@@ -15,9 +15,9 @@ const OWNED = {
     conditions: [{ id: 'c1', text: 'holds above the 4hr VWAP', weight: 'primary', mode: 'measured', persistence: 'live' }],
     scenarios: [{
         id: 's1', name: 'the fade', quantity: 50,
-        entry_zones: [{ id: 'e1', lower: 178, upper: 180, quantity: 50, note: 'Tuesday shelf' }],
-        stop_zones:  [{ id: 's1s', lower: 173, upper: 174, quantity: 50 }],
-        tp_zones:    [{ id: 't1', lower: 196, upper: 200, quantity: 50 }],
+        entry_legs: [{ id: 'e1', price: 180, quantity: 50, note: 'Tuesday shelf' }],
+        stop_legs:  [{ id: 's1s', price: 173, quantity: 50 }],
+        target_legs:    [{ id: 't1', price: 196, quantity: 50 }],
         conditions:  [],
     }],
     monitor_state: { conditions: { c1: { met: true } } },
@@ -55,7 +55,7 @@ test('the card carries the plan, the note, the price and who sent it — and not
         assert.deepEqual(card.payload.blueprint.from, { userId: 'u_roy', username: 'roy', fullname: 'Roy' })
         assert.equal(card.payload.blueprint.asset, 'NVDA')
         assert.equal(card.payload.blueprint.entry_mode, 'limit')
-        assert.equal(card.payload.blueprint.scenarios[0].entry_zones[0].note, 'Tuesday shelf')
+        assert.equal(card.payload.blueprint.scenarios[0].entry_legs[0].note, 'Tuesday shelf')
 
         // The invariant: no size, no account, no workspace, no monitor state, anywhere in the card.
         const text = JSON.stringify(card.payload)

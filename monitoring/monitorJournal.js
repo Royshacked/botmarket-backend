@@ -10,7 +10,7 @@
 // The row says what the read LOOKED AT, what it DECIDED and what it is WAITING FOR:
 //
 //   { at, reason, price, rung, verdict, note, warning?, conditions?, tools?, proposal?,
-//     fired?, armed?, zone_id?, next_check_at }
+//     fired?, armed?, leg_id?, next_check_at }
 //
 //   reason ∈ first_look | candle | guard | expiry_review | limit_order | limit_disarmed
 //            | entry | invalidation | exit | pre_active | manage
@@ -68,11 +68,11 @@ export function verdictFallbackNote(verdict) {
  * else is a READ, where the monitor supplies what the model said and what the read pulled.
  *
  * @param {string} reason  the wake kind
- * @param {object} opts    { nowMs, entity, price, zone, nextAt, raw, note, verb, failed, failReason,
+ * @param {object} opts    { nowMs, entity, price, leg, nextAt, raw, note, verb, failed, failReason,
  *                           closedReason, pnl, woke, armed, rung, tools, model }
  */
 export function journalEntry(reason, {
-    nowMs, entity = null, price = null, zone = null, nextAt = null,
+    nowMs, entity = null, price = null, leg = null, nextAt = null,
     raw = null, note = null, verb = 'read', failed = false, failReason = null,
     closedReason = null, pnl = null,
     // The guard that woke this (guardSweep writes it to `monitor_state.woke_on`). Absent on a wake
@@ -122,7 +122,7 @@ export function journalEntry(reason, {
         at, reason,
         price:   toNum(price),
         ...(rung ? { rung } : {}),
-        ...(zone?.id ? { zone_id: zone.id } : {}),
+        ...(leg?.id ? { leg_id: leg.id } : {}),
         ...(tier && tier !== 'expensive' ? { tier } : {}),
         verdict: raw?.verdict ?? null,
         // Omitted when intact, which is most rows — the journal should show a flagged map, not

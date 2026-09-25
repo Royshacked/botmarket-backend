@@ -6,7 +6,7 @@ import { buildSetupEntryConfirm, buildSetupInvalidation } from '../../services/t
 // tripped zone (talos.monitor holds every other verdict at 'watching' and posts nothing). So the
 // card is never hedged: there is no warning variant, because a declined setup never gets here.
 
-const SETUP = { id: 'setup_NVDA_1', userId: 'u1', asset: 'NVDA', direction: 'long', armed_zone_id: 'ez1' }
+const SETUP = { id: 'setup_NVDA_1', userId: 'u1', asset: 'NVDA', direction: 'long', armed_leg_id: 'ez1' }
 
 test('the copy says the SETUP is confirmed, not merely that price tagged a zone', () => {
     const card = buildSetupEntryConfirm(SETUP, { verdict: 'enter', read: 'Trigger is live.' })
@@ -25,10 +25,10 @@ test('the card carries NO warning channel — a hedged confirm is what the gate 
 })
 
 test('the verdict and read ride in the payload for the detail view', () => {
-    const card = buildSetupEntryConfirm(SETUP, { verdict: 'enter', read: 'Coiling under it.', zone_id: 'ez2' })
+    const card = buildSetupEntryConfirm(SETUP, { verdict: 'enter', read: 'Coiling under it.', leg_id: 'ez2' })
     assert.equal(card.payload.verdict, 'enter')
     assert.equal(card.payload.read, 'Coiling under it.')
-    assert.equal(card.payload.zoneId, 'ez2', 'the assessment zone wins over the stored one')
+    assert.equal(card.payload.legId, 'ez2', 'the assessment leg wins over the stored one')
 })
 
 test('the payload identifies the SETUP kind, so the confirm dialog routes correctly', () => {
@@ -39,8 +39,8 @@ test('the payload identifies the SETUP kind, so the confirm dialog routes correc
     assert.equal(card.botId, 'mentor')
 })
 
-test('the zone falls back to the armed one when no assessment is attached', () => {
-    assert.equal(buildSetupEntryConfirm(SETUP, null).payload.zoneId, 'ez1')
+test('the leg falls back to the armed one when no assessment is attached', () => {
+    assert.equal(buildSetupEntryConfirm(SETUP, null).payload.legId, 'ez1')
 })
 
 test('a card with no owner is built but carries a null userId for the poster to drop', () => {

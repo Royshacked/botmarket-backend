@@ -4,7 +4,7 @@ import { logger }            from '../../services/logger.service.js'
 import { buildEventRisk }    from '../../services/eventRisk.service.js'
 import { makeEntityCrud }    from '../../services/entity/entityCrud.service.js'
 import { resolveVenue, resolveMode, isBindableVenue } from '../../services/venue.resolve.service.js'
-import { normalizeSetup, setupReadiness, projectScenario, disarmedSetupPatch } from '../../services/setup.schema.js'
+import { normalizeSetup, setupReadiness, projectScenario, disarmedSetupPatch, legPrice } from '../../services/setup.schema.js'
 import { bucketForMarketCap } from '../../services/setup.ladder.js'
 import { getMarketCap } from '../../providers/fmp.provider.js'
 import { resolveMainAccountId } from '../../services/agentUtils.js'
@@ -55,8 +55,8 @@ const crud = makeEntityCrud({
 // (fulfilled, awaiting confirm) → long/short → closed. Generate and Arm are two separate acts, so
 // a setup sits at `waiting` until the user arms it — that is what `waiting` means everywhere.
 //
-// Price sitting INSIDE a zone is `armed_zone_id` on a `looking` setup, not a status: the zone is
-// only the first gate, so a trip does not resolve within the wake, but "being in a zone" is a
+// Price standing AT a leg is `armed_leg_id` on a `looking` setup, not a status: the level is only
+// the first gate, so reaching one does not resolve within the wake, and "price is at my entry" is a
 // detail of looking rather than a lifecycle rung of its own.
 export const SETUP_STATUSES = new Set(statusesFor(KIND))
 
@@ -65,26 +65,26 @@ const POSITION_STATUSES = new Set(PAST_ENTRY)
 
 // Plan fields rewritten by an in-place edit. Identity, monitor_state history and execution
 // linkage are never in the $set.
-// `scenarios` is the authored plan; `entry_zones`/`stop_zones`/`tp_zones`/`validity`/`quantity`/`rr`
+// `scenarios` is the authored plan; `entry_legs`/`stop_legs`/`target_legs`/`validity`/`quantity`/`rr`
 // are its EXECUTION PROJECTION, re-derived by normalizeSetup and re-stamped by Talos when a premise
 // arms. Both are written here so a re-draw leaves no stale projection behind.
 const PLAN_FIELDS = [
     'asset', 'asset_class', 'direction', 'type', 'trade_mode', 'timeframe', 'pace_rungs',
     'market_cap', 'read_mode',
     'thesis', 'conditions', 'referenced_symbols', 'scenarios',
-    'entry_zones', 'stop_zones', 'tp_zones', 'validity', 'quantity',
+    'entry_legs', 'stop_legs', 'target_legs', 'validity', 'quantity',
     'active_from', 'valid_until', 'event_risk', 'rr', 'conviction', 'entry_mode',
     'mode', 'broker', 'accounts', 'mainAccountId', 'brokerSymbol', 'basisOffset',
 ]
 
-// In-position edits touch CONTEXT only — never the zones, size or venue a live position depends on.
+// In-position edits touch CONTEXT only — never the legs, size or venue a live position depends on.
 // `validity` is context: it governs whether the PLAN is still worth watching, not what the live
 // position does, so re-drawing it can't disturb an open trade.
 //
 // `scenarios` is here because targets and conditions now live inside it — but the ARMED scenario's
 // entry, stop and size are preserved from the current document (mergeInPositionScenarios), so the
 // promise above still holds literally.
-const LIGHT_FIELDS = ['thesis', 'conditions', 'validity', 'referenced_symbols', 'scenarios', 'tp_zones', 'valid_until', 'rr', 'conviction']
+const LIGHT_FIELDS = ['thesis', 'conditions', 'validity', 'referenced_symbols', 'scenarios', 'target_legs', 'valid_until', 'rr', 'conviction']
 
 export const setupService = {
     generateSetup,
@@ -118,14 +118,13 @@ export function validateSetup(setup, broker, accounts) {
     // Paper derives its own account (paper-<userId>); live and manual must be marked explicitly.
     if (broker !== 'paper' && !(accounts?.length)) return { ok: false, reason: 'no_venue' }
 
-    // A zone with no width is allowed (an exact level), but lower > upper means the normaliser
-    // was bypassed — refuse rather than arm a gate that can never trip. Every scenario's legs, not
-    // just the projected one: a malformed rival would arm silently and trip on nonsense.
-    const zones = (setup.scenarios ?? []).flatMap(sc => [...(sc.entry_zones ?? []), ...(sc.stop_zones ?? []), ...(sc.tp_zones ?? [])])
-    for (const z of zones) {
-        if (!Number.isFinite(z.lower) || !Number.isFinite(z.upper) || z.lower > z.upper) {
-            return { ok: false, reason: 'invalid_zone' }
-        }
+    // Every leg must carry a real price. The check used to be `lower > upper` — an inverted band,
+    // which meant the normaliser had been bypassed; with one number per leg the only way to be
+    // malformed is to be unpriced. Every scenario's legs, not just the projected one: a malformed
+    // rival would arm silently and trip on nonsense.
+    const legs = (setup.scenarios ?? []).flatMap(sc => [...(sc.entry_legs ?? []), ...(sc.stop_legs ?? []), ...(sc.target_legs ?? [])])
+    for (const z of legs) {
+        if (!Number.isFinite(legPrice(z))) return { ok: false, reason: 'invalid_leg' }
     }
     return { ok: true }
 }
@@ -211,13 +210,13 @@ async function _insert(bound, userId) {
         // `guards` are the wake conditions Talos arms for itself (docs/desks/mentor-talos.md) and
         // `last_read_at` is the clock their time term is measured against. Both are declared at
         // birth for the same reason the axis below is — so every consumer can read them without an
-        // existence check. Empty means "never read"; the sweep falls back to the setup's own zones
+        // existence check. Empty means "never read"; the sweep falls back to the setup's own legs
         // until the first assessment writes a real set.
         monitor_state: {
             next_check_at: null, check_count: 0, memo: null, conditions: {}, scenarios: {},
             guards: [], last_read_at: null, woke_on: null, timeframe: null,
         },
-        armed_zone_id:     null,
+        armed_leg_id:     null,
         armed_scenario_id: null,
         // The invalidation axis, declared at birth so every consumer can read it without an
         // existence check — a setup is not invalidated, it simply hasn't been yet.
@@ -275,7 +274,7 @@ export function mergeInPositionScenarios(cur, next) {
     const armed   = (cur?.scenarios ?? []).find(s => s.id === armedId)
     if (!armed) return next
     return next.map(s => (s.id === armedId
-        ? { ...s, entry_zones: armed.entry_zones, stop_zones: armed.stop_zones, quantity: armed.quantity }
+        ? { ...s, entry_legs: armed.entry_legs, stop_legs: armed.stop_legs, quantity: armed.quantity }
         : s))
 }
 
@@ -307,7 +306,7 @@ async function _update(id, bound, userId) {
     // the reconciler's position match.
     if (!inPosition) {
         $set.status = 'waiting'
-        $set.armed_zone_id = null
+        $set.armed_leg_id = null
         $set.armed_scenario_id = null
         // THE GUARDS DIE WITH THE PLAN THAT ARMED THEM. They are levels chosen for a specific map —
         // "wake me at 311.5 because the base is building under it" — and the map just changed, so
@@ -402,7 +401,7 @@ async function patchSetup(id, patch, userId) {
             if (!gate.ok) return { ok: false, reason: `cannot_arm_${gate.reason}` }
             $set.activatedAt = Date.now()
             $set['monitor_state.next_check_at'] = null   // check on the very next tick
-            $set.armed_zone_id = null
+            $set.armed_leg_id = null
             $set.armed_scenario_id = null
         }
         // LEAVING `hit` IS A DISARM, whatever door it came through. At `hit` a confirmed limit entry

@@ -22,7 +22,7 @@ import { toNum }                                 from './format.util.js'
 import { logger }                                from './logger.service.js'
 // The ONE rule for what price a leg acts at — shared with `stopEdge` and the journal, so the
 // working stop, the order that rests and the line the record reports can never be three answers.
-import { zoneLevel }                             from './setup.schema.js'
+import { legPrice }                              from './setup.schema.js'
 import { round4 }                                from './number.util.js'
 
 const LOG = '[protectionPlan]'
@@ -84,15 +84,15 @@ export async function detectNativeEntryLevel(idea) {
  *                  monitorTree:object|null, hasAny:boolean }
  */
 export async function routeExits(idea) {
-    // A `setup` states its exits as ZONES, not condition trees, so there are no leaves to inspect
-    // and nothing to leave on the monitor — every zone edge is a price, which is precisely what
-    // rests at the broker. Routing it through the tree path returned an empty plan, which is how a
+    // A `setup` states its exits as PRICED LEGS, not condition trees, so there are no leaves to
+    // inspect and nothing to leave on the monitor — a leg IS the price that rests at the broker.
+    // Routing it through the tree path returned an empty plan, which is how a
     // confirmed setup came to place a NAKED entry: no nativeExit, no monitorStop/Tp, and
     // placeExits no-opping because `idea.nativeExit` was undefined.
     //
     // Dispatched HERE rather than at the call site so the execution path stays kind-blind — it asks
     // one function for a routing and gets the same shape back whatever authored the exits.
-    if (idea?.kind === 'setup') return routeSetupZones(idea)
+    if (idea?.kind === 'setup') return routeSetupLegs(idea)
 
     const totalQty = Number(idea.quantity) || 0
     const [stop, tp] = await Promise.all([
@@ -132,23 +132,22 @@ export async function routeExits(idea) {
  * makes the target's the cheaper mistake.
  *
  * Quantities come from the SAME rule the tree path uses (`_assignSlotQuantities`): an explicit
- * per-zone quantity wins, and the rest split the remainder equally with the residue going to the
+ * per-leg quantity wins, and the rest split the remainder equally with the residue going to the
  * first defaulted slot. So multi-target scale-outs behave identically whichever kind authored them.
  * Pure — no IO, unlike the tree path which may fetch candles to resolve a leaf.
  */
-export function routeSetupZones(setup) {
-    const isLong   = setup?.direction === 'long'
+export function routeSetupLegs(setup) {
     const totalQty = Number(setup?.quantity) || 0
 
-    const leg = (zones, which) => {
-        const all = (Array.isArray(zones) ? zones : []).filter(z => Number.isFinite(zoneLevel(z, isLong, which)))
+    const route = (legs, which) => {
+        const all = (Array.isArray(legs) ? legs : []).filter(z => Number.isFinite(legPrice(z)))
         // Quantities are assigned over EVERY authored leg, before any are held back: a conditional
         // target still owns its share of the position. Splitting only the resting ones would hand
         // the whole size to whichever targets happened to be unconditional.
         const quantities = _assignSlotQuantities(all, totalQty)
 
         const list = all
-            .map((z, i) => ({ level: zoneLevel(z, isLong, which), quantity: quantities[i], conditions: z?.conditions ?? [] }))
+            .map((z, i) => ({ level: legPrice(z), quantity: quantities[i], conditions: z?.conditions ?? [] }))
             // THE ASYMMETRY, in one line. A stop rests whatever it carries; a target with conditions
             // is the model's to propose and must not be pre-empted by its own limit order.
             .filter(o => which === 'stop' || !o.conditions.length)
@@ -159,7 +158,7 @@ export function routeSetupZones(setup) {
         return { nativeOrders, monitorTree: null, hasAny: nativeOrders.length > 0 }
     }
 
-    return { stop: leg(setup?.stop_zones, 'stop'), tp: leg(setup?.tp_zones, 'tp') }
+    return { stop: route(setup?.stop_legs, 'stop'), tp: route(setup?.target_legs, 'tp') }
 }
 
 // ─── internals ──────────────────────────────────────────────────────────────

@@ -64,7 +64,7 @@ test('buildOrigin: adopted defaults to false, never undefined', () => {
 })
 
 // ── pickCallReasoning: freeze the originating call's thesis onto the trade ──────
-test('pickCallReasoning: a call → freezes thesis/bias/entry_zones/patterns', () => {
+test('pickCallReasoning: a call → freezes thesis/bias/entry_zones/patterns (an ARCHIVED doc: it keeps its bands)', () => {
     const call = {
         thesis: 'reclaim of the 200MA', bias: 'long',
         entry_zones: [{ id: 'ez1', side: 'long', lower: 248, upper: 250 }],

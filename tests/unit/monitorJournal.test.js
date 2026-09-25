@@ -9,7 +9,7 @@ import { journalEntry, failNote, verdictFallbackNote } from '../../monitoring/mo
 const NOW = Date.parse('2026-07-29T17:49:07.885Z')
 const setup = (over = {}) => ({
     kind: 'setup', asset: 'AER', active_from: '2026-07-30T13:30:00.000Z',
-    entry_zones: [{ id: 'ez1', lower: 147.28, upper: 148.3 }, { id: 'ez2', lower: 145.35, upper: 147.27 }],
+    entry_legs: [{ id: 'ez1', price: 148.3 }, { id: 'ez2', price: 147.27 }],
     ...over,
 })
 
@@ -47,7 +47,7 @@ test('a guard wake carries WHICH guard fired and when it was armed', () => {
 
 test('a row OMITS what it has nothing to say about rather than nulling it', () => {
     const e = journalEntry('candle', { nowMs: NOW, entity: setup(), price: 151, nextAt: null, raw: { verdict: 'wait', read: 'x' } })
-    for (const k of ['fired', 'armed', 'tools', 'conditions', 'warning', 'proposal', 'rung', 'zone_id']) {
+    for (const k of ['fired', 'armed', 'tools', 'conditions', 'warning', 'proposal', 'rung', 'leg_id']) {
         assert.equal(k in e, false, k)
     }
 })
@@ -88,14 +88,14 @@ test('a runaway read is described honestly, not as a broken reply', () => {
     assert.notEqual(note, failNote('read', 'NVDA', 'malformed'))
 })
 
-test('the model read becomes the note, with the zone and verdict alongside', () => {
+test('the model read becomes the note, with the leg and verdict alongside', () => {
     const e = journalEntry('guard', {
-        nowMs: NOW, entity: setup(), price: 147.9, zone: setup().entry_zones[0],
+        nowMs: NOW, entity: setup(), price: 147.9, leg: setup().entry_legs[0],
         raw: { verdict: 'stand_aside', read: 'At the level but the tape is risk-off.' },
     })
     assert.equal(e.verdict, 'stand_aside')
     assert.equal(e.note, 'At the level but the tape is risk-off.')
-    assert.equal(e.zone_id, 'ez1')
+    assert.equal(e.leg_id, 'ez1')
 })
 
 test('no read → the verdict speaks for itself, for every verdict on either menu', () => {

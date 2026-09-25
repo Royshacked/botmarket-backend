@@ -10,7 +10,7 @@ import { isToolError } from '../../services/toolResult.util.js'
 // never turn a failed read into a confident "you have nothing" — that sentence, said wrongly, is
 // worse than no answer at all.
 
-const row = (over = {}) => ({ kind: 'call', id: 'c1', symbol: 'NVDA', title: 'reclaim', direction: 'long', status: 'looking', updatedAt: 5, detail: { rr: 2.4, nearestEntry: { low: 170, high: 172 }, entryZones: 1 }, ...over })
+const row = (over = {}) => ({ kind: 'call', id: 'c1', symbol: 'NVDA', title: 'reclaim', direction: 'long', status: 'looking', updatedAt: 5, detail: { rr: 2.4, nearestEntry: 170, entryLegs: 1 }, ...over })
 
 // ─── formatting ───────────────────────────────────────────────────────────────
 
@@ -37,7 +37,7 @@ test('detail is separated from status, and vanishes cleanly when there is none',
     // was a '' that filter(Boolean) then dropped. Both halves matter: a separator when there IS
     // detail, and no dangling one when there isn't.
     const withDetail = formatWatchedItems({ items: [row()], counts: { call: 1 } })
-    assert.match(withDetail, /· looking · entry 170–172/)
+    assert.match(withDetail, /· looking · entry 170/)
 
     const bare = formatWatchedItems({ items: [row({ detail: {} })], counts: { call: 1 } })
     assert.match(bare, /NVDA long · looking — reclaim$/m)

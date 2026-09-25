@@ -58,18 +58,18 @@ export function buildIdeaEntryConfirm(idea, note = null) {
 }
 
 /**
- * A `setup` reached one of its entry zones → confirm to place the order.
+ * A `setup` fulfilled its conditions → confirm to place the order.
  *
  * Its own builder rather than a reuse of buildIdeaEntryConfirm: that one's `note` is a
  * three-value enum the copy branches on, so passing Talos's free-text warning through it would
  * silently swallow the warning. Shared TRANSPORT (postBotCard + cardActions), own COPY — the
  * house rule.
  *
- * This fires ONLY on an `enter` verdict — a fulfilled setup, not merely a tripped zone. A card
+ * This fires ONLY on an `enter` verdict — a fulfilled setup, not merely price touching a level. A card
  * that arrives is therefore never hedged: there is no "but Talos flags…" variant, because a setup
  * Talos declined never gets here (it stays 'looking' instead). `read` carries Talos's one-line
- * monologue for the card body; the copy leads with the SETUP being confirmed, not the zone, since
- * the zone alone was never what the user is being asked about.
+ * monologue for the card body; the copy leads with the SETUP being confirmed, not the level, since
+ * the level alone was never what the user is being asked about.
  */
 export function buildSetupEntryConfirm(setup, assessment = null) {
     const dir = String(setup?.direction || '').toUpperCase()
@@ -83,14 +83,14 @@ export function buildSetupEntryConfirm(setup, assessment = null) {
 
     return {
         userId:  setup?.userId ?? null,
-        content: `Your ${dir} ${setup?.asset} setup is confirmed${named} — price reached the zone and the setup filled in. Confirm to place your order.`,
+        content: `Your ${dir} ${setup?.asset} setup is confirmed${named} — the setup filled in at your level. Confirm to place your order.`,
         type:    'entry_confirm',
         payload: {
             kind:      'setup',
             setupId:   setup?.id,
             asset:     setup?.asset,
             direction: setup?.direction ?? null,
-            zoneId:    assessment?.zone_id ?? setup?.armed_zone_id ?? null,
+            legId:     assessment?.leg_id ?? setup?.armed_leg_id ?? null,
             scenarioId: armedId,
             scenario:   scenario ? (scenario.name?.trim() || armedId) : null,
             verdict:   assessment?.verdict ?? null,

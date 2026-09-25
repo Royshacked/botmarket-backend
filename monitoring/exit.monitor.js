@@ -17,7 +17,7 @@
  * one is tied to a CAPABILITY, so it has no reason to be switched off with any desk.
  *
  * WHY `setup` IS EXCLUDED, and it is not an oversight. A setup states its exits as ZONES, and a zone
- * IS a price — `routeSetupZones` rests every edge at the broker and returns `monitorTree: null`
+ * IS a price — `routeSetupLegs` rests every edge at the broker and returns `monitorTree: null`
  * always. `checkPosition` speaks condition trees and cannot read a zone, so it has literally nothing
  * to do for a setup, even a manual one. Excluding the kind also keeps this loop from contending with
  * Talos over `monitor_state.next_check_at`: two loops claiming one document would each push the

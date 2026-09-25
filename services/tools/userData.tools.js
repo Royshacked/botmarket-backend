@@ -45,10 +45,13 @@ function _unavailableLine(unavailable = []) {
         : ''
 }
 
-function _zone(z) {
-    if (!z) return null
-    if (z.low != null && z.high != null) return z.low === z.high ? `${z.low}` : `${z.low}–${z.high}`
-    return `${z.low ?? z.high}`
+/**
+ * A level as one number. This used to collapse a `{low, high}` pair and print a range when the two
+ * disagreed; `toWatchRow` now hands over the price itself, because there are no bands left to
+ * disagree (2026-09-24). An archived call's band arrives already read at its near edge.
+ */
+function _level(v) {
+    return Number.isFinite(Number(v)) ? `${v}` : null
 }
 
 /**
@@ -68,8 +71,8 @@ function _watchLine(row) {
         case 'call':
         case 'setup':
             return `- ${_tag(row)} ${row.symbol ?? '?'} ${row.direction ?? ''} · ${row.status ?? '?'}${_tail([
-                d.nearestEntry ? `entry ${_zone(d.nearestEntry)}` : null,
-                d.stop ? `stop ${_zone(d.stop)}` : null,
+                d.nearestEntry != null ? `entry ${_level(d.nearestEntry)}` : null,
+                d.stop != null ? `stop ${_level(d.stop)}` : null,
                 _n(d.rr, 'R'), d.conviction ? `conviction ${d.conviction}` : null,
                 d.validUntil ? `until ${d.validUntil}` : null,
             ])}${row.title ? ` — ${row.title}` : ''}`

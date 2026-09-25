@@ -7,7 +7,7 @@ import {
 // The pure tier — the decisions a wake makes before it spends anything. Split out of the monitor
 // (which kept the loop, the scheduling and the writes) when that file passed 1500 lines.
 import {
-    zoneGate, normalizeConditionResults, latchPatch, costPatch,
+    legGate, normalizeConditionResults, latchPatch, costPatch,
     validityBreach, breachPatch, awayEdge, adverseEdge,
     scenarioGate, liveScenarios, rollUpBreaches, scenarioState,
     computeMetrics, rMultiple,
@@ -19,15 +19,15 @@ import { buildToolsFor, symbolScope, openingRung } from '../../monitoring/talos.
 // Talos's gates. Everything here runs on EVERY wake for free — the expensive assessment only fires
 // when these say so — so a wrong gate is either a missed entry or a wasted LLM call on every poll.
 
-// The PLAN, stated flat. A price zone is a scenario now (docs/desks/mentor-talos.md), so
+// The PLAN, stated flat. A level belongs to a scenario now (docs/desks/mentor-talos.md), so
 // fixtures are built through normalizeSetup rather than hand-written: that gives every one of them
 // the same `scenarios` + execution projection a persisted document has, and a fixture can never
 // drift from what the service would actually store.
 const PLAN = {
     asset: 'NVDA', asset_class: 'stock',
     direction: 'long', type: 'swing', trade_mode: 'classical', timeframe: '1hr',
-    entry_zones: [{ id: 'ez1', lower: 237.8, upper: 238.6, quantity: 100 }],
-    stop_zones:  [{ id: 'sz1', lower: 234.8, upper: 235.9 }],
+    entry_legs: [{ id: 'ez1', price: 238.6, quantity: 100 }],
+    stop_legs:  [{ id: 'sz1', price: 234.8 }],
     conditions: [{ id: 'c1', text: 'CHoCH up on the 15m', weight: 'primary', mode: 'measured', persistence: 'live' }],
 }
 
@@ -36,7 +36,7 @@ function mk(plan = {}, doc = {}) {
     return {
         id: 'setup_NVDA_1', kind: 'setup',
         status: 'looking',   // armed — the setup ladder's spelling, shared with calls
-        armed_zone_id: null, armed_scenario_id: null,
+        armed_leg_id: null, armed_scenario_id: null,
         monitor_state: { next_check_at: null, check_count: 0, memo: null, timeline: [], conditions: {}, scenarios: {} },
         ...normalizeSetup({ ...PLAN, ...plan }),
         ...doc,
@@ -45,31 +45,37 @@ function mk(plan = {}, doc = {}) {
 
 const SETUP = mk()
 
-// ─── Zone gate ────────────────────────────────────────────────────────────────
+// ─── The level gate ───────────────────────────────────────────────────────────
+//
+// It was `price >= lower && price <= upper`. Every leg has been zero-width since the guards build,
+// so containment already WAS equality and this is the same gate under the shape that is left
+// (2026-09-24). What went with the band is the idea that a level has WIDTH to be inside of.
 
-test('the gate trips inside the band and stays quiet outside it', () => {
-    assert.equal(zoneGate(SETUP.entry_zones, 238.0).id, 'ez1')
-    assert.equal(zoneGate(SETUP.entry_zones, 240.0), null)
-    assert.equal(zoneGate(SETUP.entry_zones, 230.0), null)
+test('the gate answers "is price AT this leg"', () => {
+    assert.equal(legGate(SETUP.entry_legs, 238.6).id, 'ez1')
+    assert.equal(legGate(SETUP.entry_legs, 238.0), null, 'near is not at')
+    assert.equal(legGate(SETUP.entry_legs, 240.0), null)
+    assert.equal(legGate(SETUP.entry_legs, 230.0), null)
 })
 
-test('both edges are inclusive, so a zero-width zone can still trip', () => {
-    // An exact level the user named normalises to lower === upper; an exclusive test would mean
-    // it could never fire.
-    assert.ok(zoneGate([{ id: 'z', lower: 100, upper: 100 }], 100))
-    assert.ok(zoneGate(SETUP.entry_zones, 237.8))
-    assert.ok(zoneGate(SETUP.entry_zones, 238.6))
+test('IT RARELY RESOLVES, AND THAT IS NOT THE BUG IT LOOKS LIKE', () => {
+    // A spot quote landing exactly on an authored price is a coincidence — measured in prod, 2 of 70
+    // journal rows carried a resolved level at all. What PROVES price reached a level is the guard
+    // sweep, which tests the range since its last pass, and `enter` stopped depending on either of
+    // them on 2026-09-23. A match still decides which rival premise is on the table.
+    assert.equal(legGate(SETUP.entry_legs, 238.5999), null)
+    assert.equal(legGate(SETUP.entry_legs, 238.6001), null)
 })
 
-test('the first containing zone wins when several are armed', () => {
-    const zones = [{ id: 'a', lower: 10, upper: 20 }, { id: 'b', lower: 15, upper: 25 }]
-    assert.equal(zoneGate(zones, 18).id, 'a')
+test('the first matching leg wins when several are armed', () => {
+    const legs = [{ id: 'a', price: 20 }, { id: 'b', price: 20 }]
+    assert.equal(legGate(legs, 20).id, 'a')
 })
 
 test('an unknown price never trips the gate', () => {
-    // A failed quote must read as "don't know", never as "not in a zone, all clear".
+    // A failed quote must read as "don't know", never as "not at a level, all clear".
     for (const p of [NaN, null, undefined, 'abc']) {
-        assert.equal(zoneGate(SETUP.entry_zones, p), null, String(p))
+        assert.equal(legGate(SETUP.entry_legs, p), null, String(p))
     }
 })
 
@@ -411,11 +417,11 @@ test('a drifted scenario can still break the other way', () => {
     assert.equal(broke.card, 'invalidated')
 })
 
-test('a dead premise is not re-armed by price wandering back into its zone', () => {
+test('a dead premise is not re-armed by price coming back to its level', () => {
     assert.deepEqual(liveScenarios(latched(RANGED, 'fired')), [], 'fired is out')
     assert.equal(liveScenarios(latched(RANGED, 'drifting')).length, 1, 'drifting stays armed')
-    assert.equal(scenarioGate(latched(RANGED, 'fired'), 238.0), null)
-    assert.equal(scenarioGate(RANGED, 238.0).scenario.id, 's1')
+    assert.equal(scenarioGate(latched(RANGED, 'fired'), 238.6), null)
+    assert.equal(scenarioGate(RANGED, 238.6).scenario.id, 's1')
 })
 
 test('on_break is honoured verbatim — and only once nothing is left standing', () => {
@@ -440,12 +446,12 @@ test('on_break is honoured verbatim — and only once nothing is left standing',
 const RIVALS = mk({
     validity: undefined,
     scenarios: [
-        { id: 's1', name: 'false break', entry_zones: [{ lower: 237.8, upper: 238.6, quantity: 100 }],
-          stop_zones: [{ lower: 234.8, upper: 235.9 }], validity: { ...VALID, on_break: 'close' } },
+        { id: 's1', name: 'false break', entry_legs: [{ price: 238.6, quantity: 100 }],
+          stop_legs: [{ price: 234.8 }], validity: { ...VALID, on_break: 'close' } },
         // A deliberately WIDER premise: the breakout can still come while price works the base, so
         // its floor sits under the shelf. This is what lets one premise die while the other stands.
-        { id: 's2', name: 'break and go', entry_zones: [{ lower: 244, upper: 244.9, quantity: 60 }],
-          stop_zones: [{ lower: 241, upper: 241.8 }], validity: { lower: 230, upper: 250, approach: 252, on_break: 'close' } },
+        { id: 's2', name: 'break and go', entry_legs: [{ price: 244.9, quantity: 60 }],
+          stop_legs: [{ price: 241.8 }], validity: { lower: 230, upper: 250, approach: 252, on_break: 'close' } },
     ],
 }, VENUE)
 
@@ -471,7 +477,7 @@ test('when the premise being SHOWN dies, the projection moves to a survivor', as
 
     assert.equal(res.reason, 'invalidation')
     assert.equal(res.remaining, 1, 's2 is untouched at 233')
-    assert.deepEqual(deps.writes[0].entry_zones, RIVALS.scenarios[1].entry_zones)
+    assert.deepEqual(deps.writes[0].entry_legs, RIVALS.scenarios[1].entry_legs)
     assert.equal(deps.writes[0].status, undefined, 'one premise falling never closes the setup')
 })
 
@@ -484,8 +490,8 @@ test('the card names the premise and says what is still standing', async () => {
 })
 
 test('the gate answers WHICH premise price reached', () => {
-    assert.equal(scenarioGate(RIVALS, 238.0).scenario.id, 's1')
-    assert.equal(scenarioGate(RIVALS, 244.4).scenario.id, 's2')
+    assert.equal(scenarioGate(RIVALS, 238.6).scenario.id, 's1')
+    assert.equal(scenarioGate(RIVALS, 244.9).scenario.id, 's2')
     assert.equal(scenarioGate(RIVALS, 241.0), null)
     assert.equal(scenarioState(RIVALS, 's1'), null, 'untouched premises have no state yet')
 })
@@ -542,7 +548,7 @@ test('a setup sitting in its own zone is never invalidated', async () => {
     // A zone trip is the setup doing exactly what it was built to do, whatever the range says.
     let carded = false
     const deps = rangedDeps({
-        getPrice: async () => 238.0,            // inside ez1
+        getPrice: async () => 238.6,            // at ez1
         getClose: async () => 100,              // and wildly "breached", which must not matter
         onInvalidation: async () => { carded = true },
     })
@@ -657,7 +663,7 @@ function stubDeps(over = {}) {
         // A fixed one-hour candle, whatever the rung: every "when do I read next" assertion below
         // is about the LAG and the expiry clamp, not about session math (candleClose.test.js).
         nextCandleCloseMs: (_s, _c, _rung, now) => now + 3600_000,
-        getPrice:    async () => 238.0,
+        getPrice:    async () => 238.0,   // NEAR the entry, not at it — the ordinary wake
         assess:      async () => ({ verdict: 'enter', read: 'Trigger is live.' }),
         // The cheap tier ESCALATES by default in this harness, so every test written against the
         // expensive path still exercises it. The tier routing has its own tests (talosTiers) and
@@ -718,30 +724,30 @@ test('price away from every level is still read on the candle, and the read is t
 const RIVAL_LIVE = mk({
     valid_until: null,
     scenarios: [
-        { id: 's1', name: 'false break', entry_zones: [{ lower: 237.8, upper: 238.6, quantity: 100 }],
-          stop_zones: [{ lower: 234.8, upper: 235.9 }], tp_zones: [{ lower: 246, upper: 247.2 }],
+        { id: 's1', name: 'false break', entry_legs: [{ price: 238.6, quantity: 100 }],
+          stop_legs: [{ price: 234.8 }], target_legs: [{ price: 246 }],
           conditions: [{ id: 's1c1', text: 'sweep and reclaim of 238', weight: 'primary' }] },
-        { id: 's2', name: 'break and go', entry_zones: [{ lower: 244, upper: 244.9, quantity: 60 }],
-          stop_zones: [{ lower: 241, upper: 241.8 }], tp_zones: [{ lower: 252, upper: 253.5 }],
+        { id: 's2', name: 'break and go', entry_legs: [{ price: 244.9, quantity: 60 }],
+          stop_legs: [{ price: 241.8 }], target_legs: [{ price: 252 }],
           conditions: [{ id: 's2c1', text: '1hr close above 244 on volume', weight: 'primary' }] },
     ],
 }, VENUE)
 
 test('the premise that fires is the one stamped onto the execution fields', async () => {
-    const deps = stubDeps({ getPrice: async () => 244.4 })   // s2's zone, not the projected s1
+    const deps = stubDeps({ getPrice: async () => 244.9 })   // s2's level, not the projected s1
     const res = await _checkSetup(RIVAL_LIVE, T, deps)
 
     assert.equal(res.fired, true)
     const $set = deps.writes[0]
     assert.equal($set.armed_scenario_id, 's2')
-    assert.deepEqual($set.entry_zones, RIVAL_LIVE.scenarios[1].entry_zones)
-    assert.deepEqual($set.stop_zones,  RIVAL_LIVE.scenarios[1].stop_zones)
-    assert.deepEqual($set.tp_zones,    RIVAL_LIVE.scenarios[1].tp_zones)
+    assert.deepEqual($set.entry_legs, RIVAL_LIVE.scenarios[1].entry_legs)
+    assert.deepEqual($set.stop_legs,  RIVAL_LIVE.scenarios[1].stop_legs)
+    assert.deepEqual($set.target_legs,    RIVAL_LIVE.scenarios[1].target_legs)
 })
 
 test('QUANTITY IS NEVER SUMMED — the winner takes the whole trade, and only its own size', async () => {
     // Two rivals of 100 and 60. The document that placed the order must never say 160.
-    for (const [price, want] of [[238.0, 100], [244.4, 60]]) {
+    for (const [price, want] of [[238.6, 100], [244.9, 60]]) {
         let planned = null
         const deps = stubDeps({ getPrice: async () => price, buildOrderPlan: async (s) => { planned = s; return [{ accountId: 'a1', quantity: s.quantity }] } })
         await _checkSetup(RIVAL_LIVE, T, deps)
@@ -752,24 +758,24 @@ test('QUANTITY IS NEVER SUMMED — the winner takes the whole trade, and only it
 
 test('the order plan is built from the PROJECTED setup, not the document as it was read', async () => {
     let planned = null
-    const deps = stubDeps({ getPrice: async () => 244.4, buildOrderPlan: async (s) => { planned = s; return [{ accountId: 'a1', quantity: 60 }] } })
+    const deps = stubDeps({ getPrice: async () => 244.9, buildOrderPlan: async (s) => { planned = s; return [{ accountId: 'a1', quantity: 60 }] } })
     await _checkSetup(RIVAL_LIVE, T, deps)
-    // protectionPlan.routeSetupZones reads these off the doc to build the resting exits.
-    assert.deepEqual(planned.stop_zones, RIVAL_LIVE.scenarios[1].stop_zones)
-    assert.deepEqual(planned.tp_zones,   RIVAL_LIVE.scenarios[1].tp_zones)
+    // protectionPlan.routeSetupLegs reads these off the doc to build the resting exits.
+    assert.deepEqual(planned.stop_legs, RIVAL_LIVE.scenarios[1].stop_legs)
+    assert.deepEqual(planned.target_legs,   RIVAL_LIVE.scenarios[1].target_legs)
 })
 
 test('the wake judges the armed premise — the rival is not on the table', async () => {
     let hit = null
-    const deps = stubDeps({ getPrice: async () => 244.4, assess: async (_s, h) => { hit = h; return { verdict: 'wait', read: 'not yet' } } })
+    const deps = stubDeps({ getPrice: async () => 244.9, assess: async (_s, h) => { hit = h; return { verdict: 'wait', read: 'not yet' } } })
     await _checkSetup(RIVAL_LIVE, T, deps)
     assert.equal(hit.scenario.id, 's2')
-    assert.equal(hit.zone.id, RIVAL_LIVE.scenarios[1].entry_zones[0].id)
+    assert.equal(hit.leg.id, RIVAL_LIVE.scenarios[1].entry_legs[0].id)
 })
 
 test('a per-condition answer is recorded against the armed premise, not the rival', async () => {
     const deps = stubDeps({
-        getPrice: async () => 244.4,
+        getPrice: async () => 244.9,
         assess:   async () => ({ verdict: 'wait', read: 'not yet', conditions: [{ id: 's2c1', met: 'no', note: 'no close yet' }] }),
     })
     await _checkSetup(RIVAL_LIVE, T, deps)
@@ -984,14 +990,14 @@ test('the first wake after a fill writes the entry into the journal', async () =
 
 test('the fill freezes the working stop and the target ladder onto the position', async () => {
     const withTargets = { ...FILLED, ...mk({
-        tp_zones: [{ price: 261 }, { price: 245 }],   // authored far-then-near
+        target_legs: [{ price: 261 }, { price: 245 }],   // authored far-then-near
     }), status: 'long', ordersPlacedAt: T - 60_000, quantity: 100 }
 
     const deps = stubDeps()
     await _checkSetup(withTargets, T, deps)
     const $set = deps.writes[0]
 
-    assert.equal($set['position_state.stop.initial'], 234.8, 'the WIDEST stop edge, not stop_zones[0].upper')
+    assert.equal($set['position_state.stop.initial'], 234.8, 'the WIDEST stop edge, not stop_legs[0].upper')
     assert.equal($set['position_state.stop.current'], 234.8, 'current starts equal to initial')
     // Nearest-first, the order price reaches them rather than the order they were typed. `watched`
     // says whether Talos reads the leg (a condition) or the broker simply holds it.
@@ -1003,7 +1009,7 @@ test('the fill freezes the working stop and the target ladder onto the position'
 
 test('a target with CONDITIONS is marked watched; an unconditional one is the broker\'s alone', async () => {
     const mixed = { ...FILLED, ...mk({
-        tp_zones: [{ price: 245, quantity: 60 }, { price: 261, quantity: 40, conditions: [{ text: 'only if volume confirms' }] }],
+        target_legs: [{ price: 245, quantity: 60 }, { price: 261, quantity: 40, conditions: [{ text: 'only if volume confirms' }] }],
     }), status: 'long', ordersPlacedAt: T - 60_000, quantity: 100 }
 
     const deps = stubDeps()
@@ -1017,8 +1023,8 @@ test('a target with CONDITIONS is marked watched; an unconditional one is the br
 test('a short seeds the opposite edges', async () => {
     const short = { ...mk({
         direction: 'short',
-        stop_zones: [{ price: 241 }],
-        tp_zones:   [{ price: 220 }, { price: 230 }],
+        stop_legs: [{ price: 241 }],
+        target_legs:   [{ price: 220 }, { price: 230 }],
     }, VENUE), status: 'short', ordersPlacedAt: T - 60_000, quantity: 100 }
 
     const deps = stubDeps()
@@ -1049,7 +1055,7 @@ test('the frozen stop is never re-stamped from the plan on a later wake', async 
 test('a position of plain exits goes DORMANT — nothing to judge, the broker holds it all', async () => {
     // docs/design/talos-per-candle.md. No read, no price, no journal row; the loop's query excludes
     // it from here on. The reconciler reports the fill and the close.
-    const promoted = { ...FILLED, position_state: { entry: { fill_at: '2026-07-26T11:00:00Z', legs: [{ zone_id: 'ez1' }] } } }
+    const promoted = { ...FILLED, position_state: { entry: { fill_at: '2026-07-26T11:00:00Z', legs: [{ leg_id: 'ez1' }] } } }
     let priced = false, assessed = false
     const deps = stubDeps({ getPrice: async () => { priced = true; return 238 }, assessPosition: async () => { assessed = true; return {} } })
     const res = await _checkSetup(promoted, T, deps)
@@ -1202,7 +1208,7 @@ test('a limit setup with no entry zones on its scenario falls through without cr
     const noZone = {
         ...base,
         quantity: 100,
-        scenarios: (base.scenarios ?? []).map(sc => ({ ...sc, entry_zones: [] })),
+        scenarios: (base.scenarios ?? []).map(sc => ({ ...sc, entry_legs: [] })),
     }
     let carded = false
     const deps = stubDeps({ onCard: async () => { carded = true } })
@@ -1304,7 +1310,7 @@ test('an enter fires with NO zone under it — price need not be standing on the
     const res = await _checkSetup(LIVE, T, deps)
     assert.equal(res.fired, true, 'the verdict fired the entry')
     assert.equal(deps.writes[0].status, 'hit')
-    assert.equal(deps.writes[0].armed_zone_id, 'ez1', 'the scenario supplied the leg')
+    assert.equal(deps.writes[0].armed_leg_id, 'ez1', 'the scenario supplied the leg')
     assert.ok(deps.writes[0].entryTriggeredAt)
 })
 
@@ -1316,24 +1322,24 @@ test('the order is placed at the AUTHORED price, never at where price happened t
         buildOrderPlan: async (executable) => { planned = executable; return [{ accountId: 'a1', quantity: 100 }] },
     })
     await _checkSetup(LIVE, T, deps)
-    assert.deepEqual(planned.entry_zones, LIVE.entry_zones, 'the zone is still the order price')
+    assert.deepEqual(planned.entry_legs, LIVE.entry_legs, 'the zone is still the order price')
     assert.equal(planned.quantity, 100, 'and still the size')
 })
 
 test('a zone under the wake still picks the leg — it just stopped being the permission', async () => {
     const deps = stubDeps({
-        getPrice: async () => 238.0,          // inside ez1
+        getPrice: async () => 238.6,          // at ez1
         assess:   async () => ({ verdict: 'enter', read: 'At the level and confirmed.' }),
     })
     const res = await _checkSetup(LIVE, T, deps)
     assert.equal(res.fired, true)
-    assert.equal(deps.writes[0].armed_zone_id, 'ez1')
+    assert.equal(deps.writes[0].armed_leg_id, 'ez1')
 })
 
 test('a non-enter verdict still arms the premise price reached, and fires nothing', async () => {
     let carded = false
     const deps = stubDeps({
-        getPrice: async () => 238.0,
+        getPrice: async () => 238.6,
         assess:   async () => ({ verdict: 'wait', read: 'At the level, not confirmed.' }),
         onCard:   async () => { carded = true },
     })
@@ -1341,14 +1347,14 @@ test('a non-enter verdict still arms the premise price reached, and fires nothin
     assert.equal(res.watching, true)
     assert.equal(res.fired, undefined)
     assert.equal(carded, false, 'no confirm card without an enter')
-    assert.equal(deps.writes[0].armed_zone_id, 'ez1', 'the leg is stamped for a later enter')
+    assert.equal(deps.writes[0].armed_leg_id, 'ez1', 'the leg is stamped for a later enter')
     assert.equal(deps.writes[0].status, 'looking')
 })
 
 test('an enter on a premise with no entry leg places nothing rather than throwing', async () => {
     // Readiness refuses this at Generate; the monitor must not blow up on a document that got
     // through some other way.
-    const legless = mk({ scenarios: [{ id: 's1', stop_zones: [{ price: 234 }] }] },
+    const legless = mk({ scenarios: [{ id: 's1', stop_legs: [{ price: 234 }] }] },
         { broker: 'ctrader', accounts: ['a1'], mainAccountId: 'a1', valid_until: null })
     const deps = stubDeps({ assess: async () => ({ verdict: 'enter', read: 'Go.' }) })
     const res = await _checkSetup(legless, T, deps)

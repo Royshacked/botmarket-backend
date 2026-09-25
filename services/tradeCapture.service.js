@@ -109,6 +109,9 @@ export function pickCallReasoning(call = null) {
     return {
         thesis:      call?.thesis      ?? null,
         bias:        call?.bias        ?? null,
+        // A CALL, not a setup: `kairos_calls` documents are frozen and keep the band shape the
+        // setup kind left on 2026-09-24. Reading `entry_legs` here would freeze null onto every
+        // trade captured from a call.
         entry_zones: call?.entry_zones ?? null,
         patterns:    call?.patterns    ?? null,
     }

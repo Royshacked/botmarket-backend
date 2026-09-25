@@ -3,7 +3,7 @@
 //
 // Same split as vocabulary.js and the tool registry: the MECHANISM lives here, the JUDGMENT stays
 // with the kind. Reading your own setups and reading your own calls is the same mechanism; whether
-// a zone rewrite re-arms the monitor, which statuses a patch may set, and what a Generate gate
+// a plan rewrite re-arms the monitor, which statuses a patch may set, and what a Generate gate
 // requires are decisions that belong to setups.service / kairos.service and never move here.
 //
 // It replaced four hand-rolled copies of the same five operations (tradeIdeas, kairos, setups,

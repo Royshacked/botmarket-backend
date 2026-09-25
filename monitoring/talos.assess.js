@@ -5,11 +5,11 @@ import { logger }                from '../services/logger.service.js'
 import { extractFirstJSON }      from './parsers/llmReply.parser.js'
 import { assessRouting, candleRows as _candleRows, formatCandles, indicatorsText,
     ASSESS_MAX_TOKENS as MAX_TOKENS, ASSESS_MAX_TOKENS_THINKING as MAX_TOKENS_THINKING, assessSystem,
-    bookAssessUsage, lensLine } from './assess.shared.js'
+    bookAssessUsage, lensLine, legText, legsText } from './assess.shared.js'
 import { _allText, _formatEventRisk } from './assess.shared.js'
 import { _thinkingConfig, advanceToolLoopCache, _finalizeServerTools } from '../providers/anthropic.provider.js'
 import { buildAssessTools, makeAssessToolRunner } from './assessTools.js'
-import { declaredConditions, pickScenario, scenarioLabel, paceRungs, resolveRung, allowedVerdicts } from '../services/setup.schema.js'
+import { declaredConditions, pickScenario, scenarioLabel, paceRungs, resolveRung, allowedVerdicts, legPrice } from '../services/setup.schema.js'
 import { config } from '../services/config.js'
 import { isRecording, recordRead } from './talos.recorder.js'
 import { runOpenAICompatRead } from '../providers/openaiCompat.provider.js'
@@ -232,22 +232,73 @@ function _conditionsBlock(setup, scenario = null) {
  * difference between "propose" and "nothing happens if you say nothing".
  */
 function _watchedBlock(setup, watched) {
-    const isLong = setup?.direction !== 'short'
-    const lvl    = (z, which) => (which === 'stop' ? (isLong ? z.lower : z.upper) : (which === 'tp' ? (isLong ? z.upper : z.lower) : (isLong ? z.upper : z.lower)))
-    const lines  = []
+    // Through `legPrice`, not a local copy: the price a prompt SAYS a leg is at and the price
+    // `protectionPlan` rests it at have to come from one place. It used to be a local edge rule
+    // here — `isLong ? z.lower : z.upper`, per leg type — which is exactly the duplication the
+    // band removal deleted.
+    const lvl   = legPrice
+    const lines = []
     if (watched.stop) {
-        lines.push(`- STOP [${watched.stop.id}] at ${lvl(watched.stop, 'stop')} — a stop-market RESTS here regardless; your read can only tighten it or exit ahead of it:`)
+        lines.push(`- STOP [${watched.stop.id}] at ${lvl(watched.stop)} — a stop-market RESTS here regardless; your read can only tighten it or exit ahead of it:`)
         lines.push(..._conditionLines(setup, watched.stop.conditions).map(l => '  ' + l))
     }
     for (const t of watched.targets) {
-        lines.push(`- TARGET [${t.id}] at ${lvl(t, 'tp')}${t.quantity != null ? ` (size ${t.quantity})` : ''} — NOTHING rests here; if you say nothing, nothing happens:`)
+        lines.push(`- TARGET [${t.id}] at ${lvl(t)}${t.quantity != null ? ` (size ${t.quantity})` : ''} — NOTHING rests here; if you say nothing, nothing happens:`)
         lines.push(..._conditionLines(setup, t.conditions).map(l => '  ' + l))
     }
     for (const e of watched.entries) {
-        lines.push(`- PENDING ENTRY [${e.id}] at ${lvl(e, 'entry')}${e.quantity != null ? ` (size ${e.quantity})` : ''} — not yet filled; add_leg only if its condition is true AT the level:`)
+        lines.push(`- PENDING ENTRY [${e.id}] at ${lvl(e)}${e.quantity != null ? ` (size ${e.quantity})` : ''} — not yet filled; add_leg only if its condition is true AT the level:`)
         lines.push(..._conditionLines(setup, e.conditions).map(l => '  ' + l))
     }
     return `WATCHED LEGS — your whole mandate:\n${lines.join('\n')}`
+}
+
+/**
+ * The premise on the table — its legs as PRICES, in the same sentence `_watchedBlock` uses.
+ *
+ * It used to be `JSON.stringify({entry_legs, stop_legs, target_legs, ...})`, which handed the read the
+ * STORAGE shape: `{"id":"s1e1","lower":238.2,"upper":238.2,"quantity":100,"note":null,"conditions":[]}`
+ * for a level the user wrote as 238.2 (docs/desks/mentor-talos.md §Guards — the two keys survive in
+ * Mongo alone, and only to spare live documents a cosmetic migration). Every read of this desk
+ * therefore opened on a band shape, on a desk that has not drawn a band since 2026-08-22.
+ *
+ * `rr` and the scenario size ride the same block because they are read together with the legs.
+ */
+export function _scenarioBlock(setup, scenario) {
+    const legs = [
+        legsText(scenario?.entry_legs, 'ENTRY'),
+        legsText(scenario?.stop_legs, 'STOP'),
+        legsText(scenario?.target_legs, 'TARGET'),
+    ].filter(Boolean).join('\n')
+
+    const tail = [
+        scenario?.quantity != null ? `size ${scenario.quantity}` : null,
+        scenario?.rr != null ? `r:r ${scenario.rr}` : null,
+    ].filter(Boolean).join(' · ')
+
+    return [
+        `SCENARIO ON THE TABLE${scenario?.name ? ` — "${scenario.name}"` : ''}:`,
+        legs || '- (no priced legs)',
+        tail ? `THIS PREMISE: ${tail}` : null,
+    ].filter(Boolean).join('\n')
+}
+
+/**
+ * Where price is standing, and NOTHING about what the read may answer.
+ *
+ * The old line ended `"enter" is not available`, which was the zone gate talking three weeks after
+ * it was removed (docs/desks/mentor-talos.md §Entry — the verdict is the whole gate, and
+ * `_applyVerdict` honours an `enter` with no zone). It contradicted the prompt's own paragraph —
+ * *it is information, not permission* — and it forbade the exact shape the removal existed for:
+ * price reaches the level, the conditions confirm two candles later, the satisfied entry guard has
+ * already been dropped by `clampGuards`, and nothing is standing on a level any more.
+ */
+export function _armedLevelLine(setup, zone) {
+    if (!zone) return 'ARMED LEVEL: (none — price is not standing on one of this plan\'s entry levels right now)'
+    // No trailing gloss: the label already means "price is standing here", and a leg that carries a
+    // note ends in one em-dash clause already — two in a row read as a sentence nobody wrote.
+    const text = legText(zone)
+    return `ARMED LEVEL (price is standing on it): ${text ?? `[${zone.id ?? '?'}]`}`
 }
 
 /**
@@ -320,13 +371,10 @@ export async function assessSetup(setup, hit, ctx = {}) {
                 trade_mode: setup.trade_mode, timeframe: setup.timeframe, thesis: setup.thesis,
                 conviction: setup.conviction, valid_until: setup.valid_until,
             })}`,
-            `SCENARIO ON THE TABLE${scenario?.name ? ` — "${scenario.name}"` : ''}: ${JSON.stringify({
-                entry_zones: scenario?.entry_zones ?? [], stop_zones: scenario?.stop_zones ?? [],
-                tp_zones: scenario?.tp_zones ?? [], quantity: scenario?.quantity ?? null, rr: scenario?.rr ?? null,
-            })}`,
+            _scenarioBlock(setup, scenario),
             _otherScenariosBlock(setup, scenario),
             _conditionsBlock(setup, scenario),
-            `ARMED LEVEL: ${zone ? JSON.stringify(zone) : '(none — price is not at an entry level; "enter" is not available)'}`,
+            _armedLevelLine(setup, zone),
             `CURRENT PRICE: ${ctx.price ?? 'unknown'}`,
             `SESSION NOW: ${sessionPhase(setup.asset, setup.asset_class)}`,
             _wokenLine(ctx.reason, ctx.woke),

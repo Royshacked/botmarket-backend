@@ -5,6 +5,7 @@ import { isIntradayTimeframe } from '../services/timeframe.service.js'
 import { userService } from '../api/user/user.service.js'
 import { recordUsage } from '../services/tokenUsage.service.js'
 import { getHouseModels } from '../services/houseModels.service.js'
+import { legPrice } from '../services/setup.schema.js'
 
 // The mechanical parts every monitor assessment shares — model routing, token budgets, and the
 // numeric candle block. Extracted because Hermes and Talos had byte-identical copies of both the
@@ -270,6 +271,48 @@ export function indicatorsText(asset, bars, tf) {
     const specs  = isIntradayTimeframe(tf) ? [{ name: 'vwap' }, ...OPENING_INDICATORS] : OPENING_INDICATORS
     const anchor = isIntradayTimeframe(tf) ? sessionStartMs(String(asset).toUpperCase()) : null
     return specs.map(s => _formatIndicator(s.name, s.period, closes, mon, anchor)).join('\n')
+}
+
+// ─── Levels — what a read is told a leg IS ────────────────────────────────────
+//
+// A LEG IS A PRICE, and that is the only shape a read ever sees (2026-09-24). Every level authored
+// since the guards build is zero-width; `lower`/`upper` survive as the STORAGE keys alone, because
+// renaming them would migrate live armed documents for a cosmetic gain (docs/desks/mentor-talos.md
+// §Guards). Until now the pre-entry read and the cheap read were handed those keys raw —
+// `JSON.stringify(entry_legs)` — so both tiers opened on `{"lower":238.2,"upper":238.2}` for a
+// price the user wrote as 238.2. That is a band shape teaching every model that edges exist, on a
+// desk whose whole premise is that they do not, and it spent tokens doing it. The in-position tail
+// already spoke prices (`WATCHED LEGS — STOP [s1s1] at 234.8`); this is the same sentence for the
+// legs a pre-entry read is shown, so ONE vocabulary crosses both tails and both tiers.
+//
+// `legPrice` is the one rule for what number a leg stands at — shared rather than re-derived here,
+// because a prompt that names a different price than `protectionPlan` rests at is a lie the journal
+// cannot catch.
+
+/**
+ * One leg, as the model should read it: its id, its PRICE, its size, and whether a rule hangs on it.
+ *
+ * The conditions themselves are NOT inlined — pre-entry judges the entry conditions and nothing else
+ * (`_conditionsBlock`), and an exit's sentence belongs to the in-position read. `· conditional` says
+ * the leg carries one without inviting a read to grade it. Pure; null for a leg with no finite price.
+ */
+export function legText(zone) {
+    const price = legPrice(zone)
+    if (price == null) return null
+    const bits = [`[${zone?.id ?? '?'}] at ${price}`]
+    if (Number.isFinite(Number(zone?.quantity)) && Number(zone.quantity) > 0) bits.push(`(size ${zone.quantity})`)
+    if (zone?.conditions?.length) bits.push('· conditional')
+    if (zone?.note) bits.push(`— ${zone.note}`)
+    return bits.join(' ')
+}
+
+/** A leg list as prompt lines, `label` leading each. '' when there is nothing priced. Pure. */
+export function legsText(legs, label) {
+    return (Array.isArray(legs) ? legs : [])
+        .map(legText)
+        .filter(Boolean)
+        .map(l => `- ${label} ${l}`)
+        .join('\n')
 }
 
 // ─── Reply / block formatting ─────────────────────────────────────────────────

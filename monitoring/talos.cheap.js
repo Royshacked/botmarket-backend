@@ -27,7 +27,7 @@ import { logger } from '../services/logger.service.js'
 import { config } from '../services/config.js'
 import { extractFirstJSON } from './parsers/llmReply.parser.js'
 import {
-    candleRows, formatCandles, indicatorsText, assessSystem, bookAssessUsage,
+    candleRows, formatCandles, indicatorsText, assessSystem, bookAssessUsage, legsText,
 } from './assess.shared.js'
 import { declaredConditions, pickScenario, paceRungs } from '../services/setup.schema.js'
 
@@ -83,6 +83,22 @@ export function cheapWatch(setup) {
     return { rung: setup?.monitor_state?.timeframe || setup?.timeframe || paceRungs(setup)[0], indicators: [] }
 }
 
+/**
+ * The plan's levels as PRICES — the same lines the expensive tier is handed (`legsText`), so the
+ * tier that decides whether to escalate and the tier it escalates to are reading one vocabulary.
+ * It used to be `JSON.stringify` of the stored zones, which handed a numbers-only read the band
+ * shape (`{"lower":238.2,"upper":238.2}`) for a level the user wrote as a point.
+ *
+ * Entry and stop only, as before: this tier answers "is it fired", and a target is not that question.
+ */
+function _levelsBlock(setup, scenario) {
+    const legs = [
+        legsText(scenario?.entry_legs, 'ENTRY'),
+        legsText(scenario?.stop_legs, 'STOP'),
+    ].filter(Boolean).join('\n')
+    return legs ? `PLAN LEVELS:\n${legs}` : 'PLAN LEVELS: (none priced)'
+}
+
 /** The conditions block, with an already-settled latching condition shown as settled. */
 function _conditionLines(setup, conditions) {
     const resolved = setup?.monitor_state?.conditions ?? {}
@@ -102,9 +118,7 @@ export function buildCheapUserText(setup, { scenario, conditions, rung, candles,
             asset: setup.asset, direction: setup.direction, type: setup.type,
             trade_mode: setup.trade_mode, timeframe: setup.timeframe, thesis: setup.thesis,
         })}`,
-        `PLAN LEVELS: ${JSON.stringify({
-            entry: scenario?.entry_zones ?? [], stop: scenario?.stop_zones ?? [],
-        })}`,
+        _levelsBlock(setup, scenario),
         conditions.length
             ? `CONDITIONS — judge exactly these, nothing else:\n${_conditionLines(setup, conditions).join('\n')}`
             : 'CONDITIONS: (none declared)',

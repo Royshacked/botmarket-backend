@@ -15,9 +15,9 @@ import { dirname, join } from 'path'
 // model emits something slightly wrong", which is the normal case, not the exception.
 
 const ZONES = {
-    entry_zones: [{ lower: 237.8, upper: 238.6, quantity: 100 }],
-    stop_zones:  [{ lower: 234.8, upper: 235.9, quantity: 100 }],
-    tp_zones:    [{ lower: 246.0, upper: 247.2, quantity: 100 }],
+    entry_legs: [{ price: 238.6, quantity: 100 }],
+    stop_legs:  [{ price: 234.8, quantity: 100 }],
+    target_legs:    [{ price: 246.0, quantity: 100 }],
 }
 const SETUP = { asset: 'NVDA', direction: 'long', type: 'swing', trade_mode: 'smc', timeframe: '1hr', ...ZONES }
 
@@ -57,13 +57,13 @@ test('an omitted field carries forward from the prior draft', () => {
     const merged = _mergeSetupDraft({ ...SETUP, thesis: 'sweep and reclaim' }, { timeframe: '15min' })
     assert.equal(merged.timeframe, '15min')
     assert.equal(merged.thesis, 'sweep and reclaim', 'the settled thesis survives a thin emit')
-    assert.deepEqual(merged.entry_zones, SETUP.entry_zones)
+    assert.deepEqual(merged.entry_legs, SETUP.entry_legs)
 })
 
-test('a re-emitted array replaces wholesale, so the model can still DROP a zone', () => {
-    const merged = _mergeSetupDraft(SETUP, { entry_zones: [{ lower: 230, upper: 231, quantity: 50 }] })
-    assert.equal(merged.entry_zones.length, 1)
-    assert.equal(merged.entry_zones[0].lower, 230)
+test('a re-emitted array replaces wholesale, so the model can still DROP a leg', () => {
+    const merged = _mergeSetupDraft(SETUP, { entry_legs: [{ price: 231, quantity: 50 }] })
+    assert.equal(merged.entry_legs.length, 1)
+    assert.equal(merged.entry_legs[0].price, 231)
 })
 
 test('an explicit null clears a field — only omission is protected', () => {
@@ -87,7 +87,7 @@ test('the setup block is parsed and stripped from the visible reply', () => {
     const { reply, setup } = _parseMentorResponse(raw)
     assert.equal(reply, 'Zones are placed.')
     assert.equal(setup.asset, 'NVDA')
-    assert.ok(!reply.includes('entry_zones'), 'raw JSON must never reach the user')
+    assert.ok(!reply.includes('entry_legs'), 'raw JSON must never reach the user')
 })
 
 test('<setups> is NOT matched as a <setup> despite the shared prefix', () => {
@@ -124,7 +124,7 @@ test('a turn with no blocks returns the reply unchanged', () => {
 test('candidates are normalised so the cards are comparable, with rr computed per option', () => {
     const raw = `<setups>${JSON.stringify({ candidates: [
         { label: 'Sweep and reclaim', pitch: 'Best risk.', setup: SETUP },
-        { label: 'Break of the shelf', pitch: 'Momentum.', setup: { ...SETUP, trade_mode: 'discretionary', entry_zones: [{ lower: 241, upper: 242, quantity: 100 }] } },
+        { label: 'Break of the shelf', pitch: 'Momentum.', setup: { ...SETUP, trade_mode: 'discretionary', entry_legs: [{ price: 242, quantity: 100 }] } },
     ] })}</setups>`
     const { candidates } = _parseCandidates(raw)
     assert.equal(candidates.length, 2)
@@ -159,10 +159,10 @@ const INCOHERENT = normalizeSetup({
     asset: 'NVDA', direction: 'long', type: 'swing', timeframe: '1hr',
     conditions: [{ id: 'c1', text: 'CHoCH up on the 15m' }],
     scenarios: [
-        { id: 's1', name: 'pullback', entry_zones: [{ lower: 199, upper: 201, quantity: 60 }],
-          stop_zones: [{ lower: 194, upper: 195 }], validity: { lower: 196, upper: 210 } },
-        { id: 's2', name: 'breakout', entry_zones: [{ lower: 208, upper: 209, quantity: 100 }],
-          stop_zones: [{ lower: 204, upper: 205 }], validity: { lower: 200, upper: 220 } },  // below ITS stop
+        { id: 's1', name: 'pullback', entry_legs: [{ price: 201, quantity: 60 }],
+          stop_legs: [{ price: 194 }], validity: { lower: 196, upper: 210 } },
+        { id: 's2', name: 'breakout', entry_legs: [{ price: 209, quantity: 100 }],
+          stop_legs: [{ price: 204 }], validity: { lower: 200, upper: 220 } },  // below ITS stop
     ],
 })
 

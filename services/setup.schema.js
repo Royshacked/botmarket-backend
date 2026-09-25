@@ -315,96 +315,89 @@ export function guardFires(guard, range = null) {
  */
 const num = (v) => (v == null || v === '' ? NaN : Number(v))
 
-// ─── Zones ────────────────────────────────────────────────────────────────────
+// ─── Legs ─────────────────────────────────────────────────────────────────────
+//
+// A LEG IS A PRICE. There is no zone, no band and no edge anywhere in this kind (2026-09-24).
+//
+// WHAT WAS REMOVED, AND WHY IT SURVIVED AS LONG AS IT DID. The document used to carry
+// `entry_legs` / `stop_legs` / `target_legs`, each `{lower, upper}`. The band was never a trading
+// idea: it was compensation for a monitor that glanced at the SPOT price every half hour, so a level
+// could only be caught if price happened to be sitting on it at the moment of a lazy look
+// (docs/desks/mentor-talos.md §Guards). The guards build retired that in August 2026 — the sweep
+// tests the RANGE since the last look, so an exact price is as catchable as a wide band — and
+// Mentor stopped drawing bands the same day. What stayed was the STORAGE: two keys holding one
+// number, kept because renaming them meant migrating live armed documents for a cosmetic gain.
+//
+// It was never only cosmetic. Every consumer had to know which edge a leg acts at, so the edge rule
+// (`zoneLevel(zone, isLong, which)`) had to be threaded through sizing, R:R, the resting orders, the
+// prompts and the UI — and every one of them was a place the wrong edge could be picked. A stop the
+// user put at 306, widened to 305.2–306.4, rested at 305.2: more risk than they agreed to, and
+// nothing in the journal said so. Deleting the shape deletes that whole class of bug, and with it
+// `zoneLevel`'s `isLong`/`which` arguments, the edge selection in `stopEdge` / `targetEdges` /
+// `routeSetupLegs`, and the "far edge" reasoning in four docs.
+//
+// THE MIGRATION WAS A DELETION. Existing setups were wiped in both databases rather than converted
+// (24 documents, 2026-09-24, the user's call) — so nothing here reads the old shape, on purpose. A
+// document still carrying `entry_legs` does not half-work; it has no legs at all.
 
 /**
- * Coerce one zone. A zone is a LEVEL with a quantity and, optionally, conditions.
+ * Coerce one leg: a PRICE, with a size and, optionally, conditions.
  *
- * ── WHY THE STORAGE SHAPE IS STILL `lower`/`upper` ───────────────────────────
- * A level authored today is ZERO-WIDTH — Mentor emits the price the user named and nothing wider
- * (docs/desks/mentor-talos.md) — so a single `price` field would read better. It stays two keys
- * anyway, and that was a decision rather than an omission: renaming would mean migrating live armed
- * documents, and a migration that touches a resting stop is real risk bought for a cosmetic gain.
- *
- * The cost is contained to the stored keys. `{"price": 312}` is accepted on the way in and
- * collapsed here, the model is told to emit exactly that, and the UI edits one box — so prices are
- * what everything upstream speaks, and only Mongo holds the number twice.
- *
- * A legacy BAND still normalises: those documents exist, and the model emits the numbers reliably
- * and their order unreliably, so edges are sorted rather than rejected. `zoneLevel` decides which
- * edge such a band acts at, and it is the edge the broker was already holding.
- *
- * ── `conditions` — the same sentence an entry condition is ────────────────────
- * A stop or a target may carry conditions of its own: "out if it closes below the 4hr VWAP". They
- * are NOT a different mechanism from an entry's — same shape, same normaliser, same document-wide
- * id space, evaluated by the same model read. That is the whole reason there is no condition tree
- * and no separate exit evaluator: a condition is text the model judges, wherever it hangs.
+ * `conditions` are the same sentence an entry condition is — a stop or a target may carry its own
+ * ("out if it closes below the 4hr VWAP"), same shape, same normaliser, same document-wide id space,
+ * judged by the same model read. That is the whole reason there is no condition tree and no separate
+ * exit evaluator: a condition is text the model judges, wherever it hangs.
  *
  * `used` threads the document-wide id set through, exactly as it does for scenario conditions —
  * `monitor_state.conditions` is ONE latch map for the setup, so a target's condition sharing an id
  * with a scenario's would let one latch answer for the other.
  */
-export function normalizeZone(z, i, prefix, { used } = {}) {
+export function normalizeLeg(z, i, prefix, { used } = {}) {
     if (!z || typeof z !== 'object') return null
 
-    let lo = num(z.lower)
-    let hi = num(z.upper)
-
-    // Point emitted instead of a band → zero-width zone at that price. The ordinary case now.
-    if (!Number.isFinite(lo) && !Number.isFinite(hi)) {
-        const p = num(z.price)
-        if (!Number.isFinite(p)) return null
-        lo = hi = p
-    } else if (!Number.isFinite(lo)) lo = hi
-    else if (!Number.isFinite(hi)) hi = lo
-
-    if (lo > hi) [lo, hi] = [hi, lo]
+    const price = num(z.price)
+    if (!Number.isFinite(price)) return null
 
     const id  = typeof z.id === 'string' && z.id.trim() ? z.id.trim() : `${prefix}${i + 1}`
     const qty = num(z.quantity)
     return {
         id,
-        lower:    lo,
-        upper:    hi,
+        price,
         quantity: Number.isFinite(qty) && qty > 0 ? qty : null,
         note:     typeof z.note === 'string' && z.note.trim() ? z.note.trim() : null,
         conditions: normalizeConditions(z.conditions, { used, prefix: `${id}c` }),
     }
 }
 
-export function normalizeZones(arr, prefix, { used } = {}) {
+export function normalizeLegs(arr, prefix, { used } = {}) {
     if (!Array.isArray(arr)) return []
-    return arr.map((z, i) => normalizeZone(z, i, prefix, { used })).filter(Boolean)
+    return arr.map((z, i) => normalizeLeg(z, i, prefix, { used })).filter(Boolean)
 }
 
 /**
- * The price a zone stands at. Zero-width is the authored shape, so both edges agree and either
- * would do; a legacy BAND is read at the edge further from entry, which is the level that was
- * already resting at the broker before this change — so a deploy cannot move a live stop.
+ * The price a leg stands at — the whole of what `zoneLevel(zone, isLong, which)` used to decide.
  *
- * `which` is 'stop' | 'tp' | 'entry'. Long: stop → lower, tp → upper, entry → upper (the worst
- * fill the band admits, which is what sizing and R:R are already measured against). Short mirrors.
+ * It keeps its own function rather than becoming `leg.price` at every call site because a leg
+ * reaches this from three directions: normalised (always a number), straight off a model reply, and
+ * out of a shared blueprint. Returning null for the last two is what keeps an unpriced leg out of a
+ * prompt and out of an order, instead of `NaN` reaching a broker.
  */
-export function zoneLevel(zone, isLong, which = 'stop') {
-    const lo = num(zone?.lower), hi = num(zone?.upper)
-    if (!Number.isFinite(lo) || !Number.isFinite(hi)) return null
-    if (lo === hi) return lo
-    const takeLower = which === 'stop' ? isLong : !isLong
-    return takeLower ? lo : hi
+export function legPrice(leg) {
+    const p = num(leg?.price)
+    return Number.isFinite(p) ? p : null
 }
 
 /**
- * A SCENARIO's size — the sum of its own entry zones, which in v1 is exactly one zone, so this is
+ * A SCENARIO's size — the sum of its own entry legs, which in v1 is usually exactly one, so this is
  * simply "the position this premise takes".
  *
  * NEVER SUMMED ACROSS SCENARIOS. Scenarios are rivals, not legs: the first to fulfil takes the whole
- * trade and the others die. The predecessor of this function summed every entry zone on the document
- * while the monitor fired ONCE for that total — so two rival zones of 100 placed 200. Scaling in
- * (several entries inside ONE scenario) is what this sum is reserved for; readiness blocks it until
- * per-leg execution exists.
+ * trade and the others die. The predecessor of this function summed every entry leg on the document
+ * while the monitor fired ONCE for that total — so two rival entries of 100 placed 200. Scaling in
+ * (several entries inside ONE scenario) is what this sum is reserved for.
  */
-export function scenarioQuantity(entryZones) {
-    const sum = (entryZones ?? []).reduce((acc, z) => acc + (Number(z?.quantity) || 0), 0)
+export function scenarioQuantity(entryLegs) {
+    const sum = (entryLegs ?? []).reduce((acc, z) => acc + (Number(z?.quantity) || 0), 0)
     return sum > 0 ? sum : null
 }
 
@@ -528,9 +521,8 @@ export function scenarioLabel(sc) {
  * is short — direction is the one thing rivals must agree on (it is what makes them rivals rather
  * than two setups).
  *
- * Zone ids are prefixed with the scenario's id, so they stay unique document-wide and
- * `armed_zone_id` still resolves to exactly one zone. An authored id always wins, which is what
- * lets a legacy document keep its `ez1`/`sz1` ids through the wrap.
+ * Leg ids are prefixed with the scenario's id, so they stay unique document-wide and `armed_leg_id`
+ * resolves to exactly one leg. An authored id always wins.
  */
 export function normalizeScenario(raw, i, { direction = null, used, ids } = {}) {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
@@ -540,21 +532,21 @@ export function normalizeScenario(raw, i, { direction = null, used, ids } = {}) 
     if (taken.has(id)) { let n = 2; while (taken.has(`${id}_${n}`)) n++; id = `${id}_${n}` }
     taken.add(id)
 
-    // `used` rides into the zones too: a target's own condition shares the document-wide latch map
+    // `used` rides into the legs too: a target's own condition shares the document-wide latch map
     // with every scenario condition, so its id has to be claimed from the same set.
-    const entry_zones = normalizeZones(raw.entry_zones, `${id}e`, { used })
-    const stop_zones  = normalizeZones(raw.stop_zones,  `${id}s`, { used })
-    const tp_zones    = normalizeZones(raw.tp_zones,    `${id}t`, { used })
+    const entry_legs  = normalizeLegs(raw.entry_legs,  `${id}e`, { used })
+    const stop_legs   = normalizeLegs(raw.stop_legs,   `${id}s`, { used })
+    const target_legs = normalizeLegs(raw.target_legs, `${id}t`, { used })
 
     const sc = {
         id,
         name: typeof raw.name === 'string' && raw.name.trim() ? raw.name.trim() : null,
-        entry_zones,
-        stop_zones,
-        tp_zones,
+        entry_legs,
+        stop_legs,
+        target_legs,
         conditions: normalizeConditions(raw.conditions, { used, prefix: `${id}c` }),
         validity:   normalizeValidity(raw.validity),
-        quantity:   scenarioQuantity(entry_zones),
+        quantity:   scenarioQuantity(entry_legs),
         rr:         null,
     }
     // Derived per scenario, from ITS OWN legs. A setup-wide r:r would price the false break's entry
@@ -571,27 +563,29 @@ export function normalizeScenarios(arr, { direction = null, used } = {}) {
 }
 
 /**
- * THE ONE PLACE THAT KNOWS THE PRE-SCENARIO SHAPE. A document authored before scenarios carries its
- * zones and its validity range at the root; it becomes a single implicit scenario so every other
- * module can read scenarios and nothing else.
+ * THE ONE PLACE THAT KNOWS THE FLAT SHAPE. A plan given as root-level legs and validity — no
+ * `scenarios` — becomes a single implicit scenario, so every other module reads scenarios and
+ * nothing else.
  *
- * Its entry zones are kept together in that one scenario — verbatim today's behaviour, including the
- * summed quantity — rather than split into rivals, because splitting would silently re-price a live
- * plan. Readiness will refuse to ARM such a setup until it is re-drawn as one scenario per premise,
- * which is the honest outcome: that shape is the double-count bug.
+ * It used to carry "delete this when no pre-scenario documents remain", and those are gone (every
+ * setup was wiped with the zone shape, 2026-09-24). It stays anyway, for the job it turned out to
+ * be doing: the flat legs ARE the execution projection (`projectScenario`), and `PLAN_FIELDS`
+ * writes them alongside `scenarios` on every edit. A normaliser that could not read its own output
+ * back would make the projection a one-way door.
  *
- * Delete this when no pre-scenario documents remain.
+ * `scenarios` wins whenever it is present, so this only ever fires on a plan that has no premise
+ * structure at all.
  */
 function _scenarioSource(raw) {
     if (Array.isArray(raw?.scenarios) && raw.scenarios.length) return raw.scenarios
-    const legacy = raw?.entry_zones ?? raw?.stop_zones ?? raw?.tp_zones ?? raw?.validity
-    if (!legacy) return []
+    const flat = raw?.entry_legs ?? raw?.stop_legs ?? raw?.target_legs ?? raw?.validity
+    if (!flat) return []
     return [{
         id: 's1',
         name: null,
-        entry_zones: raw.entry_zones,
-        stop_zones:  raw.stop_zones,
-        tp_zones:    raw.tp_zones,
+        entry_legs:  raw.entry_legs,
+        stop_legs:   raw.stop_legs,
+        target_legs: raw.target_legs,
         validity:    raw.validity,
         conditions:  [],
         rr:          raw.rr,
@@ -609,11 +603,10 @@ export function pickScenario(setup, id = null) {
  * THE EXECUTION PROJECTION — a scenario's legs, flattened onto the fields the rest of the app has
  * always read (docs/desks/mentor-talos.md).
  *
- * `entry_zones` / `stop_zones` / `tp_zones` / `quantity` are NOT setup-private: they are the shape
- * the `call` kind uses too, and every kind-blind consumer reads them flat — protectionPlan's
- * routeSetupZones, the order plan, tradeCapture, the watch row. So scenarios stay the authored and
- * monitored model, and the winning scenario is stamped down here when it arms. Execution never
- * learns that scenarios exist.
+ * `entry_legs` / `stop_legs` / `target_legs` / `quantity` are NOT setup-private: every kind-blind
+ * consumer reads them flat — protectionPlan's `routeSetupLegs`, the order plan, the watch row. So
+ * scenarios stay the authored and monitored model, and the winning scenario is stamped down here
+ * when it arms. Execution never learns that scenarios exist.
  *
  * Pre-arm the projection is the FIRST scenario — the primary, which Mentor authors first. The row
  * shows every scenario (toWatchRow) so a second premise is never hidden behind this one. Pure.
@@ -621,9 +614,9 @@ export function pickScenario(setup, id = null) {
 export function projectScenario(setup, id = null) {
     const sc = pickScenario(setup, id)
     return {
-        entry_zones: sc?.entry_zones ?? [],
-        stop_zones:  sc?.stop_zones  ?? [],
-        tp_zones:    sc?.tp_zones    ?? [],
+        entry_legs:  sc?.entry_legs  ?? [],
+        stop_legs:   sc?.stop_legs   ?? [],
+        target_legs: sc?.target_legs ?? [],
         validity:    sc?.validity    ?? null,
         quantity:    sc?.quantity    ?? null,
         rr:          sc?.rr          ?? null,
@@ -728,8 +721,8 @@ export function normalizeSetup(raw) {
         // confirm card on the first armed wake. Everything else is 'conditional' (the default).
         entry_mode: raw.entry_mode === 'limit' ? 'limit' : 'conditional',
 
-        // Server-derived — recomputed every time, never taken from the model. `entry_zones`,
-        // `stop_zones`, `tp_zones`, `validity`, `quantity` and `rr` are the EXECUTION PROJECTION of
+        // Server-derived — recomputed every time, never taken from the model. `entry_legs`,
+        // `stop_legs`, `target_legs`, `validity`, `quantity` and `rr` are the EXECUTION PROJECTION of
         // one scenario (projectScenario): pre-arm the first, and re-stamped by Talos to the armed
         // one when a zone trips. Authoring them directly does nothing — scenarios are the source.
         ...projectScenario({ scenarios }, raw.armed_scenario_id ?? null),
@@ -758,7 +751,7 @@ export function disarmedSetupPatch() {
         brokerOrders:      null,
         entryTriggeredAt:  null,
         ordersPlacedAt:    null,
-        armed_zone_id:     null,
+        armed_leg_id:     null,
         armed_scenario_id: null,
     }
 }
@@ -787,31 +780,28 @@ export function setupReadiness(setup, hasAccount = false) {
     if (!list.length) missing.push('scenario')
 
     for (const sc of list) {
-        // With two premises in play, "missing stop zone" is ambiguous — say WHICH one.
+        // With two premises in play, "missing stop price" is ambiguous — say WHICH one.
         const at = (what) => (multi ? `${what} on ${scenarioLabel(sc)}` : what)
 
-        if (!(sc.entry_zones?.length)) missing.push(at('entry zone'))
-        // Scaling in is supported now: execution places the ARMED ZONE's size (legQuantity), the
-        // monitor watches the rest (pendingLegs) and the resting stop grows to cover each new leg.
-        // What the block used to guarantee still has to hold, so it becomes a narrower rule: with
-        // more than one leg EVERY leg must carry its own size, because a leg with none falls back
-        // to the premise total and would place the whole position on the first print — the exact
-        // failure the old block existed to prevent.
-        else if (sc.entry_zones.length > 1 && sc.entry_zones.some(z => !(Number(z?.quantity) > 0))) {
+        if (!(sc.entry_legs?.length)) missing.push(at('entry price'))
+        // Scaling in is supported: execution places the ARMED LEG's size (legQuantity), the monitor
+        // watches the rest (pendingLegs) and the resting stop grows to cover each new leg. What the
+        // block used to guarantee still has to hold, so it becomes a narrower rule: with more than
+        // one leg EVERY leg must carry its own size, because a leg with none falls back to the
+        // premise total and would place the whole position on the first print — the exact failure
+        // the old block existed to prevent.
+        else if (sc.entry_legs.length > 1 && sc.entry_legs.some(z => !(Number(z?.quantity) > 0))) {
             missing.push(at('a size on every entry leg (scaling in places each leg separately)'))
         }
 
-        if (!(sc.stop_zones?.length)) missing.push(at('stop zone'))
+        if (!(sc.stop_legs?.length)) missing.push(at('stop price'))
 
-        // A TARGET IS REQUIRED, and it is required as a PRICE. Under the TP window the far edge of a
-        // tp band is not a nice-to-have annotation — it is the limit order that rests at the broker,
-        // and a premise without one is a position that can only ever be closed by its stop, by hand,
-        // or by Talos noticing. "Where does this pay?" is half of the plan; a setup that cannot
-        // answer it is not finished being authored.
+        // A TARGET IS REQUIRED. A premise without one is a position that can only ever be closed by
+        // its stop, by hand, or by Talos noticing. "Where does this pay?" is half of the plan; a
+        // setup that cannot answer it is not finished being authored.
         //
-        // Checked through targetLevels rather than on `tp_zones.length`, because a zone of nulls is
-        // a zone by the array's reckoning and no price by the broker's — the whole point is that a
-        // real number reaches the order book.
+        // Checked through targetLevels rather than on `target_legs.length`, because a leg is only a
+        // leg by the array's reckoning until a real number reaches the order book.
         if (!targetLevels(scenarioView(setup, sc)).length) missing.push(at('target price'))
 
         if (!Number.isFinite(sc.quantity) || sc.quantity <= 0) missing.push(at('quantity'))
@@ -819,7 +809,7 @@ export function setupReadiness(setup, hasAccount = false) {
         // PRESENCE only, counting the root tier. Whether a condition is *checkable* is Mentor's gate
         // and lives in the prompt — code can't read a sentence and say how anyone would know. But a
         // scenario with nothing to check arms blind: Talos falls through to `judge on price structure
-        // at the zone alone` and the premise never gets tested. A scenario needs no trigger of its
+        // at the level alone` and the premise never gets tested. A scenario needs no trigger of its
         // own when the root carries one.
         // limit setups intentionally carry zero conditions — the price touch IS the trigger.
         if (setup.entry_mode !== 'limit' && !root.length && !(sc.conditions?.length)) missing.push(at('condition'))
@@ -860,7 +850,7 @@ export function validityProblems(setup) {
 
 /**
  * The coherence check for ONE plan — a scenario, or anything else carrying `direction` + `validity`
- * + `stop_zones`. Per scenario because the range and the stop it must outlive both belong to the
+ * + `stop_legs`. Per scenario because the range and the stop it must outlive both belong to the
  * same premise: checking the false break's floor against the breakout's stop compares two different
  * trades. Pure.
  */
@@ -868,38 +858,34 @@ export function rangeProblems(setup) {
     const out  = []
     const long = setup?.direction === 'long'
 
-    // An entry zone BEYOND the stop can never fill — price arriving there means the stop already
-    // went, so the leg is unreachable by construction. Harmless-looking on one zone and actively
-    // misleading on several: a scale-in ladder drawn through its own stop reads like a plan to add
-    // twice and can only ever add once.
+    // An entry BEYOND the stop can never fill — price arriving there means the stop already went, so
+    // the leg is unreachable by construction. Harmless-looking on one leg and actively misleading on
+    // several: a scale-in ladder drawn through its own stop reads like a plan to add twice and can
+    // only ever add once.
     //
     // Checked before the validity guard below, because it has nothing to do with validity: a setup
     // with no range at all can still be drawn this way. (Found while writing scale-in fixtures — a
     // second leg placed under the stop made every gate report `adverse`, correctly.)
     //
-    // Skipped entirely when any zone is INVERTED (lower > upper). The normaliser sorts edges, so that
-    // only happens on a raw document that bypassed it — and then this check reads a garbage edge and
-    // reports an unreachable entry, which is a conclusion derived from the malformation rather than
-    // the malformation itself. A bad zone is reported as a bad zone, by the rule that owns it.
-    const sane = z => Number.isFinite(z?.lower) && Number.isFinite(z?.upper) && z.lower <= z.upper
-    const zones = [...(setup?.entry_zones ?? []), ...(setup?.stop_zones ?? [])]
-    const working = zones.every(sane) ? stopEdge(setup) : null
+    // The INVERTED-zone guard that used to skip this check went with the bands: there are no edges
+    // left to be in the wrong order, so a leg is either priced or it is not a leg.
+    const working = stopEdge(setup)
     if (working != null) {
-        const unreachable = (setup?.entry_zones ?? [])
-            .map(z => (long ? z?.lower : z?.upper))
+        const unreachable = (setup?.entry_legs ?? [])
+            .map(legPrice)
             .filter(Number.isFinite)
             .filter(e => (long ? e <= working : e >= working))
-        if (unreachable.length) out.push('an entry zone sits past the stop, where price could never reach it')
+        if (unreachable.length) out.push('an entry sits past the stop, where price could never reach it')
     }
 
     const v = setup?.validity
     if (!v) return out
 
-    // The far stop edge = the most risk the plan admits. Beyond it the trade is dead by its own
+    // The furthest stop = the most risk the plan admits. Beyond it the trade is dead by its own
     // terms, so the validity floor/ceiling must not sit further out than that.
-    const stopEdges = (setup?.stop_zones ?? []).flatMap(z => [z?.lower, z?.upper]).filter(Number.isFinite)
-    if (stopEdges.length) {
-        const stopFar = long ? Math.min(...stopEdges) : Math.max(...stopEdges)
+    const stops = (setup?.stop_legs ?? []).map(legPrice).filter(Number.isFinite)
+    if (stops.length) {
+        const stopFar = long ? Math.min(...stops) : Math.max(...stops)
         if (long  && v.lower != null && v.lower < stopFar) out.push('validity floor sits below the stop')
         if (!long && v.upper != null && v.upper > stopFar) out.push('validity ceiling sits above the stop')
     }
@@ -918,42 +904,35 @@ export function rangeProblems(setup) {
 // ─── Reward-to-risk ───────────────────────────────────────────────────────────
 
 /**
- * The price a leg is REACHED at, per side. A zone is a band, so which edge counts depends on which
- * way price arrives: a long's stop is hit at the band's `lower`, its target at the band's `lower`
- * too (price rises into the near edge). Mirrored for a short. Pure.
- */
-const _edge = (z, isLong) => (isLong ? z?.lower : z?.upper)
-
-/**
- * The size of ONE entry leg — the armed zone's own quantity, or null when it carries none. Pure.
+ * The size of ONE entry leg — the armed leg's own quantity, or null when it carries none. Pure.
  *
  * Execution projects a scenario's whole size onto the flat `quantity` field (projectScenario), which
- * is right while a premise has one leg and wrong the moment it has two: the first zone to print
+ * is right while a premise has one leg and wrong the moment it has two: the first leg to print
  * would place the size of BOTH, so the position would be fully on with only half the plan
  * confirmed. That is the readiness block's reasoning, and this is what has to exist before it can
  * be lifted.
  *
- * A no-op today. With a single entry zone, `scenarioQuantity` IS that zone's quantity, so the leg
- * and the scenario agree and nothing changes — which is what makes this safe to land on its own.
+ * A no-op on a single-leg premise, where `scenarioQuantity` IS that leg's quantity, so the leg and
+ * the scenario agree and nothing changes.
  */
-export function legQuantity(scenario, zoneId) {
-    const zone = (scenario?.entry_zones ?? []).find(z => z?.id === zoneId)
-    const q    = Number(zone?.quantity)
+export function legQuantity(scenario, legId) {
+    const leg = (scenario?.entry_legs ?? []).find(z => z?.id === legId)
+    const q   = Number(leg?.quantity)
     return Number.isFinite(q) && q > 0 ? q : null
 }
 
 /**
- * The armed premise's entry zones that have NOT filled yet — the legs still to scale into. Pure.
+ * The armed premise's entry legs that have NOT filled yet — the legs still to scale into. Pure.
  *
- * Keyed on the zone ids already recorded in `entry.legs[]`, not on a count, because legs can fill
+ * Keyed on the leg ids already recorded in `entry.legs[]`, not on a count, because legs can fill
  * out of order: a premise with a dip leg and a reclaim leg fills whichever prints first.
  *
  * Empty for a single-leg premise the moment it fills, which is what keeps the scale-in path inert
- * for every setup that exists today.
+ * for an ordinary one-entry setup.
  */
 export function pendingLegs(scenario, entry) {
-    const filled = new Set((entry?.legs ?? []).map(l => l?.zone_id).filter(Boolean))
-    return (scenario?.entry_zones ?? []).filter(z => z?.id && !filled.has(z.id))
+    const filled = new Set((entry?.legs ?? []).map(l => l?.leg_id).filter(Boolean))
+    return (scenario?.entry_legs ?? []).filter(z => z?.id && !filled.has(z.id))
 }
 
 /**
@@ -961,18 +940,18 @@ export function pendingLegs(scenario, entry) {
  * specific level, else the scenario's first unfilled leg.
  *
  * WHY THE FALLBACK EXISTS. Until 2026-09-23 an `enter` could only fire when `hit` was non-null,
- * and `hit` came from a containment test against what is now a zero-width price — so it matched a
- * live quote only by coincidence. In prod, 18 of 18 entry zones were points and only 2 of 70
- * journal rows carried a zone at all: entries worked solely because the model happened to arm its
+ * and `hit` came from a containment test against what was already a zero-width price — so it matched
+ * a live quote only by coincidence. In prod, 18 of 18 entry levels were points and only 2 of 70
+ * journal rows carried one at all: entries worked solely because the model happened to arm its
  * guards at the exact authored price. The shape that broke it is the commonest one there is —
  * price arrives, conditions confirm two candles later, and by then `clampGuards` has dropped the
  * already-satisfied entry guard and `woke_on` is long cleared, leaving no path to `enter`.
  *
- * So the level stopped being a second opinion on a decision the read already made. The zone keeps
+ * So the level stopped being a second opinion on a decision the read already made. The leg keeps
  * its three real jobs — the order price, the size, the r:r — and the verdict decides. Pure.
  */
-export function firingLeg(scenario, zone = null) {
-    if (zone?.id) return zone
+export function firingLeg(scenario, leg = null) {
+    if (leg?.id) return leg
     return pendingLegs(scenario, null)[0] ?? null
 }
 
@@ -996,8 +975,8 @@ export function watchedLegs(setup, scenario, entry = null) {
     const has     = (z) => Array.isArray(z?.conditions) && z.conditions.length > 0
     const judged  = setup?.entry_mode !== 'limit' && declaredConditions(setup, scenario).length > 0
     return {
-        stop:    (scenario?.stop_zones ?? []).find(has) ?? null,
-        targets: (scenario?.tp_zones ?? []).filter(has),
+        stop:    (scenario?.stop_legs ?? []).find(has) ?? null,
+        targets: (scenario?.target_legs ?? []).filter(has),
         entries: pendingLegs(scenario, entry).filter(z => judged || has(z)),
     }
 }
@@ -1066,36 +1045,32 @@ export function addEntryLeg(entry, leg) {
 }
 
 /**
- * The working stop: the WIDEST stop edge, i.e. the most risk the plan admits. Null when none is
+ * The working stop: the FURTHEST stop, i.e. the most risk the plan admits. Null when none is
  * authored. Pure.
  *
- * Selected by price, never by array position — the model emits zones in whatever order it reasoned
- * about them, so `stop_zones[0]` is not the far one.
+ * Selected by price, never by array position — the model emits legs in whatever order it reasoned
+ * about them, so `stop_legs[0]` is not the far one.
  */
 export function stopEdge(setup) {
     const isLong = setup?.direction === 'long'
-    // Through `zoneLevel`, so the working stop and the order protectionPlan actually rests are
-    // decided by ONE rule. Two rules is how a legacy band ends up stopping out at a level the
-    // journal never mentioned.
-    const edges  = (setup?.stop_zones ?? []).map(z => zoneLevel(z, isLong, 'stop')).filter(Number.isFinite)
-    if (!edges.length) return null
-    return isLong ? Math.min(...edges) : Math.max(...edges)
+    const stops  = (setup?.stop_legs ?? []).map(legPrice).filter(Number.isFinite)
+    if (!stops.length) return null
+    return isLong ? Math.min(...stops) : Math.max(...stops)
 }
 
 /**
- * Target edges NEAREST-FIRST — ordered by price, never by array position. Trusting `tp_zones[0]`
- * would quietly hand a multi-target setup the rr of its furthest leg. Empty when none. Pure.
+ * Targets NEAREST-FIRST — ordered by price, never by array position. Trusting `target_legs[0]` would
+ * quietly hand a multi-target setup the rr of its furthest leg. Empty when none. Pure.
  *
- * DELIBERATELY NOT `zoneLevel(_, 'tp')`, and the difference only shows on a legacy BAND: this reads
- * the NEAR edge — the pessimistic reward, what the trade pays if it is banked at the first
- * opportunity — while `targetLevels` reads where the limit rests. R:R must never flatter, so the two
- * are allowed to disagree, in that direction only. On a zero-width level (everything authored from
- * now on) they are the same number and the distinction dissolves.
+ * This and `targetLevels` used to be allowed to disagree — this one read a tp band's NEAR edge (the
+ * pessimistic reward) while `targetLevels` read where the limit rested (the far edge), because an
+ * R:R must never flatter. With bands gone they read one number, and the asymmetry is kept only as
+ * the ORDER rule below: r:r is measured to the nearest.
  */
 export function targetEdges(setup) {
     const isLong = setup?.direction === 'long'
-    const edges  = (setup?.tp_zones ?? []).map(z => _edge(z, isLong)).filter(Number.isFinite)
-    return edges.sort((a, b) => (isLong ? a - b : b - a))
+    const prices = (setup?.target_legs ?? []).map(legPrice).filter(Number.isFinite)
+    return prices.sort((a, b) => (isLong ? a - b : b - a))
 }
 
 /**
@@ -1113,8 +1088,8 @@ export function targetEdges(setup) {
  */
 export function targetLevels(setup) {
     const isLong = setup?.direction === 'long'
-    return (setup?.tp_zones ?? [])
-        .map(z => ({ target: zoneLevel(z, isLong, 'tp'), quantity: z?.quantity ?? null, conditions: z?.conditions ?? [] }))
+    return (setup?.target_legs ?? [])
+        .map(z => ({ target: legPrice(z), quantity: z?.quantity ?? null, conditions: z?.conditions ?? [] }))
         .filter(t => Number.isFinite(t.target))
         .sort((a, b) => (isLong ? a.target - b.target : b.target - a.target))
 }
@@ -1123,30 +1098,29 @@ export function targetLevels(setup) {
  * Reward-to-risk from the PESSIMISTIC fill, per docs/desks/mentor-talos.md
  *
  * SCOPED TO ONE PLAN — a scenario (via scenarioView), or the projected document, both of which carry
- * `direction` + the three zone arrays. Pricing a setup's r:r across scenarios would run one
+ * `direction` + the three leg arrays. Pricing a setup's r:r across scenarios would run one
  * premise's entry to another's target and describe a trade nobody planned.
  *
- * For a long: the worst entry is the zone's UPPER edge (you paid up), risk runs to the LOWEST
- * stop edge (the failsafe rests at the far side), reward to the NEAREST target edge. Mirrored
- * for a short. Every leg deliberately takes its unfavourable side — quoting the midpoint, or the
- * furthest target, would flatter the setup, and the whole point of the rule is that the plan
- * advertises the bad fill.
+ * The pessimism that survives the bands: risk runs to the FURTHEST stop (the failsafe rests at the
+ * far side) and reward to the NEAREST target — what the trade pays if the first target is the one
+ * that gets taken. The entry's own "worst edge" term is gone with the edges: an entry is the one
+ * price the user named, so there is no longer a favourable side of it to decline.
  *
- * Legs are SELECTED by price, never by array position: the model emits zones in whatever order it
- * reasoned about them, so trusting `tp_zones[0]` to be the first target would quietly hand a
+ * Legs are SELECTED by price, never by array position: the model emits legs in whatever order it
+ * reasoned about them, so trusting `target_legs[0]` to be the first target would quietly hand a
  * multi-target setup the rr of its furthest leg.
  *
- * `entryPrice` overrides the zone edge — that's the LIVE rr at the confirm card, computed from
+ * `entryPrice` overrides the plan's entry — that's the LIVE rr at the confirm card, computed from
  * the actual price rather than the plan.
  *
  * Returns null when any leg is missing or risk is zero (an entry inside its own stop).
  */
 export function computeRR(setup, entryPrice = null) {
     const isLong = setup?.direction === 'long'
-    const entryZone = setup?.entry_zones?.[0]
-    if (!entryZone) return null
+    const first  = setup?.entry_legs?.[0]
+    if (!first) return null
 
-    const entry   = Number.isFinite(entryPrice) ? entryPrice : (isLong ? entryZone.upper : entryZone.lower)
+    const entry   = Number.isFinite(entryPrice) ? entryPrice : legPrice(first)
     const stop    = stopEdge(setup)
     const targets = targetEdges(setup)
     if (stop == null || !targets.length) return null

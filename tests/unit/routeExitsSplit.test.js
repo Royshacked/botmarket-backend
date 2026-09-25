@@ -37,8 +37,8 @@ test('a leaf the parser cannot read falls to the monitor, never to a nonsense br
 test('a SETUP routes through zones: every edge is a price, so nothing is left on the monitor', async () => {
     const route = await routeExits({
         id: 's9', kind: 'setup', asset: 'SPY', direction: 'long', quantity: 100, broker: 'ctrader',
-        stop_zones: [{ lower: 234.8, upper: 235.9 }],
-        tp_zones:   [{ lower: 246.0, upper: 247.2 }],
+        stop_legs: [{ price: 234.8 }],
+        target_legs:   [{ price: 246.0 }],
     })
     assert.equal(route.stop.monitorTree, null)
     assert.equal(route.tp.monitorTree, null)
@@ -49,7 +49,7 @@ test('a SETUP routes through zones: every edge is a price, so nothing is left on
 
 test('the routing shape is the same whatever authored the exits', async () => {
     const tree = await routeExits({ id: 'i', asset: 'SPY', direction: 'long', quantity: 1, stop_conditions: [], tp_conditions: [] })
-    const zone = await routeExits({ id: 's', kind: 'setup', asset: 'SPY', direction: 'long', quantity: 1, stop_zones: [], tp_zones: [] })
+    const zone = await routeExits({ id: 's', kind: 'setup', asset: 'SPY', direction: 'long', quantity: 1, stop_legs: [], target_legs: [] })
     for (const r of [tree, zone]) for (const leg of ['stop', 'tp']) {
         assert.deepEqual(Object.keys(r[leg]).sort(), ['hasAny', 'monitorTree', 'nativeOrders'])
         assert.equal(r[leg].hasAny, false)

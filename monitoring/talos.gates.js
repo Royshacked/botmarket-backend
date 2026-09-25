@@ -1,6 +1,6 @@
 import { INVALIDATION } from '../services/entity/vocabulary.js'
 import { toNum } from '../services/format.util.js'
-import { scenarioLabel } from '../services/setup.schema.js'
+import { scenarioLabel, legPrice } from '../services/setup.schema.js'
 
 // Talos's PURE TIER — every decision the monitor makes without touching the network.
 //
@@ -12,7 +12,7 @@ import { scenarioLabel } from '../services/setup.schema.js'
 // EVERYTHING HERE IS PURE. No IO, no clock beyond an explicit `nowMs`, no injected deps. Four
 // groups, in the order a wake asks them:
 //
-//   1. THE ZONE GATES      is price where this setup lives, and whose premise is it?
+//   1. THE LEVEL GATES     is price at one of this setup's legs, and whose premise is it?
 //   2. IN-POSITION         where does the trade stand (R, MAE, MFE)?
 //   3. THE VALIDITY GATE   has the premise broken, or has price simply run away?
 //   4. THE RECORD          what the model answered, folded onto what the setup declared.
@@ -20,34 +20,44 @@ import { scenarioLabel } from '../services/setup.schema.js'
 // Imported by talos.monitor.service.js (the loop) and asserted directly by talosMonitor.test.js.
 
 /**
- * The cheap arithmetic gate: is price inside any entry zone? Returns the FIRST zone containing it
- * (zones are armed simultaneously; whichever price reaches first acts). Inclusive on both edges so
- * a zero-width zone — an exact level the user named — can still trip.
+ * The cheap arithmetic gate: is price AT one of these legs? Returns the first that matches (legs are
+ * armed simultaneously; whichever price reaches first acts).
+ *
+ * BEHAVIOUR-PRESERVING, not a new rule. This was `price >= z.lower && price <= z.upper`, and every
+ * leg has been zero-width since the guards build — so containment already WAS equality, and the
+ * band form only survived because the keys did. It matches about as often as it did before, which is
+ * to say rarely: measured in prod, only 2 of 70 journal rows carried a resolved level at all
+ * (docs/desks/mentor-talos.md §Entry). That is not a fault to fix here. A spot quote landing exactly
+ * on an authored price is a coincidence; the thing that PROVES price reached a level is the guard
+ * sweep, which tests the range since the last look, and `_hitFromGuard` is its side of this gate.
+ *
+ * `enter` stopped depending on either of them on 2026-09-23 — the verdict is the whole gate. What a
+ * match still decides is which rival premise is on the table and which leg fires.
  */
-export function zoneGate(zones, price) {
+export function legGate(legs, price) {
     if (!Number.isFinite(price)) return null
-    return (zones ?? []).find(z => price >= z.lower && price <= z.upper) ?? null
+    return (legs ?? []).find(z => legPrice(z) === price) ?? null
 }
 
 /**
  * The premise a FIRED PRICE GUARD belongs to, or null.
  *
  * The guard sweep proved price reached a level; this says which plan that level was part of, so the
- * wake can judge the right premise and arm the right leg. Matched by containment rather than by
- * equality: a guard armed at 312 on a legacy 311.8–312.4 band is that band's, and a model arming a
- * level a little inside its own zone means the zone.
+ * wake can judge the right premise and arm the right leg. This is the path that actually resolves in
+ * practice, because the model arms its entry guard AT the authored price — so the match is exact by
+ * construction rather than by luck.
  *
- * Null when the level belongs to no zone — a line the model drew somewhere the plan does not reach.
- * That is a legitimate wake and deliberately NOT an entry: `_applyVerdict` only fires with a zone,
- * so a read woken here can re-map the setup (`edit`) but can never open a position with no leg
- * behind it and no size to take. Pure.
+ * Null when the level belongs to no leg — a line the model drew somewhere the plan does not reach.
+ * That is a legitimate wake and deliberately not an entry level: a read woken here can re-map the
+ * setup (`edit`), and an `enter` it returns fires on the scenario's first unfilled leg (`firingLeg`)
+ * rather than on a line with no size behind it. Pure.
  */
 export function _hitFromGuard(setup, woke) {
     const lvl = toNum(woke?.price)
     if (!Number.isFinite(lvl)) return null
     for (const sc of liveScenarios(setup)) {
-        const zone = (sc.entry_zones ?? []).find(z => lvl >= z.lower && lvl <= z.upper)
-        if (zone) return { scenario: sc, zone }
+        const leg = (sc.entry_legs ?? []).find(z => legPrice(z) === lvl)
+        if (leg) return { scenario: sc, leg }
     }
     return null
 }
@@ -67,19 +77,19 @@ export function liveScenarios(setup) {
 }
 
 /**
- * The gate across a setup's rival premises: the first LIVE scenario whose entry zone contains price.
- * Returns `{ scenario, zone }`, because everything downstream needs both — the zone to report, and
+ * The gate across a setup's rival premises: the first LIVE scenario with an entry leg AT price.
+ * Returns `{ scenario, leg }`, because everything downstream needs both — the leg to report, and
  * the scenario to know which conditions to judge, which stop to place and which size to take.
  *
- * Scenarios are ordered as authored, so a primary declared first wins a tie against a rival whose
- * zone overlaps it. Overlapping rivals are a build-time smell, not a runtime decision to agonise
- * over: whichever premise the user wrote first is the one they meant.
+ * Scenarios are ordered as authored, so a primary declared first wins a tie against a rival drawn at
+ * the same price. Two premises entering at one level is a build-time smell, not a runtime decision to
+ * agonise over: whichever the user wrote first is the one they meant.
  */
 export function scenarioGate(setup, price) {
     if (!Number.isFinite(price)) return null
     for (const scenario of liveScenarios(setup)) {
-        const zone = zoneGate(scenario.entry_zones, price)
-        if (zone) return { scenario, zone }
+        const leg = legGate(scenario.entry_legs, price)
+        if (leg) return { scenario, leg }
     }
     return null
 }
@@ -136,8 +146,8 @@ export function metricsSet(m) {
 
 // ─── The validity gate ─────────────────────────────────────────────────────────
 //
-// The SECOND arithmetic question every wake asks, alongside "is price in a zone?". Without it the
-// only thing Talos can ever say while price is far away is "outside my zones, checking back in
+// The SECOND arithmetic question every wake asks, alongside "is price at a leg?". Without it the
+// only thing Talos can ever say while price is far away is "nowhere near my levels, checking back in
 // 30m" — forever, on a setup whose premise died an hour ago.
 //
 // The two edges are NOT the same event, and collapsing them loses the whole point (long shown;

@@ -24,7 +24,7 @@
 // This is deliberately small. Earlier iterations grew `unarmed`, `watching` and `ready` as second
 // spellings of `waiting`, `looking` and `hit`, and every one of them produced the same bug: a gate
 // somewhere kept testing the old word and silently matched nothing. Two states that differ only in
-// a DETAIL belong in a field, not a status — price being inside a zone is `armed_zone_id`, not a
+// a DETAIL belong in a field, not a status — price being inside a zone is `armed_leg_id`, not a
 // lifecycle rung.
 //
 // A plan that goes stale before it ever enters is NOT a lifecycle state either — that is the
@@ -97,7 +97,7 @@ export const isInvalidated = (status) => status === INVALIDATION.FIRED
  *   • idea  — the full ladder. `resting` is idea-only: a stop-market entry actually rests at the
  *     broker, which is materially different from being watched.
  *   • setup — no `resting` (a zone cannot rest as a broker order). Price sitting inside a zone is
- *     `armed_zone_id` on a `looking` setup, not a status of its own.
+ *     `armed_leg_id` on a `looking` setup, not a status of its own.
  *   • call  — same as setup. A thesis going stale pre-entry is the INVALIDATION axis, not a status.
  */
 export const STATUSES_BY_KIND = {

@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-    normalizeZone, normalizeZones, scenarioQuantity,
+    normalizeLeg, normalizeLegs, scenarioQuantity,
     normalizeConditions, normalizeSymbols, normalizeValidity, validityProblems, rangeProblems,
     normalizeSetup, setupReadiness, computeRR, TF_RUNGS,
     normalizePaceRungs, paceRungs, resolveRung, defaultReadMode, normalizeWatch,
@@ -113,44 +113,47 @@ test('watch is NULL when there is nothing a numbers-only pass could check', () =
     }
 })
 
-// ─── Zones ────────────────────────────────────────────────────────────────────
+// ─── Legs ─────────────────────────────────────────────────────────────────────
+//
+// A LEG IS A PRICE (2026-09-24). The three tests that used to live here — edges sorted, one edge
+// mirroring the other, a band surviving normalisation — described the `{lower, upper}` shape and
+// went with it. What replaces them is narrower on purpose: there is one number, it is either there
+// or it is not, and the only failure left is an unpriced leg.
 
-test('zone edges are sorted, so a flipped lower/upper is still monitorable', () => {
-    const z = normalizeZone({ lower: 240, upper: 238 }, 0, 'ez')
-    assert.equal(z.lower, 238)
-    assert.equal(z.upper, 240)
-})
-
-test('a single price collapses to a zero-width zone rather than being dropped', () => {
-    // Dropping it would silently lose the user's stop — worse than monitoring an exact level.
-    const z = normalizeZone({ price: 235.5, quantity: 10 }, 0, 'sz')
-    assert.equal(z.lower, 235.5)
-    assert.equal(z.upper, 235.5)
+test('a leg is its price — the authored spelling, stored as authored', () => {
+    const z = normalizeLeg({ price: 235.5, quantity: 10 }, 0, 'sz')
+    assert.equal(z.price, 235.5)
     assert.equal(z.quantity, 10)
+    assert.equal(z.lower, undefined, 'no edges survive anywhere in the document')
+    assert.equal(z.upper, undefined)
 })
 
-test('one missing edge mirrors the other instead of producing NaN', () => {
-    assert.deepEqual(
-        [normalizeZone({ lower: 100 }, 0, 'ez').upper, normalizeZone({ upper: 100 }, 0, 'ez').lower],
-        [100, 100],
-    )
+test('a leg with no usable price is DROPPED, never stored half-formed', () => {
+    // Dropping is the safe direction here and the readiness gate is what reports it: a leg stored
+    // with a null price is a stop the UI draws and the broker never rests.
+    assert.equal(normalizeLeg({ note: 'somewhere around the shelf' }, 0, 'ez'), null)
+    assert.equal(normalizeLeg(null, 0, 'ez'), null)
+    assert.equal(normalizeLeg({ price: 'abc' }, 0, 'ez'), null)
+    assert.equal(normalizeLegs([{ price: 'abc' }, { price: 1 }], 'ez').length, 1)
 })
 
-test('a zone with no usable price is dropped', () => {
-    assert.equal(normalizeZone({ note: 'somewhere around the shelf' }, 0, 'ez'), null)
-    assert.equal(normalizeZone(null, 0, 'ez'), null)
-    assert.deepEqual(normalizeZones([{ lower: 'abc' }, { lower: 1, upper: 2 }], 'ez').length, 1)
+test('THE BAND SHAPE IS NOT ACCEPTED — a pre-wipe document has no legs, not half a leg', () => {
+    // Every setup was deleted when the shape changed (2026-09-24), so nothing in Mongo carries
+    // edges. Reading them here "just in case" is how a deleted shape comes back: the normaliser is
+    // the one door, and a document that comes through it either speaks prices or is empty.
+    assert.equal(normalizeLeg({ lower: 238, upper: 238 }, 0, 'ez'), null)
+    assert.equal(normalizeLeg({ lower: 237.8, upper: 238.6 }, 0, 'ez'), null)
 })
 
-test('zone ids are auto-assigned by position when the model omits them', () => {
-    const zones = normalizeZones([{ lower: 1, upper: 2 }, { lower: 3, upper: 4, id: 'custom' }], 'ez')
-    assert.deepEqual(zones.map(z => z.id), ['ez1', 'custom'])
+test('leg ids are auto-assigned by position when the model omits them', () => {
+    const legs = normalizeLegs([{ price: 1 }, { price: 3, id: 'custom' }], 'ez')
+    assert.deepEqual(legs.map(z => z.id), ['ez1', 'custom'])
 })
 
 test('a non-positive or absent quantity becomes null, never 0', () => {
     // 0 would read as "size it at zero"; null reads as "not sized yet" and blocks readiness.
     for (const q of [0, -5, 'abc', undefined]) {
-        assert.equal(normalizeZone({ lower: 1, upper: 2, quantity: q }, 0, 'ez').quantity, null, String(q))
+        assert.equal(normalizeLeg({ price: 1, quantity: q }, 0, 'ez').quantity, null, String(q))
     }
 })
 
@@ -238,7 +241,7 @@ test('validity with no usable edge is null — an absent range, not a broken one
 
 const COHERENT = {
     direction: 'long',
-    stop_zones: [{ lower: 234.8, upper: 235.9 }],
+    stop_legs: [{ price: 234.8 }],
     validity:   { lower: 235.5, upper: 244, approach: 246, on_break: 'revise' },
 }
 
@@ -256,7 +259,7 @@ test('a validity floor below the stop is refused on a long', () => {
 test('a validity ceiling above the stop is refused on a short', () => {
     const p = rangeProblems({
         direction: 'short',
-        stop_zones: [{ lower: 244, upper: 245 }],
+        stop_legs: [{ price: 244 }],
         validity:   { lower: 230, upper: 250, approach: 228 },
     })
     assert.equal(p.length, 1)
@@ -276,12 +279,12 @@ test('coherence is per scenario, and the failing one is named', () => {
         conditions: [{ id: 'c1', text: 'SMH leading' }],
         scenarios: [
             { id: 's1', name: 'false break',
-              entry_zones: [{ lower: 237.8, upper: 238.6, quantity: 100 }],
-              stop_zones:  [{ lower: 234.8, upper: 235.9 }],
+              entry_legs: [{ price: 238.6, quantity: 100 }],
+              stop_legs:  [{ price: 234.8 }],
               validity:    { lower: 235.5, upper: 244 } },
             { id: 's2', name: 'break and go',
-              entry_zones: [{ lower: 244, upper: 244.9, quantity: 60 }],
-              stop_zones:  [{ lower: 241, upper: 241.8 }],
+              entry_legs: [{ price: 244.9, quantity: 60 }],
+              stop_legs:  [{ price: 241.8 }],
               validity:    { lower: 238, upper: 250 } },   // below ITS stop, fine against s1's
         ],
     })
@@ -295,9 +298,9 @@ test('readiness reports coherence problems separately from missing fields', () =
     const r = setupReadiness(normalizeSetup({
         asset: 'NVDA', direction: 'long', type: 'swing',
         conditions:  [{ id: 'c1', text: 'CHoCH up on the 15m' }],
-        entry_zones: [{ lower: 237.8, upper: 238.6, quantity: 100 }],
-        stop_zones:  [{ lower: 234.8, upper: 235.9 }],
-        tp_zones:    [{ lower: 246, upper: 247.2 }],
+        entry_legs: [{ price: 238.6, quantity: 100 }],
+        stop_legs:  [{ price: 234.8 }],
+        target_legs:    [{ price: 246 }],
         validity:    { lower: 230, upper: 244 },
     }), true)
     assert.equal(r.ready, false)
@@ -311,9 +314,9 @@ const DRAFT = {
     asset: 'nvda', direction: 'long', type: 'swing', trade_mode: 'smc', timeframe: '1hr',
     thesis: 'Sweep and reclaim of the shelf.',
     conditions: [{ id: 'c1', text: 'CHoCH up on the 15m', weight: 'primary' }],
-    entry_zones: [{ lower: 237.8, upper: 238.6, quantity: 100 }],
-    stop_zones:  [{ lower: 234.8, upper: 235.9, quantity: 100 }],
-    tp_zones:    [{ lower: 246.0, upper: 247.2, quantity: 100 }],
+    entry_legs: [{ price: 238.6, quantity: 100 }],
+    stop_legs:  [{ price: 234.8, quantity: 100 }],
+    target_legs:    [{ price: 246.0, quantity: 100 }],
     valid_until: '2026-08-08T20:00:00Z',
 }
 
@@ -358,7 +361,7 @@ test('dates normalise to Z-ISO so the poll loop can compare them lexicographical
 test('a half-built setup normalises without throwing — it renders every turn', () => {
     const s = normalizeSetup({ asset: 'AAPL' })
     assert.equal(s.asset, 'AAPL')
-    assert.deepEqual(s.entry_zones, [])
+    assert.deepEqual(s.entry_legs, [])
     assert.equal(s.quantity, null)
     assert.equal(normalizeSetup(null), null)
     assert.equal(normalizeSetup([]), null)
@@ -377,13 +380,13 @@ test('readiness names what is missing, so the UI never shows a dead button', () 
 })
 
 test('a setup with no stop zone is never ready', () => {
-    const { ready, missing } = setupReadiness(normalizeSetup({ ...DRAFT, stop_zones: [] }), true)
+    const { ready, missing } = setupReadiness(normalizeSetup({ ...DRAFT, stop_legs: [] }), true)
     assert.equal(ready, false)
-    assert.ok(missing.includes('stop zone'))
+    assert.ok(missing.includes('stop price'))
 })
 
 test('an unsized setup is never ready', () => {
-    const s = normalizeSetup({ ...DRAFT, entry_zones: [{ lower: 237.8, upper: 238.6 }] })
+    const s = normalizeSetup({ ...DRAFT, entry_legs: [{ price: 238.6 }] })
     assert.ok(setupReadiness(s, true).missing.includes('quantity'))
 })
 
@@ -394,26 +397,34 @@ test('planned rr is measured from the WORST entry edge, never the midpoint', () 
     assert.equal(computeRR(normalizeSetup(DRAFT)), 1.95)
 })
 
-test('the worst-edge rule is strictly more pessimistic than the midpoint', () => {
-    const s = normalizeSetup(DRAFT)
-    const mid = computeRR(s, (s.entry_zones[0].lower + s.entry_zones[0].upper) / 2)
-    assert.ok(computeRR(s) < mid, 'the plan must not flatter itself')
+test('THE PESSIMISM THAT SURVIVED THE BANDS — the furthest stop, the nearest target', () => {
+    // The worst-entry-edge term is gone with the edges: an entry is the one price the user named,
+    // so there is no favourable side of it left to decline. The other two halves of "never flatter"
+    // are not about width and stay exactly as they were.
+    const s = normalizeSetup({ ...DRAFT,
+        stop_legs:   [{ price: 236.5 }, { price: 234.8 }],
+        target_legs: [{ price: 246.0, quantity: 50 }, { price: 260.0, quantity: 50 }] })
+    assert.equal(stopEdge(s), 234.8, 'risk runs to the FURTHEST stop')
+    assert.equal(targetEdges(s)[0], 246.0, 'reward to the NEAREST target')
+    // Quoting the far target and the near stop is the flattering version; it must be worse.
+    const flattering = (260.0 - 238.6) / (238.6 - 236.5)
+    assert.ok(computeRR(s) < flattering, 'the plan must not flatter itself')
 })
 
 test('rr mirrors for a short', () => {
     const short = normalizeSetup({
         ...DRAFT, direction: 'short',
-        entry_zones: [{ lower: 237.8, upper: 238.6, quantity: 100 }],
-        stop_zones:  [{ lower: 241.0, upper: 242.0, quantity: 100 }],
-        tp_zones:    [{ lower: 230.0, upper: 231.0, quantity: 100 }],
+        entry_legs: [{ price: 238.6, quantity: 100 }],
+        stop_legs:  [{ price: 241.0, quantity: 100 }],
+        target_legs:    [{ price: 230.0, quantity: 100 }],
     })
-    // worst fill 237.8, stop 242.0 → risk 4.2; target 231.0 → reward 6.8 ⇒ 1.62
-    assert.equal(computeRR(short), 1.62)
+    // entry 238.6, stop 241.0 → risk 2.4; target 230.0 → reward 8.6 ⇒ 3.58
+    assert.equal(computeRR(short), 3.58)
 })
 
-test('live rr overrides the zone edge with the actual fill', () => {
+test('live rr overrides the planned entry with the actual fill', () => {
     const s = normalizeSetup(DRAFT)
-    // Entering at the good edge is a better trade than the plan advertised.
+    // Filling below your own entry on a long is a better trade than the plan advertised.
     assert.ok(computeRR(s, 237.8) > computeRR(s))
 })
 
@@ -422,8 +433,8 @@ test('rr picks the NEAREST target and the WIDEST stop, whatever order they were 
     // hand this setup the rr of its far target and overstate the trade.
     const jumbled = normalizeSetup({
         ...DRAFT,
-        tp_zones:   [{ lower: 260, upper: 261, quantity: 50 }, { lower: 246, upper: 247.2, quantity: 50 }],
-        stop_zones: [{ lower: 236, upper: 236.5 }, { lower: 234.8, upper: 235.9 }],
+        target_legs:   [{ price: 260, quantity: 50 }, { price: 246, quantity: 50 }],
+        stop_legs: [{ price: 236.5 }, { price: 234.8 }],
     })
     // nearest tp 246, widest stop 234.8, worst entry 238.6 → identical to the single-leg case.
     assert.equal(computeRR(jumbled), 1.95)
@@ -434,18 +445,18 @@ test('rr picks the NEAREST target and the WIDEST stop, whatever order they were 
 // reasoned about them, so `[0]` is a coin flip: it would hand the gate the near stop instead of the
 // working one, and fire a partial ladder in whatever order the sentences came out.
 
-test('stopEdge takes the WIDEST edge — the most risk the plan actually admits', () => {
+test('stopEdge takes the FURTHEST stop — the most risk the plan actually admits', () => {
     const long = normalizeSetup({
         ...DRAFT,
-        stop_zones: [{ lower: 236, upper: 236.5 }, { lower: 234.8, upper: 235.9 }],
+        stop_legs: [{ price: 236.5 }, { price: 234.8 }],
     })
-    assert.equal(stopEdge(long), 234.8, 'the far edge of the far zone, not stop_zones[0]')
+    assert.equal(stopEdge(long), 234.8, 'the furthest stop, not stop_legs[0]')
 
     // Mirrored on a short: widest means the HIGHEST edge, because that is where the risk ends.
     const short = normalizeSetup({ ...DRAFT, direction: 'short',
-        entry_zones: [{ lower: 238, upper: 238.6, quantity: 100 }],
-        stop_zones:  [{ lower: 240, upper: 240.5 }, { lower: 241, upper: 242.2 }],
-        tp_zones:    [{ lower: 230, upper: 231, quantity: 100 }],
+        entry_legs: [{ price: 238.6, quantity: 100 }],
+        stop_legs:  [{ price: 240.5 }, { price: 242.2 }],
+        target_legs: [{ price: 230, quantity: 100 }],
     })
     assert.equal(stopEdge(short), 242.2)
 })
@@ -453,7 +464,7 @@ test('stopEdge takes the WIDEST edge — the most risk the plan actually admits'
 test('stopEdge is null when nothing is authored, rather than 0', () => {
     // A 0 here would read as "the stop is at zero", i.e. infinite risk on a long — and the gate
     // would then never see price press it.
-    assert.equal(stopEdge(normalizeSetup({ ...DRAFT, stop_zones: [] })), null)
+    assert.equal(stopEdge(normalizeSetup({ ...DRAFT, stop_legs: [] })), null)
     assert.equal(stopEdge(null), null)
 })
 
@@ -461,40 +472,39 @@ test('targetEdges come back NEAREST-FIRST — the order price reaches them', () 
     // That is also the order a partial ladder must fire in. Array order would take the far leg first.
     const long = normalizeSetup({
         ...DRAFT,
-        tp_zones: [{ lower: 260, upper: 261, quantity: 50 }, { lower: 246, upper: 247.2, quantity: 50 }],
+        target_legs: [{ price: 260, quantity: 50 }, { price: 246, quantity: 50 }],
     })
     assert.deepEqual(targetEdges(long), [246, 260], 'nearest first, despite being emitted second')
 
     const short = normalizeSetup({ ...DRAFT, direction: 'short',
-        entry_zones: [{ lower: 238, upper: 238.6, quantity: 100 }],
-        stop_zones:  [{ lower: 241, upper: 242 }],
-        tp_zones:    [{ lower: 220, upper: 221, quantity: 50 }, { lower: 232, upper: 233, quantity: 50 }],
+        entry_legs: [{ price: 238.6, quantity: 100 }],
+        stop_legs:  [{ price: 241 }],
+        target_legs: [{ price: 221, quantity: 50 }, { price: 233, quantity: 50 }],
     })
     assert.deepEqual(targetEdges(short), [233, 221], 'a short reaches the HIGHEST target first')
 })
 
-test('targetLevels reads a tp zone as the price the limit rests at', () => {
-    // A level authored today is zero-width, so this is simply "the target". On a LEGACY band it is
-    // the far side — the level such a document was already resting at, so a deploy moves nothing.
+test('targetLevels reads a target leg as the price the limit rests at', () => {
+    // It IS the target. This used to have a third case — a legacy band resting at its far side,
+    // which is also where `targetLevels` and `targetEdges` were allowed to disagree (rr read the
+    // near edge so it could never flatter). One price per leg, so they agree by construction.
     const long = normalizeSetup({ ...DRAFT, direction: 'long',
-        tp_zones: [{ price: 260 }, { price: 245 }] })
-    assert.deepEqual(long.scenarios[0].tp_zones.map(z => [z.lower, z.upper]), [[260, 260], [245, 245]],
-        'a bare price collapses to a zero-width level')
+        target_legs: [{ price: 260 }, { price: 245 }] })
+    assert.deepEqual(long.scenarios[0].target_legs.map(z => z.price), [260, 245], 'stored as authored')
     assert.deepEqual(targetLevels(long).map(t => t.target), [245, 260], 'nearest-first')
+    assert.deepEqual(targetEdges(long), targetLevels(long).map(t => t.target),
+        'what rr measures and what rests are now one number')
 
-    const short = normalizeSetup({ ...DRAFT, direction: 'short', tp_zones: [{ price: 220 }, { price: 232 }] })
+    const short = normalizeSetup({ ...DRAFT, direction: 'short', target_legs: [{ price: 220 }, { price: 232 }] })
     assert.deepEqual(targetLevels(short).map(t => t.target), [232, 220], 'a short reaches the HIGHEST target first')
-
-    const legacy = normalizeSetup({ ...DRAFT, direction: 'long', tp_zones: [{ lower: 258, upper: 260 }] })
-    assert.deepEqual(targetLevels(legacy).map(t => t.target), [260], 'a legacy band rests at the far side')
 })
 
 test('a target carries its own conditions, in the same shape an entry condition has', () => {
     // The whole reason there is no exit evaluator: an exit condition is a SENTENCE the model judges,
     // not a tree software resolves. Same normaliser, same three axes, same document-wide id space.
     const s = normalizeSetup({ ...DRAFT, direction: 'long',
-        tp_zones: [{ price: 260, conditions: [{ text: 'only if volume confirms the push', weight: 'primary' }] }] })
-    const [tp] = s.scenarios[0].tp_zones
+        target_legs: [{ price: 260, conditions: [{ text: 'only if volume confirms the push', weight: 'primary' }] }] })
+    const [tp] = s.scenarios[0].target_legs
     assert.equal(tp.conditions.length, 1)
     assert.equal(tp.conditions[0].text, 'only if volume confirms the push')
     assert.equal(tp.conditions[0].weight, 'primary')
@@ -508,19 +518,19 @@ test('a leg condition claims its id from the DOCUMENT-WIDE set, not its own list
     // with a scenario's would let one latch answer for the other.
     const s = normalizeSetup({ ...DRAFT, direction: 'long',
         conditions: [{ id: 'x1', text: 'regime is risk-on' }],
-        tp_zones:   [{ price: 260, conditions: [{ id: 'x1', text: 'volume confirms' }] }],
-        stop_zones: [{ price: 234, conditions: [{ id: 'x1', text: 'closes below the 4hr VWAP' }] }],
+        target_legs:   [{ price: 260, conditions: [{ id: 'x1', text: 'volume confirms' }] }],
+        stop_legs: [{ price: 234, conditions: [{ id: 'x1', text: 'closes below the 4hr VWAP' }] }],
     })
     const ids = [
         ...s.conditions.map(c => c.id),
-        ...s.scenarios[0].tp_zones.flatMap(z => z.conditions.map(c => c.id)),
-        ...s.scenarios[0].stop_zones.flatMap(z => z.conditions.map(c => c.id)),
+        ...s.scenarios[0].target_legs.flatMap(z => z.conditions.map(c => c.id)),
+        ...s.scenarios[0].stop_legs.flatMap(z => z.conditions.map(c => c.id)),
     ]
     assert.equal(new Set(ids).size, ids.length, `ids collided: ${ids.join(', ')}`)
 })
 
 test('a zero-width tp zone is a level with nothing to discuss', () => {
-    const s = normalizeSetup({ ...DRAFT, direction: 'long', tp_zones: [{ lower: 246, upper: 246 }] })
+    const s = normalizeSetup({ ...DRAFT, direction: 'long', target_legs: [{ price: 246 }] })
     assert.deepEqual(targetLevels(s), [{ target: 246, quantity: null, conditions: [] }])
 })
 
@@ -530,16 +540,16 @@ test('a setup cannot be generated without a target PRICE', () => {
     const base = {
         asset: 'NVDA', direction: 'long', type: 'swing',
         conditions:  [{ id: 'c1', text: 'CHoCH up on the 15m' }],
-        entry_zones: [{ lower: 237.8, upper: 238.6, quantity: 100 }],
-        stop_zones:  [{ lower: 234.8, upper: 235.9 }],
+        entry_legs: [{ price: 238.6, quantity: 100 }],
+        stop_legs:  [{ price: 234.8 }],
     }
     assert.match(setupReadiness(normalizeSetup(base), true).missing.join(' '), /target price/)
 
     // A band of nulls is a zone to the array and no price to the broker.
-    const blank = setupReadiness(normalizeSetup({ ...base, tp_zones: [{ lower: null, upper: null }] }), true)
+    const blank = setupReadiness(normalizeSetup({ ...base, target_legs: [{ lower: null, upper: null }] }), true)
     assert.match(blank.missing.join(' '), /target price/)
 
-    const ok = setupReadiness(normalizeSetup({ ...base, tp_zones: [{ lower: 246, upper: 247.2 }] }), true)
+    const ok = setupReadiness(normalizeSetup({ ...base, target_legs: [{ price: 246 }] }), true)
     assert.deepEqual(ok.missing, [])
     assert.equal(ok.ready, true)
 })
@@ -549,10 +559,10 @@ test('a missing target names WHICH premise is short of one', () => {
         asset: 'NVDA', direction: 'long', type: 'swing',
         conditions: [{ id: 'c1', text: 'SMH leading' }],
         scenarios: [
-            { id: 's1', name: 'false break', entry_zones: [{ lower: 237.8, upper: 238.6, quantity: 100 }],
-              stop_zones: [{ lower: 234.8, upper: 235.9 }], tp_zones: [{ lower: 246, upper: 247.2 }] },
-            { id: 's2', name: 'break and go', entry_zones: [{ lower: 244, upper: 244.9, quantity: 60 }],
-              stop_zones: [{ lower: 241, upper: 241.8 }] },
+            { id: 's1', name: 'false break', entry_legs: [{ price: 238.6, quantity: 100 }],
+              stop_legs: [{ price: 234.8 }], target_legs: [{ price: 246 }] },
+            { id: 's2', name: 'break and go', entry_legs: [{ price: 244.9, quantity: 60 }],
+              stop_legs: [{ price: 241.8 }] },
         ],
     })
     assert.deepEqual(setupReadiness(two, true).missing, ['target price on break and go'])
@@ -561,13 +571,13 @@ test('a missing target names WHICH premise is short of one', () => {
 test('targetEdges is empty, never [null], when none is authored', () => {
     // The fill path maps this into position_state.targets — a null in there would become a target
     // the gate compares price against forever.
-    assert.deepEqual(targetEdges(normalizeSetup({ ...DRAFT, tp_zones: [] })), [])
+    assert.deepEqual(targetEdges(normalizeSetup({ ...DRAFT, target_legs: [] })), [])
     assert.deepEqual(targetEdges(null), [])
 })
 
 test('rr is null when a leg is missing or the entry sits inside its own stop', () => {
-    assert.equal(computeRR(normalizeSetup({ ...DRAFT, tp_zones: [] })), null)
-    assert.equal(computeRR(normalizeSetup({ ...DRAFT, stop_zones: [{ lower: 239, upper: 240 }] })), null)
+    assert.equal(computeRR(normalizeSetup({ ...DRAFT, target_legs: [] })), null)
+    assert.equal(computeRR(normalizeSetup({ ...DRAFT, stop_legs: [{ price: 239 }] })), null)
 })
 
 // ─── scenarios ────────────────────────────────────────────────────────────────
@@ -581,14 +591,14 @@ const RIVALS = {
     scenarios: [
         { id: 's1', name: 'false break',
           conditions:  [{ text: 'sweep of 238 that closes back inside', weight: 'primary', mode: 'measured' }],
-          entry_zones: [{ lower: 237.8, upper: 238.6, quantity: 100 }],
-          stop_zones:  [{ lower: 234.8, upper: 235.9 }],
-          tp_zones:    [{ lower: 246.0, upper: 247.2 }] },
+          entry_legs: [{ price: 238.6, quantity: 100 }],
+          stop_legs:  [{ price: 234.8 }],
+          target_legs:    [{ price: 246.0 }] },
         { id: 's2', name: 'break and go',
           conditions:  [{ text: '1hr close above 244 on volume', weight: 'primary', mode: 'measured' }],
-          entry_zones: [{ lower: 244.0, upper: 244.9, quantity: 60 }],
-          stop_zones:  [{ lower: 241.0, upper: 241.8 }],
-          tp_zones:    [{ lower: 252.0, upper: 253.5 }] },
+          entry_legs: [{ price: 244.9, quantity: 60 }],
+          stop_legs:  [{ price: 241.0 }],
+          target_legs:    [{ price: 252.0 }] },
     ],
 }
 
@@ -610,13 +620,13 @@ test('QUANTITY IS NEVER SUMMED ACROSS SCENARIOS — the whole trade, whichever p
 
 test('the document projects ONE scenario for execution — the armed one, else the first', () => {
     const s = normalizeSetup(RIVALS)
-    assert.deepEqual(s.entry_zones, s.scenarios[0].entry_zones, 'pre-arm: the primary')
-    assert.deepEqual(s.stop_zones,  s.scenarios[0].stop_zones)
+    assert.deepEqual(s.entry_legs, s.scenarios[0].entry_legs, 'pre-arm: the primary')
+    assert.deepEqual(s.stop_legs,  s.scenarios[0].stop_legs)
     assert.equal(s.rr, s.scenarios[0].rr)
 
     const armed = normalizeSetup({ ...RIVALS, armed_scenario_id: 's2' })
-    assert.deepEqual(armed.entry_zones, armed.scenarios[1].entry_zones)
-    assert.deepEqual(armed.tp_zones,    armed.scenarios[1].tp_zones)
+    assert.deepEqual(armed.entry_legs, armed.scenarios[1].entry_legs)
+    assert.deepEqual(armed.target_legs,    armed.scenarios[1].target_legs)
 })
 
 test('condition ids are unique across the WHOLE document — one ledger, one key each', () => {
@@ -663,10 +673,10 @@ test('scenario ids collide safely rather than merging two premises', () => {
 // ─── readiness, per scenario ──────────────────────────────────────────────────
 
 test('readiness names WHICH premise is unfinished', () => {
-    const s = normalizeSetup({ ...RIVALS, scenarios: [RIVALS.scenarios[0], { ...RIVALS.scenarios[1], stop_zones: [] }] })
+    const s = normalizeSetup({ ...RIVALS, scenarios: [RIVALS.scenarios[0], { ...RIVALS.scenarios[1], stop_legs: [] }] })
     const { ready, missing } = setupReadiness(s, true)
     assert.equal(ready, false)
-    assert.deepEqual(missing, ['stop zone on break and go'])
+    assert.deepEqual(missing, ['stop price on break and go'])
 })
 
 test('a scenario with no trigger of its own is fine while the root carries one', () => {
@@ -683,9 +693,9 @@ test('a limit setup with no conditions is ready — the price touch IS the trigg
     const s = normalizeSetup({
         asset: 'NVDA', direction: 'long', type: 'swing',
         entry_mode: 'limit',
-        entry_zones: [{ lower: 237.8, upper: 238.6, quantity: 100 }],
-        stop_zones:  [{ lower: 234.8, upper: 235.9 }],
-        tp_zones:    [{ lower: 246, upper: 247.2 }],
+        entry_legs: [{ price: 238.6, quantity: 100 }],
+        stop_legs:  [{ price: 234.8 }],
+        target_legs:    [{ price: 246 }],
     })
     const { missing } = setupReadiness(s, true)
     assert.ok(!missing.some(m => m.includes('condition')), `condition must not be required for limit setups; got: ${missing.join(', ')}`)
@@ -697,7 +707,7 @@ test('two entries in ONE scenario is scaling in — allowed, once every leg carr
     // that still has to hold.
     const s = normalizeSetup({ ...RIVALS, scenarios: [{
         ...RIVALS.scenarios[0],
-        entry_zones: [{ lower: 237.8, upper: 238.6, quantity: 60 }, { lower: 236.2, upper: 236.8, quantity: 40 }],
+        entry_legs: [{ price: 238.6, quantity: 60 }, { price: 236.8, quantity: 40 }],
     }, RIVALS.scenarios[1]] })
     assert.deepEqual(setupReadiness(s, true).missing, [])
 })
@@ -707,7 +717,7 @@ test('a scale-in leg with no size of its own is refused', () => {
     // position on the first print — exactly the failure the old blanket block existed to prevent.
     const s = normalizeSetup({ ...RIVALS, scenarios: [{
         ...RIVALS.scenarios[0],
-        entry_zones: [{ lower: 237.8, upper: 238.6, quantity: 60 }, { lower: 236.2, upper: 236.8 }],
+        entry_legs: [{ price: 238.6, quantity: 60 }, { price: 236.8 }],
     }, RIVALS.scenarios[1]] })
     assert.match(setupReadiness(s, true).missing.join(' '), /size on every entry leg/)
 })
@@ -717,8 +727,8 @@ test('a leg drawn PAST the stop is refused — price could never reach it', () =
     // `adverse`, correctly. It reads like a plan to add twice and can only ever add once.
     const s = normalizeSetup({ ...RIVALS, scenarios: [{
         ...RIVALS.scenarios[0],
-        stop_zones:  [{ lower: 234.8, upper: 235.9 }],
-        entry_zones: [{ lower: 237.8, upper: 238.6, quantity: 60 }, { lower: 231, upper: 232, quantity: 40 }],
+        stop_legs:  [{ price: 234.8 }],
+        entry_legs: [{ price: 238.6, quantity: 60 }, { price: 232, quantity: 40 }],
     }, RIVALS.scenarios[1]] })
     assert.match(setupReadiness(s, true).problems.join(' '), /past the stop/)
 })
@@ -733,7 +743,7 @@ test('a pre-scenario document becomes exactly one scenario, keeping its zone ids
     const s = normalizeSetup({ ...DRAFT, validity: { lower: 234, upper: 244, on_break: 'close' } })
     assert.equal(s.scenarios.length, 1)
     assert.equal(s.scenarios[0].id, 's1')
-    assert.deepEqual(s.scenarios[0].entry_zones, s.entry_zones, 'the projection matches the wrap')
+    assert.deepEqual(s.scenarios[0].entry_legs, s.entry_legs, 'the projection matches the wrap')
     assert.equal(s.scenarios[0].validity.on_break, 'close', 'the root range moves down with it')
     assert.equal(s.validity.on_break, 'close', 'and is projected back up for the FE')
 })
@@ -742,7 +752,7 @@ test('re-normalising an already-scenario document is idempotent', () => {
     const once  = normalizeSetup(RIVALS)
     const twice = normalizeSetup(once)
     assert.deepEqual(twice.scenarios, once.scenarios)
-    assert.deepEqual(twice.entry_zones, once.entry_zones)
+    assert.deepEqual(twice.entry_legs, once.entry_legs)
 })
 
 // `Number(null)` is 0, and this module re-normalises its OWN output — every streamed turn, every
@@ -770,62 +780,64 @@ test('an absent validity floor does not become a floor of 0', () => {
     assert.deepEqual(validityProblems(twice), [])
 })
 
-test('an unsized zone does not become a zone at 0 on the second pass', () => {
-    const once  = normalizeZone({ lower: null, upper: 238.6, quantity: null }, 0, 'ez')
-    const twice = normalizeZone(once, 0, 'ez')
-    assert.deepEqual([twice.lower, twice.upper], [238.6, 238.6], 'a one-edged band stays that level')
-    assert.equal(twice.quantity, null)
+test('an unsized leg does not become a leg at 0 on the second pass', () => {
+    // Number(null) is 0, and this module re-normalises its own output on every streamed turn.
+    const once  = normalizeLeg({ price: 238.6, quantity: null }, 0, 'ez')
+    const twice = normalizeLeg(once, 0, 'ez')
+    assert.equal(twice.price, 238.6, 'the level survives the round trip')
+    assert.equal(twice.quantity, null, 'and an absent size stays absent')
 })
 
-// ─── plan edges: chosen by PRICE, never by array position ─────────────────────
-// The model emits zones in whatever order it reasoned about them. computeRR already depended on
+// ─── plan levels: chosen by PRICE, never by array position ────────────────────
+// The model emits legs in whatever order it reasoned about them. computeRR already depended on
 // this rule; the position gate now does too, so it lives in one place rather than being re-derived
 // by every caller that needs "which stop am I actually working against".
 
-test('the working stop is the WIDEST edge, whatever order the zones arrived in', () => {
-    // Widest = most risk the plan admits. Taking the nearest would understate risk and overstate R.
-    const long = { direction: 'long', stop_zones: [{ lower: 96, upper: 97 }, { lower: 94, upper: 95 }] }
+test('the working stop is the FURTHEST, whatever order the legs arrived in', () => {
+    // Furthest = most risk the plan admits. Taking the nearest would understate risk and overstate R.
+    const long = { direction: 'long', stop_legs: [{ price: 96 }, { price: 94 }] }
     assert.equal(stopEdge(long), 94)
 
-    const short = { direction: 'short', stop_zones: [{ lower: 103, upper: 104 }, { lower: 105, upper: 106 }] }
-    assert.equal(stopEdge(short), 106, 'a short works against the HIGH edge')
+    const short = { direction: 'short', stop_legs: [{ price: 103 }, { price: 105 }] }
+    assert.equal(stopEdge(short), 105, 'a short works against the HIGHEST stop')
 })
 
-test('a long and a short read opposite edges of the same band', () => {
-    // The band is where price ARRIVES: a long is stopped at the low side, a short at the high side.
-    const zones = [{ lower: 94, upper: 95 }]
-    assert.equal(stopEdge({ direction: 'long',  stop_zones: zones }), 94)
-    assert.equal(stopEdge({ direction: 'short', stop_zones: zones }), 95)
+test('DIRECTION PICKS A LEG, NEVER AN EDGE — the level itself is the same number either way', () => {
+    // This replaces "a long and a short read opposite edges of the same band". A leg has one price,
+    // so direction no longer changes what a given leg IS — only which of several is furthest.
+    const legs = [{ price: 94 }]
+    assert.equal(stopEdge({ direction: 'long',  stop_legs: legs }), 94)
+    assert.equal(stopEdge({ direction: 'short', stop_legs: legs }), 94)
 })
 
 test('targets come back nearest-first, which is the order partials fire in', () => {
-    const long = { direction: 'long', tp_zones: [{ lower: 120, upper: 121 }, { lower: 105, upper: 106 }] }
+    const long = { direction: 'long', target_legs: [{ price: 120 }, { price: 105 }] }
     assert.deepEqual(targetEdges(long), [105, 120], 'authored far-then-near, returned near-then-far')
 
-    const short = { direction: 'short', tp_zones: [{ lower: 80, upper: 81 }, { lower: 95, upper: 96 }] }
+    const short = { direction: 'short', target_legs: [{ price: 81 }, { price: 96 }] }
     assert.deepEqual(targetEdges(short), [96, 81], 'a short falls INTO its targets')
 })
 
-test('no zones authored → null stop and an empty ladder, never a thrown or a NaN', () => {
+test('no legs authored → null stop and an empty ladder, never a thrown or a NaN', () => {
     assert.equal(stopEdge({ direction: 'long' }), null)
     assert.equal(stopEdge(null), null)
     assert.deepEqual(targetEdges({ direction: 'long' }), [])
     assert.deepEqual(targetEdges(null), [])
 })
 
-test('an unusable edge is skipped rather than poisoning the selection', () => {
-    // One malformed zone must not make Math.min return NaN and take the whole gate down with it.
-    const s = { direction: 'long', stop_zones: [{ lower: null, upper: 97 }, { lower: 94, upper: 95 }] }
+test('an unpriced leg is skipped rather than poisoning the selection', () => {
+    // One malformed leg must not make Math.min return NaN and take the whole gate down with it.
+    const s = { direction: 'long', stop_legs: [{ note: 'around the shelf' }, { price: 94 }] }
     assert.equal(stopEdge(s), 94)
 })
 
-test('computeRR still quotes the widest stop against the nearest target', () => {
+test('computeRR still quotes the furthest stop against the nearest target', () => {
     // The extraction must not change the number: rr is what the plan advertises to the user.
     const setup = {
         direction: 'long',
-        entry_zones: [{ lower: 99, upper: 100 }],
-        stop_zones:  [{ lower: 96, upper: 97 }, { lower: 94, upper: 95 }],   // widest = 94 → risk 6
-        tp_zones:    [{ lower: 120, upper: 121 }, { lower: 106, upper: 107 }], // nearest = 106 → reward 6
+        entry_legs: [{ price: 100 }],
+        stop_legs:   [{ price: 96 }, { price: 94 }],    // furthest = 94 → risk 6
+        target_legs: [{ price: 120 }, { price: 106 }],  // nearest  = 106 → reward 6
     }
     assert.equal(computeRR(setup), 1)
 })
@@ -856,8 +868,8 @@ test('two legs weight by SIZE, not by count', () => {
 test('legs accumulate in fill order and keep what they were', () => {
     // The average is derived; the legs are the record. A user asking "where did I get in" wants both.
     const e = addEntryLeg(addEntryLeg(null,
-        { zone_id: 'ez1', price: 50, quantity: 10 }), { zone_id: 'ez2', price: 60, quantity: 10 })
-    assert.deepEqual(e.legs.map(l => l.zone_id), ['ez1', 'ez2'])
+        { leg_id: 'ez1', price: 50, quantity: 10 }), { leg_id: 'ez2', price: 60, quantity: 10 })
+    assert.deepEqual(e.legs.map(l => l.leg_id), ['ez1', 'ez2'])
     assert.equal(e.fill_price, 55)
 })
 
@@ -897,7 +909,7 @@ test('the average is rounded, so a third of a cent never reaches a card', () => 
 // on with half the plan confirmed — and sizing the protective orders to match.
 
 test('a leg is sized by its own zone', () => {
-    const sc = { entry_zones: [{ id: 'ez1', quantity: 60 }, { id: 'ez2', quantity: 40 }] }
+    const sc = { entry_legs: [{ id: 'ez1', quantity: 60 }, { id: 'ez2', quantity: 40 }] }
     assert.equal(legQuantity(sc, 'ez1'), 60)
     assert.equal(legQuantity(sc, 'ez2'), 40)
 })
@@ -905,44 +917,44 @@ test('a leg is sized by its own zone', () => {
 test('with ONE entry zone the leg and the premise agree — which is why this is inert today', () => {
     // scenarioQuantity of a single zone IS that zone's quantity, so nothing changes until a
     // premise actually has two legs.
-    const sc = { entry_zones: [{ id: 'ez1', quantity: 100 }] }
-    assert.equal(legQuantity(sc, 'ez1'), scenarioQuantity(sc.entry_zones))
+    const sc = { entry_legs: [{ id: 'ez1', quantity: 100 }] }
+    assert.equal(legQuantity(sc, 'ez1'), scenarioQuantity(sc.entry_legs))
 })
 
 test('an unsized or unknown zone yields null, so the caller falls back to the premise total', () => {
     // Never 0 — a zero would place nothing and read as a successful entry.
-    assert.equal(legQuantity({ entry_zones: [{ id: 'ez1' }] }, 'ez1'), null)
-    assert.equal(legQuantity({ entry_zones: [{ id: 'ez1', quantity: 0 }] }, 'ez1'), null)
-    assert.equal(legQuantity({ entry_zones: [{ id: 'ez1', quantity: 10 }] }, 'nope'), null)
+    assert.equal(legQuantity({ entry_legs: [{ id: 'ez1' }] }, 'ez1'), null)
+    assert.equal(legQuantity({ entry_legs: [{ id: 'ez1', quantity: 0 }] }, 'ez1'), null)
+    assert.equal(legQuantity({ entry_legs: [{ id: 'ez1', quantity: 10 }] }, 'nope'), null)
     assert.equal(legQuantity(null, 'ez1'), null)
 })
 
 test('legs never sum across a premise at execution time', () => {
     // The safety property, from the other side: two legs of 60 and 40 must place 60, not 100.
-    const sc = { entry_zones: [{ id: 'ez1', quantity: 60 }, { id: 'ez2', quantity: 40 }] }
-    assert.equal(scenarioQuantity(sc.entry_zones), 100, 'the premise is 100 in total')
+    const sc = { entry_legs: [{ id: 'ez1', quantity: 60 }, { id: 'ez2', quantity: 40 }] }
+    assert.equal(scenarioQuantity(sc.entry_legs), 100, 'the premise is 100 in total')
     assert.notEqual(legQuantity(sc, 'ez1'), 100, 'but the first print is not')
 })
 
 // ─── Pending legs, and when adding is allowed ─────────────────────────────────
 
-const TWO_LEG = { entry_zones: [{ id: 'ez1', lower: 100, upper: 101, quantity: 60 },
-                                { id: 'ez2', lower: 95,  upper: 96,  quantity: 40 }] }
+const TWO_LEG = { entry_legs: [{ id: 'ez1', price: 101, quantity: 60 },
+                                { id: 'ez2', price: 96,  quantity: 40 }] }
 
 test('a filled leg drops out, and the rest stay pending', () => {
-    const pend = pendingLegs(TWO_LEG, { legs: [{ zone_id: 'ez1' }] })
+    const pend = pendingLegs(TWO_LEG, { legs: [{ leg_id: 'ez1' }] })
     assert.deepEqual(pend.map(z => z.id), ['ez2'])
 })
 
 test('legs are matched by ID, not by count — they fill in whatever order price reaches them', () => {
     // A dip leg and a reclaim leg fill in the order the market offers, not the order authored.
-    const pend = pendingLegs(TWO_LEG, { legs: [{ zone_id: 'ez2' }] })
+    const pend = pendingLegs(TWO_LEG, { legs: [{ leg_id: 'ez2' }] })
     assert.deepEqual(pend.map(z => z.id), ['ez1'], 'the SECOND authored leg filled first')
 })
 
 test('a single-leg premise has nothing pending once it fills — the whole path stays inert today', () => {
-    const one = { entry_zones: [{ id: 'ez1', quantity: 100 }] }
-    assert.equal(pendingLegs(one, { legs: [{ zone_id: 'ez1' }] }).length, 0)
+    const one = { entry_legs: [{ id: 'ez1', quantity: 100 }] }
+    assert.equal(pendingLegs(one, { legs: [{ leg_id: 'ez1' }] }).length, 0)
 })
 
 test('an unfilled premise is entirely pending, and a missing scenario is not a crash', () => {
@@ -958,45 +970,45 @@ test('an unfilled premise is entirely pending, and a missing scenario is not a c
 const COND = [{ id: 'x1', text: 'out if it closes below the 4hr VWAP', weight: 'primary', mode: 'judgment', persistence: 'live' }]
 const PLAIN_SC = {
     id: 'sc1',
-    entry_zones: [{ id: 'e1', lower: 100, upper: 100, quantity: 10, conditions: [] }],
-    stop_zones:  [{ id: 's1', lower: 95,  upper: 95,  quantity: 10, conditions: [] }],
-    tp_zones:    [{ id: 't1', lower: 110, upper: 110, quantity: 10, conditions: [] }],
+    entry_legs: [{ id: 'e1', price: 100, quantity: 10, conditions: [] }],
+    stop_legs:  [{ id: 's1', price: 95,  quantity: 10, conditions: [] }],
+    target_legs:    [{ id: 't1', price: 110, quantity: 10, conditions: [] }],
 }
 
 test('a scenario of plain levels watches nothing — the broker holds it all', () => {
-    const w = watchedLegs({ entry_mode: 'limit' }, PLAIN_SC, { legs: [{ zone_id: 'e1' }] })
+    const w = watchedLegs({ entry_mode: 'limit' }, PLAIN_SC, { legs: [{ leg_id: 'e1' }] })
     assert.deepEqual(w, { stop: null, targets: [], entries: [] })
     assert.equal(hasWatchedLegs(w), false)
     assert.deepEqual(allowedVerdicts(w), ['hold'])
 })
 
 test('a conditional stop is watched and unlocks the stop verdicts only', () => {
-    const sc = { ...PLAIN_SC, stop_zones: [{ ...PLAIN_SC.stop_zones[0], conditions: COND }] }
-    const w  = watchedLegs({ entry_mode: 'limit' }, sc, { legs: [{ zone_id: 'e1' }] })
+    const sc = { ...PLAIN_SC, stop_legs: [{ ...PLAIN_SC.stop_legs[0], conditions: COND }] }
+    const w  = watchedLegs({ entry_mode: 'limit' }, sc, { legs: [{ leg_id: 'e1' }] })
     assert.equal(w.stop?.id, 's1')
     assert.equal(hasWatchedLegs(w), true)
     assert.deepEqual(allowedVerdicts(w), ['hold', 'move_stop', 'exit_now'])
 })
 
 test('a conditional target is watched and unlocks take_partial only', () => {
-    const sc = { ...PLAIN_SC, tp_zones: [PLAIN_SC.tp_zones[0], { id: 't2', lower: 120, upper: 120, quantity: 5, conditions: COND }] }
-    const w  = watchedLegs({ entry_mode: 'limit' }, sc, { legs: [{ zone_id: 'e1' }] })
+    const sc = { ...PLAIN_SC, target_legs: [PLAIN_SC.target_legs[0], { id: 't2', price: 120, quantity: 5, conditions: COND }] }
+    const w  = watchedLegs({ entry_mode: 'limit' }, sc, { legs: [{ leg_id: 'e1' }] })
     assert.deepEqual(w.targets.map(t => t.id), ['t2'], 'the plain target is not on the list')
     assert.deepEqual(allowedVerdicts(w), ['hold', 'take_partial'])
 })
 
 test("a pending entry leg is watched while unfilled — on its own conditions, or the setup's", () => {
-    const sc = { ...PLAIN_SC, entry_zones: [PLAIN_SC.entry_zones[0], { id: 'e2', lower: 96, upper: 96, quantity: 10, conditions: [] }] }
+    const sc = { ...PLAIN_SC, entry_legs: [PLAIN_SC.entry_legs[0], { id: 'e2', price: 96, quantity: 10, conditions: [] }] }
     const conditional = { entry_mode: 'conditional', conditions: COND }
     // A conditional setup: the setup's own entry conditions apply to every leg.
-    assert.deepEqual(watchedLegs(conditional, sc, { legs: [{ zone_id: 'e1' }] }).entries.map(z => z.id), ['e2'])
-    assert.deepEqual(watchedLegs(conditional, sc, { legs: [{ zone_id: 'e1' }, { zone_id: 'e2' }] }).entries, [], 'filled → nothing to add')
-    assert.deepEqual(allowedVerdicts(watchedLegs(conditional, sc, { legs: [{ zone_id: 'e1' }] })), ['hold', 'add_leg'])
+    assert.deepEqual(watchedLegs(conditional, sc, { legs: [{ leg_id: 'e1' }] }).entries.map(z => z.id), ['e2'])
+    assert.deepEqual(watchedLegs(conditional, sc, { legs: [{ leg_id: 'e1' }, { leg_id: 'e2' }] }).entries, [], 'filled → nothing to add')
+    assert.deepEqual(allowedVerdicts(watchedLegs(conditional, sc, { legs: [{ leg_id: 'e1' }] })), ['hold', 'add_leg'])
     // A limit setup declares nothing: a plain pending leg is not a read.
-    assert.deepEqual(watchedLegs({ entry_mode: 'limit' }, sc, { legs: [{ zone_id: 'e1' }] }).entries, [])
+    assert.deepEqual(watchedLegs({ entry_mode: 'limit' }, sc, { legs: [{ leg_id: 'e1' }] }).entries, [])
     // …unless the leg carries its own condition.
-    const own = { ...sc, entry_zones: [sc.entry_zones[0], { ...sc.entry_zones[1], conditions: COND }] }
-    assert.deepEqual(watchedLegs({ entry_mode: 'limit' }, own, { legs: [{ zone_id: 'e1' }] }).entries.map(z => z.id), ['e2'])
+    const own = { ...sc, entry_legs: [sc.entry_legs[0], { ...sc.entry_legs[1], conditions: COND }] }
+    assert.deepEqual(watchedLegs({ entry_mode: 'limit' }, own, { legs: [{ leg_id: 'e1' }] }).entries.map(z => z.id), ['e2'])
 })
 
 test('a missing scenario watches nothing and is not a crash', () => {

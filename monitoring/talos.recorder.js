@@ -149,7 +149,7 @@ export function buildBundle({ setup, meta = {}, systemText, userText, trace = {}
             // before the stop", and that is scenario arithmetic the labeler redoes from here.
             scenarios: setup?.scenarios ?? [],
             armed_scenario_id: setup?.armed_scenario_id ?? null,
-            armed_zone_id: setup?.armed_zone_id ?? null,
+            armed_leg_id: setup?.armed_leg_id ?? null,
             monitor_state: setup?.monitor_state ?? null,
             position_state: setup?.position_state ?? null,
         },

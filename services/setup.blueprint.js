@@ -34,7 +34,7 @@
 // ── What else is deliberately absent ─────────────────────────────────────────
 // Everything the save path stamps for itself (setup.finalize / setups.service): accounts, broker,
 // broker_symbol, basis_offset, mode, event_risk, status, monitor_state, armed_*, ownership, and
-// the flat `entry_zones`/`stop_zones`/`tp_zones` projection — those are OUTPUT of `projectScenario`,
+// the flat `entry_legs`/`stop_legs`/`target_legs` projection — those are OUTPUT of `projectScenario`,
 // re-derived on every normalise, so carrying them would only ever let a stale copy travel.
 
 /**
@@ -79,9 +79,9 @@ export function toBlueprint(setup, { at = 0, from = null } = {}) {
     bp.scenarios  = (Array.isArray(setup.scenarios) ? setup.scenarios : []).map(sc => ({
         id:          typeof sc?.id === 'string' ? sc.id : null,
         name:        typeof sc?.name === 'string' ? sc.name : '',
-        entry_zones: _carryZones(sc?.entry_zones),
-        stop_zones:  _carryZones(sc?.stop_zones),
-        tp_zones:    _carryZones(sc?.tp_zones),
+        entry_legs:  _carryLegs(sc?.entry_legs),
+        stop_legs:  _carryLegs(sc?.stop_legs),
+        target_legs: _carryLegs(sc?.target_legs),
         conditions:  _carryConditions(sc?.conditions),
         validity:    sc?.validity ?? null,
         // `quantity` absent BY OMISSION — see the header. So are `rr` and every monitor field:
@@ -114,9 +114,9 @@ export function hydrateBlueprint(bp) {
     draft.scenarios = (scenarios.length ? scenarios : [{}]).map((sc, i) => ({
         id:          typeof sc?.id === 'string' && sc.id.trim() ? sc.id.trim() : `s${i + 1}`,
         name:        typeof sc?.name === 'string' ? sc.name : '',
-        entry_zones: _carryZones(sc?.entry_zones),
-        stop_zones:  _carryZones(sc?.stop_zones),
-        tp_zones:    _carryZones(sc?.tp_zones),
+        entry_legs:  _carryLegs(sc?.entry_legs),
+        stop_legs:  _carryLegs(sc?.stop_legs),
+        target_legs: _carryLegs(sc?.target_legs),
         conditions:  _carryConditions(sc?.conditions),
         validity:    sc?.validity ?? null,
         // Explicitly null rather than omitted: `normalizeSetup` derives a scenario's size from its
@@ -129,7 +129,7 @@ export function hydrateBlueprint(bp) {
 /**
  * What is wrong with this blueprint, said OUT LOUD at open time.
  *
- * The normaliser is deliberately forgiving — an unreadable zone is dropped, an unknown lens falls
+ * The normaliser is deliberately forgiving — an unreadable leg is dropped, an unknown lens falls
  * back to `discretionary`. That is right for a model's own emit, which it can be told to fix on the
  * next turn. It is wrong for a plan that arrived from somewhere else: silently dropping two of
  * someone's four price levels hands the user a DIFFERENT trade wearing the same name, and the only
@@ -157,7 +157,7 @@ export function blueprintProblems(bp, normalized) {
         problems.push(`${unreadable} of ${sent.length} ways in could not be read and ${unreadable > 1 ? 'were' : 'was'} dropped.`)
         // AND STOP THERE. What follows matches sent[i] against survived[i], which only means
         // anything while the two lists line up: drop scenario 0 and survived[0] is what was sent[1],
-        // so every zone comparison after it comes from a different premise. It would invent losses
+        // so every leg comparison after it comes from a different premise. It would invent losses
         // and hide real ones. The dropped-scenario line above is the honest report in that case.
         return problems
     }
@@ -166,7 +166,7 @@ export function blueprintProblems(bp, normalized) {
     // sent premise was readable, so nothing shifted and survived[i] IS sent[i]. The normaliser
     // preserves order, so a count that shrank names the group that lost a level.
     for (let i = 0; i < survived.length && i < sent.length; i++) {
-        for (const [key, label] of [['entry_zones', 'entry'], ['stop_zones', 'stop'], ['tp_zones', 'target']]) {
+        for (const [key, label] of [['entry_legs', 'entry'], ['stop_legs', 'stop'], ['target_legs', 'target']]) {
             const before = (Array.isArray(sent[i]?.[key]) ? sent[i][key] : []).length
             const after  = (survived[i]?.[key] ?? []).length
             if (before > after) {
@@ -193,22 +193,21 @@ export function blueprintProblems(bp, normalized) {
 const isPlainObject = (v) => !!v && typeof v === 'object' && !Array.isArray(v)
 
 /**
- * Zone edges WITHOUT their size. `note` travels because it is the author's word about the level —
+ * A leg's PRICE without its size. `note` travels because it is the author's word about the level —
  * "the shelf from Tuesday" is exactly the kind of thing a recipient needs and cannot re-derive.
- * So do a zone's own `conditions`: a target that only prints "if the day closes above" is a
- * different target without that sentence (`normalizeZone` keeps them per zone).
+ * So do a leg's own `conditions`: a target that only prints "if the day closes above" is a
+ * different target without that sentence (`normalizeLeg` keeps them per leg).
  *
- * Deliberately NOT coerced to numbers here: `normalizeZone` owns that (including the sorting of
- * inverted edges and the single-`price` collapse), and a second coercion in this file is a second
- * opinion about what a price is.
+ * Deliberately NOT coerced to a number here: `normalizeLeg` owns that, and a second coercion in
+ * this file is a second opinion about what a price is. It carried `lower`/`upper` until the band
+ * shape was deleted (2026-09-24); a blueprint written before then hydrates with no legs, which is
+ * what `blueprintProblems` is for — it reports every level it could not read.
  */
-function _carryZones(arr) {
+function _carryLegs(arr) {
     if (!Array.isArray(arr)) return []
     return arr.map(z => ({
         id:    typeof z?.id === 'string' ? z.id : null,
-        lower: z?.lower ?? null,
-        upper: z?.upper ?? null,
-        ...(z?.price != null ? { price: z.price } : {}),
+        price: z?.price ?? null,
         note:  typeof z?.note === 'string' ? z.note : null,
         conditions: _carryConditions(z?.conditions),
     }))

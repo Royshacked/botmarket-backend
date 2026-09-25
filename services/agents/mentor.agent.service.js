@@ -67,7 +67,7 @@ export const MENTOR_TOOLS = [
         // (agentToolsRegistry.test.js), and it sits past the tools cache breakpoint — which is
         // inside TRADING_TOOLS, on get_derivatives_context — so declaring it here touches no
         // cached prefix.
-        consult: consultDescription(`Reach for it in exactly three situations: **final sizing on real money** (live or manual — the account is at risk and the arithmetic has to be right); **two readings that genuinely disagree** and you cannot settle which one governs — most often the direction call at rung 2 of the guided build, when the structure leans one way and momentum or positioning the other and the user is waiting on your lean; and **placing a zone where the structure is ambiguous** — a level that is both a prior high and a supply shelf, say. The wider-target check at rung 7 is NOT a consult: it is a tool question, answered by the levels.`),
+        consult: consultDescription(`Reach for it in exactly three situations: **final sizing on real money** (live or manual — the account is at risk and the arithmetic has to be right); **two readings that genuinely disagree** and you cannot settle which one governs — most often the direction call at rung 2 of the guided build, when the structure leans one way and momentum or positioning the other and the user is waiting on your lean; and **placing a level where the structure is ambiguous** — a price that is both a prior high and a supply shelf, say. The wider-target check at rung 7 is NOT a consult: it is a tool question, answered by the levels.`),
     }),
 ]
 
@@ -185,10 +185,10 @@ export function mergeCoverage(prior, raw) {
  *
  * The prompt demands the complete worksheet every turn, but on an edit turn the model sometimes
  * narrates "everything else stands" and emits only the changed field. The client replaces its
- * draft wholesale, so that thin block would wipe settled zones.
+ * draft wholesale, so that thin block would wipe settled legs.
  *
  * Shallow BY DESIGN (same rule as Kairos's `_mergeCallDraft`): a re-emitted array or object
- * replaces its prior value outright, so the model can still DROP a zone or clear a field with an
+ * replaces its prior value outright, so the model can still DROP a leg or clear a field with an
  * explicit null — only omission is protected. Returns null when there's no new setup this turn.
  */
 export const _mergeSetupDraft = mergeDraft
@@ -272,7 +272,7 @@ function _buildSystemPrompt(chatState, accounts, mainAccountId, audience = null,
     const today = new Date().toISOString().slice(0, 10)
     const audienceBlock = buildAudienceSection(audience)
     const dynamicContext = `---
-CURRENT DATE: ${today}. Resolve relative dates (today, next week, this month) against it — including when setting active_from / valid_until.
+CURRENT DATE: ${today}. Resolve relative dates (today, next week, this month) against it — when setting active_from / valid_until, AND inside the text of a condition. A condition is read by the monitor days after you wrote it, so "a false break yesterday on last week's low" must be filed as the dated fact it was on the day you filed it — the date, and the level if you know it.
 ${audienceBlock ? `
 ${audienceBlock}
 

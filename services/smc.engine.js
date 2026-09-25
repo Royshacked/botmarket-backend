@@ -1,7 +1,7 @@
 // Deterministic Smart-Money-Concepts primitives over OHLCV bars (K2, docs/desks/kairos-hermes.md).
 // PURE functions — input `bars` oldest→newest, each { open, high, low, close, volume, timestamp }.
 // This is the SHARED engine: the Kairos SMC mode's tools consume it, and it's reusable by Argus/Hermes
-// (DRY). It yields EXACT monitorable levels (vs today's vision estimates) that flow into entry_zones /
+// (DRY). It yields EXACT monitorable levels (vs today's vision estimates) that flow into entry_legs /
 // reference_levels so any discretionary monitor can gate on them.
 //
 // HONEST LIMIT: no L2 / order-flow / volume-at-price → this is STRUCTURE-based smart-money ("SMC-lite"),

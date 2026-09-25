@@ -14,9 +14,9 @@ const SETUP = {
     id: 'setup_NVDA_1', userId: 'u_roy', kind: 'setup', status: 'watching',
     ...normalizeSetup({
         asset: 'NVDA', asset_class: 'stock', direction: 'long', type: 'swing', trade_mode: 'classical', timeframe: '1hr',
-        entry_zones: [{ id: 'ez1', lower: 237.8, upper: 238.6, quantity: 100 }],
-        stop_zones:  [{ id: 'sz1', lower: 234.8, upper: 235.9 }],
-        tp_zones:    [{ id: 'tz1', lower: 246, upper: 246, quantity: 100 }],
+        entry_legs: [{ id: 'ez1', price: 238.6, quantity: 100 }],
+        stop_legs:  [{ id: 'sz1', price: 234.8 }],
+        target_legs:    [{ id: 'tz1', price: 246, quantity: 100 }],
         conditions:  [{ id: 'c1', text: 'CHoCH up on the 15m', weight: 'primary', mode: 'judgment', persistence: 'live' }],
     }),
     referenced_symbols: ['SMH'],

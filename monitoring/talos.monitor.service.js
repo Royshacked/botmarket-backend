@@ -11,14 +11,14 @@ import { isPreActive, isExpiring, isPastExpiry, effectiveVerdict, nextStatus, ha
 import { buildOrderPlanForIdea } from '../services/orderPlan.service.js'
 import { notifyManualEntry, entryLegFromIdea } from '../services/manualNotify.service.js'
 import { assessSetup, assessPosition, READINESS_VERDICTS, openingRung } from './talos.assess.js'
-import { scenarioView, scenarioLabel, declaredConditions, projectScenario, pickScenario, stopEdge, targetLevels, addEntryLeg, legQuantity, firingLeg, resolveRung, clampGuards, normalizeWatch, normalizePremise, disarmedSetupPatch, watchedLegs, hasWatchedLegs, allowedVerdicts } from '../services/setup.schema.js'
+import { scenarioView, scenarioLabel, declaredConditions, projectScenario, pickScenario, stopEdge, targetLevels, addEntryLeg, legQuantity, legPrice, firingLeg, resolveRung, clampGuards, normalizeWatch, normalizePremise, disarmedSetupPatch, watchedLegs, hasWatchedLegs, allowedVerdicts } from '../services/setup.schema.js'
 import { tierFor, clampExpensiveGap, tickExpensiveDue } from './talos.tiers.js'
 import { cheapRead as _cheapRead } from './talos.cheap.js'
 import { cancelRestingEntryOrders } from '../services/restingOrders.service.js'
 import { notifySetupEntryConfirm, notifySetupInvalidation, notifySetupManage, notifySetupLimitDisarm } from '../services/tradeNotify.service.js'
 import { isSelfExecuted } from '../services/venue.resolve.service.js'
 import { brokerService } from '../api/broker/broker.service.js'
-import { zoneGate, scenarioGate, liveScenarios, _hitFromGuard, computeMetrics, metricsSet, validityBreach, breachPatch, rollUpBreaches, normalizeConditionResults, latchPatch, costPatch } from './talos.gates.js'
+import { legGate, scenarioGate, liveScenarios, _hitFromGuard, computeMetrics, metricsSet, validityBreach, breachPatch, rollUpBreaches, normalizeConditionResults, latchPatch, costPatch } from './talos.gates.js'
 
 // Talos — the guardian of the `setup` kind (docs/design/talos-per-candle.md).
 //
@@ -106,16 +106,16 @@ export async function _checkSetup(setup, nowMs, deps = _deps) {
     // decides, rather than auto-firing an enter on a setup whose window may have closed.
     if (setup.entry_mode === 'limit' && !_isPastExpiry(setup, nowMs)) {
         const sc   = liveScenarios(setup)[0] ?? null
-        const zone = sc?.entry_zones?.[0] ?? null
-        if (sc && !zone) logger.warn(LOG, `[${setup.id}] limit setup has scenario but no entry_zones — falling through to normal path`)
-        if (sc && zone) {
+        const leg = sc?.entry_legs?.[0] ?? null
+        if (sc && !leg) logger.warn(LOG, `[${setup.id}] limit setup has scenario but no entry_legs — falling through to normal path`)
+        if (sc && leg) {
             if (!deps.isAssetOpen(setup.asset, setup.asset_class)) return _sleepShut(setup, nowMs, deps)
             if (liveScenarios(setup).some(s => s.validity)) {
                 const price    = await deps.getPrice(setup)
                 const breached = await _checkValidity(setup, price, nowMs, deps)
                 if (breached) return breached
             }
-            return _applyVerdict(setup, { scenario: sc, zone },
+            return _applyVerdict(setup, { scenario: sc, leg },
                 { verdict: 'enter', read: 'Limit order — no conditions to assess.', guards: [], conditions: [], next_timeframe: null, memo_update: null },
                 nowMs, 'limit_order', null, deps)
         }
@@ -134,7 +134,7 @@ export async function _checkSetup(setup, nowMs, deps = _deps) {
     // Which PREMISE price reached, when it reached one. `scenarioGate` asks where price is RIGHT
     // NOW; the sweep already established where it has BEEN, up to a minute earlier — a level touched
     // and left in that minute would make the spot check say "nothing here" and throw away the very
-    // crossing that paid for the wake. So a fired price guard resolves to its own zone, whatever
+    // crossing that paid for the wake. So a fired price guard resolves to its own leg, whatever
     // price is doing by the time we look.
     //
     // SINCE 2026-09-23 THIS NO LONGER GATES THE ENTRY. It tells the READ which premise is on the
@@ -293,7 +293,7 @@ async function _checkPosition(setup, nowMs, deps) {
     // First wake after the fill. Bookkeeping, not monitoring: it fetches no price, calls no model
     // and posts no card — it writes down a fill that has already happened. Deliberately ahead of
     // the off-hours gate so a setup filled at the close has its position_state before the open.
-    const fillPrice = toNum(ps.entry?.intended) ?? toNum(setup.armed_zone_id ? _zoneById(setup, setup.armed_zone_id)?.upper : null)
+    const fillPrice = toNum(ps.entry?.intended) ?? legPrice(_legById(setup, setup.armed_leg_id))
     const fillAtMs  = setup.ordersPlacedAt ?? setup.entryTriggeredAt ?? nowMs
     // The WORKING stop, chosen by price rather than by array position (setup.schema stopEdge).
     const stop = stopEdge(setup)
@@ -301,9 +301,9 @@ async function _checkPosition(setup, nowMs, deps) {
     // Recorded as a LEG: a position built by scaling in has several fills at different prices, and
     // `fill_price` must be their size-weighted average because every R is measured from it.
     const entry = addEntryLeg(ps.entry, {
-        zone_id:  setup.armed_zone_id ?? null,
+        leg_id:   setup.armed_leg_id ?? null,
         price:    fillPrice,
-        quantity: toNum(_zoneById(setup, setup.armed_zone_id)?.quantity) ?? setup.quantity ?? null,
+        quantity: toNum(_legById(setup, setup.armed_leg_id)?.quantity) ?? setup.quantity ?? null,
         at:       new Date(fillAtMs).toISOString(),
     })
 
@@ -371,13 +371,13 @@ async function _managePosition(setup, ps, scenario, watched, nowMs, deps) {
     // The proposal, resolved against the document rather than trusted: a leg the model names must
     // be a watched leg, and a pending entry must actually be printing.
     let proposal = null
-    let legZone  = null
+    let firing  = null
     if (verdict === 'take_partial') {
-        legZone = watched.targets.find(z => z.id === raw.proposal?.leg) ?? (watched.targets.length === 1 ? watched.targets[0] : null)
+        firing = watched.targets.find(z => z.id === raw.proposal?.leg) ?? (watched.targets.length === 1 ? watched.targets[0] : null)
         const size = Number(ps.entry?.size)
-        const qty  = toNum(legZone?.quantity)
-        if (!legZone || !Number.isFinite(qty) || !(size > 0)) { verdict = 'hold'; logger.warn(LOG, `take_partial without a sized watched target for ${setup.id} — treating as hold`) }
-        else proposal = { leg: legZone.id, quantity: qty, size_pct: Math.round((qty / size) * 10000) / 100 }
+        const qty  = toNum(firing?.quantity)
+        if (!firing || !Number.isFinite(qty) || !(size > 0)) { verdict = 'hold'; logger.warn(LOG, `take_partial without a sized watched target for ${setup.id} — treating as hold`) }
+        else proposal = { leg: firing.id, quantity: qty, size_pct: Math.round((qty / size) * 10000) / 100 }
     } else if (verdict === 'move_stop') {
         const stop = toNum(raw.proposal?.stop ?? raw.proposal?.new_stop)
         if (!Number.isFinite(stop)) { verdict = 'hold'; logger.warn(LOG, `move_stop without a level for ${setup.id} — treating as hold`) }
@@ -385,14 +385,14 @@ async function _managePosition(setup, ps, scenario, watched, nowMs, deps) {
     } else if (verdict === 'add_leg') {
         // The leg must be a WATCHED pending one (never a filled leg whose level a guard re-touched),
         // and it must be printing: price at it now, or the sweep saw it reached since the last read.
-        const wokeZone = _hitFromGuard(setup, woke)?.zone ?? null
-        legZone = watched.entries.find(z => z.id === raw.proposal?.leg)
-            ?? zoneGate(watched.entries, price)
-            ?? watched.entries.find(z => z.id === wokeZone?.id)
+        const wokeLeg = _hitFromGuard(setup, woke)?.leg ?? null
+        firing = watched.entries.find(z => z.id === raw.proposal?.leg)
+            ?? legGate(watched.entries, price)
+            ?? watched.entries.find(z => z.id === wokeLeg?.id)
             ?? null
-        const printing = legZone && (zoneGate([legZone], price) || wokeZone?.id === legZone.id)
+        const printing = firing && (legGate([firing], price) || wokeLeg?.id === firing.id)
         if (!printing) { verdict = 'hold'; logger.warn(LOG, `add_leg with no planned leg printing for ${setup.id} — treating as hold`) }
-        else proposal = { leg: legZone.id }
+        else proposal = { leg: firing.id }
     }
 
     const nextAt   = _nextReadAt(setup, nowMs, rung, deps)
@@ -419,24 +419,24 @@ async function _managePosition(setup, ps, scenario, watched, nowMs, deps) {
 
     // The execution half of a scale-in — an order plan for ONE leg, at that leg's size. Deliberately
     // NOT routed through the entry flow, which assumes nothing is open yet. `status` is untouched;
-    // `armed_zone_id` moves to the new leg so the fill stamps against the right zone.
-    if (verdict === 'add_leg' && legZone) {
+    // `armed_leg_id` moves to the new leg so the fill stamps against the right leg.
+    if (verdict === 'add_leg' && firing) {
         const projection = projectScenario(setup, setup.armed_scenario_id ?? null)
-        const executable = { ...setup, ...projection, quantity: legQuantity(scenario, legZone.id) ?? null }
+        const executable = { ...setup, ...projection, quantity: legQuantity(scenario, firing.id) ?? null }
         if (Number.isFinite(executable.quantity) && executable.quantity > 0) {
             const plan = await deps.buildOrderPlan(executable).catch(err => {
                 logger.error(LOG, `scale-in order plan failed for ${setup.id}:`, err.message)
                 return []
             })
             if (plan.length > 0) {
-                set.armed_zone_id = legZone.id
+                set.armed_leg_id = firing.id
                 set.pendingOrder  = { plan, builtAt: nowMs }
                 set.orderState    = deps.isAssetOpen(setup.asset, setup.asset_class) ? 'awaiting_confirm' : 'awaiting_market'
             } else {
                 logger.info(LOG, `[${setup.id}] planned leg printed with no placeable accounts — alert only`)
             }
         } else {
-            logger.warn(LOG, `[${setup.id}] planned leg ${legZone.id} carries no size — nothing to place`)
+            logger.warn(LOG, `[${setup.id}] planned leg ${firing.id} carries no size — nothing to place`)
         }
     }
 
@@ -457,8 +457,8 @@ function _armedScenario(setup) {
     return (setup?.scenarios ?? []).find(s => s.id === id) ?? pickScenario(setup)
 }
 
-function _zoneById(setup, id) {
-    return (setup?.scenarios ?? []).flatMap(sc => sc.entry_zones ?? []).find(z => z.id === id) ?? null
+function _legById(setup, id) {
+    return (setup?.scenarios ?? []).flatMap(sc => sc.entry_legs ?? []).find(z => z.id === id) ?? null
 }
 
 // ─── The validity gate ─────────────────────────────────────────────────────────
@@ -555,25 +555,29 @@ async function _checkValidity(setup, price, nowMs, deps) {
  * about.
  *
  * What the level still decides is WHICH leg (`firingLeg`): the one price is at when the wake
- * resolved to a specific zone, else the scenario's first unfilled leg. The zone keeps the order
- * price, the size and the r:r; it stopped being a second opinion (see firingLeg for what that cost
- * in prod).
+ * resolved to a specific one, else the scenario's first unfilled leg. The leg keeps the order price,
+ * the size and the r:r; it stopped being a second opinion (see firingLeg for what that cost in
+ * prod).
+ *
+ * `armed` is where price is STANDING (may be null); `leg` is what an `enter` would fire. They are
+ * usually the same object and must not be collapsed: the whole point of the 2026-09-23 build is
+ * that the second survives the first being null.
  *
  * Anything other than `enter` keeps looking, the read recorded so it is visible on the setup
  * without a card. Card spam isn't a risk: firing moves the setup to 'hit'.
  */
 async function _applyVerdict(setup, hit, raw, nowMs, reason, price, deps) {
-    const zone     = hit?.zone ?? null
+    const armed    = hit?.leg ?? null
     const scenario = hit?.scenario ?? pickScenario(setup)
     const declared = declaredConditions(setup, scenario)
     const rung     = openingRung(setup)
     // Resolved for an `enter` whether or not price is standing on a level right now.
-    const leg      = raw.verdict === 'enter' ? firingLeg(scenario, zone) : null
+    const leg      = raw.verdict === 'enter' ? firingLeg(scenario, armed) : null
 
     const conditions = normalizeConditionResults(raw.conditions, declared)
     const armedNow   = clampGuards(raw.guards, price)
     const nextRung   = resolveRung(raw.next_timeframe, setup)
-    const assessment = _assessmentRecord({ nowMs, reason, zone, scenario, raw, verdict: raw.verdict, conditions, price, rung })
+    const assessment = _assessmentRecord({ nowMs, reason, leg: armed, scenario, raw, verdict: raw.verdict, conditions, price, rung })
     const nextAt     = _nextReadAt(setup, nowMs, nextRung ?? rung, deps)
 
     const base = {
@@ -596,7 +600,7 @@ async function _applyVerdict(setup, hit, raw, nowMs, reason, price, deps) {
         ...costPatch(setup, raw._tools),
     }
     const row = (extra = {}) => _entry(reason, {
-        setup, nowMs, price, rung, nextAt, armed: armedNow, zone,
+        setup, nowMs, price, rung, nextAt, armed: armedNow, leg: armed,
         raw: { ...raw, conditions }, tools: raw._tools, model: raw._model, ...extra,
     })
 
@@ -608,7 +612,7 @@ async function _applyVerdict(setup, hit, raw, nowMs, reason, price, deps) {
     if (raw.verdict === 'edit' && !isInvalidated(setup.invalidation_status) && _hasEditProposal(raw)) {
         const patch = {
             ...base,
-            ...(zone ? { armed_zone_id: zone.id, armed_scenario_id: scenario?.id ?? null } : {}),
+            ...(armed ? { armed_leg_id: armed.id, armed_scenario_id: scenario?.id ?? null } : {}),
             invalidation_status: INVALIDATION.FIRED,
             invalidation_edge:   'time',
             invalidation_reason: raw.edit_proposal?.why ?? raw.read ?? null,
@@ -628,7 +632,7 @@ async function _applyVerdict(setup, hit, raw, nowMs, reason, price, deps) {
         const patch = {
             ...base, ...projection,
             status: _nextStatus(raw.verdict),
-            armed_zone_id: leg.id,
+            armed_leg_id: leg.id,
             armed_scenario_id: scenario?.id ?? null,
             entryTriggeredAt: nowMs,
         }
@@ -662,7 +666,7 @@ async function _applyVerdict(setup, hit, raw, nowMs, reason, price, deps) {
         return { reason, verdict: raw.verdict, fired: true, orderState: patch.orderState ?? null }
     }
 
-    // An `enter` with no leg to fire on — a premise carrying no entry zone, which readiness refuses
+    // An `enter` with no leg to fire on — a premise carrying no entry leg, which readiness refuses
     // at Generate. Recorded rather than silently swallowed, because the alternative is a user whose
     // setup said "enter" and did nothing, with nothing anywhere saying why.
     if (raw.verdict === 'enter') {
@@ -671,8 +675,8 @@ async function _applyVerdict(setup, hit, raw, nowMs, reason, price, deps) {
 
     // Not an entry. Arm the premise price reached, when it reached one, so the fill stamps against
     // the right leg if a later read does say enter.
-    if (zone) {
-        await deps.persist(setup.id, { ...base, status: _nextStatus(raw.verdict), armed_zone_id: zone.id, armed_scenario_id: scenario?.id ?? null }, row())
+    if (armed) {
+        await deps.persist(setup.id, { ...base, status: _nextStatus(raw.verdict), armed_leg_id: armed.id, armed_scenario_id: scenario?.id ?? null }, row())
         return { reason, verdict: raw.verdict, watching: true }
     }
 
@@ -698,11 +702,11 @@ function _cheapAsLedger(cheap) {
 }
 
 /** What the last read concluded — the pop-out's "where Talos stands now", kept on the document. */
-function _assessmentRecord({ nowMs, reason, zone = null, scenario, raw, verdict, conditions, price, rung }) {
+function _assessmentRecord({ nowMs, reason, leg = null, scenario, raw, verdict, conditions, price, rung }) {
     return {
         at:             new Date(nowMs).toISOString(),
         reason,
-        zone_id:        zone?.id ?? null,
+        leg_id:         leg?.id ?? null,
         scenario_id:    scenario?.id ?? null,
         verdict,
         // The MAP, asked separately from the moment — a read can wait on an intact premise for weeks

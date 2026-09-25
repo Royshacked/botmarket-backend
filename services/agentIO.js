@@ -64,7 +64,7 @@ export function parseEmitBlocks(raw, tag, log = '[agentIO]') {
  * draft wholesale, so that thin block would wipe already-settled work.
  *
  * SHALLOW BY DESIGN: a re-emitted array or object replaces its prior value outright, so the model
- * can still DROP a zone or clear a field with an explicit null. Only OMISSION is protected.
+ * can still DROP a leg or clear a field with an explicit null. Only OMISSION is protected.
  * Returns null when there is no new artifact this turn, so the caller keeps what it has.
  */
 export function mergeDraft(prev, next) {

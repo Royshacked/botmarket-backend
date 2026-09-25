@@ -198,7 +198,7 @@ function scannerToolsForProfile(profile) {
 // entry and defeat the breakpoint. The volatile tail is already rebuilt per turn, so naming the desk
 // here is free.
 const HANDOFF_DESKS = {
-    mentor: 'Mentor, which builds a `setup` the user shapes zone by zone',
+    mentor: 'Mentor, which builds a `setup` the user shapes level by level',
     kairos: 'Kairos, which authors a single `call`',
 }
 // Unknown/absent destination degrades to the generic phrasing rather than guessing a desk: the

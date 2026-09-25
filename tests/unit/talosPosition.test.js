@@ -18,15 +18,15 @@ const COND = (id, text) => ({ id, text, weight: 'primary', mode: 'judgment', per
 const PLAN = {
     asset: 'NVDA', asset_class: 'stock',
     direction: 'long', type: 'swing', trade_mode: 'classical', timeframe: '1hr',
-    entry_zones: [{ id: 'ez1', lower: 237.8, upper: 238.6, quantity: 100 }],
-    stop_zones:  [{ id: 'sz1', lower: 234.8, upper: 235.9 }],
-    tp_zones:    [{ id: 'tz1', lower: 246, upper: 246, quantity: 50, conditions: [COND('tz1c1', 'bank it if momentum fades into the level')] }],
+    entry_legs: [{ id: 'ez1', price: 238.6, quantity: 100 }],
+    stop_legs:  [{ id: 'sz1', price: 234.8 }],
+    target_legs:    [{ id: 'tz1', price: 246, quantity: 50, conditions: [COND('tz1c1', 'bank it if momentum fades into the level')] }],
     conditions:  [COND('c1', 'CHoCH up on the 15m')],
 }
 
 // In at 238.6, original stop 234.8 (risk 3.8), one target at 246.
 const PS = (over = {}) => ({
-    entry:   { fill_price: 238.6, fill_at: '2026-07-26T09:00:00.000Z', size: 100, direction: 'long', legs: [{ zone_id: 'ez1', price: 238.6, quantity: 100 }] },
+    entry:   { fill_price: 238.6, fill_at: '2026-07-26T09:00:00.000Z', size: 100, direction: 'long', legs: [{ leg_id: 'ez1', price: 238.6, quantity: 100 }] },
     stop:    { initial: 234.8, current: 234.8 },
     targets: [{ price: 246, quantity: 50, watched: true }],
     ...over,
@@ -107,7 +107,7 @@ test('take_partial with ONE watched target needs no leg id; with none it is a ho
     const one = stubDeps({ assessPosition: async () => ({ verdict: 'take_partial' }) })
     assert.equal((await _checkSetup(INPOS(), T, one)).verdict, 'take_partial', 'unambiguous')
 
-    const unsized = INPOS(PS(), {}, { ...PLAN, tp_zones: [{ ...PLAN.tp_zones[0], quantity: null }] })
+    const unsized = INPOS(PS(), {}, { ...PLAN, target_legs: [{ ...PLAN.target_legs[0], quantity: null }] })
     const noSize = stubDeps({ assessPosition: async () => ({ verdict: 'take_partial', proposal: { leg: 'tz1' } }) })
     assert.equal((await _checkSetup(unsized, T, noSize)).verdict, 'hold', 'a leg with no size cannot be banked')
 })
@@ -126,7 +126,7 @@ test('the verdict is held to the menu the watched legs allow', async () => {
 })
 
 test('a watched STOP unlocks move_stop and exit_now, and a stop move needs a level', async () => {
-    const plan = { ...PLAN, stop_zones: [{ id: 'sz1', lower: 234.8, upper: 234.8, conditions: [COND('sz1c1', 'out early if it closes below the 4hr VWAP')] }] }
+    const plan = { ...PLAN, stop_legs: [{ id: 'sz1', price: 234.8, conditions: [COND('sz1c1', 'out early if it closes below the 4hr VWAP')] }] }
     let card = null
     const deps = stubDeps({
         assessPosition: async () => ({ verdict: 'move_stop', proposal: { stop: 237, why: 'the shelf held' }, read: 'Tightening.' }),
@@ -189,7 +189,7 @@ test('a pending card is not re-posted by the same verdict on the next wake', asy
 })
 
 test('a more urgent verdict DOES interrupt a pending one', async () => {
-    const plan = { ...PLAN, stop_zones: [{ id: 'sz1', lower: 234.8, upper: 234.8, conditions: [COND('sz1c1', 'out if it closes below VWAP')] }] }
+    const plan = { ...PLAN, stop_legs: [{ id: 'sz1', price: 234.8, conditions: [COND('sz1c1', 'out if it closes below VWAP')] }] }
     let card = null
     const ps = PS({ pending_action: { verdict: 'take_partial', at: new Date(T - 60_000).toISOString() } })
     const deps = stubDeps({
@@ -307,15 +307,15 @@ test('an unknown verdict still produces a readable card rather than an empty bub
 
 const TWO_LEG_PLAN = {
     ...PLAN,
-    tp_zones: [{ id: 'tz1', lower: 246, upper: 246, quantity: 100 }],   // plain target: only the leg is watched
-    entry_zones: [{ id: 'ez1', lower: 237.8, upper: 238.6, quantity: 60 },
-                  { id: 'ez2', lower: 236.0, upper: 236.6, quantity: 40 }],
+    target_legs: [{ id: 'tz1', price: 246, quantity: 100 }],   // plain target: only the leg is watched
+    entry_legs: [{ id: 'ez1', price: 238.6, quantity: 60 },
+                  { id: 'ez2', price: 236.6, quantity: 40 }],
 }
 
 /** In on leg ez1 only; ez2 is still pending below. */
 const SCALING = (over = {}, psOver = {}) => INPOS({
     entry: { fill_price: 238.6, fill_at: '2026-07-26T09:00:00.000Z', size: 60, direction: 'long',
-             legs: [{ zone_id: 'ez1', price: 238.6, quantity: 60 }] },
+             legs: [{ leg_id: 'ez1', price: 238.6, quantity: 60 }] },
     stop:  { initial: 234.8, current: 234.8 },
     targets: [{ price: 246, quantity: 100, watched: false }],
     ...psOver,
@@ -333,7 +333,7 @@ test('a pending leg is watched on the setup\'s own conditions, and the read is t
 test('add_leg places the LEG, at the leg size, and never touches status', async () => {
     let planned = null
     const deps = stubDeps({
-        getPrice: async () => 236.2,                       // inside ez2
+        getPrice: async () => 236.6,                       // AT ez2
         assessPosition: async () => ({ verdict: 'add_leg', proposal: { leg: 'ez2' }, read: 'The dip leg printed.' }),
         buildOrderPlan: async (executable) => { planned = executable; return [{ accountId: 'a1', quantity: executable.quantity }] },
     })
@@ -342,7 +342,7 @@ test('add_leg places the LEG, at the leg size, and never touches status', async 
 
     assert.equal(planned.quantity, 40, 'the pending leg, not the premise total of 100')
     assert.equal($set.status, undefined, 'already long — adding to it does not change what it is')
-    assert.equal($set.armed_zone_id, 'ez2', 'the fill will stamp against the right zone')
+    assert.equal($set.armed_leg_id, 'ez2', 'the fill will stamp against the right leg')
     assert.equal($set.orderState, 'awaiting_confirm')
     assert.ok($set.pendingOrder?.plan?.length)
 })
@@ -350,7 +350,7 @@ test('add_leg places the LEG, at the leg size, and never touches status', async 
 test('a venue that shuts DURING the wake parks the leg rather than dropping it', async () => {
     let looks = 0
     const deps = stubDeps({
-        getPrice: async () => 236.2,
+        getPrice: async () => 236.6,
         isAssetOpen: () => ++looks === 1,          // open at the gate, shut at the order
         assessPosition: async () => ({ verdict: 'add_leg', proposal: { leg: 'ez2' } }),
         buildOrderPlan: async () => [{ accountId: 'a1', quantity: 40 }],
@@ -372,9 +372,9 @@ test('add_leg with the leg not printing is refused rather than trusted', async (
 })
 
 test('a guard armed at the pending leg counts as the leg printing, even if price has left it', async () => {
-    // The sweep proved price reached 236.2 a minute ago; the spot read says 237 now. The crossing
+    // The sweep proved price reached 236.6 a minute ago; the spot read says 237 now. The crossing
     // that paid for the wake is not thrown away.
-    const woke = { price: 236.2, direction: 'any', means: 'entry' }
+    const woke = { price: 236.6, direction: 'any', means: 'entry' }
     const deps = stubDeps({
         getPrice: async () => 237.0,
         assessPosition: async () => ({ verdict: 'add_leg', proposal: { leg: 'ez2' } }),
@@ -399,7 +399,7 @@ test('a guard re-touching a FILLED leg never adds it again', async () => {
 
 test('a fully-scaled position with plain exits is dormant', async () => {
     const both = SCALING({}, { entry: { fill_price: 236, fill_at: '2026-07-26T09:00:00.000Z', size: 100, direction: 'long',
-        legs: [{ zone_id: 'ez1', price: 238.6, quantity: 60 }, { zone_id: 'ez2', price: 236.2, quantity: 40 }] } })
+        legs: [{ leg_id: 'ez1', price: 238.6, quantity: 60 }, { leg_id: 'ez2', price: 236.2, quantity: 40 }] } })
     const res = await _checkSetup(both, T, stubDeps())
     assert.equal(res.reason, 'dormant')
 })

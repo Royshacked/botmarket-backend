@@ -1,3 +1,5 @@
+import { legPrice } from "../setup.schema.js"
+
 // Present any owner-scoped artifact as ONE watch-list row: "here is a thing you have in the app."
 // The list-tier twin of toEnvelope.js beside it — that one gives the EXECUTION path a canonical
 // shape, this one gives the REPORTING path a canonical shape.
@@ -7,7 +9,7 @@
 // qualifies a list here, not which collection it sits in.
 //
 // TRIMMED, HARD, and not only for token cost. A call doc carries `chat_state` — an entire past
-// conversation — plus entry_zones, reference_levels, patterns and monitor_state.timeline; a scan
+// conversation — plus entry_legs, reference_levels, patterns and monitor_state.timeline; a scan
 // carries candidates[] AND chat[]. Feeding that to an agent puts a stale transcript in its context
 // where it can be read back as current fact, which is a correctness bug rather than a bill. Every
 // row keeps `id` + `kind`, so "tell me about the NVDA call" is a targeted read, not a re-list.
@@ -41,27 +43,37 @@ function _title(text, fallback = '', max = 120) {
 }
 
 /**
- * The zone nearest to being actionable, as plain bounds. Zone shapes differ; only bounds are read.
+ * The leg nearest to being actionable, as a PRICE.
  *
- * A zone's edges are `lower`/`upper` — BOTH normalizers emit that spelling (setup.schema
- * normalizeZone and kairos.service normalizeZones). This read `low`/`high`, which no zone has ever
- * carried, so `nearestEntry` / `stop` / `firstTp` were null on every setup AND call row ever
- * projected — including the agent-facing watch list, where the levels simply went missing rather
- * than reading wrong. `low`/`high` stay accepted as a fallback in case an unnormalized zone reaches
- * here; the OUTPUT keys are unchanged because userData.tools._zone reads them.
+ * It used to return `{low, high}` off a zone's `lower`/`upper` edges, and every consumer collapsed
+ * them back to one number when the two agreed — which, once bands were gone, was always
+ * (`userData.tools._zone` printed `238.2` for `{low: 238.2, high: 238.2}`). With the zone shape
+ * deleted (2026-09-24) there is one number to carry and no collapsing to do.
+ *
+ * `lower`/`upper` are NOT read as a fallback any more. A document still carrying them is a
+ * pre-wipe setup, and there are none — reading them would keep the shape alive in the one place
+ * nobody would think to look.
  */
-function _firstZone(zones) {
-    const z = Array.isArray(zones) ? zones.find(Boolean) : null
-    if (!z) return null
-    const low  = typeof z.lower === 'number' ? z.lower : (typeof z.low  === 'number' ? z.low  : null)
-    const high = typeof z.upper === 'number' ? z.upper : (typeof z.high === 'number' ? z.high : null)
-    if (low == null && high == null) return null
-    return { low, high }
+function _firstLeg(legs) {
+    const z = Array.isArray(legs) ? legs.find(Boolean) : null
+    return z ? legPrice(z) : null
 }
 
-/** A Kairos call → a row. `bias` is the call's word for direction. */
+/**
+ * A Kairos call → a row. `bias` is the call's word for direction.
+ *
+ * IT KEEPS THE ZONE SHAPE, and that is not drift. Kairos is archived (2026-08-18) and its documents
+ * are frozen: nothing authors a call any more, so the ones in Mongo will carry `entry_zones` with
+ * `{lower, upper}` for as long as they exist. Migrating the `setup` kind off zones does not rewrite
+ * history, and reading the live shape here would blank the entry level on every archived call.
+ */
 export function callToWatchRow(doc) {
     if (!doc?.id) return null
+    const entries = Array.isArray(doc.entry_zones) ? doc.entry_zones : []
+    // A call's band, read at its near edge — the only place `lower`/`upper` are still spoken.
+    const first   = entries.find(Boolean)
+    const nearest = typeof first?.lower === 'number' ? first.lower
+        : (typeof first?.upper === 'number' ? first.upper : null)
     return {
         kind: 'call',
         id: doc.id,
@@ -71,8 +83,8 @@ export function callToWatchRow(doc) {
         status: doc.status ?? null,
         updatedAt: _ms(doc.savedAt) ?? _ms(doc.created_at),
         detail: {
-            entryZones: Array.isArray(doc.entry_zones) ? doc.entry_zones.length : 0,
-            nearestEntry: _firstZone(doc.entry_zones),
+            entryLegs: entries.length,
+            nearestEntry: nearest,
             rr: doc.rr ?? null,
             conviction: doc.conviction ?? null,
             validUntil: doc.valid_until ?? null,
@@ -90,9 +102,9 @@ function _scenarioRow(sc, doc) {
     return {
         id: sc?.id ?? null,
         name: sc?.name ?? null,
-        entry: _firstZone(sc?.entry_zones),
-        stop: _firstZone(sc?.stop_zones),
-        tp: _firstZone(sc?.tp_zones),
+        entry: _firstLeg(sc?.entry_legs),
+        stop: _firstLeg(sc?.stop_legs),
+        tp: _firstLeg(sc?.target_legs),
         quantity: sc?.quantity ?? null,
         rr: sc?.rr ?? null,
         armed: sc?.id != null && sc.id === (doc?.armed_scenario_id ?? null),
@@ -103,11 +115,11 @@ function _scenarioRow(sc, doc) {
 }
 
 /**
- * A Mentor setup → a row. Setups carry their own stop/tp zones, which a call leaves to its tree.
+ * A Mentor setup → a row. Setups carry their own stop/target legs, which a call leaves to its tree.
  *
  * The flat `nearestEntry`/`stop`/`firstTp`/`rr` are the ARMED scenario's (else the first authored) —
  * they read the document's execution projection, which is exactly that. They are not redundant with
- * `scenarios`: userData.tools._zone reads these keys, and an agent asked "where is my NVDA setup"
+ * `scenarios`: userData.tools reads these keys, and an agent asked "where is my NVDA setup"
  * wants one answer rather than a menu.
  */
 export function setupToWatchRow(doc) {
@@ -122,10 +134,10 @@ export function setupToWatchRow(doc) {
         status: doc.status ?? null,
         updatedAt: _ms(doc.savedAt),
         detail: {
-            entryZones: Array.isArray(doc.entry_zones) ? doc.entry_zones.length : 0,
-            nearestEntry: _firstZone(doc.entry_zones),
-            stop: _firstZone(doc.stop_zones),
-            firstTp: _firstZone(doc.tp_zones),
+            entryLegs: Array.isArray(doc.entry_legs) ? doc.entry_legs.length : 0,
+            nearestEntry: _firstLeg(doc.entry_legs),
+            stop: _firstLeg(doc.stop_legs),
+            firstTp: _firstLeg(doc.target_legs),
             rr: doc.rr ?? null,
             conviction: doc.conviction ?? null,
             validUntil: doc.valid_until ?? null,

@@ -18,8 +18,8 @@ const PLAN = {
     trade_mode: 'discretionary', timeframe: '1hr', market_cap: 'large',
     scenarios: [{
         id: 's1',
-        entry_zones: [{ id: 'ez1', price: 238, quantity: 100 }],
-        stop_zones:  [{ id: 'sz1', price: 234 }],
+        entry_legs: [{ id: 'ez1', price: 238, quantity: 100 }],
+        stop_legs:  [{ id: 'sz1', price: 234 }],
         conditions: [
             { id: 's1c1', text: '15min close above VWAP', weight: 'primary', mode: 'measured', persistence: 'live' },
             { id: 's1c2', text: 'a false break down at the prior daily low', weight: 'confirming', mode: 'judgment', persistence: 'latching' },

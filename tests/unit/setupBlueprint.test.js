@@ -12,9 +12,9 @@ const A_SETUP = {
     conditions: [{ id: 'c1', text: 'holds above the 4hr VWAP', weight: 'primary', mode: 'measured', persistence: 'live' }],
     scenarios: [{
         id: 's1', name: 'the fade',
-        entry_zones: [{ id: 'e1', lower: 178, upper: 180, quantity: 50, note: 'Tuesday shelf' }],
-        stop_zones:  [{ id: 's1s', lower: 173, upper: 174, quantity: 50 }],
-        tp_zones:    [{ id: 't1', lower: 196, upper: 200, quantity: 50 }],
+        entry_legs: [{ id: 'e1', price: 180, quantity: 50, note: 'Tuesday shelf' }],
+        stop_legs:  [{ id: 's1s', price: 173, quantity: 50 }],
+        target_legs:    [{ id: 't1', price: 196, quantity: 50 }],
         conditions:  [{ id: 's1c1', text: 'sweep of the prior low first' }],
     }],
 }
@@ -32,10 +32,10 @@ test('a blueprint carries no size, at either end of the trip', () => {
 
     // In: even a blueprint that WAS handed a size — hand-edited, forged, or written by an older
     // client — cannot pass one through. This is the security half, not a tidy-up.
-    const sized = { ...bp, scenarios: [{ ...bp.scenarios[0], quantity: 999, entry_zones: [{ lower: 178, upper: 180, quantity: 999 }] }] }
+    const sized = { ...bp, scenarios: [{ ...bp.scenarios[0], quantity: 999, entry_legs: [{ price: 180, quantity: 999 }] }] }
     const setup = hydrated(sized)
     assert.equal(setup.scenarios[0].quantity, null)
-    assert.equal(setup.scenarios[0].entry_zones[0].quantity, null)
+    assert.equal(setup.scenarios[0].entry_legs[0].quantity, null)
 })
 
 test('a hydrated blueprint is never ready — it is blocked on quantity and nothing else', () => {
@@ -48,7 +48,7 @@ test('a hydrated blueprint is never ready — it is blocked on quantity and noth
 
     // …and typing the size is all it takes. If this ever fails, the recipient has been handed work
     // beyond "fill in the quantities", which is the whole promise of the flow.
-    setup.scenarios[0].entry_zones[0].quantity = 10
+    setup.scenarios[0].entry_legs[0].quantity = 10
     const done = setupReadiness(normalizeSetup(setup), true)
     assert.equal(done.ready, true, `still not ready after sizing: ${done.missing.join(', ')} / ${done.problems.join(', ')}`)
 })
@@ -62,9 +62,9 @@ test('the plan itself survives the round trip intact', () => {
     assert.equal(setup.trade_mode, 'smc')
     assert.equal(setup.timeframe, '1hr')
     assert.equal(setup.thesis, 'reclaim of the weekly shelf')
-    assert.deepEqual(setup.scenarios[0].entry_zones[0].lower, 178)
-    assert.deepEqual(setup.scenarios[0].tp_zones[0].upper, 200)
-    assert.equal(setup.scenarios[0].entry_zones[0].note, 'Tuesday shelf', 'the author’s word about a level is not re-derivable')
+    assert.equal(setup.scenarios[0].entry_legs[0].price, 180)
+    assert.equal(setup.scenarios[0].target_legs[0].price, 196)
+    assert.equal(setup.scenarios[0].entry_legs[0].note, 'Tuesday shelf', 'the author’s word about a level is not re-derivable')
     assert.equal(setup.conditions[0].text, 'holds above the 4hr VWAP')
     assert.equal(setup.conditions[0].mode, 'measured', 'a condition’s tags change how it is judged and must travel with it')
     assert.equal(setup.scenarios[0].conditions[0].text, 'sweep of the prior low first')
@@ -76,7 +76,7 @@ test('nothing personal rides along', () => {
         id: 'setup_1', userId: 'u_1', status: 'looking', mode: 'live', broker: 'ctrader',
         broker_symbol: 'US100', basis_offset: 1.5, accounts: [{ id: 'acc_1' }],
         event_risk: [{ date: '2026-09-01', label: 'earnings' }],
-        armed_scenario_id: 's1', armed_zone_id: 'e1',
+        armed_scenario_id: 's1', armed_leg_id: 'e1',
         monitor_state: { scenarios: { s1: { invalidation_status: 'fired' } } },
     }
     const bp = toBlueprint(owned, { at: 1 })
@@ -104,12 +104,12 @@ test('the way in travels: a limit setup does not come back as a conditional one'
 test('a target that only prints on a condition keeps that condition', () => {
     const gated = {
         ...A_SETUP,
-        scenarios: [{ ...A_SETUP.scenarios[0], tp_zones: [{ id: 't1', lower: 196, upper: 200, conditions: [{ id: 't1c1', text: 'the day closes above 195', weight: 'primary' }] }] }],
+        scenarios: [{ ...A_SETUP.scenarios[0], target_legs: [{ id: 't1', price: 196, conditions: [{ id: 't1c1', text: 'the day closes above 195', weight: 'primary' }] }] }],
     }
     const bp = toBlueprint(gated, { at: 1 })
-    assert.equal(bp.scenarios[0].tp_zones[0].conditions[0].text, 'the day closes above 195')
+    assert.equal(bp.scenarios[0].target_legs[0].conditions[0].text, 'the day closes above 195')
     const setup = hydrated(bp)
-    assert.equal(setup.scenarios[0].tp_zones[0].conditions[0].text, 'the day closes above 195')
+    assert.equal(setup.scenarios[0].target_legs[0].conditions[0].text, 'the day closes above 195')
     assert.equal(JSON.stringify(bp).includes('quantity'), false, 'still no size, even on a gated leg')
 })
 
@@ -120,14 +120,14 @@ test('no blueprint at all hydrates to the blank skeleton', () => {
         const setup = hydrated(empty)
         assert.ok(setup, 'the express form must open on nothing')
         assert.equal(setup.scenarios.length, 1, 'one empty way in, ready to be filled')
-        assert.deepEqual(setup.scenarios[0].entry_zones, [])
+        assert.deepEqual(setup.scenarios[0].entry_legs, [])
         assert.equal(setup.asset, '')
     }
 })
 
 test('a blank draft reports every gap, so the form can say what it wants', () => {
     const { missing } = setupReadiness(hydrated(null), false)
-    for (const want of ['asset', 'direction', 'horizon', 'entry zone', 'stop zone', 'target price', 'quantity', 'trading account']) {
+    for (const want of ['asset', 'direction', 'horizon', 'entry price', 'stop price', 'target price', 'quantity', 'trading account']) {
         assert.ok(missing.includes(want), `the blank form should be asking for ${want}; got: ${missing.join(', ')}`)
     }
 })
@@ -136,7 +136,7 @@ test('a blank draft reports every gap, so the form can say what it wants', () =>
 
 test('a level that could not be read is REPORTED, not silently dropped', () => {
     const bp = toBlueprint(A_SETUP, { at: 1 })
-    bp.scenarios[0].tp_zones.push({ id: 't2', lower: 'about 210', upper: null })
+    bp.scenarios[0].target_legs.push({ id: 't2', price: 'about 210' })
 
     const problems = blueprintProblems(bp, hydrated(bp))
     assert.equal(problems.length, 1)
@@ -184,28 +184,24 @@ test('hydrate tolerates junk where a plan should be', () => {
 })
 
 test('scenario ids are minted when absent, so zone ids stay document-unique', () => {
-    const setup = hydrated({ scenarios: [{ entry_zones: [{ lower: 1, upper: 2 }] }, { entry_zones: [{ lower: 3, upper: 4 }] }] })
+    const setup = hydrated({ scenarios: [{ entry_legs: [{ price: 2 }] }, { entry_legs: [{ price: 4 }] }] })
     assert.deepEqual(setup.scenarios.map(s => s.id), ['s1', 's2'])
 })
 
-test('an inverted band is sorted rather than dropped — the recipient typed nothing wrong', () => {
-    const setup = hydrated({ scenarios: [{ entry_zones: [{ lower: 180, upper: 178 }] }] })
-    assert.deepEqual(
-        [setup.scenarios[0].entry_zones[0].lower, setup.scenarios[0].entry_zones[0].upper],
-        [178, 180],
-    )
-})
-
-test('a single price collapses to an exact level, not a dropped stop', () => {
-    const setup = hydrated({ scenarios: [{ stop_zones: [{ price: 173.5 }] }] })
-    const z = setup.scenarios[0].stop_zones[0]
-    assert.deepEqual([z.lower, z.upper], [173.5, 173.5])
+test('a level arrives as the price it was sent as — nothing is re-derived on the way in', () => {
+    // Two tests used to live here: one that an inverted band was SORTED rather than dropped (the
+    // recipient typed nothing wrong), and one that a bare price collapsed to a zero-width zone. Both
+    // described the band shape. A leg is one number now, so the only question left is whether it
+    // survives the trip.
+    const setup = hydrated({ scenarios: [{ entry_legs: [{ price: 178 }], stop_legs: [{ price: 173.5 }] }] })
+    assert.equal(setup.scenarios[0].entry_legs[0].price, 178)
+    assert.equal(setup.scenarios[0].stop_legs[0].price, 173.5)
 })
 
 test('a dropped way in stops the per-zone report, rather than misreading the one after it', () => {
     // Scenario 0 is junk and is dropped, so survived[0] IS what was sent[1]. Comparing them by
     // position would invent zone losses out of a premise that arrived whole.
-    const bp = { scenarios: [null, { entry_zones: [{ lower: 1, upper: 2 }], stop_zones: [{ lower: 0.5, upper: 0.6 }] }] }
+    const bp = { scenarios: [null, { entry_legs: [{ price: 2 }], stop_legs: [{ price: 0.6 }] }] }
     const problems = blueprintProblems(bp, hydrated(bp))
 
     assert.equal(problems.length, 1)

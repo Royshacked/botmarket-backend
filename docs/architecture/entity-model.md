@@ -32,8 +32,10 @@ Envelope {
 idea            → entry/stop/tp/additional trees, invalidation, conviction, rr, type
 call            → entry_zones, reference_levels, patterns, thesis, timeframe_ladder,
                   cadence, market_sensitivity, event_risk, position_state
-setup           → scenarios[{ entry_zones, stop_zones, tp_zones, conditions, validity }],
-                  conditions (root), ladder, entry_mode, validity, position_state,
+                  (ARCHIVED, and the last kind carrying `{lower, upper}` bands: the documents
+                   are frozen, so they keep the shape `setup` left on 2026-09-24)
+setup           → scenarios[{ entry_legs, stop_legs, target_legs, conditions, validity }],
+                  conditions (root), pace_rungs, entry_mode, validity, position_state,
                   monitor_state.{ guards[], timeframe, last_assessment, dormant, cost }
 portfolio_item  → allocationRatio, targetWeight, thesis, sector, conviction, conviction_history
 ```

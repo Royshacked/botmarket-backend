@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import {
     callToWatchRow, setupToWatchRow, portfolioToWatchRow, scanToWatchRow, coverageToWatchRow,
 } from '../../services/entity/toWatchRow.js'
-import { normalizeZone } from '../../services/setup.schema.js'
+import { normalizeLeg } from '../../services/setup.schema.js'
 
 // The reporting-tier projection: any owner-scoped artifact → one watch-list row.
 //
@@ -15,7 +15,9 @@ import { normalizeZone } from '../../services/setup.schema.js'
 const call = {
     id: 'c1', asset: 'NVDA', bias: 'long', status: 'looking', savedAt: 1000,
     thesis: 'reclaim of the range high', rr: 2.4, conviction: 'high', valid_until: '2026-08-30', mode: 'discretionary',
-    entry_zones: [{ id: 'z1', lower: 170, upper: 172 }, { id: 'z2', lower: 165, upper: 166 }],
+    // A call is a FROZEN Kairos document and still carries the band shape — nothing authors one,
+    // so `callToWatchRow` is the last reader of `lower`/`upper` in the app.
+    entry_zones: [{ id: 'z1', lower: 170, upper: 172 }, { id: 'z2', lower: 166, upper: 168 }],
     // Everything below must NOT survive the projection.
     chat_state: { messages: [{ role: 'user', content: 'a whole past conversation' }] },
     reference_levels: [{ px: 180 }], patterns: ['bull flag'],
@@ -29,8 +31,8 @@ test('a call keeps what a reader needs and drops the bulk', () => {
     assert.equal(row.direction, 'long', "bias is the call's word for direction")
     assert.equal(row.status, 'looking')
     assert.equal(row.detail.rr, 2.4)
-    assert.deepEqual(row.detail.nearestEntry, { low: 170, high: 172 })
-    assert.equal(row.detail.entryZones, 2, 'the count, not the zones themselves')
+    assert.equal(row.detail.nearestEntry, 170, "an archived band, read at the edge price reaches")
+    assert.equal(row.detail.entryLegs, 2, 'the count, not the levels themselves')
 })
 
 test('a stale transcript never rides along — this is the correctness one', () => {
@@ -61,11 +63,11 @@ test('no thesis falls back to something readable rather than empty', () => {
 test('a setup carries its own stop and target, which a call leaves to its tree', () => {
     const row = setupToWatchRow({
         id: 's1', asset: 'SPY', direction: 'long', status: 'waiting', savedAt: 2000,
-        entry_zones: [{ lower: 500, upper: 502 }], stop_zones: [{ lower: 495, upper: 495 }], tp_zones: [{ lower: 520, upper: 522 }],
+        entry_legs: [{ price: 502 }], stop_legs: [{ price: 495 }], target_legs: [{ price: 522 }],
         rr: 3, timeframe: '4h',
     })
-    assert.deepEqual(row.detail.stop, { low: 495, high: 495 })
-    assert.deepEqual(row.detail.firstTp, { low: 520, high: 522 })
+    assert.equal(row.detail.stop, 495)
+    assert.equal(row.detail.firstTp, 522)
     assert.equal(row.detail.timeframe, '4h')
 })
 
@@ -76,12 +78,12 @@ test('a row shows every scenario, and says which one is armed', () => {
     const row = setupToWatchRow({
         id: 's1', asset: 'NVDA', direction: 'long', status: 'looking', savedAt: 2000,
         armed_scenario_id: 's2',
-        entry_zones: [{ lower: 244, upper: 244.9 }], stop_zones: [{ lower: 241, upper: 241.8 }], rr: 2.4,
+        entry_legs: [{ price: 244.9 }], stop_legs: [{ price: 241.8 }], rr: 2.4,
         scenarios: [
-            { id: 's1', name: 'false break', entry_zones: [{ lower: 237.8, upper: 238.6 }],
-              stop_zones: [{ lower: 234.8, upper: 235.9 }], tp_zones: [{ lower: 246, upper: 247.2 }], quantity: 100, rr: 1.95 },
-            { id: 's2', name: 'break and go', entry_zones: [{ lower: 244, upper: 244.9 }],
-              stop_zones: [{ lower: 241, upper: 241.8 }], tp_zones: [{ lower: 252, upper: 253.5 }], quantity: 60, rr: 2.4 },
+            { id: 's1', name: 'false break', entry_legs: [{ price: 238.6 }],
+              stop_legs: [{ price: 234.8 }], target_legs: [{ price: 246 }], quantity: 100, rr: 1.95 },
+            { id: 's2', name: 'break and go', entry_legs: [{ price: 244.9 }],
+              stop_legs: [{ price: 241.8 }], target_legs: [{ price: 252 }], quantity: 60, rr: 2.4 },
         ],
         monitor_state: { scenarios: { s1: { invalidation_status: 'fired' } } },
     })
@@ -89,17 +91,17 @@ test('a row shows every scenario, and says which one is armed', () => {
     assert.deepEqual(row.detail.scenarios.map(s => s.name), ['false break', 'break and go'])
     assert.deepEqual(row.detail.scenarios.map(s => s.armed), [false, true])
     assert.equal(row.detail.scenarios[0].invalidation, 'fired', 'a dead premise must not read as live')
-    assert.deepEqual(row.detail.scenarios[1].entry, { low: 244, high: 244.9 })
+    assert.equal(row.detail.scenarios[1].entry, 244.9)
     assert.deepEqual(row.detail.scenarios.map(s => s.quantity), [100, 60], 'never added together')
     // The flat levels stay the ARMED premise's — one answer for "where is my NVDA setup".
-    assert.deepEqual(row.detail.nearestEntry, { low: 244, high: 244.9 })
+    assert.equal(row.detail.nearestEntry, 244.9)
     assert.equal(row.detail.rr, 2.4)
 })
 
 test('a scenario-less document still projects a row', () => {
-    const row = setupToWatchRow({ id: 's1', asset: 'SPY', direction: 'long', entry_zones: [{ lower: 500, upper: 502 }] })
+    const row = setupToWatchRow({ id: 's1', asset: 'SPY', direction: 'long', entry_legs: [{ price: 502 }] })
     assert.deepEqual(row.detail.scenarios, [])
-    assert.deepEqual(row.detail.nearestEntry, { low: 500, high: 502 })
+    assert.equal(row.detail.nearestEntry, 502)
 })
 
 test('a book reports null status — it has none of its own — and counts what is in it', () => {
@@ -153,26 +155,23 @@ test('a doc with no id is dropped rather than becoming an unaddressable row', ()
     assert.equal(portfolioToWatchRow({ name: 'no id' }), null)
 })
 
-// REGRESSION. _firstZone read `low`/`high`, but a zone's edges are `lower`/`upper` — the spelling
-// BOTH normalizers emit (setup.schema.normalizeZone, kairos.service.normalizeZones). Every level on
-// every setup and call row was therefore null, including the agent-facing watch list, where they
-// went missing rather than reading wrong. The fixtures above used to say low/high as well, so the
-// test agreed with the bug and only production data disagreed — hence the shape is asserted here
-// against the normalizer's own output rather than a hand-written literal.
-test('zone bounds are read from the shape the normalizers actually emit', () => {
-    const zone = normalizeZone({ lower: 188, upper: 190.5 }, 0, 'ez')
-    assert.deepEqual(zone.lower, 188)   // guard: if the normalizer ever renames its edges, this fails first
+// REGRESSION, and it is the reason this test reads the NORMALIZER rather than a literal. `_firstZone`
+// read `low`/`high` while a zone's edges were `lower`/`upper`, so every level on every setup and call
+// row was null — including the agent-facing watch list, where they went missing rather than reading
+// wrong. The fixtures said low/high too, so the test agreed with the bug and only production data
+// disagreed. Same guard, new shape: if the normaliser ever renames `price`, this fails first.
+test('a level is read from the shape the normaliser actually emits', () => {
+    const leg = normalizeLeg({ price: 190.5 }, 0, 'ez')
+    assert.equal(leg.price, 190.5)
 
-    const setup = setupToWatchRow({ id: 's', asset: 'NVDA', direction: 'long', entry_zones: [zone] })
-    assert.deepEqual(setup.detail.nearestEntry, { low: 188, high: 190.5 })
-
-    const call = callToWatchRow({ id: 'c', asset: 'NVDA', bias: 'long', entry_zones: [zone] })
-    assert.deepEqual(call.detail.nearestEntry, { low: 188, high: 190.5 })
+    const setup = setupToWatchRow({ id: 's', asset: 'NVDA', direction: 'long', entry_legs: [leg] })
+    assert.equal(setup.detail.nearestEntry, 190.5, 'one number, not a pair the caller has to collapse')
 })
 
-test('missing zones degrade to null, not to a half-built object', () => {
+test('missing levels degrade to null, not to a half-built object', () => {
     const row = callToWatchRow({ id: 'c', asset: 'X', entry_zones: [] })
     assert.equal(row.detail.nearestEntry, null)
-    assert.equal(row.detail.entryZones, 0)
+    assert.equal(row.detail.entryLegs, 0)
     assert.equal(callToWatchRow({ id: 'c', asset: 'X', entry_zones: [{ id: 'z' }] }).detail.nearestEntry, null)
+    assert.equal(setupToWatchRow({ id: 's', asset: 'X', entry_legs: [{ id: 'z' }] }).detail.nearestEntry, null)
 })

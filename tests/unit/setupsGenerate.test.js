@@ -12,9 +12,9 @@ const DRAFT = {
     asset: 'NVDA', direction: 'long', type: 'swing', trade_mode: 'smc', timeframe: '1hr',
     thesis: 'Sweep and reclaim.',
     conditions: [{ id: 'c1', text: 'CHoCH up on the 15min after the sweep', weight: 'primary', mode: 'measured', persistence: 'latching' }],
-    entry_zones: [{ lower: 237.8, upper: 238.6, quantity: 100 }],
-    stop_zones:  [{ lower: 234.8, upper: 235.9, quantity: 100 }],
-    tp_zones:    [{ lower: 246.0, upper: 247.2, quantity: 100 }],
+    entry_legs: [{ price: 238.6, quantity: 100 }],
+    stop_legs:  [{ price: 234.8, quantity: 100 }],
+    target_legs:    [{ price: 246.0, quantity: 100 }],
 }
 const ACCTS = [{ id: 'a1', broker: 'ctrader' }]
 
@@ -23,22 +23,22 @@ test('a complete setup on a marked account passes the gate', () => {
 })
 
 test('an unsized setup is rejected — an order needs a quantity', () => {
-    const s = normalizeSetup({ ...DRAFT, entry_zones: [{ lower: 237.8, upper: 238.6 }] })
+    const s = normalizeSetup({ ...DRAFT, entry_legs: [{ price: 238.6 }] })
     assert.equal(validateSetup(s, 'ctrader', ACCTS).reason, 'missing_quantity')
 })
 
-test('a setup with no stop zone never reaches the broker', () => {
-    const s = normalizeSetup({ ...DRAFT, stop_zones: [] })
-    assert.equal(validateSetup(s, 'ctrader', ACCTS).reason, 'missing_stop_zone')
+test('a setup with no stop price never reaches the broker', () => {
+    const s = normalizeSetup({ ...DRAFT, stop_legs: [] })
+    assert.equal(validateSetup(s, 'ctrader', ACCTS).reason, 'missing_stop_price')
 })
 
-test('a setup with no entry zone is rejected', () => {
-    const s = normalizeSetup({ ...DRAFT, entry_zones: [] })
+test('a setup with no entry price is rejected', () => {
+    const s = normalizeSetup({ ...DRAFT, entry_legs: [] })
     assert.equal(validateSetup(s, 'ctrader', ACCTS).ok, false)
 })
 
 // PRESENCE, not checkability: a setup with nothing declared arms with nothing to verify against its
-// thesis, and Talos falls through to judging price structure at the zone alone. Whether a condition
+// thesis, and Talos falls through to judging price structure at the level alone. Whether a condition
 // is a good one stays Mentor's gate, in the prompt.
 test('a setup with no conditions has nothing for the monitor to check', () => {
     const s = normalizeSetup({ ...DRAFT, conditions: [] })
@@ -85,15 +85,18 @@ test('live and manual need a marked account; paper derives its own', () => {
     assert.equal(validateSetup(normalizeSetup(DRAFT), 'paper', []).ok, true, 'paper needs no marked account')
 })
 
-test('an inverted zone is refused rather than armed as a gate that can never trip', () => {
-    // normalizeSetup sorts edges, so reaching the gate inverted means it was bypassed.
+test('an UNPRICED leg is refused rather than armed as a gate that can never trip', () => {
+    // This was "an inverted zone is refused" — `lower > upper` meant the normaliser had been
+    // bypassed. With one number per leg the only way to be malformed is to have no price, and the
+    // gate must still catch it: a leg with no price is a stop the panel draws and the broker never
+    // rests (docs/desks/mentor-talos.md).
     const s = normalizeSetup(DRAFT)
-    s.entry_zones[0] = { ...s.entry_zones[0], lower: 240, upper: 238 }
-    assert.equal(validateSetup(s, 'ctrader', ACCTS).reason, 'invalid_zone')
+    s.scenarios[0].entry_legs[0] = { ...s.scenarios[0].entry_legs[0], price: null }
+    assert.equal(validateSetup(s, 'ctrader', ACCTS).reason, 'invalid_leg')
 })
 
-test('a zero-width zone is allowed — it is an exact level, not a broken band', () => {
-    const s = normalizeSetup({ ...DRAFT, stop_zones: [{ price: 235, quantity: 100 }] })
+test('an exact level is what every leg is — and it is allowed', () => {
+    const s = normalizeSetup({ ...DRAFT, stop_legs: [{ price: 235, quantity: 100 }] })
     assert.equal(validateSetup(s, 'ctrader', ACCTS).ok, true)
 })
 
@@ -115,7 +118,7 @@ test('a setup speaks the ONE shared ladder — no private words', () => {
     for (const dead of ['unarmed', 'watching', 'ready', 'in_position']) {
         assert.equal(SETUP_STATUSES.has(dead), false, `setups must not speak '${dead}'`)
     }
-    // Price sitting inside a zone is armed_zone_id on a `looking` setup — a detail, not a rung.
+    // Price sitting inside a zone is armed_leg_id on a `looking` setup — a detail, not a rung.
     assert.ok(SETUP_STATUSES.has('looking'))
 })
 
@@ -147,12 +150,12 @@ test('an edit that never touched the conditions leaves the findings alone', () =
 
 const RIVALS = normalizeSetup({
     ...DRAFT,
-    entry_zones: undefined, stop_zones: undefined, tp_zones: undefined,
+    entry_legs: undefined, stop_legs: undefined, target_legs: undefined,
     scenarios: [
-        { id: 's1', name: 'false break', entry_zones: [{ lower: 237.8, upper: 238.6, quantity: 100 }],
-          stop_zones: [{ lower: 234.8, upper: 235.9 }], tp_zones: [{ lower: 246, upper: 247.2 }] },
-        { id: 's2', name: 'break and go', entry_zones: [{ lower: 244, upper: 244.9, quantity: 60 }],
-          stop_zones: [{ lower: 241, upper: 241.8 }], tp_zones: [{ lower: 252, upper: 253.5 }] },
+        { id: 's1', name: 'false break', entry_legs: [{ price: 238.6, quantity: 100 }],
+          stop_legs: [{ price: 234.8 }], target_legs: [{ price: 246 }] },
+        { id: 's2', name: 'break and go', entry_legs: [{ price: 244.9, quantity: 60 }],
+          stop_legs: [{ price: 241.8 }], target_legs: [{ price: 252 }] },
     ],
 })
 
@@ -163,8 +166,8 @@ test('a two-premise setup passes the gate on its own terms', () => {
 test('a malformed RIVAL is refused, not just the projected premise', () => {
     // Only s1 is projected onto the flat fields, so checking those alone would arm a gate on s2
     // that can never trip.
-    const broken = { ...RIVALS, scenarios: [RIVALS.scenarios[0], { ...RIVALS.scenarios[1], stop_zones: [{ lower: 250, upper: 240 }] }] }
-    assert.equal(validateSetup(broken, 'ctrader', ACCTS).reason, 'invalid_zone')
+    const broken = { ...RIVALS, scenarios: [RIVALS.scenarios[0], { ...RIVALS.scenarios[1], stop_legs: [{ id: 'x', price: null }] }] }
+    assert.equal(validateSetup(broken, 'ctrader', ACCTS).reason, 'invalid_leg')
 })
 
 test('the armed premise keeps its entry, stop and size through an in-position edit', () => {
@@ -173,18 +176,18 @@ test('the armed premise keeps its entry, stop and size through an in-position ed
     const cur = { ...RIVALS, armed_scenario_id: 's2', status: 'long' }
     const next = RIVALS.scenarios.map(sc => ({
         ...sc,
-        entry_zones: [{ lower: 1, upper: 2, quantity: 999 }],
-        stop_zones:  [{ lower: 3, upper: 4 }],
-        tp_zones:    [{ lower: 300, upper: 301 }],
+        entry_legs: [{ price: 2, quantity: 999 }],
+        stop_legs:  [{ price: 3 }],
+        target_legs:    [{ price: 300 }],
         quantity: 999,
     }))
 
     const merged = mergeInPositionScenarios(cur, next)
     const armed  = merged.find(s => s.id === 's2')
-    assert.deepEqual(armed.entry_zones, RIVALS.scenarios[1].entry_zones, 'the live entry is not rewritable')
-    assert.deepEqual(armed.stop_zones,  RIVALS.scenarios[1].stop_zones)
+    assert.deepEqual(armed.entry_legs, RIVALS.scenarios[1].entry_legs, 'the live entry is not rewritable')
+    assert.deepEqual(armed.stop_legs,  RIVALS.scenarios[1].stop_legs)
     assert.equal(armed.quantity, 60, 'nor is the exposure')
-    assert.deepEqual(armed.tp_zones, [{ lower: 300, upper: 301 }], 'but the target is')
+    assert.deepEqual(armed.target_legs, [{ price: 300 }], 'but the target is')
 
     const rival = merged.find(s => s.id === 's1')
     assert.equal(rival.quantity, 999, 'a rival premise had nothing placed on it — edit it freely')
@@ -203,7 +206,7 @@ test('a latched SCENARIO condition survives an edit that never reworded it', () 
 })
 
 test('with nothing armed, an in-position merge holds nothing back', () => {
-    const next = [{ id: 's1', entry_zones: [{ lower: 1, upper: 2, quantity: 5 }] }]
+    const next = [{ id: 's1', entry_legs: [{ price: 2, quantity: 5 }] }]
     assert.deepEqual(mergeInPositionScenarios({ ...RIVALS, armed_scenario_id: null }, next), next)
     assert.equal(mergeInPositionScenarios(RIVALS, undefined), undefined, 'untouched → nothing to write')
 })
@@ -292,7 +295,7 @@ test('disarming a hit limit setup cancels the order and clears every armed field
         assert.deepEqual(cancelled, [['ctrader', 'u1', 'a1', 'ord-1']], 'the broker was told')
         const $set = f.sets.at(-1)
         assert.equal($set.status, 'waiting')
-        for (const k of ['orderState', 'pendingOrder', 'brokerOrders', 'entryTriggeredAt', 'ordersPlacedAt', 'armed_zone_id', 'armed_scenario_id']) {
+        for (const k of ['orderState', 'pendingOrder', 'brokerOrders', 'entryTriggeredAt', 'ordersPlacedAt', 'armed_leg_id', 'armed_scenario_id']) {
             assert.equal($set[k], null, `${k} is cleared`)
         }
     } finally { restore() }

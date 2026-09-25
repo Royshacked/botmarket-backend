@@ -21,7 +21,7 @@ const _handle = makeHandle(LOG)
 // "fix it in the chat" — a 400 carrying the slug, never a 500.
 const SETUP_REASONS = {
     invalid_setup: [400, 'The draft is not a usable setup'],
-    invalid_zone:  [400, 'A zone is inverted or not numeric'],
+    invalid_leg:   [400, 'A level is missing its price'],
     no_venue:      [400, 'Mark a trading account before generating'],
     // Management refusals. `confirm_order` is not an error the user caused: a printing second leg is
     // placed by confirming its order, so the client is being told WHERE the action lives.
@@ -35,7 +35,7 @@ const SETUP_REASONS = {
     invalid_conversation: [400, 'Pick a conversation to share into'],
     bot_recipient:        [400, 'A setup can only be shared with another user'],
 }
-// Named reasons win over the prefix rules — `invalid_setup` / `invalid_zone` have their own copy and
+// Named reasons win over the prefix rules — `invalid_setup` / `invalid_leg` have their own copy and
 // must not be swallowed by the generic `invalid_*` passthrough below them.
 const setupReason = (reason) =>
     SETUP_REASONS[reason]

@@ -190,7 +190,12 @@ is a bigger prompt and a worse answer than a narrow one.
 
 ---
 
-## Zones
+## Levels
+
+> **2026-09-24: there are no zones.** A leg is a PRICE (`entry_legs` / `stop_legs` / `target_legs`,
+> each `{price}`) and `zoneGate` is `legGate`. This section was written when a target was a band, and
+> the design question it answers — *entry and exit compare differently* — outlived the shape, so it
+> is kept with the old vocabulary rather than rewritten into a plan nobody built.
 
 **Targets become zones**, `lower`/`upper`, the same shape as entry zones — so Tier 1's exit gate is
 the same `zoneGate` as entry. One mechanism, parameterised. Not two.
@@ -281,7 +286,7 @@ Reuse, do not fork:
   is computed; no cadence code.
 - `postCard` → `postBotCard` — one card transport (bots); `postUserCard` — its human-sender twin,
   the pipe a shared setup travels through (see mentor-talos.md "Sharing a setup").
-- `zoneGate` — one function for entry and exit, parameterised by comparison direction.
+- `legGate` — one function for entry and exit, parameterised by comparison direction.
 - `deferIfClosed` / `originRegistry` — the off-hours queue.
 
 Stays per-desk — **share the pipe, not the judgment**: the six questions, their verdict sets, and
@@ -348,8 +353,9 @@ not a guess.
 live positions and refactoring it would touch running money for a caller scheduled for retirement.
 **Delete the copy when Hermes sleeps** — the block carries the same note. Three things differ and
 are the reason a blind copy would have been wrong: cadence is `{min,max}` not `{min_gap_min,…}`;
-targets are zones reduced to their near edge, so `scale_out` fires at-or-beyond; and the stop is the
-widest edge across `stop_zones`, chosen by price.
+targets are reduced to their near edge, so `scale_out` fires at-or-beyond; and the stop is the
+furthest across `stop_legs`, chosen by price. (Those two edge terms described the band shape, deleted
+2026-09-24 — a leg is a price. The copy itself is archived code and is left exactly as it ran.)
 
 - **Coherence is done.** `rangeProblems` (`setup.schema.js`) checks it per scenario and blocks
   Generate through `setupReadiness().problems`. The `mentor-talos.md` Open list saying otherwise

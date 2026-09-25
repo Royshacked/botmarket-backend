@@ -2,6 +2,17 @@
 
 The user's own trade, built with **Mentor** and watched by **Talos**.
 
+> **THERE IS NO ZONE (2026-09-24).** A leg is a PRICE. `entry_zones` / `stop_zones` / `tp_zones`,
+> each `{lower, upper}`, are now `entry_legs` / `stop_legs` / `target_legs`, each `{price}` — and
+> with them went `zoneLevel(zone, isLong, which)` and every edge rule it threaded through sizing,
+> R:R, the resting orders, the prompts and the UI. Mentor stopped DRAWING bands on 2026-08-22; the
+> storage outlived that by a month because renaming it meant migrating live documents. **The
+> migration was a deletion**: all 24 setups in both databases were wiped rather than converted (the
+> user's call), so nothing reads the old shape and a document still carrying edges has no legs at
+> all. [Legs](#legs--a-price-and-nothing-else) is the contract. The `call` kind keeps its bands —
+> it is archived, its documents are frozen, and `callToWatchRow` / `deriveCallOverlay` are their
+> last readers.
+>
 > **A WAKE IS CHEAP BY DEFAULT (2026-09-23).** Talos still wakes on every candle close, but what a
 > wake COSTS is now one of three: the full read, a CHEAP numbers-only read that decides whether the
 > full one is worth paying for, or nothing at all. Every expensive read declares how many closes
@@ -65,15 +76,15 @@ live positions — run on their own path until they close naturally.
 
 ---
 
-## A price zone is a SCENARIO
+## A LEVEL BELONGS TO A STORY
 
 The load-bearing decision, and the one worth stating first because everything else follows from it.
 
-A setup does not carry three flat lists (`entry_zones` / `stop_zones` / `tp_zones`). It carries
+A setup does not carry three flat lists (`entry_legs` / `stop_legs` / `target_legs`). It carries
 **scenarios**, each owning its own entry, stop, targets, conditions and validity range — because a
 level only means something inside a story. "If it breaks 420 I'm long, if it fails at 415 I'm
-short" is two trades, and flattening them into one list of zones loses which stop belongs to which
-and what price would prove each one dead.
+short" is two trades, and flattening them into one list loses which stop belongs to which and what
+price would prove each one dead.
 
 > **RIVALS, NOT LEGS.** The first scenario to fulfil takes the WHOLE trade; the rest die with it.
 
@@ -82,15 +93,58 @@ them would size the position as if both stories could be true at once, which is 
 nobody intended. Within one scenario, several entries CAN sum (that is scaling in, and
 `scenarioQuantity` reserves the sum for it); across scenarios, never.
 
-The flat zone lists survive only as the **execution projection** (`projectScenario`) — what the
-order layer reads once a scenario wins. Authored shape and executed shape are different things.
+The flat lists survive only as the **execution projection** (`projectScenario`) — what the order
+layer reads once a scenario wins. Authored shape and executed shape are different things.
+
+## Legs — a price, and nothing else
+
+> **BUILT 2026-09-24.** The shape, three years of edge rules, and the word "zone" — removed.
+
+A leg is `{ id, price, quantity, note, conditions }`. That is the whole of it.
+
+**The band was never a trading idea.** It was compensation for a monitor that read the SPOT price
+every half hour, so a level could only be caught if price happened to be sitting on it at the moment
+of a lazy glance ([Guards](#guards--exact-prices-not-bands)). The guards build retired that reason in
+August 2026 — the sweep tests the RANGE since its last pass, so an exact price is as catchable as a
+wide band — and Mentor stopped drawing bands the same day. Only the storage stayed, because
+renaming two keys meant migrating live armed documents for what looked like a cosmetic gain.
+
+**It was never only cosmetic**, and that is why this is worth a section. Every consumer had to know
+which EDGE a leg acted at, so `zoneLevel(zone, isLong, which)` was threaded through sizing, R:R, the
+resting orders, both prompts and the UI — and each of those was a place the wrong edge could be
+picked. A stop the user put at 306, widened to 305.2–306.4, rested at 305.2 on a long and 306.4 on a
+short: the same sentence, two different amounts of money, decided by a field they never saw. One
+price per leg deletes that class of bug outright, along with `zoneLevel`'s arguments, the edge
+selection in `stopEdge` / `targetEdges` / `routeSetupLegs`, and the "far edge" reasoning in four docs.
+
+**Two numbers became one, and one rule had to break.** `computeRR` read a target's NEAR edge (so an
+advertised r:r could never flatter) while the limit RESTED at the far one — so the plan at the
+broker was quietly better than the plan on the card, and the routing test had been weakened from an
+equality to "never worse". They are one number now and the strong assertion is back. What survives
+of the pessimism is the part that was never about width: risk runs to the FURTHEST stop, reward to
+the NEAREST target.
+
+**What the gates do now.** `legGate` asks `legPrice(leg) === price`, which is what containment
+already meant against a zero-width band — behaviour-preserving, not a new rule. It resolves about as
+rarely as it did before (2 of 70 journal rows ever carried a resolved level), and that is not a fault
+to fix: a spot quote landing exactly on an authored price is a coincidence, the guard sweep is what
+PROVES price reached a level, and `enter` stopped depending on either of them on 2026-09-23.
+
+**Renamed with it**, so one vocabulary reaches the whole document: `armed_zone_id` → `armed_leg_id`,
+the journal's `zone_id` → `leg_id`, `entry.legs[].zone_id` → `leg_id`, `normalizeZone` →
+`normalizeLeg`, `zoneGate` → `legGate`, `routeSetupZones` → `routeSetupLegs`, and the Generate
+refusal `invalid_zone` → `invalid_leg`.
+
+**The one place edges still live** is `validity` — `{ lower, upper, approach }` — and it is not a
+leftover. A validity range is a genuine RANGE: the span outside which the setup is dead. It was
+never a level wearing a band.
 
 ---
 
 ## Conditions — the instruction sheet
 
 Each condition carries a `weight` (`primary` │ `confirming`), a `mode` (`measured` │
-`discretionary`) and a `persistence` (`live` │ `latching`).
+`judgment`) and a `persistence` (`live` │ `latching`).
 
 **A condition is what a read costs, and the only thing that does.** Since the per-candle build a
 condition is not merely an instruction Talos judges — it is the reason Talos is running at all. The
@@ -106,7 +160,7 @@ evaluate; Talos is not expected to interpret an unfalsifiable instruction at wak
 condition is caught at build, where the user is present to sharpen it — not at 3am, where the only
 options are guess or stall.
 
-**Discretion is not a defect.** `discretionary` is a first-class mode, not a lesser `measured`. Some
+**Discretion is not a defect.** `judgment` is a first-class mode, not a lesser `measured`. Some
 real instructions ("wait for the sellers to give up") are judgments; forcing them into a numeric
 threshold does not make them more rigorous, it makes them wrong precisely.
 
@@ -293,10 +347,21 @@ level that would make you say something different right now.*
 **The memo** carries forward why a guard was set, so a wake three hours later resumes a judgment
 instead of re-deriving the situation from scratch.
 
-**`lower` / `upper` stay as the storage shape.** Every level authored now is zero-width, so a `price`
-field would read better — and renaming it would mean migrating live armed documents for a cosmetic
-gain. `normalizeZone` accepts `{ "price": 312 }` on the way in and collapses it, so the model and the
-UI both speak prices; only the stored keys are two.
+**`lower` / `upper` stayed as the storage shape until 2026-09-24**, on the reasoning that renaming
+them meant migrating live armed documents for a cosmetic gain. [Legs](#legs--a-price-and-nothing-else)
+is what replaced them and why that reasoning did not survive contact with the edge rules it kept
+alive. The paragraphs below are the state before that.
+
+**And on the way OUT they never leave storage (2026-09-24).** That claim was half true for a year:
+Mentor authored prices and the UI showed them, but every Talos read was handed the stored keys raw —
+`JSON.stringify(entry_zones)` in the pre-entry block, the ARMED LEVEL and the cheap tier's PLAN
+LEVELS — so both tiers opened on `{"lower":238.2,"upper":238.2}` for a level written as 238.2. A
+band shape, taught to every model on every wake, by the desk that stopped drawing bands. One
+renderer now stands between the document and any prompt (`legText` / `legsText` in
+`assess.shared.js`, over `legPrice`), and the pre-entry block reads in the same sentence the
+in-position `WATCHED LEGS` always did: `- ENTRY [s1e1] at 238.2 (size 100)`. A leg that carries a
+rule is marked `· conditional` and its sentence is NOT inlined — pre-entry judges the entry
+conditions and nothing else, and an exit's words belong to the in-position read.
 
 ### A free poll NEVER writes
 
@@ -361,6 +426,13 @@ What the level still decides is WHICH leg (`firingLeg`): the one price is at whe
 to a specific zone, else the scenario's first unfilled leg. `hit` is still computed and still told to
 the model as ARMED LEVEL — entering far from your own entry is usually a worse trade — but that is
 the read's judgment, not the monitor's veto.
+
+**The gate outlived its own removal in the prompt, for a day (fixed 2026-09-24).** The code stopped
+vetoing on 2026-09-23 and the prompt's paragraph said so — *ARMED LEVEL … is information, not
+permission* — while the ARMED LEVEL line itself still ended `"enter" is not available` whenever price
+was not standing on a level. The instruction and the data contradicted each other on the same read,
+and the data line was the one that spoke at the exact moment the removal existed for. It now says
+where price is and nothing about what may be answered.
 
 **Why it had to go.** The shape that broke it is the commonest there is: price arrives, the
 conditions confirm two candles later. By then `clampGuards` has dropped the already-satisfied entry
@@ -641,7 +713,7 @@ no model, no card — so a setup filled at the close has its `position_state` be
   re-post a decision the user already has in front of them; `add_leg` sits below every protective
   verdict on purpose.
 - **`add_leg` builds the order plan for ONE leg** at that leg's size (`legQuantity`) and parks it
-  `awaiting_confirm`; `armed_zone_id` moves to the new leg so the fill stamps against the right
+  `awaiting_confirm`; `armed_leg_id` moves to the new leg so the fill stamps against the right
   zone. Whether to add while the trade presses its stop is the read's judgment, held by the prompt
   ("never to rescue a trade that is going against you") — the old code guard went with
   `positionGate`. Worth knowing if that reflex ever needs to come back as code.
