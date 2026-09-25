@@ -38,7 +38,7 @@ export async function streamAxl(req, res) {
                 ...sseAgentCallbacks(sendEvent),
             })
 
-            // route / routeSymbol / edit / opening — validated for this user by the shared tier.
+            // route / routeSymbol / edit / show / opening — validated for this user by the shared tier.
             const routing = routeFields(result, req.user.role)
             const { route } = routing
             return {

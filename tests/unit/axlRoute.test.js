@@ -11,6 +11,7 @@ import { axlAgentService } from '../../services/agents/axl.agent.service.js'
 import {
     splitRoute as _splitRoute, splitEdit as _splitEdit, cleanOpening as _cleanOpening, EDIT_KIND_DESKS,
     sanitizeRouteSymbol as _sanitizeRouteSymbol, sanitizeEditRef as _sanitizeEditRef, validateEdit as _validateEdit,
+    splitShow as _splitShow, validateShow as _validateShow, SHOW_KINDS,
     VALID_PIPELINES, EDIT_KINDS,
 } from '../../services/routing.util.js'
 import { ALL_EMIT_TAGS } from '../../services/llmStream.util.js'
@@ -124,6 +125,99 @@ test('validate edit: the whole hand-off survives, or none of it does', () => {
     assert.equal(_validateEdit({ kind: 'call', ref: 'a whole sentence', desk: 'trade' }), null, 'ref not a handle')
 })
 
+// ── the show tag: opening an item's own window, without changing it ───────────
+//
+// The third verb. A route opens a desk for new work, an edit reopens the CHAT that authored an
+// item, and a show opens the item's own detail window — the chart, the plan, the monitor's journal.
+// "Show me my trades" then "what's going on with that one" used to have only the edit tag to land
+// on, which sent a user who wanted to LOOK at a setup into Mentor, re-planning it.
+
+test('split show: the one kind with a window of its own, and its handle', () => {
+    assert.deepEqual(_splitShow('setup s1'), { kind: 'setup', ref: 's1' })
+    // No desk on the way out — a detail view belongs to none.
+    assert.equal(Object.hasOwn(_splitShow('setup s1'), 'desk'), false)
+})
+
+test('split show: tolerant separators, and a UUID survives its dashes', () => {
+    assert.deepEqual(_splitShow('Setup:3f9c'), { kind: 'setup', ref: '3f9c' })
+    assert.deepEqual(_splitShow(' setup , 1b4d-9f2c-aa01 '), { kind: 'setup', ref: '1b4d-9f2c-aa01' })
+})
+
+test('split show: a kind with no window, or half a tag, opens nothing', () => {
+    assert.equal(_splitShow('coverage c1'), null, 'coverage is read in its desk, not in a window')
+    assert.equal(_splitShow('portfolio p1'), null, 'a book is a list of holdings, not one document')
+    assert.equal(_splitShow('call c1'), null, 'the call page went with Kairos')
+    // The idea KIND is alive — it is the execution tier, and a holding is an idea document — but no
+    // read an agent makes ever names one, so a tag that could only be guessed at is not offered.
+    assert.equal(_splitShow('idea i1'), null, 'nothing hands Axl an idea id to quote')
+    assert.equal(_splitShow('setup'), null)
+    assert.equal(_splitShow('s1'), null)
+    assert.equal(_splitShow(''), null)
+    assert.equal(_splitShow(null), null)
+})
+
+test('validate show: the same handle gate as an edit, minus the desk', () => {
+    assert.deepEqual(_validateShow({ kind: 'setup', ref: 'NVDA' }), { kind: 'setup', ref: 'NVDA' })
+    assert.equal(_validateShow({ kind: 'setup', ref: 'the NVDA one' }), null, 'a phrase is not a handle')
+    assert.equal(_validateShow({ kind: 'coverage', ref: 'c1' }), null, 'kind has no window')
+    assert.equal(_validateShow({ kind: 'idea', ref: 'i1' }), null, 'and neither has a nameable id')
+    assert.equal(_validateShow(null), null)
+})
+
+test('every kind the prompt teaches as a show is one the controller accepts', () => {
+    const promptPath = join(dirname(fileURLToPath(import.meta.url)), '../../prompts/axl_system_prompt.md')
+    const prompt = readFileSync(promptPath, 'utf8')
+    const taught = [...prompt.matchAll(/<show>([a-z]+)[^<]*<\/show>/g)].map(m => m[1])
+
+    assert.ok(taught.length >= 1, 'the prompt still teaches the show tag')
+    for (const kind of new Set(taught)) {
+        assert.ok(SHOW_KINDS.has(kind), `the prompt teaches <show>${kind}</show> but the controller drops it`)
+    }
+})
+
+test('show is registered as an emit tag, or the first turn prints the id at the user', () => {
+    assert.ok(ALL_EMIT_TAGS.includes('show'))
+})
+
+test('turn: a show tag becomes the item to open, with no desk and no opening', async () => {
+    const result = await axlAgentService.chatStream({
+        messages: [{ role: 'user', content: "what's going on with my NVDA setup?" }],
+        _run: runWith('It armed on Tuesday and Talos is watching 182. <show>setup s1</show>'),
+    })
+    assert.deepEqual(result.show, { kind: 'setup', ref: 's1' })
+    assert.equal(result.route, null, 'a look is not a hand-off')
+    assert.equal(result.edit, null, 'and it is not an edit — nothing is being changed')
+    assert.equal(result.reply, 'It armed on Tuesday and Talos is watching 182.')
+})
+
+test('turn: a hand-off outranks a look — one destination per turn', async () => {
+    // Both tags on one turn would open a desk and a detail window at the same moment.
+    const routed = await axlAgentService.chatStream({
+        messages: [{ role: 'user', content: 'change it' }],
+        _run: runWith('Opening it in Mentor. <edit>setup s1</edit><show>setup s1</show>'),
+    })
+    assert.equal(routed.show, null)
+    assert.deepEqual(routed.edit, { kind: 'setup', ref: 's1', desk: 'assist' })
+
+    const toDesk = await axlAgentService.chatStream({
+        messages: [{ role: 'user', content: 'find me a trade' }],
+        _run: runWith('Off to Argus. <route>trade NVDA</route><show>setup s1</show>'),
+    })
+    assert.equal(toDesk.show, null)
+    assert.equal(toDesk.route, 'trade')
+})
+
+test('turn: a show keeps the user here, so the follow-up chips still stand', async () => {
+    // The opposite of a routing turn: nobody is being taken anywhere, so "what now" is still a
+    // question this conversation answers.
+    const result = await axlAgentService.chatStream({
+        messages: [{ role: 'user', content: 'show me that one' }],
+        _run: runWith('Here it is. <show>setup s1</show><suggest>How is it doing?</suggest>'),
+    })
+    assert.deepEqual(result.show, { kind: 'setup', ref: 's1' })
+    assert.deepEqual(result.suggestions, ['How is it doing?'])
+})
+
 // ── the prompt and the gate agree ─────────────────────────────────────────────
 
 // The failure this catches is silent and total: the prompt teaches Axl a tag the controller drops,
@@ -217,7 +311,7 @@ test('the prompt teaches the book edit as one tag with two outcomes, decided by 
 // service sees it — hand the reply back through the same callback the real stream uses.
 function runWith(reply) {
     return async ({ tagCaptures }) => {
-        for (const name of ['route', 'edit', 'open']) {
+        for (const name of ['route', 'edit', 'open', 'show', 'suggest']) {
             const tag = reply.match(new RegExp(`<${name}>([\\s\\S]*?)</${name}>`))
             const capture = (tagCaptures ?? []).find(c => c.open === `<${name}>`)
             if (tag) capture?.onCapture?.(tag[1])

@@ -46,29 +46,30 @@ test('the rule is constant per agent — the cached spine stays byte-identical a
 })
 
 // ── the capture ──────────────────────────────────────────────────────────────
-function drive(route, { open = null, edit = null } = {}) {
+function drive(route, { open = null, edit = null, show = null } = {}) {
     const cap = makeRouteCapture()
     if (route != null) cap.captures.route(route)
     if (open  != null) cap.captures.open(open)
     if (edit  != null) cap.captures.edit(edit)
+    if (show  != null) cap.captures.show(show)
     return cap.result()
 }
 
 test('capture: route + opening travel together; the opening is collapsed', () => {
     assert.deepEqual(drive(' research NVDA ', { open: 'Look at NVDA.\n  It is basing.' }),
-        { route: 'research', routeSymbol: 'NVDA', opening: 'Look at NVDA. It is basing.', edit: null })
+        { route: 'research', routeSymbol: 'NVDA', opening: 'Look at NVDA. It is basing.', edit: null, show: null })
 })
 
 test('capture: a desk routing to ITSELF is dropped, opening and all', () => {
     const cap = makeRouteCapture('scanner')
     cap.captures.route('scan NVDA'); cap.captures.open('back to where you are')
-    assert.deepEqual(cap.result(), { route: null, routeSymbol: null, opening: null, edit: null })
+    assert.deepEqual(cap.result(), { route: null, routeSymbol: null, opening: null, edit: null, show: null })
     // …and Axl, which stands at no desk, may route anywhere.
     assert.equal(drive('scan NVDA').route, 'scan')
 })
 
 test('capture: no route → no opening; an edit → no opening either', () => {
-    assert.deepEqual(drive(null, { open: 'orphan' }), { route: null, routeSymbol: null, opening: null, edit: null })
+    assert.deepEqual(drive(null, { open: 'orphan' }), { route: null, routeSymbol: null, opening: null, edit: null, show: null })
     const r = drive('research NVDA', { open: 'talks over the page', edit: 'coverage c1' })
     assert.equal(r.opening, null)
     assert.deepEqual(r.edit, { kind: 'coverage', ref: 'c1', desk: 'research' })
@@ -77,10 +78,10 @@ test('capture: no route → no opening; an edit → no opening either', () => {
 // ── the controller tier ──────────────────────────────────────────────────────
 test('routeFields: validates the desk for the role, sanitizes the symbol, gates the opening on a desk', () => {
     const ok = routeFields({ route: 'research', routeSymbol: 'nvda', opening: 'Look at it.', edit: null }, 'trader')
-    assert.deepEqual(ok, { route: 'research', routeSymbol: 'NVDA', edit: null, opening: 'Look at it.' })
+    assert.deepEqual(ok, { route: 'research', routeSymbol: 'NVDA', edit: null, show: null, opening: 'Look at it.' })
 
     const junk = routeFields({ route: 'kairos', routeSymbol: 'NVDA', opening: 'Look at it.' }, 'admin')
-    assert.deepEqual(junk, { route: null, routeSymbol: null, edit: null, opening: null })
+    assert.deepEqual(junk, { route: null, routeSymbol: null, edit: null, show: null, opening: null })
 
     assert.equal(routeFields({ route: 'strategy' }, 'trader').route, null, 'a trader is never sent to Pythia')
     assert.equal(routeFields({ route: 'strategy' }, 'admin').route, 'strategy')

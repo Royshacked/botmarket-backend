@@ -60,7 +60,7 @@ const AGENT_DESK = Object.freeze({ scanner: 'scan', mentor: 'assist', analyst: '
 // ─── Grammar ──────────────────────────────────────────────────────────────────
 
 /** The emit tags this mechanism owns. Strip them all from a reply that captured any. */
-export const ROUTE_TAGS = Object.freeze(['route', 'open', 'edit'])
+export const ROUTE_TAGS = Object.freeze(['route', 'open', 'edit', 'show'])
 
 // The route tag may carry the name the user is here for: `<route>research NVDA</route>`. Desk and
 // symbol travel as ONE capture because they are one decision — a desk that opens on a name the
@@ -96,6 +96,39 @@ export function splitEdit(raw) {
     const desk = EDIT_KIND_DESKS[k]
     if (!desk || !ref) return null
     return { kind: k, ref, desk }
+}
+
+// The kinds that have a DETAIL SURFACE — the window a card opens when you click it: the chart, the
+// plan, the monitor's journal, the positions the entity owns.
+//
+// `<show>setup 3f9c…</show>` is the third sibling, and it is neither of the other two. A `<route>`
+// opens a desk for new work; an `<edit>` reopens the CHAT that authored an item, to change it;
+// a show opens the item's own READ surface and changes nothing — "what's going on with this one"
+// is a question about the trade, not a request to redraw it. Sending that ask to Mentor would
+// reopen the build conversation and start re-planning a setup the user only wanted to look at.
+//
+// No desk here, deliberately: a detail view belongs to no desk — it is the entity's own page, and
+// the client opens it the same way the card click does (the pop-out on a desktop, the full-screen
+// page on a phone). `call` is absent with Kairos; the archived page is not rendered by anything.
+//
+// ONE KIND, because a tag is only as good as the handle that reaches it. `idea` was here for a day
+// and came out: the kind is alive — it is the execution tier every order rides and a portfolio
+// holding IS an idea document — but nothing an agent reads ever names one. `get_watched_items`
+// lists setups, books, coverage, scans, queued actions and Aether events; a holding is reached
+// through its book, and the positions in `get_trading_context` carry no entity id at all. A kind an
+// agent cannot quote is a tag that can only be emitted wrong. The CLIENT still opens ideas — the
+// Floor's holdings and the positions rows do it on a click — which is a different list
+// (entityDetail.INLINE_KINDS) for a different question: what a page exists for, not what a model
+// may name. Give ideas a handle a desk can read and this is one word.
+export const SHOW_KINDS = new Set(['setup'])
+
+/** `<show>setup 3f9c…</show>` → { kind, ref }, or null. Both halves or nothing, as with an edit. */
+export function splitShow(raw) {
+    if (typeof raw !== 'string') return null
+    const [kind = '', ref = ''] = raw.trim().split(/[\s:,]+/)
+    const k = kind.toLowerCase()
+    if (!SHOW_KINDS.has(k) || !ref) return null
+    return { kind: k, ref }
 }
 
 // What the desk OPENS ON — the job, as the first turn of the desk's conversation.
@@ -158,6 +191,17 @@ export function validateEdit(edit) {
 }
 
 /**
+ * The whole show hand-off, or null. Same gate as an edit minus the desk — a detail view has none.
+ * The ref is read by the client through the owner-scoped get, so a borrowed or invented id opens
+ * nothing; this only keeps junk (a sentence, a quoted phrase) from travelling as a handle.
+ */
+export function validateShow(show) {
+    if (!show || !SHOW_KINDS.has(show.kind)) return null
+    const ref = sanitizeEditRef(show.ref)
+    return ref ? { kind: show.kind, ref } : null
+}
+
+/**
  * The routing fields of a `done` payload, validated for this user. Spread into the controller's
  * return beside the agent's own fields. Every gate is the same one: a symbol, an opening or an
  * adopt flag with no desk to land at is a message sent to no one.
@@ -170,6 +214,8 @@ export function routeFields(result, role) {
         // Reopen an item the user already has, in the desk that owns it. Independent of `route` —
         // it carries its own desk.
         edit:    validateEdit(result?.edit),
+        // Open an item's own detail surface. Independent of both — it goes to no desk at all.
+        show:    validateShow(result?.show),
         opening: route ? (result?.opening ?? null) : null,
     }
 }
@@ -188,13 +234,14 @@ export function routeFields(result, role) {
  * would reopen the desk the user is sitting at on a blank page. Axl passes none (it stands nowhere).
  */
 export function makeRouteCapture(agentKey = null) {
-    let routeText = null, openText = null, editText = null
+    let routeText = null, openText = null, editText = null, showText = null
     const own = AGENT_DESK[agentKey] ?? null
     return {
         captures: {
             route: (text) => { routeText = text.trim() },
             open:  (text) => { openText = text },
             edit:  (text) => { editText = text.trim() },
+            show:  (text) => { showText = text.trim() },
         },
         result() {
             const split = splitRoute(routeText)
@@ -202,7 +249,12 @@ export function makeRouteCapture(agentKey = null) {
             const symbol = desk ? split.symbol : null
             const edit = splitEdit(editText)
             const opening = (desk && !edit) ? cleanOpening(openText) : null
-            return { route: desk, routeSymbol: symbol, opening, edit }
+            // ONE destination per turn, and a hand-off outranks a look: the desk (or the document)
+            // the user is being taken to IS the turn, and a detail window opening beside it would
+            // put a second thing on screen at the moment the first one arrives. Gated here rather
+            // than trusted to the prompt, for the reason `opening` and `routeSymbol` are.
+            const show = (desk || edit) ? null : splitShow(showText)
+            return { route: desk, routeSymbol: symbol, opening, edit, show }
         },
     }
 }
@@ -241,4 +293,4 @@ Emit, each on its own line, at the end of your reply:
 - Say in one line where they are going and why. Do not describe a queue or a wait, and do not ask them to confirm — the block IS the hand-off; the app shows a button carrying it.`
 }
 
-export const routingUtil = { splitRoute, splitEdit, cleanOpening, routeFor, sanitizeRouteSymbol, sanitizeEditRef, validateEdit, routeFields, makeRouteCapture, buildRouteRule }
+export const routingUtil = { splitRoute, splitEdit, splitShow, cleanOpening, routeFor, sanitizeRouteSymbol, sanitizeEditRef, validateEdit, validateShow, routeFields, makeRouteCapture, buildRouteRule }

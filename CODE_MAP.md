@@ -138,9 +138,10 @@ api/
                           POST /:id/cancel). What is waiting on the user, from BOTH stores —
                           off-hours-queued intents AND entities the market-open sweep unparked.
                           Execute REPLAYS through the origin's own function, never a copy
-  axl/                    Axl chat SSE /api/axl/stream (converse + chart + two hand-off tags:
+  axl/                    Axl chat SSE /api/axl/stream (converse + chart + three hand-off tags:
                           `<route>desk SYMBOL` opens a desk for NEW work, `<edit>kind ID` reopens an
-                          item the user already has, in the editor that owns it — see APP_SPEC §2)
+                          item the user already has, in the editor that owns it, `<show>setup ID`
+                          opens that setup's own DETAIL page and changes nothing — see APP_SPEC §2)
                           and POST /api/axl/brief/stream — DELIVERY, not a turn: streams today's
                           market brief into the Axl chat panel (the confirm behind the offer card).
                           No model runs on it and the whole brief goes out as ONE token event, but it
@@ -347,7 +348,14 @@ services/
                           Every desk speaks it; the client lands all of them on one doorway
                           (MainPage.handleRoute → handleAxlPick). Nothing structured crosses — the
                           OPENING is where what the sender found travels, as prose. WHEN to route is
-                          each desk's judgment; the rule only gates it on the user's ask
+                          each desk's judgment; the rule only gates it on the user's ask.
+                          THIRD VERB (2026-09-25): `<show>setup id</show>` — open that item's own
+                          DETAIL page. No desk (a detail view belongs to none), nothing changed, and
+                          the capture drops it beside a route or an edit: one destination per turn.
+                          SHOW_KINDS is `setup` ALONE, because no read an agent makes names anything
+                          else openable — an idea id reaches no prompt, and a book/thesis/scan opens
+                          at its desk. Taught in Axl's prompt only; the client resolves the handle
+                          (entityResolve) and opens it through the ONE opener
   suggestions.service.js  follow-up CHIPS — the shared pipe for "what might I ask next". Owns the
                           `<suggest>` tag, the capture, the cleaning and the cap of 3; one line
                           (makeSuggestionCapture) wires any desk in and the client renders one

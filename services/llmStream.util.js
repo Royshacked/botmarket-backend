@@ -42,6 +42,10 @@ export const ALL_EMIT_TAGS = [
     // Prometheus" (the scanner prompts). Unregistered until 2026-09-18, so the block streamed raw
     // into the Atlas bubble until the settled reply replaced it.
     'coverage_request', 'coverage_refresh',
+    // "Open THIS item's detail window" — the third sibling of <route>/<edit> (routing.util
+    // SHOW_KINDS). Registered for the same reason as `suggest`: the suppressor has to know the tag
+    // before the first turn emits one, or the id prints at the user mid-sentence.
+    'show',
 ]
 
 // Build the tag-capture descriptor array for a streaming agent. `overrides` maps a

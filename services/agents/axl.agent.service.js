@@ -210,9 +210,9 @@ ${audienceBlock}` : ''}` },
     })
 
     const reply = stripEmitTags(raw ?? '', [...ROUTE_TAGS, 'adopt', 'suggest']).trim()
-    // No desk, no opening; no opening on an edit — the capture gates the three tags against each
-    // other (see makeRouteCapture).
-    const { route: desk, routeSymbol: symbol, opening, edit } = route.result()
+    // No desk, no opening; no opening on an edit; no show beside either — the capture gates the
+    // four tags against each other (see makeRouteCapture).
+    const { route: desk, routeSymbol: symbol, opening, edit, show } = route.result()
 
     // Chips are for a turn that STAYS here. When Axl is handing the user to a desk, the door he
     // just opened is the next step — offering three other questions beside it competes with the
@@ -226,7 +226,7 @@ ${audienceBlock}` : ''}` },
     // arrives, so the two cannot both be true.
     const adopt = (adoptCapture && desk === 'portfolio' && !edit)
 
-    logger.info(LOG, 'chatStream done', { route: desk, routeSymbol: symbol, adopt, edit: edit ? `${edit.kind}:${edit.ref}` : null, opening: opening ? opening.length : null, suggestions: suggestions.length, replyLength: reply.length })
+    logger.info(LOG, 'chatStream done', { route: desk, routeSymbol: symbol, adopt, edit: edit ? `${edit.kind}:${edit.ref}` : null, show: show ? `${show.kind}:${show.ref}` : null, opening: opening ? opening.length : null, suggestions: suggestions.length, replyLength: reply.length })
     // `chart` on the return is the REQUEST, never the image: the row already went out on its own
     // event and doubling it here would double the bytes on the wire.
     return {
@@ -237,6 +237,10 @@ ${audienceBlock}` : ''}` },
         // { kind, ref, desk } — reopen this exact item. Stands apart from `route` rather than
         // folding into it: a route hands over a desk and a blank page, an edit hands over a document.
         edit,
+        // { kind, ref } — open this exact item's own detail window: the chart, the plan, the
+        // monitor's journal. No desk, because a detail view belongs to none, and no opening, because
+        // nothing is being said to anyone — "show me what's going on with this one" is a look.
+        show,
         // The desk's first turn, in the user's words. The client sends it as their message on
         // arrival, so the desk starts on the job instead of asking what they came for.
         opening,

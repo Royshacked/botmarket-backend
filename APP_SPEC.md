@@ -274,11 +274,11 @@ cards in the same second.
 `services/tradeNotify.service.js` also holds a few card builders whose only callers are under
 `archive/`. They emit nothing and are documented in `archive/README.md`, not here.
 
-### Axl reception hand-off: `<route>` vs `<edit>`
+### Axl reception hand-off: `<route>` vs `<edit>` vs `<show>`
 
 Axl (`POST /api/axl/stream`) is where the user lands, so it is also the way in to the desks. It hands
-them over with one of two tags, and they are different acts: a route names a **desk**, an edit names a
-**document**.
+them over with one of three tags, and they are different acts: a route names a **desk**, an edit names
+a **document**, a show names a **page to read**.
 
 - `<route>desk SYMBOL</route>` — NEW work. The desk opens at its `entryTab`, on that name.
 - `<open>…</open>` — the desk's FIRST TURN, in the user's own words, sent on arrival as their own
@@ -291,6 +291,21 @@ them over with one of two tags, and they are different acts: a route names a **d
 - `<edit>kind ID</edit>` — reopen something they ALREADY have, in the editor that owns it, with the
   conversation that built it restored. Same destination as the list-surface pencil, by design: an
   edit reached from a sentence and an edit reached from a click are one edit.
+- `<show>setup ID</show>` (2026-09-25) — open that setup's own DETAIL page: the chart
+  with its levels drawn, the plan, the monitor's journal, the positions it holds. **It changes
+  nothing**, which is what separates it from an edit — "what's going on with my NVDA setup" is a
+  look, and answering it with an `<edit>` sent the user into Mentor re-planning a trade they only
+  wanted to read. It carries no desk (a detail view belongs to none) and no opening (nothing is being
+  said to anyone). The client resolves the handle through the same owner-scoped read every doorway
+  uses (`entityResolve`), renders a BUTTON rather than opening by itself — on a desktop this ends in
+  `window.open`, which outside a click is what a pop-up blocker exists to stop — and opens it through
+  the ONE opener, so it lands on the pop-out window on a desktop and on the in-app full-screen page
+  on a phone (§ *The detail surface*). One of the three per turn: a hand-off outranks a look, and the
+  capture enforces that rather than the prompt. `SHOW_KINDS` is **setup alone**: the `idea` kind is
+  alive and central — it is the execution tier and a holding IS an idea document — but nothing an
+  agent reads ever names one (`get_watched_items` lists setups, books, coverage, scans, queued and
+  Aether; positions carry no entity id), and a kind a model cannot quote is a tag it can only emit
+  wrong. The CLIENT still opens idea pages on a click — a different list for a different question.
 - `<suggest>…</suggest>` — up to three follow-up questions the user can send with one click, offered
   as chips under the reply. They ride INSIDE the reply already streaming (no second model call, so no
   added latency), and `services/suggestions.service.js` owns the wire format — the tag, the capture,
