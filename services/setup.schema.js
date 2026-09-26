@@ -14,6 +14,7 @@ import { cleanConviction } from './conviction.util.js'
 import { TRADE_HORIZONS } from './entity/vocabulary.js'
 import { MODES } from './analysisModes.js'
 import { TF_RUNGS, isFetchableRung, ladderFor, MARKET_CAPS } from './setup.ladder.js'
+import { ENTRY_ARCHETYPES, STOP_ANCHORS, TARGET_ANCHORS, normalizeTaxon } from './setup.taxonomy.js'
 
 // The rung VOCABULARY lives in setup.ladder.js, not here. This module is the entity contract and
 // consumes rung facts; that one owns what a rung is and which rungs a horizon reaches for. The
@@ -67,8 +68,33 @@ export const CONDITION_PERSISTENCE = ['live', 'latching']
 /** What happens when price leaves the validity range. Authored, never assumed. */
 export const ON_BREAK = ['revise', 'close', 'notify_only']
 
+/**
+ * What happens when price leaves on the FAVOURABLE side — the away edge, which until now had a
+ * detector and nothing authored behind it (docs/design/mentor-challenge.md §3).
+ *
+ *   revise — tell the user and open Mentor with the plan loaded. The level moved, so the redraw is
+ *            where a continuation gets MEASURED; nothing here authors one.
+ *   pass   — they decided to let a missed trade go. Told once, asked nothing.
+ *
+ * TWO, not four. `close` has no meaning on this edge (a runaway never kills a setup — price can
+ * come back), and a pre-authored `continuation` was considered and dropped: no entry fires without
+ * the user's confirm, so arming the sibling in advance buys no action while they sleep, only a
+ * staler price than the redraw would measure.
+ *
+ * NO DEFAULT, unlike `on_break` — see normalizeValidity.
+ */
+export const ON_AWAY = ['revise', 'pass']
+
 /** Cap on symbols a setup may pull the monitor onto — free text can name anything. */
 const MAX_REFERENCED_SYMBOLS = 6
+
+/**
+ * Caps on the rejects pool. FIVE entries because the list is read at a glance and a sixth is noise;
+ * one CLAUSE each because `alternatives` rides every worksheet re-emit, and a paragraph per reject
+ * is a real per-turn output cost for something authored once.
+ */
+const MAX_ALTERNATIVES = 5
+const MAX_WHY_NOT      = 200
 
 // ─── Pace ── which rungs Talos is READ on ──────────────────────────────
 //
@@ -352,7 +378,7 @@ const num = (v) => (v == null || v === '' ? NaN : Number(v))
  * `monitor_state.conditions` is ONE latch map for the setup, so a target's condition sharing an id
  * with a scenario's would let one latch answer for the other.
  */
-export function normalizeLeg(z, i, prefix, { used } = {}) {
+export function normalizeLeg(z, i, prefix, { used, anchors = null } = {}) {
     if (!z || typeof z !== 'object') return null
 
     const price = num(z.price)
@@ -365,13 +391,21 @@ export function normalizeLeg(z, i, prefix, { used } = {}) {
         price,
         quantity: Number.isFinite(qty) && qty > 0 ? qty : null,
         note:     typeof z.note === 'string' && z.note.trim() ? z.note.trim() : null,
+        // WHAT THIS PRICE IS MEASURED FROM (setup.taxonomy.js). A stop and a target answer to
+        // different vocabularies, so the caller passes the one that applies; an ENTRY leg passes
+        // none, because the scenario's `archetype` is what an entry is anchored to.
+        //
+        // It is documentation the user can challenge, never an input to execution: the order rests
+        // at `price` whatever the anchor says. `structure` on a stop at 234.8 is what turns "why
+        // that stop?" into a citation instead of an argument.
+        anchor:   normalizeTaxon(anchors, z.anchor),
         conditions: normalizeConditions(z.conditions, { used, prefix: `${id}c` }),
     }
 }
 
-export function normalizeLegs(arr, prefix, { used } = {}) {
+export function normalizeLegs(arr, prefix, { used, anchors = null } = {}) {
     if (!Array.isArray(arr)) return []
-    return arr.map((z, i) => normalizeLeg(z, i, prefix, { used })).filter(Boolean)
+    return arr.map((z, i) => normalizeLeg(z, i, prefix, { used, anchors })).filter(Boolean)
 }
 
 /**
@@ -492,6 +526,13 @@ export function normalizeValidity(raw) {
         // intraday wick must not kill a swing setup.
         timeframe: normalizeTimeframe(raw.timeframe) || null,
         on_break:  ON_BREAK.includes(raw.on_break) ? raw.on_break : 'revise',
+        // NULL WHEN UNAUTHORED, where `on_break` above defaults. The asymmetry is the feature: the
+        // monitor's behaviour without an answer is already safe (a runaway is announced once and
+        // never closes anything), so a default here would buy nothing except the silent skipping of
+        // the one question this field exists to force — "and if it just goes?". `setupReadiness`
+        // blocks on the null, which is how the question gets asked while the plan is being built
+        // rather than discovered when price is already gone.
+        on_away:   ON_AWAY.includes(raw.on_away) ? raw.on_away : null,
     }
 }
 
@@ -535,12 +576,17 @@ export function normalizeScenario(raw, i, { direction = null, used, ids } = {}) 
     // `used` rides into the legs too: a target's own condition shares the document-wide latch map
     // with every scenario condition, so its id has to be claimed from the same set.
     const entry_legs  = normalizeLegs(raw.entry_legs,  `${id}e`, { used })
-    const stop_legs   = normalizeLegs(raw.stop_legs,   `${id}s`, { used })
-    const target_legs = normalizeLegs(raw.target_legs, `${id}t`, { used })
+    const stop_legs   = normalizeLegs(raw.stop_legs,   `${id}s`, { used, anchors: STOP_ANCHORS })
+    const target_legs = normalizeLegs(raw.target_legs, `${id}t`, { used, anchors: TARGET_ANCHORS })
 
     const sc = {
         id,
         name: typeof raw.name === 'string' && raw.name.trim() ? raw.name.trim() : null,
+        // THE WAY IN, named from the closed set. Mentor's filing of its own plan, never a question
+        // put to the user — the same rule `trade_mode` follows. It is what makes the rejects pool
+        // answerable ("you took the pullback; what about the sweep?") and what the runaway redraw
+        // reads to know which continuation to even ask about (`siblingOf`).
+        archetype: normalizeTaxon(ENTRY_ARCHETYPES, raw.archetype),
         entry_legs,
         stop_legs,
         target_legs,
@@ -637,6 +683,45 @@ export function declaredConditions(setup, sc = null) {
     return [...(setup?.conditions ?? []), ...(sc?.conditions ?? [])]
 }
 
+// ─── alternatives[] — the ways in that were REJECTED ──────────────────────────
+//
+// The pool a scenario is promoted out of, and the only record the app keeps of the road not taken
+// (docs/design/mentor-challenge.md §1). "Is there a better way into this?" is unanswerable as an
+// open search and finite against the closed set in setup.taxonomy.js, so the plan carries the
+// members it did NOT take, one clause each.
+//
+// PROVENANCE, NEVER AN INSTRUCTION. Nothing in monitoring/ may read this: a rejected way in is not
+// a condition, and feeding the rejects to an assess prompt would have Talos weighing premises the
+// user explicitly did not take. It is also a SNAPSHOT — the reason a gap fill was skipped stops
+// being true the day the gap fills, which is what a journal entry is and not a bug to fix.
+//
+// It does not travel in a blueprint (setup.blueprint.js): a fork gets the plan, and the author's
+// reasoning about what they didn't take stays with the author.
+
+/**
+ * Coerce the rejects pool. Capped, clause-length bounded, and every entry needs BOTH an archetype
+ * from the set and a reason.
+ *
+ * A reject with no reason is dropped on purpose, and it is the one strict rule here. The entry's
+ * entire value is the answer to "why not that one?" — so an archetype on its own is a hollow claim
+ * that a coverage check could not tell from a real one, and five of them would satisfy any
+ * emptiness test while recording nothing. Pure.
+ */
+export function normalizeAlternatives(arr) {
+    if (!Array.isArray(arr)) return []
+    const out = []
+    for (const a of arr) {
+        if (!a || typeof a !== 'object' || Array.isArray(a)) continue
+        const archetype = normalizeTaxon(ENTRY_ARCHETYPES, a.archetype)
+        const why       = typeof a.why_not === 'string' ? a.why_not.trim().slice(0, MAX_WHY_NOT) : ''
+        if (!archetype || !why) continue
+        const price = num(a.price)
+        out.push({ archetype, price: Number.isFinite(price) ? price : null, why_not: why })
+        if (out.length >= MAX_ALTERNATIVES) break
+    }
+    return out
+}
+
 // ─── ISO bounds ───────────────────────────────────────────────────────────────
 
 // Accept an ISO string (or ms) and return a normalised Z-ISO string. Invalid → null, so a
@@ -714,6 +799,13 @@ export function normalizeSetup(raw) {
         // The authored plan: one entry per premise, each owning its legs and its death line.
         scenarios,
 
+        // The ways in that were considered and NOT taken. Authored once at the scenario rung and
+        // carried forward unchanged, like a condition id — a pool that gets re-derived every turn is
+        // a prompt bug, not a reason to drop the field. Empty is the correct answer on a plan the
+        // user brought: they chose the way in, and filling this with what they could have done
+        // instead would be re-opening their plan by the back door.
+        alternatives: normalizeAlternatives(raw.alternatives),
+
         conviction: cleanConviction(raw.conviction) || null,
 
         // The model sets this when the only entry trigger is price arriving at a specific level —
@@ -768,7 +860,8 @@ export function disarmedSetupPatch() {
  * Returns the blocking reasons, so the UI can say WHICH thing is missing instead of a dead button.
  */
 export function setupReadiness(setup, hasAccount = false) {
-    const missing = []
+    const missing  = []
+    const warnings = []
     if (!setup?.asset)      missing.push('asset')
     if (!setup?.direction)  missing.push('direction')
     if (!setup?.type)       missing.push('horizon')
@@ -813,13 +906,34 @@ export function setupReadiness(setup, hasAccount = false) {
         // own when the root carries one.
         // limit setups intentionally carry zero conditions — the price touch IS the trigger.
         if (setup.entry_mode !== 'limit' && !root.length && !(sc.conditions?.length)) missing.push(at('condition'))
+
+        // "AND IF IT JUST GOES?" — the question a missed trade makes urgent and nobody asks while
+        // the plan is being built. The away edge is the one edge with no authored intent behind it
+        // (docs/design/mentor-challenge.md §3), so a range that can report a runaway must say what
+        // to do about one: ping for a redraw, or let it go.
+        //
+        // Gated on the RANGE existing, not on the entry needing price to come back. The narrower
+        // test — is this entry below the live price? — needs a quote, and readiness is pure and must
+        // stay that way; asking the question in the shape the archetype deserves is the prompt's
+        // job. A scenario with no validity range has no away edge to answer for.
+        //
+        // Kept to two plain words because this string becomes an API reason slug
+        // (`validateSetup` → `missing_runaway_answer`), exactly as 'stop price' does. Punctuation and
+        // parentheses in a `missing` entry travel into a refusal code that a client has to match on.
+        if (sc.validity && !sc.validity.on_away) missing.push(at('runaway answer'))
     }
     if (!list.length && !root.length) missing.push('condition')
 
     if (!hasAccount) missing.push('trading account')
 
+    // SOFT — never blocks. Coverage strength 2 of docs/design/mentor-challenge.md §1: the gate can
+    // see that nothing was rejected, and cannot see whether anything SHOULD have been. It is
+    // correct-and-noisy on a plan the user brought, where an empty pool is the right answer; until
+    // something marks which path authored the plan, that false positive is the price of the signal.
+    if (!(setup?.alternatives?.length)) warnings.push('no rejected ways in recorded')
+
     const problems = validityProblems(setup)
-    return { ready: missing.length === 0 && problems.length === 0, missing, problems }
+    return { ready: missing.length === 0 && problems.length === 0, missing, problems, warnings }
 }
 
 /**

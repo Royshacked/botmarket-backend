@@ -8,7 +8,9 @@ import {
     normalizePremise, PREMISE_STATES,
     normalizeScenarios, pickScenario, projectScenario, scenarioView, declaredConditions, scenarioLabel,
     stopEdge, targetEdges, targetLevels, clampGuards, addEntryLeg, legQuantity, pendingLegs, watchedLegs, hasWatchedLegs, allowedVerdicts, CONDITION_MODES, TRADE_MODES,
+    normalizeAlternatives, ON_AWAY,
 } from '../../services/setup.schema.js'
+import { ENTRY_ARCHETYPES, STOP_ANCHORS, TARGET_ANCHORS } from '../../services/setup.taxonomy.js'
 import { MODES } from '../../services/analysisModes.js'
 
 // The `setup` entity contract (docs/desks/mentor-talos.md). Mentor authors loosely, Talos monitors
@@ -301,7 +303,9 @@ test('readiness reports coherence problems separately from missing fields', () =
         entry_legs: [{ price: 238.6, quantity: 100 }],
         stop_legs:  [{ price: 234.8 }],
         target_legs:    [{ price: 246 }],
-        validity:    { lower: 230, upper: 244 },
+        // `on_away` authored so this test stays about COHERENCE. A range that can report a runaway
+        // and says nothing about one is its own missing field, covered below.
+        validity:    { lower: 230, upper: 244, on_away: 'revise' },
     }), true)
     assert.equal(r.ready, false)
     assert.deepEqual(r.missing, [], 'nothing is missing — the range is wrong, not absent')
@@ -370,7 +374,10 @@ test('a half-built setup normalises without throwing — it renders every turn',
 // ─── Readiness ────────────────────────────────────────────────────────────────
 
 test('a complete setup with a marked account is ready', () => {
-    assert.deepEqual(setupReadiness(normalizeSetup(DRAFT), true), { ready: true, missing: [], problems: [] })
+    // `warnings` never bear on `ready` — DRAFT records no rejected ways in, which is a thing to say
+    // and not a thing to block on (docs/design/mentor-challenge.md §1, coverage strength 2).
+    assert.deepEqual(setupReadiness(normalizeSetup(DRAFT), true),
+        { ready: true, missing: [], problems: [], warnings: ['no rejected ways in recorded'] })
 })
 
 test('readiness names what is missing, so the UI never shows a dead button', () => {
@@ -1132,4 +1139,135 @@ test('the three premise states, and absence means intact', () => {
     for (const bad of [null, undefined, '', 'broken', 'INTACT', 42, {}]) {
         assert.equal(normalizePremise(bad), 'intact', String(bad))
     }
+})
+
+// ─── The authoring taxonomy on the document ───────────────────────────────────
+//
+// Phase 1 of docs/design/mentor-challenge.md: the archetype, the leg anchors, the rejects pool and
+// the away-edge answer. All four are AUTHORING record — none of them changes what executes, and most
+// of what follows is about that boundary holding.
+
+test('a scenario files its way in from the closed set, and junk files as nothing', () => {
+    const of = (archetype) => normalizeScenarios([{ id: 's1', archetype, entry_legs: [{ price: 238.6, quantity: 100 }] }])[0].archetype
+    for (const id of ENTRY_ARCHETYPES) assert.equal(of(id), id)
+    assert.equal(of('  Sweep_Reclaim '), 'sweep_reclaim', 'trim and case are spelling, not meaning')
+    for (const bad of [null, undefined, '', 'scalp', 42, {}]) assert.equal(of(bad), null, String(bad))
+})
+
+test('a stop and a target answer to DIFFERENT anchor vocabularies', () => {
+    const sc = normalizeScenarios([{
+        id: 's1',
+        entry_legs:  [{ price: 238.6, quantity: 100, anchor: 'structure' }],
+        stop_legs:   [{ price: 234.8, anchor: 'structure' }],
+        target_legs: [{ price: 246.0, anchor: 'measured_move' }],
+    }])[0]
+    assert.equal(sc.stop_legs[0].anchor, 'structure')
+    assert.equal(sc.target_legs[0].anchor, 'measured_move')
+    // An ENTRY leg carries none: what an entry is anchored to is the scenario's archetype, and a
+    // second vocabulary answering the same question is how two fields start disagreeing.
+    assert.equal(sc.entry_legs[0].anchor, null)
+})
+
+test('an anchor from the wrong vocabulary is dropped, not accepted', () => {
+    // `measured_move` is a TARGET anchor. On a stop it is meaningless, and accepting it would put a
+    // citation in front of the user that cannot be true.
+    const sc = normalizeScenarios([{
+        id: 's1',
+        stop_legs:   [{ price: 234.8, anchor: 'measured_move' }],
+        target_legs: [{ price: 246.0, anchor: 'volatility' }],
+    }])[0]
+    assert.ok(!STOP_ANCHORS.includes('measured_move') && !TARGET_ANCHORS.includes('volatility'), 'the premise of this test')
+    assert.equal(sc.stop_legs[0].anchor, null)
+    assert.equal(sc.target_legs[0].anchor, null)
+})
+
+test('a reject needs an archetype AND a reason — an archetype alone records nothing', () => {
+    const out = normalizeAlternatives([
+        { archetype: 'sweep_reclaim', price: 232.4, why_not: 'the pool sits under the shelf, so the entry is below my stop' },
+        { archetype: 'gap_fill' },                                 // no reason → hollow, dropped
+        { archetype: 'gap_fill', why_not: '   ' },                  // whitespace is no reason either
+        { archetype: 'scalp', why_not: 'not in the vocabulary' },
+        { why_not: 'orphan' },
+        null, 'pullback', 42,
+    ])
+    assert.equal(out.length, 1)
+    assert.deepEqual(out[0], { archetype: 'sweep_reclaim', price: 232.4, why_not: 'the pool sits under the shelf, so the entry is below my stop' })
+})
+
+test('the rejects pool is capped and its clauses are bounded', () => {
+    const many = Array.from({ length: 9 }, () => ({ archetype: 'breakout', why_not: 'x'.repeat(400) }))
+    const out  = normalizeAlternatives(many)
+    assert.equal(out.length, 5, 'five is a glance; a sixth is noise')
+    assert.equal(out[0].why_not.length, 200, 'a clause, not a paragraph riding every re-emit')
+    assert.deepEqual(normalizeAlternatives(null), [])
+    assert.deepEqual(normalizeAlternatives('pullback'), [])
+})
+
+test('a price is optional on a reject — some ways in were never at a level', () => {
+    const out = normalizeAlternatives([{ archetype: 'momentum_continuation', why_not: 'nothing to lean on above' }])
+    assert.equal(out[0].price, null)
+})
+
+test('the away edge has NO default, where the adverse edge does', () => {
+    // The asymmetry is the feature: the monitor is already safe without an answer (a runaway is
+    // announced once and never closes anything), so a default would only let the question go unasked.
+    const bare = normalizeValidity({ lower: 234, upper: 244 })
+    assert.equal(bare.on_break, 'revise', 'the adverse edge still defaults')
+    assert.equal(bare.on_away, null)
+    for (const v of ON_AWAY) assert.equal(normalizeValidity({ lower: 234, on_away: v }).on_away, v)
+    for (const bad of ['close', 'notify_only', 'continuation', 'mandate', '', 42]) {
+        assert.equal(normalizeValidity({ lower: 234, on_away: bad }).on_away, null, String(bad))
+    }
+})
+
+test('a range that can report a runaway must say what to do about one', () => {
+    const base = {
+        asset: 'NVDA', direction: 'long', type: 'swing',
+        conditions: [{ id: 'c1', text: 'CHoCH up on the 15m' }],
+        entry_legs: [{ price: 238.6, quantity: 100 }],
+        stop_legs:  [{ price: 234.8 }],
+        target_legs: [{ price: 246 }],
+    }
+    const unanswered = setupReadiness(normalizeSetup({ ...base, validity: { lower: 234, upper: 244, approach: 246.5 } }), true)
+    assert.equal(unanswered.ready, false)
+    // Two plain words: this string becomes `missing_runaway_answer` in the Generate refusal.
+    assert.deepEqual(unanswered.missing, ['runaway answer'])
+
+    const answered = setupReadiness(normalizeSetup({ ...base, validity: { lower: 234, upper: 244, approach: 246.5, on_away: 'pass' } }), true)
+    assert.deepEqual(answered.missing, [], 'letting it go IS an answer')
+
+    // No range at all → no away edge → nothing to answer for. The validity range stays optional.
+    assert.deepEqual(setupReadiness(normalizeSetup(base), true).missing, [])
+})
+
+test('a missing runaway answer names WHICH premise is silent', () => {
+    const two = normalizeSetup({
+        asset: 'NVDA', direction: 'long', type: 'swing',
+        conditions: [{ id: 'c1', text: 'SMH leading' }],
+        scenarios: [
+            { id: 's1', name: 'false break', entry_legs: [{ price: 238.6, quantity: 100 }],
+              stop_legs: [{ price: 234.8 }], target_legs: [{ price: 246 }],
+              validity: { lower: 234, upper: 244, on_away: 'revise' } },
+            { id: 's2', name: 'break and go', entry_legs: [{ price: 244.9, quantity: 60 }],
+              stop_legs: [{ price: 241.8 }], target_legs: [{ price: 252 }],
+              validity: { lower: 241, upper: 250 } },
+        ],
+    })
+    assert.deepEqual(setupReadiness(two, true).missing, ['runaway answer on break and go'])
+})
+
+test('an empty rejects pool warns and never blocks', () => {
+    const filled = normalizeSetup({ ...DRAFT, alternatives: [{ archetype: 'breakout', why_not: 'worse fill, no better invalidation' }] })
+    assert.deepEqual(setupReadiness(filled, true).warnings, [])
+    assert.equal(setupReadiness(normalizeSetup(DRAFT), true).ready, true, 'the warning is not a gate')
+    assert.deepEqual(setupReadiness(normalizeSetup(DRAFT), true).warnings, ['no rejected ways in recorded'])
+})
+
+test('alternatives survive a normalise round-trip, like the conditions do', () => {
+    // The pool is authored ONCE and carried forward on every re-emit, so the normaliser has to be
+    // able to read its own output back — otherwise the worksheet empties itself on the next turn.
+    const once  = normalizeSetup({ ...DRAFT, alternatives: [{ archetype: 'retest', price: 244, why_not: 'the break has not printed yet' }] })
+    const twice = normalizeSetup(once)
+    assert.deepEqual(twice.alternatives, once.alternatives)
+    assert.equal(twice.scenarios[0].archetype, once.scenarios[0].archetype)
 })

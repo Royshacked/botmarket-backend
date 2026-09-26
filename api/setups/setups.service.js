@@ -71,7 +71,7 @@ const POSITION_STATUSES = new Set(PAST_ENTRY)
 const PLAN_FIELDS = [
     'asset', 'asset_class', 'direction', 'type', 'trade_mode', 'timeframe', 'pace_rungs',
     'market_cap', 'read_mode',
-    'thesis', 'conditions', 'referenced_symbols', 'scenarios',
+    'thesis', 'conditions', 'referenced_symbols', 'scenarios', 'alternatives',
     'entry_legs', 'stop_legs', 'target_legs', 'validity', 'quantity',
     'active_from', 'valid_until', 'event_risk', 'rr', 'conviction', 'entry_mode',
     'mode', 'broker', 'accounts', 'mainAccountId', 'brokerSymbol', 'basisOffset',

@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { ENTRY_ARCHETYPES, STOP_ANCHORS, TARGET_ANCHORS, SIBLINGS, siblingOf } from '../../services/setup.taxonomy.js'
+import { ENTRY_ARCHETYPES, STOP_ANCHORS, TARGET_ANCHORS, SIBLINGS, siblingOf, normalizeTaxon } from '../../services/setup.taxonomy.js'
 
 // The taxonomy is a CLOSED SET whose whole value is that it can be checked (Phase 0 of
 // docs/design/mentor-challenge.md). These tests guard the two ways a closed set stops being one:
@@ -73,6 +73,35 @@ test('siblingOf is tolerant of what a half-built plan actually holds', () => {
         assert.equal(siblingOf(junk), null)
     }
     assert.equal(siblingOf('  PULLBACK '), 'retest', 'trim and case are spelling, not meaning')
+})
+
+// ─── normalizeTaxon — the one matcher all three fields go through ─────────────
+
+test('normalizeTaxon accepts a member, in any spelling, and nothing else', () => {
+    // ONE function rather than three near-identical normalisers: the tolerance is the mechanism, and
+    // it must not differ between the archetype and the two anchor fields (CLAUDE.md).
+    for (const list of [ENTRY_ARCHETYPES, STOP_ANCHORS, TARGET_ANCHORS]) {
+        for (const id of list) {
+            assert.equal(normalizeTaxon(list, id), id)
+            assert.equal(normalizeTaxon(list, ` ${id.toUpperCase()} `), id)
+        }
+    }
+    // Cross-vocabulary is the failure that matters: a target's anchor on a stop leg is not a
+    // spelling mistake, it is a claim about the price that cannot be true.
+    assert.equal(normalizeTaxon(STOP_ANCHORS, 'measured_move'), null)
+    assert.equal(normalizeTaxon(TARGET_ANCHORS, 'volatility'), null)
+    assert.equal(normalizeTaxon(ENTRY_ARCHETYPES, 'structure'), null)
+})
+
+test('normalizeTaxon degrades to null instead of throwing, for anything', () => {
+    // It runs on every streamed turn over a half-built worksheet. Nothing here may cost the user
+    // the draft — the house rule for every field the model authors.
+    for (const bad of [null, undefined, '', '  ', 42, {}, [], 'no_such_id', 'toString']) {
+        assert.equal(normalizeTaxon(ENTRY_ARCHETYPES, bad), null, String(bad))
+    }
+    for (const list of [null, undefined, 'pullback', 42, {}]) {
+        assert.equal(normalizeTaxon(list, 'pullback'), null, String(list))
+    }
 })
 
 test('siblingOf does not answer for inherited object keys', () => {

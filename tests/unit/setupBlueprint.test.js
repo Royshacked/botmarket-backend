@@ -89,6 +89,42 @@ test('nothing personal rides along', () => {
     assert.equal(bp.mode, undefined)
 })
 
+test('the way in and the anchors travel; the author’s rejects do not', () => {
+    // The split is plan vs person (docs/design/mentor-challenge.md §1). `archetype` and `anchor` are
+    // facts about the PLAN — a recipient who cannot see that the stop is anchored to structure has to
+    // re-derive the one thing that makes the level challengeable. `alternatives` is the author's
+    // reasoning about what they did NOT take, and a fork should earn its own.
+    const authored = {
+        ...A_SETUP,
+        alternatives: [{ archetype: 'breakout', price: 244, why_not: 'worse fill and no better invalidation' }],
+        scenarios: [{
+            ...A_SETUP.scenarios[0],
+            archetype: 'fade',
+            stop_legs:   [{ id: 's1s', price: 173, anchor: 'structure' }],
+            target_legs: [{ id: 't1', price: 196, anchor: 'liquidity' }],
+        }],
+    }
+    const bp = toBlueprint(normalizeSetup(authored), { at: 1 })
+
+    assert.equal(bp.alternatives, undefined, 'the rejects pool is not the recipient’s')
+    assert.equal(JSON.stringify(bp).includes('why_not'), false)
+
+    const setup = hydrated(bp)
+    assert.equal(setup.scenarios[0].archetype, 'fade')
+    assert.equal(setup.scenarios[0].stop_legs[0].anchor, 'structure')
+    assert.equal(setup.scenarios[0].target_legs[0].anchor, 'liquidity')
+    assert.deepEqual(setup.alternatives, [])
+})
+
+test('a runaway answer travels — it is the author’s decision about the plan', () => {
+    // `on_away` rides inside `validity`, which travels whole. Without it the recipient's readiness
+    // would block on a question the sender already answered.
+    const withRange = { ...A_SETUP, scenarios: [{ ...A_SETUP.scenarios[0], validity: { lower: 172, upper: 190, on_away: 'pass' } }] }
+    const setup = hydrated(toBlueprint(normalizeSetup(withRange), { at: 1 }))
+    assert.equal(setup.scenarios[0].validity.on_away, 'pass')
+    assert.ok(!setupReadiness(setup, true).missing.some(m => m.includes('runaway')))
+})
+
 // ── The plan is more than its prices ──────────────────────────────────────────
 
 test('the way in travels: a limit setup does not come back as a conditional one', () => {

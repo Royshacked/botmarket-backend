@@ -79,6 +79,11 @@ export function toBlueprint(setup, { at = 0, from = null } = {}) {
     bp.scenarios  = (Array.isArray(setup.scenarios) ? setup.scenarios : []).map(sc => ({
         id:          typeof sc?.id === 'string' ? sc.id : null,
         name:        typeof sc?.name === 'string' ? sc.name : '',
+        // The way in, and what each level is measured from, travel: they are facts about the PLAN,
+        // not about the author. A recipient who cannot see that the stop is anchored to structure has
+        // to re-derive the one thing that makes the level challengeable. `alternatives` does NOT
+        // travel — that is the author's reasoning about what they didn't take (setup.schema.js).
+        archetype:   sc?.archetype ?? null,
         entry_legs:  _carryLegs(sc?.entry_legs),
         stop_legs:  _carryLegs(sc?.stop_legs),
         target_legs: _carryLegs(sc?.target_legs),
@@ -114,6 +119,7 @@ export function hydrateBlueprint(bp) {
     draft.scenarios = (scenarios.length ? scenarios : [{}]).map((sc, i) => ({
         id:          typeof sc?.id === 'string' && sc.id.trim() ? sc.id.trim() : `s${i + 1}`,
         name:        typeof sc?.name === 'string' ? sc.name : '',
+        archetype:   sc?.archetype ?? null,
         entry_legs:  _carryLegs(sc?.entry_legs),
         stop_legs:  _carryLegs(sc?.stop_legs),
         target_legs: _carryLegs(sc?.target_legs),
@@ -206,9 +212,12 @@ const isPlainObject = (v) => !!v && typeof v === 'object' && !Array.isArray(v)
 function _carryLegs(arr) {
     if (!Array.isArray(arr)) return []
     return arr.map(z => ({
-        id:    typeof z?.id === 'string' ? z.id : null,
-        price: z?.price ?? null,
-        note:  typeof z?.note === 'string' ? z.note : null,
+        id:     typeof z?.id === 'string' ? z.id : null,
+        price:  z?.price ?? null,
+        note:   typeof z?.note === 'string' ? z.note : null,
+        // What the price is measured FROM (setup.taxonomy.js). Plan, not person — and the
+        // normaliser drops it if the recipient's vocabulary ever stops holding the word.
+        anchor: z?.anchor ?? null,
         conditions: _carryConditions(z?.conditions),
     }))
 }

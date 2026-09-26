@@ -1,8 +1,9 @@
 # Mentor — the paths not taken
 
-**STATUS: PLANNED 2026-09-26. Nothing below is built.** Names in backticks that do not resolve yet
-(`services/setup.taxonomy.js`, `flip_test`, `on_away`, `alternatives`) are the plan's own
-vocabulary, not drift — `npm run check:docs` will report them unresolved until the phases land, and
+**STATUS: PHASES 0–1 BUILT 2026-09-26** (the taxonomy, the schema and the gate). Phases 2–5 — the
+prompt, the flip test, the runaway card, the docs — are still PLAN. Names in backticks that do not
+resolve yet (`flip_test`, `services/flipTest.service.js`, `ran_away_fyi`) are the plan's own
+vocabulary, not drift — `npm run check:docs` reports them unresolved until those phases land, and
 that is correct. Update this line phase by phase.
 
 **Scope: Mentor (authoring) plus ONE card change at Talos.** No monitor logic, no new assess
@@ -103,7 +104,7 @@ is a real cover; fifteen makes the rejection list noise.
 
 | primary | sibling |
 |---|---|
-| `pullback` | `retest` (preferred), else `breakout` |
+| `pullback` | `retest` — `breakout` is the user's alternative, offered in conversation, never by `siblingOf` |
 | `sweep_reclaim` | `retest` of the reclaimed level |
 | `gap_fill` | `momentum_continuation`, else none |
 | `fade` | **none** — a fade that runs away is the other direction's trade |
@@ -118,6 +119,7 @@ in prose cannot be checked, and checking it is the whole point.
 - per scenario: **`archetype`**
 - per stop leg and target leg: **`anchor`**
 - per setup: **`alternatives: [{ archetype, price, why_not }]`** — capped at 5, `why_not` one clause
+  (bounded at 200 chars), and an entry with no reason is dropped rather than kept hollow
 
 `alternatives` is **the pool scenarios are promoted out of.** "Make the retest a second scenario"
 moves that entry into `scenarios[]` and removes it from the pool — one truth, and a mechanic the user
@@ -350,32 +352,59 @@ object keys.
 `prompts/mentor_system_prompt.md`, and that prose does not exist until Phase 2 writes it. Corrected
 after Phase 0 landed; the plan had it in the wrong phase.
 
+**BUILT 2026-09-26** — `services/setup.taxonomy.js` + `tests/unit/setupTaxonomy.test.js` (11 tests).
+Settled beyond the plan: the glosses are trailing comments rather than exported data (no runtime
+consumer would have read them, and the prose mirror is the prompt's), and `SIBLINGS` is exported
+alongside `siblingOf` so the drift test can assert total coverage rather than probing one id at a
+time.
+
 ### Phase 1 — the schema and the gate
 
 `services/setup.schema.js`:
 
 - normalize `archetype` on a scenario and `anchor` on stop/target legs, both against the taxonomy,
   unknown → null (never a throw; the plan still builds).
-- normalize `alternatives[]` on the setup: cap 5, trim `why_not`, drop entries with no archetype.
-- normalize `validity.on_away`: `revise` | `pass`, default `revise` — the same shape as `on_break`.
-- a `challenge` provenance block: `{ pass, verdict, at }`, additive, never required.
+- normalize `alternatives[]` on the setup: cap 5, cap the clause, drop entries with no archetype
+  **or no reason**.
+- normalize `validity.on_away`: `revise` | `pass`, and **no default** — see below.
 
-`setupReadiness`: a soft warning when `alternatives` is empty, and **`on_away` required on every
-scenario**. Required on every one rather than only on return-requiring entries, so the gate stays
-pure — deciding "does this entry need price to come back" needs a live quote, and readiness must not
-fetch. The quote-aware nuance lives in the prompt, which asks the question in the way that fits the
-archetype.
+`setupReadiness`: a soft warning when `alternatives` is empty, and a **block when a scenario carries a
+validity range with no `on_away`**. Gated on the range existing rather than on the entry needing price
+to come back, so the gate stays pure — the narrower test needs a live quote, and readiness must not
+fetch. Asking the question in the shape the archetype deserves is the prompt's job.
 
-*Tests:* extend `tests/unit/setupSchema.test.js` (normalisation, defaults, caps) and
-`tests/unit/setupsGenerate.test.js` (the gate blocks on a missing `on_away`, warns on empty
-`alternatives`). Check `services/setup.blueprint.js` drops `alternatives` and `challenge` — with a
-test, since a share leaking the author's rejects is the kind of thing nobody notices.
+**BUILT 2026-09-26** — `services/setup.taxonomy.js` (`normalizeTaxon`), `services/setup.schema.js`,
+`services/setup.blueprint.js`, `api/setups/setups.service.js` (`PLAN_FIELDS`), +15 tests across
+`setupSchema` / `setupTaxonomy` / `setupBlueprint`. Suite 3352/0.
 
-**BUILT 2026-09-26** — `services/setup.taxonomy.js` + `tests/unit/setupTaxonomy.test.js` (11 tests).
-Settled beyond the plan: the glosses are trailing comments rather than exported data (no runtime
-consumer would have read them, and the prose mirror is the prompt's), and `SIBLINGS` is exported
-alongside `siblingOf` so the drift test can assert total coverage rather than probing one id at a
-time.
+**What the build settled differently from this plan:**
+
+- **`on_away` has NO default, and the plan contradicted itself about it** — it asked for `default
+  'revise'` in one line and "required" in the next, and a defaulted field can never be missing. The
+  default is gone. The asymmetry with `on_break` is now the point: the monitor is already safe without
+  an answer (a runaway is announced once and never closes anything), so a default would buy nothing
+  except letting the one question this field exists to force go unasked.
+- **The `challenge` provenance block is DEFERRED to Phase 3**, where the flip test gets a writer.
+  Adding it here would have made it a model-authored field — provenance written by the party it
+  vouches for, which is worth nothing: a model could file `stands` on a verdict that came back
+  `reversed`. Phase 3 owns both the field and the question of who may write it.
+- **A reject with no reason is dropped**, not kept with a null. The entry's whole value is the answer
+  to "why not that one?", so an archetype on its own is a hollow claim that no emptiness check could
+  tell from a real one — five of them would satisfy the warning while recording nothing.
+- **`archetype` and `anchor` DO travel in a blueprint.** They are facts about the plan, not about the
+  author: a recipient who cannot see that the stop is anchored to structure has to re-derive the one
+  thing that makes the level challengeable. Only `alternatives` stays behind.
+- **`setupReadiness` gained a `warnings` array.** A soft signal could not ride in `problems`, which
+  blocks. Additive, so the FE ignores it until it renders it.
+- **`alternatives` is in `PLAN_FIELDS` but not `LIGHT_FIELDS`** — a re-draw re-authors the pool; an
+  in-position edit touches context only and has no business rewriting the author's rejects.
+- **Two existing tests changed**, both intentionally: the readiness fixture now authors `on_away` so
+  it stays a test about coherence, and the "complete setup is ready" deep-equal carries `warnings`.
+
+**Known limitation, accepted:** the empty-pool warning fires on every interview-path plan, where an
+empty pool is the CORRECT answer — the schema cannot see which path authored the plan. Two ways to
+close it later: an `authored: interview | guided` marker, or the FE suppressing the warning when it
+knows the user brought the plan. Until then it is a true statement that is sometimes not worth saying.
 
 ### Phase 2 — the prompt
 

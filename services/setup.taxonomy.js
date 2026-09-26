@@ -98,14 +98,35 @@ export const SIBLINGS = {
 }
 
 /**
+ * The one matcher every taxonomy field goes through: a member of `list`, or null.
+ *
+ * ONE function rather than three `normalizeArchetype`-shaped copies, because the tolerance IS the
+ * mechanism and not the judgment (CLAUDE.md): trim and case are spelling, a model that emits
+ * `"Pullback"` means `pullback`, and whether that spelling is acceptable cannot be allowed to differ
+ * between the archetype and the two anchor fields.
+ *
+ * A non-member degrades to null rather than throwing, which is the house rule for everything the
+ * model authors — an unknown lens falls back, an unreadable leg is dropped, and the draft still
+ * renders. Filing an archetype wrong must never cost the user the worksheet.
+ *
+ * Pure.
+ */
+export function normalizeTaxon(list, raw) {
+    const id = typeof raw === 'string' ? raw.trim().toLowerCase() : ''
+    return id && Array.isArray(list) && list.includes(id) ? id : null
+}
+
+/**
  * The continuation archetype for a way in that never filled, or null when there isn't one.
  *
  * Tolerant of junk by design — an unknown or missing archetype is "no sibling", never a throw. The
  * caller is a conversation, and a plan filed before this taxonomy existed must still be re-openable.
+ * Going through `normalizeTaxon` is also what keeps an inherited object key (`toString`) from
+ * resolving to something that is not an archetype at all.
  *
  * Pure.
  */
 export function siblingOf(archetype) {
-    const id = typeof archetype === 'string' ? archetype.trim().toLowerCase() : ''
-    return Object.prototype.hasOwnProperty.call(SIBLINGS, id) ? SIBLINGS[id] : null
+    const id = normalizeTaxon(ENTRY_ARCHETYPES, archetype)
+    return id ? SIBLINGS[id] : null
 }
