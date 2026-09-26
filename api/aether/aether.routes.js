@@ -1,7 +1,7 @@
 import express        from 'express'
 import { log }        from '../../middleware/logger.middleware.js'
 import { requireAuth, requireAdmin } from '../../middleware/auth.middleware.js'
-import { streamAether, getCandidates, getCandidatesByTicker, getScorecardRead, postQuickRead, startDiscovery, getDiscoveryStatus } from './aether.controller.js'
+import { streamAether, getCandidates, getCandidatesByTicker, getScorecardRead, postQuickRead, getScanUniverseRead, startDiscovery, getDiscoveryStatus } from './aether.controller.js'
 
 const router = express.Router()
 
@@ -25,6 +25,10 @@ router.get('/scorecard',          log, getScorecardRead)
 // Prometheus's quick read on one name — credible, priced in, or contradicted. Any signed-in
 // user: their model call, their budget; the read is a broadcast annotation on the list.
 router.post('/quickread',         log, postQuickRead)
+// The names this user's next scan carries to Argus — the board minus whatever their last radar
+// list already took, plus anything a new event has named since. PER USER, unlike every other read
+// here: the events are broadcast, but which of them you have already worked is not.
+router.get('/scan-universe',      log, getScanUniverseRead)
 
 // Discovery is MANUAL and ADMIN-ONLY. It is the one leg of the engine that spends real
 // money per press — an Opus call with web search per event, plus several hundred SEC

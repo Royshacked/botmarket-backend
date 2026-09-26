@@ -15,7 +15,7 @@ const LOG    = '[scanner:controller]'
 const handle = makeHandle(LOG)
 
 export async function streamScanner(req, res) {
-    const { messages, model, editList, handoff, handoffTo, profile } = req.body ?? {}
+    const { messages, model, editList, handoff, handoffTo, radar, radarBoard, profile } = req.body ?? {}
 
     const validatedMessages = parseChatMessages(messages)
     if (validatedMessages.error) {
@@ -36,6 +36,11 @@ export async function streamScanner(req, res) {
                 // and an unknown value degrades to the generic phrasing instead of putting whatever
                 // the body carried in front of the user.
                 handoffTo:       handoffTo === 'mentor' || handoffTo === 'kairos' ? handoffTo : null,
+                // The Events radar handed over a universe: the mode flag, and the board it applies to.
+                // The board is built server-side (aetherScanUniverse) and handed straight back, so the
+                // only thing worth checking here is its shape — the prompt renders whatever it holds.
+                radar:           radar === true,
+                radarBoard:      radarBoard && typeof radarBoard === 'object' ? radarBoard : null,
                 profile:         profile === 'investing' ? 'investing' : 'trading',
                 userId:   req.user._id,
                 signal:   signal,

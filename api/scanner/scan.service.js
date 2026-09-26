@@ -46,6 +46,19 @@ async function saveScan(scan, userId) {
             // Saved because it is what the ranking MEANS — the same names under a different school are
             // a different list, and one re-read months later has to say which bar it was held to.
             lens:       scan.lens        ?? null,
+            // WHERE THE NAMES CAME FROM, and only when they came from somewhere: 'aether' marks a
+            // list Argus built off the Events radar's universe. It is what lets the next radar scan
+            // hold back the names this one already listed (aetherScanUniverse), and it has to be a
+            // stored field rather than a guess from the contents — a hand-written list of the same
+            // tickers is not the same artifact. Null for an ordinary scan, which is most of them.
+            source:     scan.source === 'aether' ? 'aether' : null,
+            // The Aether run ids this list was cut FROM — the whole board that day, not just the
+            // events that produced a survivor. It is what "unless they are in a new event" is
+            // answered against: tomorrow's universe treats a run id no saved list carries as new.
+            // Only meaningful with source 'aether', so it is dropped for every other scan rather
+            // than left as an empty array that reads like a board with no events in it.
+            sourceRuns: scan.source === 'aether' && Array.isArray(scan.sourceRuns)
+                ? scan.sourceRuns.map(String) : null,
             candidates: Array.isArray(scan.candidates) ? scan.candidates : [],
             // The scanner conversation that produced this list — lets the user
             // click the thesis to return to that chat.

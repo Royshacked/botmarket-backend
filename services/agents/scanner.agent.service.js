@@ -36,6 +36,12 @@ const _profilePrompt = {
 // where a list-building turn read fifty lines of "find ONE ticker, do not emit a scan_list" that did
 // not apply to it, and a hand-off turn read the list machinery and phase gate it had to override.
 const _handoffMode = makePromptLoader(join(__dirname, '../../prompts/scanner_mode_handoff.md'), LOG)
+
+// RADAR CUT is the second mode, and the same shape: the Events radar hands Argus a universe it did
+// not screen for, and the module replaces the DISCOVERY half of the spine where hand-off replaces
+// the list half. The two are mutually exclusive — one ends in a pick, the other in a list — which
+// is what keeps the system prompt at two cached blocks and inside the breakpoint budget below.
+const _radarMode = makePromptLoader(join(__dirname, '../../prompts/scanner_mode_radar.md'), LOG)
 const MAX_MESSAGES = 10
 
 export const TOOLS = toolsFor({
@@ -204,12 +210,47 @@ const HANDOFF_DESKS = {
 // Unknown/absent destination degrades to the generic phrasing rather than guessing a desk: the
 // module already tells Argus to name only what this line names, so "the build desk" is honest where
 // a wrong brand name would be a lie the user reads.
+// The universe itself rides in the seeded OPENING MESSAGE, not here and not through editList: it is
+// tens of kilobytes that never change within a session, so history caching carries it for free,
+// where a volatile system block would re-send it every turn. editList was the other candidate and is
+// wrong on meaning — it tells Argus it is REFINING a list and to keep untouched names, which is the
+// opposite of a cut.
+const RADAR_CONTEXT = 'ACTIVE MODE: RADAR CUT — the Events radar handed you the board below. The '
+    + 'RADAR CUT MODE module is in force: it replaces the discovery half of the spine. Phases 1-2 are '
+    + 'already done, you start at Phase 3, and you cut to the few names worth watching in the coming week.'
+
+/**
+ * The board itself, rendered for the volatile tail.
+ *
+ * SAME MECHANISM AS THE EDIT LIST, different meaning. It cannot ride in the seeded opening message
+ * the way the hand-off's bias and horizon do: that seed is SENT as the user's own turn and rendered
+ * as their bubble, and a hundred-name board in a chat bubble buries the conversation it starts. So
+ * the user says one sentence and the board arrives as context, which is what it is.
+ *
+ * Not a cached block either, though it is the biggest thing here (~10k tokens on a full board):
+ * the breakpoint budget is spent — tools, history, the spine and the mode module — and a cut is a
+ * short conversation, so re-sending it per turn costs less than the block it would displace.
+ */
+function _buildRadarSection(board) {
+    const rows = Array.isArray(board?.candidates) ? board.candidates : []
+    if (!rows.length) return null
+    const lines = rows.map(c => `  - ${c.ticker}${c.company ? ` (${c.company})` : ''}`
+        + `${c.returning ? ' [BACK — a new event named it since your last list]' : ''} — ${c.thesis ?? ''}`)
+    return [
+        `THE BOARD — ${rows.length} name${rows.length === 1 ? '' : 's'} Aether's events reached`
+        + `${board.runs ? ` across ${board.runs} event${board.runs === 1 ? '' : 's'}` : ''}`
+        + `${board.held ? `, with ${board.held} more held back because a previous list already took them` : ''}.`,
+        'HELPED / HURT is what Aether claimed about ONE event and is context only — not a filter, not a rank.',
+        ...lines,
+    ].join('\n')
+}
+
 function _handoffContext(handoffTo) {
     const desk = HANDOFF_DESKS[handoffTo] ?? 'the build desk that sent them'
     return `ACTIVE MODE: BUILD HAND-OFF — the user was sent here by ${desk}, to find ONE ticker to build a single trade on. Refer to that desk by that name. The BUILD HAND-OFF MODE module is in force: it replaces the list-building shape of the spine.`
 }
 
-async function chatStream({ messages = [], model: requestedModel, editList = null, handoff = false, handoffTo = null, profile = 'trading', audience = null, reasoningEffort, userId, onToken, onTicker, onPhase, onToolStart, onReasoning, onChart, signal,
+async function chatStream({ messages = [], model: requestedModel, editList = null, handoff = false, handoffTo = null, radar = false, radarBoard = null, profile = 'trading', audience = null, reasoningEffort, userId, onToken, onTicker, onPhase, onToolStart, onReasoning, onChart, signal,
     _run = runAgentStream,   // the shared contract-test seam — see runAgentStream in agentIO.js
     _venueSection = buildVenueSection,
 }) {
@@ -234,7 +275,21 @@ async function chatStream({ messages = [], model: requestedModel, editList = nul
     const editSection = _buildEditSection(editList)
     if (editSection) dynamic.push(editSection)
     const inHandoff = handoff && prof === 'trading'   // hand-off is a trading-only path
+    // HAND-OFF WINS when both arrive. They cannot both be meant — one ends in a single pick and the
+    // other in a list — and a caller that sets both has a bug, so the mode that the user was
+    // physically routed into is the one honoured. Silently running neither would be worse: the
+    // spine would ask a hundred-name universe what angle to screen for.
+    const inRadar   = radar && !inHandoff && prof === 'trading'
     if (inHandoff) dynamic.push(_handoffContext(handoffTo))
+    if (inRadar) {
+        dynamic.push(RADAR_CONTEXT)
+        const boardSection = _buildRadarSection(radarBoard)
+        // EVERY turn of a cut carries the board, not just the first. This is the volatile tail, not
+        // the history: it is rebuilt per turn, so a board sent once is gone by the follow-up — and
+        // "why did you drop MOS" is unanswerable without the row that named MOS. ~10k tokens a turn
+        // at the input rate, against a cut that runs a handful of turns.
+        if (boardSection) dynamic.push(boardSection)
+    }
 
     const promptLoader = _profilePrompt[prof] ?? _profilePrompt.trading
     // Spine (cached) + the mode module on a hand-off turn (its own cached block, so the list-mode
@@ -245,6 +300,7 @@ async function chatStream({ messages = [], model: requestedModel, editList = nul
     const systemPrompt = [
         cachedBlock(promptLoader() + buildRouteRule('scanner') + LANGUAGE_RULE + VENUE_RULE + BREVITY_RULE),
         ...(inHandoff ? [cachedBlock(_handoffMode())] : []),
+        ...(inRadar   ? [cachedBlock(_radarMode())]   : []),
         { type: 'text', text: dynamic.join('\n\n') },
     ]
 

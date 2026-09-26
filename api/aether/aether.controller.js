@@ -11,6 +11,7 @@
 import { aetherAgentService }                        from '../../services/agents/aether.agent.service.js'
 import { getEventCandidates, getCandidatesForTicker, tickerWindowDays, getScorecard } from './aether.service.js'
 import { quickRead } from '../../services/aetherQuickRead.service.js'
+import { getScanUniverse } from '../../services/aetherScanUniverse.service.js'
 import { aetherSchedulerService, DISCOVERY_DEFAULTS } from '../../services/aetherScheduler.service.js'
 import { streamAgentResponse, sseAgentCallbacks }    from '../_shared/sse.util.js'
 import { routeFields }                               from '../../services/routing.util.js'
@@ -95,6 +96,24 @@ export const postQuickRead = handle('postQuickRead', async (req, res) => {
     const { run_id: runId, ticker } = req.body ?? {}
     // The read runs on the HOUSE chat model; a `model` the client still sends is not read.
     res.json(await quickRead({ runId, ticker, userId: req.user?._id }))
+})
+
+/**
+ * The names this user's next radar scan should carry to Argus.
+ *
+ * Any signed-in user, like the board it is built from — but the answer is PER USER, because the
+ * exclusions are: "the names I already listed" is a fact about one person's scanning, where the
+ * events and the reads are broadcast measurements. Two people working the same board get the same
+ * events and different universes, which is correct.
+ *
+ * Read-only. Nothing is marked as handed over here — the exclusion keys on the LIST Argus saves,
+ * so asking what the universe is costs nothing and changes nothing. Pressing the button twice
+ * without saving a list gives the same names both times.
+ */
+export const getScanUniverseRead = handle('getScanUniverse', async (req, res) => {
+    const days = Number(req.query?.days)
+    res.json(await getScanUniverse(req.user._id,
+        Number.isFinite(days) && days > 0 ? { days: Math.min(days, 90) } : {}))
 })
 
 // ── discovery, on demand (admin) ──────────────────────────────────────────────
