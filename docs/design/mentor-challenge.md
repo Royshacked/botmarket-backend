@@ -342,9 +342,13 @@ Five phases. Each ends with tests and a green suite (`npm test` excluding
 `services/setup.taxonomy.js`: `ENTRY_ARCHETYPES`, `STOP_ANCHORS`, `TARGET_ANCHORS`, `SIBLINGS`, each
 an array of ids plus a one-line gloss, and `siblingOf(archetype)`. No behaviour.
 
-*Tests:* shape and uniqueness; `siblingOf` covers every archetype including the `none` cases; a drift
-test asserting every id appears in `prompts/mentor_system_prompt.md` (the `promptToolDrift.test.js`
-pattern), so the prose mirror cannot rot.
+*Tests:* shape and uniqueness; `SIBLINGS` decides every archetype and invents none; the chain is one
+hop (the "you do not chase a chase" rule, asserted); `siblingOf` tolerant of junk and of inherited
+object keys.
+
+**The prose-mirror drift test belongs to Phase 2, not here** — it asserts every id appears in
+`prompts/mentor_system_prompt.md`, and that prose does not exist until Phase 2 writes it. Corrected
+after Phase 0 landed; the plan had it in the wrong phase.
 
 ### Phase 1 — the schema and the gate
 
@@ -366,6 +370,12 @@ archetype.
 `tests/unit/setupsGenerate.test.js` (the gate blocks on a missing `on_away`, warns on empty
 `alternatives`). Check `services/setup.blueprint.js` drops `alternatives` and `challenge` — with a
 test, since a share leaking the author's rejects is the kind of thing nobody notices.
+
+**BUILT 2026-09-26** — `services/setup.taxonomy.js` + `tests/unit/setupTaxonomy.test.js` (11 tests).
+Settled beyond the plan: the glosses are trailing comments rather than exported data (no runtime
+consumer would have read them, and the prose mirror is the prompt's), and `SIBLINGS` is exported
+alongside `siblingOf` so the drift test can assert total coverage rather than probing one id at a
+time.
 
 ### Phase 2 — the prompt
 
