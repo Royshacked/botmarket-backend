@@ -175,8 +175,19 @@ condition written against a peer or an index needs that symbol in scope on the i
 
 ## Validity — the range outside which the setup is dead
 
-`validity` bounds where the setup still makes sense, with `on_break`: `revise` │ `close` │
-`notify_only`.
+`validity` bounds where the setup still makes sense. **Each edge has its own authored answer**, because
+the two edges are not the same event (2026-09-26, docs/design/mentor-challenge.md §3):
+
+- `on_break` — the ADVERSE edge, the premise broke: `revise` │ `close` │ `notify_only`, default `revise`.
+- `on_away` — the FAVOURABLE edge, price went without them: `revise` │ `pass`, **no default**. `revise`
+  posts `ran_away`, whose primary reopens the plan in Mentor; `pass` posts `ran_away_fyi`, which asks
+  nothing. Generate refuses a range with neither (`missing_runaway_answer`), because it is the one
+  question about a plan that can only be asked while the plan is still being built.
+
+Neither answer ever authors a level for the runaway. The continuation is MEASURED in the redraw, off
+structure that has actually printed — a retest price for a break that has not happened is a level from
+imagination, and nothing fires without the user's confirm anyway, so pre-authoring it would buy a
+staler price and nothing else.
 
 **The asymmetry is deliberate — do not flatten it.** Pre-entry, both edges matter: too high is "do
 not enter here" just as much as too low is "the thesis broke". In position, only the **adverse**

@@ -507,7 +507,7 @@ async function _checkValidity(setup, price, nowMs, deps) {
         Object.assign(set, res.set)
         next[sc.id] = res.status
         last = { scenario: sc, edge: res.edge, reason: res.reason }
-        events.push({ scenario: sc, card: res.card, side, price: close, edge: res.edge, reason: res.reason })
+        events.push({ scenario: sc, card: res.card, side, price: close, edge: res.edge, reason: res.reason, archetype: res.archetype ?? null })
     }
 
     if (!events.length) return null

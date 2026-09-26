@@ -48,15 +48,52 @@ test('a card with no owner is built but carries a null userId for the poster to 
 })
 
 // ─── Invalidation cards ───────────────────────────────────────────────────────
-// Four events, four messages. Merging them would produce copy that is wrong for three of the four:
-// "you missed it" is not a problem to solve, and "the premise broke" is not an FYI.
+// Five events, five messages. Merging them would produce copy that is wrong for four of the five:
+// "you missed it and want another look" is not "you missed it and said you'd let it go", and neither
+// of those is "the premise broke".
 
-test('a runaway says nothing was wrong, and asks for nothing', () => {
+test('a runaway opens the plan back up, and says why now', () => {
+    // Phase 4 of docs/design/mentor-challenge.md OVERTURNED this card's old contract, which was "asks
+    // for nothing, because a chase is the user's own decision from a clean slate". The clean slate is
+    // where FOMO lives: the honest outcomes are wait, a measured continuation, or close it, and the
+    // user should not be triaging those alone while the move runs.
     const card = buildSetupInvalidation(SETUP, { card: 'ran_away', side: 'away', price: 247, edge: 'upper' })
     assert.match(card.content, /ran past 247/)
-    assert.match(card.content, /Nothing was wrong with the read/)
-    assert.equal(card.actions, undefined, 'a missed entry is not a task')
+    assert.match(card.content, /read wasn't wrong/)
+    assert.match(card.content, /while the move is live/)
+    assert.equal(card.actions?.primary?.label, 'Re-draw with Mentor')
     assert.equal(card.payload.event, 'ran_away')
+})
+
+test('a runaway names the continuation worth looking at, from the way in that missed', () => {
+    // A QUESTION, not a level: the card names an archetype, and the price for it gets measured in the
+    // conversation off structure that has actually printed.
+    const card = buildSetupInvalidation(SETUP, { card: 'ran_away', price: 247, archetype: 'sweep_reclaim' })
+    assert.match(card.content, /off a sweep reclaim, the continuation to look at is the retest/)
+    assert.equal(card.payload.archetype, 'sweep_reclaim')
+})
+
+test('a way in with no continuation says the level moved, and stops there', () => {
+    // A `fade` that ran away is evidence for the OTHER direction — a different plan, not this one's
+    // sibling. Offering one would walk the user into a reversal wearing the missed trade's label.
+    const fade = buildSetupInvalidation(SETUP, { card: 'ran_away', price: 247, archetype: 'fade' })
+    assert.match(fade.content, /measured rather than remembered/)
+    assert.doesNotMatch(fade.content, /continuation to look at/)
+
+    // Same copy when nothing was filed at all, so an older document degrades quietly.
+    const bare = buildSetupInvalidation(SETUP, { card: 'ran_away', price: 247 })
+    assert.match(bare.content, /measured rather than remembered/)
+    assert.ok(bare.actions, 'the re-draw is still on offer')
+})
+
+test('`pass` is honoured: the user is told and asked nothing', () => {
+    // They answered this exact question while the plan was being built. Re-asking it is the thing
+    // `on_away: pass` exists to prevent.
+    const card = buildSetupInvalidation(SETUP, { card: 'ran_away_fyi', side: 'away', price: 247, archetype: 'pullback' })
+    assert.match(card.content, /ran past 247/)
+    assert.match(card.content, /you said to let that one go/)
+    assert.equal(card.actions, undefined, 'no primary, and nothing to clear')
+    assert.doesNotMatch(card.content, /continuation to look at/, 'a pass does not get a suggestion')
 })
 
 test('an invalidation offers the re-draw, and quotes the close', () => {
@@ -121,7 +158,7 @@ test('with nothing left standing the copy is about the setup again', () => {
 })
 
 test('every invalidation card is owner-scoped and routes to Mentor', () => {
-    for (const kind of ['ran_away', 'invalidated', 'invalidated_fyi', 'stale_map']) {
+    for (const kind of ['ran_away', 'ran_away_fyi', 'invalidated', 'invalidated_fyi', 'stale_map']) {
         const card = buildSetupInvalidation(SETUP, { card: kind })
         assert.equal(card.userId, SETUP.userId, kind)
         assert.equal(card.botId, 'mentor', kind)

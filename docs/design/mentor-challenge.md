@@ -1,7 +1,8 @@
 # Mentor — the paths not taken
 
-**STATUS: PHASES 0–2 BUILT 2026-09-26** (the taxonomy, the schema and the gate, the prompt). Phases
-3–5 — the flip test, the runaway card, the docs — are still PLAN. Names in backticks that do not
+**STATUS: PHASES 0–2 AND 4 BUILT 2026-09-26** (the taxonomy, the schema and the gate, the prompt, the
+runaway card — so the whole runaway loop is closed end to end). Phase 3, the flip test, is still PLAN;
+Phase 5 is the docs sweep. Names in backticks that do not
 resolve yet (`flip_test`, `services/flipTest.service.js`, `ran_away_fyi`) are the plan's own
 vocabulary, not drift — `npm run check:docs` reports them unresolved until those phases land, and
 that is correct. Update this line phase by phase.
@@ -479,6 +480,28 @@ the ledger tag.
 
 *Tests:* extend `tests/unit/setupNotify.test.js` — card kind and actions per `on_away`, fire-once
 unchanged, the payload still carries `side`/`edge`/`scenario`.
+
+**BUILT 2026-09-26** — `monitoring/talos.gates.js` (the away branch picks the card and passes the
+archetype), `monitoring/talos.monitor.service.js` (one line: the event carries it),
+`services/tradeNotify.service.js` (`ran_away` copy + primary, `ran_away_fyi`, `_words`), +5 tests in
+`setupNotify` / `talosMonitor`. Suite 3365/0. `docs/desks/mentor-talos.md` §Validity rewritten in the
+same commit, since its `on_break`-only line was the doc's claim about this mechanism.
+
+**What the build settled beyond the plan:**
+
+- **Push needed no work.** Every bot card pushes already — `postCard` → `postBotCard` fans out to the
+  socket AND web push for the same message. The plan listed pushing as a task; it was one sentence of
+  copy ("while the move is live"), not a wiring change.
+- **`siblingOf` got its consumer here, as agreed** — the card names the continuation worth looking at
+  (*"off a sweep reclaim, the continuation to look at is the retest"*), and a test asserts it never
+  invents a price. The three archetypes with no sibling fall back to *"the level has moved, so anything
+  past here has to be measured rather than remembered"*, which is the honest version of not knowing.
+- **`_words` instead of a label map.** `sweep_reclaim` → "sweep reclaim" reads correctly for every id in
+  all three sets, so a second user-facing vocabulary to keep in step would have been pure liability.
+- **`ran_away_fyi` uses `actions: null`, not `dismissOnly()`** — matching `invalidated_fyi` exactly. The
+  user pre-answered this question at build time; giving them something to clear re-asks it.
+- **An unauthored range still gets the re-draw card.** Only a document predating the field can reach
+  that state (Generate refuses it now), and the safe failure on the away edge is being told.
 
 ### Phase 5 — docs
 

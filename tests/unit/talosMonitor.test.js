@@ -411,6 +411,28 @@ test('a runaway is announced once and never kills the premise', () => {
     assert.equal(breachPatch(latched(RANGED, 'drifting'), RANGED.scenarios[0], 'away', 248, T).card, null)
 })
 
+test('the AUTHORED answer picks the runaway card, exactly as on_break picks the invalidation one', () => {
+    // `pass` is the user saying at build time that a missed trade is a missed trade
+    // (docs/design/mentor-challenge.md §3). The monitor honours it by telling them and asking nothing.
+    const sc   = RANGED.scenarios[0]
+    const pass = { ...sc, validity: { ...sc.validity, on_away: 'pass' } }
+    assert.equal(breachPatch({ ...RANGED, scenarios: [pass] }, pass, 'away', 247, T).card, 'ran_away_fyi')
+
+    const revise = { ...sc, validity: { ...sc.validity, on_away: 'revise' } }
+    assert.equal(breachPatch({ ...RANGED, scenarios: [revise] }, revise, 'away', 247, T).card, 'ran_away')
+
+    // An unauthored range still opens the plan back up: Generate refuses one with no answer, so this
+    // only happens on a document that predates the field — and the safe failure is being told.
+    assert.equal(breachPatch(RANGED, sc, 'away', 247, T).card, 'ran_away')
+})
+
+test('the way in that missed travels with the runaway, so the card can name the continuation', () => {
+    const sc = { ...RANGED.scenarios[0], archetype: 'pullback' }
+    assert.equal(breachPatch({ ...RANGED, scenarios: [sc] }, sc, 'away', 247, T).archetype, 'pullback')
+    // A document with nothing filed degrades to null rather than to a guess.
+    assert.equal(breachPatch(RANGED, RANGED.scenarios[0], 'away', 247, T).archetype, null)
+})
+
 test('a drifted scenario can still break the other way', () => {
     const broke = breachPatch(latched(RANGED, 'drifting'), RANGED.scenarios[0], 'adverse', 233, T)
     assert.equal(broke.set[KEY].invalidation_status, 'fired')

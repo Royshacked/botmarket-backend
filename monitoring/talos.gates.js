@@ -240,8 +240,17 @@ export function breachPatch(setup, sc, side, price, nowMs) {
         const reason = `price ran to ${price} — past the ${edge} edge of where ${many ? label : 'this setup'} works`
         return {
             set:    { [key]: { invalidation_status: INVALIDATION.DRIFTING, invalidation_edge: edge, invalidation_reason: reason, at } },
-            card:   'ran_away',
+            // THE AUTHORED ANSWER picks the card, exactly as `on_break` picks between `invalidated`
+            // and `invalidated_fyi` below. `pass` is the user saying at build time that a missed trade
+            // is a missed trade — so they are told and asked nothing. Anything else (the default is
+            // `revise`, and Generate refuses a range with neither) opens the plan back up with Mentor,
+            // because the level has moved and a continuation has to be MEASURED rather than
+            // remembered (docs/design/mentor-challenge.md §3).
+            card:   sc?.validity?.on_away === 'pass' ? 'ran_away_fyi' : 'ran_away',
             status: INVALIDATION.DRIFTING,
+            // The way in that did not fill. It travels so the card can name the continuation worth
+            // looking at — a question, never a level: nothing here authors a price.
+            archetype: sc?.archetype ?? null,
             edge, reason,
         }
     }

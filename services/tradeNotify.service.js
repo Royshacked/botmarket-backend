@@ -14,6 +14,7 @@
  */
 
 import { cardActions, botForKind, BOT_USER_ID } from '../api/chat/chat.service.js'
+import { siblingOf } from './setup.taxonomy.js'
 import { kindForDoc } from './entity/envelope.js'
 import { postCard } from './notifyCard.js'
 
@@ -26,6 +27,15 @@ const LOG = '[tradeNotify]'
  * retired. The OrderConfirmDialog shows the same age against the same threshold.
  */
 const STALE_HOURS = 12
+
+/**
+ * A taxonomy id as a trader would say it out loud — `sweep_reclaim` → "sweep reclaim".
+ *
+ * A label map would be a second vocabulary to keep in step with setup.taxonomy.js for no gain:
+ * every id in those three sets reads correctly with its underscores opened out, which is part of
+ * why they are spelled the way they are.
+ */
+const _words = (id) => String(id ?? '').replace(/_/g, ' ')
 
 // ── Pure card builders ─────────────────────────────────────────────────────────
 
@@ -103,12 +113,13 @@ export function buildSetupEntryConfirm(setup, assessment = null) {
 
 /**
  * The setup's plan is no longer worth what it was — either price left the validity range, or Talos
- * read the map as stale. FOUR distinct messages, because they are four different things to hear and
- * merging them would produce copy that is wrong for three of the four:
+ * read the map as stale. FIVE distinct messages, because they are five different things to hear and
+ * merging them would produce copy that is wrong for four of the five:
  *
  *   ran_away        price left on the FAVOURABLE side. Nothing was wrong with the read — it was
- *                   missed. Not a problem to solve, so no action button; a chase is the user's own
- *                   decision to make from a clean slate.
+ *                   missed. Opens the plan back up with Mentor.
+ *   ran_away_fyi    the same miss, on a scenario whose `on_away` says `pass` — they decided at build
+ *                   time to let a missed trade go, so they are told and asked nothing.
  *   invalidated     the premise broke and the user asked to be given the chance to re-draw it.
  *   invalidated_fyi same break, but they chose notify_only — tell them, ask nothing.
  *   stale_map       Talos's own read: the levels have drifted from where structure now sits. This
@@ -130,9 +141,36 @@ export function buildSetupInvalidation(setup, info = null) {
     const remaining = Number(info?.remaining) || 0
     const survives  = remaining > 0 ? ` Your other ${remaining === 1 ? 'scenario is' : `${remaining} scenarios are`} still armed.` : ''
 
+    // WHERE A RE-DRAW WOULD START, from the way in that did not fill. A question to open the
+    // conversation with, never an answer: `siblingOf` names an ARCHETYPE, and the price for it is
+    // measured in that conversation off structure that has actually printed. Three of the eight have
+    // no continuation at all (a `fade` that ran away is evidence for the other direction, which is a
+    // different plan) — then the copy says the level moved and stops there, which is the honest
+    // version of "I don't know what you'd do instead".
+    const sibling = siblingOf(info?.archetype)
+    const nextUp  = sibling ? { from: _words(info.archetype), to: _words(sibling) } : null
+
     const copy = {
+        // THE ONE CARD THAT USED TO ASK FOR NOTHING, and the reasoning it was built on has been
+        // overturned deliberately (docs/design/mentor-challenge.md §3). It read: "not a problem to
+        // solve, so no action button; a chase is the user's own decision to make from a clean slate."
+        //
+        // The clean slate IS the problem. It is where FOMO lives, and the card assumed the only thing
+        // on the table was a chase when there are three outcomes and two of them are not: the plan may
+        // still stand (a runaway never closes a setup — price can come back), a continuation may exist
+        // on TODAY's structure, or it is gone. Triaging that unaided while the move is running is the
+        // worst moment to hand someone a blank chart; going back to Mentor with the plan loaded is the
+        // opposite of a clean slate — it is the 1R floor and the anchor vocabulary applied at the one
+        // moment they matter.
         ran_away: {
-            content: `${subject} didn't get filled — price ran past ${info?.price ?? 'the level'} without you. Nothing was wrong with the read; the entry just never came.`,
+            content: `${subject} didn't get filled — price ran past ${info?.price ?? 'the level'} without you. The read wasn't wrong; the entry just never came.`
+                + ` Re-draw it with me while the move is live${nextUp ? ` — off a ${nextUp.from}, the continuation to look at is the ${nextUp.to}, and its level only exists now` : ' — the level has moved, so anything past here has to be measured rather than remembered'}.`,
+            actions: cardActions('Re-draw with Mentor'),
+        },
+        ran_away_fyi: {
+            content: `${subject} didn't get filled — price ran past ${info?.price ?? 'the level'} without you. The read wasn't wrong; the entry just never came, and you said to let that one go.`,
+            // `actions: null`, matching `invalidated_fyi`: the user pre-answered this exact question at
+            // build time, so re-asking it is the thing `pass` exists to prevent.
             actions: null,
         },
         invalidated: {
@@ -162,6 +200,7 @@ export function buildSetupInvalidation(setup, info = null) {
             side:      info?.side ?? null,
             edge:      info?.edge ?? null,
             scenario:  info?.scenario ?? null,
+            archetype: info?.archetype ?? null,
             remaining: Number.isFinite(info?.remaining) ? info.remaining : null,
             price:     Number.isFinite(info?.price) ? info.price : null,
             reason:    why,
