@@ -1,7 +1,7 @@
 # Mentor — the paths not taken
 
-**STATUS: PHASES 0–1 BUILT 2026-09-26** (the taxonomy, the schema and the gate). Phases 2–5 — the
-prompt, the flip test, the runaway card, the docs — are still PLAN. Names in backticks that do not
+**STATUS: PHASES 0–2 BUILT 2026-09-26** (the taxonomy, the schema and the gate, the prompt). Phases
+3–5 — the flip test, the runaway card, the docs — are still PLAN. Names in backticks that do not
 resolve yet (`flip_test`, `services/flipTest.service.js`, `ran_away_fyi`) are the plan's own
 vocabulary, not drift — `npm run check:docs` reports them unresolved until those phases land, and
 that is correct. Update this line phase by phase.
@@ -424,6 +424,35 @@ Plus the flip test's offer rule once Phase 3 lands.
 *Tests:* a new `tests/unit/mentorChallenge.test.js` asserting the prompt carries every taxonomy id,
 the `on_away` vocabulary, and the runaway section's load-bearing sentences; plus the existing
 `tests/unit/mentorAgent.test.js` still green.
+
+**BUILT 2026-09-26** — `prompts/mentor_system_prompt.md` (877 → 1032 lines, ~59k → ~70k chars) +
+`tests/unit/mentorChallenge.test.js` (8 tests). Suite 3360/0. The Generate gate shipped in Phase 1 is
+now satisfiable: the prompt authors `on_away`.
+
+**What the build settled beyond the plan:**
+
+- **The worksheet EXAMPLE was the most important edit**, and the plan did not mention it. For most
+  turns the `<setup>` block is the instruction the model actually follows, so a field taught in prose
+  and missing from the example is a field that never gets emitted. `archetype`, `anchor`,
+  `alternatives` and `on_away` all appear in it, and a test asserts every taxonomy value the example
+  uses is real — an example teaching a word the normaliser drops would be worse than no example.
+- **"Ready to Generate" is a hand-written mirror of `setupReadiness`**, so it gained `on_away` too, and
+  a test now asserts it mentions it. The prompt claiming a gate the code does not run (or missing one
+  it does) is a lie the user hits as a dead button.
+- **The drift test runs BOTH ways.** Every id in the code must appear in the prompt, AND every
+  backticked snake_case word in the taxonomy section must exist in the code. The second direction is
+  the one that fails silently: a word the prompt teaches and the schema drops gets filed every turn
+  and never lands, with nothing anywhere saying so.
+- **The away section is asserted NOT to offer the adverse edge's values.** `close` and `notify_only`
+  are `on_break` words; a prompt that offered them here would have the model author a value the
+  normaliser drops, and a runaway that reads as "let it die quietly".
+- **Prose cost, stated plainly:** ~11k characters on a cached system prompt — paid once per
+  conversation at cache-write, then at 0.1× on every turn. The three new sections are the ones a user
+  can see the effect of (a citation on every level, a rejects list, one extra question), so it is a
+  real trade and not a free one.
+- **A fourth prompt edit the plan did not list:** the interview's filing step (step 2, "Name the
+  lens") now files the archetype and anchors in the same read, because that path files rather than
+  asks and the taxonomy is filing.
 
 ### Phase 3 — the flip test
 
