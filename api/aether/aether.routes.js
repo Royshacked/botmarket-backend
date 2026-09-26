@@ -1,7 +1,7 @@
 import express        from 'express'
 import { log }        from '../../middleware/logger.middleware.js'
 import { requireAuth, requireAdmin } from '../../middleware/auth.middleware.js'
-import { streamAether, getCandidates, getCandidatesByTicker, getScorecardRead, postQuickRead, getScanUniverseRead, startDiscovery, getDiscoveryStatus } from './aether.controller.js'
+import { streamAether, getCandidates, getCandidatesByTicker, getScorecardRead, postQuickRead, postBatchRead, getScanUniverseRead, startDiscovery, getDiscoveryStatus } from './aether.controller.js'
 
 const router = express.Router()
 
@@ -29,6 +29,9 @@ router.post('/quickread',         log, postQuickRead)
 // list already took, plus anything a new event has named since. PER USER, unlike every other read
 // here: the events are broadcast, but which of them you have already worked is not.
 router.get('/scan-universe',      log, getScanUniverseRead)
+// The same read over a whole list, once Argus has cut the board down. Any signed-in user, like the
+// single read it repeats — their model calls, their budget, and the reads are broadcast once made.
+router.post('/batch-read',        log, postBatchRead)
 
 // Discovery is MANUAL and ADMIN-ONLY. It is the one leg of the engine that spends real
 // money per press — an Opus call with web search per event, plus several hundred SEC
