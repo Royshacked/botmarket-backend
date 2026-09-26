@@ -479,6 +479,22 @@ services/
         and a spread) and as the horizon lengthens. rungsBetween is also what a spoken range means —
         "15min to 1hr" is three rungs, not two. The dependency runs ONE way: setup.schema consumes
         rung facts and re-exports them, the ladder never imports back.
+    NB: setup.taxonomy.js owns the AUTHORING TAXONOMY (2026-09-26, docs/design/mentor-challenge.md):
+        ENTRY_ARCHETYPES (8 ways in) · STOP_ANCHORS / TARGET_ANCHORS (what a price is measured FROM,
+        and they do NOT mix — `measured_move` on a stop is dropped) · SIBLINGS + siblingOf (which way
+        in continues which, for the runaway redraw; three have none). normalizeTaxon is the ONE
+        matcher all three fields go through, so the tolerance cannot differ between them. Vocabulary
+        only, no behaviour but siblingOf. The prose mirror is in Mentor's prompt and
+        mentorChallenge.test.js holds the two in step IN BOTH DIRECTIONS — a word the prompt teaches
+        that the code lacks is filed every turn and lands nowhere.
+    NB: flipTest.service.js — the BLINDED direction red-team. flip_test takes only what identifies
+        the question (ticker, rung, horizon, direction); the SERVER assembles the evidence from the
+        desk's own readers (smcReadText on the named rung AND always the daily, + the indicator and
+        quote handlers), so the desk cannot feed its own audit. Runs through deepThink with its own
+        `system` (the sidecar gained that param here — shared pipe, caller's judgment), ONE per turn,
+        booked `flip:mentor`. Verdict stands | two_sided | reversed, parsed off a `VERDICT:` line and
+        null when unreadable. `challenges[]` on the setup is written by chatStream from that parse and
+        NEVER by the model — provenance authored by the party it vouches for is worth less than none.
     NB: computeRR in services/setup.schema.js (PESSIMISTIC r:r — worst entry, furthest stop,
         NEAREST target) is mirrored by the FE cmps/TradeIdeas/orderRisk.util.js, which is what the
         OrderConfirmDialog shows at approval. Keep the convention in sync.

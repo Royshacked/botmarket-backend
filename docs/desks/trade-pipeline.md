@@ -275,6 +275,43 @@ that IS the wick guard working."* Easy to lose in a rewrite, expensive to redisc
 
 ---
 
+## Back from a runaway — the third way a Mentor conversation starts
+
+> **BUILT 2026-09-26** — [design/mentor-challenge.md](../design/mentor-challenge.md) §3.
+
+The desk has two authoring paths (the interview, for a plan the user brought; the guided build, for
+one still being made). This is the third, and it is a LOOP rather than a start: Talos sees the entry
+miss, and hands the plan back to Mentor with the numbers still to be measured.
+
+```
+Mentor authors validity.on_away        revise | pass, no default; Generate refuses neither
+        ↓
+Talos   awayEdge breached on a close   drifting, announced once, never closes the setup
+        ↓
+card    ran_away → "Re-draw with Mentor"        (on_away: pass → ran_away_fyi, asks nothing)
+        ↓
+Mentor  re-measures, then three honest outcomes:
+        the original still stands and they wait · a continuation on TODAY's structure that
+        clears 1R on its own · it is gone, close it
+```
+
+**Nothing authors a level for the path price actually took.** A retest entry drawn before the break
+assumes the break happens where the plan guessed; a gap through it makes that number fiction. And
+pre-arming it buys nothing, because no entry fires without the user's confirm either way — so the
+only thing a pre-authored chase adds is a staler price than the redraw measures.
+
+**The floor does not move because the trade was missed.** That sentence is the reason the card opens
+Mentor instead of leaving the user on a blank chart at the exact moment a bad entry looks cheapest.
+The redraw re-derives the size (a new stop distance is a new share count) and re-derives the targets
+(entering 6 dollars higher makes the old first target a scratch: 244/241 against 246.5 is 0.83R,
+where the next pool at 252 is 2.7R).
+
+The direction and the lens do NOT reopen — the read was not wrong, the entry was missed — so only
+the entry rung is unsettled. The way in that missed travels on the card, so it can name the
+continuation worth asking about (`siblingOf`, mentor-talos.md).
+
+---
+
 ## Shared services
 
 Reuse, do not fork:
@@ -288,6 +325,11 @@ Reuse, do not fork:
   the pipe a shared setup travels through (see mentor-talos.md "Sharing a setup").
 - `legGate` — one function for entry and exit, parameterised by comparison direction.
 - `deferIfClosed` / `originRegistry` — the off-hours queue.
+- `deepThink` — the reasoning sidecar: ONE bounded question to a stronger model, in its own request,
+  booked and contained. Two framings ride it (the desk-head `consult` and the blinded `flip_test`),
+  and the caller brings the system prompt — the pipe is shared, the question is not.
+- `setup.taxonomy.js` — the authoring vocabulary (entry archetypes, stop and target anchors,
+  siblings). One closed set for the schema, the prompt's prose mirror and the runaway card.
 
 Stays per-desk — **share the pipe, not the judgment**: the six questions, their verdict sets, and
 the card copy.

@@ -39,7 +39,7 @@ when to act on it only make sense together.
 | Doc | Desk → monitor |
 |---|---|
 | [trade-pipeline.md](./desks/trade-pipeline.md) | **The path a new trade takes: Argus → Mentor → Talos.** Read this first — it is the record of why the trading desk is the one it is |
-| [mentor-talos.md](./desks/mentor-talos.md) | Mentor builds a `setup`; Talos watches it. Scenarios as rivals, conditions, validity, guards (exact prices, the free sweep, the exit asymmetry) — the guards doc was merged here 2026-09-19 |
+| [mentor-talos.md](./desks/mentor-talos.md) | Mentor builds a `setup`; Talos watches it. Scenarios as rivals, conditions, validity (both edges authored), guards (exact prices, the free sweep, the exit asymmetry), and **the paths not taken** — the closed authoring taxonomy, the rejects pool and the blinded flip test (2026-09-26). The guards doc was merged here 2026-09-19 |
 | [argus-scans.md](./desks/argus-scans.md) | Argus turns a question about a period into a ranked, grounded list — one spine, three targets (a trading list, an investing shortlist for Prometheus, one pick for Mentor). **Names come from the tape, and the code enforces it**; the server scores and ranks |
 | [atlas-themis.md](./desks/atlas-themis.md) | Atlas builds a book against a mandate from house coverage only, reviews it as a delta against its thesis, proposes Accept-gated changes; Themis is the LLM-free doorbell that says when to look |
 | [prometheus-coverage.md](./desks/prometheus-coverage.md) | Prometheus writes a house `coverage` thesis; the coverage monitor keeps it living. **The edge is the gap vs the Street, never price**; two tiers — a free daily check and a gated re-model |
@@ -62,7 +62,7 @@ the plan and what the build settled differently (the rule at the bottom of this 
 
 | Doc | Status |
 |---|---|
-| [mentor-challenge.md](./design/mentor-challenge.md) | **PLANNED 2026-09-26, nothing built** — the paths not taken: a closed entry/stop/target taxonomy with a rejects pool, a blinded flip test, and the runaway handoff that sends the user back to Mentor |
+| [mentor-challenge.md](./design/mentor-challenge.md) | **BUILD RECORD — phases 0–4 shipped 2026-09-26**; the contract is mentor-talos.md §The paths not taken. The three mechanisms (closed taxonomy + rejects pool, blinded flip test, runaway handoff), the 10 principles, and the two options rejected with the argument that killed them |
 | [talos-per-candle.md](./design/talos-per-candle.md) | **BUILD RECORD** — shipped 2026-09-17; the contract is mentor-talos.md. The plan, the decisions, what the build settled differently |
 | [triggered-setups.md](./design/triggered-setups.md) | Design only — a guard's price term becomes an array over prices and indicators; the level need not exist at authoring time |
 | [adopted-book.md](./design/adopted-book.md) | A portfolio that wasn't built here. Phase 1 (intake + write) built 2026-08-10, not live-verified; the rest is design |

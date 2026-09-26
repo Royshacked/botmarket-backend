@@ -184,10 +184,15 @@ edges `lower | upper | time` (`services/entity/vocabulary.js`). It only INFORMS 
 stop-owned and invalidation never executes.**
 
 - **On a `setup` it is Talos's validity gate**, and it is the live path. Talos fires a
-  `setup_invalidation` card in four flavours: `ran_away` (price ran past the level unfilled),
+  `setup_invalidation` card in FIVE flavours, and which one it is depends on what the user authored
+  for that edge: `ran_away` (price ran past the level unfilled — offers *Re-draw with Mentor*, and
+  names the continuation worth asking about), `ran_away_fyi` (the same miss where the scenario's
+  `on_away` says `pass` — they already decided to let a missed trade go, so it asks nothing),
   `invalidated` (a close past the edge where the trade works — offers *Re-draw it*),
-  `invalidated_fyi` (same event, but other scenarios survive, so there is nothing to decide) and
-  `stale_map` (the levels have drifted from where structure now sits). Scenarios are RIVALS, so the
+  `invalidated_fyi` (same event, but `on_break` said `notify_only`) and `stale_map` (the levels have
+  drifted from where structure now sits). **Each edge has its own authored answer** — `on_break` for
+  the adverse side, `on_away` for the favourable one, which has no default and which Generate refuses
+  a range without (`missing_runaway_answer`). Scenarios are RIVALS, so the
   card says how many are still armed.
 - **The `idea` price ENVELOPE is gone.** `monitoring/invalidation.monitor.js` watched
   `idea.invalidation.range` and was deleted on 2026-08-18: the band was only ever authored by the
@@ -222,7 +227,7 @@ while only one started a revise turn was the same failure by another route. (202
 
 | `type` | Event | Card actions → destination |
 |---|---|---|
-| `setup_invalidation` | Talos's validity gate on a `setup` — `ran_away` · `invalidated` · `invalidated_fyi` · `stale_map` | Re-draw it → Mentor; the two FYI flavours carry NO action, because nothing is being asked |
+| `setup_invalidation` | Talos's validity gate on a `setup` — `ran_away` · `ran_away_fyi` · `invalidated` · `invalidated_fyi` · `stale_map` | Re-draw → Mentor, with the plan loaded; the FYI flavours carry NO action, because the user already answered that edge at build time. A runaway opens Mentor rather than asking nothing (2026-09-26): the honest outcomes are wait, a continuation measured on today's structure, or close it — and nobody should triage those on a blank chart while the move runs |
 | `setup_manage` | Talos wants to change a position it is already in — `move_stop` · `add_leg` · `take_partial` · `exit_now`, and only the verbs the watched legs allow (`allowedVerdicts`) | Review → Mentor. `take_partial` names a watched target leg and carries that leg's own size. `add_leg` routes to the ORDER confirm, not the action endpoint — the leg is placed by confirming its order. (`let_run` was deleted 2026-09-17: a bare "let it run" is a `hold`, and moving a target out is an edit of the plan) |
 | `portfolio_review` | Scheduled review due | Review → Atlas review mode |
 | `manual_entry` / `manual_exit` | Broker-less fill needed | Inline FillCard (price/qty) — the one embedded-action card |

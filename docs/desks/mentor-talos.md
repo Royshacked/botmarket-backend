@@ -100,7 +100,10 @@ layer reads once a scenario wins. Authored shape and executed shape are differen
 
 > **BUILT 2026-09-24.** The shape, three years of edge rules, and the word "zone" — removed.
 
-A leg is `{ id, price, quantity, note, conditions }`. That is the whole of it.
+A leg is `{ id, price, quantity, note, conditions, anchor }`. That is the whole of it.
+
+`anchor` arrived 2026-09-26 and changes nothing about execution — see
+[the paths not taken](#the-paths-not-taken) below.
 
 **The band was never a trading idea.** It was compensation for a monitor that read the SPOT price
 every half hour, so a level could only be caught if price happened to be sitting on it at the moment
@@ -172,6 +175,71 @@ trade flicker.
 condition written against a peer or an index needs that symbol in scope on the in-position read.
 
 ---
+
+## The paths not taken
+
+> **BUILT 2026-09-26** — design + build record in
+> [design/mentor-challenge.md](../design/mentor-challenge.md). Three mechanisms, one obligation: a
+> plan must account for the paths it is NOT on. There are exactly three of those — the other
+> direction, the other way in, and the path where price never comes back.
+
+Nothing in the app used to check whether a plan was the BEST plan available; the gates only ever
+asked whether it was well formed. These three fields are what made that question answerable, and all
+three are **authoring record** — no monitor logic reads any of them.
+
+| field | what it is |
+|---|---|
+| `scenarios[].archetype` | which of eight ways in this is — `pullback` · `breakout` · `retest` · `sweep_reclaim` · `fade` · `gap_fill` · `momentum_continuation` · `event_gated` |
+| `stop_legs[].anchor` | what a stop's price is measured FROM — `structure` · `level` · `session` · `volatility` · `indicator` |
+| `target_legs[].anchor` | and a target's — `liquidity` · `structure` · `measured_move` · `session` · `r_multiple` |
+| `alternatives[]` | `{ archetype, price, why_not }` × 5 max — the ways in this chart offered that the plan did NOT take |
+| `challenges[]` | `{ pass, verdict, at }` × 3 max — what has been thrown at this plan. **Server-written** |
+
+**Why a closed set.** "Is there a better way in?" is unanswerable as an open search and finite
+against a vocabulary (`services/setup.taxonomy.js`). It also turns every *"why that stop?"* from an
+argument into a citation — `structure`, the last swing at 234.8 — which the user can attack by
+naming a different member of the set. The prose mirror lives in Mentor's prompt and a drift test
+(`tests/unit/mentorChallenge.test.js`) keeps the two spellings identical in BOTH directions: a word
+the prompt teaches and the code does not hold is filed every turn and lands nowhere.
+
+**`alternatives` is the pool a scenario is promoted out of.** *"Arm the breakout too"* moves that
+entry into `scenarios[]` and removes it from the pool. A reject with no reason is dropped rather than
+kept hollow, and the list is EMPTY on a plan the user brought — they chose the way in, and listing
+what they could have done instead is re-opening their plan by the back door. It travels no further
+than the author: a shared blueprint carries the `archetype` and the `anchor`s (facts about the plan)
+and never the rejects (the author's reasoning).
+
+**`siblingOf(archetype)`** is the taxonomy's one behaviour: which way in continues which, used when a
+runaway sends the user back to Mentor. Three archetypes have none, and `fade` is the one worth
+knowing — a fade that ran away is evidence for the OTHER direction, which is a new plan and not this
+one's sibling.
+
+### The flip test
+
+`flip_test` (`services/flipTest.service.js`) hands the numbers to a second model that **cannot see
+the conversation** and asks it to argue the opposite direction. The blinding is the whole design: the
+tool takes only what identifies the question (ticker, rung, horizon, the direction already chosen),
+and the server assembles the pack itself from the desk's own readers — `smcReadText` on the named
+rung AND on the daily, whatever rung was named, plus the indicator and quote handlers. A desk that
+could feed its own audit would get back the weak counter-case it expected.
+
+Transport is the shared sidecar (`deepThink`, which gained a `system` parameter for this — same
+mechanism, different judgment). One per turn: a second run asks the same question of the same
+numbers, and the only use for a different answer is picking the one you preferred. Booked under
+`flip:mentor`.
+
+Three verdicts, and **bad news moves the number while good news moves the words**:
+
+- `stands` — the counter-case is weak. A line in the conviction rationale, and the score does NOT
+  rise. A number that climbed each time the pass ran would measure the pass.
+- `two_sided` — the chart supports both sides. The score comes down and the rationale names the cap.
+  The one verdict nothing else in the app produces.
+- `reversed` — the numbers favour the other way. Direction reopens and everything under it is void.
+
+**The verdict is the SERVER's to record.** `chatStream` stamps `challenges` from the handler's parsed
+answer and ignores whatever the model emitted for that field. Provenance authored by the party it
+vouches for is worth less than none. It has no macro read, no news and no catalyst calendar, so it
+must never overrule a dated event.
 
 ## Validity — the range outside which the setup is dead
 

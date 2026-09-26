@@ -1,8 +1,12 @@
 # Mentor — the paths not taken
 
-**STATUS: PHASES 0–4 BUILT 2026-09-26.** The taxonomy, the schema and the gate, the prompt, the flip
-test, the runaway card — all three mechanisms are live end to end. Only Phase 5, the docs sweep across
-the other files, is outstanding. Names in backticks that do not
+**STATUS: COMPLETE — ALL PHASES BUILT 2026-09-26.** The taxonomy, the schema and the gate, the prompt,
+the flip test, the runaway card, the docs. All three mechanisms are live end to end.
+
+**This file is now the BUILD RECORD.** The contract lives in
+[desks/mentor-talos.md §The paths not taken](../desks/mentor-talos.md#the-paths-not-taken); what stays
+here is the plan, the ten principles that governed it, the options rejected with the argument that
+killed them, and what each phase settled differently from what was written. Names in backticks that do not
 The drift scanner resolves every name in this file (114/114), which is the
 mechanical half of it being true; the read-through is Phase 5's.
 
@@ -540,6 +544,34 @@ same commit, since its `on_break`-only line was the doc's claim about this mecha
   that state (Generate refuses it now), and the safe failure on the away edge is being told.
 
 ### Phase 5 — docs
+
+**BUILT 2026-09-26.** The CONTRACT now lives in
+[desks/mentor-talos.md §The paths not taken](../desks/mentor-talos.md#the-paths-not-taken) and this
+file stays as the BUILD RECORD — the plan, the principles, and what each phase settled differently.
+
+What the sweep touched, and why each one was a claim that had gone wrong rather than a claim that was
+merely absent:
+
+- **`desks/mentor-talos.md`** — the new § (the three vocabularies as a table, the pool mechanic, the
+  flip test, the server-written record), plus `anchor` added to the leg definition, which had said a
+  leg was `{ id, price, quantity, note, conditions }` and "that is the whole of it".
+- **`desks/trade-pipeline.md`** — a new § for the runaway loop as the desk's THIRD entry mode, with
+  the flow from authored answer to card to redraw; `deepThink` and `setup.taxonomy.js` added to
+  Shared services, since both are now shared mechanisms with more than one caller.
+- **`APP_SPEC.md`** — the one place that was actively WRONG: it said `setup_invalidation` has four
+  flavours and that "the two FYI flavours carry no action", which after Phase 4 described neither the
+  count nor the behaviour. Now five, with each edge's authored answer named and
+  `missing_runaway_answer` stated as a refusal.
+- **`CODE_MAP.md`** — two NBs in the `setup.*` cluster: the taxonomy (including that the anchor
+  vocabularies do not mix) and the flip test (including that `challenges` is never model-authored).
+  The "New Mentor tool" recipe row already described what Phase 3 did, injectable seam included.
+- **`docs/README.md`** — this file's row is now a BUILD RECORD pointing at the contract, and the
+  mentor-talos row names the new section.
+
+**Deliberately left:** the 17 unresolved names the scanner reports in `mentor-talos.md` and the 6 in
+`trade-pipeline.md` are all pre-existing zone-era vocabulary inside SUPERSEDED callouts, which name
+what they replaced on purpose. None of them is in a section this build wrote; a scanner percentage is
+not the thing to optimise (a doc can resolve 100% and describe a mechanism nobody built).
 
 This doc's STATUS line, the Talos section of `docs/desks/mentor-talos.md` (the away edge now has
 authored intent), `docs/desks/trade-pipeline.md` (the runaway → Mentor loop), `CODE_MAP.md` (the new
