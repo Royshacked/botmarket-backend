@@ -9,8 +9,9 @@ import { makeRouteCapture, ROUTE_TAGS, buildRouteRule } from '../routing.util.js
 import { TRADING_TOOLS, buildTradingToolHandlers } from '../tools/trading.tools.js'
 import { toolsFor } from '../agentTools.registry.js'
 import { consultDescription } from '../deepThink.service.js'
+import { FLIP_TOOL, FLIP_DESCRIPTION, makeFlipHandler } from '../flipTest.service.js'
 import { buildVenueSection } from '../tools/tradingContext.tools.js'
-import { normalizeSetup, setupReadiness, computeRR, validityProblems } from '../setup.schema.js'
+import { normalizeSetup, setupReadiness, computeRR, validityProblems, normalizeChallenges } from '../setup.schema.js'
 import { logger } from '../logger.service.js'
 
 // Mentor — the trade ASSISTANT (Pipeline F). A conversation → a draft `setup` entity.
@@ -62,6 +63,10 @@ export const MENTOR_TOOLS = [
         get_news: `Recent NEWS on the name — dated, attributed headlines with the publisher's own summary, newest first. \`companies\` with the TICKER as \`subject\` is the one you reach for: the catalyst check inside the horizon (rung 3 and rung 5 of the guided build), and the first place to look before web_search, because it is cached and dated where a search is neither. \`topic\` for a theme with no ticker; \`headlines\` is the market's front page and is rarely a Mentor question. Read them as what was WRITTEN — a headline is a fact to weigh, never a level.`,
         get_analyst_actions: `Recent analyst rating changes on the name — upgrades, downgrades, initiations, with the house and the date. Pass \`symbols\` with the ticker; the market-wide feed (no symbols) is a scanner's tool and not yours. Positioning's slow leg: it belongs to the \`institutional\` read at rung 5 and to a swing or long-term company read, and it is a line of context on an intraday trade at most. US-listed equities.`,
     }),
+    // The blinded direction red-team (flipTest.service.js). It sits BEFORE the sidecar, which is
+    // contractually last everywhere, and still past the tools cache breakpoint inside TRADING_TOOLS —
+    // so declaring it re-writes no cached prefix.
+    ...toolsFor({ [FLIP_TOOL]: FLIP_DESCRIPTION }),
     ...toolsFor({
         // The sidecar is contractually last at every desk that declares it
         // (agentToolsRegistry.test.js), and it sits past the tools cache breakpoint — which is
@@ -86,14 +91,23 @@ async function chatStream({
     _venueSection = buildVenueSection,
     _newsHandlers = makeNewsHandlers,
     _analystActions = getAnalystActions,
+    _flipHandler = makeFlipHandler,   // the blinded red-team, injectable so the stamp below is testable without a model call
 }) {
 
     const tools        = MENTOR_TOOLS
     // `consult` is deliberately absent: runAgentStream builds it from the tool declaration, which is
     // also the only place that holds `onReasoning` — wiring it here would swallow the sidecar's
     // thinking silently. See the MENTOR_TOOLS note above.
+    // SERVER-RECORDED, never model-authored: a desk that files its own verdict on its own plan has
+    // produced provenance worth less than none. The handler hands the parsed verdict back here and
+    // the stamp below is the only writer.
+    let flipVerdict = null
     const toolHandlers = {
         ...buildTradingToolHandlers(onChart, userId),
+        [FLIP_TOOL]: _flipHandler({
+            userId, agent: 'mentor', onReasoning,
+            onVerdict: (v) => { flipVerdict = v },
+        }),
         ..._newsHandlers(),
         get_analyst_actions: makeToolHandler('get_analyst_actions',
             ({ symbols, limit }) => _analystActions(Array.isArray(symbols) ? symbols : [], limit),
@@ -141,6 +155,17 @@ async function chatStream({
     const merged     = _mergeSetupDraft(chatState?.draft, setup)
     const normalized = merged ? normalizeSetup(merged) : null
     if (normalized) normalized.rr = computeRR(normalized) ?? normalized.rr
+
+    // The challenge record is the SERVER's. It carries forward from the draft the server stamped last
+    // turn (the model's own emit of this field is ignored, whatever it says) and gains at most one
+    // entry per turn, from the handler above. `at` is stamped here because this is the only layer
+    // that knows the turn actually happened.
+    if (normalized) {
+        normalized.challenges = normalizeChallenges([
+            ...(Array.isArray(chatState?.draft?.challenges) ? chatState.draft.challenges : []),
+            ...(flipVerdict ? [{ pass: 'flip', verdict: flipVerdict, at: new Date().toISOString() }] : []),
+        ])
+    }
 
     const readiness = normalized ? setupReadiness(normalized, (accounts?.length ?? 0) > 0) : null
 

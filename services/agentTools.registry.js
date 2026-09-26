@@ -274,6 +274,34 @@ export const TOOL_SCHEMAS = {
         },
         "required": ["question", "context"]
     },
+    // The blinded direction red-team (services/flipTest.service.js). Every field IDENTIFIES the
+    // question; none of them is evidence. That is deliberate and it is the feature: the server
+    // assembles the numbers, so the desk cannot hand its own audit a case file that suits the plan it
+    // already drew.
+    flip_test: {
+        "type": "object",
+        "properties": {
+            "symbol": {
+                "type": "string",
+                "description": "The setup's ticker."
+            },
+            "timeframe": {
+                "type": "string",
+                "description": "The rung the plan is DRAWN on (its premise timeframe). The daily is always included as well, whatever you name."
+            },
+            "horizon": {
+                "type": "string",
+                "enum": ["intraday", "day", "swing", "long term"],
+                "description": "The trade's horizon, so the counter-case is argued over the same holding period."
+            },
+            "direction": {
+                "type": "string",
+                "enum": ["long", "short"],
+                "description": "The direction the plan takes. The OTHER side is what gets argued."
+            }
+        },
+        "required": ["symbol", "direction"]
+    },
     get_market_hours: {
         "type": "object",
         "properties": {

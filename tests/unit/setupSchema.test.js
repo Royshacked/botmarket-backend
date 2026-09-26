@@ -8,7 +8,7 @@ import {
     normalizePremise, PREMISE_STATES,
     normalizeScenarios, pickScenario, projectScenario, scenarioView, declaredConditions, scenarioLabel,
     stopEdge, targetEdges, targetLevels, clampGuards, addEntryLeg, legQuantity, pendingLegs, watchedLegs, hasWatchedLegs, allowedVerdicts, CONDITION_MODES, TRADE_MODES,
-    normalizeAlternatives, ON_AWAY,
+    normalizeAlternatives, ON_AWAY, normalizeChallenges, CHALLENGE_VERDICTS,
 } from '../../services/setup.schema.js'
 import { ENTRY_ARCHETYPES, STOP_ANCHORS, TARGET_ANCHORS } from '../../services/setup.taxonomy.js'
 import { MODES } from '../../services/analysisModes.js'
@@ -1270,4 +1270,36 @@ test('alternatives survive a normalise round-trip, like the conditions do', () =
     const twice = normalizeSetup(once)
     assert.deepEqual(twice.alternatives, once.alternatives)
     assert.equal(twice.scenarios[0].archetype, once.scenarios[0].archetype)
+})
+
+test('a challenge entry needs a pass AND a verdict, or it is not a record', () => {
+    // `{ pass: 'flip', verdict: null }` would read at confirm as "attacked, inconclusive", when what
+    // actually happened is that nobody could tell what came back.
+    const out = normalizeChallenges([
+        { pass: 'flip', verdict: 'two_sided', at: '2026-09-26T10:00:00Z' },
+        { pass: 'flip' },
+        { verdict: 'stands' },
+        { pass: 'vibes', verdict: 'stands' },
+        { pass: 'flip', verdict: 'probably fine' },
+        null, 'flip', 42,
+    ])
+    // `at` is canonicalised like every other stored timestamp — same ISO shape everywhere.
+    assert.deepEqual(out, [{ pass: 'flip', verdict: 'two_sided', at: '2026-09-26T10:00:00.000Z' }])
+    for (const v of CHALLENGE_VERDICTS) assert.equal(normalizeChallenges([{ pass: 'flip', verdict: v }])[0].verdict, v)
+    assert.equal(normalizeChallenges([{ pass: 'flip', verdict: 'stands', at: 'whenever' }])[0].at, null)
+})
+
+test('the challenge record keeps the NEWEST three', () => {
+    // A verdict about the current levels is worth more than one about levels that have since moved —
+    // and a fourth entry means the plan was re-attacked until it gave the wanted answer.
+    const five = ['stands', 'two_sided', 'reversed', 'stands', 'two_sided'].map(verdict => ({ pass: 'flip', verdict }))
+    assert.deepEqual(normalizeChallenges(five).map(c => c.verdict), ['reversed', 'stands', 'two_sided'])
+    assert.deepEqual(normalizeChallenges(null), [])
+})
+
+test('the challenge record survives the round trip to Generate', () => {
+    // It is read from `raw` so the client's draft can carry it to the save path; the AGENT layer is
+    // what stops the model authoring it (mentorAgent.test.js), not this normaliser.
+    const once = normalizeSetup({ ...DRAFT, challenges: [{ pass: 'flip', verdict: 'stands', at: '2026-09-26T10:00:00Z' }] })
+    assert.deepEqual(normalizeSetup(once).challenges, once.challenges)
 })

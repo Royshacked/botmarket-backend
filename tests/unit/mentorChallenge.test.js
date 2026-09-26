@@ -4,7 +4,7 @@ import { readFileSync } from 'fs'
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
 import { ENTRY_ARCHETYPES, STOP_ANCHORS, TARGET_ANCHORS, SIBLINGS } from '../../services/setup.taxonomy.js'
-import { ON_AWAY } from '../../services/setup.schema.js'
+import { ON_AWAY, CHALLENGE_VERDICTS } from '../../services/setup.schema.js'
 
 // THE PROSE MIRROR (Phase 2 of docs/design/mentor-challenge.md).
 //
@@ -74,6 +74,25 @@ test('the runaway arrival gets the sibling map right', () => {
         assert.match(section, pair, `the prompt does not point \`${from}\` at \`${to}\``)
     }
     assert.match(section, /`fade`[^.]*no\*\*? ?\*?\*?\s*continuation/i, 'a fade must be named as having none')
+})
+
+test('the flip section teaches all three verdicts, and the asymmetry between them', () => {
+    const section = PROMPT.split('## The flip test')[1]?.split('\n## ')[0] ?? ''
+    assert.ok(section.length > 800, 'the flip test section is missing')
+
+    for (const v of CHALLENGE_VERDICTS) assert.match(section, new RegExp(`\`${v}\``), `the prompt never explains \`${v}\``)
+
+    // BAD NEWS MOVES THE NUMBER, GOOD NEWS MOVES THE WORDS. If surviving raised conviction, the score
+    // would measure how many times the pass was run — which is worse than not having the number.
+    assert.match(section, /Do not raise the score/i)
+    assert.match(section, /score DOWN/,  'two_sided is the one verdict that moves it')
+    assert.match(section, /void/,        'reversed voids everything under the direction')
+
+    // The model must not author its own verdict; the server is the only writer (flipTest.service.js).
+    assert.match(section, /do not author `challenges`/i)
+
+    // It never saw macro or news, so it must not be allowed to overrule a dated catalyst.
+    assert.match(section, /macro, news, catalysts/)
 })
 
 test('the rejects pool is taught as empty on the path that brought its own plan', () => {

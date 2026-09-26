@@ -205,3 +205,23 @@ test('a missing when-clause degrades to mechanism only, with no blank paragraph'
     assert.ok(!desc.includes('\n\n\n'), 'no empty paragraph is left behind')
     assert.equal(desc.split('\n\n').length, 2, 'just the two shared halves')
 })
+
+test('a caller may bring its own framing, and the desk-head prompt is the default', async () => {
+    // The sidecar gained a `system` seam when the second framing arrived — a blinded red-team of a
+    // plan's direction (flipTest.service.js). Same mechanism, different judgment: one transport, so
+    // the containment and the booking cannot drift between the two.
+    const seen = []
+    const stream = async ({ systemPrompt }) => { seen.push(systemPrompt); return 'ok' }
+
+    await deepThink({ question: 'q', _stream: stream })
+    assert.match(seen[0], /senior trading desk head/)
+
+    await deepThink({ question: 'q', system: 'You are a second desk arguing the other side.', _stream: stream })
+    assert.equal(seen[1], 'You are a second desk arguing the other side.')
+
+    // Blank or junk falls back rather than sending an empty system prompt.
+    for (const bad of ['', '   ', null, 42, {}]) {
+        await deepThink({ question: 'q', system: bad, _stream: stream })
+        assert.match(seen[seen.length - 1], /senior trading desk head/, String(bad))
+    }
+})

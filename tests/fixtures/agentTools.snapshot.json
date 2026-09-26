@@ -2616,6 +2616,45 @@
       }
     },
     {
+      "name": "flip_test",
+      "description": "Have this plan's DIRECTION attacked by a second desk that cannot see your conversation. The server assembles the evidence itself — structure, levels, liquidity, imbalances, indicators, on the rung you name and on the daily — and a stronger model argues the opposite side from those numbers and returns a verdict: `stands` (the counter-case is weak), `two_sided` (the chart supports both about equally) or `reversed` (the numbers favour the other way).\n\nYou cannot influence what it is shown, which is the point: you supply only the ticker, the rung, the horizon and the direction already chosen. It has no macro read, no news and no catalyst calendar, so it must never be allowed to overrule a dated event.\n\nReach for it when the user ASKS for their direction challenged, and — once, at the moment a setup goes ready — when real money is behind it (a `live` or `manual` account). Never on paper unless asked, never twice on the same levels, and never on a plan the user brought unless they ask outright: taking someone's own plan down and then arguing with its direction is not what they came for.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "description": "The setup's ticker."
+          },
+          "timeframe": {
+            "type": "string",
+            "description": "The rung the plan is DRAWN on (its premise timeframe). The daily is always included as well, whatever you name."
+          },
+          "horizon": {
+            "type": "string",
+            "enum": [
+              "intraday",
+              "day",
+              "swing",
+              "long term"
+            ],
+            "description": "The trade's horizon, so the counter-case is argued over the same holding period."
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "long",
+              "short"
+            ],
+            "description": "The direction the plan takes. The OTHER side is what gets argued."
+          }
+        },
+        "required": [
+          "symbol",
+          "direction"
+        ]
+      }
+    },
+    {
       "name": "consult",
       "description": "Put ONE decision to a more capable desk head and get a straight answer back. It cannot see this conversation and cannot fetch anything — you hand it the question and every number it needs, and it thinks harder than you can in-line.\n\nReach for it in exactly three situations: **final sizing on real money** (live or manual — the account is at risk and the arithmetic has to be right); **two readings that genuinely disagree** and you cannot settle which one governs — most often the direction call at rung 2 of the guided build, when the structure leans one way and momentum or positioning the other and the user is waiting on your lean; and **placing a level where the structure is ambiguous** — a price that is both a prior high and a supply shelf, say. The wider-target check at rung 7 is NOT a consult: it is a tool question, answered by the levels.\n\nDo NOT reach for it to look something up, to double-check work you are already confident in, to summarize, or because a question feels big. A consult costs a full model call and adds seconds to the turn: if you already know the answer, or a tool call would settle it, that is the cheaper and better move. Most turns should end without it.",
       "input_schema": {

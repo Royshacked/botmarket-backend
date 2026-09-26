@@ -1,11 +1,10 @@
 # Mentor — the paths not taken
 
-**STATUS: PHASES 0–2 AND 4 BUILT 2026-09-26** (the taxonomy, the schema and the gate, the prompt, the
-runaway card — so the whole runaway loop is closed end to end). Phase 3, the flip test, is still PLAN;
-Phase 5 is the docs sweep. Names in backticks that do not
-resolve yet (`flip_test`, `services/flipTest.service.js`, `ran_away_fyi`) are the plan's own
-vocabulary, not drift — `npm run check:docs` reports them unresolved until those phases land, and
-that is correct. Update this line phase by phase.
+**STATUS: PHASES 0–4 BUILT 2026-09-26.** The taxonomy, the schema and the gate, the prompt, the flip
+test, the runaway card — all three mechanisms are live end to end. Only Phase 5, the docs sweep across
+the other files, is outstanding. Names in backticks that do not
+The drift scanner resolves every name in this file (114/114), which is the
+mechanical half of it being true; the read-through is Phase 5's.
 
 **Scope: Mentor (authoring) plus ONE card change at Talos.** No monitor logic, no new assess
 behaviour, no frontend. Decided with Roy 2026-09-26 in a principles-first pass; the discussion that
@@ -469,6 +468,43 @@ now satisfiable: the prompt authors `on_away`.
 *Tests:* the handler ignores any model-supplied evidence (the blinding, asserted rather than
 described); a failed pack and a failed sidecar both return prose and never throw; the per-turn cap;
 the ledger tag.
+
+**BUILT 2026-09-26** — `services/flipTest.service.js`, a `system` seam on `deepThink`, the `flip_test`
+schema in `services/agentTools.registry.js`, wired into `MENTOR_TOOLS` before `consult`, the prompt's
+own section, and `challenges` on the document. `tests/unit/flipTest.test.js` (19) plus additions to
+`mentorAgent` / `setupSchema` / `deepThink` / `mentorChallenge`. Suite 3392/0.
+
+**What the build settled beyond the plan:**
+
+- **The pack ALWAYS includes the daily**, whatever rung the desk names. Without it the blinding has a
+  hole you could drive a plan through: name a friendly timeframe and the counter-case gets thin on its
+  own. The daily is where the structure that decides a direction lives, so it cannot be dodged.
+- **The readers are the desk's own** — `smcReadText`, and the indicator and quote handlers. One bar
+  fetch per rung feeds all four SMC reads, and the judge sees the same numbers in the same words the
+  desk would have. A second implementation here could have drifted into a kinder read with nothing
+  failing to say so.
+- **A thin pack is NAMED, and a nearly-empty one is not asked about at all.** `usable` needs two
+  sections; below that the sidecar would be forming an opinion from nothing, and an opinion from
+  nothing must never reach the desk wearing a verdict. Both failure paths say *the direction was NOT
+  checked* in the same words, so the desk cannot report a check that did not happen.
+- **ONE per turn, not three like the consult.** A second flip asks the same question of the same
+  numbers, and the only use for a different answer is picking the one you preferred — which is the
+  failure this feature exists to prevent, so the cap is design rather than cost control.
+- **`deepThink` gained a `system` parameter** instead of a second transport. Same mechanism (one
+  bounded question to a stronger model, its own request, booked, contained), different judgment — the
+  house rule. A copied transport would have drifted on the containment, not on the prose.
+- **The provenance question from Phase 1 is answered: the SERVER is the only writer.** The handler
+  reports the parsed verdict to `chatStream`, which stamps `challenges` after normalisation and ignores
+  whatever the model emitted for that field, every turn. Tested three ways — a real verdict lands, a
+  forged one is discarded, and a forged one does not overwrite a real one. The field is still read from
+  `raw` so the client's draft can carry it to Generate; the threat model is the MODEL forging a verdict
+  about its own plan, not the user editing their own browser.
+- **The record keeps the newest three and never overwrites.** A plan attacked on two different maps
+  reads as a history; a fourth entry would mean it was re-attacked until it gave the wanted answer.
+- **The snapshot fixture needed a hand-written rewrite.** `agentTools.snapshot.json` is CRLF with
+  2-space indent, and regenerating it naively produced a 2,900-line diff that would have hidden the one
+  tool being added. Re-emitted with the file's own formatting: +39 lines, which is what a change
+  detector should look like.
 
 ### Phase 4 — the runaway card
 

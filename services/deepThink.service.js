@@ -91,6 +91,14 @@ which way you lean.`
  * @param {object}  opts
  * @param {string}  opts.question  the decision to make
  * @param {string} [opts.context]  the material to decide on — levels, account size, the conflict
+ * @param {string} [opts.system]   the framing to consult UNDER. Defaults to the desk-head prompt
+ *                                 above. It exists because the second framing that arrived — a
+ *                                 blinded red-team of a plan's direction (flipTest.service.js) — is
+ *                                 the same MECHANISM (one bounded question to a stronger model, in
+ *                                 its own request, booked, contained) with a different JUDGMENT.
+ *                                 Sharing the pipe and letting the caller bring the question is the
+ *                                 house rule; a second copy of this transport would have drifted on
+ *                                 the containment, not on the prose.
  * @param {string} [opts.model]    override; the caller almost never should
  * @param {string} [opts.effort]   'low' | 'high'
  * @param {string} [opts.userId]   for usage attribution
@@ -98,7 +106,7 @@ which way you lean.`
  * @returns {Promise<string>} the answer, or a readable failure the desk can carry on from
  */
 export async function deepThink({
-    question, context = '', model, effort, userId, onUsage, onReasoning,
+    question, context = '', system, model, effort, userId, onUsage, onReasoning,
     // Injectable so this function's OWN behaviour — the reasoning passthrough and the containment
     // around it — is reachable without a live model call. Everything else here is exercised through
     // makeConsultHandler's `_deepThink`.
@@ -123,7 +131,7 @@ export async function deepThink({
         // belongs to the caller that knows (runAgentStream tags it).
         const answer = await _stream({
             model:            picked,
-            systemPrompt:     SYSTEM,
+            systemPrompt:     (typeof system === 'string' && system.trim()) ? system : SYSTEM,
             promptOrMessages: [{ role: 'user', content: body }],
             tools:            [],
             reasoningEffort:  effort ?? DEFAULT_EFFORT,

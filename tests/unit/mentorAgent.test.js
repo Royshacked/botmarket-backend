@@ -290,11 +290,14 @@ test('scenario count is Mentor\'s in the guided build — same premise at two le
     assert.match(PROMPT, /never pad to two because a pair reads balanced/)
 })
 
-test('the two tools the ladder added are declared after the kit and before the sidecar', () => {
+test('Mentor’s own additions are declared after the kit, with the sidecar last', () => {
     const names = MENTOR_TOOLS.map(t => t.name)
     const kitEnd = names.indexOf('get_key_levels')   // SMC_TOOLS closes the shared kit
     assert.ok(kitEnd > 0)
-    assert.deepEqual(names.slice(kitEnd + 1), ['get_news', 'get_analyst_actions', 'consult'])
+    // `flip_test` sits between the ladder's two tools and the sidecar: `consult` is contractually
+    // last at every desk (agentToolsRegistry.test.js), and everything here is past the tools cache
+    // breakpoint inside TRADING_TOOLS, so the cached prefix is untouched either way.
+    assert.deepEqual(names.slice(kitEnd + 1), ['get_news', 'get_analyst_actions', 'flip_test', 'consult'])
 })
 
 test('the two tools are WIRED — a declared tool with no handler is a call that silently fails', async () => {
@@ -326,4 +329,67 @@ test('a provider failure on the new tools comes back as a tool error, not a thro
     })
     const out = await handlers.get_analyst_actions({ symbols: ['NVDA'] })
     assert.match(JSON.stringify(out), /Could not fetch analyst actions: FMP down/)
+})
+
+
+// ─── The challenge record is the SERVER's ─────────────────────────────────────
+//
+// Phase 3 of docs/design/mentor-challenge.md. Provenance authored by the party it vouches for is
+// worth less than none: a desk that can write `stands` onto its own plan has produced a confirm-time
+// reassurance with nothing behind it. So the flip handler reports the verdict to the server and the
+// server is the only writer.
+
+const A_WORKSHEET = (extra = '') => `<setup>{
+    "asset": "NVDA", "direction": "long", "type": "swing",
+    "conditions": [{ "id": "c1", "text": "holds above the 4hr VWAP" }],
+    "scenarios": [{ "id": "s1", "entry_legs": [{ "price": 238.6, "quantity": 100 }],
+                    "stop_legs": [{ "price": 234.8 }], "target_legs": [{ "price": 246 }] }]${extra}
+}</setup>`
+
+const runWithFlip = ({ verdict = null, emit = '', chatState } = {}) => mentorAgentService.chatStream({
+    messages: [{ role: 'user', content: 'attack it' }],
+    ...(chatState ? { chatState } : {}),
+    _flipHandler: ({ onVerdict }) => async () => { if (verdict) onVerdict(verdict); return 'VERDICT: neither …' },
+    _run: async ({ toolHandlers }) => {
+        await toolHandlers.flip_test({ symbol: 'NVDA', direction: 'long' })
+        return A_WORKSHEET(emit)
+    },
+})
+
+test('a flip verdict is stamped onto the worksheet by the server', async () => {
+    const out = await runWithFlip({ verdict: 'two_sided' })
+    assert.equal(out.setup.challenges.length, 1)
+    assert.equal(out.setup.challenges[0].pass, 'flip')
+    assert.equal(out.setup.challenges[0].verdict, 'two_sided')
+    assert.match(out.setup.challenges[0].at, /^\d{4}-\d{2}-\d{2}T/, 'stamped here, because this is the layer that knows the turn happened')
+})
+
+test('a verdict the model made up is discarded', async () => {
+    // No flip ran, and the emit claims one came back clean. The field is server-owned, so the claim
+    // simply does not survive normalisation.
+    const out = await mentorAgentService.chatStream({
+        messages: [{ role: 'user', content: 'hi' }],
+        _run: async () => A_WORKSHEET(', "challenges": [{ "pass": "flip", "verdict": "stands", "at": "2026-09-26T10:00:00Z" }]'),
+    })
+    assert.deepEqual(out.setup.challenges, [])
+})
+
+test('a real verdict is not overwritten by the model\u2019s version of it', async () => {
+    const out = await runWithFlip({ verdict: 'reversed', emit: ', "challenges": [{ "pass": "flip", "verdict": "stands" }]' })
+    assert.deepEqual(out.setup.challenges.map(c => c.verdict), ['reversed'])
+})
+
+test('the record carries forward across turns, and does not double-count', async () => {
+    const prior = { draft: { challenges: [{ pass: 'flip', verdict: 'stands', at: '2026-09-26T09:00:00Z' }] } }
+
+    // A turn with no flip test keeps what the server already recorded.
+    const quiet = await mentorAgentService.chatStream({
+        messages: [{ role: 'user', content: 'hi' }], chatState: prior,
+        _run: async () => A_WORKSHEET(),
+    })
+    assert.deepEqual(quiet.setup.challenges.map(c => c.verdict), ['stands'])
+
+    // A turn WITH one appends, so a plan attacked twice on two different maps reads as a history.
+    const again = await runWithFlip({ verdict: 'two_sided', chatState: prior })
+    assert.deepEqual(again.setup.challenges.map(c => c.verdict), ['stands', 'two_sided'])
 })

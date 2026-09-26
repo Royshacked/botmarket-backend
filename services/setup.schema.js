@@ -85,6 +85,22 @@ export const ON_BREAK = ['revise', 'close', 'notify_only']
  */
 export const ON_AWAY = ['revise', 'pass']
 
+/**
+ * The challenge record — which adversarial pass ran over this plan, and what came back.
+ *
+ * SERVER-WRITTEN, and that is the whole reason it is a vocabulary here rather than free text: the
+ * desk must not be able to file a verdict about its own plan. `mentor.agent.service` stamps it from
+ * the flip handler's parsed answer and ignores whatever the model emitted (flipTest.service.js).
+ *
+ *   stands     — the counter-case was weak; the read is chart-driven
+ *   two_sided  — the chart supports both sides about equally. The honest cap on conviction, and the
+ *                one verdict nothing else in the app produces
+ *   reversed   — the numbers favour the other way. The direction reopens, and everything under it
+ *                is void
+ */
+export const CHALLENGE_PASSES   = ['flip']
+export const CHALLENGE_VERDICTS = ['stands', 'two_sided', 'reversed']
+
 /** Cap on symbols a setup may pull the monitor onto — free text can name anything. */
 const MAX_REFERENCED_SYMBOLS = 6
 
@@ -95,6 +111,11 @@ const MAX_REFERENCED_SYMBOLS = 6
  */
 const MAX_ALTERNATIVES = 5
 const MAX_WHY_NOT      = 200
+
+// Three is a history, not a log. Re-running the same pass over the same levels asks one question
+// twice, so a plan with four entries has been re-attacked until it gave the wanted answer — which is
+// the failure this record exists to make visible rather than to accumulate.
+const MAX_CHALLENGES = 3
 
 // ─── Pace ── which rungs Talos is READ on ──────────────────────────────
 //
@@ -722,6 +743,27 @@ export function normalizeAlternatives(arr) {
     return out
 }
 
+/**
+ * Coerce the challenge record. Newest kept: with more than the cap, the LAST three survive, because a
+ * verdict about the current levels is worth more than one about levels that have since moved.
+ *
+ * An entry with an unreadable pass or verdict is dropped rather than half-kept — `{ pass: 'flip',
+ * verdict: null }` would read as "attacked, inconclusive" when what happened is that nobody could
+ * tell what came back. Pure.
+ */
+export function normalizeChallenges(arr) {
+    if (!Array.isArray(arr)) return []
+    const out = []
+    for (const c of arr) {
+        if (!c || typeof c !== 'object' || Array.isArray(c)) continue
+        const pass    = CHALLENGE_PASSES.includes(c.pass) ? c.pass : null
+        const verdict = CHALLENGE_VERDICTS.includes(c.verdict) ? c.verdict : null
+        if (!pass || !verdict) continue
+        out.push({ pass, verdict, at: isoOrNull(c.at) })
+    }
+    return out.slice(-MAX_CHALLENGES)
+}
+
 // ─── ISO bounds ───────────────────────────────────────────────────────────────
 
 // Accept an ISO string (or ms) and return a normalised Z-ISO string. Invalid → null, so a
@@ -805,6 +847,11 @@ export function normalizeSetup(raw) {
         // user brought: they chose the way in, and filling this with what they could have done
         // instead would be re-opening their plan by the back door.
         alternatives: normalizeAlternatives(raw.alternatives),
+
+        // What has been thrown at this plan, and what survived. Read from `raw` so it survives the
+        // client's round trip to Generate, but the desk never gets to author it: the agent layer
+        // overwrites this field from the server's own record every turn.
+        challenges:   normalizeChallenges(raw.challenges),
 
         conviction: cleanConviction(raw.conviction) || null,
 
