@@ -62,6 +62,7 @@ the plan and what the build settled differently (the rule at the bottom of this 
 
 | Doc | Status |
 |---|---|
+| [mentor-challenge.md](./design/mentor-challenge.md) | **PLANNED 2026-09-26, nothing built** — the paths not taken: a closed entry/stop/target taxonomy with a rejects pool, a blinded flip test, and the runaway handoff that sends the user back to Mentor |
 | [talos-per-candle.md](./design/talos-per-candle.md) | **BUILD RECORD** — shipped 2026-09-17; the contract is mentor-talos.md. The plan, the decisions, what the build settled differently |
 | [triggered-setups.md](./design/triggered-setups.md) | Design only — a guard's price term becomes an array over prices and indicators; the level need not exist at authoring time |
 | [adopted-book.md](./design/adopted-book.md) | A portfolio that wasn't built here. Phase 1 (intake + write) built 2026-08-10, not live-verified; the rest is design |
