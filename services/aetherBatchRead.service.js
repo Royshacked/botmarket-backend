@@ -20,6 +20,7 @@
 import { getCandidatesForTicker } from '../api/aether/aether.service.js'
 import { quickRead } from './aetherQuickRead.service.js'
 import { TICKER_RE } from '../api/aether/aether.model.js'
+import { mapLimit } from './concurrency.util.js'
 import { logger } from './logger.service.js'
 import { httpError } from './httpError.util.js'
 
@@ -28,16 +29,34 @@ const LOG = '[aetherBatchRead]'
 /**
  * How many names one batch will read.
  *
- * A ceiling on spend AND on the wall clock, and the second is what sets the number. The reads run
- * one after another and a single one takes 35-45s (aetherQuickRead's own timeout note), so a batch
- * is minutes long by construction — and the client gives up at ten. Past that the server keeps
- * reading and STORES every result while the user is told it failed, which is the worst of both:
- * paid for, landed, and reported as a loss. Twelve keeps the batch inside the window it is given.
+ * A ceiling on spend AND on the wall clock, and the second is what sets the number. A single read
+ * takes 35-45s (aetherQuickRead's own timeout note), so a batch is minutes long by construction —
+ * and the client gives up at ten. Past that the server keeps reading and STORES every result while
+ * the user is told it failed, which is the worst of both: paid for, landed, and reported as a loss.
+ * Twelve at READ_CONCURRENCY is four waves, comfortably inside the window it is given.
  *
  * Argus's cut lands in single figures anyway, so this is a guard against a caller handing over the
- * whole board rather than a limit anyone should meet.
+ * whole board rather than a limit anyone should meet. Meeting it is not an error — the names past it
+ * come back unread and flagged (see batchRead).
  */
 export const BATCH_MAX  = 12
+
+/**
+ * How many reads run at once.
+ *
+ * THIS WAS ONE, and the reasoning that made it one no longer holds. Sequential was chosen so that a
+ * list would not spend its whole budget before the first refusal came back — a real argument while
+ * the read was a press on a list the user was still deciding about. It fires by itself now, on every
+ * name Argus kept, and a refusal has never stopped the batch: every name is read either way. So the
+ * serialisation bought nothing and cost the only thing that was scarce — the wall clock. Twelve names
+ * at 40s each is eight minutes against a client that waits ten; at three it is under three.
+ *
+ * THREE, not "all of them". These are model calls on ONE user's budget and against their rate
+ * ceiling, and a twelve-wide fan-out is how the scanner's own quote call starved its calendar call of
+ * the request budget on the very board this reads. Three overlaps the waiting without turning a batch
+ * into a burst, and it is the depth at which the slowest read stops setting the whole batch's clock.
+ */
+export const READ_CONCURRENCY = 3
 export const READ_DAYS  = 30
 
 /**
@@ -112,40 +131,71 @@ const _io = {
 }
 
 /**
- * Read a list of names, one after another, and say where each one lands.
+ * Read a list of names, READ_CONCURRENCY at a time, and say where each one lands.
  *
- * SEQUENTIAL ON PURPOSE. These are model calls on the user's budget and against their ceiling, and
- * a parallel fan-out over a list would spend the whole batch before the first refusal came back.
- * quickRead already coalesces a name pressed twice, so nothing is paid for that was paid before —
+ * BOUNDED, NOT SERIAL AND NOT FANNED OUT — see READ_CONCURRENCY for why the middle is the answer
+ * and why it used to be one. quickRead coalesces a name read before, so nothing is paid for twice:
  * a list re-read after one new event costs only the names whose set of events changed.
  *
  * ONE NAME'S FAILURE MUST NOT COST THE BATCH, the rule the discovery run learned the hard way: a
  * free step failing threw away the costly one. A name that throws is reported with its reason and
- * the batch goes on, and `judge` keeps it flagged rather than reading the failure as a refusal.
+ * the batch goes on, and `judge` keeps it flagged rather than reading the failure as a refusal. That
+ * is why the catch is INSIDE the mapped function: mapLimit has no swallow mode, deliberately, and
+ * this is the caller that owns the judgment.
+ *
+ * ROWS COME BACK IN THE ORDER THE NAMES WERE GIVEN, never in the order the reads happened to finish.
+ * The caller pairs them with the list it sent, and a batch whose shape depended on which model call
+ * returned first would be a different answer every time it ran.
  */
 export async function batchRead({ tickers = [], userId, signal } = {}, deps = _io) {
     const syms = [...new Set(tickers.map(t => String(t ?? '').trim().toUpperCase()).filter(t => TICKER_RE.test(t)))]
     if (!syms.length) throw httpError(400, 'at least one ticker is required')
-    if (syms.length > BATCH_MAX) throw httpError(400, `at most ${BATCH_MAX} names in one batch`)
 
-    const rows = []
-    for (const ticker of syms) {
-        if (signal?.aborted) break
-        let row
+    // OVER THE CAP IS NOT AN ERROR. It was, while the read was a press a user chose to make: a
+    // caller handing over the whole board was a bug and a 400 said so. The read now fires by itself
+    // on every radar cut, so the cap is something that HAPPENS to a list rather than something a
+    // caller did wrong — and refusing the batch over its thirteenth name would throw away the twelve
+    // reads that were fine, which is the failure this file already refuses to make one name at a time.
+    //
+    // The overflow goes through UNREAD, which is the answer this file gives a name whose read threw:
+    // the absence of a reading is not a reading. The names that get read are the first ones, and the
+    // list arrives in Argus's own ranking (_normalizeScan sorts by the composite before it leaves),
+    // so the cap falls on the weakest names rather than on an arbitrary twelve.
+    const queue    = syms.slice(0, BATCH_MAX)
+    const overflow = syms.slice(BATCH_MAX)
+
+    const read = await mapLimit(queue, async (ticker) => {
+        // ABORTED, so this name is never started. The reads already in flight when the signal fired
+        // still finish — that is what a bounded pool means, and abandoning them would throw away
+        // model calls already paid for — but nothing new is picked up. A null here is "never ran",
+        // which is the one thing that must not become a row: an unread name is a claim about the
+        // name, and the list it belonged to is gone.
+        if (signal?.aborted) return null
         try {
-            row = await _readOne(ticker, { userId, signal }, deps)
+            const row = await _readOne(ticker, { userId, signal }, deps)
+            return { ...row, ...judge(row.read, { side: row.side }) }
         } catch (err) {
             logger.warn(LOG, 'read failed', { ticker, err: err.message })
             // No read, and the reason kept with the name — `judge` puts it through flagged.
-            row = { ticker, read: null, side: '', error: err.message }
+            const row = { ticker, read: null, side: '', error: err.message }
+            return { ...row, ...judge(null, { side: '' }) }
         }
-        rows.push({ ...row, ...judge(row.read, { side: row.side }) })
+    }, { concurrency: READ_CONCURRENCY })
+
+    const rows = read.filter(Boolean)
+
+    // Past the cap, and said so on the row rather than by being absent from the answer: a caller
+    // reads a missing row as "the read never reached it", which is true but gives it nothing to show
+    // the user. `judge` ships these kept-and-flagged, the same as a name whose read timed out.
+    for (const ticker of overflow) {
+        const row = { ticker, read: null, side: '', error: `not read — a batch is capped at ${BATCH_MAX} names` }
+        rows.push({ ...row, ...judge(null, { side: '' }) })
     }
 
     const kept = rows.filter(r => r.keep)
     logger.info(LOG, 'batch read', {
         asked: syms.length, read: rows.filter(r => r.read).length,
-        kept: kept.length, flagged: kept.filter(r => r.flag).length,
+        capped: overflow.length, kept: kept.length, flagged: kept.filter(r => r.flag).length,
     })
     return { rows, kept: kept.length, flagged: kept.filter(r => r.flag).length }
 }

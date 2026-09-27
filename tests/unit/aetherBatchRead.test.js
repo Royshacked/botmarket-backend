@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { judge, directionOf, batchRead, BATCH_MAX } from '../../services/aetherBatchRead.service.js'
+import { judge, directionOf, batchRead, BATCH_MAX, READ_CONCURRENCY } from '../../services/aetherBatchRead.service.js'
 
 // Prometheus over a radar list: the veto, the longs cut, and the rule that a name nobody could
 // read is not a name that was refused.
@@ -110,6 +110,29 @@ test('every name is read and judged, and the tally counts what was kept', async 
     assert.equal(out.flagged, 1)
 })
 
+// The reads OVERLAP, bounded. It was one at a time, on the argument that a list should not spend its
+// whole budget before the first refusal came back — which stopped being true the day the read started
+// firing by itself on every kept name, since a refusal has never stopped the batch. What was left was
+// eight minutes of wall clock against a client that waits ten.
+test('the reads run READ_CONCURRENCY at a time — overlapped, and never a fan-out', async () => {
+    let active = 0, peak = 0
+    const deps = {
+        appearances: async () => ({ best: { run_id: 'r', side: 'helped' } }),
+        read: async () => {
+            active++; peak = Math.max(peak, active)
+            await new Promise(r => setTimeout(r, 5))
+            active--
+            return read('credible')
+        },
+    }
+    const names = ['A', 'B', 'C', 'D', 'E', 'F', 'G']
+    const out = await batchRead({ tickers: names }, deps)
+
+    assert.equal(peak, READ_CONCURRENCY, 'three at once — not one, and not all seven')
+    // …and the answer does not depend on which model call came back first.
+    assert.deepEqual(out.rows.map(r => r.ticker), names)
+})
+
 test('ONE NAME FAILING DOES NOT COST THE BATCH — it goes through unread and flagged', async () => {
     const out = await batchRead({ tickers: ['NUE', 'X', 'XOM'] }, io({ fail: { X: 'model timed out' } }))
     assert.equal(out.rows.length, 3)
@@ -151,11 +174,33 @@ test('junk tickers are refused, not queried', async () => {
     await assert.rejects(() => batchRead({ tickers: ['', '!!', null] }, io()), /at least one ticker/)
 })
 
-test('the batch is capped — a caller cannot hand over the whole board', async () => {
-    const many = Array.from({ length: BATCH_MAX + 1 }, (_, i) => `T${i}`)
-    await assert.rejects(() => batchRead({ tickers: many }, io()), new RegExp(`at most ${BATCH_MAX}`))
+// The cap bounds what is READ, not what is answered. It used to refuse the call, which was right
+// while the read was a press and a long list meant a caller bug; the read now fires by itself on
+// every radar cut, so a list one name too long must not cost the twelve reads that were fine.
+test('the batch is capped — the overflow comes back unread, and the reads that fit still happen', async () => {
+    const calls = []
+    const deps = { appearances: async () => ({ best: { run_id: 'r', side: 'helped' } }),
+                   read: async ({ ticker }) => { calls.push(ticker); return read('credible') } }
+    const many = Array.from({ length: BATCH_MAX + 3 }, (_, i) => `T${i}`)
+    const out  = await batchRead({ tickers: many }, deps)
+
+    assert.equal(calls.length, BATCH_MAX, 'exactly the cap is paid for')
+    assert.deepEqual(calls, many.slice(0, BATCH_MAX), 'and it is the top of the list, in its own ranking')
+    assert.equal(out.rows.length, many.length, 'every name asked about is answered for')
+
+    // Kept, flagged, and carrying the reason — never silently missing from the answer.
+    const past = out.rows.filter(r => many.slice(BATCH_MAX).includes(r.ticker))
+    assert.equal(past.length, 3)
+    for (const r of past) {
+        assert.equal(r.keep, true)
+        assert.equal(r.flag, 'unread')
+        assert.match(r.error, new RegExp(`capped at ${BATCH_MAX}`))
+    }
 })
 
+// An abort stops the batch PICKING UP new names. The reads already in flight finish — that is what a
+// bounded pool is, and dropping them would throw away model calls already paid for — so what this
+// pins is that the wave in flight is the last of it, not that the batch halts mid-read.
 test('an aborted signal stops the batch where it is rather than spending the rest', async () => {
     const ctrl = new AbortController()
     let n = 0
@@ -163,6 +208,10 @@ test('an aborted signal stops the batch where it is rather than spending the res
         appearances: async () => ({ best: { run_id: 'r', side: 'helped' } }),
         read: async () => { if (++n === 2) ctrl.abort(); return read('credible') },
     }
-    const out = await batchRead({ tickers: ['A', 'B', 'C', 'D'], signal: ctrl.signal }, deps)
-    assert.equal(out.rows.length, 2, 'stopped after the turn that aborted')
+    const many = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']
+    const out  = await batchRead({ tickers: many, signal: ctrl.signal }, deps)
+
+    assert.equal(n, READ_CONCURRENCY, 'only the wave that had already started was paid for')
+    assert.equal(out.rows.length, READ_CONCURRENCY, 'and the names never started are not rows')
+    assert.deepEqual(out.rows.map(r => r.ticker), many.slice(0, READ_CONCURRENCY))
 })
