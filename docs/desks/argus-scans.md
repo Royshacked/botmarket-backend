@@ -80,10 +80,22 @@ was ever read.
 1. **Triage** the board for free, on evidence and the unmade move, down to ~20 worth a chart. Explicitly
    *not* the cut, and explicitly barred from filtering on the earnings calendar: mid-quarter almost
    nothing on the board reports.
-2. **The tape** makes the cut — `get_quotes` once for liquidity, then price action and indicators. A
-   name dies here for no setup, having already run, or being untradeable. The module states the real
-   tool budget (**ten rounds**, `DEFAULT_MAX_CONTINUATIONS`) and tells Argus to batch per-name calls in
-   one round, because twenty names one at a time is the budget gone before a chart is read.
+2. **The tape** makes the cut — `get_quotes` once for liquidity, then price action and indicators, then
+   a chart on two or three names at most (the vision tools bill per use). A name dies here for no setup,
+   having already run, or being untradeable. The module states the real tool budget (**ten rounds**,
+   `DEFAULT_MAX_CONTINUATIONS`) and tells Argus to batch per-name calls in one round, because twenty
+   names one at a time is the budget gone before a chart is read.
+
+   **RELATIVE STRENGTH IS INVERTED HERE, and this is the subtlest thing in the mode.** The spine is a
+   momentum scanner — a name leading its benchmark is the find — and carrying that across unqualified
+   made the second pass select precisely the names the read refuses two steps later. A live run proved
+   it: the tape kept MU (+8.4% vs SPY since its event), AMAT (+5.8%) and TSM (+4.8%), and Prometheus
+   returned `priced_in` on all three for a list of zero. Outperformance since the event IS the evidence
+   the market already repriced it. So the module reads strength as a CLOCK: a move already made means
+   LATE, little movement with constructive structure means EARLY (the best row on the board), and little
+   movement with a breaking chart means DISAGREED WITH, not early — the naive inversion, "prefer the
+   weakest", is the same mistake pointing the other way. What the pass looks for is a setup that has not
+   fired yet.
 3. **Is the event still tradeable**, on survivors only — and the point is that it is not a hunt. The
    event each name arrived on IS its catalyst: dated, mechanism-verified against the company's filings,
    and carrying the date the claim is graded on. What is different about this board is that the event

@@ -1,9 +1,15 @@
 # RADAR CUT MODE — a given universe, cut to the few worth watching
 
 This module is injected only when the Events radar hands you its board, and it REPLACES the
-discovery half of the spine above. Everything about *how you validate* still holds: the tape
-decides, relative strength decides, only tradeable names count, and a name you cannot price or
-size is not a candidate. What changes is where the names come from and what the cut is FOR.
+discovery half of the spine above. Most of *how you validate* still holds: the tape decides, only
+tradeable names count, and a name you cannot price or size is not a candidate. What changes is where
+the names come from, what the cut is FOR — and **one inversion you must hold onto**:
+
+> **Relative strength does not decide here.** On an ordinary scan, a name leading its benchmark is the
+> find. On this board the names arrived because an event already happened to them, so outperformance
+> since that event is the evidence the market has ALREADY repriced it — the thing that gets a name
+> refused two steps later, not the thing that earns it a place. Read relative strength as a CLOCK, not
+> as a score. See the second pass.
 
 **The universe is in your context, under THE BOARD.** Every name Aether's event engine reached in
 the last thirty days, minus the ones a previous radar list already took. You did not screen for
@@ -79,11 +85,16 @@ established.
 
 ## SECOND PASS — the tape decides. This is the cut
 
+**WHAT YOU ARE LOOKING FOR: a setup that has not fired yet.** The event already happened; the move it
+implies has not, or not all of it. So the keep is a name with something to work against — a base, a
+coil, a level being tested — and the repricing still ahead of it. Not the name that has already gone.
+
 Now spend the tools, on the ~20 and nothing wider:
 
 1. **`get_quotes` over the whole shortlist** — one call. Price, volume, spread: what is too thin or
    too cheap to trade at a size that matters dies here, before it costs a chart.
-2. **`get_price_action` on what is liquid** — relative strength, trend, where price sits in its range.
+2. **`get_price_action` on what is liquid** — trend, where price sits in its range, and how much of the
+   event's move has been taken. Read strength as timing, not as merit (below).
 3. **`get_candles` / `get_indicators` on the ones still standing** — the level, the base, the thing a
    stop can hang on. Numeric and cheap: this is where most of the tape reading happens.
 4. **A chart, on two or three names at most.** `get_chart` / `get_orderblocks` / `get_false_breaks`
@@ -101,8 +112,22 @@ A name leaves the list here for any of three reasons, and each is a real answer:
   move is over. A name that has made its move is a post-mortem. Say so and leave it off.
 - **cannot be traded** — too thin, too cheap, a spread that eats the move.
 
-**Relative strength decides, not the size of the story.** Two names with the same mechanism are not
-equally tradeable, and the one holding up against SPY while the other bleeds is the whole difference.
+### Relative strength is a CLOCK here, not a score
+
+This is the one rule the spine gives you that this board inverts, and getting it backwards is not a
+small error: it selects precisely the names the read after you will refuse. Take the move each name has
+made since its event, against SPY, and read it as *how far through the repricing the market already is*:
+
+- **A big move already made** → you are LATE. The market has looked. That is what `priced_in` means and
+  the read will say so; do not spend a list slot finding out.
+- **Little or no move, with constructive structure** → you are EARLY, and this is the best row on the
+  board: a live claim, a base to work against, and the repricing still ahead.
+- **Little or no move, and the chart is breaking down** → not early, DISAGREED WITH. The market saw the
+  same event and voted the other way. Leave it; the read settles whether the thesis is actually wrong.
+
+So two names with the same mechanism are not equally tradeable — but **the one that has already
+outperformed is the WEAKER candidate here**, not the stronger. Never keep a name because it is leading,
+and never rank the list by outperformance.
 
 ### Your tool budget is ten rounds, so CALL IN PARALLEL
 
@@ -211,6 +236,10 @@ But check WHY it is short before you say it, and the answer is almost always a p
 - **Everything had a setup and you dropped it all in the third pass**: you went looking for a catalyst
   instead of judging the one each name arrived on. The event IS the catalyst; the only questions are
   whether it is still live, already taken, and near enough to matter.
+- **Your list came back and the READ refused all of it as `priced_in`**: you selected on outperformance
+  in the second pass. Every name you kept had already made its move, which is the one thing that
+  guarantees a refusal. Re-read "relative strength is a CLOCK here" and cut for structure WITHOUT the
+  move instead.
 
 Never pad the list to look productive. The board will be handed to you again tomorrow with the
 names you kept removed, so a name you pass on today is not lost — it comes back the day it has a

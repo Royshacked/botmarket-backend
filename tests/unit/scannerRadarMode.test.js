@@ -278,3 +278,37 @@ test('the second pass names the vision tools as its LAST rung, capped at two or 
     // The ladder order: the cheap numeric tools come before the billed ones.
     assert.ok(second.indexOf('get_indicators') < second.indexOf('get_orderblocks'))
 })
+
+// THE INVERSION. The spine is a momentum scanner: a name leading its benchmark is the find. On an event
+// board that is backwards — outperformance SINCE the event is the evidence the market already repriced
+// it, which is exactly what the read refuses as `priced_in`. Carried across unqualified, the second pass
+// selected precisely the names guaranteed to be refused two steps later, and a live run proved it: MU
+// (+8.4% vs SPY), AMAT (+5.8%) and TSM (+4.8%) were kept by the tape and all three came back priced_in,
+// leaving a list of zero.
+test('the module inverts "relative strength decides" and says why, in the header AND the second pass', () => {
+    // The header cannot let the spine's rule through unqualified — that is where it was inherited.
+    const header = RADAR.slice(0, RADAR.indexOf('## What this mode overrides'))
+    assert.match(header, /Relative strength does not decide here/)
+    assert.doesNotMatch(header, /the tape\s+decides, relative strength decides/,
+        "the spine's rule must not be echoed unqualified")
+
+    const second = RADAR.slice(RADAR.indexOf('## SECOND PASS'), RADAR.indexOf('## THIRD PASS'))
+    assert.match(second, /a setup that has not fired yet/)
+    assert.match(second, /Relative strength is a CLOCK here, not a score/)
+    // All three readings of the clock, because the naive inversion — "prefer the weakest" — is just the
+    // same mistake pointing the other way.
+    assert.match(second, /you are LATE/)
+    assert.match(second, /you are EARLY/)
+    assert.match(second, /DISAGREED WITH/)
+    assert.match(second, /the one that has already\s+outperformed is the WEAKER candidate here/)
+    assert.match(second, /never rank the list by outperformance/)
+})
+
+// The failure had a signature — a full list that comes back entirely refused — so the diagnostic list
+// names it, since that is the one a reader will actually be holding.
+test('the short-list diagnostics name the priced_in wipeout and point at its cause', () => {
+    const why = RADAR.slice(RADAR.indexOf('## When almost nothing survives'))
+    assert.match(why, /refused all of it as `priced_in`/)
+    assert.match(why, /you selected on outperformance/)
+    assert.match(why, /structure WITHOUT the\s+move/)
+})
