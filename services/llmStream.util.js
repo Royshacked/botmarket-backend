@@ -20,6 +20,27 @@
 // the last.
 export const TOOL_BUDGET_LANDING = 'The tool budget for this turn is spent — this is your last round, and no further tool call will be honoured. Answer now with what you already have: emit whatever structured block you were building as far as it is built, say plainly what you did not get to check, and say you will continue next turn.'
 
+/**
+ * How many tool calls in ONE round actually run at once.
+ *
+ * A round used to be `Promise.all(uses.map(...))` in both providers: every call the model asked for,
+ * fired together, however many that was. It stayed invisible while a round held two or three calls,
+ * and it broke the moment a desk was told to ask for more — Argus's radar cut, given "call in
+ * parallel" over a twenty-name shortlist, turned one round into twenty simultaneous candle requests
+ * and got 429 back on fourteen of them. The model had done exactly as instructed; the burst was the
+ * transport's.
+ *
+ * FOUR, and the number is about the PROVIDERS behind the tools, not the model. It is wide enough that
+ * a round of per-name reads still overlaps — the whole point of asking for them together — and narrow
+ * enough that a dozen-name round arrives as three waves rather than one spike, on top of the paper
+ * loops already holding 45-85 requests a minute against the same key. Raising it trades a rate-limit
+ * risk for latency that bounded overlap has already mostly bought.
+ *
+ * Shared by both providers (share the pipe). It bounds ONE round; the number of rounds is
+ * maxContinuations, and the two limits answer different questions.
+ */
+export const MAX_PARALLEL_TOOLS = 4
+
 // ─── Emit-tag registry ────────────────────────────────────────────────────────
 // Every emit tag ANY agent may produce. The tag suppressor must know about all of
 // them so a stray tag from one agent never leaks raw into another agent's chat UI.

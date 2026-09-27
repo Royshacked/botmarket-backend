@@ -338,7 +338,13 @@ services/
                           Drives the market-closed exemption + the `off_hours` card note
   llmStream.util.js       createTagSuppressor({ onToken, captures }) + ALL_EMIT_TAGS — the ONE list
                           of tags suppressed from every agent's token stream. A new emit tag goes
-                          here first, or it leaks raw into the chat AND is never captured
+                          here first, or it leaks raw into the chat AND is never captured.
+                          Also the two cross-provider tool-loop constants: TOOL_BUDGET_LANDING (the
+                          last round's note) and MAX_PARALLEL_TOOLS = 4 — how much of ONE round
+                          actually runs at once. A round was Promise.all over every call the model
+                          asked for, invisible at two or three and a 429 storm at twenty (Argus's
+                          radar cut, told to batch, lost 14 of 20 candle reads). The model decides
+                          how wide a round is; the transport decides how much of it lands at once
   routing.util.js         desk-to-desk ROUTING — the shared mechanism (2026-09-18). The grammar Axl
                           always spoke (`<route>desk SYMBOL</route>` + `<open>…</open>`, or
                           `<edit>kind id</edit>`), its parsers, the controller-tier validation
@@ -453,8 +459,11 @@ services/
                             NB distinct from candleFetch.service below: this one is the monitor/
                             paper-fill shape, that one is the FMP-first ROUTER behind the chart
   candleFetch.service.js    fetchMarketCandles(symbol,{timeSpan,multiplier,from,to}) + toMsCandles — shared
-                            FMP-first (USE_FMP_CANDLES) → Massive/Yahoo fallback (futures/index/broker symbols
-                            only) → sec-to-ms pipeline. Massive defaults missing from/to to avoid a crash. One code path for the
+                            FMP-first (USE_FMP_CANDLES — an opt-in flag, ON since 2026-09-27; until then it was
+                            off and EVERY candle read in the app went to Massive's free tier, which blocks
+                            same-day intraday and rate-limits) → Massive/Yahoo fallback (futures/index/broker
+                            symbols only) → sec-to-ms pipeline. It is a local .env flag, so Render needs it set
+                            separately. Massive defaults missing from/to to avoid a crash. One code path for the
                             /api/market/candles endpoint AND the chart renderer (same data the monitor sees).
                             (Named distinctly from monitorUtils.fetchCandles, the monitor's broker-candle router.)
                             + buildFormingBar: TODAY's bar, which the EOD feed publishes LATE (measured

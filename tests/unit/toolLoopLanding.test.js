@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { streamAnthropicWithTools } from '../../providers/anthropic.provider.js'
 import { streamOpenAICompatWithTools } from '../../providers/openaiCompat.provider.js'
-import { TOOL_BUDGET_LANDING } from '../../services/llmStream.util.js'
+import { TOOL_BUDGET_LANDING, MAX_PARALLEL_TOOLS } from '../../services/llmStream.util.js'
 
 // The tool loop's LANDING ROUND, on both providers. A turn that is still calling tools when the
 // continuation cap arrives used to throw — and Mentor's "go all the way" build, which climbs eight
@@ -126,4 +126,90 @@ test('openai-compat: same landing — tool_choice none on the last round, the no
     assert.deepEqual(last, { role: 'user', content: TOOL_BUDGET_LANDING })
     assert.equal(r3.messages[r3.messages.length - 2].role, 'tool', 'the note follows the final tool results')
     assert.ok(!r2.messages.some(m => m.content === TOOL_BUDGET_LANDING), 'not before the last round')
+})
+
+// ─── A WIDE ROUND IS PACED ────────────────────────────────────────────────────
+// The other half of the loop's discipline, and the half that was missing. A round used to be
+// `Promise.all(uses.map(...))` on both providers: every call the model asked for, fired together.
+// That stayed invisible while rounds held two or three calls and broke the moment a desk was told to
+// batch — Argus's radar cut, instructed to call in parallel over a twenty-name shortlist, turned one
+// round into twenty simultaneous candle requests and got 429 back on fourteen. The model had done as
+// instructed; the burst belonged to the transport. So: the model decides how WIDE a round is, the
+// transport decides how much of it reaches a provider at once.
+
+/** A tracker whose handler records the high-water mark of concurrent tool calls. */
+function paceTracker() {
+    const t = { active: 0, peak: 0, seen: [] }
+    t.handler = async (args) => {
+        t.active++
+        t.peak = Math.max(t.peak, t.active)
+        await new Promise(r => setTimeout(r, 5))
+        t.active--
+        t.seen.push(args.ticker)
+        return `px ${args.ticker}`
+    }
+    return t
+}
+
+const WIDE = 12
+
+const multiToolRound = (n) => [
+    { type: 'message_start', message: { usage: { input_tokens: 10 } } },
+    ...Array.from({ length: n }, (_, i) => [
+        { type: 'content_block_start', index: i, content_block: { type: 'tool_use', id: `t${i}`, name: 'get_quote', input: {} } },
+        { type: 'content_block_delta', index: i, delta: { type: 'input_json_delta', partial_json: `{"ticker":"S${i}"}` } },
+    ]).flat(),
+    { type: 'message_delta', delta: { stop_reason: 'tool_use' }, usage: { output_tokens: 5 } },
+]
+
+test('anthropic: a twelve-call round runs MAX_PARALLEL_TOOLS at a time, and answers all twelve in order', async () => {
+    const t = paceTracker()
+    const client = fakeAnthropic([multiToolRound(WIDE), textRound('done')])
+    const text = await streamAnthropicWithTools({
+        model: 'claude-sonnet-5', promptOrMessages: 'read them all', systemPrompt: 'S',
+        tools: [TOOL], toolHandlers: { get_quote: t.handler },
+        maxContinuations: 4, client,
+    })
+    assert.equal(text, 'done')
+    assert.equal(t.peak, MAX_PARALLEL_TOOLS, `expected a ceiling of ${MAX_PARALLEL_TOOLS} concurrent calls, saw ${t.peak}`)
+    assert.ok(t.peak < WIDE, 'and not the whole round at once, which is the bug')
+    assert.equal(t.seen.length, WIDE, 'every call the model asked for still ran')
+
+    // A tool_result must line up with the tool_use it answers, so the order the model asked in is the
+    // order it is answered in — whichever call happened to finish first.
+    const results = client.requests[1].messages.at(-1).content
+    assert.deepEqual(results.map(b => b.tool_use_id), Array.from({ length: WIDE }, (_, i) => `t${i}`))
+})
+
+const oaMultiToolRound = (n) => [
+    chunk({ tool_calls: Array.from({ length: n }, (_, i) => (
+        { index: i, id: `c${i}`, function: { name: 'get_quote', arguments: `{"ticker":"S${i}"}` } }
+    )) }, 'tool_calls'),
+]
+
+test('openai-compat: same pacing, same completeness', async () => {
+    const t = paceTracker()
+    const client = fakeOpenAI([oaMultiToolRound(WIDE), [chunk({ content: 'done' }, 'stop')]])
+    const text = await streamOpenAICompatWithTools({
+        wire: 'openai/gpt-6-luna', model: 'gpt-6-luna', client,
+        promptOrMessages: 'read them all', systemPrompt: 'S',
+        tools: [TOOL], toolHandlers: { get_quote: t.handler },
+        maxContinuations: 4,
+    })
+    assert.equal(text, 'done')
+    assert.equal(t.peak, MAX_PARALLEL_TOOLS)
+    assert.equal(t.seen.length, WIDE)
+
+    const toolMsgs = client.requests[1].messages.filter(m => m.role === 'tool')
+    assert.deepEqual(toolMsgs.map(m => m.tool_call_id), Array.from({ length: WIDE }, (_, i) => `c${i}`))
+})
+
+test('a round narrower than the cap is not slowed down — everything in it still overlaps', async () => {
+    const t = paceTracker()
+    const client = fakeAnthropic([multiToolRound(3), textRound('done')])
+    await streamAnthropicWithTools({
+        model: 'claude-sonnet-5', promptOrMessages: 'three', systemPrompt: 'S',
+        tools: [TOOL], toolHandlers: { get_quote: t.handler }, maxContinuations: 4, client,
+    })
+    assert.equal(t.peak, 3, 'three calls, three at once — the cap is a ceiling, not a batch size')
 })

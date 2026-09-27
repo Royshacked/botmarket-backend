@@ -3,7 +3,15 @@
 // FMP-first (real-time, verified timestamp parity with the current provider, and CORRECT
 // 2hr/4hr aggregation) with the existing Massive/Yahoo provider as the fallback for anything
 // FMP doesn't serve on this plan: futures / index CFDs / broker symbols (uncovered → FMP
-// returns empty) and weekly / monthly bars (getFmpCandles returns null → native Massive).
+// returns empty). Week/month bars used to fall through here too; fmp.price aggregates them from daily
+// now (groupOhlcByPeriod), so FMP serves those as well — verified 2026-09-27 at day/hour/15m/5m/week/
+// month, current to the last session and byte-identical to Massive on dailies.
+//
+// THE FLAG WAS OFF UNTIL 2026-09-27, which is the thing to know about this file. It is opt-in, nobody
+// had ever set it, and no boot log in a month of runs carried the "USE_FMP_CANDLES on" line — so every
+// candle read in the app (price action, indicators, charts, the monitors' fallback) went to Massive's
+// free tier. That tier blocks same-day intraday and rate-limits hard: a single Argus radar cut asking
+// for price action across a twenty-name shortlist got HTTP 429 on fourteen of them.
 //
 // Same signature and return shape as massive.getTickerAggregates, so it is a drop-in for
 // price.service. Guarded by USE_FMP_CANDLES so the cutover is reversible: with the flag off

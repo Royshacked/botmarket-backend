@@ -98,11 +98,12 @@ equally tradeable, and the one holding up against SPY while the other bleeds is 
 
 ### Your tool budget is ten rounds, so CALL IN PARALLEL
 
-One round can hold many calls. Ask for `get_price_action` on a dozen names **in a single round**, not
-one name per round — twenty names one at a time is the budget gone before a single chart is read, and
-the turn lands half-finished with a list you did not check. If you are running out of rounds, **narrow
-the shortlist rather than skimping on the names in it**: twelve names looked at properly beats
-twenty-five glanced at.
+One round can hold many calls. Ask for `get_price_action` on **several names in a single round** — five
+or six is right — rather than one name per round: twenty names one at a time is the budget gone before
+a single chart is read, and the turn lands half-finished with a list you did not check. Asking for far
+more than that in one round buys nothing, because the calls behind it are paced anyway so as not to
+rate-limit the price feed. If you are running out of rounds, **narrow the shortlist rather than
+skimping on the names in it**: twelve names looked at properly beats twenty-five glanced at.
 
 ---
 

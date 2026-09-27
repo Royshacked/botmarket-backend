@@ -21,7 +21,8 @@
 import OpenAI from 'openai'
 import { config } from '../services/config.js'
 import { logger } from '../services/logger.service.js'
-import { createTagSuppressor, TOOL_BUDGET_LANDING } from '../services/llmStream.util.js'
+import { createTagSuppressor, TOOL_BUDGET_LANDING, MAX_PARALLEL_TOOLS } from '../services/llmStream.util.js'
+import { mapLimit } from '../services/concurrency.util.js'
 import { _runTool } from './anthropic.provider.js'
 
 const LOG = '[openaiCompat]'
@@ -327,7 +328,10 @@ export async function streamOpenAICompatWithTools({
         }
 
         messages.push({ role: 'assistant', content: text || null, tool_calls: toolCalls })
-        const results = await Promise.all(uses.map(u => _runTool(toolHandlers, u, { onUsage })))
+        // Bounded, and for the reason the Anthropic loop states: the model decides how wide a round
+        // is, the transport decides how much of it hits a provider at once.
+        const results = await mapLimit(uses, u => _runTool(toolHandlers, u, { onUsage }),
+            { concurrency: MAX_PARALLEL_TOOLS })
         messages.push(...toToolMessages(results))
         if (i === maxContinuations - 2) messages.push({ role: 'user', content: TOOL_BUDGET_LANDING })
     }

@@ -112,8 +112,13 @@ test('the module names the tool budget and tells Argus to call in parallel', () 
     assert.match(RADAR, /ten rounds/)
     assert.match(RADAR, /CALL IN PARALLEL/)
     assert.match(RADAR, /in a single round/)
-    // …and what to give up when it runs short: depth over breadth.
-    assert.match(RADAR, /narrow\s+the shortlist rather than skimping/)
+    // A NUMBER, and it tracks MAX_PARALLEL_TOOLS: the transport paces a round anyway, so telling the
+    // model to ask for twenty at once only buys it a queue it cannot see.
+    assert.match(RADAR, /five\s+or six is right/)
+    assert.match(RADAR, /paced anyway/)
+    // …and what to give up when it runs short: depth over breadth. Whitespace-agnostic, because the
+    // phrase is bold-wrapped in the markdown and the line break moves with any edit around it.
+    assert.match(RADAR, /narrow\s+the\s+shortlist\s+rather\s+than\s+skimping/)
 })
 
 test('the funnel is stated as a shape, so a pass run out of order is nameable', () => {

@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk'
-import { createTagSuppressor, TOOL_BUDGET_LANDING } from '../services/llmStream.util.js'
+import { createTagSuppressor, TOOL_BUDGET_LANDING, MAX_PARALLEL_TOOLS } from '../services/llmStream.util.js'
+import { mapLimit } from '../services/concurrency.util.js'
 import { isToolError, toolErrorText } from '../services/toolResult.util.js'
 import { logger } from '../services/logger.service.js'
 import { config } from '../services/config.js'
@@ -218,7 +219,11 @@ export async function streamAnthropicWithTools({
             const toolUseBlocks = validBlocks.filter(b => b.type === 'tool_use')
             _compactPriorToolResults(messages)
             messages.push({ role: 'assistant', content: validBlocks })
-            const results = await Promise.all(toolUseBlocks.map(b => _runTool(toolHandlers, b, { onUsage })))
+            // BOUNDED, not Promise.all: a round is however many calls the model asked for, and firing
+            // all of them at one provider is what 429s it (MAX_PARALLEL_TOOLS). Input order is kept,
+            // because a tool_result must line up with the tool_use it answers.
+            const results = await mapLimit(toolUseBlocks, b => _runTool(toolHandlers, b, { onUsage }),
+                { concurrency: MAX_PARALLEL_TOOLS })
             // The next round is the landing round: tell the model so, next to the results it lands on.
             if (i === maxContinuations - 2) results.push({ type: 'text', text: TOOL_BUDGET_LANDING })
             messages.push({ role: 'user', content: results })
