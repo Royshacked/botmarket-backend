@@ -430,6 +430,12 @@ services/
                           Timestamps are toLocaleString('he')
   timeout.util.js         withTimeout(promise, ms, label) — THE one timeout guard (monitors, coverage
                           refresh, the health ping); lives here so both layers reach it
+  concurrency.util.js     mapLimit(items, fn, { concurrency }) — THE one worker pool for bounding ONE
+                          batch: results in INPUT order, a shared cursor so a slow item parks nobody,
+                          rejections raised (no swallow mode — that judgment is the caller's). Used by
+                          companyProfile.util (Finnhub fan-out) and aetherBatchRead (3 reads at once).
+                          NOT klineRender's semaphore, which caps a process-wide resource across
+                          unrelated callers — same shape, different mechanism
   tokenUsage.service.js     recordUsage(userId, model, usage, agent, { monitor }) books every LLM
                             call into the month document; `monitor: true` (Talos assessments) also
                             accumulates `monitorCost`, and chatSpend(doc) = totalCost − monitorCost is
@@ -567,6 +573,25 @@ services/
                             model (quickReadModel: the same house rule as resolveAgentStream — an admin's
                             own registered choice, anyone else the house chat model, else Sonnet 5; the doc
                             names what ran) and books under its own ledger row `analystAgent-quickread`
+  aetherScanUniverse.service.js  The board Argus is handed: every name 30 days of events reached, folded
+                            to ONE row per ticker, minus the names a previous radar list took — keyed on
+                            run_id, never on a timestamp. Per user (the events are broadcast; which you
+                            have worked is not) and read-only. Held-back names come back with the reason.
+                            EVERY ROW ARRIVES DATED — next print (one cached earningsWindow call,
+                            _attachEarnings), the claim's grading deadline (`expires`), the engine's last
+                            price, the move vs SPY. Those were Argus's first two tool calls, 116 wide and
+                            mid-stream, and losing them once cut a 116-name board to one name. A missing
+                            `earnings` key is "calendar unreadable", null is "nothing scheduled" — the
+                            pair survives the JSON round trip to the browser and back, a sentinel would not
+  aetherBatchRead.service.js  The quick read over a WHOLE radar list, and the cut that follows it:
+                            contradicted and priced_in are out, unclear and unread ship FLAGGED, then
+                            the longs cut on the read's `net` where it has one and Aether's `side`
+                            where it does not. Sequential (model calls on the user's budget) and one
+                            name failing never costs the batch. BATCH_MAX 12 — the wall clock, not the
+                            money; the overflow comes back unread + flagged rather than 400-ing, because
+                            the read FIRES BY ITSELF on every radar cut (ScannerPanel `_settleScan`).
+                            READ_CONCURRENCY 3 (was serial): a refusal never stopped the batch, so the
+                            serialisation only cost wall clock — 12 names go from ~8min to under 3
   lastPrice.service.js      fetchLastPrice(symbol): THE last-price read — quote first, a 1-minute-candle
                             fallback second, null only when both fail; a non-positive price is NO price.
                             The input to every zone gate, baseline stamp and coherence check. Lived in

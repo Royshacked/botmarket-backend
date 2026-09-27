@@ -33,6 +33,7 @@ the target and the emit differ (`services/agents/scanner.agent.service.js`, P4a)
 | **Trading profile** (default) | a ranked list of 4–8 tradeable setups for a period | `<scan_list>` | the user; a picked name → Mentor |
 | **Investing profile** | a shortlist of businesses worth researching under a mandate — fundamental/quality lens, no technical kit | `<scan_list>` with a `lens` (the selection school) | Prometheus, top N by the app's button or one by click |
 | **Hand-off mode** (trading) | ONE ticker to build a single trade on | `<kairos_pick>` | Mentor |
+| **Radar cut mode** (trading) | a given universe — Aether's event board — cut to 8–12 | `<scan_list>` with `source: 'aether'` | Prometheus's batch read, then the user's Scans |
 
 The hand-off used to sit *inside* the trading prompt, where a list-building turn read fifty lines of
 "find ONE ticker, do not emit a scan_list" that did not apply, and a hand-off turn read the list
@@ -42,6 +43,62 @@ the module — interpolating a desk name into a cached block would give every de
 cache entry. The tag is literally `<kairos_pick>`: it kept the name of the desk it was written for,
 and renaming a tag both repos parse is a migration, not a docs fix. Read it as "the single pick"; it
 goes to Mentor ([trade-pipeline.md](trade-pipeline.md)).
+
+## Radar cut mode — the board Aether hands over
+
+`prompts/scanner_mode_radar.md`, the second module, injected as its own cached block. It replaces the
+DISCOVERY half of the spine where hand-off replaces the list half, and the two are mutually exclusive —
+one ends in a pick, the other in a list — which is what keeps the system prompt inside its
+two-cached-block budget. The board itself rides in the **volatile tail**, rebuilt every turn: not
+`editList`, which would tell Argus it is refining a list and to keep untouched names (the opposite of a
+cut), and not the seeded opening message, which is rendered as the user's own chat bubble.
+
+**The universe** is `services/aetherScanUniverse.service.js` — every name thirty days of events reached,
+folded to one row per ticker, minus the names a previous radar list already took. The exclusion is keyed
+on `run_id` and never on a timestamp: a run id is `subject:published-date` and the engine never rewrites
+it, where `created_at` is stamped with `now` whenever a candidate is stored without one, so re-verifying
+an event would make every name it reached look newly discovered and flood back onto a worked list. A
+name Argus **rejected** is not excluded tomorrow ("no catalyst this week" is a verdict about this week);
+a name it **kept** is.
+
+**Every row arrives dated**, and that is a bug fix with a history. The mode used to open with two batch
+calls — `get_earnings_calendar` and `get_quotes`, both over the whole board, mid-stream, on the user's
+clock. On 2026-09-27 the calendar lost that race four times out of five (a 10s budget against a fetch of
+the entire market's calendar, competing with its own 116-wide quote fan-out), the model had no dates for
+anything, and the mode's own rule — *"without a date, a name does not belong here"* — cut a 116-name
+board down to **one** name. Both facts are now attached server-side before the prompt is built: the next
+print (one cached call through the shared `earningsWindow`), the claim's grading deadline, the engine's
+own last price, and the move since the event vs SPY. A **missing** `earnings` key means "the calendar
+could not be read" where **null** means "nothing scheduled" — the pair survives the JSON round trip to
+the browser and back, which a sentinel string would not, and the distinction is the difference between
+a fact about the company and a fact about the fetch.
+
+**Three passes, and the order is the whole design.** The catalyst question used to run first, with
+per-name tools forbidden until after it — so a strong chart could never rescue a name, because no chart
+was ever read.
+
+1. **Triage** the board for free, on evidence and the unmade move, down to ~20 worth a chart. Explicitly
+   *not* the cut, and explicitly barred from filtering on the earnings calendar: mid-quarter almost
+   nothing on the board reports.
+2. **The tape** makes the cut — `get_quotes` once for liquidity, then price action and indicators. A
+   name dies here for no setup, having already run, or being untradeable. The module states the real
+   tool budget (**ten rounds**, `DEFAULT_MAX_CONTINUATIONS`) and tells Argus to batch per-name calls in
+   one round, because twenty names one at a time is the budget gone before a chart is read.
+3. **The catalyst question**, on survivors only, and four things count as a dated window: a scheduled
+   print, the claim's own deadline, a macro print the mechanism hangs on, or a live claim whose move has
+   not happened yet. Earnings is a risk flag and a tiebreak, never the entrance.
+
+**Direction is deliberately not passed.** Aether's `side` is a claim about ONE event, and nine of the
+twenty-one recurring tickers carry conflicting sides, so the sides ride in the thesis line as
+information and Argus is asked a direction-blind question. The direction is settled downstream.
+
+**Then Prometheus, by itself.** The list Argus emits is read against the record before it is saved —
+`services/aetherBatchRead.service.js`, fired automatically from the panel (`_settleScan`), not from a
+button: `contradicted` and `priced_in` are out, `unclear` and unread ship flagged, and the longs cut on
+the read's `net` where it has one and Aether's `side` where it does not. Three reads at once
+(`READ_CONCURRENCY`), capped at twelve names (`BATCH_MAX`) with the overflow returned unread rather than
+refused — which is why the module aims at eight to twelve. The user can leave without waiting ("Save
+without the read"), and a read that lands after they did is discarded rather than applied.
 
 A fourth shape has **no agent at all**: the **house scan** (`services/houseScan.service.js`), fired
 after Pythia publishes a tilt. For each overweight sector it runs the FMP screener with a neutral
