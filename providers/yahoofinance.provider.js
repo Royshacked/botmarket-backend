@@ -7,6 +7,7 @@
 import YahooFinance from 'yahoo-finance2'
 import { compactNumber } from '../services/format.util.js'
 import { createTtlCache } from '../services/ttlCache.util.js'
+import { mapLimit } from '../services/concurrency.util.js'
 // FMP-first quotes (with Yahoo fallback). fmp.price is a leaf module, so importing it here is
 // cycle-free — unlike candles.provider, which imports massive → this module. See reference_fmp_pricing.
 import { getFmpQuoteYf } from './fmp.price.provider.js'
@@ -80,19 +81,55 @@ export async function getNumericQuoteWithTime(ticker) {
 }
 
 /**
+ * How many of a batch's quotes are in flight at once.
+ *
+ * There is NO batch quote endpoint on this tier, so "batch" here means a loop, and the loop used to be
+ * `Promise.allSettled` over every symbol given — one HTTP request each, all at once, and a second one
+ * per symbol whenever FMP misses and Yahoo is asked instead. Handed a scanner's hundred-and-sixteen
+ * name board that is 116+ simultaneous requests against a key the paper mark and fill loops are
+ * already holding at 45-85 a minute, which is how a quote sweep came to starve the calendar call
+ * running beside it and answer "quote unavailable" for half a board.
+ *
+ * Eight keeps a long list moving (a hundred names is a dozen or so waves, a few seconds) without the
+ * spike. Same reasoning as MAX_PARALLEL_TOOLS one layer up, different limit: that one bounds a tool
+ * ROUND across providers, this one bounds a single tool's own fan-out.
+ */
+// The one read this fans out over, injectable so the batching can be tested without the network —
+// the same seam candles.provider and aetherScanUniverse use, and for the same reason: ESM bindings are
+// immutable, so a module-private function cannot be stubbed from outside.
+const _quoteIO = { quote: _quote }
+
+export const QUOTE_FANOUT = 8
+
+/**
  * Batch quotes for several tickers in one call. Returns an LLM-ready string
  * table so the agent doesn't have to fetch prices one ticker at a time.
+ *
+ * ONE SYMBOL FAILING NEVER COSTS THE REST — the catch is inside the mapped function, because mapLimit
+ * deliberately has no swallow mode and this is the caller that owns that judgment.
  */
-export async function getQuotes(tickers = []) {
+export async function getQuotes(tickers = [], deps = _quoteIO) {
     const symbols = [...new Set(tickers.map(t => String(t).toUpperCase()))].filter(Boolean)
     if (!symbols.length) return 'No tickers provided.'
-    const results = await Promise.allSettled(symbols.map(s => _quote(s)))
+
+    const rows = await mapLimit(symbols, async (symbol) => {
+        try { return { symbol, q: await deps.quote(symbol) } }
+        catch (err) { return { symbol, err: String(err?.message ?? err).slice(0, 80) } }
+    }, { concurrency: QUOTE_FANOUT })
+
     const p = v => (v != null ? `$${Number(v).toFixed(2)}` : 'n/a')
-    const lines = results.map((r, i) => {
-        if (r.status !== 'fulfilled' || !r.value) return `${symbols[i]}: quote unavailable`
-        const q = r.value
-        const chg = q.regularMarketChangePercent != null ? `${q.regularMarketChangePercent.toFixed(2)}%` : 'n/a'
-        return `${q.symbol}: ${p(q.regularMarketPrice)} (${chg})`
+    const lines = rows.map(({ symbol, q, err }) => {
+        if (q) {
+            const chg = q.regularMarketChangePercent != null ? `${q.regularMarketChangePercent.toFixed(2)}%` : 'n/a'
+            return `${q.symbol}: ${p(q.regularMarketPrice)} (${chg})`
+        }
+        // A FAILED READ AND AN UNPRICED SYMBOL ARE DIFFERENT ANSWERS, and "quote unavailable" said both.
+        // A model reads that as "cannot price it, so it is not tradeable" and drops the name — which is
+        // exactly what happened to half a radar board when this fan-out rate-limited itself. One of
+        // these is a fact about the symbol; the other is a fact about the fetch.
+        return err
+            ? `${symbol}: price read FAILED (${err}) — a fetch problem, NOT a fact about the symbol; do not read it as untradeable`
+            : `${symbol}: no price on this feed (uncovered symbol)`
     })
     return lines.join('\n')
 }

@@ -738,6 +738,17 @@ providers/
                             EVERY JSON call rides services/http.util.getJson — timeout per attempt, the
                             request meter, typed err.status + err.body, a jittered retry on 429/5xx.
                             chartImg (a POST for a PNG) is the one exception. Nothing imports axios
+  yahoofinance.provider.js      The QUOTE fallback (FMP-first via getFmpQuoteYf), the candle fallback for what FMP
+                                does not carry, and the three reads only Yahoo serves (short interest, options
+                                context, the chart feed). getQuotes is a LOOP, not a batch endpoint — none exists
+                                on this tier — bounded at QUOTE_FANOUT (8) since 2026-09-27: it was
+                                Promise.allSettled over every symbol given, so a 116-name board meant 116+
+                                simultaneous requests (two per symbol when FMP missed) against a key the paper
+                                loops already hold at 45-85/min. That sweep starved the calendar call beside it
+                                and answered "quote unavailable" for half a board, which a model reads as
+                                untradeable. A FAILED read and an UNCOVERED symbol are now different lines, and
+                                the failure says it is not a fact about the symbol. Measured after: 116/116
+                                priced in 5.3s, no failures. `deps` is the test seam
   fmp.provider.js               Starter plan: getFundamentals (valuation+analyst+ETF look-through), getEarnings(Calendar),
                                 screenCandidates (company-screener), getMacroSnapshot + getMacroRaw (treasury/econ/sector);
                                 getSectorSnapshot / getMarketMovers / getAnalystActions (Argus discovery feeds);
