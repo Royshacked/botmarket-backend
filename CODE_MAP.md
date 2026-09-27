@@ -734,7 +734,15 @@ providers/
                                 getSectorSnapshot / getMarketMovers / getAnalystActions (Argus discovery feeds);
                                 getAnalystEstimates / getPriceTargetConsensus / getGradesConsensus + getGradesHistorical /
                                 getHistoricalMultiples (Analyst consensus + valuation feeds, P2);
-                                getSectorRaw. fmp.price.provider.js = live quote + candles (paper feed); week/month
+                                getSectorRaw. readCalendarWindow is THE calendar read both earnings-calendar
+                                functions go through: FMP caps a response at 4000 rows AND TRIMS FROM THE END, so a
+                                3-month ask used to come back holding only Nov 5 onward with nothing saying the
+                                nearest six weeks were missing. One request whenever one is enough (the shared 30-day
+                                window is 1750 rows); a window that comes back AT the cap is halved into DISJOINT
+                                spans and re-asked, recursively, each half cached under its own key. Measured after:
+                                9055 rows from 2026-09-28. The LLM string's own 40-row cap now says "the 40 soonest
+                                of N" — the same silent-hole bug one layer up.
+                                fmp.price.provider.js = live quote + candles (paper feed); week/month
                                 aggregated from daily EOD via groupOhlcByPeriod (FMP has no native week/month endpoint)
   chartImg.provider.js          chart-img (TradingView) PNG — now the FALLBACK behind the own-chart
                                 renderer (services/chartRender); still primary when OWN_CHART_RENDER=false

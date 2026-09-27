@@ -218,69 +218,138 @@ const CAL_TTL_MS = 6 * 60 * 60 * 1000
 const _calCache = createTtlCache({ ttlMs: CAL_TTL_MS, max: 50 }) // "from|to" -> rows
 
 /**
- * Upcoming earnings between `from` and `to` (YYYY-MM-DD, max ~3-month window),
- * as an LLM-ready string. Optionally narrow to a set of symbols the agent is
- * already considering. Returns the soonest-first list, capped so the tool
- * result stays small.
+ * The row ceiling FMP puts on one calendar response — AND IT TRIMS FROM THE END OF THE WINDOW, not
+ * the start.
+ *
+ * Measured, not guessed: `from=2026-09-27&to=2026-12-20` answers exactly 4000 rows whose EARLIEST
+ * date is 2026-11-05. The next six weeks — the only part anyone asked about — are simply absent, and
+ * nothing in the response says so. A caller reads that as "nothing reports before November", which is
+ * the worst failure shape available: a confident negative from a source that did not answer. The
+ * same ask at 30 days returns 1750 rows and is whole, so the hole only opens on a wide window, which
+ * is exactly the one the tool description invites.
+ */
+const CAL_ROW_CAP = 4000
+
+const _isoDay   = (iso, delta) => new Date(Date.parse(`${iso}T00:00:00Z`) + delta * 864e5).toISOString().slice(0, 10)
+const _isoSpan  = (a, b) => Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 864e5)
+
+/**
+ * A window split into two DISJOINT halves, or null when it is already one day. PURE.
+ *
+ * Disjoint matters: FMP treats both ends as inclusive, so `[from, mid]` and `[mid, to]` would return
+ * the middle day twice and double every name reporting on it.
+ */
+export function splitCalendarWindow(from, to) {
+    const span = _isoSpan(from, to)
+    if (!Number.isFinite(span) || span < 1) return null
+    const mid = _isoDay(from, Math.floor(span / 2))
+    return [[from, mid], [_isoDay(mid, 1), to]]
+}
+
+const _calIO = {
+    get:   (f, t) => _fmpGet(`/earnings-calendar?from=${f}&to=${t}`),
+    cache: _calCache,
+}
+
+/**
+ * Every calendar row in a window, whole — the cap worked around rather than reported.
+ *
+ * ONE REQUEST WHENEVER ONE IS ENOUGH, which is almost always: the 30-day window every "upcoming
+ * earnings" surface in the app shares is well inside the cap, and it costs exactly what it did
+ * before. Only a window that actually comes back AT the ceiling pays for anything more, and it pays
+ * by being halved and asked again — recursively, since a three-month ask in earnings season can be
+ * over the cap in its first half too.
+ *
+ * DETECTED BY THE ROW COUNT, because that is the only signal there is. FMP sends no "truncated"
+ * marker and no total, so `length >= CAL_ROW_CAP` is the whole of the evidence. A window that
+ * legitimately holds exactly 4000 rows would be split for nothing, which costs two requests and
+ * returns the same rows — the harmless direction of a guess that cannot be made precisely.
+ *
+ * A SINGLE DAY AT THE CEILING cannot be split further, and that is the one case this cannot fix. It
+ * is logged as an error rather than passed on quietly: the busiest day measured carries ~360 rows, so
+ * reaching 4000 in one day means the cap moved or the endpoint changed, and the next reader needs to
+ * know which of those they are looking at.
+ */
+export async function readCalendarWindow(from, to, io = _calIO) {
+    const key = `${from}|${to}`
+    const hit = io.cache?.get(key)
+    if (hit) return hit
+
+    const arr = await io.get(from, to)
+    let rows  = Array.isArray(arr) ? arr : []
+
+    if (rows.length >= CAL_ROW_CAP) {
+        const halves = splitCalendarWindow(from, to)
+        if (!halves) {
+            logger.error(LOG, `earnings calendar: ${from} alone fills the ${CAL_ROW_CAP}-row cap — this one day is incomplete`)
+        } else {
+            logger.info(LOG, `earnings calendar ${from}→${to} hit the ${CAL_ROW_CAP}-row cap — splitting`)
+            // Sequential, not both at once: the second half is usually under the cap and the first is
+            // usually the one that splits again, so a fan-out would only widen the burst on the branch
+            // that is about to branch anyway. Two requests either way on the common path.
+            rows = []
+            for (const [a, b] of halves) rows = rows.concat(await readCalendarWindow(a, b, io))
+        }
+    }
+
+    io.cache?.set(key, rows)
+    return rows
+}
+
+/**
+ * Upcoming earnings between `from` and `to` (YYYY-MM-DD, ~3-month window), as an LLM-ready string.
+ * Optionally narrow to a set of symbols the agent is already considering. Returns the soonest-first
+ * list, capped so the tool result stays small — and SAYS when that cap bit.
+ *
+ * The window is whole at any width now (readCalendarWindow), which it was not: a wide one used to
+ * come back missing its nearest weeks entirely.
  */
 export async function getEarningsCalendar(from, to, symbols = []) {
     const today = new Date().toISOString().slice(0, 10)
     const f = /^\d{4}-\d{2}-\d{2}$/.test(from) ? from : today
     const t = /^\d{4}-\d{2}-\d{2}$/.test(to)   ? to   : new Date(Date.now() + 7 * 864e5).toISOString().slice(0, 10)
-    const key = `${f}|${t}`
 
-    let rows
-    const hit = _calCache.get(key)
-    if (hit) {
-        rows = hit
-    } else {
-        const arr = await _fmpGet(`/earnings-calendar?from=${f}&to=${t}`)
-        rows = Array.isArray(arr) ? arr : []
-        _calCache.set(key, rows)
-    }
+    const rows = await readCalendarWindow(f, t)
 
     const wanted = new Set(symbols.map(s => String(s).toUpperCase()))
-    let filtered = wanted.size ? rows.filter(r => wanted.has(String(r.symbol).toUpperCase())) : rows
-    filtered = filtered
+    const dated  = (wanted.size ? rows.filter(r => wanted.has(String(r.symbol).toUpperCase())) : rows)
         .filter(r => r.date)
         .sort((a, b) => a.date.localeCompare(b.date))
-        .slice(0, wanted.size ? 50 : 40)
+    const shown = dated.slice(0, wanted.size ? 50 : 40)
 
-    if (!filtered.length) {
+    if (!shown.length) {
         return wanted.size
             ? `No scheduled earnings for ${[...wanted].join(', ')} between ${f} and ${t}.`
             : `No earnings found between ${f} and ${t}.`
     }
 
-    const lines = filtered.map(r => {
+    const lines = shown.map(r => {
         const eps = r.epsEstimated != null ? `est EPS ${num(r.epsEstimated)}` : null
         const rev = r.revenueEstimated != null ? `est rev ${money(r.revenueEstimated)}` : null
         const extra = [eps, rev].filter(Boolean).join(', ')
         return `  ${r.date}  ${r.symbol}${extra ? ` — ${extra}` : ''}`
     })
-    return [`Earnings calendar ${f} → ${t}${wanted.size ? ` (filtered to ${wanted.size} symbols)` : ''}:`, ...lines].join('\n')
+    // THE OUTPUT CAP SAYS SO WHEN IT BITES. The same silent-hole bug as the row cap, one layer up: a
+    // market-wide ask returns thousands of rows, forty reach the model, and without this line the
+    // fortieth date reads as the end of the calendar. Soonest-first, so what survives the slice is the
+    // near end — which is the useful half, and worth saying rather than leaving to be inferred.
+    const note = dated.length > shown.length
+        ? ` — the ${shown.length} soonest of ${dated.length} in this window; narrow the dates or pass symbols to see further out`
+        : ''
+    return [`Earnings calendar ${f} → ${t}${wanted.size ? ` (filtered to ${wanted.size} symbols)` : ''}${note}:`, ...lines].join('\n')
 }
 
 /**
  * Raw upcoming earnings rows for programmatic use (not LLM-formatted).
- * Reuses the same cache as getEarningsCalendar.
+ * Same window read (and so the same cache) as getEarningsCalendar — whole at any width.
  * Returns [{ symbol, date, epsEstimated, revenueEstimated }] filtered to the given symbols.
  */
 export async function getEarningsCalendarRaw(from, to, symbols = []) {
     const today = new Date().toISOString().slice(0, 10)
     const f = /^\d{4}-\d{2}-\d{2}$/.test(from) ? from : today
     const t = /^\d{4}-\d{2}-\d{2}$/.test(to)   ? to   : new Date(Date.now() + 7 * 864e5).toISOString().slice(0, 10)
-    const key = `${f}|${t}`
 
-    let rows
-    const hit = _calCache.get(key)
-    if (hit) {
-        rows = hit
-    } else {
-        const arr = await _fmpGet(`/earnings-calendar?from=${f}&to=${t}`)
-        rows = Array.isArray(arr) ? arr : []
-        _calCache.set(key, rows)
-    }
+    const rows = await readCalendarWindow(f, t)
 
     const wanted = new Set(symbols.map(s => String(s).toUpperCase()))
     return (wanted.size ? rows.filter(r => wanted.has(String(r.symbol).toUpperCase())) : rows)

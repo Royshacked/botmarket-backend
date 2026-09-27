@@ -282,7 +282,7 @@
     },
     {
       "name": "get_earnings_calendar",
-      "description": "Upcoming earnings dates (with EPS/revenue estimates) between two dates (YYYY-MM-DD, window up to ~3 months). Optionally filter to specific symbols. Use it for entry timing — a candidate reporting in a few days carries gap risk, so you may size in after the print rather than before it.",
+      "description": "Upcoming earnings dates (with EPS/revenue estimates) between two dates (YYYY-MM-DD, window up to ~3 months). Optionally filter to specific symbols. Use it for entry timing — a candidate reporting in a few days carries gap risk, so you may size in after the print rather than before it. Pass symbols when you have them: a market-wide ask returns only the soonest rows, and says so.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -834,7 +834,7 @@
     },
     {
       "name": "get_earnings_calendar",
-      "description": "Upcoming earnings dates (with EPS/revenue estimates) between two dates (YYYY-MM-DD, window up to ~3 months). Optionally filter to specific symbols. Use it for the forward-looking \"who reports when\" — especially for week/multi-day scans.",
+      "description": "Upcoming earnings dates (with EPS/revenue estimates) between two dates (YYYY-MM-DD, window up to ~3 months). Optionally filter to specific symbols. Use it for the forward-looking \"who reports when\" — especially for week/multi-day scans. Pass symbols when you have them: a market-wide ask returns only the soonest rows, and says so.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -1745,7 +1745,7 @@
     },
     {
       "name": "get_earnings_calendar",
-      "description": "Upcoming earnings dates (with EPS/revenue estimates) for ALL companies reporting between two dates (YYYY-MM-DD, window up to ~3 months), optionally narrowed to specific symbols. The forward-looking \"who reports when\" — use it to scan for an event inside the trade horizon, or to check a shortlist for gap risk. For one ticker's next date plus its beat/miss history, prefer get_earnings.",
+      "description": "Upcoming earnings dates (with EPS/revenue estimates) for ALL companies reporting between two dates (YYYY-MM-DD, window up to ~3 months), optionally narrowed to specific symbols — PASS symbols when you have them, since a market-wide ask returns only the soonest rows and says so. The forward-looking \"who reports when\" — use it to scan for an event inside the trade horizon, or to check a shortlist for gap risk. For one ticker's next date plus its beat/miss history, prefer get_earnings.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -2350,7 +2350,7 @@
     },
     {
       "name": "get_earnings_calendar",
-      "description": "Upcoming earnings dates (with EPS/revenue estimates) for ALL companies reporting between two dates (YYYY-MM-DD, window up to ~3 months), optionally narrowed to specific symbols. The forward-looking \"who reports when\" — use it to scan for an event inside the trade horizon, or to check a shortlist for gap risk. For one ticker's next date plus its beat/miss history, prefer get_earnings.",
+      "description": "Upcoming earnings dates (with EPS/revenue estimates) for ALL companies reporting between two dates (YYYY-MM-DD, window up to ~3 months), optionally narrowed to specific symbols — PASS symbols when you have them, since a market-wide ask returns only the soonest rows and says so. The forward-looking \"who reports when\" — use it to scan for an event inside the trade horizon, or to check a shortlist for gap risk. For one ticker's next date plus its beat/miss history, prefer get_earnings.",
       "input_schema": {
         "type": "object",
         "properties": {
