@@ -112,6 +112,22 @@ was ever read.
 twenty-one recurring tickers carry conflicting sides, so the sides ride in the thesis line as
 information and Argus is asked a direction-blind question. The direction is settled downstream.
 
+**THE LIST MAY HOLD SHORTS** — since 2026-09-27, and it could not before. `judge`'s `longsOnly` flag
+defaulted true and nothing ever passed it, so the only value that shipped was the one nobody chose, and
+it discarded every name whose record reads `hurt`: 44 of the live board's 116 tickers are HURT by their
+only event, plus whichever of the 9 conflicting ones the read settles downward — about 38% of the board,
+cut AFTER triage, the tape and a paid chart read had been spent on it. It also contradicted the
+instruction one step upstream, where Argus is told the stated side is context and never a filter. AAPL
+made it plain: `credible`, `net: hurt`, not priced in, −0.4% vs SPY — the best result the chain can
+produce — dropped for being a short. `RADAR_LONGS_ONLY` is now a named constant set to false; the vetoes
+(`contradicted`, `priced_in`) are untouched, since direction is not what makes a name bad.
+
+The consequence on screen is a new flag. Argus emits the direction the TAPE supports; the read answers
+the direction the RECORD supports across every event naming the name. They can disagree, and until
+shorts survived the disagreement never shipped — a record-says-short name was simply dropped. Now the
+arrow stays Argus's (the tape is what you would actually trade) and the disagreement rides beside it as
+**record disagrees** (`readFlagFor`, derived in the panel because only that side knows both directions).
+
 **Then Prometheus, by itself.** The list Argus emits is read against the record before it is saved —
 `services/aetherBatchRead.service.js`, fired automatically from the panel (`_settleScan`), not from a
 button: `contradicted` and `priced_in` are out, `unclear` and unread ship flagged, and the longs cut on

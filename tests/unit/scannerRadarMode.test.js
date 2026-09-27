@@ -297,10 +297,17 @@ test('the module inverts "relative strength decides" and says why, in the header
     assert.match(second, /Relative strength is a CLOCK here, not a score/)
     // All three readings of the clock, because the naive inversion — "prefer the weakest" — is just the
     // same mistake pointing the other way.
-    assert.match(second, /you are LATE/)
-    assert.match(second, /you are EARLY/)
-    assert.match(second, /DISAGREED WITH/)
-    assert.match(second, /the one that has already\s+outperformed is the WEAKER candidate here/)
+    // DIRECTION-AWARE, because the first version of the clock was long-biased: "breaking down" was
+    // written as a bad sign, which on a HURT claim is confirmation.
+    assert.match(second, /READ THE MOVE IN THE DIRECTION THE CLAIM IMPLIES/)
+    assert.match(second, /\*\*LATE\*\*/)
+    assert.match(second, /\*\*EARLY\*\*/)
+    assert.match(second, /the market DISAGREES/)
+    assert.match(second, /A falling chart is therefore not a bad sign on a HURT name/)
+    // …and the list may hold what that produces.
+    assert.match(second, /The list may hold shorts/)
+    assert.match(second, /direction: "short"/)
+    assert.match(second, /the one whose move has already\s+happened is the WEAKER candidate here/)
     assert.match(second, /never rank the list by outperformance/)
 })
 

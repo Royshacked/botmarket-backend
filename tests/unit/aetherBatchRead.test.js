@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { judge, directionOf, batchRead, BATCH_MAX, READ_CONCURRENCY } from '../../services/aetherBatchRead.service.js'
+import { judge, directionOf, batchRead, BATCH_MAX, READ_CONCURRENCY, RADAR_LONGS_ONLY } from '../../services/aetherBatchRead.service.js'
 
 // Prometheus over a radar list: the veto, the longs cut, and the rule that a name nobody could
 // read is not a name that was refused.
@@ -214,4 +214,34 @@ test('an aborted signal stops the batch where it is rather than spending the res
     assert.equal(n, READ_CONCURRENCY, 'only the wave that had already started was paid for')
     assert.equal(out.rows.length, READ_CONCURRENCY, 'and the names never started are not rows')
     assert.deepEqual(out.rows.map(r => r.ticker), many.slice(0, READ_CONCURRENCY))
+})
+
+// A RADAR LIST MAY HOLD SHORTS, and did not until 2026-09-27: `judge`'s longsOnly flag defaulted true
+// and nothing ever passed it, so the only value that shipped was the one nobody chose. It discarded
+// every name whose record reads `hurt` — 44 of the live board's 116 tickers are HURT by their only
+// event — after Argus had already spent triage, the tape and a paid chart read on them. AAPL proved it:
+// credible, net hurt, not priced in, -0.4% vs SPY, dropped for being a short.
+test('a short the record CONFIRMS is kept, not binned — the list is not longs-only', async () => {
+    assert.equal(RADAR_LONGS_ONLY, false, 'the decision is a named constant, not a default nobody chose')
+    const deps = {
+        appearances: async () => ({ best: { run_id: 'r', side: 'hurt' }, events: 1 }),
+        read:        async () => read('credible', 'hurt'),
+    }
+    const out = await batchRead({ tickers: ['AAPL'] }, deps)
+    const row = out.rows[0]
+    assert.equal(row.keep, true, 'a credible, unpriced short belongs on the list')
+    assert.equal(row.direction, 'short')
+    assert.equal(row.flag, null, 'and it is not a caveat — the record settled it')
+    assert.equal(out.kept, 1)
+})
+
+// The vetoes that SHOULD still drop a short are untouched: the direction is not what makes a name bad.
+test('allowing shorts does not weaken the vetoes', async () => {
+    for (const verdict of ['contradicted', 'priced_in']) {
+        const out = await batchRead({ tickers: ['AAPL'] }, {
+            appearances: async () => ({ best: { run_id: 'r', side: 'hurt' } }),
+            read:        async () => read(verdict, 'hurt'),
+        })
+        assert.equal(out.rows[0].keep, false, `${verdict} must still drop`)
+    }
 })

@@ -60,6 +60,26 @@ export const READ_CONCURRENCY = 3
 export const READ_DAYS  = 30
 
 /**
+ * Whether a radar list may hold shorts. IT MAY, and it did not until 2026-09-27.
+ *
+ * `judge` has always taken a `longsOnly` flag and it defaulted to true, and nothing ever passed it —
+ * so the only value that ever shipped was the one nobody chose. What it discarded: every name whose
+ * record reads `hurt`. On the live board that is 44 of 116 tickers HURT by their only event, plus
+ * whichever of the 9 conflicting ones the read settles downward — about 38% of the board, cut AFTER
+ * Argus had spent triage, the tape and a paid chart read on it.
+ *
+ * And it contradicted the instruction directly above it in the chain: Argus is told the stated side is
+ * CONTEXT, never a filter and never a rank, because a one-event side is not the net. Then the terminal
+ * step filtered on exactly that. AAPL made it plain — `credible`, `net: hurt`, not priced in, -0.4% vs
+ * SPY, which is the best result this chain can produce — dropped for being a short.
+ *
+ * Shorts are first-class everywhere else: LIVE_POSITION is [LONG, SHORT], every entity kind carries a
+ * SHORT status, and the scan schema and the UI have rendered short candidates all along. The flag stays
+ * on `judge` because the question is real for a longs-only book; this list is not one.
+ */
+export const RADAR_LONGS_ONLY = false
+
+/**
  * Where a name goes once its read is in. PURE.
  *
  * THE VETO, in the order the reasons are conclusive:
@@ -83,8 +103,12 @@ export const READ_DAYS  = 30
  * common path, not the edge case.
  *
  * A direction the record cannot settle ships FLAGGED rather than dropped, for the same reason
- * `unclear` does — but it is worth seeing as its own flag: "we do not know if this is a long" is a
+ * `unclear` does — but it is worth seeing as its own flag: "we do not know which way this goes" is a
  * different warning from "we do not know if the claim holds".
+ *
+ * `longsOnly` DEFAULTS TRUE HERE AND THE SHIPPING CALLER PASSES FALSE (RADAR_LONGS_ONLY). The default
+ * is kept for a longs-only book asking the same question; a radar list is not one, and leaving the
+ * default in place silently threw away every short the read confirmed.
  *
  * @param {?object} read  the stored quick read, or null when there is none
  * @param {object}  opts  `side` — Aether's claim on this name, the fallback direction
@@ -173,7 +197,7 @@ export async function batchRead({ tickers = [], userId, signal } = {}, deps = _i
         if (signal?.aborted) return null
         try {
             const row = await _readOne(ticker, { userId, signal }, deps)
-            return { ...row, ...judge(row.read, { side: row.side }) }
+            return { ...row, ...judge(row.read, { side: row.side, longsOnly: RADAR_LONGS_ONLY }) }
         } catch (err) {
             logger.warn(LOG, 'read failed', { ticker, err: err.message })
             // No read, and the reason kept with the name — `judge` puts it through flagged.

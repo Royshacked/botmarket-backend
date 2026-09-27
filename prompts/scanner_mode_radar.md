@@ -116,18 +116,29 @@ A name leaves the list here for any of three reasons, and each is a real answer:
 
 This is the one rule the spine gives you that this board inverts, and getting it backwards is not a
 small error: it selects precisely the names the read after you will refuse. Take the move each name has
-made since its event, against SPY, and read it as *how far through the repricing the market already is*:
+made since its event and read it as *how far through the repricing the market already is*.
 
-- **A big move already made** → you are LATE. The market has looked. That is what `priced_in` means and
-  the read will say so; do not spend a list slot finding out.
-- **Little or no move, with constructive structure** → you are EARLY, and this is the best row on the
-  board: a live claim, a base to work against, and the repricing still ahead.
-- **Little or no move, and the chart is breaking down** → not early, DISAGREED WITH. The market saw the
-  same event and voted the other way. Leave it; the read settles whether the thesis is actually wrong.
+**READ THE MOVE IN THE DIRECTION THE CLAIM IMPLIES**, not as "up is good". A name Aether called HURT is
+supposed to fall; one it called HELPED is supposed to rise. So "has it moved yet" means moved THAT way:
 
-So two names with the same mechanism are not equally tradeable — but **the one that has already
-outperformed is the WEAKER candidate here**, not the stronger. Never keep a name because it is leading,
-and never rank the list by outperformance.
+| the move since the event | HELPED claim | HURT claim | what it means |
+|---|---|---|---|
+| gone the claim's way, hard | up a lot | down a lot | **LATE** — the market has looked. `priced_in`, and the read will say so. Do not spend a list slot finding out. |
+| barely moved | flat | flat | **EARLY** — the best row on the board: a live claim, structure to work against, the repricing still ahead. |
+| gone the other way | down | up | **the market DISAGREES** — it saw the same event and voted against it. Leave it; the read settles whether the thesis is actually wrong. |
+
+A falling chart is therefore not a bad sign on a HURT name — it is confirmation, and the same chart on a
+HELPED name is the market voting against the claim. Do not read "breaking down" as bad until you have
+checked which way the claim points.
+
+So two names with the same mechanism are not equally tradeable — but **the one whose move has already
+happened is the WEAKER candidate here**, not the stronger. Never keep a name because it is leading, and
+never rank the list by outperformance.
+
+**The list may hold shorts.** A HURT claim the tape confirms is a short, emitted with
+`direction: "short"`, and the list-level `direction` is `"mixed"`. You are still not FILTERING on the
+stated side — nine names on this board carry claims that disagree with each other and only the read
+settles those — but where the tape and the claim agree on a fall, that is a candidate, not a reject.
 
 ### Your tool budget is ten rounds, so CALL IN PARALLEL
 
@@ -154,8 +165,9 @@ already landed". Three questions, and the row answers all three:
 
 1. **Is the claim still live?** Inside the board window on the row. Past it, the thesis has expired and
    the name is not this week's business.
-2. **Has the market already taken it?** The move since the event, against SPY. A name that has made
-   its move is a post-mortem. This is a cheap screen, not a verdict — the deep version is the read that
+2. **Has the market already taken it?** The move since the event, read **in the direction the claim
+   implies** — down is "taken" on a HURT name exactly as up is on a HELPED one. A name whose move has
+   been made is a post-mortem. This is a cheap screen, not a verdict — the deep version is the read that
    runs after you, which weighs the whole record and can answer `priced_in` outright. Do not try to
    settle it here; just do not put an obviously-finished move on the list.
 3. **Is there enough time left for it to matter?** A claim graded next week is this week's business. One
