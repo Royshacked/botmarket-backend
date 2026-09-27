@@ -21,7 +21,7 @@
 import OpenAI from 'openai'
 import { config } from '../services/config.js'
 import { logger } from '../services/logger.service.js'
-import { createTagSuppressor, TOOL_BUDGET_LANDING, MAX_PARALLEL_TOOLS } from '../services/llmStream.util.js'
+import { createTagSuppressor, TOOL_BUDGET_LANDING, MAX_PARALLEL_TOOLS, makeVisionBudget } from '../services/llmStream.util.js'
 import { mapLimit } from '../services/concurrency.util.js'
 import { _runTool } from './anthropic.provider.js'
 
@@ -269,6 +269,9 @@ export async function streamOpenAICompatWithTools({
     const wantsWeb   = (tools ?? []).some(t => typeof t?.type === 'string' && t.type.startsWith('web_search'))
     const messages   = [{ role: 'system', content: toSystemText(systemPrompt) }, ...toOpenAIMessages(promptOrMessages)]
 
+    // One ctx for the whole turn — see the Anthropic loop; the vision budget counts across rounds.
+    const toolCtx = { onUsage, visionBudget: makeVisionBudget(config.visionMaxUsesPerTurn) }
+
     for (let i = 0; i < maxContinuations; i++) {
         if (signal?.aborted) { suppressor.flush(); return '' }
 
@@ -330,7 +333,7 @@ export async function streamOpenAICompatWithTools({
         messages.push({ role: 'assistant', content: text || null, tool_calls: toolCalls })
         // Bounded, and for the reason the Anthropic loop states: the model decides how wide a round
         // is, the transport decides how much of it hits a provider at once.
-        const results = await mapLimit(uses, u => _runTool(toolHandlers, u, { onUsage }),
+        const results = await mapLimit(uses, u => _runTool(toolHandlers, u, toolCtx),
             { concurrency: MAX_PARALLEL_TOOLS })
         messages.push(...toToolMessages(results))
         if (i === maxContinuations - 2) messages.push({ role: 'user', content: TOOL_BUDGET_LANDING })

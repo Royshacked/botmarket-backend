@@ -41,6 +41,44 @@ export const TOOL_BUDGET_LANDING = 'The tool budget for this turn is spent — t
  */
 export const MAX_PARALLEL_TOOLS = 4
 
+/**
+ * The per-turn VISION budget — the backstop under "never run it across the pool".
+ *
+ * get_chart, get_orderblocks and get_false_breaks each render a chart and then spend a Claude vision
+ * call on the image. They are the only tools in the kit that bill per use, and nothing counted them:
+ * web_search has its own max_uses, the render pool bounds concurrency, MAX_PARALLEL_TOOLS bounds what
+ * is in flight — none of those bound the COUNT. The discipline lived entirely in a prompt line, and a
+ * prompt line is not a budget. A scan working a twenty-name shortlist could spend twenty vision calls
+ * and nothing would stop it or even say so afterwards.
+ *
+ * ONE BUDGET PER TURN, built by the provider's stream loop and carried on the tool ctx, because "per
+ * turn" is a fact the loop knows and a module-level counter cannot: the handlers are built once at
+ * import for some desks, so a counter in their closure would be process-global and would refuse the
+ * fiftieth call of the day rather than the ninth of a turn.
+ *
+ * The refusal is a toolError, deliberately. A plain string would read to the model as a finding, and
+ * worse, it would confer GROUNDING on the ticker in Argus's ledger — a name credited to a read that
+ * never happened. It also names the cheap tools to use instead, so a refused turn has somewhere to go.
+ */
+export function makeVisionBudget(max) {
+    const ceiling = Math.max(1, Number(max) || 1)
+    let used = 0
+    return {
+        get used() { return used },
+        get max()  { return ceiling },
+        /** Claim one call. False when the budget is spent — the caller refuses, it does not throw. */
+        take() {
+            if (used >= ceiling) return false
+            used++
+            return true
+        },
+    }
+}
+
+/** What a vision tool says once the turn's budget is gone. */
+export const VISION_BUDGET_SPENT = (name, max) =>
+    `${name} refused: this turn's budget of ${max} chart/vision reads is spent. Each one renders a chart and spends a vision call, so they are for your strongest two or three names, never the pool. Use get_candles, get_indicators or get_price_action for the rest — they are numeric, cheap, and give you exact levels rather than approximate ones.`
+
 // ─── Emit-tag registry ────────────────────────────────────────────────────────
 // Every emit tag ANY agent may produce. The tag suppressor must know about all of
 // them so a stray tag from one agent never leaks raw into another agent's chat UI.

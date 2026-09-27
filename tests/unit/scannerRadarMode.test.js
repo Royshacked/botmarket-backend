@@ -243,3 +243,18 @@ test('a board without the radar flag is never rendered — the mode is what admi
     // \bNUE\b rather than /NUE/: VENUE_RULE is appended to the spine, so a loose match always hits.
     assert.doesNotMatch(got.systemPrompt.map(b => b.text).join('\n'), /THE BOARD|\bNUE\b/)
 })
+
+// THE EXPENSIVE RUNG. The module's ladder used to stop at candles/indicators, which left the three
+// tools that actually bill per use — a chart render plus a vision read each — governed only by a line
+// in the spine that this module partly replaces. A ladder that ends before the costly tier is not a
+// cheap-first funnel.
+test('the second pass names the vision tools as its LAST rung, capped at two or three names', () => {
+    const second = RADAR.slice(RADAR.indexOf('## SECOND PASS'), RADAR.indexOf('## THIRD PASS'))
+    for (const t of ['get_chart', 'get_orderblocks', 'get_false_breaks']) assert.match(second, new RegExp(t))
+    assert.match(second, /two or three names at most/)
+    assert.match(second, /cost per use/)
+    // …and that they are for the names already chosen, not for choosing them.
+    assert.match(second, /never for deciding which names those are/)
+    // The ladder order: the cheap numeric tools come before the billed ones.
+    assert.ok(second.indexOf('get_indicators') < second.indexOf('get_orderblocks'))
+})

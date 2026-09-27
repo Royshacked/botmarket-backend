@@ -83,7 +83,13 @@ Now spend the tools, on the ~20 and nothing wider:
    too cheap to trade at a size that matters dies here, before it costs a chart.
 2. **`get_price_action` on what is liquid** — relative strength, trend, where price sits in its range.
 3. **`get_candles` / `get_indicators` on the ones still standing** — the level, the base, the thing a
-   stop can hang on.
+   stop can hang on. Numeric and cheap: this is where most of the tape reading happens.
+4. **A chart, on two or three names at most.** `get_chart` / `get_orderblocks` / `get_false_breaks`
+   each render an image and then spend a vision read on it — the only tools here that cost per use,
+   and the reason the funnel has this shape at all. They are for the names you are about to put on
+   the list, never for deciding which names those are, and a turn's budget for them runs out: past
+   it they come back refused. Everything above this rung answers "is there a setup" well enough to
+   cut twenty names to ten.
 
 A name leaves the list here for any of three reasons, and each is a real answer:
 

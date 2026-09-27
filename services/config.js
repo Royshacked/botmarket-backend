@@ -163,6 +163,20 @@ export const config = {
     get ownChartRenderTimeoutMs()      { return _num('OWN_CHART_RENDER_TIMEOUT_MS', 12_000) },
     get ownChartRenderPageTimeoutMs()  { return _num('OWN_CHART_RENDER_PAGE_TIMEOUT_MS', 10_000) },
     get ownChartRenderConcurrency()    { return Math.max(1, _num('OWN_CHART_RENDER_CONCURRENCY', 3)) },
+    /**
+     * How many VISION tool calls one desk turn may spend — get_chart, get_orderblocks,
+     * get_false_breaks. Each is a chart render AND a Claude vision call, so these are the only tools
+     * in the kit that bill per use, and until now nothing counted them: web_search has
+     * WEB_SEARCH_MAX_USES, the render pool caps concurrency, MAX_PARALLEL_TOOLS caps what is in
+     * flight — none of them caps the COUNT. A scan told to look at twenty names could spend twenty
+     * vision calls, and the only thing standing in the way was a line of prompt.
+     *
+     * Eight, because the desks' legitimate needs differ: Argus wants a chart on its strongest two or
+     * three, while Mentor's build reads structure AND sweeps AND the chart on one name, sometimes
+     * across two timeframes. Eight clears both and still stops a pool-wide sweep dead. A getter
+     * rather than a constant so the number can be moved on evidence — the refusal is logged.
+     */
+    get visionMaxUsesPerTurn()         { return Math.max(1, _num('VISION_MAX_USES_PER_TURN', 8)) },
 
     // ── paper venue ──
     get paperFillIntervalMs()     { return _num('PAPER_FILL_INTERVAL_MS', 3_000) },

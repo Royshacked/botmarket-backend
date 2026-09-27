@@ -213,3 +213,23 @@ test('a round narrower than the cap is not slowed down — everything in it stil
     })
     assert.equal(t.peak, 3, 'three calls, three at once — the cap is a ceiling, not a batch size')
 })
+
+// ONE VISION BUDGET PER TURN, not per round — the whole point is a count across the turn, and the
+// providers build the ctx that carries it. (The budget's own behaviour is visionBudget.test.js.)
+test('the tool ctx is built once per turn, so a budget on it survives across rounds', async () => {
+    const seen = new Set()
+    const client = fakeAnthropic([toolRound('t1'), toolRound('t2'), textRound('done')])
+    await streamAnthropicWithTools({
+        model: 'claude-sonnet-5', promptOrMessages: 'two rounds', systemPrompt: 'S',
+        tools: [TOOL],
+        toolHandlers: { get_quote: async (_args, ctx) => {
+            assert.ok(ctx?.visionBudget, 'every round gets the budget')
+            seen.add(ctx.visionBudget)
+            ctx.visionBudget.take()
+            return 'q'
+        } },
+        maxContinuations: 4, client,
+    })
+    assert.equal(seen.size, 1, 'the SAME budget object across rounds — a per-round one would never run out')
+    assert.equal([...seen][0].used, 2, 'and it counted both rounds')
+})

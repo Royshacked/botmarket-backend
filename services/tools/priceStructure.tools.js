@@ -1,5 +1,7 @@
 import { claudeVision } from '../../monitoring/monitor.claude.js'
 import { makeToolHandler } from '../agentUtils.js'
+import { VISION_BUDGET_SPENT } from '../llmStream.util.js'
+import { toolError } from '../toolResult.util.js'
 import { cachedChartImage } from '../chartImgCache.service.js'
 import { logger } from '../logger.service.js'
 
@@ -89,6 +91,15 @@ export function makeStructureVisionHandler({ log, kind, vision, onChart, deps = 
     return makeToolHandler(
         `get_${kind}`,
         async ({ ticker, timeframe, show_to_user = false }, ctx) => {
+            // THE TURN'S VISION BUDGET, claimed before the render — a chart plus a vision call is the
+            // only per-use spend in the kit, and "top two or three, never the pool" was a prompt line
+            // with nothing behind it. A toolError and not a string: a refusal must not read as a
+            // finding, and must not credit the ticker with a read that never happened (the grounding
+            // ledger counts a successful per-name call as proof a real tool saw the name).
+            if (ctx?.visionBudget && !ctx.visionBudget.take()) {
+                logger.info(log, `get_${kind} refused — the turn's vision budget (${ctx.visionBudget.max}) is spent`)
+                return toolError(VISION_BUDGET_SPENT(`get_${kind}`, ctx.visionBudget.max))
+            }
             const { png, text } = await readStructure({ symbol: ticker, timeframe, kind, vision, onUsage: ctx?.onUsage, deps })
 
             if (show_to_user && typeof onChart === 'function') {

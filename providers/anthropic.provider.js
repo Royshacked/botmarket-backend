@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk'
-import { createTagSuppressor, TOOL_BUDGET_LANDING, MAX_PARALLEL_TOOLS } from '../services/llmStream.util.js'
+import { createTagSuppressor, TOOL_BUDGET_LANDING, MAX_PARALLEL_TOOLS, makeVisionBudget } from '../services/llmStream.util.js'
 import { mapLimit } from '../services/concurrency.util.js'
 import { isToolError, toolErrorText } from '../services/toolResult.util.js'
 import { logger } from '../services/logger.service.js'
@@ -116,6 +116,10 @@ export async function streamAnthropicWithTools({
     const reasoning  = _thinkingConfig(reasoningEffort, model)
     const finalTools = _finalizeServerTools(tools, model)
 
+    // ONE ctx for the whole turn, not one per round: the vision budget it carries counts calls across
+    // the turn, which is the only span on which "never across the pool" means anything.
+    const toolCtx = { onUsage, visionBudget: makeVisionBudget(config.visionMaxUsesPerTurn) }
+
     for (let i = 0; i < maxContinuations; i++) {
         // Client disconnected (user hit Stop) — end the loop instead of burning
         // another model call / tool round.
@@ -222,7 +226,7 @@ export async function streamAnthropicWithTools({
             // BOUNDED, not Promise.all: a round is however many calls the model asked for, and firing
             // all of them at one provider is what 429s it (MAX_PARALLEL_TOOLS). Input order is kept,
             // because a tool_result must line up with the tool_use it answers.
-            const results = await mapLimit(toolUseBlocks, b => _runTool(toolHandlers, b, { onUsage }),
+            const results = await mapLimit(toolUseBlocks, b => _runTool(toolHandlers, b, toolCtx),
                 { concurrency: MAX_PARALLEL_TOOLS })
             // The next round is the landing round: tell the model so, next to the results it lands on.
             if (i === maxContinuations - 2) results.push({ type: 'text', text: TOOL_BUDGET_LANDING })

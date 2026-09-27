@@ -9,6 +9,7 @@ import { calcSMASeries, calcEMASeries, calcRSISeries, calcMACDSeries, calcATRSer
 import { sessionStartMs } from '../market.service.js'
 import { aggregateCandles } from '../candleInterval.util.js'
 import { toolError } from '../toolResult.util.js'
+import { VISION_BUDGET_SPENT } from '../llmStream.util.js'
 import { makeToolHandler } from '../agentUtils.js'
 import { withBrokerAvailability } from './tradingContext.tools.js'
 import { withMarketStatus } from './marketHours.tools.js'
@@ -181,8 +182,14 @@ export function makeEarningsHandler(log) {
 export function makeChartHandler({ log, onChart, readText, renderChart = cachedChart }) {
     return makeToolHandler(
         'get_chart',
-        async ({ ticker, timeframe, indicators = '', show_to_user = false }) => {
+        async ({ ticker, timeframe, indicators = '', show_to_user = false }, ctx) => {
             const symbol  = String(ticker || '').toUpperCase()
+            // Same per-turn vision budget the structure tools claim from — see llmStream.util. A
+            // render plus a vision read, so it is spend, not a fetch.
+            if (ctx?.visionBudget && !ctx.visionBudget.take()) {
+                logger.info(log, `get_chart refused — the turn's vision budget (${ctx.visionBudget.max}) is spent`)
+                return toolError(VISION_BUDGET_SPENT('get_chart', ctx.visionBudget.max))
+            }
             // Plain candles by default — draw ONLY the overlays the agent explicitly named, so its
             // visual read is anchored to price structure (orderblocks, sweeps, false breaks) rather
             // than primed by moving averages / VWAP. The agent adds an overlay only to confirm a read.

@@ -344,7 +344,18 @@ services/
                           actually runs at once. A round was Promise.all over every call the model
                           asked for, invisible at two or three and a 429 storm at twenty (Argus's
                           radar cut, told to batch, lost 14 of 20 candle reads). The model decides
-                          how wide a round is; the transport decides how much of it lands at once
+                          how wide a round is; the transport decides how much of it lands at once.
+                          + makeVisionBudget / VISION_BUDGET_SPENT: the per-TURN cap on get_chart /
+                          get_orderblocks / get_false_breaks, the only three tools that bill per use
+                          (a chart render AND a Claude vision call each). Nothing counted them —
+                          web_search has max_uses, the render pool caps concurrency, MAX_PARALLEL_TOOLS
+                          caps what is in flight, none cap the COUNT — so "top 2-3, never the pool" was
+                          a prompt line with nothing behind it. Built once per turn by each provider's
+                          loop and carried on the tool ctx (per turn is a span only the loop knows);
+                          the monitor path gets its own per-wake one in makeAssessToolRunner. Refuses
+                          as a toolError, never a string: a plain refusal would read as a finding AND
+                          would ground the ticker (scanner.grounding credits a successful per-name
+                          call). Ceiling: config.visionMaxUsesPerTurn, default 8
   routing.util.js         desk-to-desk ROUTING — the shared mechanism (2026-09-18). The grammar Axl
                           always spoke (`<route>desk SYMBOL</route>` + `<open>…</open>`, or
                           `<edit>kind id</edit>`), its parsers, the controller-tier validation

@@ -31,6 +31,8 @@ import {
 import { makeStructureVisionHandler, OB_VISION, FB_VISION } from '../services/tools/priceStructure.tools.js'
 import { SMC_TOOLS, SMC_TOOL_HANDLERS } from '../services/tools/smc.tools.js'
 import { getQuotes } from '../providers/yahoofinance.provider.js'
+import { makeVisionBudget } from '../services/llmStream.util.js'
+import { config } from '../services/config.js'
 import { getPriceAction, getCycleAnalysis, getCorrelations } from '../services/priceAnalytics.service.js'
 import { getFundamentals, getMacroSnapshot, getSectorSnapshot } from '../providers/fmp.provider.js'
 import { getSecFilings } from '../providers/sec.provider.js'
@@ -162,7 +164,13 @@ export function requestedSymbols(input) {
  */
 export function makeAssessToolRunner({ symbols = [], log = LOG, onCall = null, onUsage = null, handlers = _HANDLERS } = {}) {
     const allowed = new Set(symbols.filter(Boolean).map(s => String(s).toUpperCase().trim()))
-    const ctx     = { onUsage }
+    // ONE ctx per assessment, which is the right span for the vision budget it carries: this kit holds
+    // get_chart / get_orderblocks / get_false_breaks, each a chart render plus a vision call, and a wake
+    // that read twenty charts would bill twenty times. The desks got this bound through their provider
+    // loop (llmStream.util); the runner is where a monitor wake gets it, since it does not go through
+    // that loop. A monitor reads ONE setup, so the ceiling is never the thing shaping a normal wake —
+    // it is there so a confused one cannot run away.
+    const ctx     = { onUsage, visionBudget: makeVisionBudget(config.visionMaxUsesPerTurn) }
 
     const _err = (id, content) => ({ type: 'tool_result', tool_use_id: id, is_error: true, content })
 

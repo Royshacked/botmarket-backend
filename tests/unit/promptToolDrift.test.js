@@ -57,3 +57,27 @@ test('the investing profile is a real subset — the check above is not tautolog
     assert.ok(inv.length < full.size, 'investing should drop the technical kit')
     assert.ok(!inv.includes('get_candles'), 'investing screens fundamentals, not charts')
 })
+
+// ── the cost rung ─────────────────────────────────────────────────────────────
+// A funnel is only cheap-first if the prompt says which tools are expensive, and the spine named ONLY
+// get_chart. get_orderblocks and get_false_breaks cost exactly the same — a chart render plus a vision
+// read each — and were introduced one line earlier as "reach for these when the angle is structure",
+// with no cost warning at all. So a structure-angle scan was invited to spend the two most expensive
+// tools in the kit across a whole pool.
+test('the scanner spine marks all THREE vision tools as the per-use spend, not just get_chart', () => {
+    const spine = readFileSync(join(ROOT, 'scanner_system_prompt.md'), 'utf8')
+    const claim = spine.slice(spine.indexOf('BILL PER USE'))
+    assert.ok(claim, 'the spine must say which tools bill per use')
+    for (const t of ['get_chart', 'get_orderblocks', 'get_false_breaks']) {
+        assert.match(claim, new RegExp(t), `${t} must be named as a per-use spend`)
+    }
+    assert.match(claim, /never across a pool/)
+    // …and it points at the cheap numeric alternative rather than only forbidding.
+    assert.match(claim, /get_candles/)
+    assert.match(claim, /get_indicators/)
+    // The structure tools' own line carries the shortlist rule too, since that is where the angle
+    // sends a model looking for them.
+    const structure = spine.split('\n').find(l => l.includes('get_orderblocks') && l.includes('supply/demand'))
+    assert.match(structure, /top shortlist only/)
+    assert.match(structure, /never the pool/)
+})
