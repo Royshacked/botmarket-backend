@@ -29,7 +29,8 @@ so when you keep one — the user has seen the name before and the second event 
   a thirteenth comes back unread. One or two names is not a cut either, unless the board genuinely
   offered nothing — see "When almost nothing survives".
 - **The funnel is 116 → ~20 → 8-12, in that order.** Triage the board for free, let the tape make the
-  cut, ask the catalyst question last. A pass run out of order is the one failure mode this mode has.
+  cut, and ask LAST whether the event each survivor arrived on is still tradeable. A pass run out of
+  order is the one failure mode this mode has.
 
 ---
 
@@ -69,9 +70,10 @@ that earn one are:
 quarter almost nothing on the board reports; a triage that asks "who prints this week" hands the tape
 one name and calls it a cut. That failure is the reason these passes are ordered.
 
-One row may say **`earnings date UNKNOWN (calendar unavailable)`**. That is the calendar failing, not
-the company having no catalyst. Judge the name on its other facts and say the date is unknown —
-never leave a name off for a fact nobody established.
+One row may say **`earnings date UNKNOWN (calendar unavailable)`**. That is the calendar failing, and it
+costs you an accelerant, never the catalyst — the event is the catalyst and it is still on the row. Say
+the print date is unknown and judge the name on everything else; never leave one off for a fact nobody
+established.
 
 ---
 
@@ -113,29 +115,39 @@ skimping on the names in it**: twelve names looked at properly beats twenty-five
 
 ---
 
-## THIRD PASS — the catalyst question, on the names the tape already likes
+## THIRD PASS — is the event still tradeable?
 
-Only now, and only about survivors: **is there a dated window this trade can play out inside?**
-FOUR THINGS COUNT, and an earnings date is only the first:
+**THE EVENT IS THE CATALYST. You are not looking for another one.** Every name on this board arrived
+because a dated, named event reached it through a mechanism Aether checked against the company's own
+filings, and the row carries the date that claim is graded on. That is a catalyst with a deadline. A
+pass that goes hunting for a *second* one has misunderstood what it was handed — and in most weeks of
+the year it will find nothing, because almost nothing reports mid-quarter, and will empty the board.
 
-1. **a scheduled print** — its earnings date, inside the window;
-2. **the claim's own deadline** — the board window on the row. Aether grades that claim on that date,
-   so the thesis has until then to pay off. Every name on this board has one;
-3. **a scheduled macro print the mechanism hangs on** — a CPI or a Fed date for a rates mechanism, an
-   inventory or OPEC date for an energy one. Name it and its date;
-4. **an event whose move has not happened yet** — the same deadline as (2), in the form that is worth
-   the most: the claim is live, the window is open, and the name has barely moved against SPY. The
-   date is the claim's; what makes it a trade rather than a deadline is that nobody has acted on it.
+What makes this different from an ordinary scan is that **the event has already happened.** So the
+trade is not "get in ahead of a catalyst" — it is "get in while the market is still repricing one that
+already landed". Three questions, and the row answers all three:
 
-This pass **orders** the list and drops the few names it must: a good setup whose window is already
-shut, or so far out that this is a position rather than this week's watchlist. What it must never do is
-what it used to do — run FIRST, on the earnings calendar alone, and empty a hundred-name board before
-a single chart was read.
+1. **Is the claim still live?** Inside the board window on the row. Past it, the thesis has expired and
+   the name is not this week's business.
+2. **Has the market already taken it?** The move since the event, against SPY. A name that has made
+   its move is a post-mortem. This is a cheap screen, not a verdict — the deep version is the read that
+   runs after you, which weighs the whole record and can answer `priced_in` outright. Do not try to
+   settle it here; just do not put an obviously-finished move on the list.
+3. **Is there enough time left for it to matter?** A claim graded next week is this week's business. One
+   graded in three months is a position someone might want, not a watchlist entry.
 
-**Earnings is a RISK FLAG and a TIEBREAK, not the entrance.** A print inside the window cuts both
-ways — it is a catalyst and it is gap risk on a position you have not sized yet — so say which you
-mean. Between two otherwise equal names, the one with a dated print is the better list entry. That is
-the whole of its privilege.
+**An earnings print or a macro date is an ACCELERANT, not a requirement.** It does not make the thesis
+valid — the mechanism already did that. What it does is force the repricing onto a known date, so you
+find out sooner, and it is gap risk on a position you have not sized yet. Name it when it is there, say
+which of the two you mean, and prefer it between two otherwise equal names. Never ask a name to have
+one. The two bound different things and only one of them is required:
+
+> the **claim's deadline** bounds how long you will be wrong · a **scheduled print** bounds when you find out
+
+This pass **orders** the list and drops only what it must: a claim already expired, a move already
+made, or a deadline so far out that this is not a week's trade. What it must never do is what it used
+to do — run FIRST, on the earnings calendar alone, and empty a hundred-name board before a single chart
+was read.
 
 ---
 
@@ -163,10 +175,16 @@ side.
 
 ## What a kept name has to say
 
-Every candidate's `analysis` must name **the catalyst and its date** — whichever of the four it is,
-and say which — and **the level** the trade works against. Those two are what make it this week's
-list rather than a list of interesting companies. A name whose window you cannot date at all does not
-belong here; a name dated by its claim's deadline rather than by an earnings print does.
+Every candidate's `analysis` must name three things:
+
+- **the event and the date it is graded on** — the catalyst is the event, so name that, not a substitute
+  you went looking for;
+- **where the name sits between the two** — has the repricing started, and how much room is left;
+- **the level** the trade works against.
+
+Those are what make it this week's list rather than a list of interesting companies. An accelerant goes
+in too when there is one, said as what it is: "reports Oct 8, which brings it forward and is the gap
+risk". A name with no accelerant is not weaker for it — most of this board has none.
 
 Carry Aether's mechanism into the thesis in your own words — the user is looking at a list, not at
 the board it came from, and "supplies titanium into Boeing airframes" is why the name is there.
@@ -178,8 +196,8 @@ Do not invent a mechanism Aether did not give you, and do not quote a filing it 
 
 ## When almost nothing survives
 
-Say so, plainly, and emit the short list anyway. Three names with a catalyst on Thursday is a
-better answer than eleven padded out with names that have nothing due. If NOTHING survives, emit no
+Say so, plainly, and emit the short list anyway. Three names with a live claim and a setup is a better
+answer than eleven padded out with names whose moves are already made. If NOTHING survives, emit no
 list, say which test each near-miss failed, and name the ones worth re-checking when their calendar
 comes closer — that is a real answer and the user can act on it.
 
@@ -190,8 +208,9 @@ But check WHY it is short before you say it, and the answer is almost always a p
   are still open on all of it. Go back and triage on evidence and the unmade move instead.
 - **Nothing survived the tape** and you looked at six names, not twenty: that is the tool budget, not
   the board. Say which names you never got to.
-- **Everything had a setup and you dropped it all in the third pass**: check you were not asking for an
-  earnings date when the claim's own deadline was on the row all along.
+- **Everything had a setup and you dropped it all in the third pass**: you went looking for a catalyst
+  instead of judging the one each name arrived on. The event IS the catalyst; the only questions are
+  whether it is still live, already taken, and near enough to matter.
 
 Never pad the list to look productive. The board will be handed to you again tomorrow with the
 names you kept removed, so a name you pass on today is not lost — it comes back the day it has a

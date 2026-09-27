@@ -90,7 +90,7 @@ test('the three passes appear in order, with the tape making the cut', () => {
     const three = RADAR.indexOf('## THIRD PASS')
     assert.ok(one > 0 && two > one && three > two, 'the passes must read in order')
     assert.match(RADAR.slice(two, three), /the tape decides. This is the cut/)
-    assert.match(RADAR.slice(three), /the catalyst question, on the names the tape already likes/)
+    assert.match(RADAR.slice(three), /is the event still tradeable\?/)
 })
 
 test('the first pass is explicitly NOT the cut, and is barred from the two filters that broke it', () => {
@@ -123,29 +123,49 @@ test('the module names the tool budget and tells Argus to call in parallel', () 
 
 test('the funnel is stated as a shape, so a pass run out of order is nameable', () => {
     assert.match(RADAR, /116 → ~20 → 8-12/)
-    assert.match(RADAR, /A pass run out of order is the one failure mode/)
+    assert.match(RADAR, /ask LAST whether the event each survivor arrived on is still tradeable/)
+    assert.match(RADAR, /A pass run out of\s+order is the one failure mode/)
 })
 
 // A calendar that could not be read must not read as a company with no catalyst. That confusion is
 // exactly what emptied a 116-name board down to one name.
-test('the module tells Argus that an UNKNOWN earnings date is not the absence of a catalyst', () => {
+test('the module tells Argus that an UNKNOWN earnings date costs an accelerant, not the catalyst', () => {
     assert.match(RADAR, /UNKNOWN/)
-    assert.match(RADAR, /do not read this as|never leave a name off for a fact nobody established/i)
+    assert.match(RADAR, /costs you an accelerant, never the catalyst/)
+    assert.match(RADAR, /never leave one off for a fact nobody\s+established/)
 })
 
-// THE CATALYST GATE. Four things count, and the earnings print is only the first — the whole reason a
-// mid-quarter board used to collapse to its one off-cycle reporter.
-test('the module counts four kinds of catalyst, and demotes earnings to a flag and a tiebreak', () => {
-    assert.match(RADAR, /FOUR THINGS COUNT/)
-    for (const re of [
-        /scheduled print/i,          // 1
-        /claim's own deadline/i,      // 2
-        /scheduled macro print/i,     // 3
-        /move has not happened yet/i, // 4
-    ]) assert.match(RADAR, re)
-    assert.match(RADAR, /RISK FLAG and a TIEBREAK, not the entrance/)
-    // …and the absolute rule it replaced is gone: a claim deadline dates a name on its own.
+// THE EVENT IS THE CATALYST — and this is the test for the framing that took two goes to get right.
+// The first version demanded a catalyst inside the coming week, which mid-quarter means an earnings
+// date, which collapsed the board to its one off-cycle reporter. The second offered four things that
+// count — but two of those four were just the event read properly, so a list of four equivalent options
+// still read as "go hunt one". A name arrives WITH its catalyst; the only open questions are about it.
+test('the third pass judges the event it was given rather than hunting a second one', () => {
+    assert.match(RADAR, /THE EVENT IS THE CATALYST\. You are not looking for another one\./)
+    // The three questions, all answerable off the row.
+    assert.match(RADAR, /Is the claim still live\?/)
+    assert.match(RADAR, /Has the market already taken it\?/)
+    assert.match(RADAR, /Is there enough time left for it to matter\?/)
+    // The distinction that makes this board different from an ordinary scan.
+    assert.match(RADAR, /the event has already happened/)
+    // Earnings and macro dates keep a role, but it is not a bar to clear.
+    assert.match(RADAR, /An earnings print or a macro date is an ACCELERANT, not a requirement/)
+    assert.match(RADAR, /Never ask a name to have\s+one/)
+    assert.match(RADAR, /bounds how long you will be wrong/)
+    assert.match(RADAR, /bounds when you find out/)
+    // …and neither of the two framings it replaced survives anywhere.
     assert.doesNotMatch(RADAR, /Without a date, a name does not belong here/)
+    assert.doesNotMatch(RADAR, /FOUR THINGS COUNT/)
+})
+
+// The output contract asked for "the catalyst and its date", which invited the same hunt one section
+// later — a model that had just been told not to look for a second catalyst was then asked to name one.
+test('the emitted analysis is required to name the EVENT, not a catalyst it went looking for', () => {
+    const contract = RADAR.slice(RADAR.indexOf('## What a kept name has to say'))
+    assert.match(contract, /the event and the date it is graded on/)
+    assert.match(contract, /not a substitute\s+you went looking for/)
+    assert.match(contract, /where the name sits between the two/)
+    assert.match(contract, /A name with no accelerant is not weaker for it/)
 })
 
 // Twelve is the read's own ceiling (aetherBatchRead BATCH_MAX), not a style preference: past it a

@@ -84,9 +84,17 @@ was ever read.
    name dies here for no setup, having already run, or being untradeable. The module states the real
    tool budget (**ten rounds**, `DEFAULT_MAX_CONTINUATIONS`) and tells Argus to batch per-name calls in
    one round, because twenty names one at a time is the budget gone before a chart is read.
-3. **The catalyst question**, on survivors only, and four things count as a dated window: a scheduled
-   print, the claim's own deadline, a macro print the mechanism hangs on, or a live claim whose move has
-   not happened yet. Earnings is a risk flag and a tiebreak, never the entrance.
+3. **Is the event still tradeable**, on survivors only — and the point is that it is not a hunt. The
+   event each name arrived on IS its catalyst: dated, mechanism-verified against the company's filings,
+   and carrying the date the claim is graded on. What is different about this board is that the event
+   has already HAPPENED, so the trade is "get in while the market is still repricing it", and the three
+   questions are whether the claim is still live, whether the move is already made, and whether the
+   deadline is near enough to matter — all three answerable off the row. An earnings or macro date is an
+   ACCELERANT, never a requirement: the claim's deadline bounds how long you will be wrong, a scheduled
+   print bounds when you find out, and only the first is always there. This took two goes — the first
+   version demanded a catalyst inside the coming week (mid-quarter that means earnings, and the board
+   collapsed to its one off-cycle reporter), the second offered "four things that count" of which two
+   were just the event read properly, so a list of equivalent options still read as "go find one".
 
 **Direction is deliberately not passed.** Aether's `side` is a claim about ONE event, and nine of the
 twenty-one recurring tickers carry conflicting sides, so the sides ride in the thesis line as
