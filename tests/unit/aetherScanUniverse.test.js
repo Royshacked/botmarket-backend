@@ -17,6 +17,10 @@ function run({ id = 'Canada:2026-09-20', subject = 'Canada', found = '2026-09-20
             ticker: n.ticker, company: n.company ?? '', side: n.side ?? 'helped',
             mechanism: n.mechanism ?? '', verdict: n.verdict ?? 'silent',
             rank: n.rank ?? 1, created_at: n.found ?? found, excess_pct: n.excess_pct ?? null,
+            // The claim's own deadline and the engine's last price — the dated facts the board carries
+            // so the cut does not have to fetch them mid-stream.
+            expires_at: n.expires_at ?? '2026-11-01',
+            price_latest: n.price_latest ?? null, price_asof: n.price_asof ?? '',
             subject, event_date,
         })),
     }
@@ -193,9 +197,10 @@ test('no claims → an empty line rather than a throw', () => {
 
 // ── getScanUniverse: the IO seam ──────────────────────────────────────────────
 
-const io = ({ runs = [], scans = [] } = {}) => ({
+const io = ({ runs = [], scans = [], earnings = [] } = {}) => ({
     runs:  async () => runs,
     scans: async () => scans,
+    earnings: async () => earnings,
 })
 
 test('only radar-sourced scans count as prior lists', async () => {
@@ -230,6 +235,95 @@ test('a failed scan read THROWS rather than handing back the whole board', async
 })
 
 test('no scans at all is not a failure — it is a first scan', async () => {
-    const out = await getScanUniverse('u1', {}, { runs: async () => [run({ names: [{ ticker: 'NUE' }] })], scans: async () => null })
+    const out = await getScanUniverse('u1', {}, io({ runs: [run({ names: [{ ticker: 'NUE' }] })], scans: null }))
     assert.deepEqual(out.candidates.map(c => c.ticker), ['NUE'])
+})
+
+// ── the dated facts the board carries ─────────────────────────────────────────
+// These used to be Argus's first two tool calls: a market-wide earnings calendar and a hundred-wide
+// quote fan-out, fired mid-stream against a ten-second budget. When the calendar lost that race the
+// model had no dates for anything and the mode's own rule emptied the board down to one name. They are
+// on the row now, fetched once, server-side, before the prompt is built.
+
+test('the next scheduled print is attached to the name it belongs to', async () => {
+    const out = await getScanUniverse('u1', {}, io({
+        runs: [run({ names: [{ ticker: 'MU' }, { ticker: 'NUE' }] })],
+        earnings: [{ symbol: 'MU', date: '2026-09-30', epsEstimated: 2.1 }],
+    }))
+    const by = new Map(out.candidates.map(c => [c.ticker, c]))
+    assert.deepEqual(by.get('MU').earnings, { date: '2026-09-30', epsEstimate: 2.1 })
+    // NULL and not undefined: the calendar answered, and the answer is "nothing scheduled".
+    assert.equal(by.get('NUE').earnings, null)
+    assert.equal(out.candidates.filter(c => c.earnings).length, 1)
+})
+
+// "The calendar could not be read" and "the company has no print" must not look the same to the model:
+// one is a fact about the name, the other is a fact about the fetch, and only the first is a reason to
+// leave a name off a list.
+test('a calendar failure leaves the date UNKNOWN and still hands over the board', async () => {
+    const out = await getScanUniverse('u1', {}, {
+        runs: async () => [run({ names: [{ ticker: 'MU' }] })],
+        scans: async () => [],
+        earnings: async () => { throw new Error('FMP /earnings-calendar aborted') },
+    })
+    assert.deepEqual(out.candidates.map(c => c.ticker), ['MU'], 'the board survives its calendar')
+    assert.equal(out.candidates[0].earnings, undefined, 'undefined is "not known", distinct from null')
+})
+
+test('the board window is the FURTHEST claim deadline — when the board stops carrying the name', () => {
+    const { candidates } = buildUniverse([
+        run({ id: 'a:1', names: [{ ticker: 'XOM', expires_at: '2026-10-03', rank: 9 }] }),
+        run({ id: 'b:1', names: [{ ticker: 'XOM', expires_at: '2026-11-06', rank: 1 }] }),
+    ], [])
+    assert.equal(candidates[0].expires, '2026-11-06')
+    // Each claim's own date is in the line, because a name reached twice has two deadlines and
+    // "which of these has to pay off by Friday" is not answerable from the furthest one.
+    assert.match(candidates[0].thesis, /claim runs to 2026-10-03/)
+    assert.match(candidates[0].thesis, /claim runs to 2026-11-06/)
+})
+
+test('the price rides on the row, off the most recently priced appearance', () => {
+    const { candidates } = buildUniverse([
+        run({ id: 'a:1', names: [{ ticker: 'XOM', price_latest: 110, price_asof: '2026-09-18' }] }),
+        run({ id: 'b:1', names: [{ ticker: 'XOM', price_latest: 118, price_asof: '2026-09-25' }] }),
+    ], [])
+    assert.equal(candidates[0].price, 118)
+    assert.equal(candidates[0].priceAsOf, '2026-09-25')
+})
+
+test('an unpriced name is null rather than a stale guess', () => {
+    const { candidates } = buildUniverse([run({ names: [{ ticker: 'NUE' }] })], [])
+    assert.equal(candidates[0].price, null)
+    assert.equal(candidates[0].priceAsOf, null)
+})
+
+// The board is answered to the browser, held in its state, and sent BACK on every turn of the cut, so
+// the "not known" / "nothing scheduled" distinction has to survive JSON in both directions. It does
+// only because one side is an ABSENT key and the other an explicit null.
+test('the unknown-vs-no-print distinction survives the round trip through JSON', async () => {
+    const ok = await getScanUniverse('u1', {}, io({
+        runs: [run({ names: [{ ticker: 'MU' }, { ticker: 'NUE' }] })],
+        earnings: [{ symbol: 'MU', date: '2026-09-30' }],
+    }))
+    const failed = await getScanUniverse('u1', {}, {
+        runs: async () => [run({ names: [{ ticker: 'MU' }] })],
+        scans: async () => [],
+        earnings: async () => { throw new Error('aborted') },
+    })
+
+    const trip = v => JSON.parse(JSON.stringify(v))
+    const back = trip(ok).candidates
+    assert.equal(back.find(c => c.ticker === 'MU').earnings.date, '2026-09-30')
+    assert.equal(back.find(c => c.ticker === 'NUE').earnings, null, 'null survives as null')
+    assert.ok(!('earnings' in trip(failed).candidates[0]), 'unknown stays absent, never becomes null')
+})
+
+// A garbage price must not reach the prompt. NaN serialises to null on the wire but renders as "$NaN"
+// on the way to the model, which is the hop that matters here.
+test('an unusable price is no price, not NaN', () => {
+    const { candidates } = buildUniverse([
+        run({ names: [{ ticker: 'A', price_latest: 'n/a', price_asof: '2026-09-25' },
+                      { ticker: 'B', price_latest: 0,     price_asof: '2026-09-25' }] }),
+    ], [])
+    for (const c of candidates) assert.equal(c.price, null, `${c.ticker} kept an unusable price`)
 })

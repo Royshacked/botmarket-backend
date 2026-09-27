@@ -31,6 +31,8 @@
 
 import { getEventCandidates } from '../api/aether/aether.service.js'
 import { scanService } from '../api/scanner/scan.service.js'
+import { getEarningsCalendarRaw } from '../providers/fmp.provider.js'
+import { earningsWindow, earningsBySymbol } from './earningsWindow.util.js'
 import { logger } from './logger.service.js'
 
 const LOG = '[aetherUniverse]'
@@ -159,8 +161,25 @@ export function buildUniverse(runs = [], priorLists = []) {
                 event_date: run.event_date || c.event_date || '',
                 rank:       Number(c.rank ?? 0),
                 excess_pct: c.excess_pct ?? null,
+                // THE CLAIM'S OWN DEADLINE — the date the engine grades it, and the one dated forward
+                // window every name on this board already has. It was on the candidate all along and
+                // this service dropped it, which is most of why "is there a catalyst inside the
+                // window" collapsed into "does it report earnings this week": the model was told to
+                // demand a dated window while the window it had been handed never reached it.
+                expires_at: c.expires_at ?? '',
             })
             entry.rank = Math.max(entry.rank, Number(c.rank ?? 0))
+            // The engine's own last price for the name, off whichever appearance priced it most
+            // recently. Free — it is already on the row — and it saves the model asking for a hundred
+            // quotes to find out which names are too cheap to trade.
+            const asOf = String(c.price_asof ?? '')
+            const px   = Number(c.price_latest)
+            // `isFinite`, not a null check: a garbage price would otherwise land as NaN, which JSON
+            // turns into null on the way out but which renders as "$NaN" on the way to the model.
+            if (Number.isFinite(px) && px > 0 && asOf >= String(entry.priceAsOf ?? '')) {
+                entry.price     = px
+                entry.priceAsOf = asOf
+            }
         }
     }
 
@@ -185,6 +204,13 @@ export function buildUniverse(runs = [], priorLists = []) {
             thesis:  thesisLine(entry.claims),
             events:  entry.claims.length,
             rank:    entry.rank,
+            // HOW LONG THE NAME STILL HAS: the furthest deadline among its live claims. The furthest
+            // and not the nearest, because that is when the board stops carrying it — a name with one
+            // claim expiring Friday and another in November has a November thesis. Each claim's own
+            // date rides in the thesis line, which is where the nearest decision point is readable.
+            expires: entry.claims.reduce((f, c) => (c.expires_at > f ? c.expires_at : f), ''),
+            price:   entry.price ?? null,
+            priceAsOf: entry.priceAsOf || null,
             // Back on the board because an event they have not seen named it, not because it was
             // never scanned. The seed says so, so a name the user recognises arrives explained.
             returning: was || undefined,
@@ -215,6 +241,10 @@ export function thesisLine(claims = []) {
             // to ask for: "has the market already looked" is half of what tradeability means, and
             // a name up 13% on its own claim is a different proposition from one that has not moved.
             c.excess_pct != null ? `moved ${(c.excess_pct * 100).toFixed(1)}% vs SPY since` : 'no move measured',
+            // The date THIS claim is graded on. It is the claim's own window, so it belongs beside the
+            // claim and not only in the row's summary: a name reached twice has two deadlines, and
+            // "which of these has to pay off by Friday" is not answerable from a single furthest date.
+            c.expires_at ? `claim runs to ${c.expires_at}` : '',
         ].filter(Boolean)
         return parts.join(' — ')
     })
@@ -231,6 +261,51 @@ const _io = {
     runs:  ({ days }) => getEventCandidates({ days }),
     // `onError: 'throw'` and not the default 'empty' — see getScanUniverse.
     scans: userId => scanService.getScans(userId, { onError: 'throw' }),
+    // The forward calendar for the whole board in ONE call, through the window every "upcoming
+    // earnings" surface in the app shares (earningsWindow.util). Thirty days and not the coming week:
+    // "nothing for three weeks" is a different answer from "nothing at all", and only the first of
+    // those is a reason to leave a name off THIS week's list rather than off every list.
+    //
+    // The window also has to stay under thirty-five days or so for a reason that is not about
+    // meaning: FMP caps this endpoint at 4000 rows and applies the cap from the END, so a three-month
+    // ask comes back missing the next six weeks entirely and says nothing about it.
+    earnings: symbols => {
+        const { from, to } = earningsWindow()
+        return getEarningsCalendarRaw(from, to, symbols)
+    },
+}
+
+/**
+ * The next scheduled print for each name, written onto the rows. MUTATES and returns the same rows.
+ *
+ * SWALLOWS ITS FAILURE, unlike the scan read above, and the asymmetry is the same one earningsWindow's
+ * own header draws: a missing prior-list set silently becomes the WRONG universe, where a missing
+ * earnings date is just a missing date. The board is worth handing over without it — every other fact
+ * on the row still holds — and the prompt says "no print in the next thirty days" rather than the
+ * button failing on a calendar blip.
+ */
+async function _attachEarnings(candidates, deps) {
+    if (!candidates.length) return candidates
+    try {
+        const bySymbol = earningsBySymbol(await deps.earnings(candidates.map(c => c.ticker)))
+        for (const c of candidates) {
+            const hit = bySymbol.get(c.ticker)
+            c.earnings = hit ? { date: hit.date, epsEstimate: hit.epsEstimate ?? null } : null
+        }
+    } catch (err) {
+        logger.warn(LOG, 'earnings calendar unavailable — the board goes out without dates', err.message)
+        // LEFT UNSET, where "nothing scheduled" is an explicit null. "We could not read the calendar"
+        // and "it does not report in the window" must not render the same — only the second is a fact
+        // about the company, and only the second is a reason to leave a name off a list.
+        //
+        // And the two have to stay distinguishable through JSON, which is why the pair is
+        // absent-vs-null rather than two strings: the board is answered to the browser, held in its
+        // state, and sent BACK on every turn of the cut. `undefined` is dropped by JSON.stringify at
+        // both hops, so an unset key arrives unset and `_radarFacts` still reads it as UNKNOWN; null
+        // survives as null. A "no print" sentinel string would survive the trip looking like a fact.
+        for (const c of candidates) delete c.earnings
+    }
+    return candidates
 }
 
 /**
@@ -250,8 +325,17 @@ export async function getScanUniverse(userId, { days = UNIVERSE_DAYS } = {}, dep
     // an unreachable source reports unknown, never a confident negative.
     const prior = (await deps.scans(userId) ?? []).filter(s => s?.source === SCAN_SOURCE)
     const out   = buildUniverse(runs, prior)
+    // THE DATES COME WITH THE BOARD, which is the whole point of doing it here. They used to be
+    // Argus's first move: a get_earnings_calendar over every name on the board, mid-stream, on the
+    // user's clock — one 10-second budget against a fetch of the entire market's calendar, competing
+    // with its own hundred-wide quote fan-out. When it lost that race the model had no dates for
+    // anything, and the mode's own rule ("a name without a date does not belong here") emptied a
+    // hundred-and-sixteen-name board down to the single off-cycle reporter. One cached server-side
+    // call, before the prompt is built, cannot lose that race.
+    await _attachEarnings(out.candidates, deps)
     logger.info(LOG, 'universe built', {
         runs: out.runs, names: out.candidates.length, held: out.skipped.length, priorLists: prior.length,
+        withEarnings: out.candidates.filter(c => c.earnings).length,
     })
     return { ...out, days, priorLists: prior.length }
 }

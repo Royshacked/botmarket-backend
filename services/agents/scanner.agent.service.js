@@ -220,6 +220,31 @@ const RADAR_CONTEXT = 'ACTIVE MODE: RADAR CUT — the Events radar handed you th
     + 'already done, you start at Phase 3, and you cut to the few names worth watching in the coming week.'
 
 /**
+ * The dated facts on one row, as the cut needs to read them.
+ *
+ * THESE USED TO BE TOOL CALLS — a market-wide earnings calendar and a hundred-wide quote fan-out, both
+ * fired mid-stream before the model could judge anything, and both able to fail. They are on the row
+ * now (aetherScanUniverse), so the first pass over the board costs nothing and cannot come back empty.
+ *
+ * "NO PRINT" AND "NOT KNOWN" ARE DIFFERENT ANSWERS and must not render the same. `null` is the
+ * calendar answering that nothing is scheduled in its window; a MISSING key is the calendar not
+ * having been readable at all (and missing rather than a sentinel because the board round-trips
+ * through JSON — see _attachEarnings). A model shown "no earnings" for both would leave names off for
+ * a fact nobody established, which is the exact failure this whole change exists to undo.
+ */
+function _radarFacts(c) {
+    const out = []
+    if (c.earnings === undefined)  out.push('earnings date UNKNOWN (calendar unavailable — do not read this as "no catalyst")')
+    else if (c.earnings === null)  out.push('no print in the next 30 days')
+    else out.push(`earnings ${c.earnings.date}`)
+    // The claim's own deadline, which is a dated window whether or not the company reports. Per-claim
+    // dates are in the thesis; this is when the board stops carrying the name at all.
+    if (c.expires) out.push(`board window to ${c.expires}`)
+    if (c.price != null) out.push(`$${c.price}${c.priceAsOf ? ` (${c.priceAsOf})` : ''}`)
+    return out.join(' · ')
+}
+
+/**
  * The board itself, rendered for the volatile tail.
  *
  * SAME MECHANISM AS THE EDIT LIST, different meaning. It cannot ride in the seeded opening message
@@ -235,11 +260,15 @@ function _buildRadarSection(board) {
     const rows = Array.isArray(board?.candidates) ? board.candidates : []
     if (!rows.length) return null
     const lines = rows.map(c => `  - ${c.ticker}${c.company ? ` (${c.company})` : ''}`
-        + `${c.returning ? ' [BACK — a new event named it since your last list]' : ''} — ${c.thesis ?? ''}`)
+        + `${c.returning ? ' [BACK — a new event named it since your last list]' : ''}`
+        + ` — ${_radarFacts(c)} — ${c.thesis ?? ''}`)
     return [
         `THE BOARD — ${rows.length} name${rows.length === 1 ? '' : 's'} Aether's events reached`
         + `${board.runs ? ` across ${board.runs} event${board.runs === 1 ? '' : 's'}` : ''}`
         + `${board.held ? `, with ${board.held} more held back because a previous list already took them` : ''}.`,
+        'Each row carries its own dated facts: the next scheduled print, the date the claim is graded'
+        + ' (the board window), the last price, and what the name has done since its event vs SPY.'
+        + ' You do not need a batch call to get any of them.',
         'HELPED / HURT is what Aether claimed about ONE event and is context only — not a filter, not a rank.',
         ...lines,
     ].join('\n')
