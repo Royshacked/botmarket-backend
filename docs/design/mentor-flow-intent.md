@@ -797,3 +797,30 @@ forwarded by the controller — inert until a frontend uses it.
 That is why the opening turn must emit one (phase 3: the nucleus it proposes IS the worksheet).
 
 54 new tests (`mentorBuildOps.test.js`, `mentorLedgerWiring.test.js`); suite 3582/0.
+
+## Phase 3 — the prompt learns the new flow (DONE)
+`prompts/mentor_system_prompt.md`: 1074 -> 973 lines.
+
+**Out:** `## No phases — invariants` (the section), the whole 8-rung `## The guided build` with the
+detour rule, "one rung per turn" and "go all the way", and 165 lines of interview choreography.
+Every stale cross-reference to rungs and the ladder is gone (a test now asserts that).
+
+**In:** `## How a build runs — the ledger, and what is yours to do in it` (the five stages, claim vs
+settlement, reopen cascades, three stops that are the user's, two gates that can be waived);
+`## The opening turn — one turn, three answers` (the cheap-to-expensive tool ladder, validate the
+claimed / propose the blank, close with the two asks); `## The stages after the opening` (spans,
+entries, sizing, summary in brief — phases 4-6 deepen each); and the `<build>` tag contract under
+`## Tags`.
+
+**Kept deliberately:** the coverage dimensions, "a setup always carries levels" (until phase 7),
+"name the lens, never blend it", and the two grounding rules that were buried in the deleted
+ladder — **Tools, not memory** and **Live before levels** — which are grounding, not flow.
+
+**Fixed while building:** the prompt says to emit the worksheet on the opening turn, but "the model
+did as it was told" is not a storage strategy. The service now falls back to a bare `{asset}` stub
+when a turn has ledger content and no worksheet of any kind, so opening-turn claims cannot be lost.
+
+**Known duplication, for phase 6:** `## Size comes from the user` still lists three sizing inputs
+while the new stages section lists Roy's five. Not contradictory, but two sources of truth.
+
+Suite 3589/0.

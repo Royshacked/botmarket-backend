@@ -121,6 +121,26 @@ test('a prose-only turn still carries the ledger home — a confirmation is not 
     assert.equal(stageOf(activeName(third.build)), 'spans')
 })
 
+test('an opening turn with no worksheet still keeps its claims — a stub carries them', async () => {
+    // The prompt asks for a worksheet on the opening turn. This is what happens when it does not
+    // come: there is no draft yet either, so without a stub the turn's claims have nowhere to live.
+    const out = await turn('Long and swing, I think.\n'
+        + '<build>{"asset":"NVDA","claim":{"direction":"long","horizon":"swing"},"source":"mentor"}</build>')
+
+    assert.ok(out.setup, 'a stub draft carries the ledger')
+    assert.equal(out.setup.asset, 'NVDA')
+    assert.equal(out.setup.build.names[0].claimed.direction.value, 'long')
+
+    const next = await turn('Yes.\n<build>{"claim":{"lens":"smc"},"settle":["direction","horizon","lens"],"source":"user"}</build>',
+        { active_asset: 'NVDA', draft: out.setup, coverage: [] })
+    assert.equal(stageOf(activeName(next.build)), 'spans')
+})
+
+test('a turn with nothing to record makes no stub at all', async () => {
+    const out = await turn('Which desk scans for names?')
+    assert.equal(out.setup, undefined)
+})
+
 test('a refusal reason survives the round trip in full, not cut mid-sentence', async () => {
     const first = await turn(`<setup>${JSON.stringify(SETUP)}</setup>`
         + '<build>{"settle":["direction","horizon","lens"],"source":"user"}</build>')

@@ -200,7 +200,16 @@ async function chatStream({
     //
     // What cannot be rescued here is a settlement made before ANY worksheet exists; that is why the
     // opening turn emits one (the nucleus it proposes IS the worksheet).
-    const carrier = normalized ?? (chatState?.draft ? normalizeSetup(chatState.draft) : null)
+    // Three ways to find a carrier, in order: the worksheet emitted this turn, the one the client
+    // sent back, or — on the opening turn, where neither exists yet — a bare stub holding the
+    // ticker. The prompt asks for a worksheet on that first turn precisely so the stub is rarely
+    // needed, but "the model did as it was told" is not a storage strategy, and the ledger cannot
+    // be the one thing whose survival depends on it.
+    const ledgerName = activeName(build)
+    const hasLedger  = Boolean(ledgerName && (Object.keys(ledgerName.claimed).length || Object.keys(ledgerName.settled).length))
+    const carrier = normalized
+        ?? (chatState?.draft ? normalizeSetup(chatState.draft) : null)
+        ?? (hasLedger ? normalizeSetup({ asset: ledgerName.asset }) : null)
     if (carrier) {
         carrier.build = build
         if (!normalized) carrier.rr = computeRR(carrier) ?? carrier.rr
@@ -395,7 +404,7 @@ Open on it: say the name, relay Argus's read in a sentence rather than restating
         + (lens
             ? ` NAME THE RECOMMENDED LENS AND WHY IT FITS. It is Argus's recommendation, not a decision: if the user wants a different lens, or the chart disagrees with it, say so and use theirs. A lens adopted without the user hearing it is one they never chose.`
             : ` say that you will ask which lens they want to build it through when the ladder reaches it.`)
-        + ` Then run the guided build from rung 1 — the quick read — as for any name: the ticker is settled unless they change it, Argus's direction is a lean you test at rung 2 rather than a settled rung, and the lens is agreed at rung 4, not in the opening. Everything else is still theirs to shape.`
+        + ` Then run the OPENING TURN as for any name: read it cheapest-first, and come back with direction, horizon and lens together. The ticker is settled unless they change it; everything Argus sent is a CLAIM you validate against your own read, never a settled value — its direction is a lean you test, its lens a recommendation the user still has to agree to. Everything else is theirs to shape.`
 }
 
 /**

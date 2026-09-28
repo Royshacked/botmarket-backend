@@ -229,65 +229,93 @@ test('no seed leaves the prompt exactly as it was', async () => {
     assert.doesNotMatch(text, /ARGUS HANDED YOU/)
 })
 
-// ─── The guided build ─────────────────────────────────────────────────────────
-// A name and no plan climbs a ladder (prompts/mentor_system_prompt.md, "The guided build"). The
-// ladder is prompt, not code — the server tracks no step — so what CAN be held here is the contract
-// around it: the rungs exist in order, the detour rule and the two grounding rules are stated, the
-// candidate offer is no longer the default answer to "no plan", and the tools the rungs name are
-// wired. The prose assertions are deliberately few and anchored on the bold rule names, which is
-// the level a rewrite of the section would have to preserve on purpose.
+// ─── The build, as the prompt states it ───────────────────────────────────────
+// The FLOW is server state now (services/mentorBuild.util.js), so what the prompt still has to
+// carry is the part a model must hold: the stages in order, the claim/settle distinction, which
+// stops belong to the user, and the grounding rules. The prose assertions are deliberately few and
+// anchored on the bold rule names, which is the level a rewrite would have to preserve on purpose.
 
 const PROMPT = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../../prompts/mentor_system_prompt.md'), 'utf8')
 
-test('the ladder has its eight rungs, in the order a trader settles a trade', () => {
-    const section = PROMPT.slice(PROMPT.indexOf('## The guided build'), PROMPT.indexOf('## Size comes from the user'))
-    assert.ok(section.length > 0, 'the guided build section sits before sizing')
-    const rungs = [...section.matchAll(/^\d+\. \*\*([^*]+)\*\*/gm)].map(m => m[1].replace(/\.$/, ''))
-    assert.deepEqual(rungs, [
-        'The name', 'Direction', 'Horizon', 'The lens', 'The deep read, under that lens',
-        'The scenarios', 'R:R, then the wider one', 'Size and account',
-    ])
+test('the five stages are named in the order they settle', () => {
+    assert.match(PROMPT, /\*\*opening\*\*[^\n]*→ \*\*spans\*\*[^\n]*→ \*\*entries\*\*[\s\S]{0,60}→ \*\*sizing\*\* → \*\*summary\*\*/)
 })
 
-test('the ladder is a checklist, not a script — the detour rule and its two grounding rules are stated', () => {
-    for (const rule of ['The detour rule.', 'One rung per turn, as a rule.', '"Go all the way" lifts the pauses, not the rungs.', 'Tools, not memory.', 'Live before levels.']) {
+test('the ledger rules are stated: a claim is not a settlement, settled is settled, talk is free', () => {
+    for (const rule of ['A CLAIM is not a SETTLEMENT.', 'Settled is settled.', 'Talking never moves it.', 'Always soft.']) {
         assert.ok(PROMPT.includes(`**${rule}**`), `missing rule: ${rule}`)
     }
-    // The detour returns to the first UNSETTLED rung, read off the worksheet — never to a remembered position.
-    assert.match(PROMPT, /return to the FIRST unsettled rung/)
-    assert.match(PROMPT, /read it\s+and go to the first blank/)
+    // Reopening is the only way a settled value changes, and it cascades.
+    assert.match(PROMPT, /unsettle[\s\S]{0,120}reopens every stage below it/)
 })
 
-test('"go all the way" runs the ladder in one turn without dropping a rung, and names the calls it made', () => {
-    const para = PROMPT.slice(PROMPT.indexOf('**"Go all the way"'), PROMPT.indexOf('**Tools, not memory.**'))
-    assert.ok(para.length > 0, 'the paragraph sits between the pacing rule and the grounding rules')
-    assert.match(para, /Every rung still\s+happens, in order/)
-    assert.match(para, /RECORD the call instead of asking/)
-    assert.match(para, /naming, in one line, the calls you made/)
-    assert.match(para, /ready except for size/, 'size is never invented, even unpaced')
-    assert.match(para, /no trade/, 'the unpaced run may still refuse')
-    // The tool loop caps a turn at DEFAULT_MAX_CONTINUATIONS = 10 rounds (providers/anthropic.provider.js)
-    // and THROWS past it; the prompt tells the model how to land short of the cap instead.
-    assert.match(para, /about ten rounds of tools/)
-    assert.match(para, /pick up from the first\s+unsettled rung next turn/)
+test('three stops belong to the user and two gates can be waived', () => {
+    assert.match(PROMPT, /Three stages are the user's and are never skipped: the opening, sizing, and the summary/)
+    assert.match(PROMPT, /spans and entries — are theirs too, unless they waived them/)
+    // A waived gate is still REPORTED, or the user agreed to something they never heard.
+    assert.match(PROMPT, /A call the user never heard is one they\s+never made/)
 })
 
-test('horizon and lens are settled WITH the user; direction is Mentor\'s read they may overrule', () => {
-    assert.match(PROMPT, /\*\*Horizon\.\*\* The trader's, not yours/)
-    assert.match(PROMPT, /\*\*The lens\.\*\* Propose one[\s\S]{0,200}Wait for the yes/)
-    assert.match(PROMPT, /\*\*Direction\.\*\* Your read[\s\S]{0,300}Theirs to\s+accept or overrule/)
+test('the opening turn answers all three at once, cheapest tools first, and asks the waiver ONCE', () => {
+    const section = PROMPT.slice(PROMPT.indexOf('## The opening turn'), PROMPT.indexOf('## The stages after the opening'))
+    assert.ok(section.length > 0, 'the opening turn sits before the later stages')
+    assert.match(section, /Whatever arrived is\s+a CLAIM/)
+    assert.match(section, /direction, horizon and lens/)
+    assert.match(section, /Read it, cheapest first/)
+    assert.match(section, /Only on a real conflict[\s\S]{0,120}`consult`/)
+    assert.match(section, /Never fetch twice in one build/)
+    assert.match(section, /asked \*\*once, here\*\* — never later/)
+    // The worksheet is what carries the ledger between turns (mentor.agent.service.js).
+    assert.match(section, /Emit the worksheet on this turn/)
 })
 
-test('candidates are an explicit ask now — the guided build ends in one setup', () => {
+test('the later stages keep the decisions that are theirs and not the model\'s', () => {
+    const section = PROMPT.slice(PROMPT.indexOf('## The stages after the opening'))
+    assert.match(section, /Up to\s+\*\*four\*\* candidates/, 'spans are capped')
+    assert.match(section, /name in one clause each what you discarded/)
+    assert.match(section, /ALTERNATIVES — the first to\s+fire takes the position/)
+    assert.match(section, /The stop is a price/)
+    assert.match(section, /Management \(break-even,\s+trailing\) is NOT authored here/)
+    assert.match(section, /Never choose it for them/, 'sizing stays the user\'s')
+    assert.match(section, /both in\s+dollars and as a percent of the account/)
+})
+
+test('the <build> tag contract is stated, including that settle is never the model\'s own', () => {
+    const section = PROMPT.slice(PROMPT.indexOf('`<build>` moves the LEDGER'))
+    assert.match(section, /never shown to them/)
+    assert.match(section, /`settle` is the user's confirmation — \*\*never your own\*\*/)
+    assert.match(section, /A settlement out of order is REFUSED/)
+})
+
+test('the grounding rules survived the flow moving into the server', () => {
+    for (const rule of ['Tools, not memory.', 'Live before levels.']) {
+        assert.ok(PROMPT.includes(`**${rule}**`), `missing rule: ${rule}`)
+    }
+})
+
+test('a brought plan asks only for what is missing, and is never offered the waiver', () => {
+    const section = PROMPT.slice(PROMPT.indexOf('### When the plan is already theirs'), PROMPT.indexOf('## `scenarios[]`'))
+    assert.match(section, /you ask only for what is genuinely missing/)
+    assert.match(section, /almost always the SIZE/)
+    assert.match(section, /You do not offer the waiver/)
+})
+
+test('candidates are an explicit ask now — a walked build ends in one setup', () => {
     assert.match(PROMPT, /## Offering candidates — only when they ask for options/)
-    assert.match(PROMPT, /The guided build does not reach for it on its own/)
+    assert.match(PROMPT, /A walked build does not reach for it on its own/)
     assert.doesNotMatch(PROMPT, /When the user has no setup, offer a few/, 'the old default-to-candidates invariant is gone')
 })
 
-test('scenario count is Mentor\'s in the guided build — same premise at two levels is allowed, padding is not', () => {
-    assert.match(PROMPT, /if they are all pullbacks, they are all pullbacks/)
+test('scenario count is Mentor\'s on a walked build — same premise at two levels is allowed, padding is not', () => {
+    assert.match(PROMPT, /if they are all pullbacks, they are all\s+pullbacks/)
     assert.doesNotMatch(PROMPT, /Most setups have exactly one\./)
     assert.match(PROMPT, /never pad to two because a pair reads balanced/)
+})
+
+test('nothing in the prompt still points at the deleted ladder', () => {
+    assert.doesNotMatch(PROMPT, /guided build/i)
+    assert.doesNotMatch(PROMPT, /rung [0-9]/i)
+    assert.doesNotMatch(PROMPT, /the ladder/i)
 })
 
 test('Mentor’s own additions are declared after the kit, with the sidecar last', () => {
