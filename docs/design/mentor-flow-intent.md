@@ -995,3 +995,25 @@ Suite 3668/0.
   Generate-all button; the endpoint above is ready for it.
 - **Social-chat batch intake** (#16): a DM carrying several setups, taken down as one batch. Setup
   sharing (2026-09-21) is the ground to build on; what is new is the multi-setup message.
+
+## Phase 8b — several names in one build (DONE)
+The client held ONE draft, so a user who moved from NVDA to AMD lost the NVDA plan. Now the server
+returns `drafts` (keyed by asset) whenever a build holds more than one name, the panel keeps them
+and sends them back, and `_mergeDrafts` re-normalises everything that comes through the client.
+**Only the active draft carries the ledger** — one build has one ledger, and a copy per plan is
+several records of one truth.
+
+FE: a `Generate all (N)` button beside the single one (generating just the name in front of you is
+still a thing a user may want), and partial success handled as the contract it is — the saved ones
+are gone from the table, the refused ones stay on it with their reasons, and the conversation picks
+up exactly what failed.
+
+Prompt: a multi-name build is an ordinary build run once per name, with a one-line tally of where
+each stands, because the user is holding four builds in their head and Mentor is not.
+
+Suites: backend 3671/0, frontend 1115/1115.
+
+### The one piece of the design still unbuilt
+**Social-chat batch intake (#16)** — a DM carrying several setups, taken down as one batch. Setup
+sharing (2026-09-21: DM card, fork, blueprint) is the ground; what is new is a multi-setup message
+and the "whose sizing?" rule (a risk percentage transfers between accounts, a share count does not).

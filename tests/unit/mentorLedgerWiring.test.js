@@ -189,3 +189,38 @@ test('the ledger reaches the turn context, next to the draft it rides on', async
     assert.match(text, /BUILD LEDGER — NVDA/)
     assert.match(text, /Setup so far/)
 })
+
+// ─── Several names in one build ───────────────────────────────────────────────
+
+test('a second name does not lose the plan built for the first', async () => {
+    const nvda = await turn(`<setup>${JSON.stringify(SETUP)}</setup>`)
+    assert.equal(nvda.drafts, undefined, 'one name sends nothing new')
+
+    // The user moves on to AMD. The client sends back what it holds; NVDA has to survive it.
+    const amd = await turn(`<setup>${JSON.stringify({ ...SETUP, asset: 'AMD' })}</setup>`, {
+        active_asset: 'AMD',
+        draft: null,
+        drafts: { NVDA: nvda.setup },
+        coverage: [],
+    })
+    assert.deepEqual(Object.keys(amd.drafts).sort(), ['AMD', 'NVDA'])
+    assert.equal(amd.setup.asset, 'AMD', 'the active plan is still the one being worked on')
+    assert.equal(amd.drafts.NVDA.scenarios[0].entry_legs[0].price, 238.6)
+})
+
+test('only the ACTIVE draft carries the ledger — one build, one record of what is settled', async () => {
+    const nvda = await turn(`<setup>${JSON.stringify(SETUP)}</setup>`
+        + '<build>{"settle":["direction","horizon","lens"],"source":"user"}</build>')
+    const amd = await turn(`<setup>${JSON.stringify({ ...SETUP, asset: 'AMD' })}</setup>`, {
+        active_asset: 'AMD', draft: null, drafts: { NVDA: nvda.setup }, coverage: [],
+    })
+    assert.ok(amd.setup.build, 'the active one has it')
+    assert.equal(amd.drafts.NVDA.build, undefined, 'the others are content only')
+})
+
+test('a draft that comes back as junk is dropped, not carried', async () => {
+    const out = await turn(`<setup>${JSON.stringify(SETUP)}</setup>`, {
+        active_asset: 'NVDA', draft: null, drafts: { AMD: 'not a setup', TSLA: { asset: '' } }, coverage: [],
+    })
+    assert.deepEqual(Object.keys(out.drafts ?? {}), [])
+})

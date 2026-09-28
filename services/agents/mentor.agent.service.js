@@ -276,6 +276,14 @@ async function chatStream({
         if (!normalized) carrier.rr = computeRR(carrier) ?? carrier.rr
     }
 
+    // SEVERAL NAMES IN ONE BUILD (#15). The active name's plan is `setup`, as it always was; the
+    // others ride in `drafts`, keyed by asset, so a user who built NVDA and moved on to AMD still
+    // has the NVDA plan when they press Generate all.
+    //
+    // Only the ACTIVE draft carries the ledger: it is build-wide, and a copy on every plan would be
+    // several records of one truth, which is how they start disagreeing.
+    const drafts = _mergeDrafts(chatState?.drafts, carrier)
+
     const readiness = carrier ? setupReadiness(carrier, (accounts?.length ?? 0) > 0) : null
 
     logger.info(LOG, 'chatStream done', {
@@ -298,6 +306,8 @@ async function chatStream({
         // it does not know) and the seam a future frontend uses to carry the ledger on its own.
         build,
         ...(carrier ? { setup: carrier, readiness } : {}),
+        // Absent until there is a second name, so an ordinary one-name build sends nothing new.
+        ...(Object.keys(drafts).length > 1 ? { drafts } : {}),
         ...(setups && !normalized ? { setups } : {}),
         ...route.result(),   // { route, routeSymbol, opening, edit } — the controller validates
     }
@@ -574,6 +584,27 @@ export function _buildLedgerSection(chatState) {
     lines.push(`  The stages, in order: ${STAGES.map(s => s.key).join(' → ')}. Nothing settles out of order, and reopening one reopens every stage below it.`)
     lines.push('  A question about anything else is always answered in full — talking never moves this ledger, and it never has to.')
     return lines.join('\n')
+}
+
+/**
+ * Every plan in this build, keyed by asset: what the client sent back, with this turn's on top.
+ *
+ * A build can hold up to ten names and the conversation only ever works on one at a time, so the
+ * others have to be kept somewhere or they are lost the moment the user says "now AMD". They are
+ * kept as CONTENT only — the ledger stays on the active draft, because one build has one ledger.
+ *
+ * Pure.
+ */
+export function _mergeDrafts(prior, carrier) {
+    const out = {}
+    // Re-normalised on the way in, and keyed by the asset the DOCUMENT says rather than by the key
+    // it arrived under: this came back through a client, and the two could disagree.
+    for (const draft of Object.values(prior ?? {})) {
+        const normalized = normalizeSetup(draft)
+        if (normalized?.asset) out[normalized.asset] = normalized
+    }
+    if (carrier?.asset) out[carrier.asset] = carrier
+    return out
 }
 
 /** Ledger values are short by construction; a list is summarised rather than spelled out. */
