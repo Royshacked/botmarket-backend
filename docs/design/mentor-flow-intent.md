@@ -754,3 +754,24 @@ Section by section against `prompts/mentor_system_prompt.md` (1074 lines today).
 **Net effect:** roughly 350-400 lines leave the prompt, because the ladder, the interview
 choreography and the candidate-offer rules become server state and stage instructions. The prompt
 keeps what only a model can hold — judgment, vocabulary, honesty rules — and stops holding the flow.
+
+---
+
+# BUILD LOG
+
+## Phase 1 — the ledger core (DONE, `services/mentorBuild.util.js`)
+Pure, no I/O, no clock. `STAGES` (opening · spans · entries · sizing · summary) with the two gates
+marked waivable; `claim` / `settle` / `unsettle`; `stageOf` / `firstUnsettled`; multi-name via
+`upsertName` / `putName`; `claimsFromDraft` as the bridge for a brought plan.
+
+Two rules carry it: **claimed is not settled**, and **nothing settles out of order** (a settled field
+changes only through `unsettle`, which cascades to every stage below). 26 unit tests.
+
+**Decided while building:** the LEDGER owns the flow, the DRAFT owns the content. They both hold
+direction/horizon/lens, so they can diverge — an emitted draft that contradicts a settled value is
+REFUSED, not silently accepted. (To implement in phase 2.)
+
+**Open for phase 2:** `emptyMentorState()` gains `build`, which changes the `chatState` the client
+round-trips. The frontend ships as a prebuilt bundle in `public/` — if it echoes `chatState`
+verbatim this is free; if it reconstructs it, `build` is dropped every turn and the ledger resets.
+Check before wiring.
