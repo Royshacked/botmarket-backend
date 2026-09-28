@@ -12,6 +12,10 @@ import { consultDescription } from '../deepThink.service.js'
 import { FLIP_TOOL, FLIP_DESCRIPTION, makeFlipHandler } from '../flipTest.service.js'
 import { buildVenueSection } from '../tools/tradingContext.tools.js'
 import { normalizeSetup, setupReadiness, computeRR, validityProblems, normalizeChallenges } from '../setup.schema.js'
+import {
+    normalizeBuild, sanitizeBuildOps, applyBuildOps, claimsFromDraft, settledConflicts,
+    activeName, stageOf, firstUnsettled, isWaived, STAGES,
+} from '../mentorBuild.util.js'
 import { logger } from '../logger.service.js'
 
 // Mentor — the trade ASSISTANT (Pipeline F). A conversation → a draft `setup` entity.
@@ -148,7 +152,7 @@ async function chatStream({
         meta: { userPrompt, asset: chatState?.active_asset || '', accounts: accounts?.length ?? 0 },
     })
 
-    const { reply, setup, setups } = _parseMentorResponse(raw)
+    const { reply, setup, setups, buildOps } = _parseMentorResponse(raw)
 
     // A candidate-offer turn and a worksheet turn are mutually exclusive by contract; if the model
     // emits both, the picked worksheet wins (it's the more committed artifact).
@@ -167,20 +171,63 @@ async function chatStream({
         ])
     }
 
-    const readiness = normalized ? setupReadiness(normalized, (accounts?.length ?? 0) > 0) : null
+    // THE LEDGER. It rides on the draft because the draft is the one thing that round-trips: the
+    // client rebuilds `chatState` from the fields it was sent, so a new top-level key would be
+    // dropped every turn and the flow would reset on each message.
+    //
+    // Claims are taken from the worksheet the model just emitted as well as from its <build> tag, so
+    // a turn that forgets the tag still records what was PROPOSED. Settling always needs the tag:
+    // a proposal is not an agreement, and only the user's confirmation moves the ledger.
+    const priorBuild = normalizeBuild(chatState?.build ?? chatState?.draft?.build)
+    const { build, refused, cleared } = applyBuildOps(priorBuild, {
+        asset: normalized?.asset || chatState?.active_asset || '',
+        derived: normalized ? claimsFromDraft(normalized) : {},
+        ...(sanitizeBuildOps(buildOps) ?? {}),
+    })
+
+    // The ledger owns the FLOW, the draft owns the CONTENT. Where they contradict each other the
+    // settled value is restored — visibly: the conflict rides back into the next turn's context
+    // with the refusals, because a silent correction teaches the model nothing.
+    const conflicts = settledConflicts(normalized, activeName(build))
+    for (const c of conflicts) normalized[c.key] = c.settled
+    if (conflicts.length) build.refused = [...build.refused, ...conflicts.map(c => ({ field: c.field, reason: c.reason }))]
+
+    // THE LEDGER MUST GO HOME, and the draft is the only vehicle. A turn that settles something but
+    // emits no worksheet is the ordinary case, not an edge one — the user says "yes, long and swing",
+    // Mentor answers in prose — and without this the confirmation is simply lost: the client would
+    // send back last turn's draft, carrying last turn's ledger, and the same question would be asked
+    // again. So an unchanged draft is re-issued rather than skipped.
+    //
+    // What cannot be rescued here is a settlement made before ANY worksheet exists; that is why the
+    // opening turn emits one (the nucleus it proposes IS the worksheet).
+    const carrier = normalized ?? (chatState?.draft ? normalizeSetup(chatState.draft) : null)
+    if (carrier) {
+        carrier.build = build
+        if (!normalized) carrier.rr = computeRR(carrier) ?? carrier.rr
+    }
+
+    const readiness = carrier ? setupReadiness(carrier, (accounts?.length ?? 0) > 0) : null
 
     logger.info(LOG, 'chatStream done', {
         replyLength: reply.length,
         hasSetup: Boolean(normalized),
+        carried: Boolean(carrier && !normalized),
         candidates: setups?.candidates?.length ?? 0,
         ready: readiness?.ready ?? false,
         coverage: capturedCoverage ?? chatState?.coverage ?? [],
+        stage: stageOf(activeName(build)) ?? 'done',
+        settled: Object.keys(activeName(build)?.settled ?? {}),
+        refused: refused.map(r => r.field),
+        ...(cleared.length ? { cleared } : {}),
     })
 
     return {
         reply,
         coverage: capturedCoverage ?? chatState?.coverage ?? [],
-        ...(normalized ? { setup: normalized, readiness } : {}),
+        // Returned at the top level as well as on the draft: harmless today (the client ignores what
+        // it does not know) and the seam a future frontend uses to carry the ledger on its own.
+        build,
+        ...(carrier ? { setup: carrier, readiness } : {}),
         ...(setups && !normalized ? { setups } : {}),
         ...route.result(),   // { route, routeSymbol, opening, edit } — the controller validates
     }
@@ -228,9 +275,16 @@ export const _mergeSetupDraft = mergeDraft
  */
 export function _parseMentorResponse(raw) {
     const text  = raw ?? ''
-    const reply = stripEmitTags(text, ['setup', 'setups', 'asset', 'interval', 'coverage', ...ROUTE_TAGS]).trim()
+    const reply = stripEmitTags(text, ['setup', 'setups', 'build', 'asset', 'interval', 'coverage', ...ROUTE_TAGS]).trim()
 
-    return { reply, setup: _parseBlock(text, 'setup'), setups: _parseCandidates(text) }
+    return {
+        reply,
+        setup:    _parseBlock(text, 'setup'),
+        setups:   _parseCandidates(text),
+        // The ledger moves this turn: what the user confirmed, reopened, or waived. Validated by the
+        // ledger itself — this only pulls the block out.
+        buildOps: _parseBlock(text, 'build'),
+    }
 }
 
 // The shared extractor already matches the tag EXACTLY, which is what keeps <setups> from being
@@ -362,8 +416,68 @@ export function _buildTurnContext(chatState, clientTime = null) {
 
     return `---
 ${buildTimeSection(clientTime, 'active_from / valid_until')}
-COVERAGE SO FAR: ${covered}. Re-state these in every <coverage> tag plus anything new you read this turn.${draft}`
+COVERAGE SO FAR: ${covered}. Re-state these in every <coverage> tag plus anything new you read this turn.${_buildLedgerSection(chatState)}${draft}`
 }
+
+/**
+ * WHERE THE BUILD IS — the server's answer, not the model's recollection.
+ *
+ * This is what makes a detour free (docs/design/mentor-flow-intent.md D4): the model never has to
+ * remember where the conversation was, because the first unsettled stage is recomputed and handed
+ * over every single turn. The user can ask about earnings in the middle of sizing and nothing here
+ * moves — the ledger records settlements, and knows nothing about topics.
+ *
+ * It also carries last turn's REFUSALS. A settlement the server rejected is invisible to the model
+ * otherwise, and an invisible refusal is a silently skipped gate, which is the failure this whole
+ * design exists to prevent.
+ */
+export function _buildLedgerSection(chatState) {
+    const build = normalizeBuild(chatState?.build ?? chatState?.draft?.build)
+    const name  = activeName(build)
+    if (!name) return ''
+
+    const at    = firstUnsettled(name)
+    const lines = [`\n\nBUILD LEDGER — ${name.asset} (the server's record; you do not carry it yourself)`]
+
+    const settled = Object.entries(name.settled)
+    lines.push(settled.length
+        ? `  SETTLED (never re-ask, never re-litigate): ${settled.map(([f, v]) => `${f}=${_short(v)}`).join(' · ')}`
+        : '  SETTLED: nothing yet.')
+
+    const open = Object.entries(name.claimed).filter(([f]) => !(f in name.settled))
+    if (open.length) {
+        lines.push(`  CLAIMED but NOT settled — validate, then ask: ${
+            open.map(([f, c]) => `${f}=${_short(c.value)} (${c.source})`).join(' · ')}`)
+    }
+
+    if (at) {
+        const waived = isWaived(build, at.stage)
+        lines.push(`  YOU ARE AT: ${at.stage} — still blank: ${at.fields.join(', ')}.`)
+        lines.push(waived
+            ? '  The user waived this gate: make the call yourself, record it, and say in one line what you decided so they can overturn it.'
+            : '  This stage ends in something the user says yes to. Settle it with <build>{"settle":["…"]}</build> only once they have.')
+    } else {
+        lines.push('  YOU ARE AT: done — every stage is settled. Summarise and offer Generate.')
+    }
+
+    if (build.names.length > 1) {
+        lines.push(`  OTHER NAMES IN THIS BUILD: ${build.names
+            .filter(n => n.asset !== name.asset)
+            .map(n => `${n.asset} (${stageOf(n) ?? 'done'})`).join(' · ')}`)
+    }
+
+    if (build.refused.length) {
+        lines.push(`  REFUSED LAST TURN — it did not happen, so do not build on it:\n${
+            build.refused.map(r => `    - ${r.field}: ${r.reason}`).join('\n')}`)
+    }
+
+    lines.push(`  The stages, in order: ${STAGES.map(s => s.key).join(' → ')}. Nothing settles out of order, and reopening one reopens every stage below it.`)
+    lines.push('  A question about anything else is always answered in full — talking never moves this ledger, and it never has to.')
+    return lines.join('\n')
+}
+
+/** Ledger values are short by construction; a list is summarised rather than spelled out. */
+const _short = (v) => (Array.isArray(v) ? `${v.length} item(s)` : String(v))
 
 function _buildAccountsSection(accounts, mainAccountId = null) {
     if (!Array.isArray(accounts) || accounts.length === 0) {

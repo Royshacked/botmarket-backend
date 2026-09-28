@@ -775,3 +775,25 @@ REFUSED, not silently accepted. (To implement in phase 2.)
 round-trips. The frontend ships as a prebuilt bundle in `public/` — if it echoes `chatState`
 verbatim this is free; if it reconstructs it, `build` is dropped every turn and the ledger resets.
 Check before wiring.
+
+## Phase 2 — the ledger is wired (DONE)
+`services/mentorBuild.util.js` gains the turn: `normalizeBuild` (the door — the ledger comes back
+through the client every turn and is untrusted), `sanitizeBuildOps` (model output, dropped by type
+and never coerced), `applyBuildOps` (unsettle -> derived claims -> explicit claims -> settle, in
+that order, because a flip-and-confirm is ONE turn) and `settledConflicts`.
+
+`mentor.agent.service.js` threads it: a new `<build>` tag (registered in `ALL_EMIT_TAGS`, suppressed
+like every other), claims derived from the emitted worksheet so a forgotten tag still records what
+was PROPOSED, and `_buildLedgerSection` in the turn context — where the build is, what is settled,
+what was refused last turn, and the line that says talking never moves any of it.
+
+**How the ledger survives:** it rides ON THE DRAFT. The frontend rebuilds `chatState` from the
+fields it was sent (`active_asset: e?.asset || n?.ticker || ''`), so a new top-level key would be
+dropped every turn. A turn that emits no worksheet RE-ISSUES the previous draft rather than skipping
+it, or a confirmation given in prose would be lost. `build` is also returned at the top level and
+forwarded by the controller — inert until a frontend uses it.
+
+**Still true after phase 2:** a settlement made before any worksheet exists has nothing to ride on.
+That is why the opening turn must emit one (phase 3: the nucleus it proposes IS the worksheet).
+
+54 new tests (`mentorBuildOps.test.js`, `mentorLedgerWiring.test.js`); suite 3582/0.
