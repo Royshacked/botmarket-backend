@@ -14,7 +14,8 @@ import { buildVenueSection } from '../tools/tradingContext.tools.js'
 import { normalizeSetup, setupReadiness, computeRR, validityProblems, normalizeChallenges } from '../setup.schema.js'
 import {
     normalizeBuild, sanitizeBuildOps, applyBuildOps, claimsFromDraft, settledConflicts,
-    normalizeSpans, spanIds, activeName, stageOf, firstUnsettled, isWaived, STAGES,
+    normalizeSpans, spanIds, normalizeEntries, entryIds, entryProblems, fieldsClearedBy,
+    activeName, stageOf, firstUnsettled, isWaived, STAGES,
 } from '../mentorBuild.util.js'
 import { logger } from '../logger.service.js'
 
@@ -152,7 +153,7 @@ async function chatStream({
         meta: { userPrompt, asset: chatState?.active_asset || '', accounts: accounts?.length ?? 0 },
     })
 
-    const { reply, setup, setups, buildOps, spanBlock } = _parseMentorResponse(raw)
+    const { reply, setup, setups, buildOps, spanBlock, entryBlock } = _parseMentorResponse(raw)
 
     // A candidate-offer turn and a worksheet turn are mutually exclusive by contract; if the model
     // emits both, the picked worksheet wins (it's the more committed artifact).
@@ -185,9 +186,27 @@ async function chatStream({
     // A block that arrives and normalises to NOTHING is not the same as no block: the model meant
     // to put candidates on the table and none of them survived. The old ones stand (better than an
     // empty gate), and it is logged, because a silently ignored emit is a bug nobody sees.
+    // A REOPENED stage drops its content as well as its settlement. The ledger clearing `spans`
+    // while four candidate trades stay on the draft is the ledger and the screen disagreeing: the
+    // gate is open again and the user is still looking at the answers to it. What the model emits
+    // THIS turn survives — a reopen usually arrives with the replacement.
+    //
+    // Answered from the OPS, before they are applied, because the content it drops is also what the
+    // claims below are derived from.
+    const ops      = sanitizeBuildOps(buildOps) ?? {}
+    const reopened = new Set(fieldsClearedBy(ops.unsettle))
+
     const emitted = normalizeSpans(spanBlock)
     if (spanBlock && !emitted) logger.warn(LOG, '<spans> emitted but no candidate survived normalisation — keeping the previous set')
-    const spans = emitted ?? normalizeSpans(chatState?.draft?.spans)
+    const spans = emitted ?? (reopened.has('spans') ? null : normalizeSpans(chatState?.draft?.spans))
+
+    // The ways in, per trade. Scoped to the spans on the table: an entry for a trade the user never
+    // agreed to look at is an entry for nothing, and the gate would show a way into a trade that is
+    // not being built. Carried forward the same way the spans are.
+    const emittedEntries = normalizeEntries(entryBlock, spanIds(spans))
+    if (entryBlock && !emittedEntries) logger.warn(LOG, '<entries> emitted but nothing survived normalisation — keeping the previous set')
+    const entries = emittedEntries
+        ?? (reopened.has('entries') ? null : normalizeEntries(chatState?.draft?.entries, spanIds(spans)))
 
     const priorBuild = normalizeBuild(chatState?.build ?? chatState?.draft?.build)
     const { build, refused, cleared } = applyBuildOps(priorBuild, {
@@ -195,8 +214,9 @@ async function chatStream({
         derived: {
             ...(normalized ? claimsFromDraft(normalized) : {}),
             ...(spans ? { spans: spanIds(spans) } : {}),
+            ...(entries ? { entries: entryIds(entries) } : {}),
         },
-        ...(sanitizeBuildOps(buildOps) ?? {}),
+        ...ops,
     })
 
     // The ledger owns the FLOW, the draft owns the CONTENT. Where they contradict each other the
@@ -227,6 +247,7 @@ async function chatStream({
     if (carrier) {
         carrier.build = build
         if (spans) carrier.spans = spans
+        if (entries) carrier.entries = entries
         if (!normalized) carrier.rr = computeRR(carrier) ?? carrier.rr
     }
 
@@ -299,7 +320,7 @@ export const _mergeSetupDraft = mergeDraft
  */
 export function _parseMentorResponse(raw) {
     const text  = raw ?? ''
-    const reply = stripEmitTags(text, ['setup', 'setups', 'build', 'spans', 'asset', 'interval', 'coverage', ...ROUTE_TAGS]).trim()
+    const reply = stripEmitTags(text, ['setup', 'setups', 'build', 'spans', 'entries', 'asset', 'interval', 'coverage', ...ROUTE_TAGS]).trim()
 
     return {
         reply,
@@ -311,6 +332,8 @@ export function _parseMentorResponse(raw) {
         // The candidate trades at the spans gate. `<spans>` is the TABLE the user chooses from;
         // `<setups>` is a menu of complete alternative plans, and they are not the same thing.
         spanBlock: _parseBlock(text, 'spans'),
+        // The ways INTO each candidate trade, at the second gate.
+        entryBlock: _parseBlock(text, 'entries'),
     }
 }
 
@@ -360,7 +383,9 @@ export function _parseCandidates(text) {
  * which is never something to wait out.
  */
 export function _buildProblemsSection(draft) {
-    const problems = draft ? validityProblems(draft) : []
+    // Scaling-in shares belong here rather than in readiness: they are not a MISSING field, they
+    // are a stated plan that does not add up, and the user would be filled for a size nobody chose.
+    const problems = draft ? [...validityProblems(draft), ...entryProblems(draft.entries)] : []
     if (!problems.length) return ''
     return `\nTHE PLAN YOU EMITTED DOES NOT ADD UP — fix this in your next <setup>, and say so plainly rather than silently re-emitting:\n${
         problems.map(p => `- ${p}`).join('\n')}\nGenerate refuses a setup in this state, so the user cannot save it until you correct it.`

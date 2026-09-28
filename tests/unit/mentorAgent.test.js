@@ -278,9 +278,15 @@ test('the later stages keep the decisions that are theirs and not the model\'s',
     assert.match(section, /a stage about WHERE, not how/)
     assert.match(section, /<spans>/, 'the candidates have an emit contract')
     assert.match(section, /`get_chart` with `show_to_user: true`[\s\S]{0,60}`levels`/, 'and are drawn')
-    assert.match(section, /ALTERNATIVES — the first to\s+fire takes the position/)
-    assert.match(section, /The stop is a price/)
-    assert.match(section, /Management \(break-even,\s+trailing\) is NOT authored here/)
+    // The field that changes what the broker does, and the default that cannot add risk.
+    assert.match(section, /`alternatives` \(the default\) means the first trigger to fire takes the WHOLE\s+position/)
+    assert.match(section, /Never let a list of entries imply scaling/)
+    assert.match(section, /the shares\s+must add to 100/)
+    // Tested on THIS ticker, and the evidence is counted rather than felt.
+    assert.match(section, /does it work on THIS ticker/)
+    assert.match(section, /it is a measurement, not a feeling/)
+    assert.match(section, /The stop is a \*\*price\*\*/)
+    assert.match(section, /Management — break-even, trailing — is NOT\s+authored/)
     assert.match(section, /Never choose it for them/, 'sizing stays the user\'s')
     assert.match(section, /both in\s+dollars and as a percent of the account/)
 })

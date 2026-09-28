@@ -870,3 +870,38 @@ moves on a `<build>` emit, so a silent local change would leave the server holdi
 
 FE suite 1099/1099; bundle rebuilt into `botmarket-backend/public` (prod ships the committed build).
 Pre-existing FE lint warnings on main are untouched and none are in the new files.
+
+## Phase 5 — the entries gate (DONE)
+`<entries>`: per trade, up to three tested ways in — `{id, label, technique, trigger, timeframe,
+evidence, share?, recommended}` — normalised by `normalizeEntries`, scoped to the spans on the
+table (an entry for a trade nobody agreed to look at is an entry for nothing), and carried on the
+draft as `draft.entries` with the ledger holding `tradeId:optionId`.
+
+**`semantics` is the field that changes what the broker does**, so it defaults to `alternatives`
+— the reading that cannot put on more risk than the user agreed to. `scale_in` requires a `share`
+per option, and `entryProblems` reports shares that do not add to 100 through the existing
+problems block: not a missing field but a stated plan that would fill the user for a size nobody
+chose. Exactly one `recommended` survives normalisation, because two picks expand two rows and ask
+the user the question Mentor was supposed to answer.
+
+Timeframes live on the ENTRY (D3): the rung a trigger is read on is a property of the mechanic.
+
+**Bug found and fixed while building:** a reopened stage cleared its ledger entry but left its
+CONTENT on the draft — the gate would be open again while the user was still looking at the answers
+to it. `fieldsClearedBy` answers "what is being reopened" from the ops BEFORE they are applied
+(the content is also what the claims derive from), and the reopened stage's content is dropped
+unless the same turn emits a replacement.
+
+Prompt: the entries stage written out (test on THIS ticker and count it — "a measurement, not a
+feeling"; stop is a price; targets may be legs; time exits offered; management NOT authored, Talos
+raises it live), plus a rule both gates needed — **re-emit the narrowed set when the user chooses**,
+because the ledger records the agreement, not the menu.
+
+FE: `EntryTable.jsx` — trade blocks with entries nested, Mentor's pick expanded, the rest folded,
+the semantics stated in words, the share shown when scaling in.
+
+Suites: backend 3622/0, frontend 1106/1106.
+
+**Still not built for this stage (noted in #9):** a general "does this pattern work on this ticker"
+measurement. Mentor evidences it today from `get_candles` / `get_false_breaks` / `get_orderblocks`
+and is told to say so when it cannot measure.

@@ -26,6 +26,7 @@
  */
 
 import { ENTRY_ARCHETYPES, normalizeTaxon } from './setup.taxonomy.js'
+import { VALID_TIMEFRAMES, normalizeTimeframe } from './timeframe.service.js'
 
 // The stages, in the order they settle. `fields` are what a stage owes; a stage is settled when all
 // of its fields are. `waivable` is the user's answer to the opening turn's second ask — the two
@@ -460,6 +461,116 @@ export function normalizeSpans(raw) {
 /** The ledger value for a settled spans stage: the ids the user agreed to look at. */
 export function spanIds(spans) {
     return (spans?.candidates ?? []).map(c => c.id)
+}
+
+// ─── The entries — how to get into each trade ─────────────────────────────────
+
+const MAX_OPTIONS = 3
+
+/** ALTERNATIVES unless the author says otherwise, and the default is the one that cannot hurt. */
+export const ENTRY_SEMANTICS = ['alternatives', 'scale_in']
+
+/**
+ * The ENTRIES stage's output: per surviving trade, the ways in that were tested on THIS ticker.
+ *
+ * The one field that changes what the broker does is `semantics`. **Alternatives** means the first
+ * trigger to fire takes the whole position and the rest are cancelled; **scale_in** means each
+ * carries its share and all of them may fire. Read the wrong way round, a three-entry trade either
+ * enters at a third of the intended size or at three times it — so it defaults to `alternatives`,
+ * which is the reading that cannot put on more risk than the user agreed to.
+ *
+ * `timeframe` lives HERE and not on the setup: the rung a trigger is READ on is a property of the
+ * mechanic, not of the horizon. A swing trade can wait for a 15-minute reclaim.
+ */
+export function normalizeEntries(raw, allowedTradeIds = null) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+    const allow = allowedTradeIds?.length ? new Set(allowedTradeIds) : null
+
+    const seen = new Set()
+    const trades = (Array.isArray(raw.trades) ? raw.trades : [])
+        .map((t) => {
+            const id = clampStr(String(t?.id ?? '').trim().toLowerCase(), 16)
+            // An entry for a trade the user never agreed to look at is not an entry for anything.
+            if (!id || (allow && !allow.has(id))) return null
+
+            const options = (Array.isArray(t.options) ? t.options : [])
+                .map((o, i) => {
+                    if (!o || typeof o !== 'object') return null
+                    let oid = clampStr(String(o.id ?? `${id}e${i + 1}`).trim().toLowerCase(), 24)
+                    while (seen.has(oid)) oid = `${oid}x`
+                    seen.add(oid)
+                    const tf = normalizeTimeframe(o.timeframe)
+                    const share = Number(o.share)
+                    return {
+                        id: oid,
+                        label:     clampStr(o.label ?? '', MAX_STR),
+                        technique: clampStr(o.technique ?? '', MAX_STR),
+                        trigger:   clause(o.trigger),
+                        timeframe: VALID_TIMEFRAMES.has(tf) ? tf : null,
+                        evidence:  clause(o.evidence),
+                        share:     Number.isFinite(share) && share > 0 && share <= 100 ? share : null,
+                        recommended: o.recommended === true,
+                    }
+                })
+                .filter(o => o && o.label && o.trigger)
+                .slice(0, MAX_OPTIONS)
+
+            if (!options.length) return null
+            // Mentor's own pick is what the gate expands, so there is EXACTLY one: the first it
+            // marked, or the first option when it marked none. Two picks expand two rows and the
+            // "which does it actually recommend" question comes straight back to the user.
+            const picked = Math.max(0, options.findIndex(o => o.recommended))
+            options.forEach((o, i) => { o.recommended = i === picked })
+
+            return {
+                id,
+                semantics: ENTRY_SEMANTICS.includes(t.semantics) ? t.semantics : 'alternatives',
+                options,
+            }
+        })
+        .filter(Boolean)
+        .slice(0, MAX_SPANS)
+
+    return trades.length ? { trades } : null
+}
+
+/**
+ * Which fields a reopen of this stage would clear — the cascade, answered WITHOUT applying it.
+ *
+ * The caller needs this before it can apply anything: a reopened stage drops its CONTENT too (the
+ * candidate trades, the ways in), and that content is also what the claims are derived from. So
+ * the question "what is being reopened" has to be answerable from the ops alone.
+ */
+export function fieldsClearedBy(stageKey) {
+    const from = stageIndex(stageKey)
+    return from < 0 ? [] : STAGES.slice(from).flatMap(s => s.fields)
+}
+
+/** Every chosen way in, as the ledger records it: `tradeId:optionId`. */
+export function entryIds(entries) {
+    return (entries?.trades ?? []).flatMap(t => t.options.map(o => `${t.id}:${o.id}`))
+}
+
+/**
+ * What is WRONG with the entries as authored — fed back to the model, never silently corrected.
+ *
+ * Scaling in is the only place a shape error costs money rather than clarity: shares that do not
+ * add up to the whole position mean the user is filled for something other than the size they
+ * agreed to, and neither the card nor the broker would ever say so.
+ */
+export function entryProblems(entries) {
+    const out = []
+    for (const t of (entries?.trades ?? [])) {
+        if (t.semantics !== 'scale_in') continue
+        const shares = t.options.map(o => o.share)
+        if (shares.some(s => s == null)) {
+            out.push(`${t.id}: scaling in, but ${shares.filter(s => s == null).length} of ${shares.length} entries carry no share of the size`)
+            continue
+        }
+        const total = shares.reduce((a, b) => a + b, 0)
+        if (Math.abs(total - 100) > 0.01) out.push(`${t.id}: scaling in, but the shares add up to ${total}%, not 100%`)
+    }
+    return out
 }
 
 // ─── The ledger owns the flow, the draft owns the content ─────────────────────

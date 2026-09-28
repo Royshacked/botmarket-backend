@@ -112,6 +112,8 @@ export const ALL_EMIT_TAGS = [
     // Mentor's candidate trades at the spans gate — the table the user picks from, rejects and all.
     // Unlike <build> this one IS rendered; it is suppressed from the prose and drawn as a card.
     'spans',
+    // And the ways INTO those trades, at the second gate. Same deal: suppressed here, drawn there.
+    'entries',
 ]
 
 // Build the tag-capture descriptor array for a streaming agent. `overrides` maps a
