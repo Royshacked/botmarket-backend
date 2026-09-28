@@ -3,6 +3,12 @@
 **STATUS: COMPLETE — ALL PHASES BUILT 2026-09-26.** The taxonomy, the schema and the gate, the prompt,
 the flip test, the runaway card, the docs. All three mechanisms are live end to end.
 
+> **VOCABULARY NOTE (2026-09-28).** This record predates the flow rewrite
+> ([mentor-flow-intent.md](./mentor-flow-intent.md), phases 1-3 built). Where it says *the guided
+> build*, *the interview* or *rung N*, read: a build Mentor walked, a plan the user brought, and the
+> ledger stage of the same name — `opening` · `spans` · `entries` · `sizing` · `summary`. What the
+> record DECIDED is unchanged; only the names for the steps are.
+
 **This file is now the BUILD RECORD.** The contract lives in
 [desks/mentor-talos.md §The paths not taken](../desks/mentor-talos.md#the-paths-not-taken); what stays
 here is the plan, the ten principles that governed it, the options rejected with the argument that

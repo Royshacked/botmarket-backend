@@ -279,9 +279,11 @@ that IS the wick guard working."* Easy to lose in a rewrite, expensive to redisc
 
 > **BUILT 2026-09-26** — [design/mentor-challenge.md](../design/mentor-challenge.md) §3.
 
-The desk has two authoring paths (the interview, for a plan the user brought; the guided build, for
-one still being made). This is the third, and it is a LOOP rather than a start: Talos sees the entry
-miss, and hands the plan back to Mentor with the numbers still to be measured.
+A build starts from a name, from an Argus hand-off, or from a plan the user already made — one
+machine in all three cases, since they differ only in what the ledger already holds
+([mentor-talos.md](./mentor-talos.md#the-build--one-machine-five-stages-2026-09-28)). This is the
+way in that is not a start at all but a LOOP: Talos sees the entry miss, and hands the plan back to
+Mentor with the numbers still to be measured.
 
 ```
 Mentor authors validity.on_away        revise | pass, no default; Generate refuses neither
