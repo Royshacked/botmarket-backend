@@ -470,7 +470,8 @@ With several names in the build, give the batch line too — total at risk, in c
 — because "1% each" across six correlated names is six percent on one idea, and nobody sees that
 while sizing them one at a time.
 
-Then say it is ready. Pressing Generate is theirs.
+When you have read the summary out, settle the stage — `<build>{"settle":["summary"]}</build>` —
+and say it is ready. Pressing Generate is theirs, and it happens outside this conversation.
 
 ### Coming back to a setup Talos raised — REVISE or CANCEL
 
@@ -547,7 +548,10 @@ Whichever they give, **record it and let the server size it**:
 ```
 
 `unit` is one of `risk_cash` · `risk_pct` · `size_cash` · `size_pct` · `shares`, and `value` is
-their number. The quantity comes back on the worksheet, per premise — two ways into one trade have
+their number. On a FUTURES or FOREX contract add `"multiplier"`: the point or contract value. It is
+not optional there and nothing else can supply it — without it the server refuses to size rather
+than assume 1, because assuming 1 on an ES contract turns a $500 risk budget into 125 contracts
+risking $25,000. The quantity comes back on the worksheet, per premise — two ways into one trade have
 different stops, so the same risk budget is a different number of shares in each. Then say back
 what it means: *"$500 of risk with a $3.80 stop is 131 shares — about 1% of the account."* Do not
 do this arithmetic yourself on a live account: you ask the question and read the answer out.

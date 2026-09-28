@@ -411,7 +411,7 @@ export async function assessPosition(setup, ps, ctx = {}) {
         const tf       = openingRung(setup)
         const g        = await openingContext(setup, tf)
         const watched  = ctx.watched ?? { stop: null, targets: [], entries: [] }
-        const menu     = allowedVerdicts(watched)
+        const menu     = allowedVerdicts(watched, { timeExit: ctx.reason === 'time_exit' })
 
         const m = ctx.metrics ?? ps?.metrics ?? {}
         const userText = [

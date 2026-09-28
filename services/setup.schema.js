@@ -1211,11 +1211,15 @@ export function hasWatchedLegs(w) {
  * Derived rather than fixed so the prompt never offers a verdict the monitor would refuse, and the
  * monitor never has to refuse one the prompt offered.
  */
-export function allowedVerdicts(w) {
+export function allowedVerdicts(w, { timeExit = false } = {}) {
     const out = ['hold']
     if (w?.stop)            out.push('move_stop', 'exit_now')
     if (w?.targets?.length) out.push('take_partial')
     if (w?.entries?.length) out.push('add_leg')
+    // THE CLOCK EXIT NEEDS A WAY OUT. A position of plain levels watches no stop, so `exit_now`
+    // would not be on the menu — and a read woken by the user's own deadline that may only answer
+    // `hold` is a read that cannot do the one thing it was woken for.
+    if (timeExit && !out.includes('exit_now')) out.push('exit_now')
     return out
 }
 

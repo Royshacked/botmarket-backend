@@ -116,18 +116,29 @@ export function summarizeTrade(setup, { quantity = null, balance = null, livePri
  *
  * Returns quantities and problems; writes nothing. The caller applies them.
  */
-export function applySizing(setup, sizing, { balance = null, multiplier = 1 } = {}) {
+export function applySizing(setup, sizing, { balance = null, multiplier = null } = {}) {
     const unit  = sizing?.unit
     const value = sizing?.value
     const list  = setup?.scenarios ?? []
     if (!unit || !list.length) return { quantities: [], problems: [] }
+
+    // WHOSE MULTIPLIER. Stated with the size if the instrument has one; otherwise 1 is only safe
+    // where a unit IS the price — shares, ETFs and crypto. On a future or an FX contract, assuming
+    // 1 silently sizes the position by the contract value: a $500 budget on ES becomes 125
+    // contracts risking $25,000. So it is refused instead, by name, and asked for.
+    const m = Number(sizing?.multiplier ?? multiplier)
+    const contractual = setup?.asset_class === 'futures' || setup?.asset_class === 'forex'
+    if (contractual && !(Number.isFinite(m) && m > 0)) {
+        return { quantities: [], problems: [`this is a ${setup.asset_class} contract — tell me its point/contract value and I will size it; assuming 1 would size the position by the contract instead of the risk`] }
+    }
+    const mult = Number.isFinite(m) && m > 0 ? m : 1
 
     const quantities = []
     const problems   = []
     for (const sc of list) {
         const view = { direction: setup.direction, ...sc }
         const out  = resolveSize({
-            unit, value, multiplier, balance,
+            unit, value, balance, multiplier: mult,
             // legReference, not legPrice: a trigger entry has no order price but does carry a
             // rough fill, and without it "risk 1%" would be refused on a perfectly good plan.
             entry: legReference(sc.entry_legs?.[0]),

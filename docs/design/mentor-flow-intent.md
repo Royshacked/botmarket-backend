@@ -1017,3 +1017,37 @@ Suites: backend 3671/0, frontend 1115/1115.
 **Social-chat batch intake (#16)** — a DM carrying several setups, taken down as one batch. Setup
 sharing (2026-09-21: DM card, fork, blueprint) is the ground; what is new is a multi-setup message
 and the "whose sizing?" rule (a risk percentage transfers between accounts, a share count does not).
+
+## Code review of the branch (2026-09-29) — eight findings, all fixed
+A full review of `feat/mentor-flow-v2` found eight gaps that 3671 passing tests had not. Worth
+recording, because most of them are the same shape: **the piece worked, and nothing connected it.**
+
+1. **`time_exit` was unreachable.** `_checkSetup` hands every position status to `_checkPosition`
+   long before the pre-entry reason is chosen, so the clock was tested where a filled position
+   never arrives. Moved to the position path — and two deeper holes came out of it: a position of
+   plain levels is marked DORMANT and never read at all (so a `time_exit` on one still would not
+   fire), and `allowedVerdicts` only offers `exit_now` when a STOP is watched, so the read woken by
+   the user's own deadline could only have answered `hold`. A setup carrying a `time_exit` now
+   never goes dormant, and that wake is always allowed to exit.
+2. **The sizing stage could never settle.** `sanitizeBuildOps` produced `ops.size`, `applyBuildOps`
+   never claimed it, and the exact op the prompt prescribes came back `nothing claimed for size`.
+3. **A multi-name build lost the first name.** `_mergeDrafts` seeded only from `chatState.drafts`,
+   which the client only has once the server sends it — and the server only sends it at two names.
+   So "Generate all" was unreachable. **The test that should have caught it hand-fed the server a
+   field the real client never sends.** Now seeded from the draft being sent back, and the
+   regression test drives it the way the frontend does.
+4. **The contract multiplier was ignored** — `applySizing`/`summarizeTrade` defaulted it to 1, so
+   an ES future with a 4-point stop and a $500 budget sized 125 contracts risking $25,000. It now
+   travels with the size op, and futures/forex are REFUSED by name rather than assumed.
+5. **The lens was auto-claimed as `discretionary`** because `normalizeSetup` defaults `trade_mode`,
+   so the opening turn settled a lens the user never heard — the precise failure claimed-vs-settled
+   exists to prevent. Only a stated lens is claimed now.
+6. **The build could never complete.** The summary stage's field was `generate`, which nothing
+   could ever claim (pressing Generate happens outside the conversation), so `buildComplete` was
+   permanently false and every settle of it was refused. The stage now settles on the FIGURES.
+7. **The gates leaked across an asset switch** — AMD inherited NVDA's candidate trades when a turn
+   emitted none. Carry-forward is now scoped to the same name.
+8. **Parked names lost their gate content** every round trip, because `normalizeSetup` returns a
+   fixed shape. `spans`/`entries`/`summary` are carried explicitly; the ledger deliberately is not.
+
+Suite 3682/0 (11 new regression tests, one file: `mentorReviewFixes.test.js`).

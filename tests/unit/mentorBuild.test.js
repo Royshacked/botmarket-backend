@@ -14,7 +14,7 @@ import {
 function advance(name, through) {
     const VALUES = {
         direction: 'long', horizon: 'swing', lens: 'smc',
-        spans: ['s1'], entries: ['s1:0'], size: 100, generate: true,
+        spans: ['s1'], entries: ['s1:0'], size: 100, summary: { rr: 2.5 },
     }
     for (const stage of STAGES) {
         const fields = stage.fields
@@ -30,7 +30,7 @@ function advance(name, through) {
 test('the stages are the flow, in order, and only the two gates are waivable', () => {
     assert.deepEqual(STAGE_KEYS, ['opening', 'spans', 'entries', 'sizing', 'summary'])
     assert.deepEqual(STAGES.filter(s => s.waivable).map(s => s.key), ['spans', 'entries'])
-    assert.deepEqual(BUILD_FIELDS, ['direction', 'horizon', 'lens', 'spans', 'entries', 'size', 'generate'])
+    assert.deepEqual(BUILD_FIELDS, ['direction', 'horizon', 'lens', 'spans', 'entries', 'size', 'summary'])
 })
 
 test('a fresh name is at the opening stage with all three fields blank', () => {

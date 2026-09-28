@@ -11,7 +11,7 @@ import {
 
 const VALUES = {
     direction: 'long', horizon: 'swing', lens: 'smc',
-    spans: ['s1'], entries: ['s1:0'], size: 100, generate: true,
+    spans: ['s1'], entries: ['s1:0'], size: 100, summary: { rr: 2.5 },
 }
 
 /** Settle a name up to and including `through`. */

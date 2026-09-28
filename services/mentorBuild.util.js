@@ -37,7 +37,7 @@ export const STAGES = [
     { key: 'spans',   fields: ['spans'],                        waivable: true  },
     { key: 'entries', fields: ['entries'],                      waivable: true  },
     { key: 'sizing',  fields: ['size'],                         waivable: false },
-    { key: 'summary', fields: ['generate'],                     waivable: false },
+    { key: 'summary', fields: ['summary'],                      waivable: false },
 ]
 
 export const STAGE_KEYS = STAGES.map(s => s.key)
@@ -247,11 +247,15 @@ export function buildComplete(build) {
  * — but it is still only CLAIMED. Mentor validates it softly before anything is settled, which is
  * the whole difference between "taken down" and "taken as read".
  */
-export function claimsFromDraft(draft) {
+export function claimsFromDraft(draft, { lensStated = true } = {}) {
     const out = {}
     if (draft?.direction)  out.direction = draft.direction
     if (draft?.type)       out.horizon   = draft.type
-    if (draft?.trade_mode) out.lens      = draft.trade_mode
+    // THE LENS IS THE ONE FIELD WITH A NON-NULL DEFAULT. `normalizeSetup` fills `trade_mode` with
+    // 'discretionary' when the model emits none, so claiming it unconditionally put a lens nobody
+    // proposed into the ledger — and the opening turn then settled a lens the user never heard,
+    // which is precisely what claimed-vs-settled exists to prevent. Only a STATED lens is claimed.
+    if (draft?.trade_mode && lensStated) out.lens = draft.trade_mode
     if (Array.isArray(draft?.scenarios) && draft.scenarios.length) {
         out.spans   = draft.scenarios.map((s, i) => s.id ?? s.name ?? `s${i + 1}`)
         out.entries = draft.scenarios.flatMap((s, i) =>
@@ -361,6 +365,13 @@ export function applyBuildOps(build, ops = {}) {
         name = claim(name, ops.claim, ops.source).name
     }
 
+    // THE SIZING ANSWER IS A CLAIM LIKE ANY OTHER. Without this the op resolved a quantity onto the
+    // worksheet and then the settlement was refused for having nothing claimed — the stage could
+    // never close, and the model was told off for following the prompt exactly.
+    if (ops.size) {
+        name = claim(name, { size: ops.size }, ops.source ?? 'user').name
+    }
+
     let accepted = []
     let refused  = []
     if (ops.settle) {
@@ -400,7 +411,14 @@ export function sanitizeBuildOps(raw) {
     if (raw.size && typeof raw.size === 'object' && !Array.isArray(raw.size)) {
         const unit  = SIZE_UNITS.includes(raw.size.unit) ? raw.size.unit : null
         const value = Number(raw.size.value)
-        if (unit && Number.isFinite(value) && value > 0) ops.size = { unit, value }
+        const mult  = Number(raw.size.multiplier)
+        if (unit && Number.isFinite(value) && value > 0) {
+            ops.size = { unit, value }
+            // The CONTRACT or point value, when the instrument has one. On an ES future a $500
+            // budget against a 4-point stop is 2 contracts, not 125 — the multiplier IS the
+            // position, so it travels with the size rather than being assumed to be 1.
+            if (Number.isFinite(mult) && mult > 0) ops.size.multiplier = mult
+        }
     }
 
     if (typeof raw.unsettle === 'string' && STAGE_KEYS.includes(raw.unsettle)) ops.unsettle = raw.unsettle

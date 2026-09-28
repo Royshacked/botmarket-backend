@@ -197,9 +197,16 @@ async function chatStream({
     const ops      = sanitizeBuildOps(buildOps) ?? {}
     const reopened = new Set(fieldsClearedBy(ops.unsettle))
 
+    // The gates' content belongs to ONE name, so it only carries forward while the build is still
+    // on that name: handing AMD the candidate trades drawn for NVDA would claim NVDA's ids onto
+    // AMD's ledger, and a later settle would agree to the wrong name's trades.
+    const activeAsset = String(normalized?.asset || chatState?.active_asset || '').toUpperCase()
+    const sameName    = Boolean(activeAsset) && String(chatState?.draft?.asset ?? '').toUpperCase() === activeAsset
+    const carryGates  = sameName ? chatState?.draft : null
+
     const emitted = normalizeSpans(spanBlock)
     if (spanBlock && !emitted) logger.warn(LOG, '<spans> emitted but no candidate survived normalisation — keeping the previous set')
-    const spans = emitted ?? (reopened.has('spans') ? null : normalizeSpans(chatState?.draft?.spans))
+    const spans = emitted ?? (reopened.has('spans') ? null : normalizeSpans(carryGates?.spans))
 
     // The ways in, per trade. Scoped to the spans on the table: an entry for a trade the user never
     // agreed to look at is an entry for nothing, and the gate would show a way into a trade that is
@@ -207,15 +214,23 @@ async function chatStream({
     const emittedEntries = normalizeEntries(entryBlock, spanIds(spans))
     if (entryBlock && !emittedEntries) logger.warn(LOG, '<entries> emitted but nothing survived normalisation — keeping the previous set')
     const entries = emittedEntries
-        ?? (reopened.has('entries') ? null : normalizeEntries(chatState?.draft?.entries, spanIds(spans)))
+        ?? (reopened.has('entries') ? null : normalizeEntries(carryGates?.entries, spanIds(spans)))
 
     const priorBuild = normalizeBuild(chatState?.build ?? chatState?.draft?.build)
     const { build, refused, cleared } = applyBuildOps(priorBuild, {
         asset: normalized?.asset || chatState?.active_asset || '',
         derived: {
-            ...(normalized ? claimsFromDraft(normalized) : {}),
+            // `lensStated` guards the one field with a non-null schema default: normalizeSetup
+            // fills `trade_mode` with 'discretionary', and claiming that would put a lens nobody
+            // proposed into the opening turn's settlement.
+            ...(normalized ? claimsFromDraft(normalized, { lensStated: Boolean(setup?.trade_mode) }) : {}),
             ...(spans ? { spans: spanIds(spans) } : {}),
             ...(entries ? { entries: entryIds(entries) } : {}),
+            // The summary stage settles on the FIGURES being in front of the user, so its claim is
+            // derived from them existing. `generate` used to be the field here and nothing could
+            // ever claim it — pressing Generate happens outside the conversation — so the build
+            // could never complete and every settle of it was refused.
+            ...(_summaryClaim(chatState?.draft) ?? {}),
         },
         ...ops,
     })
@@ -259,7 +274,7 @@ async function chatStream({
         // the entry) comes back as a refusal rather than a guess, and the stage stays open.
         const balance = _mainBalance(accounts, mainAccountId)
         if (ops.size) {
-            const { quantities, problems } = applySizing(carrier, ops.size, { balance })
+            const { quantities, problems } = applySizing(carrier, ops.size, { balance, multiplier: ops.size.multiplier })
             for (const q of quantities) {
                 const sc = carrier.scenarios?.find(x => x.id === q.id) ?? carrier.scenarios?.[0]
                 if (!sc) continue
@@ -272,7 +287,7 @@ async function chatStream({
             logger.info(LOG, 'sizing resolved', { unit: ops.size.unit, value: ops.size.value, sized: quantities.length, problems: problems.length })
         }
 
-        carrier.summary = summarizeTrade(carrier, { balance })
+        carrier.summary = summarizeTrade(carrier, { balance, multiplier: ops.size?.multiplier })
         if (!normalized) carrier.rr = computeRR(carrier) ?? carrier.rr
     }
 
@@ -282,7 +297,7 @@ async function chatStream({
     //
     // Only the ACTIVE draft carries the ledger: it is build-wide, and a copy on every plan would be
     // several records of one truth, which is how they start disagreeing.
-    const drafts = _mergeDrafts(chatState?.drafts, carrier)
+    const drafts = _mergeDrafts(chatState?.drafts, carrier, chatState?.draft)
 
     const readiness = carrier ? setupReadiness(carrier, (accounts?.length ?? 0) > 0) : null
 
@@ -595,16 +610,42 @@ export function _buildLedgerSection(chatState) {
  *
  * Pure.
  */
-export function _mergeDrafts(prior, carrier) {
+export function _mergeDrafts(prior, carrier, lastDraft = null) {
     const out = {}
     // Re-normalised on the way in, and keyed by the asset the DOCUMENT says rather than by the key
     // it arrived under: this came back through a client, and the two could disagree.
-    for (const draft of Object.values(prior ?? {})) {
+    //
+    // `lastDraft` is what makes a second name possible at all. The client only holds a `drafts` map
+    // once the server has sent one, and the server only sends one at two names — so on the turn the
+    // user says "now AMD", the NVDA plan exists ONLY as the draft being sent back, and seeding from
+    // `prior` alone dropped it. That is the bug that made "Generate all" unreachable.
+    for (const draft of [...Object.values(prior ?? {}), lastDraft]) {
+        if (!draft) continue
         const normalized = normalizeSetup(draft)
-        if (normalized?.asset) out[normalized.asset] = normalized
+        if (!normalized?.asset) continue
+        // normalizeSetup returns a fixed shape, so the gate content and the money would be stripped
+        // off every parked plan on each round trip — leaving the ledger saying `spans` are settled
+        // with nothing behind them. Carried explicitly; the LEDGER is not, because one build has one.
+        for (const key of ['spans', 'entries', 'summary']) {
+            if (draft[key]) normalized[key] = draft[key]
+        }
+        out[normalized.asset] = normalized
     }
     if (carrier?.asset) out[carrier.asset] = carrier
     return out
+}
+
+/**
+ * The summary stage's claim: what the user is being shown, once there is money to show.
+ *
+ * Read off the PREVIOUS turn's draft rather than this one's, because the claim has to exist before
+ * the model can settle it, and both happen in the same turn: the figures were computed last turn,
+ * presented in that reply, and this turn's `settle` is the user agreeing with what they read.
+ */
+function _summaryClaim(draft) {
+    const s = draft?.summary
+    if (!s || (s.gainCash == null && s.lossCash == null)) return null
+    return { summary: { rr: s.rr ?? null, gain: s.gainCash ?? null, loss: s.lossCash ?? null, estimated: Boolean(s.estimated) } }
 }
 
 /** Ledger values are short by construction; a list is summarised rather than spelled out. */
