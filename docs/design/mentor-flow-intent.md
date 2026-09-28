@@ -968,3 +968,30 @@ entry arms no guard and is read on every candle close by the cheap tier — the 
 money, which is the one thing it must not do.
 
 Suites: backend 3661/0, frontend 1112/1112.
+
+## Phase 8a — revise vs cancel, and Generate all (DONE, backend)
+**REVISE or CANCEL (#17).** The re-entry section of the prompt is rewritten around the one question
+that decides which conversation this is: *do the DIRECTION and the HORIZON still stand?* Yes →
+revise, and the opening stays settled while the build reopens at `spans` (or `entries` when only
+the way in moved). No → cancel: say the thesis broke, and do not re-draw a trade that no longer
+exists; a new one on the same name starts at `opening`.
+
+No new mechanism was needed — the cascade from phase 1 IS the re-entry, and Talos's cards already
+carry the user back with the plan loaded. What was missing was the TEST and the two different
+answers to it.
+
+**Generate all** — `POST /api/setups/generate-all`, capped at 10 (the ledger's own name cap).
+Sequential, not parallel: each generate resolves accounts and checks the venue, and a burst of
+those against one broker is how you get rate-limited into a false refusal. **Partial success is the
+contract**: three of four saving returns 200 with `{saved, failed}`, the three are monitored, and
+the fourth comes back with its reason and its index. Rolling back finished work because a later one
+was unsized would throw away what the user did; an error status would tell the client to discard a
+response carrying real documents.
+
+Suite 3668/0.
+
+### Still open for phase 8b
+- **The client carries ONE draft.** A multi-name build needs N, plus a list in the panel and a
+  Generate-all button; the endpoint above is ready for it.
+- **Social-chat batch intake** (#16): a DM carrying several setups, taken down as one batch. Setup
+  sharing (2026-09-21) is the ground to build on; what is new is the multi-setup message.

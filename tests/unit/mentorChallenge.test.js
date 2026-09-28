@@ -51,9 +51,21 @@ test('the gate the prompt claims matches the gate the code runs', () => {
     assert.match(gate, /`on_away`/, 'the readiness list does not mention the runaway answer')
 })
 
-test('the runaway arrival tells the model not to inherit the old numbers', () => {
-    const section = PROMPT.split('### Arriving from a runaway')[1]?.split('\n## ')[0] ?? ''
-    assert.ok(section.length > 800, 'the runaway arrival section is missing')
+test('coming back from a card asks REVISE or CANCEL before anything else', () => {
+    const section = PROMPT.split('### Coming back to a setup Talos raised')[1]?.split('\n## ')[0] ?? ''
+    assert.ok(section.length > 800, 'the re-entry section is missing')
+
+    // The one question that decides which conversation this is (mentor-flow-intent #17).
+    assert.match(section, /Do the DIRECTION and the HORIZON still stand/)
+    // A revise keeps the opening settled and reopens below it; a cancel starts again from the top.
+    assert.match(section, /Yes → REVISE[\s\S]{0,400}unsettle":"spans/)
+    assert.match(section, /No → CANCEL[\s\S]{0,400}unsettle":"opening/)
+    assert.match(section, /do not re-draw a trade that no longer exists/)
+})
+
+test('the re-entry tells the model not to inherit the old numbers', () => {
+    const section = PROMPT.split('### Coming back to a setup Talos raised')[1]?.split('\n## ')[0] ?? ''
+    assert.ok(section.length > 800, 'the re-entry section is missing')
 
     // The four load-bearing instructions. Each one is a specific way a redraw goes wrong: a level
     // quoted from the dead conversation, a cascade nobody asked for, an inherited target that turns a
@@ -64,8 +76,8 @@ test('the runaway arrival tells the model not to inherit the old numbers', () =>
     assert.match(section, /1R floor does not move because they missed the trade/)
 })
 
-test('the runaway arrival gets the sibling map right', () => {
-    const section = PROMPT.split('### Arriving from a runaway')[1]?.split('\n## ')[0] ?? ''
+test('the re-entry gets the sibling map right', () => {
+    const section = PROMPT.split('### Coming back to a setup Talos raised')[1]?.split('\n## ')[0] ?? ''
     // Prose against `SIBLINGS`: a prompt that offered a continuation where the code says there is
     // none would walk the user into a reversal wearing the missed trade's label.
     for (const [from, to] of Object.entries(SIBLINGS)) {

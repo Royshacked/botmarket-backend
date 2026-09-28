@@ -2,13 +2,14 @@ import express from 'express'
 
 import { log }         from '../../middleware/logger.middleware.js'
 import { requireAuth } from '../../middleware/auth.middleware.js'
-import { generateSetup, hydrateBlueprint, validateDraft, listSetups, getSetup, getSetupJournal, patchSetup, deleteSetup, actOnSetup, disarmSetupEntry, shareSetup } from './setups.controller.js'
+import { generateSetup, generateSetups, hydrateBlueprint, validateDraft, listSetups, getSetup, getSetupJournal, patchSetup, deleteSetup, actOnSetup, disarmSetupEntry, shareSetup } from './setups.controller.js'
 
 const router = express.Router()
 
 router.use(requireAuth)
 
 router.post('/generate', log, generateSetup)
+router.post('/generate-all', log, generateSetups)   // one press, N names — partial success by contract
 // Read-only despite the verb: a blueprint is a body, not an id, so it cannot be a GET. Nothing is
 // written — it turns a portable plan into a draft the form can render. Above `/:id` so the literal
 // segment is never swallowed by the id route.
