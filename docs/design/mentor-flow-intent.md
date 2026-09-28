@@ -853,3 +853,20 @@ chart-img fallback served the render, because that renderer cannot draw them at 
 the SHARED get_chart, so portfolio, scanner, kairos and mentor all see it.
 
 Suite 3605/0. Still to come for this phase: the FE table card (4c).
+
+## Phase 4c — the gate's own card (DONE, frontend)
+`botmarket-frontend/src/cmps/MentorPanel/SpanTable.jsx` + `.scss` + tests, mounted in
+`MentorPanel` where the candidate picker sits, reading `pendingSetup.spans` (the spans ride on the
+draft, so there is no parallel state to fall out of step).
+
+Rows, not cards, and deliberately NOT the CandidatePicker beside it: that offers complete
+alternative PLANS and picking one replaces the worksheet, while this offers the trade itself and
+picking one says which trades are worth building mechanics for. Prices render only when the data
+has them. The invalidation gets its own line. The rejects are folded, one clause each, and
+clickable.
+
+Both gate actions SPEAK — they send a message rather than setting state — because the ledger only
+moves on a `<build>` emit, so a silent local change would leave the server holding an open gate.
+
+FE suite 1099/1099; bundle rebuilt into `botmarket-backend/public` (prod ships the committed build).
+Pre-existing FE lint warnings on main are untouched and none are in the new files.
