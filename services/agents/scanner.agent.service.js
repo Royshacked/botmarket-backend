@@ -219,6 +219,15 @@ const RADAR_CONTEXT = 'ACTIVE MODE: RADAR CUT — the Events radar handed you th
     + 'RADAR CUT MODE module is in force: it replaces the discovery half of the spine. Phases 1-2 are '
     + 'already done, you start at Phase 3, and you cut to the few names worth watching in the coming week.'
 
+// What each repricing state is called in front of the model. Written as verdicts rather than as data,
+// because the row is read once and skimmed: "TAKEN" says leave it in a way "+8.4%" never did.
+const REPRICING_LABEL = {
+    not_yet: 'NOT YET — the move is still ahead',
+    taken:   'TAKEN — the market has already made this move',
+    against: 'AGAINST — the market moved the other way from the claim',
+    unknown: 'NOT MEASURED — no move on record, which is not the same as "not yet"',
+}
+
 /**
  * The dated facts on one row, as the cut needs to read them.
  *
@@ -241,6 +250,13 @@ function _radarFacts(c) {
     // dates are in the thesis; this is when the board stops carrying the name at all.
     if (c.expires) out.push(`board window to ${c.expires}`)
     if (c.price != null) out.push(`$${c.price}${c.priceAsOf ? ` (${c.priceAsOf})` : ''}`)
+    // HOW FAR THROUGH THE REPRICING, computed server-side and signed into the claim's own direction
+    // (aetherScanUniverse.repricingOf), because this is the judgment the prompt could not get made:
+    // three cuts in a row kept the most extended names on the board and the read refused them all as
+    // `priced_in`. It is a label now, not a derivation. NOT MEASURED is deliberately not "not yet" —
+    // nobody has looked, which is a maybe, not a green light.
+    out.push(`REPRICING: ${REPRICING_LABEL[c.repricing?.state] ?? 'NOT MEASURED'}`
+        + (c.repricing?.pct != null ? ` (${c.repricing.pct >= 0 ? '+' : ''}${c.repricing.pct.toFixed(1)}% the claim's way)` : ''))
     return out.join(' · ')
 }
 

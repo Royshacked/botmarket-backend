@@ -112,28 +112,27 @@ A name leaves the list here for any of three reasons, and each is a real answer:
   move is over. A name that has made its move is a post-mortem. Say so and leave it off.
 - **cannot be traded** — too thin, too cheap, a spread that eats the move.
 
-### Relative strength is a CLOCK here, not a score
+### REPRICING is on every row. Read it; do not re-derive it
 
-This is the one rule the spine gives you that this board inverts, and getting it backwards is not a
-small error: it selects precisely the names the read after you will refuse. Take the move each name has
-made since its event and read it as *how far through the repricing the market already is*.
+This is the one rule the spine gives you that this board inverts, and getting it backwards selects
+precisely the names the read after you will refuse. So it is not left to you to work out: **every row
+carries a `REPRICING:` verdict**, computed from the move the name has made since its event, signed into
+the direction its claim implies. A HURT name is supposed to FALL, so a fall is its move being made.
 
-**READ THE MOVE IN THE DIRECTION THE CLAIM IMPLIES**, not as "up is good". A name Aether called HURT is
-supposed to fall; one it called HELPED is supposed to rise. So "has it moved yet" means moved THAT way:
+| the row says | what it means | what you do |
+|---|---|---|
+| **NOT YET** | the move is still ahead of the market | **this is what you are looking for.** A live claim, structure to work against, the repricing to come |
+| **TAKEN** | the market has already made this move | **do not keep it.** This is what `priced_in` means and the read WILL refuse it — you are spending a list slot to be told no |
+| **AGAINST** | the market moved the other way from the claim | it saw the same event and voted against it. Leave it; the read settles whether the thesis is actually wrong |
+| **NOT MEASURED** | no move on record | a maybe, NOT a green light. Nobody has looked, so the chart is all you have — judge it on structure alone and say the move is unmeasured |
 
-| the move since the event | HELPED claim | HURT claim | what it means |
-|---|---|---|---|
-| gone the claim's way, hard | up a lot | down a lot | **LATE** — the market has looked. `priced_in`, and the read will say so. Do not spend a list slot finding out. |
-| barely moved | flat | flat | **EARLY** — the best row on the board: a live claim, structure to work against, the repricing still ahead. |
-| gone the other way | down | up | **the market DISAGREES** — it saw the same event and voted against it. Leave it; the read settles whether the thesis is actually wrong. |
+The board is ordered on this, so the names you want are at the top. Nothing is removed: if you want to
+report "19 already taken" in your funnel counts, they are all still there to count.
 
-A falling chart is therefore not a bad sign on a HURT name — it is confirmation, and the same chart on a
-HELPED name is the market voting against the claim. Do not read "breaking down" as bad until you have
-checked which way the claim points.
-
-So two names with the same mechanism are not equally tradeable — but **the one whose move has already
-happened is the WEAKER candidate here**, not the stronger. Never keep a name because it is leading, and
-never rank the list by outperformance.
+**So never keep a name because it is leading, and never rank the list by outperformance.** On this board
+outperformance since the event is the evidence the opportunity has gone. Two names with the same
+mechanism are not equally tradeable — and the one whose move has already happened is the WEAKER
+candidate here, not the stronger.
 
 **The list may hold shorts.** A HURT claim the tape confirms is a short, emitted with
 `direction: "short"`, and the list-level `direction` is `"mixed"`. You are still not FILTERING on the

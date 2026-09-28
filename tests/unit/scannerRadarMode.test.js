@@ -200,9 +200,11 @@ const BOARD = {
     held: 12,
     candidates: [
         { ticker: 'NUE', company: 'Nucor', thesis: 'HURT by Canada (2026-09-20) — imports steel',
-          earnings: { date: '2026-10-22', epsEstimate: 1.4 }, expires: '2026-11-01', price: 148.2, priceAsOf: '2026-09-25' },
+          earnings: { date: '2026-10-22', epsEstimate: 1.4 }, expires: '2026-11-01', price: 148.2, priceAsOf: '2026-09-25',
+          repricing: { state: 'not_yet', pct: 0.4 } },
         { ticker: 'XOM', company: 'Exxon', thesis: 'HELPED by Hormuz', returning: true,
-          earnings: null, expires: '2026-11-06', price: 118, priceAsOf: '2026-09-25' },
+          earnings: null, expires: '2026-11-06', price: 118, priceAsOf: '2026-09-25',
+          repricing: { state: 'taken', pct: 8.4 } },
     ],
 }
 
@@ -285,7 +287,7 @@ test('the second pass names the vision tools as its LAST rung, capped at two or 
 // selected precisely the names guaranteed to be refused two steps later, and a live run proved it: MU
 // (+8.4% vs SPY), AMAT (+5.8%) and TSM (+4.8%) were kept by the tape and all three came back priced_in,
 // leaving a list of zero.
-test('the module inverts "relative strength decides" and says why, in the header AND the second pass', () => {
+test('the module inverts "relative strength decides", and hands the judgment over as a LABEL', () => {
     // The header cannot let the spine's rule through unqualified — that is where it was inherited.
     const header = RADAR.slice(0, RADAR.indexOf('## What this mode overrides'))
     assert.match(header, /Relative strength does not decide here/)
@@ -294,21 +296,28 @@ test('the module inverts "relative strength decides" and says why, in the header
 
     const second = RADAR.slice(RADAR.indexOf('## SECOND PASS'), RADAR.indexOf('## THIRD PASS'))
     assert.match(second, /a setup that has not fired yet/)
-    assert.match(second, /Relative strength is a CLOCK here, not a score/)
-    // All three readings of the clock, because the naive inversion — "prefer the weakest" — is just the
-    // same mistake pointing the other way.
-    // DIRECTION-AWARE, because the first version of the clock was long-biased: "breaking down" was
-    // written as a bad sign, which on a HURT claim is confirmation.
-    assert.match(second, /READ THE MOVE IN THE DIRECTION THE CLAIM IMPLIES/)
-    assert.match(second, /\*\*LATE\*\*/)
-    assert.match(second, /\*\*EARLY\*\*/)
-    assert.match(second, /the market DISAGREES/)
-    assert.match(second, /A falling chart is therefore not a bad sign on a HURT name/)
+
+    // THE JUDGMENT IS NOT ASKED FOR ANY MORE. Three cuts in a row applied this backwards — keeping MU
+    // at +8.4% and TSM at +4.8% past their events, twice, both refused as `priced_in` minutes later,
+    // while 42 names with no move made sat on the same board. The row carries the verdict now and the
+    // prompt is a lookup, which is the only version of this that has not failed.
+    assert.match(second, /REPRICING is on every row\. Read it; do not re-derive it/)
+    for (const state of ['NOT YET', 'TAKEN', 'AGAINST', 'NOT MEASURED']) {
+        // includes, not a regex: the labels are bolded in the markdown and `**` needs escaping that is
+        // easy to get wrong for no benefit — the assertion is a literal string either way.
+        assert.ok(second.includes(`**${state}**`), `${state} must be in the lookup table`)
+    }
+    assert.match(second, /this is what you are looking for/)
+    assert.match(second, /do not keep it/)
+    // NOT MEASURED is the trap: ISRG survived a cut by having no measured move rather than by being early.
+    assert.match(second, /a maybe, NOT a green light/)
+    // The direction-signing is what makes the label mean anything on a HURT name.
+    assert.match(second, /A HURT name is supposed to FALL/)
+    assert.match(second, /never rank the list by outperformance/)
+    assert.match(second, /the one whose move has already\s+happened is the WEAKER\s+candidate here/)
     // …and the list may hold what that produces.
     assert.match(second, /The list may hold shorts/)
     assert.match(second, /direction: "short"/)
-    assert.match(second, /the one whose move has already\s+happened is the WEAKER candidate here/)
-    assert.match(second, /never rank the list by outperformance/)
 })
 
 // The failure had a signature — a full list that comes back entirely refused — so the diagnostic list
@@ -318,4 +327,22 @@ test('the short-list diagnostics name the priced_in wipeout and point at its cau
     assert.match(why, /refused all of it as `priced_in`/)
     assert.match(why, /you selected on outperformance/)
     assert.match(why, /structure WITHOUT the\s+move/)
+})
+
+// The verdict has to REACH the model, not merely exist on the row — this is the fact three prompt
+// versions failed to get derived, so the rendering is the load-bearing part.
+test('every board row shows its REPRICING verdict, signed and named', async () => {
+    const tail = (await call({ radar: true, radarBoard: BOARD })).systemPrompt[2].text
+    assert.match(tail, /NUE .*REPRICING: NOT YET — the move is still ahead \(\+0\.4% the claim's way\)/)
+    assert.match(tail, /XOM .*REPRICING: TAKEN — the market has already made this move \(\+8\.4% the claim's way\)/)
+})
+
+// A row with no repricing at all must not render as "not yet" — that is the gap ISRG survived through.
+test('a row with no repricing renders NOT MEASURED, never NOT YET', async () => {
+    const board = { runs: 1, candidates: [{ ticker: 'ISRG', thesis: 'HELPED by tariff relief' }] }
+    const tail  = (await call({ radar: true, radarBoard: board })).systemPrompt[2].text
+    assert.match(tail, /REPRICING: NOT MEASURED/)
+    assert.doesNotMatch(tail, /REPRICING: NOT YET/)
+    // …and with no number attached, since there is nothing measured to show.
+    assert.doesNotMatch(tail, /NOT MEASURED.*the claim's way/)
 })

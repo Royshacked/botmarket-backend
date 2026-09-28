@@ -602,7 +602,15 @@ services/
                             price, the move vs SPY. Those were Argus's first two tool calls, 116 wide and
                             mid-stream, and losing them once cut a 116-name board to one name. A missing
                             `earnings` key is "calendar unreadable", null is "nothing scheduled" — the
-                            pair survives the JSON round trip to the browser and back, a sentinel would not
+                            pair survives the JSON round trip to the browser and back, a sentinel would not.
+                            + repricingOf: how far through its move the market already is, SIGNED INTO the
+                            claim's direction (a HURT name is meant to FALL, so -8% is the move being
+                            TAKEN — excess_pct alone cannot say which). taken/not_yet/against/unknown at
+                            REPRICED_PCT 3%, off the best-ranked claim that HAS a measured move; the board
+                            SORTS on it (not_yet, unknown, against, taken, then rank). Computed here
+                            because the prompt could not get it derived — three cuts kept the most extended
+                            names and the read refused them all as priced_in, with 51 unmoved names on the
+                            same board. `unknown` is 32 of 116 and must never read as not_yet
   aetherBatchRead.service.js  The quick read over a WHOLE radar list, and the cut that follows it:
                             contradicted and priced_in are out, unclear and unread ship FLAGGED, then
                             the longs cut on the read's `net` where it has one and Aether's `side`

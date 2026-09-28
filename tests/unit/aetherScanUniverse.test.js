@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
-    buildUniverse, priorScanState, thesisLine, getScanUniverse, SCAN_SOURCE, UNIVERSE_DAYS,
+    buildUniverse, priorScanState, thesisLine, repricingOf, getScanUniverse, SCAN_SOURCE, UNIVERSE_DAYS,
 } from '../../services/aetherScanUniverse.service.js'
 
 // The radar → Argus universe and the rule that stops a name being scanned every day.
@@ -326,4 +326,87 @@ test('an unusable price is no price, not NaN', () => {
                       { ticker: 'B', price_latest: 0,     price_asof: '2026-09-25' }] }),
     ], [])
     for (const c of candidates) assert.equal(c.price, null, `${c.ticker} kept an unusable price`)
+})
+
+// ── REPRICING: how far through its move the market already is ─────────────────
+// Computed here because the prompt could not get it applied: three cuts in a row kept the most extended
+// names on the board — MU at +8.4% and TSM at +4.8% past their events, twice — and the read refused all
+// of them as `priced_in` minutes later, while 42 names with no move made sat on the same board. A rule
+// the model must remember is a rule it can skip; a label on the row is a fact it reads.
+
+const claim = (side, excess, rank = 1) => ({ side, excess_pct: excess, rank, expires_at: '2026-11-01' })
+
+test('a HELPED claim that has RISEN has had its move taken', () => {
+    const { state, pct } = repricingOf([claim('helped', 0.084)])
+    assert.equal(state, 'taken')
+    // A tolerance, not equality: the percentage is a float multiply and pinning its last bit tests IEEE
+    // rather than the classifier.
+    assert.ok(Math.abs(pct - 8.4) < 1e-9, `pct was ${pct}`)
+})
+
+// THE SIGN IS THE WHOLE POINT. A HURT name is supposed to FALL, so a fall is the move being MADE — read
+// unsigned, -8% looks like weakness and would be mistaken for an opportunity.
+test('a HURT claim that has FALLEN has ALSO had its move taken', () => {
+    assert.equal(repricingOf([claim('hurt', -0.084)]).state, 'taken')
+})
+
+test('moving the wrong way for the claim is the market disagreeing, either side', () => {
+    assert.equal(repricingOf([claim('helped', -0.06)]).state, 'against')
+    assert.equal(repricingOf([claim('hurt',    0.06)]).state, 'against')
+})
+
+test('barely moved either way is the row worth having', () => {
+    for (const c of [claim('helped', 0.004), claim('hurt', -0.004), claim('helped', -0.02), claim('hurt', 0.02)]) {
+        assert.equal(repricingOf([c]).state, 'not_yet', JSON.stringify(c))
+    }
+})
+
+// UNKNOWN IS NOT "NOT YET" — 42 of the live board's 116 rows have no measured move, and ISRG survived a
+// cut by falling into that gap rather than by being early.
+test('no measured move is UNKNOWN, never not_yet', () => {
+    assert.deepEqual(repricingOf([claim('helped', null)]), { state: 'unknown', pct: null })
+    assert.deepEqual(repricingOf([]), { state: 'unknown', pct: null })
+    // A side that cannot be signed cannot be read either — mixed/blank is not a direction.
+    assert.equal(repricingOf([claim('', 0.08)]).state, 'unknown')
+    assert.equal(repricingOf([claim('mixed', 0.08)]).state, 'unknown')
+})
+
+test('the strongest claim that HAS a move decides, not the strongest claim full stop', () => {
+    const claims = [claim('helped', null, 9), claim('hurt', -0.07, 4)]
+    assert.equal(repricingOf(claims).state, 'taken', 'an unmeasured top claim must not blind the whole name')
+})
+
+test('the row carries it, and the thesis still carries the raw move', () => {
+    const { candidates } = buildUniverse([
+        run({ names: [{ ticker: 'MU', side: 'helped', excess_pct: 0.084 }] }),
+    ], [])
+    assert.equal(candidates[0].repricing.state, 'taken')
+    assert.match(candidates[0].thesis, /moved 8\.4% vs SPY since/)
+})
+
+// The ORDER is a nudge, not a filter: a hundred rows is more than anyone reads evenly, and the names
+// worth the tape were scattered through it.
+test('the board leads with not_yet, then unmeasured, then against, then taken', () => {
+    const { candidates } = buildUniverse([
+        run({ names: [
+            { ticker: 'TAKEN',   side: 'helped', excess_pct: 0.09,  rank: 9 },
+            { ticker: 'AGAINST', side: 'helped', excess_pct: -0.09, rank: 9 },
+            { ticker: 'UNKNOWN', side: 'helped', excess_pct: null,  rank: 9 },
+            { ticker: 'NOTYET',  side: 'helped', excess_pct: 0.001, rank: 1 },
+        ] }),
+    ], [])
+    assert.deepEqual(candidates.map(c => c.ticker), ['NOTYET', 'UNKNOWN', 'AGAINST', 'TAKEN'])
+    // …and NOTYET led on its state despite having the WORST rank, which is the point of the change.
+    assert.equal(candidates[0].rank, 1)
+})
+
+test('rank still breaks ties inside a state, so the order is total and repeatable', () => {
+    const { candidates } = buildUniverse([
+        run({ names: [
+            { ticker: 'LOW',  side: 'helped', excess_pct: 0.001, rank: 1 },
+            { ticker: 'HIGH', side: 'helped', excess_pct: 0.001, rank: 9 },
+            { ticker: 'MID',  side: 'helped', excess_pct: 0.001, rank: 5 },
+        ] }),
+    ], [])
+    assert.deepEqual(candidates.map(c => c.ticker), ['HIGH', 'MID', 'LOW'])
 })

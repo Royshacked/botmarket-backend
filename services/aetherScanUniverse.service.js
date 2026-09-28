@@ -56,6 +56,19 @@ const MECHANISM_CHARS = 220
 /** At most this many events per name are spelled out; the rest are counted. */
 const MAX_CLAIMS = 3
 
+/**
+ * How far a name has to have moved, in its claim's own direction, before the move counts as MADE.
+ *
+ * Three percent of excess return vs SPY. Measured against the live board rather than picked: it splits
+ * the hundred and sixteen names into 42 not-yet / 19 taken / 13 against / 42 unmeasured, which are
+ * workable sizes for every bucket. Tighter and the not-yet pile starts holding names that have quietly
+ * gone; looser and the pile Argus is told to reject stops being worth naming.
+ */
+const REPRICED_PCT = 0.03
+
+/** Which repricing states lead the board. See the sort in buildUniverse. */
+const REPRICING_ORDER = { not_yet: 0, unknown: 1, against: 2, taken: 3 }
+
 const SIDE = s => (s === 'hurt' ? 'HURT' : s === 'helped' ? 'HELPED' : 'MIXED')
 
 const clip = (s, n) => {
@@ -211,16 +224,70 @@ export function buildUniverse(runs = [], priorLists = []) {
             expires: entry.claims.reduce((f, c) => (c.expires_at > f ? c.expires_at : f), ''),
             price:   entry.price ?? null,
             priceAsOf: entry.priceAsOf || null,
+            // How far through its repricing the market already is — the single most decision-relevant
+            // fact on the row, and the one the prompt could not get Argus to derive (see repricingOf).
+            repricing: repricingOf(entry.claims),
             // Back on the board because an event they have not seen named it, not because it was
             // never scanned. The seed says so, so a name the user recognises arrives explained.
             returning: was || undefined,
         })
     }
 
-    // Best-evidenced first, then the name, so two runs of the same board order identically.
-    candidates.sort((a, b) => b.rank - a.rank || a.ticker.localeCompare(b.ticker))
+    // REPRICING FIRST, then best-evidenced, then the name — still totally ordered, so two runs of the
+    // same board come out identical.
+    //
+    // The order is a nudge, not a filter: nothing is removed, and Argus can still report "19 already
+    // taken" in its funnel counts. But a hundred rows is more than anyone reads evenly, and the names
+    // worth the tape were scattered through it — which is how a cut came back holding the two most
+    // extended names on the board while forty-two untouched ones sat below them. Unmeasured ranks
+    // second and not last: "nobody has measured this" is a maybe, where "the move is made" is a no.
+    candidates.sort((a, b) =>
+        REPRICING_ORDER[a.repricing.state] - REPRICING_ORDER[b.repricing.state]
+        || b.rank - a.rank
+        || a.ticker.localeCompare(b.ticker))
     skipped.sort((a, b) => a.ticker.localeCompare(b.ticker))
     return { candidates, skipped, runs: runs.length, runIds }
+}
+
+/**
+ * How much of a claim's move the market has already made. PURE.
+ *
+ * WHY THIS IS COMPUTED HERE AND NOT ASKED OF THE MODEL. It is one subtraction and a sign flip, and the
+ * prompt asked Argus to do it three times in a row and got it wrong three times in a row — keeping MU
+ * at +8.4% and TSM at +4.8% past their events, twice, both refused as `priced_in` by the read minutes
+ * later, while forty-two names sat on the same board with no move made. A rule the model must remember
+ * and apply is a rule it can skip; a label on the row is a fact it reads. Same move that fixed the
+ * earnings dates and the price.
+ *
+ * SIGNED INTO THE CLAIM'S DIRECTION, which is the part that is easy to get backwards: a HURT name is
+ * supposed to FALL, so -6% on a HURT claim is the move being taken, and +6% is the market voting
+ * against it. `excess_pct` alone cannot say which — only `side` can.
+ *
+ * THE BEST-RANKED CLAIM DECIDES when a name is reached more than once, the same rule the row's run id
+ * follows. Nine of this board's names carry claims that disagree with each other, so one name's "taken"
+ * is another claim's "against"; the read settles that later with every event in front of it, and this is
+ * a screen, not a verdict.
+ *
+ * UNKNOWN IS NOT "NOT YET". Forty-two of a hundred and sixteen rows carry no measured move at all, and
+ * a name that survived because nobody measured it has not earned anything. They render differently and
+ * sort differently for that reason.
+ *
+ * @returns {{state: 'taken'|'not_yet'|'against'|'unknown', pct: ?number}}
+ */
+export function repricingOf(claims = []) {
+    // The strongest claim that HAS a measurable move, rather than the strongest claim full stop: a
+    // top-ranked row with no price history would otherwise make the whole name unreadable.
+    const c = claims.find(x => x.excess_pct != null && (x.side === 'helped' || x.side === 'hurt'))
+    if (!c) return { state: 'unknown', pct: null }
+
+    // Into the claim's direction: a HURT claim paying off is a FALL.
+    const toward = c.side === 'hurt' ? -Number(c.excess_pct) : Number(c.excess_pct)
+    if (!Number.isFinite(toward)) return { state: 'unknown', pct: null }
+
+    const pct = toward * 100
+    if (toward >=  REPRICED_PCT) return { state: 'taken',   pct }
+    if (toward <= -REPRICED_PCT) return { state: 'against', pct }
+    return { state: 'not_yet', pct }
 }
 
 /**

@@ -96,6 +96,17 @@ was ever read.
    movement with a breaking chart means DISAGREED WITH, not early — the naive inversion, "prefer the
    weakest", is the same mistake pointing the other way. What the pass looks for is a setup that has not
    fired yet.
+
+   **AND THE JUDGMENT IS A LABEL, not a rule the model applies.** Three prompt versions failed at it: the
+   cut kept MU (+8.4% vs SPY past its event) and TSM (+4.8%) twice, the read refused both as `priced_in`
+   both times, and 51 names with no move made were sitting on the same board. So `repricingOf` computes it
+   server-side and every row arrives carrying `REPRICING: NOT YET / TAKEN / AGAINST / NOT MEASURED`, signed
+   into the claim's own direction — a HURT name is meant to FALL, so −8% is its move being TAKEN, and
+   `excess_pct` alone cannot tell you which. The board sorts on it too (not_yet → unknown → against →
+   taken, then rank), which is a nudge and not a filter: nothing is removed and the funnel counts can still
+   say "20 already taken". After the change MU sits at row 99 of 116 and TSM at row 116. `NOT MEASURED` is
+   32 of the 116 and is deliberately not `NOT YET` — ISRG survived a cut by falling into that gap rather
+   than by being early.
 3. **Is the event still tradeable**, on survivors only — and the point is that it is not a hunt. The
    event each name arrived on IS its catalyst: dated, mechanism-verified against the company's filings,
    and carrying the date the claim is graded on. What is different about this board is that the event
