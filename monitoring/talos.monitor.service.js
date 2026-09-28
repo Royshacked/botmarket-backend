@@ -148,7 +148,14 @@ export async function _checkSetup(setup, nowMs, deps = _deps) {
     const breached = await _checkValidity(setup, price, nowMs, deps)
     if (breached) return breached
 
-    const reason = expiring ? 'expiry_review'
+    // THE CLOCK EXIT. `valid_until` kills a setup that never filled; this closes a position that
+    // DID — "out before earnings", "flat by the close" — and it is the one exit the chart cannot
+    // fire. It outranks a fired guard, because a guard is a level and this is a deadline the user
+    // set: reading it as an ordinary candle wake would let the tier triage it away.
+    const timeExit = _isTimeExit(setup, nowMs)
+
+    const reason = timeExit ? 'time_exit'
+        : expiring ? 'expiry_review'
         : woke ? 'guard'
         : !setup.monitor_state?.last_assessment ? 'first_look'
         : 'candle'
@@ -728,6 +735,19 @@ export const _hasEditProposal = hasEditProposal
 export const _isPreActive  = isPreActive
 export const _isPastExpiry = isPastExpiry
 export const _isExpiring   = (setup, nowMs) => isExpiring(setup, nowMs, EXPIRY_THRESHOLD_MS)
+
+/**
+ * Has the authored time exit come round on a position that is actually open?
+ *
+ * Only in position: a `time_exit` on a setup that never filled has nothing to close, and
+ * `valid_until` is what retires that one. Pure.
+ */
+export const _isTimeExit = (setup, nowMs) => {
+    // `long` / `short` ARE the in-position statuses at this desk; `waiting` and `hit` are pre-entry.
+    if (!setup?.time_exit || (setup.status !== 'long' && setup.status !== 'short')) return false
+    const at = Date.parse(setup.time_exit)
+    return Number.isFinite(at) && nowMs >= at
+}
 
 /**
  * A setup does NOT spare `edit` from the past-expiry cutoff. Talos latches on the branch that fires

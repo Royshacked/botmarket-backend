@@ -12,7 +12,7 @@
  * Pure. No clock, no I/O.
  */
 
-import { computeRR, stopEdge, targetLevels, legPrice } from './setup.schema.js'
+import { computeRR, stopEdge, targetLevels, legPrice, legReference } from './setup.schema.js'
 import { riskPerUnit, resolveSize } from './positionSize.util.js'
 
 const num = (v) => (v === null || v === '' || v === undefined ? NaN : Number(v))
@@ -28,8 +28,13 @@ const pctOf = (cash, balance) => (Number.isFinite(cash) && balance > 0 ? round2(
  * no number at all is just unhelpful.
  */
 export function summaryEntry(setup, livePrice = null) {
-    const authored = legPrice(setup?.entry_legs?.[0])
+    const leg      = setup?.entry_legs?.[0]
+    const authored = legPrice(leg)
     if (Number.isFinite(authored)) return { entry: authored, estimated: false }
+    // A trigger entry's own rough fill comes first: Mentor had a quote when it authored the plan,
+    // and that is a better stand-in than whatever the price happens to be on this turn.
+    const about = legReference(leg)
+    if (about != null) return { entry: about, estimated: true }
     const live = num(livePrice)
     return Number.isFinite(live) && live > 0 ? { entry: live, estimated: true } : { entry: null, estimated: true }
 }
@@ -123,7 +128,9 @@ export function applySizing(setup, sizing, { balance = null, multiplier = 1 } = 
         const view = { direction: setup.direction, ...sc }
         const out  = resolveSize({
             unit, value, multiplier, balance,
-            entry: legPrice(sc.entry_legs?.[0]),
+            // legReference, not legPrice: a trigger entry has no order price but does carry a
+            // rough fill, and without it "risk 1%" would be refused on a perfectly good plan.
+            entry: legReference(sc.entry_legs?.[0]),
             stop:  stopEdge(view),
         })
         if (out.problem) problems.push(`${sc.id ?? 'the premise'}: ${out.problem}`)

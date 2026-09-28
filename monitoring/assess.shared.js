@@ -298,7 +298,19 @@ export function indicatorsText(asset, bars, tf) {
  */
 export function legText(zone) {
     const price = legPrice(zone)
-    if (price == null) return null
+    // A TRIGGER entry has no price and is still the whole way in: "RSI back above 30 on the 15m",
+    // fulfilled → confirm at market (docs/design/mentor-flow-intent.md #7). Returning null for it,
+    // as this did while every leg was a price, made the entry INVISIBLE to the read that judges it
+    // — the setup would be monitored for an entry the prompt never mentioned.
+    if (price == null) {
+        const trigger = typeof zone?.trigger === 'string' && zone.trigger.trim() ? zone.trigger.trim() : null
+        if (!trigger) return null
+        const bits = [`[${zone?.id ?? '?'}] ON TRIGGER: ${trigger}`]
+        if (zone?.timeframe) bits.push(`(read on the ${zone.timeframe})`)
+        if (Number.isFinite(Number(zone?.quantity)) && Number(zone.quantity) > 0) bits.push(`(size ${zone.quantity})`)
+        bits.push('— no price: when this is true, the entry is AT MARKET')
+        return bits.join(' ')
+    }
     const bits = [`[${zone?.id ?? '?'}] at ${price}`]
     if (Number.isFinite(Number(zone?.quantity)) && Number(zone.quantity) > 0) bits.push(`(size ${zone.quantity})`)
     if (zone?.conditions?.length) bits.push('· conditional')

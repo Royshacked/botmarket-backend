@@ -394,6 +394,47 @@ band was the order that actually rested (`zoneExitLevel`, long → `lower`), so 
 user put at 306 to 305.2–306.4 quietly rested it at 305.2, more risk than they agreed to. With no
 bands there is no edge to pick, and a stop is where the user put it.
 
+### An entry need not be a price (2026-09-28)
+
+> **BUILT 2026-09-28**, phase 7 of [design/mentor-flow-intent.md](../design/mentor-flow-intent.md).
+> The principle: *we are not bound to prices*. Mentor authors what actually moves the ticker and
+> Talos watches what Mentor said.
+
+An ENTRY leg may carry `{ trigger, timeframe, about }` instead of `price`. A stop or a target may
+not — those rest at the broker and an order needs a number.
+
+**Almost nothing had to change to execute it**, which is the part worth knowing. A `conditional`
+setup's confirmed entry already places `type: 'market'` (`buildOrderPlan`), and `firingLeg` already
+falls back to the first unfilled leg rather than resolving a level. So a fulfilled trigger asks the
+user to confirm an entry at market down the path that existed.
+
+What DID have to change:
+- `normalizeLeg` accepts a trigger on entry legs only, and drops an unknown rung.
+- **`legText` rendered a priceless leg as null** — the trigger would have been INVISIBLE to the read
+  that judges it, a setup monitored for an entry its own prompt never mentioned. It now renders
+  `ON TRIGGER: … — no price: when this is true, the entry is AT MARKET`.
+- `entry_mode: 'limit'` is forced to `conditional` when any entry is a trigger: a limit order rests
+  at a price and this entry has none.
+- **`about`** — roughly where a trigger would fill. NOT an order price (`legPrice` still returns
+  null for it, forever); it exists because risk-per-unit needs an entry, and without it *"risk 1%"*
+  came back refused on a perfectly good plan. Everything derived from it is marked an estimate.
+  `legReference` is the "what do the sums use" answer, kept deliberately separate from `legPrice`,
+  which is the "what does an order rest at" answer.
+
+**Guards are still price-only, and that is now a decision rather than a gap.** A trigger entry arms
+no guard, so it never rides the free 30s sweep — it is read on every candle close by the cheap
+tier, which is exactly the right clock for "a 15m close above X". Extending the sweep to compute
+indicators would make tier 0 cost money, which is the one thing it must not do.
+
+### `time_exit` — the exit the chart cannot fire (2026-09-28)
+
+`valid_until` retires a setup that never filled. **`time_exit` closes a position that did** — *out
+before earnings*, *flat by the close*. Authored by Mentor at the entries stage; when it comes round
+on an open position, `_isTimeExit` makes the wake reason `time_exit`, which is in
+`ALWAYS_EXPENSIVE_REASONS` (like `expiry_review`: a scheduled decision, and the one wake where
+sleeping through it costs the user exactly what they asked for). The in-position prompt says
+`exit_now` is the default answer to it. Talos still never executes — it is a card the user confirms.
+
 ### The sweep — tier 0, and it must stay free
 
 `guardSweep.service` (`GUARD_SWEEP_INTERVAL_MS`, default 30s) prices every symbol with an armed guard

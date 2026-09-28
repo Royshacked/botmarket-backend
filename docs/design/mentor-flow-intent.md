@@ -936,3 +936,35 @@ and nothing did. That is what the `size` op above fixes.
 FE: the money line on `SetupSummary`, upside and downside at the same weight, estimates marked.
 
 Suites: backend 3643/0, frontend 1109/1109.
+
+## Phase 7 — an entry need not be a price (DONE)
+**The scope collapsed once the code was read, and that is the headline.** Two things this phase was
+scoped to build already existed:
+- **The two-level shape.** Scenarios were ALWAYS rivals ("the first to fulfil takes the whole trade
+  and the others die") and legs INSIDE one scenario were always the scale-in. That is exactly
+  `alternatives` vs `scale_in` (4.1). So no restructure: scenarios gained `trade_id` as grouping,
+  and the gate artifacts carry the two levels for the UI.
+- **Entry at market.** A confirmed `conditional` entry already places `type: 'market'`
+  (`buildOrderPlan`), and `firingLeg` already falls back to the first unfilled leg instead of
+  resolving a level. Nothing downstream had to learn a new way to execute.
+
+What actually shipped:
+- `normalizeLeg` accepts `{trigger, timeframe, about}` on ENTRY legs only; stops and targets stay
+  prices, because they rest at a broker.
+- **`legText` returned null for a priceless leg** — the trigger would have been INVISIBLE to the
+  read that judges it. That was the bug that would have made the whole feature quietly useless.
+- `entry_mode: limit` is forced to `conditional` when any entry is a trigger.
+- **`about`** (roughly where it fills, never an order) + `legReference`, because risk-per-unit needs
+  an entry: without it *"risk 1%"* was refused on a perfectly good plan. Everything off it is an
+  estimate. `legPrice` keeps answering null forever — that separation is the safety property.
+- `time_exit` authored on the setup, and WIRED: `_isTimeExit` on an open position makes the wake
+  reason `time_exit`, which is always-expensive like `expiry_review`, and the in-position prompt
+  says `exit_now` is the default answer to it.
+- The watch row and the scenario card show a trigger entry instead of a blank cell.
+
+**Open decision 6d is now resolved by the shape of the thing:** guards stay price-only. A trigger
+entry arms no guard and is read on every candle close by the cheap tier — the right clock for "a
+15m close above X" — and teaching the free 30s sweep to compute indicators would make tier 0 cost
+money, which is the one thing it must not do.
+
+Suites: backend 3661/0, frontend 1112/1112.
