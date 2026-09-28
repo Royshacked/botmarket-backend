@@ -71,6 +71,19 @@ export const TOOL_SCHEMAS = {
             "show_to_user": {
                 "type": "boolean",
                 "description": "Set true whenever this chart relates to the user's ACTUAL setup — you are defining, validating, or refining their entry / stop / take-profit or reading the market structure behind it, or they asked to see it. In those cases the user wants to see what you are looking at, so show it. Leave false / omit ONLY for a quick throwaway internal peek that does not inform the setup under discussion; such a check must NOT appear in the chat."
+            },
+            "levels": {
+                "type": "array",
+                "description": "Price lines to DRAW on the chart — the trade, shown rather than described. Use it when you are putting candidate trades or a built plan in front of the user (with show_to_user true), not for your own reading. At most 8 lines; more than a handful and the picture stops being a trade.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "price": { "type": "number", "description": "Where the line sits." },
+                        "kind":  { "type": "string", "enum": ["from", "to", "stop", "level"], "description": "What it MEANS, which is what colours it: `from` where the trade starts, `to` where it pays, `stop` where it is wrong, `level` structure drawn for reference." },
+                        "label": { "type": "string", "description": "A few words shown on the line — \"the 238 shelf\", \"gap fill\". Keep it to the name of the thing, not a sentence." }
+                    },
+                    "required": ["price", "kind"]
+                }
             }
         },
         "required": ["ticker", "timeframe"]

@@ -109,6 +109,9 @@ export const ALL_EMIT_TAGS = [
     // ONE turn. Server-validated, never shown: what the user agreed to is said in the reply, in
     // words, and the tag is only how the server hears about it.
     'build',
+    // Mentor's candidate trades at the spans gate — the table the user picks from, rejects and all.
+    // Unlike <build> this one IS rendered; it is suppressed from the prose and drawn as a card.
+    'spans',
 ]
 
 // Build the tag-capture descriptor array for a streaming agent. `overrides` maps a

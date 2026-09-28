@@ -136,7 +136,7 @@ export async function closeRenderer() {
 // DataLoader-driven — we satisfy getBars with the injected candles once, then wait two animation
 // frames so the canvas actually paints before exporting (exporting too early yields a blank PNG).
 /* c8 ignore start — runs in the browser, not under node coverage */
-async function _inPageRender({ candles, precision, period, styles, bg, overlays, panes }) {
+async function _inPageRender({ candles, precision, period, styles, bg, overlays, panes, levels }) {
     // ── Custom indicator templates (idempotent across renders on a reused page) ──
     if (!window.__kcCustomsRegistered) {
         // VWAP — session-anchored (reset each UTC day), drawn on the candle pane's price axis.
@@ -178,6 +178,21 @@ async function _inPageRender({ candles, precision, period, styles, bg, overlays,
         window.__kcCustomsRegistered = true
     }
 
+    // An overlay does NOT stretch the price axis: a line drawn above or below the range the candles
+    // produced is simply not visible, which is the worst possible failure for a picture of a trade
+    // — Mentor says "target at 300", the user sees no line, and nothing says which of them is
+    // wrong. The axis comes from the data on the pane, so the levels are ALSO fed in as an
+    // invisible indicator, purely so the range has to include them.
+    if ((levels ?? []).length && !window.__kcLevelsRegistered) {
+        klinecharts.registerIndicator({
+            name: 'LEVELS', shortName: '', series: 'price',
+            figures: [{ key: 'lo', type: 'line' }, { key: 'hi', type: 'line' }],
+            styles: { lines: [{ color: 'rgba(0,0,0,0)' }, { color: 'rgba(0,0,0,0)' }] },
+            calc: (dataList, { calcParams }) => dataList.map(() => ({ lo: calcParams[0], hi: calcParams[1] })),
+        })
+        window.__kcLevelsRegistered = true
+    }
+
     const el = document.getElementById('chart')
     const chart = klinecharts.init(el, { locale: 'en-US', styles })
 
@@ -185,6 +200,13 @@ async function _inPageRender({ candles, precision, period, styles, bg, overlays,
     // there is no 3rd paneOptions arg); each pane indicator stacks in its own sub-pane below.
     for (const d of overlays) chart.createIndicator({ name: d.name, calcParams: d.calcParams, paneId: 'candle_pane' }, true)
     for (const d of panes)    chart.createIndicator({ name: d.name, calcParams: d.calcParams }, false)
+
+    if ((levels ?? []).length) {
+        const prices = levels.map(l => l.price)
+        chart.createIndicator({
+            name: 'LEVELS', calcParams: [Math.min(...prices), Math.max(...prices)], paneId: 'candle_pane',
+        }, true)
+    }
 
     await new Promise((resolve) => {
         let delivered = false
@@ -200,6 +222,22 @@ async function _inPageRender({ candles, precision, period, styles, bg, overlays,
         chart.setPeriod(period)
     })
 
+    // Drawn levels — the trade lines. They go on AFTER the data loads, because an overlay placed
+    // before there is a price axis has nothing to sit against. `priceLine` is klinecharts' own
+    // horizontal-at-a-value overlay, so the line and its price tag come for free. The tag shows the
+    // NUMBER, not the caller's words: the words are in the table beside the chart, and the colour
+    // carries the meaning (blue in, green out, red wrong).
+    for (const lv of (levels ?? [])) {
+        chart.createOverlay({
+            name: 'priceLine',
+            points: [{ value: lv.price }],
+            styles: {
+                line: { color: lv.color, style: lv.dashed ? 'dashed' : 'solid', size: 1 },
+                text: { color: '#ffffff', backgroundColor: lv.color, size: 11 },
+            },
+        })
+    }
+
     await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
     return chart.getConvertPictureUrl(true, 'png', bg)
 }
@@ -212,9 +250,10 @@ async function _inPageRender({ candles, precision, period, styles, bg, overlays,
  * @param {string}   symbol
  * @param {string}   timeframe  internal spelling ('5min','4hr','day'…) — parseChartInterval
  * @param {object[]} studies    _buildStudies output (chart-img TradingView study objects)
+ * @param {object[]} levels     drawn price lines — see normalizeChartLevels
  * @returns {Promise<string>}   base64 PNG (no data: prefix)
  */
-export async function renderChartImage(symbol, timeframe, studies = []) {
+export async function renderChartImage(symbol, timeframe, studies = [], levels = []) {
     const spec = parseChartInterval(timeframe) ?? { timeSpan: 'day', multiplier: 1 }
     const { timeSpan, multiplier } = spec
     const to   = Date.now()
@@ -229,13 +268,48 @@ export async function renderChartImage(symbol, timeframe, studies = []) {
     // Bound concurrency via the pool, then render on a fresh page.
     await _acquire()
     try {
-        return await _doRender({ candles, period, precision: precisionOf(candles), overlays, panes })
+        return await _doRender({ candles, period, precision: precisionOf(candles), overlays, panes, levels: normalizeChartLevels(levels) })
     } finally {
         _release()
     }
 }
 
-async function _doRender({ candles, period, precision, overlays, panes, width = DEFAULT_W, height = DEFAULT_H }) {
+/** What a drawn level MEANS, and therefore what colour it is. Unknown kinds draw as a plain level. */
+const LEVEL_COLORS = Object.freeze({
+    from:   '#4c9aff',   // where the trade starts — the entry side of a span
+    to:     '#26a69a',   // where it pays
+    stop:   '#ef5350',   // where it is wrong
+    level:  '#9598a1',   // structure, drawn for reference
+})
+
+export const MAX_CHART_LEVELS = 8
+
+/**
+ * Drawn levels, taken from a model and therefore checked like anything else from one: a price that
+ * is not a finite positive number is not a line, and the set is capped — past a handful of lines a
+ * chart stops being a picture of a trade and becomes a ruler.
+ *
+ * Pure.
+ */
+export function normalizeChartLevels(raw) {
+    return (Array.isArray(raw) ? raw : [])
+        .map((l) => {
+            const price = Number(l?.price)
+            if (!Number.isFinite(price) || price <= 0) return null
+            const kind = Object.hasOwn(LEVEL_COLORS, l?.kind) ? l.kind : 'level'
+            return {
+                price,
+                kind,
+                label:  typeof l?.label === 'string' ? l.label.trim().slice(0, 40) : '',
+                color:  LEVEL_COLORS[kind],
+                dashed: kind !== 'stop',   // the stop is the one line that should not look optional
+            }
+        })
+        .filter(Boolean)
+        .slice(0, MAX_CHART_LEVELS)
+}
+
+async function _doRender({ candles, period, precision, overlays, panes, levels = [], width = DEFAULT_W, height = DEFAULT_H }) {
     const browser = await getBrowser()
     const page = await browser.newPage({ viewport: { width, height } })
     page.setDefaultTimeout(RENDER_MS)   // bound setContent / addScriptTag
@@ -254,12 +328,12 @@ async function _doRender({ candles, period, precision, overlays, panes, width = 
         let timer
         const evalTimeout = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`in-page render timed out after ${RENDER_MS}ms`)), RENDER_MS) })
         const dataUrl = await Promise.race([
-            page.evaluate(_inPageRender, { candles, precision, period, styles: baseStyles(), bg: BG, overlays, panes }),
+            page.evaluate(_inPageRender, { candles, precision, period, styles: baseStyles(), bg: BG, overlays, panes, levels }),
             evalTimeout,
         ]).finally(() => clearTimeout(timer))
         const b64 = String(dataUrl || '').replace(/^data:image\/png;base64,/, '')
         if (!b64) throw new Error('render produced an empty image')
-        logger.info(LOG, `Rendered ${candles.length} candles (${overlays.length} overlay, ${panes.length} pane) → PNG (${b64.length} b64)`)
+        logger.info(LOG, `Rendered ${candles.length} candles (${overlays.length} overlay, ${panes.length} pane, ${levels.length} level) → PNG (${b64.length} b64)`)
         return b64
     } finally {
         await page.close().catch(() => {})

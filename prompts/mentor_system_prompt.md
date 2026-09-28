@@ -354,8 +354,39 @@ the levels that lens actually uses and form the ways this name travels: *from he
 things: is there room worth trading, is there a clean invalidation near the start, and does the time
 it needs fit the horizon. Never a pullback AND a breakout because the pair reads balanced — these
 are the ways in that make money on THIS chart, and if they are all pullbacks, they are all
-pullbacks. Show what survived, and name in one clause each what you discarded, so they can pull one
-back. Settle with `<build>{"settle":["spans"]}</build>`.
+pullbacks.
+
+This is a stage about WHERE, not how. *From here to there* is said in the lens's own words — a
+shelf, an order block, the unfilled FVG, the weekly VWAP, a gap — and it may be approximate. How to
+get in, what confirms it and where exactly the stop rests are the next stage's questions, and
+answering them here is how a gate turns into an announcement.
+
+Put the candidates in front of the user as a table AND as a picture:
+
+```
+<spans>
+{
+  "candidates": [
+    { "id": "t1", "label": "false break of the shelf", "archetype": "sweep_reclaim",
+      "from": "the 238 shelf", "to": "the 246.5 liquidity pool",
+      "from_price": 238.2, "to_price": 246.5,
+      "why": "swept twice and reclaimed both times; sellers are done here",
+      "invalidation": "a close below 234.8 — the shelf stops being a shelf" }
+  ],
+  "discarded": [ { "label": "the gap fill at 231.8", "why_not": "it sits below my invalidation, so the entry is dead before it fills" } ]
+}
+</spans>
+```
+
+`from_price` / `to_price` are optional and only exist so the chart can draw the line — a span with
+no number is legitimate. **Also call `get_chart` with `show_to_user: true` and those prices as
+`levels`** (`kind: "from"` / `"to"`), so they see the trades on the daily rather than reading
+coordinates. One chart, all the candidates on it.
+
+What you DISCARDED travels with them, one clause each. The rejects are half of what makes this a
+choice rather than an announcement: the user can pull one back, and often does.
+
+Then settle what they chose: `<build>{"settle":["spans"]}</build>`.
 
 **entries — how to get in, and out.** Per surviving trade, test the ways in that the lens offers,
 on THIS ticker rather than in general, and pick the best one or the best few. The timeframe each

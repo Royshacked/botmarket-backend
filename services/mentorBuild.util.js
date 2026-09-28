@@ -25,6 +25,8 @@
  * exactly as `chatState` already works at this desk (nothing persists until Generate).
  */
 
+import { ENTRY_ARCHETYPES, normalizeTaxon } from './setup.taxonomy.js'
+
 // The stages, in the order they settle. `fields` are what a stage owes; a stage is settled when all
 // of its fields are. `waivable` is the user's answer to the opening turn's second ask — the two
 // gates may be waived, the opening, sizing and the summary never can (intent #14).
@@ -396,6 +398,68 @@ export function sanitizeBuildOps(raw) {
     if (typeof raw.asset === 'string' && raw.asset.trim()) ops.asset = raw.asset
 
     return Object.keys(ops).length ? ops : null
+}
+
+// ─── The spans — the candidate trades, before there are entries ───────────────
+
+const MAX_SPANS     = 4
+const MAX_DISCARDED = 6
+const MAX_CLAUSE    = 200
+
+const clause = (v) => (typeof v === 'string' ? v.trim().slice(0, MAX_CLAUSE) : '')
+const priceOrNull = (v) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : null)
+
+/**
+ * The SPANS stage's output: the ways this name travels, before anyone has said how to get in.
+ *
+ * `from`/`to` are WORDS, in the lens's own vocabulary — "the 238 shelf", "the unfilled FVG", "the
+ * weekly VWAP" — because a span is a claim about where price goes, and the lens decides what counts
+ * as a place. The optional numeric pair is only what the chart needs to draw a line; a span with no
+ * number is legitimate and simply is not drawn.
+ *
+ * **Four candidates, hard.** Past four the user is choosing from noise, and a cap the server keeps
+ * is a cap the model cannot talk itself out of. What was DISCARDED travels too, one clause each, so
+ * the user can pull one back — the rejects are half of what makes the gate a choice rather than an
+ * announcement.
+ */
+export function normalizeSpans(raw) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+
+    const seen = new Set()
+    const candidates = (Array.isArray(raw.candidates) ? raw.candidates : [])
+        .map((c, i) => {
+            if (!c || typeof c !== 'object') return null
+            let id = clampStr(String(c.id ?? `t${i + 1}`).trim().toLowerCase(), 16) || `t${i + 1}`
+            while (seen.has(id)) id = `${id}x`
+            seen.add(id)
+            return {
+                id,
+                label:        clampStr(c.label ?? '', MAX_STR),
+                from:         clause(c.from),
+                to:           clause(c.to),
+                from_price:   priceOrNull(c.from_price),
+                to_price:     priceOrNull(c.to_price),
+                why:          clause(c.why),
+                invalidation: clause(c.invalidation),
+                archetype:    normalizeTaxon(ENTRY_ARCHETYPES, c.archetype),
+            }
+        })
+        .filter(c => c && c.label && c.from && c.to)
+        .slice(0, MAX_SPANS)
+
+    const discarded = (Array.isArray(raw.discarded) ? raw.discarded : [])
+        .map(d => (d && typeof d === 'object'
+            ? { label: clampStr(d.label ?? '', MAX_STR), why_not: clause(d.why_not) }
+            : null))
+        .filter(d => d && d.label && d.why_not)
+        .slice(0, MAX_DISCARDED)
+
+    return candidates.length ? { candidates, discarded } : null
+}
+
+/** The ledger value for a settled spans stage: the ids the user agreed to look at. */
+export function spanIds(spans) {
+    return (spans?.candidates ?? []).map(c => c.id)
 }
 
 // ─── The ledger owns the flow, the draft owns the content ─────────────────────

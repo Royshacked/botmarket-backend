@@ -14,7 +14,7 @@ import { buildVenueSection } from '../tools/tradingContext.tools.js'
 import { normalizeSetup, setupReadiness, computeRR, validityProblems, normalizeChallenges } from '../setup.schema.js'
 import {
     normalizeBuild, sanitizeBuildOps, applyBuildOps, claimsFromDraft, settledConflicts,
-    activeName, stageOf, firstUnsettled, isWaived, STAGES,
+    normalizeSpans, spanIds, activeName, stageOf, firstUnsettled, isWaived, STAGES,
 } from '../mentorBuild.util.js'
 import { logger } from '../logger.service.js'
 
@@ -152,7 +152,7 @@ async function chatStream({
         meta: { userPrompt, asset: chatState?.active_asset || '', accounts: accounts?.length ?? 0 },
     })
 
-    const { reply, setup, setups, buildOps } = _parseMentorResponse(raw)
+    const { reply, setup, setups, buildOps, spanBlock } = _parseMentorResponse(raw)
 
     // A candidate-offer turn and a worksheet turn are mutually exclusive by contract; if the model
     // emits both, the picked worksheet wins (it's the more committed artifact).
@@ -178,10 +178,24 @@ async function chatStream({
     // Claims are taken from the worksheet the model just emitted as well as from its <build> tag, so
     // a turn that forgets the tag still records what was PROPOSED. Settling always needs the tag:
     // a proposal is not an agreement, and only the user's confirmation moves the ledger.
+    // The candidate trades are CONTENT, so they live on the draft beside the rest of it; the ledger
+    // only ever holds their ids. A turn that emits none keeps the ones already on the table — the
+    // gate is a conversation, and re-listing four spans to change one word is not one.
+    //
+    // A block that arrives and normalises to NOTHING is not the same as no block: the model meant
+    // to put candidates on the table and none of them survived. The old ones stand (better than an
+    // empty gate), and it is logged, because a silently ignored emit is a bug nobody sees.
+    const emitted = normalizeSpans(spanBlock)
+    if (spanBlock && !emitted) logger.warn(LOG, '<spans> emitted but no candidate survived normalisation — keeping the previous set')
+    const spans = emitted ?? normalizeSpans(chatState?.draft?.spans)
+
     const priorBuild = normalizeBuild(chatState?.build ?? chatState?.draft?.build)
     const { build, refused, cleared } = applyBuildOps(priorBuild, {
         asset: normalized?.asset || chatState?.active_asset || '',
-        derived: normalized ? claimsFromDraft(normalized) : {},
+        derived: {
+            ...(normalized ? claimsFromDraft(normalized) : {}),
+            ...(spans ? { spans: spanIds(spans) } : {}),
+        },
         ...(sanitizeBuildOps(buildOps) ?? {}),
     })
 
@@ -212,6 +226,7 @@ async function chatStream({
         ?? (hasLedger ? normalizeSetup({ asset: ledgerName.asset }) : null)
     if (carrier) {
         carrier.build = build
+        if (spans) carrier.spans = spans
         if (!normalized) carrier.rr = computeRR(carrier) ?? carrier.rr
     }
 
@@ -284,7 +299,7 @@ export const _mergeSetupDraft = mergeDraft
  */
 export function _parseMentorResponse(raw) {
     const text  = raw ?? ''
-    const reply = stripEmitTags(text, ['setup', 'setups', 'build', 'asset', 'interval', 'coverage', ...ROUTE_TAGS]).trim()
+    const reply = stripEmitTags(text, ['setup', 'setups', 'build', 'spans', 'asset', 'interval', 'coverage', ...ROUTE_TAGS]).trim()
 
     return {
         reply,
@@ -293,6 +308,9 @@ export function _parseMentorResponse(raw) {
         // The ledger moves this turn: what the user confirmed, reopened, or waived. Validated by the
         // ledger itself — this only pulls the block out.
         buildOps: _parseBlock(text, 'build'),
+        // The candidate trades at the spans gate. `<spans>` is the TABLE the user chooses from;
+        // `<setups>` is a menu of complete alternative plans, and they are not the same thing.
+        spanBlock: _parseBlock(text, 'spans'),
     }
 }
 

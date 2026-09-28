@@ -272,7 +272,12 @@ test('the opening turn answers all three at once, cheapest tools first, and asks
 test('the later stages keep the decisions that are theirs and not the model\'s', () => {
     const section = PROMPT.slice(PROMPT.indexOf('## The stages after the opening'))
     assert.match(section, /Up to\s+\*\*four\*\* candidates/, 'spans are capped')
-    assert.match(section, /name in one clause each what you discarded/)
+    // The rejects travel with the candidates — they are what makes the gate a choice.
+    assert.match(section, /What you DISCARDED travels with them, one clause each/)
+    // The spans stage is about WHERE, and says so; the mechanics are the next stage's.
+    assert.match(section, /a stage about WHERE, not how/)
+    assert.match(section, /<spans>/, 'the candidates have an emit contract')
+    assert.match(section, /`get_chart` with `show_to_user: true`[\s\S]{0,60}`levels`/, 'and are drawn')
     assert.match(section, /ALTERNATIVES — the first to\s+fire takes the position/)
     assert.match(section, /The stop is a price/)
     assert.match(section, /Management \(break-even,\s+trailing\) is NOT authored here/)

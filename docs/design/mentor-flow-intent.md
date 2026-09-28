@@ -824,3 +824,32 @@ when a turn has ledger content and no worksheet of any kind, so opening-turn cla
 while the new stages section lists Roy's five. Not contradictory, but two sources of truth.
 
 Suite 3589/0.
+
+## Phase 4a/4b — the spans gate, and the trade drawn on the chart (DONE, backend)
+**The candidates.** `normalizeSpans` / `spanIds` in `mentorBuild.util.js`, emitted as `<spans>`:
+each candidate is `{id, label, archetype, from, to, from_price?, to_price?, why, invalidation}` and
+the DISCARDED travel with them, one clause each. `from`/`to` are WORDS in the lens's vocabulary;
+the prices are optional and exist only so the chart can draw a line. **Four candidates, hard** —
+the cap is the server's, not the prompt's. Spans are CONTENT, so they ride on the draft
+(`draft.spans`) while the ledger holds only their ids.
+
+**The picture.** `get_chart` gains `levels: [{price, kind, label}]`, threaded through `cachedChart`
+(in the cache key — two charts with different lines are different pictures) to
+`renderChartImage` -> `normalizeChartLevels` -> klinecharts `priceLine` overlays. `kind` is what the
+line MEANS and therefore its colour: `from` blue, `to` green, `stop` red and solid while the rest
+are dashed.
+
+Two things learned by rendering it rather than trusting the API:
+- The price tag shows the NUMBER; `extendData` does not draw the label. The words stay in the table.
+- **An overlay does not stretch the price axis.** A level outside the candles' range was silently
+  invisible — the worst failure for a picture of a trade. Fixed by feeding the levels in as an
+  invisible `LEVELS` indicator, so the axis has to include them. Verified: 170 and 268 on a chart
+  whose candles run 189–235 now both draw, axis 170–280.
+
+Also: the tool reports the lines actually DRAWN (normalised, capped), and says plainly when the
+chart-img fallback served the render, because that renderer cannot draw them at all.
+
+`tests/fixtures/agentTools.snapshot.json` updated deliberately in the same commit — `levels` is on
+the SHARED get_chart, so portfolio, scanner, kairos and mentor all see it.
+
+Suite 3605/0. Still to come for this phase: the FE table card (4c).
