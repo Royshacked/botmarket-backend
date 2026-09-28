@@ -905,3 +905,34 @@ Suites: backend 3622/0, frontend 1106/1106.
 **Still not built for this stage (noted in #9):** a general "does this pattern work on this ticker"
 measurement. Mentor evidences it today from `get_candles` / `get_false_breaks` / `get_orderblocks`
 and is told to say so when it cannot measure.
+
+## Phase 6 — sizing in five units, and the money said out loud (DONE)
+**`services/positionSize.util.js`** (pure): `SIZE_UNITS` = risk_cash · risk_pct · size_cash ·
+size_pct · shares, all resolving to one quantity from the entry, the stop, the balance and the
+contract multiplier. Two things it REFUSES rather than guesses — a percentage with no visible
+balance, and a risk budget when entry and stop are the same price — and a budget smaller than one
+unit is said out loud instead of being floored to a silent zero.
+
+**`services/mentorSummary.util.js`** (pure): `summarizeTrade` → R:R, gain and loss in cash and as a
+percent of the account; `summarizeBatch` for the multi-name line; `applySizing` resolves the user's
+answer PER SCENARIO, because two ways into one trade have different stops and therefore different
+sizes for the same risk budget.
+
+**Wired:** `<build>{"size":{"unit":"risk_pct","value":1}}</build>` is now an op. The server sizes
+every premise, writes the quantity onto the worksheet, and returns a refusal (not a guess) when it
+cannot. `_mainBalance` picks the marked account's deployable cash and returns null when several
+accounts are marked with no main — ambiguous is not a number. `_buildMoneySection` hands the model
+the figures to READ OUT, under a line telling it never to recompute them.
+
+**A judgment call worth knowing:** when the target ladder's legs do not add up to the size the user
+chose (the plan was drawn at 100 and they sized 125), the whole position is priced to the NEAREST
+target instead of scaling the legs or leaving a remainder unsold. Both of those invent a plan
+nobody agreed to; pricing it all to the first target can only understate the good case, which is
+the direction to be wrong in — and it is the rule `rr` already follows.
+
+**Caught by the bug hunt:** `resolveSize` had no caller. The prompt said "the server computes it"
+and nothing did. That is what the `size` op above fixes.
+
+FE: the money line on `SetupSummary`, upside and downside at the same weight, estimates marked.
+
+Suites: backend 3643/0, frontend 1109/1109.

@@ -12,6 +12,7 @@ import { consultDescription } from '../deepThink.service.js'
 import { FLIP_TOOL, FLIP_DESCRIPTION, makeFlipHandler } from '../flipTest.service.js'
 import { buildVenueSection } from '../tools/tradingContext.tools.js'
 import { normalizeSetup, setupReadiness, computeRR, validityProblems, normalizeChallenges } from '../setup.schema.js'
+import { summarizeTrade, applySizing } from '../mentorSummary.util.js'
 import {
     normalizeBuild, sanitizeBuildOps, applyBuildOps, claimsFromDraft, settledConflicts,
     normalizeSpans, spanIds, normalizeEntries, entryIds, entryProblems, fieldsClearedBy,
@@ -248,6 +249,30 @@ async function chatStream({
         carrier.build = build
         if (spans) carrier.spans = spans
         if (entries) carrier.entries = entries
+        // THE MONEY IS COMPUTED, NEVER NARRATED FROM THE MODEL'S OWN ARITHMETIC. The summary rides
+        // on the draft so the panel shows the same figures the model was handed, and both come from
+        // one place (mentorSummary.util). A model that is roughly right about R:R is wrong about
+        // dollars on a live account, and nobody can tell a computed figure from a fluent one.
+        // SIZING: the user names a unit and a number, the server turns it into a quantity — per
+        // scenario, because two ways into one trade have different stops and therefore different
+        // sizes for the same risk. A problem (no balance to take a percentage of, a stop equal to
+        // the entry) comes back as a refusal rather than a guess, and the stage stays open.
+        const balance = _mainBalance(accounts, mainAccountId)
+        if (ops.size) {
+            const { quantities, problems } = applySizing(carrier, ops.size, { balance })
+            for (const q of quantities) {
+                const sc = carrier.scenarios?.find(x => x.id === q.id) ?? carrier.scenarios?.[0]
+                if (!sc) continue
+                sc.quantity = q.quantity
+                // One way in takes the whole position; a scaling-in ladder is the entries stage's
+                // shares to split, and phase 7 is where that lands on the legs.
+                if (sc.entry_legs?.length === 1) sc.entry_legs[0].quantity = q.quantity
+            }
+            if (problems.length) build.refused = [...build.refused, ...problems.map(p => ({ field: 'size', reason: p }))]
+            logger.info(LOG, 'sizing resolved', { unit: ops.size.unit, value: ops.size.value, sized: quantities.length, problems: problems.length })
+        }
+
+        carrier.summary = summarizeTrade(carrier, { balance })
         if (!normalized) carrier.rr = computeRR(carrier) ?? carrier.rr
     }
 
@@ -468,7 +493,30 @@ export function _buildTurnContext(chatState, clientTime = null) {
 
     return `---
 ${buildTimeSection(clientTime, 'active_from / valid_until')}
-COVERAGE SO FAR: ${covered}. Re-state these in every <coverage> tag plus anything new you read this turn.${_buildLedgerSection(chatState)}${draft}`
+COVERAGE SO FAR: ${covered}. Re-state these in every <coverage> tag plus anything new you read this turn.${_buildLedgerSection(chatState)}${_buildMoneySection(chatState?.draft)}${draft}`
+}
+
+/**
+ * THE MONEY, COMPUTED. Handed to the model as figures to read out, never as arithmetic to do.
+ *
+ * The summary stage is where a user decides with their gut, and it decides on money: "2.4R" is an
+ * abstraction, "$740 if it works, $310 if it doesn't, 1.2% of the account" is a decision. Those
+ * numbers come from `mentorSummary.util` — the same ones the panel renders, so the screen and the
+ * sentence cannot disagree.
+ */
+export function _buildMoneySection(draft) {
+    const s = draft?.summary
+    if (!s || (s.gainCash == null && s.lossCash == null)) return ''
+
+    const money = (cash, pct) => (cash == null ? '—' : `${cash}${pct != null ? ` (${pct}% of the account)` : ''}`)
+    const lines = [
+        '\n\nTHE MONEY ON THIS TRADE — computed from the plan and the size, not by you. Read these out; never recompute them:',
+        `  pays ${money(s.gainCash, s.gainPct)} · costs ${money(s.lossCash, s.lossPct)}${s.rr != null ? ` · ${s.rr}R` : ''}${s.quantity != null ? ` · ${s.quantity} unit(s)` : ''}`,
+    ]
+    if (s.estimated) {
+        lines.push('  ESTIMATED: this entry has no authored price, so the figures are measured off the live price. Say so when you quote them — the real ones are computed at the fill.')
+    }
+    return lines.join('\n')
 }
 
 /**
@@ -530,6 +578,24 @@ export function _buildLedgerSection(chatState) {
 
 /** Ledger values are short by construction; a list is summarised rather than spelled out. */
 const _short = (v) => (Array.isArray(v) ? `${v.length} item(s)` : String(v))
+
+/**
+ * The balance every percentage is measured against: the MAIN account's, or the only one marked.
+ *
+ * Deliberately narrow. With several accounts marked and no main, a percentage would silently pick
+ * one of several different answers, so it picks none and the sizing stage says it cannot see a
+ * balance — which is true, and is a sentence the user can act on.
+ */
+export function _mainBalance(accounts, mainAccountId = null) {
+    const valid = Array.isArray(accounts) ? accounts.filter(a => a && a.id != null) : []
+    if (!valid.length) return null
+    const main = valid.length === 1
+        ? valid[0]
+        : valid.find(a => String(a.id) === String(mainAccountId))
+    // freeMargin is what can actually be deployed; balance counts capital already in positions.
+    const n = Number(main?.freeMargin ?? main?.balance)
+    return Number.isFinite(n) && n > 0 ? n : null
+}
 
 function _buildAccountsSection(accounts, mainAccountId = null) {
     if (!Array.isArray(accounts) || accounts.length === 0) {

@@ -27,6 +27,7 @@
 
 import { ENTRY_ARCHETYPES, normalizeTaxon } from './setup.taxonomy.js'
 import { VALID_TIMEFRAMES, normalizeTimeframe } from './timeframe.service.js'
+import { SIZE_UNITS } from './positionSize.util.js'
 
 // The stages, in the order they settle. `fields` are what a stage owes; a stage is settled when all
 // of its fields are. `waivable` is the user's answer to the opening turn's second ask — the two
@@ -392,6 +393,15 @@ export function sanitizeBuildOps(raw) {
     const asked  = Array.isArray(raw.settle) ? raw.settle : (typeof raw.settle === 'string' ? [raw.settle] : [])
     const fields = asked.filter(f => typeof f === 'string' && BUILD_FIELDS.includes(f))
     if (fields.length) ops.settle = fields
+
+    // The sizing answer: the unit the user thinks in and their number. The QUANTITY is the
+    // server's to compute from it (positionSize.util) — a model that sizes a live account by
+    // arithmetic is a model that is confidently wrong about how much is at risk.
+    if (raw.size && typeof raw.size === 'object' && !Array.isArray(raw.size)) {
+        const unit  = SIZE_UNITS.includes(raw.size.unit) ? raw.size.unit : null
+        const value = Number(raw.size.value)
+        if (unit && Number.isFinite(value) && value > 0) ops.size = { unit, value }
+    }
 
     if (typeof raw.unsettle === 'string' && STAGE_KEYS.includes(raw.unsettle)) ops.unsettle = raw.unsettle
     if (typeof raw.waiver === 'boolean') ops.waiver = raw.waiver

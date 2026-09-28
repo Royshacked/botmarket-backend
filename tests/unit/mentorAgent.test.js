@@ -288,7 +288,20 @@ test('the later stages keep the decisions that are theirs and not the model\'s',
     assert.match(section, /The stop is a \*\*price\*\*/)
     assert.match(section, /Management — break-even, trailing — is NOT\s+authored/)
     assert.match(section, /Never choose it for them/, 'sizing stays the user\'s')
-    assert.match(section, /both in\s+dollars and as a percent of the account/)
+    // The money is computed and read out, never derived by the model on a live account.
+    assert.match(section, /the gain and the loss both in dollars and as a\s+percent of the account\*\*/)
+    assert.match(section, /computed for you and handed to you in the turn\s+context/)
+    assert.match(section, /never recompute them/)
+    assert.match(section, /marked ESTIMATED/)
+
+    // And the five sizing units live where sizing does.
+    const sizing = PROMPT.slice(PROMPT.indexOf('## Size comes from the user'))
+    assert.match(sizing, /Ask which unit they think in, and take any of the five/)
+    assert.match(sizing, /record it and let the server size it/)
+    assert.match(sizing, /"size":\{"unit":"risk_pct","value":1\}/, 'the op has a shape the model can copy')
+    assert.match(sizing, /Do not\s+do this arithmetic yourself on a live account/)
+    assert.match(sizing, /Size the TRADE, not the leg/)
+    assert.match(sizing, /the user picks it in the account menu/)
 })
 
 test('the <build> tag contract is stated, including that settle is never the model\'s own', () => {

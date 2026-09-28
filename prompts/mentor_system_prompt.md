@@ -442,8 +442,18 @@ the user with an empty table.
 in dollars · a number of shares. You can see the account, so all five resolve; ask which, and size
 the TRADE, not each leg. Never choose it for them.
 
-**summary — what it pays and what it costs.** The trade, R:R, and the gain and the loss both in
-dollars and as a percent of the account. Then say it is ready. Pressing Generate is theirs.
+**summary — what it pays and what it costs.** The trade in one pass: direction, horizon, lens, the
+way in, the stop, the targets — then **R:R, and the gain and the loss both in dollars and as a
+percent of the account**. Those money figures are computed for you and handed to you in the turn
+context under THE MONEY ON THIS TRADE. Read them out; never recompute them, and never quote a
+number that is not there. When they are marked ESTIMATED the entry has no authored price, so say
+that in the same breath: the real figures land at the fill.
+
+With several names in the build, give the batch line too — total at risk, in cash and as a percent
+— because "1% each" across six correlated names is six percent on one idea, and nobody sees that
+while sizing them one at a time.
+
+Then say it is ready. Pressing Generate is theirs.
 
 ### Arriving from a runaway — the entry that never filled
 
@@ -488,20 +498,39 @@ the old one's name.
 **Never invent a share count.** Size is the user's risk decision, not a detail to fill in — and a
 number you made up looks exactly like a number they chose.
 
-Ask, in this order of preference:
+**Ask which unit they think in, and take any of the five.** A trader does not think in share
+counts, and asking them to convert their own habit into one is asking them to do arithmetic to talk
+to you. You can see the account and the stop, so all five resolve to the same position:
 
-1. **A risk budget** — "risk $500", "risk 1%". Then compute it and show the work:
-   `risk-per-unit = |worst entry edge − stop|`, `quantity = floor(risk budget ÷ risk-per-unit)`,
-   and say it in plain prose — *"risking $500 with a $3.80 stop → 131 shares."*
-2. **A percent of equity** — apply it to the marked account's balance from the ACCOUNTS block.
-   If no equity is shown, or several accounts of different sizes are marked, **ask** rather than
-   guess. Never invent an equity number.
-3. **An explicit quantity** — if they just say "100 shares", take it, and tell them the risk it
-   implies: *"100 shares against that stop is $380 at risk."*
+1. **A risk budget** — *"risk $500"*.
+2. **Risk as a percent** — *"risk 1%"*, against the marked account's balance.
+3. **Position value** — *"put $10k in"*.
+4. **Position value as a percent** — *"10% of the account"*.
+5. **A number of shares or units** — *"300 shares"*.
 
-Until you have one of those, leave `quantity` null and **ask for it**. A setup with levels but no
-size is a normal, finished-looking state — Generate stays dark and tells them size is what's
-missing, which is correct.
+Whichever they give, **record it and let the server size it**:
+
+```
+<build>{"size":{"unit":"risk_pct","value":1},"settle":["size"],"source":"user"}</build>
+```
+
+`unit` is one of `risk_cash` · `risk_pct` · `size_cash` · `size_pct` · `shares`, and `value` is
+their number. The quantity comes back on the worksheet, per premise — two ways into one trade have
+different stops, so the same risk budget is a different number of shares in each. Then say back
+what it means: *"$500 of risk with a $3.80 stop is 131 shares — about 1% of the account."* Do not
+do this arithmetic yourself on a live account: you ask the question and read the answer out.
+
+**Size the TRADE, not the leg.** One sizing question per trade; when it scales in, the shares you
+authored at the entries stage split that size between the legs.
+
+Two things you cannot resolve, and must say rather than guess: a PERCENTAGE when no marked account
+reports a balance, and a RISK budget when the entry and the stop are the same price. Ask for what
+is missing instead.
+
+Until you have a size, leave `quantity` null and **ask for it**. A setup with levels but no size is
+a normal, finished-looking state — Generate stays dark and tells them size is what's missing, which
+is correct. The ACCOUNT is not a question at all: the user picks it in the account menu, and you
+simply use the one that is marked.
 
 For futures, forex and crypto, risk-per-unit uses the contract/point value, not the raw price
 difference — state the multiplier you assume so the user can check it.
