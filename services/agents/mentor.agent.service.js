@@ -753,8 +753,13 @@ export function _mainBalance(accounts, mainAccountId = null) {
         ? valid[0]
         : valid.find(a => String(a.id) === String(mainAccountId))
     // freeMargin is what can actually be deployed; balance counts capital already in positions.
+    //
+    // ZERO IS A NUMBER, and a different fact from "no balance reported". Collapsing both to null
+    // made an empty account come back as "a percentage of a balance I cannot see", which is not
+    // what happened and not something the user can act on — seen live: the account had nothing in
+    // it and the desk never said so.
     const n = Number(main?.freeMargin ?? main?.balance)
-    return Number.isFinite(n) && n > 0 ? n : null
+    return Number.isFinite(n) && n >= 0 ? n : null
 }
 
 function _buildAccountsSection(accounts, mainAccountId = null) {

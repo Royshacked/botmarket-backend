@@ -53,7 +53,11 @@ export function resolveSize({ unit, value, entry, stop, balance = null, multipli
     const per = riskPerUnit(entry, stop, m)
 
     // Anything expressed as a PERCENT needs the account, and a percent of an unknown balance is a
-    // number nobody should act on. Say so instead of guessing an equity figure.
+    // number nobody should act on. Say so instead of guessing an equity figure — and say WHICH of
+    // the two things is wrong, because they have different fixes.
+    if ((unit === 'risk_pct' || unit === 'size_pct') && bal === 0) {
+        return none('the marked account has a zero balance — nothing can be sized against it. Mark an account with money in it (the bank icon), or tell me a cash amount and I will size that')
+    }
     if ((unit === 'risk_pct' || unit === 'size_pct') && !(bal > 0)) {
         return none('that is a percentage of an account balance I cannot see — give me a cash amount, or mark an account that reports its balance')
     }

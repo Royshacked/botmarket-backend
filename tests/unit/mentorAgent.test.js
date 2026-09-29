@@ -532,3 +532,13 @@ test('the ledger section counts its own rules correctly', () => {
     const bullets = (intro.match(/^- \*\*/gm) ?? []).length
     assert.match(PROMPT, new RegExp(`${['', 'One', 'Two', 'Three', 'Four', 'Five'][bullets]} things about the ledger`))
 })
+
+test('a blocker at sizing is stated, never answered by reopening a settled gate', () => {
+    // Seen live: the marked account was empty and the desk put the entries table back up, which
+    // reads as "choose again" about a choice the user had already made.
+    const sizing = PROMPT.slice(PROMPT.indexOf('## Size comes from the user'))
+    assert.match(sizing, /A blocker at sizing is a blocker, not a reason to go back/)
+    assert.match(sizing, /do not re-offer\s+the ways in/)
+    assert.match(sizing, /balance is \*\*zero\*\*/)
+    assert.match(sizing, /do not dress it up as not being\s+able to see it/)
+})

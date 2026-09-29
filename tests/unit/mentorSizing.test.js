@@ -247,3 +247,30 @@ test('a quantity the plan already carries is left alone — there is nothing to 
         { active_asset: 'NVDA', draft: SETUP, coverage: [] })
     assert.equal(out.setup.scenarios[0].quantity, 100)
 })
+
+// ─── An empty account is a FACT, not a mystery ────────────────────────────────
+// Seen live: entries settled, the marked account had nothing in it, and the desk answered with
+// "a balance I cannot see" — which is not what happened and not something the user can act on.
+
+test('a ZERO balance says so, and says what to do about it', () => {
+    const out = resolveSize({ unit: 'risk_pct', value: 1, entry: 200, stop: 196, balance: 0 })
+    assert.equal(out.quantity, null)
+    assert.match(out.problem, /zero balance/)
+    assert.match(out.problem, /Mark an account with money in it/)
+    assert.doesNotMatch(out.problem, /cannot see/, 'we CAN see it — it is empty')
+})
+
+test('an UNKNOWN balance is still the other message', () => {
+    assert.match(resolveSize({ unit: 'risk_pct', value: 1, entry: 200, stop: 196, balance: null }).problem, /cannot see/)
+})
+
+test('a cash amount still sizes on an empty account — the venue refuses it later, not the arithmetic', () => {
+    const out = resolveSize({ unit: 'risk_cash', value: 500, entry: 200, stop: 196, balance: 0 })
+    assert.equal(out.quantity, 125)
+})
+
+test('_mainBalance reports zero as zero, not as absent', () => {
+    assert.equal(_mainBalance([{ id: 1, balance: 0 }]), 0)
+    assert.equal(_mainBalance([{ id: 1, balance: 0, freeMargin: 0 }]), 0)
+    assert.equal(_mainBalance([{ id: 1 }]), null, 'and a truly unreported balance is still null')
+})
