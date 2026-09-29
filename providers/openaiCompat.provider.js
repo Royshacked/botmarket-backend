@@ -24,6 +24,7 @@ import { logger } from '../services/logger.service.js'
 import { createTagSuppressor, TOOL_BUDGET_LANDING, MAX_PARALLEL_TOOLS, makeVisionBudget } from '../services/llmStream.util.js'
 import { mapLimit } from '../services/concurrency.util.js'
 import { _runTool } from './anthropic.provider.js'
+import { WEB_SEARCH_COMPAT, makeWebSearchCompatHandler } from '../services/tools/webSearchCompat.tools.js'
 
 const LOG = '[openaiCompat]'
 
@@ -49,13 +50,24 @@ function _clientFor(endpoint) {
 // ─── Translators (pure) ────────────────────────────────────────────────────────
 
 /**
- * Anthropic tool definitions → OpenAI function tools. Server tools (`type: web_search_*`) have no
- * OpenAI twin and are dropped; a registry tool is `{ name, description, input_schema }`.
+ * Anthropic tool definitions → OpenAI function tools.
+ *
+ * A server tool (`type: web_search_*`) has no OpenAI twin. It used to be dropped, which left every
+ * desk prompt naming a `web_search` the model could not see — on Luna it duly reported the tool as
+ * unavailable. It is now SUBSTITUTED with a real function tool of the same name
+ * (services/tools/webSearchCompat.tools.js), so the ladder means the same thing on every model.
  */
 export function toOpenAITools(tools) {
-    return (tools ?? [])
-        .filter(t => t?.name && t?.input_schema && !(typeof t.type === 'string' && t.type.startsWith('web_search')))
-        .map(t => ({ type: 'function', function: { name: t.name, description: t.description ?? '', parameters: t.input_schema } }))
+    const out = []
+    for (const t of tools ?? []) {
+        if (typeof t?.type === 'string' && t.type.startsWith('web_search')) {
+            out.push({ type: 'function', function: { name: WEB_SEARCH_COMPAT.name, description: WEB_SEARCH_COMPAT.description, parameters: WEB_SEARCH_COMPAT.input_schema } })
+            continue
+        }
+        if (!t?.name || !t?.input_schema) continue
+        out.push({ type: 'function', function: { name: t.name, description: t.description ?? '', parameters: t.input_schema } })
+    }
+    return out
 }
 
 /**
@@ -297,6 +309,12 @@ export async function streamOpenAICompatWithTools({
     const suppressor = createTagSuppressor({ onToken, captures: tagCaptures })
     const oaTools    = toOpenAITools(tools)
     const wantsWeb   = (tools ?? []).some(t => typeof t?.type === 'string' && t.type.startsWith('web_search'))
+    // The desk cannot supply this one: on Anthropic the VENDOR runs web_search, so no handler for
+    // it has ever existed in a toolset. The substitute needs one, and this is the only layer that
+    // knows the substitution happened.
+    const handlers = wantsWeb
+        ? { ...toolHandlers, [WEB_SEARCH_COMPAT.name]: toolHandlers[WEB_SEARCH_COMPAT.name] ?? makeWebSearchCompatHandler(LOG) }
+        : toolHandlers
     const messages   = [{ role: 'system', content: toSystemText(systemPrompt) }, ...toOpenAIMessages(promptOrMessages)]
 
     // One ctx for the whole turn — see the Anthropic loop; the vision budget counts across rounds.
@@ -312,8 +330,6 @@ export async function streamOpenAICompatWithTools({
             model: wire, messages, max_tokens: STREAM_MAX_TOKENS, stream: true,
             stream_options: { include_usage: true },
             ...(oaTools.length ? { tools: oaTools, tool_choice: landing ? 'none' : 'auto' } : {}),
-            // OpenRouter's stand-in for the Anthropic server tool. Billed per result by OpenRouter.
-            ...(wantsWeb && endpoint === 'openrouter' ? { plugins: [{ id: 'web', max_results: 5 }] } : {}),
         }, signal ? { signal } : undefined)
 
         let text   = ''
@@ -363,7 +379,7 @@ export async function streamOpenAICompatWithTools({
         messages.push({ role: 'assistant', content: text || null, tool_calls: toolCalls })
         // Bounded, and for the reason the Anthropic loop states: the model decides how wide a round
         // is, the transport decides how much of it hits a provider at once.
-        const results = await mapLimit(uses, u => _runTool(toolHandlers, u, toolCtx),
+        const results = await mapLimit(uses, u => _runTool(handlers, u, toolCtx),
             { concurrency: MAX_PARALLEL_TOOLS })
         messages.push(...toToolMessages(results))
         if (i === maxContinuations - 2) messages.push({ role: 'user', content: TOOL_BUDGET_LANDING })

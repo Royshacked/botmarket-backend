@@ -16,11 +16,18 @@ const TOOLS = [
     { type: 'web_search_20260209', name: 'web_search' },
 ]
 
-test('openaiCompat: tool schemas translate; the server tool is dropped', () => {
+test('openaiCompat: tool schemas translate; the SERVER tool is substituted, not dropped', () => {
     const out = toOpenAITools(TOOLS)
-    assert.equal(out.length, 2)
+    assert.equal(out.length, 3)
     assert.deepEqual(out[0], { type: 'function', function: { name: 'get_chart', description: 'Render a chart', parameters: TOOLS[0].input_schema } })
-    assert.ok(!out.some(t => t.function.name === 'web_search'))
+
+    // Dropping it left every desk prompt naming a web_search the model could not see, and on Luna
+    // it duly reported the tool as unavailable. It is a real function tool here instead.
+    const web = out.find(t => t.function.name === 'web_search')
+    assert.ok(web, 'web_search must exist on this path, by another route')
+    assert.equal(web.type, 'function')
+    assert.match(web.function.description, /news/i, 'and it says what it actually searches')
+    assert.deepEqual(web.function.parameters.required, ['query'])
     assert.deepEqual(toOpenAITools(undefined), [])
 })
 
@@ -110,7 +117,8 @@ test('openaiCompat: the loop runs a tool round through the shared runner and ret
     // system, user, assistant(tool_calls), tool, user(image), assistant(final)
     assert.deepEqual(trace.messages.map(m => m.role), ['system', 'user', 'assistant', 'tool', 'user', 'assistant'])
     assert.equal(client.requests[0].model, 'openai/gpt-6-luna')
-    assert.equal(client.requests[0].tools.length, 2)
+    // 3, not 2: the server tool is substituted rather than dropped (web_search, by function).
+    assert.equal(client.requests[0].tools.length, 3)
     assert.equal(client.requests[1].messages[3].tool_call_id, 'c1')
 })
 

@@ -88,8 +88,12 @@ test('stream: text streams through the tag suppressor, a tool round runs the han
     assert.equal(r1.model, 'openai/gpt-6-luna')
     assert.equal(r1.stream, true)
     assert.equal(r1.messages[0].role, 'system'); assert.equal(r1.messages[0].content, 'SYS')
-    assert.equal(r1.tools.length, 1, 'web_search is not a function tool')
-    assert.deepEqual(r1.plugins, [{ id: 'web', max_results: 5 }], 'OpenRouter web plugin stands in for web_search')
+    // web_search IS a function tool here now. The plugin it replaced augmented the prompt
+    // silently and could not be called, so every desk prompt named a tool the model could not see
+    // — on Luna it reported it unavailable. Substituted, not dropped, and no plugin.
+    assert.equal(r1.tools.length, 2)
+    assert.ok(r1.tools.some(t => t.function.name === 'web_search'))
+    assert.equal(r1.plugins, undefined)
     const r2 = client.requests[1]
     assert.deepEqual(r2.messages.slice(2).map(m => m.role), ['assistant', 'tool', 'user'])
     assert.equal(r2.messages[2].tool_calls[0].function.arguments, '{"ticker":"NVDA"}')
@@ -97,12 +101,15 @@ test('stream: text streams through the tag suppressor, a tool round runs the han
     assert.equal(r2.messages[4].content[1].image_url.url, 'data:image/png;base64,PNG')
 })
 
-test('stream: no web plugin off OpenRouter, and a substituted model throws', async () => {
+test('stream: no web plugin anywhere — web_search is a real tool now — and a substituted model throws', async () => {
     const client = fakeStreamClient([[chunk({ content: 'ok' }, 'stop')]])
     await streamOpenAICompatWithTools({ endpoint: 'mistral', wire: 'openai/gpt-6-luna', model: 'm', client, promptOrMessages: 'hi', systemPrompt: 'S',
         tools: [{ type: 'web_search_20260209', name: 'web_search' }] })
-    assert.equal(client.requests[0].plugins, undefined)
-    assert.equal(client.requests[0].tools, undefined)
+    assert.equal(client.requests[0].plugins, undefined, 'the plugin is gone everywhere')
+    // …and the substitute is OUR search, so it works off OpenRouter too — on Mistral's own API
+    // the desk used to have no web at all.
+    assert.equal(client.requests[0].tools.length, 1)
+    assert.equal(client.requests[0].tools[0].function.name, 'web_search')
 
     const bad = fakeStreamClient([[{ model: 'openai/gpt-6-terra', choices: [{ delta: { content: 'x' }, finish_reason: 'stop' }] }]])
     await assert.rejects(streamOpenAICompatWithTools({ wire: 'openai/gpt-6-luna', model: 'm', client: bad, promptOrMessages: 'hi', systemPrompt: 'S' }), /served "openai\/gpt-6-terra"/)

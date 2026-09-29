@@ -498,6 +498,16 @@ services/
                               klinecharts built-ins); paneId 'candle_pane' for overlays.
     studyTranslate.js         studiesToIndicators/translateStudy — _buildStudies TradingView study
                               objects → klinecharts indicator descriptors (overlay vs own-pane split).
+    tools/webSearchCompat.tools.js  web_search FOR A NON-ANTHROPIC MODEL (2026-09-29). On Anthropic
+                              it is a SERVER tool the vendor runs; the compat translation used to
+                              drop it and send OpenRouter's `web` plugin instead — which augments
+                              the prompt silently and cannot be CALLED, so every desk prompt named
+                              a tool the model could not see (seen live on Luna: "web search tool
+                              isn't available"). Now substituted in toOpenAITools as a real
+                              function tool, backed by GNews, with the handler injected by the
+                              compat loop because no desk toolset has ever carried one. News, not
+                              the whole web — which is what the desks ask this tool for — and the
+                              description says so.
     positionSize.util.js      THE FIVE SIZING UNITS, resolved to one quantity (2026-09-28). PURE.
                               SIZE_UNITS risk_cash · risk_pct · size_cash · size_pct · shares;
                               riskPerUnit(entry, stop, multiplier) is the contract-aware distance.
