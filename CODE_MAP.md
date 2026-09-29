@@ -1101,12 +1101,18 @@ scripts/                    ops one-offs — none run by `npm test`. Kinds: migr
                             LIVE tree and nothing lints or tests it, so a sweep that deletes an
                             export no live caller uses breaks it silently. Run it after any such
                             sweep. A script, not a test, so archive/ stays out of `npm test`.
-  check-docs-drift.mjs      `npm run check:docs` — pulls every checkable claim out of the living docs
+  check-docs-drift.mjs      `npm run check:docs` — pulls every checkable claim out of the docs
                             (backtick paths, module names, routes, emit tags, symbols, constants,
                             markdown links + anchors) and reports the ones that resolve to nothing,
-                            or only to archive/. Per-doc counts first, worst first; `--json` for a
-                            fix pass; a folder or file argument to narrow, including one in a sibling
-                            repo. Mechanical only — it says which sentences to distrust, not whether
+                            or only to archive/. TWO TABLES: the LIVING docs are the contract and
+                            have to resolve; docs/design/ holds plans and build records, which name
+                            what is not built yet or what a build shipped under, so they carry their
+                            own total and print findings only with `--records` (or when you name one).
+                            A name that is GONE is struck through — ~~`zoneGate`~~ — and skipped,
+                            because a paragraph explaining a deletion is the doc working; see
+                            docs/README.md for the two conventions. Per-doc counts, worst first;
+                            `--json` for a fix pass; a folder or file argument to narrow, including
+                            one in a sibling repo. Mechanical only — it says which sentences to distrust, not whether
                             the prose is still true. Its verdict rules are pinned by
                             tests/unit/docsDrift.test.js (the cases a code review found it passing).
 prompts/                    every prompt loaded at RUNTIME (6 desks + Argus's

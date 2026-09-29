@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { classify, check, slug, extractClaims } from '../../scripts/check-docs-drift.mjs'
+import { classify, check, slug, extractClaims, docKind } from '../../scripts/check-docs-drift.mjs'
 
 // The docs-drift scanner's verdicts on the cases the 2026-09-19 code review found it getting
 // wrong. Each one is a claim shape the docs actually use, checked against the REAL tree — so a
@@ -83,3 +83,17 @@ test('a struck-through name is retired prose, not a claim', () => {
     // one tilde pair is not a strikethrough, and nothing else on the line is lost
     assert.deepEqual(names('`broker.service` ~ `logger.js`'), ['broker.service', 'logger.js'])
 })
+
+// The directory IS the declaration: docs/design/ holds plans and build records, both of which
+// name things the tree does not have (a plan invents them, a record shipped under them). Counting
+// those against the contract is what made the summary read worst-first on the docs that were
+// least wrong — talos-per-candle, a record of a build that shipped, topped the list at 20%.
+test('a doc under design/ is a record; everything else is the contract', () => {
+    assert.equal(docKind('docs/design/talos-per-candle.md'), 'record')
+    assert.equal(docKind('docs/desks/mentor-talos.md'), 'living')
+    assert.equal(docKind('CODE_MAP.md'), 'living')
+    assert.equal(docKind('docs/architecture/broker.md'), 'living')
+    // the scan hands paths in the host's separator
+    assert.equal(docKind(String.raw`docs\design\adopted-book.md`), 'record')
+})
+

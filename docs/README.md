@@ -113,3 +113,13 @@ drops its extension instead — `was portfolio.monitor` — which the scanner re
 name that was *proposed and never built* is not retired: put it in quotes, not backticks, because
 there is nothing to strike.
 
+## What `npm run check:docs` reports, and what it does not
+
+The scan splits on the line this directory already draws. **Living docs — the root four,
+`architecture/` and `desks/` — are the contract, and every name in them has to resolve.**
+`design/` is a moment: a plan names what is not built yet, a record keeps the names its build
+shipped under, and neither is drifting when it does. Records get their own table and their own
+total; their findings print with `--records`, or whenever you ask for one by name.
+
+So a living doc at anything but zero is a sentence to go read. That is the whole signal, and it
+only works if the count means something — which is why the two conventions above exist.

@@ -174,6 +174,17 @@ function headingsOf(rel) {
  */
 const RETIRED = /~~.+?~~/g
 
+/**
+ * A doc is either the CONTRACT or a MOMENT, and only the contract has to resolve.
+ *
+ * `docs/design/` is the moment by definition of the directory (see docs/README.md): a plan for
+ * something not built yet, or the record of a build and what it settled differently. Both name
+ * things that do not exist — a plan invents names, a record keeps the ones it shipped under — and
+ * neither is drifting when it does. They are reported, in their own table, under their own total,
+ * and their findings print with --records. Everything else is the contract and must resolve.
+ */
+const docKind = docRel => toPosix(docRel).startsWith('docs/design/') ? 'record' : 'living'
+
 function extractClaims(text) {
     const claims = []
     const lines = text.split('\n')
@@ -413,7 +424,7 @@ function check(claim, docRel) {
     }
 }
 
-export { classify, check, extractClaims, slug }
+export { classify, check, extractClaims, slug, docKind }
 
 // ---------------------------------------------------------------- run
 
@@ -422,6 +433,8 @@ const isMain = process.argv[1] && pathToFileURL(resolve(process.argv[1])).href =
 if (!isMain) process.exitCode = 0
 const argv = isMain ? process.argv.slice(2) : []
 const asJson = argv.includes('--json')
+// A record's findings are a separate read from the contract's; ask for them.
+const showRecords = argv.includes('--records')
 const docs = isMain ? listDocs(argv.filter(a => !a.startsWith('--'))) : []
 
 const report = []
@@ -440,6 +453,7 @@ for (const docRel of docs) {
     const bad = counted.filter(r => r.verdict !== 'ok')
     report.push({
         doc: docRel,
+        kind: docKind(docRel),
         lines: text.split('\n').length,
         claims: counted.length,
         bad: bad.length,
@@ -458,26 +472,50 @@ if (!isMain) {
 const pad = (s, n) => String(s).padEnd(n)
 const rpad = (s, n) => String(s).padStart(n)
 
-console.log(`\nDocs drift — ${docs.length} doc(s), corpus ${code.length} code files` +
-    (corpus.some(f => f.tier === 'frontend') ? ' (+frontend)' : ' (frontend repo not found)') + '\n')
-console.log(pad('doc', 46) + rpad('lines', 6) + rpad('claims', 8) + rpad('bad', 5) + rpad('%', 5))
-console.log('-'.repeat(70))
-for (const r of [...report].sort((a, b) => b.pct - a.pct || b.bad - a.bad)) {
-    console.log(pad(r.doc, 46) + rpad(r.lines, 6) + rpad(r.claims, 8) + rpad(r.bad, 5) + rpad(r.pct, 5))
-}
-const totalClaims = report.reduce((n, r) => n + r.claims, 0)
-const totalBad = report.reduce((n, r) => n + r.bad, 0)
-console.log('-'.repeat(70))
-console.log(pad('total', 46) + rpad('', 6) + rpad(totalClaims, 8) + rpad(totalBad, 5) + rpad(totalClaims ? Math.round(totalBad / totalClaims * 100) : 0, 5))
+console.log('')
+console.log(`Docs drift — ${docs.length} doc(s), corpus ${code.length} code files` +
+    (corpus.some(f => f.tier === 'frontend') ? ' (+frontend)' : ' (frontend repo not found)'))
+console.log('')
 
-for (const r of report) {
-    if (!r.findings.length) continue
-    console.log(`\n== ${r.doc}  (${r.bad}/${r.claims})`)
+const living  = report.filter(r => r.kind === 'living')
+const records = report.filter(r => r.kind === 'record')
+
+const table = (rows, heading, ...note) => {
+    if (!rows.length) return
+    console.log(heading)
+    for (const n of note) console.log(n)
+    console.log(pad('doc', 46) + rpad('lines', 6) + rpad('claims', 8) + rpad('bad', 5) + rpad('%', 5))
+    console.log('-'.repeat(70))
+    for (const r of [...rows].sort((a, b) => b.pct - a.pct || b.bad - a.bad)) {
+        console.log(pad(r.doc, 46) + rpad(r.lines, 6) + rpad(r.claims, 8) + rpad(r.bad, 5) + rpad(r.pct, 5))
+    }
+    const c = rows.reduce((n, r) => n + r.claims, 0)
+    const b = rows.reduce((n, r) => n + r.bad, 0)
+    console.log('-'.repeat(70))
+    console.log(pad('total', 46) + rpad('', 6) + rpad(c, 8) + rpad(b, 5) + rpad(c ? Math.round(b / c * 100) : 0, 5))
+    console.log('')
+}
+
+table(living, 'LIVING DOCS — the contract. These have to resolve.')
+table(records, 'PLANS AND RECORDS (docs/design/) — a moment, not the present.',
+    '  A plan names what is not built yet, and a record keeps the names it shipped under;',
+    '  neither is drifting when it does. Their findings print with --records.')
+
+// Findings: the contract first, and always. A record's are on request, because the whole point
+// of the split is that reading them is a different job from fixing the contract.
+// Ask for a record by name and you get its findings; the flag is for the sweep, where they
+// would bury the contract's.
+const wantRecords = showRecords || !living.length
+const withFindings = [...living, ...(wantRecords ? records : [])].filter(r => r.findings.length)
+for (const r of withFindings) {
+    console.log('')
+    console.log(`== ${r.doc}  (${r.bad}/${r.claims})`)
     for (const f of r.findings) {
         const where = f.at ? ` → ${f.at}` : ''
         const detail = f.detail ? `  (${f.detail})` : ''
         console.log(`  ${rpad(f.line, 5)}  ${pad(f.verdict, 9)} ${pad(f.kind, 7)} ${f.raw}${where}${detail}`)
     }
 }
-console.log()
+if (living.length && !living.some(r => r.findings.length)) console.log('Every living doc resolves.')
+console.log('')
 }
