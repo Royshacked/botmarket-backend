@@ -1210,3 +1210,27 @@ Six new prompt-contract tests pin the ones a future edit could quietly undo. Sui
 touched (conditions, validity, the worksheet, the flip test). They are coherent with the new flow —
 that was checked — but they carry the density of the Kairos fork and would read better shorter.
 That is a separate job, on a fresh read, not at the end of a ten-hour session.
+
+## De-duplication (2026-09-29): the two things the new flow said twice
+Roy's read: most of the old sections are covered by the new flow. Measured, that is true of two of
+them and false of the rest — `conditions[]`, `persistence`, `referenced_symbols`, `validity`,
+`on_away`, the worksheet and the tags are the EMIT CONTRACT Talos reads, and the stage sections
+never restate any of it.
+
+**1. The rejects were authored twice, in the same `why_not` key.** Once as `<spans>.discarded` at
+the gate, again as `alternatives[]` on the worksheet. The gate is where the judgment is actually
+made, in front of the user, so that is where it is written: `alternativesFromSpans` derives the
+setup field from it, and the prompt section is now "you do not author this" plus the two rules the
+server cannot derive (a reject promoted into a scenario, and EMPTY on a plan the user brought).
+A discarded span may now carry an optional `archetype` so the derivation keeps it.
+
+**2. The scenario count was stated twice, differently** — "up to four" at the spans stage and "as
+many as the chart offers" in `scenarios[]`. The gate owns the rule; the schema section points at it
+and keeps only what is its own (the same premise at two levels is two scenarios).
+
+Prompt 1,195 -> 1,181 lines, and more to the point one fewer thing for the model to be inconsistent
+about on every re-emit. Suite 3718/0.
+
+**Kept, by Roy's call:** `<setups>` and the candidate picker. Largely superseded by the spans gate
+— the prompt says so itself — but removing it retires a user-facing path, which is a product
+decision and not a cleanup.

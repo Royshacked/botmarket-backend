@@ -15,7 +15,7 @@ import { normalizeSetup, setupReadiness, computeRR, validityProblems, normalizeC
 import { summarizeTrade, applySizing } from '../mentorSummary.util.js'
 import {
     normalizeBuild, sanitizeBuildOps, applyBuildOps, claimsFromDraft, settledConflicts,
-    normalizeSpans, spanIds, normalizeEntries, entryIds, entryProblems, fieldsClearedBy,
+    normalizeSpans, spanIds, normalizeEntries, entryIds, entryProblems, fieldsClearedBy, alternativesFromSpans,
     recordReads, ALWAYS_REFETCH, sanitizeUserOps, applyUserOps, gateView,
     activeName, stageOf, firstUnsettled, isWaived, STAGES,
 } from '../mentorBuild.util.js'
@@ -281,7 +281,15 @@ async function chatStream({
         ?? (hasLedger ? normalizeSetup({ asset: ledgerName.asset }) : null)
     if (carrier) {
         carrier.build = build
-        if (spans) carrier.spans = spans
+        if (spans) {
+            carrier.spans = spans
+            // THE REJECTS ARE AUTHORED ONCE, at the gate. `alternatives[]` used to be a second
+            // section asking for the same judgment in the same `why_not` key — the same thing
+            // written twice is the same thing drifting twice, and it rode every re-emit. Derived
+            // here unless the model authored its own (a plan the user brought has no gate).
+            const fromGate = alternativesFromSpans(spans)
+            if (fromGate.length && !carrier.alternatives?.length) carrier.alternatives = fromGate
+        }
         if (entries) carrier.entries = entries
         // THE MONEY IS COMPUTED, NEVER NARRATED FROM THE MODEL'S OWN ARITHMETIC. The summary rides
         // on the draft so the panel shows the same figures the model was handed, and both come from

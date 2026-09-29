@@ -110,9 +110,13 @@ test('the flip section teaches all three verdicts, and the asymmetry between the
 test('the rejects pool is taught as empty on the path that brought its own plan', () => {
     const section = PROMPT.split('### `alternatives[]`')[1]?.split('\n## ')[0] ?? ''
     assert.ok(section.length > 600, 'the alternatives section is missing')
-    assert.match(section, /EMPTY/,                 'the interview carve-out is the rule most likely to be lost')
+    assert.match(section, /EMPTY/,                 'the brought-plan carve-out is the rule most likely to be lost')
     assert.match(section, /reason|why_not/,        'a reject without a reason is dropped — the prompt must say so')
-    assert.match(section, /once/i,                 'authored once and carried forward, or it costs on every re-emit')
+    // Authored ONCE now means authored at the GATE: the setup field is derived from the spans it
+    // discarded, so the same judgment is not written twice in two vocabularies.
+    assert.match(section, /You do not author this/)
+    assert.match(section, /`discarded` list from your `<spans>` gate/)
+    assert.match(section, /pool a scenario gets promoted out of/)
 })
 
 test('the worksheet example carries the fields the model is meant to copy', () => {

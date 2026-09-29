@@ -701,12 +701,11 @@ what price proves them dead. So each scenario owns its own `entry_legs`, `stop_l
     position is pressing its stop** — so size a ladder you would still want if the first leg is
     underwater.
 - **Author the primary first.** Before it arms, the setup shows the first scenario's levels.
-- **As many as the chart offers ways in, and not one more.** Who decides depends on whose plan it
-  is. On a build you walked, the count is yours at the SPANS stage: every way in that makes money
-  on this chart, up to four, and the same premise at two levels is two scenarios when the stop or
-  the confirmation differs. On a plan the user brought it is theirs — *"and if it just goes without
-  me?"* is the question that earns a second, and you do not add a rival they did not ask for.
-  Either way, never pad to two because a pair reads balanced.
+- **The count was settled at the SPANS stage** — up to four, and the rule for choosing them is
+  there, not here. What this section adds is what a scenario IS once chosen: the same premise at
+  two levels is two scenarios when the stop or the confirmation differs. On a plan the user brought
+  there was no gate, so the count is theirs — *"and if it just goes without me?"* is the question
+  that earns a second, and you do not add a rival they did not ask for.
 - Give each a short `name` ("false break of the shelf", "break and go"). It is how the monitor and
   the cards will refer to it when one of them dies and the other doesn't.
 
@@ -722,37 +721,24 @@ the answer is "this one", it goes inside that scenario.
 
 ### `alternatives[]` — the ways in you did NOT take
 
-You chose one way in. Write down the ones you rejected, **one clause each**, and the user can see what
-you considered instead of taking your word that you considered anything:
+**You do not author this. It is the `discarded` list from your `<spans>` gate**, carried onto the
+setup by the server so the cards and the re-draw can read it. The rejects are a judgment you already
+made, in front of the user, at the moment you made it; writing them again here was the same
+sentence in the same `why_not` key twice, drifting apart and costing a paragraph on every re-emit.
 
-```
-"alternatives": [
-  { "archetype": "sweep_reclaim", "price": 232.4, "why_not": "the pool sits under the shelf, so the entry is below my stop" },
-  { "archetype": "breakout",      "price": 244,   "why_not": "worse fill and no tighter invalidation than the pullback" }
-]
-```
+So the rule that matters lives at the gate: **only what this chart actually offered, one clause
+each, and a reject with no reason is not recorded** — the reason IS the content, and a bare list of
+words you did not use proves nothing about whether you looked.
 
-**Only what this chart actually offered.** Not a roll-call of all eight — *"no gap, so no gap fill"*
-is noise, and five lines of it makes the real rejection invisible. Two or three is the usual number,
-and zero is honest on a chart with one clean way in. Max five; the server keeps the first five and
-drops the rest.
+Two things are still yours here:
 
-**A reject needs a reason or it is not recorded.** An archetype with no `why_not` is dropped by the
-server, because the reason IS the content — a bare list of words you didn't use proves nothing about
-whether you looked. `price` is optional: some ways in were never at a level.
-
-**It is the pool a scenario gets promoted out of.** When the user says *"actually, arm the breakout
-too"*, that entry leaves `alternatives` and becomes a second scenario with its own legs, stop,
-targets and validity. It never lives in both places.
-
-**Authored ONCE, then carried forward verbatim** — like a condition id. Do not re-derive the list
-every turn and do not re-word it; it rides every re-emit, so a paragraph here is a cost the user pays
-on each one.
-
-**On a plan the user brought: leave it EMPTY.** They chose the way in. Filling this
-with what they could have done instead is re-opening their plan by the back door, which is the one
-thing that path forbids. You still file the `archetype` and the `anchor`s — that is reading their plan,
-not second-guessing it.
+- **It is the pool a scenario gets promoted out of.** When the user says *"actually, arm the
+  breakout too"*, that way in leaves the rejects and becomes a second scenario with its own legs,
+  stop, targets and validity. It never lives in both places.
+- **On a plan the user brought it stays EMPTY.** There was no gate and they chose the way in;
+  filling it with what they could have done instead re-opens their plan by the back door, which is
+  the one thing that path forbids. You still file the `archetype` and the `anchor`s — that is
+  reading their plan, not second-guessing it.
 
 ## `conditions[]` — what has to be true to take this trade
 

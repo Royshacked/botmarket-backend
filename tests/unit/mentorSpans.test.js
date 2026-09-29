@@ -131,3 +131,36 @@ test('a spans block where nothing survives leaves the table as it was', async ()
         { active_asset: 'NVDA', draft: first.setup, coverage: [] })
     assert.deepEqual(spanIds(junk.setup.spans), ['t1'], 'an empty gate is worse than a stale one')
 })
+
+// ─── The rejects are authored once, at the gate ───────────────────────────────
+
+import { alternativesFromSpans } from '../../services/mentorBuild.util.js'
+
+test('the discarded spans BECOME the alternatives on the setup — one judgment, one place', () => {
+    const out = normalizeSpans({
+        candidates: [span(1)],
+        discarded: [
+            { label: 'the gap fill at 231.8', why_not: 'it sits below my invalidation', archetype: 'gap_fill' },
+            { label: 'the breakout', why_not: 'worse fill, no tighter stop' },
+        ],
+    })
+    assert.deepEqual(alternativesFromSpans(out), [
+        { archetype: 'gap_fill', label: 'the gap fill at 231.8', why_not: 'it sits below my invalidation' },
+        { label: 'the breakout', why_not: 'worse fill, no tighter stop' },
+    ])
+})
+
+test('a reject with no reason is not one — the reason IS the content', () => {
+    const out = normalizeSpans({ candidates: [span(1)], discarded: [{ label: 'the gap' }] })
+    assert.deepEqual(alternativesFromSpans(out), [])
+    assert.deepEqual(alternativesFromSpans(null), [])
+})
+
+test('the rejects reach the worksheet without the model writing them twice', async () => {
+    const out = await turn(`<spans>${JSON.stringify({
+        candidates: [span(1)],
+        discarded: [{ label: 'the gap fill', why_not: 'below my invalidation', archetype: 'gap_fill' }],
+    })}</spans>`, AT_NVDA)
+    assert.equal(out.setup.alternatives.length, 1)
+    assert.equal(out.setup.alternatives[0].why_not, 'below my invalidation')
+})

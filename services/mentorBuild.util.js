@@ -551,12 +551,43 @@ export function normalizeSpans(raw) {
 
     const discarded = (Array.isArray(raw.discarded) ? raw.discarded : [])
         .map(d => (d && typeof d === 'object'
-            ? { label: clampStr(d.label ?? '', MAX_STR), why_not: clause(d.why_not) }
+            ? {
+                label:   clampStr(d.label ?? '', MAX_STR),
+                why_not: clause(d.why_not),
+                // Optional, and carried because `alternatives[]` on the setup keys on it — the
+                // rejects are authored HERE now and derived from there.
+                ...(normalizeTaxon(ENTRY_ARCHETYPES, d.archetype) ? { archetype: normalizeTaxon(ENTRY_ARCHETYPES, d.archetype) } : {}),
+            }
             : null))
         .filter(d => d && d.label && d.why_not)
         .slice(0, MAX_DISCARDED)
 
     return candidates.length ? { candidates, discarded } : null
+}
+
+/**
+ * The rejects, as the SETUP records them — derived from the spans the gate discarded.
+ *
+ * They were being authored twice, in two sections, under the same `why_not` key: once as the
+ * discarded candidates at the gate, and again as `alternatives[]` on the worksheet. The same
+ * judgment written twice is the same judgment drifting twice, and it cost the model a paragraph
+ * on every re-emit. The gate is where the decision is actually made, so that is where it is
+ * written; this turns it into the shape the setup and the cards already read.
+ *
+ * `archetype` is what `alternatives[]` keys on and a discarded span may not carry one — the
+ * fallback keeps the REASON, which is the whole content of a reject, rather than dropping the row
+ * for want of a taxonomy word.
+ *
+ * Pure.
+ */
+export function alternativesFromSpans(spans) {
+    return (spans?.discarded ?? [])
+        .map(d => ({
+            ...(d.archetype ? { archetype: d.archetype } : {}),
+            label:   d.label,
+            why_not: d.why_not,
+        }))
+        .filter(a => a.why_not)
 }
 
 /** The ledger value for a settled spans stage: the ids the user agreed to look at. */

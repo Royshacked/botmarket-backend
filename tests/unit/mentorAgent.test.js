@@ -335,10 +335,14 @@ test('candidates are an explicit ask now — a walked build ends in one setup', 
     assert.doesNotMatch(PROMPT, /When the user has no setup, offer a few/, 'the old default-to-candidates invariant is gone')
 })
 
-test('scenario count is Mentor\'s on a walked build — same premise at two levels is allowed, padding is not', () => {
+test('the scenario count is stated ONCE, at the gate that decides it', () => {
+    // It lived in two places in two wordings — "up to four" at the spans stage and "as many as the
+    // chart offers" in scenarios[]. The gate owns the rule; the schema section points at it.
     assert.match(PROMPT, /if they are all pullbacks, they are all\s+pullbacks/)
     assert.doesNotMatch(PROMPT, /Most setups have exactly one\./)
-    assert.match(PROMPT, /never pad to two because a pair reads balanced/)
+    assert.match(PROMPT, /Never a pullback AND a breakout because the pair reads balanced/)
+    assert.match(PROMPT, /The count was settled at the SPANS stage/)
+    assert.doesNotMatch(PROMPT, /As many as the chart offers ways in, and not one more/)
 })
 
 test('nothing in the prompt still points at the deleted ladder', () => {
