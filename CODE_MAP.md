@@ -39,6 +39,12 @@ api/
     exitOrders.service.js     in-position exit (re)arming — through buildExitOrder, so the basis offset is
                               applied once, by the one helper, on this path as on placement
   mentor/                 Mentor chat SSE /api/mentor/stream — the trader's desk (agents/mentor)
+    mentor.controller.js      NB: `_mentorResponse(result, role)` is the response shaping, PURE and
+                              exported so a test can hold it (mentorResponse.test.js). Everything
+                              the panel reads is listed there BY HAND, and twice something was not:
+                              `build` first, then `gate` — which blanked both build gate cards while
+                              the server went on computing which one was open. A new field the client
+                              reads is added HERE, with a line in that test.
   setups/                 the `setup` kind — Mentor's artifact, Talos's charge  /api/setups/*
     setups.service.js         Generate (the readiness gate + the server-stamped binding: mode /
                               broker / accounts / venue / event_risk) and owner-scoped CRUD over
@@ -1082,6 +1088,14 @@ scripts/                    ops one-offs — none run by `npm test`. Kinds: migr
                             (free-port, clone-db-for-dev). tests/unit/scriptsImport.test.js loads
                             every one STATICALLY (they run on import) and fails if an import or a
                             named export it reaches has been moved — the only guard they have.
+  drive-mentor-ui.mjs       DRIVES THE ACTUAL SCREEN (2026-09-29) — headless Chromium via
+                            Playwright: makes the throwaway `ui-smoke` user, signs in, opens
+                            Mentor, sends an opening turn, presses the confirm, screenshots the
+                            gate. The FE tests mock the service layer, so nothing else exercises
+                            server → controller → panel as ONE path — and every gate defect so far
+                            has lived exactly there, with green tests behind it. Rebuild the
+                            bundle into public/ first, and LOOK at the screenshots. A resumed
+                            thread starts past the opening stage; that is state, not a defect.
   check-archive-loads.mjs   `npm run check:archive` — imports every file under archive/ and fails
                             on the first that cannot resolve. The archive reaches ~40 symbols in the
                             LIVE tree and nothing lints or tests it, so a sweep that deletes an
@@ -1168,6 +1182,7 @@ docs/                       docs/README.md is THE index. architecture/ (how it i
 | New background loop | `startLoop('name', svc)` in `server.js` — and the service MUST export both `start` and `stop`. `startLoop` refuses one without a `stop()` with a log line and returns false, so a missing `stop` means the loop silently never runs (this happened to `execution.reconciler`). `tests/unit/loopContract.test.js` is the guard |
 | New env var | one getter in `services/config.js`, reading through `_raw` / `_str` / `_num` / `_bool` — the known-key set is derived from the readers (`knownKeys()`), and `config.test` fails on a getter that reads `process.env` directly |
 | New Axl tool | APPEND to `TOOLS` in `axl.agent.service.js` (never insert — the snapshot compares by index and the prompt cache keys off the array prefix) + append the built entry to the `axl` array in `tests/fixtures/agentTools.snapshot.json` in the same commit |
+| New field the Mentor panel reads | list it in `_mentorResponse` (`mentor.controller.js`) AND in `tests/unit/mentorResponse.test.js` — the controller names every forwarded field by hand, and a field computed but never sent is invisible in the only way that matters. Then drive it: `node scripts/drive-mentor-ui.mjs` |
 | New Mentor tool | its own `toolsFor({...})` block in `MENTOR_TOOLS` (`mentor.agent.service.js`) AFTER the spread `TRADING_TOOLS` kit and BEFORE `consult` (contractually last) + its handler in `chatStream`'s `toolHandlers` with an injectable seam + rebuild the `mentor` row of the snapshot in live order; `promptToolDrift.test` then checks the prompt only names tools the kit has |
 | New agent tool that is a FACT about the venue/instrument | ride it on `get_quote` (`makeQuoteHandler`) as well as giving it a tool — a desk cannot then be unaware of it |
 | New notification card | build it through `postCard` (notifyCard.js), give it `actions` only if it's actionable, add a bubble + a `msg.type` branch in the FE `ChatWindow.jsx`; a recurring fan-out dedupes via `listCardRecipientsSince`. It reaches the user's devices as a push on its own — nothing to add |

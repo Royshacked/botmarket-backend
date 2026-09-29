@@ -884,13 +884,16 @@ restored — the same destination whether reached from the list pencil or from A
 
 ### The build — one machine, five stages (2026-09-28)
 
-> **BUILT 2026-09-28**, phases 1–3 of
-> [design/mentor-flow-intent.md](../design/mentor-flow-intent.md), which is the target flow in full.
+> **BUILT 2026-09-28, ALL EIGHT PHASES, merged to main 2026-09-29** —
+> [design/mentor-flow-intent.md](../design/mentor-flow-intent.md) is the design in full and the
+> build log, including the code review, the live smokes and the defects running it found.
 > **The eight-rung ladder is DELETED**, along with "one rung per turn", the detour rule and the
 > interview choreography. The flow is server state now (`services/mentorBuild.util.js`), and the
 > prompt lost 101 lines because it no longer has to teach a model to remember where it was.
-> Stages 4–8 of that design — the gates' own UI, the drawn chart, batch Generate, revise/cancel —
-> are NOT built; the prompt states those stages in brief and the ledger already holds them.
+> The gates have their own cards, the spans are drawn on a chart, a build may hold several names
+> and generate them together, and a monitored setup can be revised or cancelled. The one piece of
+> the design still unbuilt is **batch intake from social chat** — several finished plans arriving
+> in one DM — which needs a sender, not a receiver.
 
 A setup arrives one of three ways — a bare name, a name Argus handed over, or a plan the user
 already made — and there is **one machine, not three paths**. Whatever arrived is written into the
@@ -915,6 +918,36 @@ reads is the silent skip the whole design exists to stop.
 **Three stops are the user's** — the opening turn, sizing, and the summary — and the two gates
 between them (spans, entries) may be waived once, in the opening turn (*"go all the way"*). A waived
 gate is still reported at the next stop: a call the user never heard is one they never made.
+
+**A gate is a PRESS, not a sentence (2026-09-29).** The server reports the open gate on every turn
+(`gateView` → `{asset, stage, fields, values, awaiting}`, forwarded as `gate`), the panel draws its
+card from `gate.stage`, and the same key is how the card comes OFF the screen when that stage
+settles. The answer comes back as `chatState.ops` and is applied by `applyUserOps` **before the
+model reads the turn**: a click is a fact, so nothing about it is left to be inferred from prose.
+Ops arrive through the client, so they are sanitized by type like any other input
+(`sanitizeUserOps`).
+
+**Ticking, not picking.** Spans and entries are multi-select. More than one way in is a real answer
+and not only when scaling — rival scenarios where the first to fulfil takes the position and the
+rest are cancelled. A `scale_in` trade is the exception: it ticks as ONE unit, because its options
+are halves of one position and taking two of three would author shares that no longer sum to 100.
+`You choose` hands the judgment back to Mentor; the rejects stay reachable behind "N ways not
+taken".
+
+**Every field the panel reads has exactly one place to be forgotten**, and twice something was.
+`build` went missing first; then `gate` — and because the panel had just started drawing its cards
+from the stage the server reports, both build gates silently vanished from the screen while the
+server went on computing which one was open. The response shaping is a pure exported function with
+a test over it now (`_mentorResponse`, `tests/unit/mentorResponse.test.js`). Green unit tests did
+not catch either one: they mock the service layer, so nothing exercises server → controller → panel
+as one path. `scripts/drive-mentor-ui.mjs` drives that path in a real browser.
+
+**Sizing sizes EVERY leg.** Readiness demands a quantity per leg, so one unit and one number fan out
+across the plan: a scale-in splits by each leg's share, and two rival entries filed inside ONE
+scenario are refused by name ("those are scenarios, not legs") rather than sized as if they were a
+ladder. A balance of **zero is a balance** — it reads "this account is empty, mark another", not "I
+cannot see a balance", and it is a blocker at the sizing stage rather than a reason to send the
+build back to the entries gate.
 
 **How the ledger survives a turn: it rides ON THE DRAFT.** The frontend rebuilds `chatState` from the
 fields it was sent (`active_asset: e?.asset || n?.ticker || ''`), so a new top-level key would be

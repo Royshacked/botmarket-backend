@@ -1234,3 +1234,56 @@ about on every re-emit. Suite 3718/0.
 **Kept, by Roy's call:** `<setups>` and the candidate picker. Largely superseded by the spans gate
 — the prompt says so itself — but removing it retires a user-facing path, which is a product
 decision and not a cleanup.
+
+## Running it live (2026-09-29, after the merge) — seven defects, and one new rule
+Roy built setups in the real app on the house model (Luna) while this was on main. Everything the
+flow is *for* held: the opening turn came back with direction, horizon and lens together; the gates
+opened in order; the ledger never lost its place across a digression. What broke was the seam
+between the server and the screen — and I wrote most of it.
+
+1. **`web_search` was named in every desk prompt and could not be called on a non-Anthropic model.**
+   The compat translation dropped the Anthropic server tool and sent OpenRouter's `web` plugin
+   instead, which augments the prompt silently and is not callable. Luna said so out loud: *"web
+   search tool isn't available."* Now substituted as a real function tool backed by GNews
+   (`services/tools/webSearchCompat.tools.js`), with the handler injected by the compat loop
+   because no desk toolset has ever carried one. **Not mine — it predates this build.**
+2. **The picture did not follow the house model.** The vision route was pinned while the chat model
+   was a selector. Both follow `house_settings/models` now.
+3. **The gate's chart could not be reached** — the spans card drew above a chart the user could not
+   scroll to, and the routes were single-click radio behaviour. Both fixed together: the chart got
+   a fixed aspect ratio, and the routes became **checkboxes**, because more than one way in is a
+   real answer even without scaling.
+4. **A settled gate stayed on the screen.** The card was keyed to its content, not its stage.
+5. **Then BOTH gates vanished** — the controller never forwarded the `gate` field the panel had just
+   started keying off. That is the SECOND field dropped there (`build` was the first), so the
+   shaping is a pure function with a test now (`_mentorResponse`).
+6. **A zero balance read as "a balance I cannot see"**, and the sizing blocker sent the build back
+   to the entries gate. Zero is a balance; a sizing problem is answered at sizing.
+7. **Two entries could not be sized.** Sizing set a leg quantity only when there was exactly one
+   leg, while readiness demands one per leg — so the honest answer ("I'd take it either way") made
+   the build unsizable. Every leg is sized now: a scale-in splits by share, and two rivals filed
+   inside one scenario are refused by name.
+
+A last one was found by looking rather than by asking: the blockers line read *"Still needs: …,
+trading account, trading account"*, because the gap is known on both sides and both said it.
+
+**The rule this leaves (Roy's).** Three of these had green tests when I handed them back. The FE
+tests mock the service layer, so nothing exercised server → controller → panel as one path, which
+is where all three lived. **Drive the app in a browser before reporting a frontend change done.**
+`scripts/drive-mentor-ui.mjs` is that drive, committed rather than improvised: it makes the
+throwaway user, signs in, opens Mentor, sends an opening turn, presses the confirm and screenshots
+the gate. Look at the screenshots. Two traps worth knowing: a resumed thread starts past the
+opening stage (state, not a defect), and a local server run with `NODE_ENV=production` disables the
+8.8.8.8 DNS pin, which reads exactly like a Mongo outage.
+
+### Still open after this session
+- **Batch intake from social chat** — several finished plans in one DM, straight to "generate all".
+  The receiver is built (the blueprint hydrates and lands on a turn); what is missing is a sender
+  for more than one.
+- **A candidate pick settling the opening** — shipped as an interim fix; Roy is redoing it with the
+  sending part and the two may collide.
+- **Argus stalled mid-conversation** on one live run. Reported, not diagnosed, not this desk.
+- **Labels on the drawn spans** — the lines are there, the names are not.
+- **Reasoning on Luna.** The `reasoningEffort` knob is Anthropic-only; OpenRouter takes a
+  `reasoning` parameter nobody has wired.
+

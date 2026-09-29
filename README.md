@@ -803,8 +803,11 @@ GET  /equity-curve   equity points (?fromMs=)
 - **Workspace** `/api/workspace` — `GET` and `PUT { workspace }` → `{ workspace, stored }`. Which of
   the three books the user is standing in. Its own surface rather than a field on `/api/paper/state`,
   because a workspace is not a paper concept and `manual` is the one with no paper account behind it.
-- **Mentor / setups** `/api/mentor/stream` + `/api/setups` — the `setup` kind (price zones are
-  RIVAL scenarios, never legs; quantity is never summed across them).
+- **Mentor / setups** `/api/mentor/stream` + `/api/setups` — the `setup` kind. SCENARIOS are
+  rivals (the first to fulfil takes the position, the rest cancel) and quantity is never summed
+  across them; LEGS inside one scenario are the scale-in and every one of them is sized. The build
+  itself is server state, not prompt choreography — five stages in a ledger
+  (`services/mentorBuild.util.js`, `docs/design/mentor-flow-intent.md`).
 - **Analyst** `/api/analyst` — `POST /stream` + coverage CRUD; `POST /coverage/:id/retire` archives,
   `DELETE` removes. Two verbs because retire once answered the DELETE route and the API claimed a
   removal that never happened.
