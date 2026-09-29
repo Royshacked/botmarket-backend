@@ -39,7 +39,7 @@ Routes / Services / Monitor / Reconciler
 
 > **Directory note:** adapters and services live under `api/broker/` and
 > `api/broker/adapters/`, but the **transport providers live at the repo root
-> `providers/`** — not `api/broker/providers/`.
+> `providers/`** — not ~~`api/broker/providers/`~~.
 
 ---
 
@@ -191,8 +191,8 @@ ctrader.execution.js         pure ProtoOA(2126) → BrokerExecution translator
 | Constant | payloadType | Layer |
 |---|---|---|
 | `HEARTBEAT` | 51 | ws |
-| `APP_AUTH` | 2100 → 2101 | ws |
-| `ACCOUNT_AUTH` | 2102 | session |
+| `APP_AUTH_REQ` | 2100 → 2101 | ws |
+| `ACCOUNT_AUTH_REQ` | 2102 | session |
 | `NEW_ORDER` | 2106 | adapter |
 | `CANCEL_ORDER` | **2108** | adapter |
 | `AMEND_ORDER` | **2109** | adapter |

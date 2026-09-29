@@ -157,7 +157,7 @@ number — it is an agent that never looks and reasons as if the book were empty
   carrying this now and prompts are what tests cannot verify. If a desk skips it, the fix is the
   lever already used for tradability: enforce it in code rather than ask.
 - [ ] **Balances cover EVERY account** `[ANY]` — with ≥2 accounts on a broker, all of them report a
-  balance. The retired `loadContext` used `getAccount`, which only ever returned the selected one;
+  balance. The retired ~~`loadContext`~~ used `getAccount`, which only ever returned the selected one;
   this is the gap that closed, so it is worth actually looking at.
 - [ ] **Positions land on the right account** `[ANY]` — open positions across paper + manual (and
   live if available) appear under their own account, with `pnlPct` signed correctly for shorts.
@@ -267,13 +267,13 @@ order at a broker, and the fill stamp and the in-position read only meet at runt
 
 Commits: `ef1f6ba` · `b26e777` (in-position) · `f6bd284` (exit journal) · `97f70dd` (partial ledger).
 **G1 rewritten 2026-09-17** for the per-candle build (`3580762`): the price gate, `hit_at` and
-`in_position_idle` it used to verify are deleted.
+~~`in_position_idle`~~ it used to verify are deleted.
 
 ### G1 — the read sees what the fill wrote `[BLOCKED — needs a real fill]`
 
 - [ ] **A fill seeds the stop and the ladder.** After a real entry, read `position_state`: `stop.initial`
   and `stop.current` both equal the working stop of the armed scenario (`stopEdge`), `entry.legs[]`
-  has one leg with the fill's `zone_id`, and `targets[]` is nearest-first as `{ price, quantity,
+  has one leg with the fill's `leg_id`, and `targets[]` is nearest-first as `{ price, quantity,
   watched }`. Unseeded, `computeMetrics` reads undefined and every R is null — the symptom is a read
   with no numbers, which looks like an LLM problem and is not one.
 - [ ] **A short seeds the opposite edges.** Same check on a short: stop from the HIGH side, targets

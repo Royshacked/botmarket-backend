@@ -35,7 +35,7 @@ The user's own trade, built with **Mentor** and watched by **Talos**.
 >
 > **THE ZONE GATE IS GONE (2026-08-22, finished 2026-09-23).** The guards build replaced it with
 > LLM-authored wake guards, and Mentor no longer draws bands — every level is an exact price. That
-> doc (`talos-guards.md`) was merged into this one on 2026-09-19; sections marked **SUPERSEDED** or
+> doc (~~`talos-guards.md`~~) was merged into this one on 2026-09-19; sections marked **SUPERSEDED** or
 > **History** describe how it used to work and are kept because the reasoning still explains the
 > shape of what replaced them.
 >
@@ -47,7 +47,7 @@ The user's own trade, built with **Mentor** and watched by **Talos**.
 > verdict**; the zone keeps the order price, the size and the r:r, and `firingLeg` says which leg.
 > See [Entry — the verdict decides](#entry--the-verdict-decides).
 
-Replaces `docs/setup-entity.md` and `docs/mentor-talos-refactor.md` (2026-08-08). The refactor doc
+Replaces ~~`docs/setup-entity.md`~~ and ~~`docs/mentor-talos-refactor.md`~~ (2026-08-08). The refactor doc
 already superseded parts of the contract doc — the `watch[]` taxonomy — so the two disagreed with
 each other in writing, and both still described the scenario model as designed-not-built when it
 had been live-verified since 2026-08-03.
@@ -133,10 +133,10 @@ rarely as it did before (2 of 70 journal rows ever carried a resolved level), an
 to fix: a spot quote landing exactly on an authored price is a coincidence, the guard sweep is what
 PROVES price reached a level, and `enter` stopped depending on either of them on 2026-09-23.
 
-**Renamed with it**, so one vocabulary reaches the whole document: `armed_zone_id` → `armed_leg_id`,
-the journal's `zone_id` → `leg_id`, `entry.legs[].zone_id` → `leg_id`, `normalizeZone` →
-`normalizeLeg`, `zoneGate` → `legGate`, `routeSetupZones` → `routeSetupLegs`, and the Generate
-refusal `invalid_zone` → `invalid_leg`.
+**Renamed with it**, so one vocabulary reaches the whole document: ~~`armed_zone_id`~~ → `armed_leg_id`,
+the journal's ~~`zone_id`~~ → `leg_id`, ~~`entry.legs[].zone_id`~~ → `leg_id`, ~~`normalizeZone`~~ →
+`normalizeLeg`, ~~`zoneGate`~~ → `legGate`, ~~`routeSetupZones`~~ → `routeSetupLegs`, and the Generate
+refusal ~~`invalid_zone`~~ → `invalid_leg`.
 
 **The one place edges still live** is `validity` — `{ lower, upper, approach }` — and it is not a
 leftover. A validity range is a genuine RANGE: the span outside which the setup is dead. It was
@@ -390,7 +390,7 @@ crossed at any point in the gap trips, whether or not price stayed there, so an 
 catchable as a wide band. And **let the model decide when to look next** — first as a guard it wrote
 for itself, now as the rung whose candle close it wants (`next_timeframe`). After both, a band
 communicates nothing a price does not — and it actively lied about the stop: the far edge of a stop
-band was the order that actually rested (`zoneExitLevel`, long → `lower`), so widening a stop the
+band was the order that actually rested (~~`zoneExitLevel`~~, long → the lower edge), so widening a stop the
 user put at 306 to 305.2–306.4 quietly rested it at 305.2, more risk than they agreed to. With no
 bands there is no edge to pick, and a stop is where the user put it.
 
@@ -518,8 +518,8 @@ open problem, and the journal as a capped array on the document. All four answer
 *when do I look if price does nothing* — and the candle close answers it: a setup 20 away for three
 weeks is read once per candle of its rung, and earnings, the sector and `valid_until` are seen on
 those reads. Tier 1 dissolved INTO the read, which opens on numbers and pulls the chart as a tool
-call whose cost shows on the row. `BACKSTOP`, `after_min`, `and_price_above`, `CADENCE_BY_TYPE`,
-`PULSE_MOVE_BANDS`, `proximityGapMin` and `skipped_since_last` are gone.
+call whose cost shows on the row. ~~`BACKSTOP`~~, ~~`after_min`~~, ~~`and_price_above`~~, ~~`CADENCE_BY_TYPE`~~,
+~~`PULSE_MOVE_BANDS`~~, ~~`proximityGapMin`~~ and ~~`skipped_since_last`~~ are gone.
 
 ---
 
@@ -591,7 +591,7 @@ The current rule, in full:
 
 - **A plain stop rests as a stop-market, full size. A plain target rests as a limit.** Nobody reads
   either; the reconciler reports the fill and the close.
-- **A conditional stop keeps its resting stop-market** (`routeSetupZones`), and Talos may only
+- **A conditional stop keeps its resting stop-market** (`routeSetupLegs`), and Talos may only
   TIGHTEN it. **A conditional target does not rest** — a limit would fill regardless of what its
   condition said — so Talos owns that leg and proposes when the condition is met.
 - Which legs are watched is a pure function of the document — `watchedLegs(setup, scenario, entry)`
@@ -624,7 +624,7 @@ behind it, the condition may only tighten it, and the broker order guarantees th
 model can get out earlier and smarter; it can never be the only thing standing between the user and
 an open loss. And the mirror, settled in the build: a conditional target's limit MUST be held back,
 or it fills the moment price prints and makes its own condition dead letter. Both legs follow one
-rule — fail in the safe direction (`routeSetupZones`). Before this, `positionMonitor.checkPosition`
+rule — fail in the safe direction (`routeSetupLegs`). Before this, `positionMonitor.checkPosition`
 — the only code that evaluated an exit condition for a position — had had no caller since Minos was
 deleted, so a conditional stop could be authored, stored and shown as protection and never once run.
 
@@ -637,7 +637,8 @@ deleted, so a conditional stop could be authored, stored and shown as protection
 > because price is close to it. It reads a target only if the user attached a CONDITION to it, on
 > every candle close, and the discriminator between "an order" and "a conversation" is that
 > condition — not the band's width (the first design) and not a guard's proximity (the second).
-> `rearmTargets`, `hit_at`, `resting` and `let_run` were deleted with it; the accept path is below.
+> ~~`rearmTargets`~~, ~~`hit_at`~~ and ~~`resting`~~ were deleted with it, and `let_run` left Talos's
+> menu (it is still a verb in the shared executor — see [Open](#open)); the accept path is below.
 >
 > Principle 1 is what survived every round, and it now reads both ways: an unconditional level is
 > just an order, and a conditional TARGET is the opposite — it does not rest at all.
@@ -664,9 +665,9 @@ price is the top, the breadth runs back toward entry. Mirrored for a short.
 - **Talos wakes at TP − breadth** (long) — the near edge.
 - **Do nothing and you get the TP you named.** That is the default outcome, not a degraded one.
 
-**THE WINDOW USED TO BE ZERO WIDE.** `protectionPlan.zoneExitLevel` rested the TP limit on the NEAR
+**THE WINDOW USED TO BE ZERO WIDE.** ~~`protectionPlan.zoneExitLevel`~~ rested the TP limit on the NEAR
 edge — the first edge price touches — and `setup.schema.targetEdges` woke Talos on that SAME edge.
-So the limit filled at the exact instant the `scale_out` gate tripped, and "sell only half" was a
+So the limit filled at the exact instant the ~~`scale_out`~~ gate tripped, and "sell only half" was a
 proposal about a position that was already flat. Separating the two — the limit at the far edge,
 the wake at the near — was the fix; both halves shipped in one commit, deliberately, because
 prompt-first would have had every trade exiting at TP − breadth as a silent systematic haircut.
@@ -852,7 +853,7 @@ no model, no card — so a setup filled at the close has its `position_state` be
   `awaiting_confirm`; `armed_leg_id` moves to the new leg so the fill stamps against the right
   zone. Whether to add while the trade presses its stop is the read's judgment, held by the prompt
   ("never to rescue a trade that is going against you") — the old code guard went with
-  `positionGate`. Worth knowing if that reflex ever needs to come back as code.
+  ~~`positionGate`~~. Worth knowing if that reflex ever needs to come back as code.
 
 ### The journal
 
@@ -1055,7 +1056,7 @@ Generate; live-follow (linked setups across accounts); sharing to bots; email.
 ## Open
 
 - ~~**In-position management**~~ **BUILT 2026-08-09, REBUILT 2026-09-17.** Originally a cheap price
-  gate (`adverse` │ `scale_out` │ `breakeven`) plus a periodic review, with a fixed verdict menu and
+  gate (`adverse` │ ~~`scale_out`~~ │ `breakeven`) plus a periodic review, with a fixed verdict menu and
   partial sizes as fractions of the position. Now: a read on every candle close of the watched legs,
   a menu derived from them, a partial sized by its leg. The read re-checks the setup's own declared
   conditions rather than a fixed axis set — the conditions were the reason for the trade, so they

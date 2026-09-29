@@ -74,7 +74,7 @@ Existing checklist: `docs/live-verify-checklist.md` (pending for Themis, the ord
 - [ ] **cTrader amend-by-cancel-then-place** — amendment returns a NEW order id; verify the client
       re-tracks and no orphan is left resting.
 - [ ] **Multi-account fan-out** — one idea across several accounts of one broker.
-- [ ] **Broker-vs-app reconciliation sweep** (long-standing: `project_broker_reality_reconciliation`)
+- [ ] **Broker-vs-app reconciliation sweep** (long-standing, carried in memory as project_broker_reality_reconciliation)
       — broker is truth, heal entities stuck in `long` / `in_position`.
 
 ---

@@ -194,7 +194,7 @@ stop-owned and invalidation never executes.**
   the adverse side, `on_away` for the favourable one, which has no default and which Generate refuses
   a range without (`missing_runaway_answer`). Scenarios are RIVALS, so the
   card says how many are still armed.
-- **The `idea` price ENVELOPE is gone.** `monitoring/invalidation.monitor.js` watched
+- **The `idea` price ENVELOPE is gone.** ~~`monitoring/invalidation.monitor.js`~~ watched
   `idea.invalidation.range` and was deleted on 2026-08-18: the band was only ever authored by the
   Idea agent (deleted in July) and by an archived desk, Atlas never stamps one on a holding, and
   its only caller was Minos's tick. It had been watching a field nothing writes, for a kind nothing

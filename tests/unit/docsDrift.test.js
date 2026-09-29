@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { classify, check, slug } from '../../scripts/check-docs-drift.mjs'
+import { classify, check, slug, extractClaims } from '../../scripts/check-docs-drift.mjs'
 
 // The docs-drift scanner's verdicts on the cases the 2026-09-19 code review found it getting
 // wrong. Each one is a claim shape the docs actually use, checked against the REAL tree — so a
@@ -66,4 +66,20 @@ test("the docs' shorthand for a three-part module resolves to it", () => {
 test('a URL path to a static asset resolves against the served roots', () => {
     assert.equal(verdict('/img/prometheus-bot.svg'), 'ok')
     assert.equal(verdict('/img/no-such-glyph.svg'), 'missing')
+})
+
+// A living doc is mostly history, and history names things that are gone. The convention is a
+// strikethrough; without it, the paragraph that explains a deletion is reported as drift, which
+// is exactly backwards — that paragraph is the doc doing its job.
+test('a struck-through name is retired prose, not a claim', () => {
+    const names = t => extractClaims(t).map(c => c.raw)
+    assert.deepEqual(names('the `zoneGate` became ~~`nosuchthing`~~ last year'), ['zoneGate'])
+    assert.deepEqual(names('~~`BACKSTOP`~~, ~~`CADENCE_BY_TYPE`~~ and ~~`skipped_since_last`~~ are gone'), [])
+    // the old name struck, the live one checked — the shape a rename note actually takes
+    assert.deepEqual(names('~~`zone_id`~~ → `leg_id`'), ['leg_id'])
+    // a struck LINK is a doc that was merged away; the link beside it still has to resolve
+    assert.deepEqual(extractClaims('~~[gone](./nope.md)~~ and [docs](./README.md)')
+        .filter(c => c.kind === 'link').map(c => c.raw), ['./README.md'])
+    // one tilde pair is not a strikethrough, and nothing else on the line is lost
+    assert.deepEqual(names('`broker.service` ~ `logger.js`'), ['broker.service', 'logger.js'])
 })

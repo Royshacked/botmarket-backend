@@ -113,7 +113,7 @@ position + rel volume), `get_cycle_analysis` (price-cycle / seasonal modes), `ge
 > An eighth desk is **archived** and intentionally absent from this document. Its build — prompt,
 > tools, phases, emit tag — is described in `archive/README.md`. The 14-tool analysis kit it carried
 > was not archived with it: it lives on in `services/tools/trading.tools.js` (renamed from
-> `kairos.tools.js`) and is what Mentor uses.
+> ~~`kairos.tools.js`~~) and is what Mentor uses.
 
 ---
 

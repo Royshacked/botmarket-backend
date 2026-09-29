@@ -364,7 +364,7 @@ perfectly well `looking`, so it is tracked orthogonally to the lifecycle — `IN
 `setup_invalidation` card; it only INFORMS — exits are always stop-owned and invalidation never
 executes.
 
-A separate `monitoring/invalidation.monitor.js` used to watch a price ENVELOPE on the `idea` kind
+A separate ~~`monitoring/invalidation.monitor.js`~~ used to watch a price ENVELOPE on the `idea` kind
 (`idea.invalidation.range`). It was deleted on 2026-08-18: the band was only ever authored by the
 Idea agent (deleted in July) and by an archived desk, Atlas never stamps one on a holding, and the
 monitor's only caller was Minos's tick — so it had been watching a field nothing writes, for a

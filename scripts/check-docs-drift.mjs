@@ -19,6 +19,12 @@
  * Historical records (`docs/code-review-*.md`) and `archive/` are skipped by design: they describe
  * a moment, not the present, and are supposed to go stale. A symbol that resolves ONLY inside
  * `archive/` is reported as `archived` — that is a drift signal, not a pass.
+ *
+ * WITHIN a living doc the same problem arrives one sentence at a time: a paragraph explaining
+ * what was deleted has to name the deleted thing, and that is the doc working, not drifting.
+ * The convention is a STRIKETHROUGH — ~~`zoneGate`~~ — and anything struck through is skipped.
+ * It costs the reader nothing (the name keeps its code font and now says "dead" on sight) and
+ * it keeps the count meaningful: what is left in the report is a sentence that means to be true.
  */
 import { readdirSync, readFileSync, statSync, existsSync } from 'node:fs'
 import { join, dirname, resolve, relative, sep, basename, extname } from 'node:path'
@@ -166,6 +172,8 @@ function headingsOf(rel) {
  * Fenced code blocks give up only path-shaped tokens (a tree listing, a test name); the prose
  * around them gives up everything in single backticks plus every markdown link.
  */
+const RETIRED = /~~.+?~~/g
+
 function extractClaims(text) {
     const claims = []
     const lines = text.split('\n')
@@ -181,11 +189,16 @@ function extractClaims(text) {
             }
             continue
         }
-        for (const m of line.matchAll(/\[[^\]]*\]\(([^)\s]+)\)/g)) {
+        // A RETIRED NAME IS STRUCK THROUGH, and a struck name is not a claim about the tree.
+        // The docs have to be able to say "`zoneGate` is gone" without the sentence reading as
+        // drift — history is most of what a long-lived doc is, and a checker that cannot tell
+        // "X was deleted" from "X exists" reports the doc's best paragraphs as its worst.
+        const live = line.replace(RETIRED, ' ')
+        for (const m of live.matchAll(/\[[^\]]*\]\(([^)\s]+)\)/g)) {
             if (/^(https?:|mailto:)/.test(m[1])) continue
             claims.push({ line: n, kind: 'link', raw: m[1] })
         }
-        for (const m of line.matchAll(/`([^`\n]{2,120})`/g)) {
+        for (const m of live.matchAll(/`([^`\n]{2,120})`/g)) {
             const c = classify(m[1].trim())
             if (c) claims.push({ line: n, ...c, raw: m[1] })
         }

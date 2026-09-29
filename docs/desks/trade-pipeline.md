@@ -193,7 +193,7 @@ is a bigger prompt and a worse answer than a narrow one.
 ## Levels
 
 > **2026-09-24: there are no zones.** A leg is a PRICE (`entry_legs` / `stop_legs` / `target_legs`,
-> each `{price}`) and `zoneGate` is `legGate`. This section was written when a target was a band, and
+> each `{price}`) and ~~`zoneGate`~~ is `legGate`. This section was written when a target was a band, and
 > the design question it answers — *entry and exit compare differently* — outlived the shape, so it
 > is kept with the old vocabulary rather than rewritten into a plan nobody built.
 
@@ -231,7 +231,7 @@ things to warn the user about at build time:
 > **SUPERSEDED (2026-09-17).** A partial is a WATCHED TARGET: the user attaches a condition to a
 > target leg, and `take_partial` names that leg by id — the monitor resolves `{ leg, quantity,
 > size_pct }` from the zone's own size, so the model never chooses a number. The enum below was the
-> plan and was built (`third │ half │ two_thirds`, `FRACTION_PCT`); it is deleted. The terminating
+> plan and was built (`third │ half │ two_thirds`, ~~`FRACTION_PCT`~~); it is deleted. The terminating
 > property survives in a stronger form: a leg can be taken once, and a ladder of targets is a
 > ladder of legs each with its own size. Still a card — the user confirms.
 
@@ -357,7 +357,7 @@ Five slices, the first four deliberately inert so the readiness block could stay
 the protective half existed: entry became an aggregate of legs with a size-weighted
 `fill_price` (`4c2a85d`), execution sizes by the armed ZONE rather than the premise
 (`04cfc47`), a pending leg printing forces the in-position read (`d7e4f63` — the "never while
-`adverse`" code guard went with `positionGate` on 2026-09-17; it is the read's judgment now, held
+`adverse`" code guard went with ~~`positionGate`~~ on 2026-09-17; it is the read's judgment now, held
 by the prompt), `add_leg` places that one leg without touching status (`4b95cb4`), and the
 resting stop GROWS by adding a leg for the delta rather than cancel-and-replace, so the
 cover never dips and never doubles (`b3bc6e2`).
@@ -372,15 +372,16 @@ so it reads as a plan to add twice and can only ever add once.
 > **REBUILT 2026-09-17.** `_managePosition` now: metrics → READ on every candle close → verdict held
 > to `allowedVerdicts(watched)` → persist + journal row → card when the verdict out-ranks the
 > pending one. It runs only when `watchedLegs` is non-empty; otherwise the position is stamped
-> dormant and leaves the loop's query. `positionGate`, `reviewDue`, the `adverse` / `scale_out` /
-> `breakeven` flags, `let_run`, the partial enum and the Hermes copies are deleted. The paragraphs
+> dormant and leaves the loop's query. ~~`positionGate`~~, ~~`reviewDue`~~, the `adverse` / ~~`scale_out`~~ /
+> `breakeven` flags, the partial enum and the Hermes copies are deleted, and `let_run` left the
+> menu (the shared executor still carries the verb). The paragraphs
 > below describe the 2026-08-09 build.
 
 `_managePosition` in `talos.monitor.service.js`: metrics (always) → cheap gate → assess only if the
 gate tripped or a review is due → persist, and post a card when the verdict asks for something.
 
 Gate flags: `adverse` (price within a quarter of the original risk of the working stop — the look
-*before* the stop, while there is still a decision), `scale_out` (an un-hit target reached), and
+*before* the stop, while there is still a decision), ~~`scale_out`~~ (an un-hit target reached), and
 `breakeven` (≥ +1R with the stop not yet protected past entry).
 
 Verdicts, aligned on Hermes's built vocabulary rather than the names sketched above:
@@ -388,16 +389,16 @@ Verdicts, aligned on Hermes's built vocabulary rather than the names sketched ab
 enum — `third │ half │ two_thirds` of the ORIGINAL size** — so partials terminate.
 
 **Tier 2 was not built.** Hermes solves the ungated questions with a periodic full review
-(`reviewDue`, one cadence since the last read) rather than a cheap triage call, and that shape is
+(~~`reviewDue`~~, one cadence since the last read) rather than a cheap triage call, and that shape is
 adopted here. Cheaper to build, more expensive to run; revisit only with a measured cadence cost,
 not a guess.
 
-**The duplication is deliberate and time-boxed.** `positionGate` / `computeMetrics` / `rMultiple` /
-`reviewDue` are copied from Hermes rather than extracted, because Hermes is silent but still holds
+**The duplication is deliberate and time-boxed.** ~~`positionGate`~~ / `computeMetrics` / `rMultiple` /
+~~`reviewDue`~~ are copied from Hermes rather than extracted, because Hermes is silent but still holds
 live positions and refactoring it would touch running money for a caller scheduled for retirement.
 **Delete the copy when Hermes sleeps** — the block carries the same note. Three things differ and
 are the reason a blind copy would have been wrong: cadence is `{min,max}` not `{min_gap_min,…}`;
-targets are reduced to their near edge, so `scale_out` fires at-or-beyond; and the stop is the
+targets are reduced to their near edge, so ~~`scale_out`~~ fires at-or-beyond; and the stop is the
 furthest across `stop_legs`, chosen by price. (Those two edge terms described the band shape, deleted
 2026-09-24 — a leg is a price. The copy itself is archived code and is left exactly as it ran.)
 

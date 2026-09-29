@@ -100,3 +100,16 @@ So: when a design ships, either fold it into the doc that describes the built sy
 design note, or rewrite the note as a record of what was decided and why. Do not leave a status line
 that will quietly become a lie. When two docs cover one subject, merge them — the pair will drift,
 and the reader cannot tell which half is current.
+
+## Naming something that no longer exists
+
+A long-lived doc is mostly history: the paragraph that explains why a mechanism was replaced has to
+name the thing that was replaced. **Strike it through** — ~~`zoneGate`~~ — and `npm run check:docs`
+skips it, so a sentence doing its job stops being reported as drift. The name keeps its code font
+and now says "dead" on sight; what is left in the drift report is prose that means to be true.
+
+Two notes. Inside a fenced block (CODE_MAP's tree) strikethrough does not render, so a retired path
+drops its extension instead — `was portfolio.monitor` — which the scanner reads as prose. And a
+name that was *proposed and never built* is not retired: put it in quotes, not backticks, because
+there is nothing to strike.
+

@@ -471,7 +471,7 @@ services/
                             lands at its rate
   ohlcv.service.js          getCandles(symbol,timeframe,count) → the compact {t,o,h,l,c,v} the
                             EVALUATORS read. A relabel over priceService, not a fetcher. Was
-                            providers/ohlcv.provider.js until 2026-08-07 — it reaches nothing
+                            providers/ohlcv.provider until 2026-08-07 — it reaches nothing
                             external, so it sat in the one layer defined by doing exactly that.
                             NB distinct from candleFetch.service below: this one is the monitor/
                             paper-fill shape, that one is the FMP-first ROUTER behind the chart
@@ -835,7 +835,7 @@ monitoring/
                             of the same tree — a STATE read and an EDGE read — because the monitor
                             fires on a rising edge, so a breakout that happened before the arm can
                             never fire and the entity sits at `looking` forever. Lifted out of
-                            minos.monitor.service.js when Minos was DELETED (2026-08-18); its other
+                            minos.monitor.service when Minos was DELETED (2026-08-18); its other
                             export, resetIdea, only cleared Minos's own Map and went with it.
                             Best-effort: every failure path returns not-satisfied so the arm still
                             proceeds. NB the `idea` KIND is untouched — it is the execution tier.
@@ -1001,7 +1001,7 @@ monitoring/
                             manual holder to close it themselves. NOTHING EXECUTES OFF-HOURS, paper
                             included. executeDeferredClose replays a queued close through the very same
                             closer, so an overnight stop and an in-hours stop place identical orders
-  themis.monitor.service.js (was portfolio.monitor.js) due-review NOTIFY-only; runs the non-LLM
+  themis.monitor.service.js (was portfolio.monitor) due-review NOTIFY-only; runs the non-LLM
                             pre-check computeReviewSignals → enriches the bubble + payload with triggers[]
   marketBrief.notify.js     the daily market-brief OFFER: one card per user per weekday (12:00 UTC,
                             MARKET_BRIEF_OFFER_HOUR_UTC; MARKET_BRIEF_OFFER=off disables). Posts the
@@ -1128,7 +1128,7 @@ docs/                       docs/README.md is THE index. architecture/ (how it i
 - **Broker adapters:** `<broker>.adapter.js`, a class extending `BrokerAdapter`; register in
   `broker.factory.js`.
 - **Evaluators:** `<type>.evaluator.js`, export `evaluate<Type>` / `evaluate`.
-- **Private helpers:** `_camelCase`. **Log tags:** `const LOG = '[feature]'`, used as `logger.x(LOG, …)`.
+- **Private helpers:** an underscore prefix, then camelCase. **Log tags:** `const LOG = '[feature]'`, used as `logger.x(LOG, …)`.
 - **User id:** `req.user._id` (and `user._id`) is the custom string id equal to `idea.userId` —
   NOT the Mongo `_id`. Strip Mongo `_id` from responses via `stripId` (providers/mongodb.provider.js).
 - **Consumers branch on capabilities/flags, never on broker name.** The predicates live in
