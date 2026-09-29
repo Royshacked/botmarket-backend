@@ -58,7 +58,7 @@ const sameValue = (a, b) => (a === b) || (JSON.stringify(a ?? null) === JSON.str
 
 /** A build with no names in it yet. `waiver` is build-wide: the user answers it once, not per name. */
 export function emptyBuild() {
-    return { names: [], active: '', waiver: false }
+    return { names: [], active: '', waiver: false, turn: 0, reads: {} }
 }
 
 /** One name's ledger. `claimed` holds { value, source }; `settled` holds the confirmed value. */
@@ -217,15 +217,53 @@ export function stageOf(name) {
 }
 
 /**
- * The stage the build is at, and exactly which of its fields are still blank. This is what the turn
- * context hands the model, and it is why the model never has to remember where the conversation was:
- * a detour costs nothing, because the answer is recomputed from the ledger every turn (D4.4).
+ * The stage the build is at, which of its fields are still BLANK, and which are already CLAIMED.
+ *
+ * That last distinction is the one this module was missing, and it cost a whole turn in the first
+ * live run: a stage whose fields are all claimed has already been PUT TO THE USER and is waiting on
+ * their answer, but it was reported the same way as one nobody had started. The model read "still
+ * blank: direction, horizon, lens", re-read the name, re-proposed the same three values and asked
+ * the same question again — with the user's "yes" sitting in front of it.
+ *
+ * `awaiting` is true when every unsettled field already carries a claim: the work is done and the
+ * next move belongs to the user, not to another read.
  */
 export function firstUnsettled(name) {
     const key = stageOf(name)
     if (!key) return null
-    const stage = STAGES.find(s => s.key === key)
-    return { stage: key, fields: stage.fields.filter(f => !isSettled(name, f)) }
+    const stage  = STAGES.find(s => s.key === key)
+    const open   = stage.fields.filter(f => !isSettled(name, f))
+    const blank  = open.filter(f => !claimOf(name, f))
+    return { stage: key, fields: open, blank, awaiting: blank.length === 0 }
+}
+
+// ─── What has already been read ───────────────────────────────────────────────
+
+const MAX_READS = 40
+
+/** Tools whose answer goes stale within a turn: a level is placed against the price that IS. */
+export const ALWAYS_REFETCH = ['get_quote', 'get_candles', 'get_indicators', 'get_chart']
+
+/**
+ * Record the tools this turn called, and advance the turn counter.
+ *
+ * "Fetch once per build" was written into the prompt and into the design doc as a PRINCIPLE, and
+ * the first live run re-read the news, the fundamentals and the macro on the very next turn — the
+ * prompt cannot enforce a fact it has no record of. This is that record: what was read, and when.
+ * A model that is told "you read get_fundamentals on turn 1, it is now turn 3" can decline; one
+ * told only "do not fetch twice" cannot know whether it already has.
+ *
+ * Pure.
+ */
+export function recordReads(build, tools = []) {
+    const turn  = Number(build?.turn ?? 0) + 1
+    const reads = { ...(build?.reads ?? {}) }
+    for (const t of tools) {
+        if (typeof t !== 'string' || ALWAYS_REFETCH.includes(t)) continue
+        reads[clampStr(t, 40)] = turn
+    }
+    const kept = Object.entries(reads).slice(-MAX_READS)
+    return { ...build, turn, reads: Object.fromEntries(kept) }
 }
 
 /** Is this stage one the user waived? Only the two gates can be, and only if they said so (#14). */
@@ -256,11 +294,10 @@ export function claimsFromDraft(draft, { lensStated = true } = {}) {
     // proposed into the ledger — and the opening turn then settled a lens the user never heard,
     // which is precisely what claimed-vs-settled exists to prevent. Only a STATED lens is claimed.
     if (draft?.trade_mode && lensStated) out.lens = draft.trade_mode
-    if (Array.isArray(draft?.scenarios) && draft.scenarios.length) {
-        out.spans   = draft.scenarios.map((s, i) => s.id ?? s.name ?? `s${i + 1}`)
-        out.entries = draft.scenarios.flatMap((s, i) =>
-            (s.entry_legs ?? []).map((_, j) => `${s.id ?? s.name ?? `s${i + 1}`}:${j}`))
-    }
+    // NOT spans/entries. Those stages have their own emits (`<spans>` / `<entries>`) with their own
+    // ids, and deriving them from SCENARIO ids claimed `s1` into a ledger whose gates speak `t1` —
+    // a claim in the wrong vocabulary, recorded before either gate had run. A plan the user brought
+    // skips those stages by being settled through the gates' own path, not by faking their ids.
     // Size is the TRADE's, not a scenario's (step 5), so a draft whose scenarios disagree has not
     // stated one — claiming the first scenario's would hand the user a number they never gave.
     const sizes = (draft?.scenarios ?? []).map(s => Number(s?.quantity)).filter(n => Number.isFinite(n) && n > 0)
@@ -316,11 +353,21 @@ export function normalizeBuild(raw) {
         })
         .filter(n => n.asset)
 
+    const reads = {}
+    for (const [tool, turn] of Object.entries(raw.reads ?? {}).slice(0, MAX_READS)) {
+        const n = Number(turn)
+        if (Number.isFinite(n) && n > 0) reads[clampStr(tool, 40)] = n
+    }
+
     const active = String(raw.active ?? '').trim().toUpperCase()
+    const turn   = Number(raw.turn)
     return {
         names,
         active: names.some(n => n.asset === active) ? active : (names[0]?.asset ?? ''),
         waiver: Boolean(raw.waiver),
+        // What has been read, and on which turn — the record that makes "fetch once" enforceable.
+        turn:  Number.isFinite(turn) && turn > 0 ? Math.floor(turn) : 0,
+        reads,
         // What the server refused LAST turn, carried forward so the next turn's context can tell the
         // model what it tried to do and why it did not happen. Cleared as soon as it is shown.
         refused: (Array.isArray(raw.refused) ? raw.refused : [])

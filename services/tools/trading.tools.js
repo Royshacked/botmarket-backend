@@ -106,8 +106,24 @@ const _STATIC_HANDLERS = {
         ({ ticker, mode, calendar_window, lookback_years, timeframe }) => getCycleAnalysis(ticker, mode, calendar_window ?? null, lookback_years ?? 4, timeframe ?? 'day'),
         (err, { ticker }) => `Could not compute cycle analysis for ${ticker}: ${err.message}`, LOG),
 
+    // AN EMPTY WINDOW IS NOT EVIDENCE AGAINST A DATE OUTSIDE IT. A live run walked straight into
+    // this: the model had NVDA's earnings on 18 Nov from `get_earnings`, asked the calendar for a
+    // window ending on the 17th, got nothing back, and announced a correction retracting a date
+    // that was right. The absence only ever means "not in these dates", so the answer says so
+    // rather than leaving the inference to be made twice.
     get_earnings_calendar: makeToolHandler('get_earnings_calendar',
-        ({ from, to, symbols }) => getEarningsCalendar(from, to, Array.isArray(symbols) ? symbols : []),
+        async ({ from, to, symbols }) => {
+            const list = Array.isArray(symbols) ? symbols : []
+            const out  = await getEarningsCalendar(from, to, list)
+            // A row is a dated line; no dated line means the window held nothing.
+            // A ROW starts a line with its date; the header prose contains dates too, so matching a
+            // date anywhere found "rows" in the sentence that says there are none.
+            const empty = typeof out === 'string' ? !/^\s*\d{4}-\d{2}-\d{2}\s/m.test(out) : !(out?.length)
+            if (!empty || !list.length) return out
+            return `${out}
+
+Nothing for ${list.join(', ')} BETWEEN ${from} AND ${to}. That is all this says — it is NOT evidence that a date you already have from get_earnings is wrong, only that it falls outside this window. Widen the window, or trust get_earnings.`
+        },
         (err) => `Could not fetch earnings calendar: ${err.message}`, LOG),
 
     get_fundamentals: makeToolHandler('get_fundamentals',

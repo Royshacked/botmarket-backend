@@ -37,7 +37,10 @@ test('a fresh name is at the opening stage with all three fields blank', () => {
     const n = emptyName('nvda')
     assert.equal(n.asset, 'NVDA')
     assert.equal(stageOf(n), 'opening')
-    assert.deepEqual(firstUnsettled(n), { stage: 'opening', fields: ['direction', 'horizon', 'lens'] })
+    assert.deepEqual(firstUnsettled(n), {
+        stage: 'opening', fields: ['direction', 'horizon', 'lens'],
+        blank: ['direction', 'horizon', 'lens'], awaiting: false,
+    })
 })
 
 // ─── Claiming ─────────────────────────────────────────────────────────────────
@@ -202,11 +205,10 @@ test('a brought draft becomes CLAIMS, not settlements — it is still validated'
         asset: 'NVDA', direction: 'long', type: 'swing', trade_mode: 'smc',
         scenarios: [{ id: 's1', quantity: 100, entry_legs: [{ price: 238.2 }, { price: 236 }] }],
     }
+    // Deliberately NOT spans/entries: those stages speak their own ids (`t1`), and deriving them
+    // from scenario ids claimed a vocabulary the gates do not use, before either gate had run.
     const claims = claimsFromDraft(draft)
-    assert.deepEqual(claims, {
-        direction: 'long', horizon: 'swing', lens: 'smc',
-        spans: ['s1'], entries: ['s1:0', 's1:1'], size: 100,
-    })
+    assert.deepEqual(claims, { direction: 'long', horizon: 'swing', lens: 'smc', size: 100 })
 
     const n = claim(emptyName('NVDA'), claims, 'user').name
     assert.equal(stageOf(n), 'opening')   // claimed, not settled

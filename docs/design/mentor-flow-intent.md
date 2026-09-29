@@ -1051,3 +1051,50 @@ recording, because most of them are the same shape: **the piece worked, and noth
    fixed shape. `spans`/`entries`/`summary` are carried explicitly; the ledger deliberately is not.
 
 Suite 3682/0 (11 new regression tests, one file: `mentorReviewFixes.test.js`).
+
+## The first LIVE smoke (2026-09-29, claude-sonnet-5) — what it proved and what it did not
+Five runs of a real two-to-three turn build on a paper account, real tools, nothing stubbed but the
+venue line. **Nothing here was findable by a unit test**, and one of it is still open.
+
+### Works, seen with my own eyes
+- The opening turn: cheap-first ladder, all three values CLAIMED not settled, worksheet emitted,
+  both asks in one message.
+- **The chart presentation.** At the spans gate Mentor drew both candidate trades on one daily
+  chart — 224.94 and 216.76 blue (where each starts), 229.98 and 234.76 green (where each pays) —
+  from a single `get_chart` call with `levels`. This is the thing to look at if you want to see the
+  feature working.
+- The spans gate itself: two SMC candidates as `FVG → order block`, stopping to ask which to carry.
+- Settlement, cascade, refusals and the money section all behaved as built.
+
+### Three defects found, with their ROOT causes (not the symptoms)
+1. **The stage said "still blank" when it was actually waiting for an answer.** The ledger had no
+   state between blank and settled, so on the turn the user said "yes" the model was told the work
+   had not been done — and duly re-read the name and re-proposed all three. Fixed in state:
+   `firstUnsettled` now reports `awaiting`, and the turn context says the user's message IS the
+   answer.
+2. **"Never fetch twice" was prose about a fact nothing recorded.** Fixed by building the evidence
+   ledger the design promised: `recordReads` keeps what was read and on which turn, the context
+   lists it, and only quote/candles/indicators/chart are exempt.
+3. **An empty earnings window was read as evidence against a date outside it.** The model had
+   NVDA's 18 Nov date, asked the calendar for a window ending the 17th, got nothing, and
+   "corrected" a date that was right. Fixed in the TOOL: an empty filtered window now says what it
+   does and does not mean.
+
+### STILL OPEN — the one that matters
+**The model does not reliably settle the opening turn.** Across five runs it emitted the settle tag
+zero times on the confirmation turn: first no tag at all, then — once the tag was made mandatory
+like `<asset>` — a dutiful `<build>{}</build>` while re-reading twelve tools. The tool re-reading is
+better and still not reliable (one run: zero tools; the next: fourteen).
+
+Three prompt-level fixes were tried and are all KEPT, because each is right on its own terms: the
+opening turn rewritten as two explicit beats, the mandatory `<build>` tag, and the awaiting state
+above. None of them made it dependable.
+
+**The conclusion is architectural, and it should be Roy's call.** Every other confirmation in this
+app is a card the user presses — Generate, Arm, every Talos verdict, both build gates. The opening
+turn is the ONE place we ask the model to notice agreement in prose and report it, and it is the
+one place that fails. The durable fix is to make the proposal a card with a confirm button, so the
+CLIENT tells the server what was agreed and the server settles deterministically; the model's tag
+becomes a fallback rather than the mechanism. Until then a user may be asked the same question
+twice, which is a poor first impression of the desk but harms nothing — the ledger simply stays
+open, and nothing is recorded that the user did not agree to.

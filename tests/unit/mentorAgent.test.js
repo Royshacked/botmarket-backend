@@ -307,6 +307,11 @@ test('the later stages keep the decisions that are theirs and not the model\'s',
 test('the <build> tag contract is stated, including that settle is never the model\'s own', () => {
     const section = PROMPT.slice(PROMPT.indexOf('`<build>` moves the LEDGER'))
     assert.match(section, /never shown to them/)
+    // Unconditional, like <asset>: a tag emitted only "when something happened" is skipped on the
+    // turn something happened, and the user is then asked the same question twice (live run,
+    // 2026-09-29).
+    assert.match(section, /END EVERY RESPONSE WITH ONE/)
+    assert.match(section, /<build>\{\}<\/build>/)
     assert.match(section, /`settle` is the user's confirmation — \*\*never your own\*\*/)
     assert.match(section, /A settlement out of order is REFUSED/)
 })

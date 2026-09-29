@@ -16,6 +16,7 @@ import { summarizeTrade, applySizing } from '../mentorSummary.util.js'
 import {
     normalizeBuild, sanitizeBuildOps, applyBuildOps, claimsFromDraft, settledConflicts,
     normalizeSpans, spanIds, normalizeEntries, entryIds, entryProblems, fieldsClearedBy,
+    recordReads, ALWAYS_REFETCH,
     activeName, stageOf, firstUnsettled, isWaived, STAGES,
 } from '../mentorBuild.util.js'
 import { logger } from '../logger.service.js'
@@ -120,6 +121,14 @@ async function chatStream({
             (err) => `Could not fetch analyst actions: ${err.message}`, LOG),
     }
 
+    // WHAT THIS TURN READ. Wrapped here rather than taken from `onToolStart`, which belongs to the
+    // caller: the record has to be the server's own, because it is what the NEXT turn is told it
+    // already has (see recordReads — "fetch once" is unenforceable without it).
+    const readThisTurn = []
+    for (const [name, fn] of Object.entries(toolHandlers)) {
+        toolHandlers[name] = async (...args) => { readThisTurn.push(name); return fn(...args) }
+    }
+
     const systemPrompt  = _buildSystemPrompt(chatState, accounts, mainAccountId, audience, seed)
     // The venue (mode / broker / accounts / free cash) rides the last USER message rather than
     // the system prompt: free cash moves whenever anything fills, so a volatile system block
@@ -216,7 +225,7 @@ async function chatStream({
     const entries = emittedEntries
         ?? (reopened.has('entries') ? null : normalizeEntries(carryGates?.entries, spanIds(spans)))
 
-    const priorBuild = normalizeBuild(chatState?.build ?? chatState?.draft?.build)
+    const priorBuild = recordReads(normalizeBuild(chatState?.build ?? chatState?.draft?.build), readThisTurn)
     const { build, refused, cleared } = applyBuildOps(priorBuild, {
         asset: normalized?.asset || chatState?.active_asset || '',
         derived: {
@@ -575,9 +584,20 @@ export function _buildLedgerSection(chatState) {
             open.map(([f, c]) => `${f}=${_short(c.value)} (${c.source})`).join(' · ')}`)
     }
 
-    if (at) {
+    if (at?.awaiting) {
+        // THE STAGE IS DONE AND WAITING. Reported separately from a blank one because conflating
+        // the two cost a whole turn in the first live run: told "still blank", the model re-read
+        // the name and re-proposed values it had already put to the user, with their "yes" in
+        // front of it. Nothing here is left to work out — the next move is theirs, then yours.
+        lines.push(`  YOU ARE AT: ${at.stage} — ALREADY PROPOSED, AWAITING THEIR ANSWER: ${at.fields.join(', ')}.`)
+        lines.push('  You put these to the user last turn. Their message IS the answer:')
+        lines.push(`    - they agreed → settle it now: <build>{"settle":[${at.fields.map(f => `"${f}"`).join(',')}],"source":"user"}</build>`)
+        lines.push('    - they changed one → claim the new value in the same tag, then settle.')
+        lines.push('    - they asked something else → answer it, and leave this exactly where it is.')
+        lines.push('  DO NOT re-derive these, do not re-read the name for them, and do not ask again.')
+    } else if (at) {
         const waived = isWaived(build, at.stage)
-        lines.push(`  YOU ARE AT: ${at.stage} — still blank: ${at.fields.join(', ')}.`)
+        lines.push(`  YOU ARE AT: ${at.stage} — still blank: ${at.blank.join(', ')}.`)
         lines.push(waived
             ? '  The user waived this gate: make the call yourself, record it, and say in one line what you decided so they can overturn it.'
             : '  This stage ends in something the user says yes to. Settle it with <build>{"settle":["…"]}</build> only once they have.')
@@ -594,6 +614,16 @@ export function _buildLedgerSection(chatState) {
     if (build.refused.length) {
         lines.push(`  REFUSED LAST TURN — it did not happen, so do not build on it:\n${
             build.refused.map(r => `    - ${r.field}: ${r.reason}`).join('\n')}`)
+    }
+
+    // WHAT YOU HAVE ALREADY READ. The prompt's "never fetch twice in one build" is a rule about a
+    // fact the model has no way to check — on the first live run it re-read the news, the
+    // fundamentals and the macro one turn after reading them. This is the fact.
+    const reads = Object.entries(build.reads ?? {})
+    if (reads.length) {
+        lines.push(`  ALREADY READ THIS BUILD (turn ${build.turn}) — you HAVE these answers; cite what you concluded instead of calling again:`)
+        lines.push(`    ${reads.map(([tool, turn]) => `${tool} (turn ${turn})`).join(' · ')}`)
+        lines.push(`    Re-read only ${ALWAYS_REFETCH.join(' / ')} — a level is placed against the price that IS — or when something makes an answer genuinely out of date, and say why.`)
     }
 
     lines.push(`  The stages, in order: ${STAGES.map(s => s.key).join(' → ')}. Nothing settles out of order, and reopening one reopens every stage below it.`)

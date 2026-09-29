@@ -170,3 +170,68 @@ test('a time-exit wake can actually answer with the exit it was woken for', () =
     const watched = { stop: { id: 's1' }, targets: [], entries: [] }
     assert.deepEqual(allowedVerdicts(watched, { timeExit: true }), ['hold', 'move_stop', 'exit_now'])
 })
+
+// ─── From the first LIVE run (2026-09-29): two turns wasted, and why ──────────
+// The smoke build found what no stub could: told "still blank" on the turn the user said yes,
+// the model re-read the name, re-proposed the same three values and asked the same question
+// again. Both defects were one missing piece of STATE, not two prompt slips.
+
+import { firstUnsettled, recordReads, ALWAYS_REFETCH } from '../../services/mentorBuild.util.js'
+import { _buildLedgerSection } from '../../services/agents/mentor.agent.service.js'
+
+test('a stage whose fields are all claimed is AWAITING an answer, not blank', () => {
+    let b = upsertName(emptyBuild(), 'NVDA')
+    b = applyBuildOps(b, { claim: { direction: 'long', horizon: 'swing', lens: 'smc' } }).build
+    const at = firstUnsettled(activeName(b))
+    assert.equal(at.awaiting, true)
+    assert.deepEqual(at.blank, [], 'there is nothing left to work out')
+    assert.deepEqual(at.fields, ['direction', 'horizon', 'lens'], 'they are still unsettled')
+})
+
+test('the turn context tells the model the answer is in front of it, and not to start again', () => {
+    let b = upsertName(emptyBuild(), 'NVDA')
+    b = applyBuildOps(b, { claim: { direction: 'long', horizon: 'swing', lens: 'smc' } }).build
+    const text = _buildLedgerSection({ build: b })
+    assert.match(text, /ALREADY PROPOSED, AWAITING THEIR ANSWER/)
+    assert.match(text, /Their message IS the answer/)
+    assert.match(text, /settle it now: <build>\{"settle":\["direction","horizon","lens"\]/)
+    assert.match(text, /DO NOT re-derive these, do not re-read the name/)
+})
+
+test('a half-claimed stage is still reported as having work left', () => {
+    let b = upsertName(emptyBuild(), 'NVDA')
+    b = applyBuildOps(b, { claim: { direction: 'long' } }).build
+    const at = firstUnsettled(activeName(b))
+    assert.equal(at.awaiting, false)
+    assert.deepEqual(at.blank, ['horizon', 'lens'])
+    assert.match(_buildLedgerSection({ build: b }), /still blank: horizon, lens/)
+})
+
+test('what was read is recorded, and the price tools are exempt', () => {
+    const b = recordReads(emptyBuild(), ['get_news', 'get_fundamentals', 'get_quote', 'get_candles'])
+    assert.equal(b.turn, 1)
+    assert.deepEqual(Object.keys(b.reads).sort(), ['get_fundamentals', 'get_news'])
+    assert.deepEqual(ALWAYS_REFETCH, ['get_quote', 'get_candles', 'get_indicators', 'get_chart'])
+
+    const next = recordReads(b, ['get_macro_snapshot'])
+    assert.equal(next.turn, 2)
+    assert.equal(next.reads.get_news, 1, 'the turn it was read on is kept')
+    assert.equal(next.reads.get_macro_snapshot, 2)
+})
+
+test('the model is TOLD what it already has — the rule it could not previously check', () => {
+    let b = recordReads(upsertName(emptyBuild(), 'NVDA'), ['get_news', 'get_fundamentals'])
+    b = applyBuildOps(b, { claim: { direction: 'long' } }).build
+    const text = _buildLedgerSection({ build: b })
+    assert.match(text, /ALREADY READ THIS BUILD \(turn 1\)/)
+    assert.match(text, /get_news \(turn 1\)/)
+    assert.match(text, /cite what you concluded instead of calling again/)
+    assert.match(text, /Re-read only get_quote \/ get_candles/)
+})
+
+test('the read record survives the round trip through the client', async () => {
+    const out = await turn(`<setup>${JSON.stringify(SETUP())}</setup>`)
+    assert.equal(out.build.turn, 1)
+    const second = await turn('and?', { active_asset: 'NVDA', draft: out.setup, coverage: [] })
+    assert.equal(second.build.turn, 2, 'the counter is not reset by the client')
+})
