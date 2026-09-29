@@ -110,7 +110,7 @@ export function setWaiver(build, on) {
  * than applied: a settled value changes only through `unsettle`, which says out loud what else it
  * just invalidated. Silently overwriting it is how a user ends up with a plan they never agreed to.
  */
-export function claim(name, fields, source = 'mentor') {
+export function claim(name, fields, source = 'mentor', { overwrite = true } = {}) {
     const src     = CLAIM_SOURCES.includes(source) ? source : 'mentor'
     const settled = name?.settled ?? {}
     const claimed = { ...(name?.claimed ?? {}) }
@@ -118,6 +118,13 @@ export function claim(name, fields, source = 'mentor') {
     for (const [field, value] of Object.entries(fields ?? {})) {
         if (!FIELD_STAGE[field]) { dropped.push(field); continue }
         if (field in settled) { dropped.push(field); continue }
+        // A DERIVED claim is a default, and a default must never overwrite something someone
+        // actually said. The case that proved it: the user answers "risk 1%", which is recorded as
+        // {unit, value} — and the next turn the worksheet's own share count is derived back into a
+        // plain number over the top of it, so the sizing intent is gone and the quantity can never
+        // be re-derived when the stop moves. The worksheet's quantity is the RESULT of sizing, not
+        // a statement of it.
+        if (!overwrite && field in claimed) { dropped.push(field); continue }
         claimed[field] = { value, source: src }
     }
     return { name: { ...name, claimed }, dropped }
@@ -317,11 +324,30 @@ const MAX_REASON     = 240
 
 const clampStr = (v, max = MAX_STR) => String(v).slice(0, max)
 
-/** A claim/settlement value, shrunk to something a ledger can hold: scalar, or a short list. */
+/**
+ * A claim/settlement value, shrunk to something a ledger can hold: a scalar, a short list, or a
+ * FLAT object of scalars.
+ *
+ * That last case is not a nicety. The sizing answer is `{unit, value}`, and while objects were
+ * nulled here a settled size did not survive the round trip through the client: the ledger came
+ * back saying the stage was settled with nothing in it, so the quantity was never re-derived and
+ * the worksheet carried no size at all while the build reported itself sized. Seen in a live run,
+ * at the summary stage, with the money line empty.
+ *
+ * Flat only, and capped: this is a ledger, not a document store.
+ */
 function clampValue(v) {
     if (Array.isArray(v)) return v.slice(0, MAX_LIST).map(x => (typeof x === 'string' ? clampStr(x) : x))
     if (typeof v === 'string') return clampStr(v)
     if (typeof v === 'number' || typeof v === 'boolean' || v === null) return v
+    if (v && typeof v === 'object') {
+        const out = {}
+        for (const [k, x] of Object.entries(v).slice(0, MAX_LIST)) {
+            if (typeof x === 'string') out[clampStr(k, 32)] = clampStr(x)
+            else if (typeof x === 'number' || typeof x === 'boolean') out[clampStr(k, 32)] = x
+        }
+        return Object.keys(out).length ? out : null
+    }
     return null
 }
 
@@ -405,7 +431,7 @@ export function applyBuildOps(build, ops = {}) {
     // still records what it proposed. They are always Mentor's own, and an explicit claim in the tag
     // wins over them — hence two passes rather than one merged object.
     if (ops.derived && typeof ops.derived === 'object') {
-        name = claim(name, ops.derived, 'mentor').name
+        name = claim(name, ops.derived, 'mentor', { overwrite: false }).name
     }
 
     if (ops.claim && typeof ops.claim === 'object') {

@@ -292,8 +292,19 @@ async function chatStream({
         // sizes for the same risk. A problem (no balance to take a percentage of, a stop equal to
         // the entry) comes back as a refusal rather than a guess, and the stage stays open.
         const balance = _mainBalance(accounts, mainAccountId)
-        if (ops.size) {
-            const { quantities, problems } = applySizing(carrier, ops.size, { balance, multiplier: ops.size.multiplier })
+
+        // SIZE IS DERIVED, AND RE-DERIVED EVERY TURN. It used to be computed only on the turn the
+        // `size` op arrived, which left two ways to have a ledger that says "sized" over a
+        // worksheet that carries no quantity: a size settled by any other route, and a stop that
+        // moved afterwards — the same risk budget is a different number of shares once the
+        // distance changes, and the stale count looked identical on the page.
+        //
+        // Read from the LEDGER (settled first, else the standing claim) so the answer survives the
+        // turn it was given on. A plain number there is a quantity the plan already carries and
+        // needs no arithmetic; only the {unit, value} shape is something to resolve.
+        const sizeAsked = activeName(build)?.settled?.size ?? activeName(build)?.claimed?.size?.value ?? null
+        if (sizeAsked && typeof sizeAsked === 'object' && sizeAsked.unit) {
+            const { quantities, problems } = applySizing(carrier, sizeAsked, { balance, multiplier: sizeAsked.multiplier })
             for (const q of quantities) {
                 const sc = carrier.scenarios?.find(x => x.id === q.id) ?? carrier.scenarios?.[0]
                 if (!sc) continue
@@ -303,7 +314,7 @@ async function chatStream({
                 if (sc.entry_legs?.length === 1) sc.entry_legs[0].quantity = q.quantity
             }
             if (problems.length) build.refused = [...build.refused, ...problems.map(p => ({ field: 'size', reason: p }))]
-            logger.info(LOG, 'sizing resolved', { unit: ops.size.unit, value: ops.size.value, sized: quantities.length, problems: problems.length })
+            logger.info(LOG, 'sizing resolved', { unit: sizeAsked.unit, value: sizeAsked.value, sized: quantities.length, problems: problems.length })
         }
 
         carrier.summary = summarizeTrade(carrier, { balance, multiplier: ops.size?.multiplier })

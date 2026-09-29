@@ -1131,3 +1131,30 @@ fundamentals or macro, and returns two candidate spans as a table. The flow work
 **The lesson worth keeping:** a test harness that drives the desk differently from the real client
 does not test the desk. The harness never sent what the frontend sends, and five runs of confident
 diagnosis followed from that one line.
+
+## The five-turn live build (2026-09-29, on the house model = Luna)
+All five stages settled end to end — opening → spans → entries → sizing → summary — with the two
+gates rendering real content (a candidate table, then two entry options with `alternatives`
+semantics and the evidence for each) and the chart drawn at the spans gate. Turn 2 used **4 tools**
+where the earlier runs used 12–14: the read record doing its job.
+
+**The earlier "turn 4 stalls" report was wrong too** — that run was piped through `head -70`, which
+closes the pipe and kills the writer at line 72. Re-run to a file: five turns, no stall.
+
+### What the run DID find: the ledger said "sized" over a worksheet with no size
+At the summary stage, `settled: …,size` and `qty: -`, `money: -`. Three causes, all fixed:
+1. **Sizing only ran on the turn the op arrived.** It is derived state and is now re-derived every
+   turn from the ledger — which also means a stop that MOVES re-sizes the position, where before
+   the stale share count looked identical on the page.
+2. **`clampValue` nulled object values**, so a settled `{unit, value}` did not survive the round
+   trip through the client. The ledger now carries a flat object of scalars.
+3. **A derived claim overwrote a stated one.** `claimsFromDraft` derives `size` from the
+   worksheet's own share count, and that plain number landed on top of the user's "risk 1%" —
+   after which the intent was gone and nothing could re-derive it. Derived claims are defaults now:
+   they never overwrite an existing claim.
+
+### Two blemishes for a prompt pass, not flow defects
+- It quotes a stale price as current (it says the market is shut, then talks as if the last close
+  is live).
+- Earnings framing drifts turn to turn ("pre-earnings swing" vs the expiry reasoning), even though
+  the retraction bug itself is fixed at the tool.

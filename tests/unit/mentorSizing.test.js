@@ -212,3 +212,38 @@ test('the quantity lands on the worksheet, and the money follows from it', async
     assert.equal(out.setup.summary.lossCash, 500)
     assert.equal(out.setup.summary.lossPct, 1)
 })
+
+// ─── Size is DERIVED, not a one-off ───────────────────────────────────────────
+// Found in a live build: the ledger said the size stage was settled while the worksheet carried no
+// quantity at all, because the arithmetic only ran on the turn the op arrived.
+
+test('a size settled on an EARLIER turn still produces a quantity', async () => {
+    const first = await sized('<build>{"size":{"unit":"risk_cash","value":500},"settle":["size"]}</build>',
+        { active_asset: 'NVDA', draft: SETUP, coverage: [] })
+    assert.equal(first.setup.scenarios[0].quantity, 125)
+
+    // The next turn says nothing about size. The quantity must still be there.
+    const later = await sized('What about the target?',
+        { active_asset: 'NVDA', draft: first.setup, coverage: [] })
+    assert.equal(later.setup.scenarios[0].quantity, 125)
+    assert.equal(later.setup.summary.lossCash, 500)
+})
+
+test('a stop that MOVES re-sizes the position — the same risk is a different share count', async () => {
+    const first = await sized('<build>{"size":{"unit":"risk_cash","value":500},"settle":["size"]}</build>',
+        { active_asset: 'NVDA', draft: SETUP, coverage: [] })
+    assert.equal(first.setup.scenarios[0].quantity, 125)   // $4 wide
+
+    // Mentor widens the stop to 190: $10 of risk per share, so 50 shares for the same $500.
+    const wider = normalizeSetup({ ...SETUP, scenarios: [{ ...SETUP.scenarios[0], stop_legs: [{ price: 190 }] }] })
+    wider.build = first.setup.build
+    const after = await sized(`<setup>${JSON.stringify(wider)}</setup>`,
+        { active_asset: 'NVDA', draft: wider, coverage: [] })
+    assert.equal(after.setup.scenarios[0].quantity, 50, 'a stale count looks identical on the page')
+})
+
+test('a quantity the plan already carries is left alone — there is nothing to resolve', async () => {
+    const out = await sized('<build>{"claim":{"size":100},"settle":["size"]}</build>',
+        { active_asset: 'NVDA', draft: SETUP, coverage: [] })
+    assert.equal(out.setup.scenarios[0].quantity, 100)
+})
