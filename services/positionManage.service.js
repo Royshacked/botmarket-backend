@@ -36,8 +36,13 @@ import { appendJournal } from './journal.service.js'
  * THE EXECUTION CONTRACT (what a caller must normalize its proposal into):
  *   move_stop     { new_stop:number, ref?:string }
  *   take_partial  { size_pct:number }                     — a share of the ORIGINAL position
- *   let_run       { new_tp:number } | { cancel_tp:true }
  *   exit_now      {}                                       — full close
+ *
+ * `let_run` was here until 2026-09-29. Talos dropped it on 2026-09-17 — a bare "letting it run" is
+ * a `hold`, and moving a target OUT is an edit of the plan, not a monitor act — and Hermes, the
+ * only other caller that ever sent it, is archived. It stayed in this set for twelve days as a
+ * verb nothing could produce but anything could still execute, which is the wrong direction for a
+ * dead path to fail in: it amends a resting TP or cancels one outright.
  *
  * ENTITY vs HOLDER. `entity` is the doc that owns `position_state` and declares the accounts; it is
  * also what gets the write. `holder` is the doc carrying `brokerOrders` / `exitOrders` — the broker
@@ -48,7 +53,7 @@ import { appendJournal } from './journal.service.js'
 const LOG = '[positionManage]'
 
 /** The verbs this executes. `hold` is not one — a monitor that holds proposes nothing. */
-export const MANAGE_VERBS = new Set(['move_stop', 'take_partial', 'exit_now', 'let_run'])
+export const MANAGE_VERBS = new Set(['move_stop', 'take_partial', 'exit_now'])
 
 export const _deps = {
     getDb,
@@ -58,7 +63,6 @@ export const _deps = {
     findOpenPosition: (broker, userId, acct, positionId)      => brokerService.findOpenPosition(broker, userId, acct, positionId),
     closePosition:    (broker, userId, acct, positionId, opts)=> brokerService.closePosition(broker, userId, acct, positionId, opts),
     amendOrder:       (broker, userId, acct, orderId, fields) => brokerService.amendOrder(broker, userId, acct, orderId, fields),
-    cancelOrder:      (broker, userId, acct, orderId)         => brokerService.cancelOrder(broker, userId, acct, orderId),
 }
 
 // Every write goes through the entity repo — the ONE write funnel (P1b) — built over the injected
@@ -146,11 +150,6 @@ export function manageApplied(verb, proposal, ps, extra, nowMs) {
         const why = set['position_state.phase'] === 'breakeven' ? 'locking in breakeven' : 'tightening protection'
         note = manual ? `Asked you to move the stop to ${proposal?.new_stop} at your institution — ${why} once it is in.`
                       : `Moved my stop to ${proposal?.new_stop} — ${why}.`
-    } else if (verb === 'let_run') {
-        set['position_state.phase'] = 'runner'
-        note = proposal?.cancel_tp
-            ? (manual ? 'Asked you to cancel the take-profit — letting this run.' : 'Cancelled the take-profit — letting this run.')
-            : (manual ? `Asked you to raise the take-profit to ${proposal?.new_tp} — letting it run.` : `Raised the take-profit to ${proposal?.new_tp} — letting it run.`)
     } else if (verb === 'take_partial') {
         push['position_state.taken'] = { at, size: extra?.qty ?? null, price: null, r_multiple: null, kind: 'partial' }
         note = manual ? `Asked you to bank ${proposal?.size_pct}% here — taking money off the table.`
@@ -174,23 +173,18 @@ export function manageApplied(verb, proposal, ps, extra, nowMs) {
  */
 export async function executeManage(verb, proposal, holder, link, open, userId, deps = _deps) {
     const { broker, accountId, positionId } = link
-    if (verb === 'move_stop' || verb === 'let_run') {
-        const leg = verb === 'move_stop' ? 'stop' : 'tp'
+    if (verb === 'move_stop') {
+        const leg = 'stop'
         const ord = workingExit(holder, accountId, leg)
         if (!ord) throw new Error(`no working ${leg} order to amend`)
-        if (verb === 'let_run' && proposal?.cancel_tp) {
-            await deps.cancelOrder(broker, userId, accountId, ord.orderId)
-            await _syncExit(deps)(holder.id, accountId, leg, { status: 'cancelled' })
-            return {}
-        }
-        const level  = verb === 'move_stop' ? Number(proposal.new_stop) : Number(proposal.new_tp)
+        const level = Number(proposal.new_stop)
         // The ORDER carries the level shifted into the broker's price space by the holder's fork-
         // measured basisOffset (0 everywhere but an aliased index CFD); the RECORD keeps the authored
         // level, which is what the app shows. Same boundary rule as buildExitOrder — this used to
         // send the raw level, so a Talos "move the stop to 20000" on cTrader's US100 rested ~one
         // futures basis away from 20000.
         const brokerLevel = applyOffset(level, holder?.basisOffset)
-        const fields = verb === 'move_stop' ? { stopPrice: brokerLevel } : { limitPrice: brokerLevel }
+        const fields = { stopPrice: brokerLevel }
         const res    = await deps.amendOrder(broker, userId, accountId, ord.orderId, fields)
         await _syncExit(deps)(holder.id, accountId, leg, { price: level, orderId: res?.orderId ?? null })
         return {}
@@ -202,9 +196,13 @@ export async function executeManage(verb, proposal, holder, link, open, userId, 
         await deps.closePosition(broker, userId, accountId, positionId, { quantity: qty })
         return { qty }
     }
-    // exit_now → full close
-    await deps.closePosition(broker, userId, accountId, positionId)
-    return {}
+    if (verb === 'exit_now') {
+        await deps.closePosition(broker, userId, accountId, positionId)
+        return {}
+    }
+    // Reached only by a caller that skipped applyManage. This used to be the unconditional tail
+    // under an `// exit_now → full close` comment, so ANY unrecognised verb flattened the position.
+    throw new Error(`positionManage cannot execute ${verb}`)
 }
 
 /**
@@ -217,6 +215,15 @@ export async function executeManage(verb, proposal, holder, link, open, userId, 
  * Returns the same { ok, reason?, accounts? } shape the desk handoffs return to their controllers.
  */
 export async function applyManage({ entity, holder, verb, proposal, userId, origin = null, nowMs = Date.now(), deps = _deps }) {
+    // THE SET IS A GATE, not a list. It was neither until 2026-09-29: MANAGE_VERBS was exported,
+    // documented and never asked, so the only thing standing between a retired verb and the broker
+    // calls was each desk's own copy (`SETUP_MANAGE_VERBS`) and the queue's. A desk that forgot to
+    // check, or a legacy queued row, reached `executeManage` — where anything unrecognised fell
+    // past every branch onto the unconditional full close at the bottom. A verb this executor does
+    // not have must stop at the door, before the venue check, because a bad verb is bad on every
+    // venue.
+    if (!MANAGE_VERBS.has(verb)) return { ok: false, reason: 'bad_verb' }
+
     // SELF-EXECUTED VENUE — the app is not the one with hands here, so this function has nothing to
     // do and says so. The desk posts its instruction card and records the intent.
     //

@@ -718,10 +718,14 @@ services/
                             setup they are the same doc, and the split exists for kinds where they
                             are not.
                             Execution contract: move_stop{new_stop} take_partial{size_pct}
-                            let_run{new_tp|cancel_tp} exit_now{}. The contract keeps let_run (a
-                            queued row written before 2026-09-17 may still carry it) but no live
-                            desk proposes it any more — Talos's menu dropped it: moving a target is
-                            an edit of the plan, not a monitor act. Each desk translates its own dialect in
+                            exit_now{}. MANAGE_VERBS is a GATE as of 2026-09-29 — applyManage asks
+                            it before anything else, on every venue. It never did, so the set was
+                            documentation and each desk's own copy was the only check; an
+                            unrecognised verb reaching executeManage fell past every branch onto the
+                            unconditional full close. let_run went the same day (Talos dropped it
+                            2026-09-17 — moving a target is an edit of the plan, not a monitor act —
+                            and Hermes, the only other caller, is archived; neither database held a
+                            row). Each desk translates its own dialect in
   talos.handoff.service.js  Mentor's half: POST /api/setups/:id/action → accept (move_stop|take_partial|
                             exit_now) or dismiss. Translates Talos's {stop,why}/{leg,quantity,size_pct}
                             into the contract above — the partial's size is the WATCHED TARGET's own,

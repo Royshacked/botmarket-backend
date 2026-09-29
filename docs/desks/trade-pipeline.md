@@ -8,7 +8,7 @@ Design record, 2026-08-09. Nothing here is built yet except where marked **BUILT
 > **THE MONITOR HALF WAS REBUILT 2026-09-17** — the per-candle build
 > ([design/talos-per-candle.md](../design/talos-per-candle.md); current contract in
 > [mentor-talos.md](mentor-talos.md#talos)). The three-tier cascade, the cheap triage tier, the
-> in-position price gate, the periodic review, the partial enum and `let_run` are all gone. Talos
+> in-position price gate, the periodic review, the partial enum and ~~`let_run`~~ are all gone. Talos
 > reads on every candle close of its rung wherever a condition was written — always pre-entry, and
 > in position only on the legs the user made conditional (`watchedLegs`); a position of plain
 > levels is dormant. The Argus → Mentor handoff, the lenses, the zone/scenario model and the
@@ -373,8 +373,9 @@ so it reads as a plan to add twice and can only ever add once.
 > to `allowedVerdicts(watched)` → persist + journal row → card when the verdict out-ranks the
 > pending one. It runs only when `watchedLegs` is non-empty; otherwise the position is stamped
 > dormant and leaves the loop's query. ~~`positionGate`~~, ~~`reviewDue`~~, the `adverse` / ~~`scale_out`~~ /
-> `breakeven` flags, the partial enum and the Hermes copies are deleted, and `let_run` left the
-> menu (the shared executor still carries the verb). The paragraphs
+> `breakeven` flags, ~~`let_run`~~, the partial enum and the Hermes copies are deleted. `let_run`
+> outlived the menu by twelve days as a verb the shared executor could still run; it went on
+> 2026-09-29, and MANAGE_VERBS became a gate rather than a list on the same commit. The paragraphs
 > below describe the 2026-08-09 build.
 
 `_managePosition` in `talos.monitor.service.js`: metrics (always) → cheap gate → assess only if the
@@ -385,7 +386,7 @@ Gate flags: `adverse` (price within a quarter of the original risk of the workin
 `breakeven` (≥ +1R with the stop not yet protected past entry).
 
 Verdicts, aligned on Hermes's built vocabulary rather than the names sketched above:
-`hold` · `let_run` · `take_partial` · `move_stop` · `exit_now`. **`take_partial` uses the doc's
+`hold` · ~~`let_run`~~ · `take_partial` · `move_stop` · `exit_now`. **`take_partial` uses the doc's
 enum — `third │ half │ two_thirds` of the ORIGINAL size** — so partials terminate.
 
 **Tier 2 was not built.** Hermes solves the ungated questions with a periodic full review

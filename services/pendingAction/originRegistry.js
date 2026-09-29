@@ -150,8 +150,14 @@ async function _cancelMonitorExit(record) {
 // management proposal (tighten the stop, bank a third, get flat) after hours. Nothing about it is
 // discretionary once accepted — but nothing about it can reach a broker either, so it waits.
 
-/** The verbs positionManage executes. Their presence is what tells a manage row from a monitor exit. */
-const MANAGE_VERBS = new Set(['move_stop', 'take_partial', 'exit_now', 'let_run'])
+/**
+ * The verbs positionManage executes. Their presence is what tells a manage row from a monitor exit,
+ * so this set MIRRORS that one — a verb here that the executor does not have answers
+ * `unknown_action` at the open, and a verb there that is missing here goes to the exit handler,
+ * which closes the whole position. Kept literal rather than imported because importing the
+ * executor here would close the cycle the lazy imports below exist to avoid.
+ */
+const MANAGE_VERBS = new Set(['move_stop', 'take_partial', 'exit_now'])
 
 /**
  * Replay an accepted management action at the open, through the SAME executor that would have run
@@ -222,7 +228,7 @@ async function _cancelManage(record) {
  * Dispatched on the VERB, not on `queuedBy`, and the difference from `_byDecider` above is worth
  * stating. A holding's two kinds both spell `exit`, so only the decider can separate them. Here they
  * never collide: a monitor exit is `exit`, a management action is `move_stop` / `take_partial` /
- * `exit_now` / `let_run`. The verb is therefore the more robust tell — rows written before
+ * `exit_now`. The verb is therefore the more robust tell — rows written before
  * `queuedBy` existed default to 'user', and dispatching those to the manage handler would send a
  * legacy overnight stop through the wrong executor.
  */

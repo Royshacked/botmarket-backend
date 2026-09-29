@@ -637,8 +637,8 @@ deleted, so a conditional stop could be authored, stored and shown as protection
 > because price is close to it. It reads a target only if the user attached a CONDITION to it, on
 > every candle close, and the discriminator between "an order" and "a conversation" is that
 > condition — not the band's width (the first design) and not a guard's proximity (the second).
-> ~~`rearmTargets`~~, ~~`hit_at`~~ and ~~`resting`~~ were deleted with it, and `let_run` left Talos's
-> menu (it is still a verb in the shared executor — see [Open](#open)); the accept path is below.
+> ~~`rearmTargets`~~, ~~`hit_at`~~, ~~`resting`~~ and ~~`let_run`~~ were deleted with it; the accept
+> path is below.
 >
 > Principle 1 is what survived every round, and it now reads both ways: an unconditional level is
 > just an order, and a conditional TARGET is the opposite — it does not rest at all.
@@ -674,7 +674,7 @@ prompt-first would have had every trade exiting at TP − breadth as a silent sy
 
 **Where the principles stand now.** 2 is gone — the conversation is opened by a condition, not by
 proximity. 3 is half-built: a conditional exit plan IS a conditional target (built); moving a target
-OUT is an edit of the plan, not a monitor act, which is why `let_run` was deleted rather than
+OUT is an edit of the plan, not a monitor act, which is why ~~`let_run`~~ was deleted rather than
 extended. 4 holds unchanged. The "conditional stops are out of scope" clause of 4 is void: they are
 built, and a conditional stop ALWAYS keeps its resting stop-market.
 
@@ -1074,7 +1074,7 @@ Generate; live-follow (linked setups across accounts); sharing to bots; email.
   - **`add_leg` is not an accept.** Talos already builds the order plan for a printing second leg and
     parks it `awaiting_confirm`, so that size is placed by confirming the ORDER. Accepting it as a
     management action would place it twice; the endpoint answers `confirm_order` and the card routes
-    to the order dialog instead. `let_run` is gone — a bare "letting it run" is a `hold`, and moving
+    to the order dialog instead. ~~`let_run`~~ is gone — a bare "letting it run" is a `hold`, and moving
     a target out is an edit of the plan.
 - ~~**The CLOSE journal line.**~~ **BUILT 2026-08-09.** Written in `entityRepo.finalizeClose`, not
   in a monitor: a closed entity drops out of every polled status before its monitor wakes, and the

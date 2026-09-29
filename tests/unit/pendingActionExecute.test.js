@@ -130,11 +130,17 @@ test('a management verb routes to the manage path, an exit to the monitor path',
 
     // Both get PAST the verb check — proof each reached its own handler — and then fail on the
     // database, which is as far as a unit test without one can follow them.
-    for (const type of ['move_stop', 'take_partial', 'exit_now', 'let_run']) {
+    for (const type of ['move_stop', 'take_partial', 'exit_now']) {
         const res = await executeOrigin(row({ type }))
         assert.notEqual(res.reason, 'unknown_action', `${type} is a management verb`)
     }
     assert.notEqual((await executeOrigin(row({ type: 'exit' }))).reason, 'unknown_action')
+
+    // A RETIRED verb stops here. `let_run` left Talos's menu on 2026-09-17 and the executor on
+    // 2026-09-29; a row carrying it could only be legacy, and refusing it is not the cautious
+    // choice but the safe one — an unrecognised verb used to fall past every branch in
+    // executeManage onto the full close at the bottom, so "let it run" would have flattened it.
+    assert.equal((await executeOrigin(row({ type: 'let_run' }))).reason, 'unknown_action')
 })
 
 test('the manage dispatch reads the VERB, not queuedBy — a legacy row must not misroute', async () => {

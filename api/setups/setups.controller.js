@@ -32,6 +32,7 @@ const SETUP_REASONS = {
     // placed by confirming its order, so the client is being told WHERE the action lives.
     confirm_order:        [409, 'That leg is placed by confirming its order, not from here'],
     no_pending_action:    [409, 'Talos has not proposed that'],
+    bad_verb:             [400, 'That is not an action this desk can execute'],
     bad_proposal:         [422, 'The proposal is missing the level it needs'],
     no_position_link:     [409, 'No broker position is linked to this setup'],
     not_a_pending_limit:  [409, 'This setup is not a confirmed limit order awaiting a fill'],

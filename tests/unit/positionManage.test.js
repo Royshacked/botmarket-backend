@@ -121,7 +121,7 @@ test('no linkage at a real venue is still the refusal it always was', async () =
 // An aliased index CFD (cTrader's US100 for NQ) is priced one futures basis away from the level the
 // user authored; the holder carries that offset from the fork (`basisOffset`). The ORDER must carry
 // the shifted level and the RECORD the authored one — exactly what buildExitOrder does for a
-// placement. move_stop / let_run went to amendOrder with the raw level.
+// placement. move_stop went to amendOrder with the raw level.
 
 const BASIS = { ...LINKED, basisOffset: -227.5 }
 
@@ -135,11 +135,17 @@ test('move_stop amends at the SHIFTED level and records the AUTHORED one', async
     assert.equal(sync.args[3].price, 20000, 'our record keeps the authored level')
 })
 
-test('let_run with a new target shifts the limit the same way', async () => {
+// `let_run` was a verb here until 2026-09-29 and it amended the TP the same way. It left Talos's
+// menu on 2026-09-17 and Hermes, the only other caller, is archived — but it stayed executable for
+// twelve days, and this is the direction that matters: an accepted row could still move or CANCEL
+// a resting take-profit with nothing alive to have proposed it.
+test('a verb the executor no longer has is refused, and touches no broker', async () => {
     const holder = { ...BASIS, exitOrders: [{ leg: 'tp', status: 'working', orderId: 'to1', accountId: 'a1', price: 20500 }] }
     const { called, deps } = spyDeps()
-    await applyManage({ entity: holder, holder, verb: 'let_run', proposal: { new_tp: 21000 }, userId: 'u1', deps })
-    assert.deepEqual(called.find(c => c.name === 'amendOrder').args[4], { limitPrice: 20772.5 })
+    const r = await applyManage({ entity: holder, holder, verb: 'let_run', proposal: { new_tp: 21000 }, userId: 'u1', deps })
+    assert.equal(r.ok, false)
+    assert.equal(r.reason, 'bad_verb')
+    assert.deepEqual(called, [], 'no broker call, no write')
 })
 
 test('no basisOffset (every non-index instrument) is the identity — nothing changes for them', async () => {

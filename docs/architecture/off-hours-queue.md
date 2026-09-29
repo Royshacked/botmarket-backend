@@ -73,7 +73,7 @@ so a producer cannot ship a queued item whose desk can never be told it was canc
   asked. A card posted before the close could be tapped at 02:00 and go straight out; on paper it
   "filled" at the day close. The gate sits in `positionManage.applyManage` — the shared executor —
   so every desk is covered by one call and none can add a verb that forgets it.
-  **The verb IS the action type** (`move_stop` │ `take_partial` │ `exit_now` │ `let_run`), because
+  **The verb IS the action type** (`move_stop` │ `take_partial` │ `exit_now`), because
   `enqueue` dedupes on `(user, entity, action.type)` and a single `manage` type would let a queued
   stop-move swallow the `exit_now` that came after it. `action.holderId` rides along, for the kinds
   whose position hangs off a separate holder document: by the open the row is all the replay has.
