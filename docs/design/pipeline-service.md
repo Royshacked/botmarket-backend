@@ -252,7 +252,7 @@ Each phase deletes the per-hop state it replaces from `MainPage`; nothing is lef
    Worth knowing before anyone "fixes" it.
 
 1. **Envelope + contracts + conveyor + the trade desk. — DONE (not live-verified).**
-   `artifact.js` / `hop.js` / `contracts.js` + `scanner.contract.js` / `kairos.contract.js`.
+   `artifact.js` / `hop.js` / `contracts.js` + `scanner.contract.js` / ~~`kairos.contract.js`~~.
    `MainPage` gained `emitArtifact` + `_applyHop` and lost `scanHandoff`, `kairosScanResult` and
    `buildScanSeedMessage`; `scanInbox` / `kairosInbox` hold artifacts instead. Single-pick mode is
    now derived (`scanInbox?.kind === SCAN_REQUEST`) rather than a flag, and `handleBuildFromCandidate`

@@ -364,7 +364,7 @@ wanted waking there.
 
 **BUILT 2026-09-23.** `firingLeg` (setup.schema) + the branch order in `_applyVerdict`; the
 `_PRE_ENTRY` prompt rewritten to match, because it was still telling the model a rule the code had
-stopped enforcing. 5 tests in `talosMonitor.test.js` (not the planned `talosEntry.test.js` — the
+stopped enforcing. 5 tests in `talosMonitor.test.js` (not the planned "talosEntry.test.js" — the
 harness `stubDeps` lives there and duplicating it would be worse than the extra file is worth).
 
 **What the build settled beyond the plan:** an `enter` places at the plan's OWN authored entry
@@ -423,7 +423,8 @@ they want it watched on (with "no idea" a complete answer), and **expanding a sp
 ---
 ## Phase 7 — Mentor
 
-`prompts/mentor_system_prompt.md` and `services/setup.finalize.js`.
+`prompts/mentor_system_prompt.md` and "services/setup.finalize.js" (the plan's name; the
+finalize path stayed in `api/setups/setups.service.js`).
 
 - The interview asks for rungs as it does now — *"which chart do you want this watched on?"* — and
   takes "no idea" for an answer.
@@ -463,8 +464,8 @@ they want it watched on (with "no idea" a complete answer), and **expanding a sp
 | `setupLadder.test.js` | new — every horizon × cap cell, coarse→fine, fetchable only |
 | `talosCheap.test.js` | new — three-valued parse · `fired`/`unknown` force escalate regardless of the model's own `escalate` · a malformed reply escalates |
 | `talosMonitor.test.js` | the branch: which tier runs, per mode · guard skips triage · `not_fired` writes a row and no card |
-| `talosAssess.test.js` | indicators in the opening block · lens kit · `next_expensive_in` and `watch` validated and rewritten whole |
-| `talosEntry.test.js` | new — `enter` fires with no `hit`, at the authored price, on the resolved scenario |
+| "talosAssess.test.js" (not written) | indicators in the opening block · lens kit · `next_expensive_in` and `watch` validated and rewritten whole |
+| "talosEntry.test.js" (not written — the cases went to `talosMonitor.test.js`) | new — `enter` fires with no `hit`, at the authored price, on the resolved scenario |
 
 ---
 

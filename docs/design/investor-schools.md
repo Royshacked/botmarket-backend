@@ -22,7 +22,7 @@ Teach Atlas the **way** great investors think — not what they hold. (Tracking 
 ## The pattern
 
 Copy the archived desk's mode pattern exactly (`services/analysisModes.js`, renamed from
-`kairos.modes.js`; the desk itself is written up in `archive/README.md`):
+~~`kairos.modes.js`~~; the desk itself is written up in `archive/README.md`):
 
 - one source-of-truth module + one prompt file per school, injected as its own block
 - a school selects **prompt profile + vocabulary**, nothing else

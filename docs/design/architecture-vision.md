@@ -5,7 +5,7 @@
 > describes what it actually does: identify the companies a named event reaches, and quote
 > what their own filings say. The paragraphs that still name channels are the record of why
 > that engine went, which is worth keeping; nothing in this document describes it as
-> something that runs. `channel-graph-build-spec.md` went with the code.
+> something that runs. ~~`channel-graph-build-spec.md`~~ went with the code.
 
 **Core principle:** Does the process need to know WHO the user is?
 - No → house layer (runs once, writes to DB, all users read)

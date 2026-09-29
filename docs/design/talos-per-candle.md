@@ -10,7 +10,7 @@
 **STATUS: BUILT 2026-09-17** (phases 0–6). The desk docs caught up the same day: the monitor
 CONTRACT is now the Talos section of [desks/mentor-talos.md](../desks/mentor-talos.md#talos), and
 this file stays where it is as the BUILD RECORD — the plan, the decisions, and what the build
-settled differently. It superseded the wake model in `desks/talos-guards.md` (merged into
+settled differently. It superseded the wake model in ~~`desks/talos-guards.md`~~ (merged into
 [desks/mentor-talos.md](../desks/mentor-talos.md#guards--exact-prices-not-bands) on 2026-09-19)
 (the three-tier escalation and the time term on guards) and the in-position gate in mentor-talos.md;
 both carry SUPERSEDED callouts pointing here.
@@ -33,7 +33,7 @@ both carry SUPERSEDED callouts pointing here.
 - **A re-drawn plan forgets its last read** (`monitor_state.last_assessment` cleared on a
   pre-position edit), so the first read of the new map is a `first_look`.
 - **A `hit` limit setup keeps the expiry clamp** on its next read — only a live position is exempt.
-- **The pop-out shipped as `SetupPlan.jsx`, not `SetupExits.jsx`.** Entry AND exits per scenario in
+- **The pop-out shipped as `SetupPlan.jsx`, not ~~`SetupExits.jsx`~~.** Entry AND exits per scenario in
   one component (every leg tagged rests | watched, the live numbers merged into Exits once in
   position), with `SetupPlan.test.jsx`. Phase 6 below keeps the plan's name.
 - **2026-09-19: the column became three FOLDED sections — thesis · scenarios · Talos journal** (the
@@ -379,12 +379,12 @@ the target" on a build Talos does not read is a lie in the interview.
                "older…" loads the next page through the route
 ```
 
-**New:** `SetupExits.jsx` (built as `SetupPlan.jsx` — see the top; absorbs `ZoneRow` for exits and everything `PositionPanel.jsx` rendered),
+**New:** ~~`SetupExits.jsx`~~ (built as `SetupPlan.jsx` — see the top; absorbs `ZoneRow` for exits and everything ~~`PositionPanel.jsx`~~ rendered),
 `TalosJournal.jsx` + `useJournal(setupId)` (fetches the route; refetches when
 `setup.monitor_state.check_count` changes, which every read bumps — no new socket event).
 
-**Deleted:** `TalosWatch.jsx` + `.scss` + both tests, `PositionPanel.jsx` + `.scss` + test,
-`MonitorJournal.jsx` + `.scss` + test (Talos is its only caller — verify `CallPage` does not
+**Deleted:** ~~`TalosWatch.jsx`~~ + `.scss` + both tests, ~~`PositionPanel.jsx`~~ + `.scss` + test,
+~~`MonitorJournal.jsx`~~ + `.scss` + test (Talos is its only caller — verify `CallPage` does not
 import it; the grep says it does not). In `talosWatch.js`: `tiers`, `lastWake`, `ZONE_STANDING`,
 `conditionRows` (rows now carry their conditions), `readiness`; keep `watchTimeframe`, `showsWatch`.
 In `monitorJournal.utils.js`: keep `tidyPrices`, `firstSentence`, `guardLabel` minus the
@@ -410,7 +410,7 @@ Written per phase, per the rule. The rewrites and deletions in one place:
 | `tests/unit/dueLoop.test.js` | `makePersist` without `timelineMax` |
 | `tests/unit/readinessGates.test.js` | `clampGap` cases deleted |
 | `tests/unit/setupsGenerate.test.js`, `mentorAgent.test.js` | no `cadence`, no `timeline` |
-| FE `TalosJournal.test.jsx`, `SetupExits.test.jsx` (built as `SetupPlan.test.jsx`) | new; `TalosWatch`/`PositionPanel`/`MonitorJournal` tests deleted |
+| FE `TalosJournal.test.jsx`, ~~`SetupExits.test.jsx`~~ (built as `SetupPlan.test.jsx`) | new; `TalosWatch`/`PositionPanel`/`MonitorJournal` tests deleted |
 
 ---
 
@@ -426,14 +426,14 @@ Backend: `CADENCE_BY_TYPE` · `DEFAULT_CADENCE` · `buildCadence` · `cadence` o
 reasons `market_closed` `guard_time` `backstop` `scheduled` `zone_trip` `momentum_pulse`
 `in_position` · `position_state.targets[].hit_at` / `.resting`.
 
-Frontend: `TalosWatch.jsx/.scss` · `PositionPanel.jsx/.scss` · `MonitorJournal.jsx/.scss` ·
+Frontend: ~~`TalosWatch.jsx`~~/`.scss` · ~~`PositionPanel.jsx`~~/`.scss` · ~~`MonitorJournal.jsx`~~/`.scss` ·
 `tiers` · `lastWake` · `ZONE_STANDING` · `conditionRows` · `readiness` · `readEntry` legacy
 branches · `guardLabel`'s `after_min` branch · `let_run` in `setupManage.js`.
 
 ## Docs updated (2026-09-17, same day)
 
 `desks/mentor-talos.md` (rewritten: the Talos section is the contract; the TP window stays as
-history) · `desks/talos-guards.md` (SUPERSEDED callouts on the time term, the guard set, the tiers — since merged into mentor-talos.md,
+history) · ~~`desks/talos-guards.md`~~ (SUPERSEDED callouts on the time term, the guard set, the tiers — since merged into mentor-talos.md,
 the journal, the kept list; open items 1/2/4/6 closed) · `desks/trade-pipeline.md` (the cascade,
 invariants, partials, shared services, in-position as built) · `architecture/monitoring.md` ·
 `architecture/entity-model.md` (journal leaves the document; `setup` payload row) · `APP_SPEC.md`

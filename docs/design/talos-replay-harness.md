@@ -68,7 +68,7 @@ own stop and targets — so a replay is cheap and honest.
    Report: a confusion matrix per candidate with absolute cost / rounds / latency beside it.
 5. **Before paying:** an oracle run (Sonnet on its own trajectory ≈ reproduces its verdict; the
    spread is the noise floor), null candidates (constant `wait` must fail recall, constant `enter`
-   must fail false_enter), then a 5-case pilot × every candidate → `report.html` for sign-off.
+   must fail false_enter), then a 5-case pilot × every candidate → a report.html for sign-off.
    ~50 cases × 2 reps ≈ ±10 points; stratify by reason (candle / guard / first_look / expiry) and
    by rung.
 
