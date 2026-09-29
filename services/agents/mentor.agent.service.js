@@ -317,9 +317,18 @@ async function chatStream({
                 const sc = carrier.scenarios?.find(x => x.id === q.id) ?? carrier.scenarios?.[0]
                 if (!sc) continue
                 sc.quantity = q.quantity
-                // One way in takes the whole position; a scaling-in ladder is the entries stage's
-                // shares to split, and phase 7 is where that lands on the legs.
-                if (sc.entry_legs?.length === 1) sc.entry_legs[0].quantity = q.quantity
+                // EVERY LEG GETS A SIZE, or the setup can never be ready — `setupReadiness`
+                // requires one per leg, and leaving multi-leg premises unsized was a dead end the
+                // user could not act on: "pick entries and conditions" about entries they had
+                // already picked. One leg takes the whole position; a scale-in ladder splits by
+                // the shares the entries stage authored.
+                const legs   = sc.entry_legs ?? []
+                const shares = _sharesFor(entries, sc, legs)
+                if (legs.length === 1) legs[0].quantity = q.quantity
+                else if (shares) legs.forEach((l, i) => { l.quantity = Math.floor(q.quantity * shares[i] / 100) })
+                else if (legs.length > 1) {
+                    problems.push(`${sc.id}: ${legs.length} entry legs with no shares between them. Two ALTERNATIVE ways in belong in two scenarios, each sized off its own stop — legs of one scenario are a scale-in and must carry shares that add to 100.`)
+                }
             }
             if (problems.length) build.refused = [...build.refused, ...problems.map(p => ({ field: 'size', reason: p }))]
             logger.info(LOG, 'sizing resolved', { unit: sizeAsked.unit, value: sizeAsked.value, sized: quantities.length, problems: problems.length })
@@ -347,6 +356,7 @@ async function chatStream({
         ready: readiness?.ready ?? false,
         coverage: capturedCoverage ?? chatState?.coverage ?? [],
         stage: stageOf(activeName(build)) ?? 'done',
+        missing: readiness?.missing ?? [],
         settled: Object.keys(activeName(build)?.settled ?? {}),
         refused: refused.map(r => r.field),
         ...(cleared.length ? { cleared } : {}),
@@ -734,6 +744,21 @@ function _summaryClaim(draft) {
     const s = draft?.summary
     if (!s || (s.gainCash == null && s.lossCash == null)) return null
     return { summary: { rr: s.rr ?? null, gain: s.gainCash ?? null, loss: s.lossCash ?? null, estimated: Boolean(s.estimated) } }
+}
+
+/**
+ * The share each entry leg takes of its premise, from the entries gate — or null when this is not
+ * a scale-in and the legs are not meant to be split at all.
+ *
+ * Matched by POSITION, because that is the only correspondence the two shapes have: the gate's
+ * options for a trade are authored in the order the legs are.
+ */
+function _sharesFor(entries, scenario, legs) {
+    const trade = (entries?.trades ?? []).find(t => t.id === (scenario?.trade_id ?? t.id))
+    if (trade?.semantics !== 'scale_in') return null
+    const shares = (trade.options ?? []).slice(0, legs.length).map(o => Number(o.share))
+    if (shares.length !== legs.length || shares.some(n => !Number.isFinite(n) || n <= 0)) return null
+    return Math.abs(shares.reduce((a, b) => a + b, 0) - 100) < 0.01 ? shares : null
 }
 
 /** Ledger values are short by construction; a list is summarised rather than spelled out. */

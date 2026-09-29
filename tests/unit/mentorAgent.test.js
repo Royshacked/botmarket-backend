@@ -542,3 +542,14 @@ test('a blocker at sizing is stated, never answered by reopening a settled gate'
     assert.match(sizing, /balance is \*\*zero\*\*/)
     assert.match(sizing, /do not dress it up as not being\s+able to see it/)
 })
+
+test('the chosen entries land as scenarios or as legs, and the prompt says which', () => {
+    // Live: two alternatives were authored as two legs of one premise, which the server reads as
+    // a scale-in and then cannot finish — the user was asked for entries they had already chosen.
+    const section = PROMPT.slice(PROMPT.indexOf('**entries — how to get in'), PROMPT.indexOf('**sizing —'))
+    assert.match(section, /`alternatives` → ONE SCENARIO PER ENTRY/)
+    assert.match(section, /`scale_in` → ONE SCENARIO, several entry LEGS/)
+    assert.match(section, /Never put two alternatives in one scenario as two legs/)
+    // And the thing Roy actually wanted: different sizes per way in is correct, not a problem.
+    assert.match(section, /that is\s+correct, not a problem to flag/)
+})

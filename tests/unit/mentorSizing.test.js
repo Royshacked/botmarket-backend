@@ -274,3 +274,46 @@ test('_mainBalance reports zero as zero, not as absent', () => {
     assert.equal(_mainBalance([{ id: 1, balance: 0, freeMargin: 0 }]), 0)
     assert.equal(_mainBalance([{ id: 1 }]), null, 'and a truly unreported balance is still null')
 })
+
+// ─── Every leg gets a size, or nothing can ever be generated ──────────────────
+// Live: two entries chosen, $100 of risk given, and the desk reported a problem and asked for
+// entries the user had already picked. setupReadiness requires a size on every leg; sizing was
+// setting one only when there was exactly one leg, so a two-leg premise was a dead end.
+
+test('a scale-in ladder is split by the shares the entries stage authored', async () => {
+    const laddered = normalizeSetup({
+        asset: 'NVDA', direction: 'long', type: 'swing', trade_mode: 'smc',
+        scenarios: [{ id: 's1', trade_id: 't1',
+            entry_legs:  [{ price: 200 }, { price: 196 }],
+            stop_legs:   [{ price: 192 }],
+            target_legs: [{ price: 214 }] }],
+    })
+    laddered.entries = { trades: [{ id: 't1', semantics: 'scale_in', options: [
+        { id: 'a', label: 'first half', trigger: 'x', share: 60, recommended: true },
+        { id: 'b', label: 'second half', trigger: 'y', share: 40, recommended: false },
+    ] }] }
+
+    const out = await sized('<build>{"size":{"unit":"risk_cash","value":800},"settle":["size"]}</build>',
+        { active_asset: 'NVDA', draft: laddered, coverage: [] })
+    // $8 of risk per unit at the 200 entry → 100 units, split 60/40.
+    assert.equal(out.setup.scenarios[0].quantity, 100)
+    assert.deepEqual(out.setup.scenarios[0].entry_legs.map(l => l.quantity), [60, 40])
+})
+
+test('two ALTERNATIVES crammed into one scenario are refused with the shape to use instead', async () => {
+    const crammed = normalizeSetup({
+        asset: 'NVDA', direction: 'long', type: 'swing', trade_mode: 'smc',
+        scenarios: [{ id: 's1', entry_legs: [{ price: 200 }, { price: 196 }], stop_legs: [{ price: 192 }], target_legs: [{ price: 214 }] }],
+    })
+    const out = await sized('<build>{"size":{"unit":"risk_cash","value":800},"settle":["size"]}</build>',
+        { active_asset: 'NVDA', draft: crammed, coverage: [] })
+    const said = out.build.refused.map(r => r.reason).join(' ')
+    assert.match(said, /belong in two scenarios/)
+    assert.match(said, /must carry shares that add to 100/)
+})
+
+test('one leg still takes the whole position', async () => {
+    const out = await sized('<build>{"size":{"unit":"risk_cash","value":500},"settle":["size"]}</build>',
+        { active_asset: 'NVDA', draft: SETUP, coverage: [] })
+    assert.equal(out.setup.scenarios[0].entry_legs[0].quantity, 125)
+})

@@ -498,6 +498,21 @@ earnings, flat by the close on an intraday horizon). **Management — break-even
 authored.** Talos raises it live, with the position in front of it and the situation known; a rule
 written now is a rule written blind.
 
+**HOW THE CHOSEN ENTRIES LAND ON THE WORKSHEET, and it follows from `semantics`:**
+
+- **`alternatives` → ONE SCENARIO PER ENTRY.** Two ways into the same trade are two rival
+  premises, each with its own entry, its own stop and its own targets. They are sized separately
+  and they will differ: the same $100 of risk is a different share count at a different entry
+  against a different stop, and that is correct, not a problem to flag. The first to fulfil takes
+  the position and the others die.
+- **`scale_in` → ONE SCENARIO, several entry LEGS**, each carrying the share you authored. One
+  position, filled in parts.
+
+Never put two alternatives in one scenario as two legs. That is the scale-in shape: the server
+reads the legs as parts of a single position, asks for a share on each, and the plan cannot be
+finished until it gets one — which looks to the user like being asked to choose entries they have
+already chosen.
+
 Show the trades with their entries nested underneath, your pick expanded and the rest named but
 folded. When they choose, **re-emit `<entries>` narrowed to what they took** — the ledger records
 the agreement, not the menu — and settle it: `<build>{"settle":["entries"]}</build>`.
