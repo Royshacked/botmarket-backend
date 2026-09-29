@@ -105,6 +105,15 @@ export const ALL_EMIT_TAGS = [
     // SHOW_KINDS). Registered for the same reason as `suggest`: the suppressor has to know the tag
     // before the first turn emits one, or the id prints at the user mid-sentence.
     'show',
+    // Mentor's build ledger (services/mentorBuild.util.js) — the claims, settlements and reopens of
+    // ONE turn. Server-validated, never shown: what the user agreed to is said in the reply, in
+    // words, and the tag is only how the server hears about it.
+    'build',
+    // Mentor's candidate trades at the spans gate — the table the user picks from, rejects and all.
+    // Unlike <build> this one IS rendered; it is suppressed from the prose and drawn as a card.
+    'spans',
+    // And the ways INTO those trades, at the second gate. Same deal: suppressed here, drawn there.
+    'entries',
 ]
 
 // Build the tag-capture descriptor array for a streaming agent. `overrides` maps a

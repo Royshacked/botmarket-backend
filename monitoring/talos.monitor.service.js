@@ -274,7 +274,11 @@ async function _checkPosition(setup, nowMs, deps) {
         // NOTHING TO JUDGE. Every leg is a plain level resting at the broker; the reconciler reports
         // the fill and the close. Excluded at the query from here on — an edit that adds a condition
         // clears the flag (setups.service).
-        if (!hasWatchedLegs(watched)) {
+        // A `time_exit` IS something to judge, and it is the one thing no resting order covers: the
+        // broker holds a stop for ever, but nothing at the broker knows the user wanted to be flat
+        // before earnings. A position carrying one never goes dormant, or the clock they set would
+        // pass unread and the exit they asked for would simply not happen.
+        if (!hasWatchedLegs(watched) && !setup.time_exit) {
             await deps.persist(setup.id, {
                 'monitor_state.dormant':     true,
                 'monitor_state.check_count': (setup.monitor_state?.check_count ?? 0) + 1,
@@ -349,7 +353,11 @@ async function _managePosition(setup, ps, scenario, watched, nowMs, deps) {
     const price   = await deps.getPrice(setup)
     const metrics = computeMetrics(ps, price, nowMs)
     const woke    = setup.monitor_state?.woke_on ?? null
-    const reason  = woke ? 'guard' : 'candle'
+    // THE CLOCK EXIT. `valid_until` retires a setup that never filled; this closes a position that
+    // DID — "out before earnings", "flat by the close" — and it is the one exit the chart cannot
+    // fire. It outranks a fired guard: a guard is a level, this is a deadline the user set, and
+    // reading it as an ordinary candle would let the cheap tier triage it away.
+    const reason  = _isTimeExit(setup, nowMs) ? 'time_exit' : woke ? 'guard' : 'candle'
     const rung    = openingRung(setup)
 
     const base = (nextAt) => ({ ...metricsSet(metrics), ..._wakePatch(setup, nextAt) })
@@ -364,7 +372,7 @@ async function _managePosition(setup, ps, scenario, watched, nowMs, deps) {
 
     // THE MENU IS THE LEGS. The prompt offered exactly `allowedVerdicts(watched)`; this is the half
     // that cannot be talked out of it.
-    const menu = allowedVerdicts(watched)
+    const menu = allowedVerdicts(watched, { timeExit: reason === 'time_exit' })
     let verdict = menu.includes(raw.verdict) ? raw.verdict : 'hold'
     if (verdict !== raw.verdict) logger.warn(LOG, `off-menu management verdict "${raw.verdict}" for ${setup.id} — treating as hold`)
 
@@ -728,6 +736,19 @@ export const _hasEditProposal = hasEditProposal
 export const _isPreActive  = isPreActive
 export const _isPastExpiry = isPastExpiry
 export const _isExpiring   = (setup, nowMs) => isExpiring(setup, nowMs, EXPIRY_THRESHOLD_MS)
+
+/**
+ * Has the authored time exit come round on a position that is actually open?
+ *
+ * Only in position: a `time_exit` on a setup that never filled has nothing to close, and
+ * `valid_until` is what retires that one. Pure.
+ */
+export const _isTimeExit = (setup, nowMs) => {
+    // `long` / `short` ARE the in-position statuses at this desk; `waiting` and `hit` are pre-entry.
+    if (!setup?.time_exit || (setup.status !== 'long' && setup.status !== 'short')) return false
+    const at = Date.parse(setup.time_exit)
+    return Number.isFinite(at) && nowMs >= at
+}
 
 /**
  * A setup does NOT spare `edit` from the past-expiry cutoff. Talos latches on the branch that fires

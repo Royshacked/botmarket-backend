@@ -23,6 +23,10 @@ const ALWAYS_EXPENSIVE_REASONS = new Set([
     // Nothing has ever been read, so there is no `watch`, no countdown and nothing to triage
     // against. The first look is always the full one.
     'first_look',
+    // The authored TIME EXIT has come round — flat before earnings, flat by the close. Also a
+    // scheduled decision rather than a "did something happen" question, and the one wake where
+    // sleeping through it costs the user the exact thing they asked for.
+    'time_exit',
 ])
 
 /**

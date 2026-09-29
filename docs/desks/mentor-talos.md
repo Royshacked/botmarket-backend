@@ -156,7 +156,7 @@ condition on a stop or a target is why a position is read; without one, every ex
 resting at the broker and the position is dormant. Mentor therefore asks the exit question ONCE, at
 the targets step: *rest it as a limit and let it fill, or have Talos watch into it with a rule?* A
 wish to bank partials on the way up IS a target condition, written as one. Silence buys a plain
-level that nobody reads, and the interview says so.
+level that nobody reads, and Mentor says so.
 
 **Checkability is Mentor's job, not Talos's.** Mentor must author a condition Talos can actually
 evaluate; Talos is not expected to interpret an unfalsifiable instruction at wake time. A vague
@@ -393,6 +393,47 @@ communicates nothing a price does not — and it actively lied about the stop: t
 band was the order that actually rested (`zoneExitLevel`, long → `lower`), so widening a stop the
 user put at 306 to 305.2–306.4 quietly rested it at 305.2, more risk than they agreed to. With no
 bands there is no edge to pick, and a stop is where the user put it.
+
+### An entry need not be a price (2026-09-28)
+
+> **BUILT 2026-09-28**, phase 7 of [design/mentor-flow-intent.md](../design/mentor-flow-intent.md).
+> The principle: *we are not bound to prices*. Mentor authors what actually moves the ticker and
+> Talos watches what Mentor said.
+
+An ENTRY leg may carry `{ trigger, timeframe, about }` instead of `price`. A stop or a target may
+not — those rest at the broker and an order needs a number.
+
+**Almost nothing had to change to execute it**, which is the part worth knowing. A `conditional`
+setup's confirmed entry already places `type: 'market'` (`buildOrderPlan`), and `firingLeg` already
+falls back to the first unfilled leg rather than resolving a level. So a fulfilled trigger asks the
+user to confirm an entry at market down the path that existed.
+
+What DID have to change:
+- `normalizeLeg` accepts a trigger on entry legs only, and drops an unknown rung.
+- **`legText` rendered a priceless leg as null** — the trigger would have been INVISIBLE to the read
+  that judges it, a setup monitored for an entry its own prompt never mentioned. It now renders
+  `ON TRIGGER: … — no price: when this is true, the entry is AT MARKET`.
+- `entry_mode: 'limit'` is forced to `conditional` when any entry is a trigger: a limit order rests
+  at a price and this entry has none.
+- **`about`** — roughly where a trigger would fill. NOT an order price (`legPrice` still returns
+  null for it, forever); it exists because risk-per-unit needs an entry, and without it *"risk 1%"*
+  came back refused on a perfectly good plan. Everything derived from it is marked an estimate.
+  `legReference` is the "what do the sums use" answer, kept deliberately separate from `legPrice`,
+  which is the "what does an order rest at" answer.
+
+**Guards are still price-only, and that is now a decision rather than a gap.** A trigger entry arms
+no guard, so it never rides the free 30s sweep — it is read on every candle close by the cheap
+tier, which is exactly the right clock for "a 15m close above X". Extending the sweep to compute
+indicators would make tier 0 cost money, which is the one thing it must not do.
+
+### `time_exit` — the exit the chart cannot fire (2026-09-28)
+
+`valid_until` retires a setup that never filled. **`time_exit` closes a position that did** — *out
+before earnings*, *flat by the close*. Authored by Mentor at the entries stage; when it comes round
+on an open position, `_isTimeExit` makes the wake reason `time_exit`, which is in
+`ALWAYS_EXPENSIVE_REASONS` (like `expiry_review`: a scheduled decision, and the one wake where
+sleeping through it costs the user exactly what they asked for). The in-position prompt says
+`exit_now` is the default answer to it. Talos still never executes — it is a card the user confirms.
 
 ### The sweep — tier 0, and it must stay free
 
@@ -825,52 +866,86 @@ Mentor works on what the user brought. It does not source names (that is Argus) 
 allocate (that is Atlas). A saved setup reopens in Mentor with its worksheet and conversation
 restored — the same destination whether reached from the list pencil or from Axl's `<edit>`.
 
-### Two entry paths (2026-09-20)
+### The build — one machine, five stages (2026-09-28)
 
-A setup arrives one of two ways, told apart on the first message, and the prompt runs a different
-contract for each (`prompts/mentor_system_prompt.md`):
+> **BUILT 2026-09-28**, phases 1–3 of
+> [design/mentor-flow-intent.md](../design/mentor-flow-intent.md), which is the target flow in full.
+> **The eight-rung ladder is DELETED**, along with "one rung per turn", the detour rule and the
+> interview choreography. The flow is server state now (`services/mentorBuild.util.js`), and the
+> prompt lost 101 lines because it no longer has to teach a model to remember where it was.
+> Stages 4–8 of that design — the gates' own UI, the drawn chart, batch Generate, revise/cancel —
+> are NOT built; the prompt states those stages in brief and the ledger already holds them.
 
-- **The interview** — the user recites a plan. One question at a time for what is missing, the
-  levels taken exactly as given, no opinions they did not ask for, no tool call needed.
-- **The guided build** — a name and no plan. Mentor climbs a **ladder**: name → quick read
-  (`get_quote` · `get_candles` · `get_chart` · structure) → direction (Mentor's read, the user may
-  overrule) → horizon (the trader's; Mentor says with tools whether the chart supports it) → lens
-  (Mentor proposes, waits for the yes) → the deep read under that lens → the scenarios (as many
-  as the chart offers ways in; the count is Mentor's, and all-pullbacks is fine) → R:R, then one
-  offer to look for a wider target the structure justifies → size and account (the user's).
+A setup arrives one of three ways — a bare name, a name Argus handed over, or a plan the user
+already made — and there is **one machine, not three paths**. Whatever arrived is written into the
+ledger as a CLAIM; the opening turn validates the claims and proposes the blanks; the build resumes
+at the first unsettled stage. A brought plan differs only in what the ledger already holds, which is
+why it lands on sizing by itself and Mentor asks only for what is missing.
 
-**The ladder is a checklist, not a state machine.** The server tracks no step. The user may pull
-Mentor to any rung at any time (the *detour rule*); afterwards Mentor returns to the first UNSETTLED
-rung, which it reads off its own last `<setup>` — the first blank field is the next rung. A detour
-that changes a settled rung unsettles everything below it. **Paced by default** — one rung per
-turn, each ending in a yes — and *"go all the way"* lifts the pauses, not the rungs: the whole
-ladder in one turn, Mentor recording each call instead of asking, then naming the calls it made
-(direction, horizon, lens) so any one can be overturned. Anything the user stated still wins, size
-is still theirs, and "no trade" is still a legal landing. The tool loop caps a turn at ten rounds
-(`DEFAULT_MAX_CONTINUATIONS`, `providers/anthropic.provider.js`); it used to THROW past the cap,
-which would have lost a whole unpaced build on an imperfectly batched run. Both loops now run the
-last round with tools off and a note on the final tool results (`TOOL_BUDGET_LANDING`,
-`services/llmStream.util.js`), so the turn lands as text — the prompt tells Mentor to batch reads
-per rung and, on that landing round, emit what is built and continue next turn.
-This is why the "no phases" rule of
-2026-08 and the ladder coexist: the invariants still govern what must be TRUE, the ladder only
-fixes the default order in which Mentor gets there, so nothing is skipped.
+**The ledger** (`mentorBuild.util.js`, pure — no clock, no I/O) holds five stages: `opening`
+(direction · horizon · lens) → `spans` → `entries` → `sizing` → `summary`. Two rules give it teeth:
+nothing settles out of order, and a settled field changes only through `unsettle`, which cascades to
+every stage below it — entries built on a direction that just flipped are not entries any more.
+`claim` records an assertion and whose it was (`user` · `argus` · `mentor`); `settle` records the
+user's confirmation and takes the value from the claim, so an overrule is always visible. Refusals
+are returned, never thrown.
 
-Two grounding rules sit under the ladder: **tools, not memory** (every fact about the name comes
-from a tool result in this conversation) and **live before levels** (`get_quote` in any turn that
-places or moves a level). Both are prompt rules, not code gates — a server-side refusal was
-considered and rejected, because the one turn it would fire on most is the interview, where the
-user's own levels are filed without a tool call by design, and a refusal there has no honest way
-to be told apart from a guess.
+**Enforce settlement, not speech.** The ledger knows nothing about topics. A question about earnings
+in the middle of sizing is answered in full and moves nothing — which is how free conversation and
+"nothing gets forgotten" stop fighting. The model never tracks its own position: `_buildLedgerSection`
+hands it the stage, what is settled, and what was refused last turn, every turn. A refusal nobody
+reads is the silent skip the whole design exists to stop.
 
-The `<setups>` candidate offer is no longer the default answer to "no plan": the fork between
-plans is settled by dialogue at the direction, horizon and lens rungs, and the ladder ends in ONE
-setup with however many scenarios it needs. Candidates remain for an explicit *"show me a few
-options"*; the parsing and the cards are unchanged.
+**Three stops are the user's** — the opening turn, sizing, and the summary — and the two gates
+between them (spans, entries) may be waived once, in the opening turn (*"go all the way"*). A waived
+gate is still reported at the next stop: a call the user never heard is one they never made.
 
-The ladder added two tools to Mentor's kit for the company read: `get_news` (the dated, cached
-catalyst check on a name — before `web_search`) and `get_analyst_actions` (positioning's slow leg,
-for the `institutional` read). Both are appended after the shared kit and before `consult`.
+**How the ledger survives a turn: it rides ON THE DRAFT.** The frontend rebuilds `chatState` from the
+fields it was sent (`active_asset: e?.asset || n?.ticker || ''`), so a new top-level key would be
+dropped every message. Three carriers, in order: the worksheet emitted this turn, the draft the
+client sent back, or a bare `{asset}` stub. The last exists because a turn that settles something
+while emitting no worksheet is the ordinary case — the user says "yes, long and swing", Mentor
+answers in prose — and a model doing as it was told is not a storage strategy. `build` also comes
+back at the top level and is forwarded by the controller, inert until a frontend uses it.
+
+**The `<build>` tag** is how the model moves the ledger: `{claim, settle, unsettle, waiver, source,
+asset}`, every key optional, registered in `ALL_EMIT_TAGS` and suppressed like every other tag. It is
+model output, so it is sanitized by TYPE and dropped rather than coerced. Claims are ALSO derived
+from the emitted worksheet, so a forgotten tag still records what was proposed — but settling always
+needs the tag, because a proposal is not an agreement. Where the worksheet contradicts a settled
+value the settled value is restored and the override is reported (`settledConflicts`): the ledger
+owns the flow, the draft owns the content.
+
+**The opening turn** reads cheapest-first and stops as soon as the question is answered: quote,
+candles, structure and one chart always; `get_news` + `get_earnings_calendar` for what sits inside
+the horizon; one cheap probe per candidate lens (`get_orderblocks`/`get_fvg`, `get_indicators`,
+`get_analyst_actions`/`get_short_interest`); and `web_search` / `flip_test` / `consult` only on a
+real conflict. Nothing is fetched twice in one build — a later stage needs what was CONCLUDED, not
+another call. It comes back with direction, horizon and lens together, validating what was claimed
+and proposing what was blank, and closes with two asks in one message: are these right, and shall I
+run to sizing or stop at the checkpoints.
+
+The tool loop caps a turn at ten rounds (`DEFAULT_MAX_CONTINUATIONS`,
+`providers/anthropic.provider.js`); it used to THROW past the cap, which would have lost a whole
+unpaced build on an imperfectly batched run. Both loops now run the last round with tools off and a
+note on the final tool results (`TOOL_BUDGET_LANDING`, `services/llmStream.util.js`), so the turn
+lands as text.
+
+Two grounding rules outlived the ladder they were buried in, because they are grounding and not
+flow: **tools, not memory** (every fact about the name comes from a tool result in this
+conversation) and **live before levels** (`get_quote` in any turn that places or moves a level).
+Both are prompt rules, not code gates — a server-side refusal was considered and rejected, because
+the turn it would fire on most is a plan the user brought, where their own levels are filed without
+a tool call by design, and a refusal there has no honest way to be told apart from a guess.
+
+The `<setups>` candidate offer is not the default answer to "no plan": the fork between plans is
+settled by dialogue at the opening turn and at the spans gate, and a walked build ends in ONE setup
+with however many scenarios it needs. Candidates remain for an explicit *"show me a few options"*;
+the parsing and the cards are unchanged.
+
+The company read adds two tools to Mentor's kit: `get_news` (the dated, cached catalyst check on a
+name — before `web_search`) and `get_analyst_actions` (positioning's slow leg, for the
+`institutional` read). Both are appended after the shared kit and before `consult`.
 
 **Share the pipe, not the judgment.** Talos posts through the one `postCard` → `postBotCard`
 transport (`tradeNotify.service`) and draws from the one tool registry, but the copy on its cards

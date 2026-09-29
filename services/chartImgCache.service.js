@@ -1,5 +1,5 @@
 import { fetchChartImage } from '../providers/chartImg.provider.js'
-import { renderChartImage } from './chartRender/klineRender.provider.js'
+import { renderChartImage, normalizeChartLevels } from './chartRender/klineRender.provider.js'
 import { createTtlCache } from './ttlCache.util.js'
 import { withTimeout } from './timeout.util.js'
 import { logger } from './logger.service.js'
@@ -35,10 +35,13 @@ const RENDER_TIMEOUT_MS = config.ownChartRenderTimeoutMs
 export const CHART_SOURCE = Object.freeze({ OWN: 'own', CHART_IMG: 'chart-img' })
 
 /** Produce a chart PNG: own renderer first, chart-img as fallback. Returns { png (base64), source }. */
-async function _renderPng(symbol, timeframe, studies) {
+async function _renderPng(symbol, timeframe, studies, levels = []) {
+    // The chart-img fallback draws no levels — it is TradingView's own render of its own data, with
+    // nowhere to put ours. A degraded chart is still the right answer (the alternative is no chart),
+    // so the lines are dropped rather than the render, and the log above says which renderer served.
     if (!OWN_RENDER_ON) return { png: await fetchChartImage(symbol, timeframe, studies), source: CHART_SOURCE.CHART_IMG }
     try {
-        const png = await withTimeout(renderChartImage(symbol, timeframe, studies), RENDER_TIMEOUT_MS, 'own-render')
+        const png = await withTimeout(renderChartImage(symbol, timeframe, studies, levels), RENDER_TIMEOUT_MS, 'own-render')
         logger.info(LOG, `served by own-render: ${symbol}/${timeframe}`)
         return { png, source: CHART_SOURCE.OWN }
     } catch (err) {
@@ -54,12 +57,20 @@ function _studyKey(s) {
     return params ? `${s.name}(${params})` : s.name
 }
 
-/** Chart PNG plus which renderer served it: { png, source }. Cached 60s per symbol/timeframe/studies. */
-export async function cachedChart(symbol, timeframe, studies) {
-    const key = `${symbol}|${timeframe}|${studies.map(_studyKey).join(',')}`
+/**
+ * Chart PNG plus which renderer served it: { png, source }. Cached 60s per
+ * symbol/timeframe/studies/levels.
+ *
+ * The LEVELS belong in the key for the same reason the studies do: two charts of the same name and
+ * rung with different lines drawn on them are different pictures, and serving one for the other
+ * would show a user a trade they are not looking at.
+ */
+export async function cachedChart(symbol, timeframe, studies, levels = []) {
+    const drawn = normalizeChartLevels(levels)
+    const key = `${symbol}|${timeframe}|${studies.map(_studyKey).join(',')}|${drawn.map(l => `${l.kind}@${l.price}`).join(',')}`
     const hit = _chartCache.get(key)
     if (hit) return hit
-    const entry = await _renderPng(symbol, timeframe, studies)
+    const entry = await _renderPng(symbol, timeframe, studies, drawn)
     return _chartCache.set(key, entry)
 }
 

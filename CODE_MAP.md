@@ -498,6 +498,29 @@ services/
                               klinecharts built-ins); paneId 'candle_pane' for overlays.
     studyTranslate.js         studiesToIndicators/translateStudy — _buildStudies TradingView study
                               objects → klinecharts indicator descriptors (overlay vs own-pane split).
+    positionSize.util.js      THE FIVE SIZING UNITS, resolved to one quantity (2026-09-28). PURE.
+                              SIZE_UNITS risk_cash · risk_pct · size_cash · size_pct · shares;
+                              riskPerUnit(entry, stop, multiplier) is the contract-aware distance.
+                              REFUSES rather than guesses: a percentage with no visible balance, a
+                              risk budget against a stop equal to the entry, a budget smaller than
+                              one unit (which floor() would hand back as a silent zero).
+    mentorSummary.util.js     WHAT IT PAYS AND WHAT IT COSTS. summarizeTrade (rr + gain/loss in cash
+                              and % of account), summarizeBatch (the multi-name risk line),
+                              applySizing (resolves the user's unit PER SCENARIO — two ways in have
+                              different stops, so the same risk budget is a different size), and
+                              expectedGain, which prices the whole position to the NEAREST target
+                              when the ladder does not cover it rather than inventing a split.
+    mentorBuild.util.js       THE BUILD LEDGER — Mentor's flow as server state (2026-09-28,
+                              docs/design/mentor-flow-intent.md). PURE: no clock, no I/O, nothing
+                              mutated. STAGES opening(direction·horizon·lens) → spans → entries →
+                              sizing → summary, the middle two waivable. claim/settle/unsettle +
+                              stageOf/firstUnsettled; unsettle CASCADES to every stage below.
+                              normalizeBuild is the door (it comes back through the client on the
+                              draft, so it is untrusted); sanitizeBuildOps reads the <build> tag by
+                              type and drops rather than coerces; applyBuildOps runs one turn as
+                              unsettle → derived claims → explicit claims → settle; settledConflicts
+                              is "the ledger owns the flow, the draft owns the content".
+                              A CLAIM IS NOT A SETTLEMENT: only the user's confirmation settles.
     NB: setup.ladder.js owns the RUNG VOCABULARY (TF_RUNGS, isFetchableRung, rungMinutes) and the
         DEFAULT pace — ladderFor(horizon, marketCap, premise) → the rungs a setup is read on when
         nobody named any, as a contiguous band that always widens to reach the premise. Coarser as

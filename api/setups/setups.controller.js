@@ -1,3 +1,4 @@
+import { logger }       from '../../services/logger.service.js'
 import { sendReason }   from '../_shared/reason.util.js'
 import { makeHandle }   from '../_shared/handle.util.js'
 import { makeEntityController } from '../_shared/entityController.util.js'
@@ -11,6 +12,10 @@ import { hydrateBlueprint as hydrateDraft, blueprintProblems } from '../../servi
 
 const LOG     = '[setups:controller]'
 const _handle = makeHandle(LOG)
+
+// The most names one build may generate at once. It is the ledger's own cap (mentorBuild.util
+// MAX_NAMES), repeated here because this route is reachable without going through a build at all.
+const MAX_BATCH = 10
 
 // Setup-OWNED reasons. Everything cross-kind (not_found / forbidden / in_position /
 // closed_is_terminal / invalid_status / nothing_to_patch) is answered by the shared table, so this
@@ -153,6 +158,55 @@ export const generateSetup = _handle('generateSetup', async (req, res) => {
     if (updateId) await resolveCardsFor({ kind: 'setup', id: updateId }, { outcome: 'completed' })
 
     res.send(result.doc)
+})
+
+/**
+ * GENERATE ALL — one press, N setups (docs/design/mentor-flow-intent.md #15, step 6).
+ *
+ * A user may build several names in one conversation, and pressing Generate once per name at the
+ * end is a worse version of the same thing: it invites them to stop halfway with three of five
+ * saved and no record of which two they meant to keep.
+ *
+ * **PARTIAL SUCCESS IS THE CONTRACT, and it is Roy's call rather than an implementation
+ * convenience**: if three of four pass validation, the three are SAVED and monitored and the
+ * fourth comes back with its reason. Rolling back three good setups because a fourth had no size
+ * would throw away work the user finished, and leaving the batch half-written with no answer about
+ * which half is worse still. So the response says exactly what happened to each one.
+ *
+ * Generated in sequence, not in parallel: each one does its own account resolution and venue
+ * checks, and a burst of those against one broker is how you get rate-limited into a false refusal.
+ */
+export const generateSetups = _handle('generateSetups', async (req, res) => {
+    const { setups, accounts, mainAccountId, chat_state } = req.body ?? {}
+    if (!Array.isArray(setups) || !setups.length) {
+        return res.status(400).send({ error: 'setups must be a non-empty array' })
+    }
+    if (setups.length > MAX_BATCH) {
+        return res.status(400).send({ error: `no more than ${MAX_BATCH} setups in one batch` })
+    }
+
+    const saved  = []
+    const failed = []
+    for (const [i, setup] of setups.entries()) {
+        if (!setup || typeof setup !== 'object' || Array.isArray(setup)) {
+            failed.push({ index: i, asset: null, reason: 'not_an_object' })
+            continue
+        }
+        const result = await setupService.generateSetup(setup, {
+            userId:   req.user._id,
+            accounts: Array.isArray(accounts) ? accounts : [],
+            mainAccountId,
+            updateId: null,
+            chatState: chat_state,
+        })
+        if (result.ok) saved.push(result.doc)
+        else failed.push({ index: i, asset: setup.asset ?? null, reason: result.reason })
+    }
+
+    logger.info(LOG, `generateSetups: ${saved.length} saved, ${failed.length} refused`)
+    // 200 even with refusals: the batch DID something, and an error status would tell a client to
+    // discard a response that is carrying real saved documents. `failed` is the news, not the code.
+    res.send({ saved, failed })
 })
 
 // ── Blueprint: opening a plan nobody has sized yet ─────────────────────────────

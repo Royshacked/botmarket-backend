@@ -1,4 +1,4 @@
-import { legPrice } from "../setup.schema.js"
+import { legPrice, legReference } from "../setup.schema.js"
 
 // Present any owner-scoped artifact as ONE watch-list row: "here is a thing you have in the app."
 // The list-tier twin of toEnvelope.js beside it — that one gives the EXECUTION path a canonical
@@ -60,6 +60,20 @@ function _firstLeg(legs) {
 }
 
 /**
+ * The ENTRY as a row shows it. A trigger entry has no price, and a blank cell where a number
+ * belongs reads as a broken row rather than as "this one gets in on a condition" — so the rough
+ * fill stands in, and the row says it is one. Never an order price (see `legReference`).
+ */
+function _entryCell(legs) {
+    const z = Array.isArray(legs) ? legs.find(Boolean) : null
+    if (!z) return { entry: null }
+    const price = legPrice(z)
+    if (price != null) return { entry: price }
+    const about = legReference(z)
+    return { entry: about, entryIsTrigger: true, ...(z.trigger ? { entryTrigger: z.trigger } : {}) }
+}
+
+/**
  * A Kairos call → a row. `bias` is the call's word for direction.
  *
  * IT KEEPS THE ZONE SHAPE, and that is not drift. Kairos is archived (2026-08-18) and its documents
@@ -102,7 +116,7 @@ function _scenarioRow(sc, doc) {
     return {
         id: sc?.id ?? null,
         name: sc?.name ?? null,
-        entry: _firstLeg(sc?.entry_legs),
+        ..._entryCell(sc?.entry_legs),
         stop: _firstLeg(sc?.stop_legs),
         tp: _firstLeg(sc?.target_legs),
         quantity: sc?.quantity ?? null,

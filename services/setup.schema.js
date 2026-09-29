@@ -399,17 +399,38 @@ const num = (v) => (v == null || v === '' ? NaN : Number(v))
  * `monitor_state.conditions` is ONE latch map for the setup, so a target's condition sharing an id
  * with a scenario's would let one latch answer for the other.
  */
-export function normalizeLeg(z, i, prefix, { used, anchors = null } = {}) {
+export function normalizeLeg(z, i, prefix, { used, anchors = null, allowTrigger = false } = {}) {
     if (!z || typeof z !== 'object') return null
 
     const price = num(z.price)
-    if (!Number.isFinite(price)) return null
+    // A leg is normally a price, and for stops and targets it is ALWAYS a price: those rest at the
+    // broker, and an order needs a number. An ENTRY may instead be a TRIGGER in words — "RSI back
+    // above 30 on the 15m" — because what moves a ticker is not always a level
+    // (docs/design/mentor-flow-intent.md #7). A fulfilled trigger asks the user to confirm an entry
+    // AT MARKET, which is the path a `conditional` setup already takes: buildOrderPlan places
+    // `type: 'market'`, so nothing downstream had to learn a new way to execute.
+    const trigger = allowTrigger && typeof z.trigger === 'string' && z.trigger.trim()
+        ? z.trigger.trim().slice(0, 200)
+        : null
+    if (!Number.isFinite(price) && !trigger) return null
 
     const id  = typeof z.id === 'string' && z.id.trim() ? z.id.trim() : `${prefix}${i + 1}`
     const qty = num(z.quantity)
+    const tf  = normalizeTimeframe(z.timeframe)
     return {
         id,
-        price,
+        price: Number.isFinite(price) ? price : null,
+        // Present only on a trigger entry, and then it is the whole instruction.
+        ...(trigger ? { trigger } : {}),
+        // ROUGHLY WHERE IT WOULD FILL — on a trigger entry only, and it is NOT an order price.
+        // Without it a trigger entry cannot be sized by risk (risk per unit needs an entry) and has
+        // no r:r, so "risk 1%" would come back as a refusal on a perfectly good plan. Mentor has a
+        // quote in hand when it authors one; this is that number, carried so the arithmetic works
+        // and everything derived from it is marked an ESTIMATE.
+        ...(trigger && Number.isFinite(num(z.about)) && num(z.about) > 0 ? { about: num(z.about) } : {}),
+        // The rung the trigger is READ on — a property of the mechanic, not of the horizon, so a
+        // swing trade may wait on a 15-minute close (docs/design/mentor-flow-intent.md D3).
+        ...(trigger && VALID_TIMEFRAMES.has(tf) ? { timeframe: tf } : {}),
         quantity: Number.isFinite(qty) && qty > 0 ? qty : null,
         note:     typeof z.note === 'string' && z.note.trim() ? z.note.trim() : null,
         // WHAT THIS PRICE IS MEASURED FROM (setup.taxonomy.js). A stop and a target answer to
@@ -424,9 +445,9 @@ export function normalizeLeg(z, i, prefix, { used, anchors = null } = {}) {
     }
 }
 
-export function normalizeLegs(arr, prefix, { used, anchors = null } = {}) {
+export function normalizeLegs(arr, prefix, { used, anchors = null, allowTrigger = false } = {}) {
     if (!Array.isArray(arr)) return []
-    return arr.map((z, i) => normalizeLeg(z, i, prefix, { used, anchors })).filter(Boolean)
+    return arr.map((z, i) => normalizeLeg(z, i, prefix, { used, anchors, allowTrigger })).filter(Boolean)
 }
 
 /**
@@ -440,6 +461,22 @@ export function normalizeLegs(arr, prefix, { used, anchors = null } = {}) {
 export function legPrice(leg) {
     const p = num(leg?.price)
     return Number.isFinite(p) ? p : null
+}
+
+/**
+ * The price to MEASURE a leg from — its own, or the rough fill of a trigger entry.
+ *
+ * Kept separate from `legPrice` on purpose, and the distinction is the safety property: `legPrice`
+ * answers "what does an order rest at", and a trigger entry must keep answering NULL to that,
+ * forever. This answers "what number do the sums use" — sizing, risk per unit, r:r — where the
+ * honest estimate is worth far more than a blank. Anything computed from it is an estimate and is
+ * labelled one. Pure.
+ */
+export function legReference(leg) {
+    const p = legPrice(leg)
+    if (p != null) return p
+    const about = num(leg?.about)
+    return Number.isFinite(about) && about > 0 ? about : null
 }
 
 /**
@@ -596,13 +633,17 @@ export function normalizeScenario(raw, i, { direction = null, used, ids } = {}) 
 
     // `used` rides into the legs too: a target's own condition shares the document-wide latch map
     // with every scenario condition, so its id has to be claimed from the same set.
-    const entry_legs  = normalizeLegs(raw.entry_legs,  `${id}e`, { used })
+    const entry_legs  = normalizeLegs(raw.entry_legs,  `${id}e`, { used, allowTrigger: true })
     const stop_legs   = normalizeLegs(raw.stop_legs,   `${id}s`, { used, anchors: STOP_ANCHORS })
     const target_legs = normalizeLegs(raw.target_legs, `${id}t`, { used, anchors: TARGET_ANCHORS })
 
     const sc = {
         id,
         name: typeof raw.name === 'string' && raw.name.trim() ? raw.name.trim() : null,
+        // Which candidate TRADE this premise is a way into (the spans gate's id). Grouping only:
+        // scenarios were always rivals and remain rivals, and nothing executes differently for it.
+        // It is what lets the two-level gate and the flat execution shape describe the same build.
+        trade_id: typeof raw.trade_id === 'string' && raw.trade_id.trim() ? raw.trade_id.trim().slice(0, 16) : null,
         // THE WAY IN, named from the closed set. Mentor's filing of its own plan, never a question
         // put to the user — the same rule `trade_mode` follows. It is what makes the rejects pool
         // answerable ("you took the pullback; what about the sweep?") and what the runaway redraw
@@ -621,6 +662,11 @@ export function normalizeScenario(raw, i, { direction = null, used, ids } = {}) 
     const authored = num(raw.rr)
     sc.rr = computeRR({ direction, ...sc }) ?? (Number.isFinite(authored) ? authored : null)
     return sc
+}
+
+/** Does any premise get in on words rather than a level? Then nothing about it can rest at a broker. */
+function _hasTriggerEntry(scenarios) {
+    return (scenarios ?? []).some(sc => (sc.entry_legs ?? []).some(l => l.trigger && !Number.isFinite(l.price)))
 }
 
 export function normalizeScenarios(arr, { direction = null, used } = {}) {
@@ -827,6 +873,11 @@ export function normalizeSetup(raw) {
         // WORKSPACE (live | paper | manual), bound at Generate, and two meanings on one key is the
         // trap the condition `mode` rename was written to avoid.
         read_mode:   READ_MODES.includes(raw.read_mode) ? raw.read_mode : defaultReadMode({ conditions, scenarios }),
+        // FLAT BY THE CLOCK — the exit the chart cannot fire. "Out before earnings", "flat by the
+        // close on an intraday horizon": authored here because it is a decision about the plan, and
+        // distinct from `valid_until`, which kills a setup that never filled rather than closing a
+        // position that did (docs/design/mentor-flow-intent.md 4.3.4).
+        time_exit:   isoOrNull(raw.time_exit),
         active_from: isoOrNull(raw.active_from),
         valid_until: isoOrNull(raw.valid_until),
 
@@ -858,7 +909,11 @@ export function normalizeSetup(raw) {
         // The model sets this when the only entry trigger is price arriving at a specific level —
         // no candle close, no indicator, no pattern. Talos skips the assessment and fires the
         // confirm card on the first armed wake. Everything else is 'conditional' (the default).
-        entry_mode: raw.entry_mode === 'limit' ? 'limit' : 'conditional',
+        //
+        // A TRIGGER entry can never be `limit`, whatever the model says: a limit order rests at a
+        // price, and this entry has none. Forced here rather than refused, because the mistake is
+        // the flag and not the plan — the trigger is still a perfectly good way in, assessed.
+        entry_mode: raw.entry_mode === 'limit' && !_hasTriggerEntry(scenarios) ? 'limit' : 'conditional',
 
         // Server-derived — recomputed every time, never taken from the model. `entry_legs`,
         // `stop_legs`, `target_legs`, `validity`, `quantity` and `rr` are the EXECUTION PROJECTION of
@@ -924,6 +979,9 @@ export function setupReadiness(setup, hasAccount = false) {
         const at = (what) => (multi ? `${what} on ${scenarioLabel(sc)}` : what)
 
         if (!(sc.entry_legs?.length)) missing.push(at('entry price'))
+        // A TRIGGER entry needs no price: the fulfilment asks the user to confirm at market. What it
+        // does need is to be the whole story — a leg with neither a price nor a trigger never
+        // normalises, so reaching here means every leg has one or the other.
         // Scaling in is supported: execution places the ARMED LEG's size (legQuantity), the monitor
         // watches the rest (pendingLegs) and the resting stop grows to cover each new leg. What the
         // block used to guarantee still has to hold, so it becomes a narrower rule: with more than
@@ -1153,11 +1211,15 @@ export function hasWatchedLegs(w) {
  * Derived rather than fixed so the prompt never offers a verdict the monitor would refuse, and the
  * monitor never has to refuse one the prompt offered.
  */
-export function allowedVerdicts(w) {
+export function allowedVerdicts(w, { timeExit = false } = {}) {
     const out = ['hold']
     if (w?.stop)            out.push('move_stop', 'exit_now')
     if (w?.targets?.length) out.push('take_partial')
     if (w?.entries?.length) out.push('add_leg')
+    // THE CLOCK EXIT NEEDS A WAY OUT. A position of plain levels watches no stop, so `exit_now`
+    // would not be on the menu — and a read woken by the user's own deadline that may only answer
+    // `hold` is a read that cannot do the one thing it was woken for.
+    if (timeExit && !out.includes('exit_now')) out.push('exit_now')
     return out
 }
 

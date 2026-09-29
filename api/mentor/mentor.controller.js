@@ -56,6 +56,12 @@ export async function streamMentor(req, res) {
             return {
                 reply:    result.reply,
                 coverage: result.coverage,
+                // The build ledger (services/mentorBuild.util.js). It travels on the draft, which is
+                // what the client already round-trips; this copy is the seam for a frontend that
+                // carries it in its own right, and is ignored until one does.
+                build:    result.build,
+                // Every plan in a multi-name build, keyed by asset — absent on a one-name one.
+                ...(result.drafts ? { drafts: result.drafts } : {}),
                 ...(result.setup     ? { setup: result.setup, readiness: result.readiness } : {}),
                 ...(result.setups    ? { setups: result.setups } : {}),
                 // route / routeSymbol / opening — the user asked to be sent to another desk (routing.util).

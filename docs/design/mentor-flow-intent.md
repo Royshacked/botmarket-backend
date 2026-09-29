@@ -754,3 +754,300 @@ Section by section against `prompts/mentor_system_prompt.md` (1074 lines today).
 **Net effect:** roughly 350-400 lines leave the prompt, because the ladder, the interview
 choreography and the candidate-offer rules become server state and stage instructions. The prompt
 keeps what only a model can hold — judgment, vocabulary, honesty rules — and stops holding the flow.
+
+---
+
+# BUILD LOG
+
+## Phase 1 — the ledger core (DONE, `services/mentorBuild.util.js`)
+Pure, no I/O, no clock. `STAGES` (opening · spans · entries · sizing · summary) with the two gates
+marked waivable; `claim` / `settle` / `unsettle`; `stageOf` / `firstUnsettled`; multi-name via
+`upsertName` / `putName`; `claimsFromDraft` as the bridge for a brought plan.
+
+Two rules carry it: **claimed is not settled**, and **nothing settles out of order** (a settled field
+changes only through `unsettle`, which cascades to every stage below). 26 unit tests.
+
+**Decided while building:** the LEDGER owns the flow, the DRAFT owns the content. They both hold
+direction/horizon/lens, so they can diverge — an emitted draft that contradicts a settled value is
+REFUSED, not silently accepted. (To implement in phase 2.)
+
+**Open for phase 2:** `emptyMentorState()` gains `build`, which changes the `chatState` the client
+round-trips. The frontend ships as a prebuilt bundle in `public/` — if it echoes `chatState`
+verbatim this is free; if it reconstructs it, `build` is dropped every turn and the ledger resets.
+Check before wiring.
+
+## Phase 2 — the ledger is wired (DONE)
+`services/mentorBuild.util.js` gains the turn: `normalizeBuild` (the door — the ledger comes back
+through the client every turn and is untrusted), `sanitizeBuildOps` (model output, dropped by type
+and never coerced), `applyBuildOps` (unsettle -> derived claims -> explicit claims -> settle, in
+that order, because a flip-and-confirm is ONE turn) and `settledConflicts`.
+
+`mentor.agent.service.js` threads it: a new `<build>` tag (registered in `ALL_EMIT_TAGS`, suppressed
+like every other), claims derived from the emitted worksheet so a forgotten tag still records what
+was PROPOSED, and `_buildLedgerSection` in the turn context — where the build is, what is settled,
+what was refused last turn, and the line that says talking never moves any of it.
+
+**How the ledger survives:** it rides ON THE DRAFT. The frontend rebuilds `chatState` from the
+fields it was sent (`active_asset: e?.asset || n?.ticker || ''`), so a new top-level key would be
+dropped every turn. A turn that emits no worksheet RE-ISSUES the previous draft rather than skipping
+it, or a confirmation given in prose would be lost. `build` is also returned at the top level and
+forwarded by the controller — inert until a frontend uses it.
+
+**Still true after phase 2:** a settlement made before any worksheet exists has nothing to ride on.
+That is why the opening turn must emit one (phase 3: the nucleus it proposes IS the worksheet).
+
+54 new tests (`mentorBuildOps.test.js`, `mentorLedgerWiring.test.js`); suite 3582/0.
+
+## Phase 3 — the prompt learns the new flow (DONE)
+`prompts/mentor_system_prompt.md`: 1074 -> 973 lines.
+
+**Out:** `## No phases — invariants` (the section), the whole 8-rung `## The guided build` with the
+detour rule, "one rung per turn" and "go all the way", and 165 lines of interview choreography.
+Every stale cross-reference to rungs and the ladder is gone (a test now asserts that).
+
+**In:** `## How a build runs — the ledger, and what is yours to do in it` (the five stages, claim vs
+settlement, reopen cascades, three stops that are the user's, two gates that can be waived);
+`## The opening turn — one turn, three answers` (the cheap-to-expensive tool ladder, validate the
+claimed / propose the blank, close with the two asks); `## The stages after the opening` (spans,
+entries, sizing, summary in brief — phases 4-6 deepen each); and the `<build>` tag contract under
+`## Tags`.
+
+**Kept deliberately:** the coverage dimensions, "a setup always carries levels" (until phase 7),
+"name the lens, never blend it", and the two grounding rules that were buried in the deleted
+ladder — **Tools, not memory** and **Live before levels** — which are grounding, not flow.
+
+**Fixed while building:** the prompt says to emit the worksheet on the opening turn, but "the model
+did as it was told" is not a storage strategy. The service now falls back to a bare `{asset}` stub
+when a turn has ledger content and no worksheet of any kind, so opening-turn claims cannot be lost.
+
+**Known duplication, for phase 6:** `## Size comes from the user` still lists three sizing inputs
+while the new stages section lists Roy's five. Not contradictory, but two sources of truth.
+
+Suite 3589/0.
+
+## Phase 4a/4b — the spans gate, and the trade drawn on the chart (DONE, backend)
+**The candidates.** `normalizeSpans` / `spanIds` in `mentorBuild.util.js`, emitted as `<spans>`:
+each candidate is `{id, label, archetype, from, to, from_price?, to_price?, why, invalidation}` and
+the DISCARDED travel with them, one clause each. `from`/`to` are WORDS in the lens's vocabulary;
+the prices are optional and exist only so the chart can draw a line. **Four candidates, hard** —
+the cap is the server's, not the prompt's. Spans are CONTENT, so they ride on the draft
+(`draft.spans`) while the ledger holds only their ids.
+
+**The picture.** `get_chart` gains `levels: [{price, kind, label}]`, threaded through `cachedChart`
+(in the cache key — two charts with different lines are different pictures) to
+`renderChartImage` -> `normalizeChartLevels` -> klinecharts `priceLine` overlays. `kind` is what the
+line MEANS and therefore its colour: `from` blue, `to` green, `stop` red and solid while the rest
+are dashed.
+
+Two things learned by rendering it rather than trusting the API:
+- The price tag shows the NUMBER; `extendData` does not draw the label. The words stay in the table.
+- **An overlay does not stretch the price axis.** A level outside the candles' range was silently
+  invisible — the worst failure for a picture of a trade. Fixed by feeding the levels in as an
+  invisible `LEVELS` indicator, so the axis has to include them. Verified: 170 and 268 on a chart
+  whose candles run 189–235 now both draw, axis 170–280.
+
+Also: the tool reports the lines actually DRAWN (normalised, capped), and says plainly when the
+chart-img fallback served the render, because that renderer cannot draw them at all.
+
+`tests/fixtures/agentTools.snapshot.json` updated deliberately in the same commit — `levels` is on
+the SHARED get_chart, so portfolio, scanner, kairos and mentor all see it.
+
+Suite 3605/0. Still to come for this phase: the FE table card (4c).
+
+## Phase 4c — the gate's own card (DONE, frontend)
+`botmarket-frontend/src/cmps/MentorPanel/SpanTable.jsx` + `.scss` + tests, mounted in
+`MentorPanel` where the candidate picker sits, reading `pendingSetup.spans` (the spans ride on the
+draft, so there is no parallel state to fall out of step).
+
+Rows, not cards, and deliberately NOT the CandidatePicker beside it: that offers complete
+alternative PLANS and picking one replaces the worksheet, while this offers the trade itself and
+picking one says which trades are worth building mechanics for. Prices render only when the data
+has them. The invalidation gets its own line. The rejects are folded, one clause each, and
+clickable.
+
+Both gate actions SPEAK — they send a message rather than setting state — because the ledger only
+moves on a `<build>` emit, so a silent local change would leave the server holding an open gate.
+
+FE suite 1099/1099; bundle rebuilt into `botmarket-backend/public` (prod ships the committed build).
+Pre-existing FE lint warnings on main are untouched and none are in the new files.
+
+## Phase 5 — the entries gate (DONE)
+`<entries>`: per trade, up to three tested ways in — `{id, label, technique, trigger, timeframe,
+evidence, share?, recommended}` — normalised by `normalizeEntries`, scoped to the spans on the
+table (an entry for a trade nobody agreed to look at is an entry for nothing), and carried on the
+draft as `draft.entries` with the ledger holding `tradeId:optionId`.
+
+**`semantics` is the field that changes what the broker does**, so it defaults to `alternatives`
+— the reading that cannot put on more risk than the user agreed to. `scale_in` requires a `share`
+per option, and `entryProblems` reports shares that do not add to 100 through the existing
+problems block: not a missing field but a stated plan that would fill the user for a size nobody
+chose. Exactly one `recommended` survives normalisation, because two picks expand two rows and ask
+the user the question Mentor was supposed to answer.
+
+Timeframes live on the ENTRY (D3): the rung a trigger is read on is a property of the mechanic.
+
+**Bug found and fixed while building:** a reopened stage cleared its ledger entry but left its
+CONTENT on the draft — the gate would be open again while the user was still looking at the answers
+to it. `fieldsClearedBy` answers "what is being reopened" from the ops BEFORE they are applied
+(the content is also what the claims derive from), and the reopened stage's content is dropped
+unless the same turn emits a replacement.
+
+Prompt: the entries stage written out (test on THIS ticker and count it — "a measurement, not a
+feeling"; stop is a price; targets may be legs; time exits offered; management NOT authored, Talos
+raises it live), plus a rule both gates needed — **re-emit the narrowed set when the user chooses**,
+because the ledger records the agreement, not the menu.
+
+FE: `EntryTable.jsx` — trade blocks with entries nested, Mentor's pick expanded, the rest folded,
+the semantics stated in words, the share shown when scaling in.
+
+Suites: backend 3622/0, frontend 1106/1106.
+
+**Still not built for this stage (noted in #9):** a general "does this pattern work on this ticker"
+measurement. Mentor evidences it today from `get_candles` / `get_false_breaks` / `get_orderblocks`
+and is told to say so when it cannot measure.
+
+## Phase 6 — sizing in five units, and the money said out loud (DONE)
+**`services/positionSize.util.js`** (pure): `SIZE_UNITS` = risk_cash · risk_pct · size_cash ·
+size_pct · shares, all resolving to one quantity from the entry, the stop, the balance and the
+contract multiplier. Two things it REFUSES rather than guesses — a percentage with no visible
+balance, and a risk budget when entry and stop are the same price — and a budget smaller than one
+unit is said out loud instead of being floored to a silent zero.
+
+**`services/mentorSummary.util.js`** (pure): `summarizeTrade` → R:R, gain and loss in cash and as a
+percent of the account; `summarizeBatch` for the multi-name line; `applySizing` resolves the user's
+answer PER SCENARIO, because two ways into one trade have different stops and therefore different
+sizes for the same risk budget.
+
+**Wired:** `<build>{"size":{"unit":"risk_pct","value":1}}</build>` is now an op. The server sizes
+every premise, writes the quantity onto the worksheet, and returns a refusal (not a guess) when it
+cannot. `_mainBalance` picks the marked account's deployable cash and returns null when several
+accounts are marked with no main — ambiguous is not a number. `_buildMoneySection` hands the model
+the figures to READ OUT, under a line telling it never to recompute them.
+
+**A judgment call worth knowing:** when the target ladder's legs do not add up to the size the user
+chose (the plan was drawn at 100 and they sized 125), the whole position is priced to the NEAREST
+target instead of scaling the legs or leaving a remainder unsold. Both of those invent a plan
+nobody agreed to; pricing it all to the first target can only understate the good case, which is
+the direction to be wrong in — and it is the rule `rr` already follows.
+
+**Caught by the bug hunt:** `resolveSize` had no caller. The prompt said "the server computes it"
+and nothing did. That is what the `size` op above fixes.
+
+FE: the money line on `SetupSummary`, upside and downside at the same weight, estimates marked.
+
+Suites: backend 3643/0, frontend 1109/1109.
+
+## Phase 7 — an entry need not be a price (DONE)
+**The scope collapsed once the code was read, and that is the headline.** Two things this phase was
+scoped to build already existed:
+- **The two-level shape.** Scenarios were ALWAYS rivals ("the first to fulfil takes the whole trade
+  and the others die") and legs INSIDE one scenario were always the scale-in. That is exactly
+  `alternatives` vs `scale_in` (4.1). So no restructure: scenarios gained `trade_id` as grouping,
+  and the gate artifacts carry the two levels for the UI.
+- **Entry at market.** A confirmed `conditional` entry already places `type: 'market'`
+  (`buildOrderPlan`), and `firingLeg` already falls back to the first unfilled leg instead of
+  resolving a level. Nothing downstream had to learn a new way to execute.
+
+What actually shipped:
+- `normalizeLeg` accepts `{trigger, timeframe, about}` on ENTRY legs only; stops and targets stay
+  prices, because they rest at a broker.
+- **`legText` returned null for a priceless leg** — the trigger would have been INVISIBLE to the
+  read that judges it. That was the bug that would have made the whole feature quietly useless.
+- `entry_mode: limit` is forced to `conditional` when any entry is a trigger.
+- **`about`** (roughly where it fills, never an order) + `legReference`, because risk-per-unit needs
+  an entry: without it *"risk 1%"* was refused on a perfectly good plan. Everything off it is an
+  estimate. `legPrice` keeps answering null forever — that separation is the safety property.
+- `time_exit` authored on the setup, and WIRED: `_isTimeExit` on an open position makes the wake
+  reason `time_exit`, which is always-expensive like `expiry_review`, and the in-position prompt
+  says `exit_now` is the default answer to it.
+- The watch row and the scenario card show a trigger entry instead of a blank cell.
+
+**Open decision 6d is now resolved by the shape of the thing:** guards stay price-only. A trigger
+entry arms no guard and is read on every candle close by the cheap tier — the right clock for "a
+15m close above X" — and teaching the free 30s sweep to compute indicators would make tier 0 cost
+money, which is the one thing it must not do.
+
+Suites: backend 3661/0, frontend 1112/1112.
+
+## Phase 8a — revise vs cancel, and Generate all (DONE, backend)
+**REVISE or CANCEL (#17).** The re-entry section of the prompt is rewritten around the one question
+that decides which conversation this is: *do the DIRECTION and the HORIZON still stand?* Yes →
+revise, and the opening stays settled while the build reopens at `spans` (or `entries` when only
+the way in moved). No → cancel: say the thesis broke, and do not re-draw a trade that no longer
+exists; a new one on the same name starts at `opening`.
+
+No new mechanism was needed — the cascade from phase 1 IS the re-entry, and Talos's cards already
+carry the user back with the plan loaded. What was missing was the TEST and the two different
+answers to it.
+
+**Generate all** — `POST /api/setups/generate-all`, capped at 10 (the ledger's own name cap).
+Sequential, not parallel: each generate resolves accounts and checks the venue, and a burst of
+those against one broker is how you get rate-limited into a false refusal. **Partial success is the
+contract**: three of four saving returns 200 with `{saved, failed}`, the three are monitored, and
+the fourth comes back with its reason and its index. Rolling back finished work because a later one
+was unsized would throw away what the user did; an error status would tell the client to discard a
+response carrying real documents.
+
+Suite 3668/0.
+
+### Still open for phase 8b
+- **The client carries ONE draft.** A multi-name build needs N, plus a list in the panel and a
+  Generate-all button; the endpoint above is ready for it.
+- **Social-chat batch intake** (#16): a DM carrying several setups, taken down as one batch. Setup
+  sharing (2026-09-21) is the ground to build on; what is new is the multi-setup message.
+
+## Phase 8b — several names in one build (DONE)
+The client held ONE draft, so a user who moved from NVDA to AMD lost the NVDA plan. Now the server
+returns `drafts` (keyed by asset) whenever a build holds more than one name, the panel keeps them
+and sends them back, and `_mergeDrafts` re-normalises everything that comes through the client.
+**Only the active draft carries the ledger** — one build has one ledger, and a copy per plan is
+several records of one truth.
+
+FE: a `Generate all (N)` button beside the single one (generating just the name in front of you is
+still a thing a user may want), and partial success handled as the contract it is — the saved ones
+are gone from the table, the refused ones stay on it with their reasons, and the conversation picks
+up exactly what failed.
+
+Prompt: a multi-name build is an ordinary build run once per name, with a one-line tally of where
+each stands, because the user is holding four builds in their head and Mentor is not.
+
+Suites: backend 3671/0, frontend 1115/1115.
+
+### The one piece of the design still unbuilt
+**Social-chat batch intake (#16)** — a DM carrying several setups, taken down as one batch. Setup
+sharing (2026-09-21: DM card, fork, blueprint) is the ground; what is new is a multi-setup message
+and the "whose sizing?" rule (a risk percentage transfers between accounts, a share count does not).
+
+## Code review of the branch (2026-09-29) — eight findings, all fixed
+A full review of `feat/mentor-flow-v2` found eight gaps that 3671 passing tests had not. Worth
+recording, because most of them are the same shape: **the piece worked, and nothing connected it.**
+
+1. **`time_exit` was unreachable.** `_checkSetup` hands every position status to `_checkPosition`
+   long before the pre-entry reason is chosen, so the clock was tested where a filled position
+   never arrives. Moved to the position path — and two deeper holes came out of it: a position of
+   plain levels is marked DORMANT and never read at all (so a `time_exit` on one still would not
+   fire), and `allowedVerdicts` only offers `exit_now` when a STOP is watched, so the read woken by
+   the user's own deadline could only have answered `hold`. A setup carrying a `time_exit` now
+   never goes dormant, and that wake is always allowed to exit.
+2. **The sizing stage could never settle.** `sanitizeBuildOps` produced `ops.size`, `applyBuildOps`
+   never claimed it, and the exact op the prompt prescribes came back `nothing claimed for size`.
+3. **A multi-name build lost the first name.** `_mergeDrafts` seeded only from `chatState.drafts`,
+   which the client only has once the server sends it — and the server only sends it at two names.
+   So "Generate all" was unreachable. **The test that should have caught it hand-fed the server a
+   field the real client never sends.** Now seeded from the draft being sent back, and the
+   regression test drives it the way the frontend does.
+4. **The contract multiplier was ignored** — `applySizing`/`summarizeTrade` defaulted it to 1, so
+   an ES future with a 4-point stop and a $500 budget sized 125 contracts risking $25,000. It now
+   travels with the size op, and futures/forex are REFUSED by name rather than assumed.
+5. **The lens was auto-claimed as `discretionary`** because `normalizeSetup` defaults `trade_mode`,
+   so the opening turn settled a lens the user never heard — the precise failure claimed-vs-settled
+   exists to prevent. Only a stated lens is claimed now.
+6. **The build could never complete.** The summary stage's field was `generate`, which nothing
+   could ever claim (pressing Generate happens outside the conversation), so `buildComplete` was
+   permanently false and every settle of it was refused. The stage now settles on the FIGURES.
+7. **The gates leaked across an asset switch** — AMD inherited NVDA's candidate trades when a turn
+   emitted none. Carry-forward is now scoped to the same name.
+8. **Parked names lost their gate content** every round trip, because `normalizeSetup` returns a
+   fixed shape. `spans`/`entries`/`summary` are carried explicitly; the ledger deliberately is not.
+
+Suite 3682/0 (11 new regression tests, one file: `mentorReviewFixes.test.js`).

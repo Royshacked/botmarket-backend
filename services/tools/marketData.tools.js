@@ -4,6 +4,7 @@ import { getEarnings }          from '../../providers/fmp.provider.js'
 import { getFmpQuoteFull }      from '../../providers/fmp.price.provider.js'
 import { buildFormingBar, toMsCandles } from '../candleFetch.service.js'
 import { cachedChart, cachedChartImage, CHART_SOURCE } from '../chartImgCache.service.js'
+import { normalizeChartLevels } from '../chartRender/klineRender.provider.js'
 import { buildStudies } from '../../monitoring/evaluators/chart.evaluator.js'
 import { calcSMASeries, calcEMASeries, calcRSISeries, calcMACDSeries, calcATRSeries, calcVWAPSeries } from '../../monitoring/evaluators/structured.evaluator.js'
 import { sessionStartMs } from '../market.service.js'
@@ -182,7 +183,7 @@ export function makeEarningsHandler(log) {
 export function makeChartHandler({ log, onChart, readText, renderChart = cachedChart }) {
     return makeToolHandler(
         'get_chart',
-        async ({ ticker, timeframe, indicators = '', show_to_user = false }, ctx) => {
+        async ({ ticker, timeframe, indicators = '', show_to_user = false, levels = [] }, ctx) => {
             const symbol  = String(ticker || '').toUpperCase()
             // Same per-turn vision budget the structure tools claim from — see llmStream.util. A
             // render plus a vision read, so it is spend, not a fetch.
@@ -194,7 +195,9 @@ export function makeChartHandler({ log, onChart, readText, renderChart = cachedC
             // visual read is anchored to price structure (orderblocks, sweeps, false breaks) rather
             // than primed by moving averages / VWAP. The agent adds an overlay only to confirm a read.
             const studies = buildStudies(indicators || '', { fillDefaults: false })
-            const { png, source } = await renderChart(symbol, timeframe, studies)
+            // Drawn levels are the one thing on this chart the model put there rather than read:
+            // the trade itself, as lines. Capped and colour-coded by the renderer.
+            const { png, source } = await renderChart(symbol, timeframe, studies, levels)
 
             if (show_to_user && typeof onChart === 'function') {
                 try { onChart({ symbol, timeframe, imageBase64: png }) }
@@ -202,12 +205,20 @@ export function makeChartHandler({ log, onChart, readText, renderChart = cachedC
             }
 
             const studyNames = studies.map(s => s.name).join(', ') || 'price only, no overlays'
+            // Report the lines that were actually DRAWN, not the ones asked for: the renderer drops
+            // a price that is not a price and caps the set, so echoing the request would tell the
+            // model about lines the user cannot see. And the chart-img fallback draws none at all.
+            const asked = normalizeChartLevels(levels)
+            const drawn = !asked.length ? ''
+                : source !== CHART_SOURCE.OWN
+                    ? ` NOTE: the ${asked.length} line(s) you asked for are NOT on this chart — it came from the fallback renderer, which cannot draw them. Say the levels in words instead.`
+                    : ` Lines drawn: ${asked.map(l => `${l.kind} ${l.price}${l.label ? ` (${l.label})` : ''}`).join(', ')}.`
             // Label the source honestly: the own render is drawn from the same candles the user's
             // chart pane shows; the fallback is TradingView's own data and drawing.
             const sourceLabel = source === CHART_SOURCE.OWN ? "chart (app render, same candles as the user's chart)" : 'TradingView chart'
             return [
                 { type: 'image', source: { type: 'base64', media_type: 'image/png', data: png } },
-                { type: 'text',  text: `${symbol} ${timeframe} ${sourceLabel} (studies: ${studyNames}). ${readText}` },
+                { type: 'text',  text: `${symbol} ${timeframe} ${sourceLabel} (studies: ${studyNames}).${drawn} ${readText}` },
             ]
         },
         (err, { ticker }) => `Could not render chart for ${ticker}: ${err.message}. Use get_candles instead.`,

@@ -12,6 +12,12 @@ import { consultDescription } from '../deepThink.service.js'
 import { FLIP_TOOL, FLIP_DESCRIPTION, makeFlipHandler } from '../flipTest.service.js'
 import { buildVenueSection } from '../tools/tradingContext.tools.js'
 import { normalizeSetup, setupReadiness, computeRR, validityProblems, normalizeChallenges } from '../setup.schema.js'
+import { summarizeTrade, applySizing } from '../mentorSummary.util.js'
+import {
+    normalizeBuild, sanitizeBuildOps, applyBuildOps, claimsFromDraft, settledConflicts,
+    normalizeSpans, spanIds, normalizeEntries, entryIds, entryProblems, fieldsClearedBy,
+    activeName, stageOf, firstUnsettled, isWaived, STAGES,
+} from '../mentorBuild.util.js'
 import { logger } from '../logger.service.js'
 
 // Mentor — the trade ASSISTANT (Pipeline F). A conversation → a draft `setup` entity.
@@ -148,7 +154,7 @@ async function chatStream({
         meta: { userPrompt, asset: chatState?.active_asset || '', accounts: accounts?.length ?? 0 },
     })
 
-    const { reply, setup, setups } = _parseMentorResponse(raw)
+    const { reply, setup, setups, buildOps, spanBlock, entryBlock } = _parseMentorResponse(raw)
 
     // A candidate-offer turn and a worksheet turn are mutually exclusive by contract; if the model
     // emits both, the picked worksheet wins (it's the more committed artifact).
@@ -167,20 +173,156 @@ async function chatStream({
         ])
     }
 
-    const readiness = normalized ? setupReadiness(normalized, (accounts?.length ?? 0) > 0) : null
+    // THE LEDGER. It rides on the draft because the draft is the one thing that round-trips: the
+    // client rebuilds `chatState` from the fields it was sent, so a new top-level key would be
+    // dropped every turn and the flow would reset on each message.
+    //
+    // Claims are taken from the worksheet the model just emitted as well as from its <build> tag, so
+    // a turn that forgets the tag still records what was PROPOSED. Settling always needs the tag:
+    // a proposal is not an agreement, and only the user's confirmation moves the ledger.
+    // The candidate trades are CONTENT, so they live on the draft beside the rest of it; the ledger
+    // only ever holds their ids. A turn that emits none keeps the ones already on the table — the
+    // gate is a conversation, and re-listing four spans to change one word is not one.
+    //
+    // A block that arrives and normalises to NOTHING is not the same as no block: the model meant
+    // to put candidates on the table and none of them survived. The old ones stand (better than an
+    // empty gate), and it is logged, because a silently ignored emit is a bug nobody sees.
+    // A REOPENED stage drops its content as well as its settlement. The ledger clearing `spans`
+    // while four candidate trades stay on the draft is the ledger and the screen disagreeing: the
+    // gate is open again and the user is still looking at the answers to it. What the model emits
+    // THIS turn survives — a reopen usually arrives with the replacement.
+    //
+    // Answered from the OPS, before they are applied, because the content it drops is also what the
+    // claims below are derived from.
+    const ops      = sanitizeBuildOps(buildOps) ?? {}
+    const reopened = new Set(fieldsClearedBy(ops.unsettle))
+
+    // The gates' content belongs to ONE name, so it only carries forward while the build is still
+    // on that name: handing AMD the candidate trades drawn for NVDA would claim NVDA's ids onto
+    // AMD's ledger, and a later settle would agree to the wrong name's trades.
+    const activeAsset = String(normalized?.asset || chatState?.active_asset || '').toUpperCase()
+    const sameName    = Boolean(activeAsset) && String(chatState?.draft?.asset ?? '').toUpperCase() === activeAsset
+    const carryGates  = sameName ? chatState?.draft : null
+
+    const emitted = normalizeSpans(spanBlock)
+    if (spanBlock && !emitted) logger.warn(LOG, '<spans> emitted but no candidate survived normalisation — keeping the previous set')
+    const spans = emitted ?? (reopened.has('spans') ? null : normalizeSpans(carryGates?.spans))
+
+    // The ways in, per trade. Scoped to the spans on the table: an entry for a trade the user never
+    // agreed to look at is an entry for nothing, and the gate would show a way into a trade that is
+    // not being built. Carried forward the same way the spans are.
+    const emittedEntries = normalizeEntries(entryBlock, spanIds(spans))
+    if (entryBlock && !emittedEntries) logger.warn(LOG, '<entries> emitted but nothing survived normalisation — keeping the previous set')
+    const entries = emittedEntries
+        ?? (reopened.has('entries') ? null : normalizeEntries(carryGates?.entries, spanIds(spans)))
+
+    const priorBuild = normalizeBuild(chatState?.build ?? chatState?.draft?.build)
+    const { build, refused, cleared } = applyBuildOps(priorBuild, {
+        asset: normalized?.asset || chatState?.active_asset || '',
+        derived: {
+            // `lensStated` guards the one field with a non-null schema default: normalizeSetup
+            // fills `trade_mode` with 'discretionary', and claiming that would put a lens nobody
+            // proposed into the opening turn's settlement.
+            ...(normalized ? claimsFromDraft(normalized, { lensStated: Boolean(setup?.trade_mode) }) : {}),
+            ...(spans ? { spans: spanIds(spans) } : {}),
+            ...(entries ? { entries: entryIds(entries) } : {}),
+            // The summary stage settles on the FIGURES being in front of the user, so its claim is
+            // derived from them existing. `generate` used to be the field here and nothing could
+            // ever claim it — pressing Generate happens outside the conversation — so the build
+            // could never complete and every settle of it was refused.
+            ...(_summaryClaim(chatState?.draft) ?? {}),
+        },
+        ...ops,
+    })
+
+    // The ledger owns the FLOW, the draft owns the CONTENT. Where they contradict each other the
+    // settled value is restored — visibly: the conflict rides back into the next turn's context
+    // with the refusals, because a silent correction teaches the model nothing.
+    const conflicts = settledConflicts(normalized, activeName(build))
+    for (const c of conflicts) normalized[c.key] = c.settled
+    if (conflicts.length) build.refused = [...build.refused, ...conflicts.map(c => ({ field: c.field, reason: c.reason }))]
+
+    // THE LEDGER MUST GO HOME, and the draft is the only vehicle. A turn that settles something but
+    // emits no worksheet is the ordinary case, not an edge one — the user says "yes, long and swing",
+    // Mentor answers in prose — and without this the confirmation is simply lost: the client would
+    // send back last turn's draft, carrying last turn's ledger, and the same question would be asked
+    // again. So an unchanged draft is re-issued rather than skipped.
+    //
+    // What cannot be rescued here is a settlement made before ANY worksheet exists; that is why the
+    // opening turn emits one (the nucleus it proposes IS the worksheet).
+    // Three ways to find a carrier, in order: the worksheet emitted this turn, the one the client
+    // sent back, or — on the opening turn, where neither exists yet — a bare stub holding the
+    // ticker. The prompt asks for a worksheet on that first turn precisely so the stub is rarely
+    // needed, but "the model did as it was told" is not a storage strategy, and the ledger cannot
+    // be the one thing whose survival depends on it.
+    const ledgerName = activeName(build)
+    const hasLedger  = Boolean(ledgerName && (Object.keys(ledgerName.claimed).length || Object.keys(ledgerName.settled).length))
+    const carrier = normalized
+        ?? (chatState?.draft ? normalizeSetup(chatState.draft) : null)
+        ?? (hasLedger ? normalizeSetup({ asset: ledgerName.asset }) : null)
+    if (carrier) {
+        carrier.build = build
+        if (spans) carrier.spans = spans
+        if (entries) carrier.entries = entries
+        // THE MONEY IS COMPUTED, NEVER NARRATED FROM THE MODEL'S OWN ARITHMETIC. The summary rides
+        // on the draft so the panel shows the same figures the model was handed, and both come from
+        // one place (mentorSummary.util). A model that is roughly right about R:R is wrong about
+        // dollars on a live account, and nobody can tell a computed figure from a fluent one.
+        // SIZING: the user names a unit and a number, the server turns it into a quantity — per
+        // scenario, because two ways into one trade have different stops and therefore different
+        // sizes for the same risk. A problem (no balance to take a percentage of, a stop equal to
+        // the entry) comes back as a refusal rather than a guess, and the stage stays open.
+        const balance = _mainBalance(accounts, mainAccountId)
+        if (ops.size) {
+            const { quantities, problems } = applySizing(carrier, ops.size, { balance, multiplier: ops.size.multiplier })
+            for (const q of quantities) {
+                const sc = carrier.scenarios?.find(x => x.id === q.id) ?? carrier.scenarios?.[0]
+                if (!sc) continue
+                sc.quantity = q.quantity
+                // One way in takes the whole position; a scaling-in ladder is the entries stage's
+                // shares to split, and phase 7 is where that lands on the legs.
+                if (sc.entry_legs?.length === 1) sc.entry_legs[0].quantity = q.quantity
+            }
+            if (problems.length) build.refused = [...build.refused, ...problems.map(p => ({ field: 'size', reason: p }))]
+            logger.info(LOG, 'sizing resolved', { unit: ops.size.unit, value: ops.size.value, sized: quantities.length, problems: problems.length })
+        }
+
+        carrier.summary = summarizeTrade(carrier, { balance, multiplier: ops.size?.multiplier })
+        if (!normalized) carrier.rr = computeRR(carrier) ?? carrier.rr
+    }
+
+    // SEVERAL NAMES IN ONE BUILD (#15). The active name's plan is `setup`, as it always was; the
+    // others ride in `drafts`, keyed by asset, so a user who built NVDA and moved on to AMD still
+    // has the NVDA plan when they press Generate all.
+    //
+    // Only the ACTIVE draft carries the ledger: it is build-wide, and a copy on every plan would be
+    // several records of one truth, which is how they start disagreeing.
+    const drafts = _mergeDrafts(chatState?.drafts, carrier, chatState?.draft)
+
+    const readiness = carrier ? setupReadiness(carrier, (accounts?.length ?? 0) > 0) : null
 
     logger.info(LOG, 'chatStream done', {
         replyLength: reply.length,
         hasSetup: Boolean(normalized),
+        carried: Boolean(carrier && !normalized),
         candidates: setups?.candidates?.length ?? 0,
         ready: readiness?.ready ?? false,
         coverage: capturedCoverage ?? chatState?.coverage ?? [],
+        stage: stageOf(activeName(build)) ?? 'done',
+        settled: Object.keys(activeName(build)?.settled ?? {}),
+        refused: refused.map(r => r.field),
+        ...(cleared.length ? { cleared } : {}),
     })
 
     return {
         reply,
         coverage: capturedCoverage ?? chatState?.coverage ?? [],
-        ...(normalized ? { setup: normalized, readiness } : {}),
+        // Returned at the top level as well as on the draft: harmless today (the client ignores what
+        // it does not know) and the seam a future frontend uses to carry the ledger on its own.
+        build,
+        ...(carrier ? { setup: carrier, readiness } : {}),
+        // Absent until there is a second name, so an ordinary one-name build sends nothing new.
+        ...(Object.keys(drafts).length > 1 ? { drafts } : {}),
         ...(setups && !normalized ? { setups } : {}),
         ...route.result(),   // { route, routeSymbol, opening, edit } — the controller validates
     }
@@ -228,9 +370,21 @@ export const _mergeSetupDraft = mergeDraft
  */
 export function _parseMentorResponse(raw) {
     const text  = raw ?? ''
-    const reply = stripEmitTags(text, ['setup', 'setups', 'asset', 'interval', 'coverage', ...ROUTE_TAGS]).trim()
+    const reply = stripEmitTags(text, ['setup', 'setups', 'build', 'spans', 'entries', 'asset', 'interval', 'coverage', ...ROUTE_TAGS]).trim()
 
-    return { reply, setup: _parseBlock(text, 'setup'), setups: _parseCandidates(text) }
+    return {
+        reply,
+        setup:    _parseBlock(text, 'setup'),
+        setups:   _parseCandidates(text),
+        // The ledger moves this turn: what the user confirmed, reopened, or waived. Validated by the
+        // ledger itself — this only pulls the block out.
+        buildOps: _parseBlock(text, 'build'),
+        // The candidate trades at the spans gate. `<spans>` is the TABLE the user chooses from;
+        // `<setups>` is a menu of complete alternative plans, and they are not the same thing.
+        spanBlock: _parseBlock(text, 'spans'),
+        // The ways INTO each candidate trade, at the second gate.
+        entryBlock: _parseBlock(text, 'entries'),
+    }
 }
 
 // The shared extractor already matches the tag EXACTLY, which is what keeps <setups> from being
@@ -279,7 +433,9 @@ export function _parseCandidates(text) {
  * which is never something to wait out.
  */
 export function _buildProblemsSection(draft) {
-    const problems = draft ? validityProblems(draft) : []
+    // Scaling-in shares belong here rather than in readiness: they are not a MISSING field, they
+    // are a stated plan that does not add up, and the user would be filled for a size nobody chose.
+    const problems = draft ? [...validityProblems(draft), ...entryProblems(draft.entries)] : []
     if (!problems.length) return ''
     return `\nTHE PLAN YOU EMITTED DOES NOT ADD UP — fix this in your next <setup>, and say so plainly rather than silently re-emitting:\n${
         problems.map(p => `- ${p}`).join('\n')}\nGenerate refuses a setup in this state, so the user cannot save it until you correct it.`
@@ -341,7 +497,7 @@ Open on it: say the name, relay Argus's read in a sentence rather than restating
         + (lens
             ? ` NAME THE RECOMMENDED LENS AND WHY IT FITS. It is Argus's recommendation, not a decision: if the user wants a different lens, or the chart disagrees with it, say so and use theirs. A lens adopted without the user hearing it is one they never chose.`
             : ` say that you will ask which lens they want to build it through when the ladder reaches it.`)
-        + ` Then run the guided build from rung 1 — the quick read — as for any name: the ticker is settled unless they change it, Argus's direction is a lean you test at rung 2 rather than a settled rung, and the lens is agreed at rung 4, not in the opening. Everything else is still theirs to shape.`
+        + ` Then run the OPENING TURN as for any name: read it cheapest-first, and come back with direction, horizon and lens together. The ticker is settled unless they change it; everything Argus sent is a CLAIM you validate against your own read, never a settled value — its direction is a lean you test, its lens a recommendation the user still has to agree to. Everything else is theirs to shape.`
 }
 
 /**
@@ -362,7 +518,155 @@ export function _buildTurnContext(chatState, clientTime = null) {
 
     return `---
 ${buildTimeSection(clientTime, 'active_from / valid_until')}
-COVERAGE SO FAR: ${covered}. Re-state these in every <coverage> tag plus anything new you read this turn.${draft}`
+COVERAGE SO FAR: ${covered}. Re-state these in every <coverage> tag plus anything new you read this turn.${_buildLedgerSection(chatState)}${_buildMoneySection(chatState?.draft)}${draft}`
+}
+
+/**
+ * THE MONEY, COMPUTED. Handed to the model as figures to read out, never as arithmetic to do.
+ *
+ * The summary stage is where a user decides with their gut, and it decides on money: "2.4R" is an
+ * abstraction, "$740 if it works, $310 if it doesn't, 1.2% of the account" is a decision. Those
+ * numbers come from `mentorSummary.util` — the same ones the panel renders, so the screen and the
+ * sentence cannot disagree.
+ */
+export function _buildMoneySection(draft) {
+    const s = draft?.summary
+    if (!s || (s.gainCash == null && s.lossCash == null)) return ''
+
+    const money = (cash, pct) => (cash == null ? '—' : `${cash}${pct != null ? ` (${pct}% of the account)` : ''}`)
+    const lines = [
+        '\n\nTHE MONEY ON THIS TRADE — computed from the plan and the size, not by you. Read these out; never recompute them:',
+        `  pays ${money(s.gainCash, s.gainPct)} · costs ${money(s.lossCash, s.lossPct)}${s.rr != null ? ` · ${s.rr}R` : ''}${s.quantity != null ? ` · ${s.quantity} unit(s)` : ''}`,
+    ]
+    if (s.estimated) {
+        lines.push('  ESTIMATED: this entry has no authored price, so the figures are measured off the live price. Say so when you quote them — the real ones are computed at the fill.')
+    }
+    return lines.join('\n')
+}
+
+/**
+ * WHERE THE BUILD IS — the server's answer, not the model's recollection.
+ *
+ * This is what makes a detour free (docs/design/mentor-flow-intent.md D4): the model never has to
+ * remember where the conversation was, because the first unsettled stage is recomputed and handed
+ * over every single turn. The user can ask about earnings in the middle of sizing and nothing here
+ * moves — the ledger records settlements, and knows nothing about topics.
+ *
+ * It also carries last turn's REFUSALS. A settlement the server rejected is invisible to the model
+ * otherwise, and an invisible refusal is a silently skipped gate, which is the failure this whole
+ * design exists to prevent.
+ */
+export function _buildLedgerSection(chatState) {
+    const build = normalizeBuild(chatState?.build ?? chatState?.draft?.build)
+    const name  = activeName(build)
+    if (!name) return ''
+
+    const at    = firstUnsettled(name)
+    const lines = [`\n\nBUILD LEDGER — ${name.asset} (the server's record; you do not carry it yourself)`]
+
+    const settled = Object.entries(name.settled)
+    lines.push(settled.length
+        ? `  SETTLED (never re-ask, never re-litigate): ${settled.map(([f, v]) => `${f}=${_short(v)}`).join(' · ')}`
+        : '  SETTLED: nothing yet.')
+
+    const open = Object.entries(name.claimed).filter(([f]) => !(f in name.settled))
+    if (open.length) {
+        lines.push(`  CLAIMED but NOT settled — validate, then ask: ${
+            open.map(([f, c]) => `${f}=${_short(c.value)} (${c.source})`).join(' · ')}`)
+    }
+
+    if (at) {
+        const waived = isWaived(build, at.stage)
+        lines.push(`  YOU ARE AT: ${at.stage} — still blank: ${at.fields.join(', ')}.`)
+        lines.push(waived
+            ? '  The user waived this gate: make the call yourself, record it, and say in one line what you decided so they can overturn it.'
+            : '  This stage ends in something the user says yes to. Settle it with <build>{"settle":["…"]}</build> only once they have.')
+    } else {
+        lines.push('  YOU ARE AT: done — every stage is settled. Summarise and offer Generate.')
+    }
+
+    if (build.names.length > 1) {
+        lines.push(`  OTHER NAMES IN THIS BUILD: ${build.names
+            .filter(n => n.asset !== name.asset)
+            .map(n => `${n.asset} (${stageOf(n) ?? 'done'})`).join(' · ')}`)
+    }
+
+    if (build.refused.length) {
+        lines.push(`  REFUSED LAST TURN — it did not happen, so do not build on it:\n${
+            build.refused.map(r => `    - ${r.field}: ${r.reason}`).join('\n')}`)
+    }
+
+    lines.push(`  The stages, in order: ${STAGES.map(s => s.key).join(' → ')}. Nothing settles out of order, and reopening one reopens every stage below it.`)
+    lines.push('  A question about anything else is always answered in full — talking never moves this ledger, and it never has to.')
+    return lines.join('\n')
+}
+
+/**
+ * Every plan in this build, keyed by asset: what the client sent back, with this turn's on top.
+ *
+ * A build can hold up to ten names and the conversation only ever works on one at a time, so the
+ * others have to be kept somewhere or they are lost the moment the user says "now AMD". They are
+ * kept as CONTENT only — the ledger stays on the active draft, because one build has one ledger.
+ *
+ * Pure.
+ */
+export function _mergeDrafts(prior, carrier, lastDraft = null) {
+    const out = {}
+    // Re-normalised on the way in, and keyed by the asset the DOCUMENT says rather than by the key
+    // it arrived under: this came back through a client, and the two could disagree.
+    //
+    // `lastDraft` is what makes a second name possible at all. The client only holds a `drafts` map
+    // once the server has sent one, and the server only sends one at two names — so on the turn the
+    // user says "now AMD", the NVDA plan exists ONLY as the draft being sent back, and seeding from
+    // `prior` alone dropped it. That is the bug that made "Generate all" unreachable.
+    for (const draft of [...Object.values(prior ?? {}), lastDraft]) {
+        if (!draft) continue
+        const normalized = normalizeSetup(draft)
+        if (!normalized?.asset) continue
+        // normalizeSetup returns a fixed shape, so the gate content and the money would be stripped
+        // off every parked plan on each round trip — leaving the ledger saying `spans` are settled
+        // with nothing behind them. Carried explicitly; the LEDGER is not, because one build has one.
+        for (const key of ['spans', 'entries', 'summary']) {
+            if (draft[key]) normalized[key] = draft[key]
+        }
+        out[normalized.asset] = normalized
+    }
+    if (carrier?.asset) out[carrier.asset] = carrier
+    return out
+}
+
+/**
+ * The summary stage's claim: what the user is being shown, once there is money to show.
+ *
+ * Read off the PREVIOUS turn's draft rather than this one's, because the claim has to exist before
+ * the model can settle it, and both happen in the same turn: the figures were computed last turn,
+ * presented in that reply, and this turn's `settle` is the user agreeing with what they read.
+ */
+function _summaryClaim(draft) {
+    const s = draft?.summary
+    if (!s || (s.gainCash == null && s.lossCash == null)) return null
+    return { summary: { rr: s.rr ?? null, gain: s.gainCash ?? null, loss: s.lossCash ?? null, estimated: Boolean(s.estimated) } }
+}
+
+/** Ledger values are short by construction; a list is summarised rather than spelled out. */
+const _short = (v) => (Array.isArray(v) ? `${v.length} item(s)` : String(v))
+
+/**
+ * The balance every percentage is measured against: the MAIN account's, or the only one marked.
+ *
+ * Deliberately narrow. With several accounts marked and no main, a percentage would silently pick
+ * one of several different answers, so it picks none and the sizing stage says it cannot see a
+ * balance — which is true, and is a sentence the user can act on.
+ */
+export function _mainBalance(accounts, mainAccountId = null) {
+    const valid = Array.isArray(accounts) ? accounts.filter(a => a && a.id != null) : []
+    if (!valid.length) return null
+    const main = valid.length === 1
+        ? valid[0]
+        : valid.find(a => String(a.id) === String(mainAccountId))
+    // freeMargin is what can actually be deployed; balance counts capital already in positions.
+    const n = Number(main?.freeMargin ?? main?.balance)
+    return Number.isFinite(n) && n > 0 ? n : null
 }
 
 function _buildAccountsSection(accounts, mainAccountId = null) {
