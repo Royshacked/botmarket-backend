@@ -450,3 +450,37 @@ test('the record carries forward across turns, and does not double-count', async
     const again = await runWithFlip({ verdict: 'two_sided', chatState: prior })
     assert.deepEqual(again.setup.challenges.map(c => c.verdict), ['stands', 'two_sided'])
 })
+
+// ─── What the live builds taught the prompt (2026-09-29) ─────────────────────
+
+test('a shut market is spoken as a CLOSE, not as a live price', () => {
+    // Observed: "the market is closed" in one sentence and "NVDA is at 228.86" in the next.
+    assert.match(PROMPT, /\*\*And SAY which price it is\.\*\*/)
+    assert.match(PROMPT, /never \*"NVDA is at 228\.86"\*/)
+    assert.match(PROMPT, /A number in the present tense is a\s+number somebody may act on/)
+})
+
+test('an earnings date inside the horizon is DECIDED, and the plan says the same thing', () => {
+    assert.match(PROMPT, /exactly two honest\s+answers: be out before it, or hold through it/)
+    assert.match(PROMPT, /`valid_until` ahead of the date/)
+    assert.match(PROMPT, /deciding nothing is how a\s+plan ends up straddling/)
+})
+
+test('the earnings DATE comes from get_earnings, not from a window that may exclude it', () => {
+    // The live flip-flop: the calendar was asked about a window ending before the date, and the
+    // empty answer was read as evidence the date was wrong.
+    assert.match(PROMPT, /\*\*`get_earnings` for the date\*\*/)
+    assert.match(PROMPT, /It is not evidence the date is wrong/)
+})
+
+test('the model is told that some answers arrive already settled, by a press', () => {
+    assert.match(PROMPT, /Some answers arrive as a PRESS, already recorded/)
+    assert.match(PROMPT, /The `<build>` tag is for the answers that arrive as WORDS/)
+})
+
+test('the document has one H1, and the beats are subsections of the opening turn', () => {
+    const h1s = [...PROMPT.matchAll(/^# (?!#)(.+)$/gm)].map(m => m[1])
+    assert.deepEqual(h1s, ['Mentor — Trade Assistant'], 'a stray H1 reads as a second document')
+    assert.match(PROMPT, /### Beat one/)
+    assert.match(PROMPT, /### Beat two/)
+})

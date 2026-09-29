@@ -1158,3 +1158,25 @@ At the summary stage, `settled: …,size` and `qty: -`, `money: -`. Three causes
   is live).
 - Earnings framing drifts turn to turn ("pre-earnings swing" vs the expiry reasoning), even though
   the retraction bug itself is fixed at the tool.
+
+## Prompt pass (2026-09-29) — the two blemishes the live builds left
+Both were fixed at their source rather than by adding an instruction on top:
+
+- **A shut market quoted as a live price.** "The market is closed" in one sentence and "NVDA is at
+  228.86" in the next is the same mistake with a disclaimer attached. `Live before levels` now
+  carries the speech rule: when the market is shut the newest number is a CLOSE with a date, and it
+  is spoken as one — a number in the present tense is a number somebody may act on.
+- **Earnings framing drifting turn to turn.** Two causes. The prompt sent the model to
+  `get_earnings_calendar` for ONE ticker's date, which is the wrong tool (its own description says
+  to prefer `get_earnings`) and is how a window ending before the date became "evidence" the date
+  was wrong. And nothing said what to DO about an event inside the horizon, so it was mentioned
+  every turn and decided never. It is now a decision with exactly two honest answers — out before
+  it, or hold through it — which must then be reflected in `valid_until` / `time_exit`.
+
+Also in the pass: the `<build>` tag section now says some answers arrive as a PRESS and are already
+recorded (the cards settle server-side before the model reads the turn), and two stray H1 headings
+I introduced mid-document became subsections.
+
+**Verified live on the same conditions that produced both defects:** "Monday's September 28 close of
+$228.86", and "Next earnings … November 18, 2026; I'd plan to be out beforehand, with the setup
+expiring before then." Five new prompt-contract tests; suite 3709/0.
