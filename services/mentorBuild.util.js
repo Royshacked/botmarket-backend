@@ -648,6 +648,66 @@ export function entryProblems(entries) {
     return out
 }
 
+// ─── The user's own moves, authored by the client ─────────────────────────────
+
+const MAX_USER_OPS = 4
+
+/**
+ * Ops the CLIENT authored, because the user pressed something.
+ *
+ * The difference from `sanitizeBuildOps` is provenance, and it is the whole point. A `<build>` tag
+ * is the model's REPORT that the user agreed — an inference from prose, and the first live run
+ * showed it is not dependable: five builds, five failures to settle the opening turn on the turn
+ * the user said yes. A press is not an inference. The client knows exactly which button was hit,
+ * so it says so, and the server settles without asking a model to notice anything.
+ *
+ * They are still validated like any other op — ordering still applies, and a press cannot settle a
+ * stage whose predecessors are open.
+ */
+export function sanitizeUserOps(raw) {
+    return (Array.isArray(raw) ? raw : [])
+        .slice(0, MAX_USER_OPS)
+        .map(op => sanitizeBuildOps(op))
+        .filter(Boolean)
+        .map(op => ({ ...op, source: 'user' }))
+}
+
+/** Apply the presses, in order, before the model sees anything. Returns the build and what took. */
+export function applyUserOps(build, ops = []) {
+    let next = build
+    const settled = []
+    for (const op of ops) {
+        const r = applyUserOp(next, op)
+        next = r.build
+        settled.push(...r.accepted)
+    }
+    return { build: next, settled }
+}
+
+function applyUserOp(build, op) {
+    const { build: next, accepted, refused } = applyBuildOps(build, op)
+    // A refused PRESS is a bug in the client, not a model slip: it offered a button for something
+    // the ledger will not accept. Logged by the caller through `refused`, same as any other.
+    return { build: next, accepted, refused }
+}
+
+/**
+ * What the UI needs to draw a confirm card: the stage, whether it is waiting on the user, and the
+ * values that were put to them. Derived here so the client never has to know what a stage is.
+ */
+export function gateView(build) {
+    const name = activeName(build)
+    const at   = firstUnsettled(name)
+    if (!name || !at) return null
+    return {
+        asset:    name.asset,
+        stage:    at.stage,
+        awaiting: at.awaiting,
+        fields:   at.fields,
+        values:   Object.fromEntries(at.fields.map(f => [f, claimOf(name, f)?.value ?? null])),
+    }
+}
+
 // ─── The ledger owns the flow, the draft owns the content ─────────────────────
 
 /** The three fields the ledger and the worksheet both hold, and what each of them calls it. */

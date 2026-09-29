@@ -16,7 +16,7 @@ import { summarizeTrade, applySizing } from '../mentorSummary.util.js'
 import {
     normalizeBuild, sanitizeBuildOps, applyBuildOps, claimsFromDraft, settledConflicts,
     normalizeSpans, spanIds, normalizeEntries, entryIds, entryProblems, fieldsClearedBy,
-    recordReads, ALWAYS_REFETCH,
+    recordReads, ALWAYS_REFETCH, sanitizeUserOps, applyUserOps, gateView,
     activeName, stageOf, firstUnsettled, isWaived, STAGES,
 } from '../mentorBuild.util.js'
 import { logger } from '../logger.service.js'
@@ -129,12 +129,22 @@ async function chatStream({
         toolHandlers[name] = async (...args) => { readThisTurn.push(name); return fn(...args) }
     }
 
-    const systemPrompt  = _buildSystemPrompt(chatState, accounts, mainAccountId, audience, seed)
+    // THE USER'S PRESSES, APPLIED FIRST. A button is not an inference: the client knows what was
+    // pressed, so the ledger moves before the turn is built and the model is TOLD what was agreed
+    // rather than asked to spot it in prose (which five live builds showed it does not).
+    const incoming = applyUserOps(
+        normalizeBuild(chatState?.build ?? chatState?.draft?.build),
+        sanitizeUserOps(chatState?.ops),
+    )
+    if (incoming.settled.length) logger.info(LOG, 'user ops settled', { fields: incoming.settled })
+    const turnState = { ...chatState, build: incoming.build }
+
+    const systemPrompt  = _buildSystemPrompt(turnState, accounts, mainAccountId, audience, seed)
     // The venue (mode / broker / accounts / free cash) rides the last USER message rather than
     // the system prompt: free cash moves whenever anything fills, so a volatile system block
     // would sit ahead of the whole conversation in the cache prefix. See buildVenueSection.
     const builtMessages = attachTurnContext(
-        attachTurnContext(_buildMessages({ messages, userPrompt }), _buildTurnContext(chatState, clientTime)),
+        attachTurnContext(_buildMessages({ messages, userPrompt }), _buildTurnContext(turnState, clientTime, incoming.settled)),
         await _venueSection(userId))
 
     // Coverage is CUMULATIVE across the conversation: the model re-states everything it has read,
@@ -225,7 +235,7 @@ async function chatStream({
     const entries = emittedEntries
         ?? (reopened.has('entries') ? null : normalizeEntries(carryGates?.entries, spanIds(spans)))
 
-    const priorBuild = recordReads(normalizeBuild(chatState?.build ?? chatState?.draft?.build), readThisTurn)
+    const priorBuild = recordReads(incoming.build, readThisTurn)
     const { build, refused, cleared } = applyBuildOps(priorBuild, {
         asset: normalized?.asset || chatState?.active_asset || '',
         derived: {
@@ -329,6 +339,8 @@ async function chatStream({
         // Returned at the top level as well as on the draft: harmless today (the client ignores what
         // it does not know) and the seam a future frontend uses to carry the ledger on its own.
         build,
+        // What the UI draws a confirm card from, so the client never has to know what a stage is.
+        ...(gateView(build) ? { gate: gateView(build) } : {}),
         ...(carrier ? { setup: carrier, readiness } : {}),
         // Absent until there is a second name, so an ordinary one-name build sends nothing new.
         ...(Object.keys(drafts).length > 1 ? { drafts } : {}),
@@ -516,18 +528,45 @@ Open on it: say the name, relay Argus's read in a sentence rather than restating
  * carry-forward rule and the problems block: an instruction separated from the data it governs is
  * how a prompt quietly stops meaning what it says.
  */
-export function _buildTurnContext(chatState, clientTime = null) {
+export function _buildTurnContext(chatState, clientTime = null, justSettled = []) {
+    // THE WORKSHEET, WITHOUT WHAT IS ALREADY WRITTEN OUT ABOVE IT. `build`, `spans`, `entries` and
+    // `summary` each have their own section in prose; dumping them again as JSON paid for them
+    // twice and buried the instructions under a wall of fields.
+    const { build: _b, spans: _s, entries: _e, summary: _m, ...plan } = chatState?.draft ?? {}
     const draft = chatState?.draft
-        ? `\nSetup so far (carry every settled field forward; change only what's discussed):\n${JSON.stringify(chatState.draft, null, 2)}${_buildProblemsSection(chatState.draft)}`
+        ? `\nSetup so far (carry every settled field forward; change only what's discussed):\n${JSON.stringify(plan, null, 2)}${_buildProblemsSection(chatState.draft)}`
         : ''
 
     const covered = Array.isArray(chatState?.coverage) && chatState.coverage.length
         ? chatState.coverage.join(', ')
         : 'nothing yet'
 
+    // ORDER IS AN INSTRUCTION. The ledger goes LAST, closest to where the model starts writing. It
+    // used to sit above the worksheet dump, so the final thing read before generating was a page of
+    // JSON rather than "they agreed — settle it", and five live builds re-asked a question the user
+    // had already answered.
     return `---
 ${buildTimeSection(clientTime, 'active_from / valid_until')}
-COVERAGE SO FAR: ${covered}. Re-state these in every <coverage> tag plus anything new you read this turn.${_buildLedgerSection(chatState)}${_buildMoneySection(chatState?.draft)}${draft}`
+COVERAGE SO FAR: ${covered}. Re-state these in every <coverage> tag plus anything new you read this turn.${draft}${_buildMoneySection(chatState?.draft)}${_buildLedgerSection(chatState)}${_buildPressSection(justSettled, chatState)}`
+}
+
+/**
+ * WHAT THE USER JUST PRESSED. Not a reading of their words — the client said so, because they hit a
+ * button, and the server has already recorded it. Stated out loud so the model does not re-ask a
+ * question that is now answered or re-propose a value that is now settled.
+ */
+export function _buildPressSection(justSettled = [], chatState = null) {
+    if (!justSettled.length) return ''
+    const build = normalizeBuild(chatState?.build ?? chatState?.draft?.build)
+    const next  = firstUnsettled(activeName(build))
+    return '\n\nTHE USER JUST PRESSED THE CONFIRM BUTTON. This is not a reading of their words — the'
+        + ` client told the server which button, and the ledger ALREADY RECORDS IT: ${justSettled.join(', ')} are SETTLED.`
+        + `\n  They answered the pacing question by pressing it too: ${build.waiver
+            ? 'run all the way to sizing, so do not stop at the two gates.'
+            : 'stop at the checkpoints, so show them each gate as you reach it.'}`
+        + '\n  NOTHING about that stage is outstanding. Do not say that it is, do not ask for it again,'
+        + ' and do not repeat the values back as a question.'
+        + (next ? `\n  Your job this turn is the NEXT stage — ${next.stage} — and nothing else.` : '')
 }
 
 /**

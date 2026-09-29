@@ -6,7 +6,7 @@ import {
 } from '../../services/mentorBuild.util.js'
 import { applySizing } from '../../services/mentorSummary.util.js'
 import { normalizeSetup, allowedVerdicts } from '../../services/setup.schema.js'
-import { mentorAgentService, emptyMentorState, _mergeDrafts } from '../../services/agents/mentor.agent.service.js'
+import { mentorAgentService, emptyMentorState, _mergeDrafts, _buildTurnContext } from '../../services/agents/mentor.agent.service.js'
 
 // The code review of feat/mentor-flow-v2 (2026-09-29) found eight gaps that 3671 passing tests did
 // not. Every one of them is here, driven the way the REAL client drives it — the lesson of finding
@@ -234,4 +234,77 @@ test('the read record survives the round trip through the client', async () => {
     assert.equal(out.build.turn, 1)
     const second = await turn('and?', { active_asset: 'NVDA', draft: out.setup, coverage: [] })
     assert.equal(second.build.turn, 2, 'the counter is not reset by the client')
+})
+
+// ─── The press, not the prose ─────────────────────────────────────────────────
+// The durable answer to the one defect the live smoke could not fix with prompting: the client
+// knows what was pressed, so the ledger moves BEFORE the model reads the turn.
+
+import { sanitizeUserOps, applyUserOps, gateView } from '../../services/mentorBuild.util.js'
+import { _buildPressSection } from '../../services/agents/mentor.agent.service.js'
+
+test('a press settles deterministically, with no model involved at all', async () => {
+    const proposed = await turn(`<setup>${JSON.stringify(SETUP())}</setup>`)
+    assert.equal(stageOf(activeName(proposed.build)), 'opening', 'proposed, not settled')
+
+    // The client sends what the user pressed. The model emits NOTHING this turn.
+    const confirmed = await turn('Right.', {
+        active_asset: 'NVDA',
+        draft: proposed.setup,
+        coverage: [],
+        ops: [{ settle: ['direction', 'horizon', 'lens'] }],
+    })
+    assert.equal(stageOf(activeName(confirmed.build)), 'spans', 'settled without a <build> tag')
+    assert.equal(activeName(confirmed.build).settled.direction, 'long')
+})
+
+test('a press is validated like anything else — it cannot skip a stage', () => {
+    const ops = sanitizeUserOps([{ settle: ['size'] }])
+    const { build, settled } = applyUserOps(upsertName(emptyBuild(), 'NVDA'), ops)
+    assert.deepEqual(settled, [], 'nothing claimed for size, and the opening is still open')
+    assert.equal(stageOf(activeName(build)), 'opening')
+})
+
+test('a press is always the USER — a client cannot claim to be Argus', () => {
+    const [op] = sanitizeUserOps([{ claim: { lens: 'smc' }, source: 'argus' }])
+    assert.equal(op.source, 'user')
+})
+
+test('junk from a client is dropped, not trusted for being client-side', () => {
+    assert.deepEqual(sanitizeUserOps([{ settle: ['vibes'] }, 'yes', null]), [])
+    assert.deepEqual(sanitizeUserOps(null), [])
+    assert.equal(sanitizeUserOps([{ settle: ['direction'] }])[0].settle[0], 'direction')
+})
+
+test('the model is TOLD what was pressed, so it does not ask again', async () => {
+    const proposed = await turn(`<setup>${JSON.stringify(SETUP())}</setup>`)
+    const text = _buildPressSection(['direction', 'horizon', 'lens'], { draft: proposed.setup })
+    assert.match(text, /THE USER JUST PRESSED THE CONFIRM BUTTON/)
+    assert.match(text, /ALREADY RECORDS IT/)
+    assert.match(text, /NOTHING about that stage is outstanding/)
+    // The press answers the pacing question too — that is what the button means.
+    assert.match(text, /stop at the checkpoints/)
+    assert.equal(_buildPressSection([]), '', 'and nothing is said when nothing was pressed')
+    assert.ok(proposed.gate, 'the card has something to draw')
+})
+
+test('the gate view tells the client what to draw without teaching it what a stage is', async () => {
+    const out = await turn(`<setup>${JSON.stringify(SETUP())}</setup>`)
+    assert.deepEqual(out.gate, {
+        asset: 'NVDA', stage: 'opening', awaiting: true,
+        fields: ['direction', 'horizon', 'lens'],
+        values: { direction: 'long', horizon: 'swing', lens: 'smc' },
+    })
+    assert.equal(gateView(emptyBuild()), null)
+})
+
+test('the ledger is the LAST thing in the turn context, not buried under the worksheet', async () => {
+    const out = await turn(`<setup>${JSON.stringify(SETUP())}</setup>`)
+    const ctx = _buildTurnContext({ active_asset: 'NVDA', draft: out.setup, coverage: [] })
+    assert.ok(ctx.lastIndexOf('BUILD LEDGER') > ctx.lastIndexOf('Setup so far'),
+        'the instruction has to be the last thing read before the model writes')
+    // And the worksheet no longer repeats what the prose sections already say.
+    const plan = ctx.slice(ctx.indexOf('Setup so far'), ctx.indexOf('BUILD LEDGER'))
+    assert.equal(plan.includes('"build"'), false)
+    assert.equal(plan.includes('"summary"'), false)
 })

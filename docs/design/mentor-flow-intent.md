@@ -1080,7 +1080,7 @@ venue line. **Nothing here was findable by a unit test**, and one of it is still
    "corrected" a date that was right. Fixed in the TOOL: an empty filtered window now says what it
    does and does not mean.
 
-### STILL OPEN — the one that matters
+### ~~STILL OPEN~~ — RETRACTED, see below
 **The model does not reliably settle the opening turn.** Across five runs it emitted the settle tag
 zero times on the confirmation turn: first no tag at all, then — once the tag was made mandatory
 like `<asset>` — a dutiful `<build>{}</build>` while re-reading twelve tools. The tool re-reading is
@@ -1098,3 +1098,36 @@ CLIENT tells the server what was agreed and the server settles deterministically
 becomes a fallback rather than the mechanism. Until then a user may be asked the same question
 twice, which is a poor first impression of the desk but harms nothing — the ledger simply stays
 open, and nothing is recorded that the user did not agree to.
+
+## CORRECTION (2026-09-29, same day): the "model never settles" finding was WRONG
+It was the SMOKE HARNESS, not the desk. `buildDeskMessages` ignores `userPrompt` when `messages`
+is a non-empty array, because the real client puts the new user turn INSIDE `messages`. The
+harness appended the assistant's reply to `messages` and passed the user's words separately — so
+from turn two onward **the user's reply was dropped on the floor**, and the turn context was
+attached to the model's own last message.
+
+The model was therefore asked to continue from its own sentence with no answer in front of it. Its
+"failure" — re-proposing the same three values and asking again — was the correct response to what
+it actually received. Five runs of evidence, all of it measuring the harness.
+
+**Re-run with a correct harness, prose only, NO ops:** settles `direction`/`horizon`/`lens`,
+advances to `spans`, calls nine tools all belonging to the NEW stage, re-reads none of the news,
+fundamentals or macro, and returns two candidate spans as a table. The flow works as designed.
+
+### What survives, and why it was still worth doing
+- **The `awaiting` state** — the ledger genuinely lacked a state between blank and settled, and the
+  turn context genuinely said "still blank" about work already done. Right on its own terms.
+- **The read record** (`recordReads`) — "fetch once" was a rule about a fact nothing recorded. Still
+  true, still worth having, and now the context can say what was read and when.
+- **The earnings-window fix** — that one was real and happened inside a single model turn: an empty
+  filtered window was read as evidence against a date outside it.
+- **Recency and de-duplication** — the ledger now sits last, and the worksheet dump no longer
+  repeats `build`/`spans`/`entries`/`summary` in JSON above their own prose sections.
+- **The press path** (`chatState.ops` → server settles before the model reads anything, plus the
+  `StageConfirm` card). Its JUSTIFICATION changed: not "the model cannot do this" but "a button
+  should not depend on a model noticing anything". It is how every other confirmation in this app
+  works, it is deterministic, and it is tested — but it was not the necessity I claimed.
+
+**The lesson worth keeping:** a test harness that drives the desk differently from the real client
+does not test the desk. The harness never sent what the frontend sends, and five runs of confident
+diagnosis followed from that one line.
