@@ -484,3 +484,47 @@ test('the document has one H1, and the beats are subsections of the opening turn
     assert.match(PROMPT, /### Beat one/)
     assert.match(PROMPT, /### Beat two/)
 })
+
+// ─── The deeper read (2026-09-29): contradictions between old and new sections ──
+// Eight edits in one day left sections that each read correctly and disagreed with each other.
+
+test('a user with no name is sent to ARGUS, the scanning desk', () => {
+    // Roy corrected this in the first minute of the design conversation; the prompt still said Axl.
+    assert.match(PROMPT, /\*\*send them to Argus\*\*, the scanning desk/)
+    assert.doesNotMatch(PROMPT, /point them back to Axl/)
+})
+
+test('"levels, not bands" no longer contradicts the trigger entry', () => {
+    const section = PROMPT.slice(PROMPT.indexOf('## Levels, not bands'), PROMPT.indexOf('### Name the way in'))
+    assert.match(section, /The one entry that is\s+not a level is the TRIGGER entry/)
+    assert.match(section, /an entry that is a trigger as/)
+})
+
+test('scale-in is legs inside one scenario; rival scenarios are alternatives', () => {
+    // The old line said both at once: "multiple entry levels = scale-in ... whichever price
+    // reaches first acts", which describes alternatives while calling it scaling in.
+    const section = PROMPT.slice(PROMPT.indexOf('## Levels, not bands'), PROMPT.indexOf('### Name the way in'))
+    assert.match(section, /Two entry legs inside ONE scenario are a scale-in/)
+    assert.match(section, /BOTH are meant to fill/)
+    assert.match(section, /two\s+scenarios, which are RIVALS/)
+    assert.doesNotMatch(section, /Multiple entry levels = scale-in/)
+})
+
+test('the Generate gate knows about trigger entries and server-side sizing', () => {
+    const gate = PROMPT.slice(PROMPT.indexOf('## Ready to Generate'))
+    assert.match(gate, /an\s+entry \(a price, or a trigger in words\)/)
+    assert.match(gate, /a size THE USER CHOSE/)
+    assert.match(gate, /they give the unit and the number, it gives the quantity/)
+    assert.doesNotMatch(gate, /a quantity THE USER GAVE\s+YOU/)
+})
+
+test('"the tag is the move" is scoped to answers that arrive as words', () => {
+    assert.match(PROMPT, /When the answer comes in WORDS, the tag is the move/)
+    assert.match(PROMPT, /When they PRESSED instead, it is already recorded/)
+})
+
+test('the ledger section counts its own rules correctly', () => {
+    const intro = PROMPT.slice(PROMPT.indexOf('things about the ledger'), PROMPT.indexOf('Three stages are the user'))
+    const bullets = (intro.match(/^- \*\*/gm) ?? []).length
+    assert.match(PROMPT, new RegExp(`${['', 'One', 'Two', 'Three', 'Four', 'Five'][bullets]} things about the ledger`))
+})

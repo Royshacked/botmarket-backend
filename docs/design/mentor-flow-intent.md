@@ -1180,3 +1180,33 @@ I introduced mid-document became subsections.
 **Verified live on the same conditions that produced both defects:** "Monday's September 28 close of
 $228.86", and "Next earnings … November 18, 2026; I'd plan to be out beforehand, with the setup
 expiring before then." Five new prompt-contract tests; suite 3709/0.
+
+## The deeper read (2026-09-29) — what eight edits in one day left behind
+Reading all 1,195 lines as one document, rather than as the eight places I had touched. Every
+finding is the same shape: a section that reads correctly on its own and disagrees with another.
+
+1. **Argus.** The very first correction of the design conversation — *Mentor turns the user to
+   Argus* — was logged as fix #1 and never applied. The prompt still said "point them back to Axl".
+   Ten hours of building on top of a doc whose first line was never done.
+2. **"Levels, not bands" contradicted the trigger entry.** It opens "Every level you author is an
+   exact price. Entry, stop, target — one number each", which is the opposite of what the entry
+   section now says. Carved out, with the trigger shape shown beside the price shape.
+3. **Scale-in was described as alternatives.** "Multiple entry levels = scale-in. All are armed;
+   whichever price reaches first acts" — which is scaling in by name and rivalry by behaviour, and
+   it collides with the entries stage. Now: legs inside ONE scenario are the scale-in and both are
+   meant to fill; rival SCENARIOS are the alternatives and the first to fulfil takes the position.
+4. **The Generate gate predated both changes**: it demanded "an entry price" (a trigger entry has
+   none) and "a quantity THE USER GAVE YOU" (the user gives a unit and a number; the server gives
+   the quantity).
+5. **"The tag is the move" became half-false** the moment the press path landed — scoped now to
+   answers that arrive as words.
+6. **"Three things about the ledger" over four bullets** — I added the fourth.
+7. **`get_chart` "once per asset/timeframe"** ruled out the second chart the spans gate exists to
+   draw. Excepted.
+
+Six new prompt-contract tests pin the ones a future edit could quietly undo. Suite 3715/0.
+
+**Not done, and deliberately:** a tone/redundancy pass over the ~700 lines this session never
+touched (conditions, validity, the worksheet, the flip test). They are coherent with the new flow —
+that was checked — but they carry the density of the Kairos fork and would read better shorter.
+That is a separate job, on a fresh read, not at the end of a ten-hour session.
