@@ -193,6 +193,36 @@ export async function runOpenAICompatRead({
     }
 }
 
+/**
+ * ONE call, no tools, optionally with a picture — the compat twin of `callAnthropicOnce`.
+ *
+ * It exists so a one-shot read can follow the HOUSE MODEL wherever it points. Until now the chart
+ * vision read was pinned to the Anthropic default while every desk turn ran on the house pick, so
+ * the pictures quietly cost more than the conversation did (measured 2026-09-29: $0.26 of vision
+ * against $0.19 of desk).
+ *
+ * The image translation is the same one `toToolMessages` uses — a base64 PNG becomes an
+ * `image_url` data URI part, which is how every OpenAI-shaped vendor takes one.
+ */
+export async function callOpenAICompatOnce({
+    endpoint = 'openrouter', wire, model, systemText, userText, image = null,
+    maxTokens = 1024, onUsage, client = null,
+}) {
+    client ??= _clientFor(endpoint)
+    const content = image
+        ? [{ type: 'text', text: userText }, { type: 'image_url', image_url: { url: `data:image/png;base64,${image}` } }]
+        : userText
+
+    const res = await client.chat.completions.create({
+        model: wire,
+        messages: [{ role: 'system', content: systemText }, { role: 'user', content }],
+        max_tokens: maxTokens,
+    })
+    if (!servedModelMatches(res?.model, wire)) throw new Error(`provider served "${res?.model}" for "${wire}"`)
+    onUsage?.(toAnthropicUsage(res?.usage), model)
+    return String(res?.choices?.[0]?.message?.content ?? '')
+}
+
 // ─── The desks' streaming loop ─────────────────────────────────────────────────
 // The streaming twin of streamAnthropicWithTools, same signature, for a chat desk on a non-Anthropic
 // candidate (llmModels MODELS, provider 'openai-compat'). Same tag suppressor (services/llmStream.util

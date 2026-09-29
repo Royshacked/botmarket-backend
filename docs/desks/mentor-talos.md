@@ -435,6 +435,22 @@ on an open position, `_isTimeExit` makes the wake reason `time_exit`, which is i
 sleeping through it costs the user exactly what they asked for). The in-position prompt says
 `exit_now` is the default answer to it. Talos still never executes — it is a card the user confirms.
 
+### The picture follows the house model (2026-09-29)
+
+`claudeVision` — the in-tool structure read behind `get_orderblocks` and `get_false_breaks` — was
+pinned to `DEFAULT_MODEL` while every desk turn ran on the admin's house pick. Once the house moved
+to Luna that made the PICTURES the most expensive thing in a build: measured on one session,
+**$0.26 of Sonnet vision against $0.19 of Luna desk**.
+
+It now resolves the house `chatModel` per call (`modelRoute` carries the endpoint and wire slug a
+one-shot needs, `callOpenAICompatOnce` is the compat twin of `callAnthropicOnce`, image and all).
+Any failure to resolve falls back to the default, because a vision read that cannot pick a model is
+a structure read that silently does not happen.
+
+**The trade-off is stated, not hidden:** the old comment said "the cheap model's eyes are not good
+enough for structure". That judgment now belongs to whoever sets the house model — one selector,
+everything on it — and an order-block read is exactly where a weak vision model would show.
+
 ### The sweep — tier 0, and it must stay free
 
 `guardSweep.service` (`GUARD_SWEEP_INTERVAL_MS`, default 30s) prices every symbol with an armed guard

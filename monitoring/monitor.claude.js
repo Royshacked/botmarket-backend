@@ -12,7 +12,9 @@
  */
 
 import { callAnthropicOnce } from '../providers/anthropic.provider.js'
-import { CHEAP_MODEL, DEFAULT_MODEL } from '../services/llmModels.js'
+import { callOpenAICompatOnce } from '../providers/openaiCompat.provider.js'
+import { CHEAP_MODEL, DEFAULT_MODEL, modelRoute } from '../services/llmModels.js'
+import { getHouseModels } from '../services/houseModels.service.js'
 import { extractFirstJSON } from './parsers/llmReply.parser.js'
 
 // The one call, behind a seam. The outage tests used to simulate "no model" by blanking
@@ -28,11 +30,46 @@ export function _setOneShot(fn) {
     return () => { _once = prev }
 }
 
+// The same seam for the non-Anthropic path, so a test can hold the vision read still whichever
+// model the house is on.
+let _onceCompat = callOpenAICompatOnce
+export function _setCompatOneShot(fn) {
+    const prev = _onceCompat
+    _onceCompat = fn ?? callOpenAICompatOnce
+    return () => { _onceCompat = prev }
+}
+
 // A condition parse and a YES/NO verdict are reading, not modelling — the cheap model, as before.
-// A chart is a VISION read, and the cheap model's eyes are not good enough for structure; the
-// desks' default model reads the picture.
-const PARSE_MODEL  = CHEAP_MODEL
-const VISION_MODEL = DEFAULT_MODEL
+const PARSE_MODEL = CHEAP_MODEL
+
+/**
+ * WHICH MODEL READS THE PICTURE: the HOUSE pick, the same one every desk turn runs on.
+ *
+ * It used to be pinned to `DEFAULT_MODEL` while the desks followed the admin's selection, which
+ * made the vision reads the most expensive thing in a build the moment the house moved to a
+ * cheaper model — measured on 2026-09-29, $0.26 of Sonnet vision against $0.19 of Luna desk, so
+ * the pictures cost more than the conversation. One selector, everything on it (houseModels).
+ *
+ * Falls back to the default on any failure, because a vision read that cannot resolve a model is
+ * a structure read that silently does not happen.
+ */
+async function _visionRoute() {
+    try {
+        const { chatModel } = await _houseModels()
+        return modelRoute(chatModel)
+    } catch {
+        return modelRoute(DEFAULT_MODEL)
+    }
+}
+
+// The house lookup behind a seam, like the two one-shots above: a test that wants the vision read
+// on a particular model says so here rather than writing to a database to find out.
+let _houseModels = getHouseModels
+export function _setHouseModelsReader(fn) {
+    const prev = _houseModels
+    _houseModels = fn ?? getHouseModels
+    return () => { _houseModels = prev }
+}
 
 /**
  * Call Claude and extract the first JSON object from the response.
@@ -64,5 +101,12 @@ export async function claudeText(systemPrompt, userMessage) {
  * @returns {Promise<string>}
  */
 export async function claudeVision(systemPrompt, userMessage, imageBase64, { maxTokens = 64, onUsage } = {}) {
-    return _once({ model: VISION_MODEL, systemPrompt, user: userMessage, image: imageBase64, maxTokens, onUsage })
+    const route = await _visionRoute()
+    if (route.provider === 'anthropic') {
+        return _once({ model: route.model, systemPrompt, user: userMessage, image: imageBase64, maxTokens, onUsage })
+    }
+    return _onceCompat({
+        endpoint: route.endpoint, wire: route.wire, model: route.model,
+        systemText: systemPrompt, userText: userMessage, image: imageBase64, maxTokens, onUsage,
+    })
 }

@@ -54,6 +54,11 @@ const MODELS = {
 function _candidate(id, label, endpoint, wire) {
     return { [id]: {
         provider: 'openai-compat', label, adminOnly: true, webSearch: null,
+        // Carried as DATA as well as bound into streamFn: the streaming loop never needs to know
+        // them, but a one-shot read does (the vision call has no loop to bind them into), and a
+        // second copy of "which slug at which endpoint" is exactly the drift this registry exists
+        // to prevent.
+        endpoint, wire,
         streamFn: (args) => streamOpenAICompatWithTools({ ...args, endpoint, wire }),
     } }
 }
@@ -76,6 +81,16 @@ export function isAllowedModel(model) {
 /** A model only an admin may run a desk on — a candidate under evaluation. */
 export function isAdminOnlyModel(model) {
     return isAllowedModel(model) && MODELS[model].adminOnly === true
+}
+
+/**
+ * How to REACH a model for a one-shot call: its provider, and for a non-Anthropic one the endpoint
+ * and wire slug. Unknown ids resolve to the default, so a bad value never reaches a provider.
+ */
+export function modelRoute(id) {
+    const model = isAllowedModel(id) ? id : DEFAULT_MODEL
+    const m = MODELS[model]
+    return { model, provider: m.provider, endpoint: m.endpoint ?? null, wire: m.wire ?? null }
 }
 
 /**
