@@ -9,3 +9,4 @@ scratch/
 _tmp_*
 _edit.mjs
 *.backup*.md
+_smoke.tmp.mjs
