@@ -49,6 +49,15 @@ rule()
 line(`\nREPLY (${res.reply.length} chars, ${secs}s, ${tools.length} tool calls)\n`)
 line(res.reply.slice(0, 1200) + (res.reply.length > 1200 ? '\n…' : ''))
 
+// The WHOLE reply, on disk. The preview above cuts at 1200 characters, which lands inside
+// Phase 1 — so every question about how the desk REASONED (why this grain, why this basis)
+// was being answered by inference rather than by reading what it actually said.
+if (process.env.REPLY_OUT) {
+    const { writeFileSync } = await import('node:fs')
+    writeFileSync(process.env.REPLY_OUT, res.reply, 'utf8')
+    line(`  full reply written to ${process.env.REPLY_OUT}`)
+}
+
 rule()
 if (!res.tilt) {
     line('\n✗ NO <tilt> BLOCK EMITTED — the desk discussed but did not publish.')

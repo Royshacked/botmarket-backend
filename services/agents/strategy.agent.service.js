@@ -84,8 +84,45 @@ export async function _coverageBySector(deps = { listActiveBySector: coverageSer
     // argue from are broken out: one name is an anecdote, and printing every singleton would bury
     // the sector line it sits under. The rest stay counted in their sector, where they belong.
     const MIN_FOR_A_CLAIM = 3
+
+    /**
+     * What the book CONCLUDES about a bucket, not merely where it looks.
+     *
+     * Asked why it kept a call at sector grain, the desk answered: "the book provides coverage, not
+     * directional analyst conclusions, so it does not establish bottom-up support." It was reading a
+     * list of tickers. `bottom_up` is a claim about what our analysts think, so the mix has to be on
+     * the line or the basis cannot honestly be chosen.
+     *
+     * The LEAN is stated rather than left to be counted: a reader skimming eleven sectors and ten
+     * industries should not have to do arithmetic to see which way a bucket points.
+     */
+    const RATING_ORDER = ['strong_buy', 'buy', 'hold', 'sell', 'strong_sell']
+    const BULLISH = new Set(['strong_buy', 'buy'])
+    const BEARISH = new Set(['sell', 'strong_sell'])
+
+    const verdict = (rs) => {
+        const counted = rs.filter(r => r.rating)
+        if (!counted.length) return 'no ratings yet'
+        const tally = RATING_ORDER
+            .map(k => [k, counted.filter(r => r.rating === k).length])
+            .filter(([, n]) => n > 0)
+            .map(([k, n]) => `${n} ${k.replace('_', ' ')}`)
+            .join(', ')
+        const bull = counted.filter(r => BULLISH.has(r.rating)).length
+        const bear = counted.filter(r => BEARISH.has(r.rating)).length
+        // A MAJORITY of the covered names, not merely more than the other side. "1 buy, 2 hold"
+        // has no bears and would otherwise read BULLISH on a single opinion — a lean this desk
+        // would then cite as bottom-up support for an overweight. Holds are not agreement.
+        const need = Math.ceil(counted.length / 2)
+        const lean = (bull >= need && bull > bear) ? 'BULLISH'
+            : (bear >= need && bear > bull) ? 'BEARISH'
+            : 'SPLIT'
+        return `${tally} — ${lean}`
+    }
+
     const line = (bucket, rs, indent = 2) =>
-        `${' '.repeat(indent)}${bucket.padEnd(34 - indent)} ${rs.length} name${rs.length === 1 ? '' : 's'} — ${rs.map(r => r.symbol).join(', ')}`
+        `${' '.repeat(indent)}${bucket.padEnd(34 - indent)} ${String(rs.length).padStart(2)} name${rs.length === 1 ? ' ' : 's'}`
+        + `  ${verdict(rs).padEnd(34)} ${rs.map(r => r.symbol).join(', ')}`
 
     const covered = []
     for (const [sector, rs] of [...bySector.entries()].sort((a, b) => b[1].length - a[1].length)) {
@@ -108,7 +145,10 @@ export async function _coverageBySector(deps = { listActiveBySector: coverageSer
         uncovered.length ? `\nNo coverage at all in: ${uncovered.join(', ')}. A stance on these has no bottom-up support — say so.` : '',
         `\nAn industry listed above carries at least ${MIN_FOR_A_CLAIM} covered names, which is what makes`
         + ' `bottom_up` available at that grain. One that is not listed is not a gap in the market — it is'
-        + ' a gap in OUR book, and a stance taken there rests on something else.',
+        + ' a gap in OUR book, and a stance taken there rests on something else.'
+        + '\nThe lean is what our analysts CONCLUDED, not where they looked: a bucket reading BULLISH on six'
+        + ' names is bottom-up support for an overweight on that bucket, and a SPLIT one is not, however'
+        + ' many names it holds.',
     ].filter(Boolean).join('\n')
 }
 

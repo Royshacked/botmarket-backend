@@ -37,6 +37,10 @@ test('a malformed or empty block is null, never a half-built view', () => {
 })
 
 // ── the bottom-up cross-check ────────────────────────────────────────────────
+/** The one line the table gives a bucket. Assertions about a bucket belong here and not in the
+ *  whole block, where the closing paragraph also uses the words BULLISH and SPLIT. */
+const lineFor = (out, bucket) => out.split('\n').find(l => l.trim().startsWith(bucket)) ?? ''
+
 const BOOK = [
     { userId: 'u1', symbol: 'NVDA', sector: 'Technology' },
     { userId: 'u2', symbol: 'AMD',  sector: 'Technology' },
@@ -49,8 +53,10 @@ test('the cross-check reads the WHOLE institution’s book, not one user’s', a
     let asked = null
     const out = await _coverageBySector({ listActiveBySector: async (s) => { asked = s; return BOOK } })
     assert.deepEqual(asked, SECTORS, 'it asks about every sector')
-    assert.match(out, /Technology\s+2 names — NVDA, AMD/)
-    assert.match(out, /Energy\s+1 name — XOM/)
+    assert.match(lineFor(out, 'Technology'), /2 names/)
+    assert.match(lineFor(out, 'Technology'), /NVDA, AMD/)
+    assert.match(lineFor(out, 'Energy'), /1 name\b/)
+    assert.match(lineFor(out, 'Energy'), /XOM/)
 })
 
 test('sectors with NO coverage are named — silence would read as agreement', async () => {
@@ -82,8 +88,9 @@ const DEEP = [
 
 test('an industry deep enough to argue from is broken out under its sector', async () => {
     const out = await _coverageBySector({ listActiveBySector: async () => DEEP })
-    assert.match(out, /Technology\s+4 names/, 'the sector line still counts every name')
-    assert.match(out, /Semiconductors\s+3 names — NVDA, AVGO, TXN/)
+    assert.match(lineFor(out, 'Technology'), /4 names/, 'the sector line still counts every name')
+    assert.match(lineFor(out, 'Semiconductors'), /3 names/)
+    assert.match(lineFor(out, 'Semiconductors'), /NVDA, AVGO, TXN/)
 })
 
 test('a THIN industry is not broken out — one name is an anecdote, not a basis', async () => {
@@ -92,7 +99,7 @@ test('a THIN industry is not broken out — one name is an anecdote, not a basis
     const out = await _coverageBySector({ listActiveBySector: async () => DEEP })
     assert.doesNotMatch(out, /Software - Infrastructure/)
     assert.doesNotMatch(out, /Oil & Gas Integrated/)
-    assert.match(out, /Energy\s+1 name — XOM/, 'but the name is still counted in its sector')
+    assert.match(lineFor(out, 'Energy'), /XOM/, 'but the name is still counted in its sector')
 })
 
 test('the threshold is STATED, so a missing industry reads as our gap and not the market\'s', async () => {
@@ -101,11 +108,61 @@ test('the threshold is STATED, so a missing industry reads as our gap and not th
     assert.match(out, /a gap in OUR book/)
 })
 
+// ── what the book CONCLUDED ──────────────────────────────────────────────
+//
+// Asked why it kept a call at sector grain, the desk answered: "the book provides coverage, not
+// directional analyst conclusions, so it does not establish bottom-up support." It was reading a
+// list of tickers — the rating was fetched and dropped by the formatter. `bottom_up` is a claim
+// about what our analysts THINK, so the mix has to be on the line for the basis to be choosable.
+
+const rated = (bucket, ...ratings) => ratings.map((rating, i) => ({
+    symbol: `${bucket.slice(0, 3).toUpperCase()}${i}`, sector: 'Technology', industry: bucket, rating,
+}))
+
+test('the rating mix is on every line, with the lean stated', async () => {
+    const out = await _coverageBySector({ listActiveBySector: async () => rated('Semiconductors', 'buy', 'buy', 'buy') })
+    assert.match(out, /3 buy/)
+    assert.match(out, /BULLISH/)
+})
+
+test('a lean needs a MAJORITY, not merely more than the other side', async () => {
+    // "1 buy, 2 hold" has no bears. Counting it bullish would let one opinion out of three become
+    // bottom-up support for an overweight, which is the failure this threshold exists to stop.
+    const out = await _coverageBySector({ listActiveBySector: async () => rated('Computer Hardware', 'buy', 'hold', 'hold') })
+    const ln = lineFor(out, 'Computer Hardware')
+    assert.match(ln, /1 buy, 2 hold/)
+    assert.match(ln, /SPLIT/)
+    assert.doesNotMatch(ln, /BULLISH/)
+})
+
+test('holds are not agreement, and an all-hold bucket says so', async () => {
+    const out = await _coverageBySector({ listActiveBySector: async () => rated('Steel', 'hold', 'hold', 'hold') })
+    assert.match(out, /SPLIT/)
+})
+
+test('a bearish majority reads BEARISH — the lean cuts both ways', async () => {
+    const out = await _coverageBySector({ listActiveBySector: async () => rated('Gold', 'sell', 'sell', 'hold') })
+    assert.match(out, /2 sell/)
+    assert.match(out, /BEARISH/)
+})
+
+test('an unrated bucket says so rather than leaning on nothing', async () => {
+    const out = await _coverageBySector({ listActiveBySector: async () => rated('Copper', null, null, null) })
+    const ln = lineFor(out, 'Copper')
+    assert.match(ln, /no ratings yet/)
+    assert.doesNotMatch(ln, /BULLISH|BEARISH/)
+})
+
+test('the tool explains what the lean MEANS, so the basis can be chosen honestly', async () => {
+    const out = await _coverageBySector({ listActiveBySector: async () => rated('Semiconductors', 'buy', 'buy', 'buy') })
+    assert.match(out, /what our analysts CONCLUDED, not where they looked/)
+})
+
 test('a book with no industries at all still reads exactly as it did', async () => {
     // Every document carried only a sector before the backfill, and a half-migrated book must not
     // produce a broken table — it produces the old one.
     const out = await _coverageBySector({ listActiveBySector: async () => BOOK })
-    assert.match(out, /Technology\s+2 names — NVDA, AMD/)
+    assert.match(lineFor(out, 'Technology'), /NVDA, AMD/)
     assert.doesNotMatch(out, /^ {6}\S/m, 'nothing is indented as an industry')
 })
 

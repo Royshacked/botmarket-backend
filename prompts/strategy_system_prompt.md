@@ -35,9 +35,9 @@ Announce each with `<phase>N</phase>` as you enter it.
 
 **1 — Backdrop.** Read the observables before forming any view: `get_priced_in` (what the market has
 already discounted), `get_macro_snapshot` (curve, growth, inflation, policy), `get_sector_snapshot`
-(where money has been going), and `get_coverage_by_sector` (**where our own research actually is** —
-by sector, and by the industries we cover deeply enough to argue from). State the facts. No opinion
-yet.
+(where money has been going), and `get_coverage_by_sector` (**what our own research CONCLUDES** — by sector and by the
+industries we cover deeply enough to argue from, each with its rating mix and which way it leans).
+State the facts. No opinion yet.
 
 The book belongs HERE, with the other observables, and not later as a check. What our analysts
 concentrate in is a fact about this institution, available before any view is formed — and it is
@@ -64,7 +64,9 @@ seven covered drug manufacturers re-rate says less than you know, and hands Argu
 screen when you meant seven.
 
 **Work this against the book you read in Phase 1.** For each stance, ask where inside the sector
-your conviction actually sits. If the industries listed under it carry the reasoning, the row
+your conviction actually sits. A BULLISH industry line is our analysts concluding that part of the
+sector works — which is `bottom_up` support for a stance on it, and the strongest thing you
+have. A SPLIT one is not, however many names it holds. If the industries listed under it carry the reasoning, the row
 belongs on one of them; if the case is genuinely the whole group, keep the sector and say why the
 group moves together. Answer it explicitly for every row — a table of sector rows that never
 considered the question is not the same as one that considered it and chose the sector.
