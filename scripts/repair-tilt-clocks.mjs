@@ -50,7 +50,7 @@ else dns.setServers(['8.8.8.8', '1.1.1.1'])
 
 const { tiltService, normalizeTilt, carryReaffirmed } = await import('../api/strategy/tilt.service.js')
 const { gradeRow, totalContributionBp } = await import('../monitoring/tilt.assess.js')
-const { proxyFor, BENCHMARK_PROXY }  = await import('../services/entity/vocabulary.js')
+const { BENCHMARK_PROXY }  = await import('../services/entity/vocabulary.js')
 const { fetchLastPrice } = await import('../services/lastPrice.service.js')
 
 const apply     = process.argv.includes('--apply')
@@ -115,9 +115,9 @@ for (const doc of chain) {
         // the monitor backfills TODAY's price against a six-week-old call, would both be worse than
         // the wrong-but-visible figure already stored. So it is reported, not rewritten.
         if (!wasCarried && was.set_at && was.set_at !== doc.created_at) {
-            unreconstructable.set(r.sector, `its ${day(doc.created_at)} publish inherited a clock from the call before it`)
+            unreconstructable.set(r.bucket, `its ${day(doc.created_at)} publish inherited a clock from the call before it`)
         } else if (!wasCarried) {
-            unreconstructable.delete(r.sector)   // freshly and correctly stamped — the history restarts clean here
+            unreconstructable.delete(r.bucket)   // freshly and correctly stamped — the history restarts clean here
         }
 
         return {
@@ -137,11 +137,11 @@ const stored  = active.tilts ?? []
 
 // The replay must not have invented, dropped or re-sectored a stance — it only moves clocks.
 const sameSet = rebuilt.length === stored.length
-    && rebuilt.every(r => stored.some(s => s.sector === r.sector))
+    && rebuilt.every(r => stored.some(s => s.bucket === r.bucket))
 if (!sameSet) {
     line('✗ REFUSED — the replay did not reproduce the active view\'s sectors. Nothing written.')
-    line(`  stored:  ${stored.map(r => r.sector).join(', ')}`)
-    line(`  rebuilt: ${rebuilt.map(r => r.sector).join(', ')}\n`)
+    line(`  stored:  ${stored.map(r => r.bucket).join(', ')}`)
+    line(`  rebuilt: ${rebuilt.map(r => r.bucket).join(', ')}\n`)
     process.exit(1)
 }
 
@@ -157,10 +157,10 @@ for (const row of rebuilt) {
     // A stance the replay could not reconstruct keeps the clock and baseline it already has. It is
     // still re-graded, because refreshing a contribution against an UNCHANGED baseline is only what
     // the monitor does hourly anyway.
-    const keep = unreconstructable.has(row.sector)
-    const base = keep ? (stored.find(s => s.sector === row.sector) ?? row) : row
+    const keep = unreconstructable.has(row.bucket)
+    const base = keep ? (stored.find(s => s.bucket === row.bucket) ?? row) : row
 
-    const proxy     = proxyFor(row.sector)
+    const proxy     = row.proxy?.symbol ?? null
     const sectorNow = proxy ? await fetchLastPrice(proxy).catch(() => null) : null
     graded.push(gradeRow(base, { sectorNow, benchNow }, nowMs))
 }
@@ -172,19 +172,19 @@ line('sector                    set_at                  baseline                
 rule()
 let moved = 0
 for (const row of graded) {
-    const was = stored.find(s => s.sector === row.sector) ?? {}
+    const was = stored.find(s => s.bucket === row.bucket) ?? {}
     const clockMoved = was.set_at !== row.set_at
     const baseMoved  = was.base_px !== row.base_px
     if (clockMoved || baseMoved) moved++
     const arrow = (a, b, changed) => `${String(a).padStart(10)} ${changed ? '→' : ' '} ${changed ? String(b).padEnd(10) : ' '.repeat(10)}`
     line([
-        String(row.sector).padEnd(24),
+        String(row.bucket).padEnd(24),
         arrow(day(was.set_at), day(row.set_at), clockMoved),
         ' ',
         arrow(px(was.base_px), px(row.base_px), baseMoved),
         ' ',
         arrow(px(was.contribution_bp), px(row.contribution_bp), was.contribution_bp !== row.contribution_bp),
-        unreconstructable.has(row.sector) ? '  LEFT ALONE — see below'
+        unreconstructable.has(row.bucket) ? '  LEFT ALONE — see below'
             : clockMoved ? `  held since ${day(row.set_at)}, due ${day(row.review_date)}` : '  unchanged',
     ].join(''))
 }
@@ -203,7 +203,7 @@ if (unreconstructable.size) {
 const matured = graded.filter(r => r.state === 'matured')
 if (matured.length) {
     line('')
-    line(`! ${matured.map(r => r.sector).join(', ')} land ALREADY MATURED on the restored clock.`)
+    line(`! ${matured.map(r => r.bucket).join(', ')} land ALREADY MATURED on the restored clock.`)
     line('  That is the repair working — the call came due and nobody was asked. The monitor will')
     line('  offer the review on its next tick.')
 }
