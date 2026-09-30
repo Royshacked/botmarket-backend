@@ -1,8 +1,14 @@
 # Pythia — where to look, and why
 
-**PROPOSED. Nothing here is built.** Backticked names that do not resolve are what this doc asks
-to create; everything described as existing was read out of the code or the database on 2026-09-30
-and the evidence is quoted inline.
+**PROPOSED.** Backticked names that do not resolve are what this doc asks to create; everything
+described as existing was read out of the code or the database on 2026-09-30 and the evidence is
+quoted inline.
+
+**Landed since:** the vocabulary and the resolver — `INDUSTRY_SECTOR`, `resolveBucket`,
+`parentSector`, `BUCKET_PROXY`, `proxyFor` in `services/entity/vocabulary.js`, with
+`tests/unit/bucketVocabulary.test.js`. ~~`SECTOR_ETF`~~ and ~~`sectorProxy`~~ were removed rather
+than left beside the new table. Nothing else in this doc is built: the row still carries `sector`,
+and no consumer knows about grain yet.
 
 `check:docs` scores this doc around 40% unresolved, and that is expected rather than rot. What it
 cannot see splits three ways: **Mongo collections and document fields** (`aether_channel_state`,
@@ -11,7 +17,7 @@ cannot see splits three ways: **Mongo collections and document fields** (`aether
 dated body, not the percentage.
 
 The one line: **Pythia publishes one table of relative bets at whatever grain the bet actually
-lives at — sector, industry or sub-industry — sized by the gap between what the desk thinks a
+lives at — sector or industry — sized by the gap between what the desk thinks a
 macro channel will do and what the market has already priced.**
 
 ---
@@ -26,7 +32,7 @@ Pythia grades cleanly and says almost nothing actionable.
   `Technology — Semiconductors` → `Technology`, priced with XLK, **not logged at all** — the drop
   warning in `publishTilt` only fires for rows that fail to canonicalise, and this one succeeds
   into the wrong thing. A semis call becomes a bet on all of Technology with no trace.
-- **Sub-industries do not exist** in the vocabulary at any level.
+- **The grain below a sector does not exist** in the vocabulary at any level.
 - The **regime is ungraded prose**. `reviewDecision` says so plainly, and correctly refuses to
   fake a verdict on free text.
 - Three of the six live rows rest on `basis: rate_sensitivity` — the basis the desk's own
@@ -40,11 +46,27 @@ So the desk's strongest claim is its weakest-evidenced one, at a grain too coars
 **One table. One benchmark. Mixed grain.**
 
 Every row is an active weight in basis points against **SPX**, exactly as today. What changes is
-that a row may name a sector, an industry or a sub-industry. The row records which:
+that a row may name a sector or an industry. The row records which:
 
-- `grain` — `sector` · `industry` · `sub_industry`
+- `grain` — `sector` · `industry` (see **Two grains, not three** below)
 - `bucket` — the name at that grain
 - `proxy` — the ETF it is graded against
+
+### Two grains, not three
+
+Settled during implementation, 2026-09-30. **FMP's `industry` level is already sub-industry fine**,
+so a third grain would have no vocabulary behind it and nothing for Argus to screen with.
+`/available-industries` returns 159 names, and `Gold`, `Copper`, `Steel`, `Semiconductors`,
+`Banks - Regional`, `REIT - Mortgage`, `Uranium` and `Solar` are all first-class industries there.
+
+Every fund this doc first called a sub-industry proxy — GDX, COPX, SLX, JETS, ITB, REM — therefore
+maps to an FMP **industry**. The ragged "only where a real ETF exists" level is not needed, because
+the level it was reaching for is the one already in the vocabulary.
+
+155 of the 159 are usable: each resolves to exactly one sector with no ambiguous case, and the four
+dropped (`Financial - Diversified`, `Industrial - Capital Goods`, `Real Estate - General`,
+`General Utilities`) have no actively trading companies, so a stance on one could be neither
+screened nor graded.
 
 Everything else on the row is unchanged: `stance`, `active_bp`, `horizon`, `basis`, `rationale`,
 `set_at`, `review_date`, `base_px`, `base_bench_px`, `contribution_bp`, `state`.
@@ -79,11 +101,12 @@ problem being solved.
 - **No decomposition.** One number per row. A loss does not tell you which layer was wrong.
 - **Coverage.** ETFs cover perhaps 25–30 distinct industries; GICS has ~74. Sector rows remain in
   the vocabulary as the fallback grain for everything with no fund — not as a layer, as a default.
-- **Signal strength falls with grain.** Sector ≈ 40 names, industry ≈ 10, sub-industry ≈ 4. The
+- **Signal strength falls with grain.** Sector ≈ 40 names, industry ≈ 10, and the finest of them
+  fewer still. The
   measured version of this: of 8,531 fitted betas only **200** cleared significance, and only 5 of
   28 industries had ≥3 names carrying an EDGAR exposure.
 - **Risk is not comparable across grains.** 200bp in a 40-name sector and 200bp in a 4-name
-  sub-industry ETF are the same number and very different bets. `grain` is on the row so Atlas can
+  four-name industry fund are the same number and very different bets. `grain` is on the row so Atlas can
   treat them differently; this doc does not specify how.
 
 ## 3. Proxies
@@ -156,7 +179,7 @@ Using channels means reviving jobs, not wiring a tool.
 
 Every other input is grain-specific — coverage counts, the sector snapshot, the proxy. Betas are
 fitted per instrument, so the same arithmetic serves a sector row, an industry row and a
-sub-industry row. They are the one input that does not care which grain a row is at.
+row at either grain. They are the one input that does not care which grain a row is at.
 
 ### Fit the ETF, not the constituents
 
@@ -372,7 +395,8 @@ repos. The code is cheap; the collections need a script.
   from exposure into timing. It is also the most thoroughly archived piece —
   `aether_predicted_channel_state` holds **one row** — and ~~`run_event_channels.py`~~ is *"wired to a
   dead engine at both ends."*
-- **Who caps a sub-industry row?** `grain` is recorded; nothing here says what Atlas does with it.
+- **Who caps a narrow industry row?** `grain` is recorded and a four-name fund is not a
+  forty-name one; nothing here says what Atlas does with the difference.
 - **Does Pythia publish both grains in one turn**, or the finer table on demand?
 
 ## 12. Build order
@@ -381,6 +405,8 @@ Each step is useful alone and none of them requires the next.
 
 1. **`grain` / `bucket` / `proxy` on the row, plus the parent-child gate and the proxy table.** The
    table can then say "Semiconductors" and grade it. No channels involved.
+   *The vocabulary half is done (see **Landed since** above); the row schema, the gate and the two
+   migrations — the tilt documents and Atlas's stored fingerprints — are not.*
 2. **`houseScan` passes the row's bucket to the screener**, so an industry stance reaches Argus —
    and so an overweight inside an underweight sector is screened at all.
 3. **The sparkline**, with its per-day cache. Independent of everything else.

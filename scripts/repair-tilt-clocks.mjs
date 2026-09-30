@@ -50,7 +50,7 @@ else dns.setServers(['8.8.8.8', '1.1.1.1'])
 
 const { tiltService, normalizeTilt, carryReaffirmed } = await import('../api/strategy/tilt.service.js')
 const { gradeRow, totalContributionBp } = await import('../monitoring/tilt.assess.js')
-const { sectorProxy, BENCHMARK_PROXY }  = await import('../services/entity/vocabulary.js')
+const { proxyFor, BENCHMARK_PROXY }  = await import('../services/entity/vocabulary.js')
 const { fetchLastPrice } = await import('../services/lastPrice.service.js')
 
 const apply     = process.argv.includes('--apply')
@@ -160,7 +160,7 @@ for (const row of rebuilt) {
     const keep = unreconstructable.has(row.sector)
     const base = keep ? (stored.find(s => s.sector === row.sector) ?? row) : row
 
-    const proxy     = sectorProxy(row.sector)
+    const proxy     = proxyFor(row.sector)
     const sectorNow = proxy ? await fetchLastPrice(proxy).catch(() => null) : null
     graded.push(gradeRow(base, { sectorNow, benchNow }, nowMs))
 }

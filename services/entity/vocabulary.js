@@ -259,30 +259,339 @@ export function normalizeSector(raw) {
 }
 
 /**
- * How a sector is PRICED — the SPDR Select Sector ETF that stands in for it, and SPY for the
- * benchmark. A sector is an abstraction; attribution needs something with a quote, and this is the
- * standard proxy set every desk uses for exactly that.
- *
- * It lives beside the names rather than in the monitor because more than one caller needs it (the
- * grading loop prices a stance; the strategy desk quotes the group it is discussing), and a second
- * copy would be a second chance for a sector to map to the wrong ticker.
+ * The GRAINS a view can be held at. FMP gives two levels, and its `industry` is already
+ * sub-industry fine — `Gold`, `Copper`, `Steel`, `Semiconductors`, `Banks - Regional` and
+ * `REIT - Mortgage` are all first-class industries there. A third level would have no vocabulary
+ * behind it and nothing to screen with, so there are two.
  */
-export const SECTOR_ETF = {
-    'Basic Materials':        'XLB',
-    'Communication Services': 'XLC',
-    'Consumer Cyclical':      'XLY',
-    'Consumer Defensive':     'XLP',
-    'Energy':                 'XLE',
-    'Financial Services':     'XLF',
-    'Healthcare':             'XLV',
-    'Industrials':            'XLI',
-    'Real Estate':            'XLRE',
-    'Technology':             'XLK',
-    'Utilities':              'XLU',
+export const GRAINS = ['sector', 'industry']
+
+/**
+ * Every industry the screener knows, keyed to the sector that owns it. Derived from FMP's own
+ * `/available-industries` and `/company-screener` on 2026-09-30: 155 of 159 industries, each
+ * resolving to exactly ONE sector, with no ambiguous case in the panel.
+ *
+ * The four left out — `Financial - Diversified`, `Industrial - Capital Goods`,
+ * `Real Estate - General`, `General Utilities` — have no actively trading companies at all.
+ * Nothing to screen and nothing to price, so a stance on one could be neither handed to Argus nor
+ * graded, which makes it a sentence rather than a view.
+ *
+ * FMP's spellings rather than GICS's, for the reason SECTORS gives and one that weighs more here:
+ * a stance written in this vocabulary is a screen Argus can run unchanged. Any other vocabulary
+ * needs a mapping layer, and a mapping layer drifts.
+ */
+export const INDUSTRY_SECTOR = {
+    // Basic Materials
+    "Steel": "Basic Materials",
+    "Silver": "Basic Materials",
+    "Other Precious Metals": "Basic Materials",
+    "Gold": "Basic Materials",
+    "Copper": "Basic Materials",
+    "Aluminum": "Basic Materials",
+    "Paper, Lumber & Forest Products": "Basic Materials",
+    "Industrial Materials": "Basic Materials",
+    "Construction Materials": "Basic Materials",
+    "Chemicals - Specialty": "Basic Materials",
+    "Chemicals": "Basic Materials",
+    "Agricultural Inputs": "Basic Materials",
+    // Communication Services
+    "Telecommunications Services": "Communication Services",
+    "Internet Content & Information": "Communication Services",
+    "Publishing": "Communication Services",
+    "Broadcasting": "Communication Services",
+    "Advertising Agencies": "Communication Services",
+    "Entertainment": "Communication Services",
+    // Consumer Cyclical
+    "Travel Lodging": "Consumer Cyclical",
+    "Travel Services": "Consumer Cyclical",
+    "Specialty Retail": "Consumer Cyclical",
+    "Luxury Goods": "Consumer Cyclical",
+    "Home Improvement": "Consumer Cyclical",
+    "Residential Construction": "Consumer Cyclical",
+    "Department Stores": "Consumer Cyclical",
+    "Personal Products & Services": "Consumer Cyclical",
+    "Leisure": "Consumer Cyclical",
+    "Gambling, Resorts & Casinos": "Consumer Cyclical",
+    "Furnishings, Fixtures & Appliances": "Consumer Cyclical",
+    "Restaurants": "Consumer Cyclical",
+    "Auto - Parts": "Consumer Cyclical",
+    "Auto - Manufacturers": "Consumer Cyclical",
+    "Auto - Recreational Vehicles": "Consumer Cyclical",
+    "Auto - Dealerships": "Consumer Cyclical",
+    "Apparel - Retail": "Consumer Cyclical",
+    "Apparel - Manufacturers": "Consumer Cyclical",
+    "Apparel - Footwear & Accessories": "Consumer Cyclical",
+    "Packaging & Containers": "Consumer Cyclical",
+    // Consumer Defensive
+    "Tobacco": "Consumer Defensive",
+    "Grocery Stores": "Consumer Defensive",
+    "Discount Stores": "Consumer Defensive",
+    "Household & Personal Products": "Consumer Defensive",
+    "Packaged Foods": "Consumer Defensive",
+    "Food Distribution": "Consumer Defensive",
+    "Food Confectioners": "Consumer Defensive",
+    "Agricultural Farm Products": "Consumer Defensive",
+    "Education & Training Services": "Consumer Defensive",
+    "Beverages - Wineries & Distilleries": "Consumer Defensive",
+    "Beverages - Non-Alcoholic": "Consumer Defensive",
+    "Beverages - Alcoholic": "Consumer Defensive",
+    // Energy
+    "Uranium": "Energy",
+    "Solar": "Energy",
+    "Oil & Gas Refining & Marketing": "Energy",
+    "Oil & Gas Midstream": "Energy",
+    "Oil & Gas Integrated": "Energy",
+    "Oil & Gas Exploration & Production": "Energy",
+    "Oil & Gas Equipment & Services": "Energy",
+    "Oil & Gas Energy": "Energy",
+    "Oil & Gas Drilling": "Energy",
+    "Coal": "Energy",
+    // Financial Services
+    "Shell Companies": "Financial Services",
+    "Investment - Banking & Investment Services": "Financial Services",
+    "Insurance - Specialty": "Financial Services",
+    "Insurance - Reinsurance": "Financial Services",
+    "Insurance - Property & Casualty": "Financial Services",
+    "Insurance - Life": "Financial Services",
+    "Insurance - Diversified": "Financial Services",
+    "Insurance - Brokers": "Financial Services",
+    "Financial - Mortgages": "Financial Services",
+    "Financial - Data & Stock Exchanges": "Financial Services",
+    "Financial - Credit Services": "Financial Services",
+    "Financial - Conglomerates": "Financial Services",
+    "Financial - Capital Markets": "Financial Services",
+    "Banks - Regional": "Financial Services",
+    "Banks - Diversified": "Financial Services",
+    "Banks": "Financial Services",
+    "Asset Management": "Financial Services",
+    "Asset Management - Bonds": "Financial Services",
+    "Asset Management - Income": "Financial Services",
+    "Asset Management - Leveraged": "Financial Services",
+    "Asset Management - Cryptocurrency": "Financial Services",
+    "Asset Management - Global": "Financial Services",
+    // Healthcare
+    "Medical - Specialties": "Healthcare",
+    "Medical - Pharmaceuticals": "Healthcare",
+    "Medical - Instruments & Supplies": "Healthcare",
+    "Medical - Healthcare Plans": "Healthcare",
+    "Medical - Healthcare Information Services": "Healthcare",
+    "Medical - Equipment & Services": "Healthcare",
+    "Medical - Distribution": "Healthcare",
+    "Medical - Diagnostics & Research": "Healthcare",
+    "Medical - Devices": "Healthcare",
+    "Medical - Care Facilities": "Healthcare",
+    "Drug Manufacturers - Specialty & Generic": "Healthcare",
+    "Drug Manufacturers - General": "Healthcare",
+    "Biotechnology": "Healthcare",
+    // Industrials
+    "Waste Management": "Industrials",
+    "Trucking": "Industrials",
+    "Railroads": "Industrials",
+    "Aerospace & Defense": "Industrials",
+    "Marine Shipping": "Industrials",
+    "Integrated Freight & Logistics": "Industrials",
+    "Airlines, Airports & Air Services": "Industrials",
+    "General Transportation": "Industrials",
+    "Manufacturing - Tools & Accessories": "Industrials",
+    "Manufacturing - Textiles": "Industrials",
+    "Manufacturing - Miscellaneous": "Industrials",
+    "Manufacturing - Metal Fabrication": "Industrials",
+    "Industrial - Distribution": "Industrials",
+    "Industrial - Specialties": "Industrials",
+    "Industrial - Pollution & Treatment Controls": "Industrials",
+    "Environmental Services": "Industrials",
+    "Industrial - Machinery": "Industrials",
+    "Industrial - Infrastructure Operations": "Industrials",
+    "Consulting Services": "Industrials",
+    "Business Equipment & Supplies": "Industrials",
+    "Staffing & Employment Services": "Industrials",
+    "Rental & Leasing Services": "Industrials",
+    "Engineering & Construction": "Industrials",
+    "Security & Protection Services": "Industrials",
+    "Specialty Business Services": "Industrials",
+    "Construction": "Industrials",
+    "Conglomerates": "Industrials",
+    "Electrical Equipment & Parts": "Industrials",
+    "Agricultural - Machinery": "Industrials",
+    "Agricultural - Commodities/Milling": "Industrials",
+    // Real Estate
+    "REIT - Specialty": "Real Estate",
+    "REIT - Retail": "Real Estate",
+    "REIT - Residential": "Real Estate",
+    "REIT - Office": "Real Estate",
+    "REIT - Mortgage": "Real Estate",
+    "REIT - Industrial": "Real Estate",
+    "REIT - Hotel & Motel": "Real Estate",
+    "REIT - Healthcare Facilities": "Real Estate",
+    "REIT - Diversified": "Real Estate",
+    "Real Estate - Services": "Real Estate",
+    "Real Estate - Diversified": "Real Estate",
+    "Real Estate - Development": "Real Estate",
+    // Technology
+    "Information Technology Services": "Technology",
+    "Hardware, Equipment & Parts": "Technology",
+    "Computer Hardware": "Technology",
+    "Electronic Gaming & Multimedia": "Technology",
+    "Software - Services": "Technology",
+    "Software - Infrastructure": "Technology",
+    "Software - Application": "Technology",
+    "Semiconductors": "Technology",
+    "Media & Entertainment": "Technology",
+    "Communication Equipment": "Technology",
+    "Technology Distributors": "Technology",
+    "Consumer Electronics": "Technology",
+    // Utilities
+    "Renewable Utilities": "Utilities",
+    "Regulated Water": "Utilities",
+    "Regulated Gas": "Utilities",
+    "Regulated Electric": "Utilities",
+    "Independent Power Producers": "Utilities",
+    "Diversified Utilities": "Utilities",
 }
 
-/** The benchmark a tilt is measured against, by its name on the doc. */
+/** Every industry name, in FMP's own spelling. */
+export const INDUSTRIES = Object.freeze(Object.keys(INDUSTRY_SECTOR))
+
+const _INDUSTRY_BY_LOWER = new Map(INDUSTRIES.map(i => [i.toLowerCase(), i]))
+
+// The shorthands a desk actually reaches for. Deliberately thin: FMP's spelling IS the vocabulary,
+// and every alias here is one more place the two can drift apart.
+const INDUSTRY_SYNONYMS = {
+    'semis': 'Semiconductors', 'semiconductor': 'Semiconductors',
+    'biotech': 'Biotechnology',
+    'homebuilders': 'Residential Construction', 'homebuilding': 'Residential Construction',
+    'regional banks': 'Banks - Regional',
+    'gold miners': 'Gold', 'copper miners': 'Copper',
+    'airlines': 'Airlines, Airports & Air Services',
+    'e&p': 'Oil & Gas Exploration & Production',
+    'oil services': 'Oil & Gas Equipment & Services',
+    'midstream': 'Oil & Gas Midstream',
+    'mortgage reits': 'REIT - Mortgage',
+    'medical devices': 'Medical - Devices',
+    'pharma': 'Medical - Pharmaceuticals', 'pharmaceuticals': 'Medical - Pharmaceuticals',
+    'aerospace': 'Aerospace & Defense', 'defense': 'Aerospace & Defense',
+}
+
+/**
+ * An industry from the vocabulary, or null. Matched on the WHOLE string.
+ *
+ * Deliberately NOT normalizeSector's qualifier split, and that difference is load-bearing. This
+ * module takes the HEAD of a qualified string when resolving a sector, which is right when a
+ * provider hands back `Technology - Semiconductors` and the answer wanted is Technology — and
+ * catastrophic here, where the tail is the entire point. An industry resolved through it would
+ * silently publish a semis call as a bet on all of Technology.
+ */
+export function normalizeIndustry(raw) {
+    if (!raw || typeof raw !== 'string') return null
+    const s = raw.trim().toLowerCase()
+    const whole = _INDUSTRY_BY_LOWER.get(s) ?? INDUSTRY_SYNONYMS[s]
+    if (whole) return whole
+
+    // A QUALIFIED string ("Technology - Semiconductors") names its sector and then narrows it, so
+    // the tail is the claim and the head is context. Tried only after the whole string fails, so a
+    // legitimately hyphenated name ("Banks - Regional", "Oil & Gas Midstream") is never split.
+    //
+    // The tail is tried before the sector fallback deliberately. Reading the HEAD of that string —
+    // which is what normalizeSector does, correctly, for its own purpose — would answer Technology
+    // to a sentence whose subject is semiconductors.
+    const tail = s.split(SECTOR_QUALIFIER).slice(1).join(' ').trim()
+    return (tail && (_INDUSTRY_BY_LOWER.get(tail) ?? INDUSTRY_SYNONYMS[tail])) || null
+}
+
+/**
+ * What a view is held ON, at whichever grain it is held → `{ grain, bucket }`, or null. Pure.
+ *
+ * INDUSTRY FIRST, and the order is the whole function. A row naming an industry has to resolve to
+ * that industry; falling through to its sector would publish a bet on many times more of the
+ * market than the author wrote, priced against the wrong fund, with nothing downstream able to
+ * tell the difference.
+ */
+export function resolveBucket(raw) {
+    const industry = normalizeIndustry(raw)
+    if (industry) return { grain: 'industry', bucket: industry }
+    const sector = normalizeSector(raw)
+    return sector ? { grain: 'sector', bucket: sector } : null
+}
+
+/** The sector that owns a bucket — itself when the bucket IS a sector. Null when unrecognised. */
+export function parentSector(raw) {
+    const r = resolveBucket(raw)
+    if (!r) return null
+    return r.grain === 'sector' ? r.bucket : (INDUSTRY_SECTOR[r.bucket] ?? null)
+}
+
+/**
+ * How a bucket is PRICED — ONE table across both grains, because a stance is graded the same way
+ * whichever grain it sits at, and a second table would be a second chance to map a bucket to the
+ * wrong ticker. Sectors are the SPDR Select Sector funds; industries are the nearest liquid fund.
+ *
+ * `weighting` and `exact` are recorded rather than assumed, because each distorts a grade in a way
+ * that is invisible once it is booked:
+ *   - `weighting: 'equal'` graded against a cap-weighted benchmark books part of a size factor as
+ *     an industry call. Where a cap-weighted twin exists it is taken (IBB over XBI, SMH over XSD,
+ *     ITB over XHB); where none does, the row carries the caveat instead of pretending.
+ *   - `exact: false` means the fund spans more than this one industry — IGV is all software, KIE
+ *     every insurance line. The bucket named and the thing graded are then near, not equal.
+ *
+ * Every symbol here was fetched through fetchLastPrice on 2026-09-30.
+ */
+export const BUCKET_PROXY = {
+    // sectors — SPDR Select Sector, cap-weighted, and exact by construction
+    'Basic Materials':        { symbol: 'XLB',  weighting: 'cap', exact: true },
+    'Communication Services': { symbol: 'XLC',  weighting: 'cap', exact: true },
+    'Consumer Cyclical':      { symbol: 'XLY',  weighting: 'cap', exact: true },
+    'Consumer Defensive':     { symbol: 'XLP',  weighting: 'cap', exact: true },
+    'Energy':                 { symbol: 'XLE',  weighting: 'cap', exact: true },
+    'Financial Services':     { symbol: 'XLF',  weighting: 'cap', exact: true },
+    'Healthcare':             { symbol: 'XLV',  weighting: 'cap', exact: true },
+    'Industrials':            { symbol: 'XLI',  weighting: 'cap', exact: true },
+    'Real Estate':            { symbol: 'XLRE', weighting: 'cap', exact: true },
+    'Technology':             { symbol: 'XLK',  weighting: 'cap', exact: true },
+    'Utilities':              { symbol: 'XLU',  weighting: 'cap', exact: true },
+
+    // industries
+    'Semiconductors':                     { symbol: 'SMH',  weighting: 'cap',   exact: true },
+    'Software - Infrastructure':          { symbol: 'IGV',  weighting: 'cap',   exact: false },
+    'Software - Application':             { symbol: 'XSW',  weighting: 'equal', exact: false },
+    'Internet Content & Information':     { symbol: 'FDN',  weighting: 'cap',   exact: false },
+    'Biotechnology':                      { symbol: 'IBB',  weighting: 'cap',   exact: true },
+    'Medical - Devices':                  { symbol: 'IHI',  weighting: 'cap',   exact: true },
+    'Medical - Pharmaceuticals':          { symbol: 'XPH',  weighting: 'equal', exact: true },
+    'Medical - Care Facilities':          { symbol: 'IHF',  weighting: 'cap',   exact: false },
+    'Banks - Regional':                   { symbol: 'KRE',  weighting: 'equal', exact: true },
+    'Banks - Diversified':                { symbol: 'KBWB', weighting: 'cap',   exact: false },
+    'Insurance - Property & Casualty':    { symbol: 'KIE',  weighting: 'equal', exact: false },
+    'Financial - Capital Markets':        { symbol: 'IAI',  weighting: 'cap',   exact: false },
+    'Oil & Gas Exploration & Production': { symbol: 'XOP',  weighting: 'equal', exact: true },
+    'Oil & Gas Equipment & Services':     { symbol: 'OIH',  weighting: 'cap',   exact: true },
+    'Oil & Gas Midstream':                { symbol: 'AMLP', weighting: 'cap',   exact: true },
+    'Gold':                               { symbol: 'GDX',  weighting: 'cap',   exact: true },
+    'Copper':                             { symbol: 'COPX', weighting: 'cap',   exact: true },
+    'Steel':                              { symbol: 'SLX',  weighting: 'cap',   exact: true },
+    'Residential Construction':           { symbol: 'ITB',  weighting: 'cap',   exact: true },
+    'Specialty Retail':                   { symbol: 'XRT',  weighting: 'equal', exact: false },
+    'Aerospace & Defense':                { symbol: 'ITA',  weighting: 'cap',   exact: true },
+    'Airlines, Airports & Air Services':  { symbol: 'JETS', weighting: 'cap',   exact: true },
+    'REIT - Mortgage':                    { symbol: 'REM',  weighting: 'cap',   exact: true },
+    'REIT - Residential':                 { symbol: 'REZ',  weighting: 'cap',   exact: false },
+    'REIT - Industrial':                  { symbol: 'INDS', weighting: 'cap',   exact: true },
+    'Telecommunications Services':        { symbol: 'XTL',  weighting: 'equal', exact: false },
+}
+
+/** What the benchmark itself is priced with. */
 export const BENCHMARK_PROXY = { SPX: 'SPY' }
 
-/** The tradable proxy for a sector (accepts any spelling normalizeSector accepts), or null. */
-export const sectorProxy = (raw) => SECTOR_ETF[normalizeSector(raw)] ?? null
+/** The tradable proxy for a bucket at either grain (any spelling resolveBucket takes), or null. */
+export function proxyFor(raw) {
+    const r = resolveBucket(raw)
+    return r ? (BUCKET_PROXY[r.bucket]?.symbol ?? null) : null
+}
+
+/** The proxy's caveats — `{ symbol, weighting, exact }` — for a row that has to record them. */
+export function proxyMeta(raw) {
+    const r = resolveBucket(raw)
+    return r ? (BUCKET_PROXY[r.bucket] ?? null) : null
+}
+
+/** Buckets that can be graded at all: a stance needs a price, so one without a proxy is not one. */
+export const PRICEABLE_BUCKETS = Object.freeze(Object.keys(BUCKET_PROXY))
