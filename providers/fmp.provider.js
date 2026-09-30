@@ -560,14 +560,11 @@ export async function screenCandidates(filters = {}) {
 // this is context that barely moves intraday, so a 1h TTL is plenty.
 const MACRO_TTL_MS = 60 * 60 * 1000
 const _macroCache  = createTtlCache({ ttlMs: MACRO_TTL_MS, max: 4 })
-const ECON_INDICATORS = [
-    ['Real GDP',           'realGDP'],
-    ['CPI',                'CPI'],
-    ['Inflation (YoY)',    'inflationRate'],
-    ['Unemployment',       'unemploymentRate'],
-    ['Fed funds rate',     'federalFunds'],
-    ['Consumer sentiment', 'consumerSentiment'],
-]
+// THE INDICATOR LEG MOVED TO FRED (2026-09-30). FMP's /economic-indicators returns two or three
+// rows ending 2025-12-01 — nine months stale — and it is not a fetch bug on our side: the data is
+// not there to take. Four desks read this block as current, and Pythia names the REGIME off it.
+// See fred.provider's MACRO_SERIES. The treasury curve and the sector tape stay here, where both
+// are current.
 
 // The sector snapshot is pinned to a trading date; on weekends/holidays `date=today`
 // returns 0 rows, so walk back up to a few days to the last day that actually has data.
@@ -641,20 +638,19 @@ async function _macroParts() {
 
     const today = new Date().toISOString().slice(0, 10)
     const from  = new Date(Date.now() - 10 * 864e5).toISOString().slice(0, 10)
-    const [treasuryArr, sectorArr, ...indArrs] = await Promise.all([
+    // The snapshot is TWO providers now — see the note above ECON_INDICATORS. Imported lazily so
+    // a caller that only wants a quote does not drag the FRED client in behind it.
+    const { fetchMacroIndicators } = await import('./fred.provider.js')
+    const [treasuryArr, sectorArr, indicators] = await Promise.all([
         _fmpGet(`/treasury-rates?from=${from}&to=${today}`).catch(e => { logger.warn(LOG, 'treasury', e.message); return [] }),
         _fetchSectorSnapshot(),
-        ...ECON_INDICATORS.map(([, name]) => _fmpGet(`/economic-indicators?name=${name}`).catch(() => [])),
+        fetchMacroIndicators().catch(e => { logger.warn(LOG, 'macro indicators', e.message); return [] }),
     ])
-    const indicators = ECON_INDICATORS.map(([label], i) => {
-        const row = Array.isArray(indArrs[i]) ? indArrs[i][0] : null
-        return row ? { label, value: row.value, date: row.date } : null
-    }).filter(Boolean)
 
     const parts = {
         treasury:  Array.isArray(treasuryArr) ? treasuryArr : [],
         sectors:   Array.isArray(sectorArr)   ? sectorArr   : [],
-        indicators,
+        indicators: Array.isArray(indicators) ? indicators : [],
     }
     // Cache an ANSWER, never an outage. Every leg above swallows its own failure into [], so a
     // transient blip — one 429 on a busy minute — used to produce an all-empty parts object that
@@ -957,11 +953,11 @@ export async function getMacroRaw() {
     const t = [...parts.treasury].filter(r => r?.date).sort((a, b) => String(b.date).localeCompare(String(a.date)))[0]
     const g = k => (t && Number.isFinite(Number(t[k])) ? Number(t[k]) : null)
     const y2 = g('year2'), y10 = g('year10')
-    // Look up by the stable FMP indicator name, resolved to its display label via ECON_INDICATORS —
-    // so renaming a display label there can't silently null these out.
-    const labelFor = fmpName => ECON_INDICATORS.find(([, name]) => name === fmpName)?.[0]
-    const ind = fmpName => {
-        const x = parts.indicators.find(i => i.label === labelFor(fmpName))
+    // Look up by the DISPLAY LABEL, which is the one thing both providers agree on: FRED serves
+    // these now (see fred.provider's MACRO_SERIES) and its series ids share nothing with FMP's
+    // indicator names, so the label is the only stable key left.
+    const ind = label => {
+        const x = parts.indicators.find(i => i.label === label)
         return x && Number.isFinite(Number(x.value)) ? Number(x.value) : null
     }
     const leaders = [...parts.sectors]
@@ -971,8 +967,8 @@ export async function getMacroRaw() {
     return {
         asOf:        t?.date ?? null,
         spread2s10s: (y2 != null && y10 != null) ? Number((y10 - y2).toFixed(2)) : null,
-        fedFunds:    ind('federalFunds'),
-        inflation:   ind('inflationRate'),
+        fedFunds:    ind('Fed funds rate'),
+        inflation:   ind('Inflation (YoY)'),
         leaders,
     }
 }

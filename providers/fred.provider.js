@@ -130,6 +130,80 @@ const PRICED_IN_SERIES = [
     ['real_yield_10y', 'DFII10', '10-year TIPS real yield'],
 ]
 
+// ─── The macro indicators ────────────────────────────────────────────────────
+//
+// These used to come from FMP's /economic-indicators, which returns two or three rows ending
+// 2025-12-01 — nine months stale, and four desks (Pythia, Prometheus, Atlas, the institutional
+// trading tools) read them as current. Pythia's REGIME is named off them, and the whole house
+// pipeline is steered from that regime, so a published view quoted "unemployment 4.40%" as a fact
+// about a labour market it had not seen since December.
+//
+// FRED carries the same measures to within a month or two, and this module already has the client,
+// the key and the reader. The curve and the sector tape stay on FMP: both are current there and
+// FRED does not serve either as conveniently.
+//
+// LABELS ARE THE OLD ONES on purpose. The snapshot's format is unchanged, so nothing downstream
+// re-learns how to read it — only the numbers stop being stale.
+const MACRO_SERIES = [
+    ['Real GDP',           'GDPC1'],      // real GDP, chained 2017 dollars, quarterly
+    ['CPI',                'CPIAUCSL'],   // CPI-U, all items, index
+    ['Inflation (YoY)',    'CPIAUCSL'],   // derived below — YoY change on the same index
+    ['Unemployment',       'UNRATE'],
+    ['Fed funds rate',     'FEDFUNDS'],
+    ['Consumer sentiment', 'UMCSENT'],
+]
+
+const _macroIndCache = createTtlCache({ ttlMs: 6 * 60 * 60 * 1000, max: 2 })
+
+/** An observation a year before `date`, for the year-on-year leg. Null when FRED has no print. */
+async function _yearAgo(seriesId, date) {
+    const d = new Date(`${date}T00:00:00.000Z`)
+    if (Number.isNaN(d.getTime())) return null
+    d.setUTCFullYear(d.getUTCFullYear() - 1)
+    const to = d.toISOString().slice(0, 10)
+    const url = `${BASE}/series/observations?series_id=${seriesId}&api_key=${FRED_API_KEY}`
+              + `&file_type=json&sort_order=desc&limit=1&observation_end=${to}`
+    const data = await getJson(url, { label: 'FRED /series/observations (year-ago)' })
+    const o = data?.observations?.[0]
+    const v = Number(o?.value)
+    return (o?.date && Number.isFinite(v)) ? { value: v, date: o.date } : null
+}
+
+/**
+ * The macro indicators, newest print each → `[{ label, value, date }]` in the snapshot's own shape.
+ *
+ * A series that fails is DROPPED rather than zeroed, exactly as the FMP version dropped one: a
+ * missing print and a reading of nothing are different facts. An empty array is a legitimate
+ * answer and the caller keeps its other legs.
+ */
+export async function fetchMacroIndicators() {
+    if (!FRED_API_KEY) return []
+    const hit = _macroIndCache.get('indicators')
+    if (hit) return hit
+
+    const out = []
+    for (const [label, seriesId] of MACRO_SERIES) {
+        try {
+            const latest = await _latest(seriesId)
+            if (!latest) continue
+
+            if (label === 'Inflation (YoY)') {
+                // FRED publishes the index, not the rate. Computing it here keeps the snapshot
+                // reading the way every desk already expects, off a series that is actually current.
+                const prior = await _yearAgo(seriesId, latest.date)
+                if (!prior || !prior.value) continue
+                out.push({ label, value: Number((((latest.value / prior.value) - 1) * 100).toFixed(2)), date: latest.date })
+                continue
+            }
+            out.push({ label, value: latest.value, date: latest.date })
+        } catch (err) {
+            logger.warn(LOG, `macro indicator ${label} unavailable (the rest still return)`, err.message)
+        }
+    }
+    if (out.length) _macroIndCache.set('indicators', out)
+    return out
+}
+
 // Daily series, so an hour is plenty and it keeps a chatty turn off the wire.
 const _pricedInCache = createTtlCache({ ttlMs: 60 * 60 * 1000, max: 4 })
 
