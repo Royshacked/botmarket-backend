@@ -3,7 +3,7 @@ import { log }                    from '../../middleware/logger.middleware.js'
 import { requireAuth, requireAdmin } from '../../middleware/auth.middleware.js'
 import {
     streamStrategy,
-    getCurrentTilt, listTilts, getTilt, publishTilt, updateTilt, retireTilt,
+    getCurrentTilt, getTiltSeries, listTilts, getTilt, publishTilt, updateTilt, retireTilt,
 } from './strategy.controller.js'
 
 const router = express.Router()
@@ -26,6 +26,8 @@ router.post('/stream',        log, streamStrategy)
 
 // The tilt publication log.
 router.get('/tilt/current',     log, getCurrentTilt)
+// The lines behind the stances. Registered BEFORE `/tilt/:id`, or "series" is read as an id.
+router.get('/tilt/series',      log, getTiltSeries)
 router.get('/tilt',             log, listTilts)
 router.post('/tilt',            log, publishTilt)
 router.get('/tilt/:id',         log, getTilt)

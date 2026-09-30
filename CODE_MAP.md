@@ -88,6 +88,12 @@ api/
                           delete: a desk that can erase its calls has no track record). Every handler
                           rides makeHandle. Publish diffs against the view in force (tilt.assess.
                           diffStances) → tiltNotify.notifyTiltChanged to every admin → runHouseScan
+    tiltSeries.service.js     The LINE behind each stance: the bucket's relative return since the
+                              call, rebased to 100, served at GET /tilt/series. ARITHMETIC, matching
+                              relativeReturnPct exactly — the geometric form reads half a point
+                              apart and would put a chart on screen disagreeing with the number
+                              beside it. Bars cached per (symbol, day); a provider outage costs the
+                              line and never the board
     tilt.service.js           `tilt` collection = ONE active house view per benchmark, superseded on
                               publish, never overwritten; house-owned like coverage (no userId). A row
                               names a SECTOR or an INDUSTRY (`grain`/`bucket`), graded against the

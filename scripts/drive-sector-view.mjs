@@ -66,6 +66,23 @@ try {
     }
     await page.waitForTimeout(2000)
 
+    // The lines arrive on their own read, which fetches a range of bars per row and is therefore
+    // slower than the board. Wait for them, but never require them: a board with no lines is a
+    // correct board, so this reports rather than throws.
+    await page.waitForSelector('.sector-view__spark', { timeout: 20000 }).catch(() => {})
+
+    // What the SERVER said, asked from the page so it carries the same session. This is what
+    // separates "no lines because none were sent" from "none rendered".
+    const served = await page.evaluate(async () => {
+        try {
+            const r = await fetch('/api/strategy/tilt/series?benchmark=SPX', { credentials: 'include' })
+            if (!r.ok) return { status: r.status }
+            const j = await r.json()
+            return { status: r.status, buckets: Object.keys(j), lengths: Object.values(j).map(v => v.length) }
+        } catch (e) { return { error: String(e) } }
+    })
+    console.log('series endpoint ->', JSON.stringify(served))
+
     await page.screenshot({ path: `${OUT}/ui-sector-view.png`, fullPage: false })
     console.log('shot: ui-sector-view.png')
 
@@ -77,17 +94,25 @@ try {
         proxy:  el.querySelector('.sector-view__proxy')?.textContent?.trim() ?? null,
         stance: el.querySelector('[class*="sector-view__stance--"]')?.textContent?.trim() ?? null,
         bp:     el.querySelector('.sector-view__bp')?.textContent?.trim() ?? null,
+        // The LINE behind the number. Point count and tone come off the rendered SVG, so a chart
+        // that drew nothing is distinguishable from one that drew a flat line.
+        spark:  el.querySelector('.sector-view__spark')?.getAttribute('data-points') ?? null,
+        tone:   [...(el.querySelector('.sector-view__spark')?.classList ?? [])]
+            .find(c => c.startsWith('sector-view__spark--'))?.replace('sector-view__spark--', '') ?? null,
+        contrib: el.querySelector('.sector-view__contrib')?.textContent?.trim() ?? null,
     })))
 
     console.log(`\nrows rendered: ${rows.length}`)
     for (const r of rows) {
-        console.log(`  ${String(r.bucket).padEnd(26)} ${String(r.grain).padEnd(7)} ${String(r.proxy).padEnd(6)} ${String(r.stance).padEnd(10)} ${r.bp}`)
+        console.log(`  ${String(r.bucket).padEnd(26)} ${String(r.grain).padEnd(7)} ${String(r.proxy).padEnd(6)} ${String(r.stance).padEnd(10)} ${String(r.bp).padStart(7)}  ${String(r.contrib).padStart(8)}  line ${String(r.spark ?? '-').padStart(3)}pts ${r.tone ?? ''}`)
     }
 
     const blank = rows.filter(r => !r.bucket)
     if (!rows.length)   console.log('\n! NO ROWS — the board is empty (no published view, or the tab did not open)')
     else if (blank.length) console.log(`\n✗ ${blank.length} row(s) rendered with NO BUCKET — the panel is reading a field the server no longer sends`)
     else                console.log('\n✓ every row rendered a bucket')
+
+    console.log(`  lines drawn: ${rows.filter(r => r.spark).length}/${rows.length}`)
 
     if (errors.length) {
         console.log('\nconsole errors:')

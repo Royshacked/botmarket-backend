@@ -7,6 +7,7 @@
 // — see strategy.routes.
 
 import { tiltService, balanceOf } from './tilt.service.js'
+import { seriesForTilt }          from './tiltSeries.service.js'
 import { strategyAgentService } from '../../services/agents/strategy.agent.service.js'
 import { diffStances }          from '../../monitoring/tilt.assess.js'
 import { notifyTiltChanged }    from '../../services/tiltNotify.service.js'
@@ -89,6 +90,20 @@ function _fail(res, result, fallback = 'Request failed') {
 export const getCurrentTilt = _handle('getCurrentTilt', async (req, res) => {
     const doc = await tiltService.getCurrentTilt(req.query?.benchmark || 'SPX')
     res.json(doc)
+})
+
+/**
+ * The LINE behind each stance on the view in force — `{ [bucket]: [{t, v}] }`, rebased to 100 at
+ * the call, so its last point is the relative return the contribution is computed from.
+ *
+ * A SEPARATE read from the view itself, deliberately. The board must paint on the numbers it
+ * already has; the lines are an ornament that arrives when the bars do, and folding them into
+ * `/tilt/current` would put a dozen range fetches in front of every read of the house view.
+ * `{}` is a legitimate answer — no published view, or a provider having a bad morning.
+ */
+export const getTiltSeries = _handle('getTiltSeries', async (req, res) => {
+    const doc = await tiltService.getCurrentTilt(req.query?.benchmark || 'SPX')
+    res.json(doc ? await seriesForTilt(doc) : {})
 })
 
 export const listTilts = _handle('listTilts', async (req, res) => {

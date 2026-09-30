@@ -411,6 +411,7 @@ Each step is useful alone and none of them requires the next.
 2. **`houseScan` passes the row's bucket to the screener**, so an industry stance reaches Argus —
    and so an overweight inside an underweight sector is screened at all.
 3. **The sparkline**, with its per-day cache. Independent of everything else.
+   *Done 2026-09-30 — `tiltSeries.service.js`, `GET /tilt/series`, and the line on the board.*
 4. **Revive `state`.** Cheapest channel work, and it is what makes the regime falsifiable.
 5. **Refit `betas` on the ~40 proxies.** Upgrades the weakest basis the desk publishes.
 6. **Elasticity, residual sizing, and the Prometheus verification loop.** The largest step, and the

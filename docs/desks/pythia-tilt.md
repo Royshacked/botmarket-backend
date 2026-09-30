@@ -147,6 +147,32 @@ repaired by `scripts/repair-tilt-clocks.mjs`, which REPLAYS the publication chai
 `carryReaffirmed` — the fix applied retroactively rather than a second opinion about what counts as
 a reaffirm — and leaves alone any stance whose baseline the chain cannot honestly reconstruct.
 
+## The line — the contribution, drawn
+
+`contribution_bp` says where a stance ended up and nothing about how it got there, and those are
+different facts about a call: a stance that bled for five months and snapped back last week reads
+identically to one that worked from the day it was set, and only one of them is a thesis behaving
+as written. `api/strategy/tiltSeries.service.js` serves the path — the bucket's performance against
+the benchmark since its own `set_at`, rebased to 100 — at `GET /api/strategy/tilt/series`.
+
+**The line and the number must agree**, and two things enforce it:
+
+- **Arithmetic, not geometric.** `v = (px/base_px − bench/base_bench_px + 1) × 100` is exactly what
+  `relativeReturnPct` computes. The intuitive ratio-of-growth-factors form reads −10.48% where the
+  grader reads −11% — half a point of daily disagreement between a chart and the figure printed
+  beside it, invisible unless someone checks. The attribution this desk runs on is arithmetic, so
+  the line follows the grader.
+- **Signed by the stance, in the panel.** The service sends the BUCKET's relative return, which is
+  the objective quantity and the one the grader scores; what a row REPORTS is what the stance
+  earned, which is that return times the sign of the weight. Plotted unsigned, every underweight
+  reads backwards — Real Estate rendered +7.9bp beside a falling red line, live, until the drive
+  caught it.
+
+A SEPARATE read from the view. The board paints on the numbers it already has; the bars behind a
+dozen rows are a dozen range fetches, and folding them into `/tilt/current` would put all of them
+in front of every read of the house view. A stance set today has no line and costs no fetch to
+discover it — asking a provider for a zero-width range 403s and logs what reads like an outage.
+
 ## The gates — refused vs recorded
 
 Same distinction as coverage, and the same reason:
