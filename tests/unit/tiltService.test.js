@@ -323,6 +323,29 @@ test('carry: a caller that states the window itself is not overridden', () => {
     assert.equal(carried.base_px, 99)
 })
 
+test('draft: a RESTATED stance stays on the fund its baseline was priced from, whatever the map says now', () => {
+    // The baseline is a price of ONE instrument. E&P moved XOP → IEO in BUCKET_PROXY on 2026-09-30;
+    // a stance set on XOP and restated afterwards must still be graded on XOP, or its score compares
+    // IEO today against XOP at inception.
+    const ep = { bucket: 'Oil & Gas Exploration & Production', grain: 'industry' }
+    const held = { tilts: [heldRow({ ...ep, proxy: { symbol: 'XOP', weighting: 'equal', exact: true }, base_px: 130 })] }
+
+    const [kept] = draftForPublish({ tilts: [wireRow({ bucket: ep.bucket })] }, held, LATER).tilts
+    assert.equal(kept.proxy.symbol, 'XOP', 'the fund the baseline was priced from')
+    assert.equal(kept.base_px, 130)
+
+    // A MOVED call is a new call: fresh clock, fresh baseline, and the fund the map names today.
+    const [fresh] = draftForPublish({ tilts: [wireRow({ bucket: ep.bucket, active_bp: 200 })] }, held, LATER).tilts
+    assert.equal(fresh.proxy.symbol, 'IEO')
+    assert.equal(fresh.base_px, null)
+})
+
+test('carry: a held row with no stored fund falls back to the map rather than to nothing', () => {
+    // A document written before `proxy` existed. There is no instrument to keep, so the map decides.
+    const [row0] = draftForPublish({ tilts: [wireRow()] }, { tilts: [heldRow({ proxy: undefined })] }, LATER).tilts
+    assert.equal(row0.proxy.symbol, 'XLK')
+})
+
 test('draft: the carried window survives normalisation, and the deadline holds', () => {
     // The end of the publish path that a database is not needed for: what publishTilt stores.
     const draft = draftForPublish(

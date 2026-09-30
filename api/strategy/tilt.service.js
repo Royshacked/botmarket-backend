@@ -347,8 +347,14 @@ export function carryReaffirmed(rawTilts, previous, now = new Date().toISOString
         // `??` and not a plain overwrite: a caller that DID supply a window (a repair script, a
         // re-publish of a stored doc) is stating the call's history on purpose, and this is a
         // fallback for the author who cannot state it, not an override of the one who can.
+        // The FUND rides with the baseline, because the baseline is a price OF that fund. A row off
+        // the wire carries no proxy, so without this `_row` re-resolves it from BUCKET_PROXY — and the
+        // day a bucket's fund is swapped (XOP → IEO, 2026-09-30) a restated stance would be graded as
+        // IEO today against XOP at inception. The same instrument also keys the channel betas
+        // (pythia-industries-and-channels.md §4), so a carried row must stay on the fund it began on.
         return {
             ...raw,
+            proxy:           raw.proxy           ?? prev.proxy,
             set_at:          raw.set_at          ?? prev.set_at,
             base_px:         raw.base_px         ?? prev.base_px,
             base_bench_px:   raw.base_bench_px   ?? prev.base_bench_px,

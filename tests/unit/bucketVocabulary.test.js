@@ -114,6 +114,25 @@ test('the cap-weighted twin is the one taken, where one exists', () => {
     assert.equal(proxyFor('Biotechnology'), 'IBB')
     assert.equal(proxyFor('Semiconductors'), 'SMH')
     assert.equal(proxyFor('Residential Construction'), 'ITB')
+    assert.equal(proxyFor('Oil & Gas Exploration & Production'), 'IEO')
+})
+
+test('a fund standing for several industries is exact for at most ONE of them', () => {
+    // IYT grades Railroads, Trucking and Logistics alike. That is closer than XLI, but a row graded
+    // on it is partly a transport call, and `exact: true` would hide that from everyone reading it.
+    // A fund may still be exact for the one industry it was built for — IHI is Medical - Devices.
+    const users = {}
+    for (const [bucket, meta] of Object.entries(BUCKET_PROXY)) (users[meta.symbol] ??= []).push(bucket)
+    for (const [symbol, buckets] of Object.entries(users)) {
+        const exact = buckets.filter(b => BUCKET_PROXY[b].exact)
+        assert.ok(exact.length <= 1, `${symbol} claims to be exact for ${exact.join(', ')}`)
+    }
+})
+
+test('most industries are graded on a fund of their own grain, not their sector\'s', () => {
+    // 129 of 155 used to fall through to the sector fund, scoring an industry call as a sector call.
+    const own = INDUSTRIES.filter(i => BUCKET_PROXY[i])
+    assert.ok(own.length >= 75, `only ${own.length} industries have their own fund`)
 })
 
 test('proxyFor and proxyMeta answer for the same bucket, at either grain', () => {

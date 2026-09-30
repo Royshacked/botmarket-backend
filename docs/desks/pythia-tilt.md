@@ -48,6 +48,12 @@ measured on. `weighting` and `exact` ride along because both distort a grade —
 fund against a cap-weighted benchmark books part of a size factor as an industry call, and a fund
 that spans several industries is not the bucket it stands in for.
 
+*Fixed 2026-09-30, and until then this held only for a stored row.* A REAFFIRMED row came off the
+wire with no proxy, so `_row` re-resolved it from the map while `carryReaffirmed` kept the old
+baseline — a fund swap would have graded the new fund today against the old one's price at
+inception. It surfaced the day `BUCKET_PROXY` widened from 26 industries to 76 and E&P moved XOP →
+IEO; no open row was on a changed fund. `carryReaffirmed` now carries `proxy` with the baseline.
+
 ## What a tilt IS, and is not
 
 ONE document for the whole market (`api/strategy/tilt.service.js`, collection `tilt`): a `benchmark`
@@ -133,8 +139,8 @@ because the deadline first chosen is the one it is judged against.
 **Which row is a reaffirm is decided SERVER-side** (`carryReaffirmed`, called from `publishTilt`),
 and it has to be, because the author cannot decide it: Pythia emits a table rather than a diff and
 the `<tilt>` block has no `set_at` field, so a row off the wire never carries a window for
-`openWindow` to preserve. Publish reads the standing view first and merges its `set_at`, baseline
-and running contribution onto every row unchanged in **stance, `active_bp` and horizon** — the same
+`openWindow` to preserve. Publish reads the standing view first and merges its `set_at`, baseline,
+**fund (`proxy`)** and running contribution onto every row unchanged in **stance, `active_bp` and horizon** — the same
 equality `diffStances` uses to decide a sector moved, plus the horizon, so the card and the clock
 cannot disagree about what changed. A **closed** window is never carried: a matured row, or one
 whose deadline has simply passed, was already owed a verdict, so restating it is a new call rather

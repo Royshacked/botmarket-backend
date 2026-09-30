@@ -562,7 +562,8 @@ export const BUCKET_PROXY = {
     'Banks - Diversified':                { symbol: 'KBWB', weighting: 'cap',   exact: false },
     'Insurance - Property & Casualty':    { symbol: 'KIE',  weighting: 'equal', exact: false },
     'Financial - Capital Markets':        { symbol: 'IAI',  weighting: 'cap',   exact: false },
-    'Oil & Gas Exploration & Production': { symbol: 'XOP',  weighting: 'equal', exact: true },
+    // IEO over XOP: the cap-weighted twin, same rule as IBB over XBI.
+    'Oil & Gas Exploration & Production': { symbol: 'IEO',  weighting: 'cap',   exact: true },
     'Oil & Gas Equipment & Services':     { symbol: 'OIH',  weighting: 'cap',   exact: true },
     'Oil & Gas Midstream':                { symbol: 'AMLP', weighting: 'cap',   exact: true },
     'Gold':                               { symbol: 'GDX',  weighting: 'cap',   exact: true },
@@ -576,6 +577,72 @@ export const BUCKET_PROXY = {
     'REIT - Residential':                 { symbol: 'REZ',  weighting: 'cap',   exact: false },
     'REIT - Industrial':                  { symbol: 'INDS', weighting: 'cap',   exact: true },
     'Telecommunications Services':        { symbol: 'XTL',  weighting: 'equal', exact: false },
+
+    // Added 2026-09-30 after an all-155 probe showed 129 industries graded on their SECTOR's fund —
+    // an industry call scored exactly like a sector call. Each fund was checked live for AUM and
+    // volume; fit is judged from the fund's mandate (FMP's holdings endpoint is not on our plan).
+    //
+    // ONE FUND MAY STAND FOR SEVERAL INDUSTRIES here, and every such row is `exact: false`. A stance
+    // on Railroads graded on IYT is partly a transport call; that is still closer to the bet than
+    // XLI, and the row says which fund it was. Small funds (under ~$0.4B, or thin volume) are kept
+    // on purpose and marked in the comment: noisier tracking beats grading on the wrong layer.
+    'Silver':                             { symbol: 'SIL',  weighting: 'cap',   exact: true },
+    'Other Precious Metals':              { symbol: 'XME',  weighting: 'equal', exact: false },
+    'Aluminum':                           { symbol: 'XME',  weighting: 'equal', exact: false },
+    'Industrial Materials':               { symbol: 'XME',  weighting: 'equal', exact: false },
+    'Paper, Lumber & Forest Products':    { symbol: 'WOOD', weighting: 'cap',   exact: false },  // small, global
+    'Agricultural Inputs':                { symbol: 'MOO',  weighting: 'cap',   exact: false },
+    'Agricultural Farm Products':         { symbol: 'MOO',  weighting: 'cap',   exact: false },
+    'Agricultural - Machinery':           { symbol: 'MOO',  weighting: 'cap',   exact: false },
+
+    'Uranium':                            { symbol: 'URNM', weighting: 'cap',   exact: true },
+    'Solar':                              { symbol: 'TAN',  weighting: 'cap',   exact: true },
+    'Oil & Gas Refining & Marketing':     { symbol: 'CRAK', weighting: 'cap',   exact: false },  // global
+    'Oil & Gas Drilling':                 { symbol: 'XES',  weighting: 'equal', exact: false },  // small
+
+    'Banks':                              { symbol: 'KBE',  weighting: 'equal', exact: false },
+    'Asset Management':                   { symbol: 'KCE',  weighting: 'equal', exact: false },
+    'Investment - Banking & Investment Services': { symbol: 'KCE', weighting: 'equal', exact: false },
+    'Financial - Data & Stock Exchanges': { symbol: 'KCE',  weighting: 'equal', exact: false },
+    'Insurance - Life':                   { symbol: 'KIE',  weighting: 'equal', exact: false },
+    'Insurance - Reinsurance':            { symbol: 'KIE',  weighting: 'equal', exact: false },
+    'Insurance - Brokers':                { symbol: 'KIE',  weighting: 'equal', exact: false },
+    'Insurance - Specialty':              { symbol: 'KIE',  weighting: 'equal', exact: false },
+    'Insurance - Diversified':            { symbol: 'KIE',  weighting: 'equal', exact: false },
+    'Financial - Credit Services':        { symbol: 'IPAY', weighting: 'cap',   exact: false },  // small, payments
+
+    'Drug Manufacturers - General':       { symbol: 'IHE',  weighting: 'cap',   exact: true },
+    'Medical - Healthcare Plans':         { symbol: 'IHF',  weighting: 'cap',   exact: false },
+    'Medical - Distribution':             { symbol: 'IHF',  weighting: 'cap',   exact: false },
+    'Medical - Instruments & Supplies':   { symbol: 'IHI',  weighting: 'cap',   exact: false },
+    'Medical - Equipment & Services':     { symbol: 'IHI',  weighting: 'cap',   exact: false },
+
+    'Railroads':                          { symbol: 'IYT',  weighting: 'cap',   exact: false },
+    'Trucking':                           { symbol: 'IYT',  weighting: 'cap',   exact: false },
+    'Integrated Freight & Logistics':     { symbol: 'IYT',  weighting: 'cap',   exact: false },
+    'General Transportation':             { symbol: 'IYT',  weighting: 'cap',   exact: false },
+    'Marine Shipping':                    { symbol: 'BOAT', weighting: 'cap',   exact: false },  // small, global
+    'Waste Management':                   { symbol: 'EVX',  weighting: 'equal', exact: false },  // small, thin
+    'Environmental Services':             { symbol: 'EVX',  weighting: 'equal', exact: false },  // small, thin
+    'Engineering & Construction':         { symbol: 'PAVE', weighting: 'cap',   exact: false },
+    'Industrial - Infrastructure Operations': { symbol: 'PAVE', weighting: 'cap', exact: false },
+    'Construction':                       { symbol: 'PAVE', weighting: 'cap',   exact: false },
+    'Construction Materials':             { symbol: 'PAVE', weighting: 'cap',   exact: false },
+    'Electrical Equipment & Parts':       { symbol: 'GRID', weighting: 'cap',   exact: false },
+
+    'Home Improvement':                   { symbol: 'XHB',  weighting: 'equal', exact: false },
+    'Furnishings, Fixtures & Appliances': { symbol: 'XHB',  weighting: 'equal', exact: false },
+    // PEJ is tiered, not cap-weighted; 'equal' is the nearer of the two labels. Small.
+    'Leisure':                            { symbol: 'PEJ',  weighting: 'equal', exact: false },
+    'Travel Services':                    { symbol: 'PEJ',  weighting: 'equal', exact: false },
+    'Travel Lodging':                     { symbol: 'PEJ',  weighting: 'equal', exact: false },
+    'Entertainment':                      { symbol: 'PEJ',  weighting: 'equal', exact: false },
+
+    'Communication Equipment':            { symbol: 'IYZ',  weighting: 'cap',   exact: false },
+    'Electronic Gaming & Multimedia':     { symbol: 'ESPO', weighting: 'cap',   exact: true },   // small
+    'REIT - Specialty':                   { symbol: 'SRVR', weighting: 'cap',   exact: false },  // small
+    'Regulated Water':                    { symbol: 'PHO',  weighting: 'cap',   exact: false },
+    'Renewable Utilities':                { symbol: 'ICLN', weighting: 'cap',   exact: false },  // global
 }
 
 /** What the benchmark itself is priced with. */

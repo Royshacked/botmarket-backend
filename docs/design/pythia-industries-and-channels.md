@@ -132,6 +132,15 @@ Cons Cyclical  ITB XHB XRT PEJ BJK             Comm Svcs    XTL VOX XWEB
 Real Estate    REM REZ INDS SRVR               Cons Def     PBJ
 ```
 
+**Widened 2026-09-30.** The first cut mapped 26 industries; an all-155 probe showed the other 129
+graded on their SECTOR's fund, which scores an industry call exactly like a sector call. Every
+candidate was then checked live for AUM and volume, and `BUCKET_PROXY` now maps **76 industries on
+61 funds**, small funds (WOOD, XES, IPAY, BOAT, EVX, PEJ, ESPO, SRVR) included on purpose. A fund may
+stand for several industries (IYT for Railroads, Trucking, Logistics, General Transportation), and
+is then `exact: false` for all but at most the one it was built for — tested. XOP gave way to IEO,
+its cap-weighted twin. The remaining 79 (autos, restaurants, food and beverage, tobacco, office and
+retail REITs, regulated electric and gas, …) have no usable US fund and stay on their sector's.
+
 ### Cap-weight, not equal-weight — the decision that silently corrupts the grade
 
 The Select **Sector** SPDRs already in use (XLB…XLU) are cap-weighted. The Select **Industry**
@@ -201,6 +210,13 @@ The archived engine fitted ~460 tickers. **Fit the ~40 proxies instead.**
 - It removes the roll-up step, and with it the ETF-versus-taxonomy mismatch: the beta then
   describes **the exact instrument the stance is graded on**.
 - An index is less noisy than a single name, so more pairs should clear the significance bar.
+
+**Key betas on the ROW's fund, not the map's.** A stance keeps the fund it was published on until
+it closes (`carryReaffirmed` carries `proxy` with the baseline), and `BUCKET_PROXY` can change under
+it — it already has once (XOP → IEO, 2026-09-30). So a beta is looked up by `row.proxy.symbol`, and
+the fit universe is **every fund in the map plus every fund still held by an open row**. Fitting
+only the map would leave a standing stance with no beta for the instrument it is graded on, which
+§5 would then treat as unmeasured — the case that maximises the position built on it.
 
 The regression spec carries over unchanged. It must:
 
