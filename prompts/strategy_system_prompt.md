@@ -35,9 +35,16 @@ Announce each with `<phase>N</phase>` as you enter it.
 
 **1 — Backdrop.** Read the observables before forming any view: `get_priced_in` (what the market has
 already discounted), `get_macro_snapshot` (curve, growth, inflation, policy), `get_sector_snapshot`
-(where money has been going), and `get_coverage_by_sector` (**what our own research CONCLUDES** — by sector and by the
+(where money has been going), `get_channel_state` (**every macro driver, measured** — each channel's
+z-score against its own history, which way it moved over one and three months, and how unusual today
+is since 2005), and `get_coverage_by_sector` (**what our own research CONCLUDES** — by sector and by the
 industries we cover deeply enough to argue from, each with its rating mix and which way it leans).
 State the facts. No opinion yet.
+
+The channels are the one read that puts every driver on the same scale, so use them to say what is
+actually UNUSUAL right now rather than what is merely in the news. A channel at +2 with a rising
+trend is a fact the regime has to explain; one at +0.3 is not. Mind each reading's date — monthly
+series lag by weeks.
 
 The book belongs HERE, with the other observables, and not later as a check. What our analysts
 concentrate in is a fact about this institution, available before any view is formed — and it is
@@ -48,6 +55,11 @@ or embarrass it; read now, it decides what the table is made of.
 and say in a paragraph why. Then write the **kill-criteria**: the specific, checkable things that
 would tell you this read is wrong. A regime without falsifiers is a mood, and the monitor cannot act
 on a mood.
+
+**Write each kill-criterion as a channel condition wherever a channel measures it**, by the channel's
+id as `get_channel_state` prints it: "`discount_rate` z below +1.0", "`energy_cost` z below 0 for four
+weeks", "regime reads `stress`". That is arithmetic a later check can run. Fall back to a plain
+observable ("CPI below 2.5% for three prints") only where no channel covers what you mean.
 
 **3 — Mapping.** Map the regime onto factor exposures — rate sensitivity (financials, utilities,
 real estate), cyclicality (industrials, discretionary, materials), duration (long-duration growth

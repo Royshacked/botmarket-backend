@@ -87,10 +87,15 @@ Three things it deliberately is not:
 `prompts/strategy_system_prompt.md`. Five phases, each announced with `<phase>N</phase>`:
 
 1. **Backdrop** — observables before opinion: `get_priced_in` (what the market has discounted),
-   `get_macro_snapshot` (curve, growth, inflation, policy), `get_sector_snapshot` (where money went).
+   `get_macro_snapshot` (curve, growth, inflation, policy), `get_sector_snapshot` (where money went),
+   `get_channel_state` (since 2026-09-30: 23 macro channels as z-scores with their 1- and 3-month
+   trend and percentile since 2005, written by `aether-engine/scripts/build_channel_state.py` and
+   formatted by `api/strategy/channelState.service.js`, which heads the read STALE after 8 days).
 2. **The regime** — named in a few words, argued in a paragraph, and then its **kill-criteria**: the
    checkable things that would say the read is wrong. "A regime without falsifiers is a mood, and the
-   monitor cannot act on a mood." The regime is the BASIS of the table, deliberately not its own
+   monitor cannot act on a mood." Written as **channel conditions** wherever a channel measures the
+   thing (`discount_rate z below +1.0 for four weeks`) — nothing evaluates them automatically yet;
+   that is the monitor row of the design doc §4. The regime is the BASIS of the table, deliberately not its own
    artifact with its own clock — same call as `price_target.basis` on coverage.
 3. **Sector mapping** — the regime onto factor exposures: rate sensitivity, cyclicality, duration,
    dollar and oil. Where a regime becomes a stance.

@@ -56,6 +56,14 @@
             }
         },
         {
+            "name": "get_channel_state",
+            "description": "The macro CHANNELS, measured: every driver (energy cost, real yields, the curve, breakevens, credit spreads, the dollar, liquidity, labor, freight, demand…) as a z-score against its own trailing two years, with its reading one and three months ago and where today sits in its history since 2005, plus the week's regime from VIX and credit spreads. The Phase-1 read of what is actually moving, and the vocabulary for kill-criteria — a falsifier written as \"discount_rate z below +1\" is checkable where prose is not. READINGS, not sector evidence: which buckets move with a channel is not measured yet. Each line carries its own as-of date; monthly series lag by weeks. No arguments.",
+            "input_schema": {
+                "type": "object",
+                "properties": {}
+            }
+        },
+        {
             "name": "consult",
             "description": "Put ONE decision to a more capable desk head and get a straight answer back. It cannot see this conversation and cannot fetch anything — you hand it the question and every number it needs, and it thinks harder than you can in-line.\n\nA tilt is a broadcast the whole house reads, so it is worth thinking hard about ONCE. Reach for it in exactly two situations: **the regime call itself**, when the macro data, the tape and what is already priced do not point the same way and you have to name one regime anyway; and **a sector stance that contradicts our own coverage book** — your top-down read and the analysts' bottom-up theses disagree, and you must decide which one the stance follows and say why. Not per sector: the stances follow from the regime, and re-consulting each one is the same call answered eight times.\n\nDo NOT reach for it to look something up, to double-check work you are already confident in, to summarize, or because a question feels big. A consult costs a full model call and adds seconds to the turn: if you already know the answer, or a tool call would settle it, that is the cheaper and better move. Most turns should end without it.",
             "input_schema": {

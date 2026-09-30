@@ -642,6 +642,10 @@ export const TOOL_SCHEMAS = {
         "type": "object",
         "properties": {}
     },
+    get_channel_state: {
+        "type": "object",
+        "properties": {}
+    },
     get_sector_view: {
         "type": "object",
         "properties": {}

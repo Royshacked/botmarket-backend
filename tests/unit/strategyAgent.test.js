@@ -181,7 +181,7 @@ test('the published view rides the TURN context, not the system prompt', () => {
 // ── the tool surface ─────────────────────────────────────────────────────────
 test('the desk gets the top-down reads and NOT the stock-picking ones', () => {
     const names = TOOLS.map(t => t.name)
-    for (const t of ['get_macro_snapshot', 'get_sector_snapshot', 'get_priced_in', 'get_coverage_by_sector']) {
+    for (const t of ['get_macro_snapshot', 'get_sector_snapshot', 'get_priced_in', 'get_coverage_by_sector', 'get_channel_state']) {
         assert.ok(names.includes(t), `missing ${t}`)
     }
     // Pythia does not pick names or size positions — giving it these would invite it to.
@@ -193,7 +193,7 @@ test('the desk gets the top-down reads and NOT the stock-picking ones', () => {
 test('the argument-free tools come from the SHARED registry with an empty schema', () => {
     // They used to be hand-rolled objects on this array, which bypassed the one place tool schemas
     // live — and therefore the orphan/snapshot guards that watch it.
-    for (const t of TOOLS.filter(t => ['get_priced_in', 'get_coverage_by_sector'].includes(t.name))) {
+    for (const t of TOOLS.filter(t => ['get_priced_in', 'get_coverage_by_sector', 'get_channel_state'].includes(t.name))) {
         assert.equal(t.input_schema.type, 'object')
         assert.deepEqual(t.input_schema.properties, {}, `${t.name} should take no arguments`)
     }

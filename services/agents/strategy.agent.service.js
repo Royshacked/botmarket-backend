@@ -21,6 +21,7 @@ import { makeRouteCapture, ROUTE_TAGS, buildRouteRule } from '../routing.util.js
 import { getMacroSnapshot, getSectorSnapshot } from '../../providers/fmp.provider.js'
 import { getPricedIn } from '../../providers/fred.provider.js'
 import { coverageService } from '../../api/analyst/coverage.service.js'
+import { readChannelState, formatChannelState } from '../../api/strategy/channelState.service.js'
 import { SECTORS } from '../entity/vocabulary.js'
 import { logger } from '../logger.service.js'
 
@@ -39,6 +40,10 @@ export const TOOLS = [
         get_sector_snapshot: `Today's sector rotation, every sector ranked leaders→laggards. Where money has actually been going — the tape against which your stance is a claim. No arguments.`,
         get_priced_in: `What the MARKET has already discounted: 5y and 10y breakeven inflation, the 5y5y forward, and the 10y TIPS real yield (FRED, daily). This is the benchmark your view has to beat — a regime call that merely restates what is priced is not a view. Breakevens carry an inflation risk premium, so they are not a pure forecast, and the market-implied POLICY PATH is not available to us. No arguments.`,
         get_coverage_by_sector: `OUR OWN analysts' book, aggregated by sector: how many active theses per sector, and which sectors we cover at all. The bottom-up cross-check for Phase 4 — where the book agrees with your top-down read that is your strongest basis, and where it disagrees you must say so rather than reconciling it away. No arguments.`,
+        // Last of the desk's own tools, ahead of the sidecar only — `consult` stays LAST on every
+        // desk (agentToolsRegistry.test.js). The channel read, revived 2026-09-30 as step 4 of
+        // docs/design/pythia-industries-and-channels.md: Python writes it, this only formats it.
+        get_channel_state: `The macro CHANNELS, measured: every driver (energy cost, real yields, the curve, breakevens, credit spreads, the dollar, liquidity, labor, freight, demand…) as a z-score against its own trailing two years, with its reading one and three months ago and where today sits in its history since 2005, plus the week's regime from VIX and credit spreads. The Phase-1 read of what is actually moving, and the vocabulary for kill-criteria — a falsifier written as "discount_rate z below +1" is checkable where prose is not. READINGS, not sector evidence: which buckets move with a channel is not measured yet. Each line carries its own as-of date; monthly series lag by weeks. No arguments.`,
         // Appended, never inserted — prompt caching keys off the array prefix. The reasoning sidecar
         // (services/deepThink.service.js): one bounded decision put to a stronger model and handed
         // back as a tool result. The mechanism half of this description is shared with every other
@@ -57,6 +62,7 @@ const TOOL_HANDLERS = {
     get_sector_snapshot: makeToolHandler('get_sector_snapshot', () => getSectorSnapshot(), (e) => `Could not fetch sector snapshot: ${e.message}`, LOG),
     get_priced_in:       makeToolHandler('get_priced_in',       () => getPricedIn(),       (e) => `Could not fetch market-implied levels: ${e.message}`, LOG),
     get_coverage_by_sector: makeToolHandler('get_coverage_by_sector', () => _coverageBySector(), (e) => `Could not read the coverage book: ${e.message}`, LOG),
+    get_channel_state:   makeToolHandler('get_channel_state',   async () => formatChannelState(await readChannelState()), (e) => `Could not read the channel state: ${e.message}`, LOG),
 }
 
 export const strategyAgentService = { chatStream }

@@ -88,6 +88,10 @@ api/
                           delete: a desk that can erase its calls has no track record). Every handler
                           rides makeHandle. Publish diffs against the view in force (tilt.assess.
                           diffStances) → tiltNotify.notifyTiltChanged to every admin → runHouseScan
+    channelState.service.js   Pythia's get_channel_state: reads the ONE `pythia_channel_latest` doc
+                              aether-engine's build_channel_state.py writes (23 channels, z / 4w / 13w
+                              / percentile / as-of) and formats it. No arithmetic on this side; a read
+                              older than STALE_DAYS is headed STALE, an absent one forbids inventing
     tiltSeries.service.js     The LINE behind each stance: the bucket's relative return since the
                               call, rebased to 100, served at GET /tilt/series. ARITHMETIC, matching
                               relativeReturnPct exactly — the geometric form reads half a point

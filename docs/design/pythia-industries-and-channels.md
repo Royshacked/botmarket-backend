@@ -437,6 +437,17 @@ Each step is useful alone and none of them requires the next.
 3. **The sparkline**, with its per-day cache. Independent of everything else.
    *Done 2026-09-30 — `tiltSeries.service.js`, `GET /tilt/series`, and the line on the board.*
 4. **Revive `state`.** Cheapest channel work, and it is what makes the regime falsifiable.
+   *Done 2026-09-30.* `aether-engine/scripts/build_channel_state.py` (cron `pythia-channel-state`)
+   writes 23 channels — the 19 that ran before plus curve, breakevens, liquidity and a high-yield
+   proxy — to `pythia_channel_state` / `pythia_regimes` / `pythia_channel_latest`; Pythia reads them
+   through `get_channel_state` (`api/strategy/channelState.service.js`) and, on its first live run,
+   wrote all four kill-criteria as channel conditions. Corrections found on the way: `freight_logistics`
+   had read PPIACO (ALL commodities) and now reads PCU484484 (truck transportation); the HY proxy is
+   **HYG/IEI**, not the HYG/LQD this doc suggested — measured against the three years of real HY OAS,
+   HYG/LQD correlated 0.46 and read 2022 as tighter credit; HYG/IEI correlates 0.91.
+   **Carry into step 5:** monthly FRED series are dated at the period START, so the weekly table
+   shows a reading ~6 weeks before it was published. Harmless for a read; a look-ahead leak for a
+   regression on weekly changes. Lag monthly/quarterly series by their release delay before fitting.
 5. **Refit `betas` on the ~40 proxies.** Upgrades the weakest basis the desk publishes.
 6. **Elasticity, residual sizing, and the Prometheus verification loop.** The largest step, and the
    one that makes the judgment scoreable.
