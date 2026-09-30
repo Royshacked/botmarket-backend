@@ -92,7 +92,11 @@ api/
                               publish, never overwritten; house-owned like coverage (no userId). Each
                               ROW owns its clock (forecastClock.openWindow: reaffirm keeps set_at,
                               re-author restarts) and its FROZEN baseline (base_px / base_bench_px —
-                              stampBaselines at publish). stanceCoherence refuses a row whose words and
+                              stampBaselines at publish). The reaffirm is decided SERVER-side:
+                              publish reads the standing view and carryReaffirmed merges its clock +
+                              baseline onto every row unchanged in (stance, active_bp, horizon) — a
+                              row off the wire carries no set_at, so without it every publish
+                              restarted every deadline. stanceCoherence refuses a row whose words and
                               number disagree; balanceOf records an unbalanced table rather than losing
                               it. Writes ride houseArtifact.repo (`_updateSet` = only the patched fields)
   aether/                 Aether — the EVENT-EXPOSURE desk  /api/aether/*. Node is READ-ONLY against the

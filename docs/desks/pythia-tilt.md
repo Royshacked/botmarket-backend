@@ -89,6 +89,29 @@ Two things are frozen onto every row at publish, and the rule governing both is 
 The consequence the prompt states plainly: stretching a horizon to flatter a stance does not work,
 because the deadline first chosen is the one it is judged against.
 
+**Which row is a reaffirm is decided SERVER-side** (`carryReaffirmed`, called from `publishTilt`),
+and it has to be, because the author cannot decide it: Pythia emits a table rather than a diff and
+the `<tilt>` block has no `set_at` field, so a row off the wire never carries a window for
+`openWindow` to preserve. Publish reads the standing view first and merges its `set_at`, baseline
+and running contribution onto every row unchanged in **stance, `active_bp` and horizon** — the same
+equality `diffStances` uses to decide a sector moved, plus the horizon, so the card and the clock
+cannot disagree about what changed. A **closed** window is never carried: a matured row, or one
+whose deadline has simply passed, was already owed a verdict, so restating it is a new call rather
+than the old one continuing (carrying it would store a row overdue the instant it is written, and
+the review it triggers would re-offer the same stance on every tick).
+
+*Fixed 2026-09-30, and this section previously described the rule as if the data held it.* It did
+not: the helper preserved a `set_at` it was handed and nothing ever handed it one, so **every**
+publish re-stamped **every** deadline and `stampBaselines` re-priced every baseline. Four of the
+five republishes on the book had restarted all six rows — no stance could ever mature (the one
+trigger the clock exists to pull), and the score re-based at each review's own prices, so Energy
+read **+0.99bp** against **−3.36bp** measured from the baseline it was actually set at. The unit
+test that claimed to cover the rule fed `set_at` straight into the normalizer, which is the one
+thing a real publish never does, so it stayed green throughout. The view standing at the time is
+repaired by `scripts/repair-tilt-clocks.mjs`, which REPLAYS the publication chain through
+`carryReaffirmed` — the fix applied retroactively rather than a second opinion about what counts as
+a reaffirm — and leaves alone any stance whose baseline the chain cannot honestly reconstruct.
+
 ## The gates — refused vs recorded
 
 Same distinction as coverage, and the same reason:

@@ -27,7 +27,7 @@ import { fetchLastPrice }  from '../../services/lastPrice.service.js'
 import { logger }          from '../../services/logger.service.js'
 import { toNum }           from '../../services/format.util.js'
 import { normalizeSector, SECTORS, sectorProxy, BENCHMARK_PROXY } from '../../services/entity/vocabulary.js'
-import { openWindow, HORIZONS, DEFAULT_HORIZON } from '../../services/forecastClock.js'
+import { openWindow, normalizeHorizon, HORIZONS, DEFAULT_HORIZON } from '../../services/forecastClock.js'
 import { newRevision, diffFields }  from '../../services/revisionTrail.js'
 
 const LOG        = '[tilt]'
@@ -215,6 +215,79 @@ export function incoherentRows(doc) {
     return _arr(doc?.tilts).map(stanceCoherence).filter(c => !c.ok)
 }
 
+/**
+ * Is this freshly emitted row the SAME CALL as one already standing? Pure.
+ *
+ * Reaffirm-vs-re-author has to be decided HERE, because the author cannot decide it: Pythia emits a
+ * table, not a diff, and the `<tilt>` block has no `set_at` field — there is no way for it to say
+ * "this is the call I made in August". The prompt promises that restating a stance keeps its window
+ * and its entry prices; this is what makes the promise true.
+ *
+ * The equality is deliberately the SAME ONE `diffStances` uses to decide a sector moved, plus the
+ * horizon: re-cutting a 12m call to 3m is a different call about the same sector and deserves a
+ * deadline it can actually be judged against. Stance, weight and horizon agree → nothing moved.
+ */
+function _sameCall(raw, held) {
+    return (STANCES.includes(raw?.stance) ? raw.stance : null) === (held?.stance ?? null)
+        && _num(raw?.active_bp) === _num(held?.active_bp)
+        && normalizeHorizon(raw?.horizon) === normalizeHorizon(held?.horizon)
+}
+
+/**
+ * Merge the standing view's clock and baseline onto every row that merely RESTATES it. Pure —
+ * returns fresh rows, never mutates either side, and is the identity when nothing is standing.
+ *
+ * WHY THE PUBLISH PATH NEEDS THIS AT ALL. `openWindow` keeps `set_at` only when the row it is given
+ * already carries one, and a row off the wire never does — so without this merge every publish
+ * re-stamped every clock and `stampBaselines` re-priced every baseline. A monthly review then
+ * pushed each deadline out another six months (nothing could ever mature, which is the one trigger
+ * the whole clock exists to pull) and re-based the score at the review's own prices, so a stance
+ * that had been wrong for six weeks published as flat. Measured on the live book at the time:
+ * Energy read +0.99bp against −3.36bp from the baseline it was actually set at.
+ *
+ * A CLOSED window is never carried. If the held row matured — or its deadline has simply passed —
+ * the desk has already been asked for a verdict on it, and restating it is a NEW call rather than
+ * the old one continuing. Carrying the dead clock forward would republish a row that is overdue the
+ * instant it is stored, and the review it triggers would offer the same row again on every tick.
+ */
+export function carryReaffirmed(rawTilts, previous, now = new Date().toISOString()) {
+    const rows = _arr(rawTilts)
+    const held = new Map(_arr(previous?.tilts).filter(r => r?.sector).map(r => [r.sector, r]))
+    if (!held.size) return rows
+
+    const nowMs = Date.parse(now)
+    return rows.map(raw => {
+        if (!raw || typeof raw !== 'object') return raw
+        const prev = held.get(normalizeSector(raw.sector))
+        if (!prev || !_sameCall(raw, prev)) return raw
+
+        const endsMs = Date.parse(prev.review_date ?? '')
+        const open   = prev.state !== 'matured' && Number.isFinite(endsMs) && Number.isFinite(nowMs) && endsMs > nowMs
+        if (!open) return raw
+
+        // `??` and not a plain overwrite: a caller that DID supply a window (a repair script, a
+        // re-publish of a stored doc) is stating the call's history on purpose, and this is a
+        // fallback for the author who cannot state it, not an override of the one who can.
+        return {
+            ...raw,
+            set_at:          raw.set_at          ?? prev.set_at,
+            base_px:         raw.base_px         ?? prev.base_px,
+            base_bench_px:   raw.base_bench_px   ?? prev.base_bench_px,
+            contribution_bp: raw.contribution_bp ?? prev.contribution_bp,
+        }
+    })
+}
+
+/**
+ * The document a publish actually stores: the emitted table, with every reaffirmed row's clock and
+ * baseline carried over from the view it restates. Pure, and exported because it is the whole of
+ * publish that can be tested without a database — the CRUD around it is DB-bound.
+ */
+export function draftForPublish(raw, previous, now = new Date().toISOString()) {
+    const r = (raw && typeof raw === 'object') ? raw : {}
+    return normalizeTilt({ ...r, tilts: carryReaffirmed(r.tilts, previous, now) }, now)
+}
+
 export const tiltService = { publishTilt, getCurrentTilt, getTiltById, listTilts, updateTilt, retireTilt, recordMonitorState }
 
 /**
@@ -234,6 +307,10 @@ const _io = {
     priceFor: async (symbol) => {
         try { return await fetchLastPrice(symbol) } catch { return null }
     },
+    // The view a publish is restating, read through the same seam. `getCurrentTilt` already returns
+    // null rather than throwing, so an unreachable read degrades to "every row is a fresh call" —
+    // exactly what publish did before rows could be carried, never to a failed publish.
+    currentView: (benchmark) => getCurrentTilt(benchmark),
 }
 export function _setTiltIO(io) { Object.assign(_io, io) }
 
@@ -283,7 +360,11 @@ async function _ensureIndexes(db) {
  * reach an allocator, and the author can still fix it here.
  */
 async function publishTilt(raw, { note = null } = {}) {
-    const doc = normalizeTilt(raw)
+    // What is standing right now, read BEFORE the table is normalised: a reaffirmed row's window and
+    // baseline have to be merged onto it while it is still raw, because `openWindow` re-stamps the
+    // moment it sees a row without a `set_at`. See carryReaffirmed for what that cost.
+    const previous = await _io.currentView(_str(raw?.benchmark) ?? 'SPX')
+    const doc = draftForPublish(raw, previous)
     if (!doc.tilts.length) return { ok: false, reason: 'no_usable_rows' }
 
     // A row whose sector will not canonicalise is DROPPED by the normalizer, and the stored doc
@@ -322,7 +403,14 @@ async function publishTilt(raw, { note = null } = {}) {
             { $set: { status: 'superseded', updated_at: doc.updated_at } },
         )
         await db.collection(COLLECTION).insertOne({ ...doc })
-        logger.info(LOG, 'tilt published', { id: doc.id, benchmark: doc.benchmark, rows: doc.tilts.length, net_bp: doc.net_bp })
+        // A row whose clock predates this document is one the desk RESTATED. Logged because it is
+        // the difference between a desk with a track record and a series of opinions, and because a
+        // review that reaffirms nothing is worth noticing rather than inferring later from the data.
+        const reaffirmed = doc.tilts.filter(r => r.set_at && r.set_at < doc.created_at).length
+        logger.info(LOG, 'tilt published', {
+            id: doc.id, benchmark: doc.benchmark, rows: doc.tilts.length, net_bp: doc.net_bp,
+            reaffirmed, reauthored: doc.tilts.length - reaffirmed,
+        })
         return { ok: true, doc }
     } catch (err) {
         logger.error(LOG, 'Failed to publish tilt', err)

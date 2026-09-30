@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 
 import {
     normalizeTilt, stanceCoherence, incoherentRows, balanceOf,
+    carryReaffirmed, draftForPublish, tiltService, _setTiltIO,
     STANCES, TILT_BASES, TILT_STATUSES, BALANCE_TOLERANCE_BP,
 } from '../../api/strategy/tilt.service.js'
 
@@ -203,4 +204,125 @@ test('the stored document and the draft answer alike', () => {
     const doc  = normalizeTilt({ benchmark: 'SPX', tilts: rows })
     assert.equal(doc.balanced, balanceOf(rows).balanced)
     assert.equal(doc.net_bp,   balanceOf(rows).net_bp)
+})
+
+// ── the reaffirm carry, on the PUBLISH path ──────────────────────────────────
+//
+// The clock test above hands `set_at` straight to the normalizer, which is the one thing a real
+// publish never does: Pythia emits a table, the `<tilt>` block has no `set_at` field, and the
+// frontend posts what the model emitted. So the rule held in the helper and broke in the app —
+// every publish re-stamped every window and re-priced every baseline. These tests run the path the
+// wire actually takes.
+
+const LATER = '2026-09-19T00:00:00.000Z'
+/** A STORED row, as the standing view carries it — clock and baseline already frozen. */
+const heldRow = (over = {}) => ({
+    sector: 'Technology', stance: 'over', active_bp: 150, horizon: '12m',
+    set_at: NOW, review_date: '2027-08-06T00:00:00.000Z',
+    base_px: 180, base_bench_px: 700, contribution_bp: 1.25, state: 'open', ...over,
+})
+/** A row off the wire — what the model emits, which is stance, weight and words. */
+const wireRow = (over = {}) => ({ sector: 'Technology', stance: 'over', active_bp: 150, horizon: '12m', basis: 'bottom_up', ...over })
+
+test('carry: a RESTATED stance keeps its window, its baseline and its running grade', () => {
+    const [carried] = carryReaffirmed([wireRow()], { tilts: [heldRow()] }, LATER)
+    assert.equal(carried.set_at, NOW, 'the deadline first chosen is the one it is judged against')
+    assert.equal(carried.base_px, 180)
+    assert.equal(carried.base_bench_px, 700)
+    assert.equal(carried.contribution_bp, 1.25)
+})
+
+test('carry: a MOVED stance is a new call — weight, direction or horizon each restart it', () => {
+    const held = { tilts: [heldRow()] }
+    for (const moved of [
+        wireRow({ active_bp: 200 }),                               // resized
+        wireRow({ stance: 'under', active_bp: -150 }),             // reversed
+        wireRow({ horizon: '3m' }),                                // re-cut to a different deadline
+    ]) {
+        const [row0] = carryReaffirmed([moved], held, LATER)
+        assert.equal(row0.set_at, undefined, 'a changed call may not inherit the old one\'s clock')
+        assert.equal(row0.base_px, undefined)
+    }
+})
+
+test('carry: a CLOSED window is never inherited — the old call was already owed a verdict', () => {
+    // Both shapes of closed: graded shut by the monitor, and simply past its deadline. Carrying
+    // either would store a row that is overdue the instant it is written, and the review it triggers
+    // would offer the same stance again on every tick.
+    const matured = { tilts: [heldRow({ state: 'matured' })] }
+    const expired = { tilts: [heldRow({ review_date: '2026-09-01T00:00:00.000Z' })] }
+    for (const prev of [matured, expired]) {
+        const [row0] = carryReaffirmed([wireRow()], prev, LATER)
+        assert.equal(row0.set_at, undefined)
+        assert.equal(row0.base_px, undefined)
+    }
+})
+
+test('carry: the sector is matched CANONICALLY, so a GICS spelling still finds its own history', () => {
+    const [carried] = carryReaffirmed(
+        [wireRow({ sector: 'Information Technology' })],
+        { tilts: [heldRow()] }, LATER,
+    )
+    assert.equal(carried.set_at, NOW)
+})
+
+test('carry: no standing view, an unknown sector and junk rows are all the identity', () => {
+    const rows = [wireRow()]
+    assert.deepEqual(carryReaffirmed(rows, null, LATER), rows)
+    assert.deepEqual(carryReaffirmed(rows, { tilts: [] }, LATER), rows)
+    assert.deepEqual(carryReaffirmed([wireRow({ sector: 'Energy' })], { tilts: [heldRow()] }, LATER),
+        [wireRow({ sector: 'Energy' })], 'a sector we held no view on has nothing to inherit')
+    assert.deepEqual(carryReaffirmed(['nonsense', null], { tilts: [heldRow()] }, LATER), ['nonsense', null])
+    assert.deepEqual(carryReaffirmed(undefined, { tilts: [heldRow()] }, LATER), [])
+})
+
+test('carry: a caller that states the window itself is not overridden', () => {
+    // A repair script or a re-publish of a stored document is asserting the call's history on
+    // purpose. This is a fallback for the author who cannot state it, not an override of one who can.
+    const [carried] = carryReaffirmed(
+        [wireRow({ set_at: '2026-01-01T00:00:00.000Z', base_px: 99 })],
+        { tilts: [heldRow()] }, LATER,
+    )
+    assert.equal(carried.set_at, '2026-01-01T00:00:00.000Z')
+    assert.equal(carried.base_px, 99)
+})
+
+test('draft: the carried window survives normalisation, and the deadline holds', () => {
+    // The end of the publish path that a database is not needed for: what publishTilt stores.
+    const draft = draftForPublish(
+        { tilts: [wireRow(), wireRow({ sector: 'Energy', stance: 'under', active_bp: -150, horizon: '3m' })] },
+        { tilts: [heldRow()] },
+        LATER,
+    )
+    const [tech, energy] = draft.tilts
+    assert.equal(tech.set_at, NOW)
+    assert.equal(tech.review_date, '2027-08-06T00:00:00.000Z', 'a monthly review must not push the deadline out')
+    assert.equal(tech.base_px, 180, 'still graded from where the call was actually made')
+    assert.equal(energy.set_at, LATER, 'a sector we had no view on is a fresh call')
+    assert.equal(energy.review_date, '2026-12-19T00:00:00.000Z')
+})
+
+test('draft: republishing an unchanged table leaves every clock exactly where it was', () => {
+    // The failure this whole fix is about: four of five real republishes restarted all six rows,
+    // so nothing could ever mature and the score re-based at each review's own prices.
+    const standing = { tilts: [heldRow(), heldRow({ sector: 'Energy', stance: 'under', active_bp: -150, horizon: '3m', set_at: NOW, review_date: '2026-11-06T00:00:00.000Z', base_px: 58 })] }
+    const draft = draftForPublish({ tilts: [wireRow(), wireRow({ sector: 'Energy', stance: 'under', active_bp: -150, horizon: '3m' })] }, standing, LATER)
+    assert.deepEqual(draft.tilts.map(r => r.set_at), [NOW, NOW])
+    assert.deepEqual(draft.tilts.map(r => r.base_px), [180, 58])
+    assert.equal(draft.created_at, LATER, 'the DOCUMENT is new; the calls on it are not')
+})
+
+test('publish reads the standing view before it normalises anything', async () => {
+    // The link the helper tests cannot reach: publishTilt must fetch what it is restating, and do it
+    // for the benchmark being published. Asserted on the refusal path, which returns before any DB.
+    const seen = []
+    _setTiltIO({ currentView: async (benchmark) => { seen.push(benchmark); return null } })
+    try {
+        const res = await tiltService.publishTilt({ benchmark: 'NDX', tilts: [wireRow({ stance: 'under', active_bp: 150 })] })
+        assert.equal(res.ok, false)
+        assert.equal(res.reason, 'stance_contradicts_weight')
+        assert.deepEqual(seen, ['NDX'], 'the read happens, and for the benchmark being published')
+    } finally {
+        _setTiltIO({ currentView: (benchmark) => tiltService.getCurrentTilt(benchmark) })
+    }
 })
