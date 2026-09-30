@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import {
     normalizeTilt, stanceCoherence, incoherentRows, balanceOf,
     carryReaffirmed, draftForPublish, tiltService, _setTiltIO,
-    STANCES, TILT_BASES, TILT_STATUSES, BALANCE_TOLERANCE_BP,
+    STANCES, TILT_BASES, TILT_STATUSES, BALANCE_TOLERANCE_BP, DESK_HORIZON,
 } from '../../api/strategy/tilt.service.js'
 
 // Pythia's `tilt` schema normalizer (pure). The CRUD is DB-bound and not unit-tested, mirroring
@@ -64,9 +64,12 @@ test('normalize: unknown stance / basis / state null out rather than defaulting 
 // ── the clock lives on the ROW ───────────────────────────────────────────────
 test('each row carries its OWN window, defaulted and derived', () => {
     const t = normalizeTilt({ tilts: [row(), row({ sector: 'Energy', horizon: '3m', active_bp: -150, stance: 'under' })] }, NOW)
-    assert.equal(t.tilts[0].horizon, '12m')                          // house default
+    // THE DESK's default, not the clock module's `12m`. Pythia's prompt has always said 6m, and a
+    // stance defaulting to 12m under a monthly review would never be graded inside a year.
+    assert.equal(t.tilts[0].horizon, DESK_HORIZON)
+    assert.equal(DESK_HORIZON, '6m')
     assert.equal(t.tilts[0].set_at, NOW)
-    assert.equal(t.tilts[0].review_date, '2027-08-06T00:00:00.000Z')
+    assert.equal(t.tilts[0].review_date, '2027-02-06T00:00:00.000Z')
     assert.equal(t.tilts[1].horizon, '3m')
     assert.equal(t.tilts[1].review_date, '2026-11-06T00:00:00.000Z')
 })
@@ -256,6 +259,21 @@ test('carry: a CLOSED window is never inherited — the old call was already owe
         assert.equal(row0.set_at, undefined)
         assert.equal(row0.base_px, undefined)
     }
+})
+
+test('carry: an OMITTED horizon is the desk default, so it still reads as the same call', () => {
+    // The trap the desk default closes. `_sameCall` compares horizons, so if the normalizer and the
+    // reaffirm check disagreed about what an omission means, a row Pythia meant to restate would be
+    // filed as a re-author and silently lose its window — and `diffStances` ignores the horizon, so
+    // no card would say so either. One row at a time, which is harder to see than all six at once.
+    const held = { tilts: [heldRow({ horizon: '6m', review_date: '2027-02-06T00:00:00.000Z' })] }
+    const [carried] = carryReaffirmed([wireRow({ horizon: undefined })], held, LATER)
+    assert.equal(carried.set_at, NOW, 'an omitted horizon must not restart the clock')
+    assert.equal(carried.base_px, 180)
+
+    // ...and the other direction: a row that really is re-cut still restarts.
+    const [recut] = carryReaffirmed([wireRow({ horizon: '3m' })], held, LATER)
+    assert.equal(recut.set_at, undefined)
 })
 
 test('carry: the sector is matched CANONICALLY, so a GICS spelling still finds its own history', () => {

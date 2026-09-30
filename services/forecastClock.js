@@ -16,7 +16,11 @@
 // per-sector stances (`set_at` → `review_date`). The deadline's FIELD NAME stays each caller's
 // business — this module supplies the rule, not the schema.
 
-/** Horizons a call may be made over. `12m` is the sell-side convention and our default. */
+/**
+ * Horizons a call may be made over. `12m` is the sell-side convention and the FALLBACK default —
+ * right for a price target, which is a twelve-month number almost by definition, and wrong for
+ * anything reviewed monthly. A caller whose convention differs states its own (see below).
+ */
 export const HORIZONS        = ['3m', '6m', '12m', '18m', '24m']
 export const DEFAULT_HORIZON = '12m'
 const HORIZON_MONTHS = { '3m': 3, '6m': 6, '12m': 12, '18m': 18, '24m': 24 }
@@ -25,9 +29,17 @@ const HORIZON_MONTHS = { '3m': 3, '6m': 6, '12m': 12, '18m': 18, '24m': 24 }
  * A horizon from the vocabulary. Anything unrecognised — a free-text `"12 months"`, an omission —
  * DEFAULTS rather than throwing: a view is worth more than its metadata, and a missing deadline
  * should become the house convention, not discard the work.
+ *
+ * `fallback` is which house convention, because there is more than one and the difference is not
+ * cosmetic. A desk's default is part of its schema, and this module has always held that the schema
+ * is the caller's business — Pythia's prompt says a stance defaults to `6m`, and a silent `12m`
+ * both broke that promise and, since the reaffirm check compares horizons, would have read an
+ * omitted horizon as a re-authored stance and restarted its clock. A junk fallback still lands on
+ * the house default, so a caller cannot invent a horizon by passing one.
  */
-export function normalizeHorizon(v) {
-    return HORIZONS.includes(v) ? v : DEFAULT_HORIZON
+export function normalizeHorizon(v, fallback = DEFAULT_HORIZON) {
+    if (HORIZONS.includes(v)) return v
+    return HORIZONS.includes(fallback) ? fallback : DEFAULT_HORIZON
 }
 
 /** A valid ISO instant, or null. */
@@ -64,9 +76,11 @@ export function addMonths(iso, months) {
  *
  * `ends_at` is ALWAYS derived, so a hand-written deadline can never disagree with its horizon.
  * Callers map it onto their own field name (`target_date`, `review_date`).
+ *
+ * `fallback` is the caller's own default for a row that states no horizon — see normalizeHorizon.
  */
-export function openWindow({ set_at, horizon } = {}, now) {
-    const h     = normalizeHorizon(horizon)
+export function openWindow({ set_at, horizon } = {}, now, fallback = DEFAULT_HORIZON) {
+    const h     = normalizeHorizon(horizon, fallback)
     const start = toIso(set_at) ?? now
     return { horizon: h, set_at: start, ends_at: addMonths(start, HORIZON_MONTHS[h]) }
 }

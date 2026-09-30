@@ -27,7 +27,7 @@ import { fetchLastPrice }  from '../../services/lastPrice.service.js'
 import { logger }          from '../../services/logger.service.js'
 import { toNum }           from '../../services/format.util.js'
 import { normalizeSector, SECTORS, sectorProxy, BENCHMARK_PROXY } from '../../services/entity/vocabulary.js'
-import { openWindow, normalizeHorizon, HORIZONS, DEFAULT_HORIZON } from '../../services/forecastClock.js'
+import { openWindow, normalizeHorizon, HORIZONS } from '../../services/forecastClock.js'
 import { newRevision, diffFields }  from '../../services/revisionTrail.js'
 
 const LOG        = '[tilt]'
@@ -67,10 +67,27 @@ export const ROW_STATES = ['open', 'matured']
  */
 export const BALANCE_TOLERANCE_BP = 50
 
+/**
+ * What a stance defaults to when it states no horizon — THIS DESK's convention, not the clock
+ * module's. `forecastClock.DEFAULT_HORIZON` is `12m`, which is right for a price target (a
+ * twelve-month number by definition, and what the Analyst's prompt promises) and wrong for a view
+ * re-read every month: a 12m stance reviewed monthly is never graded inside a year. Pythia's prompt
+ * has always said `6m`; this is what makes that true rather than aspirational.
+ */
+export const DESK_HORIZON = '6m'
+
 // ─── pure helpers ─────────────────────────────────────────────────────────────
 const _str = v => (typeof v === 'string' && v.trim() ? v.trim() : null)
 const _arr = v => (Array.isArray(v) ? v : [])
 const _num = toNum   // the one safe coercion — see format.util.toNum
+/**
+ * The desk's horizon reading, in ONE place because two callers depend on them agreeing: the
+ * normalizer stamps a row's window with it, and the reaffirm check compares horizons to decide
+ * whether a stance is the same call. If those two ever read an omitted horizon differently, a row
+ * Pythia meant to restate is filed as a re-author and silently loses its clock — the exact failure
+ * `carryReaffirmed` exists to prevent, arriving one row at a time instead of six.
+ */
+const _horizon = v => normalizeHorizon(v, DESK_HORIZON)
 
 /**
  * One sector row. Pure. Returns null when it carries no usable sector — an unrecognised sector
@@ -88,7 +105,7 @@ function _row(raw, now) {
     const sector = normalizeSector(raw.sector)
     if (!sector) return null
 
-    const { horizon, set_at, ends_at } = openWindow(raw, now)
+    const { horizon, set_at, ends_at } = openWindow(raw, now, DESK_HORIZON)
     return {
         sector,
         stance:    STANCES.includes(raw.stance) ? raw.stance : null,
@@ -230,7 +247,7 @@ export function incoherentRows(doc) {
 function _sameCall(raw, held) {
     return (STANCES.includes(raw?.stance) ? raw.stance : null) === (held?.stance ?? null)
         && _num(raw?.active_bp) === _num(held?.active_bp)
-        && normalizeHorizon(raw?.horizon) === normalizeHorizon(held?.horizon)
+        && _horizon(raw?.horizon) === _horizon(held?.horizon)
 }
 
 /**
@@ -300,7 +317,10 @@ export const tiltService = { publishTilt, getCurrentTilt, getTiltById, listTilts
  * fields), `inc` the counters.
  */
 function recordMonitorState(id, opts) { return _repo.recordMonitorState(id, opts) }
-export { HORIZONS, DEFAULT_HORIZON, SECTORS }
+// `DEFAULT_HORIZON` is deliberately NOT re-exported here: it is `12m`, and this desk's default is
+// `DESK_HORIZON`. A re-export under the clock module's name would read as this desk's convention
+// while stating the other one.
+export { HORIZONS, SECTORS }
 
 /** The price read used to stamp a stance's baseline. Injected so tests exercise the stamping. */
 const _io = {

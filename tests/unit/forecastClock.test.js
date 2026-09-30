@@ -20,6 +20,24 @@ test('normalizeHorizon: the vocabulary passes; anything else becomes the house d
     assert.equal(DEFAULT_HORIZON, '12m')
 })
 
+test('normalizeHorizon: a caller may state ITS OWN default, but cannot invent one', () => {
+    // There is more than one house convention — a price target is a twelve-month number, a sector
+    // stance re-read monthly is not — and the difference decides when a call is graded.
+    assert.equal(normalizeHorizon(undefined, '6m'), '6m')
+    assert.equal(normalizeHorizon('12 months', '3m'), '3m')
+    assert.equal(normalizeHorizon('18m', '6m'), '18m', 'a stated horizon always wins over a default')
+    // A fallback outside the vocabulary is not a horizon, so it lands on the house one.
+    assert.equal(normalizeHorizon(undefined, '9m'), DEFAULT_HORIZON)
+    assert.equal(normalizeHorizon(undefined, null), DEFAULT_HORIZON)
+})
+
+test('openWindow: the caller\'s default sets the deadline it derives', () => {
+    const now = '2026-08-06T00:00:00.000Z'
+    assert.equal(openWindow({}, now).ends_at, '2027-08-06T00:00:00.000Z')          // 12m, the house default
+    assert.equal(openWindow({}, now, '6m').ends_at, '2027-02-06T00:00:00.000Z')    // the desk's own
+    assert.equal(openWindow({ horizon: '3m' }, now, '6m').ends_at, '2026-11-06T00:00:00.000Z')
+})
+
 // ── date arithmetic ─────────────────────────────────────────────────────────
 test('addMonths: plain shifts', () => {
     assert.equal(addMonths('2026-03-10T12:00:00.000Z', 3),  '2026-06-10T12:00:00.000Z')

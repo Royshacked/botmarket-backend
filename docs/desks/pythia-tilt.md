@@ -65,7 +65,9 @@ the prompt as a narrative device: usable to explain a stance reached another way
 Two rules the prompt makes the model hold: **the table nets to zero** (a book is fully invested;
 funding an overweight means an underweight somewhere) and **it gets graded** — there is no rhetorical
 escape from a stance, so pick the horizon you mean. Horizons are the shared vocabulary
-`3m · 6m · 12m · 18m · 24m` (`forecastClock.js`), default `6m`, set per row because a rate call and a
+`3m · 6m · 12m · 18m · 24m` (`forecastClock.js`), default `6m` — the DESK's (`DESK_HORIZON`), not the
+clock module's `12m`, which is a price target's convention and would leave a monthly-reviewed stance
+ungraded for a year — set per row because a rate call and a
 cyclical call do not mature on one clock.
 
 ## The clock and the baseline — what makes a stance falsifiable
