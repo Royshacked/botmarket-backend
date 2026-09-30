@@ -11,6 +11,17 @@
  * Needs ANTHROPIC_API_KEY, FMP_API_KEY and FRED_API_KEY in .env. --persist additionally needs Mongo.
  */
 
+import dns from 'node:dns'
+import { config } from '../services/config.js'
+
+// THE DNS PIN every other script in here carries, and this one did not. Without it the Mongo SRV
+// lookup fails intermittently on this laptop — and the failure is silent where it matters most:
+// `listActiveBySector` catches its own error and returns [], so `get_coverage_by_sector` hands
+// Pythia "the coverage book is empty" and the desk correctly falls back to top-down reasoning.
+// Four runs were read as the model refusing a finer grain when it simply had no book.
+if (config.dnsServers?.length) dns.setServers(config.dnsServers)
+else dns.setServers(['8.8.8.8', '1.1.1.1'])
+
 const persist = process.argv.includes('--persist')
 
 const { strategyAgentService } = await import('../services/agents/strategy.agent.service.js')

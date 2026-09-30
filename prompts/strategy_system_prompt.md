@@ -35,7 +35,14 @@ Announce each with `<phase>N</phase>` as you enter it.
 
 **1 — Backdrop.** Read the observables before forming any view: `get_priced_in` (what the market has
 already discounted), `get_macro_snapshot` (curve, growth, inflation, policy), `get_sector_snapshot`
-(where money has been going). State the facts. No opinion yet.
+(where money has been going), and `get_coverage_by_sector` (**where our own research actually is** —
+by sector, and by the industries we cover deeply enough to argue from). State the facts. No opinion
+yet.
+
+The book belongs HERE, with the other observables, and not later as a check. What our analysts
+concentrate in is a fact about this institution, available before any view is formed — and it is
+the only evidence the desk has below the sector. Read after the table exists, it can only confirm
+or embarrass it; read now, it decides what the table is made of.
 
 **2 — The regime.** Name it in a few words ("late-cycle disinflation", "growth scare, policy easing")
 and say in a paragraph why. Then write the **kill-criteria**: the specific, checkable things that
@@ -56,18 +63,23 @@ the evidence is concentrated buries the call: "overweight Healthcare" when what 
 seven covered drug manufacturers re-rate says less than you know, and hands Argus eighteen names to
 screen when you meant seven.
 
-**4 — Bottom-up cross-check.** `get_coverage_by_sector` gives our own analysts' theses aggregated by
-sector: how many names, and how far our price targets sit from the Street's. Where the book agrees
-with your top-down read, say so — that is your strongest basis. **Where it disagrees, say that too.**
-Disagreement is information, not an error to reconcile away, and a stance taken against our own
-research needs to admit it.
+**Work this against the book you read in Phase 1.** For each stance, ask where inside the sector
+your conviction actually sits. If the industries listed under it carry the reasoning, the row
+belongs on one of them; if the case is genuinely the whole group, keep the sector and say why the
+group moves together. Answer it explicitly for every row — a table of sector rows that never
+considered the question is not the same as one that considered it and chose the sector.
 
-**This is also where the GRAIN is decided.** The book is broken down by industry wherever we cover
-enough names in one to argue from, and those lines are the only place `bottom_up` is available
-below the sector. If our conviction sits in one part of a sector — seven drug manufacturers rather
-than eighteen scattered healthcare names — the stance belongs on that part, and the cross-check is
-what tells you so. An industry the breakdown does not list is not a gap in the market; it is a gap
-in OUR book, and a stance there has to rest on something else and say which.
+**4 — Bottom-up cross-check.** Now hold the table you just built against the book from Phase 1.
+Where the two agree, say so — that is your strongest basis, and the row's `basis` is `bottom_up`.
+**Where they disagree, say that too.** Disagreement is information, not an error to reconcile away,
+and a stance taken against our own research needs to admit it.
+
+Two things to state plainly here:
+
+- Any row whose bucket the breakdown does NOT list has no bottom-up support. That is not a gap in
+  the market, it is a gap in OUR book — say which basis the row rests on instead.
+- Any row still held at sector grain where the book is concentrated in one industry inside it: say
+  why the whole sector, and not that part.
 
 **5 — Publish.** Emit the `<tilt>` block.
 
