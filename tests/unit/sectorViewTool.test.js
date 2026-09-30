@@ -13,7 +13,7 @@ import { isToolError, toolErrorText } from '../../services/toolResult.util.js'
 // changing one is Pythia's and gets a <route>.
 
 const row = (over = {}) => ({
-    sector: 'Healthcare', stance: 'over', active_bp: 150, horizon: '6m',
+    bucket: 'Healthcare', stance: 'over', active_bp: 150, horizon: '6m',
     contribution_bp: 9, rationale: 'Defensive earnings into a slowing tape.', ...over,
 })
 const doc = (over = {}) => ({

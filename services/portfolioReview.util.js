@@ -134,7 +134,7 @@ export function computeReviewTriggers({ state = null, fingerprint = null, delta 
     // deliberately so: a card interrupts, a review trigger is read when the user is already looking.
     const viewMoved = diffStances({ tilts: fingerprint?.tilt?.stances }, { tilts: tilt?.tilts })
     if (viewMoved.length) {
-        const named = viewMoved.slice(0, 2).map(c => `${c.sector} ${c.from ?? 'no view'}→${c.to ?? 'no view'}`).join(', ')
+        const named = viewMoved.slice(0, 2).map(c => `${c.bucket} ${c.from ?? 'no view'}→${c.to ?? 'no view'}`).join(', ')
         const more  = viewMoved.length > 2 ? ` (+${viewMoved.length - 2} more)` : ''
         triggers.push({ kind: 'sector_view', severity: 'medium', label: `house sector view changed — ${named}${more}` })
     }
@@ -267,7 +267,7 @@ export function buildFingerprint({ reason, state = null, macroRaw = null, benchm
             ? {
                 id: tilt.id,
                 stances: (Array.isArray(tilt.tilts) ? tilt.tilts : [])
-                    .map(r => ({ sector: r.sector, stance: r.stance ?? null, active_bp: r.active_bp ?? null })),
+                    .map(r => ({ bucket: r.bucket, stance: r.stance ?? null, active_bp: r.active_bp ?? null })),
             }
             : null,
         holdings,

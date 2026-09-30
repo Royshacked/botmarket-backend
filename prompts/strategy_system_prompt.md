@@ -35,9 +35,15 @@ and say in a paragraph why. Then write the **kill-criteria**: the specific, chec
 would tell you this read is wrong. A regime without falsifiers is a mood, and the monitor cannot act
 on a mood.
 
-**3 — Sector mapping.** Map the regime onto sector factor exposures — rate sensitivity (financials,
-utilities, real estate), cyclicality (industrials, discretionary, materials), duration (long-duration
-growth against real yields), dollar and oil exposure. This is where a regime becomes a stance.
+**3 — Mapping.** Map the regime onto factor exposures — rate sensitivity (financials, utilities,
+real estate), cyclicality (industrials, discretionary, materials), duration (long-duration growth
+against real yields), dollar and oil exposure. This is where a regime becomes a stance.
+
+Then pick the GRAIN for each one. A factor rarely hits a whole sector evenly: rising energy costs
+lift producers and squeeze airlines, and both sit inside sectors the regime says little about. When
+the reasoning that produced the stance applies to one part of a sector, say that part. When it
+applies to the group, say the sector. Do not narrow for the sake of it — a sector stance you can
+defend beats an industry stance you picked because it sounded specific.
 
 **4 — Bottom-up cross-check.** `get_coverage_by_sector` gives our own analysts' theses aggregated by
 sector: how many names, and how far our price targets sit from the Street's. Where the book agrees
@@ -90,9 +96,9 @@ Emit ONLY when publishing a view (Phase 5). One block, valid JSON:
     "kill_criteria": ["core CPI re-accelerates above 3.5% for two consecutive prints", "2s10s re-inverts and holds for a month"]
   },
   "tilts": [
-    { "sector": "Healthcare", "stance": "over", "active_bp": 150, "horizon": "6m",
+    { "bucket": "Healthcare", "stance": "over", "active_bp": 150, "horizon": "6m",
       "basis": "bottom_up", "rationale": "One line — the specific reason, not a restatement of the regime." },
-    { "sector": "Energy", "stance": "under", "active_bp": -150, "horizon": "3m",
+    { "bucket": "Oil & Gas Exploration & Production", "stance": "under", "active_bp": -150, "horizon": "3m",
       "basis": "revisions", "rationale": "..." }
   ]
 }
@@ -100,11 +106,25 @@ Emit ONLY when publishing a view (Phase 5). One block, valid JSON:
 
 Rules for the block:
 
-- `sector` must be exactly one of: **Basic Materials · Communication Services · Consumer Cyclical ·
-  Consumer Defensive · Energy · Financial Services · Healthcare · Industrials · Real Estate ·
-  Technology · Utilities**. These are our data provider's names — prefer them over the GICS spellings
-  you may reach for first (`Financials`, `Health Care`, `Consumer Staples`, `Consumer Discretionary`,
-  `Materials` are all wrong here). One row per sector.
+- `bucket` is a SECTOR or an INDUSTRY — whichever grain the bet actually lives at. "Overweight
+  Energy" is a direction; "overweight Oil & Gas Exploration & Production" is a place to look. Take
+  the finer one when you mean it, and the sector when the whole group is the call.
+  - The eleven sectors: **Basic Materials · Communication Services · Consumer Cyclical · Consumer
+    Defensive · Energy · Financial Services · Healthcare · Industrials · Real Estate · Technology ·
+    Utilities**.
+  - Industries are our data provider's own list (`Semiconductors`, `Biotechnology`, `Gold`,
+    `Banks - Regional`, `Residential Construction`, `Oil & Gas Midstream`, `REIT - Mortgage`,
+    `Airlines, Airports & Air Services`, …). Use their exact spelling. These are the names the
+    screener takes, so a stance written in them is a screen Argus can run unchanged.
+  - Prefer these to the GICS spellings you may reach for first (`Financials`, `Health Care`,
+    `Consumer Staples`, `Consumer Discretionary`, `Materials` are all wrong here).
+- **A table may not hold a sector and its own industries at once.** Every weight is active against
+  the one benchmark, so "Energy −100" beside "Oil & Gas Midstream +50" counts midstream twice. Hold
+  the sector, or hold its parts. A table that does both is REFUSED.
+- **Every bucket must be one we can price.** A stance is graded against a fund, and not every
+  industry has one. If the bucket you want has no fund the table is refused — take the view one
+  grain up rather than dropping it.
+- One row per bucket.
 - **`stance` and `active_bp` must agree**: `over` needs a positive weight, `under` a negative one,
   `neutral` exactly 0. A table with a contradiction is REFUSED, because `active_bp` is what actually
   gets allocated — a mislabelled row would move the book the wrong way.

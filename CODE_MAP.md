@@ -89,7 +89,10 @@ api/
                           rides makeHandle. Publish diffs against the view in force (tilt.assess.
                           diffStances) → tiltNotify.notifyTiltChanged to every admin → runHouseScan
     tilt.service.js           `tilt` collection = ONE active house view per benchmark, superseded on
-                              publish, never overwritten; house-owned like coverage (no userId). Each
+                              publish, never overwritten; house-owned like coverage (no userId). A row
+                              names a SECTOR or an INDUSTRY (`grain`/`bucket`), graded against the
+                              `proxy` frozen onto it; overlappingRows refuses a table holding a sector
+                              and its own parts, unpriceableRows one that cannot be graded at all. Each
                               ROW owns its clock (forecastClock.openWindow: reaffirm keeps set_at,
                               re-author restarts) and its FROZEN baseline (base_px / base_bench_px —
                               stampBaselines at publish). The reaffirm is decided SERVER-side:

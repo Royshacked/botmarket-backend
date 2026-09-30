@@ -40,7 +40,7 @@ export function formatSectorView(doc) {
         const contrib = (r.contribution_bp === null || r.contribution_bp === undefined)
             ? 'not yet priced'
             : `${r.contribution_bp >= 0 ? '+' : ''}${r.contribution_bp}bp so far`
-        return `  ${String(r.sector).padEnd(24)} ${String(STANCE_WORD[r.stance] ?? 'no view').padEnd(12)} `
+        return `  ${String(r.bucket).padEnd(34)} ${String(STANCE_WORD[r.stance] ?? 'no view').padEnd(12)} `
              + `${_bp(r.active_bp).padStart(7)}  ${String(r.horizon ?? '—').padEnd(4)} ${contrib}`
              + (r.rationale ? `\n${' '.repeat(28)}${r.rationale}` : '')
     }

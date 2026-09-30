@@ -4,29 +4,29 @@ import assert   from 'node:assert/strict'
 import { runHouseScan, hitsForConviction, overweightRows } from '../../services/houseScan.service.js'
 
 // ─── runHouseScan ─────────────────────────────────────────────────────────────
-// Uses injected deps (screenSector + enqueue) — no DB, no FMP calls.
+// Uses injected deps (screenBucket + enqueue) — no DB, no FMP calls.
 
 function _tilt(stances) {
-    return { tilts: stances.map(([sector, stance]) => ({ sector, stance })) }
+    return { tilts: stances.map(([bucket, stance]) => ({ bucket, grain: 'sector', stance })) }
 }
 
-function _deps(sectorMap = {}) {
+function _deps(bucketMap = {}) {
     const enqueued = []
     return {
         screened:     [],
         enqueued,
-        screenSector: async (s) => { _deps._.screened.push(s); return sectorMap[s] ?? [] },
+        screenBucket: async ({ bucket }) => { _deps._.screened.push(bucket); return bucketMap[bucket] ?? [] },
         enqueue:      async ({ symbol }) => { enqueued.push(symbol); return { ok: true } },
     }
 }
 // simple factory — share no state between calls
-function makeDeps(sectorMap = {}) {
+function makeDeps(bucketMap = {}) {
     const screened = []
     const enqueued = []
     return {
         screened,
         enqueued,
-        screenSector: async (s) => { screened.push(s); return sectorMap[s] ?? [] },
+        screenBucket: async ({ bucket }) => { screened.push(bucket); return bucketMap[bucket] ?? [] },
         enqueue:      async ({ symbol }) => { enqueued.push(symbol); return { ok: true } },
     }
 }
@@ -65,15 +65,15 @@ test('houseScan: null or missing tilt doc → no crash, nothing screened', async
     assert.deepEqual(d.screened, [])
 })
 
-test('houseScan: a screenSector failure does not abort remaining sectors', async () => {
+test('houseScan: a screenBucket failure does not abort remaining sectors', async () => {
     const screened = []
     const enqueued = []
     const d = {
         screened,
         enqueued,
-        screenSector: async (s) => {
-            screened.push(s)
-            if (s === 'Technology') throw new Error('provider down')
+        screenBucket: async ({ bucket }) => {
+            screened.push(bucket)
+            if (bucket === 'Technology') throw new Error('provider down')
             return ['JNJ']
         },
         enqueue: async ({ symbol }) => { enqueued.push(symbol); return { ok: true } },
@@ -113,14 +113,14 @@ test('an ABSENT weight falls to the default breadth, never to the narrowest band
 
 test('overweightRows keeps the policy, not just the sector name', () => {
     const doc = { tilts: [
-        { sector: 'Technology', stance: 'over',  active_bp: 300, basis: 'revisions' },
-        { sector: 'Energy',     stance: 'under', active_bp: -150, basis: 'valuation' },
-        { sector: 'Utilities',  stance: 'over' },
-        { stance: 'over', active_bp: 100 },   // no sector — not actionable
+        { bucket: 'Technology', stance: 'over',  active_bp: 300, basis: 'revisions' },
+        { bucket: 'Energy',     stance: 'under', active_bp: -150, basis: 'valuation' },
+        { bucket: 'Utilities',  stance: 'over' },
+        { stance: 'over', active_bp: 100 },   // no bucket — not actionable
     ] }
     assert.deepEqual(overweightRows(doc), [
-        { sector: 'Technology', active_bp: 300, basis: 'revisions' },
-        { sector: 'Utilities',  active_bp: null, basis: null },
+        { bucket: 'Technology', grain: 'sector', active_bp: 300, basis: 'revisions' },
+        { bucket: 'Utilities',  grain: 'sector', active_bp: null, basis: null },
     ])
 })
 
@@ -128,11 +128,11 @@ test('the screen is sized per sector by that sector’s conviction', async () =>
     const calls = []
     await runHouseScan(
         { tilts: [
-            { sector: 'Technology', stance: 'over', active_bp: 300 },
-            { sector: 'Healthcare', stance: 'over', active_bp: 40 },
+            { bucket: 'Technology', stance: 'over', active_bp: 300 },
+            { bucket: 'Healthcare', stance: 'over', active_bp: 40 },
         ] },
         {
-            screenSector: async (s, opts) => { calls.push([s, opts?.limit]); return [] },
+            screenBucket: async (row, opts) => { calls.push([row.bucket, opts?.limit]); return [] },
             enqueue:      async () => ({ ok: true }),
         },
     )
@@ -143,12 +143,12 @@ test('the strongest conviction is screened FIRST — the queue is consumed in or
     const screened = []
     await runHouseScan(
         { tilts: [
-            { sector: 'Healthcare', stance: 'over', active_bp: 80 },
-            { sector: 'Technology', stance: 'over', active_bp: 400 },
-            { sector: 'Utilities',  stance: 'over', active_bp: 120 },
+            { bucket: 'Healthcare', stance: 'over', active_bp: 80 },
+            { bucket: 'Technology', stance: 'over', active_bp: 400 },
+            { bucket: 'Utilities',  stance: 'over', active_bp: 120 },
         ] },
         {
-            screenSector: async (s) => { screened.push(s); return [] },
+            screenBucket: async (row) => { screened.push(row.bucket); return [] },
             enqueue:      async () => ({ ok: true }),
         },
     )
@@ -160,25 +160,25 @@ test('every queued name carries the mandate that surfaced it', async () => {
     await runHouseScan(
         {
             id: 'tilt_SPX_abc', regime: { name: 'Disinflation' },
-            tilts: [{ sector: 'Technology', stance: 'over', active_bp: 300, basis: 'revisions' }],
+            tilts: [{ bucket: 'Technology', stance: 'over', active_bp: 300, basis: 'revisions' }],
         },
         {
-            screenSector: async () => ['AAPL'],
+            screenBucket: async () => ['AAPL'],
             enqueue:      async (args) => { rows.push(args); return { ok: true } },
         },
     )
     assert.equal(rows.length, 1)
     assert.deepEqual(rows[0].context, {
         tiltId: 'tilt_SPX_abc', regime: 'Disinflation',
-        sector: 'Technology', stance: 'over', active_bp: 300, basis: 'revisions',
+        bucket: 'Technology', grain: 'sector', stance: 'over', active_bp: 300, basis: 'revisions',
     })
 })
 
 test('a view with no regime or id still queues — the context degrades, the scan does not', async () => {
     const rows = []
     await runHouseScan(
-        { tilts: [{ sector: 'Energy', stance: 'over' }] },
-        { screenSector: async () => ['XOM'], enqueue: async (a) => { rows.push(a); return { ok: true } } },
+        { tilts: [{ bucket: 'Energy', stance: 'over' }] },
+        { screenBucket: async () => ['XOM'], enqueue: async (a) => { rows.push(a); return { ok: true } } },
     )
     assert.equal(rows[0].context.tiltId, null)
     assert.equal(rows[0].context.regime, null)

@@ -2,6 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
 import { _checkTilt, _resolvePrices } from '../../monitoring/tilt.monitor.service.js'
+import { proxyMeta } from '../../services/entity/vocabulary.js'
 
 // Pythia's per-view check, with mocked prices/DB (deps injectable).
 
@@ -9,11 +10,17 @@ const DAY = 24 * 60 * 60 * 1000
 const T0  = Date.parse('2026-01-01T00:00:00.000Z')
 const at  = days => T0 + days * DAY
 
-const row = (over = {}) => ({
-    sector: 'Technology', stance: 'over', active_bp: 150,
-    set_at: '2026-01-01T00:00:00.000Z', review_date: '2027-01-01T00:00:00.000Z',
-    base_px: 100, base_bench_px: 100, state: 'open', contribution_bp: null, ...over,
-})
+// A STORED row, which carries the proxy it was published against — the monitor prices that and
+// never re-resolves, so a fixture without one is not a stored row.
+const row = (over = {}) => {
+    const bucket = over.bucket ?? 'Technology'
+    return {
+        bucket, grain: 'sector', proxy: proxyMeta(bucket),
+        stance: 'over', active_bp: 150,
+        set_at: '2026-01-01T00:00:00.000Z', review_date: '2027-01-01T00:00:00.000Z',
+        base_px: 100, base_bench_px: 100, state: 'open', contribution_bp: null, ...over,
+    }
+}
 const doc = (over = {}) => ({
     id: 'tilt1', benchmark: 'SPX', status: 'active',
     created_at: '2026-01-01T00:00:00.000Z', updated_at: '2026-01-01T00:00:00.000Z',
@@ -43,15 +50,15 @@ function harness({ prices = { XLK: 110, XLE: 90, SPY: 104 }, catalystDates = [] 
 test('only sectors carrying an OPEN stance are priced', async () => {
     const asked = []
     const deps = { getPrice: async (s) => { asked.push(s); return 100 } }
-    await _resolvePrices([row(), row({ sector: 'Energy', state: 'matured' })], 'SPX', deps)
+    await _resolvePrices([row(), row({ bucket: 'Energy', state: 'matured' })], 'SPX', deps)
     assert.deepEqual(asked.sort(), ['SPY', 'XLK'], 'a matured stance is settled — no need to re-price it')
 })
 
 test('an unknown benchmark or unpriceable sector degrades to null, not a throw', async () => {
     const deps = { getPrice: async () => null }
-    const { bySector, bench } = await _resolvePrices([row()], 'NIKKEI', deps)
+    const { byBucket, bench } = await _resolvePrices([row()], 'NIKKEI', deps)
     assert.equal(bench, null)
-    assert.equal(bySector.get('Technology'), null)
+    assert.equal(byBucket.get('Technology'), null)
 })
 
 // ── the daily grade ──────────────────────────────────────────────────────────
@@ -70,7 +77,7 @@ test('a quiet day writes the grade as BOOKKEEPING — no revision, no card', asy
 test('an underweight that beat its benchmark scores POSITIVE', async () => {
     // Energy proxy 100 → 90 (-10%) while SPY 100 → 104 (+4%): -14% relative, and we were -150bp.
     const h = harness()
-    const d = doc({ tilts: [row({ sector: 'Energy', stance: 'under', active_bp: -150 })] })
+    const d = doc({ tilts: [row({ bucket: 'Energy', stance: 'under', active_bp: -150 })] })
     await _checkTilt(d, at(30), h.deps)
     assert.equal(h.writes.at(-1).set.tilts[0].contribution_bp, 21)
 })
@@ -78,7 +85,7 @@ test('an underweight that beat its benchmark scores POSITIVE', async () => {
 // ── maturity ─────────────────────────────────────────────────────────────────
 test('a newly matured stance IS a state change — it gets a revision through the service', async () => {
     const h = harness()
-    const d = doc({ tilts: [row({ sector: 'Energy', review_date: '2026-02-01T00:00:00.000Z' })] })
+    const d = doc({ tilts: [row({ bucket: 'Energy', review_date: '2026-02-01T00:00:00.000Z' })] })
     const res = await _checkTilt(d, at(45), h.deps)
     assert.deepEqual(res.matured, ['Energy'])
     assert.equal(h.updates.length, 1)
@@ -133,7 +140,7 @@ test('a baseline that still cannot be priced stays null rather than being guesse
 // ── waking the desk ──────────────────────────────────────────────────────────
 test('a matured stance wakes the desk — as an OFFER, not a run', async () => {
     const h = harness()
-    const d = doc({ tilts: [row({ sector: 'Energy', review_date: '2026-02-01T00:00:00.000Z' })] })
+    const d = doc({ tilts: [row({ bucket: 'Energy', review_date: '2026-02-01T00:00:00.000Z' })] })
     const res = await _checkTilt(d, at(45), h.deps)
     assert.equal(h.reviews.length, 1)
     assert.match(h.reviews[0].reason, /stance matured/)
@@ -165,7 +172,7 @@ test('a dated macro catalyst wakes it', async () => {
 // stance that came due restarted the cooldown and muted its own trigger on the very next tick.
 test('the maturity write does not mute the trigger it just fired', async () => {
     const h = harness()
-    const matured = row({ sector: 'Energy', review_date: '2026-02-01T00:00:00.000Z' })
+    const matured = row({ bucket: 'Energy', review_date: '2026-02-01T00:00:00.000Z' })
     const d = doc({
         tilts:      [matured],
         revisions:  [{ at: '2026-01-01T00:00:00.000Z', kind: 'publish' }],

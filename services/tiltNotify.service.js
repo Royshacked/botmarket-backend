@@ -46,12 +46,12 @@ const _deps = {
 const STANCE_WORD = { over: 'overweight', neutral: 'neutral', under: 'underweight' }
 const _word = s => STANCE_WORD[s] ?? 'no view'
 
-/** "Energy underweight → overweight (+150bp)" — one moved sector, in words. Pure. */
+/** "Energy underweight → overweight (+150bp)" — one moved bucket, in words. Pure. */
 function _phrase(c) {
     const weight = c.to_bp === null || c.to_bp === undefined
         ? ''
         : ` (${c.to_bp >= 0 ? '+' : ''}${c.to_bp}bp)`
-    return `${c.sector} ${_word(c.from)} → ${_word(c.to)}${weight}`
+    return `${c.bucket} ${_word(c.from)} → ${_word(c.to)}${weight}`
 }
 
 /**
@@ -60,13 +60,13 @@ function _phrase(c) {
  * the house view is one document and each admin hears the whole change.
  */
 export function buildTiltEvent(tilt, changes, userId) {
-    const moved = (Array.isArray(changes) ? changes : []).filter(c => c?.sector)
+    const moved = (Array.isArray(changes) ? changes : []).filter(c => c?.bucket)
     if (!userId || !moved.length) return null
 
     // Lead with the regime when it is named: the stance is the conclusion, the regime is the reason,
     // and a card that gives only the conclusion invites the reader to guess at the reason.
     const regime = tilt?.regime?.name ? `${tilt.regime.name} — ` : ''
-    const head   = moved.length === 1 ? 'Sector view changed' : `${moved.length} sector views changed`
+    const head   = moved.length === 1 ? 'Sector view changed' : `${moved.length} stances changed`
     const body   = moved.map(_phrase).join('; ')
 
     return {
@@ -75,7 +75,7 @@ export function buildTiltEvent(tilt, changes, userId) {
         type:    'tilt_event',
         payload: {
             kind: 'tilt', tiltId: tilt?.id ?? null, benchmark: tilt?.benchmark ?? null,
-            sectors: moved.map(c => c.sector),
+            buckets: moved.map(c => c.bucket),
             // The desk publishes unbalanced tables rather than losing them, so the card has to admit
             // it — an active-weight set that does not net out is not directly allocatable.
             balanced: tilt?.balanced !== false,
@@ -98,7 +98,7 @@ export function buildTiltEvent(tilt, changes, userId) {
  * weeks: see the header.)
  */
 export async function notifyTiltChanged(tilt, changes, deps = _deps) {
-    const moved = (Array.isArray(changes) ? changes : []).filter(c => c?.sector)
+    const moved = (Array.isArray(changes) ? changes : []).filter(c => c?.bucket)
     if (!moved.length) return 0
 
     let userIds
@@ -117,7 +117,7 @@ export async function notifyTiltChanged(tilt, changes, deps = _deps) {
         // overridden must not turn every partial into a crash.
         if (await (deps.post ?? postCard)(buildTiltEvent(tilt, moved, userId), { tag: 'Tilt-change card', log: LOG })) posted++
     }
-    logger.info(LOG, 'tilt change notified', { sectors: moved.length, users: (userIds ?? []).length, posted })
+    logger.info(LOG, 'tilt change notified', { buckets: moved.length, users: (userIds ?? []).length, posted })
     return posted
 }
 
@@ -173,10 +173,10 @@ export function buildTiltReviewOffer(tilt, { reason = null, userId } = {}) {
             kind: 'tilt_review', tiltId: tilt?.id ?? null, benchmark: tilt?.benchmark ?? null,
             reason, regime: tilt?.regime?.name ?? null,
             stances:      rows.length,
-            sectors:      rows.map(r => r?.sector).filter(Boolean),
+            buckets:      rows.map(r => r?.bucket).filter(Boolean),
             // What the desk owes a verdict ON. A matured stance is the sharp case: its window closed,
             // so it is a closed call the review has to grade rather than one it may simply reaffirm.
-            matured:      rows.filter(r => r?.state === 'matured').map(r => r?.sector).filter(Boolean),
+            matured:      rows.filter(r => r?.state === 'matured').map(r => r?.bucket).filter(Boolean),
             published_at: tilt?.created_at ?? null,
         },
         botId:      'strategy',

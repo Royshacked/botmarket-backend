@@ -7,8 +7,10 @@ quoted inline.
 **Landed since:** the vocabulary and the resolver — `INDUSTRY_SECTOR`, `resolveBucket`,
 `parentSector`, `BUCKET_PROXY`, `proxyFor` in `services/entity/vocabulary.js`, with
 `tests/unit/bucketVocabulary.test.js`. ~~`SECTOR_ETF`~~ and ~~`sectorProxy`~~ were removed rather
-than left beside the new table. Nothing else in this doc is built: the row still carries `sector`,
-and no consumer knows about grain yet.
+than left beside the new table. Also landed: the row schema itself — `grain` / `bucket` / `proxy` replacing `sector`, the
+`overlappingRows` and `unpriceableRows` gates, every consumer (the monitor, `diffStances`, the
+house scan, the cards, Atlas's fingerprint), the prompt, and `scripts/migrate-tilt-buckets.mjs`.
+Step 1 is complete. Steps 2 onward — the sparkline and everything channel-shaped — are not.
 
 `check:docs` scores this doc around 40% unresolved, and that is expected rather than rot. What it
 cannot see splits three ways: **Mongo collections and document fields** (`aether_channel_state`,
@@ -405,8 +407,7 @@ Each step is useful alone and none of them requires the next.
 
 1. **`grain` / `bucket` / `proxy` on the row, plus the parent-child gate and the proxy table.** The
    table can then say "Semiconductors" and grade it. No channels involved.
-   *The vocabulary half is done (see **Landed since** above); the row schema, the gate and the two
-   migrations — the tilt documents and Atlas's stored fingerprints — are not.*
+   *Done 2026-09-30 — vocabulary, row schema, both gates, both migrations.*
 2. **`houseScan` passes the row's bucket to the screener**, so an industry stance reaches Argus —
    and so an overweight inside an underweight sector is screened at all.
 3. **The sparkline**, with its per-day cache. Independent of everything else.

@@ -63,12 +63,23 @@ export function hitsForConviction(activeBp) {
 
 /**
  * The overweight stances, as the POLICY rows the scan acts on — not just their names. Each carries
- * the weight that sizes its screen and the basis that explains it.
+ * the weight that sizes its screen, the basis that explains it, and the GRAIN it was taken at,
+ * which is what the screen is narrowed by.
+ *
+ * Every overweight row is scanned, at whatever grain it names. It deliberately does NOT ask whether
+ * the parent sector is also favoured: an overweight industry inside an underweight sector is the
+ * normal case, not a contradiction — energy lagging while E&P leads is one view, expressed twice.
+ * Filtering on the sector's stance would drop exactly the rows the finer grain exists to express.
  */
 export function overweightRows(tiltDoc) {
     return (Array.isArray(tiltDoc?.tilts) ? tiltDoc.tilts : [])
-        .filter(r => r?.stance === 'over' && r?.sector)
-        .map(r => ({ sector: r.sector, active_bp: toNum(r.active_bp), basis: r.basis ?? null }))
+        .filter(r => r?.stance === 'over' && r?.bucket)
+        .map(r => ({
+            bucket: r.bucket,
+            grain:  r.grain === 'industry' ? 'industry' : 'sector',
+            active_bp: toNum(r.active_bp),
+            basis: r.basis ?? null,
+        }))
 }
 
 /**
@@ -79,12 +90,12 @@ export async function runHouseScan(tiltDoc, deps = _io) {
     try {
         const rows = overweightRows(tiltDoc)
         if (!rows.length) {
-            logger.info(LOG, 'no overweight sectors — nothing to scan')
+            logger.info(LOG, 'no overweight stances — nothing to scan')
             return
         }
         const regime = tiltDoc?.regime?.name ?? null
         logger.info(LOG, 'house scan starting', {
-            regime, sectors: rows.map(r => `${r.sector}${r.active_bp === null ? '' : ` +${r.active_bp}bp`}`),
+            regime, buckets: rows.map(r => `${r.bucket}${r.active_bp === null ? '' : ` +${r.active_bp}bp`}`),
         })
 
         const enqueue = deps.enqueue ?? _io.enqueue   // tests inject screenSector alone
@@ -92,20 +103,20 @@ export async function runHouseScan(tiltDoc, deps = _io) {
         let queued    = 0
         let skipped   = 0
 
-        // Widest conviction first. Every sector is screened regardless, but the queue is consumed in
+        // Widest conviction first. Every bucket is screened regardless, but the queue is consumed in
         // insertion order — so when Prometheus only gets through half of it, the half it reaches is
         // the half the house feels strongest about.
         for (const row of [...rows].sort((a, b) => Math.abs(b.active_bp ?? 0) - Math.abs(a.active_bp ?? 0))) {
             const hits = hitsForConviction(row.active_bp)
             let symbols
             try {
-                symbols = await deps.screenSector(row.sector, { limit: hits })
+                symbols = await deps.screenBucket(row, { limit: hits })
             } catch (err) {
-                logger.warn(LOG, `sector screen failed: ${row.sector} (scan continues)`, err.message)
+                logger.warn(LOG, `screen failed: ${row.bucket} (scan continues)`, err.message)
                 continue
             }
             for (const sym of symbols) {
-                if (seen.has(sym)) continue   // appeared in a prior sector — don't double-enqueue
+                if (seen.has(sym)) continue   // appeared under a prior bucket — don't double-enqueue
                 seen.add(sym)
                 const res = await enqueue({
                     symbol: sym, source: 'argus', requestedBy: 'house',
@@ -113,7 +124,7 @@ export async function runHouseScan(tiltDoc, deps = _io) {
                     // stored rather than looked up when the name is finally researched.
                     context: {
                         tiltId: tiltDoc?.id ?? null, regime,
-                        sector: row.sector, stance: 'over',
+                        bucket: row.bucket, grain: row.grain, stance: 'over',
                         active_bp: row.active_bp, basis: row.basis,
                     },
                 })
@@ -121,7 +132,7 @@ export async function runHouseScan(tiltDoc, deps = _io) {
                 else if (res.ok)   queued++
             }
         }
-        logger.info(LOG, 'house scan complete', { sectors: rows.length, queued, skipped_duplicate: skipped })
+        logger.info(LOG, 'house scan complete', { buckets: rows.length, queued, skipped_duplicate: skipped })
     } catch (err) {
         logger.error(LOG, 'house scan failed (caller unaffected)', err)
     }
@@ -129,13 +140,17 @@ export async function runHouseScan(tiltDoc, deps = _io) {
 
 // Default IO: FMP screener imported lazily so tests can inject stubs without dragging the provider
 // stack in. Throws on a failed screen — runHouseScan's loop is the one place that decides what a
-// failed sector means (skip it, scan continues), and catching here as well made that branch
+// failed screen means (skip it, scan continues), and catching here as well made that branch
 // unreachable for the real IO.
+//
+// The bucket goes into the screener under its OWN grain: `industry` for an industry row, `sector`
+// for a sector one. This is why the vocabulary is FMP's — the stance is already written in the
+// words the screener takes, so nothing has to be translated on the way out.
 const _io = {
-    async screenSector(sector, { limit = DEFAULT_HITS } = {}) {
+    async screenBucket({ bucket, grain }, { limit = DEFAULT_HITS } = {}) {
         const { screenCandidatesRaw } = await import('../providers/fmp.provider.js')
         const rows = await screenCandidatesRaw({
-            sector,
+            [grain === 'industry' ? 'industry' : 'sector']: bucket,
             volumeMoreThan: MIN_VOLUME,
             isEtf:          'false',
             limit,

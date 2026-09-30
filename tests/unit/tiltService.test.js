@@ -10,7 +10,7 @@ import {
 // Pythia's `tilt` schema normalizer (pure). The CRUD is DB-bound and not unit-tested, mirroring
 // normalizeCoverage vs the coverage CRUD.
 
-const row = (over = {}) => ({ sector: 'Technology', stance: 'over', active_bp: 150, basis: 'bottom_up', ...over })
+const row = (over = {}) => ({ bucket: 'Technology', stance: 'over', active_bp: 150, basis: 'bottom_up', ...over })
 const NOW = '2026-08-06T00:00:00.000Z'
 
 // ── identity + defaults ──────────────────────────────────────────────────────
@@ -33,20 +33,37 @@ test('normalize: non-object raw never throws', () => {
 
 // ── rows: the sector is the join key ─────────────────────────────────────────
 test('normalize: sector is canonicalised, so a GICS spelling still joins', () => {
-    const t = normalizeTilt({ tilts: [row({ sector: 'Financials' }), row({ sector: 'Health Care', active_bp: -150, stance: 'under' })] }, NOW)
-    assert.deepEqual(t.tilts.map(r => r.sector), ['Financial Services', 'Healthcare'])
+    const t = normalizeTilt({ tilts: [row({ bucket: 'Financials' }), row({ bucket: 'Health Care', active_bp: -150, stance: 'under' })] }, NOW)
+    assert.deepEqual(t.tilts.map(r => r.bucket), ['Financial Services', 'Healthcare'])
 })
 
-test('normalize: a row with no usable sector is DROPPED — it cannot be joined or graded', () => {
-    const t = normalizeTilt({ tilts: [row(), row({ sector: 'Semiconductors' }), row({ sector: null }), 'nonsense'] }, NOW)
+test('normalize: a row naming nothing the vocabulary knows is DROPPED', () => {
+    const t = normalizeTilt({ tilts: [row(), row({ bucket: 'the AI trade' }), row({ bucket: null }), 'nonsense'] }, NOW)
     assert.equal(t.tilts.length, 1)
-    assert.equal(t.tilts[0].sector, 'Technology')
+    assert.equal(t.tilts[0].bucket, 'Technology')
+})
+
+test('normalize: an INDUSTRY is kept, at its own grain and against its own fund', () => {
+    // It used to be dropped for not being one of the eleven. A semis call is a semis call.
+    const t = normalizeTilt({ tilts: [row({ bucket: 'Semiconductors' })] }, NOW)
+    assert.equal(t.tilts.length, 1)
+    assert.equal(t.tilts[0].bucket, 'Semiconductors')
+    assert.equal(t.tilts[0].grain, 'industry')
+    assert.equal(t.tilts[0].proxy.symbol, 'SMH')
+})
+
+test('normalize: the proxy is FROZEN onto the row, not looked up on every read', () => {
+    // Same rule as the baseline. Swapping a fund in the table must not re-score a standing call
+    // against an instrument it was never measured on.
+    const stored = normalizeTilt({ tilts: [row({ bucket: 'Energy', proxy: { symbol: 'XOP', weighting: 'equal', exact: false } })] }, NOW)
+    assert.equal(stored.tilts[0].proxy.symbol, 'XOP', 'the row keeps what it was published against')
+    assert.equal(normalizeTilt({ tilts: [row({ bucket: 'Energy' })] }, NOW).tilts[0].proxy.symbol, 'XLE')
 })
 
 test('normalize: one row per sector — a duplicate never quietly overrides the first', () => {
     const t = normalizeTilt({ tilts: [
         row({ active_bp: 150 }),
-        row({ sector: 'Information Technology', active_bp: -300, stance: 'under' }),   // same sector, other spelling
+        row({ bucket: 'Information Technology', active_bp: -300, stance: 'under' }),   // same sector, other spelling
     ] }, NOW)
     assert.equal(t.tilts.length, 1)
     assert.equal(t.tilts[0].active_bp, 150, 'first wins')
@@ -63,7 +80,7 @@ test('normalize: unknown stance / basis / state null out rather than defaulting 
 
 // ── the clock lives on the ROW ───────────────────────────────────────────────
 test('each row carries its OWN window, defaulted and derived', () => {
-    const t = normalizeTilt({ tilts: [row(), row({ sector: 'Energy', horizon: '3m', active_bp: -150, stance: 'under' })] }, NOW)
+    const t = normalizeTilt({ tilts: [row(), row({ bucket: 'Energy', horizon: '3m', active_bp: -150, stance: 'under' })] }, NOW)
     // THE DESK's default, not the clock module's `12m`. Pythia's prompt has always said 6m, and a
     // stance defaulting to 12m under a monthly review would never be graded inside a year.
     assert.equal(t.tilts[0].horizon, DESK_HORIZON)
@@ -78,7 +95,7 @@ test('REAFFIRMING a row keeps its clock; re-authoring restarts it', () => {
     // The whole reason the clock is per row: a monthly review that changes two sectors must not
     // reset the nine it reaffirmed, or a 12-month call never comes due.
     const held  = row({ set_at: '2026-01-01T00:00:00.000Z', horizon: '12m' })
-    const fresh = row({ sector: 'Energy', active_bp: -150, stance: 'under' })
+    const fresh = row({ bucket: 'Energy', active_bp: -150, stance: 'under' })
     const t = normalizeTilt({ tilts: [held, fresh] }, NOW)
     assert.equal(t.tilts[0].set_at, '2026-01-01T00:00:00.000Z')
     assert.equal(t.tilts[0].review_date, '2027-01-01T00:00:00.000Z')   // deadline holds
@@ -94,14 +111,14 @@ test('a hand-supplied review_date is ignored — the deadline cannot disagree wi
 test('a balanced table nets to ~zero; an unbalanced one is FLAGGED, not destroyed', () => {
     const balanced = normalizeTilt({ tilts: [
         row({ active_bp: 150 }),
-        row({ sector: 'Energy', stance: 'under', active_bp: -150 }),
+        row({ bucket: 'Energy', stance: 'under', active_bp: -150 }),
     ] }, NOW)
     assert.equal(balanced.net_bp, 0)
     assert.equal(balanced.balanced, true)
 
     const lopsided = normalizeTilt({ tilts: [
         row({ active_bp: 300 }),
-        row({ sector: 'Energy', stance: 'over', active_bp: 200 }),
+        row({ bucket: 'Energy', stance: 'over', active_bp: 200 }),
     ] }, NOW)
     assert.equal(lopsided.net_bp, 500)
     assert.equal(lopsided.balanced, false)
@@ -111,7 +128,7 @@ test('a balanced table nets to ~zero; an unbalanced one is FLAGGED, not destroye
 test('rounding slack inside the tolerance still counts as balanced', () => {
     const t = normalizeTilt({ tilts: [
         row({ active_bp: BALANCE_TOLERANCE_BP }),
-        row({ sector: 'Energy', stance: 'neutral', active_bp: 0 }),
+        row({ bucket: 'Energy', stance: 'neutral', active_bp: 0 }),
     ] }, NOW)
     assert.equal(t.balanced, true)
     const over = normalizeTilt({ tilts: [row({ active_bp: BALANCE_TOLERANCE_BP + 1 })] }, NOW)
@@ -141,11 +158,11 @@ test('stanceCoherence ABSTAINS when nothing is claimed', () => {
 test('incoherentRows names every offender, so the author can fix them in one pass', () => {
     const doc = normalizeTilt({ tilts: [
         row(),                                                              // fine
-        row({ sector: 'Energy',    stance: 'under',   active_bp:  200 }),   // contradicts
-        row({ sector: 'Utilities', stance: 'neutral', active_bp: -100 }),   // contradicts
+        row({ bucket: 'Energy',    stance: 'under',   active_bp:  200 }),   // contradicts
+        row({ bucket: 'Utilities', stance: 'neutral', active_bp: -100 }),   // contradicts
     ] }, NOW)
     const bad = incoherentRows(doc)
-    assert.deepEqual(bad.map(b => b.sector), ['Energy', 'Utilities'])
+    assert.deepEqual(bad.map(b => b.bucket), ['Energy', 'Utilities'])
     assert.match(bad[0].detail, /negative active weight/)
     assert.equal(incoherentRows(normalizeTilt({ tilts: [row()] }, NOW)).length, 0)
 })
@@ -203,7 +220,7 @@ test('missing and junk weights count as zero rather than poisoning the sum', () 
 
 test('the stored document and the draft answer alike', () => {
     // Same function on both sides of the publish, which is the whole point of extracting it.
-    const rows = [{ sector: 'Energy', stance: 'over', active_bp: 400 }]
+    const rows = [{ bucket: 'Energy', stance: 'over', active_bp: 400 }]
     const doc  = normalizeTilt({ benchmark: 'SPX', tilts: rows })
     assert.equal(doc.balanced, balanceOf(rows).balanced)
     assert.equal(doc.net_bp,   balanceOf(rows).net_bp)
@@ -220,12 +237,13 @@ test('the stored document and the draft answer alike', () => {
 const LATER = '2026-09-19T00:00:00.000Z'
 /** A STORED row, as the standing view carries it — clock and baseline already frozen. */
 const heldRow = (over = {}) => ({
-    sector: 'Technology', stance: 'over', active_bp: 150, horizon: '12m',
+    bucket: 'Technology', grain: 'sector', proxy: { symbol: 'XLK', weighting: 'cap', exact: true },
+    stance: 'over', active_bp: 150, horizon: '12m',
     set_at: NOW, review_date: '2027-08-06T00:00:00.000Z',
     base_px: 180, base_bench_px: 700, contribution_bp: 1.25, state: 'open', ...over,
 })
 /** A row off the wire — what the model emits, which is stance, weight and words. */
-const wireRow = (over = {}) => ({ sector: 'Technology', stance: 'over', active_bp: 150, horizon: '12m', basis: 'bottom_up', ...over })
+const wireRow = (over = {}) => ({ bucket: 'Technology', stance: 'over', active_bp: 150, horizon: '12m', basis: 'bottom_up', ...over })
 
 test('carry: a RESTATED stance keeps its window, its baseline and its running grade', () => {
     const [carried] = carryReaffirmed([wireRow()], { tilts: [heldRow()] }, LATER)
@@ -278,7 +296,7 @@ test('carry: an OMITTED horizon is the desk default, so it still reads as the sa
 
 test('carry: the sector is matched CANONICALLY, so a GICS spelling still finds its own history', () => {
     const [carried] = carryReaffirmed(
-        [wireRow({ sector: 'Information Technology' })],
+        [wireRow({ bucket: 'Information Technology' })],
         { tilts: [heldRow()] }, LATER,
     )
     assert.equal(carried.set_at, NOW)
@@ -288,8 +306,8 @@ test('carry: no standing view, an unknown sector and junk rows are all the ident
     const rows = [wireRow()]
     assert.deepEqual(carryReaffirmed(rows, null, LATER), rows)
     assert.deepEqual(carryReaffirmed(rows, { tilts: [] }, LATER), rows)
-    assert.deepEqual(carryReaffirmed([wireRow({ sector: 'Energy' })], { tilts: [heldRow()] }, LATER),
-        [wireRow({ sector: 'Energy' })], 'a sector we held no view on has nothing to inherit')
+    assert.deepEqual(carryReaffirmed([wireRow({ bucket: 'Energy' })], { tilts: [heldRow()] }, LATER),
+        [wireRow({ bucket: 'Energy' })], 'a sector we held no view on has nothing to inherit')
     assert.deepEqual(carryReaffirmed(['nonsense', null], { tilts: [heldRow()] }, LATER), ['nonsense', null])
     assert.deepEqual(carryReaffirmed(undefined, { tilts: [heldRow()] }, LATER), [])
 })
@@ -308,7 +326,7 @@ test('carry: a caller that states the window itself is not overridden', () => {
 test('draft: the carried window survives normalisation, and the deadline holds', () => {
     // The end of the publish path that a database is not needed for: what publishTilt stores.
     const draft = draftForPublish(
-        { tilts: [wireRow(), wireRow({ sector: 'Energy', stance: 'under', active_bp: -150, horizon: '3m' })] },
+        { tilts: [wireRow(), wireRow({ bucket: 'Energy', stance: 'under', active_bp: -150, horizon: '3m' })] },
         { tilts: [heldRow()] },
         LATER,
     )
@@ -323,8 +341,8 @@ test('draft: the carried window survives normalisation, and the deadline holds',
 test('draft: republishing an unchanged table leaves every clock exactly where it was', () => {
     // The failure this whole fix is about: four of five real republishes restarted all six rows,
     // so nothing could ever mature and the score re-based at each review's own prices.
-    const standing = { tilts: [heldRow(), heldRow({ sector: 'Energy', stance: 'under', active_bp: -150, horizon: '3m', set_at: NOW, review_date: '2026-11-06T00:00:00.000Z', base_px: 58 })] }
-    const draft = draftForPublish({ tilts: [wireRow(), wireRow({ sector: 'Energy', stance: 'under', active_bp: -150, horizon: '3m' })] }, standing, LATER)
+    const standing = { tilts: [heldRow(), heldRow({ bucket: 'Energy', stance: 'under', active_bp: -150, horizon: '3m', set_at: NOW, review_date: '2026-11-06T00:00:00.000Z', base_px: 58 })] }
+    const draft = draftForPublish({ tilts: [wireRow(), wireRow({ bucket: 'Energy', stance: 'under', active_bp: -150, horizon: '3m' })] }, standing, LATER)
     assert.deepEqual(draft.tilts.map(r => r.set_at), [NOW, NOW])
     assert.deepEqual(draft.tilts.map(r => r.base_px), [180, 58])
     assert.equal(draft.created_at, LATER, 'the DOCUMENT is new; the calls on it are not')

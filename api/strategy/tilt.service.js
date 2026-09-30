@@ -26,7 +26,7 @@ import { makeHouseArtifactRepo } from '../../services/houseArtifact.repo.js'
 import { fetchLastPrice }  from '../../services/lastPrice.service.js'
 import { logger }          from '../../services/logger.service.js'
 import { toNum }           from '../../services/format.util.js'
-import { normalizeSector, SECTORS, proxyFor, BENCHMARK_PROXY } from '../../services/entity/vocabulary.js'
+import { SECTORS, resolveBucket, parentSector, proxyMeta, BENCHMARK_PROXY } from '../../services/entity/vocabulary.js'
 import { openWindow, normalizeHorizon, HORIZONS } from '../../services/forecastClock.js'
 import { newRevision, diffFields }  from '../../services/revisionTrail.js'
 
@@ -90,24 +90,38 @@ const _num = toNum   // the one safe coercion — see format.util.toNum
 const _horizon = v => normalizeHorizon(v, DESK_HORIZON)
 
 /**
- * One sector row. Pure. Returns null when it carries no usable sector — an unrecognised sector
- * cannot be joined against sector data or against our own book, so a row keyed on one is not a
- * stance, it is a sentence.
+ * One stance row, at either grain. Pure. Returns null when it names nothing the vocabulary knows —
+ * a bucket that cannot be resolved can be joined neither to market data nor to our own book, so a
+ * row keyed on one is not a stance, it is a sentence.
+ *
+ * `bucket` is read from `bucket`, falling back to the retired `sector` spelling. That fallback is
+ * READ-SIDE ONLY — one field is stored, never two — and it exists so a document written before the
+ * migration still normalises. Remove it once no stored view carries `sector`.
  *
  * The row owns its OWN clock, and that is the load-bearing detail. A monthly review typically
- * changes two sectors and reaffirms nine; if the clock lived on the document, every review would
- * reset all eleven and a 12-month call would never come due — the same unfalsifiability that a price
- * target without a deadline had. `openWindow` preserves `set_at` when the row carries one and
+ * changes two buckets and reaffirms nine; if the clock lived on the document, every review would
+ * reset all of them and a 12-month call would never come due — the same unfalsifiability that a
+ * price target without a deadline had. `openWindow` preserves `set_at` when the row carries one and
  * re-stamps when it does not, so reaffirming keeps the clock and re-authoring restarts it.
  */
 function _row(raw, now) {
     if (!raw || typeof raw !== 'object') return null
-    const sector = normalizeSector(raw.sector)
-    if (!sector) return null
+    const resolved = resolveBucket(raw.bucket ?? raw.sector)
+    if (!resolved) return null
+    const { grain, bucket } = resolved
 
     const { horizon, set_at, ends_at } = openWindow(raw, now, DESK_HORIZON)
     return {
-        sector,
+        grain,
+        bucket,
+        // WHAT THIS ROW IS GRADED AGAINST, frozen at publish beside the baseline and for the same
+        // reason. Re-resolving it on every read would mean that swapping a fund in BUCKET_PROXY
+        // silently re-scores every stance ever taken on that bucket against an instrument it was
+        // never measured on. `weighting` and `exact` ride along because both distort a grade and a
+        // reader judging the row needs to see which one it carries.
+        proxy: (raw.proxy && typeof raw.proxy === 'object' && _str(raw.proxy.symbol))
+            ? { symbol: raw.proxy.symbol, weighting: raw.proxy.weighting ?? null, exact: raw.proxy.exact ?? null }
+            : (proxyMeta(bucket) ? { ...proxyMeta(bucket) } : null),
         stance:    STANCES.includes(raw.stance) ? raw.stance : null,
         active_bp: _num(raw.active_bp),
         horizon,
@@ -134,25 +148,25 @@ function _row(raw, now) {
 }
 
 /**
- * Does a row's stance agree with its number? PURE → `{ ok }` | `{ ok: false, sector, detail }`.
+ * Does a row's stance agree with its number? PURE → `{ ok }` | `{ ok: false, bucket, detail }`.
  *
- * This is the sector-level twin of coverage's `ratingCoherence`, and it exists for the same reason
+ * This is the bucket-level twin of coverage's `ratingCoherence`, and it exists for the same reason
  * that one does: a `sell` rating with an upside target passed every gate and surfaced a day later as
  * a bogus verdict. Here the failure is worse than bogus — `active_bp` is what Atlas would actually
- * allocate on, so a row reading `stance: 'over'` with `active_bp: -150` would UNDERWEIGHT a sector
+ * allocate on, so a row reading `stance: 'over'` with `active_bp: -150` would UNDERWEIGHT a bucket
  * the desk meant to favour. The words and the number must agree before either reaches an allocator.
  */
 export function stanceCoherence(row) {
-    const { sector, stance, active_bp: bp } = row ?? {}
+    const { bucket, stance, active_bp: bp } = row ?? {}
     if (!stance || bp === null || bp === undefined) return { ok: true }   // nothing claimed → nothing to contradict
     if (stance === 'over' && bp <= 0) {
-        return { ok: false, sector, detail: `an "over" stance needs a positive active weight, got ${bp}bp` }
+        return { ok: false, bucket, detail: `an "over" stance needs a positive active weight, got ${bp}bp` }
     }
     if (stance === 'under' && bp >= 0) {
-        return { ok: false, sector, detail: `an "under" stance needs a negative active weight, got ${bp}bp` }
+        return { ok: false, bucket, detail: `an "under" stance needs a negative active weight, got ${bp}bp` }
     }
     if (stance === 'neutral' && bp !== 0) {
-        return { ok: false, sector, detail: `a "neutral" stance is 0bp by definition, got ${bp}bp` }
+        return { ok: false, bucket, detail: `a "neutral" stance is 0bp by definition, got ${bp}bp` }
     }
     return { ok: true }
 }
@@ -203,12 +217,13 @@ export function normalizeTilt(raw, now = new Date().toISOString()) {
     const r = (raw && typeof raw === 'object') ? raw : {}
     const benchmark = _str(r.benchmark) ?? 'SPX'
 
-    // One row per sector: two stances on one sector is a contradiction, not a richer view. First
-    // wins, so a later duplicate can never quietly override an earlier stance.
+    // One row per BUCKET: two stances on one bucket is a contradiction, not a richer view. First
+    // wins, so a later duplicate can never quietly override an earlier stance. Keyed on the
+    // RESOLVED bucket rather than the spelling, so "semis" cannot sit beside "Semiconductors".
     const seen = new Set()
     const tilts = _arr(r.tilts)
         .map(t => _row(t, now))
-        .filter(t => t && !seen.has(t.sector) && seen.add(t.sector))
+        .filter(t => t && !seen.has(t.bucket) && seen.add(t.bucket))
 
     return {
         id:        _str(r.id) ?? `tilt_${benchmark}_${randomUUID().slice(0, 8)}`,
@@ -230,6 +245,46 @@ export function normalizeTilt(raw, now = new Date().toISOString()) {
 /** Every row whose words disagree with its number. Pure — `[]` when the table is coherent. */
 export function incoherentRows(doc) {
     return _arr(doc?.tilts).map(stanceCoherence).filter(c => !c.ok)
+}
+
+/**
+ * Rows that DOUBLE-COUNT — an industry sitting under a sector the same table already holds a view
+ * on. Pure → `[]` when the table is clean, else `[{ bucket, parent, detail }]`.
+ *
+ * Every weight here is active against ONE benchmark, which is what keeps the attribution exact. A
+ * table holding "Energy −100" and "Oil & Gas Midstream +50" counts midstream's energy exposure
+ * twice: the sums still net, and what they mean is mud. Either the view is on the sector or it is
+ * on the parts, and the author is the one who knows which.
+ *
+ * The sibling of `stanceCoherence`, refused in the same place and for the same reason — `active_bp`
+ * is what Atlas allocates on, so a number that means two things must not reach it.
+ */
+export function overlappingRows(doc) {
+    const rows    = _arr(doc?.tilts).filter(r => r?.bucket)
+    const sectors = new Set(rows.filter(r => r.grain === 'sector').map(r => r.bucket))
+    if (!sectors.size) return []
+
+    return rows
+        .filter(r => r.grain === 'industry' && sectors.has(parentSector(r.bucket)))
+        .map(r => ({
+            bucket: r.bucket,
+            parent: parentSector(r.bucket),
+            detail: `"${r.bucket}" sits inside "${parentSector(r.bucket)}", which this table already holds a view on — hold the sector or its parts, not both`,
+        }))
+}
+
+/**
+ * Rows that cannot be graded at all: the bucket resolved, but nothing prices it. Pure.
+ *
+ * Distinct from a baseline that could not be READ today, which the monitor backfills on the next
+ * tick. This is permanent — no fund stands in for the bucket, so the stance could never be scored
+ * however long it stands, and the whole desk rests on stances being scoreable. Refused at publish,
+ * where the author can take the view one grain up instead.
+ */
+export function unpriceableRows(doc) {
+    return _arr(doc?.tilts)
+        .filter(r => r?.bucket && !r?.proxy?.symbol)
+        .map(r => ({ bucket: r.bucket, detail: `no fund stands in for "${r.bucket}" — take the view on ${parentSector(r.bucket) ?? 'its sector'} instead` }))
 }
 
 /**
@@ -269,13 +324,15 @@ function _sameCall(raw, held) {
  */
 export function carryReaffirmed(rawTilts, previous, now = new Date().toISOString()) {
     const rows = _arr(rawTilts)
-    const held = new Map(_arr(previous?.tilts).filter(r => r?.sector).map(r => [r.sector, r]))
+    const held = new Map(_arr(previous?.tilts)
+        .map(r => [resolveBucket(r?.bucket ?? r?.sector)?.bucket, r])
+        .filter(([bucket]) => bucket))
     if (!held.size) return rows
 
     const nowMs = Date.parse(now)
     return rows.map(raw => {
         if (!raw || typeof raw !== 'object') return raw
-        const prev = held.get(normalizeSector(raw.sector))
+        const prev = held.get(resolveBucket(raw.bucket ?? raw.sector)?.bucket)
         if (!prev || !_sameCall(raw, prev)) return raw
 
         const endsMs = Date.parse(prev.review_date ?? '')
@@ -353,11 +410,13 @@ export async function stampBaselines(rows, benchmark = 'SPX', io = _io) {
 
     const benchPx = bench ? _num(await io.priceFor(bench)) : null
     for (const r of needs) {
-        const proxy = proxyFor(r.sector)
+        // The row's OWN proxy, stamped by `_row` and never re-resolved here: a stance is
+        // measured against the instrument it was published against, whatever the table says later.
+        const proxy = r.proxy?.symbol ?? null
         if (r.base_px === null && proxy)      r.base_px = _num(await io.priceFor(proxy))
         if (r.base_bench_px === null)         r.base_bench_px = benchPx
     }
-    const unpriced = rows.filter(r => r.base_px === null || r.base_bench_px === null).map(r => r.sector)
+    const unpriced = rows.filter(r => r.base_px === null || r.base_bench_px === null).map(r => r.bucket)
     if (unpriced.length) logger.warn(LOG, 'stances published without a baseline — ungradeable until backfilled', { unpriced })
     return rows
 }
@@ -387,25 +446,42 @@ async function publishTilt(raw, { note = null } = {}) {
     const doc = draftForPublish(raw, previous)
     if (!doc.tilts.length) return { ok: false, reason: 'no_usable_rows' }
 
-    // A row whose sector will not canonicalise is DROPPED by the normalizer, and the stored doc
+    // A row naming nothing the vocabulary knows is DROPPED by the normalizer, and the stored doc
     // cannot say so afterwards — "we held no view on Utilities" and "the Utilities row was
     // discarded at the boundary" read identically once written. Record the discrepancy here, the
     // one place both numbers exist, so a silent drop leaves a trace instead of a mystery.
     const emitted = Array.isArray(raw?.tilts) ? raw.tilts.length : 0
     if (emitted > doc.tilts.length) {
-        const kept    = new Set(doc.tilts.map(r => r.sector))
+        const kept    = new Set(doc.tilts.map(r => r.bucket))
         const dropped = (raw.tilts ?? [])
-            .map(r => r?.sector)
-            .filter(sec => !kept.has(normalizeSector(sec)))
-        logger.warn(LOG, 'rows DROPPED — unrecognised sector, not an absent view',
+            .map(r => r?.bucket ?? r?.sector)
+            .filter(name => !kept.has(resolveBucket(name)?.bucket))
+        logger.warn(LOG, 'rows DROPPED — unrecognised bucket, not an absent view',
             { emitted, kept: doc.tilts.length, dropped })
     }
 
     const bad = incoherentRows(doc)
     if (bad.length) {
-        const detail = bad.map(b => `${b.sector}: ${b.detail}`).join('; ')
+        const detail = bad.map(b => `${b.bucket}: ${b.detail}`).join('; ')
         logger.warn(LOG, 'tilt REJECTED — stance contradicts active weight', { detail })
         return { ok: false, reason: 'stance_contradicts_weight', detail }
+    }
+
+    // Both of these are permanent conditions the author can fix, so they are refused here rather
+    // than recorded — unlike an unbalanced table, which is a smell worth seeing and not worth
+    // destroying the work over.
+    const overlapping = overlappingRows(doc)
+    if (overlapping.length) {
+        const detail = overlapping.map(o => o.detail).join('; ')
+        logger.warn(LOG, 'tilt REJECTED — a table cannot hold a sector and its own parts', { detail })
+        return { ok: false, reason: 'bucket_overlaps_parent', detail }
+    }
+
+    const unpriceable = unpriceableRows(doc)
+    if (unpriceable.length) {
+        const detail = unpriceable.map(u => u.detail).join('; ')
+        logger.warn(LOG, 'tilt REJECTED — a stance that cannot be priced can never be graded', { detail })
+        return { ok: false, reason: 'bucket_has_no_proxy', detail }
     }
     if (!doc.balanced) {
         logger.warn(LOG, 'tilt published UNBALANCED — active weights do not net out', { net_bp: doc.net_bp })
@@ -519,9 +595,17 @@ async function updateTilt(id, patch = {}) {
     if ('tilts' in p) {
         const bad = incoherentRows(merged)
         if (bad.length) {
-            const detail = bad.map(b => `${b.sector}: ${b.detail}`).join('; ')
+            const detail = bad.map(b => `${b.bucket}: ${b.detail}`).join('; ')
             logger.warn(LOG, 'tilt update REJECTED — stance contradicts active weight', { id, detail })
             return { ok: false, reason: 'stance_contradicts_weight', detail }
+        }
+        // The same gate publish applies, and for the same reason: this path is how the monitor and
+        // a hand correction rewrite rows, and either could introduce the overlap a publish refuses.
+        const overlapping = overlappingRows(merged)
+        if (overlapping.length) {
+            const detail = overlapping.map(o => o.detail).join('; ')
+            logger.warn(LOG, 'tilt update REJECTED — a table cannot hold a sector and its own parts', { id, detail })
+            return { ok: false, reason: 'bucket_overlaps_parent', detail }
         }
     }
 

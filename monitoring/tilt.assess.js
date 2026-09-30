@@ -109,30 +109,37 @@ export function maturedRows(rows = [], nowMs = 0) {
 }
 
 /**
- * What actually MOVED between two published views → `[{ sector, from, to, from_bp, to_bp }]`. Pure.
+ * What actually MOVED between two published views → `[{ bucket, grain, from, to, from_bp, to_bp }]`.
+ * Pure.
  *
  * Reaffirming is the common case — a monthly review typically restates nine sectors and re-authors
  * two — so a diff is what separates news from noise. A row whose stance and weight are both
  * unchanged is not reported, however many times it has been re-published.
  *
- * A sector appearing for the first time reads as `from: null`; one that drops out reads as
+ * A bucket appearing for the first time reads as `from: null`; one that drops out reads as
  * `to: null`, because withdrawing a stance is itself a change worth telling someone about.
+ *
+ * DELIBERATELY NOT the horizon. This diff drives the change card and Atlas's review trigger, both
+ * of which act on weight; re-cutting a 12m call to 3m moves no allocation. The reaffirm check in
+ * tilt.service does read the horizon, because a re-cut call genuinely starts a new clock.
  */
 export function diffStances(prev, next) {
-    const byKey = rows => new Map((Array.isArray(rows) ? rows : []).map(r => [r?.sector, r]).filter(([s]) => s))
+    const byKey = rows => new Map((Array.isArray(rows) ? rows : [])
+        .map(r => [r?.bucket ?? r?.sector, r]).filter(([k]) => k))
     const a = byKey(prev?.tilts), b = byKey(next?.tilts)
     const out = []
-    for (const sector of new Set([...a.keys(), ...b.keys()])) {
-        const was = a.get(sector), now = b.get(sector)
+    for (const bucket of new Set([...a.keys(), ...b.keys()])) {
+        const was = a.get(bucket), now = b.get(bucket)
         const fromBp = _num(was?.active_bp), toBp = _num(now?.active_bp)
         if ((was?.stance ?? null) === (now?.stance ?? null) && fromBp === toBp) continue
         out.push({
-            sector,
+            bucket,
+            grain: now?.grain ?? was?.grain ?? null,
             from: was?.stance ?? null, to: now?.stance ?? null,
             from_bp: fromBp, to_bp: toBp,
         })
     }
-    return out.sort((x, y) => x.sector.localeCompare(y.sector))
+    return out.sort((x, y) => x.bucket.localeCompare(y.bucket))
 }
 
 /**
@@ -191,7 +198,7 @@ export function reviewDecision(doc, { nowMs = 0, catalystDates = [] } = {}) {
     //    nobody ever graded — the failure this whole clock exists to prevent.
     const due = maturedRows(doc?.tilts, nowMs)
     if (due.length) {
-        return { ...quiet, due: true, reason: `stance matured: ${due.map(r => r.sector).join(', ')}` }
+        return { ...quiet, due: true, reason: `stance matured: ${due.map(r => r.bucket).join(', ')}` }
     }
 
     // 2. A dated macro catalyst has landed since we last published. Actionable the day AFTER it

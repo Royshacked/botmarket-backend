@@ -15,7 +15,7 @@
 
 import { tiltService, COLLECTION } from '../api/strategy/tilt.service.js'
 import { gradeRow, totalContributionBp, reviewDecision } from './tilt.assess.js'
-import { proxyFor, BENCHMARK_PROXY } from '../services/entity/vocabulary.js'
+import { BENCHMARK_PROXY } from '../services/entity/vocabulary.js'
 import { fetchMacroCatalystDates } from '../providers/fred.provider.js'
 import { notifyTiltReviewDue } from '../services/tiltNotify.service.js'
 import { fetchLastPrice } from '../services/lastPrice.service.js'
@@ -28,9 +28,9 @@ const POLL_INTERVAL_MS = 60 * 60 * 1000
 const DAY_MS           = 24 * 60 * 60 * 1000
 
 const _deps = {
-    // The SHARED price read — the same one Talos and the coverage monitor gate on. Twelve
-    // reads a day at most (eleven sector proxies plus the benchmark), and only for sectors actually
-    // carrying an open stance.
+    // The SHARED price read — the same one Talos and the coverage monitor gate on. One read per
+    // bucket carrying an open stance, plus the benchmark — so the budget now follows the size of
+    // the table rather than the eleven sectors it used to be capped at.
     getPrice:  (sym) => fetchLastPrice(sym).catch(() => null),
     updateTilt: tiltService.updateTilt,
     // The quiet grade-refresh path. It deliberately does NOT append a revision (see the service),
@@ -74,13 +74,16 @@ export const tiltMonitorService = { start: _loop.start, stop: _loop.stop }
  * `gradeRow` already handles by keeping the last known contribution.
  */
 export async function _resolvePrices(rows, benchmark, deps = _deps) {
-    const sectors = [...new Set(rows.filter(r => r?.state !== 'matured').map(r => r?.sector).filter(Boolean))]
-    const bench   = BENCHMARK_PROXY[benchmark] ?? null
+    // The row's OWN frozen proxy, never a fresh lookup — a stance is graded against the instrument
+    // it was published against, so swapping a fund in the table cannot re-score a standing call.
+    const open   = rows.filter(r => r?.state !== 'matured' && r?.bucket && r?.proxy?.symbol)
+    const wanted = [...new Map(open.map(r => [r.bucket, r.proxy.symbol])).entries()]
+    const bench  = BENCHMARK_PROXY[benchmark] ?? null
     const [benchPx, ...pxs] = await Promise.all([
         bench ? deps.getPrice(bench) : Promise.resolve(null),
-        ...sectors.map(s => { const p = proxyFor(s); return p ? deps.getPrice(p) : Promise.resolve(null) }),
+        ...wanted.map(([, symbol]) => deps.getPrice(symbol)),
     ])
-    return { bySector: new Map(sectors.map((s, i) => [s, pxs[i]])), bench: benchPx }
+    return { byBucket: new Map(wanted.map(([bucket], i) => [bucket, pxs[i]])), bench: benchPx }
 }
 
 /**
@@ -94,19 +97,19 @@ export async function _resolvePrices(rows, benchmark, deps = _deps) {
  */
 export async function _checkTilt(doc, nowMs, deps = _deps) {
     const rows = Array.isArray(doc.tilts) ? doc.tilts : []
-    const { bySector, bench } = await _resolvePrices(rows, doc.benchmark, deps)
+    const { byBucket, bench } = await _resolvePrices(rows, doc.benchmark, deps)
 
     const backfilled = []
     const graded = rows.map(r => {
-        const sectorNow = bySector.get(r?.sector) ?? null
+        const sectorNow = byBucket.get(r?.bucket) ?? null
         let row = r
         if ((r?.base_px === null || r?.base_px === undefined) && sectorNow && bench) {
             row = { ...r, base_px: sectorNow, base_bench_px: r.base_bench_px ?? bench }
-            backfilled.push(r.sector)
+            backfilled.push(r.bucket)
         }
         return gradeRow(row, { sectorNow, benchNow: bench }, nowMs)
     })
-    if (backfilled.length) logger.info(LOG, 'baselines backfilled a tick late', { id: doc.id, sectors: backfilled })
+    if (backfilled.length) logger.info(LOG, 'baselines backfilled a tick late', { id: doc.id, buckets: backfilled })
 
     const newlyMatured = graded.filter((g, i) => g.state === 'matured' && rows[i]?.state !== 'matured')
     const remodel = reviewDecision({ ...doc, tilts: graded }, {
@@ -125,7 +128,7 @@ export async function _checkTilt(doc, nowMs, deps = _deps) {
     // the desk changing its mind, and writing a revision every day would bury the ones that matter.
     // Maturity IS a state change, so that one gets a trail entry through the service.
     if (newlyMatured.length) {
-        const note = `stance matured: ${newlyMatured.map(r => `${r.sector} ${r.contribution_bp ?? '?'}bp`).join(', ')}`
+        const note = `stance matured: ${newlyMatured.map(r => `${r.bucket} ${r.contribution_bp ?? '?'}bp`).join(', ')}`
         const res  = await deps.updateTilt(doc.id, { tilts: graded, revision_kind: 'stance_matured', revision_note: note })
         if (!res?.ok) {
             logger.warn(LOG, 'maturity write failed — leaving the view due for the next tick', { id: doc.id, reason: res?.reason })
@@ -149,5 +152,5 @@ export async function _checkTilt(doc, nowMs, deps = _deps) {
         offered = await deps.requestReview({ ...doc, tilts: graded }, remodel.reason)
         logger.info(LOG, 'review due', { id: doc.id, reason: remodel.reason, offered })
     }
-    return { graded: true, matured: newlyMatured.map(r => r.sector), remodel, offered, total_bp: bookkeeping['monitor.total_bp'] }
+    return { graded: true, matured: newlyMatured.map(r => r.bucket), remodel, offered, total_bp: bookkeeping['monitor.total_bp'] }
 }

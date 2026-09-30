@@ -39,7 +39,7 @@ test('fingerprint: full state → all fields captured', () => {
         ],
     }
     const macroRaw = { asOf: '2026-07-16', spread2s10s: 0.41, fedFunds: 4.09, inflation: 2.29 }
-    const tilt = { id: 'tilt1', tilts: [{ sector: 'Energy', stance: 'under', active_bp: -150, rationale: 'ignored here' }] }
+    const tilt = { id: 'tilt1', tilts: [{ bucket: 'Energy', stance: 'under', active_bp: -150, rationale: 'ignored here' }] }
     const fp = buildFingerprint({ reason: 'review', state, macroRaw, tilt, benchmark: { ticker: 'SPY', price: 600 }, now: 1_700_000_000_000 })
 
     assert.equal(fp.reason, 'review')
@@ -52,7 +52,7 @@ test('fingerprint: full state → all fields captured', () => {
     assert.equal(fp.regime.fedFunds, 4.09)
     // The house view as it stood — the baseline the NEXT review diffs against. Only the three
     // fields a stance is judged by; the day's sector ranking is deliberately not captured at all.
-    assert.deepEqual(fp.tilt, { id: 'tilt1', stances: [{ sector: 'Energy', stance: 'under', active_bp: -150 }] })
+    assert.deepEqual(fp.tilt, { id: 'tilt1', stances: [{ bucket: 'Energy', stance: 'under', active_bp: -150 }] })
     assert.equal(fp.regime.leaders, undefined, 'a daily sector ranking is not a baseline')
     assert.equal(fp.holdings.length, 2)
     assert.deepEqual(fp.holdings[0], { asset: 'NVDA', allocationRatio: 0.3, actualWeight: 0.32, convictionScore: 0.8, convictionLevel: 'high' })
@@ -154,8 +154,8 @@ test('triggers: daily sector rotation NEVER fires — it was pure noise', () => 
 })
 
 test('triggers: the HOUSE SECTOR VIEW changing is what earns a look', () => {
-    const fingerprint = { tilt: { id: 't1', stances: [{ sector: 'Energy', stance: 'under', active_bp: -150 }] } }
-    const tilt = { id: 't2', tilts: [{ sector: 'Energy', stance: 'over', active_bp: 150 }] }
+    const fingerprint = { tilt: { id: 't1', stances: [{ bucket: 'Energy', stance: 'under', active_bp: -150 }] } }
+    const tilt = { id: 't2', tilts: [{ bucket: 'Energy', stance: 'over', active_bp: 150 }] }
     const t = computeReviewTriggers({ state: null, fingerprint, tilt })
     assert.equal(t.length, 1)
     assert.equal(t[0].kind, 'sector_view')
@@ -164,7 +164,7 @@ test('triggers: the HOUSE SECTOR VIEW changing is what earns a look', () => {
 
 test('triggers: a republished but UNCHANGED view is not news', () => {
     // The ratchet the rotation trigger never had: publishing again with the same stances is silent.
-    const stances = [{ sector: 'Energy', stance: 'under', active_bp: -150 }]
+    const stances = [{ bucket: 'Energy', stance: 'under', active_bp: -150 }]
     const t = computeReviewTriggers({
         state: null,
         fingerprint: { tilt: { id: 't1', stances } },
@@ -179,7 +179,7 @@ test('triggers: the view trigger is NOT gated on what the book holds', () => {
     const t = computeReviewTriggers({
         state: { ideas: [{ asset: 'NVDA' }] },
         fingerprint: { tilt: { id: 't1', stances: [] } },
-        tilt: { id: 't2', tilts: [{ sector: 'Utilities', stance: 'over', active_bp: 200 }] },
+        tilt: { id: 't2', tilts: [{ bucket: 'Utilities', stance: 'over', active_bp: 200 }] },
     })
     assert.ok(t.some(x => x.kind === 'sector_view' && /Utilities/.test(x.label)))
 })

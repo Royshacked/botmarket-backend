@@ -9,10 +9,43 @@ The one line: **a tilt is the one forecast in this app that grades by arithmetic
 judgment — `active weight × relative return` — and it is the mandate the rest of the house pipeline
 is steered from.**
 
+## The grain — what a stance is held ON
+
+Since 2026-09-30 a row names a **sector or an industry**, whichever grain the bet lives at, and
+carries which (`grain`) alongside the name (`bucket`) and the fund it is graded against (`proxy`).
+"Overweight Energy" is a direction; "overweight Oil & Gas Exploration & Production" is a place to
+look, and Argus can screen it unchanged because the vocabulary is the screener's own
+(`INDUSTRY_SECTOR`, 155 industries derived from FMP, each owned by exactly one sector).
+
+**Two grains, not three.** FMP's `industry` is already sub-industry fine — `Gold`, `Steel`,
+`Semiconductors`, `Banks - Regional` are all first-class there — so a third level would have no
+vocabulary behind it and nothing to screen with.
+
+`resolveBucket` tries the INDUSTRY first, and that order is the whole function: falling through to
+the sector would publish a bet on many times more of the market than the author wrote, against the
+wrong fund, with nothing downstream able to tell. ~~`sectorProxy`~~ and the `sector` field are gone
+rather than kept beside the new ones; `scripts/migrate-tilt-buckets.mjs` moved the stored rows and
+Atlas's stored review fingerprints, which carried the field too.
+
+**Two gates come with it**, both refused at publish where the author can fix them:
+
+- **A table may not hold a sector and its own industries** (`overlappingRows`). Every weight is
+  active against the one benchmark, so "Energy −100" beside "Oil & Gas Midstream +50" counts
+  midstream twice — the sums still net and what they mean is mud.
+- **A bucket with no fund cannot be published** (`unpriceableRows`). Distinct from a baseline that
+  could not be read today, which the monitor backfills: this one is permanent, and the whole desk
+  rests on a stance being scoreable.
+
+The proxy is FROZEN onto the row at publish, for the same reason the baseline is. Swapping a fund
+in `BUCKET_PROXY` must not silently re-score a standing call against an instrument it was never
+measured on. `weighting` and `exact` ride along because both distort a grade — an equal-weighted
+fund against a cap-weighted benchmark books part of a size factor as an industry call, and a fund
+that spans several industries is not the bucket it stands in for.
+
 ## What a tilt IS, and is not
 
 ONE document for the whole market (`api/strategy/tilt.service.js`, collection `tilt`): a `benchmark`
-(`SPX`), a `regime` (`name`, `thesis`, `kill_criteria`) and `tilts[]` — one row per sector with
+(`SPX`), a `regime` (`name`, `thesis`, `kill_criteria`) and `tilts[]` — one row per BUCKET with
 `stance` (`over · neutral · under`), `active_bp`, `horizon`, `basis`, `rationale`, and the grading
 fields the service adds: `set_at` / `review_date` (the row's own clock), `base_px` / `base_bench_px`
 (the frozen baseline), `contribution_bp`, `state` (`open · matured`). Plus `net_bp` / `balanced` on
@@ -140,7 +173,7 @@ write — the same lesson coverage learned by losing a target to a stale merged 
 
 `monitoring/tilt.monitor.service.js`, on the shared `dueLoop`. Hourly tick, ~daily per view via
 `monitor.next_check_at`; there is one broadcast view, so "due" is at most one document a day. Not
-eager on start. At most twelve price reads a day (eleven sector proxies plus the benchmark), and only
+eager on start. One price read a day per bucket carrying an open stance, plus the benchmark, and only
 for sectors carrying an open stance.
 
 **Two tiers, mirroring coverage — and the expensive tier is not run by the monitor at all.**

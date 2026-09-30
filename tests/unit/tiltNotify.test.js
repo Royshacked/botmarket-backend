@@ -14,7 +14,7 @@ const tilt = (over = {}) => ({
     id: 'tilt_SPX_1', benchmark: 'SPX', balanced: true,
     regime: { name: 'late-cycle disinflation' }, ...over,
 })
-const change = (over = {}) => ({ sector: 'Energy', from: 'neutral', to: 'under', from_bp: 0, to_bp: -150, ...over })
+const change = (over = {}) => ({ bucket: 'Energy', grain: null, from: 'neutral', to: 'under', from_bp: 0, to_bp: -150, ...over })
 
 // ── the card ─────────────────────────────────────────────────────────────────
 test('one moved sector → a strategy card with the regime as the reason', () => {
@@ -23,7 +23,7 @@ test('one moved sector → a strategy card with the regime as the reason', () =>
     assert.equal(c.type, 'tilt_event')
     assert.equal(c.userId, 'u1')
     assert.equal(c.content, 'Sector view changed: late-cycle disinflation — Energy neutral → underweight (-150bp).')
-    assert.deepEqual(c.payload.sectors, ['Energy'])
+    assert.deepEqual(c.payload.buckets, ['Energy'])
     assert.equal(c.payload.tiltId, 'tilt_SPX_1')
     assert.ok(c.actions, 'the card is actionable — it opens the view')
 })
@@ -33,8 +33,8 @@ test('tilt_event is admin-only — only the Pythia pipeline produces these', () 
 })
 
 test('several moved sectors are counted in the head and listed in the body', () => {
-    const c = buildTiltEvent(tilt(), [change(), change({ sector: 'Technology', from: 'over', to: 'neutral', to_bp: 0 })], 'u1')
-    assert.match(c.content, /^2 sector views changed:/)
+    const c = buildTiltEvent(tilt(), [change(), change({ bucket: 'Technology', grain: null, from: 'over', to: 'neutral', to_bp: 0 })], 'u1')
+    assert.match(c.content, /^2 stances changed:/)
     assert.match(c.content, /Energy neutral → underweight \(-150bp\)/)
     assert.match(c.content, /Technology overweight → neutral \(\+0bp\)/)
 })
@@ -80,14 +80,14 @@ test('the change card reaches every admin — the roster is the audience, not a 
 })
 
 test('every admin hears the WHOLE change — one card each, naming every moved sector', async () => {
-    const changes = [change(), change({ sector: 'Technology', from: 'over', to: 'neutral', to_bp: 0 })]
+    const changes = [change(), change({ bucket: 'Technology', grain: null, from: 'over', to: 'neutral', to_bp: 0 })]
     const posted = []
     await notifyTiltChanged(tilt(), changes, {
         adminUserIds: async () => ['a1'],
         post:         async (card) => { posted.push(card); return card },
     })
     assert.equal(posted.length, 1)
-    assert.deepEqual(posted[0].payload.sectors, ['Energy', 'Technology'])
+    assert.deepEqual(posted[0].payload.buckets, ['Energy', 'Technology'])
     assert.equal(posted[0].visibility, 'admin')
 })
 
@@ -127,8 +127,8 @@ const view = (over = {}) => tilt({
     created_at: '2026-01-01T00:00:00.000Z',
     revisions: [{ at: '2026-01-01T00:00:00.000Z', kind: 'publish' }],
     tilts: [
-        { sector: 'Energy', stance: 'under', active_bp: -150, state: 'matured' },
-        { sector: 'Technology', stance: 'over', active_bp: 150, state: 'open' },
+        { bucket: 'Energy', stance: 'under', active_bp: -150, state: 'matured' },
+        { bucket: 'Technology', stance: 'over', active_bp: 150, state: 'open' },
     ],
     ...over,
 })
@@ -149,7 +149,7 @@ test('tilt_review offer is admin-only — only the admin runs the Pythia review'
 
 test('the payload separates what is DUE from what is merely standing', () => {
     const p = buildTiltReviewOffer(view(), { reason: 'x', userId: 'u1' }).payload
-    assert.deepEqual(p.sectors, ['Energy', 'Technology'])
+    assert.deepEqual(p.buckets, ['Energy', 'Technology'])
     assert.deepEqual(p.matured, ['Energy'], 'a closed call the review has to grade, not just restate')
     assert.equal(p.stances, 2)
     assert.equal(p.tiltId, 'tilt_SPX_1')
@@ -228,25 +228,25 @@ test('a view with no id is not offered — there is nothing to review', async ()
 
 // ── the diff is what separates news from noise ───────────────────────────────
 test('republishing an unchanged view notifies nobody', () => {
-    const rows = [{ sector: 'Energy', stance: 'under', active_bp: -150 }]
+    const rows = [{ bucket: 'Energy', stance: 'under', active_bp: -150 }]
     assert.deepEqual(diffStances({ tilts: rows }, { tilts: [...rows] }), [])
 })
 
 test('diffStances reports a changed weight even when the stance word is the same', () => {
     const d = diffStances(
-        { tilts: [{ sector: 'Energy', stance: 'under', active_bp: -150 }] },
-        { tilts: [{ sector: 'Energy', stance: 'under', active_bp: -300 }] },
+        { tilts: [{ bucket: 'Energy', stance: 'under', active_bp: -150 }] },
+        { tilts: [{ bucket: 'Energy', stance: 'under', active_bp: -300 }] },
     )
-    assert.deepEqual(d, [{ sector: 'Energy', from: 'under', to: 'under', from_bp: -150, to_bp: -300 }])
+    assert.deepEqual(d, [{ bucket: 'Energy', grain: null, from: 'under', to: 'under', from_bp: -150, to_bp: -300 }])
 })
 
 test('diffStances reports sectors that appear and sectors that drop out', () => {
     const d = diffStances(
-        { tilts: [{ sector: 'Energy', stance: 'under', active_bp: -150 }] },
-        { tilts: [{ sector: 'Technology', stance: 'over', active_bp: 150 }] },
+        { tilts: [{ bucket: 'Energy', stance: 'under', active_bp: -150 }] },
+        { tilts: [{ bucket: 'Technology', stance: 'over', active_bp: 150 }] },
     )
     assert.deepEqual(d, [
-        { sector: 'Energy',     from: 'under', to: null,   from_bp: -150, to_bp: null },
-        { sector: 'Technology', from: null,    to: 'over', from_bp: null, to_bp: 150 },
+        { bucket: 'Energy',     grain: null, from: 'under', to: null,   from_bp: -150, to_bp: null },
+        { bucket: 'Technology', grain: null, from: null,    to: 'over', from_bp: null, to_bp: 150 },
     ])
 })

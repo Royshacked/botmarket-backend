@@ -14,7 +14,7 @@ const T0  = Date.parse('2026-01-01T00:00:00.000Z')
 const at  = days => T0 + days * DAY
 
 const row = (over = {}) => ({
-    sector: 'Technology', stance: 'over', active_bp: 150,
+    bucket: 'Technology', stance: 'over', active_bp: 150,
     set_at: '2026-01-01T00:00:00.000Z', review_date: '2027-01-01T00:00:00.000Z',
     // The baseline is FROZEN on the row at authoring time — grading never looks up history.
     base_px: 100, base_bench_px: 100,
@@ -67,7 +67,7 @@ test('gradeRow scores an open stance and leaves it open', () => {
     const g = gradeRow(row(), PRICES, at(30))
     assert.equal(g.contribution_bp, 9)      // 150bp x 6%
     assert.equal(g.state, 'open')
-    assert.equal(g.sector, 'Technology', 'the rest of the row rides through untouched')
+    assert.equal(g.bucket, 'Technology', 'the rest of the row rides through untouched')
 })
 
 test('a stance MATURES when its own window closes', () => {
@@ -104,12 +104,12 @@ test('total skips unpriced rows rather than counting them as zero', () => {
 
 test('maturedRows finds exactly the stances the desk owes a verdict on', () => {
     const rows = [
-        row({ sector: 'Technology' }),                                                  // 12m, open
-        row({ sector: 'Energy', review_date: '2026-04-01T00:00:00.000Z' }),             // 3m, due
-        row({ sector: 'Utilities', set_at: null, review_date: null }),                  // unmeasurable
+        row({ bucket: 'Technology' }),                                                  // 12m, open
+        row({ bucket: 'Energy', review_date: '2026-04-01T00:00:00.000Z' }),             // 3m, due
+        row({ bucket: 'Utilities', set_at: null, review_date: null }),                  // unmeasurable
     ]
-    assert.deepEqual(maturedRows(rows, at(120)).map(r => r.sector), ['Energy'])
-    assert.deepEqual(maturedRows(rows, at(10)).map(r => r.sector), [])
+    assert.deepEqual(maturedRows(rows, at(120)).map(r => r.bucket), ['Energy'])
+    assert.deepEqual(maturedRows(rows, at(10)).map(r => r.bucket), [])
 })
 
 // ── the wake decision ────────────────────────────────────────────────────────
@@ -125,7 +125,7 @@ test('quiet inside the cooldown, whatever else is true', () => {
 })
 
 test('a matured stance wakes the desk — a call nobody graded is the failure to avoid', () => {
-    const d = doc({ tilts: [row({ sector: 'Energy', review_date: '2026-02-01T00:00:00.000Z' })] })
+    const d = doc({ tilts: [row({ bucket: 'Energy', review_date: '2026-02-01T00:00:00.000Z' })] })
     const v = reviewDecision(d, { nowMs: at(40) })
     assert.equal(v.due, true)
     assert.match(v.reason, /stance matured: Energy/)
