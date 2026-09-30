@@ -32,9 +32,15 @@ Atlas's stored review fingerprints, which carried the field too.
 - **A table may not hold a sector and its own industries** (`overlappingRows`). Every weight is
   active against the one benchmark, so "Energy −100" beside "Oil & Gas Midstream +50" counts
   midstream twice — the sums still net and what they mean is mud.
-- **A bucket with no fund cannot be published** (`unpriceableRows`). Distinct from a baseline that
-  could not be read today, which the monitor backfills: this one is permanent, and the whole desk
-  rests on a stance being scoreable.
+- **A bucket with no fund CASCADES to its parent's** (`tradableProxy`) rather than being refused.
+  The design's own rule: the finest bucket that can be PRICED, not the finest that exists. A view
+  on Publishing is graded against XLC and the row records `stands_for`.
+
+  This replaced a REFUSAL, and the refusal did real damage. It made the desk responsible for
+  knowing which of 155 industries have funds — nothing tells it — so the only safe table was one
+  of sectors, and eight live runs produced exactly that. `unpriceableRows` survives as an assertion
+  about the vocabulary rather than a gate on the author: every sector has a fund, so the cascade
+  terminates, and a row reaching it means `BUCKET_PROXY` is missing an entry.
 
 The proxy is FROZEN onto the row at publish, for the same reason the baseline is. Swapping a fund
 in `BUCKET_PROXY` must not silently re-score a standing call against an instrument it was never

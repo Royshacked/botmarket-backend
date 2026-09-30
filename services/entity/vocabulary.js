@@ -581,16 +581,44 @@ export const BUCKET_PROXY = {
 /** What the benchmark itself is priced with. */
 export const BENCHMARK_PROXY = { SPX: 'SPY' }
 
-/** The tradable proxy for a bucket at either grain (any spelling resolveBucket takes), or null. */
-export function proxyFor(raw) {
+/**
+ * What a bucket is GRADED against, falling back to its parent when it has no fund of its own →
+ * `{ symbol, weighting, exact, stands_for }` | null.
+ *
+ * THE CASCADE, and it is the design: the finest bucket that can be priced, not the finest bucket
+ * that exists. A view on Publishing is a real view; there is no Publishing fund, so it is graded
+ * against Communication Services and the row says so. `stands_for` names the bucket the fund
+ * actually represents whenever that is not the row's own, and `exact` goes false with it — a
+ * parent's fund covering a child is the widest version of "this fund spans more than the bucket".
+ *
+ * What this REPLACES is a refusal. Refusing a table because one bucket had no fund made the desk
+ * responsible for knowing which of 155 industries are priceable, which nothing tells it, so the
+ * only safe table was one of sectors. Naming the bucket you mean and being graded against the
+ * closest instrument that exists is strictly more information than being pushed back up a level.
+ */
+export function tradableProxy(raw) {
     const r = resolveBucket(raw)
-    return r ? (BUCKET_PROXY[r.bucket]?.symbol ?? null) : null
+    if (!r) return null
+
+    const own = BUCKET_PROXY[r.bucket]
+    if (own) return { ...own, stands_for: null }
+
+    // One hop: an industry with no fund is graded against its sector's. The sectors all have one,
+    // so the cascade terminates — a bucket that reaches here with nothing is a vocabulary bug, and
+    // null says so rather than inventing a benchmark.
+    const parent = r.grain === 'industry' ? INDUSTRY_SECTOR[r.bucket] : null
+    const up = parent ? BUCKET_PROXY[parent] : null
+    return up ? { ...up, exact: false, stands_for: parent } : null
 }
 
-/** The proxy's caveats — `{ symbol, weighting, exact }` — for a row that has to record them. */
+/** The tradable proxy's SYMBOL for a bucket, after the cascade. */
+export function proxyFor(raw) {
+    return tradableProxy(raw)?.symbol ?? null
+}
+
+/** The proxy's caveats — `{ symbol, weighting, exact, stands_for }` — for a row that records them. */
 export function proxyMeta(raw) {
-    const r = resolveBucket(raw)
-    return r ? (BUCKET_PROXY[r.bucket] ?? null) : null
+    return tradableProxy(raw)
 }
 
 /** Buckets that can be graded at all: a stance needs a price, so one without a proxy is not one. */

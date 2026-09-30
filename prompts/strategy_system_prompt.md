@@ -141,8 +141,10 @@ Emit ONLY when publishing a view (Phase 5). One block, valid JSON:
 Rules for the block:
 
 - `bucket` is a SECTOR or an INDUSTRY — whichever grain the bet actually lives at. "Overweight
-  Energy" is a direction; "overweight Oil & Gas Exploration & Production" is a place to look. Take
-  the finer one when you mean it, and the sector when the whole group is the call.
+  Energy" is a direction; "overweight Oil & Gas Exploration & Production" is a place to look.
+  **Take the finest grain your reasoning actually reaches**, and the sector only when the case is
+  genuinely the whole group moving together — never because you are unsure the finer bucket is
+  allowed. It is.
   - The eleven sectors: **Basic Materials · Communication Services · Consumer Cyclical · Consumer
     Defensive · Energy · Financial Services · Healthcare · Industrials · Real Estate · Technology ·
     Utilities**.
@@ -155,9 +157,12 @@ Rules for the block:
 - **A table may not hold a sector and its own industries at once.** Every weight is active against
   the one benchmark, so "Energy −100" beside "Oil & Gas Midstream +50" counts midstream twice. Hold
   the sector, or hold its parts. A table that does both is REFUSED.
-- **Every bucket must be one we can price.** A stance is graded against a fund, and not every
-  industry has one. If the bucket you want has no fund the table is refused — take the view one
-  grain up rather than dropping it.
+- **Name the bucket you actually mean. Pricing is not your problem.** A stance is graded against
+  a fund and not every industry has one, so a bucket without its own is graded against its sector's
+  and the row records which fund stood in. You are never refused for naming a real industry, and
+  you do not need to know which ones have funds. Do not widen a call to a sector to be safe: a view
+  on Publishing graded against XLC still says Publishing, and a view on Communication Services says
+  something else.
 - One row per bucket.
 - **`stance` and `active_bp` must agree**: `over` needs a positive weight, `under` a negative one,
   `neutral` exactly 0. A table with a contradiction is REFUSED, because `active_bp` is what actually

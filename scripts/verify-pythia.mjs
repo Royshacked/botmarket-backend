@@ -58,6 +58,15 @@ if (process.env.REPLY_OUT) {
     line(`  full reply written to ${process.env.REPLY_OUT}`)
 }
 
+// The emitted <tilt> block, on disk. A dry run that shows a table and keeps it only in memory
+// cannot be acted on: deciding to publish after SEEING it would otherwise mean a second model
+// call, producing a different table from the one that was judged.
+if (process.env.TILT_OUT && res.tilt) {
+    const { writeFileSync } = await import('node:fs')
+    writeFileSync(process.env.TILT_OUT, JSON.stringify(res.tilt, null, 2), 'utf8')
+    line(`  emitted tilt written to ${process.env.TILT_OUT}`)
+}
+
 rule()
 if (!res.tilt) {
     line('\n✗ NO <tilt> BLOCK EMITTED — the desk discussed but did not publish.')

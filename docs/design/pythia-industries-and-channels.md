@@ -7,7 +7,15 @@ quoted inline.
 **Landed since:** the vocabulary and the resolver — `INDUSTRY_SECTOR`, `resolveBucket`,
 `parentSector`, `BUCKET_PROXY`, `proxyFor` in `services/entity/vocabulary.js`, with
 `tests/unit/bucketVocabulary.test.js`. ~~`SECTOR_ETF`~~ and ~~`sectorProxy`~~ were removed rather
-than left beside the new table. Also landed: the row schema itself — `grain` / `bucket` / `proxy` replacing `sector`, the
+than left beside the new table. **Vindicated 2026-09-30, after eight runs that produced only sector stances.** The doc's cascade —
+"sub-industry where a proxy exists, industry where it doesn't, sector where neither does" — was
+built as a REFUSAL instead, and the prompt told the desk its table would be rejected for naming a
+bucket with no fund. With no way to know which of 155 industries are priceable, the only safe table
+was one of sectors. Restoring the fallback produced industry stances on the next run: Semiconductors
++100bp against SMH and Biotechnology +100bp against IBB, both `bottom_up`, and Argus screened those
+two industries rather than their sectors.
+
+Also landed: the row schema itself — `grain` / `bucket` / `proxy` replacing `sector`, the
 `overlappingRows` and `unpriceableRows` gates, every consumer (the monitor, `diffStances`, the
 house scan, the cards, Atlas's fingerprint), the prompt, and `scripts/migrate-tilt-buckets.mjs`.
 Step 1 is complete. Steps 2 onward — the sparkline and everything channel-shaped — are not.

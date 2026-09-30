@@ -274,17 +274,22 @@ export function overlappingRows(doc) {
 }
 
 /**
- * Rows that cannot be graded at all: the bucket resolved, but nothing prices it. Pure.
+ * Rows that cannot be graded at all. Pure — and after the cascade this should be empty forever.
  *
- * Distinct from a baseline that could not be READ today, which the monitor backfills on the next
- * tick. This is permanent — no fund stands in for the bucket, so the stance could never be scored
- * however long it stands, and the whole desk rests on stances being scoreable. Refused at publish,
- * where the author can take the view one grain up instead.
+ * `tradableProxy` falls back from a bucket with no fund to its parent's, and every sector has one,
+ * so a row reaching here has resolved to something the vocabulary knows and still found nothing.
+ * That is a vocabulary bug rather than an authoring mistake, which is why the message points at the
+ * table and not at the desk.
+ *
+ * It used to refuse any table holding an unpriceable bucket, and the prompt said so. That made the
+ * desk responsible for knowing which of 155 industries have funds — nothing tells it — so the only
+ * safe table was one of sectors. The fallback is the design: name the bucket you mean, and it is
+ * graded against the closest instrument that exists, with the row recording which.
  */
 export function unpriceableRows(doc) {
     return _arr(doc?.tilts)
         .filter(r => r?.bucket && !r?.proxy?.symbol)
-        .map(r => ({ bucket: r.bucket, detail: `no fund stands in for "${r.bucket}" — take the view on ${parentSector(r.bucket) ?? 'its sector'} instead` }))
+        .map(r => ({ bucket: r.bucket, detail: `"${r.bucket}" resolved but nothing prices it, not even ${parentSector(r.bucket) ?? 'its sector'} — BUCKET_PROXY is missing an entry` }))
 }
 
 /**

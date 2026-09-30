@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 
 import {
     GRAINS, SECTORS, INDUSTRIES, INDUSTRY_SECTOR, BUCKET_PROXY, PRICEABLE_BUCKETS,
-    normalizeIndustry, normalizeSector, resolveBucket, parentSector, proxyFor, proxyMeta,
+    normalizeIndustry, normalizeSector, resolveBucket, parentSector, proxyFor, proxyMeta, tradableProxy,
 } from '../../services/entity/vocabulary.js'
 
 // The vocabulary a view is held in, at either grain. The whole point of these tests is the ONE
@@ -121,8 +121,47 @@ test('proxyFor and proxyMeta answer for the same bucket, at either grain', () =>
     assert.equal(proxyMeta('semis').symbol, 'SMH')
     assert.equal(proxyFor('Technology'), 'XLK')
     assert.equal(proxyMeta('Technology').exact, true)
-    // A bucket that resolves but has no fund is not gradeable, and says so rather than guessing.
-    assert.ok(resolveBucket('Publishing'), 'Publishing is a real industry')
-    assert.equal(proxyFor('Publishing'), null)
-    assert.equal(proxyMeta('Publishing'), null)
+})
+
+// ── the cascade ────────────────────────────────────────────────────────────
+//
+// The design: "Sub-industry where a proxy exists, industry where it doesn't, sector where neither
+// does." What was built refused any table holding a bucket with no fund, and the prompt said so —
+// which made the desk responsible for knowing which of 155 industries are priceable. Nothing tells
+// it, so the only safe table was one of sectors, and eight live runs produced exactly that.
+
+test('a bucket with NO fund of its own is graded against its sector\'s', () => {
+    const p = tradableProxy('Publishing')
+    assert.equal(p.symbol, 'XLC')
+    assert.equal(p.stands_for, 'Communication Services', 'the row records which fund stood in')
+    assert.equal(p.exact, false, 'a parent covering a child is the widest kind of inexact')
+})
+
+test('a bucket WITH its own fund does not cascade, and says it did not', () => {
+    const p = tradableProxy('Semiconductors')
+    assert.equal(p.symbol, 'SMH')
+    assert.equal(p.stands_for, null)
+    assert.equal(p.exact, true)
+})
+
+test('EVERY industry in the vocabulary is publishable, which is the point', () => {
+    // The refusal made 129 of the 155 unusable. A view on any real industry is now a view that can
+    // be taken and graded, against the closest instrument that exists.
+    const unpriceable = INDUSTRIES.filter(i => !proxyFor(i))
+    assert.deepEqual(unpriceable, [], 'no industry should be unpublishable')
+})
+
+test('a sector never cascades — it is where the cascade stops', () => {
+    for (const sector of SECTORS) {
+        const p = tradableProxy(sector)
+        assert.equal(p.stands_for, null, sector)
+        assert.equal(p.exact, true, sector)
+    }
+})
+
+test('proxyFor and proxyMeta both answer through the cascade', () => {
+    assert.equal(proxyFor('Publishing'), 'XLC')
+    assert.equal(proxyMeta('Publishing').stands_for, 'Communication Services')
+    assert.equal(proxyFor('nonsense'), null, 'but a bucket that does not resolve still has nothing')
+    assert.equal(proxyMeta('nonsense'), null)
 })
