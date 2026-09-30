@@ -76,17 +76,39 @@ export async function _coverageBySector(deps = { listActiveBySector: coverageSer
     const bySector = new Map()
     for (const r of rows) {
         if (!bySector.has(r.sector)) bySector.set(r.sector, [])
-        bySector.get(r.sector).push(r.symbol)
+        bySector.get(r.sector).push(r)
     }
-    const covered = [...bySector.entries()]
-        .sort((a, b) => b[1].length - a[1].length)
-        .map(([sector, syms]) => `  ${sector.padEnd(24)} ${syms.length} name${syms.length === 1 ? '' : 's'} — ${syms.join(', ')}`)
+
+    // A stance can be held on an INDUSTRY now, and `bottom_up` on one has to mean our covered names
+    // in THAT industry rather than in its sector. Only industries carrying enough of the book to
+    // argue from are broken out: one name is an anecdote, and printing every singleton would bury
+    // the sector line it sits under. The rest stay counted in their sector, where they belong.
+    const MIN_FOR_A_CLAIM = 3
+    const line = (bucket, rs, indent = 2) =>
+        `${' '.repeat(indent)}${bucket.padEnd(34 - indent)} ${rs.length} name${rs.length === 1 ? '' : 's'} — ${rs.map(r => r.symbol).join(', ')}`
+
+    const covered = []
+    for (const [sector, rs] of [...bySector.entries()].sort((a, b) => b[1].length - a[1].length)) {
+        covered.push(line(sector, rs))
+        const byIndustry = new Map()
+        for (const r of rs) {
+            if (!r.industry) continue
+            if (!byIndustry.has(r.industry)) byIndustry.set(r.industry, [])
+            byIndustry.get(r.industry).push(r)
+        }
+        for (const [industry, irs] of [...byIndustry.entries()].sort((a, b) => b[1].length - a[1].length)) {
+            if (irs.length >= MIN_FOR_A_CLAIM) covered.push(line(industry, irs, 6))
+        }
+    }
     const uncovered = SECTORS.filter(s => !bySector.has(s))
 
     return [
-        'OUR BOOK — active coverage by sector (all analysts):',
+        'OUR BOOK — active coverage, by sector and by the industries deep enough to argue from:',
         ...covered,
         uncovered.length ? `\nNo coverage at all in: ${uncovered.join(', ')}. A stance on these has no bottom-up support — say so.` : '',
+        `\nAn industry listed above carries at least ${MIN_FOR_A_CLAIM} covered names, which is what makes`
+        + ' `bottom_up` available at that grain. One that is not listed is not a gap in the market — it is'
+        + ' a gap in OUR book, and a stance taken there rests on something else.',
     ].filter(Boolean).join('\n')
 }
 

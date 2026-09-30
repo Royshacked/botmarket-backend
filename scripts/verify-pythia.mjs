@@ -14,7 +14,7 @@
 const persist = process.argv.includes('--persist')
 
 const { strategyAgentService } = await import('../services/agents/strategy.agent.service.js')
-const { normalizeTilt, incoherentRows, tiltService } = await import('../api/strategy/tilt.service.js')
+const { normalizeTilt, incoherentRows, overlappingRows, unpriceableRows, tiltService } = await import('../api/strategy/tilt.service.js')
 const { diffStances } = await import('../monitoring/tilt.assess.js')
 
 const line = (s = '') => console.log(s)
@@ -50,17 +50,24 @@ line(`  kill-criteria: ${doc.regime?.kill_criteria?.length ?? 0}`)
 line('')
 for (const r of doc.tilts) {
     const bp = r.active_bp === null ? '   ?' : `${r.active_bp >= 0 ? '+' : ''}${r.active_bp}`.padStart(5)
-    line(`  ${String(r.sector).padEnd(24)} ${String(r.stance ?? '?').padEnd(8)} ${bp}bp  ${String(r.horizon).padEnd(4)} ${r.basis ?? '—'}`)
+    line(`  ${String(r.bucket).padEnd(34)} ${String(r.grain).padEnd(9)} ${String(r.proxy?.symbol ?? '—').padEnd(5)} ${String(r.stance ?? '?').padEnd(8)} ${bp}bp  ${String(r.horizon).padEnd(4)} ${r.basis ?? '—'}`)
 }
 
 rule()
 const bad = incoherentRows(doc)
+const overlapping = overlappingRows(doc)
+const unpriceable = unpriceableRows(doc)
 const emitted = Array.isArray(res.tilt.tilts) ? res.tilt.tilts.length : 0
 line('\nGATES')
-line(`  rows emitted / kept      ${emitted} / ${doc.tilts.length}${emitted !== doc.tilts.length ? '   ← dropped: unrecognised sector' : ''}`)
+line(`  rows emitted / kept      ${emitted} / ${doc.tilts.length}${emitted !== doc.tilts.length ? '   ← dropped: unrecognised bucket' : ''}`)
 line(`  nets to zero             ${doc.balanced ? 'yes' : `NO (${doc.net_bp}bp)`}`)
 line(`  stance vs weight         ${bad.length ? `${bad.length} CONTRADICTION(S)` : 'coherent'}`)
-for (const b of bad) line(`      ${b.sector}: ${b.detail}`)
+for (const b of bad) line(`      ${b.bucket}: ${b.detail}`)
+line(`  sector vs its own parts  ${overlapping.length ? `${overlapping.length} OVERLAP(S)` : 'no double-counting'}`)
+for (const o of overlapping) line(`      ${o.detail}`)
+line(`  every bucket priceable   ${unpriceable.length ? `${unpriceable.length} WITH NO FUND` : 'yes'}`)
+for (const u of unpriceable) line(`      ${u.detail}`)
+line(`  grains                   ${doc.tilts.filter(r => r.grain === 'industry').length} industry / ${doc.tilts.filter(r => r.grain === 'sector').length} sector`)
 line(`  baselines                stamped at publish (not in a dry run)`)
 
 if (!persist) {
@@ -78,6 +85,6 @@ if (!result.ok) {
 const changes = diffStances(previous, result.doc)
 line(`\n✓ PUBLISHED ${result.doc.id}`)
 line(`  superseded: ${previous?.id ?? '(none — first view)'}`)
-line(`  changed:    ${changes.length ? changes.map(c => `${c.sector} ${c.from ?? '—'}→${c.to ?? '—'}`).join(', ') : 'nothing'}`)
+line(`  changed:    ${changes.length ? changes.map(c => `${c.bucket} ${c.from ?? '—'}→${c.to ?? '—'}`).join(', ') : 'nothing'}`)
 line(`  baselines:  ${result.doc.tilts.filter(r => r.base_px !== null).length}/${result.doc.tilts.length} priced\n`)
 process.exit(0)

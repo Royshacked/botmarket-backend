@@ -19,7 +19,7 @@ import { logger }          from '../../services/logger.service.js'
 import { cleanConviction } from '../../services/conviction.util.js'
 import { toNum }           from '../../services/format.util.js'
 import { HORIZONS, DEFAULT_HORIZON, openWindow } from '../../services/forecastClock.js'
-import { normalizeSector }  from '../../services/entity/vocabulary.js'
+import { normalizeSector, normalizeIndustry }  from '../../services/entity/vocabulary.js'
 import { newRevision, diffFields } from '../../services/revisionTrail.js'
 
 const LOG = '[coverage]'
@@ -157,6 +157,12 @@ const _io = {
             return await getHistoricalMultiples(symbol, 'pe')
         } catch { return [] }
     },
+    // The taxonomy read — see _withTaxonomy. Lazy like its neighbour above so a test can stub it
+    // without the provider stack loading.
+    sectorRaw: async (symbol) => {
+        const { getSectorRaw } = await import('../../providers/fmp.provider.js')
+        return getSectorRaw(symbol)
+    },
 }
 export function _setCoverageIO(io) { Object.assign(_io, io) }
 
@@ -261,6 +267,11 @@ function normalizeCoverage(raw) {
         id:            _str(r.id) ?? `cov_${symbol || 'x'}_${randomUUID().slice(0, 8)}`,
         symbol,
         sector:        normalizeSector(r.sector),
+        // THE GRAIN BELOW THE SECTOR, and the one Pythia's bottom-up cross-check needs to say
+        // anything finer than "Technology". Normalised through the same vocabulary the strategy
+        // desk holds its stances in, so `bottom_up` on an industry row means our covered names in
+        // THAT industry rather than in its sector.
+        industry:      normalizeIndustry(r.industry),
         thesis:        _str(r.thesis),
         rating:        RATINGS.includes(r.rating) ? r.rating : null,
         price_target:  _priceTarget(r.price_target, now),
@@ -303,6 +314,35 @@ async function _ensureIndexes(db) {
     await db.collection(COLLECTION).createIndex({ sector: 1, status: 1, schools: 1 })
 }
 
+/**
+ * Fill the sector and industry from the PROVIDER, not from the model. Returns a new document.
+ *
+ * Prometheus emits `sector` in its `<coverage>` block, and the fundamentals it reads formats the
+ * pair as "Technology / Software - Infrastructure" (see fmp.provider's profile lines) — so three
+ * documents on the book stored that whole string as their sector and were invisible to every
+ * `$in` match against the eleven until `repair-coverage-sectors.mjs` cleaned them. A taxonomy
+ * transcribed by a model is a taxonomy that drifts; this one is looked up.
+ *
+ * The model's own value is kept as the FALLBACK, for the case the provider does not know the
+ * ticker at all (an ETF, a foreign listing) — a thesis is worth more than its metadata, and losing
+ * the sector would drop the name out of the cross-check entirely.
+ */
+async function _withTaxonomy(doc, symbol, io = _io) {
+    try {
+        const raw = await io.sectorRaw(symbol)
+        if (!raw) return doc
+        return {
+            ...doc,
+            sector:   normalizeSector(raw.sector) ?? doc.sector,
+            industry: normalizeIndustry(raw.industry) ?? doc.industry,
+        }
+    } catch (err) {
+        // The taxonomy is an attribute of a thesis, never a precondition for storing one.
+        logger.warn(LOG, `taxonomy lookup failed for ${symbol} — keeping what was emitted`, err.message)
+        return doc
+    }
+}
+
 // ─── CRUD ─────────────────────────────────────────────────────────────────────
 
 async function initiateCoverage(raw) {
@@ -314,7 +354,7 @@ async function initiateCoverage(raw) {
         const existing = await db.collection(COLLECTION).findOne({ symbol })
         if (existing) return { ok: false, reason: 'already_covered', id: existing.id }
 
-        const doc = normalizeCoverage(raw)
+        const doc = await _withTaxonomy(normalizeCoverage(raw), symbol)
         const coherent = await _checkCoherence(doc)
         if (!coherent.ok) {
             logger.warn(LOG, 'coverage REJECTED — rating contradicts target', { symbol, rating: doc.rating, pt: doc.price_target?.value, detail: coherent.detail })
@@ -324,7 +364,7 @@ async function initiateCoverage(raw) {
         if (doc.flags.length) logger.warn(LOG, 'coverage FLAGGED — implausible, stored anyway', { symbol, codes: doc.flags.map(f => f.code) })
         doc.revisions = [newRevision({ kind: 'initiate', note: _str(raw?.init_note) ?? `Initiated coverage on ${symbol}` })]
         await db.collection(COLLECTION).insertOne({ ...doc })
-        logger.info(LOG, 'coverage initiated', { id: doc.id, symbol, sector: doc.sector })
+        logger.info(LOG, 'coverage initiated', { id: doc.id, symbol, sector: doc.sector, industry: doc.industry })
         return { ok: true, doc: stripId(doc) }
     } catch (err) {
         if (err?.code === 11000) return { ok: false, reason: 'already_covered' }
@@ -402,7 +442,9 @@ async function listActiveBySector(sectors) {
         const db = await getDb()
         return await db.collection(COLLECTION)
             .find({ status: 'active', sector: { $in: want } })
-            .project({ _id: 0, symbol: 1, sector: 1 })
+            // The INDUSTRY rides along, because a stance can now be held at that grain and
+            // `bottom_up` has to mean "our names in THAT industry" when it is.
+            .project({ _id: 0, symbol: 1, sector: 1, industry: 1, rating: 1 })
             .toArray()
     } catch (err) {
         logger.error(LOG, 'sector sweep failed', err)

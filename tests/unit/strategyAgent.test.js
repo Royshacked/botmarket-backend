@@ -65,6 +65,50 @@ test('an empty book says so rather than implying our analysts agree', async () =
     assert.match(out, /rather than implying our analysts agree/)
 })
 
+// ── the grain below the sector ──────────────────────────────────────────────────
+//
+// A stance can be held on an industry, and `bottom_up` on one has to mean our covered names in
+// THAT industry. A live run took six SECTOR stances and reached for no industry at all, because
+// every input it had was sector-shaped: it had the vocabulary to say "Semiconductors" and no
+// evidence at that grain.
+
+const DEEP = [
+    { symbol: 'NVDA', sector: 'Technology', industry: 'Semiconductors' },
+    { symbol: 'AVGO', sector: 'Technology', industry: 'Semiconductors' },
+    { symbol: 'TXN',  sector: 'Technology', industry: 'Semiconductors' },
+    { symbol: 'MSFT', sector: 'Technology', industry: 'Software - Infrastructure' },
+    { symbol: 'XOM',  sector: 'Energy',     industry: 'Oil & Gas Integrated' },
+]
+
+test('an industry deep enough to argue from is broken out under its sector', async () => {
+    const out = await _coverageBySector({ listActiveBySector: async () => DEEP })
+    assert.match(out, /Technology\s+4 names/, 'the sector line still counts every name')
+    assert.match(out, /Semiconductors\s+3 names — NVDA, AVGO, TXN/)
+})
+
+test('a THIN industry is not broken out — one name is an anecdote, not a basis', async () => {
+    // It stays counted in its sector. Printing every singleton would bury the line above it and
+    // dress up a sample of one as bottom-up support.
+    const out = await _coverageBySector({ listActiveBySector: async () => DEEP })
+    assert.doesNotMatch(out, /Software - Infrastructure/)
+    assert.doesNotMatch(out, /Oil & Gas Integrated/)
+    assert.match(out, /Energy\s+1 name — XOM/, 'but the name is still counted in its sector')
+})
+
+test('the threshold is STATED, so a missing industry reads as our gap and not the market\'s', async () => {
+    const out = await _coverageBySector({ listActiveBySector: async () => DEEP })
+    assert.match(out, /at least 3 covered names/)
+    assert.match(out, /a gap in OUR book/)
+})
+
+test('a book with no industries at all still reads exactly as it did', async () => {
+    // Every document carried only a sector before the backfill, and a half-migrated book must not
+    // produce a broken table — it produces the old one.
+    const out = await _coverageBySector({ listActiveBySector: async () => BOOK })
+    assert.match(out, /Technology\s+2 names — NVDA, AMD/)
+    assert.doesNotMatch(out, /^ {6}\S/m, 'nothing is indented as an industry')
+})
+
 // ── the turn context ─────────────────────────────────────────────────────────
 test('the published view rides the TURN context, not the system prompt', () => {
     // A volatile block in the system tail sits ahead of the whole conversation in the cache prefix,
