@@ -385,3 +385,45 @@ test('publish reads the standing view before it normalises anything', async () =
         _setTiltIO({ currentView: (benchmark) => tiltService.getCurrentTilt(benchmark) })
     }
 })
+
+// ── the reaffirm rule for SIZED rows ─────────────────────────────────────────
+// A sized row's weight is the server's arithmetic: the same calls published 40bp rows as 45bp the
+// next review. Under the strict rule every one restarted its clock, baseline and line.
+
+const sizedHeld = (over = {}) => heldRow({ bucket: 'Semiconductors', grain: 'industry', basis: 'evidence', active_bp: 40,
+    proxy: { symbol: 'SMH', weighting: 'cap', exact: true }, contribution_bp: 2, ...over })
+const sizedWire = (over = {}) => ({ bucket: 'Semiconductors', stance: 'over', active_bp: 45, horizon: '12m', basis: 'evidence', ...over })
+
+test('reaffirm: a sized row that keeps its direction keeps its clock, baseline and fund, at the new weight', () => {
+    const [carried] = carryReaffirmed([sizedWire()], { tilts: [sizedHeld()] }, LATER)
+    assert.equal(carried.set_at, NOW)
+    assert.equal(carried.base_px, 180)
+    assert.equal(carried.proxy.symbol, 'SMH')
+    assert.equal(carried.active_bp, 45, 'the new weight is applied')
+    assert.equal(carried.contribution_bp, 2.25, 'contribution restated at the new weight: 2 × 45/40')
+})
+
+test('reaffirm: a sized row moving from channels to evidence is still the same call', () => {
+    const [carried] = carryReaffirmed([sizedWire({ basis: 'channels' })], { tilts: [sizedHeld()] }, LATER)
+    assert.equal(carried.set_at, NOW)
+})
+
+test('reaffirm: a sized row that FLIPS direction, or changes horizon, is a new call', () => {
+    for (const moved of [sizedWire({ stance: 'under', active_bp: -45 }), sizedWire({ horizon: '3m' })]) {
+        const [row0] = carryReaffirmed([moved], { tilts: [sizedHeld()] }, LATER)
+        assert.equal(row0.set_at, undefined)
+        assert.equal(row0.base_px, undefined)
+    }
+})
+
+test('reaffirm: the desk\'s OWN row still restarts when its weight changes', () => {
+    const own = heldRow({ basis: 'bottom_up', active_bp: 150 })
+    const [row0] = carryReaffirmed([wireRow({ active_bp: 200 })], { tilts: [own] }, LATER)
+    assert.equal(row0.set_at, undefined, 'changing your own weight is re-authoring the call')
+})
+
+test('reaffirm: an own row and a sized row on the same bucket are not the same call at a new weight', () => {
+    // A bucket that was Pythia's coverage row and is now sized (or back) — the weight rule stays strict.
+    const [row0] = carryReaffirmed([sizedWire()], { tilts: [sizedHeld({ basis: 'bottom_up' })] }, LATER)
+    assert.equal(row0.set_at, undefined)
+})

@@ -351,11 +351,39 @@ export function unpriceableRows(doc) {
  * The equality is deliberately the SAME ONE `diffStances` uses to decide a sector moved, plus the
  * horizon: re-cutting a 12m call to 3m is a different call about the same sector and deserves a
  * deadline it can actually be judged against. Stance, weight and horizon agree → nothing moved.
+ *
+ * EXCEPT FOR A SIZED ROW, where the weight is the server's arithmetic, not the desk's choice. A row
+ * sized from the channel calls and the industry evidence (basis `channels` / `evidence`) moves a few
+ * bp whenever any input moves — the same three calls published 40bp rows as 45bp the next review
+ * because another fund's row merged (2026-10-01) — and under the strict rule every one restarted its
+ * clock, its baseline and its line at every review: the unfalsifiability the carry exists to prevent.
+ * So two SIZED rows are the same call when the bucket keeps its DIRECTION and horizon; the new weight
+ * is applied to the old window. The desk's own rows keep the strict rule — changing your own weight
+ * is re-authoring the call.
  */
+const SIZED_BASES = new Set(['channels', 'evidence'])
+const _isSized = (row) => SIZED_BASES.has(row?.basis)
+
 function _sameCall(raw, held) {
-    return (STANCES.includes(raw?.stance) ? raw.stance : null) === (held?.stance ?? null)
-        && _num(raw?.active_bp) === _num(held?.active_bp)
-        && _horizon(raw?.horizon) === _horizon(held?.horizon)
+    const sameStance  = (STANCES.includes(raw?.stance) ? raw.stance : null) === (held?.stance ?? null)
+    const sameHorizon = _horizon(raw?.horizon) === _horizon(held?.horizon)
+    if (_isSized(raw) && _isSized(held)) return sameStance && sameHorizon
+    return sameStance && _num(raw?.active_bp) === _num(held?.active_bp) && sameHorizon
+}
+
+/**
+ * The held row's running contribution, restated at the NEW weight. Contribution is
+ * `active_bp × relative return / 100` (tilt.assess.contributionBp) — linear in the weight — so a
+ * reaffirmed sized row whose weight moved carries `old × new / old`, which is what the monitor would
+ * compute at its next tick. Unchanged weight → unchanged figure; a held weight of 0 → unknown.
+ */
+function _carriedContribution(raw, prev) {
+    const c = _num(prev?.contribution_bp)
+    if (c === null) return null
+    const was = _num(prev?.active_bp), now = _num(raw?.active_bp)
+    if (now === null || now === was) return c
+    if (!was) return null
+    return Math.round(c * (now / was) * 100) / 100
 }
 
 /**
@@ -406,7 +434,7 @@ export function carryReaffirmed(rawTilts, previous, now = new Date().toISOString
             set_at:          raw.set_at          ?? prev.set_at,
             base_px:         raw.base_px         ?? prev.base_px,
             base_bench_px:   raw.base_bench_px   ?? prev.base_bench_px,
-            contribution_bp: raw.contribution_bp ?? prev.contribution_bp,
+            contribution_bp: raw.contribution_bp ?? _carriedContribution(raw, prev),
         }
     })
 }

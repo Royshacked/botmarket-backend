@@ -165,7 +165,13 @@ the `<tilt>` block has no `set_at` field, so a row off the wire never carries a 
 `openWindow` to preserve. Publish reads the standing view first and merges its `set_at`, baseline,
 **fund (`proxy`)** and running contribution onto every row unchanged in **stance, `active_bp` and horizon** — the same
 equality `diffStances` uses to decide a sector moved, plus the horizon, so the card and the clock
-cannot disagree about what changed. A **closed** window is never carried: a matured row, or one
+cannot disagree about what changed. **Sized rows** (basis `channels` / `evidence`, since 2026-10-01)
+match on **stance and horizon only**: their weight is the server's arithmetic and shifts a few bp
+whenever any input does, so under the weight-equality rule every sized row restarted its clock, its
+baseline and its line at every review. A reaffirmed sized row keeps its window and fund at the new
+weight, its running contribution rescaled to it (contribution is linear in the weight). The desk's
+own rows keep the strict rule. Replayed on the live views: 28 of 28 rows kept their clock where the
+old rule had restarted most of them. A **closed** window is never carried: a matured row, or one
 whose deadline has simply passed, was already owed a verdict, so restating it is a new call rather
 than the old one continuing (carrying it would store a row overdue the instant it is written, and
 the review it triggers would re-offer the same stance on every tick).
