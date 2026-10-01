@@ -36,6 +36,7 @@ import { BUCKET_PROXY, SECTORS, parentSector, resolveBucket } from '../../servic
 import { BETAS_COLLECTION } from './channelExposures.service.js'
 import { LATEST_COLLECTION } from './channelState.service.js'
 import { FUND_EVIDENCE_COLLECTION } from './industryReads.service.js'
+import { readTrackRecord } from './channelCalls.service.js'
 
 /** How a stated reaction scales the measured beta. Coarse on purpose — see the header. */
 export const REACTIONS = { stronger: 1.5, weaker: 0.5, opposite: -1 }
@@ -89,18 +90,22 @@ const _io = {
     latest: async () => (await getDb()).collection(LATEST_COLLECTION).findOne({ _id: 'latest' }),
     evidence: async () => (await getDb()).collection(FUND_EVIDENCE_COLLECTION)
         .find({}, { projection: { evidence: 1, beat: 1, surprise: 1, momentum: 1 } }).toArray(),
+    // The graded call record — its `confidence` replaces CHANNEL_CONFIDENCE once enough calls are final.
+    record: () => readTrackRecord(),
 }
 export function _setSizingIO(io) { Object.assign(_io, io) }
 
 /** → { betas, latest, evidence: { symbol: { score, beat, surprise, momentum } } } */
 export async function readSizingInputs() {
-    const [betas, latest, ev] = await Promise.all([_io.betas(), _io.latest(), _io.evidence ? _io.evidence() : []])
+    const [betas, latest, ev, record] = await Promise.all([_io.betas(), _io.latest(), _io.evidence ? _io.evidence() : [], _io.record ? _io.record() : null])
     const evidence = {}
     for (const d of Array.isArray(ev) ? ev : []) {
         const score = toNum(d?.evidence)
         if (d?._id && score !== null) evidence[d._id] = { score, beat: toNum(d.beat), surprise: toNum(d.surprise), momentum: toNum(d.momentum) }
     }
-    return { betas, latest, evidence }
+    // The desk's MEASURED confidence once enough calls are graded (channelCalls.trackRecord), else the placeholder.
+    const channelConfidence = toNum(record?.confidence) ?? CHANNEL_CONFIDENCE
+    return { betas, latest, evidence, channelConfidence, record }
 }
 
 // ─── validation ───────────────────────────────────────────────────────────────
@@ -218,7 +223,7 @@ function _label(entries) {
  * same bucket, or one that would double-count with it (a sector and its own industry), is dropped,
  * and the computed rows absorb the manual rows' net so the table still balances.
  */
-export function sizeFromChannels({ views = [], reactions = [], exclude = [], manualRows = [], betas, evidence = {}, proxyMap = BUCKET_PROXY } = {}) {
+export function sizeFromChannels({ views = [], reactions = [], exclude = [], manualRows = [], betas, evidence = {}, channelConfidence = CHANNEL_CONFIDENCE, proxyMap = BUCKET_PROXY } = {}) {
     const idx = _betaIndex(betas)
     // Funds the engine has FITTED at all (significant or not). A fund added to the map since the
     // last weekly fit has no betas yet; read as "expected move 0" it would argue for splitting its
@@ -240,7 +245,7 @@ export function sizeFromChannels({ views = [], reactions = [], exclude = [], man
             const m = mult[sym]?.[v.channel_id] ?? 1
             // The DEVIATION from the base rate when one is attached (withBases); the raw call otherwise.
             const move = v.deviation ?? v.dz
-            const c = CHANNEL_CONFIDENCE * m * beta * move
+            const c = channelConfidence * m * beta * move
             e += c
             drivers.push({
                 channel_id: v.channel_id, beta, dz: v.dz,
@@ -477,10 +482,10 @@ export function formatSizing(result, views = []) {
  * reverses one is flagged in the preview — before it is published, not after.
  */
 export async function previewSizing({ channel_views, reactions, exclude, manual_rows } = {}, { previous = [] } = {}) {
-    const { betas, latest, evidence } = await readSizingInputs()
+    const { betas, latest, evidence, channelConfidence } = await readSizingInputs()
     const known = new Set([...(betas ?? []).map(b => b.channel_id), ...Object.keys(latest?.channels ?? {})])
     const views = withBases(normalizeViews(channel_views, known.size ? known : null), latest, previous)
-    const result = sizeFromChannels({ views, reactions: normalizeReactions(reactions), exclude: Array.isArray(exclude) ? exclude : [], manualRows: Array.isArray(manual_rows) ? manual_rows : [], betas, evidence })
+    const result = sizeFromChannels({ views, reactions: normalizeReactions(reactions), exclude: Array.isArray(exclude) ? exclude : [], manualRows: Array.isArray(manual_rows) ? manual_rows : [], betas, evidence, channelConfidence })
     return formatSizing(result, views)
 }
 
@@ -492,14 +497,14 @@ export async function previewSizing({ channel_views, reactions, exclude, manual_
  */
 export async function expandChannelDraft(draft, now = new Date().toISOString(), { previous = [] } = {}) {
     if (!draft) return draft
-    const { betas, latest, evidence } = await readSizingInputs()
+    const { betas, latest, evidence, channelConfidence } = await readSizingInputs()
     const known = new Set([...(betas ?? []).map(b => b.channel_id), ...Object.keys(latest?.channels ?? {})])
     const views = withBases(normalizeViews(draft.channel_views, known.size ? known : null), latest, previous)
     if (!views.length && !Object.keys(evidence ?? {}).length) return draft
     const reactions = normalizeReactions(draft.reactions)
     const manualRows = Array.isArray(draft.tilts) ? draft.tilts : []
     const exclusions = normalizeExclusions(draft.exclude)
-    const { rows } = sizeFromChannels({ views, reactions, exclude: exclusions, manualRows, betas, evidence })
+    const { rows } = sizeFromChannels({ views, reactions, exclude: exclusions, manualRows, betas, evidence, channelConfidence })
     return {
         ...draft,
         exclusions,

@@ -32,8 +32,9 @@ function harness({ prices = { XLK: 110, XLE: 90, SPY: 104 }, catalystDates = [] 
     // into the collection itself — nor does it take a db handle, now that due-selection lives in dueLoop. `updateTilt` is the PUBLICATION path (appends a revision, for a
     // real state change like a stance maturing); `recordMonitorState` is the quiet daily grade
     // refresh, which must NOT append a revision or eleven a day would bury the trail.
-    const updates = [], reviews = [], writes = []
+    const updates = [], reviews = [], writes = [], gradeTicks = []
     const deps = {
+        gradeCalls:    async (nowMs) => { gradeTicks.push(nowMs); return 0 },
         getPrice:      async (sym) => prices[sym] ?? null,
         updateTilt:    async (id, patch) => { updates.push({ id, patch }); return { ok: true } },
         recordMonitorState: async (id, { set = {}, inc = null } = {}) => { writes.push({ id, set, inc }); return { ok: true } },
@@ -43,7 +44,7 @@ function harness({ prices = { XLK: 110, XLE: 90, SPY: 104 }, catalystDates = [] 
         requestReview: async (d, reason) => { reviews.push({ id: d.id, reason, doc: d }); return 1 },
         catalystDates: async () => catalystDates,
     }
-    return { deps, updates, reviews, writes }
+    return { deps, updates, reviews, writes, gradeTicks }
 }
 
 // ── price resolution ─────────────────────────────────────────────────────────
@@ -200,4 +201,16 @@ test('a catalyst lookup that throws never breaks the daily grade', async () => {
     h.deps.catalystDates = async () => { throw new Error('calendar down') }
     const res = await _checkTilt(doc(), at(30), h.deps)
     assert.equal(res.graded, true, 'grading is free and must not depend on the calendar')
+})
+
+// ── the channel calls ride the same tick ─────────────────────────────────────
+test('each check grades the channel calls, and a grading failure never costs the stance grade', async () => {
+    const h = harness()
+    await _checkTilt(doc(), at(30), h.deps)
+    assert.deepEqual(h.gradeTicks, [at(30)])
+
+    const broken = harness()
+    broken.deps.gradeCalls = async () => { throw new Error('ledger down') }
+    const res = await _checkTilt(doc(), at(30), broken.deps)
+    assert.ok(res, 'the stances were still graded')
 })

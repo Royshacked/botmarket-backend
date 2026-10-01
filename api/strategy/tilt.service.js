@@ -29,6 +29,7 @@ import { toNum }           from '../../services/format.util.js'
 import { SECTORS, resolveBucket, parentSector, proxyMeta, BENCHMARK_PROXY } from '../../services/entity/vocabulary.js'
 import { openWindow, normalizeHorizon, HORIZONS } from '../../services/forecastClock.js'
 import { newRevision, diffFields }  from '../../services/revisionTrail.js'
+import { syncCallLedger } from './channelCalls.service.js'
 
 const LOG        = '[tilt]'
 // Exported for the tilt monitor, which reads these documents on the background path. One name,
@@ -179,6 +180,7 @@ function _channelViews(raw) {
         .map(v => ({
             channel_id: v.channel_id, dz: _num(v.dz), rationale: _str(v.rationale),
             z_at_set: _num(v.z_at_set), set_at: _str(v.set_at),
+            call_id: _str(v.call_id),   // the ledger entry this call is graded under (channelCalls)
             // What the call is MEASURED against: the channel's base rate when it was made, and the
             // deviation that was actually sized. Grading asks whether the deviation was right.
             base_dz: _num(v.base_dz), deviation: _num(v.deviation),
@@ -475,6 +477,9 @@ const _io = {
     // null rather than throwing, so an unreachable read degrades to "every row is a fresh call" —
     // exactly what publish did before rows could be carried, never to a failed publish.
     currentView: (benchmark) => getCurrentTilt(benchmark),
+    // The call ledger's sync. Never throws (channelCalls.syncCallLedger) — a ledger failure must not
+    // cost the publish.
+    syncCalls: (doc) => syncCallLedger(doc),
 }
 export function _setTiltIO(io) { Object.assign(_io, io) }
 
@@ -580,6 +585,9 @@ async function publishTilt(raw, { note = null } = {}) {
         // Freeze what each new stance is measured from, BEFORE it is stored — a baseline added later
         // would be a different number than the one the call was actually made at.
         await stampBaselines(doc.tilts, doc.benchmark)
+        // The CALL LEDGER: each channel call gets its own clock, so a restated call keeps the date,
+        // reading and base rate it was made at and can be graded at six months (channelCalls).
+        if (doc.channel_views?.length) await _io.syncCalls(doc)
         doc.revisions = [newRevision({ kind: 'publish', note: note ?? `Published ${doc.tilts.length} sector stances` })]
         await db.collection(COLLECTION).updateMany(
             { benchmark: doc.benchmark, status: 'active' },

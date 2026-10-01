@@ -88,6 +88,11 @@ api/
                           delete: a desk that can erase its calls has no track record). Every handler
                           rides makeHandle. Publish diffs against the view in force (tilt.assess.
                           diffStances) → tiltNotify.notifyTiltChanged to every admin → runHouseScan
+    channelCalls.service.js   The CALL LEDGER (`pythia_channel_calls`): each channel call with its own
+                              clock (restated = same call, revised = superseded but still graded),
+                              marked at 4/13/26 weeks by the tilt monitor against the base rate; its
+                              track record replaces CHANNEL_CONFIDENCE once 10 calls are final and is
+                              shown to Pythia at the top of each review
     channelSizing.service.js  Step 6: the table SIZED from Pythia's channel calls — every fund's
                               expected move Σ multiplier × beta × dz, a sector whole or split into its
                               industries where they diverge, over/under sides scaled to balance (never

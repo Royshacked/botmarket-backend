@@ -120,6 +120,10 @@ Three things it deliberately is not:
    (`get_industry_reads`; beat rate, surprise, 12-1 momentum — valuation and growth shown as context
    only). A draft is sized even with no calls, from the evidence alone — that is how tech, which no
    channel reaches, gets rows; such rows have basis `evidence` and store their `evidence` part.
+   Every call enters the CALL LEDGER (`channelCalls.service.js`) at publish — a restated call keeps
+   its original date, reading and base rate (`call_id` on the stored call) — and the tilt monitor
+   marks it at 4, 13 and 26 weeks against the base rate. Once 10 calls are final the measured record
+   replaces the 0.4 channel confidence; a review opens with the desk's own record.
 
 **Every stance records WHY**, and the five bases are ranked by evidential weight in the vocabulary
 itself (`TILT_BASES`): `bottom_up` (our covered names say so — most defensible) · `revisions` (sector

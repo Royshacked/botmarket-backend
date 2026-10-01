@@ -25,6 +25,7 @@ import { readChannelState, formatChannelState } from '../../api/strategy/channel
 import { readChannelExposures, formatChannelExposures } from '../../api/strategy/channelExposures.service.js'
 import { previewSizing, expandChannelDraft } from '../../api/strategy/channelSizing.service.js'
 import { readIndustryReads, formatIndustryReads } from '../../api/strategy/industryReads.service.js'
+import { readTrackRecord, formatRecord } from '../../api/strategy/channelCalls.service.js'
 import { SECTORS } from '../entity/vocabulary.js'
 import { logger } from '../logger.service.js'
 
@@ -201,9 +202,13 @@ async function chatStream({
     model: requestedModel, reasoningEffort, userId,
     onToken, onToolStart, onReasoning, onPhase, signal,
     _run = runAgentStream,   // the shared contract-test seam — see runAgentStream in agentIO.js
+    _record = readTrackRecord,   // the graded call record (channelCalls) — injectable for tests
 }) {
     const systemPrompt  = _buildSystemPrompt()
-    const builtMessages = attachTurnContext(_buildMessages({ messages, userPrompt }), _buildTurnContext(chatState))
+    // The desk's own call record rides into a REVIEW — a standing view with channel calls is the only
+    // time it bears on the next call. Never fatal: no record reads as "none yet".
+    const record = _standingCalls(chatState).length ? await _record().catch(() => null) : null
+    const builtMessages = attachTurnContext(_buildMessages({ messages, userPrompt }), _buildTurnContext(chatState, record))
 
     const phase = makePhaseCapture(5, onPhase)
     // Every emit tag is suppressed by default; <tilt> is parsed from `raw` afterward, same as
@@ -270,7 +275,7 @@ function _buildSystemPrompt() {
  * Per-turn state, attached to the LAST USER MESSAGE rather than the system prompt — a volatile block
  * in the system tail is what kept the conversation breakpoint from ever hitting.
  */
-export function _buildTurnContext(chatState) {
+export function _buildTurnContext(chatState, record = null) {
     const current = chatState?.current_tilt
     if (!current) return null
     // The monitor's bookkeeping (`monitor.*`) is not part of the view and is not shown to the desk,
@@ -286,9 +291,13 @@ export function _buildTurnContext(chatState) {
           + calls.map(c => `  ${c.channel_id}: call ${c.dz}z (base ${c.base_dz ?? 'n/a'}z, sized on ${c.deviation ?? c.dz}z) `
               + `made at z ${c.z_at_set ?? '?'} on ${String(c.set_at ?? '?').slice(0, 10)} — ${c.rationale ?? 'no reason recorded'}`).join('\n')
         : ''
+    // How the desk's PAST calls have done against the base rate — graded at six months, with interim
+    // marks at four and thirteen weeks (channelCalls). A call is judged on exactly its departure from
+    // the base rate, and this is where the desk sees that judgment.
+    const recordText = record ? `\n\n${formatRecord(record)}` : ''
     return `CURRENT PUBLISHED VIEW — this is the house view in force. Reaffirm what still holds (a `
         + `reaffirmed stance keeps its original clock and entry prices) and re-author only what has `
-        + `actually moved.${standing}\n\n${JSON.stringify(lean, null, 2)}`
+        + `actually moved.${standing}${recordText}\n\n${JSON.stringify(lean, null, 2)}`
 }
 
 // A continuing conversation is trimmed + coalesced; a first turn is just the prompt. normalizeMessages

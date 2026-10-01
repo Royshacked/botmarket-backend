@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
-    sizeFromChannels, normalizeViews, normalizeReactions, normalizeExclusions, formatSizing, expandChannelDraft, withBases, _setSizingIO,
+    sizeFromChannels, normalizeViews, normalizeReactions, normalizeExclusions, formatSizing, expandChannelDraft, withBases, readSizingInputs, _setSizingIO,
     CAP_BP, MAX_DZ, REACTIONS, K_EVIDENCE, CHANNEL_CONFIDENCE,
 } from '../../api/strategy/channelSizing.service.js'
 import { normalizeTilt, overlappingRows, incoherentRows } from '../../api/strategy/tilt.service.js'
@@ -204,7 +204,7 @@ test('a block carrying only channel calls parses, and expands into sized rows st
     const { tilt } = _parseStrategyResponse(raw)
     assert.ok(tilt, 'a calls-only block is a draft, not a discussion')
 
-    _setSizingIO({ betas: async () => BETAS, latest: async () => ({ channels: { energy_cost: { z: 1.66 } } }), evidence: async () => [] })
+    _setSizingIO({ betas: async () => BETAS, latest: async () => ({ channels: { energy_cost: { z: 1.66 } } }), evidence: async () => [], record: async () => null })
     const expanded = await expandChannelDraft(tilt, '2026-10-01T00:00:00.000Z')
     assert.ok(expanded.tilts.length >= 1)
     assert.equal(expanded.channel_views[0].z_at_set, 1.66, 'the call is graded from the z it was made at')
@@ -264,7 +264,7 @@ test('an exclusion carries its reason onto the view, and a missing one is called
     const { notes } = size({ views: [{ channel_id: 'energy_cost', dz: 1 }], exclude: ['Energy'] })
     assert.match(notes.join(' '), /Excluded WITHOUT a reason: Energy/)
 
-    _setSizingIO({ betas: async () => BETAS, latest: async () => ({ channels: {} }), evidence: async () => [] })
+    _setSizingIO({ betas: async () => BETAS, latest: async () => ({ channels: {} }), evidence: async () => [], record: async () => null })
     const draft = await expandChannelDraft({ channel_views: [{ channel_id: 'discount_rate', dz: -1 }], exclude: [{ bucket: 'Utilities', reason: 'r' }], tilts: [] })
     assert.deepEqual(normalizeTilt(draft).exclusions, [{ bucket: 'Utilities', reason: 'r' }])
 })
@@ -350,4 +350,15 @@ test('a fund grading industries in several sectors is ONE row, standing for all 
     assert.equal(moo[0].bucket, 'Agricultural - Machinery', 'first by name when the fund is exact for none')
     assert.deepEqual(moo[0].stands_for, ['Agricultural - Machinery', 'Agricultural Farm Products', 'Agricultural Inputs'])
     assert.equal(rows.filter(r => ['Agricultural Inputs', 'Agricultural Farm Products', 'Agricultural - Machinery'].includes(r.bucket)).length, 1)
+})
+
+test('a measured call record replaces the placeholder confidence; without one the placeholder stands', async () => {
+    _setSizingIO({ betas: async () => BETAS, latest: async () => ({ channels: {} }), evidence: async () => [],
+        record: async () => ({ confidence: 0.7, measured: true }) })
+    assert.equal((await readSizingInputs()).channelConfidence, 0.7)
+    _setSizingIO({ record: async () => null })
+    assert.equal((await readSizingInputs()).channelConfidence, CHANNEL_CONFIDENCE)
+
+    const strong = size({ views: [{ channel_id: 'energy_cost', dz: 1 }], channelConfidence: 0.7 }).candidates.find(c => c.bucket === 'Energy')
+    assert.equal(strong.channelPart, 0.7 * 0.046)
 })

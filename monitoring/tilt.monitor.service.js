@@ -18,6 +18,7 @@ import { gradeRow, totalContributionBp, reviewDecision } from './tilt.assess.js'
 import { BENCHMARK_PROXY } from '../services/entity/vocabulary.js'
 import { fetchMacroCatalystDates } from '../providers/fred.provider.js'
 import { notifyTiltReviewDue } from '../services/tiltNotify.service.js'
+import { gradeChannelCalls } from '../api/strategy/channelCalls.service.js'
 import { fetchLastPrice } from '../services/lastPrice.service.js'
 import { createDueLoop }   from './dueLoop.js'
 import { logger }               from '../services/logger.service.js'
@@ -47,6 +48,8 @@ const _deps = {
     // to re-author a 3-12 month sector view, and a trigger that fires on everything is one nobody
     // can act on. Failure degrades to "that trigger did not fire", never to a broken grade.
     catalystDates: () => fetchMacroCatalystDates().catch(() => []),
+    // The call ledger's marks — the grade for each channel FORECAST, as `gradeRow` is for each stance.
+    gradeCalls: (nowMs) => gradeChannelCalls(nowMs),
 }
 export function _setDeps(d) { Object.assign(_deps, d) }
 
@@ -96,6 +99,11 @@ export async function _resolvePrices(rows, benchmark, deps = _deps) {
  * never be judged. Only a MISSING baseline is ever written; an existing one is immutable.
  */
 export async function _checkTilt(doc, nowMs, deps = _deps) {
+    // The channel CALLS are graded on the same daily tick as the stances: 4-, 13- and 26-week marks
+    // against what each channel then did (channelCalls). Ledger-wide, including superseded calls,
+    // and never fatal to the stance grading below.
+    try { await deps.gradeCalls?.(nowMs) } catch (err) { logger.warn(LOG, 'call grading failed', err?.message) }
+
     const rows = Array.isArray(doc.tilts) ? doc.tilts : []
     const { byBucket, bench } = await _resolvePrices(rows, doc.benchmark, deps)
 

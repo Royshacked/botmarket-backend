@@ -535,8 +535,16 @@ Each step is useful alone and none of them requires the next.
 6. *Sizing done 2026-10-01, as channel calls — see the box at the top of §5.* `size_from_channels`
    previews; the parsed draft is expanded server-side (`expandChannelDraft`) so the preview IS the
    published table; each call is stored with `z_at_set`, each sized row with its `drivers`, each
-   exclusion with its reason. First live run: 14 rows, 9 of them industries. **Still open in this
-   step:** grading each call at maturity (§6's first question) and the Prometheus verification loop.
+   exclusion with its reason. First live run: 14 rows, 9 of them industries.
+   *Call grading done 2026-10-01* (§6's first question): the CALL LEDGER
+   (`api/strategy/channelCalls.service.js`, `pythia_channel_calls`). Each call has its own clock —
+   restated with the same dz it is the same call; a changed dz or a dropped channel supersedes it,
+   and a superseded call is still graded. The tilt monitor marks it at 4, 13 and 26 weeks on the
+   point-in-time grid: did it land closer than the base rate (both pro-rated), and did the channel
+   move off the base rate the way the call departed. Once 10 calls are final, the sizing's
+   CHANNEL_CONFIDENCE becomes `clamp(2 × hit − 1, 0, 1)` — 0.4 at a 70% hit rate (the placeholder's
+   level), 0 at a coin flip — and Pythia reads its record at the top of each review. First finals
+   due 2027-04-01. **Still open in this step:** the Prometheus verification loop.
    Original text:
    **Elasticity, residual sizing, and the Prometheus verification loop.** The largest step, and the
    one that makes the judgment scoreable.
