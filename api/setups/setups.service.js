@@ -118,13 +118,23 @@ export function validateSetup(setup, broker, accounts) {
     // Paper derives its own account (paper-<userId>); live and manual must be marked explicitly.
     if (broker !== 'paper' && !(accounts?.length)) return { ok: false, reason: 'no_venue' }
 
-    // Every leg must carry a real price. The check used to be `lower > upper` — an inverted band,
-    // which meant the normaliser had been bypassed; with one number per leg the only way to be
-    // malformed is to be unpriced. Every scenario's legs, not just the projected one: a malformed
-    // rival would arm silently and trip on nonsense.
-    const legs = (setup.scenarios ?? []).flatMap(sc => [...(sc.entry_legs ?? []), ...(sc.stop_legs ?? []), ...(sc.target_legs ?? [])])
-    for (const z of legs) {
-        if (!Number.isFinite(legPrice(z))) return { ok: false, reason: 'invalid_leg' }
+    // Every leg must be something an order can be made of. The check used to be `lower > upper` — an
+    // inverted band, which meant the normaliser had been bypassed; with one number per leg the only
+    // way to be malformed is to be unpriced. Every scenario's legs, not just the projected one: a
+    // malformed rival would arm silently and trip on nonsense.
+    //
+    // AN ENTRY MAY BE A TRIGGER instead of a price (f17b02f, "an entry need not be a price"): Talos
+    // judges the words and the confirmed fill is at market. This check predated that and was never
+    // told, so every trigger-entry plan lit Generate — readiness accepts it — and was then refused
+    // here as "a level is missing its price" (driven live, 2026-10-01). The STOP and every TARGET
+    // stay prices: they rest at the broker, and an order needs a number.
+    for (const sc of setup.scenarios ?? []) {
+        for (const z of sc.entry_legs ?? []) {
+            if (!Number.isFinite(legPrice(z)) && !(typeof z?.trigger === 'string' && z.trigger.trim())) return { ok: false, reason: 'invalid_leg' }
+        }
+        for (const z of [...(sc.stop_legs ?? []), ...(sc.target_legs ?? [])]) {
+            if (!Number.isFinite(legPrice(z))) return { ok: false, reason: 'invalid_leg' }
+        }
     }
     return { ok: true }
 }

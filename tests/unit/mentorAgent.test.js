@@ -298,8 +298,12 @@ test('the later stages keep the decisions that are theirs and not the model\'s',
     const sizing = PROMPT.slice(PROMPT.indexOf('## Size comes from the user'))
     assert.match(sizing, /Ask which unit they think in, and take any of the five/)
     assert.match(sizing, /record it and let the server size it/)
-    assert.match(sizing, /"size":\{"unit":"risk_pct","value":1\}/, 'the op has a shape the model can copy')
-    assert.match(sizing, /Do not\s+do this arithmetic yourself on a live account/)
+    assert.match(sizing, /size_position\(\{"unit":"risk_pct","value":1\}\)/, 'the call has a shape the model can copy')
+    // The figures come back in the SAME turn, and the fit check is the server's, not the model's.
+    assert.match(sizing, /The tool answers IN THE SAME TURN/)
+    assert.match(sizing, /DOES NOT FIT/)
+    assert.match(sizing, /Never shrink the size yourself/)
+    assert.match(sizing, /Do not do any of this\s+arithmetic yourself — not the share count, not the position value, not whether it fits/)
     assert.match(sizing, /Size the TRADE, not the leg/)
     assert.match(sizing, /the user picks it in the account menu/)
 })
@@ -358,7 +362,8 @@ test('Mentor’s own additions are declared after the kit, with the sidecar last
     // `flip_test` sits between the ladder's two tools and the sidecar: `consult` is contractually
     // last at every desk (agentToolsRegistry.test.js), and everything here is past the tools cache
     // breakpoint inside TRADING_TOOLS, so the cached prefix is untouched either way.
-    assert.deepEqual(names.slice(kitEnd + 1), ['get_news', 'get_analyst_actions', 'flip_test', 'consult'])
+    // `size_position` joins it there for the same reason (the sizing answer as a call, 2026-10-01).
+    assert.deepEqual(names.slice(kitEnd + 1), ['get_news', 'get_analyst_actions', 'flip_test', 'size_position', 'consult'])
 })
 
 test('the two tools are WIRED — a declared tool with no handler is a call that silently fails', async () => {

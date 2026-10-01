@@ -11,12 +11,13 @@ import { toolsFor } from '../agentTools.registry.js'
 import { consultDescription } from '../deepThink.service.js'
 import { FLIP_TOOL, FLIP_DESCRIPTION, makeFlipHandler } from '../flipTest.service.js'
 import { buildVenueSection } from '../tools/tradingContext.tools.js'
-import { normalizeSetup, setupReadiness, computeRR, validityProblems, normalizeChallenges } from '../setup.schema.js'
-import { summarizeTrade, applySizing } from '../mentorSummary.util.js'
+import { normalizeSetup, setupReadiness, computeRR, validityProblems, normalizeChallenges, scenarioView, scenarioLabel, legReference, stopEdge } from '../setup.schema.js'
+import { summarizeTrade, sizePlan, cashFit } from '../mentorSummary.util.js'
+import { resolveSize, SIZE_UNITS } from '../positionSize.util.js'
 import {
     normalizeBuild, sanitizeBuildOps, applyBuildOps, claimsFromDraft, settledConflicts,
-    normalizeSpans, spanIds, normalizeEntries, entryIds, entryProblems, fieldsClearedBy, alternativesFromSpans,
-    recordReads, ALWAYS_REFETCH, sanitizeUserOps, applyUserOps, gateView,
+    normalizeSpans, spanIds, normalizeEntries, resolveEntryTrades, entryIds, entryProblems, fieldsClearedBy, alternativesFromSpans,
+    recordReads, ALWAYS_REFETCH, sanitizeUserOps, applyUserOps, gateView, delegationPicks, heldAnswers,
     activeName, stageOf, firstUnsettled, isWaived, STAGES,
 } from '../mentorBuild.util.js'
 import { logger } from '../logger.service.js'
@@ -47,6 +48,9 @@ const _baseSystemPrompt = makePromptLoader(PROMPT_PATH, LOG)
 /** The dimensions <coverage> may claim. Anything else is dropped. */
 const COVERAGE_DIMENSIONS = ['markets', 'company', 'technicals']
 
+/** The sizing call. An ACTION, not a read — so it is kept out of the "already read" record. */
+export const SIZE_TOOL = 'size_position'
+
 // Kairos's kit plus the reasoning sidecar, APPENDED so the shared array is the exact prefix of
 // this one — the tools cache breakpoint sits inside TRADING_TOOLS, and inserting anywhere before it
 // would re-write that cache on every Mentor turn.
@@ -74,6 +78,13 @@ export const MENTOR_TOOLS = [
     // contractually last everywhere, and still past the tools cache breakpoint inside TRADING_TOOLS —
     // so declaring it re-writes no cached prefix.
     ...toolsFor({ [FLIP_TOOL]: FLIP_DESCRIPTION }),
+    // THE SIZING ANSWER, as a call rather than a tag. A tag is read after the model has finished
+    // writing, so the figures it produces could only ever be read out NEXT turn — and the turn the
+    // user gave their size ended on "I'll give you the share count before calling it ready", which is
+    // a turn spent on nothing. Same slot rules as the flip test: past the breakpoint, before consult.
+    ...toolsFor({
+        [SIZE_TOOL]: `Record the USER's sizing answer and get the server's figures back in the same turn. Call it the moment they give a size — "risk $1,000", "1%", "$20k position", "300 shares" — with their unit and their number, never yours ("never choose it for them"). It returns, per scenario, the quantity, the cash at risk, the position value and whether that fits the cash the account can deploy (with the largest size that does, when it does not); the money the trade pays and costs; and whether the Generate button is now lit. Read those out — do not recompute any of them. The answer is recorded as theirs and settles sizing by itself as soon as the stages before it are settled, so never ask for the size again after calling this. Call it again only when they CHANGE the size.`,
+    }),
     ...toolsFor({
         // The sidecar is contractually last at every desk that declares it
         // (agentToolsRegistry.test.js), and it sits past the tools cache breakpoint — which is
@@ -109,6 +120,16 @@ async function chatStream({
     // produced provenance worth less than none. The handler hands the parsed verdict back here and
     // the stamp below is the only writer.
     let flipVerdict = null
+    // The account the plan binds to, read once: the sizing tool needs it mid-turn and the
+    // re-derivation after the turn needs the same figure, or the two would disagree about the money.
+    const balance    = _mainBalance(accounts, mainAccountId)
+    const hasAccount = (accounts?.length ?? 0) > 0
+    // The gates' content as the user last SAW it (normalised — it has been to the client). What a
+    // "you pick" press settles on, and what the sizing tool splits a scale-in by.
+    const shown = _gateContent(chatState?.draft)
+    // The size the user gave THIS turn, as reported through the tool. Applied after the turn exactly
+    // like a `size` in the tag: one op, whichever way it arrived.
+    let toolSize = null
     const toolHandlers = {
         ...buildTradingToolHandlers(onChart, userId),
         [FLIP_TOOL]: _flipHandler({
@@ -119,24 +140,41 @@ async function chatStream({
         get_analyst_actions: makeToolHandler('get_analyst_actions',
             ({ symbols, limit }) => _analystActions(Array.isArray(symbols) ? symbols : [], limit),
             (err) => `Could not fetch analyst actions: ${err.message}`, LOG),
+        [SIZE_TOOL]: async (args = {}) => {
+            const size = sanitizeBuildOps({ size: args })?.size
+            if (!size) return `Not recorded: \`unit\` must be one of ${SIZE_UNITS.join(', ')} and \`value\` a positive number. Ask the user for their size in one of those.`
+            toolSize = size
+            const plan = chatState?.draft ? normalizeSetup(chatState.draft) : null
+            // The NORMALISED gate content: the draft has been to the client, and the scale-in shares
+            // are read off it.
+            return _sizingReport(plan, size, { balance, hasAccount, entries: shown.entries })
+        },
     }
 
     // WHAT THIS TURN READ. Wrapped here rather than taken from `onToolStart`, which belongs to the
     // caller: the record has to be the server's own, because it is what the NEXT turn is told it
-    // already has (see recordReads — "fetch once" is unenforceable without it).
+    // already has (see recordReads — "fetch once" is unenforceable without it). The sizing call is
+    // an action, not a read: recorded as read, a CHANGED size would be declined as already fetched.
     const readThisTurn = []
     for (const [name, fn] of Object.entries(toolHandlers)) {
-        toolHandlers[name] = async (...args) => { readThisTurn.push(name); return fn(...args) }
+        toolHandlers[name] = async (...args) => { if (name !== SIZE_TOOL) readThisTurn.push(name); return fn(...args) }
     }
 
     // THE USER'S PRESSES, APPLIED FIRST. A button is not an inference: the client knows what was
     // pressed, so the ledger moves before the turn is built and the model is TOLD what was agreed
     // rather than asked to spot it in prose (which five live builds showed it does not).
+    //
+    // A "you pick" press settles on Mentor's recommendation over the content the user was LOOKING AT
+    // — last turn's gate, carried on the draft — so the gate is closed before the model reads a word.
     const incoming = applyUserOps(
         normalizeBuild(chatState?.build ?? chatState?.draft?.build),
         sanitizeUserOps(chatState?.ops),
+        delegationPicks(shown),
     )
-    if (incoming.settled.length) logger.info(LOG, 'user ops settled', { fields: incoming.settled })
+    if (incoming.settled.length || incoming.delegated.length) {
+        logger.info(LOG, 'user ops applied', { settled: incoming.settled, delegated: incoming.delegated })
+    }
+    if (incoming.refused.length) logger.warn(LOG, 'a press was refused — the client offered something the ledger will not take', { refused: incoming.refused })
     const turnState = { ...chatState, build: incoming.build }
 
     const systemPrompt  = _buildSystemPrompt(turnState, accounts, mainAccountId, audience, seed)
@@ -144,7 +182,7 @@ async function chatStream({
     // the system prompt: free cash moves whenever anything fills, so a volatile system block
     // would sit ahead of the whole conversation in the cache prefix. See buildVenueSection.
     const builtMessages = attachTurnContext(
-        attachTurnContext(_buildMessages({ messages, userPrompt }), _buildTurnContext(turnState, clientTime, incoming.settled)),
+        attachTurnContext(_buildMessages({ messages, userPrompt }), _buildTurnContext(turnState, clientTime, incoming.settled, { delegated: incoming.delegated, hasAccount })),
         await _venueSection(userId))
 
     // Coverage is CUMULATIVE across the conversation: the model re-states everything it has read,
@@ -230,14 +268,22 @@ async function chatStream({
     // The ways in, per trade. Scoped to the spans on the table: an entry for a trade the user never
     // agreed to look at is an entry for nothing, and the gate would show a way into a trade that is
     // not being built. Carried forward the same way the spans are.
-    const emittedEntries = normalizeEntries(entryBlock, spanIds(spans))
-    if (entryBlock && !emittedEntries) logger.warn(LOG, '<entries> emitted but nothing survived normalisation — keeping the previous set')
+    // Keyed to the spans FIRST: the model writes scenario ids (`s1`) where span ids (`t1`) belong,
+    // and an entry keyed to no span is dropped — which emptied the whole gate (resolveEntryTrades).
+    const keyed = resolveEntryTrades(entryBlock, spanIds(spans))
+    if (keyed.remapped.length) logger.info(LOG, '<entries> trades re-keyed to the spans on the table', { remapped: keyed.remapped })
+    const emittedEntries = normalizeEntries(keyed.entries, spanIds(spans))
+    if (entryBlock && !emittedEntries) logger.warn(LOG, '<entries> emitted but nothing survived normalisation — keeping the previous set', { unresolved: keyed.unresolved, spans: spanIds(spans) })
     const entries = emittedEntries
         ?? (reopened.has('entries') ? null : normalizeEntries(carryGates?.entries, spanIds(spans)))
 
+    // The size, whichever way it came: the tag or the tool. One op either way, applied once.
+    if (toolSize && !ops.size) ops.size = toolSize
+
+    const asset      = normalized?.asset || chatState?.active_asset || ''
     const priorBuild = recordReads(incoming.build, readThisTurn)
-    const { build, refused, cleared } = applyBuildOps(priorBuild, {
-        asset: normalized?.asset || chatState?.active_asset || '',
+    const first = applyBuildOps(priorBuild, {
+        asset,
         derived: {
             // `lensStated` guards the one field with a non-null schema default: normalizeSetup
             // fills `trade_mode` with 'discretionary', and claiming that would put a lens nobody
@@ -245,14 +291,24 @@ async function chatStream({
             ...(normalized ? claimsFromDraft(normalized, { lensStated: Boolean(setup?.trade_mode) }) : {}),
             ...(spans ? { spans: spanIds(spans) } : {}),
             ...(entries ? { entries: entryIds(entries) } : {}),
-            // The summary stage settles on the FIGURES being in front of the user, so its claim is
-            // derived from them existing. `generate` used to be the field here and nothing could
-            // ever claim it — pressing Generate happens outside the conversation — so the build
-            // could never complete and every settle of it was refused.
-            ...(_summaryClaim(chatState?.draft) ?? {}),
         },
+        // Mentor's pick on whatever is on the table now. Only ever used for a gate the user handed
+        // back — `applyBuildOps` ignores it everywhere else — so it is safe to pass on every turn,
+        // and passing it always is what lets "you decide" in WORDS settle the same way a press does.
+        picks: delegationPicks({ spans, entries }),
         ...ops,
     })
+    let build = first.build
+    const { refused, cleared } = first
+
+    // An entry the server could not key to any trade on the table is DROPPED — so the model is told,
+    // by name, rather than left to wonder why the gate it just drew is empty on the user's screen.
+    if (keyed.unresolved.length) {
+        build.refused = [...build.refused, {
+            field: 'entries',
+            reason: `ways in for ${keyed.unresolved.map(id => `"${id}"`).join(', ')} name no trade on the table — key each trade in <entries> by its span id (${spanIds(spans).join(', ') || 'none settled'}), never a scenario id, and emit them again`,
+        }]
+    }
 
     // The ledger owns the FLOW, the draft owns the CONTENT. Where they contradict each other the
     // settled value is restored — visibly: the conflict rides back into the next turn's context
@@ -299,8 +355,7 @@ async function chatStream({
         // scenario, because two ways into one trade have different stops and therefore different
         // sizes for the same risk. A problem (no balance to take a percentage of, a stop equal to
         // the entry) comes back as a refusal rather than a guess, and the stage stays open.
-        const balance = _mainBalance(accounts, mainAccountId)
-
+        //
         // SIZE IS DERIVED, AND RE-DERIVED EVERY TURN. It used to be computed only on the turn the
         // `size` op arrived, which left two ways to have a ledger that says "sized" over a
         // worksheet that carries no quantity: a size settled by any other route, and a stop that
@@ -312,30 +367,33 @@ async function chatStream({
         // needs no arithmetic; only the {unit, value} shape is something to resolve.
         const sizeAsked = activeName(build)?.settled?.size ?? activeName(build)?.claimed?.size?.value ?? null
         if (sizeAsked && typeof sizeAsked === 'object' && sizeAsked.unit) {
-            const { quantities, problems } = applySizing(carrier, sizeAsked, { balance, multiplier: sizeAsked.multiplier })
-            for (const q of quantities) {
-                const sc = carrier.scenarios?.find(x => x.id === q.id) ?? carrier.scenarios?.[0]
-                if (!sc) continue
-                sc.quantity = q.quantity
-                // EVERY LEG GETS A SIZE, or the setup can never be ready — `setupReadiness`
-                // requires one per leg, and leaving multi-leg premises unsized was a dead end the
-                // user could not act on: "pick entries and conditions" about entries they had
-                // already picked. One leg takes the whole position; a scale-in ladder splits by
-                // the shares the entries stage authored.
-                const legs   = sc.entry_legs ?? []
-                const shares = _sharesFor(entries, sc, legs)
-                if (legs.length === 1) legs[0].quantity = q.quantity
-                else if (shares) legs.forEach((l, i) => { l.quantity = Math.floor(q.quantity * shares[i] / 100) })
-                else if (legs.length > 1) {
-                    problems.push(`${sc.id}: ${legs.length} entry legs with no shares between them. Two ALTERNATIVE ways in belong in two scenarios, each sized off its own stop — legs of one scenario are a scale-in and must carry shares that add to 100.`)
-                }
-            }
-            if (problems.length) build.refused = [...build.refused, ...problems.map(p => ({ field: 'size', reason: p }))]
-            logger.info(LOG, 'sizing resolved', { unit: sizeAsked.unit, value: sizeAsked.value, sized: quantities.length, problems: problems.length })
+            const sized = sizePlan(carrier, sizeAsked, { balance, entries })
+            carrier.scenarios = sized.plan.scenarios
+            // A size that cannot be resolved YET is not a refusal. Given in the opening turn, the
+            // answer is held while the plan is still being drawn, and "sizing by risk needs an entry
+            // and a stop" was reported as REFUSED on every turn until there was a stop — the exact
+            // signal that sends a model back to ask for the size again. So problems are reported
+            // once the plan is DRAWN — every scenario with an entry and a stop — and from then on
+            // they are real: no balance, a missing multiplier, two rivals in one scenario.
+            const drawn = (carrier.scenarios ?? []).length > 0 && carrier.scenarios.every(sc =>
+                legReference(sc.entry_legs?.[0]) != null && stopEdge(scenarioView(carrier, sc)) != null)
+            if (sized.problems.length && drawn) build.refused = [...build.refused, ...sized.problems.map(p => ({ field: 'size', reason: p }))]
+            logger.info(LOG, 'sizing resolved', { unit: sizeAsked.unit, value: sizeAsked.value, sized: sized.quantities.length, problems: sized.problems.length })
         }
 
-        carrier.summary = summarizeTrade(carrier, { balance, multiplier: ops.size?.multiplier })
+        // The multiplier travels with the size the LEDGER holds, not with this turn's op: priced off
+        // `ops.size` it was lost on every turn after the one the size was given on.
+        carrier.summary = summarizeTrade(carrier, { balance, multiplier: sizeAsked?.multiplier })
         if (!normalized) carrier.rr = computeRR(carrier) ?? carrier.rr
+
+        // THE SUMMARY SETTLES ON ITS OWN FIGURES — this turn's, now that they exist. It used to be
+        // claimed off LAST turn's draft and settled only on a "yes" in prose, so the turn the user
+        // sized could never finish the build and Mentor asked them to "confirm the summary" while
+        // Generate was already lit (Marce's INTC build, 2026-10-01). Its answer is pressing Generate
+        // (intent #12); here the server only records that there is something to press on.
+        const second = applyBuildOps(build, { asset, derived: _summaryClaim(carrier) ?? {} })
+        build = { ...second.build, refused: [...build.refused, ...second.refused] }
+        carrier.build = build
     }
 
     // SEVERAL NAMES IN ONE BUILD (#15). The active name's plan is `setup`, as it always was; the
@@ -557,7 +615,7 @@ Open on it: say the name, relay Argus's read in a sentence rather than restating
  * carry-forward rule and the problems block: an instruction separated from the data it governs is
  * how a prompt quietly stops meaning what it says.
  */
-export function _buildTurnContext(chatState, clientTime = null, justSettled = []) {
+export function _buildTurnContext(chatState, clientTime = null, justSettled = [], { delegated = [], hasAccount = null } = {}) {
     // THE WORKSHEET, WITHOUT WHAT IS ALREADY WRITTEN OUT ABOVE IT. `build`, `spans`, `entries` and
     // `summary` each have their own section in prose; dumping them again as JSON paid for them
     // twice and buried the instructions under a wall of fields.
@@ -576,26 +634,76 @@ export function _buildTurnContext(chatState, clientTime = null, justSettled = []
     // had already answered.
     return `---
 ${buildTimeSection(clientTime, 'active_from / valid_until')}
-COVERAGE SO FAR: ${covered}. Re-state these in every <coverage> tag plus anything new you read this turn.${draft}${_buildMoneySection(chatState?.draft)}${_buildLedgerSection(chatState)}${_buildPressSection(justSettled, chatState)}`
+COVERAGE SO FAR: ${covered}. Re-state these in every <coverage> tag plus anything new you read this turn.${draft}${_buildMoneySection(chatState?.draft)}${_buildGenerateSection(chatState, hasAccount)}${_buildLedgerSection(chatState)}${_buildPressSection(justSettled, chatState, delegated)}`
+}
+
+/**
+ * WHETHER THE GENERATE BUTTON IS LIT — the panel's own verdict (setupReadiness), stated to the model.
+ *
+ * The button and the conversation used to answer "is it ready?" from two different records: the
+ * button from readiness, Mentor from the ledger. They disagreed at exactly the moment it mattered —
+ * Generate lit, Mentor saying "confirm this summary, then it will be ready", the user asking twice to
+ * be allowed to generate (Marce, INTC, 2026-10-01). There is one answer now, and it is the button's.
+ *
+ * What is MISSING is said only once the ledger has nothing left open: before that an unfinished
+ * plan is the normal state of a conversation, and reciting the gaps every turn would push the model
+ * to fill them by guessing rather than by asking (see _buildProblemsSection).
+ *
+ * `hasAccount` null means the caller did not say — and then nothing is claimed either way.
+ */
+export function _buildGenerateSection(chatState, hasAccount = null) {
+    const draft = chatState?.draft
+    if (!draft || hasAccount == null) return ''
+    const plan = normalizeSetup(draft)
+    if (!plan) return ''
+    const r = setupReadiness(plan, hasAccount)
+    if (r.ready) {
+        return '\n\nGENERATE: the button is LIT. The plan can be saved by pressing it, now. If the user asks to generate,'
+            + ' tell them to press it — never say it is not ready, and never ask them to confirm anything first.'
+            + ' Anything you still want to raise is a remark, not a condition.'
+    }
+    const build = normalizeBuild(chatState?.build ?? draft.build)
+    if (stageOf(activeName(build)) !== null) return ''
+    return `\n\nGENERATE: still DARK, and every stage is settled — so this is what stands between the user and the button: ${
+        [...r.missing, ...r.problems].join(', ')}. Fix what is yours to fix in your next <setup>, and ask for exactly what is theirs.`
 }
 
 /**
  * WHAT THE USER JUST PRESSED. Not a reading of their words — the client said so, because they hit a
  * button, and the server has already recorded it. Stated out loud so the model does not re-ask a
  * question that is now answered or re-propose a value that is now settled.
+ *
+ * A "you pick" press is the user handing the gate back, and the server has ALREADY settled it on
+ * Mentor's recommendation — the model is told what it picked, so it can name it, not asked to pick.
  */
-export function _buildPressSection(justSettled = [], chatState = null) {
-    if (!justSettled.length) return ''
+export function _buildPressSection(justSettled = [], chatState = null, delegated = []) {
+    if (!justSettled.length && !delegated.length) return ''
     const build = normalizeBuild(chatState?.build ?? chatState?.draft?.build)
-    const next  = firstUnsettled(activeName(build))
-    return '\n\nTHE USER JUST PRESSED THE CONFIRM BUTTON. This is not a reading of their words — the'
-        + ` client told the server which button, and the ledger ALREADY RECORDS IT: ${justSettled.join(', ')} are SETTLED.`
-        + `\n  They answered the pacing question by pressing it too: ${build.waiver
+    const name  = activeName(build)
+    const next  = firstUnsettled(name)
+    const lines = ['\n\nTHE USER JUST PRESSED A BUTTON. This is not a reading of their words — the client told the server which button, and the ledger ALREADY RECORDS IT.']
+
+    const confirmed = justSettled.filter(f => !delegated.some(stage => STAGES.find(s => s.key === stage)?.fields.includes(f)))
+    if (confirmed.length) lines.push(`  ${confirmed.join(', ')} are SETTLED, as they confirmed.`)
+    // The pacing answer rides the opening confirm only — said after any other press it was noise.
+    if (['direction', 'horizon', 'lens'].some(f => confirmed.includes(f))) {
+        lines.push(`  They answered the pacing question by pressing it too: ${build.waiver
             ? 'run all the way to sizing, so do not stop at the two gates.'
-            : 'stop at the checkpoints, so show them each gate as you reach it.'}`
-        + '\n  NOTHING about that stage is outstanding. Do not say that it is, do not ask for it again,'
-        + ' and do not repeat the values back as a question.'
-        + (next ? `\n  Your job this turn is the NEXT stage — ${next.stage} — and nothing else.` : '')
+            : 'stop at the checkpoints, so show them each gate as you reach it.'}`)
+    }
+    for (const stage of delegated) {
+        const fields = STAGES.find(s => s.key === stage)?.fields ?? []
+        const picked = fields.map(f => name?.settled?.[f]).filter(v => v != null)
+        lines.push(picked.length
+            ? `  They handed you the ${stage} gate ("you pick"), and the server settled YOUR recommendation: ${fields.map(f => `${f}=${JSON.stringify(name.settled[f])}`).join(' · ')}. Name that pick and why in one line, build on it, and go on — they can overturn it.`
+            : `  They handed you the ${stage} gate ("you pick"), but there was nothing on the table to pick from. Put your choice in front of them now, mark it recommended, and it settles as your pick.`)
+    }
+    for (const f of heldAnswers(build, name)) {
+        lines.push(`  Their ${f} answer is already recorded and HELD — it settles by itself once its turn comes. Do not ask for it again.`)
+    }
+    lines.push('  NOTHING about a settled stage is outstanding. Do not say that it is, do not ask for it again, and do not repeat the values back as a question.')
+    if (next) lines.push(`  Your job this turn is the NEXT stage — ${next.stage} — and nothing else.`)
+    return lines.join('\n')
 }
 
 /**
@@ -646,13 +754,32 @@ export function _buildLedgerSection(chatState) {
         ? `  SETTLED (never re-ask, never re-litigate): ${settled.map(([f, v]) => `${f}=${_short(v)}`).join(' · ')}`
         : '  SETTLED: nothing yet.')
 
-    const open = Object.entries(name.claimed).filter(([f]) => !(f in name.settled))
+    // A user's answer given ahead of its stage is HELD, not pending a question: shown apart from the
+    // claims still to validate, or the model reads "size … (user), not settled" and asks for it again.
+    const held = new Set(heldAnswers(build, name))
+    const open = Object.entries(name.claimed).filter(([f]) => !(f in name.settled) && !held.has(f))
     if (open.length) {
         lines.push(`  CLAIMED but NOT settled — validate, then ask: ${
             open.map(([f, c]) => `${f}=${_short(c.value)} (${c.source})`).join(' · ')}`)
     }
+    if (held.size) {
+        lines.push(`  ANSWERED by the user and HELD — settles by itself once the stages before it are settled; never ask for it again: ${
+            [...held].map(f => `${f}=${_short(name.claimed[f].value)}`).join(' · ')}`)
+    }
 
-    if (at?.awaiting) {
+    const stage = at && STAGES.find(s => s.key === at.stage)
+    // Every gate from here on, in order — what "decide and let me generate" hands back.
+    const ahead = STAGES.slice(STAGES.findIndex(s => s.key === at?.stage)).filter(s => s.waivable).map(s => `"${s.key}"`)
+    const handBack = stage?.waivable
+        ? `    - they handed the choice back to you ("you decide", "you pick", "do what you think is right") → that IS the answer: <build>{"delegate":"${at.stage}"}</build>, with your pick marked "recommended": true. The server settles it on your pick — name the pick in one line and go straight on to the next stage in the same turn.`
+            + (ahead.length > 1 ? `\n    - they handed back the REST ("decide and let me generate", "just build it") → <build>{"delegate":[${ahead.join(',')}]}</build>: each gate settles on your pick as you put it up, so put them up in this same turn.` : '')
+        : null
+
+    // "Awaiting their yes" belongs to the stages that settle on a yes. Sizing and the summary settle
+    // on an answer and on figures; a worksheet's own share count claimed onto sizing is not a
+    // proposal waiting on agreement, and telling the model to "settle it now" there would have it
+    // settle a size nobody chose.
+    if (at?.awaiting && stage.settles === 'confirm' && !isWaived(build, at.stage)) {
         // THE STAGE IS DONE AND WAITING. Reported separately from a blank one because conflating
         // the two cost a whole turn in the first live run: told "still blank", the model re-read
         // the name and re-proposed values it had already put to the user, with their "yes" in
@@ -661,16 +788,20 @@ export function _buildLedgerSection(chatState) {
         lines.push('  You put these to the user last turn. Their message IS the answer:')
         lines.push(`    - they agreed → settle it now: <build>{"settle":[${at.fields.map(f => `"${f}"`).join(',')}],"source":"user"}</build>`)
         lines.push('    - they changed one → claim the new value in the same tag, then settle.')
+        if (handBack) lines.push(handBack)
         lines.push('    - they asked something else → answer it, and leave this exactly where it is.')
         lines.push('  DO NOT re-derive these, do not re-read the name for them, and do not ask again.')
     } else if (at) {
-        const waived = isWaived(build, at.stage)
-        lines.push(`  YOU ARE AT: ${at.stage} — still blank: ${at.blank.join(', ')}.`)
-        lines.push(waived
-            ? '  The user waived this gate: make the call yourself, record it, and say in one line what you decided so they can overturn it.'
-            : '  This stage ends in something the user says yes to. Settle it with <build>{"settle":["…"]}</build> only once they have.')
+        lines.push(`  YOU ARE AT: ${at.stage}${at.blank.length ? ` — still blank: ${at.blank.join(', ')}` : ''}.`)
+        lines.push(_stageInstruction(build, at, handBack))
     } else {
-        lines.push('  YOU ARE AT: done — every stage is settled. Summarise and offer Generate.')
+        lines.push('  YOU ARE AT: done — every stage is settled. The GENERATE line above says whether the button is lit; that is the only readiness there is.')
+    }
+
+    // The ids the entries gate is keyed by, said where they are used. The model writes scenario ids
+    // (`s1`) on the worksheet and kept writing them here too, which emptied the gate.
+    if (at?.stage === 'entries' && Array.isArray(name.settled.spans) && name.settled.spans.length) {
+        lines.push(`  Key every trade in <entries> by its SPAN id — ${name.settled.spans.join(', ')} — never a scenario id (s1, s2…).`)
     }
 
     if (build.names.length > 1) {
@@ -697,6 +828,25 @@ export function _buildLedgerSection(chatState) {
     lines.push(`  The stages, in order: ${STAGES.map(s => s.key).join(' → ')}. Nothing settles out of order, and reopening one reopens every stage below it.`)
     lines.push('  A question about anything else is always answered in full — talking never moves this ledger, and it never has to.')
     return lines.join('\n')
+}
+
+/**
+ * What to do at an OPEN stage — one line, decided by how that stage settles (STAGES `settles`). The
+ * instruction is derived from the same rule the server applies, so the prompt cannot tell the model
+ * to ask for an answer the server will record without it. Pure.
+ */
+function _stageInstruction(build, at, handBack) {
+    if (isWaived(build, at.stage)) {
+        return '  The user handed this gate to you: make the call, mark your pick "recommended": true on what you put on the table, and the server settles it. Say in one line what you chose and why, so they can overturn it, then keep going.'
+    }
+    if (at.stage === 'sizing') {
+        return `  Ask which unit and number — theirs, never yours. When they give it, call ${SIZE_TOOL} with it and read out what it returns; it records the answer and settles the stage by itself.`
+    }
+    if (at.stage === 'summary') {
+        return '  The server settles this stage once the money figures exist — there is no "yes" to ask for. Read the trade and the money out; pressing Generate is their answer to it.'
+    }
+    return '  This stage ends in something the user says yes to. Settle it with <build>{"settle":["…"]}</build> only once they have.'
+        + (handBack ? `\n${handBack}` : '')
 }
 
 /**
@@ -736,29 +886,66 @@ export function _mergeDrafts(prior, carrier, lastDraft = null) {
 /**
  * The summary stage's claim: what the user is being shown, once there is money to show.
  *
- * Read off the PREVIOUS turn's draft rather than this one's, because the claim has to exist before
- * the model can settle it, and both happen in the same turn: the figures were computed last turn,
- * presented in that reply, and this turn's `settle` is the user agreeing with what they read.
+ * Read off the plan as it stands at the END of this turn — sized, priced — because the stage settles
+ * on the figures existing (`settles: 'shown'`), and the turn that sized the trade is the turn they
+ * first exist. Nothing to show → no claim, and the stage stays open.
  */
-function _summaryClaim(draft) {
-    const s = draft?.summary
+function _summaryClaim(plan) {
+    const s = plan?.summary
     if (!s || (s.gainCash == null && s.lossCash == null)) return null
     return { summary: { rr: s.rr ?? null, gain: s.gainCash ?? null, loss: s.lossCash ?? null, estimated: Boolean(s.estimated) } }
 }
 
 /**
- * The share each entry leg takes of its premise, from the entries gate — or null when this is not
- * a scale-in and the legs are not meant to be split at all.
- *
- * Matched by POSITION, because that is the only correspondence the two shapes have: the gate's
- * options for a trade are authored in the order the legs are.
+ * The gates' content as the user last SAW it — what a press was made on. Re-normalised, because it
+ * has been to the client. Pure.
  */
-function _sharesFor(entries, scenario, legs) {
-    const trade = (entries?.trades ?? []).find(t => t.id === (scenario?.trade_id ?? t.id))
-    if (trade?.semantics !== 'scale_in') return null
-    const shares = (trade.options ?? []).slice(0, legs.length).map(o => Number(o.share))
-    if (shares.length !== legs.length || shares.some(n => !Number.isFinite(n) || n <= 0)) return null
-    return Math.abs(shares.reduce((a, b) => a + b, 0) - 100) < 0.01 ? shares : null
+export function _gateContent(draft) {
+    const spans = normalizeSpans(draft?.spans)
+    return { spans, entries: normalizeEntries(draft?.entries, spanIds(spans)) }
+}
+
+/**
+ * What the sizing tool hands back: the user's size resolved on the plan on the table, per scenario,
+ * with the money and the Generate verdict — everything the model needs to finish the sizing turn in
+ * that turn. Pure; the plan is not touched.
+ *
+ * Per SCENARIO, because two rival ways in have different stops and so different sizes for the same
+ * risk — and the panel's money line covers only the first, which left Mentor saying "the dollar
+ * figures are for the pullback only" in Marce's INTC build.
+ */
+export function _sizingReport(plan, size, { balance = null, hasAccount = false, entries = null } = {}) {
+    const said = `${size.value} ${size.unit}${size.multiplier ? ` (multiplier ${size.multiplier})` : ''}`
+    const recorded = `Recorded as the USER's size: ${said}. It settles sizing by itself once the stages before sizing are settled — never ask for the size again.`
+    if (!plan?.scenarios?.length) {
+        return `${recorded}\nThere is no plan with an entry and a stop on the table yet, so there is nothing to size; the quantity is computed the moment there is.`
+    }
+
+    const { plan: sized, problems } = sizePlan(plan, size, { balance, entries })
+    const money = (cash, pct) => (cash == null ? '—' : `$${cash}${pct != null ? ` (${pct}% of the account)` : ''}`)
+    const lines = [recorded]
+    for (const sc of sized.scenarios) {
+        if (!(sc.quantity > 0)) continue
+        const view  = scenarioView(sized, sc)
+        const entry = legReference(sc.entry_legs?.[0])
+        const stop  = stopEdge(view)
+        const pos   = resolveSize({ unit: 'shares', value: sc.quantity, entry, stop, balance, multiplier: size.multiplier ?? 1 })
+        const s     = summarizeTrade(view, { quantity: sc.quantity, balance, multiplier: size.multiplier })
+        lines.push(`- ${scenarioLabel(sc)}: ${sc.quantity} unit(s) · position ${money(pos.notional, pos.notionalPct)} · pays ${money(s.gainCash, s.gainPct)} · costs ${money(s.lossCash, s.lossPct)}${s.rr != null ? ` · ${s.rr}R` : ''}${s.estimated ? ' · ESTIMATED (no authored entry price — say so)' : ''}`)
+        const fit = cashFit(pos, { entry, stop, balance, multiplier: size.multiplier ?? 1 })
+        if (fit) {
+            lines.push(`  DOES NOT FIT: the position is $${fit.notional} and the account has $${fit.available} to deploy.${fit.maxQuantity
+                ? ` The most that fits is ${fit.maxQuantity} unit(s), risking $${fit.maxRiskCash}.`
+                : ''} On a cash account this order cannot fill — tell the user and let them choose a new size; on margin it may be intended.`)
+        }
+    }
+    for (const p of problems) lines.push(`- PROBLEM: ${p}`)
+
+    const readiness = setupReadiness(sized, hasAccount)
+    lines.push(readiness.ready
+        ? 'GENERATE: the button is now LIT for this plan. Tell the user it is ready to press — never ask them to confirm anything else first.'
+        : `GENERATE: still dark — it needs ${[...readiness.missing, ...readiness.problems].join(', ')}. Say exactly that.`)
+    return lines.join('\n')
 }
 
 /** Ledger values are short by construction; a list is summarised rather than spelled out. */

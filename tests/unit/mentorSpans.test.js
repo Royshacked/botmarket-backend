@@ -25,7 +25,7 @@ test('a span keeps its words and its optional numbers', () => {
     assert.deepEqual(out.candidates[0], {
         id: 't1', label: 'way 1', from: 'the shelf', to: 'the pool',
         from_price: 238.2, to_price: 246.5, why: 'swept twice', invalidation: 'close below 234.8',
-        archetype: 'sweep_reclaim',
+        archetype: 'sweep_reclaim', recommended: false,
     })
     assert.deepEqual(out.discarded, [{ label: 'the gap', why_not: 'below my stop' }])
 })

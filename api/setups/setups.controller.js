@@ -9,6 +9,7 @@ import { talosHandoffService } from '../../services/talos.handoff.service.js'
 import { normalizeSetup, setupReadiness, TRADE_MODES, TF_RUNGS, isFetchableRung } from '../../services/setup.schema.js'
 import { TRADE_HORIZONS } from '../../services/entity/vocabulary.js'
 import { hydrateBlueprint as hydrateDraft, blueprintProblems } from '../../services/setup.blueprint.js'
+import { gateView, normalizeBuild } from '../../services/mentorBuild.util.js'
 
 const LOG     = '[setups:controller]'
 const _handle = makeHandle(LOG)
@@ -297,9 +298,16 @@ export const validateDraft = _handle('validateDraft', async (req, res) => {
     const setup = normalizeSetup(raw)
     if (!setup) return res.status(400).send({ error: 'invalid_setup' })
 
+    // A Mentor draft carries its build ledger; the gate open on it is what the panel draws its card
+    // from. A REOPENED conversation used to land with no verdict and no gate at all — Generate dark
+    // with nothing said, and no entries table to press — until the user sent another message. One
+    // ask answers both, from the same functions a turn uses.
+    const gate = raw.build ? gateView(normalizeBuild(raw.build)) : null
+
     res.send({
         setup,
         readiness:  setupReadiness(setup, Array.isArray(accounts) && accounts.length > 0),
+        ...(gate ? { gate } : {}),
         // Carried here too so the form can open straight onto a live draft (no blueprint to
         // hydrate) and still render its dropdowns from the server's vocabulary.
         vocabulary: FORM_VOCABULARY,

@@ -53,23 +53,20 @@ test('the size op becomes a CLAIM, so the settlement the prompt prescribes is ac
 // ─── 6. The build could never complete ────────────────────────────────────────
 
 test('the summary stage settles on the FIGURES, and the build can finish', async () => {
-    // The figures are computed on the turn they are presented, and settled on the next one.
+    // The figures are computed on the turn the size is given, and the stage settles on them existing
+    // — with no "yes" asked for (STAGES settles: 'shown'; Marce's INTC build, 2026-10-01).
     const priced = await turn(`<setup>${JSON.stringify(SETUP())}</setup>`
         + '<build>{"size":{"unit":"risk_cash","value":500}}</build>',
     { active_asset: 'NVDA', draft: null, coverage: [] })
     assert.ok(priced.setup.summary.lossCash, 'there is money to show')
 
     let b = upTo('summary')
-    b = applyBuildOps(b, {
-        asset: 'NVDA',
-        claim: { size: { unit: 'risk_cash', value: 500 } },
-        settle: ['size'],
-    }).build
-    // The claim for it is DERIVED from last turn's summary, exactly as the service does it.
+    b = applyBuildOps(b, { asset: 'NVDA', size: { unit: 'risk_cash', value: 500 } }).build
+    // The claim for it is DERIVED from the figures, exactly as the service does it — and nothing
+    // asks to settle it.
     const withSummary = applyBuildOps(b, {
         asset: 'NVDA',
         derived: { summary: { rr: 2.5, gain: 1250, loss: 500, estimated: false } },
-        settle: ['summary'],
     })
     assert.deepEqual(withSummary.refused, [])
     assert.equal(stageOf(activeName(withSummary.build)), null, 'the build is finished')
@@ -279,9 +276,10 @@ test('junk from a client is dropped, not trusted for being client-side', () => {
 test('the model is TOLD what was pressed, so it does not ask again', async () => {
     const proposed = await turn(`<setup>${JSON.stringify(SETUP())}</setup>`)
     const text = _buildPressSection(['direction', 'horizon', 'lens'], { draft: proposed.setup })
-    assert.match(text, /THE USER JUST PRESSED THE CONFIRM BUTTON/)
+    assert.match(text, /THE USER JUST PRESSED A BUTTON/)
     assert.match(text, /ALREADY RECORDS IT/)
-    assert.match(text, /NOTHING about that stage is outstanding/)
+    assert.match(text, /direction, horizon, lens are SETTLED/)
+    assert.match(text, /NOTHING about a settled stage is outstanding/)
     // The press answers the pacing question too — that is what the button means.
     assert.match(text, /stop at the checkpoints/)
     assert.equal(_buildPressSection([]), '', 'and nothing is said when nothing was pressed')

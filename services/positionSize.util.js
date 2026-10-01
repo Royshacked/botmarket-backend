@@ -69,13 +69,18 @@ export function resolveSize({ unit, value, entry, stop, balance = null, multipli
         return none('sizing by position value needs an entry price')
     }
 
+    // WHOLE UNITS, floored — but not below a whole number the arithmetic only MISSED. A price
+    // difference is a float: 2.20 − 2.14 is 0.06000000000000005, so "$300 of risk" came out as 4,999
+    // shares instead of 5,000. The tolerance is far below any real fraction of a share, so it only
+    // ever restores a unit that float noise took away; it never rounds a genuine 4,999.6 up.
+    const units = (x) => Math.floor(x + 1e-9)
     let quantity
     switch (unit) {
-        case 'risk_cash': quantity = Math.floor(v / per); break
-        case 'risk_pct':  quantity = Math.floor((bal * v / 100) / per); break
-        case 'size_cash': quantity = Math.floor(v / (e * m)); break
-        case 'size_pct':  quantity = Math.floor((bal * v / 100) / (e * m)); break
-        case 'shares':    quantity = Math.floor(v); break
+        case 'risk_cash': quantity = units(v / per); break
+        case 'risk_pct':  quantity = units((bal * v / 100) / per); break
+        case 'size_cash': quantity = units(v / (e * m)); break
+        case 'size_pct':  quantity = units((bal * v / 100) / (e * m)); break
+        case 'shares':    quantity = units(v); break
     }
 
     // A budget smaller than one unit is not a rounding problem, it is a trade the user cannot take

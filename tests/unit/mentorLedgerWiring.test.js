@@ -171,7 +171,7 @@ test('a waived gate tells the model to decide and say so; an unwaived one tells 
         + '<build>{"settle":["direction","horizon","lens"],"waiver":true}</build>')
     const waived = _buildLedgerSection({ draft: settled.setup })
     assert.match(waived, /YOU ARE AT: spans/)
-    assert.match(waived, /make the call yourself/i)
+    assert.match(waived, /handed this gate to you: make the call/i)
 
     const asked = await turn(`<setup>${JSON.stringify(SETUP)}</setup>`
         + '<build>{"settle":["direction","horizon","lens"]}</build>')

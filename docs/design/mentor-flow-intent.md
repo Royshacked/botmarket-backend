@@ -1287,3 +1287,74 @@ opening stage (state, not a defect), and a local server run with `NODE_ENV=produ
 - **Reasoning on Luna.** The `reasoningEffort` knob is Anthropic-only; OpenRouter takes a
   `reasoning` parameter nobody has wired.
 
+
+## Marce's builds (2026-10-01) — what the ledger could not record, and the Generate path
+
+Reported by Marce: *"Mentor forgets and asks questions again and again, and there are problems
+clicking Generate."* Read from his prod threads first (INTC, PACB, plus FCX/ERO/CAT), then replayed
+live against the real model and driven in a browser. Every cause below was reproduced before it was
+fixed.
+
+**Why it asked again — the ledger had no word for three answers the user really gave.**
+1. **"You decide."** Spec'd at #3 ("or tells Mentor to choose") and never built into the ledger: the
+   `You choose` button sent words with no op, and the prompt only knew the opening-turn waiver.
+   PACB: Mentor picked the limit pullback in prose, the gate stayed open, and his `$20K` size was then
+   **refused** — `entries must be settled before size`. → `delegate` (op and tag), settled by the
+   server on Mentor's own `recommended` option (`delegationPicks`). The build-wide waiver now settles
+   the same way; before, it too waited on a `settle` the model had to remember.
+2. **A size given early.** Refused for being out of order, the refusal shown as REFUSED LAST TURN,
+   and Mentor asked for the size again. → sizing `settles: 'answer'`: a user's size is HELD and settles
+   by itself the moment the stages before it do. Sizing settles only on a `user` claim.
+3. **The summary.** Spec #12 makes its answer pressing Generate; the build made it a prose "yes", so
+   INTC ended on *"confirm this summary, then it will be ready"* — with Generate already lit, after he
+   had asked twice. → `settles: 'shown'`: the server settles it on this turn's figures, and the turn
+   context carries the button's own verdict (GENERATE lit / dark + what is missing once every stage is
+   settled).
+
+`settleInOrder` replaces the order-sensitive settle: one walk over the stages, requested fields plus
+the ones that settle by themselves. Derived claims that mirror content now follow Mentor's newer
+content (`claim(..., {overwrite: 'own'})`) — before, a narrowed `<entries>` was dropped against the old
+menu and a settle agreed to every option ever offered.
+
+**Sizing became a tool** (`size_position`). A tag is read after the model writes, so the sizing turn
+could never read its own figures and ended on a promise. The tool answers in-turn per scenario —
+quantity, risk, position value, pays/costs, `cashFit` against deployable cash (PACB's "$36,667 against
+$22,624" had been the model's own arithmetic), and the Generate verdict. Found on the way: float noise
+under-sized by a share (2.20 − 2.14 → 4,999 for $300, not 5,000), fixed in `resolveSize`.
+
+**The entries gate came out EMPTY.** Live, the model keyed `<entries>` by scenario id (`s1`) where the
+span id (`t1`) belongs; `normalizeEntries` dropped every trade. No table, nothing to press, nothing for
+a hand-back to settle on — his PACB ledger shows exactly this ("nothing claimed for entries"). →
+`resolveEntryTrades` re-keys only that slip; anything else unresolved is told to the model by name; the
+ledger names the span ids at the entries stage.
+
+**Generate — four defects, all driven, none caught by a green test:**
+1. **A trigger entry lit Generate and was refused at save** — `invalid_leg`, "a level is missing its
+   price". The save-path check (Sep 25) predated "an entry need not be a price" (Sep 28, f17b02f) and
+   was never told. Every trigger-entry plan since Sep 28 hit it. Entry legs may be a trigger; stop and
+   targets stay prices. Generate and Arm share the one `validateSetup`.
+2. **The refusal said "Request failed with status code 400"** — the panel printed axios's message, not
+   the server's. All three Mentor alerts now go through the shared `apiError`.
+3. **Marking an account did not light Generate** until another message — the verdict was the last
+   turn's. The panel composes the account gap both ways now (the gate reads the account only as "is one
+   marked"), lighting only when the account was the sole blocker.
+4. **A reopened conversation** — from the threads list or a restore — landed with no verdict and no
+   gate card. Both doorways are now one function (`_openConversation`) that asks `/api/setups/validate`
+   once (which now also returns the open gate), guarded so a late answer never overwrites a turn's.
+
+Plus, on the Lists card: a trigger entry printed **"in null"**, and a generated (unwatched) setup said
+**"Armed"** — the status copy predated the shared ladder. One entry reader for every surface
+(`setupPlan.utils.entryText`); the copy keyed to `waiting/looking/hit/long/short/closed`.
+
+**Voice.** Whisper detected the language and heard accented English as Romanian, French, Polish and
+Spanish; each such turn was stopped and dictated again. The language is told now (`en`, or a client's
+two-letter code), with a vocabulary hint.
+
+### Still open after this pass
+- **History window.** Mentor keeps 8 messages and trims at 24 (`MAX_RECENT_MESSAGES`). A long build
+  loses its opening — "mind the balance, leave money free" — past that; the ledger keeps the settled
+  facts but not stated constraints. Not hit in Marce's threads (14–19 messages); worth a decision.
+- **Two "available cash" sources.** Sizing uses the client-sent account's `freeMargin`; the venue
+  section reads it fresh per turn. They agreed in every real thread, but they are two reads of one fact.
+- **The money line covers the first scenario only** (`carrier.summary`); the sizing tool reports per
+  scenario, the panel does not yet.

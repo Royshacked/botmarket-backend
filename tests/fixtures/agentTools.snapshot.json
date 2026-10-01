@@ -2904,6 +2904,38 @@
             }
         },
         {
+            "name": "size_position",
+            "description": "Record the USER's sizing answer and get the server's figures back in the same turn. Call it the moment they give a size — \"risk $1,000\", \"1%\", \"$20k position\", \"300 shares\" — with their unit and their number, never yours (\"never choose it for them\"). It returns, per scenario, the quantity, the cash at risk, the position value and whether that fits the cash the account can deploy (with the largest size that does, when it does not); the money the trade pays and costs; and whether the Generate button is now lit. Read those out — do not recompute any of them. The answer is recorded as theirs and settles sizing by itself as soon as the stages before it are settled, so never ask for the size again after calling this. Call it again only when they CHANGE the size.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "unit": {
+                        "type": "string",
+                        "enum": [
+                            "risk_cash",
+                            "risk_pct",
+                            "size_cash",
+                            "size_pct",
+                            "shares"
+                        ],
+                        "description": "The unit the USER sized in: risk in cash, risk as % of the account, position value in cash, position value as % of the account, or a number of shares/units."
+                    },
+                    "value": {
+                        "type": "number",
+                        "description": "Their number, in that unit — 1000 for \"risk $1k\", 1 for \"1%\"."
+                    },
+                    "multiplier": {
+                        "type": "number",
+                        "description": "Contract or point value — futures and FX only. Omit for shares, ETFs and crypto."
+                    }
+                },
+                "required": [
+                    "unit",
+                    "value"
+                ]
+            }
+        },
+        {
             "name": "consult",
             "description": "Put ONE decision to a more capable desk head and get a straight answer back. It cannot see this conversation and cannot fetch anything — you hand it the question and every number it needs, and it thinks harder than you can in-line.\n\nReach for it in exactly three situations: **final sizing on real money** (live or manual — the account is at risk and the arithmetic has to be right); **two readings that genuinely disagree** and you cannot settle which one governs — most often the direction call at rung 2 of the guided build, when the structure leans one way and momentum or positioning the other and the user is waiting on your lean; and **placing a level where the structure is ambiguous** — a price that is both a prior high and a supply shelf, say. The wider-target check at rung 7 is NOT a consult: it is a tool question, answered by the levels.\n\nDo NOT reach for it to look something up, to double-check work you are already confident in, to summarize, or because a question feels big. A consult costs a full model call and adds seconds to the turn: if you already know the answer, or a tool call would settle it, that is the cheaper and better move. Most turns should end without it.",
             "input_schema": {

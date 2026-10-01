@@ -242,7 +242,9 @@ api/
   market/ calendar/       chart candles + quotes + market status; the week's earnings / Fed / IPO
                           calendars (calendar.service owns the shaping; the controller is three lines)
   transcribe/             raw audio → Whisper (OpenAI SDK, the only OpenAI use). Mounted BEFORE
-                          express.json so the raw-body parser sees the bytes; authed — it is a paid API
+                          express.json so the raw-body parser sees the bytes; authed — it is a paid API.
+                          The language is TOLD (`en`, or a client's 2-letter `?language=`), never
+                          detected — transcribe.util.js (2026-10-01)
   health/                 /api/health (liveness — no IO, 200 while draining) and /api/health/ready
                           (readiness — 503 the moment shutdown begins; db ping cached 5s ok / 1s fail).
                           Unauthenticated, mounted BEFORE the rate limiters, written with .end() so
@@ -565,6 +567,9 @@ services/
                               different stops, so the same risk budget is a different size), and
                               expectedGain, which prices the whole position to the NEAREST target
                               when the ladder does not cover it rather than inventing a split.
+                              sizePlan lays the size onto every leg (ONE implementation for the
+                              size_position tool and the post-turn re-derivation); cashFit says
+                              whether the position fits the deployable cash (a remark, never a cap).
     mentorBuild.util.js       THE BUILD LEDGER — Mentor's flow as server state (2026-09-28,
                               docs/design/mentor-flow-intent.md). PURE: no clock, no I/O, nothing
                               mutated. STAGES opening(direction·horizon·lens) → spans → entries →
@@ -573,9 +578,15 @@ services/
                               normalizeBuild is the door (it comes back through the client on the
                               draft, so it is untrusted); sanitizeBuildOps reads the <build> tag by
                               type and drops rather than coerces; applyBuildOps runs one turn as
-                              unsettle → derived claims → explicit claims → settle; settledConflicts
-                              is "the ledger owns the flow, the draft owns the content".
-                              A CLAIM IS NOT A SETTLEMENT: only the user's confirmation settles.
+                              unsettle → delegate/waiver → derived claims → explicit claims → picks →
+                              size → settleInOrder; settledConflicts is "the ledger owns the flow,
+                              the draft owns the content".
+                              A CLAIM IS NOT A SETTLEMENT: only the user's answer settles — and each
+                              stage says what its answer IS (STAGES `settles`, 2026-10-01): confirm
+                              (a yes; a handed-back gate settles on Mentor's pick, delegationPicks),
+                              answer (sizing: the user's number, HELD until its turn — heldAnswers),
+                              shown (summary: settles when the figures exist). resolveEntryTrades
+                              re-keys entries the model filed under a scenario id (s1 → t1).
     NB: setup.ladder.js owns the RUNG VOCABULARY (TF_RUNGS, isFetchableRung, rungMinutes) and the
         DEFAULT pace — ladderFor(horizon, marketCap, premise) → the rungs a setup is read on when
         nobody named any, as a contiguous band that always widens to reach the premise. Coarser as

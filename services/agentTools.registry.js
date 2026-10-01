@@ -315,6 +315,28 @@ export const TOOL_SCHEMAS = {
         },
         "required": ["symbol", "direction"]
     },
+    // Mentor's sizing answer (services/agents/mentor.agent.service.js). The UNIT and the NUMBER are
+    // the user's; the quantity is never a parameter — it is the server's to compute. The enum mirrors
+    // SIZE_UNITS in services/positionSize.util.js.
+    size_position: {
+        "type": "object",
+        "properties": {
+            "unit": {
+                "type": "string",
+                "enum": ["risk_cash", "risk_pct", "size_cash", "size_pct", "shares"],
+                "description": "The unit the USER sized in: risk in cash, risk as % of the account, position value in cash, position value as % of the account, or a number of shares/units."
+            },
+            "value": {
+                "type": "number",
+                "description": "Their number, in that unit — 1000 for \"risk $1k\", 1 for \"1%\"."
+            },
+            "multiplier": {
+                "type": "number",
+                "description": "Contract or point value — futures and FX only. Omit for shares, ETFs and crypto."
+            }
+        },
+        "required": ["unit", "value"]
+    },
     get_market_hours: {
         "type": "object",
         "properties": {

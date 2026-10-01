@@ -917,8 +917,22 @@ hands it the stage, what is settled, and what was refused last turn, every turn.
 reads is the silent skip the whole design exists to stop.
 
 **Three stops are the user's** — the opening turn, sizing, and the summary — and the two gates
-between them (spans, entries) may be waived once, in the opening turn (*"go all the way"*). A waived
-gate is still reported at the next stop: a call the user never heard is one they never made.
+between them (spans, entries) may be waived once, in the opening turn (*"go all the way"*), or
+**handed back at the gate itself** (*"you decide"*, the `You choose` button — `delegate`). A waived
+or handed-back gate is still reported at the next stop: a call the user never heard is one they never
+made.
+
+**Each stage settles on its own kind of answer, and the server applies it (2026-10-01).** STAGES
+carries `settles`: `confirm` (the opening and the gates — a yes, or, for a handed-back gate,
+Mentor's pick), `answer` (sizing — the user's number IS the answer), `shown` (the summary — settles
+once the server's figures exist; the user's answer to it is pressing Generate). `settleInOrder`
+walks the stages in order, so one turn can close a handed-back gate, the size the user had already
+given, and the summary together, whatever order the model listed them in. A size given before the
+gates closed is **held**, not refused — the refusal is what made Mentor ask for it twice — and
+sizing settles only on a `user` claim, never on a share count the worksheet happened to carry.
+Mentor's pick on a handed-back gate is structural (`delegationPicks`): the entry option it marked
+`recommended` (exactly one per trade), and the spans it marked recommended (all of them when none
+are). It is derived from the content on the table, never read off the wire.
 
 **A gate is a PRESS, not a sentence (2026-09-29).** The server reports the open gate on every turn
 (`gateView` → `{asset, stage, fields, values, awaiting}`, forwarded as `gate`), the panel draws its
@@ -932,8 +946,16 @@ Ops arrive through the client, so they are sanitized by type like any other inpu
 and not only when scaling — rival scenarios where the first to fulfil takes the position and the
 rest are cancelled. A `scale_in` trade is the exception: it ticks as ONE unit, because its options
 are halves of one position and taking two of three would author shares that no longer sum to 100.
-`You choose` hands the judgment back to Mentor; the rejects stay reachable behind "N ways not
+`You choose` hands the judgment back to Mentor — as a press (`{delegate: 'entries'}`), settled by
+the server on Mentor's recommendation before the model reads the turn; sent as words alone it
+settled nothing (Marce's PACB build, 2026-10-01). The rejects stay reachable behind "N ways not
 taken".
+
+**The entries gate is keyed by SPAN id.** The model writes scenario ids (`s1`) on the worksheet and
+wrote them into `<entries>` too; every trade was dropped as belonging to no span and the gate came
+out empty — no table to press, nothing for a hand-back to settle on. `resolveEntryTrades` re-keys
+only that slip (`s<n>` → the span it numbers, or the single free span), and anything still
+unresolved is reported back to the model by name.
 
 **Every field the panel reads has exactly one place to be forgotten**, and twice something was.
 `build` went missing first; then `gate` — and because the panel had just started drawing its cards
@@ -950,6 +972,20 @@ ladder. A balance of **zero is a balance** — it reads "this account is empty, 
 cannot see a balance", and it is a blocker at the sizing stage rather than a reason to send the
 build back to the entries gate.
 
+**Sizing is a TOOL call, not a tag (2026-10-01).** `size_position({unit, value, multiplier?})`
+records the user's answer and answers in the SAME turn, per scenario: quantity, cash at risk,
+position value, what it pays and costs, whether it fits the cash the account can deploy (`cashFit`
+— with the largest size that does; a remark, never a cap, since margin is the user's to know), and
+whether Generate is now lit. A tag is read after the model has written, so its figures could only
+ever be read out next turn — the sizing turn used to end on "I'll give you the share count before
+calling it ready". One implementation (`sizePlan`) serves the tool and the post-turn re-derivation.
+Sizing problems are reported once the plan is DRAWN (every scenario with an entry and a stop); before
+that, "needs an entry and a stop" is the normal state of a plan being drawn, not a refusal.
+
+**One answer to "is it ready?" — the button's.** The turn context carries a GENERATE line from
+`setupReadiness` on the draft: when it is lit Mentor is told so, and told never to make Generate
+conditional on another confirmation. What is missing is listed only once every stage is settled.
+
 **How the ledger survives a turn: it rides ON THE DRAFT.** The frontend rebuilds `chatState` from the
 fields it was sent (`active_asset: e?.asset || n?.ticker || ''`), so a new top-level key would be
 dropped every message. Three carriers, in order: the worksheet emitted this turn, the draft the
@@ -958,11 +994,14 @@ while emitting no worksheet is the ordinary case — the user says "yes, long an
 answers in prose — and a model doing as it was told is not a storage strategy. `build` also comes
 back at the top level and is forwarded by the controller, inert until a frontend uses it.
 
-**The `<build>` tag** is how the model moves the ledger: `{claim, settle, unsettle, waiver, source,
-asset}`, every key optional, registered in `ALL_EMIT_TAGS` and suppressed like every other tag. It is
-model output, so it is sanitized by TYPE and dropped rather than coerced. Claims are ALSO derived
-from the emitted worksheet, so a forgotten tag still records what was proposed — but settling always
-needs the tag, because a proposal is not an agreement. Where the worksheet contradicts a settled
+**The `<build>` tag** is how the model moves the ledger: `{claim, settle, unsettle, waiver, delegate,
+source, asset}`, every key optional, registered in `ALL_EMIT_TAGS` and suppressed like every other
+tag. It is model output, so it is sanitized by TYPE and dropped rather than coerced; `delegate`
+accepts only the two gates. Claims are ALSO derived from the emitted worksheet, so a forgotten tag
+still records what was proposed — and the derived claims that MIRROR content (spans, entries, the
+summary) follow Mentor's own newer content, never displacing a user's claim. A `confirm` stage still
+needs the tag (a proposal is not an agreement); the stages whose answer has already been given settle
+by themselves (above). Where the worksheet contradicts a settled
 value the settled value is restored and the override is reported (`settledConflicts`): the ledger
 owns the flow, the draft owns the content.
 

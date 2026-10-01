@@ -32,12 +32,27 @@ import { SIZE_UNITS } from './positionSize.util.js'
 // The stages, in the order they settle. `fields` are what a stage owes; a stage is settled when all
 // of its fields are. `waivable` is the user's answer to the opening turn's second ask — the two
 // gates may be waived, the opening, sizing and the summary never can (intent #14).
+//
+// `settles` is WHAT COUNTS AS THE USER'S ANSWER at that stage, and it is the server's to apply — a
+// stage whose answer has already been given must never wait on a model noticing it:
+//
+//   confirm — the user agrees to what was put to them (a press, or a `settle` the model reports). A
+//             GATE the user handed back (`delegated`, or the build-wide waiver) settles on Mentor's
+//             own pick instead, because "you decide" IS the answer.
+//   answer  — the user's own number is the answer; there is nothing left to confirm. A size the
+//             user gave before the gates were closed is HELD, not refused, and settles the moment
+//             they are — Marce's PACB build (2026-10-01) gave $20K, had it refused for an unsettled
+//             entry, and was asked for a size again.
+//   shown   — settles once the server's figures exist. The summary's answer is pressing Generate
+//             (intent #12), which happens outside the conversation; asking for a "yes" to it as well
+//             was a second confirmation the spec never had, and Mentor kept asking for it while the
+//             button was already lit.
 export const STAGES = [
-    { key: 'opening', fields: ['direction', 'horizon', 'lens'], waivable: false },
-    { key: 'spans',   fields: ['spans'],                        waivable: true  },
-    { key: 'entries', fields: ['entries'],                      waivable: true  },
-    { key: 'sizing',  fields: ['size'],                         waivable: false },
-    { key: 'summary', fields: ['summary'],                      waivable: false },
+    { key: 'opening', fields: ['direction', 'horizon', 'lens'], waivable: false, settles: 'confirm' },
+    { key: 'spans',   fields: ['spans'],                        waivable: true,  settles: 'confirm' },
+    { key: 'entries', fields: ['entries'],                      waivable: true,  settles: 'confirm' },
+    { key: 'sizing',  fields: ['size'],                         waivable: false, settles: 'answer'  },
+    { key: 'summary', fields: ['summary'],                      waivable: false, settles: 'shown'   },
 ]
 
 export const STAGE_KEYS = STAGES.map(s => s.key)
@@ -56,9 +71,12 @@ const sameValue = (a, b) => (a === b) || (JSON.stringify(a ?? null) === JSON.str
 
 // ─── State ────────────────────────────────────────────────────────────────────
 
-/** A build with no names in it yet. `waiver` is build-wide: the user answers it once, not per name. */
+/**
+ * A build with no names in it yet. `waiver` is build-wide: the user answers it once, not per name.
+ * `delegated` is the same answer given at ONE gate, mid-build — "you pick" (intent #3, Gate 2).
+ */
 export function emptyBuild() {
-    return { names: [], active: '', waiver: false, turn: 0, reads: {} }
+    return { names: [], active: '', waiver: false, delegated: [], turn: 0, reads: {} }
 }
 
 /** One name's ledger. `claimed` holds { value, source }; `settled` holds the confirmed value. */
@@ -100,6 +118,15 @@ export function setWaiver(build, on) {
     return { ...build, waiver: Boolean(on) }
 }
 
+/** Only a gate can be handed back; the opening, sizing and the summary stay the user's (#14). */
+const WAIVABLE = new Set(STAGES.filter(s => s.waivable).map(s => s.key))
+
+/** Record that the user handed these gates to Mentor. Idempotent; anything not a gate is ignored. */
+export function delegate(build, stageKeys = []) {
+    const add = (Array.isArray(stageKeys) ? stageKeys : [stageKeys]).filter(k => WAIVABLE.has(k))
+    return { ...build, delegated: [...new Set([...(build?.delegated ?? []), ...add])] }
+}
+
 // ─── Claiming ─────────────────────────────────────────────────────────────────
 
 /**
@@ -109,6 +136,12 @@ export function setWaiver(build, on) {
  * `fields` is { direction: 'long', ... }. A claim over an already-SETTLED field is dropped rather
  * than applied: a settled value changes only through `unsettle`, which says out loud what else it
  * just invalidated. Silently overwriting it is how a user ends up with a plan they never agreed to.
+ *
+ * `overwrite`: true replaces any claim, false replaces none, and `'own'` replaces only a claim from
+ * the SAME source. That last one is for the claims that MIRROR content — the candidate trades and the
+ * ways in on the table. Mentor narrowing its own menu to a pick is Mentor's claim replacing Mentor's;
+ * with no overwrite at all, the narrowed claim was dropped against the old menu and a settle then
+ * agreed to every option ever offered. A user's or Argus's claim is still never displaced by one.
  */
 export function claim(name, fields, source = 'mentor', { overwrite = true } = {}) {
     const src     = CLAIM_SOURCES.includes(source) ? source : 'mentor'
@@ -124,7 +157,10 @@ export function claim(name, fields, source = 'mentor', { overwrite = true } = {}
         // plain number over the top of it, so the sizing intent is gone and the quantity can never
         // be re-derived when the stop moves. The worksheet's quantity is the RESULT of sizing, not
         // a statement of it.
-        if (!overwrite && field in claimed) { dropped.push(field); continue }
+        if (field in claimed) {
+            const blocked = overwrite === 'own' ? claimed[field].source !== src : !overwrite
+            if (blocked) { dropped.push(field); continue }
+        }
         claimed[field] = { value, source: src }
     }
     return { name: { ...name, claimed }, dropped }
@@ -273,9 +309,84 @@ export function recordReads(build, tools = []) {
     return { ...build, turn, reads: Object.fromEntries(kept) }
 }
 
-/** Is this stage one the user waived? Only the two gates can be, and only if they said so (#14). */
+/**
+ * Is this stage one the user handed to Mentor? Only the two gates can be, and only if they said so:
+ * build-wide in the opening turn (#14), or at the gate itself (#3 — "or tells Mentor to choose").
+ */
 export function isWaived(build, stageKey) {
-    return Boolean(build?.waiver) && Boolean(STAGES.find(s => s.key === stageKey)?.waivable)
+    if (!WAIVABLE.has(stageKey)) return false
+    return Boolean(build?.waiver) || (build?.delegated ?? []).includes(stageKey)
+}
+
+/**
+ * Does this stage settle WITHOUT anyone reporting it this turn? See `settles` on STAGES — the answer
+ * has already been given, so waiting on a `settle` from the model would only re-ask a question the
+ * user has answered. Every field must carry a claim; settlement order is still `canSettle`'s.
+ */
+export function settlesByItself(build, name, stage) {
+    const claims = stage.fields.map(f => claimOf(name, f))
+    if (claims.some(c => !c)) return false
+    if (stage.settles === 'answer') return claims.every(c => c.source === 'user')
+    if (stage.settles === 'shown')  return true
+    return isWaived(build, stage.key)
+}
+
+/**
+ * A user's answer recorded ahead of the stages before it — sizing given while a gate is still open.
+ * It is not refused: it is HELD, and settles by itself once its turn comes. Pure.
+ */
+export function heldAnswers(build, name) {
+    return STAGES
+        .filter(s => s.settles === 'answer' && s.fields.some(f => !isSettled(name, f)))
+        .filter(s => settlesByItself(build, name, s))
+        .flatMap(s => s.fields)
+}
+
+/**
+ * Settle, walking the stages IN ORDER. `requested` are the fields someone reported as agreed this
+ * turn; a stage that settles by itself (above) joins them. Walking in stage order is what lets one
+ * turn close several stages — a gate handed back, then the size the user had already given, then the
+ * summary — without the order the model happened to list them in mattering.
+ *
+ * Only a REQUESTED field is ever reported as refused. A stage that settles by itself and cannot yet
+ * is simply not its turn; and a requested answer that is held (see heldAnswers) is not refused
+ * either, because telling the model "refused" is what made it ask for the size a second time.
+ */
+export function settleInOrder(build, name, requested = []) {
+    const want     = new Set(Array.isArray(requested) ? requested : [requested])
+    const accepted = []
+    const refused  = []
+    let current    = name
+
+    for (const field of want) {
+        if (!FIELD_STAGE[field]) refused.push({ field, reason: `unknown field: ${field}` })
+    }
+    for (const stage of STAGES) {
+        const auto   = settlesByItself(build, current, stage)
+        let fields   = stage.fields.filter(f => want.has(f) || auto)
+        // AN ANSWER STAGE SETTLES ON THE USER'S ANSWER, and on nothing else. A worksheet's own share
+        // count is claimed onto `size` as Mentor's; a `settle` of it would record a size nobody chose
+        // — the one thing the sizing stage exists to stop.
+        // Checked only where the field could otherwise settle, so an out-of-order attempt still gets
+        // the ordering reason, which is the one to act on first.
+        if (stage.settles === 'answer') {
+            const notTheirs = fields.filter(x => {
+                const c = claimOf(current, x)
+                return c && c.source !== 'user' && !isSettled(current, x) && canSettle(current, x).ok
+            })
+            for (const f of notTheirs) {
+                refused.push({ field: f, reason: `${f} is the user's answer — record their unit and number (the sizing tool), not a quantity from the worksheet` })
+            }
+            fields = fields.filter(x => !notTheirs.includes(x))
+        }
+        if (!fields.length) continue
+        const r = settle(current, fields)
+        current = r.name
+        accepted.push(...r.accepted)
+        const held = auto && stage.settles === 'answer'
+        refused.push(...r.refused.filter(x => want.has(x.field) && !held))
+    }
+    return { name: current, accepted, refused }
 }
 
 /** Every name finished — i.e. Generate all has something to generate and nothing to wait for. */
@@ -391,6 +502,7 @@ export function normalizeBuild(raw) {
         names,
         active: names.some(n => n.asset === active) ? active : (names[0]?.asset ?? ''),
         waiver: Boolean(raw.waiver),
+        delegated: delegate(emptyBuild(), Array.isArray(raw.delegated) ? raw.delegated : []).delegated,
         // What has been read, and on which turn — the record that makes "fetch once" enforceable.
         turn:  Number.isFinite(turn) && turn > 0 ? Math.floor(turn) : 0,
         reads,
@@ -425,39 +537,63 @@ export function applyBuildOps(build, ops = {}) {
         const r = unsettle(name, ops.unsettle)
         name = r.name
         cleared = r.cleared
+        // A REOPENED GATE IS THE USER'S AGAIN. Handing a gate to Mentor answered it once; reopening
+        // it is asking to see it, and a delegation left standing would settle it again unseen. The
+        // build-wide waiver stays — that was an answer about the whole build, given once (#14).
+        const reopened = new Set(STAGES.slice(Math.max(0, stageIndex(ops.unsettle))).map(s => s.key))
+        next = { ...next, delegated: (next.delegated ?? []).filter(k => !reopened.has(k)) }
     }
+
+    // The gate handed back BEFORE anything is claimed, because what it settles on is decided below.
+    // The waiver lands here too, for the same reason: "go all the way" in the turn that also offers
+    // the spans has to reach those spans in the same pass.
+    if (ops.delegate) next = delegate(next, ops.delegate)
+    if (ops.waiver != null) next = setWaiver(next, ops.waiver)
 
     // DERIVED claims come off the worksheet the model just emitted, so a turn that forgets the tag
     // still records what it proposed. They are always Mentor's own, and an explicit claim in the tag
     // wins over them — hence two passes rather than one merged object.
+    //
+    // The fields that MIRROR content — the gates' ids, the figures — follow the content: Mentor's
+    // newer menu replaces Mentor's older one. The rest never overwrite (see `claim`): a worksheet's
+    // share count is the RESULT of a sizing answer, never a restatement of it.
     if (ops.derived && typeof ops.derived === 'object') {
-        name = claim(name, ops.derived, 'mentor', { overwrite: false }).name
+        const mirrored = Object.fromEntries(Object.entries(ops.derived).filter(([f]) => MIRRORED.has(f)))
+        const rest     = Object.fromEntries(Object.entries(ops.derived).filter(([f]) => !MIRRORED.has(f)))
+        name = claim(name, rest, 'mentor', { overwrite: false }).name
+        name = claim(name, mirrored, 'mentor', { overwrite: 'own' }).name
     }
 
     if (ops.claim && typeof ops.claim === 'object') {
         name = claim(name, ops.claim, ops.source).name
     }
 
-    // THE SIZING ANSWER IS A CLAIM LIKE ANY OTHER. Without this the op resolved a quantity onto the
-    // worksheet and then the settlement was refused for having nothing claimed — the stage could
-    // never close, and the model was told off for following the prompt exactly.
-    if (ops.size) {
-        name = claim(name, { size: ops.size }, ops.source ?? 'user').name
+    // MENTOR'S PICK, on a gate the user handed back. It replaces the MENU claim (which is Mentor's
+    // own), never a claim someone made explicitly this turn — a model that wrote its choice out in
+    // the tag has already said which.
+    for (const [field, value] of Object.entries(ops.picks ?? {})) {
+        const stage = FIELD_STAGE[field]
+        if (!stage || !isWaived(next, stage) || ops.claim?.[field] !== undefined) continue
+        if (!(Array.isArray(value) && value.length)) continue
+        name = claim(name, { [field]: value }, 'mentor', { overwrite: 'own' }).name
     }
 
-    let accepted = []
-    let refused  = []
-    if (ops.settle) {
-        const r = settle(name, Array.isArray(ops.settle) ? ops.settle : [ops.settle])
-        name = r.name
-        accepted = r.accepted
-        refused  = r.refused
+    // THE SIZING ANSWER IS A CLAIM LIKE ANY OTHER, and it is ALWAYS the user's: "never choose it for
+    // them" is the rule of the stage, so whoever carries it here — a press, the tag, the sizing tool
+    // — is reporting their number. Recorded as anyone else's it would never settle by itself.
+    if (ops.size) {
+        name = claim(name, { size: ops.size }, 'user').name
     }
+
+    const r = settleInOrder(next, name, ops.settle ?? [])
+    name = r.name
 
     next = putName(next, name)
-    if (ops.waiver != null) next = setWaiver(next, ops.waiver)
-    return { build: { ...next, refused }, refused, cleared, accepted }
+    return { build: { ...next, refused: r.refused }, refused: r.refused, cleared, accepted: r.accepted }
 }
+
+/** The claims that mirror content on the table, and so follow it as Mentor revises it. */
+const MIRRORED = new Set(['spans', 'entries', 'summary'])
 
 // ─── The model's ops, off the wire ────────────────────────────────────────────
 
@@ -496,6 +632,11 @@ export function sanitizeBuildOps(raw) {
 
     if (typeof raw.unsettle === 'string' && STAGE_KEYS.includes(raw.unsettle)) ops.unsettle = raw.unsettle
     if (typeof raw.waiver === 'boolean') ops.waiver = raw.waiver
+    // "You pick" at a gate. Only the gates can be handed back; anything else is dropped, not coerced.
+    // `picks` are deliberately NOT read off the wire: what a delegation settles on is derived by the
+    // server from the content on the table (`delegationPicks`), never asserted by a client or a model.
+    const handed = (Array.isArray(raw.delegate) ? raw.delegate : [raw.delegate]).filter(k => WAIVABLE.has(k))
+    if (handed.length) ops.delegate = [...new Set(handed)]
     if (CLAIM_SOURCES.includes(raw.source)) ops.source = raw.source
     if (typeof raw.asset === 'string' && raw.asset.trim()) ops.asset = raw.asset
 
@@ -544,6 +685,9 @@ export function normalizeSpans(raw) {
                 why:          clause(c.why),
                 invalidation: clause(c.invalidation),
                 archetype:    normalizeTaxon(ENTRY_ARCHETYPES, c.archetype),
+                // The ones Mentor would build. Several may be — a span gate's answer is a SET — and
+                // it is what a "you choose" settles on (delegationPicks).
+                recommended:  c.recommended === true,
             }
         })
         .filter(c => c && c.label && c.from && c.to)
@@ -667,6 +811,55 @@ export function normalizeEntries(raw, allowedTradeIds = null) {
 }
 
 /**
+ * Key each emitted trade to a span ON THE TABLE, where the model's id says which one unambiguously.
+ *
+ * The model writes a worksheet in scenario ids (`s1`, `s2`) and the entries gate in span ids (`t1`,
+ * `t2`), and it mixes them up: live, it emitted `"id": "s1"` for span `t1`, `normalizeEntries`
+ * dropped the trade as belonging to no span, and the whole gate came out EMPTY — no table to press,
+ * nothing for a "you decide" to settle on, a stage that could never close. That is the PACB build
+ * Marce could not finish (2026-10-01; his ledger: "nothing claimed for entries").
+ *
+ * Only that slip is repaired — an id in the SCENARIO vocabulary (`s<n>`). Any other stranger (`t7`
+ * with only `t1` on the table) may be a different trade altogether, and hanging its triggers under
+ * t1's label would show the user a way into the wrong trade; it stays unresolved. Two passes:
+ *   1. the same number (`s2` → `t2`), when that span is on the table and not already taken;
+ *   2. exactly one `s<n>` trade still unkeyed and exactly one span still free — it can only be that.
+ * Anything left is UNRESOLVED and returned by name, so the caller tells the model rather than
+ * silently showing an empty gate. Pure; the input is not touched.
+ */
+export function resolveEntryTrades(raw, allowedTradeIds = []) {
+    const allow  = (allowedTradeIds ?? []).map(String)
+    const trades = Array.isArray(raw?.trades) ? raw.trades : null
+    if (!trades || !allow.length) return { entries: raw, remapped: [], unresolved: [] }
+
+    const idOf       = (t) => String(t?.id ?? '').trim().toLowerCase()
+    const numOf      = (id) => id.match(/(\d+)$/)?.[1] ?? null
+    const scenarioId = (id) => /^s\d+$/.test(id)
+    const taken = new Set(trades.map(idOf).filter(id => allow.includes(id)))
+    const to    = new Map()   // index → span id
+
+    trades.forEach((t, i) => { if (allow.includes(idOf(t))) to.set(i, idOf(t)) })
+    trades.forEach((t, i) => {
+        if (to.has(i) || !scenarioId(idOf(t))) return
+        const n    = numOf(idOf(t))
+        const span = allow.find(a => numOf(a) === n && !taken.has(a))
+        if (span) { to.set(i, span); taken.add(span) }
+    })
+    const loose = trades.map((_, i) => i).filter(i => !to.has(i))
+    const free  = allow.filter(a => !taken.has(a))
+    if (loose.length === 1 && free.length === 1 && scenarioId(idOf(trades[loose[0]]))) to.set(loose[0], free[0])
+
+    const remapped   = []
+    const unresolved = []
+    const out = trades.map((t, i) => {
+        if (!to.has(i)) { unresolved.push(idOf(t) || `#${i + 1}`); return t }
+        if (to.get(i) !== idOf(t)) remapped.push({ from: idOf(t), to: to.get(i) })
+        return { ...t, id: to.get(i) }
+    })
+    return { entries: { ...raw, trades: out }, remapped, unresolved }
+}
+
+/**
  * Which fields a reopen of this stage would clear — the cascade, answered WITHOUT applying it.
  *
  * The caller needs this before it can apply anything: a reopened stage drops its CONTENT too (the
@@ -681,6 +874,37 @@ export function fieldsClearedBy(stageKey) {
 /** Every chosen way in, as the ledger records it: `tradeId:optionId`. */
 export function entryIds(entries) {
     return (entries?.trades ?? []).flatMap(t => t.options.map(o => `${t.id}:${o.id}`))
+}
+
+/**
+ * WHAT "YOU PICK" SETTLES ON — Mentor's own recommendation, read off the content on the table.
+ *
+ * Structural, not inferred: the entries gate marks exactly ONE recommended way in per trade
+ * (normalizeEntries guarantees it), and the span gate marks the trades Mentor would build. A span
+ * table with nothing marked is taken whole — every candidate on it is one Mentor judged worth
+ * building, since the rest went to `discarded`.
+ *
+ * The same rule holds whether the content was shown last turn (the user pressed "you pick" on it) or
+ * emitted this turn under a waiver — one definition of "Mentor's pick", so the press path and the
+ * prose path can never settle on different things.
+ *
+ * Pure. Absent content → no pick, and the stage simply stays open.
+ */
+export function delegationPicks({ spans = null, entries = null } = {}) {
+    const out = {}
+    const cands = spans?.candidates ?? []
+    if (cands.length) {
+        const marked = cands.filter(c => c.recommended)
+        out.spans = (marked.length ? marked : cands).map(c => c.id)
+    }
+    const trades = entries?.trades ?? []
+    if (trades.length) {
+        out.entries = trades.flatMap(t => {
+            const pick = t.options.find(o => o.recommended) ?? t.options[0]
+            return pick ? [`${t.id}:${pick.id}`] : []
+        })
+    }
+    return out
 }
 
 /**
@@ -729,23 +953,30 @@ export function sanitizeUserOps(raw) {
         .map(op => ({ ...op, source: 'user' }))
 }
 
-/** Apply the presses, in order, before the model sees anything. Returns the build and what took. */
-export function applyUserOps(build, ops = []) {
+/**
+ * Apply the presses, in order, before the model sees anything. Returns the build, what settled and
+ * which gates were handed back.
+ *
+ * `picks` is Mentor's recommendation on the content the user was looking at when they pressed
+ * (delegationPicks over last turn's draft). A "you pick" press settles on it right here, so the
+ * model reads the gate as CLOSED and goes on to the next stage — rather than being asked to notice
+ * a hand-back and remember to settle it, which is the step that kept being missed.
+ */
+export function applyUserOps(build, ops = [], picks = {}) {
     let next = build
-    const settled = []
+    const settled   = []
+    const delegated = []
+    const refused   = []
     for (const op of ops) {
-        const r = applyUserOp(next, op)
+        const r = applyBuildOps(next, op.delegate ? { ...op, picks } : op)
         next = r.build
         settled.push(...r.accepted)
+        delegated.push(...(op.delegate ?? []))
+        // A refused PRESS is a bug in the client, not a model slip: it offered a button for
+        // something the ledger will not accept. Returned so the caller can log it.
+        refused.push(...r.refused)
     }
-    return { build: next, settled }
-}
-
-function applyUserOp(build, op) {
-    const { build: next, accepted, refused } = applyBuildOps(build, op)
-    // A refused PRESS is a bug in the client, not a model slip: it offered a button for something
-    // the ledger will not accept. Logged by the caller through `refused`, same as any other.
-    return { build: next, accepted, refused }
+    return { build: next, settled, delegated, refused }
 }
 
 /**

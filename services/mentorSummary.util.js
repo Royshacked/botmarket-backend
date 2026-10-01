@@ -151,6 +151,80 @@ export function applySizing(setup, sizing, { balance = null, multiplier = null }
 }
 
 /**
+ * The share each entry leg takes of its premise, from the entries gate — or null when this is not
+ * a scale-in and the legs are not meant to be split at all.
+ *
+ * Matched by POSITION, because that is the only correspondence the two shapes have: the gate's
+ * options for a trade are authored in the order the legs are.
+ */
+function sharesFor(entries, scenario, legs) {
+    const trade = (entries?.trades ?? []).find(t => t.id === (scenario?.trade_id ?? t.id))
+    if (trade?.semantics !== 'scale_in') return null
+    const shares = (trade.options ?? []).slice(0, legs.length).map(o => Number(o.share))
+    if (shares.length !== legs.length || shares.some(n => !Number.isFinite(n) || n <= 0)) return null
+    return Math.abs(shares.reduce((a, b) => a + b, 0) - 100) < 0.01 ? shares : null
+}
+
+/**
+ * Size a whole plan: the user's answer resolved per scenario (applySizing), then laid onto every
+ * entry leg. Returns a NEW plan with the quantities on it, plus the problems — the input is not
+ * touched.
+ *
+ * ONE implementation for both callers: the turn that re-derives the size after the model has
+ * written (a stop that moved is a different share count for the same risk), and the sizing TOOL the
+ * model calls mid-turn so it can read the figures out instead of promising them for next turn. Two
+ * copies of this would be two answers to "how many shares", and the user would see both.
+ *
+ * EVERY LEG GETS A SIZE, or the setup can never be ready — `setupReadiness` requires one per leg.
+ * One leg takes the whole position; a scale-in ladder splits by the shares the entries stage
+ * authored; two legs with no shares are two rival premises filed in one scenario, and refused.
+ */
+export function sizePlan(plan, sizing, { balance = null, entries = null } = {}) {
+    if (!plan) return { plan, quantities: [], problems: [] }
+    const next = { ...plan, scenarios: (plan.scenarios ?? []).map(sc => ({ ...sc, entry_legs: (sc.entry_legs ?? []).map(l => ({ ...l })) })) }
+    const { quantities, problems } = applySizing(next, sizing, { balance, multiplier: sizing?.multiplier })
+    for (const q of quantities) {
+        const sc = next.scenarios.find(x => x.id === q.id) ?? next.scenarios[0]
+        if (!sc) continue
+        sc.quantity = q.quantity
+        const legs   = sc.entry_legs
+        const shares = sharesFor(entries, sc, legs)
+        if (legs.length === 1) legs[0].quantity = q.quantity
+        else if (shares) legs.forEach((l, i) => { l.quantity = Math.floor(q.quantity * shares[i] / 100) })
+        else if (legs.length > 1) {
+            problems.push(`${sc.id}: ${legs.length} entry legs with no shares between them. Two ALTERNATIVE ways in belong in two scenarios, each sized off its own stop — legs of one scenario are a scale-in and must carry shares that add to 100.`)
+        }
+    }
+    return { plan: next, quantities, problems }
+}
+
+/**
+ * Does this position FIT the money the account can deploy — and if not, the largest that does.
+ *
+ * A remark, never a cap: on a margin account a position larger than free cash is ordinary, and only
+ * the user knows which kind of account this is. But "the position would cost $36,667 and RAZ TEST
+ * has $22,624" was arithmetic the model did by itself in Marce's PACB build (2026-10-01); it is
+ * money on the user's account, so it is computed here, beside every other figure.
+ *
+ * Returns null when it fits or cannot be judged (no balance reported, no notional). ZERO IS A
+ * BALANCE — an account with nothing free fits nothing, and saying "cannot judge" about it would hide
+ * the one fact the user most needs. Pure.
+ */
+export function cashFit(sized, { entry, stop, balance, multiplier = 1 } = {}) {
+    const bal = num(balance)
+    if (!Number.isFinite(bal) || bal < 0 || !(num(sized?.notional) > bal)) return null
+    const most = bal > 0
+        ? resolveSize({ unit: 'size_cash', value: bal, entry, stop, balance: bal, multiplier })
+        : { quantity: null, riskCash: null }
+    return {
+        available: round2(bal),
+        notional:  sized.notional,
+        maxQuantity: most.quantity,
+        maxRiskCash: most.riskCash,
+    }
+}
+
+/**
  * The batch line: what is at risk across every name in one build (#15, step 5.3).
  *
  * Per-trade sizing stays the user's — this is a REMARK, never a veto. But "1% each" across six

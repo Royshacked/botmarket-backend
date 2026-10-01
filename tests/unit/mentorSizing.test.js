@@ -317,3 +317,10 @@ test('one leg still takes the whole position', async () => {
         { active_asset: 'NVDA', draft: SETUP, coverage: [] })
     assert.equal(out.setup.scenarios[0].entry_legs[0].quantity, 125)
 })
+
+test('float noise in the stop distance never costs a share — and a real fraction is still floored', () => {
+    // 2.20 − 2.14 is 0.06000000000000005: $300 of risk is 5,000 shares, not 4,999.
+    assert.equal(resolveSize({ unit: 'risk_cash', value: 300, entry: 2.2, stop: 2.14 }).quantity, 5000)
+    // A genuine fraction stays a fraction: $301 / $0.06 is 5,016.67 shares → 5,016.
+    assert.equal(resolveSize({ unit: 'risk_cash', value: 301, entry: 2.2, stop: 2.14 }).quantity, 5016)
+})

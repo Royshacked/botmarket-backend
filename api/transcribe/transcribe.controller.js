@@ -8,6 +8,7 @@ import { logger }     from '../../services/logger.service.js'
 import { config }     from '../../services/config.js'
 import { makeHandle } from '../_shared/handle.util.js'
 import { httpError }  from '../../services/httpError.util.js'
+import { transcriptionLanguage, VOCABULARY } from './transcribe.util.js'
 
 const LOG    = '[transcribe]'
 const handle = makeHandle(LOG)
@@ -28,6 +29,8 @@ export const transcribeAudio = handle('transcribeAudio', async (req, res) => {
         const result = await openai.audio.transcriptions.create({
             file: createReadStream(tmpPath),
             model: 'whisper-1',
+            language: transcriptionLanguage(req.query?.language),
+            prompt: VOCABULARY,
         })
         logger.info(LOG, `Transcribed ${buffer.length} bytes → "${result.text?.slice(0, 80)}"`)
         res.json({ text: result.text ?? '' })

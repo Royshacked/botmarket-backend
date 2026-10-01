@@ -95,6 +95,25 @@ test('an UNPRICED leg is refused rather than armed as a gate that can never trip
     assert.equal(validateSetup(s, 'ctrader', ACCTS).reason, 'invalid_leg')
 })
 
+// A TRIGGER ENTRY lit Generate and was then refused here as "a level is missing its price" — the
+// leg check predated "an entry need not be a price" (f17b02f) and was never told (driven live,
+// 2026-10-01). The button, readiness and this gate must agree, and now they do.
+test('a TRIGGER entry passes the gate — readiness lit the button for it, so the save must agree', () => {
+    const s = normalizeSetup({ ...DRAFT, entry_legs: [{ trigger: 'a 15m close back above 238 after the sweep', timeframe: '15min', about: 238.6, quantity: 100 }] })
+    assert.equal(s.scenarios[0].entry_legs[0].price, null, 'it really has no order price')
+    assert.deepEqual(validateSetup(s, 'ctrader', ACCTS), { ok: true })
+})
+
+test('the STOP and the TARGETS stay prices — a trigger never stands in for a resting order', () => {
+    const noStop = normalizeSetup(DRAFT)
+    noStop.scenarios[0].stop_legs[0] = { trigger: 'when it feels wrong' }
+    assert.equal(validateSetup(noStop, 'ctrader', ACCTS).reason, 'invalid_leg')
+
+    const noTarget = normalizeSetup(DRAFT)
+    noTarget.scenarios[0].target_legs[0] = { trigger: 'when it has run' }
+    assert.equal(validateSetup(noTarget, 'ctrader', ACCTS).ok, false)
+})
+
 test('an exact level is what every leg is — and it is allowed', () => {
     const s = normalizeSetup({ ...DRAFT, stop_legs: [{ price: 235, quantity: 100 }] })
     assert.equal(validateSetup(s, 'ctrader', ACCTS).ok, true)
