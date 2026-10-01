@@ -652,6 +652,53 @@ export const TOOL_SCHEMAS = {
             "channel": { "type": "string", "description": "One channel id as get_channel_state prints it (e.g. discount_rate). Omit for every channel." }
         }
     },
+    size_from_channels: {
+        "type": "object",
+        "properties": {
+            "channel_views": {
+                "type": "array",
+                "description": "Your macro calls: the move you expect in each channel's z over the horizon.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "channel_id": { "type": "string", "description": "A channel id from get_channel_state." },
+                        "dz": { "type": "number", "description": "Expected change in the channel's z-score over the horizon, between -3 and +3." },
+                        "rationale": { "type": "string" }
+                    },
+                    "required": ["channel_id", "dz"]
+                }
+            },
+            "reactions": {
+                "type": "array",
+                "description": "Buckets you expect to respond differently from their measured history to one channel.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "bucket": { "type": "string" },
+                        "channel_id": { "type": "string" },
+                        "reaction": { "type": "string", "enum": ["stronger", "weaker", "opposite"] },
+                        "reason": { "type": "string" }
+                    },
+                    "required": ["bucket", "channel_id", "reaction", "reason"]
+                }
+            },
+            "exclude": {
+                "type": "array",
+                "description": "Buckets to leave out of the sized table, each with the reason.",
+                "items": {
+                    "type": "object",
+                    "properties": { "bucket": { "type": "string" }, "reason": { "type": "string" } },
+                    "required": ["bucket", "reason"]
+                }
+            },
+            "manual_rows": {
+                "type": "array",
+                "description": "Your own non-channel rows (bucket, stance, active_bp, basis), so the preview accounts for them.",
+                "items": { "type": "object" }
+            }
+        },
+        "required": ["channel_views"]
+    },
     get_sector_view: {
         "type": "object",
         "properties": {}

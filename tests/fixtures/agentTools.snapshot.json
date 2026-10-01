@@ -77,6 +77,100 @@
             }
         },
         {
+            "name": "size_from_channels",
+            "description": "PREVIEW the table your channel calls produce. Pass channel_views — your macro calls, each a channel id from get_channel_state and the move you expect in its z over the horizon (dz, ±3 at most) — and optionally reactions (a bucket you expect to respond STRONGER, WEAKER or OPPOSITE to its measured history on one channel, with the reason), exclude (buckets to leave out, EACH WITH ITS REASON — an exclusion is a call and is stored with the view), and manual_rows (your own non-channel rows, so the preview accounts for them). The code turns the calls into every fund's expected move beyond the market through the measured betas, holds each sector as one row or splits it into its industries where they diverge, nets to zero and caps. Call it, read the table, revise the CALLS until it says what you mean — then emit the same channel_views in the <tilt> block.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "channel_views": {
+                        "type": "array",
+                        "description": "Your macro calls: the move you expect in each channel's z over the horizon.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "channel_id": {
+                                    "type": "string",
+                                    "description": "A channel id from get_channel_state."
+                                },
+                                "dz": {
+                                    "type": "number",
+                                    "description": "Expected change in the channel's z-score over the horizon, between -3 and +3."
+                                },
+                                "rationale": {
+                                    "type": "string"
+                                }
+                            },
+                            "required": [
+                                "channel_id",
+                                "dz"
+                            ]
+                        }
+                    },
+                    "reactions": {
+                        "type": "array",
+                        "description": "Buckets you expect to respond differently from their measured history to one channel.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "bucket": {
+                                    "type": "string"
+                                },
+                                "channel_id": {
+                                    "type": "string"
+                                },
+                                "reaction": {
+                                    "type": "string",
+                                    "enum": [
+                                        "stronger",
+                                        "weaker",
+                                        "opposite"
+                                    ]
+                                },
+                                "reason": {
+                                    "type": "string"
+                                }
+                            },
+                            "required": [
+                                "bucket",
+                                "channel_id",
+                                "reaction",
+                                "reason"
+                            ]
+                        }
+                    },
+                    "exclude": {
+                        "type": "array",
+                        "description": "Buckets to leave out of the sized table, each with the reason.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "bucket": {
+                                    "type": "string"
+                                },
+                                "reason": {
+                                    "type": "string"
+                                }
+                            },
+                            "required": [
+                                "bucket",
+                                "reason"
+                            ]
+                        }
+                    },
+                    "manual_rows": {
+                        "type": "array",
+                        "description": "Your own non-channel rows (bucket, stance, active_bp, basis), so the preview accounts for them.",
+                        "items": {
+                            "type": "object"
+                        }
+                    }
+                },
+                "required": [
+                    "channel_views"
+                ]
+            }
+        },
+        {
             "name": "consult",
             "description": "Put ONE decision to a more capable desk head and get a straight answer back. It cannot see this conversation and cannot fetch anything — you hand it the question and every number it needs, and it thinks harder than you can in-line.\n\nA tilt is a broadcast the whole house reads, so it is worth thinking hard about ONCE. Reach for it in exactly two situations: **the regime call itself**, when the macro data, the tape and what is already priced do not point the same way and you have to name one regime anyway; and **a sector stance that contradicts our own coverage book** — your top-down read and the analysts' bottom-up theses disagree, and you must decide which one the stance follows and say why. Not per sector: the stances follow from the regime, and re-consulting each one is the same call answered eight times.\n\nDo NOT reach for it to look something up, to double-check work you are already confident in, to summarize, or because a question feels big. A consult costs a full model call and adds seconds to the turn: if you already know the answer, or a tool call would settle it, that is the cheaper and better move. Most turns should end without it.",
             "input_schema": {

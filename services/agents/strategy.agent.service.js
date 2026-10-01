@@ -23,6 +23,7 @@ import { getPricedIn } from '../../providers/fred.provider.js'
 import { coverageService } from '../../api/analyst/coverage.service.js'
 import { readChannelState, formatChannelState } from '../../api/strategy/channelState.service.js'
 import { readChannelExposures, formatChannelExposures } from '../../api/strategy/channelExposures.service.js'
+import { previewSizing, expandChannelDraft } from '../../api/strategy/channelSizing.service.js'
 import { SECTORS } from '../entity/vocabulary.js'
 import { logger } from '../logger.service.js'
 
@@ -47,6 +48,9 @@ export const TOOLS = [
         get_channel_state: `The macro CHANNELS, measured: every driver (energy cost, real yields, the curve, breakevens, credit spreads, the dollar, liquidity, labor, freight, demand…) as a z-score against its own trailing two years, with its reading one and three months ago and where today sits in its history since 2005, plus the week's regime from VIX and credit spreads. The Phase-1 read of what is actually moving, and the vocabulary for kill-criteria — a falsifier written as "discount_rate z below +1" is checkable where prose is not. READINGS, not sector evidence: which buckets move with a channel is not measured yet. Each line carries its own as-of date; monthly series lag by weeks. No arguments.`,
         // Step 5 of the same design: the betas on the funds. Ahead of consult for the same reason.
         get_channel_exposures: `Which BUCKETS move with which CHANNEL, measured: every sector and industry fund's weekly return beyond the market regressed on each channel since ~2006, listing only |t| ≥ 3, with the buckets each fund stands for and how far it has already moved at today's z. The Phase-3 evidence for mapping a regime onto buckets — it turns "utilities are rate sensitive" from a story into a number, and names the INDUSTRIES a channel actually reaches, including ones our coverage does not. A beta proves an exposure is real; it is not an edge — a high one means the channel is already traded through that fund. Pass \`channel\` (an id from get_channel_state) to narrow to one.`,
+        // Step 6: the table sized from the desk's channel calls. Same function the draft is expanded
+        // with after parsing, so the preview and the published table cannot differ.
+        size_from_channels: `PREVIEW the table your channel calls produce. Pass channel_views — your macro calls, each a channel id from get_channel_state and the move you expect in its z over the horizon (dz, ±3 at most) — and optionally reactions (a bucket you expect to respond STRONGER, WEAKER or OPPOSITE to its measured history on one channel, with the reason), exclude (buckets to leave out, EACH WITH ITS REASON — an exclusion is a call and is stored with the view), and manual_rows (your own non-channel rows, so the preview accounts for them). The code turns the calls into every fund's expected move beyond the market through the measured betas, holds each sector as one row or splits it into its industries where they diverge, nets to zero and caps. Call it, read the table, revise the CALLS until it says what you mean — then emit the same channel_views in the <tilt> block.`,
         // Appended, never inserted — prompt caching keys off the array prefix. The reasoning sidecar
         // (services/deepThink.service.js): one bounded decision put to a stronger model and handed
         // back as a tool result. The mechanism half of this description is shared with every other
@@ -69,6 +73,8 @@ const TOOL_HANDLERS = {
     get_channel_exposures: makeToolHandler('get_channel_exposures',
         async (input) => formatChannelExposures(await readChannelExposures(), { channel: typeof input?.channel === 'string' && input.channel.trim() ? input.channel.trim() : null }),
         (e) => `Could not read the channel exposures: ${e.message}`, LOG),
+    size_from_channels: makeToolHandler('size_from_channels', (input) => previewSizing(input ?? {}),
+        (e) => `Could not size the table: ${e.message}`, LOG),
 }
 
 export const strategyAgentService = { chatStream }
@@ -187,7 +193,13 @@ async function chatStream({
         meta: { userPrompt },
     })
 
-    const { reply, tilt } = _parseStrategyResponse(raw)
+    const parsed = _parseStrategyResponse(raw)
+    const { reply } = parsed
+    // Channel calls are sized HERE, before the draft reaches the preview, so what the admin sees is
+    // exactly what publishing stores. A failed read keeps the desk's own rows rather than the turn.
+    let tilt = parsed.tilt
+    try { tilt = await expandChannelDraft(tilt) } catch (err) { logger.warn(LOG, 'channel sizing failed — draft keeps only its own rows', err.message) }
+    if (tilt && !tilt.tilts?.length) tilt = null
     logger.info(LOG, 'chatStream done', { replyLength: reply.length, hasTilt: Boolean(tilt), rows: tilt?.tilts?.length ?? 0, phase: phase.get() })
     // A DRAFT — returned for preview, never saved. Publishing is a separate, explicit act.
     return { reply, phase: phase.get(), ...(tilt ? { tilt } : {}), ...route.result() }
@@ -208,8 +220,11 @@ export function _parseStrategyResponse(raw) {
 // Light guard (full normalization happens at publish): an object carrying at least one row.
 function _cleanDraft(t) {
     if (!t || typeof t !== 'object' || Array.isArray(t)) return null
-    if (!Array.isArray(t.tilts) || !t.tilts.length) return null
-    return t
+    // A block may carry only channel calls — the rows are sized from them after parsing.
+    const rows  = Array.isArray(t.tilts) && t.tilts.length
+    const calls = Array.isArray(t.channel_views) && t.channel_views.length
+    if (!rows && !calls) return null
+    return rows ? t : { ...t, tilts: [] }
 }
 
 function _buildSystemPrompt() {

@@ -104,8 +104,15 @@ Three things it deliberately is not:
 4. **Bottom-up cross-check** — `get_coverage_by_sector`: our own analysts' theses aggregated by
    sector, how far our targets sit from the Street. Agreement is the strongest basis a stance can
    have; **disagreement is information, and a stance taken against our own research must admit it.**
-5. **Publish** — emit the `<tilt>` block. A DRAFT, returned for preview; publishing is a separate act
-   (`publishTilt`), same as a coverage draft vs Initiate.
+5. **Size and publish** — emit the `<tilt>` block. A DRAFT, returned for preview; publishing is a
+   separate act (`publishTilt`), same as a coverage draft vs Initiate. Since 2026-10-01 the channel
+   part of the table is SIZED, not written: the block carries 2–5 `channel_views` (expected `dz` per
+   channel over the horizon), optional `reactions` and `exclude` (each with a reason) and only the
+   desk's OWN rows in `tilts`; `chatStream` expands it through `channelSizing.expandChannelDraft`
+   before the preview, so what is previewed is what publishes. Pythia previews with
+   `size_from_channels` first. The doc stores `channel_views` (with `z_at_set`, for grading),
+   `reactions`, `exclusions`, and each sized row's `drivers`. Why calls rather than elasticities:
+   design doc §5's box.
 
 **Every stance records WHY**, and the five bases are ranked by evidential weight in the vocabulary
 itself (`TILT_BASES`): `bottom_up` (our covered names say so — most defensible) · `revisions` (sector

@@ -246,6 +246,28 @@ makes the difference mean anything.
 
 ## 5. From a channel to a weight
 
+> **SUPERSEDED 2026-10-01 by measurement — read this before the formula below.** The formula was
+> tested before it was built (`aether-engine/scratch/backtest_regime_elasticity.py`: every 13 weeks
+> since 2010, 61 funds, no look-ahead; rank IC of the signal against each fund's next-26-week return
+> over SPY). The systematic candidate for `elasticity` — the fund's beta fitted only in the regime
+> we are heading into — carried **no information even with the coming regime known in advance**
+> (IC −0.02, t −0.6; with today's regime, −0.05). An LLM-stated per-row elasticity was rejected
+> before testing: it cannot cover sixty funds, and a number written just after reading the beta
+> echoes it. What DID rank the funds was `beta × the channel's actual move` (IC +0.13, right on 68%
+> of dates, t +2.8): the betas transmit a correct macro call into the right ranking.
+>
+> **So what is built (step 6) is:** the desk makes 2–5 CHANNEL CALLS (`dz` over the horizon) and the
+> code sizes every fund from `Σ multiplier × beta × dz` (`api/strategy/channelSizing.service.js`).
+> The judgment moved from sixty sensitivities to a handful of forecasts, each graded against what the
+> channel then did. Option 3 of the discussion survives as the `multiplier`: a bucket the desk
+> expects to respond `stronger` (×1.5), `weaker` (×0.5) or `opposite` (×−1) to its history, with a
+> reason — a coarse, scoreable claim instead of a decimal. Sizing balances by scaling the over and
+> under SIDES, never by demeaning rows: the moves are already relative to the market (the sector
+> funds' moves average ~0% at index weights), and demeaning again left Real Estate at +2.95%
+> expected with no row. "Beta is the subtraction" (below) still holds as a caution — a channel the
+> market already trades is priced — and is now carried by the desk's call having to be a MOVE from
+> here rather than a level.
+
 The formula is the archived engine's, and it is better than "exposure × expected move":
 
 ```
@@ -461,6 +483,12 @@ Each step is useful alone and none of them requires the next.
    exposures are "partly priced" and an extreme channel level "limits conviction". That is §5
    working as written: a beta is the subtraction, and turning channels into weights across every
    fund is step 6, not this one.
-6. **Elasticity, residual sizing, and the Prometheus verification loop.** The largest step, and the
+6. *Sizing done 2026-10-01, as channel calls — see the box at the top of §5.* `size_from_channels`
+   previews; the parsed draft is expanded server-side (`expandChannelDraft`) so the preview IS the
+   published table; each call is stored with `z_at_set`, each sized row with its `drivers`, each
+   exclusion with its reason. First live run: 14 rows, 9 of them industries. **Still open in this
+   step:** grading each call at maturity (§6's first question) and the Prometheus verification loop.
+   Original text:
+   **Elasticity, residual sizing, and the Prometheus verification loop.** The largest step, and the
    one that makes the judgment scoreable.
 7. **The event leg**, if ever.

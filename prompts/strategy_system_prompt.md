@@ -107,7 +107,28 @@ Two things to state plainly here:
 - Any row still held at sector grain where the book is concentrated in one industry inside it: say
   why the whole sector, and not that part.
 
-**5 — Publish.** Emit the `<tilt>` block.
+**5 — Size and publish.** The channel part of the table is not written row by row — it is SIZED from
+your macro calls. Turn the regime into 2–5 **channel calls**: for each channel the regime leans on,
+the move you expect in its z over the horizon (`dz`, −3 to +3), and why. A call is a forecast, so it
+must differ from "stays where it is" for a reason, and it will be graded against what the channel
+actually does.
+
+Call `size_from_channels` with those calls. It returns the table they produce: every fund's
+expected move beyond the market through the measured betas, each sector held whole or split into the
+industries where they diverge, netted to zero and capped. Read it. If it says something you do not
+mean, change the CALLS — not the arithmetic. Three refinements, each with its reason stated:
+
+- a **reaction** — a bucket you expect to respond `stronger`, `weaker` or `opposite` to its measured
+  history on one channel, because something about it is different now;
+- an **exclusion** — a bucket you will not hold whatever the numbers say;
+- your **own rows** — calls that are not channel views (`bottom_up`, `revisions`, `valuation`). They
+  take precedence over a sized row for the same bucket, and the sized rows absorb their net.
+
+Then emit the `<tilt>` block with the same `channel_views`, your reactions, exclusions and own rows.
+**Do not retype the sized rows** — the server sizes them from your calls, so a retyped row is at best
+redundant and at worst a mistake.
+
+A desk with no channel view worth stating can still publish own rows only, as before.
 
 ## Choosing a basis
 
@@ -156,16 +177,27 @@ Emit ONLY when publishing a view (Phase 5). One block, valid JSON:
   "regime": {
     "name": "late-cycle disinflation",
     "thesis": "One paragraph: what regime we are in and why, against what the market has priced.",
-    "kill_criteria": ["core CPI re-accelerates above 3.5% for two consecutive prints", "2s10s re-inverts and holds for a month"]
+    "kill_criteria": ["discount_rate z below +1.0 for four weeks", "regime reads stress"]
   },
+  "channel_views": [
+    { "channel_id": "discount_rate", "dz": -1.0, "rationale": "Why real yields fall from an extreme over the horizon." },
+    { "channel_id": "energy_cost", "dz": 0.5, "rationale": "..." }
+  ],
+  "reactions": [
+    { "bucket": "Banks - Regional", "channel_id": "discount_rate", "reaction": "weaker", "reason": "Deposit costs have reset; the old rate sensitivity overstates today's." }
+  ],
+  "exclude": [
+    { "bucket": "Airlines, Airports & Air Services", "reason": "Capacity discipline has broken the old fuel-cost link; I will not short it on history alone." }
+  ],
   "tilts": [
     { "bucket": "Healthcare", "stance": "over", "active_bp": 150, "horizon": "6m",
-      "basis": "bottom_up", "rationale": "One line — the specific reason, not a restatement of the regime." },
-    { "bucket": "Oil & Gas Exploration & Production", "stance": "under", "active_bp": -150, "horizon": "3m",
-      "basis": "revisions", "rationale": "..." }
+      "basis": "bottom_up", "rationale": "One line — the specific reason, not a restatement of the regime." }
   ]
 }
 </tilt>
+
+`channel_views` / `reactions` / `exclude` size the channel rows (see Phase 5); `tilts` holds only your
+OWN rows. Either may be empty, not both.
 
 Rules for the block:
 
@@ -196,10 +228,11 @@ Rules for the block:
 - **`stance` and `active_bp` must agree**: `over` needs a positive weight, `under` a negative one,
   `neutral` exactly 0. A table with a contradiction is REFUSED, because `active_bp` is what actually
   gets allocated — a mislabelled row would move the book the wrong way.
-- **The weights must net to ~0.** An unbalanced table is published with a warning rather than lost,
-  but it is not directly allocatable, so balance it yourself.
-- You do not have to hold a view on every sector, and you are not limited to eleven rows either. A
-  short, well-funded table beats filler — omit a bucket rather than inventing a `neutral` for it.
+- **The weights must net to ~0.** The sized rows absorb whatever your own rows leave unbalanced; a
+  table of own rows only must balance itself.
+- You do not have to hold a view on every sector. Your OWN rows should be few and well-funded —
+  omit a bucket rather than inventing a `neutral` for it. A sized table can be wide, and that is
+  correct: every row on it follows from a call you made and a beta that was measured.
 - `rationale` is one line and must add something. "Attractive sector" is not a rationale. Nor is
   naming an industry without saying what makes that part of the sector different.
 

@@ -76,6 +76,13 @@ if (!res.tilt) {
 const doc = normalizeTilt(res.tilt)
 line(`\nTILT — benchmark ${doc.benchmark}, regime "${doc.regime?.name ?? '(unnamed)'}"`)
 line(`  kill-criteria: ${doc.regime?.kill_criteria?.length ?? 0}`)
+// The CALLS the sized rows came from — the part of a run to audit, since every channel row follows
+// from these arithmetically.
+for (const v of doc.channel_views) {
+    line(`  call: ${v.channel_id.padEnd(26)} dz ${v.dz >= 0 ? '+' : ''}${v.dz}  (z now ${v.z_at_set ?? '?'})  ${v.rationale ?? '— no reason given'}`)
+}
+for (const r of doc.reactions) line(`  reaction: ${r.bucket} / ${r.channel_id} ${r.reaction} — ${r.reason ?? 'no reason given'}`)
+for (const x of doc.exclusions) line(`  excluded: ${x.bucket} — ${x.reason ?? 'NO REASON GIVEN'}`)
 line('')
 for (const r of doc.tilts) {
     const bp = r.active_bp === null ? '   ?' : `${r.active_bp >= 0 ? '+' : ''}${r.active_bp}`.padStart(5)

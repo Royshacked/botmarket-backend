@@ -88,6 +88,12 @@ api/
                           delete: a desk that can erase its calls has no track record). Every handler
                           rides makeHandle. Publish diffs against the view in force (tilt.assess.
                           diffStances) → tiltNotify.notifyTiltChanged to every admin → runHouseScan
+    channelSizing.service.js  Step 6: the table SIZED from Pythia's channel calls — every fund's
+                              expected move Σ multiplier × beta × dz, a sector whole or split into its
+                              industries where they diverge, over/under sides scaled to balance (never
+                              demeaned), grain caps. Same function behind size_from_channels (preview)
+                              and expandChannelDraft (the parsed draft), so preview = published.
+                              Reactions (stronger/weaker/opposite) and exclusions carry reasons
     channelExposures.service.js  Pythia's get_channel_exposures: the engine's fund × channel betas
                               (`pythia_channel_betas`), only |t| ≥ 3 offered as exposures, each fund
                               named by the buckets it grades, beta × today's z as "already moved".

@@ -147,7 +147,29 @@ function _row(raw, now) {
         base_px:         _num(raw.base_px),
         base_bench_px:   _num(raw.base_bench_px),
         contribution_bp: _num(raw.contribution_bp),   // written by the monitor, not the author
+        // A SIZED row's arithmetic — which channel calls, through which betas, produced its weight.
+        // Kept on the row so the scorecard can later ask whether the bucket moved as the betas said.
+        drivers:         _drivers(raw.drivers),
     }
+}
+
+function _drivers(raw) {
+    const out = _arr(raw)
+        .filter(d => d && typeof d === 'object' && _str(d.channel_id))
+        .map(d => ({
+            channel_id: d.channel_id, beta: _num(d.beta), dz: _num(d.dz), contribution: _num(d.contribution),
+            ...(_num(d.multiplier) !== null ? { multiplier: _num(d.multiplier) } : {}),
+        }))
+    return out.length ? out : null
+}
+
+function _channelViews(raw) {
+    return _arr(raw)
+        .filter(v => v && typeof v === 'object' && _str(v.channel_id) && _num(v.dz) !== null)
+        .map(v => ({
+            channel_id: v.channel_id, dz: _num(v.dz), rationale: _str(v.rationale),
+            z_at_set: _num(v.z_at_set), set_at: _str(v.set_at),
+        }))
 }
 
 /**
@@ -235,6 +257,14 @@ export function normalizeTilt(raw, now = new Date().toISOString()) {
         regime:    _regime(r.regime),
         tilts,
         ...balanceOf(tilts),
+        // The desk's MACRO CALLS (step 6, channelSizing.service.js): the channel moves the sized
+        // rows were computed from, each stamped with the z it was made at so it can be graded at
+        // maturity — "did the channel move as forecast?" is the first question of §6's scorecard.
+        channel_views: _channelViews(r.channel_views),
+        reactions:     _arr(r.reactions).filter(x => x && typeof x === 'object' && _str(x.bucket) && _str(x.channel_id) && _str(x.reaction)),
+        // Buckets the desk kept OUT of the sized table, each with its reason (null when it gave none).
+        exclusions:    _arr(r.exclusions).filter(x => x && typeof x === 'object' && _str(x.bucket))
+            .map(x => ({ bucket: x.bucket, reason: _str(x.reason) })),
         status:    TILT_STATUSES.includes(r.status) ? r.status : DEFAULT_STATUS,
         evidence:  _arr(r.evidence),
         revisions: _arr(r.revisions),
