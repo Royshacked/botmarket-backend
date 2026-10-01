@@ -35,6 +35,21 @@ test('a call dropped from the view is superseded — and stays in the ledger to 
     assert.equal(plan.create.length, 0)
 })
 
+test('a call past its six months is never reaffirmed — the same dz restated after it is a new forecast', () => {
+    const matured = call({ matures_at: new Date(SET_MS + HORIZON_WEEKS * 7 * DAY).toISOString() })
+    const later = SET_MS + 30 * 7 * DAY
+    const plan = planCallSync([{ channel_id: 'discount_rate', dz: -0.5 }], [matured], later)
+    assert.equal(plan.reaffirm.length, 0, 'its clock has run out; reaffirming would leave the restatement ungraded')
+    assert.deepEqual(plan.supersede.map(c => c._id), ['c1'])
+    assert.deepEqual(plan.create.map(v => v.channel_id), ['discount_rate'])
+    // ...and a call already graded is matured even if its date says otherwise.
+    const graded = planCallSync([{ channel_id: 'discount_rate', dz: -0.5 }], [call({ graded: true })], SET_MS + DAY)
+    assert.equal(graded.reaffirm.length, 0)
+    // Before maturity, the same dz is still the same call.
+    const early = planCallSync([{ channel_id: 'discount_rate', dz: -0.5 }], [matured], SET_MS + 10 * 7 * DAY)
+    assert.deepEqual(early.reaffirm.map(r => r.call._id), ['c1'])
+})
+
 test('a new ledger entry carries its six-month maturity and the deviation it was sized on', () => {
     const c = newCall({ channel_id: 'discount_rate', dz: -0.5, base_dz: -1.8, z_at_set: 3.97, set_at: SET }, 'tilt_1', SET)
     assert.equal(c.matures_at, new Date(SET_MS + HORIZON_WEEKS * 7 * DAY).toISOString())
@@ -147,6 +162,17 @@ test('publishing a restated call keeps its original clock on the stored view', a
     assert.equal(doc.channel_views[0].z_at_set, 3.99)
     assert.equal(doc.channel_views[0].call_id, 'c1')
     assert.deepEqual(ledger.store.get('c1').tilt_ids, ['tilt_1', 'tilt_2'], 'the call now spans both views')
+})
+
+test('a view published with NO calls retires every standing call', async () => {
+    // Otherwise a call dropped for months and then restated at the same dz is picked back up on its
+    // old clock, as if it had stood the whole time.
+    const ledger = fakeLedger([call({ tilt_ids: ['tilt_1'] })])
+    _setCallsIO({ coll: ledger.coll })
+    const doc = { id: 'tilt_2', tilts: [] }
+    await syncCallLedger(doc, '2026-03-01T00:00:00.000Z')
+    assert.equal(ledger.store.get('c1').active, false)
+    assert.equal(ledger.store.get('c1').superseded_at, '2026-03-01T00:00:00.000Z')
 })
 
 test('grading writes the due marks and closes a call at its six-month mark', async () => {

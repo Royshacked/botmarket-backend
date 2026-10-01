@@ -37,6 +37,8 @@ const DIRECTION_FLOOR = 0.1
 
 const _r = (v, d = 3) => (v === null || v === undefined ? null : Math.round(v * 10 ** d) / 10 ** d)
 const _sameDz = (a, b) => toNum(a) !== null && toNum(b) !== null && Math.abs(toNum(a) - toNum(b)) < 0.005
+/** Graded, or past its maturity date even if the grid has not caught up to grade it yet. */
+const _matured = (call, nowMs) => call.graded === true || Date.parse(call.matures_at) <= nowMs
 
 // ─── sync: a published view's calls → the ledger ──────────────────────────────
 
@@ -45,8 +47,12 @@ const _sameDz = (a, b) => toNum(a) !== null && toNum(b) !== null && Math.abs(toN
  *   reaffirm   [{ call, view }]   same channel, same dz — the call continues, original clock kept
  *   create     [view]             a channel with no active call, or one whose dz changed
  *   supersede  [call]             an active call whose channel was dropped or whose dz changed
+ *
+ * A call past its six months is NEVER reaffirmed: its forecast has been made and graded, so the same
+ * dz restated after it is a NEW forecast with a new clock. Reaffirming it would pin the restatement to
+ * a clock that has already run out, and nothing would ever grade it.
  */
-export function planCallSync(viewCalls, activeCalls) {
+export function planCallSync(viewCalls, activeCalls, nowMs = Date.now()) {
     const active = new Map((activeCalls ?? []).map(c => [c.channel_id, c]))
     const out = { reaffirm: [], create: [], supersede: [] }
     const seen = new Set()
@@ -54,7 +60,7 @@ export function planCallSync(viewCalls, activeCalls) {
         if (!v?.channel_id || seen.has(v.channel_id)) continue
         seen.add(v.channel_id)
         const held = active.get(v.channel_id)
-        if (held && _sameDz(held.dz, v.dz)) out.reaffirm.push({ call: held, view: v })
+        if (held && !_matured(held, nowMs) && _sameDz(held.dz, v.dz)) out.reaffirm.push({ call: held, view: v })
         else {
             if (held) out.supersede.push(held)
             out.create.push(v)
@@ -193,7 +199,7 @@ export async function syncCallLedger(doc, now = new Date().toISOString()) {
     try {
         const c = await _io.coll()
         const active = await c.find({ active: true }).toArray()
-        const plan = planCallSync(doc.channel_views ?? [], active)
+        const plan = planCallSync(doc.channel_views ?? [], active, Date.parse(now))
         for (const old of plan.supersede) {
             await c.updateOne({ _id: old._id }, { $set: { active: false, superseded_at: now } })
         }

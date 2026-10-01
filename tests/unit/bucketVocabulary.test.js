@@ -46,6 +46,21 @@ test('a QUALIFIED string keeps its tail — the narrowing is the claim', () => {
     assert.equal(normalizeSector('Technology - Semiconductors'), 'Technology')
 })
 
+test('a sector-prefixed HYPHENATED industry keeps the industry, not the sector', () => {
+    // The tail was split again on its own hyphen, matched nothing, and the row widened to the whole
+    // sector — an infrastructure-software call graded on XLK.
+    const cases = {
+        'Technology / Software - Infrastructure': 'Software - Infrastructure',
+        'Technology - Software - Infrastructure': 'Software - Infrastructure',
+        'Financial Services - Banks - Regional': 'Banks - Regional',
+        'Industrials (Aerospace & Defense)': 'Aerospace & Defense',
+        'Healthcare: Medical - Devices': 'Medical - Devices',
+    }
+    for (const [raw, bucket] of Object.entries(cases)) {
+        assert.deepEqual(resolveBucket(raw), { grain: 'industry', bucket }, raw)
+    }
+})
+
 test('a hyphenated INDUSTRY name is never split by the qualifier rule', () => {
     // The whole string is tried first precisely so these survive. Split, they would resolve to
     // "Banks"/"Oil" or to nothing.

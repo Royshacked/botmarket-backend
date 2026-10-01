@@ -494,8 +494,19 @@ export function normalizeIndustry(raw) {
     // The tail is tried before the sector fallback deliberately. Reading the HEAD of that string —
     // which is what normalizeSector does, correctly, for its own purpose — would answer Technology
     // to a sentence whose subject is semiconductors.
-    const tail = s.split(SECTOR_QUALIFIER).slice(1).join(' ').trim()
-    return (tail && (_INDUSTRY_BY_LOWER.get(tail) ?? INDUSTRY_SYNONYMS[tail])) || null
+    //
+    // Every SUFFIX after a qualifier is tried, kept whole, because the industry name may itself
+    // carry a hyphen: "Technology / Software - Infrastructure" and "Financial Services - Banks -
+    // Regional" name hyphenated industries, and splitting them again found nothing — the row then
+    // fell back to the whole sector, the outcome this function exists to prevent. A closing paren
+    // goes with its opening one: "Industrials (Aerospace & Defense)".
+    const lookup = (t) => (t && (_INDUSTRY_BY_LOWER.get(t) ?? INDUSTRY_SYNONYMS[t])) || null
+    const qualifier = new RegExp(SECTOR_QUALIFIER.source, 'g')
+    for (const m of s.matchAll(qualifier)) {
+        const hit = lookup(s.slice(m.index + m[0].length).replace(/\s*\)\s*$/, '').trim())
+        if (hit) return hit
+    }
+    return lookup(s.split(SECTOR_QUALIFIER).slice(1).join(' ').trim())
 }
 
 /**

@@ -586,8 +586,10 @@ async function publishTilt(raw, { note = null } = {}) {
         // would be a different number than the one the call was actually made at.
         await stampBaselines(doc.tilts, doc.benchmark)
         // The CALL LEDGER: each channel call gets its own clock, so a restated call keeps the date,
-        // reading and base rate it was made at and can be graded at six months (channelCalls).
-        if (doc.channel_views?.length) await _io.syncCalls(doc)
+        // reading and base rate it was made at and can be graded at six months (channelCalls). Run on
+        // EVERY publish, calls or none: a view without calls is what retires the ones standing, or a
+        // call absent for months would be picked back up on its old clock when restated.
+        await _io.syncCalls(doc)
         doc.revisions = [newRevision({ kind: 'publish', note: note ?? `Published ${doc.tilts.length} sector stances` })]
         await db.collection(COLLECTION).updateMany(
             { benchmark: doc.benchmark, status: 'active' },
