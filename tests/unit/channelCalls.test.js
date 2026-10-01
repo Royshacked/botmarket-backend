@@ -165,3 +165,14 @@ test('a ledger failure never throws out of either hook', async () => {
     assert.equal(await syncCallLedger(doc), doc)
     assert.equal(await gradeChannelCalls(Date.now()), 0)
 })
+
+// ── the board read ───────────────────────────────────────────────────────────
+test('the board gets each standing call\'s latest mark, and a call with no ledger entry has none', async () => {
+    const { callsForBoard } = await import('../../api/strategy/channelCalls.service.js')
+    const ledger = [call({ _id: 'c1', marks: { 4: { weeks: 4, beat_base: true }, 13: { weeks: 13, beat_base: false } } })]
+    const view = { channel_views: [{ channel_id: 'discount_rate', call_id: 'c1' }, { channel_id: 'energy_cost' }] }
+    const out = callsForBoard(view, ledger)
+    assert.equal(out.calls.discount_rate.latest_mark.weeks, 13, 'the most recent mark')
+    assert.equal(out.calls.energy_cost.latest_mark, null)
+    assert.equal(out.record.graded, 0)
+})

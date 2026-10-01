@@ -8,6 +8,7 @@
 
 import { tiltService, balanceOf } from './tilt.service.js'
 import { seriesForTilt }          from './tiltSeries.service.js'
+import { readBoardCalls }         from './channelCalls.service.js'
 import { strategyAgentService } from '../../services/agents/strategy.agent.service.js'
 import { diffStances }          from '../../monitoring/tilt.assess.js'
 import { notifyTiltChanged }    from '../../services/tiltNotify.service.js'
@@ -104,6 +105,16 @@ export const getCurrentTilt = _handle('getCurrentTilt', async (req, res) => {
 export const getTiltSeries = _handle('getTiltSeries', async (req, res) => {
     const doc = await tiltService.getCurrentTilt(req.query?.benchmark || 'SPX')
     res.json(doc ? await seriesForTilt(doc) : {})
+})
+
+/**
+ * The view in force's channel calls with their latest marks, and the desk's record — a separate light
+ * read beside the view, like the series: the board paints without it. `{ record: null, calls: {} }`
+ * when there is no view or no ledger.
+ */
+export const getTiltCalls = _handle('getTiltCalls', async (req, res) => {
+    const doc = await tiltService.getCurrentTilt(req.query?.benchmark || 'SPX')
+    res.json(doc ? await readBoardCalls(doc) : { record: null, calls: {} })
 })
 
 export const listTilts = _handle('listTilts', async (req, res) => {

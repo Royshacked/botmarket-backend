@@ -246,6 +246,33 @@ export async function gradeChannelCalls(nowMs = Date.now()) {
     return written
 }
 
+/**
+ * PURE. The view's calls + the ledger → what the forecast board shows beside each call:
+ * { record, calls: { [channel_id]: { call_id, latest_mark } } }. A call with no ledger entry (published
+ * before the ledger existed) simply has no mark yet.
+ */
+export function callsForBoard(view, ledger) {
+    const byId = new Map((ledger ?? []).map(c => [c._id, c]))
+    const calls = {}
+    for (const v of view?.channel_views ?? []) {
+        const entry = v.call_id ? byId.get(v.call_id) : (ledger ?? []).find(c => c.active && c.channel_id === v.channel_id)
+        const marks = entry?.marks ? Object.values(entry.marks).sort((a, b) => b.weeks - a.weeks) : []
+        calls[v.channel_id] = { call_id: entry?._id ?? null, latest_mark: marks[0] ?? null }
+    }
+    return { record: trackRecord(ledger ?? []), calls }
+}
+
+/** The board read: the current view's calls with their marks, and the record. Never throws. */
+export async function readBoardCalls(view) {
+    try {
+        const c = await _io.coll()
+        return callsForBoard(view, await c.find({}).toArray())
+    } catch (err) {
+        logger.warn(LOG, 'board calls unreadable', err.message)
+        return { record: null, calls: {} }
+    }
+}
+
 /** The record, read. Null on failure — the sizing then keeps the placeholder. */
 export async function readTrackRecord() {
     try {
