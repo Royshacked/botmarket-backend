@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
-    sizeFromChannels, normalizeViews, normalizeReactions, normalizeExclusions, formatSizing, expandChannelDraft, _setSizingIO,
+    sizeFromChannels, normalizeViews, normalizeReactions, normalizeExclusions, formatSizing, expandChannelDraft, withBases, _setSizingIO,
     CAP_BP, MAX_DZ, REACTIONS,
 } from '../../api/strategy/channelSizing.service.js'
 import { normalizeTilt, overlappingRows, incoherentRows } from '../../api/strategy/tilt.service.js'
@@ -117,13 +117,66 @@ test('a call no fund is measurably exposed to is reported, not silently dropped'
     assert.match(notes.join(' '), /size nothing/)
 })
 
-test('calls: unknown channels, zero, absurd and duplicate moves are dropped', () => {
-    const known = new Set(['energy_cost', 'discount_rate'])
+test('calls: unknown channels, absurd and duplicate moves are dropped; "stays put" (0) is a call', () => {
+    const known = new Set(['energy_cost', 'discount_rate', 'fx_usd'])
     const v = normalizeViews([
         { channel_id: 'energy_cost', dz: 1 }, { channel_id: 'energy_cost', dz: 2 }, { channel: 'discount_rate', dz: -0.5 },
-        { channel_id: 'nope', dz: 1 }, { channel_id: 'discount_rate', dz: 0 }, { channel_id: 'x', dz: MAX_DZ + 1 }, { channel_id: 'energy_cost', dz: 'a' },
+        { channel_id: 'nope', dz: 1 }, { channel_id: 'fx_usd', dz: 0 }, { channel_id: 'x', dz: MAX_DZ + 1 }, { channel_id: 'energy_cost', dz: 'a' },
     ], known)
-    assert.deepEqual(v.map(x => [x.channel_id, x.dz]), [['energy_cost', 1], ['discount_rate', -0.5]])
+    assert.deepEqual(v.map(x => [x.channel_id, x.dz]), [['energy_cost', 1], ['discount_rate', -0.5], ['fx_usd', 0]])
+})
+
+// ── the base rate: only the departure from history is sized ──────────────────
+
+const LATEST = { channels: { discount_rate: { z: 3.97, base_dz: -1.78 }, energy_cost: { z: 1.66, base_dz: -0.4 } } }
+
+test('a call is sized on its DEVIATION from the base rate', () => {
+    const [v] = withBases([{ channel_id: 'discount_rate', dz: -0.8 }], LATEST)
+    assert.equal(v.base_dz, -1.78)
+    assert.equal(v.deviation, 0.98)
+    const { candidates } = size({ views: [v] })
+    assert.equal(candidates.find(c => c.bucket === 'Utilities').e, -0.013 * 0.98)
+})
+
+test('a call that repeats the base rate sizes nothing — it is already priced', () => {
+    const views = withBases([{ channel_id: 'discount_rate', dz: -1.78 }, { channel_id: 'energy_cost', dz: -0.4 }], LATEST)
+    assert.deepEqual(views.map(v => v.deviation), [0, 0])
+    assert.equal(size({ views }).rows.length, 0)
+})
+
+test('the two calls that looked opposite were the same view, against the base rate', () => {
+    // Measured: Pythia called real yields -0.8, then +0.8, on identical data. Base -1.78.
+    const [a] = withBases([{ channel_id: 'discount_rate', dz: -0.8 }], LATEST)
+    const [b] = withBases([{ channel_id: 'discount_rate', dz: 0.8 }], LATEST)
+    assert.equal(Math.sign(a.deviation), Math.sign(b.deviation), 'both say "less reversion than usual"')
+})
+
+test('a call against the base rate, and one reversing the standing call, are flagged', () => {
+    const [against] = withBases([{ channel_id: 'discount_rate', dz: 0.8 }], LATEST)
+    assert.ok(against.flags.includes('against_base_rate'))
+    const [withHistory] = withBases([{ channel_id: 'discount_rate', dz: -0.5 }], LATEST)
+    assert.ok(!withHistory.flags.includes('against_base_rate'))
+
+    const standing = [{ channel_id: 'discount_rate', dz: -0.8, base_dz: -1.78, deviation: 0.98 }]
+    const [flip] = withBases([{ channel_id: 'discount_rate', dz: -2.5 }], LATEST, standing)
+    assert.ok(flip.flags.includes('reverses_standing_call'), 'deviation +0.98 -> -0.72')
+    assert.equal(flip.previous_dz, -0.8)
+    const [kept] = withBases([{ channel_id: 'discount_rate', dz: 0.8 }], LATEST, standing)
+    assert.ok(!kept.flags.includes('reverses_standing_call'), 'same side of the base rate is not a reversal')
+})
+
+test('a channel with no base rate is sized on the raw call and says so', () => {
+    const [v] = withBases([{ channel_id: 'fx_usd', dz: 0.5 }], LATEST)
+    assert.equal(v.base_dz, null)
+    assert.equal(v.deviation, 0.5)
+    assert.ok(v.flags.includes('no_base_rate'))
+})
+
+test('the preview shows call, base and what is sized, with each flag spelled out', () => {
+    const views = withBases([{ channel_id: 'discount_rate', dz: 0.8 }, { channel_id: 'energy_cost', dz: 0.5 }], LATEST)
+    const text = formatSizing(size({ views }), views)
+    assert.match(text, /discount_rate\s+call +\+0\.80z\s+base -1\.78z\s+sized on +\+2\.58z/)
+    assert.match(text, /AGAINST THE BASE RATE/)
 })
 
 test('reactions: only the three words, on a real bucket', () => {

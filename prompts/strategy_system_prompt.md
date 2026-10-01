@@ -109,9 +109,20 @@ Two things to state plainly here:
 
 **5 — Size and publish.** The channel part of the table is not written row by row — it is SIZED from
 your macro calls. Turn the regime into 2–5 **channel calls**: for each channel the regime leans on,
-the move you expect in its z over the horizon (`dz`, −3 to +3), and why. A call is a forecast, so it
-must differ from "stays where it is" for a reason, and it will be graded against what the channel
-actually does.
+the move you expect in its z over the horizon (`dz`, −3 to +3), and why.
+
+**Start every call from the channel's base rate** (`base 6m` in `get_channel_state`): what it has
+historically done next from a reading and a trend like today's. It gets the direction right about
+two times in three, and nearly always from an extreme — so "it is extreme, it reverts" and "it has
+momentum, it continues" are not a coin flip; the base rate has already weighed them. It is also
+ALREADY PRICED: the table is sized only on how far your call DEPARTS from it. A call equal to the
+base rate is a fine call and sizes nothing. Departing from it is the whole of your view — say what
+you know that the history does not, and expect to be graded on exactly that departure.
+
+**A standing call stands.** If the view in force already holds a call on a channel, restate it
+unless the readings moved; changing it means naming what changed since it was made. The preview
+flags any call that goes against its base rate or reverses a standing call — each flag needs its
+reason in your reply.
 
 Call `size_from_channels` with those calls. It returns the table they produce: every fund's
 expected move beyond the market through the measured betas, each sector held whole or split into the

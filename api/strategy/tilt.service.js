@@ -158,6 +158,7 @@ function _drivers(raw) {
         .filter(d => d && typeof d === 'object' && _str(d.channel_id))
         .map(d => ({
             channel_id: d.channel_id, beta: _num(d.beta), dz: _num(d.dz), contribution: _num(d.contribution),
+            ...(_num(d.deviation) !== null ? { base_dz: _num(d.base_dz), deviation: _num(d.deviation) } : {}),
             ...(_num(d.multiplier) !== null ? { multiplier: _num(d.multiplier) } : {}),
         }))
     return out.length ? out : null
@@ -169,6 +170,11 @@ function _channelViews(raw) {
         .map(v => ({
             channel_id: v.channel_id, dz: _num(v.dz), rationale: _str(v.rationale),
             z_at_set: _num(v.z_at_set), set_at: _str(v.set_at),
+            // What the call is MEASURED against: the channel's base rate when it was made, and the
+            // deviation that was actually sized. Grading asks whether the deviation was right.
+            base_dz: _num(v.base_dz), deviation: _num(v.deviation),
+            previous_dz: _num(v.previous_dz),
+            flags: _arr(v.flags).filter(f => typeof f === 'string'),
         }))
 }
 

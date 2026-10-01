@@ -231,3 +231,14 @@ test('the current view rides the turn without the monitor\'s bookkeeping', () =>
     assert.match(text, /"sector": "Energy"/)
     assert.doesNotMatch(text, /"checks"|total_bp|next_check_at/)
 })
+
+// ── the standing calls ride into the turn ────────────────────────────────────
+test('the turn context lists the standing channel calls, and leaves the per-row arithmetic out', () => {
+    const ctx = _buildTurnContext({ current_tilt: {
+        id: 'tilt1', tilts: [{ bucket: 'Gold', stance: 'under', active_bp: -95, drivers: [{ channel_id: 'discount_rate', beta: -0.04 }] }],
+        channel_views: [{ channel_id: 'discount_rate', dz: 0.8, base_dz: -1.78, deviation: 2.58, z_at_set: 3.99, set_at: '2026-10-01T00:00:00Z', rationale: 'another leg' }],
+    } })
+    assert.match(ctx, /STANDING CHANNEL CALLS — a call STANDS unless the evidence moved/)
+    assert.match(ctx, /discount_rate: call 0\.8z \(base -1\.78z, sized on 2\.58z\) made at z 3\.99 on 2026-10-01 — another leg/)
+    assert.doesNotMatch(ctx, /"drivers"/)
+})

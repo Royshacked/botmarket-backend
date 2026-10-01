@@ -34,11 +34,16 @@ const rule = () => line('─'.repeat(78))
 line('\nPYTHIA — live verification\n')
 rule()
 
+// The view in force rides along, exactly as StrategyPanel sends it — a run without it is a desk
+// with no memory of its own calls, which is not how a review happens and made every run look new.
+const currentTilt = await tiltService.getCurrentTilt('SPX').catch(() => null)
+line(currentTilt ? `  reviewing the view in force: ${currentTilt.id} (${currentTilt.channel_views?.length ?? 0} standing call(s))` : '  no view in force — a first publication')
+
 const tools = []
 const t0 = Date.now()
 const res = await strategyAgentService.chatStream({
     userPrompt: 'Publish the house view. Work the phases, then emit the tilt table.',
-    chatState: {},
+    chatState: currentTilt ? { current_tilt: currentTilt } : {},
     userId: 'verify-script',
     onToolStart: (tool) => { tools.push(tool); process.stdout.write(`  · ${tool}\n`) },
     onPhase:     (p) => process.stdout.write(`  phase ${p}\n`),
@@ -79,7 +84,8 @@ line(`  kill-criteria: ${doc.regime?.kill_criteria?.length ?? 0}`)
 // The CALLS the sized rows came from — the part of a run to audit, since every channel row follows
 // from these arithmetically.
 for (const v of doc.channel_views) {
-    line(`  call: ${v.channel_id.padEnd(26)} dz ${v.dz >= 0 ? '+' : ''}${v.dz}  (z now ${v.z_at_set ?? '?'})  ${v.rationale ?? '— no reason given'}`)
+    line(`  call: ${v.channel_id.padEnd(26)} dz ${v.dz >= 0 ? '+' : ''}${v.dz}  base ${v.base_dz ?? 'n/a'}  sized ${v.deviation ?? v.dz}`
+        + `${v.previous_dz !== null ? `  (was ${v.previous_dz})` : ''}${v.flags.length ? `  ⚑ ${v.flags.join(', ')}` : ''}  — ${v.rationale ?? 'no reason given'}`)
 }
 for (const r of doc.reactions) line(`  reaction: ${r.bucket} / ${r.channel_id} ${r.reaction} — ${r.reason ?? 'no reason given'}`)
 for (const x of doc.exclusions) line(`  excluded: ${x.bucket} — ${x.reason ?? 'NO REASON GIVEN'}`)

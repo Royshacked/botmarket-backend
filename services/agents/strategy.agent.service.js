@@ -77,6 +77,25 @@ const TOOL_HANDLERS = {
         (e) => `Could not size the table: ${e.message}`, LOG),
 }
 
+/** The standing view's channel calls — what a new call is compared against. */
+function _standingCalls(chatState) {
+    const v = chatState?.current_tilt?.channel_views
+    return Array.isArray(v) ? v : []
+}
+
+/**
+ * The handlers for ONE turn. Only the sizing preview needs the turn's state — to flag a call that
+ * reverses the standing view's — so it is the only one rebuilt; the rest are the shared constants.
+ */
+function _turnHandlers(chatState) {
+    const previous = _standingCalls(chatState)
+    return {
+        ...TOOL_HANDLERS,
+        size_from_channels: makeToolHandler('size_from_channels', (input) => previewSizing(input ?? {}, { previous }),
+            (e) => `Could not size the table: ${e.message}`, LOG),
+    }
+}
+
 export const strategyAgentService = { chatStream }
 
 /**
@@ -188,7 +207,7 @@ async function chatStream({
 
     const raw = await _run({
         log: LOG, requestedModel, userId, messages: builtMessages, systemPrompt,
-        tools: TOOLS, toolHandlers: TOOL_HANDLERS,
+        tools: TOOLS, toolHandlers: _turnHandlers(chatState),
         reasoningEffort, signal, onToken, tagCaptures, onToolStart, onReasoning,
         meta: { userPrompt },
     })
@@ -198,7 +217,7 @@ async function chatStream({
     // Channel calls are sized HERE, before the draft reaches the preview, so what the admin sees is
     // exactly what publishing stores. A failed read keeps the desk's own rows rather than the turn.
     let tilt = parsed.tilt
-    try { tilt = await expandChannelDraft(tilt) } catch (err) { logger.warn(LOG, 'channel sizing failed — draft keeps only its own rows', err.message) }
+    try { tilt = await expandChannelDraft(tilt, undefined, { previous: _standingCalls(chatState) }) } catch (err) { logger.warn(LOG, 'channel sizing failed — draft keeps only its own rows', err.message) }
     if (tilt && !tilt.tilts?.length) tilt = null
     logger.info(LOG, 'chatStream done', { replyLength: reply.length, hasTilt: Boolean(tilt), rows: tilt?.tilts?.length ?? 0, phase: phase.get() })
     // A DRAFT — returned for preview, never saved. Publishing is a separate, explicit act.
@@ -247,11 +266,22 @@ function _buildSystemPrompt() {
 export function _buildTurnContext(chatState) {
     const current = chatState?.current_tilt
     if (!current) return null
-    // The monitor's bookkeeping (`monitor.*`) is not part of the view and is not shown to the desk.
+    // The monitor's bookkeeping (`monitor.*`) is not part of the view and is not shown to the desk,
+    // and neither is each sized row's `drivers` — the arithmetic of the CALLS listed below, repeated
+    // per row; it multiplied the context without adding a fact the calls do not already state.
     const { monitor, ...view } = current   // eslint-disable-line no-unused-vars -- destructured away on purpose
+    const lean = { ...view, tilts: (view.tilts ?? []).map(({ drivers, ...row }) => row) }   // eslint-disable-line no-unused-vars
+    const calls = Array.isArray(view.channel_views) ? view.channel_views : []
+    const standing = calls.length
+        ? '\n\nSTANDING CHANNEL CALLS — a call STANDS unless the evidence moved. Restate it, or say what '
+          + 'changed in the readings since it was made; a call that reverses one of these is flagged in '
+          + 'the sizing preview.\n'
+          + calls.map(c => `  ${c.channel_id}: call ${c.dz}z (base ${c.base_dz ?? 'n/a'}z, sized on ${c.deviation ?? c.dz}z) `
+              + `made at z ${c.z_at_set ?? '?'} on ${String(c.set_at ?? '?').slice(0, 10)} — ${c.rationale ?? 'no reason recorded'}`).join('\n')
+        : ''
     return `CURRENT PUBLISHED VIEW — this is the house view in force. Reaffirm what still holds (a `
         + `reaffirmed stance keeps its original clock and entry prices) and re-author only what has `
-        + `actually moved.\n${JSON.stringify(view, null, 2)}`
+        + `actually moved.${standing}\n\n${JSON.stringify(lean, null, 2)}`
 }
 
 // A continuing conversation is trimmed + coalesced; a first turn is just the prompt. normalizeMessages

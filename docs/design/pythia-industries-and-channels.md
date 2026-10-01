@@ -267,6 +267,20 @@ makes the difference mean anything.
 > expected with no row. "Beta is the subtraction" (below) still holds as a caution — a channel the
 > market already trades is priced — and is now carried by the desk's call having to be a MOVE from
 > here rather than a level.
+>
+> **Then sized on the DEVIATION from a base rate (same day).** Pythia's calls flipped sign between two
+> runs on identical data (real yields −0.8z, then +0.8z). At +4z and rising, "extreme → reverts" and
+> "momentum → more" were both stories and nothing it read chose between them. Each channel now carries
+> a measured BASE RATE — its expected z-change over 26 weeks from a regression on its own level and
+> 13-week momentum (`aether-engine` `state.base_rate`). Tested out of sample
+> (`scratch/backtest_base_rate.py`): it calls the channel's direction 68% of the time, 97% from
+> |z| ≥ 2 — and sizing funds on it ranked their returns at IC −0.05: **what is predictable about a
+> channel is priced.** So rows are sized on `beta × (call − base rate)`: a call that repeats history
+> sizes nothing, and the table carries only the desk's disagreement with it. Against a base of
+> −1.78z, the two "opposite" yield calls were the same view — less reversion than usual — at two
+> convictions. The preview flags a call against its base rate or reversing a standing call; the
+> standing calls ride into each review's context. Kept on file as the alternative: size on the call
+> itself with the base rate as an anchor only (fuller tables, but the base-rate part is priced).
 
 The formula is the archived engine's, and it is better than "exposure × expected move":
 

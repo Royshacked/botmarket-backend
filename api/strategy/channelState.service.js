@@ -70,14 +70,14 @@ export function formatChannelState(doc, nowMs = Date.now()) {
     const pct = (v) => { const n = toNum(v); return n === null ? '  —' : `${Math.round(n * 100)}%`.padStart(4) }
     const lines = rows.map(r => {
         const dir = r.sign_convention === -1 ? ' (sign inverted)' : ''
-        return `  ${r.id.padEnd(27)} z ${_z(r.z)}   4w ${_z(r.z_4w)}   13w ${_z(r.z_13w)}   pct ${pct(r.pct)}   as of ${_day(r.as_of)}${dir}\n      ${r.description ?? ''}`
+        return `  ${r.id.padEnd(27)} z ${_z(r.z)}   4w ${_z(r.z_4w)}   13w ${_z(r.z_13w)}   pct ${pct(r.pct)}   base 6m ${_z(r.base_dz)}   as of ${_day(r.as_of)}${dir}\n      ${r.description ?? ''}`
     })
 
     const missing = doc.missing && typeof doc.missing === 'object' ? Object.entries(doc.missing) : []
     return [
         header,
         '',
-        'z = trailing-2-year z-score (positive = more pressure in that channel). 4w/13w = the reading one and three months earlier, on the channel\'s own series. pct = share of its own history since 2005 at or below today.',
+        'z = trailing-2-year z-score (positive = more pressure in that channel). 4w/13w = the reading one and three months earlier, on the channel\'s own series. pct = share of its own history since 2005 at or below today. base 6m = the move in z the channel has historically made over the next six months from a reading and a trend like today\'s — it calls the direction ~2 times in 3, nearly always from an extreme, and it is ALREADY PRICED: only a call that departs from it is a view.',
         '',
         ...lines,
         ...(missing.length ? ['', `Not measured: ${missing.map(([id, why]) => `${id} (${why})`).join(', ')}.`] : []),

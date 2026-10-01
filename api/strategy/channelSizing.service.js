@@ -17,6 +17,16 @@
 // differently from its history, it says how — never with a made-up decimal, which would only echo
 // the beta it was just shown.
 //
+// SIZED ON THE DEVIATION FROM THE BASE RATE, not on the call. Each channel carries a base rate — what
+// it has historically done over the next 26 weeks from where it sits (aether-engine
+// state.base_rate). Measured 2026-10-01 (scratch/backtest_base_rate.py): that base rate calls the
+// channel's direction 68% of the time (97% from |z| >= 2) and is PRICED — funds sized on it ranked at
+// IC −0.05. So E = Σ multiplier × beta × (dz − base_dz): a call that only repeats history sizes
+// nothing, and the table carries exactly the desk's disagreement with it. It also ended the sign
+// flips: Pythia called real yields −0.8 then +0.8 on the same data, but against a base of −1.78 both
+// were the same view — "less reversion than usual" — differing only in conviction. (The alternative,
+// sizing on the call with the base rate as an anchor only, gives fuller tables; kept on file.)
+//
 // DATA VS JUDGMENT. This module is arithmetic. Which channels move, by how much, and which buckets
 // react unusually are Pythia's; nothing here decides a view.
 
@@ -66,7 +76,9 @@ export function normalizeViews(raw, knownChannels = null) {
     for (const v of Array.isArray(raw) ? raw : []) {
         const id = typeof v?.channel_id === 'string' ? v.channel_id.trim() : (typeof v?.channel === 'string' ? v.channel.trim() : '')
         const dz = toNum(v?.dz)
-        if (!id || dz === null || dz === 0 || Math.abs(dz) > MAX_DZ || seen.has(id)) continue
+        // dz = 0 is a real call now ("the channel stays put"): against a base rate that expects it
+        // to move, it is a deviation, and it sizes.
+        if (!id || dz === null || Math.abs(dz) > MAX_DZ || seen.has(id)) continue
         if (knownChannels && !knownChannels.has(id)) continue
         seen.add(id)
         out.push({ channel_id: id, dz, rationale: typeof v.rationale === 'string' ? v.rationale.trim() || null : null })
@@ -99,6 +111,33 @@ export function normalizeExclusions(raw) {
         out.push({ bucket, reason })
     }
     return out
+}
+
+/** A base rate this small is "no expected move": a call's sign against it is not a disagreement. */
+export const BASE_SIGN_FLOOR = 0.3
+/** A call this close to zero has no direction to disagree with. */
+const CALL_SIGN_FLOOR = 0.1
+
+/**
+ * Calls → calls with their base rate and DEVIATION attached, and a flag wherever a call reverses the
+ * base rate's direction or the standing view's call on the same channel. PURE.
+ *
+ * `latest` is pythia_channel_latest; `previous` the standing view's channel_views. A channel with
+ * no base rate deviates from 0 and says so.
+ */
+export function withBases(views, latest, previous = []) {
+    const prevBy = Object.fromEntries((Array.isArray(previous) ? previous : []).filter(p => p?.channel_id).map(p => [p.channel_id, p]))
+    return views.map(v => {
+        const base = toNum(latest?.channels?.[v.channel_id]?.base_dz)
+        const deviation = Math.round((v.dz - (base ?? 0)) * 1000) / 1000
+        const flags = []
+        if (base === null) flags.push('no_base_rate')
+        else if (Math.abs(base) >= BASE_SIGN_FLOOR && Math.abs(v.dz) >= CALL_SIGN_FLOOR && Math.sign(v.dz) !== Math.sign(base)) flags.push('against_base_rate')
+        const prev = prevBy[v.channel_id]
+        const prevDev = toNum(prev?.deviation) ?? (toNum(prev?.dz) !== null && toNum(prev?.base_dz) !== null ? toNum(prev.dz) - toNum(prev.base_dz) : null)
+        if (prevDev !== null && Math.abs(prevDev) >= CALL_SIGN_FLOOR && Math.abs(deviation) >= CALL_SIGN_FLOOR && Math.sign(prevDev) !== Math.sign(deviation)) flags.push('reverses_standing_call')
+        return { ...v, base_dz: base, deviation, ...(prev ? { previous_dz: toNum(prev.dz) } : {}), flags }
+    })
 }
 
 // ─── the arithmetic ───────────────────────────────────────────────────────────
@@ -163,9 +202,15 @@ export function sizeFromChannels({ views, reactions = [], exclude = [], manualRo
             const beta = idx[sym]?.[v.channel_id]
             if (beta === undefined) continue
             const m = mult[sym]?.[v.channel_id] ?? 1
-            const c = m * beta * v.dz
+            // The DEVIATION from the base rate when one is attached (withBases); the raw call otherwise.
+            const move = v.deviation ?? v.dz
+            const c = m * beta * move
             e += c
-            drivers.push({ channel_id: v.channel_id, beta, dz: v.dz, ...(m !== 1 ? { multiplier: m } : {}), contribution: c })
+            drivers.push({
+                channel_id: v.channel_id, beta, dz: v.dz,
+                ...(v.base_dz !== undefined ? { base_dz: v.base_dz, deviation: move } : {}),
+                ...(m !== 1 ? { multiplier: m } : {}), contribution: c,
+            })
         }
         return { e, drivers: drivers.sort((a, b) => Math.abs(b.contribution) - Math.abs(a.contribution)) }
     }
@@ -302,8 +347,13 @@ export function sizeFromChannels({ views, reactions = [], exclude = [], manualRo
 
 function _rationale(c) {
     const pct = (v) => `${v >= 0 ? '+' : ''}${(v * 100).toFixed(1)}%`
-    const parts = c.drivers.slice(0, 3).map(d =>
-        `${d.channel_id} ${d.dz >= 0 ? '+' : ''}${d.dz}z × β ${pct(d.beta)}${d.multiplier ? ` × ${d.multiplier} (reaction)` : ''} = ${pct(d.contribution)}`)
+    const sz = (v) => `${v >= 0 ? '+' : ''}${Math.round(v * 100) / 100}z`
+    const parts = c.drivers.slice(0, 3).map(d => {
+        const move = d.deviation !== undefined
+            ? `${d.channel_id} call ${sz(d.dz)} vs base ${d.base_dz === null ? 'n/a' : sz(d.base_dz)} = ${sz(d.deviation)}`
+            : `${d.channel_id} ${sz(d.dz)}`
+        return `${move} × β ${pct(d.beta)}${d.multiplier ? ` × ${d.multiplier} (reaction)` : ''} = ${pct(d.contribution)}`
+    })
     const scope = c.stands_for && c.stands_for.length > 1 ? ` Graded on ${c.symbol}, which also stands for ${c.stands_for.filter(b => b !== c.bucket).join(', ')}.` : ''
     return `Sized from the desk's channel calls: expected ${pct(c.e)} vs the market — ${parts.join('; ')}.${scope}`
 }
@@ -320,8 +370,20 @@ export function formatSizing(result, views) {
         .sort((a, b) => Math.abs(b.e) - Math.abs(a.e))
         .slice(0, 8)
         .map(c => `${c.bucket} ${pct(c.e)}`)
+    const sz = (v) => (v === null || v === undefined ? '  n/a' : `${v >= 0 ? '+' : ''}${(Math.round(v * 100) / 100).toFixed(2)}`.padStart(5))
+    const FLAG = {
+        against_base_rate: 'AGAINST THE BASE RATE — history says the other direction; state why this time differs',
+        reverses_standing_call: 'REVERSES THE STANDING CALL — name what changed in the readings since it was made',
+        no_base_rate: 'no base rate for this channel — sized on the raw call',
+    }
+    const callLines = views.map(v => {
+        const head = `  ${v.channel_id.padEnd(26)} call ${sz(v.dz)}z   base ${sz(v.base_dz)}z   sized on ${sz(v.deviation ?? v.dz)}z`
+            + (v.previous_dz !== undefined ? `   (standing call ${sz(v.previous_dz)}z)` : '')
+        return [head, ...(v.flags ?? []).map(f => `      ⚑ ${FLAG[f] ?? f}`)].join('\n')
+    })
     return [
-        `PROPOSED TABLE from ${views.length} channel call(s): ${views.map(v => `${v.channel_id} ${v.dz >= 0 ? '+' : ''}${v.dz}z`).join(', ')}`,
+        `PROPOSED TABLE from ${views.length} channel call(s). Only each call's DEVIATION from its base rate is sized — a call that repeats history is already priced and sizes nothing:`,
+        ...callLines,
         '',
         ...(rows.length ? rows : ['  (no bucket clears the minimum expected move — the calls are too small, or reach no measured exposure)']),
         '',
@@ -332,11 +394,14 @@ export function formatSizing(result, views) {
     ].join('\n')
 }
 
-/** For the tool: read, size, format. */
-export async function previewSizing({ channel_views, reactions, exclude, manual_rows } = {}) {
+/**
+ * For the tool: read, size, format. `previous` is the standing view's channel_views, so a call that
+ * reverses one is flagged in the preview — before it is published, not after.
+ */
+export async function previewSizing({ channel_views, reactions, exclude, manual_rows } = {}, { previous = [] } = {}) {
     const { betas, latest } = await readSizingInputs()
     const known = new Set([...(betas ?? []).map(b => b.channel_id), ...Object.keys(latest?.channels ?? {})])
-    const views = normalizeViews(channel_views, known.size ? known : null)
+    const views = withBases(normalizeViews(channel_views, known.size ? known : null), latest, previous)
     const result = sizeFromChannels({ views, reactions: normalizeReactions(reactions), exclude: Array.isArray(exclude) ? exclude : [], manualRows: Array.isArray(manual_rows) ? manual_rows : [], betas })
     return formatSizing(result, views)
 }
@@ -346,11 +411,11 @@ export async function previewSizing({ channel_views, reactions, exclude, manual_
  * and each call stamped with the z it was made at, so it can be graded at maturity. A draft
  * without channel views is returned untouched.
  */
-export async function expandChannelDraft(draft, now = new Date().toISOString()) {
+export async function expandChannelDraft(draft, now = new Date().toISOString(), { previous = [] } = {}) {
     if (!draft || !Array.isArray(draft.channel_views) || !draft.channel_views.length) return draft
     const { betas, latest } = await readSizingInputs()
     const known = new Set([...(betas ?? []).map(b => b.channel_id), ...Object.keys(latest?.channels ?? {})])
-    const views = normalizeViews(draft.channel_views, known.size ? known : null)
+    const views = withBases(normalizeViews(draft.channel_views, known.size ? known : null), latest, previous)
     if (!views.length) return draft
     const reactions = normalizeReactions(draft.reactions)
     const manualRows = Array.isArray(draft.tilts) ? draft.tilts : []

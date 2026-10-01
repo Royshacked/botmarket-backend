@@ -112,7 +112,10 @@ Three things it deliberately is not:
    before the preview, so what is previewed is what publishes. Pythia previews with
    `size_from_channels` first. The doc stores `channel_views` (with `z_at_set`, for grading),
    `reactions`, `exclusions`, and each sized row's `drivers`. Why calls rather than elasticities:
-   design doc §5's box.
+   design doc §5's box. Rows are sized on each call's DEVIATION from the channel's base rate
+   (`base 6m` in `get_channel_state`, written by the engine), because the base rate is priced; each
+   stored call carries `base_dz`, `deviation`, `previous_dz` and `flags` (`against_base_rate`,
+   `reverses_standing_call`, `no_base_rate`), and the turn context lists the STANDING calls first.
 
 **Every stance records WHY**, and the five bases are ranked by evidential weight in the vocabulary
 itself (`TILT_BASES`): `bottom_up` (our covered names say so — most defensible) · `revisions` (sector
