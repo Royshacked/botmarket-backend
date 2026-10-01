@@ -73,12 +73,13 @@ const _round5 = (v) => Math.round(v / 5) * 5
 /**
  * INDUSTRY EVIDENCE → expected move: the fund's next-26-week return over SPY per unit of its
  * evidence score (centred -0.5..+0.5). MEASURED, not chosen: the mean cross-sectional slope over 66
- * dates since 2010 (aether-engine scratch/backtest_industry_reads.py; median +0.045, t +1.6). So the
- * best-evidenced fund expects ~+1.75% over the market from evidence alone, the worst ~-1.75% —
- * a tilt beside channel contributions of several percent, and the WHOLE of the sizing for tech,
- * where no channel reaches.
+ * dates since 2010 (aether-engine scratch/backtest_industry_reads.py), on the SHRUNK score production
+ * writes (small samples pulled to the middle; median +0.058, t +1.6). It was 0.035 on the unshrunk
+ * score — shrinking narrows the scores, so the same evidence needs a larger slope. A strongly
+ * evidenced fund (score ~±0.4) expects about ±2% over the market from evidence alone: a tilt beside
+ * the channel term, and the WHOLE of the sizing for tech, where no channel reaches.
  */
-export const K_EVIDENCE = 0.035
+export const K_EVIDENCE = 0.055
 
 // ─── inputs ───────────────────────────────────────────────────────────────────
 

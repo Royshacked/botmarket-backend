@@ -65,7 +65,7 @@ export function formatIndustryReads(docs, { sector = null, nowMs = Date.now() } 
             ? `⚠ STALE INDUSTRY READS — computed ${age === null ? 'at an unknown time' : `${age} days ago`}. Treat them as old and say so.`
             : `INDUSTRY READS — as of ${new Date(newest).toISOString().slice(0, 10)}${sector ? `, sector ${sector}` : ''}. ${scored.length} industries scored, best evidence first.`,
         '',
-        'EVIDENCE (sized): ev = average cross-sectional rank of beat (share of the industry\'s companies > $2B that beat estimates last quarter), surprise (median size), mom (its fund\'s 12-1 month return over SPY; [fund] = which fund — an industry with none inherits its sector\'s), centred to -0.5..+0.5. Measured since 2010: IC +0.08 across funds, +0.12 on tech.',
+        'EVIDENCE (sized): ev = average cross-sectional rank of beat (share of the industry\'s companies > $2B that beat estimates last quarter), surprise (median size), mom (its fund\'s 12-1 month return over SPY; [fund] = which fund — an industry with none inherits its sector\'s), centred to -0.5..+0.5. Beat and surprise are pulled toward the middle when few companies reported (n): three companies count for about a quarter of fifty. Measured since 2010: IC +0.09 across funds, +0.15 on tech.',
         'CONTEXT (never sized): P/E z against its own 5 years (+ = expensive vs itself), trailing EPS/revenue growth. Cheapness did NOT pay in 2010-2026 and reported growth is priced — do not argue a stance from either.',
         '',
         ...scored.map(line),

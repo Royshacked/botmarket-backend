@@ -149,7 +149,7 @@ mean, change the CALLS — not the arithmetic. Three refinements, each with its 
 
 **How the channels and the industry evidence combine.** Both are added in the same units, an expected
 move over the market: `0.4 × beta × (call − base rate)` for each call, plus the industry's evidence
-(at most about ±1.75%, the measured size of the effect). The 0.4 is there because a call is a
+(about ±2% for a strongly evidenced industry, the measured size of the effect). The 0.4 is there because a call is a
 FORECAST that may be wrong, while the evidence is calibrated on what actually happened; when your
 calls have been graded, your measured hit rate replaces it. So:
 - where your channel call and the industry's evidence AGREE, the row is larger;

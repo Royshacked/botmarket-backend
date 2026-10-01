@@ -292,10 +292,14 @@ makes the difference mean anything.
 > (`scratch/backtest_industry_reads.py`): beat rate IC +0.073 (t 2.2), surprise +0.051, momentum
 > +0.076; their composite EVIDENCE +0.083 (t 2.2), +0.115 on tech. Valuation was INVERTED (cheap
 > industries kept lagging, IC −0.067, t −2.5) and reported growth priced, so both are context only.
-> Sizing adds `K_EVIDENCE (0.035, measured) × evidence` to each fund's expected move, beside
+> Sizing adds `K_EVIDENCE (0.055, measured on the shrunk score; 0.035 unshrunk) × evidence` to each fund's expected move, beside
 > `beta × deviation`: agreeing views add, disagreeing ones offset, tech is sized on evidence alone,
 > rows carry basis `evidence` where it dominates. Caveats on the record: the three evidence parts were
 > kept after seeing them work, and the earnings members are today's companies (survivorship).
+> SMALL SAMPLES (same day): an industry scored on 3 companies swung to the extremes (uranium −0.46).
+> The earnings parts' ranks are now pulled toward the middle by n / (n + 10); momentum is not. Tested
+> before adopting: IC +0.083 → +0.088, right 59% → 64% of dates, tech +0.115 → +0.146; k re-measured
+> on the shrunk score (0.035 → 0.055, since shrinking narrows the scores).
 
 The formula is the archived engine's, and it is better than "exposure × expected move":
 
