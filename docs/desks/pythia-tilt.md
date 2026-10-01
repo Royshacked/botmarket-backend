@@ -116,6 +116,10 @@ Three things it deliberately is not:
    (`base 6m` in `get_channel_state`, written by the engine), because the base rate is priced; each
    stored call carries `base_dz`, `deviation`, `previous_dz` and `flags` (`against_base_rate`,
    `reverses_standing_call`, `no_base_rate`), and the turn context lists the STANDING calls first.
+   Each fund's expected move also carries `K_EVIDENCE × evidence` from the INDUSTRY READS
+   (`get_industry_reads`; beat rate, surprise, 12-1 momentum — valuation and growth shown as context
+   only). A draft is sized even with no calls, from the evidence alone — that is how tech, which no
+   channel reaches, gets rows; such rows have basis `evidence` and store their `evidence` part.
 
 **Every stance records WHY**, and the five bases are ranked by evidential weight in the vocabulary
 itself (`TILT_BASES`): `bottom_up` (our covered names say so — most defensible) · `revisions` (sector

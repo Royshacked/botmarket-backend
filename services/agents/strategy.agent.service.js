@@ -24,6 +24,7 @@ import { coverageService } from '../../api/analyst/coverage.service.js'
 import { readChannelState, formatChannelState } from '../../api/strategy/channelState.service.js'
 import { readChannelExposures, formatChannelExposures } from '../../api/strategy/channelExposures.service.js'
 import { previewSizing, expandChannelDraft } from '../../api/strategy/channelSizing.service.js'
+import { readIndustryReads, formatIndustryReads } from '../../api/strategy/industryReads.service.js'
 import { SECTORS } from '../entity/vocabulary.js'
 import { logger } from '../logger.service.js'
 
@@ -50,7 +51,10 @@ export const TOOLS = [
         get_channel_exposures: `Which BUCKETS move with which CHANNEL, measured: every sector and industry fund's weekly return beyond the market regressed on each channel since ~2006, listing only |t| ≥ 3, with the buckets each fund stands for and how far it has already moved at today's z. The Phase-3 evidence for mapping a regime onto buckets — it turns "utilities are rate sensitive" from a story into a number, and names the INDUSTRIES a channel actually reaches, including ones our coverage does not. A beta proves an exposure is real; it is not an edge — a high one means the channel is already traded through that fund. Pass \`channel\` (an id from get_channel_state) to narrow to one.`,
         // Step 6: the table sized from the desk's channel calls. Same function the draft is expanded
         // with after parsing, so the preview and the published table cannot differ.
-        size_from_channels: `PREVIEW the table your channel calls produce. Pass channel_views — your macro calls, each a channel id from get_channel_state and the move you expect in its z over the horizon (dz, ±3 at most) — and optionally reactions (a bucket you expect to respond STRONGER, WEAKER or OPPOSITE to its measured history on one channel, with the reason), exclude (buckets to leave out, EACH WITH ITS REASON — an exclusion is a call and is stored with the view), and manual_rows (your own non-channel rows, so the preview accounts for them). The code turns the calls into every fund's expected move beyond the market through the measured betas, holds each sector as one row or splits it into its industries where they diverge, nets to zero and caps. Call it, read the table, revise the CALLS until it says what you mean — then emit the same channel_views in the <tilt> block.`,
+        size_from_channels: `PREVIEW the table your channel calls produce. Pass channel_views — your macro calls, each a channel id from get_channel_state and the move you expect in its z over the horizon (dz, ±3 at most) — and optionally reactions (a bucket you expect to respond STRONGER, WEAKER or OPPOSITE to its measured history on one channel, with the reason), exclude (buckets to leave out, EACH WITH ITS REASON — an exclusion is a call and is stored with the view), and manual_rows (your own non-channel rows, so the preview accounts for them). The code turns the calls into every fund's expected move beyond the market through the measured betas, ADDS each fund's industry evidence (get_industry_reads), holds each sector as one row or splits it into its industries where they diverge, nets to zero and caps. With no calls it sizes the evidence alone. Call it, read the table, revise the CALLS until it says what you mean — then emit the same channel_views in the <tilt> block.`,
+        // Step 6b: the industry reads — evidence where no channel reaches (tech), a tilt beside the
+        // channels everywhere else. Ahead of consult, which stays last.
+        get_industry_reads: `What each INDUSTRY's own companies and fund say, measured: an EVIDENCE score per industry (−0.5..+0.5) from its companies' beat rate and surprise last quarter and its fund's 12-1 month momentum over SPY — measured since 2010 to rank industries' next six months (IC +0.08; +0.12 on tech) — plus CONTEXT that is never sized: P/E against its own five years and trailing growth. The evidence is already ADDED to the sized table; read it to know why a row is there, to see which industries look strongest and weakest, and — for tech, where no channel reaches — as the only measured evidence there is. Pass \`sector\` to narrow to one.`,
         // Appended, never inserted — prompt caching keys off the array prefix. The reasoning sidecar
         // (services/deepThink.service.js): one bounded decision put to a stronger model and handed
         // back as a tool result. The mechanism half of this description is shared with every other
@@ -73,6 +77,9 @@ const TOOL_HANDLERS = {
     get_channel_exposures: makeToolHandler('get_channel_exposures',
         async (input) => formatChannelExposures(await readChannelExposures(), { channel: typeof input?.channel === 'string' && input.channel.trim() ? input.channel.trim() : null }),
         (e) => `Could not read the channel exposures: ${e.message}`, LOG),
+    get_industry_reads: makeToolHandler('get_industry_reads',
+        async (input) => formatIndustryReads(await readIndustryReads(), { sector: typeof input?.sector === 'string' && input.sector.trim() ? input.sector.trim() : null }),
+        (e) => `Could not read the industry reads: ${e.message}`, LOG),
     size_from_channels: makeToolHandler('size_from_channels', (input) => previewSizing(input ?? {}),
         (e) => `Could not size the table: ${e.message}`, LOG),
 }

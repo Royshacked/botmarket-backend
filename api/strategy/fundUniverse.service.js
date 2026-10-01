@@ -14,12 +14,17 @@
 
 import { getDb }  from '../../providers/mongodb.provider.js'
 import { logger } from '../../services/logger.service.js'
-import { BUCKET_PROXY, BENCHMARK_PROXY, SECTORS } from '../../services/entity/vocabulary.js'
+import { BUCKET_PROXY, BENCHMARK_PROXY, SECTORS, INDUSTRY_SECTOR } from '../../services/entity/vocabulary.js'
 
 const LOG = '[fundUniverse]'
 export const FUND_UNIVERSE_COLLECTION = 'pythia_fund_universe'
 
-/** { funds: [{ symbol, buckets, weighting }], market } — PURE, one entry per fund, buckets sorted. */
+/**
+ * { funds: [{ symbol, buckets, weighting }], market, industry_sector } — PURE, one entry per fund,
+ * buckets sorted. `industry_sector` is the whole vocabulary map (all 155 industries): the engine's
+ * industry reads need it to score a SECTOR fund on the companies of every industry inside it, and it
+ * is defined here, so it is published from here rather than copied into Python.
+ */
 export function fundUniverse(proxyMap = BUCKET_PROXY) {
     const bySymbol = new Map()
     for (const [bucket, meta] of Object.entries(proxyMap)) {
@@ -31,7 +36,7 @@ export function fundUniverse(proxyMap = BUCKET_PROXY) {
     const funds = [...bySymbol.values()]
         .map(f => ({ ...f, buckets: f.buckets.sort((a, b) => a.bucket.localeCompare(b.bucket)) }))
         .sort((a, b) => a.symbol.localeCompare(b.symbol))
-    return { funds, market: BENCHMARK_PROXY.SPX }
+    return { funds, market: BENCHMARK_PROXY.SPX, industry_sector: { ...INDUSTRY_SECTOR } }
 }
 
 const _io = {

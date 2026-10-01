@@ -696,8 +696,13 @@ export const TOOL_SCHEMAS = {
                 "description": "Your own non-channel rows (bucket, stance, active_bp, basis), so the preview accounts for them.",
                 "items": { "type": "object" }
             }
-        },
-        "required": ["channel_views"]
+        }
+    },
+    get_industry_reads: {
+        "type": "object",
+        "properties": {
+            "sector": { "type": "string", "description": "One of the eleven sectors (e.g. Technology) to narrow the list. Omit for every industry." }
+        }
     },
     get_sector_view: {
         "type": "object",

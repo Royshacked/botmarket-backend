@@ -51,10 +51,14 @@ export const STANCES = ['over', 'neutral', 'under']
  *   • channels         — the regime mapped onto an exposure the bucket's fund has MEASURABLY shown
  *                        (a significant channel beta, get_channel_exposures). rate_sensitivity with
  *                        the exposure measured instead of asserted. Added 2026-09-30.
+ *   • evidence         — the industry's own measured evidence carries the row: its companies' beat
+ *                        rate and surprise, and its fund's 12-1 momentum (industryReads.service.js;
+ *                        IC +0.083 since 2010, +0.115 on tech). The only basis tech can have — no
+ *                        channel moves its funds. Added 2026-10-01.
  *   • valuation        — sector multiple vs its own history. Weak mean reversion, non-zero.
  *   • rate_sensitivity — the regime read mapped onto the sector's factor exposure. Top-down.
  */
-export const TILT_BASES = ['bottom_up', 'revisions', 'channels', 'valuation', 'rate_sensitivity']
+export const TILT_BASES = ['bottom_up', 'revisions', 'channels', 'evidence', 'valuation', 'rate_sensitivity']
 
 /** Doc lifecycle. One `active` view per benchmark; publishing supersedes rather than overwrites. */
 export const TILT_STATUSES = ['active', 'superseded', 'retired']
@@ -150,6 +154,11 @@ function _row(raw, now) {
         // A SIZED row's arithmetic — which channel calls, through which betas, produced its weight.
         // Kept on the row so the scorecard can later ask whether the bucket moved as the betas said.
         drivers:         _drivers(raw.drivers),
+        // A sized row's INDUSTRY-EVIDENCE part: the score and what it added to the expected move.
+        evidence:        (raw.evidence && typeof raw.evidence === 'object' && _num(raw.evidence.score) !== null)
+            ? { score: _num(raw.evidence.score), contribution: _num(raw.evidence.contribution),
+                beat: _num(raw.evidence.beat), surprise: _num(raw.evidence.surprise), momentum: _num(raw.evidence.momentum) }
+            : null,
     }
 }
 

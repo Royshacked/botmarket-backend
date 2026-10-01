@@ -94,6 +94,10 @@ api/
                               demeaned), grain caps. Same function behind size_from_channels (preview)
                               and expandChannelDraft (the parsed draft), so preview = published.
                               Reactions (stronger/weaker/opposite) and exclusions carry reasons
+    industryReads.service.js  Pythia's get_industry_reads: per-industry EVIDENCE (beat, surprise,
+                              12-1 momentum → one score) and CONTEXT (P/E vs 5y, growth — never sized)
+                              from `pythia_industry_reads`, written weekly by aether-engine. The only
+                              evidence tech has. FUND_EVIDENCE_COLLECTION feeds channelSizing's K_EVIDENCE term
     channelExposures.service.js  Pythia's get_channel_exposures: the engine's fund × channel betas
                               (`pythia_channel_betas`), only |t| ≥ 3 offered as exposures, each fund
                               named by the buckets it grades, beta × today's z as "already moved".

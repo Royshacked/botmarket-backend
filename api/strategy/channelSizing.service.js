@@ -35,6 +35,7 @@ import { toNum }  from '../../services/format.util.js'
 import { BUCKET_PROXY, SECTORS, parentSector, resolveBucket } from '../../services/entity/vocabulary.js'
 import { BETAS_COLLECTION } from './channelExposures.service.js'
 import { LATEST_COLLECTION } from './channelState.service.js'
+import { FUND_EVIDENCE_COLLECTION } from './industryReads.service.js'
 
 /** How a stated reaction scales the measured beta. Coarse on purpose — see the header. */
 export const REACTIONS = { stronger: 1.5, weaker: 0.5, opposite: -1 }
@@ -42,8 +43,24 @@ export const REACTIONS = { stronger: 1.5, weaker: 0.5, opposite: -1 }
 /** A channel call larger than this many z over one horizon is not a forecast, it is a typo. */
 export const MAX_DZ = 3
 
-/** Split a sector into its industries when one of them is expected to move this much more or less than the sector. */
-export const SPLIT_THRESHOLD = 0.01
+/**
+ * Split a sector into its industries when one of them is expected to move this much more or less than
+ * the sector. 0.5%, down from 1% (2026-10-01): the threshold was set when only channels moved the
+ * numbers, and an industry's evidence differs from its sector's by under a point — at 1% Semiconductors
+ * (evidence +0.33, the strongest of any fund) never split out of Technology.
+ */
+export const SPLIT_THRESHOLD = 0.005
+
+/**
+ * The CHANNEL term's weight against the industry evidence. `beta × deviation` is the move IF the desk's
+ * macro call is right; the evidence term is calibrated on what actually happened (K_EVIDENCE is a
+ * measured slope). Unweighted, an unproven call outweighed measured evidence about 3 to 1, and tech —
+ * sized on evidence alone — lost its rows to channel moves of several percent. 0.4: roughly the
+ * evidence's strength against a PERFECT channel call (IC 0.083 vs 0.13), shrunk further for an
+ * imperfect forecaster. A placeholder by design — once each call is graded at maturity, the desk's
+ * measured hit rate replaces it. Decided with Roy, 2026-10-01.
+ */
+export const CHANNEL_CONFIDENCE = 0.4
 /** An expected move smaller than this is no view: the bucket stays at benchmark weight. */
 export const MIN_MOVE = 0.005
 /** Per-row caps, bp. A narrow industry fund is a bigger bet per bp than an 11-sector fund (§11). */
@@ -53,18 +70,36 @@ export const MIN_ROW_BP = 25
 
 const _round5 = (v) => Math.round(v / 5) * 5
 
+/**
+ * INDUSTRY EVIDENCE → expected move: the fund's next-26-week return over SPY per unit of its
+ * evidence score (centred -0.5..+0.5). MEASURED, not chosen: the mean cross-sectional slope over 66
+ * dates since 2010 (aether-engine scratch/backtest_industry_reads.py; median +0.045, t +1.6). So the
+ * best-evidenced fund expects ~+1.75% over the market from evidence alone, the worst ~-1.75% —
+ * a tilt beside channel contributions of several percent, and the WHOLE of the sizing for tech,
+ * where no channel reaches.
+ */
+export const K_EVIDENCE = 0.035
+
 // ─── inputs ───────────────────────────────────────────────────────────────────
 
 const _io = {
     betas:  async () => (await getDb()).collection(BETAS_COLLECTION)
         .find({ status: 'measured' }, { projection: { _id: 0, symbol: 1, channel_id: 1, beta: 1, t_stat: 1, significant: 1 } }).toArray(),
     latest: async () => (await getDb()).collection(LATEST_COLLECTION).findOne({ _id: 'latest' }),
+    evidence: async () => (await getDb()).collection(FUND_EVIDENCE_COLLECTION)
+        .find({}, { projection: { evidence: 1, beat: 1, surprise: 1, momentum: 1 } }).toArray(),
 }
 export function _setSizingIO(io) { Object.assign(_io, io) }
 
+/** → { betas, latest, evidence: { symbol: { score, beat, surprise, momentum } } } */
 export async function readSizingInputs() {
-    const [betas, latest] = await Promise.all([_io.betas(), _io.latest()])
-    return { betas, latest }
+    const [betas, latest, ev] = await Promise.all([_io.betas(), _io.latest(), _io.evidence ? _io.evidence() : []])
+    const evidence = {}
+    for (const d of Array.isArray(ev) ? ev : []) {
+        const score = toNum(d?.evidence)
+        if (d?._id && score !== null) evidence[d._id] = { score, beat: toNum(d.beat), surprise: toNum(d.surprise), momentum: toNum(d.momentum) }
+    }
+    return { betas, latest, evidence }
 }
 
 // ─── validation ───────────────────────────────────────────────────────────────
@@ -182,7 +217,7 @@ function _label(entries) {
  * same bucket, or one that would double-count with it (a sector and its own industry), is dropped,
  * and the computed rows absorb the manual rows' net so the table still balances.
  */
-export function sizeFromChannels({ views, reactions = [], exclude = [], manualRows = [], betas, proxyMap = BUCKET_PROXY } = {}) {
+export function sizeFromChannels({ views = [], reactions = [], exclude = [], manualRows = [], betas, evidence = {}, proxyMap = BUCKET_PROXY } = {}) {
     const idx = _betaIndex(betas)
     // Funds the engine has FITTED at all (significant or not). A fund added to the map since the
     // last weekly fit has no betas yet; read as "expected move 0" it would argue for splitting its
@@ -204,7 +239,7 @@ export function sizeFromChannels({ views, reactions = [], exclude = [], manualRo
             const m = mult[sym]?.[v.channel_id] ?? 1
             // The DEVIATION from the base rate when one is attached (withBases); the raw call otherwise.
             const move = v.deviation ?? v.dz
-            const c = m * beta * move
+            const c = CHANNEL_CONFIDENCE * m * beta * move
             e += c
             drivers.push({
                 channel_id: v.channel_id, beta, dz: v.dz,
@@ -212,7 +247,16 @@ export function sizeFromChannels({ views, reactions = [], exclude = [], manualRo
                 ...(m !== 1 ? { multiplier: m } : {}), contribution: c,
             })
         }
-        return { e, drivers: drivers.sort((a, b) => Math.abs(b.contribution) - Math.abs(a.contribution)) }
+        // The industry evidence, added in the same units: an expected move over the market.
+        const ev = evidence[sym]
+        const evidencePart = ev ? K_EVIDENCE * ev.score : 0
+        return {
+            e: e + evidencePart,
+            channelPart: e,
+            evidencePart,
+            ...(ev ? { evidence: { ...ev, contribution: evidencePart } } : {}),
+            drivers: drivers.sort((a, b) => Math.abs(b.contribution) - Math.abs(a.contribution)),
+        }
     }
 
     const silent = views.filter(v => !Object.values(idx).some(chs => v.channel_id in chs)).map(v => v.channel_id)
@@ -331,9 +375,11 @@ export function sizeFromChannels({ views, reactions = [], exclude = [], manualRo
                 bucket: c.bucket,
                 stance: bp > 0 ? 'over' : 'under',
                 active_bp: bp,
-                basis: 'channels',
+                // Named for whichever part carries the row. A tech row is always `evidence`: no channel reaches it.
+                basis: Math.abs(c.channelPart ?? c.e) >= Math.abs(c.evidencePart ?? 0) ? 'channels' : 'evidence',
                 rationale: _rationale(c),
                 drivers: c.drivers.map(d => ({ ...d, contribution: Math.round(d.contribution * 10000) / 10000 })),
+                ...(c.evidence ? { evidence: { ...c.evidence, contribution: Math.round(c.evidence.contribution * 10000) / 10000 } } : {}),
             }))
     }
 
@@ -354,17 +400,25 @@ function _rationale(c) {
             : `${d.channel_id} ${sz(d.dz)}`
         return `${move} × β ${pct(d.beta)}${d.multiplier ? ` × ${d.multiplier} (reaction)` : ''} = ${pct(d.contribution)}`
     })
+    if (c.evidence && Math.abs(c.evidence.contribution) >= 0.0005) {
+        const ev = c.evidence
+        parts.push(`industry evidence ${ev.score >= 0 ? '+' : ''}${ev.score.toFixed(2)} (beat ${ev.beat === null ? '—' : Math.round(ev.beat * 100) + '%'}, momentum ${ev.momentum === null ? '—' : pct(ev.momentum)}) = ${pct(ev.contribution)}`)
+    }
     const scope = c.stands_for && c.stands_for.length > 1 ? ` Graded on ${c.symbol}, which also stands for ${c.stands_for.filter(b => b !== c.bucket).join(', ')}.` : ''
-    return `Sized from the desk's channel calls: expected ${pct(c.e)} vs the market — ${parts.join('; ')}.${scope}`
+    return `Sized: expected ${pct(c.e)} vs the market — ${parts.join('; ')}.${scope}`
 }
 
 // ─── the preview Pythia reads ─────────────────────────────────────────────────
 
 /** sizeFromChannels' result → LLM-ready text. PURE. */
-export function formatSizing(result, views) {
-    if (!views?.length) return 'No valid channel calls. Each needs a channel id from get_channel_state and a non-zero dz within ±3.'
+export function formatSizing(result, views = []) {
+    if (!views?.length && !result.rows.length) return 'No valid channel calls and no industry evidence to size. Each call needs a channel id from get_channel_state and a dz within ±3.'
     const pct = (v) => `${v >= 0 ? '+' : ''}${(v * 100).toFixed(2)}%`
-    const rows = result.rows.map(r => `  ${r.bucket.padEnd(36)} ${r.stance.padEnd(5)} ${String(r.active_bp).padStart(5)}bp   ${r.drivers.slice(0, 2).map(d => `${d.channel_id} ${pct(d.contribution)}`).join(', ')}`)
+    const rows = result.rows.map(r => {
+        const parts = r.drivers.slice(0, 2).map(d => `${d.channel_id} ${pct(d.contribution)}`)
+        if (r.evidence && Math.abs(r.evidence.contribution) >= 0.0005) parts.push(`evidence ${pct(r.evidence.contribution)}`)
+        return `  ${r.bucket.padEnd(36)} ${r.stance.padEnd(5)} ${String(r.active_bp).padStart(5)}bp   [${r.basis}] ${parts.join(', ')}`
+    })
     const quiet = result.candidates
         .filter(c => !result.rows.some(r => r.bucket === c.bucket))
         .sort((a, b) => Math.abs(b.e) - Math.abs(a.e))
@@ -382,7 +436,9 @@ export function formatSizing(result, views) {
         return [head, ...(v.flags ?? []).map(f => `      ⚑ ${FLAG[f] ?? f}`)].join('\n')
     })
     return [
-        `PROPOSED TABLE from ${views.length} channel call(s). Only each call's DEVIATION from its base rate is sized — a call that repeats history is already priced and sizes nothing:`,
+        views.length
+            ? `PROPOSED TABLE from ${views.length} channel call(s) plus the industry evidence. Only each call's DEVIATION from its base rate is sized — a call that repeats history is already priced and sizes nothing:`
+            : 'PROPOSED TABLE from the industry evidence alone — no channel calls:',
         ...callLines,
         '',
         ...(rows.length ? rows : ['  (no bucket clears the minimum expected move — the calls are too small, or reach no measured exposure)']),
@@ -399,28 +455,29 @@ export function formatSizing(result, views) {
  * reverses one is flagged in the preview — before it is published, not after.
  */
 export async function previewSizing({ channel_views, reactions, exclude, manual_rows } = {}, { previous = [] } = {}) {
-    const { betas, latest } = await readSizingInputs()
+    const { betas, latest, evidence } = await readSizingInputs()
     const known = new Set([...(betas ?? []).map(b => b.channel_id), ...Object.keys(latest?.channels ?? {})])
     const views = withBases(normalizeViews(channel_views, known.size ? known : null), latest, previous)
-    const result = sizeFromChannels({ views, reactions: normalizeReactions(reactions), exclude: Array.isArray(exclude) ? exclude : [], manualRows: Array.isArray(manual_rows) ? manual_rows : [], betas })
+    const result = sizeFromChannels({ views, reactions: normalizeReactions(reactions), exclude: Array.isArray(exclude) ? exclude : [], manualRows: Array.isArray(manual_rows) ? manual_rows : [], betas, evidence })
     return formatSizing(result, views)
 }
 
 /**
- * A parsed <tilt> draft carrying `channel_views` → the same draft with the sized rows merged in
- * and each call stamped with the z it was made at, so it can be graded at maturity. A draft
- * without channel views is returned untouched.
+ * A parsed <tilt> draft → the same draft with the sized rows merged in and each call stamped with
+ * the z it was made at, so it can be graded at maturity. Sized from the channel calls AND the
+ * industry evidence — so a draft with no calls is still sized wherever there is evidence (that is
+ * how tech gets rows at all). Returned untouched only when there is neither.
  */
 export async function expandChannelDraft(draft, now = new Date().toISOString(), { previous = [] } = {}) {
-    if (!draft || !Array.isArray(draft.channel_views) || !draft.channel_views.length) return draft
-    const { betas, latest } = await readSizingInputs()
+    if (!draft) return draft
+    const { betas, latest, evidence } = await readSizingInputs()
     const known = new Set([...(betas ?? []).map(b => b.channel_id), ...Object.keys(latest?.channels ?? {})])
     const views = withBases(normalizeViews(draft.channel_views, known.size ? known : null), latest, previous)
-    if (!views.length) return draft
+    if (!views.length && !Object.keys(evidence ?? {}).length) return draft
     const reactions = normalizeReactions(draft.reactions)
     const manualRows = Array.isArray(draft.tilts) ? draft.tilts : []
     const exclusions = normalizeExclusions(draft.exclude)
-    const { rows } = sizeFromChannels({ views, reactions, exclude: exclusions, manualRows, betas })
+    const { rows } = sizeFromChannels({ views, reactions, exclude: exclusions, manualRows, betas, evidence })
     return {
         ...draft,
         exclusions,

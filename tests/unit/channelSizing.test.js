@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 
 import {
     sizeFromChannels, normalizeViews, normalizeReactions, normalizeExclusions, formatSizing, expandChannelDraft, withBases, _setSizingIO,
-    CAP_BP, MAX_DZ, REACTIONS,
+    CAP_BP, MAX_DZ, REACTIONS, K_EVIDENCE, CHANNEL_CONFIDENCE,
 } from '../../api/strategy/channelSizing.service.js'
 import { normalizeTilt, overlappingRows, incoherentRows } from '../../api/strategy/tilt.service.js'
 import { _parseStrategyResponse } from '../../services/agents/strategy.agent.service.js'
@@ -36,7 +36,7 @@ const net = (rows) => rows.reduce((s, r) => s + r.active_bp, 0)
 test('the expected move is beta × dz, and only significant betas transmit', () => {
     const { candidates } = size({ views: [{ channel_id: 'energy_cost', dz: 1 }] })
     const xle = candidates.find(c => c.bucket === 'Energy')
-    assert.equal(xle.e, 0.046)
+    assert.equal(xle.e, CHANNEL_CONFIDENCE * 0.046)
     assert.equal(candidates.find(c => c.bucket === 'Utilities').e, 0, 'a measured zero moves nothing')
 })
 
@@ -135,7 +135,7 @@ test('a call is sized on its DEVIATION from the base rate', () => {
     assert.equal(v.base_dz, -1.78)
     assert.equal(v.deviation, 0.98)
     const { candidates } = size({ views: [v] })
-    assert.equal(candidates.find(c => c.bucket === 'Utilities').e, -0.013 * 0.98)
+    assert.equal(candidates.find(c => c.bucket === "Utilities").e, CHANNEL_CONFIDENCE * -0.013 * 0.98)
 })
 
 test('a call that repeats the base rate sizes nothing — it is already priced', () => {
@@ -204,7 +204,7 @@ test('a block carrying only channel calls parses, and expands into sized rows st
     const { tilt } = _parseStrategyResponse(raw)
     assert.ok(tilt, 'a calls-only block is a draft, not a discussion')
 
-    _setSizingIO({ betas: async () => BETAS, latest: async () => ({ channels: { energy_cost: { z: 1.66 } } }) })
+    _setSizingIO({ betas: async () => BETAS, latest: async () => ({ channels: { energy_cost: { z: 1.66 } } }), evidence: async () => [] })
     const expanded = await expandChannelDraft(tilt, '2026-10-01T00:00:00.000Z')
     assert.ok(expanded.tilts.length >= 1)
     assert.equal(expanded.channel_views[0].z_at_set, 1.66, 'the call is graded from the z it was made at')
@@ -264,7 +264,7 @@ test('an exclusion carries its reason onto the view, and a missing one is called
     const { notes } = size({ views: [{ channel_id: 'energy_cost', dz: 1 }], exclude: ['Energy'] })
     assert.match(notes.join(' '), /Excluded WITHOUT a reason: Energy/)
 
-    _setSizingIO({ betas: async () => BETAS, latest: async () => ({ channels: {} }) })
+    _setSizingIO({ betas: async () => BETAS, latest: async () => ({ channels: {} }), evidence: async () => [] })
     const draft = await expandChannelDraft({ channel_views: [{ channel_id: 'discount_rate', dz: -1 }], exclude: [{ bucket: 'Utilities', reason: 'r' }], tilts: [] })
     assert.deepEqual(normalizeTilt(draft).exclusions, [{ bucket: 'Utilities', reason: 'r' }])
 })
@@ -275,4 +275,59 @@ test('excluding a sector also excludes its industries when the calls split it', 
         exclude: [{ bucket: 'Financial Services', reason: 'our book disagrees' }] })
     assert.ok(candidates.some(c => c.bucket === 'Banks - Regional'), 'the sector did split')
     assert.ok(!rows.some(r => ['Financial Services', 'Banks - Regional', 'Insurance - Life'].includes(r.bucket)))
+})
+
+// ── the industry evidence ────────────────────────────────────────────────────
+
+test('evidence adds to the expected move in the same units, at the measured rate', () => {
+    const evidence = { XLE: { score: 0.5, beat: 0.8, surprise: 0.05, momentum: 0.1 } }
+    const { candidates } = size({ views: [{ channel_id: 'energy_cost', dz: 1 }], evidence })
+    const xle = candidates.find(c => c.bucket === 'Energy')
+    assert.equal(xle.channelPart, CHANNEL_CONFIDENCE * 0.046)
+    assert.equal(xle.evidencePart, K_EVIDENCE * 0.5)
+    assert.equal(xle.e, CHANNEL_CONFIDENCE * 0.046 + K_EVIDENCE * 0.5)
+})
+
+test('with no channel calls the evidence alone sizes a table, and those rows say so', () => {
+    const evidence = { XLE: { score: 0.5 }, XLU: { score: -0.5 }, XLF: { score: 0.3 } }
+    const { rows } = size({ views: [], evidence })
+    assert.ok(rows.length >= 2)
+    assert.ok(rows.every(r => r.basis === 'evidence'))
+    assert.equal(rows.find(r => r.bucket === 'Energy').stance, 'over')
+    assert.equal(rows.find(r => r.bucket === 'Utilities').stance, 'under')
+    assert.ok(Math.abs(net(rows)) <= 10)
+    assert.match(rows[0].rationale, /industry evidence/)
+})
+
+test('a channel view and contrary evidence offset; the row is labelled by what carries it', () => {
+    // Rates down 1z: Utilities +1.3% from the channel; evidence -0.5 takes off 1.75%.
+    const withEv = size({ views: [{ channel_id: 'discount_rate', dz: -1 }], evidence: { XLU: { score: -0.5 } } }).candidates.find(c => c.bucket === 'Utilities')
+    assert.ok(withEv.e < 0, 'the evidence outweighs a small channel part')
+    const ch = size({ views: [{ channel_id: 'energy_cost', dz: 1 }, { channel_id: 'discount_rate', dz: -1 }], evidence: { XLE: { score: -0.1 } } })
+    assert.equal(ch.rows.find(r => r.bucket === 'Energy').basis, 'channels')
+})
+
+test('a draft with no calls is still sized where there is evidence — that is how tech gets rows', async () => {
+    _setSizingIO({ betas: async () => BETAS, latest: async () => ({ channels: {} }),
+        evidence: async () => [{ _id: 'XLE', evidence: 0.5 }, { _id: 'XLU', evidence: -0.5 }] })
+    const out = await expandChannelDraft({ tilts: [] })
+    assert.ok(out.tilts.some(r => r.bucket === 'Energy' && r.basis === 'evidence'))
+    const stored = normalizeTilt(out)
+    assert.equal(stored.tilts.find(r => r.bucket === 'Energy').evidence.score, 0.5)
+    _setSizingIO({ evidence: async () => [] })
+})
+
+test('the preview names the basis of every row and works with no calls at all', () => {
+    const r = size({ views: [], evidence: { XLE: { score: 0.5 }, XLU: { score: -0.5 } } })
+    const text = formatSizing(r, [])
+    assert.match(text, /PROPOSED TABLE from the industry evidence alone/)
+    assert.match(text, /\[evidence\]/)
+})
+
+test('the channel term is discounted for being a forecast; the measured evidence is not', () => {
+    const { candidates } = size({ views: [{ channel_id: 'energy_cost', dz: 1 }], evidence: { XLE: { score: 0.5 } } })
+    const xle = candidates.find(c => c.bucket === 'Energy')
+    assert.equal(xle.channelPart, CHANNEL_CONFIDENCE * 0.046)
+    assert.equal(xle.evidencePart, K_EVIDENCE * 0.5, 'evidence is already calibrated on realized returns')
+    assert.ok(CHANNEL_CONFIDENCE > 0 && CHANNEL_CONFIDENCE < 1)
 })

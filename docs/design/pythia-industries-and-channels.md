@@ -281,6 +281,21 @@ makes the difference mean anything.
 > convictions. The preview flags a call against its base rate or reversing a standing call; the
 > standing calls ride into each review's context. Kept on file as the alternative: size on the call
 > itself with the base rate as an anchor only (fuller tables, but the base-rate part is priced).
+>
+> **Then INDUSTRY READS beside the channels (2026-10-01).** No channel moves the tech funds: SMH,
+> IGV, XSW, FDN, IYZ and XLC have no significant beta to any of the 23, and twenty candidate series
+> — semiconductor production, electronics and core capex orders, power output, trade policy, China's
+> leading indicator, pharma and food prices, lending, financial stress — moved none of them at weekly
+> OR monthly frequency (`scratch/backtest_candidate_channels.py`, `_monthly.py`). So the evidence for
+> tech has to be the industry's own. Rule set with Roy: Pythia points at INDUSTRIES (Argus gets the
+> names, Prometheus the companies), so every read is an industry number. Tested
+> (`scratch/backtest_industry_reads.py`): beat rate IC +0.073 (t 2.2), surprise +0.051, momentum
+> +0.076; their composite EVIDENCE +0.083 (t 2.2), +0.115 on tech. Valuation was INVERTED (cheap
+> industries kept lagging, IC −0.067, t −2.5) and reported growth priced, so both are context only.
+> Sizing adds `K_EVIDENCE (0.035, measured) × evidence` to each fund's expected move, beside
+> `beta × deviation`: agreeing views add, disagreeing ones offset, tech is sized on evidence alone,
+> rows carry basis `evidence` where it dominates. Caveats on the record: the three evidence parts were
+> kept after seeing them work, and the earnings members are today's companies (survivorship).
 
 The formula is the archived engine's, and it is better than "exposure × expected move":
 
@@ -460,6 +475,22 @@ repos. The code is cheap; the collections need a script.
 - **Who caps a narrow industry row?** `grain` is recorded and a four-name fund is not a
   forty-name one; nothing here says what Atlas does with the difference.
 - **Does Pythia publish both grains in one turn**, or the finer table on demand?
+- **OPTION (parked 2026-10-01, revisit once the channels + industry reads work end to end):
+  synthetic industry baskets for the 79 industries with no fund of their own.** Today such an
+  industry inherits its SECTOR fund's channel betas and is graded on that fund (Restaurants on XLY),
+  so neither the exposure nor the grade is the industry's. Build each industry's own index from its
+  companies' prices — the same > $2B members the industry earnings read uses, cap-weighted:
+  - **betas** fitted on the basket's history give every industry its own measured exposures
+    (survivorship-biased, since the members are today's; sensitivities are far less affected by that
+    than return levels);
+  - **grading** on the basket FROZEN at the call (members and weights fixed at `set_at`) is honest
+    going forward and free of survivorship;
+  - it is also what the pipeline holds: Pythia points at the industry, Argus screens those same
+    companies, Prometheus picks among them — so it answers "graded on the proxy or on what was held"
+    above for these industries.
+  Cost: ~2,500 company price histories (FMP, cached) and a weekly roll-up. **Check first:** build a
+  basket for an industry that HAS a fund (Semiconductors vs SMH) and confirm it tracks before
+  trusting one where nothing can be checked against.
 
 ## 12. Build order
 

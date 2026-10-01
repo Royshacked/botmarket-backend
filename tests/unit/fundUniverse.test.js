@@ -45,3 +45,9 @@ test('publishing writes one document and never throws', async () => {
     _setFundUniverseIO({ write: async () => { throw new Error('mongo down') } })
     assert.equal(await publishFundUniverse(now), null, 'a failed boot write costs the list, not the server')
 })
+
+test('the industry-to-sector map rides along, so the engine can score a sector fund on all its industries', () => {
+    const { industry_sector } = fundUniverse()
+    assert.equal(Object.keys(industry_sector).length, 155)
+    assert.equal(industry_sector['Semiconductors'], 'Technology')
+})
