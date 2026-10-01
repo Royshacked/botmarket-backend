@@ -115,34 +115,46 @@ export function thin(points, max = MAX_POINTS) {
  * summed across rows), so the line follows the grader rather than the other way round.
  *
  * Only days where BOTH legs priced are plotted. A day with one leg missing is not a flat day.
+ *
+ * CONTEXT BEFORE THE CALL. Points dated before `set_at`'s day carry `pre: true`: where the bucket was
+ * coming from, on the same scale — rebased on the same frozen baseline, so the line passes 100 at
+ * the call and its LAST point is still exactly the graded number. They are context, never part of the
+ * stance's performance; the board draws them dimmed and judges "working or not" on the rest.
  */
 export function relativeSeries(row, bucketCloses, benchCloses) {
     const base  = toNum(row?.base_px)
     const bBase = toNum(row?.base_bench_px)
     if (base === null || base <= 0 || bBase === null || bBase <= 0) return []
 
+    const setDay = Number.isFinite(Date.parse(row?.set_at ?? '')) ? _day(Date.parse(row.set_at)) : null
     const bench = new Map((Array.isArray(benchCloses) ? benchCloses : []).map(p => [_day(p.t), p.c]))
     const out = []
     for (const p of (Array.isArray(bucketCloses) ? bucketCloses : [])) {
         const b = bench.get(_day(p.t))
         if (!b) continue
-        out.push({ t: p.t, v: round2((p.c / base - b / bBase + 1) * 100) })
+        const point = { t: p.t, v: round2((p.c / base - b / bBase + 1) * 100) }
+        if (setDay && _day(p.t) < setDay) point.pre = true
+        out.push(point)
     }
     return out
 }
 
+/** How much history before a call its line shows. A quarter: enough to see the trend it was made into. */
+export const CONTEXT_DAYS = 91
+
 /**
  * Every open stance's line for one view → `{ [bucket]: [{t, v}] }`.
  *
- * Each line starts at the row's OWN `set_at`, because that is when the call was made and the window
- * it is graded over. Rows share the benchmark fetch — one range covering the earliest `set_at` on
- * the table, sliced per row — so a twelve-row view costs thirteen reads, not twenty-four.
+ * Each line starts CONTEXT_DAYS before the row's OWN `set_at` — the call's window plus a quarter of
+ * where the bucket came from (marked `pre`). A call made today therefore still has a line: all
+ * context, ending at the call. Rows share the benchmark fetch — one range covering the earliest
+ * start on the table, sliced per row — so a twelve-row view costs thirteen reads, not twenty-four.
  */
 export async function seriesForTilt(doc, { nowMs = Date.now(), io = _io } = {}) {
     const rows = (Array.isArray(doc?.tilts) ? doc.tilts : []).filter(r => r?.bucket && r?.proxy?.symbol)
     if (!rows.length) return {}
 
-    const starts = rows.map(r => Date.parse(r.set_at ?? '')).filter(Number.isFinite)
+    const starts = rows.map(r => Date.parse(r.set_at ?? '')).filter(Number.isFinite).map(ms => ms - CONTEXT_DAYS * DAY_MS)
     if (!starts.length) return {}
     const floor = nowMs - MAX_LOOKBACK_DAYS * DAY_MS
     const from  = Math.max(Math.min(...starts), floor)
@@ -156,11 +168,10 @@ export async function seriesForTilt(doc, { nowMs = Date.now(), io = _io } = {}) 
 
     const out = {}
     for (const row of rows) {
-        const startMs = Number.isFinite(Date.parse(row.set_at ?? '')) ? Math.max(Date.parse(row.set_at), floor) : from
-        // A call made today has no line yet, and asking for a zero-width range is not a neutral
-        // way to discover that: the provider 403s on it and logs a failure that reads like an
-        // outage. Two days is the shortest window that can hold two closes.
-        if (nowMs - startMs < 2 * DAY_MS) continue
+        const setMs = Date.parse(row.set_at ?? '')
+        const startMs = Number.isFinite(setMs) ? Math.max(setMs - CONTEXT_DAYS * DAY_MS, floor) : from
+        // The range always spans the context quarter, so it is never the zero-width request that
+        // 403s at the provider — the reason a call made today used to get no line at all.
         const closes  = await closesFor(row.proxy.symbol, startMs, nowMs, io)
         if (!closes.length) continue
         const line = relativeSeries(row, closes, benchCloses.filter(p => p.t >= startMs))

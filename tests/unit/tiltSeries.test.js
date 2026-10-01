@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { relativeSeries, thin, seriesForTilt, closesFor, _clearSeriesCache, MAX_POINTS } from '../../api/strategy/tiltSeries.service.js'
+import { relativeSeries, thin, seriesForTilt, closesFor, _clearSeriesCache, MAX_POINTS, CONTEXT_DAYS } from '../../api/strategy/tiltSeries.service.js'
 import { relativeReturnPct, contributionBp } from '../../monitoring/tilt.assess.js'
 
 // The line behind a stance. The one property worth defending is that it AGREES with the number
@@ -104,14 +104,27 @@ test('every open stance gets a line, and the benchmark is fetched ONCE for the t
     assert.equal(asked.filter(s => s === 'SPY').length, 1, 'one benchmark read serves the whole table')
 })
 
-test('a stance set TODAY has no line, and does not cost a fetch to find out', async () => {
-    // Asking a provider for a zero-width range is not a neutral way to learn this: it 403s and
-    // logs a failure that reads like an outage.
+test('a stance set TODAY still has a line — the quarter it was made into, all marked as context', async () => {
+    // It used to have none (a call made today has no performance yet), and a sized table publishes
+    // most rows fresh, so the whole board went blank. The range now always spans CONTEXT_DAYS before
+    // the call, so it is never the zero-width request that 403s.
     const asked = []
-    const io = { fetchBars: async (s) => { asked.push(s); return recent(10, 100) } }
+    const io = { fetchBars: async (s, from, to) => { asked.push({ s, days: (to - from) / DAY }); return recent(60, s === 'SPY' ? 200 : 100) } }
+    _clearSeriesCache()
     const out = await seriesForTilt(doc({ tilts: [row({ set_at: new Date().toISOString() })] }), { io })
-    assert.deepEqual(out, {})
-    assert.ok(!asked.includes('XLK'), 'the bucket was never fetched')
+    const line = out.Technology
+    assert.ok(line && line.length > 1, 'a line is drawn')
+    assert.ok(line.slice(0, -1).every(p => p.pre === true), 'everything before today is context')
+    assert.ok(asked.find(a => a.s === 'XLK').days >= CONTEXT_DAYS - 1, 'never a zero-width range')
+})
+
+test('context points are marked, the call\'s own are not, and the last point is still the grade', () => {
+    const set = '2026-01-03T12:00:00.000Z'
+    const r = row({ set_at: set, base_px: 100, base_bench_px: 200 })
+    const line = relativeSeries(r, bars(98, 99, 100, 104), bars(200, 200, 200, 210))   // T0 = Jan 1
+    assert.deepEqual(line.map(p => !!p.pre), [true, true, false, false])
+    const graded = relativeReturnPct({ sectorStart: 100, sectorNow: 104, benchStart: 200, benchNow: 210 })
+    assert.ok(Math.abs((line.at(-1).v - 100) - graded) < 0.02)
 })
 
 test('a row with no proxy is skipped — there is nothing to draw it from', async () => {
