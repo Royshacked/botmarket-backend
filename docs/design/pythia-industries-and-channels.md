@@ -544,7 +544,9 @@ Each step is useful alone and none of them requires the next.
    move off the base rate the way the call departed. Once 10 calls are final, the sizing's
    CHANNEL_CONFIDENCE becomes `clamp(2 × hit − 1, 0, 1)` — 0.4 at a 70% hit rate (the placeholder's
    level), 0 at a coin flip — and Pythia reads its record at the top of each review. First finals
-   due 2027-04-01. **Still open in this step:** the Prometheus verification loop.
+   due 2027-04-01. The calls, their base rates and their marks show on the forecast board
+   (`GET /tilt/calls`). **Still open in this step:** the Prometheus verification loop — DEFERRED by
+   Roy, 2026-10-01 ("not now").
    Original text:
    **Elasticity, residual sizing, and the Prometheus verification loop.** The largest step, and the
    one that makes the judgment scoreable.
