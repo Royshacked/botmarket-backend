@@ -48,10 +48,13 @@ export const STANCES = ['over', 'neutral', 'under']
  * and a reader deserves to know which one is carrying a call:
  *   • bottom_up        — our own covered names in the sector say so. Most defensible.
  *   • revisions        — sector estimate-revision momentum. The best-supported signal empirically.
+ *   • channels         — the regime mapped onto an exposure the bucket's fund has MEASURABLY shown
+ *                        (a significant channel beta, get_channel_exposures). rate_sensitivity with
+ *                        the exposure measured instead of asserted. Added 2026-09-30.
  *   • valuation        — sector multiple vs its own history. Weak mean reversion, non-zero.
  *   • rate_sensitivity — the regime read mapped onto the sector's factor exposure. Top-down.
  */
-export const TILT_BASES = ['bottom_up', 'revisions', 'valuation', 'rate_sensitivity']
+export const TILT_BASES = ['bottom_up', 'revisions', 'channels', 'valuation', 'rate_sensitivity']
 
 /** Doc lifecycle. One `active` view per benchmark; publishing supersedes rather than overwrites. */
 export const TILT_STATUSES = ['active', 'superseded', 'retired']

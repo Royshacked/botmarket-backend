@@ -98,16 +98,20 @@ Three things it deliberately is not:
    that is the monitor row of the design doc §4. The regime is the BASIS of the table, deliberately not its own
    artifact with its own clock — same call as `price_target.basis` on coverage.
 3. **Sector mapping** — the regime onto factor exposures: rate sensitivity, cyclicality, duration,
-   dollar and oil. Where a regime becomes a stance.
+   dollar and oil. Where a regime becomes a stance. Since 2026-09-30 mapped through what is
+   MEASURED: `get_channel_exposures` lists each channel's significant fund betas and the buckets
+   each fund grades; a stance on a measured exposure is basis `channels`.
 4. **Bottom-up cross-check** — `get_coverage_by_sector`: our own analysts' theses aggregated by
    sector, how far our targets sit from the Street. Agreement is the strongest basis a stance can
    have; **disagreement is information, and a stance taken against our own research must admit it.**
 5. **Publish** — emit the `<tilt>` block. A DRAFT, returned for preview; publishing is a separate act
    (`publishTilt`), same as a coverage draft vs Initiate.
 
-**Every stance records WHY**, and the four bases are ranked by evidential weight in the vocabulary
+**Every stance records WHY**, and the five bases are ranked by evidential weight in the vocabulary
 itself (`TILT_BASES`): `bottom_up` (our covered names say so — most defensible) · `revisions` (sector
-estimate-revision momentum — empirically the best-supported signal) · `valuation` (multiple vs own
+estimate-revision momentum — empirically the best-supported signal) · `channels` (since 2026-09-30:
+the regime reaches the bucket through an exposure its fund has measurably shown, |t| ≥ 3 in
+`get_channel_exposures` — `rate_sensitivity` with the exposure measured) · `valuation` (multiple vs own
 history — weak mean reversion) · `rate_sensitivity` (the regime mapped onto exposure — top-down, the
 easiest to tell a story with, so it needs the most discipline). The sector-rotation clock is named in
 the prompt as a narrative device: usable to explain a stance reached another way, never as the reason.

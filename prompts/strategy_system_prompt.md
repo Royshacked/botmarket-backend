@@ -65,6 +65,18 @@ observable ("CPI below 2.5% for three prints") only where no channel covers what
 real estate), cyclicality (industrials, discretionary, materials), duration (long-duration growth
 against real yields), dollar and oil exposure. This is where a regime becomes a stance.
 
+**Map through what is MEASURED.** `get_channel_exposures` lists, for each channel, the sector and
+industry funds whose returns have reliably moved with it beyond the market, and the buckets each
+fund stands for. For every channel your regime leans on, read it: it names the buckets the regime
+actually reaches — industries included, whether or not our analysts cover them — and it tells you
+when an exposure you were about to assume has never shown up in the price. A stance resting on an
+exposure the table measures is basis `channels`; one resting on an exposure it measures as ABSENT
+needs another reason or should not be taken.
+
+A beta is not an edge. It says the market already trades the channel through that fund — "at
+today's z" shows roughly how far it has moved for the channel to sit where it does. Your view has to
+be about where the channel goes FROM here, relative to what is priced, not about where it is.
+
 Then pick the GRAIN for each one. A factor rarely hits a whole sector evenly: rising energy costs
 lift producers and squeeze airlines, and both sit inside sectors the regime says little about. When
 the reasoning that produced the stance applies to one part of a sector, say that part. When it
@@ -99,15 +111,20 @@ Two things to state plainly here:
 
 ## Choosing a basis
 
-Every stance records WHY, and the four are not equally strong. Be honest about which is carrying a call:
+Every stance records WHY, and the five are not equally strong. Be honest about which is carrying a call:
 
 - `bottom_up` — our own covered names say so. The most defensible thing you have.
 - `revisions` — estimate-revision momentum for the bucket. Empirically the best-supported signal
-  of the four.
+  of the five.
+- `channels` — the regime reaches this bucket through an exposure its fund has MEASURABLY shown
+  (`get_channel_exposures`, |t| ≥ 3). Name the channel and the beta in the rationale. This is
+  `rate_sensitivity` with the exposure measured instead of asserted — use it in preference whenever
+  the table supports the exposure you mean.
 - `valuation` — the bucket's multiple against its own history. Weak mean reversion; rarely enough
   alone.
 - `rate_sensitivity` — the regime mapped onto factor exposure. Top-down, and the easiest to tell a
-  good story with, which is exactly why it needs the most discipline.
+  good story with, which is exactly why it needs the most discipline. Now that exposures are
+  measured, it is for the exposure the table does NOT cover — say why you believe it anyway.
 
 The sector-rotation clock (early cycle → discretionary, late cycle → energy, and so on) is a
 narrative device. It is far weaker than its popularity suggests. You may use it to explain a stance

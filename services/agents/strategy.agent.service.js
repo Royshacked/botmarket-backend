@@ -22,6 +22,7 @@ import { getMacroSnapshot, getSectorSnapshot } from '../../providers/fmp.provide
 import { getPricedIn } from '../../providers/fred.provider.js'
 import { coverageService } from '../../api/analyst/coverage.service.js'
 import { readChannelState, formatChannelState } from '../../api/strategy/channelState.service.js'
+import { readChannelExposures, formatChannelExposures } from '../../api/strategy/channelExposures.service.js'
 import { SECTORS } from '../entity/vocabulary.js'
 import { logger } from '../logger.service.js'
 
@@ -44,6 +45,8 @@ export const TOOLS = [
         // desk (agentToolsRegistry.test.js). The channel read, revived 2026-09-30 as step 4 of
         // docs/design/pythia-industries-and-channels.md: Python writes it, this only formats it.
         get_channel_state: `The macro CHANNELS, measured: every driver (energy cost, real yields, the curve, breakevens, credit spreads, the dollar, liquidity, labor, freight, demand…) as a z-score against its own trailing two years, with its reading one and three months ago and where today sits in its history since 2005, plus the week's regime from VIX and credit spreads. The Phase-1 read of what is actually moving, and the vocabulary for kill-criteria — a falsifier written as "discount_rate z below +1" is checkable where prose is not. READINGS, not sector evidence: which buckets move with a channel is not measured yet. Each line carries its own as-of date; monthly series lag by weeks. No arguments.`,
+        // Step 5 of the same design: the betas on the funds. Ahead of consult for the same reason.
+        get_channel_exposures: `Which BUCKETS move with which CHANNEL, measured: every sector and industry fund's weekly return beyond the market regressed on each channel since ~2006, listing only |t| ≥ 3, with the buckets each fund stands for and how far it has already moved at today's z. The Phase-3 evidence for mapping a regime onto buckets — it turns "utilities are rate sensitive" from a story into a number, and names the INDUSTRIES a channel actually reaches, including ones our coverage does not. A beta proves an exposure is real; it is not an edge — a high one means the channel is already traded through that fund. Pass \`channel\` (an id from get_channel_state) to narrow to one.`,
         // Appended, never inserted — prompt caching keys off the array prefix. The reasoning sidecar
         // (services/deepThink.service.js): one bounded decision put to a stronger model and handed
         // back as a tool result. The mechanism half of this description is shared with every other
@@ -63,6 +66,9 @@ const TOOL_HANDLERS = {
     get_priced_in:       makeToolHandler('get_priced_in',       () => getPricedIn(),       (e) => `Could not fetch market-implied levels: ${e.message}`, LOG),
     get_coverage_by_sector: makeToolHandler('get_coverage_by_sector', () => _coverageBySector(), (e) => `Could not read the coverage book: ${e.message}`, LOG),
     get_channel_state:   makeToolHandler('get_channel_state',   async () => formatChannelState(await readChannelState()), (e) => `Could not read the channel state: ${e.message}`, LOG),
+    get_channel_exposures: makeToolHandler('get_channel_exposures',
+        async (input) => formatChannelExposures(await readChannelExposures(), { channel: typeof input?.channel === 'string' && input.channel.trim() ? input.channel.trim() : null }),
+        (e) => `Could not read the channel exposures: ${e.message}`, LOG),
 }
 
 export const strategyAgentService = { chatStream }

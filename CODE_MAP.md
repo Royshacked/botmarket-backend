@@ -88,6 +88,13 @@ api/
                           delete: a desk that can erase its calls has no track record). Every handler
                           rides makeHandle. Publish diffs against the view in force (tilt.assess.
                           diffStances) → tiltNotify.notifyTiltChanged to every admin → runHouseScan
+    channelExposures.service.js  Pythia's get_channel_exposures: the engine's fund × channel betas
+                              (`pythia_channel_betas`), only |t| ≥ 3 offered as exposures, each fund
+                              named by the buckets it grades, beta × today's z as "already moved".
+                              Measured-zero and unmeasured counted apart, never as a zero beta
+    fundUniverse.service.js   Writes BUCKET_PROXY's funds to `pythia_fund_universe` at boot
+                              (server.js) — the list the Python engine fits betas on. The map stays
+                              here; the fit stays in Python; neither copies the other
     channelState.service.js   Pythia's get_channel_state: reads the ONE `pythia_channel_latest` doc
                               aether-engine's build_channel_state.py writes (23 channels, z / 4w / 13w
                               / percentile / as-of) and formats it. No arithmetic on this side; a read

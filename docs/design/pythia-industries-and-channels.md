@@ -449,6 +449,18 @@ Each step is useful alone and none of them requires the next.
    shows a reading ~6 weeks before it was published. Harmless for a read; a look-ahead leak for a
    regression on weekly changes. Lag monthly/quarterly series by their release delay before fitting.
 5. **Refit `betas` on the ~40 proxies.** Upgrades the weakest basis the desk publishes.
+   *Done 2026-09-30.* `aether-engine/scripts/build_channel_betas.py` (weekly cron
+   `pythia-channel-betas`) fits the 61 funds of `BUCKET_PROXY` — published by the backend at boot
+   to `pythia_fund_universe` (`api/strategy/fundUniverse.service.js`) — plus every fund an open
+   stance holds, into `pythia_channel_betas`. The channel table became point-in-time first (each
+   reading enters on its release date), closing the look-ahead noted under step 4. 174 of 1,403
+   pairs significant, ~4 expected by chance. Pythia reads them through `get_channel_exposures`
+   (`api/strategy/channelExposures.service.js`), and `channels` joined `TILT_BASES`.
+   **What it did not do: fill the table.** The first live run read exposures for six channels and
+   published two rows on `channels` — and still four rows in all. The desk's own reasons: the
+   exposures are "partly priced" and an extreme channel level "limits conviction". That is §5
+   working as written: a beta is the subtraction, and turning channels into weights across every
+   fund is step 6, not this one.
 6. **Elasticity, residual sizing, and the Prometheus verification loop.** The largest step, and the
    one that makes the judgment scoreable.
 7. **The event leg**, if ever.

@@ -646,6 +646,12 @@ export const TOOL_SCHEMAS = {
         "type": "object",
         "properties": {}
     },
+    get_channel_exposures: {
+        "type": "object",
+        "properties": {
+            "channel": { "type": "string", "description": "One channel id as get_channel_state prints it (e.g. discount_rate). Omit for every channel." }
+        }
+    },
     get_sector_view: {
         "type": "object",
         "properties": {}

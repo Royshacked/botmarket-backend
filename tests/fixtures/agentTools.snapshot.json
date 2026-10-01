@@ -64,6 +64,19 @@
             }
         },
         {
+            "name": "get_channel_exposures",
+            "description": "Which BUCKETS move with which CHANNEL, measured: every sector and industry fund's weekly return beyond the market regressed on each channel since ~2006, listing only |t| ≥ 3, with the buckets each fund stands for and how far it has already moved at today's z. The Phase-3 evidence for mapping a regime onto buckets — it turns \"utilities are rate sensitive\" from a story into a number, and names the INDUSTRIES a channel actually reaches, including ones our coverage does not. A beta proves an exposure is real; it is not an edge — a high one means the channel is already traded through that fund. Pass `channel` (an id from get_channel_state) to narrow to one.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "channel": {
+                        "type": "string",
+                        "description": "One channel id as get_channel_state prints it (e.g. discount_rate). Omit for every channel."
+                    }
+                }
+            }
+        },
+        {
             "name": "consult",
             "description": "Put ONE decision to a more capable desk head and get a straight answer back. It cannot see this conversation and cannot fetch anything — you hand it the question and every number it needs, and it thinks harder than you can in-line.\n\nA tilt is a broadcast the whole house reads, so it is worth thinking hard about ONCE. Reach for it in exactly two situations: **the regime call itself**, when the macro data, the tape and what is already priced do not point the same way and you have to name one regime anyway; and **a sector stance that contradicts our own coverage book** — your top-down read and the analysts' bottom-up theses disagree, and you must decide which one the stance follows and say why. Not per sector: the stances follow from the regime, and re-consulting each one is the same call answered eight times.\n\nDo NOT reach for it to look something up, to double-check work you are already confident in, to summarize, or because a question feels big. A consult costs a full model call and adds seconds to the turn: if you already know the answer, or a tool call would settle it, that is the cheaper and better move. Most turns should end without it.",
             "input_schema": {

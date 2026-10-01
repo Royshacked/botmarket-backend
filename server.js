@@ -39,6 +39,7 @@ import cookieParser from 'cookie-parser'
 import { chatRoutes }         from './api/chat/chat.routes.js'
 import { attach as attachChatWs } from './api/chat/chatWs.js'
 import { ensureIndexes as ensureChatIndexes } from './api/chat/chat.service.js'
+import { publishFundUniverse } from './api/strategy/fundUniverse.service.js'
 import { ensureUserIndexes } from './api/user/user.model.js'
 import { ensureIdeaIndexes } from './api/trade-ideas/tradeIdeas.service.js'
 import { ensureTradeIndexes } from './services/tradeCapture.service.js'
@@ -223,6 +224,8 @@ ensureWorkspaceIndexes()
 ensurePendingActionIndexes()
 ensureAetherIndexes()
 threadService.ensureThreadIndexes()
+// The funds the engine fits channel betas on — BUCKET_PROXY lives here, the fit lives in Python.
+publishFundUniverse()
 
 // ─── Background loops ─────────────────────────────────────────────────────────
 // ONE INSTANCE RUNS THESE, and that is now enforced rather than merely documented. They start
