@@ -547,6 +547,26 @@ Each step is useful alone and none of them requires the next.
    due 2027-04-01. The calls, their base rates and their marks show on the forecast board
    (`GET /tilt/calls`). **Still open in this step:** the Prometheus verification loop — DEFERRED by
    Roy, 2026-10-01 ("not now").
+   *Code review 2026-10-01* (steps 1–6, all three repos). Fixed: a call past its six months is never
+   reaffirmed (a restatement is a new forecast with a new clock); every publish syncs the ledger, so
+   a view with no calls retires the standing ones; a sector-prefixed hyphenated industry
+   ("Technology / Software - Infrastructure") resolves to the industry, not the sector; the HYG/IEI
+   legs are fetched in two windows under FMP's 5,000-row cap (`sources.fetch_windowed`, which the
+   betas fetch now shares); FMP's `{"Error Message"}` served as a 200 raises instead of reading as
+   no rows; the board says the call weight is still the placeholder below ten grades.
+   **Left open (low):** the ledger is written before the view is stored (a failed insert leaves it
+   ahead); `diffStances` still compares bp, so a sized row's 40→45bp drift sends a change card
+   though its clock is carried; `exclusions` written instead of `exclude` is dropped silently; a
+   shared fund kept under one sector (MOO, Materials) escapes an exclusion of the other sector it
+   stands for; evidence rows have no staleness gate in sizing; a matured row's line runs past its
+   frozen grade; house-scan queue rows read `context.sector` (`toWatchRow.js`) and lose their label;
+   `_row` drops `proxy.stands_for` on re-normalisation; one failed screener call aborts the
+   industry-reads job; a flat two-year window would write NaN z; industry reads that leave the
+   universe are never pruned; on the board, an `under` row with no weight draws its line unsigned
+   and shows direction by colour alone.
+   **Deploy order is load-bearing:** `migrate-tilt-buckets` in the same deploy as the code (every
+   reader reads `bucket`), then `repair-tilt-clocks`. Check the prod view's horizons first — a row
+   stored `12m` and reaffirmed with no horizon now reads `6m` and restarts its clock once.
    Original text:
    **Elasticity, residual sizing, and the Prometheus verification loop.** The largest step, and the
    one that makes the judgment scoreable.

@@ -813,6 +813,9 @@ GET  /equity-curve   equity points (?fromMs=)
   removal that never happened.
 - **Strategy** `/api/strategy` — `POST /stream` + the tilt log. `GET /tilt/current` is the house
   view, the same document for everyone; `POST /tilt/:id/retire` archives, and there is no delete.
+  `GET /tilt/series` serves the line behind each stance (since its call, with ~3 months of history
+  before it) and `GET /tilt/calls` the channel calls' latest marks and the desk's record — both
+  admin-only, like the desk.
 - **Pending actions** `/api/pending-actions` — `GET /` (the queued list), `POST /:id/execute`,
   `POST /:id/cancel`. See the off-hours queue above.
 - **Threads** `/api/threads` — the unified build-conversation drafts (subject-bound, TTL-expired,
