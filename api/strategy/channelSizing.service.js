@@ -280,6 +280,27 @@ export function sizeFromChannels({ views = [], reactions = [], exclude = [], man
         else candidates.push(sec)
     }
 
+    // ONE ROW PER FUND. Candidates are built sector by sector, so a fund that grades industries in
+    // SEVERAL sectors came out once per sector: MOO (Agricultural Inputs / Farm Products / Machinery,
+    // in Materials, Consumer Defensive and Industrials) published as three +40bp rows on one fund —
+    // a 120bp bet reading as three independent views (tilt_SPX_11807d9e, 2026-10-01). Collapsed here
+    // to the bucket the fund is exact for, else the first by name, standing for all of them.
+    const bySym = new Map()
+    for (const c of candidates) {
+        if (c.grain !== 'industry') continue
+        ;(bySym.get(c.symbol) ?? bySym.set(c.symbol, []).get(c.symbol)).push(c)
+    }
+    for (const [sym, dupes] of bySym) {
+        if (dupes.length < 2) continue
+        const entries = (funds[sym] ?? []).filter(e => e.grain === 'industry')
+        const label = _label(entries)
+        const keep = dupes.find(c => c.bucket === label) ?? [...dupes].sort((a, b) => a.bucket.localeCompare(b.bucket))[0]
+        keep.stands_for = [...new Set(dupes.flatMap(c => c.stands_for ?? [c.bucket]))].sort()
+        for (const c of dupes) {
+            if (c !== keep) candidates.splice(candidates.indexOf(c), 1)
+        }
+    }
+
     // Manual rows win, and so does an exclusion.
     const exclusions = normalizeExclusions(exclude)
     const excluded = new Set(exclusions.map(x => x.bucket))

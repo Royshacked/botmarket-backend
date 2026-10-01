@@ -331,3 +331,23 @@ test('the channel term is discounted for being a forecast; the measured evidence
     assert.equal(xle.evidencePart, K_EVIDENCE * 0.5, 'evidence is already calibrated on realized returns')
     assert.ok(CHANNEL_CONFIDENCE > 0 && CHANNEL_CONFIDENCE < 1)
 })
+
+test('a fund grading industries in several sectors is ONE row, standing for all of them', () => {
+    // MOO published as three +40bp rows — Agricultural Inputs, Farm Products, Machinery — one fund,
+    // three sectors (tilt_SPX_11807d9e). Rebuilt here with each of those sectors splitting.
+    const map = {
+        'Basic Materials': { symbol: 'XLB', exact: true }, 'Consumer Defensive': { symbol: 'XLP', exact: true },
+        'Industrials': { symbol: 'XLI', exact: true },
+        'Agricultural Inputs': { symbol: 'MOO', exact: false }, 'Agricultural Farm Products': { symbol: 'MOO', exact: false },
+        'Agricultural - Machinery': { symbol: 'MOO', exact: false },
+        'Utilities': { symbol: 'XLU', exact: true },
+    }
+    const betas = [beta('MOO', 'energy_cost', 0.03), beta('XLB', 'energy_cost', 0.001, false), beta('XLP', 'energy_cost', 0.001, false),
+        beta('XLI', 'energy_cost', 0.001, false), beta('XLU', 'energy_cost', -0.02)]
+    const { candidates, rows } = sizeFromChannels({ views: [{ channel_id: 'energy_cost', dz: 1 }], betas, proxyMap: map })
+    const moo = candidates.filter(c => c.symbol === 'MOO')
+    assert.equal(moo.length, 1, 'one candidate for one fund')
+    assert.equal(moo[0].bucket, 'Agricultural - Machinery', 'first by name when the fund is exact for none')
+    assert.deepEqual(moo[0].stands_for, ['Agricultural - Machinery', 'Agricultural Farm Products', 'Agricultural Inputs'])
+    assert.equal(rows.filter(r => ['Agricultural Inputs', 'Agricultural Farm Products', 'Agricultural - Machinery'].includes(r.bucket)).length, 1)
+})
