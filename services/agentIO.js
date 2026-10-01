@@ -25,12 +25,42 @@ import { makeConsultHandler, CONSULT_TOOL } from './deepThink.service.js'
  * prefix, and a loose match would parse the candidate offer as a worksheet.
  */
 export function parseEmitBlock(raw, tag, log = '[agentIO]') {
-    const m = String(raw ?? '').match(new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`))
-    if (!m) return null
+    const text = String(raw ?? '')
+    const m = text.match(new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`))
+    if (!m) return _parseMalformedBlock(text, tag, log)
     try {
         return JSON.parse(m[1].trim())
     } catch (err) {
         logger.warn(log, `${tag} JSON parse failed:`, err.message)
+        return null
+    }
+}
+
+/**
+ * A block whose CLOSING tag came out wrong → its JSON, or null.
+ *
+ * Measured 2026-10-01: Pythia on gpt-6-luna closed a complete, valid table with `</til>` instead of
+ * `</tilt>` — twice in about eight runs, both times at the end of a long block, not cut by
+ * max_tokens — and the strict match dropped the whole table, so the run published nothing. Accepted
+ * here: an opening tag, JSON, then a closing tag whose name is a PREFIX of the real one, at least
+ * three letters (`</til>`). A closing tag of any kind proves the model finished the block; a block
+ * with NO closing tag is still absent, because that is what a reply cut by max_tokens looks like.
+ * Only the span from the first `{` to the last `}` is parsed, and only a successful parse is returned.
+ */
+function _parseMalformedBlock(text, tag, log) {
+    const open = text.indexOf(`<${tag}>`)
+    if (open < 0) return null
+    const body = text.slice(open + tag.length + 2)
+    const close = body.match(/<\/([a-z_]*)>/i)
+    if (!close || !(close[1].length >= 3 && tag.startsWith(close[1]))) return null
+    const inner = body.slice(0, close.index)
+    const a = inner.indexOf('{'), b = inner.lastIndexOf('}')
+    if (a < 0 || b <= a) return null
+    try {
+        const parsed = JSON.parse(inner.slice(a, b + 1))
+        logger.warn(log, `${tag} block had a malformed closing tag (${close[0]}) — parsed anyway`)
+        return parsed
+    } catch {
         return null
     }
 }

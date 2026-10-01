@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { parseEmitBlock, mergeDraft, makePhaseCapture, runAgentStream } from '../../services/agentIO.js'
+import { stripEmitTags } from '../../services/agentUtils.js'
 
 // The agent I/O protocol. Every streaming agent repeated these mechanics verbatim — three
 // identical parse functions, two character-for-character identical draft merges, and five
@@ -218,4 +219,29 @@ test('no onReasoning stays undefined rather than becoming a no-op wrapper', asyn
     const { got, consultOpts } = await runWith({ tools: [CONSULT_TOOL_DECL] })
     assert.equal(got.onReasoning, undefined)
     assert.equal(consultOpts.onReasoning, undefined)
+})
+
+// ── a malformed closing tag ──────────────────────────────────────────────────
+// Measured 2026-10-01: gpt-6-luna closed a complete table with `</til>` — twice — and the strict
+// match threw the whole table away, so the run published nothing.
+
+test('a block closed with a truncated tag is still parsed', () => {
+    const raw = 'The view.\n<tilt>\n{"benchmark":"SPX","tilts":[{"bucket":"Energy"}]}\n</til>'
+    assert.deepEqual(parseEmitBlock(raw, 'tilt'), { benchmark: 'SPX', tilts: [{ bucket: 'Energy' }] })
+})
+
+test('a block with NO closing tag stays absent — that is a reply cut by max_tokens', () => {
+    assert.equal(parseEmitBlock('<tilt>{"a":1}', 'tilt'), null)
+})
+
+test('the tolerance does not reach a different tag, prose, or broken JSON', () => {
+    assert.equal(parseEmitBlock('<tilt>{"a":1}</phase>', 'tilt'), null, 'a different tag is not a truncation')
+    assert.equal(parseEmitBlock('<tilt>{"a":1}</ti>', 'tilt'), null, 'two letters is too short to trust')
+    assert.equal(parseEmitBlock('we will emit a <tilt> block next turn', 'tilt'), null)
+    assert.equal(parseEmitBlock('<tilt>{"a":</til>', 'tilt'), null)
+})
+
+test('the stripper removes the malformed block too, so its JSON never leaks into the reply', () => {
+    assert.equal(stripEmitTags('Here.\n<tilt>{"a":1}</til>', ['tilt']).trim(), 'Here.')
+    assert.equal(stripEmitTags('Here.\n<tilt>{"a":1}</tilt> after', ['tilt']).trim(), 'Here.\n after'.trim())
 })

@@ -517,6 +517,12 @@ export function stripEmitTags(raw, tagNames) {
     let text = raw ?? ''
     for (const name of tagNames) {
         text = text.replace(new RegExp(`<${name}>[\\s\\S]*?</${name}>`, 'g'), '')
+        // The same malformed close parseEmitBlock tolerates (`</til>` for `</tilt>`): strip it too,
+        // or the raw JSON of a block that WAS parsed leaks into the reply.
+        if (text.includes(`<${name}>`) && name.length > 3) {
+            const prefixes = Array.from({ length: name.length - 3 }, (_, i) => name.slice(0, 3 + i)).join('|')
+            text = text.replace(new RegExp(`<${name}>[\\s\\S]*?</(?:${prefixes})>`), '')
+        }
     }
     return text
 }
