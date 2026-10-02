@@ -644,7 +644,72 @@ export async function resolveMessage(conversationId, messageId, userId, { status
             resolveOutcome: outcome ? String(outcome) : null,
         } }
     )
+    await _settleHouseTwins(db, conversationId, messageId, uid, st, outcome)
     return { ok: true, status: st }
+}
+
+/**
+ * The other admins' copies of a HOUSE card — the query that finds them, or null when there are
+ * none to find. PURE, so the rule is assertable without a DB.
+ *
+ * A house card (`visibility: 'admin'` — Prometheus's coverage cards, Pythia's tilt cards) is ONE
+ * ask about house work, posted once per admin because each admin has their own conversation. Each
+ * copy was resolved on its own, so when Marce opened "the re-model of BAC is in", Roy's copy sat
+ * pending as if nobody had (2026-10-02: 4 of his 11 open coverage cards were already opened on
+ * Marce's side). The twins are found the way the one-live-ask rule (_supersedePending) already
+ * counts asks: same type, same subject, still pending — a conversation holds at most one such
+ * card, so this is exactly one per other admin.
+ *
+ * ONLY A `done` CARRIES OVER. Dismiss is personal (Roy, 2026-10-02): one admin waving a card away
+ * says nothing about whether the other has read it — the house work was not done, only declined
+ * by one reader. `done` (opened a read card, or the work landed) is the house acting.
+ *
+ * A card with no subject has no twin to name — it is left alone rather than guessed at.
+ */
+export function houseTwinQuery(card, messageId, status = 'done') {
+    if (status !== 'done') return null
+    if (card?.visibility !== 'admin' || !card.type || !card.subject?.kind || !card.subject?.id) return null
+    return {
+        id:             { $ne: String(messageId) },
+        type:           card.type,
+        visibility:     'admin',
+        status:         'pending',
+        'subject.kind': card.subject.kind,
+        'subject.id':   card.subject.id,
+    }
+}
+
+/** The twin's resolution: the same settlement, saying WHO settled it. Pure. */
+export function houseTwinPatch(status, outcome, byName, now = Date.now()) {
+    return {
+        status,
+        resolvedAt:     now,
+        resolveOutcome: outcome ? String(outcome) : null,
+        resolveNote:    byName ? `by ${byName}` : null,
+    }
+}
+
+// Settle the twins and tell their owners' open panels (the same `message_resolved` frame the work
+// landing sends). Never throws: the admin's own resolve already succeeded, and a twin left pending
+// is the old behaviour, not a failure worth reporting to them.
+async function _settleHouseTwins(db, conversationId, messageId, uid, st, outcome) {
+    if (st !== 'done') return 0   // dismiss is personal — see houseTwinQuery
+    try {
+        const card  = await db.collection(MSGS).findOne({ id: messageId, conversationId }, { projection: { _id: 0, type: 1, visibility: 1, subject: 1 } })
+        const query = houseTwinQuery(card, messageId, st)
+        if (!query) return 0
+        const twins = await db.collection(MSGS).find(query, { projection: { _id: 0, id: 1, conversationId: 1 } }).toArray()
+        if (!twins.length) return 0
+        const who   = await db.collection(USERS).findOne({ id: uid }, { projection: { fullname: 1, username: 1 } })
+        const patch = houseTwinPatch(st, outcome, who?.username || who?.fullname || null)
+        const res   = await db.collection(MSGS).updateMany({ ...query, id: { $in: twins.map(t => t.id) } }, { $set: patch })
+        if (res.modifiedCount) logger.info(LOG, 'house card settled for every admin', { type: card.type, subject: card.subject, count: res.modifiedCount })
+        await _pushResolved(db, twins, patch)
+        return res.modifiedCount
+    } catch (err) {
+        logger.warn(LOG, 'house twin settle failed (other admins\' copies left pending)', err.message)
+        return 0
+    }
 }
 
 /**
