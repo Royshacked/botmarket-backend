@@ -103,6 +103,9 @@ export async function notifyCoverageEvent(coverage, verdict, deps = _deps) {
 }
 
 // ─── Coverage refresh (G1) ──────────────────────────────────────────────────────
+// What every refresh card's button says when there is a thesis to revise — the verdict card's words,
+// because it is the verdict card's doorway (FE CoverageRefreshedBubble → OPEN_COVERAGE 'revise').
+export const REVISE_LABEL = 'Revise thesis'
 // Prometheus says when a headless refresh has rewritten a name's coverage. Two askers, two audiences:
 //
 //   • Atlas's refresh-by-hop (mid-review) names the USER who asked. The card is theirs alone — so the
@@ -133,7 +136,7 @@ export function buildCoverageRefreshed({ userId, ticker, portfolioId = null, por
             type:       'coverage_refreshed',
             payload:    { kind: 'coverage', symbol: sym, coverageId, portfolioId, ok: false, house, pass: true },
             botId:      'analyst',
-            actions:    portfolioId ? cardActions('Resume review') : cardActions('Open coverage', { resolvesOn: 'open' }),
+            actions:    portfolioId ? cardActions('Resume review') : cardActions(REVISE_LABEL),
             ...(house ? { visibility: 'admin' } : { visibility: 'own', forUserId: userId }),
         }
     }
@@ -149,7 +152,7 @@ export function buildCoverageRefreshed({ userId, ticker, portfolioId = null, por
     const resume = portfolioId ? ' You can resume the review.' : ''
     const content = house
         ? (ok
-            ? `Scheduled re-model of ${sym} is in${gist}. Read the revised thesis.`
+            ? `Scheduled re-model of ${sym} is in${gist}. Take it to Prometheus to revise.`
             : `Scheduled re-model of ${sym} produced nothing to store — the existing coverage stands.`)
         : (ok
             ? `Fresh research on ${sym} is ready${forBook}${gist}.${portfolioId ? ' Resume the review to fold it in.' : ''}`
@@ -160,24 +163,22 @@ export function buildCoverageRefreshed({ userId, ticker, portfolioId = null, por
         type:       'coverage_refreshed',
         payload:    { kind: 'coverage', symbol: sym, coverageId, portfolioId, ok, house },
         botId:      'analyst',
-        // WHAT CLOSES IT, in three shapes.
+        // WHERE THE BUTTON GOES, and what closes it.
         //
         // With a review behind it the ask is the review — work, satisfied when the portfolio write
-        // lands (the subject is the portfolio, see cardSubject). That holds whether the refresh
-        // succeeded or not: there is still somewhere to go back to.
+        // lands (the subject is the portfolio, see cardSubject), whether the refresh succeeded or not.
         //
-        // A SUCCESSFUL house refresh asks to READ what it wrote — no write could ever satisfy a
-        // 'work' card here, so stamped 'work' it sat "still waiting on you" after being opened,
-        // forever. Opening it IS doing it.
-        //
-        // A FAILED one has nowhere to send anyone: it stored nothing, so the thesis is the one
-        // already in the book. It carried "Open coverage" anyway, which only switched to the
-        // Analyst desk — and that desk keeps its last conversation, so the click appeared to answer
-        // this card with the PREVIOUS name's revise turn. A statement with a Dismiss says what
-        // happened and asks for nothing.
+        // Without one, every card on a thesis we hold goes to PROMETHEUS, TO REVISE IT (Roy,
+        // 2026-10-03) — the verdict card's doorway: the desk on THIS thesis, on a fresh thread
+        // (FE handleEditCoverage). It is work, closed when the revision lands (resolveCardsFor).
+        // History: until 2026-09-24 "Open coverage" switched to the desk, which showed whatever it
+        // last held (CIFR's turn under a WIX card); it was then cut to the book alone, which the
+        // Floor never renders and a phone hides — a dead button. The revise doorway has neither
+        // problem. A refresh that stored NOTHING still asks for nothing (Dismiss only, 2026-09-24) —
+        // unchanged here; whether it should offer the revise too is Roy's call, not taken silently.
         actions:    portfolioId ? cardActions('Resume review')
-                  : ok         ? cardActions('Open coverage', { resolvesOn: 'open' })
-                  :              dismissOnly(),
+                  : ok          ? cardActions(REVISE_LABEL)
+                  :               dismissOnly(),
         ...(house
             ? { visibility: 'admin' }
             : { visibility: 'own', forUserId: userId }),

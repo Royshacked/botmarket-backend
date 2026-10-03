@@ -170,11 +170,15 @@ test('a verdict card says REVISE — the label is what separates it from the ref
     }
 })
 
-test('a SUCCESSFUL house refresh opens the book, and opening it is what closes it', async () => {
+// 2026-10-03: the button goes to Prometheus to REVISE (the verdict card's doorway). Until 09-24 it
+// switched to the desk (which showed the last name's turn); 09-24 to 10-03 it opened only the book,
+// which the Floor never renders and a phone hides — a dead button.
+test('a SUCCESSFUL house refresh goes to Prometheus to revise, and stays open until the revision lands', async () => {
     const d = deps(['a1'])
     await notifyCoverageRefreshed({ userId: null, ticker: 'NVDA', coverageId: 'cov_1', ok: true }, d)
-    assert.equal(d.posted[0].actions.primary.label, 'Open coverage')
-    assert.equal(d.posted[0].actions.primary.resolvesOn, 'open')
+    assert.equal(d.posted[0].actions.primary.label, 'Revise thesis')
+    assert.equal(d.posted[0].actions.primary.resolvesOn, 'work')
+    assert.match(d.posted[0].content, /Take it to Prometheus to revise\./)
 })
 
 test('a FAILED house refresh carries a Dismiss and NO primary — it stored nothing to open', async () => {

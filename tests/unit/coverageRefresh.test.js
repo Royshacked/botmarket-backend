@@ -37,12 +37,13 @@ test('buildCoverageRefreshed: failure card is honest and still lets the user res
 })
 
 // WHAT CLOSES THE CARD. Behind a review the ask is the review (work — the portfolio write lands).
-// Without one the ask is to read what the refresh wrote, and nothing else could ever close it: the
-// house re-model cards were stamped 'work' with no write to wait for, and stayed "still waiting on
-// you" after every open. Opening a read IS doing it.
-test('buildCoverageRefreshed: a review resumes on WORK; a bare coverage read closes on OPEN', () => {
+// Without one the button goes to Prometheus to REVISE the thesis (2026-10-03) — work too, closed
+// when the revision lands (resolveCardsFor on the coverage subject).
+test('buildCoverageRefreshed: a review resumes on WORK; a bare refresh goes to revise, also WORK', () => {
     assert.equal(buildCoverageRefreshed({ userId: 'u1', ticker: 'NVDA', portfolioId: 'p1' }).actions.primary.resolvesOn, 'work')
-    assert.equal(buildCoverageRefreshed({ userId: 'u1', ticker: 'NVDA', coverageId: 'cov1' }).actions.primary.resolvesOn, 'open')
+    const bare = buildCoverageRefreshed({ userId: 'u1', ticker: 'NVDA', coverageId: 'cov1' })
+    assert.equal(bare.actions.primary.label, 'Revise thesis')
+    assert.equal(bare.actions.primary.resolvesOn, 'work')
     // A review behind it is still somewhere to go even when the refresh failed.
     assert.equal(buildCoverageRefreshed({ userId: 'u1', ticker: 'NVDA', portfolioId: 'p1', ok: false }).actions.primary.resolvesOn, 'work')
 })
@@ -294,12 +295,12 @@ test('a pass on a name we do NOT hold is still a plain no-draft — there is no 
     assert.equal(h.calls.update.length, 0)
 })
 
-test('the pass card reads as a kept target with its reason, and offers the thesis to read', () => {
+test('the pass card reads as a kept target with its reason, and offers the revise', () => {
     const house = buildCoverageRefreshed({ userId: 'a1', ticker: 'TEM', coverageId: 'cov_TEM_1', ok: false, house: true, pass: 'not like-for-like.' })
     assert.equal(house.content, 'Scheduled re-model of TEM kept the existing target — not like-for-like.')
     assert.doesNotMatch(house.content, /nothing to store/)
     assert.equal(house.payload.pass, true)
-    assert.equal(house.actions.primary.label, 'Open coverage')
+    assert.equal(house.actions.primary.label, 'Revise thesis')
     assert.equal(house.visibility, 'admin')
     const mine = buildCoverageRefreshed({ userId: 'u1', ticker: 'TEM', portfolioId: 'p1', ok: false, pass: 'why.' })
     assert.match(mine.content, /no new target — why\. You can resume the review\./)
