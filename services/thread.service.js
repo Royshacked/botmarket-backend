@@ -154,6 +154,29 @@ export function _yourTurn(messages) {
     return last?.role === 'assistant'
 }
 
+// The last thing said in a conversation, as `{ role, text }`.
+//
+// The same message `_yourTurn` reads, and it was already being pulled out of Mongo and thrown away:
+// the projection slices it off every draft, the flag keeps whose turn it was, and the words went in
+// the bin. They are what a desk actually DID — "the NVDA thesis is published, PT 210 vs the Street's
+// 185" — and reception has no other way to know it. Axl reads this on the walk back (AxlHub
+// `_sendReturn`) so the sentence that closes a trip is the desk's own, not a guess assembled from
+// the book afterwards.
+//
+// CAPPED, and that is not only about bytes: it becomes one clause of a note inside a prompt. A desk's
+// closing turn can be a page of plan, and a page quoted back at reception buries the question the
+// return turn exists to ask. Hard-wrapping is collapsed for the same reason — this is a quote in a
+// sentence, not a document.
+const LAST_LINE_MAX = 400
+export function _lastLine(messages) {
+    const last = (Array.isArray(messages) ? messages : []).at(-1)
+    if (!last || typeof last.content !== 'string') return null
+    // A hidden row is history-only (the note a chart turn leaves behind) — never something "said".
+    if (last.hidden) return null
+    const text = last.content.replace(/\s+/g, ' ').trim().slice(0, LAST_LINE_MAX)
+    return text ? { role: last.role === 'assistant' ? 'assistant' : 'user', text } : null
+}
+
 /**
  * UNFINISHED WORK, per desk — what the route badges read.
  *
@@ -168,8 +191,12 @@ export function _yourTurn(messages) {
  * Only DRAFTS count. A linked thread produced its artifact and is finished business; badging it would
  * mark every book the user ever built as outstanding.
  *
+ * WHAT WAS LAST SAID rides along for the same reason, off the same message: the badge needed only
+ * whose turn it was, but reception needs the words — see _lastLine.
+ *
  * @returns {Promise<Array<{agent:string, pipeline:string|null, threadId:string, title:string|null,
- *                           updatedAt:number, yourTurn:boolean}>>}
+ *                           updatedAt:number, yourTurn:boolean,
+ *                           lastLine:{role:'user'|'assistant', text:string}|null}>>}
  */
 async function listUnfinished({ userId }) {
     try {
@@ -193,6 +220,9 @@ async function listUnfinished({ userId }) {
             phase:     d.phase ?? null,
             updatedAt: d.updatedAt ?? null,
             yourTurn:  _yourTurn(d.messages),
+            // What was last said there, `{ role, text }` — free, off the message the flag above
+            // already read. See _lastLine.
+            lastLine:  _lastLine(d.messages),
         }))
     } catch (err) {
         logger.error(LOG, 'listUnfinished failed', err)

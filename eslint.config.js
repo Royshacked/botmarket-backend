@@ -12,7 +12,12 @@ export default [
         // archive/ is FROZEN code kept for revival (Kairos + Hermes, 2026-08-18). Nothing imports
         // it, so lint has nothing to protect there — and linting it would turn every future rule
         // change into edits to code nobody is maintaining.
-        ignores: ['node_modules/**', 'public/**', 'data/**', 'archive/**'],
+        //
+        // scratch/ is the owner's personal sandbox — experiments that are not the app and are not
+        // imported by it. It is ignored for a sharper reason than archive/: `npm test` runs lint
+        // FIRST, so a browser global in a throwaway script took the whole suite down with it. A
+        // gate that fails on code the app does not contain stops being read as a signal.
+        ignores: ['node_modules/**', 'public/**', 'data/**', 'archive/**', 'scratch/**'],
     },
     js.configs.recommended,
     {

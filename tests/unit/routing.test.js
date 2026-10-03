@@ -35,6 +35,9 @@ test('the rule never offers an admin desk, and teaches the grammar and the ask-g
         assert.doesNotMatch(rule, /`strategy`|`aether`|Pythia/, `${agent}'s rule offers an admin desk`)
         assert.match(rule, /<route>\w+ NVDA<\/route>/)
         assert.match(rule, /<open>/)
+        // The opening is not optional. A bare route lands the user at a desk that cannot see this
+        // chat, so it opens blank and asks for what they just said — see Axl's own routing section.
+        assert.match(rule, /\*\*Always emit it\.\*\*/, `${agent}'s rule leaves the opening optional`)
         assert.match(rule, /Only when the user asked/)
         assert.match(rule, /never your own desk/)
     }

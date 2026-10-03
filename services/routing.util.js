@@ -289,6 +289,7 @@ Emit, each on its own line, at the end of your reply:
 
 - \`<route>\` is the desk key and, when there is one, the ticker. Only the keys above; never your own desk.
 - \`<open>\` is the desk's FIRST TURN — it is sent as the user's message on arrival. The desk cannot see this conversation, so the opening is where what you learned travels: the user's ask, plus what you found on the name in this session. Facts and your read, not a summary of the chat and not the desk's conclusion — it forms its own.
+- **Always emit it.** Naming the desk is how the user said WHERE; the verb and what it acts on are WHAT they want done, and that is the opening. Route bare and the desk opens on a blank page and asks for what they just told you.
 - **Only when the user asked.** Never route to be helpful, and never to close a question you could answer here. One hand-off per turn; several names → ask which one first.
 - Say in one line where they are going and why. Do not describe a queue or a wait, and do not ask them to confirm — the block IS the hand-off; the app shows a button carrying it.`
 }

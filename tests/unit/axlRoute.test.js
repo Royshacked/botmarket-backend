@@ -289,6 +289,66 @@ test('the prompt teaches the opening hand-off, and keeps reception out of the br
         'asking for risk at reception is what the desk does in its own first phase')
 })
 
+// The gap this closes: `<open>` was taught ONLY under "When someone brings you a goal", so a user who
+// named the desk themselves — "I want to review with Pythia", "take NVDA to Prometheus" — got a bare
+// `<route>` and arrived at a desk that opened blank and asked what they had just finished saying.
+// The routing section is where the model looks on that ask, so the rule has to live there too.
+test('the routing section itself demands an opening, and says the desk name is not the ask', () => {
+    const promptPath = join(dirname(fileURLToPath(import.meta.url)), '../../prompts/axl_system_prompt.md')
+    const prompt = readFileSync(promptPath, 'utf8')
+
+    // Scoped to the routing section — the goal section has taught `<open>` all along, and matching
+    // the whole prompt would pass on that alone.
+    const routing = prompt.slice(prompt.indexOf('## Routing to a desk'))
+    assert.ok(routing.length > 0, 'the routing section still exists under that heading')
+    assert.match(routing, /EVERY\s+route\s+carries\s+an\s+`<open>`/, 'the opening is not optional here')
+    assert.match(routing, /Naming\s+the\s+desk\s+is\s+not\s+the\s+ask/,
+        'a user who says where still said what — the verb is the opening')
+    assert.match(routing, /<route>strategy<\/route>/, 'and it is shown on a named-desk route')
+
+    // The escape hatch must read as the exception. "No opening is better than a wrong one" was being
+    // read as a default, which is how a route with something to carry still arrived empty.
+    assert.match(prompt, /No\s+opening\s+is\s+better\s+than\s+an\s+INVENTED\s+one/,
+        'the omit case is an invented brief, not a thin one')
+    assert.match(prompt, /not\s+a\s+default/, 'and it is stated as the exception')
+})
+
+// The other half of a hand-off: the walk BACK. Axl's thread is persisted, so returning from a desk
+// restored a conversation whose last line was "taking you to Pythia" — a hand-off describing a trip
+// already taken, left standing as the live state. The client now sends a bracketed app note on the
+// return; this is the rule that tells Axl what to do with one.
+test('the prompt teaches the return turn, and forbids routing on it', () => {
+    const promptPath = join(dirname(fileURLToPath(import.meta.url)), '../../prompts/axl_system_prompt.md')
+    const prompt = readFileSync(promptPath, 'utf8')
+
+    assert.match(prompt, /## When they come back from a desk/, 'the section exists')
+    const section = prompt.slice(prompt.indexOf('## When they come back from a desk'))
+
+    // The note's shape, as the client composes it (AxlHub `_sendReturn` + `_lastWordAt`). If one
+    // side's wording moves the other has to move with it — the model recognises this turn by nothing
+    // else, and it branches on who the quote is attributed to.
+    assert.match(section, /\[The user has come back to reception from the Research Desk\. Last said there — Prometheus: "/,
+        'the app note is shown verbatim, quote and all, in the shape the client sends')
+    assert.match(section, /is\s+the\s+APP\s+speaking,\s+not\s+the\s+user/,
+        'a bracketed note is not something the user said')
+
+    // The three readings of the note, which are three different situations. Collapsing any of them
+    // into "finished with X?" throws away the only account of what happened that Axl can get.
+    assert.match(section, /The\s+quote\s+is\s+the\s+desk\s+telling\s+you\s+what\s+it\s+did/,
+        'the desk speaking last = what it did')
+    assert.match(section, /`the user:`\s+in\s+the\s+quote\s+means\s+they\s+spoke\s+last/,
+        'the user speaking last = a trip cut short, offer the way back')
+    assert.match(section, /No\s+quote\s+at\s+all\s+means/,
+        'and no quote at all is its own signal, not a gap')
+    assert.match(section, /get_watched_items/, 'and THAT is when the book gets read')
+
+    // The failure the whole turn exists to avoid, and the only one that is actively harmful: the
+    // spent hand-off is still in the history, so a model that re-emits it marches the user straight
+    // back into the desk they just walked out of.
+    assert.match(section, /NEVER\s+route\s+on\s+this\s+turn/, 'a return must not re-route')
+    assert.match(section, /No\s+`<route>`,\s+no\s+`<edit>`,\s+no\s+`<adopt>`/, 'and it names all three')
+})
+
 // The one kind with two modes. A book still being built is a plan to re-work; a book in positions is
 // a REVIEW, because re-planning it would stand a live position down to rewrite a plan the market has
 // already acted on. That choice is the client's, made from the book's own state (isPortfolioReview)
