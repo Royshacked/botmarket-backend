@@ -6,13 +6,23 @@ decides when the view is worth re-modelling. Written 2026-09-19 from the code an
 contract has been stable since the monitor shipped (P5, 2026-07-22) with two later corrections that
 are called out where they land.
 
-The one line: **the edge is the GAP — our number against the Street's — and a thesis is monitored by
-watching that gap move, never by watching price.**
+The one line: **coverage is OUR PRICE — the number the desk enters and manages positions by — and a
+thesis is monitored by watching the Street move against it, never by watching price.**
+
+**Doctrine change (2026-10-02, Roy).** This page used to open "the edge is the GAP": coverage was only
+worth having while it disagreed with the Street, a target inside the Street's low–high range was a
+PASS, and a hit with the Street also there was "edge gone — consider harvesting". That is the
+sell-side reading and it is not ours. Our PT is ours whether or not some analyst agrees with it. What
+changed: the prompt no longer passes on a near-Street number (PASS = "I cannot defend a number"), a
+re-model that passes records its reason instead of reporting "nothing to store", and `edge_gone` is
+gone from the verdict and the card. What did NOT change, on purpose: Street moves are still monitored
+— the `validating`/`diverging` cards and the edge-category re-model trigger stay, because the Street
+moving is exactly the prompt to check whether OUR number needs revising.
 
 ## What coverage IS, and is not
 
 `coverage` is one document per symbol in its own collection (`api/analyst/coverage.service.js`):
-identity + the variant-perception `thesis` + `rating` + OUR `price_target` (value, horizon, basis) +
+identity + our `thesis` + `rating` + OUR `price_target` (value, horizon, basis) +
 `estimates` (ours vs consensus) + the `gap` (our PT against the Street's whole distribution) +
 dated `catalysts` + checkable `kill_criteria` + a bear/base/bull `risk_reward` band + `conviction` +
 `schools` tags + `status` + an append-only `revisions[]` trail. The trail is what makes it *living*:
@@ -45,9 +55,9 @@ desk UI can follow:
 
 1. **Profile** — what the business is (`get_fundamentals`, `get_sec_filings`).
 2. **The Street** — `get_consensus`: forward estimates, the consensus PT, the rating distribution and
-   the revision trend. This is the anchor; there is no variant view without knowing the consensus view.
-3. **The variant perception** — where we differ and why. An edge lives in exactly two places: a
-   different **estimate** or a different **multiple**. The prompt makes the model name which.
+   the revision trend. The reference: our number is framed against theirs.
+3. **Our view** — what drives our number: the **estimate** and the **multiple**. Where we differ from
+   the Street the model names which lever and why; where we agree it says what it checked.
 4. **Valuation** — `compute_valuation` (`services/valuation.engine.js`), deterministic:
    `price = multiple × forward metric` (or EV-based per sector), plus the band and the gap. The model
    supplies the *judgment* (which multiple, whose estimate); the tool does the arithmetic. Two rules the
@@ -56,9 +66,10 @@ desk UI can follow:
    not a downside case, and the doc says which it is via `band_basis`); and check every leg against
    the name's **own multiple history** — a multiple inside its historical range has a precedent, one
    outside it is a claim that must be argued in the thesis.
-5. **The call** — is the gap material and defensible? Inside the Street's own low–high range is not a
-   variant view. Thin → **PASS**, and emit nothing: "no edge" is a research outcome, and coverage is
-   scarce on purpose. Two questions are kept apart because the model conflates them: **the rating is
+5. **The call** — is our number **defensible**? Where it sits against the Street's low–high range goes
+   in the thesis as information; it is never the decision (until 2026-10-02 inside-the-range was a
+   PASS). **PASS** only when no number can be defended — unverifiable inputs, legs that do not hold
+   together — in one line beginning `PASS —`. Two questions are kept apart because the model conflates them: **the rating is
    vs the PRICE; the gap is vs the STREET.** Being below consensus is a view on the consensus, not on
    the stock.
 6. **Coverage** — emit the `<coverage>` block. Nothing is initiated until it appears.
@@ -135,7 +146,7 @@ in `monitoring/coverage.assess.js`:
 
 | state | meaning | status change |
 |---|---|---|
-| `target_hit` | price reached our PT on schedule; `edge_gone` if the Street has also arrived | → `target_hit` |
+| `target_hit` | price reached our PT on schedule (no `edge_gone` since 2026-10-02 — the Street being there too takes nothing from our number) | → `target_hit` |
 | `target_hit_early` | reached inside the first quarter of its own horizon (`EARLY_HIT_FRACTION`): the number was **too low**. Reads as a MISS and re-opens the thesis | none — stays `active` |
 | `validating` | the Street's PT is moving TOWARD ours (they are catching up) | none |
 | `diverging` | the Street's PT is moving AWAY (we are increasingly contrarian) | none |
@@ -173,6 +184,21 @@ the verdict that triggered it, an earlier "nothing to store" — with the revisi
 "re-model is in" card goes out: a company already revised has nothing left to click.
 `scripts/backfill-coverage-refresh-cards.mjs` repairs the cards already posted: re-stamps, names the
 doc, resolves cards answered by a later revision, supersedes older duplicates. (2026-09-19)
+
+**A PASS is a verdict, not a failure (2026-10-02).** A re-model of a thesis we hold that declines to set
+a new number says why — TEM's did ("the revenue edge compares our FY27 estimate with the Street's FY26
+— not like-for-like") — and that used to be thrown away under "produced nothing to store", the same
+copy as a crash. `coverageRefresh` now extracts the reason (`_passReason`: the `PASS —` line, else the
+last paragraph), appends it to the trail as a `remodel_pass` revision (thesis, rating and target
+untouched), and posts "Scheduled re-model of X kept the existing target — <reason>" with "Open
+coverage" (`payload.pass`; the FE heads it "target kept"). It resolves no "Revise thesis" card: keeping
+the target is the machine's read, and the revise ask stays with the admin. "Produced nothing to store"
+is now only an empty reply, a wrong-symbol draft, or a save that failed.
+
+**One house card, every admin (2026-10-02).** Admin-visibility cards are posted once per admin; opening
+one (`done`) now settles the other admins' pending copies of the same ask (`chat.service`
+`houseTwinQuery` — same type + subject), stamped "by <name>". A dismissal is personal and carries over
+to no one.
 
 `gap.pctile` — where our PT sits inside the Street's own low→high range — is the measure that says
 whether we hold a variant view at all. A percentage off the mean does not: against targets spanning
@@ -264,8 +290,10 @@ copied. That frozen PT is what Themis compares the *revised* one against.
 - **The pencil stays with the admin.** Every automatic path — the run, the refresh, the re-model —
   writes a revision the admin reads after; none of them overwrites a standing thesis without leaving
   the trail. The run's skip rule and the quiet path exist for the same reason.
-- **PASS is a first-class outcome.** A queue row that ends `no_edge` is research that was done. A
-  book of me-too theses would be worse than an empty one.
+- **PASS is a first-class outcome — about defensibility, not agreement.** A queue row that ends
+  `no_edge` (the label predates the 2026-10-02 doctrine; it now means "no defensible number") is
+  research that was done, and a re-model's PASS is on the trail with its reason. A target close to the
+  Street's is not a PASS: our number is the product whether or not the Street agrees.
 
 ## Open
 

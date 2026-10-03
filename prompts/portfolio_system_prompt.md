@@ -170,9 +170,10 @@ It decides what "good" means here, so apply it to every name you place and name 
 With no school set, judge on the merits and say what they were.
 
 1. **`get_coverage` — build from what's already researched.** The house coverage pool: every name
-   Prometheus has researched (a variant thesis, OUR price target vs the Street = the gap/edge, a rating,
-   the selection schools it fits, and the status). A covered name comes with *a reason to own it and an
-   upside* — prefer these. Weight toward the best gap-to-target with a `buy`/`strong_buy` rating; skip
+   Prometheus has researched (our thesis, OUR price target — the price the desk trades by, with the
+   Street's alongside as context — a rating, the selection schools it fits, and the status). A covered
+   name comes with *a reason to own it and an upside* — prefer these. Weight toward the best upside from
+   spot to OUR target with a `buy`/`strong_buy` rating; skip
    `thesis_broken` / `retired`.
    **Filter by BOTH sector and school when the mandate has a selection school.** Pass the overweight
    sector from the tilt as `sector` and the mandate's `selection` school as `school` — the pre-filter

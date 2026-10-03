@@ -48,19 +48,23 @@ function _hitProgress(priceTarget, nowMs) {
  * A hit AFTER the deadline is an ordinary `target_hit` too — late is still hit, and "the target was
  * too high" is a different signal this doesn't claim to make.
  */
-function _hitVerdict(coverage, price, ourPt, nowMs, edgeGone) {
+//
+// NO "EDGE GONE" (2026-10-02). A hit used to carry `edge_gone` when the Street's PT had also reached
+// ours, and the card read "the Street has caught up, so the edge is gone. Consider harvesting." That
+// was the sell-side doctrine — research is only worth something while it disagrees with the Street.
+// Ours is the opposite: the coverage PT is the price WE enter and manage positions by, and the Street
+// agreeing with it takes nothing away from it. Street moves stay a monitored signal (validating /
+// diverging below) — a reason to look at the thesis, never a verdict on its worth.
+function _hitVerdict(coverage, price, ourPt, nowMs) {
     const pt       = coverage?.price_target
     const progress = _hitProgress(pt, nowMs)
     if (progress === null || progress >= EARLY_HIT_FRACTION) {
-        return { state: 'target_hit', reason: `price ${price} reached PT ${ourPt}`, edge_gone: edgeGone }
+        return { state: 'target_hit', reason: `price ${price} reached PT ${ourPt}` }
     }
     const pct = Math.round(progress * 100)
     return {
         state:  'target_hit_early',
         reason: `price ${price} reached PT ${ourPt} just ${pct}% into a ${pt.horizon} call — the target was too low`,
-        // An early hit is never "edge gone": the Street agreeing with a number we now think was wrong
-        // is not a reason to harvest. Re-model first, and let the fresh target answer that.
-        edge_gone: false,
     }
 }
 
@@ -100,8 +104,8 @@ export function recomputeGap(ourPt, street) {
 
 /**
  * Classify how a coverage thesis is tracking, from fresh { price, consensus_pt, nowMs }. Returns
- * { state, reason, edge_gone }:
- *   target_hit       — price reached our PT on schedule (edge_gone if the Street has also caught up)
+ * { state, reason }:
+ *   target_hit       — price reached our PT on schedule
  *   target_hit_early — it reached our PT almost immediately: the number was too low, so this REOPENS
  *                      the thesis (re-model) instead of closing it. Needs `nowMs`; without a clock or
  *                      a stored deadline it degrades to plain `target_hit`.
@@ -126,11 +130,10 @@ export function classifyGapState(coverage, fresh = {}) {
     const bullish = BULLISH.has(coverage?.rating)
     const bearish = BEARISH.has(coverage?.rating)
 
-    // 1. Target hit — edge_gone when the Street has also arrived (nothing differentiated left), and
-    //    split by WHEN it landed inside the target's own horizon (see _hitVerdict).
+    // 1. Target hit — split by WHEN it landed inside the target's own horizon (see _hitVerdict).
     if (ourPt !== null && price !== null) {
-        if (bullish && price >= ourPt) return _hitVerdict(coverage, price, ourPt, fresh.nowMs, freshC !== null && freshC >= ourPt)
-        if (bearish && price <= ourPt) return _hitVerdict(coverage, price, ourPt, fresh.nowMs, freshC !== null && freshC <= ourPt)
+        if (bullish && price >= ourPt) return _hitVerdict(coverage, price, ourPt, fresh.nowMs)
+        if (bearish && price <= ourPt) return _hitVerdict(coverage, price, ourPt, fresh.nowMs)
     }
 
     // 2. Consensus movement — is the Street catching up to us, or moving away?
@@ -139,12 +142,12 @@ export function classifyGapState(coverage, fresh = {}) {
         if (Math.abs(movePct) >= CONSENSUS_MOVE_PCT) {
             const up = movePct > 0
             const note = `Street PT ${oldC}→${freshC}`
-            if (bullish) return up ? { state: 'validating', reason: `${note} (catching up)`, edge_gone: false } : { state: 'diverging', reason: `${note} (moving away)`, edge_gone: false }
-            if (bearish) return up ? { state: 'diverging', reason: `${note} (moving away)`, edge_gone: false } : { state: 'validating', reason: `${note} (catching down)`, edge_gone: false }
+            if (bullish) return up ? { state: 'validating', reason: `${note} (catching up)` } : { state: 'diverging', reason: `${note} (moving away)` }
+            if (bearish) return up ? { state: 'diverging', reason: `${note} (moving away)` } : { state: 'validating', reason: `${note} (catching down)` }
         }
     }
 
-    return { state: 'stable', reason: 'no material change', edge_gone: false }
+    return { state: 'stable', reason: 'no material change' }
 }
 
 // A classified state → the coverage `status` it should move to (null = leave status unchanged; the

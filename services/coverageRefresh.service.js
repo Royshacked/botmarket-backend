@@ -39,6 +39,27 @@ export function _setDeps(d) { Object.assign(_deps, d) }
 /** Why a persist failed, for the caller's log — the service's own reason when it gave one. */
 const _reason = r => (typeof r === 'string' && r.trim() ? r.trim() : 'persist_failed')
 
+// The longest pass reason kept — a revision note and a card line, not the research write-up.
+export const PASS_REASON_MAX = 400
+
+/**
+ * Why the model declined to set a number, from its visible reply. Pure → string or null.
+ *
+ * The prompt asks a re-model that cannot defend a number to say so "in one line beginning PASS —",
+ * so that paragraph is the reason when it is there. A model that passes without the marker still
+ * explains itself, usually last — so the final paragraph stands in. An empty reply has no reason, and
+ * the caller treats that as a plain failure rather than a verdict.
+ */
+export function _passReason(reply) {
+    const text = typeof reply === 'string' ? reply.trim() : ''
+    if (!text) return null
+    const marked = text.match(/\bPASS\s*[—–:-]+\s*([\s\S]*?)(?:\n\s*\n|$)/)
+    const raw    = marked?.[1]?.trim() || text.split(/\n\s*\n/).map(s => s.trim()).filter(Boolean).at(-1)
+    if (!raw) return null
+    const one = raw.replace(/\s+/g, ' ')
+    return one.length > PASS_REASON_MAX ? one.slice(0, PASS_REASON_MAX - 1).trimEnd() + '…' : one
+}
+
 
 // The headless research prompt. A refresh is a re-model of an EXISTING thesis, optionally focused by
 // Atlas's question. Pure — exported for tests.
@@ -54,7 +75,8 @@ export function _buildRefreshPrompt(ticker, question) {
     const q = typeof question === 'string' && question.trim() ? question.trim() : null
     return `Re-research ${ticker} and emit an updated <coverage> block for it.`
         + (q ? ` Focus especially on: ${q}` : '')
-        + ` This is a refresh of an existing thesis for a portfolio review — produce your current variant-perception view, our price target vs the Street, catalysts, and monitorable kill-criteria.`
+        + ` This is a refresh of an existing thesis — produce our current view, our price target (reaffirmed or revised; where it sits vs the Street is context, not a reason to withhold it), catalysts, and monitorable kill-criteria.`
+        + ` End with the <coverage> block. Skip it only if you cannot defend a number at all, and then say why in one line beginning "PASS —".`
 }
 
 /**
@@ -101,8 +123,23 @@ export async function refreshCoverage({ userId = null, ticker, question = null, 
         }), RESEARCH_TIMEOUT_MS, `coverage research ${sym}`)
 
         const draft = result?.coverage
-        // A "no-edge" turn (or a wrong-symbol draft) yields nothing to persist — tell the user we left
-        // the existing coverage in place so the review can still resume.
+
+        // A PASS IS A VERDICT, NOT A FAILURE (2026-10-02). The model looked at the thesis and declined
+        // to set a new number — and says why. That reasoning used to be thrown away and the card read
+        // "produced nothing to store", the same words as a crash (TEM: a 71-second run whose whole
+        // point was "the revenue edge compares our FY27 to the Street's FY26 — not like-for-like").
+        // On a doc we hold, the why goes on the trail and the card says it; the thesis is untouched.
+        const pass = !draft && existing?.id ? _passReason(result?.reply) : null
+        if (pass) {
+            logger.info(LOG, 're-model passed — reason recorded', { ticker: sym })
+            const rec = await deps.update(existing.id, { revision_kind: 'remodel_pass', revision_note: pass })
+            if (!rec?.ok) logger.warn(LOG, 'pass reason not recorded (card still says it)', { id: existing.id, reason: rec?.reason })
+            await deps.notify({ userId, ticker: sym, portfolioId, portfolioName, coverageId: existing.id, ok: false, pass })
+            return { ok: false, reason: 'pass', pass }
+        }
+
+        // No draft and nothing said about why (or a wrong-symbol draft) — nothing to persist. Tell the
+        // user we left the existing coverage in place so the review can still resume.
         if (!draft || String(draft.symbol ?? '').toUpperCase().trim() !== sym) {
             logger.warn(LOG, 'no usable coverage draft', { ticker: sym })
             await deps.notify({ userId, ticker: sym, portfolioId, portfolioName, coverageId: existing?.id ?? null, ok: false })

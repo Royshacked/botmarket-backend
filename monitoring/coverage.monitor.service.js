@@ -78,7 +78,7 @@ const _deps = {
     // no userId). Traders never do: the feed is admin-only, and the card asks for a revision only an
     // admin can make. Logged as well, so the verdict is on record even when the roster is empty.
     notify: (cov, verdict) => {
-        logger.info(LOG, 'coverage event', { symbol: cov.symbol, state: verdict.state, reason: verdict.reason, edge_gone: verdict.edge_gone })
+        logger.info(LOG, 'coverage event', { symbol: cov.symbol, state: verdict.state, reason: verdict.reason })
         return notifyCoverageEvent(cov, verdict)
     },
 }
@@ -243,8 +243,7 @@ export async function _checkCoverage(cov, nowMs, deps = _deps) {
     }
 
     // Material verdict → update the thesis (status + gap + an appended revision) then notify.
-    const note  = verdict.reason + (verdict.edge_gone ? ' — edge gone (Street caught up); consider harvest/retire' : '')
-    const patch = { gap, revision_kind: verdict.state, revision_note: note }
+    const patch = { gap, revision_kind: verdict.state, revision_note: verdict.reason }
     const status = statusForState(verdict.state)
     if (status) patch.status = status
 

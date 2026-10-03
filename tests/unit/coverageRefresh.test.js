@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { refreshCoverage, _buildRefreshPrompt } from '../../services/coverageRefresh.service.js'
+import { refreshCoverage, _buildRefreshPrompt, _passReason, PASS_REASON_MAX } from '../../services/coverageRefresh.service.js'
 import { buildCoverageRefreshed } from '../../services/coverageNotify.service.js'
 import { _parseCoverageRefresh } from '../../services/agents/portfolio.agent.service.js'
 
@@ -70,10 +70,10 @@ test('coverage_refreshed is own-only — it is the reply to the specific user wh
 })
 
 // ─── refreshCoverage orchestration (injected deps) ──────────────────────────────
-function harness({ draft, initResult, existing = null, updResult = { ok: true } }) {
+function harness({ draft, initResult, existing = null, updResult = { ok: true }, reply = undefined }) {
     const calls = { research: [], initiate: [], update: [], notify: [], existing: [], resolve: [] }
     const deps = {
-        research: async (args) => { calls.research.push(args); return draft ? { coverage: draft } : {} },
+        research: async (args) => { calls.research.push(args); return draft ? { coverage: draft, reply } : (reply === undefined ? {} : { reply }) },
         initiate: async (d, userId) => { calls.initiate.push({ d, userId }); return initResult },
         update:   async (id, patch, userId) => { calls.update.push({ id, patch, userId }); return updResult },
         notify:   async (a) => { calls.notify.push(a) },
@@ -258,4 +258,50 @@ test('an uncovered name carries no update-mode context — there is nothing to r
 test('the refresh prompt carries no language instruction of its own', () => {
     const p = _buildRefreshPrompt('NVDA', null)
     assert.doesNotMatch(p, /language/i)
+})
+
+
+// ─── A PASS IS A VERDICT (2026-10-02) ──────────────────────────────────────────
+// TEM's scheduled re-model ran 71s, looked at the thesis and declined to set a new number — with a
+// reason. That reason was thrown away and the card said "produced nothing to store", the same words
+// as a crash. On a doc we hold, the why now goes on the trail and onto the card.
+const TEM_REPLY = 'Phase 5 work above.\n\nPASS — the revenue edge compares our FY27 estimate with the Street FY26 one, so it is not like-for-like.'
+
+test('_passReason: the PASS line when marked, the last paragraph when not, nothing from nothing', () => {
+    assert.equal(_passReason(TEM_REPLY), 'the revenue edge compares our FY27 estimate with the Street FY26 one, so it is not like-for-like.')
+    assert.equal(_passReason('Long write-up.\n\nThe data would not reconcile, so no target.'), 'The data would not reconcile, so no target.')
+    assert.equal(_passReason(''), null)
+    assert.equal(_passReason(null), null)
+    assert.equal(_passReason('PASS - ' + 'x'.repeat(1000)).length, PASS_REASON_MAX)
+})
+
+test('a re-model that passes on a held thesis records the reason and says it on the card', async () => {
+    const existing = { id: 'cov_TEM_1', symbol: 'TEM' }
+    const h = harness({ draft: null, initResult: { ok: true }, existing, reply: TEM_REPLY })
+    const r = await refreshCoverage({ userId: null, ticker: 'TEM' }, h.deps)
+    assert.equal(r.reason, 'pass')
+    assert.deepEqual(h.calls.update, [{ id: 'cov_TEM_1', patch: { revision_kind: 'remodel_pass', revision_note: _passReason(TEM_REPLY) }, userId: undefined }])
+    assert.equal(h.calls.initiate.length, 0)                       // nothing new is stored
+    assert.equal(h.calls.resolve.length, 0)                        // a pass answers no "revise" ask
+    assert.equal(h.calls.notify[0].pass, _passReason(TEM_REPLY))
+    assert.equal(h.calls.notify[0].coverageId, 'cov_TEM_1')
+})
+
+test('a pass on a name we do NOT hold is still a plain no-draft — there is no thesis to annotate', async () => {
+    const h = harness({ draft: null, initResult: { ok: true }, existing: null, reply: TEM_REPLY })
+    const r = await refreshCoverage({ userId: null, ticker: 'TEM' }, h.deps)
+    assert.equal(r.reason, 'no_draft')
+    assert.equal(h.calls.update.length, 0)
+})
+
+test('the pass card reads as a kept target with its reason, and offers the thesis to read', () => {
+    const house = buildCoverageRefreshed({ userId: 'a1', ticker: 'TEM', coverageId: 'cov_TEM_1', ok: false, house: true, pass: 'not like-for-like.' })
+    assert.equal(house.content, 'Scheduled re-model of TEM kept the existing target — not like-for-like.')
+    assert.doesNotMatch(house.content, /nothing to store/)
+    assert.equal(house.payload.pass, true)
+    assert.equal(house.actions.primary.label, 'Open coverage')
+    assert.equal(house.visibility, 'admin')
+    const mine = buildCoverageRefreshed({ userId: 'u1', ticker: 'TEM', portfolioId: 'p1', ok: false, pass: 'why.' })
+    assert.match(mine.content, /no new target — why\. You can resume the review\./)
+    assert.equal(mine.actions.primary.label, 'Resume review')
 })

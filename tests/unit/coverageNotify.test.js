@@ -12,20 +12,22 @@ const cov = (over = {}) => ({ id: 'cov_1', symbol: 'NVDA', price_target: { value
 
 // ── the card ─────────────────────────────────────────────────────────────────
 
-test('target hit, edge gone → a harvest nudge from Prometheus, admin-visible', () => {
-    const c = buildCoverageEvent(cov(), { state: 'target_hit', reason: 'x', edge_gone: true }, 'a1')
+test('target hit → a plain card from Prometheus, admin-visible', () => {
+    const c = buildCoverageEvent(cov(), { state: 'target_hit', reason: 'x' }, 'a1')
     assert.equal(c.userId, 'a1')
     assert.equal(c.botId, 'analyst')
     assert.equal(c.type, 'coverage_event')
     assert.equal(c.visibility, 'admin')
-    assert.equal(c.content, 'NVDA reached our price target (180) — the Street has caught up, so the edge is gone. Consider harvesting.')
-    assert.deepEqual(c.payload, { kind: 'coverage', symbol: 'NVDA', coverageId: 'cov_1', state: 'target_hit', edge_gone: true })
+    assert.equal(c.content, 'NVDA reached our price target (180).')
+    assert.deepEqual(c.payload, { kind: 'coverage', symbol: 'NVDA', coverageId: 'cov_1', state: 'target_hit' })
     assert.equal(c.actions.primary.label, 'Revise thesis')
 })
 
 test('each material state reads as itself; too-fast reads as a miss, not a win', () => {
     const say = (state, reason = 'r') => buildCoverageEvent(cov(), { state, reason }, 'a1').content
     assert.equal(say('target_hit'), 'NVDA reached our price target (180).')
+    // Our PT is the price we trade by — the Street agreeing with it is not "the edge is gone".
+    assert.doesNotMatch(say('target_hit'), /edge|Street|harvest/i)
     assert.match(say('target_hit_early', 'gap closed in 3 days'), /far too fast: gap closed in 3 days\. Re-modelling/)
     assert.equal(say('thesis_broken', 'guide cut'), 'NVDA thesis BROKEN: guide cut.')
     assert.equal(say('validating', 'estimates rising'), 'NVDA thesis is playing out: estimates rising.')

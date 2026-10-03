@@ -30,7 +30,7 @@ export function _setDeps(d) { Object.assign(_deps, d) }
 /**
  * Build the coverage-event card for one admin. Pure → { userId, content, type, payload, botId,
  * actions, visibility } or null when there is nobody to tell or nothing to say.
- * verdict = { state, reason, edge_gone } from coverage.assess.classifyGapState.
+ * verdict = { state, reason } from coverage.assess.classifyGapState.
  */
 export function buildCoverageEvent(coverage, verdict, userId) {
     if (!userId || !coverage?.symbol || !verdict?.state) return null
@@ -42,8 +42,9 @@ export function buildCoverageEvent(coverage, verdict, userId) {
     // already reads "Prometheus", same as the Atlas/Pythia cards. Keep the copy a plain sentence.
     let content
     if (state === 'target_hit') {
-        content = `${sym} reached our price target${pt != null ? ` (${pt})` : ''}`
-            + (verdict.edge_gone ? ' — the Street has caught up, so the edge is gone. Consider harvesting.' : '.')
+        // No "the Street caught up, so the edge is gone" (2026-10-02): our PT is the price we trade by,
+        // and the Street agreeing with it is not a verdict on it. See coverage.assess._hitVerdict.
+        content = `${sym} reached our price target${pt != null ? ` (${pt})` : ''}.`
     } else if (state === 'target_hit_early') {
         // Reads as a MISS, not a win — the copy has to say so, or a card announcing "target reached"
         // invites exactly the harvest the verdict is arguing against.
@@ -63,7 +64,7 @@ export function buildCoverageEvent(coverage, verdict, userId) {
         userId,
         content,
         type:       'coverage_event',
-        payload:    { kind: 'coverage', symbol: sym, coverageId: coverage.id ?? null, state, edge_gone: !!verdict.edge_gone },
+        payload:    { kind: 'coverage', symbol: sym, coverageId: coverage.id ?? null, state },
         botId:      'analyst',
         // "Revise thesis", not "Open coverage". This card's primary runs the REVISE doorway — it
         // opens Prometheus on the thesis with the turn already in flight — while the refresh card
@@ -117,9 +118,25 @@ export async function notifyCoverageEvent(coverage, verdict, deps = _deps) {
  * (the existing thesis is left in place). `house` = a scheduled re-model, not a user's request: the
  * copy stops talking about "the review" and the card is admin-visible rather than own-only.
  */
-export function buildCoverageRefreshed({ userId, ticker, portfolioId = null, portfolioName = null, coverageId = null, summary = null, ok = true, house = false }) {
+export function buildCoverageRefreshed({ userId, ticker, portfolioId = null, portfolioName = null, coverageId = null, summary = null, ok = true, house = false, pass = null }) {
     const sym = String(ticker ?? '').toUpperCase().trim()
     if (!userId || !sym) return null
+    // A PASS — the model reviewed the thesis and declined to set a new number, and said why (see
+    // coverageRefresh). Not a failure: the card carries the reason, and there is a thesis to go read.
+    const passWhy = !ok && typeof pass === 'string' && pass.trim() ? pass.trim() : null
+    if (passWhy) {
+        return {
+            userId,
+            content: house
+                ? `Scheduled re-model of ${sym} kept the existing target — ${passWhy}`
+                : `Re-researched ${sym}${portfolioName ? ` for "${portfolioName}"` : ''}: no new target — ${passWhy}${portfolioId ? ' You can resume the review.' : ''}`,
+            type:       'coverage_refreshed',
+            payload:    { kind: 'coverage', symbol: sym, coverageId, portfolioId, ok: false, house, pass: true },
+            botId:      'analyst',
+            actions:    portfolioId ? cardActions('Resume review') : cardActions('Open coverage', { resolvesOn: 'open' }),
+            ...(house ? { visibility: 'admin' } : { visibility: 'own', forUserId: userId }),
+        }
+    }
     const forBook = portfolioName ? ` for "${portfolioName}"` : ''
     const gist    = (ok && typeof summary === 'string' && summary.trim())
         ? ` — ${summary.trim().length > 140 ? summary.trim().slice(0, 137) + '…' : summary.trim()}`

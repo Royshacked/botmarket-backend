@@ -47,10 +47,13 @@ test('recomputeGap: pctile clamps to 0–100 and needs a real range', () => {
 })
 
 // ── target_hit ───────────────────────────────────────────────────────────────
-test('bullish: price reaches our PT → target_hit; edge_gone only when the Street has caught up', () => {
+test('bullish: price reaches our PT → target_hit, wherever the Street sits', () => {
     assert.equal(classifyGapState(bull(), { price: 205, consensus_pt: 190 }).state, 'target_hit')
-    assert.equal(classifyGapState(bull(), { price: 205, consensus_pt: 190 }).edge_gone, false)  // Street still below
-    assert.equal(classifyGapState(bull(), { price: 205, consensus_pt: 210 }).edge_gone, true)   // Street caught up → edge gone
+    // The Street at or past our PT used to stamp `edge_gone` (2026-10-02: removed). Our PT is the
+    // price we trade by; the Street agreeing with it is no verdict on it.
+    const v = classifyGapState(bull(), { price: 205, consensus_pt: 210 })
+    assert.equal(v.state, 'target_hit')
+    assert.equal('edge_gone' in v, false)
 })
 
 test('bearish: price falls to our PT → target_hit', () => {
@@ -68,20 +71,16 @@ const dated = (over = {}) => bull({
 })
 const at = days => Date.parse('2026-01-01T00:00:00.000Z') + days * DAY
 
-test('a target reached in the first quarter of its window → target_hit_early, never edge_gone', () => {
+test('a target reached in the first quarter of its window → target_hit_early', () => {
     const v = classifyGapState(dated(), { price: 205, consensus_pt: 210, nowMs: at(21) })
     assert.equal(v.state, 'target_hit_early')
     assert.match(v.reason, /too low/)
     assert.match(v.reason, /12m/)
-    // The Street sitting above our PT would read as edge_gone on a normal hit. On an early one it must
-    // not: agreeing with a number we now think was wrong is no reason to harvest.
-    assert.equal(v.edge_gone, false)
 })
 
-test('past the quarter mark it is an ordinary target_hit, edge_gone intact', () => {
+test('past the quarter mark it is an ordinary target_hit', () => {
     const v = classifyGapState(dated(), { price: 205, consensus_pt: 210, nowMs: at(200) })
     assert.equal(v.state, 'target_hit')
-    assert.equal(v.edge_gone, true)
 })
 
 test('the early boundary scales with the horizon, not a fixed period', () => {

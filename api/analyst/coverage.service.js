@@ -462,7 +462,7 @@ const _diffPlan = (prev, next) => diffFields(prev, next, LOGGED_FIELDS)
 // whether anything moved. This is the analyst's own account of the change — the copy is a
 // per-desk judgment (the trail's SHAPE is shared in revisionTrail.js; what it means is not), which
 // is why it lives here and the chat transport merely carries it.
-const REVISION_VERBS = { remodel: 'Re-modelled', update: 'Updated', retire: 'Retired', rating_change: 'Rating changed', target_change: 'Target changed' }
+const REVISION_VERBS = { remodel: 'Re-modelled', remodel_pass: 'Re-modelled, no new target', update: 'Updated', retire: 'Retired', rating_change: 'Rating changed', target_change: 'Target changed' }
 const _pt = v => (v && typeof v === 'object') ? v.value : v
 export function revisionSummary(revision) {
     if (!revision || typeof revision !== 'object') return null
