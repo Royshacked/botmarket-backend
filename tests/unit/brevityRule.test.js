@@ -124,7 +124,9 @@ test('it rides the CACHED prefix, and rides it LAST', () => {
     for (const f of DESKS) {
         assert.match(
             src(f),
-            /cachedBlock\(\w+\(\)(?: \+ buildRouteRule\('\w+'\))? \+ LANGUAGE_RULE(?: \+ VENUE_RULE)? \+ BREVITY_RULE\)/,
+            // (buildStandingProposalRule rides on the one-shot-proposal desks, ahead of this — see
+            // reviewWithdrawnProposal.test.js.)
+            /cachedBlock\(\w+\(\)(?: \+ buildRouteRule\('\w+'\))? \+ LANGUAGE_RULE(?: \+ VENUE_RULE)?(?: \+ buildStandingProposalRule\([^)]*\))? \+ BREVITY_RULE\)/,
             `${f} appends BREVITY_RULE somewhere other than the end of the cached system-prompt entry`,
         )
     }

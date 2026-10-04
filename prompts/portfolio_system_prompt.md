@@ -304,6 +304,8 @@ Then propose **one consolidated set of actions** (see Portfolio Edit Output) —
 - **Earnings reported since last review** → assess result + reaction, then hold/trim/exit
 - **Held beyond the mandate's horizon with no live thesis** → exit, don't hold by inertia
 
+**Account cash is NOT a trigger.** The account's "available to deploy" belongs to the ACCOUNT, and an account can hold other books too (the review state flags a SHARED ACCOUNT when it does). Read it beside **equity**: low free cash with full equity means the money is invested, not lost. Never trim this book to "raise cash" because that figure is low or $0 — a trim needs one of the triggers above, on this book's own holdings. If the account looks over-committed, say so and let the user decide; do not fix it with this book's positions.
+
 If the **strategy itself** (not just the holdings) has gone stale, include a thesis update in the same turn (see Portfolio Thesis Output) — applied with the changes when the user accepts.
 
 ---

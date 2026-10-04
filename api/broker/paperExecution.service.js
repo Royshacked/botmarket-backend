@@ -10,7 +10,7 @@
  *
  * Cost model: spread is baked into the fill price (applySpread), commission is a cash debit on
  * every fill. Cash otherwise moves only by realized P&L, so equity stays cashBalance +
- * Σ unrealized with no notional bookkeeping (committedByAccount derives exposure from cost basis).
+ * Σ unrealized with no notional bookkeeping (exposureByAccount derives exposure from cost basis).
  */
 
 import { randomUUID }        from 'crypto'
@@ -495,14 +495,22 @@ export async function reducePosition({ userId, positionId, qty, price, reason = 
  * That is what makes this affordable on an accounts LIST, which is called far more often than the
  * single-account read.
  */
-export async function committedByAccount(userId) {
+//
+// It reports UNREALIZED too (was `committedByAccount`, cost basis only), so the list can carry equity:
+// without it an agent saw "balance $100,112 · available $0" and nothing saying what the account is
+// worth, and read the $0 as an empty account. Same rollUpPositions computeEquity uses — stored marks,
+// still no fetch — so equity here and on the single-account read are one identity.
+//
+// @returns {Promise<Map<string, {marginUsed:number, unrealized:number}>>}  keyed by accountId
+export async function exposureByAccount(userId) {
     const positions = await paperBrokerService.listPositions(userId, { status: 'open' })
-    const by = new Map()
+    const groups = new Map()
     for (const p of positions) {
         const key = String(p.accountId)
-        by.set(key, (by.get(key) ?? 0) + Math.abs(p.avgPrice * p.qty))
+        if (!groups.has(key)) groups.set(key, [])
+        groups.get(key).push(p)
     }
-    return by
+    return new Map([...groups].map(([key, list]) => [key, rollUpPositions(list)]))
 }
 
 /** Deployable cash: leveraged buying power where leverage is on, otherwise cash not yet committed. */

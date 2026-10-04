@@ -510,6 +510,35 @@ Depth on request is not a violation. When the user asks you to explain, teach, c
 
 This governs the reply you SPEAK. Prose you emit into something that gets saved — a thesis, kill-criteria, a rationale, an \`analysis\` field, card copy — follows its own schema's spec and is not capped here.`
 
+// ─── The proposal stands only while you keep making it ────────────────────────
+// The fourth rule on this seam, for every desk whose turn ends in a ONE-SHOT proposal the user
+// commits with a button: Atlas's <portfolio_update> (Accept changes), Pythia's <tilt> (Publish),
+// Prometheus's <coverage> (Initiate / Revise).
+//
+// WHY IT EXISTS (2026-10-03). Atlas proposed six trims in a review, the user asked "are you sure?",
+// and Atlas took them back — in prose. The panel was still holding the first turn's block, so
+// "Accept changes" sent all six. A desk that changed its mind could still place the orders it had
+// withdrawn. The panels now hold ONLY the latest turn's block: a turn without one withdraws it.
+// This rule is the model's half of that contract — without it, a desk that merely answers a
+// follow-up question would silently lose a proposal it still stands behind.
+//
+// Mentor is deliberately NOT on it: its worksheet is re-emitted every turn already and the server
+// ledger, not the panel, holds the build.
+//
+// `scope` narrows it when the same tag means something else elsewhere. Atlas's <portfolio_update>
+// outside a review is APPLIED the moment it is emitted (MainPage.handlePortfolioUpdate) — re-emitting
+// it there would add the same holding twice — so Atlas's copy says "in a review" and forbids it
+// outside one.
+export function buildStandingProposalRule(tag, button, scope = '') {
+    return `
+
+THE LATEST TURN DECIDES — \`<${tag}>\`${scope ? ` (${scope})` : ''}. The app keeps only the \`<${tag}>\` from your MOST RECENT turn; ${button} acts on that one and nothing older. A turn without the block WITHDRAWS whatever you proposed before.
+
+- Still standing behind it after a follow-up question or a challenge? Re-emit the FULL block, unchanged, in that turn.
+- Changed your mind, partly or wholly? Re-emit only what you still back — or emit nothing, and say plainly that the earlier proposal is withdrawn.
+- Never write "I'd hold off" or "on reflection, no" while the block you no longer back is still the last one you emitted. The button does not read your prose.`
+}
+
 // ─── Emit-tag cleanup ─────────────────────────────────────────────────────────
 // Strip the given emit blocks (<name>…</name>) from a raw model reply. Each name
 // is removed globally, matching the per-agent hand-written `.replace(...)` chains.

@@ -26,7 +26,7 @@
 import { BrokerAdapter }      from './broker.interface.js'
 import { paperBrokerService } from '../paperBroker.service.js'
 import { computeEquity,
-         committedByAccount,
+         exposureByAccount,
          deployable,
          latestMarkPrice,
          dirSign }            from '../paperExecution.service.js'
@@ -117,18 +117,21 @@ export class VirtualAdapter extends BrokerAdapter {
     async getTradingAccounts(userId) {
         const accts     = await paperBrokerService.listAccounts(userId, { mode: this.brokerType })
         // Cash minus what is already committed to open positions. A virtual account's cash does NOT
-        // drop when a position opens (see committedByAccount), so balance alone tells an agent it has
-        // capital that is in fact invested. One query for all accounts, no quotes.
-        const committed = await committedByAccount(userId)
+        // drop when a position opens (see exposureByAccount), so balance alone tells an agent it has
+        // capital that is in fact invested. One query for all accounts, no quotes — and the same
+        // query yields equity (cash + unrealized on stored marks), so the list says what the account
+        // is WORTH beside what is free. See exposureByAccount.
+        const exposure = await exposureByAccount(userId)
         return accts.map(acct => ({
             id:       acct.accountId,
             login:    acct.accountId,
             name:     acct.name,
             currency: acct.currency,
             balance:  round2(acct.cashBalance),
+            equity:   round2(acct.cashBalance + (exposure.get(String(acct.accountId))?.unrealized ?? 0)),
             freeMargin: deployable({
                 cashBalance: acct.cashBalance,
-                marginUsed:  committed.get(String(acct.accountId)) ?? 0,
+                marginUsed:  exposure.get(String(acct.accountId))?.marginUsed ?? 0,
                 buyingPower: this._buyingPower(acct),
             }),
             broker:   this.brokerLabel,

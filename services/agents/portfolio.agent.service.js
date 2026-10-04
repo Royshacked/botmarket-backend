@@ -10,7 +10,7 @@ import { getSecFilings } from '../../providers/sec.provider.js'
 import { cleanConviction } from '../conviction.util.js'
 import { formatWorkspaceLine } from '../portfolioMode.util.js'
 import { logger }         from '../logger.service.js'
-import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, buildAccountLines, stripEmitTags, makeToolHandler, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, BREVITY_RULE, VENUE_RULE, cachedBlock } from '../agentUtils.js'
+import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, buildAccountLines, stripEmitTags, makeToolHandler, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, BREVITY_RULE, VENUE_RULE, buildStandingProposalRule, cachedBlock } from '../agentUtils.js'
 import { makeTradingContextHandlers, buildVenueSection } from '../tools/tradingContext.tools.js'
 import { makeMarketHoursHandlers, MARKET_HOURS_TOOL_SPEC } from '../tools/marketHours.tools.js'
 import { makeSectorViewHandlers, SECTOR_VIEW_TOOL_SPEC } from '../tools/sectorView.tools.js'
@@ -227,7 +227,7 @@ async function chatStream({ messages = [], ideaAccounts = [], mainAccountId = nu
     // session, so caching it lets turns 2+ read it at ~0.1× instead of re-paying
     // full price every turn. A turn where it does change just re-writes it once.
     const systemPrompt = [
-        cachedBlock(_systemPrompt() + buildRouteRule('portfolio') + LANGUAGE_RULE + VENUE_RULE + BREVITY_RULE),
+        cachedBlock(_systemPrompt() + buildRouteRule('portfolio') + LANGUAGE_RULE + VENUE_RULE + buildStandingProposalRule('portfolio_update', 'Accept changes', 'IN A REVIEW ONLY — outside a review the block is applied the moment you emit it, so there you emit it once and never repeat it') + BREVITY_RULE),
         ...(dynamicSections.length
             ? [cachedBlock(dynamicSections.join('\n\n'))]
             : []),
@@ -728,6 +728,19 @@ export function _buildUnreadableVenueSection(state) {
     ].join('\n')
 }
 
+/**
+ * The account this book trades in also holds positions that are NOT this book's — say so, and say
+ * what it does to the free-cash figure. See portfolioState.sharedAccountExposure for the review that
+ * read an account's $0 as the book's own and trimmed six holdings to "raise cash".
+ */
+export function _sharedAccountLine(shared) {
+    if (!shared?.positions) return ''
+    const names = shared.symbols?.length ? ` (${shared.symbols.slice(0, 12).join(', ')}${shared.symbols.length > 12 ? ', …' : ''})` : ''
+    return `SHARED ACCOUNT: the account(s) this book trades in also hold ${shared.positions} position(s) worth $${Math.round(shared.notional)} that are NOT in this book${names}. `
+        + `The account's "available to deploy" is net of ALL of them — it is the ACCOUNT's free cash, not this book's. `
+        + `A low or $0 figure there is never by itself a reason to trim this book: judge each holding on its thesis, conviction and drift against this book's own targets.`
+}
+
 export function _buildPortfolioStateSection(state, isReviewMode = false, reviewDelta = null) {
     // Ungrouped, for the reason agentUtils.formatMoney spells out: a comma in a number an agent
     // reads is a decimal point half the time, and `$94,500` came back as 94.5.
@@ -757,6 +770,7 @@ export function _buildPortfolioStateSection(state, isReviewMode = false, reviewD
         title,
         formatWorkspaceLine(state.workspace),
         `Total notional: $${Math.round(state.totalNotional)} | Total P&L: ${fmtMoney(state.totalPnl)} (${fmtPct(state.totalPnlPct)})`,
+        _sharedAccountLine(state.sharedAccount),
     ].filter(Boolean).join('\n')
 
     // "Live" here means MATCHED TO AN OPEN POSITION, which is what gives a holding a weight at all.

@@ -88,6 +88,7 @@ export function _accountHead(a, workspace = null) {
         + here
         + `${a.selected ? ' · SELECTED (where a live order goes today)' : ''}`
         + ` · balance ${_fixed(a.balance) ?? 'unknown'}${ccy}`
+        + (_fixed(a.equity) != null ? ` · equity ${_fixed(a.equity)}${ccy}` : '')
         + free
 }
 

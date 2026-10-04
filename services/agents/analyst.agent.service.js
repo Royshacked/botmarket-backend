@@ -14,7 +14,7 @@ import { dirname, join } from 'path'
 
 import { getFundamentals, getEarnings, getStockPeers, getSectorSnapshot, getMacroSnapshot } from '../../providers/fmp.provider.js'
 import { getSecFilings } from '../../providers/sec.provider.js'
-import { makePromptLoader, stripEmitTags, makeToolHandler, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, BREVITY_RULE, VENUE_RULE, COMMON_TOOL_HANDLERS, cachedBlock, buildDeskMessages } from '../agentUtils.js'
+import { makePromptLoader, stripEmitTags, makeToolHandler, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, BREVITY_RULE, VENUE_RULE, buildStandingProposalRule, COMMON_TOOL_HANDLERS, cachedBlock, buildDeskMessages } from '../agentUtils.js'
 import { makeTradingContextHandlers, buildVenueSection, TRADING_CONTEXT_TOOL_SPEC } from '../tools/tradingContext.tools.js'
 import { makeMarketHoursHandlers, MARKET_HOURS_TOOL_SPEC } from '../tools/marketHours.tools.js'
 import { buildTagCaptures } from '../llmStream.util.js'
@@ -259,7 +259,7 @@ ${audienceBlock}
 
 ` : ''}Active name: ${active}${seedBlock}${coverageListBlock}${existingBlock}`
     return [
-        cachedBlock(_systemPrompt() + buildRouteRule('analyst') + LANGUAGE_RULE + VENUE_RULE + BREVITY_RULE),
+        cachedBlock(_systemPrompt() + buildRouteRule('analyst') + LANGUAGE_RULE + VENUE_RULE + buildStandingProposalRule('coverage', 'Initiate / Revise') + BREVITY_RULE),
         // The mode module AFTER the spine and BEFORE the dynamic block, as its own cached block:
         // coverage turns keep their prefix untouched, and quick-read turns share one across names.
         ...(mode === MODES.QUICKREAD ? [cachedBlock(_quickreadMode())] : []),

@@ -15,7 +15,7 @@ import { dirname, join } from 'path'
 import { makePhaseCapture, runAgentStream, parseEmitBlock } from '../agentIO.js'
 import { toolsFor } from '../agentTools.registry.js'
 import { consultDescription } from '../deepThink.service.js'
-import { makePromptLoader, stripEmitTags, makeToolHandler, attachTurnContext, LANGUAGE_RULE, BREVITY_RULE, cachedBlock, buildDeskMessages } from '../agentUtils.js'
+import { makePromptLoader, stripEmitTags, makeToolHandler, attachTurnContext, LANGUAGE_RULE, BREVITY_RULE, buildStandingProposalRule, cachedBlock, buildDeskMessages } from '../agentUtils.js'
 import { buildTagCaptures } from '../llmStream.util.js'
 import { makeRouteCapture, ROUTE_TAGS, buildRouteRule } from '../routing.util.js'
 import { getMacroSnapshot, getSectorSnapshot } from '../../providers/fmp.provider.js'
@@ -266,7 +266,7 @@ function _buildSystemPrompt() {
     // hit.
     const today = new Date().toISOString().slice(0, 10)
     return [
-        cachedBlock(_systemPrompt() + buildRouteRule('strategy') + LANGUAGE_RULE + BREVITY_RULE),
+        cachedBlock(_systemPrompt() + buildRouteRule('strategy') + LANGUAGE_RULE + buildStandingProposalRule('tilt', 'Publish') + BREVITY_RULE),
         { type: 'text', text: `---\nCURRENT DATE: ${today}. Resolve relative dates (this quarter, the next FOMC) against it.` },
     ]
 }

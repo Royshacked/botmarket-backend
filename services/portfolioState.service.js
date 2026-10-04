@@ -214,6 +214,10 @@ export async function computePortfolioState(portfolioId, userId) {
     // ── Match positions → ideas, accumulate notional and P&L ──────────────────
     let totalNotional = 0
     let totalPnl      = 0
+    // Every position this book claims, and every account it holds them in — read back below to find
+    // what ELSE sits in those accounts (sharedAccountExposure).
+    const matchedKeys  = new Set()
+    const bookAccounts = new Set()
 
     const liveStates = liveIdeas.map(idea => {
         let notional        = 0
@@ -240,6 +244,8 @@ export async function computePortfolioState(portfolioId, userId) {
                      String(p.accountId) === String(link.accountId)
             )
             if (!pos) continue
+            matchedKeys.add(_positionKey(link.broker, pos))
+            bookAccounts.add(`${link.broker}|${pos.accountId}`)
 
             const vol = pos.volume ?? 0
             const cur = pos.currentPrice ?? pos.entryPrice ?? 0
@@ -388,6 +394,7 @@ export async function computePortfolioState(portfolioId, userId) {
     const totalPnlPct = costBasis > 0 ? (totalPnl / costBasis) * 100 : 0
 
     const workspace = await _deriveWorkspace(ideas, userId)
+    const sharedAccount = sharedAccountExposure(positionsByBroker, bookAccounts, matchedKeys)
 
     logger.info(LOG, 'computed', { portfolioId, live: liveStates.length, pending: pendingStates.length, totalNotional, mode: workspace.mode })
 
@@ -401,7 +408,43 @@ export async function computePortfolioState(portfolioId, userId) {
         totalPnlPct,
         ideas:         allStates,
         sectors,
+        sharedAccount,
     }
+}
+
+function _positionKey(broker, pos) {
+    return `${broker}|${pos.accountId}|${pos.id}`
+}
+
+/**
+ * WHAT ELSE SITS IN THE ACCOUNTS THIS BOOK TRADES IN — positions held there that are not this book's.
+ *
+ * Why it exists (2026-10-03): two Atlas books had been built on ONE $100k paper account, ~$145k of
+ * positions between them. The account's "available to deploy" was correctly $0, and a review of the
+ * smaller book read that $0 as ITS OWN cash and proposed six trims to raise some — while the book sat
+ * ~$38k under the capital it was built for. The free-cash figure is the ACCOUNT's, net of every
+ * position in it; without this, nothing told the desk that most of what used it up was not its book.
+ *
+ * Read off the positions the state ALREADY fetched (one call per broker, every account), so it costs
+ * nothing. Only brokers this book has a matched position at are seen — a book with nothing live has
+ * no account to share yet. Exported for tests.
+ *
+ * @returns {{ positions: number, notional: number, symbols: string[] } | null}  null = nothing else there
+ */
+export function sharedAccountExposure(positionsByBroker, bookAccounts, matchedKeys) {
+    let positions = 0
+    let notional  = 0
+    const symbols = new Set()
+    for (const [broker, list] of Object.entries(positionsByBroker ?? {})) {
+        for (const p of (list ?? [])) {
+            if (!bookAccounts.has(`${broker}|${p.accountId}`)) continue
+            if (matchedKeys.has(_positionKey(broker, p))) continue
+            positions++
+            notional += Math.abs((p.volume ?? 0) * (p.currentPrice ?? p.entryPrice ?? 0))
+            if (p.symbol) symbols.add(String(p.symbol).toUpperCase())
+        }
+    }
+    return positions ? { positions, notional, symbols: [...symbols] } : null
 }
 
 /**

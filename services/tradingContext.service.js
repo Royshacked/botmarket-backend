@@ -6,7 +6,7 @@
 // Returns:
 //   { modes: { paper: bool, manual: bool, live_brokers: [name] },
 //     workspace: 'paper'|'live'|'manual',   ← the one the user is SITTING IN (see activeWorkspace)
-//     accounts: [ { id, broker, mode, name, balance, freeMargin, currency, capabilities, selected, positions } ],
+//     accounts: [ { id, broker, mode, name, balance, equity, freeMargin, currency, capabilities, selected, positions } ],
 //     unavailable: [broker] }   ← brokers whose position read failed; their book is UNKNOWN, not flat
 //
 // Every agent reaches this through the tools in tradingContext.tools.js — it is the ONE answer to
@@ -106,6 +106,9 @@ export async function getTradingContext(userId, deps = {}) {
                 // the broker doesn't report it — the renderer then falls back to balance rather than
                 // inventing a number.
                 freeMargin: a.freeMargin ?? null,
+                // What the account is WORTH — cash plus open P&L. Beside a $0 "available" it is what says
+                // the money is invested, not missing. null where the venue does not report it.
+                equity: a.equity ?? null,
                 // Which account an order would actually go to today, when the user holds several.
                 selected: selectedAccountId != null && String(selectedAccountId) === String(a.id),
                 positions: posFor(a.id),
@@ -139,6 +142,7 @@ export async function getTradingContext(userId, deps = {}) {
                     name: a.name ?? id,
                     balance: a.balance ?? null, currency: a.currency ?? null, capabilities: caps,
                     freeMargin: a.freeMargin ?? null,   // see the live branch above
+                    equity:     a.equity ?? null,       // see the live branch above
                     // Virtual accounts are picked per artifact, not globally — there is no
                     // "selected" one to report, so the selectedAccountId this read also returns is
                     // deliberately dropped.
