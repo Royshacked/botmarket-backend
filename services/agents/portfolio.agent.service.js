@@ -240,7 +240,11 @@ async function chatStream({ messages = [], ideaAccounts = [], mainAccountId = nu
     let capturedThesis  = null
     const phase = makePhaseCapture(6, onPhase)
     const onPlan    = (json) => { try { capturedPlan    = JSON.parse(json) } catch { /* malformed */ } }
-    const onUpdate  = (json) => { try { capturedUpdate  = JSON.parse(json) } catch { /* malformed */ } }
+    // The book's id is the SERVER's, never the model's. The schema asked the model to copy it "from
+    // context" while no context carried it (the EDIT MODE block that did was deleted 2026-09-15), so
+    // Atlas either guessed one or refused to propose at all — and an edit's add_item lands in whatever
+    // portfolioId the block names (MainPage.handlePortfolioUpdate). Stamped over whatever it wrote.
+    const onUpdate  = (json) => { try { capturedUpdate = _stampPortfolioId(JSON.parse(json), portfolioId) } catch { /* malformed */ } }
     const onMandate = (json) => { try { capturedMandate = JSON.parse(json) } catch { /* malformed */ } }
 
     // All known emit tags suppressed by default; this agent captures phase, ticker
@@ -728,6 +732,12 @@ export function _buildUnreadableVenueSection(state) {
     ].join('\n')
 }
 
+/** The open book's id over whatever the block named; no open book (construction) → left as written. */
+export function _stampPortfolioId(update, portfolioId) {
+    if (!portfolioId || !update || typeof update !== 'object' || Array.isArray(update)) return update
+    return { ...update, portfolioId }
+}
+
 /**
  * The account this book trades in also holds positions that are NOT this book's — say so, and say
  * what it does to the free-cash figure. See portfolioState.sharedAccountExposure for the review that
@@ -768,6 +778,9 @@ export function _buildPortfolioStateSection(state, isReviewMode = false, reviewD
         : `CURRENT PORTFOLIO — POSITIONS & P&L — as of ${date}`
     const header = [
         title,
+        // The id a <portfolio_update> names — the server stamps it anyway (chatStream onUpdate), but a
+        // schema that asks for a value the context never shows is one the model refuses to fill.
+        state.portfolioId ? `Portfolio id: ${state.portfolioId}${state.portfolioName ? ` ("${state.portfolioName}")` : ''}` : null,
         formatWorkspaceLine(state.workspace),
         `Total notional: $${Math.round(state.totalNotional)} | Total P&L: ${fmtMoney(state.totalPnl)} (${fmtPct(state.totalPnlPct)})`,
         _sharedAccountLine(state.sharedAccount),

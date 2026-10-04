@@ -24,7 +24,7 @@ import { paperBrokerService } from '../../api/broker/paperBroker.service.js'
 import { getTradingContext } from '../../services/tradingContext.service.js'
 import { _accountHead } from '../../services/tools/tradingContext.tools.js'
 import { sharedAccountExposure } from '../../services/portfolioState.service.js'
-import { _buildPortfolioStateSection, _sharedAccountLine } from '../../services/agents/portfolio.agent.service.js'
+import { _buildPortfolioStateSection, _sharedAccountLine, _stampPortfolioId } from '../../services/agents/portfolio.agent.service.js'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '../../')
 const read = (p) => readFileSync(join(ROOT, p), 'utf-8')
@@ -145,6 +145,35 @@ test('a long symbol list is capped, not dumped', () => {
     const line = _sharedAccountLine({ positions: 15, notional: 1, symbols })
     assert.match(line, /S11, …\)/)
     assert.doesNotMatch(line, /S12/)
+})
+
+// ─── 3. the book's id ─────────────────────────────────────────────────────────
+// Found driving the fix live: asked for a trim, Atlas refused — "the portfolio ID isn't present in the
+// context". It wasn't: the schema said "<portfolioId from context>" and nothing had carried it since
+// the EDIT MODE block was deleted (2026-09-15). And an edit's add_item lands in whatever id the model
+// wrote. Shown to the model, and stamped by the server regardless.
+
+test('the state block names the book\'s id', () => {
+    const out = _buildPortfolioStateSection({ ...reviewState(null), portfolioId: 'portfolio_1786030441286', portfolioName: 'Quality-Value Swing' }, true, null)
+    assert.match(out, /^Portfolio id: portfolio_1786030441286 \("Quality-Value Swing"\)$/m)
+    assert.doesNotMatch(_buildPortfolioStateSection(reviewState(null), true, null), /Portfolio id:/)
+})
+
+test('the server\'s id overwrites the model\'s — a guessed or missing one never survives', () => {
+    const changes = [{ action: 'add_item', item: { asset: 'JPM' } }]
+    assert.deepEqual(_stampPortfolioId({ portfolioId: 'portfolio_GUESSED', changes }, 'portfolio_real'), { portfolioId: 'portfolio_real', changes })
+    assert.deepEqual(_stampPortfolioId({ changes }, 'portfolio_real'), { portfolioId: 'portfolio_real', changes })
+    // Construction has no open book — nothing to stamp, and a malformed block passes through untouched.
+    assert.deepEqual(_stampPortfolioId({ portfolioId: 'x', changes }, null), { portfolioId: 'x', changes })
+    assert.equal(_stampPortfolioId(null, 'portfolio_real'), null)
+    assert.deepEqual(_stampPortfolioId([1], 'portfolio_real'), [1])
+})
+
+test('the prompt points at the id line, not at a block that no longer exists', () => {
+    const prompt = read('prompts/portfolio_system_prompt.md')
+    assert.doesNotMatch(prompt, /EDIT MODE/)
+    assert.doesNotMatch(prompt, /portfolioId from context/)
+    assert.match(prompt, /"portfolioId": "<the Portfolio id line>"/)
 })
 
 test('Atlas\'s review prompt: account cash is not a trigger', () => {

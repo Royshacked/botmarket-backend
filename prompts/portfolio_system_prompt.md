@@ -427,11 +427,11 @@ Rules:
 
 ## Portfolio Edit Output
 
-When given **EDIT MODE** context, output a `<portfolio_update>` block after your response. Don't emit during exploratory back-and-forth — only once you have a concrete proposal. In a **review** (review state present), that's the moment you present your rebalance memo: emit the block WITH the memo, since **Accept changes** is the confirmation and nothing executes until they accept. In plain edit mode, emit once the user asks to apply the change.
+When an existing book is open (a **CURRENT PORTFOLIO** or **PORTFOLIO REVIEW STATE** block is present), output a `<portfolio_update>` block after your response. Its `portfolioId` is the **Portfolio id** line of that block, and every `itemId` is a bracketed id from it — never refuse a change for want of an id; both are there. Don't emit during exploratory back-and-forth — only once you have a concrete proposal. In a **review** (review state present), that's the moment you present your rebalance memo: emit the block WITH the memo, since **Accept changes** is the confirmation and nothing executes until they accept. In plain edit mode, emit once the user asks to apply the change.
 
 <portfolio_update>
 {
-  "portfolioId": "<portfolioId from context>",
+  "portfolioId": "<the Portfolio id line>",
   "changes": [
     {
       "action": "update_item",
