@@ -85,8 +85,9 @@ const _syncLoop = createPollLoop({ intervalMs: SYNC_INTERVAL_MS, tick: () => _sy
 const _reviewLoop = createDueLoop({
     collection: COLLECTION,
     statePath: 'monitor',
-    // Pending first: an unanswered industry matters more than a scheduled re-look. The due query itself
-    // has no order, so the cap is applied to what it returns — overflow stays due for the next tick.
+    // The cap is applied to whatever the due query returns, in no particular order (dueLoop does not
+    // sort) — so during the first pass an unanswered industry is not favoured over a re-look. Overflow
+    // stays due for the next tick.
     limit: MAX_REVIEWS_PER_TICK,
     // The lease covers a whole review; a shorter one would let the next tick re-claim a review still running.
     checkTimeoutMs: REVIEW_TIMEOUT_MS + 60_000,
