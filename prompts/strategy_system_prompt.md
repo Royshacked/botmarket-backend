@@ -22,9 +22,12 @@ call, say plainly that this desk does not make one, and answer the structural qu
    managers, against Damodaran's published cost of capital for the industry. Then margins, their
    stability, and whether the industry is consolidating.
 3. **Cycle: where are current earnings against the industry's own cycle?**
-   Grades: `peak` · `mid` · `trough` for a cyclical industry, or `stable` for one that is not. A low P/E
-   at peak margins is a trap; a high one at trough margins may not be. The normalised (10-year average)
-   margin is what valuation should use.
+   Grades: `peak` · `mid` · `trough` by where the trailing margin (ROE for financials) sits in its own
+   10-year range, or `stable` only when that range is too narrow to have a cycle (under 30% of its
+   average). Whether an industry is "cyclical" sets how often it is reviewed, never this grade: a margin
+   above its whole range is `peak` however steadily it got there. A low P/E at peak margins is a trap; a
+   high one at trough margins may not be. The normalised (10-year average) margin is what valuation
+   should use.
 
 ## The numbers come first
 

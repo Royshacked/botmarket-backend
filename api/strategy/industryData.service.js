@@ -100,6 +100,14 @@ export async function readCompanies(level, code, { limit = 25 } = {}) {
 const pct = (v, d = 1) => (typeof v === 'number' ? `${(v * 100).toFixed(d)}%` : 'n/a')
 const pp  = (v) => (typeof v === 'number' ? `${v >= 0 ? '+' : ''}${(v * 100).toFixed(1)}pp` : 'n/a')
 
+// The engine's "stable" rule (aether-engine fundamentals/industry_metrics.py STABLE_RANGE), restated so the
+// desk is told the rule beside the measured width. The engine decides the code grade; this only explains it.
+export const STABLE_RANGE = 0.30
+const _rangeWidth = (q3) => {
+    const { range_low: lo, range_high: hi, normalised_value: mean } = q3
+    return [lo, hi, mean].every(v => typeof v === 'number') && mean !== 0 ? (hi - lo) / Math.abs(mean) : null
+}
+
 /** One node's three-question numbers as text. Pure. */
 export function formatNode(n) {
     if (!n) return 'No measurements.'
@@ -108,7 +116,10 @@ export function formatNode(n) {
         `${n.name} (${n.level.replace('_', ' ')}, GICS ${n.code}) — ${n.n_companies} companies with enough history; fiscal year ${n.last_fiscal_year}, as of ${n.asof}`,
         `  DEMAND     code grade: ${q1.grade ?? 'none'} — revenue ${pct(q1.cagr)}/yr over ${q1.years ?? '?'}y (universe ${pct(q1.universe_cagr)}, relative ${pp(q1.relative)}), last 3y ${pct(q1.cagr_recent_3y)}/yr, ${pct(q1.share_positive_years, 0)} of years up, growth volatility ${pct(q1.growth_volatility)}`,
         `  ECONOMICS  code grade: ${q2.grade ?? 'none'} — the industry's ${q2.return_measure ?? 'return'} ${pct(q2.aggregate_return)} (all its capital together) vs hurdle ${pct(q2.hurdle)} (${(q2.hurdle_sources ?? []).join(', ') || 'no hurdle'}; spread ${pp(q2.spread)}); the median company earns ${pct(q2.median_return)} and ${pct(q2.share_above_hurdle, 0)} of ${q2.companies_with_returns ?? 0} clear their own hurdle; operating margin ${pct(q2.op_margin_mean)} ± ${pct(q2.op_margin_stdev)}; top-5 revenue share ${pct(q2.top5_share, 0)} (5y ago ${pct(q2.top5_share_5y_ago, 0)})`,
-        `  CYCLE      code grade: ${q3.grade ?? 'none'} — ${q3.measure === 'roe' ? 'ROE' : 'operating margin'} trailing 12m ${pct(q3.ttm_value)} vs its 10y range ${pct(q3.range_low)}–${pct(q3.range_high)} (percentile ${pct(q3.percentile, 0)}), normalised ${pct(q3.normalised_value)}, ${q3.cyclical ? 'CYCLICAL' : 'not cyclical'} (cv ${typeof q3.cv === 'number' ? q3.cv.toFixed(2) : 'n/a'})`,
+        `  CYCLE      code grade: ${q3.grade ?? 'none'} — ${q3.measure === 'roe' ? 'ROE' : 'operating margin'} trailing 12m ${pct(q3.ttm_value)} vs its 10y range ${pct(q3.range_low)}–${pct(q3.range_high)} (percentile ${pct(q3.percentile, 0)}), normalised ${pct(q3.normalised_value)}; the range is ${pct(_rangeWidth(q3), 0)} of its normalised value (stable only under ${pct(STABLE_RANGE, 0)} — otherwise placed peak/mid/trough by the percentile)`,
+        // `cyclical` (cv or a revenue drop) sets the review CADENCE only — never the grade. Said as such, because
+        // "not cyclical" beside a peak margin read as licence to grade it stable (the first live review, 2026-10-05).
+        `  CADENCE    ${q3.cyclical ? 'cyclical — reviewed quarterly' : 'reviewed yearly'} (margin cv ${typeof q3.cv === 'number' ? q3.cv.toFixed(2) : 'n/a'}); this does not decide the cycle grade`,
     ]
     if (n.triggers?.length) lines.push(`  TRIGGERS   ${n.triggers.join(', ')}`)
     return lines.join('\n')

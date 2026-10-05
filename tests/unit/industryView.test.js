@@ -82,6 +82,17 @@ test('a node reads as three lines of numbers, each with its code grade, and its 
     assert.match(t, /TRIGGERS\s+margin_at_range_edge/)
 })
 
+test('the cycle line states the stable rule with the measured width, and "cyclical" only as the cadence', () => {
+    // the first live review graded a margin above its whole range "stable" because the tool said "not cyclical"
+    const steady = { ...NODE, q3: { ...NODE.q3, cyclical: false, cv: 0.19, range_low: 0.175, range_high: 0.365, normalised_value: 0.249 } }
+    const t = formatNode(steady)
+    assert.match(t, /the range is 76% of its normalised value \(stable only under 30% — otherwise placed peak\/mid\/trough by the percentile\)/)
+    assert.match(t, /CADENCE\s+reviewed yearly \(margin cv 0\.19\); this does not decide the cycle grade/)
+    assert.doesNotMatch(t, /not cyclical/)
+    assert.match(formatNode(NODE), /CADENCE\s+cyclical — reviewed quarterly/)
+    assert.match(formatNode({ ...NODE, q3: { grade: null } }), /the range is n\/a of its normalised value/, 'no history reads n/a, not NaN')
+})
+
 test('a thin sub-industry says it is answered at its parent', () => {
     const t = formatSubIndustry({ sub: { code: '25102010', name: 'Motorcycle Manufacturers', n_companies: 1, answered_at: { level: 'industry', name: 'Automobiles' } }, answering: { ...NODE, level: 'industry', name: 'Automobiles', code: '251020' }, parents: [] })
     assert.match(t, /too few companies \(1\) to answer on its own — it is answered at its industry, Automobiles/)
@@ -105,7 +116,12 @@ test('a changed answer posts a card per admin naming what moved; an unchanged re
     const posted = []
     const n = await notifyIndustryChanged(doc, { demand: { from: null, to: 'growing' } }, { adminUserIds: async () => ['a', 'b'], post: async c => { posted.push(c); return c } })
     assert.equal(n, 2)
-    assert.match(posted[0].content, /demand unanswered → growing/)
+    assert.equal(posted[0].content, 'Semiconductors: first answer — demand growing. Top of the cycle.')
+})
+
+test('a revision that newly answers one question among changed ones still reads as moves', () => {
+    const card = buildIndustryChanged({ code: 'x', name: 'Airlines' }, { cycle: { from: 'mid', to: 'trough' }, demand: { from: null, to: 'shrinking' } }, 'u1')
+    assert.equal(card.content, 'Airlines: cycle mid → trough, demand unanswered → shrinking.')
 })
 
 // ── the headless review ──────────────────────────────────────────────────────

@@ -20,11 +20,13 @@ const LABEL = { demand: 'demand', economics: 'economics', cycle: 'cycle' }
 /** The card for one admin. Pure → card or null when nothing changed. `changed` is revisionTrail.diffFields' shape. */
 export function buildIndustryChanged(doc, changed, userId) {
     if (!userId || !doc?.code || !changed || !Object.keys(changed).length) return null
+    // A first answer has no "from" on any question — say so once instead of "demand unanswered → …" per question.
+    const first = Object.values(changed).every(c => c?.from == null)
     const moves = Object.entries(changed)
-        .map(([q, { from, to }]) => `${LABEL[q] ?? q} ${from ?? 'unanswered'} → ${to}`).join(', ')
+        .map(([q, { from, to }]) => first ? `${LABEL[q] ?? q} ${to}` : `${LABEL[q] ?? q} ${from ?? 'unanswered'} → ${to}`).join(', ')
     return {
         userId,
-        content:    `${doc.name}: ${moves}.${doc.summary ? ` ${doc.summary}` : ''}`,
+        content:    `${doc.name}: ${first ? 'first answer — ' : ''}${moves}.${doc.summary ? ` ${doc.summary}` : ''}`,
         type:       'industry_view',
         payload:    { kind: 'industry_view', code: doc.code, name: doc.name ?? null, industryViewId: doc.id ?? null, changed },
         botId:      'strategy',
