@@ -38,7 +38,7 @@
         },
         {
             "name": "get_industry_metrics",
-            "description": "The measured numbers behind the three questions for one sub-industry, from 15 years of SEC filings: DEMAND (chained revenue growth over 10 and 3 years against the whole universe, how steady), ECONOMICS (median ROIC — ROE for financials — against Damodaran's cost of capital, the share of companies clearing it, margin level and stability, top-5 concentration), CYCLE (trailing-12-month margin or ROE in its own 10-year range, the normalised value, whether the industry is cyclical), each with the CODE GRADE you start from, plus any early-review triggers. Also the levels above it for context.",
+            "description": "The measured numbers behind the three questions for one sub-industry, from 15 years of SEC filings: DEMAND (chained revenue growth over 10 and 3 years against the whole universe, how steady), ECONOMICS (the industry's aggregate ROIC — ROE for financials — against Damodaran's cost of capital, with the median company and the share of companies clearing it as breadth, margin level and stability, top-5 concentration), CYCLE (trailing-12-month margin or ROE in its own 10-year range, the normalised value, whether the industry is cyclical), each with the CODE GRADE you start from, plus any early-review triggers. Also the levels above it for context.",
             "input_schema": {
                 "type": "object",
                 "properties": {

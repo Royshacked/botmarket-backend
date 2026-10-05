@@ -110,7 +110,7 @@ FMP Starter, verified 2026-10-05:
 
 **Triggers that reopen a sub-industry early:**
 - industry revenue growth negative for two quarters in a row;
-- median ROIC crossing below the cost of capital;
+- the industry's ROIC crossing below the cost of capital;
 - margins reaching the top or bottom of their 10-year range;
 - a thesis break on a held name, which sends the check up to its industry;
 - a structural news event: regulation, a technology shift, lasting trade policy, consolidation.

@@ -22,8 +22,8 @@ archived** (git keeps them). The `tilt` and `pythia_*` collections remain in Mon
 | Question | Grades | Measured as (aether-engine `fundamentals/industry_metrics.py`) |
 |---|---|---|
 | **Demand** — is the market growing or shrinking structurally? | `growing` · `in_line` · `shrinking` | Revenue growth chained over the companies present in both years (a listing is not demand), 10y and 3y, against the whole universe's |
-| **Economics** — is it a good industry to own? | `good` · `average` · `poor` | Median ROIC — ROE for financials — against Damodaran's cost of capital (cost of equity for financials), the share of companies clearing it, margin level and stability, top-5 concentration |
-| **Cycle** — where are current earnings in the industry's own cycle? | `peak` · `mid` · `trough`, or `stable` | Trailing-12-month operating margin (ROE for financials) placed in its own 10-year range; the normalised (10-year average) margin is what valuation reads |
+| **Economics** — is it a good industry to own? | `good` · `average` · `poor` | The industry's AGGREGATE ROIC — all its after-tax operating profit over all its invested capital; ROE for financials — against Damodaran's cost of capital (cost of equity for financials), weighted the same way. The median company and the share clearing its own hurdle are reported as breadth, with margin level and stability and top-5 concentration |
+| **Cycle** — where are current earnings in the industry's own cycle? | `peak` · `mid` · `trough`, or `stable` | Trailing-12-month operating margin (ROE for financials) placed in its own 10-year range — peak / mid / trough by position; `stable` only when the range is under 30% of its mean. The normalised (10-year average) margin is what valuation reads |
 
 The engine attaches a **code grade** to each question — a first read with documented thresholds. Pythia
 starts from it. Agreeing needs a reason; **departing needs an argument** (`override_reason`), and a

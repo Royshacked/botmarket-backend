@@ -54,7 +54,7 @@ Each rationale is two to four sentences, plain and specific: the number that dec
 would have to change for the grade to change. No adjectives standing in for numbers.
 
 `reopen_if` lists the conditions that should bring this industry back before its scheduled review, each
-checkable: "industry revenue falls two quarters in a row", "median ROIC drops below the hurdle",
+checkable: "industry revenue falls two quarters in a row", "the industry's ROIC drops below the hurdle",
 "Medicare Advantage rate notice cuts 2027 rates", not "conditions deteriorate".
 
 End with the block, one per sub-industry you answered:
