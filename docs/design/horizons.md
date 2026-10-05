@@ -183,3 +183,33 @@ Example:
    would give each claim a base rate.
 
    Today's record: 163 name claims across 20 events, 8 graded (4 hit, 4 miss).
+
+## 7. Notes for later — NOT decisions (2026-10-05)
+
+Recorded at Roy's request as notes only; both still need discussing before anything is designed.
+
+**Our own screener.** The data built for Pythia is most of what the 5-year funnel (§2C) needs:
+- **Universe and hard filters:** the universe (`aether_engine/companies.py`, ~2,870 names).
+- **Comparing within an industry:** GICS placement for every company.
+- **Quality:** 15 years of statements give return on capital, margin stability, debt, free cash flow and
+  dilution.
+- **Industry context:** Pythia's answers.
+- **Valuation:** works now against today's market cap. Valuation against a company's own history waits
+  for the price backfill.
+
+Missing:
+- per-company scores stored as their own collection (they are computed only in memory today);
+- a ranking by investor school, with a hard bar per industry;
+- pointing the paused house scan at it.
+
+**Events against the new data.** What helps:
+- **Company → sub-industry:** an event's claims roll up into "this share of the sub-industry, by market
+  cap, is on the hurt side".
+- **Fundamentals:** revenue sizes the shock, margins turn it into earnings, and the cycle numbers grade
+  "margins fall over 2 quarters".
+- **Estimate snapshots:** measure how fast analysts revised after an event.
+
+Missing:
+- **Daily prices**, to grade price claims and build historical analogs.
+- **Revenue by segment and country**, which is where event exposure lives. FMP segment data is unchecked
+  on our plan; Aether's SEC-filing check covers it case by case.
