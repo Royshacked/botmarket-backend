@@ -1,5 +1,8 @@
 # The adopted book — a portfolio that wasn't built here
 
+> **2026-10-05:** Pythia's tilt was deleted. The `sector_view` trigger and the tilt in the
+> fingerprint are now `industry_view` and the held names' industry answers (`docs/desks/atlas-themis.md`).
+
 **Status: PHASE 1 (backend intake + write) BUILT 2026-08-10, not live-verified. The rest is design.**
 Design settled 2026-08-10. Covers a user who arrives with a real portfolio already running somewhere
 we can't wire to (a bank brokerage), and wants Atlas to take it over from today: monitor it, review it,

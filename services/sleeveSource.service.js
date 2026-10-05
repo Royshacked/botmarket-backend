@@ -41,7 +41,7 @@ import { logger }               from './logger.service.js'
 
 const LOG = '[sleeveSource]'
 
-// Minimum daily volume: below this a name is too illiquid to research meaningfully (houseScan's bar).
+// Minimum daily volume: below this a name is too illiquid to research meaningfully (the deleted house scan's bar).
 const MIN_VOLUME = 500_000
 // Names per sleeve. A sleeve needs four to eight PLACEABLE names, and the run passes on some (no
 // edge) — twelve is enough pond for that and still under an hour of Prometheus. Not conviction-

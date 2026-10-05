@@ -5,7 +5,7 @@ flow diagrams see [README.md](README.md); for file layout see [CODE_MAP.md](CODE
 
 The app turns natural-language chat into **monitored trade ideas** that route to a
 broker. Six desks produce work — Axl (reception) · Mentor (`setup`, the trader) ·
-Atlas (portfolio) · Argus (scan) · Prometheus (`coverage`) · Pythia (`tilt`) — and each
+Atlas (portfolio) · Argus (scan) · Prometheus (`coverage`) · Pythia (`industry_view`) — and each
 authored kind is watched by its desk's own background monitor. The `idea` execution tier
 has no desk, so it is watched by two kind-blind loops instead (§2). One reconciler keeps
 entity state honest against the broker. Nothing reaches a broker while its venue is shut
@@ -234,31 +234,28 @@ while only one started a revise turn was the same failure by another route. (202
 | `entry_confirm` | Entry triggered, confirm needed | → workspace + `OrderConfirmDialog`. The payload carries a `kind`; only `idea` is emitted today |
 | `queue_ready` | The venue opened and something is waiting (`marketOpen.monitor`) | Open the queue → the Floor's **Queued** desk. ONE card per USER, from Axl (see §5). The one card **completed by opening** (`resolvesOn: 'open'`): it points at a batch, so it carries no `subject` a write could resolve it through, and the list itself is the live record of what is still owed |
 | `market_brief_offer` | Daily broadcast offer, one per user per weekday (`marketBrief.notify.js`) | Get the brief → routes to **Axl**, who writes it in his thread · Dismiss |
-| `tilt_review` | The house view is past its clock — a stance matured, a macro catalyst landed, or the monthly floor expired (`tilt.monitor` → `reviewDecision`) | Run the review → routes to **Pythia**, who runs it in his thread · Dismiss |
-| `tilt_event` | A publish MOVED a bucket — a sector or an industry (`tilt.assess.diffStances` against the view in force; a reaffirming republish tells nobody) | Open sector view — a READ, so it completes on open (`resolvesOn: 'open'`). Every admin, the whole change |
+| `industry_view` | A Pythia review CHANGED the house answer on a GICS sub-industry — demand, economics or cycle (`industryReview` → `industryNotify`; a review that reaffirms every grade tells nobody) | Open industry → the Forecasts board — a READ. Every admin. Carries `industryViewId`, so it is superseded and completed like a coverage card |
 | `coverage_event` | The coverage monitor's material verdict on a name — `target_hit` · `target_hit_early` (reads as a MISS: the number was too low, so it re-opens the call) · `validating` · `diverging` (`coverage.assess.classifyGapState`) | **Revise thesis** — the primary runs the revise doorway, which is what distinguishes it from the refresh card's "Open coverage". Every admin — the card asks for a revision only an admin can make |
 | `coverage_refreshed` | A headless Prometheus run rewrote a name's coverage — Atlas's `<coverage_refresh>` hop mid-review, or the monitor's scheduled re-model | Resume review (→ Atlas, when a portfolioId rides along); Open coverage when it stored something; **Dismiss only** when it stored nothing — a refresh that wrote nothing has no read behind a button, and its "Open coverage" merely switched to a desk still showing the last name worked on there. The hop's card goes to the ONE user who asked; the scheduled re-model has no user and goes to every admin |
 | `sleeve_sourced` | The research run finished the names a `<screen_request>` queued for a book's sleeve (`sleeveSource.service`) | Resume → Atlas, for the requester |
 
-Two cards are **not about the user** — `market_brief_offer` and `tilt_review`. Both announce a
-BROADCAST (the daily brief, the house sector view), so the same text goes to everyone in their
-audience and neither mentions a position, account or holding — the brief fans out over
-`listAllUserIds`, the review offer over `listAdminUserIds` (the desk is admin-only) — and both
-dedupe by reading the cards already posted rather than by a flag, so a restart mid-fan-out resumes
-instead of double-posting. Both are also **offers**: posted with no tokens spent, the work only
-runs when someone confirms. Axl relays that same brief in chat via `get_market_brief`.
+One card is **not about the user** — `market_brief_offer`. It announces a BROADCAST (the daily
+brief), so the same text goes to everyone and mentions no position, account or holding; it fans out
+over `listAllUserIds` and dedupes by reading the cards already posted rather than by a flag, so a
+restart mid-fan-out resumes instead of double-posting. It is an **offer**: posted with no tokens
+spent, the work only runs when someone confirms. Axl relays that same brief in chat via
+`get_market_brief`.
 
-The three HOUSE cards — `tilt_event`, `coverage_event`, the scheduled half of
+The three HOUSE cards — `industry_view`, `coverage_event`, the scheduled half of
 `coverage_refreshed` — describe an artifact with no owner, so their audience is derived at
 delivery: the admin roster, every time. There is no narrower audience left in the data (coverage
 carries no `userId` since 2026-08-26), and the one card that tried to derive one from it went to
 nobody for three weeks.
 
-`tilt_review` is the strategy desk's wake, and the reason it asks rather than acts is that a
-re-author SUPERSEDES the view every user reads — see §monitors. Its dedupe window opens at the last
-publish/re-author (`reviewAnchorMs`, off the revision trail — deliberately **not** `updated_at`,
-which the monitor's own maturity write moves), floored at the 30-day review cadence so a view left
-stale is asked about again rather than forgotten.
+The strategy desk's reviews RUN rather than ask (since 2026-10-05): each answer is one industry's
+description, checked against the measured numbers at publish, not a view that steers every book —
+so the industry-view monitor reviews what is due headless, at most three an hour, and only when
+`INDUSTRY_REVIEWS=true` (see `docs/desks/pythia-industries.md`).
 
 Confirming does not answer in the social chat: it resolves the card as read, routes to Axl, and
 streams the brief into his thread (`POST /api/axl/brief/stream`). A page of market prose does not
@@ -675,7 +672,8 @@ the Nasdaq-100 as the **US100 cash CFD**, but levels are read off the **NQ futur
 
 - JWT in an httpOnly cookie; `requireAuth` guards most routes. `req.user._id` is the custom string id.
 - **Two roles, `trader` (default) and `admin`** (`users.role`, minted into the token at sign-in;
-  `scripts/set-admin-role.mjs <username> --apply`). `requireAdmin` (403) is router-wide on `/api/strategy`, on the
+  `scripts/set-admin-role.mjs <username> --apply`). `requireAdmin` (403) is on `/api/strategy`'s writes (the
+  stream and publishing — the industry reads are open to every user since 2026-10-05), on the
   coverage writes + the research queue under `/api/analyst`, and on Aether's chat + discovery.
   Scanner, mentor, setups and trade-ideas routes are never role-gated (`tests/unit/adminGate.test.js`
   pins both facts). Social-chat feeds of the admin desks (`ADMIN_BOT_IDS`: `strategy`, `analyst`)

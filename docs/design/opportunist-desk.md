@@ -1,5 +1,8 @@
 # The opportunist — trading the lag, not the news
 
+> **2026-10-05:** the tilt and `api/strategy/tilt.service.js` (the grading machinery this borrows)
+> were deleted; the comparisons to Pythia's tilt below describe a desk that no longer exists.
+
 **Status: DESIGN ONLY, nothing built.** Settled 2026-08-13, substantially revised 2026-08-16 — the
 revision moved the centre of gravity from *reasoning about one headline* to *automating unowned tedium
 at volume* (§3, §4). A desk that reacts to an event and finds the second/third-order instrument that has

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import { buildCoverageEvent, notifyCoverageEvent, notifyCoverageRefreshed } from '../../services/coverageNotify.service.js'
 
 // Prometheus's monitor card. House coverage has no owner, so the audience is every ADMIN — derived
-// at delivery time, the join tiltNotify's review offer already uses. Traders never see the feed
+// at delivery time, the join industryNotify also uses. Traders never see the feed
 // (ADMIN_BOT_IDS), and the card asks for a revision only an admin can make, so a card addressed
 // to a trader would be a document nobody could open.
 

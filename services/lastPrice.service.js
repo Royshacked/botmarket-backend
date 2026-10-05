@@ -24,7 +24,7 @@ import { toNum }               from './format.util.js'
  * A non-positive price is treated as NO price: zero is never a real print, and letting it through
  * hands every downstream gate a number that compares below any stop, target or bear case.
  *
- * Shared by Talos, the coverage and tilt monitors, the baseline stamps and the valuation tool, so
+ * Shared by Talos, the coverage monitor and the valuation tool, so
  * a fix to the quote-shape fallback chain reaches every gate. Returns null only when BOTH sources
  * fail.
  */

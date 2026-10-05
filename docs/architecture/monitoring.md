@@ -42,7 +42,10 @@ against live market data. It runs as a background service inside the Express pro
 >
 > The running loops are **Talos** (`setup`, plus its free guard sweep), **Themis** (portfolio),
 > **marketOpen** (kind-blind deferred-order sweep), **entries** and **exits** (the two kind-blind
-> condition-tree loops), the **coverage** monitor, the **tilt** monitor, the execution reconciler
+> condition-tree loops), the **coverage** monitor, the **industry-view** monitor (Pythia's
+> 163 sub-industries: seeds pending views, brings a view forward on a new engine trigger, and reviews
+> due views — yearly, quarterly for a cyclical industry — at most three an hour, only when
+> `INDUSTRY_REVIEWS=true`; it replaced the tilt monitor on 2026-10-05), the execution reconciler
 > and the paper-venue loops. One further monitor is archived with the desk it served
 > (`archive/README.md`).
 >

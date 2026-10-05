@@ -1,5 +1,8 @@
 # Money flow — the opportunist's first hunting ground
 
+> **2026-10-05:** `api/strategy/tilt.service.js`, the publication-log template this cites, was
+> deleted with the tilt; `api/strategy/industryView.service.js` is the nearest house-broadcast precedent now.
+
 **Status: DESIGN ONLY, nothing built.** Settled 2026-08-16. This is the concrete flow for §3.1 of
 `docs/design/opportunist-desk.md` (the Tyche desk). Read that first — this document assumes its
 premises (concede speed, trade the lag, precision is the product) and does not re-argue them.

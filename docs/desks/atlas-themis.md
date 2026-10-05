@@ -56,7 +56,9 @@ presents in flow, they don't ask permission to think":
 3. **Architecture.** Sector targets as **deliberate active weights against the benchmark's REAL
    weights** — fetched (`get_fundamentals` on the benchmark ETF's look-through), never estimated: the
    S&P is a third technology, so a 30% sleeve is a neutral, and calling it a bet is a mistake about your
-   own book. **The house view (Pythia's tilt) is an input, not an instruction**: agreement is real
+   own book. **The house industry views (Pythia's, via `get_industry_views`) are an input, not an
+   instruction**: descriptions of each GICS sub-industry's demand, economics and cycle, used to
+   question a sleeve (and to check industry concentration), never to build one. Agreement is real
    support; disagreement must be said and argued, because Atlas can see this mandate and Pythia cannot.
    **→ Gate 2** — the skeleton is the decision worth the user's input.
 4. **Selection.** THE HARD RULE: **every name placed came out of `get_coverage`.** Not `web_search`,
@@ -97,7 +99,7 @@ change must be justified against what the book was built to do. Same stream, `re
   window), a **regime then→now delta**, per-holding drift and conviction, then a rebalance memo.
 
 Both are computed, not estimated: the **fingerprint** (`buildFingerprint` — book value, benchmark
-price, regime, per-holding weight and conviction, the tilt in force) is captured at construction and
+price, regime, per-holding weight and conviction, the held names' house industry answers) is captured at construction and
 at every review close, because the book's "then" state is not recoverable after the fact, and the
 server renders the deltas into the review-state block rather than letting the model re-reason them.
 The snapshot is short-TTL cached (`portfolioState.service`) so a review's follow-up turns re-use it —
@@ -134,8 +136,9 @@ not on intraday noise. Not eager on start. Three gates, all cheap and determinis
   and that answer used to differ between the seed, the readers and the display) via `nextReviewAt`.
 - **Event (EOD)** — the trigger panel, `computeReviewSignals` → `computeReviewTriggers`, pure:
   conviction fell · drawdown since the last look (the "nuclear war" proxy — the market's own reaction
-  rather than a news classifier) · the yield curve flipped · **the house sector view moved**
-  (`diffStances` against the fingerprinted tilt) · a holding drifted · trailing the benchmark ·
+  rather than a news classifier) · the yield curve flipped · **a held industry's house view changed**
+  (`industry_view`: `industryChanges` against the fingerprinted answers — gated on holdings, so the
+  163 sub-industries reviewed through the year ring only for what the book owns) · a holding drifted · trailing the benchmark ·
   earnings within seven days.
 - **Coverage-delta** — a held name's Prometheus coverage flipped terminal (`thesis_broken`,
   `target_hit`), or **our own price target fell to or below our entry, or was cut materially since
@@ -155,9 +158,9 @@ exists for any kind.
 
 | With | Direction | Mechanism |
 |---|---|---|
-| **Pythia** | reads | `getCurrentTilt` into the mandate build (advisory — the mandate wins) and into the fingerprint; a moved view is a Themis trigger |
+| **Pythia** | reads | `get_industry_views` in the build (advisory — the mandate wins); `industryViewService.viewsForSymbols` into the review snapshot and the fingerprint; a held industry's changed answer is a Themis trigger (`industry_view`) |
 | **Prometheus** | reads; asks | `get_coverage` (the only source of names, filtered by sector + school); `<screen_request>` / `<coverage_request>` to fill a sleeve; `<coverage_refresh>` mid-review |
-| **Argus** | via the sleeve | never directly — the screen inside `sleeveSource` is the same mechanism as Argus's house scan, and Atlas has no screener of its own |
+| **Argus** | via the sleeve | never directly — the screen inside `sleeveSource` is the same mechanism as Argus's house scan (paused since the tilt was deleted), and Atlas has no screener of its own |
 | **Axl** | hand-off in | `<edit>portfolio` opens the book through the same edit-vs-review gate as the pencils |
 | **Mentor** | none | a single-name conviction trade is Mentor's; Atlas does not build a one-asset book for it *(the vision lists one — see Open)* |
 | **The broker** | via accept | `portfolioRebalance` after a confirmed `<portfolio_update>`; activation moves each `waiting` leg to its activation status, or posts the N-leg entry card in manual |

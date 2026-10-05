@@ -20,7 +20,7 @@ client POST → SSE chat stream → Claude with tools → agent writes XML "emit
 | **Portfolio** | "Atlas" | a multi-holding allocation plan (sized server-side) | `<portfolio_plan>` / `<portfolio_update>` |
 | **Scanner** | "Argus" | candidate list for one period × thesis | `<scan_list>` |
 | **Analyst** | "Prometheus" | a living per-name research thesis | `<coverage>` |
-| **Strategy** | "Pythia" | the house view — regime + sector active weights | `<tilt>` |
+| **Strategy** | "Pythia" | the house industry views — demand / economics / cycle per GICS sub-industry (drafts; an admin publishes) | `<industry_view>` |
 
 > `api/chat/*` is **user-to-user social DM**, not an agent — don't confuse the two.
 
@@ -58,7 +58,7 @@ writes `event: <name>\ndata: <json>\n\n`.
 - **Portfolio:** `done` → `{ reply, plan, update, mandate, thesis, phase }`
 - **Scanner:** `done` → `{ reply, scan, phase }`
 - **Analyst:** `done` → `{ reply, coverage, phase }`
-- **Strategy:** `done` → `{ reply, tilt, phase }`
+- **Strategy:** `done` → `{ reply, views, phase }`
 
 Client SSE plumbing: `src/services/userPrompt/userPrompt.service.remote.js` posts JSON and
 consumes events via `postSSE` + `buildStreamHandlers`.
@@ -135,7 +135,7 @@ still stream to the user, e.g. `<ticker>`.) Each agent registers its own capture
 - **Scanner:** `<scan_list>` → `onScan`
 - **Analyst:** `<phase>` live; `<coverage>` (or `<quickread>`) parsed from the finished text
   (`_parseAnalystResponse`)
-- **Strategy:** `<phase>` live; `<tilt>` parsed from the finished text (`_parseStrategyResponse`)
+- **Strategy:** `<phase>` live; every `<industry_view>` block parsed from the finished text (`_parseStrategyResponse`)
 
 **A typed block, never a rolling parse.** Each desk emits a complete block captured through
 `buildTagCaptures` and parsed wholesale — not a regex over an accumulating `<state>` buffer, which

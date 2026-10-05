@@ -1,5 +1,9 @@
 # Architecture Vision — House vs Per-User Pipeline
 
+> **2026-10-05:** the tilt this chain starts from was deleted — Pythia now publishes industry views
+> (demand / economics / cycle per GICS sub-industry, [pythia-industry-questions.md](./pythia-industry-questions.md)),
+> and the Argus house scan is paused until the 5-year funnel in [horizons.md](./horizons.md).
+
 > **Revised 2026-09-10.** Aether's channel-graph engine was deleted, not paused — it was
 > measured against held-out data and did not work. Every section describing Aether now
 > describes what it actually does: identify the companies a named event reaches, and quote

@@ -2,7 +2,7 @@
 //
 // 1. coverage_event (P5): the coverage MONITOR fired a material verdict (target hit, thesis broken,
 //    validating, diverging). House-owned coverage has no userId, so the audience is DERIVED at
-//    delivery time — every admin (`listAdminUserIds`), the same join tiltNotify's review offer uses.
+//    delivery time — every admin (`listAdminUserIds`), the same join industryNotify uses.
 //    Admins, not the roster: coverage is a house artifact that only an admin can revise, and the
 //    card asks for exactly that revision (2026-09-14: Prometheus's feed is admin-only, like Pythia's).
 //
@@ -17,7 +17,7 @@ import { logger }           from './logger.service.js'
 
 const LOG = '[coverageNotify]'
 
-// Injectable so the admin fan-out is assertable without a DB — the same seam tiltNotify exposes.
+// Injectable so the admin fan-out is assertable without a DB — the same seam industryNotify exposes.
 // `post` is still postCard: a test seam, not a second way for a card to reach the user.
 const _deps = {
     adminUserIds: ()          => listAdminUserIds(),

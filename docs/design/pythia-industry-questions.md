@@ -1,8 +1,8 @@
 # Pythia — three questions per industry (2026-10-05)
 
-**PROPOSED. Replaces everything Pythia does today.** Supersedes `pythia-industries-and-channels.md`
-and the tilt contract in `docs/desks/pythia-tilt.md`. Decided with Roy on 2026-10-05. Nothing in
-this doc is built yet.
+**BUILT 2026-10-05 (steps 1–5); step 6 = the docs.** Supersedes `pythia-industries-and-channels.md`
+and the deleted tilt contract (`docs/desks/pythia-tilt.md`). Decided with Roy on 2026-10-05. The
+living contract is `docs/desks/pythia-industries.md`; this doc keeps the reasoning and the decisions.
 
 **Read with `horizons.md`.** A sourced check found no evidence that structural growth predicts
 returns, and Ritter and Siegel found the opposite when the price is high. So the three answers are a

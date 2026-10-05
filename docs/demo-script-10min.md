@@ -20,7 +20,8 @@ keeps working after you close the chat.*
 - One `manual` item, so the third mode isn't a claim.
 - One `setup` already **triggered** with Talos assessments on it — you need history to scroll.
 - One **queued** off-hours action sitting in the queue.
-- A recent Argus scan with results, one live `coverage` from Prometheus, a current `tilt`.
+- A recent Argus scan with results, one live `coverage` from Prometheus, a handful of answered
+  (published) `industry_view`s from Pythia — the Forecasts board shows pending rows otherwise.
 - Earnings/Fed rows in the Radar calendar for the next few days.
 
 **Pre-warm.** Open every tab you'll visit once before recording so nothing cold-loads on camera.
@@ -162,7 +163,7 @@ Then open the queued action and the QueuedActionDialog.
 
 Move fast — these are proof of breadth, not deep dives. ~25 seconds each.
 
-**SCREEN:** Atlas portfolio panel → Prometheus coverage → Pythia tilt.
+**SCREEN:** Atlas portfolio panel → Prometheus coverage → the Forecasts board (Pythia's industry views).
 
 > Trading one name is one desk. Here's the rest.
 >
@@ -172,8 +173,10 @@ Move fast — these are proof of breadth, not deep dives. ~25 seconds each.
 > Prometheus is the research desk. It maintains a living thesis on a name with our own price
 > target — and the number that actually matters is the gap between ours and the Street's.
 >
-> And Pythia is the house view. One top-down call, published to everyone, with a track record
-> it isn't allowed to delete. A desk that can erase its own bad calls doesn't have a record.
+> And Pythia is the house view of every industry — all 163 of them. Three questions each: is
+> demand growing, does the industry earn more than its cost of capital, and where are margins in
+> their own cycle. Measured from fifteen years of filings, published to everyone, and it never
+> pretends to forecast the next six months.
 
 ---
 

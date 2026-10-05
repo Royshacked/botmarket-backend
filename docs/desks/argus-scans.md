@@ -147,13 +147,12 @@ the read's `net` where it has one and Aether's `side` where it does not. Three r
 refused — which is why the module aims at eight to twelve. The user can leave without waiting ("Save
 without the read"), and a read that lands after they did is discarded rather than applied.
 
-A fourth shape has **no agent at all**: the **house scan** (`services/houseScan.service.js`), fired
-after Pythia publishes a tilt. For each overweight sector it runs the FMP screener with a neutral
-composite filter and enqueues the hits for Prometheus, with `active_bp` setting breadth and queue
-order. The regime and the stance's `basis` travel on the queue row rather than being compiled into
-filters — the screener has no valuation or revision predicate, and faking one with a proxy would
-substitute a guess for Pythia's stated reason. Turning the basis into real factor selection needs the
-Argus *agent* in that loop, not a wider filter list. The sleeve hop Atlas uses
+A fourth shape had **no agent at all**: the **house scan** (houseScan.service, since deleted), fired
+after Pythia published a tilt — for each overweight sector it ran the FMP screener and enqueued the
+hits for Prometheus. **It is PAUSED: deleted with the tilt on 2026-10-05.** Pythia now publishes
+industry views (demand / economics / cycle per GICS sub-industry), which are descriptions, not
+overweights, so the scan has no input. It returns as the code-computed ranking of the 5-year funnel
+in [design/horizons.md](../design/horizons.md). The sleeve hop Atlas uses
 (`sleeveSource.service`) is the same screen with the school as its coarse filter
 ([atlas-themis.md](atlas-themis.md)).
 
@@ -234,7 +233,7 @@ blend, the order silently changing while the user watches, for a school they nev
 |---|---|---|
 | **Mentor** | out | the single pick — `<kairos_pick>` → `{ ticker, direction, thesis, analysis, recommended_mode }` seeds Mentor's first turn (`scanSeed.util`); or a clicked candidate on a saved trading list |
 | **Prometheus** | out | an investing list's top N by the app's button, one name by click — the research queue, house-owned; or by asking ("send NVDA to Prometheus") through the shared `<route>` hand-off |
-| **Pythia** | in | the house scan runs on her publish — no Argus turn, the screener alone |
+| **Pythia** | none today | the house scan that ran on her tilt publish is paused (deleted with the tilt, 2026-10-05) until the 5-year funnel |
 | **Atlas** | in | the sleeve hop — the same screener under the school; never Argus's chat |
 | **Axl** | in / out | the user is routed here with a name; Argus can route the user on by their ask |
 
@@ -253,14 +252,15 @@ fields the receiver's UI needs.
   is modular.
 - **No monitor, because a scan is a question about a period.** It ages out; the thing that needs
   watching is the trade built from it, and that has Talos.
-- **The house scan has no agent, on purpose.** Screening a sector on a published stance is
-  arithmetic on a whitelist; the judgment (does this name clear the school's real bar?) is
+- **The house scan had no agent, on purpose** (paused since 2026-10-05). Screening on a published
+  stance is arithmetic on a whitelist; the judgment (does this name clear the school's real bar?) is
   Prometheus's, four minutes a name, and the queue row carries the reason so he can apply it.
 
 ## Open
 
-- **The Argus agent in the house-scan loop** — the only way a stance's `basis` becomes real factor
-  selection rather than a note on the queue row (`houseScan.service` says so).
+- **The house scan's replacement** — the 5-year funnel's code ranking
+  ([design/horizons.md](../design/horizons.md)); until it lands nothing feeds Prometheus from the
+  house side except Argus's user lists and Atlas's sleeve hop.
 - **Scans are the one artifact that never learns.** A stale list is kept for the user, but nothing
-  scores whether its candidates went the way the thesis said. *(Inferred gap — the tilt and the
-  coverage both grade; the scan does not.)*
+  scores whether its candidates went the way the thesis said. *(Inferred gap — the coverage grades; the scan does
+  not.)*

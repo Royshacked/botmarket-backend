@@ -43,7 +43,7 @@ when to act on it only make sense together.
 | [argus-scans.md](./desks/argus-scans.md) | Argus turns a question about a period into a ranked, grounded list — one spine, three targets (a trading list, an investing shortlist for Prometheus, one pick for Mentor). **Names come from the tape, and the code enforces it**; the server scores and ranks |
 | [atlas-themis.md](./desks/atlas-themis.md) | Atlas builds a book against a mandate from house coverage only, reviews it as a delta against its thesis, proposes Accept-gated changes; Themis is the LLM-free doorbell that says when to look |
 | [prometheus-coverage.md](./desks/prometheus-coverage.md) | Prometheus writes a house `coverage` thesis; the coverage monitor keeps it living. **The edge is the gap vs the Street, never price**; two tiers — a free daily check and a gated re-model |
-| [pythia-tilt.md](./desks/pythia-tilt.md) | Pythia publishes the house `tilt` — a regime and sector stances as active weight vs a benchmark; the monitor grades each stance by arithmetic. **The tilt is the mandate the house pipeline is steered from**; a re-author is offered, never run |
+| [pythia-industries.md](./desks/pythia-industries.md) | Pythia + the industry-view monitor — the `industry_view` artifact. Pythia answers three structural questions (demand, economics, cycle) per GICS sub-industry from the engine's measured numbers; the monitor seeds, triggers and schedules reviews. Descriptions, never forecasts — the tilt was deleted 2026-10-05 |
 | [roles-and-sourcing.md](./desks/roles-and-sourcing.md) | **Trader vs admin, desk by desk** — where each gate lives — and the autonomous sleeve hop: Atlas → Argus → Prometheus → Atlas, researched as the house |
 
 Every desk and its monitor is written up above. Axl (reception) is described by its hand-off
@@ -68,7 +68,9 @@ the plan and what the build settled differently (the rule at the bottom of this 
 | [adopted-book.md](./design/adopted-book.md) | A portfolio that wasn't built here. Phase 1 (intake + write) built 2026-08-10, not live-verified; the rest is design |
 | [opportunist-desk.md](./design/opportunist-desk.md) | Design only — a desk that trades the lag after an event, not the headline. Working name Tyche |
 | [opportunist-money-flow.md](./design/opportunist-money-flow.md) | Design only — the opportunist's first hunting ground: government money flow, recipient resolution, a sigma screen |
-| [architecture-vision.md](./design/architecture-vision.md) | House vs per-user pipeline; the Pythia → Argus → Prometheus → Atlas chain. Revised 2026-09-10 after the channel-graph engine was deleted |
+| [pythia-industry-questions.md](./design/pythia-industry-questions.md) | **BUILT 2026-10-05** — Pythia rebuilt: three structural questions per GICS sub-industry from measured data; the tilt and channel desk deleted. Why, the decisions, the build order. The contract is desks/pythia-industries.md |
+| [horizons.md](./design/horizons.md) | Design, built in order — what can honestly be known at every horizon from 1 month to 20 years, on sourced evidence; the signal lab; the Forecasts board's future range view; events PARKED |
+| [architecture-vision.md](./design/architecture-vision.md) | House vs per-user pipeline; the Pythia → Argus → Prometheus → Atlas chain. Revised 2026-09-10 after the channel-graph engine was deleted; its tilt-led chain is stale since 2026-10-05 (Pythia publishes industry views, the house scan is paused) |
 | [investor-schools.md](./design/investor-schools.md) | **BUILT 2026-08-02** (record) — two axes, selection and allocation, on two different seams. Trap: a school that only changes prose is a costume |
 | [pipeline-service.md](./design/pipeline-service.md) | **BUILT 2026-08-04** in the frontend (record) — hops between desks as artifacts keyed by kind; each desk declares what it emits and accepts. Written for Kairos; Mentor holds that hop now. The mechanism doc is `botmarket-frontend/docs/hand-offs.md` |
 

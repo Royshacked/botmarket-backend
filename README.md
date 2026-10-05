@@ -13,7 +13,7 @@ unified adapter layer. Each desk owns a kind; each kind is watched by its own mo
 | **Atlas** — portfolio construction + review | `/api/portfolio` | `portfolio_item` holdings | Themis |
 | **Argus** — the systematic scanner | `/api/scanner` | `scan` | — |
 | **Prometheus** — buy-side research | `/api/analyst` | `coverage` | coverage monitor |
-| **Pythia** — top-down strategy | `/api/strategy` | `tilt` (the house view — a **broadcast**, not per-user) | tilt monitor |
+| **Pythia** — the industry desk | `/api/strategy` | `industry_view` — three structural answers per GICS sub-industry (a **broadcast**, not per-user) | industry-view monitor |
 
 One desk and its kind are **archived**: frozen whole under [`archive/`](archive/README.md),
 imported by nothing, started by nothing, and deliberately not described here or in APP_SPEC — that
@@ -105,7 +105,7 @@ npm test             # node --test tests/unit/*.test.js
 
 On boot `server.js` ensures the Mongo indexes and starts **thirteen background loops**: the
 market-open sweep, the **entry** and **exit** monitors, three assessment monitors (Talos /
-coverage / tilt) plus Talos's free **guard sweep**, Themis, the execution reconciler, the three
+coverage / industry views) plus Talos's free **guard sweep**, Themis, the execution reconciler, the three
 paper engines (fill / mark / equity) and the market-brief notifier. Each goes through `startLoop` (`services/lifecycle.service.js`),
 which registers it so shutdown can stop it — a service without a `stop()` is refused and never
 runs. They do not start at import: they start when this process wins the loop lease (below).
@@ -147,10 +147,9 @@ api/                   HTTP surface — one folder per feature (routes + control
   workspace/           which book the user is standing in — GET/PUT /api/workspace
   mentor/ setups/      Mentor chat + the `setup` kind (monitored by Talos)
   analyst/             Prometheus chat + the `coverage` research artifact (initiate/revise/retire)
-  strategy/            Pythia chat + the `tilt` publication log. NOT owner-scoped — the house view
-                       is a broadcast, so /tilt/current answers the same document to everyone, and
-                       there is deliberately no delete (a desk that can erase its own calls has no
-                       track record; retire archives instead)
+  strategy/            Pythia chat + the `industry_view` house docs (one per GICS sub-industry).
+                       NOT owner-scoped — a broadcast; the reads are open to every user, the stream
+                       and publishing are admin-only
   trade-ideas/         the EXECUTION tier — entity CRUD + order placement over the `idea` kind,
                        which is what `portfolio_item` holdings ride
   portfolio/           Atlas chat + portfolio review/rebalance lifecycle
@@ -195,7 +194,7 @@ providers/             external clients (LLMs, market data, brokers, Mongo) — 
                        talks to the outside world
 monitoring/            one monitor per kind + the shared execution layer
                        talos (setup) · themis (portfolio) · coverage (analyst) ·
-                       tilt (strategy)
+                       industry views (strategy)
                        talos WAKES on every candle close of its rung, only where a condition
                          was written in words — and a wake costs one of three things: the full
                          read, a CHEAP numbers-only read that decides whether the full one is
@@ -557,25 +556,23 @@ PROMETHEUS (buy-side research)        POST /api/analyst/stream
             DEADLINE; an early hit reopens the call rather than closing it — a target hit early
             means the target was too low, not that the thesis is done.
 
-PYTHIA (top-down strategy)            POST /api/strategy/stream
-  ├─ ONE standing house view: a named regime + sector stances as ACTIVE WEIGHT (bps) vs a
-  │  benchmark — a stance, never a return forecast
-  ├─ a BROADCAST: no userId anywhere — but the DESK is admin-only (every /api/strategy route is
-  │  requireAdmin, 2026-09-14). Traders never author or open it; they still READ the view through
-  │  Atlas (in-process) and Axl (get_sector_view). See docs/desks/roles-and-sourcing.md
-  └─ retire ARCHIVES; there is no delete, because a desk that can erase its own calls has no
-     track record
+PYTHIA (the industry desk)            POST /api/strategy/stream
+  ├─ for each of the 163 GICS sub-industries, three STRUCTURAL answers — demand · economics ·
+  │  cycle — from aether-engine's measured numbers (15 years of filings, Damodaran's hurdles).
+  │  Descriptions, never forecasts; a departure from a measured grade must be argued
+  ├─ a BROADCAST: no userId anywhere. Every user READS it (the Forecasts board, Atlas and Axl
+  │  via get_industry_views); only admins author (the stream, publishing)
+  └─ industry_view: one house doc per sub-industry with a revision trail
         │
-        ├─► the tilt monitor re-reads the regime; the clock and the baseline are PER ROW
-        └─► CONSUMED, not just published: Atlas reads the house view when constructing and
-            reviewing (portfolioChat + sectorView.tools), and Axl surfaces it — a strategy desk
-            nobody reads is a costume
+        ├─► the industry-view monitor seeds, brings a view forward on an engine trigger, and
+        │   reviews what is due (yearly; quarterly if cyclical) — opt-in, INDUSTRY_REVIEWS
+        └─► CONSUMED: Atlas's review trigger fires when a HELD industry's answer changes
 ```
 
 **Who gets which desk.** Two roles. A **trader** has Argus, Mentor and Atlas in full, Prometheus
-to research with (every coverage readable, none writable), Axl knowing those four desks plus the
-house forecast — and no Pythia, no Aether. An **admin** has everything, and is the only audience
-of Pythia's and Prometheus's social-chat feeds (coverage verdicts, review offers). The server owns
+to research with (every coverage readable, none writable), the Forecasts board and Axl reading the
+house industry views — and no Pythia desk, no Aether. An **admin** has everything, and is the only audience
+of Pythia's and Prometheus's social-chat feeds (coverage verdicts, industry-view changes). The server owns
 every gate; the client hides what the server would refuse. The matrix and where each gate lives:
 [docs/desks/roles-and-sourcing.md](docs/desks/roles-and-sourcing.md).
 
@@ -811,11 +808,10 @@ GET  /equity-curve   equity points (?fromMs=)
 - **Analyst** `/api/analyst` — `POST /stream` + coverage CRUD; `POST /coverage/:id/retire` archives,
   `DELETE` removes. Two verbs because retire once answered the DELETE route and the API claimed a
   removal that never happened.
-- **Strategy** `/api/strategy` — `POST /stream` + the tilt log. `GET /tilt/current` is the house
-  view, the same document for everyone; `POST /tilt/:id/retire` archives, and there is no delete.
-  `GET /tilt/series` serves the line behind each stance (since its call, with ~3 months of history
-  before it) and `GET /tilt/calls` the channel calls' latest marks and the desk's record — both
-  admin-only, like the desk.
+- **Strategy** `/api/strategy` — `GET /industries` (every GICS sub-industry: the engine's measured
+  read beside the house answer) and `GET /industries/:code` (one, with its trail) — open to every
+  signed-in user; `POST /stream` and `POST /industries/:code` (publish a drafted answer, checked
+  against the measured numbers) — admin-only.
 - **Pending actions** `/api/pending-actions` — `GET /` (the queued list), `POST /:id/execute`,
   `POST /:id/cancel`. See the off-hours queue above.
 - **Threads** `/api/threads` — the unified build-conversation drafts (subject-bound, TTL-expired,
@@ -847,7 +843,7 @@ GET  /equity-curve   equity points (?fromMs=)
               ┌──────────────┬────────────┴──┬──────────────┬─────────────┐
               ▼              ▼               ▼              ▼             ▼
             Argus         Mentor           Atlas       Prometheus      Pythia
-            scan          setup          portfolio      coverage        tilt
+            scan          setup          portfolio      coverage    industry_view
               │              │               │              │             │
          candidates ────────►│           holdings          the artifacts other
                              │               │             desks read (no orders)

@@ -91,8 +91,10 @@ instances.
 
 ### 3. Duplicated LLM work — cost, and duplicate history
 
-- `coverage.monitor` and `tilt.monitor` write their bookkeeping with unconditional `updateOne`, so
-  both instances run the same assessment. That is two model runs, and two appended revisions on a
+- `coverage.monitor` writes its bookkeeping with unconditional `updateOne`, so both instances run
+  the same assessment. (The tilt monitor had the same problem and was deleted with the tilt on
+  2026-10-05; its successor, `industryView.monitor`, reviews through `dueLoop`'s conditional claim,
+  so a due view is reviewed once.) That is two model runs, and two appended revisions on a
   document whose whole point is an append-only trail.
 - `themis.monitor` is a doorbell — two instances ring it twice.
 - `marketBrief.service` caches the brief in-process (`_cache`, `max: 1`) behind an in-process

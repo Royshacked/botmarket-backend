@@ -1,7 +1,8 @@
 # Horizons — what we can know, from one month to twenty years (2026-10-05)
 
 **PROPOSED, designed whole and built in order.** Decided with Roy on 2026-10-05: design every horizon
-now, build long-term first. Its companion is `pythia-industry-questions.md`, which covers the
+now, build long-term first. Built so far (2026-10-05): the industry-structure layer (Pythia, §2A) and
+the estimate snapshots (§5 step 2). The signal lab, the funnels and the horizon board are not. Its companion is `pythia-industry-questions.md`, which covers the
 industry-structure layer.
 
 The one rule: **at every horizon we show and trade only what has published evidence AND passes our

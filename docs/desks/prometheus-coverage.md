@@ -35,8 +35,8 @@ Three things it deliberately is not:
   is watched by its own monitor. A trade taken on the back of it is Mentor's or Atlas's, and the trade
   carries a frozen pointer back (`research_basis`, below), never a live link.
 - **Not per-user.** Coverage is HOUSE-OWNED: no `userId`, one thesis per symbol, authored through the
-  admin pipeline and read by every desk. It mirrors the tilt's ownership model — one active view per
-  name, superseded on revision, owner-blind — and shares the tilt's write pipe
+  admin pipeline and read by every desk. It shares its ownership model with Pythia's industry views
+  — one active view per key, superseded on revision, owner-blind — and the same write pipe
   (`services/houseArtifact.repo.js`). Traders read it; only an admin writes it
   ([roles-and-sourcing.md](roles-and-sourcing.md)).
 - **Not Mentor's "coverage".** Mentor's chat state has a field of the same name — the dimensions the
@@ -303,6 +303,7 @@ copied. That frozen PT is what Themis compares the *revised* one against.
   multiple persisted at model time and a noise threshold.
 - **The model + effort a re-model was read with** are not on the revision.
 - **Prometheus, Pythia and Aether are one research layer** in the architecture vision
-  ([design/architecture-vision.md](../design/architecture-vision.md)); how the tilt should steer
-  which names get researched, beyond Argus's sector overweight, is not written down. *(Inferred gap —
-  not stated anywhere in code.)*
+  ([design/architecture-vision.md](../design/architecture-vision.md)); how the house view
+  steers which names get researched is now the 5-year funnel in
+  [design/horizons.md](../design/horizons.md) — not built; the tilt-driven house scan that fed the
+  queue was deleted with the tilt on 2026-10-05.

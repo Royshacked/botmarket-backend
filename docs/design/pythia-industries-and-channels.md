@@ -1,5 +1,8 @@
 # Pythia — where to look, and why
 
+> **SUPERSEDED 2026-10-05** by [pythia-industry-questions.md](./pythia-industry-questions.md) and
+> [horizons.md](./horizons.md); the tilt/channel desk it describes was deleted.
+
 **PROPOSED.** Backticked names that do not resolve are what this doc asks to create; everything
 described as existing was read out of the code or the database on 2026-09-30 and the evidence is
 quoted inline.

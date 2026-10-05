@@ -67,7 +67,7 @@ export function _isOfferTime(now, offerHourUtc = OFFER_HOUR_UTC) {
 async function _tick(deps = {}) {
     const {
         // The broadcast roster now lives with the users collection — the strategy desk's review
-        // offer fans out over the same one (see tiltNotify.notifyTiltReviewDue).
+        // offer fans out over the same one (as industryNotify and coverageNotify do for admins).
         userIds = listAllUserIds,
         recipients = listCardRecipientsSince,
         post = postCard,

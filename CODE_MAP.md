@@ -18,7 +18,7 @@ monitoring/   →  services/  →  providers/            background path (poll +
   This is the only layer that talks to the outside world.
 - **monitoring/** — background workers started in `server.js` (poll loop, reconciler, paper engines).
   The arrow to services/ runs both ways for PURE modules: services import the evaluators' indicator
-  math, tilt.assess's diff, the condition parser and monitorJournal's writer. What must not happen
+  math, the condition parser and monitorJournal's writer. What must not happen
   is a service reaching into the monitor tier for a FETCH or a CLIENT — those live in services/
   (lastPrice.service, anthropic.provider) since 2026-09-16.
 
@@ -79,61 +79,27 @@ api/
                               symbol, no userId — since 5c12b8c): variant-perception + our PT vs Street (the
                               gap) + monitorable kill-criteria + append-only revisions[]. normalizeCoverage +
                               CRUD (initiate/update-w-revision/retire). Writes ride houseArtifact.repo, the
-                              pipe it shares with tilt.service: revise = `$set` of ONLY the patched fields +
+                              pipe it shares with industryView.service: revise = `$set` of ONLY the patched fields +
                               `$push` of the revision at position 0, in one update (`_updateSet` is the pure
                               half). Own collection — NOT the execution-tier entities (P1 of the Analyst)
-  strategy/               Pythia — the house SECTOR VIEW  /api/strategy/*. THE WHOLE DESK IS ADMIN-ONLY
-                          (router-wide requireAdmin, 2026-09-14). strategy.controller streams the desk +
-                          the tilt publication log (current · list · publish · update · retire — no
-                          delete: a desk that can erase its calls has no track record). Every handler
-                          rides makeHandle. Publish diffs against the view in force (tilt.assess.
-                          diffStances) → tiltNotify.notifyTiltChanged to every admin → runHouseScan
-    channelCalls.service.js   The CALL LEDGER (`pythia_channel_calls`): each channel call with its own
-                              clock (restated = same call, revised = superseded but still graded),
-                              marked at 4/13/26 weeks by the tilt monitor against the base rate; its
-                              track record replaces CHANNEL_CONFIDENCE once 10 calls are final and is
-                              shown to Pythia at the top of each review
-    channelSizing.service.js  Step 6: the table SIZED from Pythia's channel calls — every fund's
-                              expected move Σ multiplier × beta × dz, a sector whole or split into its
-                              industries where they diverge, over/under sides scaled to balance (never
-                              demeaned), grain caps. Same function behind size_from_channels (preview)
-                              and expandChannelDraft (the parsed draft), so preview = published.
-                              Reactions (stronger/weaker/opposite) and exclusions carry reasons
-    industryReads.service.js  Pythia's get_industry_reads: per-industry EVIDENCE (beat, surprise,
-                              12-1 momentum → one score) and CONTEXT (P/E vs 5y, growth — never sized)
-                              from `pythia_industry_reads`, written weekly by aether-engine. The only
-                              evidence tech has. FUND_EVIDENCE_COLLECTION feeds channelSizing's K_EVIDENCE term
-    channelExposures.service.js  Pythia's get_channel_exposures: the engine's fund × channel betas
-                              (`pythia_channel_betas`), only |t| ≥ 3 offered as exposures, each fund
-                              named by the buckets it grades, beta × today's z as "already moved".
-                              Measured-zero and unmeasured counted apart, never as a zero beta
-    fundUniverse.service.js   Writes BUCKET_PROXY's funds to `pythia_fund_universe` at boot
-                              (server.js) — the list the Python engine fits betas on. The map stays
-                              here; the fit stays in Python; neither copies the other
-    channelState.service.js   Pythia's get_channel_state: reads the ONE `pythia_channel_latest` doc
-                              aether-engine's build_channel_state.py writes (23 channels, z / 4w / 13w
-                              / percentile / as-of) and formats it. No arithmetic on this side; a read
-                              older than STALE_DAYS is headed STALE, an absent one forbids inventing
-    tiltSeries.service.js     The LINE behind each stance: the bucket's relative return since the
-                              call, rebased to 100, served at GET /tilt/series. ARITHMETIC, matching
-                              relativeReturnPct exactly — the geometric form reads half a point
-                              apart and would put a chart on screen disagreeing with the number
-                              beside it. Bars cached per (symbol, day); a provider outage costs the
-                              line and never the board
-    tilt.service.js           `tilt` collection = ONE active house view per benchmark, superseded on
-                              publish, never overwritten; house-owned like coverage (no userId). A row
-                              names a SECTOR or an INDUSTRY (`grain`/`bucket`), graded against the
-                              `proxy` frozen onto it; overlappingRows refuses a table holding a sector
-                              and its own parts, unpriceableRows one that cannot be graded at all. Each
-                              ROW owns its clock (forecastClock.openWindow: reaffirm keeps set_at,
-                              re-author restarts) and its FROZEN baseline (base_px / base_bench_px —
-                              stampBaselines at publish). The reaffirm is decided SERVER-side:
-                              publish reads the standing view and carryReaffirmed merges its clock +
-                              baseline onto every row unchanged in (stance, active_bp, horizon) — a
-                              row off the wire carries no set_at, so without it every publish
-                              restarted every deadline. stanceCoherence refuses a row whose words and
-                              number disagree; balanceOf records an unbalanced table rather than losing
-                              it. Writes ride houseArtifact.repo (`_updateSet` = only the patched fields)
+  strategy/               Pythia — the house INDUSTRY VIEWS  /api/strategy/*. Rebuilt 2026-10-05
+                          (docs/desks/pythia-industries.md; the tilt desk was deleted). READS are open to
+                          every signed-in user (GET /industries, /industries/:code); AUTHORING is admin-only
+                          per route (POST /stream, POST /industries/:code). Every handler rides makeHandle
+    industryView.service.js   `industry_view` = one house doc per GICS sub-industry (no userId): the three
+                              answers (demand / economics / cycle, each {grade, rationale, code_grade,
+                              override_reason?}), summary, reopen_if, status pending|answered, monitor.*.
+                              checkDraft refuses a grade outside the vocabulary, a missing rationale, or a
+                              departure from the measured code grade without override_reason. Cadence:
+                              nextReviewAt = 12 months, 3 for a cyclical industry. seedMissing creates the
+                              pending views; viewsForSymbols is THE join (symbol → its industry's answer)
+                              behind Atlas's trigger, its fingerprint and the read tool. Writes ride
+                              houseArtifact.repo
+    industryData.service.js   Reads what aether-engine measured, from the ENGINE's database
+                              (services/engineDb.js): industry_metrics (readSubIndustry → the node that
+                              answers it + its parents; listSubIndustries) and gics_companies
+                              (readCompanies, readCompaniesBySymbol). Pure formatters for the desk.
+                              Data, not judgment
   aether/                 Aether — the EVENT-EXPOSURE desk  /api/aether/*. Node is READ-ONLY against the
                           engine's collections: the Python aether-engine (a separate repo) writes them, and
                           only when an admin starts a discovery run. What survived the channel-engine
@@ -626,6 +592,10 @@ services/
                             not one per user. Two consumers: Axl's tool and POST /api/axl/brief/stream
   marketBrief.tools.js      get_market_brief — UNBOUND (no userId, so the brief cannot be made
                             personal). Axl RELAYS the brief; it does not write market commentary
+  industryViews.tools.js    get_industry_views (Axl + Atlas, replaced get_sector_view 2026-10-05) — UNBOUND;
+                            the caller passes `symbols` (the industry each is in + the house's three
+                            answers, through industryView.viewsForSymbols) or a GICS `sector`. Reads say
+                            DESCRIPTIONS, not forecasts; a pending industry has no house answer
   watchlist.service.js      listWatchedItems — "what am I watching?" across EVERY list the Floor
                             shows, in ONE read (setups · books · coverage · scans · the off-hours
                             QUEUE · Aether runs, one row per event · and, for an admin, the research
@@ -722,25 +692,26 @@ services/
                             learns a run ended (and chains the next when its names were queued after
                             the run listed the queue). The abort controller is cleared only if still
                             ours — a run chained from a listener must stay stoppable
-  houseArtifact.repo.js     The write pipe under the two HOUSE ARTIFACTS (coverage, tilt) — a standing
+  houseArtifact.repo.js     The write pipe under the two HOUSE ARTIFACTS (coverage, industry_view) — a standing
                             view with no owner, kept as a publication log. revise(id, $set, revision)
                             prepends the revision and sets the patched fields atomically; a $set carrying
                             `revisions` is refused. recordMonitorState = the monitor's quiet bookkeeping,
                             no revision. The schema, the gates and what counts as a revision stay in each
                             service; injectable getDb so the update's shape is testable
-  houseScan.service.js      Argus's admin-pipeline mode: on tilt publish, FMP-screen each overweight
-                            sector and queue the hits. Same screener as sleeveSource, own inline call
   coverageNotify.service.js Prometheus's cards. coverage_event = the monitor's material verdict,
                             fanned out to EVERY ADMIN (listAdminUserIds, visibility 'admin') — house
                             coverage has no owner, so the audience is derived at delivery, as
-                            tiltNotify's review offer does. coverage_refreshed = the ping after a
+                            industryNotify does. coverage_refreshed = the ping after a
                             headless refresh: to the ONE user whose <coverage_refresh> hop asked, or
                             — for the monitor's scheduled re-model, which has no user — to every admin
-  tiltNotify.service.js     Pythia's cards, both to the ADMIN ROSTER: tilt_event on publish (what
-                            moved, via tilt.assess.diffStances) and tilt_review when the monitor finds
-                            the view due. The change card used to be narrowed by a coverage.userId join;
-                            coverage lost that field at the house pivot and the card went to nobody for
-                            three weeks — there is no per-user sector audience left in the data
+  industryNotify.service.js Pythia's card, to the ADMIN ROSTER: `industry_view` when a review CHANGED an
+                            industry's answer (payload industryViewId — a card subject, so it can be
+                            superseded and completed). A review that reaffirms every grade posts nothing
+  industryReview.service.js A headless Pythia review of ONE sub-industry (the desk with userId null):
+                            publishes the <industry_view> it gets, or records a pass / a refused answer
+                            on the trail. Never throws — the caller is a monitor tick
+  engineDb.js               THE rule for which database aether-engine writes (AETHER_DB, else Node's own) —
+                            shared by the engine's scheduler and every desk that reads what it wrote
   manualNotify.service.js   broker-less entry/exit FillCards → social chat (embedded price/qty confirm)
   tradeNotify.service.js    notify+route cards → social chat: entry_confirm (paper/live idea entry)
                             + queue_ready (the market-open nudge, from Axl) + setup_invalidation /
@@ -1023,7 +994,7 @@ monitoring/
                             against a lease, check it under a timeout. THE LEASE IS THE SUBTLE PART —
                             withTimeout ABANDONS a slow check but cannot cancel it, so without one the
                             next tick re-selects an entity whose check is still in flight and fires it
-                            twice. Shared by Talos, exits, coverage and tilt. `statePath` is what lets
+                            twice. Shared by Talos, exits, coverage and the industry views. `statePath` is what lets
                             the research loops ride it (they schedule under `monitor.*`, entities under
                             `monitor_state.*`) and `kind` is OPTIONAL because their collections hold one
                             thing and carry no such field — passing one selects nothing, forever,
@@ -1064,15 +1035,12 @@ monitoring/
                             so a mid-fan-out restart resumes instead of double-posting. The confirm
                             takes the user to AXL and streams it there; the brief never lands in the
                             social chat (a page of prose in a one-line surface, with nobody to ask)
-  tilt.monitor.service.js   Pythia's slow loop. Cheap tier daily (re-price each open stance vs its
-                            FROZEN baseline, mature the ones whose window closed — tilt.assess, pure).
-                            Expensive tier is an OFFER, not a run: reviewDecision says due (stance
-                            matured / macro catalyst / 30-day floor, under a 7-day cooldown) →
-                            tiltNotify.notifyTiltReviewDue posts a `tilt_review` card to every admin,
-                            and the confirm runs the review at PYTHIA'S DESK — a re-author supersedes
-                            the view everyone reads, so it takes a confirm. Both clocks anchor on
-                            reviewAnchorMs (last publish/reauthor off the revision trail), NEVER on
-                            updated_at — the loop's own maturity write moves that
+  industryView.monitor.service.js  Pythia's loops. SYNC every 6h (Mongo only): seed a pending view for
+                            every measured sub-industry; bring a view forward on a NEW engine trigger
+                            (revenue down two quarters / returns below hurdle / margins at a range edge)
+                            unless reviewed in the last 30 days. REVIEW hourly via dueLoop: due views get
+                            industryReview, at most 3 a tick, ONLY with INDUSTRY_REVIEWS=true (off, the
+                            claim is handed back and nothing is spent)
   coverage.monitor.service.js  Prometheus's slow loop (dueLoop, hourly tick, ~daily per name, every
                             status but retired). Cheap tier: price + the Street's PT distribution →
                             coverage.assess.classifyGapState (target_hit / target_hit_early /
@@ -1098,14 +1066,6 @@ monitoring/
                             YYYY-MM-DD only — fuzzy dates are prose for the analyst), remodelDecision.
                             Not a trigger: price, raw consensus drift, sector rotation (declined
                             2026-07-30 — Atlas's question, not Prometheus's)
-  tilt.assess.js            PURE grading for the house view: relativeReturnPct / contributionBp
-                            (active_bp × relative return — attribution, not opinion; null, never 0,
-                            when unpriceable), gradeRow (a row MATURES when its own window closes),
-                            diffStances (what moved between two views), reviewAnchorMs (off the
-                            revision trail, NEVER updated_at — the monitor's own maturity write moves
-                            that), reviewDecision (matured / macro catalyst / 30-day floor, 7-day
-                            cooldown). The same cooldown → triggers → floor shape as remodelDecision,
-                            deliberately NOT collapsed — the constants ARE the judgment
   paperFill.service.js  paperEquity.service.js
   monitor.claude.js         the monitor tier's three one-shot LLM reads — claudeJSON (a condition parse),
                             claudeText (a YES/NO verdict), claudeVision (a look at a chart) — as thin
