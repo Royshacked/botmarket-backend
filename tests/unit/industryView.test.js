@@ -14,7 +14,7 @@ import { _triggered, _sync, _reason, TRIGGER_COOLDOWN_DAYS } from '../../monitor
 const NODE = {
     level: 'sub_industry', code: '45301020', name: 'Semiconductors', asof: '2026-10-05', n_companies: 41, last_fiscal_year: 2025,
     q1: { grade: 'growing', cagr: 0.12, years: 10, universe_cagr: 0.05, relative: 0.07, cagr_recent_3y: 0.15, share_positive_years: 0.8, growth_volatility: 0.1 },
-    q2: { grade: 'good', return_measure: 'roic', median_return: 0.18, hurdle: 0.106, hurdle_sources: ['Semiconductor'], spread: 0.074, share_above_hurdle: 0.7, companies_with_returns: 38, op_margin_mean: 0.22, op_margin_stdev: 0.05, top5_share: 0.62, top5_share_5y_ago: 0.55 },
+    q2: { grade: 'good', return_measure: 'roic', aggregate_return: 0.21, median_return: 0.18, hurdle: 0.106, hurdle_sources: ['Semiconductor'], spread: 0.074, share_above_hurdle: 0.7, companies_with_returns: 38, op_margin_mean: 0.22, op_margin_stdev: 0.05, top5_share: 0.62, top5_share_5y_ago: 0.55 },
     q3: { grade: 'peak', measure: 'op_margin', ttm_value: 0.31, range_low: 0.12, range_high: 0.29, percentile: 1, normalised_value: 0.22, cyclical: true, cv: 0.3 },
     triggers: ['margin_at_range_edge'],
 }
@@ -76,7 +76,8 @@ test('an unanswered sub-industry is seeded pending and due now', () => {
 test('a node reads as three lines of numbers, each with its code grade, and its triggers', () => {
     const t = formatNode(NODE)
     assert.match(t, /DEMAND\s+code grade: growing — revenue 12\.0%\/yr over 10y \(universe 5\.0%, relative \+7\.0pp\)/)
-    assert.match(t, /ECONOMICS\s+code grade: good — median roic 18\.0% vs hurdle 10\.6%/)
+    assert.match(t, /ECONOMICS\s+code grade: good — the industry's roic 21\.0% \(all its capital together\) vs hurdle 10\.6%/)
+    assert.match(t, /the median company earns 18\.0%/)
     assert.match(t, /CYCLE\s+code grade: peak — operating margin trailing 12m 31\.0%/)
     assert.match(t, /TRIGGERS\s+margin_at_range_edge/)
 })
