@@ -48,14 +48,14 @@ test('requireAdmin: a trader, a role-less token, and no user at all are all 403'
 
 // ── the strategy router mounts it before ANY route ───────────────────────────
 
-test('strategy routes: requireAdmin is router-wide, ahead of every route', () => {
-    const gate  = routesSrc.indexOf('router.use(requireAdmin)')
-    const first = routesSrc.indexOf('router.post(')
-    const firstGet = routesSrc.indexOf('router.get(')
-    assert.ok(gate > 0, 'router.use(requireAdmin) is present')
-    assert.ok(gate < first && gate < firstGet, 'the gate is mounted before the first route')
-    // and the reads are no longer the broadcast they used to be
-    assert.doesNotMatch(routesSrc, /router\.get\([^\n]*requireAuth\b/)
+test('strategy routes: every WRITE is admin-gated, the industry reads are open to any user', () => {
+    // Roy, 2026-10-05: traders see the board. Authoring (the stream, publishing) stays admin-only.
+    assert.match(routesSrc, /router\.use\(requireAuth\)/)
+    assert.doesNotMatch(routesSrc, /router\.use\(requireAdmin\)/)
+    const posts = routesSrc.split('\n').filter(l => /^router\.post\(/.test(l))
+    assert.ok(posts.length >= 2)
+    for (const l of posts) assert.match(l, /requireAdmin/, l)
+    for (const l of routesSrc.split('\n').filter(l => /^router\.get\(/.test(l))) assert.doesNotMatch(l, /requireAdmin/, l)
 })
 
 // ── Argus and Mentor are the same desks for everyone ─────────────────────────

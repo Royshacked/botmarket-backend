@@ -10,25 +10,21 @@ const router = express.Router()
 
 router.use(requireAuth)
 
-// THE WHOLE DESK IS ADMIN-ONLY (2026-09-14). Pythia's chat, the drafts it emits and the views it
-// publishes are the house layer — the input the pipeline is steered from, not a view a trader
-// consumes. The reads used to be broadcast ("the house view answers the same to everyone") while
-// only the writes were gated; that left the Forecasts board and this stream open to any signed-in
-// user, so the client hid the desk for traders and the server still answered them. Gating every
-// route here makes the served set equal to the visible set, the same rule industryNotify
-// applies to the cards (`listAdminUserIds`). Traders reach nothing under /api/strategy — the
-// monitors and the other desks (Atlas, Axl) read the views in-process, not through these routes, so they are
-// unaffected.
-router.use(requireAdmin)
+// READ FOR EVERYONE, AUTHOR FOR ADMINS (Roy, 2026-10-05). The industry views are a broadcast — the
+// house's description of each industry, the same for every user — so the Forecasts board and one
+// industry's detail are open to any signed-in user. Chatting with Pythia and publishing an answer
+// change the house layer, so those two stay admin-only, each gated where it is mounted.
+//
+// (2026-09-14 to 2026-10-05 the whole desk was admin-only: the tilt was the input the pipeline was
+// steered from, not a view a trader consumed.)
 
-// Streaming industry-desk agent — emits <industry_view> drafts for preview.
-router.post('/stream',        log, streamStrategy)
-
-// The industry views (Pythia, rebuilt 2026-10-05): every GICS sub-industry with the house's answer to
-// the three questions beside the engine's measurements; one sub-industry by its 8-digit code; publish
-// a reviewed draft.
+// The industry views: every GICS sub-industry with the house's answer to the three questions beside
+// the engine's measurements; one sub-industry by its 8-digit code.
 router.get('/industries',        log, listIndustries)
 router.get('/industries/:code',  log, getIndustry)
-router.post('/industries/:code', log, publishIndustry)
+
+// Authoring: the streaming desk (emits <industry_view> drafts) and publishing a reviewed draft.
+router.post('/stream',           requireAdmin, log, streamStrategy)
+router.post('/industries/:code', requireAdmin, log, publishIndustry)
 
 export const strategyRoutes = router
