@@ -390,7 +390,7 @@ function checkDotted(parts) {
     // `modelRouter.service` — shaped like a module, and no such module: missing, however many
     // comments still say `modelRouter`. Checked before the word fallback, which would pass it.
     if (parts.length === 2 && MODULE_SUFFIXES.has(parts[1])) {
-        // `tilt.monitor` is the docs' shorthand for tilt.monitor.service — a prefix of a module is that module
+        // `coverage.monitor` is the docs' shorthand for coverage.monitor.service — a prefix of a module is that module
         const longer = [...moduleNames].find(m => m.startsWith(parts.join('.') + '.'))
         if (!longer) return { verdict: 'missing', detail: 'no such module' }
         const rel = (byBasename.get([...byBasename.keys()].find(b => b.replace(/\.[^.]+$/, '') === longer)) || [])[0]

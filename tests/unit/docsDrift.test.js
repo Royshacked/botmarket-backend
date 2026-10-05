@@ -58,7 +58,7 @@ test('a bare @word is prose; a dependency claim is @scope/pkg or a name in packa
 })
 
 test("the docs' shorthand for a three-part module resolves to it", () => {
-    assert.equal(verdict('tilt.monitor'), 'ok')
+    assert.equal(verdict('industryView.monitor'), 'ok')
     assert.equal(verdict('coverage.monitor'), 'ok')
     assert.equal(verdict('nosuch.monitor'), 'missing')
 })

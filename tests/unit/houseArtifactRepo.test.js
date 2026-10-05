@@ -3,7 +3,6 @@ import assert from 'node:assert/strict'
 
 import { makeHouseArtifactRepo } from '../../services/houseArtifact.repo.js'
 import { _updateSet as coverageSet, normalizeCoverage } from '../../api/analyst/coverage.service.js'
-import { _updateSet as tiltSet, normalizeTilt } from '../../api/strategy/tilt.service.js'
 
 // The write pipe under coverage and the tilt. Both services used to read the doc, rebuild `revisions`
 // as a whole array and `$set` it back beside EVERY field of the merged document — so two writers in
@@ -97,22 +96,4 @@ test('coverage: a re-model draft names every plan field, and every plan field is
     const $set = coverageSet(draft, merged, { flagsRecomputed: true })
     for (const k of ['rating', 'price_target', 'thesis', 'sector', 'catalysts', 'kill_criteria', 'conviction', 'flags']) assert.ok(k in $set, k)
     assert.equal($set.price_target.value, 240)
-})
-
-// ── tilt._updateSet ──────────────────────────────────────────────────────────
-
-const view = normalizeTilt({ id: 'tilt_1', benchmark: 'SPX', tilts: [{ sector: 'Energy', stance: 'over', active_bp: 150 }, { sector: 'Utilities', stance: 'under', active_bp: -150 }] })
-
-test('tilt: a retire writes status + updated_at and leaves the rows alone', () => {
-    const merged = normalizeTilt({ ...view, status: 'retired' })
-    const $set = tiltSet({ status: 'retired', revision_kind: 'retire' }, merged)
-    assert.deepEqual(Object.keys($set).sort(), ['status', 'updated_at'])
-})
-
-test('tilt: a rows patch writes the rows AND the balance verdict they imply', () => {
-    const merged = normalizeTilt({ ...view, tilts: [{ sector: 'Energy', stance: 'over', active_bp: 150 }] })
-    const $set = tiltSet({ tilts: merged.tilts, revision_kind: 'stance_matured' }, merged)
-    assert.deepEqual(Object.keys($set).sort(), ['balanced', 'net_bp', 'tilts', 'updated_at'])
-    assert.equal($set.balanced, false)   // one 150bp row does not net out
-    assert.ok(!('revisions' in $set))
 })

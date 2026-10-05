@@ -39,7 +39,6 @@ import cookieParser from 'cookie-parser'
 import { chatRoutes }         from './api/chat/chat.routes.js'
 import { attach as attachChatWs } from './api/chat/chatWs.js'
 import { ensureIndexes as ensureChatIndexes } from './api/chat/chat.service.js'
-import { publishFundUniverse } from './api/strategy/fundUniverse.service.js'
 import { ensureUserIndexes } from './api/user/user.model.js'
 import { ensureIdeaIndexes } from './api/trade-ideas/tradeIdeas.service.js'
 import { ensureTradeIndexes } from './services/tradeCapture.service.js'
@@ -73,7 +72,6 @@ import { marketRoutes }      from './api/market/market.routes.js'
 import { calendarRoutes }    from './api/calendar/calendar.routes.js'
 import { talosService }     from './monitoring/talos.monitor.service.js'
 import { coverageMonitorService } from './monitoring/coverage.monitor.service.js'
-import { tiltMonitorService }     from './monitoring/tilt.monitor.service.js'
 import { industryViewMonitorService } from './monitoring/industryView.monitor.service.js'
 import { themisService }      from './monitoring/themis.monitor.service.js'
 import { executionReconciler } from './monitoring/execution.reconciler.js'
@@ -225,8 +223,6 @@ ensureWorkspaceIndexes()
 ensurePendingActionIndexes()
 ensureAetherIndexes()
 threadService.ensureThreadIndexes()
-// The funds the engine fits channel betas on — BUCKET_PROXY lives here, the fit lives in Python.
-publishFundUniverse()
 
 // ─── Background loops ─────────────────────────────────────────────────────────
 // ONE INSTANCE RUNS THESE, and that is now enforced rather than merely documented. They start
@@ -259,7 +255,6 @@ function startBackgroundLoops() {
     // when one fires, marks the setup due so the loop above claims it. See guardSweep's header.
     startLoop('guardSweep',   guardSweepService)
     startLoop('coverage',     coverageMonitorService)
-    startLoop('tilt',         tiltMonitorService)
     startLoop('industryView', industryViewMonitorService)
     startLoop('themis',       themisService)
     startLoop('reconciler',   executionReconciler)

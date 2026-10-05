@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
 import { listResearchQueue, getResearchRun } from '../../api/analyst/analyst.controller.js'
-import { getTilt } from '../../api/strategy/strategy.controller.js'
+import { getIndustry } from '../../api/strategy/strategy.controller.js'
 
 // The analyst queue/run handlers and every strategy handler used to be bare async functions with no
 // try/catch — they leaned on the services catching everything, which is true today and one thrown
@@ -23,9 +23,9 @@ test('analyst: a throw inside a queue handler reaches next(err) — it does not 
     assert.ok(next.calls[0] instanceof TypeError)
 })
 
-test('strategy: a throw inside a tilt handler reaches next(err)', async () => {
+test('strategy: a throw inside an industry handler reaches next(err)', async () => {
     const next = nextSpy()
-    await getTilt({ /* no params */ }, fakeRes(), next)
+    await getIndustry({ /* no params */ }, fakeRes(), next)
     assert.equal(next.calls.length, 1)
     assert.ok(next.calls[0] instanceof TypeError)
 })

@@ -195,7 +195,7 @@ const SUBJECT_KEYS = [
     ['callId',      'call'],
     ['ideaId',      'idea'],
     ['coverageId',  'coverage'],
-    ['tiltId',      'tilt'],
+    ['industryViewId', 'industry_view'],
 ]
 
 /**

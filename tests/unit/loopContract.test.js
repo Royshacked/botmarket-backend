@@ -65,7 +65,7 @@ test('server.js registers the full fleet', () => {
         // unconditionally in server.js, gated on the engine being present on this host, and its
         // mutual exclusion comes from claiming each job occurrence in aether_scheduler_runs.
         'coverage', 'entries', 'exits', 'guardSweep', 'industryView', 'marketBrief', 'marketOpen', 'paperEquity',
-        'paperFill', 'paperMark', 'reconciler', 'talos', 'themis', 'tilt',
+        'paperFill', 'paperMark', 'reconciler', 'talos', 'themis',
     ])
 })
 
