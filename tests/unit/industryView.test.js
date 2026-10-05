@@ -1,7 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { checkDraft, nextReviewAt, pendingDoc, GRADES } from '../../api/strategy/industryView.service.js'
+import { checkDraft, nextReviewAt, pendingDoc, GRADES, nextAfterPass, failureBackoff, PENDING_RETRY_DAYS } from '../../api/strategy/industryView.service.js'
+import { forTraders } from '../../api/strategy/strategy.controller.js'
 import { formatNode, formatSubIndustry, formatCompanies } from '../../api/strategy/industryData.service.js'
 import { buildIndustryChanged, notifyIndustryChanged } from '../../services/industryNotify.service.js'
 import { reviewIndustry, _reviewPrompt, _lastParagraph } from '../../services/industryReview.service.js'
@@ -96,6 +97,7 @@ test('a changed answer posts a card per admin naming what moved; an unchanged re
     const doc = { code: '45301020', id: 'iv_45301020', name: 'Semiconductors', summary: 'Top of the cycle.' }
     const card = buildIndustryChanged(doc, { cycle: { from: 'mid', to: 'peak' } }, 'u1')
     assert.equal(card.content, 'Semiconductors: cycle mid → peak. Top of the cycle.')
+    assert.equal(card.payload.name, 'Semiconductors', 'the frontend heading names the industry')
     assert.equal(card.visibility, 'admin')
     assert.equal(buildIndustryChanged(doc, null, 'u1'), null)
 
@@ -107,7 +109,7 @@ test('a changed answer posts a card per admin naming what moved; an unchanged re
 
 // ── the headless review ──────────────────────────────────────────────────────
 function deps(over = {}) {
-    const calls = { published: [], passes: [], notified: [] }
+    const calls = { published: [], passes: [], notified: [], failures: [] }
     return {
         calls,
         read: async () => ({ sub: { code: '45301020', name: 'Semiconductors' }, answering: NODE }),
@@ -115,6 +117,7 @@ function deps(over = {}) {
         publish: async (code, draft, node) => { calls.published.push({ code, draft, node }); return { ok: true, doc: { code }, changed: { cycle: { from: null, to: 'peak' } } } },
         pass: async (code, reason, cyclical) => { calls.passes.push({ code, reason, cyclical }) },
         notify: async (doc, changed) => { calls.notified.push(changed) },
+        fail: async (code, reason) => { calls.failures.push({ code, reason }) },
         ...over,
     }
 }
@@ -141,9 +144,45 @@ test('an answer refused at publish is recorded, so the next review sees why', as
     assert.match(d.calls.passes[0].reason, /answer refused at publish — cycle: give override_reason/)
 })
 
-test('a review never throws, and an unknown industry is not reviewed', async () => {
-    assert.equal((await reviewIndustry('x', null, deps({ read: async () => null }))).outcome, 'unknown')
-    assert.equal((await reviewIndustry('x', null, deps({ run: async () => { throw new Error('boom') } }))).outcome, 'error')
+test('a review never throws; an unknown industry or a crash is RECORDED as a failure, so it backs off', async () => {
+    const unknown = deps({ read: async () => null })
+    assert.equal((await reviewIndustry('x', null, unknown)).outcome, 'unknown')
+    assert.equal(unknown.calls.failures.length, 1)
+    const crash = deps({ run: async () => { throw new Error('boom') } })
+    assert.equal((await reviewIndustry('x', null, crash)).outcome, 'error')
+    assert.deepEqual(crash.calls.failures, [{ code: 'x', reason: 'boom' }])
+})
+
+test('a review past its timeout is CANCELLED, not left spending tokens', async () => {
+    let seen
+    const slow = deps({ run: ({ signal }) => new Promise((_, reject) => { seen = signal; signal.addEventListener('abort', () => reject(new Error('aborted'))) }) })
+    const r = await reviewIndustry('45301020', null, slow, { timeoutMs: 20 })
+    assert.equal(r.outcome, 'error')
+    assert.equal(seen.aborted, true)
+    assert.equal(slow.calls.failures.length, 1)
+})
+
+test('a pending industry whose review produced nothing comes back in days; an answered one keeps its cadence', () => {
+    const now = '2026-10-05T00:00:00.000Z'
+    assert.equal(nextAfterPass('pending', now, false), new Date(Date.parse(now) + PENDING_RETRY_DAYS * 86_400_000).toISOString())
+    assert.equal(nextAfterPass('answered', now, true), '2027-01-05T00:00:00.000Z')
+})
+
+test('failed reviews back off 1, 3, 7 days, then park for 30 and say so', () => {
+    const now = '2026-10-05T00:00:00.000Z'
+    const days = (iso) => Math.round((Date.parse(iso) - Date.parse(now)) / 86_400_000)
+    assert.deepEqual([1, 2, 3].map(n => days(failureBackoff(n, now).next_check_at)), [1, 3, 7])
+    const parked = failureBackoff(4, now)
+    assert.equal(days(parked.next_check_at), 30)
+    assert.equal(parked.failing, true)
+})
+
+test('a trader reads the answers without the revision trail or the monitor', () => {
+    const v = forTraders({ code: 'x', demand: { grade: 'growing' }, revisions: [{ note: 'answer refused at publish' }], monitor: { next_check_at: '2027-01-01', failures: 2 } })
+    assert.equal(v.revisions, undefined)
+    assert.equal(v.monitor, undefined)
+    assert.equal(v.next_review, '2027-01-01')
+    assert.equal(forTraders(null), null)
 })
 
 test('the headless prompt names the industry, why it is due, and the one block expected', () => {

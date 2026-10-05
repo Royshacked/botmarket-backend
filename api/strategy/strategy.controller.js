@@ -2,7 +2,8 @@
 // agent, and the industry views it answers (docs/design/pythia-industry-questions.md).
 //
 // The views are a BROADCAST — house documents with no owner — so nothing here filters by
-// `req.user._id`. The router gates the whole desk `requireAdmin` — see strategy.routes.
+// `req.user._id`. The READS are open to every signed-in user; the stream and publishing are admin-only,
+// gated per route in strategy.routes. A trader's read carries the answers, not the review machinery.
 
 import { strategyAgentService } from '../../services/agents/strategy.agent.service.js'
 import { industryViewService }  from './industryView.service.js'
@@ -73,12 +74,24 @@ export const listIndustries = _handle('listIndustries', async (req, res) => {
     }))
 })
 
-/** One sub-industry: its measurements (and what answers it) plus the house's view with its trail. */
+/**
+ * One sub-industry: its measurements (and what answers it) plus the house's view. An admin gets the
+ * revision trail and the monitor state; a trader gets the answers — the trail carries internal notes
+ * ("answer refused at publish — …") and the bookkeeping is the desk's.
+ */
 export const getIndustry = _handle('getIndustry', async (req, res) => {
     const bundle = await readSubIndustry(req.params.code)
     if (!bundle) return sendReason(res, 'unknown_industry', { overrides: VIEW_REASONS })
-    res.json({ ...bundle, view: await industryViewService.getView(bundle.sub.code) })
+    const view = await industryViewService.getView(bundle.sub.code)
+    res.json({ ...bundle, view: req.user?.role === 'admin' ? view : forTraders(view) })
 })
+
+/** A view without its revision trail and monitor bookkeeping. Pure. */
+export function forTraders(view) {
+    if (!view) return view
+    const { revisions, monitor, ...rest } = view   // eslint-disable-line no-unused-vars -- dropped on purpose
+    return { ...rest, next_review: monitor?.next_check_at ?? null }
+}
 
 /** Publish a reviewed draft (the chat preview's Publish). Checked against the measured numbers. */
 export const publishIndustry = _handle('publishIndustry', async (req, res) => {

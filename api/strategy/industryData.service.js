@@ -16,6 +16,7 @@ import { getEngineDb } from '../../services/engineDb.js'
 import { coverageService } from '../analyst/coverage.service.js'
 
 export const METRICS = 'industry_metrics'
+export const RUNS = 'industry_metrics_runs'
 export const COMPANIES = 'gics_companies'
 const LEVELS = ['sub_industry', 'industry', 'industry_group', 'sector']
 
@@ -27,10 +28,14 @@ const _io = {
 /** Test seam. */
 export function _setIndustryIO(io) { Object.assign(_io, io) }
 
-/** The latest run date the engine wrote, or null when it has written nothing. */
+/**
+ * The latest COMPLETE run, or null. The engine writes a run one node at a time and marks it complete in
+ * industry_metrics_runs only at the end — reading the highest asof in industry_metrics instead served a
+ * half-written run during the job, and a crashed one forever.
+ */
 export async function latestAsof() {
     const db = await _io.db()
-    const d = await db.collection(METRICS).find({}, { projection: { asof: 1 } }).sort({ asof: -1 }).limit(1).next()
+    const d = await db.collection(RUNS).find({ complete: true }, { projection: { asof: 1 } }).sort({ asof: -1 }).limit(1).next()
     return d?.asof ?? null
 }
 
@@ -53,7 +58,11 @@ export async function readSubIndustry(codeOrName, asof = null) {
     if (!sub) return null
     const at = sub.answered_at ?? { level: 'sub_industry', code: sub.code }
     const answering = at.level === 'sub_industry' ? sub : await coll.findOne({ asof: when, level: at.level, code: at.code })
-    const parents = await coll.find({ asof: when, level: { $in: ['industry', 'industry_group'] }, name: { $in: [sub.industry, sub.industry_group] } }).toArray()
+    // By CODE — a name can repeat across branches of GICS. Older runs without codes fall back to names.
+    const parentQuery = sub.industry_code
+        ? { $or: [{ level: 'industry', code: sub.industry_code }, { level: 'industry_group', code: sub.group_code }] }
+        : { $or: [{ level: 'industry', name: sub.industry }, { level: 'industry_group', name: sub.industry_group }] }
+    const parents = await coll.find({ asof: when, ...parentQuery }).toArray()
     return { sub, answering, parents }
 }
 
@@ -62,9 +71,9 @@ export async function listSubIndustries(asof = null) {
     const db = await _io.db()
     const when = asof ?? await latestAsof()
     if (!when) return []
-    const subs = await db.collection(METRICS).find({ asof: when, level: 'sub_industry' }).toArray()
-    const nodes = new Map((await db.collection(METRICS).find({ asof: when, level: { $in: LEVELS } }).toArray())
-        .map(n => [`${n.level}|${n.code}`, n]))
+    const all = await db.collection(METRICS).find({ asof: when, level: { $in: LEVELS } }).toArray()
+    const subs = all.filter(n => n.level === 'sub_industry')
+    const nodes = new Map(all.map(n => [`${n.level}|${n.code}`, n]))
     return subs.map(s => {
         const a = s.answered_at ?? { level: 'sub_industry', code: s.code }
         const n = nodes.get(`${a.level}|${a.code}`) ?? s

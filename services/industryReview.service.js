@@ -29,6 +29,7 @@ const _deps = {
     run:     (args) => strategyAgentService.chatStream(args),
     publish: (code, draft, node, opts) => industryViewService.publishView(code, draft, node, opts),
     pass:    (code, reason, cyclical) => industryViewService.recordPass(code, reason, cyclical),
+    fail:    (code, reason) => industryViewService.recordFailure(code, reason),
     notify:  (doc, changed) => notifyIndustryChanged(doc, changed),
 }
 export function _setDeps(d) { Object.assign(_deps, d) }
@@ -52,18 +53,25 @@ export function _lastParagraph(reply) {
  * Review one sub-industry and publish the answer. → `{ ok, outcome }`, outcome one of
  * published | refused | pass | unknown | error.
  */
-export async function reviewIndustry(code, reason = null, deps = _deps) {
+export async function reviewIndustry(code, reason = null, deps = _deps, { timeoutMs = REVIEW_TIMEOUT_MS } = {}) {
+    // The run is CANCELLED at the timeout, not just abandoned: withTimeout alone stops waiting but the
+    // stream would keep spending tokens on an answer nobody will read.
+    const abort = new AbortController()
+    const timer = setTimeout(() => abort.abort(), timeoutMs)
     try {
         const bundle = await deps.read(code)
-        if (!bundle) return { ok: false, outcome: 'unknown' }
+        if (!bundle) {
+            await deps.fail(code, 'not in the latest industry metrics')
+            return { ok: false, outcome: 'unknown' }
+        }
         const { sub, answering } = bundle
         const cyclical = Boolean(answering?.q3?.cyclical)
         const result = await withTimeout(deps.run({
             messages: [], userPrompt: _reviewPrompt(sub, reason),
             chatState: { industry: sub.code, ...(reason ? { review_reason: reason } : {}) },
-            userId: null,
+            userId: null, signal: abort.signal,
             onToken: () => {}, onToolStart: () => {}, onReasoning: () => {}, onPhase: () => {},
-        }), REVIEW_TIMEOUT_MS, `industry review ${sub.code}`)
+        }), timeoutMs, `industry review ${sub.code}`)
 
         const draft = (result?.views ?? []).find(v => v.industry === sub.code || v.industry.toLowerCase() === sub.name.toLowerCase())
         if (!draft) {
@@ -84,7 +92,12 @@ export async function reviewIndustry(code, reason = null, deps = _deps) {
         logger.info(LOG, 'review published', { code: sub.code, changed: Boolean(r.changed) })
         return { ok: true, outcome: 'published', changed: r.changed ?? null }
     } catch (err) {
+        abort.abort()
         logger.warn(LOG, 'review failed', { code, error: err.message })
+        // Recorded with a backoff, or the due loop re-claims this view every hour (industryView.service).
+        try { await deps.fail(code, err.message) } catch { /* the failure is already logged */ }
         return { ok: false, outcome: 'error' }
+    } finally {
+        clearTimeout(timer)
     }
 }

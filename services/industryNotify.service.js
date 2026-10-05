@@ -26,7 +26,7 @@ export function buildIndustryChanged(doc, changed, userId) {
         userId,
         content:    `${doc.name}: ${moves}.${doc.summary ? ` ${doc.summary}` : ''}`,
         type:       'industry_view',
-        payload:    { kind: 'industry_view', code: doc.code, industryViewId: doc.id ?? null, changed },
+        payload:    { kind: 'industry_view', code: doc.code, name: doc.name ?? null, industryViewId: doc.id ?? null, changed },
         botId:      'strategy',
         actions:    cardActions('Open industry'),
         visibility: 'admin',

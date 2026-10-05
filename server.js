@@ -73,6 +73,7 @@ import { calendarRoutes }    from './api/calendar/calendar.routes.js'
 import { talosService }     from './monitoring/talos.monitor.service.js'
 import { coverageMonitorService } from './monitoring/coverage.monitor.service.js'
 import { industryViewMonitorService } from './monitoring/industryView.monitor.service.js'
+import { ensureIndustryViewIndexes } from './api/strategy/industryView.service.js'
 import { themisService }      from './monitoring/themis.monitor.service.js'
 import { executionReconciler } from './monitoring/execution.reconciler.js'
 import { paperFillService }  from './monitoring/paperFill.service.js'
@@ -222,6 +223,7 @@ ensureExperienceIndexes()
 ensureWorkspaceIndexes()
 ensurePendingActionIndexes()
 ensureAetherIndexes()
+ensureIndustryViewIndexes().catch(() => {})   // Pythia's industry_view (api/strategy/industryView.service.js)
 threadService.ensureThreadIndexes()
 
 // ─── Background loops ─────────────────────────────────────────────────────────

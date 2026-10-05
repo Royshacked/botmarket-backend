@@ -511,7 +511,18 @@ async function captureFingerprint(portfolioId, userId, reason) {
         // can tell a changed answer from an unchanged one. Without this baseline the trigger has no
         // ratchet — which is exactly what made the daily sector-rotation trigger fire every day.
         const held = [...new Set((state?.ideas ?? []).map(i => String(i.asset ?? '').toUpperCase()).filter(Boolean))]
-        const industries = held.length ? await industryViewService.viewsForSymbols(held).catch(() => null) : null
+        let industries = null
+        if (held.length) {
+            try {
+                industries = await industryViewService.viewsForSymbols(held)
+            } catch (err) {
+                // An unreachable read must not store "no industries" as the baseline — the next review
+                // would then diff against nothing and miss a change made in between. Keep the previous one.
+                logger.warn(LOG, 'industry read failed — the fingerprint keeps the previous industries', err.message)
+                const prev = await getPortfolioLifecycle(portfolioId, userId).catch(() => null)
+                industries = prev?.lastFingerprint?.industries ?? null
+            }
+        }
         const fingerprint = buildFingerprint({ reason, state, macroRaw, benchmark, industries })
         await setPortfolioLifecycle(portfolioId, userId, { lastFingerprint: fingerprint })
         logger.info(LOG, 'fingerprint captured', { portfolioId, reason, benchmark: tk ?? null, bookValue: fingerprint.bookValue })
