@@ -13,7 +13,7 @@ import { makeUserDataHandlers, USER_DATA_TOOL_SPEC } from '../tools/userData.too
 import { makeConceptHandlers, CONCEPT_TOOL_SPEC } from '../tools/concepts.tools.js'
 import { makeExperienceHandlers, EXPERIENCE_TOOL_SPEC } from '../tools/experience.tools.js'
 import { makeMarketBriefHandlers, MARKET_BRIEF_TOOL_SPEC } from '../tools/marketBrief.tools.js'
-import { makeSectorViewHandlers, SECTOR_VIEW_TOOL_SPEC } from '../tools/sectorView.tools.js'
+import { makeIndustryViewsHandlers, INDUSTRY_VIEWS_TOOL_SPEC } from '../tools/industryViews.tools.js'
 import { makeNewsHandlers, NEWS_TOOL_SPEC } from '../tools/news.tools.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -62,7 +62,7 @@ export const TOOLS = toolsFor({
     get_market_hours: MARKET_HOURS_TOOL_SPEC.get_market_hours,
     // Appended last, per the rule above. The SHOW half of the strategy desk: Axl reports the
     // published view, Pythia is the one who writes or changes it.
-    get_sector_view: SECTOR_VIEW_TOOL_SPEC.get_sector_view,
+    get_industry_views: INDUSTRY_VIEWS_TOOL_SPEC.get_industry_views,
     // Appended last, per the rule above. The brief's sibling, not its overlap: the brief is what the
     // tape DID today, written once for everyone; this is what was WRITTEN about a subject the user
     // named. "How are markets" is the first, "any news on Nvidia" is the second, and a reception desk
@@ -95,9 +95,9 @@ export const axlAgentService = { chatStream }
 // ─── Who the user is ───────────────────────────────────────────────────────────
 // Two desks are admin-only — Pythia (strategy) and Aether — and Axl is the way in to every desk, so
 // it has to know which user it is talking to or it offers a trader a door that answers 403. The
-// house sector view is NOT one of the closed things: it is a broadcast every user may READ
-// (get_sector_view), only its AUTHORING is Pythia's. So a trader's Axl still shows the forecast;
-// it just never sends them to set one.
+// house INDUSTRY VIEWS are NOT one of the closed things: they are a broadcast every user may READ
+// (get_industry_views), only their AUTHORING is Pythia's. So a trader's Axl still shows them; it
+// just never sends them to change one.
 //
 // Rides the volatile tail of the system prompt, next to the audience block, for the same reason
 // that block does: the cached base is shared by every user, and a per-role base would split the
@@ -110,13 +110,13 @@ export { ADMIN_DESKS }
 /** The role paragraph for the prompt tail. Pure; exported for tests. */
 export function buildRoleSection(isAdmin) {
     if (isAdmin) {
-        return 'USER ROLE: ADMIN. Every desk is open to them, including Pythia (`<route>strategy</route>`, to set or change the house sector view) and Aether (`<route>aether</route>`, event exposure).'
+        return 'USER ROLE: ADMIN. Every desk is open to them, including Pythia (`<route>strategy</route>`, to review or change the house industry views) and Aether (`<route>aether</route>`, event exposure).'
     }
     return [
         'USER ROLE: TRADER. Two desks DO NOT EXIST for this user — Pythia (the strategy desk) and Aether (event exposure).',
         "Never route to `strategy` or `aether`, never offer them, never name Pythia or Aether as somewhere they can go, and leave them out of any list of the app's desks.",
-        "The HOUSE SECTOR VIEW is still theirs to read: on \"what's our view / forecast / which sectors do we like\", call `get_sector_view` and report it as \"the house view\" — the report is the whole answer.",
-        'If they ask to SET or CHANGE the view, say the house view is set centrally by the strategy desk and is not something they author here, offer to show the current one, and end the turn with NO route.',
+        "The HOUSE INDUSTRY VIEWS are still theirs to read: on \"what does the house think of semis / my names' industries\", call `get_industry_views` and report it as \"the house view\" — the report is the whole answer.",
+        'If they ask to SET or CHANGE a view, say the industry views are set centrally by the strategy desk and are not something they author here, offer to show the current one, and end the turn with NO route.',
     ].join(' ')
 }
 
@@ -135,7 +135,7 @@ async function chatStream({ messages = [], audience = null, isAdmin = false, mod
     _experienceHandlers = makeExperienceHandlers,
     _marketBriefHandlers = makeMarketBriefHandlers,
     _marketHoursHandlers = makeMarketHoursHandlers,
-    _sectorViewHandlers = makeSectorViewHandlers,
+    _industryViewsHandlers = makeIndustryViewsHandlers,
     _newsHandlers = makeNewsHandlers,
     _venueSection = buildVenueSection,
 } = {}) {
@@ -188,7 +188,7 @@ ${audienceBlock}` : ''}` },
         ..._marketHoursHandlers(),
         // Unbound for the brief's reason exactly: the house sector view is a BROADCAST, so a handler
         // that cannot see a user cannot leak one into it.
-        ..._sectorViewHandlers(),
+        ..._industryViewsHandlers(),
         // Unbound as well, and here it is the load-bearing kind: the tool that fetches headlines about
         // a name the user very likely holds is the one that must not be able to see that they hold it.
         ..._newsHandlers(),

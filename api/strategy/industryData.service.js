@@ -126,3 +126,13 @@ export function formatCompanies(rows, covered = new Set()) {
 export async function coveredSymbols() {
     return _io.coveredSymbols()
 }
+
+/** The GICS assignment of each symbol → `{ SYMBOL: { sub_code, sub_industry, industry, sector } }`. */
+export async function readCompaniesBySymbol(symbols) {
+    const syms = [...new Set((symbols ?? []).map(s => String(s ?? '').toUpperCase().trim()).filter(Boolean))]
+    if (!syms.length) return {}
+    const db = await _io.db()
+    const rows = await db.collection(COMPANIES).find({ symbol: { $in: syms } },
+        { projection: { _id: 0, symbol: 1, sub_code: 1, sub_industry: 1, industry: 1, industry_group: 1, sector: 1 } }).toArray()
+    return Object.fromEntries(rows.map(r => [r.symbol, r]))
+}

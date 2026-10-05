@@ -346,7 +346,7 @@
         },
         {
             "name": "get_coverage",
-            "description": "The house coverage pool — every name Prometheus has researched (variant-perception thesis, OUR price target vs the Street = the gap/edge, a rating, the selection schools it fits, and the status). This is the ONLY source for mandate build: fetch filtered by sector (from the tilt's overweight sectors) and by the mandate's selection school. Optionally combine both filters. For an uncovered name the user explicitly asks for, emit a <coverage_request> instead of using this tool. Read-only.",
+            "description": "The house coverage pool — every name Prometheus has researched (variant-perception thesis, OUR price target vs the Street = the gap/edge, a rating, the selection schools it fits, and the status). This is the ONLY source for mandate build: fetch filtered by sector (the sleeve being filled) and by the mandate's selection school. Optionally combine both filters. For an uncovered name the user explicitly asks for, emit a <coverage_request> instead of using this tool. Read-only.",
             "input_schema": {
                 "type": "object",
                 "properties": {
@@ -467,11 +467,23 @@
             }
         },
         {
-            "name": "get_sector_view",
-            "description": "The house SECTOR VIEW published by Pythia (the strategy desk): the named market regime, what would break that read, and each sector's stance as an active weight against the benchmark — plus how each stance is doing so far. Call it for \"what's our sector view\", \"which sectors do we like\", \"what's the house view\", \"are we overweight tech\", \"what's the current forecast\". READ-ONLY: it reports a view that already exists. It is a broadcast written for everyone and knows NOTHING about this user's book — never connect it to their positions. If the user wants a NEW or CHANGED view, that is Pythia's desk, not this tool.",
+            "name": "get_industry_views",
+            "description": "The house's INDUSTRY VIEWS from Pythia: for each GICS sub-industry, three structural answers — DEMAND (growing / in_line / shrinking against the economy), ECONOMICS (good / average / poor: do its companies earn above their cost of capital), CYCLE (peak / mid / trough, or stable: where current margins sit in the industry's own 10-year range). Pass `symbols` to get the industry each name is in and the house's answer for it; or `sector` (a GICS sector, e.g. Information Technology) for every sub-industry in it. These are DESCRIPTIONS of an industry, never a forecast of a price or a return — report them as such, and never present one as a reason a stock will rise. An industry still `pending` has no house answer yet: say so, do not supply one. Changing an answer is Pythia's desk, not this tool.",
             "input_schema": {
                 "type": "object",
-                "properties": {}
+                "properties": {
+                    "symbols": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Tickers to look up — the house answer for the industry each one is in."
+                    },
+                    "sector": {
+                        "type": "string",
+                        "description": "A GICS sector (e.g. Information Technology) — every sub-industry in it. Used when no symbols are passed."
+                    }
+                }
             }
         },
         {
@@ -3065,11 +3077,23 @@
             }
         },
         {
-            "name": "get_sector_view",
-            "description": "The house SECTOR VIEW published by Pythia (the strategy desk): the named market regime, what would break that read, and each sector's stance as an active weight against the benchmark — plus how each stance is doing so far. Call it for \"what's our sector view\", \"which sectors do we like\", \"what's the house view\", \"are we overweight tech\", \"what's the current forecast\". READ-ONLY: it reports a view that already exists. It is a broadcast written for everyone and knows NOTHING about this user's book — never connect it to their positions. If the user wants a NEW or CHANGED view, that is Pythia's desk, not this tool.",
+            "name": "get_industry_views",
+            "description": "The house's INDUSTRY VIEWS from Pythia: for each GICS sub-industry, three structural answers — DEMAND (growing / in_line / shrinking against the economy), ECONOMICS (good / average / poor: do its companies earn above their cost of capital), CYCLE (peak / mid / trough, or stable: where current margins sit in the industry's own 10-year range). Pass `symbols` to get the industry each name is in and the house's answer for it; or `sector` (a GICS sector, e.g. Information Technology) for every sub-industry in it. These are DESCRIPTIONS of an industry, never a forecast of a price or a return — report them as such, and never present one as a reason a stock will rise. An industry still `pending` has no house answer yet: say so, do not supply one. Changing an answer is Pythia's desk, not this tool.",
             "input_schema": {
                 "type": "object",
-                "properties": {}
+                "properties": {
+                    "symbols": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "Tickers to look up — the house answer for the industry each one is in."
+                    },
+                    "sector": {
+                        "type": "string",
+                        "description": "A GICS sector (e.g. Information Technology) — every sub-industry in it. Used when no symbols are passed."
+                    }
+                }
             }
         },
         {

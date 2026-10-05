@@ -197,3 +197,38 @@ test('the review is told why it is due', () => {
     assert.equal(_reason({ status: 'answered', monitor: { early_reason: 'margin_at_range_edge' } }), 'early-review trigger: margin_at_range_edge')
     assert.equal(_reason({ status: 'answered', monitor: {} }), 'scheduled review')
 })
+
+// ── the read tool (Axl + Atlas) ──────────────────────────────────────────────
+import { makeIndustryViewsHandlers, formatSymbolViews } from '../../services/tools/industryViews.tools.js'
+import { industryChanges } from '../../services/portfolioReview.util.js'
+
+test('the read tool answers by symbol, marking pending industries and unclassified names', async () => {
+    const h = makeIndustryViewsHandlers({
+        forSymbols: async () => ({
+            NVDA: { code: '45301020', name: 'Semiconductors', sector: 'Information Technology', status: 'answered', demand: 'growing', economics: 'good', cycle: 'peak', summary: 'Top of the cycle.' },
+            HOG:  { code: '25102010', name: 'Motorcycle Manufacturers', sector: 'Consumer Discretionary', status: 'pending' },
+        }),
+    })
+    const out = await h.get_industry_views({ symbols: ['nvda', 'HOG', 'ZZZZ'] })
+    assert.match(out, /NVDA\s+Semiconductors \[Information Technology\] — demand growing · economics good · cycle peak/)
+    assert.match(out, /HOG\s+Motorcycle Manufacturers .* no house answer yet \(pending\)/)
+    assert.match(out, /ZZZZ\s+not classified/)
+    assert.match(out, /not forecasts/)
+})
+
+test('the read tool lists a sector, and asks for a filter rather than dumping 163 rows', async () => {
+    const h = makeIndustryViewsHandlers({
+        measured: async () => [{ code: '45301020', name: 'Semiconductors', sector: 'Information Technology' }, { code: '10102010', name: 'Integrated Oil & Gas', sector: 'Energy' }],
+        views: async () => [{ code: '45301020', status: 'answered', demand: { grade: 'growing' }, economics: { grade: 'good' }, cycle: { grade: 'peak' } }],
+    })
+    assert.match(await h.get_industry_views({ sector: 'information technology' }), /Semiconductors\s+demand growing/)
+    assert.match(await h.get_industry_views({}), /Pass `symbols`/)
+    assert.match(await h.get_industry_views({ sector: 'Tech' }), /No GICS sector named "Tech"/)
+})
+
+test('industry changes group held names by industry and ignore a changed classification', () => {
+    const v = (code, cycle) => ({ code, name: code, demand: 'growing', economics: 'good', cycle })
+    assert.deepEqual(industryChanges({ A: v('X', 'mid'), B: v('X', 'mid'), C: v('Y', 'mid') }, { A: v('X', 'peak'), B: v('X', 'peak'), C: v('Z', 'peak') }),
+        [{ code: 'X', name: 'X', symbols: ['A', 'B'], changes: ['cycle mid→peak'] }])
+    assert.equal(formatSymbolViews({}, []).split('\n')[0], 'HOUSE INDUSTRY VIEWS for the names asked:')
+})

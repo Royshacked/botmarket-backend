@@ -17,6 +17,7 @@ import { makeHouseArtifactRepo } from '../../services/houseArtifact.repo.js'
 import { newRevision, diffFields } from '../../services/revisionTrail.js'
 import { addMonths } from '../../services/forecastClock.js'
 import { logger } from '../../services/logger.service.js'
+import { readCompaniesBySymbol } from './industryData.service.js'
 
 const LOG = '[industryView]'
 export const COLLECTION = 'industry_view'
@@ -173,4 +174,29 @@ async function markDue(code, triggers, { now = new Date().toISOString() } = {}) 
 
 function recordMonitorState(id, opts) { return _repo.recordMonitorState(id, opts) }
 
-export const industryViewService = { seedMissing, publishView, recordPass, getView, listViews, markDue, recordMonitorState }
+/**
+ * The house answer for the industry each symbol is in → `{ SYMBOL: { code, name, sector, status,
+ * demand, economics, cycle, summary } }`, grades null while the industry is unanswered. A symbol the
+ * engine never classified is absent. The one join every reader of "what does the house think of the
+ * industry this name is in" goes through — Atlas's review, its snapshot, and the read tool.
+ */
+async function viewsForSymbols(symbols, deps = { companies: readCompaniesBySymbol }) {
+    const companies = await deps.companies(symbols)
+    const codes = [...new Set(Object.values(companies).map(c => c.sub_code).filter(Boolean))]
+    if (!codes.length) return {}
+    const db = await _io.db()
+    const views = new Map((await db.collection(COLLECTION).find({ code: { $in: codes } },
+        { projection: { _id: 0, revisions: 0, monitor: 0 } }).toArray()).map(v => [v.code, v]))
+    const out = {}
+    for (const [sym, c] of Object.entries(companies)) {
+        const v = views.get(c.sub_code)
+        out[sym] = {
+            code: c.sub_code, name: c.sub_industry, sector: c.sector, status: v?.status ?? 'pending',
+            demand: v?.demand?.grade ?? null, economics: v?.economics?.grade ?? null, cycle: v?.cycle?.grade ?? null,
+            summary: v?.summary ?? null,
+        }
+    }
+    return out
+}
+
+export const industryViewService = { seedMissing, publishView, recordPass, getView, listViews, markDue, recordMonitorState, viewsForSymbols }

@@ -1,8 +1,6 @@
 // Pure helpers for the portfolio review lifecycle — no I/O, no DB.
 //
 import { toNum } from './format.util.js'
-// Pure too (forecast clock + arithmetic), so this module stays no-I/O as its header claims.
-import { diffStances } from '../monitoring/tilt.assess.js'
 import { round2 }      from './number.util.js'
 //
 // A review is a delta operation anchored to the thesis, but the book's "then" state
@@ -66,7 +64,7 @@ const _n = toNum
  *
  * @returns {Array<{kind:string, severity:'high'|'medium', label:string}>}
  */
-export function computeReviewTriggers({ state = null, fingerprint = null, delta = null, coverage = [], tilt = null, now = Date.now(), driftThreshold = 0.10, benchmarkLagThreshold = 3, adverseMoveThreshold = 8 } = {}) {
+export function computeReviewTriggers({ state = null, fingerprint = null, delta = null, coverage = [], industries = null, now = Date.now(), driftThreshold = 0.10, benchmarkLagThreshold = 3, adverseMoveThreshold = 8 } = {}) {
     const triggers = []
     const ideas = Array.isArray(state?.ideas) ? state.ideas : []
 
@@ -120,23 +118,22 @@ export function computeReviewTriggers({ state = null, fingerprint = null, delta 
     // that could ratchet, which is the same reason it was declined as a coverage re-model trigger
     // on 2026-07-30 and should never have survived here.
     //
-    // What replaces it is the HOUSE SECTOR VIEW changing — deliberate, rare, and already ratcheted
-    // (Pythia publishes on a monthly floor under a cooldown). See the sector_view trigger below.
+    // What replaces it is the HOUSE INDUSTRY VIEW changing for something the book holds — deliberate,
+    // rare (yearly, quarterly for a cyclical industry) and ratcheted by the fingerprint. See below.
     if (delta?.regime?.inversionFlip) {
         triggers.push({ kind: 'regime', severity: 'high', label: 'yield-curve inversion flipped since last review' })
     }
 
-    // The house sector view moved since this book was last looked at.
+    // The house's answer on an industry this book HOLDS changed since it was last looked at.
     //
-    // NOT gated on what the book holds. A sector we own nothing in turning overweight is exactly
-    // when a swap is worth considering, so filtering to current holdings would hide the most
-    // actionable case — the opposite of the ownership gate the notification cards use, and
-    // deliberately so: a card interrupts, a review trigger is read when the user is already looking.
-    const viewMoved = diffStances({ tilts: fingerprint?.tilt?.stances }, { tilts: tilt?.tilts })
-    if (viewMoved.length) {
-        const named = viewMoved.slice(0, 2).map(c => `${c.bucket} ${c.from ?? 'no view'}→${c.to ?? 'no view'}`).join(', ')
-        const more  = viewMoved.length > 2 ? ` (+${viewMoved.length - 2} more)` : ''
-        triggers.push({ kind: 'sector_view', severity: 'medium', label: `house sector view changed — ${named}${more}` })
+    // Gated on holdings, unlike the sector trigger it replaced (2026-10-05): with 163 sub-industries
+    // reviewed through the year, an ungated trigger would ring on most reviews for industries the
+    // book has nothing in. An industry it does not hold is a construction question, not a review one.
+    const moved = industryChanges(fingerprint?.industries, industries)
+    if (moved.length) {
+        const named = moved.slice(0, 2).map(m => `${m.name} (${m.symbols.join(', ')}) ${m.changes.join(', ')}`).join('; ')
+        const more  = moved.length > 2 ? ` (+${moved.length - 2} more)` : ''
+        triggers.push({ kind: 'industry_view', severity: 'medium', label: `house industry view changed — ${named}${more}` })
     }
 
     // Worst drift beyond the band.
@@ -236,7 +233,7 @@ export function computeReviewDelta({ fingerprint = null, state = null, benchmark
  * @param {{ticker:string, price:(number|null)}|null} args.benchmark
  * @param {number} [args.now]          epoch ms (injectable for tests)
  */
-export function buildFingerprint({ reason, state = null, macroRaw = null, benchmark = null, tilt = null, now = Date.now() }) {
+export function buildFingerprint({ reason, state = null, macroRaw = null, benchmark = null, industries = null, now = Date.now() }) {
     const holdings = (Array.isArray(state?.ideas) ? state.ideas : []).map(s => ({
         asset:           s.asset ?? null,
         allocationRatio: s.allocationRatio ?? null,
@@ -261,15 +258,37 @@ export function buildFingerprint({ reason, state = null, macroRaw = null, benchm
                 asOf:        macroRaw.asOf ?? null,
             }
             : null,
-        // The house sector view AS IT STOOD at this review — the baseline the next one diffs
-        // against. Only the three fields a stance is judged by; the rest of the doc is Pythia's.
-        tilt: tilt?.id
-            ? {
-                id: tilt.id,
-                stances: (Array.isArray(tilt.tilts) ? tilt.tilts : [])
-                    .map(r => ({ bucket: r.bucket, stance: r.stance ?? null, active_bp: r.active_bp ?? null })),
-            }
+        // The house's industry answers for the HELD names, as they stood at this review — the
+        // baseline the next one diffs against. Only the code and the three grades; the reasoning is
+        // Pythia's and is read live.
+        industries: industries && Object.keys(industries).length
+            ? Object.fromEntries(Object.entries(industries).map(([sym, v]) =>
+                [sym, { code: v.code, name: v.name, demand: v.demand ?? null, economics: v.economics ?? null, cycle: v.cycle ?? null }]))
             : null,
         holdings,
     }
+}
+
+const _QUESTIONS = ['demand', 'economics', 'cycle']
+
+/**
+ * Which held industries' house answers moved between two snapshots → `[{ code, name, symbols, changes }]`.
+ * Pure. A grade going from none to something (a first answer) counts — it is new information about a
+ * held name. An industry absent from either side (a name bought or sold since) does not: that is the
+ * book changing, which other triggers see.
+ */
+export function industryChanges(before, after) {
+    if (!before || !after) return []
+    const byCode = new Map()
+    for (const [sym, now] of Object.entries(after)) {
+        const then = before[sym]
+        if (!then || then.code !== now.code) continue
+        const changes = _QUESTIONS.filter(q => (then[q] ?? null) !== (now[q] ?? null) && now[q])
+            .map(q => `${q} ${then[q] ?? 'unanswered'}→${now[q]}`)
+        if (!changes.length) continue
+        const cur = byCode.get(now.code) ?? { code: now.code, name: now.name, symbols: [], changes }
+        cur.symbols.push(sym)
+        byCode.set(now.code, cur)
+    }
+    return [...byCode.values()]
 }

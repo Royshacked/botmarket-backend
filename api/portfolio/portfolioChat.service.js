@@ -9,7 +9,7 @@ import { buildFingerprint, benchmarkTicker, computeReviewDelta, computeReviewTri
 import { getMacroRaw } from '../../providers/fmp.provider.js'
 import { getFmpQuote } from '../../providers/fmp.price.provider.js'
 import { coverageService } from '../analyst/coverage.service.js'
-import { tiltService } from '../strategy/tilt.service.js'
+import { industryViewService } from '../strategy/industryView.service.js'
 // Mode/account helpers live in a shared util (portfolioState needs them too, and importing
 // them from here would be circular).
 import { _firstAccountId, _deriveMode, _accountLabel, _virtualAccountNames } from '../../services/portfolioMode.util.js'
@@ -143,11 +143,11 @@ async function computeReviewSignals(portfolioId, userId) {
                     }
                 })
         }
-        // The house sector view in force. A READ, not a hop — Pythia publishes on a cadence and
-        // Atlas reads what stands, so there is no arrow between the desks. Best-effort: an
-        // unreachable view means one fewer trigger, never a failed review.
-        const tilt = await tiltService.getCurrentTilt().catch(() => null)
-        return { triggers: computeReviewTriggers({ state, fingerprint, delta, coverage, tilt }) }
+        // The house's industry answers for what the book holds. A READ, not a hop — Pythia reviews
+        // on a cadence and Atlas reads what stands. Best-effort: an unreachable read means one fewer
+        // trigger, never a failed review.
+        const industries = holdings.size ? await industryViewService.viewsForSymbols([...holdings.keys()]).catch(() => null) : null
+        return { triggers: computeReviewTriggers({ state, fingerprint, delta, coverage, industries }) }
     } catch (err) {
         logger.warn(LOG, 'computeReviewSignals failed', err.message)
         return { triggers: [] }
@@ -507,11 +507,12 @@ async function captureFingerprint(portfolioId, userId, reason) {
             benchmark = { ticker: tk, price: Number.isFinite(price) ? price : null }
         }
 
-        // Stamp the house view as it stands NOW, so the next review can tell a changed view from an
-        // unchanged one. Without this baseline the trigger has no ratchet — which is exactly what
-        // made the daily sector-rotation trigger it replaces fire every day.
-        const tilt = await tiltService.getCurrentTilt().catch(() => null)
-        const fingerprint = buildFingerprint({ reason, state, macroRaw, benchmark, tilt })
+        // Stamp the house's industry answers for the held names as they stand NOW, so the next review
+        // can tell a changed answer from an unchanged one. Without this baseline the trigger has no
+        // ratchet — which is exactly what made the daily sector-rotation trigger fire every day.
+        const held = [...new Set((state?.ideas ?? []).map(i => String(i.asset ?? '').toUpperCase()).filter(Boolean))]
+        const industries = held.length ? await industryViewService.viewsForSymbols(held).catch(() => null) : null
+        const fingerprint = buildFingerprint({ reason, state, macroRaw, benchmark, industries })
         await setPortfolioLifecycle(portfolioId, userId, { lastFingerprint: fingerprint })
         logger.info(LOG, 'fingerprint captured', { portfolioId, reason, benchmark: tk ?? null, bookValue: fingerprint.bookValue })
         return fingerprint

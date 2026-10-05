@@ -657,9 +657,12 @@ export const TOOL_SCHEMAS = {
     // The channel-era Pythia tools (get_priced_in, get_coverage_by_sector, get_channel_state,
     // get_channel_exposures, size_from_channels, get_industry_reads) went with the desk's rebuild on
     // 2026-10-05 (docs/design/pythia-industry-questions.md).
-    get_sector_view: {
+    get_industry_views: {
         "type": "object",
-        "properties": {}
+        "properties": {
+            "symbols": { "type": "array", "items": { "type": "string" }, "description": "Tickers to look up — the house answer for the industry each one is in." },
+            "sector": { "type": "string", "description": "A GICS sector (e.g. Information Technology) — every sub-industry in it. Used when no symbols are passed." }
+        }
     },
     // ── Pythia, the industry desk (docs/design/pythia-industry-questions.md) ──
     list_industries: {

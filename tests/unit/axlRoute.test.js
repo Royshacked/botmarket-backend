@@ -535,7 +535,7 @@ test('role block: a trader is told the two desks do not exist, and that the view
     const t = buildRoleSection(false)
     assert.match(t, /USER ROLE: TRADER/)
     assert.match(t, /Never route to `strategy` or `aether`/)
-    assert.match(t, /get_sector_view/)
+    assert.match(t, /get_industry_views/)
     assert.match(t, /end the turn with NO route/)
     // undefined / anything not exactly true reads as a trader — the safe default
     assert.equal(buildRoleSection(undefined), t)

@@ -13,7 +13,7 @@ import { logger }         from '../logger.service.js'
 import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, buildAccountLines, stripEmitTags, makeToolHandler, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, BREVITY_RULE, VENUE_RULE, buildStandingProposalRule, cachedBlock } from '../agentUtils.js'
 import { makeTradingContextHandlers, buildVenueSection } from '../tools/tradingContext.tools.js'
 import { makeMarketHoursHandlers, MARKET_HOURS_TOOL_SPEC } from '../tools/marketHours.tools.js'
-import { makeSectorViewHandlers, SECTOR_VIEW_TOOL_SPEC } from '../tools/sectorView.tools.js'
+import { makeIndustryViewsHandlers, INDUSTRY_VIEWS_TOOL_SPEC } from '../tools/industryViews.tools.js'
 import { makeChartHandler } from '../tools/marketData.tools.js'
 import { coverageService } from '../../api/analyst/coverage.service.js'
 import { SECTORS } from '../entity/vocabulary.js'
@@ -46,7 +46,7 @@ export const TOOLS = toolsFor({
         description: `Upcoming earnings dates (with EPS/revenue estimates) between two dates (YYYY-MM-DD, window up to ~3 months). Optionally filter to specific symbols. Use it for entry timing — a candidate reporting in a few days carries gap risk, so you may size in after the print rather than before it. Pass symbols when you have them: a market-wide ask returns only the soonest rows, and says so.`,
         cache: true,
     },
-    get_coverage: `The house coverage pool — every name Prometheus has researched (variant-perception thesis, OUR price target vs the Street = the gap/edge, a rating, the selection schools it fits, and the status). This is the ONLY source for mandate build: fetch filtered by sector (from the tilt's overweight sectors) and by the mandate's selection school. Optionally combine both filters. For an uncovered name the user explicitly asks for, emit a <coverage_request> instead of using this tool. Read-only.`,
+    get_coverage: `The house coverage pool — every name Prometheus has researched (variant-perception thesis, OUR price target vs the Street = the gap/edge, a rating, the selection schools it fits, and the status). This is the ONLY source for mandate build: fetch filtered by sector (the sleeve being filled) and by the mandate's selection school. Optionally combine both filters. For an uncovered name the user explicitly asks for, emit a <coverage_request> instead of using this tool. Read-only.`,
     get_chart: `Render a candlestick chart IMAGE for ONE name and look at it directly. Your job is allocation, not entry timing, so use this for the questions a picture answers better than a number: where a candidate sits in its multi-year range, whether a holding's trend is intact or broken, how ugly a drawdown was, what a long base looks like. Prefer weekly/monthly for a multi-month or multi-year hold; a daily view is for judging whether to phase into a position now or wait. Numbers (valuation, risk metrics, correlations) still decide the WEIGHT — this only informs the read. Set show_to_user true when the picture is part of the case you're making to the user, so they see what you saw.`,
     // APPENDED, never inserted — the snapshot compares by index and prompt caching keys off the
     // array prefix.
@@ -54,13 +54,13 @@ export const TOOLS = toolsFor({
     // Appended too. The house sector view — the SAME unbound read Axl reports from, because a
     // broadcast has one text and two readers, not two texts. Advisory: it informs which sectors
     // Atlas sources, and the mandate still wins (see the prompt).
-    get_sector_view: SECTOR_VIEW_TOOL_SPEC.get_sector_view,
+    get_industry_views: INDUSTRY_VIEWS_TOOL_SPEC.get_industry_views,
     consult: consultDescription(`Reach for it in exactly three situations: **the final weights on a real-money book** (live or manual — the capital is at risk, and a weight is the one number here that cannot be walked back cheaply); **two names you cannot tell apart as ONE bet or two** — the correlation number is high but not decisive and the concentration call rests on your read of it; and **a rebalance where cutting the winner and adding to the laggard are both defensible** against the mandate, and you have to pick one.`),
 })
 
 const TOOL_HANDLERS = {
     // Unbound — a house view is a broadcast, so the handler takes no userId to leak.
-    ...makeSectorViewHandlers(),
+    ...makeIndustryViewsHandlers(),
     get_quote: makeToolHandler('get_quote',
         ({ ticker }) => getQuote(ticker),
         (err, { ticker }) => `Could not fetch quote for ${ticker}: ${err.message}`, LOG),

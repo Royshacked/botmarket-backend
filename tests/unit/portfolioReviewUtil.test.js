@@ -39,8 +39,8 @@ test('fingerprint: full state → all fields captured', () => {
         ],
     }
     const macroRaw = { asOf: '2026-07-16', spread2s10s: 0.41, fedFunds: 4.09, inflation: 2.29 }
-    const tilt = { id: 'tilt1', tilts: [{ bucket: 'Energy', stance: 'under', active_bp: -150, rationale: 'ignored here' }] }
-    const fp = buildFingerprint({ reason: 'review', state, macroRaw, tilt, benchmark: { ticker: 'SPY', price: 600 }, now: 1_700_000_000_000 })
+    const industries = { NVDA: { code: '45301020', name: 'Semiconductors', sector: 'Information Technology', status: 'answered', demand: 'growing', economics: 'good', cycle: 'peak', summary: 'ignored here' } }
+    const fp = buildFingerprint({ reason: 'review', state, macroRaw, industries, benchmark: { ticker: 'SPY', price: 600 }, now: 1_700_000_000_000 })
 
     assert.equal(fp.reason, 'review')
     assert.equal(fp.capturedAt, 1_700_000_000_000)
@@ -50,9 +50,9 @@ test('fingerprint: full state → all fields captured', () => {
     assert.deepEqual(fp.benchmark, { ticker: 'SPY', price: 600 })
     assert.equal(fp.regime.spread2s10s, 0.41)
     assert.equal(fp.regime.fedFunds, 4.09)
-    // The house view as it stood — the baseline the NEXT review diffs against. Only the three
-    // fields a stance is judged by; the day's sector ranking is deliberately not captured at all.
-    assert.deepEqual(fp.tilt, { id: 'tilt1', stances: [{ bucket: 'Energy', stance: 'under', active_bp: -150 }] })
+    // The house's industry answers for the held names as they stood — the baseline the NEXT review
+    // diffs against. Only the code and the three grades; the day's sector ranking is not captured.
+    assert.deepEqual(fp.industries, { NVDA: { code: '45301020', name: 'Semiconductors', demand: 'growing', economics: 'good', cycle: 'peak' } })
     assert.equal(fp.regime.leaders, undefined, 'a daily sector ranking is not a baseline')
     assert.equal(fp.holdings.length, 2)
     assert.deepEqual(fp.holdings[0], { asset: 'NVDA', allocationRatio: 0.3, actualWeight: 0.32, convictionScore: 0.8, convictionLevel: 'high' })
@@ -153,40 +153,33 @@ test('triggers: daily sector rotation NEVER fires — it was pure noise', () => 
     assert.equal(t.length, 0)
 })
 
-test('triggers: the HOUSE SECTOR VIEW changing is what earns a look', () => {
-    const fingerprint = { tilt: { id: 't1', stances: [{ bucket: 'Energy', stance: 'under', active_bp: -150 }] } }
-    const tilt = { id: 't2', tilts: [{ bucket: 'Energy', stance: 'over', active_bp: 150 }] }
-    const t = computeReviewTriggers({ state: null, fingerprint, tilt })
-    assert.equal(t.length, 1)
-    assert.equal(t[0].kind, 'sector_view')
-    assert.match(t[0].label, /Energy under→over/)
-})
+const SEMIS = (cycle) => ({ code: '45301020', name: 'Semiconductors', demand: 'growing', economics: 'good', cycle })
 
-test('triggers: a republished but UNCHANGED view is not news', () => {
-    // The ratchet the rotation trigger never had: publishing again with the same stances is silent.
-    const stances = [{ bucket: 'Energy', stance: 'under', active_bp: -150 }]
+test('triggers: the house answer on a HELD industry changing is what earns a look', () => {
     const t = computeReviewTriggers({
         state: null,
-        fingerprint: { tilt: { id: 't1', stances } },
-        tilt: { id: 't2', tilts: stances },
+        fingerprint: { industries: { NVDA: SEMIS('mid'), AMD: SEMIS('mid') } },
+        industries:  { NVDA: SEMIS('peak'), AMD: SEMIS('peak') },
     })
-    assert.equal(t.length, 0)
+    assert.equal(t.length, 1)
+    assert.equal(t[0].kind, 'industry_view')
+    assert.match(t[0].label, /Semiconductors \(NVDA, AMD\) cycle mid→peak/)
 })
 
-test('triggers: the view trigger is NOT gated on what the book holds', () => {
-    // A sector we own nothing in turning overweight is exactly when a swap is worth considering, so
-    // filtering to holdings would hide the most actionable case.
-    const t = computeReviewTriggers({
-        state: { ideas: [{ asset: 'NVDA' }] },
-        fingerprint: { tilt: { id: 't1', stances: [] } },
-        tilt: { id: 't2', tilts: [{ bucket: 'Utilities', stance: 'over', active_bp: 200 }] },
-    })
-    assert.ok(t.some(x => x.kind === 'sector_view' && /Utilities/.test(x.label)))
+test('triggers: an unchanged answer, a name bought since, or a grade going blank is not news', () => {
+    assert.equal(computeReviewTriggers({ state: null, fingerprint: { industries: { NVDA: SEMIS('mid') } }, industries: { NVDA: SEMIS('mid') } }).length, 0)
+    assert.equal(computeReviewTriggers({ state: null, fingerprint: { industries: {} }, industries: { NVDA: SEMIS('peak') } }).length, 0)
+    assert.equal(computeReviewTriggers({ state: null, fingerprint: { industries: { NVDA: SEMIS('mid') } }, industries: { NVDA: SEMIS(null) } }).length, 0)
 })
 
-test('triggers: no view at all on either side is silent', () => {
+test('triggers: a held industry\'s FIRST answer is news', () => {
+    const t = computeReviewTriggers({ state: null, fingerprint: { industries: { NVDA: SEMIS(null) } }, industries: { NVDA: SEMIS('peak') } })
+    assert.match(t[0].label, /cycle unanswered→peak/)
+})
+
+test('triggers: no industry snapshot on either side is silent', () => {
     assert.equal(computeReviewTriggers({ state: null }).length, 0)
-    assert.equal(computeReviewTriggers({ state: null, tilt: { id: 't', tilts: [] } }).length, 0)
+    assert.equal(computeReviewTriggers({ state: null, industries: { NVDA: SEMIS('peak') } }).length, 0)
 })
 
 // ─── _formatReviewDelta (display) ───────────────────────────────────────────
