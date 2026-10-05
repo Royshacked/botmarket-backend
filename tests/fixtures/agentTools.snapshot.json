@@ -24,165 +24,73 @@
             "name": "web_search"
         },
         {
-            "name": "get_macro_snapshot",
-            "description": "Hard macro read: the Treasury curve (3M/2Y/10Y/30Y + 2s10s inversion flag), key economic indicators (GDP, CPI, inflation, unemployment, Fed funds, consumer sentiment), and today's sector rotation. The Phase-1 backdrop. No arguments.",
-            "input_schema": {
-                "type": "object",
-                "properties": {}
-            }
-        },
-        {
-            "name": "get_sector_snapshot",
-            "description": "Today's sector rotation, every sector ranked leaders→laggards. Where money has actually been going — the tape against which your stance is a claim. No arguments.",
-            "input_schema": {
-                "type": "object",
-                "properties": {}
-            }
-        },
-        {
-            "name": "get_priced_in",
-            "description": "What the MARKET has already discounted: 5y and 10y breakeven inflation, the 5y5y forward, and the 10y TIPS real yield (FRED, daily). This is the benchmark your view has to beat — a regime call that merely restates what is priced is not a view. Breakevens carry an inflation risk premium, so they are not a pure forecast, and the market-implied POLICY PATH is not available to us. No arguments.",
-            "input_schema": {
-                "type": "object",
-                "properties": {}
-            }
-        },
-        {
-            "name": "get_coverage_by_sector",
-            "description": "OUR OWN analysts' book, aggregated by sector: how many active theses per sector, and which sectors we cover at all. The bottom-up cross-check for Phase 4 — where the book agrees with your top-down read that is your strongest basis, and where it disagrees you must say so rather than reconciling it away. No arguments.",
-            "input_schema": {
-                "type": "object",
-                "properties": {}
-            }
-        },
-        {
-            "name": "get_channel_state",
-            "description": "The macro CHANNELS, measured: every driver (energy cost, real yields, the curve, breakevens, credit spreads, the dollar, liquidity, labor, freight, demand…) as a z-score against its own trailing two years, with its reading one and three months ago and where today sits in its history since 2005, plus the week's regime from VIX and credit spreads. The Phase-1 read of what is actually moving, and the vocabulary for kill-criteria — a falsifier written as \"discount_rate z below +1\" is checkable where prose is not. READINGS, not sector evidence: which buckets move with a channel is not measured yet. Each line carries its own as-of date; monthly series lag by weeks. No arguments.",
-            "input_schema": {
-                "type": "object",
-                "properties": {}
-            }
-        },
-        {
-            "name": "get_channel_exposures",
-            "description": "Which BUCKETS move with which CHANNEL, measured: every sector and industry fund's weekly return beyond the market regressed on each channel since ~2006, listing only |t| ≥ 3, with the buckets each fund stands for and how far it has already moved at today's z. The Phase-3 evidence for mapping a regime onto buckets — it turns \"utilities are rate sensitive\" from a story into a number, and names the INDUSTRIES a channel actually reaches, including ones our coverage does not. A beta proves an exposure is real; it is not an edge — a high one means the channel is already traded through that fund. Pass `channel` (an id from get_channel_state) to narrow to one.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "channel": {
-                        "type": "string",
-                        "description": "One channel id as get_channel_state prints it (e.g. discount_rate). Omit for every channel."
-                    }
-                }
-            }
-        },
-        {
-            "name": "size_from_channels",
-            "description": "PREVIEW the table your channel calls produce. Pass channel_views — your macro calls, each a channel id from get_channel_state and the move you expect in its z over the horizon (dz, ±3 at most) — and optionally reactions (a bucket you expect to respond STRONGER, WEAKER or OPPOSITE to its measured history on one channel, with the reason), exclude (buckets to leave out, EACH WITH ITS REASON — an exclusion is a call and is stored with the view), and manual_rows (your own non-channel rows, so the preview accounts for them). The code turns the calls into every fund's expected move beyond the market through the measured betas, ADDS each fund's industry evidence (get_industry_reads), holds each sector as one row or splits it into its industries where they diverge, nets to zero and caps. With no calls it sizes the evidence alone. Call it, read the table, revise the CALLS until it says what you mean — then emit the same channel_views in the <tilt> block.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "channel_views": {
-                        "type": "array",
-                        "description": "Your macro calls: the move you expect in each channel's z over the horizon.",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "channel_id": {
-                                    "type": "string",
-                                    "description": "A channel id from get_channel_state."
-                                },
-                                "dz": {
-                                    "type": "number",
-                                    "description": "Expected change in the channel's z-score over the horizon, between -3 and +3."
-                                },
-                                "rationale": {
-                                    "type": "string"
-                                }
-                            },
-                            "required": [
-                                "channel_id",
-                                "dz"
-                            ]
-                        }
-                    },
-                    "reactions": {
-                        "type": "array",
-                        "description": "Buckets you expect to respond differently from their measured history to one channel.",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "bucket": {
-                                    "type": "string"
-                                },
-                                "channel_id": {
-                                    "type": "string"
-                                },
-                                "reaction": {
-                                    "type": "string",
-                                    "enum": [
-                                        "stronger",
-                                        "weaker",
-                                        "opposite"
-                                    ]
-                                },
-                                "reason": {
-                                    "type": "string"
-                                }
-                            },
-                            "required": [
-                                "bucket",
-                                "channel_id",
-                                "reaction",
-                                "reason"
-                            ]
-                        }
-                    },
-                    "exclude": {
-                        "type": "array",
-                        "description": "Buckets to leave out of the sized table, each with the reason.",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "bucket": {
-                                    "type": "string"
-                                },
-                                "reason": {
-                                    "type": "string"
-                                }
-                            },
-                            "required": [
-                                "bucket",
-                                "reason"
-                            ]
-                        }
-                    },
-                    "manual_rows": {
-                        "type": "array",
-                        "description": "Your own non-channel rows (bucket, stance, active_bp, basis), so the preview accounts for them.",
-                        "items": {
-                            "type": "object"
-                        }
-                    }
-                }
-            }
-        },
-        {
-            "name": "get_industry_reads",
-            "description": "What each INDUSTRY's own companies and fund say, measured: an EVIDENCE score per industry (−0.5..+0.5) from its companies' beat rate and surprise last quarter and its fund's 12-1 month momentum over SPY — measured since 2010 to rank industries' next six months (IC +0.08; +0.12 on tech) — plus CONTEXT that is never sized: P/E against its own five years and trailing growth. The evidence is already ADDED to the sized table; read it to know why a row is there, to see which industries look strongest and weakest, and — for tech, where no channel reaches — as the only measured evidence there is. Pass `sector` to narrow to one.",
+            "name": "list_industries",
+            "description": "Every GICS sub-industry the house measures: code, name, sector, the level it is answered at (its own, or its industry's/group's when it has too few companies), and the code's three first-read grades. Pass `sector` to narrow. Use it to find a code or to compare an industry with its neighbours.",
             "input_schema": {
                 "type": "object",
                 "properties": {
                     "sector": {
                         "type": "string",
-                        "description": "One of the eleven sectors (e.g. Technology) to narrow the list. Omit for every industry."
+                        "description": "A GICS sector (e.g. Information Technology) to narrow the list. Omit for all 163 sub-industries."
                     }
                 }
             }
         },
         {
+            "name": "get_industry_metrics",
+            "description": "The measured numbers behind the three questions for one sub-industry, from 15 years of SEC filings: DEMAND (chained revenue growth over 10 and 3 years against the whole universe, how steady), ECONOMICS (median ROIC — ROE for financials — against Damodaran's cost of capital, the share of companies clearing it, margin level and stability, top-5 concentration), CYCLE (trailing-12-month margin or ROE in its own 10-year range, the normalised value, whether the industry is cyclical), each with the CODE GRADE you start from, plus any early-review triggers. Also the levels above it for context.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "industry": {
+                        "type": "string",
+                        "description": "A GICS sub-industry: its 8-digit code (45301020) or its exact name (Semiconductors)."
+                    }
+                },
+                "required": [
+                    "industry"
+                ]
+            }
+        },
+        {
+            "name": "get_industry_companies",
+            "description": "The largest companies classified into a sub-industry (or the level that answers it), with market cap, marking the ones OUR analysts cover. Read it before answering: an industry whose numbers are mostly one company is that company.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "industry": {
+                        "type": "string",
+                        "description": "A GICS sub-industry: its 8-digit code or its exact name."
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "How many of the largest companies to list (default 25, at most 60)."
+                    }
+                },
+                "required": [
+                    "industry"
+                ]
+            }
+        },
+        {
+            "name": "get_industry_view",
+            "description": "The house's STANDING answer on a sub-industry — the three grades with their reasoning, reopen conditions, when it is next due, and its revision history. Read it before a review.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "industry": {
+                        "type": "string",
+                        "description": "A GICS sub-industry: its 8-digit code or its exact name."
+                    }
+                },
+                "required": [
+                    "industry"
+                ]
+            }
+        },
+        {
             "name": "consult",
-            "description": "Put ONE decision to a more capable desk head and get a straight answer back. It cannot see this conversation and cannot fetch anything — you hand it the question and every number it needs, and it thinks harder than you can in-line.\n\nA tilt is a broadcast the whole house reads, so it is worth thinking hard about ONCE. Reach for it in exactly two situations: **the regime call itself**, when the macro data, the tape and what is already priced do not point the same way and you have to name one regime anyway; and **a sector stance that contradicts our own coverage book** — your top-down read and the analysts' bottom-up theses disagree, and you must decide which one the stance follows and say why. Not per sector: the stances follow from the regime, and re-consulting each one is the same call answered eight times.\n\nDo NOT reach for it to look something up, to double-check work you are already confident in, to summarize, or because a question feels big. A consult costs a full model call and adds seconds to the turn: if you already know the answer, or a tool call would settle it, that is the cheaper and better move. Most turns should end without it.",
+            "description": "Put ONE decision to a more capable desk head and get a straight answer back. It cannot see this conversation and cannot fetch anything — you hand it the question and every number it needs, and it thinks harder than you can in-line.\n\nReach for it when you are about to DEPART from a measured code grade on a large industry, and the argument is close — the override is what the house will read, and it should survive someone attacking it. Not for agreeing with the numbers.\n\nDo NOT reach for it to look something up, to double-check work you are already confident in, to summarize, or because a question feels big. A consult costs a full model call and adds seconds to the turn: if you already know the answer, or a tool call would settle it, that is the cheaper and better move. Most turns should end without it.",
             "input_schema": {
                 "type": "object",
                 "properties": {

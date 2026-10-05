@@ -90,6 +90,8 @@ export const ALL_EMIT_TAGS = [
     'portfolio_plan', 'portfolio_update', 'portfolio_mandate', 'portfolio_thesis',
     'scan_list', 'call', 'scan_request', 'kairos_pick', 'coverage', 'screen_request',
     'route', 'chart', 'setup', 'setups', 'edit', 'open', 'adopt', 'tilt',
+    // Pythia's answer on one GICS sub-industry (api/strategy/industryView.service.js).
+    'industry_view',
     // Follow-up chips (services/suggestions.service.js). Registered here even though only Axl
     // emits it today — that is the whole point of this list: the suppressor must know a tag
     // BEFORE an agent starts using it, or the first turn that emits one prints it at the user.

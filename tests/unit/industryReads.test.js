@@ -2,7 +2,6 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
 import { formatIndustryReads, readIndustryReads, _setIndustryIO, STALE_DAYS } from '../../api/strategy/industryReads.service.js'
-import { TOOLS } from '../../services/agents/strategy.agent.service.js'
 
 // Pythia's industry reads. What must hold: evidence and context are told apart in so many words,
 // "no read" is never shown as average, and an old read says it is old.
@@ -44,10 +43,7 @@ test('a sector filter narrows, and nothing at all forbids arguing as if measured
     assert.match(formatIndustryReads([], { nowMs: NOW }), /not available.*Do not argue/)
 })
 
-test('the read goes through the seam, and the desk carries the tool ahead of consult', async () => {
+test('the read goes through the seam', async () => {
     _setIndustryIO({ reads: async () => [doc('Semiconductors')] })
     assert.equal((await readIndustryReads()).length, 1)
-    const tool = TOOLS.find(t => t.name === 'get_industry_reads')
-    assert.equal(tool.input_schema.properties.sector.type, 'string')
-    assert.equal(TOOLS.at(-1).name, 'consult')
 })

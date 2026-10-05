@@ -209,6 +209,11 @@ export const config = {
     // frozen data pack). Off, the recorder is one boolean check per read and nothing else. The dir
     // is gitignored (`data/`) — bundles carry users' live trading plans.
     get talosRecordReads() { return _bool('TALOS_RECORD_READS', 'opt-in') },
+    // Pythia's scheduled industry reviews (monitoring/industryView.monitor.service.js). OPT-IN: each
+    // review is a multi-minute research run on the house's tokens, and the first pass covers all 163
+    // GICS sub-industries (~3 an hour). Off, the monitor still seeds and flags due views; it just
+    // runs no review. Set INDUSTRY_REVIEWS=true where the house pays for them.
+    get industryReviews() { return _bool('INDUSTRY_REVIEWS', 'opt-in') },
     // `disk` (the default) writes files under talosRecordDir; `mongo` inserts into the `talos_reads`
     // collection of the app's own database — the sink for the deployed instance, whose disk is
     // ephemeral. `scripts/eval/talos-replay/pull-reads.mjs` brings those down to the disk layout.

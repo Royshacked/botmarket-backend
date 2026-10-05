@@ -4,6 +4,7 @@ import { requireAuth, requireAdmin } from '../../middleware/auth.middleware.js'
 import {
     streamStrategy,
     getCurrentTilt, getTiltSeries, getTiltCalls, listTilts, getTilt, publishTilt, updateTilt, retireTilt,
+    listIndustries, getIndustry, publishIndustry,
 } from './strategy.controller.js'
 
 const router = express.Router()
@@ -37,5 +38,12 @@ router.put('/tilt/:id',         log, updateTilt)
 // Retiring ARCHIVES (status change, trail kept). There is deliberately no delete: a published view
 // is the record the desk is graded on, and a desk that can erase its own calls has no track record.
 router.post('/tilt/:id/retire', log, retireTilt)
+
+// The industry views (Pythia, rebuilt 2026-10-05): every GICS sub-industry with the house's answer to
+// the three questions beside the engine's measurements; one sub-industry by its 8-digit code; publish
+// a reviewed draft.
+router.get('/industries',        log, listIndustries)
+router.get('/industries/:code',  log, getIndustry)
+router.post('/industries/:code', log, publishIndustry)
 
 export const strategyRoutes = router

@@ -6,7 +6,9 @@
 // opinions. (Coverage is house-owned the same way.) The router gates the whole desk `requireAdmin`
 // — see strategy.routes.
 
-import { tiltService, balanceOf } from './tilt.service.js'
+import { tiltService } from './tilt.service.js'
+import { industryViewService } from './industryView.service.js'
+import { readSubIndustry, listSubIndustries } from './industryData.service.js'
 import { seriesForTilt }          from './tiltSeries.service.js'
 import { readBoardCalls }         from './channelCalls.service.js'
 import { strategyAgentService } from '../../services/agents/strategy.agent.service.js'
@@ -28,7 +30,8 @@ const LOG = '[strategyCtrl]'
 // streamAgentResponse's, which has its own error path on an open SSE stream.)
 const _handle = makeHandle(LOG)
 
-// Streaming top-down chat → emits a <tilt> draft (returned for preview; POST /tilt publishes it).
+// Streaming industry-desk chat → <industry_view> drafts (returned for preview; POST /industries/:code
+// publishes one).
 export async function streamStrategy(req, res) {
     const { messages: rawMessages, userPrompt, model, chatState } = req.body ?? {}
     let messages
@@ -50,13 +53,9 @@ export async function streamStrategy(req, res) {
                 ...sseAgentCallbacks(sendEvent),
                 onPhase:     phase => sendEvent('phase',     { phase }),
             })
-            // The draft carries its own balance verdict. It is the SERVER's answer to "does this
-            // table net out" — the same one normalizeTilt records at publish — so the panel can show
-            // it without owning the tolerance, which is a number that decides a verdict and has no
-            // business living in a component in another repo.
-            const tilt = result.tilt ? { ...result.tilt, ...balanceOf(result.tilt.tilts) } : null
+            // The <industry_view> drafts, for preview — publishing is POST /industries/:code.
             // …plus route / routeSymbol / opening: the user asked to be sent to another desk (routing.util).
-            return { reply: result.reply, phase: result.phase ?? null, ...(tilt ? { tilt } : {}), ...routeFields(result, req.user.role) }
+            return { reply: result.reply, phase: result.phase ?? null, views: result.views ?? [], ...routeFields(result, req.user.role) }
         },
     })
 }
@@ -167,4 +166,43 @@ export const retireTilt = _handle('retireTilt', async (req, res) => {
     const result = await tiltService.retireTilt(req.params.id)
     if (!result.ok) return _fail(res, result, 'Could not retire the view')
     res.json(result.doc)
+})
+
+
+// ─── The industry views (Pythia, rebuilt 2026-10-05) ─────────────────────────
+
+const VIEW_REASONS = {
+    bad_draft: [422, 'The view does not hold up — see detail'],
+    unknown_industry: [404, 'Unknown GICS sub-industry'],
+}
+
+/**
+ * Every sub-industry: the house's answer where there is one, beside the engine's measured first read.
+ * The two are separate on purpose — a pending industry still shows what was measured.
+ */
+export const listIndustries = _handle('listIndustries', async (req, res) => {
+    const [measured, views] = await Promise.all([listSubIndustries(), industryViewService.listViews()])
+    const byCode = new Map(views.map(v => [v.code, v]))
+    res.json(measured.map(m => {
+        const v = byCode.get(m.code)
+        return { ...m, view: v ? { status: v.status, demand: v.demand, economics: v.economics, cycle: v.cycle,
+            summary: v.summary, reopen_if: v.reopen_if, next_review: v.monitor?.next_check_at ?? null, updated_at: v.updated_at } : null }
+    }))
+})
+
+/** One sub-industry: its measurements (and what answers it) plus the house's view with its trail. */
+export const getIndustry = _handle('getIndustry', async (req, res) => {
+    const bundle = await readSubIndustry(req.params.code)
+    if (!bundle) return sendReason(res, 'unknown_industry', { overrides: VIEW_REASONS })
+    res.json({ ...bundle, view: await industryViewService.getView(bundle.sub.code) })
+})
+
+/** Publish a reviewed draft (the chat preview's Publish). Checked against the measured numbers. */
+export const publishIndustry = _handle('publishIndustry', async (req, res) => {
+    const bundle = await readSubIndustry(req.params.code)
+    if (!bundle) return sendReason(res, 'unknown_industry', { overrides: VIEW_REASONS })
+    await industryViewService.seedMissing([bundle.sub])
+    const r = await industryViewService.publishView(bundle.sub.code, req.body ?? {}, bundle.answering, { note: req.body?.summary ?? null })
+    if (!r.ok) return sendReason(res, r.reason, { overrides: VIEW_REASONS, fallback: 500, ...(r.detail ? { extra: { detail: r.detail } } : {}) })
+    res.json(r.doc)
 })

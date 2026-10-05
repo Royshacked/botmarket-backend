@@ -175,7 +175,21 @@ Decided by Roy on 2026-10-05:
 1. GICS vocabulary table, FMP→GICS map, and per-company classification of the 710, with tests.
 2. Statement fetch job and cache, after checking the rate limit.
 3. Industry aggregates for the three questions (code), with tests on known industries.
-4. The Pythia desk on the new contract: prompt, artifact repo and review loop.
+4. The Pythia desk on the new contract: prompt, artifact repo and review loop. **BUILT 2026-10-05**:
+   - **artifact:** `industry_view` (`api/strategy/industryView.service.js`), one house document per
+     sub-industry, with a revision trail. A departure from a measured grade is refused at publish unless
+     it is argued (`override_reason`).
+   - **readers:** `api/strategy/industryData.service.js` reads the engine's database
+     (`services/engineDb.js`).
+   - **desk:** the rewritten `strategy.agent.service.js` and prompt, emitting `<industry_view>`.
+   - **headless review:** `services/industryReview.service.js`; a changed answer posts an admin card
+     (`industryNotify.service.js`).
+   - **monitor:** `monitoring/industryView.monitor.service.js` seeds and brings views forward on new
+     triggers every 6h, and reviews due views at most 3 an hour, but only when `INDUSTRY_REVIEWS=true`.
+   - **API:** `GET /api/strategy/industries`, `GET /api/strategy/industries/:code` and
+     `POST /api/strategy/industries/:code`.
+
+   The old tilt services, routes and monitor stay until step 5; nothing can publish a new tilt.
 5. Consumers: Argus funnel, Atlas caps, Themis trigger. Then retire the old desk.
 6. Docs: CODE_MAP, APP_SPEC, the desk doc.
 

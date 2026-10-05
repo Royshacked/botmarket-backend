@@ -5,7 +5,6 @@ import {
     planCallSync, newCall, dueMarks, trackRecord, formatRecord, syncCallLedger, gradeChannelCalls, _setCallsIO,
     HORIZON_WEEKS, MIN_GRADED, PLACEHOLDER_CONFIDENCE,
 } from '../../api/strategy/channelCalls.service.js'
-import { _buildTurnContext } from '../../services/agents/strategy.agent.service.js'
 
 // The call ledger: each channel call graded against what the channel then did. What must hold — a
 // restated call keeps its clock, a revised one is still graded, marks are judged on the departure
@@ -122,12 +121,6 @@ test('interim marks are reported, not counted', () => {
     assert.deepEqual(r.interim.map(i => [i.channel_id, i.weeks, i.beat_base]), [['discount_rate', 4, true]])
     assert.match(formatRecord(r), /discount_rate \(call -0\.5z\) at 4w: AHEAD of the base rate, moving the way you called/)
     assert.match(formatRecord(r), /placeholder until 10 calls are graded/)
-})
-
-test('the record rides into a review\'s context', () => {
-    const ctx = _buildTurnContext({ current_tilt: { tilts: [], channel_views: [{ channel_id: 'discount_rate', dz: -0.5 }] } },
-        trackRecord([graded(true)]))
-    assert.match(ctx, /YOUR CALL RECORD — 1 call\(s\) graded at six months; 1 beat the base rate \(100%\)/)
 })
 
 // ── the hooks ────────────────────────────────────────────────────────────────

@@ -653,82 +653,42 @@ export const TOOL_SCHEMAS = {
             }
         }
     },
-    // ── strategy desk (Pythia) + Axl's read of its output ────────────────────
-    // All argument-free: each answers ONE question about the world or about our own book, and
-    // giving them parameters would only invite the model to narrow a read that is cheap whole.
-    get_priced_in: {
-        "type": "object",
-        "properties": {}
-    },
-    get_coverage_by_sector: {
-        "type": "object",
-        "properties": {}
-    },
-    get_channel_state: {
-        "type": "object",
-        "properties": {}
-    },
-    get_channel_exposures: {
-        "type": "object",
-        "properties": {
-            "channel": { "type": "string", "description": "One channel id as get_channel_state prints it (e.g. discount_rate). Omit for every channel." }
-        }
-    },
-    size_from_channels: {
-        "type": "object",
-        "properties": {
-            "channel_views": {
-                "type": "array",
-                "description": "Your macro calls: the move you expect in each channel's z over the horizon.",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "channel_id": { "type": "string", "description": "A channel id from get_channel_state." },
-                        "dz": { "type": "number", "description": "Expected change in the channel's z-score over the horizon, between -3 and +3." },
-                        "rationale": { "type": "string" }
-                    },
-                    "required": ["channel_id", "dz"]
-                }
-            },
-            "reactions": {
-                "type": "array",
-                "description": "Buckets you expect to respond differently from their measured history to one channel.",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "bucket": { "type": "string" },
-                        "channel_id": { "type": "string" },
-                        "reaction": { "type": "string", "enum": ["stronger", "weaker", "opposite"] },
-                        "reason": { "type": "string" }
-                    },
-                    "required": ["bucket", "channel_id", "reaction", "reason"]
-                }
-            },
-            "exclude": {
-                "type": "array",
-                "description": "Buckets to leave out of the sized table, each with the reason.",
-                "items": {
-                    "type": "object",
-                    "properties": { "bucket": { "type": "string" }, "reason": { "type": "string" } },
-                    "required": ["bucket", "reason"]
-                }
-            },
-            "manual_rows": {
-                "type": "array",
-                "description": "Your own non-channel rows (bucket, stance, active_bp, basis), so the preview accounts for them.",
-                "items": { "type": "object" }
-            }
-        }
-    },
-    get_industry_reads: {
-        "type": "object",
-        "properties": {
-            "sector": { "type": "string", "description": "One of the eleven sectors (e.g. Technology) to narrow the list. Omit for every industry." }
-        }
-    },
+    // ── Axl's read of the house view (Pythia's industry desk tools follow) ─────
+    // The channel-era Pythia tools (get_priced_in, get_coverage_by_sector, get_channel_state,
+    // get_channel_exposures, size_from_channels, get_industry_reads) went with the desk's rebuild on
+    // 2026-10-05 (docs/design/pythia-industry-questions.md).
     get_sector_view: {
         "type": "object",
         "properties": {}
+    },
+    // ── Pythia, the industry desk (docs/design/pythia-industry-questions.md) ──
+    list_industries: {
+        "type": "object",
+        "properties": {
+            "sector": { "type": "string", "description": "A GICS sector (e.g. Information Technology) to narrow the list. Omit for all 163 sub-industries." }
+        }
+    },
+    get_industry_metrics: {
+        "type": "object",
+        "properties": {
+            "industry": { "type": "string", "description": "A GICS sub-industry: its 8-digit code (45301020) or its exact name (Semiconductors)." }
+        },
+        "required": ["industry"]
+    },
+    get_industry_companies: {
+        "type": "object",
+        "properties": {
+            "industry": { "type": "string", "description": "A GICS sub-industry: its 8-digit code or its exact name." },
+            "limit": { "type": "integer", "description": "How many of the largest companies to list (default 25, at most 60)." }
+        },
+        "required": ["industry"]
+    },
+    get_industry_view: {
+        "type": "object",
+        "properties": {
+            "industry": { "type": "string", "description": "A GICS sub-industry: its 8-digit code or its exact name." }
+        },
+        "required": ["industry"]
     },
     // ── Aether desk (event exposure) ──────────────────────────────────────────
     // get_channel_taxonomy, get_channel_state and get_regime were removed with the

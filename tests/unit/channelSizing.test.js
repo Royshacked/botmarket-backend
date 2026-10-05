@@ -6,7 +6,6 @@ import {
     CAP_BP, MAX_DZ, REACTIONS, K_EVIDENCE, CHANNEL_CONFIDENCE,
 } from '../../api/strategy/channelSizing.service.js'
 import { normalizeTilt, overlappingRows, incoherentRows } from '../../api/strategy/tilt.service.js'
-import { _parseStrategyResponse } from '../../services/agents/strategy.agent.service.js'
 
 // Step 6: the table sized from a few channel calls. What must hold: the arithmetic is beta × dz,
 // the table balances and respects its caps, it never holds a sector beside its own industry, and the
@@ -199,10 +198,8 @@ test('the preview says what to change, and what it will not do', () => {
 
 // ── the draft path ───────────────────────────────────────────────────────────
 
-test('a block carrying only channel calls parses, and expands into sized rows stamped with today\'s z', async () => {
-    const raw = `<tilt>{"benchmark":"SPX","channel_views":[{"channel_id":"energy_cost","dz":1},{"channel_id":"discount_rate","dz":-1}],"tilts":[]}</tilt>`
-    const { tilt } = _parseStrategyResponse(raw)
-    assert.ok(tilt, 'a calls-only block is a draft, not a discussion')
+test('a draft carrying only channel calls expands into sized rows stamped with today\'s z', async () => {
+    const tilt = { benchmark: 'SPX', channel_views: [{ channel_id: 'energy_cost', dz: 1 }, { channel_id: 'discount_rate', dz: -1 }], tilts: [] }
 
     _setSizingIO({ betas: async () => BETAS, latest: async () => ({ channels: { energy_cost: { z: 1.66 } } }), evidence: async () => [], record: async () => null })
     const expanded = await expandChannelDraft(tilt, '2026-10-01T00:00:00.000Z')

@@ -49,7 +49,7 @@ test('a scope narrows it — Atlas\'s copy is review-only, because outside a rev
 test('every one-shot-proposal desk carries the rule; Mentor (re-emits every turn) does not', () => {
     // Ahead of BREVITY_RULE, which stays last on purpose (brevityRule.test.js).
     assert.match(read('services/agents/portfolio.agent.service.js'), /\+ buildStandingProposalRule\('portfolio_update', [^)]*\) \+ BREVITY_RULE\)/)
-    assert.match(read('services/agents/strategy.agent.service.js'),  /\+ buildStandingProposalRule\('tilt', 'Publish'\) \+ BREVITY_RULE\)/)
+    assert.match(read('services/agents/strategy.agent.service.js'),  /\+ buildStandingProposalRule\('industry_view', 'Publish'\) \+ BREVITY_RULE\)/)
     assert.match(read('services/agents/analyst.agent.service.js'),   /\+ buildStandingProposalRule\('coverage', [^)]*\) \+ BREVITY_RULE\)/)
     assert.doesNotMatch(read('services/agents/mentor.agent.service.js'), /buildStandingProposalRule/)
 })

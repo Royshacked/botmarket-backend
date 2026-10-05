@@ -2,7 +2,6 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
 import { formatChannelExposures, readChannelExposures, _setExposureIO } from '../../api/strategy/channelExposures.service.js'
-import { TOOLS } from '../../services/agents/strategy.agent.service.js'
 import { TILT_BASES, normalizeTilt } from '../../api/strategy/tilt.service.js'
 
 // Pythia's Phase-3 evidence: which buckets move with which channel. The properties worth defending:
@@ -81,15 +80,6 @@ test('the read goes through the injectable seam', async () => {
 })
 
 // ── the desk side ────────────────────────────────────────────────────────────
-test('the desk carries the tool, with an optional channel filter, ahead of consult', () => {
-    const names = TOOLS.map(t => t.name)
-    const tool = TOOLS.find(t => t.name === 'get_channel_exposures')
-    assert.ok(tool)
-    assert.equal(tool.input_schema.properties.channel.type, 'string')
-    assert.deepEqual(tool.input_schema.required ?? [], [])
-    assert.equal(names.at(-1), 'consult')
-})
-
 test('`channels` is a basis a row can publish with', () => {
     assert.ok(TILT_BASES.includes('channels'))
     const t = normalizeTilt({ tilts: [{ bucket: 'Utilities', stance: 'under', active_bp: -100, basis: 'channels' }] })

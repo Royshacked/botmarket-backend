@@ -28,6 +28,7 @@ import fs       from 'fs'
 import path     from 'path'
 import { getDbName, getSiblingDb } from '../providers/mongodb.provider.js'
 import { mirrorDiscoveryRuns } from './aetherMirror.service.js'
+import { engineDbName } from './engineDb.js'
 import { config } from './config.js'
 import { logger } from './logger.service.js'
 import { httpError } from './httpError.util.js'
@@ -43,11 +44,9 @@ function _pythonExe(engineDir) {
         : path.join(engineDir, '.venv', 'bin', 'python')
 }
 
-// The database the ENGINE works in: the house one when configured (a laptop on its own dev
-// database still runs Aether against the shared queue and list), else the one Node is on.
-function _engineDbName() {
-    return config.aetherDb ?? getDbName()
-}
+// The database the ENGINE works in — services/engineDb.js, shared with the desks that read what the
+// engine writes.
+const _engineDbName = engineDbName
 
 // Returns null when the database cannot be resolved — the caller must not spawn on null.
 function _buildEnv() {
