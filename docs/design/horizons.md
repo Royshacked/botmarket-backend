@@ -168,11 +168,23 @@ Example:
 
 ## 6. Open decisions
 
-1. **Range tier cutoff.** Top/bottom 30% or 20% (§4).
+1. **Range tier cutoff. DECIDED by Roy, 2026-10-06: top and bottom 30%** (about 49 of 163 at each
+   end, as in Moskowitz & Grinblatt).
 2. **Detail under the range headline.** A grid of every sub-industry × horizon, or a card per
    sub-industry, and how a cell shows its reading (decile and arrow, or words).
 3. **Cells with no live signal.** Hidden, or shown as "no reliable signal".
-4. **Backtest bar.** The IC and t threshold, set before the first run.
+4. **Backtest bar. DECIDED by Roy, 2026-10-06, before any run.** A signal passes at a horizon when
+   ALL of these hold:
+   - mean monthly rank IC ≥ 0.02;
+   - its t-statistic ≥ 2, Newey–West adjusted for the overlap of multi-month horizons;
+   - the same sign in both halves (2007–16 and 2017–26);
+   - a positive top-minus-bottom 30% spread after 10bp per trade in costs.
+
+   **Delisted companies (decided the same day).** Our FMP plan lists only the latest 100 delistings
+   (page 0; deeper pages and the index-change history need Premium). So the first runs use today's
+   companies and are labelled **survivors only**; nothing goes live from them. If a signal passes,
+   one month of FMP Premium adds the delisted companies (their prices and historical market caps already
+   work on our plan), and only that rerun can put the signal on the board.
 5. **Events. PARKED by Roy on 2026-10-05 to think it over.** The proposal on the table: convert
    Aether's output from names to sub-industries, keeping the names as evidence underneath. Two kinds
    of graded claim:
