@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 
 import { checkDraft, nextReviewAt, pendingDoc, GRADES, nextAfterPass, failureBackoff, PENDING_RETRY_DAYS } from '../../api/strategy/industryView.service.js'
 import { forTraders } from '../../api/strategy/strategy.controller.js'
-import { formatNode, formatSubIndustry, formatCompanies } from '../../api/strategy/industryData.service.js'
+import { formatNode, formatSubIndustry, formatCompanies, companiesQuery } from '../../api/strategy/industryData.service.js'
 import { buildIndustryChanged, notifyIndustryChanged } from '../../services/industryNotify.service.js'
 import { reviewIndustry, _reviewPrompt, _lastParagraph } from '../../services/industryReview.service.js'
 import { _triggered, _sync, _reason, TRIGGER_COOLDOWN_DAYS } from '../../monitoring/industryView.monitor.service.js'
@@ -96,6 +96,10 @@ test('the cycle line states the stable rule with the measured width, and "cyclic
 test('a thin sub-industry says it is answered at its parent', () => {
     const t = formatSubIndustry({ sub: { code: '25102010', name: 'Motorcycle Manufacturers', n_companies: 1, answered_at: { level: 'industry', name: 'Automobiles' } }, answering: { ...NODE, level: 'industry', name: 'Automobiles', code: '251020' }, parents: [] })
     assert.match(t, /too few companies \(1\) to answer on its own — it is answered at its industry, Automobiles/)
+})
+
+test('an industry\'s companies are the ones the engine measured: not stale, one listing per filer', () => {
+    assert.deepEqual(companiesQuery('sub_code', '55101010'), { sub_code: '55101010', stale: { $ne: true }, duplicate_of: null })
 })
 
 test('companies are listed largest first, our coverage marked', () => {

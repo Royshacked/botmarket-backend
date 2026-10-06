@@ -86,12 +86,18 @@ export async function listSubIndustries(asof = null) {
     }).sort((x, y) => (x.sector + x.name).localeCompare(y.sector + y.name))
 }
 
-/** The companies classified into a node, largest first. `level` is one of the four GICS levels. */
+/**
+ * The companies classified into a node, largest first. `level` is one of the four GICS levels. The same
+ * companies the engine measured: not stale, and one listing per filer — a preferred or note carrying its
+ * parent's statements is marked `duplicate_of` by the engine (2026-10-06: Southern listed five times).
+ */
+export const companiesQuery = (field, code) => ({ [field]: code, stale: { $ne: true }, duplicate_of: null })
+
 export async function readCompanies(level, code, { limit = 25 } = {}) {
     const field = { sub_industry: 'sub_code', industry: 'industry_code', industry_group: 'group_code', sector: 'sector_code' }[level]
     if (!field) return []
     const db = await _io.db()
-    return db.collection(COMPANIES).find({ [field]: code }, { projection: { _id: 0, symbol: 1, name: 1, market_cap: 1, sub_industry: 1, source: 1, confidence: 1 } })
+    return db.collection(COMPANIES).find(companiesQuery(field, code), { projection: { _id: 0, symbol: 1, name: 1, market_cap: 1, sub_industry: 1, source: 1, confidence: 1 } })
         .sort({ market_cap: -1 }).limit(limit).toArray()
 }
 
