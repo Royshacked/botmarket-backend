@@ -116,6 +116,29 @@ footing:
 **The bar is fixed before running.** Results are written to Mongo with their run inputs. This is the
 same discipline as the 2026-10-01 base-rate test that retired the channel calls.
 
+### Results
+
+**Momentum, 2026-10-07 — FAILED at every horizon** (survivors only; `signal_backtests`
+`2026-10-07|momentum|survivors_only`; aether `scripts/run_momentum_backtest.py`). 2,788 companies,
+145 distinct industry baskets, signals from late 2007 to 2026-09, horizons 1/3/6/12 months.
+
+| Signal | Best horizon | Mean IC | t | Why it failed |
+|---|---|---|---|---|
+| Industry 1m | 12m | 0.018 | 1.45 | below 0.02, t, net spread negative |
+| Industry 6-1 | 6m | 0.025 | 1.05 | t; negative in 2007-16 |
+| Industry 12-1 | 1m | 0.012 | 0.76 | below 0.02, t, net spread negative |
+| Stock 12-1 | 1m | 0.005 | 0.52 | below 0.02, t, net spread negative |
+| Stock 1m reversal | 1m | 0.0135 | 1.72 | below 0.02, t (the closest; positive in both halves) |
+
+The pipeline was checked against known history before the result was believed: stock momentum formed
+at the end of March 2009 has an IC of -0.58 against April (the documented 2009 momentum crash), January
+2021 is negative (the junk rally), 2022 strongly positive. Momentum works in some years and crashes in
+others; over 2007-2026 they cancel — consistent with its published post-2000 weakening.
+
+**Consequence.** Survivorship normally FLATTERS momentum (the losers that died are missing), so adding
+the delisted companies would not rescue it: the FMP Premium month (§6.4) is not worth buying for
+momentum. The board gets no momentum column.
+
 ## 4. The Forecasts view (UI)
 
 Rows are sub-industries, with their level shown when rolled up. Columns are horizons. Each cell holds
