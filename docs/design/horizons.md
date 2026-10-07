@@ -139,6 +139,24 @@ others; over 2007-2026 they cancel — consistent with its published post-2000 w
 the delisted companies would not rescue it: the FMP Premium month (§6.4) is not worth buying for
 momentum. The board gets no momentum column.
 
+**Risk-managed industry momentum — DECLARED 2026-10-07, before any run** (Roy: "first run momentum
+batch"). The forms institutions actually run, on the same 145 industry baskets, horizons 1/3/6/12 months,
+the same bar. Exactly these three; nothing is added or tuned after the results are seen. Three tries
+raise the odds that one passes by chance, and a pass is read with that in mind.
+
+1. **Risk-adjusted 6+12 (MSCI's recipe).** The 6- and 12-month returns ending a month ago, each divided by
+   the industry's volatility (36 monthly returns, at least 24), turned into cross-sectional z-scores and
+   averaged 50/50. Graded exactly as the raw signals were.
+2. **Volatility-scaled 12-1 (Barroso & Santa-Clara 2015).** The raw 12-1 ranking, with each month weighted
+   by the inverse of the top-minus-bottom spread's volatility over the 12 months before it (monthly data:
+   6 points is too few). The IC mean, its t and the halves are weighted means; the net spread is scaled
+   by the same weights.
+3. **Time-series momentum (Moskowitz, Ooi & Pedersen 2012).** Each industry long when its past 12 months
+   are up, short when down, sized by the inverse of its volatility, the book normalised to a gross
+   exposure of 1. It is not a cross-sectional ranking, so there is no IC: it passes when its net monthly
+   return (10bp a trade on every change of position) has a Newey-West t >= 2 and is positive in both
+   halves. Stated here because it adapts the bar.
+
 ## 4. The Forecasts view (UI)
 
 Rows are sub-industries, with their level shown when rolled up. Columns are horizons. Each cell holds
