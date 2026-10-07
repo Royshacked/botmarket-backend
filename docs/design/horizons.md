@@ -157,6 +157,21 @@ raise the odds that one passes by chance, and a pass is read with that in mind.
    return (10bp a trade on every change of position) has a Newey-West t >= 2 and is positive in both
    halves. Stated here because it adapts the bar.
 
+**Result, 2026-10-07 — FAILED, all three at every horizon** (`signal_backtests`
+`2026-10-07|momentum_risk_managed|survivors_only`).
+
+| Variant | 1m | 3m | 6m | 12m |
+|---|---|---|---|---|
+| Risk-adjusted 6+12 (IC, t) | 0.007, 0.41 | 0.004, 0.18 | 0.021, 0.75 | 0.004, 0.10 |
+| Volatility-scaled 12-1 (IC, t) | 0.019, 1.11 | 0.017, 0.79 | 0.019, 0.68 | -0.008, -0.23 |
+| Time-series (net per period, t) | 0.22%, 1.05 | 1.13%, 1.76 | 2.22%, 1.91 | 5.54%, 1.93 |
+
+Time-series momentum is the near miss — positive in both halves at every horizon, t below 2 at every
+one. Two reasons not to stretch it: a trend book in a market that mostly rose (2009-2026) is long most
+of the time, so part of its return is the market's own premium rather than timing; and of three variants
+tried, one landing near the line is what chance alone would often produce. **Momentum in every tested form
+does not pass. Price alone does not time industries 1-12 months out on this universe.**
+
 ## 4. The Forecasts view (UI)
 
 Rows are sub-industries, with their level shown when rolled up. Columns are horizons. Each cell holds
