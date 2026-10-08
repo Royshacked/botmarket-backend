@@ -54,8 +54,8 @@ engine from the universe. Industry ETFs are optional context, because most sub-i
 
 | Input | Source | Status |
 |---|---|---|
-| S&P 500 against its rising 200-day MA; distance from 52-week high | FMP daily index prices | available, needs the daily fetch |
-| VIX against its 1-year average | FMP index quote (unchecked) or CBOE's public history | **unchecked** |
+| S&P 500 against its rising 200-day MA; distance from 52-week high | FMP daily index prices (`^GSPC`) | built (§3.1) |
+| VIX against its 1-year average | FMP index quote (unchecked) or CBOE's public history | **unchecked**; the S&P 500's own 20-day realised volatility stands in, labelled so on every regime row |
 
 ### Step 2 — Quality (Q1–Q5), from Pythia
 
@@ -71,21 +71,55 @@ engine from the universe. Industry ETFs are optional context, because most sub-i
 
 | Spec | Data | Status |
 |---|---|---|
-| Q6 Relative strength 6-1 and 12-1 | monthly prices | **in Mongo now** (`monthly_prices`) |
-| Q6 1m and 3m against S&P (context) | monthly / daily prices | now (monthly) |
-| Q7 Trend: above rising 50d and 200d | daily prices | **needs the daily backfill** |
-| Q8 Breadth: share above 50d | daily prices per stock | needs the daily backfill |
-| Q9 Extension: distance above 50d, ATR | daily prices | needs the daily backfill |
-| Q10 Volatility and liquidity | daily prices + volume | needs the daily backfill |
+| Q6 Relative strength 6-1 and 12-1 | daily prices (the live job); monthly prices (the filter backtest) | built (§3.1) |
+| Q6 1m and 3m against S&P (context) | daily prices | built |
+| Q7 Trend: above rising 50d and 200d | daily prices | built |
+| Q8 Breadth: share above 50d | daily prices per stock | built |
+| Q9 Extension: distance above 50d, ATR | daily prices | built |
+| Q10 Volatility and liquidity | daily prices + volume | built |
 | Q11 Catalyst | earnings calendar (`get_earnings_calendar`), news, rates and commodities | agent, with tools the desks already have |
 
 ### Step 4 — Crowding and flow
 
 | Spec | Data | Status |
 |---|---|---|
-| Q12 Volume | daily volume | needs the daily backfill |
+| Q12 Volume | daily volume | built (§3.1) |
 | Q13 Sentiment | put/call, retail sentiment, analyst consensus | analyst ratings: FMP `grades-historical`, monthly from about 2018-12 (checked 2026-10-08 on AAPL, XOM, DHI: 90–94 months), so under the 10 years the full test asks for. Put/call and retail sentiment: **no source, N/A** |
 | Q14 Institutional flows | ETF fund flows; 13F | **unchecked**; N/A until a source is found |
+
+### 3.1 The engine job (BUILT 2026-10-08, not yet scheduled)
+
+`aether-engine/scripts/run_screener_timing.py` → `market_regime/{asof}`, `industry_timing/{asof}|{sub-industry}`
+(163 rows, each carrying its answering basket's numbers), `industry_timing_runs`. Code:
+`aether_engine/screener/timing.py`. It reads the daily window (`daily_prices_recent`), so it can run on
+Render without the Parquet history. A run with under 90% of the universe priced on the day is marked
+PARTIAL on every row.
+
+**The industry index** is equal-weighted over the basket's LIQUID companies: market cap ≥ $300M AND a
+median daily dollar volume ≥ $1M over the last 60 days. The dollar-volume test was added after the
+first dry run put two industries at +44,000,000% and +8,100%: six companies that trade almost nothing
+(FUNR ~$20 a day on a listed "$10B" cap; AONC, GLOH, IPEU, INRE, KEGS under $15k) print prices like
+12 → 0.1 → 10, and equal weighting turns one such day into the industry's move. 107 of 1,525 companies
+checked fell under the floor (7%).
+
+**Thresholds the spec does not number**, fixed on 2026-10-08 before any real run and not to be tuned to
+results:
+
+| Where | Spec says | Fixed as |
+|---|---|---|
+| Regime | "near highs", "well below highs", "elevated" volatility | within 5% of the 52-week high; 10% or more below; 20-day realised volatility above 1.25× its 1-year average |
+| Q6 | rank on 6- and 12-month returns | the mean of the two percentile ranks; top 20% = 2, bottom 20% = 0 |
+| Q7 | above a rising 50-day and 200-day | one point for each average the index is above while it rises (rising = above its value 21 trading days earlier) |
+| Q8 | >60% = 2; "carried by one or two names" = 0 | under 40% = 0 |
+| Q9 | near the MA or a fresh breakout = 2; >15–20% or >3 ATRs = 0 | up to 5% above the 50-day (or below it) = 2; over 15% or over 3 ATRs = 0 (ATR = mean absolute daily move of the index, 14 days) |
+| Q10 | range ~2–4%+; several stocks at 1M+ shares | one point for a median daily range ≥ 2%, one for ≥ 3 companies averaging 1M+ shares (20 days) |
+| Q12 | rising moderately on up days = early; extremely heavy after a long run = crowded | up-day volume (last 20 days) ≥ 1.1× the prior 100-day average = early; ≥ 1.5× AND Q6 = 2 = crowded |
+
+The engine scores Q6–Q10 (max 10) and flags Q12; Q11 (the last 2 Timing points) is the agent's.
+
+**First dry run (2026-10-08, PARTIAL: 1,473 of 2,788 priced while the backfill ran):** regime GREEN
+(S&P 500 0.2% below its 52-week high, 200-day rising, volatility normal); 155 of 163 sub-industries
+scored; 7 baskets N/A (fewer than 3 liquid companies).
 
 ## 4. Classification
 
@@ -162,7 +196,9 @@ backfill and the Pythia inputs as they stood on each past date (statements carry
 1. **Momentum filter test (§5.1)** on data in Mongo. No FMP calls.
 2. **Daily price + volume backfill** for the universe and the S&P 500 (FMP; check plan limits first,
    the daily limit was hit on 2026-10-07).
-3. **Engine job:** regime + Q6–Q10 + Q12 per sub-industry, stored with as-of dates.
+3. **Engine job:** regime + Q6–Q10 + Q12 per sub-industry, stored with as-of dates. **BUILT
+   2026-10-08 (§3.1)**; first real run after the backfill; Render crons (daily refresh + this job)
+   not added yet.
 4. **Pythia read:** Q1–Q5 from existing views, plus GDP comparison and margin direction.
 5. **Pythia's agent + tool:** classification, reasons, notes, leading stocks, changes since last run.
 6. **Board:** buckets in plain words on IndustryView.
