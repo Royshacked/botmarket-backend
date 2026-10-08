@@ -178,9 +178,20 @@ every swing bucket by one level. Thresholds are fixed as written and are not tun
 
 The spec has no "yes, long term only" bucket: a good business with weak timing is a wait, not a buy.
 
-**OPEN (found 2026-10-08, first run with both halves): a gap in the buckets.** Quality ≥ 7 with
-Timing 6–7 matches none of them (Swing + Long-term needs Timing ≥ 8, Long-term watchlist needs < 6):
-22 industries today with Q11 = 0, 31 with Q11 = 2. Roy decides where they go.
+**DECIDED by Roy, 2026-10-08: Long-term watchlist is Quality ≥ 7 and Timing < 8** (the spec said
+< 6). The spec left Quality ≥ 7 with Timing 6–7 in no bucket — 22 industries on the first run with
+Q11 = 0, 31 with Q11 = 2 — and a good business at a middling moment is exactly "good for long term,
+not the moment yet". The buckets now cover every case:
+
+| Quality | Timing (of 12) | Bucket |
+|---|---|---|
+| ≥ 7 | ≥ 8, not extended, not crowded | Swing + Long-term |
+| ≥ 7 | ≥ 8, Q9 = 0 or crowded | Extended — wait for pullback |
+| < 7 | ≥ 8 | Swing only |
+| ≥ 7 | < 8 | Long-term watchlist |
+| < 7 | < 8 | Avoid |
+
+A Red regime downgrades every swing bucket one level (spec).
 
 **Q11 is a large lever.** The engine's Timing sits mostly at 4–7 of 10, so the agent's 2 catalyst points
 move many industries across the 8 line: swing only 11 → 46 and avoid 88 → 53 between Q11 = 0 and 2.
@@ -313,7 +324,7 @@ Compute a Quality score (Q1–5, max 10) and a Timing score (Q6–11, max 12), t
 - **Swing + Long-term:** Quality ≥ 7 and Timing ≥ 8, not extended, not crowded.
 - **Extended — wait for pullback:** Quality and Timing strong, but Q9 = 0 or crowding flags are "Crowded".
 - **Swing only (for now):** Timing ≥ 8 but Quality < 7 (e.g., cyclicals, commodities, speculative themes). Trade the move, don't hold long-term.
-- **Long-term watchlist:** Quality ≥ 7 but Timing < 6. Good business, wrong moment; wait for relative strength and trend to turn up.
+- **Long-term watchlist:** Quality ≥ 7 but Timing < 6. Good business, wrong moment; wait for relative strength and trend to turn up. *(Changed by Roy on 2026-10-08 to Timing < 8 — see §4.)*
 - **Avoid:** Weak on both.
 
 In a Red market regime, downgrade every Swing bucket by one level and say so.
