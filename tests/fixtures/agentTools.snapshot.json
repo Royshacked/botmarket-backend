@@ -89,6 +89,34 @@
             }
         },
         {
+            "name": "get_earnings_calendar",
+            "description": "Upcoming earnings dates between two dates (YYYY-MM-DD, window up to ~3 months), optionally for specific symbols — PASS the industry's leaders and largest companies: a market-wide ask returns only the soonest rows. For the weekly screen's catalyst (Q11): an industry whose largest companies report inside the four-week window has a DATED event.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "from": {
+                        "type": "string",
+                        "description": "start date YYYY-MM-DD"
+                    },
+                    "to": {
+                        "type": "string",
+                        "description": "end date YYYY-MM-DD"
+                    },
+                    "symbols": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "optional — narrow to these tickers"
+                    }
+                },
+                "required": [
+                    "from",
+                    "to"
+                ]
+            }
+        },
+        {
             "name": "consult",
             "description": "Put ONE decision to a more capable desk head and get a straight answer back. It cannot see this conversation and cannot fetch anything — you hand it the question and every number it needs, and it thinks harder than you can in-line.\n\nReach for it when you are about to DEPART from a measured code grade on a large industry, and the argument is close — the override is what the house will read, and it should survive someone attacking it. Not for agreeing with the numbers.\n\nDo NOT reach for it to look something up, to double-check work you are already confident in, to summarize, or because a question feels big. A consult costs a full model call and adds seconds to the turn: if you already know the answer, or a tool call would settle it, that is the cheaper and better move. Most turns should end without it.",
             "input_schema": {

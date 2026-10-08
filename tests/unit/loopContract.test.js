@@ -64,7 +64,8 @@ test('server.js registers the full fleet', () => {
         // Under the lease it completed zero scheduled runs in twelve days. It is now started
         // unconditionally in server.js, gated on the engine being present on this host, and its
         // mutual exclusion comes from claiming each job occurrence in aether_scheduler_runs.
-        'coverage', 'entries', 'exits', 'guardSweep', 'industryView', 'marketBrief', 'marketOpen', 'paperEquity',
+        // 'industryScreen' (2026-10-08) publishes Pythia's weekly screen when the engine has a new run.
+        'coverage', 'entries', 'exits', 'guardSweep', 'industryScreen', 'industryView', 'marketBrief', 'marketOpen', 'paperEquity',
         'paperFill', 'paperMark', 'reconciler', 'talos', 'themis',
     ])
 })

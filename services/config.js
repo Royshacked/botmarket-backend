@@ -214,6 +214,10 @@ export const config = {
     // GICS sub-industries (~3 an hour). Off, the monitor still seeds and flags due views; it just
     // runs no review. Set INDUSTRY_REVIEWS=true where the house pays for them.
     get industryReviews() { return _bool('INDUSTRY_REVIEWS', 'opt-in') },
+    // Pythia's weekly industry screen (monitoring/industryScreen.monitor.service.js). OPT-IN for the same
+    // reason: once per engine run it asks the desk for a catalyst read on ~75 industries (~8 batched
+    // research runs). Off, no screen is published and the board has nothing new.
+    get industryScreen() { return _bool('INDUSTRY_SCREEN', 'opt-in') },
     // `disk` (the default) writes files under talosRecordDir; `mongo` inserts into the `talos_reads`
     // collection of the app's own database — the sink for the deployed instance, whose disk is
     // ephemeral. `scripts/eval/talos-replay/pull-reads.mjs` brings those down to the disk layout.

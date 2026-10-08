@@ -9,6 +9,8 @@ import { strategyAgentService } from '../../services/agents/strategy.agent.servi
 import { industryViewService }  from './industryView.service.js'
 import { readSubIndustry, listSubIndustries } from './industryData.service.js'
 import { notifyIndustryChanged } from '../../services/industryNotify.service.js'
+import { industryScreenService } from './industryScreen.service.js'
+import { runScreen } from '../../services/industryScreenRun.service.js'
 import { streamAgentResponse, sseAgentCallbacks }  from '../_shared/sse.util.js'
 import { routeFields }                             from '../../services/routing.util.js'
 import { parseChatMessages }    from '../_shared/parse.util.js'
@@ -92,6 +94,24 @@ export function forTraders(view) {
     const { revisions, monitor, ...rest } = view   // eslint-disable-line no-unused-vars -- dropped on purpose
     return { ...rest, next_review: monitor?.next_check_at ?? null }
 }
+
+// ─── The weekly industry screen (docs/design/industry-screener.md) ──────────
+
+/** The latest published screen: every sub-industry's verdict (trade or not, horizon) and why. */
+export const getScreen = _handle('getScreen', async (req, res) => {
+    const screen = await industryScreenService.latestScreen()
+    if (!screen) return res.status(404).json({ error: 'No industry screen published yet' })
+    res.json(screen)
+})
+
+/**
+ * Run the screen now on the latest complete engine run (admin). `force` reruns a run date that already
+ * has a screen. Answers when the screen is published — several minutes of research.
+ */
+export const runScreenNow = _handle('runScreenNow', async (req, res) => {
+    const r = await runScreen(undefined, { force: req.body?.force === true })
+    res.status(r.ok ? 200 : 409).json(r)
+})
 
 /** Publish a reviewed draft (the chat preview's Publish). Checked against the measured numbers. */
 export const publishIndustry = _handle('publishIndustry', async (req, res) => {

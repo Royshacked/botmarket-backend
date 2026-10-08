@@ -92,6 +92,8 @@ export const ALL_EMIT_TAGS = [
     'route', 'chart', 'setup', 'setups', 'edit', 'open', 'adopt',
     // Pythia's answer on one GICS sub-industry (api/strategy/industryView.service.js).
     'industry_view',
+    // Pythia's weekly screen row: the catalyst score and notes (services/industryScreenRun.service.js).
+    'industry_screen',
     // Follow-up chips (services/suggestions.service.js). Registered here even though only Axl
     // emits it today — that is the whole point of this list: the suppressor must know a tag
     // BEFORE an agent starts using it, or the first turn that emits one prints it at the user.

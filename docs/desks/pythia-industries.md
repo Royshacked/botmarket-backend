@@ -69,6 +69,22 @@ marked), `get_industry_view` (the standing answer and its trail), `consult` (for
 large industry). It emits one `<industry_view>` block per sub-industry it answered. In chat the blocks
 are DRAFTS; the admin publishes each from the panel (`POST /api/strategy/industries/:code`).
 
+## The weekly screen — `industry_screen` (since 2026-10-08)
+
+Pythia also publishes, once a week, **whether to trade each industry now and on which horizon** (Roy,
+2026-10-08: everything lives under Pythia; contract in `docs/design/industry-screener.md`). This changes
+the desk's old rule that it never gives a price direction or a 6-month view. It still never publishes a
+weight, and the agent still never forecasts: the verdict is CODE, from the engine's quality (Q1–Q5) and
+timing (Q6–Q10, Q12) scores plus the one input that is the desk's, **Q11**, a dated catalyst inside four
+weeks that `checkScreen` holds to its date.
+
+- Engine: `aether-engine/scripts/run_screener_timing.py` → `industry_timing`, `market_regime` and each  industry's stored index line (weekly cron).
+- Backend: `monitoring/industryScreen.monitor.service.js` → `services/industryScreenRun.service.js` →
+  `industry_screen` (one document per run date). Opt-in `INDUSTRY_SCREEN`.
+- Read: `GET /api/strategy/screen`. Run now (admin): `POST /api/strategy/screen/run`.
+- The desk emits `<industry_screen>` blocks only in the headless screen run; it gained
+  `get_earnings_calendar` for it.
+
 ## The monitor — `monitoring/industryView.monitor.service.js`
 
 Two loops, because they cost different things:

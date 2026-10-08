@@ -107,7 +107,7 @@ against a 4.4% hurdle, slower than GDP). The metrics call semiconductors NOT cyc
 | Q13 Sentiment | put/call, retail sentiment, analyst consensus | analyst ratings: FMP `grades-historical`, monthly from about 2018-12 (checked 2026-10-08 on AAPL, XOM, DHI: 90–94 months), so under the 10 years the full test asks for. Put/call and retail sentiment: **no source, N/A** |
 | Q14 Institutional flows | ETF fund flows; 13F | **unchecked**; N/A until a source is found |
 
-### 3.1 The engine job (BUILT 2026-10-08, not yet scheduled)
+### 3.1 The engine job (BUILT 2026-10-08; weekly on Render once the blueprint is synced)
 
 `aether-engine/scripts/run_screener_timing.py` → `market_regime/{asof}`, `industry_timing/{asof}|{sub-industry}`
 (163 rows, each carrying its answering basket's numbers), `industry_timing_runs`. Code:
@@ -252,6 +252,39 @@ including a bear market, results split bull/bear, against SPX buy-and-hold and a
 industry benchmark, no look-ahead, costs included, every alternative reported. It needs the daily
 backfill and the Pythia inputs as they stood on each past date (statements carry filing dates).
 
+### 5.3 Step 5 — the weekly screen (BUILT 2026-10-08)
+
+**Decided by Roy, 2026-10-08:**
+1. **Q11 rule:** 2 = a DATED event inside the four weeks after the run date that directly moves the
+   industry's revenue or costs (its leaders report; a scheduled regulatory or rate decision; a dated
+   industry data release), with the date and the mechanism named. 1 = an identifiable driver with no
+   date in the window. 0 = nothing named. The code holds the claim: a 2 without a date in the window or
+   a mechanism is marked down (to 1 with a reason, else 0), and the correction is kept on the row.
+2. **Scope:** the agent looks only where it matters: engine timing 6 or 7 (Q11 decides the bucket) and
+   the top two buckets (they need notes). Every other industry's Q11 is "not assessed: could not change
+   this bucket".
+3. **Cadence: weekly.** Engine: `daily-prices` Saturday 06:00 UTC, `industry-screener` Sunday 08:00 UTC
+   (aether render.yaml). Backend: `monitoring/industryScreen.monitor.service.js` checks every 3 hours
+   for a complete engine run without a screen, and runs one. Opt-in: `INDUSTRY_SCREEN=true`.
+
+**How it is built:**
+- `api/strategy/screenerData.service.js`: reads the engine's collections; the bucket rule
+  (`bucketFor`, §4 including Roy's widened watchlist); `needsAgent`; `checkScreen` (the Q11 claim);
+  `composeRows` (verdict, horizon, change since the previous screen).
+- `services/industryScreenRun.service.js`: the headless run, batches of 10 through Pythia (the
+  `strategy` desk), which answers `<industry_screen>` blocks; a failed batch publishes with Q11 = 0
+  and is counted.
+- `api/strategy/industryScreen.service.js`: the house collection `industry_screen`, one document per
+  engine run date (never edited; next week is a new document).
+- Pythia gains `get_earnings_calendar` and a "weekly screen" section in its prompt. The VERDICT is
+  code; the agent never picks a bucket.
+- Routes: `GET /api/strategy/screen` (everyone, the latest screen); `POST /api/strategy/screen/run`
+  (admin, `{force}` reruns a date).
+- **Leading stocks** (engine): liquid, within 10% of the 52-week high, no more than 15% above their own
+  50-day average, ranked by 6-1 return, up to five per industry.
+- **Red regime** ("downgrade every swing bucket one level"), read as: the swing half goes. Swing +
+  long-term and extended become the long-term watchlist; swing only becomes avoid.
+
 ## 6. Build order
 
 1. **Momentum filter test (§5.1)** on data in Mongo. No FMP calls.
@@ -263,14 +296,15 @@ backfill and the Pythia inputs as they stood on each past date (statements carry
 4. **Pythia read:** Q1–Q5 from existing views, plus GDP comparison and margin direction. **BUILT
    2026-10-08** from the industry metrics (§3, Step 2).
 5. **Pythia's agent + tool:** classification, reasons, notes, leading stocks, changes since last run.
+   **BUILT 2026-10-08 (§5.3).**
 6. **Board:** buckets in plain words on IndustryView.
 7. **Full backtest (§5.2).**
 8. **Source checks:** VIX, ETF flows, 13F (analyst rating depth checked: from about 2018-12). Each stays N/A until found.
 
 ## 7. Open
 
-- How often it runs (daily after close, or weekly).
-- Whether the board shows the scores under the bucket, or only the bucket and reason.
+- ~~How often it runs~~ — **weekly**, decided by Roy 2026-10-08 (§5.3).
+- Whether the board shows the scores under the bucket, or only the bucket and reason (step 6).
 
 ---
 

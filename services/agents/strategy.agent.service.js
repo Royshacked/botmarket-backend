@@ -24,6 +24,7 @@ import {
     formatSubIndustry, formatCompanies,
 } from '../../api/strategy/industryData.service.js'
 import { industryViewService } from '../../api/strategy/industryView.service.js'
+import { getEarningsCalendar } from '../../providers/fmp.provider.js'
 import { logger } from '../logger.service.js'
 
 const __dirname   = dirname(fileURLToPath(import.meta.url))
@@ -42,6 +43,9 @@ export const TOOLS = [
         get_industry_metrics: `The measured numbers behind the three questions for one sub-industry, from 15 years of SEC filings: DEMAND (chained revenue growth over 10 and 3 years against the whole universe, how steady), ECONOMICS (the industry's aggregate ROIC — ROE for financials — against Damodaran's cost of capital, with the median company and the share of companies clearing it as breadth, margin level and stability, top-5 concentration), CYCLE (trailing-12-month margin or ROE in its own 10-year range, the normalised value, whether the industry is cyclical), each with the CODE GRADE you start from, plus any early-review triggers. Also the levels above it for context.`,
         get_industry_companies: `The largest companies classified into a sub-industry (or the level that answers it), with market cap, marking the ones OUR analysts cover. Read it before answering: an industry whose numbers are mostly one company is that company.`,
         get_industry_view: `The house's STANDING answer on a sub-industry — the three grades with their reasoning, reopen conditions, when it is next due, and its revision history. Read it before a review.`,
+        // The weekly screen's catalyst read (docs/design/industry-screener.md): who reports when. Inserted
+        // before `consult`, which stays last.
+        get_earnings_calendar: `Upcoming earnings dates between two dates (YYYY-MM-DD, window up to ~3 months), optionally for specific symbols — PASS the industry's leaders and largest companies: a market-wide ask returns only the soonest rows. For the weekly screen's catalyst (Q11): an industry whose largest companies report inside the four-week window has a DATED event.`,
         consult: consultDescription(`Reach for it when you are about to DEPART from a measured code grade on a large industry, and the argument is close — the override is what the house will read, and it should survive someone attacking it. Not for agreeing with the numbers.`),
     }),
 ]
@@ -68,6 +72,9 @@ const TOOL_HANDLERS = {
         const [rows, covered] = await Promise.all([readCompanies(at.level, at.code, { limit }), coveredSymbols()])
         return `${at.name} (${at.level.replace('_', ' ')}) — largest ${rows.length}:\n${formatCompanies(rows, covered)}`
     }, (e) => `Could not read the companies: ${e.message}`, LOG),
+    get_earnings_calendar: makeToolHandler('get_earnings_calendar',
+        ({ from, to, symbols }) => getEarningsCalendar(from, to, Array.isArray(symbols) ? symbols : []),
+        (err) => `Could not fetch the earnings calendar: ${err.message}`, LOG),
     get_industry_view: makeToolHandler('get_industry_view', async (input) => {
         const b = await readSubIndustry(_industry(input))
         if (!b) return 'Unknown sub-industry — call list_industries for the codes and names.'
@@ -105,24 +112,25 @@ async function chatStream({
         meta: { userPrompt },
     })
 
-    const { reply, views } = _parseStrategyResponse(raw)
-    logger.info(LOG, 'chatStream done', { replyLength: reply.length, views: views.length })
-    return { reply, phase: phase.get(), views, ...route.result() }
+    const { reply, views, screens } = _parseStrategyResponse(raw)
+    logger.info(LOG, 'chatStream done', { replyLength: reply.length, views: views.length, screens: screens.length })
+    return { reply, phase: phase.get(), views, screens, ...route.result() }
 }
 
 // ─── extraction (pure) ────────────────────────────────────────────────────────
 
 /**
- * Every <industry_view> block in the raw output → `{ reply, views }`. A block without an `industry` is
- * dropped — nothing could be published against it. Full checking happens at publish (checkDraft).
+ * Every <industry_view> and <industry_screen> block in the raw output → `{ reply, views, screens }`. A
+ * block without an `industry` is dropped — nothing could be published against it. Full checking happens
+ * downstream (checkDraft for views, checkScreen for screens).
  */
 export function _parseStrategyResponse(raw) {
     const text  = raw ?? ''
-    const reply = stripEmitTags(text, ['industry_view', 'phase', ...ROUTE_TAGS]).trim()
-    const views = parseEmitBlocks(text, 'industry_view', LOG)
+    const reply = stripEmitTags(text, ['industry_view', 'industry_screen', 'phase', ...ROUTE_TAGS]).trim()
+    const withIndustry = (tag) => parseEmitBlocks(text, tag, LOG)
         .filter(v => v && typeof v === 'object' && !Array.isArray(v) && typeof v.industry === 'string' && v.industry.trim())
         .map(v => ({ ...v, industry: v.industry.trim() }))
-    return { reply, views }
+    return { reply, views: withIndustry('industry_view'), screens: withIndustry('industry_screen') }
 }
 
 function _buildSystemPrompt() {
@@ -139,6 +147,9 @@ function _buildSystemPrompt() {
  * it was brought back. Null when there is nothing to add.
  */
 export function _buildTurnContext(chatState) {
+    if (typeof chatState?.screen === 'string' && chatState.screen.trim()) {
+        return `This is the WEEKLY INDUSTRY SCREEN for the engine run of ${chatState.screen.trim()} — follow "The weekly screen" in your instructions. No <industry_view> blocks this turn.`
+    }
     const focus = typeof chatState?.industry === 'string' && chatState.industry.trim() ? chatState.industry.trim() : null
     if (!focus) return null
     const why = typeof chatState?.review_reason === 'string' && chatState.review_reason.trim()

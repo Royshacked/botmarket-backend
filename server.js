@@ -74,6 +74,8 @@ import { talosService }     from './monitoring/talos.monitor.service.js'
 import { coverageMonitorService } from './monitoring/coverage.monitor.service.js'
 import { industryViewMonitorService } from './monitoring/industryView.monitor.service.js'
 import { ensureIndustryViewIndexes } from './api/strategy/industryView.service.js'
+import { industryScreenMonitorService } from './monitoring/industryScreen.monitor.service.js'
+import { ensureIndustryScreenIndexes } from './api/strategy/industryScreen.service.js'
 import { themisService }      from './monitoring/themis.monitor.service.js'
 import { executionReconciler } from './monitoring/execution.reconciler.js'
 import { paperFillService }  from './monitoring/paperFill.service.js'
@@ -224,6 +226,7 @@ ensureWorkspaceIndexes()
 ensurePendingActionIndexes()
 ensureAetherIndexes()
 ensureIndustryViewIndexes().catch(() => {})   // Pythia's industry_view (api/strategy/industryView.service.js)
+ensureIndustryScreenIndexes().catch(() => {}) // Pythia's weekly industry_screen (api/strategy/industryScreen.service.js)
 threadService.ensureThreadIndexes()
 
 // ─── Background loops ─────────────────────────────────────────────────────────
@@ -258,6 +261,7 @@ function startBackgroundLoops() {
     startLoop('guardSweep',   guardSweepService)
     startLoop('coverage',     coverageMonitorService)
     startLoop('industryView', industryViewMonitorService)
+    startLoop('industryScreen', industryScreenMonitorService)
     startLoop('themis',       themisService)
     startLoop('reconciler',   executionReconciler)
     startLoop('paperFill',    paperFillService)

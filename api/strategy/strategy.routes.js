@@ -4,6 +4,7 @@ import { requireAuth, requireAdmin } from '../../middleware/auth.middleware.js'
 import {
     streamStrategy,
     listIndustries, getIndustry, publishIndustry,
+    getScreen, runScreenNow,
 } from './strategy.controller.js'
 
 const router = express.Router()
@@ -22,6 +23,11 @@ router.use(requireAuth)
 // the engine's measurements; one sub-industry by its 8-digit code.
 router.get('/industries',        log, listIndustries)
 router.get('/industries/:code',  log, getIndustry)
+
+// The weekly industry screen (docs/design/industry-screener.md): the latest verdict per industry, read by
+// everyone; running it now is the house's spend, so admin-only.
+router.get('/screen',            log, getScreen)
+router.post('/screen/run',       requireAdmin, log, runScreenNow)
 
 // Authoring: the streaming desk (emits <industry_view> drafts) and publishing a reviewed draft.
 router.post('/stream',           requireAdmin, log, streamStrategy)
