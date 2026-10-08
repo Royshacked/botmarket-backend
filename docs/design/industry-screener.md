@@ -84,7 +84,7 @@ engine from the universe. Industry ETFs are optional context, because most sub-i
 | Spec | Data | Status |
 |---|---|---|
 | Q12 Volume | daily volume | needs the daily backfill |
-| Q13 Sentiment | put/call, retail sentiment, analyst consensus | analyst ratings: FMP `grades-historical` (depth unchecked). Put/call and retail sentiment: **no source, N/A** |
+| Q13 Sentiment | put/call, retail sentiment, analyst consensus | analyst ratings: FMP `grades-historical`, monthly from about 2018-12 (checked 2026-10-08 on AAPL, XOM, DHI: 90–94 months), so under the 10 years the full test asks for. Put/call and retail sentiment: **no source, N/A** |
 | Q14 Institutional flows | ETF fund flows; 13F | **unchecked**; N/A until a source is found |
 
 ## 4. Classification
@@ -167,7 +167,7 @@ backfill and the Pythia inputs as they stood on each past date (statements carry
 5. **Pythia's agent + tool:** classification, reasons, notes, leading stocks, changes since last run.
 6. **Board:** buckets in plain words on IndustryView.
 7. **Full backtest (§5.2).**
-8. **Source checks:** VIX, ETF flows, 13F, analyst rating depth. Each stays N/A until found.
+8. **Source checks:** VIX, ETF flows, 13F (analyst rating depth checked: from about 2018-12). Each stays N/A until found.
 
 ## 7. Open
 
