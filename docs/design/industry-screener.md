@@ -67,6 +67,26 @@ engine from the universe. Industry ETFs are optional context, because most sub-i
 | Q4 Moat | Q2 economics: concentration (top-5 share) and its trend, margin stability | measured stand-in; pricing power stays judgment, labelled so |
 | Q5 Cyclicality | Q3 cycle: margins against 10-year range | built; maps to early / mid / late / bust |
 
+**BUILT 2026-10-08** (`aether_engine/screener/quality.py`, written by the same job onto each
+`industry_timing` row as `quality`). Scored from the industry METRICS (the measured numbers, all 163),
+not from Pythia's reviewed grades (66 answered on axl_dev, 0 in prod); the agent in step 5 can weigh a
+reviewed grade that departs. Thresholds fixed before the run:
+
+| Q | Scored as |
+|---|---|
+| Q1 | The industry's AGGREGATE return (ROIC; ROE for financials), not the median company's — medians let small loss-makers outvote NVDA/AVGO/MSFT (the metrics module's finding). 2 = ≥ 12% and above its cost of capital; 1 = above its cost of capital; 0 = below. "Stable across a cycle" is not measured for returns |
+| Q2 | Healthy = 10-year mean operating margin ≥ the median industry's (10.7% on this run); stable = coefficient of variation ≤ 0.25; expanding = trailing twelve months above the 10-year mean (stand-in for "3–5 years"). 2 = healthy and (stable or expanding); 1 = one; 0 = neither. Financials: ROE vs cost of equity |
+| Q3 | Revenue CAGR vs NOMINAL US GDP (FRED `GDP`, annual averages) over 10 and 3 years: 5.4% and 5.8% for 2025. 2 = beats both; 1 = one; 0 = neither |
+| Q4 | Measured stand-in: top 5 ≥ 60% of revenue in an industry of ≥ 8 companies (consolidated), and earning above its cost of capital (barriers holding). 2 = both; 1 = one. Pricing power is judgment, not scored |
+| Q5 | From the cycle placement: narrow range = 2; peak: cyclical (late) = 0, not cyclical = 1; mid: cyclical = 1, not = 2; trough: revenue growth improving over two quarters = 2 (early / recovering), else 1 (bust / low) |
+
+**First run (asof 2026-10-07):** all five answered for 163 of 163. Quality: 1→1, 2→6, 3→16, 4→14,
+5→25, 6→37, 7→25, 8→22, 9→17 (64 at ≥ 7). Cycle: 52 mid, 31 late, 23 high, 22 none, 18 early, 17 bust/low.
+Spot checks read right: semiconductors 9 (ROIC 18.7%, margin 24%, 12.6%/yr growth, top 5 at 77%);
+oil refining 4 (thin margins, revenue −10% over 3 years, late cycle); electric utilities 5 (ROIC 5.2%
+against a 4.4% hurdle, slower than GDP). The metrics call semiconductors NOT cyclical (margin CV 0.19, no
+10% revenue drop in the window), so their record margins cost 1 point, not 2.
+
 ### Step 3 — Timing (Q6–Q11)
 
 | Spec | Data | Status |
@@ -157,6 +177,16 @@ every swing bucket by one level. Thresholds are fixed as written and are not tun
 | Avoid | **No** | — | Not good now |
 
 The spec has no "yes, long term only" bucket: a good business with weak timing is a wait, not a buy.
+
+**OPEN (found 2026-10-08, first run with both halves): a gap in the buckets.** Quality ≥ 7 with
+Timing 6–7 matches none of them (Swing + Long-term needs Timing ≥ 8, Long-term watchlist needs < 6):
+22 industries today with Q11 = 0, 31 with Q11 = 2. Roy decides where they go.
+
+**Q11 is a large lever.** The engine's Timing sits mostly at 4–7 of 10, so the agent's 2 catalyst points
+move many industries across the 8 line: swing only 11 → 46 and avoid 88 → 53 between Q11 = 0 and 2.
+Preview with Q11 = 0, Swing + Long-term: life-science tools, semiconductors, communications equipment,
+semiconductor equipment, health care distributors, managed health care, systems software,
+pharmaceuticals, electronic components.
 The board lists every industry, sorted by verdict and then by Timing score.
 
 ## 5. Testing
@@ -219,7 +249,8 @@ backfill and the Pythia inputs as they stood on each past date (statements carry
 3. **Engine job:** regime + Q6–Q10 + Q12 per sub-industry, stored with as-of dates. **BUILT
    2026-10-08 (§3.1)**; first real run after the backfill; Render crons (daily refresh + this job)
    not added yet.
-4. **Pythia read:** Q1–Q5 from existing views, plus GDP comparison and margin direction.
+4. **Pythia read:** Q1–Q5 from existing views, plus GDP comparison and margin direction. **BUILT
+   2026-10-08** from the industry metrics (§3, Step 2).
 5. **Pythia's agent + tool:** classification, reasons, notes, leading stocks, changes since last run.
 6. **Board:** buckets in plain words on IndustryView.
 7. **Full backtest (§5.2).**
