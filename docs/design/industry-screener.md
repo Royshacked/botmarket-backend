@@ -260,6 +260,11 @@ backfill and the Pythia inputs as they stood on each past date (statements carry
    industry data release), with the date and the mechanism named. 1 = an identifiable driver with no
    date in the window. 0 = nothing named. The code holds the claim: a 2 without a date in the window or
    a mechanism is marked down (to 1 with a reason, else 0), and the correction is kept on the row.
+   **Known and accepted (Roy, 2026-10-08, after the first live run):** in earnings season the rule
+   gives nearly every industry a 2. The first run (window 2026-10-07 to 11-04, mid Q3 season) scored
+   60 of 66 at 2, all from earnings reports, and the swing buckets filled (31 swing + long-term, 42
+   swing only). Offered: earnings count only 1, or only when results are expected to swing. Roy kept
+   the rule as is.
 2. **Scope:** the agent looks only where it matters: engine timing 6 or 7 (Q11 decides the bucket) and
    the top two buckets (they need notes). Every other industry's Q11 is "not assessed: could not change
    this bucket".
