@@ -121,6 +121,14 @@ The engine scores Q6–Q10 (max 10) and flags Q12; Q11 (the last 2 Timing points
 (S&P 500 0.2% below its 52-week high, 200-day rising, volatility normal); 155 of 163 sub-industries
 scored; 7 baskets N/A (fewer than 3 liquid companies).
 
+**First real run (2026-10-08, asof 2026-10-07, after the full backfill):** 2,743 of 2,788 priced
+(98.4%); regime GREEN; 162 of 163 sub-industries scored (Multi-Sector Holdings N/A: 2 liquid
+companies). Engine Timing (of 10): 3→6 rows, 4→30, 5→49, 6→41, 7→21, 8→11, 9→4. Q12: 31 early,
+131 neutral, none crowded. Top: health care distributors / services / managed care, alternative
+carriers (9); bottom: utilities, rail, multi-family REITs (3) — partly by design, since Q10 asks for a
+2%+ daily range that low-volatility groups do not have. Sub-industries that share a parent's basket
+show the same numbers.
+
 ## 4. Classification
 
 As in the spec (Appendix, Step 5): Quality max 10, Timing max 12, five buckets, Red regime downgrades
