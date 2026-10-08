@@ -316,6 +316,18 @@ aether-engine `data/screener_backtest.json` (aether 0d819b3).
   heavily overlapping 12-month windows and no significance test, and survivorship flatters it.
   Testing quality alone needs its own declared test.
 
+#### 5.2.3 Holding periods — declared 2026-10-08 AFTER the 4-week result, BEFORE any other run
+
+Roy asked for longer holds. Choosing a hold after seeing results is how a backtest finds luck, so the
+whole set is fixed here and every one is reported:
+
+- **Holds:** 4 (a rerun, as a check that it reproduces §5.2.2), 8, 12, 16, 26 and 52 weeks; all three
+  Q11 variants. Everything else exactly as §5.2.1 (decisions, buckets, costs, benchmark).
+- **Bar at each hold:** as §5.2.1, with Newey–West lags of hold − 1 for the longer overlap.
+- **Consistency rule (against chance across six tries):** a hold that passes counts only if a
+  neighbouring hold in the list is also positive in both halves. An isolated pass is reported as
+  chance.
+
 ### 5.3 Step 5 — the weekly screen (BUILT 2026-10-08)
 
 **Decided by Roy, 2026-10-08:**
