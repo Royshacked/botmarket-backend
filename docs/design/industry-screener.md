@@ -349,6 +349,42 @@ reproduced §5.2.2 exactly. Trade portfolio minus the equal-weight benchmark, pe
   it leads. Not tested for significance (overlapping windows).
 - Bear weeks (11) stay too few to read.
 
+#### 5.2.4 The fairer tests — declared 2026-10-08 after critiquing §5.2.2-3, BEFORE any run (Roy)
+
+The first test had five weaknesses that could hide a real edge (critique, 2026-10-08): the Trade
+bucket held ~half of all industries every week (66 of 136), so it was barely a filter; it tested entries
+only, with fixed holds and no exits; it could only detect an edge of ~4.5%/year (t = 2); dropping
+delisted companies flatters weak industries; equal-weighted baskets let small, noisy companies drive
+them. (a)–(c) answer three of these; the delisted fix needs FMP Premium. Everything not stated is as
+§5.2.1 (2014–2026 weekly decisions, point in time, 10bp per side, halves 2014–19 / 2020–26, holds
+4/8/12/16/26/52 with §5.2.3's neighbour rule, survivors only). Every line below is reported.
+
+**(a) Ranking — does the score carry information, wherever the bucket lines sit?** At each decision,
+rank all scored baskets by the TIMING score (engine Q6–Q10 + mechanical Q11, 0–12; ties broken by Q6's
+relative-strength percentile).
+- Measures per hold: the mean weekly rank IC between the score and the basket's forward return
+  (Newey–West, hold − 1 lags), and the TOP decile's forward return minus all baskets', net of 20bp.
+- **Pass** at a hold: IC > 0 with t ≥ 2, positive in both halves, AND top-decile net excess > 0.
+- Reported the same way, same bar, as alternatives: ranked by QUALITY (Q1–Q5, ties by timing), and
+  by QUALITY + TIMING.
+
+**(b) Professional exits — entries plus risk control, on single companies.** Positions are the five
+largest liquid companies (cap at the prior month-end) of every Trade basket (mechanical Q11), one
+position per company per decision, entered at the decision's close. Each position exits at the FIRST
+of: a close below entry − 2 × its 14-day ATR (a fixed initial stop); a close below its own 50-day average
+(trend break); 26 weeks (a time stop). 10bp per side.
+- The portfolio's weekly return is the mean of the open positions' returns that week.
+- **Benchmark:** the same rules on the five largest of EVERY scored basket.
+- **Pass:** the weekly excess is positive with Newey–West t ≥ 2 (8 lags), positive in both halves.
+- **Reported:** trades, win rate, average win and loss, average days held, CAGR, max drawdown, and the
+  share of exits by stop, trend and time.
+
+**(c) Liquid instruments — industries as professionals hold them.** Each basket becomes its five
+largest liquid companies, equal-weighted, instead of every liquid member. This is the stand-in for an
+industry ETF, which is cap-weighted and top-heavy; ETFs themselves are not mapped to GICS
+sub-industries in our data. Then §5.2.3 exactly: Trade against all, three Q11 variants, six holds, same
+bar and neighbour rule.
+
 ### 5.3 Step 5 — the weekly screen (BUILT 2026-10-08)
 
 **Decided by Roy, 2026-10-08:**
