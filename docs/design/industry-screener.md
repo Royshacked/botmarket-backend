@@ -290,6 +290,32 @@ Fixed here so nothing can move after the numbers are seen; every alternative lis
   S&P 500 at least 20% below its running high at the decision); and the **Avoid** bucket's forward
   returns, to see whether what the screen rejects lags.
 
+#### 5.2.2 Result (run 2026-10-08): FAILED in every variant
+
+Survivors only. 665 weekly decisions 2014-01-03..2026-09-25; 178 baskets over time; 90,535
+basket-weeks; quality from 153 month-ends (annual stand-in for 70% of companies in 2014, 4% by 2026).
+Stored as `signal_backtests` `2026-10-08|industry_screener|survivors_only`, weekly series in
+aether-engine `data/screener_backtest.json` (aether 0d819b3).
+
+| Q11 | Trade − EW, per week | t | 2014–19 / 2020–26 | Trade CAGR | EW CAGR | S&P CAGR | Max DD (Trade / EW / S&P) | Trades, win rate |
+|---|---|---|---|---|---|---|---|---|
+| mechanical | −0.035% | −0.82 | −0.019% / −0.049% | 8.5% | 10.0% | 12.0% | −42.0% / −41.1% / −31.8% | 43,768, 55.2% |
+| 0 | −0.043% | −0.78 | +0.017% / −0.095% | 8.2% | 10.0% | 12.0% | −39.7% / −41.1% / −31.8% | 26,194, 55.2% |
+| 2 | −0.046% | −1.13 | −0.021% / −0.068% | 7.9% | 10.0% | 12.0% | −41.2% / −41.1% / −31.8% | 57,864, 55.1% |
+
+- **The Trade verdict does not beat holding every industry.** It trails the equal-weight benchmark by
+  about 2% a year, not significantly. Average win +5.1%, average loss −4.9% per 4-week trade, against a
+  benchmark trade averaging +0.90%.
+- **What the screen rejects did not lag.** Avoid baskets earned +1.31% over 4 weeks against +1.10%
+  for all (mechanical Q11): the opposite of the filter's claim, as momentum alone showed (§5.1).
+- **Bear markets:** only 11 decision weeks were 20%+ below the S&P's high (81 trades). The Trade
+  portfolio beat the benchmark there (+0.89%/week), but 11 weeks is not evidence.
+- **The long-term watchlist is the one encouraging number, and it is NOT a tested result:**
+  Quality ≥ 7 with Timing < 8 earned 18.8% over the next 12 months against 14.6% for all baskets
+  (mechanical; 17.3% with Q11 = 0, 21.7% with Q11 = 2). It was declared "reported, no bar", has
+  heavily overlapping 12-month windows and no significance test, and survivorship flatters it.
+  Testing quality alone needs its own declared test.
+
 ### 5.3 Step 5 — the weekly screen (BUILT 2026-10-08)
 
 **Decided by Roy, 2026-10-08:**
