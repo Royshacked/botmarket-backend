@@ -302,14 +302,22 @@ backfill and the Pythia inputs as they stood on each past date (statements carry
    2026-10-08** from the industry metrics (§3, Step 2).
 5. **Pythia's agent + tool:** classification, reasons, notes, leading stocks, changes since last run.
    **BUILT 2026-10-08 (§5.3).**
-6. **Board:** buckets in plain words on IndustryView.
+6. **Board:** buckets in plain words on IndustryView. **BUILT 2026-10-08:** the Forecasts tab opens on
+   "Trade now" when a screen exists (regime line; industries grouped by verdict; Trade / Wait / No chip,
+   horizon, one-line reason); a row opens onto notes, main risk, catalyst, the quality and timing scores
+   and the leaders; "Structure" keeps the three answers (frontend 46b1281, bundle in backend 523fdce;
+   driven with `scripts/drive-screen-ui.mjs`).
 7. **Full backtest (§5.2).**
 8. **Source checks:** VIX, ETF flows, 13F (analyst rating depth checked: from about 2018-12). Each stays N/A until found.
 
 ## 7. Open
 
 - ~~How often it runs~~ — **weekly**, decided by Roy 2026-10-08 (§5.3).
-- Whether the board shows the scores under the bucket, or only the bucket and reason (step 6).
+- ~~Whether the board shows the scores~~ — on the line: the verdict, horizon and a reason (its two
+  scores and a dated catalyst); every question's score in the opened row (step 6).
+- **To go live (Roy):** push the three repos; sync the aether Render blueprint (two new crons, FRED key);
+  set `INDUSTRY_SCREEN=true` on the backend service. Prod's first screen follows the first Sunday
+  engine run. The `industry_index` lines in `test` are already seeded.
 
 ---
 
