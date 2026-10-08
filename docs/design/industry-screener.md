@@ -111,7 +111,7 @@ results:
 | Q6 | rank on 6- and 12-month returns | the mean of the two percentile ranks; top 20% = 2, bottom 20% = 0 |
 | Q7 | above a rising 50-day and 200-day | one point for each average the index is above while it rises (rising = above its value 21 trading days earlier) |
 | Q8 | >60% = 2; "carried by one or two names" = 0 | under 40% = 0 |
-| Q9 | near the MA or a fresh breakout = 2; >15–20% or >3 ATRs = 0 | up to 5% above the 50-day (or below it) = 2; over 15% or over 3 ATRs = 0 (ATR = mean absolute daily move of the index, 14 days) |
+| Q9 | near the MA or a fresh breakout = 2; >15–20% or >3 ATRs = 0 | **Changed by Roy, 2026-10-08, after the first real run:** today's distance above the 50-day as a percentile of the same distance over the industry's previous year (≥120 readings): above the 90th = 0, 70th–90th = 1, else 2. The first form (≤5% = 2; >15% or >3 ATRs = 0) read 3 ATRs of a smoothed index as ~4–5%, so semiconductors at their usual +7% scored "extended" |
 | Q10 | range ~2–4%+; several stocks at 1M+ shares | one point for a median daily range ≥ 2%, one for ≥ 3 companies averaging 1M+ shares (20 days) |
 | Q12 | rising moderately on up days = early; extremely heavy after a long run = crowded | up-day volume (last 20 days) ≥ 1.1× the prior 100-day average = early; ≥ 1.5× AND Q6 = 2 = crowded |
 
@@ -128,6 +128,13 @@ companies). Engine Timing (of 10): 3→6 rows, 4→30, 5→49, 6→41, 7→21, 8
 carriers (9); bottom: utilities, rail, multi-family REITs (3) — partly by design, since Q10 asks for a
 2%+ daily range that low-volatility groups do not have. Sub-industries that share a parent's basket
 show the same numbers.
+
+**Rerun with the percentile Q9 (same day):** Q9 = 2 for 160 of 162, 1 for one (Systems Software,
++9.6%, 71st percentile), 0 for one. Engine Timing: 3→7, 4→30, 5→48, 6→40, 7→17, 8→9, 9→7, 10→4; 20
+industries at 8+ (semiconductors, oil refining, tech hardware, life-science tools now among them).
+**Known property:** after a year-long uptrend, the industry's own year is itself extended, so the
+percentile rarely flags — today's +5–7% sits mid-range for those groups. A longer reference (2–3 years,
+from the Parquet history) would flag more; not changed, because the threshold was fixed before the run.
 
 ## 4. Classification
 
