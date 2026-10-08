@@ -328,6 +328,27 @@ whole set is fixed here and every one is reported:
   neighbouring hold in the list is also positive in both halves. An isolated pass is reported as
   chance.
 
+**Result (run 2026-10-08): no hold passes, in any variant; nothing counted.** The 4-week line
+reproduced §5.2.2 exactly. Trade portfolio minus the equal-weight benchmark, per week (t):
+
+| Hold | mechanical Q11 | Q11 = 0 | Q11 = 2 |
+|---|---|---|---|
+| 4w | −0.035% (−0.82) | −0.043% (−0.78) | −0.046% (−1.13) |
+| 8w | +0.010% (0.50), both halves + | −0.000% (−0.01) | +0.002% (0.15) |
+| 12w | +0.003% (0.22), both halves + | −0.008% (−0.27) | −0.001% (−0.05) |
+| 16w | +0.004% (0.29), both halves + | +0.009% (0.39), both halves + | +0.001% (0.11), both halves + |
+| 26w | +0.005% (0.56) | +0.012% (0.75), both halves + | +0.002% (0.26) |
+| 52w | +0.006% (0.70) | +0.013% (0.90) | +0.000% (0.03) |
+
+- Beyond 4 weeks the Trade portfolio is indistinguishable from holding every industry: the largest
+  gap is 0.013% a week (about 0.7% a year), the best t is 0.90 against a bar of 2.
+- The 4-week shortfall was largely trading cost: the benchmark itself earns 10.0% a year at a 4-week
+  turnover and 12.4% at 52 weeks.
+- **The Avoid bucket beat the average at EVERY hold** (mechanical): +0.21% over 4 weeks, +0.46% (8),
+  +0.67% (12), +0.55% (16), +0.57% (26), +1.09% (52). What the screen rejects does not lag; if anything
+  it leads. Not tested for significance (overlapping windows).
+- Bear weeks (11) stay too few to read.
+
 ### 5.3 Step 5 — the weekly screen (BUILT 2026-10-08)
 
 **Decided by Roy, 2026-10-08:**
