@@ -252,6 +252,44 @@ including a bear market, results split bull/bear, against SPX buy-and-hold and a
 industry benchmark, no look-ahead, costs included, every alternative reported. It needs the daily
 backfill and the Pythia inputs as they stood on each past date (statements carry filing dates).
 
+#### 5.2.1 The run, as declared on 2026-10-08 BEFORE any code or result (Roy)
+
+Fixed here so nothing can move after the numbers are seen; every alternative listed is reported.
+
+- **Period:** weekly decisions on the last trading day of each week, **2014-01 to 2026-09** (12+ years;
+  the 2020 crash and the 2022 bear inside). Quality needs 3+ years of filings, and annual statements
+  start with fiscal 2011, so 2014 is the earliest honest start. Halves: **2014–2019 / 2020–2026**.
+- **Point in time:** prices from the Parquet daily history (windows ending at the decision); quality
+  from `industry_metrics` recomputed as of each month-end from statements ACCEPTED by then, carried to
+  that month's decisions; market caps from `monthly_prices` at the prior month-end; the $1M
+  dollar-volume floor on the 60 days before the decision.
+- **Declared deviations:**
+  1. **Annual stand-in for the trailing 12 months.** Quarterly statements cover only the last 12
+     quarters, and fetching more would break the 512 MB cluster cap. Where no TTM margin exists, the
+     latest ANNUAL margin stands in, the same rule on every date. It feeds Q2 "expanding" and Q5.
+  2. **Q11 is mechanical:** 2 when one of the basket's five largest liquid companies (cap at the prior
+     month-end) has an earnings date in the 28 days after the decision (FMP per-company earnings
+     history, kept in a local file, not Mongo); else 0. This mirrors the live screen, where 60 of 66
+     catalysts were earnings. **Alternatives reported:** Q11 = 0 everywhere, and Q11 = 2 everywhere.
+  3. **Survivors only:** today's universe and today's GICS classification (as every result so far).
+  4. **Today's data for two inputs:** the cost-of-capital hurdle (only the current Damodaran year is
+     stored) and GDP (current FRED vintage). Both move slowly; recorded as look-ahead.
+- **Buckets:** by `bucketFor` exactly as live (§4, Roy's widened watchlist, red regime downgrade).
+- **A trade:** at each decision, every industry in a **Trade** bucket (swing + long-term, swing only) is
+  bought, equal-weighted across industries, each industry as its equal-weighted liquid basket (members
+  fixed at the decision), held **4 weeks**, **10bp per side**. Cohorts overlap (one opens each week);
+  the portfolio's weekly return is the mean of the open cohorts'. **Long-term watchlist:** held 12
+  months, reported separately, no bar.
+- **Benchmarks:** the equal-weighted basket of ALL scored industries traded the same way (the bar),
+  and S&P 500 buy-and-hold.
+- **PASS** when ALL hold: the Trade portfolio's mean weekly return minus the equal-weight benchmark's,
+  net of costs, is positive with Newey–West t ≥ 2 (3 lags, for the overlapping cohorts), and positive
+  in both halves.
+- **Reported** (spec): number of trades, win rate (a trade's net return > 0), average win and loss, max
+  drawdown, CAGR, for the Trade portfolio, the benchmark and the S&P; split **bull / bear** (bear = the
+  S&P 500 at least 20% below its running high at the decision); and the **Avoid** bucket's forward
+  returns, to see whether what the screen rejects lags.
+
 ### 5.3 Step 5 — the weekly screen (BUILT 2026-10-08)
 
 **Decided by Roy, 2026-10-08:**
