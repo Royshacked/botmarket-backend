@@ -97,11 +97,12 @@ export function forTraders(view) {
 
 // ─── The weekly industry screen (docs/design/industry-screener.md) ──────────
 
-/** The latest published screen: every sub-industry's verdict (trade or not, horizon) and why. */
+/**
+ * The latest published screen: every sub-industry's verdict (trade or not, horizon) and why. `null`
+ * (200) before the first one — not a 404: every board load asks, and "none yet" is not an error.
+ */
 export const getScreen = _handle('getScreen', async (req, res) => {
-    const screen = await industryScreenService.latestScreen()
-    if (!screen) return res.status(404).json({ error: 'No industry screen published yet' })
-    res.json(screen)
+    res.json(await industryScreenService.latestScreen() ?? null)
 })
 
 /**
