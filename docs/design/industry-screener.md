@@ -385,6 +385,37 @@ industry ETF, which is cap-weighted and top-heavy; ETFs themselves are not mappe
 sub-industries in our data. Then §5.2.3 exactly: Trade against all, three Q11 variants, six holds, same
 bar and neighbour rule.
 
+**Result (run 2026-10-08): nothing passes; nothing counted.** Survivors only, 665 decisions.
+
+**(a) Ranking**, mean weekly rank IC (t) and the top decile's net excess over all baskets:
+
+| Hold | Timing | Quality | Quality + timing |
+|---|---|---|---|
+| 4w | +0.019 (1.58), top −0.04% | +0.006 (0.66), top −0.36% | +0.015 (1.56), top −0.15% |
+| 8w | +0.016 (1.05), top +0.05% | +0.008 (0.65), top −0.50% | +0.013 (1.08), top −0.09% |
+| 12w | +0.013 (0.73), top +0.12% | +0.006 (0.46), top −0.66% | +0.009 (0.59), top −0.10% |
+| 16w | +0.018 (0.99), top +0.28% | +0.004 (0.25), top −0.79% | +0.009 (0.55), top −0.02% |
+| 26w | +0.036 (1.88), top +1.29% | −0.001 (−0.04), top −1.26% | +0.017 (0.73), top +0.46% |
+| 52w | +0.020 (0.69), top +2.33% | +0.002 (0.06), top −1.87% | +0.011 (0.30), top +0.02% |
+
+- **Timing carries a weak, consistent signal.** The IC is positive at all six holds and in both halves
+  at every one (12 of 12), but the best t is 1.88 (26 weeks), under the bar of 2. The top decile beats
+  the average only from 8 weeks on, and by little until 26 weeks (+1.3%) and 52 weeks (+2.3%).
+- **Quality as ranked carries no information**, and its top decile LAGS at every hold (−0.4% to
+  −1.9%). Positive in 2014–19, negative in 2020–26. This contradicts the long-term watchlist's 12-month
+  lead (§5.2.2), which was quality ≥ 7 AND timing < 8, never tested on its own.
+
+**(b) Professional exits** (single companies, 2×ATR stop, 50-day trend exit, 26-week time stop):
+Trade minus the same rules on every basket +0.078%/week (about 4%/year), t 1.33, halves +0.003% /
++0.145%: almost all of it after 2020. CAGR 7.4% against 3.4%, max drawdown −25.5% against −29.0%.
+186,889 trades, win rate 33%, average win +7.7%, average loss −3.4%, 18 days held; exits 81% trend,
+19% stop, 1% time. **Note the absolute level:** the same exit rules on every basket made 3.4% a year,
+against ~10% for simply holding the same industries. These stops and trend exits cost far more than
+any selection added in this period.
+
+**(c) Liquid baskets** (five largest companies) reproduce §5.2.3: from −0.047% to +0.012% a week, best
+t 0.74; the 4-week shortfall again ~2% a year of trading cost.
+
 ### 5.3 Step 5 — the weekly screen (BUILT 2026-10-08)
 
 **Decided by Roy, 2026-10-08:**
