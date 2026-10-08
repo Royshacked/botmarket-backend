@@ -1,0 +1,247 @@
+# Pythia's industry screener — trade or not, and on which horizon (2026-10-08)
+
+**PROPOSED, nothing built.** Roy's spec, adopted on 2026-10-08. It replaces the two three-question
+drafts of 2026-10-07 (swing and months to a year), which are deleted. The spec itself is kept word for
+word in the Appendix. This doc adds the decisions, how it maps onto what is built, the data status
+and the build order.
+
+The one line: **Pythia publishes the industry list, and for each industry whether to trade it and on
+which horizon. The screener filters out low-probability industries; it does not pick winners.**
+
+---
+
+## 1. Decisions (Roy, 2026-10-08)
+
+1. **Replace** the swing and months three-question docs with this spec.
+2. **The board shows the bucket to the user in plain words**: "good now for swing", "good now for
+   long term", "both", "swing only", "wait for pullback", "avoid". This is a deliberate exception to
+   the `horizons.md` rule ("show only what passes our own backtest"). The buckets are shown from the
+   first run; the backtest (§5) measures them afterwards.
+3. **Momentum's job is to filter out, not to pick.** Momentum failed as a ranking signal
+   (`horizons.md` §3 Results: no significant spread between top and bottom). Its role here is
+   narrower: **if it can say "this industry is unlikely to do well" with good probability, that is
+   the achievement.** The test in §5.1 measures exactly that, declared before it runs.
+4. **Everything lives under Pythia.** No new desk. Pythia's three structural questions become the
+   quality half of the screener, and Pythia's output becomes **the industry list, whether to trade
+   each industry, and the horizon for it** (§4). This changes Pythia's contract: until now it
+   "never publishes a price direction or a 6-month view" (`pythia-industry-questions.md` §2). It now
+   publishes a trade verdict and a horizon; it still never publishes a weight.
+
+## 2. How it is built: code computes, the agent judges
+
+Same split as every desk (data versus judgment):
+
+| Layer | Does | Where |
+|---|---|---|
+| **Engine (code)** | Every number: regime, moving averages, breadth, extension, ranks, ranges, volume, scores Q1–Q10 and Q12 | aether-engine, a scheduled job, stored per industry with its as-of date |
+| **Pythia (built)** | Quality inputs: ROIC, margins, growth, concentration, cycle position | read, never recomputed (one shared service) |
+| **Pythia's agent (LLM)** | Q11 catalyst, the one-line reasons, the verdict and horizon, the 3–5 line notes, leading stocks, "changes since last run" | the `industry_view` desk, extended; reads the stored numbers through a tool |
+| **Board (FE)** | The industry list with trade verdict and horizon, sorted as the spec's output format | IndustryView (Pythia's existing board) |
+
+The agent never computes a number. A missing number reaches it as N/A, with the reason, and it
+reports it as N/A.
+
+**Unit:** the 163 GICS sub-industries Pythia uses, rolled up when thin (Pythia's rule). The spec asks
+for 50–150 groups; 163 is close and keeps one taxonomy across the app. The 74 GICS industries are
+the fallback if 163 proves too thin for breadth (Q8).
+
+**Industry price series:** an equal-weighted index of the industry's liquid stocks, built by the
+engine from the universe. Industry ETFs are optional context, because most sub-industries have none.
+
+## 3. Mapping each question to data
+
+### Step 1 — Market regime
+
+| Input | Source | Status |
+|---|---|---|
+| S&P 500 against its rising 200-day MA; distance from 52-week high | FMP daily index prices | available, needs the daily fetch |
+| VIX against its 1-year average | FMP index quote (unchecked) or CBOE's public history | **unchecked** |
+
+### Step 2 — Quality (Q1–Q5), from Pythia
+
+| Spec | Pythia measure | Note |
+|---|---|---|
+| Q1 Return on capital | Q2 economics: median ROIC and its spread against cost of capital | built |
+| Q2 Margins | Q2 economics: margin level and stability, 3–5 year direction | built (direction to add) |
+| Q3 Growth | Q1 demand: 10-year revenue CAGR | built; GDP growth to add as the comparison |
+| Q4 Moat | Q2 economics: concentration (top-5 share) and its trend, margin stability | measured stand-in; pricing power stays judgment, labelled so |
+| Q5 Cyclicality | Q3 cycle: margins against 10-year range | built; maps to early / mid / late / bust |
+
+### Step 3 — Timing (Q6–Q11)
+
+| Spec | Data | Status |
+|---|---|---|
+| Q6 Relative strength 6-1 and 12-1 | monthly prices | **in Mongo now** (`monthly_prices`) |
+| Q6 1m and 3m against S&P (context) | monthly / daily prices | now (monthly) |
+| Q7 Trend: above rising 50d and 200d | daily prices | **needs the daily backfill** |
+| Q8 Breadth: share above 50d | daily prices per stock | needs the daily backfill |
+| Q9 Extension: distance above 50d, ATR | daily prices | needs the daily backfill |
+| Q10 Volatility and liquidity | daily prices + volume | needs the daily backfill |
+| Q11 Catalyst | earnings calendar (`get_earnings_calendar`), news, rates and commodities | agent, with tools the desks already have |
+
+### Step 4 — Crowding and flow
+
+| Spec | Data | Status |
+|---|---|---|
+| Q12 Volume | daily volume | needs the daily backfill |
+| Q13 Sentiment | put/call, retail sentiment, analyst consensus | analyst ratings: FMP `grades-historical` (depth unchecked). Put/call and retail sentiment: **no source, N/A** |
+| Q14 Institutional flows | ETF fund flows; 13F | **unchecked**; N/A until a source is found |
+
+## 4. Classification
+
+As in the spec (Appendix, Step 5): Quality max 10, Timing max 12, five buckets, Red regime downgrades
+every swing bucket by one level. Thresholds are fixed as written and are not tuned to past results.
+
+**Pythia's output per industry: trade it or not, and the horizon.**
+
+| Spec bucket | Trade? | Horizon | Board text |
+|---|---|---|---|
+| Swing + Long-term | **Yes** | Swing and long term | Good now — swing and long term |
+| Swing only (for now) | **Yes** | Swing (weeks) | Good now for swing only |
+| Extended — wait for pullback | **Wait** (pullback) | Swing and long term | Good, but extended — wait for a pullback |
+| Long-term watchlist | **Wait** (timing) | Long term | Good for long term — not the moment yet |
+| Avoid | **No** | — | Not good now |
+
+The spec has no "yes, long term only" bucket: a good business with weak timing is a wait, not a buy.
+The board lists every industry, sorted by verdict and then by Timing score.
+
+## 5. Testing
+
+### 5.1 Momentum as a filter (first, runs on data in Mongo now)
+
+The question: **does the bottom of the momentum ranking reliably avoid bad industries?** Declared
+here before any run; the bar is fixed now and not changed afterwards.
+
+- **Signal:** industry 6-1 and 12-1 relative strength (Q6), bottom 20% = "filtered out" (the spec's
+  tier).
+- **Measure:** each month, the share of filtered-out industries that do worse than the median
+  industry over the next 1, 3 and 6 months (the hit rate), and the mean return of the bottom 20%
+  minus the rest.
+- **Pass, at a horizon, when ALL hold:**
+  - hit rate ≥ 55% on average (50% is a coin flip);
+  - bottom-minus-rest negative, with a t-statistic ≤ −2 (Newey–West for overlapping horizons);
+  - the same sign in both halves (2007–16 and 2017–26);
+  - holds after 10bp per trade.
+- **Data:** `monthly_prices` and the existing momentum backtest code (aether). Survivors only, so a
+  pass is provisional until the Premium month adds delisted companies (`horizons.md` §6.4).
+
+**Result (run 2026-10-08): FAILED at every horizon.** Survivors only; 2,788 companies, 145 distinct
+industry baskets, months 2006-02..2026-09. Stored in `signal_backtests` as
+`2026-10-08|momentum_filter|survivors_only` (aether `run_momentum_backtest.py --batch filter`,
+grader `backtest.evaluate_filter`).
+
+| Signal | Horizon | Hit rate (bar ≥ 0.55) | Bottom − rest | t (bar ≤ −2) | 2007–16 / 2017–26 | Net |
+|---|---|---|---|---|---|---|
+| 6-1 | 1m | 0.501 | −0.00% | −0.02 | +0.12% / −0.13% | +0.06% |
+| 6-1 | 3m | 0.503 | −0.20% | −0.47 | +0.32% / −0.72% | +0.03% |
+| 6-1 | 6m | 0.522 | −0.21% | −0.24 | +0.78% / −1.26% | −0.41% |
+| 12-1 | 1m | 0.513 | −0.04% | −0.17 | +0.13% / −0.19% | +0.01% |
+| 12-1 | 3m | 0.509 | −0.00% | −0.00 | +0.46% / −0.45% | +0.02% |
+| 12-1 | 6m | 0.505 | +0.58% | +0.53 | +1.46% / −0.29% | +0.59% |
+
+- **The bottom 20% does worse than the median about half the time: a coin flip.** No t comes near −2.
+- **The halves disagree.** In 2007–16 the filtered-out industries did slightly BETTER than the
+  rest; in 2017–26 slightly worse. The recent half alone is not evidence: picking the half that
+  works is the tuning the spec forbids.
+- **Survivorship works against this test.** Today's companies only means the losers that went
+  bust are missing, which flatters the bottom tier. The delisted rerun (Premium month) could move
+  the result, but not from a coin flip to the bar.
+- **What it means for the screener:** Q6 (relative strength) does not filter out bad industries on
+  its own. **Decided by Roy, 2026-10-08: Q6 stays in the Timing score unchanged, and the full
+  combined test (§5.2) judges it inside the whole filter.** No reweighting before that test.
+
+### 5.2 The full screener (the spec's own test)
+
+The Appendix's "Testing the system" section is the contract: the full combined filter, 10+ years
+including a bear market, results split bull/bear, against SPX buy-and-hold and an equal-weight
+industry benchmark, no look-ahead, costs included, every alternative reported. It needs the daily
+backfill and the Pythia inputs as they stood on each past date (statements carry filing dates).
+
+## 6. Build order
+
+1. **Momentum filter test (§5.1)** on data in Mongo. No FMP calls.
+2. **Daily price + volume backfill** for the universe and the S&P 500 (FMP; check plan limits first,
+   the daily limit was hit on 2026-10-07).
+3. **Engine job:** regime + Q6–Q10 + Q12 per sub-industry, stored with as-of dates.
+4. **Pythia read:** Q1–Q5 from existing views, plus GDP comparison and margin direction.
+5. **Pythia's agent + tool:** classification, reasons, notes, leading stocks, changes since last run.
+6. **Board:** buckets in plain words on IndustryView.
+7. **Full backtest (§5.2).**
+8. **Source checks:** VIX, ETF flows, 13F, analyst rating depth. Each stays N/A until found.
+
+## 7. Open
+
+- How often it runs (daily after close, or weekly).
+- Whether the board shows the scores under the bucket, or only the bucket and reason.
+
+---
+
+## Appendix — Roy's spec (2026-10-08, verbatim)
+
+# Industry Screener Agent — Swing to Long-Term Classification
+
+## Role
+You are an equity research agent. Your job is to scan all industries and classify each one by how suitable it is right now for swing trading, long-term holding, both, or neither. You filter out low-probability industries; you do not predict winners.
+
+## Ground rules
+- Use real market and fundamental data only. For every number, state the source and the as-of date.
+- If data is missing or you cannot compute something, say "N/A" and why. Never estimate or invent figures.
+- Never claim a backtest result unless you actually ran code on real price data. Show the data source, date range, tickers and code.
+- Work at the industry level with fine granularity (GICS industries or a similar set of ~50–150 groups), not just the 11 broad sectors. Use an industry ETF where a liquid one exists; otherwise build an equal-weighted index of the industry's liquid stocks.
+- Avoid survivorship bias: include industries and stocks that existed at the time being analyzed, not only today's survivors.
+
+## Step 1 — Market regime (report at the top, once)
+- Is the S&P 500 above its rising 200-day moving average?
+- How far is it from its 52-week high, and is volatility (e.g., VIX) elevated vs. its 1-year average?
+- Classify the regime:
+  - **Green:** above 200-day MA, near highs, normal volatility → full-size trading.
+  - **Yellow:** mixed signals → reduced size.
+  - **Red:** well below highs with high volatility → momentum strategies are prone to crashes; swing trading at minimum size or not at all.
+
+## Step 2 — Quality questions (long-term lens)
+Score each 0 (fail), 1 (neutral), 2 (pass), with a one-line reason.
+1. **Return on capital:** Is median ROIC high and stable across a full cycle (roughly above 12–15%)?
+2. **Margins:** Are margins healthy and stable or expanding over the last 3–5 years?
+3. **Growth:** Is industry revenue growing faster than GDP?
+4. **Moat / competition:** High barriers to entry, consolidated competition, pricing power?
+5. **Cyclicality:** Is the industry cyclical, and where is it in its cycle (early, mid, late, bust)? Late-cycle peak margins should lower the score.
+
+## Step 3 — Timing questions (swing lens)
+Score each 0 / 1 / 2, with a one-line reason.
+6. **Relative strength:** Rank the industry vs. all industries on 6- and 12-month returns, skipping the most recent month. Top 20% = 2, middle = 1, bottom 20% = 0. Also report 1- and 3-month relative performance vs. the S&P 500 for context only.
+7. **Trend:** Price above a rising 50-day and 200-day moving average?
+8. **Breadth:** Share of the industry's stocks above their 50-day MA. Broad participation (>60%) = 2; carried by one or two names = 0.
+9. **Extension:** Distance above the 50-day MA. Near the MA or a fresh breakout = 2; moderately extended = 1; far above (e.g., >15–20% or >3 ATRs) = 0.
+10. **Volatility and liquidity:** Average daily range around 2–4%+ and several stocks trading 1M+ shares/day?
+11. **Catalyst:** Any identifiable near-term driver (earnings season, rates, regulation, commodity prices, a theme)?
+
+## Step 4 — Crowding and flow checks
+Flag each as Early / Neutral / Crowded, with a one-line reason.
+12. **Volume:** Is volume rising moderately on up days (early), or extremely heavy after a long run (crowded)? Research shows high-volume winners tend to reverse faster.
+13. **Sentiment:** Is sentiment toward this industry extreme in either direction (media hype, retail enthusiasm, put/call, analyst consensus)? Sentiment is a contrarian signal, strongest in speculative, hard-to-value groups.
+14. **Institutional flows:** Is institutional buying new (last 1–2 quarters) or long-running and crowded? Use ETF fund flows as a timely proxy; note that 13F data lags ~45 days. Institutional herding tends to predict positive short-term but negative long-term returns.
+
+## Step 5 — Classification
+Compute a Quality score (Q1–5, max 10) and a Timing score (Q6–11, max 12), then assign one bucket:
+- **Swing + Long-term:** Quality ≥ 7 and Timing ≥ 8, not extended, not crowded.
+- **Extended — wait for pullback:** Quality and Timing strong, but Q9 = 0 or crowding flags are "Crowded".
+- **Swing only (for now):** Timing ≥ 8 but Quality < 7 (e.g., cyclicals, commodities, speculative themes). Trade the move, don't hold long-term.
+- **Long-term watchlist:** Quality ≥ 7 but Timing < 6. Good business, wrong moment; wait for relative strength and trend to turn up.
+- **Avoid:** Weak on both.
+
+In a Red market regime, downgrade every Swing bucket by one level and say so.
+
+## Output format
+1. Market regime summary (2–3 lines, with data and dates).
+2. A table sorted by bucket, then by Timing score:
+   | Industry | Bucket | Quality | Timing | Volume | Sentiment | Inst. flows | Key reason |
+3. For each industry in the top two buckets: 3–5 lines covering the main strengths, the main risk, and 3–5 leading liquid stocks in it (strong relative strength, near highs, not extended).
+4. A short "changes since last run" section if prior results exist.
+5. A data-gaps section listing anything marked N/A.
+
+## Testing the system (only when asked to backtest)
+- Test the full combined filter, not individual filters in isolation.
+- Use 10+ years of data including at least one bear market; report results separately for bull and bear periods.
+- Compare against buying and holding the S&P 500 and an equal-weight industry benchmark.
+- Use only data available at each decision date (no look-ahead), include transaction costs, and report: number of trades, win rate, average win/loss, max drawdown, and CAGR.
+- Do not tune thresholds to maximize past results; if you test alternatives, report all of them.

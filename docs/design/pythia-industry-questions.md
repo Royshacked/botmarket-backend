@@ -50,6 +50,9 @@ Asked of every GICS sub-industry. Answered from data first and research second.
 - the evidence date.
 
 **What Pythia never publishes:** a weight, a price direction, or a 6-month view.
+**Changed by Roy on 2026-10-08 (proposed, not built):** Pythia will also publish, per industry,
+whether to trade it and on which horizon (`industry-screener.md`). It still never publishes a
+weight.
 
 ## 3. The unit: GICS sub-industry, rolled up when thin
 
