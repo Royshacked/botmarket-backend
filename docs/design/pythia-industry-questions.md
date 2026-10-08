@@ -144,7 +144,11 @@ The full map is the dependency sweep of 2026-10-05, file and line in the session
 - **aether-engine:** `channels/`, the channel-state and channel-beta builders and their three Render
   crons. Those crons fail at startup once `pythia_fund_universe` is no longer written.
 - **Collections orphaned:** `tilt` and every `pythia_*` collection. Keep them read-only until
-  archived.
+  archived. **DROPPED 2026-10-08 with Roy's approval** (`tilt` kept): the Atlas cluster hit its
+  512 MB quota (537 MB data + indexes) and blocked every write, prod included. 31 collections with no
+  reference in any live code of the three repos went, in `test` and `axl_dev`: the 8 `pythia_*`
+  and 23 channel-engine `aether_*` (inner facts and parameters, channel state and betas, forecasts,
+  regimes, predictions, edges, taxonomy and the rest). ~148 MB freed; the cluster stood at 389 MB.
 - **Frontend:** the SectorView stance rows, sparklines and channel calls, StrategyPanel's publish
   flow, and TiltReviewBubble.
 
