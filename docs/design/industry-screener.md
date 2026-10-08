@@ -132,9 +132,14 @@ show the same numbers.
 **Rerun with the percentile Q9 (same day):** Q9 = 2 for 160 of 162, 1 for one (Systems Software,
 +9.6%, 71st percentile), 0 for one. Engine Timing: 3→7, 4→30, 5→48, 6→40, 7→17, 8→9, 9→7, 10→4; 20
 industries at 8+ (semiconductors, oil refining, tech hardware, life-science tools now among them).
-**Known property:** after a year-long uptrend, the industry's own year is itself extended, so the
-percentile rarely flags — today's +5–7% sits mid-range for those groups. A longer reference (2–3 years,
-from the Parquet history) would flag more; not changed, because the threshold was fixed before the run.
+**Two years (Roy, same day):** the reference became the previous TWO years. That needs ~560 days of
+each industry's index, more than the daily window, so each basket's line is stored in `industry_index`
+(seeded once with `run_screener_timing.py --seed-from-parquet`, extended by every run). Rerun: 144 lines
+seeded with full two-year history; Q9 = 2 for 161 of 162, 1 for one (Systems Software, +9.6%, 83rd
+percentile), 0 for none. Semiconductors +7.3% sit at the 64th percentile of their two years, oil
+refining +5.8% at the 58th. **So the longer window changed little: on 2026-10-07 no industry is unusually
+far above its 50-day by its own standards.** The S&P is near its high, but industries sit within about
+±7% of their 50-day averages. Q9 will bite when that changes.
 
 ## 4. Classification
 
