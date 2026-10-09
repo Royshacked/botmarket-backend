@@ -608,6 +608,20 @@ variance when the lags approach the sample); treat the 36-month t as uninformati
   (3) two inputs are today's (Damodaran hurdles, GDP vintage); (4) ~16 baskets a month, so a few
   industries may carry it — not yet checked; (5) only ~8 independent years.
 
+#### 5.2.9 Robustness of the quality + price pass — checks declared 2026-10-09 BEFORE the rerun
+
+Report only: none of these re-grades §5.2.8's pass; they show whether it is fragile. All on the same
+decisions, 12 months, against all baskets the same month (t, Newey–West 11 lags):
+
+1. **Who carries it:** the industries most often in good + cheap and their share of the total excess;
+   the sectors' shares.
+2. **Leave out the top contributors:** drop each of the five largest contributors, one at a time, then
+   all five together.
+3. **Leave out 2020** (the crash and the rebound into 2021): decisions in 2020 removed.
+4. **Neighbouring thresholds** (every one reported, none chosen): cheap = top 20% / 40% of own history;
+   good = quality ≥ 6 / ≥ 8.
+5. **Equal-weighted** baskets instead of cap-weighted.
+
 ### 5.3 Step 5 — the weekly screen (BUILT 2026-10-08)
 
 **Decided by Roy, 2026-10-08:**
