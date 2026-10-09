@@ -557,6 +557,34 @@ bucket's forward return minus ALL baskets' in the SAME week, t (Newey–West), h
   dominated by the periods when many industries sat in the watchlist — periods when everything rose. The
   same-week comparison removes the market's moves and reverses the sign. Recorded so nobody builds on it.
 
+#### 5.2.8 Quality paired with price — declared 2026-10-09 BEFORE any code (Roy)
+
+horizons.md §1 always held that the structural answers count toward returns only PAIRED WITH PRICE: a
+good industry at a normalised valuation below its own history. §5.2.7 found quality alone lags (good
+industries are priced as good). This tests the pairing.
+
+- **Data limit (said first):** annual statements start with fiscal 2011, so a point-in-time industry
+  valuation exists from ~2014, and "against its own history" needs 36 months of it: decisions start
+  **2017-01**. A 3–5 year test would have ~2 non-overlapping periods — too few to decide anything. So
+  the **PRIMARY horizon is 12 months** (decisions 2017-01..2025-09); 36 months is REPORTED only.
+- **Decisions:** monthly, at each month-end; everything point in time (statements accepted by then,
+  market caps at that month-end, quality via `quality_at` as in §5.2.1 with its annual stand-in).
+- **Normalised earnings yield, per answering basket** (companies above $300M at the month-end):
+  - non-financials: the basket's 10-year mean operating margin (the metrics' normalised margin) × its
+    companies' latest annual revenue, over enterprise value (market caps + total debt − cash, latest
+    annual balance sheets);
+  - financials (the metrics' cycle measured on ROE): normalised ROE × latest equity, over market cap.
+- **Cheap:** the yield in the TOP 30% of the basket's OWN monthly history (all months from 2014 to the
+  previous month, at least 36). **Expensive:** bottom 30%.
+- **Groups** (each month): **good + cheap** (quality ≥ 7 and cheap) — the PRIMARY; reported:
+  cheap alone, good alone, good + expensive, and cheap against OTHER industries (top 30% of the month's
+  yields).
+- **Returns:** each basket cap-weighted (monthly prices, dividend-adjusted), compounded over the horizon;
+  10bp per side.
+- **The comparison (the bar):** the group's mean forward return minus all baskets' that month. **PASS**
+  (12 months): positive with Newey–West t ≥ 2 (11 lags), positive in both halves (decisions 2017–2020 /
+  2021–2025). Survivors only.
+
 ### 5.3 Step 5 — the weekly screen (BUILT 2026-10-08)
 
 **Decided by Roy, 2026-10-08:**
