@@ -702,6 +702,22 @@ growing +1.4pp (1.66); the rest flat or negative.
 - **As baskets none beats QQQ** (−5.8% at best): step 1 alone does not beat the index — as Roy framed
   it, steps 2–3 must. Survivors only; the Premium-month rerun is still required before live.
 
+#### 5.2.11 Concentration of the step-1 pass — checks declared 2026-10-09 BEFORE the rerun
+
+Report only; none re-grades §5.2.10's pass. All on good + cheap's 12-month hit rate against SPY (pool's
+share minus all companies' share, Newey–West 11 lags):
+
+1. **Who supplies it:** every industry ever flagged — months flagged and its share of the total extra
+   hit rate; sector shares.
+2. **Leave one out:** without each of the five largest contributors in turn, then all five.
+3. **Without 2020** decisions.
+4. **Neighbouring thresholds** (all reported): quality ≥ 6 / 7 / 8 × cheap top 20% / 30% / 40%.
+5. **Without the largest companies:** the pool and the base both drop each industry's top 20% of
+   companies by market cap at the decision.
+
+**Reading, fixed now:** robust if the extra hit rate stays positive in both halves without any single
+top contributor and across the neighbouring thresholds; fragile if dropping one or two industries ends it.
+
 ### 5.3 Step 5 — the weekly screen (BUILT 2026-10-08)
 
 **Decided by Roy, 2026-10-08:**
