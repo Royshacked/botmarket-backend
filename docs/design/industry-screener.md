@@ -509,6 +509,31 @@ trade as gap-ups / episodic pivots.
   (from the saved weekly verdicts — does Pythia's screen add anything to an event); the same reaction
   WITHOUT a beat (does the beat matter, or only the reaction).
 
+**Result (run 2026-10-09): FAILED, and in the opposite direction.** 99,871 reports; 85,914 of liquid
+companies; 13,920 reacted +5% on 2× volume; 11,583 of those beat (451 had no quiet peer). Trades: beat +
+immediate 11,206, beat + technical 10,569 (the 3-day hold filter kept 94%). Each cell: the stock's net
+return minus its sub-industry's quiet peers over the same days (t):
+
+| Hold | Beat, technical (PRIMARY) | Beat, immediate | Beat, technical, with stop | No beat, technical |
+|---|---|---|---|---|
+| 1w | −0.20% (−1.75) | −0.32% (−2.76) | −0.22% (−1.88) | −0.48% (−1.98) |
+| 2w | −0.40% (−3.11) | −0.38% (−2.37) | −0.42% (−3.27) | −0.60% (−2.12) |
+| 4w | −0.74% (−3.64) | −0.85% (−3.98) | −0.95% (−4.17) | −0.62% (−1.22) |
+| 8w | −0.77% (−2.89) | −0.98% (−3.24) | −1.19% (−3.16) | −0.89% (−1.38) |
+
+- **Buying a beat-and-gap-up LOSES against the stock's own industry**, in both halves, at every hold, and
+  significantly from 2 weeks on. On this data (survivors, 2014–2026) gaps fade; they do not drift.
+  Survivorship flatters the gappers (the ones that later collapsed are missing), so the true number is
+  likely worse.
+- **The technical confirmation helps a little:** +0.1% to +0.2% over buying at once. That is not enough to
+  turn a losing setup into a winning one.
+- **The stop made it worse** at 4 and 8 weeks: it cut winners and losers alike after volatile starts.
+- **The beat barely matters:** a gap without a beat fades about as much.
+- **Pythia's screen did not help:** events in Trade industries did worse than events elsewhere at
+  every hold (e.g. −0.34% against −0.03% at 1 week).
+- Win rates of 51–54% and average wins about equal to average losses: a coin flip that pays the
+  spread to the peers.
+
 ### 5.3 Step 5 — the weekly screen (BUILT 2026-10-08)
 
 **Decided by Roy, 2026-10-08:**
