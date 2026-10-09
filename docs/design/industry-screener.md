@@ -416,6 +416,40 @@ any selection added in this period.
 **(c) Liquid baskets** (five largest companies) reproduce §5.2.3: from −0.047% to +0.012% a week, best
 t 0.74; the 4-week shortfall again ~2% a year of trading cost.
 
+#### 5.2.5 Buying leaders on pullbacks — declared 2026-10-09 BEFORE any run (Roy)
+
+**Where the idea came from (so it is clear it was found by looking).** The 34 industries that beat the
+S&P over 2014–2026 were in Trade 54% of weeks against 46% for the rest; but within them, the next 52
+weeks returned +17.9% after a "Trade" week against +25.0% after a "not now" week. The screen says "now"
+after the run and "not yet" on the dips. The hypothesis, hence: **buy long-term leaders when a
+pullback ENDS.** Because it came from the data, it counts only if this declared test passes.
+
+Everything not stated is as §5.2.1 (weekly decisions 2014-01..2026-09, point in time, equal-weighted
+liquid baskets, 10bp per side, halves 2014–19 / 2020–26, holds 4/8/12/16/26/52 with §5.2.3's neighbour
+rule, survivors only). All definitions are on the basket's equal-weighted index, on daily closes,
+evaluated at each decision's close:
+
+- **Leader:** top 30% of all scored baskets by 12-1 return, AND the index is above its 200-day average,
+  which is itself above its value 21 trading days earlier (rising).
+- **Pullback:** the index closed below its 50-day average on at least one of the last 20 trading days.
+- **The pullback ends** (Roy's choice, the PRIMARY rule) — **reclaim:** the index closes above its
+  20-day average. Reported alternatives, same bar:
+  - **range break:** a close above the highest close of the previous 10 days;
+  - **momentum:** the 14-day RSI fell below 40 within the last 20 days and is now above 50;
+  - **breadth:** the share of the basket's companies above their own 50-day average is 15+ points
+    above its low of the last 20 days;
+  - **buy the dip:** the index is below its 50-day average now (no end signal; buying INTO the pullback).
+- **Fresh signals only:** a signal counts at a decision only if its condition is true now and was NOT
+  true at the previous decision (one entry per pullback, not one per week the condition lasts). The
+  leader and pullback conditions must hold at the signal.
+- **The comparison (the bar):** each signal's forward return over the hold, net of 20bp, minus the mean
+  forward return of ALL leaders at the same decision. This separates the TIMING from the leaders' own
+  edge. **PASS** at a hold: the mean of the weekly averages of that excess is positive, Newey–West t ≥ 2
+  (hold − 1 lags), positive in both halves; and the neighbour rule.
+- **Reported:** number of signals, win rate, average win and loss; the same signals against ALL baskets
+  and against the S&P; the leaders-any-week portfolio against all baskets (is being a leader worth
+  anything on its own?).
+
 ### 5.3 Step 5 — the weekly screen (BUILT 2026-10-08)
 
 **Decided by Roy, 2026-10-08:**
