@@ -585,6 +585,29 @@ industries are priced as good). This tests the pairing.
   (12 months): positive with Newey–West t ≥ 2 (11 lags), positive in both halves (decisions 2017–2020 /
   2021–2025). Survivors only.
 
+**Result (run 2026-10-09): PASSED at 12 months — the first pass in §5.2, and narrowly.** Each group's
+forward return (cap-weighted, net of 20bp) minus all baskets' the same month (t); decision months
+2017-01..2025-09 (105) for 12 months, ..2023-09 (81) for 36:
+
+| Group | 12 months (the bar) | 36 months (reported only) |
+|---|---|---|
+| **Good + cheap** (PRIMARY, 1,690 picks) | **+2.41% (2.03), halves +3.16% / +1.78% — PASS** | +8.40% (8.01*) |
+| Cheap alone | +0.13% (0.09) | +7.74% (1.87) |
+| Good alone | −0.06% (−0.08) | −0.74% (−0.31) |
+| Good + expensive | −0.36% (−0.27) | −4.74% (−1.13) |
+| Cheap against other industries | −0.95% (−1.04) | +0.14% (0.04) |
+
+* A t of 8 on 81 overlapping 36-month windows with 35 lags is not credible (Newey–West understates the
+variance when the lags approach the sample); treat the 36-month t as uninformative.
+
+- **The pattern is the one horizons.md predicted on 2026-10-05, before any data:** neither quality nor
+  cheapness alone pays; quality bought cheap against its own history does, and quality bought dear does
+  worst. The hypothesis was not found by looking, which is what makes the pass worth something.
+- **Why it is NOT live yet:** (1) t 2.03 is at the edge of the bar; (2) survivors only, and survivorship
+  flatters CHEAP groups most (value traps that went bust are missing) — the Premium month must rerun it;
+  (3) two inputs are today's (Damodaran hurdles, GDP vintage); (4) ~16 baskets a month, so a few
+  industries may carry it — not yet checked; (5) only ~8 independent years.
+
 ### 5.3 Step 5 — the weekly screen (BUILT 2026-10-08)
 
 **Decided by Roy, 2026-10-08:**
