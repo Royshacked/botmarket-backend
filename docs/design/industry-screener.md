@@ -718,6 +718,28 @@ share minus all companies' share, Newey–West 11 lags):
 **Reading, fixed now:** robust if the extra hit rate stays positive in both halves without any single
 top contributor and across the neighbouring thresholds; fragile if dropping one or two industries ends it.
 
+**Result (run 2026-10-09): broader than the basket result, but by the reading fixed in advance it is
+FRAGILE on one industry — Regional Banks.** The base reproduced §5.2.10 (+4.7pp, t 3.45).
+
+1. **Who supplies it:** 77 industries ever flagged; 54 added, 23 subtracted. Top five = 67% of the total:
+   Regional Banks 30%, Banks (industry level) 12%, Semiconductors 10%, Food, Beverage & Tobacco 8%,
+   Specialty Retail 6%. By sector: Financials 40%, Consumer Discretionary 21%, Information Technology 16%.
+2. **Leave one out:** without Banks, Semiconductors, Food/Beverage/Tobacco or Specialty Retail it holds
+   (+4.2 to +5.0pp, t 2.69–3.42, both halves positive). **Without Regional Banks: +3.2pp, t 1.63, and
+   2021–25 turns negative (−0.6pp).** Without all five: +1.7pp, t 0.96, 2021–25 −1.8pp.
+3. **Without 2020:** +4.2pp, t 3.00, both halves — holds.
+4. **Thresholds:** quality ≥ 6 or ≥ 7 at every cheapness cut is positive in both halves (+2.7 to
+   +6.2pp, t 1.98–3.61); quality ≥ 8 at 20% and 30% turns 2021–25 negative.
+5. **Smaller companies only** (each industry's top 20% by cap removed): +4.5pp, t 3.65, both halves —
+   **not a large-company effect**, unlike §5.2.9's basket.
+
+**Reading (as fixed before the run):** robust to 2020, to size and to four of the five leave-outs, but
+dropping ONE industry — Regional Banks — ends the 2021–25 half. So, by the declared reading, fragile.
+**And it is fragile exactly where survivorship bites hardest:** regional banks were "cheap against their
+own history" in 2023, and the banks that failed that year (Silicon Valley, Signature, First Republic)
+are MISSING from a survivors-only universe — the pool's losers were removed. The Premium-month rerun
+with delisted companies is the test that decides this; until then step 1 has a promising lead, not a rule.
+
 ### 5.3 Step 5 — the weekly screen (BUILT 2026-10-08)
 
 **Decided by Roy, 2026-10-08:**
