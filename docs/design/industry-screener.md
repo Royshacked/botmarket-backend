@@ -675,6 +675,33 @@ trailed SPY by 1.9%/yr and QQQ by 8.2%/yr over 2017–2026, and good + cheap onl
   baskets (cap-weighted) against SPY and against QQQ; the pool's size; 36 months for the hit rate.
   Survivors only — which flatters every pool's hit rate alike, and the cheap pools most.
 
+**Result (run 2026-10-09): good + cheap passes as a hunting ground; hot + growing is close; the rest
+do not.** Hit rate = the share of the pool's companies that beat SPY over the next 12 months, minus the
+share among all companies (percentage points, t). 105 decision months:
+
+| Definition | Pool (median companies) | Hit rate vs all, 12m | Best quartile vs all | Baskets vs SPY | Baskets vs QQQ |
+|---|---|---|---|---|---|
+| **Good + cheap** | 286 | **+4.7pp (3.45), halves +6.8 / +3.1 — PASS** | +2.2% | +0.5% | −5.8% |
+| Hot + growing | 347 | +2.5pp (2.44), halves +3.5 / +1.8 — just short of 2.5 | +0.7% | −1.1% | −7.4% |
+| Getting hot | 311 | +1.5pp (1.14) | +2.0% | +0.1% | −6.2% |
+| Hot | 705 | +0.7pp (0.68) | +0.5% | −1.5% | −7.9% |
+| Growing | 1,095 | +0.2pp (0.19) | −0.6% | −2.4% | −8.7% |
+| Earnings breadth | 702 | −0.1pp (−0.12) | −0.2% | −2.6% | −8.9% |
+| Margins turning up | 334 | −1.4pp (−0.82) | −1.0% | −3.4% | −9.7% |
+
+36 months (reported only): good + cheap +3.6pp (1.35, 2021–25 negative); hot + growing +2.9pp (1.68);
+growing +1.4pp (1.66); the rest flat or negative.
+
+- **For step 1, good + cheap is the hunting ground that works on this data:** about 5 points more of its
+  companies beat SPY over the next year, in both halves, and the hit rate counts every company equally —
+  so, unlike §5.2.9's cap-weighted basket, it is not five mega-caps carrying it. Its best quartile is 2.2%
+  better too: the pool is richer where steps 2–3 pick.
+- **Hot + growing** (leadership confirmed by accelerating demand) is the second candidate: +2.5pp,
+  positive in both halves, t 2.44 against the raised 2.5.
+- **Momentum, demand, earnings breadth and margins alone do not make a better pool.**
+- **As baskets none beats QQQ** (−5.8% at best): step 1 alone does not beat the index — as Roy framed
+  it, steps 2–3 must. Survivors only; the Premium-month rerun is still required before live.
+
 ### 5.3 Step 5 — the weekly screen (BUILT 2026-10-08)
 
 **Decided by Roy, 2026-10-08:**
