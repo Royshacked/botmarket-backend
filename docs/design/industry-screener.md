@@ -310,7 +310,7 @@ aether-engine `data/screener_backtest.json` (aether 0d819b3).
   for all (mechanical Q11): the opposite of the filter's claim, as momentum alone showed (§5.1).
 - **Bear markets:** only 11 decision weeks were 20%+ below the S&P's high (81 trades). The Trade
   portfolio beat the benchmark there (+0.89%/week), but 11 weeks is not evidence.
-- **The long-term watchlist is the one encouraging number, and it is NOT a tested result:**
+- **CORRECTED 2026-10-09 — this lead was an averaging artefact; see §5.2.7.** ~~The long-term watchlist is the one encouraging number, and it is NOT a tested result:~~
   Quality ≥ 7 with Timing < 8 earned 18.8% over the next 12 months against 14.6% for all baskets
   (mechanical; 17.3% with Q11 = 0, 21.7% with Q11 = 2). It was declared "reported, no bar", has
   heavily overlapping 12-month windows and no significance test, and survivorship flatters it.
@@ -533,6 +533,29 @@ return minus its sub-industry's quiet peers over the same days (t):
   every hold (e.g. −0.34% against −0.03% at 1 week).
 - Win rates of 51–54% and average wins about equal to average losses: a coin flip that pays the
   spread to the peers.
+
+#### 5.2.7 Each bucket against the same week's industries — a report, not a declared test (2026-10-09)
+
+Roy asked whether swing needs quality or only timing. By the spec, timing alone makes a swing trade
+(quality < 7 with timing ≥ 8 is "swing only"); quality decides only whether it is also long term (and,
+in a red market, where a swing bucket falls). From the saved weekly verdicts (mechanical Q11), each
+bucket's forward return minus ALL baskets' in the SAME week, t (Newey–West), halves 2014–19 / 2020–26:
+
+| Bucket | 4w | 26w | 52w |
+|---|---|---|---|
+| Swing + long term (Q ≥ 7) | +0.03% (0.41) | −0.74% (−1.34) | −1.18% (−1.09) |
+| Swing only (Q < 7) | +0.10% (1.33) | +0.46% (1.44) | +0.68% (0.85) |
+| Extended | −0.16% (−0.74) | +0.59% (0.49) | +0.72% (0.27) |
+| Long-term watchlist (Q ≥ 7) | −0.31% (−2.70) | −1.38% (−2.59), −1.76% / −1.04% | −2.22% (−2.14), −2.60% / −1.84% |
+| Avoid | −0.04% (−0.45) | −0.02% (−0.06) | +0.04% (0.05) |
+
+- **High quality went with LOWER returns.** The watchlist lagged significantly in both halves; swing +
+  long term did worse than swing only. The ranking test (§5.2.4 a) found the same: quality's top decile
+  lagged at every hold. Good industries are priced as good; the structural answers are a description,
+  and count toward returns only paired with price (horizons.md §1) — as this design always said.
+- **The §5.2.2 "18.8% against 14.6%" was an artefact.** It averaged across all basket-weeks, so it was
+  dominated by the periods when many industries sat in the watchlist — periods when everything rose. The
+  same-week comparison removes the market's moves and reverses the sign. Recorded so nobody builds on it.
 
 ### 5.3 Step 5 — the weekly screen (BUILT 2026-10-08)
 
