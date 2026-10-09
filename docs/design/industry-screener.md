@@ -450,6 +450,32 @@ evaluated at each decision's close:
   and against the S&P; the leaders-any-week portfolio against all baskets (is being a leader worth
   anything on its own?).
 
+**Result (run 2026-10-09): no rule passes, and waiting for the pullback to end HURT.** Each cell: the
+signal's forward return net of 20bp minus the average leader bought the same week (t).
+
+| Hold | Reclaim 20-day (primary) | Range break | RSI turn | Breadth turn | Buy the dip | Leaders vs all baskets |
+|---|---|---|---|---|---|---|
+| 4w | −0.28% (−1.42) | −0.26% (−1.29) | −0.08% (−0.32) | −0.38% (−2.42) | −0.31% (−1.64) | +0.21% (1.56) |
+| 8w | −0.28% (−1.08) | −0.29% (−0.93) | −0.35% (−1.14) | −0.45% (−1.72) | −0.40% (−1.23) | +0.34% (1.46) |
+| 12w | −0.56% (−1.86) | −0.22% (−0.53) | −0.62% (−1.73) | −0.16% (−0.50) | −0.70% (−1.60) | +0.52% (1.70) |
+| 16w | −1.11% (−3.24) | −0.55% (−1.12) | −0.77% (−1.69) | −0.70% (−1.95) | −0.77% (−1.48) | +0.71% (1.94) |
+| 26w | −1.61% (−3.09) | −1.24% (−2.38) | −1.65% (−2.86) | −1.15% (−2.11) | −1.14% (−1.60) | +1.16% (2.19) |
+| 52w | −2.78% (−2.93) | −1.63% (−2.22) | −2.97% (−2.51) | −1.93% (−2.68) | −3.42% (−2.90) | +1.69% (1.40) |
+
+~1,400–2,300 signals per rule; win rates 56–67% (mostly the market rising).
+
+- **Every rule, at every hold, did worse than simply buying the same leaders in any week.** From 16
+  weeks on the shortfall is significant: buying the reclaim of the 20-day cost 1.1% (16 weeks), 1.6%
+  (26) and 2.8% (52) against the average leader, t −2.9 to −3.2.
+- **Why the idea looked good and failed:** it came from the industries that TURNED OUT to be the
+  winners. Within those, every dip recovered, by construction. In real time, a leader's pullback is as
+  often the start of its leadership ending, and buying it then is worse than holding a leader that is
+  still running. The finding was hindsight; the declared test removed it.
+- **Leaders on their own** (top 30% by 12-1 above a rising 200-day) beat all baskets by +0.2% (4 weeks)
+  to +1.7% (52 weeks). At 26 weeks the t is 2.19, but all of it is 2020–26 (2014–19 slightly
+  negative), so it would not pass the both-halves rule; it was reported, not tested.
+- Against the S&P the signals were roughly flat (−0.2% to +1.5%).
+
 ### 5.3 Step 5 — the weekly screen (BUILT 2026-10-08)
 
 **Decided by Roy, 2026-10-08:**
