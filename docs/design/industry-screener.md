@@ -644,6 +644,37 @@ industries — semiconductors, Apple, Alphabet/Meta — bought when they were ch
 history (2022 above all) and recovering. A rule that works because five large industries recovered is not
 yet a rule. Not live; the Premium month (delisted companies) and more years are what can settle it.
 
+#### 5.2.10 Step 1 of the long-term pipeline: hot and getting-hot industries — declared 2026-10-09 BEFORE any code (Roy)
+
+**The pipeline (Roy):** (1) the app shows the industries that are hot or getting hot; (2) Argus and
+Prometheus choose the companies inside them; (3) Atlas allocates. The three together are meant to beat
+the big indices. **This tests step 1 only.** Step 1's job is not to beat the S&P as a basket: steps 2–3
+do not buy the average company. Its job is to be a better HUNTING GROUND: industries where more of the
+companies, and the best of them, beat the index. (Against the index directly, the average industry
+trailed SPY by 1.9%/yr and QQQ by 8.2%/yr over 2017–2026, and good + cheap only matched SPY; §5.2.9.)
+
+- **Decisions:** monthly, 2017-01..2025-09; point in time as §5.2.8 (quality via `quality_at` with its
+  annual stand-in; prices and caps at the month-end). Baskets: the answering baskets, companies above $300M.
+- **The seven definitions** (each graded separately; a basket can be in several):
+  1. **Hot:** top 30% of baskets by 12-1 return (cap-weighted).
+  2. **Getting hot:** its 12-1 return rank rose by 30+ percentile points over the last 6 months and is
+     now above the median.
+  3. **Growing:** revenue CAGR over the last 3 years above its 10-year CAGR AND above nominal GDP's 3-year.
+  4. **Good + cheap:** quality ≥ 7 and normalised earnings yield in the top 30% of its own history (§5.2.8).
+  5. **Earnings breadth:** at least 60% of its companies with two reports a year apart grew EPS year on
+     year in their latest report (FMP earnings history, by report date), and that share rose over the
+     last 3 months.
+  6. **Margins turning up:** the trailing margin's percentile in its own 10-year range rose by 20+ points
+     over the last 6 months.
+  7. **Hot and growing:** 1 and 3 together.
+- **PRIMARY measure — the pool's hit rate:** the share of the flagged baskets' companies whose next
+  12-month return, net of 20bp, beats SPY's (dividends included), minus the same share among ALL
+  baskets' companies that month. **PASS:** positive with Newey–West t ≥ **2.5** (11 lags; raised from 2
+  because seven definitions are tried), positive in both halves (2017–2020 / 2021–2025).
+- **Reported:** the flagged pool's best-quartile company return against all companies'; the flagged
+  baskets (cap-weighted) against SPY and against QQQ; the pool's size; 36 months for the hit rate.
+  Survivors only — which flatters every pool's hit rate alike, and the cheap pools most.
+
 ### 5.3 Step 5 — the weekly screen (BUILT 2026-10-08)
 
 **Decided by Roy, 2026-10-08:**
