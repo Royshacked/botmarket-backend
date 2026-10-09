@@ -476,6 +476,39 @@ signal's forward return net of 20bp minus the average leader bought the same wee
   negative), so it would not pass the both-halves rule; it was reported, not tested.
 - Against the S&P the signals were roughly flat (−0.2% to +1.5%).
 
+#### 5.2.6 Event first, technicals for entry — declared 2026-10-09 BEFORE any data or code (Roy)
+
+**The idea (Roy):** a swing trade should follow an event (earnings); technicals only time the entry.
+Price-only timing failed throughout §5.2; an earnings reaction carries new information. Classic
+earnings drift on the SURPRISE has faded for large caps (horizons.md §1, Martineau 2022); drift after
+the market's REACTION to the report has held up better (Brandt et al. 2008), and is what professionals
+trade as gap-ups / episodic pivots.
+
+- **Data:** each company's earnings history from FMP (date, EPS actual and estimate), fetched to a local
+  file; daily prices from the Parquet history. Universe and liquidity as the screener (cap ≥ $300M at the
+  prior month-end, median dollar volume ≥ $1M over the prior 60 days). Reports 2014-01..2026-08.
+  Survivors only.
+- **The event:** a report on day E with EPS above its estimate, and a REACTION over days E and E+1
+  (covering before-open and after-close reports): the close of E+1 at least **+5%** above the close of
+  E−1, with the higher of the two days' volume at least **2×** the average of the 50 days before E−1.
+  The reaction low is the lower of the two days' lows.
+- **Entries:**
+  - **immediate:** at the close of E+1;
+  - **technical (Roy's primary): holds the gap 3 days:** at the close of E+4, only if no close in
+    E+2..E+4 was below the reaction low; otherwise no trade.
+- **Holds:** 1, 2, 4 and 8 weeks (5 / 10 / 20 / 40 trading days) from entry, 10bp per side.
+  **Primary:** a fixed hold. **Reported:** the same with a stop on a close below the reaction low.
+- **The comparison (the bar):** the event stock's net return over the hold minus the mean return over
+  the SAME days of its sub-industry's other liquid companies (none reporting within 5 trading days of E):
+  the event's own value, net of the industry's move.
+- **PASS** (technical entry): the weekly mean of that excess (events grouped by entry week) is positive,
+  Newey–West t ≥ 2 (lags = hold weeks − 1, at least 1), positive in both halves (2014–19 / 2020–26),
+  with §5.2.3's neighbour rule across the four holds.
+- **Reported:** the immediate entry the same way; technical minus immediate (what the confirmation adds);
+  events, win rate, average win and loss; the events in the screener's Trade industries against the rest
+  (from the saved weekly verdicts — does Pythia's screen add anything to an event); the same reaction
+  WITHOUT a beat (does the beat matter, or only the reaction).
+
 ### 5.3 Step 5 — the weekly screen (BUILT 2026-10-08)
 
 **Decided by Roy, 2026-10-08:**
