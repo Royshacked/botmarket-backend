@@ -622,6 +622,28 @@ decisions, 12 months, against all baskets the same month (t, Newey–West 11 lag
    good = quality ≥ 6 / ≥ 8.
 5. **Equal-weighted** baskets instead of cap-weighted.
 
+**Result (run 2026-10-09): the pass is FRAGILE — concentrated in a few large companies.** The base
+reproduced §5.2.8 exactly (+2.41%, t 2.03).
+
+1. **Who carries it:** 77 industries were ever picked, but five carry most of it: Semiconductors (45% of
+   the total excess), Commercial & Residential Mortgage Finance (33%), Household Durables (29% — which
+   cap-weighted is APPLE, $4.9T against $37B for the next company; see the GICS note in §5.2.5's winners
+   check), Interactive Media & Services (27%), Building Products (17%). The largest drags: Cable &
+   Satellite, Diversified REITs, Beverages. By sector, Information Technology and Financials carry it;
+   Real Estate and Consumer Staples work against it.
+2. **Leave out the top contributors:** dropping any ONE of the five takes t under 2 (1.03–1.85);
+   dropping mortgage finance also turns 2021–26 negative. **Without all five: +0.30%, t 0.16.**
+3. **Leave out 2020:** +2.38%, t 1.76 — the size holds, the t does not.
+4. **Thresholds:** quality ≥ 7 or ≥ 8 is positive at every cheapness cut (+2.1% to +3.0%, t 0.87–2.58);
+   quality ≥ 6 is not (+0.5%). The quality line matters; the size is steady above it, the t is not.
+5. **Equal-weighted baskets: +0.69%, t 0.45, 2021–26 negative.** The effect lives in the largest
+   companies of each industry.
+
+**Reading:** the signal is real in direction and size for quality ≥ 7, but it is largely a few mega-cap
+industries — semiconductors, Apple, Alphabet/Meta — bought when they were cheap against their own
+history (2022 above all) and recovering. A rule that works because five large industries recovered is not
+yet a rule. Not live; the Premium month (delisted companies) and more years are what can settle it.
+
 ### 5.3 Step 5 — the weekly screen (BUILT 2026-10-08)
 
 **Decided by Roy, 2026-10-08:**
