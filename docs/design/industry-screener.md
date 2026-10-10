@@ -876,6 +876,27 @@ base − (a) cheap too long; base − (c) REITs; base − a+c (§5.2.13's defini
 - **Reported:** industries per month, each pool's gain over the base with its t, the median industry's
   median company vs SPY, and every pool WITHOUT Regional Banks.
 
+**Result (2026-10-10) — ALL FIVE FAIL. Counted one vote per industry, the screen picked better
+industries in 2017–20 and not in 2021–25.**
+
+| pool | industries / month | vs ALL industries | NW t | 17–20 / 21–25 | vs base (t) | median company vs SPY | without Regional Banks |
+|---|---|---|---|---|---|---|---|
+| plain good + cheap | 15 | +2.8pp | 1.63 | +6.6 / −0.3 | — | −6.3% | +2.5pp t 1.38 |
+| base (− returns falling) | 9 | +1.9pp | 0.68 | +6.6 / −1.9 | — | −5.7% | +1.3pp t 0.44 |
+| base − a | 8 | +1.9pp | 0.63 | +6.4 / −1.9 | −0.3pp (−0.61) | −5.1% | +1.5pp t 0.46 |
+| base − c | 8 | +3.3pp | 1.34 | +8.3 / −0.8 | +1.9pp (2.11) | −5.0% | +2.6pp t 0.95 |
+| base − a+c | 7 | +4.4pp | 2.14 | +7.9 / +0.8 | +1.4pp (1.48) | −3.6% | +3.7pp t 1.49 |
+
+- **What §5.2.10–13's passes were:** a company-weighted pool in which a third of the votes were
+  regional banks. As an INDUSTRY picker, good + cheap is +6–8pp in 2017–20 in every version and about
+  zero in 2021–25. The 2021–25 half is where the company-weighted reading also leaned on one industry
+  (§5.2.11); this says the same thing a second way.
+- **Filters help in the direction the description said:** REITs out (+1.9pp over the base, t 2.11)
+  and a+c (+1.4pp) lift the score, and a+c is the only pool positive in both halves — but at t 2.14
+  overall, below the bar.
+- **What the Premium-month rerun can and cannot change:** adding the failed 2023 banks can only lower
+  the company-weighted result; it does not touch the industry-weighted failure in 2021–25.
+
 ### 5.3 Step 5 — the weekly screen (BUILT 2026-10-08)
 
 **Decided by Roy, 2026-10-08:**
