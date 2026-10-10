@@ -233,6 +233,12 @@ already does (`needsAgent`):
    names (news.service `basket`). First live cost on Luna: ~$0.004 per assessment.
 2. **Money, companies** — capex and buyback trends by industry and theme from `fin_statements` (data in
    hand). Only companies' own money in this step.
+   **BUILT 2026-10-10**: the engine's industry-metrics job adds `money` to every node (capex, buybacks,
+   dividends, acquisitions — last 4 quarters vs the 4 before and the change a year earlier; share of companies
+   raising capex; capex intensity; median share-count change; top spenders). Pythia reads it through
+   `get_industry_money` and `get_capex_leaders`; the facts ride on each assessment and the board. First run:
+   2,648 companies; capex rising most — Interactive Media +$103B, Software +$103B, Broadline Retail +$65B,
+   Electric Utilities +$21B. Themes are step 3, so "by theme" waits for the registry.
 3. **Themes** — the registry; Pythia proposes the first themes and the admin approves them; filings
    exposure through Aether's `exposure/` tools.
 4. **Geopolitics** — the GPR index job and the exposure map.
