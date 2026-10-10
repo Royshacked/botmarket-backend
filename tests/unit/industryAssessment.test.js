@@ -92,6 +92,12 @@ test('"none" is an allowed cause — a move with nothing behind it is a finding'
     assert.equal(checkAssessment(BLOCK({ cause: { kind: 'none', text: 'no news, no money — the hype pattern' } })).ok, true)
 })
 
+test('"unverified" is its own cause — a failed search is not the hype finding', () => {
+    const c = checkAssessment(BLOCK({ cause: { kind: 'unverified', text: 'the news search hit its daily limit' } }))
+    assert.equal(c.ok, true)
+    assert.equal(c.assessment.cause.kind, 'unverified')
+})
+
 test('the verdict words are the four Roy kept', () => {
     assert.deepEqual(Object.keys(VERDICTS), ['interesting_trade', 'interesting_invest', 'watch', 'avoid'])
 })

@@ -83,7 +83,9 @@ Each input answers one question, has a source, and has things it may NOT claim.
   the hype flag. A good story already up 80% is a different trade from the same story flat.
 - **And what caused the move** (Roy, 2026-10-10) — Pythia ties it to the other inputs: news or an event
   (§4.1), money arriving (§4.3), the regime (§4.4), geopolitics (§4.5) — or nothing it can name, which is
-  itself a finding (a move with no cause behind it is the hype pattern).
+  itself a finding (a move with no cause behind it is the hype pattern). **`unverified`** is a separate answer
+  — the research could not be done (first live run, 2026-10-10: the news search at its daily limit) — so a
+  failed search never reads as the hype finding.
 - **Not Pythia's job — whether it is "priced in"** (Roy, 2026-10-10): that is close to unknowable at
   industry level. Expectations live in companies — estimates, guidance, how a stock took its last
   report — so **Prometheus** assesses them per name (§10). Pythia reports how far the price has gone,

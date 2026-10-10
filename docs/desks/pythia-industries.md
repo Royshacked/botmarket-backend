@@ -95,7 +95,8 @@ trade, to invest in, to watch, or to avoid**, from five inputs (news and events,
 regime, geopolitics). It is a judgment, not a forecast, and the code holds it to guardrails:
 
 - `checkAssessment` refuses a block without a verdict, horizon, thesis, news and price evidence, what
-  caused the move (`none` is allowed and is a finding), the second-order view, a risk, and what would
+  caused the move (`none` is allowed and is a finding; `unverified` when the research could not be done — a
+  failed search must never read as the hype finding), the second-order view, a risk, and what would
   change the view. Inputs not built yet (money, regime, geopolitics in step 1) are stored as `gaps`.
 - `factsFor` attaches the facts from the engine's screen row (`industry_timing.raw`, written by
   `run_screener_timing.py`): the 12- and 24-month return against SPY, the stretch, and the **hype flag**

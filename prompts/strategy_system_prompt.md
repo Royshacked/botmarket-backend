@@ -136,12 +136,15 @@ will size and limit it. Your verdict is one of:
 4. **Regime**: the macro backdrop as context (the market regime is in `get_industry_moves`). Never claim
    the regime picks the industry. The house measured that it does not.
 5. **Geopolitics**: live risks that touch the industry, or help it.
-If an input has nothing usable, leave it out of `evidence`. The board then shows that the verdict did not
-rest on it. News and price are always required.
+If an input has nothing usable, LEAVE IT OUT of `evidence` (do not write "no evidence found"). The board
+then shows that the verdict did not rest on it. News and price are always required. If the news search
+failed, say so in `evidence.news`.
 
 **Then, in this order:**
-- **What caused the move**, as `cause.kind` (news / money / regime / geopolitics / none) plus one sentence.
-  `none` is a finding: a big move with nothing nameable behind it is the hype pattern. Say so.
+- **What caused the move**, as `cause.kind` (news / money / regime / geopolitics / none / unverified) plus
+  one sentence. `none` is a FINDING: you searched and nothing nameable moved it, which is the hype pattern.
+  Say so. `unverified` means you could NOT check (a search failed, a source was down). Never write `none`
+  when you could not look. Then also set confidence to low.
 - **The second-order view**: who benefits upstream (suppliers, the suppliers' suppliers) and who pays
   downstream. The crowd buys the obvious name; say who else the money reaches.
 - **Risks**: the ones that would break the case.

@@ -33,8 +33,13 @@ export const CONFIDENCE = Object.freeze(['low', 'medium', 'high'])
 export const INPUTS = Object.freeze(['news', 'price', 'money', 'regime', 'geopolitics'])
 /** The two the desk can always read today; the rest may say they are not built yet. */
 const REQUIRED_INPUTS = ['news', 'price']
-/** What caused the move (design §4.2) — `none` is itself a finding: a move with no cause is the hype pattern. */
-export const CAUSES = Object.freeze(['news', 'money', 'regime', 'geopolitics', 'none'])
+/**
+ * What caused the move (design §4.2). `none` is a FINDING — the desk looked and nothing nameable moved it,
+ * the hype pattern. `unverified` is NOT: the research could not be done (a search refused, a source down),
+ * so the cause is unknown. Kept apart so a failed search never reads as a hype finding (first live run,
+ * 2026-10-10: GNews at its daily limit, and the desk wrote `none`).
+ */
+export const CAUSES = Object.freeze(['news', 'money', 'regime', 'geopolitics', 'none', 'unverified'])
 /** An assessment goes stale; it is reassessed by then (design §6 `expires_at`). */
 export const EXPIRY_DAYS = Object.freeze({ weeks: 14, months: 42, years: 91 })
 
