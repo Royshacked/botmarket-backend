@@ -1134,6 +1134,45 @@ swapped in; dollar = DTWEXM chained into DTWEXBGS; real 10y = GS10 − CPI y/y; 
   A design that follows: rules as a constant layer, plus a channel-driven industry tilt — to be built as
   a small shrinkage model and judged walk-forward on 1960–2025 before anything is named.
 
+### 5.5 Hypes and links — declared 2026-10-10 BEFORE any code or result (Roy)
+
+Roy: some moves follow no economic logic (tech, solar, EV, AI); and when AI is up, do power and chips
+follow, or are they part of it? Two studies on the French 49 (§5.4.6, no survivorship), before the model.
+
+#### 5.5.1 The hype life cycle
+
+- **Episode:** an industry whose value-weighted return over the past 24 months is ≥ +100% AND ≥ +100%
+  above the market's (Greenwood–Shleifer–You's run-up). It starts in the first month both hold; the same
+  industry cannot start another for 24 months. Starts 1928-07..2024-08 (24 months of outcome needed).
+- **Outcomes:** a CRASH = the industry falling ≥ 40% below its start-month level at any point in the next
+  24 months; its return over the next 12 and 24 months against the market. Base rate for comparison: the
+  same crash test on every industry-month.
+- **Features at the start, point in time:** size of the run-up (24-month excess); ACCELERATION = the share
+  of the 24-month log return made in the last 6 months; VOLATILITY = the std of the last 12 monthly
+  returns over the industry's own std of the 60 months before them; LISTING WAVE = % change in the
+  number of firms over 24 months; VALUATION = Sum BE / Sum ME against the industry's own history
+  (percentile; low = stretched).
+- **Reported, not graded** (expect ~30–60 episodes): crash rate and next returns vs base; for each
+  feature, crash rate and next-12-month excess above vs below its median across episodes, with Fisher's
+  exact p. An "early vs late" rule found here is a hypothesis for the walk-forward, not a result.
+
+#### 5.5.2 Supply-chain links
+
+- **The link map, fixed before any return is read:** BEA's summary Use tables (producers' prices, before
+  redefinitions; 71 industries) mapped to the French 49 by their definitions — written in
+  `configs/french49_bea.yaml`. The 1997 table serves decisions to 2006, 2007's to 2016, 2017's from 2017
+  (the pre-1997 years use 1997's — a structure look-ahead, accepted). A shared BEA code (334 → Hardw,
+  Chips, LabEq) splits its flow equally; flows within an industry's own codes are dropped.
+- **Customer weights** w(A→B) = B's share of A's sales to other industries. **Signal:** A's customers'
+  weighted value-weighted return.
+- **Primary — next month (the known effect):** each month 1960-01..2026-07, sort industries by their
+  customers' return THAT month; the next month's return, top 30% minus bottom 30%, against the average
+  industry. PASS: Newey–West t ≥ 3 (3 lags), positive in both halves (1960–92 / 1993–2026).
+- **Secondary — the slow cascade (Roy's AI → power):** customers' return over the past 12 months, the
+  industry's next 12 months (NW 11 lags). Same bar.
+- **Reported:** both with the industry's own past return held fixed (sorting on the signal's residual
+  after its own return), and the reverse direction (suppliers' returns → the customer).
+
 ## 6. Build order
 
 1. **Momentum filter test (§5.1)** on data in Mongo. No FMP calls.
