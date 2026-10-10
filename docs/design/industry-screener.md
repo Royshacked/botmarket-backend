@@ -1071,6 +1071,28 @@ Premium-month history.
   the same months (does choosing by regime beat the one rule we had?).
 - **Reported:** which rule the chain chose by state and year, the score by state, against QQQ.
 
+**Result (2026-10-10) — FAIL.** A pick in 59 of 93 months (63%); −0.6pp vs all industries, t −0.18;
+halves 2018–21 **+6.7** / 2022–25 **−7.6**; QQQ −1.3pp; −2.2pp against plain good + cheap in the same
+months (t −1.37).
+
+| year | rule the chain chose | score |
+|---|---|---|
+| 2018–21 (low inflation) | good + cheap (learned from 2017–20) | +2.7 / +5.0 / +6.6 / +12.9 |
+| 2022 | — no pick (high inflation, no past) | — |
+| 2023 | bottom momentum, good + cheap − returns falling, low quality | −2.8 |
+| 2024 | good + cheap − returns falling, low quality, expensive, top momentum | −4.9 |
+| 2025 (low inflation, easing) | good + cheap − returns falling | −16.1 |
+
+- **Low inflation, 2018–21: the chain works** — it learned good + cheap from 2017–20 and it kept paying.
+- **High inflation, 2022–24: it had nothing to learn from** but the first months of the same episode, and
+  hopped between rules; no pick at all in 2022.
+- **2025 broke the mapping:** back in low inflation, the chain chose what low inflation had taught it,
+  and it did −16.1pp. The low inflation of 2024–25 (real 10y ~2%, AI-led) is not that of 2017–20 (real
+  10y ~0.3%). A hypothesis, NOT tested: real rates may be the axis that matters, not CPI — read off the
+  same years, it would need its own declaration and the longer history.
+- **Verdict on the design:** the chain is the right shape and is now code; with one episode per state it
+  cannot be judged. It reruns unchanged on the Premium-month history.
+
 ## 6. Build order
 
 1. **Momentum filter test (§5.1)** on data in Mongo. No FMP calls.
