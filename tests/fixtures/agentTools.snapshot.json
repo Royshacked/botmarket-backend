@@ -133,6 +133,47 @@
             }
         },
         {
+            "name": "get_industry_news",
+            "description": "The last month's NEWS on a sub-industry's largest companies (up to 15), dated and attributed, at most three per company so one busy name cannot fill it — the first place to look for what is happening to an industry. Headlines are what was WRITTEN, not facts about the industry: weigh them, and say when a story is about one company rather than the group.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "industry": {
+                        "type": "string",
+                        "description": "A GICS sub-industry: its 8-digit code or its exact name."
+                    }
+                },
+                "required": [
+                    "industry"
+                ]
+            }
+        },
+        {
+            "name": "get_news",
+            "description": "Other NEWS: `headlines` for the market's front page (macro, rates, geopolitics), `topic` to search a theme or an event in words (\"data center power\", \"export controls\", \"OPEC\"), `companies` for one ticker. The topic search has a small daily quota and can refuse — if it does, say so and use what you have.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "category": {
+                        "type": "string",
+                        "enum": [
+                            "companies",
+                            "headlines",
+                            "topic"
+                        ],
+                        "description": "which kind of news read this is. `companies` — one listed company, `subject` is its TICKER. `headlines` — the market's front page, no subject needed. `topic` — free-text search for a theme, an institution or an asset with no ticker."
+                    },
+                    "subject": {
+                        "type": "string",
+                        "description": "for `companies`, the TICKER (NVDA, BA, AAPL). For `topic`, the theme in the words a paper would print (\"Federal Reserve\", \"OPEC\", \"semiconductors\", \"gold\"). Omit for `headlines`. It is both the search and the cache key, so ask for the same subject the same way each time."
+                    }
+                },
+                "required": [
+                    "category"
+                ]
+            }
+        },
+        {
             "name": "consult",
             "description": "Put ONE decision to a more capable desk head and get a straight answer back. It cannot see this conversation and cannot fetch anything — you hand it the question and every number it needs, and it thinks harder than you can in-line.\n\nReach for it when you are about to DEPART from a measured code grade on a large industry, and the argument is close — the override is what the house will read, and it should survive someone attacking it. Not for agreeing with the numbers.\n\nDo NOT reach for it to look something up, to double-check work you are already confident in, to summarize, or because a question feels big. A consult costs a full model call and adds seconds to the turn: if you already know the answer, or a tool call would settle it, that is the cheaper and better move. Most turns should end without it.",
             "input_schema": {

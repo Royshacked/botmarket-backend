@@ -38,6 +38,28 @@ export function mapGNewsArticle(item) {
 }
 
 /**
+ * Map one raw FMP stock-news row (`/stable/news/stock`) into the internal shape. FMP stamps
+ * `publishedDate` as "YYYY-MM-DD HH:MM:SS" with no zone; it is read as UTC — at worst a few hours off on
+ * a list that is dated by day. One ticker per row, carried in `related` so a basket read can tell whose
+ * story it is.
+ * @param {object} item raw FMP news row
+ */
+export function mapFmpArticle(item) {
+    const raw = typeof item?.publishedDate === 'string' ? item.publishedDate.trim() : ''
+    const ms = Date.parse(raw.includes('T') ? raw : `${raw.replace(' ', 'T')}Z`)
+    return {
+        datetime: Number.isFinite(ms) ? Math.floor(ms / 1000) : NaN,
+        headline: typeof item?.title === 'string' ? item.title.trim() : '',
+        summary: typeof item?.text === 'string' ? item.text : '',
+        url: item?.url ?? '',
+        image: item?.image ?? '',
+        source: item?.publisher ?? item?.site ?? '',
+        id: null,
+        related: typeof item?.symbol === 'string' && item.symbol ? [item.symbol.toUpperCase()] : [],
+    }
+}
+
+/**
  * Map one raw Finnhub article (company-news or the general feed) into the internal shape.
  * Finnhub already dates in unix SECONDS — no division here, unlike the GNews mapper above, and
  * dividing it again is the bug this comment exists to prevent (every article would land in 1970).

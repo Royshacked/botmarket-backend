@@ -31,6 +31,8 @@ import { industryViewService } from '../../api/strategy/industryView.service.js'
 import { readTimingRow } from '../../api/strategy/screenerData.service.js'
 import { formatFacts } from '../../api/strategy/industryAssessment.service.js'
 import { getEarningsCalendar } from '../../providers/fmp.provider.js'
+import { newsService } from '../news.service.js'
+import { makeNewsHandlers, formatNewsDigest, capPerSymbol } from '../tools/news.tools.js'
 import { logger } from '../logger.service.js'
 
 const __dirname   = dirname(fileURLToPath(import.meta.url))
@@ -55,6 +57,10 @@ export const TOOLS = [
         // The assessment's price input (docs/design/pythia-assessment.md §4.2): facts from code. Appended
         // before `consult`, which stays last.
         get_industry_moves: `How far a sub-industry has MOVED, from the engine's weekly screen: its equal-weight basket's return over 12 and 24 months against SPY, the last 1 and 3 months against the S&P, how stretched it is (distance above its 50-day and that distance's percentile in its own two years), the HYPE FLAG (up 100%+ in two years and 100%+ over the market) with its base rate, and the market regime. Facts to state in an assessment, not to argue with.`,
+        // The assessment's NEWS input (§4.1). An industry IS its companies: its largest names' news over the
+        // last month, one FMP call through the one news pipe (services/news.service.js, category basket).
+        get_industry_news: `The last month's NEWS on a sub-industry's largest companies (up to 15), dated and attributed, at most three per company so one busy name cannot fill it — the first place to look for what is happening to an industry. Headlines are what was WRITTEN, not facts about the industry: weigh them, and say when a story is about one company rather than the group.`,
+        get_news: `Other NEWS: \`headlines\` for the market's front page (macro, rates, geopolitics), \`topic\` to search a theme or an event in words ("data center power", "export controls", "OPEC"), \`companies\` for one ticker. The topic search has a small daily quota and can refuse — if it does, say so and use what you have.`,
         consult: consultDescription(`Reach for it when you are about to DEPART from a measured code grade on a large industry, and the argument is close — the override is what the house will read, and it should survive someone attacking it. Not for agreeing with the numbers.`),
     }),
 ]
@@ -62,7 +68,30 @@ export const TOOLS = [
 /** Resolve the `industry` argument (code or name) the way every tool does. */
 const _industry = (input) => (typeof input?.industry === 'string' ? input.industry.trim() : '')
 
+/** How many of an industry's largest companies its news read covers, and how many headlines reach the model. */
+export const INDUSTRY_NEWS_COMPANIES = 15
+export const INDUSTRY_NEWS_MAX = 24
+
+/**
+ * An industry's news: its largest companies (its own; its answering level's when it has fewer than three),
+ * through the one news pipe as a `basket`, spread so no one name fills it. → the digest text.
+ */
+export async function industryNews(input, deps = { readSub: readSubIndustry, companies: readCompanies, fetch: (o) => newsService.getOrFetch(o) }) {
+    const b = await deps.readSub(_industry(input))
+    if (!b) return 'Unknown sub-industry — call list_industries for the codes and names.'
+    let rows = await deps.companies('sub_industry', b.sub.code, { limit: INDUSTRY_NEWS_COMPANIES })
+    const at = b.sub.answered_at
+    if (rows.length < 3 && at && at.level !== 'sub_industry') rows = await deps.companies(at.level, at.code, { limit: INDUSTRY_NEWS_COMPANIES })
+    const symbols = rows.map(r => r.symbol).filter(Boolean).sort()
+    if (!symbols.length) return `No companies classified into ${b.sub.name} — no company news to read.`
+    const { articles } = await deps.fetch({ category: 'basket', subject: `gics_${b.sub.code}`, query: symbols.join(',') })
+    return formatNewsDigest(capPerSymbol(articles, 3), { subject: `${b.sub.name} — its ${symbols.length} largest companies (${symbols.join(', ')})`, category: 'basket', max: INDUSTRY_NEWS_MAX })
+}
+
 const TOOL_HANDLERS = {
+    ...makeNewsHandlers(),
+    get_industry_news: makeToolHandler('get_industry_news', (input) => industryNews(input),
+        (e) => `Could not read the industry's news: ${e.message}`, LOG),
     list_industries: makeToolHandler('list_industries', async (input) => {
         const rows = await listSubIndustries()
         if (!rows.length) return 'No industry measurements yet — the engine has not run.'

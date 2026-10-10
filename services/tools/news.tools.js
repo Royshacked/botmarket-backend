@@ -96,14 +96,14 @@ function _trim(text, max) {
  * from memory. It gets told, in words, that the index came back empty and that saying so IS the
  * answer — the same instruction formatSectorView gives for a view nobody has published.
  */
-export function formatNewsDigest(articles, { subject, category, now = Date.now() } = {}) {
+export function formatNewsDigest(articles, { subject, category, now = Date.now(), max = MAX_ARTICLES } = {}) {
     // Sorted HERE and not merely assumed: the header claims which item is newest and the slice keeps
     // the top 12, so an unsorted list would both mislabel the freshness and drop the very headlines
     // the reader asked for. The service sorts too; this is the guarantee that survives a new caller.
     const rows = (Array.isArray(articles) ? articles : [])
         .filter(a => Number.isFinite(a?.datetime))
         .sort((a, b) => b.datetime - a.datetime)
-        .slice(0, MAX_ARTICLES)
+        .slice(0, max)
     const what = category === 'headlines'
         ? "today's market front page"
         : `${subject}${category === 'companies' ? '' : ` (${category})`}`
@@ -191,4 +191,20 @@ export function makeNewsHandlers(deps = {}) {
             },
             (err) => `Could not fetch the news: ${err.message}`, LOG),
     }
+}
+
+/**
+ * At most `perSymbol` articles per ticker, newest first — so one busy name cannot fill a basket's digest
+ * (an industry read where every headline is Nvidia's is Nvidia news, not the industry's). An article with
+ * no ticker counts under its own key. Pure.
+ */
+export function capPerSymbol(articles, perSymbol = 3) {
+    const seen = new Map()
+    return [...(articles ?? [])].sort((a, b) => b.datetime - a.datetime).filter(a => {
+        const k = a?.related?.[0] ?? ''
+        const n = seen.get(k) ?? 0
+        if (n >= perSymbol) return false
+        seen.set(k, n + 1)
+        return true
+    })
 }

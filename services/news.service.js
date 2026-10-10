@@ -26,9 +26,10 @@
  */
 import { fetchGNews } from '../providers/gnews.provider.js'
 import { fetchCompanyNews, fetchGeneralNews } from '../providers/finnhub.provider.js'
+import { fetchStockNews } from '../providers/fmp.provider.js'
 import { logger } from './logger.service.js'
 import { isCacheFresh } from './ttlCache.util.js'
-import { mapGNewsArticle, mapFinnhubArticle, isValidArticle, mergeDedupedArticles } from './newsArticle.service.js'
+import { mapGNewsArticle, mapFinnhubArticle, mapFmpArticle, isValidArticle, mergeDedupedArticles } from './newsArticle.service.js'
 
 /**
  * How long each shelf stays warm — one TTL per KIND of read, not one for the file.
@@ -44,6 +45,7 @@ export const CACHE_TTL_MS = {
     companies:  3_600_000,   // 1 hour
     topic:      3_600_000,   // 1 hour
     headlines:    900_000,   // 15 minutes — the front page
+    basket:     3_600_000,   // 1 hour — several companies at once (an industry's largest)
 }
 /** A category that somehow escaped the vocabulary still gets an archive's hour, never zero. */
 const DEFAULT_TTL_MS = 3_600_000
@@ -58,7 +60,7 @@ const LOG = '[news]'
  * front page, `topic` is free text. Exported because the agent tool normalizes a model-supplied
  * category against the SAME set rather than keeping a second copy (CLAUDE.md).
  */
-export const NEWS_CATEGORIES = new Set(['companies', 'headlines', 'topic'])
+export const NEWS_CATEGORIES = new Set(['companies', 'headlines', 'topic', 'basket'])
 
 /** `headlines` has no subject of its own — one front page, one cache entry. */
 export const HEADLINES_SUBJECT = 'top-stories'
@@ -72,6 +74,7 @@ const PROVIDERS = {
     companyNews: fetchCompanyNews,
     generalNews: fetchGeneralNews,
     search: fetchGNews,
+    stockNews: fetchStockNews,
 }
 
 export const newsService = {
@@ -202,6 +205,10 @@ async function getOrFetch({ category, subject, query, refresh = false, _provider
  */
 export async function _fetchArticles({ category, subject, query, from, to, limit = FETCH_LIMIT }, providers = PROVIDERS) {
     if (category === 'headlines') return fetchFromFinnhubGeneral({ limit }, providers)
+    // `basket`: several tickers at once (an industry's largest companies, for Pythia). The SUBJECT is the
+    // cache key the caller names it by (gics_45301020 — a list of tickers would outrun the key's 64
+    // characters); the QUERY is the comma-separated tickers. FMP answers the whole list in one call.
+    if (category === 'basket') return fetchFromFmpBasket({ symbols: String(query ?? '').split(','), from, to }, providers)
 
     if (category === 'companies') {
         const result = await fetchFromFinnhubCompany({ symbol: subject, from, to, limit }, providers)
@@ -230,6 +237,16 @@ async function fetchFromFinnhubCompany({ symbol, from, to, limit = FETCH_LIMIT }
     // exactly the headlines the reader came for.
     const newest = _sortByDatetimeDesc(articles).slice(0, limit)
     return _result(newest, { source: 'finnhub', symbol: sym, from, to, count: newest.length })
+}
+
+/** Several companies' news in one FMP call, newest first. */
+export const BASKET_FETCH_LIMIT = 60
+async function fetchFromFmpBasket({ symbols, from, to, limit = BASKET_FETCH_LIMIT }, providers = PROVIDERS) {
+    const syms = symbols.map(s => s.trim().toUpperCase()).filter(Boolean)
+    if (!syms.length) throw new Error('basket needs tickers')
+    const raw = await providers.stockNews({ symbols: syms, from, to, limit })
+    const articles = _sortByDatetimeDesc((Array.isArray(raw) ? raw : []).map(mapFmpArticle).filter(isValidArticle)).slice(0, limit)
+    return _result(articles, { source: 'fmp', feed: 'stock-news', symbols: syms.length, from, to, count: articles.length })
 }
 
 /** @returns {Promise<{ articles: NewsArticle[], meta: object }>} */

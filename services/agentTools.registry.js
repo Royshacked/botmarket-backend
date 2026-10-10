@@ -700,6 +700,13 @@ export const TOOL_SCHEMAS = {
         },
         "required": ["industry"]
     },
+    get_industry_news: {
+        "type": "object",
+        "properties": {
+            "industry": { "type": "string", "description": "A GICS sub-industry: its 8-digit code or its exact name." }
+        },
+        "required": ["industry"]
+    },
     // ── Aether desk (event exposure) ──────────────────────────────────────────
     // get_channel_taxonomy, get_channel_state and get_regime were removed with the
     // channel engine on 2026-09-09. This is what the desk reads now.

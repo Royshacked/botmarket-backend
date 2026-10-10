@@ -357,6 +357,23 @@ export async function getEarningsCalendarRaw(from, to, symbols = []) {
         .sort((a, b) => a.date.localeCompare(b.date))
 }
 
+// ─── News for several companies in one call (news.service's `basket` source) ──
+// `/stable/news/stock?symbols=A,B,C` answers a whole list at once with a date window — one call for an
+// industry's largest companies, where Finnhub's company feed costs one per ticker. Raw rows; the news
+// service maps, caches and dedupes them (services/news.service.js). Press releases need a higher plan.
+
+const _ymd = (d) => new Date(d).toISOString().slice(0, 10)
+
+/** Raw FMP stock-news rows for `symbols` between `from` and `to` (ISO or Date), newest first. */
+export async function fetchStockNews({ symbols = [], from, to, limit = 50 } = {}) {
+    const syms = [...new Set(symbols.map(s => String(s).trim().toUpperCase()).filter(Boolean))]
+    if (!syms.length) throw new Error('symbols are required')
+    const f = _ymd(from || Date.now() - 30 * 86_400_000)
+    const t = _ymd(to || Date.now())
+    const data = await _fmpGet(`/news/stock?symbols=${encodeURIComponent(syms.join(','))}&from=${f}&to=${t}&limit=${limit}`)
+    return Array.isArray(data) ? data : []
+}
+
 // ─── Per-ticker earnings (next date + recent actual-vs-estimate) ────────────
 // `/stable/earnings?symbol=` returns upcoming rows (epsActual null) AND historical quarters
 // (epsActual populated), newest first — so one call covers both halves the LLM string needs.

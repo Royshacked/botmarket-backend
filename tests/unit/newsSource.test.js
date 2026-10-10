@@ -126,8 +126,30 @@ test('a Finnhub row maps into the SAME internal shape a GNews row does', () => {
     assert.equal(isValidArticle(mapFinnhubArticle({ headline: 'no date' })), false)
 })
 
-test('the vocabulary names exactly the three kinds of read', () => {
-    assert.deepEqual([...NEWS_CATEGORIES].sort(), ['companies', 'headlines', 'topic'])
+// `basket` joined on 2026-10-10 (Pythia's industry news, docs/design/pythia-assessment.md §4.1): several
+// tickers in one FMP call. The model-facing get_news schema still offers only the first three.
+test('the vocabulary names exactly the four kinds of read', () => {
+    assert.deepEqual([...NEWS_CATEGORIES].sort(), ['basket', 'companies', 'headlines', 'topic'])
+})
+
+test('a basket goes to FMP in ONE call for every ticker, mapped, dated and newest first', async () => {
+    const calls = []
+    const providers = {
+        companyNews: async () => { throw new Error('not Finnhub') }, generalNews: async () => [], search: async () => { throw new Error('not GNews') },
+        stockNews: async (opts) => { calls.push(opts); return [
+            { symbol: 'AMD', publishedDate: '2026-10-09 10:00:00', publisher: 'Reuters', title: 'AMD older', text: 's1', url: 'u1' },
+            { symbol: 'NVDA', publishedDate: '2026-10-10 12:38:00', publisher: 'PRNewsWire', title: 'NVDA newer', text: 's2', url: 'u2' },
+            { symbol: 'NVDA', publishedDate: '', title: 'no date' },
+        ] },
+    }
+    const r = await _fetchArticles({ category: 'basket', subject: 'gics_45301020', query: 'AMD,NVDA' }, providers)
+    assert.equal(calls.length, 1)
+    assert.deepEqual(calls[0].symbols, ['AMD', 'NVDA'])
+    assert.deepEqual(r.articles.map(a => a.headline), ['NVDA newer', 'AMD older'], 'newest first, the dateless row dropped')
+    assert.deepEqual(r.articles[0].related, ['NVDA'])
+    assert.equal(r.articles[0].datetime, Date.parse('2026-10-10T12:38:00Z') / 1000)
+    assert.equal(r.meta.source, 'fmp')
+    await assert.rejects(() => _fetchArticles({ category: 'basket', subject: 'gics_x', query: '' }, providers), /basket needs tickers/)
 })
 
 // ── The warm-cache guarantee ──────────────────────────────────────────────────

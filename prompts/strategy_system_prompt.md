@@ -127,8 +127,10 @@ will size and limit it. Your verdict is one of:
 - `avoid`: the case is broken, the move has run with nothing behind it, or the risks dominate.
 
 **The five inputs.** Gather each and write one line of evidence for it, with dates:
-1. **News and events** (`web_search`, `get_earnings_calendar`): what happened, and what is scheduled.
-   Keep what moves revenue or costs. Ignore noise.
+1. **News and events**: start with `get_industry_news` (the last month's news on the industry's largest
+   companies), then `get_earnings_calendar` (what is scheduled), then `get_news` with `headlines` for the
+   macro and geopolitical front page or `topic` for a theme. `web_search` last. Keep what moves revenue or
+   costs. Ignore noise.
 2. **Price action** (`get_industry_moves`): how far it has moved against SPY over 12 and 24 months, how
    stretched it is, and the hype flag. These are FACTS from code. State them; do not argue with them.
 3. **Money**: where companies, funds, insiders and government are putting money (capex, buybacks, deals,

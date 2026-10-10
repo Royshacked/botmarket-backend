@@ -296,3 +296,27 @@ test('the structure rides along only for an answered industry; the spend sums th
 test('the benchmarks are SPY, QQQ and the equal-weight RSP', () => {
     assert.deepEqual([...BENCHMARKS], ['SPY', 'QQQ', 'RSP'])
 })
+
+// ── the news input (FMP basket through the one news pipe) ─────────────────────
+
+test('one busy name cannot fill a basket digest — at most three per ticker, newest first', async () => {
+    const { capPerSymbol } = await import('../../services/tools/news.tools.js')
+    const a = (sym, t) => ({ related: [sym], datetime: t, headline: `${sym} ${t}` })
+    const out = capPerSymbol([a('NVDA', 5), a('NVDA', 4), a('NVDA', 3), a('NVDA', 2), a('AMD', 1)], 3)
+    assert.deepEqual(out.map(x => x.headline), ['NVDA 5', 'NVDA 4', 'NVDA 3', 'AMD 1'])
+})
+
+test('industry news reads the largest companies as a basket keyed by the industry, and rolls up when thin', async () => {
+    const { industryNews } = await import('../../services/agents/strategy.agent.service.js')
+    const fetched = []
+    const deps = {
+        readSub: async () => ({ sub: { code: CODE, name: 'Semiconductors', answered_at: { level: 'industry', code: '453010' } } }),
+        companies: async (level) => (level === 'sub_industry' ? [{ symbol: 'NVDA' }] : [{ symbol: 'NVDA' }, { symbol: 'AMD' }, { symbol: 'AVGO' }]),
+        fetch: async (o) => { fetched.push(o); return { articles: [{ related: ['AMD'], datetime: Math.floor(Date.parse(NOW) / 1000) - 3600, headline: 'AMD wins a deal', summary: 's', source: 'Reuters' }] } },
+    }
+    const text = await industryNews({ industry: CODE }, deps)
+    assert.deepEqual(fetched[0], { category: 'basket', subject: `gics_${CODE}`, query: 'AMD,AVGO,NVDA' }, 'one sub-industry name is too few: its industry answers')
+    assert.match(text, /Semiconductors — its 3 largest companies/)
+    assert.match(text, /AMD wins a deal/)
+    assert.match(await industryNews({ industry: 'nope' }, { ...deps, readSub: async () => null }), /Unknown sub-industry/)
+})
