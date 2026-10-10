@@ -46,9 +46,11 @@ export const EXPIRY_DAYS = Object.freeze({ weeks: 14, months: 42, years: 91 })
 /**
  * The base rates attached by CODE (design §5.2), with the research behind each. Only the ones measured
  * in production are attached; the rest are listed as not measured yet so the board does not imply them.
+ * The texts are shown to users, so they carry no doc references — the hype rate's source is
+ * industry-screener.md §5.5.3 (Ken French's 49 industries, 1928–2024).
  */
 export const BASE_RATES = Object.freeze({
-    hype: 'Up 100%+ in two years and 100%+ above the market. Of 98 such run-ups since 1928, 22% fell 40%+ within 24 months (base rate 9%); the median one trailed the market by 10.6% over the next two years (industry-screener.md §5.5.3).',
+    hype: 'Up 100%+ in two years and 100%+ above the market. Of 98 such run-ups since 1928, 22% fell 40%+ within 24 months (base rate 9%); the median one trailed the market by 10.6% over the next two years.',
 })
 export const NOT_MEASURED = Object.freeze(['value_trap', 'customer_demand', 'momentum_at_turns'])
 
