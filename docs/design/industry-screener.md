@@ -765,6 +765,36 @@ is also declining by:
   above plain good + cheap on average. Reported: pool size, the share beating SPY by 50%+, the median
   company against SPY.
 
+**Result (2026-10-10) — only "demand shrinking" clears the declared bar, and it barely changes the
+pool; removing the traps does not fix the fragility.** The base reproduced §5.2.10 exactly.
+
+| pool (median companies / month) | hit rate vs ALL | NW t | halves 17–20 / 21–25 | vs plain (t) | beat SPY by 50%+ | median vs SPY | verdict |
+|---|---|---|---|---|---|---|---|
+| ALL companies | — | — | — | — | 8.8% | −7.8% | |
+| plain good + cheap (286) | +4.7pp | 3.45 | +6.7 / +3.1 | — | 8.4% | −3.7% | (§5.2.10) |
+| − returns falling (158) | +5.8pp | 2.38 | +6.6 / +5.3 | +1.2pp (0.80) | 8.4% | −2.9% | FAIL (t) |
+| − demand shrinking (285) | +5.4pp | 3.37 | +7.5 / +3.7 | +0.7pp (1.64) | 8.3% | −3.2% | PASS |
+| − price still falling (172) | +2.3pp | 1.47 | +5.9 / −0.5 | −2.2pp (−1.39) | 8.2% | −5.3% | FAIL |
+| − any of the three (91) | +3.4pp | 1.46 | +5.3 / +2.0 | −0.7pp (−0.37) | 8.3% | −5.7% | (reported) |
+
+- **Returns falling** removes almost half the flags and lifts the hit rate (+1.2pp over plain) and the
+  weak 2021–25 half (+3.1 → +5.3), but with a smaller pool the t drops below 3. A direction, not a pass.
+- **Demand shrinking** passes by the letter, but it removes few flags (198 of 1,690 basket-months, the
+  smaller industries) and its gain over plain is +0.7pp at t 1.64 — not distinguishable from plain.
+- **Price still falling** HURTS: the cheap industries still falling are the recoveries (banks and the
+  like). Consistent with §5.2.5 — buying cheap means buying weak, and the weak ones paid.
+- **No pool has more big winners.** Beating SPY by 50%+ stays at ~8.3–8.9% against 8.8% for all, on
+  both monthly-averaged and pooled counts. The edge is fewer losers (median company −3 to −4% against
+  SPY vs −7.8%), not more winners. (An earlier chat figure of 10.9% for the pool does not reproduce on
+  this measure and is withdrawn.)
+- **Reported, not declared — §5.2.11's fragility stays.** Without Regional Banks: plain +3.2pp t 1.63
+  (−0.6 in 2021–25); − returns falling +4.0pp t 1.20 (+1.0); − demand shrinking +3.2pp t 1.23 (−1.4).
+  Regional Banks is never "shrinking" and only 13 of its 48 flagged months are "returns falling", so
+  neither filter touches the industry that carries the result.
+
+Code: `screener/step1.py` (`aggregate_returns`, `returns_falling`), `scripts/run_step1_backtest.py`
+(dump rows carry `shrinking`, `ret_falling`, `rs`).
+
 ### 5.3 Step 5 — the weekly screen (BUILT 2026-10-08)
 
 **Decided by Roy, 2026-10-08:**
