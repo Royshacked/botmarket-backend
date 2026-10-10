@@ -226,8 +226,12 @@ export function formatMoneyLeaders({ asof, up = [], down = [] } = {}) {
         'RISING MOST ($):', ...up.map(row), 'FALLING MOST ($):', ...(down.length ? down.map(row) : ['  none falling'])].join('\n')
 }
 
-/** Every ticker in the measured universe (not stale, one listing per filer) — a Set. */
+/**
+ * Every ticker in the measured universe (not stale, one listing per filer) — a Set. A projected find, not
+ * `distinct`: the engine's connection runs Mongo's strict versioned API, which refuses `distinct`.
+ */
 export async function universeSymbols() {
     const db = await _io.db()
-    return new Set(await db.collection(COMPANIES).distinct('symbol', companiesQuery('sector_code', { $exists: true })))
+    const rows = await db.collection(COMPANIES).find(companiesQuery('sector_code', { $exists: true }), { projection: { _id: 0, symbol: 1 } }).toArray()
+    return new Set(rows.map(r => r.symbol).filter(Boolean))
 }

@@ -82,6 +82,23 @@ try {
             await shot(page, `${user.role}-02-row-open`)
             console.log('open row:', (await page.locator('.industry-view__row--open .industry-view__detail').innerText()).slice(0, 900).replace(/\n+/g, ' | '))
         }
+        // Themes (step 3): the list, one opened, and — for an admin only — the approve control (NOT clicked).
+        await page.getByRole('tab', { name: 'Themes' }).click()
+        await page.waitForTimeout(800)
+        await shot(page, `${user.role}-03-themes`)
+        console.log('themes summary:', (await page.locator('.themes-view .industry-view__summary-bar').innerText()).replace(/\n+/g, ' | '))
+        console.log('theme rows:', (await page.locator('.themes-view .industry-view__name').allInnerTexts()).join(' | '))
+        console.log('Propose themes visible:', await page.getByRole('button', { name: 'Propose themes' }).count() === 1)
+        const themeRows = page.locator('.themes-view .industry-view__line')
+        if (await themeRows.count()) {
+            await themeRows.first().click()
+            await page.waitForTimeout(600)
+            await shot(page, `${user.role}-04-theme-open`)
+            console.log('theme open:', (await page.locator('.themes-view .industry-view__row--open .industry-view__detail').innerText()).slice(0, 700).replace(/\n+/g, ' | '))
+            console.log('Approve visible:', await page.getByRole('button', { name: 'Approve' }).count() > 0)
+        }
+        await page.getByRole('tab', { name: 'Assessed' }).click()
+        await page.waitForTimeout(400)
         await page.getByLabel('Find an industry').fill('zzz-none')
         await page.waitForTimeout(400)
         console.log('search with no match:', await page.locator('.assessment-view .news-feed__empty').innerText().catch(() => '(none)'))
