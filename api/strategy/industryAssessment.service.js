@@ -1,0 +1,221 @@
+// Pythia's assessment of an industry — is it interesting to trade, to invest in, to watch, or to avoid
+// (docs/design/pythia-assessment.md, Roy's design of 2026-10-10).
+//
+// Pythia ASSESSES, it does not forecast: the research of 2026-10-08..10 (industry-screener.md §5) found no
+// way to forecast which industries lead. So an assessment is a judgment from five inputs — news and
+// events, price action, where the money goes, the regime, geopolitics — and the code holds it to
+// guardrails: it must name what caused the move, the second-order effects, its risks and what would change
+// its mind; and the FACTS it may not argue with — how far the price has moved, the hype flag — are
+// attached here, from the engine's numbers, never taken from the agent.
+//
+// One house document per subject in `industry_assessment` (no owner — a broadcast, like industry_view),
+// written through the house artifact repo so every change appends a revision. Every published verdict is
+// also logged as a CALL (pythiaCalls.service.js) and graded later — the only honest test of a judgment.
+
+import { getDb } from '../../providers/mongodb.provider.js'
+import { makeHouseArtifactRepo } from '../../services/houseArtifact.repo.js'
+import { newRevision, diffFields } from '../../services/revisionTrail.js'
+import { logger } from '../../services/logger.service.js'
+
+const LOG = '[industryAssessment]'
+export const COLLECTION = 'industry_assessment'
+
+/** The verdict words (Roy, 2026-10-10) and what the board says for each. */
+export const VERDICTS = Object.freeze({
+    interesting_trade:  'Interesting to trade',
+    interesting_invest: 'Interesting to invest',
+    watch:              'Watch',
+    avoid:              'Avoid',
+})
+export const HORIZONS = Object.freeze(['weeks', 'months', 'years'])
+export const CONFIDENCE = Object.freeze(['low', 'medium', 'high'])
+/** The five inputs (design §4), each with a line of evidence. */
+export const INPUTS = Object.freeze(['news', 'price', 'money', 'regime', 'geopolitics'])
+/** The two the desk can always read today; the rest may say they are not built yet. */
+const REQUIRED_INPUTS = ['news', 'price']
+/** What caused the move (design §4.2) — `none` is itself a finding: a move with no cause is the hype pattern. */
+export const CAUSES = Object.freeze(['news', 'money', 'regime', 'geopolitics', 'none'])
+/** An assessment goes stale; it is reassessed by then (design §6 `expires_at`). */
+export const EXPIRY_DAYS = Object.freeze({ weeks: 14, months: 42, years: 91 })
+
+/**
+ * The base rates attached by CODE (design §5.2), with the research behind each. Only the ones measured
+ * in production are attached; the rest are listed as not measured yet so the board does not imply them.
+ */
+export const BASE_RATES = Object.freeze({
+    hype: 'Up 100%+ in two years and 100%+ above the market. Of 98 such run-ups since 1928, 22% fell 40%+ within 24 months (base rate 9%); the median one trailed the market by 10.6% over the next two years (industry-screener.md §5.5.3).',
+})
+export const NOT_MEASURED = Object.freeze(['value_trap', 'customer_demand', 'momentum_at_turns'])
+
+const _io = { db: () => getDb() }
+// The repo reads the same seam, so a test's fake database sees the revision write too.
+const _repo = makeHouseArtifactRepo({ collection: COLLECTION, getDb: () => _io.db() })
+/** Test seam. */
+export function _setAssessmentIO(io) { Object.assign(_io, io) }
+
+const _str = (v, max = 900) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : null)
+const _list = (v, max = 6) => (Array.isArray(v) ? v.map(x => _str(x, 300)).filter(Boolean).slice(0, max) : [])
+const _num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null)
+
+/**
+ * One <industry_assessment> block, checked → `{ ok, assessment, gaps }` or `{ ok:false, detail }`. Pure.
+ *
+ * Refused when it lacks what makes it a judgment rather than a story: a verdict, a horizon, a thesis, the
+ * news and price evidence, what caused the move, the second-order view, a risk, and what would change it.
+ * The inputs not built yet (money, regime, geopolitics in build step 1) may be absent — they are stored as
+ * gaps, so the board shows what the verdict was NOT based on. Facts the agent sends (moves, flags) are
+ * ignored: the code attaches them.
+ */
+export function checkAssessment(block) {
+    if (!block || typeof block !== 'object') return { ok: false, detail: 'no block' }
+    const code = _str(block.industry, 16)
+    if (!code || !/^\d{8}$/.test(code)) return { ok: false, detail: 'industry must be the 8-digit GICS code' }
+    const problems = []
+    const verdict = _str(block.verdict, 40)
+    if (!verdict || !VERDICTS[verdict]) problems.push(`verdict must be one of ${Object.keys(VERDICTS).join('/')}`)
+    const horizon = _str(block.horizon, 20)
+    if (!horizon || !HORIZONS.includes(horizon)) problems.push(`horizon must be one of ${HORIZONS.join('/')}`)
+    const thesis = _str(block.thesis)
+    if (!thesis) problems.push('thesis is missing')
+
+    const ev = block.evidence && typeof block.evidence === 'object' ? block.evidence : {}
+    const evidence = {}, gaps = []
+    for (const k of INPUTS) {
+        const text = _str(typeof ev[k] === 'object' && ev[k] ? ev[k].text : ev[k], 700)
+        if (text) evidence[k] = text
+        else if (REQUIRED_INPUTS.includes(k)) problems.push(`evidence.${k} is missing`)
+        else gaps.push(k)
+    }
+    const c = block.cause && typeof block.cause === 'object' ? block.cause : {}
+    const causeKind = _str(c.kind, 20)
+    const causeText = _str(c.text, 500)
+    if (!causeKind || !CAUSES.includes(causeKind)) problems.push(`cause.kind must be one of ${CAUSES.join('/')}`)
+    if (!causeText) problems.push('cause.text is missing — say what moved it, or why nothing nameable did')
+    const secondOrder = _str(block.second_order, 600)
+    if (!secondOrder) problems.push('second_order is missing — who benefits or pays up and down the chain')
+    const risks = _list(block.risks)
+    if (!risks.length) problems.push('risks: name at least one')
+    const changeIf = _list(block.change_view_if)
+    if (!changeIf.length) problems.push('change_view_if: name at least one checkable condition')
+    const confidence = _str(block.confidence, 10)
+    if (!confidence || !CONFIDENCE.includes(confidence)) problems.push(`confidence must be one of ${CONFIDENCE.join('/')}`)
+    if (problems.length) return { ok: false, detail: `${code}: ${problems.join('; ')}` }
+    return {
+        ok: true, gaps,
+        assessment: {
+            code, verdict, horizon, thesis, evidence, cause: { kind: causeKind, text: causeText },
+            second_order: secondOrder, risks, change_view_if: changeIf, confidence,
+            confidence_reason: _str(block.confidence_reason, 300),
+        },
+    }
+}
+
+/**
+ * The facts attached by code from the engine's screen row for the industry (industry_timing) → `{ moved,
+ * base_rates, not_measured }`. Pure. `moved` is how far the price has gone (design §4.2); a base rate is
+ * attached only when it APPLIES.
+ */
+export function factsFor(row) {
+    const r = row?.raw ?? {}
+    const ex = (a, b) => (_num(a) != null && _num(b) != null ? a - b : null)
+    const moved = row ? {
+        asof: row.asof ?? null, basket: row.basket_name ?? null,
+        ret_12m: _num(r.ret_12m), spy_12m: _num(r.spy_12m), excess_12m: ex(r.ret_12m, r.spy_12m),
+        ret_24m: _num(r.ret_24m), spy_24m: _num(r.spy_24m), excess_24m: ex(r.ret_24m, r.spy_24m),
+        rel_1m: _num(r.rel_1m), rel_3m: _num(r.rel_3m),
+        ext_50: _num(r.ext_50), ext_percentile: _num(r.ext_percentile),
+        hype: typeof r.hype === 'boolean' ? r.hype : null,
+    } : null
+    const base_rates = moved?.hype ? [{ key: 'hype', text: BASE_RATES.hype }] : []
+    return { moved, base_rates, not_measured: [...NOT_MEASURED] }
+}
+
+/** 1st, 2nd, 3rd, 4th … 11th, 12th, 13th, 21st. Pure. */
+export function ordinal(n) {
+    const t = n % 100
+    if (t >= 11 && t <= 13) return `${n}th`
+    return `${n}${{ 1: 'st', 2: 'nd', 3: 'rd' }[n % 10] ?? 'th'}`
+}
+
+const _pct = (v, d = 0) => (typeof v === 'number' ? `${v >= 0 ? '+' : ''}${(v * 100).toFixed(d)}%` : 'n/a')
+
+/**
+ * The facts as the agent reads them (the `get_industry_moves` tool). Pure. `regime` is the engine's
+ * market regime for the same run (green / yellow / red from the S&P's trend and volatility).
+ */
+export function formatFacts(row, regime = null) {
+    const { moved, base_rates, not_measured } = factsFor(row)
+    if (!moved) return 'No price measurements for this industry yet — the engine screen has not covered it.'
+    const pctile = moved.ext_percentile != null ? `${ordinal(Math.round(moved.ext_percentile * 100))} percentile of its own two years` : 'percentile n/a'
+    return [
+        `HOW FAR IT HAS MOVED (engine run ${moved.asof}; equal-weight basket: ${moved.basket ?? 'its own'}):`,
+        `  12 months ${_pct(moved.ret_12m)} vs SPY ${_pct(moved.spy_12m)} → ${_pct(moved.excess_12m)} over the market`,
+        `  24 months ${_pct(moved.ret_24m)} vs SPY ${_pct(moved.spy_24m)} → ${_pct(moved.excess_24m)} over the market`,
+        `  last 1 / 3 months vs the S&P: ${_pct(moved.rel_1m, 1)} / ${_pct(moved.rel_3m, 1)}`,
+        `  stretched: ${_pct(moved.ext_50, 1)} above its 50-day — ${pctile}`,
+        `HYPE FLAG: ${moved.hype == null ? 'n/a (needs two years and SPY)' : moved.hype ? 'YES' : 'no'}`,
+        ...base_rates.map(b => `BASE RATE (attached to your assessment by code): ${b.text}`),
+        `NOT MEASURED YET (say nothing about them as if measured): ${not_measured.join(', ')}`,
+        `MARKET REGIME (S&P trend and volatility): ${String(regime?.regime ?? 'n/a').toUpperCase()}`,
+    ].join('\n')
+}
+
+const _plusDays = (iso, days) => new Date(Date.parse(iso) + days * 86_400_000).toISOString()
+
+/** Once, at boot (server.js), like every other collection's ensure*Indexes. */
+export async function ensureIndustryAssessmentIndexes() {
+    const db = await _io.db()
+    await db.collection(COLLECTION).createIndex({ id: 1 }, { unique: true })
+    await db.collection(COLLECTION).createIndex({ 'subject.code': 1 })
+}
+
+const _id = (code) => `ia_ind_${code}`
+
+/**
+ * Publish an assessment of one sub-industry: checked, the code's facts attached, written with a revision,
+ * and logged as a call. `sub` is the industry's metrics node (industryData.readSubIndustry().sub), `row`
+ * its latest screen row (screenerData.readTimingRow), `structure` the standing industry_view grades.
+ * → `{ ok, doc, changed, call }` or `{ ok:false, reason, detail }`.
+ */
+async function publishAssessment(block, { sub, row, structure = null, recordCall = null, now = new Date().toISOString(), source = 'chat' } = {}) {
+    const checked = checkAssessment(block)
+    if (!checked.ok) return { ok: false, reason: 'bad_assessment', detail: checked.detail }
+    const a = checked.assessment
+    if (!sub || sub.code !== a.code) return { ok: false, reason: 'unknown_industry', detail: `no measured sub-industry ${a.code}` }
+    const db = await _io.db()
+    const id = _id(a.code)
+    const subject = { kind: 'industry', code: sub.code, name: sub.name, sector: sub.sector ?? null }
+    await db.collection(COLLECTION).updateOne({ id },
+        { $setOnInsert: { subject, revisions: [], created_at: now } }, { upsert: true })
+    const cur = await db.collection(COLLECTION).findOne({ id })
+    const facts = factsFor(row)
+    const set = {
+        subject, verdict: a.verdict, horizon: a.horizon, thesis: a.thesis, evidence: a.evidence, gaps: checked.gaps,
+        cause: a.cause, second_order: a.second_order, risks: a.risks, change_view_if: a.change_view_if,
+        confidence: a.confidence, confidence_reason: a.confidence_reason,
+        moved: facts.moved, base_rates: facts.base_rates, not_measured: facts.not_measured,
+        structure, assessed_at: now, expires_at: _plusDays(now, EXPIRY_DAYS[a.horizon]), source, updated_at: now,
+    }
+    const fields = ['verdict', 'horizon', 'confidence']
+    const changed = diffFields(Object.fromEntries(fields.map(f => [f, cur?.[f] ?? null])), a, fields)
+    await _repo.revise(id, set, newRevision({ kind: cur?.verdict ? 'reassessment' : 'assessment', note: a.thesis, changed, at: now }))
+    const doc = await db.collection(COLLECTION).findOne({ id }, { projection: { _id: 0 } })
+    let call = null
+    if (recordCall) {
+        try { call = await recordCall(doc, { now }) }
+        catch (err) { logger.warn(LOG, 'call not logged (the assessment is published)', { code: a.code, error: err.message }) }
+    }
+    return { ok: true, doc, changed, call }
+}
+
+async function getAssessment(code) {
+    const db = await _io.db()
+    return db.collection(COLLECTION).findOne({ id: _id(code) }, { projection: { _id: 0 } })
+}
+
+async function listAssessments() {
+    const db = await _io.db()
+    return db.collection(COLLECTION).find({}, { projection: { _id: 0, revisions: 0 } }).sort({ 'subject.sector': 1, 'subject.name': 1 }).toArray()
+}
+
+export const industryAssessmentService = { publishAssessment, getAssessment, listAssessments }

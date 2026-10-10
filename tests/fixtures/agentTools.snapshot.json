@@ -117,6 +117,22 @@
             }
         },
         {
+            "name": "get_industry_moves",
+            "description": "How far a sub-industry has MOVED, from the engine's weekly screen: its equal-weight basket's return over 12 and 24 months against SPY, the last 1 and 3 months against the S&P, how stretched it is (distance above its 50-day and that distance's percentile in its own two years), the HYPE FLAG (up 100%+ in two years and 100%+ over the market) with its base rate, and the market regime. Facts to state in an assessment, not to argue with.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "industry": {
+                        "type": "string",
+                        "description": "A GICS sub-industry: its 8-digit code or its exact name."
+                    }
+                },
+                "required": [
+                    "industry"
+                ]
+            }
+        },
+        {
             "name": "consult",
             "description": "Put ONE decision to a more capable desk head and get a straight answer back. It cannot see this conversation and cannot fetch anything — you hand it the question and every number it needs, and it thinks harder than you can in-line.\n\nReach for it when you are about to DEPART from a measured code grade on a large industry, and the argument is close — the override is what the house will read, and it should survive someone attacking it. Not for agreeing with the numbers.\n\nDo NOT reach for it to look something up, to double-check work you are already confident in, to summarize, or because a question feels big. A consult costs a full model call and adds seconds to the turn: if you already know the answer, or a tool call would settle it, that is the cheaper and better move. Most turns should end without it.",
             "input_schema": {

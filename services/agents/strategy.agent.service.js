@@ -6,6 +6,10 @@
 // economics, cycle — from the numbers aether-engine measured (api/strategy/industryData.service.js),
 // departing from the code's first read only with an argument.
 //
+// Since 2026-10-10 it also ASSESSES an industry (docs/design/pythia-assessment.md): one
+// <industry_assessment> block per assessment turn (chatState.assess), checked and published by
+// industryAssessment.service, its price facts attached by code from get_industry_moves' source.
+//
 // Emits one <industry_view> block per sub-industry it answered. In chat the blocks are DRAFTS returned
 // for preview; publishing is a separate act (industryViewService.publishView). The headless review
 // (services/industryReview.service.js) publishes what it gets.
@@ -24,6 +28,8 @@ import {
     formatSubIndustry, formatCompanies,
 } from '../../api/strategy/industryData.service.js'
 import { industryViewService } from '../../api/strategy/industryView.service.js'
+import { readTimingRow } from '../../api/strategy/screenerData.service.js'
+import { formatFacts } from '../../api/strategy/industryAssessment.service.js'
 import { getEarningsCalendar } from '../../providers/fmp.provider.js'
 import { logger } from '../logger.service.js'
 
@@ -46,6 +52,9 @@ export const TOOLS = [
         // The weekly screen's catalyst read (docs/design/industry-screener.md): who reports when. Inserted
         // before `consult`, which stays last.
         get_earnings_calendar: `Upcoming earnings dates between two dates (YYYY-MM-DD, window up to ~3 months), optionally for specific symbols — PASS the industry's leaders and largest companies: a market-wide ask returns only the soonest rows. For the weekly screen's catalyst (Q11): an industry whose largest companies report inside the four-week window has a DATED event.`,
+        // The assessment's price input (docs/design/pythia-assessment.md §4.2): facts from code. Appended
+        // before `consult`, which stays last.
+        get_industry_moves: `How far a sub-industry has MOVED, from the engine's weekly screen: its equal-weight basket's return over 12 and 24 months against SPY, the last 1 and 3 months against the S&P, how stretched it is (distance above its 50-day and that distance's percentile in its own two years), the HYPE FLAG (up 100%+ in two years and 100%+ over the market) with its base rate, and the market regime. Facts to state in an assessment, not to argue with.`,
         consult: consultDescription(`Reach for it when you are about to DEPART from a measured code grade on a large industry, and the argument is close — the override is what the house will read, and it should survive someone attacking it. Not for agreeing with the numbers.`),
     }),
 ]
@@ -75,6 +84,12 @@ const TOOL_HANDLERS = {
     get_earnings_calendar: makeToolHandler('get_earnings_calendar',
         ({ from, to, symbols }) => getEarningsCalendar(from, to, Array.isArray(symbols) ? symbols : []),
         (err) => `Could not fetch the earnings calendar: ${err.message}`, LOG),
+    get_industry_moves: makeToolHandler('get_industry_moves', async (input) => {
+        const b = await readSubIndustry(_industry(input))
+        if (!b) return 'Unknown sub-industry — call list_industries for the codes and names.'
+        const { row, regime } = await readTimingRow(b.sub.code)
+        return `${b.sub.name} (${b.sub.code})\n${formatFacts(row, regime)}`
+    }, (e) => `Could not read the industry's moves: ${e.message}`, LOG),
     get_industry_view: makeToolHandler('get_industry_view', async (input) => {
         const b = await readSubIndustry(_industry(input))
         if (!b) return 'Unknown sub-industry — call list_industries for the codes and names.'
@@ -112,25 +127,25 @@ async function chatStream({
         meta: { userPrompt },
     })
 
-    const { reply, views, screens } = _parseStrategyResponse(raw)
-    logger.info(LOG, 'chatStream done', { replyLength: reply.length, views: views.length, screens: screens.length })
-    return { reply, phase: phase.get(), views, screens, ...route.result() }
+    const { reply, views, screens, assessments } = _parseStrategyResponse(raw)
+    logger.info(LOG, 'chatStream done', { replyLength: reply.length, views: views.length, screens: screens.length, assessments: assessments.length })
+    return { reply, phase: phase.get(), views, screens, assessments, ...route.result() }
 }
 
 // ─── extraction (pure) ────────────────────────────────────────────────────────
 
 /**
- * Every <industry_view> and <industry_screen> block in the raw output → `{ reply, views, screens }`. A
- * block without an `industry` is dropped — nothing could be published against it. Full checking happens
- * downstream (checkDraft for views, checkScreen for screens).
+ * Every <industry_view>, <industry_screen> and <industry_assessment> block in the raw output →
+ * `{ reply, views, screens, assessments }`. A block without an `industry` is dropped — nothing could be
+ * published against it. Full checking happens downstream (checkDraft, checkScreen, checkAssessment).
  */
 export function _parseStrategyResponse(raw) {
     const text  = raw ?? ''
-    const reply = stripEmitTags(text, ['industry_view', 'industry_screen', 'phase', ...ROUTE_TAGS]).trim()
+    const reply = stripEmitTags(text, ['industry_view', 'industry_screen', 'industry_assessment', 'phase', ...ROUTE_TAGS]).trim()
     const withIndustry = (tag) => parseEmitBlocks(text, tag, LOG)
         .filter(v => v && typeof v === 'object' && !Array.isArray(v) && typeof v.industry === 'string' && v.industry.trim())
         .map(v => ({ ...v, industry: v.industry.trim() }))
-    return { reply, views: withIndustry('industry_view'), screens: withIndustry('industry_screen') }
+    return { reply, views: withIndustry('industry_view'), screens: withIndustry('industry_screen'), assessments: withIndustry('industry_assessment') }
 }
 
 function _buildSystemPrompt() {
@@ -149,6 +164,9 @@ function _buildSystemPrompt() {
 export function _buildTurnContext(chatState) {
     if (typeof chatState?.screen === 'string' && chatState.screen.trim()) {
         return `This is the WEEKLY INDUSTRY SCREEN for the engine run of ${chatState.screen.trim()} — follow "The weekly screen" in your instructions. No <industry_view> blocks this turn.`
+    }
+    if (typeof chatState?.assess === 'string' && /^\d{8}$/.test(chatState.assess.trim())) {
+        return `ASSESSMENT of GICS sub-industry ${chatState.assess.trim()} — follow "Assessing an industry" in your instructions and end with ONE <industry_assessment> block. No <industry_view> blocks this turn.`
     }
     const focus = typeof chatState?.industry === 'string' && chatState.industry.trim() ? chatState.industry.trim() : null
     if (!focus) return null

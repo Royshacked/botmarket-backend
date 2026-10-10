@@ -5,6 +5,7 @@ import {
     streamStrategy,
     listIndustries, getIndustry, publishIndustry,
     getScreen, runScreenNow,
+    listAssessments, getAssessment, publishAssessment, assessNow, listCalls,
 } from './strategy.controller.js'
 
 const router = express.Router()
@@ -28,6 +29,14 @@ router.get('/industries/:code',  log, getIndustry)
 // everyone; running it now is the house's spend, so admin-only.
 router.get('/screen',            log, getScreen)
 router.post('/screen/run',       requireAdmin, log, runScreenNow)
+
+// Assessments (docs/design/pythia-assessment.md): Pythia's verdict per industry and the graded calls
+// behind it, read by everyone; publishing a draft and "Assess now" spend the house's research, so admin.
+router.get('/assessments',             log, listAssessments)
+router.get('/assessments/:code',       log, getAssessment)
+router.get('/calls',                   log, listCalls)
+router.post('/assessments/:code',      requireAdmin, log, publishAssessment)
+router.post('/assessments/:code/run',  requireAdmin, log, assessNow)
 
 // Authoring: the streaming desk (emits <industry_view> drafts) and publishing a reviewed draft.
 router.post('/stream',           requireAdmin, log, streamStrategy)

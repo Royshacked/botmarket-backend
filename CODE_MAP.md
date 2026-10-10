@@ -100,6 +100,15 @@ api/
                               answers it + its parents; listSubIndustries) and gics_companies
                               (readCompanies, readCompaniesBySymbol). Pure formatters for the desk.
                               Data, not judgment
+    industryAssessment.service.js  `industry_assessment` = Pythia's verdict per industry (docs/design/
+                              pythia-assessment.md): interesting_trade / interesting_invest / watch / avoid,
+                              horizon, thesis, evidence per input, cause, second_order, risks, change_view_if,
+                              confidence. checkAssessment refuses a story without those guardrails; factsFor
+                              attaches the MOVES and the hype base rate from the engine row — never from the
+                              agent. publishAssessment rides houseArtifact.repo and logs the call
+    pythiaCalls.service.js    `pythia_calls` = the FORWARD LOG: each verdict freezes its basket's and SPY /
+                              QQQ / RSP's prices; gradeDue scores it at 3 and 12 months (gradeCall, summarise).
+                              Logged on a new verdict or a reaffirmation after 28 days (shouldLog)
   aether/                 Aether — the EVENT-EXPOSURE desk  /api/aether/*. Node is READ-ONLY against the
                           engine's collections: the Python aether-engine (a separate repo) writes them, and
                           only when an admin starts a discovery run. What survived the channel-engine
@@ -710,6 +719,8 @@ services/
   industryReview.service.js A headless Pythia review of ONE sub-industry (the desk with userId null):
                             publishes the <industry_view> it gets, or records a pass / a refused answer
                             on the trail. Never throws — the caller is a monitor tick
+  industryAssessmentRun.service.js  "Assess now" (admin): one headless Pythia assessment, run AS the admin so
+                            the spend is booked; returns cost_usd (ledger after − before, desk + sidecar)
   engineDb.js               THE rule for which database aether-engine writes (AETHER_DB, else Node's own) —
                             shared by the engine's scheduler and every desk that reads what it wrote
   manualNotify.service.js   broker-less entry/exit FillCards → social chat (embedded price/qty confirm)
@@ -1041,6 +1052,8 @@ monitoring/
                             unless reviewed in the last 30 days. REVIEW hourly via dueLoop: due views get
                             industryReview, at most 3 a tick, ONLY with INDUSTRY_REVIEWS=true (off, the
                             claim is handed back and nothing is spent)
+  pythiaCalls.monitor.service.js  The grader — daily, scores Pythia's logged calls at 3 and 12 months
+                            (pythiaCalls.gradeDue). Quotes only, no model; ungated
   coverage.monitor.service.js  Prometheus's slow loop (dueLoop, hourly tick, ~daily per name, every
                             status but retired). Cheap tier: price + the Street's PT distribution →
                             coverage.assess.classifyGapState (target_hit / target_hit_early /

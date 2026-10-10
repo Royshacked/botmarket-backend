@@ -170,6 +170,21 @@ export async function readRun(asof) {
     return { rows, regime }
 }
 
+/**
+ * One sub-industry's row from the latest COMPLETE run, and that run's regime → `{ row, regime }`, either
+ * null when missing. For Pythia's assessment (pythia-assessment.md §4.2): how far the price has moved.
+ */
+export async function readTimingRow(code) {
+    const latest = await latestRun()
+    if (!latest) return { row: null, regime: null }
+    const db = await _io.db()
+    const [row, regime] = await Promise.all([
+        db.collection(TIMING).findOne({ asof: latest.asof, code }, { projection: { _id: 0 } }),
+        db.collection(REGIME).findOne({ _id: latest.asof }),
+    ])
+    return { row, regime }
+}
+
 // ─── the agent's input (pure) ─────────────────────────────────────────────────
 
 const pct = (v, d = 1) => (typeof v === 'number' ? `${(v * 100).toFixed(d)}%` : 'n/a')

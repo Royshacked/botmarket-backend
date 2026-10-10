@@ -88,6 +88,29 @@ weeks that `checkScreen` holds to its date.
 - The desk emits `<industry_screen>` blocks only in the headless screen run; it gained
   `get_earnings_calendar` for it.
 
+## The assessment — `industry_assessment` (build step 1, 2026-10-10)
+
+Contract: `docs/design/pythia-assessment.md`. Pythia judges whether an industry is **interesting to
+trade, to invest in, to watch, or to avoid**, from five inputs (news and events, price action, money,
+regime, geopolitics). It is a judgment, not a forecast, and the code holds it to guardrails:
+
+- `checkAssessment` refuses a block without a verdict, horizon, thesis, news and price evidence, what
+  caused the move (`none` is allowed and is a finding), the second-order view, a risk, and what would
+  change the view. Inputs not built yet (money, regime, geopolitics in step 1) are stored as `gaps`.
+- `factsFor` attaches the facts from the engine's screen row (`industry_timing.raw`, written by
+  `run_screener_timing.py`): the 12- and 24-month return against SPY, the stretch, and the **hype flag**
+  (up 100%+ in two years and 100%+ over the market) with its base rate (22% crashed vs 9%). The agent
+  reads them through `get_industry_moves` and cannot override them.
+- Every published verdict is logged as a call in **`pythia_calls`** (`pythiaCalls.service.js`): the
+  sub-industry's largest companies and SPY / QQQ / RSP priced on the day, re-priced at 3 and 12 months
+  by the daily grader (`monitoring/pythiaCalls.monitor.service.js`). Logged on a new verdict, or a
+  reaffirmation after 28 days.
+- Routes: `GET /api/strategy/assessments` (everyone; with the track record), `GET /assessments/:code`,
+  `GET /calls`; admin: `POST /assessments/:code` (publish a chat draft), `POST /assessments/:code/run`
+  ("Assess now", headless, returns `cost_usd`, the input to the weekly cap).
+- Until build step 6 (the change scan and weekly run) assessments are made one at a time by an admin.
+  The weekly screen stays visible until the assessment board replaces it (Roy, 2026-10-10).
+
 ## The monitor — `monitoring/industryView.monitor.service.js`
 
 Two loops, because they cost different things:

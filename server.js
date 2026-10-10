@@ -76,6 +76,9 @@ import { industryViewMonitorService } from './monitoring/industryView.monitor.se
 import { ensureIndustryViewIndexes } from './api/strategy/industryView.service.js'
 import { industryScreenMonitorService } from './monitoring/industryScreen.monitor.service.js'
 import { ensureIndustryScreenIndexes } from './api/strategy/industryScreen.service.js'
+import { ensureIndustryAssessmentIndexes } from './api/strategy/industryAssessment.service.js'
+import { ensurePythiaCallsIndexes } from './api/strategy/pythiaCalls.service.js'
+import { pythiaCallsMonitorService } from './monitoring/pythiaCalls.monitor.service.js'
 import { themisService }      from './monitoring/themis.monitor.service.js'
 import { executionReconciler } from './monitoring/execution.reconciler.js'
 import { paperFillService }  from './monitoring/paperFill.service.js'
@@ -227,6 +230,8 @@ ensurePendingActionIndexes()
 ensureAetherIndexes()
 ensureIndustryViewIndexes().catch(() => {})   // Pythia's industry_view (api/strategy/industryView.service.js)
 ensureIndustryScreenIndexes().catch(() => {}) // Pythia's weekly industry_screen (api/strategy/industryScreen.service.js)
+ensureIndustryAssessmentIndexes().catch(() => {}) // Pythia's industry_assessment (api/strategy/industryAssessment.service.js)
+ensurePythiaCallsIndexes().catch(() => {})        // Pythia's forward log, pythia_calls (api/strategy/pythiaCalls.service.js)
 threadService.ensureThreadIndexes()
 
 // ─── Background loops ─────────────────────────────────────────────────────────
@@ -262,6 +267,7 @@ function startBackgroundLoops() {
     startLoop('coverage',     coverageMonitorService)
     startLoop('industryView', industryViewMonitorService)
     startLoop('industryScreen', industryScreenMonitorService)
+    startLoop('pythiaCalls', pythiaCallsMonitorService)
     startLoop('themis',       themisService)
     startLoop('reconciler',   executionReconciler)
     startLoop('paperFill',    paperFillService)

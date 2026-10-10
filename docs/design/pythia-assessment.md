@@ -1,6 +1,6 @@
 # Pythia assesses, it does not forecast — events, price, money, regime, geopolitics (2026-10-10)
 
-**PROPOSED, nothing built.** Roy's design of 2026-10-10, written up for decision before any code. It
+**BUILDING.** Roy's design of 2026-10-10. Step 1 (the artifact, guardrails, forward log and grader) is built in the backend and engine; its board is next. Status per step in §12. It
 replaces the forecasting half of `industry-screener.md` (the weekly buckets, §2–§5.3) and keeps
 Pythia's three structural questions (`pythia-industry-questions.md`) as one of its inputs.
 
@@ -221,6 +221,10 @@ already does (`needsAgent`):
 
 1. **The artifact, the guardrails and the forward log** (§5–§7) — before any new input, so every verdict
    is measured from the first one. Board: verdict + thesis + flags + track record.
+   **Backend + engine BUILT 2026-10-10**: `industry_assessment`, `checkAssessment` / `factsFor`, `pythia_calls` +
+   the daily grader, "Assess now", `get_industry_moves`; the engine screen job writes the 12/24-month moves
+   and the hype flag. Benchmarks for "no view": SPY, QQQ and RSP (equal-weight S&P 500); the "rules only"
+   baseline waits for the rules in production. Board: next.
 2. **Money, companies** — capex and buyback trends by industry and theme from `fin_statements` (data in
    hand). Only companies' own money in this step.
 3. **Themes** — the registry; Pythia proposes the first themes and the admin approves them; filings
