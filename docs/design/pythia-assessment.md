@@ -36,7 +36,7 @@ call. This doc builds Pythia on that.
 
 | | Before (screen, 2026-10-08) | After (this design) |
 |---|---|---|
-| Question | "Which industries will do well?" | "What is happening here, what is priced in, and is it worth our attention?" |
+| Question | "Which industries will do well?" | "What is happening here, how far has the price gone, and is it worth our attention?" |
 | Verdict | CODE, from quality + timing scores | The AGENT's judgment, from five inputs, held to guardrails (§5) and graded forward (§7) |
 | Unit | GICS sub-industry | Sub-industry AND theme (§3) |
 | Structural questions (demand, economics, cycle) | The quality half of the score | One input among several; `industry_view` stays as is |
@@ -74,13 +74,17 @@ Each input answers one question, has a source, and has things it may NOT claim.
 - **May not claim:** that a headline means the price will move. Speed is the machines' game; the edge is
   in what the crowd misses and in reading it differently.
 
-### 4.2 Price action — "what is already priced in?"
+### 4.2 Price action — "how much has already moved?"
 
 - **Have:** daily prices (Parquet history + the `daily_prices_recent` window), the industry baskets, 12-1
   strength against SPY, extension (2-year percentile), breadth — the screen's engine job.
-- **Pythia's job:** read price as the CROWD's view. The test for every story: how did the price react to
-  the news against what was expected? A good story already up 80% is a different trade from the same
-  story flat.
+- **Pythia's job:** state the move, as FACTS from code: the industry's (or theme basket's) return since
+  the story started and over 12 and 24 months against SPY, its extension against its own two years, and
+  the hype flag. A good story already up 80% is a different trade from the same story flat.
+- **Not Pythia's job — whether it is "priced in"** (Roy, 2026-10-10): that is close to unknowable at
+  industry level. Expectations live in companies — estimates, guidance, how a stock took its last
+  report — so **Prometheus** assesses them per name (§10). Pythia reports how far the price has gone,
+  not what the market expects.
 - **Guardrails it carries:** momentum reverses at turns (§5.4.2 there: −8 to −9pp in easing and stress);
   an industry in a run-up carries the hype flag (§5).
 
@@ -124,7 +128,7 @@ Built engine-side as aggregates by industry and theme (§9), never as raw filing
 Every assessment must carry these, and `checkAssessment` refuses one that omits them (as `checkScreen`
 refuses an undated catalyst today):
 
-1. **What is priced in** — the price reaction and the extension (§4.2).
+1. **How much has already moved** — the run-up and the extension (§4.2), from code.
 2. **The base rates we tested**, attached by CODE, not recalled by the agent:
    - **hype flag** — 24-month return ≥ 100% and ≥ 100% over the market: crash within 24 months 22% vs 9%
      base; median 24-month excess −10.6% (§5.5.3 there);
@@ -145,7 +149,8 @@ One house document per industry or theme, through `houseArtifact.repo` (every ch
 - `horizon` — weeks / months / years; `expires_at` (an assessment goes stale)
 - `thesis` — two or three sentences
 - `evidence` — one short entry per input (§4.1–4.5), each with its date
-- `priced_in`, `base_rates` (attached by code), `second_order`, `risks`, `confidence`, `change_view_if`
+- `moved` (code: run-up, extension, hype flag), `base_rates` (attached by code), `second_order`, `risks`,
+  `confidence`, `change_view_if`
 - `structure` — the standing `industry_view` answer (demand / economics / cycle), read, not rewritten
 
 The board shows the verdict in plain words with the thesis, the flags and the track record (§7).
@@ -190,7 +195,10 @@ already does (`needsAgent`):
 - **Argus** reads `interesting_trade` / `interesting_invest` subjects as its hunting ground (it has been
   paused since the tilt was deleted — this is its new input) and brings names: for a theme, the
   first-order names AND the second-order ones the assessment named.
-- **Prometheus** covers the names; the assessment's thesis and risks travel with them.
+- **Prometheus** covers the names; the assessment's thesis and risks travel with them. **"Is it priced
+  in?" is Prometheus's question, per name:** what the price implies against what the company can
+  deliver, the consensus and its revisions, and how the stock took its recent reports (beat and fell /
+  missed and rose — our earnings data holds 135k reports with the estimate beside the result since 1994).
 - **Atlas** allocates and manages risk: industry and theme caps (no book a third in one industry), the
   hype flag as a sizing brake, and the channels as the BOOK's exposure ("you are long rates, long the
   cycle") — not as picks.
