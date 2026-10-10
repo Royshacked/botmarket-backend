@@ -935,6 +935,44 @@ industries in 2017–20 and not in 2021–25.**
 - **Red regime** ("downgrade every swing bucket one level"), read as: the swing half goes. Swing +
   long-term and extended become the long-term watchlist; swing only becomes avoid.
 
+### 5.4 Regimes — the history and the connection (Roy, 2026-10-10)
+
+**Why:** §5.2.14 — good + cheap picked better industries in 2017–20 and not in 2021–25; what led in
+2021–25 (energy, metals, capex, defence) was neither "good" nor "cheap". Roy: the rules may hold in one
+macro regime and not another — go back in time, read the channels, see which industries led, connect,
+explain, and only then define a rule (to be tested walk-forward, §5.4.3).
+
+#### 5.4.1 The history (built 2026-10-10)
+
+`aether-engine scripts/build_regime_history.py` → two LOCAL tables under `data/history/` (never Mongo):
+- `channels_monthly.parquet` — 30 FRED series (the deleted channel engine's primaries + CPI, core CPI,
+  unemployment, industrial production), each as KNOWN at every month end since 1996 (release lags:
+  daily 0, weekly 7, monthly 50; unemployment 40, durable orders 60, consumer credit 70), with its
+  12-month change and trailing-2y z.
+- `industries_monthly.parquet` — every GICS node, every month 2006-11..2025-09: its liquid companies'
+  ($300M cap, $1M median dollar volume) next-12-month returns against SPY and QQQ. Survivors only, today's
+  GICS labels; ~930 liquid companies in 2006, ~2,200 in 2024.
+
+#### 5.4.2 The connection — regime axes declared BEFORE looking at outcomes by regime
+
+Each month is placed on four axes from `channels_monthly` (point in time):
+- **Inflation:** HIGH when CPI y/y ≥ 3%, else LOW.
+- **Fed:** TIGHTENING when fed funds is ≥ 0.25pp above 12 months earlier, EASING when ≥ 0.25pp below,
+  else HOLDING.
+- **Growth:** EXPANDING when industrial production y/y > 0, else CONTRACTING.
+- **Stress:** STRESS when the BAA spread's or the VIX's trailing-2y z ≥ 1 (the deleted engine's stress
+  threshold), else CALM.
+
+Measured, one vote per industry (§5.2.14): each sector's / industry's share of companies beating SPY
+over the next 12 months minus the average's, averaged over the months in each state, with the number of
+separate EPISODES (runs of consecutive months) per state — a state seen in one episode is one example,
+however many months it lasts. Our rules are scored the same way on the step-1 dump (2017-01..2025-09):
+good (quality ≥ 7), cheap (own-history percentile ≥ 0.70), good + cheap, and 12-1 momentum top / bottom
+30%; momentum also on the history table from 2007 (an industry's equal-weight return over months m−13..m−1).
+
+This is DESCRIPTION (Roy's "connect, explain"). No pass bar here; a rule found here is declared in
+§5.4.3 and judged walk-forward, never on these numbers.
+
 ## 6. Build order
 
 1. **Momentum filter test (§5.1)** on data in Mongo. No FMP calls.
