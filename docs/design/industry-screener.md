@@ -1093,6 +1093,47 @@ months (t −1.37).
 - **Verdict on the design:** the chain is the right shape and is now code; with one episode per state it
   cannot be judged. It reruns unchanged on the Premium-month history.
 
+#### 5.4.5 The clean view — correlations before naming anything (Roy, 2026-10-10)
+
+Roy: channels, industries, rules — find the correlations first; name regimes and rules only after.
+`scripts/run_channel_correlations.py` (2006–25, GICS) and `run_channel_correlations_long.py` (§5.4.6).
+Each channel read two ways at the decision month — its 12-month change, and its level against its own
+trailing 2 years (z); each outcome over the next 12 months, one vote per industry. Significance counts
+each YEAR once (months / 12). **Chance check:** the channel history is shifted circularly against the
+outcomes (24+ months; ~30 shifts on 2006–25, 124 on the long history) and the share of |t| ≥ 2 cells is
+counted — what luck alone gives.
+
+**2006–25 (GICS, survivors):** sectors × channel level 2.7% of cells vs luck 0.9% (3% of shifts as
+high) — likely real; industries 1.2–1.4% vs 0.7–0.8% — borderline; rules (2017+) BELOW luck. The 30
+series cluster into ~8–11 forces (Fed policy; long rates; inflation + wages; risk/dollar/credit/copper;
+input costs; the economic cycle; mood; four loners).
+
+#### 5.4.6 The long history — Ken French's 49 industries, 1960–2025 (2026-10-10)
+
+`scripts/fetch_long_history.py` → local parquet: the 49 industry portfolios (CRSP, every stock of its
+time — NO survivorship; monthly returns since 1926-07, firms, size, Sum BE / Sum ME by year) and the
+market; the channels on their longest FRED proxies since 1947 (monthly WTI, GS10, TB3MS, BAA, AHETPI
+swapped in; dollar = DTWEXM chained into DTWEXBGS; real 10y = GS10 − CPI y/y; curve = 10y − 3m; credit
+= BAA − 10y). Outcome: industry VW return over the next 12 months minus the average industry's.
+
+**Result — channels → industries: REAL. Channels → rules: still nothing.**
+- Industries: **5.6%** of cells at |t| ≥ 2 (12-month change) and 4.8% (level) against luck's 1.8%;
+  **none of 124 shifts** reached it. About three times chance — though which single cells are the real
+  ones cannot be told from the table.
+- The channels carrying it are the **economic cycle** (capacity use, unemployment, jobless claims,
+  durable orders, industrial production) and **input costs** (PPI). The shape is classic rotation:
+  after the economy has run hot, defensives lead the next 12 months (Health, Drugs, Utilities; e.g.
+  industrial production → Drugs r +0.39) and cyclicals lag (Autos, Machinery, Toys; PPI level → Autos
+  −0.41); after jobless claims have risen, cyclicals lead (claims → Autos +0.45); commodities and food
+  rising → Oil leads (+0.41 to +0.52).
+- Rules: 0.4–0.8% of cells vs luck 0.4–0.8% — no channel moves a rule's success detectably, even over
+  65 years. The rules themselves work ON AVERAGE: cheap vs own history +2.8pp a year over the average
+  industry, momentum top 30% +1.3pp / bottom −1.4pp; rank ICs: momentum +0.075, own-history cheapness
+  +0.062, BE/ME +0.044.
+- **Reading (not yet a rule):** the channels act on WHICH INDUSTRIES lead, not on WHICH RULE works.
+  A design that follows: rules as a constant layer, plus a channel-driven industry tilt — to be built as
+  a small shrinkage model and judged walk-forward on 1960–2025 before anything is named.
+
 ## 6. Build order
 
 1. **Momentum filter test (§5.1)** on data in Mongo. No FMP calls.
