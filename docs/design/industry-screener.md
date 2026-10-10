@@ -1206,6 +1206,44 @@ follow, or are they part of it? Two studies on the French 49 (§5.4.6, no surviv
   not in it. A new theme creates links no published table holds yet — that needs company-level exposure
   (Aether's filings tools), not BEA.
 
+### 5.6 The industry model — walk-forward, declared 2026-10-10 BEFORE any code (Roy)
+
+**Question:** do the channels, with the rules, pick which industries beat the others over the next 12
+months — on years the model never saw? And do the CHANNELS add anything beyond the rules?
+
+**Data:** French 49 (§5.4.6). Decision months 1960-01..2025-08; outcome y = the industry's value-weighted
+return over the next 12 months minus the average industry's (one vote per industry); industries with
+≥ 5 firms.
+
+**Inputs, all point in time at m:**
+- **Twelve channel forces** (one series per force, every one available from 1960), each standardised by
+  its own mean and std over ALL months up to m: industrial production y/y; unemployment 12m change; CPI
+  y/y; intermediate PPI y/y; oil y/y; fed funds 12m change; 10y yield 12m change; real 10y level
+  (10y − CPI y/y); curve level (10y − 3m); credit level (BAA − 10y); housing starts y/y; consumer credit
+  y/y.
+- **Four industry signals** (ranks 0..1 across industries that month; missing → 0.5): 12-1 momentum;
+  BE/ME against the industry's own history (§5.4.6); BE/ME against other industries; customers' 12-month
+  return (§5.5.2).
+
+**Model (two stages, both ridge regressions):**
+- **A — rules, pooled:** y on the four industry signals, one set of coefficients for all industries.
+- **B — channel tilt, per industry:** A's residual on the twelve forces, a separate fit per industry
+  (each industry its own sensitivity — that is the point).
+- **Prediction = A + B.** "Rules only" = A alone, the comparison.
+- **Training:** expanding window; at month m only decisions d with d + 12 ≤ m (outcomes known). Refit
+  every January. First prediction 1975-01 (15 years of training). Ridge strength chosen INSIDE each
+  training window (grid 0.1, 1, 10, 100, 1000 × n; fit on all but the last 5 training years, score on
+  those 5) — never on test years.
+
+**Score:** each month, rank industries by the prediction; the realised y of the top 30% minus the bottom
+30% (overlapping 12-month outcomes, Newey–West 11 lags). Also the rank IC.
+
+- **PASS:** the model's spread t ≥ 3 and positive in both halves (1975–99 / 2000–2025-08).
+- **CHANNELS ADD** (the separate question): the model's spread minus rules-only's, positive on average
+  with t ≥ 2.
+- **Reported:** both for 2006–2025 alone; the top 30% against the market per year; the channel forces
+  each industry leans on most in the last fit.
+
 ## 6. Build order
 
 1. **Momentum filter test (§5.1)** on data in Mongo. No FMP calls.
