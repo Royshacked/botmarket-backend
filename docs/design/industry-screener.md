@@ -973,6 +973,24 @@ good (quality ≥ 7), cheap (own-history percentile ≥ 0.70), good + cheap, and
 This is DESCRIPTION (Roy's "connect, explain"). No pass bar here; a rule found here is declared in
 §5.4.3 and judged walk-forward, never on these numbers.
 
+**What it showed (2026-10-10):**
+- **Calendar.** High inflation: 3 episodes (2007-11..08-11, 2011-05..12-02, 2021-05..24-06) — the
+  last is 38 of its 61 months. Tightening: 2006–07, 2016-12..19-07, 2022-03..24-06. Easing: 2007–09,
+  2019-09..21-02, 2024-09 on. Stress: 19 short episodes.
+- **One axis alone says little** (sectors within ±9pp). **Inflation × Fed says more:**
+  - HIGH inflation, Fed HOLDING (behind the curve; 20 months): Utilities +16, Staples +13, Energy +13;
+    Tech −17, Comm −12, Health −11.
+  - HIGH inflation, Fed TIGHTENING (chasing; 28 months, mostly 2022–24): Industrials +9, Financials +8,
+    Tech +6; Real Estate −10, Utilities −9, Staples −6.
+  - HIGH inflation, Fed EASING (13 months, 2008): Staples +17, Utilities +16; Energy −15, Real Estate −11.
+  - LOW inflation, EASING: Tech +7, Energy +7; Utilities −16, Staples −7. LOW, TIGHTENING: Tech +9,
+    Health +6; Energy −9, Financials −9.
+- **Our rules by state (2017–25 only, one vote per industry, pp vs all):** good + cheap +4.1 in low
+  inflation, +0.5 in high; good alone and cheap alone ≈ 0 everywhere; low quality (q ≤ 4) +3.8 easing,
+  +3.2 holding, −3.3 tightening; momentum top 30% vs bottom 30% (2007–25): about 0 when calm or
+  tightening, −8.4 when easing and −9.1 in stress (it reverses at turns).
+- **Limits:** 2017–25 holds ONE high-inflation episode; survivors only; each combination is 1–3 episodes.
+
 ## 6. Build order
 
 1. **Momentum filter test (§5.1)** on data in Mongo. No FMP calls.
