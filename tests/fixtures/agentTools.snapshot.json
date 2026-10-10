@@ -149,6 +149,30 @@
             }
         },
         {
+            "name": "get_industry_money",
+            "description": "Where a sub-industry's COMPANIES put their own money, from their cash-flow statements: capex, buybacks, dividends and acquisitions over the last four quarters against the four before (and the change a year earlier, so you see it turning), how many companies raised capex, capex as a share of revenue, the median company's share-count change, and the top spenders. Capex is money committed, not talk — and it is the SUPPLIERS' revenue.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "industry": {
+                        "type": "string",
+                        "description": "A GICS sub-industry: its 8-digit code or its exact name."
+                    }
+                },
+                "required": [
+                    "industry"
+                ]
+            }
+        },
+        {
+            "name": "get_capex_leaders",
+            "description": "Where corporate capex is rising and falling most across the whole market, by GICS industry, ranked by the dollar change. Use it to follow the money to where it LANDS: an industry whose customers are spending more is a second-order beneficiary.",
+            "input_schema": {
+                "type": "object",
+                "properties": {}
+            }
+        },
+        {
             "name": "get_news",
             "description": "Other NEWS: `headlines` for the market's front page (macro, rates, geopolitics), `topic` to search a theme or an event in words (\"data center power\", \"export controls\", \"OPEC\"), `companies` for one ticker. The topic search has a small daily quota and can refuse — if it does, say so and use what you have.",
             "input_schema": {

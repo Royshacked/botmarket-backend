@@ -7,7 +7,7 @@
 
 import { strategyAgentService } from '../../services/agents/strategy.agent.service.js'
 import { industryViewService }  from './industryView.service.js'
-import { readSubIndustry, listSubIndustries } from './industryData.service.js'
+import { readSubIndustry, listSubIndustries, moneyFacts } from './industryData.service.js'
 import { notifyIndustryChanged } from '../../services/industryNotify.service.js'
 import { industryScreenService } from './industryScreen.service.js'
 import { runScreen } from '../../services/industryScreenRun.service.js'
@@ -163,7 +163,7 @@ export const publishAssessment = _handle('publishAssessment', async (req, res) =
     if (!bundle) return sendReason(res, 'unknown_industry', { overrides: ASSESS_REASONS })
     const [{ row }, view] = await Promise.all([readTimingRow(bundle.sub.code), industryViewService.getView(bundle.sub.code)])
     const r = await industryAssessmentService.publishAssessment({ ...(req.body ?? {}), industry: bundle.sub.code },
-        { sub: bundle.sub, row, structure: structureOf(view), recordCall: pythiaCallsService.recordCall, source: 'chat' })
+        { sub: bundle.sub, row, money: moneyFacts(bundle.answering), structure: structureOf(view), recordCall: pythiaCallsService.recordCall, source: 'chat' })
     if (!r.ok) return sendReason(res, r.reason, { overrides: ASSESS_REASONS, fallback: 500, ...(r.detail ? { extra: { detail: r.detail } } : {}) })
     res.json({ ...r.doc, call: r.call ?? null })
 })

@@ -11,7 +11,7 @@
 // result. Never throws: the caller is an HTTP handler that reports the outcome.
 
 import { strategyAgentService } from './agents/strategy.agent.service.js'
-import { readSubIndustry } from '../api/strategy/industryData.service.js'
+import { readSubIndustry, moneyFacts } from '../api/strategy/industryData.service.js'
 import { readTimingRow } from '../api/strategy/screenerData.service.js'
 import { industryAssessmentService } from '../api/strategy/industryAssessment.service.js'
 import { industryViewService } from '../api/strategy/industryView.service.js'
@@ -86,7 +86,7 @@ export async function assessIndustry(code, { userId = null, deps = _deps, timeou
         const cost = Math.max(0, (await deps.spend(userId)) - before)
         const block = (result?.assessments ?? []).find(b => b.industry === sub.code)
         if (!block) return { ok: false, outcome: 'no_block', cost_usd: cost, detail: (result?.reply ?? '').slice(0, 400) }
-        const pub = await deps.publish(block, { sub, row, structure: structureOf(view), recordCall: deps.recordCall, now: deps.now(), source: 'assess_now' })
+        const pub = await deps.publish(block, { sub, row, money: moneyFacts(bundle.answering), structure: structureOf(view), recordCall: deps.recordCall, now: deps.now(), source: 'assess_now' })
         if (!pub.ok) return { ok: false, outcome: 'refused', cost_usd: cost, detail: pub.detail }
         logger.info(LOG, 'assessment published', { code: sub.code, verdict: pub.doc.verdict, cost_usd: Number(cost.toFixed(4)), call: pub.call?.logged ?? null })
         return { ok: true, outcome: 'published', doc: pub.doc, call: pub.call, cost_usd: cost }

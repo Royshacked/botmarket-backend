@@ -181,10 +181,11 @@ const _id = (code) => `ia_ind_${code}`
 /**
  * Publish an assessment of one sub-industry: checked, the code's facts attached, written with a revision,
  * and logged as a call. `sub` is the industry's metrics node (industryData.readSubIndustry().sub), `row`
- * its latest screen row (screenerData.readTimingRow), `structure` the standing industry_view grades.
+ * its latest screen row (screenerData.readTimingRow), `money` the money facts of the node that answers it
+ * (industryData.moneyFacts), `structure` the standing industry_view grades.
  * → `{ ok, doc, changed, call }` or `{ ok:false, reason, detail }`.
  */
-async function publishAssessment(block, { sub, row, structure = null, recordCall = null, now = new Date().toISOString(), source = 'chat' } = {}) {
+async function publishAssessment(block, { sub, row, money = null, structure = null, recordCall = null, now = new Date().toISOString(), source = 'chat' } = {}) {
     const checked = checkAssessment(block)
     if (!checked.ok) return { ok: false, reason: 'bad_assessment', detail: checked.detail }
     const a = checked.assessment
@@ -201,6 +202,8 @@ async function publishAssessment(block, { sub, row, structure = null, recordCall
         cause: a.cause, second_order: a.second_order, risks: a.risks, change_view_if: a.change_view_if,
         confidence: a.confidence, confidence_reason: a.confidence_reason,
         moved: facts.moved, base_rates: facts.base_rates, not_measured: facts.not_measured,
+        // Companies' own money (§4.3) — facts from the engine's metrics node, like the moves (industryData.moneyFacts).
+        money,
         structure, assessed_at: now, expires_at: _plusDays(now, EXPIRY_DAYS[a.horizon]), source, updated_at: now,
     }
     const fields = ['verdict', 'horizon', 'confidence']

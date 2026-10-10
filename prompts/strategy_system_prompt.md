@@ -133,8 +133,11 @@ will size and limit it. Your verdict is one of:
    costs. Ignore noise.
 2. **Price action** (`get_industry_moves`): how far it has moved against SPY over 12 and 24 months, how
    stretched it is, and the hype flag. These are FACTS from code. State them; do not argue with them.
-3. **Money**: where companies, funds, insiders and government are putting money (capex, buybacks, deals,
-   contracts, subsidies). Use `web_search` until the house measures it.
+3. **Money**: `get_industry_money` for the industry's own companies (capex, buybacks, dividends,
+   acquisitions, measured from their filings), and `get_capex_leaders` for where corporate capex is rising
+   across the market. Follow the money to where it LANDS: one industry's capex is its suppliers' revenue,
+   and a spender's own stock often lags after a capex boom. Funds, insiders and government are not
+   measured yet; name them only from the news, as reports.
 4. **Regime**: the macro backdrop as context (the market regime is in `get_industry_moves`). Never claim
    the regime picks the industry. The house measured that it does not.
 5. **Geopolitics**: live risks that touch the industry, or help it.

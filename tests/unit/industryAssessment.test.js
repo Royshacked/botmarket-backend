@@ -34,7 +34,11 @@ const ROW = (raw = {}) => ({
 
 function _get(o, path) { return path.split('.').reduce((x, k) => (x == null ? x : x[k]), o) }
 function _setPath(o, path, v) { const ks = path.split('.'); let x = o; for (const k of ks.slice(0, -1)) x = (x[k] ??= {}); x[ks.at(-1)] = v }
-function _match(doc, q) { return Object.entries(q).every(([k, v]) => JSON.stringify(_get(doc, k)) === JSON.stringify(v)) }
+function _match(doc, q) {
+    return Object.entries(q).every(([k, v]) => (v && typeof v === 'object' && '$ne' in v
+        ? (_get(doc, k) ?? null) !== v.$ne
+        : JSON.stringify(_get(doc, k)) === JSON.stringify(v)))
+}
 function memDb() {
     const cols = {}
     const col = (name) => {
@@ -319,4 +323,58 @@ test('industry news reads the largest companies as a basket keyed by the industr
     assert.match(text, /Semiconductors — its 3 largest companies/)
     assert.match(text, /AMD wins a deal/)
     assert.match(await industryNews({ industry: 'nope' }, { ...deps, readSub: async () => null }), /Unknown sub-industry/)
+})
+
+// ── companies' own money (step 2, pythia-assessment.md §4.3) ──────────────────
+
+const MONEY_NODE = {
+    name: 'Semiconductors', code: '45301020', asof: '2026-10-10',
+    money: {
+        companies: 40,
+        capex: { now: 60e9, before: 40e9, change: 0.5, prev_change: 0.1, companies: 38, share_up: 0.71, intensity: 0.12, intensity_before: 0.09 },
+        buybacks: { now: 30e9, before: 36e9, change: -0.1667, prev_change: 0.05, companies: 30, share_up: 0.4 },
+        dividends: { now: 10e9, before: 9.5e9, change: 0.0526, prev_change: 0.03, companies: 25, share_up: 0.6 },
+        acquisitions: { now: 2e9, before: 8e9, change: -0.75, prev_change: null, companies: 40, share_up: 0.2 },
+        share_count_median_change: -0.012,
+        top_spenders: [{ symbol: 'INTC', capex: 20e9, change: 0.3 }, { symbol: 'MU', capex: 12e9, change: 0.9 }],
+    },
+}
+
+test('money facts and text come from the engine node; capex reads as the suppliers\' revenue', async () => {
+    const { moneyFacts, formatMoney, formatMoneyLeaders } = await import('../../api/strategy/industryData.service.js')
+    const f = moneyFacts(MONEY_NODE)
+    assert.equal(f.capex_change, 0.5)
+    assert.equal(f.capex_share_up, 0.71)
+    assert.equal(f.buybacks_change, -0.1667)
+    assert.equal(moneyFacts({ name: 'x' }), null)
+    const t = formatMoney(MONEY_NODE)
+    assert.match(t, /CAPEX\s+\$60\.0B over the last 4 quarters vs \$40\.0B the 4 before → \+50% \(a year earlier: \+10%\); 71% of 38 companies raised it/)
+    assert.match(t, /capex intensity: 12% of revenue \(a year before: 9%\)/)
+    assert.match(t, /top spenders: INTC \$20\.0B \(\+30%\), MU \$12\.0B \(\+90%\)/)
+    assert.match(t, /follow the money to where it lands/)
+    assert.match(formatMoney({ name: 'x' }), /No money measurements/)
+    const l = formatMoneyLeaders({ asof: '2026-10-10', up: [{ name: 'Interactive Media', sector: 'Communication Services', now: 200e9, delta: 80e9, change: 0.67, prev_change: 0.4, share_up: 0.8 }], down: [] })
+    assert.match(l, /Interactive Media \[Communication Services\]: capex \$200\.0B, \+\$80\.0B \(\+67%; a year earlier \+40%\), 80% of companies up/)
+    assert.match(l, /none falling/)
+})
+
+test('the capex leaders rank GICS industries by the dollar change, both ways', async () => {
+    const { readMoneyLeaders, _setIndustryIO } = await import('../../api/strategy/industryData.service.js')
+    const m = memDb()
+    m.rows('industry_metrics_runs').push({ asof: '2026-10-10', complete: true })
+    const node = (name, now, before) => ({ asof: '2026-10-10', level: 'industry', name, code: name, sector: 'S', money: { capex: { now, before, change: now / before - 1 } } })
+    m.rows('industry_metrics').push(node('Up big', 300, 100), node('Up small', 110, 100), node('Down', 50, 100))
+    _setIndustryIO({ db: async () => m.db })
+    const r = await readMoneyLeaders({ n: 2 })
+    assert.deepEqual(r.up.map(x => x.name), ['Up big', 'Up small'])
+    assert.deepEqual(r.down.map(x => x.name), ['Down'])
+})
+
+test('a published assessment carries the money facts it was given', async () => {
+    const m = memDb()
+    _setAssessmentIO({ db: async () => m.db })
+    const { moneyFacts } = await import('../../api/strategy/industryData.service.js')
+    const r = await industryAssessmentService.publishAssessment(BLOCK(), { sub: { code: CODE, name: 'Semiconductors' }, row: ROW(), money: moneyFacts(MONEY_NODE), now: NOW })
+    assert.equal(r.doc.money.capex_change, 0.5)
+    assert.ok(TOOLS.some(t => t.name === 'get_industry_money') && TOOLS.some(t => t.name === 'get_capex_leaders'))
 })

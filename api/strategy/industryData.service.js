@@ -162,3 +162,66 @@ export async function readCompaniesBySymbol(symbols) {
         { projection: { _id: 0, symbol: 1, sub_code: 1, sub_industry: 1, industry: 1, industry_group: 1, sector: 1 } }).toArray()
     return Object.fromEntries(rows.map(r => [r.symbol, r]))
 }
+
+// ─── companies' own money (docs/design/pythia-assessment.md §4.3) ────────────
+// The engine's `money` block on each node (aether-engine fundamentals/industry_metrics.py node_money): its
+// companies' capex, buybacks, dividends and acquisitions over the last four quarters against the four
+// before (and the change a year earlier, to see it turning), how many raised capex, capex as a share of
+// revenue, the median company's share-count change, and the top spenders. DATA — the desk reads it.
+
+const _usd = (v) => (typeof v === 'number' ? `$${(v / 1e9).toFixed(1)}B` : 'n/a')
+const _chg = (v) => (typeof v === 'number' ? `${v >= 0 ? '+' : ''}${(v * 100).toFixed(0)}%` : 'n/a')
+
+/** The money facts an assessment carries (attached by code). Pure → null without a money block. */
+export function moneyFacts(node) {
+    const m = node?.money
+    if (!m?.capex) return null
+    return {
+        basket: node.name ?? null, companies: m.companies ?? null,
+        capex_now: m.capex.now ?? null, capex_change: m.capex.change ?? null, capex_prev_change: m.capex.prev_change ?? null,
+        capex_share_up: m.capex.share_up ?? null, capex_intensity: m.capex.intensity ?? null, capex_intensity_before: m.capex.intensity_before ?? null,
+        buybacks_change: m.buybacks?.change ?? null, dividends_change: m.dividends?.change ?? null,
+        acquisitions_change: m.acquisitions?.change ?? null, share_count_median_change: m.share_count_median_change ?? null,
+    }
+}
+
+/** One node's money as text. Pure. */
+export function formatMoney(node) {
+    const m = node?.money
+    if (!m?.capex) return 'No money measurements for this industry yet (needs eight quarters of cash-flow statements).'
+    const line = (label, x) => `  ${label.padEnd(12)} ${_usd(x?.now)} over the last 4 quarters vs ${_usd(x?.before)} the 4 before → ${_chg(x?.change)} (a year earlier: ${_chg(x?.prev_change)}); ${typeof x?.share_up === 'number' ? `${Math.round(x.share_up * 100)}% of ${x.companies} companies raised it` : ''}`
+    return [
+        `WHERE ${node.name}'s COMPANIES PUT THEIR MONEY (${m.companies} companies with eight quarters; engine run ${node.asof}):`,
+        line('CAPEX', m.capex),
+        `  capex intensity: ${_chg(m.capex.intensity).replace('+', '')} of revenue (a year before: ${_chg(m.capex.intensity_before).replace('+', '')})`,
+        line('BUYBACKS', m.buybacks),
+        line('DIVIDENDS', m.dividends),
+        line('ACQUISITIONS', m.acquisitions),
+        `  share count: the median company ${_chg(m.share_count_median_change)} in a year (negative = shrinking through buybacks)`,
+        `  top spenders: ${(m.top_spenders ?? []).map(t => `${t.symbol} ${_usd(t.capex)} (${_chg(t.change)})`).join(', ') || 'none'}`,
+        'Read capex as revenue for the SUPPLIERS: follow the money to where it lands (get_capex_leaders shows which industries are spending).',
+    ].join('\n')
+}
+
+/**
+ * Where corporate capex is rising and falling most across the market — GICS INDUSTRIES (the 70-odd level:
+ * enough companies each), ranked by the DOLLAR change of their last four quarters' capex. → `{ asof, up, down }`.
+ */
+export async function readMoneyLeaders({ asof = null, n = 8 } = {}) {
+    const db = await _io.db()
+    const when = asof ?? await latestAsof()
+    if (!when) return { asof: null, up: [], down: [] }
+    const rows = (await db.collection(METRICS).find({ asof: when, level: 'industry', 'money.capex.change': { $ne: null } },
+        { projection: { _id: 0, name: 1, code: 1, sector: 1, money: 1 } }).toArray())
+        .map(r => ({ name: r.name, code: r.code, sector: r.sector, ...r.money.capex, delta: (r.money.capex.now ?? 0) - (r.money.capex.before ?? 0) }))
+        .sort((a, b) => b.delta - a.delta)
+    return { asof: when, up: rows.slice(0, n), down: rows.slice(-n).reverse().filter(r => r.delta < 0) }
+}
+
+/** The leaders as text. Pure. */
+export function formatMoneyLeaders({ asof, up = [], down = [] } = {}) {
+    if (!asof) return 'No money measurements yet — the engine has not run.'
+    const row = (r) => `  ${r.name} [${r.sector}]: capex ${_usd(r.now)}, ${r.delta >= 0 ? '+' : ''}${_usd(r.delta)} (${_chg(r.change)}; a year earlier ${_chg(r.prev_change)}), ${typeof r.share_up === 'number' ? `${Math.round(r.share_up * 100)}% of companies up` : ''}`
+    return [`CORPORATE CAPEX BY GICS INDUSTRY — last 4 quarters vs the 4 before (engine run ${asof}). Capex is the SUPPLIERS' revenue.`,
+        'RISING MOST ($):', ...up.map(row), 'FALLING MOST ($):', ...(down.length ? down.map(row) : ['  none falling'])].join('\n')
+}

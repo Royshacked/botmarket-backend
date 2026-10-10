@@ -25,7 +25,7 @@ import { buildTagCaptures } from '../llmStream.util.js'
 import { makeRouteCapture, ROUTE_TAGS, buildRouteRule } from '../routing.util.js'
 import {
     readSubIndustry, listSubIndustries, readCompanies, coveredSymbols,
-    formatSubIndustry, formatCompanies,
+    formatSubIndustry, formatCompanies, formatMoney, readMoneyLeaders, formatMoneyLeaders,
 } from '../../api/strategy/industryData.service.js'
 import { industryViewService } from '../../api/strategy/industryView.service.js'
 import { readTimingRow } from '../../api/strategy/screenerData.service.js'
@@ -60,6 +60,10 @@ export const TOOLS = [
         // The assessment's NEWS input (§4.1). An industry IS its companies: its largest names' news over the
         // last month, one FMP call through the one news pipe (services/news.service.js, category basket).
         get_industry_news: `The last month's NEWS on a sub-industry's largest companies (up to 15), dated and attributed, at most three per company so one busy name cannot fill it — the first place to look for what is happening to an industry. Headlines are what was WRITTEN, not facts about the industry: weigh them, and say when a story is about one company rather than the group.`,
+        // The assessment's MONEY input (§4.3): companies' own money, measured by the engine from cash-flow
+        // statements. Funds, insiders and government come later (build step 8).
+        get_industry_money: `Where a sub-industry's COMPANIES put their own money, from their cash-flow statements: capex, buybacks, dividends and acquisitions over the last four quarters against the four before (and the change a year earlier, so you see it turning), how many companies raised capex, capex as a share of revenue, the median company's share-count change, and the top spenders. Capex is money committed, not talk — and it is the SUPPLIERS' revenue.`,
+        get_capex_leaders: `Where corporate capex is rising and falling most across the whole market, by GICS industry, ranked by the dollar change. Use it to follow the money to where it LANDS: an industry whose customers are spending more is a second-order beneficiary.`,
         get_news: `Other NEWS: \`headlines\` for the market's front page (macro, rates, geopolitics), \`topic\` to search a theme or an event in words ("data center power", "export controls", "OPEC"), \`companies\` for one ticker. The topic search has a small daily quota and can refuse — if it does, say so and use what you have.`,
         consult: consultDescription(`Reach for it when you are about to DEPART from a measured code grade on a large industry, and the argument is close — the override is what the house will read, and it should survive someone attacking it. Not for agreeing with the numbers.`),
     }),
@@ -92,6 +96,14 @@ const TOOL_HANDLERS = {
     ...makeNewsHandlers(),
     get_industry_news: makeToolHandler('get_industry_news', (input) => industryNews(input),
         (e) => `Could not read the industry's news: ${e.message}`, LOG),
+    get_industry_money: makeToolHandler('get_industry_money', async (input) => {
+        const b = await readSubIndustry(_industry(input))
+        if (!b) return 'Unknown sub-industry — call list_industries for the codes and names.'
+        const via = b.answering && b.answering.code !== b.sub.code ? ` (too few companies on its own — measured at ${b.answering.name})` : ''
+        return `${b.sub.name} (${b.sub.code})${via}\n${formatMoney(b.answering)}`
+    }, (e) => `Could not read the industry's money: ${e.message}`, LOG),
+    get_capex_leaders: makeToolHandler('get_capex_leaders', async () => formatMoneyLeaders(await readMoneyLeaders()),
+        (e) => `Could not read the capex leaders: ${e.message}`, LOG),
     list_industries: makeToolHandler('list_industries', async (input) => {
         const rows = await listSubIndustries()
         if (!rows.length) return 'No industry measurements yet — the engine has not run.'
