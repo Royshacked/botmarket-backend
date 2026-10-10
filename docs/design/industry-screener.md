@@ -855,6 +855,27 @@ amount, and the Regional Banks fragility is untouched.** Of the base's 945 indus
 
 Code: `screener/step1.py` (`aggregate_margin`, `normal_broke`), runner dump carries `normal_broke`.
 
+#### 5.2.14 One vote per industry — declared 2026-10-10 BEFORE the run (Roy)
+
+**Why:** §5.2.10–13 count COMPANIES, so an industry with 204 companies outvotes one with 8, and a
+third of the pool's votes are regional banks. Roy's pipeline gives each flagged industry a share
+(Argus picks a few names per industry, Atlas spreads the book), so the question step 1 answers is
+"does the screen pick good INDUSTRIES?" — one vote per industry.
+
+**Measure:** each month, each industry's hit rate = the share of its companies beating SPY over the next
+12 months (an industry needs ≥ 3 companies to count). The pool's score = the plain average of its
+industries' hit rates; the benchmark = the plain average of ALL industries' hit rates that month.
+Months with fewer than 3 industries in a pool are skipped for that pool. Same data, months
+(2017-01..2025-09), dump (data/step1_rows.json) and survivors-only caveat as §5.2.10–13.
+
+**Pools (five):** plain good + cheap (§5.2.10); the base = good + cheap − returns falling (§5.2.12);
+base − (a) cheap too long; base − (c) REITs; base − a+c (§5.2.13's definitions).
+
+- **PASS** (each): score above ALL industries with Newey–West t ≥ 3 (11 lags), positive in both halves
+  (2017–20 / 2021–25). For the three filtered pools, also above the base on average.
+- **Reported:** industries per month, each pool's gain over the base with its t, the median industry's
+  median company vs SPY, and every pool WITHOUT Regional Banks.
+
 ### 5.3 Step 5 — the weekly screen (BUILT 2026-10-08)
 
 **Decided by Roy, 2026-10-08:**
