@@ -90,6 +90,7 @@ export async function ensurePythiaCallsIndexes() {
     const db = await _io.db()
     await db.collection(COLLECTION).createIndex({ id: 1 }, { unique: true })
     await db.collection(COLLECTION).createIndex({ 'subject.code': 1, called_at: -1 })
+    await db.collection(COLLECTION).createIndex({ 'subject.id': 1, called_at: -1 })
     await db.collection(COLLECTION).createIndex({ status: 1 })
 }
 
@@ -98,13 +99,18 @@ export async function ensurePythiaCallsIndexes() {
  * or throws (the caller logs it; the assessment stands). The basket is the sub-industry's own largest
  * companies — the names Argus would hunt among.
  */
-async function recordCall(doc, { now = new Date().toISOString() } = {}) {
+async function recordCall(doc, { now = new Date().toISOString(), basket: given = null } = {}) {
     const db = await _io.db()
-    const code = doc.subject.code
-    const prev = await db.collection(COLLECTION).find({ 'subject.code': code }).sort({ called_at: -1 }).limit(1).next()
+    // An industry is keyed by its GICS code, a theme (step 3) by its id; a theme's basket comes from the
+    // caller (its own names, or its linked industries' largest), an industry's from its own companies.
+    const key = doc.subject.code ?? doc.subject.id
+    const field = doc.subject.code ? 'subject.code' : 'subject.id'
+    const prev = await db.collection(COLLECTION).find({ [field]: key }).sort({ called_at: -1 }).limit(1).next()
     if (!shouldLog(prev, doc.verdict, now)) return { logged: false, reason: 'same verdict, reaffirmed within the window' }
-    const companies = await _io.companies('sub_industry', code, { limit: BASKET_MAX })
-    const symbols = companies.map(c => c.symbol).filter(Boolean)
+    const symbols = Array.isArray(given) && given.length
+        ? [...new Set(given.map(s => String(s).toUpperCase()))].slice(0, BASKET_MAX)
+        : (await _io.companies('sub_industry', key, { limit: BASKET_MAX })).map(c => c.symbol).filter(Boolean)
+    const code = key
     const prices = await _prices([...symbols, ...BENCHMARKS])
     const basket = symbols.filter(s => prices[s])
     if (basket.length < BASKET_MIN || BENCHMARKS.some(s => !prices[s])) {

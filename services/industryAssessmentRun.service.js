@@ -11,7 +11,9 @@
 // result. Never throws: the caller is an HTTP handler that reports the outcome.
 
 import { strategyAgentService } from './agents/strategy.agent.service.js'
-import { readSubIndustry, moneyFacts } from '../api/strategy/industryData.service.js'
+import { readSubIndustry, moneyFacts, universeSymbols } from '../api/strategy/industryData.service.js'
+import { themeService, checkThemeProposal } from '../api/strategy/theme.service.js'
+import { readThemeFacts, themeBasket, measuredSubs } from '../api/strategy/themeData.service.js'
 import { readTimingRow } from '../api/strategy/screenerData.service.js'
 import { industryAssessmentService } from '../api/strategy/industryAssessment.service.js'
 import { industryViewService } from '../api/strategy/industryView.service.js'
@@ -54,6 +56,13 @@ const _deps = {
     spend: (userId) => _strategySpend(userId),
     settle: () => new Promise(r => setTimeout(r, LEDGER_SETTLE_MS)),
     now: () => new Date().toISOString(),
+    // themes (step 3)
+    getTheme: (id) => themeService.getTheme(id),
+    themeFacts: (theme) => readThemeFacts(theme),
+    themeBasket: (theme) => themeBasket(theme),
+    measuredSubs: () => measuredSubs(),
+    universeSymbols: () => universeSymbols(),
+    proposeTheme: (theme, opts) => themeService.proposeTheme(theme, opts),
 }
 export function _setDeps(d) { Object.assign(_deps, d) }
 
@@ -64,26 +73,42 @@ export function structureOf(view) {
 }
 
 /**
+ * One headless desk turn, measured → `{ result, cost }`. The ledger is read before and after (with the
+ * settle wait) so the cost is THIS run's; on a throw the error carries `cost` too. Shared by every run here.
+ */
+async function _measuredTurn(deps, { userId, userPrompt, chatState, label, timeoutMs }) {
+    const abort = new AbortController()
+    const timer = setTimeout(() => abort.abort(), timeoutMs)
+    const before = await deps.spend(userId)
+    const cost = async () => Math.max(0, (await deps.spend(userId).catch(() => before)) - before)
+    try {
+        const result = await withTimeout(deps.run({
+            messages: [], userPrompt, chatState, userId, signal: abort.signal,
+            onToken: () => {}, onToolStart: () => {}, onReasoning: () => {}, onPhase: () => {},
+        }), timeoutMs, label)
+        await deps.settle()
+        return { result, cost: await cost() }
+    } catch (err) {
+        err.cost = await cost()
+        throw err
+    } finally {
+        abort.abort()
+        clearTimeout(timer)
+    }
+}
+
+/**
  * Assess one sub-industry now → `{ ok, outcome, doc?, call?, cost_usd, detail? }`, outcome one of
  * published | unknown_industry | no_block | refused | error.
  */
 export async function assessIndustry(code, { userId = null, deps = _deps, timeoutMs = RUN_TIMEOUT_MS } = {}) {
-    const abort = new AbortController()
-    const timer = setTimeout(() => abort.abort(), timeoutMs)
-    let before = 0
     try {
         const bundle = await deps.readSub(code)
         if (!bundle) return { ok: false, outcome: 'unknown_industry', cost_usd: 0 }
         const sub = bundle.sub
         const [{ row }, view] = await Promise.all([deps.readRow(sub.code), deps.readView(sub.code)])
-        before = await deps.spend(userId)
-        const result = await withTimeout(deps.run({
-            messages: [], userPrompt: `Assess ${sub.name} (${sub.code}).`,
-            chatState: { assess: sub.code }, userId, signal: abort.signal,
-            onToken: () => {}, onToolStart: () => {}, onReasoning: () => {}, onPhase: () => {},
-        }), timeoutMs, `industry assessment ${sub.code}`)
-        await deps.settle()
-        const cost = Math.max(0, (await deps.spend(userId)) - before)
+        const { result, cost } = await _measuredTurn(deps, { userId, timeoutMs, userPrompt: `Assess ${sub.name} (${sub.code}).`,
+            chatState: { assess: sub.code }, label: `industry assessment ${sub.code}` })
         const block = (result?.assessments ?? []).find(b => b.industry === sub.code)
         if (!block) return { ok: false, outcome: 'no_block', cost_usd: cost, detail: (result?.reply ?? '').slice(0, 400) }
         const pub = await deps.publish(block, { sub, row, money: moneyFacts(bundle.answering), structure: structureOf(view), recordCall: deps.recordCall, now: deps.now(), source: 'assess_now' })
@@ -92,9 +117,59 @@ export async function assessIndustry(code, { userId = null, deps = _deps, timeou
         return { ok: true, outcome: 'published', doc: pub.doc, call: pub.call, cost_usd: cost }
     } catch (err) {
         logger.warn(LOG, 'assessment failed', { code, error: err.message })
-        return { ok: false, outcome: 'error', detail: err.message, cost_usd: Math.max(0, (await deps.spend(userId).catch(() => before)) - before) }
-    } finally {
-        abort.abort()
-        clearTimeout(timer)
+        return { ok: false, outcome: 'error', detail: err.message, cost_usd: err.cost ?? 0 }
+    }
+}
+
+/**
+ * Assess one APPROVED theme now (step 3) → the same shape as assessIndustry, outcome one of published |
+ * unknown_theme | no_block | refused | error. Its facts are its links' moves and money (themeData), its call
+ * graded on the theme's basket.
+ */
+export async function assessTheme(id, { userId = null, deps = _deps, timeoutMs = RUN_TIMEOUT_MS } = {}) {
+    try {
+        const theme = await deps.getTheme(id)
+        if (!theme || theme.status !== 'approved') return { ok: false, outcome: 'unknown_theme', cost_usd: 0, detail: theme ? `${theme.name} is ${theme.status}` : `no theme ${id}` }
+        const [{ facts }, basket] = await Promise.all([deps.themeFacts(theme), deps.themeBasket(theme)])
+        const { result, cost } = await _measuredTurn(deps, { userId, timeoutMs, userPrompt: `Assess the theme ${theme.name} (${theme.id}).`,
+            chatState: { assess_theme: theme.id }, label: `theme assessment ${theme.id}` })
+        const block = (result?.assessments ?? []).find(b => b.theme === theme.id)
+        if (!block) return { ok: false, outcome: 'no_block', cost_usd: cost, detail: (result?.reply ?? '').slice(0, 400) }
+        const pub = await deps.publish(block, { theme, facts, basket, recordCall: deps.recordCall, now: deps.now(), source: 'assess_now' })
+        if (!pub.ok) return { ok: false, outcome: 'refused', cost_usd: cost, detail: pub.detail }
+        logger.info(LOG, 'theme assessment published', { id: theme.id, verdict: pub.doc.verdict, cost_usd: Number(cost.toFixed(4)) })
+        return { ok: true, outcome: 'published', doc: pub.doc, call: pub.call, cost_usd: cost }
+    } catch (err) {
+        logger.warn(LOG, 'theme assessment failed', { id, error: err.message })
+        return { ok: false, outcome: 'error', detail: err.message, cost_usd: err.cost ?? 0 }
+    }
+}
+
+export const PROPOSE_MAX = 5
+
+/**
+ * Ask Pythia to propose themes (step 3; Pythia proposes, the admin approves) → `{ ok, proposed, refused,
+ * skipped, cost_usd }`. Each <theme_proposal> is checked against the measured sub-industries and the
+ * universe's tickers; an already-approved theme is skipped, never overwritten.
+ */
+export async function proposeThemes({ userId = null, max = PROPOSE_MAX, deps = _deps, timeoutMs = RUN_TIMEOUT_MS } = {}) {
+    const n = Math.min(Math.max(Number(max) || PROPOSE_MAX, 1), 10)
+    try {
+        const [subs, symbols] = await Promise.all([deps.measuredSubs(), deps.universeSymbols()])
+        const { result, cost } = await _measuredTurn(deps, { userId, timeoutMs, userPrompt: `Propose up to ${n} themes.`,
+            chatState: { propose_themes: n }, label: 'theme proposals' })
+        const proposed = [], refused = [], skipped = []
+        for (const block of (result?.theme_proposals ?? []).slice(0, n)) {
+            const c = checkThemeProposal(block, subs, symbols)
+            if (!c.ok) { refused.push(c.detail); continue }
+            const r = await deps.proposeTheme(c.theme, { now: deps.now(), source: 'pythia' })
+            if (r.ok) proposed.push({ id: c.theme.id, name: c.theme.name, dropped: c.dropped })
+            else skipped.push(r.detail)
+        }
+        logger.info(LOG, 'themes proposed', { proposed: proposed.length, refused: refused.length, skipped: skipped.length, cost_usd: Number(cost.toFixed(4)) })
+        return { ok: true, proposed, refused, skipped, cost_usd: cost }
+    } catch (err) {
+        logger.warn(LOG, 'theme proposals failed', { error: err.message })
+        return { ok: false, outcome: 'error', detail: err.message, cost_usd: err.cost ?? 0 }
     }
 }

@@ -225,3 +225,9 @@ export function formatMoneyLeaders({ asof, up = [], down = [] } = {}) {
     return [`CORPORATE CAPEX BY GICS INDUSTRY — last 4 quarters vs the 4 before (engine run ${asof}). Capex is the SUPPLIERS' revenue.`,
         'RISING MOST ($):', ...up.map(row), 'FALLING MOST ($):', ...(down.length ? down.map(row) : ['  none falling'])].join('\n')
 }
+
+/** Every ticker in the measured universe (not stale, one listing per filer) — a Set. */
+export async function universeSymbols() {
+    const db = await _io.db()
+    return new Set(await db.collection(COMPANIES).distinct('symbol', companiesQuery('sector_code', { $exists: true })))
+}

@@ -6,6 +6,7 @@ import {
     listIndustries, getIndustry, publishIndustry,
     getScreen, runScreenNow,
     listAssessments, getAssessment, publishAssessment, assessNow, listCalls,
+    listThemes, setThemeStatus, proposeThemesNow, assessThemeNow,
 } from './strategy.controller.js'
 
 const router = express.Router()
@@ -37,6 +38,13 @@ router.get('/assessments/:code',       log, getAssessment)
 router.get('/calls',                   log, listCalls)
 router.post('/assessments/:code',      requireAdmin, log, publishAssessment)
 router.post('/assessments/:code/run',  requireAdmin, log, assessNow)
+
+// Themes (pythia-assessment.md §3): Pythia proposes, the admin approves. Read by everyone (approved only for
+// traders); proposing, approving/retiring and assessing are admin.
+router.get('/themes',                  log, listThemes)
+router.post('/themes/propose',         requireAdmin, log, proposeThemesNow)
+router.post('/themes/:id/status',      requireAdmin, log, setThemeStatus)
+router.post('/themes/:id/assess',      requireAdmin, log, assessThemeNow)
 
 // Authoring: the streaming desk (emits <industry_view> drafts) and publishing a reviewed draft.
 router.post('/stream',           requireAdmin, log, streamStrategy)

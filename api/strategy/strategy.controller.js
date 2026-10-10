@@ -14,7 +14,8 @@ import { runScreen } from '../../services/industryScreenRun.service.js'
 import { industryAssessmentService } from './industryAssessment.service.js'
 import { pythiaCallsService } from './pythiaCalls.service.js'
 import { readTimingRow } from './screenerData.service.js'
-import { assessIndustry, structureOf } from '../../services/industryAssessmentRun.service.js'
+import { assessIndustry, assessTheme, proposeThemes, structureOf } from '../../services/industryAssessmentRun.service.js'
+import { themeService } from './theme.service.js'
 import { streamAgentResponse, sseAgentCallbacks }  from '../_shared/sse.util.js'
 import { routeFields }                             from '../../services/routing.util.js'
 import { parseChatMessages }    from '../_shared/parse.util.js'
@@ -181,4 +182,43 @@ export const assessNow = _handle('assessNow', async (req, res) => {
 /** The forward log: the latest calls with their grades (everyone). */
 export const listCalls = _handle('listCalls', async (req, res) => {
     res.json(await pythiaCallsService.listCalls({ limit: parseInt(req.query?.limit, 10) || 100 }))
+})
+
+// ─── Themes (docs/design/pythia-assessment.md §3, step 3) ───────────────────
+// Pythia proposes, the admin approves (Roy, 2026-10-10). A trader sees the APPROVED list with each theme's
+// assessment; an admin also sees the proposals waiting, and approves, retires, proposes and assesses.
+
+const THEME_REASONS = {
+    not_found: [404, 'Unknown theme'],
+    bad_status: [422, 'Status must be approved or retired'],
+}
+
+/** The themes and, beside each, its assessment (or null). */
+export const listThemes = _handle('listThemes', async (req, res) => {
+    const admin = req.user?.role === 'admin'
+    const themes = await themeService.listThemes({ statuses: admin ? ['approved', 'proposed', 'retired'] : ['approved'] })
+    const withAssessments = await Promise.all(themes.map(async t => ({
+        ...t, assessment: t.status === 'approved' ? withoutTrail(await industryAssessmentService.getThemeAssessment(t.id)) : null,
+    })))
+    res.json(withAssessments)
+})
+
+/** Approve or retire a theme (admin). Body `{ status, note? }`. */
+export const setThemeStatus = _handle('setThemeStatus', async (req, res) => {
+    const r = await themeService.setStatus(req.params.id, req.body?.status, { by: req.user?.username ?? null, note: req.body?.note ?? null })
+    if (!r.ok) return sendReason(res, r.reason, { overrides: THEME_REASONS, fallback: 500 })
+    res.json(r.doc)
+})
+
+/** Ask Pythia to propose themes now (admin) — a few minutes of research, its cost returned. Body `{ max? }`. */
+export const proposeThemesNow = _handle('proposeThemesNow', async (req, res) => {
+    const r = await proposeThemes({ userId: req.user._id, max: req.body?.max })
+    res.status(r.ok ? 200 : 500).json(r)
+})
+
+/** Assess one approved theme now (admin), headless, its cost returned. */
+export const assessThemeNow = _handle('assessThemeNow', async (req, res) => {
+    const r = await assessTheme(req.params.id, { userId: req.user._id })
+    const status = r.ok ? 200 : r.outcome === 'unknown_theme' ? 404 : r.outcome === 'error' ? 500 : 422
+    res.status(status).json(r)
 })

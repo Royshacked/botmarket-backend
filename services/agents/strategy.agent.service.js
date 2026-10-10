@@ -30,6 +30,8 @@ import {
 import { industryViewService } from '../../api/strategy/industryView.service.js'
 import { readTimingRow } from '../../api/strategy/screenerData.service.js'
 import { formatFacts } from '../../api/strategy/industryAssessment.service.js'
+import { themeService } from '../../api/strategy/theme.service.js'
+import { readThemeFacts, formatTheme } from '../../api/strategy/themeData.service.js'
 import { getEarningsCalendar } from '../../providers/fmp.provider.js'
 import { newsService } from '../news.service.js'
 import { makeNewsHandlers, formatNewsDigest, capPerSymbol } from '../tools/news.tools.js'
@@ -64,6 +66,9 @@ export const TOOLS = [
         // statements. Funds, insiders and government come later (build step 8).
         get_industry_money: `Where a sub-industry's COMPANIES put their own money, from their cash-flow statements: capex, buybacks, dividends and acquisitions over the last four quarters against the four before (and the change a year earlier, so you see it turning), how many companies raised capex, capex as a share of revenue, the median company's share-count change, and the top spenders. Capex is money committed, not talk — and it is the SUPPLIERS' revenue.`,
         get_capex_leaders: `Where corporate capex is rising and falling most across the whole market, by GICS industry, ranked by the dollar change. Use it to follow the money to where it LANDS: an industry whose customers are spending more is a second-order beneficiary.`,
+        // Themes (§3, step 3): the registry, and one theme's value chain with each link's facts.
+        list_themes: `The house's THEMES — approved ones (the house list) and proposed ones (awaiting the admin) — each with its id, thesis, search words and its value chain of GICS sub-industries in order (1 direct, 2 suppliers, 3 suppliers' suppliers). Read it before proposing, so you do not propose a theme that exists.`,
+        get_theme: `One theme by its id (th_…): its thesis, its value chain link by link with WHY each belongs, and for each link how far it has moved against SPY (12 and 24 months, stretch, hype) and where its companies put money (capex, buybacks). The facts a theme assessment states.`,
         get_news: `Other NEWS: \`headlines\` for the market's front page (macro, rates, geopolitics), \`topic\` to search a theme or an event in words ("data center power", "export controls", "OPEC"), \`companies\` for one ticker. The topic search has a small daily quota and can refuse — if it does, say so and use what you have.`,
         consult: consultDescription(`Reach for it when you are about to DEPART from a measured code grade on a large industry, and the argument is close — the override is what the house will read, and it should survive someone attacking it. Not for agreeing with the numbers.`),
     }),
@@ -102,6 +107,18 @@ const TOOL_HANDLERS = {
         const via = b.answering && b.answering.code !== b.sub.code ? ` (too few companies on its own — measured at ${b.answering.name})` : ''
         return `${b.sub.name} (${b.sub.code})${via}\n${formatMoney(b.answering)}`
     }, (e) => `Could not read the industry's money: ${e.message}`, LOG),
+    list_themes: makeToolHandler('list_themes', async () => {
+        const themes = await themeService.listThemes({ statuses: ['approved', 'proposed'] })
+        if (!themes.length) return 'No themes yet — the house list is empty.'
+        return themes.map(t => `${t.id} — ${t.name} [${t.status}]: ${t.thesis}\n  words: ${(t.terms ?? []).join(', ')}\n  chain: ${(t.links ?? []).map(l => `${l.order}:${l.name}`).join(' · ')}`).join('\n')
+    }, (e) => `Could not list the themes: ${e.message}`, LOG),
+    get_theme: makeToolHandler('get_theme', async (input) => {
+        const id = typeof input?.theme === 'string' ? input.theme.trim() : ''
+        const theme = id ? await themeService.getTheme(id) : null
+        if (!theme) return 'Unknown theme — call list_themes for the ids.'
+        const { facts, regime } = await readThemeFacts(theme)
+        return formatTheme(theme, facts, regime)
+    }, (e) => `Could not read the theme: ${e.message}`, LOG),
     get_capex_leaders: makeToolHandler('get_capex_leaders', async () => formatMoneyLeaders(await readMoneyLeaders()),
         (e) => `Could not read the capex leaders: ${e.message}`, LOG),
     list_industries: makeToolHandler('list_industries', async (input) => {
@@ -168,25 +185,34 @@ async function chatStream({
         meta: { userPrompt },
     })
 
-    const { reply, views, screens, assessments } = _parseStrategyResponse(raw)
-    logger.info(LOG, 'chatStream done', { replyLength: reply.length, views: views.length, screens: screens.length, assessments: assessments.length })
-    return { reply, phase: phase.get(), views, screens, assessments, ...route.result() }
+    const { reply, views, screens, assessments, theme_proposals } = _parseStrategyResponse(raw)
+    logger.info(LOG, 'chatStream done', { replyLength: reply.length, views: views.length, screens: screens.length, assessments: assessments.length, theme_proposals: theme_proposals.length })
+    return { reply, phase: phase.get(), views, screens, assessments, theme_proposals, ...route.result() }
 }
 
 // ─── extraction (pure) ────────────────────────────────────────────────────────
 
+const _obj = (v) => v && typeof v === 'object' && !Array.isArray(v)
+const _txt = (v) => typeof v === 'string' && v.trim()
+
 /**
- * Every <industry_view>, <industry_screen> and <industry_assessment> block in the raw output →
- * `{ reply, views, screens, assessments }`. A block without an `industry` is dropped — nothing could be
- * published against it. Full checking happens downstream (checkDraft, checkScreen, checkAssessment).
+ * Every <industry_view>, <industry_screen>, <industry_assessment> and <theme_proposal> block in the raw
+ * output → `{ reply, views, screens, assessments, theme_proposals }`. A view or screen without an `industry`
+ * is dropped, an assessment without an `industry` or a `theme`, a proposal without a `name` — nothing could
+ * be published against it. Full checking happens downstream (checkDraft, checkScreen, checkAssessment,
+ * checkThemeProposal).
  */
 export function _parseStrategyResponse(raw) {
     const text  = raw ?? ''
-    const reply = stripEmitTags(text, ['industry_view', 'industry_screen', 'industry_assessment', 'phase', ...ROUTE_TAGS]).trim()
-    const withIndustry = (tag) => parseEmitBlocks(text, tag, LOG)
-        .filter(v => v && typeof v === 'object' && !Array.isArray(v) && typeof v.industry === 'string' && v.industry.trim())
-        .map(v => ({ ...v, industry: v.industry.trim() }))
-    return { reply, views: withIndustry('industry_view'), screens: withIndustry('industry_screen'), assessments: withIndustry('industry_assessment') }
+    const reply = stripEmitTags(text, ['industry_view', 'industry_screen', 'industry_assessment', 'theme_proposal', 'phase', ...ROUTE_TAGS]).trim()
+    const blocks = (tag) => parseEmitBlocks(text, tag, LOG).filter(_obj)
+    const withIndustry = (tag) => blocks(tag).filter(v => _txt(v.industry)).map(v => ({ ...v, industry: v.industry.trim() }))
+    const assessments = blocks('industry_assessment').filter(v => _txt(v.industry) || _txt(v.theme))
+        .map(v => (_txt(v.industry) ? { ...v, industry: v.industry.trim() } : { ...v, theme: v.theme.trim() }))
+    return {
+        reply, views: withIndustry('industry_view'), screens: withIndustry('industry_screen'), assessments,
+        theme_proposals: blocks('theme_proposal').filter(v => _txt(v.name)),
+    }
 }
 
 function _buildSystemPrompt() {
@@ -205,6 +231,13 @@ function _buildSystemPrompt() {
 export function _buildTurnContext(chatState) {
     if (typeof chatState?.screen === 'string' && chatState.screen.trim()) {
         return `This is the WEEKLY INDUSTRY SCREEN for the engine run of ${chatState.screen.trim()} — follow "The weekly screen" in your instructions. No <industry_view> blocks this turn.`
+    }
+    if (typeof chatState?.assess_theme === 'string' && /^th_[a-z0-9_]+$/.test(chatState.assess_theme.trim())) {
+        return `ASSESSMENT of the theme ${chatState.assess_theme.trim()} — follow "Assessing a theme" in your instructions and end with ONE <industry_assessment> block carrying "theme": "${chatState.assess_theme.trim()}". No <industry_view> blocks this turn.`
+    }
+    if (chatState?.propose_themes) {
+        const n = Math.min(Math.max(Number(chatState.propose_themes) || 5, 1), 10)
+        return `PROPOSE THEMES — follow "Proposing themes" in your instructions and end with up to ${n} <theme_proposal> blocks. No other blocks this turn.`
     }
     if (typeof chatState?.assess === 'string' && /^\d{8}$/.test(chatState.assess.trim())) {
         return `ASSESSMENT of GICS sub-industry ${chatState.assess.trim()} — follow "Assessing an industry" in your instructions and end with ONE <industry_assessment> block. No <industry_view> blocks this turn.`

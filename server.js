@@ -78,6 +78,7 @@ import { industryScreenMonitorService } from './monitoring/industryScreen.monito
 import { ensureIndustryScreenIndexes } from './api/strategy/industryScreen.service.js'
 import { ensureIndustryAssessmentIndexes } from './api/strategy/industryAssessment.service.js'
 import { ensurePythiaCallsIndexes } from './api/strategy/pythiaCalls.service.js'
+import { ensureThemeIndexes } from './api/strategy/theme.service.js'
 import { pythiaCallsMonitorService } from './monitoring/pythiaCalls.monitor.service.js'
 import { themisService }      from './monitoring/themis.monitor.service.js'
 import { executionReconciler } from './monitoring/execution.reconciler.js'
@@ -232,6 +233,7 @@ ensureIndustryViewIndexes().catch(() => {})   // Pythia's industry_view (api/str
 ensureIndustryScreenIndexes().catch(() => {}) // Pythia's weekly industry_screen (api/strategy/industryScreen.service.js)
 ensureIndustryAssessmentIndexes().catch(() => {}) // Pythia's industry_assessment (api/strategy/industryAssessment.service.js)
 ensurePythiaCallsIndexes().catch(() => {})        // Pythia's forward log, pythia_calls (api/strategy/pythiaCalls.service.js)
+ensureThemeIndexes().catch(() => {})              // Pythia's themes (api/strategy/theme.service.js)
 threadService.ensureThreadIndexes()
 
 // ─── Background loops ─────────────────────────────────────────────────────────

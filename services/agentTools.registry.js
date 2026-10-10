@@ -718,6 +718,17 @@ export const TOOL_SCHEMAS = {
         "type": "object",
         "properties": {}
     },
+    list_themes: {
+        "type": "object",
+        "properties": {}
+    },
+    get_theme: {
+        "type": "object",
+        "properties": {
+            "theme": { "type": "string", "description": "The theme's id, th_… (from list_themes)." }
+        },
+        "required": ["theme"]
+    },
     // ── Aether desk (event exposure) ──────────────────────────────────────────
     // get_channel_taxonomy, get_channel_state and get_regime were removed with the
     // channel engine on 2026-09-09. This is what the desk reads now.

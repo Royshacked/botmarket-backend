@@ -173,6 +173,30 @@
             }
         },
         {
+            "name": "list_themes",
+            "description": "The house's THEMES — approved ones (the house list) and proposed ones (awaiting the admin) — each with its id, thesis, search words and its value chain of GICS sub-industries in order (1 direct, 2 suppliers, 3 suppliers' suppliers). Read it before proposing, so you do not propose a theme that exists.",
+            "input_schema": {
+                "type": "object",
+                "properties": {}
+            }
+        },
+        {
+            "name": "get_theme",
+            "description": "One theme by its id (th_…): its thesis, its value chain link by link with WHY each belongs, and for each link how far it has moved against SPY (12 and 24 months, stretch, hype) and where its companies put money (capex, buybacks). The facts a theme assessment states.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "theme": {
+                        "type": "string",
+                        "description": "The theme's id, th_… (from list_themes)."
+                    }
+                },
+                "required": [
+                    "theme"
+                ]
+            }
+        },
+        {
             "name": "get_news",
             "description": "Other NEWS: `headlines` for the market's front page (macro, rates, geopolitics), `topic` to search a theme or an event in words (\"data center power\", \"export controls\", \"OPEC\"), `companies` for one ticker. The topic search has a small daily quota and can refuse — if it does, say so and use what you have.",
             "input_schema": {

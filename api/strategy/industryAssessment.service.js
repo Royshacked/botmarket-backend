@@ -75,8 +75,13 @@ const _num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null)
  */
 export function checkAssessment(block) {
     if (!block || typeof block !== 'object') return { ok: false, detail: 'no block' }
-    const code = _str(block.industry, 16)
-    if (!code || !/^\d{8}$/.test(code)) return { ok: false, detail: 'industry must be the 8-digit GICS code' }
+    // The subject: an industry (8-digit GICS code) or a theme (its th_ id, theme.service) — step 3.
+    const industry = _str(block.industry, 16)
+    const theme = industry ? null : _str(block.theme, 60)
+    if (theme ? !/^th_[a-z0-9_]+$/.test(theme) : (!industry || !/^\d{8}$/.test(industry))) {
+        return { ok: false, detail: 'industry must be the 8-digit GICS code — or, for a theme, theme its th_ id' }
+    }
+    const code = industry ?? theme
     const problems = []
     const verdict = _str(block.verdict, 40)
     if (!verdict || !VERDICTS[verdict]) problems.push(`verdict must be one of ${Object.keys(VERDICTS).join('/')}`)
@@ -110,7 +115,7 @@ export function checkAssessment(block) {
     return {
         ok: true, gaps,
         assessment: {
-            code, verdict, horizon, thesis, evidence, cause: { kind: causeKind, text: causeText },
+            code: industry, theme, verdict, horizon, thesis, evidence, cause: { kind: causeKind, text: causeText },
             second_order: secondOrder, risks, change_view_if: changeIf, confidence,
             confidence_reason: _str(block.confidence_reason, 300),
         },
@@ -167,6 +172,31 @@ export function formatFacts(row, regime = null) {
     ].join('\n')
 }
 
+/**
+ * A THEME's facts, attached by code (step 3): how far each linked industry has moved and where its
+ * companies put money, link by link in value-chain order. `rows` maps a sub-industry code to its screen
+ * row, `money` to its money facts (industryData.moneyFacts). The hype flag is the theme's when a DIRECT
+ * (order-1) link carries it. Pure → `{ moved, base_rates, not_measured, money }`.
+ */
+export function themeFacts(theme, rows = new Map(), money = new Map()) {
+    const links = (theme?.links ?? []).map(l => {
+        const m = factsFor(rows.get(l.code)).moved
+        return {
+            code: l.code, name: l.name, order: l.order,
+            ...(m ? { ret_12m: m.ret_12m, excess_12m: m.excess_12m, ret_24m: m.ret_24m, excess_24m: m.excess_24m,
+                ext_percentile: m.ext_percentile, hype: m.hype, asof: m.asof } : {}),
+        }
+    })
+    const direct = links.filter(l => l.order === 1)
+    const hype = direct.some(l => l.hype === true) ? true : direct.some(l => l.hype === false) ? false : null
+    return {
+        moved: { kind: 'theme', hype, links },
+        base_rates: hype ? [{ key: 'hype', text: BASE_RATES.hype }] : [],
+        not_measured: [...NOT_MEASURED],
+        money: { kind: 'theme', links: (theme?.links ?? []).map(l => ({ code: l.code, name: l.name, order: l.order, ...(money.get(l.code) ?? {}) })) },
+    }
+}
+
 const _plusDays = (iso, days) => new Date(Date.parse(iso) + days * 86_400_000).toISOString()
 
 /** Once, at boot (server.js), like every other collection's ensure*Indexes. */
@@ -177,33 +207,44 @@ export async function ensureIndustryAssessmentIndexes() {
 }
 
 const _id = (code) => `ia_ind_${code}`
+const _themeDocId = (themeId) => `ia_${themeId}`
 
 /**
- * Publish an assessment of one sub-industry: checked, the code's facts attached, written with a revision,
- * and logged as a call. `sub` is the industry's metrics node (industryData.readSubIndustry().sub), `row`
- * its latest screen row (screenerData.readTimingRow), `money` the money facts of the node that answers it
- * (industryData.moneyFacts), `structure` the standing industry_view grades.
+ * Publish an assessment: checked, the code's facts attached, written with a revision, and logged as a call.
+ * For an INDUSTRY: `sub` is its metrics node (industryData.readSubIndustry().sub), `row` its latest screen
+ * row (screenerData.readTimingRow), `money` the money facts of the node that answers it
+ * (industryData.moneyFacts), `structure` the standing industry_view grades. For a THEME (step 3): `theme` is
+ * the approved theme and `facts` its themeFacts; `basket` the symbols its call is graded on.
  * → `{ ok, doc, changed, call }` or `{ ok:false, reason, detail }`.
  */
-async function publishAssessment(block, { sub, row, money = null, structure = null, recordCall = null, now = new Date().toISOString(), source = 'chat' } = {}) {
+async function publishAssessment(block, { sub = null, row = null, money = null, theme = null, facts: given = null, basket = null,
+    structure = null, recordCall = null, now = new Date().toISOString(), source = 'chat' } = {}) {
     const checked = checkAssessment(block)
     if (!checked.ok) return { ok: false, reason: 'bad_assessment', detail: checked.detail }
     const a = checked.assessment
-    if (!sub || sub.code !== a.code) return { ok: false, reason: 'unknown_industry', detail: `no measured sub-industry ${a.code}` }
+    let id, subject
+    if (a.theme) {
+        if (!theme || theme.id !== a.theme) return { ok: false, reason: 'unknown_theme', detail: `no theme ${a.theme}` }
+        if (theme.status !== 'approved') return { ok: false, reason: 'unknown_theme', detail: `${theme.name} is not approved — a proposed theme is not assessed` }
+        id = _themeDocId(theme.id)
+        subject = { kind: 'theme', id: theme.id, name: theme.name, sector: null }
+    } else {
+        if (!sub || sub.code !== a.code) return { ok: false, reason: 'unknown_industry', detail: `no measured sub-industry ${a.code}` }
+        id = _id(a.code)
+        subject = { kind: 'industry', code: sub.code, name: sub.name, sector: sub.sector ?? null }
+    }
     const db = await _io.db()
-    const id = _id(a.code)
-    const subject = { kind: 'industry', code: sub.code, name: sub.name, sector: sub.sector ?? null }
     await db.collection(COLLECTION).updateOne({ id },
         { $setOnInsert: { subject, revisions: [], created_at: now } }, { upsert: true })
     const cur = await db.collection(COLLECTION).findOne({ id })
-    const facts = factsFor(row)
+    const facts = a.theme ? (given ?? themeFacts(theme)) : { ...factsFor(row), money }
     const set = {
         subject, verdict: a.verdict, horizon: a.horizon, thesis: a.thesis, evidence: a.evidence, gaps: checked.gaps,
         cause: a.cause, second_order: a.second_order, risks: a.risks, change_view_if: a.change_view_if,
         confidence: a.confidence, confidence_reason: a.confidence_reason,
         moved: facts.moved, base_rates: facts.base_rates, not_measured: facts.not_measured,
         // Companies' own money (§4.3) — facts from the engine's metrics node, like the moves (industryData.moneyFacts).
-        money,
+        money: facts.money ?? null,
         structure, assessed_at: now, expires_at: _plusDays(now, EXPIRY_DAYS[a.horizon]), source, updated_at: now,
     }
     const fields = ['verdict', 'horizon', 'confidence']
@@ -212,7 +253,7 @@ async function publishAssessment(block, { sub, row, money = null, structure = nu
     const doc = await db.collection(COLLECTION).findOne({ id }, { projection: { _id: 0 } })
     let call = null
     if (recordCall) {
-        try { call = await recordCall(doc, { now }) }
+        try { call = await recordCall(doc, { now, basket }) }
         catch (err) { logger.warn(LOG, 'call not logged (the assessment is published)', { code: a.code, error: err.message }) }
     }
     return { ok: true, doc, changed, call }
@@ -223,9 +264,14 @@ async function getAssessment(code) {
     return db.collection(COLLECTION).findOne({ id: _id(code) }, { projection: { _id: 0 } })
 }
 
+async function getThemeAssessment(themeId) {
+    const db = await _io.db()
+    return db.collection(COLLECTION).findOne({ id: _themeDocId(themeId) }, { projection: { _id: 0 } })
+}
+
 async function listAssessments() {
     const db = await _io.db()
     return db.collection(COLLECTION).find({}, { projection: { _id: 0, revisions: 0 } }).sort({ 'subject.sector': 1, 'subject.name': 1 }).toArray()
 }
 
-export const industryAssessmentService = { publishAssessment, getAssessment, listAssessments }
+export const industryAssessmentService = { publishAssessment, getAssessment, getThemeAssessment, listAssessments }

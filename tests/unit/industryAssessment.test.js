@@ -9,6 +9,7 @@ import {
 } from '../../api/strategy/pythiaCalls.service.js'
 import { assessIndustry, structureOf, deskSpend } from '../../services/industryAssessmentRun.service.js'
 import { _tick } from '../../monitoring/pythiaCalls.monitor.service.js'
+import { memDb } from '../helpers/memDb.js'
 import { _parseStrategyResponse, _buildTurnContext, TOOLS } from '../../services/agents/strategy.agent.service.js'
 
 // Pythia's assessment (docs/design/pythia-assessment.md, build step 1): the guardrails, the facts the code
@@ -29,49 +30,6 @@ const ROW = (raw = {}) => ({
     asof: '2026-10-07', code: CODE, basket_name: 'Semiconductors',
     raw: { ret_12m: 0.6, spy_12m: 0.15, ret_24m: 1.8, spy_24m: 0.4, rel_1m: 0.02, rel_3m: 0.08, ext_50: 0.07, ext_percentile: 0.92, hype: true, ...raw },
 })
-
-// ── a small in-memory Mongo, enough for these services ───────────────────────
-
-function _get(o, path) { return path.split('.').reduce((x, k) => (x == null ? x : x[k]), o) }
-function _setPath(o, path, v) { const ks = path.split('.'); let x = o; for (const k of ks.slice(0, -1)) x = (x[k] ??= {}); x[ks.at(-1)] = v }
-function _match(doc, q) {
-    return Object.entries(q).every(([k, v]) => (v && typeof v === 'object' && '$ne' in v
-        ? (_get(doc, k) ?? null) !== v.$ne
-        : JSON.stringify(_get(doc, k)) === JSON.stringify(v)))
-}
-function memDb() {
-    const cols = {}
-    const col = (name) => {
-        const rows = (cols[name] ??= [])
-        const cursor = (list) => {
-            let out = [...list]
-            const c = {
-                sort: (spec) => { const [[k, dir]] = Object.entries(spec); out.sort((a, b) => (_get(a, k) > _get(b, k) ? 1 : -1) * dir); return c },
-                limit: (n) => { out = out.slice(0, n); return c },
-                next: async () => out[0] ?? null,
-                toArray: async () => out,
-            }
-            return c
-        }
-        return {
-            rows,
-            findOne: async (q) => structuredClone(rows.find(r => _match(r, q)) ?? null),
-            find: (q = {}) => cursor(rows.filter(r => _match(r, q)).map(r => structuredClone(r))),
-            replaceOne: async (q, d, { upsert } = {}) => { const i = rows.findIndex(r => _match(r, q)); if (i >= 0) rows[i] = structuredClone(d); else if (upsert) rows.push(structuredClone(d)); return { matchedCount: i >= 0 ? 1 : 0 } },
-            updateOne: async (q, u, { upsert } = {}) => {
-                let doc = rows.find(r => _match(r, q))
-                if (!doc && upsert) { doc = { ...q, ...(u.$setOnInsert ?? {}) }; rows.push(doc) }
-                if (!doc) return { matchedCount: 0 }
-                for (const [k, v] of Object.entries(u.$set ?? {})) _setPath(doc, k, structuredClone(v))
-                for (const [k, v] of Object.entries(u.$push ?? {})) { const arr = (_get(doc, k) ?? []); arr.splice(v.$position ?? arr.length, 0, ...v.$each); _setPath(doc, k, arr) }
-                return { matchedCount: 1 }
-            },
-            createIndex: async () => {},
-        }
-    }
-    const db = { collection: (n) => col(n) }
-    return { db, rows: (n) => col(n).rows }
-}
 
 // ── the guardrails ───────────────────────────────────────────────────────────
 
