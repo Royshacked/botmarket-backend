@@ -1022,6 +1022,32 @@ next 12 months minus the average over all industries that month.
   since that logic was read off the same years.
 - Survivors only; today's GICS labels.
 
+**Result (2026-10-10) — FAIL, and backwards.** Walk-forward: a pick in 86 of 192 months (45%, under the
+half required), −3.2pp vs all industries, t −1.40, halves −4.8 / −1.8; against QQQ −2.3pp. The
+fixed-sign version (reported only) is worse: −5.1pp, t −2.63, both halves negative. ~18 industries per
+side.
+
+| state (all months, hindsight, for reference) | infl top | infl bottom | oil top | oil bottom | rate top | rate bottom | months |
+|---|---|---|---|---|---|---|---|
+| HIGH / HOLD | −8.4 | +4.0 | −8.6 | +5.6 | −5.4 | +2.7 | 20 |
+| HIGH / TIGHT | +0.6 | −4.8 | +3.4 | −6.4 | +1.5 | −0.5 | 28 |
+| LOW / EASE | +7.1 | −10.9 | +6.3 | −6.4 | +5.4 | −8.0 | 32 |
+| LOW / HOLD | −1.7 | −3.4 | −2.5 | −2.8 | −1.6 | −1.3 | 80 |
+| LOW / TIGHT | −6.7 | +2.4 | −4.8 | +4.0 | −5.2 | +3.0 | 32 |
+
+- **The sector pattern of §5.4.2 does not survive being measured as a sensitivity.** Under high
+  inflation with the Fed holding (2021, 2011), the industries whose returns had moved WITH inflation
+  and oil over the prior three years did −8.4 / −8.6pp — the opposite of the energy/staples/utilities
+  reading.
+- **Likely why:** the three betas are one thing. Breakevens, oil and yields all fell with cyclical
+  stocks in 2020 (and 2008, 2015), so a 36-month "inflation beta" mostly measures plain cyclicality,
+  and its sign flips with the cycle (+7 when easing, −7 when tightening, low inflation).
+- **And the measure punishes extremes:** every side scores below the average unconditionally (−1 to
+  −3pp) — the industries at either end of a beta are the volatile ones, and a volatile industry has
+  fewer companies beating SPY in a typical year.
+- Not tuned after the run. Narrower betas (controlling for the market, longer windows) would be new
+  tries on the same years and need their own declaration.
+
 ## 6. Build order
 
 1. **Momentum filter test (§5.1)** on data in Mongo. No FMP calls.
