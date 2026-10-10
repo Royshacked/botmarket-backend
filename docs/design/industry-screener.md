@@ -740,6 +740,31 @@ own history" in 2023, and the banks that failed that year (Silicon Valley, Signa
 are MISSING from a survivors-only universe — the pool's losers were removed. The Premium-month rerun
 with delisted companies is the test that decides this; until then step 1 has a promising lead, not a rule.
 
+#### 5.2.12 Good + cheap without the value traps — declared 2026-10-10 BEFORE any code (Roy)
+
+**Where it came from (found by looking, so the bar is raised):** inside good + cheap, the industries that
+sat in the pool longest were "cheap for a reason" — Diversified and Industrial REITs, payment processing,
+cable, commodity chemicals — and did WORSE there than overall, while recovering industries (banks,
+building products, semi equipment, consumer finance) did much better. Roy: remove the cheap AND declining.
+
+Same decisions, data and measure as §5.2.10 (monthly 2017-01..2025-09, the share of a pool's companies
+beating SPY over 12 months, survivors only). Good + cheap as §5.2.10, then REMOVE a flagged industry that
+is also declining by:
+
+1. **Returns falling:** the industry's aggregate return on capital (ROIC; ROE for financials — the
+   metrics' own measure) in its latest fiscal year below its own average of up to 10 years, AND below
+   its value 3 years earlier.
+2. **Demand shrinking:** revenue CAGR over the last 3 years below its 10-year CAGR AND below nominal GDP's.
+3. **Price still falling:** in the bottom 30% of baskets by 12-1 return.
+4. **Any of the three** (reported).
+
+- **Compared with:** (a) ALL companies — the general pool; (b) plain good + cheap — does removing
+  the traps improve on it?
+- **PASS** (each of 1–3): hit rate above ALL companies with Newey–West t ≥ **3** (11 lags; raised
+  because the idea was found by looking and three versions are tried), positive in both halves; AND
+  above plain good + cheap on average. Reported: pool size, the share beating SPY by 50%+, the median
+  company against SPY.
+
 ### 5.3 Step 5 — the weekly screen (BUILT 2026-10-08)
 
 **Decided by Roy, 2026-10-08:**
