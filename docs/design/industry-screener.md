@@ -1173,6 +1173,39 @@ follow, or are they part of it? Two studies on the French 49 (§5.4.6, no surviv
 - **Reported:** both with the industry's own past return held fixed (sorting on the signal's residual
   after its own return), and the reverse direction (suppliers' returns → the customer).
 
+#### 5.5.3 Results (2026-10-10) — `aether-engine scripts/run_hypes_and_links.py`
+
+**Hypes: 98 episodes in 37 industries, 1928–2024.**
+- A run-up raises the crash risk: **22%** fell 40%+ within 24 months against a **9%** base rate.
+- It does NOT predict a fall on average: next 12 months vs the market +1.6% mean (−0.9% median); next 24
+  months +1.7% mean but −10.6% median — most fade, a few keep running (Coal 2004 +110%, Toys 1959
+  +166%, Chips 1934 +149%).
+- **None of the five features separates the crashes** (Fisher p 0.6–1.0). Hints only: high acceleration
+  → next 12 months +4.2% vs −0.9% (p 0.14); a big listing wave → −0.4% vs +5.1% (p 0.16).
+- At 49 broad industries several themes never qualify: 2023–24's AI run did not make Chips a
+  +100%-over-market industry; EV hides inside Autos (Autos 2020-08 is one); solar has no industry.
+- Reading: a hype is a RISK flag (a crash 2.4× as likely), not a timing signal; "early vs late" is not
+  visible in these features at this grain.
+
+**Links: the right direction, below the bar.**
+
+| test | spread | NW t | halves 1960–92 / 1993–2026 | verdict |
+|---|---|---|---|---|
+| PRIMARY customers' month → next month | +0.16pp / month | 2.11 | +0.19 / +0.13 | fail |
+| …own month held fixed | +0.13pp | 1.74 | +0.21 / +0.04 | (reported) |
+| SECONDARY customers' 12m → next 12m (Roy's AI → power) | +2.07pp / year | 2.55 | +0.92 / +3.22 | fail |
+| …own 12m held fixed | +1.85pp | 2.49 | +0.83 / +2.89 | (reported) |
+| reverse: suppliers' month → next month | +0.17pp | 2.07 | +0.11 / +0.22 | (reported) |
+| reverse: suppliers' 12m → next 12m | +0.73pp | 0.96 | +0.14 / +1.33 | (reported) |
+
+- Demand travels UPSTREAM with a lag — when an industry's customers have done well, it does better the
+  next year (+2pp, not explained by its own past return), stronger since 1993. Positive in every version
+  and both halves, but t 2.1–2.6: the known effect, not proven to our bar.
+- **The map's blind spot:** a structural Use table describes the OLD economy. In the 2017 table, Utilities
+  sell to real estate, retail, restaurants; chips to wholesale and business services. AI data centres are
+  not in it. A new theme creates links no published table holds yet — that needs company-level exposure
+  (Aether's filings tools), not BEA.
+
 ## 6. Build order
 
 1. **Momentum filter test (§5.1)** on data in Mongo. No FMP calls.
