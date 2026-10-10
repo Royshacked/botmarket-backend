@@ -236,8 +236,7 @@ already does (`needsAgent`):
 
 **Decided (Roy, 2026-10-10):** geopolitics stays a SEPARATE input (§4.5), not folded into news; companies'
 own money (capex, buybacks, dividends, deals — §4.3) stays, beside funds, insiders and government;
-"priced in" is Prometheus's, per name — Pythia reports how far the price has moved and what caused it (§4.2). The verdict words stay: `interesting_trade` · `interesting_invest` · `watch` · `avoid`. Themes: Pythia PROPOSES, the admin approves — a proposed theme is not assessed until approved. The FIRST themes too: no hand-picked starting list — Pythia proposes them when the registry is built. Money comes in two stages: companies' own money first (step 2), insiders, funds and government later (step 8).
+"priced in" is Prometheus's, per name — Pythia reports how far the price has moved and what caused it (§4.2). The verdict words stay: `interesting_trade` · `interesting_invest` · `watch` · `avoid`. Themes: Pythia PROPOSES, the admin approves — a proposed theme is not assessed until approved. The FIRST themes too: no hand-picked starting list — Pythia proposes them when the registry is built. Money comes in two stages: companies' own money first (step 2), insiders, funds and government later (step 8). The weekly screen (`industry_screen`) stays visible until the assessment board replaces it at step 6.
 
 **Open:**
 1. The weekly assessment cap (after one assessment's cost is measured).
-2. Does `industry_screen` stay visible until the assessment board replaces it, or go dark now?
