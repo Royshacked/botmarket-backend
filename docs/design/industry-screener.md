@@ -1244,6 +1244,27 @@ return over the next 12 months minus the average industry's (one vote per indust
 - **Reported:** both for 2006–2025 alone; the top 30% against the market per year; the channel forces
   each industry leans on most in the last fit.
 
+**Result (2026-10-10) — MODEL FAIL; the channels SUBTRACT out of sample.** `aether-engine
+scripts/run_industry_model.py`, 608 prediction months 1975-01..2025-08.
+
+| | spread top − bottom 30% | NW t | halves 1975–99 / 2000–25 | rank IC | top 30% vs market |
+|---|---|---|---|---|---|
+| MODEL (rules + channel tilt) | −0.10pp / yr | −0.11 | +0.17 / −0.36 | +0.019 | +0.40% / yr |
+| rules only | **+2.66pp / yr** | **2.60** | +4.91 / +0.47 | +0.061 | +2.17% / yr |
+| channels' contribution | **−2.76pp / yr** | −2.05 | | | |
+| 2006–25: model / rules only | +0.95 / −0.27 | 0.80 / −0.18 | | | channels +1.22pp, t 0.60 |
+
+- **The channel connection of §5.4.6 does not survive being used.** Three times chance across 65 years
+  in-sample, but a per-industry tilt learned from the past and applied to the next year made the picks
+  WORSE by 2.8pp a year (t −2.05). The links exist on average; their sign and size are not stable enough
+  from one cycle to the next to forecast with — the familiar fate of macro-timing regressions.
+- **The rules carry what there is:** momentum, own-history cheapness, cheapness vs others and the
+  customer signal together +2.66pp a year (t 2.60) — strong in 1975–99 (+4.9), faded since 2000 (+0.5),
+  about zero in 2006–25.
+- Not tuned after the run (fewer forces, other horizons, sector-level tilts would be new declarations).
+- The script was first stopped by the machine's memory pressure (not by the model); rewritten lighter
+  (yearly BE/ME percentiles, float32, vectorised predictions) — same model, 38 seconds.
+
 ## 6. Build order
 
 1. **Momentum filter test (§5.1)** on data in Mongo. No FMP calls.
