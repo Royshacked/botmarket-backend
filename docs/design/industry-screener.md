@@ -825,6 +825,36 @@ Run separately and in every combination: a, b, c, a+b, a+c, b+c, a+b+c (seven).
 - **Reported:** pool size, share beating SPY by 50%+, median company vs SPY, the gain over the base
   with its own t, and each variant WITHOUT Regional Banks (§5.2.11's fragility — reported, not graded).
 
+**Result (2026-10-10) — a+c and a+b+c PASS by the letter; none improves on the base by a measurable
+amount, and the Regional Banks fragility is untouched.** Of the base's 945 industry-months, (a) flags
+100, (b) 46, (c) 183.
+
+| variant | pool | vs ALL | NW t | 17–20 / 21–25 | vs base (t) | 50%+ | median vs SPY | verdict | without Regional Banks |
+|---|---|---|---|---|---|---|---|---|---|
+| base | 158 | +5.8pp | 2.38 | +6.6 / +5.3 | — | 8.4% | −2.9% | | +4.0pp t 1.20 |
+| − a | 148 | +6.5pp | 2.48 | +6.3 / +6.6 | +0.6pp (1.47) | 8.1% | −2.3% | fail | +3.7pp t 1.00 |
+| − b | 158 | +5.7pp | 2.28 | +6.4 / +5.1 | −0.1pp (−0.66) | 8.3% | −2.8% | fail | +3.6pp t 1.05 |
+| − c | 148 | +5.9pp | 2.71 | +6.7 / +5.3 | +0.2pp (0.18) | 8.7% | −2.9% | fail | +4.2pp t 1.38 |
+| − a+b | 148 | +6.5pp | 2.44 | +6.2 / +6.7 | +0.6pp (1.24) | 8.0% | −2.3% | fail | +3.2pp t 0.80 |
+| − a+c | 134 | +6.5pp | 3.19 | +6.5 / +6.6 | +0.6pp (0.52) | 8.5% | −2.2% | **PASS** | +4.5pp t 1.51 |
+| − b+c | 148 | +5.8pp | 2.62 | +6.6 / +5.2 | +0.1pp (0.11) | 8.6% | −2.9% | fail | +3.8pp t 1.18 |
+| − a+b+c | 134 | +6.5pp | 3.18 | +6.4 / +6.6 | +0.6pp (0.55) | 8.4% | −2.2% | **PASS** | +3.9pp t 1.19 |
+
+- **Why so little moves:** the description that motivated this counted INDUSTRIES (each industry-month
+  once); the measure counts COMPANIES, and about a third of the pool's companies are regional banks.
+  The traps are many industries but few companies (c removes 183 industry-months and only ~10
+  companies a month), so cutting them barely shifts a company-weighted hit rate.
+- **(a) cheap too long** is the one that does something: the 2021–25 half rises (+5.3 → +6.6) and
+  the median company improves (−2.9% → −2.3%). Its gain over the base is +0.6pp at t 1.47 — a
+  direction, not proven.
+- **(b) the normal broke** rarely fires (46) once returns-falling has already filtered, and adds
+  nothing.
+- **(c) REITs out** is neutral on the hit rate; it steadies the series (t up) more than it lifts it.
+- **The pass is a+c's:** above ALL at t 3.19 with both halves positive, by the declared rule. Without
+  Regional Banks every variant is t 0.8–1.5 — the result still rests on one industry.
+
+Code: `screener/step1.py` (`aggregate_margin`, `normal_broke`), runner dump carries `normal_broke`.
+
 ### 5.3 Step 5 — the weekly screen (BUILT 2026-10-08)
 
 **Decided by Roy, 2026-10-08:**
