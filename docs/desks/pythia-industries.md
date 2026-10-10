@@ -1,5 +1,8 @@
 # Pythia + the industry-view monitor — the `industry_view` artifact
 
+> **Next (proposed 2026-10-10):** `docs/design/pythia-assessment.md` — the weekly screen gives way to an
+> assessment from five inputs with a forward-graded track record; the three questions below stay.
+
 The house's description of every industry. For each of the 163 GICS (2023) sub-industries, **Pythia**
 answers three structural questions from the numbers the engine measured, and **the industry-view
 monitor** decides when each answer is due again. Written 2026-10-05, the day the desk was rebuilt; the

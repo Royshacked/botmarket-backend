@@ -1,5 +1,9 @@
 # Pythia's industry screener — trade or not, and on which horizon (2026-10-08)
 
+> **Superseded in part (2026-10-10):** the forecasting board of §2–§5.3 is replaced by
+> `pythia-assessment.md` — Pythia assesses (events, price, money, regime, geopolitics), it does not
+> forecast. §5.1–§5.6 stay as the research record and the source of the base-rate guardrails.
+
 **PROPOSED, nothing built.** Roy's spec, adopted on 2026-10-08. It replaces the two three-question
 drafts of 2026-10-07 (swing and months to a year), which are deleted. The spec itself is kept word for
 word in the Appendix. This doc adds the decisions, how it maps onto what is built, the data status
