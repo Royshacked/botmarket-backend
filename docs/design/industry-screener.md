@@ -795,6 +795,36 @@ pool; removing the traps does not fix the fragility.** The base reproduced §5.2
 Code: `screener/step1.py` (`aggregate_returns`, `returns_falling`), `scripts/run_step1_backtest.py`
 (dump rows carry `shrinking`, `ret_falling`, `rs`).
 
+#### 5.2.13 Good cheap vs bad cheap — declared 2026-10-10 BEFORE any code for (b) (Roy)
+
+**Where it came from (found by looking, so the bar stays raised):** inside the pool, quality, cheapness
+and demand did not separate the industries whose companies beat SPY from those that did not. What did
+(description, 945 industry-months): the KIND of business (REITs, commodity materials, airlines, cable
+lagged; semis, building products, durables led), how LONG it had been cheap (over 24 months −3.2pp vs
++4.5pp at 3–12), smaller companies, weaker price. The reading: "cheap" assumes margins return to their
+10-year average; in the traps that normal broke.
+
+**Base:** good + cheap minus returns falling (§5.2.12 — Roy's working pool, ~160 companies a month).
+Same data, months (2017-01..2025-09), measure and survivors-only caveat as §5.2.10. Then REMOVE:
+
+- **(a) Cheap too long:** the industry has been good + cheap (§5.2.10's rule, before the returns
+  filter) for more than 24 consecutive months, counting the decision month. Counted from 2017-01, so
+  nothing can be removed by (a) before 2019-01 — a known limit.
+- **(b) The normal broke:** the industry's aggregate margin — Σ EBIT / Σ revenue; Σ net income / Σ
+  average equity (ROE) for baskets the metrics measure on ROE — was below its own average of up to 10
+  fiscal years in EACH of the latest 3 fiscal years public by the decision date. Needs at least 6 years;
+  otherwise not removed.
+- **(c) REITs:** Equity REITs (GICS 6010 — every node whose code starts 6010) are out; their earnings
+  do not fit an operating-margin yield. Real-estate management & development (6020) stays.
+
+Run separately and in every combination: a, b, c, a+b, a+c, b+c, a+b+c (seven).
+
+- **Compared with:** ALL companies, and the base.
+- **PASS** (each of the seven): hit rate above ALL with Newey–West t ≥ **3** (11 lags), positive in
+  both halves (2017–20 / 2021–25), AND above the base on average.
+- **Reported:** pool size, share beating SPY by 50%+, median company vs SPY, the gain over the base
+  with its own t, and each variant WITHOUT Regional Banks (§5.2.11's fragility — reported, not graded).
+
 ### 5.3 Step 5 — the weekly screen (BUILT 2026-10-08)
 
 **Decided by Roy, 2026-10-08:**
