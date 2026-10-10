@@ -991,6 +991,37 @@ This is DESCRIPTION (Roy's "connect, explain"). No pass bar here; a rule found h
   tightening, −8.4 when easing and −9.1 in stress (it reverses at turns).
 - **Limits:** 2017–25 holds ONE high-inflation episode; survivors only; each combination is 1–3 episodes.
 
+#### 5.4.3 Channel sensitivity, walk-forward — declared 2026-10-10 BEFORE any code (Roy)
+
+**Traits (industry level, ≥ 5 liquid companies), point in time at each month end m:** the slope of the
+industry's monthly equal-weight return MINUS the average industry's, on the month's change in a channel,
+over the 36 months ending m (all 36 needed):
+- **inflation beta** — on the change in the 10-year breakeven (T10YIE);
+- **oil beta** — on the % change in WTI;
+- **rate beta** — on the change in the 10-year Treasury yield.
+
+Monthly industry returns: the equal-weight 1-month return of the companies liquid at the month's start
+(the §5.4.1 floor), added to the regime-history builder. First decision 2009-10 (36 months after 2006-11),
+last 2025-09.
+
+**The recipe (mechanical — nobody chooses per year):** at each decision month m, take m's state —
+inflation × Fed from §5.4.2. Look only at PAST decision months d with d + 12 ≤ m (their outcomes known)
+in the same state; if fewer than 12, fall back to the inflation axis alone; if still fewer than 12, no
+pick that month. For each of the six trait-sides (top 30% or bottom 30% of each beta) compute its past
+average score in that state; pick the best one if positive, else no pick. The pool = the industries on
+that side of that beta at m.
+
+**Score (one vote per industry, §5.2.14):** the pool's average share of companies beating SPY over the
+next 12 months minus the average over all industries that month.
+
+- **PASS:** Newey–West t ≥ 3 (11 lags) over the months with a pick, positive in both halves
+  (2009-10..2017-12 / 2018-01..2025-09), and a pick in at least half the months.
+- **Reported:** coverage; which trait-side the recipe picked, by state and year; the score by state; the
+  same against QQQ; and a FIXED-sign version written from §5.4.2's logic (high inflation → top inflation
+  beta; tightening → top rate beta; easing → bottom rate beta; else no pick) — reported, not graded,
+  since that logic was read off the same years.
+- Survivors only; today's GICS labels.
+
 ## 6. Build order
 
 1. **Momentum filter test (§5.1)** on data in Mongo. No FMP calls.
