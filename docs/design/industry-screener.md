@@ -1048,6 +1048,29 @@ side.
 - Not tuned after the run. Narrower betas (controlling for the market, longer windows) would be new
   tries on the same years and need their own declaration.
 
+#### 5.4.4 The full chain — channels → regime → rule → industries, walk-forward — declared 2026-10-10 BEFORE the run (Roy)
+
+**A thin first pass:** our rules exist only from 2017 (the step-1 dump), so the chain learns from 2017
+and can predict from 2018; high inflation is one episode (2021-05..2024-06). The same code reruns on the
+Premium-month history.
+
+**Each decision month m (2017-01..2025-09), mechanically:**
+1. **Regime:** inflation × Fed from `channels_monthly` (§5.4.2), point in time.
+2. **Rule:** among EIGHT rules — good (quality ≥ 7), cheap (own-history percentile ≥ 0.70), good +
+   cheap, good + cheap − returns falling (§5.2.12), low quality (≤ 4), expensive (percentile ≤ 0.30),
+   12-1 momentum top 30%, bottom 30% — score each over PAST decision months d with d + 12 ≤ m in the same
+   state (fallback: the inflation axis; at least 12 such months, else no pick). Use the best if its past
+   average is positive; else no pick. A rule flagging fewer than 3 industries in a month has no score
+   that month.
+3. **Industries:** those the chosen rule flags at m.
+4. **Score:** one vote per industry (§5.2.14; industries with ≥ 3 companies) — the pool's average share
+   of companies beating SPY over the next 12 months minus all industries' average.
+
+- **PASS:** Newey–West t ≥ 3 (11 lags) over months with a pick, positive in both halves (2018–21 /
+  2022–25-09), a pick in at least half the months from 2018-01, AND above plain good + cheap applied in
+  the same months (does choosing by regime beat the one rule we had?).
+- **Reported:** which rule the chain chose by state and year, the score by state, against QQQ.
+
 ## 6. Build order
 
 1. **Momentum filter test (§5.1)** on data in Mongo. No FMP calls.
