@@ -222,21 +222,22 @@ already does (`needsAgent`):
 1. **The artifact, the guardrails and the forward log** (§5–§7) — before any new input, so every verdict
    is measured from the first one. Board: verdict + thesis + flags + track record.
 2. **Money, companies** — capex and buyback trends by industry and theme from `fin_statements` (data in
-   hand); then Form 4, 13F, USAspending engine jobs.
+   hand). Only companies' own money in this step.
 3. **Themes** — the registry; Pythia proposes the first themes and the admin approves them; filings
    exposure through Aether's `exposure/` tools.
 4. **Geopolitics** — the GPR index job and the exposure map.
 5. **Regime job** — the light channel table in production, for context and Atlas's exposure read.
 6. **The change scan and the weekly run**, replacing the screen; retire `industry_screen`.
 7. **Hand-offs** — Argus on assessments; Atlas caps and hype brake.
+8. **Money, the rest** (later, after the board runs on companies' money) — Form 4 insiders, 13F funds,
+   USAspending government awards, as engine jobs writing aggregates only.
 
 ## 13. Decisions for Roy
 
 **Decided (Roy, 2026-10-10):** geopolitics stays a SEPARATE input (§4.5), not folded into news; companies'
 own money (capex, buybacks, dividends, deals — §4.3) stays, beside funds, insiders and government;
-"priced in" is Prometheus's, per name — Pythia reports how far the price has moved and what caused it (§4.2). The verdict words stay: `interesting_trade` · `interesting_invest` · `watch` · `avoid`. Themes: Pythia PROPOSES, the admin approves — a proposed theme is not assessed until approved. The FIRST themes too: no hand-picked starting list — Pythia proposes them when the registry is built.
+"priced in" is Prometheus's, per name — Pythia reports how far the price has moved and what caused it (§4.2). The verdict words stay: `interesting_trade` · `interesting_invest` · `watch` · `avoid`. Themes: Pythia PROPOSES, the admin approves — a proposed theme is not assessed until approved. The FIRST themes too: no hand-picked starting list — Pythia proposes them when the registry is built. Money comes in two stages: companies' own money first (step 2), insiders, funds and government later (step 8).
 
 **Open:**
 1. The weekly assessment cap (after one assessment's cost is measured).
 2. Does `industry_screen` stay visible until the assessment board replaces it, or go dark now?
-3. 13F / Form 4 / USAspending: all three in step 2, or companies' own money first and the rest later?
