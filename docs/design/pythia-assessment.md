@@ -223,7 +223,7 @@ already does (`needsAgent`):
    is measured from the first one. Board: verdict + thesis + flags + track record.
 2. **Money, companies** — capex and buyback trends by industry and theme from `fin_statements` (data in
    hand); then Form 4, 13F, USAspending engine jobs.
-3. **Themes** — the registry, the first five themes (AI, power, defence, GLP-1, reshoring), filings
+3. **Themes** — the registry; Pythia proposes the first themes and the admin approves them; filings
    exposure through Aether's `exposure/` tools.
 4. **Geopolitics** — the GPR index job and the exposure map.
 5. **Regime job** — the light channel table in production, for context and Atlas's exposure read.
@@ -234,10 +234,9 @@ already does (`needsAgent`):
 
 **Decided (Roy, 2026-10-10):** geopolitics stays a SEPARATE input (§4.5), not folded into news; companies'
 own money (capex, buybacks, dividends, deals — §4.3) stays, beside funds, insiders and government;
-"priced in" is Prometheus's, per name — Pythia reports how far the price has moved and what caused it (§4.2). The verdict words stay: `interesting_trade` · `interesting_invest` · `watch` · `avoid`. Themes: Pythia PROPOSES, the admin approves — a proposed theme is not assessed until approved.
+"priced in" is Prometheus's, per name — Pythia reports how far the price has moved and what caused it (§4.2). The verdict words stay: `interesting_trade` · `interesting_invest` · `watch` · `avoid`. Themes: Pythia PROPOSES, the admin approves — a proposed theme is not assessed until approved. The FIRST themes too: no hand-picked starting list — Pythia proposes them when the registry is built.
 
 **Open:**
-1. The first five themes.
-2. The weekly assessment cap (after one assessment's cost is measured).
-3. Does `industry_screen` stay visible until the assessment board replaces it, or go dark now?
-4. 13F / Form 4 / USAspending: all three in step 2, or companies' own money first and the rest later?
+1. The weekly assessment cap (after one assessment's cost is measured).
+2. Does `industry_screen` stay visible until the assessment board replaces it, or go dark now?
+3. 13F / Form 4 / USAspending: all three in step 2, or companies' own money first and the rest later?
