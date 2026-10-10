@@ -234,13 +234,11 @@ already does (`needsAgent`):
 
 **Decided (Roy, 2026-10-10):** geopolitics stays a SEPARATE input (§4.5), not folded into news; companies'
 own money (capex, buybacks, dividends, deals — §4.3) stays, beside funds, insiders and government;
-"priced in" is Prometheus's, per name — Pythia reports how far the price has moved and what caused it (§4.2).
+"priced in" is Prometheus's, per name — Pythia reports how far the price has moved and what caused it (§4.2). The verdict words stay: `interesting_trade` · `interesting_invest` · `watch` · `avoid`.
 
 **Open:**
-
-1. Verdict words: `interesting_trade` · `interesting_invest` · `watch` · `avoid` — or others?
-2. Themes: who curates the registry — admin only, or Pythia proposes and the admin approves?
-3. The first five themes.
-4. The weekly assessment cap (after one assessment's cost is measured).
-5. Does `industry_screen` stay visible until the assessment board replaces it, or go dark now?
-6. 13F / Form 4 / USAspending: all three in step 2, or companies' own money first and the rest later?
+1. Themes: who curates the registry — admin only, or Pythia proposes and the admin approves?
+2. The first five themes.
+3. The weekly assessment cap (after one assessment's cost is measured).
+4. Does `industry_screen` stay visible until the assessment board replaces it, or go dark now?
+5. 13F / Form 4 / USAspending: all three in step 2, or companies' own money first and the rest later?
