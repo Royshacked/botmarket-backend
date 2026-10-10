@@ -81,6 +81,9 @@ Each input answers one question, has a source, and has things it may NOT claim.
 - **Pythia's job:** state the move, as FACTS from code: the industry's (or theme basket's) return since
   the story started and over 12 and 24 months against SPY, its extension against its own two years, and
   the hype flag. A good story already up 80% is a different trade from the same story flat.
+- **And what caused the move** (Roy, 2026-10-10) — Pythia ties it to the other inputs: news or an event
+  (§4.1), money arriving (§4.3), the regime (§4.4), geopolitics (§4.5) — or nothing it can name, which is
+  itself a finding (a move with no cause behind it is the hype pattern).
 - **Not Pythia's job — whether it is "priced in"** (Roy, 2026-10-10): that is close to unknowable at
   industry level. Expectations live in companies — estimates, guidance, how a stock took its last
   report — so **Prometheus** assesses them per name (§10). Pythia reports how far the price has gone,
