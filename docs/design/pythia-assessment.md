@@ -241,6 +241,13 @@ already does (`needsAgent`):
    Electric Utilities +$21B. Themes are step 3, so "by theme" waits for the registry.
 3. **Themes** — the registry; Pythia proposes the first themes and the admin approves them; filings
    exposure through Aether's `exposure/` tools.
+   **3a BUILT 2026-10-10**: `theme` (theme.service — proposed / approved / retired, value chain of measured
+   sub-industries by order 1 direct / 2 suppliers / 3 suppliers' suppliers, each with why; terms; basket);
+   Pythia's `<theme_proposal>` and "Propose themes" (admin); a theme assessment over the chain
+   (themeFacts: each link's moves and money; hype when a direct link carries it), graded on the theme's
+   basket; Themes tab on the board. First proposals (Pythia, $0.006): AI compute and cloud infrastructure;
+   Electric grid expansion — awaiting approval. **3b next**: an approved theme's companies from filings via
+   Aether's `discover_event_names.py` (headline + terms → named, filing-verified companies).
 4. **Geopolitics** — the GPR index job and the exposure map.
 5. **Regime job** — the light channel table in production, for context and Atlas's exposure read.
 6. **The change scan and the weekly run**, replacing the screen; retire `industry_screen`.
