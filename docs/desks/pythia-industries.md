@@ -111,6 +111,21 @@ regime, geopolitics). It is a judgment, not a forecast, and the code holds it to
   ("Assess now", headless, returns `cost_usd`, the input to the weekly cap).
 - Until build step 6 (the change scan and weekly run) assessments are made one at a time by an admin.
   The weekly screen stays visible until the assessment board replaces it (Roy, 2026-10-10).
+- **News** (§4.1): `get_industry_news` — the last month's news on the industry's 15 largest companies, one
+  FMP call through the one news pipe (`news.service`, category `basket`, keyed `gics_<code>`), at most three
+  stories per company; `get_news` for the front page (Finnhub) and topic search (GNews — small daily quota).
+- **Money** (step 2, §4.3): the engine's industry-metrics job writes `money` on every node — companies'
+  capex, buybacks, dividends and acquisitions, last four quarters vs the four before and the change a year
+  earlier, share raising capex, capex intensity, median share-count change, top spenders.
+  `get_industry_money` reads one industry, `get_capex_leaders` the market's biggest capex changes;
+  `industryData.moneyFacts` attaches the facts to each assessment.
+- **Themes** (step 3, §3; `theme.service`, `themeData.service`): value chains of sub-industries by order
+  (1 direct, 2 suppliers, 3 suppliers' suppliers). Pythia PROPOSES (`<theme_proposal>`, "Propose themes"),
+  the admin approves or retires; only an approved theme is assessed — an `<industry_assessment>` carrying
+  `theme`, its facts each link's moves and money, its call graded on the theme's basket. Tools `list_themes`,
+  `get_theme`; routes `GET /themes` (traders see approved only), admin `POST /themes/propose`,
+  `/themes/:id/status`, `/themes/:id/assess`. Board: Forecasts → Themes.
+- First live costs on Luna: ~$0.004–0.006 per assessment, ~$0.006 per proposal run.
 
 ## The monitor — `monitoring/industryView.monitor.service.js`
 

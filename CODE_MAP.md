@@ -108,7 +108,16 @@ api/
                               agent. publishAssessment rides houseArtifact.repo and logs the call
     pythiaCalls.service.js    `pythia_calls` = the FORWARD LOG: each verdict freezes its basket's and SPY /
                               QQQ / RSP's prices; gradeDue scores it at 3 and 12 months (gradeCall, summarise).
-                              Logged on a new verdict or a reaffirmation after 28 days (shouldLog)
+                              Logged on a new verdict or a reaffirmation after 28 days (shouldLog); an
+                              industry keyed by its GICS code, a theme by its id and graded on the basket given
+    theme.service.js          `theme` = Pythia's THEMES (step 3): proposed / approved / retired; a value chain
+                              of measured sub-industries by order (1 direct, 2 suppliers, 3 suppliers'
+                              suppliers) each with why, search terms, a named basket. checkThemeProposal
+                              refuses an unmeasured link, a missing order/why or no direct link; a proposal
+                              never overwrites an APPROVED theme (proposeTheme); setStatus is the admin's
+    themeData.service.js      A theme's facts — each link's screen row and money (readThemeFacts), its
+                              graded basket (themeBasket), formatTheme for the desk. Shared by get_theme and
+                              the headless theme assessment so the two cannot disagree
   aether/                 Aether — the EVENT-EXPOSURE desk  /api/aether/*. Node is READ-ONLY against the
                           engine's collections: the Python aether-engine (a separate repo) writes them, and
                           only when an admin starts a discovery run. What survived the channel-engine
@@ -1123,6 +1132,11 @@ scripts/                    ops one-offs — none run by `npm test`. Kinds: migr
                             has lived exactly there, with green tests behind it. Rebuild the
                             bundle into public/ first, and LOOK at the screenshots. A resumed
                             thread starts past the opening stage; that is state, not a defect.
+  drive-assessment-ui.mjs   Drives Pythia's board (Forecasts → Assessed, Themes) as a throwaway trader and
+                            admin against the LIVE routes; never presses Assess now / Propose / Approve
+  assess-industry.mjs       One Pythia "Assess now" from the command line, as an admin; prints the cost
+  propose-themes.mjs        Pythia's "Propose themes" from the command line, as an admin; prints the cost
+                            and each proposal's chain (they land as PROPOSED — approving is the admin's)
   check-archive-loads.mjs   `npm run check:archive` — imports every file under archive/ and fails
                             on the first that cannot resolve. The archive reaches ~40 symbols in the
                             LIVE tree and nothing lints or tests it, so a sweep that deletes an
