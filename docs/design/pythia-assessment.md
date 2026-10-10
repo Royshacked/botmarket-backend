@@ -1,6 +1,6 @@
 # Pythia assesses, it does not forecast — events, price, money, regime, geopolitics (2026-10-10)
 
-**BUILDING.** Roy's design of 2026-10-10. Step 1 (the artifact, guardrails, forward log and grader) is built in the backend and engine; its board is next. Status per step in §12. It
+**BUILDING.** Roy's design of 2026-10-10. Step 1 (the artifact, guardrails, forward log, grader and the board) is BUILT. Status per step in §12. It
 replaces the forecasting half of `industry-screener.md` (the weekly buckets, §2–§5.3) and keeps
 Pythia's three structural questions (`pythia-industry-questions.md`) as one of its inputs.
 
@@ -226,7 +226,11 @@ already does (`needsAgent`):
    **Backend + engine BUILT 2026-10-10**: `industry_assessment`, `checkAssessment` / `factsFor`, `pythia_calls` +
    the daily grader, "Assess now", `get_industry_moves`; the engine screen job writes the 12/24-month moves
    and the hype flag. Benchmarks for "no view": SPY, QQQ and RSP (equal-weight S&P 500); the "rules only"
-   baseline waits for the rules in production. Board: next.
+   baseline waits for the rules in production. **Board BUILT 2026-10-10**: "Assessed" on the Forecasts tab
+   (frontend AssessmentView) — verdict groups, hype chip, cause, moves, base rate, evidence and gaps, risks,
+   what would change the view, the track record, and "Assess now" for admins; driven in a browser as a
+   trader and an admin (scripts/drive-assessment-ui.mjs). News: FMP company news for the industry's largest
+   names (news.service `basket`). First live cost on Luna: ~$0.004 per assessment.
 2. **Money, companies** — capex and buyback trends by industry and theme from `fin_statements` (data in
    hand). Only companies' own money in this step.
 3. **Themes** — the registry; Pythia proposes the first themes and the admin approves them; filings
