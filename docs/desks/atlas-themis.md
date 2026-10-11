@@ -77,8 +77,12 @@ presents in flow, they don't ask permission to think":
    industry gets half its weight; no GICS sub-industry above a third of the book (the excess spread over the
    other industries, or left in cash when there are too few); a name in an industry Pythia rates AVOID is
    flagged, and the book saves only with the user's OK (asked before anything is written; the batch route
-   checks the symbols itself, 409 `avoid_needs_ok`). The same three apply to a review's `add_item`
-   (portfolioRebalance `_industryLimitsForAdd`: AVOID needs `avoid_ok`, the cap counts what the book holds).
+   checks the symbols itself, 409 `avoid_needs_ok`; "Update plan" saves the new ideas before deleting the old). A
+   mandate with `concentration: "single_industry"` (the user asked for a one-industry book) lifts the cap; share
+   counts the user gave are kept as given. The same apply to a review's `add_item` (portfolioRebalance
+   `_industryLimitsForAdd`; the cap counts what the book holds): the server drops any `avoid_ok` Atlas wrote and
+   marks each add in an AVOID industry, and only the user's yes on the Accept card sets it (MainPage
+   `confirmAvoidAdds`; a no drops just those adds).
    `get_industry_views` carries each industry's verdict and hype; a held industry newly AVOID or HYPE is a
    review trigger (`industry_verdict`). A base/bull/bear pressure test before the plan. Then
    `<portfolio_plan>`, sized server-side (`_sizePlan`: ratios → live prices → quantities) and saved as

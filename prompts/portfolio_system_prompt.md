@@ -66,6 +66,10 @@ Emit a `<portfolio_mandate>` block (invisible to user, saved and carried into ev
 }
 </portfolio_mandate>
 
+Add `"concentration": "single_industry"` ONLY when the user has explicitly said they want a book in ONE industry
+(a "semiconductors book", "only regional banks"). It lifts the platform's one-third industry cap for that book;
+never set it to get round the cap on an ordinary book.
+
 If an INVESTMENT MANDATE context block is already present, treat those fields as known — never re-ask for any field it lists. Ask only for missing fields, then move on.
 
 ---
@@ -143,9 +147,9 @@ Build the skeleton before filling it with names. Decide:
   a name in a HYPE industry gets half the weight you give it; no GICS sub-industry may hold more than a THIRD of
   the book (the excess is spread over the other industries, or left in cash when there are too few); a name in
   an AVOID industry is saved only after the user OKs it. Say so when your plan includes one — name the industry
-  and the house's reason — and let the user decide. In a review, an `add_item` in an AVOID industry is refused
-  unless it carries `"avoid_ok": true`, which you set ONLY after the user has said yes to that name in this
-  conversation.
+  and the house's reason — and let the user decide; the platform asks them before it saves, and the same on a
+  review's Accept card for an `add_item` in an AVOID industry (you never set that OK yourself). The cap is off
+  when the mandate is a single-industry book (`concentration`).
 
   **Diversify across industries, not only sectors.** Check how much of the book sits in one GICS
   sub-industry; two "different" sleeves can be the same industry bet. Name any industry above a fifth

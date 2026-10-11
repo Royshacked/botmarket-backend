@@ -194,3 +194,49 @@ test('the weekly ceiling holds, a duplicate does not count, and a verdict change
     const broken = houseDeps({ covered: async () => { throw new Error('coverage down') } })
     assert.deepEqual((await runHouseScan([{ kind: 'industry', code: '11', outcome: 'published', verdict: 'swing' }], broken.deps)).queued, [], 'never throws')
 })
+
+// ── the fixes of 2026-10-11 (Roy: fix 1-3; a single-industry mandate overrides the cap) ─
+
+test('a single-industry mandate lifts the cap — the brake and the Avoid flag still apply', async () => {
+    const { isSingleIndustry } = await import('../../services/industryLimits.service.js')
+    assert.equal(isSingleIndustry({ concentration: 'single_industry' }), true)
+    assert.equal(isSingleIndustry({ concentration: 'diversified' }), false)
+    assert.equal(isSingleIndustry(null), false)
+    const r = applyIndustryLimits([{ asset: 'A', weight: 0.5 }, { asset: 'B', weight: 0.5 }], { A: ind('semis', { hype: true }), B: ind('semis', { verdict: 'avoid' }) }, { cap: Infinity })
+    assert.ok(Math.abs(sum(r.weights) - 1) < 1e-9, 'all invested in the one industry')
+    assert.ok(Math.abs(r.weights[0] - r.weights[1] / 2) < 1e-9, 'the hype brake still halves')
+    assert.equal(r.avoid.length, 1)
+    assert.deepEqual(r.capped, [])
+
+    const quote = async () => ({ price: 10 })
+    const add = await _industryLimitsForAdd({ asset: 'NEW', allocationRatio: 0.5 }, [{ asset: 'OLD', status: 'long', quantity: 900 }], 10_000,
+        { quote, industries: async () => ({ NEW: ind('semis'), OLD: ind('semis') }), singleIndustry: true })
+    assert.deepEqual(add, { ok: true, spec: { asset: 'NEW', allocationRatio: 0.5 } }, 'no cap on a single-industry book')
+})
+
+test('construction: the user\'s own share counts are kept; a single-industry mandate keeps the whole book invested', async () => {
+    const { _sizePlan } = await import('../../services/agents/portfolio.agent.service.js')
+    setLimitsDeps({ views: async () => ({ A: ind('semis', { hype: true }), B: ind('semis') }) })
+    const own = await _sizePlan({ ideas: [{ asset: 'A', allocationRatio: 0.5, quantity: 10 }, { asset: 'B', allocationRatio: 0.5, quantity: 10 }] })
+    assert.deepEqual(own.ideas.map(i => [i.allocationRatio, i.quantity]), [[0.5, 10], [0.5, 10]], 'neither braked nor capped')
+    assert.match(own.limits.notes[0], /Your own share counts are kept/)
+    const single = await _sizePlan({ ideas: [{ asset: 'A', allocationRatio: 0.5 }, { asset: 'B', allocationRatio: 0.5 }] }, { mandate: { concentration: 'single_industry' } })
+    assert.equal(single.limits.cash, 0)
+    assert.equal(single.limits.single_industry, true)
+    assert.ok(Math.abs(single.ideas[0].allocationRatio - 1 / 3) < 1e-3, 'braked, not capped')
+    assert.match(single.limits.notes[0], /Industry cap off/)
+})
+
+test('a review update: Atlas cannot write the user\'s OK; adds in an AVOID industry are marked for the card', async () => {
+    const { _markAvoidAdds } = await import('../../services/agents/portfolio.agent.service.js')
+    const update = { changes: [
+        { action: 'add_item', item: { asset: 'XOM', allocationRatio: 0.05, avoid_ok: true } },
+        { action: 'add_item', item: { asset: 'MSFT', allocationRatio: 0.05 } },
+        { action: 'trim_item', itemId: 'i1' },
+    ] }
+    const out = await _markAvoidAdds(update, { avoid: async () => [{ asset: 'XOM', industry: 'Integrated Oil' }] })
+    assert.equal('avoid_ok' in out.changes[0].item, false, 'only the user\'s yes on the card may set it')
+    assert.deepEqual(out.changes[0].avoid, { industry: 'Integrated Oil' })
+    assert.equal(out.changes[1].avoid, undefined)
+    assert.deepEqual(await _markAvoidAdds({ changes: [] }), { changes: [] })
+})

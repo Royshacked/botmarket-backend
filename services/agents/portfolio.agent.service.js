@@ -20,7 +20,7 @@ import { SECTORS } from '../entity/vocabulary.js'
 import { buildTagCaptures } from '../llmStream.util.js'
 import { makeRouteCapture, ROUTE_TAGS, buildRouteRule } from '../routing.util.js'
 import { buildSchoolSection, normalizeAllocation, normalizeSelection } from '../investorSchools.js'
-import { applyIndustryLimits, industriesFor } from '../industryLimits.service.js'
+import { applyIndustryLimits, industriesFor, avoidNames, isSingleIndustry, INDUSTRY_CAP } from '../industryLimits.service.js'
 
 const __dirname    = dirname(fileURLToPath(import.meta.url))
 const LOG   = '[portfolioAgent]'
@@ -296,7 +296,8 @@ async function chatStream({ messages = [], ideaAccounts = [], mainAccountId = nu
         ['phase', 'portfolio_plan', 'portfolio_update', 'portfolio_mandate', 'portfolio_thesis', 'screen_request', 'coverage_refresh', 'coverage_request', ...ROUTE_TAGS],
     ).trim()
 
-    if (capturedPlan) capturedPlan = await _sizePlan(capturedPlan)
+    if (capturedPlan) capturedPlan = await _sizePlan(capturedPlan, { mandate: capturedMandate ?? mandate })
+    if (capturedUpdate) capturedUpdate = await _markAvoidAdds(capturedUpdate)
 
     logger.info(LOG, 'chatStream done', { replyLength: reply.length, hasPlan: !!capturedPlan, hasUpdate: !!capturedUpdate, hasMandate: !!capturedMandate, hasThesis: !!capturedThesis, screenRequests: screenRequests.length, coverageRefresh: !!coverageRefresh, coverageRequest: !!coverageRequest, phase: phase.get() })
     return { reply, plan: capturedPlan, update: capturedUpdate, mandate: capturedMandate, thesis: capturedThesis, phase: phase.get(), ...(screenRequests.length ? { screenRequests } : {}), ...(coverageRefresh ? { coverageRefresh } : {}), ...(coverageRequest ? { coverageRequest } : {}), ...route.result() }
@@ -366,6 +367,25 @@ function _cleanScreenRequest(obj) {
 }
 
 /**
+ * A review's update, ready for the user's Accept card (step 7): an `avoid_ok` the MODEL wrote is dropped — only the
+ * user's yes on the card may set it — and every `add_item` in an industry Pythia rates AVOID is marked with
+ * `avoid: { industry }`, so the card can ask. Exported for tests.
+ */
+export async function _markAvoidAdds(update, deps = { avoid: (symbols) => avoidNames(symbols) }) {
+    // An add's spec rides on `item` (the <portfolio_update> contract; portfolioRebalance._applyOne reads the same).
+    const changes = Array.isArray(update?.changes) ? update.changes : []
+    const adds = changes.filter(c => c?.action === 'add_item' && c.item?.asset)
+    for (const c of changes) if (c?.item && 'avoid_ok' in c.item) delete c.item.avoid_ok
+    if (!adds.length) return update
+    const flagged = new Map((await deps.avoid(adds.map(c => c.item.asset))).map(a => [a.asset, a.industry]))
+    for (const c of adds) {
+        const industry = flagged.get(String(c.item.asset).toUpperCase())
+        if (industry) c.avoid = { industry }
+    }
+    return update
+}
+
+/**
  * Deterministically finalize a captured plan's allocations and quantities so
  * the LLM never has to do the arithmetic:
  *  - allocationRatio across ideas is normalized to sum to exactly 1.0
@@ -375,7 +395,7 @@ function _cleanScreenRequest(obj) {
  *  - with no positionSize, any explicit per-asset quantity the user gave is
  *    preserved as-is
  */
-async function _sizePlan(plan) {
+export async function _sizePlan(plan, { mandate = null } = {}) {
     const ideas = Array.isArray(plan?.ideas) ? plan.ideas : []
     if (!ideas.length) return plan
 
@@ -390,9 +410,18 @@ async function _sizePlan(plan) {
 
     // The house's industry limits, in CODE (pythia-assessment.md §10, step 7): the hype brake, the one-third
     // sub-industry cap, and Avoid flagged for the user's OK. What they changed rides on the plan as `limits`.
-    const lim = applyIndustryLimits(ideas.map(i => ({ asset: i.asset, weight: i.allocationRatio })), await industriesFor(ideas.map(i => i.asset)))
-    ideas.forEach((idea, i) => { idea.allocationRatio = Number(lim.weights[i].toFixed(4)) })
-    plan.limits = { notes: lim.notes, avoid: lim.avoid, braked: lim.braked, capped: lim.capped, cash: Number(lim.cash.toFixed(4)) }
+    // A single-industry MANDATE lifts the cap (Roy, 2026-10-11). Share counts the USER gave (no position size) are
+    // theirs: the weights are left alone, and only the Avoid flag applies (code review 2026-10-11).
+    const single = isSingleIndustry(mandate)
+    const lim = applyIndustryLimits(ideas.map(i => ({ asset: i.asset, weight: i.allocationRatio })), await industriesFor(ideas.map(i => i.asset)),
+        { cap: single ? Infinity : INDUSTRY_CAP })
+    const ownSizes = !(Number(plan.positionSize) > 0) && ideas.some(i => Number(i.quantity) > 0)
+    if (!ownSizes) ideas.forEach((idea, i) => { idea.allocationRatio = Number(lim.weights[i].toFixed(4)) })
+    const notes = ownSizes ? lim.notes.filter(n => /AVOID/.test(n)) : [...lim.notes]
+    if (ownSizes && (lim.braked.length || lim.capped.length)) notes.unshift('Your own share counts are kept — the hype brake and the industry cap apply only to sizes the platform computes.')
+    if (single) notes.unshift('Industry cap off: the mandate is a single-industry book.')
+    plan.limits = { notes, avoid: lim.avoid, braked: ownSizes ? [] : lim.braked, capped: ownSizes ? [] : lim.capped,
+        cash: ownSizes ? 0 : Number(lim.cash.toFixed(4)), single_industry: single }
     const weights = ideas.map(i => i.allocationRatio)
 
     const positionSize = Number(plan.positionSize)

@@ -23,12 +23,21 @@ export const HYPE_FACTOR = 0.5
 const _pct = (v) => `${Math.round(v * 100)}%`
 
 /**
+ * A mandate that IS one industry (Roy, 2026-10-11: "let a single-industry mandate override the cap") — the user said
+ * so, and Atlas recorded it as `concentration: "single_industry"`. The cap is off for that book; the hype brake and
+ * the Avoid flag still apply. Pure.
+ */
+export function isSingleIndustry(mandate) {
+    return mandate?.concentration === 'single_industry'
+}
+
+/**
  * Apply the limits to weights. Pure. `items`: `[{ asset, weight }]` (weights > 0, any sum); `bySymbol`: the
  * viewsForSymbols shape (`{ SYM: { code, name, assessment: { verdict, hype } } }`). The output weights sum to the
  * input's total minus what had to stay in cash. → `{ weights: [number], cash, notes: [string], avoid: [{ asset,
  * industry }], braked: [asset], capped: [code] }`.
  */
-export function applyIndustryLimits(items, bySymbol = {}) {
+export function applyIndustryLimits(items, bySymbol = {}, { cap = INDUSTRY_CAP } = {}) {
     const total = items.reduce((s, i) => s + (i.weight > 0 ? i.weight : 0), 0)
     const notes = [], avoid = [], braked = []
     if (!(total > 0)) return { weights: items.map(() => 0), cash: 0, notes, avoid, braked, capped: [] }
@@ -50,8 +59,8 @@ export function applyIndustryLimits(items, bySymbol = {}) {
     //    repeat. Unclassified names take a share of the excess too but are never capped. What no one can take is cash.
     const key = (k) => info[k]?.code ?? null
     const capped = new Set()
-    const capAbs = INDUSTRY_CAP * total
-    for (let guard = 0; guard < items.length + 1; guard++) {
+    const capAbs = cap * total
+    for (let guard = 0; Number.isFinite(capAbs) && guard < items.length + 1; guard++) {
         const byCode = new Map()
         w.forEach((x, k) => { const c = key(k); if (c) byCode.set(c, (byCode.get(c) ?? 0) + x) })
         const over = [...byCode.entries()].filter(([c, s]) => s > capAbs + 1e-12 && !capped.has(c))

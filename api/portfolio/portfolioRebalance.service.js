@@ -38,7 +38,7 @@ import { orderSymbol }            from '../../services/exitOrders.util.js'
 import { deferIfClosed }          from '../../services/pendingAction/executionGate.js'
 import { isSelfExecuted }         from '../../services/venue.resolve.service.js'
 import { notifyRebalanceApplied } from '../../services/rebalanceNotify.service.js'
-import { industriesFor, INDUSTRY_CAP, HYPE_FACTOR } from '../../services/industryLimits.service.js'
+import { industriesFor, isSingleIndustry, INDUSTRY_CAP, HYPE_FACTOR } from '../../services/industryLimits.service.js'
 
 const LOG        = '[portfolio:rebalance]'
 const COLLECTION = ENTITIES
@@ -150,13 +150,15 @@ export async function applyRebalance(portfolioId, userId, update) {
     // size depend on change order and fill latency. Skipped entirely when nothing is being added.
     const adds = update.changes.some(c => c.action === 'add_item')
     const bookValue = adds ? await _bookValue(portfolioId, userId) : null
+    // A single-industry mandate lifts the house's industry cap for this book's adds (step 7, Roy 2026-10-11).
+    const singleIndustry = adds ? isSingleIndustry(await portfolioChatService.getMandate(portfolioId, userId).catch(() => null)) : false
 
     const results = []
     const manualExitLegs  = []   // manual close/trim legs → one exit Fill card
     const manualEntryLegs = []   // manual add (scale-in) + new-holding legs → one entry Fill card
     for (const change of update.changes) {
         try {
-            const r = await _applyOne(portfolioId, userId, change, bookValue)
+            const r = await _applyOne(portfolioId, userId, change, bookValue, { singleIndustry })
             if (r?.manualExitLeg)  manualExitLegs.push(r.manualExitLeg)
             if (r?.manualEntryLeg) manualEntryLegs.push(r.manualEntryLeg)
             // `asset` rides along for the receipt card, which has to NAME what moved. An add carries
@@ -242,7 +244,7 @@ export async function applyRebalance(portfolioId, userId, update) {
 // chat_messages, threads, portfolio_chats, pending_actions, entities, ideas and objectives found
 // ZERO carrying a legacy verb or field, and portfolio_system_prompt.md teaches only `_item` (14
 // uses, none of the old spelling). Nothing produces them and nothing stored holds one.
-async function _applyOne(portfolioId, userId, change, bookValue = null) {
+async function _applyOne(portfolioId, userId, change, bookValue = null, ctx = {}) {
     const db     = await getDb()
     const action = change.action
     const itemId = change.itemId
@@ -270,7 +272,7 @@ async function _applyOne(portfolioId, userId, change, bookValue = null) {
             return _trimItem(db, itemId, userId, change)
 
         case 'add_item':
-            return _addItem(db, portfolioId, userId, spec, bookValue)
+            return _addItem(db, portfolioId, userId, spec, bookValue, { singleIndustry: ctx.singleIndustry === true })
 
         case 'add_to_item':
             return _addToItem(db, itemId, userId, change)
@@ -458,6 +460,7 @@ export async function _addItem(db, portfolioId, userId, spec, bookValue = null, 
         updateItem = ideaService.updateIdea,
         quote      = getNumericQuote,
         industries = industriesFor,
+        singleIndustry = false,
     } = deps
 
     if (!spec?.asset) return { ok: false, reason: 'no_asset' }
@@ -477,7 +480,7 @@ export async function _addItem(db, portfolioId, userId, spec, bookValue = null, 
     if (siblings.some(s => _sameHolding(s, spec))) return { ok: false, reason: 'already_held_use_add_to_item' }
 
     // The house's industry limits (step 7, services/industryLimits.service.js) — the same three as construction.
-    const limits = await _industryLimitsForAdd(spec, siblings, bookValue, { quote, industries })
+    const limits = await _industryLimitsForAdd(spec, siblings, bookValue, { quote, industries, singleIndustry })
     if (!limits.ok) return limits
     const quantity = limits.quantity !== undefined ? limits.quantity : await _sizeNewItem(limits.spec, bookValue, quote)
 
@@ -611,7 +614,7 @@ const _GONE = new Set(TERMINAL)
  * size: braking it would override them, so it is only capped. → `{ ok:true, spec, quantity? }` — `quantity` set when
  * the cap had to cut it — or `{ ok:false, reason, detail }`. Exported for tests.
  */
-export async function _industryLimitsForAdd(spec, siblings, bookValue, { quote, industries }) {
+export async function _industryLimitsForAdd(spec, siblings, bookValue, { quote, industries, singleIndustry = false }) {
     const asset = String(spec.asset).toUpperCase()
     const held = siblings.filter(s => !_GONE.has(s.status))
     const views = await industries([asset, ...held.map(s => s.asset)])
@@ -623,7 +626,7 @@ export async function _industryLimitsForAdd(spec, siblings, bookValue, { quote, 
     const explicit = Number(spec.quantity) > 0
     const sized = !explicit && mine.assessment?.hype && Number(spec.allocationRatio) > 0
         ? { ...spec, allocationRatio: Number(spec.allocationRatio) * HYPE_FACTOR } : spec
-    if (!(bookValue > 0)) return { ok: true, spec: sized }
+    if (singleIndustry || !(bookValue > 0)) return { ok: true, spec: sized }
     const price = Number((await quote(asset).catch(() => null))?.price)
     if (!(price > 0)) return { ok: true, spec: sized }
     let already = 0

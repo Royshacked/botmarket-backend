@@ -271,8 +271,9 @@ screen had (`needsAgent`):
    them and asks whether the name is priced in); `industryLimits.service` in `_sizePlan` and a review's `add_item`
    (hype ×½, a third per sub-industry, Avoid needs the user's OK — asked before the write, checked by the batch
    route); `get_industry_views` (Atlas, Axl) carries the verdict and hype; a held industry newly Avoid or hype is
-   a review trigger. Note: a book wholly in one sub-industry is held to a third and the rest cash — the rule as
-   written.
+   a review trigger. A single-industry MANDATE (`concentration: "single_industry"`) lifts the cap (Roy, 2026-10-11);
+   the user's own share counts are not reweighted; the OK for an Avoid add in a review is the user's, on the
+   Accept card — the server drops one the model writes; "Update plan" saves before it deletes.
 8. **Money, the rest** (later, after the board runs on companies' money) — Form 4 insiders, 13F funds,
    USAspending government awards, as engine jobs writing aggregates only.
 
