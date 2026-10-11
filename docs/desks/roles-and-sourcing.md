@@ -75,6 +75,7 @@ which.
 
 **Known limits.** Pending sleeves live in process memory like the run itself: a restart loses the
 *card*, not the work (the rows stay queued; the next run researches them). The house scan
-(houseScan.service, fired on tilt publish) was deleted with the tilt on 2026-10-05 and is
-paused until the 5-year funnel in `docs/design/horizons.md` replaces it; when it returns, it should
-screen through `screenFiltersFor` rather than an inline call of its own.
+(houseScan.service, fired on tilt publish) was deleted with the tilt on 2026-10-05; it returned on
+2026-10-11 on Pythia's weekly verdicts (step 7 of `docs/design/pythia-assessment.md`, queue source
+`pythia`). It picks by size in code, not through a screen; if Argus takes the choosing over (open
+item 3), it should screen through `screenFiltersFor` rather than an inline call of its own.

@@ -428,7 +428,8 @@ services/
                           EMPTY fetch is stamped too — a down or uncovered symbol is asked once per hour,
                           not once per read. Was a JSON file per series under data/ (unsafe, machine-local)
   news.service.js         THE ONE NEWS PIPE: FMP for a ticker (Finnhub its fallback, 2026-10-11) and for a
-                          basket of tickers, Finnhub for the front page, GNews for words;
+                          basket of tickers, Finnhub for the front page, GNews for words (one story
+                          carried by two providers is kept once: newsArticle.service storyKey);
                           one in-process shelf per (category, subject), 1h (15m for headlines), fetched
                           incrementally and merged; a provider failure serves the warm shelf STALE and
                           does not re-stamp it. The shelf was a file under data/news until 2026-09-16
@@ -652,7 +653,8 @@ services/
                             Prometheus applies the real bar) → drop covered → research_queue rows
                             (source 'argus', context.sleeve) → researchRun.startRun AS THE HOUSE
                             (userId null: no budget degrade — and no spend booked to anyone, a known gap) → onRunSettled → an Atlas
-                            card `sleeve_sourced` to the requester. Pending sleeves are in-process
+                            card `sleeve_sourced` to the requester; the run researches the sleeve's own
+                            names only (startRun({symbols})). Pending sleeves are in-process
                             memory, like the run. See docs/desks/roles-and-sourcing.md
   aetherScheduler.service.js  The Node side of the Python aether-engine: spawns scripts/scheduler.py as a
                             child process when AETHER_ENGINE_PATH points at a checkout with a built venv
@@ -747,10 +749,16 @@ services/
   houseScan.service.js      The HOUSE SCAN on Pythia's verdicts (step 7): after a completed week, every FOR SWING /
                             FOR LONG TERM industry (and approved theme — supplier links first) queues its largest
                             uncovered names for Prometheus (HOUSE_SCAN_PER_INDUSTRY 3, HOUSE_SCAN_WEEKLY_MAX 30),
-                            the verdict's thesis and risks on the row (researchRun.researchOpening reads them)
+                            the verdict's thesis and risks on the row (researchRun.researchOpening reads them).
+                            Queue source 'pythia'; a name rejected in the last 8 weeks is not queued again;
+                            a rerun stays inside the week's ceiling (alreadyQueued)
   industryLimits.service.js The house's industry LIMITS on a book (step 7), one mechanism for construction (_sizePlan)
-                            and a review's add_item: hype ×½, no sub-industry above a third (water-filled, the rest
-                            cash), AVOID flagged → saved only with the user's OK (avoidNames, the batch route's 409)
+                            and every add: hype ×½, no sub-industry above a third (water-filled, the rest
+                            cash), AVOID flagged → saved only with the user's OK, which NAMES the symbols
+                            (avoidOkCovers; the batch route's and createTradeIdea's 409). capFor: a
+                            single_industry mandate lifts the cap only for a book 80%+ in one sub-industry.
+                            limitAddByRatio = an edit-mode add; a review's add_item / add_to_item go through
+                            portfolioRebalance._industryLimitsForAdd / _industryLimitsForScaleIn
   pythiaWeekly.service.js   Pythia's WEEK (step 6): on a new complete price run, changeScan → assess every
                             flagged subject, biggest change first, until PYTHIA_WEEKLY_MAX_USD ($3) →
                             `pythia_weekly` (one doc per run date: flagged, results, waiting, held_back, cost,

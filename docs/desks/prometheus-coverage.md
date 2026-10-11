@@ -306,4 +306,5 @@ copied. That frozen PT is what Themis compares the *revised* one against.
   ([design/architecture-vision.md](../design/architecture-vision.md)); how the house view
   steers which names get researched is now the 5-year funnel in
   [design/horizons.md](../design/horizons.md) — not built; the tilt-driven house scan that fed the
-  queue was deleted with the tilt on 2026-10-05.
+  queue was deleted with the tilt on 2026-10-05, and a new one on Pythia's weekly verdicts feeds it
+  since 2026-10-11 (queue source `pythia`, the verdict's thesis and risks in the opening).

@@ -253,7 +253,7 @@ fields the receiver's UI needs.
   is modular.
 - **No monitor, because a scan is a question about a period.** It ages out; the thing that needs
   watching is the trade built from it, and that has Talos.
-- **The house scan had no agent, on purpose** (paused since 2026-10-05). Screening on a published
+- **The house scan has no agent, on purpose** (paused 2026-10-05, back on Pythia's verdicts 2026-10-11). Screening on a published
   stance is arithmetic on a whitelist; the judgment (does this name clear the school's real bar?) is
   Prometheus's, four minutes a name, and the queue row carries the reason so he can apply it.
 

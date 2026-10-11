@@ -172,7 +172,8 @@ Decided by Roy on 2026-10-05:
 1. **The old Pythia code is DELETED, not archived.** Git history keeps it.
 2. **The 710 split-industry companies** are classified once by an LLM pass from their business
    descriptions, with Roy reviewing the result.
-3. **The Argus house scan is PAUSED** until the 5-year funnel is built.
+3. **The Argus house scan is PAUSED** until the 5-year funnel is built. *(Superseded 2026-10-11: it
+   returned on the weekly assessment verdicts — step 7 of [pythia-assessment.md](./pythia-assessment.md).)*
 4. **Cost of capital** for question 2 comes from Aswath Damodaran's (NYU Stern) annual cost of
    capital by industry. It is published every January and refreshed once a year, mapped onto GICS.
    Confirm the dataset is still downloadable before building.

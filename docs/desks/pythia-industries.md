@@ -169,8 +169,10 @@ Two loops, because they cost different things:
   changing raises the `industry_view` trigger (`portfolioReview.util.industryChanges`). Gated on
   holdings, unlike the ungated `sector_view` it replaced: 163 industries reviewed through the year would
   otherwise ring on most reviews.
-- **Not Argus.** The house scan was driven by overweight tilt rows; it is paused until the 5-year funnel
-  (`horizons.md` §2C) replaces it.
+- **Argus, by code.** The house scan was driven by overweight tilt rows and paused with the tilt; since
+  2026-10-11 it runs on her verdicts (step 7): after each completed week, the largest uncovered names of every
+  FOR SWING / FOR LONG TERM industry go to Prometheus's queue (source `pythia`). Argus choosing the names
+  instead of size is open item 3 of [pythia-assessment.md](../design/pythia-assessment.md).
 
 ## Open
 
