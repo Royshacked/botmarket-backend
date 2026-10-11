@@ -257,6 +257,14 @@ const _sym = s => String(s ?? '').toUpperCase().trim()
 export function researchOpening(item) {
     const c = item?.context
     const symbol = _sym(item?.symbol)
+    // From the HOUSE SCAN (step 7): Pythia's verdict on the industry or theme sent it — the thesis and risks travel,
+    // and "priced in" is Prometheus's question, name by name (pythia-assessment.md §10).
+    if (c?.pythia) {
+        const book  = { swing: 'FOR SWING', long_term: 'FOR LONG TERM' }[c.verdict] ?? String(c.verdict ?? '').toUpperCase()
+        const where = c.kind === 'theme' ? `the theme ${c.subject}${c.link ? ` (via ${c.link})` : ''}` : `its industry, ${c.subject}`
+        const risks = c.risks?.length ? ` Risks it named: ${c.risks.join('; ')}.` : ''
+        return `Research ${symbol} for coverage — Pythia rates ${where} ${book}${c.horizon ? ` (${c.horizon})` : ''}: ${c.thesis ?? ''}${risks} Judge whether ${symbol} is already priced for it.`
+    }
     if (!c?.sector) return `Research ${symbol} for coverage.`
     // A SLEEVE candidate (sleeveSource): the mandate that surfaced it is a user's book, not the house
     // view, so the sentence names the sleeve and the selection school Prometheus has to judge it by.
@@ -265,10 +273,7 @@ export function researchOpening(item) {
         const note   = c.note ? ` (${c.note})` : ''
         return `Research ${symbol} for coverage — a candidate for the ${c.sector} sleeve of a portfolio build${school}${note}.`
     }
-    const bp     = Number.isFinite(Number(c.active_bp)) ? ` +${c.active_bp}bp` : ''
-    const regime = c.regime ? ` on a “${c.regime}” regime` : ''
-    const basis  = c.basis ? ` (basis: ${String(c.basis).replace(/_/g, ' ')})` : ''
-    return `Research ${symbol} for coverage — the house is overweight ${c.sector}${bp}${regime}${basis}.`
+    return `Research ${symbol} for coverage.`
 }
 
 // Default IO — the agent and the coverage book, imported lazily so the unit tests (which inject

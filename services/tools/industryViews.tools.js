@@ -17,18 +17,27 @@ const LOG = '[industryViews]'
 const MAX_SYMBOLS = 60
 
 export const INDUSTRY_VIEWS_TOOL_SPEC = {
-    get_industry_views: `The house's INDUSTRY VIEWS from Pythia: for each GICS sub-industry, three structural answers — DEMAND (growing / in_line / shrinking against the economy), ECONOMICS (good / average / poor: do its companies earn above their cost of capital), CYCLE (peak / mid / trough, or stable: where current margins sit in the industry's own 10-year range). Pass \`symbols\` to get the industry each name is in and the house's answer for it; or \`sector\` (a GICS sector, e.g. Information Technology) for every sub-industry in it. These are DESCRIPTIONS of an industry, never a forecast of a price or a return — report them as such, and never present one as a reason a stock will rise. An industry still \`pending\` has no house answer yet: say so, do not supply one. Changing an answer is Pythia's desk, not this tool.`,
+    get_industry_views: `The house's INDUSTRY VIEWS from Pythia: for each GICS sub-industry, three structural answers — DEMAND (growing / in_line / shrinking against the economy), ECONOMICS (good / average / poor: do its companies earn above their cost of capital), CYCLE (peak / mid / trough, or stable: where current margins sit in the industry's own 10-year range). Pass \`symbols\` to get the industry each name is in and the house's answer for it; or \`sector\` (a GICS sector, e.g. Information Technology) for every sub-industry in it. These are DESCRIPTIONS of an industry, never a forecast of a price or a return — report them as such, and never present one as a reason a stock will rise. An industry still \`pending\` has no house answer yet: say so, do not supply one. Each name's line also carries Pythia's standing VERDICT on its industry where there is one — for swing / for long term (the house finds it worth that book's attention now), watch (a live question, with the date that decides it), avoid (the house expects it to go wrong), no case — and HYPE when its basket has run up 100%+ in two years and 100%+ over the market (a crash-risk flag, not a timing signal). A judgment from evidence, never a price forecast; the user's mandate outranks it. Changing an answer is Pythia's desk, not this tool.`,
 }
 
 const _grades = (v) => (v.status === 'answered'
     ? `demand ${v.demand} · economics ${v.economics} · cycle ${v.cycle}`
     : 'no house answer yet (pending)')
 
+const VERDICT_WORDS = { swing: 'FOR SWING', long_term: 'FOR LONG TERM', watch: 'WATCH', avoid: 'AVOID', no_case: 'no case' }
+
+/** Pythia's verdict on the industry, as a line suffix ('' without one). Pure — exported for testing. */
+export function verdictLine(a) {
+    if (!a?.verdict) return ''
+    const watch = a.verdict === 'watch' && a.decides_by ? ` — decides by ${a.decides_by}${a.question ? `: ${a.question}` : ''}` : ''
+    return `\n         Pythia's verdict: ${VERDICT_WORDS[a.verdict] ?? a.verdict}${a.hype ? ' · HYPE' : ''}${watch}`
+}
+
 /** Per-symbol answers → LLM-ready text. Pure — exported for testing. */
 export function formatSymbolViews(bySymbol, asked) {
     const lines = (asked ?? []).map(s => {
         const v = bySymbol[s]
-        return v ? `  ${s.padEnd(6)} ${v.name} [${v.sector}] — ${_grades(v)}${v.summary ? `\n         ${v.summary}` : ''}`
+        return v ? `  ${s.padEnd(6)} ${v.name} [${v.sector}] — ${_grades(v)}${verdictLine(v.assessment)}${v.summary ? `\n         ${v.summary}` : ''}`
                  : `  ${s.padEnd(6)} not classified (outside the measured universe)`
     })
     return ['HOUSE INDUSTRY VIEWS for the names asked:', ...lines, '',

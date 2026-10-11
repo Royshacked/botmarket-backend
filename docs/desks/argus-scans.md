@@ -147,12 +147,13 @@ the read's `net` where it has one and Aether's `side` where it does not. Three r
 refused — which is why the module aims at eight to twelve. The user can leave without waiting ("Save
 without the read"), and a read that lands after they did is discarded rather than applied.
 
-A fourth shape had **no agent at all**: the **house scan** (houseScan.service, since deleted), fired
-after Pythia published a tilt — for each overweight sector it ran the FMP screener and enqueued the
-hits for Prometheus. **It is PAUSED: deleted with the tilt on 2026-10-05.** Pythia now publishes
-industry views (demand / economics / cycle per GICS sub-industry), which are descriptions, not
-overweights, so the scan has no input. It returns as the code-computed ranking of the 5-year funnel
-in [design/horizons.md](../design/horizons.md). The sleeve hop Atlas uses
+A fourth shape has **no agent at all**: the **house scan** (`services/houseScan.service.js`). The first
+one ran on Pythia's tilt and was deleted with it on 2026-10-05; **it is back since 2026-10-11 (step 7 of
+pythia-assessment.md) on Pythia's VERDICTS**: after each weekly run, every industry rated FOR SWING / FOR
+LONG TERM — and every approved theme so rated, its supplier links first — sends its largest names we do not
+cover to Prometheus's research queue, `HOUSE_SCAN_PER_INDUSTRY` (3) each, at most `HOUSE_SCAN_WEEKLY_MAX` (30)
+a week, the verdict's thesis and risks on the row. Code picks the names for now; Argus choosing them is an open
+decision (Roy, after seeing the code's picks). The sleeve hop Atlas uses
 (`sleeveSource.service`) is the same screen with the school as its coarse filter
 ([atlas-themis.md](atlas-themis.md)).
 
@@ -233,7 +234,7 @@ blend, the order silently changing while the user watches, for a school they nev
 |---|---|---|
 | **Mentor** | out | the single pick — `<kairos_pick>` → `{ ticker, direction, thesis, analysis, recommended_mode }` seeds Mentor's first turn (`scanSeed.util`); or a clicked candidate on a saved trading list |
 | **Prometheus** | out | an investing list's top N by the app's button, one name by click — the research queue, house-owned; or by asking ("send NVDA to Prometheus") through the shared `<route>` hand-off |
-| **Pythia** | none today | the house scan that ran on her tilt publish is paused (deleted with the tilt, 2026-10-05) until the 5-year funnel |
+| **Pythia** | in (house) | the house scan: her weekly FOR SWING / FOR LONG TERM verdicts → the research queue, by code (step 7, 2026-10-11) |
 | **Atlas** | in | the sleeve hop — the same screener under the school; never Argus's chat |
 | **Axl** | in / out | the user is routed here with a name; Argus can route the user on by their ask |
 
@@ -258,9 +259,8 @@ fields the receiver's UI needs.
 
 ## Open
 
-- **The house scan's replacement** — the 5-year funnel's code ranking
-  ([design/horizons.md](../design/horizons.md)); until it lands nothing feeds Prometheus from the
-  house side except Argus's user lists and Atlas's sleeve hop.
+- **Argus choosing the house scan's names** instead of code (pythia-assessment.md open item 3) — Roy
+  decides after seeing the code's picks.
 - **Scans are the one artifact that never learns.** A stale list is kept for the user, but nothing
   scores whether its candidates went the way the thesis said. *(Inferred gap — the coverage grades; the scan does
   not.)*

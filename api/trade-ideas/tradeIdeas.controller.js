@@ -3,6 +3,7 @@ import { confirmManualEntry, confirmManualExit, confirmManualAdd, activateManual
 import { sendReason } from '../_shared/reason.util.js'
 import { makeEntityController } from '../_shared/entityController.util.js'
 import { makeHandle } from '../_shared/handle.util.js'
+import { avoidNames } from '../../services/industryLimits.service.js'
 
 const LOG     = '[tradeIdeas:controller]'
 const _handle = makeHandle(LOG)
@@ -106,8 +107,15 @@ export const createTradeIdea = _handle('createTradeIdea', async (req, res) => {
 })
 
 export const createBatchIdeas = _handle('createBatchIdeas', async (req, res) => {
-    const { plan, accounts = [], mainAccountId = null, portfolioId = null } = req.body ?? {}
+    const { plan, accounts = [], mainAccountId = null, portfolioId = null, avoid_ok = false } = req.body ?? {}
     if (!plan?.ideas?.length) return res.status(400).send({ error: 'Missing plan.ideas' })
+
+    // A book holding a name in an industry Pythia rates AVOID is saved only with the user's explicit OK (step 7,
+    // Roy 2026-10-11). Checked HERE from the symbols — not from the plan's own `limits`, which the client carries.
+    const avoid = await avoidNames(plan.ideas.map(i => i.asset))
+    if (avoid.length && avoid_ok !== true) {
+        return res.status(409).send({ error: 'avoid_needs_ok', outcome: 'avoid_needs_ok', avoid })
+    }
 
     // Construction stays LENIENT about a failed leg (`result.failed`): the book is a proposal the
     // user is about to review, where a missing line is visible and fixable. Adoption reads the

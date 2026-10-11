@@ -265,6 +265,14 @@ screen had (`needsAgent`):
    runs in Node, not the engine (§9): its inputs are aggregates the engine already wrote, so it needs no new
    job. Dry run on 2026-10-11: 164 flagged, all never assessed (approved themes first); not yet run for money.
 7. **Hand-offs** — Argus on assessments; Atlas caps and hype brake.
+   **BUILT 2026-10-11** (Roy's choices: code picks names, 3 per industry, 30 a week; limits clamped in code with
+   Avoid flagged; the cap per SUB-INDUSTRY): `houseScan.service` after each completed week (FOR SWING / FOR LONG
+   TERM → research_queue, theme supplier links first, thesis and risks on the row — Prometheus's opening names
+   them and asks whether the name is priced in); `industryLimits.service` in `_sizePlan` and a review's `add_item`
+   (hype ×½, a third per sub-industry, Avoid needs the user's OK — asked before the write, checked by the batch
+   route); `get_industry_views` (Atlas, Axl) carries the verdict and hype; a held industry newly Avoid or hype is
+   a review trigger. Note: a book wholly in one sub-industry is held to a third and the rest cash — the rule as
+   written.
 8. **Money, the rest** (later, after the board runs on companies' money) — Form 4 insiders, 13F funds,
    USAspending government awards, as engine jobs writing aggregates only.
 
@@ -277,6 +285,9 @@ own money (capex, buybacks, dividends, deals — §4.3) stays, beside funds, ins
 **Open:**
 1. ~~The weekly assessment cap~~ — DECIDED (Roy, 2026-10-11): every flagged subject, stopping at $3 a week
    (`PYTHIA_WEEKLY_MAX_USD`); `PYTHIA_WEEKLY_CAP` stays as an optional count cap, unset.
+3. **Argus choosing the house scan's names** — LEFT FOR LATER (Roy, 2026-10-11). Step 7 starts with code picking
+   each For swing / For long term industry's largest uncovered names (free, repeatable); an Argus run per industry
+   (judgment, a paid run each) is the alternative. Roy decides once he has seen the code's picks.
 2. **A light assessment list** — LEFT FOR LATER (Roy, 2026-10-11). `GET /assessments` sends every assessment whole
    (165 of them ≈ 790 KB; ~9 s from Atlas to the laptop, the server answers in 0 ms — transfer, and compression does
    not help). The fix: the list carries only what a closed row shows (name, verdict, chips, horizon or decides-by,

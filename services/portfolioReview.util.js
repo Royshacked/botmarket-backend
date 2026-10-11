@@ -136,6 +136,15 @@ export function computeReviewTriggers({ state = null, fingerprint = null, delta 
         triggers.push({ kind: 'industry_view', severity: 'medium', label: `house industry view changed — ${named}${more}` })
     }
 
+    // Pythia's VERDICT on a held industry turned against it (step 7, pythia-assessment.md §10): newly AVOID (the
+    // house expects it to go wrong), or its basket newly flagged HYPE (a crash-risk flag — the sizing brake).
+    for (const t of verdictTurns(fingerprint?.industries, industries)) {
+        const label = t.kind === 'avoid'
+            ? `Pythia now rates ${t.name} AVOID (${t.symbols.join(', ')})`
+            : `${t.name} now carries the hype flag (${t.symbols.join(', ')}) — up 100%+ in two years and 100%+ over the market`
+        triggers.push({ kind: 'industry_verdict', severity: t.kind === 'avoid' ? 'high' : 'medium', label })
+    }
+
     // Worst drift beyond the band.
     const worstDrift = ideas
         .filter(s => s.actualWeight != null && s.drift != null)
@@ -263,13 +272,40 @@ export function buildFingerprint({ reason, state = null, macroRaw = null, benchm
         // Pythia's and is read live.
         industries: industries && Object.keys(industries).length
             ? Object.fromEntries(Object.entries(industries).map(([sym, v]) =>
-                [sym, { code: v.code, name: v.name, demand: v.demand ?? null, economics: v.economics ?? null, cycle: v.cycle ?? null }]))
+                [sym, { code: v.code, name: v.name, demand: v.demand ?? null, economics: v.economics ?? null, cycle: v.cycle ?? null,
+                        verdict: v.assessment?.verdict ?? null, hype: v.assessment?.hype === true }]))
             : null,
         holdings,
     }
 }
 
 const _QUESTIONS = ['demand', 'economics', 'cycle']
+
+/**
+ * Held industries whose Pythia verdict turned against the book between two snapshots → `[{ kind: 'avoid'|'hype',
+ * code, name, symbols }]`. Pure. `after` is the viewsForSymbols shape (verdict under `assessment`); `before` a
+ * fingerprint (flat `verdict`, `hype`). A fingerprint from before step 7 has neither: a first reading counts, as a
+ * first grade does in industryChanges.
+ */
+export function verdictTurns(before, after) {
+    if (!before || !after) return []
+    const out = new Map()
+    for (const [sym, now] of Object.entries(after)) {
+        const then = before[sym]
+        if (!then || then.code !== now.code) continue
+        const v = now.assessment?.verdict ?? null, h = now.assessment?.hype === true
+        const kinds = []
+        if (v === 'avoid' && then.verdict !== 'avoid') kinds.push('avoid')
+        if (h && then.hype !== true) kinds.push('hype')
+        for (const kind of kinds) {
+            const k = `${kind}|${now.code}`
+            const cur = out.get(k) ?? { kind, code: now.code, name: now.name, symbols: [] }
+            cur.symbols.push(sym)
+            out.set(k, cur)
+        }
+    }
+    return [...out.values()]
+}
 
 /**
  * Which held industries' house answers moved between two snapshots → `[{ code, name, symbols, changes }]`.

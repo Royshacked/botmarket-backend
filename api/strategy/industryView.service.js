@@ -18,6 +18,7 @@ import { newRevision, diffFields } from '../../services/revisionTrail.js'
 import { addMonths } from '../../services/forecastClock.js'
 import { logger } from '../../services/logger.service.js'
 import { readCompaniesBySymbol } from './industryData.service.js'
+import { industryAssessmentService } from './industryAssessment.service.js'
 
 const LOG = '[industryView]'
 export const COLLECTION = 'industry_view'
@@ -224,17 +225,23 @@ function recordMonitorState(id, opts) { return _repo.recordMonitorState(id, opts
 
 /**
  * The house answer for the industry each symbol is in → `{ SYMBOL: { code, name, sector, status,
- * demand, economics, cycle, summary } }`, grades null while the industry is unanswered. A symbol the
+ * demand, economics, cycle, summary, assessment } }`, grades null while the industry is unanswered. A symbol the
  * engine never classified is absent. The one join every reader of "what does the house think of the
- * industry this name is in" goes through — Atlas's review, its snapshot, and the read tool.
+ * industry this name is in" goes through — Atlas's review, its snapshot, its limits, and the read tool.
+ * `assessment` (step 7, pythia-assessment.md §10) is Pythia's standing VERDICT on the sub-industry — `{ verdict,
+ * horizon, hype, decides_by, question, thesis, expires_at, assessed_at }` — or null where none is published.
  */
-async function viewsForSymbols(symbols, deps = { companies: readCompaniesBySymbol }) {
+async function viewsForSymbols(symbols, deps = { companies: readCompaniesBySymbol, verdicts: (codes) => industryAssessmentService.verdictsForCodes(codes) }) {
     const companies = await deps.companies(symbols)
     const codes = [...new Set(Object.values(companies).map(c => c.sub_code).filter(Boolean))]
     if (!codes.length) return {}
     const db = await _io.db()
-    const views = new Map((await db.collection(COLLECTION).find({ code: { $in: codes } },
-        { projection: { _id: 0, revisions: 0, monitor: 0 } }).toArray()).map(v => [v.code, v]))
+    const [viewRows, verdicts] = await Promise.all([
+        db.collection(COLLECTION).find({ code: { $in: codes } }, { projection: { _id: 0, revisions: 0, monitor: 0 } }).toArray(),
+        // A failed verdict read leaves the views standing: the verdict is an addition, not the join's purpose.
+        (deps.verdicts ? deps.verdicts(codes) : Promise.resolve(new Map())).catch(() => new Map()),
+    ])
+    const views = new Map(viewRows.map(v => [v.code, v]))
     const out = {}
     for (const [sym, c] of Object.entries(companies)) {
         const v = views.get(c.sub_code)
@@ -242,6 +249,7 @@ async function viewsForSymbols(symbols, deps = { companies: readCompaniesBySymbo
             code: c.sub_code, name: c.sub_industry, sector: c.sector, status: v?.status ?? 'pending',
             demand: v?.demand?.grade ?? null, economics: v?.economics?.grade ?? null, cycle: v?.cycle?.grade ?? null,
             summary: v?.summary ?? null,
+            assessment: verdicts.get(c.sub_code) ?? null,
         }
     }
     return out

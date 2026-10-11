@@ -88,7 +88,7 @@ test('the week picks the biggest change first, the backlog by size, and queues t
 
 // ── the run ──────────────────────────────────────────────────────────────────
 
-let mem, calls
+let mem, calls, houseCalls = []
 const ROWS = [
     { code: '11111111', name: 'Semis', raw: { ret_12m: 0.9, spy_12m: 0.17, ret_24m: 1.9, spy_24m: 0.4, rel_1m: 0.15, ext_percentile: 0.6, hype: true }, asof: '2026-10-09' },
     { code: '22222222', name: 'Steel', raw: { ret_12m: 0.1, spy_12m: 0.17, rel_1m: 0.0, ext_percentile: 0.5, hype: false }, asof: '2026-10-09' },
@@ -107,12 +107,13 @@ function deps(over = {}) {
         assessTheme: async (id, opts) => { calls.push({ id, opts }); return { ok: true, outcome: 'published', doc: { verdict: 'swing' }, cost_usd: 0.006 } },
         bookTo: async () => 'admin1',
         cap: () => 30, maxUsd: () => 1,
+        houseScan: async (results) => { houseCalls.push(results); return { queued: [], considered: 0, skipped_full: 0 } },
         db: async () => mem.db,
         now: () => AT,
         ...over,
     }
 }
-beforeEach(() => { mem = memDb(); calls = []; _resetActive() })
+beforeEach(() => { mem = memDb(); calls = []; houseCalls = []; _resetActive() })
 
 test('a week: the scan flags what moved, the flagged are assessed biggest first, the week is written', async () => {
     const r = await runWeekly({ deps: deps() })

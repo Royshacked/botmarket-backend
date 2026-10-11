@@ -20,6 +20,7 @@ import { SECTORS } from '../entity/vocabulary.js'
 import { buildTagCaptures } from '../llmStream.util.js'
 import { makeRouteCapture, ROUTE_TAGS, buildRouteRule } from '../routing.util.js'
 import { buildSchoolSection, normalizeAllocation, normalizeSelection } from '../investorSchools.js'
+import { applyIndustryLimits, industriesFor } from '../industryLimits.service.js'
 
 const __dirname    = dirname(fileURLToPath(import.meta.url))
 const LOG   = '[portfolioAgent]'
@@ -387,6 +388,13 @@ async function _sizePlan(plan) {
         idea.conviction = cleanConviction(idea.conviction)
     })
 
+    // The house's industry limits, in CODE (pythia-assessment.md §10, step 7): the hype brake, the one-third
+    // sub-industry cap, and Avoid flagged for the user's OK. What they changed rides on the plan as `limits`.
+    const lim = applyIndustryLimits(ideas.map(i => ({ asset: i.asset, weight: i.allocationRatio })), await industriesFor(ideas.map(i => i.asset)))
+    ideas.forEach((idea, i) => { idea.allocationRatio = Number(lim.weights[i].toFixed(4)) })
+    plan.limits = { notes: lim.notes, avoid: lim.avoid, braked: lim.braked, capped: lim.capped, cash: Number(lim.cash.toFixed(4)) }
+    const weights = ideas.map(i => i.allocationRatio)
+
     const positionSize = Number(plan.positionSize)
     if (!Number.isFinite(positionSize) || positionSize <= 0) {
         logger.info(LOG, 'sizePlan: no positionSize, quantities left as provided')
@@ -424,7 +432,7 @@ async function _sizePlan(plan) {
                 const ri  = symIdx[assets[i].toUpperCase()] ?? -1
                 const rj  = symIdx[assets[j].toUpperCase()] ?? -1
                 const rho = (ri >= 0 && rj >= 0) ? corrData.matrix[ri][rj] : (i === j ? 1 : 0)
-                portfolioVar += norm[i] * norm[j] * vols[i] * vols[j] * rho
+                portfolioVar += weights[i] * weights[j] * vols[i] * vols[j] * rho
             }
         }
         plan.portfolioVol = Number(Math.sqrt(portfolioVar).toFixed(4))  // annualized, e.g. 0.18 = 18%

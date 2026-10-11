@@ -105,8 +105,8 @@ test('a run already going is not a failure — the sleeve waits for it', async (
 test('the queue opening names the sleeve and the school, not the house view', () => {
     const item = { symbol: 'AAA', context: { sector: 'Technology', school: 'quality-value', note: '3-year hold', sleeve: { id: 'slv_1' } } }
     assert.equal(researchOpening(item), 'Research AAA for coverage — a candidate for the Technology sleeve of a portfolio build under a quality-value selection (3-year hold).')
-    // the house scan's row still reads as it always did
-    assert.match(researchOpening({ symbol: 'XOM', context: { sector: 'Energy', active_bp: 150 } }), /the house is overweight Energy \+150bp/)
+    // the deleted tilt house scan's rows read as a plain coverage request now
+    assert.equal(researchOpening({ symbol: 'XOM', context: { sector: 'Energy', active_bp: 150 } }), 'Research XOM for coverage.')
 })
 
 // ── the run settles ───────────────────────────────────────────────────────────

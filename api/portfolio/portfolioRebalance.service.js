@@ -24,7 +24,7 @@
  */
 
 import { getDb }                    from '../../providers/mongodb.provider.js'
-import { PAST_ENTRY, LIVE_POSITION } from '../../services/entity/vocabulary.js'
+import { PAST_ENTRY, LIVE_POSITION, TERMINAL } from '../../services/entity/vocabulary.js'
 import { logger }                   from '../../services/logger.service.js'
 import { ideaService }              from '../trade-ideas/tradeIdeas.service.js'
 import { brokerService }            from '../broker/broker.service.js'
@@ -38,6 +38,7 @@ import { orderSymbol }            from '../../services/exitOrders.util.js'
 import { deferIfClosed }          from '../../services/pendingAction/executionGate.js'
 import { isSelfExecuted }         from '../../services/venue.resolve.service.js'
 import { notifyRebalanceApplied } from '../../services/rebalanceNotify.service.js'
+import { industriesFor, INDUSTRY_CAP, HYPE_FACTOR } from '../../services/industryLimits.service.js'
 
 const LOG        = '[portfolio:rebalance]'
 const COLLECTION = ENTITIES
@@ -456,6 +457,7 @@ export async function _addItem(db, portfolioId, userId, spec, bookValue = null, 
         saveItem   = ideaService.saveIdea,
         updateItem = ideaService.updateIdea,
         quote      = getNumericQuote,
+        industries = industriesFor,
     } = deps
 
     if (!spec?.asset) return { ok: false, reason: 'no_asset' }
@@ -464,7 +466,7 @@ export async function _addItem(db, portfolioId, userId, spec, bookValue = null, 
     // doc: `broker` is what tells us this is a manual book, and one arbitrary sibling could be the
     // wrong partition of a forked (multi-broker) book.
     const siblings = await listPortfolioItems(portfolioId, userId, {
-        db, projection: { asset: 1, direction: 1, status: 1, portfolioName: 1, accounts: 1, mainAccountId: 1, broker: 1 },
+        db, projection: { asset: 1, direction: 1, status: 1, portfolioName: 1, accounts: 1, mainAccountId: 1, broker: 1, quantity: 1 },
     })
     const base     = siblings[0] ?? null
     const isManual = siblings.some(s => isSelfExecuted(s.broker))
@@ -474,7 +476,10 @@ export async function _addItem(db, portfolioId, userId, spec, bookValue = null, 
     // Matched on direction too, so a deliberate opposite-side leg isn't blocked.
     if (siblings.some(s => _sameHolding(s, spec))) return { ok: false, reason: 'already_held_use_add_to_item' }
 
-    const quantity = await _sizeNewItem(spec, bookValue, quote)
+    // The house's industry limits (step 7, services/industryLimits.service.js) — the same three as construction.
+    const limits = await _industryLimitsForAdd(spec, siblings, bookValue, { quote, industries })
+    if (!limits.ok) return limits
+    const quantity = limits.quantity !== undefined ? limits.quantity : await _sizeNewItem(limits.spec, bookValue, quote)
 
     const res = await saveItem({
         ...spec,
@@ -594,6 +599,44 @@ async function _bookValue(portfolioId, userId) {
         logger.warn(LOG, 'book value unavailable — new holdings will be unsized', err.message)
         return null
     }
+}
+
+/** A sibling in a terminal status holds nothing — it does not count toward its industry's share. */
+const _GONE = new Set(TERMINAL)
+
+/**
+ * The house's limits on ONE added name (pythia-assessment.md §10): AVOID refused unless the update carries the user's
+ * OK (`avoid_ok: true` — Atlas sets it only after the user said yes); HYPE halves its weight; and the one-third
+ * sub-industry CAP counts what the book already holds there at live prices. An explicit quantity is the user's own
+ * size: braking it would override them, so it is only capped. → `{ ok:true, spec, quantity? }` — `quantity` set when
+ * the cap had to cut it — or `{ ok:false, reason, detail }`. Exported for tests.
+ */
+export async function _industryLimitsForAdd(spec, siblings, bookValue, { quote, industries }) {
+    const asset = String(spec.asset).toUpperCase()
+    const held = siblings.filter(s => !_GONE.has(s.status))
+    const views = await industries([asset, ...held.map(s => s.asset)])
+    const mine = views[asset]
+    if (!mine?.code) return { ok: true, spec }
+    if (mine.assessment?.verdict === 'avoid' && spec.avoid_ok !== true) {
+        return { ok: false, reason: 'avoid_industry', detail: `Pythia rates ${mine.name ?? mine.code} AVOID — add ${asset} only with the user's explicit OK (avoid_ok)` }
+    }
+    const explicit = Number(spec.quantity) > 0
+    const sized = !explicit && mine.assessment?.hype && Number(spec.allocationRatio) > 0
+        ? { ...spec, allocationRatio: Number(spec.allocationRatio) * HYPE_FACTOR } : spec
+    if (!(bookValue > 0)) return { ok: true, spec: sized }
+    const price = Number((await quote(asset).catch(() => null))?.price)
+    if (!(price > 0)) return { ok: true, spec: sized }
+    let already = 0
+    for (const s of held) {
+        if (views[String(s.asset).toUpperCase()]?.code !== mine.code || !(Number(s.quantity) > 0)) continue
+        const p = Number((await quote(s.asset).catch(() => null))?.price)
+        if (p > 0) already += Number(s.quantity) * p
+    }
+    const room = INDUSTRY_CAP * bookValue - already
+    const want = explicit ? Math.floor(Number(spec.quantity)) : Math.floor(bookValue * Number(sized.allocationRatio || 0) / price)
+    if (room < price) return { ok: false, reason: 'industry_cap', detail: `${mine.name ?? mine.code} already holds a third of the book` }
+    if (want * price > room) return { ok: true, spec: sized, quantity: Math.floor(room / price) }
+    return { ok: true, spec: sized }
 }
 
 /**

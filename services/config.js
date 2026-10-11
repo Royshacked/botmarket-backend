@@ -223,6 +223,11 @@ export const config = {
     // it OpenRouter's own web_search server tool — native search on Luna; `gnews` the old news-only stand-in.
     get openrouterWebSearch() { return _str('OPENROUTER_WEB_SEARCH', 'server') },
     get pythiaWeekly()       { return _bool('PYTHIA_WEEKLY', 'opt-in') },
+    // The house scan after each week (services/houseScan.service.js, step 7; Roy 2026-10-11): names queued for
+    // Prometheus per FOR SWING / FOR LONG TERM industry (per theme LINK), and at most this many a week. Queuing is free;
+    // the research run that follows is the admin's.
+    get houseScanPerIndustry() { return _num('HOUSE_SCAN_PER_INDUSTRY', 3) },
+    get houseScanWeeklyMax()   { return _num('HOUSE_SCAN_WEEKLY_MAX', 30) },
     get pythiaWeeklyCap()    { return _num('PYTHIA_WEEKLY_CAP', Infinity) },
     get pythiaWeeklyMaxUsd() { return _num('PYTHIA_WEEKLY_MAX_USD', 3) },
     // `disk` (the default) writes files under talosRecordDir; `mongo` inserts into the `talos_reads`

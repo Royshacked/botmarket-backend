@@ -744,6 +744,13 @@ services/
                             (or theme, or a proposal run), run AS an admin so the spend is booked; returns
                             cost_usd (ledger after − before, desk + sidecar). One run per subject (409).
                             A weekly run passes the scan's reasons as `trigger` — to the turn and the doc
+  houseScan.service.js      The HOUSE SCAN on Pythia's verdicts (step 7): after a completed week, every FOR SWING /
+                            FOR LONG TERM industry (and approved theme — supplier links first) queues its largest
+                            uncovered names for Prometheus (HOUSE_SCAN_PER_INDUSTRY 3, HOUSE_SCAN_WEEKLY_MAX 30),
+                            the verdict's thesis and risks on the row (researchRun.researchOpening reads them)
+  industryLimits.service.js The house's industry LIMITS on a book (step 7), one mechanism for construction (_sizePlan)
+                            and a review's add_item: hype ×½, no sub-industry above a third (water-filled, the rest
+                            cash), AVOID flagged → saved only with the user's OK (avoidNames, the batch route's 409)
   pythiaWeekly.service.js   Pythia's WEEK (step 6): on a new complete price run, changeScan → assess every
                             flagged subject, biggest change first, until PYTHIA_WEEKLY_MAX_USD ($3) →
                             `pythia_weekly` (one doc per run date: flagged, results, waiting, held_back, cost,

@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { benchmarkTicker, buildFingerprint, computeReviewDelta, computeReviewTriggers } from '../../services/portfolioReview.util.js'
+import { benchmarkTicker, buildFingerprint, computeReviewDelta, computeReviewTriggers, verdictTurns } from '../../services/portfolioReview.util.js'
 import { _formatReviewDelta } from '../../services/agents/portfolio.agent.service.js'
 
 // Pure review-lifecycle helpers. benchmarkTicker maps a mandate's free-text benchmark to a
@@ -52,7 +52,7 @@ test('fingerprint: full state → all fields captured', () => {
     assert.equal(fp.regime.fedFunds, 4.09)
     // The house's industry answers for the held names as they stood — the baseline the NEXT review
     // diffs against. Only the code and the three grades; the day's sector ranking is not captured.
-    assert.deepEqual(fp.industries, { NVDA: { code: '45301020', name: 'Semiconductors', demand: 'growing', economics: 'good', cycle: 'peak' } })
+    assert.deepEqual(fp.industries, { NVDA: { code: '45301020', name: 'Semiconductors', demand: 'growing', economics: 'good', cycle: 'peak', verdict: null, hype: false } })
     assert.equal(fp.regime.leaders, undefined, 'a daily sector ranking is not a baseline')
     assert.equal(fp.holdings.length, 2)
     assert.deepEqual(fp.holdings[0], { asset: 'NVDA', allocationRatio: 0.3, actualWeight: 0.32, convictionScore: 0.8, convictionLevel: 'high' })
@@ -255,4 +255,15 @@ test('coverage gate: a DELIBERATE thesis_broken is still honoured', () => {
 test('coverage gate: target_hit stays a medium "worth a deliberate look"', () => {
     const t = covTriggers([{ symbol: 'X', status: 'target_hit', currentPt: 500, basisPt: 500, entryPrice: 100 }])
     assert.equal(t[0].severity, 'medium')
+})
+
+test('a held industry turning AVOID or newly HYPE triggers a review; the same verdict a second time does not (step 7)', () => {
+    const now = (o) => ({ NVDA: { code: '45301020', name: 'Semiconductors', assessment: o }, AMD: { code: '45301020', name: 'Semiconductors', assessment: o } })
+    const was = (o) => ({ NVDA: { code: '45301020', name: 'Semiconductors', ...o }, AMD: { code: '45301020', name: 'Semiconductors', ...o } })
+    assert.deepEqual(verdictTurns(was({ verdict: 'watch', hype: false }), now({ verdict: 'avoid', hype: true })).map(t => [t.kind, t.symbols.join(',')]),
+        [['avoid', 'NVDA,AMD'], ['hype', 'NVDA,AMD']])
+    assert.deepEqual(verdictTurns(was({ verdict: 'avoid', hype: true }), now({ verdict: 'avoid', hype: true })), [])
+    assert.deepEqual(verdictTurns(was({ verdict: 'avoid' }), now({ verdict: 'swing', hype: false })), [], 'turning FOR the book is not a review trigger')
+    const fp = buildFingerprint({ reason: 'review', state: { ideas: [] }, industries: now({ verdict: 'avoid', hype: true }), now: 1 })
+    assert.deepEqual(fp.industries.NVDA, { code: '45301020', name: 'Semiconductors', demand: null, economics: null, cycle: null, verdict: 'avoid', hype: true })
 })

@@ -21,6 +21,7 @@ import { factsFor, industryAssessmentService } from '../api/strategy/industryAss
 import { themeService } from '../api/strategy/theme.service.js'
 import { scanIndustry, scanTheme, pickForWeek } from '../api/strategy/changeScan.service.js'
 import { assessIndustry, assessTheme } from './industryAssessmentRun.service.js'
+import { runHouseScan } from './houseScan.service.js'
 import { listAdminUserIds } from '../api/user/user.model.js'
 import { getDb } from '../providers/mongodb.provider.js'
 import { config } from './config.js'
@@ -45,6 +46,8 @@ const _deps = {
     bookTo: async () => [...(await listAdminUserIds()) ?? []].map(String).sort()[0] ?? null,
     cap: () => config.pythiaWeeklyCap,
     maxUsd: () => config.pythiaWeeklyMaxUsd,
+    // Step 7: the week's FOR SWING / FOR LONG TERM verdicts send names to Prometheus's research queue.
+    houseScan: (results) => runHouseScan(results),
     db: () => getDb(),
     now: () => new Date().toISOString(),
 }
@@ -238,7 +241,13 @@ export async function runWeekly({ force = false, by = null, limit = Infinity, de
             waiting_count: left.length, waiting: left.slice(0, WAITING_SHOWN).map(_flagRow),
             cost_usd: spentBefore + spent,
         } })
-        if (!paused) await _prune(coll)
+        if (!paused) {
+            // The hand-off (step 7): the whole week's results, a resumed week's earlier chunks included. Never fatal —
+            // the week is done whether or not the queue took its names.
+            const house = await Promise.resolve(deps.houseScan?.([...prior, ...results])).catch(err => ({ error: err.message }))
+            if (house) await coll.updateOne({ id }, { $set: { house_scan: { queued: house.queued ?? [], considered: house.considered ?? 0, skipped_full: house.skipped_full ?? 0, ...(house.error ? { error: house.error } : {}) } } })
+            await _prune(coll)
+        }
         const published = results.filter(r => r.outcome === 'published').length
         logger.info(LOG, paused ? 'week paused' : 'week done', { asof, assessed: results.length, published, waiting: left.length, held_back: held.length, cost_usd: Number(spent.toFixed(4)), stopped })
         return { ok: true, outcome: paused ? 'paused' : 'done', asof, assessed: results.length, published, waiting: left.length, held_back: held.length, cost_usd: spent, stopped }

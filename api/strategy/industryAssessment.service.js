@@ -347,9 +347,27 @@ async function getThemeAssessment(themeId) {
     return db.collection(COLLECTION).findOne({ id: _themeDocId(themeId) }, { projection: { _id: 0 } })
 }
 
+/**
+ * The standing verdict per sub-industry code, light — for the desks that act on it (pythia-assessment.md §10:
+ * Atlas's limits and review, Axl, the house scan). → Map(code → { verdict, horizon, hype, decides_by, question,
+ * thesis, expires_at, assessed_at }).
+ */
+async function verdictsForCodes(codes) {
+    const list = [...new Set((codes ?? []).filter(Boolean))]
+    if (!list.length) return new Map()
+    const db = await _io.db()
+    const rows = await db.collection(COLLECTION).find({ 'subject.kind': 'industry', 'subject.code': { $in: list } },
+        { projection: { _id: 0, 'subject.code': 1, verdict: 1, horizon: 1, 'moved.hype': 1, decides_by: 1, question: 1, thesis: 1, expires_at: 1, assessed_at: 1 } }).toArray()
+    return new Map(rows.map(r => [r.subject.code, {
+        verdict: LEGACY_VERDICTS[r.verdict] ?? r.verdict, horizon: r.horizon ?? null, hype: r.moved?.hype === true,
+        decides_by: r.decides_by ?? null, question: r.question ?? null, thesis: r.thesis ?? null,
+        expires_at: r.expires_at ?? null, assessed_at: r.assessed_at ?? null,
+    }]))
+}
+
 async function listAssessments() {
     const db = await _io.db()
     return db.collection(COLLECTION).find({}, { projection: { _id: 0, revisions: 0 } }).sort({ 'subject.sector': 1, 'subject.name': 1 }).toArray()
 }
 
-export const industryAssessmentService = { publishAssessment, getAssessment, getThemeAssessment, listAssessments }
+export const industryAssessmentService = { publishAssessment, getAssessment, getThemeAssessment, listAssessments, verdictsForCodes }
