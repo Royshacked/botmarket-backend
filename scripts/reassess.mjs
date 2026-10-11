@@ -3,6 +3,7 @@
 //   node scripts/reassess.mjs --week            every subject the latest week already assessed, again
 //   node scripts/reassess.mjs 45301020 th_ai_…  these industries (GICS code) and themes (id)
 //   add --limit N to stop after N (a smoke test)
+//   add --skip (with --week) to leave out what was already reassessed since the week assessed it
 //
 // For when the assessments themselves were wrong — the first live week (2026-10-11) answered 38 of 38 `watch`
 // before the verdict rules were added to the prompt. A reassessed subject drops out of the change scan (it now
@@ -16,6 +17,7 @@ dns.setServers(['8.8.8.8', '1.1.1.1'])
 const { latestWeek } = await import('../services/pythiaWeekly.service.js')
 const { assessIndustry, assessTheme } = await import('../services/industryAssessmentRun.service.js')
 const { listAdminUserIds } = await import('../api/user/user.model.js')
+const { industryAssessmentService } = await import('../api/strategy/industryAssessment.service.js')
 const { closeDb } = await import('../providers/mongodb.provider.js')
 
 const args = process.argv.slice(2)
@@ -30,6 +32,18 @@ try {
         const reasons = new Map((week?.flagged ?? []).map(f => [`${f.kind}:${f.code ?? f.id}`, f.reasons]))
         subjects = (week?.results ?? []).filter(r => r.outcome === 'published')
             .map(r => ({ ...r, trigger: reasons.get(`${r.kind}:${r.code ?? r.id}`) ?? null }))
+        if (args.includes('--skip')) {
+            // Already redone: its standing assessment is newer than the week's result for it (a reassess run that
+            // was stopped part-way, 2026-10-11) — so a restart pays only for the rest.
+            const svc = industryAssessmentService
+            const before = subjects.length
+            const fresh = await Promise.all(subjects.map(async s => {
+                const a = s.kind === 'theme' ? await svc.getThemeAssessment(s.id) : await svc.getAssessment(s.code)
+                return a?.assessed_at && s.at && a.assessed_at > s.at
+            }))
+            subjects = subjects.filter((_, i) => !fresh[i])
+            console.log(`--skip: ${before - subjects.length} already reassessed, ${subjects.length} to go`)
+        }
     } else {
         subjects = named.map(s => (s.startsWith('th_') ? { kind: 'theme', id: s, name: s } : { kind: 'industry', code: s, name: s }))
     }
