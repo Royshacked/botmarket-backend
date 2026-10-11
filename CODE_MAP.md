@@ -740,10 +740,11 @@ services/
                             (or theme, or a proposal run), run AS an admin so the spend is booked; returns
                             cost_usd (ledger after − before, desk + sidecar). One run per subject (409).
                             A weekly run passes the scan's reasons as `trigger` — to the turn and the doc
-  pythiaWeekly.service.js   Pythia's WEEK (step 6): on a new complete price run, changeScan → assess the
-                            flagged, biggest change first, up to PYTHIA_WEEKLY_CAP and PYTHIA_WEEKLY_MAX_USD →
-                            `pythia_weekly` (one doc per run date: flagged, results, waiting, cost, regime).
-                            A week that died half-way is resumed (the reassessed drop out of the scan)
+  pythiaWeekly.service.js   Pythia's WEEK (step 6): on a new complete price run, changeScan → assess every
+                            flagged subject, biggest change first, until PYTHIA_WEEKLY_MAX_USD ($3) →
+                            `pythia_weekly` (one doc per run date: flagged, results, waiting, held_back, cost,
+                            regime). weekStatus: quiet 30 min = interrupted → resumed; refused two weeks
+                            running → held back one (refusedTwice)
   engineDb.js               THE rule for which database aether-engine writes (AETHER_DB, else Node's own) —
                             shared by the engine's scheduler and every desk that reads what it wrote
   manualNotify.service.js   broker-less entry/exit FillCards → social chat (embedded price/qty confirm)

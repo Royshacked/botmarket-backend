@@ -163,10 +163,17 @@ const _pct = (v, d = 0) => (typeof v === 'number' ? `${v >= 0 ? '+' : ''}${(v * 
  */
 export function formatFacts(row, regime = null) {
     const { moved, base_rates, not_measured } = factsFor(row)
-    if (!moved) return 'No price measurements for this industry yet — the engine screen has not covered it.'
+    if (!moved) return 'No price measurements for this industry yet — the engine price run has not covered it.'
     const pctile = moved.ext_percentile != null ? `${ordinal(Math.round(moved.ext_percentile * 100))} percentile of its own two years` : 'percentile n/a'
+    // A sub-industry with too few liquid names is priced on its PARENT's basket, which its siblings share
+    // (2026-10-11: 11 baskets cover ~29 sub-industries). Said in words, or the desk reads Metals & Mining's move
+    // as Copper's own.
+    const shared = moved.basket && row?.name && moved.basket !== row.name
+        ? [`  These moves are ${moved.basket}'s as a whole (too few ${row.name} names to price on their own) — not ${row.name}'s alone. Say so, and lean on the news and the money for what is specific to it.`]
+        : []
     return [
         `HOW FAR IT HAS MOVED (engine run ${moved.asof}; equal-weight basket: ${moved.basket ?? 'its own'}):`,
+        ...shared,
         `  12 months ${_pct(moved.ret_12m)} vs SPY ${_pct(moved.spy_12m)} → ${_pct(moved.excess_12m)} over the market`,
         `  24 months ${_pct(moved.ret_24m)} vs SPY ${_pct(moved.spy_24m)} → ${_pct(moved.excess_24m)} over the market`,
         `  last 1 / 3 months vs the S&P: ${_pct(moved.rel_1m, 1)} / ${_pct(moved.rel_3m, 1)}`,

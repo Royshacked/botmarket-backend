@@ -215,12 +215,13 @@ export const config = {
     // runs no review. Set INDUSTRY_REVIEWS=true where the house pays for them.
     get industryReviews() { return _bool('INDUSTRY_REVIEWS', 'opt-in') },
     // Pythia's weekly change scan and assessments (monitoring/pythiaWeekly.monitor.service.js, pythia-assessment.md
-    // §8). OPT-IN for the same reason: once per engine run the scan (code, free) flags what moved, and up to
-    // PYTHIA_WEEKLY_CAP of them are assessed (~$0.005 each on Luna), stopping early at PYTHIA_WEEKLY_MAX_USD.
+    // §8). OPT-IN for the same reason: once per engine run the scan (code, free) flags what moved, and every
+    // flagged subject is assessed (~$0.005 each on Luna), stopping early at PYTHIA_WEEKLY_MAX_USD (Roy, 2026-10-11:
+    // all flagged, $3). PYTHIA_WEEKLY_CAP sets a count cap if one is ever wanted; unset, there is none.
     // Off, nothing is scanned or spent; an admin can still run the week from the board. Replaced INDUSTRY_SCREEN.
     get pythiaWeekly()       { return _bool('PYTHIA_WEEKLY', 'opt-in') },
-    get pythiaWeeklyCap()    { return _num('PYTHIA_WEEKLY_CAP', 30) },
-    get pythiaWeeklyMaxUsd() { return _num('PYTHIA_WEEKLY_MAX_USD', 1) },
+    get pythiaWeeklyCap()    { return _num('PYTHIA_WEEKLY_CAP', Infinity) },
+    get pythiaWeeklyMaxUsd() { return _num('PYTHIA_WEEKLY_MAX_USD', 3) },
     // `disk` (the default) writes files under talosRecordDir; `mongo` inserts into the `talos_reads`
     // collection of the app's own database — the sink for the deployed instance, whose disk is
     // ephemeral. `scripts/eval/talos-replay/pull-reads.mjs` brings those down to the disk layout.

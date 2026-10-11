@@ -107,16 +107,17 @@ export function forTraders(view) {
  * details are the desk's.
  */
 export const getWeek = _handle('getWeek', async (req, res) => {
+    // `status` is the week's REAL state (pythiaWeekly.weekStatus): a week a dead process left `running` reads
+    // `interrupted`, so the board offers to resume it instead of waiting forever.
     const week = await pythiaWeeklyService.latestWeek()
-    const running = pythiaWeeklyService.weeklyRunning()
-    if (!week) return res.json(running ? { status: 'running' } : null)
-    res.json(req.user?.role === 'admin' ? { ...week, running } : weekForTraders(week))
+    if (!week) return res.json(pythiaWeeklyService.weeklyRunning() ? { status: 'running' } : null)
+    res.json(req.user?.role === 'admin' ? week : weekForTraders(week))
 })
 
 /** A week without its spend and bookkeeping. Pure. */
 export function weekForTraders(week) {
     if (!week) return week
-    const { cost_usd, max_usd, booked_to, by, ...rest } = week   // eslint-disable-line no-unused-vars -- dropped on purpose
+    const { cost_usd, max_usd, booked_to, by, cap, ...rest } = week   // eslint-disable-line no-unused-vars -- dropped on purpose
     return { ...rest, results: (rest.results ?? []).map(({ cost_usd: c, detail, ...r }) => r) }   // eslint-disable-line no-unused-vars
 }
 
@@ -126,7 +127,9 @@ export function weekForTraders(week) {
  * finished week again (the scan then flags only what is still due). 409 while a week is running.
  */
 export const runWeekNow = _handle('runWeekNow', async (req, res) => {
-    if (pythiaWeeklyService.weeklyRunning()) return res.status(409).json({ ok: false, outcome: 'already_running' })
+    if (pythiaWeeklyService.weeklyRunning() || (await pythiaWeeklyService.latestWeek())?.status === 'running') {
+        return res.status(409).json({ ok: false, outcome: 'already_running' })
+    }
     pythiaWeeklyService.runWeekly({ force: req.body?.force === true, by: req.user?.username ?? null })
         .catch(err => logger.warn(LOG, 'weekly run failed', err.message))
     res.status(202).json({ ok: true, outcome: 'started' })

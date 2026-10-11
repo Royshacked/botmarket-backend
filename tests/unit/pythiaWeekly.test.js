@@ -2,7 +2,9 @@ import { test, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
 
 import { changes, scanIndustry, scanTheme, pickForWeek, SCAN, REASONS } from '../../api/strategy/changeScan.service.js'
-import { runWeekly, scanWeek, latestWeek, _resetActive, COLLECTION, KEEP_WEEKS } from '../../services/pythiaWeekly.service.js'
+import { runWeekly, scanWeek, latestWeek, _resetActive, COLLECTION, KEEP_WEEKS, STALE_MS, weekStatus, refusedTwice, mergeFlagged } from '../../services/pythiaWeekly.service.js'
+import { formatFacts } from '../../api/strategy/industryAssessment.service.js'
+import { config } from '../../services/config.js'
 import { _tick } from '../../monitoring/pythiaWeekly.monitor.service.js'
 import { triggerState } from '../../services/industryAssessmentRun.service.js'
 import { weekForTraders } from '../../api/strategy/strategy.controller.js'
@@ -221,4 +223,69 @@ test('the earnings calendar is offered and consult stays last', () => {
     const names = TOOLS.map(t => t.name ?? t.type)
     assert.ok(names.includes('get_earnings_calendar'))
     assert.equal(TOOLS.at(-1).name, 'consult')
+})
+
+// ── review fixes (2026-10-11) ────────────────────────────────────────────────
+
+test('a week left running by a dead process reads interrupted; a live one elsewhere still reads running', () => {
+    const now = Date.parse(AT)
+    const at = (msAgo) => new Date(now - msAgo).toISOString()
+    assert.equal(weekStatus({ status: 'running', updated_at: at(STALE_MS + 1) }, { now }), 'interrupted')
+    assert.equal(weekStatus({ status: 'running', updated_at: at(60_000) }, { now }), 'running', 'a script or another instance')
+    assert.equal(weekStatus({ status: 'running', updated_at: at(STALE_MS * 9) }, { active: true, now }), 'running', 'this process runs it')
+    assert.equal(weekStatus({ status: 'running' }, { now }), 'interrupted', 'no timestamp at all')
+    assert.equal(weekStatus({ status: 'done' }, { now }), 'done')
+    assert.equal(weekStatus(null), null)
+})
+
+test('a fresh running week in another process is not started twice; a stale one is resumed', async () => {
+    await mem.db.collection(COLLECTION).insertOne({ id: 'pw_2026-10-09', asof: '2026-10-09', status: 'running', updated_at: AT, results: [] })
+    assert.equal((await runWeekly({ deps: deps() })).outcome, 'already_running')
+    assert.equal(calls.length, 0)
+    assert.equal((await latestWeek(deps())).status, 'running')
+    mem.rows(COLLECTION)[0].updated_at = new Date(Date.parse(AT) - STALE_MS - 1).toISOString()
+    assert.equal((await latestWeek(deps())).status, 'interrupted')
+    assert.equal((await runWeekly({ deps: deps() })).outcome, 'done')
+})
+
+test('a resumed week keeps what its earlier pass flagged, so its earlier results keep their words', () => {
+    const before = [{ kind: 'industry', code: '1', reasons: [{ key: 'hype_new', text: 'the hype flag turned on' }] }, { kind: 'theme', id: 'th_a', reasons: [] }]
+    const now = [{ kind: 'theme', id: 'th_a', reasons: [{ key: 'expired' }] }, { kind: 'industry', code: '2', reasons: [] }]
+    const m = mergeFlagged(before, now)
+    assert.deepEqual(m.map(f => f.code ?? f.id), ['th_a', '2', '1'])
+    assert.equal(m[0].reasons[0].key, 'expired', 'the new scan wins for a subject in both')
+    assert.deepEqual(mergeFlagged(undefined, now), now)
+})
+
+test('refused two weeks running → held back one week, then tried again', async () => {
+    const wk = (asof, outcome) => ({ id: `pw_${asof}`, asof, status: 'done', results: [{ kind: 'industry', code: '22222222', outcome }] })
+    assert.deepEqual([...refusedTwice([wk('b', 'refused'), wk('a', 'no_block')])], ['industry:22222222'])
+    assert.equal(refusedTwice([wk('b', 'refused'), wk('a', 'error')]).size, 0, 'an infrastructure error is not a refusal')
+    assert.equal(refusedTwice([wk('b', 'refused')]).size, 0)
+
+    await mem.db.collection(COLLECTION).insertOne(wk('2026-09-25', 'refused'))
+    await mem.db.collection(COLLECTION).insertOne(wk('2026-10-02', 'refused'))
+    const r = await runWeekly({ deps: deps() })
+    assert.equal(r.held_back, 1)
+    assert.ok(!calls.some(c => c.code === '22222222'))
+    const week = mem.rows(COLLECTION).find(w => w.asof === '2026-10-09')
+    assert.deepEqual(week.held_back.map(h => h.code), ['22222222'])
+})
+
+test('Roy\'s limits (2026-10-11): every flagged subject, stopping at $3', () => {
+    assert.equal(config.pythiaWeeklyCap, Infinity)
+    assert.equal(config.pythiaWeeklyMaxUsd, 3)
+    assert.equal(pickForWeek(Array.from({ length: 200 }, (_, i) => ({ name: `s${i}`, score: 1, size: 0 })), Infinity).picked.length, 200)
+})
+
+test('a week with no count cap stores none, and assesses all it flagged', async () => {
+    const r = await runWeekly({ deps: deps({ cap: () => Infinity }) })
+    assert.equal(r.assessed, 3)
+    assert.equal(mem.rows(COLLECTION)[0].cap, null)
+})
+
+test('a sub-industry priced on its parent basket is told the move is the parent\'s', () => {
+    const row = { name: 'Copper', basket_name: 'Metals & Mining', asof: '2026-10-09', raw: { ret_12m: 0.3, spy_12m: 0.17 } }
+    assert.match(formatFacts(row), /These moves are Metals & Mining's as a whole \(too few Copper names to price on their own\)/)
+    assert.doesNotMatch(formatFacts({ ...row, basket_name: 'Copper' }), /as a whole/)
 })

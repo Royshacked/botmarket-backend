@@ -86,15 +86,19 @@ Q11) was RETIRED when the assessment board replaced it (Roy, 2026-10-10). In its
   (step 8), `change_view_if` (free text).
 - **The run** (`services/pythiaWeekly.service.js`, monitor `pythiaWeekly.monitor.service.js`, opt-in
   `PYTHIA_WEEKLY`) assesses the flagged ones — biggest change first; never-assessed approved themes ahead of the
-  never-assessed industries, those by the size of their 12-month move — up to `PYTHIA_WEEKLY_CAP` (30) and
-  stopping at `PYTHIA_WEEKLY_MAX_USD` ($1). The rest wait: next week's scan still flags them. Each assessment
-  carries why it ran (`trigger`), and the desk's turn is told. Booked to the first admin's ledger.
+  never-assessed industries, those by the size of their 12-month move — ALL of them (Roy, 2026-10-11), stopping
+  at `PYTHIA_WEEKLY_MAX_USD` ($3); `PYTHIA_WEEKLY_CAP` adds a count cap only if set. What a stop leaves waits for
+  next week's scan, which still flags it. Each assessment carries why it ran (`trigger`), and the desk's turn is
+  told. Booked to the first admin's ledger. A subject the desk refused (refused / no block) two weeks running is
+  held back one week (`held_back`), then tried again. A week whose document has not moved for 30 minutes reads
+  `interrupted` (its process died) and is resumed — by the next tick, or "Resume the week".
 - **`pythia_weekly`** — one document per run date: what was flagged and why, each result (verdict, the one before,
   cost), what waits, the regime. 26 weeks kept. A week that died half-way is resumed on the next tick.
 - Routes: `GET /api/strategy/weekly` (everyone; a trader's copy has no spend), admin `POST /weekly/run` (202 — it
   runs for many minutes; `force` reruns a finished week). Board: Forecasts → Assessed, the week line on top.
-- Dry run: `node scripts/scan-week.mjs [cap]`. The first run (2026-10-11, run of 2026-10-07): 164 flagged, all
-  never assessed — the backlog drains over ~6 weeks at 30.
+- Dry run: `node scripts/scan-week.mjs [cap]`. The first dry run (2026-10-11, run of 2026-10-07): 164 flagged,
+  all never assessed. A sub-industry priced on its parent's basket (11 baskets cover ~29 sub-industries) is told
+  the move is the parent's (`formatFacts`), and the board says "measured as <parent>".
 - The engine job (`run_screener_timing.py` → `industry_timing`, `market_regime`) keeps running: it is the price
   input (§4.2) and the scan's price leg. `screenerData.service` keeps its reads only.
 

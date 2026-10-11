@@ -254,7 +254,8 @@ already does (`needsAgent`):
    **BUILT 2026-10-11**: `changeScan.service` (pure: today's moves and money against the facts frozen on the
    standing assessment — hype on/off, ±10% month, 12-month excess shifting 20 points, the stretch crossing its
    deciles, capex/buybacks turning; expired; never assessed), `pythiaWeekly.service` + monitor (opt-in
-   `PYTHIA_WEEKLY`; cap `PYTHIA_WEEKLY_CAP` 30, ceiling `PYTHIA_WEEKLY_MAX_USD` $1; resumable), `pythia_weekly`
+   `PYTHIA_WEEKLY`; every flagged subject, ceiling `PYTHIA_WEEKLY_MAX_USD` $3 — Roy, 2026-10-11; resumable;
+   refused twice → held back a week), `pythia_weekly`
    (one document per run date), each assessment carrying its `trigger`; the board's week line and "Run the
    week" (admin). Retired: `industry_screen`'s code, routes, monitor, prompt section, `<industry_screen>`
    parsing and the Trade-now tab — the collection's documents are still in Mongo (drop on approval). The scan
@@ -271,5 +272,5 @@ own money (capex, buybacks, dividends, deals — §4.3) stays, beside funds, ins
 "priced in" is Prometheus's, per name — Pythia reports how far the price has moved and what caused it (§4.2). The verdict words stay: `interesting_trade` · `interesting_invest` · `watch` · `avoid`. Themes: Pythia PROPOSES, the admin approves — a proposed theme is not assessed until approved. The FIRST themes too: no hand-picked starting list — Pythia proposes them when the registry is built. Money comes in two stages: companies' own money first (step 2), insiders, funds and government later (step 8). The weekly screen (`industry_screen`) stays visible until the assessment board replaces it at step 6 (done 2026-10-11).
 
 **Open:**
-1. The weekly assessment cap — built as `PYTHIA_WEEKLY_CAP` (default 30, ~$0.15–0.20 a week on Luna) and
-   `PYTHIA_WEEKLY_MAX_USD` (default $1); the numbers are Roy's to confirm.
+1. ~~The weekly assessment cap~~ — DECIDED (Roy, 2026-10-11): every flagged subject, stopping at $3 a week
+   (`PYTHIA_WEEKLY_MAX_USD`); `PYTHIA_WEEKLY_CAP` stays as an optional count cap, unset.
