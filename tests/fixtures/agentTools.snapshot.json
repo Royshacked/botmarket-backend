@@ -90,7 +90,7 @@
         },
         {
             "name": "get_earnings_calendar",
-            "description": "Upcoming earnings dates between two dates (YYYY-MM-DD, window up to ~3 months), optionally for specific symbols — PASS the industry's leaders and largest companies: a market-wide ask returns only the soonest rows. For the weekly screen's catalyst (Q11): an industry whose largest companies report inside the four-week window has a DATED event.",
+            "description": "Upcoming earnings dates between two dates (YYYY-MM-DD, window up to ~3 months), optionally for specific symbols — PASS the industry's largest companies: a market-wide ask returns only the soonest rows. An industry whose largest companies report soon has a DATED event; name the date.",
             "input_schema": {
                 "type": "object",
                 "properties": {
@@ -118,7 +118,7 @@
         },
         {
             "name": "get_industry_moves",
-            "description": "How far a sub-industry has MOVED, from the engine's weekly screen: its equal-weight basket's return over 12 and 24 months against SPY, the last 1 and 3 months against the S&P, how stretched it is (distance above its 50-day and that distance's percentile in its own two years), the HYPE FLAG (up 100%+ in two years and 100%+ over the market) with its base rate, and the market regime. Facts to state in an assessment, not to argue with.",
+            "description": "How far a sub-industry has MOVED, from the engine's weekly price run: its equal-weight basket's return over 12 and 24 months against SPY, the last 1 and 3 months against the S&P, how stretched it is (distance above its 50-day and that distance's percentile in its own two years), the HYPE FLAG (up 100%+ in two years and 100%+ over the market) with its base rate, and the market regime. Facts to state in an assessment, not to argue with.",
             "input_schema": {
                 "type": "object",
                 "properties": {

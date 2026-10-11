@@ -74,8 +74,8 @@ import { talosService }     from './monitoring/talos.monitor.service.js'
 import { coverageMonitorService } from './monitoring/coverage.monitor.service.js'
 import { industryViewMonitorService } from './monitoring/industryView.monitor.service.js'
 import { ensureIndustryViewIndexes } from './api/strategy/industryView.service.js'
-import { industryScreenMonitorService } from './monitoring/industryScreen.monitor.service.js'
-import { ensureIndustryScreenIndexes } from './api/strategy/industryScreen.service.js'
+import { pythiaWeeklyMonitorService } from './monitoring/pythiaWeekly.monitor.service.js'
+import { ensurePythiaWeeklyIndexes } from './services/pythiaWeekly.service.js'
 import { ensureIndustryAssessmentIndexes } from './api/strategy/industryAssessment.service.js'
 import { ensurePythiaCallsIndexes } from './api/strategy/pythiaCalls.service.js'
 import { ensureThemeIndexes } from './api/strategy/theme.service.js'
@@ -230,7 +230,7 @@ ensureWorkspaceIndexes()
 ensurePendingActionIndexes()
 ensureAetherIndexes()
 ensureIndustryViewIndexes().catch(() => {})   // Pythia's industry_view (api/strategy/industryView.service.js)
-ensureIndustryScreenIndexes().catch(() => {}) // Pythia's weekly industry_screen (api/strategy/industryScreen.service.js)
+ensurePythiaWeeklyIndexes().catch(() => {})      // Pythia's week: the change scan and its assessments (services/pythiaWeekly.service.js)
 ensureIndustryAssessmentIndexes().catch(() => {}) // Pythia's industry_assessment (api/strategy/industryAssessment.service.js)
 ensurePythiaCallsIndexes().catch(() => {})        // Pythia's forward log, pythia_calls (api/strategy/pythiaCalls.service.js)
 ensureThemeIndexes().catch(() => {})              // Pythia's themes (api/strategy/theme.service.js)
@@ -268,7 +268,7 @@ function startBackgroundLoops() {
     startLoop('guardSweep',   guardSweepService)
     startLoop('coverage',     coverageMonitorService)
     startLoop('industryView', industryViewMonitorService)
-    startLoop('industryScreen', industryScreenMonitorService)
+    startLoop('pythiaWeekly', pythiaWeeklyMonitorService)
     startLoop('pythiaCalls', pythiaCallsMonitorService)
     startLoop('themis',       themisService)
     startLoop('reconciler',   executionReconciler)

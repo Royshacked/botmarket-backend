@@ -185,6 +185,23 @@ export function moneyFacts(node) {
     }
 }
 
+/**
+ * Every sub-industry's money facts from ONE run, read from the node that answers it — `Map(code → moneyFacts)`,
+ * null facts where a node has none. For the weekly change scan (pythia-assessment.md §8), in one query.
+ */
+export async function readAllMoney(asof = null) {
+    const db = await _io.db()
+    const when = asof ?? await latestAsof()
+    if (!when) return new Map()
+    const all = await db.collection(METRICS).find({ asof: when, level: { $in: LEVELS } },
+        { projection: { _id: 0, level: 1, code: 1, name: 1, answered_at: 1, money: 1 } }).toArray()
+    const nodes = new Map(all.map(n => [`${n.level}|${n.code}`, n]))
+    return new Map(all.filter(n => n.level === 'sub_industry').map(s => {
+        const a = s.answered_at ?? { level: 'sub_industry', code: s.code }
+        return [s.code, moneyFacts(nodes.get(`${a.level}|${a.code}`) ?? s)]
+    }))
+}
+
 /** One node's money as text. Pure. */
 export function formatMoney(node) {
     const m = node?.money

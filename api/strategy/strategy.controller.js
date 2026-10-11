@@ -9,8 +9,7 @@ import { strategyAgentService } from '../../services/agents/strategy.agent.servi
 import { industryViewService }  from './industryView.service.js'
 import { readSubIndustry, listSubIndustries, moneyFacts, largestCompanies } from './industryData.service.js'
 import { notifyIndustryChanged } from '../../services/industryNotify.service.js'
-import { industryScreenService } from './industryScreen.service.js'
-import { runScreen } from '../../services/industryScreenRun.service.js'
+import { pythiaWeeklyService } from '../../services/pythiaWeekly.service.js'
 import { industryAssessmentService } from './industryAssessment.service.js'
 import { pythiaCallsService } from './pythiaCalls.service.js'
 import { readTimingRow } from './screenerData.service.js'
@@ -100,23 +99,37 @@ export function forTraders(view) {
     return { ...rest, next_review: monitor?.next_check_at ?? null }
 }
 
-// ─── The weekly industry screen (docs/design/industry-screener.md) ──────────
+// ─── Pythia's week: the change scan and its assessments (pythia-assessment.md §8) ─
 
 /**
- * The latest published screen: every sub-industry's verdict (trade or not, horizon) and why. `null`
- * (200) before the first one — not a 404: every board load asks, and "none yet" is not an error.
+ * The latest week: what the scan flagged and why, what was assessed with its outcome, what waits. `null` (200)
+ * before the first one. A trader gets what moved and what was assessed; the spend, the budget and the failure
+ * details are the desk's.
  */
-export const getScreen = _handle('getScreen', async (req, res) => {
-    res.json(await industryScreenService.latestScreen() ?? null)
+export const getWeek = _handle('getWeek', async (req, res) => {
+    const week = await pythiaWeeklyService.latestWeek()
+    const running = pythiaWeeklyService.weeklyRunning()
+    if (!week) return res.json(running ? { status: 'running' } : null)
+    res.json(req.user?.role === 'admin' ? { ...week, running } : weekForTraders(week))
 })
 
+/** A week without its spend and bookkeeping. Pure. */
+export function weekForTraders(week) {
+    if (!week) return week
+    const { cost_usd, max_usd, booked_to, by, ...rest } = week   // eslint-disable-line no-unused-vars -- dropped on purpose
+    return { ...rest, results: (rest.results ?? []).map(({ cost_usd: c, detail, ...r }) => r) }   // eslint-disable-line no-unused-vars
+}
+
 /**
- * Run the screen now on the latest complete engine run (admin). `force` reruns a run date that already
- * has a screen. Answers when the screen is published — several minutes of research.
+ * Run the week now (admin) on the latest complete engine run — the scan, then up to the cap of assessments.
+ * That takes many minutes, so this answers 202 at once and the board reads GET /weekly; `force` runs a
+ * finished week again (the scan then flags only what is still due). 409 while a week is running.
  */
-export const runScreenNow = _handle('runScreenNow', async (req, res) => {
-    const r = await runScreen(undefined, { force: req.body?.force === true })
-    res.status(r.ok ? 200 : 409).json(r)
+export const runWeekNow = _handle('runWeekNow', async (req, res) => {
+    if (pythiaWeeklyService.weeklyRunning()) return res.status(409).json({ ok: false, outcome: 'already_running' })
+    pythiaWeeklyService.runWeekly({ force: req.body?.force === true, by: req.user?.username ?? null })
+        .catch(err => logger.warn(LOG, 'weekly run failed', err.message))
+    res.status(202).json({ ok: true, outcome: 'started' })
 })
 
 /** Publish a reviewed draft (the chat preview's Publish). Checked against the measured numbers. */

@@ -1,6 +1,6 @@
 // One Pythia assessment, headless — the admin's "Assess now" (docs/design/pythia-assessment.md, build
-// step 1). The weekly change scan that picks WHICH industries to assess is step 6; until then an admin asks
-// for one at a time, which is also how the cost of one assessment gets measured (§8, the open cap).
+// step 1) and the weekly run's (services/pythiaWeekly.service.js, step 6), which passes the change scan's
+// reasons as `trigger`: they reach the desk's turn and ride on the published assessment.
 //
 //   1. read the sub-industry, its latest screen row (how far it moved) and its standing industry_view
 //   2. run the desk on an ASSESSMENT turn; it researches and ends with one <industry_assessment> block
@@ -84,6 +84,12 @@ export function structureOf(view) {
     return { demand: view.demand?.grade ?? null, economics: view.economics?.grade ?? null, cycle: view.cycle?.grade ?? null }
 }
 
+/** The change scan's reasons as the turn's `trigger` line (`{}` without any). Pure. */
+export function triggerState(trigger) {
+    if (!Array.isArray(trigger) || !trigger.length) return {}
+    return { trigger: trigger.map(r => `${r.text ?? r.key}${r.detail ? ` (${r.detail})` : ''}`).join('; ') }
+}
+
 /**
  * One headless desk turn, measured → `{ result, cost }`. The ledger is read before and after (with the
  * settle wait, on success and on failure alike) so the cost is THIS run's — approximately: the ledger is
@@ -124,18 +130,18 @@ export function assessIndustry(code, opts = {}) {
     return _once(`industry:${code}`, () => _assessIndustry(code, opts))
 }
 
-async function _assessIndustry(code, { userId = null, deps = _deps, timeoutMs = RUN_TIMEOUT_MS } = {}) {
+async function _assessIndustry(code, { userId = null, deps = _deps, timeoutMs = RUN_TIMEOUT_MS, source = 'assess_now', trigger = null } = {}) {
     try {
         const bundle = await deps.readSub(code)
         if (!bundle) return { ok: false, outcome: 'unknown_industry', cost_usd: 0 }
         const sub = bundle.sub
         const [{ row }, view] = await Promise.all([deps.readRow(sub.code), deps.readView(sub.code)])
         const { result, cost } = await _measuredTurn(deps, { userId, timeoutMs, userPrompt: `Assess ${sub.name} (${sub.code}).`,
-            chatState: { assess: sub.code }, label: `industry assessment ${sub.code}` })
+            chatState: { assess: sub.code, ...triggerState(trigger) }, label: `industry assessment ${sub.code}` })
         const block = (result?.assessments ?? []).find(b => b.industry === sub.code)
         if (!block) return { ok: false, outcome: 'no_block', cost_usd: cost, detail: (result?.reply ?? '').slice(0, 400) }
         const basket = await deps.basket(sub)
-        const pub = await deps.publish(block, { sub, row, money: moneyFacts(bundle.answering), basket, structure: structureOf(view), recordCall: deps.recordCall, now: deps.now(), source: 'assess_now' })
+        const pub = await deps.publish(block, { sub, row, money: moneyFacts(bundle.answering), basket, structure: structureOf(view), recordCall: deps.recordCall, now: deps.now(), source, trigger })
         if (!pub.ok) return { ok: false, outcome: 'refused', cost_usd: cost, detail: pub.detail }
         logger.info(LOG, 'assessment published', { code: sub.code, verdict: pub.doc.verdict, cost_usd: Number(cost.toFixed(4)), call: pub.call?.logged ?? null })
         return { ok: true, outcome: 'published', doc: pub.doc, call: pub.call, cost_usd: cost }
@@ -154,16 +160,16 @@ export function assessTheme(id, opts = {}) {
     return _once(`theme:${id}`, () => _assessTheme(id, opts))
 }
 
-async function _assessTheme(id, { userId = null, deps = _deps, timeoutMs = RUN_TIMEOUT_MS } = {}) {
+async function _assessTheme(id, { userId = null, deps = _deps, timeoutMs = RUN_TIMEOUT_MS, source = 'assess_now', trigger = null } = {}) {
     try {
         const theme = await deps.getTheme(id)
         if (!theme || theme.status !== 'approved') return { ok: false, outcome: 'unknown_theme', cost_usd: 0, detail: theme ? `${theme.name} is ${theme.status}` : `no theme ${id}` }
         const [{ facts }, basket] = await Promise.all([deps.themeFacts(theme), deps.themeBasket(theme)])
         const { result, cost } = await _measuredTurn(deps, { userId, timeoutMs, userPrompt: `Assess the theme ${theme.name} (${theme.id}).`,
-            chatState: { assess_theme: theme.id }, label: `theme assessment ${theme.id}` })
+            chatState: { assess_theme: theme.id, ...triggerState(trigger) }, label: `theme assessment ${theme.id}` })
         const block = (result?.assessments ?? []).find(b => b.theme === theme.id)
         if (!block) return { ok: false, outcome: 'no_block', cost_usd: cost, detail: (result?.reply ?? '').slice(0, 400) }
-        const pub = await deps.publish(block, { theme, facts, basket, recordCall: deps.recordCall, now: deps.now(), source: 'assess_now' })
+        const pub = await deps.publish(block, { theme, facts, basket, recordCall: deps.recordCall, now: deps.now(), source, trigger })
         if (!pub.ok) return { ok: false, outcome: 'refused', cost_usd: cost, detail: pub.detail }
         logger.info(LOG, 'theme assessment published', { id: theme.id, verdict: pub.doc.verdict, cost_usd: Number(cost.toFixed(4)) })
         return { ok: true, outcome: 'published', doc: pub.doc, call: pub.call, cost_usd: cost }

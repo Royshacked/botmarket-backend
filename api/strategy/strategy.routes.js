@@ -4,7 +4,7 @@ import { requireAuth, requireAdmin } from '../../middleware/auth.middleware.js'
 import {
     streamStrategy,
     listIndustries, getIndustry, publishIndustry,
-    getScreen, runScreenNow,
+    getWeek, runWeekNow,
     listAssessments, getAssessment, publishAssessment, assessNow, listCalls,
     listThemes, setThemeStatus, proposeThemesNow, assessThemeNow,
 } from './strategy.controller.js'
@@ -26,10 +26,10 @@ router.use(requireAuth)
 router.get('/industries',        log, listIndustries)
 router.get('/industries/:code',  log, getIndustry)
 
-// The weekly industry screen (docs/design/industry-screener.md): the latest verdict per industry, read by
-// everyone; running it now is the house's spend, so admin-only.
-router.get('/screen',            log, getScreen)
-router.post('/screen/run',       requireAdmin, log, runScreenNow)
+// Pythia's week (pythia-assessment.md §8; replaced the weekly screen 2026-10-11): what the change scan flagged
+// and what was assessed, read by everyone; running it now is the house's spend, so admin-only.
+router.get('/weekly',            log, getWeek)
+router.post('/weekly/run',       requireAdmin, log, runWeekNow)
 
 // Assessments (docs/design/pythia-assessment.md): Pythia's verdict per industry and the graded calls
 // behind it, read by everyone; publishing a draft and "Assess now" spend the house's research, so admin.

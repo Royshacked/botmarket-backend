@@ -110,6 +110,16 @@ test('publishing writes the verdict with the code facts, a revision, and logs a 
     const again = await industryAssessmentService.publishAssessment(BLOCK({ verdict: 'avoid' }), { sub, row: ROW(), now: NOW })
     assert.deepEqual(again.changed.verdict, { from: 'watch', to: 'avoid' })
     assert.equal(again.doc.revisions[0].kind, 'reassessment')
+    assert.equal(again.doc.trigger, null, "an admin's own run carries no trigger")
+})
+
+test('a weekly run publishes WHY it ran: the change scan reasons ride on the assessment', async () => {
+    const m = memDb()
+    _setAssessmentIO({ db: async () => m.db })
+    const r = await industryAssessmentService.publishAssessment(BLOCK(), { sub: { code: CODE, name: 'Semiconductors' }, row: ROW(), now: NOW,
+        source: 'weekly', trigger: [{ key: 'hype_new', text: 'the hype flag turned on', detail: '24m +190%', weight: 5 }] })
+    assert.equal(r.doc.source, 'weekly')
+    assert.deepEqual(r.doc.trigger, [{ key: 'hype_new', text: 'the hype flag turned on', detail: '24m +190%' }])
 })
 
 test('a call that fails to log does not unpublish the assessment', async () => {

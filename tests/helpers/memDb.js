@@ -1,8 +1,8 @@
 // A small in-memory Mongo — enough for the Pythia services' tests (assessments, calls, themes, metrics
 // reads). Supports: equality (null also matching a missing field, as in Mongo) and `$ne` / `$in` / `$exists` filters
 // on dotted paths; multi-key sort; find().sort().limit().next/toArray;
-// findOne; insertOne; replaceOne and updateOne with upsert, $setOnInsert, $set (dotted) and $push with
-// $each/$position; createIndex as a no-op. `rows(name)` exposes a collection's documents for assertions.
+// skip; findOne; insertOne; deleteMany; replaceOne and updateOne with upsert, $setOnInsert, $set (dotted) and
+// $push (one value, or $each/$position); createIndex as a no-op. `rows(name)` exposes a collection's documents for assertions.
 
 function _get(o, path) { return path.split('.').reduce((x, k) => (x == null ? x : x[k]), o) }
 function _setPath(o, path, v) { const ks = path.split('.'); let x = o; for (const k of ks.slice(0, -1)) x = (x[k] ??= {}); x[ks.at(-1)] = v }
@@ -15,6 +15,16 @@ function _match(doc, q) {
         if (v === null) return _get(doc, k) == null
         return JSON.stringify(_get(doc, k)) === JSON.stringify(v)
     })
+}
+
+// $push of one value, or of several with $each (and $position).
+function _push(doc, spec) {
+    for (const [k, v] of Object.entries(spec ?? {})) {
+        const arr = (_get(doc, k) ?? [])
+        const each = v && typeof v === 'object' && Array.isArray(v.$each) ? v.$each : [v]
+        arr.splice(v?.$position ?? arr.length, 0, ...structuredClone(each))
+        _setPath(doc, k, arr)
+    }
 }
 
 export function memDb() {
@@ -36,6 +46,7 @@ export function memDb() {
                     })
                     return c
                 },
+                skip: (n) => { out = out.slice(n); return c },
                 limit: (n) => { out = out.slice(0, n); return c },
                 next: async () => out[0] ?? null,
                 toArray: async () => out,
@@ -55,13 +66,14 @@ export function memDb() {
                 if (!doc) return { matchedCount: 0, upsertedCount: 0 }
                 if (upserted) {
                     for (const [k, v] of Object.entries(u.$set ?? {})) _setPath(doc, k, structuredClone(v))
-                    for (const [k, v] of Object.entries(u.$push ?? {})) { const arr = (_get(doc, k) ?? []); arr.splice(v.$position ?? arr.length, 0, ...v.$each); _setPath(doc, k, arr) }
+                    _push(doc, u.$push)
                     return { matchedCount: 0, upsertedCount: 1 }
                 }
                 for (const [k, v] of Object.entries(u.$set ?? {})) _setPath(doc, k, structuredClone(v))
-                for (const [k, v] of Object.entries(u.$push ?? {})) { const arr = (_get(doc, k) ?? []); arr.splice(v.$position ?? arr.length, 0, ...v.$each); _setPath(doc, k, arr) }
+                _push(doc, u.$push)
                 return { matchedCount: 1 }
             },
+            deleteMany: async (q) => { const keep = rows.filter(r => !_match(r, q)); const n = rows.length - keep.length; rows.splice(0, rows.length, ...keep); return { deletedCount: n } },
             createIndex: async () => {},
         }
     }

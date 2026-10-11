@@ -1,7 +1,8 @@
 # Pythia + the industry-view monitor — the `industry_view` artifact
 
-> **Next (proposed 2026-10-10):** `docs/design/pythia-assessment.md` — the weekly screen gives way to an
-> assessment from five inputs with a forward-graded track record; the three questions below stay.
+> **Since 2026-10-11:** the weekly screen is retired; Pythia ASSESSES (`docs/design/pythia-assessment.md`) — a
+> judgment from five inputs with a forward-graded track record, picked weekly by a change scan. The three
+> questions below stay.
 
 The house's description of every industry. For each of the 163 GICS (2023) sub-industries, **Pythia**
 answers three structural questions from the numbers the engine measured, and **the industry-view
@@ -72,21 +73,30 @@ marked), `get_industry_view` (the standing answer and its trail), `consult` (for
 large industry). It emits one `<industry_view>` block per sub-industry it answered. In chat the blocks
 are DRAFTS; the admin publishes each from the panel (`POST /api/strategy/industries/:code`).
 
-## The weekly screen — `industry_screen` (since 2026-10-08)
+## The week — the change scan and its assessments (step 6, 2026-10-11)
 
-Pythia also publishes, once a week, **whether to trade each industry now and on which horizon** (Roy,
-2026-10-08: everything lives under Pythia; contract in `docs/design/industry-screener.md`). This changes
-the desk's old rule that it never gives a price direction or a 6-month view. It still never publishes a
-weight, and the agent still never forecasts: the verdict is CODE, from the engine's quality (Q1–Q5) and
-timing (Q6–Q10, Q12) scores plus the one input that is the desk's, **Q11**, a dated catalyst inside four
-weeks that `checkScreen` holds to its date.
+The weekly screen (`industry_screen`, 2026-10-08 → 2026-10-11: buckets from engine scores plus a dated-catalyst
+Q11) was RETIRED when the assessment board replaced it (Roy, 2026-10-10). In its place, once per engine price run:
 
-- Engine: `aether-engine/scripts/run_screener_timing.py` → `industry_timing`, `market_regime` and each  industry's stored index line (weekly cron).
-- Backend: `monitoring/industryScreen.monitor.service.js` → `services/industryScreenRun.service.js` →
-  `industry_screen` (one document per run date). Opt-in `INDUSTRY_SCREEN`.
-- Read: `GET /api/strategy/screen`. Run now (admin): `POST /api/strategy/screen/run`.
-- The desk emits `<industry_screen>` blocks only in the headless screen run; it gained
-  `get_earnings_calendar` for it.
+- **The change scan** (`api/strategy/changeScan.service.js`, code, no model) compares each sub-industry's and each
+  approved theme's facts today with the facts FROZEN on its standing assessment, and flags what MOVED: the hype
+  flag turning on or off, a month of ±10% against the S&P, the 12-month excess over SPY shifting 20 points, the
+  stretch crossing its top or bottom decile, capex or buybacks turning (sign flip, at least 10%); plus an expired
+  assessment, and never assessed. Not scanned yet: news volume, geopolitics (step 4), funds/insiders/government
+  (step 8), `change_view_if` (free text).
+- **The run** (`services/pythiaWeekly.service.js`, monitor `pythiaWeekly.monitor.service.js`, opt-in
+  `PYTHIA_WEEKLY`) assesses the flagged ones — biggest change first; never-assessed approved themes ahead of the
+  never-assessed industries, those by the size of their 12-month move — up to `PYTHIA_WEEKLY_CAP` (30) and
+  stopping at `PYTHIA_WEEKLY_MAX_USD` ($1). The rest wait: next week's scan still flags them. Each assessment
+  carries why it ran (`trigger`), and the desk's turn is told. Booked to the first admin's ledger.
+- **`pythia_weekly`** — one document per run date: what was flagged and why, each result (verdict, the one before,
+  cost), what waits, the regime. 26 weeks kept. A week that died half-way is resumed on the next tick.
+- Routes: `GET /api/strategy/weekly` (everyone; a trader's copy has no spend), admin `POST /weekly/run` (202 — it
+  runs for many minutes; `force` reruns a finished week). Board: Forecasts → Assessed, the week line on top.
+- Dry run: `node scripts/scan-week.mjs [cap]`. The first run (2026-10-11, run of 2026-10-07): 164 flagged, all
+  never assessed — the backlog drains over ~6 weeks at 30.
+- The engine job (`run_screener_timing.py` → `industry_timing`, `market_regime`) keeps running: it is the price
+  input (§4.2) and the scan's price leg. `screenerData.service` keeps its reads only.
 
 ## The assessment — `industry_assessment` (build step 1, 2026-10-10)
 
@@ -109,8 +119,8 @@ regime, geopolitics). It is a judgment, not a forecast, and the code holds it to
 - Routes: `GET /api/strategy/assessments` (everyone; with the track record), `GET /assessments/:code`,
   `GET /calls`; admin: `POST /assessments/:code` (publish a chat draft), `POST /assessments/:code/run`
   ("Assess now", headless, returns `cost_usd`, the input to the weekly cap).
-- Until build step 6 (the change scan and weekly run) assessments are made one at a time by an admin.
-  The weekly screen stays visible until the assessment board replaces it (Roy, 2026-10-10).
+- Since step 6 (2026-10-11) the weekly change scan picks what is assessed (above); "Assess now" stays for an
+  admin's one-off.
 - **News** (§4.1): `get_industry_news` — the last month's news on the industry's 15 largest companies, one
   FMP call through the one news pipe (`news.service`, category `basket`, keyed `gics_<code>`), at most three
   stories per company; `get_news` for the front page (Finnhub) and topic search (GNews — small daily quota).

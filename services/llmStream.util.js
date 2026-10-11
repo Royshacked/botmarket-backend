@@ -92,7 +92,8 @@ export const ALL_EMIT_TAGS = [
     'route', 'chart', 'setup', 'setups', 'edit', 'open', 'adopt',
     // Pythia's answer on one GICS sub-industry (api/strategy/industryView.service.js).
     'industry_view',
-    // Pythia's weekly screen row: the catalyst score and notes (services/industryScreenRun.service.js).
+    // Pythia's weekly screen row — the screen was retired 2026-10-11, the tag is still suppressed so a thread
+    // that remembers the old format cannot stream a block into the chat.
     'industry_screen',
     // Pythia's assessment of an industry or a theme, and its theme proposals (docs/design/pythia-assessment.md).
     // Unregistered until the 2026-10-11 review, so in admin chat the block streamed raw until the reply settled.

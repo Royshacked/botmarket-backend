@@ -251,6 +251,15 @@ already does (`needsAgent`):
 4. **Geopolitics** — the GPR index job and the exposure map.
 5. **Regime job** — the light channel table in production, for context and Atlas's exposure read.
 6. **The change scan and the weekly run**, replacing the screen; retire `industry_screen`.
+   **BUILT 2026-10-11**: `changeScan.service` (pure: today's moves and money against the facts frozen on the
+   standing assessment — hype on/off, ±10% month, 12-month excess shifting 20 points, the stretch crossing its
+   deciles, capex/buybacks turning; expired; never assessed), `pythiaWeekly.service` + monitor (opt-in
+   `PYTHIA_WEEKLY`; cap `PYTHIA_WEEKLY_CAP` 30, ceiling `PYTHIA_WEEKLY_MAX_USD` $1; resumable), `pythia_weekly`
+   (one document per run date), each assessment carrying its `trigger`; the board's week line and "Run the
+   week" (admin). Retired: `industry_screen`'s code, routes, monitor, prompt section, `<industry_screen>`
+   parsing and the Trade-now tab — the collection's documents are still in Mongo (drop on approval). The scan
+   runs in Node, not the engine (§9): its inputs are aggregates the engine already wrote, so it needs no new
+   job. Dry run on 2026-10-11: 164 flagged, all never assessed (approved themes first); not yet run for money.
 7. **Hand-offs** — Argus on assessments; Atlas caps and hype brake.
 8. **Money, the rest** (later, after the board runs on companies' money) — Form 4 insiders, 13F funds,
    USAspending government awards, as engine jobs writing aggregates only.
@@ -259,7 +268,8 @@ already does (`needsAgent`):
 
 **Decided (Roy, 2026-10-10):** geopolitics stays a SEPARATE input (§4.5), not folded into news; companies'
 own money (capex, buybacks, dividends, deals — §4.3) stays, beside funds, insiders and government;
-"priced in" is Prometheus's, per name — Pythia reports how far the price has moved and what caused it (§4.2). The verdict words stay: `interesting_trade` · `interesting_invest` · `watch` · `avoid`. Themes: Pythia PROPOSES, the admin approves — a proposed theme is not assessed until approved. The FIRST themes too: no hand-picked starting list — Pythia proposes them when the registry is built. Money comes in two stages: companies' own money first (step 2), insiders, funds and government later (step 8). The weekly screen (`industry_screen`) stays visible until the assessment board replaces it at step 6.
+"priced in" is Prometheus's, per name — Pythia reports how far the price has moved and what caused it (§4.2). The verdict words stay: `interesting_trade` · `interesting_invest` · `watch` · `avoid`. Themes: Pythia PROPOSES, the admin approves — a proposed theme is not assessed until approved. The FIRST themes too: no hand-picked starting list — Pythia proposes them when the registry is built. Money comes in two stages: companies' own money first (step 2), insiders, funds and government later (step 8). The weekly screen (`industry_screen`) stays visible until the assessment board replaces it at step 6 (done 2026-10-11).
 
 **Open:**
-1. The weekly assessment cap (after one assessment's cost is measured).
+1. The weekly assessment cap — built as `PYTHIA_WEEKLY_CAP` (default 30, ~$0.15–0.20 a week on Luna) and
+   `PYTHIA_WEEKLY_MAX_USD` (default $1); the numbers are Roy's to confirm.

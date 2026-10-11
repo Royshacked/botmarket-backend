@@ -224,7 +224,7 @@ const _themeDocId = (themeId) => `ia_${themeId}`
  * → `{ ok, doc, changed, call }` or `{ ok:false, reason, detail }`.
  */
 async function publishAssessment(block, { sub = null, row = null, money = null, theme = null, facts: given = null, basket = null,
-    structure = null, recordCall = null, now = new Date().toISOString(), source = 'chat' } = {}) {
+    structure = null, recordCall = null, now = new Date().toISOString(), source = 'chat', trigger = null } = {}) {
     const checked = checkAssessment(block, { expect: theme ? 'theme' : sub ? 'industry' : null })
     if (!checked.ok) return { ok: false, reason: 'bad_assessment', detail: checked.detail }
     const a = checked.assessment
@@ -252,6 +252,8 @@ async function publishAssessment(block, { sub = null, row = null, money = null, 
         // Companies' own money (§4.3) — facts from the engine's metrics node, like the moves (industryData.moneyFacts).
         money: facts.money ?? null,
         structure, assessed_at: now, expires_at: _plusDays(now, EXPIRY_DAYS[a.horizon]), source, updated_at: now,
+        // Why this run happened, when the weekly change scan asked for it (changeScan reasons); null otherwise.
+        trigger: Array.isArray(trigger) && trigger.length ? trigger.map(r => ({ key: r.key, text: r.text ?? r.key, detail: r.detail ?? null })) : null,
     }
     const fields = ['verdict', 'horizon', 'confidence']
     const changed = diffFields(Object.fromEntries(fields.map(f => [f, cur?.[f] ?? null])), a, fields)

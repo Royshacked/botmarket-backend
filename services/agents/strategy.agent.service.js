@@ -53,12 +53,12 @@ export const TOOLS = [
         get_industry_metrics: `The measured numbers behind the three questions for one sub-industry, from 15 years of SEC filings: DEMAND (chained revenue growth over 10 and 3 years against the whole universe, how steady), ECONOMICS (the industry's aggregate ROIC — ROE for financials — against Damodaran's cost of capital, with the median company and the share of companies clearing it as breadth, margin level and stability, top-5 concentration), CYCLE (trailing-12-month margin or ROE in its own 10-year range, the normalised value, whether the industry is cyclical), each with the CODE GRADE you start from, plus any early-review triggers. Also the levels above it for context.`,
         get_industry_companies: `The largest companies classified into a sub-industry (or the level that answers it), with market cap, marking the ones OUR analysts cover. Read it before answering: an industry whose numbers are mostly one company is that company.`,
         get_industry_view: `The house's STANDING answer on a sub-industry — the three grades with their reasoning, reopen conditions, when it is next due, and its revision history. Read it before a review.`,
-        // The weekly screen's catalyst read (docs/design/industry-screener.md): who reports when. Inserted
-        // before `consult`, which stays last.
-        get_earnings_calendar: `Upcoming earnings dates between two dates (YYYY-MM-DD, window up to ~3 months), optionally for specific symbols — PASS the industry's leaders and largest companies: a market-wide ask returns only the soonest rows. For the weekly screen's catalyst (Q11): an industry whose largest companies report inside the four-week window has a DATED event.`,
+        // What is SCHEDULED for an industry (pythia-assessment.md §4.1): who reports when. Inserted before
+        // `consult`, which stays last.
+        get_earnings_calendar: `Upcoming earnings dates between two dates (YYYY-MM-DD, window up to ~3 months), optionally for specific symbols — PASS the industry's largest companies: a market-wide ask returns only the soonest rows. An industry whose largest companies report soon has a DATED event; name the date.`,
         // The assessment's price input (docs/design/pythia-assessment.md §4.2): facts from code. Appended
         // before `consult`, which stays last.
-        get_industry_moves: `How far a sub-industry has MOVED, from the engine's weekly screen: its equal-weight basket's return over 12 and 24 months against SPY, the last 1 and 3 months against the S&P, how stretched it is (distance above its 50-day and that distance's percentile in its own two years), the HYPE FLAG (up 100%+ in two years and 100%+ over the market) with its base rate, and the market regime. Facts to state in an assessment, not to argue with.`,
+        get_industry_moves: `How far a sub-industry has MOVED, from the engine's weekly price run: its equal-weight basket's return over 12 and 24 months against SPY, the last 1 and 3 months against the S&P, how stretched it is (distance above its 50-day and that distance's percentile in its own two years), the HYPE FLAG (up 100%+ in two years and 100%+ over the market) with its base rate, and the market regime. Facts to state in an assessment, not to argue with.`,
         // The assessment's NEWS input (§4.1). An industry IS its companies: its largest names' news over the
         // last month, one FMP call through the one news pipe (services/news.service.js, category basket).
         get_industry_news: `The last month's NEWS on a sub-industry's largest companies (up to 15), dated and attributed, at most three per company so one busy name cannot fill it — the first place to look for what is happening to an industry. Headlines are what was WRITTEN, not facts about the industry: weigh them, and say when a story is about one company rather than the group.`,
@@ -184,9 +184,9 @@ async function chatStream({
         meta: { userPrompt },
     })
 
-    const { reply, views, screens, assessments, theme_proposals } = _parseStrategyResponse(raw)
-    logger.info(LOG, 'chatStream done', { replyLength: reply.length, views: views.length, screens: screens.length, assessments: assessments.length, theme_proposals: theme_proposals.length })
-    return { reply, phase: phase.get(), views, screens, assessments, theme_proposals, ...route.result() }
+    const { reply, views, assessments, theme_proposals } = _parseStrategyResponse(raw)
+    logger.info(LOG, 'chatStream done', { replyLength: reply.length, views: views.length, assessments: assessments.length, theme_proposals: theme_proposals.length })
+    return { reply, phase: phase.get(), views, assessments, theme_proposals, ...route.result() }
 }
 
 // ─── extraction (pure) ────────────────────────────────────────────────────────
@@ -195,11 +195,11 @@ const _obj = (v) => v && typeof v === 'object' && !Array.isArray(v)
 const _txt = (v) => typeof v === 'string' && v.trim()
 
 /**
- * Every <industry_view>, <industry_screen>, <industry_assessment> and <theme_proposal> block in the raw
- * output → `{ reply, views, screens, assessments, theme_proposals }`. A view or screen without an `industry`
- * is dropped, an assessment without an `industry` or a `theme`, a proposal without a `name` — nothing could
- * be published against it. Full checking happens downstream (checkDraft, checkScreen, checkAssessment,
- * checkThemeProposal).
+ * Every <industry_view>, <industry_assessment> and <theme_proposal> block in the raw output → `{ reply, views,
+ * assessments, theme_proposals }`. A view without an `industry` is dropped, an assessment without an `industry`
+ * or a `theme`, a proposal without a `name` — nothing could be published against it. Full checking happens
+ * downstream (checkDraft, checkAssessment, checkThemeProposal). `industry_screen` (the weekly screen, retired
+ * 2026-10-11) is still STRIPPED, so a thread that remembers the old format cannot leak a block into the reply.
  */
 export function _parseStrategyResponse(raw) {
     const text  = raw ?? ''
@@ -209,7 +209,7 @@ export function _parseStrategyResponse(raw) {
     const assessments = blocks('industry_assessment').filter(v => _txt(v.industry) || _txt(v.theme))
         .map(v => ({ ...v, ...(_txt(v.industry) ? { industry: v.industry.trim() } : {}), ...(_txt(v.theme) ? { theme: v.theme.trim() } : {}) }))
     return {
-        reply, views: withIndustry('industry_view'), screens: withIndustry('industry_screen'), assessments,
+        reply, views: withIndustry('industry_view'), assessments,
         theme_proposals: blocks('theme_proposal').filter(v => _txt(v.name)),
     }
 }
@@ -223,23 +223,26 @@ function _buildSystemPrompt() {
     ]
 }
 
+/** Why the weekly change scan brought this assessment, as a line for the turn ('' on an admin's own run). */
+function _flagged(chatState) {
+    const t = typeof chatState?.trigger === 'string' ? chatState.trigger.replace(/\s+/g, ' ').trim().slice(0, 500) : ''
+    return t ? `\nThe weekly change scan flagged it: ${t}. Say what changed and whether it changes the verdict.` : ''
+}
+
 /**
  * Per-turn state, attached to the LAST USER MESSAGE: the sub-industry in focus and, on a review, why
- * it was brought back. Null when there is nothing to add.
+ * it was brought back; on an assessment, why the weekly scan flagged it. Null when there is nothing to add.
  */
 export function _buildTurnContext(chatState) {
-    if (typeof chatState?.screen === 'string' && chatState.screen.trim()) {
-        return `This is the WEEKLY INDUSTRY SCREEN for the engine run of ${chatState.screen.trim()} — follow "The weekly screen" in your instructions. No <industry_view> blocks this turn.`
-    }
     if (typeof chatState?.assess_theme === 'string' && /^th_[a-z0-9_]+$/.test(chatState.assess_theme.trim())) {
-        return `ASSESSMENT of the theme ${chatState.assess_theme.trim()} — follow "Assessing a theme" in your instructions and end with ONE <industry_assessment> block carrying "theme": "${chatState.assess_theme.trim()}". No <industry_view> blocks this turn.`
+        return `ASSESSMENT of the theme ${chatState.assess_theme.trim()} — follow "Assessing a theme" in your instructions and end with ONE <industry_assessment> block carrying "theme": "${chatState.assess_theme.trim()}". No <industry_view> blocks this turn.${_flagged(chatState)}`
     }
     if (chatState?.propose_themes) {
         const n = Math.min(Math.max(Number(chatState.propose_themes) || 5, 1), 10)
         return `PROPOSE THEMES — follow "Proposing themes" in your instructions and end with up to ${n} <theme_proposal> blocks. No other blocks this turn.`
     }
     if (typeof chatState?.assess === 'string' && /^\d{8}$/.test(chatState.assess.trim())) {
-        return `ASSESSMENT of GICS sub-industry ${chatState.assess.trim()} — follow "Assessing an industry" in your instructions and end with ONE <industry_assessment> block. No <industry_view> blocks this turn.`
+        return `ASSESSMENT of GICS sub-industry ${chatState.assess.trim()} — follow "Assessing an industry" in your instructions and end with ONE <industry_assessment> block. No <industry_view> blocks this turn.${_flagged(chatState)}`
     }
     const focus = typeof chatState?.industry === 'string' && chatState.industry.trim() ? chatState.industry.trim() : null
     if (!focus) return null

@@ -80,6 +80,11 @@ try {
         console.log('Assess now control visible:', await page.getByRole('button', { name: 'Assess now' }).count() === 1,
             '· industries in its list:', Math.max(0, (await page.locator('.assessment-view__assess select option').count()) - 1))
 
+        // The week (step 6): the change scan's headline and, for an admin only, the run button — NOT clicked.
+        console.log('tabs:', (await page.getByRole('tab').allInnerTexts()).join(' | '))
+        console.log('week:', (await page.locator('.assessment-view__week-head').innerText().catch(() => '(none)')).replace(/\n+/g, ' | '))
+        console.log('Run the week visible:', await page.getByRole('button', { name: /Run the week/ }).count() === 1)
+
         const rows = page.locator('.assessment-view .industry-view__line')
         if (await rows.count()) {
             await rows.first().click()

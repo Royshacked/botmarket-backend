@@ -115,9 +115,17 @@ api/
                               suppliers) each with why, search terms, a named basket. checkThemeProposal
                               refuses an unmeasured link, a missing order/why or no direct link; a proposal
                               never overwrites an APPROVED theme (proposeTheme); setStatus is the admin's
-    themeData.service.js      A theme's facts — each link's screen row and money (readThemeFacts), its
+    themeData.service.js      A theme's facts — each link's price row and money (readThemeFacts), its
                               graded basket (themeBasket), formatTheme for the desk. Shared by get_theme and
                               the headless theme assessment so the two cannot disagree
+    changeScan.service.js     Pythia's weekly CHANGE SCAN (step 6, pythia-assessment.md §8). Pure, no model:
+                              `changes` compares today's moves and money with the facts FROZEN on the standing
+                              assessment (hype on/off, a sharp month, the 12-month excess shifting, the stretch
+                              crossing its edges, capex or buybacks turning); scanIndustry / scanTheme add
+                              never-assessed and expired; pickForWeek orders by weight then size and caps
+    screenerData.service.js   Reads the engine's weekly PRICE RUN (industry_timing, market_regime,
+                              industry_timing_runs — ENGINE db): latestRun (complete runs only), readRun,
+                              readTimingRow(s). The weekly screen that bucketed it was retired 2026-10-11
   aether/                 Aether — the EVENT-EXPOSURE desk  /api/aether/*. Node is READ-ONLY against the
                           engine's collections: the Python aether-engine (a separate repo) writes them, and
                           only when an admin starts a discovery run. What survived the channel-engine
@@ -728,8 +736,14 @@ services/
   industryReview.service.js A headless Pythia review of ONE sub-industry (the desk with userId null):
                             publishes the <industry_view> it gets, or records a pass / a refused answer
                             on the trail. Never throws — the caller is a monitor tick
-  industryAssessmentRun.service.js  "Assess now" (admin): one headless Pythia assessment, run AS the admin so
-                            the spend is booked; returns cost_usd (ledger after − before, desk + sidecar)
+  industryAssessmentRun.service.js  "Assess now" (admin) and the weekly run's: one headless Pythia assessment
+                            (or theme, or a proposal run), run AS an admin so the spend is booked; returns
+                            cost_usd (ledger after − before, desk + sidecar). One run per subject (409).
+                            A weekly run passes the scan's reasons as `trigger` — to the turn and the doc
+  pythiaWeekly.service.js   Pythia's WEEK (step 6): on a new complete price run, changeScan → assess the
+                            flagged, biggest change first, up to PYTHIA_WEEKLY_CAP and PYTHIA_WEEKLY_MAX_USD →
+                            `pythia_weekly` (one doc per run date: flagged, results, waiting, cost, regime).
+                            A week that died half-way is resumed (the reassessed drop out of the scan)
   engineDb.js               THE rule for which database aether-engine writes (AETHER_DB, else Node's own) —
                             shared by the engine's scheduler and every desk that reads what it wrote
   manualNotify.service.js   broker-less entry/exit FillCards → social chat (embedded price/qty confirm)
@@ -1061,8 +1075,10 @@ monitoring/
                             unless reviewed in the last 30 days. REVIEW hourly via dueLoop: due views get
                             industryReview, at most 3 a tick, ONLY with INDUSTRY_REVIEWS=true (off, the
                             claim is handed back and nothing is spent)
-  pythiaCalls.monitor.service.js  The grader — daily, scores Pythia's logged calls at 3 and 12 months
-                            (pythiaCalls.gradeDue). Quotes only, no model; ungated
+  pythiaCalls.monitor.service.js  The grader — every 6h from boot, scores Pythia's logged calls at 3 and 12
+                            months (pythiaCalls.gradeDue). Quotes only, no model; ungated
+  pythiaWeekly.monitor.service.js  Every 3h: runs (or resumes) Pythia's week when the engine's latest complete
+                            price run has none. Opt-in PYTHIA_WEEKLY (replaced INDUSTRY_SCREEN, 2026-10-11)
   coverage.monitor.service.js  Prometheus's slow loop (dueLoop, hourly tick, ~daily per name, every
                             status but retired). Cheap tier: price + the Street's PT distribution →
                             coverage.assess.classifyGapState (target_hit / target_hit_early /
@@ -1132,8 +1148,11 @@ scripts/                    ops one-offs — none run by `npm test`. Kinds: migr
                             has lived exactly there, with green tests behind it. Rebuild the
                             bundle into public/ first, and LOOK at the screenshots. A resumed
                             thread starts past the opening stage; that is state, not a defect.
-  drive-assessment-ui.mjs   Drives Pythia's board (Forecasts → Assessed, Themes) as a throwaway trader and
-                            admin against the LIVE routes; never presses Assess now / Propose / Approve
+  drive-assessment-ui.mjs   Drives Pythia's board (Forecasts → Assessed with the week, Themes) as a throwaway
+                            trader and admin against the LIVE routes; never presses Assess now / Run the week /
+                            Propose / Approve. Names every failed API read
+  scan-week.mjs             Pythia's change scan, DRY: what this week would assess and why — no model, no
+                            writes. `node scripts/scan-week.mjs [cap]`
   assess-industry.mjs       One Pythia "Assess now" from the command line, as an admin; prints the cost
   propose-themes.mjs        Pythia's "Propose themes" from the command line, as an admin; prints the cost
                             and each proposal's chain (they land as PROPOSED — approving is the admin's)
