@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
-    checkAssessment, factsFor, formatFacts, industryAssessmentService, _setAssessmentIO, VERDICTS, EXPIRY_DAYS, ordinal,
+    checkAssessment, factsFor, formatFacts, industryAssessmentService, _setAssessmentIO, VERDICTS, EXPIRY_DAYS, ordinal, NO_CASE_EXPIRY_DAYS,
 } from '../../api/strategy/industryAssessment.service.js'
 import {
     shouldLog, gradeCall, summarise, pythiaCallsService, _setCallsIO, REAFFIRM_DAYS, BENCHMARKS,
@@ -461,4 +461,17 @@ test('a watch needs something moving it and the specific open question its date 
     const vague = ok({ question: undefined })
     assert.equal(vague.verdict, 'no_case')
     assert.match(vague.watch_downgraded, /no open question/)
+})
+
+test('code review 2026-10-11: unverified watch, impossible dates, no case expiry, old words are not changes', async () => {
+    const now = '2026-10-11T12:00:00.000Z'
+    const ok = (over) => checkAssessment(BLOCK({ verdict: 'watch', decides_by: '2026-10-28', ...over }), { now }).assessment
+    assert.equal(ok({ cause: { kind: 'unverified', text: 'search down' } }).verdict, 'no_case')
+    assert.match(ok({ decides_by: '2026-02-30' }).watch_downgraded, /not a date/, 'Feb 30 does not roll into March')
+    assert.equal(shouldLog({ verdict: 'interesting_trade', called_at: now }, 'swing', now), false, 'the same call in today\'s words')
+    assert.equal(shouldLog({ verdict: 'interesting_trade', called_at: now }, 'avoid', now), true)
+    const m = memDb()
+    _setAssessmentIO({ db: async () => m.db })
+    const pub = await industryAssessmentService.publishAssessment(BLOCK({ verdict: 'no_case', horizon: 'weeks' }), { sub: { code: CODE, name: 'Semiconductors' }, row: ROW(), now: NOW })
+    assert.equal(pub.doc.expires_at, new Date(Date.parse(NOW) + NO_CASE_EXPIRY_DAYS * 86_400_000).toISOString(), 'a fixed clock, not the horizon')
 })

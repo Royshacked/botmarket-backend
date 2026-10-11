@@ -37,6 +37,11 @@ export const VERDICTS = Object.freeze({
  * first full week had 122 of 165 on `watch`, 88 of them barely moving, which buried the few with a test days away.
  */
 export const WATCH_MAX_DAYS = 42
+/**
+ * No case is re-checked on a fixed clock, not the horizon the model happened to write (code review 2026-10-11: 14
+ * days on `weeks`, 91 on `years`). Four weeks; the weekly change scan brings it back sooner when anything moves.
+ */
+export const NO_CASE_EXPIRY_DAYS = 28
 /** The words before 2026-10-11, read as today's — a block from an old thread, a document not yet migrated. */
 export const LEGACY_VERDICTS = Object.freeze({ interesting_trade: 'swing', interesting_invest: 'long_term' })
 export const HORIZONS = Object.freeze(['weeks', 'months', 'years'])
@@ -146,13 +151,18 @@ export function checkAssessment(block, { expect = null, now = new Date().toISOSt
         // needs something that moved it (cause not `none`) and the SPECIFIC open question the dated event answers.
         question = _str(block.question, 300)
         if (causeKind === 'none') watchDowngraded = 'nothing nameable moved it — no live question'
+        // Could not check the news: there is no confirmed live question either (code review 2026-10-11).
+        else if (causeKind === 'unverified') watchDowngraded = 'the news could not be checked — no confirmed live question'
         else if (!question) watchDowngraded = 'no open question named'
         if (watchDowngraded) finalVerdict = 'no_case'
     }
     if (verdict === 'watch' && !watchDowngraded) {
         const d = _str(block.decides_by, 10)
         // Whole calendar days from today's date to the deciding date: today is 0, six weeks on is 42.
-        const days = d && /^\d{4}-\d{2}-\d{2}$/.test(d) ? (Date.parse(`${d}T00:00:00Z`) - Date.parse(`${String(now).slice(0, 10)}T00:00:00Z`)) / 86_400_000 : NaN
+        // A real calendar date only: Date.parse rolls 2026-02-30 over to March 2, so the string must round-trip.
+        const ms = d && /^\d{4}-\d{2}-\d{2}$/.test(d) ? Date.parse(`${d}T00:00:00Z`) : NaN
+        const real = Number.isFinite(ms) && new Date(ms).toISOString().slice(0, 10) === d
+        const days = real ? (ms - Date.parse(`${String(now).slice(0, 10)}T00:00:00Z`)) / 86_400_000 : NaN
         if (days >= 0 && days <= WATCH_MAX_DAYS) decidesBy = d
         else {
             finalVerdict = 'no_case'
@@ -245,7 +255,9 @@ export function themeFacts(theme, rows = new Map(), money = new Map()) {
         return {
             code: l.code, name: l.name, order: l.order,
             ...(m ? { ret_12m: m.ret_12m, excess_12m: m.excess_12m, ret_24m: m.ret_24m, excess_24m: m.excess_24m,
-                ext_percentile: m.ext_percentile, hype: m.hype, asof: m.asof } : {}),
+                // By size, beside the equal-weight move: the hype chip on a link reads these (code review 2026-10-11).
+                ret_24m_vw: m.ret_24m_vw, excess_24m_vw: m.excess_24m_vw, rel_1m: m.rel_1m,
+                ext_percentile: m.ext_percentile, hype: m.hype, hype_basis: m.hype_basis, asof: m.asof } : {}),
         }
     })
     const direct = links.filter(l => l.order === 1)
@@ -307,12 +319,14 @@ async function publishAssessment(block, { sub = null, row = null, money = null, 
         moved: facts.moved, base_rates: facts.base_rates, not_measured: facts.not_measured,
         // Companies' own money (§4.3) — facts from the engine's metrics node, like the moves (industryData.moneyFacts).
         money: facts.money ?? null,
-        structure, assessed_at: now, expires_at: _plusDays(now, EXPIRY_DAYS[a.horizon]), source, updated_at: now,
+        structure, assessed_at: now, expires_at: _plusDays(now, a.verdict === 'no_case' ? NO_CASE_EXPIRY_DAYS : EXPIRY_DAYS[a.horizon]), source, updated_at: now,
         // Why this run happened, when the weekly change scan asked for it (changeScan reasons); null otherwise.
         trigger: Array.isArray(trigger) && trigger.length ? trigger.map(r => ({ key: r.key, text: r.text ?? r.key, detail: r.detail ?? null })) : null,
     }
     const fields = ['verdict', 'horizon', 'confidence']
-    const changed = diffFields(Object.fromEntries(fields.map(f => [f, cur?.[f] ?? null])), a, fields)
+    // The stored verdict read in today's words: a document still saying interesting_trade is not a "change" to swing.
+    const was = { ...cur, verdict: LEGACY_VERDICTS[cur?.verdict] ?? cur?.verdict }
+    const changed = diffFields(Object.fromEntries(fields.map(f => [f, was?.[f] ?? null])), a, fields)
     await _repo.revise(id, set, newRevision({ kind: cur?.verdict ? 'reassessment' : 'assessment', note: a.thesis, changed, at: now }))
     const doc = await db.collection(COLLECTION).findOne({ id }, { projection: { _id: 0 } })
     let call = null

@@ -58,6 +58,13 @@ export const OPENROUTER_WEB_SEARCH = Object.freeze({
     parameters: { max_results: 5, max_total_results: 15, search_context_size: 'medium' },
 })
 
+/**
+ * The rounds of one turn that may search (code review 2026-10-11). `max_total_results` bounds ONE request, and a
+ * turn is up to maxContinuations requests, so without this a turn could run ~30 billed searches. The research
+ * happens early; later rounds read, reason and land.
+ */
+export const SEARCH_ROUNDS = 3
+
 /** Does this endpoint run its own web search? OpenRouter does, unless OPENROUTER_WEB_SEARCH=gnews. */
 export function serverSearchFor(endpoint) {
     return endpoint === 'openrouter' && config.openrouterWebSearch !== 'gnews'
@@ -136,7 +143,12 @@ export function toToolMessages(results) {
 export function toAnthropicUsage(usage) {
     if (!usage) return null
     const searches = Number(usage.server_tool_use?.web_search_requests ?? usage.web_search_requests ?? 0) || 0
+    // OpenRouter reports what the request COST (usage accounting) — tokens and its server tools' searches together,
+    // at the price it charged. The ledger books that when present (tokenUsage.calcCost): the streamed usage carries
+    // no search count, so a search-only estimate would have booked those searches at $0 (code review 2026-10-11).
+    const cost = Number(usage.cost)
     return {
+        ...(Number.isFinite(cost) && cost >= 0 ? { cost_usd: cost } : {}),
         input_tokens:            Number(usage.prompt_tokens ?? 0) || 0,
         output_tokens:           Number(usage.completion_tokens ?? 0) || 0,
         // Reported, not subtracted: the cached share is inside prompt_tokens and the row for these
@@ -264,8 +276,8 @@ export async function callOpenAICompatOnce({
 // — it was written provider-agnostic for exactly this), same _runTool and handler contract, same
 // onToken / onToolStart / onReasoning / onUsage hooks. Translated here: the system blocks, the
 // history, the streamed tool-call deltas, the tool results (images follow as a user message), the
-// usage. `web_search` becomes OpenRouter's web plugin when the endpoint is OpenRouter and the desk
-// declared the tool; elsewhere it is simply absent.
+// usage. `web_search` becomes OpenRouter's `openrouter:web_search` server tool when the endpoint is OpenRouter
+// (offered on the first SEARCH_ROUNDS rounds of a turn), the GNews function stand-in elsewhere.
 
 /** Anthropic system blocks (or a string) → one system string. Cache markers are Anthropic's. */
 export function toSystemText(systemPrompt) {
@@ -351,10 +363,14 @@ export async function streamOpenAICompatWithTools({
         // The landing round — same rule as the Anthropic loop: tools off, land as text. TOOL_BUDGET_LANDING.
         const landing = i === maxContinuations - 1
 
+        // The server search is offered on the first SEARCH_ROUNDS rounds only — each search is billed.
+        const roundTools = serverSearch && i >= SEARCH_ROUNDS ? oaTools.filter(t => t.type !== OPENROUTER_WEB_SEARCH.type) : oaTools
         const stream = await client.chat.completions.create({
             model: wire, messages, max_tokens: STREAM_MAX_TOKENS, stream: true,
             stream_options: { include_usage: true },
-            ...(oaTools.length ? { tools: oaTools, tool_choice: landing ? 'none' : 'auto' } : {}),
+            // OpenRouter's usage accounting: the response's usage carries `cost`. Other endpoints may refuse the field.
+            ...(endpoint === 'openrouter' ? { usage: { include: true } } : {}),
+            ...(roundTools.length ? { tools: roundTools, tool_choice: landing ? 'none' : 'auto' } : {}),
         }, signal ? { signal } : undefined)
 
         let text   = ''

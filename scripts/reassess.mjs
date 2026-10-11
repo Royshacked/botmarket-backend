@@ -64,13 +64,17 @@ try {
     } else {
         subjects = named.map(s => (s.startsWith('th_') ? { kind: 'theme', id: s, name: s } : { kind: 'industry', code: s, name: s }))
     }
+    // Once per subject: a week rerun with --force can hold the same subject twice (code review 2026-10-11).
+    const seenKeys = new Set()
+    subjects = subjects.filter(s => { const k = `${s.kind}:${s.code ?? s.id}`; if (seenKeys.has(k)) return false; seenKeys.add(k); return true })
     subjects = subjects.slice(0, limit)
     if (!subjects.length) { console.log('nothing to reassess'); process.exit(0) }
     const userId = (await listAdminUserIds())?.[0] ?? null
     const tally = {}
     let spent = 0
     for (const s of subjects) {
-        const opts = { userId, source: 'weekly', trigger: s.trigger ?? null }
+        // Labelled as what it is — an admin's rerun, not the weekly scan's (code review 2026-10-11).
+        const opts = { userId, source: 'reassess', trigger: s.trigger ?? null }
         const r = s.kind === 'theme' ? await assessTheme(s.id, opts) : await assessIndustry(s.code, opts)
         spent += r.cost_usd ?? 0
         const v = r.doc?.verdict ?? r.outcome

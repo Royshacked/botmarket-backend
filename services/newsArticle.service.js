@@ -127,12 +127,29 @@ export function mergeDedupedArticles(existing = [], incoming = []) {
         if (!isValidArticle(item)) continue
         map.set(articleKey(item), item)
     }
-    const merged = [...map.values()].sort((a, b) => b.datetime - a.datetime)
+    // The same story from two feeds carries two URLs (Finnhub's redirect, FMP's publisher link — code review
+    // 2026-10-11), so it is ALSO one story when its headline matches on the same day. Newest copy kept.
+    const seenStory = new Set()
+    const merged = [...map.values()].sort((a, b) => b.datetime - a.datetime).filter(a => {
+        const k = storyKey(a)
+        if (!k) return true
+        if (seenStory.has(k)) return false
+        seenStory.add(k)
+        return true
+    })
 
     const existingKeys = new Set(existing.map(articleKey))
+    const existingStories = new Set(existing.map(storyKey).filter(Boolean))
     const added = incoming.filter(
-        (item) => isValidArticle(item) && !existingKeys.has(articleKey(item))
+        (item) => isValidArticle(item) && !existingKeys.has(articleKey(item)) && !existingStories.has(storyKey(item))
     )
 
     return { merged, added }
+}
+
+/** One story across feeds: its headline, letters and digits only, lower-cased, on its UTC day. Null without one. */
+export function storyKey(item) {
+    const h = String(item?.headline ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().slice(0, 120)
+    if (h.length < 12 || !Number.isFinite(item?.datetime)) return null    // too short to tell two stories apart
+    return `${new Date(item.datetime * 1000).toISOString().slice(0, 10)}|${h}`
 }

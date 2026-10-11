@@ -155,3 +155,16 @@ test('resolveAgentStream: everyone runs the house model, unasked — the request
     // A house id that left the registry falls to the default, not to a provider error.
     assert.equal((await resolveAgentStream(undefined, 'u2', 'mentorAgent', ...noIO, async () => ({ chatModel: 'gone' }))).model, DEFAULT_MODEL)
 })
+
+test('stream: the server search is offered on the first rounds only, and OpenRouter is asked for the charge', async () => {
+    const call = (n) => [chunk({ tool_calls: [{ index: 0, id: `c${n}`, function: { name: 'get_chart', arguments: '{}' } }] }, 'tool_calls')]
+    const client = fakeStreamClient([call(1), call(2), call(3), call(4), [chunk({ content: 'done' }, 'stop')]])
+    await streamOpenAICompatWithTools({
+        wire: 'openai/gpt-6-luna', model: 'gpt-6-luna', client, promptOrMessages: 'hi', systemPrompt: 'S',
+        tools: [{ name: 'get_chart', description: 'c', input_schema: { type: 'object', properties: {} } }, { type: 'web_search_20260209', name: 'web_search' }],
+        toolHandlers: { get_chart: async () => 'ok' },
+    })
+    const searches = client.requests.map(r => r.tools.some(t => t.type === 'openrouter:web_search'))
+    assert.deepEqual(searches, [true, true, true, false, false])
+    assert.deepEqual(client.requests[0].usage, { include: true })
+})

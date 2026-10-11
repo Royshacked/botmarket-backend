@@ -2,7 +2,7 @@ import { test, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
 
 import { changes, scanIndustry, scanTheme, pickForWeek, SCAN, REASONS } from '../../api/strategy/changeScan.service.js'
-import { runWeekly, scanWeek, latestWeek, _resetActive, COLLECTION, KEEP_WEEKS, STALE_MS, weekStatus, refusedTwice, mergeFlagged } from '../../services/pythiaWeekly.service.js'
+import { runWeekly, scanWeek, latestWeek, _resetActive, COLLECTION, KEEP_WEEKS, STALE_MS, weekStatus, refusedTwice, mergeFlagged, validLimit } from '../../services/pythiaWeekly.service.js'
 import { formatFacts } from '../../api/strategy/industryAssessment.service.js'
 import { config } from '../../services/config.js'
 import { _tick } from '../../monitoring/pythiaWeekly.monitor.service.js'
@@ -201,6 +201,10 @@ test('the monitor spends nothing while PYTHIA_WEEKLY is off', async () => {
 test('a trader sees what moved and what was assessed, not the spend', () => {
     const t = weekForTraders({ asof: 'x', cost_usd: 0.2, max_usd: 1, booked_to: 'u', by: 'roy', results: [{ code: '1', cost_usd: 0.1, detail: 'boom', outcome: 'refused' }] })
     assert.deepEqual(t, { asof: 'x', results: [{ code: '1', outcome: 'refused' }] })
+    const w = weekForTraders({ stopped: 'budget', results: [{ kind: 'theme', id: 'th_old' }, { kind: 'theme', id: 'th_ok' }], flagged: [{ kind: 'theme', id: 'th_old' }, { kind: 'industry', code: '1' }] }, new Set(['th_ok']))
+    assert.equal(w.stopped, undefined, "the budget is the house's business")
+    assert.deepEqual(w.results.map(r => r.id), ['th_ok'], "a retired theme is the admin's")
+    assert.deepEqual(w.flagged.map(f => f.code ?? f.id), ['1'])
 })
 
 test('the scan reasons reach the desk turn', () => {
@@ -307,4 +311,84 @@ test('a watch is reassessed once the date it named has passed — not at its exp
     assert.equal(f.score, REASONS.decider_due.weight)
     assert.equal(scanIndustry({ code: '1', name: 'T', now, assessment: watch('2026-10-11'), at: AT }), null, 'its day is not over yet')
     assert.equal(scanIndustry({ code: '1', name: 'T', now, assessment: { ...watch('2026-10-10'), verdict: 'no_case' }, at: AT }), null, 'only a watch has a decider')
+})
+
+// ── code review 2026-10-11 ───────────────────────────────────────────────────
+
+test('no admin to book to → no run: the spend ceiling reads that ledger', async () => {
+    const r = await runWeekly({ deps: deps({ bookTo: async () => null }) })
+    assert.equal(r.outcome, 'no_ledger')
+    assert.equal(calls.length, 0)
+    assert.equal(mem.rows(COLLECTION).length, 0)
+})
+
+test('a limited run PAUSES the week; the next run resumes it without force and counts what it spent', async () => {
+    assert.equal((await runWeekly({ limit: 'x', deps: deps() })).outcome, 'bad_limit')
+    assert.equal((await runWeekly({ limit: 0, deps: deps() })).outcome, 'bad_limit')
+    const a = await runWeekly({ limit: 1, deps: deps() })
+    assert.equal(a.outcome, 'paused')
+    assert.equal(mem.rows(COLLECTION)[0].status, 'paused')
+    assert.equal((await latestWeek(deps())).status, 'paused')
+    const b = await runWeekly({ limit: 5, deps: deps() })
+    assert.equal(b.outcome, 'done')
+    assert.equal(calls.length, 3, 'each subject paid once across the two runs')
+    assert.equal(Number(mem.rows(COLLECTION)[0].cost_usd.toFixed(3)), 0.016)
+})
+
+test('a resume does not pay again for what the week already tried; a forced rerun does, inside the week\'s ceiling', async () => {
+    await mem.db.collection(COLLECTION).insertOne({ id: 'pw_2026-10-09', asof: '2026-10-09', status: 'running', updated_at: '2020-01-01T00:00:00Z',
+        results: [{ kind: 'industry', code: '22222222', outcome: 'refused', cost_usd: 0.004 }] })
+    await runWeekly({ deps: deps() })
+    assert.ok(!calls.some(c => c.code === '22222222'), 'Steel was tried this week — not bought twice')
+    // Forced: the ceiling is the WEEK's — $0.015 spent so far, $0.016 allowed → one more run, then stop.
+    calls = []
+    const f = await runWeekly({ force: true, deps: deps({ maxUsd: () => 0.016 }) })
+    assert.equal(f.stopped, 'budget')
+    assert.equal(calls.length, 1)
+})
+
+test('two processes cannot both run the week: the claim matches only what this one read', async () => {
+    await mem.db.collection(COLLECTION).insertOne({ id: 'pw_2026-10-09', asof: '2026-10-09', status: 'interrupted', claim: 'old', results: [] })
+    const real = mem.db
+    // Another process claims the week between this run's read and its claim.
+    const racing = { collection: (n) => {
+        const c = real.collection(n)
+        return { ...c,
+            findOne: async (q) => { const d = await c.findOne(q); if (d) mem.rows(COLLECTION)[0].claim = 'thief'; return d },
+            updateOne: async (q, u, o) => {
+                if ('claim' in q && !mem.rows(COLLECTION).some(r => r.id === q.id && r.claim === q.claim)) { const e = new Error('E11000 duplicate key'); e.code = 11000; throw e }
+                return c.updateOne(q, u, o)
+            } }
+    } }
+    const r = await runWeekly({ deps: deps({ db: async () => racing }) })
+    assert.equal(r.outcome, 'already_running')
+    assert.equal(calls.length, 0)
+})
+
+test('the board sees a week this process runs as running from its first moment', async () => {
+    await mem.db.collection(COLLECTION).insertOne({ id: 'pw_2026-10-09', asof: '2026-10-09', status: 'done', results: [] })
+    let release
+    const gate = new Promise(r => { release = r })
+    const run = runWeekly({ force: true, deps: deps({ readRun: async () => { await gate; return { rows: ROWS } } }) })
+    assert.equal((await latestWeek(deps())).status, 'running', 'before the scan has even written anything')
+    release()
+    await run
+    assert.equal(weekStatus({ status: 'done' }, { active: true }), 'running')
+    assert.equal(validLimit(undefined), Infinity)
+    assert.equal(validLimit(3), 3)
+    assert.equal(validLimit(2.5), null)
+})
+
+test('the scan: a sharp month the assessment already saw does not re-fire; hype compares on one basis only', () => {
+    const then = (o) => ({ moved: moved({ asof: '2026-10-02', ...o }) })
+    const keys = (now, t) => changes({ moved: moved(now) }, then(t)).map(c => c.key)
+    assert.deepEqual(keys({ rel_1m: 0.15 }, { rel_1m: 0.12 }), [], 'the same up-month, a week later')
+    assert.deepEqual(keys({ rel_1m: -0.15 }, { rel_1m: 0.12 }), ['sharp_move'], 'it turned the other way')
+    assert.deepEqual(keys({ rel_1m: 0.15 }, { rel_1m: 0.02 }), ['sharp_move'], 'a new one')
+    assert.deepEqual(keys({ hype: false, hype_basis: 'size_weighted' }, { hype: true }), [], 'old basis: not a clearing')
+    assert.deepEqual(keys({ hype: false, hype_basis: 'size_weighted' }, { hype: true, hype_basis: 'size_weighted' }), ['hype_cleared'])
+    const d = changes({ moved: moved({ hype: true, hype_basis: 'size_weighted', ret_24m: 0.6, ret_24m_vw: 1.5, spy_24m_vw: 0.4 }) }, then({ hype: false, hype_basis: 'size_weighted' }))[0]
+    assert.equal(d.detail, '24m +150% by size vs SPY +40%', 'in the flag\'s own numbers')
+    const nod = changes({ moved: moved({ hype: true, hype_basis: 'size_weighted', ret_24m: null, spy_24m: null }) }, then({ hype: false, hype_basis: 'size_weighted' }))[0]
+    assert.equal(nod.detail, null, 'never "+0%" for a missing number')
 })

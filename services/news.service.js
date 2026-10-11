@@ -160,6 +160,7 @@ async function getOrFetch({ category, subject, query, refresh = false, _provider
             from,
             to,
             limit: FETCH_LIMIT,
+            incremental: cache.lastFetchedAt > 0,
         }, _providers))
     } catch (err) {
         // A provider that is down, rate-limited or out of quota must not throw away news we already
@@ -205,7 +206,7 @@ async function getOrFetch({ category, subject, query, refresh = false, _provider
  * The SOURCE decision, made in one place. See the file header for why it splits this way.
  * @returns {Promise<{ articles: NewsArticle[], meta: object }>}
  */
-export async function _fetchArticles({ category, subject, query, from, to, limit = FETCH_LIMIT }, providers = PROVIDERS) {
+export async function _fetchArticles({ category, subject, query, from, to, limit = FETCH_LIMIT, incremental = false }, providers = PROVIDERS) {
     if (category === 'headlines') return fetchFromFinnhubGeneral({ limit }, providers)
     // `basket`: several tickers at once (an industry's largest companies, for Pythia). The SUBJECT is the
     // cache key the caller names it by (gics_45301020 — a list of tickers would outrun the key's 64
@@ -218,7 +219,9 @@ export async function _fetchArticles({ category, subject, query, from, to, limit
         // then the text index.
         try {
             const fmp = await fetchFromFmpBasket({ symbols: [subject], from, to, limit }, providers)
-            if (fmp.articles.length) return _result(fmp.articles, { ...fmp.meta, symbol: String(subject).toUpperCase() })
+            // An hourly top-up with nothing new is FMP answering, not FMP failing: falling through to Finnhub then only
+            // re-fetched stories the shelf already held, under other URLs (code review 2026-10-11).
+            if (fmp.articles.length || incremental) return _result(fmp.articles, { ...fmp.meta, symbol: String(subject).toUpperCase() })
         } catch (err) {
             logger.warn(LOG, `FMP news failed for ${subject} — falling back to Finnhub: ${err.message}`)
         }

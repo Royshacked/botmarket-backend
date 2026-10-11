@@ -41,7 +41,8 @@ const _deps = {
     listThemes: () => themeService.listThemes({ statuses: ['approved'] }),
     assessIndustry: (code, opts) => assessIndustry(code, opts),
     assessTheme: (id, opts) => assessTheme(id, opts),
-    bookTo: async () => (await listAdminUserIds())?.[0] ?? null,
+    // The FIRST admin by id, so the same ledger every week (two admins; the roster's order is not guaranteed).
+    bookTo: async () => [...(await listAdminUserIds()) ?? []].map(String).sort()[0] ?? null,
     cap: () => config.pythiaWeeklyCap,
     maxUsd: () => config.pythiaWeeklyMaxUsd,
     db: () => getDb(),
@@ -98,10 +99,16 @@ export function _resetActive() { _active = false }
  */
 export const STALE_MS = 30 * 60 * 1000
 
-/** The week's real state → done | running | interrupted (`active`: a week runs in THIS process). Pure. */
+/**
+ * The week's real state → done | paused | running | interrupted (`active`: a week runs in THIS process). Pure.
+ * `paused` is a week a limited run stopped on purpose (scripts/run-week.mjs --limit), resumable like an
+ * interrupted one. A week this process is running reads `running` whatever is stored — its document says so
+ * only after the claim and the scan, and the board asks straight away (code review 2026-10-11).
+ */
 export function weekStatus(week, { active = false, now = Date.now() } = {}) {
+    if (active) return 'running'
     if (!week?.status) return null
-    if (week.status !== 'running' || active) return week.status
+    if (week.status !== 'running') return week.status
     const at = Date.parse(week.updated_at ?? week.started_at ?? '')
     return Number.isFinite(at) && now - at < STALE_MS ? 'running' : 'interrupted'
 }
@@ -129,47 +136,82 @@ export function mergeFlagged(before, now) {
     return [...now, ...(before ?? []).filter(f => !seen.has(_key(f)))]
 }
 
+/** A per-run limit: a positive whole number, or none (Infinity). Anything else is refused. Pure. */
+export function validLimit(limit) {
+    if (limit == null || limit === Infinity) return Infinity
+    const n = Number(limit)
+    return Number.isInteger(n) && n > 0 ? n : null
+}
+
+const _token = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
+
+/**
+ * CLAIM the week, atomically across processes (code review 2026-10-11: the monitor and a script reading the same
+ * week could both run it and pay twice). The write matches only the claim this process read; a second claimant
+ * matches nothing, and its upsert hits the unique `id` index. → true when this process owns the week.
+ */
+async function _claim(coll, { id, asof, week, token, now, by, userId }) {
+    try {
+        const r = await coll.updateOne({ id, claim: week?.claim ?? null }, {
+            $setOnInsert: { id, asof, created_at: now, results: [] },
+            $set: { claim: token, status: 'running', started_at: now, updated_at: now, by, booked_to: String(userId) },
+        }, { upsert: true })
+        return (r?.matchedCount ?? 0) + (r?.upsertedCount ?? 0) > 0
+    } catch (err) {
+        if (err?.code === 11000) return false      // another process inserted the week first
+        throw err
+    }
+}
+
 /**
  * Run the week for the latest complete price run, unless it is done (`force` runs it again: the scan then
- * flags only what is still due). A week left `running` by a dead process is resumed; one still running in
- * another process is left alone. → `{ ok, outcome, asof?, assessed?, waiting?, held_back?, cost_usd?, stopped? }`,
- * outcome one of done | exists | no_run | already_running | error.
+ * flags only what is still due). A week left `running` by a dead process, or `paused` by a limited run, is
+ * resumed; one still running in another process is left alone. `limit` assesses at most that many this run and
+ * PAUSES the week if more wait. The spend ceiling is per WEEK — a resume and a forced rerun both count what the
+ * week already spent. → `{ ok, outcome, asof?, assessed?, waiting?, held_back?, cost_usd?, stopped? }`, outcome
+ * one of done | paused | exists | no_run | already_running | no_ledger | bad_limit | error.
  */
-export async function runWeekly({ force = false, by = null, deps = _deps } = {}) {
+export async function runWeekly({ force = false, by = null, limit = Infinity, deps = _deps } = {}) {
+    const max = validLimit(limit)
+    if (max == null) return { ok: false, outcome: 'bad_limit', detail: `limit must be a positive whole number, not ${limit}` }
     if (_active) return { ok: false, outcome: 'already_running' }
     _active = true
     try {
         const latest = await deps.latestRun()
         if (!latest) return { ok: false, outcome: 'no_run' }
         const { asof } = latest
+        // Every spend check reads the ledger of the admin the run is booked to; without one each run reads $0 and the
+        // ceiling never fires (code review 2026-10-11) — so no admin, no run.
+        const userId = await deps.bookTo()
+        if (!userId) return { ok: false, outcome: 'no_ledger', detail: 'no admin to book the run to — the spend ceiling could not be enforced' }
         const db = await deps.db()
         const coll = db.collection(COLLECTION)
         const id = _weekId(asof)
         const week = await coll.findOne({ id })
         if (week?.status === 'done' && !force) return { ok: true, outcome: 'exists', asof }
         if (weekStatus(week, { now: Date.parse(deps.now()) }) === 'running') return { ok: false, outcome: 'already_running', asof }
+        const started = deps.now()
+        if (!await _claim(coll, { id, asof, week, token: _token(), now: started, by, userId })) return { ok: false, outcome: 'already_running', asof }
 
         const { flags: scanned_flags, scanned, regime } = await scanWeek(asof, deps)
         const previous = await coll.find({ asof: { $ne: asof }, status: 'done' }).sort({ asof: -1 }).limit(2).toArray()
         const hold = refusedTwice(previous)
+        const prior = week?.results ?? []
+        // A resume does not pay again for what this week already tried: a refused or failed subject is still flagged,
+        // and would be bought twice in one week (code review 2026-10-11). A forced rerun tries them again on purpose.
+        const tried = force ? new Set() : new Set(prior.map(_key))
         const held = scanned_flags.filter(f => hold.has(_key(f)))
-        const flags = scanned_flags.filter(f => !hold.has(_key(f)))
-        // A resumed week has already spent part of its cap and ceiling; a forced rerun gets fresh ones.
-        const prior = force ? [] : (week?.results ?? [])
+        const flags = scanned_flags.filter(f => !hold.has(_key(f)) && !tried.has(_key(f)))
         const capSet = Number(deps.cap())
         const capAll = Number.isNaN(capSet) ? 0 : Math.max(0, capSet)          // Infinity = no count cap
-        const cap = Math.max(0, capAll - prior.length)
-        const maxUsd = Math.max(0, (Number(deps.maxUsd()) || 0) - prior.reduce((s, r) => s + (r.cost_usd ?? 0), 0))
-        const { picked, waiting } = pickForWeek(flags, cap)
-        const userId = await deps.bookTo()
-        const started = deps.now()
-        await coll.updateOne({ id }, {
-            $setOnInsert: { id, asof, created_at: started, results: [] },
-            $set: { status: 'running', started_at: started, by, scanned, regime,
-                    flagged: mergeFlagged(week?.flagged, flags.map(_flagRow)), held_back: held.map(_flagRow),
-                    cap: Number.isFinite(capAll) ? capAll : null, max_usd: Number(deps.maxUsd()) || 0,
-                    booked_to: userId ? String(userId) : null, updated_at: started },
-        }, { upsert: true })
+        const cap = Math.max(0, capAll - (force ? 0 : prior.length))
+        const spentBefore = prior.reduce((s, r) => s + (r.cost_usd ?? 0), 0)
+        const maxUsd = Math.max(0, (Number(deps.maxUsd()) || 0) - spentBefore)
+        const { picked, waiting } = pickForWeek(flags, Math.min(cap, max))
+        await coll.updateOne({ id }, { $set: {
+            scanned, regime, flagged: mergeFlagged(week?.flagged, flags.map(_flagRow)), held_back: held.map(_flagRow),
+            cap: Number.isFinite(capAll) ? capAll : null, max_usd: Number(deps.maxUsd()) || 0, updated_at: deps.now(),
+        } })
         logger.info(LOG, 'week started', { asof, flagged: flags.length, picked: picked.length, waiting: waiting.length, held_back: held.length, resumed: Boolean(week && !force) })
 
         let spent = 0, stopped = null
@@ -188,17 +230,18 @@ export async function runWeekly({ force = false, by = null, deps = _deps } = {})
         }
         const unrun = stopped ? picked.slice(results.length) : []
         const left = [...unrun, ...waiting]
+        // Paused, not done, when the run's own limit is what left subjects waiting — the next run resumes it.
+        const paused = !stopped && max < cap && waiting.length > 0
         const finished = deps.now()
-        const all = [...(force ? (week?.results ?? []) : prior), ...results]
         await coll.updateOne({ id }, { $set: {
-            status: 'done', finished_at: finished, updated_at: finished, stopped,
+            status: paused ? 'paused' : 'done', finished_at: finished, updated_at: finished, stopped,
             waiting_count: left.length, waiting: left.slice(0, WAITING_SHOWN).map(_flagRow),
-            cost_usd: all.reduce((s, r) => s + (r.cost_usd ?? 0), 0),
+            cost_usd: spentBefore + spent,
         } })
-        await _prune(coll)
+        if (!paused) await _prune(coll)
         const published = results.filter(r => r.outcome === 'published').length
-        logger.info(LOG, 'week done', { asof, assessed: results.length, published, waiting: left.length, held_back: held.length, cost_usd: Number(spent.toFixed(4)), stopped })
-        return { ok: true, outcome: 'done', asof, assessed: results.length, published, waiting: left.length, held_back: held.length, cost_usd: spent, stopped }
+        logger.info(LOG, paused ? 'week paused' : 'week done', { asof, assessed: results.length, published, waiting: left.length, held_back: held.length, cost_usd: Number(spent.toFixed(4)), stopped })
+        return { ok: true, outcome: paused ? 'paused' : 'done', asof, assessed: results.length, published, waiting: left.length, held_back: held.length, cost_usd: spent, stopped }
     } catch (err) {
         logger.warn(LOG, 'week failed', { error: err.message })
         return { ok: false, outcome: 'error', detail: err.message }
@@ -215,10 +258,10 @@ async function _prune(coll) {
 /** Is a week running in this process? */
 export function weeklyRunning() { return _active }
 
-/** The latest week's document with its real state (`status`: done | running | interrupted), or null. */
+/** The latest week's document with its real state (`status`: done | paused | running | interrupted), or null. */
 export async function latestWeek(deps = _deps) {
     const db = await deps.db()
-    const week = await db.collection(COLLECTION).find({}, { projection: { _id: 0 } }).sort({ asof: -1 }).limit(1).next()
+    const week = await db.collection(COLLECTION).find({}, { projection: { _id: 0, claim: 0 } }).sort({ asof: -1 }).limit(1).next()
     return week ? { ...week, status: weekStatus(week, { active: _active, now: Date.parse(deps.now()) }) } : null
 }
 

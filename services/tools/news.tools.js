@@ -9,7 +9,7 @@
  * Every fetch goes through services/news.service.js — the same fetch + file-cache + dedupe pipe the
  * news condition evaluator has always used (CLAUDE.md: shared mechanism → one service). This module
  * adds no fetching of its own; it only turns the articles into something a model can read. WHICH
- * source answers a category (Finnhub by symbol or front page, GNews for free text) is that
+ * source answers a category (FMP by symbol with Finnhub behind it, Finnhub for the front page, GNews for free text) is that
  * service's decision, not this tool's — the model picks the kind of question, never the provider.
  *
  * ── DATA HERE, JUDGMENT IN THE CHAT ──────────────────────────────────────────

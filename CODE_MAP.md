@@ -844,15 +844,17 @@ providers/
                                 follows in one `user` message), usage. ENDPOINTS = which account:
                                 'openrouter' (one key, most vendors — every candidate since 2026-09-20)
                                 · 'mistral' (their own API; no web plugin there, so no model rides it now).
-                                Drops web_search (an
-                                Anthropic server tool), no cache markers, vendor-default thinking.
+                                The read (Talos) gets web_search as the GNews function stand-in;
+                                no cache markers, vendor-default thinking.
                                 Asserts response.model — a substituted model is an io failure, never
                                 a wrong candidate scored as the right one. Ships as the adapter if a
                                 candidate wins; until then admin-only via the profile's Monitors card.
                                 ALSO the desks' streaming twin, streamOpenAICompatWithTools — same
                                 signature as streamAnthropicWithTools (tag suppressor, _runTool,
                                 onToken/onToolStart/onReasoning/onUsage), tool-call deltas folded by
-                                index, web_search → OpenRouter's web plugin. Bound per MODELS entry
+                                index, web_search → OpenRouter's `openrouter:web_search` server tool on the
+                                first SEARCH_ROUNDS (3) rounds of a turn (2026-10-11; the GNews stand-in elsewhere),
+                                and OpenRouter's charged `usage.cost` is what the ledger books. Bound per MODELS entry
                                 (llmModels _candidate: Luna, Qwen3.7-Plus, Mistral Medium 3.5, and since 2026-09-21
                                 Qwen3.7 Flash, DeepSeek V4.1 Flash, Gemini 3.8 Flash —
                                 adminOnly) with its endpoint + wire slug

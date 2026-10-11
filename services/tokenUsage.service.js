@@ -62,6 +62,9 @@ export function searchesIn(usage) {
 
 // Exported for testing.
 export function calcCost(model, usage) {
+    // What the vendor CHARGED, when it says (OpenRouter's usage accounting — providers/openaiCompat.toAnthropicUsage):
+    // exact, and the only number that includes its server-tool searches. Our price table is the fallback.
+    if (Number.isFinite(usage?.cost_usd) && usage.cost_usd >= 0) return usage.cost_usd
     const p = PRICING[model] ?? DEFAULT_PRICING
     // `cache_creation_input_tokens` is the TOTAL written; `cache_creation` splits it by TTL. The
     // 1-hour share is priced at its own rate; whatever the split does not name is the 5-minute

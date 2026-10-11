@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-    toOpenAITools, toToolUses, toToolMessages, toAnthropicUsage, toStopReason, servedModelMatches, runOpenAICompatRead, OPENROUTER_WEB_SEARCH, serverSearchFor,
+    toOpenAITools, toToolUses, toToolMessages, toAnthropicUsage, toStopReason, servedModelMatches, runOpenAICompatRead, OPENROUTER_WEB_SEARCH, serverSearchFor, SEARCH_ROUNDS,
 } from '../../providers/openaiCompat.provider.js'
 import { TALOS_MODELS, ALLOWED_MODELS, ASSESS_MODEL, resolveTalosModel, assessRouting, talosModel } from '../../monitoring/assess.shared.js'
 import { makeAssessToolRunner } from '../../monitoring/assessTools.js'
@@ -200,4 +200,14 @@ test('web search: OpenRouter\'s server tool on OpenRouter, the GNews stand-in el
     assert.deepEqual(toAnthropicUsage({ prompt_tokens: 10, completion_tokens: 2, server_tool_use: { web_search_requests: 3 } }).server_tool_use, { web_search_requests: 3 })
     assert.deepEqual(toAnthropicUsage({ prompt_tokens: 10, completion_tokens: 2, web_search_requests: 2 }).server_tool_use, { web_search_requests: 2 })
     assert.equal(toAnthropicUsage({ prompt_tokens: 10, completion_tokens: 2 }).server_tool_use, undefined)
+})
+
+test('OpenRouter\'s charged cost is what the ledger books — searches included (code review 2026-10-11)', async () => {
+    const { calcCost } = await import('../../services/tokenUsage.service.js')
+    const u = toAnthropicUsage({ prompt_tokens: 10_000, completion_tokens: 500, cost: 0.0213 })
+    assert.equal(u.cost_usd, 0.0213)
+    assert.equal(calcCost('gpt-6-luna', u), 0.0213, 'the vendor charge, not the price table')
+    assert.equal(toAnthropicUsage({ prompt_tokens: 1, completion_tokens: 1 }).cost_usd, undefined)
+    assert.ok(calcCost('claude-sonnet-5', { input_tokens: 1_000_000, output_tokens: 0 }) > 0, 'without a charge, the table still prices it')
+    assert.equal(SEARCH_ROUNDS, 3)
 })

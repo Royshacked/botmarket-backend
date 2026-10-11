@@ -228,3 +228,19 @@ test('a ticker reads FMP first (Roy, 2026-10-11); Finnhub only when FMP errors o
     assert.equal(r.meta.source, 'finnhub', 'an FMP outage falls back, it does not fail the read')
     assert.equal(down.calls.company, 1)
 })
+
+test('one story from two feeds is one story; an empty hourly top-up from FMP does not reach for Finnhub', async () => {
+    const { mergeDedupedArticles, storyKey } = await import('../../services/newsArticle.service.js')
+    const at = 1_791_000_000
+    const a = { headline: 'Nvidia beats on data-centre revenue', summary: 's', datetime: at, url: 'https://finnhub.io/r/1', source: 'Reuters' }
+    const b = { ...a, url: 'https://reuters.com/nvidia', datetime: at + 60 }
+    const { merged, added } = mergeDedupedArticles([a], [b])
+    assert.equal(merged.length, 1)
+    assert.equal(added.length, 0, 'not new — the shelf held it under another URL')
+    assert.equal(storyKey({ headline: 'Hi', datetime: at }), null, 'too short to tell apart')
+    let finnhub = 0
+    const providers = { stockNews: async () => [], companyNews: async () => { finnhub++; return [] }, generalNews: async () => [], search: async () => [] }
+    const out = await _fetchArticles({ category: 'companies', subject: 'NVDA', query: 'NVDA', incremental: true }, providers)
+    assert.equal(out.meta.source, 'fmp')
+    assert.equal(finnhub, 0)
+})

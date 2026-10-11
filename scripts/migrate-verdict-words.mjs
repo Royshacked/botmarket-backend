@@ -28,15 +28,17 @@ try {
     }
     // The weeks: verdicts sit inside arrays, so each touched week is rewritten whole.
     const fix = (v) => LEGACY_VERDICTS[v] ?? v
+    // Only the fields a row HAS: writing `undefined` stores null and adds the field to rows that never had it.
+    const fixed = (o, keys) => ({ ...o, ...Object.fromEntries(keys.filter(k => k in o).map(k => [k, fix(o[k])])) })
     let weeks = 0
     for (const w of await db.collection('pythia_weekly').find({ $or: [
         { 'results.verdict': { $in: OLD } }, { 'results.previous_verdict': { $in: OLD } },
         { 'flagged.previous_verdict': { $in: OLD } }, { 'waiting.previous_verdict': { $in: OLD } }] }).toArray()) {
         weeks++
         const set = {
-            results: (w.results ?? []).map(r => ({ ...r, verdict: fix(r.verdict), previous_verdict: fix(r.previous_verdict) })),
-            flagged: (w.flagged ?? []).map(f => ({ ...f, previous_verdict: fix(f.previous_verdict) })),
-            waiting: (w.waiting ?? []).map(f => ({ ...f, previous_verdict: fix(f.previous_verdict) })),
+            results: (w.results ?? []).map(r => fixed(r, ['verdict', 'previous_verdict'])),
+            flagged: (w.flagged ?? []).map(f => fixed(f, ['previous_verdict'])),
+            waiting: (w.waiting ?? []).map(f => fixed(f, ['previous_verdict'])),
         }
         if (!dry) await db.collection('pythia_weekly').updateOne({ _id: w._id }, { $set: set })
     }

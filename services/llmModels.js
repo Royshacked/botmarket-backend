@@ -33,8 +33,8 @@ const MODELS = {
     // same four as Talos's TALOS_MODELS, same pattern: the admin picks one in the profile, their
     // own desks run on it, the ledger's byModel row says what it cost. `streamFn` binds the
     // endpoint and the wire slug so the loop never learns the registry. No `webSearch`: the
-    // provider substitutes OpenRouter's web plugin when a desk declares the tool — which is why
-    // all three ride OpenRouter. Mistral was on Mistral's own API until 2026-09-20, where a desk
+    // provider gives a desk that declares the tool OpenRouter's own `openrouter:web_search` server tool
+    // (since 2026-10-11; OpenRouter's `web` plugin before) — which is why they ride OpenRouter. Mistral was on Mistral's own API until 2026-09-20, where a desk
     // simply had no web (Prometheus's "news since the event" step silently did not happen); the
     // same model on OpenRouter costs the same ($1.5/$7.5) and gets the plugin. resolveAgentStream
     // routes a non-admin who somehow requests one to DEFAULT_MODEL.

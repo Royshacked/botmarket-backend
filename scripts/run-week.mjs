@@ -4,31 +4,26 @@
 //   node scripts/run-week.mjs [--force] [--limit N]
 //
 // The same run the monitor and the board's "Run the week" make (services/pythiaWeekly.service.js). Safe beside a
-// running server: a week another process is running reads `running` and is not started twice. The board follows
-// it through GET /api/strategy/weekly.
+// running server: the week is claimed atomically, and one another process is running is left alone. The board
+// follows it through GET /api/strategy/weekly.
+//
+// --limit N assesses at most N this run and PAUSES the week if more wait; the next run (no --force needed) resumes
+// it, inside the same weekly spend ceiling (2026-10-11: on a laptop short of memory, long background runs were
+// stopped; short foreground chunks finish). --force reruns a finished week: the scan flags only what is still due.
 import dns from 'dns'
 import 'dotenv/config'
 
 dns.setServers(['8.8.8.8', '1.1.1.1'])
 
-const { runWeekly, latestWeek, _setDeps } = await import('../services/pythiaWeekly.service.js')
-const { config } = await import('../services/config.js')
+const { runWeekly } = await import('../services/pythiaWeekly.service.js')
 const { closeDb } = await import('../providers/mongodb.provider.js')
 
 const force = process.argv.includes('--force')
-// --limit N: assess at most N more this run, then stop — the week stays resumable (2026-10-11: on a laptop
-// short of memory, long background runs were stopped; short foreground chunks finish). The week's cap counts
-// what it already did, so the cap for this run is that plus N.
 const li = process.argv.indexOf('--limit')
+const limit = li >= 0 ? process.argv[li + 1] : undefined
 const started = Date.now()
 try {
-    if (li >= 0) {
-        const week = await latestWeek()
-        const done = week && week.status !== 'done' && !force ? (week.results?.length ?? 0) : 0
-        const cap = Math.min(config.pythiaWeeklyCap, done + Number(process.argv[li + 1]))
-        _setDeps({ cap: () => cap })
-    }
-    const r = await runWeekly({ force, by: 'script' })
+    const r = await runWeekly({ force, by: 'script', limit })
     console.log(JSON.stringify({ ...r, minutes: Math.round((Date.now() - started) / 60000) }))
 } finally {
     await closeDb().catch(() => {})

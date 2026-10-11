@@ -55,9 +55,20 @@ export function changes(now, then) {
     const out = []
     const m = now?.moved, t = then?.moved
     if (m && (!t?.asof || !m.asof || m.asof > t.asof)) {
-        if (m.hype === true && t?.hype !== true) out.push({ key: 'hype_new', detail: `24m ${_pct(m.ret_24m ?? 0)} vs SPY ${_pct(m.spy_24m ?? 0)}` })
-        if (m.hype === false && t?.hype === true) out.push({ key: 'hype_cleared', detail: null })
-        if (_n(m.rel_1m) != null && Math.abs(m.rel_1m) >= SCAN.SHARP_MOVE_1M) out.push({ key: 'sharp_move', detail: `${_pct(m.rel_1m)} against the S&P in a month` })
+        // The hype flag is compared only on the same BASIS: an assessment frozen under the equal-weight flag read
+        // against today's size-weighted one would "clear" hypes nothing moved (code review 2026-10-11).
+        const sameBasis = !t || (t.hype_basis ?? null) === (m.hype_basis ?? null)
+        if (sameBasis && m.hype === true && t?.hype !== true) {
+            // In the flag's own numbers — by size — and never a missing value printed as +0%.
+            const r = _n(m.ret_24m_vw) ?? _n(m.ret_24m), b = _n(m.spy_24m_vw) ?? _n(m.spy_24m)
+            out.push({ key: 'hype_new', detail: r != null && b != null ? `24m ${_pct(r)} by size vs SPY ${_pct(b)}` : null })
+        }
+        if (sameBasis && m.hype === false && t?.hype === true) out.push({ key: 'hype_cleared', detail: null })
+        // A NEW sharp month: the assessment had not already seen one this size, this way (code review 2026-10-11: the
+        // trailing month holds a move for ~4 weekly runs, and each re-fired a paid reassessment).
+        const r1 = _n(m.rel_1m), r0 = _n(t?.rel_1m)
+        const seen = r0 != null && Math.abs(r0) >= SCAN.SHARP_MOVE_1M && Math.sign(r0) === Math.sign(r1)
+        if (r1 != null && Math.abs(r1) >= SCAN.SHARP_MOVE_1M && !seen) out.push({ key: 'sharp_move', detail: `${_pct(r1)} against the S&P in a month` })
         if (_n(m.excess_12m) != null && _n(t?.excess_12m) != null && Math.abs(m.excess_12m - t.excess_12m) >= SCAN.EXCESS_SHIFT) {
             out.push({ key: 'excess_shift', detail: `12m vs SPY ${_pct(t.excess_12m)} → ${_pct(m.excess_12m)}` })
         }

@@ -18,6 +18,7 @@ import { getDb } from '../../providers/mongodb.provider.js'
 import { getNumericQuote } from '../../providers/yahoofinance.provider.js'
 import { mapLimit } from '../../services/concurrency.util.js'
 import { readCompanies } from './industryData.service.js'
+import { LEGACY_VERDICTS } from './industryAssessment.service.js'
 import { logger } from '../../services/logger.service.js'
 
 const LOG = '[pythiaCalls]'
@@ -47,7 +48,8 @@ const _ok = (v) => typeof v === 'number' && Number.isFinite(v) && v > 0
 /** Log a new call? Pure. A first call, a changed verdict, or a reaffirmation REAFFIRM_DAYS after the last. */
 export function shouldLog(prev, verdict, now) {
     if (!prev) return true
-    if (prev.verdict !== verdict) return true
+    // A call logged under the words before 2026-10-11 is the same call in today's words, not a change.
+    if ((LEGACY_VERDICTS[prev.verdict] ?? prev.verdict) !== verdict) return true
     return _days(prev.called_at, now) >= REAFFIRM_DAYS
 }
 

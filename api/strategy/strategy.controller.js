@@ -111,14 +111,27 @@ export const getWeek = _handle('getWeek', async (req, res) => {
     // `interrupted`, so the board offers to resume it instead of waiting forever.
     const week = await pythiaWeeklyService.latestWeek()
     if (!week) return res.json(pythiaWeeklyService.weeklyRunning() ? { status: 'running' } : null)
-    res.json(req.user?.role === 'admin' ? week : weekForTraders(week))
+    if (req.user?.role === 'admin') return res.json(week)
+    const approved = new Set((await themeService.listThemes({ statuses: ['approved'] })).map(t => t.id))
+    res.json(weekForTraders(week, approved))
 })
 
-/** A week without its spend and bookkeeping. Pure. */
-export function weekForTraders(week) {
+/**
+ * A week without its spend and bookkeeping (`stopped: 'budget'` says the house's budget ran out), and without
+ * themes no longer approved — a retired theme is the admin's, like its verdicts (themeForTraders). Pure.
+ */
+export function weekForTraders(week, approvedThemes = null) {
     if (!week) return week
-    const { cost_usd, max_usd, booked_to, by, cap, ...rest } = week   // eslint-disable-line no-unused-vars -- dropped on purpose
-    return { ...rest, results: (rest.results ?? []).map(({ cost_usd: c, detail, ...r }) => r) }   // eslint-disable-line no-unused-vars
+    const { cost_usd, max_usd, booked_to, by, cap, stopped, ...rest } = week   // eslint-disable-line no-unused-vars -- dropped on purpose
+    const shown = (x) => x?.kind !== 'theme' || !approvedThemes || approvedThemes.has(x.id)
+    const list = (k) => (rest[k] ?? []).filter(shown)
+    return {
+        ...rest,
+        results: list('results').map(({ cost_usd: c, detail, ...r }) => r),   // eslint-disable-line no-unused-vars
+        ...(rest.flagged ? { flagged: list('flagged') } : {}),
+        ...(rest.waiting ? { waiting: list('waiting') } : {}),
+        ...(rest.held_back ? { held_back: list('held_back') } : {}),
+    }
 }
 
 /**
@@ -127,9 +140,12 @@ export function weekForTraders(week) {
  * finished week again (the scan then flags only what is still due). 409 while a week is running.
  */
 export const runWeekNow = _handle('runWeekNow', async (req, res) => {
-    if (pythiaWeeklyService.weeklyRunning() || (await pythiaWeeklyService.latestWeek())?.status === 'running') {
-        return res.status(409).json({ ok: false, outcome: 'already_running' })
-    }
+    const busy = () => res.status(409).json({ ok: false, outcome: 'already_running' })
+    if (pythiaWeeklyService.weeklyRunning()) return busy()
+    if ((await pythiaWeeklyService.latestWeek())?.status === 'running') return busy()   // another process
+    // Checked again after the await: the monitor may have started a week meanwhile. From here to runWeekly's own
+    // claim there is no await, so "started" is never answered for a run that did not start (code review 2026-10-11).
+    if (pythiaWeeklyService.weeklyRunning()) return busy()
     pythiaWeeklyService.runWeekly({ force: req.body?.force === true, by: req.user?.username ?? null })
         .catch(err => logger.warn(LOG, 'weekly run failed', err.message))
     res.status(202).json({ ok: true, outcome: 'started' })
