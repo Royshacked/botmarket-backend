@@ -289,3 +289,12 @@ test('a sub-industry priced on its parent basket is told the move is the parent\
     assert.match(formatFacts(row), /These moves are Metals & Mining's as a whole \(too few Copper names to price on their own\)/)
     assert.doesNotMatch(formatFacts({ ...row, basket_name: 'Copper' }), /as a whole/)
 })
+
+test('the move by size rides beside the equal-weight one, and is what the hype flag reads', () => {
+    const row = { name: 'Semiconductors', basket_name: 'Semiconductors', asof: '2026-10-07',
+        raw: { ret_12m: 0.9, spy_12m: 0.17, ret_24m: 1.88, spy_24m: 0.4, ret_12m_vw: 0.6, ret_24m_vw: 1.41, spy_24m_vw: 0.4, hype: true, hype_basis: 'size_weighted' } }
+    const text = formatFacts(row)
+    assert.match(text, /BY SIZE \(the big companies count for more — what the hype flag reads\): 12 months \+60%, 24 months \+141% → \+101% over the market/)
+    assert.match(text, /weighted by size, as that history was/)
+    assert.doesNotMatch(formatFacts({ ...row, raw: { ...row.raw, ret_24m_vw: undefined } }), /BY SIZE/)
+})

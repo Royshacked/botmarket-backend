@@ -53,7 +53,7 @@ export const BASE_RATES = Object.freeze({
     // Measured on value-weighted industries of every company of its time; the live flag reads equal-weighted
     // baskets of today's companies, which run hotter — so it is stated as a risk flag, not a probability for
     // THIS industry (code review 2026-10-11).
-    hype: 'Up 100%+ in two years and 100%+ above the market. Of 98 such run-ups across US industries since 1928, 22% fell 40%+ within 24 months (base rate 9%), and the median one trailed the market by 10.6% over the next two years. A risk flag, not a probability: that history used value-weighted industries, this flag reads an equal-weighted basket of today\'s companies, which runs hotter.',
+    hype: 'Up 100%+ in two years and 100%+ above the market. Of 98 such run-ups across US industries since 1928, 22% fell 40%+ within 24 months (base rate 9%), and the median one trailed the market by 10.6% over the next two years. A risk flag, not a probability: it reads the industry\'s companies weighted by size, as that history was (value-weighted), but only today\'s companies, the ones that survived.',
 })
 export const NOT_MEASURED = Object.freeze(['value_trap', 'customer_demand', 'momentum_at_turns'])
 
@@ -142,7 +142,11 @@ export function factsFor(row) {
         ret_24m: _num(r.ret_24m), spy_24m: _num(r.spy_24m), excess_24m: ex(r.ret_24m, r.spy_24m),
         rel_1m: _num(r.rel_1m), rel_3m: _num(r.rel_3m),
         ext_50: _num(r.ext_50), ext_percentile: _num(r.ext_percentile),
+        // By SIZE (the engine's size-weighted line, 2026-10-11): what the hype flag reads. The equal-weight
+        // numbers above let a few small names multiplying stand for the industry.
+        ret_12m_vw: _num(r.ret_12m_vw), ret_24m_vw: _num(r.ret_24m_vw), excess_24m_vw: ex(r.ret_24m_vw, r.spy_24m_vw),
         hype: typeof r.hype === 'boolean' ? r.hype : null,
+        hype_basis: r.hype_basis ?? null,
     } : null
     const base_rates = moved?.hype ? [{ key: 'hype', text: BASE_RATES.hype }] : []
     return { moved, base_rates, not_measured: [...NOT_MEASURED] }
@@ -176,6 +180,7 @@ export function formatFacts(row, regime = null) {
         ...shared,
         `  12 months ${_pct(moved.ret_12m)} vs SPY ${_pct(moved.spy_12m)} → ${_pct(moved.excess_12m)} over the market`,
         `  24 months ${_pct(moved.ret_24m)} vs SPY ${_pct(moved.spy_24m)} → ${_pct(moved.excess_24m)} over the market`,
+        ...(moved.ret_24m_vw != null ? [`  BY SIZE (the big companies count for more — what the hype flag reads): 12 months ${_pct(moved.ret_12m_vw)}, 24 months ${_pct(moved.ret_24m_vw)} → ${_pct(moved.excess_24m_vw)} over the market. Where it differs from the equal-weight line, a few smaller names drove the average.`] : []),
         `  last 1 / 3 months vs the S&P: ${_pct(moved.rel_1m, 1)} / ${_pct(moved.rel_3m, 1)}`,
         `  stretched: ${_pct(moved.ext_50, 1)} above its 50-day — ${pctile}`,
         `HYPE FLAG: ${moved.hype == null ? 'n/a (needs two years and SPY)' : moved.hype ? 'YES' : 'no'}`,
