@@ -130,8 +130,8 @@ Built engine-side as aggregates by industry and theme (§9), never as raw filing
 
 ## 5. Guardrails — so a conclusion is evidence, not a story
 
-Every assessment must carry these, and `checkAssessment` refuses one that omits them (as `checkScreen`
-refuses an undated catalyst today):
+Every assessment must carry these, and `checkAssessment` refuses one that omits them (as the retired
+screen's `checkScreen` refused an undated catalyst):
 
 1. **How much has already moved** — the run-up and the extension (§4.2), from code.
 2. **The base rates we tested**, attached by CODE, not recalled by the agent:
@@ -179,8 +179,8 @@ The only honest test of a judgment is forward: the model has read the past.
 
 ## 8. Cadence and cost
 
-An LLM pass over 163 sub-industries and the themes every week is expensive. Two layers, as the screen
-already does (`needsAgent`):
+An LLM pass over 163 sub-industries and the themes every week is expensive. Two layers, as the retired
+screen had (`needsAgent`):
 
 - **Change scan (engine, weekly, no LLM):** flags an industry or theme when something MOVED — the price
   (extension, a sharp relative move), the money (capex or buyback trend turning, a 13F shift, insider

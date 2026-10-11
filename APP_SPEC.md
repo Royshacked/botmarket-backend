@@ -5,7 +5,7 @@ flow diagrams see [README.md](README.md); for file layout see [CODE_MAP.md](CODE
 
 The app turns natural-language chat into **monitored trade ideas** that route to a
 broker. Six desks produce work — Axl (reception) · Mentor (`setup`, the trader) ·
-Atlas (portfolio) · Argus (scan) · Prometheus (`coverage`) · Pythia (`industry_view`) — and each
+Atlas (portfolio) · Argus (scan) · Prometheus (`coverage`) · Pythia (`industry_view`, `industry_assessment`) — and each
 authored kind is watched by its desk's own background monitor. The `idea` execution tier
 has no desk, so it is watched by two kind-blind loops instead (§2). One reconciler keeps
 entity state honest against the broker. Nothing reaches a broker while its venue is shut

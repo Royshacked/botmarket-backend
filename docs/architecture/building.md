@@ -75,8 +75,9 @@ candidates under evaluation** — `gpt-5.6-luna`, `qwen3.7-plus`, `mistral-mediu
 2026-09-21 `qwen3.7-flash`, `deepseek-v4.1-flash`, `gemini-3.8-flash`, all on
 OpenRouter — streaming through the OpenAI-format twin `providers/openaiCompat.provider.js`
 `streamOpenAICompatWithTools` (same tag suppressor, same tool handlers; `web_search` swapped for
-OpenRouter's web plugin). Mistral rode Mistral's own API until 2026-09-20, where the plugin does
-not exist and a desk simply had no web; the `mistral` endpoint stays in the provider for a model
+OpenRouter's own `openrouter:web_search` server tool since 2026-10-11 — its `web` plugin before — on a
+turn's first three rounds, the ledger booking OpenRouter's charged `usage.cost`). Mistral rode Mistral's
+own API until 2026-09-20, where neither exists and a desk simply had no web; the `mistral` endpoint stays in the provider for a model
 that only lives there. A candidate is
 `adminOnly` in `MODELS`, a registry flag that since 2026-09-21 gates nothing at run time: **every
 turn runs on the house chat model**, the admin's own included (`resolveAgentStream`). There is one
