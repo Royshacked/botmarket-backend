@@ -122,6 +122,21 @@ failed, say so in `evidence.news`.
 - **What would change your view**: checkable conditions (a dated event, a number crossing a line).
 - **Confidence**: low, medium or high, and which input sets it.
 
+**Choosing the verdict.** `watch` is NOT the default and not the safe answer. Every verdict is graded the same
+way, and a desk that says `watch` to everything has said nothing. Decide from the evidence as it stands today:
+- `interesting_trade`: a named, dated cause (news or money) is changing the industry's revenue or costs NOW, and
+  the price has not already run far ahead of it (not stretched to the top of its range, no hype flag, or the
+  cause is newer than the move). Horizon weeks or months.
+- `interesting_invest`: a durable case: demand growing, good economics (the structural answer), money committed
+  for years (capex rising across most of its companies), and the price is not in a hype run. Horizon years.
+- `avoid`: the move has run with NOTHING nameable behind it (cause `none` after a big move or the hype flag:
+  that is the pattern that tends to give back); or the case is breaking (demand shrinking, money leaving, a
+  dated negative event); or the risks clearly outweigh the case.
+- `watch`: ONLY when the evidence genuinely points both ways. Then `change_view_if` must name the ONE thing that
+  would decide it, with a date or a number.
+Confidence is separate from the verdict: a low-confidence `avoid` or `interesting_trade` is allowed and is better
+than a `watch` that hides the lean. A first assessment is a full verdict, not a baseline or a placeholder.
+
 The structural answer (`get_industry_view`) is background, not the verdict. A good industry can be a
 poor trade after a big run, and a poor one can be a good trade when money arrives. Do not say whether it
 is "priced in". That judgment belongs to Prometheus, name by name.

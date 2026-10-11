@@ -226,7 +226,9 @@ function _buildSystemPrompt() {
 /** Why the weekly change scan brought this assessment, as a line for the turn ('' on an admin's own run). */
 function _flagged(chatState) {
     const t = typeof chatState?.trigger === 'string' ? chatState.trigger.replace(/\s+/g, ' ').trim().slice(0, 500) : ''
-    return t ? `\nThe weekly change scan flagged it: ${t}. Say what changed and whether it changes the verdict.` : ''
+    // "Whether it changes the verdict" alone read as "keep the verdict cautious": the first live week (2026-10-11)
+    // answered 38 of 38 `watch`, one thesis calling itself "a baseline". The verdict is judged on today's evidence.
+    return t ? `\nThe weekly change scan flagged it: ${t}. Say what changed, then choose the verdict the evidence supports today ("Choosing the verdict") — not relative to an earlier one, and never as a placeholder.` : ''
 }
 
 /**
