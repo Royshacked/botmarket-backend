@@ -47,7 +47,7 @@ const _deps = {
     cap: () => config.pythiaWeeklyCap,
     maxUsd: () => config.pythiaWeeklyMaxUsd,
     // Step 7: the week's FOR SWING / FOR LONG TERM verdicts send names to Prometheus's research queue.
-    houseScan: (results) => runHouseScan(results),
+    houseScan: (results, opts) => runHouseScan(results, undefined, opts),
     db: () => getDb(),
     now: () => new Date().toISOString(),
 }
@@ -244,8 +244,9 @@ export async function runWeekly({ force = false, by = null, limit = Infinity, de
         if (!paused) {
             // The hand-off (step 7): the whole week's results, a resumed week's earlier chunks included. Never fatal —
             // the week is done whether or not the queue took its names.
-            const house = await Promise.resolve(deps.houseScan?.([...prior, ...results])).catch(err => ({ error: err.message }))
-            if (house) await coll.updateOne({ id }, { $set: { house_scan: { queued: house.queued ?? [], considered: house.considered ?? 0, skipped_full: house.skipped_full ?? 0, ...(house.error ? { error: house.error } : {}) } } })
+            const before = week?.house_scan?.queued ?? []
+            const house = await Promise.resolve(deps.houseScan?.([...prior, ...results], { alreadyQueued: before.length })).catch(err => ({ error: err.message }))
+            if (house) await coll.updateOne({ id }, { $set: { house_scan: { queued: [...before, ...(house.queued ?? [])], considered: house.considered ?? 0, skipped_full: house.skipped_full ?? 0, ...(house.error ? { error: house.error } : {}) } } })
             await _prune(coll)
         }
         const published = results.filter(r => r.outcome === 'published').length

@@ -349,19 +349,19 @@ async function getThemeAssessment(themeId) {
 
 /**
  * The standing verdict per sub-industry code, light — for the desks that act on it (pythia-assessment.md §10:
- * Atlas's limits and review, Axl, the house scan). → Map(code → { verdict, horizon, hype, decides_by, question,
- * thesis, expires_at, assessed_at }).
+ * Atlas's limits and review, Axl). → Map(code → { verdict, horizon, hype, decides_by, question }). An EXPIRED verdict
+ * is left out: it is due for reassessment, and must not keep gating saves meanwhile (code review 2026-10-11). Only the
+ * fields the callers read — every Atlas tool call, plan, review and save pays for this read.
  */
-async function verdictsForCodes(codes) {
+async function verdictsForCodes(codes, { now = new Date().toISOString() } = {}) {
     const list = [...new Set((codes ?? []).filter(Boolean))]
     if (!list.length) return new Map()
     const db = await _io.db()
     const rows = await db.collection(COLLECTION).find({ 'subject.kind': 'industry', 'subject.code': { $in: list } },
-        { projection: { _id: 0, 'subject.code': 1, verdict: 1, horizon: 1, 'moved.hype': 1, decides_by: 1, question: 1, thesis: 1, expires_at: 1, assessed_at: 1 } }).toArray()
-    return new Map(rows.map(r => [r.subject.code, {
+        { projection: { _id: 0, 'subject.code': 1, verdict: 1, horizon: 1, 'moved.hype': 1, decides_by: 1, question: 1, expires_at: 1 } }).toArray()
+    return new Map(rows.filter(r => !r.expires_at || r.expires_at > now).map(r => [r.subject.code, {
         verdict: LEGACY_VERDICTS[r.verdict] ?? r.verdict, horizon: r.horizon ?? null, hype: r.moved?.hype === true,
-        decides_by: r.decides_by ?? null, question: r.question ?? null, thesis: r.thesis ?? null,
-        expires_at: r.expires_at ?? null, assessed_at: r.assessed_at ?? null,
+        decides_by: r.decides_by ?? null, question: r.question ?? null,
     }]))
 }
 

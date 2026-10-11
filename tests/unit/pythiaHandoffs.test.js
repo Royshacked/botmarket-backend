@@ -33,7 +33,7 @@ test('no sub-industry above a third; the excess goes to the others, or to cash w
     const r = applyIndustryLimits([{ asset: 'A', weight: 0.4 }, { asset: 'B', weight: 0.3 }, { asset: 'C', weight: 0.1 }, { asset: 'D', weight: 0.1 }, { asset: 'E', weight: 0.1 }], by)
     assert.ok(r.weights[0] + r.weights[1] <= INDUSTRY_CAP + 1e-9)
     assert.ok(Math.abs(sum(r.weights) - 1) < 1e-9, 'fully invested when the others can take it')
-    assert.ok(r.weights[0] / r.weights[1] - 4 / 3 < 1e-9, 'inside the capped industry, the proportions hold')
+    assert.ok(Math.abs(r.weights[0] / r.weights[1] - 4 / 3) < 1e-9, 'inside the capped industry, the proportions hold')
     assert.deepEqual(r.capped, ['semis'])
     const two = applyIndustryLimits([{ asset: 'A', weight: 0.5 }, { asset: 'C', weight: 0.5 }], by)
     assert.ok(Math.abs(two.cash - 1 / 3) < 1e-9, 'two industries cannot hold the whole book under the cap')
@@ -169,7 +169,8 @@ test('the house scan queues the largest uncovered names of this week\'s swing an
     assert.deepEqual(queued.map(q => q.symbol), ['STLD', 'CLF', 'X', 'LRCX', 'AMAT', 'KLAC', 'NVDA', 'AVGO', 'AMD'],
         'Steel minus the covered NUE; the theme\'s SUPPLIERS first, then its direct link; never order 3, never Avoid')
     assert.equal(r.queued.length, 9)
-    assert.equal(queued[0].source, 'argus')
+    assert.equal(queued[0].source, 'pythia', "Pythia's verdict picked it, not Argus")
+    assert.equal(queued[0].context.reason, 'Pythia: Steel for swing')
     assert.equal(queued[0].requestedBy, 'house')
     assert.deepEqual(queued[0].context, pythiaContext({ id: 'ia_ind_11', subject: { kind: 'industry', name: 'Steel' }, verdict: 'swing', horizon: 'months', thesis: 'Tariffs lift prices.', risks: ['demand', 'imports', 'a', 'b'] }))
     assert.equal(queued[0].context.risks.length, 3)
@@ -210,7 +211,7 @@ test('a single-industry mandate lifts the cap — the brake and the Avoid flag s
 
     const quote = async () => ({ price: 10 })
     const add = await _industryLimitsForAdd({ asset: 'NEW', allocationRatio: 0.5 }, [{ asset: 'OLD', status: 'long', quantity: 900 }], 10_000,
-        { quote, industries: async () => ({ NEW: ind('semis'), OLD: ind('semis') }), singleIndustry: true })
+        { quote, industries: async () => ({ NEW: ind('semis'), OLD: ind('semis') }), mandate: { concentration: 'single_industry' } })
     assert.deepEqual(add, { ok: true, spec: { asset: 'NEW', allocationRatio: 0.5 } }, 'no cap on a single-industry book')
 })
 

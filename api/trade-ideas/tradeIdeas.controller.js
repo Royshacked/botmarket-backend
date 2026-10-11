@@ -3,7 +3,10 @@ import { confirmManualEntry, confirmManualExit, confirmManualAdd, activateManual
 import { sendReason } from '../_shared/reason.util.js'
 import { makeEntityController } from '../_shared/entityController.util.js'
 import { makeHandle } from '../_shared/handle.util.js'
-import { avoidNames } from '../../services/industryLimits.service.js'
+import { avoidNames, avoidOkCovers, industriesFor, limitAddByRatio } from '../../services/industryLimits.service.js'
+import { listPortfolioItems } from '../../services/portfolioState.service.js'
+import { portfolioChatService } from '../portfolio/portfolioChat.service.js'
+import { TERMINAL } from '../../services/entity/vocabulary.js'
 
 const LOG     = '[tradeIdeas:controller]'
 const _handle = makeHandle(LOG)
@@ -89,9 +92,37 @@ export const getTradeIdea     = crud.get
 export const getTradeIdeas    = crud.list
 export const deleteTradeIdea  = crud.remove
 
+/**
+ * The house's industry limits on ONE idea added to a BOOK by weight — an edit-mode add (code review 2026-10-11: those
+ * reached this route and skipped every limit). The book's open ideas carry ratios; the mandate decides the single-
+ * industry exception. Read failures do not block (industriesFor logs them). Injectable for tests.
+ */
+const _bookDeps = {
+    siblings: (portfolioId, userId) => listPortfolioItems(portfolioId, userId, { projection: { _id: 0, asset: 1, allocationRatio: 1, status: 1 } }),
+    mandate:  (portfolioId, userId) => portfolioChatService.getMandate(portfolioId, userId),
+    views:    (symbols) => industriesFor(symbols),
+}
+export function _setBookDeps(d) { Object.assign(_bookDeps, d) }
+
+export async function _bookAddGate(body, userId, deps = _bookDeps) {
+    const siblings = (await deps.siblings(body.portfolioId, userId).catch(() => [])).filter(s => !TERMINAL.includes(s.status))
+    const [views, mandate] = await Promise.all([
+        deps.views([body.asset ?? body.ticker, ...siblings.map(s => s.asset)]),
+        deps.mandate(body.portfolioId, userId).catch(() => null),
+    ])
+    return limitAddByRatio({ asset: body.asset ?? body.ticker, allocationRatio: body.allocationRatio }, siblings, views, { mandate, avoidOk: body.avoid_ok })
+}
+
 export const createTradeIdea = _handle('createTradeIdea', async (req, res) => {
-    const body = req.body ?? {}
+    let body = req.body ?? {}
     if (!body.asset && !body.ticker) return res.status(400).send({ error: 'Missing asset' })
+
+    if (body.portfolioId) {
+        const gate = await _bookAddGate(body, req.user._id)
+        if (!gate.ok) return res.status(409).send({ error: gate.reason, outcome: gate.reason, detail: gate.detail, ...(gate.avoid ? { avoid: gate.avoid } : {}) })
+        const { avoid_ok, ...rest } = body   // eslint-disable-line no-unused-vars -- the OK is a request flag, not part of the idea
+        body = { ...rest, ...(gate.allocationRatio != null ? { allocationRatio: Number(gate.allocationRatio.toFixed(4)) } : {}) }
+    }
 
     const result = await ideaService.saveIdea(body, req.user._id)
     if (!result.ok) {
@@ -107,13 +138,14 @@ export const createTradeIdea = _handle('createTradeIdea', async (req, res) => {
 })
 
 export const createBatchIdeas = _handle('createBatchIdeas', async (req, res) => {
-    const { plan, accounts = [], mainAccountId = null, portfolioId = null, avoid_ok = false } = req.body ?? {}
+    const { plan, accounts = [], mainAccountId = null, portfolioId = null, avoid_ok = [] } = req.body ?? {}
     if (!plan?.ideas?.length) return res.status(400).send({ error: 'Missing plan.ideas' })
 
     // A book holding a name in an industry Pythia rates AVOID is saved only with the user's explicit OK (step 7,
     // Roy 2026-10-11). Checked HERE from the symbols — not from the plan's own `limits`, which the client carries.
     const avoid = await avoidNames(plan.ideas.map(i => i.asset))
-    if (avoid.length && avoid_ok !== true) {
+    // The OK names the symbols the user said yes to — a name turned AVOID after they were asked is not covered by it.
+    if (avoid.length && !avoidOkCovers(avoid, avoid_ok)) {
         return res.status(409).send({ error: 'avoid_needs_ok', outcome: 'avoid_needs_ok', avoid })
     }
 

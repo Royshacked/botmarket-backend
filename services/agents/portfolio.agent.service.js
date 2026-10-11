@@ -20,7 +20,7 @@ import { SECTORS } from '../entity/vocabulary.js'
 import { buildTagCaptures } from '../llmStream.util.js'
 import { makeRouteCapture, ROUTE_TAGS, buildRouteRule } from '../routing.util.js'
 import { buildSchoolSection, normalizeAllocation, normalizeSelection } from '../investorSchools.js'
-import { applyIndustryLimits, industriesFor, avoidNames, isSingleIndustry, INDUSTRY_CAP } from '../industryLimits.service.js'
+import { applyIndustryLimits, industriesFor, avoidNames, capFor } from '../industryLimits.service.js'
 
 const __dirname    = dirname(fileURLToPath(import.meta.url))
 const LOG   = '[portfolioAgent]'
@@ -376,6 +376,9 @@ export async function _markAvoidAdds(update, deps = { avoid: (symbols) => avoidN
     const changes = Array.isArray(update?.changes) ? update.changes : []
     const adds = changes.filter(c => c?.action === 'add_item' && c.item?.asset)
     for (const c of changes) if (c?.item && 'avoid_ok' in c.item) delete c.item.avoid_ok
+    // A share count on a review add is the model's (the prompt has the platform size it from a weight) — and an explicit
+    // count skips the hype brake, so it is dropped here (code review 2026-10-11).
+    for (const c of adds) if ('quantity' in c.item) delete c.item.quantity
     if (!adds.length) return update
     const flagged = new Map((await deps.avoid(adds.map(c => c.item.asset))).map(a => [a.asset, a.industry]))
     for (const c of adds) {
@@ -410,18 +413,23 @@ export async function _sizePlan(plan, { mandate = null } = {}) {
 
     // The house's industry limits, in CODE (pythia-assessment.md §10, step 7): the hype brake, the one-third
     // sub-industry cap, and Avoid flagged for the user's OK. What they changed rides on the plan as `limits`.
-    // A single-industry MANDATE lifts the cap (Roy, 2026-10-11). Share counts the USER gave (no position size) are
-    // theirs: the weights are left alone, and only the Avoid flag applies (code review 2026-10-11).
-    const single = isSingleIndustry(mandate)
-    const lim = applyIndustryLimits(ideas.map(i => ({ asset: i.asset, weight: i.allocationRatio })), await industriesFor(ideas.map(i => i.asset)),
-        { cap: single ? Infinity : INDUSTRY_CAP })
-    const ownSizes = !(Number(plan.positionSize) > 0) && ideas.some(i => Number(i.quantity) > 0)
-    if (!ownSizes) ideas.forEach((idea, i) => { idea.allocationRatio = Number(lim.weights[i].toFixed(4)) })
-    const notes = ownSizes ? lim.notes.filter(n => /AVOID/.test(n)) : [...lim.notes]
-    if (ownSizes && (lim.braked.length || lim.capped.length)) notes.unshift('Your own share counts are kept — the hype brake and the industry cap apply only to sizes the platform computes.')
-    if (single) notes.unshift('Industry cap off: the mandate is a single-industry book.')
-    plan.limits = { notes, avoid: lim.avoid, braked: ownSizes ? [] : lim.braked, capped: ownSizes ? [] : lim.capped,
-        cash: ownSizes ? 0 : Number(lim.cash.toFixed(4)), single_industry: single }
+    // A single-industry MANDATE lifts the cap — only when the book bears it out (capFor: ≥80% in one sub-industry;
+    // the field is the model's to write). A share count the user gave (no position size) is kept for THAT idea; the
+    // limits work on the others (code review 2026-10-11 — per idea, not the whole plan off because one had a count).
+    const views = await industriesFor(ideas.map(i => i.asset))
+    const all = ideas.map(i => ({ asset: i.asset, weight: i.allocationRatio }))
+    const { cap, note: capNote } = capFor(mandate, all, views)
+    const noBase = !(Number(plan.positionSize) > 0)
+    const own = ideas.map(i => noBase && Number(i.quantity) > 0)
+    const restIdx = ideas.map((_, k) => k).filter(k => !own[k])
+    const lim = applyIndustryLimits(restIdx.map(k => all[k]), views, { cap })
+    restIdx.forEach((k, j) => { ideas[k].allocationRatio = Number(lim.weights[j].toFixed(4)) })
+    const avoid = applyIndustryLimits(all, views, { cap: Infinity }).avoid      // every name, own-sized ones included
+    const notes = [...lim.notes.filter(n => !/AVOID/.test(n))]
+    if (avoid.length) notes.push(`Pythia rates ${[...new Set(avoid.map(x => x.industry))].join(', ')} AVOID (${avoid.map(x => x.asset).join(', ')}) — the book is saved only with your OK.`)
+    if (own.some(Boolean)) notes.unshift(`Your own share counts are kept (${ideas.filter((_, k) => own[k]).map(i => i.asset).join(', ')}) — the brake and the cap apply to the sizes the platform computes.`)
+    if (capNote) notes.unshift(capNote)
+    plan.limits = { notes, avoid, braked: lim.braked, capped: lim.capped, cash: Number(lim.cash.toFixed(4)), single_industry: cap === Infinity }
     const weights = ideas.map(i => i.allocationRatio)
 
     const positionSize = Number(plan.positionSize)

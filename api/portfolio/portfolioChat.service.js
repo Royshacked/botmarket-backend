@@ -523,6 +523,13 @@ async function captureFingerprint(portfolioId, userId, reason) {
                 industries = prev?.lastFingerprint?.industries ?? null
             }
         }
+        // Verdicts the join could not read keep the previous fingerprint's — "unread" stored as "no verdict" would make
+        // the next good read look like a NEW Avoid or hype (code review 2026-10-11).
+        if (industries && Object.values(industries).some(v => v?.assessment_unread)) {
+            const prev = (await getPortfolioLifecycle(portfolioId, userId).catch(() => null))?.lastFingerprint?.industries ?? {}
+            industries = Object.fromEntries(Object.entries(industries).map(([sym, v]) =>
+                [sym, v?.assessment_unread ? { ...v, verdict: prev[sym]?.verdict ?? null, hype: prev[sym]?.hype === true } : v]))
+        }
         const fingerprint = buildFingerprint({ reason, state, macroRaw, benchmark, industries })
         await setPortfolioLifecycle(portfolioId, userId, { lastFingerprint: fingerprint })
         logger.info(LOG, 'fingerprint captured', { portfolioId, reason, benchmark: tk ?? null, bookValue: fingerprint.bookValue })

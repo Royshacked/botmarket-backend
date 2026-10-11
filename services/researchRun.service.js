@@ -65,7 +65,7 @@ export function getRun() {
  * house-owned but the research turn is still made through a user's tools and level. `model` is
  * passed through untouched: absent, the agent's own default (the same one the desk uses).
  */
-export async function startRun({ userId, audience = null, model = null } = {}, deps = _io) {
+export async function startRun({ userId, audience = null, model = null, symbols = null } = {}, deps = _io) {
     if (state.run?.status === 'running' || state.starting) return { ok: false, reason: 'already_running', run: getRun() }
     state.starting = true
 
@@ -73,6 +73,11 @@ export async function startRun({ userId, audience = null, model = null } = {}, d
     try {
         queued = await deps.listQueue({ status: 'queued' })
         if (queued === null) return { ok: false, reason: 'queue_unavailable' }   // a failed read, not an empty queue
+        // `symbols`: a run for these names only (a sleeve's); without it, the whole queue (the admin's Start).
+        if (Array.isArray(symbols)) {
+            const want = new Set(symbols.map(_sym))
+            queued = queued.filter(q => want.has(_sym(q.symbol)))
+        }
         if (!queued.length)  return { ok: false, reason: 'nothing_queued' }
 
         try { covered = await deps.coveredSymbols() }
@@ -263,7 +268,8 @@ export function researchOpening(item) {
         const book  = { swing: 'FOR SWING', long_term: 'FOR LONG TERM' }[c.verdict] ?? String(c.verdict ?? '').toUpperCase()
         const where = c.kind === 'theme' ? `the theme ${c.subject}${c.link ? ` (via ${c.link})` : ''}` : `its industry, ${c.subject}`
         const risks = c.risks?.length ? ` Risks it named: ${c.risks.join('; ')}.` : ''
-        return `Research ${symbol} for coverage — Pythia rates ${where} ${book}${c.horizon ? ` (${c.horizon})` : ''}: ${c.thesis ?? ''}${risks} Judge whether ${symbol} is already priced for it.`
+        const thesis = c.thesis ? `: ${c.thesis}` : '.'
+        return `Research ${symbol} for coverage — Pythia rates ${where} ${book}${c.horizon ? ` (${c.horizon})` : ''}${thesis}${risks} Judge whether ${symbol} is already priced for it.`
     }
     if (!c?.sector) return `Research ${symbol} for coverage.`
     // A SLEEVE candidate (sleeveSource): the mandate that surfaced it is a user's book, not the house

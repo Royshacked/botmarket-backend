@@ -38,7 +38,7 @@ import { orderSymbol }            from '../../services/exitOrders.util.js'
 import { deferIfClosed }          from '../../services/pendingAction/executionGate.js'
 import { isSelfExecuted }         from '../../services/venue.resolve.service.js'
 import { notifyRebalanceApplied } from '../../services/rebalanceNotify.service.js'
-import { industriesFor, isSingleIndustry, INDUSTRY_CAP, HYPE_FACTOR } from '../../services/industryLimits.service.js'
+import { industriesFor, isSingleIndustry, INDUSTRY_CAP, HYPE_FACTOR, SINGLE_INDUSTRY_MIN } from '../../services/industryLimits.service.js'
 
 const LOG        = '[portfolio:rebalance]'
 const COLLECTION = ENTITIES
@@ -148,17 +148,17 @@ export async function applyRebalance(portfolioId, userId, update) {
     // same block must not shrink the base its own adds are sized against — and a leg closed a
     // moment ago still shows in the broker's position list, so reading it per-change would make the
     // size depend on change order and fill latency. Skipped entirely when nothing is being added.
-    const adds = update.changes.some(c => c.action === 'add_item')
+    const adds = update.changes.some(c => c.action === 'add_item' || c.action === 'add_to_item')
     const bookValue = adds ? await _bookValue(portfolioId, userId) : null
-    // A single-industry mandate lifts the house's industry cap for this book's adds (step 7, Roy 2026-10-11).
-    const singleIndustry = adds ? isSingleIndustry(await portfolioChatService.getMandate(portfolioId, userId).catch(() => null)) : false
+    // The mandate, for the single-industry exception to the house's cap (step 7) — read once, for every add.
+    const mandate = adds ? await portfolioChatService.getMandate(portfolioId, userId).catch(() => null) : null
 
     const results = []
     const manualExitLegs  = []   // manual close/trim legs → one exit Fill card
     const manualEntryLegs = []   // manual add (scale-in) + new-holding legs → one entry Fill card
     for (const change of update.changes) {
         try {
-            const r = await _applyOne(portfolioId, userId, change, bookValue, { singleIndustry })
+            const r = await _applyOne(portfolioId, userId, change, bookValue, { mandate })
             if (r?.manualExitLeg)  manualExitLegs.push(r.manualExitLeg)
             if (r?.manualEntryLeg) manualEntryLegs.push(r.manualEntryLeg)
             // `asset` rides along for the receipt card, which has to NAME what moved. An add carries
@@ -272,10 +272,10 @@ async function _applyOne(portfolioId, userId, change, bookValue = null, ctx = {}
             return _trimItem(db, itemId, userId, change)
 
         case 'add_item':
-            return _addItem(db, portfolioId, userId, spec, bookValue, { singleIndustry: ctx.singleIndustry === true })
+            return _addItem(db, portfolioId, userId, spec, bookValue, { mandate: ctx.mandate ?? null })
 
         case 'add_to_item':
-            return _addToItem(db, itemId, userId, change)
+            return _addToItem(db, itemId, userId, change, undefined, undefined, { bookValue, mandate: ctx.mandate ?? null })
 
         default:
             return { ok: false, reason: 'unknown_action' }
@@ -460,7 +460,7 @@ export async function _addItem(db, portfolioId, userId, spec, bookValue = null, 
         updateItem = ideaService.updateIdea,
         quote      = getNumericQuote,
         industries = industriesFor,
-        singleIndustry = false,
+        mandate    = null,
     } = deps
 
     if (!spec?.asset) return { ok: false, reason: 'no_asset' }
@@ -480,12 +480,14 @@ export async function _addItem(db, portfolioId, userId, spec, bookValue = null, 
     if (siblings.some(s => _sameHolding(s, spec))) return { ok: false, reason: 'already_held_use_add_to_item' }
 
     // The house's industry limits (step 7, services/industryLimits.service.js) — the same three as construction.
-    const limits = await _industryLimitsForAdd(spec, siblings, bookValue, { quote, industries, singleIndustry })
+    const limits = await _industryLimitsForAdd(spec, siblings, bookValue, { quote, industries, mandate })
     if (!limits.ok) return limits
     const quantity = limits.quantity !== undefined ? limits.quantity : await _sizeNewItem(limits.spec, bookValue, quote)
 
     const res = await saveItem({
-        ...spec,
+        // The braked weight is what is stored: the next review reads it as the target, and the original would read as
+        // drift and buy the brake back (code review 2026-10-11). The user's OK is not part of the holding.
+        ...Object.fromEntries(Object.entries(limits.spec).filter(([k]) => k !== 'avoid_ok')),
         ...(quantity != null ? { quantity } : {}),
         // A manual book can't carry a broker order plan — it goes through the Fill card below.
         // Set explicitly either way: a spec that carried its own `immediate` must never decide this.
@@ -614,32 +616,74 @@ const _GONE = new Set(TERMINAL)
  * size: braking it would override them, so it is only capped. → `{ ok:true, spec, quantity? }` — `quantity` set when
  * the cap had to cut it — or `{ ok:false, reason, detail }`. Exported for tests.
  */
-export async function _industryLimitsForAdd(spec, siblings, bookValue, { quote, industries, singleIndustry = false }) {
+export async function _industryLimitsForAdd(spec, siblings, bookValue, { quote, industries, mandate = null }) {
     const asset = String(spec.asset).toUpperCase()
     const held = siblings.filter(s => !_GONE.has(s.status))
     const views = await industries([asset, ...held.map(s => s.asset)])
     const mine = views[asset]
     if (!mine?.code) return { ok: true, spec }
     if (mine.assessment?.verdict === 'avoid' && spec.avoid_ok !== true) {
-        return { ok: false, reason: 'avoid_industry', detail: `Pythia rates ${mine.name ?? mine.code} AVOID — add ${asset} only with the user's explicit OK (avoid_ok)` }
+        const industry = mine.name ?? mine.code
+        // `avoid` rides on the refusal so the card can ask and retry — a verdict that turned after the proposal was
+        // never marked, and the add could otherwise be refused forever (code review 2026-10-11).
+        return { ok: false, reason: 'avoid_industry', detail: `Pythia rates ${industry} AVOID — add ${asset} only with the user's explicit OK`, avoid: [{ asset, industry }] }
     }
     const explicit = Number(spec.quantity) > 0
     const sized = !explicit && mine.assessment?.hype && Number(spec.allocationRatio) > 0
         ? { ...spec, allocationRatio: Number(spec.allocationRatio) * HYPE_FACTOR } : spec
-    if (singleIndustry || !(bookValue > 0)) return { ok: true, spec: sized }
+    if (!(bookValue > 0)) return { ok: true, spec: sized }
     const price = Number((await quote(asset).catch(() => null))?.price)
     if (!(price > 0)) return { ok: true, spec: sized }
-    let already = 0
-    for (const s of held) {
-        if (views[String(s.asset).toUpperCase()]?.code !== mine.code || !(Number(s.quantity) > 0)) continue
-        const p = Number((await quote(s.asset).catch(() => null))?.price)
-        if (p > 0) already += Number(s.quantity) * p
-    }
+    const already = await _heldIn(mine.code, held, views, quote)
+    // A single-industry mandate lifts the cap only for a book that IS one industry (industryLimits.capFor's rule).
+    if (isSingleIndustry(mandate) && already >= SINGLE_INDUSTRY_MIN * bookValue) return { ok: true, spec: sized }
     const room = INDUSTRY_CAP * bookValue - already
     const want = explicit ? Math.floor(Number(spec.quantity)) : Math.floor(bookValue * Number(sized.allocationRatio || 0) / price)
     if (room < price) return { ok: false, reason: 'industry_cap', detail: `${mine.name ?? mine.code} already holds a third of the book` }
     if (want * price > room) return { ok: true, spec: sized, quantity: Math.floor(room / price) }
     return { ok: true, spec: sized }
+}
+
+/** What the book holds in one sub-industry, at live prices. */
+async function _heldIn(code, held, views, quote) {
+    let v = 0
+    for (const s of held) {
+        if (views[String(s.asset).toUpperCase()]?.code !== code || !(Number(s.quantity) > 0)) continue
+        const p = Number((await quote(s.asset).catch(() => null))?.price)
+        if (p > 0) v += Number(s.quantity) * p
+    }
+    return v
+}
+
+/**
+ * The house's limits on SCALING INTO a holding (code review 2026-10-11: add_to_item grew a holding past the cap, or
+ * into an industry turned AVOID, unchecked). AVOID needs the user's OK (`change.avoid_ok`); HYPE halves the add; the
+ * cap counts the whole sub-industry, this holding included. → `{ ok:true, addFraction }` (possibly cut) or a refusal.
+ * Exported for tests.
+ */
+export async function _industryLimitsForScaleIn(item, legs, change, { bookValue, siblings, quote, industries, mandate = null }) {
+    const f = Number(change.addFraction)
+    const asset = String(item.asset ?? '').toUpperCase()
+    const held = (siblings ?? []).filter(s => !_GONE.has(s.status))
+    const views = await industries([asset, ...held.map(s => s.asset)])
+    const mine = views[asset]
+    if (!mine?.code) return { ok: true, addFraction: f }
+    if (mine.assessment?.verdict === 'avoid' && change.avoid_ok !== true) {
+        const industry = mine.name ?? mine.code
+        return { ok: false, reason: 'avoid_industry', detail: `Pythia rates ${industry} AVOID — add to ${asset} only with the user's explicit OK`, avoid: [{ asset, industry }] }
+    }
+    let frac = mine.assessment?.hype ? f * HYPE_FACTOR : f
+    if (!(bookValue > 0)) return { ok: true, addFraction: frac }
+    const price = Number((await quote(asset).catch(() => null))?.price)
+    const qty = (legs ?? []).reduce((s, l) => s + (Number(l.quantity) || 0), 0) || Number(item.quantity) || 0
+    if (!(price > 0) || !(qty > 0)) return { ok: true, addFraction: frac }
+    const already = await _heldIn(mine.code, held, views, quote)
+    if (isSingleIndustry(mandate) && already >= SINGLE_INDUSTRY_MIN * bookValue) return { ok: true, addFraction: frac }
+    const room = INDUSTRY_CAP * bookValue - already
+    const maxF = room / (qty * price)
+    if (maxF <= 1e-9) return { ok: false, reason: 'industry_cap', detail: `${mine.name ?? mine.code} already holds a third of the book` }
+    if (frac > maxF) frac = maxF
+    return { ok: true, addFraction: frac }
 }
 
 /**
@@ -690,15 +734,26 @@ async function _sizeNewItem(spec, bookValue, quote) {
  * grow here. `broker` is injectable for tests. targetAllocationRatio is advisory.
  * LIMITATION: a holding that DOES carry native exits won't have them resized here.
  */
-export async function _addToItem(db, itemId, userId, change, broker = brokerService, gate = _gate) {
+export async function _addToItem(db, itemId, userId, change, broker = brokerService, gate = _gate, limitsCtx = null) {
     // Checked before the read, for the same reason the trim's fraction is: it is the caller's own
     // input and answering it costs nothing.
-    const f = Number(change.addFraction)
+    let f = Number(change.addFraction)
     if (!(f > 0)) return { ok: false, reason: 'bad_addFraction' }
 
     // Past entry only: a pre-entry or closed holding belongs to add_item, not to this verb.
     const { item, legs, refusal } = await _positionedItem(db, itemId, userId, { requirePastEntry: true })
     if (refusal) return refusal
+
+    // The house's industry limits on a scale-in (step 7) — before either branch, manual or broker.
+    if (limitsCtx) {
+        const siblings = item.portfolioId ? await listPortfolioItems(item.portfolioId, userId, { db, projection: { asset: 1, status: 1, quantity: 1 } }).catch(() => []) : []
+        const lim = await _industryLimitsForScaleIn(item, legs, change, {
+            bookValue: limitsCtx.bookValue, siblings, mandate: limitsCtx.mandate,
+            quote: limitsCtx.quote ?? getNumericQuote, industries: limitsCtx.industries ?? industriesFor,
+        })
+        if (!lim.ok) return lim
+        f = lim.addFraction
+    }
 
     // Manual: no broker to hit — hand the add back as an entry leg so applyRebalance posts a Fill card.
     // confirmManualAdd grows the live position using the reported size, or the pendingAddQty stamped

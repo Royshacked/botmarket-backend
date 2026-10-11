@@ -24,11 +24,46 @@ const _pct = (v) => `${Math.round(v * 100)}%`
 
 /**
  * A mandate that IS one industry (Roy, 2026-10-11: "let a single-industry mandate override the cap") — the user said
- * so, and Atlas recorded it as `concentration: "single_industry"`. The cap is off for that book; the hype brake and
- * the Avoid flag still apply. Pure.
+ * so, and Atlas recorded it as `concentration: "single_industry"`. Pure.
  */
 export function isSingleIndustry(mandate) {
     return mandate?.concentration === 'single_industry'
+}
+
+/**
+ * The share of the book that must sit in ONE sub-industry before a single-industry mandate lifts the cap (code review
+ * 2026-10-11: the mandate field is written by the model, so the book itself has to bear it out — an ordinary book
+ * with the flag keeps its cap).
+ */
+export const SINGLE_INDUSTRY_MIN = 0.8
+
+/** The largest share of `total` any one sub-industry holds in these weights. Pure. */
+export function topIndustryShare(items, bySymbol = {}) {
+    const total = items.reduce((s, i) => s + (i.weight > 0 ? i.weight : 0), 0)
+    if (!(total > 0)) return 0
+    const by = new Map()
+    for (const i of items) {
+        const c = bySymbol[String(i.asset ?? '').toUpperCase()]?.code
+        if (c && i.weight > 0) by.set(c, (by.get(c) ?? 0) + i.weight)
+    }
+    return Math.max(0, ...by.values()) / total
+}
+
+/**
+ * The cap for this book: none when the mandate is single-industry AND the book is (≥ SINGLE_INDUSTRY_MIN in one
+ * sub-industry), else INDUSTRY_CAP. → `{ cap, note }`, `note` saying why a flag was not honoured. Pure.
+ */
+export function capFor(mandate, items, bySymbol = {}) {
+    if (!isSingleIndustry(mandate)) return { cap: INDUSTRY_CAP, note: null }
+    const top = topIndustryShare(items, bySymbol)
+    if (top >= SINGLE_INDUSTRY_MIN - 1e-9) return { cap: Infinity, note: 'Industry cap off: the mandate is a single-industry book.' }
+    return { cap: INDUSTRY_CAP, note: `The mandate says single-industry, but no industry holds ${_pct(SINGLE_INDUSTRY_MIN)} of this book (the largest ${_pct(top)}) — the cap stays.` }
+}
+
+/** Does the user's OK (`avoid_ok`: the symbols they said yes to) cover every Avoid name? Pure. */
+export function avoidOkCovers(avoid, ok) {
+    const yes = new Set((Array.isArray(ok) ? ok : []).map(s => String(s ?? '').toUpperCase()))
+    return (avoid ?? []).every(a => yes.has(String(a.asset ?? '').toUpperCase()))
 }
 
 /**
@@ -49,7 +84,12 @@ export function applyIndustryLimits(items, bySymbol = {}, { cap = INDUSTRY_CAP }
         if (info[k]?.assessment?.hype) { braked.push(i.asset); return base * HYPE_FACTOR }
         return base
     })
-    if (braked.length) {
+    const weighted = items.filter(i => i.weight > 0).length
+    if (braked.length && braked.length === weighted) {
+        // Every name is braked: halving them all and rescaling changes nothing, so say THAT, not "at half weight".
+        w = items.map(i => (i.weight > 0 ? i.weight : 0))
+        notes.push(`Every name here is in a hype industry, so the brake has nothing to shift weight to — the weights stand; consider holding cash.`)
+    } else if (braked.length) {
         const s = w.reduce((a, b) => a + b, 0)
         w = w.map(x => x * total / s)
         notes.push(`Hype brake: ${braked.join(', ')} at half weight — ${braked.length === 1 ? 'its industry has' : 'their industries have'} run up 100%+ in two years and 100%+ over the market.`)
@@ -107,6 +147,34 @@ export async function industriesFor(symbols, deps = _deps) {
         logger.warn(LOG, 'industries not read — limits not applied', err.message)
         return {}
     }
+}
+
+/**
+ * The limits on ONE name added to a book by WEIGHT — an edit-mode add (`POST /api/trade-ideas` with a portfolioId),
+ * where the book has no live value yet and its siblings carry ratios (code review 2026-10-11: those adds bypassed
+ * every limit). `siblings`: `[{ asset, allocationRatio }]` of the book's open ideas. → `{ ok: true, allocationRatio,
+ * notes }` or `{ ok: false, reason: 'avoid_industry' | 'industry_cap', detail, avoid? }`. Pure.
+ */
+export function limitAddByRatio(spec, siblings, bySymbol = {}, { mandate = null, avoidOk = [] } = {}) {
+    const asset = String(spec?.asset ?? '').toUpperCase()
+    const mine = bySymbol[asset]
+    const notes = []
+    let ratio = Number(spec?.allocationRatio) > 0 ? Number(spec.allocationRatio) : null
+    if (!mine?.code) return { ok: true, allocationRatio: ratio, notes }
+    if (mine.assessment?.verdict === 'avoid' && !avoidOkCovers([{ asset }], avoidOk)) {
+        const industry = mine.name ?? mine.code
+        return { ok: false, reason: 'avoid_industry', detail: `Pythia rates ${industry} AVOID — add ${asset} only with your OK`, avoid: [{ asset, industry }] }
+    }
+    if (ratio == null) return { ok: true, allocationRatio: null, notes }
+    if (mine.assessment?.hype) { ratio *= HYPE_FACTOR; notes.push(`Hype brake: ${asset} at half weight.`) }
+    const book = (siblings ?? []).map(s => ({ asset: s.asset, weight: Number(s.allocationRatio) || 0 })).concat([{ asset, weight: ratio }])
+    if (capFor(mandate, book, bySymbol).cap === Infinity) return { ok: true, allocationRatio: ratio, notes }
+    const total = book.reduce((s, i) => s + (i.weight > 0 ? i.weight : 0), 0) || 1
+    const already = book.slice(0, -1).filter(s => bySymbol[String(s.asset).toUpperCase()]?.code === mine.code).reduce((s, i) => s + i.weight, 0)
+    const room = INDUSTRY_CAP * total - already
+    if (room <= 1e-9) return { ok: false, reason: 'industry_cap', detail: `${mine.name ?? mine.code} already holds a third of the book` }
+    if (ratio > room) { ratio = room; notes.push(`Industry cap: ${asset} cut to keep ${mine.name ?? mine.code} at a third of the book.`) }
+    return { ok: true, allocationRatio: ratio, notes }
 }
 
 /** The Avoid names among these symbols → `[{ asset, industry }]`. For the server-side check at save time. */

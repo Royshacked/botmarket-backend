@@ -29,15 +29,22 @@ const _deps = {
     theme: (id) => themeService.getTheme(id),
     assessment: (r) => (r.kind === 'theme' ? industryAssessmentService.getThemeAssessment(r.id) : industryAssessmentService.getAssessment(r.code)),
     enqueue: (row) => researchQueueService.enqueue(row),
+    rejected: () => researchQueueService.listQueue({ status: 'rejected', limit: 1000 }),
     perIndustry: () => config.houseScanPerIndustry,
     weeklyMax: () => config.houseScanWeeklyMax,
 }
 export function _setDeps(d) { Object.assign(_deps, d) }
 
+/** How long a name Prometheus (or the admin) passed on stays out of the house scan (code review 2026-10-11). */
+export const REJECTED_DAYS = 56
+
 /** What travels with a name to Prometheus — the verdict that sent it. Pure. */
 export function pythiaContext(a, { link = null } = {}) {
+    const book = { swing: 'for swing', long_term: 'for long term' }[a.verdict] ?? a.verdict
     return {
         pythia: true,
+        // The queue's title for the row (toWatchRow reads `reason`).
+        reason: `Pythia: ${a.subject?.name ?? 'industry'} ${book}`,
         subject: a.subject?.name ?? null, kind: a.subject?.kind ?? 'industry', link,
         verdict: a.verdict, horizon: a.horizon ?? null,
         thesis: String(a.thesis ?? '').slice(0, 500) || null,
@@ -50,15 +57,20 @@ export function pythiaContext(a, { link = null } = {}) {
  * Queue names for this week's FOR SWING / FOR LONG TERM verdicts. `results` are the week's result rows (pythiaWeekly)
  * in the week's order. → `{ queued: [{ symbol, subject }], considered, skipped_full }`.
  */
-export async function runHouseScan(results, deps = _deps) {
+export async function runHouseScan(results, deps = _deps, { alreadyQueued = 0, now = Date.now() } = {}) {
     const per = Math.max(0, Number(deps.perIndustry()) || 0)
-    const max = Math.max(0, Number(deps.weeklyMax()) || 0)
+    // The week's ceiling counts what an earlier finish of the same week already queued (a forced rerun).
+    const max = Math.max(0, (Number(deps.weeklyMax()) || 0) - (Number(alreadyQueued) || 0))
     const picks = (results ?? []).filter(r => r.outcome === 'published' && BOOKS.has(r.verdict))
     const queued = []
     if (!picks.length || !per || !max) return { queued, considered: picks.length, skipped_full: 0 }
     let skippedFull = 0
     try {
         const covered = new Set([...(await deps.covered() ?? [])].map(s => String(s).toUpperCase()))
+        // A name passed on recently is not bought again each week: the queue de-duplicates only queued / in research.
+        const cutoff = now - REJECTED_DAYS * 86_400_000
+        const rejected = new Set(((await deps.rejected?.().catch(() => [])) ?? [])
+            .filter(r => Date.parse(r.updated_at ?? r.created_at ?? '') >= cutoff).map(r => String(r.symbol).toUpperCase()))
         const taken = new Set()
         for (const r of picks) {
             if (queued.length >= max) { skippedFull++; continue }
@@ -73,8 +85,8 @@ export async function runHouseScan(results, deps = _deps) {
                 for (const sym of await deps.largest(src.code, per * 4)) {
                     if (n >= per || queued.length >= max) break
                     const s = String(sym).toUpperCase()
-                    if (covered.has(s) || taken.has(s)) continue
-                    const q = await deps.enqueue({ symbol: s, source: 'argus', requestedBy: 'house', context: pythiaContext(a, { link: src.link }) })
+                    if (covered.has(s) || taken.has(s) || rejected.has(s)) continue
+                    const q = await deps.enqueue({ symbol: s, source: 'pythia', requestedBy: 'house', context: pythiaContext(a, { link: src.link }) })
                     taken.add(s)
                     if (q?.ok && !q.duplicate) { queued.push({ symbol: s, subject: r.name }); n++ }
                 }

@@ -238,8 +238,13 @@ async function viewsForSymbols(symbols, deps = { companies: readCompaniesBySymbo
     const db = await _io.db()
     const [viewRows, verdicts] = await Promise.all([
         db.collection(COLLECTION).find({ code: { $in: codes } }, { projection: { _id: 0, revisions: 0, monitor: 0 } }).toArray(),
-        // A failed verdict read leaves the views standing: the verdict is an addition, not the join's purpose.
-        (deps.verdicts ? deps.verdicts(codes) : Promise.resolve(new Map())).catch(() => new Map()),
+        // A failed verdict read leaves the views standing: the verdict is an addition, not the join's purpose. Said in
+        // the log, and marked on every row (`assessment_unread`) so a reader that diffs verdicts — the review's
+        // fingerprint — keeps what it had instead of reading "no verdict" (code review 2026-10-11).
+        (deps.verdicts ? deps.verdicts(codes) : Promise.resolve(new Map())).catch((err) => {
+            logger.warn(LOG, 'industry verdicts not read — views served without them', err.message)
+            return null
+        }),
     ])
     const views = new Map(viewRows.map(v => [v.code, v]))
     const out = {}
@@ -249,7 +254,8 @@ async function viewsForSymbols(symbols, deps = { companies: readCompaniesBySymbo
             code: c.sub_code, name: c.sub_industry, sector: c.sector, status: v?.status ?? 'pending',
             demand: v?.demand?.grade ?? null, economics: v?.economics?.grade ?? null, cycle: v?.cycle?.grade ?? null,
             summary: v?.summary ?? null,
-            assessment: verdicts.get(c.sub_code) ?? null,
+            assessment: verdicts ? (verdicts.get(c.sub_code) ?? null) : null,
+            ...(verdicts ? {} : { assessment_unread: true }),
         }
     }
     return out

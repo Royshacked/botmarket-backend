@@ -77,12 +77,17 @@ presents in flow, they don't ask permission to think":
    industry gets half its weight; no GICS sub-industry above a third of the book (the excess spread over the
    other industries, or left in cash when there are too few); a name in an industry Pythia rates AVOID is
    flagged, and the book saves only with the user's OK (asked before anything is written; the batch route
-   checks the symbols itself, 409 `avoid_needs_ok`; "Update plan" saves the new ideas before deleting the old). A
-   mandate with `concentration: "single_industry"` (the user asked for a one-industry book) lifts the cap; share
-   counts the user gave are kept as given. The same apply to a review's `add_item` (portfolioRebalance
-   `_industryLimitsForAdd`; the cap counts what the book holds): the server drops any `avoid_ok` Atlas wrote and
-   marks each add in an AVOID industry, and only the user's yes on the Accept card sets it (MainPage
-   `confirmAvoidAdds`; a no drops just those adds).
+   checks the symbols itself — the OK names the symbols the user said yes to (`avoid_ok: [..]`), and a 409
+   `avoid_needs_ok` for a name turned AVOID since is asked about and retried; "Update plan" saves the new ideas
+   before deleting the old, and Generate keeps the plan when nothing saved). A mandate with
+   `concentration: "single_industry"` lifts the cap only while the book is 80%+ in one sub-industry (`capFor`).
+   A share count the user gave is kept for that idea; the limits work on the rest. The same limits on every other
+   way Atlas adds money: a review's `add_item` (`_industryLimitsForAdd`) and `add_to_item` (`_industryLimitsForScaleIn`
+   — the cap counts the whole sub-industry, hype halves the add), and an edit-mode add (`POST /api/trade-ideas` with a
+   `portfolioId`, `limitAddByRatio` on the book's ratios). The server drops any `avoid_ok` or share count Atlas writes
+   on a review add and marks each add in an AVOID industry; only the user's yes (Accept card, rebalance dialog, edit
+   apply) sets the OK, and a refusal for a verdict that turned since is asked about and retried. An expired verdict
+   gates nothing; a failed verdict read keeps the review fingerprint's previous verdict.
    `get_industry_views` carries each industry's verdict and hype; a held industry newly AVOID or HYPE is a
    review trigger (`industry_verdict`). A base/bull/bear pressure test before the plan. Then
    `<portfolio_plan>`, sized server-side (`_sizePlan`: ratios → live prices → quantities) and saved as

@@ -273,7 +273,11 @@ export function buildFingerprint({ reason, state = null, macroRaw = null, benchm
         industries: industries && Object.keys(industries).length
             ? Object.fromEntries(Object.entries(industries).map(([sym, v]) =>
                 [sym, { code: v.code, name: v.name, demand: v.demand ?? null, economics: v.economics ?? null, cycle: v.cycle ?? null,
-                        verdict: v.assessment?.verdict ?? null, hype: v.assessment?.hype === true }]))
+                        // A live read nests the verdict under `assessment`; a carried-over row (a previous fingerprint)
+                        // is flat already. An UNREAD verdict keeps the flat value carried in by captureFingerprint.
+                        ...(v.assessment !== undefined && !v.assessment_unread
+                            ? { verdict: v.assessment?.verdict ?? null, hype: v.assessment?.hype === true }
+                            : { verdict: v.verdict ?? null, hype: v.hype === true }) }]))
             : null,
         holdings,
     }
@@ -292,7 +296,8 @@ export function verdictTurns(before, after) {
     const out = new Map()
     for (const [sym, now] of Object.entries(after)) {
         const then = before[sym]
-        if (!then || then.code !== now.code) continue
+        // An unread verdict is not "no verdict": nothing is known to have turned (code review 2026-10-11).
+        if (!then || then.code !== now.code || now.assessment_unread) continue
         const v = now.assessment?.verdict ?? null, h = now.assessment?.hype === true
         const kinds = []
         if (v === 'avoid' && then.verdict !== 'avoid') kinds.push('avoid')

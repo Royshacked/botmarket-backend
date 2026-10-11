@@ -243,3 +243,11 @@ test('researchRun: a Start that refuses (empty queue) does not leave the next on
     assert.equal((await startRun({ userId: 'u1' }, d)).ok, true)
     await settled()
 })
+
+test('researchRun: a run for given symbols researches only those — a sleeve does not pay for the house queue', async () => {
+    const deps = makeDeps({ queued: [q('AAA'), q('HOUSE', { source: 'pythia' })] })
+    assert.equal((await startRun({ symbols: ['aaa'] }, deps)).ok, true)
+    await settled()
+    assert.deepEqual(deps.calls.researched.map(r => r.symbol), ['AAA'])
+    assert.equal((await startRun({ symbols: ['ZZZ'] }, makeDeps({ queued: [q('AAA')] }))).reason, 'nothing_queued')
+})

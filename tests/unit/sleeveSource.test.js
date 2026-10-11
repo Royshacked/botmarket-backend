@@ -80,7 +80,8 @@ test('the fresh hits are queued as argus rows carrying the sleeve, and the run i
     // No user on the run: house coverage is researched on the house's model and the house's spend,
     // never degraded by the requester's ceiling (agentUtils) or billed to them.
     assert.equal(h.starts.length, 1)
-    assert.deepEqual(h.starts[0], { userId: null, audience: null, model: null })
+    // …and on THIS sleeve's names only: the house queue beside it is not researched on a user's request (2026-10-11).
+    assert.deepEqual(h.starts[0], { userId: null, audience: null, model: null, symbols: ['AAA', 'CCC'] })
     assert.equal(pendingSleeves().length, 1)
 })
 

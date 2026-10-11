@@ -134,7 +134,9 @@ export async function sourceSleeve(req, deps = _io) {
         requestedAt: new Date().toISOString(),
         // The run's identity: the house. Null userId → no per-user accounting, no budget degrade, the
         // agent's own default model and audience.
-        run: { userId: null, audience: null, model: null },
+        // A user's sleeve researches ITS names only — not the house queue beside it (code review 2026-10-11: the house
+        // scan's rows rode on a user's sleeve request, at the house's cost).
+        run: { userId: null, audience: null, model: null, symbols: [...fresh] },
     }
 
     if (!fresh.length) {
