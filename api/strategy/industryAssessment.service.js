@@ -139,8 +139,17 @@ export function checkAssessment(block, { expect = null, now = new Date().toISOSt
     // A watch stands only with its deciding date inside WATCH_MAX_DAYS; without one it IS no case, and is published
     // as such (not refused — the research was paid for), with the reason kept.
     let finalVerdict = verdict
-    let decidesBy = null, watchDowngraded = null
+    let decidesBy = null, watchDowngraded = null, question = null
     if (verdict === 'watch') {
+        // Earnings season puts a dated report inside six weeks for nearly every industry (2026-10-11: a quiet
+        // Apparel Retail passed as "watch, decides by TJX's report"), so the date alone is no test. A watch also
+        // needs something that moved it (cause not `none`) and the SPECIFIC open question the dated event answers.
+        question = _str(block.question, 300)
+        if (causeKind === 'none') watchDowngraded = 'nothing nameable moved it — no live question'
+        else if (!question) watchDowngraded = 'no open question named'
+        if (watchDowngraded) finalVerdict = 'no_case'
+    }
+    if (verdict === 'watch' && !watchDowngraded) {
         const d = _str(block.decides_by, 10)
         // Whole calendar days from today's date to the deciding date: today is 0, six weeks on is 42.
         const days = d && /^\d{4}-\d{2}-\d{2}$/.test(d) ? (Date.parse(`${d}T00:00:00Z`) - Date.parse(`${String(now).slice(0, 10)}T00:00:00Z`)) / 86_400_000 : NaN
@@ -156,7 +165,8 @@ export function checkAssessment(block, { expect = null, now = new Date().toISOSt
             code: industry, theme, verdict: finalVerdict, horizon, thesis, evidence, cause: { kind: causeKind, text: causeText },
             second_order: secondOrder, risks, change_view_if: changeIf, confidence,
             confidence_reason: _str(block.confidence_reason, 300),
-            decides_by: decidesBy, ...(watchDowngraded ? { watch_downgraded: watchDowngraded } : {}),
+            decides_by: decidesBy, question: finalVerdict === 'watch' ? question : null,
+            ...(watchDowngraded ? { watch_downgraded: watchDowngraded } : {}),
         },
     }
 }
@@ -292,7 +302,7 @@ async function publishAssessment(block, { sub = null, row = null, money = null, 
     const set = {
         subject, verdict: a.verdict, horizon: a.horizon, thesis: a.thesis, evidence: a.evidence, gaps: checked.gaps,
         cause: a.cause, second_order: a.second_order, risks: a.risks, change_view_if: a.change_view_if,
-        decides_by: a.decides_by ?? null, watch_downgraded: a.watch_downgraded ?? null,
+        decides_by: a.decides_by ?? null, question: a.question ?? null, watch_downgraded: a.watch_downgraded ?? null,
         confidence: a.confidence, confidence_reason: a.confidence_reason,
         moved: facts.moved, base_rates: facts.base_rates, not_measured: facts.not_measured,
         // Companies' own money (§4.3) — facts from the engine's metrics node, like the moves (industryData.moneyFacts).

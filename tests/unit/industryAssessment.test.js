@@ -20,7 +20,7 @@ const NOW = '2026-10-10T12:00:00.000Z'
 // A watch names its deciding date within six weeks — ten days from the clock the check runs on, and from NOW.
 const IN_TEN_DAYS = (from = Date.now()) => new Date(Date.parse(new Date(from).toISOString()) + 10 * 86_400_000).toISOString().slice(0, 10)
 const BLOCK = (over = {}) => ({
-    industry: CODE, verdict: 'watch', horizon: 'months', decides_by: IN_TEN_DAYS(),
+    industry: CODE, verdict: 'watch', horizon: 'months', decides_by: IN_TEN_DAYS(), question: 'Will hyperscalers hold 2027 capex guidance?',
     thesis: 'AI capex still rising; the group is up a lot and stretched.',
     evidence: { news: 'Hyperscalers raised capex guidance (2026-07-30).', price: 'Up 180% in two years, 92nd percentile stretched.' },
     cause: { kind: 'money', text: 'hyperscaler capex guidance raised in July' },
@@ -445,4 +445,20 @@ test('watch needs its deciding date within six weeks; without one it is publishe
     assert.equal(ok({ verdict: 'no_case' }).verdict, 'no_case')
     assert.equal(ok({ verdict: 'avoid', decides_by: '2026-10-21' }).decides_by, null, 'only a watch carries a deciding date')
     assert.deepEqual(Object.keys(VERDICTS), ['swing', 'long_term', 'watch', 'avoid', 'no_case'])
+})
+
+test('a watch needs something moving it and the specific open question its date answers (2026-10-11)', () => {
+    const now = '2026-10-11T12:00:00.000Z'
+    const ok = (over) => checkAssessment(BLOCK({ verdict: 'watch', decides_by: '2026-10-28', question: 'Will hyperscalers hold 2027 capex guidance?', ...over }), { now }).assessment
+    const w = ok({})
+    assert.equal(w.verdict, 'watch')
+    assert.equal(w.question, 'Will hyperscalers hold 2027 capex guidance?')
+    const quiet = ok({ cause: { kind: 'none', text: 'nothing nameable' } })
+    assert.equal(quiet.verdict, 'no_case')
+    assert.match(quiet.watch_downgraded, /nothing nameable moved it/)
+    assert.equal(quiet.question, null)
+    assert.equal(quiet.decides_by, null)
+    const vague = ok({ question: undefined })
+    assert.equal(vague.verdict, 'no_case')
+    assert.match(vague.watch_downgraded, /no open question/)
 })

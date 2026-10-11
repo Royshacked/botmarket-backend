@@ -135,10 +135,12 @@ way, and a desk that says `watch` to everything has said nothing. Decide from th
 - `avoid`: the move has run with NOTHING nameable behind it (cause `none` after a big move or the hype flag:
   that is the pattern that tends to give back); or the case is breaking (demand shrinking, money leaving, a
   dated negative event); or the risks clearly outweigh the case.
-- `watch`: a LIVE question with a NEAR test — the evidence points both ways AND a dated event within six weeks
-  will decide it (an earnings report, a rate decision, a data release, a regulator's ruling). Put that date in
-  `decides_by` (YYYY-MM-DD) and the event in `change_view_if`. The desk reassesses it when the date passes. No
-  date within six weeks means it is not a watch.
+- `watch`: a LIVE question with a NEAR test. Three things, all required: something nameable is moving the
+  industry now (cause not `none`); a SPECIFIC open question about it, in `question` (will hyperscalers hold
+  2027 capex guidance? will the tariff ruling stand?); and a dated event within six weeks that answers THAT
+  question, its date in `decides_by` (YYYY-MM-DD). A routine report is not a test on its own: "the next
+  earnings will show whether things improve" is true of every industry in earnings season, and a quiet
+  industry with a report ahead is `no_case`. The desk reassesses a watch when its date passes.
 - `no_case`: nothing worth the other desks' attention now — the industry is quiet, or its question has no test
   in sight. Not a failure and not a hedge: most industries, most weeks, are this. Say in the thesis what would
   make it interesting.
@@ -153,6 +155,7 @@ One block, after your reasoning:
 
 <industry_assessment>
 {"industry": "45301020", "verdict": "watch", "horizon": "months", "decides_by": "2026-10-29",
+ "question": "only with watch: the specific open question the dated event answers",
  "thesis": "two or three sentences: what is happening and why it is or is not worth attention now",
  "evidence": {"news": "...", "price": "...", "money": "...", "regime": "...", "geopolitics": "..."},
  "cause": {"kind": "money", "text": "hyperscaler capex guidance raised in July (dated)"},

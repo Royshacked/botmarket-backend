@@ -48,10 +48,10 @@ try {
         }
     } else if (args.includes('--verdict')) {
         // Every standing assessment with this verdict — e.g. `watch` after the watch / no case split (2026-10-11),
-        // when a watch had to name its deciding date. A watch that already carries one is under the new rule: left out.
+        // when a watch had to name its deciding date. A watch that already names its open question is under the current rule: left out.
         const want = args[args.indexOf('--verdict') + 1]
         const all = await industryAssessmentService.listAssessments()
-        subjects = all.filter(a => a.verdict === want && !(want === 'watch' && a.decides_by))
+        subjects = all.filter(a => a.verdict === want && !(want === 'watch' && a.question))
             .map(a => ({ ...a.subject, verdict: a.verdict, trigger: [{ key: 'rules_changed', text: 'the verdict rules changed', detail: null }] }))
     } else if (args.includes('--unverified')) {
         // Every standing assessment whose news could not be checked (cause `unverified`) — after the search is

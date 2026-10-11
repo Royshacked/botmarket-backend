@@ -95,7 +95,7 @@ test('an assessment can be of a theme — only an approved one — and is graded
     assert.match(checkAssessment({ theme: 'Data center' }).detail, /th_ id/)
     const m = memDb()
     _setAssessmentIO({ db: async () => m.db })
-    const block = { theme: THEME.id, verdict: 'watch', decides_by: '2026-10-29', horizon: 'months', thesis: 'Direct links stretched; suppliers not yet.',
+    const block = { theme: THEME.id, verdict: 'watch', decides_by: '2026-10-29', question: 'Do suppliers get the orders next?', horizon: 'months', thesis: 'Direct links stretched; suppliers not yet.',
         evidence: { news: 'n', price: 'p' }, cause: { kind: 'money', text: 'capex' }, second_order: 's', risks: ['r'],
         change_view_if: ['x'], confidence: 'medium' }
     const baskets = []
