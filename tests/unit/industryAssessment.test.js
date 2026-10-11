@@ -17,8 +17,10 @@ import { _parseStrategyResponse, _buildTurnContext, TOOLS } from '../../services
 
 const CODE = '45301020'
 const NOW = '2026-10-10T12:00:00.000Z'
+// A watch names its deciding date within six weeks — ten days from the clock the check runs on, and from NOW.
+const IN_TEN_DAYS = (from = Date.now()) => new Date(Date.parse(new Date(from).toISOString()) + 10 * 86_400_000).toISOString().slice(0, 10)
 const BLOCK = (over = {}) => ({
-    industry: CODE, verdict: 'watch', horizon: 'months',
+    industry: CODE, verdict: 'watch', horizon: 'months', decides_by: IN_TEN_DAYS(),
     thesis: 'AI capex still rising; the group is up a lot and stretched.',
     evidence: { news: 'Hyperscalers raised capex guidance (2026-07-30).', price: 'Up 180% in two years, 92nd percentile stretched.' },
     cause: { kind: 'money', text: 'hyperscaler capex guidance raised in July' },
@@ -61,7 +63,7 @@ test('"unverified" is its own cause — a failed search is not the hype finding'
 })
 
 test('the verdict words are the four Roy kept', () => {
-    assert.deepEqual(Object.keys(VERDICTS), ['swing', 'long_term', 'watch', 'avoid'])
+    assert.deepEqual(Object.keys(VERDICTS).slice(0, 4), ['swing', 'long_term', 'watch', 'avoid'])
 })
 
 // ── the facts the code attaches ──────────────────────────────────────────────
@@ -163,6 +165,7 @@ test('a grade: the basket against SPY, QQQ and the equal-weight market; a missin
     assert.equal(g.right, true)
     assert.equal(gradeCall(CALL({ verdict: 'avoid' }), { AAA: 12, BBB: 11, CCC: 9, SPY: 105, QQQ: 110, RSP: 103 }, NOW).right, false, 'avoid is right only when the basket lagged')
     assert.equal(gradeCall(CALL({ verdict: 'watch' }), { AAA: 12, BBB: 11, CCC: 9, SPY: 105, QQQ: 110, RSP: 103 }, NOW).right, null)
+    assert.equal(gradeCall(CALL({ verdict: 'no_case' }), { AAA: 12, BBB: 11, CCC: 9, SPY: 105, QQQ: 110, RSP: 103 }, NOW).right, null, 'no case makes no directional call')
     assert.equal(gradeCall(CALL(), { AAA: 12, BBB: 11, CCC: 9, SPY: 105, QQQ: 110 }, NOW), null, 'no grade without every benchmark')
     assert.equal(gradeCall(CALL(), { AAA: 12, SPY: 105, QQQ: 110, RSP: 103 }, NOW), null, 'too few names priced')
 })
@@ -423,4 +426,23 @@ test('the verdict names the book (Roy, 2026-10-11): old words are read as the ne
     assert.equal(ok({ verdict: 'long_term', horizon: 'months' }).assessment.horizon, 'years')
     assert.equal(ok({ verdict: 'avoid', horizon: 'weeks' }).assessment.horizon, 'weeks', 'watch and avoid take any horizon')
     assert.match(ok({ verdict: 'buy' }).detail, /verdict must be one of swing\/long_term\/watch\/avoid/)
+})
+
+test('watch needs its deciding date within six weeks; without one it is published as no case (Roy, 2026-10-11)', () => {
+    const now = '2026-10-11T12:00:00.000Z'
+    const ok = (over) => checkAssessment(BLOCK(over), { now }).assessment
+    const w = ok({ verdict: 'watch', decides_by: '2026-10-21' })
+    assert.equal(w.verdict, 'watch')
+    assert.equal(w.decides_by, '2026-10-21')
+    assert.equal(w.watch_downgraded, undefined)
+    assert.equal(ok({ verdict: 'watch', decides_by: '2026-11-22' }).verdict, 'watch', 'day 42 is inside')
+    for (const [d, why] of [[undefined, /no decides_by/], ['2027-02-15', /more than 42 days out/], ['2026-10-01', /has passed/], ['soon', /not a date/]]) {
+        const a = ok({ verdict: 'watch', decides_by: d })
+        assert.equal(a.verdict, 'no_case')
+        assert.match(a.watch_downgraded, why)
+        assert.equal(a.decides_by, null)
+    }
+    assert.equal(ok({ verdict: 'no_case' }).verdict, 'no_case')
+    assert.equal(ok({ verdict: 'avoid', decides_by: '2026-10-21' }).decides_by, null, 'only a watch carries a deciding date')
+    assert.deepEqual(Object.keys(VERDICTS), ['swing', 'long_term', 'watch', 'avoid', 'no_case'])
 })

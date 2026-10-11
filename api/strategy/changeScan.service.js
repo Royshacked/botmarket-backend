@@ -33,6 +33,7 @@ export const REASONS = Object.freeze({
     stretched:     { weight: 3, text: 'stretched to the top of its own two-year range' },
     washed_out:    { weight: 3, text: 'fell to the bottom of its own two-year range' },
     hype_cleared:  { weight: 3, text: 'the hype flag cleared' },
+    decider_due:   { weight: 4, text: 'the date its watch named has come' },
     expired:       { weight: 2, text: 'the assessment expired' },
     buyback_turn:  { weight: 2, text: 'buybacks turned' },
     link_moved:    { weight: 0, text: 'a link in its chain moved' },   // weighs as its links' biggest reason
@@ -71,6 +72,16 @@ export function changes(now, then) {
 }
 
 const _expired = (a, now) => Boolean(a?.expires_at) && Date.parse(a.expires_at) <= Date.parse(now)
+
+/**
+ * A WATCH names the date that decides it (`decides_by`, at most WATCH_MAX_DAYS out). Once that date has passed —
+ * the day after it, so the report it waited for is out — the watch is due: reassessed now, not at its expiry.
+ */
+export function deciderDue(a, now) {
+    if (a?.verdict !== 'watch' || !a.decides_by) return null
+    const due = Date.parse(`${a.decides_by}T23:59:59Z`)
+    return Number.isFinite(due) && due < Date.parse(now) ? { key: 'decider_due', detail: `decides by ${a.decides_by}` } : null
+}
 const _score = (reasons) => Math.max(0, ...reasons.map(r => r.weight ?? REASONS[r.key]?.weight ?? 0))
 const _words = (r) => ({ ...r, weight: r.weight ?? REASONS[r.key]?.weight ?? 0, text: REASONS[r.key]?.text ?? r.key })
 
@@ -84,6 +95,8 @@ export function scanIndustry({ code, name, now, assessment = null, at }) {
     if (!assessment) reasons = [{ key: 'unassessed', detail: null }]
     else {
         reasons = changes(now, { moved: assessment.moved, money: assessment.money })
+        const due = deciderDue(assessment, at)
+        if (due) reasons.push(due)
         if (_expired(assessment, at)) reasons.push({ key: 'expired', detail: `on ${String(assessment.expires_at).slice(0, 10)}` })
     }
     if (!reasons.length) return null
@@ -117,6 +130,8 @@ export function scanTheme({ theme, nowByCode, assessment = null, at }) {
             reasons.push({ key: 'link_moved', weight: moved[0].weight,
                 detail: moved.slice(0, 3).map(x => `${x.link.name} (${x.keys.map(k => REASONS[k].text).join(', ')})`).join('; ') })
         }
+        const due = deciderDue(assessment, at)
+        if (due) reasons.push(due)
         if (_expired(assessment, at)) reasons.push({ key: 'expired', detail: `on ${String(assessment.expires_at).slice(0, 10)}` })
     }
     if (!reasons.length) return null

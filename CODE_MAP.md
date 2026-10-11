@@ -101,7 +101,7 @@ api/
                               (readCompanies, readCompaniesBySymbol). Pure formatters for the desk.
                               Data, not judgment
     industryAssessment.service.js  `industry_assessment` = Pythia's verdict per industry (docs/design/
-                              pythia-assessment.md): swing / long_term / watch / avoid (the book it is for),
+                              pythia-assessment.md): swing / long_term / watch (a dated decider within 6 weeks) / avoid / no_case,
                               horizon, thesis, evidence per input, cause, second_order, risks, change_view_if,
                               confidence. checkAssessment refuses a story without those guardrails; factsFor
                               attaches the MOVES and the hype base rate from the engine row — never from the

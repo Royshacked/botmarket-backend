@@ -29,7 +29,14 @@ export const VERDICTS = Object.freeze({
     long_term: 'For long term',
     watch:     'Watch',
     avoid:     'Avoid',
+    no_case:   'No case',
 })
+/**
+ * WATCH is a live question with a near test (Roy, 2026-10-11): it names the date that decides it (`decides_by`),
+ * no more than this many days out. A quiet industry with nothing moving it and no near test is NO CASE — the
+ * first full week had 122 of 165 on `watch`, 88 of them barely moving, which buried the few with a test days away.
+ */
+export const WATCH_MAX_DAYS = 42
 /** The words before 2026-10-11, read as today's — a block from an old thread, a document not yet migrated. */
 export const LEGACY_VERDICTS = Object.freeze({ interesting_trade: 'swing', interesting_invest: 'long_term' })
 export const HORIZONS = Object.freeze(['weeks', 'months', 'years'])
@@ -83,7 +90,7 @@ const _num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null)
  * gaps, so the board shows what the verdict was NOT based on. Facts the agent sends (moves, flags) are
  * ignored: the code attaches them.
  */
-export function checkAssessment(block, { expect = null } = {}) {
+export function checkAssessment(block, { expect = null, now = new Date().toISOString() } = {}) {
     if (!block || typeof block !== 'object') return { ok: false, detail: 'no block' }
     // The subject: an industry (8-digit GICS code) or a theme (its th_ id, theme.service) — step 3. When the
     // caller knows which it asked for (`expect`), that field is read and the other ignored: on a theme turn the
@@ -129,12 +136,27 @@ export function checkAssessment(block, { expect = null } = {}) {
     const confidence = _str(block.confidence, 10)
     if (!confidence || !CONFIDENCE.includes(confidence)) problems.push(`confidence must be one of ${CONFIDENCE.join('/')}`)
     if (problems.length) return { ok: false, detail: `${code}: ${problems.join('; ')}` }
+    // A watch stands only with its deciding date inside WATCH_MAX_DAYS; without one it IS no case, and is published
+    // as such (not refused — the research was paid for), with the reason kept.
+    let finalVerdict = verdict
+    let decidesBy = null, watchDowngraded = null
+    if (verdict === 'watch') {
+        const d = _str(block.decides_by, 10)
+        // Whole calendar days from today's date to the deciding date: today is 0, six weeks on is 42.
+        const days = d && /^\d{4}-\d{2}-\d{2}$/.test(d) ? (Date.parse(`${d}T00:00:00Z`) - Date.parse(`${String(now).slice(0, 10)}T00:00:00Z`)) / 86_400_000 : NaN
+        if (days >= 0 && days <= WATCH_MAX_DAYS) decidesBy = d
+        else {
+            finalVerdict = 'no_case'
+            watchDowngraded = !d ? 'no decides_by date' : !Number.isFinite(days) ? `decides_by ${d} is not a date` : days < 0 ? `decides_by ${d} has passed` : `decides_by ${d} is more than ${WATCH_MAX_DAYS} days out`
+        }
+    }
     return {
         ok: true, gaps,
         assessment: {
-            code: industry, theme, verdict, horizon, thesis, evidence, cause: { kind: causeKind, text: causeText },
+            code: industry, theme, verdict: finalVerdict, horizon, thesis, evidence, cause: { kind: causeKind, text: causeText },
             second_order: secondOrder, risks, change_view_if: changeIf, confidence,
             confidence_reason: _str(block.confidence_reason, 300),
+            decides_by: decidesBy, ...(watchDowngraded ? { watch_downgraded: watchDowngraded } : {}),
         },
     }
 }
@@ -248,7 +270,7 @@ const _themeDocId = (themeId) => `ia_${themeId}`
  */
 async function publishAssessment(block, { sub = null, row = null, money = null, theme = null, facts: given = null, basket = null,
     structure = null, recordCall = null, now = new Date().toISOString(), source = 'chat', trigger = null } = {}) {
-    const checked = checkAssessment(block, { expect: theme ? 'theme' : sub ? 'industry' : null })
+    const checked = checkAssessment(block, { expect: theme ? 'theme' : sub ? 'industry' : null, now })
     if (!checked.ok) return { ok: false, reason: 'bad_assessment', detail: checked.detail }
     const a = checked.assessment
     let id, subject
@@ -270,6 +292,7 @@ async function publishAssessment(block, { sub = null, row = null, money = null, 
     const set = {
         subject, verdict: a.verdict, horizon: a.horizon, thesis: a.thesis, evidence: a.evidence, gaps: checked.gaps,
         cause: a.cause, second_order: a.second_order, risks: a.risks, change_view_if: a.change_view_if,
+        decides_by: a.decides_by ?? null, watch_downgraded: a.watch_downgraded ?? null,
         confidence: a.confidence, confidence_reason: a.confidence_reason,
         moved: facts.moved, base_rates: facts.base_rates, not_measured: facts.not_measured,
         // Companies' own money (§4.3) — facts from the engine's metrics node, like the moves (industryData.moneyFacts).

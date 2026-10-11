@@ -150,7 +150,10 @@ refuses an undated catalyst today):
 One house document per industry or theme, through `houseArtifact.repo` (every change a revision):
 
 - `subject` — `{ kind: 'industry' | 'theme', code | theme_id, name }`
-- `verdict` — `swing` · `long_term` · `watch` · `avoid` (Roy, 2026-10-11: the verdict names the book; `interesting_trade` / `interesting_invest` until then, still read as these). A swing's horizon is weeks or months, a long-term one's years — the code holds the horizon to the book
+- `verdict` — `swing` · `long_term` · `watch` · `avoid` · `no_case` (Roy, 2026-10-11). `watch` is a live question a dated
+  event within six weeks decides — it carries `decides_by`, and the change scan reassesses it once that date passes;
+  a watch without one is published as `no_case` (`watch_downgraded` says why). `no_case`: nothing worth attention
+  now — the first full week had 122 of 165 on watch, 88 barely moving. Neither is graded right or wrong. (The verdict names the book; `interesting_trade` / `interesting_invest` until then, still read as these). A swing's horizon is weeks or months, a long-term one's years — the code holds the horizon to the book
 - `horizon` — weeks / months / years; `expires_at` (an assessment goes stale)
 - `thesis` — two or three sentences
 - `evidence` — one short entry per input (§4.1–4.5), each with its date

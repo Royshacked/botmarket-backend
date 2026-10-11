@@ -81,7 +81,8 @@ export function gradeCall(call, exit, at) {
         share_beat_spy: rets.filter(r => r > bench.SPY).length / rets.length,
         spy: bench.SPY, qqq: bench.QQQ, rsp: bench.RSP,
         vs_spy: basket - bench.SPY, vs_qqq: basket - bench.QQQ, vs_rsp: basket - bench.RSP,
-        right: call.verdict === 'watch' ? null : right,
+        // Watch and no case make no directional call: measured, never "right" or "wrong".
+        right: call.verdict === 'watch' || call.verdict === 'no_case' ? null : right,
     }
 }
 

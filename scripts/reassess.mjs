@@ -2,6 +2,7 @@
 //
 //   node scripts/reassess.mjs --week            every subject the latest week already assessed, again
 //   node scripts/reassess.mjs --unverified      every assessment whose news could not be checked
+//   node scripts/reassess.mjs --verdict watch   every assessment with this verdict (add --limit N to chunk)
 //   node scripts/reassess.mjs 45301020 th_ai_…  these industries (GICS code) and themes (id)
 //   add --limit N to stop after N (a smoke test)
 //   add --skip (with --week) to leave out what was already reassessed since the week assessed it
@@ -45,6 +46,13 @@ try {
             subjects = subjects.filter((_, i) => !fresh[i])
             console.log(`--skip: ${before - subjects.length} already reassessed, ${subjects.length} to go`)
         }
+    } else if (args.includes('--verdict')) {
+        // Every standing assessment with this verdict — e.g. `watch` after the watch / no case split (2026-10-11),
+        // when a watch had to name its deciding date. A watch that already carries one is under the new rule: left out.
+        const want = args[args.indexOf('--verdict') + 1]
+        const all = await industryAssessmentService.listAssessments()
+        subjects = all.filter(a => a.verdict === want && !(want === 'watch' && a.decides_by))
+            .map(a => ({ ...a.subject, verdict: a.verdict, trigger: [{ key: 'rules_changed', text: 'the verdict rules changed', detail: null }] }))
     } else if (args.includes('--unverified')) {
         // Every standing assessment whose news could not be checked (cause `unverified`) — after the search is
         // fixed, these are the ones worth paying for again (2026-10-11: 62 of 165, a GNews quota out).

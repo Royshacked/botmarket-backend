@@ -298,3 +298,13 @@ test('the move by size rides beside the equal-weight one, and is what the hype f
     assert.match(text, /weighted by size, as that history was/)
     assert.doesNotMatch(formatFacts({ ...row, raw: { ...row.raw, ret_24m_vw: undefined } }), /BY SIZE/)
 })
+
+test('a watch is reassessed once the date it named has passed — not at its expiry', () => {
+    const watch = (decides_by) => ({ verdict: 'watch', decides_by, moved: moved({ asof: '2026-10-09' }), money: money(), expires_at: '2026-12-01T00:00:00Z' })
+    const now = { moved: moved({ asof: '2026-10-09' }), money: money() }
+    const f = scanIndustry({ code: '1', name: 'Telecom Towers', now, assessment: watch('2026-10-10'), at: AT })
+    assert.deepEqual(f.reasons.map(r => [r.key, r.detail]), [['decider_due', 'decides by 2026-10-10']])
+    assert.equal(f.score, REASONS.decider_due.weight)
+    assert.equal(scanIndustry({ code: '1', name: 'T', now, assessment: watch('2026-10-11'), at: AT }), null, 'its day is not over yet')
+    assert.equal(scanIndustry({ code: '1', name: 'T', now, assessment: { ...watch('2026-10-10'), verdict: 'no_case' }, at: AT }), null, 'only a watch has a decider')
+})
