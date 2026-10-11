@@ -57,6 +57,8 @@ try {
         page.on('console', m => { if (m.type() === 'error') errors.push(`${user.role} ${m.text().slice(0, 200)}`) })
         const statuses = []
         page.on('response', async r => {
+            // Any failed board read is named: an empty `industries` silently hides the admin's Assess now.
+            if (r.url().includes('/api/') && r.status() >= 400) errors.push(`${user.role} ${r.status()} ${new URL(r.url()).pathname}`)
             if (!r.url().includes('/api/strategy/assessments')) return
             const body = await r.text().catch(() => '')
             statuses.push(`${r.status()} ${(r.headers()['content-type'] ?? '').split(';')[0]} ${body.slice(0, 80).replace(/\s+/g, ' ')}`)
@@ -73,7 +75,10 @@ try {
         console.log('summary:', await page.locator('.assessment-view .industry-view__summary-bar').innerText())
         console.log('groups:', (await page.locator('.assessment-view__group').allInnerTexts()).join(' | '))
         console.log('verdict chips:', (await page.locator('.assessment-view__verdict').allInnerTexts()).join(', '), '· hype chips:', await page.locator('.assessment-view__hype').count())
-        console.log('Assess now control visible:', await page.getByRole('button', { name: 'Assess now' }).count() === 1)
+        // The industries list takes ~8s cold (163 rows read from the engine db); Assess now waits for it.
+        if (user.role === 'admin') await page.locator('.assessment-view__assess').waitFor({ timeout: 30000 }).catch(() => {})
+        console.log('Assess now control visible:', await page.getByRole('button', { name: 'Assess now' }).count() === 1,
+            '· industries in its list:', Math.max(0, (await page.locator('.assessment-view__assess select option').count()) - 1))
 
         const rows = page.locator('.assessment-view .industry-view__line')
         if (await rows.count()) {
