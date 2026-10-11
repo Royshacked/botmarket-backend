@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-    toOpenAITools, toToolUses, toToolMessages, toAnthropicUsage, toStopReason, servedModelMatches, runOpenAICompatRead,
+    toOpenAITools, toToolUses, toToolMessages, toAnthropicUsage, toStopReason, servedModelMatches, runOpenAICompatRead, OPENROUTER_WEB_SEARCH, serverSearchFor,
 } from '../../providers/openaiCompat.provider.js'
 import { TALOS_MODELS, ALLOWED_MODELS, ASSESS_MODEL, resolveTalosModel, assessRouting, talosModel } from '../../monitoring/assess.shared.js'
 import { makeAssessToolRunner } from '../../monitoring/assessTools.js'
@@ -188,4 +188,16 @@ test('assessRouting: reads the document once, applies the gate, caps the effort,
     const b = await assessRouting('u4', broken, noHouse)
     assert.equal(b.model, ASSESS_MODEL); assert.equal(b.provider, 'anthropic'); assert.equal(b.reasoningEffort, 'off')
     assert.equal((await assessRouting(null)).provider, 'anthropic')
+})
+
+test('web search: OpenRouter\'s server tool on OpenRouter, the GNews stand-in elsewhere; searches reach the ledger', () => {
+    const web = [{ type: 'web_search_20260209', name: 'web_search' }]
+    assert.deepEqual(toOpenAITools(web, { serverSearch: true }), [OPENROUTER_WEB_SEARCH])
+    assert.equal(toOpenAITools(web)[0].function.name, 'web_search')
+    assert.equal(serverSearchFor('openrouter'), true)
+    assert.equal(serverSearchFor('mistral'), false)
+    assert.equal(OPENROUTER_WEB_SEARCH.parameters.max_total_results, 15, 'searches are billed — bounded per request')
+    assert.deepEqual(toAnthropicUsage({ prompt_tokens: 10, completion_tokens: 2, server_tool_use: { web_search_requests: 3 } }).server_tool_use, { web_search_requests: 3 })
+    assert.deepEqual(toAnthropicUsage({ prompt_tokens: 10, completion_tokens: 2, web_search_requests: 2 }).server_tool_use, { web_search_requests: 2 })
+    assert.equal(toAnthropicUsage({ prompt_tokens: 10, completion_tokens: 2 }).server_tool_use, undefined)
 })

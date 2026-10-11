@@ -88,11 +88,12 @@ test('stream: text streams through the tag suppressor, a tool round runs the han
     assert.equal(r1.model, 'openai/gpt-6-luna')
     assert.equal(r1.stream, true)
     assert.equal(r1.messages[0].role, 'system'); assert.equal(r1.messages[0].content, 'SYS')
-    // web_search IS a function tool here now. The plugin it replaced augmented the prompt
-    // silently and could not be called, so every desk prompt named a tool the model could not see
-    // — on Luna it reported it unavailable. Substituted, not dropped, and no plugin.
+    // On OpenRouter web_search is OpenRouter's own SERVER tool (2026-10-11): the model calls it as often as it
+    // needs, OpenRouter runs it (native search on Luna), and it never reaches the loop's handlers. Not the old
+    // `web` plugin, which augmented the prompt once and could not be called.
     assert.equal(r1.tools.length, 2)
-    assert.ok(r1.tools.some(t => t.function.name === 'web_search'))
+    assert.ok(r1.tools.some(t => t.type === 'openrouter:web_search'))
+    assert.ok(!r1.tools.some(t => t.function?.name === 'web_search'), 'no GNews stand-in beside it')
     assert.equal(r1.plugins, undefined)
     const r2 = client.requests[1]
     assert.deepEqual(r2.messages.slice(2).map(m => m.role), ['assistant', 'tool', 'user'])

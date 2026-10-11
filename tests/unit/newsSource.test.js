@@ -202,3 +202,29 @@ test('the front page needs no subject to reach the cache at all', async () => {
     assert.equal(out.meta.subject, HEADLINES_SUBJECT)
     assert.ok(out.articles.length >= 1)
 })
+
+test('a ticker reads FMP first (Roy, 2026-10-11); Finnhub only when FMP errors or has nothing', async () => {
+    const fmpRow = { symbol: 'NVDA', publishedDate: '2026-10-10 12:00:00', title: 'Nvidia from FMP', text: 's', url: 'https://x/fmp', publisher: 'FMP wire' }
+    const finn = { headline: 'Nvidia from Finnhub', summary: 's', datetime: 1_791_000_000, url: 'https://x/f', source: 'Reuters' }
+    const make = (stockNews) => {
+        const calls = { stock: 0, company: 0 }
+        return { calls, providers: {
+            stockNews: async (o) => { calls.stock++; return stockNews(o) },
+            companyNews: async () => { calls.company++; return [finn] },
+            generalNews: async () => [], search: async () => { throw new Error('not GNews') },
+        } }
+    }
+    const a = make(async (o) => { assert.deepEqual(o.symbols, ['NVDA']); return [fmpRow] })
+    const out = await _fetchArticles({ category: 'companies', subject: 'nvda', query: 'nvda' }, a.providers)
+    assert.equal(out.meta.source, 'fmp')
+    assert.equal(out.articles[0].headline, 'Nvidia from FMP')
+    assert.deepEqual(out.articles[0].related, ['NVDA'])
+    assert.equal(a.calls.company, 0, 'Finnhub is not asked when FMP answered')
+
+    const empty = make(async () => [])
+    assert.equal((await _fetchArticles({ category: 'companies', subject: 'NVDA', query: 'NVDA' }, empty.providers)).meta.source, 'finnhub')
+    const down = make(async () => { throw new Error('FMP 500') })
+    const r = await _fetchArticles({ category: 'companies', subject: 'NVDA', query: 'NVDA' }, down.providers)
+    assert.equal(r.meta.source, 'finnhub', 'an FMP outage falls back, it does not fail the read')
+    assert.equal(down.calls.company, 1)
+})

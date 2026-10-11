@@ -219,6 +219,9 @@ export const config = {
     // flagged subject is assessed (~$0.005 each on Luna), stopping early at PYTHIA_WEEKLY_MAX_USD (Roy, 2026-10-11:
     // all flagged, $3). PYTHIA_WEEKLY_CAP sets a count cap if one is ever wanted; unset, there is none.
     // Off, nothing is scanned or spent; an admin can still run the week from the board. Replaced INDUSTRY_SCREEN.
+    // How a model on OpenRouter searches the web (providers/openaiCompat.provider.js): `server` (the default) gives
+    // it OpenRouter's own web_search server tool — native search on Luna; `gnews` the old news-only stand-in.
+    get openrouterWebSearch() { return _str('OPENROUTER_WEB_SEARCH', 'server') },
     get pythiaWeekly()       { return _bool('PYTHIA_WEEKLY', 'opt-in') },
     get pythiaWeeklyCap()    { return _num('PYTHIA_WEEKLY_CAP', Infinity) },
     get pythiaWeeklyMaxUsd() { return _num('PYTHIA_WEEKLY_MAX_USD', 3) },

@@ -127,7 +127,11 @@ regime, geopolitics). It is a judgment, not a forecast, and the code holds it to
   admin's one-off.
 - **News** (§4.1): `get_industry_news` — the last month's news on the industry's 15 largest companies, one
   FMP call through the one news pipe (`news.service`, category `basket`, keyed `gics_<code>`), at most three
-  stories per company; `get_news` for the front page (Finnhub) and topic search (GNews — small daily quota).
+  stories per company; `get_news` for one ticker (FMP first, Finnhub fallback — Roy, 2026-10-11: FMP is the main
+  news source), the front page (Finnhub) and topic search (GNews — small daily quota). `web_search` on Luna is a
+  REAL web search since 2026-10-11 (OpenRouter's server tool); the GNews stand-in ran out of quota on the first
+  live week and left 62 of 165 assessments `unverified` ("news not checked" on the board). `unverified` now
+  needs the FMP news AND the search to have failed.
 - **Money** (step 2, §4.3): the engine's industry-metrics job writes `money` on every node — companies'
   capex, buybacks, dividends and acquisitions, last four quarters vs the four before and the change a year
   earlier, share raising capex, capex intensity, median share-count change, top spenders.

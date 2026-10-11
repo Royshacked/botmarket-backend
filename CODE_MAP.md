@@ -427,7 +427,8 @@ services/
                           through candles.provider. Freshness alone decides a refetch, and a FAILED or
                           EMPTY fetch is stamped too — a down or uncovered symbol is asked once per hour,
                           not once per read. Was a JSON file per series under data/ (unsafe, machine-local)
-  news.service.js         THE ONE NEWS PIPE: Finnhub for a ticker or the front page, GNews for words;
+  news.service.js         THE ONE NEWS PIPE: FMP for a ticker (Finnhub its fallback, 2026-10-11) and for a
+                          basket of tickers, Finnhub for the front page, GNews for words;
                           one in-process shelf per (category, subject), 1h (15m for headlines), fetched
                           incrementally and merged; a provider failure serves the warm shelf STALE and
                           does not re-stamp it. The shelf was a file under data/news until 2026-09-16
@@ -537,7 +538,10 @@ services/
                               klinecharts built-ins); paneId 'candle_pane' for overlays.
     studyTranslate.js         studiesToIndicators/translateStudy — _buildStudies TradingView study
                               objects → klinecharts indicator descriptors (overlay vs own-pane split).
-    tools/webSearchCompat.tools.js  web_search FOR A NON-ANTHROPIC MODEL (2026-09-29). On Anthropic
+    tools/webSearchCompat.tools.js  web_search FOR A NON-ANTHROPIC MODEL OFF OPENROUTER (2026-09-29; on
+                              OpenRouter since 2026-10-11 the model gets OpenRouter's own `openrouter:web_search`
+                              server tool instead — real web search, native on Luna; OPENROUTER_WEB_SEARCH=gnews
+                              restores this). On Anthropic
                               it is a SERVER tool the vendor runs; the compat translation used to
                               drop it and send OpenRouter's `web` plugin instead — which augments
                               the prompt silently and cannot be CALLED, so every desk prompt named

@@ -2,7 +2,9 @@
  * THE ONE NEWS PIPE — fetch, cache, dedupe. Two consumers: the `news` condition evaluator and Axl's
  * `get_news` tool. Neither knows where an article came from, and that is deliberate.
  *
- * ── TWO SOURCES, SPLIT BY THE QUESTION ───────────────────────────────────────
+ * ── THE SOURCES, SPLIT BY THE QUESTION ───────────────────────────────────────
+ * FMP answers a ticker first (`companies`, and `basket`, several tickers in one call) — Roy, 2026-10-11:
+ * FMP is the main news source; Finnhub is a ticker's fallback when FMP errors or has nothing.
  * Finnhub answers anything that has a KEY: a ticker (`companies`) or the front page (`headlines`).
  * Its company feed is symbol-keyed, so a read for NVDA returns Nvidia's own coverage. GNews answers
  * anything that only has WORDS (`topic`: "OPEC", "semiconductors", "Federal Reserve") — a text index
@@ -211,6 +213,15 @@ export async function _fetchArticles({ category, subject, query, from, to, limit
     if (category === 'basket') return fetchFromFmpBasket({ symbols: String(query ?? '').split(','), from, to }, providers)
 
     if (category === 'companies') {
+        // FMP FIRST (Roy, 2026-10-11: "FMP should be main") — the paid feed the rest of the app already prices
+        // and files from, symbol-keyed like Finnhub. Finnhub is the fallback when FMP errors or has nothing,
+        // then the text index.
+        try {
+            const fmp = await fetchFromFmpBasket({ symbols: [subject], from, to, limit }, providers)
+            if (fmp.articles.length) return _result(fmp.articles, { ...fmp.meta, symbol: String(subject).toUpperCase() })
+        } catch (err) {
+            logger.warn(LOG, `FMP news failed for ${subject} — falling back to Finnhub: ${err.message}`)
+        }
         const result = await fetchFromFinnhubCompany({ symbol: subject, from, to, limit }, providers)
         if (result.articles.length) return result
         // Finnhub covers US listings; a foreign name, an index or a crypto pair comes back empty.

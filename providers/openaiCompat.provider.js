@@ -50,6 +50,20 @@ function _clientFor(endpoint) {
 // ─── Translators (pure) ────────────────────────────────────────────────────────
 
 /**
+ * OpenRouter's web search SERVER tool (docs: openrouter.ai/docs/guides/features/server-tools/web-search). Bounded:
+ * five results a search, fifteen a request — each search is billed (native: the provider's price; Exa $0.007).
+ */
+export const OPENROUTER_WEB_SEARCH = Object.freeze({
+    type: 'openrouter:web_search',
+    parameters: { max_results: 5, max_total_results: 15, search_context_size: 'medium' },
+})
+
+/** Does this endpoint run its own web search? OpenRouter does, unless OPENROUTER_WEB_SEARCH=gnews. */
+export function serverSearchFor(endpoint) {
+    return endpoint === 'openrouter' && config.openrouterWebSearch !== 'gnews'
+}
+
+/**
  * Anthropic tool definitions → OpenAI function tools.
  *
  * A server tool (`type: web_search_*`) has no OpenAI twin. It used to be dropped, which left every
@@ -57,11 +71,16 @@ function _clientFor(endpoint) {
  * unavailable. It is now SUBSTITUTED with a real function tool of the same name
  * (services/tools/webSearchCompat.tools.js), so the ladder means the same thing on every model.
  */
-export function toOpenAITools(tools) {
+export function toOpenAITools(tools, { serverSearch = false } = {}) {
     const out = []
     for (const t of tools ?? []) {
         if (typeof t?.type === 'string' && t.type.startsWith('web_search')) {
-            out.push({ type: 'function', function: { name: WEB_SEARCH_COMPAT.name, description: WEB_SEARCH_COMPAT.description, parameters: WEB_SEARCH_COMPAT.input_schema } })
+            // On OpenRouter the model gets the REAL web search (Roy, 2026-10-11): OpenRouter's server tool, which
+            // the model calls as often as it needs and OpenRouter runs (native search where the model has one —
+            // Luna does — else Exa). The GNews function stands in only where no server search exists: GNews is
+            // news, not the web, and its daily quota ran out on the first live Pythia week.
+            out.push(serverSearch ? OPENROUTER_WEB_SEARCH
+                : { type: 'function', function: { name: WEB_SEARCH_COMPAT.name, description: WEB_SEARCH_COMPAT.description, parameters: WEB_SEARCH_COMPAT.input_schema } })
             continue
         }
         if (!t?.name || !t?.input_schema) continue
@@ -116,12 +135,16 @@ export function toToolMessages(results) {
 /** OpenAI usage → the Anthropic-shaped usage the ledger books (services/tokenUsage.service). */
 export function toAnthropicUsage(usage) {
     if (!usage) return null
+    const searches = Number(usage.server_tool_use?.web_search_requests ?? usage.web_search_requests ?? 0) || 0
     return {
         input_tokens:            Number(usage.prompt_tokens ?? 0) || 0,
         output_tokens:           Number(usage.completion_tokens ?? 0) || 0,
         // Reported, not subtracted: the cached share is inside prompt_tokens and the row for these
         // models prices cacheRead at 0, so the prompt is charged at the input rate in full.
         cache_read_input_tokens: Number(usage.prompt_tokens_details?.cached_tokens ?? 0) || 0,
+        // OpenRouter's web_search server tool counts its searches here; the ledger books each one in the same
+        // field Anthropic's searches ride in ($10 per 1,000 — native OpenAI search is priced alike).
+        ...(searches ? { server_tool_use: { web_search_requests: searches } } : {}),
     }
 }
 
@@ -307,8 +330,10 @@ export async function streamOpenAICompatWithTools({
     client ??= _clientFor(endpoint)
     if (!wire) throw new Error('streamOpenAICompatWithTools: wire is required — llmModels binds it')
     const suppressor = createTagSuppressor({ onToken, captures: tagCaptures })
-    const oaTools    = toOpenAITools(tools)
-    const wantsWeb   = (tools ?? []).some(t => typeof t?.type === 'string' && t.type.startsWith('web_search'))
+    const serverSearch = serverSearchFor(endpoint)
+    const oaTools    = toOpenAITools(tools, { serverSearch })
+    // The GNews stand-in needs a handler; the server tool is run by OpenRouter and never reaches the loop.
+    const wantsWeb   = !serverSearch && (tools ?? []).some(t => typeof t?.type === 'string' && t.type.startsWith('web_search'))
     // The desk cannot supply this one: on Anthropic the VENDOR runs web_search, so no handler for
     // it has ever existed in a toolset. The substitute needs one, and this is the only layer that
     // knows the substitution happened.

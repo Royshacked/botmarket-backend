@@ -1,6 +1,7 @@
 // RE-ASSESS chosen subjects now (PAID: ~$0.005 each on Luna), booked to the first admin.
 //
 //   node scripts/reassess.mjs --week            every subject the latest week already assessed, again
+//   node scripts/reassess.mjs --unverified      every assessment whose news could not be checked
 //   node scripts/reassess.mjs 45301020 th_ai_…  these industries (GICS code) and themes (id)
 //   add --limit N to stop after N (a smoke test)
 //   add --skip (with --week) to leave out what was already reassessed since the week assessed it
@@ -44,6 +45,14 @@ try {
             subjects = subjects.filter((_, i) => !fresh[i])
             console.log(`--skip: ${before - subjects.length} already reassessed, ${subjects.length} to go`)
         }
+    } else if (args.includes('--unverified')) {
+        // Every standing assessment whose news could not be checked (cause `unverified`) — after the search is
+        // fixed, these are the ones worth paying for again (2026-10-11: 62 of 165, a GNews quota out).
+        const all = await industryAssessmentService.listAssessments()
+        subjects = all.filter(a => a.cause?.kind === 'unverified').map(a => ({
+            ...a.subject, verdict: a.verdict,
+            trigger: [{ key: 'news_unchecked', text: 'its news could not be checked last time', detail: null }],
+        }))
     } else {
         subjects = named.map(s => (s.startsWith('th_') ? { kind: 'theme', id: s, name: s } : { kind: 'industry', code: s, name: s }))
     }

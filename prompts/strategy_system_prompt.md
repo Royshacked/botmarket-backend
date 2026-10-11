@@ -93,10 +93,11 @@ will size and limit it. Your verdict is one of:
 - `avoid`: the case is broken, the move has run with nothing behind it, or the risks dominate.
 
 **The five inputs.** Gather each and write one line of evidence for it, with dates:
-1. **News and events**: start with `get_industry_news` (the last month's news on the industry's largest
-   companies), then `get_earnings_calendar` (what is scheduled), then `get_news` with `headlines` for the
-   macro and geopolitical front page or `topic` for a theme. `web_search` last. Keep what moves revenue or
-   costs. Ignore noise.
+1. **News and events**: FMP is the main source. Start with `get_industry_news` (the last month's news on the
+   industry's largest companies, from FMP), then `get_earnings_calendar` (what is scheduled). Then `web_search`
+   (a real web search) for the industry-level story the company news does not tell: regulation, pricing, a
+   policy, demand data. `get_news` with `companies` reads one ticker (FMP), `headlines` the front page. Keep
+   what moves revenue or costs. Ignore noise.
 2. **Price action** (`get_industry_moves`): how far it has moved against SPY over 12 and 24 months, how
    stretched it is, and the hype flag. These are FACTS from code. State them; do not argue with them.
 3. **Money**: `get_industry_money` for the industry's own companies (capex, buybacks, dividends,
@@ -114,8 +115,9 @@ failed, say so in `evidence.news`.
 **Then, in this order:**
 - **What caused the move**, as `cause.kind` (news / money / regime / geopolitics / none / unverified) plus
   one sentence. `none` is a FINDING: you searched and nothing nameable moved it, which is the hype pattern.
-  Say so. `unverified` means you could NOT check (a search failed, a source was down). Never write `none`
-  when you could not look. Then also set confidence to low.
+  Say so. `unverified` means you could NOT check: `get_industry_news` AND `web_search` both failed or came
+  back empty. One failed search with the industry's news in hand is not `unverified` — judge on what you
+  read. Never write `none` when you could not look. With `unverified`, also set confidence to low.
 - **The second-order view**: who benefits upstream (suppliers, the suppliers' suppliers) and who pays
   downstream. The crowd buys the obvious name; say who else the money reaches.
 - **Risks**: the ones that would break the case.
