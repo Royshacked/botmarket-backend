@@ -277,3 +277,8 @@ own money (capex, buybacks, dividends, deals — §4.3) stays, beside funds, ins
 **Open:**
 1. ~~The weekly assessment cap~~ — DECIDED (Roy, 2026-10-11): every flagged subject, stopping at $3 a week
    (`PYTHIA_WEEKLY_MAX_USD`); `PYTHIA_WEEKLY_CAP` stays as an optional count cap, unset.
+2. **A light assessment list** — LEFT FOR LATER (Roy, 2026-10-11). `GET /assessments` sends every assessment whole
+   (165 of them ≈ 790 KB; ~9 s from Atlas to the laptop, the server answers in 0 ms — transfer, and compression does
+   not help). The fix: the list carries only what a closed row shows (name, verdict, chips, horizon or decides-by,
+   thesis — ~100 KB) and a row fetches its detail when opened (`GET /assessments/:code`, plus the theme equivalent).
+   Not measured on Render, where Atlas is close.
