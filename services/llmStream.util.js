@@ -94,6 +94,9 @@ export const ALL_EMIT_TAGS = [
     'industry_view',
     // Pythia's weekly screen row: the catalyst score and notes (services/industryScreenRun.service.js).
     'industry_screen',
+    // Pythia's assessment of an industry or a theme, and its theme proposals (docs/design/pythia-assessment.md).
+    // Unregistered until the 2026-10-11 review, so in admin chat the block streamed raw until the reply settled.
+    'industry_assessment', 'theme_proposal',
     // Follow-up chips (services/suggestions.service.js). Registered here even though only Axl
     // emits it today — that is the whole point of this list: the suppressor must know a tag
     // BEFORE an agent starts using it, or the first turn that emits one prints it at the user.

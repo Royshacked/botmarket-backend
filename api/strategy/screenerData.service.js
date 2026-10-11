@@ -185,6 +185,22 @@ export async function readTimingRow(code) {
     return { row, regime }
 }
 
+/**
+ * Several sub-industries' rows from ONE latest complete run, and its regime → `{ rows: Map(code → row),
+ * regime }` — so a theme's links all come from the same run (a per-link read could straddle a run that
+ * completed mid-way), in one query.
+ */
+export async function readTimingRows(codes) {
+    const latest = await latestRun()
+    if (!latest || !codes?.length) return { rows: new Map(), regime: null }
+    const db = await _io.db()
+    const [rows, regime] = await Promise.all([
+        db.collection(TIMING).find({ asof: latest.asof, code: { $in: [...codes] } }, { projection: { _id: 0 } }).toArray(),
+        db.collection(REGIME).findOne({ _id: latest.asof }),
+    ])
+    return { rows: new Map(rows.map(r => [r.code, r])), regime }
+}
+
 // ─── the agent's input (pure) ─────────────────────────────────────────────────
 
 const pct = (v, d = 1) => (typeof v === 'number' ? `${(v * 100).toFixed(d)}%` : 'n/a')

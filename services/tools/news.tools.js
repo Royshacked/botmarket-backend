@@ -160,13 +160,20 @@ export function formatNewsDigest(articles, { subject, category, now = Date.now()
 }
 
 /**
+ * The kinds a MODEL may ask for — the service's vocabulary minus `basket`, which is an internal read (Pythia's
+ * industry news: a cache key plus a ticker list) and would turn a model's "basket: semiconductors" into an FMP
+ * call for the ticker SEMICONDUCTORS (code review 2026-10-11). Anything else falls back to a topic search.
+ */
+export const MODEL_NEWS_CATEGORIES = new Set([...NEWS_CATEGORIES].filter(c => c !== 'basket'))
+
+/**
  * `company` → `companies`; anything unrecognised becomes a `topic` search rather than throwing. A
  * free-text read on the wrong shelf still returns news; a thrown category returns none.
  */
 export function _normalizeCategory(raw) {
     const c = String(raw ?? '').trim().toLowerCase()
     if (c === 'company') return 'companies'
-    return NEWS_CATEGORIES.has(c) ? c : 'topic'
+    return MODEL_NEWS_CATEGORIES.has(c) ? c : 'topic'
 }
 
 export function makeNewsHandlers(deps = {}) {
@@ -201,7 +208,8 @@ export function makeNewsHandlers(deps = {}) {
 export function capPerSymbol(articles, perSymbol = 3) {
     const seen = new Map()
     return [...(articles ?? [])].sort((a, b) => b.datetime - a.datetime).filter(a => {
-        const k = a?.related?.[0] ?? ''
+        // An untagged article is its own key (its url, else its headline) — not one shared bucket of three.
+        const k = a?.related?.[0] ?? `untagged:${a?.url || a?.headline || ''}`
         const n = seen.get(k) ?? 0
         if (n >= perSymbol) return false
         seen.set(k, n + 1)

@@ -7,7 +7,7 @@
 
 import { strategyAgentService } from '../../services/agents/strategy.agent.service.js'
 import { industryViewService }  from './industryView.service.js'
-import { readSubIndustry, listSubIndustries, moneyFacts } from './industryData.service.js'
+import { readSubIndustry, listSubIndustries, moneyFacts, largestCompanies } from './industryData.service.js'
 import { notifyIndustryChanged } from '../../services/industryNotify.service.js'
 import { industryScreenService } from './industryScreen.service.js'
 import { runScreen } from '../../services/industryScreenRun.service.js'
@@ -139,9 +139,19 @@ const ASSESS_REASONS = {
 
 /** Every published assessment (no trail), and the track record of the calls behind them. Read by everyone. */
 export const listAssessments = _handle('listAssessments', async (req, res) => {
-    const [assessments, record] = await Promise.all([industryAssessmentService.listAssessments(), pythiaCallsService.trackRecord()])
-    res.json({ assessments, record })
+    const [all, record, approved] = await Promise.all([industryAssessmentService.listAssessments(), pythiaCallsService.trackRecord(),
+        themeService.listThemes({ statuses: ['approved'] })])
+    res.json({ assessments: visibleAssessments(all, approved), record })
 })
+
+/**
+ * Industry assessments, and THEME assessments only while their theme is approved — a retired theme's last
+ * verdict must not stay on the board (code review 2026-10-11). Pure.
+ */
+export function visibleAssessments(all, approvedThemes) {
+    const live = new Set((approvedThemes ?? []).map(t => t.id))
+    return (all ?? []).filter(a => a.subject?.kind !== 'theme' || live.has(a.subject.id))
+}
 
 /** One sub-industry's assessment, or null; the revision trail for admins only (it carries internal notes). */
 export const getAssessment = _handle('getAssessment', async (req, res) => {
@@ -162,9 +172,11 @@ export function withoutTrail(doc) {
 export const publishAssessment = _handle('publishAssessment', async (req, res) => {
     const bundle = await readSubIndustry(req.params.code)
     if (!bundle) return sendReason(res, 'unknown_industry', { overrides: ASSESS_REASONS })
-    const [{ row }, view] = await Promise.all([readTimingRow(bundle.sub.code), industryViewService.getView(bundle.sub.code)])
+    const [{ row }, view, companies] = await Promise.all([readTimingRow(bundle.sub.code), industryViewService.getView(bundle.sub.code),
+        largestCompanies(bundle.sub, { limit: 40 })])
     const r = await industryAssessmentService.publishAssessment({ ...(req.body ?? {}), industry: bundle.sub.code },
-        { sub: bundle.sub, row, money: moneyFacts(bundle.answering), structure: structureOf(view), recordCall: pythiaCallsService.recordCall, source: 'chat' })
+        { sub: bundle.sub, row, money: moneyFacts(bundle.answering), basket: companies.map(c => c.symbol).filter(Boolean),
+            structure: structureOf(view), recordCall: pythiaCallsService.recordCall, source: 'chat' })
     if (!r.ok) return sendReason(res, r.reason, { overrides: ASSESS_REASONS, fallback: 500, ...(r.detail ? { extra: { detail: r.detail } } : {}) })
     res.json({ ...r.doc, call: r.call ?? null })
 })
@@ -175,9 +187,16 @@ export const publishAssessment = _handle('publishAssessment', async (req, res) =
  */
 export const assessNow = _handle('assessNow', async (req, res) => {
     const r = await assessIndustry(req.params.code, { userId: req.user._id })
-    const status = r.ok ? 200 : r.outcome === 'unknown_industry' ? 404 : r.outcome === 'error' ? 500 : 422
-    res.status(status).json(r)
+    res.status(runStatus(r, 'unknown_industry')).json(r)
 })
+
+/** The HTTP status of a headless run's outcome. Pure. */
+export function runStatus(r, unknown) {
+    if (r.ok) return 200
+    if (r.outcome === 'already_running') return 409
+    if (r.outcome === unknown) return 404
+    return r.outcome === 'error' ? 500 : 422
+}
 
 /** The forward log: the latest calls with their grades (everyone). */
 export const listCalls = _handle('listCalls', async (req, res) => {
@@ -198,10 +217,17 @@ export const listThemes = _handle('listThemes', async (req, res) => {
     const admin = req.user?.role === 'admin'
     const themes = await themeService.listThemes({ statuses: admin ? ['approved', 'proposed', 'retired'] : ['approved'] })
     const withAssessments = await Promise.all(themes.map(async t => ({
-        ...t, assessment: t.status === 'approved' ? withoutTrail(await industryAssessmentService.getThemeAssessment(t.id)) : null,
+        ...(admin ? t : themeForTraders(t)),
+        assessment: t.status === 'approved' ? withoutTrail(await industryAssessmentService.getThemeAssessment(t.id)) : null,
     })))
     res.json(withAssessments)
 })
+
+/** A theme without who proposed, approved or retired it — admins' names are the desk's business. Pure. */
+export function themeForTraders(theme) {
+    const { proposed_by, approved_by, retired_by, ...rest } = theme   // eslint-disable-line no-unused-vars -- dropped on purpose
+    return rest
+}
 
 /** Approve or retire a theme (admin). Body `{ status, note? }`. */
 export const setThemeStatus = _handle('setThemeStatus', async (req, res) => {
@@ -213,12 +239,11 @@ export const setThemeStatus = _handle('setThemeStatus', async (req, res) => {
 /** Ask Pythia to propose themes now (admin) — a few minutes of research, its cost returned. Body `{ max? }`. */
 export const proposeThemesNow = _handle('proposeThemesNow', async (req, res) => {
     const r = await proposeThemes({ userId: req.user._id, max: req.body?.max })
-    res.status(r.ok ? 200 : 500).json(r)
+    res.status(runStatus(r, null)).json(r)
 })
 
 /** Assess one approved theme now (admin), headless, its cost returned. */
 export const assessThemeNow = _handle('assessThemeNow', async (req, res) => {
     const r = await assessTheme(req.params.id, { userId: req.user._id })
-    const status = r.ok ? 200 : r.outcome === 'unknown_theme' ? 404 : r.outcome === 'error' ? 500 : 422
-    res.status(status).json(r)
+    res.status(runStatus(r, 'unknown_theme')).json(r)
 })

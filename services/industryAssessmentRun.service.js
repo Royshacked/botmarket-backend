@@ -11,15 +11,14 @@
 // result. Never throws: the caller is an HTTP handler that reports the outcome.
 
 import { strategyAgentService } from './agents/strategy.agent.service.js'
-import { readSubIndustry, moneyFacts, universeSymbols } from '../api/strategy/industryData.service.js'
+import { readSubIndustry, moneyFacts, universeSymbols, largestCompanies } from '../api/strategy/industryData.service.js'
 import { themeService, checkThemeProposal } from '../api/strategy/theme.service.js'
 import { readThemeFacts, themeBasket, measuredSubs } from '../api/strategy/themeData.service.js'
 import { readTimingRow } from '../api/strategy/screenerData.service.js'
 import { industryAssessmentService } from '../api/strategy/industryAssessment.service.js'
 import { industryViewService } from '../api/strategy/industryView.service.js'
 import { pythiaCallsService } from '../api/strategy/pythiaCalls.service.js'
-import { getDb } from '../providers/mongodb.provider.js'
-import { COLLECTION as TOKEN_USAGE, monthKey } from './tokenUsage.service.js'
+import { getMonthlyUsage, monthKey } from './tokenUsage.service.js'
 import { withTimeout } from './timeout.util.js'
 import { logger } from './logger.service.js'
 
@@ -37,11 +36,23 @@ export function deskSpend(byAgent) {
         .reduce((sum, [, v]) => sum + (v?.cost ?? 0), 0)
 }
 
-async function _strategySpend(userId) {
+/** Pythia's spend for a user in one month — through the token service's own reader, not a second copy. */
+async function _strategySpend(userId, month = monthKey()) {
     if (!userId) return 0
-    const db = await getDb()
-    const d = await db.collection(TOKEN_USAGE).findOne({ userId, month: monthKey() }, { projection: { byAgent: 1 } })
-    return deskSpend(d?.byAgent)
+    return deskSpend((await getMonthlyUsage(userId, month))?.byAgent)
+}
+
+// One run per subject at a time (code review 2026-10-11): a second "Assess now" on the same industry while the
+// first is still researching paid for two runs, and each one's cost included the other's spend. The guard is
+// per process — this app runs as one.
+const _running = new Set()
+/** Test seam. */
+export function _resetRunning() { _running.clear() }
+
+async function _once(key, fn) {
+    if (_running.has(key)) return { ok: false, outcome: 'already_running', cost_usd: 0, detail: 'a run for this is already in progress' }
+    _running.add(key)
+    try { return await fn() } finally { _running.delete(key) }
 }
 // Usage is booked fire-and-forget per model call, so the last write can land just after the run returns.
 const LEDGER_SETTLE_MS = 2000
@@ -53,7 +64,8 @@ const _deps = {
     run: (args) => strategyAgentService.chatStream(args),
     publish: (block, opts) => industryAssessmentService.publishAssessment(block, opts),
     recordCall: (doc, opts) => pythiaCallsService.recordCall(doc, opts),
-    spend: (userId) => _strategySpend(userId),
+    spend: (userId, month) => _strategySpend(userId, month),
+    basket: async (sub) => (await largestCompanies(sub, { limit: 40 })).map(c => c.symbol).filter(Boolean),
     settle: () => new Promise(r => setTimeout(r, LEDGER_SETTLE_MS)),
     now: () => new Date().toISOString(),
     // themes (step 3)
@@ -74,19 +86,26 @@ export function structureOf(view) {
 
 /**
  * One headless desk turn, measured → `{ result, cost }`. The ledger is read before and after (with the
- * settle wait) so the cost is THIS run's; on a throw the error carries `cost` too. Shared by every run here.
+ * settle wait, on success and on failure alike) so the cost is THIS run's — approximately: the ledger is
+ * per user and desk, so an admin's own Pythia chat during the run lands in it too. A run that crosses into a
+ * new month adds the new month's spend. On a throw the error carries `cost`. Shared by every run here.
  */
 async function _measuredTurn(deps, { userId, userPrompt, chatState, label, timeoutMs }) {
     const abort = new AbortController()
     const timer = setTimeout(() => abort.abort(), timeoutMs)
-    const before = await deps.spend(userId)
-    const cost = async () => Math.max(0, (await deps.spend(userId).catch(() => before)) - before)
+    const month = monthKey()
+    const before = await deps.spend(userId, month)
+    const cost = async () => {
+        await deps.settle()
+        const after = await deps.spend(userId, month).catch(() => before)
+        const next = monthKey() !== month ? await deps.spend(userId, monthKey()).catch(() => 0) : 0
+        return Math.max(0, after - before) + next
+    }
     try {
         const result = await withTimeout(deps.run({
             messages: [], userPrompt, chatState, userId, signal: abort.signal,
             onToken: () => {}, onToolStart: () => {}, onReasoning: () => {}, onPhase: () => {},
         }), timeoutMs, label)
-        await deps.settle()
         return { result, cost: await cost() }
     } catch (err) {
         err.cost = await cost()
@@ -101,7 +120,11 @@ async function _measuredTurn(deps, { userId, userPrompt, chatState, label, timeo
  * Assess one sub-industry now → `{ ok, outcome, doc?, call?, cost_usd, detail? }`, outcome one of
  * published | unknown_industry | no_block | refused | error.
  */
-export async function assessIndustry(code, { userId = null, deps = _deps, timeoutMs = RUN_TIMEOUT_MS } = {}) {
+export function assessIndustry(code, opts = {}) {
+    return _once(`industry:${code}`, () => _assessIndustry(code, opts))
+}
+
+async function _assessIndustry(code, { userId = null, deps = _deps, timeoutMs = RUN_TIMEOUT_MS } = {}) {
     try {
         const bundle = await deps.readSub(code)
         if (!bundle) return { ok: false, outcome: 'unknown_industry', cost_usd: 0 }
@@ -111,7 +134,8 @@ export async function assessIndustry(code, { userId = null, deps = _deps, timeou
             chatState: { assess: sub.code }, label: `industry assessment ${sub.code}` })
         const block = (result?.assessments ?? []).find(b => b.industry === sub.code)
         if (!block) return { ok: false, outcome: 'no_block', cost_usd: cost, detail: (result?.reply ?? '').slice(0, 400) }
-        const pub = await deps.publish(block, { sub, row, money: moneyFacts(bundle.answering), structure: structureOf(view), recordCall: deps.recordCall, now: deps.now(), source: 'assess_now' })
+        const basket = await deps.basket(sub)
+        const pub = await deps.publish(block, { sub, row, money: moneyFacts(bundle.answering), basket, structure: structureOf(view), recordCall: deps.recordCall, now: deps.now(), source: 'assess_now' })
         if (!pub.ok) return { ok: false, outcome: 'refused', cost_usd: cost, detail: pub.detail }
         logger.info(LOG, 'assessment published', { code: sub.code, verdict: pub.doc.verdict, cost_usd: Number(cost.toFixed(4)), call: pub.call?.logged ?? null })
         return { ok: true, outcome: 'published', doc: pub.doc, call: pub.call, cost_usd: cost }
@@ -126,7 +150,11 @@ export async function assessIndustry(code, { userId = null, deps = _deps, timeou
  * unknown_theme | no_block | refused | error. Its facts are its links' moves and money (themeData), its call
  * graded on the theme's basket.
  */
-export async function assessTheme(id, { userId = null, deps = _deps, timeoutMs = RUN_TIMEOUT_MS } = {}) {
+export function assessTheme(id, opts = {}) {
+    return _once(`theme:${id}`, () => _assessTheme(id, opts))
+}
+
+async function _assessTheme(id, { userId = null, deps = _deps, timeoutMs = RUN_TIMEOUT_MS } = {}) {
     try {
         const theme = await deps.getTheme(id)
         if (!theme || theme.status !== 'approved') return { ok: false, outcome: 'unknown_theme', cost_usd: 0, detail: theme ? `${theme.name} is ${theme.status}` : `no theme ${id}` }
@@ -152,7 +180,11 @@ export const PROPOSE_MAX = 5
  * skipped, cost_usd }`. Each <theme_proposal> is checked against the measured sub-industries and the
  * universe's tickers; an already-approved theme is skipped, never overwritten.
  */
-export async function proposeThemes({ userId = null, max = PROPOSE_MAX, deps = _deps, timeoutMs = RUN_TIMEOUT_MS } = {}) {
+export function proposeThemes(opts = {}) {
+    return _once('propose_themes', () => _proposeThemes(opts))
+}
+
+async function _proposeThemes({ userId = null, max = PROPOSE_MAX, deps = _deps, timeoutMs = RUN_TIMEOUT_MS } = {}) {
     const n = Math.min(Math.max(Number(max) || PROPOSE_MAX, 1), 10)
     try {
         const [subs, symbols] = await Promise.all([deps.measuredSubs(), deps.universeSymbols()])

@@ -27,6 +27,10 @@ export const HORIZON_DAYS = Object.freeze({ '3m': 91, '12m': 365 })
 export const REAFFIRM_DAYS = 28
 export const BASKET_MAX = 40
 export const BASKET_MIN = 3
+/** A horizon graded more than this many days after it fell due is VOID, not scored on the wrong date. */
+export const GRADE_GRACE_DAYS = 14
+/** A grade missing more than this share of its basket (delisted, renamed) is flagged incomplete. */
+export const INCOMPLETE_SHARE = 0.2
 const QUOTE_CONCURRENCY = 8
 
 const _io = {
@@ -50,7 +54,9 @@ export function shouldLog(prev, verdict, now) {
 /**
  * Grade one call at one horizon from its frozen entry prices and today's → the grade, or null when fewer
  * than BASKET_MIN names or any benchmark could be priced. Pure. A name with no exit price (delisted,
- * renamed) is left out and counted in `missing`.
+ * renamed) is left out and counted in `missing` — and since the names that vanish are mostly the big losers
+ * (a bankruptcy) or acquired at a premium, the grade says how much of the basket is gone and is flagged
+ * `incomplete` past INCOMPLETE_SHARE, so a flattered grade is visible as such (code review 2026-10-11).
  */
 export function gradeCall(call, exit, at) {
     const rets = []
@@ -70,7 +76,8 @@ export function gradeCall(call, exit, at) {
     const basket = rets.reduce((x, y) => x + y, 0) / rets.length
     const right = call.verdict === 'avoid' ? basket < bench.SPY : basket > bench.SPY
     return {
-        at, n: rets.length, missing, basket_return: basket,
+        at, n: rets.length, missing, missing_share: missing / (call.basket?.length || 1),
+        incomplete: missing / (call.basket?.length || 1) > INCOMPLETE_SHARE, basket_return: basket,
         share_beat_spy: rets.filter(r => r > bench.SPY).length / rets.length,
         spy: bench.SPY, qqq: bench.QQQ, rsp: bench.RSP,
         vs_spy: basket - bench.SPY, vs_qqq: basket - bench.QQQ, vs_rsp: basket - bench.RSP,
@@ -117,34 +124,47 @@ async function recordCall(doc, { now = new Date().toISOString(), basket: given =
         throw new Error(`could not price the basket (${basket.length} of ${symbols.length}) or a benchmark`)
     }
     const call = {
-        id: `pc_${code}_${now.slice(0, 10)}`, subject: doc.subject, verdict: doc.verdict, horizon: doc.horizon,
+        // The minute in the id: two published verdicts on one day are two calls (a same-day flip used to
+        // overwrite the first — code review 2026-10-11).
+        id: `pc_${code}_${now.replace(/[-:]/g, '').slice(0, 13)}`, subject: doc.subject, verdict: doc.verdict, horizon: doc.horizon,
         confidence: doc.confidence, thesis: doc.thesis, called_at: now, assessed_at: doc.assessed_at,
         basket, entry: Object.fromEntries(basket.map(s => [s, prices[s]])),
         bench_entry: Object.fromEntries(BENCHMARKS.map(s => [s, prices[s]])),
         grades: {}, status: 'open',
     }
-    await db.collection(COLLECTION).replaceOne({ id: call.id }, call, { upsert: true })
+    await db.collection(COLLECTION).insertOne(call)
     logger.info(LOG, 'call logged', { code, verdict: call.verdict, basket: basket.length })
     return { logged: true, call }
 }
 
 /**
- * Grade every call that has reached a horizon it has no grade for → `{ graded, failed }`. A call is closed
- * once its last horizon is graded. Never throws per call: one bad quote run does not stop the rest.
+ * Grade every call that has reached a horizon it has no grade for → `{ graded, voided, failed }`. A call is
+ * closed once every horizon has a grade or a void. Never throws per call: one bad quote run does not stop the
+ * rest.
+ *
+ * VOID, NOT WRONG (code review 2026-10-11). A horizon is priced only within GRADE_GRACE_DAYS of falling due:
+ * later than that, today's prices would be scored as the 3-month result (a grader down for a year once would
+ * have given 3m and 12m the same numbers). And a horizon that still cannot be priced when the grace runs out
+ * (the basket lost too many names, a benchmark would not quote) is voided too, so the call can close instead
+ * of being re-priced every day forever.
  */
 async function gradeDue({ now = new Date().toISOString() } = {}) {
     const db = await _io.db()
     const open = await db.collection(COLLECTION).find({ status: 'open' }).toArray()
-    let graded = 0, failed = 0
+    let graded = 0, voided = 0, failed = 0
     for (const call of open) {
-        const due = Object.entries(HORIZON_DAYS).filter(([k, d]) => !call.grades?.[k] && _days(call.called_at, now) >= d).map(([k]) => k)
+        const due = Object.entries(HORIZON_DAYS).filter(([k, d]) => !call.grades?.[k] && _days(call.called_at, now) >= d)
+            .map(([k, d]) => ({ k, late: _days(call.called_at, now) - d }))
         if (!due.length) continue
         try {
-            const exit = await _prices([...call.basket, ...BENCHMARKS])
             const set = {}
-            for (const k of due) {
+            const voidIt = (k, reason) => { set[`grades.${k}`] = { at: now, void: true, reason }; voided++ }
+            const inTime = due.filter(x => x.late <= GRADE_GRACE_DAYS)
+            for (const x of due.filter(x => x.late > GRADE_GRACE_DAYS)) voidIt(x.k, `not graded until ${Math.round(x.late)} days after it fell due`)
+            const exit = inTime.length ? await _prices([...call.basket, ...BENCHMARKS]) : {}
+            for (const x of inTime) {
                 const g = gradeCall(call, exit, now)
-                if (g) { set[`grades.${k}`] = g; graded++ }
+                if (g) { set[`grades.${x.k}`] = { ...g, late_days: Math.round(x.late) }; graded++ }
                 else failed++
             }
             const done = Object.keys(HORIZON_DAYS).every(k => call.grades?.[k] || set[`grades.${k}`])
@@ -155,13 +175,15 @@ async function gradeDue({ now = new Date().toISOString() } = {}) {
             logger.warn(LOG, 'grading failed', { id: call.id, error: err.message })
         }
     }
-    if (graded || failed) logger.info(LOG, 'grading done', { graded, failed })
-    return { graded, failed }
+    if (graded || voided || failed) logger.info(LOG, 'grading done', { graded, voided, failed })
+    return { graded, voided, failed }
 }
 
 /**
  * The track record by verdict and horizon → `{ [verdict]: { [horizon]: { n, right, avg_vs_spy,
- * avg_share_beat_spy } }, open }`. Pure over the calls. `right` is the share graded right (not for `watch`).
+ * avg_share_beat_spy, incomplete, void } }, open }`. Pure over the calls. `right` is the share graded right
+ * (not for `watch`); a VOID horizon is counted but never averaged; `incomplete` counts grades that lost
+ * more than INCOMPLETE_SHARE of their basket.
  */
 export function summarise(calls) {
     const out = {}
@@ -169,14 +191,17 @@ export function summarise(calls) {
     for (const c of calls) {
         if (c.status === 'open') open++
         for (const [h, g] of Object.entries(c.grades ?? {})) {
-            const s = ((out[c.verdict] ??= {})[h] ??= { n: 0, right_n: 0, judged: 0, vs_spy: 0, beat: 0 })
+            const s = ((out[c.verdict] ??= {})[h] ??= { n: 0, right_n: 0, judged: 0, vs_spy: 0, beat: 0, incomplete: 0, void: 0 })
+            if (g.void) { s.void++; continue }
             s.n++; s.vs_spy += g.vs_spy; s.beat += g.share_beat_spy
+            if (g.incomplete) s.incomplete++
             if (g.right != null) { s.judged++; s.right_n += g.right ? 1 : 0 }
         }
     }
     for (const byH of Object.values(out)) {
         for (const [h, s] of Object.entries(byH)) {
-            byH[h] = { n: s.n, right: s.judged ? s.right_n / s.judged : null, avg_vs_spy: s.vs_spy / s.n, avg_share_beat_spy: s.beat / s.n }
+            byH[h] = { n: s.n, right: s.judged ? s.right_n / s.judged : null, avg_vs_spy: s.n ? s.vs_spy / s.n : null,
+                avg_share_beat_spy: s.n ? s.beat / s.n : null, incomplete: s.incomplete, void: s.void }
         }
     }
     return { by_verdict: out, open, total: calls.length }

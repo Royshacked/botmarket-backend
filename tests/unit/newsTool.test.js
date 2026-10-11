@@ -85,7 +85,7 @@ test('a topic read is labelled with its kind, and the front page names itself', 
 })
 
 test('the category vocabulary is the news service own — no second copy', () => {
-    for (const c of NEWS_CATEGORIES) assert.equal(_normalizeCategory(c), c)
+    for (const c of NEWS_CATEGORIES) assert.equal(_normalizeCategory(c), c === 'basket' ? 'topic' : c, "basket is internal (Pythia's), never a model's category")
     assert.equal(_normalizeCategory('company'), 'companies')
     // A model typo falls back rather than throwing: a text search still reads news, a throw reads none.
     assert.equal(_normalizeCategory('gossip'), 'topic')

@@ -25,7 +25,7 @@ import { buildTagCaptures } from '../llmStream.util.js'
 import { makeRouteCapture, ROUTE_TAGS, buildRouteRule } from '../routing.util.js'
 import {
     readSubIndustry, listSubIndustries, readCompanies, coveredSymbols,
-    formatSubIndustry, formatCompanies, formatMoney, readMoneyLeaders, formatMoneyLeaders,
+    formatSubIndustry, formatCompanies, formatMoney, readMoneyLeaders, formatMoneyLeaders, largestCompanies,
 } from '../../api/strategy/industryData.service.js'
 import { industryViewService } from '../../api/strategy/industryView.service.js'
 import { readTimingRow } from '../../api/strategy/screenerData.service.js'
@@ -85,12 +85,11 @@ export const INDUSTRY_NEWS_MAX = 24
  * An industry's news: its largest companies (its own; its answering level's when it has fewer than three),
  * through the one news pipe as a `basket`, spread so no one name fills it. → the digest text.
  */
-export async function industryNews(input, deps = { readSub: readSubIndustry, companies: readCompanies, fetch: (o) => newsService.getOrFetch(o) }) {
+export async function industryNews(input, deps = { readSub: readSubIndustry, largest: largestCompanies, fetch: (o) => newsService.getOrFetch(o) }) {
     const b = await deps.readSub(_industry(input))
     if (!b) return 'Unknown sub-industry — call list_industries for the codes and names.'
-    let rows = await deps.companies('sub_industry', b.sub.code, { limit: INDUSTRY_NEWS_COMPANIES })
-    const at = b.sub.answered_at
-    if (rows.length < 3 && at && at.level !== 'sub_industry') rows = await deps.companies(at.level, at.code, { limit: INDUSTRY_NEWS_COMPANIES })
+    // The one "largest companies, rolling up when thin" rule (industryData.largestCompanies).
+    const rows = await deps.largest(b.sub, { limit: INDUSTRY_NEWS_COMPANIES })
     const symbols = rows.map(r => r.symbol).filter(Boolean).sort()
     if (!symbols.length) return `No companies classified into ${b.sub.name} — no company news to read.`
     const { articles } = await deps.fetch({ category: 'basket', subject: `gics_${b.sub.code}`, query: symbols.join(',') })
@@ -208,7 +207,7 @@ export function _parseStrategyResponse(raw) {
     const blocks = (tag) => parseEmitBlocks(text, tag, LOG).filter(_obj)
     const withIndustry = (tag) => blocks(tag).filter(v => _txt(v.industry)).map(v => ({ ...v, industry: v.industry.trim() }))
     const assessments = blocks('industry_assessment').filter(v => _txt(v.industry) || _txt(v.theme))
-        .map(v => (_txt(v.industry) ? { ...v, industry: v.industry.trim() } : { ...v, theme: v.theme.trim() }))
+        .map(v => ({ ...v, ...(_txt(v.industry) ? { industry: v.industry.trim() } : {}), ...(_txt(v.theme) ? { theme: v.theme.trim() } : {}) }))
     return {
         reply, views: withIndustry('industry_view'), screens: withIndustry('industry_screen'), assessments,
         theme_proposals: blocks('theme_proposal').filter(v => _txt(v.name)),

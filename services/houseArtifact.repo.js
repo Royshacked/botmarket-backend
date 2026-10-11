@@ -37,7 +37,7 @@ export function makeHouseArtifactRepo({ collection, getDb = _defaultGetDb }) {
          * `$set` must NOT carry `revisions` — the trail is the `$push`'s, and passing both is a
          * conflict Mongo rejects; it is refused here with a clear message instead.
          */
-        async revise(id, $set, revision) {
+        async revise(id, $set, revision, { where = null } = {}) {
             if ($set && 'revisions' in $set) throw new Error('houseArtifactRepo.revise: the trail is appended, never set — drop `revisions` from $set')
             if (!revision || typeof revision !== 'object') throw new Error('houseArtifactRepo.revise: a revision is required')
             const db  = await getDb()
@@ -45,7 +45,10 @@ export function makeHouseArtifactRepo({ collection, getDb = _defaultGetDb }) {
             // MongoDB 5+ and a rejected update on anything older.
             const update = { $push: { revisions: { $each: [revision], $position: 0 } } }
             if ($set && Object.keys($set).length) update.$set = $set
-            const res = await db.collection(collection).updateOne({ id }, update)
+            // `where` makes the write CONDITIONAL in the database itself — e.g. "only if not approved" — so a
+            // check-then-write race cannot slip a revision past a state another writer just set. `ok:false`
+            // then means the condition failed (or the id is gone).
+            const res = await db.collection(collection).updateOne(where ? { ...where, id } : { id }, update)
             return { ok: res.matchedCount === 1 }
         },
 

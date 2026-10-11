@@ -187,22 +187,45 @@ test('recording a call freezes the basket and benchmark prices; a repeat inside 
     await assert.rejects(() => pythiaCallsService.recordCall({ ...doc, verdict: 'avoid' }, { now: NOW }), /could not price/)
 })
 
-test('the grader grades a horizon once it is reached and closes the call after the last', async () => {
+const PRICES = { AAA: 11, BBB: 11, CCC: 11, DDD: 11, SPY: 101, QQQ: 102, RSP: 101 }
+
+test('the grader grades a horizon that just fell due, voids one graded far too late, and closes the call', async () => {
     const m = memDb()
+    // called 374.5 days before NOW: 12m fell due 9.5 days ago (in time); 3m fell due 284 days ago (too late)
     m.rows('pythia_calls').push({ id: 'pc_1', status: 'open', called_at: '2025-10-01T00:00:00.000Z', grades: {}, ...CALL() })
     m.rows('pythia_calls').push({ id: 'pc_2', status: 'open', called_at: '2026-09-01T00:00:00.000Z', grades: {}, ...CALL() })
-    _setCallsIO({ db: async () => m.db, price: async (s) => ({ AAA: 11, BBB: 11, CCC: 11, DDD: 11, SPY: 101, QQQ: 102, RSP: 101 }[s]) })
+    _setCallsIO({ db: async () => m.db, price: async (s) => PRICES[s] })
     const r = await pythiaCallsService.gradeDue({ now: NOW })
-    assert.deepEqual(r, { graded: 2, failed: 0 })
+    assert.deepEqual(r, { graded: 1, voided: 1, failed: 0 })
     const [a, b] = m.rows('pythia_calls')
-    assert.ok(a.grades['3m'] && a.grades['12m'])
+    assert.equal(a.grades['3m'].void, true, "today's prices are not the 3-month result")
+    assert.match(a.grades['3m'].reason, /284 days after/)
+    assert.equal(a.grades['12m'].late_days, 10)
     assert.equal(a.status, 'closed')
     assert.deepEqual(b.grades, {}, 'not yet three months')
     assert.equal(b.status, 'open')
 })
 
+test('a horizon that cannot be priced is retried within the grace, then voided so the call closes', async () => {
+    const m = memDb()
+    m.rows('pythia_calls').push({ id: 'pc_3', status: 'open', called_at: '2026-07-05T00:00:00.000Z', grades: {}, ...CALL() })
+    _setCallsIO({ db: async () => m.db, price: async (s) => ({ SPY: 101, QQQ: 102, RSP: 101 }[s]) })   // every name gone
+    assert.deepEqual(await pythiaCallsService.gradeDue({ now: '2026-10-08T00:00:00.000Z' }), { graded: 0, voided: 0, failed: 1 }, 'inside the grace: retried')
+    assert.deepEqual(await pythiaCallsService.gradeDue({ now: '2026-10-25T00:00:00.000Z' }), { graded: 0, voided: 1, failed: 0 }, 'past it: voided')
+    assert.equal(m.rows('pythia_calls')[0].grades['3m'].void, true)
+})
+
+test('a grade that lost much of its basket is flagged incomplete, and the record counts voids apart', () => {
+    const g = gradeCall(CALL(), { AAA: 12, BBB: 11, CCC: 9, SPY: 105, QQQ: 110, RSP: 103 }, NOW)
+    assert.equal(g.missing_share, 0.25)
+    assert.equal(g.incomplete, true)
+    const s = summarise([{ verdict: 'watch', status: 'closed', grades: { '3m': { void: true }, '12m': { ...g, right: null } } }])
+    assert.deepEqual(s.by_verdict.watch['3m'], { n: 0, right: null, avg_vs_spy: null, avg_share_beat_spy: null, incomplete: 0, void: 1 })
+    assert.equal(s.by_verdict.watch['12m'].incomplete, 1)
+})
+
 test('the grader monitor runs one pass', async () => {
-    assert.deepEqual(await _tick({ grade: async () => ({ graded: 0, failed: 0 }) }), { graded: 0, failed: 0 })
+    assert.deepEqual(await _tick({ grade: async () => ({ graded: 0, voided: 0, failed: 0 }) }), { graded: 0, voided: 0, failed: 0 })
 })
 
 // ── the desk ─────────────────────────────────────────────────────────────────
@@ -229,7 +252,7 @@ const DEPS = (over = {}) => {
         run: async () => { spend += 0.42; return { reply: 'ok', assessments: [BLOCK()] } },
         publish: async (block, opts) => ({ ok: true, doc: { verdict: block.verdict, structure: opts.structure }, call: { logged: true } }),
         recordCall: async () => ({ logged: true }),
-        spend: async () => spend, settle: async () => {}, now: () => NOW,
+        spend: async () => spend, settle: async () => {}, now: () => NOW, basket: async () => ["NVDA", "AMD", "AVGO"],
         ...over,
     }
 }
@@ -268,16 +291,28 @@ test('one busy name cannot fill a basket digest — at most three per ticker, ne
     assert.deepEqual(out.map(x => x.headline), ['NVDA 5', 'NVDA 4', 'NVDA 3', 'AMD 1'])
 })
 
-test('industry news reads the largest companies as a basket keyed by the industry, and rolls up when thin', async () => {
+test('largest companies roll up to the answering level when a sub-industry is thin — the one shared rule', async () => {
+    const { largestCompanies, _setIndustryIO } = await import('../../api/strategy/industryData.service.js')
+    const m = memDb()
+    const co = (symbol, sub_code, industry_code, market_cap) => ({ symbol, sub_code, industry_code, market_cap, stale: false, duplicate_of: null })
+    m.rows('gics_companies').push(co('NVDA', CODE, '453010', 9), co('AMD', '45301010', '453010', 5), co('AVGO', '45301010', '453010', 7))
+    _setIndustryIO({ db: async () => m.db })
+    const thin = { code: CODE, answered_at: { level: 'industry', code: '453010' } }
+    assert.deepEqual((await largestCompanies(thin)).map(c => c.symbol), ['NVDA', 'AVGO', 'AMD'], 'one own company: its industry answers, largest first')
+    assert.deepEqual((await largestCompanies({ code: CODE, answered_at: { level: 'sub_industry', code: CODE } })).map(c => c.symbol), ['NVDA'])
+    assert.deepEqual(await largestCompanies(null), [])
+})
+
+test('industry news reads the largest companies as a basket keyed by the industry', async () => {
     const { industryNews } = await import('../../services/agents/strategy.agent.service.js')
     const fetched = []
     const deps = {
         readSub: async () => ({ sub: { code: CODE, name: 'Semiconductors', answered_at: { level: 'industry', code: '453010' } } }),
-        companies: async (level) => (level === 'sub_industry' ? [{ symbol: 'NVDA' }] : [{ symbol: 'NVDA' }, { symbol: 'AMD' }, { symbol: 'AVGO' }]),
+        largest: async () => [{ symbol: 'NVDA' }, { symbol: 'AMD' }, { symbol: 'AVGO' }],
         fetch: async (o) => { fetched.push(o); return { articles: [{ related: ['AMD'], datetime: Math.floor(Date.parse(NOW) / 1000) - 3600, headline: 'AMD wins a deal', summary: 's', source: 'Reuters' }] } },
     }
     const text = await industryNews({ industry: CODE }, deps)
-    assert.deepEqual(fetched[0], { category: 'basket', subject: `gics_${CODE}`, query: 'AMD,AVGO,NVDA' }, 'one sub-industry name is too few: its industry answers')
+    assert.deepEqual(fetched[0], { category: 'basket', subject: `gics_${CODE}`, query: 'AMD,AVGO,NVDA' })
     assert.match(text, /Semiconductors — its 3 largest companies/)
     assert.match(text, /AMD wins a deal/)
     assert.match(await industryNews({ industry: 'nope' }, { ...deps, readSub: async () => null }), /Unknown sub-industry/)
@@ -335,4 +370,36 @@ test('a published assessment carries the money facts it was given', async () => 
     const r = await industryAssessmentService.publishAssessment(BLOCK(), { sub: { code: CODE, name: 'Semiconductors' }, row: ROW(), money: moneyFacts(MONEY_NODE), now: NOW })
     assert.equal(r.doc.money.capex_change, 0.5)
     assert.ok(TOOLS.some(t => t.name === 'get_industry_money') && TOOLS.some(t => t.name === 'get_capex_leaders'))
+})
+
+test('one run per industry at a time: a second Assess now while the first researches is refused, not paid for', async () => {
+    const { assessIndustry: assess, _resetRunning } = await import('../../services/industryAssessmentRun.service.js')
+    _resetRunning()
+    let release
+    const gate = new Promise(r => { release = r })
+    const slow = DEPS({ run: async () => { await gate; return { reply: 'ok', assessments: [BLOCK()] } } })
+    const first = assess(CODE, { userId: 'admin', deps: slow })
+    const second = await assess(CODE, { userId: 'admin', deps: slow })
+    assert.equal(second.outcome, 'already_running')
+    release()
+    assert.equal((await first).outcome, 'published')
+    assert.equal((await assess(CODE, { userId: 'admin', deps: DEPS() })).outcome, 'published', 'free again once the first finished')
+})
+
+test('the controller answers a run\'s outcome with the right status, and hides retired themes\' verdicts', async () => {
+    const { runStatus, visibleAssessments, themeForTraders } = await import('../../api/strategy/strategy.controller.js')
+    assert.equal(runStatus({ ok: true }, 'x'), 200)
+    assert.equal(runStatus({ outcome: 'already_running' }, 'x'), 409)
+    assert.equal(runStatus({ outcome: 'unknown_theme' }, 'unknown_theme'), 404)
+    assert.equal(runStatus({ outcome: 'refused' }, 'x'), 422)
+    assert.equal(runStatus({ outcome: 'error' }, 'x'), 500)
+    const all = [{ subject: { kind: 'industry', code: CODE } }, { subject: { kind: 'theme', id: 'th_live' } }, { subject: { kind: 'theme', id: 'th_retired' } }]
+    assert.deepEqual(visibleAssessments(all, [{ id: 'th_live' }]).map(a => a.subject.code ?? a.subject.id), [CODE, 'th_live'])
+    assert.deepEqual(themeForTraders({ id: 't', approved_by: 'roy', proposed_by: 'pythia', retired_by: null, name: 'n' }), { id: 't', name: 'n' })
+})
+
+test('untagged articles are each their own key under the per-company cap', async () => {
+    const { capPerSymbol } = await import('../../services/tools/news.tools.js')
+    const u = (i) => ({ related: [], url: `https://x/${i}`, datetime: i, headline: `h${i}` })
+    assert.equal(capPerSymbol([u(1), u(2), u(3), u(4), u(5)], 3).length, 5)
 })

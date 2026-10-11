@@ -3,44 +3,52 @@
 // are each link's price moves (industry_timing) and money (industry_metrics), read here once and shared by
 // Pythia's `get_theme` tool and the headless assessment, so the two can never disagree. DATA, not judgment.
 
-import { readSubIndustry, readCompanies, moneyFacts, listSubIndustries } from './industryData.service.js'
-import { readTimingRow } from './screenerData.service.js'
+import { readSubIndustry, largestCompanies, moneyFacts, listSubIndustries, latestAsof } from './industryData.service.js'
+import { readTimingRows } from './screenerData.service.js'
 import { themeFacts, ordinal } from './industryAssessment.service.js'
 import { ORDER_LABEL } from './theme.service.js'
 
 const _io = {
-    sub: (code) => readSubIndustry(code),
-    row: (code) => readTimingRow(code),
-    companies: (level, code, opts) => readCompanies(level, code, opts),
+    sub: (code, asof) => readSubIndustry(code, asof),
+    rows: (codes) => readTimingRows(codes),
+    asof: () => latestAsof(),
+    largest: (sub, opts) => largestCompanies(sub, opts),
     subs: () => listSubIndustries(),
 }
 /** Test seam. */
 export function _setThemeDataIO(io) { Object.assign(_io, io) }
 
-/** Each link's screen row and money facts → `{ rows, money, facts, regime }`. */
+/**
+ * Each link's screen row and money facts → `{ rows, money, facts, regime }`. All links' rows come from ONE
+ * screen run and all their metrics from ONE metrics run (code review 2026-10-11: per-link reads could mix two
+ * runs when one completed mid-read, and re-resolved the latest run per link).
+ */
 export async function readThemeFacts(theme) {
-    const rows = new Map(), money = new Map()
-    let regime = null
-    await Promise.all((theme?.links ?? []).map(async (l) => {
-        const [{ row, regime: reg }, bundle] = await Promise.all([_io.row(l.code), _io.sub(l.code)])
-        if (row) rows.set(l.code, row)
-        if (reg && !regime) regime = reg
-        const m = moneyFacts(bundle?.answering)
+    const links = theme?.links ?? []
+    const [{ rows, regime }, asof] = await Promise.all([_io.rows(links.map(l => l.code)), _io.asof()])
+    const money = new Map()
+    await Promise.all(links.map(async (l) => {
+        const m = moneyFacts((await _io.sub(l.code, asof))?.answering)
         if (m) money.set(l.code, m)
     }))
     return { rows, money, regime, facts: themeFacts(theme, rows, money) }
 }
 
-/** A BASKET_PER_LINK-largest-companies basket over the direct and supplier links, when the theme names none. */
+/** How many of each direct and supplier link's largest companies a theme's basket takes. */
 export const BASKET_PER_LINK = 5
 
-/** The symbols a theme's call is graded on: its own named basket, else its order-1 and 2 links' largest. */
+/**
+ * The symbols a theme's call is graded on: its named companies FIRST, then its order-1 and 2 links' largest
+ * (rolling up when a link is thin — industryData.largestCompanies) — named ones are never dropped, and a
+ * theme with one or two names still gets a full basket.
+ */
 export async function themeBasket(theme) {
-    const own = (theme?.basket ?? []).map(b => b.symbol).filter(Boolean)
-    if (own.length >= 3) return own
-    const lists = await Promise.all((theme?.links ?? []).filter(l => l.order <= 2)
-        .map(l => _io.companies('sub_industry', l.code, { limit: BASKET_PER_LINK })))
-    return [...new Set(lists.flat().map(c => c.symbol).filter(Boolean))]
+    const named = (theme?.basket ?? []).map(b => b.symbol).filter(Boolean)
+    const lists = await Promise.all((theme?.links ?? []).filter(l => l.order <= 2).map(async l => {
+        const bundle = await _io.sub(l.code)
+        return bundle?.sub ? _io.largest(bundle.sub, { limit: BASKET_PER_LINK }) : []
+    }))
+    return [...new Set([...named, ...lists.flat().map(c => c.symbol).filter(Boolean)])]
 }
 
 /** The measured sub-industries as `{ code → { name, sector } }`, for checking a proposal's links. */

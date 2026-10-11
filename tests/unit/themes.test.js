@@ -117,15 +117,33 @@ test('a theme call is keyed by the theme and priced on the basket it was given',
     const doc = { subject: { kind: 'theme', id: THEME.id, name: THEME.name }, verdict: 'watch', horizon: 'months', assessed_at: NOW }
     const r = await pythiaCallsService.recordCall(doc, { now: NOW, basket: ['vst', 'ETN', 'NRG'] })
     assert.equal(r.logged, true)
-    assert.equal(r.call.id, `pc_${THEME.id}_2026-10-10`)
+    assert.equal(r.call.id, `pc_${THEME.id}_20261010T1200`, 'the minute in the id: a same-day flip is a second call')
     assert.deepEqual(r.call.basket, ['VST', 'ETN', 'NRG'])
     assert.equal((await pythiaCallsService.recordCall(doc, { now: NOW, basket: ['VST', 'ETN', 'NRG'] })).logged, false, 'same verdict, same window')
 })
 
-test('a theme with no named companies is graded on its direct and supplier links\' largest', async () => {
-    _setThemeDataIO({ companies: async (level, code) => (code === '55105010' ? [{ symbol: 'VST' }, { symbol: 'NRG' }] : [{ symbol: 'ETN' }, { symbol: 'VST' }]) })
+test('a theme is graded on its named companies first, then its direct and supplier links\' largest', async () => {
+    _setThemeDataIO({
+        sub: async (code) => ({ sub: { code } }),
+        largest: async (sub) => (sub.code === '55105010' ? [{ symbol: 'VST' }, { symbol: 'NRG' }] : [{ symbol: 'ETN' }, { symbol: 'VST' }]),
+    })
     assert.deepEqual(await themeBasket(THEME), ['VST', 'NRG', 'ETN'])
-    assert.deepEqual(await themeBasket({ ...THEME, basket: [{ symbol: 'A' }, { symbol: 'B' }, { symbol: 'C' }] }), ['A', 'B', 'C'])
+    assert.deepEqual(await themeBasket({ ...THEME, basket: [{ symbol: 'CEG' }] }), ['CEG', 'VST', 'NRG', 'ETN'], 'one named company is kept, not dropped')
+})
+
+test('a theme\'s facts come from one screen run for all its links', async () => {
+    const { readThemeFacts } = await import('../../api/strategy/themeData.service.js')
+    const asked = []
+    _setThemeDataIO({
+        rows: async (codes) => { asked.push(codes); return { rows: ROWS, regime: { regime: 'green' } } },
+        asof: async () => '2026-10-10',
+        sub: async (code, asof) => ({ answering: { name: code, asof, money: { companies: 3, capex: { change: 0.2 } } } }),
+    })
+    const r = await readThemeFacts(THEME)
+    assert.deepEqual(asked, [['55105010', '20104010']], 'one read for every link')
+    assert.equal(r.regime.regime, 'green')
+    assert.equal(r.money.get('20104010').capex_change, 0.2)
+    assert.equal(r.facts.moved.hype, true)
 })
 
 test('the desk emits theme proposals and theme assessments, and the turns say which', () => {
@@ -170,4 +188,28 @@ test('Propose themes now: checked proposals stored, a bad one refused with its r
     assert.deepEqual(r.proposed[0].dropped, ['NOPE'])
     assert.equal(r.refused.length, 1)
     assert.match(r.refused[0], /terms/)
+})
+
+test('a theme assessment that also names a direct link\'s industry is still checked as the theme', () => {
+    const block = { theme: ' th_data_center_power ', industry: '55105010', verdict: 'watch', horizon: 'months', thesis: 't',
+        evidence: { news: 'n', price: 'p' }, cause: { kind: 'money', text: 'c' }, second_order: 's', risks: ['r'], change_view_if: ['x'], confidence: 'low' }
+    const parsed = _parseStrategyResponse(`<industry_assessment>${JSON.stringify(block)}</industry_assessment>`).assessments[0]
+    assert.equal(parsed.theme, 'th_data_center_power', 'both fields trimmed')
+    const c = checkAssessment(parsed, { expect: 'theme' })
+    assert.equal(c.ok, true)
+    assert.equal(c.assessment.theme, 'th_data_center_power')
+    assert.equal(c.assessment.code, null)
+    assert.equal(checkAssessment(parsed).assessment.code, '55105010', 'without an expectation the industry wins, as before')
+})
+
+test('a proposal cannot drop an approved theme back to proposed, even racing the approval', async () => {
+    const m = memDb()
+    _setThemeIO({ db: async () => m.db })
+    const { theme } = checkThemeProposal(PROPOSAL(), SUBS, new Set(['VST']))
+    // the approval lands between the proposal's create and its revise: the conditional write must refuse
+    m.rows('theme').push({ id: theme.id, status: 'approved', revisions: [], created_at: NOW })
+    const r = await themeService.proposeTheme(theme, { now: NOW })
+    assert.equal(r.reason, 'already_approved')
+    assert.equal(m.rows('theme')[0].status, 'approved')
+    assert.equal(m.rows('theme').length, 1, 'no duplicate document')
 })

@@ -239,8 +239,11 @@ async function fetchFromFinnhubCompany({ symbol, from, to, limit = FETCH_LIMIT }
     return _result(newest, { source: 'finnhub', symbol: sym, from, to, count: newest.length })
 }
 
-/** Several companies' news in one FMP call, newest first. */
-export const BASKET_FETCH_LIMIT = 60
+/**
+ * Several companies' news in one FMP call, newest first. Enough rows that one or two busy names cannot fill
+ * the read before the per-company cap spreads it (60 did, for 15 companies over a month — code review 2026-10-11).
+ */
+export const BASKET_FETCH_LIMIT = 250
 async function fetchFromFmpBasket({ symbols, from, to, limit = BASKET_FETCH_LIMIT }, providers = PROVIDERS) {
     const syms = symbols.map(s => s.trim().toUpperCase()).filter(Boolean)
     if (!syms.length) throw new Error('basket needs tickers')

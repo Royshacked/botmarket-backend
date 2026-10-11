@@ -235,3 +235,21 @@ export async function universeSymbols() {
     const rows = await db.collection(COMPANIES).find(companiesQuery('sector_code', { $exists: true }), { projection: { _id: 0, symbol: 1 } }).toArray()
     return new Set(rows.map(r => r.symbol).filter(Boolean))
 }
+
+/** At least this many of a sub-industry's own companies, or the level that answers it is used instead. */
+export const MIN_OWN_COMPANIES = 3
+
+/**
+ * A sub-industry's largest companies, ROLLING UP when thin: its own when it has at least MIN_OWN_COMPANIES,
+ * else those of the level that answers it (`answered_at`) — the same rule its numbers follow. `sub` is the
+ * metrics node (readSubIndustry().sub). THE one place this rule lives: an industry's news basket, the basket
+ * its call is graded on and a theme link's basket all read it (code review 2026-10-11: three copies had
+ * drifted, and the call's never rolled up, so thin industries were silently left out of the track record).
+ */
+export async function largestCompanies(sub, { limit = 15 } = {}) {
+    if (!sub?.code) return []
+    const own = await readCompanies('sub_industry', sub.code, { limit })
+    const at = sub.answered_at
+    if (own.length >= MIN_OWN_COMPANIES || !at || at.level === 'sub_industry') return own
+    return readCompanies(at.level, at.code, { limit })
+}

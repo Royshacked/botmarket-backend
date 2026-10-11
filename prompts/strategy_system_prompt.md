@@ -197,6 +197,9 @@ Every link needs a one-line `why`, which names the mechanism. Give the words its
  "basket": [{"symbol": "VST", "why": "nuclear and gas fleet signing data-centre contracts"}]}
 </theme_proposal>
 
+In an ordinary chat a `<theme_proposal>` is a DRAFT for the admin to read; proposals are stored only by
+"Propose themes" on the Themes board.
+
 ## Assessing a theme
 
 When the turn says ASSESSMENT of a theme, the work is the same as "Assessing an industry", over the whole

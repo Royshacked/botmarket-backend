@@ -92,14 +92,17 @@ export async function ensureThemeIndexes() {
  */
 async function proposeTheme(theme, { now = new Date().toISOString(), source = 'pythia', note = null } = {}) {
     const db = await _io.db()
-    const cur = await db.collection(COLLECTION).findOne({ id: theme.id })
-    if (cur?.status === 'approved') return { ok: false, reason: 'already_approved', detail: `${theme.name} is already on the house list` }
-    if (!cur) await db.collection(COLLECTION).insertOne({ id: theme.id, revisions: [], created_at: now })
-    await _repo.revise(theme.id, {
+    // Create-if-missing as one upsert (two first proposals at once used to race insertOne into a duplicate-key
+    // error), then revise ONLY IF NOT APPROVED, decided by the database (code review 2026-10-11: a proposal
+    // overlapping an admin's approval could drop the theme back to `proposed`).
+    const created = (await db.collection(COLLECTION).updateOne({ id: theme.id },
+        { $setOnInsert: { revisions: [], created_at: now } }, { upsert: true })).upsertedCount === 1
+    const r = await _repo.revise(theme.id, {
         name: theme.name, thesis: theme.thesis, terms: theme.terms, links: theme.links, basket: theme.basket,
         status: 'proposed', proposed_at: now, proposed_by: source, updated_at: now,
-    }, newRevision({ kind: cur ? 'reproposed' : 'proposed', note: note ?? theme.thesis, at: now }))
-    return { ok: true, created: !cur, doc: await db.collection(COLLECTION).findOne({ id: theme.id }, { projection: { _id: 0 } }) }
+    }, newRevision({ kind: created ? 'proposed' : 'reproposed', note: note ?? theme.thesis, at: now }), { where: { status: { $ne: 'approved' } } })
+    if (!r.ok) return { ok: false, reason: 'already_approved', detail: `${theme.name} is already on the house list` }
+    return { ok: true, created, doc: await db.collection(COLLECTION).findOne({ id: theme.id }, { projection: { _id: 0 } }) }
 }
 
 /** An admin approves or retires a theme → `{ ok, doc }` or `{ ok:false, reason }`. */

@@ -50,7 +50,10 @@ export const EXPIRY_DAYS = Object.freeze({ weeks: 14, months: 42, years: 91 })
  * industry-screener.md §5.5.3 (Ken French's 49 industries, 1928–2024).
  */
 export const BASE_RATES = Object.freeze({
-    hype: 'Up 100%+ in two years and 100%+ above the market. Of 98 such run-ups since 1928, 22% fell 40%+ within 24 months (base rate 9%); the median one trailed the market by 10.6% over the next two years.',
+    // Measured on value-weighted industries of every company of its time; the live flag reads equal-weighted
+    // baskets of today's companies, which run hotter — so it is stated as a risk flag, not a probability for
+    // THIS industry (code review 2026-10-11).
+    hype: 'Up 100%+ in two years and 100%+ above the market. Of 98 such run-ups across US industries since 1928, 22% fell 40%+ within 24 months (base rate 9%), and the median one trailed the market by 10.6% over the next two years. A risk flag, not a probability: that history used value-weighted industries, this flag reads an equal-weighted basket of today\'s companies, which runs hotter.',
 })
 export const NOT_MEASURED = Object.freeze(['value_trap', 'customer_demand', 'momentum_at_turns'])
 
@@ -73,11 +76,14 @@ const _num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null)
  * gaps, so the board shows what the verdict was NOT based on. Facts the agent sends (moves, flags) are
  * ignored: the code attaches them.
  */
-export function checkAssessment(block) {
+export function checkAssessment(block, { expect = null } = {}) {
     if (!block || typeof block !== 'object') return { ok: false, detail: 'no block' }
-    // The subject: an industry (8-digit GICS code) or a theme (its th_ id, theme.service) — step 3.
-    const industry = _str(block.industry, 16)
-    const theme = industry ? null : _str(block.theme, 60)
+    // The subject: an industry (8-digit GICS code) or a theme (its th_ id, theme.service) — step 3. When the
+    // caller knows which it asked for (`expect`), that field is read and the other ignored: on a theme turn the
+    // model sometimes adds a direct link's `industry` too, and the block was then refused as an industry after
+    // a paid run (code review 2026-10-11).
+    const industry = expect === 'theme' ? null : _str(block.industry, 16)
+    const theme = expect === 'industry' || industry ? null : _str(block.theme, 60)
     if (theme ? !/^th_[a-z0-9_]+$/.test(theme) : (!industry || !/^\d{8}$/.test(industry))) {
         return { ok: false, detail: 'industry must be the 8-digit GICS code — or, for a theme, theme its th_ id' }
     }
@@ -219,7 +225,7 @@ const _themeDocId = (themeId) => `ia_${themeId}`
  */
 async function publishAssessment(block, { sub = null, row = null, money = null, theme = null, facts: given = null, basket = null,
     structure = null, recordCall = null, now = new Date().toISOString(), source = 'chat' } = {}) {
-    const checked = checkAssessment(block)
+    const checked = checkAssessment(block, { expect: theme ? 'theme' : sub ? 'industry' : null })
     if (!checked.ok) return { ok: false, reason: 'bad_assessment', detail: checked.detail }
     const a = checked.assessment
     let id, subject
