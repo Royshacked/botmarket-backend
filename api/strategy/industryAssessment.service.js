@@ -20,14 +20,21 @@ import { logger } from '../../services/logger.service.js'
 const LOG = '[industryAssessment]'
 export const COLLECTION = 'industry_assessment'
 
-/** The verdict words (Roy, 2026-10-10) and what the board says for each. */
+/**
+ * The verdict words and what the board says for each (Roy, 2026-10-11 — they were interesting_trade /
+ * interesting_invest / watch / avoid from 2026-10-10). The verdict says WHICH book the industry is for.
+ */
 export const VERDICTS = Object.freeze({
-    interesting_trade:  'Interesting to trade',
-    interesting_invest: 'Interesting to invest',
-    watch:              'Watch',
-    avoid:              'Avoid',
+    swing:     'For swing',
+    long_term: 'For long term',
+    watch:     'Watch',
+    avoid:     'Avoid',
 })
+/** The words before 2026-10-11, read as today's — a block from an old thread, a document not yet migrated. */
+export const LEGACY_VERDICTS = Object.freeze({ interesting_trade: 'swing', interesting_invest: 'long_term' })
 export const HORIZONS = Object.freeze(['weeks', 'months', 'years'])
+/** The horizons each book allows: a swing is weeks to months, a long-term holding is years. Others take any. */
+const VERDICT_HORIZONS = Object.freeze({ swing: ['weeks', 'months'], long_term: ['years'] })
 export const CONFIDENCE = Object.freeze(['low', 'medium', 'high'])
 /** The five inputs (design §4), each with a line of evidence. */
 export const INPUTS = Object.freeze(['news', 'price', 'money', 'regime', 'geopolitics'])
@@ -89,10 +96,14 @@ export function checkAssessment(block, { expect = null } = {}) {
     }
     const code = industry ?? theme
     const problems = []
-    const verdict = _str(block.verdict, 40)
+    const said = _str(block.verdict, 40)
+    const verdict = LEGACY_VERDICTS[said] ?? said
     if (!verdict || !VERDICTS[verdict]) problems.push(`verdict must be one of ${Object.keys(VERDICTS).join('/')}`)
-    const horizon = _str(block.horizon, 20)
+    let horizon = _str(block.horizon, 20)
     if (!horizon || !HORIZONS.includes(horizon)) problems.push(`horizon must be one of ${HORIZONS.join('/')}`)
+    // The verdict names the book, so it decides the horizon where they disagree — a "swing" over years is a
+    // long-term call mislabelled, and refusing it would throw away a paid run over a word.
+    else if (VERDICT_HORIZONS[verdict] && !VERDICT_HORIZONS[verdict].includes(horizon)) horizon = verdict === 'swing' ? 'months' : 'years'
     const thesis = _str(block.thesis)
     if (!thesis) problems.push('thesis is missing')
 

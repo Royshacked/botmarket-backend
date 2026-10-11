@@ -6,7 +6,7 @@ Pythia's three structural questions (`pythia-industry-questions.md`) as one of i
 
 The one line: **Pythia gathers what is happening to an industry or a theme — the news and events, how
 the price has taken them, where companies, funds and government are putting money, the macro regime and
-the geopolitical risk — and concludes whether it is interesting to trade, to invest in, to watch, or to
+the geopolitical risk — and concludes whether it is one for the swing book, for the long-term book, to watch, or to
 avoid. Argus brings the names, Prometheus analyses them, Atlas allocates and manages the risk.**
 
 ---
@@ -150,7 +150,7 @@ refuses an undated catalyst today):
 One house document per industry or theme, through `houseArtifact.repo` (every change a revision):
 
 - `subject` — `{ kind: 'industry' | 'theme', code | theme_id, name }`
-- `verdict` — `interesting_trade` · `interesting_invest` · `watch` · `avoid`
+- `verdict` — `swing` · `long_term` · `watch` · `avoid` (Roy, 2026-10-11: the verdict names the book; `interesting_trade` / `interesting_invest` until then, still read as these). A swing's horizon is weeks or months, a long-term one's years — the code holds the horizon to the book
 - `horizon` — weeks / months / years; `expires_at` (an assessment goes stale)
 - `thesis` — two or three sentences
 - `evidence` — one short entry per input (§4.1–4.5), each with its date
@@ -171,7 +171,7 @@ The only honest test of a judgment is forward: the model has read the past.
   share of names beating SPY (one vote per industry) and equal-weight return. `avoid` is graded too: did
   it lag?
 - **Read:** the board's track-record panel; Pythia's own prompt gets its record by verdict type, so a
-  desk that is wrong about `interesting_trade` sees it.
+  desk that is wrong about `swing` sees it.
 - Small documents (one per call); no quota concern.
 
 ## 8. Cadence and cost
@@ -197,7 +197,7 @@ already does (`needsAgent`):
 
 ## 10. Hand-off — what each desk does with an assessment
 
-- **Argus** reads `interesting_trade` / `interesting_invest` subjects as its hunting ground (it has been
+- **Argus** reads `swing` / `long_term` subjects as its hunting ground (it has been
   paused since the tilt was deleted — this is its new input) and brings names: for a theme, the
   first-order names AND the second-order ones the assessment named.
 - **Prometheus** covers the names; the assessment's thesis and risks travel with them. **"Is it priced
@@ -269,7 +269,7 @@ already does (`needsAgent`):
 
 **Decided (Roy, 2026-10-10):** geopolitics stays a SEPARATE input (§4.5), not folded into news; companies'
 own money (capex, buybacks, dividends, deals — §4.3) stays, beside funds, insiders and government;
-"priced in" is Prometheus's, per name — Pythia reports how far the price has moved and what caused it (§4.2). The verdict words stay: `interesting_trade` · `interesting_invest` · `watch` · `avoid`. Themes: Pythia PROPOSES, the admin approves — a proposed theme is not assessed until approved. The FIRST themes too: no hand-picked starting list — Pythia proposes them when the registry is built. Money comes in two stages: companies' own money first (step 2), insiders, funds and government later (step 8). The weekly screen (`industry_screen`) stays visible until the assessment board replaces it at step 6 (done 2026-10-11).
+"priced in" is Prometheus's, per name — Pythia reports how far the price has moved and what caused it (§4.2). The verdict words: `swing` · `long_term` · `watch` · `avoid` (Roy, 2026-10-11, replacing `interesting_trade` / `interesting_invest`). Themes: Pythia PROPOSES, the admin approves — a proposed theme is not assessed until approved. The FIRST themes too: no hand-picked starting list — Pythia proposes them when the registry is built. Money comes in two stages: companies' own money first (step 2), insiders, funds and government later (step 8). The weekly screen (`industry_screen`) stays visible until the assessment board replaces it at step 6 (done 2026-10-11).
 
 **Open:**
 1. ~~The weekly assessment cap~~ — DECIDED (Roy, 2026-10-11): every flagged subject, stopping at $3 a week

@@ -104,7 +104,7 @@ function deps(over = {}) {
             moved: { asof: '2026-10-09', hype: false, ext_percentile: 0.5, excess_12m: 0.03, rel_1m: 0.01 }, money: null, expires_at: '2027-01-01T00:00:00Z' }],
         listThemes: async () => [{ id: 'th_ai', name: 'AI', status: 'approved', links: [{ code: '11111111', name: 'Semis', order: 1 }] }],
         assessIndustry: async (code, opts) => { calls.push({ code, opts }); return { ok: true, outcome: 'published', doc: { verdict: 'watch' }, cost_usd: 0.005 } },
-        assessTheme: async (id, opts) => { calls.push({ id, opts }); return { ok: true, outcome: 'published', doc: { verdict: 'interesting_trade' }, cost_usd: 0.006 } },
+        assessTheme: async (id, opts) => { calls.push({ id, opts }); return { ok: true, outcome: 'published', doc: { verdict: 'swing' }, cost_usd: 0.006 } },
         bookTo: async () => 'admin1',
         cap: () => 30, maxUsd: () => 1,
         db: async () => mem.db,

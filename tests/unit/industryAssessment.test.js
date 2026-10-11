@@ -61,7 +61,7 @@ test('"unverified" is its own cause — a failed search is not the hype finding'
 })
 
 test('the verdict words are the four Roy kept', () => {
-    assert.deepEqual(Object.keys(VERDICTS), ['interesting_trade', 'interesting_invest', 'watch', 'avoid'])
+    assert.deepEqual(Object.keys(VERDICTS), ['swing', 'long_term', 'watch', 'avoid'])
 })
 
 // ── the facts the code attaches ──────────────────────────────────────────────
@@ -149,7 +149,7 @@ test('a call is logged on a new verdict, or a reaffirmation after the window —
 })
 
 const CALL = (over = {}) => ({
-    verdict: 'interesting_trade', basket: ['AAA', 'BBB', 'CCC', 'DDD'],
+    verdict: 'swing', basket: ['AAA', 'BBB', 'CCC', 'DDD'],
     entry: { AAA: 10, BBB: 10, CCC: 10, DDD: 10 }, bench_entry: { SPY: 100, QQQ: 100, RSP: 100 }, ...over,
 })
 
@@ -412,4 +412,15 @@ test('untagged articles are each their own key under the per-company cap', async
     const { capPerSymbol } = await import('../../services/tools/news.tools.js')
     const u = (i) => ({ related: [], url: `https://x/${i}`, datetime: i, headline: `h${i}` })
     assert.equal(capPerSymbol([u(1), u(2), u(3), u(4), u(5)], 3).length, 5)
+})
+
+test('the verdict names the book (Roy, 2026-10-11): old words are read as the new, and the book sets the horizon', () => {
+    const ok = (over) => checkAssessment(BLOCK(over))
+    assert.equal(ok({ verdict: 'interesting_trade', horizon: 'weeks' }).assessment.verdict, 'swing')
+    assert.equal(ok({ verdict: 'interesting_invest', horizon: 'years' }).assessment.verdict, 'long_term')
+    assert.equal(ok({ verdict: 'swing', horizon: 'years' }).assessment.horizon, 'months', 'a swing is weeks to months')
+    assert.equal(ok({ verdict: 'swing', horizon: 'weeks' }).assessment.horizon, 'weeks')
+    assert.equal(ok({ verdict: 'long_term', horizon: 'months' }).assessment.horizon, 'years')
+    assert.equal(ok({ verdict: 'avoid', horizon: 'weeks' }).assessment.horizon, 'weeks', 'watch and avoid take any horizon')
+    assert.match(ok({ verdict: 'buy' }).detail, /verdict must be one of swing\/long_term\/watch\/avoid/)
 })
