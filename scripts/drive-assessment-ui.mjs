@@ -69,6 +69,8 @@ try {
         await page.waitForTimeout(2500)
         console.log('GET /api/strategy/assessments →', statuses.join(', ') || '(not requested)')
         await page.getByRole('tab', { name: 'Assessed' }).click()
+        // 165 assessments are ~790 KB, ~9 s from Atlas to the laptop (2026-10-11): wait for them, not a fixed beat.
+        await page.locator('.assessment-view__group').first().waitFor({ timeout: 30000 }).catch(() => {})
         await page.waitForTimeout(800)
         await shot(page, `${user.role}-01-assessed`)
         console.log('record:', (await page.locator('.assessment-view__record').innerText()).replace(/\n+/g, ' | '))
