@@ -257,6 +257,12 @@ description, checked against the measured numbers at publish, not a view that st
 so the industry-view monitor reviews what is due headless, at most three an hour, and only when
 `INDUSTRY_REVIEWS=true` (see `docs/desks/pythia-industries.md`).
 
+Pythia's ASSESSMENTS (a verdict per industry and theme, `docs/design/pythia-assessment.md`) weigh where the money
+goes: companies' own capex and buybacks, and since step 8 (`docs/design/pythia-money-flows.md`) insiders buying,
+funds' 13F ownership and federal contract money — each measured by an engine job, shown to Pythia with how to
+read it, frozen on the assessment and shown on the board. None of them is a forecast: the insider cluster failed
+its 20-year test and is shown as a fact only, and crowding is untested.
+
 Confirming does not answer in the social chat: it resolves the card as read, routes to Axl, and
 streams the brief into his thread (`POST /api/axl/brief/stream`). A page of market prose does not
 belong in a surface built for one-liners, and read in Axl's thread the obvious follow-up — "what

@@ -571,7 +571,8 @@ PYTHIA (the industry desk)            POST /api/strategy/stream
         └─► CONSUMED: Atlas's review trigger fires when a HELD industry's answer changes
   └─ industry_assessment (docs/design/pythia-assessment.md): a JUDGMENT, not a forecast — from news
      (FMP first), price (the engine's moves; the hype flag on the size-weighted line), companies'
-     money, regime and geopolitics → for swing · for long term · watch (a live question with a dated
+     money and, since step 8, insiders, funds' 13F ownership and federal contract money
+     (docs/design/pythia-money-flows.md), regime and geopolitics → for swing · for long term · watch (a live question with a dated
      decider ≤6 weeks) · avoid · no case; every verdict logged in pythia_calls and graded vs SPY at
      3 and 12 months. Industries and approved THEMES (value chains Pythia proposes, an admin approves)
         └─► the weekly change scan (pythiaWeekly, opt-in PYTHIA_WEEKLY): after each engine price run,

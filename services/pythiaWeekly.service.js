@@ -39,7 +39,7 @@ const _deps = {
     readRun: (asof) => readRun(asof),
     readMoney: () => readAllMoney(),
     // Step 8's flows; a failed read scans without them (the price and money legs still run).
-    readFlows: () => readAllFlows().catch(() => new Map()),
+    readFlows: () => readAllFlows().catch(err => { logger.warn(LOG, 'flows not read — the scan runs without them', { error: err.message }); return new Map() }),
     listAssessments: () => industryAssessmentService.listAssessments(),
     listThemes: () => themeService.listThemes({ statuses: ['approved'] }),
     assessIndustry: (code, opts) => assessIndustry(code, opts),

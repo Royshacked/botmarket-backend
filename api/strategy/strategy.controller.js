@@ -205,7 +205,10 @@ export const publishAssessment = _handle('publishAssessment', async (req, res) =
     const bundle = await readSubIndustry(req.params.code)
     if (!bundle) return sendReason(res, 'unknown_industry', { overrides: ASSESS_REASONS })
     const [{ row }, view, companies, flows] = await Promise.all([readTimingRow(bundle.sub.code), industryViewService.getView(bundle.sub.code),
-        largestCompanies(bundle.sub, { limit: 40 }), readFlowNodes(bundle.sub.code).then(flowFacts).catch(() => null)])
+        largestCompanies(bundle.sub, { limit: 40 }), readFlowNodes(bundle.sub.code).then(flowFacts).catch(err => {
+            logger.warn('[strategy]', 'flows not read — the assessment freezes none', { code: bundle.sub.code, error: err.message })
+            return null
+        })])
     const r = await industryAssessmentService.publishAssessment({ ...(req.body ?? {}), industry: bundle.sub.code },
         { sub: bundle.sub, row, money: moneyFacts(bundle.answering), flows, basket: companies.map(c => c.symbol).filter(Boolean),
             structure: structureOf(view), recordCall: pythiaCallsService.recordCall, source: 'chat' })

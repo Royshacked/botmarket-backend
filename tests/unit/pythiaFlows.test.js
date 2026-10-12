@@ -24,6 +24,11 @@ const GOV = (over = {}) => ({ asof: '2026-10-12', level: 'sub_industry', code: C
 
 // ── the facts ────────────────────────────────────────────────────────────────
 
+test('no insider\'s personal name is frozen on an assessment', () => {
+    const f = flowFacts({ insiders: INS({ top: [{ symbol: 'ABC', name: 'DOE JANE', title: 'CEO', value: 2e6, traded: '2026-10-01' }] }) })
+    assert.deepEqual(f.insiders.top, [{ symbol: 'ABC', title: 'CEO', value: 2e6, traded: '2026-10-01' }])
+})
+
 test('flowFacts keeps the compact facts and is null when nothing is measured', () => {
     const f = flowFacts({ insiders: INS(), funds: FUN(), government: GOV() })
     assert.equal(f.insiders.cluster, true)
@@ -39,14 +44,18 @@ test('the tool text says the insider cluster has no tested edge, funds are crowd
     const t = formatFlows({ insiders: INS(), funds: FUN(), government: GOV() })
     assert.match(t, /CLUSTER: YES/)
     assert.match(t, /NO TESTED EDGE/)
-    assert.match(t, /CROWDING, never a lead/)
+    assert.match(t, /CROWDING, a FACT about who is already in/)
     assert.match(t, /: 62% of the industry's market value held/, 'a level, not a signed change')
     assert.match(t, /\$17\.5M in all/)
     assert.match(t, /CEO \$2\.0M/)
     assert.match(t, /100th percentile of its own last 7 quarters/)
+    assert.match(formatFlows({ funds: FUN({ percentile: 0.43 }) }), /43rd percentile/)
+    assert.doesNotMatch(formatFlows({ funds: FUN({ history_quarters: 2 }) }), /percentile/, 'too short a history to rank against')
+    assert.match(t, /not a tested warning/)
     assert.match(t, /\+40% on the four before/)
     assert.match(formatFlows({}), /not measured/)
-    assert.match(formatFlows({ government: GOV({ now: 0, change: null }) }), /no federal contract lines map/)
+    assert.match(formatFlows({ government: GOV({ now: 0, before: 0, change: null }) }), /no federal contract lines map/)
+    assert.match(formatFlows({ government: GOV({ now: 0, before: 2e9, change: -1 }) }), /\$0, -100% on the four before/, 'a fall to zero is read as one')
 })
 
 // ── reading the engine ───────────────────────────────────────────────────────
@@ -74,6 +83,13 @@ test('the latest COMPLETE run of each is read — never a half-written one', asy
     assert.equal(all.get(CODE).funds.quarter, '2026-06-30')
 })
 
+test('a funds quarter whose universe document landed before its nodes is not read yet', async () => {
+    const m = engine()
+    m.rows('industry_funds').push({ quarter: '2026-09-30', level: 'universe', code: 'all' })
+    assert.equal((await readFlowNodes(CODE)).funds.quarter, '2026-06-30')
+    assert.equal((await readAllFlows()).get(CODE).funds.quarter, '2026-06-30')
+})
+
 test('no runs yet → nothing, not an error', async () => {
     _setIndustryIO({ db: async () => memDb().db })
     assert.deepEqual(await readFlowNodes(CODE), { insiders: null, funds: null, government: null })
@@ -84,10 +100,11 @@ test('no runs yet → nothing, not an error', async () => {
 
 const F = (i = {}, f = {}, g = {}) => flowFacts({ insiders: INS(i), funds: FUN(f), government: GOV(g) })
 
-test('an insider cluster that started or ended is a change', () => {
-    assert.deepEqual(flowChanges(F({ cluster: true }), F({ cluster: false })).map(c => c.key).filter(k => k.startsWith('insider')), ['insider_cluster'])
-    assert.deepEqual(flowChanges(F({ cluster: false }), F({ cluster: true })).map(c => c.key).filter(k => k.startsWith('insider')), ['insider_cluster_ended'])
-    assert.equal(flowChanges(F({ cluster: true }), F({ cluster: true })).filter(c => c.key.startsWith('insider')).length, 0)
+test('an insider cluster STARTING is a change; one ending buys no run (QA 2026-10-12: no tested edge)', () => {
+    const ins = (now, then) => flowChanges(now, then).map(c => c.key).filter(k => k.startsWith('insider'))
+    assert.deepEqual(ins(F({ cluster: true }), F({ cluster: false })), ['insider_cluster'])
+    assert.deepEqual(ins(F({ cluster: false }), F({ cluster: true })), [])
+    assert.deepEqual(ins(F({ cluster: true }), F({ cluster: true })), [])
 })
 
 test('crowding is not scanned yet — the fact is shown, the trigger waits for a longer history', () => {
@@ -108,7 +125,14 @@ test('contract money shifting 25%+ on at least $1B is a change; a small line or 
     assert.deepEqual(keys(F({}, {}, { change: 0.4 }), F({}, {}, { change: 0.05 })), ['contracts_shift'])
     assert.deepEqual(keys(F({}, {}, { change: -0.3 }), F({}, {}, { change: 0.3 })), ['contracts_shift'], 'it turned')
     assert.deepEqual(keys(F({}, {}, { change: 0.4 }), F({}, {}, { change: 0.3 })), [], 'already shifting this way')
-    assert.deepEqual(keys(F({}, {}, { change: 0.9, now: 2e8 }), F({}, {}, { change: 0 })), [], 'under $1B')
+    assert.deepEqual(keys(F({}, {}, { change: 0.9, now: 2e8, before: 1e8 }), F({}, {}, { change: 0 })), [], 'under $1B both years')
+})
+
+test('QA 2026-10-12: revisions near 25% do not re-fire, and a fall below $1B counts', () => {
+    const keys = (now, then) => flowChanges(now, then).map(c => c.key).filter(k => k === 'contracts_shift')
+    assert.deepEqual(keys(F({}, {}, { change: 0.26 }), F({}, {}, { change: 0.24 })), [], 'frozen at 24%: inside the gap')
+    assert.deepEqual(keys(F({}, {}, { change: 0.26 }), F({}, {}, { change: 0.10 })), ['contracts_shift'], 'frozen at 10%: a real shift')
+    assert.deepEqual(keys(F({}, {}, { now: 0.9e9, before: 1.6e9, change: -0.44 }), F({}, {}, { change: 0.02 })), ['contracts_shift'])
 })
 
 test('no frozen flows → no flow legs: an assessment made before step 8 is not flagged for crowding every week', () => {

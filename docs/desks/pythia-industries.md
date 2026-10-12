@@ -82,8 +82,10 @@ Q11) was RETIRED when the assessment board replaced it (Roy, 2026-10-10). In its
   approved theme's facts today with the facts FROZEN on its standing assessment, and flags what MOVED: the hype
   flag turning on or off, a month of ±10% against the S&P, the 12-month excess over SPY shifting 20 points, the
   stretch crossing its top or bottom decile, capex or buybacks turning (sign flip, at least 10%); plus an expired
-  assessment, and never assessed. Not scanned yet: news volume, geopolitics (step 4), funds/insiders/government
-  (step 8), `change_view_if` (free text).
+  assessment, and never assessed. Since step 8 (pythia-money-flows.md), against the flows FROZEN on the
+  assessment: an insider cluster starting, and federal contract money moving 25%+ on $1B+. Not scanned yet:
+  news volume, geopolitics (step 4), funds' crowding (shown, not scanned — no tested meaning yet),
+  `change_view_if` (free text).
 - **The run** (`services/pythiaWeekly.service.js`, monitor `pythiaWeekly.monitor.service.js`, opt-in
   `PYTHIA_WEEKLY`) assesses the flagged ones — biggest change first; never-assessed approved themes ahead of the
   never-assessed industries, those by the size of their 12-month move — ALL of them (Roy, 2026-10-11), stopping
@@ -137,6 +139,11 @@ regime, geopolitics). It is a judgment, not a forecast, and the code holds it to
   earlier, share raising capex, capex intensity, median share-count change, top spenders.
   `get_industry_money` reads one industry, `get_capex_leaders` the market's biggest capex changes;
   `industryData.moneyFacts` attaches the facts to each assessment.
+- **The rest of the money** (step 8, [pythia-money-flows.md](../design/pythia-money-flows.md)): insiders buying
+  their own stock (90 days; a cluster is AWARENESS only — it failed a 20-year test), funds' 13F ownership against
+  the market (crowding, a fact), federal contract money on the NAICS lines an industry sells into (the change).
+  On `get_industry_money` (`industryData.formatFlows`), frozen on each industry assessment as `flows`
+  (`flowFacts`), three rows on the board, and in the change scan.
 - **Themes** (step 3, §3; `theme.service`, `themeData.service`): value chains of sub-industries by order
   (1 direct, 2 suppliers, 3 suppliers' suppliers). Pythia PROPOSES (`<theme_proposal>`, "Propose themes"),
   the admin approves or retires; only an approved theme is assessed — an `<industry_assessment>` carrying

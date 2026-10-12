@@ -277,6 +277,16 @@ test('Assess now publishes and reports what the run cost', async () => {
     assert.deepEqual(r.doc.structure, { demand: 'growing', economics: 'good', cycle: 'peak' })
 })
 
+test('Assess now publishes without flows when they cannot be read, and freezes them when they can (QA 2026-10-12)', async () => {
+    let given
+    const publish = async (block, opts) => { given = opts.flows; return { ok: true, doc: { verdict: block.verdict }, call: null } }
+    const failed = await assessIndustry(CODE, { deps: DEPS({ publish, readFlows: async () => { throw new Error('engine down') } }) })
+    assert.equal(failed.outcome, 'published')
+    assert.equal(given, null)
+    await assessIndustry(CODE, { deps: DEPS({ publish, readFlows: async () => ({ insiders: { cluster: true } }) }) })
+    assert.deepEqual(given, { insiders: { cluster: true } })
+})
+
 test('Assess now: an unknown industry, no block, a refused block, an error', async () => {
     assert.equal((await assessIndustry('99999999', { deps: DEPS() })).outcome, 'unknown_industry')
     assert.equal((await assessIndustry(CODE, { deps: DEPS({ run: async () => ({ reply: 'no', assessments: [] }) }) })).outcome, 'no_block')

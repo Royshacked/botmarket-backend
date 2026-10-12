@@ -14,6 +14,8 @@
 // assessment only: an assessment made before step 8 (or a theme, whose links carry companies' money only) has
 // none, and comparing today's crowding with nothing would flag every crowded industry every week.
 
+import { ordinal } from './industryAssessment.service.js'
+
 /** The thresholds. Each one is a "something moved" line, not a signal: crossing it buys an assessment. */
 export const SCAN = Object.freeze({
     SHARP_MOVE_1M: 0.10,     // the basket's last month against the S&P, either way
@@ -29,7 +31,8 @@ export const SCAN = Object.freeze({
     CROWDED: 0.90,           // funds' share against the market crossed into the top of its own range…
     CROWD_MIN_QUARTERS: 4,   // …ranked against at least this many quarters
     CONTRACTS_SHIFT: 0.25,   // federal contract money on its lines moved 25%+ (four quarters on the four before)…
-    CONTRACTS_MIN_USD: 1e9,  // …on at least $1B a year: a small line's swing is noise
+    CONTRACTS_MIN_USD: 1e9,  // …on at least $1B a year, this year's or last (a fall below $1B counts): a small line's swing is noise
+    CONTRACTS_GAP: 0.5,      // and the frozen change was under half the line (or the other way): revisions near 25% do not re-fire
 })
 
 /**
@@ -48,7 +51,6 @@ export const REASONS = Object.freeze({
     expired:       { weight: 2, text: 'the assessment expired' },
     buyback_turn:  { weight: 2, text: 'buybacks turned' },
     insider_cluster: { weight: 2, text: 'insiders at several of its companies started buying' },
-    insider_cluster_ended: { weight: 1, text: 'the insider buying cluster ended' },
     crowded:       { weight: 2, text: "funds' ownership reached the top of its range" },
     contracts_shift: { weight: 2, text: 'federal contract money on its lines shifted' },
     link_moved:    { weight: 0, text: 'a link in its chain moved' },   // weighs as its links' biggest reason
@@ -106,19 +108,20 @@ export function flowChanges(now, then, scan = SCAN) {
     if (!now || !then) return []
     const out = []
     const i = now.insiders, ti = then.insiders
-    if (i && ti) {
-        if (i.cluster && !ti.cluster) out.push({ key: 'insider_cluster', detail: `${i.companies_buying} of ${i.n_companies} companies` })
-        if (!i.cluster && ti.cluster) out.push({ key: 'insider_cluster_ended', detail: null })
-    }
+    // A cluster STARTING buys a look; one ending does not — it had no tested edge, and its 90-day window ends every
+    // cluster about 13 weeks on, which would buy a second paid run for nothing (QA 2026-10-12). The tool and the
+    // board show the cluster as it stands.
+    if (i && ti && i.cluster && !ti.cluster) out.push({ key: 'insider_cluster', detail: `${i.companies_buying} of ${i.n_companies} companies` })
     const f = now.funds, tf = then.funds
     if (scan.CROWDED_SCANNED && f && tf && _n(f.percentile) != null && f.history_quarters >= scan.CROWD_MIN_QUARTERS && f.percentile >= scan.CROWDED
         && !(_n(tf.percentile) != null && tf.percentile >= scan.CROWDED)) {
-        out.push({ key: 'crowded', detail: `${Math.round(f.percentile * 100)}th percentile of ${f.history_quarters} quarters` })
+        out.push({ key: 'crowded', detail: `${ordinal(Math.round(f.percentile * 100))} percentile of ${f.history_quarters} quarters` })
     }
     const g = now.government, tg = then.government
-    if (g && tg && _n(g.change) != null && Math.abs(g.change) >= scan.CONTRACTS_SHIFT && (_n(g.now) ?? 0) >= scan.CONTRACTS_MIN_USD) {
-        const before = _n(tg.change)
-        if (before == null || Math.abs(before) < scan.CONTRACTS_SHIFT || Math.sign(before) !== Math.sign(g.change)) {
+    const size = Math.max(_n(g?.now) ?? 0, _n(g?.before) ?? 0)
+    if (g && tg && _n(g.change) != null && Math.abs(g.change) >= scan.CONTRACTS_SHIFT && size >= scan.CONTRACTS_MIN_USD) {
+        const was = _n(tg.change)
+        if (was == null || Math.sign(was) !== Math.sign(g.change) || Math.abs(was) < scan.CONTRACTS_GAP * scan.CONTRACTS_SHIFT) {
             out.push({ key: 'contracts_shift', detail: `${_pct(g.change)} over a year` })
         }
     }

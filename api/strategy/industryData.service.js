@@ -14,6 +14,7 @@
 
 import { getEngineDb } from '../../services/engineDb.js'
 import { coverageService } from '../analyst/coverage.service.js'
+import { ordinal } from './industryAssessment.service.js'
 
 export const METRICS = 'industry_metrics'
 export const RUNS = 'industry_metrics_runs'
@@ -259,10 +260,16 @@ async function _latestComplete(db, runs) {
     const d = await db.collection(runs).find({ complete: true }, { projection: { asof: 1 } }).sort({ asof: -1 }).limit(1).next()
     return d?.asof ?? null
 }
+// The latest quarter that has SUB-INDUSTRY documents — industry_funds has no run marker, and a quarter whose
+// universe document landed before its nodes would freeze `funds: null` on every assessment made meanwhile (QA
+// 2026-10-12; the engine now also writes the universe document last).
 async function _latestQuarter(db) {
-    const d = await db.collection(FUNDS).find({ level: 'universe' }, { projection: { quarter: 1 } }).sort({ quarter: -1 }).limit(1).next()
+    const d = await db.collection(FUNDS).find({ level: 'sub_industry' }, { projection: { quarter: 1 } }).sort({ quarter: -1 }).limit(1).next()
     return d?.quarter ?? null
 }
+
+/** A rank needs this many earlier quarters to mean anything — the same floor the change scan would use. */
+export const FUNDS_MIN_QUARTERS = 4
 
 /** The latest run of each → `{ insiders, funds, government }` (asof / quarter / asof), nulls where none ran. */
 async function _flowRuns(db) {
@@ -280,7 +287,10 @@ export function flowFacts({ insiders = null, funds = null, government = null } =
         insiders: i ? {
             asof: insiders.asof ?? null, companies_buying: i.companies_buying ?? 0, n_companies: insiders.n_companies ?? null,
             share_buying: i.share_buying ?? null, vs_universe: i.vs_universe ?? null, cluster: Boolean(i.cluster),
-            value: i.value ?? 0, new: i.new ?? 0, top: (i.top ?? []).slice(0, 3),
+            value: i.value ?? 0, new: i.new ?? 0,
+            // No personal names frozen: the role, the company, the dollars and the date say what matters, and FMP's
+            // insider rows count as displayed data under its licence (QA 2026-10-12).
+            top: (i.top ?? []).slice(0, 3).map(t => ({ symbol: t.symbol ?? null, title: t.title ?? null, value: t.value ?? null, traded: t.traded ?? null })),
         } : null,
         funds: f ? {
             quarter: funds.quarter ?? null, share: f.share ?? null, relative_share: f.relative_share ?? null,
@@ -289,7 +299,7 @@ export function flowFacts({ insiders = null, funds = null, government = null } =
         } : null,
         government: g ? {
             asof: government.asof ?? null, through: (government.quarters ?? []).at(-1) ?? null,
-            now: g.now ?? null, change: g.change ?? null, prev_change: g.prev_change ?? null, lines: (g.lines ?? []).slice(0, 3),
+            now: g.now ?? null, before: g.before ?? null, change: g.change ?? null, prev_change: g.prev_change ?? null, lines: (g.lines ?? []).slice(0, 3),
         } : null,
     }
     return out.insiders || out.funds || out.government ? out : null
@@ -322,7 +332,7 @@ export async function readAllFlows() {
 const _pctx = (v, d = 0) => (typeof v === 'number' ? `${v >= 0 ? '+' : ''}${(v * 100).toFixed(d)}%` : 'n/a')
 const _share = (v) => (typeof v === 'number' ? `${Math.round(v * 100)}%` : 'n/a')
 // Insider buys run in thousands and millions, contract lines in billions: one unit for all read "$0.0B" (live read 2026-10-12).
-const _money = (v) => (typeof v !== 'number' ? 'n/a'
+const _money = (v) => (typeof v !== 'number' ? 'n/a' : v === 0 ? '$0'
     : Math.abs(v) >= 1e9 ? `$${(v / 1e9).toFixed(1)}B` : Math.abs(v) >= 1e6 ? `$${(v / 1e6).toFixed(1)}M` : `$${Math.round(v / 1e3)}K`)
 
 /**
@@ -344,12 +354,13 @@ export function formatFlows(nodes = {}) {
     const fu = f.funds
     if (fu) {
         lines.push(`FUNDS (13F ownership, quarter ${fu.quarter}; filed up to 45 days after it): ${_share(fu.share)} of the industry's market value held — ${typeof fu.relative_share === 'number' ? `${fu.relative_share.toFixed(2)}× the market's share` : 'n/a'}`
-            + `${typeof fu.percentile === 'number' ? `, at the ${Math.round(fu.percentile * 100)}th percentile of its own last ${fu.history_quarters} quarters` : ''}; this quarter's change against the market ${_pctx(fu.flow_vs_universe, 1)}.`,
-        '  Read as CROWDING, never a lead: where funds WERE. At the top of its range it is a warning (who is left to buy?); it never says "follow".')
+            + `${typeof fu.percentile === 'number' && fu.history_quarters >= FUNDS_MIN_QUARTERS ? `, at the ${ordinal(Math.round(fu.percentile * 100))} percentile of its own last ${fu.history_quarters} quarters` : ''}; this quarter's change against the market ${_pctx(fu.flow_vs_universe, 1)}.`,
+        '  Read as CROWDING, a FACT about who is already in, where funds WERE — never a lead, and not a tested warning either (the house has not measured what a crowded industry does next). Never write "funds are buying, so follow".')
     }
     const g = f.government
-    // An industry no contract line maps to has no government money to read — said once, not as "$0, n/a".
-    if (g && !(g.now > 0)) lines.push('GOVERNMENT: no federal contract lines map to this industry.')
+    // An industry no contract line maps to has no government money to read — said once, not as "$0, n/a". One
+    // whose lines HAD money and now have none is a fall to zero, read as such.
+    if (g && !(g.now > 0) && !(g.before > 0)) lines.push('GOVERNMENT: no federal contract lines map to this industry.')
     else if (g) {
         lines.push(`GOVERNMENT (federal contract dollars on the lines this industry sells into, four quarters to ${g.through}): ${_money(g.now)}, ${_pctx(g.change)} on the four before (a year earlier ${_pctx(g.prev_change)})`
             + `${g.lines?.length ? `; largest lines: ${g.lines.map(l => `${l.name ?? l.naics} ${_money(l.dollars)}`).join(', ')}` : ''}.`,

@@ -1,8 +1,10 @@
 # Pythia step 8 — the rest of the money: insiders, funds, government
 
 **Status: 8a BUILT 2026-10-12 (the weekly job; T1 run — FAILED, so the cluster is awareness only, §6); 8b BUILT and backfilled 2026-10-12 (§3.2); 8c BUILT and run 2026-10-12, its crosswalk accepted as drafted (§3.3); 8d BUILT 2026-10-12 (§7) — not yet
-live-driven: no assessment published since carries the flows. Decisions §9: all six
-as recommended (Roy, 2026-10-12).** Step 8 of [pythia-assessment.md](./pythia-assessment.md) §12;
+live-driven: no assessment published since carries the flows. QA cycle 2026-10-12 fixed (§10). T2 (crowding)
+declared, NOT run — so crowding is a fact only, never a tested warning, and is not scanned. Decisions §9: all
+six as recommended (Roy, 2026-10-12). Where a design bullet below and its "as built" note disagree, the
+note is what runs.** Step 8 of [pythia-assessment.md](./pythia-assessment.md) §12;
 the input it fills is §4.3 ("Where the money goes"). Step 2 built companies' own money (capex, buybacks,
 dividends, deals); this adds the other three rows of that table. Decisions for Roy are in §9.
 
@@ -27,8 +29,8 @@ stays hers.
 
 | Source | What came back | Verdict |
 |---|---|---|
-| FMP `stable/insider-trading/latest` (Starter plan) | 200; 1,000 rows a page; **6,000 rows = one week** of Form 3/4/5 lines (filed Oct 5–9). 392 open-market purchases (`P-Purchase`) in **80 symbols**, 61 of them ≥ $1M. Owner type, filing and transaction dates, price, shares, link | **Live feed.** ~6–8 calls a week |
-| FMP `insider-trading/search`, `/statistics` | 200, per symbol | Not needed — the latest feed covers everyone |
+| FMP `stable/insider-trading/latest` (Starter plan) | 200; 1,000 rows a page; **6,000 rows = one week** of Form 3/4/5 lines (filed Oct 5–9). 392 open-market purchases (`P-Purchase`) in **80 symbols**, 61 of them ≥ $1M. Owner type, filing and transaction dates, price, shares, link | Sampling only — superseded by the next row |
+| FMP `insider-trading/search` | 200; per symbol, OR across everyone with `transactionType=P-Purchase` (found while building 8a): ~1,000 purchases a page ≈ two weeks, back to 2024 | **The live feed as built:** the whole 90-day window re-read in 5–7 calls a run |
 | FMP `institutional-ownership/*` (13F) | **402**, Premium | Not usable (as fmp.provider.js already notes) |
 | FMP `profile` | `cusip` per symbol; `profile-bulk` is 402 | The CUSIP→symbol map, one call per company |
 | SEC **Form 3/4/5 data sets**, quarterly zip | 8.6 MB for 2026q3; `SUBMISSION` carries `ISSUERTRADINGSYMBOL` and **`AFF10B5ONE`**; `NONDERIV_TRANS` the code, shares, price; `REPORTINGOWNER` the relationship. 5,184 purchases in 1,047 symbols in the quarter | **History** (2006 →) for the tested base rate |
@@ -40,8 +42,10 @@ stays hers.
 
 ### 3.1 Insiders — "are the people who run these companies buying with their own money?"
 
-- **Source.** Weekly: FMP latest feed, paged back until the previous run's last filing date (~6–8 calls).
-  History: the SEC quarterly data sets, downloaded once for the test (§6), never stored in Mongo.
+- **Source.** Weekly: FMP's purchase-only search (`insider-trading/search?transactionType=P-Purchase`), the
+  whole 90-day window re-read each run (5–7 calls) — nothing raw stored. A run with under 30% of the
+  previous run's purchases is not written (an empty answer is not a quiet week). History: the SEC quarterly
+  data sets, downloaded once for the test (§6), never stored in Mongo.
 - **What counts.** Open-market purchases only (`P`, acquired, price > 0). Officers and directors are
   INSIDERS; 10% owners are a separate line (often funds — a different kind of money). Awards, option
   exercises, gifts and in-kind are not purchases. A purchase reported more than 30 days after the trade
@@ -63,18 +67,21 @@ stays hers.
 
 - **Source.** The SEC quarterly 13F data set, on each new file. Streamed row by row (never loaded whole —
   Render's memory); only rows whose CUSIP is in our universe are kept.
-- **CUSIP → symbol.** `gics_companies` gains `cusip`, from FMP `profile` (one call per company: ~2,650 once,
-  then only new names at classification; paced like `classify_gics.py`, off-hours — the key is shared with
-  live loops).
+- **CUSIP → symbol.** `gics_companies` gains `cusip`, from FMP `profile` (one call per company: 2,876 once,
+  then only new names; paced — the key is shared with live loops). A CUSIP can change (Carnival, Exxon): before
+  each new quarter, a company worth $2B+ that the last quarter showed under 5% held — or not at all — has its
+  CUSIP re-checked, at most once in 80 days (61 such on 2026-10-12, many of them preferreds funds do not hold).
 - **Hygiene.** Shares only (`SH`), not options (`PUTCALL` rows dropped) or bonds (`PRN`); one filing per filer
-  per period — a restatement amendment replaces the original, a new-holdings amendment adds to it; filings
-  for older periods go to their own period.
+  per period — a restatement amendment replaces the original, a new-holdings amendment adds to it. A filing
+  for an older period that arrives in a later file is DROPPED (a few hundred of ~11,000), not added back.
 - **Per sub-industry, per quarter:** the institutional share (13F value ÷ market cap at period end), the
-  quarter's change in SHARES held (price-neutral), the change in holder count, and the share's percentile
-  against the sub-industry's own history.
-- **Read as:** CROWDING, never a lead (§4.3). At the extremes it is a warning; it never says "follow".
+  quarter's change in ownership (designed on SHARES held; built on 13F dollars ÷ market cap — see "as built"),
+  the change in holder count, and the share's percentile against the sub-industry's own history.
+- **Read as:** CROWDING, never a lead (§4.3). Designed as "a warning at the extremes" — that needs T2 (§6),
+  which has not run, so as built it is a FACT about who is already in, and the prompt says it is not tested.
 - **As built (2026-10-12)** — `aether-engine money/funds.py`, `scripts/fetch_fund_holdings.py`, cron `fund-holdings`
-  Sunday 04:00 UTC (fetches only when SEC posts a quarter; ~22 s a file). Stores `fund_holdings` (one row per
+  Sunday 04:00 UTC (fetches only when SEC posts a quarter, known by the file NAME; ~20 s to read a file plus
+  ~1 min to download it). Stores `fund_holdings` (one row per
   company per quarter: shares, dollars, holders, its 10 largest filers) and `industry_funds` (per node per quarter,
   plus a `universe` row), 12 quarters kept; CUSIPs on `gics_companies` (2,865 of 2,876 found). The dry run found
   four ways the obvious arithmetic lies, each now handled and tested:
@@ -110,21 +117,20 @@ stays hers.
 ### 3.3 Government — "where does public money land?"
 
 - **Source.** USAspending, contracts (award types A–D), obligated dollars per NAICS per completed quarter —
-  one call a quarter plus pages. The latest quarter is incomplete for weeks (the provider's trap 3), so
-  quarters are re-read for two quarters after they close and upserted.
-- **NAICS → GICS sub-industry.** A crosswalk file in the engine (`config/naics_gics.yaml`) for the NAICS
-  codes that make up ~95% of contract dollars (a few hundred), drafted by an LLM pass from the two
-  definitions and REVIEWED by Roy — the same shape as the 710 split companies. A NAICS line may feed more
-  than one sub-industry, with a weight.
+  one call a quarter plus pages. The latest quarter is incomplete for weeks (the provider's trap 3) — as
+  built, every run re-reads 12 SETTLED quarters (100 days after each ends) rather than upserting.
+- **NAICS → GICS sub-industry.** A crosswalk in the engine (as built: `money/naics_gics.yaml`, 209 codes)
+  for the NAICS codes that make up ~95% of contract dollars, drafted by Claude and ACCEPTED by Roy as drafted
+  (2026-10-12). A NAICS line may feed more than one sub-industry, with a weight.
 - **Per sub-industry:** the last 4 quarters against the 4 before, the same change a year earlier, the top
-  NAICS lines behind it, and the top recipients (names only, from `spending_by_category/recipient` with the
-  NAICS filter — resolving them to tickers is the opportunist doc's `recipientResolve`, not this step).
+  NAICS lines behind it. (Designed with the top recipients by name — NOT built; resolving recipients to
+  tickers is the opportunist doc's `recipientResolve`.)
 - **Not here:** grants and loans (CHIPS, IRA), budgets and tariffs stay with news (§4.1); the contract
   ledger is what is cheap, dated and complete.
 - **As built (2026-10-12)** — `aether-engine money/government.py`, `money/naics_gics.yaml`,
   `scripts/fetch_government_contracts.py`, cron `government-contracts` monthly (the 2nd). Re-reads 12 settled
   quarters a run → `industry_government` per node per run date (6 runs kept); top recipients are NOT in v1.
-  - **The crosswalk** is a draft written by Claude for Roy's review: the 209 NAICS codes in the top 95% of any
+  - **The crosswalk** was drafted by Claude and accepted by Roy as drafted (2026-10-12): the 209 NAICS codes in the top 95% of any
     quarter's dollars (96.9% of eight quarters'), each weighted by where its money lands among listed companies
     as OUR universe classifies the contractors (Amentum/V2X/BWXT/HII → A&D; KBR/Jacobs/Fluor/AECOM → C&E;
     Leidos/SAIC/CACI/Parsons → IT consulting; Booz Allen/ICF → research & consulting; Maximus → data processing).
@@ -134,32 +140,40 @@ stays hers.
     the lines it sells into, NOT its revenue — read the change.
   - **Settled quarters only.** The dry run 12 days after Sep 30 read the Jul–Sep quarter at $137B against $290B a
     year earlier: Defense Department contract data reaches USAspending 90 days late. A quarter counts 100 days
-    after it ends.
+    after it ends. A settled quarter under half the same quarter a year earlier stops the run unwritten (the
+    lowest real ratio seen was 0.91).
   - **Dry run, four quarters to June 2026 vs the four before:** rising — Automobile Manufacturers +84%, Health
     Care Services +72%, Construction & Engineering +48% ($132B of line money); falling — Environmental &
     Facilities Services −57% (DOE cleanup lines), Construction Machinery −35%, Life Sciences Tools −19%.
 
 ## 4. Where it lands
 
-- **Engine jobs, aggregates only** (§9 of the parent). Three scripts, one per input, each writing ITS OWN
-  collection per GICS node per run date (8a: `industry_insiders` + `industry_insiders_runs`, complete-run
-  marker, 8 runs kept, like `industry_metrics`) — not a block on the metrics node, so no job waits on
-  another's clock; the reader (8d) joins them by code. ~270 nodes × a few hundred bytes — well inside the
-  M0 quota.
+- **Engine jobs** (§9 of the parent). Three scripts, one per input, each writing ITS OWN collections — not a
+  block on the metrics node, so no job waits on another's clock; the reader (8d) joins them by code:
+  - `industry_insiders` + `industry_insiders_runs` — per node per run date (~270 at four levels), complete-run
+    marker, 8 runs kept;
+  - `fund_holdings` (per COMPANY per quarter: ~2,700 rows a quarter, 12 quarters ≈ 33,000 small rows, ~4 MB —
+    company aggregates, not filings), `fund_holdings_runs`, and `industry_funds` (per node per quarter plus a
+    `universe` row; the universe row written LAST, which is how a reader knows the quarter is whole);
+  - `industry_government` + `industry_government_runs` — per node per run date (273), 6 runs kept.
+  Well inside the M0 quota.
   Themes take theirs from the chain, as companies' money does today (`themeFacts`).
 - **Schedule.** Insiders weekly, before Pythia's week (so the change scan sees it); funds on a new SEC file
-  (checked weekly by `Last-Modified`); government monthly.
+  (checked weekly by file name — a corrected file SEC re-posts under the same name needs `--refetch-before`);
+  government monthly.
 - **Pythia.** `get_industry_money` returns the new blocks; the prompt reads them by §3's "read as" lines;
   the facts freeze on each assessment like the others; the board's money section gains three rows.
-- **Change scan** (step 6) gains three triggers: an insider cluster appears or ends; the institutional share
-  crosses its 90th percentile; contract dollars' 4-quarter change crosses ±25%.
+- **Change scan** (step 6), as designed: an insider cluster appears or ends; the institutional share crosses
+  its 90th percentile; contract dollars' 4-quarter change crosses ±25%. As built (§7, QA §10): a cluster
+  STARTING only; contract money ±25% on $1B+ either year, outside a gap from the frozen change; crowding off.
 - **Hand-offs, later.** Prometheus's opening could name a company's own insider buys; Atlas's review could
   name a crowded holding. Not in step 8.
 
 ## 5. Cost
 
-All free sources. FMP: ~6–8 calls a week, plus ~2,650 profile calls once. SEC: one 9 MB and one 100 MB file a
-quarter (transient). USAspending: a few calls a month. No model calls in the jobs; Pythia's assessments grow
+All free sources. FMP: 5–7 calls a week (insiders), 2,876 profile calls once, then ~60 CUSIP re-checks a
+quarter. SEC: one ~100 MB 13F file a quarter (transient); the Form 4 data sets were downloaded once, for T1.
+USAspending: ~120 calls a month (12 quarters × ~10 pages). No model calls in the jobs; Pythia's assessments grow
 by the three blocks' tokens (~300).
 
 ## 6. The tests, declared before they run
@@ -215,6 +229,13 @@ that passes becomes a `BASE_RATES` entry (`api/strategy/industryAssessment.servi
   declaration first, not a rerun of this one with a new knob): single companies (the literature's insider
   effect is per firm — Prometheus's ground), GICS sub-industries instead of French 49 (163 nodes vs 49, and
   our own price history is short), dollars instead of counts.
+
+  **Two flaws found in review (QA 2026-10-12), neither able to turn the FAIL into a pass:** (1) "the test
+  measures what ships" is not exact — B counts every Form 4 issuer with a French-49 SIC, OTC registrants
+  included (small bank holding companies above all), while N is `french49_nfirms`, exchange-listed firms only;
+  the live rule takes both from one universe. (2) The month-end signal counts trades by trade DATE, including
+  ones filed after the month end — a small look-ahead that would favour a pass. Any re-declared test filters B
+  to listed issuers and to filings made by the signal date.
 - **T2 — crowding.** Do industries at the top of their institutional-ownership history have worse forward
   returns or a higher crash rate (as hypes do: 22% vs 9%)? Data: 13F data sets back to 2013 (~50 files).
   The returns are the open part: our industry index may not reach back that far, and French 49 needs each
@@ -275,3 +296,24 @@ LEVEL unsigned, and an industry no contract line maps to said once instead of "$
    grants and loans — but those are lumpy, slower and better caught by news).
 5. **The crosswalk:** an LLM draft that you review (recommended), or built by hand.
 6. **The bars in §6** — as written, or different.
+
+## 10. QA cycle (2026-10-12)
+
+Three reviews (engine jobs; backend wiring; board and docs), every finding checked against the code, all fixed:
+- **An empty answer is not a run.** Insiders: under 30% of the previous run's purchases → not written.
+  Government: a settled quarter under half the same quarter a year earlier → not written. Either would have
+  been a COMPLETE run of zeros, firing `insider_cluster_ended` or `contracts_shift` across the board.
+- **A half-written funds quarter is never read.** The engine writes each quarter's universe row last, and the
+  reader takes the latest quarter that HAS sub-industry rows.
+- **Stale CUSIPs are re-checked** (§3.2). **A mislabelled 13F file** is skipped by its file name, not
+  re-downloaded weekly. **Page caps** log a warning instead of cutting a window silently.
+- **The scan:** a cluster ending buys no run (only a start does); `contracts_shift` needs the frozen change
+  under half the line (revisions near 25% do not re-fire) and counts a fall below $1B (the floor reads either
+  year).
+- **The prompt:** crowding is a fact, not a warning (T2 has not run); the scan list no longer names crowding.
+- **The words:** real ordinals (43rd, not 43th); no rank on fewer than 4 quarters; $K amounts and "$0"; a fall to
+  zero read as −100%, not "no lines map"; null fields left out on the board; "insiders bought at N companies".
+- **Insiders' personal names** are no longer frozen on assessments (symbol, title, dollars, date only).
+- **A failed flows read** is logged, and never fails an assessment or the weekly scan.
+- Not changed: the reviewer's memory estimate for the 13F job (150–250 MB) — measured locally at 95 MB peak
+  Python heap; unmeasured on Render.

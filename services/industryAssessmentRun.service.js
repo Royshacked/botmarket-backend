@@ -61,7 +61,10 @@ const _deps = {
     readSub: (code) => readSubIndustry(code),
     readRow: (code) => readTimingRow(code),
     // Step 8's flows; a failed read publishes without them rather than losing a paid assessment.
-    readFlows: (code) => readFlowNodes(code).then(flowFacts).catch(() => null),
+    readFlows: (code) => readFlowNodes(code).then(flowFacts).catch(err => {
+        logger.warn(LOG, 'flows not read — the assessment freezes none', { code, error: err.message })
+        return null
+    }),
     readView: (code) => industryViewService.getView(code),
     run: (args) => strategyAgentService.chatStream(args),
     publish: (block, opts) => industryAssessmentService.publishAssessment(block, opts),
@@ -143,7 +146,8 @@ async function _assessIndustry(code, { userId = null, deps = _deps, timeoutMs = 
         const block = (result?.assessments ?? []).find(b => b.industry === sub.code)
         if (!block) return { ok: false, outcome: 'no_block', cost_usd: cost, detail: (result?.reply ?? '').slice(0, 400) }
         const basket = await deps.basket(sub)
-        const flows = deps.readFlows ? await deps.readFlows(sub.code) : null
+        // Never fails a paid assessment: without flows it publishes without them.
+        const flows = deps.readFlows ? await Promise.resolve().then(() => deps.readFlows(sub.code)).catch(() => null) : null
         const pub = await deps.publish(block, { sub, row, money: moneyFacts(bundle.answering), flows, basket, structure: structureOf(view), recordCall: deps.recordCall, now: deps.now(), source, trigger })
         if (!pub.ok) return { ok: false, outcome: 'refused', cost_usd: cost, detail: pub.detail }
         logger.info(LOG, 'assessment published', { code: sub.code, verdict: pub.doc.verdict, cost_usd: Number(cost.toFixed(4)), call: pub.call?.logged ?? null })

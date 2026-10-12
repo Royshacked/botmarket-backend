@@ -126,7 +126,8 @@ api/
                               `changes` compares today's moves and money with the facts FROZEN on the standing
                               assessment (hype on/off, a sharp month, the 12-month excess shifting, the stretch
                               crossing its edges, capex or buybacks turning); flowChanges (step 8) — an insider
-                              cluster starting or ending, contract money shifting 25%+ on $1B+, and funds'
+                              cluster STARTING (its end buys no run), contract money shifting 25%+ on $1B+
+                              either year (outside a gap from the frozen change), and funds'
                               crowding behind CROWDED_SCANNED (off: 66 of 163 at the top of a 7-quarter range),
                               only against FROZEN flows (none on a theme or a pre-step-8 assessment);
                               scanIndustry / scanTheme add never-assessed and expired; pickForWeek orders by
