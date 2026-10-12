@@ -1,6 +1,6 @@
 # Pythia step 8 — the rest of the money: insiders, funds, government
 
-**Status: 8a BUILT 2026-10-12 (the weekly job; T1 run — FAILED, so the cluster is awareness only, §6); 8b BUILT 2026-10-12 (dry-run verified, §3.2); 8c–8d not built. Decisions §9: all six
+**Status: 8a BUILT 2026-10-12 (the weekly job; T1 run — FAILED, so the cluster is awareness only, §6); 8b BUILT and backfilled 2026-10-12 (§3.2); 8c BUILT 2026-10-12, its crosswalk AWAITING ROY'S REVIEW, not run for real (§3.3); 8d not built. Decisions §9: all six
 as recommended (Roy, 2026-10-12).** Step 8 of [pythia-assessment.md](./pythia-assessment.md) §12;
 the input it fills is §4.3 ("Where the money goes"). Step 2 built companies' own money (capex, buybacks,
 dividends, deals); this adds the other three rows of that table. Decisions for Roy are in §9.
@@ -96,6 +96,16 @@ stays hers.
   small node (two managers reporting one position under shared discretion; Timber REITs 103%), and a stale
   market cap reads high (Rayonier after its merger). Read the CHANGE and the rank, not the level.
 
+  **Backfill (2026-10-12, into `test`):** 9 quarters (2024 Q2 – 2026 Q2) → 22,865 company rows, 2,120 node
+  documents over 8 quarters. It found a fifth trap: **a manager re-filing under new CIKs** — BlackRock's holding
+  company (Q3 2024: the old CIK gone from 718 companies, the new one in 747) and Vanguard Group splitting into
+  Vanguard Capital Management and Vanguard Portfolio Management (Q1 2026: gone from 891). The split read as +4.9
+  points of universe ownership, because the guard dropped the old CIK where it held over 10% but kept the two
+  smaller successors. `FILER_SUCCESSORS` (money/funds.py) now reads each as one filer — after the change Q1 2026
+  reads −0.49%, not +4.42%. The next such reorganization needs a line there (watch for a quarter whose
+  jumpy-filer count jumps: 50–140 is normal). The LEVEL is also computed from holdings as filed now; the jumpy
+  check cleans the flow only.
+
 ### 3.3 Government — "where does public money land?"
 
 - **Source.** USAspending, contracts (award types A–D), obligated dollars per NAICS per completed quarter —
@@ -110,6 +120,23 @@ stays hers.
   NAICS filter — resolving them to tickers is the opportunist doc's `recipientResolve`, not this step).
 - **Not here:** grants and loans (CHIPS, IRA), budgets and tariffs stay with news (§4.1); the contract
   ledger is what is cheap, dated and complete.
+- **As built (2026-10-12)** — `aether-engine money/government.py`, `money/naics_gics.yaml`,
+  `scripts/fetch_government_contracts.py`, cron `government-contracts` monthly (the 2nd). Re-reads 12 settled
+  quarters a run → `industry_government` per node per run date (6 runs kept); top recipients are NOT in v1.
+  - **The crosswalk** is a draft written by Claude for Roy's review: the 209 NAICS codes in the top 95% of any
+    quarter's dollars (96.9% of eight quarters'), each weighted by where its money lands among listed companies
+    as OUR universe classifies the contractors (Amentum/V2X/BWXT/HII → A&D; KBR/Jacobs/Fluor/AECOM → C&E;
+    Leidos/SAIC/CACI/Parsons → IT consulting; Booz Allen/ICF → research & consulting; Maximus → data processing).
+    The service lines (541330 engineering, 561210 facilities, 541715 R&D, 541512/541519 IT) carry the most
+    dollars and the most judgment; lines marked `check:` are the least sure. ~3% of dollars are on unlisted
+    codes (logged each run; above 10% a warning), ~4% land on no listed company. The node's dollars are money on
+    the lines it sells into, NOT its revenue — read the change.
+  - **Settled quarters only.** The dry run 12 days after Sep 30 read the Jul–Sep quarter at $137B against $290B a
+    year earlier: Defense Department contract data reaches USAspending 90 days late. A quarter counts 100 days
+    after it ends.
+  - **Dry run, four quarters to June 2026 vs the four before:** rising — Automobile Manufacturers +84%, Health
+    Care Services +72%, Construction & Engineering +48% ($132B of line money); falling — Environmental &
+    Facilities Services −57% (DOE cleanup lines), Construction Machinery −35%, Life Sciences Tools −19%.
 
 ## 4. Where it lands
 
