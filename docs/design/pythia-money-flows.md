@@ -1,6 +1,7 @@
 # Pythia step 8 — the rest of the money: insiders, funds, government
 
-**Status: DESIGN, nothing built (2026-10-12).** Step 8 of [pythia-assessment.md](./pythia-assessment.md) §12;
+**Status: 8a BUILT 2026-10-12 (the weekly job; T1 declared, below); 8b–8d not built. Decisions §9: all six
+as recommended (Roy, 2026-10-12).** Step 8 of [pythia-assessment.md](./pythia-assessment.md) §12;
 the input it fills is §4.3 ("Where the money goes"). Step 2 built companies' own money (capex, buybacks,
 dividends, deals); this adds the other three rows of that table. Decisions for Roy are in §9.
 
@@ -45,8 +46,15 @@ stays hers.
   exercises, gifts and in-kind are not purchases. A purchase reported more than 30 days after the trade
   counts on its trade date, never as "new this week".
 - **Per sub-industry, trailing 90 days:** companies with an insider buying, distinct insiders buying, dollars
-  bought, the largest buys (name, role, $, date) — and the **cluster** flag: insiders at ≥ 3 different
-  companies of the sub-industry bought in the window. Selling is recorded as a count only, never featured.
+  bought, the largest buys (name, role, $, date) — and the **cluster** flag. A buy under $10,000 is not
+  counted (token director purchases). Sales are not fetched at all (two thirds are scheduled).
+- **The cluster, as built.** First written as "insiders at ≥ 3 companies of the sub-industry": the first dry
+  run (2026-10-12) flagged **43** sub-industries — Regional Banks' 256 companies reach three buyers by size
+  alone. Now: ≥ 3 companies AND more than the universe's buying rate would give a node that size by chance,
+  binomial p < 0.01 (not 0.05: ~163 nodes are tested a week, and 0.05 lets ~8 through on chance — the run at
+  0.05 flagged 7). That run: universe 351 of 2,788 companies buying (12.6%); clusters Regional Banks 51/256,
+  Asset Management & Custody Banks 21/87, Apparel & Luxury 7/15. Banks may be STRUCTURAL (directors of small
+  banks habitually hold and buy their stock) — T1 and, later, each node's own history are what can tell.
 - **Read as:** clustered buying across several companies is the rare informative case (§4.3); one CEO buying
   is a company fact, Prometheus's, not an industry one.
 
@@ -82,9 +90,11 @@ stays hers.
 
 ## 4. Where it lands
 
-- **Engine jobs, aggregates only** (§9 of the parent). Three scripts, one per input, each writing a block
-  onto the industry node the money job already writes: `money.insiders`, `money.funds`, `money.government`
-  beside step 2's companies' money. ~270 nodes × a few hundred bytes a block — well inside the M0 quota.
+- **Engine jobs, aggregates only** (§9 of the parent). Three scripts, one per input, each writing ITS OWN
+  collection per GICS node per run date (8a: `industry_insiders` + `industry_insiders_runs`, complete-run
+  marker, 8 runs kept, like `industry_metrics`) — not a block on the metrics node, so no job waits on
+  another's clock; the reader (8d) joins them by code. ~270 nodes × a few hundred bytes — well inside the
+  M0 quota.
   Themes take theirs from the chain, as companies' money does today (`themeFacts`).
 - **Schedule.** Insiders weekly, before Pythia's week (so the change scan sees it); funds on a new SEC file
   (checked weekly by `Last-Modified`); government monthly.
@@ -103,15 +113,35 @@ by the three blocks' tokens (~300).
 
 ## 6. The tests, declared before they run
 
-Same discipline as industry-screener.md §5: the question, the data, the bar, written down first; the result
-recorded in the yaml the code reads, not in code.
+Same discipline as industry-screener.md §5: the question, the data, the bar, written down first. A result
+that passes becomes a `BASE_RATES` entry (`api/strategy/industryAssessment.service.js`), attached by code.
 
 - **T1 — insider clusters (the one most likely to pass).** Do industries with clustered insider buying beat
   the market over the next 6 and 12 months? Data: SEC Form 4 data sets 2006 → 2026; issuers mapped to Ken
   French's 49 industries by SIC (from EDGAR submissions, one call per issuer CIK), so the returns come from
-  the no-survivorship French 49 history already in `data/history/`. Bar: top-decile cluster months beat
-  their industry's own average by ≥ 2pp a year with t ≥ 2 on 2016–2026 held out. Pass → the base rate rides
-  on every flagged assessment. Fail → the cluster still rides, as awareness, with "no tested edge".
+  the no-survivorship French 49 history already in `data/history/`. Bar: cluster months beat their
+  industry's own average by ≥ 2pp a year with t ≥ 2 on 2016–2026 held out. Pass → the base rate rides on
+  every flagged assessment. Fail → the cluster still rides, as awareness, with "no tested edge".
+
+  **Exactly how, declared 2026-10-12 BEFORE any test code or result.** "Top-decile cluster months" is
+  replaced by THE LIVE FLAG ITSELF, so the test measures what ships:
+  1. *Purchases:* SEC Form 3/4/5 data sets 2006q1–2026q3; `TRANS_CODE` P, acquired, price > 0, value ≥
+     $10,000, `AFF10B5ONE` not true, reporting owner a Director or Officer. One count per issuer.
+  2. *Industry:* issuer CIK → SIC (EDGAR submissions) → French 49 (Ken French's `Siccodes49`). Issuers
+     with no SIC or outside the 49 are dropped and counted.
+  3. *Signal* at each month end t: B = issuers with a purchase TRADED in the trailing 3 months; N = the
+     industry's firm count that month (`french49_nfirms`); the universe rate = ΣB / ΣN. **Cluster** = B ≥ 3
+     and binomial P(X ≥ B | N, rate) < 0.01 — the live rule.
+  4. *Outcome:* the industry's value-weighted return over months t+1…t+12 minus the market's
+     (`ff_market`) over the same months; the 6-month version reported beside it, not judged.
+  5. *Comparison:* each cluster's outcome minus that industry's mean outcome over all its months from
+     2006 up to t (expanding — nothing from the future). Each month's clusters averaged into one number;
+     the mean of that series, with a Newey-West t (11 lags: the windows overlap).
+  6. *Judged on* t in 2016-01 … 2025-08 (the last month with 12 months after it); 2008-01 … 2015-12
+     reported, not judged. **Pass:** mean ≥ +2pp and t ≥ 2.
+  7. *Reported, not judged:* how many industry-months flagged; 10% owners alone (the holder line) as a
+     second signal; the universe rate's own top decile (market-wide buying waves) against the market's next
+     12 months.
 - **T2 — crowding.** Do industries at the top of their institutional-ownership history have worse forward
   returns or a higher crash rate (as hypes do: 22% vs 9%)? Data: 13F data sets back to 2013 (~50 files).
   The returns are the open part: our industry index may not reach back that far, and French 49 needs each
