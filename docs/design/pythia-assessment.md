@@ -276,6 +276,8 @@ screen had (`needsAgent`):
    Accept card — the server drops one the model writes; "Update plan" saves before it deletes.
 8. **Money, the rest** (later, after the board runs on companies' money) — Form 4 insiders, 13F funds,
    USAspending government awards, as engine jobs writing aggregates only.
+   **DESIGN 2026-10-12:** [pythia-money-flows.md](./pythia-money-flows.md) — sources sampled, tests declared,
+   six decisions for Roy.
 
 ## 13. Decisions for Roy
 
