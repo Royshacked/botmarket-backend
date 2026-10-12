@@ -17,7 +17,9 @@ words? — is still open. Today: internal, though the lens is saved on the list.
 
 Teach Atlas the **way** great investors think — not what they hold. (Tracking real holdings needs
 13F: FMP's is Premium-locked, `fmp.provider.js:18`; EDGAR is reachable via `sec.provider.js` but a
-13F is long-only US equity with a 45-day lag — fine for Buffett, useless for Dalio. Dropped.)
+13F is long-only US equity with a 45-day lag — fine for Buffett, useless for Dalio. Dropped.
+*2026-10-12: SEC's free 13F data sets are now ingested per company per quarter (`fund_holdings`, step 8 of
+pythia-money-flows.md) — available if a school's own holdings are ever wanted; nothing here changed.*)
 
 ## The pattern
 

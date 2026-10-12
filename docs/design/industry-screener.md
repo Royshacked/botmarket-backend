@@ -112,7 +112,7 @@ against a 4.4% hurdle, slower than GDP). The metrics call semiconductors NOT cyc
 |---|---|---|
 | Q12 Volume | daily volume | built (§3.1) |
 | Q13 Sentiment | put/call, retail sentiment, analyst consensus | analyst ratings: FMP `grades-historical`, monthly from about 2018-12 (checked 2026-10-08 on AAPL, XOM, DHI: 90–94 months), so under the 10 years the full test asks for. Put/call and retail sentiment: **no source, N/A** |
-| Q14 Institutional flows | ETF fund flows; 13F | **unchecked**; N/A until a source is found |
+| Q14 Institutional flows | ETF fund flows; 13F | **unchecked**; N/A until a source is found. *2026-10-12: 13F found and built — SEC's free quarterly data sets, per industry against the market (pythia-money-flows.md §3.2); ETF flows still none* |
 
 ### 3.1 The engine job (BUILT 2026-10-08; weekly on Render once the blueprint is synced)
 
@@ -1290,7 +1290,7 @@ scripts/run_industry_model.py`, 608 prediction months 1975-01..2025-08.
    and the leaders; "Structure" keeps the three answers (frontend 46b1281, bundle in backend 523fdce;
    driven with `scripts/drive-screen-ui.mjs`).
 7. **Full backtest (§5.2).**
-8. **Source checks:** VIX, ETF flows, 13F (analyst rating depth checked: from about 2018-12). Each stays N/A until found.
+8. **Source checks:** VIX, ETF flows, 13F (analyst rating depth checked: from about 2018-12). Each stays N/A until found. *(13F found 2026-10-12: SEC's quarterly data sets, built in pythia-money-flows.md §3.2.)*
 
 ## 7. Open
 

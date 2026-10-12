@@ -100,9 +100,9 @@ The strongest input and the one most worth building. Four kinds of money, treate
 | Whose money | Signal | Source | Have? | Read as |
 |---|---|---|---|---|
 | **Companies** | Capex trend, buybacks, dividends, M&A, guidance | `fin_statements` (capex, repurchases, dividends — quarterly); 8-K deals; earnings calls | Capex and buybacks: yes. Guidance and calls: via `web_search` | Real commitments. **Follow the money to where it LANDS** — capex is the supplier's revenue. The spender's own stock often lags after a capex boom (the asset-growth effect) |
-| **Funds and institutions** | Holdings changes by industry | SEC 13F (free, quarterly, ~45 days late) | No | CROWDING, not a lead: who is already in. At extremes a warning, not a signal to follow |
-| **Insiders** | Open-market buying, clustered | SEC Form 4 (free) | No | Insider BUYING across several companies of an industry is the rare informative case; selling is mostly noise |
-| **Government** | Contracts, subsidies, budgets, tariffs | USAspending.gov (free API); CHIPS, IRA, defence budgets, tariff schedules via news | No | Dated, sized money with a beneficiary list — a theme's best friend and its policy risk |
+| **Funds and institutions** | Holdings changes by industry | SEC 13F (free, quarterly, ~45 days late) | Yes, since 2026-10-12 (step 8) | CROWDING, not a lead: who is already in. At extremes a warning, not a signal to follow |
+| **Insiders** | Open-market buying, clustered | SEC Form 4 (free); as built, FMP's purchase feed | Yes, since 2026-10-12 (step 8) | Insider BUYING across several companies of an industry is the rare informative case; selling is mostly noise |
+| **Government** | Contracts, subsidies, budgets, tariffs | USAspending.gov (free API); CHIPS, IRA, defence budgets, tariff schedules via news | Contracts yes, since 2026-10-12 (step 8); the rest via news | Dated, sized money with a beneficiary list — a theme's best friend and its policy risk |
 
 Built engine-side as aggregates by industry and theme (§9), never as raw filings in Mongo.
 
@@ -182,10 +182,13 @@ The only honest test of a judgment is forward: the model has read the past.
 An LLM pass over 163 sub-industries and the themes every week is expensive. Two layers, as the retired
 screen had (`needsAgent`):
 
-- **Change scan (engine, weekly, no LLM):** flags an industry or theme when something MOVED — the price
+- **Change scan (weekly, no LLM):** flags an industry or theme when something MOVED — the price
   (extension, a sharp relative move), the money (capex or buyback trend turning, a 13F shift, insider
   cluster, a government award), news volume, a geopolitical index jump touching its exposure map, or its
-  assessment expiring / a `change_view_if` condition met.
+  assessment expiring / a `change_view_if` condition met. *As built (step 6, then step 8): in Node
+  (`changeScan.service.js`), not the engine; the price legs, capex/buybacks turning, an insider cluster
+  STARTING, contract money shifting 25%+ on $1B+; a 13F shift is shown but not scanned (no tested meaning);
+  news volume, geopolitics and `change_view_if` are not scanned.*
 - **Assessment (LLM):** only flagged subjects, capped per week; plus event-triggered runs between scans.
 - **Cost per assessment is unmeasured** — measure one by hand before setting the cap (as for
   `INDUSTRY_REVIEWS`).
