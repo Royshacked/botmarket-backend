@@ -1,6 +1,6 @@
 # Pythia step 4 — geopolitics: how intense, and who it touches
 
-**Status: DESIGN (2026-10-12); decisions §8 all five as recommended (Roy, 2026-10-12); 4a BUILT and run 2026-10-12 (§3.1); 4b the map ACCEPTED as drafted (Roy, 2026-10-12; the Gulf and the Red Sea kept apart); 4c T3 declared exactly (§6) BEFORE any test code.** Step 4 of [pythia-assessment.md](./pythia-assessment.md) §12; the
+**Status: DESIGN (2026-10-12); decisions §8 all five as recommended (Roy, 2026-10-12); 4a BUILT and run 2026-10-12 (§3.1); 4b the map ACCEPTED as drafted (Roy, 2026-10-12; the Gulf and the Red Sea kept apart); 4c T3 declared exactly (§6) BEFORE any test code, then run — FAILED, so the map is shown as hypotheses only.** Step 4 of [pythia-assessment.md](./pythia-assessment.md) §12; the
 input it fills is §4.5 ("what could hit this industry from outside the economy?"). Today every assessment carries
 `geopolitics` as a GAP. Decisions for Roy are in §8.
 
@@ -137,6 +137,27 @@ remove; what it tests is the DIRECTIONS, not the choice of risks.
 7. *What passes means:* the base rate rides on assessments for the risks whose own mean spread has the right sign
    (their numbers attached, said to be few events each). A fail: the map stays shown as hypotheses, said so, and
    `BASE_RATES` gains nothing — as for the insider cluster.
+
+**Result (run 2026-10-12, `aether-engine scripts/run_geopolitics_test.py`): FAILED — and the sign is the wrong way.**
+
+| | helped minus hurt, after a risk turns elevated | t | event-months |
+|---|---|---|---|
+| **3 months, judged 2005–2025** | **−2.35pp** | **−1.08** | 29 |
+| 1 month, judged | −1.42pp | −1.22 | 29 |
+| 6 months, judged | −1.08pp | −0.35 | 29 |
+| strength-1 lines only, 3 months | +0.24pp | 0.15 | 32 |
+| 3 months, 1995–2004 (reported) | −2.00pp | −0.63 | 13 |
+
+By risk (3 months, all years, few events each): Taiwan Strait −5.7pp (18), Israel −5.2pp (7), US–China −4.2pp (10),
+Korea −2.9pp (7), Russia–Ukraine −1.1pp (11), Gulf +0.7pp (12), Red Sea +1.6pp (10). Venezuela has NO testable line:
+its only French-49 industry, Oil, sits on both sides (refiners hurt, producers helped) and was dropped as declared.
+Dropped as both-sided: Trans (Gulf, Red Sea), Chems (Russia–Ukraine), Oil (Venezuela).
+
+**So:** the map ships as HYPOTHESES, as declared — `BASE_RATES` gains nothing, and 4d's prompt and board must say the
+directions are untested-or-failed, as the insider cluster says "no tested edge". Read honestly, the numbers lean the
+OTHER way — the industries a risk was supposed to hurt did better over the next quarter (the chipmakers after a
+Taiwan scare above all), which is the pattern of a scare already priced at its peak. That is a hypothesis for a NEW
+declared test (a contrarian one), not a reading of this one: at t −1.08 the reverse is no more proven than the map.
 
 ## 7. Build order
 
