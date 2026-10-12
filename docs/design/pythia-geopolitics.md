@@ -1,6 +1,6 @@
 # Pythia step 4 — geopolitics: how intense, and who it touches
 
-**Status: DESIGN (2026-10-12); decisions §8 all five as recommended (Roy, 2026-10-12); 4a BUILT 2026-10-12 (§3.1), dry-run only.** Step 4 of [pythia-assessment.md](./pythia-assessment.md) §12; the
+**Status: DESIGN (2026-10-12); decisions §8 all five as recommended (Roy, 2026-10-12); 4a BUILT and run 2026-10-12 (§3.1); 4b — the map — DRAFTED, awaiting Roy's review (§3.2).** Step 4 of [pythia-assessment.md](./pythia-assessment.md) §12; the
 input it fills is §4.5 ("what could hit this industry from outside the economy?"). Today every assessment carries
 `geopolitics` as a GAP. Decisions for Roy are in §8.
 
@@ -67,6 +67,15 @@ draft list (D2):
 | Venezuela | VEN | — | Refining (heavy crude), E&P |
 
 Gaps by construction: no Iran / Iraq / North Korea index — the Gulf and Korea risks read their neighbours'.
+
+**As drafted (2026-10-12)** — `aether-engine geopolitics/exposure_map.yaml`, validated by `geopolitics/exposure.py`
+(every code a GICS sub-industry, every country a GPR index, every line a strength, a reason and a French-49 industry
+for T3; nothing both hurt and helped). A risk is as intense as its HOTTEST party; the US index is left out of every
+risk (it rises with anything the US is party to). The weekly job writes each risk's reading WITH its lines onto the
+run's document — the backend cannot read the engine's files, so it joins an industry to its risks by code (this
+replaces §3.3's "joined in Node from the map"). First reading through the draft: Gulf and Hormuz +2.2 and Red Sea
++2.2 (both on Saudi Arabia — elevated), Israel +0.8, Taiwan +0.7, US–China +0.7, Venezuela +0.3, Russia–Ukraine
++0.1, Korea −0.3. The Gulf and the Red Sea share their measure (no Yemen or Iran index), so they move together.
 
 ### 3.3 Per sub-industry, and where it lands
 
