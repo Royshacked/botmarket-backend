@@ -1,6 +1,6 @@
 # Pythia step 8 — the rest of the money: insiders, funds, government
 
-**Status: 8a BUILT 2026-10-12 (the weekly job; T1 run — FAILED, so the cluster is awareness only, §6); 8b–8d not built. Decisions §9: all six
+**Status: 8a BUILT 2026-10-12 (the weekly job; T1 run — FAILED, so the cluster is awareness only, §6); 8b BUILT 2026-10-12 (dry-run verified, §3.2); 8c–8d not built. Decisions §9: all six
 as recommended (Roy, 2026-10-12).** Step 8 of [pythia-assessment.md](./pythia-assessment.md) §12;
 the input it fills is §4.3 ("Where the money goes"). Step 2 built companies' own money (capex, buybacks,
 dividends, deals); this adds the other three rows of that table. Decisions for Roy are in §9.
@@ -72,6 +72,29 @@ stays hers.
   quarter's change in SHARES held (price-neutral), the change in holder count, and the share's percentile
   against the sub-industry's own history.
 - **Read as:** CROWDING, never a lead (§4.3). At the extremes it is a warning; it never says "follow".
+- **As built (2026-10-12)** — `aether-engine money/funds.py`, `scripts/fetch_fund_holdings.py`, cron `fund-holdings`
+  Sunday 04:00 UTC (fetches only when SEC posts a quarter; ~22 s a file). Stores `fund_holdings` (one row per
+  company per quarter: shares, dollars, holders, its 10 largest filers) and `industry_funds` (per node per quarter,
+  plus a `universe` row), 12 quarters kept; CUSIPs on `gics_companies` (2,865 of 2,876 found). The dry run found
+  four ways the obvious arithmetic lies, each now handled and tested:
+  1. **Splits.** FMP restates past share counts; the old 13F does not. Booking's 25-for-1 read as ownership
+     4% → 94%. Ownership is now **13F dollars ÷ market cap** (`monthly_prices.caps`) — neither moves on a split.
+  2. **Changed CUSIPs** (Carnival, Exxon) — a company "held" 0.5% one quarter, 65% the next. Ownership that more
+     than doubles or halves is a data BREAK, out of the flow and counted.
+  3. **Misfiled positions.** One manager reported $265B of Berkshire's class A (a quarter of the company) in
+     March only — a −34% "flow" for Multi-Sector Holdings. A filer holding > 10% of a company whose ownership
+     appeared, vanished or more than doubled/halved is left out of BOTH quarters (`jumpy_out`; 137 filers in
+     the dry run). First written on dollars, which flagged BlackRock's steady 10% of AMAT when AMAT's price
+     doubled — now on ownership.
+  4. **Everyone drifts up.** Universe ownership +3.9% in one quarter (median company +3.2%; more filers, more
+     money with the managers that file). So the read is **against the universe**: `flow_vs_universe`,
+     `relative_share` (node ÷ universe), and the percentile ranks `relative_share`.
+
+  Dry run, Q2 2026 against Q1: universe share 68.5%. Falling most against the universe: Fertilizers & Agricultural
+  Chemicals −9.4%, Air Freight & Logistics −7.4%, Paper Products −4.2%; rising most: Diversified Capital Markets
+  +7.9%, Specialized Finance +7.1%, Data Center REITs +6.4%. Known limits: a level over 100% is possible in a
+  small node (two managers reporting one position under shared discretion; Timber REITs 103%), and a stale
+  market cap reads high (Rayonier after its merger). Read the CHANGE and the rank, not the level.
 
 ### 3.3 Government — "where does public money land?"
 
