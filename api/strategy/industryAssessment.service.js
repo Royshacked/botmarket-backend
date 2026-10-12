@@ -286,11 +286,12 @@ const _themeDocId = (themeId) => `ia_${themeId}`
  * Publish an assessment: checked, the code's facts attached, written with a revision, and logged as a call.
  * For an INDUSTRY: `sub` is its metrics node (industryData.readSubIndustry().sub), `row` its latest screen
  * row (screenerData.readTimingRow), `money` the money facts of the node that answers it
- * (industryData.moneyFacts), `structure` the standing industry_view grades. For a THEME (step 3): `theme` is
+ * (industryData.moneyFacts), `flows` its insiders, funds and government (industryData.flowFacts, step 8),
+ * `structure` the standing industry_view grades. For a THEME (step 3): `theme` is
  * the approved theme and `facts` its themeFacts; `basket` the symbols its call is graded on.
  * → `{ ok, doc, changed, call }` or `{ ok:false, reason, detail }`.
  */
-async function publishAssessment(block, { sub = null, row = null, money = null, theme = null, facts: given = null, basket = null,
+async function publishAssessment(block, { sub = null, row = null, money = null, flows = null, theme = null, facts: given = null, basket = null,
     structure = null, recordCall = null, now = new Date().toISOString(), source = 'chat', trigger = null } = {}) {
     const checked = checkAssessment(block, { expect: theme ? 'theme' : sub ? 'industry' : null, now })
     if (!checked.ok) return { ok: false, reason: 'bad_assessment', detail: checked.detail }
@@ -319,6 +320,8 @@ async function publishAssessment(block, { sub = null, row = null, money = null, 
         moved: facts.moved, base_rates: facts.base_rates, not_measured: facts.not_measured,
         // Companies' own money (§4.3) — facts from the engine's metrics node, like the moves (industryData.moneyFacts).
         money: facts.money ?? null,
+        // The rest of the money (step 8: insiders, funds, government — pythia-money-flows.md), industries only.
+        flows: a.theme ? null : (flows ?? null),
         structure, assessed_at: now, expires_at: _plusDays(now, a.verdict === 'no_case' ? NO_CASE_EXPIRY_DAYS : EXPIRY_DAYS[a.horizon]), source, updated_at: now,
         // Why this run happened, when the weekly change scan asked for it (changeScan reasons); null otherwise.
         trigger: Array.isArray(trigger) && trigger.length ? trigger.map(r => ({ key: r.key, text: r.text ?? r.key, detail: r.detail ?? null })) : null,

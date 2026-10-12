@@ -150,7 +150,7 @@
         },
         {
             "name": "get_industry_money",
-            "description": "Where a sub-industry's COMPANIES put their own money, from their cash-flow statements: capex, buybacks, dividends and acquisitions over the last four quarters against the four before (and the change a year earlier, so you see it turning), how many companies raised capex, capex as a share of revenue, the median company's share-count change, and the top spenders. Capex is money committed, not talk — and it is the SUPPLIERS' revenue.",
+            "description": "Where the money goes in a sub-industry. Its COMPANIES' own money, from their cash-flow statements: capex, buybacks, dividends and acquisitions over the last four quarters against the four before (and the change a year earlier, so you see it turning), how many raised capex, capex as a share of revenue, the median share-count change, the top spenders — capex is money committed, and it is the SUPPLIERS' revenue. Then the rest: INSIDERS buying their own stock (90 days; a cluster is awareness only — it had no tested edge), FUNDS' ownership from 13F against the market and its own range (crowding, never a lead), and federal CONTRACT money on the lines it sells into (the change, not the level). Each comes with how to read it.",
             "input_schema": {
                 "type": "object",
                 "properties": {

@@ -11,7 +11,7 @@
 // result. Never throws: the caller is an HTTP handler that reports the outcome.
 
 import { strategyAgentService } from './agents/strategy.agent.service.js'
-import { readSubIndustry, moneyFacts, universeSymbols, largestCompanies } from '../api/strategy/industryData.service.js'
+import { readSubIndustry, moneyFacts, universeSymbols, largestCompanies, readFlowNodes, flowFacts } from '../api/strategy/industryData.service.js'
 import { themeService, checkThemeProposal } from '../api/strategy/theme.service.js'
 import { readThemeFacts, themeBasket, measuredSubs } from '../api/strategy/themeData.service.js'
 import { readTimingRow } from '../api/strategy/screenerData.service.js'
@@ -60,6 +60,8 @@ const LEDGER_SETTLE_MS = 2000
 const _deps = {
     readSub: (code) => readSubIndustry(code),
     readRow: (code) => readTimingRow(code),
+    // Step 8's flows; a failed read publishes without them rather than losing a paid assessment.
+    readFlows: (code) => readFlowNodes(code).then(flowFacts).catch(() => null),
     readView: (code) => industryViewService.getView(code),
     run: (args) => strategyAgentService.chatStream(args),
     publish: (block, opts) => industryAssessmentService.publishAssessment(block, opts),
@@ -141,7 +143,8 @@ async function _assessIndustry(code, { userId = null, deps = _deps, timeoutMs = 
         const block = (result?.assessments ?? []).find(b => b.industry === sub.code)
         if (!block) return { ok: false, outcome: 'no_block', cost_usd: cost, detail: (result?.reply ?? '').slice(0, 400) }
         const basket = await deps.basket(sub)
-        const pub = await deps.publish(block, { sub, row, money: moneyFacts(bundle.answering), basket, structure: structureOf(view), recordCall: deps.recordCall, now: deps.now(), source, trigger })
+        const flows = deps.readFlows ? await deps.readFlows(sub.code) : null
+        const pub = await deps.publish(block, { sub, row, money: moneyFacts(bundle.answering), flows, basket, structure: structureOf(view), recordCall: deps.recordCall, now: deps.now(), source, trigger })
         if (!pub.ok) return { ok: false, outcome: 'refused', cost_usd: cost, detail: pub.detail }
         logger.info(LOG, 'assessment published', { code: sub.code, verdict: pub.doc.verdict, cost_usd: Number(cost.toFixed(4)), call: pub.call?.logged ?? null })
         return { ok: true, outcome: 'published', doc: pub.doc, call: pub.call, cost_usd: cost }

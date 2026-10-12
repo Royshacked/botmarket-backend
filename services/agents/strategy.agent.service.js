@@ -26,6 +26,7 @@ import { makeRouteCapture, ROUTE_TAGS, buildRouteRule } from '../routing.util.js
 import {
     readSubIndustry, listSubIndustries, readCompanies, coveredSymbols,
     formatSubIndustry, formatCompanies, formatMoney, readMoneyLeaders, formatMoneyLeaders, largestCompanies,
+    readFlowNodes, formatFlows,
 } from '../../api/strategy/industryData.service.js'
 import { industryViewService } from '../../api/strategy/industryView.service.js'
 import { readTimingRow } from '../../api/strategy/screenerData.service.js'
@@ -62,9 +63,9 @@ export const TOOLS = [
         // The assessment's NEWS input (§4.1). An industry IS its companies: its largest names' news over the
         // last month, one FMP call through the one news pipe (services/news.service.js, category basket).
         get_industry_news: `The last month's NEWS on a sub-industry's largest companies (up to 15), dated and attributed, at most three per company so one busy name cannot fill it — the first place to look for what is happening to an industry. Headlines are what was WRITTEN, not facts about the industry: weigh them, and say when a story is about one company rather than the group.`,
-        // The assessment's MONEY input (§4.3): companies' own money, measured by the engine from cash-flow
-        // statements. Funds, insiders and government come later (build step 8).
-        get_industry_money: `Where a sub-industry's COMPANIES put their own money, from their cash-flow statements: capex, buybacks, dividends and acquisitions over the last four quarters against the four before (and the change a year earlier, so you see it turning), how many companies raised capex, capex as a share of revenue, the median company's share-count change, and the top spenders. Capex is money committed, not talk — and it is the SUPPLIERS' revenue.`,
+        // The assessment's MONEY input (§4.3): companies' own money from cash-flow statements (step 2), and since
+        // step 8 the rest — insiders, funds (13F), government contracts (docs/design/pythia-money-flows.md).
+        get_industry_money: `Where the money goes in a sub-industry. Its COMPANIES' own money, from their cash-flow statements: capex, buybacks, dividends and acquisitions over the last four quarters against the four before (and the change a year earlier, so you see it turning), how many raised capex, capex as a share of revenue, the median share-count change, the top spenders — capex is money committed, and it is the SUPPLIERS' revenue. Then the rest: INSIDERS buying their own stock (90 days; a cluster is awareness only — it had no tested edge), FUNDS' ownership from 13F against the market and its own range (crowding, never a lead), and federal CONTRACT money on the lines it sells into (the change, not the level). Each comes with how to read it.`,
         get_capex_leaders: `Where corporate capex is rising and falling most across the whole market, by GICS industry, ranked by the dollar change. Use it to follow the money to where it LANDS: an industry whose customers are spending more is a second-order beneficiary.`,
         // Themes (§3, step 3): the registry, and one theme's value chain with each link's facts.
         list_themes: `The house's THEMES — approved ones (the house list) and proposed ones (awaiting the admin) — each with its id, thesis, search words and its value chain of GICS sub-industries in order (1 direct, 2 suppliers, 3 suppliers' suppliers). Read it before proposing, so you do not propose a theme that exists.`,
@@ -104,7 +105,10 @@ const TOOL_HANDLERS = {
         const b = await readSubIndustry(_industry(input))
         if (!b) return 'Unknown sub-industry — call list_industries for the codes and names.'
         const via = b.answering && b.answering.code !== b.sub.code ? ` (too few companies on its own — measured at ${b.answering.name})` : ''
-        return `${b.sub.name} (${b.sub.code})${via}\n${formatMoney(b.answering)}`
+        // The rest of the money is read at the sub-industry's OWN node: insiders, funds and contracts are counted per
+        // company or per line, so even a thin sub-industry has them. A failed read leaves the companies' money standing.
+        const flows = await readFlowNodes(b.sub.code).then(formatFlows).catch(e => `Insiders, funds, government: could not be read (${e.message}).`)
+        return `${b.sub.name} (${b.sub.code})${via}\n${formatMoney(b.answering)}\n${flows}`
     }, (e) => `Could not read the industry's money: ${e.message}`, LOG),
     list_themes: makeToolHandler('list_themes', async () => {
         const themes = await themeService.listThemes({ statuses: ['approved', 'proposed'] })

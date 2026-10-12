@@ -7,7 +7,7 @@
 
 import { strategyAgentService } from '../../services/agents/strategy.agent.service.js'
 import { industryViewService }  from './industryView.service.js'
-import { readSubIndustry, listSubIndustries, moneyFacts, largestCompanies } from './industryData.service.js'
+import { readSubIndustry, listSubIndustries, moneyFacts, largestCompanies, readFlowNodes, flowFacts } from './industryData.service.js'
 import { notifyIndustryChanged } from '../../services/industryNotify.service.js'
 import { pythiaWeeklyService } from '../../services/pythiaWeekly.service.js'
 import { industryAssessmentService } from './industryAssessment.service.js'
@@ -204,10 +204,10 @@ export function withoutTrail(doc) {
 export const publishAssessment = _handle('publishAssessment', async (req, res) => {
     const bundle = await readSubIndustry(req.params.code)
     if (!bundle) return sendReason(res, 'unknown_industry', { overrides: ASSESS_REASONS })
-    const [{ row }, view, companies] = await Promise.all([readTimingRow(bundle.sub.code), industryViewService.getView(bundle.sub.code),
-        largestCompanies(bundle.sub, { limit: 40 })])
+    const [{ row }, view, companies, flows] = await Promise.all([readTimingRow(bundle.sub.code), industryViewService.getView(bundle.sub.code),
+        largestCompanies(bundle.sub, { limit: 40 }), readFlowNodes(bundle.sub.code).then(flowFacts).catch(() => null)])
     const r = await industryAssessmentService.publishAssessment({ ...(req.body ?? {}), industry: bundle.sub.code },
-        { sub: bundle.sub, row, money: moneyFacts(bundle.answering), basket: companies.map(c => c.symbol).filter(Boolean),
+        { sub: bundle.sub, row, money: moneyFacts(bundle.answering), flows, basket: companies.map(c => c.symbol).filter(Boolean),
             structure: structureOf(view), recordCall: pythiaCallsService.recordCall, source: 'chat' })
     if (!r.ok) return sendReason(res, r.reason, { overrides: ASSESS_REASONS, fallback: 500, ...(r.detail ? { extra: { detail: r.detail } } : {}) })
     res.json({ ...r.doc, call: r.call ?? null })

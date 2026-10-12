@@ -276,8 +276,10 @@ screen had (`needsAgent`):
    Accept card — the server drops one the model writes; "Update plan" saves before it deletes.
 8. **Money, the rest** (later, after the board runs on companies' money) — Form 4 insiders, 13F funds,
    USAspending government awards, as engine jobs writing aggregates only.
-   **DESIGN 2026-10-12:** [pythia-money-flows.md](./pythia-money-flows.md) — sources sampled, tests declared,
-   six decisions for Roy.
+   **BUILT 2026-10-12:** [pythia-money-flows.md](./pythia-money-flows.md) — insiders (weekly; the cluster FAILED
+   its 20-year test, so it is awareness only), funds from 13F (quarterly, read against the market), federal
+   contracts by NAICS (monthly), all three on `get_industry_money`, frozen on each industry assessment as
+   `flows`, on the board, and in the change scan (crowding shown but not scanned yet).
 
 ## 13. Decisions for Roy
 

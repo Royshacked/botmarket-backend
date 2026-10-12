@@ -1,6 +1,7 @@
 # Pythia step 8 — the rest of the money: insiders, funds, government
 
-**Status: 8a BUILT 2026-10-12 (the weekly job; T1 run — FAILED, so the cluster is awareness only, §6); 8b BUILT and backfilled 2026-10-12 (§3.2); 8c BUILT 2026-10-12, its crosswalk AWAITING ROY'S REVIEW, not run for real (§3.3); 8d not built. Decisions §9: all six
+**Status: 8a BUILT 2026-10-12 (the weekly job; T1 run — FAILED, so the cluster is awareness only, §6); 8b BUILT and backfilled 2026-10-12 (§3.2); 8c BUILT and run 2026-10-12, its crosswalk accepted as drafted (§3.3); 8d BUILT 2026-10-12 (§7) — not yet
+live-driven: no assessment published since carries the flows. Decisions §9: all six
 as recommended (Roy, 2026-10-12).** Step 8 of [pythia-assessment.md](./pythia-assessment.md) §12;
 the input it fills is §4.3 ("Where the money goes"). Step 2 built companies' own money (capex, buybacks,
 dividends, deals); this adds the other three rows of that table. Decisions for Roy are in §9.
@@ -231,6 +232,25 @@ that passes becomes a `BASE_RATES` entry (`api/strategy/industryAssessment.servi
 4. **8d Pythia:** tool, prompt, board rows, change-scan triggers, frozen facts. Docs.
 
 8a alone is useful; each later part ships on its own.
+
+**8d as built (2026-10-12).** One reader, beside step 2's: `industryData.readFlowNodes / readAllFlows` (the
+latest COMPLETE run of each collection, at the sub-industry's OWN node — insiders, funds and contracts are
+counted per company or per line, so a thin sub-industry has them), `flowFacts` (what an industry assessment
+freezes as `flows`, beside `money`; a theme's links stay on companies' money), `formatFlows` (appended to
+`get_industry_money`, each with its reading). The prompt's money paragraph reads them: the insider cluster is a
+fact and never the verdict's reason (T1 failed); funds are crowding, never "follow"; contracts are a `money`
+cause only when the change is large and the lines are core. The board shows three rows under "where its
+companies put money". The change scan gains `flowChanges`, compared ONLY against frozen flows — an assessment
+made before 8d (or a theme) has none, so nothing is flagged for crowding it was never assessed on:
+- `insider_cluster` / `insider_cluster_ended` (weights 2 / 1);
+- `contracts_shift`: four quarters' contract money ±25% on the four before, on at least $1B, and not already
+  shifting that way when assessed (weight 2);
+- `crowded` — **built but OFF** (`SCAN.CROWDED_SCANNED`): on the first live read 66 of 163 sub-industries sat at
+  the top of their own seven quarters at once, so the trigger would buy dozens of reassessments a week on a
+  drift. Turn it on once the history is long enough that the top of the range is rare, and record how rare.
+
+The live read also fixed three words: insider dollars in $M/$K (a single $B unit printed "$0.0B"), the ownership
+LEVEL unsigned, and an industry no contract line maps to said once instead of "$0.0B, n/a".
 
 ## 8. Risks
 

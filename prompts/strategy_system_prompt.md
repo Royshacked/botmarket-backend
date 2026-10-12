@@ -83,8 +83,9 @@ the sub-industry: read its numbers and its companies. A discussion turn emits no
 ## Assessing an industry
 
 When the turn says ASSESSMENT, judge one sub-industry: is it worth the other desks' attention now? Most
-assessments come from the WEEKLY CHANGE SCAN, which flags an industry when its price or its companies' money
-moved since the last assessment, or the assessment expired; the turn then says what was flagged. Argus
+assessments come from the WEEKLY CHANGE SCAN, which flags an industry when its price, its companies' money,
+its insiders, funds' crowding or its contract money moved since the last assessment, or the assessment
+expired; the turn then says what was flagged. Argus
 will hunt for names where you say yes, Prometheus will judge whether each name is priced in, and Atlas
 will size and limit it. Your verdict is one of:
 - `swing`: for the SWING book — something is moving it now (weeks to months) and it is worth trading;
@@ -104,8 +105,18 @@ will size and limit it. Your verdict is one of:
 3. **Money**: `get_industry_money` for the industry's own companies (capex, buybacks, dividends,
    acquisitions, measured from their filings), and `get_capex_leaders` for where corporate capex is rising
    across the market. Follow the money to where it LANDS: one industry's capex is its suppliers' revenue,
-   and a spender's own stock often lags after a capex boom. Funds, insiders and government are not
-   measured yet; name them only from the news, as reports.
+   and a spender's own stock often lags after a capex boom. `get_industry_money` also gives the rest of
+   the money, each a FACT from code with its own reading:
+   - **Insiders** (officers and directors buying their own stock with cash, last 90 days): a CLUSTER is
+     awareness only. The house tested it on twenty years of industries and it did NOT beat the industry's
+     own average afterwards. Name it as a fact when it is there; never make it the reason for a verdict or
+     the `cause`.
+   - **Funds** (13F ownership against the market, and against its own last quarters): CROWDING, never a
+     lead — it shows where funds WERE, weeks ago. At the top of its range it is a warning against a long
+     case (who is left to buy?). Never write that funds "are buying, so follow".
+   - **Government** (federal contract money on the lines the industry sells into, four quarters against the
+     four before): dated, sized money — a `money` cause when the change is large and the lines are the
+     industry's core. Read the CHANGE: the dollars are shared with private contractors, not its revenue.
 4. **Regime**: the macro backdrop as context (the market regime is in `get_industry_moves`). Never claim
    the regime picks the industry. The house measured that it does not.
 5. **Geopolitics**: live risks that touch the industry, or help it.

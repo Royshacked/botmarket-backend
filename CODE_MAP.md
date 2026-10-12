@@ -99,7 +99,11 @@ api/
                               (services/engineDb.js): industry_metrics (readSubIndustry → the node that
                               answers it + its parents; listSubIndustries) and gics_companies
                               (readCompanies, readCompaniesBySymbol). Pure formatters for the desk.
-                              Data, not judgment
+                              Data, not judgment. Since step 8 (pythia-money-flows.md) also the rest of the
+                              money, at the sub-industry's own node: industry_insiders, industry_funds,
+                              industry_government (readFlowNodes, readAllFlows — latest COMPLETE run each;
+                              flowFacts = what an assessment freezes; formatFlows = get_industry_money's text,
+                              each with its reading: the insider cluster has NO TESTED EDGE)
     industryAssessment.service.js  `industry_assessment` = Pythia's verdict per industry (docs/design/
                               pythia-assessment.md): swing / long_term / watch (a dated decider within 6 weeks) / avoid / no_case,
                               horizon, thesis, evidence per input, cause, second_order, risks, change_view_if,
@@ -121,8 +125,12 @@ api/
     changeScan.service.js     Pythia's weekly CHANGE SCAN (step 6, pythia-assessment.md §8). Pure, no model:
                               `changes` compares today's moves and money with the facts FROZEN on the standing
                               assessment (hype on/off, a sharp month, the 12-month excess shifting, the stretch
-                              crossing its edges, capex or buybacks turning); scanIndustry / scanTheme add
-                              never-assessed and expired; pickForWeek orders by weight then size and caps
+                              crossing its edges, capex or buybacks turning); flowChanges (step 8) — an insider
+                              cluster starting or ending, contract money shifting 25%+ on $1B+, and funds'
+                              crowding behind CROWDED_SCANNED (off: 66 of 163 at the top of a 7-quarter range),
+                              only against FROZEN flows (none on a theme or a pre-step-8 assessment);
+                              scanIndustry / scanTheme add never-assessed and expired; pickForWeek orders by
+                              weight then size and caps
     screenerData.service.js   Reads the engine's weekly PRICE RUN (industry_timing, market_regime,
                               industry_timing_runs — ENGINE db): latestRun (complete runs only), readRun,
                               readTimingRow(s). The weekly screen that bucketed it was retired 2026-10-11

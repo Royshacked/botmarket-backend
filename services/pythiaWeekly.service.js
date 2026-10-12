@@ -16,7 +16,7 @@
 // throws: the callers are a monitor tick and a fire-and-forget admin route.
 
 import { latestRun, readRun } from '../api/strategy/screenerData.service.js'
-import { readAllMoney } from '../api/strategy/industryData.service.js'
+import { readAllMoney, readAllFlows } from '../api/strategy/industryData.service.js'
 import { factsFor, industryAssessmentService } from '../api/strategy/industryAssessment.service.js'
 import { themeService } from '../api/strategy/theme.service.js'
 import { scanIndustry, scanTheme, pickForWeek } from '../api/strategy/changeScan.service.js'
@@ -38,6 +38,8 @@ const _deps = {
     latestRun: () => latestRun(),
     readRun: (asof) => readRun(asof),
     readMoney: () => readAllMoney(),
+    // Step 8's flows; a failed read scans without them (the price and money legs still run).
+    readFlows: () => readAllFlows().catch(() => new Map()),
     listAssessments: () => industryAssessmentService.listAssessments(),
     listThemes: () => themeService.listThemes({ statuses: ['approved'] }),
     assessIndustry: (code, opts) => assessIndustry(code, opts),
@@ -67,9 +69,10 @@ export async function ensurePythiaWeeklyIndexes() {
  * comparison is like for like.
  */
 export async function scanWeek(asof, deps = _deps) {
-    const [{ rows, regime }, money, assessments, themes] = await Promise.all([deps.readRun(asof), deps.readMoney(), deps.listAssessments(), deps.listThemes()])
+    const [{ rows, regime }, money, flows, assessments, themes] = await Promise.all([deps.readRun(asof), deps.readMoney(),
+        deps.readFlows ? deps.readFlows() : new Map(), deps.listAssessments(), deps.listThemes()])
     const at = deps.now()
-    const nowByCode = new Map((rows ?? []).map(r => [r.code, { moved: factsFor(r).moved, money: money.get(r.code) ?? null }]))
+    const nowByCode = new Map((rows ?? []).map(r => [r.code, { moved: factsFor(r).moved, money: money.get(r.code) ?? null, flows: flows.get(r.code) ?? null }]))
     const byCode = new Map(), byTheme = new Map()
     for (const a of assessments ?? []) {
         if (a.subject?.kind === 'theme') byTheme.set(a.subject.id, a)

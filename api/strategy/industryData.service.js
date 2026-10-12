@@ -243,6 +243,121 @@ export function formatMoneyLeaders({ asof, up = [], down = [] } = {}) {
         'RISING MOST ($):', ...up.map(row), 'FALLING MOST ($):', ...(down.length ? down.map(row) : ['  none falling'])].join('\n')
 }
 
+// ─── the rest of the money: insiders, funds, government (docs/design/pythia-money-flows.md, step 8) ─────
+// Three engine jobs, one collection each, one document per GICS node (aether-engine money/): insider buying over
+// 90 days (industry_insiders, weekly), funds' 13F ownership against the universe (industry_funds, per quarter),
+// federal contract money on the NAICS lines an industry sells into (industry_government, monthly). Read at the
+// sub-industry's OWN node. DATA — how each is read is in the prompt and in formatFlows' lines.
+
+export const INSIDERS = 'industry_insiders'
+export const INSIDER_RUNS = 'industry_insiders_runs'
+export const FUNDS = 'industry_funds'
+export const GOVERNMENT = 'industry_government'
+export const GOVERNMENT_RUNS = 'industry_government_runs'
+
+async function _latestComplete(db, runs) {
+    const d = await db.collection(runs).find({ complete: true }, { projection: { asof: 1 } }).sort({ asof: -1 }).limit(1).next()
+    return d?.asof ?? null
+}
+async function _latestQuarter(db) {
+    const d = await db.collection(FUNDS).find({ level: 'universe' }, { projection: { quarter: 1 } }).sort({ quarter: -1 }).limit(1).next()
+    return d?.quarter ?? null
+}
+
+/** The latest run of each → `{ insiders, funds, government }` (asof / quarter / asof), nulls where none ran. */
+async function _flowRuns(db) {
+    const [insiders, funds, government] = await Promise.all([_latestComplete(db, INSIDER_RUNS), _latestQuarter(db), _latestComplete(db, GOVERNMENT_RUNS)])
+    return { insiders, funds, government }
+}
+
+/**
+ * The flows facts an assessment carries (attached by code), from a sub-industry's three nodes → `{ insiders,
+ * funds, government }`, each null without its node; null when all three are. Pure.
+ */
+export function flowFacts({ insiders = null, funds = null, government = null } = {}) {
+    const i = insiders?.insiders, f = funds?.funds, g = government?.government
+    const out = {
+        insiders: i ? {
+            asof: insiders.asof ?? null, companies_buying: i.companies_buying ?? 0, n_companies: insiders.n_companies ?? null,
+            share_buying: i.share_buying ?? null, vs_universe: i.vs_universe ?? null, cluster: Boolean(i.cluster),
+            value: i.value ?? 0, new: i.new ?? 0, top: (i.top ?? []).slice(0, 3),
+        } : null,
+        funds: f ? {
+            quarter: funds.quarter ?? null, share: f.share ?? null, relative_share: f.relative_share ?? null,
+            flow: f.flow ?? null, flow_vs_universe: f.flow_vs_universe ?? null,
+            percentile: f.percentile ?? null, history_quarters: f.history_quarters ?? 0,
+        } : null,
+        government: g ? {
+            asof: government.asof ?? null, through: (government.quarters ?? []).at(-1) ?? null,
+            now: g.now ?? null, change: g.change ?? null, prev_change: g.prev_change ?? null, lines: (g.lines ?? []).slice(0, 3),
+        } : null,
+    }
+    return out.insiders || out.funds || out.government ? out : null
+}
+
+/** One sub-industry's three nodes from the latest runs → `{ insiders, funds, government }` (docs or nulls). */
+export async function readFlowNodes(code) {
+    const db = await _io.db()
+    const runs = await _flowRuns(db)
+    const one = (coll, key, when) => (when ? db.collection(coll).findOne({ [key]: when, level: 'sub_industry', code }, { projection: { _id: 0 } }) : null)
+    const [insiders, funds, government] = await Promise.all([
+        one(INSIDERS, 'asof', runs.insiders), one(FUNDS, 'quarter', runs.funds), one(GOVERNMENT, 'asof', runs.government)])
+    return { insiders, funds, government }
+}
+
+/** Every sub-industry's flows facts from the latest runs → `Map(code → flowFacts)`, for the weekly change scan. */
+export async function readAllFlows() {
+    const db = await _io.db()
+    const runs = await _flowRuns(db)
+    const all = async (coll, key, when) => (when
+        ? db.collection(coll).find({ [key]: when, level: 'sub_industry' }, { projection: { _id: 0 } }).toArray()
+        : [])
+    const [ins, fun, gov] = await Promise.all([all(INSIDERS, 'asof', runs.insiders), all(FUNDS, 'quarter', runs.funds), all(GOVERNMENT, 'asof', runs.government)])
+    const by = (rows) => new Map(rows.map(r => [r.code, r]))
+    const [i, f, g] = [by(ins), by(fun), by(gov)]
+    const codes = new Set([...i.keys(), ...f.keys(), ...g.keys()])
+    return new Map([...codes].map(c => [c, flowFacts({ insiders: i.get(c) ?? null, funds: f.get(c) ?? null, government: g.get(c) ?? null })]))
+}
+
+const _pctx = (v, d = 0) => (typeof v === 'number' ? `${v >= 0 ? '+' : ''}${(v * 100).toFixed(d)}%` : 'n/a')
+const _share = (v) => (typeof v === 'number' ? `${Math.round(v * 100)}%` : 'n/a')
+// Insider buys run in thousands and millions, contract lines in billions: one unit for all read "$0.0B" (live read 2026-10-12).
+const _money = (v) => (typeof v !== 'number' ? 'n/a'
+    : Math.abs(v) >= 1e9 ? `$${(v / 1e9).toFixed(1)}B` : Math.abs(v) >= 1e6 ? `$${(v / 1e6).toFixed(1)}M` : `$${Math.round(v / 1e3)}K`)
+
+/**
+ * A sub-industry's three nodes as text, each with how to read it. Pure. The insider line says outright that the
+ * cluster has NO TESTED EDGE: it failed its declared test on 2006–2026 history (pythia-money-flows.md §6, T1).
+ */
+export function formatFlows(nodes = {}) {
+    const f = flowFacts(nodes)
+    if (!f) return 'Insiders, funds, government: not measured for this industry yet.'
+    const lines = []
+    const i = f.insiders
+    if (i) {
+        const top = (i.top ?? []).map(t => `${t.symbol} ${t.title ?? ''} ${_money(t.value)} (${t.traded})`.replace(/\s+/g, ' ')).join(', ')
+        lines.push(`INSIDERS (open-market buys by officers and directors, last 90 days; run ${i.asof}): ${i.companies_buying} of ${i.n_companies} companies bought`
+            + `${typeof i.vs_universe === 'number' ? ` — ${i.vs_universe.toFixed(1)}× the market's rate` : ''}, ${_money(i.value)} in all, ${i.new} new this week.`
+            + ` CLUSTER: ${i.cluster ? 'YES' : 'no'}${top ? `. Largest: ${top}` : ''}.`,
+        '  Read as AWARENESS ONLY: a cluster had NO TESTED EDGE on industries over 2006–2026 (it did not beat the industry\'s own average afterwards). Name it as a fact; never as the reason for a verdict. Selling is not measured (most of it is scheduled).')
+    }
+    const fu = f.funds
+    if (fu) {
+        lines.push(`FUNDS (13F ownership, quarter ${fu.quarter}; filed up to 45 days after it): ${_share(fu.share)} of the industry's market value held — ${typeof fu.relative_share === 'number' ? `${fu.relative_share.toFixed(2)}× the market's share` : 'n/a'}`
+            + `${typeof fu.percentile === 'number' ? `, at the ${Math.round(fu.percentile * 100)}th percentile of its own last ${fu.history_quarters} quarters` : ''}; this quarter's change against the market ${_pctx(fu.flow_vs_universe, 1)}.`,
+        '  Read as CROWDING, never a lead: where funds WERE. At the top of its range it is a warning (who is left to buy?); it never says "follow".')
+    }
+    const g = f.government
+    // An industry no contract line maps to has no government money to read — said once, not as "$0, n/a".
+    if (g && !(g.now > 0)) lines.push('GOVERNMENT: no federal contract lines map to this industry.')
+    else if (g) {
+        lines.push(`GOVERNMENT (federal contract dollars on the lines this industry sells into, four quarters to ${g.through}): ${_money(g.now)}, ${_pctx(g.change)} on the four before (a year earlier ${_pctx(g.prev_change)})`
+            + `${g.lines?.length ? `; largest lines: ${g.lines.map(l => `${l.name ?? l.naics} ${_money(l.dollars)}`).join(', ')}` : ''}.`,
+        '  Read the CHANGE, not the level: the dollars are the lines\' money, shared with private contractors — not the industry\'s revenue.')
+    }
+    return lines.join('\n')
+}
+
 /**
  * Every ticker in the measured universe (not stale, one listing per filer) — a Set. A projected find, not
  * `distinct`: the engine's connection runs Mongo's strict versioned API, which refuses `distinct`.
