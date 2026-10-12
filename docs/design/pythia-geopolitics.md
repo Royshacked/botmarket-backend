@@ -1,6 +1,6 @@
 # Pythia step 4 — geopolitics: how intense, and who it touches
 
-**Status: DESIGN (2026-10-12); decisions §8 all five as recommended (Roy, 2026-10-12); 4a in progress.** Step 4 of [pythia-assessment.md](./pythia-assessment.md) §12; the
+**Status: DESIGN (2026-10-12); decisions §8 all five as recommended (Roy, 2026-10-12); 4a BUILT 2026-10-12 (§3.1), dry-run only.** Step 4 of [pythia-assessment.md](./pythia-assessment.md) §12; the
 input it fills is §4.5 ("what could hit this industry from outside the economy?"). Today every assessment carries
 `geopolitics` as a GAP. Decisions for Roy are in §8.
 
@@ -39,6 +39,14 @@ anyone's revenue. The map's "hurts / helps" is a hypothesis per line until the t
 (`geopolitical_risk`, + `_runs`, complete-run marker): the global index (monthly level, daily 7- and 30-day
 averages, threats vs acts, the category shares) and every country's monthly index — each with its **intensity**
 (z against its own normal, D1) and its **trend** (the last 3 months against the 3 before). Nothing per day is stored.
+
+**As built (2026-10-12)** — `aether-engine geopolitics/gpr.py`, `scripts/fetch_geopolitical_risk.py`, cron
+`geopolitical-risk` Sunday 04:30 UTC → `geopolitical_risk` (+ `_runs`), 12 runs kept. Intensity = the last three
+months' mean as a z against the 120 months before them (no z under 60 months of history); elevated at z ≥ 2;
+the daily 7-day line as a percentile of its own ten years. A source over 100 days (monthly) or 30 days (daily)
+old, or with under 40 countries, is refused, not written. Dry run: global 147 for Jul–Sep (z +0.7, −30% on the
+March spike now out of the window), this week 178 (above 92% of the last ten years' weeks); one country
+elevated — Saudi Arabia, z +2.2 — so "turning elevated" is rare, as a trigger should be.
 
 ### 3.2 The exposure map (reviewed config)
 
