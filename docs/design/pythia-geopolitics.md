@@ -1,6 +1,6 @@
 # Pythia step 4 — geopolitics: how intense, and who it touches
 
-**Status: DESIGN, nothing built (2026-10-12).** Step 4 of [pythia-assessment.md](./pythia-assessment.md) §12; the
+**Status: DESIGN (2026-10-12); decisions §8 all five as recommended (Roy, 2026-10-12); 4a in progress.** Step 4 of [pythia-assessment.md](./pythia-assessment.md) §12; the
 input it fills is §4.5 ("what could hit this industry from outside the economy?"). Today every assessment carries
 `geopolitics` as a GAP. Decisions for Roy are in §8.
 
@@ -106,6 +106,10 @@ said so.
 4a alone gives Pythia the global reading; each part ships on its own.
 
 ## 8. Decisions for Roy
+
+**Decided 2026-10-12 (Roy): 1–5 as recommended** — each index against its own trailing ten years; the eight
+risks; a Claude draft of the map for Roy's review; a risk turning elevated triggers a reassessment (weight 2);
+the bar in §6 as outlined.
 
 1. **"Elevated" against what:** each index's own trailing ten years (recommended — moves with the world), or a
    fixed 2016–2025 decade (stable, but ages).

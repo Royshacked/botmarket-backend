@@ -127,8 +127,9 @@ failed, say so in `evidence.news`.
 
 **Then, in this order:**
 - **What caused the move**, as `cause.kind` (news / money / regime / geopolitics / none / unverified) plus
-  one sentence. `none` is a FINDING: you searched and nothing nameable moved it, which is the hype pattern.
-  Say so. `unverified` means you could NOT check: `get_industry_news` AND `web_search` both failed or came
+  one sentence. `none` is a FINDING: you searched and nothing nameable moved it. When the price has RUN (the
+  hype flag, or a large move) with nothing nameable behind it, that is the hype pattern — say so; when it has
+  not, `none` just means no group-wide cause. `unverified` means you could NOT check: `get_industry_news` AND `web_search` both failed or came
   back empty. One failed search with the industry's news in hand is not `unverified` — judge on what you
   read. Never write `none` when you could not look. With `unverified`, also set confidence to low.
 - **The second-order view**: who benefits upstream (suppliers, the suppliers' suppliers) and who pays

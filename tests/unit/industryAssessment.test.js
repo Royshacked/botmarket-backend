@@ -485,3 +485,9 @@ test('code review 2026-10-11: unverified watch, impossible dates, no case expiry
     const pub = await industryAssessmentService.publishAssessment(BLOCK({ verdict: 'no_case', horizon: 'weeks' }), { sub: { code: CODE, name: 'Semiconductors' }, row: ROW(), now: NOW })
     assert.equal(pub.doc.expires_at, new Date(Date.parse(NOW) + NO_CASE_EXPIRY_DAYS * 86_400_000).toISOString(), 'a fixed clock, not the horizon')
 })
+
+test('a web search citation is stored as its label, not as raw Markdown (live drive 2026-10-12)', () => {
+    const r = checkAssessment(BLOCK({ evidence: { news: 'FDIC data ([ebs.publicnow.com](https://ebs.publicnow.com/view/06?utm_source=openai)).', price: 'Flat.' } }), { now: NOW })
+    assert.ok(r.ok, r.detail)
+    assert.equal(r.assessment.evidence.news, 'FDIC data (ebs.publicnow.com).')
+})

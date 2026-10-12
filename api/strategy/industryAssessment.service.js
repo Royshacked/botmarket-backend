@@ -53,8 +53,8 @@ export const INPUTS = Object.freeze(['news', 'price', 'money', 'regime', 'geopol
 /** The two the desk can always read today; the rest may say they are not built yet. */
 const REQUIRED_INPUTS = ['news', 'price']
 /**
- * What caused the move (design §4.2). `none` is a FINDING — the desk looked and nothing nameable moved it,
- * the hype pattern. `unverified` is NOT: the research could not be done (a search refused, a source down),
+ * What caused the move (design §4.2). `none` is a FINDING — the desk looked and nothing nameable moved it (the
+ * hype pattern only when the price has run: the board says so only with the hype flag on). `unverified` is NOT: the research could not be done (a search refused, a source down),
  * so the cause is unknown. Kept apart so a failed search never reads as a hype finding (first live run,
  * 2026-10-10: GNews at its daily limit, and the desk wrote `none`).
  */
@@ -82,7 +82,11 @@ const _repo = makeHouseArtifactRepo({ collection: COLLECTION, getDb: () => _io.d
 /** Test seam. */
 export function _setAssessmentIO(io) { Object.assign(_io, io) }
 
-const _str = (v, max = 900) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : null)
+// A web search's citations arrive as Markdown — "([ebs.publicnow.com](https://…?utm_source=openai))" — and were stored
+// and shown raw (live drive, 2026-10-12). Kept as their label: the source's name stays, the tracking URL goes.
+export const plainCitations = (s) => s
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '$1')
+const _str = (v, max = 900) => (typeof v === 'string' && v.trim() ? plainCitations(v.trim()).slice(0, max) : null)
 const _list = (v, max = 6) => (Array.isArray(v) ? v.map(x => _str(x, 300)).filter(Boolean).slice(0, max) : [])
 const _num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null)
 
