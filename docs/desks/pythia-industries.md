@@ -83,9 +83,9 @@ Q11) was RETIRED when the assessment board replaced it (Roy, 2026-10-10). In its
   flag turning on or off, a month of ±10% against the S&P, the 12-month excess over SPY shifting 20 points, the
   stretch crossing its top or bottom decile, capex or buybacks turning (sign flip, at least 10%); plus an expired
   assessment, and never assessed. Since step 8 (pythia-money-flows.md), against the flows FROZEN on the
-  assessment: an insider cluster starting, and federal contract money moving 25%+ on $1B+. Not scanned yet:
-  news volume, geopolitics (step 4), funds' crowding (shown, not scanned — no tested meaning yet),
-  `change_view_if` (free text).
+  assessment: an insider cluster starting, and federal contract money moving 25%+ on $1B+; since step 4
+  (pythia-geopolitics.md), a mapped geopolitical risk touching the industry turning elevated. Not scanned yet:
+  news volume, funds' crowding (shown, not scanned — no tested meaning yet), `change_view_if` (free text).
 - **The run** (`services/pythiaWeekly.service.js`, monitor `pythiaWeekly.monitor.service.js`, opt-in
   `PYTHIA_WEEKLY`) assesses the flagged ones — biggest change first; never-assessed approved themes ahead of the
   never-assessed industries, those by the size of their 12-month move — ALL of them (Roy, 2026-10-11), stopping
@@ -144,6 +144,11 @@ regime, geopolitics). It is a judgment, not a forecast, and the code holds it to
   the market (crowding, a fact), federal contract money on the NAICS lines an industry sells into (the change).
   On `get_industry_money` (`industryData.formatFlows`), frozen on each industry assessment as `flows`
   (`flowFacts`), three rows on the board, and in the change scan.
+- **Geopolitics** (step 4, [pythia-geopolitics.md](../design/pythia-geopolitics.md)): the Caldara–Iacoviello index,
+  the world's and each mapped risk's intensity against its own ten years (ELEVATED at z ≥ 2), and the risks the
+  reviewed exposure map says hurt or help an industry — read by `get_geopolitics` (`geopoliticsData.service`), frozen
+  on each industry assessment as `geopolitics`, a board row, and the change scan. ATTENTION, not impact; the map's
+  directions FAILED their 40-year test (T3) and are shown as hypotheses.
 - **Themes** (step 3, §3; `theme.service`, `themeData.service`): value chains of sub-industries by order
   (1 direct, 2 suppliers, 3 suppliers' suppliers). Pythia PROPOSES (`<theme_proposal>`, "Propose themes"),
   the admin approves or retires; only an approved theme is assessed — an `<industry_assessment>` carrying

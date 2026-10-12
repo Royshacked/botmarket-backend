@@ -718,6 +718,12 @@ export const TOOL_SCHEMAS = {
         "type": "object",
         "properties": {}
     },
+    get_geopolitics: {
+        "type": "object",
+        "properties": {
+            "industry": { "type": "string", "description": "Optional: a GICS sub-industry (8-digit code or exact name) for the risks touching it." }
+        }
+    },
     list_themes: {
         "type": "object",
         "properties": {}

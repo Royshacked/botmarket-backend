@@ -1,6 +1,6 @@
 # Pythia step 4 — geopolitics: how intense, and who it touches
 
-**Status: DESIGN (2026-10-12); decisions §8 all five as recommended (Roy, 2026-10-12); 4a BUILT and run 2026-10-12 (§3.1); 4b the map ACCEPTED as drafted (Roy, 2026-10-12; the Gulf and the Red Sea kept apart); 4c T3 declared exactly (§6) BEFORE any test code, then run — FAILED, so the map is shown as hypotheses only.** Step 4 of [pythia-assessment.md](./pythia-assessment.md) §12; the
+**Status: DESIGN (2026-10-12); decisions §8 all five as recommended (Roy, 2026-10-12); 4a BUILT and run 2026-10-12 (§3.1); 4b the map ACCEPTED as drafted (Roy, 2026-10-12; the Gulf and the Red Sea kept apart); 4c T3 declared exactly (§6) BEFORE any test code, then run — FAILED, so the map is shown as hypotheses only; 4d BUILT 2026-10-12 (§3.3) — step 4 complete.** Step 4 of [pythia-assessment.md](./pythia-assessment.md) §12; the
 input it fills is §4.5 ("what could hit this industry from outside the economy?"). Today every assessment carries
 `geopolitics` as a GAP. Decisions for Roy are in §8.
 
@@ -88,6 +88,16 @@ the map — the map's lines are small, so the per-industry view is computed in N
   a base rate is attached (T3); an elevated risk is a reason to READ the news on it, not a verdict.
 - **Board:** one row per touching risk under the money rows.
 - **Change scan:** a touching risk turning elevated since the assessment (D4).
+
+**4d as built (2026-10-12).** `api/strategy/geopoliticsData.service.js`: `latestReading` (the latest COMPLETE run),
+`geoFacts` (an industry's view: the world's reading and the mapped risks touching it, hottest first, with side,
+strength and why — frozen on each industry assessment as `geopolitics`; themes stay without), `readAllGeo` (one read for
+the scan), `formatGeo`. The tool `get_geopolitics` (appended before `consult`), the prompt's fifth input (attention,
+not impact; the directions failed T3; an elevated risk is a reason to read the news, the `cause` only when the news
+shows revenue or costs moving), a board row ("Gulf and the Strait of Hormuz helps it — ELEVATED (+2.2)"), and the scan's
+`geo_elevated` leg (weight 2, against FROZEN facts only — none on a pre-step-4 assessment or a theme). A failed read
+is logged and never fails an assessment or the weekly scan. The first reading run before the map existed had no
+risks on it; the job was rerun the same day with the map.
 
 ## 4. Cost
 

@@ -222,6 +222,19 @@
             }
         },
         {
+            "name": "get_geopolitics",
+            "description": "Geopolitical risk, MEASURED: the Caldara–Iacoviello index of newspaper attention to geopolitical tension — the world's level against its own ten years, this week's line — and the house's mapped risks (Taiwan Strait, US–China, the Gulf, the Red Sea, Russia–Ukraine, Israel, Korea, Venezuela), each as intense as its hottest party, ELEVATED at two standard deviations. Pass `industry` for the risks the map says touch it, which way (hurts / helps) and why. Attention, not impact; the map's directions are hypotheses that failed their history test — a reason to read the news on a risk, never a verdict on its own.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "industry": {
+                        "type": "string",
+                        "description": "Optional: a GICS sub-industry (8-digit code or exact name) for the risks touching it."
+                    }
+                }
+            }
+        },
+        {
             "name": "consult",
             "description": "Put ONE decision to a more capable desk head and get a straight answer back. It cannot see this conversation and cannot fetch anything — you hand it the question and every number it needs, and it thinks harder than you can in-line.\n\nReach for it when you are about to DEPART from a measured code grade on a large industry, and the argument is close — the override is what the house will read, and it should survive someone attacking it. Not for agreeing with the numbers.\n\nDo NOT reach for it to look something up, to double-check work you are already confident in, to summarize, or because a question feels big. A consult costs a full model call and adds seconds to the turn: if you already know the answer, or a tool call would settle it, that is the cheaper and better move. Most turns should end without it.",
             "input_schema": {

@@ -12,6 +12,7 @@
 
 import { strategyAgentService } from './agents/strategy.agent.service.js'
 import { readSubIndustry, moneyFacts, universeSymbols, largestCompanies, readFlowNodes, flowFacts } from '../api/strategy/industryData.service.js'
+import { readGeoFacts } from '../api/strategy/geopoliticsData.service.js'
 import { themeService, checkThemeProposal } from '../api/strategy/theme.service.js'
 import { readThemeFacts, themeBasket, measuredSubs } from '../api/strategy/themeData.service.js'
 import { readTimingRow } from '../api/strategy/screenerData.service.js'
@@ -61,6 +62,10 @@ const _deps = {
     readSub: (code) => readSubIndustry(code),
     readRow: (code) => readTimingRow(code),
     // Step 8's flows; a failed read publishes without them rather than losing a paid assessment.
+    readGeo: (code) => readGeoFacts(code).catch(err => {
+        logger.warn(LOG, 'geopolitics not read — the assessment freezes none', { code, error: err.message })
+        return null
+    }),
     readFlows: (code) => readFlowNodes(code).then(flowFacts).catch(err => {
         logger.warn(LOG, 'flows not read — the assessment freezes none', { code, error: err.message })
         return null
@@ -148,7 +153,8 @@ async function _assessIndustry(code, { userId = null, deps = _deps, timeoutMs = 
         const basket = await deps.basket(sub)
         // Never fails a paid assessment: without flows it publishes without them.
         const flows = deps.readFlows ? await Promise.resolve().then(() => deps.readFlows(sub.code)).catch(() => null) : null
-        const pub = await deps.publish(block, { sub, row, money: moneyFacts(bundle.answering), flows, basket, structure: structureOf(view), recordCall: deps.recordCall, now: deps.now(), source, trigger })
+        const geopolitics = deps.readGeo ? await Promise.resolve().then(() => deps.readGeo(sub.code)).catch(() => null) : null
+        const pub = await deps.publish(block, { sub, row, money: moneyFacts(bundle.answering), flows, geopolitics, basket, structure: structureOf(view), recordCall: deps.recordCall, now: deps.now(), source, trigger })
         if (!pub.ok) return { ok: false, outcome: 'refused', cost_usd: cost, detail: pub.detail }
         logger.info(LOG, 'assessment published', { code: sub.code, verdict: pub.doc.verdict, cost_usd: Number(cost.toFixed(4)), call: pub.call?.logged ?? null })
         return { ok: true, outcome: 'published', doc: pub.doc, call: pub.call, cost_usd: cost }

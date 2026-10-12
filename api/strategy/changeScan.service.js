@@ -8,9 +8,9 @@
 // week's run. So a subject Pythia has just reassessed carries this run's facts and cannot be flagged again by
 // them — which also makes a weekly run that was interrupted safe to rerun: what it already did drops out.
 //
-// Not scanned yet, by design: news volume (an FMP call per industry, on the key the live loops share) and
-// geopolitics (step 4); `change_view_if` is free text a model would have to read. Each joins here when its input
-// exists. Insiders, funds and government (step 8) are scanned since 2026-10-12 — against the flows FROZEN on the
+// Not scanned yet, by design: news volume (an FMP call per industry, on the key the live loops share);
+// `change_view_if` is free text a model would have to read. Geopolitics (step 4: a mapped risk touching the industry
+// turning elevated) and insiders, funds and government (step 8) are scanned since 2026-10-12 — against the flows FROZEN on the
 // assessment only: an assessment made before step 8 (or a theme, whose links carry companies' money only) has
 // none, and comparing today's crowding with nothing would flag every crowded industry every week.
 
@@ -53,6 +53,7 @@ export const REASONS = Object.freeze({
     insider_cluster: { weight: 2, text: 'insiders at several of its companies started buying' },
     crowded:       { weight: 2, text: "funds' ownership reached the top of its range" },
     contracts_shift: { weight: 2, text: 'federal contract money on its lines shifted' },
+    geo_elevated:  { weight: 2, text: 'a geopolitical risk the map says touches it turned elevated' },
     link_moved:    { weight: 0, text: 'a link in its chain moved' },   // weighs as its links' biggest reason
     unassessed:    { weight: 1, text: 'never assessed' },
 })
@@ -97,6 +98,24 @@ export function changes(now, then) {
     if (_turned(mo?.capex_change, to?.capex_change)) out.push({ key: 'capex_turn', detail: `capex ${_pct(to.capex_change)} → ${_pct(mo.capex_change)}` })
     if (_turned(mo?.buybacks_change, to?.buybacks_change)) out.push({ key: 'buyback_turn', detail: `buybacks ${_pct(to.buybacks_change)} → ${_pct(mo.buybacks_change)}` })
     out.push(...flowChanges(now?.flows, then?.flows))
+    out.push(...geoChanges(now?.geopolitics, then?.geopolitics))
+    return out
+}
+
+/**
+ * Step 4's leg (Roy, 2026-10-12, decision 4): a mapped risk touching the industry turned ELEVATED since the assessment
+ * — against the FROZEN reading only, like the flows (an assessment made before step 4, or a theme, has none). Pure.
+ */
+export function geoChanges(now, then) {
+    if (!now || !then) return []
+    const was = new Map((then.risks ?? []).map(r => [r.id, r]))
+    const seen = new Set()
+    const out = []
+    for (const r of now.risks ?? []) {
+        if (!r.elevated || seen.has(r.id) || was.get(r.id)?.elevated) continue
+        seen.add(r.id)
+        out.push({ key: 'geo_elevated', detail: `${r.name} (${r.side === 'hurts' ? 'hurts' : 'helps'} it, the map says)` })
+    }
     return out
 }
 
@@ -151,7 +170,8 @@ export function scanIndustry({ code, name, now, assessment = null, at }) {
     let reasons
     if (!assessment) reasons = [{ key: 'unassessed', detail: null }]
     else {
-        reasons = changes(now, { moved: assessment.moved, money: assessment.money, flows: assessment.flows ?? null })
+        reasons = changes(now, { moved: assessment.moved, money: assessment.money, flows: assessment.flows ?? null,
+            geopolitics: assessment.geopolitics ?? null })
         const due = deciderDue(assessment, at)
         if (due) reasons.push(due)
         if (_expired(assessment, at)) reasons.push({ key: 'expired', detail: `on ${String(assessment.expires_at).slice(0, 10)}` })

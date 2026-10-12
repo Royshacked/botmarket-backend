@@ -8,6 +8,7 @@
 import { strategyAgentService } from '../../services/agents/strategy.agent.service.js'
 import { industryViewService }  from './industryView.service.js'
 import { readSubIndustry, listSubIndustries, moneyFacts, largestCompanies, readFlowNodes, flowFacts } from './industryData.service.js'
+import { readGeoFacts } from './geopoliticsData.service.js'
 import { notifyIndustryChanged } from '../../services/industryNotify.service.js'
 import { pythiaWeeklyService } from '../../services/pythiaWeekly.service.js'
 import { industryAssessmentService } from './industryAssessment.service.js'
@@ -209,8 +210,12 @@ export const publishAssessment = _handle('publishAssessment', async (req, res) =
             logger.warn('[strategy]', 'flows not read — the assessment freezes none', { code: bundle.sub.code, error: err.message })
             return null
         })])
+    const geopolitics = await readGeoFacts(bundle.sub.code).catch(err => {
+        logger.warn('[strategy]', 'geopolitics not read — the assessment freezes none', { code: bundle.sub.code, error: err.message })
+        return null
+    })
     const r = await industryAssessmentService.publishAssessment({ ...(req.body ?? {}), industry: bundle.sub.code },
-        { sub: bundle.sub, row, money: moneyFacts(bundle.answering), flows, basket: companies.map(c => c.symbol).filter(Boolean),
+        { sub: bundle.sub, row, money: moneyFacts(bundle.answering), flows, geopolitics, basket: companies.map(c => c.symbol).filter(Boolean),
             structure: structureOf(view), recordCall: pythiaCallsService.recordCall, source: 'chat' })
     if (!r.ok) return sendReason(res, r.reason, { overrides: ASSESS_REASONS, fallback: 500, ...(r.detail ? { extra: { detail: r.detail } } : {}) })
     res.json({ ...r.doc, call: r.call ?? null })

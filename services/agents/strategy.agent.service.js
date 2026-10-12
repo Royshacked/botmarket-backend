@@ -28,6 +28,7 @@ import {
     formatSubIndustry, formatCompanies, formatMoney, readMoneyLeaders, formatMoneyLeaders, largestCompanies,
     readFlowNodes, formatFlows,
 } from '../../api/strategy/industryData.service.js'
+import { latestReading, geoFacts, formatGeo } from '../../api/strategy/geopoliticsData.service.js'
 import { industryViewService } from '../../api/strategy/industryView.service.js'
 import { readTimingRow } from '../../api/strategy/screenerData.service.js'
 import { formatFacts } from '../../api/strategy/industryAssessment.service.js'
@@ -71,6 +72,9 @@ export const TOOLS = [
         list_themes: `The house's THEMES — approved ones (the house list) and proposed ones (awaiting the admin) — each with its id, thesis, search words and its value chain of GICS sub-industries in order (1 direct, 2 suppliers, 3 suppliers' suppliers). Read it before proposing, so you do not propose a theme that exists.`,
         get_theme: `One theme by its id (th_…): its thesis, its value chain link by link with WHY each belongs, and for each link how far it has moved against SPY (12 and 24 months, stretch, hype) and where its companies put money (capex, buybacks). The facts a theme assessment states.`,
         get_news: `Other NEWS: \`headlines\` for the market's front page (macro, rates, geopolitics), \`topic\` to search a theme or an event in words ("data center power", "export controls", "OPEC"), \`companies\` for one ticker. The topic search has a small daily quota and can refuse — if it does, say so and use what you have.`,
+        // The assessment's GEOPOLITICS input (§4.5, step 4 — docs/design/pythia-geopolitics.md). Appended before
+        // `consult`, which stays last.
+        get_geopolitics: `Geopolitical risk, MEASURED: the Caldara–Iacoviello index of newspaper attention to geopolitical tension — the world's level against its own ten years, this week's line — and the house's mapped risks (Taiwan Strait, US–China, the Gulf, the Red Sea, Russia–Ukraine, Israel, Korea, Venezuela), each as intense as its hottest party, ELEVATED at two standard deviations. Pass \`industry\` for the risks the map says touch it, which way (hurts / helps) and why. Attention, not impact; the map's directions are hypotheses that failed their history test — a reason to read the news on a risk, never a verdict on its own.`,
         consult: consultDescription(`Reach for it when you are about to DEPART from a measured code grade on a large industry, and the argument is close — the override is what the house will read, and it should survive someone attacking it. Not for agreeing with the numbers.`),
     }),
 ]
@@ -124,6 +128,14 @@ const TOOL_HANDLERS = {
     }, (e) => `Could not read the theme: ${e.message}`, LOG),
     get_capex_leaders: makeToolHandler('get_capex_leaders', async () => formatMoneyLeaders(await readMoneyLeaders()),
         (e) => `Could not read the capex leaders: ${e.message}`, LOG),
+    get_geopolitics: makeToolHandler('get_geopolitics', async (input) => {
+        const reading = await latestReading()
+        const key = _industry(input)
+        if (!key) return formatGeo(reading)
+        const b = await readSubIndustry(key)
+        if (!b) return 'Unknown sub-industry — call list_industries for the codes and names.'
+        return `${b.sub.name} (${b.sub.code})\n${formatGeo(reading, geoFacts(reading, b.sub.code))}`
+    }, (e) => `Could not read geopolitical risk: ${e.message}`, LOG),
     list_industries: makeToolHandler('list_industries', async (input) => {
         const rows = await listSubIndustries()
         if (!rows.length) return 'No industry measurements yet — the engine has not run.'

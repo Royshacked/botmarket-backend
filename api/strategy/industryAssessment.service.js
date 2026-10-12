@@ -295,7 +295,7 @@ const _themeDocId = (themeId) => `ia_${themeId}`
  * the approved theme and `facts` its themeFacts; `basket` the symbols its call is graded on.
  * → `{ ok, doc, changed, call }` or `{ ok:false, reason, detail }`.
  */
-async function publishAssessment(block, { sub = null, row = null, money = null, flows = null, theme = null, facts: given = null, basket = null,
+async function publishAssessment(block, { sub = null, row = null, money = null, flows = null, geopolitics = null, theme = null, facts: given = null, basket = null,
     structure = null, recordCall = null, now = new Date().toISOString(), source = 'chat', trigger = null } = {}) {
     const checked = checkAssessment(block, { expect: theme ? 'theme' : sub ? 'industry' : null, now })
     if (!checked.ok) return { ok: false, reason: 'bad_assessment', detail: checked.detail }
@@ -326,6 +326,8 @@ async function publishAssessment(block, { sub = null, row = null, money = null, 
         money: facts.money ?? null,
         // The rest of the money (step 8: insiders, funds, government — pythia-money-flows.md), industries only.
         flows: a.theme ? null : (flows ?? null),
+        // Geopolitics (step 4: the GPR reading and the mapped risks touching it — pythia-geopolitics.md), industries only.
+        geopolitics: a.theme ? null : (geopolitics ?? null),
         structure, assessed_at: now, expires_at: _plusDays(now, a.verdict === 'no_case' ? NO_CASE_EXPIRY_DAYS : EXPIRY_DAYS[a.horizon]), source, updated_at: now,
         // Why this run happened, when the weekly change scan asked for it (changeScan reasons); null otherwise.
         trigger: Array.isArray(trigger) && trigger.length ? trigger.map(r => ({ key: r.key, text: r.text ?? r.key, detail: r.detail ?? null })) : null,

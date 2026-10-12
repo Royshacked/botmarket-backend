@@ -95,6 +95,11 @@ api/
                               pending views; viewsForSymbols is THE join (symbol → its industry's answer)
                               behind Atlas's trigger, its fingerprint and the read tool. Writes ride
                               houseArtifact.repo
+    geopoliticsData.service.js  Geopolitical risk as the engine measured it (step 4, pythia-geopolitics.md):
+                              latestReading (geopolitical_risk, latest COMPLETE run — the GPR index, world and
+                              countries, and the exposure map's risks with the sub-industries they hurt/help),
+                              geoFacts (what an industry assessment freezes as `geopolitics`), readAllGeo (the
+                              scan), formatGeo (get_geopolitics' text: attention not impact; the map FAILED T3)
     industryData.service.js   Reads what aether-engine measured, from the ENGINE's database
                               (services/engineDb.js): industry_metrics (readSubIndustry → the node that
                               answers it + its parents; listSubIndustries) and gics_companies
@@ -130,6 +135,7 @@ api/
                               either year (outside a gap from the frozen change), and funds'
                               crowding behind CROWDED_SCANNED (off: 66 of 163 at the top of a 7-quarter range),
                               only against FROZEN flows (none on a theme or a pre-step-8 assessment);
+                              geoChanges (step 4) — a mapped risk touching the industry turning elevated;
                               scanIndustry / scanTheme add never-assessed and expired; pickForWeek orders by
                               weight then size and caps
     screenerData.service.js   Reads the engine's weekly PRICE RUN (industry_timing, market_regime,
