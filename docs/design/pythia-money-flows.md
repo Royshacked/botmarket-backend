@@ -1,6 +1,6 @@
 # Pythia step 8 — the rest of the money: insiders, funds, government
 
-**Status: 8a BUILT 2026-10-12 (the weekly job; T1 declared, below); 8b–8d not built. Decisions §9: all six
+**Status: 8a BUILT 2026-10-12 (the weekly job; T1 run — FAILED, so the cluster is awareness only, §6); 8b–8d not built. Decisions §9: all six
 as recommended (Roy, 2026-10-12).** Step 8 of [pythia-assessment.md](./pythia-assessment.md) §12;
 the input it fills is §4.3 ("Where the money goes"). Step 2 built companies' own money (capex, buybacks,
 dividends, deals); this adds the other three rows of that table. Decisions for Roy are in §9.
@@ -142,6 +142,28 @@ that passes becomes a `BASE_RATES` entry (`api/strategy/industryAssessment.servi
   7. *Reported, not judged:* how many industry-months flagged; 10% owners alone (the holder line) as a
      second signal; the universe rate's own top decile (market-wide buying waves) against the market's next
      12 months.
+
+  **Result (run 2026-10-12, `aether-engine scripts/run_insider_cluster_test.py`): FAILED.**
+  Data: 408,807 qualifying purchases 2006q1–2026q3 from 12,728 issuers; SIC found for 11,618, inside the 49
+  for 11,548 (91%). 1,057 of 12,054 industry-months flagged.
+
+  | | 12 months vs own mean | t (NW) | months / flags |
+  |---|---|---|---|
+  | **Insiders, judged 2016-01…2025-08** | **+0.6pp** | **0.25** | 116 / 451 |
+  | Insiders, 2008–2015 (reported) | −3.2pp | −1.68 | 95 / 458 |
+  | Insiders, 6 months, judged | +0.5pp | 0.38 | 116 / 451 |
+  | 10% owners alone, judged | −0.3pp | −0.10 | 112 / 210 |
+
+  Year by year the judged series swings from −16pp (2019) to +13pp (2016) — no sign that holds. Market-wide
+  buying waves (the universe rate's top decile, 25 months: late 2007–early 2008, late 2008, 2011, 2015, Dec
+  2018, spring 2020, May 2022) were followed by a market up +3.3% over 12 months against +12.5% for all
+  months — insiders buy into falls, and in 2007–08 the fall kept going. Reported, not judged.
+
+  **So:** the cluster ships as AWARENESS only, as declared — `BASE_RATES` gains nothing, and 8d's prompt and
+  board must say "no tested edge" beside it. What the test does NOT cover (each would need its own
+  declaration first, not a rerun of this one with a new knob): single companies (the literature's insider
+  effect is per firm — Prometheus's ground), GICS sub-industries instead of French 49 (163 nodes vs 49, and
+  our own price history is short), dollars instead of counts.
 - **T2 — crowding.** Do industries at the top of their institutional-ownership history have worse forward
   returns or a higher crash rate (as hypes do: 22% vs 9%)? Data: 13F data sets back to 2013 (~50 files).
   The returns are the open part: our industry index may not reach back that far, and French 49 needs each
