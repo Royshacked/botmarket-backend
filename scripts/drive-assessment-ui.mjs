@@ -87,12 +87,16 @@ try {
         console.log('week:', (await page.locator('.assessment-view__week-head').innerText().catch(() => '(none)')).replace(/\n+/g, ' | '))
         console.log('Run the week visible:', await page.getByRole('button', { name: /Run the week/ }).count() === 1)
 
-        const rows = page.locator('.assessment-view .industry-view__line')
+        // OPEN_ROW=<name> opens that industry's row instead of the first (e.g. one carrying step 8's money rows).
+        const all = page.locator('.assessment-view .industry-view__line')
+        const rows = process.env.OPEN_ROW ? all.filter({ hasText: process.env.OPEN_ROW }) : all
         if (await rows.count()) {
+            await rows.first().scrollIntoViewIfNeeded()
             await rows.first().click()
             await page.waitForTimeout(700)
+            await page.locator('.industry-view__row--open').first().scrollIntoViewIfNeeded()
             await shot(page, `${user.role}-02-row-open`)
-            console.log('open row:', (await page.locator('.industry-view__row--open .industry-view__detail').innerText()).slice(0, 900).replace(/\n+/g, ' | '))
+            console.log('open row:', (await page.locator('.industry-view__row--open .industry-view__detail').innerText()).slice(0, 1600).replace(/\n+/g, ' | '))
         }
         // Themes (step 3): the list, one opened, and — for an admin only — the approve control (NOT clicked).
         await page.getByRole('tab', { name: 'Themes' }).click()
