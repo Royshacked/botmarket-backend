@@ -255,6 +255,8 @@ screen had (`needsAgent`):
    Electric grid expansion — awaiting approval. **3b next**: an approved theme's companies from filings via
    Aether's `discover_event_names.py` (headline + terms → named, filing-verified companies).
 4. **Geopolitics** — the GPR index job and the exposure map.
+   **DESIGN 2026-10-12:** [pythia-geopolitics.md](./pythia-geopolitics.md) — sources sampled (the GPR `.dta` files,
+   44 country indexes, daily to a week ago), the map's first eight risks, T3 outlined, five decisions for Roy.
 5. **Regime job** — the light channel table in production, for context and Atlas's exposure read.
 6. **The change scan and the weekly run**, replacing the screen; retire `industry_screen`.
    **BUILT 2026-10-11**: `changeScan.service` (pure: today's moves and money against the facts frozen on the
