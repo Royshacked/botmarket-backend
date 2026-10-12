@@ -1,6 +1,6 @@
 # Pythia step 4 — geopolitics: how intense, and who it touches
 
-**Status: DESIGN (2026-10-12); decisions §8 all five as recommended (Roy, 2026-10-12); 4a BUILT and run 2026-10-12 (§3.1); 4b — the map — DRAFTED, awaiting Roy's review (§3.2).** Step 4 of [pythia-assessment.md](./pythia-assessment.md) §12; the
+**Status: DESIGN (2026-10-12); decisions §8 all five as recommended (Roy, 2026-10-12); 4a BUILT and run 2026-10-12 (§3.1); 4b the map ACCEPTED as drafted (Roy, 2026-10-12; the Gulf and the Red Sea kept apart); 4c T3 declared exactly (§6) BEFORE any test code.** Step 4 of [pythia-assessment.md](./pythia-assessment.md) §12; the
 input it fills is §4.5 ("what could hit this industry from outside the economy?"). Today every assessment carries
 `geopolitics` as a GAP. Decisions for Roy are in §8.
 
@@ -112,6 +112,31 @@ line gets its nearest French-49 industry for the test (Chips, Aero, Guns, Ships,
 (to be fixed in writing before the run): the helped-minus-hurt spread after jumps ≥ +2pp over 3 months, t ≥ 2,
 judged on 2005–2025. Pass → a base rate per risk rides on assessments. Fail → the map is shown as hypotheses,
 said so.
+
+**T3 exactly, declared 2026-10-12 BEFORE any test code or result (Roy approved the outline the same day).** It tests
+the ACCEPTED map as it stands — written in 2026 with hindsight about which industries matter, which this test cannot
+remove; what it tests is the DIRECTIONS, not the choice of risks.
+1. *Intensity, month by month, as live:* each country index's z at month end t exactly as `gpr.intensity` computes it
+   on the series up to t (the last 3 months' mean against the 120 before; none under 60 months of history). A risk's
+   z is its hottest country's. The country indexes start in 1985, so z exists from about 1990 (60 months) and in full
+   from 1995.
+2. *Events:* a risk TURNING ELEVATED — z ≥ 2 at t and < 2 at t−1 (the live trigger). A crossing within 6 months of
+   the same risk's previous event is the same episode and is dropped.
+3. *Lines:* each risk's hurts and helps mapped to their French-49 industry (`ff49`); a French-49 industry that sits
+   on BOTH sides of one risk (the Gulf: Trans hurt through airlines, helped through tankers) is dropped from that
+   risk — it cannot be tested at that grain — and counted; repeats on one side count once.
+4. *Outcome per event:* each line's French-49 value-weighted return minus the market's (`ff_market`) over months
+   t+1 … t+h, compounded; the event's SPREAD = the mean over its helped industries minus the mean over its hurt
+   ones (a risk with one side only: that side, signed — helped +, hurt −). h = 3 is judged; 1 and 6 reported.
+5. *Statistic:* events in the same month are averaged into one number (the months, not the events, are the sample);
+   the mean of those, with a plain t (episodes are at least 6 months apart within a risk; across risks, same-month
+   events are already merged).
+6. *Judged on* events at t in 2005-01 … 2025-12 with 3 months after them. **Pass:** mean spread ≥ +2pp and
+   t ≥ 2. Reported, not judged: 1995–2004; h = 1 and 6; each risk alone; strength-1 lines alone; how many events
+   and how many dropped lines.
+7. *What passes means:* the base rate rides on assessments for the risks whose own mean spread has the right sign
+   (their numbers attached, said to be few events each). A fail: the map stays shown as hypotheses, said so, and
+   `BASE_RATES` gains nothing — as for the insider cluster.
 
 ## 7. Build order
 
