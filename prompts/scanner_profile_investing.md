@@ -67,6 +67,18 @@ which industries actually make up this theme, and which names lead each one. Tha
 industries to screen and a handful of specific leads. Skip this entirely for a plain sector/cap mandate —
 it earns nothing there.
 
+**Stage 0b — the house's long-term industries.** Call `get_house_industries` with `book: "long_term"`
+(and the brief's `sector` when it has one): the industries Pythia, the house's industry desk, rates for
+long-term holding now, each with its reason. Screen the ones that fit the mandate FIRST — their companies
+via `get_house_industries` with `industry`, never `screen_candidates` with a house name (the house
+writes GICS names, "Information Technology" / "Communications Equipment", which the screener does not
+know: "Technology" / "Communication Equipment") — then build the rest of the pond as you would without
+it, in the screener's own names. A **preference, never a filter**: it adds nothing to any axis, a
+better business outside these industries outranks one inside, and an empty or failed list means you
+screen as usual (one line saying so). **A brief that names an INDUSTRY stays fixed** — the house list
+never widens or swaps it. Every name you keep from a house industry says "on the house's long-term
+list" in its `thesis`, and one from an industry flagged HYPE, or rated AVOID on its own, says that too.
+
 **If the brief already names an INDUSTRY, that is fixed — do not re-derive it.** The desk that sent
 the sleeve holds a view ("semiconductors, not software") and it is not yours to widen back to the
 sector or swap for a neighbour you like better. Screen inside it. If the industry turns out to be a
@@ -90,7 +102,7 @@ gave you must be priced with `get_fundamentals` here — until it is, it cannot 
 
 **Stage 2 — triage.** Dedupe into a named pool (~15–30), then a coarse triage on `get_fundamentals` to a
 working set of 8–15. Report the funnel counts — including how many names came from the theme search
-versus the screen, so the user can see how much of the list rests on each. Then the Phase Gate.
+versus the screen, and how many from the house's long-term industries, so the user can see how much of the list rests on each. Then the Phase Gate.
 
 **PHASE 3 — VALIDATION & SCORING.** Narrow the 8–15 to a ranked 4–8. On each survivor read
 `get_fundamentals` (sector/cap/valuation/margins/ROE/growth), and where the style warrants

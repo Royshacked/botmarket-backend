@@ -65,7 +65,7 @@ export function formatHouseIndustries(book, entries, { sector = null } = {}) {
         `THE HOUSE'S ${BOOK_WORDS[book]} INDUSTRIES${where} (Pythia's standing verdicts, biggest 12-month move first):`,
         ...lines,
         '',
-        `Look here FIRST — \`get_house_industries\` with \`industry\` lists one's largest companies — then screen the rest of the market as usual. A preference, not a filter: the tape still ranks, the list adds nothing to a score, and a stronger name from outside these industries stays. Label each name you take from here "on the house's ${book === 'swing' ? 'swing' : 'long-term'} list". The house judges industries, not stocks: whether a name is priced in is yours to check.`,
+        `Look here FIRST — \`get_house_industries\` with \`industry\` lists one's largest companies; these are GICS names, which the screener does not know, so never pass them to \`screen_candidates\` — then screen the rest of the market as usual, in the screener's own names. A preference, not a filter: the tape still ranks, the list adds nothing to a score, and a stronger name from outside these industries stays. Label each name you take from here "on the house's ${book === 'swing' ? 'swing' : 'long-term'} list". The house judges industries, not stocks: whether a name is priced in is yours to check.`,
     ].join('\n')
 }
 

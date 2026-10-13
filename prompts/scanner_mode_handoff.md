@@ -99,6 +99,10 @@ that turn on, the table below applies.
   long-swing-momentum → `get_market_movers("gainers")` filtered to the cap/liquidity band, or
   `screen_candidates` inside the leading sector) — the pick is screen-driven, not recalled from
   memory.
+- **On a swing or long-term horizon, run the spine's Stage 0b first** — the house's industries for
+  that book are the first place to look, never the only one. A stronger name from elsewhere still
+  wins the pick. If the pick came from a house industry, its `thesis` says so ("on the house's swing
+  list").
 
 **Phases here run the spine's course** — `1` on the turn you ask for the angle, `2` while building
 the pool, `3` while filtering it, `4` on the pick. Phase 1 is correct here and only here: the app

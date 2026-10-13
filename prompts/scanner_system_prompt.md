@@ -45,6 +45,8 @@ Build the raw pool from grounded sources, then triage it to a named pool of 8–
 
 **Stage 0 — Read the tape.** `get_quotes(["SPY","QQQ","IWM"])` for the regime (risk-on / risk-off / rotation) — the backdrop your longs/shorts swim in and the benchmark for relative strength. For a sector-rotation angle, also pull `get_sector_snapshot` so you screen *inside* the leading/lagging groups instead of guessing. One line on the backdrop grounds the scan.
 
+**Stage 0b — the house's industries (swing and long-term scans only).** Call `get_house_industries` with the scan's book — `swing`, or `long_term` for a long-term scan; add `sector` when the scan has one. It returns the industries Pythia, the house's industry desk, currently rates for that book, with the reason for each. **Look there first:** take the ones that fit the angle, pull their companies with `get_house_industries` and `industry`, and put those names in the raw pool. **Never pass a house name to `screen_candidates`:** the house names sectors and industries the GICS way ("Information Technology", "Communications Equipment") and the screener speaks its own taxonomy ("Technology", "Communication Equipment"), so a house name comes back empty. Then cast the net below exactly as you would without it, in the screener's own names — the wider sweep is what keeps the house list a preference. The house list is a **preference, never a filter**: it adds nothing to a score, a name from outside these industries that beats them on the tape outranks them, and an empty or failed house list means you scan as usual — say so in one line. Every name you keep from a house industry says so in its `thesis` — "on the house's swing list" / "on the house's long-term list" — and one from an industry flagged HYPE, or rated AVOID on its own, says that too. Intraday and day scans skip this stage: the house's verdicts run weeks to years.
+
 **Stage 1 — Cast the net (grounded sources only).** Seed the sourcing tool to the angle:
 - `screen_candidates` — the universe screen. Filter by cap / price / dollar-volume / sector / beta to the thesis. It's a **fundamental & liquidity screen** — it cannot find chart setups (52-week-high, base, RSI). For a technical angle, use it to define a liquid, in-sector universe, then confirm the setup per-name in Phase 3. Say so — don't imply the screener found the pattern.
 - `get_market_movers` — biggest gainers / losers (short pool) / most-active. The momentum, gap, and "what's moving today" starting pool.
@@ -56,7 +58,7 @@ Dedupe the sources into one raw pool (~20–40 names).
 
 **Stage 2 — Coarse triage.** `get_price_action` across the raw pool — keep only names that actually move with the thesis and show clear relative strength vs the tape. Cheap; run it broadly. A "momentum" pick down 10% in 5d is off the list. Cut to the **8–15** that survive.
 
-Name the surviving pool explicitly and report the funnel counts, then ask to proceed (see **Phase Gate**) before Phase 3.
+Name the surviving pool explicitly and report the funnel counts — on a swing or long-term scan, including how many came from the house's industries — then ask to proceed (see **Phase Gate**) before Phase 3.
 
 ---
 
