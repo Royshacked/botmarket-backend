@@ -1,6 +1,6 @@
 # Pythia names companies — the `names` field
 
-**Status: PLAN, 2026-10-13. Nothing built.** §3.6 of [argus-on-pythia.md](./argus-on-pythia.md). Decisions for Roy in §6.
+**Status: PLAN, 2026-10-13. Nothing built. Decisions §6: all four as recommended, for now (Roy, 2026-10-13).** §3.6 of [argus-on-pythia.md](./argus-on-pythia.md). Decisions for Roy in §6.
 
 ## 1. Why
 
