@@ -13,11 +13,11 @@ const EARLIER = '2026-10-01T00:00:00.000Z'
 
 const IND = (code, name, sector, verdict, over = {}) => ({
     id: `ia_ind_${code}`, subject: { kind: 'industry', code, name, sector }, verdict, horizon: verdict === 'long_term' ? 'years' : 'weeks',
-    thesis: `${name} thesis`, risks: [`${name} risk`, 'second risk'], expires_at: LATER, moved: { hype: false, excess_12m: 0.1 }, ...over,
+    thesis: `${name} thesis`, risks: [`${name} risk`, 'second risk'], second_order: `${name} reaches its suppliers`, expires_at: LATER, moved: { hype: false, excess_12m: 0.1 }, ...over,
 })
 const THEME_ROW = (id, verdict, over = {}) => ({
     id: `ia_${id}`, subject: { kind: 'theme', id, name: id, sector: null }, verdict, horizon: 'months', thesis: `${id} theme thesis`,
-    risks: ['theme risk'], expires_at: LATER, moved: { kind: 'theme', hype: false, links: [] }, ...over,
+    risks: ['theme risk'], second_order: `${id} reaches the grid`, expires_at: LATER, moved: { kind: 'theme', hype: false, links: [] }, ...over,
 })
 const THEME = (id, links, status = 'approved') => ({ id, name: id, status, links })
 const LINK = (code, name, sector, order) => ({ code, name, sector, order })
@@ -77,7 +77,8 @@ test("a theme rated the book brings its direct and supplier links — not the su
     assert.equal(ipp.thesis, null)
     assert.equal(ipp.hype, true, "the link's own hype flag")
     assert.equal(ipp.excess_12m, 0.4)
-    assert.deepEqual(ipp.themes, [{ id: 'ai_power', name: 'ai_power', order: 1, horizon: 'months', thesis: 'ai_power theme thesis' }])
+    assert.deepEqual(ipp.themes, [{ id: 'ai_power', name: 'ai_power', order: 1, horizon: 'months', thesis: 'ai_power theme thesis', second_order: 'ai_power reaches the grid' }])
+    assert.equal(ipp.second_order, null, 'not rated on its own: no second-order read of its own')
 })
 
 test('an industry rated on its own AND through a theme is one entry carrying both', () => {
@@ -276,4 +277,16 @@ test('listForBooks reads once and answers every book asked (code review 2026-10-
     assert.deepEqual(out.long_term.map(e => e.code), ['45103010'])
     assert.equal(themeReads, 1)
     assert.deepEqual(await industryAssessmentService.listForBooks([], { now: NOW }, { themes }), {})
+})
+
+test("the second-order read rides beside the first, clipped, neither preferred (Roy, 2026-10-13)", () => {
+    const own = houseIndustriesFor([SEMIS], [], { book: 'swing', now: NOW })[0]
+    assert.equal(own.second_order, 'Semiconductors reaches its suppliers')
+    const long = 'x'.repeat(600)
+    const text = formatHouseIndustries('swing', [ENTRY({ second_order: long, themes: [{ id: 't', name: 'Power', order: 2, thesis: 'grid', second_order: 'utilities next' }] })])
+    assert.match(text, /who else it reaches: x{200,}…/)
+    assert.doesNotMatch(text, /x{300}/, 'clipped')
+    assert.match(text, /via theme "Power" \(supplier link\): grid\n {8}who else the theme reaches: utilities next/)
+    assert.match(text, /neither preferred/)
+    assert.doesNotMatch(formatHouseIndustries('swing', [ENTRY({ second_order: null })]), /who else it reaches/)
 })

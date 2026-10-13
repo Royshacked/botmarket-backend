@@ -34,6 +34,10 @@ export function normalizeBook(v) {
     return BOOKS.includes(s) ? s : null
 }
 
+// A second-order line is up to 600 characters as written; the list carries up to twenty industries.
+const SECOND_ORDER_MAX = 260
+const _clip = (t) => (t.length > SECOND_ORDER_MAX ? `${t.slice(0, SECOND_ORDER_MAX - 1).trimEnd()}…` : t)
+
 const _pct = (v) => (typeof v === 'number' ? `${v >= 0 ? '+' : ''}${Math.round(v * 100)}%` : null)
 
 /** The list for a book → LLM-ready text. Pure — exported for testing. */
@@ -52,8 +56,12 @@ export function formatHouseIndustries(book, entries, { sector = null } = {}) {
         if (e.rated) {
             out.push(`      thesis (${e.horizon ?? 'horizon n/a'}): ${e.thesis ?? 'n/a'}`)
             if (e.top_risk) out.push(`      top risk: ${e.top_risk}`)
+            if (e.second_order) out.push(`      who else it reaches: ${_clip(e.second_order)}`)
         }
-        for (const t of e.themes ?? []) out.push(`      via theme "${t.name}" (${ORDER_WORDS[t.order] ?? `order ${t.order}`} link): ${t.thesis ?? 'n/a'}`)
+        for (const t of e.themes ?? []) {
+            out.push(`      via theme "${t.name}" (${ORDER_WORDS[t.order] ?? `order ${t.order}`} link): ${t.thesis ?? 'n/a'}`)
+            if (t.second_order) out.push(`        who else the theme reaches: ${_clip(t.second_order)}`)
+        }
         return out.join('\n')
     })
     const rest = entries.slice(FULL_ENTRIES)
@@ -65,7 +73,7 @@ export function formatHouseIndustries(book, entries, { sector = null } = {}) {
         `THE HOUSE'S ${BOOK_WORDS[book]} INDUSTRIES${where} (Pythia's standing verdicts, biggest 12-month move first):`,
         ...lines,
         '',
-        `Look here FIRST — \`get_house_industries\` with \`industry\` lists one's largest companies; these are GICS names, which the screener does not know, so never pass them to \`screen_candidates\` — then screen the rest of the market as usual, in the screener's own names. A preference, not a filter: the tape still ranks, the list adds nothing to a score, and a stronger name from outside these industries stays. Label each name you take from here "on the house's ${book === 'swing' ? 'swing' : 'long-term'} list". The house judges industries, not stocks: whether a name is priced in is yours to check.`,
+        `Look here FIRST — \`get_house_industries\` with \`industry\` lists one's largest companies; these are GICS names, which the screener does not know, so never pass them to \`screen_candidates\` — then screen the rest of the market as usual, in the screener's own names. A preference, not a filter: the tape still ranks, the list adds nothing to a score, and a stronger name from outside these industries stays. Label each name you take from here "on the house's ${book === 'swing' ? 'swing' : 'long-term'} list". "Who else it reaches" is the house's second-order read — the suppliers, customers or neighbours its view spills into: a place to look as good as the industry itself, neither preferred. The house judges industries, not stocks: whether a name is priced in is yours to check.`,
     ].join('\n')
 }
 

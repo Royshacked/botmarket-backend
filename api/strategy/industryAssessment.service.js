@@ -420,7 +420,7 @@ const BOOK_LINK_ORDER = 2
  * when its own unexpired verdict is the book, or when an unexpired theme rated the book links it at order 1–2 —
  * one entry per sub-industry either way, with every theme that brought it. `sector` narrows to one GICS sector.
  * An industry Pythia rates AVOID on its own can still arrive through a theme: it is listed, marked `avoid`.
- * → `[{ code, name, sector, rated, horizon, hype, thesis, top_risk, avoid, excess_12m, themes: [{ id, name, order, horizon, thesis }] }]`,
+ * → `[{ code, name, sector, rated, horizon, hype, thesis, top_risk, second_order, avoid, excess_12m, themes: [{ id, name, order, horizon, thesis, second_order }] }]`,
  * the biggest 12-month move over the market first (none last).
  */
 export function houseIndustriesFor(rows, themes, { book, sector = null, now = new Date().toISOString() } = {}) {
@@ -441,6 +441,9 @@ export function houseIndustriesFor(rows, themes, { book, sector = null, now = ne
                 rated: Boolean(mine), horizon: mine ? (r.horizon ?? null) : null,
                 hype: r?.moved?.hype === true, thesis: mine ? (r.thesis ?? null) : null,
                 top_risk: mine ? (r.risks?.[0] ?? null) : null, avoid: r ? verdictOf(r) === 'avoid' : false,
+                // Who else it reaches — Pythia's second-order read, required on every assessment (Roy, 2026-10-13: shown
+                // beside the first order, neither preferred).
+                second_order: mine ? (r.second_order ?? null) : null,
                 excess_12m: _num(r?.moved?.excess_12m), themes: [],
             })
         }
@@ -459,7 +462,7 @@ export function houseIndustriesFor(rows, themes, { book, sector = null, now = ne
             const e = entry(l.code, l.name, l.sector)
             if (e.excess_12m == null) e.excess_12m = _num(moves.get(l.code)?.excess_12m)
             if (moves.get(l.code)?.hype === true) e.hype = true
-            e.themes.push({ id: t.id, name: t.name, order: l.order, horizon: r.horizon ?? null, thesis: r.thesis ?? null })
+            e.themes.push({ id: t.id, name: t.name, order: l.order, horizon: r.horizon ?? null, thesis: r.thesis ?? null, second_order: r.second_order ?? null })
         }
     }
     return [...out.values()].sort((a, b) => (b.excess_12m ?? -Infinity) - (a.excess_12m ?? -Infinity) || String(a.name).localeCompare(String(b.name)))
@@ -476,7 +479,7 @@ async function listForBooks(books, { sector = null, now = new Date().toISOString
     const db = await _io.db()
     const [rows, approved] = await Promise.all([
         db.collection(COLLECTION).find({}, { projection: {
-            _id: 0, subject: 1, verdict: 1, horizon: 1, thesis: 1, risks: 1, expires_at: 1,
+            _id: 0, subject: 1, verdict: 1, horizon: 1, thesis: 1, risks: 1, second_order: 1, expires_at: 1,
             'moved.hype': 1, 'moved.excess_12m': 1, 'moved.links': 1,
         } }).toArray(),
         themes(),
