@@ -12,6 +12,7 @@
 import { getDb } from '../../providers/mongodb.provider.js'
 import { makeHouseArtifactRepo } from '../../services/houseArtifact.repo.js'
 import { newRevision } from '../../services/revisionTrail.js'
+import { plainCitations } from '../../services/agentUtils.js'
 
 export const COLLECTION = 'theme'
 export const STATUSES = Object.freeze(['proposed', 'approved', 'retired'])
@@ -25,7 +26,7 @@ const _repo = makeHouseArtifactRepo({ collection: COLLECTION, getDb: () => _io.d
 /** Test seam. */
 export function _setThemeIO(io) { Object.assign(_io, io) }
 
-const _str = (v, max = 600) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : null)
+const _str = (v, max = 600) => (typeof v === 'string' && v.trim() ? plainCitations(v.trim()).slice(0, max) : null)
 
 /** A theme's id from its name: th_data_center_power. Pure. */
 export function themeId(name) {

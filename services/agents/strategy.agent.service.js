@@ -28,7 +28,7 @@ import {
     formatSubIndustry, formatCompanies, formatMoney, readMoneyLeaders, formatMoneyLeaders, largestCompanies,
     readFlowNodes, formatFlows,
 } from '../../api/strategy/industryData.service.js'
-import { latestReading, geoFacts, formatGeo } from '../../api/strategy/geopoliticsData.service.js'
+import { geopoliticsText } from '../../api/strategy/geopoliticsData.service.js'
 import { industryViewService } from '../../api/strategy/industryView.service.js'
 import { readTimingRow } from '../../api/strategy/screenerData.service.js'
 import { formatFacts } from '../../api/strategy/industryAssessment.service.js'
@@ -128,14 +128,8 @@ const TOOL_HANDLERS = {
     }, (e) => `Could not read the theme: ${e.message}`, LOG),
     get_capex_leaders: makeToolHandler('get_capex_leaders', async () => formatMoneyLeaders(await readMoneyLeaders()),
         (e) => `Could not read the capex leaders: ${e.message}`, LOG),
-    get_geopolitics: makeToolHandler('get_geopolitics', async (input) => {
-        const reading = await latestReading()
-        const key = _industry(input)
-        if (!key) return formatGeo(reading)
-        const b = await readSubIndustry(key)
-        if (!b) return 'Unknown sub-industry — call list_industries for the codes and names.'
-        return `${b.sub.name} (${b.sub.code})\n${formatGeo(reading, geoFacts(reading, b.sub.code))}`
-    }, (e) => `Could not read geopolitical risk: ${e.message}`, LOG),
+    get_geopolitics: makeToolHandler('get_geopolitics', (input) => geopoliticsText(input, { readSub: readSubIndustry }),
+        (e) => `Could not read geopolitical risk: ${e.message}`, LOG),
     list_industries: makeToolHandler('list_industries', async (input) => {
         const rows = await listSubIndustries()
         if (!rows.length) return 'No industry measurements yet — the engine has not run.'

@@ -32,6 +32,8 @@ export const SCAN = Object.freeze({
     CROWD_MIN_QUARTERS: 4,   // …ranked against at least this many quarters
     CONTRACTS_SHIFT: 0.25,   // federal contract money on its lines moved 25%+ (four quarters on the four before)…
     CONTRACTS_MIN_USD: 1e9,  // …on at least $1B a year, this year's or last (a fall below $1B counts): a small line's swing is noise
+    GEO_REARM_Z: 1.5,        // a mapped risk counts as TURNING elevated only if the frozen reading had it below this —
+                             // one frozen at 1.9 ticking to 2.0 is noise, not an episode (T3 kept episodes 6 months apart)
     CONTRACTS_GAP: 0.5,      // and the frozen change was under half the line (or the other way): revisions near 25% do not re-fire
 })
 
@@ -106,13 +108,21 @@ export function changes(now, then) {
  * Step 4's leg (Roy, 2026-10-12, decision 4): a mapped risk touching the industry turned ELEVATED since the assessment
  * — against the FROZEN reading only, like the flows (an assessment made before step 4, or a theme, has none). Pure.
  */
-export function geoChanges(now, then) {
+export function geoChanges(now, then, scan = SCAN) {
     if (!now || !then) return []
     const was = new Map((then.risks ?? []).map(r => [r.id, r]))
+    // Only risks the frozen reading MEASURED for this industry: one the map gained later is not "newly elevated"
+    // (QA 2026-10-13). Readings frozen before `map_risks` existed fall back to the risks they carried.
+    const measured = new Set(then.map_risks ?? [...was.keys()])
     const seen = new Set()
     const out = []
     for (const r of now.risks ?? []) {
-        if (!r.elevated || seen.has(r.id) || was.get(r.id)?.elevated) continue
+        if (!r.elevated || seen.has(r.id) || !measured.has(r.id)) continue
+        const w = was.get(r.id)
+        // Not touching it then, or elevated then, or too near the line then: not a new episode. A risk that was
+        // elevated when assessed, calmed and rose again is NOT re-flagged — the desk already read it; it is read again
+        // at the next reassessment.
+        if (!w || w.elevated || (typeof w.z === 'number' && w.z >= scan.GEO_REARM_Z)) continue
         seen.add(r.id)
         out.push({ key: 'geo_elevated', detail: `${r.name} (${r.side === 'hurts' ? 'hurts' : 'helps'} it, the map says)` })
     }

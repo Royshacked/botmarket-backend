@@ -1,8 +1,10 @@
 # Pythia step 4 — geopolitics: how intense, and who it touches
 
-**Status: DESIGN (2026-10-12); decisions §8 all five as recommended (Roy, 2026-10-12); 4a BUILT and run 2026-10-12 (§3.1); 4b the map ACCEPTED as drafted (Roy, 2026-10-12; the Gulf and the Red Sea kept apart); 4c T3 declared exactly (§6) BEFORE any test code, then run — FAILED, so the map is shown as hypotheses only; 4d BUILT 2026-10-12 (§3.3) — step 4 complete.** Step 4 of [pythia-assessment.md](./pythia-assessment.md) §12; the
-input it fills is §4.5 ("what could hit this industry from outside the economy?"). Today every assessment carries
-`geopolitics` as a GAP. Decisions for Roy are in §8.
+**Status: BUILT — step 4 complete (2026-10-12), QA cycle fixed (2026-10-13, §9). Decisions §8 all five as recommended (Roy, 2026-10-12); 4a BUILT and run 2026-10-12 (§3.1); 4b the map ACCEPTED as drafted (Roy, 2026-10-12; the Gulf and the Red Sea kept apart); 4c T3 declared exactly (§6) BEFORE any test code, then run — FAILED, so the map is shown as hypotheses only; 4d BUILT 2026-10-12 (§3.3) — step 4 complete.** Step 4 of [pythia-assessment.md](./pythia-assessment.md) §12; the
+input it fills is §4.5 ("what could hit this industry from outside the economy?"). Before step 4 every assessment
+carried `geopolitics` as a gap; now the desk reads the measure and leaves it out only when nothing touching the
+industry is elevated and the news shows nothing. Where a design passage below and an "as built" note disagree, the
+note is what runs.
 
 Relates to: [pythia-money-flows.md](./pythia-money-flows.md) (step 8 — the same shape: an engine job, a reviewed
 map, a declared test, then Pythia's wiring); [industry-screener.md](./industry-screener.md) §5 (every forecasting
@@ -53,7 +55,9 @@ elevated — Saudi Arabia, z +2.2 — so "turning elevated" is rare, as a trigge
 `geopolitics/exposure_map.yaml` in the engine: named RISKS, each with the country indexes that measure it, words
 for the news, and the GICS sub-industries it HURTS and HELPS — each with a one-line why and a strength (1 direct,
 2 through a supplier or a customer). Drafted by Claude, reviewed by Roy (D3), like the NAICS crosswalk. First
-draft list (D2):
+draft list (D2) — as DESIGNED; the accepted map measures each risk by fewer countries (as built: Taiwan TWN+CHN,
+US–China CHN, Gulf SAU+ISR, Red Sea EGY+SAU, Russia–Ukraine RUS+UKR, Israel ISR, Korea KOR, Venezuela VEN) and its
+lines differ in detail — `exposure_map.yaml` is the record:
 
 | Risk | Measured by | Hurts (examples) | Helps (examples) |
 |---|---|---|---|
@@ -80,13 +84,14 @@ replaces §3.3's "joined in Node from the map"). First reading through the draft
 ### 3.3 Per sub-industry, and where it lands
 
 For every sub-industry, the risks that touch it: name, direction, strength, intensity now, trend, and an
-**elevated** flag (intensity above the D1 line). Read in the backend from the latest complete run joined with
-the map — the map's lines are small, so the per-industry view is computed in Node, not stored per node.
+**elevated** flag (intensity above the D1 line). *(Designed as joined in Node from the map; as built, the engine
+writes each risk with its lines onto the run, and Node joins by code — §3.2's note.)*
 - **Pythia:** `get_geopolitics` (the global reading, then the risks touching an industry); `evidence.geopolitics`
   stops being a gap; the facts freeze on each assessment as `geopolitics`, like `flows`.
-- **Prompt:** the index counts newspaper articles — attention, not impact; a map direction is a hypothesis unless
-  a base rate is attached (T3); an elevated risk is a reason to READ the news on it, not a verdict.
-- **Board:** one row per touching risk under the money rows.
+- **Prompt:** the index counts newspaper articles — attention, not impact; a map direction is a hypothesis
+  (*as built: always — T3 failed*); an elevated risk is a reason to READ the news on it, not a verdict.
+- **Board:** one row per touching risk under the money rows. *(As built: ONE "geopolitics" row listing the
+  touching risks, after the insiders / funds / government rows.)*
 - **Change scan:** a touching risk turning elevated since the assessment (D4).
 
 **4d as built (2026-10-12).** `api/strategy/geopoliticsData.service.js`: `latestReading` (the latest COMPLETE run),
@@ -165,9 +170,23 @@ Dropped as both-sided: Trans (Gulf, Red Sea), Chems (Russia–Ukraine), Oil (Ven
 
 **So:** the map ships as HYPOTHESES, as declared — `BASE_RATES` gains nothing, and 4d's prompt and board must say the
 directions are untested-or-failed, as the insider cluster says "no tested edge". Read honestly, the numbers lean the
-OTHER way — the industries a risk was supposed to hurt did better over the next quarter (the chipmakers after a
-Taiwan scare above all), which is the pattern of a scare already priced at its peak. That is a hypothesis for a NEW
-declared test (a contrarian one), not a reading of this one: at t −1.08 the reverse is no more proven than the map.
+OTHER way — and the review (2026-10-13, line by line on the saved events) found about HALF of that is the HELPED side
+lagging, not the hurt side winning: after a Taiwan scare gold trailed the market by 5.8pp and defence by 1.2 while
+chips beat it by 3.1 and hardware by 2.0; Israel's −5.2pp is oil (−11.6pp, mostly 1990-10 and 2001-09); US–China's is
+steel (−7.1) against chips (+3.9). That is the pattern of hedges and commodities bought at a scare's peak and sold
+after it, with the hurt lines recovering — a hypothesis for a NEW declared test, not a reading of this one: at
+t −1.08 the reverse is no more proven than the map.
+
+*Notes added in review (2026-10-13), none changing the FAIL:* (1) **episodes:** a crossing is dropped when it falls
+within 6 months of the last kept event, so kept events are at least 7 months apart; (2) **strength-1 is not a subset
+of the main run:** filtering by strength BEFORE the both-sided drop brings back lines the main run dropped (Venezuela's
+Oil, the Gulf's and the Red Sea's Trans) — hence 32 event-months against 29; (3) **dependence:** risks share countries
+(Saudi Arabia in the Gulf and the Red Sea, Israel in the Gulf and Israel, China in Taiwan and US–China) and adjacent
+events' windows overlap, so the plain t overstates |t| — the FAIL and "no more proven" only get stronger; (4)
+**publication lag:** month t's index is published in the first days of t+1, while returns are counted from t+1's
+first day — a few days' overlap; (5) **proxies corrected after the test** (Roy, 2026-10-13): Agricultural Products is
+Food, not Agric (farms), and cruise lines are Trans, not Meals — Russia–Ukraine's number above rests on the old farm
+proxy; a rerun would be a new declared test.
 
 ## 7. Build order
 
@@ -191,3 +210,23 @@ the bar in §6 as outlined.
 4. **The scan:** a touching risk turning elevated buys a reassessment of the industries it hurts or helps
    (recommended, weight 2), or shown only until T3.
 5. **The bar in §6** — as outlined, or different.
+
+## 9. QA cycle (2026-10-13)
+
+Three reviews (engine; backend wiring; board and docs), every finding checked against the code, all fixed except the
+map's directions (Roy: only the two proxy corrections):
+- **The job refuses** a mapped country that is missing from the file or ends before the global index (the source
+  dropping Taiwan would have left the Taiwan risk on China alone); each country carries its own `through`; the
+  monthly staleness is 75 days from the month's first day (100 let a missed release pass); staleness is checked
+  against TODAY, not `--asof`.
+- **No false crossings:** a reading without the map's risks freezes nothing (an empty list would have made every
+  already-elevated risk look new); only risks the frozen reading measured are compared (`map_risks`); a risk counts
+  as turning elevated only if it was frozen below 1.5 (`SCAN.GEO_REARM_Z`) — one frozen at 1.9 ticking to 2.0 is
+  noise. A risk elevated when assessed, calmed, and elevated again is NOT re-flagged: the desk read it.
+- **Pythia gets each risk's news words**, the tool's nulls read n/a, a line with no strength is not called
+  indirect, "40-year" is gone (judged 2005–2025), and the prompt says to leave `geopolitics` out when nothing
+  touching is elevated and the news shows nothing.
+- **One citation cleaner** (`agentUtils.plainCitations`) for industries AND themes, handling a URL with one level of
+  parentheses.
+- **The board** says "sd". **The weekly scan** survives a flows or geopolitics reader that throws. **The tool's
+  logic** is `geopoliticsText` (tested). The controller reads geopolitics beside the other reads.

@@ -261,7 +261,11 @@ Pythia's ASSESSMENTS (a verdict per industry and theme, `docs/design/pythia-asse
 goes: companies' own capex and buybacks, and since step 8 (`docs/design/pythia-money-flows.md`) insiders buying,
 funds' 13F ownership and federal contract money — each measured by an engine job, shown to Pythia with how to
 read it, frozen on the assessment and shown on the board. None of them is a forecast: the insider cluster failed
-its 20-year test and is shown as a fact only, and crowding is untested.
+its 20-year test and is shown as a fact only, and crowding is untested. GEOPOLITICS (step 4,
+`docs/design/pythia-geopolitics.md`) works the same way: the Caldara–Iacoviello index as each mapped risk's intensity
+against its own ten years, and a reviewed map of which industries each risk hurts and helps — shown to Pythia, frozen
+on the assessment, a board row and a weekly-scan trigger; the map's directions failed their history test and are shown
+as hypotheses.
 
 Confirming does not answer in the social chat: it resolves the card as read, routes to Axl, and
 streams the brief into his thread (`POST /api/axl/brief/stream`). A page of market prose does not

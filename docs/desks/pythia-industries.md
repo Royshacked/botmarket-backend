@@ -113,7 +113,8 @@ regime, geopolitics). It is a judgment, not a forecast, and the code holds it to
 - `checkAssessment` refuses a block without a verdict, horizon, thesis, news and price evidence, what
   caused the move (`none` is allowed and is a finding; `unverified` when the research could not be done — a
   failed search must never read as the hype finding), the second-order view, a risk, and what would
-  change the view. Inputs not built yet (money, regime, geopolitics in step 1) are stored as `gaps`.
+  change the view. Inputs beyond news and price that the desk leaves out are stored as `gaps` (only regime has no
+  measured input yet).
 - `factsFor` attaches the facts from the engine's screen row (`industry_timing.raw`, written by
   `run_screener_timing.py`): the 12- and 24-month return against SPY, the stretch, and the **hype flag**
   (up 100%+ in two years and 100%+ over the market) with its base rate (22% crashed vs 9%). The agent
@@ -148,7 +149,7 @@ regime, geopolitics). It is a judgment, not a forecast, and the code holds it to
   the world's and each mapped risk's intensity against its own ten years (ELEVATED at z ≥ 2), and the risks the
   reviewed exposure map says hurt or help an industry — read by `get_geopolitics` (`geopoliticsData.service`), frozen
   on each industry assessment as `geopolitics`, a board row, and the change scan. ATTENTION, not impact; the map's
-  directions FAILED their 40-year test (T3) and are shown as hypotheses.
+  directions FAILED their history test (T3, judged on 2005–2025) and are shown as hypotheses.
 - **Themes** (step 3, §3; `theme.service`, `themeData.service`): value chains of sub-industries by order
   (1 direct, 2 suppliers, 3 suppliers' suppliers). Pythia PROPOSES (`<theme_proposal>`, "Propose themes"),
   the admin approves or retires; only an approved theme is assessed — an `<industry_assessment>` carrying

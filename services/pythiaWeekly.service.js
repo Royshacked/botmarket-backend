@@ -72,7 +72,9 @@ export async function ensurePythiaWeeklyIndexes() {
  */
 export async function scanWeek(asof, deps = _deps) {
     const [{ rows, regime }, money, flows, geo, assessments, themes] = await Promise.all([deps.readRun(asof), deps.readMoney(),
-        deps.readFlows ? deps.readFlows() : new Map(), deps.readGeo ? deps.readGeo() : () => null, deps.listAssessments(), deps.listThemes()])
+        deps.readFlows ? Promise.resolve().then(() => deps.readFlows()).catch(() => new Map()) : new Map(),
+        deps.readGeo ? Promise.resolve().then(() => deps.readGeo()).catch(() => () => null) : () => null,
+        deps.listAssessments(), deps.listThemes()])
     const at = deps.now()
     const nowByCode = new Map((rows ?? []).map(r => [r.code, { moved: factsFor(r).moved, money: money.get(r.code) ?? null, flows: flows.get(r.code) ?? null, geopolitics: geo(r.code) }]))
     const byCode = new Map(), byTheme = new Map()

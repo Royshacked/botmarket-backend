@@ -120,7 +120,9 @@ Built engine-side as aggregates by industry and theme (§9), never as raw filing
 
 ### 4.5 Geopolitics — "what could hit this industry from outside the economy?"
 
-- **Have:** `web_search`, news.
+- **Have:** `web_search`, news. *Since 2026-10-12 (step 4, [pythia-geopolitics.md](./pythia-geopolitics.md)): the GPR
+  index and a reviewed exposure map of eight risks — BUILT; the map's directions failed their history test and are
+  shown as hypotheses. The list below is the original design.*
 - **Missing:** the Caldara–Iacoviello Geopolitical Risk index (free, monthly, since 1985; by country), and
   an **exposure map** (config): Taiwan → semiconductors and hardware; Red Sea / Hormuz → shipping, energy,
   chemicals; Russia–Ukraine → energy, grains, fertiliser, defence; China tariffs → retail, autos, solar;
@@ -159,6 +161,8 @@ One house document per industry or theme, through `houseArtifact.repo` (every ch
 - `evidence` — one short entry per input (§4.1–4.5), each with its date
 - `moved` (code: run-up, extension, hype flag), `base_rates` (attached by code), `second_order`, `risks`,
   `confidence`, `change_view_if`
+- `money` (step 2: companies' own money), `flows` (step 8: insiders, funds, government) and `geopolitics` (step 4:
+  the GPR reading and the mapped risks touching it) — facts frozen by code, industries only
 - `structure` — the standing `industry_view` answer (demand / economics / cycle), read, not rewritten
 
 The board shows the verdict in plain words with the thesis, the flags and the track record (§7).

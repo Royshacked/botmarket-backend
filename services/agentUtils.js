@@ -539,6 +539,17 @@ THE LATEST TURN DECIDES — \`<${tag}>\`${scope ? ` (${scope})` : ''}. The app k
 - Never write "I'd hold off" or "on reflection, no" while the block you no longer back is still the last one you emitted. The button does not read your prose.`
 }
 
+// ─── Web-search citations ─────────────────────────────────────────────────────
+// A web search's citations arrive as Markdown — "([ebs.publicnow.com](https://…?utm_source=openai))" — and were stored
+// and shown raw (live drive, 2026-10-12). Kept as their label: the source's name stays, the tracking URL goes. A URL
+// may hold one level of parentheses (Wikipedia's "Foo_(bar)"); a bracket not followed by an http link is left alone.
+// ONE cleaner for every desk that stores a searched model's text (QA 2026-10-13: the themes had none).
+export function plainCitations(s) {
+    return typeof s === 'string'
+        ? s.replace(/\[([^\]]+)\]\((https?:\/\/(?:[^()\s]|\([^()\s]*\))+)\)/g, '$1')
+        : s
+}
+
 // ─── Emit-tag cleanup ─────────────────────────────────────────────────────────
 // Strip the given emit blocks (<name>…</name>) from a raw model reply. Each name
 // is removed globally, matching the per-agent hand-written `.replace(...)` chains.

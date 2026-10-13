@@ -572,7 +572,8 @@ PYTHIA (the industry desk)            POST /api/strategy/stream
   └─ industry_assessment (docs/design/pythia-assessment.md): a JUDGMENT, not a forecast — from news
      (FMP first), price (the engine's moves; the hype flag on the size-weighted line), companies'
      money and, since step 8, insiders, funds' 13F ownership and federal contract money
-     (docs/design/pythia-money-flows.md), regime and geopolitics → for swing · for long term · watch (a live question with a dated
+     (docs/design/pythia-money-flows.md), regime, and geopolitics — since step 4 the GPR index and a
+     reviewed risk map (docs/design/pythia-geopolitics.md) → for swing · for long term · watch (a live question with a dated
      decider ≤6 weeks) · avoid · no case; every verdict logged in pythia_calls and graded vs SPY at
      3 and 12 months. Industries and approved THEMES (value chains Pythia proposes, an admin approves)
         └─► the weekly change scan (pythiaWeekly, opt-in PYTHIA_WEEKLY): after each engine price run,

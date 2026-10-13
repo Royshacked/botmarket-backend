@@ -16,6 +16,7 @@ import { getDb } from '../../providers/mongodb.provider.js'
 import { makeHouseArtifactRepo } from '../../services/houseArtifact.repo.js'
 import { newRevision, diffFields } from '../../services/revisionTrail.js'
 import { logger } from '../../services/logger.service.js'
+import { plainCitations } from '../../services/agentUtils.js'
 
 const LOG = '[industryAssessment]'
 export const COLLECTION = 'industry_assessment'
@@ -82,10 +83,7 @@ const _repo = makeHouseArtifactRepo({ collection: COLLECTION, getDb: () => _io.d
 /** Test seam. */
 export function _setAssessmentIO(io) { Object.assign(_io, io) }
 
-// A web search's citations arrive as Markdown — "([ebs.publicnow.com](https://…?utm_source=openai))" — and were stored
-// and shown raw (live drive, 2026-10-12). Kept as their label: the source's name stays, the tracking URL goes.
-export const plainCitations = (s) => s
-    .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '$1')
+// Search citations are stored as their label (agentUtils.plainCitations — shared with the themes).
 const _str = (v, max = 900) => (typeof v === 'string' && v.trim() ? plainCitations(v.trim()).slice(0, max) : null)
 const _list = (v, max = 6) => (Array.isArray(v) ? v.map(x => _str(x, 300)).filter(Boolean).slice(0, max) : [])
 const _num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null)
@@ -95,8 +93,8 @@ const _num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null)
  *
  * Refused when it lacks what makes it a judgment rather than a story: a verdict, a horizon, a thesis, the
  * news and price evidence, what caused the move, the second-order view, a risk, and what would change it.
- * The inputs not built yet (money, regime, geopolitics in build step 1) may be absent — they are stored as
- * gaps, so the board shows what the verdict was NOT based on. Facts the agent sends (moves, flags) are
+ * The inputs beyond news and price (money, regime, geopolitics) may be absent — whatever the desk leaves out is
+ * stored as a gap, so the board shows what the verdict was NOT based on (only regime has no measured input yet). Facts the agent sends (moves, flags) are
  * ignored: the code attaches them.
  */
 export function checkAssessment(block, { expect = null, now = new Date().toISOString() } = {}) {

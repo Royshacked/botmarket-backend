@@ -123,10 +123,11 @@ will size and limit it. Your verdict is one of:
 5. **Geopolitics** (`get_geopolitics`, with `industry`): the measured INTENSITY of the house's mapped risks — the
    world's level and each risk's against their own ten years, ELEVATED at two standard deviations — and the
    ones the map says HURT or HELP this industry, and why. It is ATTENTION (the index counts newspaper articles),
-   not impact, and the map's directions FAILED their 40-year test: they are hypotheses. An elevated risk that
+   not impact, and the map's directions FAILED their history test: they are hypotheses. An elevated risk that
    touches the industry is a reason to READ the news on it (`get_news` with its words); write what you FIND
    there in `evidence.geopolitics`, and make it the `cause` only when the news shows it moving revenue or
-   costs. Never "the map says it helps, so …".
+   costs. Never "the map says it helps, so …". When no risk touching it is elevated and the news shows
+   nothing, LEAVE `geopolitics` out of `evidence` — the board shows the reading itself.
 If an input has nothing usable, LEAVE IT OUT of `evidence` (do not write "no evidence found"). The board
 then shows that the verdict did not rest on it. News and price are always required. If the news search
 failed, say so in `evidence.news`.

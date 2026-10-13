@@ -99,7 +99,8 @@ api/
                               latestReading (geopolitical_risk, latest COMPLETE run — the GPR index, world and
                               countries, and the exposure map's risks with the sub-industries they hurt/help),
                               geoFacts (what an industry assessment freezes as `geopolitics`), readAllGeo (the
-                              scan), formatGeo (get_geopolitics' text: attention not impact; the map FAILED T3)
+                              scan), formatGeo / geopoliticsText (get_geopolitics' text: attention not impact,
+                              each risk's news words, the map FAILED T3)
     industryData.service.js   Reads what aether-engine measured, from the ENGINE's database
                               (services/engineDb.js): industry_metrics (readSubIndustry → the node that
                               answers it + its parents; listSubIndustries) and gics_companies
@@ -127,7 +128,7 @@ api/
     themeData.service.js      A theme's facts — each link's price row and money (readThemeFacts), its
                               graded basket (themeBasket), formatTheme for the desk. Shared by get_theme and
                               the headless theme assessment so the two cannot disagree
-    changeScan.service.js     Pythia's weekly CHANGE SCAN (step 6, pythia-assessment.md §8). Pure, no model:
+    changeScan.service.js     Pythia's weekly CHANGE SCAN (step 6, pythia-assessment.md §12 item 6). Pure, no model:
                               `changes` compares today's moves and money with the facts FROZEN on the standing
                               assessment (hype on/off, a sharp month, the 12-month excess shifting, the stretch
                               crossing its edges, capex or buybacks turning); flowChanges (step 8) — an insider
@@ -135,7 +136,8 @@ api/
                               either year (outside a gap from the frozen change), and funds'
                               crowding behind CROWDED_SCANNED (off: 66 of 163 at the top of a 7-quarter range),
                               only against FROZEN flows (none on a theme or a pre-step-8 assessment);
-                              geoChanges (step 4) — a mapped risk touching the industry turning elevated;
+                              geoChanges (step 4) — a mapped risk touching the industry turning elevated (only
+                              risks the frozen reading measured, frozen below GEO_REARM_Z 1.5);
                               scanIndustry / scanTheme add never-assessed and expired; pickForWeek orders by
                               weight then size and caps
     screenerData.service.js   Reads the engine's weekly PRICE RUN (industry_timing, market_regime,
