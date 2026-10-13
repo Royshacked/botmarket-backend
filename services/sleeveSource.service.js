@@ -38,6 +38,7 @@ import { normalizeSelection }   from './investorSchools.js'
 import { cardActions }          from '../api/chat/chat.service.js'
 import { postCard }             from './notifyCard.js'
 import { logger }               from './logger.service.js'
+import { config }               from './config.js'
 
 const LOG = '[sleeveSource]'
 
@@ -47,6 +48,10 @@ const MIN_VOLUME = 500_000
 // edge) — twelve is enough pond for that and still under an hour of Prometheus. Not conviction-
 // scaled like the house scan: a sleeve is a slot in a book, not a stance with a weight on it.
 export const SLEEVE_HITS = 12
+// The wider screen when Pythia rates long-term industries in the sector (docs/design/argus-on-pythia.md §3.5): the
+// house's names are found INSIDE the same school screen, so every floor (cap, dividend, volume) holds for them too.
+// 50 is the screener's own ceiling (fmp.provider _buildScreenQs).
+export const HOUSE_POOL = 50
 
 /**
  * The school as a screen. Coarse on purpose — see the header. `default` is the pond for a mandate
@@ -94,6 +99,26 @@ export function _resetSleeves() { state.sleeves = []; state.subscribed = false }
 const _sym = s => String(s ?? '').toUpperCase().trim()
 
 /**
+ * The house's long-term industries FIRST, up to `max` of the `hits`, the rest of the screen after them, in the
+ * screen's order. A ceiling, not a quota: a short house list takes what it has. `industryOf` maps a symbol to its
+ * GICS sub-industry code; `houseCodes` is the set Pythia rates for long term. Pure → `{ symbols, house }`.
+ */
+export function houseFirst(screened, industryOf, houseCodes, { hits = SLEEVE_HITS, max = 6 } = {}) {
+    const cap = Math.max(0, Math.min(Number(max) || 0, hits))
+    const house = (screened ?? []).filter(s => houseCodes?.has(industryOf?.[s])).slice(0, cap)
+    const taken = new Set(house)
+    const rest = (screened ?? []).filter(s => !taken.has(s)).slice(0, hits - house.length)
+    return { symbols: [...house, ...rest], house }
+}
+
+/** The sub-industry codes Pythia rates for long term in the sector; empty on any failure (the sleeve screens as before). */
+async function _houseCodes(sector, deps) {
+    if (!deps.houseIndustries) return new Set()
+    try { return new Set(await deps.houseIndustries(sector) ?? []) }
+    catch (err) { logger.warn(LOG, 'house industries unreadable — the sleeve screens without them', err.message); return new Set() }
+}
+
+/**
  * Source one sleeve: screen → queue → run → (later) card. Never throws; the caller is a stream
  * handler that has already answered the user.
  *
@@ -112,7 +137,18 @@ export async function sourceSleeve(req, deps = _io) {
     if (school === 'passive')  return { ok: false, reason: 'passive' }
     if (!sector)               return { ok: false, reason: 'sector_required' }
 
-    const symbols = await deps.screen(screenFiltersFor(sector, school, { industry }))
+    // Pythia's long-term industries in the sector go first (a preference, not a filter — Roy, 2026-10-13): the screen
+    // widens so they can be found inside it, then they take up to half the sleeve and the screen fills the rest.
+    const houseCodes = await _houseCodes(sector, deps)
+    const wide = houseCodes.size > 0
+    let symbols = await deps.screen(screenFiltersFor(sector, school, { industry, limit: wide ? HOUSE_POOL : SLEEVE_HITS }))
+    let fromHouse = []
+    if (wide && symbols.length) {
+        let industryOf = {}
+        try { industryOf = await deps.industryOf(symbols) ?? {} }
+        catch (err) { logger.warn(LOG, 'industries unreadable — the sleeve takes the screen in its order', err.message) }
+        ;({ symbols, house: fromHouse } = houseFirst(symbols, industryOf, houseCodes, { max: deps.houseMax?.() ?? config.sleeveHouseMax }))
+    }
     if (!symbols.length) {
         logger.info(LOG, 'nothing screened — sleeve not sourced', { sector, school, industry })
         return { ok: false, reason: 'nothing_screened' }
@@ -128,6 +164,8 @@ export async function sourceSleeve(req, deps = _io) {
         userId: String(userId), threadId, portfolioId, portfolioName,
         sector, school, industry,
         symbols:     fresh,
+        // Which of them came from Pythia's long-term industries — the card says how many.
+        house:       fromHouse.filter(s => !covered.has(s)),
         // symbol → 'covered' | 'passed' | 'skipped' | 'failed' | 'unresolved', filled as runs settle
         outcomes:    {},
         alreadyCovered: symbols.length - fresh.length,
@@ -165,7 +203,7 @@ export async function sourceSleeve(req, deps = _io) {
 
     state.sleeves.push(sleeve)
     _subscribe(deps)
-    logger.info(LOG, 'sleeve queued', { id: sleeve.id, sector, school, screened: symbols.length, queued, alreadyCovered: sleeve.alreadyCovered })
+    logger.info(LOG, 'sleeve queued', { id: sleeve.id, sector, school, screened: symbols.length, queued, alreadyCovered: sleeve.alreadyCovered, house: sleeve.house.length })
 
     await _kick(sleeve, deps)
     return { ok: true, sleeve: _pub(sleeve) }
@@ -231,7 +269,7 @@ async function _settle(sleeve, deps) {
     logger.info(LOG, 'sleeve settled', { id: sleeve.id, sector: sleeve.sector, covered: card?.payload?.covered?.length ?? 0, of: sleeve.symbols.length, posted: !!msg })
 }
 
-const _pub = s => ({ id: s.id, sector: s.sector, school: s.school, symbols: [...s.symbols], alreadyCovered: s.alreadyCovered })
+const _pub = s => ({ id: s.id, sector: s.sector, school: s.school, symbols: [...s.symbols], alreadyCovered: s.alreadyCovered, house: [...(s.house ?? [])] })
 
 // ─── The card ───────────────────────────────────────────────────────────────────
 
@@ -257,6 +295,8 @@ export function buildSleeveSourced(sleeve) {
     const unresolved = _by(sleeve, 'unresolved')
     const inBook     = covered.length + (sleeve.alreadyCovered ?? 0)
     const school     = sleeve.school ? ` (${sleeve.school})` : ''
+    const house      = (sleeve.house ?? []).filter(s => sleeve.symbols.includes(s))
+    const houseLine  = house.length ? ` ${house.length} of the ${sleeve.symbols.length} came from the house's long-term industries.` : ''
 
     let content
     if (!sleeve.symbols.length) {
@@ -267,11 +307,11 @@ export function buildSleeveSourced(sleeve) {
             failed.length     ? `${failed.length} failed to save`       : null,
             unresolved.length ? `${unresolved.length} left the queue unresearched` : null,
         ].filter(Boolean).join(', ')
-        content = `${sleeve.sector} sleeve sourced${school}: ${covered.length} of ${sleeve.symbols.length} screened names now in coverage — ${covered.join(', ')}${tail ? `; ${tail}` : ''}. Resume the build and Atlas allocates from coverage.`
+        content = `${sleeve.sector} sleeve sourced${school}: ${covered.length} of ${sleeve.symbols.length} screened names now in coverage — ${covered.join(', ')}${tail ? `; ${tail}` : ''}. Resume the build and Atlas allocates from coverage.${houseLine}`
     } else {
         content = `${sleeve.sector} sleeve${school}: Prometheus researched ${sleeve.symbols.length} screened names and put none into coverage`
             + (passed.length ? ` (${passed.length} no edge${failed.length ? `, ${failed.length} failed to save` : ''})` : '')
-            + `. Resume the build — Atlas will say what the pool holds, or broaden the filter.`
+            + `. Resume the build — Atlas will say what the pool holds, or broaden the filter.${houseLine}`
     }
 
     return {
@@ -283,7 +323,7 @@ export function buildSleeveSourced(sleeve) {
             sector: sleeve.sector, school: sleeve.school ?? null,
             portfolioId: sleeve.portfolioId ?? null, threadId: sleeve.threadId ?? null,
             screened: sleeve.symbols.length, inBook,
-            covered: written, skipped, passed, failed, unresolved,
+            covered: written, skipped, passed, failed, unresolved, house,
         },
         botId:      'portfolio',
         actions:    cardActions('Resume build'),
@@ -306,6 +346,15 @@ const _io = {
             logger.warn(LOG, `sector screen failed: ${filters?.sector}`, err.message)
             return []
         }
+    },
+    // Pythia's long-term industries in the sector, and each screened symbol's GICS sub-industry (argus-on-pythia.md §3.5).
+    async houseIndustries(sector) {
+        const { industryAssessmentService } = await import('../api/strategy/industryAssessment.service.js')
+        return (await industryAssessmentService.listForBook('long_term', { sector })).map(e => e.code)
+    },
+    async industryOf(symbols) {
+        const { readCompaniesBySymbol } = await import('../api/strategy/industryData.service.js')
+        return Object.fromEntries(Object.entries(await readCompaniesBySymbol(symbols)).map(([s, r]) => [s, r.sub_code]))
     },
     async coveredSymbols() {
         const { coverageService } = await import('../api/analyst/coverage.service.js')

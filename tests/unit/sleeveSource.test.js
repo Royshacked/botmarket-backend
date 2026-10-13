@@ -186,3 +186,67 @@ test('the card needs a user and a sector', () => {
     assert.equal(buildSleeveSourced({ sector: 'Energy', symbols: [] }), null)
     assert.equal(buildSleeveSourced({ userId: 'u1', symbols: [] }), null)
 })
+
+// ── the house's long-term industries first (argus-on-pythia.md §3.5, Roy 2026-10-13: up to half) ──────────
+
+import { houseFirst, HOUSE_POOL } from '../../services/sleeveSource.service.js'
+
+const POOL = Array.from({ length: 30 }, (_, i) => `S${String(i).padStart(2, '0')}`)
+// Every fifth symbol of the pool is in the house's industry 'H1'; the rest in 'X'.
+const IND_OF = Object.fromEntries(POOL.map((s, i) => [s, i % 5 === 0 ? 'H1' : 'X']))
+
+test('houseFirst: the house names lead, up to the cap; the screen fills the rest in its order', () => {
+    const r = houseFirst(POOL, IND_OF, new Set(['H1']), { hits: 12, max: 6 })
+    assert.deepEqual(r.house, ['S00', 'S05', 'S10', 'S15', 'S20', 'S25'])
+    assert.equal(r.symbols.length, 12)
+    assert.deepEqual(r.symbols.slice(0, 6), r.house)
+    assert.deepEqual(r.symbols.slice(6), ['S01', 'S02', 'S03', 'S04', 'S06', 'S07'])
+    const capped = houseFirst(POOL, IND_OF, new Set(['H1']), { hits: 12, max: 3 })
+    assert.deepEqual(capped.house, ['S00', 'S05', 'S10'], 'the cap is a ceiling')
+    const short = houseFirst(POOL.slice(0, 8), IND_OF, new Set(['H1']), { hits: 12, max: 6 })
+    assert.deepEqual(short.house, ['S00', 'S05'], 'a short house list takes what it has')
+    assert.equal(short.symbols.length, 8)
+    assert.deepEqual(houseFirst(POOL, IND_OF, new Set(), { hits: 12, max: 6 }).symbols, POOL.slice(0, 12), 'no house: the screen as it was')
+    assert.deepEqual(houseFirst(POOL, IND_OF, new Set(['H1']), { hits: 12, max: 0 }).house, [])
+})
+
+test('a sector Pythia rates long term: the screen widens, the house names lead, the card counts them', async () => {
+    const h = harness({ screened: POOL, covered: ['S05'] })
+    const filters = []
+    h.deps.screen = async (f) => { filters.push(f); return POOL }
+    h.deps.houseIndustries = async (sector) => { assert.equal(sector, 'Technology'); return ['H1'] }
+    h.deps.industryOf = async () => IND_OF
+    h.deps.houseMax = () => 6
+    const res = await sourceSleeve(req(), h.deps)
+    assert.equal(res.ok, true)
+    assert.equal(filters[0].limit, HOUSE_POOL)
+    assert.deepEqual(res.sleeve.house, ['S00', 'S10', 'S15', 'S20', 'S25'], 'a covered house name is in the book, not in the sleeve')
+    assert.equal(res.sleeve.symbols.length + 1, SLEEVE_HITS, 'twelve screened, one already covered')
+    assert.deepEqual(h.enqueued.slice(0, 5).map(e => e.symbol), ['S00', 'S10', 'S15', 'S20', 'S25'])
+    await h.settled(run(res.sleeve.symbols.map(symbol => ({ symbol, outcome: 'covered' }))))
+    const card = h.posted.at(-1)
+    assert.match(card.content, /5 of the 11 came from the house's long-term industries/)
+    assert.deepEqual(card.payload.house, ['S00', 'S10', 'S15', 'S20', 'S25'])
+})
+
+test('no house industries, or an unreadable list, or unreadable industries: the sleeve screens as before', async () => {
+    for (const houseIndustries of [async () => [], async () => { throw new Error('db down') }]) {
+        _resetSleeves()
+        const h = harness({ screened: POOL })
+        const filters = []
+        h.deps.screen = async (f) => { filters.push(f); return POOL.slice(0, SLEEVE_HITS) }
+        h.deps.houseIndustries = houseIndustries
+        const res = await sourceSleeve(req(), h.deps)
+        assert.equal(filters[0].limit, SLEEVE_HITS)
+        assert.deepEqual(res.sleeve.house, [])
+        assert.doesNotMatch(buildSleeveSourced({ ...res.sleeve, userId: 'u1', outcomes: {} })?.content ?? '', /house/)
+    }
+    _resetSleeves()
+    const h = harness()
+    h.deps.screen = async () => POOL
+    h.deps.houseIndustries = async () => ['H1']
+    h.deps.industryOf = async () => { throw new Error('db down') }
+    const res = await sourceSleeve(req(), h.deps)
+    assert.deepEqual(res.sleeve.symbols, POOL.slice(0, SLEEVE_HITS), 'the wide screen is still cut to the sleeve, in its order')
+    assert.deepEqual(res.sleeve.house, [])
+})

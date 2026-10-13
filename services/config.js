@@ -228,6 +228,9 @@ export const config = {
     // the research run that follows is the admin's.
     get houseScanPerIndustry() { return _num('HOUSE_SCAN_PER_INDUSTRY', 3) },
     get houseScanWeeklyMax()   { return _num('HOUSE_SCAN_WEEKLY_MAX', 30) },
+    // Of a sleeve's twelve screened names, at most this many from Pythia's long-term industries in its sector
+    // (services/sleeveSource.service.js; docs/design/argus-on-pythia.md §3.5 — Roy 2026-10-13: half). A ceiling.
+    get sleeveHouseMax()       { return _num('SLEEVE_HOUSE_MAX', 6) },
     get pythiaWeeklyCap()    { return _num('PYTHIA_WEEKLY_CAP', Infinity) },
     get pythiaWeeklyMaxUsd() { return _num('PYTHIA_WEEKLY_MAX_USD', 3) },
     // `disk` (the default) writes files under talosRecordDir; `mongo` inserts into the `talos_reads`

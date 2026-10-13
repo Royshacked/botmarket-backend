@@ -247,3 +247,10 @@ test('a long list shows the first twenty in full and the rest by name', () => {
     assert.match(text, /3 more, names only .*Industry 20 \(10000020\), Industry 21 \(10000021\), Industry 22 \(10000022\) HYPE/)
     assert.doesNotMatch(formatHouseIndustries('swing', many.slice(0, 20)), /more, names only/)
 })
+
+test("the sector matches in either spelling — a sleeve's sector is model text (step 4)", () => {
+    for (const sector of ['Technology', 'information technology', 'Information Technology', 'tech']) {
+        assert.deepEqual(houseIndustriesFor([SEMIS, BANKS], [], { book: 'swing', sector, now: NOW }).map(e => e.code), ['45301020'], sector)
+    }
+    assert.deepEqual(houseIndustriesFor([SEMIS, BANKS], [], { book: 'swing', sector: 'Financial Services', now: NOW }).map(e => e.code), ['40101015'])
+})

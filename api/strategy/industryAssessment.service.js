@@ -18,6 +18,7 @@ import { newRevision, diffFields } from '../../services/revisionTrail.js'
 import { logger } from '../../services/logger.service.js'
 import { plainCitations } from '../../services/agentUtils.js'
 import { themeService } from './theme.service.js'
+import { normalizeSector } from '../../services/entity/vocabulary.js'
 
 const LOG = '[industryAssessment]'
 export const COLLECTION = 'industry_assessment'
@@ -399,7 +400,9 @@ export function houseIndustriesFor(rows, themes, { book, sector = null, now = ne
     const live = (rows ?? []).filter(r => !r.expires_at || r.expires_at > now)
     const verdictOf = (r) => LEGACY_VERDICTS[r.verdict] ?? r.verdict
     const own = new Map(live.filter(r => r.subject?.kind === 'industry' && r.subject.code).map(r => [r.subject.code, r]))
-    const inSector = (s) => !sector || String(s ?? '').toLowerCase() === String(sector).toLowerCase()
+    // Either spelling — GICS ("Information Technology") or the screener's ("Technology"): a sleeve's sector is model text.
+    const _sec = (s) => normalizeSector(s) ?? String(s ?? '').trim().toLowerCase()
+    const inSector = (s) => !sector || _sec(s) === _sec(sector)
     const out = new Map()
     const entry = (code, name, sec) => {
         if (!out.has(code)) {
