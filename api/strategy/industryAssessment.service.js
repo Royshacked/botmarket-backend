@@ -17,6 +17,7 @@ import { makeHouseArtifactRepo } from '../../services/houseArtifact.repo.js'
 import { newRevision, diffFields } from '../../services/revisionTrail.js'
 import { logger } from '../../services/logger.service.js'
 import { plainCitations } from '../../services/agentUtils.js'
+import { themeService } from './theme.service.js'
 
 const LOG = '[industryAssessment]'
 export const COLLECTION = 'industry_assessment'
@@ -377,4 +378,72 @@ async function listAssessments() {
     return db.collection(COLLECTION).find({}, { projection: { _id: 0, revisions: 0 } }).sort({ 'subject.sector': 1, 'subject.name': 1 }).toArray()
 }
 
-export const industryAssessmentService = { publishAssessment, getAssessment, getThemeAssessment, listAssessments, verdictsForCodes }
+/** The books a scan can ask for — the verdicts that say "worth this book's attention now". Watch is left out (Roy, 2026-10-13). */
+export const BOOKS = Object.freeze(['swing', 'long_term'])
+/** A theme sends its direct links and its suppliers, as the house scan does; suppliers' suppliers are too far out. */
+const BOOK_LINK_ORDER = 2
+
+/**
+ * The house's industries for one BOOK (docs/design/argus-on-pythia.md §3.1) — where a scan for that book looks
+ * FIRST. A preference, never a filter: the callers screen the rest of the market too. Pure.
+ *
+ * `rows` are assessment documents (industries and themes); `themes` the APPROVED themes. An industry is listed
+ * when its own unexpired verdict is the book, or when an unexpired theme rated the book links it at order 1–2 —
+ * one entry per sub-industry either way, with every theme that brought it. `sector` narrows to one GICS sector.
+ * An industry Pythia rates AVOID on its own can still arrive through a theme: it is listed, marked `avoid`.
+ * → `[{ code, name, sector, rated, horizon, hype, thesis, top_risk, avoid, excess_12m, themes: [{ id, name, order, horizon, thesis }] }]`,
+ * the biggest 12-month move over the market first (none last).
+ */
+export function houseIndustriesFor(rows, themes, { book, sector = null, now = new Date().toISOString() } = {}) {
+    if (!BOOKS.includes(book)) return []
+    const live = (rows ?? []).filter(r => !r.expires_at || r.expires_at > now)
+    const verdictOf = (r) => LEGACY_VERDICTS[r.verdict] ?? r.verdict
+    const own = new Map(live.filter(r => r.subject?.kind === 'industry' && r.subject.code).map(r => [r.subject.code, r]))
+    const inSector = (s) => !sector || String(s ?? '').toLowerCase() === String(sector).toLowerCase()
+    const out = new Map()
+    const entry = (code, name, sec) => {
+        if (!out.has(code)) {
+            const r = own.get(code)
+            const mine = r && verdictOf(r) === book
+            out.set(code, {
+                code, name: r?.subject?.name ?? name, sector: r?.subject?.sector ?? sec ?? null,
+                rated: Boolean(mine), horizon: mine ? (r.horizon ?? null) : null,
+                hype: r?.moved?.hype === true, thesis: mine ? (r.thesis ?? null) : null,
+                top_risk: mine ? (r.risks?.[0] ?? null) : null, avoid: r ? verdictOf(r) === 'avoid' : false,
+                excess_12m: _num(r?.moved?.excess_12m), themes: [],
+            })
+        }
+        return out.get(code)
+    }
+    for (const r of own.values()) {
+        if (verdictOf(r) === book && inSector(r.subject.sector)) entry(r.subject.code, r.subject.name, r.subject.sector)
+    }
+    const approved = new Map((themes ?? []).filter(t => t?.status === 'approved').map(t => [t.id, t]))
+    for (const r of live) {
+        if (r.subject?.kind !== 'theme' || verdictOf(r) !== book) continue
+        const t = approved.get(r.subject.id)
+        if (!t) continue                          // retired since it was rated: its verdict no longer speaks for the house
+        const moves = new Map((r.moved?.links ?? []).map(l => [l.code, l]))
+        for (const l of (t.links ?? []).filter(x => x.order <= BOOK_LINK_ORDER && inSector(x.sector))) {
+            const e = entry(l.code, l.name, l.sector)
+            if (e.excess_12m == null) e.excess_12m = _num(moves.get(l.code)?.excess_12m)
+            if (moves.get(l.code)?.hype === true) e.hype = true
+            e.themes.push({ id: t.id, name: t.name, order: l.order, horizon: r.horizon ?? null, thesis: r.thesis ?? null })
+        }
+    }
+    return [...out.values()].sort((a, b) => (b.excess_12m ?? -Infinity) - (a.excess_12m ?? -Infinity) || String(a.name).localeCompare(String(b.name)))
+}
+
+/** houseIndustriesFor over the stored assessments and the approved themes. Read-only. */
+async function listForBook(book, { sector = null, now = new Date().toISOString() } = {}, deps = {}) {
+    if (!BOOKS.includes(book)) return []
+    const { themes = () => themeService.listThemes({ statuses: ['approved'] }) } = deps
+    const db = await _io.db()
+    const rows = await db.collection(COLLECTION).find({}, { projection: {
+        _id: 0, subject: 1, verdict: 1, horizon: 1, thesis: 1, risks: 1, expires_at: 1,
+        'moved.hype': 1, 'moved.excess_12m': 1, 'moved.links': 1,
+    } }).toArray()
+    return houseIndustriesFor(rows, await themes(), { book, sector, now })
+}
+
+export const industryAssessmentService = { publishAssessment, getAssessment, getThemeAssessment, listAssessments, verdictsForCodes, listForBook }

@@ -12,13 +12,12 @@
 
 import { largestCompanies, coveredSymbols, readSubIndustry } from '../api/strategy/industryData.service.js'
 import { themeService } from '../api/strategy/theme.service.js'
-import { industryAssessmentService } from '../api/strategy/industryAssessment.service.js'
+import { industryAssessmentService, BOOKS } from '../api/strategy/industryAssessment.service.js'
 import { researchQueueService } from './researchQueue.service.js'
 import { config } from './config.js'
 import { logger } from './logger.service.js'
 
 const LOG = '[houseScan]'
-export const BOOKS = new Set(['swing', 'long_term'])
 
 const _deps = {
     covered: () => coveredSymbols(),
@@ -61,7 +60,7 @@ export async function runHouseScan(results, deps = _deps, { alreadyQueued = 0, n
     const per = Math.max(0, Number(deps.perIndustry()) || 0)
     // The week's ceiling counts what an earlier finish of the same week already queued (a forced rerun).
     const max = Math.max(0, (Number(deps.weeklyMax()) || 0) - (Number(alreadyQueued) || 0))
-    const picks = (results ?? []).filter(r => r.outcome === 'published' && BOOKS.has(r.verdict))
+    const picks = (results ?? []).filter(r => r.outcome === 'published' && BOOKS.includes(r.verdict))
     const queued = []
     if (!picks.length || !per || !max) return { queued, considered: picks.length, skipped_full: 0 }
     let skippedFull = 0
@@ -75,7 +74,7 @@ export async function runHouseScan(results, deps = _deps, { alreadyQueued = 0, n
         for (const r of picks) {
             if (queued.length >= max) { skippedFull++; continue }
             const a = await deps.assessment(r)
-            if (!a || !BOOKS.has(a.verdict)) continue      // re-assessed since: the verdict that would send it is gone
+            if (!a || !BOOKS.includes(a.verdict)) continue      // re-assessed since: the verdict that would send it is gone
             // Industries: the sub-industry. Themes: supplier links first, then direct — `per` names from each.
             const sources = r.kind === 'theme'
                 ? ((await deps.theme(r.id))?.links ?? []).filter(l => l.order <= 2).sort((x, y) => y.order - x.order).map(l => ({ code: l.code, link: l.name }))
