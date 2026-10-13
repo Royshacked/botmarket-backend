@@ -168,7 +168,8 @@ Commits: 8497ccf (3.1), a0e20c3 (3.2), 4245cc8 (3.3), 673b087 (the screener fix)
   cap, dividend, volume — holds for them; a dividend check on `gics_companies` was not needed. `SLEEVE_HOUSE_MAX`
   (default 6). The card: "N of the M came from the house's long-term industries". Live (no queuing): IT → MSFT ORCL
   PANW CRWD FTNT + 7; Financials → V MA ICE PYPL COIN + 7; Communication Services → GOOG META RDDT PINS SNAP MTCH + 6.
-- **3.6** (Pythia naming companies) not built.
+- **3.6** (Pythia naming companies) BUILT 2026-10-13 — [pythia-names.md](./pythia-names.md). The same day the house list
+  began showing each assessment's second-order line (`who else it reaches`), first and second order equal (Roy).
 
 **Code review 2026-10-13** (an independent pass over every commit above). Fixed: an industry the house rates AVOID that
 arrives through a long-term theme no longer leads a sleeve (`_houseCodes` drops it; its names can still come through

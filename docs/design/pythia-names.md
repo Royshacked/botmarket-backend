@@ -1,6 +1,7 @@
 # Pythia names companies — the `names` field
 
-**Status: PLAN, 2026-10-13. Nothing built. Decisions §6: all four as recommended, for now (Roy, 2026-10-13).** §3.6 of [argus-on-pythia.md](./argus-on-pythia.md). Decisions for Roy in §6.
+**Status: BUILT 2026-10-13 (§9), one live assessment and a browser drive on axl_dev. Decisions §6: all four as
+recommended, for now (Roy, 2026-10-13).** §3.6 of [argus-on-pythia.md](./argus-on-pythia.md). Decisions for Roy in §6.
 
 ## 1. Why
 
@@ -84,6 +85,30 @@ assessments have no names until their next run; nothing is backfilled.
 5. Docs, CODE_MAP, the deploy checklist.
 
 No migration, no new environment variable. Cost: a few output tokens per assessment; no extra model call.
+
+## 9. As built (2026-10-13)
+
+As designed, with these specifics:
+- **The field** (`industryAssessment.service`): `checkNames` (shape, pure; `NAMES_MAX` 6; a share class spelled as the
+  universe spells it, BRK.B → BRK-B), `resolveNames` (pure: first order when the sub-industry is the subject's, or one
+  of a theme's links, at ANY order), stored as `names` and `names_dropped` (each with its reason; null when none). The
+  universe is read through a lazily imported seam (`_io.companies`): industryData imports this module.
+- **Argus**: the book list's `the house names: …` line (own names, and a theme's); the `{industry}` call lists a
+  STANDING assessment's names first as company rows — grounded through the same extract — then the largest.
+- **The weekly house scan**: an industry's names and its largest share the count; a theme's names take a count of their
+  own ahead of its links. The queue row carries `named_why`, and Prometheus's opening then says whose assessment named
+  the company and why — not "its industry", which a second-order name is not in.
+- **The sleeve**: a named company inside the 50-wide screen joins the house-first slots, wherever it is classified; an
+  Avoid industry's names never do.
+- **The label**: a named company outside the listed industries carries `named: true` and its `why`; the chip's line reads
+  "Named by the house in its swing assessment of Communications Equipment — …". An Avoid industry lends no label.
+- **The board**: the opened row lists "companies it names" with order and why.
+- **Live** (Communications Equipment, "Assess now", $0.026, 53 s): CIEN, LITE and VIAV, all first order, each with a dated
+  piece of evidence; none dropped.
+- **Cost, not settled:** that run cost $0.026 against the $0.014–0.015 measured on 2026-10-12/13. The names add at most
+  about $0.002 (a few hundred tokens), so the rest is probably the web search reading more that day — one sample.
+  At $0.026 a first week of ~166 would stop at the $3 cap after ~115 (the rest wait a week). See the deploy checklist.
+- Tests: backend `pythiaNames.test.js` (13), the house list and scan tests updated; frontend the board and the chip.
 
 ## 8. Not in this build
 

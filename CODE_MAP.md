@@ -120,7 +120,9 @@ api/
                               for a book — own verdict, or an approved theme's order 1-2 links; expired never;
                               sector in either spelling (argus-on-pythia.md §3.1). listAssessmentRows / assessmentRow:
                               the board's LIGHT list (what a closed row shows; assessment-light-list.md) — GET
-                              /assessments?view=rows; an opened row reads /assessments/:code or /assessments/theme/:id
+                              /assessments?view=rows; an opened row reads /assessments/:code or /assessments/theme/:id.
+                              NAMES (pythia-names.md): checkNames (shape) + resolveNames (the universe; first order
+                              inside the subject, second elsewhere) → `names` / `names_dropped` on the assessment
     pythiaCalls.service.js    `pythia_calls` = the FORWARD LOG: each verdict freezes its basket's and SPY /
                               QQQ / RSP's prices; gradeDue scores it at 3 and 12 months (gradeCall, summarise).
                               Logged on a new verdict or a reaffirmation after 28 days (shouldLog); an
@@ -781,7 +783,8 @@ services/
                             a rerun stays inside the week's ceiling (alreadyQueued)
   houseLabel.service.js     the HOUSE LABEL on a name ("on the house's swing / long-term list") worked out by CODE from its
                             GICS sub-industry + listForBook — never the model, never a request body. Argus's scan
-                            candidates and pick, Mentor's seed (argus-on-pythia.md §3.4). Never throws
+                            candidates and pick, Mentor's seed (argus-on-pythia.md §3.4). Never throws. A company an
+                            assessment on the list NAMES carries it too (`named`, `why`; pythia-names.md)
   industryLimits.service.js The house's industry LIMITS on a book (step 7), one mechanism for construction (_sizePlan)
                             and every add: hype ×½, no sub-industry above a third (water-filled, the rest
                             cash), AVOID flagged → saved only with the user's OK, which NAMES the symbols

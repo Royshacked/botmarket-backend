@@ -192,6 +192,10 @@ Two loops, because they cost different things:
   a swing or long-term scan looks in her industries first (`get_house_industries`, `listForBook`); an Atlas sleeve
   takes names from her long-term industries in its sector first, up to half; a scanned or handed-over name carries
   the house label, worked out by code (`houseLabel.service`). Never a filter, never a score.
+- **The companies she names** (2026-10-13, [pythia-names.md](../design/pythia-names.md)): an assessment may name up to six
+  companies its evidence points at, each with why; code checks them against the universe and marks first or second
+  order. Argus sees them first in an industry's companies, the house scan queues them first, a sleeve takes them first
+  when its screen holds them, and they carry the house label.
 
 ## Open
 
