@@ -437,16 +437,28 @@ export function houseIndustriesFor(rows, themes, { book, sector = null, now = ne
     return [...out.values()].sort((a, b) => (b.excess_12m ?? -Infinity) - (a.excess_12m ?? -Infinity) || String(a.name).localeCompare(String(b.name)))
 }
 
-/** houseIndustriesFor over the stored assessments and the approved themes. Read-only. */
-async function listForBook(book, { sector = null, now = new Date().toISOString() } = {}, deps = {}) {
-    if (!BOOKS.includes(book)) return []
+/**
+ * houseIndustriesFor over the stored assessments and the approved themes, for SEVERAL books from ONE read of each
+ * (code review 2026-10-13: the label asked both books and read everything twice). → `{ [book]: entries }`. Read-only.
+ */
+async function listForBooks(books, { sector = null, now = new Date().toISOString() } = {}, deps = {}) {
+    const want = (books ?? []).filter(b => BOOKS.includes(b))
+    if (!want.length) return {}
     const { themes = () => themeService.listThemes({ statuses: ['approved'] }) } = deps
     const db = await _io.db()
-    const rows = await db.collection(COLLECTION).find({}, { projection: {
-        _id: 0, subject: 1, verdict: 1, horizon: 1, thesis: 1, risks: 1, expires_at: 1,
-        'moved.hype': 1, 'moved.excess_12m': 1, 'moved.links': 1,
-    } }).toArray()
-    return houseIndustriesFor(rows, await themes(), { book, sector, now })
+    const [rows, approved] = await Promise.all([
+        db.collection(COLLECTION).find({}, { projection: {
+            _id: 0, subject: 1, verdict: 1, horizon: 1, thesis: 1, risks: 1, expires_at: 1,
+            'moved.hype': 1, 'moved.excess_12m': 1, 'moved.links': 1,
+        } }).toArray(),
+        themes(),
+    ])
+    return Object.fromEntries(want.map(book => [book, houseIndustriesFor(rows, approved, { book, sector, now })]))
 }
 
-export const industryAssessmentService = { publishAssessment, getAssessment, getThemeAssessment, listAssessments, verdictsForCodes, listForBook }
+/** The house's industries for one book (listForBooks for one). Read-only. */
+async function listForBook(book, opts = {}, deps = {}) {
+    return (await listForBooks([book], opts, deps))[book] ?? []
+}
+
+export const industryAssessmentService = { publishAssessment, getAssessment, getThemeAssessment, listAssessments, verdictsForCodes, listForBook, listForBooks }

@@ -254,3 +254,26 @@ test("the sector matches in either spelling — a sleeve's sector is model text 
     }
     assert.deepEqual(houseIndustriesFor([SEMIS, BANKS], [], { book: 'swing', sector: 'Financial Services', now: NOW }).map(e => e.code), ['40101015'])
 })
+
+test('a six-character ticker in an industry call is grounded too (code review 2026-10-13)', async () => {
+    const ledger = makeGroundingLedger()
+    const rows = [{ symbol: 'GOOGL', name: 'Alphabet', market_cap: 2e12 }, { symbol: 'ABCDEF', name: 'Six Letters', market_cap: 1e9 }, { symbol: 'BRK-B', name: 'Berkshire', market_cap: 1e12 }]
+    const wrapped = _wrapForGrounding({ get_house_industries: async () => formatIndustryCompanies(SUB, rows, new Set(['GOOGL'])) }, ledger)
+    await wrapped.get_house_industries({ industry: 'Semiconductors' })
+    for (const t of ['GOOGL', 'ABCDEF', 'BRK-B']) assert.equal(groundingTier(t, ledger), 'sourced', t)
+    for (const t of ['L', 'T', 'E']) assert.equal(groundingTier(t, ledger), 'ungrounded', `"${t}" from the prose lines`)
+})
+
+test('listForBooks reads once and answers every book asked (code review 2026-10-13)', async () => {
+    const m = memDb()
+    _setAssessmentIO({ db: async () => m.db })
+    for (const r of [SEMIS, SOFT, BANKS]) await m.db.collection('industry_assessment').insertOne(structuredClone(r))
+    let themeReads = 0
+    const themes = async () => { themeReads++; return [] }
+    const out = await industryAssessmentService.listForBooks(['swing', 'long_term', 'watch'], { now: NOW }, { themes })
+    assert.deepEqual(Object.keys(out), ['swing', 'long_term'])
+    assert.deepEqual(out.swing.map(e => e.code), ['45301020', '40101015'])
+    assert.deepEqual(out.long_term.map(e => e.code), ['45103010'])
+    assert.equal(themeReads, 1)
+    assert.deepEqual(await industryAssessmentService.listForBooks([], { now: NOW }, { themes }), {})
+})

@@ -15,7 +15,8 @@ import { logger } from './logger.service.js'
 const LOG = '[houseLabel]'
 
 const _deps = {
-    forBook:    (book) => industryAssessmentService.listForBook(book),
+    // Every book asked, from one read (listForBooks).
+    forBooks:   (books) => industryAssessmentService.listForBooks(books),
     industryOf: async (symbols) => Object.fromEntries(Object.entries(await readCompaniesBySymbol(symbols)).map(([s, r]) => [s, r.sub_code])),
 }
 /** Test seam. */
@@ -59,8 +60,8 @@ export async function houseLabels(symbols, { books = BOOKS } = {}, deps = _deps)
     const want = (books ?? []).filter(b => BOOKS.includes(b))
     if (!syms.length || !want.length) return new Map()
     try {
-        const [industryOf, ...lists] = await Promise.all([deps.industryOf(syms), ...want.map(b => deps.forBook(b))])
-        return labelsFrom(syms, industryOf, Object.fromEntries(want.map((b, i) => [b, lists[i]])), want)
+        const [industryOf, lists] = await Promise.all([deps.industryOf(syms), deps.forBooks(want)])
+        return labelsFrom(syms, industryOf, lists, want)
     } catch (err) {
         logger.warn(LOG, 'house labels unreadable — names go without one', err.message)
         return new Map()

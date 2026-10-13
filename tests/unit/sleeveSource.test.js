@@ -214,7 +214,7 @@ test('a sector Pythia rates long term: the screen widens, the house names lead, 
     const h = harness({ screened: POOL, covered: ['S05'] })
     const filters = []
     h.deps.screen = async (f) => { filters.push(f); return POOL }
-    h.deps.houseIndustries = async (sector) => { assert.equal(sector, 'Technology'); return ['H1'] }
+    h.deps.houseIndustries = async (sector) => { assert.equal(sector, 'Technology'); return [{ code: 'H1' }, { code: 'X', avoid: true }] }
     h.deps.industryOf = async () => IND_OF
     h.deps.houseMax = () => 6
     const res = await sourceSleeve(req(), h.deps)
@@ -244,9 +244,21 @@ test('no house industries, or an unreadable list, or unreadable industries: the 
     _resetSleeves()
     const h = harness()
     h.deps.screen = async () => POOL
-    h.deps.houseIndustries = async () => ['H1']
+    h.deps.houseIndustries = async () => [{ code: 'H1' }]
     h.deps.industryOf = async () => { throw new Error('db down') }
     const res = await sourceSleeve(req(), h.deps)
     assert.deepEqual(res.sleeve.symbols, POOL.slice(0, SLEEVE_HITS), 'the wide screen is still cut to the sleeve, in its order')
     assert.deepEqual(res.sleeve.house, [])
+})
+
+test('an industry the house rates AVOID never leads a sleeve, even through a long-term theme (code review 2026-10-13)', async () => {
+    const h = harness()
+    const filters = []
+    h.deps.screen = async (f) => { filters.push(f); return POOL.slice(0, f.limit) }
+    h.deps.houseIndustries = async () => [{ code: 'H1', avoid: true }]
+    h.deps.industryOf = async () => IND_OF
+    const res = await sourceSleeve(req(), h.deps)
+    assert.equal(filters[0].limit, SLEEVE_HITS, 'only an Avoid industry: no house list, the plain screen')
+    assert.deepEqual(res.sleeve.house, [])
+    assert.deepEqual(res.sleeve.symbols, POOL.slice(0, SLEEVE_HITS), 'its names still come through the screen in its order')
 })

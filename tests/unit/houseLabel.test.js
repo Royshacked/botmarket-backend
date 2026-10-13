@@ -39,13 +39,13 @@ test("a theme-only industry carries the theme's name and reason", () => {
 
 test('houseLabels reads each book once, upper-cases, and never throws', async () => {
     const asked = []
-    const deps = { forBook: async (b) => { asked.push(b); return LISTS[b] }, industryOf: async () => IND }
+    const deps = { forBooks: async (books) => { asked.push(...books); return Object.fromEntries(books.map(b => [b, LISTS[b]])) }, industryOf: async () => IND }
     const m = await houseLabels(['lite', 'LITE', 'msft'], { books: ['swing', 'long_term'] }, deps)
     assert.deepEqual([...m.keys()].sort(), ['LITE', 'MSFT'])
     assert.deepEqual(asked.sort(), ['long_term', 'swing'])
     assert.equal((await houseLabels(['LITE'], { books: ['watch'] }, deps)).size, 0, 'not a book')
     assert.equal((await houseLabels([], {}, deps)).size, 0)
-    assert.equal((await houseLabels(['LITE'], {}, { ...deps, forBook: async () => { throw new Error('db down') } })).size, 0)
+    assert.equal((await houseLabels(['LITE'], {}, { ...deps, forBooks: async () => { throw new Error('db down') } })).size, 0)
 })
 
 test('the wire carries the facts, not the thesis; the prompt line carries the flags', () => {

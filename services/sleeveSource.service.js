@@ -111,10 +111,14 @@ export function houseFirst(screened, industryOf, houseCodes, { hits = SLEEVE_HIT
     return { symbols: [...house, ...rest], house }
 }
 
-/** The sub-industry codes Pythia rates for long term in the sector; empty on any failure (the sleeve screens as before). */
+/**
+ * The sub-industry codes Pythia rates for long term in the sector; empty on any failure (the sleeve screens as before).
+ * An industry the house rates AVOID on its own can arrive through a long-term theme (listed, marked) — it never goes
+ * ahead of the screen in a sleeve (code review 2026-10-13); its names can still come through the screen.
+ */
 async function _houseCodes(sector, deps) {
     if (!deps.houseIndustries) return new Set()
-    try { return new Set(await deps.houseIndustries(sector) ?? []) }
+    try { return new Set((await deps.houseIndustries(sector) ?? []).filter(e => e?.code && !e.avoid).map(e => e.code)) }
     catch (err) { logger.warn(LOG, 'house industries unreadable — the sleeve screens without them', err.message); return new Set() }
 }
 
@@ -347,10 +351,11 @@ const _io = {
             return []
         }
     },
-    // Pythia's long-term industries in the sector, and each screened symbol's GICS sub-industry (argus-on-pythia.md §3.5).
+    // Pythia's long-term industries in the sector (listForBook entries), and each screened symbol's GICS sub-industry
+    // (argus-on-pythia.md §3.5).
     async houseIndustries(sector) {
         const { industryAssessmentService } = await import('../api/strategy/industryAssessment.service.js')
-        return (await industryAssessmentService.listForBook('long_term', { sector })).map(e => e.code)
+        return industryAssessmentService.listForBook('long_term', { sector })
     },
     async industryOf(symbols) {
         const { readCompaniesBySymbol } = await import('../api/strategy/industryData.service.js')

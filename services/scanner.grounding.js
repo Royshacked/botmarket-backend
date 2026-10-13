@@ -27,8 +27,10 @@ export const DISCOVERY_TOOLS = new Set([
 // A discovery tool whose answer is mostly PROSE puts only its ticker rows on the tape: otherwise a word in a
 // thesis ("AI", "ROIC") would ground an invented name with that ticker. → the text the ledger records.
 export const SOURCED_EXTRACT = {
-    // The company rows of an industry call ("  NVDA   NVIDIA ..."); the book list's lines start with an 8-digit code.
-    get_house_industries: (text) => [...text.matchAll(/^ {2}([A-Z][A-Z0-9.-]{0,9}) {2,}/gm)].map(m => m[1]).join(' '),
+    // The company rows of an industry call ("  NVDA   NVIDIA ..."): the symbol, then at least ONE space — formatCompanies
+    // pads to six, so a six-character ticker is followed by a single space (code review 2026-10-13). The book list's
+    // lines start with an 8-digit code, its prose lines with more indent or a lowercase word, so neither matches.
+    get_house_industries: (text) => [...text.matchAll(/^ {2}([A-Z][A-Z0-9.-]{0,9}) +\S/gm)].map(m => m[1]).join(' '),
 }
 
 // Per-name tools → how to read the ticker(s) they ran on from their input args.
