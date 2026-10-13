@@ -174,6 +174,8 @@ try {
     await tp.getByRole('tab', { name: 'Structure' }).click()
     await tp.waitForTimeout(1000)
     const tline = tp.locator('.industry-view__line[aria-haspopup="dialog"]').first()
+    // The board loads 163 industries; on a cold dev server that outlasts a fixed wait.
+    await tline.waitFor({ timeout: 20_000 }).catch(() => {})
     if (await tline.count()) {
         await tline.click()
         await tp.waitForTimeout(800)
@@ -185,7 +187,7 @@ try {
         await tp.waitForTimeout(600)
         check('tablet: back closes it', !(await panelState(tp)).open)
         check('tablet: back stayed in the app', tp.url().startsWith(BASE), tp.url())
-    } else check('tablet: a Forecasts row', false, 'desk not reachable at this width')
+    } else { await shot(tp, '05-tablet-no-row'); check('tablet: a Forecasts row', false, 'desk not reachable at this width') }
     await tctx.close()
 } finally {
     await browser.close()
