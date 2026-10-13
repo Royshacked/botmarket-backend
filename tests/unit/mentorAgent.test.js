@@ -223,6 +223,13 @@ test('a hand-off with no lens asks instead of assuming one', async () => {
     assert.doesNotMatch(text, /recommends the/i)
 })
 
+test("the house's label on a handed-over name is said as a view of the industry (argus-on-pythia.md §3.4)", async () => {
+    const text = await seedOf({ ticker: 'LITE', house: "on the house's swing list — Communications Equipment" })
+    assert.match(text, /The house: on the house's swing list — Communications Equipment/)
+    assert.match(text, /view of the INDUSTRY, not of this stock/)
+    assert.doesNotMatch(await seedOf({ ticker: 'LITE' }), /The house:/, 'no label, no line')
+})
+
 test('no seed leaves the prompt exactly as it was', async () => {
     // The ordinary path — a user who opened Mentor themselves must not be told a name was handed over.
     const text = await seedOf(null)

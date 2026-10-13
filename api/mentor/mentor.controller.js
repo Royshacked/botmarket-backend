@@ -4,6 +4,7 @@ import { routeFields } from '../../services/routing.util.js'
 import { parseStreamBody, parseClientTime } from '../_shared/parse.util.js'
 import { getExperienceLevel } from '../../services/experience.service.js'
 import { sanitizeScanSeed } from '../../services/scanSeed.util.js'
+import { houseLabels, formatHouseLabel } from '../../services/houseLabel.service.js'
 
 const LOG = '[mentor:controller]'
 
@@ -53,6 +54,9 @@ export async function streamMentor(req, res) {
     // Argus hand-off: the validated name, its read, and the lens Argus recommends. Absent for a
     // user who opened Mentor on their own, which is the ordinary path.
     const seed = sanitizeScanSeed(req.body?.seed)
+    // The house's label on the handed-over name, worked out HERE from the ticker — never read off the request body
+    // (argus-on-pythia.md §3.4). No label, or a failed read, leaves it null.
+    if (seed) seed.house = formatHouseLabel((await houseLabels([seed.ticker], { books: ['swing', 'long_term'] })).get(seed.ticker)) || null
 
     await streamAgentResponse(req, res, {
         log: LOG,

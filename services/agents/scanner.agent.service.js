@@ -16,6 +16,7 @@ import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, stripEmitTag
 import { makeTradingContextHandlers, buildVenueSection } from '../tools/tradingContext.tools.js'
 import { makeMarketHoursHandlers, MARKET_HOURS_TOOL_SPEC } from '../tools/marketHours.tools.js'
 import { makeHouseIndustriesHandlers, HOUSE_INDUSTRIES_TOOL_SPEC } from '../tools/houseIndustries.tools.js'
+import { houseLabels, booksForStyle, wireLabel } from '../houseLabel.service.js'
 import { buildTagCaptures } from '../llmStream.util.js'
 import { makeRouteCapture, ROUTE_TAGS, buildRouteRule } from '../routing.util.js'
 import { isToolError } from '../toolResult.util.js'
@@ -394,10 +395,30 @@ async function chatStream({ messages = [], model: requestedModel, editList = nul
 
     const scan = _normalizeScan(capturedScan, editList, ledger, prof)
     const pick = _normalizeKairosPick(capturedPick)
+    await _attachHouseLabels(scan, pick, { profile: prof })
     const routing = route.result()   // { route, routeSymbol, opening, edit } — the controller validates
 
     logger.info(LOG, 'chatStream done', { replyLength: reply.length, profile: prof, hasScan: !!scan, candidates: scan?.candidates?.length ?? 0, hasPick: !!pick, route: routing.route, phase: phase.get() })
     return { reply, scan, phase: phase.get(), ...(pick ? { pick } : {}), ...routing }
+}
+
+/**
+ * The house label on each name (houseLabel.service; argus-on-pythia.md §3.4) — worked out by CODE from the name's
+ * industry and the house's list for the book, never taken from the model. A scan asks its own style's book (an
+ * investing list with no style, long term); a hand-off pick asks both, the swing list first — Mentor builds either.
+ * Mutates the normalized scan / pick in place; a failed read leaves them unlabelled. Exported for tests.
+ */
+export async function _attachHouseLabels(scan, pick, { profile = 'trading', labels = houseLabels } = {}) {
+    if (scan?.candidates?.length) {
+        const books = booksForStyle(scan.style)
+        const want = books.length ? books : profile === 'investing' ? ['long_term'] : []
+        const m = await labels(scan.candidates.map(c => c.ticker), { books: want })
+        for (const c of scan.candidates) c.house = wireLabel(m.get(c.ticker))
+    }
+    if (pick?.ticker) {
+        const m = await labels([pick.ticker], { books: ['swing', 'long_term'] })
+        pick.house = wireLabel(m.get(pick.ticker))
+    }
 }
 
 // Normalize a captured <kairos_pick> (hand-off mode) — the single ticker Argus recommends back to

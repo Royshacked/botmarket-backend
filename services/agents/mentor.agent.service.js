@@ -599,6 +599,10 @@ ARGUS HANDED YOU THIS NAME: ${seed.ticker}${seed.direction ? ` (${seed.direction
   Argus's read: ${seed.analysis}` : ''}`
         + (lens ? `
   Argus recommends the ${lens} lens.` : '')
+        // Worked out by code from the ticker (houseLabel.service), not by Argus: the house's industry desk holds this
+        // name's industry on its list. Context the user hears once — never a reason the trade will work.
+        + (seed.house ? `
+  The house: ${seed.house}. Say it in one line as the house's view of the INDUSTRY, not of this stock; it settles nothing about the trade.` : '')
         + `
 
 Open on it: say the name, relay Argus's read in a sentence rather than restating it wholesale, and`
