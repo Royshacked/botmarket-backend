@@ -118,7 +118,9 @@ api/
                               agent. publishAssessment rides houseArtifact.repo and logs the call.
                               listForBook / listForBooks (one read, several books) / houseIndustriesFor (BOOKS = swing, long_term): the house's industries
                               for a book — own verdict, or an approved theme's order 1-2 links; expired never;
-                              sector in either spelling (argus-on-pythia.md §3.1)
+                              sector in either spelling (argus-on-pythia.md §3.1). listAssessmentRows / assessmentRow:
+                              the board's LIGHT list (what a closed row shows; assessment-light-list.md) — GET
+                              /assessments?view=rows; an opened row reads /assessments/:code or /assessments/theme/:id
     pythiaCalls.service.js    `pythia_calls` = the FORWARD LOG: each verdict freezes its basket's and SPY /
                               QQQ / RSP's prices; gradeDue scores it at 3 and 12 months (gradeCall, summarise).
                               Logged on a new verdict or a reaffirmation after 28 days (shouldLog); an

@@ -310,7 +310,8 @@ own money (capex, buybacks, dividends, deals — §4.3) stays, beside funds, ins
    each For swing / For long term industry's largest uncovered names (free, repeatable); an Argus run per industry
    (judgment, a paid run each) is the alternative. Roy decides once he has seen the code's picks.
    (Argus's own scans read the verdicts since 2026-10-13 — argus-on-pythia.md; the weekly house scan is unchanged.)
-2. **A light assessment list** — LEFT FOR LATER (Roy, 2026-10-11). `GET /assessments` sends every assessment whole
+2. **A light assessment list** — BUILT 2026-10-13 ([assessment-light-list.md](./assessment-light-list.md)): 107 KB instead
+   of 780, a row's detail read when it opens. The original note: LEFT FOR LATER (Roy, 2026-10-11). `GET /assessments` sends every assessment whole
    (165 of them ≈ 790 KB; ~9 s from Atlas to the laptop, the server answers in 0 ms — transfer, and compression does
    not help). The fix: the list carries only what a closed row shows (name, verdict, chips, horizon or decides-by,
    thesis — ~100 KB) and a row fetches its detail when opened (`GET /assessments/:code`, plus the theme equivalent).

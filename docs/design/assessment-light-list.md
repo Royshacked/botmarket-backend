@@ -1,6 +1,6 @@
 # The Assessed board's light list
 
-**Status: PLAN, 2026-10-13. Decisions §4: both as recommended (Roy, 2026-10-13) — building now.** Open item 2 of [pythia-assessment.md](./pythia-assessment.md) §13
+**Status: BUILT 2026-10-13 (§5), driven on axl_dev. Decisions §4: both as recommended (Roy, 2026-10-13).** Open item 2 of [pythia-assessment.md](./pythia-assessment.md) §13
 ("A light assessment list", left for later on 2026-10-11). First of the "Next builds" in
 [deploy-2026-10.md](../deploy-2026-10.md).
 
@@ -76,6 +76,21 @@ Atlas. Render sits near Atlas, so the server side is probably fast there; the br
 5. Bundle, docs (pythia-assessment.md open item 2, the Pythia desk doc, CODE_MAP), the deploy checklist.
 
 Size: half a day. No migration, no environment variable.
+
+## 5. As built (2026-10-13)
+
+As designed. `industryAssessmentService.listAssessmentRows` (Mongo projection `ROW_PROJECTION` + the pure
+`assessmentRow` shape), `?view=rows`, `GET /assessments/theme/:id` (`getThemeAssessment`, 404 `unknown_theme` unless
+approved). Frontend: `strategyService.listAssessments` asks for rows, `getAssessmentDetail(row)`, the hook
+`customHooks/useAssessmentDetail.js`, and `AssessmentDetail` — the panel body, split out of `AssessmentRow`.
+
+- **A row that already carries its detail is used as it is** (`'evidence' in row`): an old server, or one that ignores
+  the parameter, still gives a working board — the first drive ran against a server started before the change and
+  every panel opened from the full list.
+- **Driven** (desktop, 166 assessments, after restarting the dev server on the new code): the list 106.8 KB (780 before);
+  an industry opened 4.7 KB, another 4.4; a theme 10.7 KB through its route; a reopen fetched nothing; the panel
+  showed "Loading the rest…" for the moment the read took, then the whole page.
+- Tests: backend 4 (`assessmentLightList.test.js`), frontend 5 (the light rows in `AssessmentView.test.jsx`).
 
 ## 4. Decisions for Roy
 
