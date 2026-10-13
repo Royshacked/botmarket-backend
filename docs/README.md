@@ -83,6 +83,7 @@ the plan and what the build settled differently (the rule at the bottom of this 
 |---|---|
 | [trust-gaps-todo.md](./trust-gaps-todo.md) | **The ranked open work.** Capture the thesis→result chain; make the money path testable without a broker |
 | [live-verify-checklist.md](./live-verify-checklist.md) | What only a running app can confirm — the queue, by feature |
+| [deploy-2026-10.md](./deploy-2026-10.md) | **The deploy checklist for Pythia steps 6–8 and 4** (2026-10-13): push order, Render engine and backend env, the theme copy, the first week, the smoke checks, leftovers, and the next builds in order |
 | [code-review-2026-08-19.md](./code-review-2026-08-19.md) | Structural review of both repos: broker sealing, desk/kind plug-in-ability, duplications, plasters to remove |
 | [code-review-2026-09-15.md](./code-review-2026-09-15.md) | Full backend review in 10 sections under one eight-point lens; §1 broker + execution done, findings + what landed per section |
 
