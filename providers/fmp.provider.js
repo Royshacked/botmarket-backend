@@ -25,6 +25,7 @@ import { compactMoney } from '../services/format.util.js'
 import { createTtlCache } from '../services/ttlCache.util.js'
 import { makeMongoBackedCache } from '../services/mongoCache.util.js'
 import { fmpGet as _fmpGet } from './fmp.price.provider.js'
+import { normalizeSector } from '../services/entity/vocabulary.js'
 
 const LOG = '[fmp]'
 
@@ -484,6 +485,20 @@ const SCREEN_PARAMS = {
     isEtf: 'isEtf',
 }
 
+/**
+ * The filters in the screener's own spelling. A GICS sector ("Information Technology", "Health Care",
+ * "Financials") matched NOTHING and came back as an empty pond with no error (Argus live replay, 2026-10-13:
+ * Pythia's GICS names copied into the screen) — the one shared sector map (vocabulary.normalizeSector)
+ * translates it. An unknown sector passes unchanged. Industries are not mapped: about half of GICS's have
+ * no FMP twin. Pure.
+ */
+export function normalizeScreenFilters(filters) {
+    const f = filters && typeof filters === 'object' ? filters : {}
+    if (typeof f.sector !== 'string' || !f.sector.trim()) return f
+    const sector = normalizeSector(f.sector) ?? f.sector
+    return sector === f.sector ? f : { ...f, sector }
+}
+
 /** Build and sort the screener query string from whitelisted filters. */
 function _buildScreenQs(f) {
     const parts = []
@@ -549,7 +564,7 @@ export function formatScreenerRows(rows, filters = {}) {
  * and the house scan (screenCandidatesRaw).
  */
 export async function screenCandidatesRaw(filters = {}) {
-    const f  = filters && typeof filters === 'object' ? filters : {}
+    const f  = normalizeScreenFilters(filters)
     const qs = _buildScreenQs(f)
     const hit = _screenRawCache.get(qs)
     if (hit) return hit
@@ -566,7 +581,7 @@ export async function screenCandidatesRaw(filters = {}) {
  * Discovery only — the agent still qualifies each hit with get_fundamentals.
  */
 export async function screenCandidates(filters = {}) {
-    const f    = filters && typeof filters === 'object' ? filters : {}
+    const f    = normalizeScreenFilters(filters)
     const rows = await screenCandidatesRaw(f)
     return formatScreenerRows(rows, f)
 }
