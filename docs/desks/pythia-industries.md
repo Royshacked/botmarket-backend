@@ -188,6 +188,10 @@ Two loops, because they cost different things:
   2026-10-11 it runs on her verdicts (step 7): after each completed week, the largest uncovered names of every
   FOR SWING / FOR LONG TERM industry go to Prometheus's queue (source `pythia`). Argus choosing the names
   instead of size is open item 3 of [pythia-assessment.md](../design/pythia-assessment.md).
+- **Argus and Atlas's sleeves, as a preference** (2026-10-13, [argus-on-pythia.md](../design/argus-on-pythia.md)):
+  a swing or long-term scan looks in her industries first (`get_house_industries`, `listForBook`); an Atlas sleeve
+  takes names from her long-term industries in its sector first, up to half; a scanned or handed-over name carries
+  the house label, worked out by code (`houseLabel.service`). Never a filter, never a score.
 
 ## Open
 

@@ -228,13 +228,24 @@ drift) and are rehydrated from the stored record. The school is inherited from t
 when the turn forgets to restate it — otherwise every kept name would be re-ranked under the neutral
 blend, the order silently changing while the user watches, for a school they never dropped.
 
+## The house's industries — where a swing or long-term scan looks first (2026-10-13)
+
+[argus-on-pythia.md](../design/argus-on-pythia.md). On a swing or long-term scan Argus calls
+`get_house_industries` first: the sub-industries Pythia rates for that book (and the links of approved themes rated
+so), each with its reason. It pulls the fitting ones' companies from that tool — **never by passing a house name to
+the screener**, which speaks FMP's taxonomy, not GICS's — then casts the usual net. **A preference, not a filter**
+(Roy): the list adds nothing to a score, a stronger name from outside it outranks one inside, an empty list means an
+ordinary scan, and intraday / day scans skip it. The prose is the model's; the **label** is not —
+`houseLabel.service` works out each candidate's `house` from its industry, so the "House · swing" chip on the list
+is a fact. The investing profile does the same for long term, and a brief's named industry stays fixed.
+
 ## The hops
 
 | With | Direction | Mechanism |
 |---|---|---|
 | **Mentor** | out | the single pick — `<kairos_pick>` → `{ ticker, direction, thesis, analysis, recommended_mode }` seeds Mentor's first turn (`scanSeed.util`); or a clicked candidate on a saved trading list |
 | **Prometheus** | out | an investing list's top N by the app's button, one name by click — the research queue, house-owned; or by asking ("send NVDA to Prometheus") through the shared `<route>` hand-off |
-| **Pythia** | in (house) | the house scan: her weekly FOR SWING / FOR LONG TERM verdicts → the research queue, by code (step 7, 2026-10-11) |
+| **Pythia** | in (house) | the house scan: her weekly FOR SWING / FOR LONG TERM verdicts → the research queue, by code (step 7, 2026-10-11); and, since 2026-10-13, every swing / long-term scan looks in her industries first (`get_house_industries`) |
 | **Atlas** | in | the sleeve hop — the same screener under the school; never Argus's chat |
 | **Axl** | in / out | the user is routed here with a name; Argus can route the user on by their ask |
 
@@ -260,7 +271,8 @@ fields the receiver's UI needs.
 ## Open
 
 - **Argus choosing the house scan's names** instead of code (pythia-assessment.md open item 3) — Roy
-  decides after seeing the code's picks.
+  decides after seeing the code's picks. (Argus's OWN scans have looked in Pythia's industries first since
+  2026-10-13; the weekly house scan still picks by size.)
 - **Scans are the one artifact that never learns.** A stale list is kept for the user, but nothing
   scores whether its candidates went the way the thesis said. *(Inferred gap — the coverage grades; the scan does
   not.)*

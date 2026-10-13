@@ -211,6 +211,9 @@ screen had (`needsAgent`):
 - **Argus** reads `swing` / `long_term` subjects as its hunting ground (it has been
   paused since the tilt was deleted — this is its new input) and brings names: for a theme, the
   first-order names AND the second-order ones the assessment named.
+  *Built 2026-10-13 as a PREFERENCE, not a filter ([argus-on-pythia.md](./argus-on-pythia.md)): Argus's swing /
+  long-term scans and Atlas's sleeves look in these industries first; the "second-order ones the assessment named"
+  wait on a `names` field (that doc's §3.6, not built).*
 - **Prometheus** covers the names; the assessment's thesis and risks travel with them. **"Is it priced
   in?" is Prometheus's question, per name:** what the price implies against what the company can
   deliver, the consensus and its revisions, and how the stock took its recent reports (beat and fell /
@@ -306,6 +309,7 @@ own money (capex, buybacks, dividends, deals — §4.3) stays, beside funds, ins
 3. **Argus choosing the house scan's names** — LEFT FOR LATER (Roy, 2026-10-11). Step 7 starts with code picking
    each For swing / For long term industry's largest uncovered names (free, repeatable); an Argus run per industry
    (judgment, a paid run each) is the alternative. Roy decides once he has seen the code's picks.
+   (Argus's own scans read the verdicts since 2026-10-13 — argus-on-pythia.md; the weekly house scan is unchanged.)
 2. **A light assessment list** — LEFT FOR LATER (Roy, 2026-10-11). `GET /assessments` sends every assessment whole
    (165 of them ≈ 790 KB; ~9 s from Atlas to the laptop, the server answers in 0 ms — transfer, and compression does
    not help). The fix: the list carries only what a closed row shows (name, verdict, chips, horizon or decides-by,

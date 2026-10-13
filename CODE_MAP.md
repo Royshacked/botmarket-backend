@@ -115,7 +115,10 @@ api/
                               horizon, thesis, evidence per input, cause, second_order, risks, change_view_if,
                               confidence. checkAssessment refuses a story without those guardrails; factsFor
                               attaches the MOVES and the hype base rate from the engine row — never from the
-                              agent. publishAssessment rides houseArtifact.repo and logs the call
+                              agent. publishAssessment rides houseArtifact.repo and logs the call.
+                              listForBook / listForBooks (one read, several books) / houseIndustriesFor (BOOKS = swing, long_term): the house's industries
+                              for a book — own verdict, or an approved theme's order 1-2 links; expired never;
+                              sector in either spelling (argus-on-pythia.md §3.1)
     pythiaCalls.service.js    `pythia_calls` = the FORWARD LOG: each verdict freezes its basket's and SPY /
                               QQQ / RSP's prices; gradeDue scores it at 3 and 12 months (gradeCall, summarise).
                               Logged on a new verdict or a reaffirmation after 28 days (shouldLog); an
@@ -644,6 +647,9 @@ services/
                             the caller passes `symbols` (the industry each is in + the house's three
                             answers, through industryView.viewsForSymbols) or a GICS `sector`. Reads say
                             DESCRIPTIONS, not forecasts; a pending industry has no house answer
+  houseIndustries.tools.js  get_house_industries (Argus, both profiles; argus-on-pythia.md §3.2) — `book` → the house's
+                            industries for it (first 20 in full), `industry` → its largest companies. Says PREFERENCE in
+                            every answer. A grounding source, but only its company rows (scanner.grounding SOURCED_EXTRACT)
   watchlist.service.js      listWatchedItems — "what am I watching?" across EVERY list the Floor
                             shows, in ONE read (setups · books · coverage · scans · the off-hours
                             QUEUE · Aether runs, one row per event · and, for an admin, the research
@@ -672,7 +678,9 @@ services/
                             (userId null: no budget degrade — and no spend booked to anyone, a known gap) → onRunSettled → an Atlas
                             card `sleeve_sourced` to the requester; the run researches the sleeve's own
                             names only (startRun({symbols})). Pending sleeves are in-process
-                            memory, like the run. See docs/desks/roles-and-sourcing.md
+                            memory, like the run. See docs/desks/roles-and-sourcing.md. HOUSE FIRST (houseFirst):
+                            Pythia's long-term industries in the sector lead, found inside a 50-wide screen, up to
+                            SLEEVE_HOUSE_MAX (6) of SLEEVE_HITS; the card counts them (argus-on-pythia.md §3.5)
   aetherScheduler.service.js  The Node side of the Python aether-engine: spawns scripts/scheduler.py as a
                             child process when AETHER_ENGINE_PATH points at a checkout with a built venv
                             (a quiet no-op everywhere else — every deploy), bridging the Mongo connection
@@ -769,6 +777,9 @@ services/
                             the verdict's thesis and risks on the row (researchRun.researchOpening reads them).
                             Queue source 'pythia'; a name rejected in the last 8 weeks is not queued again;
                             a rerun stays inside the week's ceiling (alreadyQueued)
+  houseLabel.service.js     the HOUSE LABEL on a name ("on the house's swing / long-term list") worked out by CODE from its
+                            GICS sub-industry + listForBook — never the model, never a request body. Argus's scan
+                            candidates and pick, Mentor's seed (argus-on-pythia.md §3.4). Never throws
   industryLimits.service.js The house's industry LIMITS on a book (step 7), one mechanism for construction (_sizePlan)
                             and every add: hype ×½, no sub-industry above a third (water-filled, the rest
                             cash), AVOID flagged → saved only with the user's OK, which NAMES the symbols
@@ -906,7 +917,7 @@ providers/
                                 the failure says it is not a fact about the symbol. Measured after: 116/116
                                 priced in 5.3s, no failures. `deps` is the test seam
   fmp.provider.js               Starter plan: getFundamentals (valuation+analyst+ETF look-through), getEarnings(Calendar),
-                                screenCandidates (company-screener), getMacroSnapshot + getMacroRaw (treasury/econ/sector);
+                                screenCandidates (company-screener; a GICS sector is translated first — normalizeScreenFilters), getMacroSnapshot + getMacroRaw (treasury/econ/sector);
                                 getSectorSnapshot / getMarketMovers / getAnalystActions (Argus discovery feeds);
                                 getAnalystEstimates / getPriceTargetConsensus / getGradesConsensus + getGradesHistorical /
                                 getHistoricalMultiples (Analyst consensus + valuation feeds, P2);

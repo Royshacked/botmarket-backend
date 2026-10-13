@@ -1,6 +1,7 @@
 # Argus on Pythia — the house's industries as the first place to look
 
-**Status: PLAN, 2026-10-13. Nothing built. Decisions §5: all three as recommended (Roy, 2026-10-13).**
+**Status: BUILT 2026-10-13 — steps 1-6 (§4), live-replayed, browser-driven and code-reviewed on axl_dev; NOT pushed. Decisions §5:
+all three as recommended (Roy, 2026-10-13). Where a design bullet below and §7 "As built" disagree, §7 is what runs.**
 Roy's decision (2026-10-13): Pythia's verdicts are a
 **PREFERENCE, not a filter** — Argus looks in the industries Pythia rated for the user's book first, says
 so on every name it finds there, and still screens the rest of the market. A strong name outside the
@@ -136,6 +137,51 @@ to a swing / long-term scan.
    house list takes what it has, the screen fills the rest); one config value, so it moves without code.
 
 **Decided (Roy, 2026-10-13): 1 no — label only; 2 left out; 3 up to half (6 of 12).**
+
+## 7. As built (2026-10-13)
+
+Commits: 8497ccf (3.1), a0e20c3 (3.2), 4245cc8 (3.3), 673b087 (the screener fix), 9901373 (3.5), 1bb79a6 + frontend
+73508a7 (3.4); bundle after.
+
+- **3.1** as designed. The sector matches in either spelling (`normalizeSector`): a sleeve's sector is model text.
+- **3.2** The companies formatter did NOT need moving — `formatCompanies` / `largestCompanies` were already in the
+  shared industryData.service. The book list shows the first 20 in full and the rest by name (`FULL_ENTRIES`; a
+  32-industry swing list ran ~18k characters). **Grounding**: only the company ROWS of an industry call reach the
+  tape (`SOURCED_EXTRACT`) — the book list's prose ("AI", "ROIC") would otherwise ground an invented ticker.
+- **3.3 — the GICS / FMP names.** The first live replay put 6 of 8 pool names from the house list: the house writes
+  GICS names ("Information Technology", "Communications Equipment"), the FMP screener knows only its own
+  ("Technology", "Communication Equipment"), so Argus's screens came back EMPTY and the house list filled the pool —
+  the preference acting as a filter. Two fixes: the prompts and the tool say a house industry's companies come from
+  `get_house_industries`, never the screener; and the screener now translates a GICS SECTOR through the one shared
+  map (fmp.provider `normalizeScreenFilters`, 673b087 — every caller, Atlas's sleeves included). Industries are not
+  mapped: about half of GICS's have no FMP twin. Replayed after: swing scan 3 of 9 from the house list, Mentor
+  hand-off 2 of 11, an investing Industrials screen (no house list) said so and screened as usual (48 → 9).
+- **3.4 — the label is worked out by CODE, not checked.** `services/houseLabel.service.js`: a name carries `house`
+  when its GICS sub-industry is on the book's list. Nothing the model writes can set it, and Mentor recomputes it
+  from the ticker. A SAVED scan keeps the labels its candidates carried when the user saved it (the client posts the
+  list whole): a snapshot of that day, shown to its owner only — not refreshed when a verdict lapses. Scan candidates ask their style's book (investing with no style: long term; intraday / day: none); the
+  hand-off pick asks both, swing first; Mentor's controller looks the label up from the seed's ticker. Frontend
+  `HouseChip` ("House · swing" / "House · long term", amber on a hype or Avoid flag) on the Scans list, the Floor's
+  scan rows and beside the hand-off pick button. A Scans list narrower than 480px drops the chip from the row (a
+  tablet's ~325px column squeezed the logo to a dot) and shows it, with its line, in the expanded row.
+- **3.5** The house names are found INSIDE the school screen (widened to 50, the screener's ceiling), so every floor —
+  cap, dividend, volume — holds for them; a dividend check on `gics_companies` was not needed. `SLEEVE_HOUSE_MAX`
+  (default 6). The card: "N of the M came from the house's long-term industries". Live (no queuing): IT → MSFT ORCL
+  PANW CRWD FTNT + 7; Financials → V MA ICE PYPL COIN + 7; Communication Services → GOOG META RDDT PINS SNAP MTCH + 6.
+- **3.6** (Pythia naming companies) not built.
+
+**Code review 2026-10-13** (an independent pass over every commit above). Fixed: an industry the house rates AVOID that
+arrives through a long-term theme no longer leads a sleeve (`_houseCodes` drops it; its names can still come through
+the screen); a ticker of six or more characters is grounded from an industry call (the extract wanted two spaces after
+the symbol, `formatCompanies` leaves one); the label reads every book from ONE read (`listForBooks`) — Mentor's
+controller awaited four reads before its stream opened. Left as they are, on purpose:
+  - **Covered house names count toward the sleeve's six** (the largest — MSFT, ORCL — are often covered). The sleeve
+    always counted covered names as in the book; the uncovered ones lower down come through the screen.
+  - **GICS vs FMP sector and spelling** (BRK.B / BRK-B, a name FMP sectors differently): a mismatch only drops the
+    preference for that name, never filters.
+  - **A trading scan with no style** gets no label while Argus's prose may still say "house's list" — rare: Stage 0b
+    runs only on a swing or long-term style.
+  - Pre-existing, not this work: at a tablet's ~325px Scans column every row's ticker is cut ("L…"), labelled or not.
 
 ## 6. Risks
 

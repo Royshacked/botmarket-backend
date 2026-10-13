@@ -50,6 +50,9 @@ Atlas turn: get_coverage(sector, school) → empty
    1. SCREEN   the sector with the FMP screener under the school's pond (SCHOOL_SCREEN — cap floors,
                a dividend for `income`; `passive` never screens; 12 names). The school filter is a
                PROXY: FMP has no valuation/quality predicate — Prometheus applies the real bar.
+               HOUSE FIRST (2026-10-13, argus-on-pythia.md §3.5): when Pythia rates long-term industries in
+               the sector, the same screen widens to 50 and their names lead — up to SLEEVE_HOUSE_MAX (6) of
+               the 12 — the screen filling the rest; the card says how many. None, or a failed read: as before.
    2. DROP     names already in coverage. Every hit covered → the card goes out at once.
    3. QUEUE    the rest as `research_queue` rows, source 'argus', context { sector, school, sleeve }
    4. RUN      researchRun.startRun AS THE HOUSE (userId null). A run already going is waited for.
