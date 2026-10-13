@@ -102,7 +102,7 @@ quick reads book under their own ledger row, `analystAgent-quickread`, so that n
 The read runs on the same model rule as every desk turn (`quickReadModel`, 2026-09-21): an admin's
 own menu choice, anyone else the house chat model, else Sonnet 5 — and the stored doc names the
 model that produced it, so two admins can compare candidates on the same name.
-The Aether drawer shows it under the verdict (`Sized: worth −11% … moved −2% · −9% open`), the
+The events-radar name's detail panel shows it under the verdict (`Sized: worth −11% … moved −2% · −9% open`), the
 conclusion line carries it, and the Mentor seed hands it over as a target-shaped number with what is
 already gone taken out.
 
