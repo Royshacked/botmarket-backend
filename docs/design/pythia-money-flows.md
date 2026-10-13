@@ -153,8 +153,8 @@ stays hers.
   block on the metrics node, so no job waits on another's clock; the reader (8d) joins them by code:
   - `industry_insiders` + `industry_insiders_runs` — per node per run date (~270 at four levels), complete-run
     marker, 8 runs kept;
-  - `fund_holdings` (per COMPANY per quarter: ~2,700 rows a quarter, 12 quarters ≈ 33,000 small rows, ~4 MB —
-    company aggregates, not filings), `fund_holdings_runs`, and `industry_funds` (per node per quarter plus a
+  - `fund_holdings` (per COMPANY per quarter: ~2,700 rows a quarter, each with its ten largest filers — measured
+    13.2 MB for 9 quarters on 2026-10-13, so ~18 MB at the 12 kept; company aggregates, not filings), `fund_holdings_runs`, and `industry_funds` (per node per quarter plus a
     `universe` row; the universe row written LAST, which is how a reader knows the quarter is whole);
   - `industry_government` + `industry_government_runs` — per node per run date (273), 6 runs kept.
   Well inside the M0 quota.
