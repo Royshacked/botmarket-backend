@@ -156,7 +156,9 @@ regime, geopolitics). It is a judgment, not a forecast, and the code holds it to
   `theme`, its facts each link's moves and money, its call graded on the theme's basket. Tools `list_themes`,
   `get_theme`; routes `GET /themes` (traders see approved only), admin `POST /themes/propose`,
   `/themes/:id/status`, `/themes/:id/assess`. Board: Forecasts → Themes.
-- First live costs on Luna: ~$0.004–0.006 per assessment, ~$0.006 per proposal run.
+- First live costs on Luna: ~$0.004–0.006 per assessment, ~$0.006 per proposal run — before the web search. With
+  OpenRouter's web search (since 2026-10-11) an assessment costs ~$0.014–0.015 (measured 2026-10-12/13), so the $3
+  weekly ceiling buys about 200.
 
 ## The monitor — `monitoring/industryView.monitor.service.js`
 

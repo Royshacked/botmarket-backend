@@ -1,6 +1,6 @@
 # Pythia step 4 — geopolitics: how intense, and who it touches
 
-**Status: BUILT — step 4 complete (2026-10-12), QA cycle fixed (2026-10-13, §9). Decisions §8 all five as recommended (Roy, 2026-10-12); 4a BUILT and run 2026-10-12 (§3.1); 4b the map ACCEPTED as drafted (Roy, 2026-10-12; the Gulf and the Red Sea kept apart); 4c T3 declared exactly (§6) BEFORE any test code, then run — FAILED, so the map is shown as hypotheses only; 4d BUILT 2026-10-12 (§3.3) — step 4 complete.** Step 4 of [pythia-assessment.md](./pythia-assessment.md) §12; the
+**Status: BUILT — step 4 complete (2026-10-12), QA cycle fixed and live-driven (2026-10-13, §9). Decisions §8 all five as recommended (Roy, 2026-10-12); 4a BUILT and run 2026-10-12 (§3.1); 4b the map ACCEPTED as drafted (Roy, 2026-10-12; the Gulf and the Red Sea kept apart); 4c T3 declared exactly (§6) BEFORE any test code, then run — FAILED, so the map is shown as hypotheses only; 4d BUILT 2026-10-12 (§3.3) — step 4 complete.** Step 4 of [pythia-assessment.md](./pythia-assessment.md) §12; the
 input it fills is §4.5 ("what could hit this industry from outside the economy?"). Before step 4 every assessment
 carried `geopolitics` as a gap; now the desk reads the measure and leaves it out only when nothing touching the
 industry is elevated and the news shows nothing. Where a design passage below and an "as built" note disagree, the
@@ -230,3 +230,12 @@ map's directions (Roy: only the two proxy corrections):
   parentheses.
 - **The board** says "sd". **The weekly scan** survives a flows or geopolitics reader that throws. **The tool's
   logic** is `geopoliticsText` (tested). The controller reads geopolitics beside the other reads.
+
+**Live check (2026-10-13).** Aerospace & Defense reassessed ($0.0149) and its row driven on the board as a trader and
+an admin. Pythia read the elevated Gulf risk (+2.2 sd), searched its news words, found dated reports (missile and drone
+attacks reaching Riyadh airport, October 12; Houthi strikes, October 13), and wrote that they "establish active regional
+security events, not a quantified change in contractor revenue" — NOT the cause. The cause she named was money: federal
+contract dollars on the industry's lines +25% over four quarters (step 8's government job). All five inputs used, no
+gaps; the citation stored as "(apnews.com)"; the frozen `geopolitics` carries `map_risks` and each risk's words. The
+board's first cold load timed out once (the known ~8 s read of the assessment list — the deferred light list); the
+rerun drove clean.

@@ -194,8 +194,9 @@ screen had (`needsAgent`):
   STARTING, contract money shifting 25%+ on $1B+; a 13F shift is shown but not scanned (no tested meaning);
   news volume, geopolitics and `change_view_if` are not scanned.*
 - **Assessment (LLM):** only flagged subjects, capped per week; plus event-triggered runs between scans.
-- **Cost per assessment is unmeasured** — measure one by hand before setting the cap (as for
-  `INDUSTRY_REVIEWS`).
+- **Cost per assessment, measured:** ~$0.004–0.006 on Luna before the web search (2026-10-10); **$0.014–0.015 with
+  OpenRouter's web search** (2026-10-12/13, Regional Banks and Aerospace & Defense). At the weekly ceiling
+  (`PYTHIA_WEEKLY_MAX_USD`, $3) that is about 200 assessments a week.
 
 ## 9. Data and storage
 
@@ -240,7 +241,8 @@ screen had (`needsAgent`):
    (frontend AssessmentView) — verdict groups, hype chip, cause, moves, base rate, evidence and gaps, risks,
    what would change the view, the track record, and "Assess now" for admins; driven in a browser as a
    trader and an admin (scripts/drive-assessment-ui.mjs). News: FMP company news for the industry's largest
-   names (news.service `basket`). First live cost on Luna: ~$0.004 per assessment.
+   names (news.service `basket`). First live cost on Luna: ~$0.004 per assessment (before the web search; with it,
+   ~$0.014 — §8).
 2. **Money, companies** — capex and buyback trends by industry and theme from `fin_statements` (data in
    hand). Only companies' own money in this step.
    **BUILT 2026-10-10**: the engine's industry-metrics job adds `money` to every node (capex, buybacks,

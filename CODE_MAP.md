@@ -1189,7 +1189,8 @@ scripts/                    ops one-offs — none run by `npm test`. Kinds: migr
                             thread starts past the opening stage; that is state, not a defect.
   drive-assessment-ui.mjs   Drives Pythia's board (Forecasts → Assessed with the week, Themes) as a throwaway
                             trader and admin against the LIVE routes; never presses Assess now / Run the week /
-                            Propose / Approve. Names every failed API read
+                            Propose / Approve. Names every failed API read. OPEN_ROW=<industry> opens that
+                            row instead of the first (how step 8's and step 4's rows were driven)
   scan-week.mjs             Pythia's change scan, DRY: what this week would assess and why — no model, no
                             writes. `node scripts/scan-week.mjs [cap]`
   assess-industry.mjs       One Pythia "Assess now" from the command line, as an admin; prints the cost

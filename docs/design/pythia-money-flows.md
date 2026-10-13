@@ -1,7 +1,8 @@
 # Pythia step 8 — the rest of the money: insiders, funds, government
 
-**Status: 8a BUILT 2026-10-12 (the weekly job; T1 run — FAILED, so the cluster is awareness only, §6); 8b BUILT and backfilled 2026-10-12 (§3.2); 8c BUILT and run 2026-10-12, its crosswalk accepted as drafted (§3.3); 8d BUILT 2026-10-12 (§7) — not yet
-live-driven: no assessment published since carries the flows. QA cycle 2026-10-12 fixed (§10). T2 (crowding)
+**Status: 8a BUILT 2026-10-12 (the weekly job; T1 run — FAILED, so the cluster is awareness only, §6); 8b BUILT and backfilled 2026-10-12 (§3.2); 8c BUILT and run 2026-10-12, its crosswalk accepted as drafted (§3.3); 8d BUILT 2026-10-12 (§7) and
+live-driven the same day (Regional Banks reassessed, $0.014: the cluster written as "awareness only", funds as "a
+crowding fact, not a signal"; the board's rows driven as a trader and an admin). QA cycle 2026-10-12 fixed (§10). T2 (crowding)
 declared, NOT run — so crowding is a fact only, never a tested warning, and is not scanned. Decisions §9: all
 six as recommended (Roy, 2026-10-12). Where a design bullet below and its "as built" note disagree, the
 note is what runs.** Step 8 of [pythia-assessment.md](./pythia-assessment.md) §12;
