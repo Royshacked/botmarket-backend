@@ -379,6 +379,34 @@ async function listAssessments() {
     return db.collection(COLLECTION).find({}, { projection: { _id: 0, revisions: 0 } }).sort({ 'subject.sector': 1, 'subject.name': 1 }).toArray()
 }
 
+/**
+ * What a CLOSED row on the Assessed board shows (docs/design/assessment-light-list.md §2.1): the name, the verdict and
+ * its horizon or deciding date, the thesis line, the "news not checked", hype and stale chips, and `assessed_at` —
+ * the key an opened row's detail is cached on. The rest (evidence, money, flows, risks…) is fetched when a row opens:
+ * the whole list was 780 KB for 166 assessments, these rows 107. Mongo's projection keeps the read light; the shaping
+ * keeps the contract. Pure.
+ */
+export const ROW_PROJECTION = Object.freeze({
+    _id: 0, id: 1, subject: 1, verdict: 1, horizon: 1, decides_by: 1, thesis: 1,
+    'cause.kind': 1, 'moved.hype': 1, expires_at: 1, assessed_at: 1,
+})
+export function assessmentRow(a) {
+    return {
+        id: a.id ?? null, subject: a.subject ?? null, verdict: a.verdict ?? null, horizon: a.horizon ?? null,
+        decides_by: a.decides_by ?? null, thesis: a.thesis ?? null,
+        cause: a.cause?.kind ? { kind: a.cause.kind } : null,
+        moved: { hype: a.moved?.hype ?? null },
+        expires_at: a.expires_at ?? null, assessed_at: a.assessed_at ?? null,
+    }
+}
+
+/** The board's list, light: one closed row per assessment, in the same order as listAssessments. */
+async function listAssessmentRows() {
+    const db = await _io.db()
+    const docs = await db.collection(COLLECTION).find({}, { projection: ROW_PROJECTION }).sort({ 'subject.sector': 1, 'subject.name': 1 }).toArray()
+    return docs.map(assessmentRow)
+}
+
 /** The books a scan can ask for — the verdicts that say "worth this book's attention now". Watch is left out (Roy, 2026-10-13). */
 export const BOOKS = Object.freeze(['swing', 'long_term'])
 /** A theme sends its direct links and its suppliers, as the house scan does; suppliers' suppliers are too far out. */
@@ -461,4 +489,4 @@ async function listForBook(book, opts = {}, deps = {}) {
     return (await listForBooks([book], opts, deps))[book] ?? []
 }
 
-export const industryAssessmentService = { publishAssessment, getAssessment, getThemeAssessment, listAssessments, verdictsForCodes, listForBook, listForBooks }
+export const industryAssessmentService = { publishAssessment, getAssessment, getThemeAssessment, listAssessments, listAssessmentRows, verdictsForCodes, listForBook, listForBooks }

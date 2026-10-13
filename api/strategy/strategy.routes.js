@@ -5,7 +5,7 @@ import {
     streamStrategy,
     listIndustries, getIndustry, publishIndustry,
     getWeek, runWeekNow,
-    listAssessments, getAssessment, publishAssessment, assessNow, listCalls,
+    listAssessments, getAssessment, getThemeAssessment, publishAssessment, assessNow, listCalls,
     listThemes, setThemeStatus, proposeThemesNow, assessThemeNow,
 } from './strategy.controller.js'
 
@@ -34,6 +34,8 @@ router.post('/weekly/run',       requireAdmin, log, runWeekNow)
 // Assessments (docs/design/pythia-assessment.md): Pythia's verdict per industry and the graded calls
 // behind it, read by everyone; publishing a draft and "Assess now" spend the house's research, so admin.
 router.get('/assessments',             log, listAssessments)
+// Before /:code — 'theme' is not a sub-industry (assessment-light-list.md: an opened theme row reads its detail here).
+router.get('/assessments/theme/:id',   log, getThemeAssessment)
 router.get('/assessments/:code',       log, getAssessment)
 router.get('/calls',                   log, listCalls)
 router.post('/assessments/:code',      requireAdmin, log, publishAssessment)

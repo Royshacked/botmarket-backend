@@ -168,12 +168,20 @@ export const publishIndustry = _handle('publishIndustry', async (req, res) => {
 const ASSESS_REASONS = {
     bad_assessment: [422, 'The assessment does not hold up — see detail'],
     unknown_industry: [404, 'Unknown GICS sub-industry'],
+    unknown_theme: [404, 'No approved theme by that id'],
 }
 
-/** Every published assessment (no trail), and the track record of the calls behind them. Read by everyone. */
+/**
+ * Every published assessment (no trail), and the track record of the calls behind them. Read by everyone.
+ * `?view=rows` sends only what a closed row shows (assessment-light-list.md) — an opened row fetches its detail. Without
+ * it the full list, as before: an installed app runs its old bundle until it reopens, and that bundle reads the
+ * detail off the list.
+ */
 export const listAssessments = _handle('listAssessments', async (req, res) => {
-    const [all, record, approved] = await Promise.all([industryAssessmentService.listAssessments(), pythiaCallsService.trackRecord(),
-        themeService.listThemes({ statuses: ['approved'] })])
+    const rows = req.query?.view === 'rows'
+    const [all, record, approved] = await Promise.all([
+        rows ? industryAssessmentService.listAssessmentRows() : industryAssessmentService.listAssessments(),
+        pythiaCallsService.trackRecord(), themeService.listThemes({ statuses: ['approved'] })])
     res.json({ assessments: visibleAssessments(all, approved), record })
 })
 
@@ -191,6 +199,17 @@ export const getAssessment = _handle('getAssessment', async (req, res) => {
     const bundle = await readSubIndustry(req.params.code)
     if (!bundle) return sendReason(res, 'unknown_industry', { overrides: ASSESS_REASONS })
     const doc = await industryAssessmentService.getAssessment(bundle.sub.code)
+    res.json(req.user?.role === 'admin' ? doc : withoutTrail(doc))
+})
+
+/**
+ * One THEME's assessment, for an opened row on the board (assessment-light-list.md §2.1) — only while the theme is
+ * approved, the board's own rule (visibleAssessments); the revision trail for admins only, as for an industry.
+ */
+export const getThemeAssessment = _handle('getThemeAssessment', async (req, res) => {
+    const theme = await themeService.getTheme(req.params.id)
+    if (theme?.status !== 'approved') return sendReason(res, 'unknown_theme', { overrides: ASSESS_REASONS })
+    const doc = await industryAssessmentService.getThemeAssessment(theme.id)
     res.json(req.user?.role === 'admin' ? doc : withoutTrail(doc))
 })
 
