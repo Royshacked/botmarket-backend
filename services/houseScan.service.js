@@ -38,7 +38,7 @@ export function _setDeps(d) { Object.assign(_deps, d) }
 export const REJECTED_DAYS = 56
 
 /** What travels with a name to Prometheus — the verdict that sent it. Pure. */
-export function pythiaContext(a, { link = null } = {}) {
+export function pythiaContext(a, { link = null, why = null } = {}) {
     const book = { swing: 'for swing', long_term: 'for long term' }[a.verdict] ?? a.verdict
     return {
         pythia: true,
@@ -49,6 +49,8 @@ export function pythiaContext(a, { link = null } = {}) {
         thesis: String(a.thesis ?? '').slice(0, 500) || null,
         risks: (a.risks ?? []).slice(0, 3),
         assessment_id: a.id ?? null,
+        // A company the assessment NAMED: what pointed at it (pythia-names.md) — Prometheus's opening reads it.
+        ...(why ? { named_why: String(why).slice(0, 200) } : {}),
     }
 }
 
@@ -75,17 +77,22 @@ export async function runHouseScan(results, deps = _deps, { alreadyQueued = 0, n
             if (queued.length >= max) { skippedFull++; continue }
             const a = await deps.assessment(r)
             if (!a || !BOOKS.includes(a.verdict)) continue      // re-assessed since: the verdict that would send it is gone
-            // Industries: the sub-industry. Themes: supplier links first, then direct — `per` names from each.
-            const sources = r.kind === 'theme'
+            // The companies the assessment NAMES go first (pythia-names.md; Roy, 2026-10-13), with why on the row; then
+            // the largest. Industries: the names and the sub-industry's largest share `per`. Themes: the names take `per`
+            // of their own, then supplier links first, then direct — `per` from each link.
+            const named = (a.names ?? []).map(x => ({ symbol: x.symbol, why: x.why }))
+            const links = r.kind === 'theme'
                 ? ((await deps.theme(r.id))?.links ?? []).filter(l => l.order <= 2).sort((x, y) => y.order - x.order).map(l => ({ code: l.code, link: l.name }))
-                : [{ code: r.code, link: null }]
+                : [{ code: r.code, link: null, named }]
+            const sources = r.kind === 'theme' && named.length ? [{ code: null, link: null, named }, ...links] : links
             for (const src of sources) {
                 let n = 0
-                for (const sym of await deps.largest(src.code, per * 4)) {
+                const pool = [...(src.named ?? []), ...(src.code ? (await deps.largest(src.code, per * 4)).map(symbol => ({ symbol })) : [])]
+                for (const cand of pool) {
                     if (n >= per || queued.length >= max) break
-                    const s = String(sym).toUpperCase()
+                    const s = String(cand.symbol).toUpperCase()
                     if (covered.has(s) || taken.has(s) || rejected.has(s)) continue
-                    const q = await deps.enqueue({ symbol: s, source: 'pythia', requestedBy: 'house', context: pythiaContext(a, { link: src.link }) })
+                    const q = await deps.enqueue({ symbol: s, source: 'pythia', requestedBy: 'house', context: pythiaContext(a, { link: src.link, why: cand.why ?? null }) })
                     taken.add(s)
                     if (q?.ok && !q.duplicate) { queued.push({ symbol: s, subject: r.name }); n++ }
                 }

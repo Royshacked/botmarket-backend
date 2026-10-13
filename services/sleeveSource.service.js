@@ -103,23 +103,29 @@ const _sym = s => String(s ?? '').toUpperCase().trim()
  * screen's order. A ceiling, not a quota: a short house list takes what it has. `industryOf` maps a symbol to its
  * GICS sub-industry code; `houseCodes` is the set Pythia rates for long term. Pure → `{ symbols, house }`.
  */
-export function houseFirst(screened, industryOf, houseCodes, { hits = SLEEVE_HITS, max = 6 } = {}) {
+export function houseFirst(screened, industryOf, houseCodes, { hits = SLEEVE_HITS, max = 6, named = null } = {}) {
     const cap = Math.max(0, Math.min(Number(max) || 0, hits))
-    const house = (screened ?? []).filter(s => houseCodes?.has(industryOf?.[s])).slice(0, cap)
+    // A company the house's assessments NAME counts as a house name wherever it is classified (pythia-names.md §4.3).
+    const house = (screened ?? []).filter(s => named?.has(s) || houseCodes?.has(industryOf?.[s])).slice(0, cap)
     const taken = new Set(house)
     const rest = (screened ?? []).filter(s => !taken.has(s)).slice(0, hits - house.length)
     return { symbols: [...house, ...rest], house }
 }
 
 /**
- * The sub-industry codes Pythia rates for long term in the sector; empty on any failure (the sleeve screens as before).
+ * The sub-industry codes Pythia rates for long term in the sector, and the companies those assessments NAME
+ * (pythia-names.md) → `{ codes, named }`; both empty on any failure (the sleeve screens as before).
  * An industry the house rates AVOID on its own can arrive through a long-term theme (listed, marked) — it never goes
- * ahead of the screen in a sleeve (code review 2026-10-13); its names can still come through the screen.
+ * ahead of the screen in a sleeve (code review 2026-10-13), and neither do its names; they can still come through the screen.
  */
-async function _houseCodes(sector, deps) {
-    if (!deps.houseIndustries) return new Set()
-    try { return new Set((await deps.houseIndustries(sector) ?? []).filter(e => e?.code && !e.avoid).map(e => e.code)) }
-    catch (err) { logger.warn(LOG, 'house industries unreadable — the sleeve screens without them', err.message); return new Set() }
+async function _house(sector, deps) {
+    const none = { codes: new Set(), named: new Set() }
+    if (!deps.houseIndustries) return none
+    try {
+        const entries = (await deps.houseIndustries(sector) ?? []).filter(e => e?.code && !e.avoid)
+        const named = entries.flatMap(e => [...(e.names ?? []), ...(e.themes ?? []).flatMap(t => t.names ?? [])]).map(n => n?.symbol).filter(Boolean)
+        return { codes: new Set(entries.map(e => e.code)), named: new Set(named) }
+    } catch (err) { logger.warn(LOG, 'house industries unreadable — the sleeve screens without them', err.message); return none }
 }
 
 /**
@@ -143,15 +149,15 @@ export async function sourceSleeve(req, deps = _io) {
 
     // Pythia's long-term industries in the sector go first (a preference, not a filter — Roy, 2026-10-13): the screen
     // widens so they can be found inside it, then they take up to half the sleeve and the screen fills the rest.
-    const houseCodes = await _houseCodes(sector, deps)
-    const wide = houseCodes.size > 0
+    const { codes: houseCodes, named } = await _house(sector, deps)
+    const wide = houseCodes.size > 0 || named.size > 0
     let symbols = await deps.screen(screenFiltersFor(sector, school, { industry, limit: wide ? HOUSE_POOL : SLEEVE_HITS }))
     let fromHouse = []
     if (wide && symbols.length) {
         let industryOf = {}
         try { industryOf = await deps.industryOf(symbols) ?? {} }
         catch (err) { logger.warn(LOG, 'industries unreadable — the sleeve takes the screen in its order', err.message) }
-        ;({ symbols, house: fromHouse } = houseFirst(symbols, industryOf, houseCodes, { max: deps.houseMax?.() ?? config.sleeveHouseMax }))
+        ;({ symbols, house: fromHouse } = houseFirst(symbols, industryOf, houseCodes, { max: deps.houseMax?.() ?? config.sleeveHouseMax, named }))
     }
     if (!symbols.length) {
         logger.info(LOG, 'nothing screened — sleeve not sourced', { sector, school, industry })

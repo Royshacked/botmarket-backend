@@ -78,8 +78,19 @@ export const BASE_RATES = Object.freeze({
     hype: 'Up 100%+ in two years and 100%+ above the market. Of 98 such run-ups across US industries since 1928, 22% fell 40%+ within 24 months (base rate 9%), and the median one trailed the market by 10.6% over the next two years. A risk flag, not a probability: it reads the industry\'s companies weighted by size, as that history was (value-weighted), but only today\'s companies, the ones that survived.',
 })
 export const NOT_MEASURED = Object.freeze(['value_trap', 'customer_demand', 'momentum_at_turns'])
+/**
+ * The COMPANIES an assessment names (docs/design/pythia-names.md; Roy, 2026-10-13): the ones the evidence points at,
+ * each with why. Optional, at most this many. Whether a name is first order (inside the subject) or second order
+ * (elsewhere) is worked out by code from gics_companies, never taken from the model.
+ */
+export const NAMES_MAX = 6
 
-const _io = { db: () => getDb() }
+const _io = {
+    db: () => getDb(),
+    // Each symbol's GICS classification (industryData.readCompaniesBySymbol). Imported lazily: industryData imports
+    // from this module, so a static import back would be a cycle.
+    companies: async (symbols) => (await import('./industryData.service.js')).readCompaniesBySymbol(symbols),
+}
 // The repo reads the same seam, so a test's fake database sees the revision write too.
 const _repo = makeHouseArtifactRepo({ collection: COLLECTION, getDb: () => _io.db() })
 /** Test seam. */
@@ -89,6 +100,47 @@ export function _setAssessmentIO(io) { Object.assign(_io, io) }
 const _str = (v, max = 900) => (typeof v === 'string' && v.trim() ? plainCitations(v.trim()).slice(0, max) : null)
 const _list = (v, max = 6) => (Array.isArray(v) ? v.map(x => _str(x, 300)).filter(Boolean).slice(0, max) : [])
 const _num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null)
+
+/** A ticker as gics_companies spells it: upper case, a share class with a dash (BRK.B → BRK-B). Pure. */
+export function normalizeSymbol(v) {
+    return typeof v === 'string' ? v.trim().toUpperCase().replace(/\./g, '-') : ''
+}
+
+/**
+ * The `names` list's SHAPE (pythia-names.md §3) → `{ names: [{ symbol, why }], dropped: [{ symbol, reason }] }`. A bad
+ * name is DROPPED with its reason, never a refusal — the research was paid for. Pure; the universe check is
+ * resolveNames, at publish.
+ */
+export function checkNames(raw) {
+    const names = [], dropped = [], seen = new Set()
+    for (const n of Array.isArray(raw) ? raw : []) {
+        const symbol = normalizeSymbol(n?.symbol)
+        const why = _str(n?.why, 200)
+        if (!/^[A-Z][A-Z0-9-]{0,9}$/.test(symbol)) { dropped.push({ symbol: symbol || String(n?.symbol ?? ''), reason: 'not a ticker' }); continue }
+        if (seen.has(symbol)) continue
+        seen.add(symbol)
+        if (!why) { dropped.push({ symbol, reason: 'no why — the evidence that points at it' }); continue }
+        if (names.length >= NAMES_MAX) { dropped.push({ symbol, reason: `over the limit of ${NAMES_MAX}` }); continue }
+        names.push({ symbol, why })
+    }
+    return { names, dropped }
+}
+
+/**
+ * The names against our universe (pythia-names.md §3). `known` is readCompaniesBySymbol's map; `inside` the subject's
+ * sub-industry codes (the industry, or the theme's links). A name the universe does not hold is dropped (foreign, under
+ * $300M, a typo — Roy: Argus and Prometheus can neither price nor classify it); the rest are FIRST order when their
+ * sub-industry is inside the subject, SECOND order otherwise. Pure → `{ names, dropped }`.
+ */
+export function resolveNames(names, known, inside) {
+    const out = [], dropped = []
+    for (const n of names ?? []) {
+        const c = known?.[n.symbol]
+        if (!c?.sub_code) { dropped.push({ symbol: n.symbol, reason: 'not in our universe (US, $300M+)' }); continue }
+        out.push({ symbol: n.symbol, why: n.why, order: inside.has(c.sub_code) ? 'first' : 'second', sub_code: c.sub_code, industry: c.sub_industry ?? null })
+    }
+    return { names: out, dropped }
+}
 
 /**
  * One <industry_assessment> block, checked → `{ ok, assessment, gaps }` or `{ ok:false, detail }`. Pure.
@@ -173,9 +225,11 @@ export function checkAssessment(block, { expect = null, now = new Date().toISOSt
             watchDowngraded = !d ? 'no decides_by date' : !Number.isFinite(days) ? `decides_by ${d} is not a date` : days < 0 ? `decides_by ${d} has passed` : `decides_by ${d} is more than ${WATCH_MAX_DAYS} days out`
         }
     }
+    const named = checkNames(block.names)
     return {
-        ok: true, gaps,
+        ok: true, gaps, names_dropped: named.dropped,
         assessment: {
+            names: named.names,
             code: industry, theme, verdict: finalVerdict, horizon, thesis, evidence, cause: { kind: causeKind, text: causeText },
             second_order: secondOrder, risks, change_view_if: changeIf, confidence,
             confidence_reason: _str(block.confidence_reason, 300),
@@ -316,9 +370,23 @@ async function publishAssessment(block, { sub = null, row = null, money = null, 
         { $setOnInsert: { subject, revisions: [], created_at: now } }, { upsert: true })
     const cur = await db.collection(COLLECTION).findOne({ id })
     const facts = a.theme ? (given ?? themeFacts(theme)) : { ...factsFor(row), money }
+    // The names against our universe. A failed read publishes the assessment without them, saying why.
+    let names = [], namesDropped = [...(checked.names_dropped ?? [])]
+    if (a.names?.length) {
+        const inside = new Set(a.theme ? (theme.links ?? []).map(l => l.code) : [sub.code])
+        try {
+            const r = resolveNames(a.names, await _io.companies(a.names.map(n => n.symbol)), inside)
+            names = r.names
+            namesDropped = [...namesDropped, ...r.dropped]
+        } catch (err) {
+            logger.warn(LOG, 'names not checked — published without them', { code: a.code ?? a.theme, error: err.message })
+            namesDropped = [...namesDropped, ...a.names.map(n => ({ symbol: n.symbol, reason: 'could not be checked' }))]
+        }
+    }
     const set = {
         subject, verdict: a.verdict, horizon: a.horizon, thesis: a.thesis, evidence: a.evidence, gaps: checked.gaps,
         cause: a.cause, second_order: a.second_order, risks: a.risks, change_view_if: a.change_view_if,
+        names, names_dropped: namesDropped.length ? namesDropped : null,
         decides_by: a.decides_by ?? null, question: a.question ?? null, watch_downgraded: a.watch_downgraded ?? null,
         confidence: a.confidence, confidence_reason: a.confidence_reason,
         moved: facts.moved, base_rates: facts.base_rates, not_measured: facts.not_measured,
@@ -444,6 +512,8 @@ export function houseIndustriesFor(rows, themes, { book, sector = null, now = ne
                 // Who else it reaches — Pythia's second-order read, required on every assessment (Roy, 2026-10-13: shown
                 // beside the first order, neither preferred).
                 second_order: mine ? (r.second_order ?? null) : null,
+                // The companies its evidence pointed at (pythia-names.md), first and second order alike.
+                names: mine ? (r.names ?? []) : [],
                 excess_12m: _num(r?.moved?.excess_12m), themes: [],
             })
         }
@@ -462,7 +532,7 @@ export function houseIndustriesFor(rows, themes, { book, sector = null, now = ne
             const e = entry(l.code, l.name, l.sector)
             if (e.excess_12m == null) e.excess_12m = _num(moves.get(l.code)?.excess_12m)
             if (moves.get(l.code)?.hype === true) e.hype = true
-            e.themes.push({ id: t.id, name: t.name, order: l.order, horizon: r.horizon ?? null, thesis: r.thesis ?? null, second_order: r.second_order ?? null })
+            e.themes.push({ id: t.id, name: t.name, order: l.order, horizon: r.horizon ?? null, thesis: r.thesis ?? null, second_order: r.second_order ?? null, names: r.names ?? [] })
         }
     }
     return [...out.values()].sort((a, b) => (b.excess_12m ?? -Infinity) - (a.excess_12m ?? -Infinity) || String(a.name).localeCompare(String(b.name)))
@@ -479,7 +549,7 @@ async function listForBooks(books, { sector = null, now = new Date().toISOString
     const db = await _io.db()
     const [rows, approved] = await Promise.all([
         db.collection(COLLECTION).find({}, { projection: {
-            _id: 0, subject: 1, verdict: 1, horizon: 1, thesis: 1, risks: 1, second_order: 1, expires_at: 1,
+            _id: 0, subject: 1, verdict: 1, horizon: 1, thesis: 1, risks: 1, second_order: 1, names: 1, expires_at: 1,
             'moved.hype': 1, 'moved.excess_12m': 1, 'moved.links': 1,
         } }).toArray(),
         themes(),

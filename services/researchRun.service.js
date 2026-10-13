@@ -269,6 +269,12 @@ export function researchOpening(item) {
         const where = c.kind === 'theme' ? `the theme ${c.subject}${c.link ? ` (via ${c.link})` : ''}` : `its industry, ${c.subject}`
         const risks = c.risks?.length ? ` Risks it named: ${c.risks.join('; ')}.` : ''
         const thesis = c.thesis ? `: ${c.thesis}` : '.'
+        // NAMED by the assessment (pythia-names.md): it may sit in another industry (second order), so the opening says
+        // whose assessment named it and why, not "its industry".
+        if (c.named_why) {
+            const of = c.kind === 'theme' ? `the theme ${c.subject}` : c.subject
+            return `Research ${symbol} for coverage — Pythia's ${book} assessment of ${of}${c.horizon ? ` (${c.horizon})` : ''} names it: ${c.named_why}. Her case${thesis}${risks} Judge whether ${symbol} is already priced for it.`
+        }
         return `Research ${symbol} for coverage — Pythia rates ${where} ${book}${c.horizon ? ` (${c.horizon})` : ''}${thesis}${risks} Judge whether ${symbol} is already priced for it.`
     }
     if (!c?.sector) return `Research ${symbol} for coverage.`

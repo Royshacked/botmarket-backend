@@ -38,7 +38,8 @@ export function labelsFrom(symbols, industryOf, listsByBook, books) {
     const out = new Map()
     for (const sym of symbols ?? []) {
         const code = industryOf?.[sym]
-        if (!code) continue
+        const named = _namedIn(sym, listsByBook, books)
+        if (!code) { if (named) out.set(sym, named); continue }
         for (const book of books) {
             const e = (listsByBook?.[book] ?? []).find(x => x.code === code)
             if (!e) continue
@@ -50,8 +51,31 @@ export function labelsFrom(symbols, industryOf, listsByBook, books) {
             })
             break
         }
+        // Not in a listed industry, but an assessment on the list NAMES it (pythia-names.md; Roy, 2026-10-13).
+        if (!out.has(sym) && named) out.set(sym, named)
     }
     return out
+}
+
+/**
+ * The first listed assessment (in `books` order) whose names include `sym` → a label saying so, or null. An industry
+ * the house rates AVOID on its own never lends its names a label. Pure.
+ */
+function _namedIn(sym, listsByBook, books) {
+    for (const book of books) {
+        for (const e of listsByBook?.[book] ?? []) {
+            if (e.avoid) continue
+            const own = (e.names ?? []).find(n => n.symbol === sym)
+            const viaTheme = own ? null : (e.themes ?? []).find(t => (t.names ?? []).some(n => n.symbol === sym))
+            const n = own ?? viaTheme?.names.find(x => x.symbol === sym)
+            if (!n) continue
+            return {
+                book, code: e.code, industry: viaTheme ? viaTheme.name : e.name, hype: false, avoid: false, themes: [],
+                named: true, why: n.why ?? null, thesis: viaTheme ? (viaTheme.thesis ?? null) : (e.thesis ?? null),
+            }
+        }
+    }
+    return null
 }
 
 /** Labels for these symbols on these books. Never throws: any failure → an empty map (no label). */
@@ -70,13 +94,14 @@ export async function houseLabels(symbols, { books = BOOKS } = {}, deps = _deps)
 
 /** The label as the wire carries it (the card's chip and the next desk). Pure. */
 export function wireLabel(l) {
-    return l ? { book: l.book, industry: l.industry, hype: l.hype, avoid: l.avoid, themes: l.themes } : null
+    return l ? { book: l.book, industry: l.industry, hype: l.hype, avoid: l.avoid, themes: l.themes, ...(l.named ? { named: true, why: l.why ?? null } : {}) } : null
 }
 
 /** The label as a desk's prompt reads it. Pure. */
 export function formatHouseLabel(l) {
     if (!l) return ''
     const list = l.book === 'swing' ? 'swing' : 'long-term'
+    if (l.named) return `named by the house in its ${list} assessment of ${l.industry}${l.why ? ` — ${l.why}` : ''}`
     const via = l.themes?.length ? ` (via the theme${l.themes.length > 1 ? 's' : ''} ${l.themes.map(t => `"${t}"`).join(', ')})` : ''
     const flags = [l.hype ? 'HYPE — ran up 100%+ in two years and 100%+ over the market, a crash-risk flag' : null,
         l.avoid ? 'the house rates the industry itself AVOID' : null].filter(Boolean)

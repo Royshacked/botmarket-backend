@@ -77,7 +77,7 @@ test("a theme rated the book brings its direct and supplier links — not the su
     assert.equal(ipp.thesis, null)
     assert.equal(ipp.hype, true, "the link's own hype flag")
     assert.equal(ipp.excess_12m, 0.4)
-    assert.deepEqual(ipp.themes, [{ id: 'ai_power', name: 'ai_power', order: 1, horizon: 'months', thesis: 'ai_power theme thesis', second_order: 'ai_power reaches the grid' }])
+    assert.deepEqual(ipp.themes, [{ id: 'ai_power', name: 'ai_power', order: 1, horizon: 'months', thesis: 'ai_power theme thesis', second_order: 'ai_power reaches the grid', names: [] }])
     assert.equal(ipp.second_order, null, 'not rated on its own: no second-order read of its own')
 })
 
@@ -199,6 +199,7 @@ test('the handler: book → list (sector passed through), industry → companies
         largest: async (_sub, limit) => [{ symbol: 'NVDA', name: 'NVIDIA', market_cap: 4e12, sub_industry: 'Semiconductors', limit }],
         covered: async () => new Set(),
         verdicts: async () => new Map([['45301020', { verdict: 'swing' }]]),
+        assessment: async () => null,
     }).get_house_industries
     assert.match(await h({ book: 'long term', sector: 'Information Technology' }), /LONG-TERM INDUSTRIES in Information Technology/)
     assert.deepEqual(asked, [['long_term', { sector: 'Information Technology' }]])

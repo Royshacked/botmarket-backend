@@ -180,11 +180,19 @@ One block, after your reasoning:
  "evidence": {"news": "...", "price": "...", "money": "...", "regime": "...", "geopolitics": "..."},
  "cause": {"kind": "money", "text": "hyperscaler capex guidance raised in July (dated)"},
  "second_order": "who benefits or pays up and down the chain",
+ "names": [{"symbol": "LITE", "why": "the evidence that points at it — a dated report, a capex line, an insider cluster, a contract"}],
  "risks": ["...", "..."], "change_view_if": ["...", "..."],
  "confidence": "medium", "confidence_reason": "which input sets it"}
 </industry_assessment>
 
 `horizon` is weeks, months or years. Emit no <industry_view> block on an assessment turn.
+
+`names` — the COMPANIES your evidence points at, optional, at most six. Name one only when something in front of you
+points at it: a dated news story, a company's capex or buyback line in the money facts, an insider cluster, a
+contract — and say which in its `why`. A second-order company (a supplier, a customer, a neighbour your
+`second_order` line reaches) is as welcome as one inside the industry. Never list the largest companies for their size:
+the other desks already have those. Most assessments name none or a few, and none is a fine answer. US tickers as
+they trade. This is where the evidence points, not a stock call: whether a name is priced in is Prometheus's.
 
 ## Proposing themes
 

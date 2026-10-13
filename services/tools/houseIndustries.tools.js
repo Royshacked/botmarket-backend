@@ -38,6 +38,11 @@ export function normalizeBook(v) {
 const SECOND_ORDER_MAX = 260
 const _clip = (t) => (t.length > SECOND_ORDER_MAX ? `${t.slice(0, SECOND_ORDER_MAX - 1).trimEnd()}…` : t)
 
+/** "CIEN (first), VRT (second — Electrical Components & Equipment)". Pure — exported for testing. */
+export function namesLine(names) {
+    return (names ?? []).map(n => `${n.symbol} (${n.order === 'second' ? `second — ${n.industry ?? 'another industry'}` : 'first'})`).join(', ')
+}
+
 const _pct = (v) => (typeof v === 'number' ? `${v >= 0 ? '+' : ''}${Math.round(v * 100)}%` : null)
 
 /** The list for a book → LLM-ready text. Pure — exported for testing. */
@@ -57,10 +62,12 @@ export function formatHouseIndustries(book, entries, { sector = null } = {}) {
             out.push(`      thesis (${e.horizon ?? 'horizon n/a'}): ${e.thesis ?? 'n/a'}`)
             if (e.top_risk) out.push(`      top risk: ${e.top_risk}`)
             if (e.second_order) out.push(`      who else it reaches: ${_clip(e.second_order)}`)
+            if (e.names?.length) out.push(`      the house names: ${namesLine(e.names)}`)
         }
         for (const t of e.themes ?? []) {
             out.push(`      via theme "${t.name}" (${ORDER_WORDS[t.order] ?? `order ${t.order}`} link): ${t.thesis ?? 'n/a'}`)
             if (t.second_order) out.push(`        who else the theme reaches: ${_clip(t.second_order)}`)
+            if (t.names?.length) out.push(`        the theme names: ${namesLine(t.names)}`)
         }
         return out.join('\n')
     })
@@ -77,13 +84,20 @@ export function formatHouseIndustries(book, entries, { sector = null } = {}) {
     ].join('\n')
 }
 
-/** One industry's companies → text. Pure — exported for testing. `verdict` is verdictsForCodes' entry, or null. */
-export function formatIndustryCompanies(sub, rows, covered, verdict = null) {
+/**
+ * One industry's companies → text. Pure — exported for testing. `verdict` is verdictsForCodes' entry, or null; `named`
+ * the companies its standing assessment names (pythia-names.md) — listed FIRST, as company rows, with why.
+ */
+export function formatIndustryCompanies(sub, rows, covered, verdict = null, named = []) {
     const rolled = (rows ?? []).some(r => r.sub_industry && r.sub_industry !== sub.name)
     const v = verdict?.verdict ? (VERDICTS[verdict.verdict] ?? verdict.verdict) : 'not assessed'
     return [
         `${sub.name} (${sub.code}) [${sub.sector ?? 'sector n/a'}] — the house's verdict: ${v}${verdict?.hype ? ' · HYPE' : ''}`,
         ...(rolled ? [`  Too few ${sub.name} companies of its own: these are the largest of the level that answers it — check each one's own business fits.`] : []),
+        ...(named.length ? [
+            '  The companies the house\'s assessment names — what its evidence pointed at (first and second order equal):',
+            ...named.map(n => `  ${n.symbol.padEnd(6)} ${n.order === 'second' ? `second order (${n.industry ?? 'another industry'})` : 'first order'} — ${n.why}${covered.has(n.symbol) ? '  [OUR COVERAGE]' : ''}`),
+        ] : []),
         `  Largest ${rows?.length ?? 0}, by market cap:`,
         formatCompanies(rows, covered),
         '',
@@ -98,6 +112,8 @@ export function makeHouseIndustriesHandlers(deps = {}) {
         largest  = (sub, limit) => largestCompanies(sub, { limit }),
         covered  = () => coveredSymbols(),
         verdicts = (codes) => industryAssessmentService.verdictsForCodes(codes),
+        assessment = (code) => industryAssessmentService.getAssessment(code),
+        now      = () => new Date().toISOString(),
     } = deps
 
     return {
@@ -107,8 +123,11 @@ export function makeHouseIndustriesHandlers(deps = {}) {
                 const b = await readSub(industry)
                 if (!b) return `No GICS sub-industry "${industry}" — pass a code or name from the \`book\` list.`
                 const limit = Math.min(Math.max(parseInt(input?.limit, 10) || DEFAULT_COMPANIES, 1), MAX_COMPANIES)
-                const [rows, cov, vs] = await Promise.all([largest(b.sub, limit), covered(), verdicts([b.sub.code])])
-                return formatIndustryCompanies(b.sub, rows, cov ?? new Set(), vs?.get?.(b.sub.code) ?? null)
+                const [rows, cov, vs, a] = await Promise.all([largest(b.sub, limit), covered(), verdicts([b.sub.code]),
+                    assessment(b.sub.code).catch(() => null)])
+                // The names of a STANDING assessment only: an expired one is due for reassessment.
+                const named = a && (!a.expires_at || a.expires_at > now()) ? (a.names ?? []) : []
+                return formatIndustryCompanies(b.sub, rows, cov ?? new Set(), vs?.get?.(b.sub.code) ?? null, named)
             }
             if (input?.book == null || input.book === '') return 'Pass `book` ("swing" or "long_term") for the house\'s industries, or `industry` for one industry\'s companies.'
             const book = normalizeBook(input.book)
