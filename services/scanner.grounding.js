@@ -20,7 +20,16 @@
 export const DISCOVERY_TOOLS = new Set([
     'screen_candidates', 'get_market_movers', 'get_sector_snapshot',
     'get_analyst_actions', 'get_earnings_calendar',
+    // The house's classified universe (argus-on-pythia.md §3.2): an industry's companies, listed by the house.
+    'get_house_industries',
 ])
+
+// A discovery tool whose answer is mostly PROSE puts only its ticker rows on the tape: otherwise a word in a
+// thesis ("AI", "ROIC") would ground an invented name with that ticker. → the text the ledger records.
+export const SOURCED_EXTRACT = {
+    // The company rows of an industry call ("  NVDA   NVIDIA ..."); the book list's lines start with an 8-digit code.
+    get_house_industries: (text) => [...text.matchAll(/^ {2}([A-Z][A-Z0-9.-]{0,9}) {2,}/gm)].map(m => m[1]).join(' '),
+}
 
 // Per-name tools → how to read the ticker(s) they ran on from their input args.
 // A successful call on the symbol confers `validated` grounding.

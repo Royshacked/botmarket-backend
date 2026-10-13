@@ -15,10 +15,11 @@ import { logger }        from '../logger.service.js'
 import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, stripEmitTags, makeToolHandler, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, BREVITY_RULE, VENUE_RULE, TRADE_HORIZONS, cachedBlock } from '../agentUtils.js'
 import { makeTradingContextHandlers, buildVenueSection } from '../tools/tradingContext.tools.js'
 import { makeMarketHoursHandlers, MARKET_HOURS_TOOL_SPEC } from '../tools/marketHours.tools.js'
+import { makeHouseIndustriesHandlers, HOUSE_INDUSTRIES_TOOL_SPEC } from '../tools/houseIndustries.tools.js'
 import { buildTagCaptures } from '../llmStream.util.js'
 import { makeRouteCapture, ROUTE_TAGS, buildRouteRule } from '../routing.util.js'
 import { isToolError } from '../toolResult.util.js'
-import { makeGroundingLedger, recordSourced, recordTouched, groundingTier, DISCOVERY_TOOLS, PER_NAME_TICKER_ARGS } from '../scanner.grounding.js'
+import { makeGroundingLedger, recordSourced, recordTouched, groundingTier, DISCOVERY_TOOLS, PER_NAME_TICKER_ARGS, SOURCED_EXTRACT } from '../scanner.grounding.js'
 import { normalizeSelection, selectionWeights } from '../investorSchools.js'
 
 const __dirname     = dirname(fileURLToPath(import.meta.url))
@@ -86,6 +87,9 @@ export const TOOLS = toolsFor({
     // APPENDED, never inserted — the snapshot compares by index and prompt caching keys off the
     // array prefix.
     get_market_hours: MARKET_HOURS_TOOL_SPEC.get_market_hours,
+    // Pythia's industries for the scan's book — where a swing / long-term scan looks FIRST (argus-on-pythia.md §3.2).
+    // Inserted before `consult`, which stays last.
+    get_house_industries: HOUSE_INDUSTRIES_TOOL_SPEC.get_house_industries,
     // Appended last — contractually. The reasoning sidecar (services/deepThink.service.js): one
     // bounded decision put to a stronger model and handed back as a tool result. The mechanism half
     // of this description is shared with every other desk; the clause below is Argus's own judgment
@@ -147,6 +151,7 @@ const TOOL_HANDLERS = {
     // Unbound (market hours belong to the instrument, not the user) — so it lives in the
     // static map, unlike the venue handlers that are rebuilt per request around a userId.
     ...makeMarketHoursHandlers(),
+    ...makeHouseIndustriesHandlers(),
 }
 
 // Wrap the module-level handlers with a per-session grounding recorder. A
@@ -166,7 +171,7 @@ function _wrapForGrounding(handlers, ledger) {
             ? async (args, ctx) => {
                 const ret = await fn(args, ctx)
                 if (!isToolError(ret)) {
-                    if (isDiscovery && typeof ret === 'string') recordSourced(ledger, ret)
+                    if (isDiscovery && typeof ret === 'string') recordSourced(ledger, SOURCED_EXTRACT[name] ? SOURCED_EXTRACT[name](ret) : ret)
                     if (reader) recordTouched(ledger, reader(args))
                 }
                 return ret
@@ -186,7 +191,7 @@ export { _normalizeScan, _cleanScore, scannerToolsForProfile, _wrapForGrounding 
 const INVESTING_TOOL_NAMES = new Set([
     'web_search', 'screen_candidates', 'get_fundamentals', 'get_sector_snapshot',
     'get_earnings', 'get_earnings_calendar', 'get_analyst_actions', 'get_sec_filings',
-    'get_quotes', 'get_price_action',
+    'get_quotes', 'get_price_action', 'get_house_industries',
 ])
 function scannerToolsForProfile(profile) {
     return profile === 'investing' ? TOOLS.filter(t => INVESTING_TOOL_NAMES.has(t.name)) : TOOLS

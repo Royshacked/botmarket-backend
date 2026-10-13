@@ -1262,6 +1262,35 @@
             }
         },
         {
+            "name": "get_house_industries",
+            "description": "The HOUSE'S INDUSTRIES for a book — the GICS sub-industries Pythia (the house's industry desk) currently rates FOR SWING or FOR LONG TERM, plus the industries inside the themes it rates so, each with its thesis, its top risk and how far it has moved. Pass `book` (\"swing\" or \"long_term\", and optionally `sector`) on a swing or long-term scan, BEFORE you screen: these are the first place to look. Then pass `industry` (a code or name from that list) for its largest companies, our coverage marked. A PREFERENCE, never a filter: screen the rest of the market as you always do, rank by the tape as you always do — being on the house's list adds nothing to a score — and keep a stronger name from outside these industries. Label every name you take from here as on the house's swing / long-term list. Intraday and day scans have no house list: Pythia's verdicts run weeks to years.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "book": {
+                        "type": "string",
+                        "enum": [
+                            "swing",
+                            "long_term"
+                        ],
+                        "description": "The scan's book: the industries Pythia rates for it."
+                    },
+                    "sector": {
+                        "type": "string",
+                        "description": "A GICS sector (e.g. Information Technology) to narrow the book's list."
+                    },
+                    "industry": {
+                        "type": "string",
+                        "description": "A GICS sub-industry (8-digit code or exact name) from the list — its largest companies instead of the list."
+                    },
+                    "limit": {
+                        "type": "number",
+                        "description": "How many of the industry's companies, 1–40 (default 15)."
+                    }
+                }
+            }
+        },
+        {
             "name": "consult",
             "description": "Put ONE decision to a more capable desk head and get a straight answer back. It cannot see this conversation and cannot fetch anything — you hand it the question and every number it needs, and it thinks harder than you can in-line.\n\nThis desk screens in BULK, so the bar is higher here than anywhere else: a consult per candidate would cost more than the scan is worth. Reach for it in exactly two situations, both of which happen at most once per scan: **the final cut**, when two or three finalists are genuinely close and the ranking is the thing the user will act on; and **an angle that resists screening** — a thesis the tools cannot express, where you have to decide what to screen FOR before you can screen at all. Never per candidate, and never to qualify a name a tool call would qualify.\n\nDo NOT reach for it to look something up, to double-check work you are already confident in, to summarize, or because a question feels big. A consult costs a full model call and adds seconds to the turn: if you already know the answer, or a tool call would settle it, that is the cheaper and better move. Most turns should end without it.",
             "input_schema": {

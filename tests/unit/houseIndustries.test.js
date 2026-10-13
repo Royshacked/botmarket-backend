@@ -136,3 +136,114 @@ test('listForBook reads the stored assessments and the approved themes', async (
     assert.deepEqual(await industryAssessmentService.listForBook('long_term', { sector: 'Information Technology', now: NOW }, { themes }).then(o => o.map(e => e.code)), ['45103010'])
     assert.deepEqual(await industryAssessmentService.listForBook('watch', { now: NOW }, { themes }), [])
 })
+
+// ── the tool Argus reads (argus-on-pythia.md §3.2) ───────────────────────────
+
+import { makeHouseIndustriesHandlers, normalizeBook, formatHouseIndustries, formatIndustryCompanies } from '../../services/tools/houseIndustries.tools.js'
+import { TOOLS as SCANNER_TOOLS, scannerToolsForProfile, _wrapForGrounding } from '../../services/agents/scanner.agent.service.js'
+import { DISCOVERY_TOOLS, makeGroundingLedger, groundingTier } from '../../services/scanner.grounding.js'
+
+const ENTRY = (over = {}) => ({
+    code: '45301020', name: 'Semiconductors', sector: 'Information Technology', rated: true, horizon: 'weeks', hype: false,
+    thesis: 'AI capex still rising', top_risk: 'a capex pause', avoid: false, excess_12m: 0.42, themes: [], ...over,
+})
+const SUB = { code: '45301020', name: 'Semiconductors', sector: 'Information Technology' }
+
+test('the book words: swing, long_term and its spellings; nothing else', () => {
+    for (const s of ['swing', 'SWING', ' swing ']) assert.equal(normalizeBook(s), 'swing')
+    for (const s of ['long_term', 'long term', 'Long-Term']) assert.equal(normalizeBook(s), 'long_term')
+    for (const s of ['intraday', 'day', 'watch', '', null, undefined]) assert.equal(normalizeBook(s), null)
+})
+
+test('the list reads as a preference: thesis, risk, flags, themes, and the rule', () => {
+    const text = formatHouseIndustries('swing', [
+        ENTRY({ hype: true }),
+        ENTRY({ code: '10102050', name: 'Coal & Consumable Fuels', sector: 'Energy', rated: false, thesis: null, top_risk: null, avoid: true, excess_12m: null,
+            themes: [{ id: 'power', name: 'Power', order: 2, thesis: 'grid demand', horizon: 'months' }] }),
+    ])
+    assert.match(text, /THE HOUSE'S SWING INDUSTRIES/)
+    assert.match(text, /45301020 {2}Semiconductors \[Information Technology\] · HYPE/)
+    assert.match(text, /12 months \+42% over SPY/)
+    assert.match(text, /thesis \(weeks\): AI capex still rising/)
+    assert.match(text, /top risk: a capex pause/)
+    assert.match(text, /AVOID — it is here only through a theme/)
+    assert.match(text, /via theme "Power" \(supplier link\): grid demand/)
+    assert.match(text, /A preference, not a filter/)
+    assert.match(text, /on the house's swing list/)
+    assert.doesNotMatch(text.split('Coal')[1].split('via theme')[0], /thesis/, 'a theme-only entry shows no thesis of its own')
+    assert.match(formatHouseIndustries('long_term', [ENTRY()]), /on the house's long-term list/)
+})
+
+test('an empty list says so and sends Argus to scan normally', () => {
+    const text = formatHouseIndustries('long_term', [], { sector: 'Utilities' })
+    assert.match(text, /no industries rated for long-term in Utilities/)
+    assert.match(text, /Scan the market as you normally would/)
+})
+
+test("an industry's companies: verdict, coverage, and a note when its parent answers for it", () => {
+    const rows = [{ symbol: 'NVDA', name: 'NVIDIA', market_cap: 4e12, sub_industry: 'Semiconductors' }, { symbol: 'AMAT', name: 'Applied', market_cap: 2e11, sub_industry: 'Semiconductor Materials & Equipment' }]
+    const text = formatIndustryCompanies(SUB, rows, new Set(['NVDA']), { verdict: 'swing', hype: true })
+    assert.match(text, /the house's verdict: For swing · HYPE/)
+    assert.match(text, /NVDA .*\[OUR COVERAGE\]/)
+    assert.match(text, /Too few Semiconductors companies of its own/)
+    assert.doesNotMatch(formatIndustryCompanies(SUB, rows.slice(0, 1), new Set(), null), /Too few/)
+    assert.match(formatIndustryCompanies(SUB, [], new Set(), null), /not assessed/)
+})
+
+test('the handler: book → list (sector passed through), industry → companies, and every wrong input answered', async () => {
+    const asked = []
+    const h = makeHouseIndustriesHandlers({
+        forBook: async (book, opts) => { asked.push([book, opts]); return [ENTRY()] },
+        readSub: async (k) => (k === 'Semiconductors' || k === '45301020' ? { sub: SUB } : null),
+        largest: async (_sub, limit) => [{ symbol: 'NVDA', name: 'NVIDIA', market_cap: 4e12, sub_industry: 'Semiconductors', limit }],
+        covered: async () => new Set(),
+        verdicts: async () => new Map([['45301020', { verdict: 'swing' }]]),
+    }).get_house_industries
+    assert.match(await h({ book: 'long term', sector: 'Information Technology' }), /LONG-TERM INDUSTRIES in Information Technology/)
+    assert.deepEqual(asked, [['long_term', { sector: 'Information Technology' }]])
+    assert.match(await h({ industry: 'Semiconductors' }), /NVDA/)
+    assert.match(await h({ industry: 'Nope' }), /No GICS sub-industry "Nope"/)
+    assert.match(await h({ book: 'intraday' }), /no list for "intraday"/)
+    assert.match(await h({}), /Pass `book`/)
+})
+
+test('a failed read answers in text and tells Argus to scan normally', async () => {
+    const h = makeHouseIndustriesHandlers({ forBook: async () => { throw new Error('db down') } }).get_house_industries
+    const out = await h({ book: 'swing' })
+    assert.match(typeof out === 'string' ? out : JSON.stringify(out), /db down.*scan the market as you normally would/)
+})
+
+test('Argus has the tool in both profiles, before consult; it is a discovery source', () => {
+    const names = SCANNER_TOOLS.map(t => t.name)
+    assert.ok(names.includes('get_house_industries'))
+    assert.equal(names.at(-1), 'consult')
+    assert.ok(scannerToolsForProfile('investing').some(t => t.name === 'get_house_industries'))
+    assert.ok(DISCOVERY_TOOLS.has('get_house_industries'))
+})
+
+test("a company the tool listed is grounded as sourced", async () => {
+    const ledger = makeGroundingLedger()
+    const wrapped = _wrapForGrounding({ get_house_industries: async () => formatIndustryCompanies(SUB, [{ symbol: 'NVDA', name: 'NVIDIA', market_cap: 4e12 }], new Set()) }, ledger)
+    await wrapped.get_house_industries({ industry: 'Semiconductors' })
+    assert.equal(groundingTier('NVDA', ledger), 'sourced')
+    assert.equal(groundingTier('AMD', ledger), 'ungrounded')
+})
+
+test("the book list's prose grounds nothing — only an industry call's company rows do (bug hunt 2026-10-13)", async () => {
+    const ledger = makeGroundingLedger()
+    const list = formatHouseIndustries('swing', [ENTRY({ thesis: 'AI capex and ROIC above the hurdle; SPY lagging' })])
+    const wrapped = _wrapForGrounding({ get_house_industries: async (a) => (a.book ? list : formatIndustryCompanies(SUB, [{ symbol: 'BRK.B', name: 'AI Holdings', market_cap: 1e9 }], new Set())) }, ledger)
+    await wrapped.get_house_industries({ book: 'swing' })
+    for (const t of ['AI', 'ROIC', 'SPY', 'HYPE', 'THE']) assert.equal(groundingTier(t, ledger), 'ungrounded', t)
+    await wrapped.get_house_industries({ industry: 'Semiconductors' })
+    assert.equal(groundingTier('BRK.B', ledger), 'sourced')
+    assert.equal(groundingTier('AI', ledger), 'ungrounded', 'a company NAME is not a ticker')
+})
+
+test('a long list shows the first twenty in full and the rest by name', () => {
+    const many = Array.from({ length: 23 }, (_, i) => ENTRY({ code: String(10000000 + i), name: `Industry ${i}`, hype: i === 22 }))
+    const text = formatHouseIndustries('swing', many)
+    assert.equal((text.match(/thesis \(/g) ?? []).length, 20)
+    assert.match(text, /3 more, names only .*Industry 20 \(10000020\), Industry 21 \(10000021\), Industry 22 \(10000022\) HYPE/)
+    assert.doesNotMatch(formatHouseIndustries('swing', many.slice(0, 20)), /more, names only/)
+})

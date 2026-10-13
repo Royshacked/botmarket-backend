@@ -664,6 +664,16 @@ export const TOOL_SCHEMAS = {
             "sector": { "type": "string", "description": "A GICS sector (e.g. Information Technology) — every sub-industry in it. Used when no symbols are passed." }
         }
     },
+    // Argus's read of the house's industries for a book (docs/design/argus-on-pythia.md §3.2).
+    get_house_industries: {
+        "type": "object",
+        "properties": {
+            "book": { "type": "string", "enum": ["swing", "long_term"], "description": "The scan's book: the industries Pythia rates for it." },
+            "sector": { "type": "string", "description": "A GICS sector (e.g. Information Technology) to narrow the book's list." },
+            "industry": { "type": "string", "description": "A GICS sub-industry (8-digit code or exact name) from the list — its largest companies instead of the list." },
+            "limit": { "type": "number", "description": "How many of the industry's companies, 1–40 (default 15)." }
+        }
+    },
     // ── Pythia, the industry desk (docs/design/pythia-industry-questions.md) ──
     list_industries: {
         "type": "object",
