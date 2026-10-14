@@ -22,16 +22,17 @@ const BASE = 'https://api.stlouisfed.org/fred'
 // Curated high-impact US macro data releases: FRED release_id → display meta.
 // `time` is the standard US release time (ET) — a stable convention, since FRED
 // only carries the date. `desc` is a hand-written one-liner (shown on hover).
+// `short` is the name a month-calendar cell has room for (2026-10-14).
 const MACRO_RELEASES = {
-    50:  { event: 'Employment Situation (Jobs)', impact: 'high',   time: '8:30a',  desc: 'Monthly jobs added + unemployment rate (NFP)' },
-    10:  { event: 'CPI (Inflation)',             impact: 'high',   time: '8:30a',  desc: 'Monthly change in consumer prices' },
-    54:  { event: 'PCE / Personal Income',       impact: 'high',   time: '8:30a',  desc: "Fed's preferred inflation gauge + income/spending" },
-    53:  { event: 'GDP',                         impact: 'high',   time: '8:30a',  desc: 'Quarterly economic output growth' },
-    46:  { event: 'PPI',                         impact: 'medium', time: '8:30a',  desc: 'Monthly change in wholesale/producer prices' },
-    192: { event: 'JOLTS (Job Openings)',        impact: 'medium', time: '10:00a', desc: 'Job openings, hires & quits' },
-    9:   { event: 'Retail Sales',                impact: 'medium', time: '8:30a',  desc: 'Monthly change in retail spending' },
-    27:  { event: 'Housing Starts',              impact: 'low',    time: '8:30a',  desc: 'New residential construction (starts & permits)' },
-    180: { event: 'Jobless Claims',              impact: 'low',    time: '8:30a',  desc: 'Weekly new unemployment filings' },
+    50:  { event: 'Employment Situation (Jobs)', short: 'Jobs',    impact: 'high',   time: '8:30a',  desc: 'Monthly jobs added + unemployment rate (NFP)' },
+    10:  { event: 'CPI (Inflation)',             short: 'CPI',     impact: 'high',   time: '8:30a',  desc: 'Monthly change in consumer prices' },
+    54:  { event: 'PCE / Personal Income',       short: 'PCE',     impact: 'high',   time: '8:30a',  desc: "Fed's preferred inflation gauge + income/spending" },
+    53:  { event: 'GDP',                         short: 'GDP',     impact: 'high',   time: '8:30a',  desc: 'Quarterly economic output growth' },
+    46:  { event: 'PPI',                         short: 'PPI',     impact: 'medium', time: '8:30a',  desc: 'Monthly change in wholesale/producer prices' },
+    192: { event: 'JOLTS (Job Openings)',        short: 'JOLTS',   impact: 'medium', time: '10:00a', desc: 'Job openings, hires & quits' },
+    9:   { event: 'Retail Sales',                short: 'Retail',  impact: 'medium', time: '8:30a',  desc: 'Monthly change in retail spending' },
+    27:  { event: 'Housing Starts',              short: 'Housing', impact: 'low',    time: '8:30a',  desc: 'New residential construction (starts & permits)' },
+    180: { event: 'Jobless Claims',              short: 'Claims',  impact: 'low',    time: '8:30a',  desc: 'Weekly new unemployment filings' },
 }
 
 // FOMC rate-decision dates (announcement day) — federalreserve.gov 2026 schedule.
@@ -42,7 +43,8 @@ const FOMC_DATES = [
 ]
 
 // The window shifts slowly, so a few-hours cache is plenty.
-const _cache = createTtlCache({ ttlMs: 6 * 60 * 60 * 1000, max: 10 }) // "from|to" -> events[]
+// Room for a few months of the Floor calendar besides the rolling windows.
+const _cache = createTtlCache({ ttlMs: 6 * 60 * 60 * 1000, max: 24 }) // "from|to" -> events[]
 
 function _isoOffset(days) {
     return new Date(Date.now() + days * 864e5).toISOString().slice(0, 10)
@@ -62,7 +64,7 @@ export function _assembleFedEvents(releaseEntries, from, to, fomcDates = FOMC_DA
     const fomc = fomcDates
         .filter(d => d >= from && d <= to)
         .map(date => ({
-            date, event: 'FOMC Rate Decision', impact: 'high', kind: 'fomc',
+            date, event: 'FOMC Rate Decision', short: 'FOMC', impact: 'high', kind: 'fomc',
             time: '2:00p', desc: 'Fed interest-rate decision + policy statement',
         }))
     return [...releaseEntries, ...fomc].sort((a, b) => a.date.localeCompare(b.date))
@@ -74,17 +76,23 @@ export function _assembleFedEvents(releaseEntries, from, to, fomcDates = FOMC_DA
  * releases with the static FOMC decision schedule. Cached 6h per window.
  */
 export async function fetchFedEvents({ days = 45, backDays = 0 } = {}) {
+    // `backDays` opens the window BACKWARDS. The Radar tab wants what is coming (the default, 0);
+    // the strategy monitor wants what has already landed since it last published, which is the
+    // opposite direction over the same feed.
+    return fetchFedEventsRange(_isoOffset(-backDays), _isoOffset(days))
+}
+
+/**
+ * The same events over an explicit window — `from`/`to` as YYYY-MM-DD, inclusive. The Floor's
+ * month calendar reads any month, past or coming, so it cannot be expressed as "the next N days".
+ * One fetch path for both: fetchFedEvents only works out its window and lands here.
+ */
+export async function fetchFedEventsRange(from, to) {
     if (!FRED_API_KEY) {
         logger.warn(LOG, 'FRED_API_KEY is not set — Fed calendar unavailable')
         return []
     }
-
-    // `backDays` opens the window BACKWARDS. The Radar tab wants what is coming (the default, 0);
-    // the strategy monitor wants what has already landed since it last published, which is the
-    // opposite direction over the same feed.
-    const from = _isoOffset(-backDays)
-    const to   = _isoOffset(days)
-    const key  = `${from}|${to}`
+    const key = `${from}|${to}`
 
     const cached = _cache.get(key)
     if (cached) return cached
@@ -203,7 +211,7 @@ export async function fetchMacroIndicators() {
     if (out.length) _macroIndCache.set('indicators', out)
     return out
 }
-
+
 // Daily series, so an hour is plenty and it keeps a chatty turn off the wire.
 const _pricedInCache = createTtlCache({ ttlMs: 60 * 60 * 1000, max: 4 })
 

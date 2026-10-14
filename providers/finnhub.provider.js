@@ -56,6 +56,16 @@ export async function fetchIpoCalendar(from, to, { onError = null } = {}) {
 // only ever happens once — not once per process restart/deploy. Value shape: { name, logo }.
 const _profiles = makeMongoBackedCache({ collection: 'finnhub_profile_cache', ttlMs: 30 * 24 * 60 * 60 * 1000, max: 1000, log: LOG })
 
+/**
+ * The cached profile, or null — never a network call. For lists too long to look every name up
+ * live (a peak earnings day runs 350–485 names, at Finnhub's 60 calls a minute): the caller takes
+ * what the cache already knows and spends live calls only where they matter.
+ */
+export async function peekCompanyProfile(symbol) {
+    if (!symbol) return null
+    return (await _profiles.read(symbol)) ?? null
+}
+
 export async function fetchCompanyProfile(symbol) {
     if (!symbol) return { name: null, logo: null }
 

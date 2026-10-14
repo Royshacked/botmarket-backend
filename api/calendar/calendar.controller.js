@@ -9,3 +9,13 @@ const handle = makeHandle(LOG)
 export const getEarnings = handle('getEarnings', async (req, res) => { res.json(await calendarService.getEarnings()) })
 export const getFed      = handle('getFed',      async (req, res) => { res.json(await calendarService.getFed()) })
 export const getIpo      = handle('getIpo',      async (req, res) => { res.json(await calendarService.getIpo()) })
+
+// The Floor's month calendar: counts per day for a grid, then one day in full. The range and the
+// date are checked here (a 400 for a malformed or over-long ask) before any provider is paid.
+export const getCounts = handle('getCounts', async (req, res) => {
+    const { from, to } = calendarService.parseRange(req.query.from, req.query.to)
+    res.json(await calendarService.getCounts(from, to))
+})
+export const getDay = handle('getDay', async (req, res) => {
+    res.json(await calendarService.getDay(calendarService.parseDate(req.params.date)))
+})
