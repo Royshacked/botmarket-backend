@@ -22,12 +22,15 @@ function toFinnhubDate(value) {
     return date.toISOString().slice(0, 10)
 }
 
-export async function fetchEarningsCalendarByDate(from, to) {
+// `onError: 'throw'` — the same contract as fetchIpoCalendar — for a reader that must not confuse
+// "no earnings" with "could not ask" (the month calendar caches what it reads).
+export async function fetchEarningsCalendarByDate(from, to, { onError = null } = {}) {
     try {
         const f = toFinnhubDate(from || new Date())
         const t = toFinnhubDate(to   || new Date())
         return await _get(`/calendar/earnings?from=${f}&to=${t}`, '/calendar/earnings')
     } catch (error) {
+        if (onError === 'throw') throw error
         logger.error(LOG, 'Error getting earnings calendar by date', error)
         return { earningsCalendar: [] }
     }

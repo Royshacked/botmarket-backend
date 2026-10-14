@@ -46,6 +46,14 @@ const FOMC_DATES = [
 // Room for a few months of the Floor calendar besides the rolling windows.
 const _cache = createTtlCache({ ttlMs: 6 * 60 * 60 * 1000, max: 24 }) // "from|to" -> events[]
 
+// Once per process: the list is a yearly chore, and a line per request would bury it.
+let _fomcWarned = false
+function _warnFomcOnce(to) {
+    if (_fomcWarned) return
+    _fomcWarned = true
+    logger.warn(LOG, `FOMC_DATES ends ${FOMC_DATES.at(-1)} — a window to ${to} shows no rate decisions after it; add the next year's schedule`)
+}
+
 function _isoOffset(days) {
     return new Date(Date.now() + days * 864e5).toISOString().slice(0, 10)
 }
@@ -97,13 +105,18 @@ export async function fetchFedEventsRange(from, to) {
     const cached = _cache.get(key)
     if (cached) return cached
 
+    // The FOMC list is static; past its last date the calendar shows no rate decisions at all.
+    if (to > FOMC_DATES.at(-1)) _warnFomcOnce(to)
+
     try {
         const ids = Object.keys(MACRO_RELEASES)
+        let failed = 0
         const perRelease = await Promise.all(ids.map(async (id) => {
             try {
                 const dates = await _releaseDates(id, from, to)
                 return dates.map(date => ({ date, ...MACRO_RELEASES[id], kind: 'data' }))
             } catch (err) {
+                failed += 1
                 logger.warn(LOG, 'FRED release fetch failed', id, err.message)
                 return []
             }
@@ -111,7 +124,9 @@ export async function fetchFedEventsRange(from, to) {
 
         const events = _assembleFedEvents(perRelease.flat(), from, to)
 
-        _cache.set(key, events)
+        // A window with a failed release is served but not cached (CR 2026-10-14): one failed CPI
+        // read would otherwise leave that month's grid without its CPI day for six hours.
+        if (!failed) _cache.set(key, events)
         return events
     } catch (err) {
         logger.error(LOG, 'Error getting Fed events', err)

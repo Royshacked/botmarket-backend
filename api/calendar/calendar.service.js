@@ -85,8 +85,9 @@ const byDate = (a, b) => (a.date || '').localeCompare(b.date || '')
 
 async function getEarnings() {
     const { from, to } = calendarWeek()
-    const data = await fetchEarningsCalendarByDate(from, to)
-    const rows = Array.isArray(data?.earningsCalendar) ? data.earningsCalendar : []
+    // The same cap-aware read as the month calendar (CR 2026-10-14): a 350-a-day week is past
+    // Finnhub's 1,500-row cap, and the single ask this used to make silently lost its Monday.
+    const rows = await earningsRowsInRange(from, to)
     const items = earningsItems(rows).sort(byDate)  // chronological → groups by day cleanly
     await enrichCalendarProfiles(items)
     return { from, to, items }
@@ -116,19 +117,23 @@ async function getIpo() {
 // names and logos, and even then only for the names worth it.
 
 const MAX_RANGE_DAYS   = 62     // a month view plus its leading/trailing week rows
-// Finnhub answers at most this many earnings rows and drops the EARLIEST dates to fit (sampled
-// 2026-10-14: an October request started on the 8th). A chunk that comes back full is re-asked
-// day by day, so a busy week cannot silently lose its Monday.
+// Finnhub answers at most this many earnings rows and drops the EARLIEST dates to fit. Sampled
+// 2026-10-14 against small windows: in a capped answer every day matches EXCEPT the earliest one it
+// returned, which is cut (Oct 8: 5 of 15; Nov 10: 228 of 399; Oct 29: 198 of 352), and the days
+// before it are missing. So a full chunk keeps its later days and re-asks the rest day by day.
 const FINNHUB_ROW_CAP  = 1500
 const CHUNK_DAYS       = 7
 // Live profile lookups an opened day may spend. The rest of the day rides on what the profile
 // cache already knows; the biggest names (by revenue estimate) are first in line for the live ones.
-const DAY_LIVE_PROFILES = 40
+// 24, not 40 (CR 2026-10-14): Finnhub allows 60 calls a minute across EVERY read, and a cold month
+// grid in earnings season spends a share of that itself.
+const DAY_LIVE_PROFILES = 24
 
-// Raw Finnhub rows per window. An hour is plenty: estimates move, dates rarely do. Empty answers
-// are not cached — the provider swallows a failure into an empty list, and an outage must not be
-// remembered as a quiet week for an hour.
+// Raw Finnhub rows per window, COMPLETE answers only. An hour is plenty: estimates move, dates
+// rarely do. A failed read is never cached — not on its own window, and not inside a chunk it was
+// re-asked for — so an outage is not remembered as a quiet day for an hour.
 const _earningsCache = createTtlCache({ ttlMs: 60 * 60 * 1000, max: 128 })
+const _fetchEarnings = (from, to) => fetchEarningsCalendarByDate(from, to, { onError: 'throw' })
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/
 
@@ -165,24 +170,45 @@ export function chunkRange(from, to, size = CHUNK_DAYS) {
     return out
 }
 
-/** Every Finnhub earnings row in [from, to] — split day by day when a window hits the row cap. */
-export async function earningsRowsInRange(from, to, fetchRows = fetchEarningsCalendarByDate) {
+/**
+ * Every Finnhub earnings row in [from, to] as `{ rows, complete }`. `complete` is false when any part
+ * of the window could not be read — those rows are still returned (a partial grid beats none) but
+ * never cached. `fetchRows` must THROW on failure; the default does.
+ */
+export async function readEarningsRange(from, to, fetchRows = _fetchEarnings) {
     const key = `${from}|${to}`
     const hit = _earningsCache.get(key)
-    if (hit) return hit
+    if (hit) return { rows: hit, complete: true }
 
-    const data = await fetchRows(from, to)
-    let rows = Array.isArray(data?.earningsCalendar) ? data.earningsCalendar : []
-    if (rows.length >= FINNHUB_ROW_CAP) {
-        if (from === to) {
-            logger.warn(LOG, `earnings for ${from} hit Finnhub's ${FINNHUB_ROW_CAP}-row cap — the day may be incomplete`)
-        } else {
-            const days = chunkRange(from, to, 1).map(([d]) => d)
-            rows = (await mapLimit(days, d => earningsRowsInRange(d, d, fetchRows), { concurrency: 2 })).flat()
-        }
+    let data
+    try {
+        data = await fetchRows(from, to)
+    } catch (err) {
+        logger.warn(LOG, `earnings ${from}..${to} unreadable — not cached: ${err?.message ?? err}`)
+        return { rows: [], complete: false }
     }
-    if (rows.length) _earningsCache.set(key, rows)
-    return rows
+    const rows = Array.isArray(data?.earningsCalendar) ? data.earningsCalendar : []
+    if (rows.length < FINNHUB_ROW_CAP || from === to) {
+        if (rows.length >= FINNHUB_ROW_CAP) logger.warn(LOG, `earnings for ${from} hit Finnhub's ${FINNHUB_ROW_CAP}-row cap — the day may be incomplete`)
+        _earningsCache.set(key, rows)
+        return { rows, complete: true }
+    }
+
+    // A full answer: the days after the earliest one returned are whole (see FINNHUB_ROW_CAP);
+    // that day and everything before it are re-asked one day at a time.
+    const earliest = rows.reduce((min, r) => (r.date && r.date < min ? r.date : min), to)
+    const whole = rows.filter(r => r.date > earliest)
+    const redo = chunkRange(from, earliest, 1).map(([d]) => d)
+    const parts = await mapLimit(redo, d => readEarningsRange(d, d, fetchRows), { concurrency: 2 })
+    const all = [...parts.flatMap(p => p.rows), ...whole]
+    const complete = parts.every(p => p.complete)
+    if (complete) _earningsCache.set(key, all)
+    return { rows: all, complete }
+}
+
+/** The rows alone — what every caller but a test needs. */
+export async function earningsRowsInRange(from, to, fetchRows) {
+    return (await readEarningsRange(from, to, fetchRows)).rows
 }
 
 /**

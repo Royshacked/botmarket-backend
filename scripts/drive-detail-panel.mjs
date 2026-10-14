@@ -6,6 +6,7 @@
 // Desktop (1600×900, the three-column Floor): the panel must dock OVER THE CHAT COLUMN, leave the
 // chat mounted under it, mark its row, close on Esc. Tablet with a touch screen: the same row opens a
 // full-screen page and the browser's back closes it. LOOK at the screenshots.
+/* global document, getComputedStyle -- page.evaluate bodies run in the browser */
 import dns from 'dns'
 import 'dotenv/config'
 import { chromium } from 'playwright'

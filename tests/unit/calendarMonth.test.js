@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-    calendarService, parseRange, parseDate, chunkRange, earningsRowsInRange, enrichFromCache, addDays,
+    calendarService, parseRange, parseDate, chunkRange, earningsRowsInRange, readEarningsRange, enrichFromCache, addDays,
 } from '../../api/calendar/calendar.service.js'
 
 // The Floor's month calendar (2026-10-14): counts per day for a grid, one day in full on a click.
@@ -34,25 +34,56 @@ test('chunkRange: consecutive windows, the last one clipped to `to`', () => {
         ['2026-10-30', '2026-10-31', '2026-11-01', '2026-11-02'])
 })
 
-// Finnhub caps at 1,500 rows and drops the EARLIEST dates — a full answer must be re-asked by day.
-test('earnings rows: a window that hits the row cap is re-asked day by day', async () => {
+// Finnhub caps at 1,500 rows and drops the EARLIEST dates; in a capped answer only the earliest day
+// it returned is cut (sampled 2026-10-14). So the later days are kept and the rest re-asked by day.
+const full = (dates) => ({ earningsCalendar: Array.from({ length: 1500 }, (_, i) => ({ symbol: `X${i}`, date: dates[i % dates.length] })) })
+
+test('earnings rows: a capped window keeps its whole days and re-asks only the cut ones', async () => {
     const calls = []
     const fetchRows = async (from, to) => {
         calls.push(`${from}|${to}`)
-        if (from !== to) return { earningsCalendar: Array.from({ length: 1500 }, (_, i) => ({ symbol: `X${i}`, date: to })) }
+        if (from !== to) return full(['2025-01-08', '2025-01-09'])      // 06–07 missing, 08 cut
         return { earningsCalendar: [{ symbol: `D${from}`, date: from }] }
     }
-    const rows = await earningsRowsInRange('2025-01-06', '2025-01-08', fetchRows)
-    assert.deepEqual(rows.map(r => r.date), ['2025-01-06', '2025-01-07', '2025-01-08'])
-    assert.equal(calls.length, 4)
+    const rows = await earningsRowsInRange('2025-01-06', '2025-01-09', fetchRows)
+    assert.deepEqual(calls, ['2025-01-06|2025-01-09', '2025-01-06|2025-01-06', '2025-01-07|2025-01-07', '2025-01-08|2025-01-08'])
+    const per = rows.reduce((m, r) => ({ ...m, [r.date]: (m[r.date] ?? 0) + 1 }), {})
+    assert.deepEqual(per, { '2025-01-06': 1, '2025-01-07': 1, '2025-01-08': 1, '2025-01-09': 750 })
 })
 
-test('earnings rows: an empty answer is not cached (an outage is not a quiet week)', async () => {
+test('earnings rows: a complete empty answer IS cached; a failed one is not', async () => {
     let n = 0
-    const fetchRows = async () => { n += 1; return { earningsCalendar: [] } }
-    await earningsRowsInRange('2025-02-03', '2025-02-03', fetchRows)
-    await earningsRowsInRange('2025-02-03', '2025-02-03', fetchRows)
-    assert.equal(n, 2)
+    const empty = async () => { n += 1; return { earningsCalendar: [] } }
+    await earningsRowsInRange('2025-02-01', '2025-02-01', empty)     // a quiet Saturday
+    await earningsRowsInRange('2025-02-01', '2025-02-01', empty)
+    assert.equal(n, 1)
+
+    let m = 0
+    const down = async () => { m += 1; throw new Error('429') }
+    assert.deepEqual(await earningsRowsInRange('2025-02-03', '2025-02-03', down), [])
+    await earningsRowsInRange('2025-02-03', '2025-02-03', down)
+    assert.equal(m, 2)
+})
+
+// The CR's medium finding: a day that failed inside a capped chunk must not be cached as part of it.
+test('earnings rows: a capped window with a failed day is served but not cached', async () => {
+    let failMonday = true
+    const calls = []
+    const fetchRows = async (from, to) => {
+        calls.push(`${from}|${to}`)
+        if (from !== to) return full(['2025-03-04', '2025-03-05'])
+        if (from === '2025-03-03' && failMonday) throw new Error('429')
+        return { earningsCalendar: [{ symbol: `D${from}`, date: from }] }
+    }
+    const first = await readEarningsRange('2025-03-03', '2025-03-05', fetchRows)
+    assert.equal(first.complete, false)
+    assert.ok(!first.rows.some(r => r.date === '2025-03-03'))
+
+    failMonday = false
+    const second = await readEarningsRange('2025-03-03', '2025-03-05', fetchRows)
+    assert.equal(second.complete, true)
+    assert.ok(second.rows.some(r => r.date === '2025-03-03'))
+    assert.equal(calls.filter(c => c === '2025-03-03|2025-03-05').length, 2)   // re-asked, not served stale
 })
 
 test('counts: per day across all three feeds, deduped, clipped to the range', async () => {
