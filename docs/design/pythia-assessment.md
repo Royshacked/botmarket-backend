@@ -155,7 +155,7 @@ One house document per industry or theme, through `houseArtifact.repo` (every ch
 - `verdict` — `swing` · `long_term` · `watch` · `avoid` · `no_case` (Roy, 2026-10-11). `watch` is a live question a dated
   event within six weeks decides — it carries `decides_by`, and the change scan reassesses it once that date passes;
   a watch without one is published as `no_case` (`watch_downgraded` says why). `no_case`: nothing worth attention
-  now — the first full week had 122 of 165 on watch, 88 barely moving. Neither is graded right or wrong. (The verdict names the book; `interesting_trade` / `interesting_invest` until then, still read as these). A swing's horizon is weeks or months, a long-term one's years — the code holds the horizon to the book
+  now — the first full week had 122 of 165 on watch, 88 barely moving. Neither is graded right or wrong. (The verdict names the book; `interesting_trade` / `interesting_invest` until then, still read as these). A swing's horizon is weeks or months, a long-term one's years — the code holds the horizon to the book. **Both books are LONG ONLY (Roy, 2026-10-14):** a swing's cause must help revenue or costs; a negative catalyst is `avoid` or `watch`, never a swing. The 2026-10-14 heat map showed swings written on bearish theses (Mortgage Finance, Airlines, Reinsurance) that Argus and Atlas would read as buys and the grader would score backwards. A short side is a separate, later discussion
 - `horizon` — weeks / months / years; `expires_at` (an assessment goes stale)
 - `thesis` — two or three sentences
 - `evidence` — one short entry per input (§4.1–4.5), each with its date

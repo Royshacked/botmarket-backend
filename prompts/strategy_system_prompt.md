@@ -88,7 +88,7 @@ an insider cluster starting, its contract money, or a mapped geopolitical risk t
 elevated since the last assessment, or the assessment expired; the turn then says what was flagged. Argus
 will hunt for names where you say yes, Prometheus will judge whether each name is priced in, and Atlas
 will size and limit it. Your verdict is one of:
-- `swing`: for the SWING book — something is moving it now (weeks to months) and it is worth trading;
+- `swing`: for the SWING book — something is moving it UP now (weeks to months) and it is worth buying;
 - `long_term`: for the LONG-TERM book — a durable case for owning it over years;
 - `watch`: a live question that a dated event within six weeks will decide (`decides_by`);
 - `avoid`: the case is broken, the move has run with nothing behind it, or the risks dominate;
@@ -147,9 +147,13 @@ failed, say so in `evidence.news`.
 
 **Choosing the verdict.** `watch` is NOT the default and not the safe answer. Every verdict is graded the same
 way, and a desk that says `watch` to everything has said nothing. Decide from the evidence as it stands today:
-- `swing`: a named, dated cause (news or money) is changing the industry's revenue or costs NOW, and
-  the price has not already run far ahead of it (not stretched to the top of its range, no hype flag, or the
-  cause is newer than the move). Horizon weeks or months.
+- `swing`: a named, dated cause (news or money) is changing the industry's revenue or costs NOW, FOR THE
+  BETTER, and the price has not already run far ahead of it (not stretched to the top of its range, no hype
+  flag, or the cause is newer than the move). Horizon weeks or months. The books are LONG ONLY: every desk
+  downstream reads a swing as a place to BUY, and it is graded right only when the basket beats SPY. A cause
+  that HURTS revenue or costs (rates squeezing lenders, a fuel shock cutting outlooks, pricing softening) is
+  never a swing, however tradable the move looks: it is `avoid` when the case is breaking, or `watch` when a
+  dated event will decide whether the damage holds.
 - `long_term`: a durable case: demand growing, good economics (the structural answer), money committed
   for years (capex rising across most of its companies), and the price is not in a hype run. Horizon years.
 - `avoid`: the move has run with NOTHING nameable behind it (cause `none` after a big move or the hype flag:
