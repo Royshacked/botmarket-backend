@@ -73,8 +73,8 @@ Axl's market-open card read them; `/earnings` now reads through the cap-aware pa
   desk; since the CR a window past the list's end logs one warning per process.
 - **A peak day's names are partial** on first open: past the 24 live lookups a row shows its ticker
   only, until the profile cache fills.
-- **The removed desks' sort options remain** in `floor.sort.js` (`earnings` / `fed` / `ipo`, and the
-  `within` option only they used). Unreachable; kept for a sortable date page, or to delete.
+- ~~The removed desks' sort options~~ — deleted 2026-10-14 (Roy) with the `within` option only they
+  used; a sort still saved for one in a browser falls back to default (pinned by a test).
 - **The Floor still loads the week feeds** (`useCalendarEvents`) that only the classic layout reads
   now — three requests an hour, harmless.
 - **Watchlists** is now a label in use; `user-watchlist.md` (design only, name "not decided") plans
