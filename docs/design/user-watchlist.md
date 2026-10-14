@@ -2,7 +2,9 @@
 
 **Status: DESIGN ONLY, nothing built.** Discussed 2026-10-04. The trigger set (what "a good entry"
 is made of) is deliberately not decided; this doc fixes the shape so it can be decided later
-without a migration. Name not decided.
+without a migration. Name not decided. (Since 2026-10-14 the Floor already labels the scan-list desk
+**Watchlists** — see [floor-calendar.md](./floor-calendar.md) §1 — so whatever this ships as should
+either live under that label or take a different one.)
 
 Relates to: `docs/desks/argus-scans.md` (the scan list this extends), `services/watchlist.service.js`
 (the cross-kind "what am I watching" read), `docs/design/architecture-vision.md` (house vs per-user),

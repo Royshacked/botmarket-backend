@@ -75,6 +75,7 @@ the plan and what the build settled differently (the rule at the bottom of this 
 | [horizons.md](./design/horizons.md) | Design, built in order — what can honestly be known at every horizon from 1 month to 20 years, on sourced evidence; the signal lab; the Forecasts board's future range view; events PARKED |
 | [architecture-vision.md](./design/architecture-vision.md) | House vs per-user pipeline; the Pythia → Argus → Prometheus → Atlas chain. Revised 2026-09-10 after the channel-graph engine was deleted; its tilt-led chain is stale since 2026-10-05 (Pythia publishes industry views); the house scan is back on Pythia's verdicts since 2026-10-11 |
 | [investor-schools.md](./design/investor-schools.md) | **BUILT 2026-08-02** (record) — two axes, selection and allocation, on two different seams. Trap: a school that only changes prose is a costume |
+| [floor-calendar.md](./design/floor-calendar.md) | **BUILD RECORD — shipped 2026-10-14** — the Floor's Lists column (chip strip, dimmed empty desks, renames, Events radar hidden) and the month Calendar that replaced the Earnings / Fed / IPO desks: per-day counts with the important Fed days named, a day page; `/api/calendar/counts` + `/day/:date`, and Finnhub's 1,500-row cap read around |
 | [pipeline-service.md](./design/pipeline-service.md) | **BUILT 2026-08-04** in the frontend (record) — hops between desks as artifacts keyed by kind; each desk declares what it emits and accepts. Written for Kairos; Mentor holds that hop now. The mechanism doc is `botmarket-frontend/docs/hand-offs.md` |
 
 ## Open work

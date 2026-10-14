@@ -256,7 +256,15 @@ api/
   turns/                  POST /api/turns/:turnId/stop — stopping a turn is spoken, walking away is
                           silent (turnRegistry); owner-scoped
   market/ calendar/       chart candles + quotes + market status; the week's earnings / Fed / IPO
-                          calendars (calendar.service owns the shaping; the controller is three lines)
+                          calendars (calendar.service owns the shaping; the controller stays thin).
+                          Since 2026-10-14 also the Floor's MONTH calendar: /counts?from&to (per-day
+                          counts + `fedHigh`, the day's high-impact Fed names; no profile lookups;
+                          ≤62 days, else 400) and /day/:date (one day in full, earnings biggest-first,
+                          names from the profile cache + ≤24 live lookups). Finnhub caps earnings at
+                          1,500 rows and drops the EARLIEST dates; readEarningsRange (the ONE earnings
+                          read — the week list too) asks 7-day chunks, keeps a capped answer's whole
+                          days and re-asks only the cut ones, and never caches a window with a failed
+                          part. docs/design/floor-calendar.md
   transcribe/             raw audio → Whisper (OpenAI SDK, the only OpenAI use). Mounted BEFORE
                           express.json so the raw-body parser sees the bytes; authed — it is a paid API.
                           The language is TOLD (`en`, or a client's 2-letter `?language=`), never
@@ -1207,6 +1215,11 @@ scripts/                    ops one-offs — none run by `npm test`. Kinds: migr
                             trader and admin against the LIVE routes; never presses Assess now / Run the week /
                             Propose / Approve. Names every failed API read. OPEN_ROW=<industry> opens that
                             row instead of the first (how step 8's and step 4's rows were driven)
+  drive-floor-lists.mjs     Drives the Floor's Lists column and Calendar (2026-10-14): the desk strip, dimmed
+                            empty desks, the pinned heading in a short window, the month grid over the chat
+                            (counts, the important Fed days named), a busy day's page, back, Esc. Reuses its
+                            sign-in session from the out dir (sign-in is rate-limited); needs the backend
+                            RUNNING the calendar routes. `node scripts/drive-floor-lists.mjs [baseUrl] [outDir]`
   scan-week.mjs             Pythia's change scan, DRY: what this week would assess and why — no model, no
                             writes. `node scripts/scan-week.mjs [cap]`
   assess-industry.mjs       One Pythia "Assess now" from the command line, as an admin; prints the cost
