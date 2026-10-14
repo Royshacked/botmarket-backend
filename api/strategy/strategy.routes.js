@@ -3,7 +3,7 @@ import { log }                    from '../../middleware/logger.middleware.js'
 import { requireAuth, requireAdmin } from '../../middleware/auth.middleware.js'
 import {
     streamStrategy,
-    listIndustries, getIndustry, publishIndustry,
+    listIndustries, getIndustry, publishIndustry, getForecastMap, getIndustryCompanies,
     getWeek, runWeekNow,
     listAssessments, getAssessment, getThemeAssessment, publishAssessment, assessNow, listCalls,
     listThemes, setThemeStatus, proposeThemesNow, assessThemeNow,
@@ -25,6 +25,9 @@ router.use(requireAuth)
 // the engine's measurements; one sub-industry by its 8-digit code.
 router.get('/industries',        log, listIndustries)
 router.get('/industries/:code',  log, getIndustry)
+// The Forecasts heat map (Roy, 2026-10-14): every tile at once, and an opened tile's companies.
+router.get('/industries/:code/companies', log, getIndustryCompanies)
+router.get('/map',               log, getForecastMap)
 
 // Pythia's week (pythia-assessment.md §8; replaced the weekly screen 2026-10-11): what the change scan flagged
 // and what was assessed, read by everyone; running it now is the house's spend, so admin-only.

@@ -13,6 +13,7 @@ import { notifyIndustryChanged } from '../../services/industryNotify.service.js'
 import { pythiaWeeklyService } from '../../services/pythiaWeekly.service.js'
 import { industryAssessmentService } from './industryAssessment.service.js'
 import { pythiaCallsService } from './pythiaCalls.service.js'
+import { forecastMapService } from './forecastMap.service.js'
 import { readTimingRow } from './screenerData.service.js'
 import { assessIndustry, assessTheme, proposeThemes, structureOf } from '../../services/industryAssessmentRun.service.js'
 import { themeService } from './theme.service.js'
@@ -255,6 +256,22 @@ export function runStatus(r, unknown) {
     if (r.outcome === unknown) return 404
     return r.outcome === 'error' ? 500 : 422
 }
+
+// ─── The Forecasts heat map (Roy, 2026-10-14) ─────────────────────────────────
+// Read by everyone, like the board: every sub-industry's latest move with Pythia's verdict on top, and an opened
+// tile's companies marked where Prometheus covers them (forecastMap.service).
+
+/** The map: `{ asof, tiles, unmapped, covered_at }`. */
+export const getForecastMap = _handle('getForecastMap', async (req, res) => {
+    res.json(await forecastMapService.readMap())
+})
+
+/** One sub-industry's companies, largest first, each marked covered or not. */
+export const getIndustryCompanies = _handle('getIndustryCompanies', async (req, res) => {
+    const out = await forecastMapService.readCompaniesFor(req.params.code)
+    if (!out) return sendReason(res, 'unknown_industry', { overrides: VIEW_REASONS })
+    res.json(out)
+})
 
 /** The forward log: the latest calls with their grades (everyone). */
 export const listCalls = _handle('listCalls', async (req, res) => {

@@ -398,10 +398,12 @@ async function getCoverage({ sector = null, status = null, school = null, onErro
  * every turn, to learn a ticker. Projects the one field. `onError: 'throw'` as getCoverage: the run
  * must not mistake an unreadable book for an empty one.
  */
-async function listSymbols({ onError } = {}) {
+async function listSymbols({ onError, live = false } = {}) {
     try {
         const db   = await getDb()
-        const rows = await db.collection(COLLECTION).find({}).project({ _id: 0, symbol: 1 }).toArray()
+        // `live`: leave RETIRED theses out — for a reader that shows the book (the Forecasts map, 2026-10-14). The
+        // "which names are taken" readers keep every status: a retired name still forces an update, not a new initiation.
+        const rows = await db.collection(COLLECTION).find(live ? { status: { $ne: 'retired' } } : {}).project({ _id: 0, symbol: 1 }).toArray()
         return rows.map(r => String(r.symbol ?? '').toUpperCase().trim()).filter(Boolean)
     } catch (err) {
         logger.error(LOG, 'listSymbols failed', err)
