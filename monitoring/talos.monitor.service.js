@@ -52,6 +52,12 @@ const EXPIRY_THRESHOLD_MS = 15 * 60_000   // run the expiry review within 15m of
 // How long after a candle closes the read is scheduled, so the provider has the bar. The poll adds
 // up to a minute on top; measure before tightening (docs/design/talos-per-candle.md, decision B).
 export const READ_LAG_MS  = 30_000
+// How long after the session shuts a wake still counts as reading the bar that closed WITH it. A
+// read is scheduled READ_LAG_MS after a close, and the last bar of the day closes at the bell — so
+// a "is it open NOW" gate put every daily read (and every session's last intraday bar) to sleep
+// until the next close, which then slept again, for ever (EXPD, 2026-10-14). Generous enough to
+// cover the poll and a restart; far short of the 2am frozen-price reads the gate exists to stop.
+export const CLOSE_GRACE_MS = 15 * 60_000
 
 // The statuses the loop polls — the readiness ladder a setup shares with a call:
 //   'waiting'  persisted but NOT monitored (Arm is the user's separate act) — never polled
@@ -125,7 +131,7 @@ export async function _checkSetup(setup, nowMs, deps = _deps) {
 
     // Market shut → no candle is closing and no entry can happen. Sleep until the first close after
     // the open. The expiry review is exempt: a setup may need to roll or die at the close.
-    if (!expiring && !deps.isAssetOpen(setup.asset, setup.asset_class)) return _sleepShut(setup, nowMs, deps)
+    if (!expiring && !_isReadable(setup, nowMs, deps)) return _sleepShut(setup, nowMs, deps)
 
     const price = await deps.getPrice(setup)
     // WHY THIS WAKE HAPPENED, as recorded by the sweep that caused it (guardSweep.service.js).
@@ -204,6 +210,16 @@ export async function _checkSetup(setup, nowMs, deps = _deps) {
     if (verdict !== onMenu) logger.info(LOG, `[${setup.id}] verdict "${onMenu}" → "${verdict}" (${reason}${_isPastExpiry(setup, nowMs) ? ', past expiry' : ''})`)
 
     return _applyVerdict(setup, hit, { ...raw, verdict }, nowMs, reason, price, deps)
+}
+
+/**
+ * Is there a bar to read? Open now, OR open CLOSE_GRACE_MS ago — the wake that reads the bar the
+ * session closed on lands just after the bell, and that read is the one a daily rung exists for.
+ * At that moment the last price IS the close, so it is not the frozen-price read the gate refuses.
+ */
+function _isReadable(setup, nowMs, deps) {
+    return deps.isAssetOpen(setup.asset, setup.asset_class, new Date(nowMs))
+        || deps.isAssetOpen(setup.asset, setup.asset_class, new Date(nowMs - CLOSE_GRACE_MS))
 }
 
 /** A shut market: park on the first candle close after the open. No read, no journal line. */
@@ -290,7 +306,7 @@ async function _checkPosition(setup, nowMs, deps) {
         // NO READS OFF-HOURS. `fetchLastPrice` answers with the last CLOSE at 2am, and a read on a
         // frozen price can post an `exit_now` card about a trade nobody can exit. The position is not
         // unwatched while we sleep: the stop rests at the broker.
-        if (!deps.isAssetOpen(setup.asset, setup.asset_class)) return _sleepShut(setup, nowMs, deps)
+        if (!_isReadable(setup, nowMs, deps)) return _sleepShut(setup, nowMs, deps)
         return _managePosition(setup, ps, scenario, watched, nowMs, deps)
     }
 

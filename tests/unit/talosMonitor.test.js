@@ -2,8 +2,9 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
     _isPreActive, _isExpiring, _nextReadAt, _checkSetup,
-    _nextStatus, _isPastExpiry, _effectiveVerdict, READ_LAG_MS,
+    _nextStatus, _isPastExpiry, _effectiveVerdict, READ_LAG_MS, CLOSE_GRACE_MS,
 } from '../../monitoring/talos.monitor.service.js'
+import { isAssetOpen } from '../../services/market.service.js'
 // The pure tier — the decisions a wake makes before it spends anything. Split out of the monitor
 // (which kept the loop, the scheduling and the writes) when that file passed 1500 lines.
 import {
@@ -1101,6 +1102,60 @@ test('the fill line schedules the next wake on the candle close, like every othe
     const deps = stubDeps()
     await _checkSetup(FILLED, T, deps)
     assert.equal(deps.writes[0]['monitor_state.next_check_at'], new Date(T + 3600_000 + READ_LAG_MS).toISOString())
+})
+
+// ─── The read that lands on the bell ──────────────────────────────────────────
+// A daily read is scheduled READ_LAG_MS after the 16:00 ET close, when the market is already shut.
+// Gating on "open NOW" slept it to the next close, which slept again — no daily setup was ever read
+// on its candle (EXPD, 2026-10-14). These use the REAL session gate, not a stub.
+
+const BELL      = Date.parse('2026-10-14T20:00:00Z')   // Wed 16:00 EDT
+const realOpen  = (s, c, d) => isAssetOpen(s, c, d)
+const DAILY     = { ...LIVE, timeframe: 'day' }
+
+test('the read just after the close is a read, not a market-closed sleep', async () => {
+    let assessed = false
+    const res = await _checkSetup(DAILY, BELL + READ_LAG_MS + 12_000, stubDeps({
+        isAssetOpen: realOpen,
+        assess:      async () => { assessed = true; return { verdict: 'wait', read: 'Not yet.' } },
+    }))
+    assert.notEqual(res.reason, 'market_closed')
+    assert.equal(assessed, true, 'the bar that closed with the session is read')
+})
+
+test('past the grace the shut market still costs nothing', async () => {
+    for (const at of [BELL + CLOSE_GRACE_MS + 60_000, Date.parse('2026-10-15T06:00:00Z')]) {   // 16:16 / 02:00 ET
+        let assessed = false
+        const res = await _checkSetup(DAILY, at, stubDeps({
+            isAssetOpen: realOpen,
+            assess:      async () => { assessed = true; return {} },
+        }))
+        assert.equal(res.reason, 'market_closed', new Date(at).toISOString())
+        assert.equal(assessed, false)
+    }
+})
+
+test('a watched position is managed on the closing bar too', async () => {
+    const watched = { ...mk({ timeframe: 'day', target_legs: [{ price: 261, conditions: [{ text: 'only if volume confirms' }] }] }, VENUE),
+        status: 'long', quantity: 100, position_state: { entry: { fill_at: '2026-10-13T15:00:00Z', fill_price: 238.6, size: 100 } } }
+    let managed = false
+    const res = await _checkSetup(watched, BELL + READ_LAG_MS, stubDeps({
+        isAssetOpen:    realOpen,
+        assessPosition: async () => { managed = true; return { verdict: 'hold', read: 'Fine.' } },
+    }))
+    assert.notEqual(res.reason, 'market_closed')
+    assert.equal(managed, true)
+})
+
+test('an entry decided on the closing bar parks for the open instead of asking for a confirm', async () => {
+    let carded = false
+    const res = await _checkSetup(DAILY, BELL + READ_LAG_MS, stubDeps({
+        isAssetOpen: realOpen,
+        assess:      async () => ({ verdict: 'enter', read: 'Closed above.' }),
+        onCard:      async () => { carded = true },
+    }))
+    assert.equal(res.orderState, 'awaiting_market')
+    assert.equal(carded, false)
 })
 
 // ─── In-position metrics ──────────────────────────────────────────────────────
