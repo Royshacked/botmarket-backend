@@ -1,9 +1,7 @@
 import { scannerAgentService } from '../../services/agents/scanner.agent.service.js'
-import { scannerChatService }  from './scannerChat.service.js'
 import { scanService }         from './scan.service.js'
 import { streamAgentResponse, sseAgentCallbacks } from '../_shared/sse.util.js'
 import { parseChatMessages }   from '../_shared/parse.util.js'
-import { makeGetChatState, makeDeleteChatState } from '../_shared/chatState.util.js'
 import { sendReason }          from '../_shared/reason.util.js'
 import { makeEntityController } from '../_shared/entityController.util.js'
 import { makeHandle }          from '../_shared/handle.util.js'
@@ -35,7 +33,7 @@ export async function streamScanner(req, res) {
                 // next step. Whitelisted rather than passed through: this string lands in the prompt,
                 // and an unknown value degrades to the generic phrasing instead of putting whatever
                 // the body carried in front of the user.
-                handoffTo:       handoffTo === 'mentor' || handoffTo === 'kairos' ? handoffTo : null,
+                handoffTo:       handoffTo === 'mentor' ? handoffTo : null,
                 // The Events radar handed over a universe: the mode flag, and the board it applies to.
                 // The board is built server-side (aetherScanUniverse) and handed straight back, so the
                 // only thing worth checking here is its shape — the prompt renders whatever it holds.
@@ -92,25 +90,4 @@ export const updateScan = handle('updateScan', async (req, res) => {
     const result = await scanService.updateScan(id, scan, req.user._id)
     if (!result.ok) return sendReason(res, result.reason, { fallback: 500, fallbackMessage: 'Failed to update scan' })
     res.json({ scan: result.doc })
-})
-
-// ─── Chat state ───────────────────────────────────────────────────────────────
-export const saveScannerChatState = handle('saveScannerChatState', async (req, res) => {
-    const { messages } = req.body ?? {}
-    if (!Array.isArray(messages)) throw httpError(400, 'messages must be an array')
-    const result = await scannerChatService.saveChatState(req.user._id, messages)
-    if (!result.ok) return res.status(500).json({ error: 'Failed to save chat state' })
-    res.json({ ok: true })
-})
-
-export const getScannerChatState = makeGetChatState({
-    service: scannerChatService,
-    keyArgs: (req) => [req.user._id],
-    log: LOG,
-})
-
-export const deleteScannerChatState = makeDeleteChatState({
-    service: scannerChatService,
-    keyArgs: (req) => [req.user._id],
-    log: LOG,
 })

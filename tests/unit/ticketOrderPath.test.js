@@ -398,7 +398,6 @@ test('a status word stamps only what it implies BY ITSELF', () => {
     assert.ok(looking.activatedAt > 0)
 
     assert.ok(normalizeIdeaPatch({ status: 'hit' }).patch.entryTriggeredAt > 0)
-    assert.equal(normalizeIdeaPatch({ status: 'closed' }).patch.chat_state, null, 'a closed idea drops its build conversation')
 })
 
 test('editing the invalidation range re-arms the watcher from scratch', () => {

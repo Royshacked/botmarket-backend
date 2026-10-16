@@ -178,7 +178,7 @@ export async function confirmManualExit(id, { price, quantity } = {}, userId) {
         const now = Date.now()
         const set = {
             status: 'closed', orderState: 'closed', closedReason: reason, closedAt: now,
-            chat_state: null, pendingTrimQty: null,
+            pendingTrimQty: null,
             ...(res?.pnl != null && { realizedPnl: res.pnl }),
         }
         const updated = await entityRepo.patchAndGet(id, set)

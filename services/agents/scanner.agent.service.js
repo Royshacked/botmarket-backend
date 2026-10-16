@@ -211,7 +211,6 @@ function scannerToolsForProfile(profile) {
 // here is free.
 const HANDOFF_DESKS = {
     mentor: 'Mentor, which builds a `setup` the user shapes level by level',
-    kairos: 'Kairos, which authors a single `call`',
 }
 // Unknown/absent destination degrades to the generic phrasing rather than guessing a desk: the
 // module already tells Argus to name only what this line names, so "the build desk" is honest where

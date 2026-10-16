@@ -673,8 +673,9 @@ the Nasdaq-100 as the **US100 cash CFD**, but levels are read off the **NQ futur
   TTL). Portfolio drafts persist server-side inline; idea/scanner drive drafts client-side through
   `/api/threads` (their server never holds the full conversation). Fixes the mandate re-send hack —
   construction state is durable before the artifact exists.
-- Portfolio/scanner legacy chat state (`portfolio_chats` / `scanner_chats`) still persists per
-  user/portfolio for post-create edit restore; being superseded by `threads`.
+- Portfolio legacy chat state (`portfolio_chats`) still persists per portfolio for post-create edit
+  restore. The scanner's (`scanner_chats`) lost its routes 2026-10-16 — nothing called them; the
+  collection waits for the unified-chat migration (`docs/design/unified-chat-plan.md`).
 
 ---
 

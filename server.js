@@ -155,9 +155,9 @@ app.use('/api', apiLimiter)
 // gets the audio stream before the JSON middleware can touch it
 app.use('/api/transcribe', transcribeRoutes)
 
-// 10mb (vs the 100kb default): trade ideas persist their full chat transcript in
-// `chat_state` (messages + analysisState), which overflows the default limit on
-// longer conversations and 413s the save/update.
+// 10mb (vs the 100kb default): a turn body can carry a whole conversation (a setup's
+// `chat_state`, an agent stream's full history, Argus's radar board), which overflows
+// the default limit on longer conversations and 413s the request.
 app.use(express.json({ limit: '10mb' }))
 
 if (config.isProduction) {

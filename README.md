@@ -527,11 +527,6 @@ The scanner agent produces a watchlist of trade candidates for a given timeframe
 │  GET    /api/scanner/scans        list all scans for user        │
 │  PUT    /api/scanner/scans/:id    update scan (add/remove names) │
 │  DELETE /api/scanner/scans/:id    delete scan                    │
-│                                                                  │
-│  Chat state saved separately per user:                           │
-│  POST   /api/scanner/chat-state   save conversation              │
-│  GET    /api/scanner/chat-state   restore conversation on reopen │
-│  DELETE /api/scanner/chat-state   clear                          │
 └──────────────────────────────────────────────────────────────────┘
 
 Edit mode (refining an existing scan list):
