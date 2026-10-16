@@ -275,7 +275,13 @@ api/
                           Express never 304s a probe. Reports leader + loop count (roster only in dev)
   _shared/                cross-controller helpers:
       sse.util.js             startSseStream() — SSE headers + heartbeat + abort wiring
-      parse.util.js           parseChatMessages / parseIdeaAccounts
+      deskStream.util.js      makeDeskStream({ log, parse, run, done }) — THE streaming desk turn every
+                              desk's POST /stream rides: shared parse + 400s, the common agent bag
+                              (messages/model/user/audience/signal/SSE callbacks), the routing gate
+                              appended to every `done`. A desk supplies only its extras, its agent
+                              call and its done shape (unified-chat phase 2, 2026-10-16)
+      parse.util.js           parseDeskTurn (the one desk-turn body: messages required, no userPrompt)
+                              / parseChatMessages / parseIdeaAccounts / parseClientTime
       handle.util.js          makeHandle(log) — wrap an async handler so a throw is logged WITH its
                               route and forwarded; errorHandler — THE global error handler (mounted
                               last in server.js): a minted `httpError` answers with its status +
@@ -357,6 +363,9 @@ services/
                             above/below/thin vs Street; the delta read ends on the JSON line the model copies). (P2)
   agentUtils.js           shared tool handlers, makePromptLoader, makeToolHandler,
                           formatMoney/buildAccountLines, stripEmitTags, runtime glue.
+                          cleanReply (every desk's reply, stripped from the shared ALL_EMIT_TAGS,
+                          <ticker> unwrapped); normalizeMessages (the one history helper, depth per
+                          desk via MAX_MESSAGES); openingTurn(text) — how a headless run opens a desk.
                           resolveAgentStream: the model for a turn. SINCE 2026-09-21 EVERY turn — any
                           user, the admin included, and a turn with no user (market brief, coverage
                           re-model) — runs the HOUSE chat model (houseModels.service, one
@@ -1308,7 +1317,8 @@ docs/                       docs/README.md is THE index. architecture/ (how it i
 | Task | Touch |
 |------|-------|
 | New HTTP endpoint | `<feature>.routes.js` + handler in controller + logic in service |
-| New SSE stream | `startSseStream()` from `api/_shared/sse.util.js` |
+| New desk stream (an agent turn) | `makeDeskStream()` from `api/_shared/deskStream.util.js` |
+| New SSE stream (not an agent turn) | `streamAgentResponse()` / `startSseStream()` from `api/_shared/sse.util.js` |
 | New agent tool | schema + handler; put shared ones in `agentUtils` (`COMMON_TOOL_HANDLERS`, `makeToolHandler`) |
 | New broker | `providers/<b>.provider.js` + `adapters/<b>.adapter.js` (extend `BrokerAdapter`) + one line in `broker.factory.js`; add aliases in `brokerSymbol.service.js` only if it renames instruments. `capabilities()` is an exhaustive literal, not a spread of the base — state EVERY flag, including `selfExecuted`, or it reads `undefined`. A broker-less venue (the user places the orders) sets `selfExecuted:true` and needs no other change: the eleven card-instead-of-order branches already ask the capability. `tests/unit/selfExecutedVenue.test.js` pins the inventory and fails when a second one arrives |
 | New aliased index future (broker basis) | add to `brokerSymbol.service.ALIASES` + `brokerPrice.service` REAL_TICKER/CASH_INDEX maps; offset auto-measured at fork, candle-shifted in monitor |

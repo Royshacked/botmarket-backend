@@ -301,6 +301,10 @@ Idempotent, dry-run first, axl_dev before prod.
 - Linked threads, `setups.chat_state`, `portfolio_chats.messages`, `scan.chat` → the entity's `agent_context`.
 - Unlinked threads and `scanner_chats` rows → one archived session each.
 - Then drop the old fields and collections (`threads`, `scanner_chats`) and the old indexes.
+- **Unset `chat_state` on every `trade-ideas` document** (CR 2026-10-16, B1). The archived idea agent
+  wrote whole transcripts there; phase 1 stopped writing and clearing it, so the existing ones sit
+  in Mongo until this step — dead weight against the 512 MB cap. (`call` documents keep theirs: the
+  `call` kind is kept data, see CLAUDE.md.)
 - Measure the database size before and after (512 MB cap) — migration removes duplicates, so it should shrink.
 
 ## 12. Phase 10 — Docs, merge, deploy

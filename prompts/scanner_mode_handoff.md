@@ -6,9 +6,9 @@ trade on — NOT a watchlist. Everything in the spine about *how you screen* sti
 from the tape, the funnel narrows in stages, relative strength decides, only tradeable names count.
 What changes is what you are converging ON and what you emit at the end.
 
-**Which desk sent you is named in your `ACTIVE MODE` line — use THAT name when you refer to where
-the pick is going** — Mentor builds a `setup` the user shapes level by level. If the line names no
-desk, say "the build desk". Do not name a desk the ACTIVE MODE line did not.
+**Which desk sent you is named in your `ACTIVE MODE` line — use THAT name, and what the line says
+the desk does, when you refer to where the pick is going.** If the line names no desk, say "the
+build desk". Do not name a desk the ACTIVE MODE line did not.
 
 **What this mode overrides:**
 

@@ -91,14 +91,11 @@ export function parseDeskTurn(body) {
     const validated = parseChatMessages(body?.messages)
     if (validated.error) return { error: validated.error }
 
+    // A chatState that is not a plain object is treated as NONE, never as a 400: four desks do not
+    // read it at all, and refusing a whole turn over a field the desk would ignore (or rebuild from
+    // its default) costs the user their message for nothing.
     const { chatState } = body
-    let state = null
-    if (chatState !== undefined && chatState !== null) {
-        if (typeof chatState !== 'object' || Array.isArray(chatState)) {
-            return { error: 'chatState must be an object' }
-        }
-        state = chatState
-    }
+    const state = chatState && typeof chatState === 'object' && !Array.isArray(chatState) ? chatState : null
 
     return {
         messages:      validated.messages,

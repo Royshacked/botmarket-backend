@@ -39,13 +39,25 @@ import { routeFields } from '../../services/routing.util.js'
  * @returns {(req: object, res: object) => Promise<void>}  the Express handler
  */
 export function makeDeskStream({ log, parse = null, run, done }, { experience = getExperienceLevel } = {}) {
-    return async function deskStream(req, res) {
+    return async function deskStream(req, res, next) {
         const turn = parseDeskTurn(req.body)
         if (turn.error) return res.status(400).json({ error: turn.error })
 
+        // The experience level is read ALONGSIDE the desk's parse rather than after it, so it never
+        // adds a round trip in front of the model call. It answers null on a failed read; the catch is
+        // only so a rejection while the parse is still running can never go unhandled.
+        const audience = experience(req.user._id).catch(() => null)
+
         // Body validation that may 400 has to finish BEFORE the stream opens — once the SSE headers
-        // are out, a status code can no longer be sent.
-        const extras = parse ? await parse(req, turn) : {}
+        // are out, a status code can no longer be sent. A desk's parse may read the database (the
+        // coverage context, the house labels); a throw there goes to the global error handler, never
+        // into the void — Express 4 does not see an async rejection, and the request would hang.
+        let extras
+        try {
+            extras = parse ? await parse(req, turn) : {}
+        } catch (err) {
+            return next ? next(err) : res.status(500).json({ error: 'Could not start the turn' })
+        }
         if (extras?.error) return res.status(400).json({ error: extras.error })
 
         await streamAgentResponse(req, res, {
@@ -55,7 +67,7 @@ export function makeDeskStream({ log, parse = null, run, done }, { experience = 
                     messages: turn.messages,
                     model:    turn.model,
                     userId:   req.user._id,
-                    audience: await experience(req.user._id),
+                    audience: await audience,
                     signal,
                     ...sseAgentCallbacks(sendEvent),
                 }

@@ -1,6 +1,6 @@
-// Generic thread write/read API over threadService. Agents whose server never sees
-// the full conversation (idea sends userPrompt+analysisState; scanner trims) drive
-// their own draft persistence from the client through these endpoints. Portfolio
+// Generic thread write/read API over threadService. Desks whose server does not persist
+// the conversation drive their own draft persistence from the client through these
+// endpoints. Portfolio
 // persists server-side inline (it already holds the full messages) — both paths land
 // in the same `threads` store; only the write trigger differs.
 

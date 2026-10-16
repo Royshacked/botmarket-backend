@@ -44,12 +44,16 @@ test('the conversation is required — an empty, absent or prompt-only body is a
 
 // ── chat state ───────────────────────────────────────────────────────────────
 
-test('chatState must be a plain object; absent and null both mean "none"', () => {
+test('chatState is a plain object or "none" — a malformed one is dropped, never a 400', () => {
     assert.deepEqual(turn({ chatState: { draft: {} } }).chatState, { draft: {} })
     assert.equal(turn().chatState, null)
     assert.equal(turn({ chatState: null }).chatState, null)
-    assert.match(turn({ chatState: [] }).error, /chatState must be an object/)
-    assert.match(turn({ chatState: 'no' }).error, /chatState must be an object/)
+    // Four desks never read it; refusing the whole turn over it would cost the user their message.
+    for (const bad of [[], 'no', 42, true]) {
+        const out = turn({ chatState: bad })
+        assert.equal(out.error, undefined, String(bad))
+        assert.equal(out.chatState, null, String(bad))
+    }
 })
 
 // ── accounts ─────────────────────────────────────────────────────────────────

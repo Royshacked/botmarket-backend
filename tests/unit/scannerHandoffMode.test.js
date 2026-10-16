@@ -175,3 +175,10 @@ test('the spine never names a build desk — it does not know which one is liste
 test('the module never names the archived Kairos desk', () => {
     assert.doesNotMatch(HANDOFF, /\bKairos\b/)
 })
+
+// The module is ONE cached block every hand-off reads — a named sender and a generic one alike. A
+// desk named in it reaches a hand-off that did not come from that desk, and Argus repeats the name
+// in prose. The destination is named only in the volatile ACTIVE MODE line.
+test('the cached module names no build desk at all', () => {
+    assert.doesNotMatch(HANDOFF, /\bMentor\b/)
+})

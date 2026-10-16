@@ -177,7 +177,7 @@ trade. Service layer: `tradeCaptureService.listTrades` / `tradeStats`; the pure
 
 ```
 call ─confirm→ idea{callId} ─fill→ ┐
-idea chat ────────→ idea ─fill→    ├─ execution.reconciler ─→ captureOpen  → trade{status:'open'}
+order ticket ─────→ idea ─fill→    ├─ execution.reconciler ─→ captureOpen  → trade{status:'open'}
 portfolio ────────→ idea ─fill→    ┘                          captureClose → trade{status:'closed'}
 broker fill (no idea) ─────────────→ captureOpenBare (idealess)
 ```

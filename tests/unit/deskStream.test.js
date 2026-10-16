@@ -57,6 +57,30 @@ test("a desk's own parse can refuse with a 400 too", async () => {
     assert.equal(res.body.error, 'bad seed')
 })
 
+test("a desk parse that THROWS reaches the error handler — the request never hangs", async () => {
+    const handler = makeDeskStream({
+        log: '[t]', parse: async () => { throw new Error('mongo down') }, run: async () => ({ reply: 'x' }), done: r => r,
+    }, deps)
+    const { req, res } = makeReqRes(hi)
+    const seen = []
+    await handler(req, res, (err) => seen.push(err))
+    assert.equal(seen.length, 1)
+    assert.match(seen[0].message, /mongo down/)
+    assert.equal(res.writes.length, 0, 'no stream was opened')
+})
+
+test('the experience read runs alongside the parse, not after it', async () => {
+    const order = []
+    const handler = makeDeskStream({
+        log: '[t]',
+        parse: async () => { order.push('parse:start'); await new Promise(r => setTimeout(r, 20)); order.push('parse:end'); return {} },
+        run: async () => ({ reply: 'x' }), done: r => r,
+    }, { experience: async () => { order.push('experience'); return 'novice' } })
+    const { req, res } = makeReqRes(hi)
+    await handler(req, res)
+    assert.ok(order.indexOf('experience') < order.indexOf('parse:end'), order.join(','))
+})
+
 test('the agent gets the common bag: conversation, model, user, audience, signal and the SSE callbacks', async () => {
     let seen = null
     const handler = makeDeskStream({
