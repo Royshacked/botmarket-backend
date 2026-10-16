@@ -5,6 +5,7 @@ import { makePromptLoader, cleanReply, buildAccountLines, buildTimeSection, buil
 import { makeNewsHandlers } from '../tools/news.tools.js'
 import { getAnalystActions } from '../../providers/fmp.provider.js'
 import { buildTagCaptures } from '../llmStream.util.js'
+import { DESKS } from '../desks/registry.js'
 import { makeRouteCapture, buildRouteRule } from '../routing.util.js'
 import { TRADING_TOOLS, buildTradingToolHandlers } from '../tools/trading.tools.js'
 import { toolsFor } from '../agentTools.registry.js'
@@ -41,7 +42,7 @@ import { logger } from '../logger.service.js'
 const __dirname   = dirname(fileURLToPath(import.meta.url))
 const PROMPT_PATH = join(__dirname, '../../prompts/mentor_system_prompt.md')
 const LOG         = '[mentorAgent]'
-const MAX_MESSAGES = 8
+const MAX_MESSAGES = DESKS.mentor.maxMessages
 
 const _baseSystemPrompt = makePromptLoader(PROMPT_PATH, LOG)
 

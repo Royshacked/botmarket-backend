@@ -24,38 +24,42 @@
 // `...route.captures` in its tag captures, `...route.result()` in its return, and
 // `...routeFields(result, req.user.role)` in its controller's done payload.
 
+import { DESKS, PIPELINE_KEYS, ADMIN_PIPELINE_KEYS } from './desks/registry.js'
+
 // ─── The desks ────────────────────────────────────────────────────────────────
+
+// Every list below DERIVES from the one desk registry (services/desks/registry.js) — five of them
+// used to be hand-kept here and in session.util, and a desk added to one and not the others was routed
+// to, refused, or sealed nowhere.
 
 // The pipelines a reply may hand the user to. Validated server-side rather than trusted from the
 // model: an unknown key would leave the client trying to navigate to a tab that doesn't exist, so
 // it becomes null and the user simply stays where they are.
-export const VALID_PIPELINES = new Set(['trade', 'portfolio', 'scan', 'assist', 'research', 'strategy', 'aether'])
+export const VALID_PIPELINES = new Set(PIPELINE_KEYS)
 
 // Admin-only: Pythia (strategy) and Aether. The prompts say so; this is the gate that holds when a
 // model forgets, so a trader is never sent to a desk the hub does not show them and the routes 403.
-export const ADMIN_DESKS = Object.freeze(['strategy', 'aether'])
+export const ADMIN_DESKS = ADMIN_PIPELINE_KEYS
 
 /**
  * The desks one DESK may send the user to — each is ONE agent, keyed by the pipeline whose entry
  * tab is that agent, so "send it to Mentor" is `assist` and never `trade` (which enters at Argus).
- * The admin desks are not here: Pythia sets the house view and Aether reads event exposure — neither
- * is somewhere a user asks to be taken with a name, and keeping them out means no desk agent has to
- * know the user's role to write a correct offer. Axl still routes admins to both.
+ * The admin desks are not here (registry: not routable) — no desk agent has to know the user's role
+ * to write a correct offer. Axl still routes admins to both.
  *
  * `agent` is the AGENTS / activeTab key the client knows the desk's agent by; `does` is the one line
  * the sender's prompt shows.
  */
-export const ROUTABLE_DESKS = Object.freeze({
-    research:  { agent: 'analyst',   brand: 'Prometheus', does: 'researches a company into house coverage — a thesis and a price target vs the Street' },
-    assist:    { agent: 'mentor',    brand: 'Mentor',     does: 'builds ONE trade setup with the user, zone by zone, and arms it for monitoring' },
-    portfolio: { agent: 'portfolio', brand: 'Atlas',      does: 'builds and reviews a portfolio book against a mandate' },
-    scan:      { agent: 'scanner',   brand: 'Argus',      does: 'scans the market for a ranked watchlist, or validates a single name for a trade' },
-})
+export const ROUTABLE_DESKS = Object.freeze(Object.fromEntries(
+    Object.values(DESKS).filter(d => d.routable).map(d => [d.desk, { agent: d.agent, brand: d.brand, does: d.does }]),
+))
 
 // The desk each agent stands at, so its own door is left off its list. Argus is also the trade
 // desk's entry and Mentor its build step; neither is listed here because `trade` is Axl's composite
 // pipeline, not a place a desk sends anyone.
-const AGENT_DESK = Object.freeze({ scanner: 'scan', mentor: 'assist', analyst: 'research', portfolio: 'portfolio' })
+const AGENT_DESK = Object.freeze(Object.fromEntries(
+    Object.values(DESKS).filter(d => d.routable).map(d => [d.agent, d.desk]),
+))
 
 // ─── Grammar ──────────────────────────────────────────────────────────────────
 
@@ -82,7 +86,9 @@ export function splitRoute(raw) {
 // kind → desk lives here beside the parse because it IS part of the grammar: the client is told
 // which desk so the pipeline crumb reads the same as any other arrival. `call` left on 2026-08-18
 // with Kairos: an <edit> is a door into the desk that OWNS the item, and that desk is archived.
-export const EDIT_KIND_DESKS = Object.freeze({ setup: 'assist', coverage: 'research', scan: 'scan', portfolio: 'portfolio' })
+export const EDIT_KIND_DESKS = Object.freeze(Object.fromEntries(
+    Object.values(DESKS).filter(d => d.editable && d.entityKind).map(d => [d.entityKind, d.desk]),
+))
 export const EDIT_KINDS = new Set(Object.keys(EDIT_KIND_DESKS))
 
 // `<edit>coverage 3f9c…</edit>` → { kind, ref, desk }, or null when there is nothing openable.

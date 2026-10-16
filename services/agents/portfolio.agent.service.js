@@ -18,6 +18,7 @@ import { makeChartHandler } from '../tools/marketData.tools.js'
 import { coverageService } from '../../api/analyst/coverage.service.js'
 import { SECTORS } from '../entity/vocabulary.js'
 import { buildTagCaptures } from '../llmStream.util.js'
+import { DESKS } from '../desks/registry.js'
 import { makeRouteCapture, buildRouteRule } from '../routing.util.js'
 import { buildSchoolSection, normalizeAllocation, normalizeSelection } from '../investorSchools.js'
 import { applyIndustryLimits, industriesFor, avoidNames, capFor } from '../industryLimits.service.js'
@@ -26,7 +27,7 @@ const __dirname    = dirname(fileURLToPath(import.meta.url))
 const LOG   = '[portfolioAgent]'
 // Hot-reload the system prompt on file change (mtime-gated) — no restart needed.
 const _systemPrompt = makePromptLoader(join(__dirname, '../../prompts/portfolio_system_prompt.md'), LOG)
-const MAX_MESSAGES = 10
+const MAX_MESSAGES = DESKS.portfolio.maxMessages
 
 export const TOOLS = toolsFor({
     web_search: '',

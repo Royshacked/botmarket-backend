@@ -18,6 +18,7 @@ import { makeMarketHoursHandlers, MARKET_HOURS_TOOL_SPEC } from '../tools/market
 import { makeHouseIndustriesHandlers, HOUSE_INDUSTRIES_TOOL_SPEC } from '../tools/houseIndustries.tools.js'
 import { houseLabels, booksForStyle, wireLabel } from '../houseLabel.service.js'
 import { buildTagCaptures } from '../llmStream.util.js'
+import { DESKS } from '../desks/registry.js'
 import { makeRouteCapture, buildRouteRule } from '../routing.util.js'
 import { isToolError } from '../toolResult.util.js'
 import { makeGroundingLedger, recordSourced, recordTouched, groundingTier, DISCOVERY_TOOLS, PER_NAME_TICKER_ARGS, SOURCED_EXTRACT } from '../scanner.grounding.js'
@@ -44,7 +45,7 @@ const _handoffMode = makePromptLoader(join(__dirname, '../../prompts/scanner_mod
 // the list half. The two are mutually exclusive — one ends in a pick, the other in a list — which
 // is what keeps the system prompt at two cached blocks and inside the breakpoint budget below.
 const _radarMode = makePromptLoader(join(__dirname, '../../prompts/scanner_mode_radar.md'), LOG)
-const MAX_MESSAGES = 10
+const MAX_MESSAGES = DESKS.scanner.maxMessages
 
 export const TOOLS = toolsFor({
     web_search: '',

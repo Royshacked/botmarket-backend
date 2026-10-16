@@ -22,6 +22,7 @@ import { toolsFor } from '../agentTools.registry.js'
 import { consultDescription } from '../deepThink.service.js'
 import { makePromptLoader, cleanReply, makeToolHandler, attachTurnContext, LANGUAGE_RULE, BREVITY_RULE, buildStandingProposalRule, cachedBlock, normalizeMessages } from '../agentUtils.js'
 import { buildTagCaptures } from '../llmStream.util.js'
+import { DESKS } from '../desks/registry.js'
 import { makeRouteCapture, buildRouteRule } from '../routing.util.js'
 import {
     readSubIndustry, listSubIndustries, readCompanies, coveredSymbols,
@@ -43,7 +44,7 @@ const __dirname   = dirname(fileURLToPath(import.meta.url))
 const LOG         = '[strategyAgent]'
 const PROMPT_PATH = join(__dirname, '../../prompts/strategy_system_prompt.md')
 const _systemPrompt = makePromptLoader(PROMPT_PATH, LOG)
-const MAX_MESSAGES = 8
+const MAX_MESSAGES = DESKS.strategy.maxMessages
 const MAX_COMPANIES = 60
 
 export const TOOLS = [

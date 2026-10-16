@@ -18,6 +18,7 @@ import { makePromptLoader, cleanReply, makeToolHandler, buildAudienceSection, at
 import { makeTradingContextHandlers, buildVenueSection, TRADING_CONTEXT_TOOL_SPEC } from '../tools/tradingContext.tools.js'
 import { makeMarketHoursHandlers, MARKET_HOURS_TOOL_SPEC } from '../tools/marketHours.tools.js'
 import { buildTagCaptures } from '../llmStream.util.js'
+import { DESKS } from '../desks/registry.js'
 import { makeRouteCapture, buildRouteRule } from '../routing.util.js'
 import { VALUATION_TOOLS, VALUATION_TOOL_HANDLERS } from '../tools/valuation.tools.js'
 import { logger } from '../logger.service.js'
@@ -27,7 +28,7 @@ const LOG         = '[analystAgent]'
 const QUICKREAD_LOG = '[analystAgent-quickread]'   // its own ledger row — see chatStream
 const PROMPT_PATH = join(__dirname, '../../prompts/analyst_system_prompt.md')
 const _systemPrompt = makePromptLoader(PROMPT_PATH, LOG)
-const MAX_MESSAGES = 8
+const MAX_MESSAGES = DESKS.analyst.maxMessages
 
 // QUICK READ is a MODE of Prometheus, not a desk of its own — the same shape as Argus's hand-off
 // module (scanner_mode_handoff.md): the spine stays, and on a quick-read turn one more cached block

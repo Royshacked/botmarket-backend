@@ -13,6 +13,7 @@ import { dirname, join }  from 'path'
 
 import { runAgentStream } from '../agentIO.js'
 import { buildTagCaptures } from '../llmStream.util.js'
+import { DESKS } from '../desks/registry.js'
 import { makeRouteCapture, buildRouteRule } from '../routing.util.js'
 import { toolsFor }       from '../agentTools.registry.js'
 import { makePromptLoader, LANGUAGE_RULE, BREVITY_RULE, cachedBlock, normalizeMessages, cleanReply } from '../agentUtils.js'
@@ -23,7 +24,7 @@ const __dirname   = dirname(fileURLToPath(import.meta.url))
 const LOG         = '[aetherAgent]'
 const PROMPT_PATH = join(__dirname, '../../prompts/aether_system_prompt.md')
 const _systemPrompt = makePromptLoader(PROMPT_PATH, LOG)
-const MAX_MESSAGES = 12
+const MAX_MESSAGES = DESKS.aether.maxMessages
 
 export const TOOLS = toolsFor({
     // Order is preserved exactly — prompt caching keys off the array prefix.

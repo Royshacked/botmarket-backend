@@ -4,6 +4,7 @@ import { logger }         from '../logger.service.js'
 import { normalizeMessages, makePromptLoader, cleanReply, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, BREVITY_RULE, VENUE_RULE, cachedBlock } from '../agentUtils.js'
 import { buildTagCaptures } from '../llmStream.util.js'
 import { makeSuggestionCapture } from '../suggestions.service.js'
+import { DESKS } from '../desks/registry.js'
 import { makeRouteCapture, ADMIN_DESKS } from '../routing.util.js'
 import { runAgentStream } from '../agentIO.js'
 import { toolsFor } from '../agentTools.registry.js'
@@ -26,7 +27,7 @@ const _systemPrompt = makePromptLoader(join(__dirname, '../../prompts/axl_system
 // and leaves 10 turns standing on the other side of it. The extra depth is nearly free here: Axl's
 // turns are short by construction (BREVITY_RULE), and a longer history costs one cache miss per
 // trim, which now happens a third as often. See agentUtils.trimHistory.
-const MAX_MESSAGES = 20
+const MAX_MESSAGES = DESKS.axl.maxMessages
 
 // Axl is the non-trading meta-layer: the social-chat assistant, app guide, and
 // (later) the account-report / trade-analysis concierge. It is READ-ONLY by

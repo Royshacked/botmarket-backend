@@ -7,18 +7,20 @@
 //   a CONTEXT    — one agent's own memory: its segment of that chat, the hand-offs addressed to it,
 //                  its summary. `segmentOf` is the line between them.
 
+import { AGENT_KEYS, ENTITY_KINDS } from './desks/registry.js'
+
 /** The scopes a session can belong to: the one chat, and the two admin desks that keep their own panel. */
 export const SCOPES = Object.freeze(['main', 'strategy', 'aether'])
 export const ADMIN_SCOPES = Object.freeze(['strategy', 'aether'])
 
-/** The agents that speak in a session (agentMeta / AGENTS keys). */
-export const SESSION_AGENTS = Object.freeze(['axl', 'mentor', 'portfolio', 'scanner', 'analyst', 'strategy', 'aether'])
+/** The agents that speak in a session (agentMeta / AGENTS keys) — the desk registry's. */
+export const SESSION_AGENTS = AGENT_KEYS
 
 /** What a timeline message is (unified-chat.md §3.1). */
 export const MESSAGE_KINDS = Object.freeze(['msg', 'handoff', 'decision', 'card', 'sealed'])
 
-/** The entities an agent's context can be sealed onto (unified-chat.md §6.2). */
-export const CONTEXT_KINDS = Object.freeze(['setup', 'scan', 'coverage', 'portfolio', 'industry_view'])
+/** The entities an agent's context can be sealed onto (unified-chat.md §6.2) — what the desks' work produces. */
+export const CONTEXT_KINDS = ENTITY_KINDS
 
 // A message is TEXT (§3.10): tool payloads, scan rows and coverage stay on their entities. A turn longer
 // than this is cut with a marker rather than refused — the user's words still land.
