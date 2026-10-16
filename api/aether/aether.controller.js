@@ -8,7 +8,7 @@
 // users from collections that had stopped being written; /shock-feed was the worst of them,
 // handing out 170 opportunity cards built on June's channel state.
 
-import { aetherAgentService }                        from '../../services/agents/aether.agent.service.js'
+import { aetherDesk }                                from '../../services/desks/aether.desk.js'
 import { getEventCandidates, getCandidatesForTicker, tickerWindowDays, getScorecard } from './aether.service.js'
 import { quickRead } from '../../services/aetherQuickRead.service.js'
 import { getScanUniverse } from '../../services/aetherScanUniverse.service.js'
@@ -22,11 +22,8 @@ import { logger }                                    from '../../services/logger
 const LOG    = '[aetherCtrl]'
 const handle = makeHandle(LOG)
 
-export const streamAether = makeDeskStream({
-    log: LOG,
-    run: ({ common }) => aetherAgentService.chatStream(common),
-    done: (result) => ({ reply: result.reply }),
-})
+// The desk itself is services/desks/aether.desk.js, shared with the session turn (unified-chat plan phase 4).
+export const streamAether = makeDeskStream(aetherDesk)
 
 // ─── The candidate list — a house-layer broadcast ─────────────────────────────
 

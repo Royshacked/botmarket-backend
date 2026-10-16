@@ -4,13 +4,12 @@ import { coverageService, revisionSummary } from './coverage.service.js'
 import { resolveCardsFor }        from '../chat/chat.service.js'
 import { researchQueueService }   from '../../services/researchQueue.service.js'
 import { researchRunService }     from '../../services/researchRun.service.js'
-import { analystAgentService }    from '../../services/agents/analyst.agent.service.js'
+import { analystDesk }            from '../../services/desks/analyst.desk.js'
 import { makeDeskStream }         from '../_shared/deskStream.util.js'
 import { sendReason }             from '../_shared/reason.util.js'
 import { makeHandle }             from '../_shared/handle.util.js'
 import { httpError }              from '../../services/httpError.util.js'
 import { logger }                 from '../../services/logger.service.js'
-import { sanitizeScanSeed }       from '../../services/scanSeed.util.js'
 import { getExperienceLevel }     from '../../services/experience.service.js'
 
 const LOG = '[analystCtrl]'
@@ -21,53 +20,9 @@ const LOG = '[analystCtrl]'
 // sentence out of a toast.
 const _handle = makeHandle(LOG)
 
-// Enrich chatState with coverage data from the DB so the agent always knows what's already
-// covered — without depending on the frontend to send it. The frontend can still override
-// by pre-populating either field; we only fill what's missing.
-export async function _resolveCoverageContext(chatState, seed) {
-    const state = { ...chatState }
-
-    if (!state.coverage_symbols?.length) {
-        try {
-            state.coverage_symbols = await coverageService.listSymbols({ onError: 'throw' })
-        } catch (err) {
-            logger.warn(LOG, '_resolveCoverageContext: listSymbols failed (non-fatal)', err.message)
-        }
-    }
-
-    // Check the active ticker — seed hand-off takes precedence over chatState.active_symbol.
-    const ticker = seed?.ticker
-        ? String(seed.ticker).toUpperCase().trim()
-        : chatState.active_symbol
-            ? String(chatState.active_symbol).toUpperCase().trim()
-            : null
-
-    if (ticker && !state.existing_coverage) {
-        try {
-            const existing = await coverageService.getCoverageBySymbol(ticker)
-            if (existing) state.existing_coverage = existing
-        } catch (err) {
-            logger.warn(LOG, '_resolveCoverageContext: getCoverageBySymbol failed (non-fatal)', err.message)
-        }
-    }
-
-    return state
-}
-
-export const streamAnalyst = makeDeskStream({
-    log: LOG,
-    parse: async (req, turn) => {
-        const seed = sanitizeScanSeed(req.body?.seed)
-        return { seed, chatState: await _resolveCoverageContext(turn.chatState ?? {}, seed) }
-    },
-    run: ({ extras, sendEvent, common }) => analystAgentService.chatStream({
-        ...common,
-        chatState: extras.chatState,
-        seed:      extras.seed,
-        onPhase:   phase => sendEvent('phase', { phase }),
-    }),
-    done: (result) => ({ reply: result.reply, phase: result.phase ?? null, ...(result.coverage ? { coverage: result.coverage } : {}) }),
-})
+// The desk itself (and its coverage-context read) is services/desks/analyst.desk.js, shared with the
+// session turn (unified-chat plan phase 4).
+export const streamAnalyst = makeDeskStream(analystDesk)
 
 // ─── Coverage CRUD ────────────────────────────────────────────────────────────
 

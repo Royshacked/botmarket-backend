@@ -1,4 +1,4 @@
-import { axlAgentService } from '../../services/agents/axl.agent.service.js'
+import { axlDesk } from '../../services/desks/axl.desk.js'
 import { streamAgentResponse } from '../_shared/sse.util.js'
 import { makeDeskStream } from '../_shared/deskStream.util.js'
 import { getMarketBrief } from '../../services/marketBrief.service.js'
@@ -17,23 +17,8 @@ const LOG = '[axl:controller]'
 // resolve. The model is the user's own pick, straight through — there is no per-turn routing layer
 // any more (see docs: a model or reasoning change mid-conversation invalidates the prompt cache,
 // which cost more than picking a cheaper model per turn ever saved).
-export const streamAxl = makeDeskStream({
-    log: LOG,
-    run: ({ req, common }) => axlAgentService.chatStream({ ...common, isAdmin: req.user.role === 'admin' }),
-    // route / routeSymbol / edit / show / opening are appended by makeDeskStream, validated for
-    // this user by the shared tier.
-    done: (result, { routing: { route } }) => ({
-        reply: result.reply,
-        // The user already owns the book they want managed → the portfolio desk opens in ADOPT mode
-        // instead of on a blank construction. Re-gated on a real portfolio route for the same reason
-        // the symbol and the opening are: this tier is the contract.
-        adopt: route === 'portfolio' && result.adopt === true,
-        // Follow-up chips. Already empty on a routing turn (the agent guards it), and re-gated here
-        // for the same reason `route` itself is validated rather than trusted.
-        suggestions: route ? [] : (Array.isArray(result.suggestions) ? result.suggestions : []),
-        chart: result.chart ?? null,
-    }),
-})
+// The desk itself is services/desks/axl.desk.js, shared with the session turn (unified-chat plan phase 4).
+export const streamAxl = makeDeskStream(axlDesk)
 
 /**
  * Today's market brief, streamed into the Axl chat panel — the CONFIRM half of the daily offer

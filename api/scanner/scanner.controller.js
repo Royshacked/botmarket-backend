@@ -1,4 +1,4 @@
-import { scannerAgentService } from '../../services/agents/scanner.agent.service.js'
+import { scannerDesk }         from '../../services/desks/scanner.desk.js'
 import { scanService }         from './scan.service.js'
 import { makeDeskStream }      from '../_shared/deskStream.util.js'
 import { sendReason }          from '../_shared/reason.util.js'
@@ -9,36 +9,8 @@ import { httpError }           from '../../services/httpError.util.js'
 const LOG    = '[scanner:controller]'
 const handle = makeHandle(LOG)
 
-export const streamScanner = makeDeskStream({
-    log: LOG,
-    parse: (req) => {
-        const { editList, handoff, handoffTo, radar, radarBoard, profile } = req.body ?? {}
-        return {
-            editList:   editList && typeof editList === 'object' ? editList : null,
-            handoff:    handoff === true,
-            // Which desk the pick goes back to — the CLIENT knows, because it is the pipeline's next
-            // step. Whitelisted rather than passed through: this string lands in the prompt, and an
-            // unknown value degrades to the generic phrasing instead of putting whatever the body
-            // carried in front of the user.
-            handoffTo:  handoffTo === 'mentor' ? handoffTo : null,
-            // The Events radar handed over a universe: the mode flag, and the board it applies to.
-            // The board is built server-side (aetherScanUniverse) and handed straight back, so the
-            // only thing worth checking here is its shape — the prompt renders whatever it holds.
-            radar:      radar === true,
-            radarBoard: radarBoard && typeof radarBoard === 'object' ? radarBoard : null,
-            profile:    profile === 'investing' ? 'investing' : 'trading',
-        }
-    },
-    run: ({ extras, sendEvent, common }) => scannerAgentService.chatStream({
-        ...common,
-        ...extras,
-        onTicker: (symbol) => sendEvent('ticker', { symbol }),
-        onPhase:  (phase)  => sendEvent('phase',  { phase }),
-    }),
-    // `kairos_pick` (hand-off mode) → the single ticker Argus recommends back to the build desk.
-    // The wire name outlived the desk it was written for; the client reads it by this name.
-    done: (result) => ({ reply: result.reply, scan: result.scan ?? null, phase: result.phase ?? null, ...(result.pick ? { kairos_pick: result.pick } : {}) }),
-})
+// The desk itself is services/desks/scanner.desk.js, shared with the session turn (unified-chat plan phase 4).
+export const streamScanner = makeDeskStream(scannerDesk)
 
 // ─── Scan CRUD ────────────────────────────────────────────────────────────────
 export const createScan = handle('createScan', async (req, res) => {

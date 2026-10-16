@@ -5,7 +5,7 @@
 // `req.user._id`. The READS are open to every signed-in user; the stream and publishing are admin-only,
 // gated per route in strategy.routes. A trader's read carries the answers, not the review machinery.
 
-import { strategyAgentService } from '../../services/agents/strategy.agent.service.js'
+import { strategyDesk }         from '../../services/desks/strategy.desk.js'
 import { industryViewService }  from './industryView.service.js'
 import { readSubIndustry, listSubIndustries, moneyFacts, largestCompanies, readFlowNodes, flowFacts } from './industryData.service.js'
 import { readGeoFacts } from './geopoliticsData.service.js'
@@ -30,16 +30,8 @@ const _handle = makeHandle(LOG)
 
 // Streaming industry-desk chat → <industry_view> drafts (returned for preview; POST /industries/:code
 // publishes one).
-export const streamStrategy = makeDeskStream({
-    log: LOG,
-    run: ({ turn, sendEvent, common }) => strategyAgentService.chatStream({
-        ...common,
-        chatState: turn.chatState ?? {},
-        onPhase:   phase => sendEvent('phase', { phase }),
-    }),
-    // The <industry_view> drafts, for preview — publishing is POST /industries/:code.
-    done: (result) => ({ reply: result.reply, phase: result.phase ?? null, views: result.views ?? [], assessments: result.assessments ?? [] }),
-})
+// The desk itself is services/desks/strategy.desk.js, shared with the session turn (unified-chat plan phase 4).
+export const streamStrategy = makeDeskStream(strategyDesk)
 
 
 // ─── The industry views (Pythia, rebuilt 2026-10-05) ─────────────────────────

@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { _mentorResponse } from '../../api/mentor/mentor.controller.js'
+import { _mentorResponse } from '../../services/desks/mentor.desk.js'
 
 // EVERYTHING THE DESK COMPUTES FOR THE USER HAS TO BE LISTED IN THE RESPONSE BY HAND, and twice
 // now something was not. `build` went missing first. Then `gate` — and because the panel had just

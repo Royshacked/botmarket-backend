@@ -85,11 +85,12 @@ test('the agent gets the common bag: conversation, model, user, audience, signal
     let seen = null
     const handler = makeDeskStream({
         log: '[t]',
-        parse: (req, turn) => ({ echo: turn.messages.length }),
-        run: async ({ common, extras }) => { seen = { common, extras }; return { reply: 'ok' } },
+        // A desk's parse knows nothing of HTTP: the body, the parsed turn and the user in; state + input out.
+        parse: (body, turn, user) => ({ state: { draft: body.draft }, input: { echo: turn.messages.length, who: user._id } }),
+        run: async (ctx) => { seen = ctx; return { reply: 'ok' } },
         done: r => ({ reply: r.reply }),
     }, deps)
-    const { req, res } = makeReqRes({ ...hi, model: 'claude-sonnet-5' })
+    const { req, res } = makeReqRes({ ...hi, model: 'claude-sonnet-5', draft: 'NVDA' })
     await handler(req, res)
     assert.deepEqual(seen.common.messages, [{ role: 'user', content: 'hi' }])
     assert.equal(seen.common.model, 'claude-sonnet-5')
@@ -97,7 +98,19 @@ test('the agent gets the common bag: conversation, model, user, audience, signal
     assert.equal(seen.common.audience, 'novice')
     assert.ok(seen.common.signal)
     for (const cb of ['onToken', 'onToolStart', 'onReasoning', 'onChart']) assert.equal(typeof seen.common[cb], 'function', cb)
-    assert.deepEqual(seen.extras, { echo: 1 })
+    assert.deepEqual(seen.state, { draft: 'NVDA' })
+    assert.deepEqual(seen.input, { echo: 1, who: 'u1' })
+    assert.equal(seen.user._id, 'u1')
+    assert.equal(typeof seen.emit, 'function')
+})
+
+test('a desk with no parse runs with null state and empty input', async () => {
+    let seen = null
+    const handler = makeDeskStream({ log: '[t]', run: async (ctx) => { seen = ctx; return { reply: 'ok' } }, done: r => r }, deps)
+    const { req, res } = makeReqRes(hi)
+    await handler(req, res)
+    assert.equal(seen.state, null)
+    assert.deepEqual(seen.input, {})
 })
 
 test('every done payload carries the routing fields, validated for the role — a desk cannot forget the gate', async () => {
