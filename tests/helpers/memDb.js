@@ -1,8 +1,9 @@
-// A small in-memory Mongo — enough for the Pythia services' tests (assessments, calls, themes, metrics
-// reads). Supports: equality (null also matching a missing field, as in Mongo) and `$ne` / `$in` / `$exists` filters
-// on dotted paths; multi-key sort; find().sort().limit().next/toArray;
-// skip; findOne; insertOne; deleteMany; replaceOne and updateOne with upsert, $setOnInsert, $set (dotted) and
-// $push (one value, or $each/$position); createIndex as a no-op. `rows(name)` exposes a collection's documents for assertions.
+// A small in-memory Mongo — enough for the Pythia services' and the session store's tests. Supports:
+// equality (null also matching a missing field, as in Mongo) and `$ne` / `$in` / `$exists` / `$gt` / `$lt`
+// filters on dotted paths; multi-key sort; find().sort().limit().next/toArray; skip; findOne;
+// insertOne; deleteMany; replaceOne and updateOne with upsert, $setOnInsert, $set (dotted), $inc and
+// $push (one value, or $each/$position); findOneAndUpdate (returns the document AFTER); createIndex as
+// a no-op — unique indexes are NOT enforced. `rows(name)` exposes a collection's documents for assertions.
 
 function _get(o, path) { return path.split('.').reduce((x, k) => (x == null ? x : x[k]), o) }
 function _setPath(o, path, v) { const ks = path.split('.'); let x = o; for (const k of ks.slice(0, -1)) x = (x[k] ??= {}); x[ks.at(-1)] = v }
@@ -11,6 +12,8 @@ function _match(doc, q) {
         if (v && typeof v === 'object' && '$ne' in v) return (_get(doc, k) ?? null) !== v.$ne
         if (v && typeof v === 'object' && '$in' in v) return v.$in.includes(_get(doc, k))
         if (v && typeof v === 'object' && '$exists' in v) return (_get(doc, k) !== undefined) === Boolean(v.$exists)
+        if (v && typeof v === 'object' && '$gt' in v) return _get(doc, k) > v.$gt
+        if (v && typeof v === 'object' && '$lt' in v) return _get(doc, k) < v.$lt
         // Mongo: { field: null } matches a null field AND a missing one.
         if (v === null) return _get(doc, k) == null
         return JSON.stringify(_get(doc, k)) === JSON.stringify(v)
@@ -25,6 +28,13 @@ function _push(doc, spec) {
         arr.splice(v?.$position ?? arr.length, 0, ...structuredClone(each))
         _setPath(doc, k, arr)
     }
+}
+
+// $set (dotted), $inc (dotted, missing counts as 0) and $push, in that order.
+function _apply(doc, u) {
+    for (const [k, v] of Object.entries(u.$set ?? {})) _setPath(doc, k, structuredClone(v))
+    for (const [k, v] of Object.entries(u.$inc ?? {})) _setPath(doc, k, (_get(doc, k) ?? 0) + v)
+    _push(doc, u.$push)
 }
 
 export function memDb() {
@@ -64,14 +74,15 @@ export function memDb() {
                 let upserted = 0
                 if (!doc && upsert) { doc = { ...q, ...(u.$setOnInsert ?? {}) }; rows.push(doc); upserted = 1 }
                 if (!doc) return { matchedCount: 0, upsertedCount: 0 }
-                if (upserted) {
-                    for (const [k, v] of Object.entries(u.$set ?? {})) _setPath(doc, k, structuredClone(v))
-                    _push(doc, u.$push)
-                    return { matchedCount: 0, upsertedCount: 1 }
-                }
-                for (const [k, v] of Object.entries(u.$set ?? {})) _setPath(doc, k, structuredClone(v))
-                _push(doc, u.$push)
-                return { matchedCount: 1 }
+                _apply(doc, u)
+                return upserted ? { matchedCount: 0, upsertedCount: 1 } : { matchedCount: 1 }
+            },
+            // The returnDocument:'after' form only — what an atomic counter (a session's seq) needs.
+            findOneAndUpdate: async (q, u) => {
+                const doc = rows.find(r => _match(r, q))
+                if (!doc) return null
+                _apply(doc, u)
+                return structuredClone(doc)
             },
             deleteMany: async (q) => { const keep = rows.filter(r => !_match(r, q)); const n = rows.length - keep.length; rows.splice(0, rows.length, ...keep); return { deletedCount: n } },
             createIndex: async () => {},

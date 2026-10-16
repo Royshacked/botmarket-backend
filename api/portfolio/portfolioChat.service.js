@@ -15,9 +15,23 @@ import { industryViewService } from '../strategy/industryView.service.js'
 import { _firstAccountId, _deriveMode, _accountLabel, _virtualAccountNames } from '../../services/portfolioMode.util.js'
 
 const LOG        = '[portfolioChat]'
-// Exported: tradeCapture reads a portfolio's chat doc to stamp origin metadata onto a trade,
-// and was naming 'portfolio_chats' inline to do it.
-export const COLLECTION = 'portfolio_chats'
+// Exported: tradeCapture reads a portfolio's book doc to stamp origin metadata onto a trade.
+//
+// `portfolio_books`, renamed from `portfolio_chats` 2026-10-16 (unified-chat plan §1 q3): the document
+// is the BOOK — lifecycle, mandate, thesis, reviews, fingerprint, Themis state. Its chat half (`messages`)
+// leaves for the session store when the frontend moves (plan phases 7–8). An existing database is
+// renamed once by scripts/rename-portfolio-books.mjs.
+export const COLLECTION = 'portfolio_books'
+
+/** Every read and write here is keyed { portfolioId, userId } — one book per portfolio per user. */
+export async function ensurePortfolioBookIndexes() {
+    try {
+        const db = await getDb()
+        await db.collection(COLLECTION).createIndex({ portfolioId: 1, userId: 1 }, { unique: true })
+    } catch (err) {
+        logger.warn(LOG, 'ensurePortfolioBookIndexes failed', err.message)
+    }
+}
 
 // Exported so a second writer of `nextReviewAt` (adoption stamps one at commit) schedules off the
 // SAME cadence truth rather than its own copy of these three numbers.

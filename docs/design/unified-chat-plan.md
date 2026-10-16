@@ -199,8 +199,8 @@ Read before writing it: every reader and writer of `threads`, `setups.chat_state
 - **Coverage is HOUSE data** — no owner, one thesis per symbol, a strict field whitelist
   (`normalizeCoverage`). An admin's Prometheus conversation written ONTO the coverage doc would be
   read by the other admin and travel with the house document. Today a revise starts with no history.
-- `portfolio_chats` is keyed `{portfolioId, userId}`, has no indexes, and `getPendingThemisChecks`
-  (and the `themis.*` fields it reads) has no caller and no writer — dead.
+- `portfolio_chats` is keyed `{portfolioId, userId}` and has no indexes. (The sweep's report that
+  `getPendingThemisChecks` was dead was wrong — `monitoring/themis.monitor.service.js` calls it; it stays.)
 - No transcript store has a size cap.
 
 **Three decisions this plan asks for (my recommendation first):**
@@ -268,7 +268,14 @@ agent_contexts    { userId, kind, entityId, agent, messages: [{ role, content, a
   and `tradeCapture.service.js`'s import; `scripts/rename-portfolio-books.mjs` (idempotent; renames if
   the old name exists and the new one does not) run on axl_dev now, on prod in the deploy runbook.
   Add the missing `{ portfolioId, userId }` unique index.
-- **Delete now (dead today):** `getPendingThemisChecks` and the `themis.*` reads.
+
+**As done (2026-10-16):** all of the above, as planned. `tests/helpers/memDb.js` gained `$gt`/`$lt`,
+`$inc` and `findOneAndUpdate`. `collectionNames.test` lists the three new collections and
+`portfolio_books`. `removeFor` exists but is not yet called from entity deletes — that wiring goes with
+sealing in phase 4. **The axl_dev rename has NOT run:** the laptop's IP is not on the Atlas access list
+(TCP connects, server selection times out). Until `node scripts/rename-portfolio-books.mjs` runs, a local
+backend on this branch reads an empty `portfolio_books`. New tests: sessionUtil, sessionService,
+agentContext, sessionsController (32). Suite 4002/0.
 
 **Not in phase 3:** desks reading/writing the session (phase 4), sealing calls at Generate (phase 4),
 the turn endpoint and channel (phase 5), anything in the frontend (7–8), the migration (9).

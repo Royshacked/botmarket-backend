@@ -249,6 +249,9 @@ api/
                           replaces, never twins). Off without VAPID_PUBLIC_KEY + VAPID_PRIVATE_KEY
   experience/             experience.model — how to TALK to a user (beginner may be inferred,
                           experienced only declared); its own collection, never the user doc
+  sessions/               the unified chat's sessions (/api/sessions: active · new · list · :id/messages);
+                          scope 'main' | 'strategy' | 'aether' (admin desks 403 for a trader). Read-only
+                          + "new" until the turn endpoint lands (unified-chat plan phase 5)
   threads/                the generic draft thread API over thread.service (/api/threads: draft ·
                           link · pin · list · unfinished · get · discard · pipeline drafts). AGENTS is
                           the draft-save whitelist — LIVE desks only, and the second half of a pair
@@ -889,6 +892,17 @@ services/
                           agent's emitted phase — NOT content), TTL-expired + LRU-capped, and
                           is `linked` to its artifact (idea/portfolio/scan) on generate.
                           Generalizes portfolio_chats; migrating agents off per-agent chat-state.
+                          BEING REPLACED by session.service (unified-chat plan): deleted when its
+                          last caller moves (plan D1).
+  session.service.js  session.util.js   the unified chat's session store: `sessions` (header — scope,
+                          status, floor, agentState, summaries, links, seq) + `session_messages` (one row
+                          per timeline message, per-session seq). ONE active per user per scope; "new"
+                          archives it; no TTL, no cap. session.util.segmentOf = one agent's context line
+                          (its own turns + hand-offs addressed to it). Factory over getDb (memDb-tested)
+  agentContext.service.js  sealed agent context: `agent_contexts`, one row per {userId, kind, entityId,
+                          agent} — an agent's conversation kept with the entity it produced (setup, scan,
+                          coverage, portfolio, industry_view). Per user even on a house entity; a second
+                          seal appends; newest 200 messages kept
 providers/
   anthropic.provider.js         THE ONE Anthropic call path: streamAnthropicWithTools — the request → tool
                                 → request loop, adaptive thinking + effort per model (_thinkingConfig, with

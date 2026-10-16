@@ -49,6 +49,9 @@ import { ensurePendingActionIndexes } from './services/pendingAction/pendingActi
 import { ensureAetherIndexes }        from './api/aether/aether.model.js'
 import { pendingActionRoutes } from './api/pendingAction/pendingAction.routes.js'
 import { threadService } from './services/thread.service.js'
+import { sessionService } from './services/session.service.js'
+import { agentContextService } from './services/agentContext.service.js'
+import { ensurePortfolioBookIndexes } from './api/portfolio/portfolioChat.service.js'
 import { mentorRoutes } from './api/mentor/mentor.routes.js'
 import { setupsRoutes } from './api/setups/setups.routes.js'
 import { tradeIdeasRoutes } from './api/trade-ideas/tradeIdeas.routes.js'
@@ -67,6 +70,7 @@ import { strategyRoutes }    from './api/strategy/strategy.routes.js'
 import { aetherRoutes }      from './api/aether/aether.routes.js'
 import { axlRoutes }         from './api/axl/axl.routes.js'
 import { threadsRoutes }     from './api/threads/threads.routes.js'
+import { sessionsRoutes }    from './api/sessions/sessions.routes.js'
 import { turnsRoutes }       from './api/turns/turns.routes.js'
 import { marketRoutes }      from './api/market/market.routes.js'
 import { calendarRoutes }    from './api/calendar/calendar.routes.js'
@@ -212,6 +216,7 @@ app.use('/api/strategy',    strategyRoutes)
 app.use('/api/aether',      aetherRoutes)
 app.use('/api/axl',         axlRoutes)
 app.use('/api/threads',     threadsRoutes)
+app.use('/api/sessions',    sessionsRoutes)
 // Stopping an agent turn — its own endpoint because stopping and walking away are different
 // intentions that used to arrive as the same closed socket (see api/_shared/sse.util.js).
 app.use('/api/turns',       turnsRoutes)
@@ -235,6 +240,9 @@ ensureIndustryAssessmentIndexes().catch(() => {}) // Pythia's industry_assessmen
 ensurePythiaCallsIndexes().catch(() => {})        // Pythia's forward log, pythia_calls (api/strategy/pythiaCalls.service.js)
 ensureThemeIndexes().catch(() => {})              // Pythia's themes (api/strategy/theme.service.js)
 threadService.ensureThreadIndexes()
+sessionService.ensureIndexes()        // the unified chat's sessions + session_messages (services/session.service.js)
+agentContextService.ensureIndexes()   // sealed agent contexts (services/agentContext.service.js)
+ensurePortfolioBookIndexes()
 
 // ─── Background loops ─────────────────────────────────────────────────────────
 // ONE INSTANCE RUNS THESE, and that is now enforced rather than merely documented. They start
