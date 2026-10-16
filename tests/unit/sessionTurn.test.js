@@ -1,0 +1,128 @@
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import { memDb } from '../helpers/memDb.js'
+import { makeSessionService } from '../../services/session.service.js'
+import { makeAgentContextService } from '../../services/agentContext.service.js'
+import { makeSessionTurn } from '../../services/desks/sessionTurn.js'
+import { foldPlan, makeSummarizer } from '../../services/desks/summarize.js'
+
+// A desk turn run against the session (services/desks/sessionTurn.js) — on memDb with a STUB desk, so
+// what is tested is the mechanism: what is appended, what the desk is handed, what state is kept, where
+// the floor goes, and when the summary folds.
+
+function rig({ run, nextState = (prev, r) => ({ ...(prev ?? {}), last: r.reply }), summarize = async () => 'S' } = {}) {
+    const { db, rows } = memDb()
+    const getDb = async () => db
+    const sessions = makeSessionService({ getDb })
+    const contexts = makeAgentContextService({ getDb })
+    const seen = []
+    const stub = (agent) => ({
+        agent,
+        run: async (ctx) => { seen.push({ agent, ...ctx }); return run ? run(ctx) : { reply: `${agent} says hi` } },
+        done: (r) => ({ reply: r.reply }),
+        nextState,
+    })
+    const desks = { axl: stub('axl'), mentor: stub('mentor'), scanner: stub('scanner') }
+    const turn = makeSessionTurn({ sessions, contexts, desks, experience: async () => 'novice', summarize })
+    return { turn, sessions, contexts, rows, seen }
+}
+const user = { _id: 'u1', role: 'user' }
+
+test('a turn appends the user message and the reply, and hands the desk only its own conversation', async () => {
+    const { turn, sessions, seen } = rig()
+    const s = await sessions.getActive({ userId: 'u1' })
+    await turn({ user, sessionId: s.sessionId, agent: 'axl', text: 'hello' })
+    await turn({ user, sessionId: s.sessionId, agent: 'mentor', text: 'long NVDA' })
+    const all = await sessions.messagesSince({ sessionId: s.sessionId, userId: 'u1' })
+    assert.deepEqual(all.map(m => `${m.agent}:${m.role}`), ['axl:user', 'axl:assistant', 'mentor:user', 'mentor:assistant'])
+    // Mentor never saw Axl's turns.
+    assert.deepEqual(seen[1].common.messages, [{ role: 'user', content: 'long NVDA' }])
+    assert.equal(seen[1].common.audience, 'novice')
+})
+
+test('the working state is folded by the desk and kept for the next turn', async () => {
+    const { turn, sessions, seen } = rig()
+    const s = await sessions.getActive({ userId: 'u1' })
+    await turn({ user, sessionId: s.sessionId, agent: 'mentor', text: 'one' })
+    await turn({ user, sessionId: s.sessionId, agent: 'mentor', text: 'two' })
+    assert.deepEqual(seen[1].state, { last: 'mentor says hi' })
+    assert.deepEqual((await sessions.get({ sessionId: s.sessionId, userId: 'u1' })).agentState.mentor, { last: 'mentor says hi' })
+})
+
+test('a reply that routes moves the floor to that desk’s agent; otherwise the agent that answered keeps it', async () => {
+    const { turn, sessions } = rig({ run: (ctx) => (ctx.common.messages.at(-1).content === 'go'
+        ? { reply: 'Sending you to Mentor', route: 'assist', opening: 'long NVDA' }
+        : { reply: 'ok' }) })
+    const s = await sessions.getActive({ userId: 'u1' })
+    await turn({ user, sessionId: s.sessionId, agent: 'axl', text: 'hi' })
+    assert.equal((await sessions.get({ sessionId: s.sessionId, userId: 'u1' })).floor, 'axl')
+    const out = await turn({ user, sessionId: s.sessionId, agent: 'axl', text: 'go' })
+    assert.equal(out.payload.route, 'assist')
+    assert.equal((await sessions.get({ sessionId: s.sessionId, userId: 'u1' })).floor, 'mentor')
+})
+
+test('a stopped turn keeps the user’s message and stores nothing it produced', async () => {
+    const { turn, sessions } = rig({ run: () => null })
+    const s = await sessions.getActive({ userId: 'u1' })
+    const out = await turn({ user, sessionId: s.sessionId, agent: 'mentor', text: 'wait' })
+    assert.deepEqual(out, { stopped: true })
+    const all = await sessions.messagesSince({ sessionId: s.sessionId, userId: 'u1' })
+    assert.deepEqual(all.map(m => m.role), ['user'])
+    assert.equal((await sessions.get({ sessionId: s.sessionId, userId: 'u1' })).agentState.mentor, undefined)
+})
+
+test('an unknown agent, another user’s session, or an archived one is refused before anything is written', async () => {
+    const { turn, sessions, rows } = rig()
+    const s = await sessions.getActive({ userId: 'u1' })
+    assert.equal((await turn({ user, sessionId: s.sessionId, agent: 'kairos', text: 'x' })).reason, 'invalid_agent')
+    assert.equal((await turn({ user: { _id: 'u2' }, sessionId: s.sessionId, agent: 'axl', text: 'x' })).reason, 'not_found')
+    assert.equal(rows('session_messages').length, 0)
+})
+
+test('while editing, the sealed context is loaded into the agent’s conversation and the marker survives the turn', async () => {
+    const { turn, sessions, contexts, seen } = rig()
+    const s = await sessions.getActive({ userId: 'u1' })
+    await contexts.seal({ userId: 'u1', kind: 'setup', entityId: 'st1', agent: 'mentor', messages: [{ role: 'user', content: 'long AMD' }], summary: 'built Oct 3' })
+    await sessions.setAgentState({ sessionId: s.sessionId, userId: 'u1', agent: 'mentor', state: { editing: { kind: 'setup', entityId: 'st1' } } })
+    await turn({ user, sessionId: s.sessionId, agent: 'mentor', text: 'move the stop' })
+    assert.deepEqual(seen[0].common.messages.map(m => m.content), ['Earlier, on this item (summary): built Oct 3', 'long AMD', 'move the stop'])
+    assert.deepEqual((await sessions.get({ sessionId: s.sessionId, userId: 'u1' })).agentState.mentor.editing, { kind: 'setup', entityId: 'st1' })
+})
+
+// ── the summary fold ────────────────────────────────────────────────────────
+
+test('foldPlan waits for the high-water mark, then folds down to maxMessages', () => {
+    const seg = (n) => Array.from({ length: n }, (_, i) => ({ seq: i + 1, agent: 'mentor', role: i % 2 ? 'assistant' : 'user', kind: 'msg', content: `m${i}` }))
+    assert.equal(foldPlan(seg(24), 'mentor', null, 8), null)               // 24 = 8 × 3: not past it
+    const plan = foldPlan(seg(25), 'mentor', null, 8)
+    assert.equal(plan.fold.length, 17)
+    assert.equal(plan.throughSeq, 17)
+    assert.equal(foldPlan(seg(25), 'mentor', { throughSeq: 17 }, 8), null) // already folded
+})
+
+test('a turn past the mark folds the summary in the background; a failed summary changes nothing', async () => {
+    const { turn, sessions } = rig({ summarize: async ({ turns }) => `summary of ${turns.length}` })
+    const s = await sessions.getActive({ userId: 'u1' })
+    // Mentor's maxMessages is 8 — 13 turns put 26 of its messages in the session, past 24.
+    for (let i = 0; i < 13; i++) await turn({ user, sessionId: s.sessionId, agent: 'mentor', text: `t${i}` })
+    await new Promise(r => setTimeout(r, 10))
+    const sum = (await sessions.get({ sessionId: s.sessionId, userId: 'u1' })).summaries.mentor
+    assert.match(sum.text, /^summary of \d+$/)
+    assert.ok(sum.throughSeq > 0)
+
+    const failing = rig({ summarize: async () => null })
+    const f = await failing.sessions.getActive({ userId: 'u1' })
+    for (let i = 0; i < 13; i++) await failing.turn({ user, sessionId: f.sessionId, agent: 'mentor', text: `t${i}` })
+    await new Promise(r => setTimeout(r, 10))
+    assert.equal((await failing.sessions.get({ sessionId: f.sessionId, userId: 'u1' })).summaries.mentor, undefined)
+})
+
+test('the summarizer books its usage to the user, and answers null on a failed call', async () => {
+    const booked = []
+    const ok = makeSummarizer({ once: async ({ onUsage }) => { onUsage({ input_tokens: 10 }, 'haiku'); return '  short summary ' }, record: async (...a) => booked.push(a) })
+    assert.equal(await ok({ userId: 'u1', agent: 'mentor', turns: [{ role: 'user', content: 'x' }] }), 'short summary')
+    assert.deepEqual(booked[0].slice(0, 2), ['u1', 'haiku'])
+    assert.equal(booked[0][3], 'summary')
+    const bad = makeSummarizer({ once: async () => { throw new Error('down') }, record: async () => {} })
+    assert.equal(await bad({ userId: 'u1', agent: 'mentor', turns: [] }), null)
+})

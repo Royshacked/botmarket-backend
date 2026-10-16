@@ -159,6 +159,29 @@ export function makeSessionService({ getDb = _defaultGetDb } = {}) {
         return r.matchedCount ? { ok: true } : { reason: 'not_found' }
     }
 
+    /** Who has the floor — the agent the user's next message goes to (unified-chat.md §3.3). */
+    async function setFloor({ sessionId, userId, agent }) {
+        if (!isAgent(agent)) return { reason: 'invalid_agent' }
+        const db = await getDb()
+        const r  = await db.collection(SESSIONS).updateOne(
+            { sessionId: String(sessionId), userId: String(userId) },
+            { $set: { floor: agent, updatedAt: Date.now() } },
+        )
+        return r.matchedCount ? { ok: true } : { reason: 'not_found' }
+    }
+
+    /** One agent's rolling summary: `{ text, throughSeq }` — its segment up to throughSeq lives in the text. */
+    async function setSummary({ sessionId, userId, agent, summary }) {
+        if (!isAgent(agent)) return { reason: 'invalid_agent' }
+        if (!summary || typeof summary.text !== 'string' || !Number.isFinite(summary.throughSeq)) return { reason: 'invalid_summary' }
+        const db = await getDb()
+        const r  = await db.collection(SESSIONS).updateOne(
+            { sessionId: String(sessionId), userId: String(userId) },
+            { $set: { [`summaries.${agent}`]: { text: summary.text, throughSeq: summary.throughSeq } } },
+        )
+        return r.matchedCount ? { ok: true } : { reason: 'not_found' }
+    }
+
     /** Record an entity this session produced — a session links to many (decision 5). */
     async function addLink({ sessionId, userId, link }) {
         const { kind, id, agent } = link ?? {}
@@ -171,7 +194,7 @@ export function makeSessionService({ getDb = _defaultGetDb } = {}) {
         return r.matchedCount ? { ok: true } : { reason: 'not_found' }
     }
 
-    return { ensureIndexes, getActive, startNew, list, get, append, messagesSince, setAgentState, addLink }
+    return { ensureIndexes, getActive, startNew, list, get, append, messagesSince, setAgentState, setFloor, setSummary, addLink }
 }
 
 export const sessionService = makeSessionService()

@@ -44,9 +44,31 @@ async function _labelSeed(seed) {
     return seed
 }
 
+/**
+ * The working state after a turn — the fold the client did on every `done` (MentorPanel `_applyDone`),
+ * done once, on the server. The draft carries the build ledger; `drafts` is the multi-name build (kept —
+ * the old client persistence dropped it); `view` is what the panel draws its cards from (the open gate,
+ * readiness, the candidate offer), kept so a reload can redraw them. `ops` is never stored: one-shot.
+ */
+export function mentorNextState(prev, result, input = {}) {
+    const draft = result.setup ?? prev?.draft ?? null
+    return {
+        active_asset: draft?.asset || input.seed?.ticker || prev?.active_asset || '',
+        draft,
+        coverage:     result.coverage ?? prev?.coverage ?? [],
+        drafts:       result.drafts ?? {},
+        view: {
+            gate:      result.gate ?? null,
+            readiness: result.setup ? (result.readiness ?? null) : (prev?.view?.readiness ?? null),
+            setups:    result.setups ?? null,
+        },
+    }
+}
+
 export const mentorDesk = {
     agent: 'mentor',
     log:   '[mentor:desk]',
+    emptyState: emptyMentorState,
     parse: async (body, turn) => ({
         state: turn.chatState ?? emptyMentorState(),
         input: {
@@ -59,6 +81,9 @@ export const mentorDesk = {
             mainAccountId: turn.mainAccountId,
         },
     }),
+    // A session turn hands its input in already parsed; the seed still needs its house label.
+    prepareInput: async (input = {}) => ({ ...input, seed: await _labelSeed(sanitizeScanSeed(input.seed)) }),
+    nextState: mentorNextState,
     run: ({ state, input, emit, common }) => mentorAgentService.chatStream({
         ...common,
         // `ops` — what a card press decided — is ONE-SHOT: it rides this turn only. The HTTP client puts

@@ -17,9 +17,27 @@ const LOG = '[portfolio:desk]'
 
 const _str = (v) => (typeof v === 'string' && v.trim() ? v.trim() : null)
 
+/**
+ * The working state after a turn: the conversation-long fields carry over; the mandate and thesis the
+ * turn stated replace the old ones (a built book also persists them to portfolio_books, as today); the
+ * plan or review update on the table is the latest one.
+ */
+export function portfolioNextState(prev, result) {
+    return {
+        portfolioId:  prev?.portfolioId ?? null,
+        reviewMode:   prev?.reviewMode === true,
+        adoptDraftId: prev?.adoptDraftId ?? null,
+        mandate:      result.mandate ?? prev?.mandate ?? null,
+        thesis:       result.thesis ?? prev?.thesis ?? null,
+        pendingPlan:  result.plan ?? prev?.pendingPlan ?? null,
+        reviewUpdate: result.update ?? prev?.reviewUpdate ?? null,
+    }
+}
+
 export const portfolioDesk = {
     agent: 'portfolio',
     log:   LOG,
+    nextState: portfolioNextState,
     // `portfolioIdeas` is still SENT by the client and deliberately not read: the book Atlas sees is
     // read from the database (portfolioState), not from the list the client happened to be holding.
     // See _buildPortfolioStateSection — an empty client list is what made Atlas invent item ids.

@@ -42,10 +42,24 @@ export async function _resolveCoverageContext(chatState, seed) {
     return state
 }
 
+/**
+ * The working state after a turn: the coverage draft (a new one replaces the old) and the name in focus.
+ * The coverage list and the standing thesis are not state — read fresh every turn.
+ */
+export function analystNextState(prev, result, input = {}) {
+    const draft = result.coverage ?? prev?.draft ?? null
+    return {
+        active_symbol: draft?.symbol || input.seed?.ticker || prev?.active_symbol || null,
+        draft,
+    }
+}
+
 export const analystDesk = {
     agent: 'analyst',
     log:   LOG,
     parse: (body, turn) => ({ state: turn.chatState ?? {}, input: { seed: sanitizeScanSeed(body.seed) } }),
+    prepareInput: (input = {}) => ({ ...input, seed: sanitizeScanSeed(input.seed) }),
+    nextState: analystNextState,
     run: async ({ state, input, emit, common }) => analystAgentService.chatStream({
         ...common,
         chatState: await _resolveCoverageContext(state ?? {}, input.seed ?? null),

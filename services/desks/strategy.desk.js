@@ -8,6 +8,8 @@ export const strategyDesk = {
     agent: 'strategy',
     log:   '[strategy:desk]',
     parse: (body, turn) => ({ state: turn.chatState ?? {} }),
+    // The focus (industry, review reason) carries over; the drafts on the table are the latest ones.
+    nextState: (prev, result) => ({ ...(prev ?? {}), draftViews: result.views?.length ? result.views : (prev?.draftViews ?? []) }),
     run: ({ state, emit, common }) => strategyAgentService.chatStream({
         ...common,
         chatState: state ?? {},

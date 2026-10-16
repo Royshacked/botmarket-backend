@@ -24,10 +24,26 @@ export function _scannerMode(raw = {}) {
     }
 }
 
+/**
+ * The working state after a turn: the mode carries over unchanged, the list in progress is the newest
+ * one Argus emitted, and while a saved scan is being edited that list is what the next turn refines.
+ */
+export function scannerNextState(prev, result) {
+    const pendingScan   = result.scan ?? prev?.pendingScan ?? null
+    const editingScanId = prev?.editingScanId ?? null
+    return {
+        ..._scannerMode(prev),
+        pendingScan,
+        editingScanId,
+        editList: editingScanId ? pendingScan : null,
+    }
+}
+
 export const scannerDesk = {
     agent: 'scanner',
     log:   '[scanner:desk]',
     parse: (body) => ({ state: _scannerMode(body) }),
+    nextState: scannerNextState,
     run: ({ state, emit, common }) => scannerAgentService.chatStream({
         ...common,
         ..._scannerMode(state),
