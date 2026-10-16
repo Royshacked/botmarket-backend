@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { TOOLS, _parseStrategyResponse, _buildTurnContext, _buildMessages } from '../../services/agents/strategy.agent.service.js'
+import { TOOLS, _parseStrategyResponse, _buildTurnContext } from '../../services/agents/strategy.agent.service.js'
 import { ALL_EMIT_TAGS } from '../../services/llmStream.util.js'
 
 // Pythia's agent seams (pure) — the industry desk, rebuilt 2026-10-05. The stream itself is
@@ -53,9 +53,4 @@ test('the turn context names the industry in focus and, on a review, why it is d
     assert.equal(_buildTurnContext({ industry: '45301020' }), 'IN FOCUS: GICS sub-industry 45301020.')
     assert.match(_buildTurnContext({ industry: '45301020', review_reason: 'early-review trigger: margin_at_range_edge' }),
         /REVIEW, brought forward because: early-review trigger: margin_at_range_edge/)
-})
-
-test('a first turn is just the prompt', () => {
-    const msgs = _buildMessages({ messages: undefined, userPrompt: 'Review semiconductors' })
-    assert.equal(msgs.at(-1).role, 'user')
 })

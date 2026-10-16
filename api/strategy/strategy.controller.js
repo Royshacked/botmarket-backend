@@ -17,9 +17,7 @@ import { forecastMapService } from './forecastMap.service.js'
 import { readTimingRow } from './screenerData.service.js'
 import { assessIndustry, assessTheme, proposeThemes, structureOf } from '../../services/industryAssessmentRun.service.js'
 import { themeService } from './theme.service.js'
-import { streamAgentResponse, sseAgentCallbacks }  from '../_shared/sse.util.js'
-import { routeFields }                             from '../../services/routing.util.js'
-import { parseChatMessages }    from '../_shared/parse.util.js'
+import { makeDeskStream }       from '../_shared/deskStream.util.js'
 import { sendReason }           from '../_shared/reason.util.js'
 import { makeHandle }           from '../_shared/handle.util.js'
 import { logger }               from '../../services/logger.service.js'
@@ -32,33 +30,16 @@ const _handle = makeHandle(LOG)
 
 // Streaming industry-desk chat → <industry_view> drafts (returned for preview; POST /industries/:code
 // publishes one).
-export async function streamStrategy(req, res) {
-    const { messages: rawMessages, userPrompt, model, chatState } = req.body ?? {}
-    let messages
-    if (rawMessages != null) {
-        const v = parseChatMessages(rawMessages)
-        if (v.error) return res.status(400).json({ error: v.error })
-        messages = v.messages
-    }
-    await streamAgentResponse(req, res, {
-        log: LOG,
-        handler: async ({ sendEvent, signal }) => {
-            const result = await strategyAgentService.chatStream({
-                messages,
-                userPrompt,
-                chatState: (chatState && typeof chatState === 'object') ? chatState : {},
-                model,
-                userId: req.user._id,
-                signal,
-                ...sseAgentCallbacks(sendEvent),
-                onPhase:     phase => sendEvent('phase',     { phase }),
-            })
-            // The <industry_view> drafts, for preview — publishing is POST /industries/:code.
-            // …plus route / routeSymbol / opening: the user asked to be sent to another desk (routing.util).
-            return { reply: result.reply, phase: result.phase ?? null, views: result.views ?? [], assessments: result.assessments ?? [], ...routeFields(result, req.user.role) }
-        },
-    })
-}
+export const streamStrategy = makeDeskStream({
+    log: LOG,
+    run: ({ turn, sendEvent, common }) => strategyAgentService.chatStream({
+        ...common,
+        chatState: turn.chatState ?? {},
+        onPhase:   phase => sendEvent('phase', { phase }),
+    }),
+    // The <industry_view> drafts, for preview — publishing is POST /industries/:code.
+    done: (result) => ({ reply: result.reply, phase: result.phase ?? null, views: result.views ?? [], assessments: result.assessments ?? [] }),
+})
 
 
 // ─── The industry views (Pythia, rebuilt 2026-10-05) ─────────────────────────

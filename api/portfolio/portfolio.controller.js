@@ -6,13 +6,11 @@ import { refreshCoverage }        from '../../services/coverageRefresh.service.j
 import { researchQueueService }   from '../../services/researchQueue.service.js'
 import { sourceSleeve }           from '../../services/sleeveSource.service.js'
 import { logger }                from '../../services/logger.service.js'
-import { streamAgentResponse, sseAgentCallbacks }   from '../_shared/sse.util.js'
-import { routeFields }                              from '../../services/routing.util.js'
-import { parseIdeaAccounts, parseChatMessages } from '../_shared/parse.util.js'
+import { makeDeskStream }    from '../_shared/deskStream.util.js'
+import { parseIdeaAccounts } from '../_shared/parse.util.js'
 import { makeGetChatState, makeDeleteChatState } from '../_shared/chatState.util.js'
 import { threadService }          from '../../services/thread.service.js'
 import { resolvePortfolioReviewCard } from '../chat/chat.service.js'
-import { getExperienceLevel } from '../../services/experience.service.js'
 import { adoptBookService }  from './adoptBook.service.js'
 import { sendReason }        from '../_shared/reason.util.js'
 import { makeHandle }        from '../_shared/handle.util.js'
@@ -145,153 +143,147 @@ export const removeAdoptedHolding = makeAdoptHandler(
     r => ({ asset: r.asset }),
 )
 
-export async function streamPortfolio(req, res) {
+export const streamPortfolio = makeDeskStream({
+    log: LOG,
     // `portfolioIdeas` is still SENT by the client and deliberately not read: the book Atlas sees is
     // read from the database (portfolioState), not from the list the client happened to be holding.
     // See _buildPortfolioStateSection — an empty client list is what made Atlas invent item ids.
-    const { messages: rawMessages, ideaAccounts, mainAccountId, portfolioId, threadId, model, pipeline } = req.body ?? {}
+    //
+    // Atlas's accounts arrive as `ideaAccounts`, not the shared `accounts` (the client's field name
+    // for this desk). Read here until the unified client sends one shape (unified-chat-plan phase 7).
+    parse: (req) => ({ accounts: parseIdeaAccounts(req.body?.ideaAccounts) }),
+    run: async ({ req, turn, extras, signal, sendEvent, common }) => {
+        const { messages } = turn
+        const { portfolioId, threadId, pipeline } = req.body ?? {}
+        const isReviewMode = req.body?.reviewMode === true
+        const bodyMandate  = (req.body?.mandate && typeof req.body.mandate === 'object') ? req.body.mandate : null
+        // Which desk this conversation belongs to, so the badge and the lock can tell an
+        // unfinished BUILD from a standalone chat at the same agent. Validated as a string,
+        // never trusted as a key — and read by BOTH endings of the turn, so it is resolved once.
+        const cleanPipeline = typeof pipeline === 'string' && pipeline.trim() ? pipeline.trim() : null
+        // The last phase this turn actually emitted. A stopped turn has no result to read one
+        // off, and the substantive floor reads it — so it is tracked as it streams.
+        let lastPhase = null
 
-    const validatedMessages = parseChatMessages(rawMessages)
-    if (validatedMessages.error) {
-        return res.status(400).json({ error: validatedMessages.error })
-    }
-    const messages = validatedMessages.messages
+        // Pre-stream context load + mandate carry-forward (business logic → service).
+        const { portfolioState, lifecycle, mandate, statedMandate, storedThesis, reviewDelta } = await portfolioChatService.loadStreamContext({
+            userId: req.user._id, portfolioId, threadId, isReviewMode, bodyMandate,
+        })
 
-    const validatedAccounts = parseIdeaAccounts(ideaAccounts)
-    // Starred main account (bank icon) → the reference account Atlas sizes the others against.
-    const validatedMainAccountId = mainAccountId != null ? String(mainAccountId) : null
+        const lastMessage = messages.at(-1)?.content ?? ''
 
-    await streamAgentResponse(req, res, {
-        log: LOG,
-        handler: async ({ sendEvent, signal }) => {
-            const isReviewMode = req.body?.reviewMode === true
-            const bodyMandate  = (req.body?.mandate && typeof req.body.mandate === 'object') ? req.body.mandate : null
-            // Which desk this conversation belongs to, so the badge and the lock can tell an
-            // unfinished BUILD from a standalone chat at the same agent. Validated as a string,
-            // never trusted as a key — and read by BOTH endings of the turn, so it is resolved once.
-            const cleanPipeline = typeof pipeline === 'string' && pipeline.trim() ? pipeline.trim() : null
-            // The last phase this turn actually emitted. A stopped turn has no result to read one
-            // off, and the substantive floor reads it — so it is tracked as it streams.
-            let lastPhase = null
+        // ADOPT MODE. The client says which staged book this conversation is about, and the raw text
+        // of the turn is parsed HERE — deterministically, before the model sees it — so a pasted
+        // book becomes rows without the model ever reading a number (holdingsParse.util). Refreshing
+        // rather than re-staging keeps one draft per adoption, so corrections land on the same book.
+        const adoptDraft = req.body?.adoptDraftId
+            ? await adoptBookService.refreshDraft({
+                draftId: String(req.body.adoptDraftId), userId: req.user._id, paste: String(lastMessage ?? ''),
+            }).then(r => r.draft ?? null).catch(() => null)
+            : null
 
-            // Pre-stream context load + mandate carry-forward (business logic → service).
-            const { portfolioState, lifecycle, mandate, statedMandate, storedThesis, reviewDelta } = await portfolioChatService.loadStreamContext({
-                userId: req.user._id, portfolioId, threadId, isReviewMode, bodyMandate,
+        const result = await portfolioAgentService.chatStream({
+            ...common,
+            ideaAccounts: extras.accounts,
+            // Starred main account (bank icon) → the reference account Atlas sizes the others against.
+            mainAccountId: turn.mainAccountId,
+            portfolioId:   portfolioId   ?? null,
+            portfolioState,
+            isReviewMode,
+            reviewDelta,
+            lifecycle,
+            mandate,
+            thesis: storedThesis,
+            adoptDraft,
+            onTicker:    (symbol) => sendEvent('ticker',    { symbol }),
+            onPhase:     (phase)  => { lastPhase = phase; sendEvent('phase', { phase }) },
+        })
+
+        // Post-stream persistence (mandate/thesis/draft) → service. Only when the client is
+        // still listening: what the turn PRODUCED (a mandate, a thesis) is the answer to a turn
+        // nobody received, and writing it back would move the build on behalf of a user who
+        // stopped it.
+        //
+        // The CONVERSATION is the exception, and it is the whole of this branch: it is the
+        // user's message and the turns before it, not the model's answer, and walking out of a
+        // turn is the commonest way to leave a desk unfinished. Dropping it here is what left
+        // Atlas with no marker at the hub and no chat after a reload — the same gap the five
+        // client-persisted desks had (useChatStream's `onStopped`), one layer down.
+        if (signal.aborted) {
+            portfolioChatService.persistStoppedTurn({
+                userId: req.user._id, threadId, portfolioId, messages,
+                mandate: statedMandate, phase: lastPhase, pipeline: cleanPipeline,
             })
+            return null
+        }
+        portfolioChatService.persistStreamOutcome({
+            // statedMandate, not mandate: only what the user established WITH ATLAS is written back.
+            userId: req.user._id, portfolioId, threadId, isReviewMode, messages,
+            mandate: statedMandate, storedThesis, result,
+            pipeline: cleanPipeline,
+        })
 
-            const lastMessage = messages.at(-1)?.content ?? ''
+        // G1: Atlas asked Prometheus to re-research a held name. Fire the async refresh-by-hop
+        // (route-and-return) — it runs headless and pings the user when the coverage is rewritten,
+        // then they resume the review. Never blocks the response; best-effort.
+        //
+        // ADMIN-ONLY (2026-09-14). The hop REWRITES house coverage — a revision, which the routes
+        // reserve for admins — and its ping lands in Prometheus's feed, which traders cannot see.
+        // A trader's Atlas keeps reading the standing coverage; the ask is logged so the desk can
+        // see it was made. (The <coverage_request> path below is the trader's route to new
+        // research: it queues for an admin instead of writing.)
+        if (result.coverageRefresh?.ticker && req.user.role !== 'admin') {
+            logger.info(LOG, 'coverage refresh skipped — not an admin', { userId: req.user._id, ticker: result.coverageRefresh.ticker })
+        } else if (result.coverageRefresh?.ticker) {
+            refreshCoverage({
+                userId:        req.user._id,
+                ticker:        result.coverageRefresh.ticker,
+                question:      result.coverageRefresh.question ?? null,
+                portfolioId:   portfolioId ?? null,
+                portfolioName: portfolioState?.portfolioName ?? null,
+            }).catch(err => logger.warn(LOG, 'coverage refresh hop failed', err.message))
+        }
 
-            // ADOPT MODE. The client says which staged book this conversation is about, and the raw text
-            // of the turn is parsed HERE — deterministically, before the model sees it — so a pasted
-            // book becomes rows without the model ever reading a number (holdingsParse.util). Refreshing
-            // rather than re-staging keeps one draft per adoption, so corrections land on the same book.
-            const adoptDraft = req.body?.adoptDraftId
-                ? await adoptBookService.refreshDraft({
-                    draftId: String(req.body.adoptDraftId), userId: req.user._id, paste: String(lastMessage ?? ''),
-                }).then(r => r.draft ?? null).catch(() => null)
-                : null
+        // SLEEVE SOURCING — the autonomous Atlas → Argus → Prometheus → Atlas hop, for ANY role.
+        // An empty pool for a sleeve is not the end of the turn any more: each <screen_request>
+        // Atlas emitted is screened, queued and researched server-side (sleeveSource), and the
+        // user gets an Atlas card when the sleeve is decided. Fire-and-forget; the response is
+        // already out. The school rides as `lens`, the sleeve's threadId/portfolioId as the way
+        // back. Not admin-gated, unlike the refresh above: this WRITES nothing a user owns — the
+        // coverage it produces is house coverage, researched and written AS the house (the run
+        // takes no user), exactly as the house scan's.
+        for (const sr of result.screenRequests ?? []) {
+            sourceSleeve({
+                userId:        req.user._id,
+                threadId:      threadId ?? null,
+                portfolioId:   portfolioId ?? null,
+                portfolioName: portfolioState?.portfolioName ?? null,
+                sector:        sr.sector,
+                industry:      sr.industry ?? null,
+                school:        sr.lens ?? statedMandate?.selection ?? mandate?.selection ?? null,
+                note:          sr.note ?? sr.constraints ?? null,
+            }).then(r => { if (!r.ok) logger.info(LOG, 'sleeve not sourced', { sector: sr.sector, reason: r.reason }) })
+              .catch(err => logger.warn(LOG, 'sleeve sourcing failed', err.message))
+        }
 
-            const result = await portfolioAgentService.chatStream({
-                messages,
-                ideaAccounts: validatedAccounts,
-                mainAccountId: validatedMainAccountId,
-                portfolioId:   portfolioId   ?? null,
-                portfolioState,
-                isReviewMode,
-                reviewDelta,
-                lifecycle,
-                mandate,
-                audience: await getExperienceLevel(req.user._id),
-                thesis: storedThesis,
-                adoptDraft,
-                model,
-                userId:   req.user._id,
-                signal:   signal,
-                ...sseAgentCallbacks(sendEvent),
-                onTicker:    (symbol) => sendEvent('ticker',    { symbol }),
-                onPhase:     (phase)  => { lastPhase = phase; sendEvent('phase', { phase }) },
-            })
+        // 4th flow: uncovered name the user asked to add. Enqueue for Prometheus — fire-and-forget.
+        if (result.coverageRequest?.symbol) {
+            researchQueueService.enqueue({
+                symbol:      result.coverageRequest.symbol,
+                source:      'manual',
+                requestedBy: req.user._id,
+            }).catch(err => logger.warn(LOG, 'coverage request enqueue failed', err.message))
+        }
 
-            // Post-stream persistence (mandate/thesis/draft) → service. Only when the client is
-            // still listening: what the turn PRODUCED (a mandate, a thesis) is the answer to a turn
-            // nobody received, and writing it back would move the build on behalf of a user who
-            // stopped it.
-            //
-            // The CONVERSATION is the exception, and it is the whole of this branch: it is the
-            // user's message and the turns before it, not the model's answer, and walking out of a
-            // turn is the commonest way to leave a desk unfinished. Dropping it here is what left
-            // Atlas with no marker at the hub and no chat after a reload — the same gap the five
-            // client-persisted desks had (useChatStream's `onStopped`), one layer down.
-            if (signal.aborted) {
-                portfolioChatService.persistStoppedTurn({
-                    userId: req.user._id, threadId, portfolioId, messages,
-                    mandate: statedMandate, phase: lastPhase, pipeline: cleanPipeline,
-                })
-                return undefined
-            }
-            portfolioChatService.persistStreamOutcome({
-                // statedMandate, not mandate: only what the user established WITH ATLAS is written back.
-                userId: req.user._id, portfolioId, threadId, isReviewMode, messages,
-                mandate: statedMandate, storedThesis, result,
-                pipeline: cleanPipeline,
-            })
-
-            // G1: Atlas asked Prometheus to re-research a held name. Fire the async refresh-by-hop
-            // (route-and-return) — it runs headless and pings the user when the coverage is rewritten,
-            // then they resume the review. Never blocks the response; best-effort.
-            //
-            // ADMIN-ONLY (2026-09-14). The hop REWRITES house coverage — a revision, which the routes
-            // reserve for admins — and its ping lands in Prometheus's feed, which traders cannot see.
-            // A trader's Atlas keeps reading the standing coverage; the ask is logged so the desk can
-            // see it was made. (The <coverage_request> path below is the trader's route to new
-            // research: it queues for an admin instead of writing.)
-            if (result.coverageRefresh?.ticker && req.user.role !== 'admin') {
-                logger.info(LOG, 'coverage refresh skipped — not an admin', { userId: req.user._id, ticker: result.coverageRefresh.ticker })
-            } else if (result.coverageRefresh?.ticker) {
-                refreshCoverage({
-                    userId:        req.user._id,
-                    ticker:        result.coverageRefresh.ticker,
-                    question:      result.coverageRefresh.question ?? null,
-                    portfolioId:   portfolioId ?? null,
-                    portfolioName: portfolioState?.portfolioName ?? null,
-                }).catch(err => logger.warn(LOG, 'coverage refresh hop failed', err.message))
-            }
-
-            // SLEEVE SOURCING — the autonomous Atlas → Argus → Prometheus → Atlas hop, for ANY role.
-            // An empty pool for a sleeve is not the end of the turn any more: each <screen_request>
-            // Atlas emitted is screened, queued and researched server-side (sleeveSource), and the
-            // user gets an Atlas card when the sleeve is decided. Fire-and-forget; the response is
-            // already out. The school rides as `lens`, the sleeve's threadId/portfolioId as the way
-            // back. Not admin-gated, unlike the refresh above: this WRITES nothing a user owns — the
-            // coverage it produces is house coverage, researched and written AS the house (the run
-            // takes no user), exactly as the house scan's.
-            for (const sr of result.screenRequests ?? []) {
-                sourceSleeve({
-                    userId:        req.user._id,
-                    threadId:      threadId ?? null,
-                    portfolioId:   portfolioId ?? null,
-                    portfolioName: portfolioState?.portfolioName ?? null,
-                    sector:        sr.sector,
-                    industry:      sr.industry ?? null,
-                    school:        sr.lens ?? statedMandate?.selection ?? mandate?.selection ?? null,
-                    note:          sr.note ?? sr.constraints ?? null,
-                }).then(r => { if (!r.ok) logger.info(LOG, 'sleeve not sourced', { sector: sr.sector, reason: r.reason }) })
-                  .catch(err => logger.warn(LOG, 'sleeve sourcing failed', err.message))
-            }
-
-            // 4th flow: uncovered name the user asked to add. Enqueue for Prometheus — fire-and-forget.
-            if (result.coverageRequest?.symbol) {
-                researchQueueService.enqueue({
-                    symbol:      result.coverageRequest.symbol,
-                    source:      'manual',
-                    requestedBy: req.user._id,
-                }).catch(err => logger.warn(LOG, 'coverage request enqueue failed', err.message))
-            }
-
-            return { reply: result.reply, plan: result.plan ?? null, update: result.update ?? null, mandate: result.mandate ?? null, thesis: result.thesis ?? null, phase: result.phase ?? null, ...(result.screenRequests ? { screen_requests: result.screenRequests } : {}), ...(result.coverageRefresh ? { coverage_refresh: result.coverageRefresh } : {}), ...(result.coverageRequest ? { coverage_request: result.coverageRequest } : {}), ...routeFields(result, req.user.role) }
-        },
-    })
-}
+        return result
+    },
+    done: (result) => ({
+        reply: result.reply, plan: result.plan ?? null, update: result.update ?? null, mandate: result.mandate ?? null, thesis: result.thesis ?? null, phase: result.phase ?? null,
+        ...(result.screenRequests ? { screen_requests: result.screenRequests } : {}),
+        ...(result.coverageRefresh ? { coverage_refresh: result.coverageRefresh } : {}),
+        ...(result.coverageRequest ? { coverage_request: result.coverageRequest } : {}),
+    }),
+})
 
 export const savePortfolioChatState = handle('savePortfolioChatState', async (req, res) => {
     const { portfolioId, messages, mandate, thesis, threadId, portfolioName } = req.body ?? {}

@@ -1,10 +1,10 @@
 import { fileURLToPath }  from 'url'
 import { dirname, join }  from 'path'
 import { logger }         from '../logger.service.js'
-import { normalizeMessages, makePromptLoader, stripEmitTags, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, BREVITY_RULE, VENUE_RULE, cachedBlock } from '../agentUtils.js'
+import { normalizeMessages, makePromptLoader, cleanReply, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, BREVITY_RULE, VENUE_RULE, cachedBlock } from '../agentUtils.js'
 import { buildTagCaptures } from '../llmStream.util.js'
 import { makeSuggestionCapture } from '../suggestions.service.js'
-import { makeRouteCapture, ROUTE_TAGS, ADMIN_DESKS } from '../routing.util.js'
+import { makeRouteCapture, ADMIN_DESKS } from '../routing.util.js'
 import { runAgentStream } from '../agentIO.js'
 import { toolsFor } from '../agentTools.registry.js'
 import { makeTradingContextHandlers, buildVenueSection, TRADING_CONTEXT_TOOL_SPEC } from '../tools/tradingContext.tools.js'
@@ -209,7 +209,7 @@ ${audienceBlock}` : ''}` },
         onChart: (row) => { chartRow = row; onChart?.(row) },
     })
 
-    const reply = stripEmitTags(raw ?? '', [...ROUTE_TAGS, 'adopt', 'suggest']).trim()
+    const reply = cleanReply(raw)
     // No desk, no opening; no opening on an edit; no show beside either — the capture gates the
     // four tags against each other (see makeRouteCapture).
     const { route: desk, routeSymbol: symbol, opening, edit, show } = route.result()

@@ -7,6 +7,7 @@ import { logger } from './logger.service.js'
 import { resolveStreamFn, CHEAP_MODEL, DEFAULT_MODEL } from './llmModels.js'
 import { recordUsage, recordTurn, userCeiling, overCeiling, chatSpend, calcCost } from './tokenUsage.service.js'
 import { getHouseModels } from './houseModels.service.js'
+import { ALL_EMIT_TAGS } from './llmStream.util.js'
 
 const LOG = '[agentUtils]'
 
@@ -173,29 +174,18 @@ export function normalizeMessages(messages, maxCount) {
 }
 
 /**
- * A desk's conversation for this turn: the trimmed history, or the opening prompt when there is
- * none yet.
+ * A conversation that is only its opening line — how a headless run (a research run, a quick read,
+ * an industry assessment) starts a desk turn. Every caller hands a desk `messages`; this is the one
+ * spelling of "a fresh conversation that opens on this sentence", so no caller invents a second
+ * shape for it (there used to be a parallel `userPrompt` argument, and the trap it set — handing
+ * `normalizeMessages` a prompt it does not read, which reaches the provider as zero messages — went
+ * with it).
  *
- * THE TRAP THIS EXISTS TO CLOSE, and it is the reason the three copies each carried the same
- * warning comment: `normalizeMessages` does NOT append `userPrompt`. Handing it one produces an
- * empty array — every filter drops it — and the provider then rejects the request with "at least
- * one message is required", which reads as an API problem rather than as a caller mistake. The two
- * cases genuinely are different code paths, and this is the one place that knows it.
- *
- * `max` is the CALLER's, deliberately. How much history a desk needs is judgment and the desks do
- * not agree — a build conversation carries 8 turns, a scan 10, Axl's reception 12 — so the depth
- * stays with the desk and only the mechanism is shared.
- *
- * A whitespace-only prompt is no prompt. Two of the three copies used `String(userPrompt)` and
- * would have opened a conversation on `'   '`; normalizeMessages drops such a message anyway on
- * every subsequent turn, so trimming here makes the first turn agree with all the others.
- *
- * @param {{ messages?: unknown, userPrompt?: unknown, max: number }} spec
- * @returns {{role: 'user'|'assistant', content: string}[]}
+ * @param   {string} text
+ * @returns {{role: 'user', content: string}[]}  empty for a blank opening
  */
-export function buildDeskMessages({ messages, userPrompt, max }) {
-    if (Array.isArray(messages) && messages.length) return normalizeMessages(messages, max)
-    const opening = typeof userPrompt === 'string' ? userPrompt.trim() : ''
+export function openingTurn(text) {
+    const opening = typeof text === 'string' ? text.trim() : ''
     return opening ? [{ role: 'user', content: opening }] : []
 }
 
@@ -565,4 +555,19 @@ export function stripEmitTags(raw, tagNames) {
         }
     }
     return text
+}
+
+/**
+ * The reply a desk returns: every registered emit block removed (ALL_EMIT_TAGS), `<ticker>` unwrapped
+ * rather than removed (its inner text IS prose — "buy <ticker>NVDA</ticker>" must keep the name),
+ * then trimmed.
+ *
+ * ONE list for every desk. Each desk used to hand-list the tags it strips, and a tag a desk did not
+ * expect — another desk's, or one it emits only in a rare mode — survived into the stored reply as
+ * raw markup. The suppressor already worked from the shared registry while streaming; the settled
+ * reply now does too.
+ */
+export function cleanReply(raw) {
+    const unwrapped = String(raw ?? '').replace(/<ticker>([\s\S]*?)<\/ticker>/g, '$1')
+    return stripEmitTags(unwrapped, ALL_EMIT_TAGS).trim()
 }

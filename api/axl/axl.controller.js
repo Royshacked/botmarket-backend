@@ -1,8 +1,6 @@
 import { axlAgentService } from '../../services/agents/axl.agent.service.js'
-import { routeFields } from '../../services/routing.util.js'
-import { streamAgentResponse, sseAgentCallbacks } from '../_shared/sse.util.js'
-import { parseChatMessages } from '../_shared/parse.util.js'
-import { getExperienceLevel } from '../../services/experience.service.js'
+import { streamAgentResponse } from '../_shared/sse.util.js'
+import { makeDeskStream } from '../_shared/deskStream.util.js'
 import { getMarketBrief } from '../../services/marketBrief.service.js'
 
 const LOG = '[axl:controller]'
@@ -19,44 +17,23 @@ const LOG = '[axl:controller]'
 // resolve. The model is the user's own pick, straight through — there is no per-turn routing layer
 // any more (see docs: a model or reasoning change mid-conversation invalidates the prompt cache,
 // which cost more than picking a cheaper model per turn ever saved).
-export async function streamAxl(req, res) {
-    const { messages, model } = req.body ?? {}
-
-    const validated = parseChatMessages(messages)
-    if (validated.error) return res.status(400).json({ error: validated.error })
-
-    await streamAgentResponse(req, res, {
-        log: LOG,
-        handler: async ({ sendEvent, signal }) => {
-            const result = await axlAgentService.chatStream({
-                messages: validated.messages,
-                audience: await getExperienceLevel(req.user._id),
-                isAdmin:  req.user.role === 'admin',
-                model,
-                userId:  req.user._id,
-                signal:  signal,
-                ...sseAgentCallbacks(sendEvent),
-            })
-
-            // route / routeSymbol / edit / show / opening — validated for this user by the shared tier.
-            const routing = routeFields(result, req.user.role)
-            const { route } = routing
-            return {
-                reply: result.reply,
-                ...routing,
-                // The user already owns the book they want managed → the portfolio desk opens in
-                // ADOPT mode instead of on a blank construction. Re-gated on a real portfolio route
-                // for the same reason the symbol and the opening are: this tier is the contract.
-                adopt: route === 'portfolio' && result.adopt === true,
-                // Follow-up chips. Already empty on a routing turn (the agent guards it), and
-                // re-gated here for the same reason `route` itself is validated rather than
-                // trusted: this tier is the contract the client reads.
-                suggestions: route ? [] : (Array.isArray(result.suggestions) ? result.suggestions : []),
-                chart: result.chart ?? null,
-            }
-        },
-    })
-}
+export const streamAxl = makeDeskStream({
+    log: LOG,
+    run: ({ req, common }) => axlAgentService.chatStream({ ...common, isAdmin: req.user.role === 'admin' }),
+    // route / routeSymbol / edit / show / opening are appended by makeDeskStream, validated for
+    // this user by the shared tier.
+    done: (result, { routing: { route } }) => ({
+        reply: result.reply,
+        // The user already owns the book they want managed → the portfolio desk opens in ADOPT mode
+        // instead of on a blank construction. Re-gated on a real portfolio route for the same reason
+        // the symbol and the opening are: this tier is the contract.
+        adopt: route === 'portfolio' && result.adopt === true,
+        // Follow-up chips. Already empty on a routing turn (the agent guards it), and re-gated here
+        // for the same reason `route` itself is validated rather than trusted.
+        suggestions: route ? [] : (Array.isArray(result.suggestions) ? result.suggestions : []),
+        chart: result.chart ?? null,
+    }),
+})
 
 /**
  * Today's market brief, streamed into the Axl chat panel — the CONFIRM half of the daily offer

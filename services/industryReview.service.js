@@ -18,6 +18,7 @@ import { industryViewService } from '../api/strategy/industryView.service.js'
 import { readSubIndustry } from '../api/strategy/industryData.service.js'
 import { notifyIndustryChanged } from './industryNotify.service.js'
 import { withTimeout } from './timeout.util.js'
+import { openingTurn } from './agentUtils.js'
 import { logger } from './logger.service.js'
 
 const LOG = '[industryReview]'
@@ -67,7 +68,7 @@ export async function reviewIndustry(code, reason = null, deps = _deps, { timeou
         const { sub, answering } = bundle
         const cyclical = Boolean(answering?.q3?.cyclical)
         const result = await withTimeout(deps.run({
-            messages: [], userPrompt: _reviewPrompt(sub, reason),
+            messages: openingTurn(_reviewPrompt(sub, reason)),
             chatState: { industry: sub.code, ...(reason ? { review_reason: reason } : {}) },
             userId: null, signal: abort.signal,
             onToken: () => {}, onToolStart: () => {}, onReasoning: () => {}, onPhase: () => {},

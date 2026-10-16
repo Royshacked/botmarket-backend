@@ -20,9 +20,9 @@ import { dirname, join } from 'path'
 import { makePhaseCapture, runAgentStream, parseEmitBlocks } from '../agentIO.js'
 import { toolsFor } from '../agentTools.registry.js'
 import { consultDescription } from '../deepThink.service.js'
-import { makePromptLoader, stripEmitTags, makeToolHandler, attachTurnContext, LANGUAGE_RULE, BREVITY_RULE, buildStandingProposalRule, cachedBlock, buildDeskMessages } from '../agentUtils.js'
+import { makePromptLoader, cleanReply, makeToolHandler, attachTurnContext, LANGUAGE_RULE, BREVITY_RULE, buildStandingProposalRule, cachedBlock, normalizeMessages } from '../agentUtils.js'
 import { buildTagCaptures } from '../llmStream.util.js'
-import { makeRouteCapture, ROUTE_TAGS, buildRouteRule } from '../routing.util.js'
+import { makeRouteCapture, buildRouteRule } from '../routing.util.js'
 import {
     readSubIndustry, listSubIndustries, readCompanies, coveredSymbols,
     formatSubIndustry, formatCompanies, formatMoney, readMoneyLeaders, formatMoneyLeaders, largestCompanies,
@@ -43,7 +43,7 @@ const __dirname   = dirname(fileURLToPath(import.meta.url))
 const LOG         = '[strategyAgent]'
 const PROMPT_PATH = join(__dirname, '../../prompts/strategy_system_prompt.md')
 const _systemPrompt = makePromptLoader(PROMPT_PATH, LOG)
-const MAX_RECENT_MESSAGES = 8
+const MAX_MESSAGES = 8
 const MAX_COMPANIES = 60
 
 export const TOOLS = [
@@ -174,13 +174,13 @@ function _forPrompt({ monitor, revisions, ...rest }) {   // eslint-disable-line 
 export const strategyAgentService = { chatStream }
 
 async function chatStream({
-    messages, userPrompt, chatState = {},
+    messages, chatState = {},
     model: requestedModel, reasoningEffort, userId,
     onToken, onToolStart, onReasoning, onPhase, signal,
     _run = runAgentStream,   // the shared contract-test seam — see runAgentStream in agentIO.js
 }) {
     const systemPrompt  = _buildSystemPrompt()
-    const builtMessages = attachTurnContext(_buildMessages({ messages, userPrompt }), _buildTurnContext(chatState))
+    const builtMessages = attachTurnContext(normalizeMessages(messages, MAX_MESSAGES), _buildTurnContext(chatState))
 
     const phase = makePhaseCapture(3, onPhase)
     // Every emit tag is suppressed by default; <industry_view> is parsed from `raw` afterward.
@@ -191,7 +191,6 @@ async function chatStream({
         log: LOG, requestedModel, userId, messages: builtMessages, systemPrompt,
         tools: TOOLS, toolHandlers: TOOL_HANDLERS,
         reasoningEffort, signal, onToken, tagCaptures, onToolStart, onReasoning,
-        meta: { userPrompt },
     })
 
     const { reply, views, assessments, theme_proposals } = _parseStrategyResponse(raw)
@@ -213,7 +212,7 @@ const _txt = (v) => typeof v === 'string' && v.trim()
  */
 export function _parseStrategyResponse(raw) {
     const text  = raw ?? ''
-    const reply = stripEmitTags(text, ['industry_view', 'industry_screen', 'industry_assessment', 'theme_proposal', 'phase', ...ROUTE_TAGS]).trim()
+    const reply = cleanReply(text)
     const blocks = (tag) => parseEmitBlocks(text, tag, LOG).filter(_obj)
     const withIndustry = (tag) => blocks(tag).filter(v => _txt(v.industry)).map(v => ({ ...v, industry: v.industry.trim() }))
     const assessments = blocks('industry_assessment').filter(v => _txt(v.industry) || _txt(v.theme))
@@ -263,6 +262,3 @@ export function _buildTurnContext(chatState) {
     return `IN FOCUS: GICS sub-industry ${focus}.${why}`
 }
 
-export function _buildMessages({ messages, userPrompt }) {
-    return buildDeskMessages({ messages, userPrompt, max: MAX_RECENT_MESSAGES })
-}

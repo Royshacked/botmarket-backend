@@ -10,6 +10,7 @@ import { coverageService, revisionSummary } from '../api/analyst/coverage.servic
 import { notifyCoverageRefreshed } from './coverageNotify.service.js'
 import { resolveCardsFor }     from '../api/chat/chat.service.js'
 import { withTimeout }         from './timeout.util.js'
+import { openingTurn }         from './agentUtils.js'
 import { logger }              from './logger.service.js'
 
 const LOG = '[coverageRefresh]'
@@ -115,8 +116,7 @@ export async function refreshCoverage({ userId = null, ticker, question = null, 
         existing = await deps.existing(sym)
 
         const result = await withTimeout(deps.research({
-            messages:  [],
-            userPrompt: _buildRefreshPrompt(sym, question),
+            messages:  openingTurn(_buildRefreshPrompt(sym, question)),
             ...(existing ? { chatState: { existing_coverage: existing, active_symbol: sym } } : {}),
             userId,
             onToken: () => {}, onToolStart: () => {}, onReasoning: () => {}, onPhase: () => {},

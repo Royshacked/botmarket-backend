@@ -152,6 +152,21 @@ So the session plugs into ONE place instead of five controllers.
 Tests: `deskControllersHandle`, `agentStreamContract`, `parse.util`, `normalizeMessages`,
 `promptCacheHistory`, `turnContextPlacement` updated; behaviour identical.
 
+**As done (2026-10-16):**
+- `api/_shared/deskStream.util.js` — `makeDeskStream({ log, parse, run, done })`; all seven desk
+  streams ride it (Pythia and Aether too: separate panels, same pipe). `run` is the seam the session
+  turn endpoint calls in phase 5.
+- `parseDeskTurn` replaced `parseStreamBody` and the hand-rolled parses. **`userPrompt` is gone
+  everywhere** — no client sent it; the five headless callers (research run, quick read, coverage
+  refresh, industry assessment, industry review) pass `openingTurn(text)` as `messages`.
+  `buildDeskMessages` and every per-desk `_buildMessages` wrapper are deleted; one constant name
+  (`MAX_MESSAGES`).
+- `cleanReply` strips from `ALL_EMIT_TAGS` (unwrapping `<ticker>`) — every per-desk strip list deleted.
+- **Moved to phase 4:** the one desk registry. Its keys are pipelines (`trade`, `assist`, …), which
+  phase 4 replaces with the agent that has the floor; merging them now would be redone there.
+- Tests: `deskStream.test.js` (new), `parse.util`, `normalizeMessages` (+ `openingTurn`, `cleanReply`),
+  `mentorResponse`, `routing`, `agentStreamContract`, `strategyAgent` updated. Suite 3970/0.
+
 ## 5. Phase 3 — The session store (backend)
 
 - **`services/session.service.js` + `session.util.js`** (pure parts unit-tested). Collection `sessions`:

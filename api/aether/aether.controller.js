@@ -14,9 +14,7 @@ import { quickRead } from '../../services/aetherQuickRead.service.js'
 import { getScanUniverse } from '../../services/aetherScanUniverse.service.js'
 import { batchRead } from '../../services/aetherBatchRead.service.js'
 import { aetherSchedulerService, DISCOVERY_DEFAULTS } from '../../services/aetherScheduler.service.js'
-import { streamAgentResponse, sseAgentCallbacks }    from '../_shared/sse.util.js'
-import { routeFields }                               from '../../services/routing.util.js'
-import { parseChatMessages }                         from '../_shared/parse.util.js'
+import { makeDeskStream }                            from '../_shared/deskStream.util.js'
 import { makeHandle }                                from '../_shared/handle.util.js'
 import { httpError }                                 from '../../services/httpError.util.js'
 import { logger }                                    from '../../services/logger.service.js'
@@ -24,29 +22,11 @@ import { logger }                                    from '../../services/logger
 const LOG    = '[aetherCtrl]'
 const handle = makeHandle(LOG)
 
-export async function streamAether(req, res) {
-    const { messages: rawMessages, model } = req.body ?? {}
-    let messages
-    if (rawMessages != null) {
-        const v = parseChatMessages(rawMessages)
-        if (v.error) return res.status(400).json({ error: v.error })
-        messages = v.messages
-    }
-    await streamAgentResponse(req, res, {
-        log: LOG,
-        handler: async ({ sendEvent, signal }) => {
-            const result = await aetherAgentService.chatStream({
-                messages,
-                model,
-                userId: req.user._id,
-                signal,
-                ...sseAgentCallbacks(sendEvent),
-            })
-            // route / routeSymbol / opening: the user asked to be sent to another desk (routing.util).
-            return { reply: result.reply, ...routeFields(result, req.user.role) }
-        },
-    })
-}
+export const streamAether = makeDeskStream({
+    log: LOG,
+    run: ({ common }) => aetherAgentService.chatStream(common),
+    done: (result) => ({ reply: result.reply }),
+})
 
 // ─── The candidate list — a house-layer broadcast ─────────────────────────────
 

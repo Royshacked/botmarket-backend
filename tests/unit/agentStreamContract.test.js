@@ -22,10 +22,10 @@ import { CONSULT_TOOL }         from '../../services/deepThink.service.js'
 // shared (the pipe). A new agent joins by adding one row + the `_run` seam.
 
 const AGENTS = [
-    { name: 'analyst  (Prometheus)', chatStream: analystAgentService.chatStream,   args: { userPrompt: 'pitch me NVDA' } },
+    { name: 'analyst  (Prometheus)', chatStream: analystAgentService.chatStream,   args: { messages: [{ role: 'user', content: 'pitch me NVDA' }] } },
     { name: 'aether',                chatStream: aetherAgentService.chatStream,    args: { messages: [{ role: 'user', content: 'explain the channel model' }] } },
     { name: 'axl',                   chatStream: axlAgentService.chatStream,       args: { messages: [{ role: 'user', content: 'what can you do' }] } },
-    { name: 'mentor',                chatStream: mentorAgentService.chatStream,    args: { userPrompt: 'walk me through AAPL' } },
+    { name: 'mentor',                chatStream: mentorAgentService.chatStream,    args: { messages: [{ role: 'user', content: 'walk me through AAPL' }] } },
     { name: 'portfolio (Atlas)',     chatStream: portfolioAgentService.chatStream, args: { messages: [{ role: 'user', content: 'build me a portfolio' }] } },
     { name: 'scanner   (Argus)',     chatStream: scannerAgentService.chatStream,   args: { messages: [{ role: 'user', content: 'find me momentum names' }] } },
 ]

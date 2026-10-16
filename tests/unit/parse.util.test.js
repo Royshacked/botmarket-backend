@@ -1,14 +1,15 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { parseStreamBody, parseClientTime, parseIdeaAccounts, parseChatMessages } from '../../api/_shared/parse.util.js'
+import { parseDeskTurn, parseClientTime, parseIdeaAccounts, parseChatMessages } from '../../api/_shared/parse.util.js'
 
-// The shared agent-stream body parser. Kairos and Mentor each carried a copy of this and had
-// drifted; these lock the ONE behaviour both endpoints now answer with.
+// THE desk-turn body parser — one for every streaming desk (makeDeskStream). Three parse styles
+// used to live in the controllers; these lock the ONE behaviour they all answer with now.
 
 const msgs = (...contents) => contents.map((content, i) => ({
     role: i % 2 === 0 ? 'user' : 'assistant', content,
 }))
+const turn = (extra = {}) => parseDeskTurn({ messages: msgs('hi'), ...extra })
 
 // ── the conversation ─────────────────────────────────────────────────────────
 
@@ -17,62 +18,63 @@ test('a valid conversation passes through validated and UNCAPPED', () => {
     // the cached prompt prefix stays byte-stable). A slice() here would be the per-turn sliding
     // window that design exists to avoid, so the parser must hand over every turn it was given.
     const twenty = msgs(...Array.from({ length: 20 }, (_, i) => `turn ${i}`))
-    const out = parseStreamBody({ messages: twenty })
+    const out = parseDeskTurn({ messages: twenty })
     assert.equal(out.error, undefined)
     assert.equal(out.messages.length, 20)
     assert.equal(out.messages[0].content, 'turn 0')
 })
 
 test('content is trimmed and the roles are validated', () => {
-    const out = parseStreamBody({ messages: [{ role: 'user', content: '  hi  ' }] })
+    const out = parseDeskTurn({ messages: [{ role: 'user', content: '  hi  ' }] })
     assert.deepEqual(out.messages, [{ role: 'user', content: 'hi' }])
 
-    assert.match(parseStreamBody({ messages: [{ role: 'system', content: 'x' }] }).error, /role must be user or assistant/)
-    assert.match(parseStreamBody({ messages: [{ role: 'user', content: '   ' }] }).error, /non-empty string/)
-    assert.match(parseStreamBody({ messages: 'nope' }).error, /messages must be an array/)
+    assert.match(parseDeskTurn({ messages: [{ role: 'system', content: 'x' }] }).error, /role must be user or assistant/)
+    assert.match(parseDeskTurn({ messages: [{ role: 'user', content: '   ' }] }).error, /non-empty string/)
+    assert.match(parseDeskTurn({ messages: 'nope' }).error, /messages must be an array/)
 })
 
-test('an empty messages array falls back to userPrompt, or errors with nothing to fall back to', () => {
-    assert.equal(parseStreamBody({ messages: [], userPrompt: '  ask  ' }).userPrompt, 'ask')
-    assert.match(parseStreamBody({ messages: [] }).error, /non-empty array/)
-    assert.match(parseStreamBody({}).error, /must include messages or userPrompt/)
-})
-
-test('userPrompt alone is a valid turn', () => {
-    const out = parseStreamBody({ userPrompt: 'long NVDA' })
-    assert.equal(out.userPrompt, 'long NVDA')
-    assert.equal(out.messages, undefined)
+// There is no second "prompt" field any more: a headless run opens a desk with openingTurn(text) as
+// its messages, and every client sends the whole history.
+test('the conversation is required — an empty, absent or prompt-only body is a 400', () => {
+    assert.match(parseDeskTurn({ messages: [] }).error, /non-empty array/)
+    assert.match(parseDeskTurn({}).error, /must be an array/)
+    assert.match(parseDeskTurn(undefined).error, /must be an array/)
+    assert.match(parseDeskTurn({ userPrompt: 'long NVDA' }).error, /must be an array/)
 })
 
 // ── chat state ───────────────────────────────────────────────────────────────
 
 test('chatState must be a plain object; absent and null both mean "none"', () => {
-    assert.deepEqual(parseStreamBody({ userPrompt: 'x', chatState: { draft: {} } }).chatState, { draft: {} })
-    assert.equal(parseStreamBody({ userPrompt: 'x' }).chatState, null)
-    assert.equal(parseStreamBody({ userPrompt: 'x', chatState: null }).chatState, null)
-    assert.match(parseStreamBody({ userPrompt: 'x', chatState: [] }).error, /chatState must be an object/)
-    assert.match(parseStreamBody({ userPrompt: 'x', chatState: 'no' }).error, /chatState must be an object/)
+    assert.deepEqual(turn({ chatState: { draft: {} } }).chatState, { draft: {} })
+    assert.equal(turn().chatState, null)
+    assert.equal(turn({ chatState: null }).chatState, null)
+    assert.match(turn({ chatState: [] }).error, /chatState must be an object/)
+    assert.match(turn({ chatState: 'no' }).error, /chatState must be an object/)
 })
 
 // ── accounts ─────────────────────────────────────────────────────────────────
 
 test('an account without an id is DROPPED, not rendered', () => {
-    // The drift this replaced: Kairos kept any object, Mentor kept only those carrying an `id`.
-    // Mentor was right — `_finalizeCall` filters `id != null` before it binds, so an id-less
-    // account reached Kairos's prompt as a venue the desk could discuss and Generate then dropped
-    // in silence. The prompt must describe exactly what Generate will bind.
-    const out = parseStreamBody({
-        userPrompt: 'x',
-        accounts: [{ id: 'a1', broker: 'ctrader' }, { broker: 'ctrader' }, null, 'nope'],
-    })
+    // An id-less account would reach the prompt as a venue the desk could discuss and then be
+    // dropped in silence when it binds. The prompt must describe exactly what will bind.
+    const out = turn({ accounts: [{ id: 'a1', broker: 'ctrader' }, { broker: 'ctrader' }, null, 'nope'] })
     assert.deepEqual(out.accounts, [{ id: 'a1', broker: 'ctrader' }])
 })
 
 test('mainAccountId is normalized to a string, and absent stays null', () => {
     // It arrives as a number or a string depending on the broker; every consumer compares as string.
-    assert.equal(parseStreamBody({ userPrompt: 'x', mainAccountId: 12345 }).mainAccountId, '12345')
-    assert.equal(parseStreamBody({ userPrompt: 'x', mainAccountId: 'a1' }).mainAccountId, 'a1')
-    assert.equal(parseStreamBody({ userPrompt: 'x' }).mainAccountId, null)
+    assert.equal(turn({ mainAccountId: 12345 }).mainAccountId, '12345')
+    assert.equal(turn({ mainAccountId: 'a1' }).mainAccountId, 'a1')
+    assert.equal(turn().mainAccountId, null)
+})
+
+// ── model ────────────────────────────────────────────────────────────────────
+
+test('the model is a non-empty string or undefined — the agent resolves the default', () => {
+    assert.equal(turn({ model: 'claude-sonnet-5' }).model, 'claude-sonnet-5')
+    assert.equal(turn().model, undefined)
+    assert.equal(turn({ model: '' }).model, undefined)
+    assert.equal(turn({ model: { evil: true } }).model, undefined)
 })
 
 // ── client clock ─────────────────────────────────────────────────────────────

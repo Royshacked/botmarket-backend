@@ -10,7 +10,7 @@ import { getSecFilings } from '../../providers/sec.provider.js'
 import { cleanConviction } from '../conviction.util.js'
 import { formatWorkspaceLine } from '../portfolioMode.util.js'
 import { logger }         from '../logger.service.js'
-import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, buildAccountLines, stripEmitTags, makeToolHandler, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, BREVITY_RULE, VENUE_RULE, buildStandingProposalRule, cachedBlock } from '../agentUtils.js'
+import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, buildAccountLines, cleanReply, makeToolHandler, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, BREVITY_RULE, VENUE_RULE, buildStandingProposalRule, cachedBlock } from '../agentUtils.js'
 import { makeTradingContextHandlers, buildVenueSection } from '../tools/tradingContext.tools.js'
 import { makeMarketHoursHandlers, MARKET_HOURS_TOOL_SPEC } from '../tools/marketHours.tools.js'
 import { makeIndustryViewsHandlers, INDUSTRY_VIEWS_TOOL_SPEC } from '../tools/industryViews.tools.js'
@@ -18,7 +18,7 @@ import { makeChartHandler } from '../tools/marketData.tools.js'
 import { coverageService } from '../../api/analyst/coverage.service.js'
 import { SECTORS } from '../entity/vocabulary.js'
 import { buildTagCaptures } from '../llmStream.util.js'
-import { makeRouteCapture, ROUTE_TAGS, buildRouteRule } from '../routing.util.js'
+import { makeRouteCapture, buildRouteRule } from '../routing.util.js'
 import { buildSchoolSection, normalizeAllocation, normalizeSelection } from '../investorSchools.js'
 import { applyIndustryLimits, industriesFor, avoidNames, capFor } from '../industryLimits.service.js'
 
@@ -188,7 +188,7 @@ async function chatStream({ messages = [], ideaAccounts = [], mainAccountId = nu
     // the system prompt: free cash moves whenever anything fills, so a volatile system block
     // would sit ahead of the whole conversation in the cache prefix. See buildVenueSection.
     const normalized = attachTurnContext(
-        attachTurnContext(_buildMessages(messages), _buildStagedBook(adoptDraft)),
+        attachTurnContext(normalizeMessages(messages, MAX_MESSAGES), _buildStagedBook(adoptDraft)),
         await _venueSection(userId))
 
     // Stable base (cached) + volatile per-request sections (accounts, edit
@@ -290,11 +290,7 @@ async function chatStream({ messages = [], ideaAccounts = [], mainAccountId = nu
     // 4th flow: user asked for a name not in house coverage → route to Prometheus via research queue.
     const coverageRequest = _parseCoverageRequest(raw)
 
-    const reply = stripEmitTags(
-        // <ticker> keeps its inner text in the reply (unwrap, don't strip).
-        raw.replace(/<ticker>([\s\S]*?)<\/ticker>/g, '$1'),
-        ['phase', 'portfolio_plan', 'portfolio_update', 'portfolio_mandate', 'portfolio_thesis', 'screen_request', 'coverage_refresh', 'coverage_request', ...ROUTE_TAGS],
-    ).trim()
+    const reply = cleanReply(raw)
 
     if (capturedPlan) capturedPlan = await _sizePlan(capturedPlan, { mandate: capturedMandate ?? mandate })
     if (capturedUpdate) capturedUpdate = await _markAvoidAdds(capturedUpdate)
@@ -479,9 +475,6 @@ export async function _sizePlan(plan, { mandate = null } = {}) {
     return plan
 }
 
-function _buildMessages(messages) {
-    return normalizeMessages(messages, MAX_MESSAGES)
-}
 
 // THE EDIT MODE BLOCK IS GONE (2026-09-15), and what it did is worth recording.
 //

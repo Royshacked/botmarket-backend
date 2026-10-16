@@ -5,15 +5,13 @@ import { resolveCardsFor }        from '../chat/chat.service.js'
 import { researchQueueService }   from '../../services/researchQueue.service.js'
 import { researchRunService }     from '../../services/researchRun.service.js'
 import { analystAgentService }    from '../../services/agents/analyst.agent.service.js'
-import { streamAgentResponse, sseAgentCallbacks } from '../_shared/sse.util.js'
-import { routeFields }             from '../../services/routing.util.js'
-import { parseChatMessages }      from '../_shared/parse.util.js'
+import { makeDeskStream }         from '../_shared/deskStream.util.js'
 import { sendReason }             from '../_shared/reason.util.js'
 import { makeHandle }             from '../_shared/handle.util.js'
 import { httpError }              from '../../services/httpError.util.js'
 import { logger }                 from '../../services/logger.service.js'
-import { getExperienceLevel }     from '../../services/experience.service.js'
 import { sanitizeScanSeed }       from '../../services/scanSeed.util.js'
+import { getExperienceLevel }     from '../../services/experience.service.js'
 
 const LOG = '[analystCtrl]'
 // Every handler here rides makeHandle. The queue and run handlers moved first (§6): they had no
@@ -56,41 +54,20 @@ export async function _resolveCoverageContext(chatState, seed) {
     return state
 }
 
-export async function streamAnalyst(req, res) {
-    const { messages: rawMessages, userPrompt, model, chatState } = req.body ?? {}
-    const seed = sanitizeScanSeed(req.body?.seed)
-    let messages
-    if (rawMessages != null) {
-        const v = parseChatMessages(rawMessages)
-        if (v.error) return res.status(400).json({ error: v.error })
-        messages = v.messages
-    }
-
-    const resolvedState = await _resolveCoverageContext(
-        (chatState && typeof chatState === 'object') ? chatState : {},
-        seed
-    )
-
-    await streamAgentResponse(req, res, {
-        log: LOG,
-        handler: async ({ sendEvent, signal }) => {
-            const result = await analystAgentService.chatStream({
-                audience:  await getExperienceLevel(req.user._id),
-                messages,
-                userPrompt,
-                chatState:     resolvedState,
-                seed,
-                model,
-                userId: req.user._id,
-                signal,
-                ...sseAgentCallbacks(sendEvent),
-                onPhase:     phase => sendEvent('phase',     { phase }),
-            })
-            // …plus route / routeSymbol / opening: the user asked to be sent to another desk (routing.util).
-            return { reply: result.reply, phase: result.phase ?? null, ...(result.coverage ? { coverage: result.coverage } : {}), ...routeFields(result, req.user.role) }
-        },
-    })
-}
+export const streamAnalyst = makeDeskStream({
+    log: LOG,
+    parse: async (req, turn) => {
+        const seed = sanitizeScanSeed(req.body?.seed)
+        return { seed, chatState: await _resolveCoverageContext(turn.chatState ?? {}, seed) }
+    },
+    run: ({ extras, sendEvent, common }) => analystAgentService.chatStream({
+        ...common,
+        chatState: extras.chatState,
+        seed:      extras.seed,
+        onPhase:   phase => sendEvent('phase', { phase }),
+    }),
+    done: (result) => ({ reply: result.reply, phase: result.phase ?? null, ...(result.coverage ? { coverage: result.coverage } : {}) }),
+})
 
 // ─── Coverage CRUD ────────────────────────────────────────────────────────────
 

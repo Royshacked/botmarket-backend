@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { normalizeMessages, buildDeskMessages, cachedBlock } from '../../services/agentUtils.js'
+import { normalizeMessages, openingTurn, cleanReply, cachedBlock } from '../../services/agentUtils.js'
 
 // ── coalescing (Kairos threads one reply across several assistant bubbles) ──
 test('normalize: coalesces consecutive assistant turns into one (phase-threaded reply)', () => {
@@ -64,43 +64,43 @@ test('normalize: non-array → empty', () => {
     assert.deepEqual(normalizeMessages(undefined, 5), [])
 })
 
-// ── buildDeskMessages: the opening turn vs a continuing one ──────────────────
+// ── openingTurn: how a headless run opens a desk ─────────────────────────────
 //
-// THE TRAP it exists to close: normalizeMessages does NOT append userPrompt. Handing it one yields
-// an empty array — every filter drops it — and the provider then rejects the request with "at least
-// one message is required", which reads as an API fault rather than a caller mistake. Three desks
-// each carried their own copy of this branch, and each carried the warning comment with it.
+// Every caller hands a desk `messages`. A headless run (a research run, a quick read, an industry
+// assessment) opens on one sentence, and this is its one spelling — the parallel `userPrompt`
+// argument it replaced set a trap: normalizeMessages does not read it, so a caller that forgot the
+// special case reached the provider with zero messages.
 
-test('desk messages: an opening turn becomes the first user message', () => {
-    assert.deepEqual(buildDeskMessages({ messages: [], userPrompt: 'cover NVDA', max: 8 }),
-        [{ role: 'user', content: 'cover NVDA' }])
-    assert.deepEqual(buildDeskMessages({ messages: null, userPrompt: 'cover NVDA', max: 8 }),
-        [{ role: 'user', content: 'cover NVDA' }])
+test('opening turn: one sentence becomes the first user message, trimmed', () => {
+    assert.deepEqual(openingTurn('  cover NVDA '), [{ role: 'user', content: 'cover NVDA' }])
 })
 
-test('desk messages: a continuing conversation is trimmed, and the prompt is NOT re-appended', () => {
-    // The prompt is already the last message on a continuing turn — the client sent it. Appending it
-    // again would double the user's own words back at the model.
-    const out = buildDeskMessages({
-        messages: [{ role: 'user', content: 'a' }, { role: 'assistant', content: 'b' }, { role: 'user', content: 'c' }],
-        userPrompt: 'c', max: 8,
-    })
-    assert.deepEqual(out.map(m => m.content), ['a', 'b', 'c'])
-})
-
-test('desk messages: `max` belongs to the caller — desks do not agree on how much history they need', () => {
-    const many = Array.from({ length: 20 }, (_, i) => ({ role: i % 2 ? 'assistant' : 'user', content: `m${i}` }))
-    assert.ok(buildDeskMessages({ messages: many, max: 4 }).length <= 4)
-    assert.ok(buildDeskMessages({ messages: many, max: 12 }).length > 4)
-})
-
-test('desk messages: a whitespace-only prompt is no prompt', () => {
-    // Two of the three copies used String(userPrompt) and would have opened a conversation on '   '.
-    // normalizeMessages drops such a message on every LATER turn, so trimming here makes the first
-    // turn agree with all the others rather than being the one that lets it through.
+test('opening turn: a blank or non-string opening is no conversation', () => {
     for (const empty of ['   ', '', null, undefined, 42, {}]) {
-        assert.deepEqual(buildDeskMessages({ messages: [], userPrompt: empty, max: 8 }), [], String(empty))
+        assert.deepEqual(openingTurn(empty), [], String(empty))
     }
+})
+
+test('opening turn: survives normalizeMessages unchanged — the desk reads it like any history', () => {
+    assert.deepEqual(normalizeMessages(openingTurn('cover NVDA'), 8), [{ role: 'user', content: 'cover NVDA' }])
+})
+
+// ── cleanReply: one list of tags for every desk ──────────────────────────────
+
+test('clean reply: every registered emit block is removed, whichever desk wrote it', () => {
+    // Each desk used to hand-list what it strips; a tag it did not expect survived as raw markup.
+    const raw = 'Here is the plan.\n<phase>2</phase><route>research NVDA</route><scan_list>{"a":1}</scan_list><suggest>["x"]</suggest>'
+    assert.equal(cleanReply(raw), 'Here is the plan.')
+})
+
+test('clean reply: <ticker> is UNWRAPPED, not removed — its text is prose', () => {
+    assert.equal(cleanReply('Buy <ticker>NVDA</ticker> on the dip.'), 'Buy NVDA on the dip.')
+})
+
+test('clean reply: empty and missing input are an empty reply', () => {
+    assert.equal(cleanReply(null), '')
+    assert.equal(cleanReply(undefined), '')
+    assert.equal(cleanReply('  plain  '), 'plain')
 })
 
 // ── cachedBlock: the breakpoint nothing can typo ─────────────────────────────

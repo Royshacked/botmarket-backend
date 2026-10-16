@@ -27,6 +27,7 @@
 import { getDb } from '../providers/mongodb.provider.js'
 import { COLLECTIONS, TICKER_RE } from '../api/aether/aether.model.js'
 import { logger } from './logger.service.js'
+import { openingTurn } from './agentUtils.js'
 import { httpError } from './httpError.util.js'
 import { isAllowedModel } from './llmModels.js'
 import { getHouseModels } from './houseModels.service.js'
@@ -170,7 +171,7 @@ const _io = {
     async read({ opening, userId, signal, model = QUICKREAD_MODEL }) {
         const { analystAgentService, MODES } = await import('./agents/analyst.agent.service.js')
         return analystAgentService.chatStream({
-            messages: [], userPrompt: opening, chatState: {}, audience: AUDIENCE,
+            messages: openingTurn(opening), chatState: {}, audience: AUDIENCE,
             mode: MODES.QUICKREAD, model, reasoningEffort: QUICKREAD_EFFORT,
             userId, signal,
         })
