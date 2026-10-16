@@ -311,6 +311,111 @@ UI changes).
 Tests: an agent never receives another agent's messages; artifacts arrive in order; summary fires once
 per high-water mark and never touches `agentState`; seal → load round trip per entity kind.
 
+### 6.1 Phase 4 — detailed plan (2026-10-16, for Roy's approval)
+
+Read before writing it: each desk's chatState and how the client folds the `done` payload back, every
+Generate / delete / edit path, and where history is trimmed. Facts that shaped it:
+- **Mentor's next state is already computed on the server** (`mentorBuild.util` + the agent); the
+  client only copies `setup`→`draft`, `coverage`, `drafts` back and clears `ops`. Its display state
+  (`gate`, `readiness`, the candidate `setups`) lives only in the panel. Today `drafts` (multi-name) is
+  dropped by both the draft thread and `chat_state`.
+- **Prometheus** re-derives `coverage_symbols` / `existing_coverage` server-side every turn
+  (`_resolveCoverageContext`); only `active_symbol` and the coverage draft are real state.
+- **Argus**'s body flags are conversation-long mode (`handoff`, `handoffTo`, `radar`/`radarBoard`,
+  `profile`) plus the list being edited (`editList` = `pendingScan` while editing).
+- **Atlas** already persists mandate / thesis / lifecycle server-side once a `portfolioId` exists
+  (`portfolio_books`); a book under construction keeps its mandate in the draft thread.
+- **Axl** and **Aether** carry no state; **Pythia** keeps its pending views client-side.
+- Generate: setups `/generate(-all)` (+ update), `/trade-ideas/batch` + `savePortfolioChatState`,
+  `createScan` / `updateScan`, `initiateCoverage` / `updateCoverage`, `publishIndustry`. Deletes: setup,
+  scan, coverage have routes; a portfolio is deleted idea-by-idea then `deleteChatState`; an industry view
+  has no delete. None touches a thread today.
+- Trimming is per request (`normalizeMessages` → `trimHistory`, high-water ×3); nothing trimmed is kept.
+
+**One decision this plan asks for:**
+
+- **E1 — Phase 4 builds the session turn as an INTERNAL service, with no new HTTP route; phase 5 adds
+  the route.** The desks' definitions move out of their controllers into `services/desks/`, so ONE
+  definition serves both callers: today's `makeDeskStream` (the old path the frontend still uses —
+  untouched, D1) and the new `sessionTurn`. Phase 4 is exercised by tests and a live script; phase 5
+  puts the endpoint, the channel and the chain on top of the same `sessionTurn`. *Alternative:* a
+  temporary `sessionId` mode inside `makeDeskStream` now, removed in phase 5 — a second path to build
+  and delete.
+
+**1. One desk registry** (moved here from phase 2) — `services/desks/registry.js`: per agent
+`{ agent, desk (the pipeline key the client still routes by), brand, entityKind, scope, admin, maxMessages }`.
+`routing.util`'s `VALID_PIPELINES`, `ROUTABLE_DESKS`, `AGENT_DESK`, `EDIT_KIND_DESKS` and
+`session.util`'s `SESSION_AGENTS` / `CONTEXT_KINDS` derive from it — five hand-kept lists become one.
+
+**2. Desk definitions** — `services/desks/<agent>.desk.js`, one per desk, each exporting
+`{ agent, parse(body), run(ctx), done(result), nextState(prev, result, input), stateFromEntity(entity) }`:
+- `parse` / `run` / `done` are today's controller code, moved (controllers become one line:
+  `makeDeskStream(mentorDesk)`).
+- `nextState` is the fold the client does today, done once on the server:
+  - Mentor: `{ active_asset, draft: result.setup ?? prev.draft, coverage, drafts, view: { gate, readiness, setups } }`
+    — `drafts` kept (fixes the drop), `view` is what the side pane draws after a reload; `ops` never stored.
+  - Prometheus: `{ active_symbol, draft: result.coverage ?? prev.draft }`.
+  - Argus: `{ profile, mode: { handoff, handoffTo, radar, radarBoard }, pendingScan: result.scan ?? prev.pendingScan, editingScanId }`.
+  - Atlas: `{ portfolioId, mandate, thesis, reviewMode, adoptDraftId, pendingPlan, reviewUpdate }` — the
+    construction mandate moves here from the draft thread; a built book keeps reading `portfolio_books`.
+  - Pythia: `{ draft views }`. Axl, Aether: none.
+- `stateFromEntity` rebuilds a desk's working state from the entity alone, for an edit: setup →
+  `chat_state.draft`, else `normalizeSetup(doc)` (the legacy fallback the client builds today, moved); scan
+  → its list and fields; coverage → the doc as draft + `active_symbol`; book → `portfolioId` + `reviewMode`.
+
+**3. `contextFor(session, agent)`** — `services/desks/context.js`, built on `session.util.segmentOf`:
+the agent's sealed context when it is editing an entity (`agent_contexts`), then its summary (as one
+leading user turn), then its segment after the summary's `throughSeq`. A hand-off TO the agent reads as a
+`user` turn (someone asking it); its own as `assistant`. `normalizeMessages` then coalesces and applies the
+desk's `maxMessages` exactly as today.
+
+**4. `sessionTurn`** — `services/desks/sessionTurn.js`:
+`sessionTurn({ userId, sessionId, agent, text, ops, seed, emit, signal })` →
+append the user message → build the conversation (`contextFor`) and the desk's input from
+`agentState[agent]` (+ `ops` / `seed`, one-shot) → `desk.run` with the shared `common` bag (moved out of
+`makeDeskStream` into one helper both use) → append the assistant message (`cleanReply` text) →
+`setAgentState(nextState)` → move `floor` when the reply routes (registry: desk → agent) → return
+`done(result)` + routing. `emit` carries the SSE callbacks; phase 5 points it at the session channel.
+
+**5. Summaries** — `services/desks/summarize.js`: after a turn, when an agent's segment past
+`throughSeq` exceeds `maxMessages × 3`, the oldest messages down to `maxMessages` are folded into
+`summaries[agent] = { text, throughSeq }` by a background Haiku 4.5 call (fixed model, booked to the user's
+usage like any call). It never touches `agentState`. On failure nothing changes — the turn is trimmed by
+`normalizeMessages` exactly as today.
+
+**6. Sealing and editing** — `services/desks/seal.js`:
+- `sealFromSession({ userId, sessionId, agent, kind, entityId, name })`: the agent's segment since its last
+  seal → `agentContext.seal` (with its summary); the agent's OWN rows leave `session_messages` (hand-offs
+  stay — they are the sender's turns too); one `sealed` line is appended ("Mentor built AMD setup",
+  `ref: { kind, id }`); `addLink`; `agentState[agent]` cleared.
+- The Generate endpoints take an optional `sessionId` and call it after the entity is saved: setups
+  `/generate`, `/generate-all`, update; `/trade-ideas/batch` (book); `createScan`, `updateScan`;
+  `initiateCoverage`, `updateCoverage`; `publishIndustry`. Without a `sessionId` (today's frontend) they
+  behave exactly as now.
+- `openForEdit({ userId, sessionId, kind, entityId })`: `agentState[agent] = stateFromEntity(entity)`
+  + `editing: { kind, entityId }`, a `sealed` card line with the context's summary and last few turns,
+  `floor = agent`. The next Generate on that entity appends to the same sealed context (§6.2 step 3).
+- `agentContext.removeFor` wired into the delete paths: setup, scan, coverage, and the portfolio's
+  `deleteChatState` (an industry view has no delete).
+
+**7. Live verification** — `scripts/drive-session-turn.mjs`: a real Axl → Mentor conversation through
+`sessionTurn` on axl_dev (Axl routes, the floor moves, Mentor builds, a Generate seals, an edit reopens),
+printing each step. A few cents of model spend. **Needs the Atlas access list fixed** (the phase-3
+rename is blocked on the same thing).
+
+**Not in phase 4:** the HTTP turn endpoint, the session channel, hand-offs between agents, the chain and
+its stop rule, "@agent" and the busy-agent rule (phase 5); anything in the frontend (7–8). **Deleted in
+phase 4:** nothing the frontend still calls (D1) — the moved controller code is a move, not a copy.
+
+**Tests:** registry (every derived list matches what it replaced); each desk's `nextState` and
+`stateFromEntity` (pure); `contextFor` (never another agent's turn; hand-off roles; summary placement;
+sealed context first when editing); `sessionTurn` with a stub `run` on memDb (append → state → floor; a
+stopped turn keeps the user message and stores no state); `summarize` (fires once per high-water mark,
+never touches agentState, failure is a no-op); `seal` (rows leave, hand-offs stay, line + link added,
+state cleared; a second seal appends); `openForEdit`; each Generate with and without `sessionId`;
+`removeFor` called by each delete. Existing controller tests keep passing unchanged (the move must not
+change one byte of the old path's behaviour).
+
 ## 7. Phase 5 — The chain runner (backend)
 
 - **Port the conveyor to `services/chain/`:** `artifact.js`, `hop.js` (pure — ports as-is, its 28 tests
