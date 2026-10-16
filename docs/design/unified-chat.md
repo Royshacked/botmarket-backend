@@ -107,6 +107,9 @@ The user can interrupt at any message. The chain resumes from the user's answer.
 
 ### 3.7 The side pane
 
+**Layout (Roy, 2026-10-16): a DRAWER over the chat column** — the workspace is the three-column Floor
+layout, so the pane does not get a column of its own.
+
 - Shows the working surface of the agent with the floor, and follows the conversation (Atlas hands to Argus →
   the pane shows Argus's results).
 - Pinnable: keep Atlas's mandate open while the chat moves on. Small tabs at the top switch between the

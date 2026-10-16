@@ -43,6 +43,35 @@ they can be found again.
    the Floor lists (`FloorLists.jsx`), admin only — TEMPORARY until they join the timeline.** Axl's
    routing to them stays.
 
+## 1b. Architecture gaps — layout decided, four PROPOSED (2026-10-16)
+
+- **Side pane layout — Roy: a DRAWER over the chat.** The workspace is the Floor layout with three columns;
+  there is no room for a fourth. The drawer opens over the chat column, follows the floor, can be pinned
+  open; on a phone it is the bottom sheet (decision 13). Supersedes "side pane next to the chat" in the
+  design §3.7 wherever they differ.
+
+The four below are technical and PROPOSED — Roy reviews them with the phase-5 / phase-7 detailed plans.
+
+1. **User types while a chain runs.** The running turn finishes; the user's message goes to the agent
+   that has the floor; the chain PAUSES. The agent answers and, if the chain had more to do, offers
+   "Continue" as a tap option. Stop (the existing `/api/turns/:turnId/stop`) still kills a turn at once.
+   Interjecting is the user taking the wheel — the chain never talks over them.
+2. **Server restarts mid-chain.** Chain state is in the session, so nothing is lost. On boot an
+   interrupted chain is marked paused and the floor-holder posts "I was interrupted — continue?". Never an
+   automatic re-run: a turn can have side effects (a queued research run, a saved scan) and paying for it
+   twice is worse than one tap. The partial text of the cut turn is kept, as a stopped turn is today.
+3. **Reconnect and several devices.** Every timeline message carries a sequence number used as the SSE
+   event id. On reconnect the client sends `Last-Event-ID` and the server replays the missed messages
+   from the timeline; a turn still streaming is sent once as a snapshot of its text so far, then live.
+   Each open device subscribes to the same per-user channel, so phone and laptop stay in step. Fan-out is
+   in-process (one Render instance); scaling past one instance would need a shared bus — noted, not built.
+4. **What makes a turn a "decision".** Not the model's say-so: CODE decides from the done payload, per desk,
+   in one declared table — Mentor's gate stages (`mentorBuild.util` STAGES), Atlas's plan / mandate / review,
+   Argus's list when the user has not said how many to take, any order confirm, a workspace pick. The chain
+   runner checks the table after every turn; a match appends a `decision` message and halts. New cards:
+   **MandateCard** (Atlas — sleeves, weights, constraints; Accept / Edit) and **SizeCard** (Mentor — risk %,
+   size, the desk's suggestion; Accept / Change). Their layout is designed in the phase-5 plan.
+
 ## 2. What the sweeps found that changes the plan
 
 - The frontend carries most of the split: ~2,000 lines of `MainPage.jsx` are desk switching and the
@@ -219,7 +248,8 @@ per high-water mark and never touches `agentState`; seal → load round trip per
     `AdoptBookGrid`.
   - `AnalystSurface` — CoverageDraft, Initiate/Update. "Back to Atlas" goes.
   - `TradeTicket` — as is.
-- **`SidePane`** — follows the floor, pin, tabs per opened surface; bottom sheet on narrow screens.
+- **`SidePane`** — a DRAWER over the chat column (§1b): follows the floor, pin, tabs per opened surface;
+  bottom sheet on narrow screens.
 - **MainPage teardown:** delete `activeTab` switching, `activePipeline` / `pipelineStep` / `pipelineMode`,
   reset keys, `returningToAxl` and friends, `resumeRefs`, `deskBusy` / `liveWork`, `handleBackToAxl`,
   `finishPipeline`, `handleAxlPick`, `handleRoute`, `_applyHop`, `emitArtifact`, `enterPipelineAt`,
@@ -260,6 +290,8 @@ Idempotent, dry-run first, axl_dev before prod.
 ## 13. Size and risk
 
 - Biggest phases: 7 and 8 (frontend). Phase 5 is the riskiest backend change (headless turns on the server).
-- Phases 1–2 are safe and independent of the session work.
+- Phases 1–2 are safe and independent of the session work, and planned to file/function level.
+- **Phases 3–10 are outlines.** Each gets its own detailed plan (exact files, schemas, tests), approved by
+  Roy, before it starts — phases 5–7 will change what 8 looks like, so detailing it now would be guessing.
 - Between phases the app must still work end to end — each phase is mergeable on the branch, not on main.
   Nothing reaches main until phase 10.
