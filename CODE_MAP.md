@@ -296,6 +296,23 @@ api/
                               kind (the HTTP twin of services/entity/entityCrud); `envelope` carries
                               the legacy `{idea}/{ideas}` body shape, everything else answers bare
 services/
+  desks/                  THE DESKS as definitions, free of HTTP (unified-chat plan phase 4):
+      registry.js             every agent once — desk key, brand, entity kind, editable, routable, scope,
+                              admin, maxMessages; routing.util / session.util / each agent's MAX_MESSAGES
+                              derive from it. entryOf(desk): where a route lands (composite `trade` →
+                              Argus preset to pick one name for Mentor)
+      <agent>.desk.js         parse(body, turn, user) → { state, input } · run · done · nextState (the fold
+                              the client did on every `done`) · stateFromEntity (rebuild to edit) ·
+                              prepareInput. ONE definition, two callers: makeDeskStream (HTTP) and sessionTurn
+      index.js · common.js    DESK_DEFS by agent · deskCommon (the shared agent bag)
+      context.js              buildConversation — what ONE agent reads: sealed context when editing, its
+                              summary, its own segment (a hand-off to it reads as the user)
+      sessionTurn.js          a desk turn against the session: append → context → run → reply → nextState →
+                              floor (entryOf on a route) → background summary fold. No HTTP until phase 5
+      summarize.js            the rolling per-agent summary past the trimHistory high-water mark (Haiku 4.5,
+                              booked to the user; failure changes nothing)
+      seal.js                 sealFromSession (Generate: turns move onto the entity, one sealed line) ·
+                              openForEdit · sealAfterGenerate (the Generate endpoints' hook — sessionId only)
   agents/                 the 6 LLM desks (analyst · axl · mentor · portfolio · scanner ·
                           strategy). A seventh is archived and lives under archive/, imported by
                           nothing — see archive/README.md, and `npm run check:archive`, which
