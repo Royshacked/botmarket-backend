@@ -153,7 +153,7 @@ Atlas M0 is 512 MB across all databases and was hit on 2026-10-08. Endless sessi
 | `threads` — one thread per conversation, tiered draft → pinned/linked, TTL + LRU cap, one `subjectId` | Session doc: one active per user, archived on "new session", many links, `agentState`, per-agent summaries |
 | `scanner_chats`, `portfolio_chats`, old `threads` | Migrated into archived sessions (§6, decision 12) |
 | Client round-trips `messages` + `chatState` every turn | Server holds the session; client sends `sessionId` + the new message; server builds per-agent context |
-| Per-desk SSE endpoints (`/api/mentor/stream`, …) | Kept — the timeline sends each turn to the floor-holder's endpoint |
+| Per-desk SSE endpoints (`/api/mentor/stream`, …) | ONE way in, ONE way out (Roy, 2026-10-16): the user posts a turn to the session and the server hands it to the floor-holder; everything that appears in the chat — turns the user started, turns a chain started, hand-offs, cards — streams down one session channel. Each desk's turn stays as an internal server function. The session (what the user sees) and each agent's context (what its model reads) are unchanged by this — it is only the wire. Pythia and Aether keep their own endpoints (separate panels). |
 | Seven mounted panels switched by `activeTab` (`MainPage.jsx`) | One timeline component + the side pane hosting each desk's working surface |
 | `_applyHop` / `handleAxlPick` switch tabs and seed an inbox (`useDeskHandoff.js`, `services/pipeline/`) | A hop appends a `handoff` message and moves the floor; artifacts and contracts unchanged |
 | AxlHub desk cards + chips, `RouteOffer` Go, the "Summoning…" animation, pipeline crumb, "Back to axl" | Removed; Axl asks; dividers mark hops; "@Axl" or asking returns to Axl |
