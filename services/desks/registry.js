@@ -66,9 +66,14 @@ export const DESKS = Object.freeze({
     }),
 })
 
-// A pipeline that is not one agent: `trade` is Axl's composite (it enters at Argus, builds at Mentor).
-// A desk never sends anyone there; Axl does.
-const COMPOSITE_PIPELINES = Object.freeze(['trade'])
+// A pipeline that is not one agent: `trade` is Axl's composite. A desk never sends anyone there; Axl
+// does. It ENTERS at Argus in single-pick mode — validate one name and hand it to Mentor to build
+// (the client's DESKS 'trade': entryTab scanner, `produces: 'one'`) — so that is who gets the floor
+// and the mode it starts in. (The Argus → Mentor hop is the chain's, unified-chat plan phase 5.)
+const COMPOSITES = Object.freeze({
+    trade: Object.freeze({ agent: 'scanner', state: Object.freeze({ handoff: true, handoffTo: 'mentor' }) }),
+})
+const COMPOSITE_PIPELINES = Object.freeze(Object.keys(COMPOSITES))
 
 const entries = Object.values(DESKS)
 
@@ -89,6 +94,17 @@ export const deskOf = (agent) => DESKS[agent] ?? null
 
 /** The agent standing at a pipeline key, or null (a composite pipeline names no one agent). */
 export const agentAtDesk = (desk) => entries.find(d => d.desk === desk)?.agent ?? null
+
+/**
+ * Where a route LANDS: the agent that takes the floor, and the working state it starts in (a composite's
+ * mode) — or null for an unknown pipeline. A single-agent desk lands on its agent with no preset state.
+ * @returns {{ agent: string, state: object|null } | null}
+ */
+export function entryOf(desk) {
+    if (COMPOSITES[desk]) return { agent: COMPOSITES[desk].agent, state: { ...COMPOSITES[desk].state } }
+    const agent = agentAtDesk(desk)
+    return agent ? { agent, state: null } : null
+}
 
 /** The agent whose work produces an entity kind, or null. */
 export const agentForKind = (kind) => entries.find(d => d.entityKind === kind)?.agent ?? null

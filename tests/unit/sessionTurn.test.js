@@ -61,6 +61,16 @@ test('a reply that routes moves the floor to that desk’s agent; otherwise the 
     assert.equal((await sessions.get({ sessionId: s.sessionId, userId: 'u1' })).floor, 'mentor')
 })
 
+test('a route to the trade desk hands the floor to Argus, preset to pick one name for Mentor', async () => {
+    const { turn, sessions } = rig({ run: () => ({ reply: 'To the trading desk', route: 'trade', routeSymbol: 'NVDA' }) })
+    const s = await sessions.getActive({ userId: 'u1' })
+    await sessions.setAgentState({ sessionId: s.sessionId, userId: 'u1', agent: 'scanner', state: { profile: 'trading' } })
+    await turn({ user, sessionId: s.sessionId, agent: 'axl', text: 'trade NVDA' })
+    const h = await sessions.get({ sessionId: s.sessionId, userId: 'u1' })
+    assert.equal(h.floor, 'scanner')
+    assert.deepEqual(h.agentState.scanner, { profile: 'trading', handoff: true, handoffTo: 'mentor' })
+})
+
 test('a stopped turn keeps the user’s message and stores nothing it produced', async () => {
     const { turn, sessions } = rig({ run: () => null })
     const s = await sessions.getActive({ userId: 'u1' })

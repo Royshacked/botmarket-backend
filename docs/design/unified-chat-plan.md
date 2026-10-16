@@ -404,6 +404,16 @@ usage like any call). It never touches `agentState`. On failure nothing changes 
 printing each step. A few cents of model spend. **Needs the Atlas access list fixed** (the phase-3
 rename is blocked on the same thing).
 
+**As done (2026-10-17):** 4a registry (4f20def) · 4b desk definitions (89d3f2f) · 4c sessionTurn, nextState,
+contextFor, summaries (be9728c) · 4d sealing, openForEdit, Generate hooks, delete cleanup (7d8ef05) · 4e live drive.
+- The live drive found a real gap: Axl routes "build a trade" to the COMPOSITE `trade` pipeline, which named
+  no agent, so the floor never moved. The registry now gives a composite its entry (`trade` → Argus, preset to
+  pick one name for Mentor — the client's entryTab) and the session turn uses it. Drive re-run: PASSED
+  (route → Argus single-pick → its own context → seal → reopen → it remembers → cleanup).
+- Seen in the drive, not fixed: a model emitted a corrupted `<䏕ticker>` tag; cleanReply unwraps only a clean
+  `<ticker>`, so the markup reached the reply (the old per-desk code had the same pattern).
+- `chatState.util.js` deleted (one caller left, inlined). Suite 4040/0.
+
 **Not in phase 4:** the HTTP turn endpoint, the session channel, hand-offs between agents, the chain and
 its stop rule, "@agent" and the busy-agent rule (phase 5); anything in the frontend (7–8). **Deleted in
 phase 4:** nothing the frontend still calls (D1) — the moved controller code is a move, not a copy.

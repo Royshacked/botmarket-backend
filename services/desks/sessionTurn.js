@@ -18,7 +18,7 @@ import { sessionService } from '../session.service.js'
 import { agentContextService } from '../agentContext.service.js'
 import { getExperienceLevel } from '../experience.service.js'
 import { routeFields } from '../routing.util.js'
-import { deskOf, agentAtDesk } from './registry.js'
+import { deskOf, entryOf } from './registry.js'
 import { DESK_DEFS } from './index.js'
 import { deskCommon } from './common.js'
 import { buildConversation } from './context.js'
@@ -103,10 +103,15 @@ export function makeSessionTurn({
             state: next ? { ...next, ...(editing ? { editing } : {}) } : null,
         })
 
-        // The floor follows the reply: a route hands the next message to that desk's agent; otherwise the
-        // agent that answered keeps it. (Hand-offs and "@agent" join in phase 5.)
-        const routedTo = routing.route ? agentAtDesk(routing.route) : null
-        await sessions.setFloor({ sessionId, userId: user._id, agent: routedTo ?? agent })
+        // The floor follows the reply: a route hands the next message to the agent that desk ENTERS at —
+        // for a composite (`trade`), Argus in single-pick mode, its mode preset on its working state;
+        // otherwise the agent that answered keeps it. (Hand-offs and "@agent" join in phase 5.)
+        const entry = routing.route ? entryOf(routing.route) : null
+        if (entry?.state) {
+            const theirs = entry.agent === agent ? next : (session.agentState?.[entry.agent] ?? null)
+            await sessions.setAgentState({ sessionId, userId: user._id, agent: entry.agent, state: { ...(theirs ?? {}), ...entry.state } })
+        }
+        await sessions.setFloor({ sessionId, userId: user._id, agent: entry?.agent ?? agent })
 
         // In the background, after the reply is out: fold the oldest turns into the summary when the
         // segment is past the high-water mark. A failure leaves everything as it was.
