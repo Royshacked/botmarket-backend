@@ -189,6 +189,101 @@ Tests: `deskControllersHandle`, `agentStreamContract`, `parse.util`, `normalizeM
 Tests: delete `thread.util`, `threadAgents`, `threadUnfinished`; rewrite `portfolioStoppedTurn`; new
 session + entityContext suites (one-active-per-user, archive, links, seal/load round trip).
 
+### 5.1 Phase 3 — detailed plan (2026-10-16, for Roy's approval)
+
+Read before writing it: every reader and writer of `threads`, `setups.chat_state` (in `entities`),
+`scans.chat`, `coverage`, `portfolio_chats`. Facts that shaped it:
+- **Pythia and Aether persist through `threads` too** (StrategyPanel/AetherPanel `saveDraft`/`getThread`;
+  Pythia links to `industry_view`). Deleting `threads` means the session store must serve their
+  separate panels as well.
+- **Coverage is HOUSE data** — no owner, one thesis per symbol, a strict field whitelist
+  (`normalizeCoverage`). An admin's Prometheus conversation written ONTO the coverage doc would be
+  read by the other admin and travel with the house document. Today a revise starts with no history.
+- `portfolio_chats` is keyed `{portfolioId, userId}`, has no indexes, and `getPendingThemisChecks`
+  (and the `themis.*` fields it reads) has no caller and no writer — dead.
+- No transcript store has a size cap.
+
+**Three decisions this plan asks for (my recommendation first):**
+
+- **D1 — The old stores die when their last caller moves, not in phase 3.** Phase 3 is ADDITIVE on the
+  backend: sessions and agent contexts exist beside `threads`, `chat_state`, `scan.chat` and the chat
+  half of `portfolio_chats`, and nothing the frontend calls changes — so the app keeps working and can
+  be driven between phases. Each old store is deleted in the phase its last caller moves (the desks
+  in phase 4 move the server side; the frontend in phases 7–8). Same rule as §0, applied to the
+  caller rather than the phase number. *Alternative:* delete in phase 3 and accept a broken app on
+  the branch until phase 8.
+- **D2 — Sealed context lives in its own collection, keyed by the entity — not as a field on it.**
+  `agent_contexts`, one row per `{userId, kind, entityId, agent}`. It works the same for an owned
+  entity (setup, scan, book) and a house one (coverage, industry view): each user's conversation stays
+  theirs. The entities' schemas do not change (no whitelist edits, no transcript in the setup that the
+  monitors and pop-outs load). The design's "sealed onto the entity" holds in meaning — the context
+  is found BY the entity and dies with it. *Alternative:* an `agent_context` field per entity, with a
+  coverage exception.
+- **D3 — The timeline is its own collection too.** `sessions` holds the header; `session_messages`
+  holds one row per timeline message with a per-session `seq`. An endless chat as one growing array
+  would approach Mongo's 16 MB document limit and rewrite the whole array on every turn; rows make a
+  turn one insert, replay-after-reconnect one `seq > n` query (§1b q3), and sealing a `deleteMany`.
+
+**Data model**
+
+```
+sessions          { sessionId, userId, scope: 'main'|'strategy'|'aether', status: 'active'|'archived',
+                    title, summary, floor, agentState: { [agent]: {...} }, summaries: { [agent]: { text, throughSeq } },
+                    links: [{ kind, id, agent, at }], seq, createdAt, updatedAt, archivedAt }
+  indexes: sessionId unique · { userId, scope, status } partial-unique on status:'active' (ONE active
+           per user per scope) · { userId, scope, archivedAt: -1 } (history)
+session_messages  { sessionId, seq, agent, role: 'user'|'assistant', kind: 'msg'|'handoff'|'decision'|'card'|'sealed',
+                    content, ref, to, at }
+  indexes: { sessionId, seq } unique
+agent_contexts    { userId, kind, entityId, agent, messages: [{ role, content, at }], summary, artifacts: [...],
+                    sealedAt, updatedAt }
+  indexes: { userId, kind, entityId, agent } unique · { kind, entityId } (cleanup on entity delete)
+```
+
+- `scope` gives Pythia and Aether their own single running session each (decision 16: separate panels),
+  on the same store — so `threads` can be deleted outright later, not kept for two desks.
+- `ref` on a message points at what it carries (an artifact, a card id, a sealed entity); `to` is the
+  receiving agent of a hand-off — what `contextFor` reads in phase 4.
+- **Size guard:** content is text only; tool payloads, scan rows and coverage stay on their entities
+  (§3.10). A message over 32 KB of text is cut with a marker. A sealed context keeps its last 200
+  messages plus its summary.
+
+**Code (backend only)**
+
+- `services/session.util.js` — pure: `newSessionId`, `deriveTitle` (moved from thread.util), `nextSeq`,
+  `toTimelineMessage` (validate + cut), `segmentOf(messages, agent)` (an agent's own messages + hand-offs
+  addressed to it — the seed of phase 4's `contextFor`).
+- `services/session.service.js` — `ensureSessionIndexes`, `getActive({ userId, scope })` (creates one if
+  none), `startNew({ userId, scope })` (archives the active one: title + summary, then opens a new one),
+  `list({ userId, scope })`, `get({ sessionId, userId })`, `append({ sessionId, userId, message })`,
+  `messagesSince({ sessionId, userId, afterSeq, limit })`, `setAgentState`, `addLink`. Every read and
+  write is owner-scoped by `userId`.
+- `services/agentContext.service.js` — `ensureIndexes`, `seal({ userId, kind, entityId, agent, messages,
+  summary, artifacts })` (append to an existing row: an edit adds to the history), `load({ userId, kind,
+  entityId, agent })`, `removeFor({ kind, entityId })`.
+- `api/sessions/` — `GET /api/sessions/active?scope=`, `POST /api/sessions/new`, `GET /api/sessions`,
+  `GET /api/sessions/:id/messages?after=`. Read-only plus "new" in this phase; turns arrive in phase 5.
+- `server.js` — mount, `ensureSessionIndexes`, `agentContext.ensureIndexes`.
+- **Rename `portfolio_chats` → `portfolio_books`** (§1 q3) in `portfolioChat.service.js`'s `COLLECTION`
+  and `tradeCapture.service.js`'s import; `scripts/rename-portfolio-books.mjs` (idempotent; renames if
+  the old name exists and the new one does not) run on axl_dev now, on prod in the deploy runbook.
+  Add the missing `{ portfolioId, userId }` unique index.
+- **Delete now (dead today):** `getPendingThemisChecks` and the `themis.*` reads.
+
+**Not in phase 3:** desks reading/writing the session (phase 4), sealing calls at Generate (phase 4),
+the turn endpoint and channel (phase 5), anything in the frontend (7–8), the migration (9).
+
+**Tests:** `session.util` (seq, cut, title, `segmentOf` never returns another agent's message); 
+`session.service` against `tests/helpers/memDb.js` through a `deps.db` seam (the pattern the Pythia
+services use) — memDb gains `$gt` (for `messagesSince`); it does not enforce unique indexes, so
+"one active per user per scope" is asserted on the service's own logic (an upsert on
+`{userId, scope, status:'active'}`), the partial-unique index being the production backstop. Cases: one
+active per user per scope; `startNew` archives; owner scoping — another user's sessionId returns
+nothing; `messagesSince` ordering; `agentContext.service` (seal → load round trip; a second seal appends;
+another user's context is invisible; `removeFor`); the sessions routes (auth, scope validation);
+`rename-portfolio-books` idempotency. QA loop + bug hunt + conflict check; no browser drive needed (no
+UI changes).
+
 ## 6. Phase 4 — Per-agent context, floor, summaries
 
 - **`contextFor(session, agent)`** in `session.util.js` — that agent's own messages + the artifacts
