@@ -125,6 +125,16 @@ Independent of everything else; shrinks the surface before the rebuild.
 
 Tests: delete the tests of what is deleted; suites green in both repos.
 
+**As done (2026-10-16) — moved out of phase 1, with the reason:**
+- **The idea chat** — not dead: three live buttons still open it (the idea/call row pencil, the
+  pre-entry dialog's Edit, the idea invalidation card's Edit), and today they open a chat that cannot
+  answer (`/api/idea` is unmounted). Deleting it needs Roy's call on what those buttons do — pending.
+- **`KIND.MANDATE` / `KIND.SCAN_REQUEST` and their briefs** — dead, but ~40 conveyor tests (`hop`,
+  `deskSteps`, `pipelineNav`) use them as fixtures, and those files are ported (phase 5) and deleted
+  (phase 7). They drop with the phase-5 port instead of being rewritten twice.
+- **`CALL_EXPIRY_EDIT`** and the call card bubbles — emitted with no listener, like `CALL_CONFIRM_OPEN`
+  (removed), but woven into the card family; they go with phase 6, where the cards are reworked.
+
 ## 4. Phase 2 — One backend turn pipe (dedupe before building on it)
 
 So the session plugs into ONE place instead of five controllers.
