@@ -5,8 +5,10 @@
 //
 //   node scripts/rename-portfolio-books.mjs            # this process's database (DB_NAME)
 //
-// Idempotent: renames only when the old name exists and the new one does not; anything else is
-// reported and left alone (both present means someone has to look, not a script to guess). Run on
+// Idempotent: moves the documents (same _ids) when the old collection exists and the new one is absent
+// or EMPTY (the new code creates it at startup while building its index), verifies the count, then drops
+// the old one; a non-empty new one is reported and left alone, because then someone has to look, not a
+// script to guess. Run on
 // axl_dev with phase 3, on prod in the deploy runbook BEFORE the new code serves traffic — the old
 // code would keep writing the old name.
 
@@ -29,18 +31,32 @@ async function run() {
     const hasOld = names.has(OLD), hasNew = names.has(NEW)
     console.log(`[rename-portfolio-books] db=${getDbName()} ${OLD}=${hasOld} ${NEW}=${hasNew}`)
 
-    if (hasOld && !hasNew) {
-        const n = await db.collection(OLD).countDocuments()
-        await db.collection(OLD).rename(NEW)
-        console.log(`[rename-portfolio-books] renamed ${OLD} → ${NEW} (${n} document(s))`)
-    } else if (!hasOld && hasNew) {
-        console.log('[rename-portfolio-books] already renamed — nothing to do')
-    } else if (hasOld && hasNew) {
-        console.log(`[rename-portfolio-books] BOTH exist — left alone. Inspect before merging by hand.`)
-        process.exitCode = 1
-        return
+    if (!hasOld) {
+        console.log(hasNew ? '[rename-portfolio-books] already moved — nothing to do'
+                           : '[rename-portfolio-books] neither exists — nothing to do (a fresh database)')
     } else {
-        console.log('[rename-portfolio-books] neither exists — nothing to do (a fresh database)')
+        // COPY, VERIFY, THEN DROP — not renameCollection: the client runs the Stable API strictly
+        // (providers/mongodb.provider.js) and renameCollection is not in API Version 1.
+        //
+        // The new code creates `portfolio_books` (empty) the moment it builds its index at startup — a
+        // server on this branch that started before the script ran. An EMPTY one holds nothing and is
+        // filled here. A non-empty one means writes landed in both, and a person has to look.
+        const newCount = hasNew ? await db.collection(NEW).countDocuments() : 0
+        if (newCount > 0) {
+            console.log(`[rename-portfolio-books] BOTH exist and ${NEW} holds ${newCount} document(s) — left alone. Inspect before merging by hand.`)
+            process.exitCode = 1
+            return
+        }
+        const docs = await db.collection(OLD).find({}).toArray()
+        if (docs.length) await db.collection(NEW).insertMany(docs, { ordered: true })
+        const copied = await db.collection(NEW).countDocuments()
+        if (copied !== docs.length) {
+            console.log(`[rename-portfolio-books] copy MISMATCH (${docs.length} read, ${copied} in ${NEW}) — ${OLD} kept. Inspect.`)
+            process.exitCode = 1
+            return
+        }
+        await db.collection(OLD).drop()
+        console.log(`[rename-portfolio-books] moved ${docs.length} document(s) ${OLD} → ${NEW} (same _ids), dropped ${OLD}`)
     }
 
     // The unique key every read and write uses. Fails loudly if duplicates exist rather than hiding them.

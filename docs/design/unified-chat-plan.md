@@ -272,9 +272,10 @@ agent_contexts    { userId, kind, entityId, agent, messages: [{ role, content, a
 **As done (2026-10-16):** all of the above, as planned. `tests/helpers/memDb.js` gained `$gt`/`$lt`,
 `$inc` and `findOneAndUpdate`. `collectionNames.test` lists the three new collections and
 `portfolio_books`. `removeFor` exists but is not yet called from entity deletes — that wiring goes with
-sealing in phase 4. **The axl_dev rename has NOT run:** the laptop's IP is not on the Atlas access list
-(TCP connects, server selection times out). Until `node scripts/rename-portfolio-books.mjs` runs, a local
-backend on this branch reads an empty `portfolio_books`. New tests: sessionUtil, sessionService,
+sealing in phase 4. **The axl_dev move RAN on 2026-10-17** (18 books, same _ids, old collection dropped, unique index ok).
+The script copies-verifies-drops rather than renaming: the client runs the Stable API strictly and
+`renameCollection` is not in API Version 1. It also absorbs the EMPTY `portfolio_books` the new code creates
+at startup — prod will see the same if the new code starts before the script. New tests: sessionUtil, sessionService,
 agentContext, sessionsController (32). Suite 4002/0.
 
 **Not in phase 3:** desks reading/writing the session (phase 4), sealing calls at Generate (phase 4),
