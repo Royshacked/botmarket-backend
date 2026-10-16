@@ -1,3 +1,5 @@
+import { sealing } from '../../services/desks/seal.js'
+import { forgetIfDeleted } from '../../services/agentContext.service.js'
 import { logger }       from '../../services/logger.service.js'
 import { sendReason }   from '../_shared/reason.util.js'
 import { makeHandle }   from '../_shared/handle.util.js'
@@ -61,7 +63,7 @@ const crud = makeEntityController({
         list:   (userId, req)      => setupService.listSetups(userId, { status: req.query?.status ?? null }),
         get:    (id, userId)       => setupService.getSetup(id, userId),
         patch:  (id, body, userId) => setupService.patchSetup(id, body, userId),
-        remove: (id, userId)       => setupService.deleteSetup(id, userId),
+        remove: async (id, userId) => forgetIfDeleted('setup', id, await setupService.deleteSetup(id, userId)),
     },
 })
 
@@ -159,6 +161,10 @@ export const generateSetup = _handle('generateSetup', async (req, res) => {
     // contract (resolveCardsFor swallows its own failures).
     if (updateId) await resolveCardsFor({ kind: 'setup', id: updateId }, { outcome: 'completed' })
 
+    // With a sessionId, Mentor's turns move onto the setup they produced (unified-chat §6.2); without one
+    // (today's frontend) nothing changes. Never fails the Generate.
+    await sealing.sealAfterGenerate(req, { kind: 'setup', entityIds: [result.doc?.id], name: result.doc?.asset ? `${result.doc.asset} setup` : null })
+
     res.send(result.doc)
 })
 
@@ -206,6 +212,8 @@ export const generateSetups = _handle('generateSetups', async (req, res) => {
     }
 
     logger.info(LOG, `generateSetups: ${saved.length} saved, ${failed.length} refused`)
+    // One conversation, several setups: the same turns are sealed onto each (unified-chat §6.2).
+    if (saved.length) await sealing.sealAfterGenerate(req, { kind: 'setup', entityIds: saved.map(d => d.id) })
     // 200 even with refusals: the batch DID something, and an error status would tell a client to
     // discard a response that is carrying real saved documents. `failed` is the news, not the code.
     res.send({ saved, failed })

@@ -90,3 +90,15 @@ export function makeAgentContextService({ getDb = _defaultGetDb } = {}) {
 }
 
 export const agentContextService = makeAgentContextService()
+
+/**
+ * The delete paths' hook: when an entity's delete SUCCEEDED, every user's sealed context for it goes too.
+ * Fire-and-forget and never fails the delete; hands the delete's own result straight back, so a service
+ * call can be wrapped in place: `remove: async (id, u) => forgetIfDeleted('setup', id, await del(id, u))`.
+ */
+export function forgetIfDeleted(kind, entityId, result, svc = agentContextService) {
+    if (result?.ok) {
+        svc.removeFor({ kind, entityId }).catch(err => logger.warn(LOG, 'context cleanup failed (the entity is deleted)', err.message))
+    }
+    return result
+}

@@ -38,6 +38,8 @@ export const portfolioDesk = {
     agent: 'portfolio',
     log:   LOG,
     nextState: portfolioNextState,
+    // Reopening a book: its id is enough — mandate, thesis and lifecycle are read from portfolio_books.
+    stateFromEntity: (book) => portfolioNextState({ portfolioId: book?.portfolioId ?? book?.id ?? null }, {}),
     // `portfolioIdeas` is still SENT by the client and deliberately not read: the book Atlas sees is
     // read from the database (portfolioState), not from the list the client happened to be holding.
     // See _buildPortfolioStateSection — an empty client list is what made Atlas invent item ids.

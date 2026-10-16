@@ -290,7 +290,6 @@ api/
                               last in server.js): a minted `httpError` answers with its status +
                               sentence, anything else is a 500 (generic body in production). Every
                               controller rides the pair; none hand-rolls `catch → res.status(500)`
-      chatState.util.js       makeGetChatState / makeDeleteChatState factories (over makeHandle)
       reason.util.js          THE reason→HTTP map (in_position=409, forbidden=403 …) + sendReason();
                               route-owned reasons are passed in as `overrides`, never re-mapped locally
       entityController.util.js  makeEntityController() — list/get/patch/delete for any owner-scoped

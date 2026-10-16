@@ -65,10 +65,45 @@ export function mentorNextState(prev, result, input = {}) {
     }
 }
 
+/**
+ * The working state to EDIT a saved setup from the document alone: its stored draft when it has one
+ * (the ledger rides on it), else a draft rebuilt from the setup's own fields — the fallback the client
+ * built for setups saved before the draft was stored (MainPage.handleEditSetup), moved here.
+ */
+export function mentorStateFromEntity(setup) {
+    const draft = setup?.chat_state?.draft ?? {
+        asset:       setup?.asset,
+        asset_class: setup?.asset_class ?? null,
+        direction:   setup?.direction   ?? null,
+        type:        setup?.type        ?? null,
+        trade_mode:  setup?.trade_mode  ?? null,
+        timeframe:   setup?.timeframe   ?? null,
+        ladder:      setup?.ladder      ?? [],
+        thesis:      setup?.thesis      ?? null,
+        watch:       setup?.watch       ?? [],
+        entry_legs:  setup?.entry_legs  ?? [],
+        stop_legs:   setup?.stop_legs   ?? [],
+        target_legs: setup?.target_legs ?? [],
+        quantity:    setup?.quantity    ?? null,
+        rr:          setup?.rr          ?? null,
+        conviction:  setup?.conviction  ?? null,
+        active_from: setup?.active_from ?? null,
+        valid_until: setup?.valid_until ?? null,
+    }
+    return {
+        active_asset: draft?.asset ?? setup?.asset ?? '',
+        draft,
+        coverage:     setup?.chat_state?.coverage ?? [],
+        drafts:       {},
+        view:         { gate: null, readiness: null, setups: null },
+    }
+}
+
 export const mentorDesk = {
     agent: 'mentor',
     log:   '[mentor:desk]',
     emptyState: emptyMentorState,
+    stateFromEntity: mentorStateFromEntity,
     parse: async (body, turn) => ({
         state: turn.chatState ?? emptyMentorState(),
         input: {

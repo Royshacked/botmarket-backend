@@ -1,3 +1,5 @@
+import { sealing } from '../../services/desks/seal.js'
+import { forgetIfDeleted } from '../../services/agentContext.service.js'
 import { scannerDesk }         from '../../services/desks/scanner.desk.js'
 import { scanService }         from './scan.service.js'
 import { makeDeskStream }      from '../_shared/deskStream.util.js'
@@ -20,6 +22,8 @@ export const createScan = handle('createScan', async (req, res) => {
     }
     const result = await scanService.saveScan(scan, req.user._id)
     if (!result.ok) return res.status(500).json({ error: 'Failed to save scan' })
+    // With a sessionId, Argus's turns move onto the scan they produced (unified-chat §6.2). Never fails the save.
+    await sealing.sealAfterGenerate(req, { kind: 'scan', entityIds: [result.doc?.id], name: result.doc?.thesis ?? null })
     res.json({ scan: result.doc })
 })
 
@@ -31,7 +35,7 @@ const crud = makeEntityController({
     service: {
         list:   (userId)     => scanService.getScans(userId),
         get:    (id, userId) => scanService.getScanById(id, userId),
-        remove: (id, userId) => scanService.deleteScan(id, userId),
+        remove: async (id, userId) => forgetIfDeleted('scan', id, await scanService.deleteScan(id, userId)),
     },
 })
 
@@ -45,5 +49,6 @@ export const updateScan = handle('updateScan', async (req, res) => {
     if (!scan || typeof scan !== 'object') throw httpError(400, 'scan patch is required')
     const result = await scanService.updateScan(id, scan, req.user._id)
     if (!result.ok) return sendReason(res, result.reason, { fallback: 500, fallbackMessage: 'Failed to update scan' })
+    await sealing.sealAfterGenerate(req, { kind: 'scan', entityIds: [id], name: result.doc?.thesis ?? null })
     res.json({ scan: result.doc })
 })

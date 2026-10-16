@@ -159,6 +159,20 @@ export function makeSessionService({ getDb = _defaultGetDb } = {}) {
         return r.matchedCount ? { ok: true } : { reason: 'not_found' }
     }
 
+    /**
+     * Remove timeline rows by seq — sealing moves an agent's turns OUT of the session onto the entity they
+     * produced (§6.2). Owner-checked first; the seqs are only ever this session's.
+     */
+    async function removeMessages({ sessionId, userId, seqs }) {
+        if (!Array.isArray(seqs) || !seqs.length) return { removed: 0 }
+        const db = await getDb()
+        const owns = await db.collection(SESSIONS).findOne(
+            { sessionId: String(sessionId), userId: String(userId) }, { projection: { _id: 0, sessionId: 1 } })
+        if (!owns) return { reason: 'not_found' }
+        const r = await db.collection(MESSAGES).deleteMany({ sessionId: String(sessionId), seq: { $in: seqs } })
+        return { removed: r.deletedCount ?? 0 }
+    }
+
     /** Who has the floor — the agent the user's next message goes to (unified-chat.md §3.3). */
     async function setFloor({ sessionId, userId, agent }) {
         if (!isAgent(agent)) return { reason: 'invalid_agent' }
@@ -194,7 +208,7 @@ export function makeSessionService({ getDb = _defaultGetDb } = {}) {
         return r.matchedCount ? { ok: true } : { reason: 'not_found' }
     }
 
-    return { ensureIndexes, getActive, startNew, list, get, append, messagesSince, setAgentState, setFloor, setSummary, addLink }
+    return { ensureIndexes, getActive, startNew, list, get, append, messagesSince, removeMessages, setAgentState, setFloor, setSummary, addLink }
 }
 
 export const sessionService = makeSessionService()

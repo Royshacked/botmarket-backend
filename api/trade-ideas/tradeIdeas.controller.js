@@ -1,3 +1,4 @@
+import { sealing } from '../../services/desks/seal.js'
 import { ideaService } from './tradeIdeas.service.js'
 import { confirmManualEntry, confirmManualExit, confirmManualAdd, activateManualPortfolio, requestManualPortfolioExit } from './manualIdea.service.js'
 import { sendReason } from '../_shared/reason.util.js'
@@ -154,6 +155,9 @@ export const createBatchIdeas = _handle('createBatchIdeas', async (req, res) => 
     // same field and refuses — see adoptBook.service.
     const result = await ideaService.saveBatchIdeas(plan, req.user._id, { accounts, mainAccountId, portfolioId })
     if (!result.ok) return res.status(500).send({ error: 'Failed to save batch' })
+
+    // With a sessionId, Atlas's turns move onto the book they produced (unified-chat §6.2). Never fails the save.
+    await sealing.sealAfterGenerate(req, { kind: 'portfolio', entityIds: [result.portfolioId], name: plan?.portfolioName ? `the ${plan.portfolioName} book` : null })
 
     res.status(201).send({ ideas: result.ideas, portfolioId: result.portfolioId })
 })

@@ -1,10 +1,10 @@
+import { forgetIfDeleted } from '../../services/agentContext.service.js'
 import { portfolioDesk }         from '../../services/desks/portfolio.desk.js'
 import { portfolioChatService }  from './portfolioChat.service.js'
 import { applyRebalance, snapshotConvictions } from './portfolioRebalance.service.js'
 import { invalidatePortfolioState, listPortfolioItems, listPortfolios } from '../../services/portfolioState.service.js'
 import { logger }                from '../../services/logger.service.js'
 import { makeDeskStream }    from '../_shared/deskStream.util.js'
-import { makeGetChatState, makeDeleteChatState } from '../_shared/chatState.util.js'
 import { threadService }          from '../../services/thread.service.js'
 import { resolvePortfolioReviewCard } from '../chat/chat.service.js'
 import { adoptBookService }  from './adoptBook.service.js'
@@ -162,17 +162,19 @@ export const savePortfolioChatState = handle('savePortfolioChatState', async (re
     res.json({ ok: true })
 })
 
-export const getPortfolioChatState = makeGetChatState({
-    service: portfolioChatService,
-    keyArgs: (req) => [req.params.portfolioId, req.user._id],
-    log: LOG,
+export const getPortfolioChatState = handle('getPortfolioChatState', async (req, res) => {
+    const chatState = await portfolioChatService.getChatState(req.params.portfolioId, req.user._id)
+    res.json({ chatState: chatState ?? null })
 })
 
-export const deletePortfolioChatState = makeDeleteChatState({
-    service: portfolioChatService,
-    keyArgs: (req) => [req.params.portfolioId, req.user._id],
-    requireKey: (req) => req.params.portfolioId ? null : 'Missing portfolioId',
-    log: LOG,
+// Deleting a book's document is the portfolio's delete (the client removes its ideas first) — so the
+// book's sealed agent contexts go with it.
+export const deletePortfolioChatState = handle('deletePortfolioChatState', async (req, res) => {
+    const { portfolioId } = req.params
+    if (!portfolioId) throw httpError(400, 'Missing portfolioId')
+    const result = await portfolioChatService.deleteChatState(portfolioId, req.user._id)
+    forgetIfDeleted('portfolio', portfolioId, result)
+    res.json({ ok: true })
 })
 
 export const getPendingReviews = handle('getPendingReviews', async (req, res) => {

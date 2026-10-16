@@ -44,6 +44,11 @@ export const scannerDesk = {
     log:   '[scanner:desk]',
     parse: (body) => ({ state: _scannerMode(body) }),
     nextState: scannerNextState,
+    // Refining a saved list: its fields are the list in progress, and the next turn refines it.
+    stateFromEntity: (scan) => {
+        const pendingScan = { period: scan?.period, thesis: scan?.thesis, direction: scan?.direction, candidates: scan?.candidates ?? [] }
+        return { ..._scannerMode({ profile: scan?.profile }), pendingScan, editingScanId: scan?.id ?? null, editList: pendingScan }
+    },
     run: ({ state, emit, common }) => scannerAgentService.chatStream({
         ...common,
         ..._scannerMode(state),

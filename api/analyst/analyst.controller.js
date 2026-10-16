@@ -1,5 +1,7 @@
 // HTTP handlers for the Analyst: the streaming research agent (P3) + coverage CRUD (P1) +
 // research queue (Argus→Prometheus admin pipeline).
+import { sealing } from '../../services/desks/seal.js'
+import { forgetIfDeleted } from '../../services/agentContext.service.js'
 import { coverageService, revisionSummary } from './coverage.service.js'
 import { resolveCardsFor }        from '../chat/chat.service.js'
 import { researchQueueService }   from '../../services/researchQueue.service.js'
@@ -61,6 +63,9 @@ export const initiateCoverage = _handle('initiateCoverage', async (req, res) => 
             extra: { ...(result.id ? { id: result.id } : {}), ...(result.detail ? { detail: result.detail } : {}) },
         })
     }
+    // With a sessionId, Prometheus's turns move onto the coverage they produced — per user, even on house
+    // coverage (agentContext.service). Never fails the write.
+    await sealing.sealAfterGenerate(req, { kind: 'coverage', entityIds: [result.doc?.id], name: result.doc?.symbol ?? null })
     res.send(result.doc)
 })
 
@@ -78,6 +83,7 @@ export const updateCoverage = _handle('updateCoverage', async (req, res) => {
     // and non-fatal (resolveCardsFor swallows its own failures). The note is the revision's own
     // account of what moved — the trail entry this write just appended.
     await resolveCardsFor({ kind: 'coverage', id: req.params.id }, { outcome: 'revised', note: revisionSummary(result.doc?.revisions?.[0]) })
+    await sealing.sealAfterGenerate(req, { kind: 'coverage', entityIds: [req.params.id], name: result.doc?.symbol ?? null })
     res.send(result.doc)
 })
 
@@ -93,6 +99,7 @@ export const deleteCoverage = _handle('deleteCoverage', async (req, res) => {
     const result = await coverageService.deleteCoverage(req.params.id)
     if (!result.ok) return sendReason(res, result.reason, { overrides: COVERAGE_REASONS, fallback: 500, fallbackMessage: 'Failed to delete coverage' })
     logger.info(LOG, 'coverage deleted', { id: req.params.id })
+    forgetIfDeleted('coverage', req.params.id, result)
     // A card asking to revise a thesis that no longer exists is a dead ask — close it as such.
     await resolveCardsFor({ kind: 'coverage', id: req.params.id }, { outcome: 'deleted', note: 'Coverage deleted' })
     res.send({ ok: true })

@@ -5,6 +5,7 @@
 // `req.user._id`. The READS are open to every signed-in user; the stream and publishing are admin-only,
 // gated per route in strategy.routes. A trader's read carries the answers, not the review machinery.
 
+import { sealing } from '../../services/desks/seal.js'
 import { strategyDesk }         from '../../services/desks/strategy.desk.js'
 import { industryViewService }  from './industryView.service.js'
 import { readSubIndustry, listSubIndustries, moneyFacts, largestCompanies, readFlowNodes, flowFacts } from './industryData.service.js'
@@ -134,6 +135,8 @@ export const publishIndustry = _handle('publishIndustry', async (req, res) => {
     const r = await industryViewService.publishView(bundle.sub.code, req.body ?? {}, bundle.answering, { note: req.body?.summary ?? null })
     if (!r.ok) return sendReason(res, r.reason, { overrides: VIEW_REASONS, fallback: 500, ...(r.detail ? { extra: { detail: r.detail } } : {}) })
     if (r.changed) notifyIndustryChanged(r.doc, r.changed).catch(err => logger.warn(LOG, 'industry card failed (view is published)', err.message))
+    // With a sessionId, Pythia's turns move onto the view they produced (unified-chat §6.2). Never fails the publish.
+    await sealing.sealAfterGenerate(req, { kind: 'industry_view', entityIds: [bundle.sub.code], name: bundle.sub.name ?? null })
     res.json(r.doc)
 })
 
