@@ -199,3 +199,27 @@ test('a state that is only mode or markers does not block reopening — only rea
     const out = await seal.openForEdit({ userId: 'u1', sessionId: s.sessionId, kind: 'scan', entity: { id: 'sc1', candidates: [] } })
     assert.equal(out.agent, 'scanner')
 })
+
+test('8e: a reopen over other work SETS IT ASIDE — the dropped turns never seal onto the item; the same item keeps them', async () => {
+    const { sessions, contexts, seal } = rig()
+    const s = await sessions.getActive({ userId: 'u1' })
+    await chat(sessions, s.sessionId, [say('mentor', 'user', 'NVDA on a pullback?'), say('mentor', 'assistant', 'Here is an NVDA draft.')])
+    await sessions.setAgentState({ sessionId: s.sessionId, userId: 'u1', agent: 'mentor', state: { draft: { asset: 'NVDA' } } })
+    const setup = { id: 'st9', asset: 'AMD' }
+    await seal.openForEdit({ userId: 'u1', sessionId: s.sessionId, kind: 'setup', entity: setup, force: true })
+    const after = await sessions.get({ sessionId: s.sessionId, userId: 'u1' })
+    assert.ok(after.seals.mentor >= 2, 'the seal point moved past the NVDA turns')
+    await chat(sessions, s.sessionId, [say('mentor', 'user', 'move the AMD stop'), say('mentor', 'assistant', 'Moved.')])
+    await seal.sealFromSession({ userId: 'u1', sessionId: s.sessionId, agent: 'mentor', kind: 'setup', entityIds: ['st9'] })
+    const ctx = await contexts.load({ userId: 'u1', kind: 'setup', entityId: 'st9', agent: 'mentor' })
+    const said = ctx.messages.map(m => m.content).join(' | ')
+    assert.match(said, /move the AMD stop/)
+    assert.doesNotMatch(said, /NVDA/, 'the put-aside NVDA conversation is not on the AMD setup')
+
+    // Reopening the SAME item it is already editing sets nothing aside.
+    const before = (await sessions.get({ sessionId: s.sessionId, userId: 'u1' })).seals.mentor
+    await sessions.setAgentState({ sessionId: s.sessionId, userId: 'u1', agent: 'mentor', state: { draft: { asset: 'AMD' }, editing: { kind: 'setup', entityId: 'st9' } } })
+    await chat(sessions, s.sessionId, [say('mentor', 'user', 'and the target?')])
+    await seal.openForEdit({ userId: 'u1', sessionId: s.sessionId, kind: 'setup', entity: setup })
+    assert.equal((await sessions.get({ sessionId: s.sessionId, userId: 'u1' })).seals.mentor, before)
+})

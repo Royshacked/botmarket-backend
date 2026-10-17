@@ -257,3 +257,20 @@ test('Pythia keeps the assessments its drafts came with', () => {
     assert.deepEqual(s1.assessments, [{ q: 'demand' }])
     assert.deepEqual(strategyDesk.nextState(s1, { views: [] }).assessments, [{ q: 'demand' }])
 })
+
+test('8e: DISCARD is the pipe\'s — unsaved work thrown away, its turns set aside; nothing on the table has nothing to discard', async () => {
+    const r = rig({ state: { draft: DRAFT, coverage: [], view: { gate: null, readiness: null } } })
+    const { s, press, stateOf } = await r.start(user)
+    assert.deepEqual(shapeOf(await press('discard')), { result: {} })
+    assert.equal(await stateOf(), null)
+    assert.deepEqual(r.asides, [{ userId: 'u1', sessionId: s.sessionId, agent: 'mentor' }])
+    assert.equal(r.seals.length, 0, 'nothing was saved, nothing sealed')
+    assert.deepEqual(await press('discard'), { reason: 'nothing_to_commit' })
+})
+
+test('8e: a fresh plan (dropMarkers) sets the old work\'s turns aside', async () => {
+    const r = rig({ state: { draft: DRAFT, coverage: [], view: { gate: null, readiness: null }, editing: { kind: 'setup', entityId: 's1' } } })
+    const { edit } = await r.start(user)
+    assert.equal((await edit({ draft: DRAFT, fresh: true, accounts: ACCOUNTS })).ok, true)
+    assert.equal(r.asides.length, 1)
+})

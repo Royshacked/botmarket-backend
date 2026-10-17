@@ -76,6 +76,22 @@ export function makeSealing({ sessions = sessionService, contexts = agentContext
     }
 
     /**
+     * Put an agent's unsealed turns ASIDE (phase 8e — carried from 8b). Its work was dropped — a reopen over other work,
+     * a fresh plan, a clean table, a discard — so its turns since the last seal belong to no entity. The seal point moves
+     * past them: they stay in the timeline, readable, and the NEXT seal starts after them, instead of carrying the
+     * put-aside conversation onto whatever the agent builds next. Its summary starts over with them.
+     */
+    async function putAside({ userId, sessionId, agent }) {
+        if (!deskOf(agent)) return { reason: 'invalid_agent' }
+        const session = await sessions.get({ sessionId, userId })
+        const seq = session?.seq
+        if (!Number.isFinite(seq)) return { reason: 'not_found' }
+        await sessions.setSealedThrough({ sessionId, userId, agent, seq })
+        await sessions.setSummary({ sessionId, userId, agent, summary: { text: '', throughSeq: seq } })
+        return { through: seq }
+    }
+
+    /**
      * Reopen an entity for editing in the live session. The caller resolves the entity (owner-checked).
      * Refused (`busy`) while the agent holds OTHER unsealed work, unless `force` — the user chose to drop it.
      * @param {{ userId: string, sessionId: string, kind: string, entity: object, name?: string, force?: boolean }} p
@@ -96,6 +112,10 @@ export function makeSealing({ sessions = sessionService, contexts = agentContext
         // Busy only over REAL unsealed work (the desk's hasWork) — a state that is just mode or markers (Argus's
         // landing mode, Atlas's carried mandate) is nothing to lose.
         if (hasWork(agent, current) && !sameItem && !force) return { reason: 'busy', agent }
+
+        // A DIFFERENT item: what the agent was doing (dropped work, or talk about something else) is not this item's
+        // conversation — set aside, so this item's next seal carries only what is said about it (phase 8e).
+        if (!sameItem) await putAside({ userId, sessionId, agent })
 
         // `opts` is how the item opens (a book in review mode) — the desk reads what it knows.
         const state   = desk.stateFromEntity(entity, opts)
@@ -129,7 +149,7 @@ export function makeSealing({ sessions = sessionService, contexts = agentContext
             .catch(err => { logger.warn(LOG, 'seal after generate failed (the entity is saved)', err.message); return null })
     }
 
-    return { sealFromSession, openForEdit, sealAfterGenerate }
+    return { sealFromSession, putAside, openForEdit, sealAfterGenerate }
 }
 
 export const sealing = makeSealing()

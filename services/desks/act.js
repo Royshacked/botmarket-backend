@@ -59,6 +59,14 @@ export function makeAct({ sessions = sessionService, desks = DESK_DEFS, sealing 
             // OWN keys only: `constructor` / `valueOf` resolve on any object literal (phase 8a bug hunt #2).
             const actions = opened.desk.actions
             const handler = actions && Object.hasOwn(actions, action) ? actions[action] : null
+            // DISCARD is the pipe's, not a desk's (phase 8e — the old panels' Clear): unsaved work is thrown away and its
+            // turns set aside, so they never seal onto what the desk builds next. Nothing is saved, so nothing is judged.
+            if (action === 'discard' && typeof handler !== 'function') {
+                if (!opened.state) return { reason: 'nothing_to_commit' }
+                await sealing.putAside({ userId: user._id, sessionId, agent })
+                await sessions.setAgentState({ sessionId, userId: user._id, agent, state: null })
+                return { result: {}, rev: await _revNow({ user, sessionId, agent }) }
+            }
             if (typeof handler !== 'function') return { reason: 'no_such_action' }
 
             const out = await handler({ user, state: opened.state, args: args && typeof args === 'object' ? args : {} })
@@ -100,7 +108,9 @@ export function makeAct({ sessions = sessionService, desks = DESK_DEFS, sealing 
             const out = await opened.desk.applyEdit(opened.state, edit && typeof edit === 'object' ? edit : {}, { user })
             if (!out || out.reason) return { reason: out?.reason ?? 'invalid_edit' }
             // The markers survive a hand edit — unless the edit replaces the work outright (`dropMarkers`: a new plan
-            // is not an edit of the one being edited).
+            // is not an edit of the one being edited). Then the turns about the old work are set aside too (phase 8e):
+            // they must not seal onto the new plan.
+            if (out.dropMarkers === true) await sealing.putAside({ userId: user._id, sessionId, agent })
             const next = out.dropMarkers === true ? out.state : keepMarkers(out.state, opened.state)
             const written = await sessions.setAgentState({ sessionId, userId: user._id, agent, state: next })
             return { ok: true, rev: written?.rev ?? null }

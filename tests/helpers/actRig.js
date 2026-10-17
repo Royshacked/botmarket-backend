@@ -16,16 +16,19 @@ export const TRADER = Object.freeze({ _id: 'u1', role: 'trader' })
 export function makeActRig({ agent, desk, state = null, scope = 'main', sessions: given = null, sealing = null }) {
     const { db } = memDb()
     const sessions = given ?? makeSessionService({ getDb: async () => db })
-    const seals = []
-    const seal = sealing ?? { sealFromSession: async (a) => {
-        seals.push(a)
-        await sessions.setAgentState({ sessionId: a.sessionId, userId: a.userId, agent: a.agent, state: null })
-        return { sealed: 1 }
-    } }
+    const seals = [], asides = []
+    const seal = sealing ?? {
+        sealFromSession: async (a) => {
+            seals.push(a)
+            await sessions.setAgentState({ sessionId: a.sessionId, userId: a.userId, agent: a.agent, state: null })
+            return { sealed: 1 }
+        },
+        putAside: async (a) => { asides.push(a); return { through: 0 } },
+    }
     const pipe = makeAct({ sessions, desks: { [agent]: desk }, sealing: seal, lock: (_id, fn) => fn() })
 
     return {
-        sessions, seals, ...pipe,
+        sessions, seals, asides, ...pipe,
         async start(user = ADMIN) {
             const s = await sessions.getActive({ userId: String(user._id), scope })
             if (state) await sessions.setAgentState({ sessionId: s.sessionId, userId: String(user._id), agent, state })
