@@ -922,7 +922,7 @@ doorway and bus listener, and the existing overlay patterns. Facts that shaped i
   `edit(agent, edit)`, `commit(agent, action, args)`; `MentorSurface` from the panel's blocks — SetupSummary, CoverageChips,
   CandidatePicker, StageConfirm, SpanTable, EntryTable (moved as they are, reading agentState), the Generate / Generate-all /
   Arm / Leave waiting / Update / Later bar. Delete `MentorPanel.jsx`; its block tests move to the surface.
-- **8c — Atlas:** `PortfolioSurface` — thesis card, build summary, limits notes, sleeve/coverage notices, the review
+- **8c — Atlas — DONE 2026-10-17, see §10.4:** `PortfolioSurface` — thesis card, build summary, limits notes, sleeve/coverage notices, the review
   Accept / Dismiss / Later and Generate / Update bar, `AdoptBookGrid` (adopt reachable again). Delete `PortfolioPanel.jsx`
   (`PortfolioPanel.scss` stays — the shared `portfolio-panel__*` bubble classes; renamed in phase 10).
 - **8d — Argus + Prometheus:** `ScannerSurface` — list summary, PrometheusStep (the read through K3), lens toggle, angle
@@ -1072,6 +1072,55 @@ at send time, the refusal text once.
 - **With 8c / 8e.** A `fresh` plan (and a forced reopen, already) leaves Mentor's seal boundary where it was, so the
   put-aside setup's conversation seals onto the next generated one. Move the boundary, or seal the dropped segment onto
   `editing.entityId`, for both at once.
+
+### 10.4 Phase 8c — as built (2026-10-17)
+
+Commits: FE `4ae4649` · BE `cf56524` · bundle `cc1a1ae` (8c) · the CR commits (FE + BE + bundle, after `cc1a1ae`).
+Driven: `scripts/drive-portfolio-surface.mjs` 14/14 on Vite :5173 — Atlas's state SEEDED (no model call): the plan on
+the floor, Generate saving a real book, a review listed and dismissed (asked first), adopt mode staging and pricing a
+paste, Cancel, an adopt over an unsaved plan asking first, the phone sheet; it removes everything it made (the book,
+its sealed context, the drafts, the session) and fails on a page error. Not pushed.
+
+**Built (frontend):**
+- `cmps/PortfolioSurface` — the book's thesis (editing), the build summary (the plan on the table, else the book as it
+  stands), the house's limits, the sleeve / coverage notices, the proposal LISTED before Accept (`describeChange`,
+  moved from MainPage's never-raised rebalance dialog), and the bars: construction Generate; an edit's Update (a plan
+  on the table must be sized; with none, Update pushes moved accounts) and Accept for its proposal, both when both
+  apply, and Later; a review's Review (a turn) until a pass ran (`reviewed`), then Accept / Dismiss (asked first) /
+  Later. The AVOID ask is the `again` round trip (yes → `avoidOk`; no on a proposal → `dropAvoid`; no on a book →
+  nothing saved). Rules in `portfolioSurface.utils.js`.
+- Adopt mode on the surface: the grid (`cmps/AdoptBook`, styled at last), the draft read after every Atlas turn
+  (answers out of order dropped), never a dead end (a failed stage or read says so, with Try again and Cancel), and
+  the "put it aside?" question over unsaved work.
+- `customHooks/useSurfacePress` (CR) — the press mechanics both surfaces share: the marked accounts, one press at a
+  time, the note (a refusal's is sticky until the next press; other errors clear when the revision moves), the stale
+  text, `before` (Mentor settles its hand edit) and `again` (Atlas's AVOID ask). What a press MEANS stays per surface.
+- MainPage: a book reopens IN THE SESSION (`editEntity` with `reviewMode`; accounts / workspace / the waiting reset only
+  once it reopened); a save re-reads the lists and the queue; an adoption opens the new book; the "building" row is a
+  plan on Atlas's table, in its own workspace. Deleted: `PortfolioPanel`, `avoidOk`, the save / update / apply /
+  accept handlers (the server's actions since 8a), the rebalance dialog, `adoptDraft`.
+- Both surfaces grow in the pane and the pane scrolls (the shared `portfolio-panel` shell clipped them).
+
+**Built (backend):** Atlas's hand edit `{ adopt: 'start' | 'end' }` (the user rides to `applyEdit`); `reviewed`;
+the book's standing thesis on reopen (`entityLookup` → `stateFromEntity`). CR: `plan_not_ready` (Generate and Update
+refuse an unsized plan — an Update never passes it over for a rebind); Axl's adopt lands on a CLEAN table (no book
+being edited, no markers) and over unsaved work waits for the yes (`adopt_over_work` until `fresh: true`, Roy
+2026-10-17 decision (a)); any other route ends adopt mode; `start` replaces a committed or vanished draft; the latest
+turn decides a proposal outside a review too; a review whose every change was declined closes as held.
+
+Phase 8c bug hunt (2026-10-17, Roy): Update needs a marked account — kept, as Mentor's; the rest carried to 8e (below).
+
+Phase 8c CR (2026-10-17, two reviewers, all applied with decision (a)): the unsized-plan Update / Generate · adopt mode
+outliving the user's exit · a withdrawn edit proposal blocking Update · the surfaces clipped · "Opening the adoption…"
+a dead end, and a committed draft reused · the building row sticking across visits and workspaces · the stage guard
+stuck after a failure, a racing stage's false error, MainPage's dead adopt branch · a refusal's note cleared by the next
+frame · an all-AVOID review looping · `useSurfacePress` · "on 0 holdings", the live count, `bookPending` on the shared
+status list, a stale comment, `setPortfolioChatRestore`, the drive's cleanup.
+
+**Carried to 8e** (Roy 2026-10-17, with 8b's list in §10.3): a Discard for an unsaved plan on the surfaces (the old
+input's Clear); Atlas's thread resume (the threads drawer, RESUME_BUILD for a book not yet saved) — `resumeRefs` had only
+the panel to set them; a save no longer ends the pipeline (`finishPipeline`), as Mentor; dead code —
+`tradeIdeasService.createBatch` has no caller.
 
 ## 11. Phase 9 — Migration (`scripts/migrate-unified-chat.mjs`)
 

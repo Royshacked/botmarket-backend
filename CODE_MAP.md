@@ -322,7 +322,8 @@ services/
                               meaning is the desk's (actions/); an edit answering dropMarkers (Mentor's fresh
                               plan, 8b) clears editing / chainId instead of keeping them
       actions/                <agent>.actions.js — each desk's commits from its agentState (never the client's
-                              copy) through the shared commit service; the contract (verbs generate / update /
+                              copy) through the shared commit service, and its hand edits (Mentor's draft, Argus's
+                              lens / read, Atlas's adopt mode — staged under the lock); the contract (verbs generate / update /
                               later + the desk's own, results { <kind>: doc }) is in mentor.actions.js
       markers.js · scannerMode.js   keepMarkers (editing / chainId survive a fold, an edit, Atlas's onRouted) ·
                               Argus's mode and radar-board validation (shared by the desk and its actions)
