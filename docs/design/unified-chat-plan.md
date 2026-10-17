@@ -448,6 +448,107 @@ change one byte of the old path's behaviour).
   the per-desk `/stream` routes go (Strategy and
   Aether keep theirs — separate panels).
 
+### 7.1 Phase 5 — detailed plan (2026-10-17, for Roy's approval)
+
+Read before writing it: the live transports (per-turn SSE + `turnRegistry`, the social-chat WebSocket),
+the frontend conveyor (hop / artifact / contracts / DESKS steps / the two panel openers), sleeve sourcing,
+the user decision points, and every concurrency guard. Facts that shaped it:
+- **The social chat's WebSocket already is most of the channel** (`api/chat/chatWs.js`): cookie-JWT auth on
+  upgrade, a per-user socket set (every tab and device), a 30 s heartbeat, `emit(userId, event, data)`, a
+  client that reconnects every 3 s. No replay — clients re-read over REST on `connected`. Single process,
+  same as every other request-path state (docs/architecture/single-instance.md).
+- **Only two artifact kinds are live**: `candidate_list` (Argus → Mentor for one pick, Argus → Prometheus
+  for a research list) and `coverage_set` (Prometheus → Atlas). With no pipeline steps on the server,
+  `hop.js` is not needed: a kind has exactly one receiver (`mentor` / `analyst` / `portfolio` accept them).
+  The openers live in two panels (MentorPanel's "I want to work on a X trade — the read on it is …",
+  AnalystPanel's queue prompt) and in one contract's `brief()` (Atlas's `briefCoverage`).
+- **No turn lock exists anywhere**: nothing stops two turns on one session, or one agent, at once.
+- **Sleeve sourcing** keeps its sleeves in memory, ends in a `sleeve_sourced` card with "Resume build",
+  and loses the pending sleeves on a restart.
+- **No step declares a gate today**; the decisions are client buttons (Generate, Arm, review accept, AVOID
+  OK, order confirm) — the server already enforces the money ones.
+
+**Four decisions this plan asks for (my recommendation first):**
+
+- **G1 — The session channel rides the EXISTING WebSocket, not a new SSE stream.** One live transport per
+  user (the shared-pipe rule): new events on the same socket — `session_message`, `session_delta` (streamed
+  tokens / status / reasoning / chart of a running turn), `session_removed` (seqs a seal took out),
+  `session_state` (floor, an agent's state changed), `session_turn` (started / done / stopped / error). Replay
+  is a client `session_sync { sessionId, afterSeq }` frame answered from the store (`messagesSince`), sent on
+  every (re)connect — it replaces the REST re-read the social chat does. A turn still streaming is sent once
+  as its text so far, then live (§1b q3). *Alternative:* the SSE channel §1b sketched — a second transport.
+- **G2 — The turn endpoint returns at once; everything streams on the channel.**
+  `POST /api/sessions/:id/turn { text, agent?, ops?, seed?, accounts?, mainAccountId?, clientTime?, turnId }`
+  → `202 { turnId }`. The turn registers in `turnRegistry`, so the existing `POST /api/turns/:turnId/stop`
+  stops it. *Alternative:* stream the user's own turn on the POST response and only chain turns on the
+  channel — two ways for one thing.
+- **G3 — The server needs no pipeline steps.** The conveyor ports as `services/chain/`: the two live kinds,
+  `receiverOf(kind)`, each receiver's opening brief (Mentor's and Prometheus's openers move out of the
+  panels into it, Atlas's `briefCoverage` too), and the runner. `hop.js` / `doors.js` / `DESKS[].steps` do
+  not come along; they leave the frontend in phase 7. `mandate` / `scan_request` die here (dropped from the
+  port; their frontend copies go in phase 7).
+- **G4 — §1b's four proposals become the rules**, as written there: a user interjecting pauses the chain
+  after the running turn (and the agent offers "Continue"); a restart marks a running chain paused and the
+  floor-holder asks "I was interrupted — continue?" (never an automatic re-run); replay by seq on reconnect;
+  a turn is a decision by a declared table, not by the model.
+
+**5a. The channel** — `services/sessionChannel.js` (one module; chatWs stays the socket owner):
+`emitSession(userId, event, data)` over `chatWs.emit`; the `session_sync` frame handled in chatWs's message
+switch → replay rows with `seq > afterSeq` + the running turn's text so far. `sessionTurn` gets an `emit`
+that forwards to it; `sealFromSession` emits `session_removed` + the line; state and floor changes emit
+`session_state`.
+
+**5b. The turn endpoint** — `api/sessions`: `POST /:id/turn`, `POST /:id/edit { kind, id }` (openForEdit, the
+entity resolved owner-checked through its own service), `POST /:id/continue` (resume a paused chain).
+- **Who answers:** `agent` when given (a tap on an agent), else an `@Brand` / `@agent` at the start of the
+  text, else `session.floor`. `canSpeak` gates it.
+- **One turn at a time per session** — an in-process per-session lock (`services/desks/turnLock.js`): a turn
+  posted while another runs is QUEUED behind it (not refused, not interleaved); a user turn arriving while a
+  chain runs sets the chain to pause after the current turn (G4).
+- **Busy agent:** an agent's working state carries `job: { origin: 'user'|'chain', chainId }`. A user turn
+  routed to an agent busy in a chain gets Axl's sentence instead ("Argus is in the middle of Atlas's scan —
+  finish that first or set it aside?") as a `decision` with two taps; "set it aside" ends that chain step.
+  `openForEdit`'s `busy` refusal goes the same way, and its tap passes `force`.
+
+**5c. The chain** — `services/chain/`:
+- `artifact.js` (`candidate_list`, `coverage_set`, `STATUS`, `makeArtifact`), `contracts.js` (per receiver:
+  `accepts`, `brief(artifact)` → the opening sentence; the two panel openers and `briefCoverage`, moved).
+- `emits.js` — per desk, what in a `done` payload is an artifact: Argus's `kairos_pick` in single-pick mode
+  → a one-item `candidate_list` for Mentor; Argus's research list → a queued `candidate_list` for Prometheus
+  (context: `queued`, `pool`, `bySector`); Prometheus finishing the queue → `coverage_set` for Atlas.
+- `decisions.js` — the declared table (G4): Mentor `gate` open / `setups` offered / a ready `setup`; Atlas
+  `plan` / `update` / `mandate` proposed; Argus a watchlist outside single-pick mode; Prometheus a coverage
+  draft; any `route`. A match appends a `decision` message (the view its card draws from) and stops.
+- `runner.js` — after every turn: decision? stop. Emitted artifact? append a `handoff` message
+  (`agent` = sender, `to` = receiver, content = the receiver's brief, `ref` = the artifact), move the floor,
+  run the receiver's turn with NO user message (`sessionTurn` gains `origin: 'chain'`, which reads the
+  hand-off as its prompt). Repeat until a decision, a pause, or nothing emitted. Prometheus's queue runs one
+  name per turn in the same loop.
+- **Chain state** in `session.chain = { id, status: running|paused|done, origin, step, queue, startedAt }` —
+  written before each step, so a restart finds it. **Boot sweep**: every `running` chain → `paused` + the
+  floor-holder's "I was interrupted — continue?" decision (G4).
+- A cap of 12 automatic steps per chain, then a decision ("keep going?") — a runaway loop costs at most that.
+
+**5d. Sleeve sourcing joins the chain** (decision 1a: a code screen, shown as Argus's work): a sleeve sourced
+from a session carries `sessionId`; on settle, instead of only the card, Argus's line ("Argus screened 40 → 8
+for the growth sleeve") is appended with the result written into Argus's segment, then the `coverage_set`
+hand-off to Atlas runs. A sleeve sourced from the old HTTP path keeps its card exactly as today (D1).
+
+**5e. Live verification** — `scripts/drive-session-chain.mjs`: Axl → trade → Argus single-pick → automatic
+hand-off → Mentor opens on the pick → stops at Mentor's first decision; an interjection mid-chain pauses it;
+`continue` resumes; a simulated restart (the sweep run on a `running` chain) asks to continue; a seal emits
+`session_removed`. On axl_dev, a few cents — with a WebSocket client in the script to see the events arrive.
+
+**Not in phase 5:** background cards into the timeline (phase 6); anything in the frontend (7–8); the per-desk
+`/stream` routes stay until the frontend moves (D1).
+
+**Tests:** channel (emit shapes; `session_sync` replays after a seq; a running turn's partial text sent once);
+turn endpoint (agent selection: explicit, `@mention`, floor; `canSpeak`; 202 + stop through the registry); turn
+lock (a second turn queues, never interleaves; an interjection pauses a chain); busy rule (the decision and its
+two taps; edit `force`); chain (each emit → the right receiver with the right brief; each decision row stops;
+the step cap; Prometheus's queue one per turn; chain state written before each step; the boot sweep pauses and
+asks); sleeve settle → Argus line + Atlas hand-off, and the old card path unchanged. Existing suites unchanged.
+
 ## 8. Phase 6 — Background cards into the timeline
 
 - Themis moves onto `postCard` (one transport, no exceptions).
