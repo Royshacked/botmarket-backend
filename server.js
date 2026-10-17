@@ -71,7 +71,6 @@ import { scannerRoutes }     from './api/scanner/scanner.routes.js'
 import { analystRoutes }     from './api/analyst/analyst.routes.js'
 import { strategyRoutes }    from './api/strategy/strategy.routes.js'
 import { aetherRoutes }      from './api/aether/aether.routes.js'
-import { axlRoutes }         from './api/axl/axl.routes.js'
 import { threadsRoutes }     from './api/threads/threads.routes.js'
 import { sessionsRoutes }    from './api/sessions/sessions.routes.js'
 import { turnsRoutes }       from './api/turns/turns.routes.js'
@@ -182,8 +181,8 @@ if (config.isProduction) {
 // in mount order and a limiter registered after its route never sees the request.
 //
 // The agent limiter is pinned to the STREAM paths specifically, not to the desk prefixes. Every
-// desk exposes exactly one `POST /stream` (Axl also has `/brief/stream`), and those are the only
-// endpoints that buy tokens. Limiting `/api/portfolio` wholesale would have counted its fifteen
+// desk exposes exactly one `POST /stream` (Axl answers only in the session, whose turn route carries the
+// same limiter — api/sessions), and those are the only endpoints that buy tokens. Limiting `/api/portfolio` wholesale would have counted its fifteen
 // ordinary reads against the same budget and throttled a user for browsing their own book.
 //
 // A NEW DESK MUST BE ADDED TO THE LIST BELOW. Forgetting it does not fail, and does not look
@@ -192,10 +191,9 @@ if (config.isProduction) {
 // tests/unit/agentLimiterCoverage.test.js walks every mounted `/stream` route and fails when one
 // of them is not here, so the omission is caught at the point it is made.
 app.use('/api/auth', authLimiter)
-for (const desk of ['axl', 'mentor', 'portfolio', 'scanner', 'analyst', 'strategy', 'aether']) {
+for (const desk of ['mentor', 'portfolio', 'scanner', 'analyst', 'strategy', 'aether']) {
     app.use(`/api/${desk}/stream`, agentLimiter)
 }
-app.use('/api/axl/brief/stream', agentLimiter)
 
 app.use('/api/mentor',      mentorRoutes)
 app.use('/api/setups',      setupsRoutes)
@@ -217,7 +215,6 @@ app.use('/api/scanner',     scannerRoutes)
 app.use('/api/analyst',     analystRoutes)
 app.use('/api/strategy',    strategyRoutes)
 app.use('/api/aether',      aetherRoutes)
-app.use('/api/axl',         axlRoutes)
 app.use('/api/threads',     threadsRoutes)
 app.use('/api/sessions',    sessionsRoutes)
 // Stopping an agent turn — its own endpoint because stopping and walking away are different

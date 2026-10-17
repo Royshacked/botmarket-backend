@@ -38,7 +38,7 @@ function limitedPaths() {
         }
     }
 
-    // Any explicitly listed path: `app.use('/api/axl/brief/stream', agentLimiter)`
+    // Any explicitly listed path: `app.use('/api/<desk>/<extra>/stream', agentLimiter)`
     for (const m of SERVER.matchAll(/app\.use\(\s*['"]([^'"]+)['"]\s*,\s*agentLimiter\s*\)/g)) paths.add(m[1])
 
     return paths

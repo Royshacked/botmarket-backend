@@ -679,14 +679,15 @@ export async function resolveMessage(conversationId, messageId, userId, { status
         return { ok: true, status: st }
     }
 
+    const resolvedAt     = Date.now()
+    const resolveOutcome = outcome ? String(outcome) : null
     await db.collection(MSGS).updateOne(
         { id: messageId, conversationId },
-        { $set: {
-            status:         st,
-            resolvedAt:     Date.now(),
-            resolveOutcome: outcome ? String(outcome) : null,
-        } }
+        { $set: { status: st, resolvedAt, resolveOutcome } }
     )
+    // The user's OTHER open copies of this card move too — the session timeline shows it beside the social
+    // chat (plan phase 7), and the screen that pressed it has already drawn it, so the echo is harmless.
+    await _tryEmit(uid, 'message_resolved', { id: messageId, conversationId, status: st, resolvedAt, resolveOutcome })
     await _settleHouseTwins(db, conversationId, messageId, uid, st, outcome)
     return { ok: true, status: st }
 }

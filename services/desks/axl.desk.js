@@ -1,5 +1,5 @@
 // Axl — reception. No working state: suggestions and the adopt flag are per turn.
-// One definition for the HTTP desk stream and the session turn (unified-chat plan phase 4).
+// Axl answers only in the session (unified-chat plan phase 7): its HTTP stream went with the old hub.
 
 import { axlAgentService } from '../agents/axl.agent.service.js'
 import { getMarketBrief } from '../marketBrief.service.js'
@@ -25,8 +25,8 @@ export const axlDesk = {
 }
 
 /**
- * Today's market brief as Axl's turn (plan phase 7, J4) — the session's version of POST /api/axl/brief/stream:
- * the brief card's button asks for it, and it lands in Axl's segment so a follow-up can be answered. The whole
+ * Today's market brief as Axl's turn (plan phase 7, J4; it replaced POST /api/axl/brief/stream): the brief
+ * card's button asks for it, and it lands in Axl's segment so a follow-up can be answered. The whole
  * text goes out as one token (it is complete when it exists); the status chip covers a stale brief's rewrite.
  */
 export async function briefTurn({ emit, signal, fetchBrief = getMarketBrief }) {
