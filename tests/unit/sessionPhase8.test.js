@@ -274,3 +274,23 @@ test('8e: a fresh plan (dropMarkers) sets the old work\'s turns aside', async ()
     assert.equal((await edit({ draft: DRAFT, fresh: true, accounts: ACCOUNTS })).ok, true)
     assert.equal(r.asides.length, 1)
 })
+
+test('8e CR: discard leaves a saved item being edited to Later, and a table with no work has nothing to discard', async () => {
+    const editing = rig({ state: { draft: DRAFT, coverage: [], view: { gate: null, readiness: null }, editing: { kind: 'setup', entityId: 's1' } } })
+    const e = await editing.start(user)
+    assert.deepEqual(await e.press('discard'), { reason: 'editing_use_later' })
+    assert.ok((await e.stateOf()).draft, 'the edit is untouched')
+    const empty = rig({ state: { draft: null, coverage: ['markets'], view: { gate: null } } })
+    assert.deepEqual(await (await empty.start(user)).press('discard'), { reason: 'nothing_to_commit' })
+    assert.equal(empty.asides.length + editing.asides.length, 0)
+})
+
+test('8e CR: a desk\'s own discard is the one that runs', async () => {
+    const calls = []
+    const desk = { ...mentorDesk, actions: { ...mentorDesk.actions, discard: async () => { calls.push('own'); return { result: { own: true }, after: null } } } }
+    const r = makeActRig({ agent: 'mentor', desk, state: { draft: DRAFT } })
+    const { press } = await r.start(user)
+    assert.deepEqual(shapeOf(await press('discard')), { result: { own: true } })
+    assert.deepEqual(calls, ['own'])
+    assert.equal(r.asides.length, 0, 'the pipe\'s discard did not run')
+})

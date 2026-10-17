@@ -223,3 +223,15 @@ test('8e: a reopen over other work SETS IT ASIDE — the dropped turns never sea
     await seal.openForEdit({ userId: 'u1', sessionId: s.sessionId, kind: 'setup', entity: setup })
     assert.equal((await sessions.get({ sessionId: s.sessionId, userId: 'u1' })).seals.mentor, before)
 })
+
+test('8e CR: setting aside resets the summary too — a turn after it reads nothing from before', async () => {
+    const { sessions, seal } = rig()
+    const s = await sessions.getActive({ userId: 'u1' })
+    await chat(sessions, s.sessionId, [say('mentor', 'user', 'NVDA?'), say('mentor', 'assistant', 'a draft')])
+    await sessions.setSummary({ sessionId: s.sessionId, userId: 'u1', agent: 'mentor', summary: { text: 'talked NVDA', throughSeq: 1 } })
+    const out = await seal.putAside({ userId: 'u1', sessionId: s.sessionId, agent: 'mentor' })
+    const after = await sessions.get({ sessionId: s.sessionId, userId: 'u1' })
+    assert.equal(after.seals.mentor, out.through)
+    assert.deepEqual(after.summaries.mentor, { text: '', throughSeq: out.through })
+    assert.deepEqual(await seal.putAside({ userId: 'u1', sessionId: s.sessionId, agent: 'nobody' }), { reason: 'invalid_agent' })
+})

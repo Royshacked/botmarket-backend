@@ -33,6 +33,9 @@ export function emitted(agent, payload, state) {
     return null
 }
 
+/** A finished chain: nothing left to tap — its choices, its pending step and its in-flight step all go. */
+export const endedChain = (chain) => ({ ...chain, status: 'done', awaiting: null, next: null, current: null, pending: null, pauseRequested: false })
+
 /** The research queue an investing list becomes when the user says "research the top N". */
 export function researchQueueFrom(scan) {
     const names = (scan?.candidates ?? []).map(c => c?.ticker).filter(Boolean)

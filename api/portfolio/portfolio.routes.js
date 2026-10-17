@@ -2,7 +2,6 @@ import express         from 'express'
 import { log }         from '../../middleware/logger.middleware.js'
 import { requireAuth } from '../../middleware/auth.middleware.js'
 import {
-    streamPortfolio,
     savePortfolioChatState,
     getPortfolioChatState,
     deletePortfolioChatState,
@@ -24,7 +23,6 @@ const router = express.Router()
 
 router.use(requireAuth)
 
-router.post('/stream',                        log, streamPortfolio)
 router.get('/',                               log, getPortfolios)       // the user's books
 router.get('/pending-reviews',                log, getPendingReviews)
 router.post('/chat-state',                    log, savePortfolioChatState)

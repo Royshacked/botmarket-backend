@@ -184,3 +184,17 @@ test('8d: a fresh table — the list, the saved list being edited and the marker
     assert.equal(st.editing, undefined)
     assert.equal(st.editingScanId, null)
 })
+
+test('8e CR: a discard keeps Argus\'s lens, and ends the chain the list belonged to (or it would come back)', async () => {
+    const r = makeActRig({ agent: 'scanner', desk: scannerDesk, state: { profile: 'investing', pendingScan: LIST, chainId: 'c1' } })
+    const { s, press, stateOf } = await r.start(TRADER)
+    await r.sessions.setChain({ sessionId: s.sessionId, userId: 'u1', chain: { id: 'c1', status: 'awaiting', awaiting: { agent: 'scanner', choices: ['research', 'keep'] } } })
+    assert.deepEqual(shapeOf(await press('discard')), { result: {} })
+    const st = await stateOf()
+    assert.equal(st.profile, 'investing', 'the lens stays')
+    assert.equal(st.pendingScan, null)
+    assert.equal(st.chainId, undefined)
+    const chain = (await r.sessions.get({ sessionId: s.sessionId, userId: 'u1' })).chain
+    assert.equal(chain.status, 'done')
+    assert.equal(chain.awaiting, null, 'no "research" card left to tap on a list that is gone')
+})

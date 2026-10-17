@@ -1,5 +1,5 @@
-// HTTP handlers for the Analyst: the streaming research agent (P3) + coverage CRUD (P1) +
-// research queue (Argus→Prometheus admin pipeline).
+// HTTP handlers for the Analyst: coverage CRUD (P1) + the research queue (Argus→Prometheus admin pipeline). The research
+// conversation itself is a session turn (services/desks/analyst.desk.js) — its HTTP stream went in unified-chat 8e.
 import { sealing } from '../../services/desks/seal.js'
 import { forgetIfDeleted } from '../../services/agentContext.service.js'
 import { coverageService } from './coverage.service.js'
@@ -8,8 +8,6 @@ import { COVERAGE_REASONS } from './coverageReasons.js'
 import { resolveCardsFor }        from '../chat/chat.service.js'
 import { researchQueueService }   from '../../services/researchQueue.service.js'
 import { researchRunService }     from '../../services/researchRun.service.js'
-import { analystDesk }            from '../../services/desks/analyst.desk.js'
-import { makeDeskStream }         from '../_shared/deskStream.util.js'
 import { sendReason }             from '../_shared/reason.util.js'
 import { makeHandle }             from '../_shared/handle.util.js'
 import { httpError }              from '../../services/httpError.util.js'
@@ -23,10 +21,6 @@ const LOG = '[analystCtrl]'
 // a 500's message in production — until then their fixed slugs were the only thing keeping a Mongo
 // sentence out of a toast.
 const _handle = makeHandle(LOG)
-
-// The desk itself (and its coverage-context read) is services/desks/analyst.desk.js, shared with the
-// session turn (unified-chat plan phase 4).
-export const streamAnalyst = makeDeskStream(analystDesk)
 
 // ─── Coverage CRUD ────────────────────────────────────────────────────────────
 

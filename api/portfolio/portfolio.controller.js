@@ -1,9 +1,7 @@
 import { forgetIfDeleted } from '../../services/agentContext.service.js'
-import { portfolioDesk }         from '../../services/desks/portfolio.desk.js'
 import { portfolioChatService }  from './portfolioChat.service.js'
 import { listPortfolioItems, listPortfolios } from '../../services/portfolioState.service.js'
 import { logger }                from '../../services/logger.service.js'
-import { makeDeskStream }    from '../_shared/deskStream.util.js'
 import { threadService }          from '../../services/thread.service.js'
 import { adoptBookService }  from './adoptBook.service.js'
 import { portfolioCommit }   from './portfolioCommit.service.js'
@@ -130,9 +128,6 @@ export const removeAdoptedHolding = makeAdoptHandler(
     (req) => adoptBookService.removeHolding({ id: req.params.id, userId: req.user._id }),
     r => ({ asset: r.asset }),
 )
-
-// The desk itself is services/desks/portfolio.desk.js, shared with the session turn (unified-chat plan phase 4).
-export const streamPortfolio = makeDeskStream(portfolioDesk)
 
 export const savePortfolioChatState = handle('savePortfolioChatState', async (req, res) => {
     const { portfolioId, messages, mandate, thesis, threadId, portfolioName } = req.body ?? {}

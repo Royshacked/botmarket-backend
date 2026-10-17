@@ -3,7 +3,9 @@
 // What 8e changed that only a browser shows: the chat column is ALWAYS the timeline (no desk tabs, no agent bar, no
 // crumb); Pythia and Aether open from the chat's header (admin) as side-pane tabs that stay MOUNTED — a half-typed
 // message survives the pane closing and another tab showing; and Discard throws a desk's unsaved work away (asked
-// first). No model call: nothing is sent to Pythia or Aether, and Mentor's draft is seeded.
+// first) and SETS ITS TURNS ASIDE — the seal point and the summary move past them, so they never seal onto Mentor's
+// next setup. No model call: nothing is sent to Pythia or Aether, and Mentor's draft and turns are seeded. (The order
+// ticket's kept mount is the same mechanism and is covered by SidePane.test — opening it takes Axl's <show>ticket.)
 //
 //   node scripts/drive-pane-tabs.mjs [baseUrl] [outDir]
 //
@@ -75,7 +77,8 @@ try {
     // ── 1. the chat column is the timeline — no desk tab, no agent bar, no crumb ──
     await signIn(page)
     await page.waitForTimeout(800)
-    check('the chat column is the timeline, with no agent bar or crumb', (await page.locator('.chat-agentbar').count()) === 0 && await page.locator('.workspace__chat .chat-timeline').isVisible())
+    // The timeline and the pane are the chat column's only content — no desk panel shares it.
+    check('the chat column is the timeline and the pane, nothing else', (await page.locator('.workspace__chat > .chat-with-pane > .chat-timeline').count()) === 1 && (await page.locator('.workspace__chat .portfolio-panel').count()) === 0)
 
     // ── 2. Pythia opens from the chat's header, as a pane tab ──
     await page.getByRole('button', { name: 'Pythia', exact: true }).click()
@@ -104,7 +107,12 @@ try {
     await page.waitForTimeout(500)
     check('back on Pythia, the message is still there', (await pane(page).locator('textarea').first().inputValue().catch(() => '')) === 'Drive — a half-typed question for Pythia')
 
-    // ── 5. Discard: Mentor's unsaved draft thrown away, asked first ──
+    // ── 5. Discard: Mentor's unsaved draft thrown away, asked first — and its turns set aside ──
+    for (const message of [
+        { agent: 'mentor', role: 'user', content: 'Drive — NVDA on a pullback?' },
+        { agent: 'mentor', role: 'assistant', content: 'Drive — here is an NVDA draft.' },
+    ]) await sessionService.append({ sessionId: sid, userId, message })
+    const before = await sessionService.get({ sessionId: sid, userId })
     const v = draftVerdict(DRAFT, true)
     await sessionService.setAgentState({ sessionId: sid, userId, agent: 'mentor', state: { active_asset: 'NVDA', draft: v.setup, coverage: [], drafts: {}, view: { gate: null, readiness: v.readiness, setups: null } } })
     await sessionService.setFloor({ sessionId: sid, userId, agent: 'mentor' })
@@ -116,8 +124,13 @@ try {
     await pane(page).getByRole('button', { name: 'Discard' }).click()
     await page.waitForTimeout(1500)
     await shot(page, '03-discarded')
-    const mentor = (await sessionService.get({ sessionId: sid, userId }))?.agentState?.mentor ?? null
+    const after = await sessionService.get({ sessionId: sid, userId })
+    const mentor = after?.agentState?.mentor ?? null
     check('Discard asks first, then Mentor\'s table is clear', /Discard the NVDA plan\? It is not saved anywhere/.test(asked ?? '') && !mentor, `asked: ${asked}`)
+    const through = after?.seals?.mentor ?? 0
+    check('…and its turns are set aside (the seal point and the summary move past them)',
+        through >= before.seq && after?.summaries?.mentor?.throughSeq === through && after.summaries.mentor.text === '',
+        `seal ${before?.seals?.mentor ?? 0} → ${through}, session seq ${before.seq}`)
 } catch (err) {
     console.error('DRIVE ERROR', err)
     check('the drive ran to the end', false, err.message)

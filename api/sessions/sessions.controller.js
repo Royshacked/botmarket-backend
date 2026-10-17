@@ -117,6 +117,8 @@ const ACT_REASONS = {
     too_many:          [400, 'Too many to save in one press'],
     invalid_edit:      [400, 'That change is not valid'],
     not_editable:      [400, 'Nothing here is edited by hand'],
+    // Discard is for unsaved work — a saved item being edited is left with Later (phase 8e CR).
+    editing_use_later: [409, 'This is a saved item being edited — leave it with Later'],
     // Pressed on a state a turn has since replaced (plan phase 8a CR D2) — the client redraws, then asks again.
     stale_state:       [409, 'That changed while you were looking — check it and try again'],
     // A desk action that answered nothing is the server's bug, not the client's request.

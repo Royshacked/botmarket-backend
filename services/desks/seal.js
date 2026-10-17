@@ -113,14 +113,14 @@ export function makeSealing({ sessions = sessionService, contexts = agentContext
         // landing mode, Atlas's carried mandate) is nothing to lose.
         if (hasWork(agent, current) && !sameItem && !force) return { reason: 'busy', agent }
 
-        // A DIFFERENT item: what the agent was doing (dropped work, or talk about something else) is not this item's
-        // conversation — set aside, so this item's next seal carries only what is said about it (phase 8e).
-        if (!sameItem) await putAside({ userId, sessionId, agent })
-
         // `opts` is how the item opens (a book in review mode) — the desk reads what it knows.
         const state   = desk.stateFromEntity(entity, opts)
         const context = await contexts.load({ userId, kind, entityId, agent })
         await sessions.setAgentState({ sessionId, userId, agent, state: { ...state, editing: { kind, entityId } } })
+        // A DIFFERENT item: what the agent was doing (dropped work, or talk about something else) is not this item's
+        // conversation — set aside, so this item's next seal carries only what is said about it (phase 8e). After the
+        // reopen it belongs to, so a reopen that failed leaves those turns where they were.
+        if (!sameItem) await putAside({ userId, sessionId, agent })
 
         // The collapsed card: what this agent already knows about the item, before the user types.
         const brand = deskOf(agent).brand

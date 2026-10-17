@@ -26,7 +26,7 @@ import { isAdminUserCached } from '../../api/user/user.model.js'
 import { coverageService } from '../../api/analyst/coverage.service.js'
 import { KIND, makeArtifact } from './artifact.js'
 import { receiverOf, briefFor } from './contracts.js'
-import { emitted, decisionFor, researchQueueFrom } from './rules.js'
+import { emitted, decisionFor, researchQueueFrom, endedChain } from './rules.js'
 import { logger } from '../logger.service.js'
 
 const LOG = '[chain]'
@@ -76,8 +76,7 @@ export function makeChainRunner({
     const bindRunQueued = (fn) => { runQueued = fn }
 
     const save = (user, sessionId, chain) => sessions.setChain({ sessionId, userId: user._id, chain })
-    // A finished chain leaves nothing to tap: its choices, its pending step and its in-flight step all go.
-    const end  = (user, sessionId, chain) => save(user, sessionId, { ...chain, status: 'done', awaiting: null, next: null, current: null, pending: null, pauseRequested: false })
+    const end  = (user, sessionId, chain) => save(user, sessionId, endedChain(chain))
 
     async function decide({ user, sessionId, agent, decision, chain }) {
         await sessions.append({ sessionId, userId: user._id, message: {

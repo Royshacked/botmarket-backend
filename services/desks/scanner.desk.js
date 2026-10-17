@@ -54,6 +54,8 @@ export const scannerDesk = {
         onTicker: (symbol) => emit('ticker', { symbol }),
         onPhase:  (phase)  => emit('phase',  { phase }),
     }),
+    // What a discard keeps (act.js): the lens — the list goes (phase 8e CR).
+    cleanTable: (state) => ({ ..._scannerMode({ profile: state?.profile }), pendingScan: null, editingScanId: null, readCut: null }),
     // The session's commits and direct edits (plan phase 8, K2/K3) — services/desks/act.js runs them.
     actions:   scannerActions,
     applyEdit: scannerApplyEdit,

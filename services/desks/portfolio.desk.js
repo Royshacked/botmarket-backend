@@ -226,6 +226,8 @@ export const portfolioDesk = {
 
         return result
     },
+    // What a discard keeps (act.js): the mandate the user set — the plan built under it goes (phase 8e CR).
+    cleanTable: (state) => (state?.mandate ? { ...portfolioNextState(null, null), mandate: state.mandate } : null),
     // The session's commits (plan phase 8, K2) and hand edits (K3: adopt mode) — services/desks/act.js runs them.
     actions: portfolioActions,
     applyEdit: makePortfolioApplyEdit({ clean: () => portfolioNextState(null, null) }),

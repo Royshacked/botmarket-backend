@@ -1,8 +1,6 @@
 import { sealing } from '../../services/desks/seal.js'
 import { forgetIfDeleted } from '../../services/agentContext.service.js'
-import { scannerDesk }         from '../../services/desks/scanner.desk.js'
 import { scanService }         from './scan.service.js'
-import { makeDeskStream }      from '../_shared/deskStream.util.js'
 import { sendReason }          from '../_shared/reason.util.js'
 import { makeEntityController } from '../_shared/entityController.util.js'
 import { makeHandle }          from '../_shared/handle.util.js'
@@ -10,9 +8,6 @@ import { httpError }           from '../../services/httpError.util.js'
 
 const LOG    = '[scanner:controller]'
 const handle = makeHandle(LOG)
-
-// The desk itself is services/desks/scanner.desk.js, shared with the session turn (unified-chat plan phase 4).
-export const streamScanner = makeDeskStream(scannerDesk)
 
 // ─── Scan CRUD ────────────────────────────────────────────────────────────────
 export const createScan = handle('createScan', async (req, res) => {

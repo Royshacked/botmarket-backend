@@ -17,7 +17,6 @@ import { visibleConversationsFor, ADMIN_BOT_IDS, RETIRED_BOT_IDS } from '../../a
 const here = dirname(fileURLToPath(import.meta.url))
 const routesSrc = readFileSync(join(here, '../../api/strategy/strategy.routes.js'), 'utf8')
 const scannerSrc = readFileSync(join(here, '../../api/scanner/scanner.routes.js'), 'utf8')
-const mentorSrc  = readFileSync(join(here, '../../api/mentor/mentor.routes.js'), 'utf8')
 const setupsSrc  = readFileSync(join(here, '../../api/setups/setups.routes.js'), 'utf8')
 const usersSrc   = readFileSync(join(here, '../../api/user/user.routes.js'), 'utf8')
 
@@ -64,8 +63,8 @@ test('strategy routes: every WRITE is admin-gated, the industry reads are open t
 // Scans and setups are owner-scoped (each user sees their own, admins included), the streams are
 // open, Talos watches every user's setups alike, and a trader reaches Argus through Atlas's sleeve
 // hop as well. Pinned so a gate cannot slip into a router unnoticed.
-test('scanner, mentor and setups routes: authenticated, never admin-gated', () => {
-    for (const src of [scannerSrc, mentorSrc, setupsSrc]) {
+test('scanner and setups routes: authenticated, never admin-gated', () => {
+    for (const src of [scannerSrc, setupsSrc]) {
         assert.match(src, /router\.use\(requireAuth\)/)
         assert.doesNotMatch(src, /requireAdmin/)
     }

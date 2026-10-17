@@ -55,7 +55,6 @@ import { threadService } from './services/thread.service.js'
 import { sessionService } from './services/session.service.js'
 import { agentContextService } from './services/agentContext.service.js'
 import { ensurePortfolioBookIndexes } from './api/portfolio/portfolioChat.service.js'
-import { mentorRoutes } from './api/mentor/mentor.routes.js'
 import { setupsRoutes } from './api/setups/setups.routes.js'
 import { tradeIdeasRoutes } from './api/trade-ideas/tradeIdeas.routes.js'
 import { authRoutes }   from './api/authentication/authentication.routes.js'
@@ -180,9 +179,9 @@ if (config.isProduction) {
 // The two targeted limiters. Mounted here, ahead of the routers, because Express runs middleware
 // in mount order and a limiter registered after its route never sees the request.
 //
-// The agent limiter is pinned to the STREAM paths specifically, not to the desk prefixes. Every
-// desk exposes exactly one `POST /stream` (Axl answers only in the session, whose turn route carries the
-// same limiter — api/sessions), and those are the only endpoints that buy tokens. Limiting `/api/portfolio` wholesale would have counted its fifteen
+// The agent limiter is pinned to the STREAM paths specifically, not to the desk prefixes. Since unified-chat 8e only
+// Pythia and Aether keep a `POST /stream` (their panels still stream); every other desk answers in the session, whose
+// turn route carries the same limiter — api/sessions. Those are the only endpoints that buy tokens. Limiting `/api/portfolio` wholesale would have counted its fifteen
 // ordinary reads against the same budget and throttled a user for browsing their own book.
 //
 // A NEW DESK MUST BE ADDED TO THE LIST BELOW. Forgetting it does not fail, and does not look
@@ -191,11 +190,10 @@ if (config.isProduction) {
 // tests/unit/agentLimiterCoverage.test.js walks every mounted `/stream` route and fails when one
 // of them is not here, so the omission is caught at the point it is made.
 app.use('/api/auth', authLimiter)
-for (const desk of ['mentor', 'portfolio', 'scanner', 'analyst', 'strategy', 'aether']) {
+for (const desk of ['strategy', 'aether']) {
     app.use(`/api/${desk}/stream`, agentLimiter)
 }
 
-app.use('/api/mentor',      mentorRoutes)
 app.use('/api/setups',      setupsRoutes)
 app.use('/api/trade-ideas', tradeIdeasRoutes)
 app.use('/api/auth',        authRoutes)

@@ -19,7 +19,8 @@
 // A stale press is refused (`stale_state`, with the current revision) and the client redraws first.
 
 import { sessionService } from '../session.service.js'
-import { DESK_DEFS } from './index.js'
+import { DESK_DEFS, hasWork } from './index.js'
+import { endedChain } from '../chain/rules.js'
 import { canSpeak } from './sessionTurn.js'
 import { sealing as defaultSealing } from './seal.js'
 import { withSessionLock } from './turnLock.js'
@@ -59,12 +60,23 @@ export function makeAct({ sessions = sessionService, desks = DESK_DEFS, sealing 
             // OWN keys only: `constructor` / `valueOf` resolve on any object literal (phase 8a bug hunt #2).
             const actions = opened.desk.actions
             const handler = actions && Object.hasOwn(actions, action) ? actions[action] : null
-            // DISCARD is the pipe's, not a desk's (phase 8e — the old panels' Clear): unsaved work is thrown away and its
+            // DISCARD is the pipe's, not a desk's (phase 8e — the old panels' Clear): UNSAVED work is thrown away and its
             // turns set aside, so they never seal onto what the desk builds next. Nothing is saved, so nothing is judged.
+            //   • a saved item being edited is Later's, not this (its turns belong to it) — refused;
+            //   • a table holding only settings (a lens, a mandate) has nothing to discard;
+            //   • the desk's settings stay (`cleanTable`, when the desk names what survives — Argus's lens);
+            //   • a chain the work belonged to ends with it, or it would bring the discarded work back (phase 8e CR).
             if (action === 'discard' && typeof handler !== 'function') {
-                if (!opened.state) return { reason: 'nothing_to_commit' }
+                const state = opened.state
+                if (state?.editing) return { reason: 'editing_use_later' }
+                if (!hasWork(agent, state)) return { reason: 'nothing_to_commit' }
+                const chain = opened.session.chain
+                if (state.chainId && chain?.id === state.chainId && chain.status !== 'done') {
+                    await sessions.setChain({ sessionId, userId: user._id, chain: endedChain(chain) })
+                }
+                const kept = typeof opened.desk.cleanTable === 'function' ? opened.desk.cleanTable(state) : null
+                await sessions.setAgentState({ sessionId, userId: user._id, agent, state: kept })
                 await sealing.putAside({ userId: user._id, sessionId, agent })
-                await sessions.setAgentState({ sessionId, userId: user._id, agent, state: null })
                 return { result: {}, rev: await _revNow({ user, sessionId, agent }) }
             }
             if (typeof handler !== 'function') return { reason: 'no_such_action' }
@@ -108,11 +120,11 @@ export function makeAct({ sessions = sessionService, desks = DESK_DEFS, sealing 
             const out = await opened.desk.applyEdit(opened.state, edit && typeof edit === 'object' ? edit : {}, { user })
             if (!out || out.reason) return { reason: out?.reason ?? 'invalid_edit' }
             // The markers survive a hand edit — unless the edit replaces the work outright (`dropMarkers`: a new plan
-            // is not an edit of the one being edited). Then the turns about the old work are set aside too (phase 8e):
-            // they must not seal onto the new plan.
-            if (out.dropMarkers === true) await sealing.putAside({ userId: user._id, sessionId, agent })
+            // is not an edit of the one being edited). Then the turns about the old work are set aside too (phase 8e),
+            // AFTER the write they belong to: a write that failed leaves the old work on the table with its turns.
             const next = out.dropMarkers === true ? out.state : keepMarkers(out.state, opened.state)
             const written = await sessions.setAgentState({ sessionId, userId: user._id, agent, state: next })
+            if (out.dropMarkers === true) await sealing.putAside({ userId: user._id, sessionId, agent })
             return { ok: true, rev: written?.rev ?? null }
         })
     }
