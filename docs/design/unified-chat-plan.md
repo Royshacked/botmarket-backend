@@ -925,7 +925,7 @@ doorway and bus listener, and the existing overlay patterns. Facts that shaped i
 - **8c — Atlas — DONE 2026-10-17, see §10.4:** `PortfolioSurface` — thesis card, build summary, limits notes, sleeve/coverage notices, the review
   Accept / Dismiss / Later and Generate / Update bar, `AdoptBookGrid` (adopt reachable again). Delete `PortfolioPanel.jsx`
   (`PortfolioPanel.scss` stays — the shared `portfolio-panel__*` bubble classes; renamed in phase 10).
-- **8d — Argus + Prometheus:** `ScannerSurface` — list summary, PrometheusStep (the read through K3), lens toggle, angle
+- **8d — Argus + Prometheus — DONE 2026-10-17, see §10.5:** `ScannerSurface` — list summary, PrometheusStep (the read through K3), lens toggle, angle
   chips, Generate / Update (the research offer and the pick bar are the chain's decision cards now); `AnalystSurface` —
   CoverageDraft, Initiate / Update. Delete both panels.
 - **8e — doorways + teardown:** one `editEntity(kind, id, opts)` (→ `POST /:id/edit`, a 409 busy asks then repeats with
@@ -1121,6 +1121,57 @@ status list, a stale comment, `setPortfolioChatRestore`, the drive's cleanup.
 input's Clear); Atlas's thread resume (the threads drawer, RESUME_BUILD for a book not yet saved) — `resumeRefs` had only
 the panel to set them; a save no longer ends the pipeline (`finishPipeline`), as Mentor; dead code —
 `tradeIdeasService.createBatch` has no caller.
+
+### 10.5 Phase 8d — as built (2026-10-17)
+
+Commits: FE `1a93a4e` · BE drive `5bcc44a` · bundle `c9b2bf9` (8d) · BE `a0047b7` + FE `b36ca90` (bug hunt) · the CR
+commits after them. Driven: `scripts/drive-scanner-analyst-surface.mjs` 12/12 (seeded state, no model call, no
+Prometheus read — it asserts none is asked for): Argus's list on the floor, the lens as a hand edit, Generate saving the
+scan, the scan reopened and Updated, a radar cut's verdict drawn, Prometheus's draft whole with its save offered. The
+Mentor (13/13) and Atlas (14/14) drives re-run. Every drive now fails its process on a failed check. Not pushed.
+
+Running several drives back to back trips the dev server's in-memory rate limits (auth, then the API — 429s that read as
+a page that never loads, or an Update that "saved the old list"): restart the dev backend between runs (touch a file).
+
+**Built (frontend):**
+- `cmps/ScannerSurface` — the list in progress (each name a button to its chart, the read's caveat beside it), the lens
+  (a hand edit), the angle chips (one turn, reset once sent), the Prometheus read of a radar cut — run by itself on its
+  own route, handed back as a hand edit of THAT list (a stale hand-back retried on the revision the refusal named; a
+  list that came and went read again; an answer for a closed surface or another session discarded) with Save without
+  the read (it discards the answer only once the save went through) and Try again — and Generate / Update / Later. The
+  single-pick hand-off and the research offer are the chain's.
+- `cmps/AnalystSurface` — the standing draft (`CoverageDraft`, uncapped in the pane) and Initiate / Update (admins) /
+  Later; a refusal says its detail; a turn that ended without a draft to save says so; a draft about another company
+  mid-revision is said, and saved as its own coverage.
+- `useSurfacePress` gains `edit` (a hand edit that says a refusal); `SidePane/SurfaceNote` and the `.desk-surface` shell
+  (SidePane.scss) are the four surfaces' one note line, lead and frame.
+- MainPage: a saved scan and a thesis reopen IN THE SESSION (`editEntity`; the coverage pencil on its revise turn); new
+  work onto Argus's table — the radar cut (its board on the turn), a brief from a route or a card — goes through ONE
+  step, `onArgusTable`: Argus holding a list, a saved list being edited or a name for another desk → the user is asked;
+  then a fresh table, then the turn. A research candidate is a turn to Prometheus with its seed. Coverage joins the
+  commit change events (COVERAGE_CHANGED). Deleted with the panels' last callers: the save / update / research /
+  sleeve-hand-back handlers, the conveyor (`emitArtifact`, `_applyHop`, `enterPipelineAt`), the single-pick hand-off,
+  `finishPipeline`, the remount keys, the inbox bridges, the auto/manual toggle, and the modules nothing ran any more —
+  `deskReset`, `scanOrigin`, `hop` (with their tests, `deskSteps` and `handoffDestination`).
+
+**Built (backend):** Argus's `{ fresh: true, profile? }` hand edit (a clean table, markers dropped, the lens kept or
+set). CR: the chain's "Research the top N" SAVES the list first through Argus's own action and seals its conversation
+onto it, then runs the research (Roy 2026-10-17, decision (a) — the old one press; a list that does not save is not
+researched); Prometheus's draft about another company than the thesis being revised is new work — Initiate takes it,
+Later keeps it (`elsewhere`, analyst.actions).
+
+Phase 8d bug hunt (2026-10-17, Roy: 1 and 2 applied — `a0047b7`, `b36ca90`): a radar cut landing on Argus's work (now a
+fresh table, asked first) · a re-emitted list not read again.
+
+Phase 8d CR (2026-10-17, two reviewers, all applied with decision (a)): a brief from a route landing on a saved list
+being edited (onArgusTable) · the stale hand-back retried on the same stale revision · the coverage book not reloaded ·
+the other-company draft a dead end · a refused "save without the read" stranding the read · the original list re-emitted
+after a narrowing read · a read handed to a closed surface · Later counted as a save · ticker → chart · a refused lens
+silent, the angles never reset, "working" over a stopped desk, "coverage on null" · SurfaceNote and the shared shell ·
+the dead code above · the drive's exit code, its no-read assertion and its cleanup.
+
+**Carried to 8e** (Roy 2026-10-17): an old hand-off queue researches only its first name (only the leftover bridge can
+still send one); stepping back along the pipeline crumb to a surfaced desk bounces to Axl (the crumb goes in 8e).
 
 ## 11. Phase 9 — Migration (`scripts/migrate-unified-chat.mjs`)
 

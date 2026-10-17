@@ -323,7 +323,7 @@ services/
                               plan, 8b) clears editing / chainId instead of keeping them
       actions/                <agent>.actions.js — each desk's commits from its agentState (never the client's
                               copy) through the shared commit service, and its hand edits (Mentor's draft, Argus's
-                              lens / read, Atlas's adopt mode — staged under the lock); the contract (verbs generate / update /
+                              lens / read / fresh table, Atlas's adopt mode — staged under the lock); the contract (verbs generate / update /
                               later + the desk's own, results { <kind>: doc }) is in mentor.actions.js
       markers.js · scannerMode.js   keepMarkers (editing / chainId survive a fold, an edit, Atlas's onRouted) ·
                               Argus's mode and radar-board validation (shared by the desk and its actions)
@@ -342,7 +342,8 @@ services/
                           coverage_set) · contracts.js (receiverOf + each receiver's opening brief) · rules.js (the
                           declared tables: what a reply emits, what makes a turn the user's call) · runner.js (after
                           every turn: decision → stop, emit → hand-off + the receiver's turn queued; busy rule, step
-                          cap, pause, boot sweep, sleeveSettled). Wired with the turns in desks/turns.js
+                          cap, pause, boot sweep, sleeveSettled; "research the top N" saves Argus's list through its
+                          own action before the run, 8d). Wired with the turns in desks/turns.js
   agents/                 the 6 LLM desks (analyst · axl · mentor · portfolio · scanner ·
                           strategy). A seventh is archived and lives under archive/, imported by
                           nothing — see archive/README.md, and `npm run check:archive`, which
