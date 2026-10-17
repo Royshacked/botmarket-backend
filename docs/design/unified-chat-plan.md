@@ -568,6 +568,74 @@ hop and Mentor's chain turn were real; Argus choosing to pick was not exercised 
   `MARKET_BRIEF_OPEN`, `OPEN_COVERAGE`, `SETUP_CONFIRM_OPEN`) become "floor → agent, load the entity's
   context" through one client call.
 
+### 8.1 Phase 6 — detailed plan (2026-10-17, for Roy's approval)
+
+Read before writing it: postCard → postBotCard, every producer and its card type / botId / scope, supersede,
+resolve (by message id, by subject, house twins), the frontend card actions, card volume. Facts that shaped it:
+- **No card fires often.** Talos latches its gates and re-fires a manage verdict only on higher urgency; the
+  market brief offer is at most one per user per weekday; supersede keeps ONE live ask per type + subject.
+  Mirroring every card into the chat does not flood it.
+- **Every post is one row for one user.** House cards (coverage events, Pythia's industry views, house
+  coverage refreshes) are a caller loop over the admins — one row per admin; the brief offer loops over all.
+- **A card's state changes without the user**: supersede, and house-twin settlement (one admin's "done"
+  settles the other's). Resolution is addressed by the `chat_messages` id (+ conversation) — the
+  `message_resolved` frame carries exactly that.
+- **Themis still calls `postBotCard` directly**, bypassing `postCard`. `resolvePortfolioReviewCard` sends no
+  live `message_resolved` at all.
+- **botIds**: axl, portfolio, mentor, analyst, strategy map 1:1 to desks; `kairos` posts the archived calls'
+  cards (branding kept — CLAUDE.md); Talos posts as mentor, Themis as portfolio, the coverage monitor as
+  analyst. Pythia's cards belong in Pythia's own session scope, not the main chat.
+- Card actions fall in four groups: **open a dialog** (order confirm, setup confirm, the queued list, the
+  setup pop-out) — stays a dialog; **edit an entity** (setup invalidation → Mentor, coverage event / refresh →
+  Prometheus, portfolio review → Atlas) — becomes a session edit (openForEdit + floor); **an Axl turn** (the
+  market brief); **an inline form** (manual entry/exit) — stays.
+
+**Three decisions this plan asks for (my recommendation first):**
+
+- **H1 — The timeline row REFERENCES the card; it is not a second copy.** One `card` message per card:
+  `{ agent, kind: 'card', content: the card's text, ref: { msgId, conversationId, type, subject, action } }`.
+  Its live state (pending / done / dismissed / superseded) is read from `chat_messages` and moved by the same
+  `message_resolved` frame the social chat already receives — keyed by `msgId`. The card store stays the one
+  record; SocialChat keeps its copy (decision 15). *Alternative:* copy the status into the timeline row and
+  keep it in step on every supersede, resolve and twin settlement — three places to forget.
+- **H2 — Every desk card mirrors, the daily brief offer included.** The volume above is low by construction;
+  a card that does not mirror is an alert the chat does not show. DMs between users (`setup_shared`, a human
+  sender) stay in SocialChat only — they are not desk cards. *Alternative:* skip the broadcast brief offer.
+- **H3 — A card lands only in a session that ALREADY EXISTS, in its agent's scope.** No session is created
+  for a card (a user who never opened the chat gets the card in SocialChat, as today). Pythia's industry-view
+  cards land in the admin's `strategy` session, if one exists; everything else in `main`.
+
+**Code (backend)**
+
+- `api/chat/chat.service.js` — `onCardPosted(fn)`: a hook `postBotCard` calls after the row is written
+  (registered, not imported — the chat layer never depends on sessions, the pattern `onSleeveSettled`
+  set). The hook gets the stored message and its botId; a throw in it never fails the post.
+- `services/sessionCards.js` — the registered hook (one module):
+  - `agentOfBot(botId)`: axl / portfolio / mentor / analyst / strategy → themselves; `kairos` → axl (the
+    archived calls' cards still read in the chat; their desk is gone).
+  - the scope from the registry; `sessionService.findActive({ userId, scope })` — a new store read that
+    never creates; no active session → nothing appended.
+  - `cardAction(message)` — the action the timeline card offers, from the card type: `{ type: 'dialog',
+    event, ids }` (the client's existing doorway), `{ type: 'edit', kind, id }` (→ `POST /:id/edit`),
+    `{ type: 'turn', agent: 'axl', text }` (the brief), `{ type: 'form' }` (manual entry/exit). ONE table, so
+    the side pane and the timeline never decide it twice.
+  - appends `{ agent, role: 'assistant', kind: 'card', content, ref: { msgId, conversationId, type, subject, action } }`
+    — the append pushes `session_message` like every other row.
+- **Resolve stays one path**: `message_resolved` already reaches every socket the user has; the timeline client
+  matches it on `ref.msgId`. Plus: `resolvePortfolioReviewCard` emits `message_resolved` (the gap found).
+- **Themis moves onto `postCard`** (one transport, no exceptions — the plan's phase 6 bullet).
+- **A card whose sleeve already settled into the session** (phase 5d) is never posted, so it never mirrors twice.
+
+**Not in phase 6:** rendering the card in the timeline and wiring its action (phase 7–8); any change to how
+cards are built, superseded or resolved.
+
+**Tests:** the hook is called once per post and a throw in it never fails the post; `agentOfBot` for every
+botId in use (incl. `kairos` → axl, unknown → axl); scope routing (Pythia → `strategy`, the rest → `main`);
+no active session → nothing appended, and no session is created; the row carries `msgId` / `conversationId` /
+`subject` / `action`; `cardAction` for every card type in use (dialog / edit / turn / form / none); house cards
+mirror per admin into each admin's own session; Themis posts through `postCard`;
+`resolvePortfolioReviewCard` emits `message_resolved`. Existing card suites unchanged.
+
 ## 9. Phase 7 — Frontend: session client + timeline
 
 - **`services/session/session.service.remote.js`** replaces `threads.service.remote.js`.
