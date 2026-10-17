@@ -9,6 +9,7 @@ import { hydrateCards, cardView } from '../../services/sessionCards.js'
 import { replay } from '../../services/sessionChannel.js'
 import { briefTurn } from '../../services/desks/axl.desk.js'
 import { splitShow, validateShow } from '../../services/routing.util.js'
+import { buildSurfaceSection } from '../../services/agents/axl.agent.service.js'
 
 // Unified-chat phase 7a (J2–J4): a reply keeps what it offered; card rows are drawn from the card; the
 // server acts on what Axl's route carries — the opening, an edit, the brief; the order ticket is a show.
@@ -181,4 +182,22 @@ test('the order ticket is a show: with or without a symbol, junk symbols dropped
     assert.deepEqual(validateShow({ kind: 'ticket', ref: null }), { kind: 'ticket', ref: null })
     assert.deepEqual(validateShow({ kind: 'ticket', ref: 'buy me something nice' }), { kind: 'ticket', ref: null })
     assert.deepEqual(splitShow('setup s1'), { kind: 'setup', ref: 's1' }, 'setups unchanged')
+})
+
+// ─── Phase 7 CR ───────────────────────────────────────────────────────────────
+
+test('a refused edit says it is not theirs to change — not that it was not found', async () => {
+    const r = rig({ find: async () => ({ ok: false, reason: 'forbidden' }) })
+    const s = await r.sessions.getActive({ userId: 'u1' })
+    await r.runner.afterTurn({ user, sessionId: s.sessionId, agent: 'axl', origin: 'user', out: { payload: { edit: { kind: 'coverage', ref: 'NVDA', desk: 'research' } } } })
+    const [line] = await rows(r.sessions, s)
+    assert.match(line.content, /not yours to change/)
+    assert.equal(r.opened.length, 0)
+})
+
+test('Axl in the social chat is told hand-offs do not happen there; the chat needs no line', () => {
+    assert.equal(buildSurfaceSection('chat'), '')
+    assert.equal(buildSurfaceSection(undefined), '')
+    assert.match(buildSurfaceSection('social'), /SOCIAL CHAT/)
+    assert.match(buildSurfaceSection('social'), /continue in the main chat/)
 })

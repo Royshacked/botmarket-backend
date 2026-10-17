@@ -144,9 +144,11 @@ export function makeChainRunner({
     async function reopen({ user, sessionId, edit }) {
         const found = await findEdit({ kind: edit.kind, ref: edit.ref, user })
         if (!found.ok) {
-            await sessions.append({ sessionId, userId: user._id, message: {
-                agent: 'axl', role: 'assistant', content: 'I could not find that one to open — open it from its list and I will pick it up.',
-            } })
+            // Not theirs to revise (house coverage is an admin's) is a different answer from not found.
+            const content = found.reason === 'forbidden'
+                ? 'That one is not yours to change here — it is maintained by the house. I can show you what it says.'
+                : 'I could not find that one to open — open it from its list and I will pick it up.'
+            await sessions.append({ sessionId, userId: user._id, message: { agent: 'axl', role: 'assistant', content } })
             return
         }
         const out = await sealing.openForEdit({ userId: user._id, sessionId, kind: edit.kind, entity: found.doc })

@@ -121,6 +121,16 @@ export function buildRoleSection(isAdmin) {
     ].join(' ')
 }
 
+/**
+ * Where this turn is answered (unified-chat plan phase 7 CR). The chat is the default and needs no line —
+ * a route there lands the desk right below. The SOCIAL CHAT drops every hand-off tag (it is a DM, not the
+ * session), so there Axl must not promise one. Pure; exported for tests.
+ */
+export function buildSurfaceSection(surface) {
+    if (surface !== 'social') return ''
+    return 'SURFACE: the SOCIAL CHAT (a direct message, not the main chat). Nothing can be handed to a desk from here — no <route>, <edit> or <show> takes effect. Answer what you can; when the user wants a desk, say plainly to continue in the main chat, where that desk will pick it up. Never say a desk "will take it from here".'
+}
+
 // The grammar — `<route>desk SYMBOL</route>`, `<edit>kind id</edit>`, `<open>…</open>` — and its
 // parsers were Axl's own until 2026-09-18, when every desk learned to hand the user on (a user at
 // Argus saying "send NVDA to Prometheus"). They live in routing.util now, shared; the reasoning that
@@ -128,7 +138,7 @@ export function buildRoleSection(isAdmin) {
 // word, why the opening is a sentence and not fields — moved with them. Axl keeps the richer
 // routing SECTION of its spine (reception's whole job is deciding where); the mechanism is common.
 
-async function chatStream({ messages = [], audience = null, isAdmin = false, model: requestedModel, reasoningEffort, userId, onToken, onToolStart, onReasoning, onChart, signal,
+async function chatStream({ messages = [], audience = null, isAdmin = false, surface = 'chat', model: requestedModel, reasoningEffort, userId, onToken, onToolStart, onReasoning, onChart, signal,
     _run = runAgentStream,   // the shared contract-test seam — see runAgentStream in agentIO.js
     _tradingContextHandlers = makeTradingContextHandlers,
     _userDataHandlers = makeUserDataHandlers,
@@ -149,11 +159,14 @@ async function chatStream({ messages = [], audience = null, isAdmin = false, mod
     const today = new Date().toISOString().slice(0, 10)
     const audienceBlock = buildAudienceSection(audience)
     const roleBlock     = buildRoleSection(isAdmin === true)
+    const surfaceBlock  = buildSurfaceSection(surface)
     const systemPrompt = [
         cachedBlock(_systemPrompt() + LANGUAGE_RULE + VENUE_RULE + BREVITY_RULE),
         { type: 'text', text: `CURRENT DATE: ${today}. Resolve relative timeframes (today, this week, this month) against this date.
 
-${roleBlock}${audienceBlock ? `
+${roleBlock}${surfaceBlock ? `
+
+${surfaceBlock}` : ''}${audienceBlock ? `
 
 ${audienceBlock}` : ''}` },
     ]

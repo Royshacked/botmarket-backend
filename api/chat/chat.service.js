@@ -453,6 +453,8 @@ export async function triggerAxlReply(userId, conversationId, aiPref = {}) {
             // The SAME Axl answers here and in the hub, so it has to read the room the same way in
             // both. Without this, someone gets plain language in one surface and jargon in the other.
             audience:        await getExperienceLevel(userId),
+            // A DM, not the session: hand-off tags are dropped here, so Axl must not promise one.
+            surface:         'social',
             model:           aiPref?.model,
             userId,
         })

@@ -11,6 +11,7 @@
 // `ui-smoke` user and starts it on a FRESH session (the old one is archived, which is also what the
 // history step reads). The card is posted from this process, so its live push goes nowhere — the page is
 // reloaded to see it, which is the reconnect replay path anyway.
+/* global document, window -- page.evaluate bodies run in the browser */
 import dns from 'dns'
 import 'dotenv/config'
 import { chromium } from 'playwright'
