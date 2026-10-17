@@ -6,7 +6,7 @@ import { analystAgentService } from '../agents/analyst.agent.service.js'
 import { coverageService } from '../../api/analyst/coverage.service.js'
 import { sanitizeScanSeed } from '../scanSeed.util.js'
 import { logger } from '../logger.service.js'
-import { analystActions, analystReason } from './actions/analyst.actions.js'
+import { analystActions, ANALYST_REASONS } from './actions/analyst.actions.js'
 
 const LOG = '[analyst:desk]'
 
@@ -80,7 +80,7 @@ export const analystDesk = {
     }),
     // The session's commits (plan phase 8, K2) — services/desks/act.js runs them. No direct edits (K3).
     actions: analystActions,
-    reasons: analystReason,
+    reasons: ANALYST_REASONS,
     stateFields: ['coverage'],
     done: (result) => ({ reply: result.reply, phase: result.phase ?? null, ...(result.coverage ? { coverage: result.coverage } : {}) }),
 }

@@ -425,7 +425,8 @@ export function claimsFromDraft(draft, { lensStated = true } = {}) {
 
 // ─── Coming back from the client ──────────────────────────────────────────────
 
-const MAX_NAMES      = 10
+// The most names one build may hold — and so the most setups one Generate-all may save (setupService.generateSetups).
+export const MAX_NAMES = 10
 const MAX_LIST       = 12
 const MAX_STR        = 64
 const MAX_REFUSALS   = 6

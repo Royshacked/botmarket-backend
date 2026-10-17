@@ -3,7 +3,7 @@
 // One definition for the HTTP desk stream and the session turn (unified-chat plan phase 4).
 
 import { strategyAgentService } from '../agents/strategy.agent.service.js'
-import { strategyActions, strategyReason } from './actions/strategy.actions.js'
+import { strategyActions, STRATEGY_REASONS } from './actions/strategy.actions.js'
 
 export const strategyDesk = {
     agent: 'strategy',
@@ -20,7 +20,7 @@ export const strategyDesk = {
     }),
     // The session's commit (plan phase 8, K2) — services/desks/act.js runs it. No direct edits (K3).
     actions: strategyActions,
-    reasons: strategyReason,
+    reasons: STRATEGY_REASONS,
     stateFields: ['views', 'assessments'],
     run: ({ state, emit, common }) => strategyAgentService.chatStream({
         ...common,

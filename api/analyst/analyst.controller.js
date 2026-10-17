@@ -30,8 +30,6 @@ export const streamAnalyst = makeDeskStream(analystDesk)
 
 // ─── Coverage CRUD ────────────────────────────────────────────────────────────
 
-// The coverage refusal table lives in coverageReasons.js — shared with Prometheus's session actions.
-
 export const listCoverage = _handle('listCoverage', async (req, res) => {
     res.send(await coverageService.getCoverage({
         sector: req.query?.sector ?? null,

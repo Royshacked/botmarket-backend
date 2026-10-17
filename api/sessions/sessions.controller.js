@@ -106,38 +106,48 @@ export const continueSession = handle('continueSession', async (req, res) => {
     res.json(out)
 })
 
-// A desk's commit (plan phase 8, K2): the draft comes from the session, the meaning from the desk. A refusal
-// answers in the desk's own words when it has them (Mentor → the setup routes' table).
+// A desk's commit (plan phase 8, K2): the draft comes from the session, the meaning from the desk. The session's own
+// refusals come first — they mean the same on every desk — then the desk's words (Mentor → the setup routes' table).
 const ACT_REASONS = {
     no_such_action:    [400, 'That is not something this desk does'],
     nothing_to_commit: [409, 'There is nothing to save yet'],
     nothing_to_edit:   [409, 'There is nothing to change yet'],
+    nothing_saved:     [409, 'Nothing could be saved — see failed'],
+    not_new:           [409, 'This is already saved — update it instead'],
+    too_many:          [400, 'Too many to save in one press'],
     invalid_edit:      [400, 'That change is not valid'],
+    not_editable:      [400, 'Nothing here is edited by hand'],
+    // Pressed on a state a turn has since replaced (plan phase 8a CR D2) — the client redraws, then asks again.
+    stale_state:       [409, 'That changed while you were looking — check it and try again'],
     // A desk action that answered nothing is the server's bug, not the client's request.
     action_failed:     [500, 'That did not go through'],
-    not_editable:      [400, 'Nothing here is edited by hand'],
 }
-const reasonsFor = (agent) => {
+
+/** A reason's [status, message] for this agent's presses: the session's table, then the desk's (a table or a lookup). */
+export function _reasonsFor(agent) {
     const own = DESK_DEFS[agent]?.reasons
-    return (reason) => (typeof own === 'function' ? own(reason) : null) ?? ACT_REASONS[reason] ?? null
+    return (reason) => ACT_REASONS[reason]
+        ?? (typeof own === 'function' ? own(reason) : own?.[reason])
+        ?? null
 }
 
 export const actInSession = handle('actInSession', async (req, res) => {
-    const { agent, action, args } = req.body ?? {}
+    const { agent, action, args, rev } = req.body ?? {}
     if (!AGENT_KEYS.includes(agent)) throw httpError(400, 'invalid agent')
-    const out = await deskAct.act({ user: req.user, sessionId: req.params.id, agent, action, args })
-    if (out.reason) return sendReason(res, out.reason, { overrides: reasonsFor(agent), fallback: 400, extra: out.extra ?? null })
-    // Saved, but the desk's state could not be written: the client refetches rather than trusting what it holds.
-    res.json(out.stateWritten === false ? { ...out.result, stateWritten: false } : out.result)
+    const out = await deskAct.act({ user: req.user, sessionId: req.params.id, agent, action, args, rev })
+    if (out.reason) return sendReason(res, out.reason, { overrides: _reasonsFor(agent), fallback: 400, extra: out.extra ?? null })
+    // `rev` is what the next press names. Saved but the state not written (`stateWritten: false`): the client refetches
+    // rather than trusting what it holds.
+    res.json({ ...out.result, rev: out.rev, ...(out.stateWritten === false ? { stateWritten: false } : {}) })
 })
 
 // A direct edit (plan phase 8, K3): validated by the desk, written to its state, pushed on the channel.
 export const editSessionState = handle('editSessionState', async (req, res) => {
-    const { agent, edit } = req.body ?? {}
+    const { agent, edit, rev } = req.body ?? {}
     if (!AGENT_KEYS.includes(agent)) throw httpError(400, 'invalid agent')
-    const out = await deskAct.editState({ user: req.user, sessionId: req.params.id, agent, edit })
-    if (out.reason) return sendReason(res, out.reason, { overrides: reasonsFor(agent), fallback: 400 })
-    res.json({ ok: true })
+    const out = await deskAct.editState({ user: req.user, sessionId: req.params.id, agent, edit, rev })
+    if (out.reason) return sendReason(res, out.reason, { overrides: _reasonsFor(agent), fallback: 400, extra: out.extra ?? null })
+    res.json({ ok: true, rev: out.rev })
 })
 
 export const getSessionMessages = handle('getSessionMessages', async (req, res) => {

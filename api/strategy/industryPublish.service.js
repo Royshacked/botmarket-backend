@@ -11,12 +11,6 @@ import { logger } from '../../services/logger.service.js'
 
 const LOG = '[industryPublish]'
 
-// What a view refusal means — the route's and Pythia's session action's.
-export const VIEW_REASONS = {
-    bad_draft: [422, 'The view does not hold up — see detail'],
-    unknown_industry: [404, 'Unknown GICS sub-industry'],
-}
-
 export function makeIndustryPublish({ views = defaultViews, readSub = defaultReadSub, notify = defaultNotify } = {}) {
     /** @returns {Promise<{ ok:false, reason:string, detail?:string } | { ok:true, doc:object, sub:object }>} */
     return async function publishIndustry(code, draft) {

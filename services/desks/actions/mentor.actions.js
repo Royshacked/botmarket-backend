@@ -1,78 +1,87 @@
 // Mentor's commits and direct edits, run against the SESSION (unified-chat plan phase 8, K2/K3).
 //
-// The draft is read from Mentor's agentState — never from the client — and handed to the SAME service the setup
-// routes use (setupService.generateSetup / generateSetups / patchSetup). What each press means is Mentor's
+// The draft is read from Mentor's agentState — never from the client — and handed to the SAME services the setup
+// routes use (setupCommit.commitSetup / armSetup, setupService.generateSetups). What each press means is Mentor's
 // judgement and lives here; the route and the lock are shared (services/desks/act.js).
 //
-// An action answers `{ reason }` (refused) or `{ result, seal?, after? }`:
-//   result  what the client shows (the saved setup, the batch outcome)
-//   seal    the entities this commit produced — Mentor's turns move onto them (seal.js), in-line, under the lock
-//   after   Mentor's state once the commit is done (undefined: leave it; null: clear it). After a Generate the
-//           state is `{ generated }` — the setup exists but nothing watches it until it is armed, and that
-//           distinction is the whole reason the surface stops on "Arm it / Leave it waiting".
+// THE ACTION CONTRACT — the same on every desk (services/desks/actions/*, phase 8a CR D1):
+//   verbs      generate (a new entity) · update (the one being edited) · later (stop editing, nothing saved),
+//              plus the desk's own (Mentor: generateAll, arm, leave)
+//   answer     `{ reason, extra?, after? }` refused, or `{ result, seal?, after? }` done:
+//     result   `{ <kind>: doc, ...extras }` — what the client shows; never a service's `ok`
+//     seal     the entities this commit produced — the agent's turns move onto them (seal.js), in-line
+//     after    the agent's state once the commit is done (undefined: leave it; null: clear it)
+//   Everything refused is a refusal (`nothing_saved`, `extra.failed`), never a success with nothing in it.
+//
+// After a Generate Mentor's state is `{ generated }` — the setup exists but nothing watches it until it is armed,
+// and that distinction is the whole reason the surface stops on "Arm it / Leave it waiting".
 
-import { setupService as defaultSetups } from '../../../api/setups/setups.service.js'
-import { resolveCardsFor as defaultResolveCards } from '../../../api/chat/chat.service.js'
-import { parseIdeaAccounts } from '../../../api/_shared/parse.util.js'
+import { setupCommit as defaultCommit } from '../../../api/setups/setupCommit.service.js'
+import { parseCommitArgs, parseIdeaAccounts } from '../../../api/_shared/parse.util.js'
 import { draftVerdict } from '../../setupVerdict.js'
 import { emptyMentorState } from '../../agents/mentor.agent.service.js'
 
-const MAX_BATCH = 10   // the ledger's own cap on names (mentorBuild.util MAX_NAMES)
-
-const commitArgs = (args = {}) => ({
-    accounts:      parseIdeaAccounts(args.accounts),
-    mainAccountId: args.mainAccountId != null ? String(args.mainAccountId) : null,
-})
 const generatedOf = (doc) => ({ id: doc.id, asset: doc.asset ?? null, status: doc.status ?? null })
 const editingId   = (state) => (state?.editing?.kind === 'setup' ? String(state.editing.entityId) : null)
+const chatStateOf = (state) => ({ draft: state?.draft ?? null, coverage: state?.coverage ?? [] })
+const setupName   = (doc) => (doc?.asset ? `${doc.asset} setup` : null)
 
-export function makeMentorActions({ setups = defaultSetups, resolveCards = defaultResolveCards } = {}) {
+export function makeMentorActions({ commit = defaultCommit } = {}) {
     return {
-        /** Save the draft — a new setup, or the one being edited (an update). */
+        /** Save the draft as a new setup — it then waits on Arm. */
         async generate({ user, state, args }) {
             const draft = state?.draft
             if (!draft) return { reason: 'nothing_to_commit' }
-            const { accounts, mainAccountId } = commitArgs(args)
+            if (editingId(state)) return { reason: 'not_new' }
+            const { accounts, mainAccountId } = parseCommitArgs(args)
             if (!accounts.length) return { reason: 'no_venue' }
-            const updateId = editingId(state)
-            const out = await setups.generateSetup(draft, {
-                userId: user._id, accounts, mainAccountId, updateId,
-                chatState: { draft, coverage: state.coverage ?? [] },
-            })
+            const out = await commit.commitSetup(draft, { userId: user._id, accounts, mainAccountId, updateId: null, chatState: chatStateOf(state) })
             if (!out.ok) return { reason: out.reason }
-            // After the write: an update satisfies the cards asking for it (a redraw, an invalidation).
-            if (updateId) await resolveCards({ kind: 'setup', id: updateId }, { outcome: 'completed' })
             return {
                 result: { setup: out.doc },
-                seal:   { kind: 'setup', entityIds: [out.doc.id], name: out.doc.asset ? `${out.doc.asset} setup` : null, onlyIfEditing: !!updateId },
-                // An update is done; a new setup waits on Arm.
-                after:  updateId ? null : { ...emptyMentorState(), generated: generatedOf(out.doc) },
+                seal:   { kind: 'setup', entityIds: [out.doc.id], name: setupName(out.doc) },
+                after:  { ...emptyMentorState(), generated: generatedOf(out.doc) },
+            }
+        },
+
+        /** Save the draft onto the setup being edited, in place — it satisfies the cards asking for it. */
+        async update({ user, state, args }) {
+            const id = editingId(state)
+            if (!id || !state?.draft) return { reason: 'nothing_to_commit' }
+            const { accounts, mainAccountId } = parseCommitArgs(args)
+            if (!accounts.length) return { reason: 'no_venue' }
+            const out = await commit.commitSetup(state.draft, { userId: user._id, accounts, mainAccountId, updateId: id, chatState: chatStateOf(state) })
+            if (!out.ok) return { reason: out.reason }
+            return {
+                result: { setup: out.doc },
+                seal:   { kind: 'setup', entityIds: [out.doc.id], name: setupName(out.doc), onlyIfEditing: true },
+                after:  null,
             }
         },
 
         /** Save every plan of a multi-name build. Partial success is the contract: refused plans stay on the table. */
         async generateAll({ user, state, args }) {
             const byAsset = { ...(state?.drafts ?? {}), ...(state?.draft?.asset ? { [state.draft.asset]: state.draft } : {}) }
-            const all = Object.values(byAsset).slice(0, MAX_BATCH)
+            const all = Object.values(byAsset)
             if (all.length < 2) return { reason: 'nothing_to_commit' }
-            const { accounts, mainAccountId } = commitArgs(args)
+            const { accounts, mainAccountId } = parseCommitArgs(args)
             if (!accounts.length) return { reason: 'no_venue' }
-            const { saved, failed } = await setups.generateSetups(all, {
-                userId: user._id, accounts, mainAccountId, chatState: { draft: state.draft ?? null, coverage: state.coverage ?? [] },
-            })
-            if (!saved.length) return { reason: failed[0]?.reason ?? 'nothing_saved', extra: { failed } }
+            const out = await commit.generateSetups(all, { userId: user._id, accounts, mainAccountId, chatState: chatStateOf(state) })
+            if (out.reason) return { reason: out.reason, extra: { max: out.max ?? null } }
+            const { saved, failed } = out
+            if (!saved.length) return { reason: 'nothing_saved', extra: { failed } }
             const refused = Object.fromEntries(failed.filter(f => f.asset && byAsset[f.asset]).map(f => [f.asset, byAsset[f.asset]]))
             const left    = Object.values(refused)
             return {
-                result: { saved, failed },
+                result: { setups: saved, failed },
                 seal:   { kind: 'setup', entityIds: saved.map(d => d.id) },
                 after:  {
                     ...emptyMentorState(),
                     // What was refused stays, by asset, so the next turn can fix it.
-                    draft:     left[0] ?? null,
+                    draft:        left[0] ?? null,
                     active_asset: left[0]?.asset ?? '',
-                    drafts:    left.length > 1 ? refused : {},
-                    generated: generatedOf(saved[saved.length - 1]),
+                    drafts:       left.length > 1 ? refused : {},
+                    generated:    generatedOf(saved[saved.length - 1]),
                 },
             }
         },
@@ -81,9 +90,8 @@ export function makeMentorActions({ setups = defaultSetups, resolveCards = defau
         async arm({ user, state }) {
             const id = state?.generated?.id
             if (!id) return { reason: 'nothing_to_commit' }
-            const out = await setups.patchSetup(id, { status: 'looking' }, user._id)
+            const out = await commit.armSetup(id, user._id)
             if (!out.ok) return { reason: out.reason }
-            await resolveCards({ kind: 'setup', id }, { outcome: 'completed' })
             return { result: { setup: out.doc }, after: null }
         },
 

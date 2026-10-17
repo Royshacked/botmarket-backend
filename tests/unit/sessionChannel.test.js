@@ -34,7 +34,8 @@ test('every change the store makes is pushed: appends, removals, the floor, an a
     assert.deepEqual(pushed, [
         ['message', 'u1', s.sessionId, 1],
         ['state', 'u1', s.sessionId, { floor: 'mentor' }],
-        ['state', 'u1', s.sessionId, { agent: 'mentor', state: { draft: { asset: 'NVDA' } } }],
+        // With the agent's revision — what the next press names (phase 8a CR D2).
+        ['state', 'u1', s.sessionId, { agent: 'mentor', state: { draft: { asset: 'NVDA' } }, rev: 1 }],
         ['removed', 'u1', s.sessionId, [1]],
         ['state', 'u1', s.sessionId, { archived: true, next: next.sessionId }],
     ])
@@ -76,6 +77,18 @@ test('replay sends every row after the seq, the floor, and a running turn’s te
     assert.deepEqual(body.messages.map(m => m.content), ['b', 'c'])
     assert.equal(body.floor, 'axl')
     assert.deepEqual(body.running, { turnId: 'tu9', agent: 'axl', text: 'thinking…' })
+})
+
+test('replay carries each agent\'s state AND its revision — what a press after a reconnect names', async () => {
+    const { store } = storeWithEvents()
+    const s = await store.getActive({ userId: 'u1' })
+    await store.setAgentState({ sessionId: s.sessionId, userId: 'u1', agent: 'mentor', state: { draft: { asset: 'NVDA' } } })
+    const second = await store.setAgentState({ sessionId: s.sessionId, userId: 'u1', agent: 'mentor', state: { draft: { asset: 'AMD' } } })
+    assert.equal(second.rev, 2, 'every write bumps it')
+    const replies = []
+    await replay({ userId: 'u1', data: { sessionId: s.sessionId }, reply: (e, d) => replies.push([e, d]) }, store)
+    assert.deepEqual(replies[0][1].agentState, { mentor: { draft: { asset: 'AMD' } } })
+    assert.deepEqual(replies[0][1].agentRev, { mentor: 2 })
 })
 
 test('replay of a session that is not yours answers not_found and leaks nothing', async () => {

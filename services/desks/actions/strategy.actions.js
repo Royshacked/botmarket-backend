@@ -2,13 +2,17 @@
 //
 // One conversation can leave several <industry_view> drafts on the table, each published on its own. The draft is
 // read from Pythia's agentState by its industry code — never from the client — and handed to the SAME service the
-// route uses (api/strategy/industryPublish.service.js). The action contract is mentor.actions.js's.
+// route uses (api/strategy/industryPublish.service.js). The action contract is mentor.actions.js's; Pythia's own
+// verb is `publish`, and it has no `later` (a view is never reopened for editing here).
 //
 // THE SEAL WAITS FOR THE LAST DRAFT. The conversation produced all of them, so it moves onto every view it
 // published — once nothing is left to publish. Sealing after the first would clear the state and lose the rest.
+// Views published from a batch the user then walks away from stay unsealed: their conversation stays in the
+// session, which is where the user left it.
 // (Pythia is an admin desk: the session's speaker rule already holds every press here to an admin.)
 
-import { publishIndustry as defaultPublish, VIEW_REASONS } from '../../../api/strategy/industryPublish.service.js'
+import { publishIndustry as defaultPublish } from '../../../api/strategy/industryPublish.service.js'
+import { VIEW_REASONS } from '../../../api/strategy/viewReasons.js'
 
 const _code = (v) => (typeof v === 'string' && v.trim() ? v.trim() : null)
 
@@ -37,4 +41,5 @@ export function makeStrategyActions({ publish = defaultPublish } = {}) {
 
 export const strategyActions = makeStrategyActions()
 
-export const strategyReason = (reason) => VIEW_REASONS[reason] ?? null
+// Pythia's refusals — the view routes' table.
+export { VIEW_REASONS as STRATEGY_REASONS }

@@ -6,7 +6,8 @@ import { logger }                from '../../services/logger.service.js'
 import { makeDeskStream }    from '../_shared/deskStream.util.js'
 import { threadService }          from '../../services/thread.service.js'
 import { adoptBookService }  from './adoptBook.service.js'
-import { portfolioCommit, REBALANCE_REASONS } from './portfolioCommit.service.js'
+import { portfolioCommit }   from './portfolioCommit.service.js'
+import { REBALANCE_REASONS } from './portfolioReasons.js'
 import { sendReason }        from '../_shared/reason.util.js'
 import { makeHandle }        from '../_shared/handle.util.js'
 import { httpError }         from '../../services/httpError.util.js'
@@ -40,8 +41,6 @@ const _adoptErr = {
 // Applying an accepted review. Only the reasons the rebalance itself raises — the per-change
 // refusals (not_found, forbidden, no_position, trim_too_small…) are already the shared vocabulary
 // and ride back in `failed` so the client can name the ones that fell over.
-// The rebalance refusals live with the commit service — shared with Atlas's session actions.
-const _rebalanceErr = REBALANCE_REASONS
 
 /**
  * Every adoption handler has the same three moves: read the request, call the one service function,
@@ -138,12 +137,9 @@ export const streamPortfolio = makeDeskStream(portfolioDesk)
 export const savePortfolioChatState = handle('savePortfolioChatState', async (req, res) => {
     const { portfolioId, messages, mandate, thesis, threadId, portfolioName } = req.body ?? {}
     if (!portfolioId || !Array.isArray(messages)) throw httpError(400, 'Missing portfolioId or messages')
-    const result = await portfolioChatService.saveChatState(portfolioId, messages, req.user._id, mandate ?? null)
+    // The book's document — the mandate and the construction thesis — one service with Atlas's session action.
+    const result = await portfolioCommit.recordConstruction(portfolioId, req.user._id, { messages, mandate, thesis })
     if (!result.ok) return res.status(500).json({ error: 'Failed to save chat state' })
-    // Persist the portfolio thesis captured during construction (portfolioId now exists).
-    if (thesis && typeof thesis === 'object') {
-        await portfolioChatService.setThesis(portfolioId, req.user._id, thesis, 'construction').catch(() => {})
-    }
     // Link the construction draft thread to the now-created portfolio: stamps subjectId,
     // promotes it to 'linked' and clears its TTL so the conversation lives with the book.
     if (threadId) {
@@ -227,7 +223,7 @@ export const applyPortfolioRebalance = handle('applyPortfolioRebalance', async (
     // in `extra` so the client can still say WHICH changes fell over.
     if (!result.ok) {
         return sendReason(res, result.reason, {
-            overrides: _rebalanceErr,
+            overrides: REBALANCE_REASONS,
             fallbackMessage: 'Could not apply the changes',
             extra: { results: result.results ?? null, failed: result.failed ?? null },
         })

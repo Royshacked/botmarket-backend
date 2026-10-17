@@ -215,18 +215,29 @@ export function makeSessionService({ getDb = _defaultGetDb, events = silentEvent
         return r.matchedCount ? { ok: true } : { reason: 'not_found' }
     }
 
-    /** Replace one agent's working state (its draft, its scan settings, its half-agreed mandate). */
+    /**
+     * Replace one agent's working state (its draft, its scan settings, its half-agreed mandate).
+     *
+     * Every write bumps the agent's REVISION (`agentRev[agent]`, atomic $inc). A press or a hand edit names the
+     * revision it was made on, and one made on a state a turn has since replaced is refused (`stale_state` —
+     * services/desks/act.js, plan phase 8a CR D2): Generate pressed on draft v1 must not save v2.
+     */
     async function setAgentState({ sessionId, userId, agent, state }) {
         if (!isAgent(agent)) return { reason: 'invalid_agent' }
         const db = await getDb()
-        const r  = await db.collection(SESSIONS).updateOne(
+        const value = state && typeof state === 'object' ? state : null
+        const res = await db.collection(SESSIONS).findOneAndUpdate(
             { sessionId: String(sessionId), userId: String(userId) },
-            { $set: { [`agentState.${agent}`]: state && typeof state === 'object' ? state : null, updatedAt: Date.now() } },
+            { $set: { [`agentState.${agent}`]: value, updatedAt: Date.now() }, $inc: { [`agentRev.${agent}`]: 1 } },
+            { returnDocument: 'after', projection: { agentRev: 1 } },
         )
-        if (!r.matchedCount) return { reason: 'not_found' }
+        // The driver answers the document (v6) or { value } (v5); the memDb double answers the document.
+        const doc = res?.value ?? res
+        if (!doc) return { reason: 'not_found' }
+        const rev = doc.agentRev?.[agent] ?? 0
         // The side pane draws an agent's surface from this — every open screen redraws together.
-        events.state(String(userId), String(sessionId), { agent, state: state && typeof state === 'object' ? state : null })
-        return { ok: true }
+        events.state(String(userId), String(sessionId), { agent, state: value, rev })
+        return { ok: true, rev }
     }
 
     /**

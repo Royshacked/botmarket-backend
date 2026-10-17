@@ -10,23 +10,24 @@
 // the book, and it is fed back as the draft-so-far), so a turn without a <coverage> block cannot clear it — it
 // withdraws only the right to save it (`standing`, analystNextState; agentUtils.buildStandingProposalRule).
 
-import { coverageCommit as defaultCommit } from '../../../api/analyst/coverageCommit.service.js'
+import { coverageCommit as defaultCommit, REMODEL } from '../../../api/analyst/coverageCommit.service.js'
 import { COVERAGE_REASONS } from '../../../api/analyst/coverageReasons.js'
 
 const _sym = (v) => String(v ?? '').trim().toUpperCase()
 const editingId = (state) => (state?.editing?.kind === 'coverage' ? String(state.editing.entityId) : null)
 const proposal  = (state) => (state?.standing === true && state?.draft && typeof state.draft === 'object' ? state.draft : null)
+const refusal   = (out) => ({ reason: out.reason, ...(out.detail ? { extra: { detail: out.detail } } : {}) })
 
 export function makeAnalystActions({ commit = defaultCommit } = {}) {
     return {
         /** Initiate coverage on the draft's name — revised instead when the name is already covered. */
-        async initiate({ user, state }) {
+        async generate({ user, state }) {
             if (user?.role !== 'admin') return { reason: 'forbidden' }
             const draft = proposal(state)
             if (!draft) return { reason: 'nothing_to_commit' }
-            if (editingId(state)) return { reason: 'not_new_coverage' }
+            if (editingId(state)) return { reason: 'not_new' }
             const out = await commit.initiateOrRevise(draft)
-            if (!out.ok) return { reason: out.reason, ...(out.detail ? { extra: { detail: out.detail } } : {}) }
+            if (!out.ok) return refusal(out)
             return {
                 result: { coverage: out.doc, revised: out.revised },
                 seal:   { kind: 'coverage', entityIds: [out.doc.id], name: out.doc.symbol ?? null },
@@ -42,8 +43,8 @@ export function makeAnalystActions({ commit = defaultCommit } = {}) {
             if (!id || !draft) return { reason: 'nothing_to_commit' }
             // Editing AAPL, Prometheus drafted MSFT: saving it would overwrite AAPL's thesis with another company's.
             if (state.editingSymbol && _sym(draft.symbol) !== _sym(state.editingSymbol)) return { reason: 'wrong_symbol' }
-            const out = await commit.revise(id, { ...draft, ...commit.REMODEL })
-            if (!out.ok) return { reason: out.reason, ...(out.detail ? { extra: { detail: out.detail } } : {}) }
+            const out = await commit.revise(id, { ...draft, ...REMODEL })
+            if (!out.ok) return refusal(out)
             return {
                 result: { coverage: out.doc, revised: true },
                 seal:   { kind: 'coverage', entityIds: [id], name: out.doc?.symbol ?? null, onlyIfEditing: true },
@@ -62,9 +63,7 @@ export function makeAnalystActions({ commit = defaultCommit } = {}) {
 export const analystActions = makeAnalystActions()
 
 // Prometheus's refusals, in its own words — the coverage routes' table, and the session's own.
-const ANALYST_REASONS = {
+export const ANALYST_REASONS = {
     ...COVERAGE_REASONS,
-    not_new_coverage: [409, 'This thesis is being revised — update it instead'],
-    wrong_symbol:     [409, 'The draft is about another company than the thesis being revised'],
+    wrong_symbol: [409, 'The draft is about another company than the thesis being revised'],
 }
-export const analystReason = (reason) => ANALYST_REASONS[reason] ?? null

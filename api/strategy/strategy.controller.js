@@ -8,7 +8,8 @@
 import { sealing } from '../../services/desks/seal.js'
 import { strategyDesk }         from '../../services/desks/strategy.desk.js'
 import { industryViewService }  from './industryView.service.js'
-import { publishIndustry as publishIndustryView, VIEW_REASONS } from './industryPublish.service.js'
+import { publishIndustry as publishIndustryView } from './industryPublish.service.js'
+import { VIEW_REASONS } from './viewReasons.js'
 import { readSubIndustry, listSubIndustries, moneyFacts, largestCompanies, readFlowNodes, flowFacts } from './industryData.service.js'
 import { readGeoFacts } from './geopoliticsData.service.js'
 import { pythiaWeeklyService } from '../../services/pythiaWeekly.service.js'
@@ -37,7 +38,6 @@ export const streamStrategy = makeDeskStream(strategyDesk)
 
 // ─── The industry views (Pythia, rebuilt 2026-10-05) ─────────────────────────
 
-// The view refusal table lives with the publish service — shared with Pythia's session action.
 
 /**
  * Every sub-industry: the house's answer where there is one, beside the engine's measured first read.

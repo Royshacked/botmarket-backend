@@ -2,6 +2,8 @@
 // 8, K2), so the button in the drawer and the route behind the old panel can never commit two different ways.
 //
 //   createBook       a new book from Atlas's plan (POST /trade-ideas/batch) — the AVOID ask, then the batch
+//   recordConstruction  the new book's document: the conversation (legacy), the mandate, the construction thesis
+//                    (POST /portfolio/chat-state)
 //   replacePlan      a re-plan of an existing book, in place (was MainPage.handleUpdatePlan) — save first, then
 //                    retire the old legs, refused while a leg is live
 //   rebindAccounts   no re-plan, but the accounts changed (was planAccountRebind on the client)
@@ -16,23 +18,13 @@ import { listPortfolioItems, invalidatePortfolioState } from '../../services/por
 import { portfolioChatService } from './portfolioChat.service.js'
 import { applyRebalance, snapshotConvictions } from './portfolioRebalance.service.js'
 import { resolvePortfolioReviewCard } from '../chat/chat.service.js'
+import { parseStringList as _ids } from '../_shared/parse.util.js'
 
 // A leg with a broker position cannot be deleted, so a book holding one cannot be re-planned in place.
 const LIVE = ['long', 'short']
 // An order has been placed (pending confirm or in position): the accounts it routes by are no longer the plan's.
 const POST_ORDER = ['hit', 'long', 'short']
 
-// What a rebalance refusal means — the route's and Atlas's session action's.
-export const REBALANCE_REASONS = {
-    missing_portfolioId: [400, 'Missing portfolioId'],
-    no_changes:          [400, 'No changes to apply'],
-    // 409, not 400: the request is well formed and the book is real — every individual change was
-    // refused by the state of what it named. Changing that state (or re-running the review against
-    // the book as it now stands) makes the same request valid.
-    nothing_applied:     [409, 'None of the proposed changes could be applied'],
-}
-
-const _ids = (list) => (Array.isArray(list) ? list.filter(a => typeof a === 'string' && a) : [])
 
 export function makePortfolioCommit({
     ideas = defaultIdeas, avoid = avoidNames, items = listPortfolioItems, chat = portfolioChatService,
@@ -55,6 +47,18 @@ export function makePortfolioCommit({
         const out = await ideas.saveBatchIdeas(plan, userId, { accounts: _ids(accounts), mainAccountId, portfolioId })
         if (!out.ok) return { ok: false, reason: 'save_failed' }
         return { ok: true, ideas: out.ideas, failed: out.failed ?? [], portfolioId: out.portfolioId }
+    }
+
+    /**
+     * The book's document once the book exists: the mandate the user established with Atlas and the construction
+     * thesis. `messages` is the old panel's copy of the conversation — the session seals it onto the book instead
+     * (agent_contexts), so its caller passes none. The thesis write is best-effort: the book is saved either way.
+     */
+    async function recordConstruction(portfolioId, userId, { messages = [], mandate = null, thesis = null } = {}) {
+        const out = await chat.saveChatState(portfolioId, Array.isArray(messages) ? messages : [], userId, mandate && typeof mandate === 'object' ? mandate : null)
+        if (!out.ok) return out
+        if (thesis && typeof thesis === 'object') await chat.setThesis(portfolioId, userId, thesis, 'construction').catch(() => {})
+        return { ok: true }
     }
 
     /**
@@ -115,7 +119,7 @@ export function makePortfolioCommit({
         return result
     }
 
-    return { createBook, replacePlan, rebindAccounts, closeReview, acceptRebalance }
+    return { createBook, recordConstruction, replacePlan, rebindAccounts, closeReview, acceptRebalance }
 }
 
 export const portfolioCommit = makePortfolioCommit()

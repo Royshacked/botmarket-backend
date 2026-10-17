@@ -6,8 +6,8 @@ import { makeHandle }   from '../_shared/handle.util.js'
 import { makeEntityController } from '../_shared/entityController.util.js'
 import { setupService } from './setups.service.js'
 import { setupReason } from './setupReasons.js'
+import { setupCommit } from './setupCommit.service.js'
 import { shareSetup as shareSetupService } from './setupShare.service.js'
-import { resolveCardsFor } from '../chat/chat.service.js'
 import { talosHandoffService } from '../../services/talos.handoff.service.js'
 import { normalizeSetup, setupReadiness, TRADE_MODES, TF_RUNGS, isFetchableRung } from '../../services/setup.schema.js'
 import { TRADE_HORIZONS } from '../../services/entity/vocabulary.js'
@@ -16,12 +16,6 @@ import { draftVerdict } from '../../services/setupVerdict.js'
 
 const LOG     = '[setups:controller]'
 const _handle = makeHandle(LOG)
-
-// The most names one build may generate at once. It is the ledger's own cap (mentorBuild.util
-// MAX_NAMES), repeated here because this route is reachable without going through a build at all.
-const MAX_BATCH = 10
-
-// The setup refusal table lives in setupReasons.js — shared with Mentor's session actions.
 
 // list / get / patch / delete are the shared HTTP tier — the same moves every kind makes, over the
 // same crud. Arming IS a patch (`{status:'looking'}`); the gate it re-runs lives in the service,
@@ -119,7 +113,8 @@ export const generateSetup = _handle('generateSetup', async (req, res) => {
         return res.status(400).send({ error: 'setup must be an object' })
     }
 
-    const result = await setupService.generateSetup(setup, {
+    // The write and, on an update, the cards it satisfies — one service with Mentor's session action.
+    const result = await setupCommit.commitSetup(setup, {
         userId:   req.user._id,
         accounts: Array.isArray(accounts) ? accounts : [],
         mainAccountId,
@@ -127,10 +122,6 @@ export const generateSetup = _handle('generateSetup', async (req, res) => {
         chatState: chat_state,
     })
     if (!result.ok) return sendReason(res, result.reason, { overrides: setupReason, fallback: 500 })
-
-    // After the write, never before — a refused update has satisfied nothing. Non-fatal by
-    // contract (resolveCardsFor swallows its own failures).
-    if (updateId) await resolveCardsFor({ kind: 'setup', id: updateId }, { outcome: 'completed' })
 
     // With a sessionId, Mentor's turns move onto the setup they produced (unified-chat §6.2); without one
     // (today's frontend) nothing changes. Never fails the Generate.
@@ -160,13 +151,10 @@ export const generateSetups = _handle('generateSetups', async (req, res) => {
     if (!Array.isArray(setups) || !setups.length) {
         return res.status(400).send({ error: 'setups must be a non-empty array' })
     }
-    if (setups.length > MAX_BATCH) {
-        return res.status(400).send({ error: `no more than ${MAX_BATCH} setups in one batch` })
-    }
-
-    const { saved, failed } = await setupService.generateSetups(setups, {
+    const { saved, failed, reason, max } = await setupService.generateSetups(setups, {
         userId: req.user._id, accounts: Array.isArray(accounts) ? accounts : [], mainAccountId, chatState: chat_state,
     })
+    if (reason === 'too_many') return res.status(400).send({ error: `no more than ${max} setups in one batch` })
 
     logger.info(LOG, `generateSetups: ${saved.length} saved, ${failed.length} refused`)
     // One conversation, several setups: the same turns are sealed onto each (unified-chat §6.2).

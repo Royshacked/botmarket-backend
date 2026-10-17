@@ -11,6 +11,22 @@ export function parseIdeaAccounts(raw) {
     return raw.filter(a => a && typeof a === 'object' && a.id)
 }
 
+/** The non-empty strings of a list (symbols the user said yes to, account ids). Non-array input yields []. */
+export function parseStringList(raw) {
+    return Array.isArray(raw) ? raw.filter(s => typeof s === 'string' && s) : []
+}
+
+/**
+ * The marked accounts a desk's commit carries — ONE shape for every press on the session route (plan phase 8a
+ * CR): the account objects the venue picker holds, and the starred main account's id.
+ */
+export function parseCommitArgs(args = {}) {
+    return {
+        accounts:      parseIdeaAccounts(args?.accounts),
+        mainAccountId: args?.mainAccountId != null && args.mainAccountId !== '' ? String(args.mainAccountId) : null,
+    }
+}
+
 /**
  * Validate + normalize a chat `messages` array, shared across every stream endpoint: each entry
  * must be an object with role user|assistant and a non-empty string content; content is trimmed

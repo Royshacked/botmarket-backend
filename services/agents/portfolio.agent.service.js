@@ -372,7 +372,12 @@ export async function _markAvoidAdds(update, deps = { avoid: (symbols) => avoidN
     // An add's spec rides on `item` (the <portfolio_update> contract; portfolioRebalance._applyOne reads the same).
     const changes = Array.isArray(update?.changes) ? update.changes : []
     const adds = changes.filter(c => c?.action === 'add_item' && c.item?.asset)
-    for (const c of changes) if (c?.item && 'avoid_ok' in c.item) delete c.item.avoid_ok
+    // EVERY model-written OK goes — on the spec (an add) and on the change itself (an add-to reads it there,
+    // _industryLimitsForScaleIn). Only the user's yes may set either (phase 8a CR C2).
+    for (const c of changes) {
+        if (c?.item && 'avoid_ok' in c.item) delete c.item.avoid_ok
+        if (c && 'avoid_ok' in c) delete c.avoid_ok
+    }
     // A share count on a review add is the model's (the prompt has the platform size it from a weight) — and an explicit
     // count skips the hype brake, so it is dropped here (code review 2026-10-11).
     for (const c of adds) if ('quantity' in c.item) delete c.item.quantity
