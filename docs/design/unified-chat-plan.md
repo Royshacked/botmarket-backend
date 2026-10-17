@@ -470,7 +470,7 @@ the user decision points, and every concurrency guard. Facts that shaped it:
 
 **Four decisions this plan asks for (my recommendation first):**
 
-- **G1 — The session channel rides the EXISTING WebSocket, not a new SSE stream.** One live transport per
+- **G1 — The session channel rides the EXISTING WebSocket, not a new SSE stream. Roy, 2026-10-17: yes.** One live transport per
   user (the shared-pipe rule): new events on the same socket — `session_message`, `session_delta` (streamed
   tokens / status / reasoning / chart of a running turn), `session_removed` (seqs a seal took out),
   `session_state` (floor, an agent's state changed), `session_turn` (started / done / stopped / error). Replay
