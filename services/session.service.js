@@ -20,6 +20,7 @@
 import { getDb as _defaultGetDb, stripId } from '../providers/mongodb.provider.js'
 import { logger } from './logger.service.js'
 import { newSessionId, isScope, isAgent, toTimelineMessage, sessionTitle, segmentQuery } from './session.util.js'
+import { sessionEvents, silentEvents } from './sessionEvents.js'
 
 const LOG       = '[session]'
 const SESSIONS  = 'sessions'
@@ -31,7 +32,9 @@ const PAGE_MAX  = 500
 // never shipped to a list row.
 const HEADER_PROJECTION = { _id: 0, agentState: 0 }
 
-export function makeSessionService({ getDb = _defaultGetDb } = {}) {
+// `events` is what every change is pushed through (services/sessionEvents.js — the WebSocket). Silent by
+// default, so a test or a script pushes nothing; the app's instance below pushes everything.
+export function makeSessionService({ getDb = _defaultGetDb, events = silentEvents } = {}) {
 
     async function ensureIndexes() {
         try {
@@ -96,7 +99,10 @@ export function makeSessionService({ getDb = _defaultGetDb } = {}) {
                 { $set: { status: 'archived', archivedAt: now, updatedAt: now, title: current.title ?? sessionTitle(firstPage) } },
             )
         }
-        return getActive({ userId, scope })
+        const next = await getActive({ userId, scope })
+        // Every open screen moves to the new session together — a phone and a laptop never sit in two.
+        if (current && next && current.sessionId !== next.sessionId) events.state(uid, current.sessionId, { archived: true, next: next.sessionId })
+        return next
     }
 
     /** History: the user's sessions in a scope, newest first, headers only. */
@@ -135,7 +141,9 @@ export function makeSessionService({ getDb = _defaultGetDb } = {}) {
         if (!Number.isFinite(seq)) return { reason: 'not_found' }
         const row = { sessionId: String(sessionId), seq, ...parsed.message }
         await db.collection(MESSAGES).insertOne(row)
-        return { message: stripId(row) }
+        const stored = stripId(row)
+        events.message(String(userId), String(sessionId), stored)
+        return { message: stored }
     }
 
     /** The messages after `afterSeq`, in order — the reconnect replay and the page read. */
@@ -157,6 +165,17 @@ export function makeSessionService({ getDb = _defaultGetDb } = {}) {
      * other agents' rows. Pages internally, so no caller writes its own paging loop. Null if not yours.
      */
     async function messagesForAgent({ sessionId, userId, agent, afterSeq = 0 }) {
+        return _allAfter({ sessionId, userId, afterSeq, filter: segmentQuery(agent) })
+    }
+
+    /** EVERY message after `afterSeq`, in order — a reconnect's replay. Null if the session is not yours. */
+    async function allMessagesSince({ sessionId, userId, afterSeq = 0 }) {
+        return _allAfter({ sessionId, userId, afterSeq, filter: {} })
+    }
+
+    // THE one pager over the timeline: owner-checked, ordered by seq, PAGE_MAX rows a round trip until a short
+    // page. Every "all of it" read goes through here — no caller writes its own loop.
+    async function _allAfter({ sessionId, userId, afterSeq, filter }) {
         const db = await getDb()
         const owns = await db.collection(SESSIONS).findOne(
             { sessionId: String(sessionId), userId: String(userId) }, { projection: { _id: 0, sessionId: 1 } })
@@ -165,7 +184,7 @@ export function makeSessionService({ getDb = _defaultGetDb } = {}) {
         let after = Number.isFinite(Number(afterSeq)) ? Number(afterSeq) : 0
         for (;;) {
             const page = await db.collection(MESSAGES)
-                .find({ sessionId: String(sessionId), seq: { $gt: after }, ...segmentQuery(agent) })
+                .find({ sessionId: String(sessionId), seq: { $gt: after }, ...filter })
                 .sort({ seq: 1 }).limit(PAGE_MAX).toArray()
             out.push(...page.map(stripId))
             if (page.length < PAGE_MAX) break
@@ -193,7 +212,10 @@ export function makeSessionService({ getDb = _defaultGetDb } = {}) {
             { sessionId: String(sessionId), userId: String(userId) },
             { $set: { [`agentState.${agent}`]: state && typeof state === 'object' ? state : null, updatedAt: Date.now() } },
         )
-        return r.matchedCount ? { ok: true } : { reason: 'not_found' }
+        if (!r.matchedCount) return { reason: 'not_found' }
+        // The side pane draws an agent's surface from this — every open screen redraws together.
+        events.state(String(userId), String(sessionId), { agent, state: state && typeof state === 'object' ? state : null })
+        return { ok: true }
     }
 
     /**
@@ -207,6 +229,7 @@ export function makeSessionService({ getDb = _defaultGetDb } = {}) {
             { sessionId: String(sessionId), userId: String(userId) }, { projection: { _id: 0, sessionId: 1 } })
         if (!owns) return { reason: 'not_found' }
         const r = await db.collection(MESSAGES).deleteMany({ sessionId: String(sessionId), seq: { $in: seqs } })
+        events.removed(String(userId), String(sessionId), seqs)
         return { removed: r.deletedCount ?? 0 }
     }
 
@@ -218,7 +241,9 @@ export function makeSessionService({ getDb = _defaultGetDb } = {}) {
             { sessionId: String(sessionId), userId: String(userId) },
             { $set: { floor: agent, updatedAt: Date.now() } },
         )
-        return r.matchedCount ? { ok: true } : { reason: 'not_found' }
+        if (!r.matchedCount) return { reason: 'not_found' }
+        events.state(String(userId), String(sessionId), { floor: agent })
+        return { ok: true }
     }
 
     /**
@@ -256,7 +281,7 @@ export function makeSessionService({ getDb = _defaultGetDb } = {}) {
         return r.matchedCount ? { ok: true } : { reason: 'not_found' }
     }
 
-    return { ensureIndexes, getActive, startNew, list, get, append, messagesSince, messagesForAgent, removeMessages, setAgentState, setSealedThrough, setFloor, setSummary, addLink }
+    return { ensureIndexes, getActive, startNew, list, get, append, messagesSince, messagesForAgent, allMessagesSince, removeMessages, setAgentState, setSealedThrough, setFloor, setSummary, addLink }
 }
 
-export const sessionService = makeSessionService()
+export const sessionService = makeSessionService({ events: sessionEvents })

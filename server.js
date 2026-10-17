@@ -38,6 +38,7 @@ import cookieParser from 'cookie-parser'
 
 import { chatRoutes }         from './api/chat/chat.routes.js'
 import { attach as attachChatWs } from './api/chat/chatWs.js'
+import { registerSessionChannel } from './services/sessionChannel.js'
 import { ensureIndexes as ensureChatIndexes } from './api/chat/chat.service.js'
 import { ensureUserIndexes } from './api/user/user.model.js'
 import { ensureIdeaIndexes } from './api/trade-ideas/tradeIdeas.service.js'
@@ -225,6 +226,7 @@ app.use('/api/calendar',    calendarRoutes)
 app.use('/api/chat',        chatRoutes)
 
 attachChatWs(server)
+registerSessionChannel()   // the unified chat's session_sync replay rides the same socket (services/sessionChannel.js)
 ensureChatIndexes()
 ensureUserIndexes()
 ensureIdeaIndexes()

@@ -98,7 +98,8 @@ export function attach(httpServer) {
         ws.on('message', (raw) => {
             try {
                 const msg = JSON.parse(raw)
-                if (msg.event === 'ping') ws.send(JSON.stringify({ event: 'pong' }))
+                if (msg.event === 'ping') { ws.send(JSON.stringify({ event: 'pong' })); return }
+                _dispatch(userId, ws, msg)
             } catch { /* ignore malformed frames */ }
         })
 
@@ -143,6 +144,30 @@ export function broadcast(event, data) {
     if (!socketMap.size) return
     const frame = JSON.stringify({ event, data })
     for (const set of socketMap.values()) _send(set, frame)
+}
+
+// ─── Frames FROM the client ──────────────────────────────────────────────────
+// This module owns the socket; what a client frame MEANS belongs to whoever registered for it (the unified
+// chat's `session_sync` replay — services/sessionChannel.js). Registered rather than imported, so the socket
+// layer never depends on the features riding it.
+const clientHandlers = new Map()
+
+/**
+ * Handle a client frame `{ event, data }`. The handler gets the authenticated userId, the frame's data,
+ * and `reply(event, data)` — which answers THAT socket only (a replay is for the tab that asked).
+ */
+export function onClientEvent(event, handler) {
+    clientHandlers.set(event, handler)
+}
+
+/** Route one parsed client frame. Exported for tests. */
+export function _dispatch(userId, ws, msg) {
+    const handler = clientHandlers.get(msg?.event)
+    if (!handler) return
+    const reply = (event, data) => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ event, data })) }
+    Promise.resolve()
+        .then(() => handler({ userId, data: msg.data ?? null, reply }))
+        .catch(err => logger.warn(LOG, 'client frame handler failed', { event: msg.event, message: err.message }))
 }
 
 function _send(sockets, frame) {
