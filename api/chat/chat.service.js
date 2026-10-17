@@ -284,11 +284,27 @@ export async function postBotCard({ userId, content, type = 'text', payload = nu
         await _supersedePending(conv.id, type, cardSubject(payload), actions)
         const msg = await sendMessage(conv.id, bot, content, type, payload, actions, visibility, forUserId)
         await _deliver(String(userId), msg)
+        _notifyCardPosted({ userId: String(userId), botId: bot, msg })
         return msg
     } catch (err) {
         logger.error(LOG, 'postBotCard failed', err)
         return null
     }
+}
+
+// ─── A card was posted (unified-chat plan phase 6) ───────────────────────────────
+// Every desk CARD also lands in the user's live session timeline — as a reference to this row
+// (services/sessionCards.js). Registered rather than imported, so the chat layer never depends on sessions.
+// Plain bot lines (`type: 'text'` — Axl's own replies here, the welcome) are not alerts and do not travel.
+// Fire-and-forget: a failure there never fails the post.
+let _cardPostedHook = null
+export function onCardPosted(fn) { _cardPostedHook = fn }
+
+export function _notifyCardPosted({ userId, botId, msg }) {
+    if (!_cardPostedHook || !msg || msg.type === 'text') return
+    Promise.resolve()
+        .then(() => _cardPostedHook({ userId, botId, msg }))
+        .catch(err => logger.warn(LOG, 'card → session mirror failed (the card is posted)', err.message))
 }
 
 /**
@@ -782,6 +798,12 @@ export async function resolvePortfolioReviewCard(userId, portfolioId, { nextRevi
                 'payload.nextReviewAt': nextReviewAt,
             } }
         )
+        // Tell the open panels — the same frame every other resolve sends (this one sent none, so a review
+        // card stayed pending on screen, and now in the session timeline too, until a reload).
+        await _tryEmit(String(userId), 'message_resolved', {
+            id: msg.id, conversationId: conv.id,
+            status: outcome === 'updated' ? 'done' : 'dismissed', resolvedAt: Date.now(), resolveOutcome: outcome,
+        })
         return { ok: true, messageId: msg.id }
     } catch (err) {
         logger.error(LOG, 'resolvePortfolioReviewCard failed', err)

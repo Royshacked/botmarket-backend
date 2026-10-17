@@ -81,6 +81,16 @@ export function makeSessionService({ getDb = _defaultGetDb, events = silentEvent
     }
 
     /**
+     * The user's running session in a scope, or null — a READ that never creates one (unlike getActive). A
+     * background card lands only in a session the user already has (plan phase 6, H3).
+     */
+    async function findActive({ userId, scope = 'main' }) {
+        if (!isScope(scope)) return null
+        const db = await getDb()
+        return db.collection(SESSIONS).findOne({ userId: String(userId), scope, status: 'active' }, { projection: HEADER_PROJECTION })
+    }
+
+    /**
      * "New session": archive the active one — titled from its first user message — and open a fresh
      * one. An active session with nothing in it is reused rather than archived empty: pressing New
      * twice must not fill the history with blank rows.
@@ -305,7 +315,7 @@ export function makeSessionService({ getDb = _defaultGetDb, events = silentEvent
         return r.matchedCount ? { ok: true } : { reason: 'not_found' }
     }
 
-    return { ensureIndexes, getActive, startNew, list, get, append, messagesSince, messagesForAgent, allMessagesSince, removeMessages, setAgentState, setSealedThrough, setChain, findRunningChains, setFloor, setSummary, addLink }
+    return { ensureIndexes, getActive, findActive, startNew, list, get, append, messagesSince, messagesForAgent, allMessagesSince, removeMessages, setAgentState, setSealedThrough, setChain, findRunningChains, setFloor, setSummary, addLink }
 }
 
 export const sessionService = makeSessionService({ events: sessionEvents })

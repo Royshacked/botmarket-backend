@@ -39,6 +39,7 @@ import cookieParser from 'cookie-parser'
 import { chatRoutes }         from './api/chat/chat.routes.js'
 import { attach as attachChatWs } from './api/chat/chatWs.js'
 import { registerSessionChannel } from './services/sessionChannel.js'
+import { registerSessionCards } from './services/sessionCards.js'
 import { chain } from './services/desks/turns.js'
 import { ensureIndexes as ensureChatIndexes } from './api/chat/chat.service.js'
 import { ensureUserIndexes } from './api/user/user.model.js'
@@ -228,6 +229,7 @@ app.use('/api/chat',        chatRoutes)
 
 attachChatWs(server)
 registerSessionChannel()   // the unified chat's session_sync replay rides the same socket (services/sessionChannel.js)
+registerSessionCards()     // every desk card also lands in the user's live session, as a reference (services/sessionCards.js)
 ensureChatIndexes()
 ensureUserIndexes()
 ensureIdeaIndexes()

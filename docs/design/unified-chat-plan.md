@@ -636,6 +636,12 @@ no active session → nothing appended, and no session is created; the row carri
 mirror per admin into each admin's own session; Themis posts through `postCard`;
 `resolvePortfolioReviewCard` emits `message_resolved`. Existing card suites unchanged.
 
+**Phase 6 as done (2026-10-17):** H1–H3 approved by Roy. chat.service onCardPosted (desk cards only, never
+`type: text`) → services/sessionCards.js (agentOfBot, scope, findActive — never creates, cardAction — the one table) ·
+Themis on postCard · resolvePortfolioReviewCard emits message_resolved. Live check on axl_dev: a real postCard landed as a
+reference row (agent mentor, msgId + conversation + action), then both copies were removed and the conversation preview
+restored. Suite 4097/0.
+
 ## 9. Phase 7 — Frontend: session client + timeline
 
 - **`services/session/session.service.remote.js`** replaces `threads.service.remote.js`.
