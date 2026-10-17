@@ -200,6 +200,8 @@ try {
     if (made) await setupService.deleteSetup(made, userId).catch(() => {})
     await browser.close()
     console.log(`\n${results.filter(r => r.ok).length}/${results.length} passed`)
+    // A failed check fails the run, so a script or CI reading the exit code is told (phase 8d CR).
+    if (results.some(r => !r.ok)) process.exitCode = 1
     if (errors.length) console.log('page errors:\n  ' + [...new Set(errors)].join('\n  '))
     await closeDb()
 }

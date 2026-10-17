@@ -128,3 +128,17 @@ test('later leaves a thesis without saving; Prometheus answers in the coverage r
     assert.equal(ANALYST_REASONS.wrong_symbol[0], 409)
     assert.equal(analystDesk.reasons, ANALYST_REASONS)
 })
+
+test('8d CR: a draft about another company while revising is NEW work — Initiate takes it, Later keeps it', async () => {
+    const MSFT = { ...DRAFT, symbol: 'MSFT' }
+    const r = rig({ state: { draft: MSFT, standing: true, ...EDITING } })
+    const { press } = await r.start(ADMIN)
+    assert.equal((await press('generate')).result.coverage.symbol, 'MSFT')
+    assert.deepEqual(r.calls.initiate[0], MSFT)
+
+    const kept = rig({ state: { draft: MSFT, standing: true, ...EDITING } })
+    const k = await kept.start(ADMIN)
+    assert.deepEqual(shapeOf(await k.press('later')), { result: {} })
+    const st = await k.stateOf()
+    assert.deepEqual(st, { active_symbol: 'MSFT', draft: MSFT, standing: true }, 'out of the edit, the draft still on the table')
+})

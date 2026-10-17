@@ -60,8 +60,16 @@ const _covered = async (ticker) => !!(await coverageService.getCoverageBySymbol(
 export function makeChainRunner({
     sessions = sessionService, desks = DESK_DEFS, maxSteps = MAX_STEPS,
     loadUser = _loadUser, isCovered = _covered, lock = withSessionLock,
-    findEdit = findForEdit, lookupEdit = lookupForEdit, sealing = defaultSealing,
+    findEdit = findForEdit, lookupEdit = lookupForEdit, sealing = defaultSealing, saveList = null,
 } = {}) {
+    // Argus's list, saved through ITS OWN action (Generate, or Update while a saved list is being refined) — the commit
+    // a press on its surface makes. Injectable for the chain's suite, which has no database.
+    const _saveList = saveList ?? (({ user, state }) => {
+        const action = state?.editingScanId ? 'update' : 'generate'
+        const run = desks.scanner?.actions?.[action]
+        return run ? run({ user, state, args: {} }) : { reason: 'no_such_action' }
+    })
+
     // The queued-turn runner (startTurn's runQueued) — bound after construction, because it needs this
     // runner's afterTurn in return (services/desks/turns.js wires the pair).
     let runQueued = null
@@ -259,8 +267,19 @@ export function makeChainRunner({
             return out.reason ? { reason: out.reason } : { ok: true }
         }
         if (choice === 'research') {
-            const art = researchQueueFrom(session.agentState?.scanner?.pendingScan)
+            const argus = session.agentState?.scanner ?? null
+            const art = researchQueueFrom(argus?.pendingScan)
             if (!art) return { reason: 'nothing_to_research' }
+            // SAVED FIRST, then researched (Roy 2026-10-17, phase 8d CR decision (a)) — the old one press: the list
+            // reaches the Scans tab carrying the names that were NOT queued, which "also do KLAC" reads from later.
+            // A list that did not save is not researched: the user would lose it to a hop they cannot see behind.
+            const saved = await _saveList({ user, state: argus })
+            if (!saved || saved.reason) return { reason: saved?.reason ?? 'save_failed' }
+            if (saved.seal) {
+                await sealing.sealFromSession({ userId: user._id, sessionId, agent: 'scanner', ...saved.seal })
+                    .catch(err => logger.warn(LOG, 'seal after the research save failed (the list is saved)', err.message))
+            }
+            if (saved.after !== undefined) await sessions.setAgentState({ sessionId, userId: user._id, agent: 'scanner', state: saved.after })
             await hop({ user, session, chain: { ...chain, status: 'running' }, art, from: 'scanner', index: 0 })
             return { ok: true }
         }

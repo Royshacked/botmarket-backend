@@ -17,6 +17,10 @@ const _sym = (v) => String(v ?? '').trim().toUpperCase()
 const editingId = (state) => (state?.editing?.kind === 'coverage' ? String(state.editing.entityId) : null)
 const proposal  = (state) => (state?.standing === true && state?.draft && typeof state.draft === 'object' ? state.draft : null)
 const refusal   = (out) => ({ reason: out.reason, ...(out.detail ? { extra: { detail: out.detail } } : {}) })
+// A standing draft about ANOTHER company than the thesis being revised (phase 8d CR): a research seed sent mid-edit,
+// say. It is not an edit of that thesis — Update refuses it (wrong_symbol) — so it is new work: Initiate takes it and
+// Later keeps it rather than throwing it away with the edit.
+const elsewhere = (state, draft) => !!state?.editingSymbol && !!draft && _sym(draft.symbol) !== _sym(state.editingSymbol)
 
 export function makeAnalystActions({ commit = defaultCommit } = {}) {
     return {
@@ -25,7 +29,7 @@ export function makeAnalystActions({ commit = defaultCommit } = {}) {
             if (user?.role !== 'admin') return { reason: 'forbidden' }
             const draft = proposal(state)
             if (!draft) return { reason: 'nothing_to_commit' }
-            if (editingId(state)) return { reason: 'not_new' }
+            if (editingId(state) && !elsewhere(state, draft)) return { reason: 'not_new' }
             const out = await commit.initiateOrRevise(draft)
             if (!out.ok) return refusal(out)
             return {
@@ -52,9 +56,11 @@ export function makeAnalystActions({ commit = defaultCommit } = {}) {
             }
         },
 
-        /** Stop revising a thesis without saving it. */
+        /** Stop revising a thesis without saving it — a standing draft about another company stays, as new work. */
         async later({ state }) {
             if (!editingId(state)) return { reason: 'nothing_to_commit' }
+            const draft = proposal(state)
+            if (elsewhere(state, draft)) return { result: {}, after: { active_symbol: _sym(draft.symbol), draft, standing: true } }
             return { result: {}, after: null }
         },
     }

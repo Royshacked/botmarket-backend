@@ -73,6 +73,9 @@ async function reload(page) {
 }
 
 const userId = await ensureUser()
+// A crashed earlier run can leave its list behind under the same thesis — cleared first, so the one Generate makes is
+// the only one carrying it.
+for (const old of ((await scanService.getScans(userId)) ?? []).filter(s => s.thesis === LIST.thesis)) await scanService.deleteScan(old.id, userId).catch(() => {})
 const before = new Set(((await scanService.getScans(userId)) ?? []).map(s => s.id))
 const sid    = (await sessionService.startNew({ userId })).sessionId
 console.log('session:', sid)
@@ -83,6 +86,9 @@ const page = await browser.newPage({ viewport: { width: 1440, height: 900 } })
 const errors = []
 page.on('console', m => { if (m.type() === 'error') errors.push(m.text().slice(0, 200)) })
 page.on('pageerror', e => errors.push(`PAGEERROR ${e.message.slice(0, 200)}`))
+// Every Prometheus read the page asks for — the drive seeds its verdicts, so it must never pay for one.
+const reads = []
+page.on('request', r => { if (r.url().includes('/aether/batch-read')) reads.push(r.url()) })
 let scanId = null
 
 try {
@@ -100,6 +106,7 @@ try {
     check('the lens is a hand edit (Argus\'s state reads investing)', (await stateOf(userId, sid, 'scanner'))?.profile === 'investing')
     await pane(page).getByRole('button', { name: 'Trading' }).click()
     await page.waitForTimeout(1200)
+    check('…and back to trading', (await stateOf(userId, sid, 'scanner'))?.profile === 'trading')
 
     // ── 3. Generate saves the scan FROM THE SESSION ──
     await pane(page).getByRole('button', { name: 'Generate list' }).click()
@@ -119,7 +126,7 @@ try {
         await reload(page)
         await pane(page).getByText('editing list —').waitFor({ timeout: 15000 }).catch(() => {})
         await shot(page, '03-editing')
-        check('a saved list being edited says so, with Update and Later', (await pane(page).getByRole('button', { name: 'Update list' }).count()) === 1 && /later/i.test(await pane(page).innerText()))
+        check('a saved list being edited says so, with Update and Later', (await pane(page).getByRole('button', { name: 'Update list' }).count()) === 1 && (await pane(page).getByRole('button', { name: /later/i }).count()) === 1)
         await pane(page).getByRole('button', { name: 'Update list' }).click()
         await pane(page).getByText('The list is updated.').waitFor({ timeout: 15000 }).catch(() => {})
         const saved = await scanService.getScanById(scanId, userId).catch(() => null)
@@ -138,6 +145,7 @@ try {
     await shot(page, '04-radar')
     const t5 = await pane(page).innerText().catch(() => '')
     check('a radar cut draws the read\'s verdict and the caveat on the name', /Prometheus dropped 1 — AMD contradicted/.test(t5) && /record disagrees/.test(t5))
+    check('…and with its verdict in, no read is asked for', reads.length === 0, `${reads.length} batch-read request(s)`)
     await sessionService.setAgentState({ sessionId: sid, userId, agent: 'scanner', state: null })
 
     // ── 6. Prometheus with a standing draft: the whole draft is drawn, and the save offered ──
@@ -148,7 +156,8 @@ try {
     const t6 = await pane(page).innerText().catch(() => '')
     check('the pane opens on Prometheus with the draft', /Prometheus/.test(await pane(page).locator('.side-pane__tabs').innerText().catch(() => '')) && /companion-animal/i.test(t6))
     check('the kill-criteria are on screen, not clipped under their label', await pane(page).getByText('Vet visits fall two quarters running').isVisible().catch(() => false))
-    check('the save is offered as Initiate (a name not in the book)', (await pane(page).getByRole('button', { name: 'Initiate coverage on ZTS' }).count()) === 1)
+    // Initiate for a name the house does not cover, Update for one it does — either is the save, offered.
+    check('the save is offered (Initiate, or Update when the house already covers ZTS)', (await pane(page).getByRole('button', { name: /^(Initiate|Update) coverage on ZTS$/ }).count()) === 1)
 } catch (err) {
     console.error('DRIVE ERROR', err)
     check('the drive ran to the end', false, err.message)
@@ -164,6 +173,8 @@ try {
     if (crashed.length) check('no page errors', false, crashed.join(' | '))
     await browser.close()
     console.log(`\n${results.filter(r => r.ok).length}/${results.length} passed`)
+    // A failed check fails the run, so a script or CI reading the exit code is told (phase 8d CR).
+    if (results.some(r => !r.ok)) process.exitCode = 1
     if (errors.length) console.log('page errors:\n  ' + [...new Set(errors)].join('\n  '))
     await closeDb()
 }

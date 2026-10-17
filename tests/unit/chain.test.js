@@ -11,14 +11,18 @@ import { decisionFor, emitted, researchQueueFrom } from '../../services/chain/ru
 // call, ask before taking over an agent's own work, cap the automatic steps, pause on an interjection,
 // and pause-and-ask after a restart. On memDb, with a recording stand-in for the queued-turn runner.
 
-function rig({ maxSteps, covered = ['NVDA'] } = {}) {
+function rig({ maxSteps, covered = ['NVDA'], saveList = null } = {}) {
     const { db } = memDb()
     const sessions = makeSessionService({ getDb: async () => db })
     const roles = { admin1: 'admin' }
-    const runner = makeChainRunner({ sessions, loadUser: async (id) => ({ _id: id, role: roles[id] ?? 'trader' }), isCovered: async (t) => covered.includes(t), ...(maxSteps ? { maxSteps } : {}) })
+    // Argus's save before a research run (8d CR (a)) and its seal — recorded, no database behind them.
+    const saves = [], seals = []
+    const save = saveList ?? (async ({ state }) => { saves.push(state); return { result: { scan: { id: 'scan1' } }, seal: { kind: 'scan', entityIds: ['scan1'] }, after: null } })
+    const sealing = { sealFromSession: async (a) => { seals.push(a); return { sealed: 1 } }, openForEdit: async () => ({ agent: 'x' }) }
+    const runner = makeChainRunner({ sessions, loadUser: async (id) => ({ _id: id, role: roles[id] ?? 'trader' }), isCovered: async (t) => covered.includes(t), saveList: save, sealing, ...(maxSteps ? { maxSteps } : {}) })
     const queued = []
     runner.bindRunQueued(async (args) => { queued.push(args); return {} })
-    return { sessions, runner, queued }
+    return { sessions, runner, queued, saves, seals }
 }
 const user = { _id: 'u1', role: 'user' }
 const rows = (sessions, s) => sessions.messagesSince({ sessionId: s.sessionId, userId: 'u1' })
@@ -79,6 +83,9 @@ test('an investing list offers research; the tap runs a one-name-per-turn queue 
     assert.deepEqual(card.ref.choices.map(c => c.id), ['research', 'keep'])
 
     assert.deepEqual(await r.runner.resume({ user, sessionId: s.sessionId, choice: 'research' }), { ok: true })
+    // 8d CR (a): the list is saved FIRST — Argus's own action — and its conversation sealed onto it.
+    assert.deepEqual(r.saves[0].pendingScan, scan)
+    assert.deepEqual(r.seals[0], { userId: 'u1', sessionId: s.sessionId, agent: 'scanner', kind: 'scan', entityIds: ['scan1'] })
     const hand = (await rows(r.sessions, s)).at(-1)
     assert.equal(hand.to, 'analyst')
     assert.match(hand.content, /^Research NVDA for coverage — it is a candidate for the Semis sleeve\. This is one of 3 from the same sleeve — AMD, AVGO follow after it\./)
@@ -169,6 +176,16 @@ test('after a restart the sweep pauses a running chain and asks; Continue re-run
     await r.runner.resume({ user, sessionId: s.sessionId, choice: 'continue' })
     assert.equal(r.queued.at(-1).agent, 'mentor')
     assert.equal(r.queued.at(-1).input.seed.ticker, 'NVDA')
+})
+
+test('8d CR: a list that did not save is not researched — the refusal is said, no hop', async () => {
+    const r = rig({ saveList: async () => ({ reason: 'save_failed' }) })
+    const s = await r.sessions.getActive({ userId: 'u1' })
+    const scan = { thesis: 'Semis', profile: 'investing', candidates: [{ ticker: 'NVDA' }] }
+    await r.sessions.setAgentState({ sessionId: s.sessionId, userId: 'u1', agent: 'scanner', state: { profile: 'investing', pendingScan: scan } })
+    await r.runner.afterTurn({ user, sessionId: s.sessionId, agent: 'scanner', origin: 'user', out: { payload: { reply: 'one name', scan } } })
+    assert.deepEqual(await r.runner.resume({ user, sessionId: s.sessionId, choice: 'research' }), { reason: 'save_failed' })
+    assert.equal(r.queued.length, 0)
 })
 
 test('a tap that is not on offer is refused', async () => {
