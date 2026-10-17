@@ -801,6 +801,14 @@ queues; a chain pauses for it) · Axl knows its surface (the social chat drops h
 Axl instead" while a desk holds the floor · taps only while their reply is the last word · a refused edit says why · a
 replay's running turn wins. Drive re-run 13/13.
 
+Phase 7 CR (2026-10-17, two reviewers, 20 findings, all applied — BE `d6968d4`, FE `2ae2341`, bundle `975f098`): an
+opening runs ONE turn (origin `opening` — no desk-to-desk ping-pong) · card reads ride the conversationId index ·
+`openForEdit` refuses another scope's item (`wrong_scope`) · a show-only reply gets a line · name matches skip closed
+setups · a brief is always Axl's · the replay carries the chain, the agents' states and the running text · an accepted
+turn never strands the input after a reconnect · the server's agent names the live turn · a failed first message shows
+· a waiting message can be cancelled · history cards have no buttons · the drawer is a proper dialog · stale /api/axl
+docs fixed. Suites: BE 4119/0, FE 1269 vitest + 452 node. Drive 13/13.
+
 ## 10. Phase 8 — Frontend: side pane + MainPage teardown
 
 - **Surfaces extracted from the panels**, reading `agentState` from the session; every action goes through
