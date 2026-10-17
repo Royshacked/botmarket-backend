@@ -917,7 +917,7 @@ doorway and bus listener, and the existing overlay patterns. Facts that shaped i
   `sendReason`; K3 `state` route + `applyEdit` (mentor, scanner); K4 nextState additions, the slimmer done frame,
   agentState on the active read, `reviewMode` on the edit route, Axl's adopt → Atlas `onRouted`; the scanner turn input
   gains `radarBoard` (the Floor's radar scan). Tests for every action and edit, the seal, the scope rules.
-- **8b — the drawer + Mentor:** `DrawerShell` extracted from DetailPanel (DetailPanel rebuilt on it, its tests kept);
+- **8b — the drawer + Mentor — DONE 2026-10-17, see §10.3:** `DrawerShell` extracted from DetailPanel (DetailPanel rebuilt on it, its tests kept);
   `SidePane` (desktop dock / phone sheet, pin, tabs, follows the floor); `useSession` gains `act(agent, text, ops)`,
   `edit(agent, edit)`, `commit(agent, action, args)`; `MentorSurface` from the panel's blocks — SetupSummary, CoverageChips,
   CandidatePicker, StageConfirm, SpanTable, EntryTable (moved as they are, reading agentState), the Generate / Generate-all /
@@ -1011,6 +1011,67 @@ Left as is, on purpose: a retry after `stateWritten: false` can save twice (it n
 the state would fail the same way); views Pythia published from a batch the user walks away from stay unsealed (their
 conversation stays in the session). The REST routes' `sessionId` seal hook (sealAfterGenerate) still stands — it goes
 once nothing sends it (D1 of §10.1).
+
+### 10.3 Phase 8b — as built (2026-10-17)
+
+Commits: FE `771ae2e` · BE `42b5492` · bundle `bccf74f` (8b, bug hunt folded in) · FE `299ab13` + BE `353c2cd` (CR).
+Driven: `scripts/drive-mentor-surface.mjs` 13/13 on Vite :5173 — Mentor's state is SEEDED (no model call): the pane on
+the floor, a hand edit, a stale press refused, Generate, Arm, a pencil reopening the setup in the session, the phone
+sheet. Not pushed.
+
+**Built (frontend):**
+- `cmps/DrawerShell` — the drawer mechanics, once: Esc closes the TOP open shell only (a stack), focus in on open and
+  back on close (`autoFocus` false for a surface that opens beside the user's work), the handheld back gesture (a history
+  entry, `{ field, key }`), portal or in place. `DetailPanel` is rebuilt on it.
+- `cmps/SidePane` + `sidePane.store.js` — one tab per opened desk; follows the floor on its CHANGE (a closed pane stays
+  closed until the floor moves); pin. Docked beside the timeline in `.chat-with-pane` (`min(560px, 58%)`, `min-width: 0`
+  — the worksheet header pushed it to 650px without it); a bottom sheet portalled to `<body>` on a handheld, z 250 —
+  under the dialogs (300–320). A surface is keyed on the session id.
+- `context/SessionContext` — ONE `useSession('main')` on MainPage, shared by the timeline, the pane and the doorways.
+  `useSession` gains `commit(agent, action, args)`, `edit(agent, change, { rev })`, `reopen(kind, id, opts)`; every
+  answer is an outcome `{ ok, reason, message, extra }`; revisions fold from the load, the replay, `session_state` and
+  each answer, never backwards (`mergeRevs`). A `stale_state` refusal also asks for a replay, so the surface redraws
+  before the next press (bug hunt #1). A press made before the session loaded waits for it, up to 10 s; a failed load
+  answers at once (bug hunt #2, CR).
+- `cmps/MentorSurface` — the worksheet, coverage, candidates, gates and the Generate / Generate all / Arm / Leave /
+  Update / Later bar, from `agentState.mentor`. Gates and picks are TURNS (ops), worksheet fields are debounced HAND EDITS
+  (600 ms, one in flight), the bar is COMMITS. Its rules (readiness, the press builders, `mentorHolding`) are in
+  `mentorSurface.utils.js`. `MentorPanel.jsx` and its suite are deleted; the blocks in `cmps/MentorPanel/` stay.
+- A commit announces its kind's change event (`session.service.remote` → `SETUPS_CHANGED` for Mentor), so the Floor
+  reloads at once. 8c and 8d add their kinds to the same map.
+- MainPage: `talkTo` / `openDesk` / `editEntity` (reopen → busy asks → force; `onOpened` runs only once it reopened);
+  the pencil and the redraw card reopen IN the session; calendar / Aether / Argus picks are turns; a shared setup is a
+  `fresh` edit (`mentorHolding` asks first) and a turn. A temporary bridge turns any old Mentor seed, inbox or tab
+  switch into the same — deleted with that machinery in 8e.
+
+**Built (backend, `42b5492`):** Mentor's `{ draft, fresh: true }` edit — a NEW plan on a cleared table, markers dropped
+(`act.editState` honours `dropMarkers`).
+
+Phase 8b bug hunt (2026-10-17, two applied): a stale press redraws before the next one (the replay); an early press
+waits for the session instead of being dropped.
+
+Phase 8b CR (2026-10-17, two reviewers, applied — FE `299ab13`, BE `353c2cd`): a press inside the edit's settle window
+committed the plan WITHOUT the edit (a press now settles the edit first; Update lights off the server's draft) · a
+debounced edit sent the revision current at send time and could overwrite a turn the user never saw (it names the one
+it was made against) · a pending edit was dropped on close · a cancelled pencil still switched workspace and accounts
+· a shared plan wiped a generated-not-armed setup unasked, and failed mid-turn (asks on any work; one retry) · doorways
+opened Mentor under the docked detail panel (`openDesk` closes it) · the Floor stale after a commit (the change event)
+· the phone sheet over the dialogs (650 → 250) · the docked pane took focus from the chat input · one Esc closed the
+history drawer AND the pane (claimed in capture) · Mentor's edit stored the client's raw draft (now the normalised plan
+plus the session's ledger / spans / entries / summary) · smaller: the editor's in-flight flag on a throw, accounts read
+at send time, the refusal text once.
+
+**Carried, on purpose:**
+- **To 8e.** Resuming an old Mentor thread (the unfinished list, the threads drawer) opens an empty surface —
+  `resumeRefs.mentor` had only the panel to set it. Arm / Leave no longer end the pipeline (`finishPipeline`). The old
+  panel's RouteOffer, "continue a stopped reply", Clear and `deskLoadingSetters.mentor` have no session counterpart
+  yet. The agent bar's Mentor AccountSelector branch is dead behind the bridge. `handleBackToAxl` still clears
+  `mentorChatRestore`, which nothing reads.
+- **To 8f.** MainPage's doorways have no unit suite (the old panel suite covered the hand-off firing once, a calendar
+  seed once, a reopen with / without an ask) — the drive covers them end to end.
+- **With 8c / 8e.** A `fresh` plan (and a forced reopen, already) leaves Mentor's seal boundary where it was, so the
+  put-aside setup's conversation seals onto the next generated one. Move the boundary, or seal the dropped segment onto
+  `editing.entityId`, for both at once.
 
 ## 11. Phase 9 — Migration (`scripts/migrate-unified-chat.mjs`)
 

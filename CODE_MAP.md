@@ -319,7 +319,8 @@ services/
       act.js                  THE PIPE for a desk's commits and hand edits (unified-chat 8a): POST /sessions/:id/act
                               and PATCH /sessions/:id/state — the session read, the speaker rule, the REVISION
                               check (agentRev; stale → stale_state), the lock, the seal, the state write. The
-                              meaning is the desk's (actions/)
+                              meaning is the desk's (actions/); an edit answering dropMarkers (Mentor's fresh
+                              plan, 8b) clears editing / chainId instead of keeping them
       actions/                <agent>.actions.js — each desk's commits from its agentState (never the client's
                               copy) through the shared commit service; the contract (verbs generate / update /
                               later + the desk's own, results { <kind>: doc }) is in mentor.actions.js
