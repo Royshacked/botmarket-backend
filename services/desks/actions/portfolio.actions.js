@@ -24,6 +24,10 @@ const commitArgs = (args = {}) => {
     return { accounts: accounts.map(a => String(a.id)), mainAccountId, avoidOk: parseStringList(args?.avoidOk) }
 }
 
+// Every holding carries a share count — the save writes quantities, and an unsized plan (no size given, or the
+// prices could not be fetched) would save holdings that can never place (phase 8c CR).
+const sized = (plan) => (plan?.ideas ?? []).every(i => Number(i?.quantity) > 0)
+
 // A change's symbol, for the AVOID ask: an add names it on its spec; a refused add-to carries it from the refusal.
 const changeAsset = (c) => c?.item?.asset ?? c?.avoid?.asset ?? null
 
@@ -85,6 +89,7 @@ export function makePortfolioActions({ commit = defaultCommit } = {}) {
             const plan = state?.pendingPlan
             if (!plan?.ideas?.length) return { reason: 'nothing_to_commit' }
             if (bookOf(state)) return { reason: 'not_new' }
+            if (!sized(plan)) return { reason: 'plan_not_ready' }
             const { accounts, mainAccountId, avoidOk } = commitArgs(args)
             const out = await commit.createBook(plan, user._id, { accounts, mainAccountId, avoidOk })
             if (!out.ok) return { reason: out.reason, ...(out.avoid ? { extra: { avoid: out.avoid } } : {}) }
@@ -108,6 +113,8 @@ export function makePortfolioActions({ commit = defaultCommit } = {}) {
             if (!portfolioId) return { reason: 'nothing_to_commit' }
             const { accounts, mainAccountId, avoidOk } = commitArgs(args)
             const plan = state.pendingPlan?.ideas?.length ? state.pendingPlan : null
+            // A plan on the table is what Update saves — an unsized one is refused, never passed over for a rebind.
+            if (plan && !sized(plan)) return { reason: 'plan_not_ready' }
             let result
             if (plan) {
                 const out = await commit.replacePlan(portfolioId, plan, user._id, { accounts, mainAccountId, avoidOk })
@@ -141,7 +148,13 @@ export function makePortfolioActions({ commit = defaultCommit } = {}) {
 
             const settled = settleAvoid(state.reviewUpdate, { avoidOk: args?.avoidOk, dropAvoid: args?.dropAvoid === true })
             if (settled.ask) return { reason: 'avoid_needs_ok', extra: { avoid: settled.ask } }
-            if (!settled.update) return { reason: 'nothing_to_commit' }
+            if (!settled.update) {
+                if (!inReview) return { reason: 'nothing_to_commit' }
+                // The user said no to every change Atlas proposed: in a review that is holding as is — it closes, rather
+                // than leaving an Accept that loops on nothing (phase 8c CR).
+                const out = await commit.closeReview(portfolioId, user._id, { outcome: 'reviewed' })
+                return { result: { portfolio: { portfolioId }, held: true, nextReviewAt: out.nextReviewAt }, seal: sealBook(portfolioId), after: null }
+            }
 
             // Only a review's Accept closes the review; an edit's changes leave a due review due.
             const out = await commit.acceptRebalance(portfolioId, user._id, settled.update, { closeReview: inReview })
@@ -185,17 +198,30 @@ export const portfolioActions = makePortfolioActions()
  * `{ adopt: 'start' }` — stage the book being adopted. Axl's adopt route marks Atlas `adopt` (onRouted); the surface
  * then asks for the draft, and it is staged HERE, under the session lock, EMPTY and at once: every Atlas turn parses
  * into it (the desk's run reads `adoptDraftId`) and the grid renders it, and the id is what makes the conversation
- * one book — a draft minted per paste would adopt two half-books. Asked twice, it hands back the one it has.
+ * one book — a draft minted per paste would adopt two half-books. Asked twice, it hands back the one it has — while
+ * that one is still a draft: a committed or vanished one is replaced (phase 8c CR).
+ *
+ * An adoption is a NEW book on a clean table (`clean()`, markers dropped): the conversation must not parse into, or
+ * write its mandate onto, a book Atlas was editing. Unsaved work — a plan, a proposal — is never dropped unasked:
+ * `adopt_over_work` until the user said yes (`fresh: true`, Roy 2026-10-17, CR decision (a)).
  * `{ adopt: 'end' }` — leave adopt mode (adopted, or the user stepped away). The draft itself stays on the server
  * (listStaged resumes it); only the session stops pointing at it.
  */
-export function makePortfolioApplyEdit({ adopt = adoptBookService } = {}) {
+export function makePortfolioApplyEdit({ adopt = adoptBookService, clean = () => ({}) } = {}) {
     return async function portfolioApplyEdit(state, edit = {}, { user } = {}) {
         if (edit.adopt === 'start') {
-            if (state?.adoptDraftId) return { state: { ...state, adopt: true } }
-            const out = await adopt.createDraft({ userId: user?._id, name: 'My bank book' })
-            if (!out?.ok || !out.draft?.draftId) return { reason: 'adopt_failed' }
-            return { state: { ...(state ?? {}), adopt: true, adoptDraftId: String(out.draft.draftId) } }
+            if ((state?.pendingPlan || state?.reviewUpdate) && edit.fresh !== true) return { reason: 'adopt_over_work' }
+            let draftId = state?.adoptDraftId ?? null
+            if (draftId) {
+                const held = await adopt.refreshDraft({ draftId, userId: user?._id }).catch(() => null)
+                if (!held?.ok) draftId = null
+            }
+            if (!draftId) {
+                const out = await adopt.createDraft({ userId: user?._id, name: 'My bank book' })
+                if (!out?.ok || !out.draft?.draftId) return { reason: 'adopt_failed' }
+                draftId = String(out.draft.draftId)
+            }
+            return { state: { ...clean(), adopt: true, adoptDraftId: draftId }, dropMarkers: true }
         }
         if (edit.adopt === 'end') {
             if (!state) return { reason: 'nothing_to_edit' }
@@ -209,4 +235,6 @@ export function makePortfolioApplyEdit({ adopt = adoptBookService } = {}) {
 export const PORTFOLIO_REASONS = {
     ...REBALANCE_REASONS, ...BOOK_REASONS,
     adopt_failed: [500, 'Could not open the adoption — try again'],
+    adopt_over_work: [409, 'Atlas has unsaved work on the table — put it aside first'],
+    plan_not_ready:  [409, 'The plan is not sized yet — every holding needs a share count'],
 }

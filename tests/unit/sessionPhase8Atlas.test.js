@@ -10,7 +10,7 @@ import { _markAvoidAdds } from '../../services/agents/portfolio.agent.service.js
 // service the portfolio routes use (portfolioCommit), with the AVOID ask as one refusal → repeat.
 
 const user = TRADER
-const PLAN = { name: 'Quality', ideas: [{ asset: 'MSFT', allocationRatio: 0.5 }, { asset: 'XOM', allocationRatio: 0.5 }] }
+const PLAN = { name: 'Quality', ideas: [{ asset: 'MSFT', allocationRatio: 0.5, quantity: 10 }, { asset: 'XOM', allocationRatio: 0.5, quantity: 40 }] }
 const ADD_XOM  = { action: 'add_item', item: { asset: 'XOM', allocationRatio: 0.1 }, avoid: { industry: 'Oil & Gas' } }
 const TRIM_AAA = { action: 'trim_item', itemId: 'i1', fraction: 0.5 }
 const ACCOUNTS = [{ id: 'a1', broker: 'paper' }]
@@ -108,7 +108,9 @@ test('a review turn without an update WITHDRAWS the proposal; a same-turn thesis
     assert.equal(portfolioNextState(prev, { reply: 'on reflection, hold' }).reviewUpdate, null)
     assert.deepEqual(portfolioNextState(prev, { update: { changes: [ADD_XOM] }, thesis: { strategy: 's' } }).reviewUpdate, { changes: [ADD_XOM], thesis: { strategy: 's' } })
     assert.deepEqual(portfolioNextState(prev, null).reviewUpdate, prev.reviewUpdate, 'a route landing is not a turn')
-    assert.deepEqual(portfolioNextState({ reviewUpdate: { changes: [TRIM_AAA] } }, { reply: 'x' }).reviewUpdate, { changes: [TRIM_AAA] }, 'outside a review the latest update carries')
+    // 8c CR: outside a review the latest turn decides too — a proposal Atlas took back does not stand in the way.
+    assert.equal(portfolioNextState({ reviewUpdate: { changes: [TRIM_AAA] } }, { reply: 'x' }).reviewUpdate, null)
+    assert.deepEqual(portfolioNextState({}, { update: { changes: [TRIM_AAA] }, thesis: { strategy: 's' } }).reviewUpdate, { changes: [TRIM_AAA] }, 'a thesis rides only in a review')
 })
 
 test('C1: a route landing on Atlas keeps the book it is editing and the chain it works for', () => {
@@ -305,8 +307,11 @@ test('8c: a review is REVIEWED once Atlas has spoken in it — a fold is not a p
 
 test('8c: adopt mode stages ONE draft under the lock, hands it back when asked again, and ends without discarding it', async () => {
     const made = []
-    const adopt = { createDraft: async (o) => { made.push(o); return { ok: true, draft: { draftId: `d${made.length}` } } } }
-    const r = makeActRig({ agent: 'portfolio', desk: { ...portfolioDesk, applyEdit: makePortfolioApplyEdit({ adopt }) }, state: { adopt: true } })
+    const adopt = {
+        createDraft:  async (o) => { made.push(o); return { ok: true, draft: { draftId: `d${made.length}` } } },
+        refreshDraft: async ({ draftId }) => ({ ok: true, draft: { draftId } }),
+    }
+    const r = makeActRig({ agent: 'portfolio', desk: { ...portfolioDesk, applyEdit: makePortfolioApplyEdit({ adopt, clean: () => portfolioNextState(null, null) }) }, state: { adopt: true } })
     const { edit, stateOf } = await r.start(user)
     assert.equal((await edit({ adopt: 'start' })).ok, true)
     assert.deepEqual(made, [{ userId: 'u1', name: 'My bank book' }], 'staged as the user, empty')
@@ -325,4 +330,60 @@ test('8c: a failed stage is a refusal, and ending with nothing on the table has 
     assert.deepEqual(await apply(null, { adopt: 'start' }, { user }), { reason: 'adopt_failed' })
     assert.deepEqual(await apply(null, { adopt: 'end' }, { user }), { reason: 'nothing_to_edit' })
     assert.equal(PORTFOLIO_REASONS.adopt_failed[0], 500)
+})
+
+// ─── phase 8c CR ──────────────────────────────────────────────────────────────
+
+test('8c CR: an unsized plan is never saved — not by Generate, and not by an Update that would rebind instead', async () => {
+    const UNSIZED = { name: 'Q', ideas: [{ asset: 'MSFT', allocationRatio: 1 }] }
+    const g = rig({ state: { pendingPlan: UNSIZED } })
+    assert.equal((await (await g.start(user)).press('generate', { accounts: ACCOUNTS })).reason, 'plan_not_ready')
+    assert.equal(g.calls.create.length, 0)
+    const u = rig({ state: { portfolioId: 'p1', editing: { kind: 'portfolio', entityId: 'p1' }, pendingPlan: UNSIZED } })
+    assert.equal((await (await u.start(user)).press('update', { accounts: ACCOUNTS })).reason, 'plan_not_ready')
+    assert.equal(u.calls.replace.length + u.calls.rebind.length, 0)
+    assert.equal(PORTFOLIO_REASONS.plan_not_ready[0], 409)
+})
+
+test('8c CR: a review whose every change was declined closes as held, not a loop on nothing', async () => {
+    const r = rig({ state: { ...REVIEW, reviewed: true, reviewUpdate: { changes: [ADD_XOM] } } })
+    const { press, stateOf } = await r.start(user)
+    const out = shapeOf(await press('accept', { dropAvoid: true }))
+    assert.equal(out.result.held, true)
+    assert.deepEqual(r.calls.close[0], { pid: 'p1', outcome: 'reviewed' })
+    assert.equal(r.calls.accept.length, 0)
+    assert.equal(await stateOf(), null)
+})
+
+test('8c CR: Axl\'s adopt lands on a CLEAN table; over unsaved work it waits for the yes; any other route ends it', () => {
+    const editing = { portfolioId: 'p1', editing: { kind: 'portfolio', entityId: 'p1' }, mandate: { goal: 'g' }, chainId: 'c1' }
+    const clean = portfolioDesk.onRouted(editing, { adopt: true })
+    assert.equal(clean.adopt, true)
+    assert.equal(clean.portfolioId, null, 'not the book being edited')
+    assert.equal(clean.editing, undefined)
+    const over = portfolioDesk.onRouted({ ...editing, pendingPlan: PLAN }, { adopt: true })
+    assert.equal(over.adopt, true)
+    assert.deepEqual(over.pendingPlan, PLAN, 'unsaved work is never dropped unasked')
+    const away = portfolioDesk.onRouted({ adopt: true, adoptDraftId: 'd1' }, null)
+    assert.equal(away.adopt, false)
+    assert.equal(away.adoptDraftId, null)
+})
+
+test('8c CR: start refuses over unsaved work until the yes; it replaces a committed draft; it clears the book being edited', async () => {
+    const made = []
+    const adopt = {
+        createDraft:  async () => { made.push(1); return { ok: true, draft: { draftId: `n${made.length}` } } },
+        refreshDraft: async ({ draftId }) => (draftId === 'dead' ? { ok: false, reason: 'already_committed' } : { ok: true, draft: { draftId } }),
+    }
+    const apply = makePortfolioApplyEdit({ adopt, clean: () => portfolioNextState(null, null) })
+    assert.deepEqual(await apply({ pendingPlan: PLAN }, { adopt: 'start' }, { user }), { reason: 'adopt_over_work' })
+    const yes = await apply({ pendingPlan: PLAN, portfolioId: 'p1' }, { adopt: 'start', fresh: true }, { user })
+    assert.equal(yes.dropMarkers, true)
+    assert.equal(yes.state.pendingPlan, null)
+    assert.equal(yes.state.portfolioId, null)
+    const replaced = await apply({ adopt: true, adoptDraftId: 'dead' }, { adopt: 'start' }, { user })
+    assert.equal(replaced.state.adoptDraftId, 'n2', 'a committed draft is not reused')
+    const kept = await apply({ adopt: true, adoptDraftId: 'live' }, { adopt: 'start' }, { user })
+    assert.equal(kept.state.adoptDraftId, 'live')
+    assert.equal(made.length, 2)
 })

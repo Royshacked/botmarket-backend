@@ -26,7 +26,7 @@ const _str = (v) => (typeof v === 'string' && v.trim() ? v.trim() : null)
  *
  * `result` null is a FOLD, not a turn (a route landing, a book reopened): everything on the table stays.
  *
- * A REVIEW proposal is the latest turn's or none. A review turn without an update block WITHDRAWS the one before
+ * A proposal is the latest turn's or none. A turn without an update block WITHDRAWS the one before
  * it — Atlas took six trims back in prose on 2026-10-03 and Accept still sent the first turn's block (the panel's
  * rule, kept here now that Accept reads the state). Atlas re-emits a proposal it still stands behind
  * (agentUtils.buildStandingProposalRule). A thesis stated in THE SAME turn rides on the proposal, so accepting it
@@ -34,9 +34,12 @@ const _str = (v) => (typeof v === 'string' && v.trim() ? v.trim() : null)
  */
 export function portfolioNextState(prev, result) {
     const turn = result ?? {}
-    const reviewUpdate = result && prev?.reviewMode === true
-        ? (result.update?.changes?.length ? { ...result.update, ...(result.thesis ? { thesis: result.thesis } : {}) } : null)
-        : (turn.update ?? prev?.reviewUpdate ?? null)
+    // The latest turn decides outside a review too (phase 8c CR): an edit's proposal waits on Accept now, so one Atlas
+    // took back would otherwise stay on the table — and stand in the way of saving the plan that replaced it.
+    const inReview = prev?.reviewMode === true
+    const reviewUpdate = result
+        ? (result.update?.changes?.length ? { ...result.update, ...(inReview && result.thesis ? { thesis: result.thesis } : {}) } : null)
+        : (prev?.reviewUpdate ?? null)
     return {
         portfolioId:  prev?.portfolioId ?? null,
         reviewMode:   prev?.reviewMode === true,
@@ -73,9 +76,17 @@ export const portfolioDesk = {
         portfolioId: book?.portfolioId ?? book?.id ?? null, reviewMode: opts.reviewMode === true, thesis: book?.thesis ?? null,
     }, null),
     // A route lands here. The work in progress is kept (an Atlas plan is not thrown away by a second route) — and so
-    // are its markers: a book being edited stays the one an update seals onto (phase 8a CR C1). The adopt hint, when
-    // Axl sends one, opens the adopt grid.
-    onRouted: (prev, preset) => keepMarkers({ ...portfolioNextState(prev, null), ...(preset?.adopt === true ? { adopt: true } : {}) }, prev),
+    // are its markers: a book being edited stays the one an update seals onto (phase 8a CR C1).
+    // ADOPT (phase 8c CR): Axl's adopt hint opens the adopt grid on a CLEAN table — an adoption is a new book, and its
+    // conversation must not parse into the one being edited. Unsaved work (a plan, a proposal) stays, marked `adopt`:
+    // the surface asks before putting it aside (`{ adopt: 'start', fresh: true }`). Any OTHER route ends adopt mode —
+    // walking away by another door used to leave the next build parsing into the old draft.
+    onRouted: (prev, preset) => {
+        const kept = portfolioNextState(prev, null)
+        if (preset?.adopt !== true) return keepMarkers({ ...kept, adopt: false, adoptDraftId: null }, prev)
+        if (kept.pendingPlan || kept.reviewUpdate) return keepMarkers({ ...kept, adopt: true }, prev)
+        return { ...portfolioNextState(null, null), adopt: true, adoptDraftId: kept.adoptDraftId }
+    },
     // `portfolioIdeas` is still SENT by the client and deliberately not read: the book Atlas sees is
     // read from the database (portfolioState), not from the list the client happened to be holding.
     // See _buildPortfolioStateSection — an empty client list is what made Atlas invent item ids.
@@ -217,7 +228,7 @@ export const portfolioDesk = {
     },
     // The session's commits (plan phase 8, K2) and hand edits (K3: adopt mode) — services/desks/act.js runs them.
     actions: portfolioActions,
-    applyEdit: makePortfolioApplyEdit(),
+    applyEdit: makePortfolioApplyEdit({ clean: () => portfolioNextState(null, null) }),
     reasons: PORTFOLIO_REASONS,
     stateFields: ['plan', 'update', 'mandate', 'thesis', 'screen_requests', 'coverage_request'],
     done: (result) => ({
