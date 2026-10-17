@@ -669,6 +669,117 @@ reads its payload, which message_resolved does not carry.
   `SUMMON_MS`, `RETURN_MS`, `TICKET_DESK`, `DESKS[].steps`. Keep `AgentIntro`, `AgentTurnTag`,
   `BotAvatarGlyph`.
 
+### 9.1 Phase 7 — detailed plan (2026-10-17, for Roy's approval)
+
+Read before writing it: AxlHub (998 lines) and its tests, the threads client and its nine importers, the chat
+socket client, the shared chat pieces, the six desk panels' send / persist / continue paths, MainPage's chat
+column, SocialChat's card dispatch, the event bus, and the backend's session routes, frames and turn payloads.
+Facts that shaped it:
+- **Nothing on the client speaks to sessions yet.** No `/api/sessions` call, no `session_*` listener, and the
+  socket client cannot SEND (`chatWsService` has `connect / disconnect / on / off`; its only outbound frame is
+  the ping). It is connected once, by `useChatWs` in AppHeaderAxl.
+- **The desk panels are entangled with their own transport.** Each one streams to `api/<agent>/stream`
+  through its own `useChatStream` state, persists through threads or an entity's `chat_state`, and draws its
+  working UI (Generate, pickers, summaries) from that state. They cannot be pointed at the session one by one;
+  they come out together with the surfaces in phase 8.
+- **What a reply carries beyond prose dies on reload.** `suggestions` (the tap options), `chart` and `show`
+  ride only the live `session_turn: done` payload; the stored row holds `content` alone.
+- **The server moves the floor on a route but does nothing else with it.** Axl's `opening` (the user's words
+  to carry), its `edit` (reopen an item) and the market brief exist only on the old HTTP paths.
+- **A card row is a bare reference** (`ref.msgId`, phase 6); the card bubbles need the card itself (payload,
+  actions, status). SocialChat's card dispatch is an inline ternary in ChatWindow (213–251); the bubbles only
+  emit on the event bus, so they render anywhere given a message and an `onResolve`.
+- **Streaming on the socket is a different shape from SSE**: `session_delta {turnId, agent, type, data}` and
+  `session_turn {status}`, with `session_message` as the settled row. `useChatStream` (504 lines, SSE-bound)
+  does not fit; ChatBubble, ChatInputRow, SuggestionChips, ChatChart and AgentGlyph do.
+
+**Six decisions this plan asks for (my recommendation first):**
+
+- **J1 — Phase 7 replaces AxlHub with the timeline for EVERY agent's conversation; the desk panels stay as
+  they are until phase 8, and the deletions that belong to them move to phase 8.** Between the two phases the
+  branch has the timeline (talk to any agent, chains, cards) and the old panels behind the entity Edit buttons
+  — two ways in for a few days, on a branch that ships nothing until phase 10. Moved to phase 8 (their
+  importers are the panels and MainPage's pipeline code): `RouteOffer`, `useRouteOffer`, `useDeskHandoff`,
+  `doors`, `contracts` + the four pipeline `*.contract.js` (NOT `Floor/queuedAction.contract.js`, a live
+  Floor module with the same suffix), `pipelineNav`, `deskReset`, `ThreadHistory`, `AgentSummon` /
+  `AxlBotGlyph` (MainPage's "Heading back" overlay), `RETURN_MS`, `DESKS[].steps`. *Alternative:* merge
+  phases 7 and 8 into one — a single 5–6k-line change with no point to drive in between.
+- **J2 — A reply row keeps its extras: `ref: { suggestions, chart, show }`** (each only when present). Tap
+  options, the chart and the "show me" offer survive a reload and replay. No new field: `ref` already exists
+  on every row. *Alternative:* keep them live-only — a reload loses the options under the last question.
+- **J3 — Card rows are HYDRATED on the server, by one shared `hydrateCards(rows)`**: the messages route, the
+  `session_sync` replay and the live `session_message` push attach `card: { payload, actions, status,
+  resolveOutcome, resolveNote }` from `chat_messages` (one `$in` read). The stored row stays a reference
+  (H1). The client renders it with ONE card dispatcher extracted from ChatWindow — `<CardBubble msg onResolve
+  onClose>` — used by both SocialChat and the timeline; resolve goes through the existing
+  `chatService.resolveMessage(ref.conversationId, …)`. `message_resolved` patches the status; the review
+  resolve's frame also carries its `payload` patch (`resolved`, `outcome`, `nextReviewAt`), which closes
+  the line carried from phase 6. *Alternative:* a client-side fetch per card — N requests per load.
+- **J4 — The server acts on Axl's routing in the session.** After an Axl turn: a route WITH an `opening`
+  queues the receiving agent's first turn with the opening as the user's message (the chain runner's queued
+  turn — not a second runner); an `edit` runs `openForEdit` exactly as `POST /:id/edit` does (a busy agent
+  → the decision card the chain already draws); `show` stays a client action (it opens a pop-out, no desk).
+  The market brief becomes an Axl session turn with `input: { brief: true }` (the Axl desk calls the brief
+  service) — the brief card's button and the bus event post that turn. *Alternative:* the client re-sends the
+  opening as a turn — the client deciding what the server already knows.
+- **J5 — Axl's opening question is a STATIC empty state, not a model turn.** An empty session shows Axl's
+  greeting and tap options — *Trade it · Build a portfolio · Find ideas · Research a company · Ask about the
+  app* — each sent as the user's own message to Axl, who routes (decision 10). No model call per new session;
+  `LANDING_ASKS` joins the same options row. *Alternative:* a generated greeting — a model call for a
+  sentence that never changes.
+- **J6 — One small client reducer for the session, not `useChatStream`.** `sessionReducer(state, frame)`
+  (pure, node-tested) folds `session_replay / message / removed / state / delta / turn` into `{ sessionId,
+  rows, live: { turnId, agent, text, reasoning, phase, status } | null, floor, agentState, chain }`;
+  `useSession(scope)` wires it to the socket and the REST client. Rendering reuses ChatBubble (a row maps to
+  its `msg` shape), ChatInputRow, SuggestionChips, ChatChart, AgentGlyph + `AGENTS`. *Alternative:* adapt
+  `useChatStream` — its SSE-shaped state machine for a socket that already delivers settled rows.
+
+**Steps**
+
+- **7a — backend (one commit):** J2 (sessionTurn appends the reply with `ref` extras; a tags-only reply with
+  options still gets a row) · J3 (`services/sessionCards.js` `hydrateCards`, used by the messages route,
+  `replay` and the live push; the review frame's payload patch) · J4 (route + opening → queued turn, edit →
+  `openForEdit`, the brief as an Axl input) · the Axl prompt (`axl_system_prompt.md`): one chat, not "the
+  desk's chat"; the opening question's options; intent → agent; leftover work ("Mentor still has your NVDA
+  setup open — carry on, or start fresh?"); a busy agent; the order ticket opens as a `show`.
+- **7b — client transport:** `chatWsService.send(event, data)`; `services/session/session.service.remote.js`
+  (active, new, list, messages, turn, edit, continue; stop stays `turn.service.stopTurn`);
+  `services/session/sessionReducer.js` + `useSession(scope)` — `session_sync` on mount and on every
+  `connected` (a reconnect replays what it missed after the last seq); a client-minted `turnId` per turn.
+- **7c — the timeline:** `cmps/ChatTimeline/` — `ChatTimeline` (scroll via `useChatScroll`), `TimelineRow`
+  per kind: `msg` (ChatBubble; an agent header when the speaker changes), `handoff` (a divider "Atlas → Argus"
+  with the artifact's one-line summary), `decision` (the question + choice buttons → `continue`; settled
+  once answered), `sealed` (the reopened-context card), `card` (CardBubble); the live turn as a streaming
+  bubble with its phase chip; tap options under the last reply that has them; ShowOffer lifted out of
+  AxlHub; the input row with Stop (the running turn's id) — no per-desk `_continue`.
+- **7d — mount and delete:** MainPage's chat column renders `ChatTimeline` where AxlHub was (the old panels
+  still render on their tabs, J1); a "New session" button and a session history drawer (archived sessions,
+  read-only). `MARKET_BRIEF_OPEN` posts the brief turn. Delete: `AxlHub.jsx` (its greeting SVG, options and
+  ShowOffer move into the timeline's empty state), `AxlHub.test.jsx` (→ timeline tests), `deskWork.js` +
+  test, `TICKET_DESK`, `SUMMON_MS`, `TicketGlyph`, the hub's private `MessageBubble`, `axlService
+  .streamAxl` / `streamBrief` (their last callers go), ChatWindow's inline card dispatch (→ CardBubble).
+  AxlHub.scss shrinks to what the empty state uses.
+- **7e — drive:** `scripts/drive-unified-chat.mjs` (Playwright on the built bundle, the throwaway QA user):
+  empty state → tap "Trade it" → Axl routes → Mentor answers in the same timeline under its own header; Stop
+  mid-turn; reload → the timeline and the last tap options come back; a posted card appears live and its
+  dismiss flips it; New session → history lists the old one.
+
+**Not in phase 7:** the side pane and surfaces, MainPage's pipeline teardown, the panels (phase 8); Pythia
+and Aether (their own scopes, still on their panels and threads — threads die with their last caller, D1);
+migration (phase 9).
+
+**Tests:** backend — the reply row's `ref` extras (present / absent / tags-only); `hydrateCards` (one read,
+missing card → `card: null`, non-card rows untouched) on all three paths; the review frame's payload patch;
+route + opening queues exactly one turn for the receiver, under the lock; a route without an opening queues
+none; `edit` → `openForEdit` and busy → decision; the brief input. Client — `sessionReducer` for every frame
+(replay merge by seq, duplicate `session_message` ignored, delta append, turn done/stopped/error clears
+`live`, `removed`, `archived`); `useSession` sends `session_sync` on connect and reconnect with the last seq;
+ChatTimeline renders each row kind, the speaker header only on a change, decision choices post `continue`,
+tap options post a turn, Stop calls `stopTurn` with the live turn id; CardBubble renders every card type
+ChatWindow did (the existing card tests move onto it); the empty state's options. Existing panel suites
+unchanged.
+
+
 ## 10. Phase 8 — Frontend: side pane + MainPage teardown
 
 - **Surfaces extracted from the panels**, reading `agentState` from the session; every action goes through
@@ -693,6 +804,9 @@ reads its payload, which message_resolved does not carry.
   `handleUpdateList`. The edit openers (`handleEditSetup`, `handleEditCoverage`, `handleEditScan`,
   `handleEditPortfolio`) collapse into one "edit entity" call.
 - `TradeIdeasList`'s `chatTab` filter signal reads the floor instead.
+- Moved here from phase 7 (J1): delete `RouteOffer`, `useRouteOffer`, `useDeskHandoff`, `doors`, `contracts` + the four
+  pipeline `*.contract.js` (keep `Floor/queuedAction.contract.js`), `pipelineNav`, `deskReset`, `ThreadHistory`,
+  `AgentSummon` / `AxlBotGlyph`, `RETURN_MS`, `DESKS[].steps`.
 - The desk panels (`MentorPanel`, `ScannerPanel`, `PortfolioPanel`, `AnalystPanel`) are deleted once their
   surfaces are out. `StrategyPanel` / `AetherPanel` stay, opened from admin-only buttons in `FloorLists.jsx`
   (§1 q4, temporary).
