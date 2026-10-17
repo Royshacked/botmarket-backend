@@ -162,3 +162,25 @@ test('Argus refusals answer in its own words', () => {
     assert.equal(SCANNER_REASONS.stale_read[0], 409)
     assert.equal(scannerDesk.reasons, SCANNER_REASONS)
 })
+
+test('8d: a fresh table — the list, the saved list being edited and the markers go; the lens stays or is the one given', async () => {
+    const editing = { profile: 'investing', pendingScan: LIST, editingScanId: 's1', editList: LIST, readCut: { dropped: [], survived: true }, editing: { kind: 'scan', entityId: 's1' } }
+    const kept = scannerApplyEdit(editing, { fresh: true })
+    assert.equal(kept.dropMarkers, true)
+    assert.equal(kept.state.pendingScan, null)
+    assert.equal(kept.state.editingScanId, null)
+    assert.equal(kept.state.editList, null)
+    assert.equal(kept.state.readCut, null)
+    assert.equal(kept.state.profile, 'investing')
+    assert.equal(scannerApplyEdit(editing, { fresh: true, profile: 'trading' }).state.profile, 'trading')
+    assert.equal(scannerApplyEdit(null, { fresh: true }).state.profile, 'trading')
+    assert.equal(scannerApplyEdit(editing, { fresh: true, profile: 'momentum' }).reason, 'invalid_edit')
+
+    // Through the pipe: the editing marker does not survive (dropMarkers), so Update cannot reach the saved list.
+    const r = makeActRig({ agent: 'scanner', desk: scannerDesk, state: editing })
+    const { edit, stateOf } = await r.start(TRADER)
+    assert.equal((await edit({ fresh: true, profile: 'trading' })).ok, true)
+    const st = await stateOf()
+    assert.equal(st.editing, undefined)
+    assert.equal(st.editingScanId, null)
+})

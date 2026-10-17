@@ -121,10 +121,19 @@ export function applyRead(state, read) {
 }
 
 /**
- * A direct edit (K3): `{ profile }` — the lens; `{ read: { tickers, rows } }` — a Prometheus read of the list.
+ * A direct edit (K3): `{ profile }` — the lens; `{ read: { tickers, rows } }` — a Prometheus read of the list;
+ * `{ fresh: true, profile? }` — a CLEAN table (phase 8d): the list in progress, the saved list being edited and its
+ * markers go, the lens stays (or is the one given). A radar cut starts on one — it is its own conversation, and a cut
+ * landing on a list being edited would make Update overwrite that saved list with the radar's names. The client asks
+ * before putting work aside.
  * The angle chips are not an edit: they compose the next turn's message, and that turn is the commit.
  */
 export function scannerApplyEdit(state, edit = {}) {
+    if (edit.fresh === true) {
+        if ('profile' in edit && edit.profile !== 'trading' && edit.profile !== 'investing') return { reason: 'invalid_edit' }
+        const profile = 'profile' in edit ? edit.profile : state?.profile
+        return { state: { ...scannerMode({ profile }), pendingScan: null, editingScanId: null, readCut: null }, dropMarkers: true }
+    }
     if ('profile' in edit) {
         if (edit.profile !== 'trading' && edit.profile !== 'investing') return { reason: 'invalid_edit' }
         // A hand-off asks for ONE tradeable name — the lens is locked to trading there.
