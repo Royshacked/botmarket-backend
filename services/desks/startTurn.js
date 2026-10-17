@@ -26,6 +26,7 @@ export function makeStartTurn({
     sessionTurn = defaultSessionTurn,
     emitterFor  = turnEmitter,
     afterTurn   = async () => {},
+    onUserTurn  = async () => {},   // a user turn accepted — the chain pauses after the turn in flight (G4)
     lock        = withSessionLock,
 } = {}) {
 
@@ -70,6 +71,7 @@ export function makeStartTurn({
         const who     = agent ?? mention?.agent ?? session.floor ?? 'axl'
         if (!canSpeak(who, session, user)) return { reason: 'forbidden' }
 
+        await onUserTurn({ user, sessionId })
         const id = typeof turnId === 'string' && turnId ? turnId : `turn_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
         runQueued({ user, sessionId, agent: who, text: mention ? mention.text || text : text, input, turnId: id })
             .catch(err => logger.warn(LOG, 'queued turn crashed', err.message))
@@ -79,4 +81,3 @@ export function makeStartTurn({
     return { startTurn, runQueued }
 }
 
-export const { startTurn, runQueued } = makeStartTurn()

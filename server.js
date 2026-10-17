@@ -39,6 +39,7 @@ import cookieParser from 'cookie-parser'
 import { chatRoutes }         from './api/chat/chat.routes.js'
 import { attach as attachChatWs } from './api/chat/chatWs.js'
 import { registerSessionChannel } from './services/sessionChannel.js'
+import { chain } from './services/desks/turns.js'
 import { ensureIndexes as ensureChatIndexes } from './api/chat/chat.service.js'
 import { ensureUserIndexes } from './api/user/user.model.js'
 import { ensureIdeaIndexes } from './api/trade-ideas/tradeIdeas.service.js'
@@ -243,6 +244,8 @@ ensurePythiaCallsIndexes().catch(() => {})        // Pythia's forward log, pythi
 ensureThemeIndexes().catch(() => {})              // Pythia's themes (api/strategy/theme.service.js)
 threadService.ensureThreadIndexes()
 sessionService.ensureIndexes()        // the unified chat's sessions + session_messages (services/session.service.js)
+// A restart cut off every chain that was running: pause each and let its floor-holder ask (plan phase 5, G4).
+chain.sweep().catch(err => logger.warn('[server]', 'chain sweep failed', err.message))
 agentContextService.ensureIndexes()   // sealed agent contexts (services/agentContext.service.js)
 ensurePortfolioBookIndexes()
 

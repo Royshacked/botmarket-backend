@@ -7,7 +7,7 @@
 import { sessionService } from '../../services/session.service.js'
 import { isScope, ADMIN_SCOPES } from '../../services/session.util.js'
 import { AGENT_KEYS } from '../../services/desks/registry.js'
-import { startTurn } from '../../services/desks/startTurn.js'
+import { startTurn, chain } from '../../services/desks/turns.js'
 import { lookupForEdit } from '../../services/desks/entityLookup.js'
 import { sealing } from '../../services/desks/seal.js'
 import { parseIdeaAccounts, parseClientTime } from '../_shared/parse.util.js'
@@ -74,6 +74,20 @@ export const editInSession = handle('editInSession', async (req, res) => {
     if (!found.ok) return sendReason(res, found.reason, { overrides: EDIT_REASONS, fallback: 404 })
     const out = await sealing.openForEdit({ userId: req.user._id, sessionId: req.params.id, kind, entity: found.doc, name, force: force === true })
     if (out.reason) return sendReason(res, out.reason, { overrides: EDIT_REASONS, fallback: 404, extra: out.agent ? { agent: out.agent } : null })
+    res.json(out)
+})
+
+// A tap on a decision the chain is waiting on (plan phase 5c): continue a paused or interrupted chain, keep
+// going past the step cap, research a list, the next name in a queue, finish / set aside for a busy agent.
+const CONTINUE_REASONS = {
+    no_such_choice:      [409, 'That choice is not open right now'],
+    nothing_to_research: [409, 'There is no list to research'],
+}
+export const continueSession = handle('continueSession', async (req, res) => {
+    const choice = typeof req.body?.choice === 'string' ? req.body.choice : null
+    if (!choice) throw httpError(400, 'choice is required')
+    const out = await chain.resume({ user: req.user, sessionId: req.params.id, choice })
+    if (out.reason) return sendReason(res, out.reason, { overrides: CONTINUE_REASONS, fallback: 404 })
     res.json(out)
 })
 

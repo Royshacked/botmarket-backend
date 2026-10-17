@@ -233,6 +233,29 @@ export function makeSessionService({ getDb = _defaultGetDb, events = silentEvent
         return { removed: r.deletedCount ?? 0 }
     }
 
+    /**
+     * The chain running in this session (plan phase 5c): `{ id, status, origin, steps, next, queue,
+     * awaiting, pauseRequested }`, or null. Written BEFORE each step, so a restart finds it.
+     */
+    async function setChain({ sessionId, userId, chain }) {
+        const db = await getDb()
+        const r  = await db.collection(SESSIONS).updateOne(
+            { sessionId: String(sessionId), userId: String(userId) },
+            { $set: { chain: chain && typeof chain === 'object' ? chain : null, updatedAt: Date.now() } },
+        )
+        if (!r.matchedCount) return { reason: 'not_found' }
+        events.state(String(userId), String(sessionId), { chain: chain ? { id: chain.id, status: chain.status, awaiting: chain.awaiting ?? null } : null })
+        return { ok: true }
+    }
+
+    /** Every session whose chain was RUNNING — what the boot sweep pauses after a restart. */
+    async function findRunningChains() {
+        const db = await getDb()
+        return db.collection(SESSIONS)
+            .find({ 'chain.status': 'running' }, { projection: { _id: 0, sessionId: 1, userId: 1, floor: 1, chain: 1 } })
+            .toArray()
+    }
+
     /** Who has the floor — the agent the user's next message goes to (unified-chat.md §3.3). */
     async function setFloor({ sessionId, userId, agent }) {
         if (!isAgent(agent)) return { reason: 'invalid_agent' }
@@ -281,7 +304,7 @@ export function makeSessionService({ getDb = _defaultGetDb, events = silentEvent
         return r.matchedCount ? { ok: true } : { reason: 'not_found' }
     }
 
-    return { ensureIndexes, getActive, startNew, list, get, append, messagesSince, messagesForAgent, allMessagesSince, removeMessages, setAgentState, setSealedThrough, setFloor, setSummary, addLink }
+    return { ensureIndexes, getActive, startNew, list, get, append, messagesSince, messagesForAgent, allMessagesSince, removeMessages, setAgentState, setSealedThrough, setChain, findRunningChains, setFloor, setSummary, addLink }
 }
 
 export const sessionService = makeSessionService({ events: sessionEvents })

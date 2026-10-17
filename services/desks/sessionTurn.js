@@ -119,7 +119,9 @@ export function makeSessionTurn({
             : null
 
         const next = desk.nextState ? desk.nextState(state, result, prepared) : state
-        const kept = next ? { ...next, ...(editing ? { editing } : {}) } : null
+        // The markers the desk's own fold knows nothing about survive it: what it is editing, and which chain
+        // it is working for (the busy rule reads that).
+        const kept = next ? { ...next, ...(editing ? { editing } : {}), ...(state?.chainId ? { chainId: state.chainId } : {}) } : null
         await sessions.setAgentState({ sessionId, userId: user._id, agent, state: kept })
 
         // The floor follows the reply: a route lands on its desk's entry agent; otherwise the agent that
