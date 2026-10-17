@@ -21,6 +21,9 @@ import { KIND, makeArtifact } from './artifact.js'
 import { receiverOf, briefFor } from './contracts.js'
 import { emitted, decisionFor, researchQueueFrom } from './rules.js'
 import { logger } from '../logger.service.js'
+import { getDb } from '../../providers/mongodb.provider.js'
+import { withSessionLock } from '../desks/turnLock.js'
+import { COLLECTION as USERS, roleOf } from '../../api/user/user.model.js'
 
 const LOG = '[chain]'
 export const MAX_STEPS = 12
@@ -31,7 +34,15 @@ const newChain = (origin) => ({
     next: null, current: null, queue: null, awaiting: null, pauseRequested: false,
 })
 
-export function makeChainRunner({ sessions = sessionService, desks = DESK_DEFS, maxSteps = MAX_STEPS } = {}) {
+// The user a turn acts as when no request carries one (the restart sweep, a settled sleeve): the id AND the
+// role — an admin's chain must keep an admin's reach (Atlas's coverage refresh is admin-only).
+async function _loadUser(userId) {
+    const db  = await getDb()
+    const doc = await db.collection(USERS).findOne({ id: String(userId) }, { projection: { _id: 0, role: 1, isAdmin: 1 } })
+    return { _id: String(userId), role: roleOf(doc) }
+}
+
+export function makeChainRunner({ sessions = sessionService, desks = DESK_DEFS, maxSteps = MAX_STEPS, loadUser = _loadUser, lock = withSessionLock } = {}) {
     // The queued-turn runner (startTurn's runQueued) — bound after construction, because it needs this
     // runner's afterTurn in return (services/desks/turns.js wires the pair).
     let runQueued = null
@@ -130,8 +141,14 @@ export function makeChainRunner({ sessions = sessionService, desks = DESK_DEFS, 
         if (session?.chain?.status === 'running') await save(user, sessionId, { ...session.chain, pauseRequested: true })
     }
 
-    /** A tap on a decision. @returns {{ ok: true } | { reason: string }} */
-    async function resume({ user, sessionId, choice }) {
+    /**
+     * A tap on a decision. @returns {{ ok: true } | { reason: string }}
+     * Under the session lock, like every turn: its hand-off message must never interleave with a turn still
+     * writing. (The receiver's turn it queues runs after the lock is released.)
+     */
+    function resume(args) { return lock(args.sessionId, () => _resume(args)) }
+
+    async function _resume({ user, sessionId, choice }) {
         const session = await sessions.get({ sessionId, userId: user._id })
         const chain   = session?.chain
         if (!session || session.status !== 'active') return { reason: 'not_found' }
@@ -184,8 +201,10 @@ export function makeChainRunner({ sessions = sessionService, desks = DESK_DEFS, 
      * follow-up to Argus can be answered — then what came back is handed to Atlas as a coverage set, saying
      * what did NOT come back too. Answers false when the session is gone, so the card is posted instead.
      */
-    async function sleeveSettled(sleeve, outcome) {
-        const user    = { _id: sleeve.userId }
+    function sleeveSettled(sleeve, outcome) { return lock(sleeve.sessionId, () => _sleeveSettled(sleeve, outcome)) }
+
+    async function _sleeveSettled(sleeve, outcome) {
+        const user    = await loadUser(sleeve.userId)
         const session = await sessions.get({ sessionId: sleeve.sessionId, userId: user._id })
         if (!session || session.status !== 'active') return false
         const school = sleeve.school ? ` (${sleeve.school})` : ''
@@ -214,7 +233,7 @@ export function makeChainRunner({ sessions = sessionService, desks = DESK_DEFS, 
     async function sweep() {
         const cut = await sessions.findRunningChains()
         for (const s of cut) {
-            const user = { _id: s.userId }
+            const user = await loadUser(s.userId)
             await save(user, s.sessionId, { ...s.chain, status: 'paused', next: null, awaiting: null, pauseRequested: false })
             await sessions.append({ sessionId: s.sessionId, userId: s.userId, message: {
                 agent: s.chain.current?.to ?? s.floor ?? 'axl', role: 'assistant', kind: 'decision',

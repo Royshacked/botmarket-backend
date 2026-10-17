@@ -14,7 +14,8 @@ import { decisionFor, emitted, researchQueueFrom } from '../../services/chain/ru
 function rig({ maxSteps } = {}) {
     const { db } = memDb()
     const sessions = makeSessionService({ getDb: async () => db })
-    const runner = makeChainRunner({ sessions, ...(maxSteps ? { maxSteps } : {}) })
+    const roles = { admin1: 'admin' }
+    const runner = makeChainRunner({ sessions, loadUser: async (id) => ({ _id: id, role: roles[id] ?? 'trader' }), ...(maxSteps ? { maxSteps } : {}) })
     const queued = []
     runner.bindRunQueued(async (args) => { queued.push(args); return {} })
     return { sessions, runner, queued }
@@ -220,4 +221,11 @@ test('a settled sleeve becomes Argus’s line, then the coverage is handed to At
 test('a sleeve whose session is gone is declined — the caller posts the card instead', async () => {
     const r = rig()
     assert.equal(await r.runner.sleeveSettled({ userId: 'u1', sessionId: 'nope', sector: 'X' }, { covered: [], passed: [], failed: [], unresolved: [], screened: 0 }), false)
+})
+
+test('a chain step the server starts on its own acts as the user WITH their role (an admin keeps admin reach)', async () => {
+    const r = rig()
+    const s = await r.sessions.getActive({ userId: 'admin1' })
+    await r.runner.sleeveSettled({ userId: 'admin1', sessionId: s.sessionId, sector: 'Energy' }, { covered: ['XOM'], passed: [], failed: [], unresolved: [], screened: 3 })
+    assert.equal(r.queued.at(-1).user.role, 'admin')
 })

@@ -21,6 +21,7 @@ if (config.dnsServers?.length) dns.setServers(config.dnsServers)
 else dns.setServers(['8.8.8.8', '1.1.1.1'])
 
 const { getDb, getDbName, closeDb } = await import('../providers/mongodb.provider.js')
+const { roleOf } = await import('../api/user/user.model.js')
 const { sessionService } = await import('../services/session.service.js')
 const { agentContextService } = await import('../services/agentContext.service.js')
 const { sessionTurn } = await import('../services/desks/sessionTurn.js')
@@ -41,9 +42,10 @@ async function run() {
     const dbName = getDbName()
     if (dbName === 'test') { console.error('refusing to run on the production database `test`'); process.exitCode = 2; return }
     const db   = await getDb()
-    const u    = await db.collection('users').findOne({ username }, { projection: { _id: 1, role: 1 } })
+    const u    = await db.collection('users').findOne({ username }, { projection: { _id: 0, id: 1, role: 1, isAdmin: 1 } })
     if (!u) { console.error(`no user "${username}" in ${getDbName()}`); process.exitCode = 2; return }
-    const user = { _id: String(u._id), role: u.role ?? 'user' }
+    // The app's user id is the document's `id` (what the login token carries), not Mongo's _id.
+    const user = { _id: String(u.id), role: roleOf(u) }
     console.log(`${C.dim}db=${getDbName()} user=${username} (${user.role})${C.off}`)
     const emit = () => {}
 

@@ -124,6 +124,14 @@ export async function isAdminUserCached(id, _lookup = isAdminUser) {
 }
 export function _resetAdminCache() { _adminCache.clear() }
 
+/**
+ * A user document's role — the ONE rule, for the login token and for any server-side turn that acts as the
+ * user without a request (a chain step after a restart, a settled sleeve). `isAdmin` is the legacy flag.
+ */
+export function roleOf(doc) {
+    return doc?.role ?? (doc?.isAdmin ? 'admin' : 'trader')
+}
+
 export function stripUser(doc) {
     if (!doc) return doc
     // pushSubscriptions carries the devices' encryption keys — it leaves only through /api/push.

@@ -1,7 +1,7 @@
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 import { getDb } from '../../providers/mongodb.provider.js'
-import { COLLECTION } from '../user/user.model.js'
+import { COLLECTION, roleOf } from '../user/user.model.js'
 import { userService } from '../user/user.service.js'
 import { logger } from '../../services/logger.service.js'
 import { config } from '../../services/config.js'
@@ -36,7 +36,7 @@ async function signin(username, password) {
     const match = await bcrypt.compare(password, user.passwordHash)
     if (!match) throw httpError(401, 'Invalid credentials')
 
-    const role    = user.role ?? (user.isAdmin ? 'admin' : 'trader')
+    const role    = roleOf(user)
     const payload = { _id: user.id, username: user.username, fullname: user.fullname, role }
     const token = jwt.sign(payload, config.jwtSecret, { expiresIn: '7d' })
 
