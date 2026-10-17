@@ -19,7 +19,7 @@
 
 import { getDb as _defaultGetDb, stripId } from '../providers/mongodb.provider.js'
 import { logger } from './logger.service.js'
-import { newSessionId, isScope, isAgent, toTimelineMessage, sessionTitle } from './session.util.js'
+import { newSessionId, isScope, isAgent, toTimelineMessage, sessionTitle, segmentQuery } from './session.util.js'
 
 const LOG       = '[session]'
 const SESSIONS  = 'sessions'
@@ -45,6 +45,9 @@ export function makeSessionService({ getDb = _defaultGetDb } = {}) {
             )
             await db.collection(SESSIONS).createIndex({ userId: 1, scope: 1, updatedAt: -1 })
             await db.collection(MESSAGES).createIndex({ sessionId: 1, seq: 1 }, { unique: true })
+            // One agent's segment (messagesForAgent): its own rows, and the hand-offs addressed to it.
+            await db.collection(MESSAGES).createIndex({ sessionId: 1, agent: 1, seq: 1 })
+            await db.collection(MESSAGES).createIndex({ sessionId: 1, to: 1, seq: 1 }, { partialFilterExpression: { kind: 'handoff' } })
         } catch (err) {
             logger.warn(LOG, 'ensureIndexes failed', err.message)
         }
@@ -64,7 +67,7 @@ export function makeSessionService({ getDb = _defaultGetDb } = {}) {
             await db.collection(SESSIONS).updateOne(filter, {
                 $setOnInsert: {
                     sessionId: newSessionId(), title: null, summary: null, floor: 'axl',
-                    agentState: {}, summaries: {}, links: [], seq: 0,
+                    agentState: {}, summaries: {}, seals: {}, links: [], seq: 0,
                     createdAt: now, updatedAt: now, archivedAt: null,
                 },
             }, { upsert: true })
@@ -148,6 +151,40 @@ export function makeSessionService({ getDb = _defaultGetDb } = {}) {
         return rows.map(stripId)
     }
 
+    /**
+     * ONE agent's segment after `afterSeq` — its own turns and the hand-offs addressed to it, read with the
+     * segment filter (session.util.segmentQuery) instead of paging the whole timeline and discarding the
+     * other agents' rows. Pages internally, so no caller writes its own paging loop. Null if not yours.
+     */
+    async function messagesForAgent({ sessionId, userId, agent, afterSeq = 0 }) {
+        const db = await getDb()
+        const owns = await db.collection(SESSIONS).findOne(
+            { sessionId: String(sessionId), userId: String(userId) }, { projection: { _id: 0, sessionId: 1 } })
+        if (!owns) return null
+        const out = []
+        let after = Number.isFinite(Number(afterSeq)) ? Number(afterSeq) : 0
+        for (;;) {
+            const page = await db.collection(MESSAGES)
+                .find({ sessionId: String(sessionId), seq: { $gt: after }, ...segmentQuery(agent) })
+                .sort({ seq: 1 }).limit(PAGE_MAX).toArray()
+            out.push(...page.map(stripId))
+            if (page.length < PAGE_MAX) break
+            after = page.at(-1).seq
+        }
+        return out
+    }
+
+    /** Where an agent's last seal ended — its next seal takes only what came after. */
+    async function setSealedThrough({ sessionId, userId, agent, seq }) {
+        if (!isAgent(agent) || !Number.isFinite(seq)) return { reason: 'invalid' }
+        const db = await getDb()
+        const r  = await db.collection(SESSIONS).updateOne(
+            { sessionId: String(sessionId), userId: String(userId) },
+            { $set: { [`seals.${agent}`]: seq } },
+        )
+        return r.matchedCount ? { ok: true } : { reason: 'not_found' }
+    }
+
     /** Replace one agent's working state (its draft, its scan settings, its half-agreed mandate). */
     async function setAgentState({ sessionId, userId, agent, state }) {
         if (!isAgent(agent)) return { reason: 'invalid_agent' }
@@ -184,11 +221,22 @@ export function makeSessionService({ getDb = _defaultGetDb } = {}) {
         return r.matchedCount ? { ok: true } : { reason: 'not_found' }
     }
 
-    /** One agent's rolling summary: `{ text, throughSeq }` — its segment up to throughSeq lives in the text. */
+    /**
+     * One agent's rolling summary: `{ text, throughSeq }` — its segment up to throughSeq lives in the text.
+     * NEWER ONLY: a summary that covers no further than the stored one is dropped. A slow background fold
+     * must never overwrite a newer fold — or the reset a seal just wrote, which would bring sealed work
+     * back as the live summary.
+     */
     async function setSummary({ sessionId, userId, agent, summary }) {
         if (!isAgent(agent)) return { reason: 'invalid_agent' }
         if (!summary || typeof summary.text !== 'string' || !Number.isFinite(summary.throughSeq)) return { reason: 'invalid_summary' }
         const db = await getDb()
+        const cur = await db.collection(SESSIONS).findOne(
+            { sessionId: String(sessionId), userId: String(userId) }, { projection: { _id: 0, summaries: 1 } })
+        if (!cur) return { reason: 'not_found' }
+        if (Number.isFinite(cur.summaries?.[agent]?.throughSeq) && cur.summaries[agent].throughSeq >= summary.throughSeq) {
+            return { reason: 'stale' }
+        }
         const r  = await db.collection(SESSIONS).updateOne(
             { sessionId: String(sessionId), userId: String(userId) },
             { $set: { [`summaries.${agent}`]: { text: summary.text, throughSeq: summary.throughSeq } } },
@@ -208,7 +256,7 @@ export function makeSessionService({ getDb = _defaultGetDb } = {}) {
         return r.matchedCount ? { ok: true } : { reason: 'not_found' }
     }
 
-    return { ensureIndexes, getActive, startNew, list, get, append, messagesSince, removeMessages, setAgentState, setFloor, setSummary, addLink }
+    return { ensureIndexes, getActive, startNew, list, get, append, messagesSince, messagesForAgent, removeMessages, setAgentState, setSealedThrough, setFloor, setSummary, addLink }
 }
 
 export const sessionService = makeSessionService()

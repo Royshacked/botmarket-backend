@@ -65,7 +65,7 @@ export const initiateCoverage = _handle('initiateCoverage', async (req, res) => 
     }
     // With a sessionId, Prometheus's turns move onto the coverage they produced — per user, even on house
     // coverage (agentContext.service). Never fails the write.
-    await sealing.sealAfterGenerate(req, { kind: 'coverage', entityIds: [result.doc?.id], name: result.doc?.symbol ?? null })
+    sealing.sealAfterGenerate(req, { kind: 'coverage', entityIds: [result.doc?.id], name: result.doc?.symbol ?? null })
     res.send(result.doc)
 })
 
@@ -83,7 +83,7 @@ export const updateCoverage = _handle('updateCoverage', async (req, res) => {
     // and non-fatal (resolveCardsFor swallows its own failures). The note is the revision's own
     // account of what moved — the trail entry this write just appended.
     await resolveCardsFor({ kind: 'coverage', id: req.params.id }, { outcome: 'revised', note: revisionSummary(result.doc?.revisions?.[0]) })
-    await sealing.sealAfterGenerate(req, { kind: 'coverage', entityIds: [req.params.id], name: result.doc?.symbol ?? null })
+    sealing.sealAfterGenerate(req, { kind: 'coverage', entityIds: [req.params.id], name: result.doc?.symbol ?? null, onlyIfEditing: true })
     res.send(result.doc)
 })
 

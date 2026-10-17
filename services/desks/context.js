@@ -10,7 +10,7 @@
 // Pure: the caller loads the rows. The desk's agent then runs `normalizeMessages` on the result, which
 // coalesces neighbouring same-role turns and trims to its maxMessages exactly as on the HTTP path.
 
-import { segmentOf } from '../session.util.js'
+import { segmentOf, contextRole } from '../session.util.js'
 
 const SEALED_LEAD  = 'Earlier, on this item (summary): '
 const SUMMARY_LEAD = 'Earlier in this conversation (summary): '
@@ -33,8 +33,7 @@ export function buildConversation({ messages, agent, summary = null, sealed = nu
     const through = Number.isFinite(summary?.throughSeq) ? summary.throughSeq : 0
     for (const m of segmentOf(messages, agent)) {
         if (Number.isFinite(m.seq) && m.seq <= through) continue
-        const askedOfIt = m.kind === 'handoff' && m.to === agent && m.agent !== agent
-        out.push({ role: askedOfIt ? 'user' : m.role, content: m.content })
+        out.push({ role: contextRole(m, agent), content: m.content })
     }
     return out
 }

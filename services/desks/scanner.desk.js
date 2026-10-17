@@ -44,6 +44,9 @@ export const scannerDesk = {
     log:   '[scanner:desk]',
     parse: (body) => ({ state: _scannerMode(body) }),
     nextState: scannerNextState,
+    // A route LANDS here: new work, so the mode is the route's own (the trade desk's single-pick preset,
+    // or a plain list) — never what a previous route left behind. The lens (profile) is the user's and stays.
+    onRouted: (prev, preset) => ({ ..._scannerMode({ profile: prev?.profile, ...(preset ?? {}) }), pendingScan: null, editingScanId: null }),
     // Refining a saved list: its fields are the list in progress, and the next turn refines it.
     stateFromEntity: (scan) => {
         const pendingScan = { period: scan?.period, thesis: scan?.thesis, direction: scan?.direction, candidates: scan?.candidates ?? [] }

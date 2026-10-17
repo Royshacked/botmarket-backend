@@ -23,7 +23,7 @@ export const createScan = handle('createScan', async (req, res) => {
     const result = await scanService.saveScan(scan, req.user._id)
     if (!result.ok) return res.status(500).json({ error: 'Failed to save scan' })
     // With a sessionId, Argus's turns move onto the scan they produced (unified-chat §6.2). Never fails the save.
-    await sealing.sealAfterGenerate(req, { kind: 'scan', entityIds: [result.doc?.id], name: result.doc?.thesis ?? null })
+    sealing.sealAfterGenerate(req, { kind: 'scan', entityIds: [result.doc?.id], name: result.doc?.thesis ?? null })
     res.json({ scan: result.doc })
 })
 
@@ -49,6 +49,6 @@ export const updateScan = handle('updateScan', async (req, res) => {
     if (!scan || typeof scan !== 'object') throw httpError(400, 'scan patch is required')
     const result = await scanService.updateScan(id, scan, req.user._id)
     if (!result.ok) return sendReason(res, result.reason, { fallback: 500, fallbackMessage: 'Failed to update scan' })
-    await sealing.sealAfterGenerate(req, { kind: 'scan', entityIds: [id], name: result.doc?.thesis ?? null })
+    sealing.sealAfterGenerate(req, { kind: 'scan', entityIds: [id], name: result.doc?.thesis ?? null, onlyIfEditing: true })
     res.json({ scan: result.doc })
 })

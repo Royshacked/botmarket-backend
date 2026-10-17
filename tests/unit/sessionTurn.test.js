@@ -5,6 +5,7 @@ import { makeSessionService } from '../../services/session.service.js'
 import { makeAgentContextService } from '../../services/agentContext.service.js'
 import { makeSessionTurn } from '../../services/desks/sessionTurn.js'
 import { foldPlan, makeSummarizer } from '../../services/desks/summarize.js'
+import { DESK_DEFS } from '../../services/desks/index.js'
 
 // A desk turn run against the session (services/desks/sessionTurn.js) — on memDb with a STUB desk, so
 // what is tested is the mechanism: what is appended, what the desk is handed, what state is kept, where
@@ -22,7 +23,8 @@ function rig({ run, nextState = (prev, r) => ({ ...(prev ?? {}), last: r.reply }
         done: (r) => ({ reply: r.reply }),
         nextState,
     })
-    const desks = { axl: stub('axl'), mentor: stub('mentor'), scanner: stub('scanner') }
+    // Argus keeps its real onRouted: the route-lands-and-resets rule is what some tests below pin.
+    const desks = { axl: stub('axl'), mentor: stub('mentor'), scanner: { ...stub('scanner'), onRouted: DESK_DEFS.scanner.onRouted }, strategy: stub('strategy') }
     const turn = makeSessionTurn({ sessions, contexts, desks, experience: async () => 'novice', summarize })
     return { turn, sessions, contexts, rows, seen }
 }
@@ -68,7 +70,60 @@ test('a route to the trade desk hands the floor to Argus, preset to pick one nam
     await turn({ user, sessionId: s.sessionId, agent: 'axl', text: 'trade NVDA' })
     const h = await sessions.get({ sessionId: s.sessionId, userId: 'u1' })
     assert.equal(h.floor, 'scanner')
-    assert.deepEqual(h.agentState.scanner, { profile: 'trading', handoff: true, handoffTo: 'mentor' })
+    assert.equal(h.agentState.scanner.handoff, true)
+    assert.equal(h.agentState.scanner.handoffTo, 'mentor')
+    assert.equal(h.agentState.scanner.profile, 'trading')
+})
+
+test('the trade preset never outlives the trade — a later plain scan route finds Argus listing again', async () => {
+    let next = 'trade'
+    const { turn, sessions } = rig({ run: () => ({ reply: 'routing', route: next }) })
+    const s = await sessions.getActive({ userId: 'u1' })
+    await turn({ user, sessionId: s.sessionId, agent: 'axl', text: 'trade NVDA' })
+    next = 'scan'
+    await turn({ user, sessionId: s.sessionId, agent: 'axl', text: 'now a watchlist' })
+    const st = (await sessions.get({ sessionId: s.sessionId, userId: 'u1' })).agentState.scanner
+    assert.equal(st.handoff, false)
+    assert.equal(st.handoffTo, null)
+})
+
+test('a route to an admin desk from the main chat moves no floor — that desk keeps its own panel', async () => {
+    const { turn, sessions } = rig({ run: () => ({ reply: 'to Pythia', route: 'strategy' }) })
+    const s = await sessions.getActive({ userId: 'admin1' })
+    await turn({ user: { _id: 'admin1', role: 'admin' }, sessionId: s.sessionId, agent: 'axl', text: 'industry view' })
+    assert.equal((await sessions.get({ sessionId: s.sessionId, userId: 'admin1' })).floor, 'axl')
+})
+
+test('an agent speaks only in its own scope, and an admin desk only for an admin', async () => {
+    const { turn, sessions } = rig()
+    const main = await sessions.getActive({ userId: 'u1' })
+    assert.equal((await turn({ user, sessionId: main.sessionId, agent: 'strategy', text: 'x' })).reason, 'forbidden')
+    const pyth = await sessions.getActive({ userId: 'u1', scope: 'strategy' })
+    assert.equal((await turn({ user, sessionId: pyth.sessionId, agent: 'strategy', text: 'x' })).reason, 'forbidden')   // a trader
+    const ok = await turn({ user: { _id: 'u1', role: 'admin' }, sessionId: pyth.sessionId, agent: 'strategy', text: 'x' })
+    assert.ok(ok.payload)
+})
+
+test('a summary that covers no further than the stored one is dropped (a slow fold never wins)', async () => {
+    const { sessions } = rig()
+    const s = await sessions.getActive({ userId: 'u1' })
+    await sessions.setSummary({ sessionId: s.sessionId, userId: 'u1', agent: 'mentor', summary: { text: '', throughSeq: 40 } })
+    assert.equal((await sessions.setSummary({ sessionId: s.sessionId, userId: 'u1', agent: 'mentor', summary: { text: 'old fold', throughSeq: 30 } })).reason, 'stale')
+    assert.deepEqual((await sessions.get({ sessionId: s.sessionId, userId: 'u1' })).summaries.mentor, { text: '', throughSeq: 40 })
+})
+
+test('messagesForAgent reads only the agent’s rows and the hand-offs addressed to it', async () => {
+    const { sessions } = rig()
+    const s = await sessions.getActive({ userId: 'u1' })
+    for (const m of [
+        { agent: 'axl', role: 'user', content: 'a' },
+        { agent: 'portfolio', role: 'assistant', kind: 'handoff', content: 'scan this', to: 'scanner' },
+        { agent: 'scanner', role: 'assistant', content: 'b' },
+        { agent: 'mentor', role: 'assistant', kind: 'card', content: 'filled' },
+    ]) await sessions.append({ sessionId: s.sessionId, userId: 'u1', message: m })
+    const rows = await sessions.messagesForAgent({ sessionId: s.sessionId, userId: 'u1', agent: 'scanner' })
+    assert.deepEqual(rows.map(r => r.content), ['scan this', 'b'])
+    assert.equal(await sessions.messagesForAgent({ sessionId: s.sessionId, userId: 'u2', agent: 'scanner' }), null)
 })
 
 test('a stopped turn keeps the user’s message and stores nothing it produced', async () => {

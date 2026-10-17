@@ -163,7 +163,7 @@ export const generateSetup = _handle('generateSetup', async (req, res) => {
 
     // With a sessionId, Mentor's turns move onto the setup they produced (unified-chat §6.2); without one
     // (today's frontend) nothing changes. Never fails the Generate.
-    await sealing.sealAfterGenerate(req, { kind: 'setup', entityIds: [result.doc?.id], name: result.doc?.asset ? `${result.doc.asset} setup` : null })
+    sealing.sealAfterGenerate(req, { kind: 'setup', entityIds: [result.doc?.id], name: result.doc?.asset ? `${result.doc.asset} setup` : null, onlyIfEditing: !!updateId })
 
     res.send(result.doc)
 })
@@ -213,7 +213,7 @@ export const generateSetups = _handle('generateSetups', async (req, res) => {
 
     logger.info(LOG, `generateSetups: ${saved.length} saved, ${failed.length} refused`)
     // One conversation, several setups: the same turns are sealed onto each (unified-chat §6.2).
-    if (saved.length) await sealing.sealAfterGenerate(req, { kind: 'setup', entityIds: saved.map(d => d.id) })
+    if (saved.length) sealing.sealAfterGenerate(req, { kind: 'setup', entityIds: saved.map(d => d.id) })
     // 200 even with refusals: the batch DID something, and an error status would tell a client to
     // discard a response that is carrying real saved documents. `failed` is the news, not the code.
     res.send({ saved, failed })

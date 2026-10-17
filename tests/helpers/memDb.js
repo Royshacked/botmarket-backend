@@ -1,6 +1,6 @@
 // A small in-memory Mongo — enough for the Pythia services' and the session store's tests. Supports:
 // equality (null also matching a missing field, as in Mongo) and `$ne` / `$in` / `$exists` / `$gt` / `$lt`
-// filters on dotted paths; multi-key sort; find().sort().limit().next/toArray; skip; findOne;
+// filters on dotted paths, and a top-level `$or`; multi-key sort; find().sort().limit().next/toArray; skip; findOne;
 // insertOne; deleteMany; replaceOne and updateOne with upsert, $setOnInsert, $set (dotted), $inc and
 // $push (one value, or $each/$position); findOneAndUpdate (returns the document AFTER); createIndex as
 // a no-op — unique indexes are NOT enforced. `rows(name)` exposes a collection's documents for assertions.
@@ -9,6 +9,7 @@ function _get(o, path) { return path.split('.').reduce((x, k) => (x == null ? x 
 function _setPath(o, path, v) { const ks = path.split('.'); let x = o; for (const k of ks.slice(0, -1)) x = (x[k] ??= {}); x[ks.at(-1)] = v }
 function _match(doc, q) {
     return Object.entries(q).every(([k, v]) => {
+        if (k === '$or') return v.some(sub => _match(doc, sub))
         if (v && typeof v === 'object' && '$ne' in v) return (_get(doc, k) ?? null) !== v.$ne
         if (v && typeof v === 'object' && '$in' in v) return v.$in.includes(_get(doc, k))
         if (v && typeof v === 'object' && '$exists' in v) return (_get(doc, k) !== undefined) === Boolean(v.$exists)

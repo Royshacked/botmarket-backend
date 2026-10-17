@@ -157,7 +157,7 @@ export const createBatchIdeas = _handle('createBatchIdeas', async (req, res) => 
     if (!result.ok) return res.status(500).send({ error: 'Failed to save batch' })
 
     // With a sessionId, Atlas's turns move onto the book they produced (unified-chat §6.2). Never fails the save.
-    await sealing.sealAfterGenerate(req, { kind: 'portfolio', entityIds: [result.portfolioId], name: plan?.portfolioName ? `the ${plan.portfolioName} book` : null })
+    sealing.sealAfterGenerate(req, { kind: 'portfolio', entityIds: [result.portfolioId], name: plan?.portfolioName ? `the ${plan.portfolioName} book` : null })
 
     res.status(201).send({ ideas: result.ideas, portfolioId: result.portfolioId })
 })

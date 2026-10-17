@@ -86,6 +86,20 @@ export function segmentOf(messages, agent) {
     ))
 }
 
+/**
+ * The role a segment message plays in ONE agent's conversation: a hand-off addressed TO it reads as the
+ * user (someone asking it); everything else keeps its own role. One rule for what the model reads, what
+ * is sealed and what is summarized — so the three can never disagree.
+ */
+export function contextRole(m, agent) {
+    return m?.kind === 'handoff' && m.to === agent && m.agent !== agent ? 'user' : m?.role
+}
+
+/** The Mongo filter for ONE agent's segment rows — the query form of segmentOf. */
+export function segmentQuery(agent) {
+    return { $or: [{ agent, kind: { $in: ['msg', 'handoff', 'decision'] } }, { kind: 'handoff', to: agent }] }
+}
+
 /** Normalize the messages being sealed: role-checked text, cut, timestamped. */
 export function toContextMessages(messages, now = Date.now()) {
     if (!Array.isArray(messages)) return []

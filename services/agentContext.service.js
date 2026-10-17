@@ -97,7 +97,10 @@ export const agentContextService = makeAgentContextService()
  * call can be wrapped in place: `remove: async (id, u) => forgetIfDeleted('setup', id, await del(id, u))`.
  */
 export function forgetIfDeleted(kind, entityId, result, svc = agentContextService) {
-    if (result?.ok) {
+    // A delete that reports a count must have removed something: `ok` with nothing deleted is a
+    // portfolioId that was not this user's (or already gone), and wiping every user's context for it
+    // would let anyone erase another user's sealed conversation.
+    if (result?.ok && (result.deleted === undefined || result.deleted > 0)) {
         svc.removeFor({ kind, entityId }).catch(err => logger.warn(LOG, 'context cleanup failed (the entity is deleted)', err.message))
     }
     return result

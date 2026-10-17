@@ -136,7 +136,7 @@ export const publishIndustry = _handle('publishIndustry', async (req, res) => {
     if (!r.ok) return sendReason(res, r.reason, { overrides: VIEW_REASONS, fallback: 500, ...(r.detail ? { extra: { detail: r.detail } } : {}) })
     if (r.changed) notifyIndustryChanged(r.doc, r.changed).catch(err => logger.warn(LOG, 'industry card failed (view is published)', err.message))
     // With a sessionId, Pythia's turns move onto the view they produced (unified-chat §6.2). Never fails the publish.
-    await sealing.sealAfterGenerate(req, { kind: 'industry_view', entityIds: [bundle.sub.code], name: bundle.sub.name ?? null })
+    sealing.sealAfterGenerate(req, { kind: 'industry_view', entityIds: [bundle.sub.code], name: bundle.sub.name ?? null })
     res.json(r.doc)
 })
 

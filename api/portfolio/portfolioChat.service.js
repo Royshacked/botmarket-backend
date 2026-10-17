@@ -269,9 +269,11 @@ async function saveChatState(portfolioId, messages, userId, mandate = null) {
 async function deleteChatState(portfolioId, userId) {
     try {
         const db = await getDb()
-        await db.collection(COLLECTION).deleteOne({ portfolioId, userId })
-        logger.info(LOG, 'Chat state deleted', { portfolioId })
-        return { ok: true }
+        const r = await db.collection(COLLECTION).deleteOne({ portfolioId, userId })
+        logger.info(LOG, 'Chat state deleted', { portfolioId, deleted: r.deletedCount })
+        // `deleted` says whether THIS user's book was there: a portfolioId that is someone else's (or
+        // already gone) deletes nothing, and the caller must not treat that as the book being deleted.
+        return { ok: true, deleted: r.deletedCount ?? 0 }
     } catch (err) {
         logger.error(LOG, 'Failed to delete chat state', err)
         return { ok: false }

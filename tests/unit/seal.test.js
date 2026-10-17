@@ -96,6 +96,62 @@ test('openForEdit puts the desk’s state back from the entity, marks it editing
     assert.match(out.line.content, /^Mentor · AMD setup\nkeep size under 2%\nYou: long AMD$/)
 })
 
+test('an UPDATE seals only when the agent is editing that entity — never its unrelated work in progress', async () => {
+    const { sessions, contexts, seal } = rig()
+    const s = await sessions.getActive({ userId: 'u1' })
+    await chat(sessions, s.sessionId, [say('scanner', 'user', 'find me semis'), say('scanner', 'assistant', 'here are 8')])
+    const skipped = await seal.sealFromSession({ userId: 'u1', sessionId: s.sessionId, agent: 'scanner', kind: 'scan', entityIds: ['old'], onlyIfEditing: true })
+    assert.equal(skipped.reason, 'not_editing')
+    assert.equal(await contexts.load({ userId: 'u1', kind: 'scan', entityId: 'old', agent: 'scanner' }), null)
+    assert.equal((await sessions.messagesSince({ sessionId: s.sessionId, userId: 'u1' })).length, 2, 'the in-progress turns stay')
+})
+
+test('nothing to seal → no line, no link, nothing cleared', async () => {
+    const { sessions, seal } = rig()
+    const s = await sessions.getActive({ userId: 'u1' })
+    await sessions.setAgentState({ sessionId: s.sessionId, userId: 'u1', agent: 'mentor', state: { draft: { asset: 'X' } } })
+    const out = await seal.sealFromSession({ userId: 'u1', sessionId: s.sessionId, agent: 'mentor', kind: 'setup', entityIds: ['st1'] })
+    assert.deepEqual(out, { sealed: 0, turns: 0, line: null })
+    const h = await sessions.get({ sessionId: s.sessionId, userId: 'u1' })
+    assert.deepEqual(h.links, [])
+    assert.deepEqual(h.agentState.mentor, { draft: { asset: 'X' } })
+})
+
+test('the seal point is stored, and an older summary never travels with newer turns', async () => {
+    const { sessions, contexts, seal } = rig()
+    const s = await sessions.getActive({ userId: 'u1' })
+    await chat(sessions, s.sessionId, [say('mentor', 'user', 'a'), say('mentor', 'assistant', 'b')])
+    const first = await seal.sealFromSession({ userId: 'u1', sessionId: s.sessionId, agent: 'mentor', kind: 'setup', entityIds: ['st1'] })
+    assert.equal((await sessions.get({ sessionId: s.sessionId, userId: 'u1' })).seals.mentor, first.line.seq)
+    await chat(sessions, s.sessionId, [say('mentor', 'user', 'c')])
+    await seal.sealFromSession({ userId: 'u1', sessionId: s.sessionId, agent: 'mentor', kind: 'setup', entityIds: ['st2'] })
+    const two = await contexts.load({ userId: 'u1', kind: 'setup', entityId: 'st2', agent: 'mentor' })
+    assert.deepEqual(two.messages.map(m => m.content), ['c'])
+    assert.equal(two.summary, null)
+})
+
+test('reopening is REFUSED while the agent holds other unsealed work, unless the user chose to drop it', async () => {
+    const { sessions, seal } = rig()
+    const s = await sessions.getActive({ userId: 'u1' })
+    await sessions.setAgentState({ sessionId: s.sessionId, userId: 'u1', agent: 'mentor', state: { draft: { asset: 'NVDA' } } })
+    const setup = { id: 'st9', asset: 'AMD' }
+    assert.deepEqual(await seal.openForEdit({ userId: 'u1', sessionId: s.sessionId, kind: 'setup', entity: setup }), { reason: 'busy', agent: 'mentor' })
+    assert.deepEqual((await sessions.get({ sessionId: s.sessionId, userId: 'u1' })).agentState.mentor, { draft: { asset: 'NVDA' } }, 'the NVDA work is untouched')
+    const forced = await seal.openForEdit({ userId: 'u1', sessionId: s.sessionId, kind: 'setup', entity: setup, force: true })
+    assert.equal(forced.agent, 'mentor')
+    // Reopening the SAME item it is already editing is not "other work".
+    assert.equal((await seal.openForEdit({ userId: 'u1', sessionId: s.sessionId, kind: 'setup', entity: setup })).agent, 'mentor')
+})
+
+test('a long name is cut for the line', async () => {
+    const { sessions, seal } = rig()
+    const s = await sessions.getActive({ userId: 'u1' })
+    await chat(sessions, s.sessionId, [say('scanner', 'user', 'go')])
+    const out = await seal.sealFromSession({ userId: 'u1', sessionId: s.sessionId, agent: 'scanner', kind: 'scan', entityIds: ['sc'], name: 'x'.repeat(200) })
+    assert.ok(out.line.content.length <= 'Argus saved '.length + 60)
+    assert.match(out.line.content, /…$/)
+})
+
 test('an entity no desk edits is refused', async () => {
     const { sessions, seal } = rig()
     const s = await sessions.getActive({ userId: 'u1' })
@@ -129,5 +185,8 @@ test('forgetIfDeleted clears the contexts only when the delete succeeded, and ha
     assert.deepEqual(forgetIfDeleted('setup', 'st1', { ok: true }, svc), { ok: true })
     assert.deepEqual(forgetIfDeleted('setup', 'st2', { ok: false, reason: 'not_found' }, svc), { ok: false, reason: 'not_found' })
     assert.equal(forgetIfDeleted('setup', 'st3', null, svc), null)
-    assert.deepEqual(calls, [{ kind: 'setup', entityId: 'st1' }])
+    // A delete that matched nothing — another user's portfolioId, or one already gone — forgets nothing.
+    assert.deepEqual(forgetIfDeleted('portfolio', 'p-not-mine', { ok: true, deleted: 0 }, svc), { ok: true, deleted: 0 })
+    forgetIfDeleted('portfolio', 'p-mine', { ok: true, deleted: 1 }, svc)
+    assert.deepEqual(calls, [{ kind: 'setup', entityId: 'st1' }, { kind: 'portfolio', entityId: 'p-mine' }])
 })
