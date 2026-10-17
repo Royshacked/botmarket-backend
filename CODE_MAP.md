@@ -38,7 +38,7 @@ api/
     ideaExecution.service.js  placeOrdersForIdea / placeRestingEntryForIdea / triggerEntryNow ("Buy now")
     exitOrders.service.js     in-position exit (re)arming — through buildExitOrder, so the basis offset is
                               applied once, by the one helper, on this path as on placement
-  mentor/                 Mentor chat SSE /api/mentor/stream — the trader's desk (agents/mentor)
+  mentor/                 (gone, unified-chat 8e — Mentor answers in the session; its setups are api/setups)
     mentor.controller.js      NB: `_mentorResponse(result, role)` is the response shaping, PURE and
                               exported so a test can hold it (mentorResponse.test.js). Everything
                               the panel reads is listed there BY HAND, and twice something was not:
@@ -286,8 +286,9 @@ api/
                           Express never 304s a probe. Reports leader + loop count (roster only in dev)
   _shared/                cross-controller helpers:
       sse.util.js             startSseStream() — SSE headers + heartbeat + abort wiring
-      deskStream.util.js      makeDeskStream({ log, parse, run, done }) — THE streaming desk turn every
-                              desk's POST /stream rides: shared parse + 400s, the common agent bag
+      deskStream.util.js      makeDeskStream({ log, parse, run, done }) — the streaming desk turn Pythia's and
+                              Aether's POST /stream ride (the other desks answer in the session since unified-chat
+                              8e — their /stream routes are gone): shared parse + 400s, the common agent bag
                               (messages/model/user/audience/signal/SSE callbacks), the routing gate
                               appended to every `done`. A desk supplies only its extras, its agent
                               call and its done shape (unified-chat phase 2, 2026-10-16)
@@ -320,7 +321,9 @@ services/
                               and PATCH /sessions/:id/state — the session read, the speaker rule, the REVISION
                               check (agentRev; stale → stale_state), the lock, the seal, the state write. The
                               meaning is the desk's (actions/); an edit answering dropMarkers (Mentor's fresh
-                              plan, 8b) clears editing / chainId instead of keeping them
+                              plan, 8b) clears editing / chainId instead of keeping them. `discard` is the pipe's
+                              own (8e): unsaved work only (refused over an edit or a table with no work), the desk's
+                              settings kept (`cleanTable`), its chain ended, its turns set aside (putAside)
       actions/                <agent>.actions.js — each desk's commits from its agentState (never the client's
                               copy) through the shared commit service, and its hand edits (Mentor's draft, Argus's
                               lens / read / fresh table, Atlas's adopt mode — staged under the lock); the contract (verbs generate / update /
@@ -337,7 +340,8 @@ services/
                               queued, stoppable, streamed · the turns + chain wired as one pair
       entityLookup.js         the entity an edit reopens, owner-checked through its own service
       seal.js                 sealFromSession (Generate: turns move onto the entity, one sealed line) ·
-                              openForEdit · sealAfterGenerate (the Generate endpoints' hook — sessionId only)
+                              putAside (dropped work's turns: the seal point and summary move past them, 8e) ·
+                              openForEdit (a DIFFERENT item sets the agent's turns aside) · sealAfterGenerate
   chain/                  THE CHAIN the server runs (unified-chat plan phase 5): artifact.js (candidate_list,
                           coverage_set) · contracts.js (receiverOf + each receiver's opening brief) · rules.js (the
                           declared tables: what a reply emits, what makes a turn the user's call) · runner.js (after

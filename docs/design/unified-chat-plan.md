@@ -928,7 +928,7 @@ doorway and bus listener, and the existing overlay patterns. Facts that shaped i
 - **8d — Argus + Prometheus — DONE 2026-10-17, see §10.5:** `ScannerSurface` — list summary, PrometheusStep (the read through K3), lens toggle, angle
   chips, Generate / Update (the research offer and the pick bar are the chain's decision cards now); `AnalystSurface` —
   CoverageDraft, Initiate / Update. Delete both panels.
-- **8e — doorways + teardown:** one `editEntity(kind, id, opts)` (→ `POST /:id/edit`, a 409 busy asks then repeats with
+- **8e — doorways + teardown — DONE 2026-10-17, see §10.6:** one `editEntity(kind, id, opts)` (→ `POST /:id/edit`, a 409 busy asks then repeats with
   `force`, the drawer opens on that agent) replaces handleEditSetup / Coverage / Scan / Portfolio and openForEdit's
   dispatch; every pencil and the five desk-opening bus listeners call it; seedMentorChat (earnings / IPO / Aether "trade
   with Mentor"), handleScanRadar and the research-queue Start become session turns; Pythia / Aether / ticket into the
@@ -1172,6 +1172,61 @@ the dead code above · the drive's exit code, its no-read assertion and its clea
 
 **Carried to 8e** (Roy 2026-10-17): an old hand-off queue researches only its first name (only the leftover bridge can
 still send one); stepping back along the pipeline crumb to a surfaced desk bounces to Axl (the crumb goes in 8e).
+
+### 10.6 Phase 8e — as built (2026-10-17)
+
+Commits: FE `d96ee22` · BE `3de482d` · bundle `7d52ce0` (8e) · FE `ca0d1af` (bug hunt) · the CR commits after them.
+Driven: `scripts/drive-pane-tabs.mjs` 8/8 — the chat column is the timeline and the pane only; Pythia and Aether open
+from the chat's header as kept pane tabs and keep a half-typed message across a pane close and a tab switch; Discard
+asks, clears Mentor's table and moves the seal point and summary past its turns. Mentor 13/13, Atlas 14/14,
+Argus/Prometheus 12/12 re-run. Not pushed.
+
+**Built (frontend):**
+- The chat column is ALWAYS the timeline and the side pane. Deleted from MainPage: the desk tabs (`activeTab`), the
+  agent bar, `PipelineCrumb` / `TAB_TO_STEP`, the step back, the walk-home overlay and `handleBackToAxl`, Axl
+  reception's desk pick (`handleAxlPick`), the thread-resume plumbing (`resumeRefs`, `_resumeThreadOn`), the desk busy
+  state, the desk doors (`useDeskHandoff`, `doors`) and their bridges. Every remaining doorway opens the pane or is a
+  session turn: the research queue's Start, the order ticket, a coverage card, a sleeve card (a pre-session thread is
+  said, not resumed), a route Pythia's or Aether's panel offers (an edit, a session turn — Argus's through
+  `onArgusTable` on the trading lens — or the other panel's seed). The Lists follow a DESK taking the floor (Mentor →
+  setups, Atlas → portfolios), never Axl answering.
+- KEPT pane tabs (K6): Pythia's and Aether's panels (their own chats still) and the order ticket stay MOUNTED while
+  hidden — each renders once through a portal into a host node of its own, which the pane moves in when its tab shows
+  (SidePane `KeptSlot`); closing the pane PARKS them (`sidePane.store.parked`); only a tab's own ✕ ends it. The pane
+  resets when the user changes. An admin opens Pythia and Aether from a row under the chat's header (every layout has
+  it; the plan's FloorLists buttons were not, on the classic layout). A seed is sent once, ever (`useSeedTurn`).
+- Discard on every surface for UNSAVED work (`SidePane/DiscardButton`, asked first) — the old panels' Clear; a saved
+  item being edited keeps Later. Mentor's drops a hand edit still settling first.
+- Deleted modules: `useDeskHandoff`, `services/pipeline` (artifact, contracts, doors), the four desk contracts,
+  `pipelineNav`, `ThreadHistory`, the summon overlay and `RETURN_MS`, `DESKS`' steps, `tradeIdeasService.createBatch`,
+  the four desks' `sendStream` (D2), and the agent-bar / summon / panel-tab CSS. The agent glyphs moved to
+  `AxlHub/AgentGlyphs.jsx`. Kept on purpose: `RouteOffer` / `useRouteOffer` (Pythia's and Aether's panels offer
+  routes) and `agentMeta.DESKS` without steps (a route's key → its agent).
+
+**Built (backend):** `sealing.putAside` — dropped work's turns are set aside: the seal point and the summary move past
+them (they stay in the timeline), so they never seal onto what the desk builds next (carried from 8b); run after the
+write it belongs to, on a reopen of a DIFFERENT item, a hand edit that replaces the work (`dropMarkers`), and a discard.
+`discard` is the act pipe's own action — refused over an edit (`editing_use_later`) and over a table with no work, the
+desk's settings kept (`cleanTable`: Argus's lens, Atlas's mandate), the chain the work belonged to ended
+(`endedChain`, shared with the runner). D2: the four desks' `POST /stream` routes are gone (Mentor's router with them);
+the agent limiter guards Pythia's and Aether's.
+
+Phase 8e bug hunt (2026-10-17, Roy: fix 1, keep 2 — `ca0d1af`): a Pythia / Aether route to Argus skipped the clean-table
+ask · a reopen of a different item sets aside all the desk's unsaved turns since its last seal (kept, by design).
+
+Phase 8e CR (2026-10-17, two reviewers, all applied with D1 (a) and D2 (a)): Discard too blunt (an edit, a table with only
+settings, the desk's settings wiped, a running chain bringing the work back) · a Pythia / Aether seed re-sent when its
+tab reopened · the route to Argus on the wrong lens · Mentor's Discard against a settling edit · set-aside before its
+write · the Lists filter reset on every Axl reply · the kept slot's empty frame, tabs surviving a user change · dead CSS,
+stale comments, the glyphs' file · the drive's checks and the set-aside verified end to end · tests for the summary
+reset, a desk's own discard, a refused discard, the kept slot in the phone sheet. D1 (a): Pythia's and Aether's drafts
+are still SAVED, their dead resume / pipeline / busy props removed — resuming one returns when they move onto the
+session. D2 (a): the four desk streams deleted now.
+
+**Carried:** resuming a Pythia / Aether conversation (with their move onto the session — phase 9 or later); a parked
+Pythia / Aether panel scrolls back to the top when shown again (its DOM is detached while hidden — accepted); MainPage's
+doorways have no unit suite (8f drives them); `openForEdit`'s per-kind dispatch still calls the `handleEdit*` doorways
+(each carries its own options — kept).
 
 ## 11. Phase 9 — Migration (`scripts/migrate-unified-chat.mjs`)
 
