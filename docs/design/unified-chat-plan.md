@@ -796,6 +796,11 @@ frontend 1259 vitest + 443 node. Deviations from the plan, each smaller:
 - the active-session header carries no `agentState` (HEADER_PROJECTION) — the phase-8 surfaces need a read for it;
 - a drive must not edit backend files while it runs: nodemon restarts and kills the turn in flight.
 
+Phase 7 bug hunt (2026-10-17, all six applied — BE `2497759`, FE `a2911c3`): the user can speak while a turn runs (it
+queues; a chain pauses for it) · Axl knows its surface (the social chat drops hand-offs, so it never promises one) · "Ask
+Axl instead" while a desk holds the floor · taps only while their reply is the last word · a refused edit says why · a
+replay's running turn wins. Drive re-run 13/13.
+
 ## 10. Phase 8 — Frontend: side pane + MainPage teardown
 
 - **Surfaces extracted from the panels**, reading `agentState` from the session; every action goes through
