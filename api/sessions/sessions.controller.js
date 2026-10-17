@@ -13,6 +13,7 @@ import { sealing } from '../../services/desks/seal.js'
 import { parseIdeaAccounts, parseClientTime } from '../_shared/parse.util.js'
 import { makeHandle } from '../_shared/handle.util.js'
 import { httpError }  from '../../services/httpError.util.js'
+import { sendReason } from '../_shared/reason.util.js'
 
 const handle = makeHandle('[sessions:controller]')
 
@@ -39,6 +40,14 @@ export const listSessions = handle('listSessions', async (req, res) => {
     res.json({ sessions: await sessionService.list({ userId: req.user._id, scope }) })
 })
 
+// The reasons only these routes answer; `not_found` / `forbidden` ride the shared table (reason.util).
+const TURN_REASONS = { empty: [400, 'text is required'] }
+const EDIT_REASONS = {
+    not_editable: [400, 'That item is not editable here'],
+    // The agent holds other unsealed work — the client asks the user, then repeats with `force`.
+    busy:         [409, 'That desk is in the middle of something else'],
+}
+
 // A turn: accepted at once (202), run queued, streamed on the session channel (plan phase 5b, G2).
 // `input` is the desk's per-turn extras (a card press's ops, a seed, the marked accounts, the clock).
 export const postSessionTurn = handle('postSessionTurn', async (req, res) => {
@@ -52,9 +61,7 @@ export const postSessionTurn = handle('postSessionTurn', async (req, res) => {
         clientTime: parseClientTime({ clientNow: clientTime?.clientNow, clientTz: clientTime?.clientTz }),
     }
     const out = await startTurn({ user: req.user, sessionId: req.params.id, text, agent, input, turnId })
-    if (out.reason === 'empty')     throw httpError(400, 'text is required')
-    if (out.reason === 'forbidden') throw httpError(403, 'that desk is not open to you here')
-    if (out.reason)                 throw httpError(404, 'Session not found')
+    if (out.reason) return sendReason(res, out.reason, { overrides: TURN_REASONS, fallback: 404 })
     res.status(202).json(out)
 })
 
@@ -64,14 +71,9 @@ export const postSessionTurn = handle('postSessionTurn', async (req, res) => {
 export const editInSession = handle('editInSession', async (req, res) => {
     const { kind, id, name = null, force = false } = req.body ?? {}
     const found = await lookupForEdit({ kind, id, user: req.user })
-    if (!found.ok) {
-        if (found.reason === 'forbidden')    throw httpError(403, 'admin only')
-        if (found.reason === 'not_editable') throw httpError(400, 'not editable')
-        throw httpError(404, 'Not found')
-    }
+    if (!found.ok) return sendReason(res, found.reason, { overrides: EDIT_REASONS, fallback: 404 })
     const out = await sealing.openForEdit({ userId: req.user._id, sessionId: req.params.id, kind, entity: found.doc, name, force: force === true })
-    if (out.reason === 'busy') return res.status(409).json({ reason: 'busy', agent: out.agent })
-    if (out.reason)            throw httpError(404, 'Session not found')
+    if (out.reason) return sendReason(res, out.reason, { overrides: EDIT_REASONS, fallback: 404, extra: out.agent ? { agent: out.agent } : null })
     res.json(out)
 })
 
