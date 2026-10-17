@@ -846,6 +846,115 @@ delete `deskWork`, `pipelineNav`, `useDeskHandoff`, `deskReset`, `doors`, `deskS
 the backend. Browser-drive every flow: Axl question → Mentor build → Generate; Atlas → sourcing →
 Prometheus → back; edit a setup; a background card arriving; new session + history.
 
+### 10.1 Phase 8 — detailed plan (2026-10-17, for Roy's approval)
+
+Read before writing it: the four desk panels' working UI (every block, what it reads, what its buttons do), every
+desk definition's `nextState` / `done` / `stateFromEntity`, every Generate/commit endpoint, the session header and
+agentState transport, Mentor's ops, the chain's reads, MainPage's tab/pipeline machinery (2820 lines), every edit
+doorway and bus listener, and the existing overlay patterns. Facts that shaped it:
+- **The surfaces' data is almost all in agentState already.** Mentor keeps draft, coverage, drafts, gate, readiness,
+  candidates; Argus keeps pendingScan + its mode; Atlas keeps mandate, thesis, pendingPlan, reviewUpdate; Prometheus keeps
+  the draft. Lost on reload today: Atlas's `screen_requests` / `coverage_request` notices, Pythia's `assessments`, the
+  phases. It reaches the client only on the socket (`session_state` per change, `session_replay` whole) — no HTTP read.
+- **Every commit takes the draft from the CLIENT body** (setups generate / generate-all / arm, trade-ideas batch,
+  rebalance, complete-review, scans create / update, coverage initiate / update, strategy publish). The seal runs from a
+  `sessionId` in the body, in the background.
+- **Some edits live only in the panel today**: Mentor's SetupSummary edits (sent as the next turn's `chatState.draft`),
+  Argus's Prometheus read rewriting the candidates, the trading/investing lens, the angle chips. In a server-held state
+  they need a way in.
+- **Payloads are sent twice**: a Mentor turn ships the draft in `session_state` AND in the `session_turn: done`
+  payload (and `build` a third time). No cap anywhere.
+- **The session path has gaps for Atlas**: nothing sets `reviewMode` or `adoptDraftId`; the edit route ignores the
+  card's `reviewMode`; Axl's `adopt` is consumed nowhere. Adopt mode (AdoptBookGrid) is unreachable since phase 7.
+- **About 1,000 of MainPage's 2,820 lines are tab/pipeline machinery**; the save halves of the edit openers and of
+  generate/update list/plan survive. Twenty-one `setActiveTab` sites; twelve bus listeners, five of them open a desk.
+- **DetailPanel already does the hard parts of a drawer**: portal (docked in the chat column / full page on a phone),
+  Esc, focus in and back, phone back-button. One active id app-wide.
+- Production still imports `RouteOffer`, `AgentSummon` (`BotAvatarGlyph` lives there), `agentMeta.DESKS`,
+  `pipeline/artifact` — they go with the panels, in order.
+
+**Six decisions this plan asks for (my recommendation first):**
+
+- **K1 — Build it desk by desk, each surface replacing its panel, in steps that each leave the app working.** 8a backend
+  (state, commits, edits) → 8b the drawer + Mentor's surface (Mentor's panel deleted) → 8c Atlas (+ adopt) → 8d Argus and
+  Prometheus → 8e the doorways, MainPage's teardown, Pythia/Aether/the ticket in the drawer, the shared-module deletions →
+  8f drive. *Alternative:* all at once — ~6k lines with nothing to drive until the end.
+- **K2 — Commits read the draft from the SESSION, through ONE route with desk-owned actions.**
+  `POST /api/sessions/:id/act { agent, action, args }` → the desk definition's `actions[action](state, args, ctx)`, which
+  calls the EXISTING service (generateSetup, createBatch, createScan, initiateCoverage, applyRebalance, completeReview,
+  publishIndustry) with the draft from agentState, then seals in-line under the session lock and answers the result. The
+  pipe is shared, the judgement stays with each desk (CLAUDE.md). The REST endpoints stay for their non-session callers;
+  their `sessionId` seal hook (sealAfterGenerate) goes once nothing sends it (D1). *Alternative:* the client posts the
+  agentState draft it received to today's endpoints — two copies of the draft, and the client decides what is committed.
+- **K3 — Direct edits are a validated state patch, not a model turn.** `PATCH /api/sessions/:id/state { agent, edit }` →
+  the desk's `applyEdit(state, edit)` (Mentor: a draft edit, re-validated by the existing validateSetup → gate/readiness;
+  Argus: the lens, the Prometheus read, the angle set; Atlas: none yet) → `setAgentState` → `session_state`. Presses that
+  ARE turns (a candidate pick, a stage confirm, spans, entries, delegate) keep Mentor's `ops` on a turn — one
+  `act(agent, text, ops)` on the client. *Alternative:* every edit rides the next turn — the user's edit is invisible until
+  they speak, and lost if they don't.
+- **K4 — The surface reads agentState ONLY; the `done` frame carries what the state does not.** Each desk's `nextState`
+  keeps what its surface shows (Atlas's notices, Pythia's assessments; Mentor's `build` already rides the draft); the
+  `session_turn: done` payload drops the fields agentState carries (sent once, not twice); the active-session read gains
+  agentState (`GET /api/sessions/active` — the first paint before the socket replays). Atlas's `reviewMode` / `adopt` are
+  set by the edit route (`reviewMode` honoured) and by Axl's adopt route (`onRouted`). *Alternative:* surfaces read
+  `done` payloads — gone on reload, the whole problem phase 7 fixed for replies.
+- **K5 — The drawer reuses DetailPanel's shell; it docks over the chat column from the right, the chat still showing.**
+  A `SidePane` (cmps/SidePane) built on DetailPanel's portal / Esc / focus / phone-back mechanics, extracted into one
+  shared `DrawerShell` both use (share the pipe): on desktop ~min(560px, 70%) of the chat column from the right edge, so
+  the conversation stays readable; on a phone a bottom sheet (decision 13) — EntityDetailHost's history handling, sheet
+  styling. It follows the floor (Mentor speaks → Mentor's surface), can be pinned, and keeps one tab per opened surface.
+  *Alternative:* a new drawer from scratch — a second copy of focus/Esc/history.
+- **K6 — Pythia, Aether and the order ticket open IN the drawer.** Pythia's and Aether's panels are mounted as drawer tabs,
+  opened from admin-only FloorLists buttons (§1 q4, temporary); the ticket is a drawer tab opened by `<show>ticket` and
+  the Lists. MainPage's chat column then holds only the timeline. *Alternative:* keep a tab system for those three — the
+  machinery this phase exists to delete.
+
+**Steps**
+
+- **8a — backend (one commit):** K2 `act` route + `actions` on mentor (generate, generateAll, arm, update, later), portfolio
+  (generatePlan, updatePlan, acceptReview, dismissReview, completeReview), scanner (generateList, updateList), analyst
+  (initiate, update), strategy (publish) — each through its existing service, seal in-line, `busy`/refusal reasons through
+  `sendReason`; K3 `state` route + `applyEdit` (mentor, scanner); K4 nextState additions, the slimmer done frame,
+  agentState on the active read, `reviewMode` on the edit route, Axl's adopt → Atlas `onRouted`; the scanner turn input
+  gains `radarBoard` (the Floor's radar scan). Tests for every action and edit, the seal, the scope rules.
+- **8b — the drawer + Mentor:** `DrawerShell` extracted from DetailPanel (DetailPanel rebuilt on it, its tests kept);
+  `SidePane` (desktop dock / phone sheet, pin, tabs, follows the floor); `useSession` gains `act(agent, text, ops)`,
+  `edit(agent, edit)`, `commit(agent, action, args)`; `MentorSurface` from the panel's blocks — SetupSummary, CoverageChips,
+  CandidatePicker, StageConfirm, SpanTable, EntryTable (moved as they are, reading agentState), the Generate / Generate-all /
+  Arm / Leave waiting / Update / Later bar. Delete `MentorPanel.jsx`; its block tests move to the surface.
+- **8c — Atlas:** `PortfolioSurface` — thesis card, build summary, limits notes, sleeve/coverage notices, the review
+  Accept / Dismiss / Later and Generate / Update bar, `AdoptBookGrid` (adopt reachable again). Delete `PortfolioPanel.jsx`
+  (`PortfolioPanel.scss` stays — the shared `portfolio-panel__*` bubble classes; renamed in phase 10).
+- **8d — Argus + Prometheus:** `ScannerSurface` — list summary, PrometheusStep (the read through K3), lens toggle, angle
+  chips, Generate / Update (the research offer and the pick bar are the chain's decision cards now); `AnalystSurface` —
+  CoverageDraft, Initiate / Update. Delete both panels.
+- **8e — doorways + teardown:** one `editEntity(kind, id, opts)` (→ `POST /:id/edit`, a 409 busy asks then repeats with
+  `force`, the drawer opens on that agent) replaces handleEditSetup / Coverage / Scan / Portfolio and openForEdit's
+  dispatch; every pencil and the five desk-opening bus listeners call it; seedMentorChat (earnings / IPO / Aether "trade
+  with Mentor"), handleScanRadar and the research-queue Start become session turns; Pythia / Aether / ticket into the
+  drawer (K6). Delete from MainPage: the tab and pipeline state, `handleBackToAxl` / `finishPipeline` / `handleAxlPick` /
+  `handleRoute` / `_applyHop` / `emitArtifact` / `enterPipelineAt` / `handleSendPick` / `handleCancelHandoff` /
+  `handleResearchCandidate` / `handleResearchList` / `handleSleeveResearched` / `handleBuildFromCandidate` / the seed
+  builders' desk half, `PipelineCrumb` / `TAB_TO_STEP`, the agent bar, the mounted panels, the "Heading back" overlay;
+  `TradeIdeasList`'s `chatTab` reads the floor. Delete the modules: `RouteOffer`, `useRouteOffer`, `useDeskHandoff`,
+  `doors`, `contracts` + the four pipeline `*.contract.js` (keep `Floor/queuedAction.contract.js`), `hop`, `artifact`
+  (FE), `pipelineNav`, `deskReset`, `ThreadHistory`, the `AgentSummon` overlay + `RETURN_MS` (`BotAvatarGlyph` /
+  `AxlBotGlyph` / `AgentIntro` / `AgentTurnTag` move to their own file), `agentMeta.DESKS` and its `.steps`;
+  `useChatStream` / `agentStream` / the HTTP desk `/stream` routes and `threadsService` stay only for Pythia and Aether
+  (D1 — they go in phase 9 when those move or in a later phase). Their tests go with them; scanOrigin's surviving half moves.
+- **8f — drive:** `scripts/drive-unified-chat.mjs` grows: a Mentor build to Generate and Arm from the drawer; Atlas →
+  sourcing → Prometheus → back to Atlas, Generate plan; a pencil edit on a setup (busy → set aside); a portfolio review card
+  → Accept; the drawer as a bottom sheet at phone width; Pythia from the admin button.
+
+**Not in phase 8:** migration of old threads / chat_state (phase 9); moving Pythia and Aether onto the session (their
+panels only change where they are mounted); the input row's clear icon (Roy, 2026-10-17: leave it).
+
+**Tests:** backend — every desk action (draft from state, the existing service called with it, the seal in-line, the
+refusals), every `applyEdit` (accepted / refused / re-validated), the slimmer done frame, agentState on the active read,
+`reviewMode` and adopt landing; frontend — DrawerShell (DetailPanel's suite passes on it), SidePane (follows the floor,
+pin, tabs, sheet at phone width), each surface's blocks (the panel suites' block assertions move over), `act` / `edit` /
+`commit`, `editEntity` incl. busy → force; the drive above.
+
 ## 11. Phase 9 — Migration (`scripts/migrate-unified-chat.mjs`)
 
 Idempotent, dry-run first, axl_dev before prod.
