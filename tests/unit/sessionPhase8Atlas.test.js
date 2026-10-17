@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { makeActRig, shapeOf, TRADER } from '../helpers/actRig.js'
-import { makePortfolioActions, settleAvoid, avoidRefused, PORTFOLIO_REASONS } from '../../services/desks/actions/portfolio.actions.js'
+import { makePortfolioActions, makePortfolioApplyEdit, settleAvoid, avoidRefused, PORTFOLIO_REASONS } from '../../services/desks/actions/portfolio.actions.js'
 import { portfolioDesk, portfolioNextState } from '../../services/desks/portfolio.desk.js'
 import { makePortfolioCommit } from '../../api/portfolio/portfolioCommit.service.js'
 import { _markAvoidAdds } from '../../services/agents/portfolio.agent.service.js'
@@ -288,4 +288,41 @@ test('Atlas refusals answer in its own words, the rebalance ones shared with the
     assert.equal(PORTFOLIO_REASONS.book_live[0], 409)
     assert.equal(PORTFOLIO_REASONS.nothing_applied[0], 409)
     assert.equal(portfolioDesk.reasons, PORTFOLIO_REASONS)
+})
+
+// ─── phase 8c: the surface's state ────────────────────────────────────────────
+
+test('8c: a review is REVIEWED once Atlas has spoken in it — a fold is not a pass, and outside a review there is none', () => {
+    const opened = portfolioDesk.stateFromEntity({ portfolioId: 'p1', thesis: { strategy: 's' } }, { reviewMode: true })
+    assert.equal(opened.reviewed, false, 'just opened: nothing has been looked at')
+    assert.deepEqual(opened.thesis, { strategy: 's' }, "the book's standing thesis rides for the card")
+    assert.equal(portfolioNextState(opened, null).reviewed, false)
+    const passed = portfolioNextState(opened, { reply: 'hold' })
+    assert.equal(passed.reviewed, true)
+    assert.equal(portfolioNextState(passed, null).reviewed, true, 'a fold keeps it')
+    assert.equal(portfolioNextState({ portfolioId: 'p1' }, { reply: 'x' }).reviewed, false)
+})
+
+test('8c: adopt mode stages ONE draft under the lock, hands it back when asked again, and ends without discarding it', async () => {
+    const made = []
+    const adopt = { createDraft: async (o) => { made.push(o); return { ok: true, draft: { draftId: `d${made.length}` } } } }
+    const r = makeActRig({ agent: 'portfolio', desk: { ...portfolioDesk, applyEdit: makePortfolioApplyEdit({ adopt }) }, state: { adopt: true } })
+    const { edit, stateOf } = await r.start(user)
+    assert.equal((await edit({ adopt: 'start' })).ok, true)
+    assert.deepEqual(made, [{ userId: 'u1', name: 'My bank book' }], 'staged as the user, empty')
+    assert.equal((await stateOf()).adoptDraftId, 'd1')
+    await edit({ adopt: 'start' })
+    assert.equal(made.length, 1, 'asked twice → the same draft')
+    await edit({ adopt: 'end' })
+    const st = await stateOf()
+    assert.equal(st.adopt, false)
+    assert.equal(st.adoptDraftId, null)
+    assert.deepEqual(await edit({ adopt: 'sideways' }), { reason: 'invalid_edit' })
+})
+
+test('8c: a failed stage is a refusal, and ending with nothing on the table has nothing to edit', async () => {
+    const apply = makePortfolioApplyEdit({ adopt: { createDraft: async () => ({ ok: false, error: new Error('db') }) } })
+    assert.deepEqual(await apply(null, { adopt: 'start' }, { user }), { reason: 'adopt_failed' })
+    assert.deepEqual(await apply(null, { adopt: 'end' }, { user }), { reason: 'nothing_to_edit' })
+    assert.equal(PORTFOLIO_REASONS.adopt_failed[0], 500)
 })

@@ -11,6 +11,7 @@
 // with `dropAvoid` (apply the rest without them). One round trip, like `busy` → `force` on the edit route.
 
 import { portfolioCommit as defaultCommit } from '../../../api/portfolio/portfolioCommit.service.js'
+import { adoptBookService } from '../../../api/portfolio/adoptBook.service.js'
 import { REBALANCE_REASONS, BOOK_REASONS } from '../../../api/portfolio/portfolioReasons.js'
 import { parseCommitArgs, parseStringList } from '../../../api/_shared/parse.util.js'
 
@@ -178,5 +179,34 @@ export function makePortfolioActions({ commit = defaultCommit } = {}) {
 
 export const portfolioActions = makePortfolioActions()
 
+/**
+ * Atlas's hand edits (K3) — ADOPT MODE only (unified-chat plan phase 8c). `{ state }` or `{ reason }`.
+ *
+ * `{ adopt: 'start' }` — stage the book being adopted. Axl's adopt route marks Atlas `adopt` (onRouted); the surface
+ * then asks for the draft, and it is staged HERE, under the session lock, EMPTY and at once: every Atlas turn parses
+ * into it (the desk's run reads `adoptDraftId`) and the grid renders it, and the id is what makes the conversation
+ * one book — a draft minted per paste would adopt two half-books. Asked twice, it hands back the one it has.
+ * `{ adopt: 'end' }` — leave adopt mode (adopted, or the user stepped away). The draft itself stays on the server
+ * (listStaged resumes it); only the session stops pointing at it.
+ */
+export function makePortfolioApplyEdit({ adopt = adoptBookService } = {}) {
+    return async function portfolioApplyEdit(state, edit = {}, { user } = {}) {
+        if (edit.adopt === 'start') {
+            if (state?.adoptDraftId) return { state: { ...state, adopt: true } }
+            const out = await adopt.createDraft({ userId: user?._id, name: 'My bank book' })
+            if (!out?.ok || !out.draft?.draftId) return { reason: 'adopt_failed' }
+            return { state: { ...(state ?? {}), adopt: true, adoptDraftId: String(out.draft.draftId) } }
+        }
+        if (edit.adopt === 'end') {
+            if (!state) return { reason: 'nothing_to_edit' }
+            return { state: { ...state, adopt: false, adoptDraftId: null } }
+        }
+        return { reason: 'invalid_edit' }
+    }
+}
+
 // Atlas's refusals, in its own words — the portfolio routes' tables.
-export const PORTFOLIO_REASONS = { ...REBALANCE_REASONS, ...BOOK_REASONS }
+export const PORTFOLIO_REASONS = {
+    ...REBALANCE_REASONS, ...BOOK_REASONS,
+    adopt_failed: [500, 'Could not open the adoption — try again'],
+}

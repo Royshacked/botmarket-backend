@@ -96,7 +96,8 @@ export function makeAct({ sessions = sessionService, desks = DESK_DEFS, sealing 
             const opened = await _open({ user, sessionId, agent, rev })
             if (opened.reason) return opened
             if (typeof opened.desk.applyEdit !== 'function') return { reason: 'not_editable' }
-            const out = await opened.desk.applyEdit(opened.state, edit && typeof edit === 'object' ? edit : {})
+            // The user rides along for an edit that writes something of theirs (Atlas staging an adoption).
+            const out = await opened.desk.applyEdit(opened.state, edit && typeof edit === 'object' ? edit : {}, { user })
             if (!out || out.reason) return { reason: out?.reason ?? 'invalid_edit' }
             // The markers survive a hand edit — unless the edit replaces the work outright (`dropMarkers`: a new plan
             // is not an edit of the one being edited).

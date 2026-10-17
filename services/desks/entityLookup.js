@@ -16,7 +16,7 @@ const LOOKUPS = {
     // A book is its portfolio_books document — present only for its owner.
     portfolio: async ({ id, user }) => {
         const book = await portfolioChatService.getChatState(id, user._id)
-        return book ? { ok: true, doc: { id, portfolioId: id, name: book.portfolioName ?? null } } : { ok: false, reason: 'not_found' }
+        return book ? { ok: true, doc: { id, portfolioId: id, name: book.portfolioName ?? null, thesis: book.thesis ?? null } } : { ok: false, reason: 'not_found' }
     },
 }
 

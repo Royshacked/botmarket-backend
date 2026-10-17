@@ -48,7 +48,7 @@ test('Argus: the mode carries over; the newest list is pending; while editing it
 test('Atlas: the book and mode carry over; the stated mandate, thesis and plan are the latest', () => {
     const prev = { portfolioId: 'p1', reviewMode: true, mandate: { a: 1 }, thesis: null, adoptDraftId: 'd1' }
     const next = portfolioNextState(prev, { mandate: { a: 2 }, thesis: { t: 1 }, plan: { ideas: [] } })
-    assert.deepEqual(next, { portfolioId: 'p1', reviewMode: true, adopt: false, adoptDraftId: 'd1', mandate: { a: 2 }, thesis: { t: 1 }, pendingPlan: { ideas: [] }, reviewUpdate: null, notices: { screenRequests: null, coverageRequest: null } })
+    assert.deepEqual(next, { portfolioId: 'p1', reviewMode: true, reviewed: true, adopt: false, adoptDraftId: 'd1', mandate: { a: 2 }, thesis: { t: 1 }, pendingPlan: { ideas: [] }, reviewUpdate: null, notices: { screenRequests: null, coverageRequest: null } })
     assert.deepEqual(portfolioNextState(prev, {}).mandate, { a: 1 })
 })
 

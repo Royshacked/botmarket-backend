@@ -12,7 +12,7 @@ import { refreshCoverage } from '../coverageRefresh.service.js'
 import { researchQueueService } from '../researchQueue.service.js'
 import { sourceSleeve } from '../sleeveSource.service.js'
 import { logger } from '../logger.service.js'
-import { portfolioActions, PORTFOLIO_REASONS } from './actions/portfolio.actions.js'
+import { portfolioActions, makePortfolioApplyEdit, PORTFOLIO_REASONS } from './actions/portfolio.actions.js'
 import { keepMarkers } from './markers.js'
 
 const LOG = '[portfolio:desk]'
@@ -40,6 +40,10 @@ export function portfolioNextState(prev, result) {
     return {
         portfolioId:  prev?.portfolioId ?? null,
         reviewMode:   prev?.reviewMode === true,
+        // A review pass has run since the book opened for review — the surface offers Accept / Dismiss only then
+        // (accepting a hold nobody looked at would close the review on nothing). Any Atlas turn in review mode is
+        // that pass: the review instruction rides every one (portfolio.agent, isReviewMode).
+        reviewed:     prev?.reviewMode === true && (!!result || prev?.reviewed === true),
         // The user already owns this book (Axl's adopt): the surface opens the adopt grid until a draft is staged.
         adopt:        prev?.adopt === true,
         adoptDraftId: prev?.adoptDraftId ?? null,
@@ -64,7 +68,10 @@ export const portfolioDesk = {
     hasWork: (state) => !!(state?.pendingPlan || state?.reviewUpdate || state?.adoptDraftId),
     // Reopening a book: its id is enough — mandate, thesis and lifecycle are read from portfolio_books.
     // A review card opens it in review mode (`opts.reviewMode`, the edit route).
-    stateFromEntity: (book, opts = {}) => portfolioNextState({ portfolioId: book?.portfolioId ?? book?.id ?? null, reviewMode: opts.reviewMode === true }, null),
+    // The book's standing thesis comes along for the surface's card (the turn reads its own copy from the database).
+    stateFromEntity: (book, opts = {}) => portfolioNextState({
+        portfolioId: book?.portfolioId ?? book?.id ?? null, reviewMode: opts.reviewMode === true, thesis: book?.thesis ?? null,
+    }, null),
     // A route lands here. The work in progress is kept (an Atlas plan is not thrown away by a second route) — and so
     // are its markers: a book being edited stays the one an update seals onto (phase 8a CR C1). The adopt hint, when
     // Axl sends one, opens the adopt grid.
@@ -208,8 +215,9 @@ export const portfolioDesk = {
 
         return result
     },
-    // The session's commits (plan phase 8, K2) — services/desks/act.js runs them. No direct edits yet (K3).
+    // The session's commits (plan phase 8, K2) and hand edits (K3: adopt mode) — services/desks/act.js runs them.
     actions: portfolioActions,
+    applyEdit: makePortfolioApplyEdit(),
     reasons: PORTFOLIO_REASONS,
     stateFields: ['plan', 'update', 'mandate', 'thesis', 'screen_requests', 'coverage_request'],
     done: (result) => ({
