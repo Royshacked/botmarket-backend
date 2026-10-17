@@ -63,6 +63,11 @@ api/
                               so the sender's later writes cannot resolve the recipient's card. Its
                               own module because chat.service → the Axl agent → its tools → the
                               setups list: importing the pipe from setups.service closed a cycle
+    setupCommit.service.js    what a Generate / an Arm DOES beyond the write (unified-chat 8a): commitSetup
+                              closes an in-place update's cards, armSetup patches to looking and closes its
+                              cards. The generate route and Mentor's session actions both call it.
+                              generateSetups (in setups.service) holds the one MAX_NAMES cap
+    setupReasons.js           the setup refusal table (status + message by reason) — routes and Mentor's actions
   portfolio/              Portfolio Agent + review    /api/portfolio/*
                           A book is NOT a document — it exists as the items carrying its
                           portfolioId — so its CRUD reads are shaped by hand rather than by
@@ -70,6 +75,13 @@ api/
                           GET /:portfolioId/items = the book's holdings, its get-by-id.
                           Both added 2026-08-14 so the client READS a book by id like every
                           other kind instead of filtering it out of its own ideas list
+    portfolioCommit.service.js  what saving a book DOES (unified-chat 8a), one path for the routes and Atlas's
+                              session actions: createBook (the AVOID 409 + the batch — POST /trade-ideas/batch),
+                              recordConstruction (mandate + construction thesis — POST /chat-state), replacePlan
+                              (a re-plan in place: save first, then retire the old legs; refused while a leg is
+                              live — moved off MainPage), rebindAccounts, closeReview, acceptRebalance
+                              ({ closeReview }: only a review's Accept advances the clock)
+    portfolioReasons.js       REBALANCE_REASONS + BOOK_REASONS — the routes' and Atlas's refusal tables
   scanner/                Scanner Agent + saved scans /api/scanner/*
                           GET /scans/:id is crud.get over scanService.getScanById — written
                           long before, wired 2026-08-14 when the frontend needed to open a
@@ -82,6 +94,9 @@ api/
                               pipe it shares with industryView.service: revise = `$set` of ONLY the patched fields +
                               `$push` of the revision at position 0, in one update (`_updateSet` is the pure
                               half). Own collection — NOT the execution-tier entities (P1 of the Analyst)
+    coverageCommit.service.js  revise (the write, then the cards it satisfies) · initiateOrRevise (an
+                              already-covered name is revised as a remodel) — the routes and Prometheus's actions
+    coverageReasons.js        the coverage refusal table, shared the same way
   strategy/               Pythia — the house INDUSTRY VIEWS  /api/strategy/*. Rebuilt 2026-10-05
                           (docs/desks/pythia-industries.md; the tilt desk was deleted). READS are open to
                           every signed-in user (GET /industries, /industries/:code); AUTHORING is admin-only
@@ -95,6 +110,8 @@ api/
                               pending views; viewsForSymbols is THE join (symbol → its industry's answer)
                               behind Atlas's trigger, its fingerprint and the read tool. Writes ride
                               houseArtifact.repo
+    industryPublish.service.js  publishIndustry — the check against the measured numbers, the write, the industry
+                              card on a changed answer; the route and Pythia's session action. viewReasons.js: its table
     geopoliticsData.service.js  Geopolitical risk as the engine measured it (step 4, pythia-geopolitics.md):
                               latestReading (geopolitical_risk, latest COMPLETE run — the GPR index, world and
                               countries, and the exposure map's risks with the sub-industries they hurt/help),
@@ -275,7 +292,8 @@ api/
                               appended to every `done`. A desk supplies only its extras, its agent
                               call and its done shape (unified-chat phase 2, 2026-10-16)
       parse.util.js           parseDeskTurn (the one desk-turn body: messages required, no userPrompt)
-                              / parseChatMessages / parseIdeaAccounts / parseClientTime
+                              / parseChatMessages / parseIdeaAccounts / parseClientTime / parseCommitArgs (the
+                              one shape a session press carries: account objects + mainAccountId) / parseStringList
       handle.util.js          makeHandle(log) — wrap an async handler so a throw is logged WITH its
                               route and forwarded; errorHandler — THE global error handler (mounted
                               last in server.js): a minted `httpError` answers with its status +
@@ -293,9 +311,20 @@ services/
                               derive from it. entryOf(desk): where a route lands (composite `trade` →
                               Argus preset to pick one name for Mentor)
       <agent>.desk.js         parse(body, turn, user) → { state, input } · run · done · nextState (the fold
-                              the client did on every `done`) · stateFromEntity (rebuild to edit) ·
-                              prepareInput. ONE definition, two callers: makeDeskStream (HTTP) and sessionTurn
-      index.js · common.js    DESK_DEFS by agent · deskCommon (the shared agent bag)
+                              the client did on every `done`) · stateFromEntity(entity, opts) (rebuild to edit) ·
+                              prepareInput · onRouted (a route landing) · hasWork · stateFields (what `done`
+                              drops from the live frame) · actions / applyEdit / reasons (the session's commits
+                              and hand edits, 8a). ONE definition, two callers: makeDeskStream (HTTP) and sessionTurn
+      index.js · common.js    DESK_DEFS by agent · hasWork · framePayload (the slimmer done frame) · deskCommon
+      act.js                  THE PIPE for a desk's commits and hand edits (unified-chat 8a): POST /sessions/:id/act
+                              and PATCH /sessions/:id/state — the session read, the speaker rule, the REVISION
+                              check (agentRev; stale → stale_state), the lock, the seal, the state write. The
+                              meaning is the desk's (actions/)
+      actions/                <agent>.actions.js — each desk's commits from its agentState (never the client's
+                              copy) through the shared commit service; the contract (verbs generate / update /
+                              later + the desk's own, results { <kind>: doc }) is in mentor.actions.js
+      markers.js · scannerMode.js   keepMarkers (editing / chainId survive a fold, an edit, Atlas's onRouted) ·
+                              Argus's mode and radar-board validation (shared by the desk and its actions)
       context.js              buildConversation — what ONE agent reads: sealed context when editing, its
                               summary, its own segment (a hand-off to it reads as the user)
       sessionTurn.js          a desk turn against the session: append → context → run → reply → nextState →
@@ -823,7 +852,7 @@ services/
   industryLimits.service.js The house's industry LIMITS on a book (step 7), one mechanism for construction (_sizePlan)
                             and every add: hype ×½, no sub-industry above a third (water-filled, the rest
                             cash), AVOID flagged → saved only with the user's OK, which NAMES the symbols
-                            (avoidOkCovers; the batch route's and createTradeIdea's 409). capFor: a
+                            (avoidOkCovers; portfolioCommit.createBook's and createTradeIdea's 409). capFor: a
                             single_industry mandate lifts the cap only for a book 80%+ in one sub-industry.
                             limitAddByRatio = an edit-mode add; a review's add_item / add_to_item go through
                             portfolioRebalance._industryLimitsForAdd / _industryLimitsForScaleIn

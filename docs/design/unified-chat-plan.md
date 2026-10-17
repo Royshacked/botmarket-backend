@@ -911,7 +911,7 @@ doorway and bus listener, and the existing overlay patterns. Facts that shaped i
 
 **Steps**
 
-- **8a — backend (one commit):** K2 `act` route + `actions` on mentor (generate, generateAll, arm, update, later), portfolio
+- **8a — backend (one commit) — DONE 2026-10-17, see §10.2 for what was built (it differs from this bullet):** K2 `act` route + `actions` on mentor (generate, generateAll, arm, update, later), portfolio
   (generatePlan, updatePlan, acceptReview, dismissReview, completeReview), scanner (generateList, updateList), analyst
   (initiate, update), strategy (publish) — each through its existing service, seal in-line, `busy`/refusal reasons through
   `sendReason`; K3 `state` route + `applyEdit` (mentor, scanner); K4 nextState additions, the slimmer done frame,
@@ -954,6 +954,63 @@ refusals), every `applyEdit` (accepted / refused / re-validated), the slimmer do
 `reviewMode` and adopt landing; frontend — DrawerShell (DetailPanel's suite passes on it), SidePane (follows the floor,
 pin, tabs, sheet at phone width), each surface's blocks (the panel suites' block assertions move over), `act` / `edit` /
 `commit`, `editEntity` incl. busy → force; the drive above.
+
+### 10.2 Phase 8a — as built (2026-10-17)
+
+Commits: `32f3f61` (8a) · `d0de776` (bug hunt) · `6e4eb00` (CR). Suite 4187/0 (excluding talosRecorder). Not pushed;
+the routes are not live-driven yet — the 8b drawer is the first thing that presses them (drive in 8f).
+
+**The contract the 8b client codes against:**
+- `POST /api/sessions/:id/act { agent, action, args, rev }` → `{ ...result, rev }`; `PATCH /api/sessions/:id/state
+  { agent, edit, rev }` → `{ ok, rev }`. `rev` is REQUIRED: the agent's revision the user was looking at
+  (`agentRev[agent]`, bumped by every `setAgentState`, pushed on `session_state` as `rev` and on `session_replay` as
+  `agentRev`). A stale one answers `409 stale_state` with `extra.rev` — the client redraws, then asks again.
+- Verbs, the same on every desk: `generate` (a new entity — `not_new` while editing one) · `update` (the one being
+  edited) · `later` (stop editing, nothing saved); plus Mentor `generateAll` / `arm` / `leave`, Atlas `accept` /
+  `dismiss`, Pythia `publish { industry }` (no `later`).
+- Results are `{ <kind>: doc, ...extras }`: Mentor `{ setup }` / `{ setups, failed }`; Atlas `{ portfolio: { portfolioId,
+  ideas? }, failed | left | rebound | rebalance | held, nextReviewAt }`; Argus `{ scan, profile }`; Prometheus `{ coverage,
+  revised }`; Pythia `{ view }`. Everything refused is a refusal (`409 nothing_saved`, `extra.failed`), never a success
+  with nothing in it. `stateWritten: false` on a saved commit whose state write failed — refetch.
+- Args: `accounts` is the account OBJECTS for every desk (`parseCommitArgs`), `mainAccountId` a string. The AVOID ask is
+  one round trip: `409 avoid_needs_ok` with `extra.avoid` → ask → press again with `avoidOk: [symbols]` (or, on Accept,
+  `dropAvoid: true`).
+- Edits: Mentor `{ draft, accounts? }` (the session's build ledger is kept — the client's dropped); Argus `{ profile }`
+  (refused in a hand-off) and `{ read: { tickers, rows } }` (the client runs `POST /aether/batch-read`, minutes long,
+  then hands the rows over; `409 stale_read` when the list changed). The angle chips are NOT an edit — they compose a turn.
+- Refusals: the session's table first (`no_such_action`, `nothing_to_commit`, `nothing_to_edit`, `nothing_saved`,
+  `not_new`, `too_many`, `invalid_edit`, `not_editable`, `stale_state`, `action_failed` 500), then the desk's
+  (`setupReason`, `PORTFOLIO_REASONS`, `SCANNER_REASONS`, `ANALYST_REASONS`, `STRATEGY_REASONS`). Prometheus's writes
+  are admin-only in the action (`forbidden`); Pythia's by the speaker rule.
+
+**Shared mechanism (the REST routes run the same code):** `api/setups/setupCommit.service.js` (commitSetup resolves an
+update's cards, armSetup), `setupService.generateSetups` (the one MAX_NAMES cap), `api/portfolio/portfolioCommit.service.js`
+(createBook, recordConstruction, replacePlan — moved off MainPage —, rebindAccounts, closeReview, acceptRebalance),
+`api/analyst/coverageCommit.service.js`, `api/strategy/industryPublish.service.js`, `services/setupVerdict.js`; refusal
+tables in `setupReasons` / `coverageReasons` / `portfolioReasons` / `viewReasons`; `services/desks/markers.js`
+(keepMarkers — the turn fold, a direct edit, Atlas's onRouted); `services/desks/scannerMode.js`.
+
+**State rules moved from the panels to the server:** a review turn without a proposal withdraws it (2026-10-03) and a
+same-turn thesis rides on it; only Prometheus's latest `<coverage>` stands (`standing`) and a revision about another
+symbol is refused (`wrong_symbol`); a Prometheus read rewrites `editList` too while a saved scan is refined; only a
+review's Accept closes the review (`applyRebalance({ closeReview })`, Roy 2026-10-17) — an edit's Accept leaves a due
+review due; edit-mode Atlas proposals wait on Accept instead of applying on arrival (Roy 2026-10-17); a radar board on a
+session turn reaches Argus (it was dropped).
+
+Phase 8a bug hunt (2026-10-17, six, all applied — `d0de776`): the build ledger stays the server's on a hand edit · own
+action names only (`constructor` answered 200) · no review closed outside a review · a failed state write after a save
+answers success with `stateWritten: false`, never 500 · Atlas takes the same account objects · `action_failed` is 500.
+
+Phase 8a CR (2026-10-17, two reviewers, 6 correctness + 6 reuse findings and D1/D2, all applied — `6e4eb00`): Atlas kept
+its plan across a route but dropped `editing` / `chainId` · a model-written `avoid_ok` on an add-to skipped the AVOID ask
+· a read left `editList` stale · the scanner import cycle · an AVOID-retry Accept closed the review twice · read rows
+typed and capped · setups and the book document moved into their commit services · Mentor's `invalid_*` rule no longer
+swallows the session's reasons · one batch cap · D1 one vocabulary and result envelope · D2 revisions.
+
+Left as is, on purpose: a retry after `stateWritten: false` can save twice (it needs two DB failures in a row — clearing
+the state would fail the same way); views Pythia published from a batch the user walks away from stay unsealed (their
+conversation stays in the session). The REST routes' `sessionId` seal hook (sealAfterGenerate) still stands — it goes
+once nothing sends it (D1 of §10.1).
 
 ## 11. Phase 9 — Migration (`scripts/migrate-unified-chat.mjs`)
 
