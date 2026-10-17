@@ -98,7 +98,10 @@ export function makeAct({ sessions = sessionService, desks = DESK_DEFS, sealing 
             if (typeof opened.desk.applyEdit !== 'function') return { reason: 'not_editable' }
             const out = await opened.desk.applyEdit(opened.state, edit && typeof edit === 'object' ? edit : {})
             if (!out || out.reason) return { reason: out?.reason ?? 'invalid_edit' }
-            const written = await sessions.setAgentState({ sessionId, userId: user._id, agent, state: keepMarkers(out.state, opened.state) })
+            // The markers survive a hand edit — unless the edit replaces the work outright (`dropMarkers`: a new plan
+            // is not an edit of the one being edited).
+            const next = out.dropMarkers === true ? out.state : keepMarkers(out.state, opened.state)
+            const written = await sessions.setAgentState({ sessionId, userId: user._id, agent, state: next })
             return { ok: true, rev: written?.rev ?? null }
         })
     }

@@ -120,21 +120,29 @@ export const mentorActions = makeMentorActions()
  * docs/design/mentor-flow-intent.md), and a hand edit is of the plan's fields, never of where the build stands. The
  * client's copy is dropped and the session's kept — otherwise an edit could mark stages confirmed that Mentor never
  * walked (phase 8a bug hunt #1).
+ *
+ * `{ draft, fresh: true }` — a NEW plan, not an edit of this one: a setup someone shared, opened in my Mentor (phase
+ * 8b). Mentor's table is cleared first — the other names, the coverage, the gate — and so are its markers
+ * (`dropMarkers`): kept, an `editing` marker would make the next Update write someone else's plan onto the setup I
+ * was editing. The client asks before replacing work Mentor holds.
  */
 export function mentorApplyEdit(state, edit = {}) {
-    if (!state) return { reason: 'nothing_to_edit' }
+    const fresh = edit.fresh === true
+    if (!state && !fresh) return { reason: 'nothing_to_edit' }
     if (!('draft' in edit)) return { reason: 'invalid_edit' }
     if (!edit.draft || typeof edit.draft !== 'object' || Array.isArray(edit.draft)) return { reason: 'invalid_setup' }
+    const base = fresh ? { ...emptyMentorState(), drafts: {}, view: { gate: null, readiness: null, setups: null } } : state
     const { build: _theirs, ...fields } = edit.draft   // eslint-disable-line no-unused-vars -- dropped on purpose
-    const draft = state.draft?.build ? { ...fields, build: state.draft.build } : fields
+    const draft = base.draft?.build ? { ...fields, build: base.draft.build } : fields
     const verdict = draftVerdict(draft, parseIdeaAccounts(edit.accounts).length > 0)
     if (!verdict) return { reason: 'invalid_setup' }
     return {
         state: {
-            ...state,
+            ...base,
             draft,
-            active_asset: draft.asset || state.active_asset || '',
-            view: { ...(state.view ?? {}), readiness: verdict.readiness, ...(verdict.gate ? { gate: verdict.gate } : {}) },
+            active_asset: draft.asset || base.active_asset || '',
+            view: { ...(base.view ?? {}), readiness: verdict.readiness, ...(verdict.gate ? { gate: verdict.gate } : {}) },
         },
+        ...(fresh ? { dropMarkers: true } : {}),
     }
 }

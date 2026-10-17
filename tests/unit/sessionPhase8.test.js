@@ -197,6 +197,23 @@ test('a hand edit never rewrites the build ledger — the session\'s is kept, th
     assert.equal(mentorApplyEdit(null, { draft: DRAFT }).reason, 'nothing_to_edit')
 })
 
+test('a FRESH plan (a shared setup) clears the table and the markers — it is never written onto the setup being edited', async () => {
+    const r = rig({ state: { draft: DRAFT, drafts: { AMD: DRAFT }, coverage: ['direction'], ...EDITING, chainId: 'c1' } })
+    const { edit, stateOf } = await r.start(user)
+    const shared = { ...DRAFT, asset: 'TSLA', build: { stage: 'ready' } }
+    assert.equal((await edit({ draft: shared, fresh: true })).ok, true)
+    const st = await stateOf()
+    assert.equal(st.draft.asset, 'TSLA')
+    assert.equal('build' in st.draft, false, 'no ledger arrives with someone else\'s plan')
+    assert.deepEqual(st.drafts, {})
+    assert.deepEqual(st.coverage, [])
+    assert.equal(st.editing, undefined, 'an Update now has nothing to write it onto')
+    assert.equal(st.chainId, undefined)
+    // Opened with nothing on Mentor's table at all — allowed for a fresh plan only.
+    assert.equal(mentorApplyEdit(null, { draft: DRAFT, fresh: true }).state.draft.asset, 'NVDA')
+    assert.equal(mentorApplyEdit(null, { draft: DRAFT }).reason, 'nothing_to_edit')
+})
+
 test('applyEdit and the validate route share ONE verdict', () => {
     assert.equal(draftVerdict(null, true), null)
     assert.equal(draftVerdict(DRAFT, true).readiness.ready, true)
