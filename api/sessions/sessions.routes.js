@@ -1,7 +1,8 @@
 import express         from 'express'
 import { log }         from '../../middleware/logger.middleware.js'
 import { requireAuth } from '../../middleware/auth.middleware.js'
-import { getActiveSession, startNewSession, listSessions, getSessionMessages } from './sessions.controller.js'
+import { agentLimiter } from '../../middleware/rateLimit.middleware.js'
+import { getActiveSession, startNewSession, listSessions, getSessionMessages, postSessionTurn, editInSession } from './sessions.controller.js'
 
 const router = express.Router()
 
@@ -12,5 +13,8 @@ router.get('/',              log, listSessions)
 router.get('/active',        log, getActiveSession)
 router.post('/new',          log, startNewSession)
 router.get('/:id/messages',  log, getSessionMessages)
+// A turn spends model calls — the same per-session budget as every desk's /stream (agentLimiter).
+router.post('/:id/turn',     agentLimiter, log, postSessionTurn)
+router.post('/:id/edit',     log, editInSession)
 
 export const sessionsRoutes = router

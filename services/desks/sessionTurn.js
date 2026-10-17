@@ -75,19 +75,23 @@ export function makeSessionTurn({
     }
 
     /**
-     * @param {{ user: { _id: string, role?: string }, sessionId: string, agent: string, text: string,
+     * @param {{ user: { _id: string, role?: string }, sessionId: string, agent: string, text?: string, origin?: 'user'|'chain',
      *           input?: object, emit?: Function, signal?: AbortSignal, model?: string }} p
      * @returns {Promise<{ reason: string } | { stopped: true } | { payload: object, reply: object|null }>}
      */
-    return async function sessionTurn({ user, sessionId, agent, text, input = {}, emit = () => {}, signal, model }) {
+    return async function sessionTurn({ user, sessionId, agent, text, input = {}, origin = 'user', emit = () => {}, signal, model }) {
         const desk = desks[agent]
         if (!desk) return { reason: 'invalid_agent' }
         const session = await sessions.get({ sessionId, userId: user._id })
         if (!session || session.status !== 'active') return { reason: 'not_found' }
         if (!canSpeak(agent, session, user)) return { reason: 'forbidden' }
 
-        const asked = await sessions.append({ sessionId, userId: user._id, message: { agent, role: 'user', content: text } })
-        if (asked.reason) return asked
+        // A chain turn has no user message: the hand-off the runner appended (addressed to this agent, in its
+        // segment as a user turn) IS its prompt.
+        if (origin !== 'chain') {
+            const asked = await sessions.append({ sessionId, userId: user._id, message: { agent, role: 'user', content: text } })
+            if (asked.reason) return asked
+        }
 
         const summary  = session.summaries?.[agent] ?? null
         // Only this agent's segment past its summary — never the whole timeline.

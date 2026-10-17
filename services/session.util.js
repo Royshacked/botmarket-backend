@@ -7,7 +7,7 @@
 //   a CONTEXT    — one agent's own memory: its segment of that chat, the hand-offs addressed to it,
 //                  its summary. `segmentOf` is the line between them.
 
-import { AGENT_KEYS, ENTITY_KINDS } from './desks/registry.js'
+import { DESKS, AGENT_KEYS, ENTITY_KINDS } from './desks/registry.js'
 
 /** The scopes a session can belong to: the one chat, and the two admin desks that keep their own panel. */
 export const SCOPES = Object.freeze(['main', 'strategy', 'aether'])
@@ -98,6 +98,19 @@ export function contextRole(m, agent) {
 /** The Mongo filter for ONE agent's segment rows — the query form of segmentOf. */
 export function segmentQuery(agent) {
     return { $or: [{ agent, kind: { $in: ['msg', 'handoff', 'decision'] } }, { kind: 'handoff', to: agent }] }
+}
+
+/**
+ * "@Atlas, add this to the growth sleeve" — an agent named at the START of a message, by brand or key,
+ * case-insensitive (unified-chat.md §3.3). Returns the agent and the message without the mention, or
+ * null when the message names no one (an "@" elsewhere in the text is just text).
+ */
+export function parseMention(text) {
+    const m = typeof text === 'string' ? text.match(/^\s*@([A-Za-z]+)[\s,:]+([\s\S]*)$/) : null
+    if (!m) return null
+    const name  = m[1].toLowerCase()
+    const agent = Object.values(DESKS).find(d => d.agent === name || d.brand.toLowerCase() === name)?.agent
+    return agent ? { agent, text: m[2].trim() } : null
 }
 
 /** Normalize the messages being sealed: role-checked text, cut, timestamped. */
