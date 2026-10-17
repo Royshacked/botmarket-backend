@@ -35,10 +35,17 @@ export function makeStartTurn({
      * Exported through the factory so the chain runner can queue its own turns the same way.
      */
     function runQueued({ user, sessionId, agent, text, input = {}, turnId, origin = 'user' }) {
+        // Registered when it is ACCEPTED, not when it starts: a turn waiting behind another is the user's to
+        // stop too — Stop on a queued turn must cancel it, not let it run later and spend anyway.
+        const ac      = new AbortController()
+        const release = registerTurn(turnId, ac, user._id)
         return lock(sessionId, async () => {
-            const ac      = new AbortController()
-            const release = registerTurn(turnId, ac, user._id)
-            const te      = emitterFor({ userId: user._id, sessionId, turnId, agent })
+            if (ac.signal.aborted) {
+                release()
+                emitterFor({ userId: user._id, sessionId, turnId, agent }).status('stopped', { queued: true })
+                return { stopped: true }
+            }
+            const te = emitterFor({ userId: user._id, sessionId, turnId, agent })
             te.status('started', { origin })
             try {
                 const out = await sessionTurn({ user, sessionId, agent, text, input, origin, emit: te.emit, signal: ac.signal })
@@ -50,6 +57,10 @@ export function makeStartTurn({
             } catch (err) {
                 logger.warn(LOG, 'turn failed', { sessionId, agent, message: err.message })
                 te.status('error', { message: 'The turn failed' })
+                // The chain hears about a failed step too — it pauses and offers to try again, rather than
+                // staying "running" with nothing in flight.
+                await afterTurn({ user, sessionId, agent, turnId, origin, out: { reason: 'error' } })
+                    .catch(e => logger.warn(LOG, 'after-turn on a failed turn failed', e.message))
                 return { reason: 'error' }
             } finally {
                 release()

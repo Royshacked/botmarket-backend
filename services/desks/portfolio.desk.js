@@ -38,6 +38,8 @@ export const portfolioDesk = {
     agent: 'portfolio',
     log:   LOG,
     nextState: portfolioNextState,
+    // Unsealed work: a plan or review update on the table, or a book being adopted.
+    hasWork: (state) => !!(state?.pendingPlan || state?.reviewUpdate || state?.adoptDraftId),
     // Reopening a book: its id is enough — mandate, thesis and lifecycle are read from portfolio_books.
     stateFromEntity: (book) => portfolioNextState({ portfolioId: book?.portfolioId ?? book?.id ?? null }, {}),
     // `portfolioIdeas` is still SENT by the client and deliberately not read: the book Atlas sees is

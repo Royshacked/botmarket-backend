@@ -113,7 +113,7 @@ async function run() {
     expect(!!ask, '"I was interrupted — continue?" arrived')
     const resumed = await chain.resume({ user, sessionId: sid, choice: 'continue' })
     expect(resumed.ok === true, 'Continue accepted')
-    const rStart = await waitFor(f => f.event === 'session_turn' && f.data.agent === 'mentor' && f.data.status === 'started' && f.data.turnId.endsWith('_r'), 'the re-run to start')
+    const rStart = await waitFor(f => f.event === 'session_turn' && f.data.agent === 'mentor' && f.data.status === 'started' && f.data.turnId.includes('_r'), 'the re-run to start')
     const rDone  = rStart ? await turnDone(rStart.data.turnId) : null
     expect(rDone?.data.status === 'done', 'the cut step ran again and finished')
 

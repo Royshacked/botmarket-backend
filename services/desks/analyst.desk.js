@@ -60,6 +60,8 @@ export const analystDesk = {
     parse: (body, turn) => ({ state: turn.chatState ?? {}, input: { seed: sanitizeScanSeed(body.seed) } }),
     prepareInput: (input = {}) => ({ ...input, seed: sanitizeScanSeed(input.seed) }),
     nextState: analystNextState,
+    // Unsealed work: a coverage draft.
+    hasWork: (state) => !!state?.draft,
     // Revising a thesis: the coverage doc is the draft and the name in focus.
     stateFromEntity: (coverage) => ({ active_symbol: coverage?.symbol ?? null, draft: coverage ?? null }),
     run: async ({ state, input, emit, common }) => analystAgentService.chatStream({

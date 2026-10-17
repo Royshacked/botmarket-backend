@@ -3,27 +3,27 @@
 // After EVERY turn — the user's or the chain's — it asks the reply three things, from the declared tables
 // (rules.js), never the model's say-so:
 //   needs the user?  → a `decision` message (with taps when there is a choice) and the chain stops;
-//   routed?          → the chain stops (the floor moved; the user's next message is the next turn);
+//   routed?          → the chain ends (the floor moved; the user's next message is the next turn);
 //   emitted an artifact? → a `handoff` message (sender → receiver, the receiver's brief) and the receiver's
 //                          turn runs, queued, with no user message.
-// Answering a decision by typing is just the next turn. Only four things need an explicit continue (a tap):
-// a paused chain, an interrupted one, the step cap, and a real choice (research a list; a busy agent; the
-// next name in a research queue).
+// Answering a decision by typing is just the next turn. Only taps need an explicit continue: a paused or
+// interrupted chain, the step cap, a real choice (research a list; a busy agent; the next name in a queue).
 //
 // The chain's state lives on the session (`session.chain`), written BEFORE each step — a restart finds it,
-// and the boot sweep pauses it and asks (G4: never an automatic re-run).
+// and the boot sweep pauses it and asks (G4: never an automatic re-run). A chain step that is refused or
+// fails pauses the chain and offers to try again — it is never left "running" with nothing in flight.
 
 import { sessionService } from '../session.service.js'
 import { deskOf } from '../desks/registry.js'
-import { DESK_DEFS } from '../desks/index.js'
+import { DESK_DEFS, hasWork } from '../desks/index.js'
 import { canSpeak } from '../desks/sessionTurn.js'
+import { withSessionLock } from '../desks/turnLock.js'
+import { isAdminUserCached } from '../../api/user/user.model.js'
+import { coverageService } from '../../api/analyst/coverage.service.js'
 import { KIND, makeArtifact } from './artifact.js'
 import { receiverOf, briefFor } from './contracts.js'
 import { emitted, decisionFor, researchQueueFrom } from './rules.js'
 import { logger } from '../logger.service.js'
-import { getDb } from '../../providers/mongodb.provider.js'
-import { withSessionLock } from '../desks/turnLock.js'
-import { COLLECTION as USERS, roleOf } from '../../api/user/user.model.js'
 
 const LOG = '[chain]'
 export const MAX_STEPS = 12
@@ -35,20 +35,25 @@ const newChain = (origin) => ({
 })
 
 // The user a turn acts as when no request carries one (the restart sweep, a settled sleeve): the id AND the
-// role — an admin's chain must keep an admin's reach (Atlas's coverage refresh is admin-only).
-async function _loadUser(userId) {
-    const db  = await getDb()
-    const doc = await db.collection(USERS).findOne({ id: String(userId) }, { projection: { _id: 0, role: 1, isAdmin: 1 } })
-    return { _id: String(userId), role: roleOf(doc) }
-}
+// role — an admin's chain keeps an admin's reach (Atlas's coverage refresh is admin-only). The cached admin
+// read every desk turn already uses, not a second lookup.
+const _loadUser = async (userId) => ({ _id: String(userId), role: (await isAdminUserCached(userId)) ? 'admin' : 'trader' })
 
-export function makeChainRunner({ sessions = sessionService, desks = DESK_DEFS, maxSteps = MAX_STEPS, loadUser = _loadUser, lock = withSessionLock } = {}) {
+// Whether a name came into house coverage — what a finished research run reports to Atlas.
+const _covered = async (ticker) => !!(await coverageService.getCoverageBySymbol(ticker))
+
+export function makeChainRunner({
+    sessions = sessionService, desks = DESK_DEFS, maxSteps = MAX_STEPS,
+    loadUser = _loadUser, isCovered = _covered, lock = withSessionLock,
+} = {}) {
     // The queued-turn runner (startTurn's runQueued) — bound after construction, because it needs this
     // runner's afterTurn in return (services/desks/turns.js wires the pair).
     let runQueued = null
     const bindRunQueued = (fn) => { runQueued = fn }
 
     const save = (user, sessionId, chain) => sessions.setChain({ sessionId, userId: user._id, chain })
+    // A finished chain leaves nothing to tap: its choices, its pending step and its in-flight step all go.
+    const end  = (user, sessionId, chain) => save(user, sessionId, { ...chain, status: 'done', awaiting: null, next: null, current: null, pauseRequested: false })
 
     async function decide({ user, sessionId, agent, decision, chain }) {
         await sessions.append({ sessionId, userId: user._id, message: {
@@ -68,11 +73,13 @@ export function makeChainRunner({ sessions = sessionService, desks = DESK_DEFS, 
     async function hop({ user, session, chain, art, from, index = 0, force = false }) {
         const sessionId = session.sessionId
         const to = receiverOf(art)
-        if (!to || !canSpeak(to, session, user)) { await save(user, sessionId, { ...chain, status: 'done' }); return }
+        if (!to || !canSpeak(to, session, user)) return end(user, sessionId, chain)
 
-        // BUSY: the receiver holds the user's own unsealed work — ask before the chain takes it over.
+        // BUSY: the receiver holds the user's own UNSEALED work (its desk says what work is) that this chain
+        // did not give it — ask before the chain takes it over. The desk that started the chain is never busy
+        // to it: Atlas's own sleeve coming back is the work Atlas is waiting for.
         const theirs = session.agentState?.[to] ?? null
-        if (!force && theirs && theirs.chainId !== chain.id) {
+        if (!force && to !== chain.origin && theirs?.chainId !== chain.id && hasWork(to, theirs)) {
             return decide({ user, sessionId, agent: 'axl', chain: { ...chain, next: { art, from, index } }, decision: {
                 question: `${deskOf(to).brand} is in the middle of something else — finish that first or set it aside?`,
                 choices: [{ id: 'finish', label: 'Finish that first' }, { id: 'aside', label: 'Set it aside' }],
@@ -90,10 +97,11 @@ export function makeChainRunner({ sessions = sessionService, desks = DESK_DEFS, 
             agent: from, role: 'assistant', kind: 'handoff', to, content: brief.text,
             ref: { artifact: { kind: art.kind, key: art.key, items: art.items, context: art.context, status: art.status } },
         } })
-        // The receiver works FOR this chain now: its state is marked, which is what the busy rule reads.
-        await sessions.setAgentState({ sessionId, userId: user._id, agent: to, state: {
-            ...(force || !theirs ? (desks[to]?.emptyState?.() ?? {}) : theirs), chainId: chain.id,
-        } })
+        // The receiver works FOR this chain now (the busy rule reads the mark). Set aside → it starts clean;
+        // otherwise what it holds is kept — a desk's own conversation-long state (Atlas's mandate) is not
+        // thrown away to receive a hand-off.
+        const base = force ? (desks[to]?.emptyState?.() ?? {}) : (theirs ?? desks[to]?.emptyState?.() ?? {})
+        await sessions.setAgentState({ sessionId, userId: user._id, agent: to, state: { ...base, chainId: chain.id } })
         await sessions.setFloor({ sessionId, userId: user._id, agent: to })
         const step = chain.steps + 1
         // Written BEFORE the turn runs: a restart mid-turn finds `current` and can offer to run it again.
@@ -108,15 +116,24 @@ export function makeChainRunner({ sessions = sessionService, desks = DESK_DEFS, 
 
     /** startTurn's after-hook: what, if anything, runs next. */
     async function afterTurn({ user, sessionId, agent, origin, out }) {
-        if (!out || out.reason) return
+        if (!out) return
         const session = await sessions.get({ sessionId, userId: user._id })
         if (!session) return
         let chain = session.chain && session.chain.status !== 'done' ? session.chain : null
 
+        // A CHAIN step that was refused or failed: pause and offer to try it again — `current` still names it.
+        if (out.reason) {
+            if (origin === 'chain' && chain) {
+                return decide({ user, sessionId, agent, chain: { ...chain, next: null }, decision: {
+                    question: 'That step did not go through — try it again?', choices: [{ id: 'continue', label: 'Try again' }],
+                } })
+            }
+            return
+        }
         if (out.stopped) { if (chain) await save(user, sessionId, { ...chain, status: 'paused', current: null }); return }
 
-        const payload = out.payload
-        const state   = session.agentState?.[agent] ?? null
+        const payload  = out.payload
+        const state    = session.agentState?.[agent] ?? null
         const decision = decisionFor(agent, payload, state, chain)
         const art = decision || payload?.route ? null : emitted(agent, payload, state)
 
@@ -131,7 +148,7 @@ export function makeChainRunner({ sessions = sessionService, desks = DESK_DEFS, 
             if (chain || decision.choices.length) return decide({ user, sessionId, agent, decision, chain: chain ?? newChain(agent) })
             return
         }
-        if (payload?.route || !art) { if (chain) await save(user, sessionId, { ...chain, status: 'done', current: null }); return }
+        if (payload?.route || !art) { if (chain) await end(user, sessionId, chain); return }
         return hop({ user, session, chain: chain ?? newChain(agent), art, from: agent })
     }
 
@@ -152,7 +169,10 @@ export function makeChainRunner({ sessions = sessionService, desks = DESK_DEFS, 
         const session = await sessions.get({ sessionId, userId: user._id })
         const chain   = session?.chain
         if (!session || session.status !== 'active') return { reason: 'not_found' }
-        const allowed = chain?.awaiting?.choices ?? (chain?.status === 'paused' ? ['continue'] : [])
+        // Only a chain that is actually waiting on the user takes a tap — a stale card on a finished chain does not.
+        const allowed = chain?.status === 'awaiting' ? (chain.awaiting?.choices ?? [])
+            : chain?.status === 'paused' ? ['continue', ...(chain.awaiting?.choices ?? [])]
+            : []
         if (!allowed.includes(choice)) return { reason: 'no_such_choice' }
 
         if (choice === 'continue' || choice === 'more' || choice === 'aside') {
@@ -160,16 +180,16 @@ export function makeChainRunner({ sessions = sessionService, desks = DESK_DEFS, 
                 await hop({ user, session, chain: { ...chain, steps: choice === 'more' ? 0 : chain.steps }, ...chain.next, force: choice === 'aside' })
                 return { ok: true }
             }
-            if (chain.current) {   // interrupted mid-turn: run that step again, with the brief it had
+            if (chain.current) {   // interrupted or failed mid-turn: run that step again, with the brief it had
                 await save(user, sessionId, { ...chain, status: 'running', awaiting: null })
-                runQueued?.({ user, sessionId, agent: chain.current.to, text: null, input: chain.current.input, turnId: `${chain.id}_${chain.current.step}_r`, origin: 'chain' })
+                runQueued?.({ user, sessionId, agent: chain.current.to, text: null, input: chain.current.input, turnId: `${chain.id}_${chain.current.step}_r${Date.now()}`, origin: 'chain' })
                     .catch(err => logger.warn(LOG, 'chain re-run failed', err.message))
                 return { ok: true }
             }
-            await save(user, sessionId, { ...chain, status: 'done' })
+            await end(user, sessionId, chain)
             return { ok: true }
         }
-        if (choice === 'finish' || choice === 'keep') { await save(user, sessionId, { ...chain, status: 'done', awaiting: null, next: null }); return { ok: true } }
+        if (choice === 'finish' || choice === 'keep') { await end(user, sessionId, chain); return { ok: true } }
         if (choice === 'research') {
             const art = researchQueueFrom(session.agentState?.scanner?.pendingScan)
             if (!art) return { reason: 'nothing_to_research' }
@@ -182,14 +202,17 @@ export function makeChainRunner({ sessions = sessionService, desks = DESK_DEFS, 
                 await hop({ user, session, chain, art: q.artifact, from: 'scanner', index: q.index + 1 })
                 return { ok: true }
             }
-            // The run is over: what came back goes to Atlas when Atlas started it; otherwise the chain ends.
-            const done = makeArtifact({
-                kind: KIND.COVERAGE_SET, from: { agent: 'analyst', label: 'Research' },
-                items: (q?.artifact.items ?? []).map(c => ({ ticker: c.ticker, sector: q.artifact.context?.sector ?? null })),
-                context: { unfilled: [], declined: [] },
-            })
+            // The run is over. What came back is what is IN coverage now — a name Prometheus passed on, or whose
+            // draft was never initiated, is reported as researched-but-not-covered, never as covered.
+            const sector = q?.artifact.context?.sector ?? null
+            const items = [], declined = []
+            for (const c of q?.artifact.items ?? []) {
+                const row = { ticker: c.ticker, sector };
+                (await isCovered(c.ticker) ? items : declined).push(row)
+            }
+            const done = makeArtifact({ kind: KIND.COVERAGE_SET, from: { agent: 'analyst', label: 'Research' }, items, context: { unfilled: [], declined } })
             if (chain.origin === 'portfolio') { await hop({ user, session, chain, art: done, from: 'analyst' }); return { ok: true } }
-            await save(user, sessionId, { ...chain, status: 'done', queue: null, awaiting: null })
+            await end(user, sessionId, { ...chain, queue: null })
             return { ok: true }
         }
         return { reason: 'no_such_choice' }
@@ -200,6 +223,7 @@ export function makeChainRunner({ sessions = sessionService, desks = DESK_DEFS, 
      * screen is code (decision 1a), shown as ARGUS's work: Argus's line goes into Argus's segment — so a
      * follow-up to Argus can be answered — then what came back is handed to Atlas as a coverage set, saying
      * what did NOT come back too. Answers false when the session is gone, so the card is posted instead.
+     * Under the session lock, like a turn.
      */
     function sleeveSettled(sleeve, outcome) { return lock(sleeve.sessionId, () => _sleeveSettled(sleeve, outcome)) }
 

@@ -18,7 +18,8 @@ import { sessionService } from '../session.service.js'
 import { agentContextService } from '../agentContext.service.js'
 import { contextRole } from '../session.util.js'
 import { deskOf, agentForKind } from './registry.js'
-import { DESK_DEFS } from './index.js'
+import { DESK_DEFS, hasWork } from './index.js'
+import { withSessionLock } from './turnLock.js'
 import { logger } from '../logger.service.js'
 
 const LOG       = '[seal]'
@@ -27,7 +28,7 @@ const VERB = { setup: 'built', scan: 'saved', coverage: 'wrote coverage on', por
 
 const _cut = (s) => (s.length > LABEL_MAX ? `${s.slice(0, LABEL_MAX - 1)}…` : s)
 
-export function makeSealing({ sessions = sessionService, contexts = agentContextService, desks = DESK_DEFS } = {}) {
+export function makeSealing({ sessions = sessionService, contexts = agentContextService, desks = DESK_DEFS, lock = withSessionLock } = {}) {
 
     /**
      * Seal an agent's turns onto the entity (or entities) its work produced.
@@ -89,7 +90,9 @@ export function makeSealing({ sessions = sessionService, contexts = agentContext
 
         const current = session.agentState?.[agent] ?? null
         const sameItem = current?.editing?.kind === kind && String(current.editing.entityId) === entityId
-        if (current && !sameItem && !force) return { reason: 'busy', agent }
+        // Busy only over REAL unsealed work (the desk's hasWork) — a state that is just mode or markers (Argus's
+        // landing mode, Atlas's carried mandate) is nothing to lose.
+        if (hasWork(agent, current) && !sameItem && !force) return { reason: 'busy', agent }
 
         const state   = desk.stateFromEntity(entity)
         const context = await contexts.load({ userId, kind, entityId, agent })
@@ -116,7 +119,9 @@ export function makeSealing({ sessions = sessionService, contexts = agentContext
         const sessionId = typeof req.body?.sessionId === 'string' ? req.body.sessionId : null
         if (!sessionId) return Promise.resolve(null)
         const agent = agentForKind(kind)
-        return sealFromSession({ userId: req.user._id, sessionId, agent, kind, entityIds, name, onlyIfEditing })
+        // Under the session lock, like every turn: a seal reads the agent's rows and clears its state, and a turn
+        // writing at the same moment would either lose its state to the seal or rewrite state for sealed work.
+        return lock(sessionId, () => sealFromSession({ userId: req.user._id, sessionId, agent, kind, entityIds, name, onlyIfEditing }))
             .catch(err => { logger.warn(LOG, 'seal after generate failed (the entity is saved)', err.message); return null })
     }
 

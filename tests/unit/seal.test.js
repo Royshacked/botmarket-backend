@@ -190,3 +190,12 @@ test('forgetIfDeleted clears the contexts only when the delete succeeded, and ha
     forgetIfDeleted('portfolio', 'p-mine', { ok: true, deleted: 1 }, svc)
     assert.deepEqual(calls, [{ kind: 'setup', entityId: 'st1' }, { kind: 'portfolio', entityId: 'p-mine' }])
 })
+
+test('a state that is only mode or markers does not block reopening — only real unsealed work does', async () => {
+    const { sessions, seal } = rig()
+    const s = await sessions.getActive({ userId: 'u1' })
+    // Argus's landing mode after a route: no list in progress.
+    await sessions.setAgentState({ sessionId: s.sessionId, userId: 'u1', agent: 'scanner', state: { handoff: false, profile: 'trading', pendingScan: null, editingScanId: null } })
+    const out = await seal.openForEdit({ userId: 'u1', sessionId: s.sessionId, kind: 'scan', entity: { id: 'sc1', candidates: [] } })
+    assert.equal(out.agent, 'scanner')
+})

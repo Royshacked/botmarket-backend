@@ -10,6 +10,14 @@ import { analystDesk } from './analyst.desk.js'
 import { strategyDesk } from './strategy.desk.js'
 import { aetherDesk } from './aether.desk.js'
 
+/**
+ * Whether an agent holds UNSEALED work — what the busy rule and openForEdit ask before taking it over. Each
+ * desk says what work is (its `hasWork`); a state that is only mode or markers is not work.
+ */
+export function hasWork(agent, state) {
+    return !!state && !!DESK_DEFS[agent]?.hasWork?.(state)
+}
+
 export const DESK_DEFS = Object.freeze({
     axl: axlDesk, mentor: mentorDesk, portfolio: portfolioDesk, scanner: scannerDesk,
     analyst: analystDesk, strategy: strategyDesk, aether: aetherDesk,

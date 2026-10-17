@@ -278,18 +278,19 @@ export function makeSessionService({ getDb = _defaultGetDb, events = silentEvent
     async function setSummary({ sessionId, userId, agent, summary }) {
         if (!isAgent(agent)) return { reason: 'invalid_agent' }
         if (!summary || typeof summary.text !== 'string' || !Number.isFinite(summary.throughSeq)) return { reason: 'invalid_summary' }
-        const db = await getDb()
-        const cur = await db.collection(SESSIONS).findOne(
-            { sessionId: String(sessionId), userId: String(userId) }, { projection: { _id: 0, summaries: 1 } })
-        if (!cur) return { reason: 'not_found' }
-        if (Number.isFinite(cur.summaries?.[agent]?.throughSeq) && cur.summaries[agent].throughSeq >= summary.throughSeq) {
-            return { reason: 'stale' }
-        }
-        const r  = await db.collection(SESSIONS).updateOne(
-            { sessionId: String(sessionId), userId: String(userId) },
-            { $set: { [`summaries.${agent}`]: { text: summary.text, throughSeq: summary.throughSeq } } },
+        const db  = await getDb()
+        const key = `summaries.${agent}`
+        // The "newer only" condition is IN the update's filter, so it is atomic: a check-then-write could let a
+        // seal's reset land between the two and then be overwritten by the slower fold.
+        const r = await db.collection(SESSIONS).updateOne(
+            { sessionId: String(sessionId), userId: String(userId),
+              $or: [{ [`${key}.throughSeq`]: { $lt: summary.throughSeq } }, { [key]: { $exists: false } }] },
+            { $set: { [key]: { text: summary.text, throughSeq: summary.throughSeq } } },
         )
-        return r.matchedCount ? { ok: true } : { reason: 'not_found' }
+        if (r.matchedCount) return { ok: true }
+        // Nothing matched: the session is not this user's, or the stored summary already reaches as far.
+        const owns = await db.collection(SESSIONS).findOne({ sessionId: String(sessionId), userId: String(userId) }, { projection: { _id: 0, sessionId: 1 } })
+        return { reason: owns ? 'stale' : 'not_found' }
     }
 
     /** Record an entity this session produced — a session links to many (decision 5). */

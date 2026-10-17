@@ -103,7 +103,7 @@ export async function isAdminUser(id) {
     if (!id) return false
     const db  = await getDb()
     const doc = await db.collection(COLLECTION).findOne({ id: String(id) }, { projection: { role: 1, isAdmin: 1, _id: 0 } })
-    return !!doc && (doc.role === 'admin' || (doc.role == null && doc.isAdmin === true))
+    return !!doc && roleOf(doc) === 'admin'
 }
 
 // The same answer, remembered for a few minutes. Since the house models (2026-09-21) every desk

@@ -11,11 +11,11 @@ import { decisionFor, emitted, researchQueueFrom } from '../../services/chain/ru
 // call, ask before taking over an agent's own work, cap the automatic steps, pause on an interjection,
 // and pause-and-ask after a restart. On memDb, with a recording stand-in for the queued-turn runner.
 
-function rig({ maxSteps } = {}) {
+function rig({ maxSteps, covered = ['NVDA'] } = {}) {
     const { db } = memDb()
     const sessions = makeSessionService({ getDb: async () => db })
     const roles = { admin1: 'admin' }
-    const runner = makeChainRunner({ sessions, loadUser: async (id) => ({ _id: id, role: roles[id] ?? 'trader' }), ...(maxSteps ? { maxSteps } : {}) })
+    const runner = makeChainRunner({ sessions, loadUser: async (id) => ({ _id: id, role: roles[id] ?? 'trader' }), isCovered: async (t) => covered.includes(t), ...(maxSteps ? { maxSteps } : {}) })
     const queued = []
     runner.bindRunQueued(async (args) => { queued.push(args); return {} })
     return { sessions, runner, queued }
@@ -228,4 +228,55 @@ test('a chain step the server starts on its own acts as the user WITH their role
     const s = await r.sessions.getActive({ userId: 'admin1' })
     await r.runner.sleeveSettled({ userId: 'admin1', sessionId: s.sessionId, sector: 'Energy' }, { covered: ['XOM'], passed: [], failed: [], unresolved: [], screened: 3 })
     assert.equal(r.queued.at(-1).user.role, 'admin')
+})
+
+test('a finished run reports only names actually in coverage as covered — the rest as researched-not-covered', async () => {
+    const r = rig({ covered: ['NVDA'] })
+    const s = await r.sessions.getActive({ userId: 'u1' })
+    const art = makeArtifact({ kind: KIND.CANDIDATE_LIST, items: [{ ticker: 'NVDA' }, { ticker: 'AMD' }], context: { queued: true, sector: 'Semis' } })
+    await r.sessions.setChain({ sessionId: s.sessionId, userId: 'u1', chain: {
+        id: 'c1', status: 'awaiting', origin: 'portfolio', steps: 2, queue: { artifact: art, index: 1 }, awaiting: { agent: 'analyst', choices: ['next'] },
+    } })
+    await r.runner.resume({ user, sessionId: s.sessionId, choice: 'next' })
+    const hand = (await rows(r.sessions, s)).at(-1)
+    assert.ok(hand.content.startsWith('Coverage is in for NVDA (Semis). Build from it.'), hand.content)
+    assert.ok(hand.content.includes('Screened but NOT researched (no coverage initiated): AMD (Semis).'), hand.content)
+})
+
+test('a stale tap on a finished chain does nothing; ending a chain clears what it was waiting on', async () => {
+    const r = rig()
+    const s = await r.sessions.getActive({ userId: 'u1' })
+    await r.sessions.setChain({ sessionId: s.sessionId, userId: 'u1', chain: { id: 'c1', status: 'done', origin: 'scanner', steps: 1, awaiting: { agent: 'axl', choices: ['aside'] } } })
+    assert.deepEqual(await r.runner.resume({ user, sessionId: s.sessionId, choice: 'aside' }), { reason: 'no_such_choice' })
+    await r.sessions.setChain({ sessionId: s.sessionId, userId: 'u1', chain: { id: 'c2', status: 'running', origin: 'axl', steps: 1, awaiting: { agent: 'x', choices: ['finish'] } } })
+    await r.runner.afterTurn({ user, sessionId: s.sessionId, agent: 'mentor', origin: 'chain', out: { payload: { reply: 'to Argus', route: 'scan' } } })
+    const c = (await header(r.sessions, s)).chain
+    assert.equal(c.status, 'done')
+    assert.equal(c.awaiting, null)
+})
+
+test('a chain step that is refused or fails pauses the chain and offers to try again — never left running', async () => {
+    const r = rig()
+    const s = await r.sessions.getActive({ userId: 'u1' })
+    await r.sessions.setChain({ sessionId: s.sessionId, userId: 'u1', chain: { id: 'c1', status: 'running', origin: 'scanner', steps: 1, current: { to: 'mentor', input: {}, step: 1 } } })
+    await r.runner.afterTurn({ user, sessionId: s.sessionId, agent: 'mentor', origin: 'chain', out: { reason: 'error' } })
+    const ask = (await rows(r.sessions, s)).at(-1)
+    assert.equal(ask.content, 'That step did not go through — try it again?')
+    assert.equal((await header(r.sessions, s)).chain.status, 'awaiting')
+    await r.runner.resume({ user, sessionId: s.sessionId, choice: 'continue' })
+    assert.equal(r.queued.at(-1).agent, 'mentor')
+})
+
+test('BUSY is about real work: Atlas’s own sleeve never asks, and a state that is only mode is not work', async () => {
+    const r = rig()
+    const s = await r.sessions.getActive({ userId: 'u1' })
+    // Atlas holds its mandate AND a pending plan — but it started the chain, so its own sleeve comes straight back.
+    await r.sessions.setAgentState({ sessionId: s.sessionId, userId: 'u1', agent: 'portfolio', state: { mandate: { a: 1 }, pendingPlan: { ideas: [] } } })
+    await r.runner.sleeveSettled({ userId: 'u1', sessionId: s.sessionId, sector: 'Energy' }, { covered: ['XOM'], passed: [], failed: [], unresolved: [], screened: 3 })
+    assert.equal(r.queued.at(-1).agent, 'portfolio')
+    assert.deepEqual((await header(r.sessions, s)).agentState.portfolio.mandate, { a: 1 }, 'the mandate is kept, not wiped')
+    // Mentor with only markers (no draft) is not busy.
+    await r.sessions.setAgentState({ sessionId: s.sessionId, userId: 'u1', agent: 'mentor', state: { view: { gate: null } } })
+    await argusPicked(r, s)
+    assert.equal(r.queued.at(-1).agent, 'mentor')
 })

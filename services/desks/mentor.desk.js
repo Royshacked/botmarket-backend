@@ -104,6 +104,8 @@ export const mentorDesk = {
     log:   '[mentor:desk]',
     emptyState: emptyMentorState,
     stateFromEntity: mentorStateFromEntity,
+    // Unsealed work: a setup in the making.
+    hasWork: (state) => !!state?.draft,
     parse: async (body, turn) => ({
         state: turn.chatState ?? emptyMentorState(),
         input: {

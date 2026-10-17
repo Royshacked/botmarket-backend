@@ -122,3 +122,18 @@ test('an edit reads the entity through its own lookup; coverage only for an admi
     assert.equal((await lookupForEdit({ kind: 'coverage', id: 'c', user }, lookups)).reason, 'forbidden')
     assert.equal((await lookupForEdit({ kind: 'call', id: 'x', user }, lookups)).reason, 'not_editable')
 })
+
+test('Stop on a turn still WAITING in the queue cancels it — it never runs', async () => {
+    let release
+    const gate = new Promise(r => { release = r })
+    const { sessions, startTurn, ran, statuses } = rig({ turnImpl: async ({ text }) => { if (text === 'first') await gate; return { payload: {} } } })
+    const s = await sessions.getActive({ userId: 'u1' })
+    await startTurn({ user, sessionId: s.sessionId, text: 'first', turnId: 'q1' })
+    await startTurn({ user, sessionId: s.sessionId, text: 'second', turnId: 'q2' })
+    await tick()
+    assert.equal(stopTurn('q2', 'u1'), true, 'the queued turn is registered and stoppable')
+    release()
+    await tick()
+    assert.deepEqual(ran.map(r => r.text), ['first'])
+    assert.ok(statuses.some(([id, , st, extra]) => id === 'q2' && st === 'stopped' && extra?.queued))
+})
