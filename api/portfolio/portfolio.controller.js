@@ -1,13 +1,12 @@
 import { forgetIfDeleted } from '../../services/agentContext.service.js'
 import { portfolioDesk }         from '../../services/desks/portfolio.desk.js'
 import { portfolioChatService }  from './portfolioChat.service.js'
-import { applyRebalance, snapshotConvictions } from './portfolioRebalance.service.js'
-import { invalidatePortfolioState, listPortfolioItems, listPortfolios } from '../../services/portfolioState.service.js'
+import { listPortfolioItems, listPortfolios } from '../../services/portfolioState.service.js'
 import { logger }                from '../../services/logger.service.js'
 import { makeDeskStream }    from '../_shared/deskStream.util.js'
 import { threadService }          from '../../services/thread.service.js'
-import { resolvePortfolioReviewCard } from '../chat/chat.service.js'
 import { adoptBookService }  from './adoptBook.service.js'
+import { portfolioCommit, REBALANCE_REASONS } from './portfolioCommit.service.js'
 import { sendReason }        from '../_shared/reason.util.js'
 import { makeHandle }        from '../_shared/handle.util.js'
 import { httpError }         from '../../services/httpError.util.js'
@@ -41,14 +40,8 @@ const _adoptErr = {
 // Applying an accepted review. Only the reasons the rebalance itself raises — the per-change
 // refusals (not_found, forbidden, no_position, trim_too_small…) are already the shared vocabulary
 // and ride back in `failed` so the client can name the ones that fell over.
-const _rebalanceErr = {
-    missing_portfolioId: [400, 'Missing portfolioId'],
-    no_changes:          [400, 'No changes to apply'],
-    // 409, not 400: the request is well formed and the book is real — every individual change was
-    // refused by the state of what it named. Changing that state (or re-running the review against
-    // the book as it now stands) makes the same request valid.
-    nothing_applied:     [409, 'None of the proposed changes could be applied'],
-}
+// The rebalance refusals live with the commit service — shared with Atlas's session actions.
+const _rebalanceErr = REBALANCE_REASONS
 
 /**
  * Every adoption handler has the same three moves: read the request, call the one service function,
@@ -185,28 +178,12 @@ export const completeReview = handle('completeReview', async (req, res) => {
     const { portfolioId } = req.params
     if (!portfolioId) throw httpError(400, 'Missing portfolioId')
 
-    // Optional cadence change carried on the body (e.g. user switched weekly→monthly).
-    const bodyCadence = req.body?.reviewCadence
-    if (bodyCadence) {
-        await portfolioChatService.setPortfolioLifecycle(portfolioId, req.user._id, { reviewCadence: bodyCadence })
-    }
-
-    // Record a conviction-trajectory point, then advance the (cadence-aware) clock.
-    await snapshotConvictions(portfolioId, req.user._id)
-    const result = await portfolioChatService.completeReview(portfolioId, req.user._id)
-
-    // Flip the Atlas notification card to a resolved state: 'reviewed' (user accepted a
-    // hold with no changes) or 'dismissed' (skipped). Defaults to dismissed.
-    const outcome = req.body?.outcome === 'reviewed' ? 'reviewed' : 'dismissed'
-    await resolvePortfolioReviewCard(req.user._id, portfolioId, {
-        nextReviewAt: result?.nextReviewAt ?? null,
-        outcome,
+    // Optional cadence change on the body (weekly→monthly); `outcome` flips the Atlas card — 'reviewed' (the user
+    // accepted a hold with no changes) or 'dismissed' (skipped, the default). One service with Atlas's session action.
+    const result = await portfolioCommit.closeReview(portfolioId, req.user._id, {
+        outcome: req.body?.outcome, reviewCadence: req.body?.reviewCadence ?? null,
     })
-
-    // Review done — drop the snapshot so the next review computes fresh.
-    invalidatePortfolioState(portfolioId, req.user._id)
-
-    res.json({ ok: true, nextReviewAt: result?.nextReviewAt ?? null })
+    res.json({ ok: true, nextReviewAt: result.nextReviewAt })
 })
 
 // The user's books — id, name, holdings count, per-status tallies, symbols, venue modes. The
@@ -241,7 +218,8 @@ export const applyPortfolioRebalance = handle('applyPortfolioRebalance', async (
     const { update }      = req.body ?? {}
     if (!portfolioId) throw httpError(400, 'Missing portfolioId')
     if (!update || !Array.isArray(update.changes)) throw httpError(400, 'Missing update.changes')
-    const result = await applyRebalance(portfolioId, req.user._id, update)
+    // Applied, and the Atlas card flipped to "Updated · next review <date>" — one service with the session action.
+    const result = await portfolioCommit.acceptRebalance(portfolioId, req.user._id, update)
     // Answer with the reason, on the shared vocabulary, like every other refusal in the app.
     // This used to be a bare 400 carrying the result object, so a book whose ids didn't resolve,
     // one whose holdings were already closed, and one the user doesn't own were the same red
@@ -254,11 +232,5 @@ export const applyPortfolioRebalance = handle('applyPortfolioRebalance', async (
             extra: { results: result.results ?? null, failed: result.failed ?? null },
         })
     }
-
-    // Flip the Atlas notification card to "Updated · next review <date>".
-    await resolvePortfolioReviewCard(req.user._id, portfolioId, {
-        nextReviewAt: result.nextReviewAt ?? null,
-        outcome: 'updated',
-    })
     res.json(result)
 })

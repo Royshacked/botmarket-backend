@@ -17,6 +17,7 @@ import { registerTurn } from '../../api/_shared/turnRegistry.js'
 import { turnEmitter } from '../sessionChannel.js'
 import { withSessionLock } from './turnLock.js'
 import { sessionTurn as defaultSessionTurn, canSpeak } from './sessionTurn.js'
+import { framePayload } from './index.js'
 import { logger } from '../logger.service.js'
 
 const LOG = '[startTurn]'
@@ -51,7 +52,7 @@ export function makeStartTurn({
                 const out = await sessionTurn({ user, sessionId, agent, text, input, origin, emit: te.emit, signal: ac.signal })
                 if (out.reason)  te.status('refused', { reason: out.reason })
                 else if (out.stopped) te.status('stopped')
-                else te.status('done', { payload: out.payload })
+                else te.status('done', { payload: framePayload(agent, out.payload) })
                 await afterTurn({ user, sessionId, agent, turnId, origin, out, input })
                 return out
             } catch (err) {

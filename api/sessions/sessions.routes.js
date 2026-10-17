@@ -2,7 +2,7 @@ import express         from 'express'
 import { log }         from '../../middleware/logger.middleware.js'
 import { requireAuth } from '../../middleware/auth.middleware.js'
 import { agentLimiter } from '../../middleware/rateLimit.middleware.js'
-import { getActiveSession, startNewSession, listSessions, getSessionMessages, postSessionTurn, editInSession, continueSession } from './sessions.controller.js'
+import { getActiveSession, startNewSession, listSessions, getSessionMessages, postSessionTurn, editInSession, continueSession, actInSession, editSessionState } from './sessions.controller.js'
 
 const router = express.Router()
 
@@ -18,5 +18,8 @@ router.post('/:id/turn',     agentLimiter, log, postSessionTurn)
 router.post('/:id/edit',     log, editInSession)
 // A tap on a decision may run the next chain step — the same model budget as a turn.
 router.post('/:id/continue', agentLimiter, log, continueSession)
+// A desk's commit (Generate, Arm, Update…) and a direct edit of its work — no model call (plan phase 8).
+router.post('/:id/act',      log, actInSession)
+router.patch('/:id/state',   log, editSessionState)
 
 export const sessionsRoutes = router

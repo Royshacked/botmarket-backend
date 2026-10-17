@@ -5,13 +5,14 @@ import { sendReason }   from '../_shared/reason.util.js'
 import { makeHandle }   from '../_shared/handle.util.js'
 import { makeEntityController } from '../_shared/entityController.util.js'
 import { setupService } from './setups.service.js'
+import { setupReason } from './setupReasons.js'
 import { shareSetup as shareSetupService } from './setupShare.service.js'
 import { resolveCardsFor } from '../chat/chat.service.js'
 import { talosHandoffService } from '../../services/talos.handoff.service.js'
 import { normalizeSetup, setupReadiness, TRADE_MODES, TF_RUNGS, isFetchableRung } from '../../services/setup.schema.js'
 import { TRADE_HORIZONS } from '../../services/entity/vocabulary.js'
 import { hydrateBlueprint as hydrateDraft, blueprintProblems } from '../../services/setup.blueprint.js'
-import { gateView, normalizeBuild } from '../../services/mentorBuild.util.js'
+import { draftVerdict } from '../../services/setupVerdict.js'
 
 const LOG     = '[setups:controller]'
 const _handle = makeHandle(LOG)
@@ -20,37 +21,7 @@ const _handle = makeHandle(LOG)
 // MAX_NAMES), repeated here because this route is reachable without going through a build at all.
 const MAX_BATCH = 10
 
-// Setup-OWNED reasons. Everything cross-kind (not_found / forbidden / in_position /
-// closed_is_terminal / invalid_status / nothing_to_patch) is answered by the shared table, so this
-// route can no longer disagree with the idea and call routes about what a refusal means.
-//
-// What's left is the Generate gate: `missing_*` says the draft isn't finished and `cannot_arm_*`
-// says re-running that gate at Arm time failed (the broker disconnected after Generate). Both are
-// "fix it in the chat" — a 400 carrying the slug, never a 500.
-const SETUP_REASONS = {
-    invalid_setup: [400, 'The draft is not a usable setup'],
-    invalid_leg:   [400, 'A level is missing its price'],
-    no_venue:      [400, 'Mark a trading account before generating'],
-    // Management refusals. `confirm_order` is not an error the user caused: a printing second leg is
-    // placed by confirming its order, so the client is being told WHERE the action lives.
-    confirm_order:        [409, 'That leg is placed by confirming its order, not from here'],
-    no_pending_action:    [409, 'Talos has not proposed that'],
-    bad_verb:             [400, 'That is not an action this desk can execute'],
-    bad_proposal:         [422, 'The proposal is missing the level it needs'],
-    no_position_link:     [409, 'No broker position is linked to this setup'],
-    not_a_pending_limit:  [409, 'This setup is not a confirmed limit order awaiting a fill'],
-    // Share refusals. A card only a person can open cannot be sent to a bot; a conversation the
-    // sender is not in is `forbidden` from the shared table.
-    invalid_conversation: [400, 'Pick a conversation to share into'],
-    bot_recipient:        [400, 'A setup can only be shared with another user'],
-}
-// Named reasons win over the prefix rules — `invalid_setup` / `invalid_leg` have their own copy and
-// must not be swallowed by the generic `invalid_*` passthrough below them.
-const setupReason = (reason) =>
-    SETUP_REASONS[reason]
-    ?? ((reason?.startsWith('missing_') || reason?.startsWith('cannot_arm_') || reason?.startsWith('invalid_'))
-        ? [400, reason]
-        : null)
+// The setup refusal table lives in setupReasons.js — shared with Mentor's session actions.
 
 // list / get / patch / delete are the shared HTTP tier — the same moves every kind makes, over the
 // same crud. Arming IS a patch (`{status:'looking'}`); the gate it re-runs lives in the service,
@@ -193,23 +164,9 @@ export const generateSetups = _handle('generateSetups', async (req, res) => {
         return res.status(400).send({ error: `no more than ${MAX_BATCH} setups in one batch` })
     }
 
-    const saved  = []
-    const failed = []
-    for (const [i, setup] of setups.entries()) {
-        if (!setup || typeof setup !== 'object' || Array.isArray(setup)) {
-            failed.push({ index: i, asset: null, reason: 'not_an_object' })
-            continue
-        }
-        const result = await setupService.generateSetup(setup, {
-            userId:   req.user._id,
-            accounts: Array.isArray(accounts) ? accounts : [],
-            mainAccountId,
-            updateId: null,
-            chatState: chat_state,
-        })
-        if (result.ok) saved.push(result.doc)
-        else failed.push({ index: i, asset: setup.asset ?? null, reason: result.reason })
-    }
+    const { saved, failed } = await setupService.generateSetups(setups, {
+        userId: req.user._id, accounts: Array.isArray(accounts) ? accounts : [], mainAccountId, chatState: chat_state,
+    })
 
     logger.info(LOG, `generateSetups: ${saved.length} saved, ${failed.length} refused`)
     // One conversation, several setups: the same turns are sealed onto each (unified-chat §6.2).
@@ -303,18 +260,16 @@ export const validateDraft = _handle('validateDraft', async (req, res) => {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
         return res.status(400).send({ error: 'setup must be an object' })
     }
-    const setup = normalizeSetup(raw)
-    if (!setup) return res.status(400).send({ error: 'invalid_setup' })
-
-    // A Mentor draft carries its build ledger; the gate open on it is what the panel draws its card
-    // from. A REOPENED conversation used to land with no verdict and no gate at all — Generate dark
-    // with nothing said, and no entries table to press — until the user sent another message. One
-    // ask answers both, from the same functions a turn uses.
-    const gate = raw.build ? gateView(normalizeBuild(raw.build)) : null
+    // A REOPENED conversation used to land with no verdict and no gate at all — Generate dark with nothing
+    // said, and no entries table to press — until the user sent another message. One ask answers both, from
+    // the same functions a turn uses (services/setupVerdict.js, shared with Mentor's session edit).
+    const verdict = draftVerdict(raw, Array.isArray(accounts) && accounts.length > 0)
+    if (!verdict) return res.status(400).send({ error: 'invalid_setup' })
+    const { setup, readiness, gate } = verdict
 
     res.send({
         setup,
-        readiness:  setupReadiness(setup, Array.isArray(accounts) && accounts.length > 0),
+        readiness,
         ...(gate ? { gate } : {}),
         // Carried here too so the form can open straight onto a live draft (no blueprint to
         // hydrate) and still render its dropdowns from the server's vocabulary.

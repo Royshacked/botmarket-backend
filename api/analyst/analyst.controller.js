@@ -2,7 +2,9 @@
 // research queue (Argus→Prometheus admin pipeline).
 import { sealing } from '../../services/desks/seal.js'
 import { forgetIfDeleted } from '../../services/agentContext.service.js'
-import { coverageService, revisionSummary } from './coverage.service.js'
+import { coverageService } from './coverage.service.js'
+import { coverageCommit } from './coverageCommit.service.js'
+import { COVERAGE_REASONS } from './coverageReasons.js'
 import { resolveCardsFor }        from '../chat/chat.service.js'
 import { researchQueueService }   from '../../services/researchQueue.service.js'
 import { researchRunService }     from '../../services/researchRun.service.js'
@@ -28,11 +30,7 @@ export const streamAnalyst = makeDeskStream(analystDesk)
 
 // ─── Coverage CRUD ────────────────────────────────────────────────────────────
 
-const COVERAGE_REASONS = {
-    symbol_required:           [400, 'A symbol is required to initiate coverage'],
-    already_covered:           [409, 'Already covered — update the thesis instead of initiating it again'],
-    rating_contradicts_target: [422, 'The rating and the price target point in opposite directions'],
-}
+// The coverage refusal table lives in coverageReasons.js — shared with Prometheus's session actions.
 
 export const listCoverage = _handle('listCoverage', async (req, res) => {
     res.send(await coverageService.getCoverage({
@@ -72,17 +70,12 @@ export const initiateCoverage = _handle('initiateCoverage', async (req, res) => 
 export const updateCoverage = _handle('updateCoverage', async (req, res) => {
     const patch = req.body?.patch ?? req.body
     if (!patch || typeof patch !== 'object' || Array.isArray(patch)) throw httpError(400, 'patch must be an object')
-    const result = await coverageService.updateCoverage(req.params.id, patch)
+    // The revision and the cards it satisfies — one service with Prometheus's session action (coverageCommit).
+    const result = await coverageCommit.revise(req.params.id, patch)
     if (!result.ok) return sendReason(res, result.reason, {
         overrides: COVERAGE_REASONS, fallback: 500, fallbackMessage: 'Failed to update coverage',
         extra: result.detail ? { detail: result.detail } : null,
     })
-    // THE WORK LANDED. Coverage writes do not go through makeEntityController, so the one seam
-    // that closes a card when its ask is satisfied never saw them — a verdict card sat "still
-    // waiting on you" after the thesis it asked for was revised. After the write, never before,
-    // and non-fatal (resolveCardsFor swallows its own failures). The note is the revision's own
-    // account of what moved — the trail entry this write just appended.
-    await resolveCardsFor({ kind: 'coverage', id: req.params.id }, { outcome: 'revised', note: revisionSummary(result.doc?.revisions?.[0]) })
     sealing.sealAfterGenerate(req, { kind: 'coverage', entityIds: [req.params.id], name: result.doc?.symbol ?? null, onlyIfEditing: true })
     res.send(result.doc)
 })

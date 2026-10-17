@@ -11,6 +11,8 @@ import { startTurn, chain } from '../../services/desks/turns.js'
 import { lookupForEdit } from '../../services/desks/entityLookup.js'
 import { sealing } from '../../services/desks/seal.js'
 import { withSessionLock } from '../../services/desks/turnLock.js'
+import { deskAct } from '../../services/desks/act.js'
+import { DESK_DEFS } from '../../services/desks/index.js'
 import { hydrateCards } from '../../services/sessionCards.js'
 import { parseIdeaAccounts, parseClientTime } from '../_shared/parse.util.js'
 import { makeHandle } from '../_shared/handle.util.js'
@@ -27,9 +29,13 @@ export function _scopeOf(req, raw) {
     return scope
 }
 
+// With the agents' working state (plan phase 8, K4): the drawer's surfaces paint from it before the socket's
+// replay arrives. The list stays header-only.
 export const getActiveSession = handle('getActiveSession', async (req, res) => {
-    const scope = _scopeOf(req, req.query?.scope)
-    res.json({ session: await sessionService.getActive({ userId: req.user._id, scope }) })
+    const scope   = _scopeOf(req, req.query?.scope)
+    const active  = await sessionService.getActive({ userId: req.user._id, scope })
+    const session = active ? await sessionService.get({ sessionId: active.sessionId, userId: req.user._id }) : null
+    res.json({ session: session ?? active })
 })
 
 export const startNewSession = handle('startNewSession', async (req, res) => {
@@ -54,13 +60,15 @@ const EDIT_REASONS = {
 // A turn: accepted at once (202), run queued, streamed on the session channel (plan phase 5b, G2).
 // `input` is the desk's per-turn extras (a card press's ops, a seed, the marked accounts, the clock).
 export const postSessionTurn = handle('postSessionTurn', async (req, res) => {
-    const { text, agent = null, turnId = null, ops, seed, accounts, mainAccountId, clientTime, brief } = req.body ?? {}
+    const { text, agent = null, turnId = null, ops, seed, accounts, mainAccountId, clientTime, brief, radarBoard } = req.body ?? {}
     if (agent != null && !AGENT_KEYS.includes(agent)) throw httpError(400, 'invalid agent')
     const input = {
         ...(Array.isArray(ops) ? { ops } : {}),
         ...(seed && typeof seed === 'object' ? { seed } : {}),
         // Today's market brief, asked of Axl (plan phase 7, J4) — only Axl's desk reads it.
         ...(brief === true ? { brief: true } : {}),
+        // The Floor's radar board for Argus's cut — shape-checked and capped by the scanner desk (prepareInput).
+        ...(radarBoard && typeof radarBoard === 'object' ? { radarBoard } : {}),
         accounts: parseIdeaAccounts(accounts),
         mainAccountId: mainAccountId != null ? String(mainAccountId) : null,
         clientTime: parseClientTime({ clientNow: clientTime?.clientNow, clientTz: clientTime?.clientTz }),
@@ -75,11 +83,11 @@ export const postSessionTurn = handle('postSessionTurn', async (req, res) => {
 // context, a card line, the floor. `busy` (the agent holds other unsealed work) answers 409 with the
 // agent, so the client can ask the user and repeat with `force`.
 export const editInSession = handle('editInSession', async (req, res) => {
-    const { kind, id, name = null, force = false } = req.body ?? {}
+    const { kind, id, name = null, force = false, reviewMode = false } = req.body ?? {}
     const found = await lookupForEdit({ kind, id, user: req.user })
     if (!found.ok) return sendReason(res, found.reason, { overrides: EDIT_REASONS, fallback: 404 })
     // Under the session lock, like every turn: it writes the agent's state, a card line and the floor.
-    const out = await withSessionLock(req.params.id, () => sealing.openForEdit({ userId: req.user._id, sessionId: req.params.id, kind, entity: found.doc, name, force: force === true }))
+    const out = await withSessionLock(req.params.id, () => sealing.openForEdit({ userId: req.user._id, sessionId: req.params.id, kind, entity: found.doc, name, force: force === true, opts: { reviewMode: reviewMode === true } }))
     if (out.reason) return sendReason(res, out.reason, { overrides: EDIT_REASONS, fallback: 404, extra: out.agent ? { agent: out.agent } : null })
     res.json(out)
 })
@@ -96,6 +104,37 @@ export const continueSession = handle('continueSession', async (req, res) => {
     const out = await chain.resume({ user: req.user, sessionId: req.params.id, choice })
     if (out.reason) return sendReason(res, out.reason, { overrides: CONTINUE_REASONS, fallback: 404 })
     res.json(out)
+})
+
+// A desk's commit (plan phase 8, K2): the draft comes from the session, the meaning from the desk. A refusal
+// answers in the desk's own words when it has them (Mentor → the setup routes' table).
+const ACT_REASONS = {
+    no_such_action:    [400, 'That is not something this desk does'],
+    nothing_to_commit: [409, 'There is nothing to save yet'],
+    nothing_to_edit:   [409, 'There is nothing to change yet'],
+    invalid_edit:      [400, 'That change is not valid'],
+    not_editable:      [400, 'Nothing here is edited by hand'],
+}
+const reasonsFor = (agent) => {
+    const own = DESK_DEFS[agent]?.reasons
+    return (reason) => (typeof own === 'function' ? own(reason) : null) ?? ACT_REASONS[reason] ?? null
+}
+
+export const actInSession = handle('actInSession', async (req, res) => {
+    const { agent, action, args } = req.body ?? {}
+    if (!AGENT_KEYS.includes(agent)) throw httpError(400, 'invalid agent')
+    const out = await deskAct.act({ user: req.user, sessionId: req.params.id, agent, action, args })
+    if (out.reason) return sendReason(res, out.reason, { overrides: reasonsFor(agent), fallback: 400, extra: out.extra ?? null })
+    res.json(out.result)
+})
+
+// A direct edit (plan phase 8, K3): validated by the desk, written to its state, pushed on the channel.
+export const editSessionState = handle('editSessionState', async (req, res) => {
+    const { agent, edit } = req.body ?? {}
+    if (!AGENT_KEYS.includes(agent)) throw httpError(400, 'invalid agent')
+    const out = await deskAct.editState({ user: req.user, sessionId: req.params.id, agent, edit })
+    if (out.reason) return sendReason(res, out.reason, { overrides: reasonsFor(agent), fallback: 400 })
+    res.json({ ok: true })
 })
 
 export const getSessionMessages = handle('getSessionMessages', async (req, res) => {

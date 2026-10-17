@@ -173,7 +173,7 @@ test('Argus reopens a saved list in edit mode; Prometheus reopens a thesis as it
     assert.equal(scan.editingScanId, 'sc1')
     assert.deepEqual(scan.editList.candidates, [{ ticker: 'NVDA' }])
     assert.equal(scan.profile, 'investing')
-    assert.deepEqual(DESK_DEFS.analyst.stateFromEntity({ id: 'c', symbol: 'CVX' }), { active_symbol: 'CVX', draft: { id: 'c', symbol: 'CVX' } })
+    assert.deepEqual(DESK_DEFS.analyst.stateFromEntity({ id: 'c', symbol: 'CVX' }), { active_symbol: 'CVX', draft: { id: 'c', symbol: 'CVX' }, standing: false, editingSymbol: 'CVX' })
     assert.equal(DESK_DEFS.portfolio.stateFromEntity({ portfolioId: 'p1' }).portfolioId, 'p1')
 })
 

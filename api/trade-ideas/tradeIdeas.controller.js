@@ -4,9 +4,10 @@ import { confirmManualEntry, confirmManualExit, confirmManualAdd, activateManual
 import { sendReason } from '../_shared/reason.util.js'
 import { makeEntityController } from '../_shared/entityController.util.js'
 import { makeHandle } from '../_shared/handle.util.js'
-import { avoidNames, avoidOkCovers, industriesFor, limitAddByRatio } from '../../services/industryLimits.service.js'
+import { industriesFor, limitAddByRatio } from '../../services/industryLimits.service.js'
 import { listPortfolioItems } from '../../services/portfolioState.service.js'
 import { portfolioChatService } from '../portfolio/portfolioChat.service.js'
+import { portfolioCommit } from '../portfolio/portfolioCommit.service.js'
 import { TERMINAL } from '../../services/entity/vocabulary.js'
 
 const LOG     = '[tradeIdeas:controller]'
@@ -142,18 +143,11 @@ export const createBatchIdeas = _handle('createBatchIdeas', async (req, res) => 
     const { plan, accounts = [], mainAccountId = null, portfolioId = null, avoid_ok = [] } = req.body ?? {}
     if (!plan?.ideas?.length) return res.status(400).send({ error: 'Missing plan.ideas' })
 
-    // A book holding a name in an industry Pythia rates AVOID is saved only with the user's explicit OK (step 7,
-    // Roy 2026-10-11). Checked HERE from the symbols — not from the plan's own `limits`, which the client carries.
-    const avoid = await avoidNames(plan.ideas.map(i => i.asset))
-    // The OK names the symbols the user said yes to — a name turned AVOID after they were asked is not covered by it.
-    if (avoid.length && !avoidOkCovers(avoid, avoid_ok)) {
-        return res.status(409).send({ error: 'avoid_needs_ok', outcome: 'avoid_needs_ok', avoid })
+    // The AVOID ask and the batch are the book's commit — one service, shared with Atlas's session action.
+    const result = await portfolioCommit.createBook(plan, req.user._id, { accounts, mainAccountId, portfolioId, avoidOk: avoid_ok })
+    if (result.reason === 'avoid_needs_ok') {
+        return res.status(409).send({ error: 'avoid_needs_ok', outcome: 'avoid_needs_ok', avoid: result.avoid })
     }
-
-    // Construction stays LENIENT about a failed leg (`result.failed`): the book is a proposal the
-    // user is about to review, where a missing line is visible and fixable. Adoption reads the
-    // same field and refuses — see adoptBook.service.
-    const result = await ideaService.saveBatchIdeas(plan, req.user._id, { accounts, mainAccountId, portfolioId })
     if (!result.ok) return res.status(500).send({ error: 'Failed to save batch' })
 
     // With a sessionId, Atlas's turns move onto the book they produced (unified-chat §6.2). Never fails the save.

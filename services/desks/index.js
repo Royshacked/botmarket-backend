@@ -18,6 +18,17 @@ export function hasWork(agent, state) {
     return !!state && !!DESK_DEFS[agent]?.hasWork?.(state)
 }
 
+/**
+ * The `done` payload as the live frame carries it (plan phase 8, K4): without the fields the agent's state
+ * already holds (the desk's `stateFields`) — the surface reads those from agentState, so they are sent once, not
+ * twice. The chain and the turn's own caller still get the full payload.
+ */
+export function framePayload(agent, payload) {
+    const drop = DESK_DEFS[agent]?.stateFields
+    if (!payload || !drop?.length) return payload ?? null
+    return Object.fromEntries(Object.entries(payload).filter(([k]) => !drop.includes(k)))
+}
+
 export const DESK_DEFS = Object.freeze({
     axl: axlDesk, mentor: mentorDesk, portfolio: portfolioDesk, scanner: scannerDesk,
     analyst: analystDesk, strategy: strategyDesk, aether: aetherDesk,

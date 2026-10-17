@@ -88,12 +88,14 @@ export function makeSessionTurn({
      * A route to a desk in another scope (an admin desk asked for from the main chat) moves nothing here:
      * that desk keeps its own panel.
      */
-    async function land({ user, session, routing, agent, next }) {
+    async function land({ user, session, routing, agent, next, hints = null }) {
         const entry = routing.route ? entryOf(routing.route) : null
         if (!entry || !canSpeak(entry.agent, session, user)) return agent
         const landing = desks[entry.agent]
         const theirs  = entry.agent === agent ? next : (session.agentState?.[entry.agent] ?? null)
-        const state   = landing?.onRouted ? landing.onRouted(theirs, entry.state)
+        // `hints`: what the routing desk knows about the landing (Axl's adopt — the user already owns this book).
+        const preset  = hints ? { ...(entry.state ?? {}), ...hints } : entry.state
+        const state   = landing?.onRouted ? landing.onRouted(theirs, preset)
             : entry.state ? { ...(theirs ?? {}), ...entry.state } : undefined
         if (state !== undefined) await sessions.setAgentState({ sessionId: session.sessionId, userId: user._id, agent: entry.agent, state })
         return entry.agent
@@ -154,7 +156,7 @@ export function makeSessionTurn({
 
         // The floor follows the reply: a route lands on its desk's entry agent; otherwise the agent that
         // answered keeps it. (Hand-offs and "@agent" join in phase 5.)
-        const floor = await land({ user, session, routing, agent, next: kept })
+        const floor = await land({ user, session, routing, agent, next: kept, hints: payload.adopt === true ? { adopt: true } : null })
         await sessions.setFloor({ sessionId, userId: user._id, agent: floor })
 
         // In the background, after the reply is out: fold the oldest turns into the summary when the

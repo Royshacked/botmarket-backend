@@ -9,6 +9,8 @@ import { mentorAgentService, emptyMentorState } from '../agents/mentor.agent.ser
 import { parseClientTime } from '../../api/_shared/parse.util.js'
 import { sanitizeScanSeed } from '../scanSeed.util.js'
 import { houseLabels, formatHouseLabel } from '../houseLabel.service.js'
+import { mentorActions, mentorApplyEdit } from './actions/mentor.actions.js'
+import { setupReason } from '../../api/setups/setupReasons.js'
 
 /**
  * WHAT REACHES THE PANEL. Pure and tested — because everything the desk computes for the user has to
@@ -135,4 +137,12 @@ export const mentorDesk = {
         onCoverage:  (coverage) => emit('coverage',  { coverage }),
     }),
     done: (result) => _mentorResponse(result),
+    // The session's commits and direct edits (plan phase 8, K2/K3) — services/desks/act.js runs them.
+    actions:   mentorActions,
+    applyEdit: mentorApplyEdit,
+    // A refused commit answers in the setup routes' own words.
+    reasons:   setupReason,
+    // What a turn's `done` carries that the state already holds — dropped from the live frame (K4), read from
+    // agentState instead. The chain still reads the full payload.
+    stateFields: ['setup', 'setups', 'drafts', 'gate', 'readiness', 'coverage', 'build'],
 }

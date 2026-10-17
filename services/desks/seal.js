@@ -80,7 +80,7 @@ export function makeSealing({ sessions = sessionService, contexts = agentContext
      * Refused (`busy`) while the agent holds OTHER unsealed work, unless `force` — the user chose to drop it.
      * @param {{ userId: string, sessionId: string, kind: string, entity: object, name?: string, force?: boolean }} p
      */
-    async function openForEdit({ userId, sessionId, kind, entity, name = null, force = false }) {
+    async function openForEdit({ userId, sessionId, kind, entity, name = null, force = false, opts = {} }) {
         const agent = agentForKind(kind)
         const desk  = agent ? desks[agent] : null
         const entityId = entity?.id ? String(entity.id) : null
@@ -97,7 +97,8 @@ export function makeSealing({ sessions = sessionService, contexts = agentContext
         // landing mode, Atlas's carried mandate) is nothing to lose.
         if (hasWork(agent, current) && !sameItem && !force) return { reason: 'busy', agent }
 
-        const state   = desk.stateFromEntity(entity)
+        // `opts` is how the item opens (a book in review mode) — the desk reads what it knows.
+        const state   = desk.stateFromEntity(entity, opts)
         const context = await contexts.load({ userId, kind, entityId, agent })
         await sessions.setAgentState({ sessionId, userId, agent, state: { ...state, editing: { kind, entityId } } })
 

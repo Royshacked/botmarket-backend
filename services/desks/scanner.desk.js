@@ -4,6 +4,17 @@
 // One definition for the HTTP desk stream and the session turn (unified-chat plan phase 4).
 
 import { scannerAgentService } from '../agents/scanner.agent.service.js'
+import { scannerActions, scannerApplyEdit, scannerReason } from './actions/scanner.actions.js'
+
+// A radar board rides on the session turn and is KEPT in the agent's state for the cut (and for the run ids the
+// saved list is stamped with), so it is capped: the universe is a few dozen names, this is a guard, not a limit.
+const RADAR_MAX = 200
+
+/** A radar board from a session turn: an object with a candidate list, capped. Null otherwise. */
+export function _radarBoard(raw) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw) || !Array.isArray(raw.candidates) || !raw.candidates.length) return null
+    return { ...raw, candidates: raw.candidates.slice(0, RADAR_MAX), runIds: Array.isArray(raw.runIds) ? raw.runIds.slice(0, RADAR_MAX).map(String) : [] }
+}
 
 /** The mode fields, validated — the same whitelist whichever caller supplies them. */
 export function _scannerMode(raw = {}) {
@@ -27,15 +38,19 @@ export function _scannerMode(raw = {}) {
 /**
  * The working state after a turn: the mode carries over unchanged, the list in progress is the newest
  * one Argus emitted, and while a saved scan is being edited that list is what the next turn refines.
+ * A turn that brought a radar board puts Argus in radar mode for the cut (`prepared`, the turn's input).
+ * A NEW LIST HAS NO VERDICT YET: the Prometheus read belongs to the list it ran on, so a re-emitted list clears it.
  */
-export function scannerNextState(prev, result) {
+export function scannerNextState(prev, result, prepared = {}) {
     const pendingScan   = result.scan ?? prev?.pendingScan ?? null
     const editingScanId = prev?.editingScanId ?? null
     return {
         ..._scannerMode(prev),
+        ...(prepared?.radarBoard ? { radar: true, radarBoard: prepared.radarBoard } : {}),
         pendingScan,
         editingScanId,
         editList: editingScanId ? pendingScan : null,
+        readCut: result.scan ? null : (prev?.readCut ?? null),
     }
 }
 
@@ -43,6 +58,8 @@ export const scannerDesk = {
     agent: 'scanner',
     log:   '[scanner:desk]',
     parse: (body) => ({ state: _scannerMode(body) }),
+    // The session turn's radar board (the Floor's "scan the radar") — validated and capped before it reaches the prompt.
+    prepareInput: (input = {}) => ({ ...input, radarBoard: _radarBoard(input.radarBoard) }),
     nextState: scannerNextState,
     // Unsealed work: a list in progress, or a saved one being edited.
     hasWork: (state) => !!(state?.pendingScan || state?.editingScanId),
@@ -54,12 +71,19 @@ export const scannerDesk = {
         const pendingScan = { period: scan?.period, thesis: scan?.thesis, direction: scan?.direction, candidates: scan?.candidates ?? [] }
         return { ..._scannerMode({ profile: scan?.profile }), pendingScan, editingScanId: scan?.id ?? null, editList: pendingScan }
     },
-    run: ({ state, emit, common }) => scannerAgentService.chatStream({
+    run: ({ state, input = {}, emit, common }) => scannerAgentService.chatStream({
         ...common,
         ..._scannerMode(state),
+        // The board this turn brought cuts in THIS turn, before nextState has folded it into the mode.
+        ...(input.radarBoard ? { radar: true, radarBoard: input.radarBoard } : {}),
         onTicker: (symbol) => emit('ticker', { symbol }),
         onPhase:  (phase)  => emit('phase',  { phase }),
     }),
+    // The session's commits and direct edits (plan phase 8, K2/K3) — services/desks/act.js runs them.
+    actions:   scannerActions,
+    applyEdit: scannerApplyEdit,
+    reasons:   scannerReason,
+    stateFields: ['scan'],
     // `kairos_pick` (hand-off mode) → the single ticker Argus recommends back to the build desk.
     // The wire name outlived the desk it was written for; the client reads it by this name.
     done: (result) => ({ reply: result.reply, scan: result.scan ?? null, phase: result.phase ?? null, ...(result.pick ? { kairos_pick: result.pick } : {}) }),

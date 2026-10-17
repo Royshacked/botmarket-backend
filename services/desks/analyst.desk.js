@@ -6,6 +6,7 @@ import { analystAgentService } from '../agents/analyst.agent.service.js'
 import { coverageService } from '../../api/analyst/coverage.service.js'
 import { sanitizeScanSeed } from '../scanSeed.util.js'
 import { logger } from '../logger.service.js'
+import { analystActions, analystReason } from './actions/analyst.actions.js'
 
 const LOG = '[analyst:desk]'
 
@@ -45,12 +46,18 @@ export async function _resolveCoverageContext(chatState, seed) {
 /**
  * The working state after a turn: the coverage draft (a new one replaces the old) and the name in focus.
  * The coverage list and the standing thesis are not state — read fresh every turn.
+ *
+ * `standing`: whether THIS turn emitted the draft. The draft stays either way (it is the conversation's subject),
+ * but a turn without a <coverage> block withdraws the right to save it — the latest turn decides (the panel's rule,
+ * kept here now that the save reads the state). `editingSymbol` is the name of the thesis being revised, carried.
  */
 export function analystNextState(prev, result, input = {}) {
     const draft = result.coverage ?? prev?.draft ?? null
     return {
         active_symbol: draft?.symbol || input.seed?.ticker || prev?.active_symbol || null,
         draft,
+        standing: !!result.coverage,
+        ...(prev?.editingSymbol ? { editingSymbol: prev.editingSymbol } : {}),
     }
 }
 
@@ -63,12 +70,17 @@ export const analystDesk = {
     // Unsealed work: a coverage draft.
     hasWork: (state) => !!state?.draft,
     // Revising a thesis: the coverage doc is the draft and the name in focus.
-    stateFromEntity: (coverage) => ({ active_symbol: coverage?.symbol ?? null, draft: coverage ?? null }),
+    // Reopened, the thesis in the book is the subject, not a proposal: nothing stands until Prometheus drafts one.
+    stateFromEntity: (coverage) => ({ active_symbol: coverage?.symbol ?? null, draft: coverage ?? null, standing: false, editingSymbol: coverage?.symbol ?? null }),
     run: async ({ state, input, emit, common }) => analystAgentService.chatStream({
         ...common,
         chatState: await _resolveCoverageContext(state ?? {}, input.seed ?? null),
         seed:      input.seed ?? null,
         onPhase:   phase => emit('phase', { phase }),
     }),
+    // The session's commits (plan phase 8, K2) — services/desks/act.js runs them. No direct edits (K3).
+    actions: analystActions,
+    reasons: analystReason,
+    stateFields: ['coverage'],
     done: (result) => ({ reply: result.reply, phase: result.phase ?? null, ...(result.coverage ? { coverage: result.coverage } : {}) }),
 }

@@ -8,9 +8,9 @@
 import { sealing } from '../../services/desks/seal.js'
 import { strategyDesk }         from '../../services/desks/strategy.desk.js'
 import { industryViewService }  from './industryView.service.js'
+import { publishIndustry as publishIndustryView, VIEW_REASONS } from './industryPublish.service.js'
 import { readSubIndustry, listSubIndustries, moneyFacts, largestCompanies, readFlowNodes, flowFacts } from './industryData.service.js'
 import { readGeoFacts } from './geopoliticsData.service.js'
-import { notifyIndustryChanged } from '../../services/industryNotify.service.js'
 import { pythiaWeeklyService } from '../../services/pythiaWeekly.service.js'
 import { industryAssessmentService } from './industryAssessment.service.js'
 import { pythiaCallsService } from './pythiaCalls.service.js'
@@ -37,10 +37,7 @@ export const streamStrategy = makeDeskStream(strategyDesk)
 
 // ─── The industry views (Pythia, rebuilt 2026-10-05) ─────────────────────────
 
-const VIEW_REASONS = {
-    bad_draft: [422, 'The view does not hold up — see detail'],
-    unknown_industry: [404, 'Unknown GICS sub-industry'],
-}
+// The view refusal table lives with the publish service — shared with Pythia's session action.
 
 /**
  * Every sub-industry: the house's answer where there is one, beside the engine's measured first read.
@@ -129,14 +126,11 @@ export const runWeekNow = _handle('runWeekNow', async (req, res) => {
 
 /** Publish a reviewed draft (the chat preview's Publish). Checked against the measured numbers. */
 export const publishIndustry = _handle('publishIndustry', async (req, res) => {
-    const bundle = await readSubIndustry(req.params.code)
-    if (!bundle) return sendReason(res, 'unknown_industry', { overrides: VIEW_REASONS })
-    await industryViewService.seedMissing([bundle.sub])
-    const r = await industryViewService.publishView(bundle.sub.code, req.body ?? {}, bundle.answering, { note: req.body?.summary ?? null })
+    // The check, the write and the industry card — one service with Pythia's session action.
+    const r = await publishIndustryView(req.params.code, req.body ?? {})
     if (!r.ok) return sendReason(res, r.reason, { overrides: VIEW_REASONS, fallback: 500, ...(r.detail ? { extra: { detail: r.detail } } : {}) })
-    if (r.changed) notifyIndustryChanged(r.doc, r.changed).catch(err => logger.warn(LOG, 'industry card failed (view is published)', err.message))
     // With a sessionId, Pythia's turns move onto the view they produced (unified-chat §6.2). Never fails the publish.
-    sealing.sealAfterGenerate(req, { kind: 'industry_view', entityIds: [bundle.sub.code], name: bundle.sub.name ?? null })
+    sealing.sealAfterGenerate(req, { kind: 'industry_view', entityIds: [r.sub.code], name: r.sub.name ?? null })
     res.json(r.doc)
 })
 

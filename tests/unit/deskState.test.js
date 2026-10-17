@@ -32,8 +32,8 @@ test('Mentor: a turn with no setup keeps the draft and its readiness; the seed n
 })
 
 test('Prometheus: the newest coverage draft and its symbol; the seed names it before a draft exists', () => {
-    assert.deepEqual(analystNextState({ draft: null }, { coverage: { symbol: 'NVDA' } }), { active_symbol: 'NVDA', draft: { symbol: 'NVDA' } })
-    assert.deepEqual(analystNextState(null, {}, { seed: { ticker: 'CVX' } }), { active_symbol: 'CVX', draft: null })
+    assert.deepEqual(analystNextState({ draft: null }, { coverage: { symbol: 'NVDA' } }), { active_symbol: 'NVDA', draft: { symbol: 'NVDA' }, standing: true })
+    assert.deepEqual(analystNextState(null, {}, { seed: { ticker: 'CVX' } }), { active_symbol: 'CVX', draft: null, standing: false })
 })
 
 test('Argus: the mode carries over; the newest list is pending; while editing it is what the next turn refines', () => {
@@ -48,13 +48,13 @@ test('Argus: the mode carries over; the newest list is pending; while editing it
 test('Atlas: the book and mode carry over; the stated mandate, thesis and plan are the latest', () => {
     const prev = { portfolioId: 'p1', reviewMode: true, mandate: { a: 1 }, thesis: null, adoptDraftId: 'd1' }
     const next = portfolioNextState(prev, { mandate: { a: 2 }, thesis: { t: 1 }, plan: { ideas: [] } })
-    assert.deepEqual(next, { portfolioId: 'p1', reviewMode: true, adoptDraftId: 'd1', mandate: { a: 2 }, thesis: { t: 1 }, pendingPlan: { ideas: [] }, reviewUpdate: null })
+    assert.deepEqual(next, { portfolioId: 'p1', reviewMode: true, adopt: false, adoptDraftId: 'd1', mandate: { a: 2 }, thesis: { t: 1 }, pendingPlan: { ideas: [] }, reviewUpdate: null, notices: { screenRequests: null, coverageRequest: null } })
     assert.deepEqual(portfolioNextState(prev, {}).mandate, { a: 1 })
 })
 
 test('Pythia: the focus carries over; the latest drafts are kept, an empty turn keeps the old ones', () => {
     const prev = { industry: '45301020', draftViews: [{ v: 1 }] }
-    assert.deepEqual(strategyDesk.nextState(prev, { views: [{ v: 2 }] }), { industry: '45301020', draftViews: [{ v: 2 }] })
+    assert.deepEqual(strategyDesk.nextState(prev, { views: [{ v: 2 }] }), { industry: '45301020', draftViews: [{ v: 2 }], assessments: [] })
     assert.deepEqual(strategyDesk.nextState(prev, { views: [] }).draftViews, [{ v: 1 }])
 })
 
