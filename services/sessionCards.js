@@ -74,7 +74,18 @@ export async function mirrorCard({ userId, botId, msg }, store = sessionService)
     } })
 }
 
+// The hook is fire-and-forget, so two cards posted together would race to the timeline. One tail per user
+// keeps them in post order; a failed mirror does not block the next. The entry goes when its tail drains.
+const _tails = new Map()
+export function mirrorInOrder(args, mirror = mirrorCard) {
+    const key  = String(args.userId)
+    const run  = (_tails.get(key) ?? Promise.resolve()).then(() => mirror(args))
+    const tail = run.catch(() => {}).finally(() => { if (_tails.get(key) === tail) _tails.delete(key) })
+    _tails.set(key, tail)
+    return run
+}
+
 /** Register the hook. Called once at startup (server.js). */
 export function registerSessionCards() {
-    onCardPosted((args) => mirrorCard(args))
+    onCardPosted((args) => mirrorInOrder(args))
 }

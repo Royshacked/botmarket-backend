@@ -74,8 +74,19 @@ const BOT_WELCOME = "Hi, I'm Axl — your trading assistant. I'll notify you her
 
 // Lazy import to avoid circular dependency (chatWs imports nothing from here).
 // emit is only called at runtime, never at module-load time.
+// The store and the socket, seamed so the resolve paths can be asserted on an in-memory db. Test-only.
+const _deps = { getDb: null, emit: null }
+const _db  = () => (_deps.getDb ?? getDb)()
+/** Test-only. Returns a restore fn. */
+export function _setDeps(overrides = {}) {
+    const prev = { ..._deps }
+    Object.assign(_deps, overrides)
+    return () => Object.assign(_deps, prev)
+}
+
 let _emit = null
 async function _tryEmit(userId, event, data) {
+    if (_deps.emit) return _deps.emit(userId, event, data)
     if (!_emit) {
         try { _emit = (await import('./chatWs.js')).emit } catch { /* ws not attached yet */ }
     }
@@ -105,7 +116,7 @@ async function _deliver(userId, msg, { senderName = null } = {}) {
 
 export async function ensureIndexes() {
     try {
-        const db = await getDb()
+        const db = await _db()
         await db.collection(CONVS).createIndexes([
             { key: { participants: 1 } },
             { key: { participants: 1, lastMessageAt: -1 } },
@@ -128,7 +139,7 @@ export async function ensureIndexes() {
  * Returns { conv, created }.
  */
 export async function getOrCreateConversation(userIdA, userIdB) {
-    const db           = await getDb()
+    const db           = await _db()
     const participants = [String(userIdA), String(userIdB)].sort()
 
     const existing = await db.collection(CONVS).findOne({ participants })
@@ -240,7 +251,7 @@ export function normalizeResolveStatus(status) {
 }
 
 export async function sendMessage(conversationId, senderId, content, type = 'text', payload = null, actions = null, visibility = 'all', forUserId = null) {
-    const db  = await getDb()
+    const db  = await _db()
     const msg = {
         id:             `msg_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
         conversationId,
@@ -308,21 +319,24 @@ export function _notifyCardPosted({ userId, botId, msg }) {
 }
 
 /**
- * Retire the pending card(s) this one replaces. Internal to the post path — nothing else may mark
+ * Retire the pending card(s) this one replaces. Internal to the post path (exported for tests) — nothing else may mark
  * a card superseded, because "a fresher card exists" is only knowable here.
  *
  * Scoped to the same conversation AND the same type: two different asks about one setup (an
  * invalidation and a manage nudge) are two jobs, not one restated.
  */
-async function _supersedePending(conversationId, type, subject, actions) {
+export async function _supersedePending(conversationId, type, subject, actions) {
     if (!actions || !subject) return 0
     try {
-        const db  = await getDb()
-        const res = await db.collection(MSGS).updateMany(
-            { conversationId, type, status: 'pending', 'subject.kind': subject.kind, 'subject.id': subject.id },
-            { $set: { status: 'superseded', resolvedAt: Date.now(), resolveOutcome: 'superseded' } },
-        )
+        const db    = await _db()
+        const query = { conversationId, type, status: 'pending', 'subject.kind': subject.kind, 'subject.id': subject.id }
+        const patch = { status: 'superseded', resolvedAt: Date.now(), resolveOutcome: 'superseded' }
+        const cards = await db.collection(MSGS).find(query, { projection: { _id: 0, id: 1, conversationId: 1 } }).toArray()
+        if (!cards.length) return 0
+        const res = await db.collection(MSGS).updateMany({ ...query, id: { $in: cards.map(c => c.id) } }, { $set: patch })
         if (res.modifiedCount) logger.info(LOG, 'superseded stale card(s)', { type, subject, count: res.modifiedCount })
+        // Tell the open panels — and the session timeline, which shows the old card beside the new one.
+        await _pushResolved(db, cards, patch)
         return res.modifiedCount
     } catch (err) {
         // A supersede that fails must never cost the user the NEW card — worst case they see two.
@@ -356,7 +370,7 @@ async function _supersedePending(conversationId, type, subject, actions) {
 export async function resolveCardsFor(subject, { outcome = 'completed', note = null } = {}) {
     if (!subject?.kind || !subject?.id) return 0
     try {
-        const db    = await getDb()
+        const db    = await _db()
         const query = { status: 'pending', 'subject.kind': subject.kind, 'subject.id': String(subject.id) }
         const patch = { status: 'done', resolvedAt: Date.now(), resolveOutcome: String(outcome), resolveNote: _str(note) }
         const cards = await db.collection(MSGS).find(query, { projection: { _id: 0, id: 1, conversationId: 1 } }).toArray()
@@ -443,7 +457,7 @@ export async function triggerAxlReply(userId, conversationId, aiPref = {}) {
  * loading the whole conversation.
  */
 async function _recipientFor(conversationId, senderId) {
-    const db   = await getDb()
+    const db   = await _db()
     const conv = await db.collection(CONVS).findOne({ id: conversationId }, { projection: { participants: 1 } })
     if (!conv || !conv.participants.includes(String(senderId))) return { ok: false }
     return { ok: true, recipientId: conv.participants.find(p => p !== String(senderId)) ?? null }
@@ -461,7 +475,7 @@ async function _deliverFromUser(recipientId, senderId, msg) {
         await _tryEmit(recipientId, 'new_message', msg)
         return
     }
-    const db     = await getDb()
+    const db     = await _db()
     const sender = await db.collection(USERS).findOne(
         { id: String(senderId) }, { projection: { fullname: 1, username: 1 } })
     await _deliver(recipientId, msg, { senderName: sender?.fullname || sender?.username || null })
@@ -537,7 +551,7 @@ export function visibleConversationsFor(convs, role = null) {
 }
 
 export async function getConversations(userId, role = null) {
-    const db  = await getDb()
+    const db  = await _db()
     const uid = String(userId)
 
     const convs = visibleConversationsFor(await db.collection(CONVS)
@@ -587,7 +601,7 @@ export async function getConversations(userId, role = null) {
  * a thread the app already resolved for its owner, and the token's role is not theirs to assert.
  */
 export async function getMessages(conversationId, userId, before, limit = 50, role = undefined) {
-    const db   = await getDb()
+    const db   = await _db()
     const conv = await db.collection(CONVS).findOne({ id: conversationId })
     if (!conv || !conv.participants.includes(String(userId))) return null
     if (role !== undefined && !visibleConversationsFor([conv], role).length) return null
@@ -605,7 +619,7 @@ export async function getMessages(conversationId, userId, before, limit = 50, ro
 }
 
 export async function markRead(conversationId, userId) {
-    const db  = await getDb()
+    const db  = await _db()
     const uid = String(userId)
 
     const conv = await db.collection(CONVS).findOne({ id: conversationId })
@@ -632,7 +646,7 @@ export async function markRead(conversationId, userId) {
  * fallback keeps reading them — what stopped is stamping a dead field onto NEW writes.
  */
 export async function resolveMessage(conversationId, messageId, userId, { status = 'dismissed', outcome = null } = {}) {
-    const db  = await getDb()
+    const db  = await _db()
     const uid = String(userId)
 
     const conv = await db.collection(CONVS).findOne({ id: conversationId })
@@ -736,7 +750,7 @@ async function _settleHouseTwins(db, conversationId, messageId, uid, st, outcome
  * @returns {Promise<Set<string>>} userIds (the non-bot participant of each matching conversation)
  */
 export async function listCardRecipientsSince(type, since) {
-    const db = await getDb()
+    const db = await _db()
     const msgs = await db.collection(MSGS)
         .find({ type: String(type), createdAt: { $gte: Number(since) } }, { projection: { conversationId: 1 } })
         .toArray()
@@ -773,7 +787,7 @@ export async function listCardRecipientsSince(type, since) {
  */
 export async function resolvePortfolioReviewCard(userId, portfolioId, { nextReviewAt = null, outcome = 'dismissed' } = {}) {
     try {
-        const db = await getDb()
+        const db = await _db()
         const participants = [String(userId), 'portfolio'].sort()
         const conv = await db.collection(CONVS).findOne({ participants })
         if (!conv) return { ok: false, reason: 'no_conversation' }
@@ -785,12 +799,14 @@ export async function resolvePortfolioReviewCard(userId, portfolioId, { nextRevi
             .next()
         if (!msg) return { ok: false, reason: 'no_card' }
 
+        // Uniform top-level lifecycle (an 'updated' review = the user acted → done).
+        const status     = outcome === 'updated' ? 'done' : 'dismissed'
+        const resolvedAt = Date.now()
         await db.collection(MSGS).updateOne(
             { id: msg.id },
             { $set: {
-                // Uniform top-level lifecycle (an 'updated' review = the user acted → done).
-                status:         outcome === 'updated' ? 'done' : 'dismissed',
-                resolvedAt:     Date.now(),
+                status,
+                resolvedAt,
                 resolveOutcome: outcome,
                 // legacy payload fields (transitional — the review bubble still reads these)
                 'payload.resolved':     true,
@@ -801,8 +817,7 @@ export async function resolvePortfolioReviewCard(userId, portfolioId, { nextRevi
         // Tell the open panels — the same frame every other resolve sends (this one sent none, so a review
         // card stayed pending on screen, and now in the session timeline too, until a reload).
         await _tryEmit(String(userId), 'message_resolved', {
-            id: msg.id, conversationId: conv.id,
-            status: outcome === 'updated' ? 'done' : 'dismissed', resolvedAt: Date.now(), resolveOutcome: outcome,
+            id: msg.id, conversationId: conv.id, status, resolvedAt, resolveOutcome: outcome,
         })
         return { ok: true, messageId: msg.id }
     } catch (err) {
@@ -813,7 +828,7 @@ export async function resolvePortfolioReviewCard(userId, portfolioId, { nextRevi
 
 export async function searchUsers(query, currentUserId) {
     if (!query || query.trim().length < 2) return []
-    const db     = await getDb()
+    const db     = await _db()
     // Escape regex metacharacters before building the matcher: the query is raw
     // user input, so an unescaped pattern like "(a+)+$" is a catastrophic-
     // backtracking (ReDoS) vector, and stray metachars break intended matching.

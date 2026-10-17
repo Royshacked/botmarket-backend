@@ -149,15 +149,16 @@ const _deps = {
     computeSignals: (portfolioId, userId) => portfolioChatService.computeReviewSignals(portfolioId, userId),
     setLifecycle:   (portfolioId, userId, patch) => portfolioChatService.setPortfolioLifecycle(portfolioId, userId, patch),
     notify:         _defaultNotify,
+    post:           postCard,
 }
 export function _setDeps(d) { Object.assign(_deps, d) }
 
 // Post the review card to social chat under the Atlas (portfolio) bot. The card action routes the
 // user into Atlas review mode. Best-effort — a notify failure must never wedge the loop.
-async function _defaultNotify(book, { reason, triggers }) {
+export async function _defaultNotify(book, { reason, triggers }) {
     logger.info(LOG, 'REVIEW CARD', { portfolioId: book.portfolioId, reason, triggers: triggers.length })
     // Through postCard like every desk card — one transport, no exceptions (unified-chat plan phase 6).
-    await postCard({
+    await _deps.post({
         userId:  book.userId,
         content: _cardContent(book, reason, triggers),
         type:    'portfolio_review',

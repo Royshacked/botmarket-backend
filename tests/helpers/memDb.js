@@ -1,7 +1,7 @@
 // A small in-memory Mongo — enough for the Pythia services' and the session store's tests. Supports:
 // equality (null also matching a missing field, as in Mongo) and `$ne` / `$in` / `$exists` / `$gt` / `$lt`
 // filters on dotted paths, and a top-level `$or`; multi-key sort; find().sort().limit().next/toArray; skip; findOne;
-// insertOne; deleteMany; replaceOne and updateOne with upsert, $setOnInsert, $set (dotted), $inc and
+// insertOne; deleteMany; updateMany; replaceOne and updateOne with upsert, $setOnInsert, $set (dotted), $inc and
 // $push (one value, or $each/$position); findOneAndUpdate (returns the document AFTER); createIndex as
 // a no-op — unique indexes are NOT enforced. `rows(name)` exposes a collection's documents for assertions.
 
@@ -77,6 +77,11 @@ export function memDb() {
                 if (!doc) return { matchedCount: 0, upsertedCount: 0 }
                 _apply(doc, u)
                 return upserted ? { matchedCount: 0, upsertedCount: 1 } : { matchedCount: 1 }
+            },
+            updateMany: async (q, u) => {
+                const docs = rows.filter(r => _match(r, q))
+                for (const d of docs) _apply(d, u)
+                return { matchedCount: docs.length, modifiedCount: docs.length }
             },
             // The returnDocument:'after' form only — what an atomic counter (a session's seq) needs.
             findOneAndUpdate: async (q, u) => {

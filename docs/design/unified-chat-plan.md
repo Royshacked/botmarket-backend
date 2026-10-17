@@ -641,6 +641,10 @@ mirror per admin into each admin's own session; Themis posts through `postCard`;
 Themis on postCard · resolvePortfolioReviewCard emits message_resolved. Live check on axl_dev: a real postCard landed as a
 reference row (agent mentor, msgId + conversation + action), then both copies were removed and the conversation preview
 restored. Suite 4097/0.
+Phase 6 CR (2026-10-17): a superseded card now sends message_resolved (it sent none, so the timeline showed two live
+asks) · the mirror keeps post order per user (mirrorInOrder) · one timestamp for a review resolve · chat.service and
+Themis gained test seams (`_setDeps`; Themis `post`). Carried to phase 7: the review card's "next review <date>" line
+reads its payload, which message_resolved does not carry.
 
 ## 9. Phase 7 — Frontend: session client + timeline
 
@@ -650,6 +654,8 @@ restored. Suite 4097/0.
 - **`ChatTimeline`** — built on the shared pieces (`AgentMessages`, `ChatBubble`, `AgentChatInput`,
   `SuggestionChips`, `AgentGlyph` + `AGENTS`): agent header per speaker run, hand-off divider with artifact
   card, decision card slot, sealed-context card, tap-to-answer on any agent's turn.
+- **Card rows** (phase 6) draw from `ref` and follow `message_resolved` by msgId; on resolve the card re-reads
+  its row, so payload-borne lines (a review's "next review <date>") are fresh — the frame carries status only.
 - **AxlHub shrinks to the greeting + Axl's opening.** Delete: desk cards, chip strip, ticket card,
   `TicketGlyph`, summon screen, `_summon` / `pendingRoute`, `deskBadge` / `deskLockTitle` / `blocked` /
   `resumableThread` / `handleDeskPick` / `handleTicketPick`, the unfinished fetch, the draft restore,

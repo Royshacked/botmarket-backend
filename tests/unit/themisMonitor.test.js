@@ -1,7 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { _checkBook, _scheduledDue, _eventSig, _nextEodMs, _cardContent } from '../../monitoring/themis.monitor.service.js'
+import { _checkBook, _scheduledDue, _eventSig, _nextEodMs, _cardContent, _defaultNotify, _setDeps } from '../../monitoring/themis.monitor.service.js'
+import { postCard } from '../../services/notifyCard.js'
 import { computeReviewTriggers } from '../../services/portfolioReview.util.js'
 
 // Themis — the portfolio doorbell. Pure gate helpers + the per-book check with injected
@@ -148,4 +149,17 @@ test('computeReviewTriggers: a mild dip does NOT trip the drawdown gate', () => 
         fingerprint: { totalPnlPct: 4 },   // -3pt, under threshold
     })
     assert.equal(trg.find(t => t.kind === 'drawdown'), undefined)
+})
+
+test('the review card goes out through postCard — the one transport — as an Atlas card', async () => {
+    const posts = []
+    _setDeps({ post: async (card, ctx) => { posts.push({ card, ctx }) } })
+    try {
+        await _defaultNotify({ userId: 'u1', portfolioId: 'p1', portfolioName: 'Core', reviewCadence: 'monthly' }, { reason: 'scheduled', triggers: [] })
+        assert.equal(posts.length, 1)
+        assert.equal(posts[0].card.botId, 'portfolio')
+        assert.equal(posts[0].card.type, 'portfolio_review')
+        assert.equal(posts[0].card.payload.portfolioId, 'p1')
+        assert.equal(posts[0].ctx.tag, 'Review card')
+    } finally { _setDeps({ post: postCard }) }
 })
