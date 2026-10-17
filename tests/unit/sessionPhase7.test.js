@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { memDb } from '../helpers/memDb.js'
 import { makeSessionService } from '../../services/session.service.js'
 import { makeChainRunner } from '../../services/chain/runner.js'
-import { replyExtras } from '../../services/desks/sessionTurn.js'
+import { replyExtras, showLine } from '../../services/desks/sessionTurn.js'
 import { findForEdit } from '../../services/desks/entityLookup.js'
 import { hydrateCards, cardView } from '../../services/sessionCards.js'
 import { replay } from '../../services/sessionChannel.js'
@@ -53,7 +53,7 @@ test('a route with an opening runs the landing desk’s first turn — the user�
     assert.equal(r.queued.length, 1)
     assert.deepEqual(r.queued[0], {
         user, sessionId: s.sessionId, agent: 'mentor', text: 'I think NVDA breaks out this week.',
-        input: { accounts: ['a1'], mainAccountId: 'a1', clientTime: { clientTz: 'UTC' } }, turnId: 't1_open', origin: 'user',
+        input: { accounts: ['a1'], mainAccountId: 'a1', clientTime: { clientTz: 'UTC' } }, turnId: 't1_open', origin: 'opening',
     })
 })
 
@@ -75,7 +75,7 @@ test('an edit reopens the item it names — the same openForEdit the edit route 
     const s = await r.sessions.getActive({ userId: 'u1' })
     await r.runner.afterTurn({ user, sessionId: s.sessionId, agent: 'axl', origin: 'user', out: { payload: { reply: 'Reopening it', edit: { kind: 'setup', ref: 'NVDA', desk: 'trade' } } } })
     assert.equal(r.opened.length, 1)
-    assert.deepEqual(r.opened[0], { userId: 'u1', sessionId: s.sessionId, kind: 'setup', entity: { id: 's1', asset: 'NVDA' } })
+    assert.deepEqual(r.opened[0], { userId: 'u1', sessionId: s.sessionId, kind: 'setup', entity: { id: 's1', asset: 'NVDA' }, name: 'NVDA' })
 })
 
 test('nothing found → Axl says so; nothing is opened', async () => {
@@ -129,11 +129,11 @@ test('hydrateCards: one read for every card row; a missing card reads null; othe
     const read = async (ids) => { reads.push(ids); return store }
     const input = [
         { seq: 1, kind: 'msg', content: 'hi' },
-        { seq: 2, kind: 'card', ref: { msgId: 'm1' } },
-        { seq: 3, kind: 'card', ref: { msgId: 'gone' } },
+        { seq: 2, kind: 'card', ref: { msgId: 'm1', conversationId: 'c1' } },
+        { seq: 3, kind: 'card', ref: { msgId: 'gone', conversationId: 'c1' } },
     ]
     const out = await hydrateCards(input, read)
-    assert.deepEqual(reads, [['m1', 'gone']])
+    assert.deepEqual(reads, [[{ msgId: 'm1', conversationId: 'c1' }, { msgId: 'gone', conversationId: 'c1' }]])
     assert.deepEqual(out[0], input[0])
     assert.deepEqual(out[1].card, { payload: { a: 1 }, actions: { primary: {} }, status: 'pending', resolveOutcome: null, resolveNote: null })
     assert.equal(out[2].card, null)
@@ -200,4 +200,53 @@ test('Axl in the social chat is told hand-offs do not happen there; the chat nee
     assert.equal(buildSurfaceSection(undefined), '')
     assert.match(buildSurfaceSection('social'), /SOCIAL CHAT/)
     assert.match(buildSurfaceSection('social'), /continue in the main chat/)
+})
+
+// ─── Phase 7 CR ───────────────────────────────────────────────────────────────
+
+test('an opening runs ONE turn: a turn that was itself an opening never opens or edits again (no ping-pong)', async () => {
+    const r = rig()
+    const s = await r.sessions.getActive({ userId: 'u1' })
+    await r.runner.afterTurn({ user, sessionId: s.sessionId, agent: 'portfolio', turnId: 't1_open', origin: 'opening', out: { payload: { route: 'assist', opening: 'over to you' } } })
+    await r.runner.afterTurn({ user, sessionId: s.sessionId, agent: 'portfolio', turnId: 't1_open', origin: 'opening', out: { payload: { edit: { kind: 'setup', ref: 'NVDA', desk: 'trade' } } } })
+    assert.equal(r.queued.length, 0)
+    assert.equal(r.opened.length, 0)
+})
+
+test('a reopen whose desk lives in another chat says where, and moves nothing; the card carries the item’s name', async () => {
+    const r = rig({ open: async () => ({ reason: 'wrong_scope', agent: 'mentor' }) })
+    const s = await r.sessions.getActive({ userId: 'u1' })
+    await r.runner.afterTurn({ user, sessionId: s.sessionId, agent: 'axl', origin: 'user', out: { payload: { edit: { kind: 'setup', ref: 'NVDA', desk: 'trade' } } } })
+    assert.equal(r.opened[0].name, 'NVDA')
+    const [line] = await rows(r.sessions, s)
+    assert.match(line.content, /opens in the main chat/)
+})
+
+test('openForEdit refuses an item whose desk is not in this session’s scope', async () => {
+    const { makeSealing } = await import('../../services/desks/seal.js')
+    const { db } = memDb()
+    const sessions = makeSessionService({ getDb: async () => db })
+    const s = await sessions.getActive({ userId: 'a1', scope: 'strategy' })
+    const sealing = makeSealing({ sessions, contexts: { load: async () => null } })
+    assert.deepEqual(await sealing.openForEdit({ userId: 'a1', sessionId: s.sessionId, kind: 'setup', entity: { id: 's1', asset: 'NVDA' } }), { reason: 'wrong_scope', agent: 'mentor' })
+    assert.equal((await sessions.get({ sessionId: s.sessionId, userId: 'a1' })).floor, s.floor, 'the floor did not move')
+})
+
+test('a reply that is only a show still gets one plain line', () => {
+    assert.equal(showLine(null), null)
+    assert.equal(showLine({ kind: 'ticket', ref: null }), "Here's the order ticket.")
+    assert.equal(showLine({ kind: 'ticket', ref: 'AAPL' }), "Here's the order ticket for AAPL.")
+    assert.equal(showLine({ kind: 'setup', ref: 's1' }), 'Here it is.')
+})
+
+test('the reconnect replay carries the chain and the agents’ states', async () => {
+    const { db } = memDb()
+    const sessions = makeSessionService({ getDb: async () => db })
+    const s = await sessions.getActive({ userId: 'u1' })
+    await sessions.setChain({ sessionId: s.sessionId, userId: 'u1', chain: { id: 'c1', status: 'awaiting', awaiting: { agent: 'axl', choices: ['continue'] } } })
+    await sessions.setAgentState({ sessionId: s.sessionId, userId: 'u1', agent: 'mentor', state: { draft: 1 } })
+    const sent = []
+    await replay({ userId: 'u1', data: { sessionId: s.sessionId }, reply: (event, data) => sent.push(data) }, sessions, async (m) => m)
+    assert.deepEqual(sent[0].chain, { id: 'c1', status: 'awaiting', awaiting: { agent: 'axl', choices: ['continue'] } })
+    assert.deepEqual(sent[0].agentState.mentor, { draft: 1 })
 })

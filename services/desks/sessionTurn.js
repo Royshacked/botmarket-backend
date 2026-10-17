@@ -55,6 +55,16 @@ export function replyExtras(payload) {
     return Object.keys(out).length ? out : null
 }
 
+/**
+ * A reply that was ONLY a `<show>` still offers its button, so it gets a row — one plain line saying what it
+ * offers (the agent's memory then knows it offered it, too). Null when there is no show. Exported for tests.
+ */
+export function showLine(show) {
+    if (!show?.kind) return null
+    if (show.kind === 'ticket') return show.ref ? `Here's the order ticket for ${show.ref}.` : "Here's the order ticket."
+    return 'Here it is.'
+}
+
 export function makeSessionTurn({
     sessions   = sessionService,
     contexts   = agentContextService,
@@ -90,7 +100,7 @@ export function makeSessionTurn({
     }
 
     /**
-     * @param {{ user: { _id: string, role?: string }, sessionId: string, agent: string, text?: string, origin?: 'user'|'chain',
+     * @param {{ user: { _id: string, role?: string }, sessionId: string, agent: string, text?: string, origin?: 'user'|'chain'|'opening',
      *           input?: object, emit?: Function, signal?: AbortSignal, model?: string }} p
      * @returns {Promise<{ reason: string } | { stopped: true } | { payload: object, reply: object|null }>}
      */
@@ -130,8 +140,10 @@ export function makeSessionTurn({
 
         // A reply that was only tags (a card, a route) has no prose to keep — the state still moves. One with
         // prose keeps what it offered beside it (its tap options, chart, "show me"), so a reload still has them.
-        const replied = result.reply?.trim()
-            ? await sessions.append({ sessionId, userId: user._id, message: { agent, role: 'assistant', content: result.reply, ref: replyExtras(payload) } })
+        const extras  = replyExtras(payload)
+        const prose   = result.reply?.trim() ? result.reply : showLine(extras?.show)
+        const replied = prose
+            ? await sessions.append({ sessionId, userId: user._id, message: { agent, role: 'assistant', content: prose, ref: extras } })
             : null
 
         const next = desk.nextState ? desk.nextState(state, result, prepared) : state

@@ -31,6 +31,8 @@ import { logger } from '../logger.service.js'
 
 const LOG = '[chain]'
 export const MAX_STEPS = 12
+// The name a reopened item's card shows ("NVDA", "Growth book") instead of its id.
+const nameOf = (doc) => doc?.asset ?? doc?.name ?? doc?.symbol ?? null
 // What an opening may carry: the user's own sentence, passed on — never a document.
 const MAX_OPENING_CHARS = 4000
 // The per-turn extras the user's turn carried that the desk a route lands on needs too — never a card press's
@@ -67,7 +69,7 @@ export function makeChainRunner({
 
     const save = (user, sessionId, chain) => sessions.setChain({ sessionId, userId: user._id, chain })
     // A finished chain leaves nothing to tap: its choices, its pending step and its in-flight step all go.
-    const end  = (user, sessionId, chain) => save(user, sessionId, { ...chain, status: 'done', awaiting: null, next: null, current: null, pauseRequested: false })
+    const end  = (user, sessionId, chain) => save(user, sessionId, { ...chain, status: 'done', awaiting: null, next: null, current: null, pending: null, pauseRequested: false })
 
     async function decide({ user, sessionId, agent, decision, chain }) {
         await sessions.append({ sessionId, userId: user._id, message: {
@@ -133,7 +135,9 @@ export function makeChainRunner({
         const entry = entryOf(payload.route)
         const text  = typeof payload.opening === 'string' ? payload.opening.trim().slice(0, MAX_OPENING_CHARS) : ''
         if (!entry || !text || !canSpeak(entry.agent, session, user)) return
-        runQueued?.({ user, sessionId: session.sessionId, agent: entry.agent, text, input: carried(input), turnId: `${turnId ?? 'turn'}_open`, origin: 'user' })
+        // origin 'opening', not 'user': an opening runs ONE turn and never another opening or edit — two desks
+        // routing to each other with openings would otherwise ping-pong paid turns with no cap and no chain to pause.
+        runQueued?.({ user, sessionId: session.sessionId, agent: entry.agent, text, input: carried(input), turnId: `${turnId ?? 'turn'}_open`, origin: 'opening' })
             .catch(err => logger.warn(LOG, 'opening turn failed', err.message))
     }
 
@@ -141,17 +145,18 @@ export function makeChainRunner({
      * An `edit`: reopen the item it names in the live session — the same openForEdit the edit route runs. Its
      * desk holding other unsealed work → ask (set it aside, or keep working). Nothing found → say so.
      */
-    async function reopen({ user, sessionId, edit }) {
+    async function reopen({ user, sessionId, edit, agent }) {
+        const say = (content) => sessions.append({ sessionId, userId: user._id, message: { agent, role: 'assistant', content } })
         const found = await findEdit({ kind: edit.kind, ref: edit.ref, user })
         if (!found.ok) {
             // Not theirs to revise (house coverage is an admin's) is a different answer from not found.
-            const content = found.reason === 'forbidden'
+            return say(found.reason === 'forbidden'
                 ? 'That one is not yours to change here — it is maintained by the house. I can show you what it says.'
-                : 'I could not find that one to open — open it from its list and I will pick it up.'
-            await sessions.append({ sessionId, userId: user._id, message: { agent: 'axl', role: 'assistant', content } })
-            return
+                : 'I could not find that one to open — open it from its list and I will pick it up.')
         }
-        const out = await sealing.openForEdit({ userId: user._id, sessionId, kind: edit.kind, entity: found.doc })
+        const out = await sealing.openForEdit({ userId: user._id, sessionId, kind: edit.kind, entity: found.doc, name: nameOf(found.doc) })
+        // Its desk lives in another chat (a setup asked for from Pythia's admin session): say where, move nothing.
+        if (out.reason === 'wrong_scope') return say('That one opens in the main chat — reopen it there.')
         if (out.reason === 'busy') {
             return decide({ user, sessionId, agent: 'axl', chain: { ...newChain('axl'), pending: { edit: { kind: edit.kind, id: found.id } } }, decision: {
                 question: `${deskOf(out.agent)?.brand ?? 'That desk'} is in the middle of something else — set it aside and open this?`,
@@ -197,7 +202,7 @@ export function makeChainRunner({
         }
         if (payload?.edit && origin === 'user') {
             if (chain) await end(user, sessionId, chain)
-            return reopen({ user, sessionId, edit: payload.edit })
+            return reopen({ user, sessionId, edit: payload.edit, agent })
         }
         if (payload?.route || !art) {
             if (chain) await end(user, sessionId, chain)
@@ -250,7 +255,7 @@ export function makeChainRunner({
             const found = edit ? await lookupEdit({ kind: edit.kind, id: edit.id, user }) : { ok: false }
             await end(user, sessionId, { ...chain, pending: null })
             if (!found.ok) return { reason: 'not_found' }
-            const out = await sealing.openForEdit({ userId: user._id, sessionId, kind: edit.kind, entity: found.doc, force: true })
+            const out = await sealing.openForEdit({ userId: user._id, sessionId, kind: edit.kind, entity: found.doc, name: nameOf(found.doc), force: true })
             return out.reason ? { reason: out.reason } : { ok: true }
         }
         if (choice === 'research') {

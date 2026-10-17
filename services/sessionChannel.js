@@ -57,6 +57,9 @@ export async function replay({ userId, data, reply }, store = sessionService, hy
         sessionId,
         status:   session.status,
         floor:    session.floor,
+        // What the user missed besides rows: the chain a decision card waits on, and each desk's state.
+        chain:      session.chain ? { id: session.chain.id, status: session.chain.status, awaiting: session.chain.awaiting ?? null } : null,
+        agentState: session.agentState ?? {},
         messages: await hydrate(messages ?? []),
         running:  live && live.userId === String(userId) ? { turnId: live.turnId, agent: live.agent, text: live.text } : null,
     })

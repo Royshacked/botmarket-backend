@@ -76,9 +76,9 @@ export function cardView(msg) {
  * replay. A card that is gone reads `card: null`; every other row is returned as it was.
  */
 export async function hydrateCards(rows, read = cardsById) {
-    const ids = (rows ?? []).filter(r => r?.kind === 'card' && r.ref?.msgId).map(r => r.ref.msgId)
-    if (!ids.length) return rows ?? []
-    const byId = await read(ids)
+    const refs = (rows ?? []).filter(r => r?.kind === 'card' && r.ref?.msgId).map(r => ({ msgId: r.ref.msgId, conversationId: r.ref.conversationId }))
+    if (!refs.length) return rows ?? []
+    const byId = await read(refs)
     return rows.map(r => (r?.kind === 'card' ? { ...r, card: cardView(byId.get(String(r.ref?.msgId))) } : r))
 }
 

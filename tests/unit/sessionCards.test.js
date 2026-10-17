@@ -145,3 +145,19 @@ test('a finished portfolio review flips its card on screen — one timestamp, st
                 payloadPatch: { resolved: true, outcome: 'updated', nextReviewAt: 99 } } }])
     } finally { restore() }
 })
+
+test('resolving a card echoes message_resolved to the user’s own screens', async () => {
+    const { resolveMessage } = await import('../../api/chat/chat.service.js')
+    const { db, rows, frames, restore } = chatDb()
+    try {
+        await db.collection(CONVS).insertOne({ id: 'conv_1', participants: ['mentor', 'u1'] })
+        await seedCard(db)
+        await resolveMessage('conv_1', 'm1', 'u1', { status: 'dismissed', outcome: 'later' })
+        assert.equal(rows(MSGS)[0].status, 'dismissed')
+        const echo = frames.find(f => f.event === 'message_resolved')
+        assert.deepEqual({ ...echo, data: { ...echo.data, resolvedAt: 0 } }, {
+            userId: 'u1', event: 'message_resolved',
+            data: { id: 'm1', conversationId: 'conv_1', status: 'dismissed', resolvedAt: 0, resolveOutcome: 'later' },
+        })
+    } finally { restore() }
+})

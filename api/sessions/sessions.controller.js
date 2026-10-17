@@ -48,6 +48,7 @@ const EDIT_REASONS = {
     not_editable: [400, 'That item is not editable here'],
     // The agent holds other unsealed work — the client asks the user, then repeats with `force`.
     busy:         [409, 'That desk is in the middle of something else'],
+    wrong_scope:  [409, 'That item opens in another chat'],
 }
 
 // A turn: accepted at once (202), run queued, streamed on the session channel (plan phase 5b, G2).
@@ -64,7 +65,8 @@ export const postSessionTurn = handle('postSessionTurn', async (req, res) => {
         mainAccountId: mainAccountId != null ? String(mainAccountId) : null,
         clientTime: parseClientTime({ clientNow: clientTime?.clientNow, clientTz: clientTime?.clientTz }),
     }
-    const out = await startTurn({ user: req.user, sessionId: req.params.id, text, agent, input, turnId })
+    // Today's brief is Axl's to give, whoever holds the floor.
+    const out = await startTurn({ user: req.user, sessionId: req.params.id, text, agent: input.brief ? 'axl' : agent, input, turnId })
     if (out.reason) return sendReason(res, out.reason, { overrides: TURN_REASONS, fallback: 404 })
     res.status(202).json(out)
 })

@@ -87,6 +87,9 @@ export function makeSealing({ sessions = sessionService, contexts = agentContext
         if (!desk?.stateFromEntity || !entityId) return { reason: 'not_editable' }
         const session = await sessions.get({ sessionId, userId })
         if (!session || session.status !== 'active') return { reason: 'not_found' }
+        // A desk speaks only in its own scope (canSpeak): reopening a setup inside Pythia's admin session would
+        // hand the floor to a desk that cannot answer there.
+        if (deskOf(agent)?.scope !== session.scope) return { reason: 'wrong_scope', agent }
 
         const current = session.agentState?.[agent] ?? null
         const sameItem = current?.editing?.kind === kind && String(current.editing.entityId) === entityId

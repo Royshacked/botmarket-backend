@@ -36,7 +36,7 @@ Every desk streams over Server-Sent Events; every router applies `requireAuth` +
 
 | Agent | Route file | Endpoint | Controller |
 |---|---|---|---|
-| Axl | `api/axl/axl.routes.js` | `POST /api/axl/stream` | `streamAxl` |
+| Axl | `api/sessions/sessions.routes.js` | `POST /api/sessions/:id/turn` (session only — unified chat phase 7) | `postSessionTurn` → `services/desks/axl.desk.js` |
 | Mentor | `api/mentor/mentor.routes.js` | `POST /api/mentor/stream` | `streamMentor` |
 | Portfolio | `api/portfolio/portfolio.routes.js` | `POST /api/portfolio/stream` | `streamPortfolio` |
 | Scanner | `api/scanner/scanner.routes.js` | `POST /api/scanner/stream` | `streamScanner` |

@@ -8,7 +8,7 @@ unified adapter layer. Each desk owns a kind; each kind is watched by its own mo
 
 | Desk | Route | Produces | Watched by |
 |---|---|---|---|
-| **Axl** — reception / concierge / critic | `/api/axl` | nothing (read-only); hands over to a desk | — |
+| **Axl** — reception / concierge / critic | `/api/sessions` (the session turn) | nothing (read-only); hands over to a desk | — |
 | **Mentor** — the trading desk | `/api/mentor`, `/api/setups` | `setup` | Talos |
 | **Atlas** — portfolio construction + review | `/api/portfolio` | `portfolio_item` holdings | Themis |
 | **Argus** — the systematic scanner | `/api/scanner` | `scan` | — |
@@ -142,8 +142,8 @@ api/                   HTTP surface — one folder per feature (routes + control
                        `<route>` opens a desk for new work, `<edit>` reopens an item they already
                        have in the editor that owns it, `<open>` carries their own sentence in as
                        the desk's first message, `<suggest>` offers follow-up chips. Also delivers
-                       the daily market brief (POST /api/axl/brief/stream — streamed into the Axl
-                       chat panel, never posted into the social chat)
+                       the daily market brief (a session turn — POST /api/sessions/:id/turn, brief: true — Axl's turn in the
+                       chat, never posted into the social chat)
   workspace/           which book the user is standing in — GET/PUT /api/workspace
   mentor/ setups/      Mentor chat + the `setup` kind (monitored by Talos)
   analyst/             Prometheus chat + the `coverage` research artifact (initiate/revise/retire)
@@ -232,7 +232,7 @@ Axl is where the user lands, so he is also the way in. He is **read-only**: he d
 then gets out of the way.
 
 ```
-AXL  —  POST /api/axl/stream
+AXL  —  POST /api/sessions/:id/turn (the session's first voice)
 
   Works out only what decides WHERE: one position or several, do they already
   have a name for it. Everything else the user said travels as their sentence.
