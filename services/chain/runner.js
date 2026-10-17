@@ -6,6 +6,8 @@
 //   routed?          → the chain ends (the floor moved; the user's next message is the next turn);
 //   emitted an artifact? → a `handoff` message (sender → receiver, the receiver's brief) and the receiver's
 //                          turn runs, queued, with no user message.
+// And what a ROUTE carries (plan phase 7, J4): the user's words for the desk it lands on (`opening`) run as
+// that desk's first turn; an `edit` reopens the item it names, asking first when its desk holds other work.
 // Answering a decision by typing is just the next turn. Only taps need an explicit continue: a paused or
 // interrupted chain, the step cap, a real choice (research a list; a busy agent; the next name in a queue).
 //
@@ -14,10 +16,12 @@
 // fails pauses the chain and offers to try again — it is never left "running" with nothing in flight.
 
 import { sessionService } from '../session.service.js'
-import { deskOf } from '../desks/registry.js'
+import { deskOf, entryOf } from '../desks/registry.js'
 import { DESK_DEFS, hasWork } from '../desks/index.js'
 import { canSpeak } from '../desks/sessionTurn.js'
 import { withSessionLock } from '../desks/turnLock.js'
+import { findForEdit, lookupForEdit } from '../desks/entityLookup.js'
+import { sealing as defaultSealing } from '../desks/seal.js'
 import { isAdminUserCached } from '../../api/user/user.model.js'
 import { coverageService } from '../../api/analyst/coverage.service.js'
 import { KIND, makeArtifact } from './artifact.js'
@@ -27,6 +31,15 @@ import { logger } from '../logger.service.js'
 
 const LOG = '[chain]'
 export const MAX_STEPS = 12
+// What an opening may carry: the user's own sentence, passed on — never a document.
+const MAX_OPENING_CHARS = 4000
+// The per-turn extras the user's turn carried that the desk a route lands on needs too — never a card press's
+// ops, a seed or a brief, which were for the turn they rode.
+const carried = (input) => {
+    const out = {}
+    for (const k of ['accounts', 'mainAccountId', 'clientTime']) if (input?.[k] != null) out[k] = input[k]
+    return out
+}
 
 const newChain = (origin) => ({
     id: `chn_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
@@ -45,6 +58,7 @@ const _covered = async (ticker) => !!(await coverageService.getCoverageBySymbol(
 export function makeChainRunner({
     sessions = sessionService, desks = DESK_DEFS, maxSteps = MAX_STEPS,
     loadUser = _loadUser, isCovered = _covered, lock = withSessionLock,
+    findEdit = findForEdit, lookupEdit = lookupForEdit, sealing = defaultSealing,
 } = {}) {
     // The queued-turn runner (startTurn's runQueued) — bound after construction, because it needs this
     // runner's afterTurn in return (services/desks/turns.js wires the pair).
@@ -114,8 +128,39 @@ export function makeChainRunner({
             .catch(err => logger.warn(LOG, 'chain turn failed', err.message))
     }
 
+    /** A route with the user's words: they run as the landing desk's first turn, queued like any turn. */
+    function followRoute({ user, session, payload, turnId, input }) {
+        const entry = entryOf(payload.route)
+        const text  = typeof payload.opening === 'string' ? payload.opening.trim().slice(0, MAX_OPENING_CHARS) : ''
+        if (!entry || !text || !canSpeak(entry.agent, session, user)) return
+        runQueued?.({ user, sessionId: session.sessionId, agent: entry.agent, text, input: carried(input), turnId: `${turnId ?? 'turn'}_open`, origin: 'user' })
+            .catch(err => logger.warn(LOG, 'opening turn failed', err.message))
+    }
+
+    /**
+     * An `edit`: reopen the item it names in the live session — the same openForEdit the edit route runs. Its
+     * desk holding other unsealed work → ask (set it aside, or keep working). Nothing found → say so.
+     */
+    async function reopen({ user, sessionId, edit }) {
+        const found = await findEdit({ kind: edit.kind, ref: edit.ref, user })
+        if (!found.ok) {
+            await sessions.append({ sessionId, userId: user._id, message: {
+                agent: 'axl', role: 'assistant', content: 'I could not find that one to open — open it from its list and I will pick it up.',
+            } })
+            return
+        }
+        const out = await sealing.openForEdit({ userId: user._id, sessionId, kind: edit.kind, entity: found.doc })
+        if (out.reason === 'busy') {
+            return decide({ user, sessionId, agent: 'axl', chain: { ...newChain('axl'), pending: { edit: { kind: edit.kind, id: found.id } } }, decision: {
+                question: `${deskOf(out.agent)?.brand ?? 'That desk'} is in the middle of something else — set it aside and open this?`,
+                choices: [{ id: 'reopen', label: 'Set it aside and open it' }, { id: 'keep', label: 'Keep working' }],
+            } })
+        }
+        if (out.reason) logger.warn(LOG, 'reopen refused', { kind: edit.kind, reason: out.reason })
+    }
+
     /** startTurn's after-hook: what, if anything, runs next. */
-    async function afterTurn({ user, sessionId, agent, origin, out }) {
+    async function afterTurn({ user, sessionId, agent, turnId, origin, out, input }) {
         if (!out) return
         const session = await sessions.get({ sessionId, userId: user._id })
         if (!session) return
@@ -148,7 +193,15 @@ export function makeChainRunner({
             if (chain || decision.choices.length) return decide({ user, sessionId, agent, decision, chain: chain ?? newChain(agent) })
             return
         }
-        if (payload?.route || !art) { if (chain) await end(user, sessionId, chain); return }
+        if (payload?.edit && origin === 'user') {
+            if (chain) await end(user, sessionId, chain)
+            return reopen({ user, sessionId, edit: payload.edit })
+        }
+        if (payload?.route || !art) {
+            if (chain) await end(user, sessionId, chain)
+            if (payload?.route && origin === 'user') followRoute({ user, session, payload, turnId, input })
+            return
+        }
         return hop({ user, session, chain: chain ?? newChain(agent), art, from: agent })
     }
 
@@ -190,6 +243,14 @@ export function makeChainRunner({
             return { ok: true }
         }
         if (choice === 'finish' || choice === 'keep') { await end(user, sessionId, chain); return { ok: true } }
+        if (choice === 'reopen') {
+            const edit  = chain.pending?.edit
+            const found = edit ? await lookupEdit({ kind: edit.kind, id: edit.id, user }) : { ok: false }
+            await end(user, sessionId, { ...chain, pending: null })
+            if (!found.ok) return { reason: 'not_found' }
+            const out = await sealing.openForEdit({ userId: user._id, sessionId, kind: edit.kind, entity: found.doc, force: true })
+            return out.reason ? { reason: out.reason } : { ok: true }
+        }
         if (choice === 'research') {
             const art = researchQueueFrom(session.agentState?.scanner?.pendingScan)
             if (!art) return { reason: 'nothing_to_research' }

@@ -40,6 +40,21 @@ export function canSpeak(agent, session, user) {
     return true
 }
 
+const MAX_TAP_OPTIONS = 6
+
+/**
+ * What a reply offered beside its prose, kept on its row (plan phase 7, J2): the tap options, the chart, the
+ * "show me" offer — each only when present; null when there is none. Exported for tests.
+ */
+export function replyExtras(payload) {
+    const out = {}
+    const taps = Array.isArray(payload?.suggestions) ? payload.suggestions.filter(s => typeof s === 'string' && s.trim()) : []
+    if (taps.length) out.suggestions = taps.slice(0, MAX_TAP_OPTIONS)
+    if (payload?.chart) out.chart = payload.chart
+    if (payload?.show) out.show = payload.show
+    return Object.keys(out).length ? out : null
+}
+
 export function makeSessionTurn({
     sessions   = sessionService,
     contexts   = agentContextService,
@@ -113,9 +128,10 @@ export function makeSessionTurn({
         const routing = routeFields(result, user.role)
         const payload = { ...desk.done(result, { routing }), ...routing }
 
-        // A reply that was only tags (a card, a route) has no prose to keep — the state still moves.
+        // A reply that was only tags (a card, a route) has no prose to keep — the state still moves. One with
+        // prose keeps what it offered beside it (its tap options, chart, "show me"), so a reload still has them.
         const replied = result.reply?.trim()
-            ? await sessions.append({ sessionId, userId: user._id, message: { agent, role: 'assistant', content: result.reply } })
+            ? await sessions.append({ sessionId, userId: user._id, message: { agent, role: 'assistant', content: result.reply, ref: replyExtras(payload) } })
             : null
 
         const next = desk.nextState ? desk.nextState(state, result, prepared) : state

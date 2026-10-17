@@ -140,6 +140,8 @@ test('a finished portfolio review flips its card on screen — one timestamp, st
         const row = rows(MSGS)[0]
         assert.equal(row.status, 'done')
         assert.deepEqual(frames, [{ userId: 'u1', event: 'message_resolved',
-            data: { id: 'r1', conversationId: 'conv_p', status: 'done', resolvedAt: row.resolvedAt, resolveOutcome: 'updated' } }])
+            data: { id: 'r1', conversationId: 'conv_p', status: 'done', resolvedAt: row.resolvedAt, resolveOutcome: 'updated',
+                // the review bubble's "next review <date>" reads its payload — the patch rides along (phase 7, J3)
+                payloadPatch: { resolved: true, outcome: 'updated', nextReviewAt: 99 } } }])
     } finally { restore() }
 })

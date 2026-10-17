@@ -126,13 +126,15 @@ export function splitEdit(raw) {
 // Floor's holdings and the positions rows do it on a click — which is a different list
 // (entityDetail.INLINE_KINDS) for a different question: what a page exists for, not what a model
 // may name. Give ideas a handle a desk can read and this is one word.
-export const SHOW_KINDS = new Set(['setup'])
+// `ticket` opens the order ticket (plan phase 7) — a code screen, no desk; its ref is an optional symbol.
+export const SHOW_KINDS = new Set(['setup', 'ticket'])
 
 /** `<show>setup 3f9c…</show>` → { kind, ref }, or null. Both halves or nothing, as with an edit. */
 export function splitShow(raw) {
     if (typeof raw !== 'string') return null
     const [kind = '', ref = ''] = raw.trim().split(/[\s:,]+/)
     const k = kind.toLowerCase()
+    if (k === 'ticket') return { kind: k, ref: ref || null }
     if (!SHOW_KINDS.has(k) || !ref) return null
     return { kind: k, ref }
 }
@@ -203,6 +205,7 @@ export function validateEdit(edit) {
  */
 export function validateShow(show) {
     if (!show || !SHOW_KINDS.has(show.kind)) return null
+    if (show.kind === 'ticket') return { kind: 'ticket', ref: sanitizeRouteSymbol(show.ref) }
     const ref = sanitizeEditRef(show.ref)
     return ref ? { kind: show.kind, ref } : null
 }

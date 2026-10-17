@@ -14,7 +14,7 @@
 //
 // Registered on chat.service's onCardPosted at boot; a failure here never fails the post.
 
-import { onCardPosted } from '../api/chat/chat.service.js'
+import { onCardPosted, cardsById } from '../api/chat/chat.service.js'
 import { sessionService } from './session.service.js'
 import { deskOf } from './desks/registry.js'
 
@@ -62,13 +62,33 @@ export function cardAction(msg) {
     }
 }
 
+/**
+ * What a card row is drawn from on the client (plan phase 7, J3): the card's own payload, actions and state.
+ * The row stays a reference (H1); this view is attached on every READ and push, never stored.
+ */
+export function cardView(msg) {
+    if (!msg) return null
+    return { payload: msg.payload ?? null, actions: msg.actions ?? null, status: msg.status ?? null, resolveOutcome: msg.resolveOutcome ?? null, resolveNote: msg.resolveNote ?? null }
+}
+
+/**
+ * Attach `card` to every card row, from one read of the card store — the messages route and the reconnect
+ * replay. A card that is gone reads `card: null`; every other row is returned as it was.
+ */
+export async function hydrateCards(rows, read = cardsById) {
+    const ids = (rows ?? []).filter(r => r?.kind === 'card' && r.ref?.msgId).map(r => r.ref.msgId)
+    if (!ids.length) return rows ?? []
+    const byId = await read(ids)
+    return rows.map(r => (r?.kind === 'card' ? { ...r, card: cardView(byId.get(String(r.ref?.msgId))) } : r))
+}
+
 /** The hook postBotCard calls after a desk card is written. Exported for tests. */
 export async function mirrorCard({ userId, botId, msg }, store = sessionService) {
     const agent   = agentOfBot(botId)
     const scope   = deskOf(agent)?.scope ?? 'main'
     const session = await store.findActive({ userId, scope })
     if (!session) return null
-    return store.append({ sessionId: session.sessionId, userId, message: {
+    return store.append({ sessionId: session.sessionId, userId, live: { card: cardView(msg) }, message: {
         agent, role: 'assistant', kind: 'card', content: msg.content ?? '',
         ref: { msgId: msg.id, conversationId: msg.conversationId, type: msg.type, subject: msg.subject ?? null, action: cardAction(msg) },
     } })

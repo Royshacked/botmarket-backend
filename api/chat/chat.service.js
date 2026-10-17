@@ -303,6 +303,19 @@ export async function postBotCard({ userId, content, type = 'text', payload = nu
     }
 }
 
+/**
+ * Cards by message id, for the session timeline's card rows (plan phase 7, J3) — one `$in` read. The rows
+ * are the user's own: a card belongs to the conversation of the user it was posted to, and the caller passes
+ * only ids from that user's session. @returns {Promise<Map<string, object>>} id → stored card
+ */
+export async function cardsById(ids) {
+    const want = [...new Set((ids ?? []).filter(Boolean).map(String))]
+    if (!want.length) return new Map()
+    const db   = await _db()
+    const rows = await db.collection(MSGS).find({ id: { $in: want } }, { projection: { _id: 0, id: 1, type: 1, payload: 1, actions: 1, status: 1, resolveOutcome: 1, resolveNote: 1, conversationId: 1, content: 1 } }).toArray()
+    return new Map(rows.map(r => [r.id, r]))
+}
+
 // ─── A card was posted (unified-chat plan phase 6) ───────────────────────────────
 // Every desk CARD also lands in the user's live session timeline — as a reference to this row
 // (services/sessionCards.js). Registered rather than imported, so the chat layer never depends on sessions.
@@ -818,6 +831,9 @@ export async function resolvePortfolioReviewCard(userId, portfolioId, { nextRevi
         // card stayed pending on screen, and now in the session timeline too, until a reload).
         await _tryEmit(String(userId), 'message_resolved', {
             id: msg.id, conversationId: conv.id, status, resolvedAt, resolveOutcome: outcome,
+            // The review bubble draws "next review <date>" from its payload — the patch rides along so an open
+            // card shows it without a reload (plan phase 7, J3).
+            payloadPatch: { resolved: true, outcome, nextReviewAt },
         })
         return { ok: true, messageId: msg.id }
     } catch (err) {

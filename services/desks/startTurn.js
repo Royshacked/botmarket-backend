@@ -52,7 +52,7 @@ export function makeStartTurn({
                 if (out.reason)  te.status('refused', { reason: out.reason })
                 else if (out.stopped) te.status('stopped')
                 else te.status('done', { payload: out.payload })
-                await afterTurn({ user, sessionId, agent, turnId, origin, out })
+                await afterTurn({ user, sessionId, agent, turnId, origin, out, input })
                 return out
             } catch (err) {
                 logger.warn(LOG, 'turn failed', { sessionId, agent, message: err.message })

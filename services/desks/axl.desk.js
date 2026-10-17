@@ -2,11 +2,14 @@
 // One definition for the HTTP desk stream and the session turn (unified-chat plan phase 4).
 
 import { axlAgentService } from '../agents/axl.agent.service.js'
+import { getMarketBrief } from '../marketBrief.service.js'
 
 export const axlDesk = {
     agent: 'axl',
     log:   '[axl:desk]',
-    run: ({ user, common }) => axlAgentService.chatStream({ ...common, isAdmin: user.role === 'admin' }),
+    run: ({ user, input, signal, emit, common }) => (input?.brief
+        ? briefTurn({ emit, signal })
+        : axlAgentService.chatStream({ ...common, isAdmin: user.role === 'admin' })),
     // route / routeSymbol / edit / show / opening are appended by the caller, validated for this user.
     done: (result, { routing: { route } }) => ({
         reply: result.reply,
@@ -19,4 +22,17 @@ export const axlDesk = {
         suggestions: route ? [] : (Array.isArray(result.suggestions) ? result.suggestions : []),
         chart: result.chart ?? null,
     }),
+}
+
+/**
+ * Today's market brief as Axl's turn (plan phase 7, J4) — the session's version of POST /api/axl/brief/stream:
+ * the brief card's button asks for it, and it lands in Axl's segment so a follow-up can be answered. The whole
+ * text goes out as one token (it is complete when it exists); the status chip covers a stale brief's rewrite.
+ */
+export async function briefTurn({ emit, signal, fetchBrief = getMarketBrief }) {
+    emit('status', { tool: 'market_brief' })
+    const { text } = await fetchBrief()
+    if (signal?.aborted) return null
+    emit('token', { text })
+    return { reply: text }
 }

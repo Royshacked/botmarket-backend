@@ -13,6 +13,7 @@
 
 import { emit as wsEmit, onClientEvent } from '../api/chat/chatWs.js'
 import { sessionService } from './session.service.js'
+import { hydrateCards } from './sessionCards.js'
 
 // sessionId → the turn streaming in it right now: { turnId, agent, userId, text, startedAt }
 const running = new Map()
@@ -45,7 +46,7 @@ export function runningTurn(sessionId) {
 }
 
 /** Answer one `session_sync` frame. */
-export async function replay({ userId, data, reply }, store = sessionService) {
+export async function replay({ userId, data, reply }, store = sessionService, hydrate = hydrateCards) {
     const sessionId = typeof data?.sessionId === 'string' ? data.sessionId : null
     if (!sessionId) return
     const session = await store.get({ sessionId, userId })
@@ -56,7 +57,7 @@ export async function replay({ userId, data, reply }, store = sessionService) {
         sessionId,
         status:   session.status,
         floor:    session.floor,
-        messages: messages ?? [],
+        messages: await hydrate(messages ?? []),
         running:  live && live.userId === String(userId) ? { turnId: live.turnId, agent: live.agent, text: live.text } : null,
     })
 }
