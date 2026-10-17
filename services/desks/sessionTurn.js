@@ -106,7 +106,7 @@ export function makeSessionTurn({
             model, user, audience: await experience(user._id).catch(() => null), signal, emit,
         })
 
-        const result = await desk.run({ user, state, input: prepared, signal, emit, common })
+        const result = await desk.run({ user, state, input: prepared, signal, emit, common, sessionId })
         // Stopped: the user's message stays (it is theirs), and nothing the turn produced is kept.
         if (!result || signal?.aborted) return { stopped: true }
 

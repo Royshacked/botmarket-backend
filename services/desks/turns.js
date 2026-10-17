@@ -6,10 +6,13 @@
 
 import { makeStartTurn } from './startTurn.js'
 import { makeChainRunner } from '../chain/runner.js'
+import { onSleeveSettled } from '../sleeveSource.service.js'
 
 export const chain = makeChainRunner()
 
 const turns = makeStartTurn({ afterTurn: chain.afterTurn, onUserTurn: chain.requestPause })
 chain.bindRunQueued(turns.runQueued)
+// A sleeve Atlas sent to be sourced from a session settles into that session's chain (plan phase 5d).
+onSleeveSettled(chain.sleeveSettled)
 
 export const { startTurn, runQueued } = turns

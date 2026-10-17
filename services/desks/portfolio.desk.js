@@ -62,7 +62,7 @@ export const portfolioDesk = {
             pipeline:      _str(body.pipeline),
         },
     }),
-    run: async ({ user, state, input, signal, emit, common }) => {
+    run: async ({ user, state, input, signal, emit, common, sessionId = null }) => {
         const { messages } = common
         const { portfolioId = null, reviewMode: isReviewMode = false, mandate: bodyMandate = null, adoptDraftId = null } = state ?? {}
         const { threadId = null, pipeline: cleanPipeline = null } = input
@@ -156,6 +156,8 @@ export const portfolioDesk = {
             sourceSleeve({
                 userId:        user._id,
                 threadId,
+                // From the unified chat, the sleeve settles into this session's chain (plan phase 5d).
+                sessionId,
                 portfolioId,
                 portfolioName: portfolioState?.portfolioName ?? null,
                 sector:        sr.sector,

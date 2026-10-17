@@ -199,3 +199,25 @@ test('only Argus in single-pick mode emits a pick; a decision table row per desk
     assert.equal(decisionFor('axl', { reply: 'hi' }, null), null)
     assert.equal(researchQueueFrom({ candidates: [] }), null)
 })
+
+// ── a sleeve settling into the chain (plan phase 5d) ────────────────────────
+
+test('a settled sleeve becomes Argus’s line, then the coverage is handed to Atlas — saying what did not come back', async () => {
+    const r = rig()
+    const s = await r.sessions.getActive({ userId: 'u1' })
+    const sleeve = { userId: 'u1', sessionId: s.sessionId, sector: 'Utilities', school: 'income' }
+    const taken = await r.runner.sleeveSettled(sleeve, { covered: ['SO'], passed: ['DUK'], failed: [], unresolved: [], screened: 12 })
+    assert.equal(taken, true)
+    const [line, hand] = await rows(r.sessions, s)
+    assert.equal(line.agent, 'scanner')
+    assert.equal(line.content, 'Screened 12 for the Utilities sleeve (income) → 1 now in coverage: SO; 1 passed on (no edge).')
+    assert.equal(hand.to, 'portfolio')
+    assert.match(hand.content, /^Coverage is in for SO \(Utilities\)\. Build from it\. Screened but NOT researched/)
+    assert.equal((await header(r.sessions, s)).chain.origin, 'portfolio')
+    assert.equal(r.queued.at(-1).agent, 'portfolio')
+})
+
+test('a sleeve whose session is gone is declined — the caller posts the card instead', async () => {
+    const r = rig()
+    assert.equal(await r.runner.sleeveSettled({ userId: 'u1', sessionId: 'nope', sector: 'X' }, { covered: [], passed: [], failed: [], unresolved: [], screened: 0 }), false)
+})

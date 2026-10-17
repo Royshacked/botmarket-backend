@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 
 import {
     sourceSleeve, buildSleeveSourced, screenFiltersFor, pendingSleeves, _resetSleeves, SCHOOL_SCREEN, SLEEVE_HITS,
+    onSleeveSettled, sleeveOutcome,
 } from '../../services/sleeveSource.service.js'
 import { researchOpening } from '../../services/researchRun.service.js'
 
@@ -261,4 +262,38 @@ test('an industry the house rates AVOID never leads a sleeve, even through a lon
     assert.equal(filters[0].limit, SLEEVE_HITS, 'only an Avoid industry: no house list, the plain screen')
     assert.deepEqual(res.sleeve.house, [])
     assert.deepEqual(res.sleeve.symbols, POOL.slice(0, SLEEVE_HITS), 'its names still come through the screen in its order')
+})
+
+// ── settling into a session (unified-chat plan phase 5d) ─────────────────────
+
+test('a sleeve sourced from a session settles into its chain — no card — when the hook takes it', async () => {
+    const seen = []
+    onSleeveSettled(async (sleeve, outcome) => { seen.push({ sleeve, outcome }); return true })
+    try {
+        const h = harness({ screened: ['AAA', 'BBB'], covered: ['AAA', 'BBB'] })   // all covered → settles at once
+        await sourceSleeve(req({ sessionId: 'ses1' }), h.deps)
+        assert.equal(h.posted.length, 0, 'no card — the session carries it')
+        assert.equal(seen[0].sleeve.sessionId, 'ses1')
+        assert.equal(seen[0].outcome.screened, 2)
+    } finally { onSleeveSettled(null) }
+})
+
+test('the card is posted as today when the sleeve has no session, or the hook declines (the session is gone)', async () => {
+    onSleeveSettled(async () => false)
+    try {
+        const declined = harness({ screened: ['AAA'], covered: ['AAA'] })
+        await sourceSleeve(req({ sessionId: 'gone' }), declined.deps)
+        assert.equal(declined.posted.length, 1)
+        const plain = harness({ screened: ['AAA'], covered: ['AAA'] })
+        await sourceSleeve(req(), plain.deps)
+        assert.equal(plain.posted.length, 1)
+    } finally { onSleeveSettled(null) }
+})
+
+test('sleeveOutcome is the one reading of a settled sleeve — skipped names count as covered', () => {
+    const o = sleeveOutcome({ symbols: ['A', 'B', 'C', 'D'], outcomes: { A: 'covered', B: 'skipped', C: 'passed', D: 'unresolved' }, alreadyCovered: 1 })
+    assert.deepEqual(o.covered, ['A', 'B'])
+    assert.deepEqual(o.passed, ['C'])
+    assert.deepEqual(o.unresolved, ['D'])
+    assert.equal(o.screened, 5)
 })

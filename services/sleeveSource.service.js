@@ -141,7 +141,7 @@ async function _house(sector, deps) {
  *   posted at once, since there is nothing to wait for), 'queue_unavailable'.
  */
 export async function sourceSleeve(req, deps = _io) {
-    const { userId, threadId = null, portfolioId = null, portfolioName = null, sector, industry = null, note = null } = req ?? {}
+    const { userId, threadId = null, sessionId = null, portfolioId = null, portfolioName = null, sector, industry = null, note = null } = req ?? {}
     const school = normalizeSelection(req?.school)
     if (!userId)               return { ok: false, reason: 'user_required' }
     if (school === 'passive')  return { ok: false, reason: 'passive' }
@@ -172,6 +172,9 @@ export async function sourceSleeve(req, deps = _io) {
     const sleeve = {
         id: `slv_${randomUUID().slice(0, 8)}`,
         userId: String(userId), threadId, portfolioId, portfolioName,
+        // A sleeve sourced from the unified chat settles INTO that session's chain (onSleeveSettled), not as a card.
+        sessionId: sessionId ? String(sessionId) : null,
+        screened:  symbols.length,
         sector, school, industry,
         symbols:     fresh,
         // Which of them came from Pythia's long-term industries — the card says how many.
@@ -272,8 +275,23 @@ async function _reconcile(sleeve, deps) {
     if (_remaining(sleeve).length === 0) await _settle(sleeve, deps)
 }
 
+// ─── Settling into a session (unified-chat plan phase 5d) ───────────────────────
+// A sleeve sourced from a session settles into its chain — Argus's line, then the coverage handed to Atlas —
+// instead of a card. The chain runner registers the hook (services/desks/turns.js), so this module never
+// imports the chain. The hook answers whether it took the sleeve; if not (no hook, the session is gone), the
+// card is posted exactly as for a sleeve from the old path.
+let _settledHook = null
+export function onSleeveSettled(fn) { _settledHook = fn }
+
 async function _settle(sleeve, deps) {
     state.sleeves = state.sleeves.filter(s => s !== sleeve)
+    if (sleeve.sessionId && _settledHook) {
+        const taken = await Promise.resolve(_settledHook(sleeve, sleeveOutcome(sleeve))).catch(err => {
+            logger.warn(LOG, 'settling into the session failed — posting the card instead', err.message)
+            return false
+        })
+        if (taken) { logger.info(LOG, 'sleeve settled into its session', { id: sleeve.id, sessionId: sleeve.sessionId }); return }
+    }
     const card = buildSleeveSourced(sleeve)
     const msg  = await deps.post(card, { tag: 'Sleeve-sourced card', log: LOG })
     logger.info(LOG, 'sleeve settled', { id: sleeve.id, sector: sleeve.sector, covered: card?.payload?.covered?.length ?? 0, of: sleeve.symbols.length, posted: !!msg })
@@ -286,6 +304,24 @@ const _pub = s => ({ id: s.id, sector: s.sector, school: s.school, symbols: [...
 const _by = (sleeve, outcome) => sleeve.symbols.filter(s => sleeve.outcomes[s] === outcome)
 
 /**
+ * What a settled sleeve came to — ONE reading for the card and for the chain's line. Pure.
+ * `skipped` is the run finding the name already covered between the screen and the turn: to the build it
+ * is a covered name, so `covered` includes it.
+ */
+export function sleeveOutcome(sleeve) {
+    const written = _by(sleeve, 'covered')
+    const skipped = _by(sleeve, 'skipped')
+    return {
+        written, skipped,
+        covered:    [...written, ...skipped],
+        passed:     _by(sleeve, 'passed'),
+        failed:     _by(sleeve, 'failed'),
+        unresolved: _by(sleeve, 'unresolved'),
+        screened:   sleeve.screened ?? (sleeve.symbols.length + (sleeve.alreadyCovered ?? 0)),
+    }
+}
+
+/**
  * Atlas's "sleeve sourced" card for the user who asked. Pure → { userId, content, type, payload,
  * botId, actions, visibility, forUserId } or null with no user.
  *
@@ -295,14 +331,8 @@ const _by = (sleeve, outcome) => sleeve.symbols.filter(s => sleeve.outcomes[s] =
  */
 export function buildSleeveSourced(sleeve) {
     if (!sleeve?.userId || !sleeve?.sector) return null
-    // `skipped` is the run finding the name already covered — by hand, between the screen and the
-    // turn. To the build it is a covered name, so it reads as one; the payload keeps them apart.
-    const written    = _by(sleeve, 'covered')
-    const skipped    = _by(sleeve, 'skipped')
-    const covered    = [...written, ...skipped]
-    const passed     = _by(sleeve, 'passed')
-    const failed     = _by(sleeve, 'failed')
-    const unresolved = _by(sleeve, 'unresolved')
+    // `skipped` names read as covered to the build; the payload keeps them apart (sleeveOutcome).
+    const { written, skipped, covered, passed, failed, unresolved } = sleeveOutcome(sleeve)
     const inBook     = covered.length + (sleeve.alreadyCovered ?? 0)
     const school     = sleeve.school ? ` (${sleeve.school})` : ''
     const house      = (sleeve.house ?? []).filter(s => sleeve.symbols.includes(s))

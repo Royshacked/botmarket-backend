@@ -178,6 +178,38 @@ export function makeChainRunner({ sessions = sessionService, desks = DESK_DEFS, 
         return { reason: 'no_such_choice' }
     }
 
+    /**
+     * A sleeve Atlas sent to be sourced has settled (sleeveSource → onSleeveSettled, plan phase 5d). The
+     * screen is code (decision 1a), shown as ARGUS's work: Argus's line goes into Argus's segment — so a
+     * follow-up to Argus can be answered — then what came back is handed to Atlas as a coverage set, saying
+     * what did NOT come back too. Answers false when the session is gone, so the card is posted instead.
+     */
+    async function sleeveSettled(sleeve, outcome) {
+        const user    = { _id: sleeve.userId }
+        const session = await sessions.get({ sessionId: sleeve.sessionId, userId: user._id })
+        if (!session || session.status !== 'active') return false
+        const school = sleeve.school ? ` (${sleeve.school})` : ''
+        const tail = [
+            outcome.passed.length     ? `${outcome.passed.length} passed on (no edge)` : null,
+            outcome.failed.length     ? `${outcome.failed.length} failed to save` : null,
+            outcome.unresolved.length ? `${outcome.unresolved.length} left unresearched` : null,
+        ].filter(Boolean).join(', ')
+        const line = outcome.covered.length
+            ? `Screened ${outcome.screened} for the ${sleeve.sector} sleeve${school} → ${outcome.covered.length} now in coverage: ${outcome.covered.join(', ')}${tail ? `; ${tail}` : ''}.`
+            : `Screened ${outcome.screened} for the ${sleeve.sector} sleeve${school} → none came into coverage${tail ? ` (${tail})` : ''}.`
+        await sessions.append({ sessionId: sleeve.sessionId, userId: user._id, message: { agent: 'scanner', role: 'assistant', content: line } })
+
+        const declined = [...outcome.passed, ...outcome.failed].map(ticker => ({ ticker, sector: sleeve.sector }))
+        const art = makeArtifact({
+            kind: KIND.COVERAGE_SET, from: { agent: 'analyst', label: 'Research' },
+            items:   outcome.covered.map(ticker => ({ ticker, sector: sleeve.sector })),
+            context: { unfilled: outcome.covered.length ? [] : [sleeve.sector], declined },
+        })
+        const chain = session.chain && session.chain.status !== 'done' ? session.chain : newChain('portfolio')
+        await hop({ user, session, chain: { ...chain, origin: 'portfolio' }, art, from: 'analyst' })
+        return true
+    }
+
     /** At boot: every chain a restart cut off is PAUSED and its floor-holder asks (G4). */
     async function sweep() {
         const cut = await sessions.findRunningChains()
@@ -193,5 +225,5 @@ export function makeChainRunner({ sessions = sessionService, desks = DESK_DEFS, 
         return cut.length
     }
 
-    return { afterTurn, requestPause, resume, sweep, bindRunQueued }
+    return { afterTurn, requestPause, resume, sweep, sleeveSettled, bindRunQueued }
 }
