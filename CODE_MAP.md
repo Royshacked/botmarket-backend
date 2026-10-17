@@ -311,8 +311,16 @@ services/
                               floor (entryOf on a route) → background summary fold. No HTTP until phase 5
       summarize.js            the rolling per-agent summary past the trimHistory high-water mark (Haiku 4.5,
                               booked to the user; failure changes nothing)
+      turnLock.js · startTurn.js · turns.js   one turn at a time per session · accept a turn (202) and run it
+                              queued, stoppable, streamed · the turns + chain wired as one pair
+      entityLookup.js         the entity an edit reopens, owner-checked through its own service
       seal.js                 sealFromSession (Generate: turns move onto the entity, one sealed line) ·
                               openForEdit · sealAfterGenerate (the Generate endpoints' hook — sessionId only)
+  chain/                  THE CHAIN the server runs (unified-chat plan phase 5): artifact.js (candidate_list,
+                          coverage_set) · contracts.js (receiverOf + each receiver's opening brief) · rules.js (the
+                          declared tables: what a reply emits, what makes a turn the user's call) · runner.js (after
+                          every turn: decision → stop, emit → hand-off + the receiver's turn queued; busy rule, step
+                          cap, pause, boot sweep, sleeveSettled). Wired with the turns in desks/turns.js
   agents/                 the 6 LLM desks (analyst · axl · mentor · portfolio · scanner ·
                           strategy). A seventh is archived and lives under archive/, imported by
                           nothing — see archive/README.md, and `npm run check:archive`, which
@@ -915,6 +923,10 @@ services/
                           per timeline message, per-session seq). ONE active per user per scope; "new"
                           archives it; no TTL, no cap. session.util.segmentOf = one agent's context line
                           (its own turns + hand-offs addressed to it). Factory over getDb (memDb-tested)
+  sessionEvents.js  sessionChannel.js   the unified chat's live channel ON THE EXISTING WebSocket (chatWs): the
+                          store pushes session_message / session_removed / session_state on every change; a running
+                          turn streams session_delta + session_turn (turnEmitter keeps its text so far); session_sync
+                          { sessionId, afterSeq } is answered with a replay to the asking socket (chatWs.onClientEvent)
   agentContext.service.js  sealed agent context: `agent_contexts`, one row per {userId, kind, entityId,
                           agent} — an agent's conversation kept with the entity it produced (setup, scan,
                           coverage, portfolio, industry_view). Per user even on a house entity; a second

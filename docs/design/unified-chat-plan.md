@@ -549,6 +549,15 @@ two taps; edit `force`); chain (each emit → the right receiver with the right 
 the step cap; Prometheus's queue one per turn; chain state written before each step; the boot sweep pauses and
 asks); sleeve settle → Argus line + Atlas hand-off, and the old card path unchanged. Existing suites unchanged.
 
+**Phase 5 as done (2026-10-17):** 5a channel (85729fb) · 5b turn endpoint (3341936, ce50064) · 5c chain (3f79a30) ·
+5d sleeve sourcing into the chain (e9c5213) · 5e live drive (scripts/drive-session-chain.mjs): PASSED — the turn engine
+streamed over the WebSocket path (812 frames), the hand-off reached Mentor and its chain turn ran with no user
+message and stopped for the user, the restart sweep asked and Continue re-ran the step, a seal sent session_removed.
+Argus declined to pick NVDA (its own call: the name did not validate), so the drive handed the chain a pick — the
+hop and Mentor's chain turn were real; Argus choosing to pick was not exercised live.
+- Busy rule, as built: it applies where the CHAIN wants an agent that holds the user's own unsealed work (finish /
+  set it aside). A user turn to an agent mid-chain simply pauses the chain (G4) — the user is taking the wheel.
+
 ## 8. Phase 6 — Background cards into the timeline
 
 - Themis moves onto `postCard` (one transport, no exceptions).
