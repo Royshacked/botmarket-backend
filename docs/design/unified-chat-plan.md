@@ -780,6 +780,22 @@ ChatWindow did (the existing card tests move onto it); the empty state's options
 unchanged.
 
 
+**Phase 7 as done (2026-10-17):** J1–J6 approved by Roy. Backend 7a `f954ccb` (replyExtras; hydrateCards + the review
+payload patch; the runner's route follow-up — opening → the landing desk's turn, edit → findForEdit + openForEdit, busy →
+reopen/keep decision; briefTurn; `<show>ticket`; the edit route under the lock; the Axl prompt's one-chat section) and
+7d `438b346` (the Axl HTTP routes deleted — the session turn replaces both; resolveMessage echoes message_resolved to the
+user's own sockets). Frontend 7b `0d2518f` (chatWsService.send, session client, sessionReducer, useSession), 7c+7d
+`046ac59` (ChatTimeline + rows + CardBubble extracted from ChatWindow; MainPage mounts it; AxlHub, deskWork,
+TICKET_DESK, SUMMON_MS, axl.service.remote deleted; AxlHub.scss → AgentSummon.scss) and `b094028` (drive polish).
+7e: `scripts/drive-unified-chat.mjs` on Vite :5173 — 13/13 (opening question, tap → Axl → Atlas answering below under
+its own name, Stop, reload, a card + dismiss, New session, History read-only, phone width). Suites: backend 4111/0,
+frontend 1259 vitest + 443 node. Deviations from the plan, each smaller:
+- a tags-only reply still has no row, so its taps stay live-only (an empty row would reach the agent's context);
+- the ticket offer opens the pad and charts the symbol — TradeTicket takes no starting symbol;
+- `AxlBotGlyph` stays (BotAvatarGlyph draws Axl with it); only the `AgentSummon` overlay goes in phase 8;
+- the active-session header carries no `agentState` (HEADER_PROJECTION) — the phase-8 surfaces need a read for it;
+- a drive must not edit backend files while it runs: nodemon restarts and kills the turn in flight.
+
 ## 10. Phase 8 — Frontend: side pane + MainPage teardown
 
 - **Surfaces extracted from the panels**, reading `agentState` from the session; every action goes through

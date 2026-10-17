@@ -199,15 +199,6 @@ api/
                           POST /:id/cancel). What is waiting on the user, from BOTH stores —
                           off-hours-queued intents AND entities the market-open sweep unparked.
                           Execute REPLAYS through the origin's own function, never a copy
-  axl/                    Axl chat SSE /api/axl/stream (converse + chart + three hand-off tags:
-                          `<route>desk SYMBOL` opens a desk for NEW work, `<edit>kind ID` reopens an
-                          item the user already has, in the editor that owns it, `<show>setup ID`
-                          opens that setup's own DETAIL page and changes nothing — see APP_SPEC §2)
-                          and POST /api/axl/brief/stream — DELIVERY, not a turn: streams today's
-                          market brief into the Axl chat panel (the confirm behind the offer card).
-                          No model runs on it and the whole brief goes out as ONE token event, but it
-                          speaks the same SSE shape as a turn, so the client's chip/typewriter/Stop
-                          work with the handlers it already has
   chat/                   social DM + bot notifications (chatWs.js = WebSocket, userId → SET of
                           sockets: every tab is a reader of the same inbox, and one socket per user
                           meant a second tab displaced the first WITHOUT closing it — that browser
@@ -688,7 +679,7 @@ services/
                             snapshot, and a 7d calendar filtered to Fed rows + MAJOR_EARNINGS only —
                             then ONE model turn with web_search for the narrative. Cached 45min
                             (MARKET_BRIEF_TTL_MS) + single-flight: the morning fan-out costs one run,
-                            not one per user. Two consumers: Axl's tool and POST /api/axl/brief/stream
+                            not one per user. Two consumers: Axl's tool and Axl's brief turn (axl.desk briefTurn)
   marketBrief.tools.js      get_market_brief — UNBOUND (no userId, so the brief cannot be made
                             personal). Axl RELAYS the brief; it does not write market commentary
   industryViews.tools.js    get_industry_views (Axl + Atlas, replaced get_sector_view 2026-10-05) — UNBOUND;
@@ -929,7 +920,9 @@ services/
                           { sessionId, afterSeq } is answered with a replay to the asking socket (chatWs.onClientEvent)
   sessionCards.js         every desk CARD also lands in the user's live session as a REFERENCE row (msgId +
                           conversation + subject + action) — hooked on chat.service onCardPosted; only an existing session
-                          in the agent's scope (Pythia → strategy); cardAction = the one table of what a card's button does
+                          in the agent's scope (Pythia → strategy); cardAction = the one table of what a card's button does;
+                          hydrateCards / cardView attach the card's payload+actions+state on every READ (messages route,
+                          replay) and on the live push (append's `live`) — never stored
   agentContext.service.js  sealed agent context: `agent_contexts`, one row per {userId, kind, entityId,
                           agent} — an agent's conversation kept with the entity it produced (setup, scan,
                           coverage, portfolio, industry_view). Per user even on a house entity; a second
