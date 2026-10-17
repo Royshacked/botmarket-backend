@@ -28,7 +28,7 @@ function commitRig({ avoid = [], items = [], deleteFails = [] } = {}) {
         avoid:      async () => avoid,
         items:      async () => items,
         chat:       { completeReview: async (pid) => { calls.complete.push(pid); return { nextReviewAt: 99 } }, setPortfolioLifecycle: async (pid, uid, p) => { calls.lifecycle.push(p) } },
-        rebalance:  async (pid, uid, update) => { calls.rebalance.push(update); return { ok: true, results: [], nextReviewAt: 77 } },
+        rebalance:  async (pid, uid, update, o) => { calls.rebalance.push(update); calls.rebalanceOpts = (calls.rebalanceOpts ?? []).concat([o]); return { ok: true, results: [], nextReviewAt: 77 } },
         snapshot:   async (pid) => { calls.snap.push(pid) },
         resolveCard: async (uid, pid, o) => { calls.card.push(o) },
         invalidate: () => {},
@@ -117,13 +117,13 @@ test('avoidRefused keeps only the changes refused for AVOID, marked to be asked 
 function rig({ atlas = null, commit: over = {}, chat: chatOver = {} } = {}) {
     const { db } = memDb()
     const sessions = makeSessionService({ getDb: async () => db })
-    const calls = { create: [], replace: [], rebind: [], close: [], accept: [], seal: [], chatState: [], thesis: [] }
+    const calls = { create: [], replace: [], rebind: [], close: [], accept: [], acceptOpts: [], seal: [], chatState: [], thesis: [] }
     const commit = {
         createBook:      async (plan, uid, o) => { calls.create.push({ plan, o }); return over.createBook?.(plan, o) ?? { ok: true, ideas: [{ id: 'n0' }], failed: [], portfolioId: 'p_new' } },
         replacePlan:     async (pid, plan, uid, o) => { calls.replace.push({ pid, plan, o }); return over.replacePlan?.() ?? { ok: true, ideas: [{ id: 'n0' }], left: [] } },
         rebindAccounts:  async (pid, uid, o) => { calls.rebind.push({ pid, o }); return { ok: true, updated: 2 } },
         closeReview:     async (pid, uid, o = {}) => { calls.close.push({ pid, ...o }); return { ok: true, nextReviewAt: 5 } },
-        acceptRebalance: async (pid, uid, update) => { calls.accept.push(update); return over.acceptRebalance?.(update) ?? { ok: true, results: [], applied: update.changes.length } },
+        acceptRebalance: async (pid, uid, update, o) => { calls.accept.push(update); calls.acceptOpts.push(o); return over.acceptRebalance?.(update) ?? { ok: true, results: [], applied: update.changes.length } },
     }
     const chat = {
         saveChatState: async (pid, messages, uid, mandate) => { calls.chatState.push({ pid, messages, mandate }); return { ok: true } },
@@ -145,7 +145,7 @@ const REVIEW = { portfolioId: 'p1', reviewMode: true, editing: { kind: 'portfoli
 test('generatePlan saves the plan FROM THE SESSION, writes the mandate and thesis onto the book, and seals onto it', async () => {
     const r = rig({ atlas: { portfolioId: null, pendingPlan: PLAN, mandate: { goal: 'g' }, thesis: { strategy: 's' } } })
     const { s, press } = await r.start()
-    const out = await press('generatePlan', { accounts: ['a1'], mainAccountId: 'a1', plan: { ideas: [{ asset: 'EVIL' }] } })
+    const out = await press('generatePlan', { accounts: [{ id: 'a1', broker: 'paper' }, 'raw-id'], mainAccountId: 'a1', plan: { ideas: [{ asset: 'EVIL' }] } })
     assert.deepEqual(out.result.portfolioId, 'p_new')
     assert.deepEqual(r.calls.create[0].plan, PLAN, 'the session plan — a plan in the args is ignored')
     assert.deepEqual(r.calls.chatState[0], { pid: 'p_new', messages: [], mandate: { goal: 'g' } })
@@ -172,7 +172,7 @@ test('generatePlan refuses on an existing book and with nothing on the table', a
 test('updatePlan re-plans in place, or rebinds the accounts with no plan; an edit from a review closes it', async () => {
     const r = rig({ atlas: { ...REVIEW, pendingPlan: PLAN } })
     const { press } = await r.start()
-    const out = await press('updatePlan', { accounts: ['a1'] })
+    const out = await press('updatePlan', { accounts: [{ id: 'a1' }] })
     assert.deepEqual(out.result, { ideas: [{ id: 'n0' }], left: [] })
     assert.equal(r.calls.replace[0].pid, 'p1')
     assert.deepEqual(r.calls.close, [{ pid: 'p1' }])
@@ -180,7 +180,7 @@ test('updatePlan re-plans in place, or rebinds the accounts with no plan; an edi
 
     const r2 = rig({ atlas: { portfolioId: 'p2', editing: { kind: 'portfolio', entityId: 'p2' } } })
     const { press: press2 } = await r2.start()
-    assert.deepEqual((await press2('updatePlan', { accounts: ['a1'] })).result, { ok: true, updated: 2 })
+    assert.deepEqual((await press2('updatePlan', { accounts: [{ id: 'a1' }] })).result, { ok: true, updated: 2 })
     assert.equal(r2.calls.close.length, 0, 'not a review — the clock is not touched')
 })
 
@@ -256,4 +256,28 @@ test('Atlas refusals answer in its own words, the rebalance ones shared with the
     assert.equal(portfolioReason('nothing_applied')[0], 409)
     assert.equal(portfolioReason('whatever'), null)
     assert.equal(portfolioDesk.reasons, portfolioReason)
+})
+
+// ─── phase 8a bug hunt ────────────────────────────────────────────────────────
+
+test('#5: Atlas takes the account OBJECTS every desk sends, and hands the book their ids', async () => {
+    const r = rig({ atlas: { pendingPlan: PLAN } })
+    await (await r.start()).press('generatePlan', { accounts: [{ id: 'a1', broker: 'paper' }, 'raw-id', { broker: 'x' }] })
+    assert.deepEqual(r.calls.create[0].o.accounts, ['a1'])
+})
+
+test("#3: only a review's Accept closes the review — an edit's changes leave a due review due", async () => {
+    const r = rig({ atlas: { ...REVIEW, reviewUpdate: { changes: [TRIM_AAA] } } })
+    await (await r.start()).press('acceptReview')
+    assert.deepEqual(r.calls.acceptOpts[0], { closeReview: true })
+    const e = rig({ atlas: { portfolioId: 'p1', editing: REVIEW.editing, reviewUpdate: { changes: [TRIM_AAA] } } })
+    await (await e.start()).press('acceptReview')
+    assert.deepEqual(e.calls.acceptOpts[0], { closeReview: false })
+
+    const { commit, calls } = commitRig()
+    await commit.acceptRebalance('p1', 'u1', { changes: [TRIM_AAA] }, { closeReview: false })
+    assert.deepEqual(calls.rebalanceOpts[0], { closeReview: false })
+    assert.equal(calls.card.length, 0, 'no review card flips outside a review')
+    await commit.acceptRebalance('p1', 'u1', { changes: [TRIM_AAA] })
+    assert.deepEqual(calls.rebalanceOpts[1], { closeReview: true }, 'the route closes the review, as before')
 })

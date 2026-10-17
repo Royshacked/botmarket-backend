@@ -165,3 +165,30 @@ test('Pythia keeps the assessments its drafts came with', () => {
     assert.deepEqual(s1.assessments, [{ q: 'demand' }])
     assert.deepEqual(strategyDesk.nextState(s1, { views: [] }).assessments, [{ q: 'demand' }])
 })
+
+// ─── phase 8a bug hunt ────────────────────────────────────────────────────────
+
+test("#1: a hand edit never rewrites the build ledger — the session's is kept, the client's dropped", () => {
+    const ledger = { stage: 'entries', confirmed: ['direction'] }
+    const forged = { ...DRAFT, build: { stage: 'ready', confirmed: ['direction', 'entries', 'size'] } }
+    assert.deepEqual(mentorApplyEdit({ draft: { ...DRAFT, build: ledger } }, { draft: forged }).state.draft.build, ledger)
+    assert.equal('build' in mentorApplyEdit({ draft: DRAFT }, { draft: forged }).state.draft, false, 'no ledger on the server → none from the client')
+    assert.equal(mentorApplyEdit({ draft: DRAFT }, { draft: 'x' }).reason, 'invalid_setup')
+})
+
+test("#2: only a desk's OWN actions run — inherited names are no action at all", async () => {
+    const r = rig({ mentorState: { draft: DRAFT } })
+    const s = await r.start()
+    for (const action of ['constructor', 'valueOf', 'toString', 'hasOwnProperty']) {
+        assert.deepEqual(await r.act({ user, sessionId: s.sessionId, agent: 'mentor', action }), { reason: 'no_such_action' }, action)
+    }
+})
+
+test('#4: once the entity is saved, a failed state write is said — never answered as a failure', async () => {
+    const r = rig({ mentorState: { active_asset: 'NVDA', draft: DRAFT } })
+    const s = await r.start()
+    const flaky = { ...r.sessions, setAgentState: async () => { throw new Error('mongo down') } }
+    const { act } = makeAct({ sessions: flaky, desks: { mentor: { ...mentorDesk, actions: makeMentorActions({ setups: { generateSetup: async (d) => ({ ok: true, doc: { id: 'n1', asset: d.asset } }) }, resolveCards: async () => {} }) } }, sealing: { sealFromSession: async () => ({ sealed: 0 }) }, lock: (_id, fn) => fn() })
+    const out = await act({ user, sessionId: s.sessionId, agent: 'mentor', action: 'generate', args: { accounts: ACCOUNTS } })
+    assert.deepEqual(out, { result: { setup: { id: 'n1', asset: 'NVDA' } }, stateWritten: false })
+})

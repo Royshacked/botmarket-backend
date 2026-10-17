@@ -12,13 +12,16 @@
 
 import { portfolioCommit as defaultCommit, REBALANCE_REASONS } from '../../../api/portfolio/portfolioCommit.service.js'
 import { portfolioChatService as defaultChat } from '../../../api/portfolio/portfolioChat.service.js'
+import { parseIdeaAccounts } from '../../../api/_shared/parse.util.js'
 
 const _ids    = (list) => (Array.isArray(list) ? list.filter(a => typeof a === 'string' && a) : [])
 const _upper  = (list) => new Set(_ids(list).map(s => s.toUpperCase()))
 const bookOf  = (state) => (state?.portfolioId ? String(state.portfolioId) : null)
 const editing = (state) => (state?.editing?.kind === 'portfolio' ? String(state.editing.entityId) : null)
+// The marked accounts arrive in the ONE shape every desk's press sends (the account objects, as Mentor's) — the
+// book's legs carry their ids.
 const commitArgs = (args = {}) => ({
-    accounts:      _ids(args.accounts),
+    accounts:      parseIdeaAccounts(args.accounts).map(a => String(a.id)),
     mainAccountId: typeof args.mainAccountId === 'string' ? args.mainAccountId : null,
     avoidOk:       _ids(args.avoidOk),
 })
@@ -128,7 +131,8 @@ export function makePortfolioActions({ commit = defaultCommit, chat = defaultCha
             if (settled.ask) return { reason: 'avoid_needs_ok', extra: { avoid: settled.ask } }
             if (!settled.update) return { reason: 'nothing_to_commit' }
 
-            const out = await commit.acceptRebalance(portfolioId, user._id, settled.update)
+            // Only a review's Accept closes the review; an edit's changes leave a due review due.
+            const out = await commit.acceptRebalance(portfolioId, user._id, settled.update, { closeReview: state.reviewMode === true })
             // What was refused only for an AVOID industry stays on the table, marked, so the next Accept asks about it.
             // Read off `results`: they carry the refusal's `avoid`, which the success shape's `failed` summary drops.
             const retry = avoidRefused(settled.update, (out.results ?? []).filter(r => r && r.ok === false))

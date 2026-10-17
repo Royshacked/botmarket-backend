@@ -104,11 +104,14 @@ export function makePortfolioCommit({
         return { ok: true, nextReviewAt }
     }
 
-    /** A review's changes applied (routed by mode/position in the rebalance service); the card says "Updated". */
-    async function acceptRebalance(portfolioId, userId, update) {
-        const result = await rebalance(portfolioId, userId, update)
+    /**
+     * Changes applied (routed by mode/position in the rebalance service). In a review (`closeReview`, the default —
+     * the route's) the review closes and its card says "Updated"; outside one the moves apply and a due review stays due.
+     */
+    async function acceptRebalance(portfolioId, userId, update, { closeReview = true } = {}) {
+        const result = await rebalance(portfolioId, userId, update, { closeReview })
         if (!result.ok) return result
-        await resolveCard(userId, portfolioId, { nextReviewAt: result.nextReviewAt ?? null, outcome: 'updated' })
+        if (closeReview) await resolveCard(userId, portfolioId, { nextReviewAt: result.nextReviewAt ?? null, outcome: 'updated' })
         return result
     }
 

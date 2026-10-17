@@ -113,6 +113,8 @@ const ACT_REASONS = {
     nothing_to_commit: [409, 'There is nothing to save yet'],
     nothing_to_edit:   [409, 'There is nothing to change yet'],
     invalid_edit:      [400, 'That change is not valid'],
+    // A desk action that answered nothing is the server's bug, not the client's request.
+    action_failed:     [500, 'That did not go through'],
     not_editable:      [400, 'Nothing here is edited by hand'],
 }
 const reasonsFor = (agent) => {
@@ -125,7 +127,8 @@ export const actInSession = handle('actInSession', async (req, res) => {
     if (!AGENT_KEYS.includes(agent)) throw httpError(400, 'invalid agent')
     const out = await deskAct.act({ user: req.user, sessionId: req.params.id, agent, action, args })
     if (out.reason) return sendReason(res, out.reason, { overrides: reasonsFor(agent), fallback: 400, extra: out.extra ?? null })
-    res.json(out.result)
+    // Saved, but the desk's state could not be written: the client refetches rather than trusting what it holds.
+    res.json(out.stateWritten === false ? { ...out.result, stateWritten: false } : out.result)
 })
 
 // A direct edit (plan phase 8, K3): validated by the desk, written to its state, pushed on the channel.

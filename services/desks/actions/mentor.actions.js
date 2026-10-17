@@ -106,18 +106,26 @@ export const mentorActions = makeMentorActions()
 /**
  * A direct edit (K3): the user changed the draft by hand. Re-judged by the same verdict a turn and the validate
  * route use, so the gate and readiness the surface draws from stay true. `{ state }` or `{ reason }`.
- * Edits: `{ draft, accounts? }` — the whole draft as edited (the build ledger rides on it).
+ * Edits: `{ draft, accounts? }` — the whole draft as edited.
+ *
+ * THE BUILD LEDGER IS THE SERVER'S. It rides on the draft (`draft.build`: the stages confirmed, the size held —
+ * docs/design/mentor-flow-intent.md), and a hand edit is of the plan's fields, never of where the build stands. The
+ * client's copy is dropped and the session's kept — otherwise an edit could mark stages confirmed that Mentor never
+ * walked (phase 8a bug hunt #1).
  */
 export function mentorApplyEdit(state, edit = {}) {
     if (!state) return { reason: 'nothing_to_edit' }
     if (!('draft' in edit)) return { reason: 'invalid_edit' }
-    const verdict = draftVerdict(edit.draft, parseIdeaAccounts(edit.accounts).length > 0)
+    if (!edit.draft || typeof edit.draft !== 'object' || Array.isArray(edit.draft)) return { reason: 'invalid_setup' }
+    const { build: _theirs, ...fields } = edit.draft   // eslint-disable-line no-unused-vars -- dropped on purpose
+    const draft = state.draft?.build ? { ...fields, build: state.draft.build } : fields
+    const verdict = draftVerdict(draft, parseIdeaAccounts(edit.accounts).length > 0)
     if (!verdict) return { reason: 'invalid_setup' }
     return {
         state: {
             ...state,
-            draft:        edit.draft,
-            active_asset: edit.draft.asset || state.active_asset || '',
+            draft,
+            active_asset: draft.asset || state.active_asset || '',
             view: { ...(state.view ?? {}), readiness: verdict.readiness, ...(verdict.gate ? { gate: verdict.gate } : {}) },
         },
     }

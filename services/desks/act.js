@@ -41,7 +41,9 @@ export function makeAct({ sessions = sessionService, desks = DESK_DEFS, sealing 
         return lock(sessionId, async () => {
             const opened = await _open({ user, sessionId, agent })
             if (opened.reason) return opened
-            const handler = opened.desk.actions?.[action]
+            // OWN keys only: `constructor` / `valueOf` resolve on any object literal (phase 8a bug hunt #2).
+            const actions = opened.desk.actions
+            const handler = actions && Object.hasOwn(actions, action) ? actions[action] : null
             if (typeof handler !== 'function') return { reason: 'no_such_action' }
 
             const state = opened.session.agentState?.[agent] ?? null
@@ -59,7 +61,17 @@ export function makeAct({ sessions = sessionService, desks = DESK_DEFS, sealing 
                 await sealing.sealFromSession({ userId: user._id, sessionId, agent: sealAgent, ...out.seal })
                     .catch(err => logger.warn(LOG, 'seal after commit failed (the entity is saved)', err.message))
             }
-            if (out.after !== undefined) await sessions.setAgentState({ sessionId, userId: user._id, agent, state: out.after })
+            // AFTER the seal, which clears the state itself — the desk's `after` is what stands once it has. The entity
+            // exists by now, so a failed state write is logged and SAID (`stateWritten: false`), never answered as a
+            // failure: a 500 here invites the retry that saves the same work twice (phase 8a bug hunt #4).
+            if (out.after !== undefined) {
+                try {
+                    await sessions.setAgentState({ sessionId, userId: user._id, agent, state: out.after })
+                } catch (err) {
+                    logger.error(LOG, 'state write after a commit failed (the entity is saved)', { agent, action, error: err.message })
+                    return { result: out.result ?? {}, stateWritten: false }
+                }
+            }
             return { result: out.result ?? {} }
         })
     }
