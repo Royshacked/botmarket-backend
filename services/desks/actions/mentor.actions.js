@@ -111,6 +111,9 @@ export function makeMentorActions({ commit = defaultCommit } = {}) {
 
 export const mentorActions = makeMentorActions()
 
+// What rides on Mentor's draft beside the plan, and is the session's to keep (mentor.agent.service's carrier).
+const CARRIED = ['build', 'spans', 'entries', 'summary']
+
 /**
  * A direct edit (K3): the user changed the draft by hand. Re-judged by the same verdict a turn and the validate
  * route use, so the gate and readiness the surface draws from stay true. `{ state }` or `{ reason }`.
@@ -125,6 +128,10 @@ export const mentorActions = makeMentorActions()
  * 8b). Mentor's table is cleared first — the other names, the coverage, the gate — and so are its markers
  * (`dropMarkers`): kept, an `editing` marker would make the next Update write someone else's plan onto the setup I
  * was editing. The client asks before replacing work Mentor holds.
+ *
+ * WHAT IS STORED IS THE SERVER'S COPY (phase 8b CR): the plan as normalizeSetup reads it, plus what rides on the
+ * draft beside the plan — the ledger, the span and entry tables a gate put up, the summary — taken from the session,
+ * never from the client. A hand edit is of the plan's fields; anything else the client sent is not kept.
  */
 export function mentorApplyEdit(state, edit = {}) {
     const fresh = edit.fresh === true
@@ -133,9 +140,10 @@ export function mentorApplyEdit(state, edit = {}) {
     if (!edit.draft || typeof edit.draft !== 'object' || Array.isArray(edit.draft)) return { reason: 'invalid_setup' }
     const base = fresh ? { ...emptyMentorState(), drafts: {}, view: { gate: null, readiness: null, setups: null } } : state
     const { build: _theirs, ...fields } = edit.draft   // eslint-disable-line no-unused-vars -- dropped on purpose
-    const draft = base.draft?.build ? { ...fields, build: base.draft.build } : fields
-    const verdict = draftVerdict(draft, parseIdeaAccounts(edit.accounts).length > 0)
+    const carried = Object.fromEntries(CARRIED.filter(k => base.draft?.[k] != null).map(k => [k, base.draft[k]]))
+    const verdict = draftVerdict({ ...fields, ...(carried.build ? { build: carried.build } : {}) }, parseIdeaAccounts(edit.accounts).length > 0)
     if (!verdict) return { reason: 'invalid_setup' }
+    const draft = { ...verdict.setup, ...carried }
     return {
         state: {
             ...base,

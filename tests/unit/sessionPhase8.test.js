@@ -181,11 +181,23 @@ test('a hand edit to the draft is re-judged — readiness and gate recomputed �
     const out = await edit({ draft: DRAFT, accounts: ACCOUNTS })
     assert.deepEqual(out, { ok: true, rev: await rev() })
     const st = await stateOf()
-    assert.deepEqual(st.draft.target_legs, [{ price: 246 }])
+    // Stored as the server reads it (normalised), not the client's raw copy.
+    assert.deepEqual(st.draft.target_legs.map(l => l.price), [246])
     assert.equal(st.view.readiness.ready, true)
     assert.deepEqual(st.editing, EDITING.editing)
     assert.deepEqual(await edit({ draft: 'nonsense' }), { reason: 'invalid_setup' })
     assert.deepEqual(await edit({}), { reason: 'invalid_edit' })
+})
+
+test('a hand edit keeps only the plan: stray fields are dropped, the gate tables stay the session\'s', async () => {
+    const SPANS = [{ id: 'sp1', label: 'the 15m pullback' }]
+    const r = rig({ state: { draft: { ...DRAFT, spans: SPANS, summary: 'ours' }, coverage: [], view: { gate: null, readiness: null } } })
+    const { edit, stateOf } = await r.start(user)
+    await edit({ draft: { ...DRAFT, spans: [{ id: 'forged' }], summary: 'theirs', junk: 'x'.repeat(50) }, accounts: ACCOUNTS })
+    const st = await stateOf()
+    assert.equal('junk' in st.draft, false)
+    assert.deepEqual(st.draft.spans, SPANS)
+    assert.equal(st.draft.summary, 'ours')
 })
 
 test('a hand edit never rewrites the build ledger — the session\'s is kept, the client\'s dropped', () => {
