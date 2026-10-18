@@ -135,9 +135,8 @@ export function makeSessionService({ getDb = _defaultGetDb, events = silentEvent
      * Append one message to an ACTIVE session. The seq is claimed atomically on the header
      * (findOneAndUpdate $inc), so two writers can never take the same number — the unique
      * {sessionId, seq} index would refuse it anyway. An archived session is read-only: `{ reason }`.
-     * `live` rides only the pushed frame, never the stored row — a card row's card view (plan phase 7, J3).
      */
-    async function append({ sessionId, userId, message, live = null }) {
+    async function append({ sessionId, userId, message }) {
         const parsed = toTimelineMessage(message)
         if (parsed.error) return { reason: 'invalid_message', error: parsed.error }
         const db  = await getDb()
@@ -153,7 +152,7 @@ export function makeSessionService({ getDb = _defaultGetDb, events = silentEvent
         const row = { sessionId: String(sessionId), seq, ...parsed.message }
         await db.collection(MESSAGES).insertOne(row)
         const stored = stripId(row)
-        events.message(String(userId), String(sessionId), live ? { ...stored, ...live } : stored)
+        events.message(String(userId), String(sessionId), stored)
         return { message: stored }
     }
 

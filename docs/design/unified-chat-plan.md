@@ -646,6 +646,15 @@ asks) · the mirror keeps post order per user (mirrorInOrder) · one timestamp f
 Themis gained test seams (`_setDeps`; Themis `post`). Carried to phase 7: the review card's "next review <date>" line
 reads its payload, which message_resolved does not carry.
 
+**REVERTED (Roy, 2026-10-18) — H2 overturned: desk cards are NOT mirrored into the session.** Review notifications
+(and every desk card) live, and are acted on, in the social chat only, as before the unified chat. Removed: the
+`onCardPosted` hook, `services/sessionCards.js` (mirror, `cardAction`, `hydrateCards`), `cardsById`, append's `live`,
+the `card` message kind; frontend: the timeline's card row, `useSession.resolveCard`, the reducer's
+`message_resolved`. KEPT (the social chat uses them): Themis on `postCard`, the supersede and portfolio-review
+`message_resolved` frames (`tests/unit/cardResolveFrames.test.js`). Card rows already written to `session_messages`
+fall through as plain text and are in no agent's context; delete them with
+`db.session_messages.deleteMany({ kind: 'card' })` (axl_dev only — prod never had the branch).
+
 ## 9. Phase 7 — Frontend: session client + timeline
 
 - **`services/session/session.service.remote.js`** replaces `threads.service.remote.js`.

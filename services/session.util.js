@@ -17,7 +17,7 @@ export const ADMIN_SCOPES = Object.freeze(['strategy', 'aether'])
 export const SESSION_AGENTS = AGENT_KEYS
 
 /** What a timeline message is (unified-chat.md §3.1). */
-export const MESSAGE_KINDS = Object.freeze(['msg', 'handoff', 'decision', 'card', 'sealed'])
+export const MESSAGE_KINDS = Object.freeze(['msg', 'handoff', 'decision', 'sealed'])
 
 /** The entities an agent's context can be sealed onto (unified-chat.md §6.2) — what the desks' work produces. */
 export const CONTEXT_KINDS = ENTITY_KINDS

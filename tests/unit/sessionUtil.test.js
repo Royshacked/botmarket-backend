@@ -61,7 +61,7 @@ test('an agentâ€™s segment is its own turns and the hand-offs addressed to it â€
     assert.deepEqual(segmentOf(timeline, 'scanner').map(m => m.content), ['Scan semis', '8 names', 'Cover these'])
     assert.deepEqual(segmentOf(timeline, 'portfolio').map(m => m.content), ['growth, mid-cap', 'mandate drafted', 'Scan semis'])
     assert.deepEqual(segmentOf(timeline, 'analyst').map(m => m.content), ['Cover these'])
-    // A background card is shown to the user; it is not part of any agent's conversation.
+    // A card row left from the reverted card mirror (2026-10-18) is part of no agent's conversation.
     assert.deepEqual(segmentOf(timeline, 'mentor'), [])
     assert.deepEqual(segmentOf(null, 'axl'), [])
 })

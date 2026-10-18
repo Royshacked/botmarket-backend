@@ -5,13 +5,12 @@ import { makeSessionService } from '../../services/session.service.js'
 import { makeChainRunner } from '../../services/chain/runner.js'
 import { replyExtras, showLine } from '../../services/desks/sessionTurn.js'
 import { findForEdit } from '../../services/desks/entityLookup.js'
-import { hydrateCards, cardView } from '../../services/sessionCards.js'
 import { replay } from '../../services/sessionChannel.js'
 import { briefTurn } from '../../services/desks/axl.desk.js'
 import { splitShow, validateShow } from '../../services/routing.util.js'
 import { buildSurfaceSection } from '../../services/agents/axl.agent.service.js'
 
-// Unified-chat phase 7a (J2–J4): a reply keeps what it offered; card rows are drawn from the card; the
+// Unified-chat phase 7a (J2–J4): a reply keeps what it offered; the
 // server acts on what Axl's route carries — the opening, an edit, the brief; the order ticket is a show.
 
 const user = { _id: 'u1', role: 'trader' }
@@ -121,48 +120,6 @@ test('findForEdit: an id first, then a name that matches EXACTLY one item — tw
     assert.deepEqual(await findForEdit({ kind: 'setup', ref: '', user }, { lookups, byName: names }), { ok: false, reason: 'not_editable' })
 })
 
-// ─── J3: card rows drawn from the card ────────────────────────────────────────
-
-test('hydrateCards: one read for every card row; a missing card reads null; other rows untouched', async () => {
-    const reads = []
-    const store = new Map([['m1', { id: 'm1', payload: { a: 1 }, actions: { primary: {} }, status: 'pending', resolveOutcome: null, resolveNote: null, content: 'x' }]])
-    const read = async (ids) => { reads.push(ids); return store }
-    const input = [
-        { seq: 1, kind: 'msg', content: 'hi' },
-        { seq: 2, kind: 'card', ref: { msgId: 'm1', conversationId: 'c1' } },
-        { seq: 3, kind: 'card', ref: { msgId: 'gone', conversationId: 'c1' } },
-    ]
-    const out = await hydrateCards(input, read)
-    assert.deepEqual(reads, [[{ msgId: 'm1', conversationId: 'c1' }, { msgId: 'gone', conversationId: 'c1' }]])
-    assert.deepEqual(out[0], input[0])
-    assert.deepEqual(out[1].card, { payload: { a: 1 }, actions: { primary: {} }, status: 'pending', resolveOutcome: null, resolveNote: null })
-    assert.equal(out[2].card, null)
-    assert.deepEqual(await hydrateCards([{ kind: 'msg' }], async () => { throw new Error('no read for no cards') }), [{ kind: 'msg' }])
-    assert.equal(cardView(null), null)
-})
-
-test('the reconnect replay hydrates its card rows', async () => {
-    const { db } = memDb()
-    const sessions = makeSessionService({ getDb: async () => db })
-    const s = await sessions.getActive({ userId: 'u1' })
-    await sessions.append({ sessionId: s.sessionId, userId: 'u1', message: { agent: 'mentor', role: 'assistant', kind: 'card', content: 'hit', ref: { msgId: 'm1' } } })
-    const sent = []
-    await replay({ userId: 'u1', data: { sessionId: s.sessionId }, reply: (event, data) => sent.push({ event, data }) }, sessions,
-        (msgs) => hydrateCards(msgs, async () => new Map([['m1', { status: 'done' }]])))
-    assert.equal(sent[0].event, 'session_replay')
-    assert.equal(sent[0].data.messages[0].card.status, 'done')
-})
-
-test('append: a live extra rides the pushed frame only — the stored row stays a reference', async () => {
-    const { db, rows: raw } = memDb()
-    const frames = []
-    const sessions = makeSessionService({ getDb: async () => db, events: { message: (u, sid, m) => frames.push(m), removed() {}, state() {} } })
-    const s = await sessions.getActive({ userId: 'u1' })
-    await sessions.append({ sessionId: s.sessionId, userId: 'u1', live: { card: { status: 'pending' } }, message: { agent: 'mentor', role: 'assistant', kind: 'card', content: 'hit', ref: { msgId: 'm1' } } })
-    assert.deepEqual(frames.at(-1).card, { status: 'pending' })
-    assert.equal('card' in raw('session_messages')[0], false)
-})
-
 // ─── J4: the brief; the ticket ────────────────────────────────────────────────
 
 test('the brief as Axl’s turn: the status chip, the whole text as one token, the reply; stopped → nothing', async () => {
@@ -246,7 +203,7 @@ test('the reconnect replay carries the chain and the agents’ states', async ()
     await sessions.setChain({ sessionId: s.sessionId, userId: 'u1', chain: { id: 'c1', status: 'awaiting', awaiting: { agent: 'axl', choices: ['continue'] } } })
     await sessions.setAgentState({ sessionId: s.sessionId, userId: 'u1', agent: 'mentor', state: { draft: 1 } })
     const sent = []
-    await replay({ userId: 'u1', data: { sessionId: s.sessionId }, reply: (event, data) => sent.push(data) }, sessions, async (m) => m)
+    await replay({ userId: 'u1', data: { sessionId: s.sessionId }, reply: (event, data) => sent.push(data) }, sessions)
     assert.deepEqual(sent[0].chain, { id: 'c1', status: 'awaiting', awaiting: { agent: 'axl', choices: ['continue'] } })
     assert.deepEqual(sent[0].agentState.mentor, { draft: 1 })
 })

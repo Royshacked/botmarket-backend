@@ -303,26 +303,6 @@ export async function postBotCard({ userId, content, type = 'text', payload = nu
 }
 
 /**
- * Cards by message id, for the session timeline's card rows (plan phase 7, J3) — one read. Keyed by
- * conversation AND id: the conversation leads so the read rides the {conversationId, …} indexes (there is no
- * index on `id` alone, and this collection only grows), and it scopes the read to conversations the session's
- * own card rows name. @param {{ msgId: string, conversationId: string }[]} refs
- * @returns {Promise<Map<string, object>>} id → stored card
- */
-export async function cardsById(refs) {
-    const ok    = (refs ?? []).filter(r => r?.msgId && r?.conversationId)
-    const ids   = [...new Set(ok.map(r => String(r.msgId)))]
-    const convs = [...new Set(ok.map(r => String(r.conversationId)))]
-    if (!ids.length) return new Map()
-    const db   = await _db()
-    const rows = await db.collection(MSGS).find(
-        { conversationId: { $in: convs }, id: { $in: ids } },
-        { projection: { _id: 0, id: 1, payload: 1, actions: 1, status: 1, resolveOutcome: 1, resolveNote: 1 } },
-    ).toArray()
-    return new Map(rows.map(r => [r.id, r]))
-}
-
-/**
  * Retire the pending card(s) this one replaces. Internal to the post path (exported for tests) — nothing else may mark
  * a card superseded, because "a fresher card exists" is only knowable here.
  *

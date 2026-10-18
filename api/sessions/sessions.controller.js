@@ -13,7 +13,6 @@ import { sealing } from '../../services/desks/seal.js'
 import { withSessionLock } from '../../services/desks/turnLock.js'
 import { deskAct } from '../../services/desks/act.js'
 import { DESK_DEFS } from '../../services/desks/index.js'
-import { hydrateCards } from '../../services/sessionCards.js'
 import { parseIdeaAccounts, parseClientTime } from '../_shared/parse.util.js'
 import { makeHandle } from '../_shared/handle.util.js'
 import { httpError }  from '../../services/httpError.util.js'
@@ -160,5 +159,5 @@ export const getSessionMessages = handle('getSessionMessages', async (req, res) 
         limit:     req.query?.limit,
     })
     if (!messages) throw httpError(404, 'Session not found')
-    res.json({ messages: await hydrateCards(messages) })
+    res.json({ messages })
 })

@@ -119,7 +119,7 @@ test('messagesForAgent reads only the agent’s rows and the hand-offs addressed
         { agent: 'axl', role: 'user', content: 'a' },
         { agent: 'portfolio', role: 'assistant', kind: 'handoff', content: 'scan this', to: 'scanner' },
         { agent: 'scanner', role: 'assistant', content: 'b' },
-        { agent: 'mentor', role: 'assistant', kind: 'card', content: 'filled' },
+        { agent: 'mentor', role: 'assistant', content: 'filled' },
     ]) await sessions.append({ sessionId: s.sessionId, userId: 'u1', message: m })
     const rows = await sessions.messagesForAgent({ sessionId: s.sessionId, userId: 'u1', agent: 'scanner' })
     assert.deepEqual(rows.map(r => r.content), ['scan this', 'b'])
