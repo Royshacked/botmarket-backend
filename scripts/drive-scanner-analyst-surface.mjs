@@ -47,14 +47,14 @@ async function ensureUser() {
     return u.id
 }
 
-// A commit ENDS the session (Roy, 2026-10-18): the old one archived, a new one open with the saved line above Axl's
+// A commit ENDS the session (Roy, 2026-10-18): the old one not kept (resolved), a new one open with the saved line above Axl's
 // greeting, the pane closed. `sid` moves to the new one — the steps after seed it.
 const sessionsMade = new Set()
 async function endedHere(page, userId) {
     const next = (await sessionService.getActive({ userId }))?.sessionId
     const old  = await sessionService.get({ sessionId: sid, userId })
     const line = await page.locator('.chat-timeline__ended').innerText().catch(() => '')
-    const ok = !!next && next !== sid && old?.status === 'archived' && /back with Axl/.test(line) && (await pane(page).count()) === 0
+    const ok = !!next && next !== sid && !old && /back with Axl/.test(line) && (await pane(page).count()) === 0
     if (next) { sid = next; sessionsMade.add(next) }
     return ok
 }

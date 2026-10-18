@@ -151,6 +151,15 @@ export const editSessionState = handle('editSessionState', async (req, res) => {
     res.json({ ok: true, rev: out.rev })
 })
 
+// History's delete (Roy, 2026-10-18): an ARCHIVED session and its rows. The live one ends with "New session".
+export const deleteSession = handle('deleteSession', async (req, res) => {
+    const out = await sessionService.remove({ sessionId: req.params.id, userId: req.user._id })
+    if (out.reason) {
+        return sendReason(res, out.reason, { overrides: { active_session: [409, 'This is the live session — start a new one to put it away'] } })
+    }
+    res.json({ ok: true })
+})
+
 export const getSessionMessages = handle('getSessionMessages', async (req, res) => {
     const messages = await sessionService.messagesSince({
         sessionId: req.params.id,

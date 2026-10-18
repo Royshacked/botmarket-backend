@@ -99,17 +99,20 @@ export function makeSessionService({ getDb = _defaultGetDb, events = silentEvent
      * NOTHING THE USER SAID → NOT SAVED (Roy, 2026-10-18): a session with no message of theirs would sit in History as
      * "Untitled" — a card pressed and saved, a reopen looked at — and means nothing to keep. It is deleted, not archived.
      * The work it touched keeps its own record (the entity and its sealed context).
+     *
+     * `discard`: a RESOLVED session — a commit saved its work, and the conversation is on the entity it produced
+     * (unified-chat.md §6.2) — is not kept either (Roy, 2026-10-18). History is what ended WITHOUT a save.
      */
-    async function startNew({ userId, scope = 'main', force = false }) {
+    async function startNew({ userId, scope = 'main', force = false, discard = false }) {
         if (!isScope(scope)) return null
         const db  = await getDb()
         const uid = String(userId)
         const current = await db.collection(SESSIONS).findOne({ userId: uid, scope, status: 'active' })
         if (current && (current.seq > 0 || force)) {
-            const said  = await db.collection(MESSAGES)
+            const said  = discard ? [] : await db.collection(MESSAGES)
                 .find({ sessionId: current.sessionId, role: 'user' }).sort({ seq: 1 }).limit(20).toArray()
             const title = current.title ?? sessionTitle(said)
-            if (title === UNTITLED) {
+            if (discard || title === UNTITLED) {
                 await db.collection(MESSAGES).deleteMany({ sessionId: current.sessionId })
                 await db.collection(SESSIONS).deleteOne({ sessionId: current.sessionId, userId: uid, status: 'active' })
             } else {
@@ -124,6 +127,21 @@ export function makeSessionService({ getDb = _defaultGetDb, events = silentEvent
         // Every open screen moves to the new session together — a phone and a laptop never sit in two.
         if (current && next && current.sessionId !== next.sessionId) events.state(uid, current.sessionId, { archived: true, next: next.sessionId })
         return next
+    }
+
+    /**
+     * Delete one ARCHIVED session and its rows (History's delete — Roy, 2026-10-18). The live session is not deleted
+     * here (`active_session`): "New session" is how it ends. The entities it produced keep their own records.
+     * @returns {Promise<{ ok: true } | { reason: 'not_found' | 'active_session' }>}
+     */
+    async function remove({ sessionId, userId }) {
+        const db = await getDb()
+        const s  = await db.collection(SESSIONS).findOne({ sessionId: String(sessionId), userId: String(userId) }, { projection: { _id: 0, status: 1 } })
+        if (!s) return { reason: 'not_found' }
+        if (s.status === 'active') return { reason: 'active_session' }
+        await db.collection(MESSAGES).deleteMany({ sessionId: String(sessionId) })
+        await db.collection(SESSIONS).deleteOne({ sessionId: String(sessionId), userId: String(userId), status: 'archived' })
+        return { ok: true }
     }
 
     /** History: the user's sessions in a scope, newest first, headers only. */
@@ -337,7 +355,7 @@ export function makeSessionService({ getDb = _defaultGetDb, events = silentEvent
         return r.matchedCount ? { ok: true } : { reason: 'not_found' }
     }
 
-    return { ensureIndexes, getActive, findActive, startNew, list, get, append, messagesSince, messagesForAgent, allMessagesSince, removeMessages, setAgentState, setSealedThrough, setChain, findRunningChains, setFloor, setSummary, addLink }
+    return { ensureIndexes, getActive, findActive, startNew, list, remove, get, append, messagesSince, messagesForAgent, allMessagesSince, removeMessages, setAgentState, setSealedThrough, setChain, findRunningChains, setFloor, setSummary, addLink }
 }
 
 export const sessionService = makeSessionService({ events: sessionEvents })

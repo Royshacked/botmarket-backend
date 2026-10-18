@@ -1287,6 +1287,11 @@ five drives in a row exhaust it; wait the window out (touching a file did not re
 Drives after all of it: mentor-surface 14/14, portfolio-surface 14/14, scanner-analyst 13/13, pane-tabs 12/12, doorways
 21/21, live-mentor 9/9 (real turns). The surface drives wait for the server's NEW session before checking a commit — a
 session a commit opened starts with an ended line, which an "an ended line is on screen" wait passed on too early.
+**Then (Roy, same day):** a commit's session is RESOLVED, not kept — its talk is sealed onto the entity (§6.2), so
+`endAfterCommit` deletes it (`startNew({ discard })`) and its timeline is left untouched on the way out (`keepTimeline`,
+no detour through the desk's sealed line). History holds only what ended WITHOUT a save ("New session"), and never a
+session the user said nothing in ("Untitled" — deleted; the 24 already there were deleted on axl_dev). History rows
+have a Delete (`DELETE /api/sessions/:id`, archived only — the live one is 409).
 **Carried:** Mentor's "Arm it / Leave it waiting" step in the pane is unreachable now (the session ends at Generate) —
 remove it, and its `arm` / `leave` actions, in a follow-up.
 

@@ -23,15 +23,15 @@ const desk = (agent = 'mentor') => ({
 const rigFor = (agent = 'mentor', state = { draft: { asset: 'NVDA' } }) => makeActRig({ agent, desk: desk(agent), state, midChain: false })
 const say = (r, s, content = 'Build me an NVDA long') => r.sessions.append({ sessionId: s.sessionId, userId: 'u1', message: { agent: 'mentor', role: 'user', content } })
 
-test('a save archives the session — titled by what the user said — and opens a fresh one: Axl, a line saying what was saved', async () => {
+test('a save RESOLVES the session — not kept, even one the user spoke in (its talk is on the entity) — and opens a fresh one: Axl, a line saying what was saved', async () => {
     const r = rigFor()
     const { s, press } = await r.start(user)
     await say(r, s)
     const out = await press('generate')
     assert.ok(out.result.nextSessionId && out.result.nextSessionId !== s.sessionId)
-    const old = await r.sessions.get({ sessionId: s.sessionId, userId: 'u1' })
-    assert.equal(old.status, 'archived')
-    assert.equal(old.title, 'Build me an NVDA long')
+    assert.equal(await r.sessions.get({ sessionId: s.sessionId, userId: 'u1' }), null, 'not archived — deleted')
+    assert.equal(await r.sessions.messagesSince({ sessionId: s.sessionId, userId: 'u1' }), null, 'its rows went with it')
+    assert.deepEqual((await r.sessions.list({ userId: 'u1' })).map(x => x.status), ['active'], 'History holds nothing from it')
     const next = await r.sessions.getActive({ userId: 'u1' })
     assert.equal(next.sessionId, out.result.nextSessionId)
     assert.equal(next.floor ?? 'axl', 'axl', 'the new session is Axl\'s')
@@ -39,7 +39,30 @@ test('a save archives the session — titled by what the user said — and opens
     assert.equal(line.agent, 'axl')
     assert.equal(line.kind, 'sealed')
     assert.equal(line.content, '✓ Mentor built NVDA setup — saved to your Setups. You\'re back with Axl.')
-    assert.deepEqual(line.ref, { kind: 'setup', ids: ['s1'], ended: true, from: s.sessionId })
+    assert.deepEqual(line.ref, { kind: 'setup', ids: ['s1'], ended: true })
+})
+
+test('"New session" over a session the user spoke in still FILES it — History is what ended without a save', async () => {
+    const r = rigFor()
+    const { s } = await r.start(user)
+    await say(r, s, 'What moved oil today?')
+    await r.sessions.startNew({ userId: 'u1' })
+    const old = await r.sessions.get({ sessionId: s.sessionId, userId: 'u1' })
+    assert.equal(old.status, 'archived')
+    assert.equal(old.title, 'What moved oil today?')
+})
+
+test('History\'s delete: an archived session goes with its rows; the live one and someone else\'s are refused', async () => {
+    const r = rigFor()
+    const { s } = await r.start(user)
+    await say(r, s, 'What moved oil today?')
+    const live = await r.sessions.startNew({ userId: 'u1' })
+    assert.deepEqual(await r.sessions.remove({ sessionId: live.sessionId, userId: 'u1' }), { reason: 'active_session' })
+    assert.deepEqual(await r.sessions.remove({ sessionId: s.sessionId, userId: 'u2' }), { reason: 'not_found' }, 'owner-scoped')
+    assert.deepEqual(await r.sessions.remove({ sessionId: s.sessionId, userId: 'u1' }), { ok: true })
+    assert.equal(await r.sessions.get({ sessionId: s.sessionId, userId: 'u1' }), null)
+    assert.equal(await r.sessions.messagesSince({ sessionId: s.sessionId, userId: 'u1' }), null)
+    assert.deepEqual(await r.sessions.remove({ sessionId: s.sessionId, userId: 'u1' }), { reason: 'not_found' })
 })
 
 test('a session the user said NOTHING in is not kept — deleted, never "Untitled" in History; the new one still opens', async () => {

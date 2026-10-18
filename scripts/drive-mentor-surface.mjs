@@ -143,7 +143,7 @@ try {
         const next = await sessionService.getActive({ userId })
         await shot(page, '04-generated')
         check('Generate saved the setup from the session', !!made, `setup ${made}`)
-        check('…and the session ended: a new one, the old one archived', next?.sessionId !== sid && (await sessionService.get({ sessionId: sid, userId }))?.status === 'archived')
+        check('…and the session ended: a new one, the old one not kept (resolved — its talk is on the setup)', next?.sessionId !== sid && !(await sessionService.get({ sessionId: sid, userId })))
         check('the chat is back with Axl — the saved line above his greeting', /back with Axl/.test(await page.locator('.chat-timeline__ended').innerText().catch(() => '')) && /What would you like to do\?/.test(await page.locator('.chat-timeline').innerText()))
         check('…and Mentor\'s pane closed', (await pane(page).count()) === 0)
         sid = next?.sessionId ?? sid

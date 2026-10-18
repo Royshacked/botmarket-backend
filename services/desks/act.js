@@ -55,9 +55,10 @@ export function makeAct({ sessions = sessionService, desks = DESK_DEFS, sealing 
 
     /**
      * A COMMIT ENDS THE SESSION (Roy, 2026-10-18). Saving the work — Generate, Update, Initiate, Accept, Publish — is the
-     * end of that piece of work: the session is archived (History keeps it, with its sealed line) and a fresh one opens
-     * with Axl, its first line saying what was saved, so the user sees they are back at the start. Every open screen
-     * follows (startNew's `archived → next` frame).
+     * end of that piece of work, and the session is RESOLVED: its conversation is sealed onto the entity (§6.2), so the
+     * session itself is not kept (`discard` — History holds what ended WITHOUT a save). A fresh one opens with Axl, its
+     * first line saying what was saved, so the user sees they are back at the start. Every open screen follows
+     * (startNew's `archived → next` frame).
      *
      * Not mid-chain: while a chain runs, a save by a desk the chain went THROUGH (Argus's list, Prometheus's coverage on
      * Atlas's errand) keeps the session — the chain ends it, when the desk that started it commits (`endsSession`).
@@ -65,13 +66,13 @@ export function makeAct({ sessions = sessionService, desks = DESK_DEFS, sealing 
      * @returns {Promise<string|null>} the new session's id, or null when the session goes on
      */
     async function endAfterCommit({ user, session, agent, seal }) {
-        const next = await sessions.startNew({ userId: user._id, scope: session.scope ?? 'main', force: true })
+        const next = await sessions.startNew({ userId: user._id, scope: session.scope ?? 'main', force: true, discard: true })
         if (!next?.sessionId || next.sessionId === session.sessionId) return null
         const ids = (seal.entityIds ?? []).filter(Boolean).map(String)
         await sessions.append({ sessionId: next.sessionId, userId: user._id, message: {
             agent: 'axl', role: 'assistant', kind: 'sealed',
             content: `✓ ${sealLabel({ agent, kind: seal.kind, ids, name: seal.name ?? null })} — saved${WHERE[seal.kind] ?? ''}. You're back with Axl.`,
-            ref: { kind: seal.kind, ids, ended: true, from: session.sessionId },
+            ref: { kind: seal.kind, ids, ended: true },
         } })
         return next.sessionId
     }
