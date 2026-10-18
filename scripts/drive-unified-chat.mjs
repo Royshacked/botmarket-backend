@@ -9,8 +9,8 @@
 // Runs against the Vite dev server (:5173 — current source, /api and /ws proxied to :3030; the dev backend
 // does not serve public/). Uses the throwaway
 // `ui-smoke` user and starts it on a FRESH session (the old one is archived, which is also what the
-// history step reads). The card is posted from this process, so its live push goes nowhere — the page is
-// reloaded to see it, which is the reconnect replay path anyway.
+// history step reads). The card is posted from this process, and the page is reloaded to prove it did NOT
+// land in the timeline — desk cards live in the social chat.
 /* global document, window -- page.evaluate bodies run in the browser */
 import dns from 'dns'
 import 'dotenv/config'
@@ -26,7 +26,6 @@ const { userService } = await import('../api/user/user.service.js')
 const { getDb, closeDb } = await import('../providers/mongodb.provider.js')
 const { sessionService } = await import('../services/session.service.js')
 const { postBotCard, cardActions } = await import('../api/chat/chat.service.js')
-const { registerSessionCards } = await import('../services/sessionCards.js')
 
 async function ensureUser() {
     try { await userService.createUser(USER); console.log('qa user: created') }
@@ -118,26 +117,17 @@ try {
     await shot(page, '04-reloaded')
     check('reload restores the rows', rowsAfter > 0 && rowsAfter >= rowsBefore - 1, `${rowsBefore} → ${rowsAfter}`)
 
-    // ── 5. a background card lands in the chat, drawn by the card bubble; dismiss flips it ──
-    registerSessionCards()
+    // ── 5. a background card stays in the social chat — it is NOT mirrored into the timeline (reverted 2026-10-18) ──
+    const cardsBefore = await page.locator('.chat-timeline__card').count()
     const card = await postBotCard({ userId, botId: 'axl', type: 'market_brief_offer', content: 'Want today’s market brief?', payload: { day: new Date().toISOString().slice(0, 10) }, actions: cardActions('Show me') })
     await page.waitForTimeout(1500)
     await page.reload({ waitUntil: 'domcontentloaded' })
-    await page.locator('.chat-timeline__card').first().waitFor({ timeout: 15000 })
+    await page.locator('.chat-timeline__row').first().waitFor({ timeout: 15000 })
     await page.waitForTimeout(1000)
-    await shot(page, '05-card')
-    check('the card row is in the chat', (await page.locator('.chat-timeline__card').count()) > 0)
-    const dismiss = page.locator('.chat-timeline__card').last().getByRole('button', { name: /dismiss|not now|no thanks/i })
-    if (await dismiss.count()) {
-        await dismiss.first().click()
-        await page.waitForTimeout(2500)
-        const db = await getDb()
-        const stored = await db.collection('chat_messages').findOne({ id: card?.id }, { projection: { status: 1 } })
-        await shot(page, '06-card-dismissed')
-        check('dismissing it resolves the card', stored?.status === 'dismissed', `status: ${stored?.status}`)
-    } else {
-        check('the card offers a dismiss', false, 'no dismiss button found')
-    }
+    await shot(page, '05-card-not-mirrored')
+    check('the card is posted to the social chat', !!card?.id)
+    check('the card does not land in the timeline', (await page.locator('.chat-timeline__card').count()) === cardsBefore)
+    if (card?.id) await (await getDb()).collection('chat_messages').updateOne({ id: card.id }, { $set: { status: 'dismissed' } })
 
     // ── 6. New session files this one; History lists it, read-only ──
     await page.getByRole('button', { name: 'New session' }).click()

@@ -954,11 +954,9 @@ services/
                           store pushes session_message / session_removed / session_state on every change; a running
                           turn streams session_delta + session_turn (turnEmitter keeps its text so far); session_sync
                           { sessionId, afterSeq } is answered with a replay to the asking socket (chatWs.onClientEvent)
-  sessionCards.js         every desk CARD also lands in the user's live session as a REFERENCE row (msgId +
-                          conversation + subject + action) — hooked on chat.service onCardPosted; only an existing session
-                          in the agent's scope (Pythia → strategy); cardAction = the one table of what a card's button does;
-                          hydrateCards / cardView attach the card's payload+actions+state on every READ (messages route,
-                          replay) and on the live push (append's `live`) — never stored
+  sessionCards.js         READ side only: hydrateCards / cardView draw the card rows already in a timeline from the card
+                          store (messages route, replay). Desk cards are NOT mirrored into the session any more (phase 6's
+                          mirror reverted 2026-10-18 — cards live and are acted on in the social chat)
   agentContext.service.js  sealed agent context: `agent_contexts`, one row per {userId, kind, entityId,
                           agent} — an agent's conversation kept with the entity it produced (setup, scan,
                           coverage, portfolio, industry_view). Per user even on a house entity; a second

@@ -295,7 +295,6 @@ export async function postBotCard({ userId, content, type = 'text', payload = nu
         await _supersedePending(conv.id, type, cardSubject(payload), actions)
         const msg = await sendMessage(conv.id, bot, content, type, payload, actions, visibility, forUserId)
         await _deliver(String(userId), msg)
-        _notifyCardPosted({ userId: String(userId), botId: bot, msg })
         return msg
     } catch (err) {
         logger.error(LOG, 'postBotCard failed', err)
@@ -321,21 +320,6 @@ export async function cardsById(refs) {
         { projection: { _id: 0, id: 1, payload: 1, actions: 1, status: 1, resolveOutcome: 1, resolveNote: 1 } },
     ).toArray()
     return new Map(rows.map(r => [r.id, r]))
-}
-
-// ─── A card was posted (unified-chat plan phase 6) ───────────────────────────────
-// Every desk CARD also lands in the user's live session timeline — as a reference to this row
-// (services/sessionCards.js). Registered rather than imported, so the chat layer never depends on sessions.
-// Plain bot lines (`type: 'text'` — Axl's own replies here, the welcome) are not alerts and do not travel.
-// Fire-and-forget: a failure there never fails the post.
-let _cardPostedHook = null
-export function onCardPosted(fn) { _cardPostedHook = fn }
-
-export function _notifyCardPosted({ userId, botId, msg }) {
-    if (!_cardPostedHook || !msg || msg.type === 'text') return
-    Promise.resolve()
-        .then(() => _cardPostedHook({ userId, botId, msg }))
-        .catch(err => logger.warn(LOG, 'card → session mirror failed (the card is posted)', err.message))
 }
 
 /**
