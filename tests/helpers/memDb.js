@@ -1,7 +1,7 @@
 // A small in-memory Mongo — enough for the Pythia services' and the session store's tests. Supports:
 // equality (null also matching a missing field, as in Mongo) and `$ne` / `$in` / `$exists` / `$gt` / `$lt`
 // filters on dotted paths, and a top-level `$or`; multi-key sort; find().sort().limit().next/toArray; skip; findOne;
-// insertOne; deleteMany; updateMany; replaceOne and updateOne with upsert, $setOnInsert, $set (dotted), $inc and
+// insertOne; deleteOne; deleteMany; updateMany; replaceOne and updateOne with upsert, $setOnInsert, $set (dotted), $inc and
 // $push (one value, or $each/$position); findOneAndUpdate (returns the document AFTER); createIndex as
 // a no-op — unique indexes are NOT enforced. `rows(name)` exposes a collection's documents for assertions.
 
@@ -91,6 +91,7 @@ export function memDb() {
                 return structuredClone(doc)
             },
             deleteMany: async (q) => { const keep = rows.filter(r => !_match(r, q)); const n = rows.length - keep.length; rows.splice(0, rows.length, ...keep); return { deletedCount: n } },
+            deleteOne: async (q) => { const i = rows.findIndex(r => _match(r, q)); if (i >= 0) rows.splice(i, 1); return { deletedCount: i >= 0 ? 1 : 0 } },
             createIndex: async () => {},
         }
     }

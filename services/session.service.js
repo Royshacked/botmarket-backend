@@ -19,7 +19,7 @@
 
 import { getDb as _defaultGetDb, stripId } from '../providers/mongodb.provider.js'
 import { logger } from './logger.service.js'
-import { newSessionId, isScope, isAgent, toTimelineMessage, sessionTitle, segmentQuery } from './session.util.js'
+import { newSessionId, isScope, isAgent, toTimelineMessage, sessionTitle, segmentQuery, UNTITLED } from './session.util.js'
 import { sessionEvents, silentEvents } from './sessionEvents.js'
 
 const LOG       = '[session]'
@@ -95,6 +95,10 @@ export function makeSessionService({ getDb = _defaultGetDb, events = silentEvent
      * one. An active session with nothing in it is reused rather than archived empty: pressing New
      * twice must not fill the history with blank rows. `force` archives it anyway — a commit ends its session even
      * when the work was built by hand edits alone, with no message in it (act.endAfterCommit, 2026-10-18).
+     *
+     * NOTHING THE USER SAID → NOT SAVED (Roy, 2026-10-18): a session with no message of theirs would sit in History as
+     * "Untitled" — a card pressed and saved, a reopen looked at — and means nothing to keep. It is deleted, not archived.
+     * The work it touched keeps its own record (the entity and its sealed context).
      */
     async function startNew({ userId, scope = 'main', force = false }) {
         if (!isScope(scope)) return null
@@ -102,13 +106,19 @@ export function makeSessionService({ getDb = _defaultGetDb, events = silentEvent
         const uid = String(userId)
         const current = await db.collection(SESSIONS).findOne({ userId: uid, scope, status: 'active' })
         if (current && (current.seq > 0 || force)) {
-            const firstPage = await db.collection(MESSAGES)
-                .find({ sessionId: current.sessionId }).sort({ seq: 1 }).limit(20).toArray()
-            const now = Date.now()
-            await db.collection(SESSIONS).updateOne(
-                { sessionId: current.sessionId, userId: uid, status: 'active' },
-                { $set: { status: 'archived', archivedAt: now, updatedAt: now, title: current.title ?? sessionTitle(firstPage) } },
-            )
+            const said  = await db.collection(MESSAGES)
+                .find({ sessionId: current.sessionId, role: 'user' }).sort({ seq: 1 }).limit(20).toArray()
+            const title = current.title ?? sessionTitle(said)
+            if (title === UNTITLED) {
+                await db.collection(MESSAGES).deleteMany({ sessionId: current.sessionId })
+                await db.collection(SESSIONS).deleteOne({ sessionId: current.sessionId, userId: uid, status: 'active' })
+            } else {
+                const now = Date.now()
+                await db.collection(SESSIONS).updateOne(
+                    { sessionId: current.sessionId, userId: uid, status: 'active' },
+                    { $set: { status: 'archived', archivedAt: now, updatedAt: now, title } },
+                )
+            }
         }
         const next = await getActive({ userId, scope })
         // Every open screen moves to the new session together — a phone and a laptop never sit in two.

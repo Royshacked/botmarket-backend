@@ -19,14 +19,19 @@ const desk = (agent = 'mentor') => ({
     agent,
 })
 
-const rigFor = (agent = 'mentor', state = { draft: { asset: 'NVDA' } }) => makeActRig({ agent, desk: desk(agent), state })
+// Not mid-chain: these test the ENDING (the rig runs desks mid-chain by default, where a commit keeps the session).
+const rigFor = (agent = 'mentor', state = { draft: { asset: 'NVDA' } }) => makeActRig({ agent, desk: desk(agent), state, midChain: false })
+const say = (r, s, content = 'Build me an NVDA long') => r.sessions.append({ sessionId: s.sessionId, userId: 'u1', message: { agent: 'mentor', role: 'user', content } })
 
-test('a save archives the session and opens a fresh one — Axl, a line saying what was saved', async () => {
+test('a save archives the session — titled by what the user said — and opens a fresh one: Axl, a line saying what was saved', async () => {
     const r = rigFor()
     const { s, press } = await r.start(user)
+    await say(r, s)
     const out = await press('generate')
     assert.ok(out.result.nextSessionId && out.result.nextSessionId !== s.sessionId)
-    assert.equal((await r.sessions.get({ sessionId: s.sessionId, userId: 'u1' })).status, 'archived')
+    const old = await r.sessions.get({ sessionId: s.sessionId, userId: 'u1' })
+    assert.equal(old.status, 'archived')
+    assert.equal(old.title, 'Build me an NVDA long')
     const next = await r.sessions.getActive({ userId: 'u1' })
     assert.equal(next.sessionId, out.result.nextSessionId)
     assert.equal(next.floor ?? 'axl', 'axl', 'the new session is Axl\'s')
@@ -37,12 +42,36 @@ test('a save archives the session and opens a fresh one — Axl, a line saying w
     assert.deepEqual(line.ref, { kind: 'setup', ids: ['s1'], ended: true, from: s.sessionId })
 })
 
-test('a session with no message in it (the work was all hand edits) is still archived — never reused', async () => {
+test('a session the user said NOTHING in is not kept — deleted, never "Untitled" in History; the new one still opens', async () => {
     const r = rigFor()
     const { s, press } = await r.start(user)
-    assert.equal((await r.sessions.get({ sessionId: s.sessionId, userId: 'u1' })).seq ?? 0, 0)
+    await r.sessions.append({ sessionId: s.sessionId, userId: 'u1', message: { agent: 'mentor', role: 'assistant', kind: 'sealed', content: 'Mentor · NVDA setup' } })
     const out = await press('generate')
-    assert.notEqual(out.result.nextSessionId, s.sessionId)
+    assert.ok(out.result.nextSessionId && out.result.nextSessionId !== s.sessionId)
+    assert.equal(await r.sessions.get({ sessionId: s.sessionId, userId: 'u1' }), null)
+    assert.equal(await r.sessions.messagesSince({ sessionId: s.sessionId, userId: 'u1' }), null, 'its rows went with it')
+    assert.ok(!(await r.sessions.list({ userId: 'u1' })).some(x => x.title === 'Untitled'))
+})
+
+test('a commit that ends the session leaves its timeline as it was — the seal is told so; mid-chain it is not', async () => {
+    const r = rigFor()
+    const { s, press } = await r.start(user)
+    await say(r, s)
+    await press('generate')
+    assert.equal(r.seals.at(-1).keepTimeline, true)
+    const m = makeActRig({ agent: 'mentor', desk: desk('mentor'), state: { draft: { asset: 'NVDA' } } })   // mid-chain
+    const run = await m.start(user)
+    await run.press('generate')
+    assert.equal('keepTimeline' in m.seals.at(-1), false)
+})
+
+test('"New session" over a session the user said nothing in replaces it rather than filing it', async () => {
+    const r = rigFor()
+    const { s } = await r.start(user)
+    await r.sessions.append({ sessionId: s.sessionId, userId: 'u1', message: { agent: 'axl', role: 'assistant', content: 'Hello' } })
+    const next = await r.sessions.startNew({ userId: 'u1' })
+    assert.notEqual(next.sessionId, s.sessionId)
+    assert.equal(await r.sessions.get({ sessionId: s.sessionId, userId: 'u1' }), null)
 })
 
 test('a press that saves nothing (Later), or a refused save, leaves the session where it is', async () => {

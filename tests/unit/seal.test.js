@@ -51,6 +51,23 @@ test('a seal moves the agent’s turns onto the entity, keeps hand-offs, leaves 
     assert.equal(header.agentState.mentor, null)
 })
 
+test('keepTimeline (the session is ending): the turns go onto the entity and it is linked — the timeline and state are left alone', async () => {
+    const { sessions, contexts, seal } = rig()
+    const s = await sessions.getActive({ userId: 'u1' })
+    await chat(sessions, s.sessionId, [say('analyst', 'user', 'revise BAC'), say('analyst', 'assistant', 'PT 52, still a buy')])
+    await sessions.setAgentState({ sessionId: s.sessionId, userId: 'u1', agent: 'analyst', state: { draft: { symbol: 'BAC' } } })
+    const out = await seal.sealFromSession({ userId: 'u1', sessionId: s.sessionId, agent: 'analyst', kind: 'coverage', entityIds: ['cov_BAC'], name: 'BAC', keepTimeline: true })
+    assert.deepEqual(out, { sealed: 1, turns: 2, line: null })
+    const ctx = await contexts.load({ userId: 'u1', kind: 'coverage', entityId: 'cov_BAC', agent: 'analyst' })
+    assert.deepEqual(ctx.messages.map(m => m.content), ['revise BAC', 'PT 52, still a buy'])
+    // Nothing moved in the chat: no rows out, no "Prometheus wrote coverage on BAC" line before the session closes.
+    const left = await sessions.messagesSince({ sessionId: s.sessionId, userId: 'u1' })
+    assert.deepEqual(left.map(m => m.content), ['revise BAC', 'PT 52, still a buy'])
+    const header = await sessions.get({ sessionId: s.sessionId, userId: 'u1' })
+    assert.deepEqual(header.links.map(l => `${l.kind}:${l.id}`), ['coverage:cov_BAC'])
+    assert.deepEqual(header.agentState.analyst, { draft: { symbol: 'BAC' } }, 'the state is not cleared into a flash of an empty pane')
+})
+
 test('a second seal takes only the turns since the first, and appends to the same context on an edit', async () => {
     const { sessions, contexts, seal } = rig()
     const s = await sessions.getActive({ userId: 'u1' })

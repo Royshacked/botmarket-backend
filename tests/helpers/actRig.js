@@ -11,9 +11,13 @@ export const ADMIN  = Object.freeze({ _id: 'u1', role: 'admin' })
 export const TRADER = Object.freeze({ _id: 'u1', role: 'trader' })
 
 /**
- * @param {{ agent: string, desk: object, state?: object|null, scope?: string, sessions?: object, sealing?: object }} p
+ * `midChain` (the default): the session runs a chain another desk started, so a commit does NOT end it — a desk's tests
+ * are about what it saves and what it leaves on its table, which only stands while the session goes on. Since a commit
+ * ends the session (2026-10-18), the ending itself is tested on its own, with `midChain: false` (commitEndsSession).
+ * @param {{ agent: string, desk: object, state?: object|null, scope?: string, sessions?: object, sealing?: object,
+ *           midChain?: boolean }} p
  */
-export function makeActRig({ agent, desk, state = null, scope = 'main', sessions: given = null, sealing = null }) {
+export function makeActRig({ agent, desk, state = null, scope = 'main', sessions: given = null, sealing = null, midChain = true }) {
     const { db } = memDb()
     const sessions = given ?? makeSessionService({ getDb: async () => db })
     const seals = [], asides = []
@@ -32,6 +36,7 @@ export function makeActRig({ agent, desk, state = null, scope = 'main', sessions
         async start(user = ADMIN) {
             const s = await sessions.getActive({ userId: String(user._id), scope })
             if (state) await sessions.setAgentState({ sessionId: s.sessionId, userId: String(user._id), agent, state })
+            if (midChain) await sessions.setChain({ sessionId: s.sessionId, userId: String(user._id), chain: { id: 'rig_chain', status: 'running', origin: 'rig' } })
             const read  = () => sessions.get({ sessionId: s.sessionId, userId: String(user._id) })
             const rev   = async () => (await read())?.agentRev?.[agent] ?? 0
             return {

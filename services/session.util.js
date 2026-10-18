@@ -134,5 +134,8 @@ export function sessionTitle(messages = []) {
     const firstUser = Array.isArray(messages)
         ? messages.find(m => m && m.role === 'user' && typeof m.content === 'string' && m.content.trim())
         : null
-    return firstUser ? firstUser.content.trim().slice(0, 80) : 'Untitled'
+    return firstUser ? firstUser.content.trim().slice(0, 80) : UNTITLED
 }
+
+/** The title of a session the user said nothing in — one never kept (session.service startNew). */
+export const UNTITLED = 'Untitled'

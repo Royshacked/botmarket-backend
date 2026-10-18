@@ -44,7 +44,7 @@ export function makeSealing({ sessions = sessionService, contexts = agentContext
      * @param {{ userId: string, sessionId: string, agent: string, kind: string, entityIds: string[],
      *           name?: string, onlyIfEditing?: boolean }} p
      */
-    async function sealFromSession({ userId, sessionId, agent, kind, entityIds, name = null, onlyIfEditing = false }) {
+    async function sealFromSession({ userId, sessionId, agent, kind, entityIds, name = null, onlyIfEditing = false, keepTimeline = false }) {
         const ids = (Array.isArray(entityIds) ? entityIds : []).filter(Boolean).map(String)
         if (!ids.length || !deskOf(agent)) return { reason: 'invalid_seal' }
         const session = await sessions.get({ sessionId, userId })
@@ -63,6 +63,15 @@ export function makeSealing({ sessions = sessionService, contexts = agentContext
         const turns = segment.map(m => ({ role: contextRole(m, agent), content: m.content, at: m.at }))
         for (const entityId of ids) {
             await contexts.seal({ userId, kind, entityId, agent, messages: turns, summary, artifacts: [{ kind, id: entityId }] })
+        }
+
+        // THE SESSION IS ENDING with this commit (act.endAfterCommit — Roy, 2026-10-18): the turns are on the entity; the
+        // timeline is left exactly as the user saw it, so History reads it whole and titles it by their first message.
+        // Moving them out and putting a line in first was a visible detour — the chat collapsed onto "Prometheus wrote
+        // coverage on BAC" a second before the new session opened.
+        if (keepTimeline) {
+            for (const id of ids) await sessions.addLink({ sessionId, userId, link: { kind, id, agent } })
+            return { sealed: ids.length, turns: turns.length, line: null }
         }
 
         // The agent's OWN rows leave; hand-offs it received stay in the sender's segment.
