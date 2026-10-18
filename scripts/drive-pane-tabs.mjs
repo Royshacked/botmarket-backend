@@ -1,11 +1,11 @@
 // DRIVE THE PANE'S KEPT TABS AND THE TEARDOWN — in a real browser (unified-chat plan phase 8e).
 //
 // What 8e changed that only a browser shows: the chat column is ALWAYS the timeline (no desk tabs, no agent bar, no
-// crumb); Pythia and Aether open from the chat's header (admin) as side-pane tabs that stay MOUNTED — a half-typed
-// message survives the pane closing and another tab showing; and Discard throws a desk's unsaved work away (asked
-// first) and SETS ITS TURNS ASIDE — the seal point and the summary move past them, so they never seal onto Mentor's
-// next setup. No model call: nothing is sent to Pythia or Aether, and Mentor's draft and turns are seeded. (The order
-// ticket's kept mount is the same mechanism and is covered by SidePane.test — opening it takes Axl's <show>ticket.)
+// crumb); the side pane is about a third of the column and the header's toggle hides it and brings the same tab back;
+// and Discard throws a desk's unsaved work away (asked first) and SETS ITS TURNS ASIDE — the seal point and the summary
+// move past them, so they never seal onto Mentor's next setup. No model call: Mentor's draft and turns are seeded.
+// The admin's Pythia / Aether row under the header is OFF for now (Roy, 2026-10-18) — the drive checks it is gone; a
+// kept tab's mount (Pythia, Aether, the order ticket) is covered by SidePane.test.
 //
 //   node scripts/drive-pane-tabs.mjs [baseUrl] [outDir]
 //
@@ -80,34 +80,27 @@ try {
     // The timeline and the pane are the chat column's only content — no desk panel shares it.
     check('the chat column is the timeline and the pane, nothing else', (await page.locator('.workspace__chat > .chat-with-pane > .chat-timeline').count()) === 1 && (await page.locator('.workspace__chat .portfolio-panel').count()) === 0)
 
-    // ── 2. Pythia opens from the chat's header, as a pane tab ──
-    await page.getByRole('button', { name: 'Pythia', exact: true }).click()
-    await pane(page).waitFor({ timeout: 10000 }).catch(() => {})
-    await page.waitForTimeout(800)
-    await shot(page, '01-pythia')
-    check('Pythia opens in the side pane, beside the chat', (await pane(page).locator('.side-pane__tabs').innerText().catch(() => '')).includes('Pythia') && await page.locator('.chat-timeline').isVisible())
+    // ── 2. the admin's Pythia / Aether row under the chat header is OFF for now (Roy, 2026-10-18) ──
+    check('no Pythia or Aether button under the chat header', (await page.locator('.chat-timeline__desks').count()) === 0
+        && (await page.getByRole('button', { name: 'Pythia', exact: true }).count()) === 0 && (await page.getByRole('button', { name: 'Aether', exact: true }).count()) === 0)
 
-    // ── 3. a half-typed message survives the pane closing ──
-    const box = pane(page).locator('textarea').first()
-    await box.fill('Drive — a half-typed question for Pythia')
-    await pane(page).getByRole('button', { name: 'Close', exact: true }).click()
-    await page.waitForTimeout(500)
-    check('the pane closes', (await pane(page).count()) === 0)
-    await page.getByRole('button', { name: 'Pythia', exact: true }).click()
+    // ── 3. Mentor holds a draft (seeded, with its turns) → its surface opens beside the chat ──
+    for (const message of [
+        { agent: 'mentor', role: 'user', content: 'Drive — NVDA on a pullback?' },
+        { agent: 'mentor', role: 'assistant', content: 'Drive — here is an NVDA draft.' },
+    ]) await sessionService.append({ sessionId: sid, userId, message })
+    const before = await sessionService.get({ sessionId: sid, userId })
+    const v = draftVerdict(DRAFT, true)
+    await sessionService.setAgentState({ sessionId: sid, userId, agent: 'mentor', state: { active_asset: 'NVDA', draft: v.setup, coverage: [], drafts: {}, view: { gate: null, readiness: v.readiness, setups: null } } })
+    await sessionService.setFloor({ sessionId: sid, userId, agent: 'mentor' })
+    await page.reload({ waitUntil: 'domcontentloaded' })
+    await page.locator('.chat-timeline').waitFor({ timeout: 15000 })
+    await pane(page).waitFor({ timeout: 15000 }).catch(() => {})
     await page.waitForTimeout(800)
-    check('…and Pythia comes back with the half-typed message still there', (await pane(page).locator('textarea').first().inputValue().catch(() => '')) === 'Drive — a half-typed question for Pythia')
+    await shot(page, '01-mentor')
+    check('Mentor\'s surface opens beside the chat', /Mentor/.test(await pane(page).locator('.side-pane__tab.is-active').innerText().catch(() => '')) && await page.locator('.chat-timeline').isVisible())
 
-    // ── 4. Aether beside it; Pythia's tab and text are kept while Aether shows ──
-    await page.getByRole('button', { name: 'Aether', exact: true }).click()
-    await page.waitForTimeout(800)
-    await shot(page, '02-aether')
-    const tabs = await pane(page).locator('.side-pane__tabs').innerText().catch(() => '')
-    check('Aether opens as a second tab', /Aether/.test(tabs) && /Pythia/.test(tabs))
-    await pane(page).getByRole('tab', { name: 'Pythia' }).click()
-    await page.waitForTimeout(500)
-    check('back on Pythia, the message is still there', (await pane(page).locator('textarea').first().inputValue().catch(() => '')) === 'Drive — a half-typed question for Pythia')
-
-    // ── 4b. the chat keeps most of the width; the header's toggle hides the pane and brings the same tabs back ──
+    // ── 4. the chat keeps most of the width; the header's toggle hides the pane and brings the same tab back ──
     const widths = await page.evaluate(() => ({
         chat: document.querySelector('.chat-with-pane > .chat-timeline')?.getBoundingClientRect().width ?? 0,
         pane: document.querySelector('.side-pane--docked')?.getBoundingClientRect().width ?? 0,
@@ -119,21 +112,9 @@ try {
     await page.getByRole('button', { name: /^Show / }).click()
     await page.waitForTimeout(800)
     await shot(page, '02b-reshown')
-    const back = await pane(page).locator('.side-pane__tabs').innerText().catch(() => '')
-    check('"Show" brings back the same tabs, on the one that was showing', /Aether/.test(back) && /Pythia/.test(back) && /Pythia/.test(await pane(page).locator('.side-pane__tab.is-active').innerText().catch(() => '')), back.replace(/\s+/g, ' '))
-    check('…and Pythia\'s half-typed message survived the hide', (await pane(page).locator('textarea').first().inputValue().catch(() => '')) === 'Drive — a half-typed question for Pythia')
+    check('"Show" brings back Mentor\'s tab, with the draft still on it', /Mentor/.test(await pane(page).locator('.side-pane__tab.is-active').innerText().catch(() => '')) && /NVDA/.test(await pane(page).innerText().catch(() => '')))
 
     // ── 5. Discard: Mentor's unsaved draft thrown away, asked first — and its turns set aside ──
-    for (const message of [
-        { agent: 'mentor', role: 'user', content: 'Drive — NVDA on a pullback?' },
-        { agent: 'mentor', role: 'assistant', content: 'Drive — here is an NVDA draft.' },
-    ]) await sessionService.append({ sessionId: sid, userId, message })
-    const before = await sessionService.get({ sessionId: sid, userId })
-    const v = draftVerdict(DRAFT, true)
-    await sessionService.setAgentState({ sessionId: sid, userId, agent: 'mentor', state: { active_asset: 'NVDA', draft: v.setup, coverage: [], drafts: {}, view: { gate: null, readiness: v.readiness, setups: null } } })
-    await sessionService.setFloor({ sessionId: sid, userId, agent: 'mentor' })
-    await page.reload({ waitUntil: 'domcontentloaded' })
-    await page.locator('.chat-timeline').waitFor({ timeout: 15000 })
     await pane(page).getByRole('button', { name: 'Discard' }).waitFor({ timeout: 15000 }).catch(() => {})
     let asked = null
     page.once('dialog', d => { asked = d.message(); d.accept() })
