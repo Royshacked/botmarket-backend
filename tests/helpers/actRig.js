@@ -46,9 +46,16 @@ export function makeActRig({ agent, desk, state = null, scope = 'main', sessions
     }
 }
 
-/** A result without the revision the pipe answers with — for asserting a desk's result shape. */
+/**
+ * A result without what the PIPE adds — the revision, and the next session a commit opened (act.endAfterCommit, its
+ * own tests in commitEndsSession.test.js) — for asserting a desk's result shape.
+ */
 export const shapeOf = (out) => {
     if (!out || out.reason) return out
     const { rev: _rev, ...rest } = out   // eslint-disable-line no-unused-vars -- dropped on purpose
+    if (rest.result && 'nextSessionId' in rest.result) {
+        const { nextSessionId: _next, ...result } = rest.result   // eslint-disable-line no-unused-vars -- dropped on purpose
+        return { ...rest, result }
+    }
     return rest
 }

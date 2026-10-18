@@ -566,8 +566,28 @@ export function stripEmitTags(raw, tagNames) {
  * expect — another desk's, or one it emits only in a rare mode — survived into the stored reply as
  * raw markup. The suppressor already worked from the shared registry while streaming; the settled
  * reply now does too.
+ *
+ * And a reasoning model's channel debris (dropDebris): a house model (gpt-6-luna, 2026-10-18) intermittently answered
+ * "X\n\n(no final)\n\nX" — the marker line and the answer twice. The marker goes, and so does a paragraph that
+ * repeats the one before it word for word.
  */
 export function cleanReply(raw) {
     const unwrapped = String(raw ?? '').replace(/<ticker>([\s\S]*?)<\/ticker>/g, '$1')
-    return stripEmitTags(unwrapped, ALL_EMIT_TAGS).trim()
+    return dropDebris(stripEmitTags(unwrapped, ALL_EMIT_TAGS)).trim()
+}
+
+// A whole line that is only a channel marker — "(no final)", "(final)", "(no final answer)".
+const DEBRIS_LINE = /^[ \t]*\((?:no )?final(?: answer)?\)[ \t]*$/gim
+
+/** The marker lines out, then a paragraph identical to the one before it dropped. Prose is otherwise untouched. */
+export function dropDebris(text) {
+    const paras = String(text ?? '').replace(DEBRIS_LINE, '').split(/\n[ \t]*\n/)
+    const out = []
+    for (const p of paras) {
+        const key = p.trim()
+        if (!key) continue
+        if (out.length && out[out.length - 1].trim() === key) continue
+        out.push(p)
+    }
+    return out.join('\n\n')
 }

@@ -12,7 +12,6 @@
 // Runs against the Vite dev server (:5173, /api and /ws proxied to :3030) as the throwaway `ui-smoke` user, on a
 // FRESH session. Everything it makes is removed after: the book's ideas, its portfolio_books row and its sealed
 // conversation (agent_contexts), the adoption drafts, and the session itself.
-/* global document -- page.evaluate bodies run in the browser */
 import dns from 'dns'
 import 'dotenv/config'
 import { chromium } from 'playwright'
@@ -53,6 +52,34 @@ async function ensureUser() {
     return u.id
 }
 
+// A commit ENDS the session (Roy, 2026-10-18): the old one archived, a new one open with the saved line above Axl's
+// greeting, the pane closed. `sid` moves to the new one — the steps after seed it.
+const sessionsMade = new Set()
+async function endedHere(page, userId) {
+    const next = (await sessionService.getActive({ userId }))?.sessionId
+    const old  = await sessionService.get({ sessionId: sid, userId })
+    const line = await page.locator('.chat-timeline__ended').innerText().catch(() => '')
+    const ok = !!next && next !== sid && old?.status === 'archived' && /back with Axl/.test(line) && (await pane(page).count()) === 0
+    if (next) { sid = next; sessionsMade.add(next) }
+    return ok
+}
+
+/**
+ * Wait for a commit to have ENDED the session: a new active one on the server, then the page on it. Not just "an
+ * ended line is on screen" — a session a commit opened STARTS with one, so the next press's wait would pass on the
+ * old line before the press had even landed (the race that failed this drive, 2026-10-18).
+ */
+async function waitEnded(page, userId, ms = 15000) {
+    const deadline = Date.now() + ms
+    while (Date.now() < deadline) {
+        const next = (await sessionService.getActive({ userId }))?.sessionId
+        if (next && next !== sid) break
+        await page.waitForTimeout(500)
+    }
+    await page.locator('.chat-timeline__ended').waitFor({ timeout: 10000 }).catch(() => {})
+    await page.waitForTimeout(800)
+}
+
 const atlas = async (userId, sessionId) => (await sessionService.get({ sessionId, userId }))?.agentState?.portfolio ?? null
 async function seed(userId, sessionId, state) {
     await sessionService.setAgentState({ sessionId, userId, agent: 'portfolio', state })
@@ -76,7 +103,8 @@ const userId = await ensureUser()
 // The books that were there before — the one Generate makes is the one that is new (a name can repeat after a crash).
 const before = new Set((await ideaService.getIdeas(userId)).map(i => i.portfolioId).filter(Boolean))
 const drafts = new Set()
-const sid    = (await sessionService.startNew({ userId })).sessionId
+let sid      = (await sessionService.startNew({ userId })).sessionId
+sessionsMade.add(sid)
 console.log('session:', sid)
 await seed(userId, sid, { pendingPlan: PLAN, mandate: { goal: 'drive' }, thesis: { strategy: 'Compounders at fair prices' } })
 
@@ -85,6 +113,8 @@ const page = await browser.newPage({ viewport: { width: 1440, height: 900 } })
 const errors = []
 page.on('console', m => { if (m.type() === 'error') errors.push(m.text().slice(0, 200)) })
 page.on('pageerror', e => errors.push(`PAGEERROR ${e.message.slice(0, 200)}`))
+// Every press's answer, printed — a commit that "did nothing" is read off what the server said, not guessed.
+page.on('response', async r => { if (/\/(act|state)$/.test(new URL(r.url()).pathname)) console.log(`  ${r.request().method()} ${new URL(r.url()).pathname.split('/').slice(-2).join('/')} → ${r.status()} ${(await r.text().catch(() => '')).slice(0, 160)}`) })
 let bookId = null
 let draftId = null
 
@@ -104,12 +134,12 @@ try {
         check('Generate is lit for a sized plan with an account marked', false, 'disabled — is an account marked for ui-smoke?')
     } else {
         await gen.click()
-        await pane(page).getByText(/is saved —/).waitFor({ timeout: 15000 }).catch(() => {})
+        await waitEnded(page, userId)
         await shot(page, '02-generated')
         const mine = (await ideaService.getIdeas(userId)).filter(i => i.portfolioName === 'Drive Quality' && !before.has(i.portfolioId))
         bookId = mine[0]?.portfolioId ?? null
         check('Generate saved the book (its holdings exist)', mine.length === 2, `${mine.length} holdings, book ${bookId}`)
-        check('the surface says so and Atlas\'s table is clear', /Drive Quality is saved — 2 holdings/.test(await pane(page).innerText()) && !(await atlas(userId, sid)))
+        check('…and the session ended — back with Axl, the saved line above his greeting', await endedHere(page, userId))
     }
 
     // ── 3. a review of that book: the proposal is listed, Dismiss asks, then closes the review ──
@@ -128,9 +158,9 @@ try {
         await pane(page).getByRole('button', { name: 'Dismiss' }).click()
         check('Dismiss asks first', (await pane(page).getByText(/Dismiss this review\?/).count()) === 1)
         await pane(page).getByRole('button', { name: 'Confirm' }).click()
-        await pane(page).getByText(/Review dismissed/).waitFor({ timeout: 15000 }).catch(() => {})
+        await waitEnded(page, userId)
         await shot(page, '04-dismissed')
-        check('the review is closed and Atlas\'s table is clear', /Review dismissed/.test(await pane(page).innerText()) && !(await atlas(userId, sid)))
+        check('Dismiss closed the review — and the session: back with Axl', await endedHere(page, userId))
     }
 
     // ── 4. adopt mode: the server stages the draft; the grid prices a paste; Cancel leaves the mode ──
@@ -186,8 +216,11 @@ try {
         await db.collection('agent_contexts').deleteMany({ kind: 'portfolio', entityId: bookId }).catch(() => {})
     }
     for (const d of drafts) await adoptBookService.discardDraft({ draftId: d, userId }).catch(() => {})
-    await db.collection('session_messages').deleteMany({ sessionId: sid }).catch(() => {})
-    await db.collection('sessions').deleteOne({ sessionId: sid }).catch(() => {})
+    // Every session the drive made — each commit opened one.
+    for (const id of sessionsMade) {
+        await db.collection('session_messages').deleteMany({ sessionId: id }).catch(() => {})
+        await db.collection('sessions').deleteOne({ sessionId: id }).catch(() => {})
+    }
     // A page error is a failure, not a footnote (the 401 before sign-in and the deliberate 409s are console lines).
     const crashed = errors.filter(e => e.startsWith('PAGEERROR'))
     if (crashed.length) check('no page errors', false, crashed.join(' | '))

@@ -107,6 +107,22 @@ try {
     await page.waitForTimeout(500)
     check('back on Pythia, the message is still there', (await pane(page).locator('textarea').first().inputValue().catch(() => '')) === 'Drive — a half-typed question for Pythia')
 
+    // ── 4b. the chat keeps most of the width; the header's toggle hides the pane and brings the same tabs back ──
+    const widths = await page.evaluate(() => ({
+        chat: document.querySelector('.chat-with-pane > .chat-timeline')?.getBoundingClientRect().width ?? 0,
+        pane: document.querySelector('.side-pane--docked')?.getBoundingClientRect().width ?? 0,
+    }))
+    check('the chat is the wider of the two (the pane is about a third)', widths.chat > widths.pane * 1.6 && widths.pane >= 270, `chat ${Math.round(widths.chat)}px · pane ${Math.round(widths.pane)}px`)
+    await page.getByRole('button', { name: /^Hide / }).click()
+    await page.waitForTimeout(500)
+    check('"Hide" closes the pane', (await pane(page).count()) === 0)
+    await page.getByRole('button', { name: /^Show / }).click()
+    await page.waitForTimeout(800)
+    await shot(page, '02b-reshown')
+    const back = await pane(page).locator('.side-pane__tabs').innerText().catch(() => '')
+    check('"Show" brings back the same tabs, on the one that was showing', /Aether/.test(back) && /Pythia/.test(back) && /Pythia/.test(await pane(page).locator('.side-pane__tab.is-active').innerText().catch(() => '')), back.replace(/\s+/g, ' '))
+    check('…and Pythia\'s half-typed message survived the hide', (await pane(page).locator('textarea').first().inputValue().catch(() => '')) === 'Drive — a half-typed question for Pythia')
+
     // ── 5. Discard: Mentor's unsaved draft thrown away, asked first — and its turns set aside ──
     for (const message of [
         { agent: 'mentor', role: 'user', content: 'Drive — NVDA on a pullback?' },

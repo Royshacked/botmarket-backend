@@ -22,7 +22,7 @@ import { sessionService } from '../session.service.js'
 import { DESK_DEFS, hasWork } from './index.js'
 import { endedChain } from '../chain/rules.js'
 import { canSpeak } from './sessionTurn.js'
-import { sealing as defaultSealing } from './seal.js'
+import { sealing as defaultSealing, sealLabel } from './seal.js'
 import { withSessionLock } from './turnLock.js'
 import { agentForKind } from './registry.js'
 import { keepMarkers } from './markers.js'
@@ -30,6 +30,8 @@ import { logger } from '../logger.service.js'
 
 const LOG = '[desk:act]'
 const ACTION_NAME = /^[a-zA-Z]{1,40}$/
+// Where a saved thing lives — the next session's first line says so (endAfterCommit).
+const WHERE = { setup: ' to your Setups', portfolio: ' to your Portfolios', scan: ' to your Scans', coverage: ' to Coverage', industry_view: ' to the house views' }
 
 export function makeAct({ sessions = sessionService, desks = DESK_DEFS, sealing = defaultSealing, lock = withSessionLock } = {}) {
 
@@ -49,6 +51,30 @@ export function makeAct({ sessions = sessionService, desks = DESK_DEFS, sealing 
     async function _revNow({ user, sessionId, agent }) {
         const session = await sessions.get({ sessionId, userId: user._id }).catch(() => null)
         return session?.agentRev?.[agent] ?? null
+    }
+
+    /**
+     * A COMMIT ENDS THE SESSION (Roy, 2026-10-18). Saving the work — Generate, Update, Initiate, Accept, Publish — is the
+     * end of that piece of work: the session is archived (History keeps it, with its sealed line) and a fresh one opens
+     * with Axl, its first line saying what was saved, so the user sees they are back at the start. Every open screen
+     * follows (startNew's `archived → next` frame).
+     *
+     * Not mid-chain: while a chain runs, a save by a desk the chain went THROUGH (Argus's list, Prometheus's coverage on
+     * Atlas's errand) keeps the session — the chain ends it, when the desk that started it commits.
+     * @returns {Promise<string|null>} the new session's id, or null when the session goes on
+     */
+    async function endAfterCommit({ user, session, agent, seal }) {
+        const chain = session.chain
+        if (chain && chain.status !== 'done' && chain.origin && chain.origin !== agent) return null
+        const next = await sessions.startNew({ userId: user._id, scope: session.scope ?? 'main', force: true })
+        if (!next?.sessionId || next.sessionId === session.sessionId) return null
+        const ids = (seal.entityIds ?? []).filter(Boolean).map(String)
+        await sessions.append({ sessionId: next.sessionId, userId: user._id, message: {
+            agent: 'axl', role: 'assistant', kind: 'sealed',
+            content: `✓ ${sealLabel({ agent, kind: seal.kind, ids, name: seal.name ?? null })} — saved${WHERE[seal.kind] ?? ''}. You're back with Axl.`,
+            ref: { kind: seal.kind, ids, ended: true, from: session.sessionId },
+        } })
+        return next.sessionId
     }
 
     /** @returns {Promise<{ reason: string, extra?: object } | { result: object, rev: number|null, stateWritten?: false }>} */
@@ -90,8 +116,8 @@ export function makeAct({ sessions = sessionService, desks = DESK_DEFS, sealing 
 
             // The turns that built it move onto what was saved — in-line, so the client's next read already has the
             // sealed line. A seal that fails never undoes the save (the document is the user's).
+            const sealAgent = out.seal ? agentForKind(out.seal.kind) ?? agent : null
             if (out.seal) {
-                const sealAgent = agentForKind(out.seal.kind) ?? agent
                 await sealing.sealFromSession({ userId: user._id, sessionId, agent: sealAgent, ...out.seal })
                     .catch(err => logger.warn(LOG, 'seal after commit failed (the entity is saved)', err.message))
             }
@@ -106,7 +132,13 @@ export function makeAct({ sessions = sessionService, desks = DESK_DEFS, sealing 
                     return { result: out.result ?? {}, rev: null, stateWritten: false }
                 }
             }
-            return { result: out.result ?? {}, rev: await _revNow({ user, sessionId, agent }) }
+            const revNow = await _revNow({ user, sessionId, agent })
+            // Last: the save, the seal and the state all landed — THEN the session ends (never a failure: it is saved).
+            const next = out.seal
+                ? await endAfterCommit({ user, session: opened.session, agent: sealAgent, seal: out.seal })
+                    .catch(err => { logger.warn(LOG, 'ending the session after a commit failed (the entity is saved)', err.message); return null })
+                : null
+            return { result: { ...(out.result ?? {}), ...(next ? { nextSessionId: next } : {}) }, rev: revNow }
         })
     }
 

@@ -12,7 +12,6 @@
 // Runs against the Vite dev server (:5173, /api and /ws proxied to :3030) as the throwaway `ui-smoke` user, on a
 // FRESH session. Everything it makes is removed after: the scan, its sealed conversation, the session.
 // A page error fails the drive.
-/* global document -- page.evaluate bodies run in the browser */
 import dns from 'dns'
 import 'dotenv/config'
 import { chromium } from 'playwright'
@@ -48,6 +47,34 @@ async function ensureUser() {
     return u.id
 }
 
+// A commit ENDS the session (Roy, 2026-10-18): the old one archived, a new one open with the saved line above Axl's
+// greeting, the pane closed. `sid` moves to the new one — the steps after seed it.
+const sessionsMade = new Set()
+async function endedHere(page, userId) {
+    const next = (await sessionService.getActive({ userId }))?.sessionId
+    const old  = await sessionService.get({ sessionId: sid, userId })
+    const line = await page.locator('.chat-timeline__ended').innerText().catch(() => '')
+    const ok = !!next && next !== sid && old?.status === 'archived' && /back with Axl/.test(line) && (await pane(page).count()) === 0
+    if (next) { sid = next; sessionsMade.add(next) }
+    return ok
+}
+
+/**
+ * Wait for a commit to have ENDED the session: a new active one on the server, then the page on it. Not just "an
+ * ended line is on screen" — a session a commit opened STARTS with one, so the next press's wait would pass on the
+ * old line before the press had even landed (the race that failed this drive, 2026-10-18).
+ */
+async function waitEnded(page, userId, ms = 15000) {
+    const deadline = Date.now() + ms
+    while (Date.now() < deadline) {
+        const next = (await sessionService.getActive({ userId }))?.sessionId
+        if (next && next !== sid) break
+        await page.waitForTimeout(500)
+    }
+    await page.locator('.chat-timeline__ended').waitFor({ timeout: 10000 }).catch(() => {})
+    await page.waitForTimeout(800)
+}
+
 const stateOf = async (userId, sessionId, agent) => (await sessionService.get({ sessionId, userId }))?.agentState?.[agent] ?? null
 async function seed(userId, sessionId, agent, state) {
     await sessionService.setAgentState({ sessionId, userId, agent, state })
@@ -77,7 +104,8 @@ const userId = await ensureUser()
 // the only one carrying it.
 for (const old of ((await scanService.getScans(userId)) ?? []).filter(s => s.thesis === LIST.thesis)) await scanService.deleteScan(old.id, userId).catch(() => {})
 const before = new Set(((await scanService.getScans(userId)) ?? []).map(s => s.id))
-const sid    = (await sessionService.startNew({ userId })).sessionId
+let sid      = (await sessionService.startNew({ userId })).sessionId
+sessionsMade.add(sid)
 console.log('session:', sid)
 await seed(userId, sid, 'scanner', { profile: 'trading', pendingScan: LIST })
 
@@ -86,6 +114,8 @@ const page = await browser.newPage({ viewport: { width: 1440, height: 900 } })
 const errors = []
 page.on('console', m => { if (m.type() === 'error') errors.push(m.text().slice(0, 200)) })
 page.on('pageerror', e => errors.push(`PAGEERROR ${e.message.slice(0, 200)}`))
+// Every press's answer, printed — a commit that "did nothing" is read off what the server said, not guessed.
+page.on('response', async r => { if (/\/(act|state)$/.test(new URL(r.url()).pathname)) console.log(`  ${r.request().method()} ${new URL(r.url()).pathname.split('/').slice(-2).join('/')} → ${r.status()} ${(await r.text().catch(() => '')).slice(0, 160)}`) })
 // Every Prometheus read the page asks for — the drive seeds its verdicts, so it must never pay for one.
 const reads = []
 page.on('request', r => { if (r.url().includes('/aether/batch-read')) reads.push(r.url()) })
@@ -110,12 +140,12 @@ try {
 
     // ── 3. Generate saves the scan FROM THE SESSION ──
     await pane(page).getByRole('button', { name: 'Generate list' }).click()
-    await pane(page).getByText('The list is saved.').waitFor({ timeout: 15000 }).catch(() => {})
+    await waitEnded(page, userId)
     const mine = ((await scanService.getScans(userId)) ?? []).filter(s => !before.has(s.id) && s.thesis === LIST.thesis)
     scanId = mine[0]?.id ?? null
     await shot(page, '02-generated')
     check('Generate saved the scan', !!scanId, `scan ${scanId}`)
-    check('…and Argus\'s table is clear', !(await stateOf(userId, sid, 'scanner')))
+    check('…and the session ended — back with Axl, the saved line above his greeting', await endedHere(page, userId))
 
     // ── 4. the scan reopened for editing → Update saves it back to the same scan ──
     if (scanId) {
@@ -127,11 +157,15 @@ try {
         await pane(page).getByText('editing list —').waitFor({ timeout: 15000 }).catch(() => {})
         await shot(page, '03-editing')
         check('a saved list being edited says so, with Update and Later', (await pane(page).getByRole('button', { name: 'Update list' }).count()) === 1 && (await pane(page).getByRole('button', { name: /later/i }).count()) === 1)
-        await pane(page).getByRole('button', { name: 'Update list' }).click()
-        await pane(page).getByText('The list is updated.').waitFor({ timeout: 15000 }).catch(() => {})
+        const upd = pane(page).getByRole('button', { name: 'Update list' })
+        console.log(`  (Update list enabled: ${await upd.isEnabled()}; rows in the chat: ${await page.locator('.chat-timeline__row, .chat-timeline__ended').count()})`)
+        await upd.click()
+        await waitEnded(page, userId)
+        console.log(`  (after the press — pane note: "${(await pane(page).locator('.desk-surface__note').allInnerTexts().catch(() => [])).join(' | ')}")`)
         const saved = await scanService.getScanById(scanId, userId).catch(() => null)
         const doc = saved?.doc ?? saved
         check('Update saved the narrowed list onto the same scan', doc?.candidates?.length === 1, `${doc?.candidates?.length} candidates`)
+        check('…and the session ended', await endedHere(page, userId))
     }
 
     // ── 5. a radar cut with its read handed back: the verdict and the caveat are drawn (no read fires) ──
@@ -167,8 +201,11 @@ try {
         await scanService.deleteScan(scanId, userId).catch(() => {})
         await db.collection('agent_contexts').deleteMany({ kind: 'scan', entityId: scanId }).catch(() => {})
     }
-    await db.collection('session_messages').deleteMany({ sessionId: sid }).catch(() => {})
-    await db.collection('sessions').deleteOne({ sessionId: sid }).catch(() => {})
+    // Every session the drive made — each commit opened one.
+    for (const id of sessionsMade) {
+        await db.collection('session_messages').deleteMany({ sessionId: id }).catch(() => {})
+        await db.collection('sessions').deleteOne({ sessionId: id }).catch(() => {})
+    }
     const crashed = errors.filter(e => e.startsWith('PAGEERROR'))
     if (crashed.length) check('no page errors', false, crashed.join(' | '))
     await browser.close()

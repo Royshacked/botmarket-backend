@@ -1237,6 +1237,59 @@ Pythia / Aether panel scrolls back to the top when shown again (its DOM is detac
 doorways have no unit suite (8f drives them); `openForEdit`'s per-kind dispatch still calls the `handleEdit*` doorways
 (each carries its own options — kept).
 
+### 10.7 Phase 8f — the drive (2026-10-18)
+
+Changed from the §10.1 bullet by the card revert (§8.1, same day): a review card is pressed in the SOCIAL CHAT, not the
+timeline. Two new drives, both against Vite :5173 as `ui-smoke`, both clean up after themselves and exit 1 on a failure:
+- `scripts/drive-doorways.mjs` — 21/21. Every desk card's button pressed in the social chat: a portfolio review →
+  Atlas's surface, the book in review mode · a setup invalidation over Mentor's other work → asked; no keeps it, yes
+  reopens the setup with the re-draw turn running (the pencil's busy path — the same `editEntity`) · a coverage verdict
+  → Prometheus, the thesis reopened, the revise turn running · the brief card → Axl's brief turn, Stop ends it · the
+  queue card → the queued desk (Floor) or the "it is on the Floor" note (classic) · no card in the timeline. The
+  doorways' turns are stopped as soon as they show (cents).
+- `scripts/drive-live-mentor.mjs` — 9/9, REAL model turns: a plan typed in the empty chat → Axl hands it to Mentor →
+  Generate lights in the pane (3 turns) → Generate saves it from the session → Arm → Talos watching, Mentor's table clear.
+Regression: drive-unified-chat 13/13, drive-mentor-surface 13/13, portfolio / scanner-analyst / pane-tabs re-run (the
+results are in the commit that records them).
+
+**Found by the drive and fixed (Roy: fix all — FE `1dc5fe4`):** (1) HIGH — MainPage built the workspace's lists inline;
+it re-renders per streamed token, so TradeIdeasList re-read pending reviews per token (527 reads in one build) and the
+API limiter refused the page — Generate answered "Too many requests". Lists memoised; the read keyed on the books.
+(2) `showUserMsg('text')` rendered an EMPTY toast — three doorways said nothing; a string is an info toast now.
+(3) SocialChat set the header's badge inside its own state updater (React's setState-in-render warning) — reported
+after commit. (4) the live drive waits 5 min for a first turn (Axl + the desk's opening ran over 3).
+
+**Not driven live, on purpose:** Atlas → sourcing → Prometheus → Atlas — multi-minute research per name; the chain is
+driven server-side by `drive-session-chain.mjs` and the surfaces by the seeded drives. The Pythia admin button and the
+phone sheet are in drive-pane-tabs / the surface drives. **Ops note:** the sign-in limiter is 20 per 15 min, in memory —
+five drives in a row exhaust it; wait the window out (touching a file did not restart nodemon this time).
+
+**Roy's changes during 8f (2026-10-18), all driven:**
+- **A commit ENDS the session** (`act.endAfterCommit`). Generate / Update / Initiate / Accept / Dismiss / Publish archive the
+  session (History keeps it) and open a fresh one with Axl; its first row is a `sealed` line `{ ref.ended: true }` —
+  "✓ Mentor built NVDA setup — saved to your Setups. You're back with Axl." — drawn ABOVE Axl's greeting and taps (the
+  session still reads as empty). A setup's line opens the setup's own window ("Open the setup to arm it") — Mentor's
+  session ends at Generate, so arming lives there now. Not mid-chain: a save by a desk the chain went THROUGH keeps the
+  session; the chain's own desk ends it. `startNew({ force })` archives even a message-less session. The desks' pane tabs
+  close on a session change (kept tabs stay). Superseded on the way: keeping the conversation with a divider (asked,
+  then withdrawn), and the "you just built" context note (moot with a fresh session).
+- **The side pane**: about a third of the chat column (`clamp(280px, 34%, 400px)`, was `min(560px, 58%)`), and a
+  Show / Hide toggle in the chat header (`PaneToggle`, `reopenPane` restores the tabs it was closed over). Mentor's
+  folded worksheet header wraps its chips below the handle at that width (they crushed it).
+- **The edit bar** (`.desk-surface__bar`): in every edit / review mode the presses are always on screen, pinned to the
+  pane's bottom, dark until there is something valid to save and while the desk answers, with a line saying why.
+- **Cards only in the social chat** confirmed live: the BAC card that reached a timeline at 20:32 came from the old
+  server (it had never reloaded this morning's revert — `npm start` has no watcher; restart after a backend change).
+- **Also found and fixed:** a house model (gpt-6-luna) intermittently answered "X (no final) X" — `cleanReply` drops the
+  marker line and an adjacent repeated paragraph (`dropDebris`, every desk) · Stop on the market brief waited out a stale
+  brief's rewrite — it now ends the turn at once · the backend's `npm run lint` was failing on the drives' unused
+  `/* global document */` lines.
+Drives after all of it: mentor-surface 14/14, portfolio-surface 14/14, scanner-analyst 13/13, pane-tabs 12/12, doorways
+21/21, live-mentor 9/9 (real turns). The surface drives wait for the server's NEW session before checking a commit — a
+session a commit opened starts with an ended line, which an "an ended line is on screen" wait passed on too early.
+**Carried:** Mentor's "Arm it / Leave it waiting" step in the pane is unreachable now (the session ends at Generate) —
+remove it, and its `arm` / `leave` actions, in a follow-up.
+
 ## 11. Phase 9 — Migration (`scripts/migrate-unified-chat.mjs`)
 
 Idempotent, dry-run first, axl_dev before prod.

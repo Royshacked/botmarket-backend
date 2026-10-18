@@ -93,14 +93,15 @@ export function makeSessionService({ getDb = _defaultGetDb, events = silentEvent
     /**
      * "New session": archive the active one — titled from its first user message — and open a fresh
      * one. An active session with nothing in it is reused rather than archived empty: pressing New
-     * twice must not fill the history with blank rows.
+     * twice must not fill the history with blank rows. `force` archives it anyway — a commit ends its session even
+     * when the work was built by hand edits alone, with no message in it (act.endAfterCommit, 2026-10-18).
      */
-    async function startNew({ userId, scope = 'main' }) {
+    async function startNew({ userId, scope = 'main', force = false }) {
         if (!isScope(scope)) return null
         const db  = await getDb()
         const uid = String(userId)
         const current = await db.collection(SESSIONS).findOne({ userId: uid, scope, status: 'active' })
-        if (current && current.seq > 0) {
+        if (current && (current.seq > 0 || force)) {
             const firstPage = await db.collection(MESSAGES)
                 .find({ sessionId: current.sessionId }).sort({ seq: 1 }).limit(20).toArray()
             const now = Date.now()

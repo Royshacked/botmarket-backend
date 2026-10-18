@@ -132,6 +132,19 @@ test('the brief as Axl’s turn: the status chip, the whole text as one token, t
     assert.equal(await briefTurn({ emit: () => {}, signal: ac.signal, fetchBrief: async () => ({ text: 'x' }) }), null)
 })
 
+test('Stop while the brief is still being written ends the turn AT ONCE — no token after it (8f drive)', async () => {
+    const events = []
+    let finish
+    const writing = new Promise(r => { finish = r })
+    const ac = new AbortController()
+    const turn = briefTurn({ emit: (type) => events.push(type), signal: ac.signal, fetchBrief: () => writing })
+    ac.abort()
+    assert.equal(await turn, null, 'the turn ended without waiting for the rewrite')
+    finish({ text: 'Late brief.' })
+    await new Promise(r => setImmediate(r))
+    assert.deepEqual(events, ['status'], 'the late brief is not sent into a stopped turn')
+})
+
 test('the order ticket is a show: with or without a symbol, junk symbols dropped', () => {
     assert.deepEqual(splitShow('ticket'), { kind: 'ticket', ref: null })
     assert.deepEqual(splitShow('ticket AAPL'), { kind: 'ticket', ref: 'AAPL' })

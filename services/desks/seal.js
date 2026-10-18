@@ -28,6 +28,13 @@ const VERB = { setup: 'built', scan: 'saved', coverage: 'wrote coverage on', por
 
 const _cut = (s) => (s.length > LABEL_MAX ? `${s.slice(0, LABEL_MAX - 1)}…` : s)
 
+/** "Mentor built NVDA setup" — what a seal says it made. One wording for the sealed line and the next session's. */
+export function sealLabel({ agent, kind, ids, name = null }) {
+    const n     = Array.isArray(ids) ? ids.length : 0
+    const label = _cut(name || `${n > 1 ? `${n} ` : ''}${kind.replace('_', ' ')}${n > 1 ? 's' : ''}`)
+    return `${deskOf(agent)?.brand ?? 'The desk'} ${VERB[kind] ?? 'made'} ${label}`
+}
+
 export function makeSealing({ sessions = sessionService, contexts = agentContextService, desks = DESK_DEFS, lock = withSessionLock } = {}) {
 
     /**
@@ -61,10 +68,8 @@ export function makeSealing({ sessions = sessionService, contexts = agentContext
         // The agent's OWN rows leave; hand-offs it received stay in the sender's segment.
         await sessions.removeMessages({ sessionId, userId, seqs: segment.filter(m => m.agent === agent).map(m => m.seq) })
 
-        const brand = deskOf(agent).brand
-        const label = _cut(name || `${ids.length > 1 ? `${ids.length} ` : ''}${kind.replace('_', ' ')}${ids.length > 1 ? 's' : ''}`)
         const line  = await sessions.append({ sessionId, userId, message: {
-            agent, role: 'assistant', kind: 'sealed', content: `${brand} ${VERB[kind] ?? 'made'} ${label}`, ref: { kind, ids },
+            agent, role: 'assistant', kind: 'sealed', content: sealLabel({ agent, kind, ids, name }), ref: { kind, ids },
         } })
         for (const id of ids) await sessions.addLink({ sessionId, userId, link: { kind, id, agent } })
         await sessions.setAgentState({ sessionId, userId, agent, state: null })

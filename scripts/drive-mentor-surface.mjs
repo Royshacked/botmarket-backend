@@ -1,7 +1,8 @@
 // DRIVE MENTOR'S SURFACE — the side pane over the session, in a real browser (unified-chat plan phase 8b).
 //
 // The FE tests stub the session; the backend tests stub the browser. This runs the one path that matters for 8b:
-// Mentor's state on the session → the pane opens on the floor → a hand edit (PATCH /state) → Generate and Arm
+// Mentor's state on the session → the pane opens on the floor → a hand edit (PATCH /state) → Generate (the session ends;
+// back with Axl) and Arm in the setup's own window
 // (POST /act) → a stale press refused (the revision) → the pencil reopening a saved setup → the phone's bottom sheet.
 // No model call: Mentor's state is SEEDED here, with a draft the real readiness gate passes, so the drive is cheap
 // and repeatable. The screenshots are the evidence — look at them.
@@ -11,7 +12,6 @@
 // Runs against the Vite dev server (:5173, /api and /ws proxied to :3030). Uses the throwaway `ui-smoke` user on a
 // FRESH session. Writes from this process do not push to the page (the socket is the dev server's), which is what
 // the stale-press step relies on.
-/* global document -- page.evaluate bodies run in the browser */
 import dns from 'dns'
 import 'dotenv/config'
 import { chromium } from 'playwright'
@@ -81,7 +81,7 @@ async function signIn(page) {
 
 const userId = await ensureUser()
 const fresh  = await sessionService.startNew({ userId })
-const sid    = fresh.sessionId
+let sid      = fresh.sessionId   // moves on: a commit ends the session (2026-10-18)
 console.log('session:', sid)
 await seed(userId, sid)
 
@@ -132,24 +132,37 @@ try {
         check('a press on a state the user did not see is refused, and said', /moved on while you were looking/i.test(alert), alert)
         await shot(page, '03-stale')
 
-        // ── 4. Generate for real (the refusal folded the new revision in) → saved, waiting on Arm ──
+        // ── 4. Generate for real (the refusal folded the new revision in) → saved, and the SESSION ENDS (Roy, 2026-10-18):
+        //       a fresh one opens with Axl, its first line saying what was saved; the pane closes ──
+        const before = new Set(((await setupService.listSetups(userId).catch(() => [])) ?? []).map(s => s.id))
         await gen.click()
-        await pane(page).getByText(/nothing is watching it yet/).waitFor({ timeout: 15000 }).catch(() => {})
-        const s4 = await mentorState(userId, sid)
-        made = s4.state?.generated?.id ?? null
+        await page.locator('.chat-timeline__ended').waitFor({ timeout: 15000 }).catch(() => {})
+        await page.waitForTimeout(1000)
+        const mine = (await setupService.listSetups(userId).catch(() => [])) ?? []
+        made = mine.find(s => !before.has(s.id) && s.asset === 'NVDA')?.id ?? null
+        const next = await sessionService.getActive({ userId })
         await shot(page, '04-generated')
-        check('Generate saved the setup from the session', !!made, `generated: ${JSON.stringify(s4.state?.generated ?? null)}`)
-        check('the surface stops on Arm', (await pane(page).getByRole('button', { name: /Arm it/ }).count()) === 1)
+        check('Generate saved the setup from the session', !!made, `setup ${made}`)
+        check('…and the session ended: a new one, the old one archived', next?.sessionId !== sid && (await sessionService.get({ sessionId: sid, userId }))?.status === 'archived')
+        check('the chat is back with Axl — the saved line above his greeting', /back with Axl/.test(await page.locator('.chat-timeline__ended').innerText().catch(() => '')) && /What would you like to do\?/.test(await page.locator('.chat-timeline').innerText()))
+        check('…and Mentor\'s pane closed', (await pane(page).count()) === 0)
+        sid = next?.sessionId ?? sid
 
-        // ── 5. Arm → watched; Mentor's table clears ──
+        // ── 5. the line opens the setup's own window, where it is armed ──
         if (made) {
-            await pane(page).getByRole('button', { name: /Arm it/ }).click()
-            await page.waitForTimeout(2500)
+            const [popup] = await Promise.all([
+                page.context().waitForEvent('page', { timeout: 15000 }),
+                page.getByRole('button', { name: 'Open the setup to arm it' }).click(),
+            ])
+            await popup.getByRole('button', { name: 'Arm it' }).waitFor({ timeout: 15000 })
+            await popup.getByRole('button', { name: 'Arm it' }).click()
+            await popup.waitForTimeout(2500)
+            await popup.screenshot({ path: `${OUT}/ms-05-armed.png` })
+            console.log('  shot: 05-armed')
             const armed = await setupService.getSetup(made, userId).catch(() => null)
             const status = armed?.doc?.status ?? armed?.status ?? null
-            await shot(page, '05-armed')
-            check('Arm armed it (looking)', status === 'looking', `status: ${status}`)
-            check('the surface says so and Mentor\'s table is clear', /armed — Talos is watching/i.test(await pane(page).innerText()) && !(await mentorState(userId, sid)).state)
+            check('Arm in the setup\'s window armed it (looking)', status === 'looking', `status: ${status}`)
+            await popup.close()
         }
     }
 
