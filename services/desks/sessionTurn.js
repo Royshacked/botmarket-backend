@@ -63,6 +63,8 @@ export function replyExtras(payload) {
 export function showLine(show) {
     if (!show?.kind) return null
     if (show.kind === 'ticket') return show.ref ? `Here's the order ticket for ${show.ref}.` : "Here's the order ticket."
+    if (show.kind === 'heatmap') return show.ref ? `Here's the forecast heat map, on ${show.ref}.` : "Here's the forecast heat map."
+    if (show.kind === 'calendar') return "Here's the calendar."
     return 'Here it is.'
 }
 

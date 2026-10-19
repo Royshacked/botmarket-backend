@@ -127,14 +127,18 @@ export function splitEdit(raw) {
 // (entityDetail.INLINE_KINDS) for a different question: what a page exists for, not what a model
 // may name. Give ideas a handle a desk can read and this is one word.
 // `ticket` opens the order ticket (plan phase 7) — a code screen, no desk; its ref is an optional symbol.
-export const SHOW_KINDS = new Set(['setup', 'ticket'])
+// `heatmap` and `calendar` (Roy, 2026-10-19) open the house's two read-only VIEWS: the forecast heat map (Pythia's
+// industries — its ref an optional symbol to focus on) and the month calendar. Screens, like the ticket: no desk, no item.
+export const SHOW_KINDS = new Set(['setup', 'ticket', 'heatmap', 'calendar'])
+// The screens — a show whose ref is optional, because what it opens exists without one.
+const SHOW_SCREENS = new Set(['ticket', 'heatmap', 'calendar'])
 
-/** `<show>setup 3f9c…</show>` → { kind, ref }, or null. Both halves or nothing, as with an edit. */
+/** `<show>setup 3f9c…</show>` → { kind, ref }, or null. Both halves or nothing, as with an edit — a screen's ref is optional. */
 export function splitShow(raw) {
     if (typeof raw !== 'string') return null
     const [kind = '', ref = ''] = raw.trim().split(/[\s:,]+/)
     const k = kind.toLowerCase()
-    if (k === 'ticket') return { kind: k, ref: ref || null }
+    if (SHOW_SCREENS.has(k)) return { kind: k, ref: ref || null }
     if (!SHOW_KINDS.has(k) || !ref) return null
     return { kind: k, ref }
 }
@@ -205,7 +209,9 @@ export function validateEdit(edit) {
  */
 export function validateShow(show) {
     if (!show || !SHOW_KINDS.has(show.kind)) return null
-    if (show.kind === 'ticket') return { kind: 'ticket', ref: sanitizeRouteSymbol(show.ref) }
+    // A screen's ref is a symbol at most (the ticket's, the heat map's focus); the calendar takes none.
+    if (show.kind === 'calendar') return { kind: 'calendar', ref: null }
+    if (SHOW_SCREENS.has(show.kind)) return { kind: show.kind, ref: sanitizeRouteSymbol(show.ref) }
     const ref = sanitizeEditRef(show.ref)
     return ref ? { kind: show.kind, ref } : null
 }

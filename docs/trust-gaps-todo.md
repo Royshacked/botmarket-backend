@@ -93,3 +93,22 @@ Existing checklist: `docs/live-verify-checklist.md` (pending for Themis, the ord
 ## Features (not trust gaps)
 
 - [ ] **Currencies (FX) trading.** Added by Roy, 2026-10-19 — scope not written yet.
+
+---
+
+## Next up — unified chat (Roy, 2026-10-19)
+
+In order:
+
+- [ ] **Restart the backend** (the stall guard, Atlas industry sleeves) and **delete the sleeve test session** (`ses_1792423146682_i8his4bi`, ui-smoke).
+- [ ] **QA / CR / docs cycle on 2026-10-19's work** — trades start at Mentor (→ Argus → back), the desk speaks first, History resume, the reply cleaner, tool status names, Atlas industry sleeves + the trading check, the stall guard, the pane hint, the Mentor account picker.
+- [ ] **Re-run the drives** not yet run against current code: portfolio-surface, scanner-analyst, pane-tabs, doorways, live-mentor. ≤ 3 per 15 min, or raise `RATE_LIMIT_AUTH_PER_15M` first.
+- [ ] **Phase 9** — the migration (`scripts/migrate-unified-chat.mjs`): legacy chats → sessions.
+- [ ] **Phase 10** — docs, merge to main, deploy.
+
+Smaller:
+
+- [ ] Mentor: remove the unreachable "Arm it / Leave it waiting" pane step and its `arm` / `leave` actions (the session ends at Generate).
+- [ ] Atlas: it picks "risk-balanced" allocation itself, then flags it against quality-value — a prompt fix.
+- [ ] Talos test "an entry decided on the closing bar parks for the open" depends on the real calendar — pin its clock.
+- [ ] Pythia: only 4 industries FOR LONG TERM, and no assessment names companies yet (Atlas's "named first" is untested on real data).
