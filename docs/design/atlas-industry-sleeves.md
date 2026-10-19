@@ -1,6 +1,7 @@
 # Atlas builds on industries — plan
 
-Status: **PLAN, not built** (2026-10-19). Branch `feat/unified-chat`.
+Status: **BUILT 2026-10-19** (BE 8124cf2, FE f091654), branch `feat/unified-chat`. Live-checked up to the
+architecture gate; the empty-sleeve research loop is NOT yet run live (see the end).
 
 ## Why
 
@@ -67,15 +68,41 @@ What already exists and the plan reuses:
 | 6 | Tests | Prompt guards (no rotation, sleeves by industry), coverage filter + grouping, sleeve sourcing from `gics_companies` + fallback, card copy. |
 | 7 | Live | A full Atlas build under the unified chat, **including one empty sleeve end to end** (screen → Prometheus → card → Resume build). That loop has not been run live since the chat was unified. |
 
-## Open questions for Roy
+## Decided (Roy, 2026-10-19)
 
-1. **Horizon → book:** under a year = `swing`, a year or more = `long_term`? (A 6–12 month book is the grey zone.)
-2. **Sector-ETF trend charts** — drop them with rotation (recommended), or keep one weekly chart per proposed sleeve's
-   own industry basket instead?
-3. **Industries Pythia has not assessed** — allowed only when the user asks (recommended), or may Atlas propose one
-   with a stated reason?
-4. **Sleeve size from `gics_companies`** — how many names per empty sleeve go to Prometheus (today `SLEEVE_HITS`)?
-   Prometheus spends minutes per name.
+1. **Horizon → book:** under about a year `swing`, a year or more `long_term` — **with some flexibility**: in between,
+   Atlas judges (a 9-month book on a multi-year cycle reads `long_term`) and says which it read.
+2. **Sector-ETF trend charts:** dropped, with rotation.
+3. **Industries the house has not listed:** **both** — when the user asks, and when Atlas states the reason.
+4. **Names per empty sleeve:** at most 12 (`SLEEVE_HITS`).
+
+## Built
+
+- Prompt phases 2–4 + the Sleeve Sourcing Output rewritten; gates and phase tags follow. Review mode untouched.
+- `get_house_industries` for Atlas — Argus's handler and formatting, Atlas's own description and closing note
+  (`ATLAS_WORDS`; Argus's `SCAN_WORDS` unchanged). `get_macro_snapshot`'s description says to ignore its rotation.
+- `get_coverage` takes `industry` and groups every read by sub-industry (`makeCoverageHandler`, joined from
+  `gics_companies`; a name the table lacks falls back to its sector, marked).
+- `<screen_request industry_code>` → `sourceSleeve({ industryCode })`: `industryPick` (named first, school floor, ≤ 12),
+  the sector screen as a same-sub-industry fill under `MIN_INDUSTRY_NAMES` (4). The old sector request still works.
+- The sleeve's label is its industry in the card (BE copy + FE bubble) and in the chain's hand-back to Atlas.
+- Tests: `atlasIndustrySleeves`, `portfolioCoverage`, `sleeveSource`, `chain`, `houseIndustries`, the tool snapshot.
+
+## Live check (2026-10-19, real model, axl_dev)
+
+- Data: the house lists **4** long-term industries and **32** swing ones today; an industry sleeve from
+  `gics_companies` comes back sound (Systems Software → MSFT, ORCL, PANW, CRWD, FTNT, …). None of the current
+  assessments name companies, so "named first" is untested on real data.
+- A build to the architecture gate: Atlas read the long-term list with codes, gave a forward view, used the macro
+  numbers as background only, proposed industry sleeves with codes and weights (four from outside the list, each
+  with a reason), named the ⅓ cap, checked the sectors against SPY in points, and stopped for sign-off.
+
+## Still open
+
+- **The empty-sleeve loop live** (sleeve → Prometheus → the hand-back to Atlas) — not run: it writes real house
+  coverage and spends Prometheus minutes per name (up to 12). Run it on Roy's go.
+- **A junk symbol in `gics_companies`**: the payments sleeve picked `BSQKZ`. The table needs a clean-up pass (or a
+  symbol-shape filter) before sleeves are sourced from it at scale.
 
 ## Not in scope
 
