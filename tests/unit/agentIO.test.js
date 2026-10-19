@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { parseEmitBlock, mergeDraft, makePhaseCapture, runAgentStream } from '../../services/agentIO.js'
+import { parseEmitBlock, mergeDraft, makePhaseCapture, runAgentStream, toolTargets, announceTargets } from '../../services/agentIO.js'
 import { stripEmitTags } from '../../services/agentUtils.js'
 
 // The agent I/O protocol. Every streaming agent repeated these mechanics verbatim — three
@@ -244,4 +244,41 @@ test('the tolerance does not reach a different tag, prose, or broken JSON', () =
 test('the stripper removes the malformed block too, so its JSON never leaks into the reply', () => {
     assert.equal(stripEmitTags('Here.\n<tilt>{"a":1}</til>', ['tilt']).trim(), 'Here.')
     assert.equal(stripEmitTags('Here.\n<tilt>{"a":1}</tilt> after', ['tilt']).trim(), 'Here.\n after'.trim())
+})
+
+// ─── The names a tool runs on (2026-10-19) ────────────────────────────────────
+
+test('toolTargets reads every schema spelling, upper-cases and de-duplicates', () => {
+    assert.deepEqual(toolTargets({ ticker: ' scco ' }), ['SCCO'])
+    assert.deepEqual(toolTargets({ symbols: ['fcx', 'SCCO', 'fcx'] }), ['FCX', 'SCCO'])
+    assert.deepEqual(toolTargets({ symbol: 'MSI', tickers: ['PG', 7, null] }), ['MSI', 'PG'])
+    assert.deepEqual(toolTargets({ sector: 'Energy' }), [])
+    assert.deepEqual(toolTargets(null), [])
+})
+
+test('announceTargets: a handler tells the names as it runs, then runs unchanged; a throwing callback fails nothing', async () => {
+    const told = []
+    const h = announceTargets({ get_candles: async (input, ctx) => `ran ${input.ticker} ${ctx.n}`, flag: 1 }, (name, extra) => told.push([name, extra]))
+    assert.equal(await h.get_candles({ ticker: 'scco' }, { n: 2 }), 'ran scco 2')
+    assert.deepEqual(told, [['get_candles', { targets: ['SCCO'] }]])
+    assert.equal(h.flag, 1)
+    const quiet = announceTargets({ get_sector_snapshot: async () => 'ok' }, () => told.push('x'))
+    assert.equal(await quiet.get_sector_snapshot({}), 'ok')   // no names → no second status
+    assert.equal(told.length, 1)
+    const boom = announceTargets({ get_quotes: async () => 'ok' }, () => { throw new Error('ui gone') })
+    assert.equal(await boom.get_quotes({ symbols: ['A'] }), 'ok')
+    const handlers = { a: async () => 1 }
+    assert.equal(announceTargets(handlers, undefined), handlers)
+})
+
+test('runAgentStream hands the provider handlers that announce their names', async () => {
+    let got = null
+    const told = []
+    await runAgentStream({
+        messages: [{ role: 'user', content: 'x' }], systemPrompt: 'sys', tools: [], toolHandlers: { get_candles: async () => 'c' },
+        onToolStart: (name, extra) => told.push([name, extra]),
+        _resolve: () => ({ model: 'm', streamFn: async (a) => { got = a; return 'raw' }, provider: 'p' }),
+    })
+    await got.toolHandlers.get_candles({ ticker: 'nvda' })
+    assert.deepEqual(told, [['get_candles', { targets: ['NVDA'] }]])
 })

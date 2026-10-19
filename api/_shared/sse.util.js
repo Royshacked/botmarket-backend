@@ -85,7 +85,8 @@ export function startSseStream(req, res, { turnId = null, userId = null } = {}) 
 export function sseAgentCallbacks(sendEvent) {
     return {
         onToken:     (text)         => sendEvent('token',     { text }),
-        onToolStart: (tool)         => sendEvent('status',    { tool }),
+        // `targets`: the names the call is about, once it runs (agentIO.announceTargets) — absent at its start.
+        onToolStart: (tool, extra)  => sendEvent('status',    { tool, ...(extra?.targets?.length ? { targets: extra.targets } : {}) }),
         onReasoning: (text, source) => sendEvent('reasoning', { text, source }),
         onChart:     (chart)        => sendEvent('chart',     chart),
     }

@@ -153,3 +153,16 @@ test('reasoning carries WHOSE thinking it is', () => {
         ['reasoning', { text: 'resuming',    source: 'desk' }],
     ])
 })
+
+test('a tool status carries the names it runs on, once it runs — and stays bare at its start (2026-10-19)', () => {
+    const sent = []
+    const cb = sseAgentCallbacks((event, data) => sent.push([event, data]))
+    cb.onToolStart('get_candles')
+    cb.onToolStart('get_candles', { targets: ['SCCO'] })
+    cb.onToolStart('get_candles', { targets: [] })
+    assert.deepEqual(sent, [
+        ['status', { tool: 'get_candles' }],
+        ['status', { tool: 'get_candles', targets: ['SCCO'] }],
+        ['status', { tool: 'get_candles' }],
+    ])
+})
