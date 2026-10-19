@@ -318,21 +318,24 @@ export function makeChainRunner({
         const session = await sessions.get({ sessionId: sleeve.sessionId, userId: user._id })
         if (!session || session.status !== 'active') return false
         const school = sleeve.school ? ` (${sleeve.school})` : ''
+        // A sleeve is named by what it is: its GICS sub-industry (and code — Atlas places by it), or the old sector sleeve.
+        const label = sleeve.industryCode && sleeve.industry ? `${sleeve.industry} (${sleeve.industryCode})` : sleeve.sector
         const tail = [
             outcome.passed.length     ? `${outcome.passed.length} passed on (no edge)` : null,
             outcome.failed.length     ? `${outcome.failed.length} failed to save` : null,
             outcome.unresolved.length ? `${outcome.unresolved.length} left unresearched` : null,
         ].filter(Boolean).join(', ')
         const line = outcome.covered.length
-            ? `Screened ${outcome.screened} for the ${sleeve.sector} sleeve${school} → ${outcome.covered.length} now in coverage: ${outcome.covered.join(', ')}${tail ? `; ${tail}` : ''}.`
-            : `Screened ${outcome.screened} for the ${sleeve.sector} sleeve${school} → none came into coverage${tail ? ` (${tail})` : ''}.`
+            ? `Screened ${outcome.screened} for the ${label} sleeve${school} → ${outcome.covered.length} now in coverage: ${outcome.covered.join(', ')}${tail ? `; ${tail}` : ''}.`
+            : `Screened ${outcome.screened} for the ${label} sleeve${school} → none came into coverage${tail ? ` (${tail})` : ''}.`
         await sessions.append({ sessionId: sleeve.sessionId, userId: user._id, message: { agent: 'scanner', role: 'assistant', content: line } })
 
-        const declined = [...outcome.passed, ...outcome.failed].map(ticker => ({ ticker, sector: sleeve.sector }))
+        // `sector` on an item is the sleeve's label (the brief groups by it) — the industry for an industry sleeve.
+        const declined = [...outcome.passed, ...outcome.failed].map(ticker => ({ ticker, sector: label }))
         const art = makeArtifact({
             kind: KIND.COVERAGE_SET, from: { agent: 'analyst', label: 'Research' },
-            items:   outcome.covered.map(ticker => ({ ticker, sector: sleeve.sector })),
-            context: { unfilled: outcome.covered.length ? [] : [sleeve.sector], declined },
+            items:   outcome.covered.map(ticker => ({ ticker, sector: label })),
+            context: { unfilled: outcome.covered.length ? [] : [label], declined },
         })
         const chain = session.chain && session.chain.status !== 'done' ? session.chain : newChain('portfolio')
         await hop({ user, session, chain: { ...chain, origin: 'portfolio' }, art, from: 'analyst' })

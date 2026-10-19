@@ -21,6 +21,14 @@ const MAX_COMPANIES = 40
 /** Industries shown in full; the rest by name only (a 32-industry swing list ran ~18k characters, 2026-10-13). */
 export const FULL_ENTRIES = 20
 
+// Atlas reads the SAME list (docs/design/atlas-industry-sleeves.md, Roy 2026-10-19) — one pipe, two readers. What
+// the list is FOR is each reader's own judgment: Argus looks there first on a scan and screens the rest; Atlas builds
+// a book's sleeves from it, one GICS sub-industry per sleeve. So the data and the formatting are shared, and the
+// description and the closing note are the reader's (`words` below).
+export const ATLAS_HOUSE_INDUSTRIES_TOOL_SPEC = {
+    get_house_industries: `The HOUSE'S INDUSTRIES for this book — the GICS sub-industries Pythia (the house's industry desk) rates FOR SWING or FOR LONG TERM, plus the industries inside the themes it rates so, each with its thesis, top risk, how far it has moved and the companies it names. Pass \`book\` (the mandate's: "swing" for under about a year, "long_term" for longer — use judgment in between) at the start of a build: THESE ARE THE CANDIDATE SLEEVES, one sub-industry per sleeve. Pass \`industry\` (a code or name) for one industry's largest companies, our coverage marked. The house judges industries, never stocks, and the mandate and the user still outrank it.`,
+}
+
 export const HOUSE_INDUSTRIES_TOOL_SPEC = {
     get_house_industries: `The HOUSE'S INDUSTRIES for a book — the GICS sub-industries Pythia (the house's industry desk) currently rates FOR SWING or FOR LONG TERM, plus the industries inside the themes it rates so, each with its thesis, its top risk and how far it has moved. Pass \`book\` ("swing" or "long_term", and optionally \`sector\`) on a swing or long-term scan, BEFORE you screen: these are the first place to look. Then pass \`industry\` (a code or name from that list) for its largest companies, our coverage marked. A PREFERENCE, never a filter: screen the rest of the market as you always do, rank by the tape as you always do — being on the house's list adds nothing to a score — and keep a stronger name from outside these industries. Label every name you take from here as on the house's swing / long-term list. Intraday and day scans have no house list: Pythia's verdicts run weeks to years.`,
 }
@@ -45,12 +53,28 @@ export function namesLine(names) {
 
 const _pct = (v) => (typeof v === 'number' ? `${v >= 0 ? '+' : ''}${Math.round(v * 100)}%` : null)
 
-/** The list for a book → LLM-ready text. Pure — exported for testing. */
-export function formatHouseIndustries(book, entries, { sector = null } = {}) {
+/**
+ * What each reader is told around the shared list (see ATLAS_HOUSE_INDUSTRIES_TOOL_SPEC). `empty` and `footer` take
+ * the book; `noBook` the value passed; `failed` the error.
+ */
+export const SCAN_WORDS = Object.freeze({
+    empty:  (book, where) => `The house has no industries rated for ${BOOK_WORDS[book].toLowerCase()}${where} right now (none rated, or every verdict is due for reassessment). Scan the market as you normally would, and say in one line that there was no house list to start from.`,
+    footer: (book) => `Look here FIRST — \`get_house_industries\` with \`industry\` lists one's largest companies; these are GICS names, which the screener does not know, so never pass them to \`screen_candidates\` — then screen the rest of the market as usual, in the screener's own names. A preference, not a filter: the tape still ranks, the list adds nothing to a score, and a stronger name from outside these industries stays. Label each name you take from here "on the house's ${book === 'swing' ? 'swing' : 'long-term'} list". "Who else it reaches" is the house's second-order read — the suppliers, customers or neighbours its view spills into: a place to look as good as the industry itself, neither preferred. The house judges industries, not stocks: whether a name is priced in is yours to check.`,
+    noBook: (v) => `The house has no list for "${v}". Pythia's verdicts are for swing (weeks to months) and long term (years); an intraday or day scan has no house list — scan the market as you normally would.`,
+    failed: (err) => `Could not read the house's industries: ${err.message} — scan the market as you normally would.`,
+})
+
+export const ATLAS_WORDS = Object.freeze({
+    empty:  (book, where) => `The house has no industries rated for ${BOOK_WORDS[book].toLowerCase()}${where} right now (none rated, or every verdict is due for reassessment). Say so in one line, and build the sleeves from the mandate and the user's asks — each one GICS sub-industry, with the reason for it stated.`,
+    footer: () => 'These are the CANDIDATE SLEEVES — one GICS sub-industry each; carry its code on the sleeve. `get_coverage` with `industry` gives the researched names to place in one; `get_house_industries` with `industry` its largest companies. FOR this book: build from them. AVOID: only when the user asks for it (the platform asks them before it saves). HYPE: allowed — the platform halves the weight; say so. An industry NOT on this list is fine when the user asks for it, or when you state the reason for it. "Who else it reaches" is the house\'s second-order read — a candidate sleeve too. The house judges industries, not stocks; the mandate and the user outrank it.',
+    noBook: (v) => `The house has no list for "${v}". Pythia's verdicts are for swing (weeks to months) and long term (years) — pick the nearer one for this mandate's horizon.`,
+    failed: (err) => `Could not read the house's industries: ${err.message} — say so, and build the sleeves from the mandate with the reason for each stated.`,
+})
+
+/** The list for a book → LLM-ready text. Pure — exported for testing. `words`: the reader's (SCAN_WORDS by default). */
+export function formatHouseIndustries(book, entries, { sector = null, words = SCAN_WORDS } = {}) {
     const where = sector ? ` in ${sector}` : ''
-    if (!entries?.length) {
-        return `The house has no industries rated for ${BOOK_WORDS[book].toLowerCase()}${where} right now (none rated, or every verdict is due for reassessment). Scan the market as you normally would, and say in one line that there was no house list to start from.`
-    }
+    if (!entries?.length) return words.empty(book, where)
     const lines = entries.slice(0, FULL_ENTRIES).map(e => {
         const flags = [
             e.hype ? 'HYPE (ran up 100%+ in two years and 100%+ over the market — a crash-risk flag)' : null,
@@ -80,7 +104,7 @@ export function formatHouseIndustries(book, entries, { sector = null } = {}) {
         `THE HOUSE'S ${BOOK_WORDS[book]} INDUSTRIES${where} (Pythia's standing verdicts, biggest 12-month move first):`,
         ...lines,
         '',
-        `Look here FIRST — \`get_house_industries\` with \`industry\` lists one's largest companies; these are GICS names, which the screener does not know, so never pass them to \`screen_candidates\` — then screen the rest of the market as usual, in the screener's own names. A preference, not a filter: the tape still ranks, the list adds nothing to a score, and a stronger name from outside these industries stays. Label each name you take from here "on the house's ${book === 'swing' ? 'swing' : 'long-term'} list". "Who else it reaches" is the house's second-order read — the suppliers, customers or neighbours its view spills into: a place to look as good as the industry itself, neither preferred. The house judges industries, not stocks: whether a name is priced in is yours to check.`,
+        words.footer(book),
     ].join('\n')
 }
 
@@ -114,6 +138,7 @@ export function makeHouseIndustriesHandlers(deps = {}) {
         verdicts = (codes) => industryAssessmentService.verdictsForCodes(codes),
         assessment = (code) => industryAssessmentService.getAssessment(code),
         now      = () => new Date().toISOString(),
+        words    = SCAN_WORDS,
     } = deps
 
     return {
@@ -131,9 +156,9 @@ export function makeHouseIndustriesHandlers(deps = {}) {
             }
             if (input?.book == null || input.book === '') return 'Pass `book` ("swing" or "long_term") for the house\'s industries, or `industry` for one industry\'s companies.'
             const book = normalizeBook(input.book)
-            if (!book) return `The house has no list for "${input.book}". Pythia's verdicts are for swing (weeks to months) and long term (years); an intraday or day scan has no house list — scan the market as you normally would.`
+            if (!book) return words.noBook(input.book)
             const sector = typeof input?.sector === 'string' && input.sector.trim() ? input.sector.trim() : null
-            return formatHouseIndustries(book, await forBook(book, { sector }), { sector })
-        }, (err) => `Could not read the house's industries: ${err.message} — scan the market as you normally would.`, LOG),
+            return formatHouseIndustries(book, await forBook(book, { sector }), { sector, words })
+        }, (err) => words.failed(err), LOG),
     }
 }

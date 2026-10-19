@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { _formatCoverage, _parseCoverageRequest } from '../../services/agents/portfolio.agent.service.js'
+import { _formatCoverage, _parseCoverageRequest, _cleanScreenRequest, makeCoverageHandler } from '../../services/agents/portfolio.agent.service.js'
 
 // Atlas P4d — get_coverage read (Analyst→Atlas pull): render coverage for construction (pure).
 
@@ -27,32 +27,43 @@ test('missing fields degrade gracefully (no PT / no gap / no thesis / unrated)',
     assert.doesNotMatch(out, /our PT/)
 })
 
-// ── grouped by sleeve ─────────────────────────────────────────────────────────
-// Atlas builds sector sleeves, and read as a flat list it had to guess which sleeve each researched
-// name belonged to — from the ticker. The Analyst records the sector; group on it.
-test('names are grouped under the sector the Analyst researched them for', () => {
+// ── grouped by sleeve — a sleeve is a GICS sub-industry (atlas-industry-sleeves.md, 2026-10-19) ──────
+const SUBS = {
+    NVDA: { sub_code: '45301020', sub_industry: 'Semiconductors', sector: 'Information Technology' },
+    AVGO: { sub_code: '45301020', sub_industry: 'Semiconductors', sector: 'Information Technology' },
+    XOM:  { sub_code: '10102010', sub_industry: 'Integrated Oil & Gas', sector: 'Energy' },
+}
+test('names are grouped under their GICS sub-industry, one heading each', () => {
     const out = _formatCoverage([
         { symbol: 'NVDA', rating: 'buy',  sector: 'Technology' },
         { symbol: 'XOM',  rating: 'buy',  sector: 'Energy' },
-        { symbol: 'MSFT', rating: 'hold', sector: 'Technology' },
-    ])
-    const tech = out.indexOf('Technology:')
-    const nrgy = out.indexOf('Energy:')
-    assert.ok(tech > -1 && nrgy > -1, 'both sector headings present')
-    assert.ok(tech < out.indexOf('NVDA') && out.indexOf('NVDA') < nrgy, 'NVDA sits under Technology')
-    assert.ok(nrgy < out.indexOf('XOM'), 'XOM sits under Energy')
-    // MSFT joins the existing Technology block rather than opening a second one
-    assert.equal(out.match(/^Technology:$/gm).length, 1)
-    assert.ok(out.indexOf('MSFT') < nrgy)
+        { symbol: 'AVGO', rating: 'hold', sector: 'Technology' },
+    ], { subs: SUBS })
+    const semis = out.indexOf('Semiconductors (45301020) [Information Technology]:')
+    const oil   = out.indexOf('Integrated Oil & Gas (10102010) [Energy]:')
+    assert.ok(semis > -1 && oil > -1, 'both industry headings present')
+    assert.ok(semis < out.indexOf('NVDA') && out.indexOf('NVDA') < oil, 'NVDA sits under Semiconductors')
+    assert.ok(oil < out.indexOf('XOM'))
+    assert.equal(out.match(/^Semiconductors \(45301020\)/gm).length, 1, 'AVGO joins the same heading')
+    assert.ok(out.indexOf('AVGO') < oil)
 })
 
-test('a sector-less name gets its own bucket, always last', () => {
+test('a name the GICS table does not know sits under its sector, marked, after the industries; no sector at all is last', () => {
     const out = _formatCoverage([
-        { symbol: 'ABC' },                              // no sector
+        { symbol: 'ABC' },
+        { symbol: 'ZZZ', sector: 'Energy' },
         { symbol: 'XOM', sector: 'Energy' },
-    ])
-    assert.match(out, /Unclassified \(no sector recorded/)
-    assert.ok(out.indexOf('Energy:') < out.indexOf('Unclassified'), 'the unclassified bucket comes last')
+    ], { subs: SUBS })
+    assert.match(out, /Energy — industry not in the house's GICS table/)
+    assert.match(out, /Unclassified \(no industry or sector recorded/)
+    assert.ok(out.indexOf('Integrated Oil & Gas') < out.indexOf('Energy — industry not'), 'industries first')
+    assert.ok(out.indexOf('Energy — industry not') < out.indexOf('Unclassified'), 'the unclassified bucket comes last')
+})
+
+test('an empty industry read names the sleeve to source, by its code', () => {
+    const out = _formatCoverage([], { industry: { code: '45301020', name: 'Semiconductors' } })
+    assert.match(out, /No house coverage yet in Semiconductors \(45301020\)/)
+    assert.match(out, /"industry_code": "45301020"/)
 })
 
 test('a sleeve with nothing researched is not fillable from another sector', () => {
@@ -73,23 +84,47 @@ test('a long thesis is truncated', () => {
 })
 
 // ── the gap Atlas could not see ─────────────────────────────────────────────
-test('names the sectors coverage has NOTHING in — an absence is not on the page', () => {
-    // The reported behaviour: Atlas built entirely from existing coverage and never screened. Using
-    // coverage first is correct; NOT screening is correct only if every targeted sleeve had a name
-    // behind it. The empty case already ended in a hard instruction, but the PARTIAL case had none —
-    // so a book covered in two sectors read as "you have what you need".
-    const out = _formatCoverage([{ symbol: 'NVDA', sector: 'Technology', rating: 'buy', status: 'active' }])
-    assert.match(out, /NO COVERAGE AT ALL IN:/)
-    assert.match(out, /Healthcare/)
-    assert.match(out, /Utilities/)
-    // The sleeve is SOURCED (2026-09-14): one <screen_request> per empty sleeve runs the Argus →
-    // Prometheus hop on the server; <coverage_request> stays for a name the user asked for by ticker.
-    assert.match(out, /<screen_request> per such sleeve/)
-    assert.match(out, /<coverage_request> for it/)
-    // A covered sector must not be reported as a gap.
-    assert.doesNotMatch(out.split('NO COVERAGE AT ALL IN:')[1], /Technology/)
+test('a PARTIAL read still says what to do about a sleeve with no heading — an absence is not on the page', () => {
+    // The reported behaviour: Atlas built entirely from existing coverage and never screened. The empty case ends in
+    // a hard instruction; the partial one has to as well, or two covered industries read as "you have what you need".
+    // (It listed the uncovered SECTORS until 2026-10-19; a sleeve is an industry now, and 163 of them are no list.)
+    const out = _formatCoverage([{ symbol: 'NVDA', rating: 'buy', status: 'active' }], { subs: SUBS })
+    assert.match(out, /no heading here has nothing researched behind it yet: emit a <screen_request> for it \(its industry_code \+ lens\)/)
+    assert.match(out, /<coverage_request>/)
     // The failure worth naming outright: bending the architecture to fit what happens to be researched.
     assert.match(out, /shrink the sleeve to fit what happens to be covered/)
+    assert.match(out, /neighbouring industry's names/)
+})
+
+// ── get_coverage by industry ─────────────────────────────────────────────────
+test('get_coverage with `industry`: only that sub-industry\'s names, not narrowed by sector; unknown industry said', async () => {
+    let asked = null
+    const handler = makeCoverageHandler({
+        coverage: async (q) => { asked = q; return [{ symbol: 'NVDA', rating: 'buy' }, { symbol: 'XOM', rating: 'buy' }, { symbol: 'AVGO', rating: 'hold' }] },
+        subsOf:   async () => SUBS,
+        readSub:  async (k) => (k === 'Semiconductors' || k === '45301020' ? { sub: { code: '45301020', name: 'Semiconductors' } } : null),
+    })
+    const out = await handler({ industry: 'Semiconductors', sector: 'Technology', school: 'quality-value' })
+    assert.deepEqual(asked, { status: 'active', sector: null, school: 'quality-value' })
+    assert.match(out, /NVDA/)
+    assert.match(out, /AVGO/)
+    assert.doesNotMatch(out, /XOM/)
+    assert.match(await handler({ industry: 'Basket Weaving' }), /No GICS sub-industry "Basket Weaving"/)
+    // Without an industry it reads as before, by sector — grouped by industry all the same.
+    await handler({ sector: 'Energy' })
+    assert.equal(asked.sector, 'Energy')
+})
+
+test('a GICS table that cannot be read still answers — by sector', async () => {
+    const handler = makeCoverageHandler({ coverage: async () => [{ symbol: 'XOM', sector: 'Energy' }], subsOf: async () => { throw new Error('down') }, readSub: async () => null })
+    assert.match(await handler({}), /Energy — industry not in the house's GICS table/)
+})
+
+// ── <screen_request> carries the sleeve's GICS code ──────────────────────────
+test('a screen request with an 8-digit industry_code is enough on its own; anything else there is no code', () => {
+    assert.equal(_cleanScreenRequest({ industry_code: '45301020', lens: 'quality-value' }).industry_code, '45301020')
+    assert.equal(_cleanScreenRequest({ industry_code: 'Semiconductors', sector: 'Technology' }).industry_code, null)
+    assert.equal(_cleanScreenRequest({ industry_code: 'nope' }), null)
 })
 
 // ── schools display ───────────────────────────────────────────────────────────

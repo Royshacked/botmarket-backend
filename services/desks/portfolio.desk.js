@@ -209,6 +209,8 @@ export const portfolioDesk = {
                 portfolioName: portfolioState?.portfolioName ?? null,
                 sector:        sr.sector,
                 industry:      sr.industry ?? null,
+                // The sleeve's GICS sub-industry (atlas-industry-sleeves.md) — its names come from the house's GICS table.
+                industryCode:  sr.industry_code ?? null,
                 school:        sr.lens ?? statedMandate?.selection ?? mandate?.selection ?? null,
                 note:          sr.note ?? sr.constraints ?? null,
             }).then(r => { if (!r.ok) logger.info(LOG, 'sleeve not sourced', { sector: sr.sector, reason: r.reason }) })

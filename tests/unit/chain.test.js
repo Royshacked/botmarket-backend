@@ -235,6 +235,16 @@ test('a settled sleeve becomes Argus’s line, then the coverage is handed to At
     assert.equal(r.queued.at(-1).agent, 'portfolio')
 })
 
+test('an INDUSTRY sleeve settles under its industry and code — Atlas places by the sub-industry (2026-10-19)', async () => {
+    const r = rig()
+    const s = await r.sessions.getActive({ userId: 'u1' })
+    const sleeve = { userId: 'u1', sessionId: s.sessionId, sector: 'Information Technology', industry: 'Semiconductors', industryCode: '45301020', school: 'quality-value' }
+    await r.runner.sleeveSettled(sleeve, { covered: [], passed: ['TINY'], failed: [], unresolved: [], screened: 4 })
+    const [line, hand] = await rows(r.sessions, s)
+    assert.equal(line.content, 'Screened 4 for the Semiconductors (45301020) sleeve (quality-value) → none came into coverage (1 passed on (no edge)).')
+    assert.match(hand.content, /These sleeves came back with NOTHING screened: Semiconductors \(45301020\)\./)
+})
+
 test('a sleeve whose session is gone is declined — the caller posts the card instead', async () => {
     const r = rig()
     assert.equal(await r.runner.sleeveSettled({ userId: 'u1', sessionId: 'nope', sector: 'X' }, { covered: [], passed: [], failed: [], unresolved: [], screened: 0 }), false)

@@ -16,6 +16,7 @@ test('parses a full mandate block', () => {
         sector: 'Technology', style: 'quality-compounder', cap_band: 'large', constraints: 'net cash, ROIC > 15%', note: 'core-growth sleeve',
         lens: null,       // this block predates the schools — no selection school stated, so none crosses
         industry: null,   // no industry view held → Argus narrows the sector itself
+        industry_code: null,   // no GICS sleeve — the old sector request (atlas-industry-sleeves.md)
     })
 })
 
@@ -23,7 +24,7 @@ test('needs at least a sector OR a style (else null)', () => {
     assert.equal(_first('<screen_request>{ "cap_band": "large" }</screen_request>'), null)
     // style-only is enough
     assert.deepEqual(_first('<screen_request>{ "style": "dividend" }</screen_request>'),
-        { sector: null, style: 'dividend', cap_band: null, constraints: null, note: null, lens: null, industry: null })
+        { sector: null, style: 'dividend', cap_band: null, constraints: null, note: null, lens: null, industry: null, industry_code: null })
     // sector-only is enough
     assert.equal(_first('<screen_request>{ "sector": "Energy" }</screen_request>').sector, 'Energy')
 })
