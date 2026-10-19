@@ -581,7 +581,7 @@ const DEBRIS_LINE = /^[ \t]*\((?:no )?final(?: answer)?\)[ \t]*$/gim
 // A stray token in angle brackets (2026-10-19): Argus's reply opened "<չ>\nThe best fit…". Only brackets around one to
 // four NON-ASCII characters, or a special token's `<|name|>` — a tag, "<5%" or "a <-> b" is never that shape. Its
 // spaces go with it, so a reply that opened with one starts on its first word.
-const DEBRIS_TOKEN = /[ \t]*(?:<[^\x00-\x7F<>]{1,4}>|<\|[a-z_]{1,32}\|>)[ \t]*/g
+const DEBRIS_TOKEN = /[ \t]*(?:<[\u0080-￿]{1,4}>|<\|[a-z_]{1,32}\|>)[ \t]*/g
 
 /** The stray tokens and marker lines out, then a paragraph identical to the one before it dropped. Prose is otherwise untouched. */
 export function dropDebris(text) {
