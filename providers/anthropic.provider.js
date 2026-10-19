@@ -5,6 +5,7 @@ import { isToolError, toolErrorText } from '../services/toolResult.util.js'
 import { logger } from '../services/logger.service.js'
 import { config } from '../services/config.js'
 import { webSearchTypeFor } from '../services/llmModels.js'
+import { stallGuard } from './streamStall.js'
 
 const LOG = '[anthropic]'
 
@@ -108,6 +109,7 @@ export async function streamAnthropicWithTools({
     reasoningEffort,
     signal,
     client = _defaultClient,   // the test seam — a scripted client drives the loop without a network
+    stall = stallGuard,        // a stream that stops sending is cut (streamStall) — a seam for tests
 }) {
     const messages   = _normalizeMessages(promptOrMessages)
     const historyLen = messages.length
@@ -133,6 +135,8 @@ export async function streamAnthropicWithTools({
         // `none` is the one tool_choice extended thinking accepts besides `auto`. See TOOL_BUDGET_LANDING.
         const landing = i === maxContinuations - 1 && finalTools.length > 0
 
+        // Cut a round that stops sending (streamStall) — the stream rides the guard's signal.
+        const guard = stall({ signal })
         const stream = client.messages.stream({
             model,
             system:     systemPrompt,
@@ -141,7 +145,7 @@ export async function streamAnthropicWithTools({
             ...(landing ? { tool_choice: { type: 'none' } } : {}),
             max_tokens: reasoning ? THINKING_MAX_TOKENS : DEFAULT_MAX_TOKENS,
             ...(reasoning ?? {}),
-        }, signal ? { signal } : undefined)
+        }, { signal: guard.signal })
 
         const contentBlocks = []
         let stopReason  = null
@@ -150,6 +154,7 @@ export async function streamAnthropicWithTools({
 
         try {
             for await (const event of stream) {
+                guard.touch()
                 if (event.type === 'message_start') {
                     const u = event.message?.usage
                     // `cache_creation` (the write split by TTL) rides along because a 1-hour write
@@ -191,6 +196,8 @@ export async function streamAnthropicWithTools({
                 }
             }
         } catch (err) {
+            // The stall, not the user: fail the turn with a clear reason rather than pass a cut reply off as whole.
+            if (guard.stalled) { logger.warn(LOG, `stream stalled on ${model}`, guard.error.message); throw guard.error }
             // A user-initiated stop aborts the underlying request — return the
             // partial text cleanly rather than throwing.
             if (signal?.aborted || err?.name === 'AbortError') {
@@ -198,6 +205,8 @@ export async function streamAnthropicWithTools({
                 return contentBlocks.filter(Boolean).filter(b => b.type === 'text').map(b => b.text || '').join('')
             }
             throw err
+        } finally {
+            guard.done()
         }
 
         if (turnUsage) onUsage?.(turnUsage, model)
