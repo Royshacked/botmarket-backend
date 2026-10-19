@@ -1300,6 +1300,11 @@ Axl's prompt routes every single trade to `assist`. Mentor asks whether the user
 offers Argus and routes `scan` — and a route FROM Mentor TO Argus presets Argus's single-pick mode (`handBackOf`, applied
 in sessionTurn's `land`), so the pick rides the chain back to Mentor as before. Live-checked on the real model: Axl →
 Mentor → Argus `{ handoff: true, handoffTo: 'mentor' }`.
+**History resumes (Roy, 2026-10-19).** Design §3.5 said History "opens any archived session read-only, or resumes it";
+only the first half was built, so a past session opened with no input. `POST /api/sessions/:id/resume` puts the live
+session away exactly as New session does (`putAway`, shared with `startNew`) and makes the archived one live, floor and
+desk state as left; the open view in History has the input, and writing there resumes it and posts the message to it
+(`useSession.resume` — to the resumed id, not the ref). Not while a reply runs in the current chat.
 
 ## 11. Phase 9 — Migration (`scripts/migrate-unified-chat.mjs`)
 

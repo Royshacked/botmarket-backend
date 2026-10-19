@@ -108,25 +108,69 @@ export function makeSessionService({ getDb = _defaultGetDb, events = silentEvent
         const db  = await getDb()
         const uid = String(userId)
         const current = await db.collection(SESSIONS).findOne({ userId: uid, scope, status: 'active' })
-        if (current && (current.seq > 0 || force)) {
-            const said  = discard ? [] : await db.collection(MESSAGES)
-                .find({ sessionId: current.sessionId, role: 'user' }).sort({ seq: 1 }).limit(20).toArray()
-            const title = current.title ?? sessionTitle(said)
-            if (discard || title === UNTITLED) {
-                await db.collection(MESSAGES).deleteMany({ sessionId: current.sessionId })
-                await db.collection(SESSIONS).deleteOne({ sessionId: current.sessionId, userId: uid, status: 'active' })
-            } else {
-                const now = Date.now()
-                await db.collection(SESSIONS).updateOne(
-                    { sessionId: current.sessionId, userId: uid, status: 'active' },
-                    { $set: { status: 'archived', archivedAt: now, updatedAt: now, title } },
-                )
-            }
-        }
+        if (current && (current.seq > 0 || force)) await putAway(db, current, uid, { discard })
         const next = await getActive({ userId, scope })
         // Every open screen moves to the new session together — a phone and a laptop never sit in two.
         if (current && next && current.sessionId !== next.sessionId) events.state(uid, current.sessionId, { archived: true, next: next.sessionId })
         return next
+    }
+
+    /**
+     * Put the live session away: archived under the title the user's words give it, or deleted outright when it holds
+     * nothing worth keeping (`discard` — a commit resolved it — or an "Untitled" one the user said nothing in).
+     */
+    async function putAway(db, current, uid, { discard = false } = {}) {
+        const said  = discard ? [] : await db.collection(MESSAGES)
+            .find({ sessionId: current.sessionId, role: 'user' }).sort({ seq: 1 }).limit(20).toArray()
+        const title = current.title ?? sessionTitle(said)
+        if (discard || title === UNTITLED) {
+            await db.collection(MESSAGES).deleteMany({ sessionId: current.sessionId })
+            await db.collection(SESSIONS).deleteOne({ sessionId: current.sessionId, userId: uid, status: 'active' })
+            return
+        }
+        const now = Date.now()
+        await db.collection(SESSIONS).updateOne(
+            { sessionId: current.sessionId, userId: uid, status: 'active' },
+            { $set: { status: 'archived', archivedAt: now, updatedAt: now, title } },
+        )
+    }
+
+    /**
+     * Pick an ARCHIVED session back up (History — design §3.5, "opens any archived session read-only, or resumes it";
+     * Roy, 2026-10-19). The live one is put away exactly as "New session" puts it away, and this one becomes live again,
+     * with its floor and its desks' state as it was left. Already live → returned as is.
+     * @returns {Promise<{ session: object } | { reason: 'not_found' }>}
+     */
+    async function resume({ sessionId, userId }) {
+        const db  = await getDb()
+        const uid = String(userId)
+        const id  = String(sessionId)
+        const target = await db.collection(SESSIONS).findOne({ sessionId: id, userId: uid }, { projection: { _id: 0, status: 1, scope: 1 } })
+        if (!target) return { reason: 'not_found' }
+        const scope = target.scope ?? 'main'
+        if (target.status === 'active') return { session: await db.collection(SESSIONS).findOne({ sessionId: id }, { projection: HEADER_PROJECTION }) }
+
+        // Twice at most: a screen that created a fresh live session between the put-away and the switch (getActive
+        // upserts) is put away too — the one-live-session index refuses the switch until it is.
+        let previous = null
+        for (let attempt = 0; attempt < 2; attempt++) {
+            const current = await db.collection(SESSIONS).findOne({ userId: uid, scope, status: 'active' })
+            if (current) { await putAway(db, current, uid); previous ??= current.sessionId }
+            try {
+                const now = Date.now()
+                const res = await db.collection(SESSIONS).updateOne(
+                    { sessionId: id, userId: uid, status: 'archived' },
+                    { $set: { status: 'active', archivedAt: null, updatedAt: now } },
+                )
+                if (!res.matchedCount) return { reason: 'not_found' }   // deleted meanwhile
+                break
+            } catch (err) {
+                if (err?.code !== 11000 || attempt === 1) throw err
+            }
+        }
+        // Every open screen moves to it together, as with "New session".
+        if (previous) events.state(uid, previous, { archived: true, next: id })
+        return { session: await db.collection(SESSIONS).findOne({ sessionId: id }, { projection: HEADER_PROJECTION }) }
     }
 
     /**
@@ -355,7 +399,7 @@ export function makeSessionService({ getDb = _defaultGetDb, events = silentEvent
         return r.matchedCount ? { ok: true } : { reason: 'not_found' }
     }
 
-    return { ensureIndexes, getActive, findActive, startNew, list, remove, get, append, messagesSince, messagesForAgent, allMessagesSince, removeMessages, setAgentState, setSealedThrough, setChain, findRunningChains, setFloor, setSummary, addLink }
+    return { ensureIndexes, getActive, findActive, startNew, resume, list, remove, get, append, messagesSince, messagesForAgent, allMessagesSince, removeMessages, setAgentState, setSealedThrough, setChain, findRunningChains, setFloor, setSummary, addLink }
 }
 
 export const sessionService = makeSessionService({ events: sessionEvents })

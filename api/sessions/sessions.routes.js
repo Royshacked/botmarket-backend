@@ -2,7 +2,7 @@ import express         from 'express'
 import { log }         from '../../middleware/logger.middleware.js'
 import { requireAuth } from '../../middleware/auth.middleware.js'
 import { agentLimiter } from '../../middleware/rateLimit.middleware.js'
-import { getActiveSession, startNewSession, listSessions, getSessionMessages, postSessionTurn, editInSession, continueSession, actInSession, editSessionState, deleteSession } from './sessions.controller.js'
+import { getActiveSession, startNewSession, listSessions, getSessionMessages, postSessionTurn, editInSession, continueSession, actInSession, editSessionState, deleteSession, resumeSession } from './sessions.controller.js'
 
 const router = express.Router()
 
@@ -15,6 +15,8 @@ router.post('/new',          log, startNewSession)
 router.get('/:id/messages',  log, getSessionMessages)
 // History's delete — an archived session and its rows (the live one is refused).
 router.delete('/:id',        log, deleteSession)
+// History's resume — an archived session becomes the live one (the live one is put away, as New session does).
+router.post('/:id/resume',   log, resumeSession)
 // A turn spends model calls — the same per-session budget as every desk's /stream (agentLimiter).
 router.post('/:id/turn',     agentLimiter, log, postSessionTurn)
 router.post('/:id/edit',     log, editInSession)
