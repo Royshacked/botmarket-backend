@@ -87,3 +87,9 @@ Existing checklist: `docs/live-verify-checklist.md` (pending for Themis, the ord
   compromise to be migrated off.
 - Multi-instance. Single-process is a fine deployment for this app; the risk was that the
   constraint was undocumented, and it now isn't.
+
+---
+
+## Features (not trust gaps)
+
+- [ ] **Currencies (FX) trading.** Added by Roy, 2026-10-19 — scope not written yet.
