@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { memDb } from '../helpers/memDb.js'
 import { makeSessionService } from '../../services/session.service.js'
 import { makeAgentContextService } from '../../services/agentContext.service.js'
-import { makeSessionTurn } from '../../services/desks/sessionTurn.js'
+import { makeSessionTurn, ownWords } from '../../services/desks/sessionTurn.js'
 import { foldPlan, makeSummarizer } from '../../services/desks/summarize.js'
 import { DESK_DEFS } from '../../services/desks/index.js'
 
@@ -70,6 +70,22 @@ test('a trade starts at Mentor — a `trade` route hands the floor to Mentor, ne
     const h = await sessions.get({ sessionId: s.sessionId, userId: 'u1' })
     assert.equal(h.floor, 'mentor')
     assert.equal(h.agentState?.scanner, undefined)
+})
+
+test('a route from Axl with no opening carries the user’s own words, so the desk speaks first (Roy, 2026-10-19)', async () => {
+    const { turn, sessions } = rig({ run: () => ({ reply: 'Mentor will take it from here', route: 'assist' }) })
+    const s = await sessions.getActive({ userId: 'u1' })
+    const out = await turn({ user, sessionId: s.sessionId, agent: 'axl', text: '  i want to talk to the trader ' })
+    assert.equal(out.payload.opening, 'i want to talk to the trader')
+})
+
+test('ownWords: Axl only, never over an opening the model wrote, never without a route or words', () => {
+    const r = { route: 'assist', opening: null }
+    assert.equal(ownWords(r, 'axl', 'trade it').opening, 'trade it')
+    assert.equal(ownWords({ route: 'assist', opening: 'Long NVDA' }, 'axl', 'go').opening, 'Long NVDA')
+    assert.equal(ownWords(r, 'mentor', 'yes'), r)               // a desk's own route: "yes" is no opening
+    assert.equal(ownWords({ route: null, opening: null }, 'axl', 'hi').opening, null)
+    assert.equal(ownWords(r, 'axl', '   '), r)
 })
 
 test('Mentor sending the user to Argus presets Argus to find ONE name and hand it back to Mentor', async () => {

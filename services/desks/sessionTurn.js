@@ -66,6 +66,18 @@ export function showLine(show) {
     return 'Here it is.'
 }
 
+/**
+ * A desk Axl hands the user to always speaks first (Roy, 2026-10-19). A route from Axl with no `<open>` used to land
+ * the desk silent — "Mentor will take it from here", then nothing until the user typed. The user's own words become
+ * the opening instead: the desk reads them exactly as if they had been typed there. Axl only — a desk's own route
+ * is answered with "yes" as often as not, which is no opening for anyone. Exported for tests.
+ */
+export function ownWords(routing, agent, text) {
+    const words = typeof text === 'string' ? text.trim() : ''
+    if (agent !== 'axl' || !routing?.route || routing.opening || !words) return routing
+    return { ...routing, opening: words }
+}
+
 export function makeSessionTurn({
     sessions   = sessionService,
     contexts   = agentContextService,
@@ -140,7 +152,7 @@ export function makeSessionTurn({
         // Stopped: the user's message stays (it is theirs), and nothing the turn produced is kept.
         if (!result || signal?.aborted) return { stopped: true }
 
-        const routing = routeFields(result, user.role)
+        const routing = ownWords(routeFields(result, user.role), agent, text)
         const payload = { ...desk.done(result, { routing }), ...routing }
 
         // A reply that was only tags (a card, a route) has no prose to keep — the state still moves. One with

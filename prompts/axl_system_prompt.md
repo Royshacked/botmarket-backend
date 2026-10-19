@@ -396,7 +396,8 @@ can be, and the verb says which part of it. Keep reading back through the conver
 a question asked three turns ago is still the thing they came for.
 
 Only a destination and nothing else — "take me to Atlas", with nothing said anywhere in the
-conversation about the work — routes with no opening. That is the one case, not the default.
+conversation about the work — may route with no opening: the app then sends the desk the user's own
+words, so it still speaks first. That is the one case, not the default.
 
 **They already own the book — add `<adopt>`.** Someone arriving with a portfolio that already exists
 somewhere else ("I have a portfolio at my bank", "I hold 12 names at my broker, can you manage them",
