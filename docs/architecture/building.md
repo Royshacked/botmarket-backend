@@ -36,7 +36,7 @@ Every desk streams over Server-Sent Events; every router applies `requireAuth` +
 
 | Agent | Route file | Endpoint | Controller |
 |---|---|---|---|
-| Axl | `api/axl/axl.routes.js` | `POST /api/axl/stream` | `streamAxl` |
+| Axl | `api/sessions/sessions.routes.js` | `POST /api/sessions/:id/turn` (session only — unified chat phase 7) | `postSessionTurn` → `services/desks/axl.desk.js` |
 | Mentor | `api/mentor/mentor.routes.js` | `POST /api/mentor/stream` | `streamMentor` |
 | Portfolio | `api/portfolio/portfolio.routes.js` | `POST /api/portfolio/stream` | `streamPortfolio` |
 | Scanner | `api/scanner/scanner.routes.js` | `POST /api/scanner/stream` | `streamScanner` |
@@ -60,8 +60,10 @@ writes `event: <name>\ndata: <json>\n\n`.
 - **Analyst:** `done` → `{ reply, coverage, phase }`
 - **Strategy:** `done` → `{ reply, views, phase }`
 
-Client SSE plumbing: `src/services/userPrompt/userPrompt.service.remote.js` posts JSON and
-consumes events via `postSSE` + `buildStreamHandlers`.
+Server side, every desk's `/stream` is one `makeDeskStream()` (`api/_shared/deskStream.util.js`):
+the body is `parseDeskTurn` (messages required), the routing fields are appended to every `done`
+above. Client SSE plumbing: each desk's `*.service.remote.js` posts through `src/services/agentStream.js`
+`streamAgent`, which consumes events via `postSSE` + `buildStreamHandlers`.
 
 ---
 
@@ -272,8 +274,8 @@ Orchestrated by `pages/MainPage.jsx`.
 | Scanner | `cmps/ScannerPanel/ScannerPanel.jsx` → `cmps/Radar/*` | `handleGenerateList` → scan CRUD |
 | Analyst | `cmps/AnalystPanel/*` | coverage CRUD (`POST /api/analyst/coverage`) |
 
-A desk's live emit block drives the Generate button and a `__building__` preview
-(`deriveBuildingIdea`). Emitted/saved items surface in `cmps/TradeIdeas/*`
+A desk's live emit block drives its Generate button. (The `__building__` preview row in the ideas
+list belonged to the archived idea chat and went with it, 2026-10-16.) Emitted/saved items surface in `cmps/TradeIdeas/*`
 (`TradeIdeasList`, the shared `EntityCard` shell with its status dropdown — every kind's card is
 built on it — `IdeaDetail`, `ConditionTree` renders the AND/OR tree). Dialogs: **OrderConfirmDialog** (idea hit → order plan), **PreEntryDialog**
 (arm-time already-satisfied), plus Delete/ClosePosition/EditOrders dialogs.
@@ -292,5 +294,5 @@ trees          services/conditionTree.service.js
 persistence    api/trade-ideas/tradeIdeas.{routes,controller,service}.js
 arming         tradeIdeas.service.updateIdea  +  monitoring/preflightEntry.js
 models         services/llmModels.js  (+ the spend ceiling in services/agentUtils.js)
-frontend       src/pages/MainPage.jsx  +  src/cmps/{ChatPanel,PortfolioPanel,ScannerPanel,AnalystPanel,TradeIdeas}/*
+frontend       src/pages/MainPage.jsx  +  src/cmps/{MentorPanel,PortfolioPanel,ScannerPanel,AnalystPanel,TradeIdeas}/*
 ```

@@ -14,11 +14,12 @@ import { dirname, join } from 'path'
 
 import { getFundamentals, getEarnings, getStockPeers, getSectorSnapshot, getMacroSnapshot } from '../../providers/fmp.provider.js'
 import { getSecFilings } from '../../providers/sec.provider.js'
-import { makePromptLoader, stripEmitTags, makeToolHandler, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, BREVITY_RULE, VENUE_RULE, buildStandingProposalRule, COMMON_TOOL_HANDLERS, cachedBlock, buildDeskMessages } from '../agentUtils.js'
+import { makePromptLoader, cleanReply, makeToolHandler, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, BREVITY_RULE, VENUE_RULE, buildStandingProposalRule, COMMON_TOOL_HANDLERS, cachedBlock, normalizeMessages } from '../agentUtils.js'
 import { makeTradingContextHandlers, buildVenueSection, TRADING_CONTEXT_TOOL_SPEC } from '../tools/tradingContext.tools.js'
 import { makeMarketHoursHandlers, MARKET_HOURS_TOOL_SPEC } from '../tools/marketHours.tools.js'
 import { buildTagCaptures } from '../llmStream.util.js'
-import { makeRouteCapture, ROUTE_TAGS, buildRouteRule } from '../routing.util.js'
+import { DESKS } from '../desks/registry.js'
+import { makeRouteCapture, buildRouteRule } from '../routing.util.js'
 import { VALUATION_TOOLS, VALUATION_TOOL_HANDLERS } from '../tools/valuation.tools.js'
 import { logger } from '../logger.service.js'
 
@@ -27,7 +28,7 @@ const LOG         = '[analystAgent]'
 const QUICKREAD_LOG = '[analystAgent-quickread]'   // its own ledger row — see chatStream
 const PROMPT_PATH = join(__dirname, '../../prompts/analyst_system_prompt.md')
 const _systemPrompt = makePromptLoader(PROMPT_PATH, LOG)
-const MAX_RECENT_MESSAGES = 8
+const MAX_MESSAGES = DESKS.analyst.maxMessages
 
 // QUICK READ is a MODE of Prometheus, not a desk of its own — the same shape as Argus's hand-off
 // module (scanner_mode_handoff.md): the spine stays, and on a quick-read turn one more cached block
@@ -84,7 +85,7 @@ const TOOL_HANDLERS = {
 export const analystAgentService = { chatStream }
 
 async function chatStream({
-    messages, userPrompt, chatState = {}, seed = null, audience = null, mode = MODES.COVERAGE,
+    messages, chatState = {}, seed = null, audience = null, mode = MODES.COVERAGE,
     model: requestedModel, reasoningEffort, userId,
     onToken, onToolStart, onReasoning, onPhase, onChart, signal,
     _run = runAgentStream,   // the shared contract-test seam — see runAgentStream in agentIO.js
@@ -95,7 +96,7 @@ async function chatStream({
     // the system prompt: free cash moves whenever anything fills, so a volatile system block
     // would sit ahead of the whole conversation in the cache prefix. See buildVenueSection.
     const builtMessages = attachTurnContext(
-        attachTurnContext(_buildMessages({ messages, userPrompt }), _buildTurnContext(chatState)),
+        attachTurnContext(normalizeMessages(messages, MAX_MESSAGES), _buildTurnContext(chatState)),
         await _venueSection(userId))
 
 
@@ -113,7 +114,6 @@ async function chatStream({
         log: mode === MODES.QUICKREAD ? QUICKREAD_LOG : LOG, requestedModel, userId, messages: builtMessages, systemPrompt,
         tools: TOOLS, toolHandlers: { ...TOOL_HANDLERS, ...makeTradingContextHandlers(userId) },
         reasoningEffort, signal, onToken, tagCaptures, onToolStart, onReasoning, onChart,
-        meta: { userPrompt },
     })
 
     const { reply, coverage } = _parseAnalystResponse(raw)
@@ -132,7 +132,7 @@ async function chatStream({
 // parsed draft (null when absent, malformed, or missing a symbol). A "no-edge" turn emits no block.
 export function _parseAnalystResponse(raw) {
     const text  = raw ?? ''
-    const reply = stripEmitTags(text, ['coverage', 'phase', 'quickread', ...ROUTE_TAGS]).trim()
+    const reply = cleanReply(text)
     return { reply, coverage: _cleanDraft(parseEmitBlock(text, 'coverage', LOG)) }
 }
 
@@ -277,6 +277,3 @@ export function _buildTurnContext(chatState) {
         : ''
 }
 
-function _buildMessages({ messages, userPrompt }) {
-    return buildDeskMessages({ messages, userPrompt, max: MAX_RECENT_MESSAGES })
-}

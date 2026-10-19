@@ -103,7 +103,7 @@ export async function isAdminUser(id) {
     if (!id) return false
     const db  = await getDb()
     const doc = await db.collection(COLLECTION).findOne({ id: String(id) }, { projection: { role: 1, isAdmin: 1, _id: 0 } })
-    return !!doc && (doc.role === 'admin' || (doc.role == null && doc.isAdmin === true))
+    return !!doc && roleOf(doc) === 'admin'
 }
 
 // The same answer, remembered for a few minutes. Since the house models (2026-09-21) every desk
@@ -123,6 +123,14 @@ export async function isAdminUserCached(id, _lookup = isAdminUser) {
     return value
 }
 export function _resetAdminCache() { _adminCache.clear() }
+
+/**
+ * A user document's role — the ONE rule, for the login token and for any server-side turn that acts as the
+ * user without a request (a chain step after a restart, a settled sleeve). `isAdmin` is the legacy flag.
+ */
+export function roleOf(doc) {
+    return doc?.role ?? (doc?.isAdmin ? 'admin' : 'trader')
+}
 
 export function stripUser(doc) {
     if (!doc) return doc

@@ -24,7 +24,8 @@
  */
 
 import { portfolioChatService } from '../api/portfolio/portfolioChat.service.js'
-import { postBotCard, cardActions } from '../api/chat/chat.service.js'
+import { cardActions } from '../api/chat/chat.service.js'
+import { postCard } from '../services/notifyCard.js'
 import { createPollLoop } from './pollLoop.js'
 import { withTimeout } from '../services/timeout.util.js'
 import { logger } from '../services/logger.service.js'
@@ -148,14 +149,16 @@ const _deps = {
     computeSignals: (portfolioId, userId) => portfolioChatService.computeReviewSignals(portfolioId, userId),
     setLifecycle:   (portfolioId, userId, patch) => portfolioChatService.setPortfolioLifecycle(portfolioId, userId, patch),
     notify:         _defaultNotify,
+    post:           postCard,
 }
 export function _setDeps(d) { Object.assign(_deps, d) }
 
 // Post the review card to social chat under the Atlas (portfolio) bot. The card action routes the
 // user into Atlas review mode. Best-effort — a notify failure must never wedge the loop.
-async function _defaultNotify(book, { reason, triggers }) {
+export async function _defaultNotify(book, { reason, triggers }) {
     logger.info(LOG, 'REVIEW CARD', { portfolioId: book.portfolioId, reason, triggers: triggers.length })
-    await postBotCard({
+    // Through postCard like every desk card — one transport, no exceptions (unified-chat plan phase 6).
+    await _deps.post({
         userId:  book.userId,
         content: _cardContent(book, reason, triggers),
         type:    'portfolio_review',
@@ -171,5 +174,5 @@ async function _defaultNotify(book, { reason, triggers }) {
         },
         botId:   'portfolio',
         actions: cardActions('Review portfolio'),
-    })
+    }, { tag: 'Review card', log: LOG })
 }

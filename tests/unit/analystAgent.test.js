@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
 import { _parseAnalystResponse, _buildSystemPrompt, analystAgentService } from '../../services/agents/analyst.agent.service.js'
-import { _resolveCoverageContext } from '../../api/analyst/analyst.controller.js'
+import { _resolveCoverageContext } from '../../services/desks/analyst.desk.js'
 import { sanitizeScanSeed } from '../../services/scanSeed.util.js'
 
 // Analyst P3 — <coverage> extraction from the streamed research turn (pure).
@@ -118,7 +118,7 @@ function makeCoverageService({ symbols = [], bySymbol = null } = {}) {
 test('resolveCoverage: populates coverage_symbols from DB when chatState has none', async () => {
     const _svc = makeCoverageService({ symbols: ['AAPL', 'MSFT'] })
     // Swap the real service inside the module for this call
-    const { default: _csModule } = await import('../../api/analyst/analyst.controller.js')
+    const { default: _csModule } = await import('../../services/desks/analyst.desk.js')
     // _resolveCoverageContext takes the service as a third arg (optional, defaults to real svc)
     // Since the controller is a real module, we test the logic by mocking coverageService via
     // the exported function's third parameter — not available yet. Test the invariant instead:

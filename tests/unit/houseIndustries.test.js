@@ -140,7 +140,7 @@ test('listForBook reads the stored assessments and the approved themes', async (
 
 // ── the tool Argus reads (argus-on-pythia.md §3.2) ───────────────────────────
 
-import { makeHouseIndustriesHandlers, normalizeBook, formatHouseIndustries, formatIndustryCompanies } from '../../services/tools/houseIndustries.tools.js'
+import { makeHouseIndustriesHandlers, normalizeBook, formatHouseIndustries, formatIndustryCompanies, ATLAS_WORDS } from '../../services/tools/houseIndustries.tools.js'
 import { TOOLS as SCANNER_TOOLS, scannerToolsForProfile, _wrapForGrounding } from '../../services/agents/scanner.agent.service.js'
 import { DISCOVERY_TOOLS, makeGroundingLedger, groundingTier } from '../../services/scanner.grounding.js'
 
@@ -290,4 +290,21 @@ test("the second-order read rides beside the first, clipped, neither preferred (
     assert.match(text, /via theme "Power" \(supplier link\): grid\n {8}who else the theme reaches: utilities next/)
     assert.match(text, /neither preferred/)
     assert.doesNotMatch(formatHouseIndustries('swing', [ENTRY({ second_order: null })]), /who else it reaches/)
+})
+
+// ── Atlas reads the same list, in its own words (atlas-industry-sleeves.md, 2026-10-19) ──────────────────────
+test('Atlas: the same list, read as candidate SLEEVES — never told to screen the market or that the tape ranks', async () => {
+    const entries = [{ code: '45301020', name: 'Semiconductors', sector: 'Information Technology', rated: true, thesis: 'Capex cycle', horizon: '3y' }]
+    const h = makeHouseIndustriesHandlers({ forBook: async () => entries, words: ATLAS_WORDS })
+    const out = await h.get_house_industries({ book: 'long_term' })
+    assert.match(out, /45301020 {2}Semiconductors/)
+    assert.match(out, /CANDIDATE SLEEVES — one GICS sub-industry each/)
+    assert.match(out, /AVOID: only when the user asks for it/)
+    assert.doesNotMatch(out, /screen_candidates|the tape still ranks/)
+    const empty = await makeHouseIndustriesHandlers({ forBook: async () => [], words: ATLAS_WORDS }).get_house_industries({ book: 'swing' })
+    assert.match(empty, /build the sleeves from the mandate/)
+    assert.match(await h.get_house_industries({ book: 'intraday' }), /pick the nearer one for this mandate's horizon/)
+    // Argus's words are unchanged by default.
+    const argus = await makeHouseIndustriesHandlers({ forBook: async () => entries }).get_house_industries({ book: 'long_term' })
+    assert.match(argus, /never pass them to `screen_candidates`/)
 })

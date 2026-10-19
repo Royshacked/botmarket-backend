@@ -13,9 +13,10 @@ import { dirname, join }  from 'path'
 
 import { runAgentStream } from '../agentIO.js'
 import { buildTagCaptures } from '../llmStream.util.js'
-import { makeRouteCapture, ROUTE_TAGS, buildRouteRule } from '../routing.util.js'
+import { DESKS } from '../desks/registry.js'
+import { makeRouteCapture, buildRouteRule } from '../routing.util.js'
 import { toolsFor }       from '../agentTools.registry.js'
-import { makePromptLoader, LANGUAGE_RULE, BREVITY_RULE, cachedBlock, buildDeskMessages, stripEmitTags } from '../agentUtils.js'
+import { makePromptLoader, LANGUAGE_RULE, BREVITY_RULE, cachedBlock, normalizeMessages, cleanReply } from '../agentUtils.js'
 import { AETHER_TOOL_SPECS, makeAetherToolHandlers } from '../tools/aether.tools.js'
 import { logger }         from '../logger.service.js'
 
@@ -23,7 +24,7 @@ const __dirname   = dirname(fileURLToPath(import.meta.url))
 const LOG         = '[aetherAgent]'
 const PROMPT_PATH = join(__dirname, '../../prompts/aether_system_prompt.md')
 const _systemPrompt = makePromptLoader(PROMPT_PATH, LOG)
-const MAX_RECENT_MESSAGES = 12
+const MAX_MESSAGES = DESKS.aether.maxMessages
 
 export const TOOLS = toolsFor({
     // Order is preserved exactly — prompt caching keys off the array prefix.
@@ -40,7 +41,7 @@ async function chatStream({
     _run = runAgentStream,
 }) {
     const systemPrompt  = _buildSystemPrompt()
-    const builtMessages = _buildMessages({ messages })
+    const builtMessages = normalizeMessages(messages, MAX_MESSAGES)
 
     // The shared routing tags: the user asked to be sent to another desk with a name (routing.util).
     const route = makeRouteCapture('aether')
@@ -51,7 +52,7 @@ async function chatStream({
         tagCaptures: buildTagCaptures({ ...route.captures }),
     })
 
-    const reply = stripEmitTags(raw ?? '', ROUTE_TAGS).trim()
+    const reply = cleanReply(raw)
     logger.info(LOG, 'chatStream done', { replyLength: reply.length })
     return { reply, ...route.result() }
 }
@@ -64,6 +65,3 @@ function _buildSystemPrompt() {
     ]
 }
 
-export function _buildMessages({ messages }) {
-    return buildDeskMessages({ messages, max: MAX_RECENT_MESSAGES })
-}

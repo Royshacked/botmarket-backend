@@ -1,0 +1,152 @@
+// Argus's commits and direct edits, run against the SESSION (unified-chat plan phase 8, K2/K3).
+//
+// The list is read from Argus's agentState — never from the client — and handed to the SAME service the scan
+// routes use (scanService.saveScan / updateScan). The action contract is mentor.actions.js's.
+//
+// THE PROMETHEUS READ is an edit, not an action. It runs for minutes (aetherBatchRead: one model call per name),
+// so it cannot hold the session lock a commit holds — a turn the user sends meanwhile ("drop MOS, add KLAC") must
+// still land. The client runs the read on its existing route and hands the rows back here, and the rows are
+// applied only to the list they were read for: a list that changed since answers `stale_read` (the panel's epoch,
+// on the server). A read can drop or annotate a name, never add one.
+
+import { scanService as defaultScans } from '../../../api/scanner/scan.service.js'
+import { scannerMode } from '../scannerMode.js'
+
+const TEXT_MAX = 600   // a read's `why` / `read` prose, as shown on the row
+const WORD_MAX = 40    // a read's verdict / net / direction / flag — one word each
+
+const _str  = (v, max = TEXT_MAX) => (typeof v === 'string' ? v.slice(0, max) : '')
+const _word = (v) => (typeof v === 'string' && v ? v.slice(0, WORD_MAX) : null)
+const _tick = (v) => String(v ?? '').trim().toUpperCase()
+const listOf  = (state) => (state?.pendingScan?.candidates?.length ? state.pendingScan : null)
+const resultOf = (doc, state) => ({ scan: doc, profile: doc?.profile ?? state?.profile ?? 'trading' })
+
+/** The scan as it is saved: the list, the lens it was cut under, and — for a radar cut — the board it came from. */
+function scanToSave(state) {
+    const scan = { ...state.pendingScan, profile: state.profile === 'investing' ? 'investing' : 'trading' }
+    // A radar cut is named apart so the next cut can hold back its names; its run ids are what "unless a new event
+    // names it" is answered against tomorrow. Stamped here, where the mode is known.
+    if (state.radar === true) return { ...scan, source: 'aether', sourceRuns: Array.isArray(state.radarBoard?.runIds) ? state.radarBoard.runIds : [] }
+    return scan
+}
+
+export function makeScannerActions({ scans = defaultScans } = {}) {
+    return {
+        /** Save the list as a new scan. The cut is over once its list exists — the radar board goes with it. */
+        async generate({ user, state }) {
+            if (!listOf(state)) return { reason: 'nothing_to_commit' }
+            if (state.editingScanId) return { reason: 'not_new' }
+            const out = await scans.saveScan(scanToSave(state), user._id)
+            if (!out.ok) return { reason: 'save_failed' }
+            return {
+                // `profile` so the client can offer the research hand-off on an investing list.
+                result: resultOf(out.doc, state),
+                seal:   { kind: 'scan', entityIds: [out.doc.id], name: out.doc.thesis ?? null },
+                after:  null,
+            }
+        },
+
+        /**
+         * Update the saved list being refined. The desk STAYS on it for more refining (the panel's rule): the turns
+         * so far are sealed onto the scan, and the next update appends to the context it reopened.
+         */
+        async update({ user, state }) {
+            const id = state?.editingScanId ? String(state.editingScanId) : null
+            if (!id || !listOf(state)) return { reason: 'nothing_to_commit' }
+            const { period, thesis, direction, candidates } = state.pendingScan
+            const out = await scans.updateScan(id, { period, thesis, direction, candidates, profile: state.profile }, user._id)
+            if (!out.ok) return { reason: out.reason ?? 'save_failed' }
+            return {
+                result: resultOf(out.doc, state),
+                seal:   { kind: 'scan', entityIds: [id], name: out.doc.thesis ?? null, onlyIfEditing: true },
+                after:  { ...state, readCut: null },
+            }
+        },
+
+        /** Stop refining a saved list without updating it. */
+        async later({ state }) {
+            if (!state?.editingScanId) return { reason: 'nothing_to_commit' }
+            return { result: {}, after: null }
+        },
+    }
+}
+
+export const scannerActions = makeScannerActions()
+
+/**
+ * Apply a Prometheus read to the list it was read for. Pure. → `{ state }` or `{ reason }`.
+ *
+ * It REWRITES the list rather than annotating it, because the cut is the point: what the user generates should be
+ * what survived. What was refused is kept beside it (`readCut.dropped`), with the reason. NOTHING SURVIVING DOES
+ * NOT REWRITE — an empty list would take Generate off screen and strand the user; the verdict is shown over the
+ * untouched list instead. A name the read never reached keeps its place: a gap in the read, not a refusal.
+ * While a saved list is being refined, the list Argus refines from (`editList`) is rewritten with it — or the next
+ * turn would re-emit the names the read just dropped (phase 8a CR C3).
+ */
+export function applyRead(state, read) {
+    const list = listOf(state)
+    if (!list) return { reason: 'nothing_to_edit' }
+    const asked = Array.isArray(read?.tickers) ? read.tickers.map(_tick).filter(Boolean) : []
+    const rows  = Array.isArray(read?.rows) ? read.rows.filter(r => r && typeof r === 'object') : null
+    if (!asked.length || !rows) return { reason: 'invalid_edit' }
+    // The list this read was about must still be the list on the table — a turn since replaced it. Compared as
+    // sorted lists, so a repeated name cannot stand in for a missing one.
+    const now = list.candidates.map(c => _tick(c?.ticker))
+    if (JSON.stringify([...now].sort()) !== JSON.stringify([...asked].sort())) return { reason: 'stale_read' }
+
+    const byTicker = new Map(rows.map(r => [_tick(r.ticker), r]).filter(([t]) => now.includes(t)))
+    const kept = list.candidates
+        .filter(c => byTicker.get(_tick(c.ticker))?.keep !== false)
+        .map(c => {
+            const r = byTicker.get(_tick(c.ticker))
+            return r ? { ...c, prometheus: {
+                verdict:   _word(r.read?.verdict),
+                net:       _word(r.read?.net),
+                direction: _word(r.direction),
+                flag:      _word(r.flag),
+                why:       _str(r.why),
+                read:      _str(r.read?.read),
+            } } : c
+        })
+    const dropped = [...byTicker.values()].filter(r => r.keep === false)
+        .map(r => ({ ticker: _tick(r.ticker), why: _str(r.why), verdict: _word(r.read?.verdict), flag: _word(r.flag) }))
+    const rewritten = kept.length ? { ...list, candidates: kept } : null
+    return {
+        state: {
+            ...state,
+            ...(rewritten ? { pendingScan: rewritten, ...(state.editingScanId ? { editList: rewritten } : {}) } : {}),
+            readCut: { dropped, survived: kept.length > 0 },
+        },
+    }
+}
+
+/**
+ * A direct edit (K3): `{ profile }` — the lens; `{ read: { tickers, rows } }` — a Prometheus read of the list;
+ * `{ fresh: true, profile? }` — a CLEAN table (phase 8d): the list in progress, the saved list being edited and its
+ * markers go, the lens stays (or is the one given). A radar cut starts on one — it is its own conversation, and a cut
+ * landing on a list being edited would make Update overwrite that saved list with the radar's names. The client asks
+ * before putting work aside.
+ * The angle chips are not an edit: they compose the next turn's message, and that turn is the commit.
+ */
+export function scannerApplyEdit(state, edit = {}) {
+    if (edit.fresh === true) {
+        if ('profile' in edit && edit.profile !== 'trading' && edit.profile !== 'investing') return { reason: 'invalid_edit' }
+        const profile = 'profile' in edit ? edit.profile : state?.profile
+        return { state: { ...scannerMode({ profile }), pendingScan: null, editingScanId: null, readCut: null }, dropMarkers: true }
+    }
+    if ('profile' in edit) {
+        if (edit.profile !== 'trading' && edit.profile !== 'investing') return { reason: 'invalid_edit' }
+        // A hand-off asks for ONE tradeable name — the lens is locked to trading there.
+        if (state?.handoff === true && edit.profile !== 'trading') return { reason: 'invalid_edit' }
+        // The lens can be chosen before the first message, with no state yet.
+        return { state: { ...(state ?? scannerMode({})), profile: edit.profile } }
+    }
+    if ('read' in edit) return applyRead(state, edit.read)
+    return { reason: 'invalid_edit' }
+}
+
+// Argus's refusals, in its own words.
+export const SCANNER_REASONS = {
+    stale_read:   [409, 'The list changed while Prometheus was reading — read it again'],
+    save_failed:  [500, 'Could not save the list'],
+}

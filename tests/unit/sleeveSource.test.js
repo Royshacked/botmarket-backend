@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 
 import {
     sourceSleeve, buildSleeveSourced, screenFiltersFor, pendingSleeves, _resetSleeves, SCHOOL_SCREEN, SLEEVE_HITS,
+    onSleeveSettled, sleeveOutcome, industryPick,
 } from '../../services/sleeveSource.service.js'
 import { researchOpening } from '../../services/researchRun.service.js'
 
@@ -261,4 +262,130 @@ test('an industry the house rates AVOID never leads a sleeve, even through a lon
     assert.equal(filters[0].limit, SLEEVE_HITS, 'only an Avoid industry: no house list, the plain screen')
     assert.deepEqual(res.sleeve.house, [])
     assert.deepEqual(res.sleeve.symbols, POOL.slice(0, SLEEVE_HITS), 'its names still come through the screen in its order')
+})
+
+// ── settling into a session (unified-chat plan phase 5d) ─────────────────────
+
+test('a sleeve sourced from a session settles into its chain — no card — when the hook takes it', async () => {
+    const seen = []
+    onSleeveSettled(async (sleeve, outcome) => { seen.push({ sleeve, outcome }); return true })
+    try {
+        const h = harness({ screened: ['AAA', 'BBB'], covered: ['AAA', 'BBB'] })   // all covered → settles at once
+        await sourceSleeve(req({ sessionId: 'ses1' }), h.deps)
+        assert.equal(h.posted.length, 0, 'no card — the session carries it')
+        assert.equal(seen[0].sleeve.sessionId, 'ses1')
+        assert.equal(seen[0].outcome.screened, 2)
+    } finally { onSleeveSettled(null) }
+})
+
+test('the card is posted as today when the sleeve has no session, or the hook declines (the session is gone)', async () => {
+    onSleeveSettled(async () => false)
+    try {
+        const declined = harness({ screened: ['AAA'], covered: ['AAA'] })
+        await sourceSleeve(req({ sessionId: 'gone' }), declined.deps)
+        assert.equal(declined.posted.length, 1)
+        const plain = harness({ screened: ['AAA'], covered: ['AAA'] })
+        await sourceSleeve(req(), plain.deps)
+        assert.equal(plain.posted.length, 1)
+    } finally { onSleeveSettled(null) }
+})
+
+test('sleeveOutcome is the one reading of a settled sleeve — skipped names count as covered', () => {
+    const o = sleeveOutcome({ symbols: ['A', 'B', 'C', 'D'], outcomes: { A: 'covered', B: 'skipped', C: 'passed', D: 'unresolved' }, alreadyCovered: 1 })
+    assert.deepEqual(o.covered, ['A', 'B'])
+    assert.deepEqual(o.passed, ['C'])
+    assert.deepEqual(o.unresolved, ['D'])
+    assert.equal(o.screened, 5)
+})
+
+// ── an INDUSTRY sleeve (docs/design/atlas-industry-sleeves.md, Roy 2026-10-19) ──────────────────────────────────
+// A sleeve is one GICS sub-industry, and its names come from the house's own GICS table — the screener does not know
+// GICS names. The house's named companies first, the school's floor, at most twelve; a thin table is filled from the
+// sector screen with ONLY this sub-industry's names.
+
+const SEMIS = { code: '45301020', name: 'Semiconductors', sector: 'Information Technology' }
+const row = (symbol, cap) => ({ symbol, market_cap: cap })
+function industryHarness({ rows = [], named = [], screened = [], industryOf = {}, covered = [] } = {}) {
+    const h = harness({ screened, covered })
+    h.screens = []
+    Object.assign(h.deps, {
+        screen:            async (f) => { h.screens.push(f); return screened },
+        subIndustry:       async (code) => (code === SEMIS.code ? SEMIS : null),
+        industryCompanies: async () => rows,
+        industryNamed:     async () => new Set(named),
+        industryOf:        async () => industryOf,
+    })
+    return h
+}
+
+test('industryPick: the house-named first, then by size; under the school floor out; unknown size kept; twelve at most', () => {
+    const rows = [row('NVDA', 4e12), row('AVGO', 1.5e12), row('TINY', 5e8), row('NOCAP'), row('MCHP', 4e10)]
+    const out = industryPick(rows, new Set(['MCHP']), 'quality-value')
+    assert.deepEqual(out.symbols, ['MCHP', 'NVDA', 'AVGO', 'NOCAP'])
+    assert.deepEqual(out.house, ['MCHP'])
+    const many = Array.from({ length: 30 }, (_, i) => row(`S${i}`, 1e11 - i))
+    assert.equal(industryPick(many, new Set(), null).symbols.length, SLEEVE_HITS)
+})
+
+test('an industry sleeve sources from the GICS table — no screen — and carries the industry and its sector', async () => {
+    const rows = ['NVDA', 'AVGO', 'MCHP', 'ADI', 'TXN'].map((s, i) => row(s, 1e12 - i))
+    const h = industryHarness({ rows, named: ['ADI'], covered: ['NVDA'] })
+    const out = await sourceSleeve({ userId: 'u1', industryCode: SEMIS.code, school: 'quality-value' }, h.deps)
+    assert.equal(out.ok, true)
+    assert.equal(h.screens.length, 0, 'enough names in the table — the screener is not asked')
+    assert.deepEqual(out.sleeve.symbols, ['ADI', 'AVGO', 'MCHP', 'TXN'], 'named first, the covered one left out')
+    assert.deepEqual([out.sleeve.industry, out.sleeve.industryCode, out.sleeve.sector], ['Semiconductors', SEMIS.code, 'Information Technology'])
+    assert.equal(h.enqueued[0].context.industry, 'Semiconductors')
+})
+
+test('a thin table is filled from the sector screen — only names the table puts in THIS sub-industry', async () => {
+    const h = industryHarness({
+        rows: [row('NVDA', 4e12)],
+        screened: ['AVGO', 'MSFT', 'ADI'],
+        industryOf: { AVGO: SEMIS.code, MSFT: '45103020', ADI: SEMIS.code },
+    })
+    const out = await sourceSleeve({ userId: 'u1', industryCode: SEMIS.code }, h.deps)
+    assert.equal(h.screens[0].sector, 'Technology', 'the screener\'s own sector name')
+    assert.deepEqual(out.sleeve.symbols, ['NVDA', 'AVGO', 'ADI'])
+})
+
+test('an unknown industry code is refused before anything is screened or queued', async () => {
+    const h = industryHarness()
+    assert.equal((await sourceSleeve({ userId: 'u1', industryCode: '99999999' }, h.deps)).reason, 'industry_unknown')
+    assert.equal(h.enqueued.length, 0)
+})
+
+test('the card names the industry, and counts the companies the house\'s assessment names', () => {
+    const card = buildSleeveSourced({ id: 's1', userId: 'u1', sector: 'Information Technology', industry: 'Semiconductors', industryCode: SEMIS.code,
+        school: 'quality-value', symbols: ['ADI', 'AVGO'], house: ['ADI'], outcomes: { ADI: 'covered', AVGO: 'covered' }, alreadyCovered: 0 })
+    assert.match(card.content, /^Semiconductors sleeve sourced \(quality-value\)/)
+    assert.match(card.content, /1 of the 2 are named in the house's assessment of the industry/)
+    assert.equal(card.payload.industryCode, SEMIS.code)
+})
+
+test('an industry sleeve takes only names that trade: notes, preferreds, funds and thin lines out — the next one takes the slot', async () => {
+    // BSQKZ was Block's notes in the GICS table (2026-10-19). The pool is read in order until twelve trade.
+    const rows = ['BSQKZ', 'V', 'MA', 'FITB-PM', 'PYPL', 'THIN', 'FUND', 'GPN'].map((s, i) => row(s, 1e12 - i))
+    const facts = {
+        BSQKZ: { averageVolume: 1200, activelyTrading: true, fund: false },
+        'FITB-PM': { averageVolume: 30_000, activelyTrading: true, fund: false },
+        THIN: { averageVolume: 90_000, activelyTrading: true, fund: false },
+        FUND: { averageVolume: 9e6, activelyTrading: true, fund: true },
+    }
+    const h = industryHarness({ rows, named: ['BSQKZ'] })
+    h.deps.listingFacts = async (s) => facts[s] ?? { averageVolume: 5e6, activelyTrading: true, fund: false }
+    const out = await sourceSleeve({ userId: 'u1', industryCode: SEMIS.code }, h.deps)
+    assert.deepEqual(out.sleeve.symbols, ['V', 'MA', 'PYPL', 'GPN'])
+    assert.deepEqual(out.sleeve.house, [], 'a named junk line is not a house name either')
+})
+
+test('a profile that cannot be read is not taken — unless NONE can be (the provider is down): then unchecked', async () => {
+    const rows = ['AAA', 'BBB', 'CCC', 'DDD'].map((s, i) => row(s, 1e11 - i))
+    const h = industryHarness({ rows })
+    h.deps.listingFacts = async (s) => (s === 'BBB' ? null : { averageVolume: 2e6, activelyTrading: true, fund: false })
+    assert.deepEqual((await sourceSleeve({ userId: 'u1', industryCode: SEMIS.code }, h.deps)).sleeve.symbols, ['AAA', 'CCC', 'DDD'])
+    _resetSleeves()
+    const down = industryHarness({ rows })
+    down.deps.listingFacts = async () => { throw new Error('fmp down') }
+    assert.deepEqual((await sourceSleeve({ userId: 'u1', industryCode: SEMIS.code }, down.deps)).sleeve.symbols, ['AAA', 'BBB', 'CCC', 'DDD'])
 })

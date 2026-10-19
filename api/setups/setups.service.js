@@ -11,6 +11,7 @@ import { resolveMainAccountId } from '../../services/agentUtils.js'
 import { cancelRestingEntryOrders } from '../../services/restingOrders.service.js'
 import { listJournal } from '../../services/journal.service.js'
 import { getDb }             from '../../providers/mongodb.provider.js'
+import { MAX_NAMES }         from '../../services/mentorBuild.util.js'
 import { ENTITIES }          from '../../services/entity/entityCollection.js'
 
 // Persistence for the `setup` kind — Mentor's artifact (docs/desks/mentor-talos.md).
@@ -86,8 +87,35 @@ const PLAN_FIELDS = [
 // promise above still holds literally.
 const LIGHT_FIELDS = ['thesis', 'conditions', 'validity', 'referenced_symbols', 'scenarios', 'target_legs', 'valid_until', 'rr', 'conviction']
 
+/**
+ * GENERATE ALL — one press, N setups (docs/design/mentor-flow-intent.md #15). PARTIAL SUCCESS IS THE CONTRACT
+ * (Roy's call): the ones that pass are SAVED and monitored, each refused one comes back with its reason. In
+ * sequence, not in parallel: each does its own account resolution and venue checks, and a burst of those against
+ * one broker is how you get rate-limited into a false refusal. ONE loop for the route and Mentor's session action.
+ * More than the build's cap (MAX_NAMES) is refused whole: `{ reason: 'too_many', max }`.
+ * @returns {Promise<{ saved: object[], failed: { index: number, asset: string|null, reason: string }[], reason?: string, max?: number }>}
+ */
+async function generateSetups(setups, { userId, accounts = [], mainAccountId = null, chatState = undefined } = {}) {
+    const list = Array.isArray(setups) ? setups : []
+    // The build's own cap, held here for every caller — the route and Mentor's session action alike.
+    if (list.length > MAX_NAMES) return { saved: [], failed: [], reason: 'too_many', max: MAX_NAMES }
+    const saved = [], failed = []
+    for (const [i, setup] of list.entries()) {
+        if (!setup || typeof setup !== 'object' || Array.isArray(setup)) {
+            failed.push({ index: i, asset: null, reason: 'not_an_object' })
+            continue
+        }
+        // Through the service object, not the bare function: one seam for the route's tests and Mentor's.
+        const result = await setupService.generateSetup(setup, { userId, accounts, mainAccountId, updateId: null, chatState })
+        if (result.ok) saved.push(result.doc)
+        else failed.push({ index: i, asset: setup.asset ?? null, reason: result.reason })
+    }
+    return { saved, failed }
+}
+
 export const setupService = {
     generateSetup,
+    generateSetups,
     getSetup,
     getSetupJournal,
     listSetups,

@@ -120,9 +120,9 @@ export function pickCallReasoning(call = null) {
 /**
  * The portfolio's thesis (strategy + target exposures), frozen onto a portfolio-origin
  * trade's snapshot — the trade stores portfolio *pointers* (id/name), but the thesis text
- * lives only in `portfolio_chats` and gets rewritten over the book's life. Pure — a
+ * lives only in `portfolio_books` and gets rewritten over the book's life. Pure — a
  * null/absent thesis (idea/call trade, or a book with no thesis) yields null.
- * @param {object|null} [thesis] the `portfolio_chats.thesis` sub-doc
+ * @param {object|null} [thesis] the `portfolio_books.thesis` sub-doc
  */
 export function pickPortfolioThesis(thesis = null) {
     if (!thesis) return null
@@ -171,7 +171,7 @@ async function captureOpen(idea, exec) {
         }
 
         // Best-effort: freeze the book's thesis for portfolio-origin trades — the trade holds
-        // portfolio pointers, but the thesis text lives in portfolio_chats and gets rewritten.
+        // portfolio pointers, but the thesis text lives in portfolio_books and gets rewritten.
         let portfolioThesis = null
         if (idea.portfolioId) {
             try {

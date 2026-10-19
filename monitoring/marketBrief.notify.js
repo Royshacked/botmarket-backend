@@ -2,8 +2,8 @@
  * The daily market-brief OFFER.
  *
  * Once each weekday morning every user gets one card in the social chat: "want today's market
- * brief?". Nothing is written until they confirm — the confirm takes the user to Axl and streams
- * the brief into his thread (POST /api/axl/brief/stream), which is where it is actually built.
+ * brief?". Nothing is written until they confirm — the confirm asks Axl for it as a turn in the user's
+ * chat session (input.brief → services/desks/axl.desk.js briefTurn), which is where it is actually built.
  * The brief itself never lands in the social chat: it is a page of market prose, and it belongs in
  * the conversation where the user can ask about it.
  *

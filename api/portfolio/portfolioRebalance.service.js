@@ -138,7 +138,12 @@ async function _postReceipt(portfolioId, userId, results, portfolioName) {
     }
 }
 
-export async function applyRebalance(portfolioId, userId, update) {
+/**
+ * `closeReview` (default true — the review card's Accept): the moves close the review — a conviction point, the
+ * clock advanced. False for changes accepted OUTSIDE a review (an edit of the book from the session): the moves and
+ * the receipt are the same, but a review that is due stays due (Roy 2026-10-17, phase 8a bug hunt #3).
+ */
+export async function applyRebalance(portfolioId, userId, update, { closeReview = true } = {}) {
     if (!portfolioId) return { ok: false, reason: 'missing_portfolioId' }
     if (!update || !Array.isArray(update.changes) || update.changes.length === 0) {
         return { ok: false, reason: 'no_changes' }
@@ -208,14 +213,15 @@ export async function applyRebalance(portfolioId, userId, update) {
         return { ok: false, reason: 'nothing_applied', results, failed }
     }
 
-    // Trajectory point, then deliberate thesis update (if any), then advance the clock.
-    await snapshotConvictions(portfolioId, userId)
+    // Trajectory point, then deliberate thesis update (if any), then advance the clock — the point and the clock
+    // only when these moves close a review.
+    if (closeReview) await snapshotConvictions(portfolioId, userId)
     if (update.thesis && typeof update.thesis === 'object') {
         await portfolioChatService.setThesis(portfolioId, userId, update.thesis, 'accepted-rebalance')
     }
     // The review itself IS done even when every change is queued — the decisions were taken, and
     // the queue owns their execution from here. Only a total failure (above) leaves it open.
-    const rev = await portfolioChatService.completeReview(portfolioId, userId)
+    const rev = closeReview ? await portfolioChatService.completeReview(portfolioId, userId) : null
     invalidatePortfolioState(portfolioId, userId)
 
     logger.info(LOG, 'rebalance applied', {

@@ -106,10 +106,10 @@ test('routeFields: validates the desk for the role, sanitizes the symbol, gates 
 // adding one row.
 const DESKS = [
     { key: 'scanner',   own: 'scan',      chatStream: scannerAgentService.chatStream,   args: { messages: [{ role: 'user', content: 'send nvda to prometheus' }] } },
-    { key: 'mentor',    own: 'assist',    chatStream: mentorAgentService.chatStream,    args: { userPrompt: 'send nvda to prometheus' } },
-    { key: 'analyst',   own: 'research',  chatStream: analystAgentService.chatStream,   args: { userPrompt: 'send nvda to mentor' } },
+    { key: 'mentor',    own: 'assist',    chatStream: mentorAgentService.chatStream,    args: { messages: [{ role: 'user', content: 'send nvda to prometheus' }] } },
+    { key: 'analyst',   own: 'research',  chatStream: analystAgentService.chatStream,   args: { messages: [{ role: 'user', content: 'send nvda to mentor' }] } },
     { key: 'portfolio', own: 'portfolio', chatStream: portfolioAgentService.chatStream, args: { messages: [{ role: 'user', content: 'send nvda to prometheus' }] } },
-    { key: 'strategy',  own: null,        chatStream: strategyAgentService.chatStream,  args: { messages: [{ role: 'user', content: 'send nvda to prometheus' }], userPrompt: 'send nvda to prometheus' } },
+    { key: 'strategy',  own: null,        chatStream: strategyAgentService.chatStream,  args: { messages: [{ role: 'user', content: 'send nvda to prometheus' }] } },
     { key: 'aether',    own: null,        chatStream: aetherAgentService.chatStream,    args: { messages: [{ role: 'user', content: 'send nvda to prometheus' }] } },
 ]
 

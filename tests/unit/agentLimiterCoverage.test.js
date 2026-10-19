@@ -38,7 +38,7 @@ function limitedPaths() {
         }
     }
 
-    // Any explicitly listed path: `app.use('/api/axl/brief/stream', agentLimiter)`
+    // Any explicitly listed path: `app.use('/api/<desk>/<extra>/stream', agentLimiter)`
     for (const m of SERVER.matchAll(/app\.use\(\s*['"]([^'"]+)['"]\s*,\s*agentLimiter\s*\)/g)) paths.add(m[1])
 
     return paths
@@ -82,8 +82,9 @@ test('every streaming endpoint is behind the agent rate limiter', () => {
 
     // Guard the guard: if the parsing above ever stops finding anything, this test would pass by
     // vacuously checking nothing — the exact way a file-walking test rots into decoration.
-    assert.ok(streams.length >= 6, `expected to find the desks' stream routes, found ${streams.length}`)
-    assert.ok(limited.size >= 6, `expected to parse the limiter list, found ${limited.size}`)
+    // Two since unified-chat 8e: Pythia's and Aether's — the other desks answer in the session (its turn route).
+    assert.ok(streams.length >= 2, `expected to find the desks' stream routes, found ${streams.length}`)
+    assert.ok(limited.size >= 2, `expected to parse the limiter list, found ${limited.size}`)
 
     const unlimited = streams.filter(s => !limited.has(s.path))
     assert.deepEqual(unlimited.map(s => s.path), [],

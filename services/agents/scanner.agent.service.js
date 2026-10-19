@@ -12,13 +12,14 @@ import { isMode } from '../analysisModes.js'
 import { makeStructureVisionHandler, OB_VISION, FB_VISION } from '../tools/priceStructure.tools.js'
 import { cleanConviction } from '../conviction.util.js'
 import { logger }        from '../logger.service.js'
-import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, stripEmitTags, makeToolHandler, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, BREVITY_RULE, VENUE_RULE, TRADE_HORIZONS, cachedBlock } from '../agentUtils.js'
+import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, cleanReply, makeToolHandler, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, BREVITY_RULE, VENUE_RULE, TRADE_HORIZONS, cachedBlock } from '../agentUtils.js'
 import { makeTradingContextHandlers, buildVenueSection } from '../tools/tradingContext.tools.js'
 import { makeMarketHoursHandlers, MARKET_HOURS_TOOL_SPEC } from '../tools/marketHours.tools.js'
 import { makeHouseIndustriesHandlers, HOUSE_INDUSTRIES_TOOL_SPEC } from '../tools/houseIndustries.tools.js'
 import { houseLabels, booksForStyle, wireLabel } from '../houseLabel.service.js'
 import { buildTagCaptures } from '../llmStream.util.js'
-import { makeRouteCapture, ROUTE_TAGS, buildRouteRule } from '../routing.util.js'
+import { DESKS } from '../desks/registry.js'
+import { makeRouteCapture, buildRouteRule } from '../routing.util.js'
 import { isToolError } from '../toolResult.util.js'
 import { makeGroundingLedger, recordSourced, recordTouched, groundingTier, DISCOVERY_TOOLS, PER_NAME_TICKER_ARGS, SOURCED_EXTRACT } from '../scanner.grounding.js'
 import { normalizeSelection, selectionWeights } from '../investorSchools.js'
@@ -44,7 +45,7 @@ const _handoffMode = makePromptLoader(join(__dirname, '../../prompts/scanner_mod
 // the list half. The two are mutually exclusive — one ends in a pick, the other in a list — which
 // is what keeps the system prompt at two cached blocks and inside the breakpoint budget below.
 const _radarMode = makePromptLoader(join(__dirname, '../../prompts/scanner_mode_radar.md'), LOG)
-const MAX_MESSAGES = 10
+const MAX_MESSAGES = DESKS.scanner.maxMessages
 
 export const TOOLS = toolsFor({
     web_search: '',
@@ -211,7 +212,6 @@ function scannerToolsForProfile(profile) {
 // here is free.
 const HANDOFF_DESKS = {
     mentor: 'Mentor, which builds a `setup` the user shapes level by level',
-    kairos: 'Kairos, which authors a single `call`',
 }
 // Unknown/absent destination degrades to the generic phrasing rather than guessing a desk: the
 // module already tells Argus to name only what this line names, so "the build desk" is honest where
@@ -309,7 +309,7 @@ async function chatStream({ messages = [], model: requestedModel, editList = nul
     // The venue (mode / broker / accounts / free cash) rides the last USER message rather than the
     // system tail: free cash moves whenever anything fills, so a volatile system block would sit
     // ahead of the whole conversation in the cache prefix. See buildVenueSection.
-    const normalized = attachTurnContext(_buildMessages(messages), await _venueSection(userId))
+    const normalized = attachTurnContext(normalizeMessages(messages, MAX_MESSAGES), await _venueSection(userId))
 
     // Per-session grounding ledger — records which tickers a real, successful tool
     // engaged, so a fabricated candidate that no tool touched is dropped at normalize.
@@ -387,11 +387,7 @@ async function chatStream({ messages = [], model: requestedModel, editList = nul
         meta: { profile: prof },
     })
 
-    const reply = stripEmitTags(
-        // <ticker> keeps its inner text in the reply (unwrap, don't strip).
-        raw.replace(/<ticker>([\s\S]*?)<\/ticker>/g, '$1'),
-        ['scan_list', 'phase', 'kairos_pick', ...ROUTE_TAGS],
-    ).trim()
+    const reply = cleanReply(raw)
 
     const scan = _normalizeScan(capturedScan, editList, ledger, prof)
     const pick = _normalizeKairosPick(capturedPick)
@@ -662,6 +658,3 @@ function _buildEditSection(editList) {
     ].join('\n')
 }
 
-function _buildMessages(messages) {
-    return normalizeMessages(messages, MAX_MESSAGES)
-}

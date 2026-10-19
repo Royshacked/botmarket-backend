@@ -39,6 +39,7 @@ import { cardActions }          from '../api/chat/chat.service.js'
 import { postCard }             from './notifyCard.js'
 import { logger }               from './logger.service.js'
 import { config }               from './config.js'
+import { normalizeSector }      from './entity/vocabulary.js'
 
 const LOG = '[sleeveSource]'
 
@@ -98,6 +99,76 @@ export function _resetSleeves() { state.sleeves = []; state.subscribed = false }
 
 const _sym = s => String(s ?? '').toUpperCase().trim()
 
+// ─── An industry sleeve (docs/design/atlas-industry-sleeves.md, Roy 2026-10-19) ─────────────────────────────────
+// A sleeve is one GICS sub-industry, and its names come from the house's OWN GICS table (gics_companies) — not the
+// screener, whose industry names are not GICS's ("Software - Application" vs "Application Software"), so a GICS name
+// handed to it screened to nothing. The companies the house's assessment names come first, then the rest by market
+// cap, over the school's floor; at most SLEEVE_HITS (Roy: max 12). Too few → the sector screen fills in, keeping only
+// the names the table puts in THIS sub-industry (a neighbour's names are not this sleeve's).
+export const MIN_INDUSTRY_NAMES = 4
+const INDUSTRY_POOL = 40
+
+/**
+ * One sub-industry's names → `{ symbols, house }`. `rows`: its gics_companies rows (largest first); `named`: the symbols
+ * its standing assessment names. A row with no market cap is kept — Prometheus applies the school's real bar. Pure.
+ */
+export function industryPick(rows, named, school = null, { hits = SLEEVE_HITS } = {}) {
+    const floor = (SCHOOL_SCREEN[normalizeSelection(school)] ?? SCHOOL_SCREEN.default).marketCapMoreThan ?? 0
+    const syms  = (rows ?? []).filter(r => r?.symbol && !(typeof r.market_cap === 'number' && r.market_cap < floor)).map(r => _sym(r.symbol))
+    const house = syms.filter(s => named?.has(s))
+    const symbols = [...new Set([...house, ...syms])].slice(0, hits)
+    return { symbols, house: house.filter(s => symbols.includes(s)) }
+}
+
+/**
+ * The names that trade as a live, liquid stock — in order, at most `hits`. The GICS table holds a real company's notes,
+ * preferreds and thin OTC lines beside its stock (a payments sleeve picked BSQKZ, Block's notes, 2026-10-19); the
+ * screener path has its volume floor, and this is the same floor (MIN_VOLUME). A profile that cannot be read → not
+ * taken; NONE readable → the provider is down, and the names go on unchecked (Prometheus still judges each).
+ */
+async function _tradable(symbols, deps, hits = SLEEVE_HITS) {
+    if (!deps.listingFacts) return symbols.slice(0, hits)
+    const out = []
+    let read = 0
+    for (const s of symbols) {
+        if (out.length >= hits) break
+        let f = null
+        try { f = await deps.listingFacts(s) } catch { f = null }
+        if (f) read++
+        if (f && f.activelyTrading && !f.fund && (f.averageVolume ?? 0) >= MIN_VOLUME) out.push(s)
+    }
+    if (!read && symbols.length) {
+        logger.warn(LOG, 'no listing readable — the industry sleeve goes on unchecked', { names: symbols.length })
+        return symbols.slice(0, hits)
+    }
+    return out
+}
+
+/** The industry sleeve's names, with the sector screen's fill when the table is thin. → `{ sub, symbols, house }` or `{ reason }`. */
+async function _industrySleeve(code, school, deps) {
+    let sub = null
+    try { sub = await deps.subIndustry(code) } catch (err) { logger.warn(LOG, 'sub-industry unreadable', err.message) }
+    if (!sub?.code) return { reason: 'industry_unknown' }
+    let rows = [], named = new Set()
+    try { rows = await deps.industryCompanies(sub.code, INDUSTRY_POOL) ?? [] } catch (err) { logger.warn(LOG, 'industry companies unreadable', err.message) }
+    try { named = await deps.industryNamed(sub.code) ?? new Set() } catch (err) { logger.warn(LOG, 'industry assessment unreadable — no house names first', err.message) }
+    // The whole ordered pool, then only what trades — so a junk line does not cost the sleeve a slot.
+    let { symbols, house } = industryPick(rows, named, school, { hits: INDUSTRY_POOL })
+    symbols = await _tradable(symbols, deps)
+    house = house.filter(s => symbols.includes(s))
+    if (symbols.length < MIN_INDUSTRY_NAMES) {
+        const sector = normalizeSector(sub.sector)
+        if (sector) {
+            const screened = await deps.screen(screenFiltersFor(sector, school, { limit: HOUSE_POOL }))
+            let industryOf = {}
+            try { industryOf = await deps.industryOf(screened) ?? {} } catch (err) { logger.warn(LOG, 'industries unreadable — no fill from the screen', err.message) }
+            const fill = screened.filter(s => industryOf[s] === sub.code && !symbols.includes(s))
+            symbols = [...symbols, ...fill].slice(0, SLEEVE_HITS)
+        }
+    }
+    return { sub, symbols, house }
+}
+
 /**
  * The house's long-term industries FIRST, up to `max` of the `hits`, the rest of the screen after them, in the
  * screen's order. A ceiling, not a quota: a short house list takes what it has. `industryOf` maps a symbol to its
@@ -141,26 +212,37 @@ async function _house(sector, deps) {
  *   posted at once, since there is nothing to wait for), 'queue_unavailable'.
  */
 export async function sourceSleeve(req, deps = _io) {
-    const { userId, threadId = null, portfolioId = null, portfolioName = null, sector, industry = null, note = null } = req ?? {}
+    const { userId, threadId = null, sessionId = null, portfolioId = null, portfolioName = null, industryCode = null, note = null } = req ?? {}
+    let { sector = null, industry = null } = req ?? {}
     const school = normalizeSelection(req?.school)
     if (!userId)               return { ok: false, reason: 'user_required' }
     if (school === 'passive')  return { ok: false, reason: 'passive' }
-    if (!sector)               return { ok: false, reason: 'sector_required' }
+    if (!sector && !industryCode) return { ok: false, reason: 'sector_required' }
 
-    // Pythia's long-term industries in the sector go first (a preference, not a filter — Roy, 2026-10-13): the screen
-    // widens so they can be found inside it, then they take up to half the sleeve and the screen fills the rest.
-    const { codes: houseCodes, named } = await _house(sector, deps)
-    const wide = houseCodes.size > 0 || named.size > 0
-    let symbols = await deps.screen(screenFiltersFor(sector, school, { industry, limit: wide ? HOUSE_POOL : SLEEVE_HITS }))
-    let fromHouse = []
-    if (wide && symbols.length) {
-        let industryOf = {}
-        try { industryOf = await deps.industryOf(symbols) ?? {} }
-        catch (err) { logger.warn(LOG, 'industries unreadable — the sleeve takes the screen in its order', err.message) }
-        ;({ symbols, house: fromHouse } = houseFirst(symbols, industryOf, houseCodes, { max: deps.houseMax?.() ?? config.sleeveHouseMax, named }))
+    let symbols = [], fromHouse = [], code = null
+    if (industryCode) {
+        // A GICS sub-industry sleeve: the house's own table, the companies it names first (see _industrySleeve).
+        const picked = await _industrySleeve(industryCode, school, deps)
+        if (picked.reason) return { ok: false, reason: picked.reason }
+        ;({ symbols, house: fromHouse } = picked)
+        code = picked.sub.code
+        sector = picked.sub.sector ?? sector
+        industry = picked.sub.name
+    } else {
+        // Pythia's long-term industries in the sector go first (a preference, not a filter — Roy, 2026-10-13): the screen
+        // widens so they can be found inside it, then they take up to half the sleeve and the screen fills the rest.
+        const { codes: houseCodes, named } = await _house(sector, deps)
+        const wide = houseCodes.size > 0 || named.size > 0
+        symbols = await deps.screen(screenFiltersFor(sector, school, { industry, limit: wide ? HOUSE_POOL : SLEEVE_HITS }))
+        if (wide && symbols.length) {
+            let industryOf = {}
+            try { industryOf = await deps.industryOf(symbols) ?? {} }
+            catch (err) { logger.warn(LOG, 'industries unreadable — the sleeve takes the screen in its order', err.message) }
+            ;({ symbols, house: fromHouse } = houseFirst(symbols, industryOf, houseCodes, { max: deps.houseMax?.() ?? config.sleeveHouseMax, named }))
+        }
     }
     if (!symbols.length) {
-        logger.info(LOG, 'nothing screened — sleeve not sourced', { sector, school, industry })
+        logger.info(LOG, 'nothing screened — sleeve not sourced', { sector, school, industry, industryCode: code })
         return { ok: false, reason: 'nothing_screened' }
     }
 
@@ -172,7 +254,12 @@ export async function sourceSleeve(req, deps = _io) {
     const sleeve = {
         id: `slv_${randomUUID().slice(0, 8)}`,
         userId: String(userId), threadId, portfolioId, portfolioName,
+        // A sleeve sourced from the unified chat settles INTO that session's chain (onSleeveSettled), not as a card.
+        sessionId: sessionId ? String(sessionId) : null,
+        screened:  symbols.length,
         sector, school, industry,
+        // Set for an industry sleeve — its GICS code; the card names the industry and counts the house's named companies.
+        industryCode: code,
         symbols:     fresh,
         // Which of them came from Pythia's long-term industries — the card says how many.
         house:       fromHouse.filter(s => !covered.has(s)),
@@ -272,18 +359,51 @@ async function _reconcile(sleeve, deps) {
     if (_remaining(sleeve).length === 0) await _settle(sleeve, deps)
 }
 
+// ─── Settling into a session (unified-chat plan phase 5d) ───────────────────────
+// A sleeve sourced from a session settles into its chain — Argus's line, then the coverage handed to Atlas —
+// instead of a card. The chain runner registers the hook (services/desks/turns.js), so this module never
+// imports the chain. The hook answers whether it took the sleeve; if not (no hook, the session is gone), the
+// card is posted exactly as for a sleeve from the old path.
+let _settledHook = null
+export function onSleeveSettled(fn) { _settledHook = fn }
+
 async function _settle(sleeve, deps) {
     state.sleeves = state.sleeves.filter(s => s !== sleeve)
+    if (sleeve.sessionId && _settledHook) {
+        const taken = await Promise.resolve(_settledHook(sleeve, sleeveOutcome(sleeve))).catch(err => {
+            logger.warn(LOG, 'settling into the session failed — posting the card instead', err.message)
+            return false
+        })
+        if (taken) { logger.info(LOG, 'sleeve settled into its session', { id: sleeve.id, sessionId: sleeve.sessionId }); return }
+    }
     const card = buildSleeveSourced(sleeve)
     const msg  = await deps.post(card, { tag: 'Sleeve-sourced card', log: LOG })
     logger.info(LOG, 'sleeve settled', { id: sleeve.id, sector: sleeve.sector, covered: card?.payload?.covered?.length ?? 0, of: sleeve.symbols.length, posted: !!msg })
 }
 
-const _pub = s => ({ id: s.id, sector: s.sector, school: s.school, symbols: [...s.symbols], alreadyCovered: s.alreadyCovered, house: [...(s.house ?? [])] })
+const _pub = s => ({ id: s.id, sector: s.sector, industry: s.industry ?? null, industryCode: s.industryCode ?? null, school: s.school, symbols: [...s.symbols], alreadyCovered: s.alreadyCovered, house: [...(s.house ?? [])] })
 
 // ─── The card ───────────────────────────────────────────────────────────────────
 
 const _by = (sleeve, outcome) => sleeve.symbols.filter(s => sleeve.outcomes[s] === outcome)
+
+/**
+ * What a settled sleeve came to — ONE reading for the card and for the chain's line. Pure.
+ * `skipped` is the run finding the name already covered between the screen and the turn: to the build it
+ * is a covered name, so `covered` includes it.
+ */
+export function sleeveOutcome(sleeve) {
+    const written = _by(sleeve, 'covered')
+    const skipped = _by(sleeve, 'skipped')
+    return {
+        written, skipped,
+        covered:    [...written, ...skipped],
+        passed:     _by(sleeve, 'passed'),
+        failed:     _by(sleeve, 'failed'),
+        unresolved: _by(sleeve, 'unresolved'),
+        screened:   sleeve.screened ?? (sleeve.symbols.length + (sleeve.alreadyCovered ?? 0)),
+    }
+}
 
 /**
  * Atlas's "sleeve sourced" card for the user who asked. Pure → { userId, content, type, payload,
@@ -295,31 +415,29 @@ const _by = (sleeve, outcome) => sleeve.symbols.filter(s => sleeve.outcomes[s] =
  */
 export function buildSleeveSourced(sleeve) {
     if (!sleeve?.userId || !sleeve?.sector) return null
-    // `skipped` is the run finding the name already covered — by hand, between the screen and the
-    // turn. To the build it is a covered name, so it reads as one; the payload keeps them apart.
-    const written    = _by(sleeve, 'covered')
-    const skipped    = _by(sleeve, 'skipped')
-    const covered    = [...written, ...skipped]
-    const passed     = _by(sleeve, 'passed')
-    const failed     = _by(sleeve, 'failed')
-    const unresolved = _by(sleeve, 'unresolved')
+    // `skipped` names read as covered to the build; the payload keeps them apart (sleeveOutcome).
+    const { written, skipped, covered, passed, failed, unresolved } = sleeveOutcome(sleeve)
     const inBook     = covered.length + (sleeve.alreadyCovered ?? 0)
     const school     = sleeve.school ? ` (${sleeve.school})` : ''
     const house      = (sleeve.house ?? []).filter(s => sleeve.symbols.includes(s))
-    const houseLine  = house.length ? ` ${house.length} of the ${sleeve.symbols.length} came from the house's long-term industries.` : ''
+    // An industry sleeve is named by its industry, and its house names are the ones the house's assessment names.
+    const label      = sleeve.industryCode && sleeve.industry ? sleeve.industry : sleeve.sector
+    const houseLine  = !house.length ? ''
+        : sleeve.industryCode ? ` ${house.length} of the ${sleeve.symbols.length} are named in the house's assessment of the industry.`
+        : ` ${house.length} of the ${sleeve.symbols.length} came from the house's long-term industries.`
 
     let content
     if (!sleeve.symbols.length) {
-        content = `${sleeve.sector} sleeve${school}: every name the screen found is already in coverage (${sleeve.alreadyCovered}). Resume the build — Atlas allocates from what is there.`
+        content = `${label} sleeve${school}: every name the screen found is already in coverage (${sleeve.alreadyCovered}). Resume the build — Atlas allocates from what is there.`
     } else if (covered.length) {
         const tail = [
             passed.length     ? `${passed.length} passed on (no edge)` : null,
             failed.length     ? `${failed.length} failed to save`       : null,
             unresolved.length ? `${unresolved.length} left the queue unresearched` : null,
         ].filter(Boolean).join(', ')
-        content = `${sleeve.sector} sleeve sourced${school}: ${covered.length} of ${sleeve.symbols.length} screened names now in coverage — ${covered.join(', ')}${tail ? `; ${tail}` : ''}. Resume the build and Atlas allocates from coverage.${houseLine}`
+        content = `${label} sleeve sourced${school}: ${covered.length} of ${sleeve.symbols.length} screened names now in coverage — ${covered.join(', ')}${tail ? `; ${tail}` : ''}. Resume the build and Atlas allocates from coverage.${houseLine}`
     } else {
-        content = `${sleeve.sector} sleeve${school}: Prometheus researched ${sleeve.symbols.length} screened names and put none into coverage`
+        content = `${label} sleeve${school}: Prometheus researched ${sleeve.symbols.length} screened names and put none into coverage`
             + (passed.length ? ` (${passed.length} no edge${failed.length ? `, ${failed.length} failed to save` : ''})` : '')
             + `. Resume the build — Atlas will say what the pool holds, or broaden the filter.${houseLine}`
     }
@@ -330,7 +448,7 @@ export function buildSleeveSourced(sleeve) {
         type:    'sleeve_sourced',
         payload: {
             kind: 'portfolio', sleeveId: sleeve.id,
-            sector: sleeve.sector, school: sleeve.school ?? null,
+            sector: sleeve.sector, industry: sleeve.industry ?? null, industryCode: sleeve.industryCode ?? null, school: sleeve.school ?? null,
             portfolioId: sleeve.portfolioId ?? null, threadId: sleeve.threadId ?? null,
             screened: sleeve.symbols.length, inBook,
             covered: written, skipped, passed, failed, unresolved, house,
@@ -366,6 +484,29 @@ const _io = {
     async industryOf(symbols) {
         const { readCompaniesBySymbol } = await import('../api/strategy/industryData.service.js')
         return Object.fromEntries(Object.entries(await readCompaniesBySymbol(symbols)).map(([s, r]) => [s, r.sub_code]))
+    },
+    // Whether a listing trades (an industry sleeve's names are checked — see _tradable).
+    async listingFacts(symbol) {
+        const { getListingFacts } = await import('../providers/fmp.provider.js')
+        return getListingFacts(symbol)
+    },
+    // An industry sleeve's reads (atlas-industry-sleeves.md): the sub-industry, its companies, and the ones the house names.
+    async subIndustry(code) {
+        const { readSubIndustry } = await import('../api/strategy/industryData.service.js')
+        const b = await readSubIndustry(code)
+        return b?.sub ? { code: b.sub.code, name: b.sub.name, sector: b.sub.sector ?? null } : null
+    },
+    async industryCompanies(code, limit) {
+        const { readCompanies } = await import('../api/strategy/industryData.service.js')
+        return readCompanies('sub_industry', code, { limit })
+    },
+    // First-order names of a STANDING assessment only — a second-order name sits in another industry, and an expired
+    // assessment is due for reassessment.
+    async industryNamed(code) {
+        const { industryAssessmentService } = await import('../api/strategy/industryAssessment.service.js')
+        const a = await industryAssessmentService.getAssessment(code)
+        if (!a || (a.expires_at && a.expires_at <= new Date().toISOString())) return new Set()
+        return new Set((a.names ?? []).filter(n => n?.order !== 'second').map(n => _sym(n.symbol)).filter(Boolean))
     },
     async coveredSymbols() {
         const { coverageService } = await import('../api/analyst/coverage.service.js')

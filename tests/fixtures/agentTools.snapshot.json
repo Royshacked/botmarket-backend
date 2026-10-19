@@ -373,7 +373,7 @@
         },
         {
             "name": "get_macro_snapshot",
-            "description": "Hard macro read for the Phase-2 regime call: the current Treasury curve (3M/2Y/10Y/30Y with the 2s10s spread — inversion flag), key economic indicators (real GDP, CPI, inflation YoY, unemployment, Fed funds rate, consumer sentiment), and today's sector rotation (leaders/laggards). Call this alongside web_search — the snapshot is the data, web_search is the narrative. No arguments.",
+            "description": "Background macro numbers for Phase 2: the current Treasury curve (3M/2Y/10Y/30Y with the 2s10s spread — inversion flag) and key economic indicators (real GDP, CPI, inflation YoY, unemployment, Fed funds rate, consumer sentiment). It also lists today's sector rotation — IGNORE that part: last week's sector leaders are noise for a book, and no sleeve is built or tilted on them. No arguments.",
             "input_schema": {
                 "type": "object",
                 "properties": {}
@@ -492,13 +492,17 @@
         },
         {
             "name": "get_coverage",
-            "description": "The house coverage pool — every name Prometheus has researched (variant-perception thesis, OUR price target vs the Street = the gap/edge, a rating, the selection schools it fits, and the status). This is the ONLY source for mandate build: fetch filtered by sector (the sleeve being filled) and by the mandate's selection school. Optionally combine both filters. For an uncovered name the user explicitly asks for, emit a <coverage_request> instead of using this tool. Read-only.",
+            "description": "The house coverage pool — every name Prometheus has researched (variant-perception thesis, OUR price target vs the Street = the gap/edge, a rating, the selection schools it fits, and the status), GROUPED BY GICS SUB-INDUSTRY. This is the ONLY source for mandate build: fetch filtered by `industry` (the sleeve being filled — its GICS code or exact name) and the mandate's selection `school`. `sector` is for a broad look only. For an uncovered name the user explicitly asks for, emit a <coverage_request> instead of using this tool. Read-only.",
             "input_schema": {
                 "type": "object",
                 "properties": {
+                    "industry": {
+                        "type": "string",
+                        "description": "optional — one GICS sub-industry (8-digit code or exact name): a sleeve's researched names"
+                    },
                     "sector": {
                         "type": "string",
-                        "description": "optional — narrow to one sector, e.g. Technology"
+                        "description": "optional — narrow to one sector, e.g. Technology (a broad look; a sleeve is an industry)"
                     },
                     "school": {
                         "type": "string",
@@ -508,7 +512,7 @@
                             "income",
                             "passive"
                         ],
-                        "description": "optional — narrow to names Prometheus tagged for this selection school; combine with sector for the mandate-build pre-filter"
+                        "description": "optional — narrow to names Prometheus tagged for this selection school; combine with industry for the mandate-build pre-filter"
                     }
                 }
             }
@@ -628,6 +632,35 @@
                     "sector": {
                         "type": "string",
                         "description": "A GICS sector (e.g. Information Technology) — every sub-industry in it. Used when no symbols are passed."
+                    }
+                }
+            }
+        },
+        {
+            "name": "get_house_industries",
+            "description": "The HOUSE'S INDUSTRIES for this book — the GICS sub-industries Pythia (the house's industry desk) rates FOR SWING or FOR LONG TERM, plus the industries inside the themes it rates so, each with its thesis, top risk, how far it has moved and the companies it names. Pass `book` (the mandate's: \"swing\" for under about a year, \"long_term\" for longer — use judgment in between) at the start of a build: THESE ARE THE CANDIDATE SLEEVES, one sub-industry per sleeve. Pass `industry` (a code or name) for one industry's largest companies, our coverage marked. The house judges industries, never stocks, and the mandate and the user still outrank it.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "book": {
+                        "type": "string",
+                        "enum": [
+                            "swing",
+                            "long_term"
+                        ],
+                        "description": "The scan's book: the industries Pythia rates for it."
+                    },
+                    "sector": {
+                        "type": "string",
+                        "description": "A GICS sector (e.g. Information Technology) to narrow the book's list."
+                    },
+                    "industry": {
+                        "type": "string",
+                        "description": "A GICS sub-industry (8-digit code or exact name) from the list — its largest companies instead of the list."
+                    },
+                    "limit": {
+                        "type": "number",
+                        "description": "How many of the industry's companies, 1–40 (default 15)."
                     }
                 }
             }

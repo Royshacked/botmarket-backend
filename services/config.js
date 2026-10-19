@@ -129,6 +129,12 @@ export const config = {
     // vendors behind one key; Mistral is read on their own API.
     get openrouterApiKey() { return _raw('OPENROUTER_API_KEY') },
     get mistralApiKey()    { return _raw('MISTRAL_API_KEY') },
+    /**
+     * A model stream that goes quiet is cut (providers/streamStall.js — a luna stream sat silent for 53 minutes,
+     * 2026-10-19). The first data may take longer (a reasoning model thinks first); the gaps after it may not.
+     */
+    get llmStallFirstMs() { return _num('LLM_STALL_FIRST_MS', 240_000) },
+    get llmStallIdleMs()  { return _num('LLM_STALL_IDLE_MS', 150_000) },
     /** Monthly spend per user shown as a percentage in the profile, USD — see tokenUsage.service. */
     get tokenBudgetUsd()  { return _num('TOKEN_BUDGET_USD', 20) },
     /**

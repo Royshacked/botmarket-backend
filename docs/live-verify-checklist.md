@@ -193,7 +193,7 @@ turn, so what is unverified here is precisely the part tests cannot reach: wheth
 and whether the brief holds its boundary.
 
 **Delivery changed 2026-08-05.** The confirm no longer posts the brief into the social chat — it
-routes to Axl and streams it into his thread (`POST /api/axl/brief/stream`). The items below are
+routes to Axl and streams it into his thread (since unified-chat phase 7: an Axl session turn, `POST /api/sessions/:id/turn` with `brief: true`). The items below are
 rewritten to match; anything phrased around a posted `market_brief` message is gone, not merely
 re-worded.
 

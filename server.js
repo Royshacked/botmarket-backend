@@ -38,6 +38,8 @@ import cookieParser from 'cookie-parser'
 
 import { chatRoutes }         from './api/chat/chat.routes.js'
 import { attach as attachChatWs } from './api/chat/chatWs.js'
+import { registerSessionChannel } from './services/sessionChannel.js'
+import { chain } from './services/desks/turns.js'
 import { ensureIndexes as ensureChatIndexes } from './api/chat/chat.service.js'
 import { ensureUserIndexes } from './api/user/user.model.js'
 import { ensureIdeaIndexes } from './api/trade-ideas/tradeIdeas.service.js'
@@ -49,7 +51,9 @@ import { ensurePendingActionIndexes } from './services/pendingAction/pendingActi
 import { ensureAetherIndexes }        from './api/aether/aether.model.js'
 import { pendingActionRoutes } from './api/pendingAction/pendingAction.routes.js'
 import { threadService } from './services/thread.service.js'
-import { mentorRoutes } from './api/mentor/mentor.routes.js'
+import { sessionService } from './services/session.service.js'
+import { agentContextService } from './services/agentContext.service.js'
+import { ensurePortfolioBookIndexes } from './api/portfolio/portfolioChat.service.js'
 import { setupsRoutes } from './api/setups/setups.routes.js'
 import { tradeIdeasRoutes } from './api/trade-ideas/tradeIdeas.routes.js'
 import { authRoutes }   from './api/authentication/authentication.routes.js'
@@ -65,8 +69,8 @@ import { scannerRoutes }     from './api/scanner/scanner.routes.js'
 import { analystRoutes }     from './api/analyst/analyst.routes.js'
 import { strategyRoutes }    from './api/strategy/strategy.routes.js'
 import { aetherRoutes }      from './api/aether/aether.routes.js'
-import { axlRoutes }         from './api/axl/axl.routes.js'
 import { threadsRoutes }     from './api/threads/threads.routes.js'
+import { sessionsRoutes }    from './api/sessions/sessions.routes.js'
 import { turnsRoutes }       from './api/turns/turns.routes.js'
 import { marketRoutes }      from './api/market/market.routes.js'
 import { calendarRoutes }    from './api/calendar/calendar.routes.js'
@@ -155,9 +159,9 @@ app.use('/api', apiLimiter)
 // gets the audio stream before the JSON middleware can touch it
 app.use('/api/transcribe', transcribeRoutes)
 
-// 10mb (vs the 100kb default): trade ideas persist their full chat transcript in
-// `chat_state` (messages + analysisState), which overflows the default limit on
-// longer conversations and 413s the save/update.
+// 10mb (vs the 100kb default): a turn body can carry a whole conversation (a setup's
+// `chat_state`, an agent stream's full history, Argus's radar board), which overflows
+// the default limit on longer conversations and 413s the request.
 app.use(express.json({ limit: '10mb' }))
 
 if (config.isProduction) {
@@ -174,9 +178,9 @@ if (config.isProduction) {
 // The two targeted limiters. Mounted here, ahead of the routers, because Express runs middleware
 // in mount order and a limiter registered after its route never sees the request.
 //
-// The agent limiter is pinned to the STREAM paths specifically, not to the desk prefixes. Every
-// desk exposes exactly one `POST /stream` (Axl also has `/brief/stream`), and those are the only
-// endpoints that buy tokens. Limiting `/api/portfolio` wholesale would have counted its fifteen
+// The agent limiter is pinned to the STREAM paths specifically, not to the desk prefixes. Since unified-chat 8e only
+// Pythia and Aether keep a `POST /stream` (their panels still stream); every other desk answers in the session, whose
+// turn route carries the same limiter — api/sessions. Those are the only endpoints that buy tokens. Limiting `/api/portfolio` wholesale would have counted its fifteen
 // ordinary reads against the same budget and throttled a user for browsing their own book.
 //
 // A NEW DESK MUST BE ADDED TO THE LIST BELOW. Forgetting it does not fail, and does not look
@@ -185,12 +189,10 @@ if (config.isProduction) {
 // tests/unit/agentLimiterCoverage.test.js walks every mounted `/stream` route and fails when one
 // of them is not here, so the omission is caught at the point it is made.
 app.use('/api/auth', authLimiter)
-for (const desk of ['axl', 'mentor', 'portfolio', 'scanner', 'analyst', 'strategy', 'aether']) {
+for (const desk of ['strategy', 'aether']) {
     app.use(`/api/${desk}/stream`, agentLimiter)
 }
-app.use('/api/axl/brief/stream', agentLimiter)
 
-app.use('/api/mentor',      mentorRoutes)
 app.use('/api/setups',      setupsRoutes)
 app.use('/api/trade-ideas', tradeIdeasRoutes)
 app.use('/api/auth',        authRoutes)
@@ -210,8 +212,8 @@ app.use('/api/scanner',     scannerRoutes)
 app.use('/api/analyst',     analystRoutes)
 app.use('/api/strategy',    strategyRoutes)
 app.use('/api/aether',      aetherRoutes)
-app.use('/api/axl',         axlRoutes)
 app.use('/api/threads',     threadsRoutes)
+app.use('/api/sessions',    sessionsRoutes)
 // Stopping an agent turn — its own endpoint because stopping and walking away are different
 // intentions that used to arrive as the same closed socket (see api/_shared/sse.util.js).
 app.use('/api/turns',       turnsRoutes)
@@ -220,6 +222,7 @@ app.use('/api/calendar',    calendarRoutes)
 app.use('/api/chat',        chatRoutes)
 
 attachChatWs(server)
+registerSessionChannel()   // the unified chat's session_sync replay rides the same socket (services/sessionChannel.js)
 ensureChatIndexes()
 ensureUserIndexes()
 ensureIdeaIndexes()
@@ -235,6 +238,11 @@ ensureIndustryAssessmentIndexes().catch(() => {}) // Pythia's industry_assessmen
 ensurePythiaCallsIndexes().catch(() => {})        // Pythia's forward log, pythia_calls (api/strategy/pythiaCalls.service.js)
 ensureThemeIndexes().catch(() => {})              // Pythia's themes (api/strategy/theme.service.js)
 threadService.ensureThreadIndexes()
+sessionService.ensureIndexes()        // the unified chat's sessions + session_messages (services/session.service.js)
+// A restart cut off every chain that was running: pause each and let its floor-holder ask (plan phase 5, G4).
+chain.sweep().catch(err => logger.warn('[server]', 'chain sweep failed', err.message))
+agentContextService.ensureIndexes()   // sealed agent contexts (services/agentContext.service.js)
+ensurePortfolioBookIndexes()
 
 // ─── Background loops ─────────────────────────────────────────────────────────
 // ONE INSTANCE RUNS THESE, and that is now enforced rather than merely documented. They start

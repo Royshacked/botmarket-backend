@@ -2,7 +2,6 @@ import express         from 'express'
 import { log }         from '../../middleware/logger.middleware.js'
 import { requireAuth, requireAdmin } from '../../middleware/auth.middleware.js'
 import {
-    streamAnalyst,
     listCoverage, getCoverageOne, getCoverageBySymbol,
     initiateCoverage, updateCoverage, retireCoverage, deleteCoverage,
     listResearchQueue, enqueueResearch, startResearch, completeResearch, rejectResearch,
@@ -12,9 +11,6 @@ import {
 const router = express.Router()
 
 router.use(requireAuth)
-
-// Streaming research agent (P3).
-router.post('/stream',             log, streamAnalyst)
 
 // Coverage — reads open to all users; writes admin-only (house coverage is a broadcast artifact).
 router.get('/coverage',                         log, listCoverage)

@@ -70,7 +70,6 @@ async function runTurn(prompt, chatState, history, n) {
         // The real client posts the running transcript, NOT just the latest prompt — without it
         // every turn starts blind and the agent re-asks for the ticker.
         messages:   [...history, { role: 'user', content: prompt }],
-        userPrompt: prompt,
         chatState,
         accounts: ACCOUNTS,
         mainAccountId: 'paper-chat-stub',

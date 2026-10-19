@@ -104,14 +104,18 @@ export const TOOL_SCHEMAS = {
     get_coverage: {
         "type": "object",
         "properties": {
+            "industry": {
+                "type": "string",
+                "description": "optional — one GICS sub-industry (8-digit code or exact name): a sleeve's researched names"
+            },
             "sector": {
                 "type": "string",
-                "description": "optional — narrow to one sector, e.g. Technology"
+                "description": "optional — narrow to one sector, e.g. Technology (a broad look; a sleeve is an industry)"
             },
             "school": {
                 "type": "string",
                 "enum": ["quality-value", "growth-durability", "income", "passive"],
-                "description": "optional — narrow to names Prometheus tagged for this selection school; combine with sector for the mandate-build pre-filter"
+                "description": "optional — narrow to names Prometheus tagged for this selection school; combine with industry for the mandate-build pre-filter"
             }
         }
     },

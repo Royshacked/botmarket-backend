@@ -25,6 +25,7 @@ import { createTagSuppressor, TOOL_BUDGET_LANDING, MAX_PARALLEL_TOOLS, makeVisio
 import { mapLimit } from '../services/concurrency.util.js'
 import { _runTool } from './anthropic.provider.js'
 import { WEB_SEARCH_COMPAT, makeWebSearchCompatHandler } from '../services/tools/webSearchCompat.tools.js'
+import { stallGuard } from './streamStall.js'
 
 const LOG = '[openaiCompat]'
 
@@ -338,6 +339,7 @@ export async function streamOpenAICompatWithTools({
     endpoint = 'openrouter', wire, model,
     promptOrMessages, systemPrompt, tools = [], toolHandlers = {}, maxContinuations = 10,
     onToken, tagCaptures = [], onToolStart, onReasoning, onUsage, signal, client = null,
+    stall = stallGuard,   // the stall guard (streamStall) — a seam for tests
 }) {
     client ??= _clientFor(endpoint)
     if (!wire) throw new Error('streamOpenAICompatWithTools: wire is required — llmModels binds it')
@@ -365,14 +367,8 @@ export async function streamOpenAICompatWithTools({
 
         // The server search is offered on the first SEARCH_ROUNDS rounds only — each search is billed.
         const roundTools = serverSearch && i >= SEARCH_ROUNDS ? oaTools.filter(t => t.type !== OPENROUTER_WEB_SEARCH.type) : oaTools
-        const stream = await client.chat.completions.create({
-            model: wire, messages, max_tokens: STREAM_MAX_TOKENS, stream: true,
-            stream_options: { include_usage: true },
-            // OpenRouter's usage accounting: the response's usage carries `cost`. Other endpoints may refuse the field.
-            ...(endpoint === 'openrouter' ? { usage: { include: true } } : {}),
-            ...(roundTools.length ? { tools: roundTools, tool_choice: landing ? 'none' : 'auto' } : {}),
-        }, signal ? { signal } : undefined)
-
+        // Cut a round that stops sending (streamStall) — the request and its stream share the guard's signal.
+        const guard = stall({ signal })
         let text   = ''
         let finish = null
         let usage  = null
@@ -380,7 +376,15 @@ export async function streamOpenAICompatWithTools({
         const acc  = {}
         const announced = new Set()
         try {
+            const stream = await client.chat.completions.create({
+                model: wire, messages, max_tokens: STREAM_MAX_TOKENS, stream: true,
+                stream_options: { include_usage: true },
+                // OpenRouter's usage accounting: the response's usage carries `cost`. Other endpoints may refuse the field.
+                ...(endpoint === 'openrouter' ? { usage: { include: true } } : {}),
+                ...(roundTools.length ? { tools: roundTools, tool_choice: landing ? 'none' : 'auto' } : {}),
+            }, { signal: guard.signal })
             for await (const chunk of stream) {
+                guard.touch()
                 served ??= chunk.model ?? null
                 if (chunk.usage) usage = chunk.usage
                 const choice = chunk.choices?.[0]
@@ -401,8 +405,12 @@ export async function streamOpenAICompatWithTools({
                 if (choice.finish_reason) finish = choice.finish_reason
             }
         } catch (err) {
+            // The stall, not the user: fail the turn with a clear reason (the chain offers "try it again").
+            if (guard.stalled) { logger.warn(LOG, `stream stalled on ${wire}`, guard.error.message); throw guard.error }
             if (signal?.aborted || err?.name === 'AbortError') { suppressor.flush(); return text }
             throw err
+        } finally {
+            guard.done()
         }
 
         if (!servedModelMatches(served, wire)) throw new Error(`provider served "${served}" for "${wire}"`)

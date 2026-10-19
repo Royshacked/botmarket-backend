@@ -358,6 +358,32 @@ export const REASONING_CONSULT = 'consult'
 // agent code nothing else covers: a bad reference there throws before the first token, and the
 // client only ever sees the generic "Streaming failed".
 /**
+ * The names a tool call is about, from its arguments (`ticker`, `tickers`, `symbol`, `symbols` — every tool schema's
+ * spelling), upper-cased and de-duplicated. What the chat's status line names. Exported for tests.
+ */
+export function toolTargets(input) {
+    if (!input || typeof input !== 'object') return []
+    const list = (v) => (Array.isArray(v) ? v : [])
+    const raw = [input.ticker, input.symbol, ...list(input.tickers), ...list(input.symbols)]
+    return [...new Set(raw.filter(s => typeof s === 'string' && s.trim()).map(s => s.trim().toUpperCase()))]
+}
+
+/**
+ * Every handler, announcing WHAT it is about as it runs (Roy, 2026-10-19: a 4-minute Argus validation read as one
+ * "Working…" chip). The provider's own onToolStart fires when the model STARTS writing the call — before its
+ * arguments exist — so the names can only be told here, at the run. Same callback, a second argument; a caller that
+ * reads only the first is unchanged. A throwing callback never fails the tool. Exported for tests.
+ */
+export function announceTargets(handlers, onToolStart) {
+    if (!handlers || typeof onToolStart !== 'function') return handlers
+    return Object.fromEntries(Object.entries(handlers).map(([name, fn]) => [name, typeof fn !== 'function' ? fn : (input, ...rest) => {
+        const targets = toolTargets(input)
+        if (targets.length) { try { onToolStart(name, { targets }) } catch { /* status only */ } }
+        return fn(input, ...rest)
+    }]))
+}
+
+/**
  * Open a model stream for an agent and return its raw text.
  *
  * Wraps the three lines every agent repeats: resolve the model + usage recorder, log the start,
@@ -413,9 +439,9 @@ export async function runAgentStream({
     // Built per call, which is per TURN — which is exactly the scope of the cap it carries.
     // A desk that supplies its own `consult` handler keeps it; the injected one only fills a gap.
     const wantsConsult   = Array.isArray(tools) && tools.some(t => t?.name === CONSULT_TOOL)
-    const resolvedHandlers = wantsConsult
+    const resolvedHandlers = announceTargets(wantsConsult
         ? { [CONSULT_TOOL]: _makeConsult({ userId, agent: agentKey, onReasoning: tagReasoning(REASONING_CONSULT) }), ...toolHandlers }
-        : toolHandlers
+        : toolHandlers, onToolStart)
 
     logger.info(log, 'chatStream start', { messageCount: messages?.length ?? 0, model, provider, ...(degraded ? { degraded: true } : {}), ...(wantsConsult ? { consult: true } : {}), ...meta })
 

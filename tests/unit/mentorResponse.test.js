@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { _mentorResponse } from '../../api/mentor/mentor.controller.js'
+import { _mentorResponse } from '../../services/desks/mentor.desk.js'
 
 // EVERYTHING THE DESK COMPUTES FOR THE USER HAS TO BE LISTED IN THE RESPONSE BY HAND, and twice
 // now something was not. `build` went missing first. Then `gate` — and because the panel had just
@@ -21,7 +21,7 @@ const FULL = {
 }
 
 test('every field the panel needs survives the controller', () => {
-    const out = _mentorResponse(FULL, 'user')
+    const out = _mentorResponse(FULL)
     for (const key of ['reply', 'coverage', 'build', 'gate', 'drafts', 'setup', 'readiness']) {
         assert.ok(key in out, `${key} was dropped on the way to the client`)
     }
@@ -30,14 +30,14 @@ test('every field the panel needs survives the controller', () => {
 })
 
 test('the gate is what the panel draws its cards from, so its shape travels whole', () => {
-    const { gate } = _mentorResponse(FULL, 'user')
+    const { gate } = _mentorResponse(FULL)
     assert.equal(gate.stage, 'spans')
     assert.equal(gate.awaiting, true)
     assert.deepEqual(gate.fields, ['spans'])
 })
 
 test('the optional halves stay optional — a bare turn sends no empty shells', () => {
-    const out = _mentorResponse({ reply: 'hi', coverage: [], build: { names: [] } }, 'user')
+    const out = _mentorResponse({ reply: 'hi', coverage: [], build: { names: [] } })
     assert.equal('gate' in out, false)
     assert.equal('drafts' in out, false)
     assert.equal('setup' in out, false)
@@ -46,16 +46,17 @@ test('the optional halves stay optional — a bare turn sends no empty shells', 
 })
 
 test('readiness rides WITH the setup — a verdict about a draft nobody was sent is noise', () => {
-    const out = _mentorResponse({ reply: 'x', coverage: [], readiness: { ready: true } }, 'user')
+    const out = _mentorResponse({ reply: 'x', coverage: [], readiness: { ready: true } })
     assert.equal('readiness' in out, false)
 })
 
-test('a candidate offer travels, and so does a route', () => {
+test('a candidate offer travels; the route is left to the shared desk stream', () => {
     const out = _mentorResponse({
         reply: 'options', coverage: [], setups: { candidates: [{ label: 'one' }] },
-        route: 'scan', routeSymbol: 'NVDA',   // the PIPELINE key, not the desk's name
-    }, 'user')
+        route: 'scan', routeSymbol: 'NVDA',
+    })
     assert.deepEqual(out.setups.candidates, [{ label: 'one' }])
-    assert.equal(out.route, 'scan')
-    assert.equal(out.routeSymbol, 'NVDA')
+    // makeDeskStream appends the routing fields, validated for the user's role (deskStream.test.js).
+    // Mentor building them too is how one desk's copy drifts from the gate.
+    assert.equal('route' in out, false)
 })

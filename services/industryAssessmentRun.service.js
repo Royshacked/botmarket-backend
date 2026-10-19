@@ -21,6 +21,7 @@ import { industryViewService } from '../api/strategy/industryView.service.js'
 import { pythiaCallsService } from '../api/strategy/pythiaCalls.service.js'
 import { getMonthlyUsage, monthKey } from './tokenUsage.service.js'
 import { withTimeout } from './timeout.util.js'
+import { openingTurn } from './agentUtils.js'
 import { logger } from './logger.service.js'
 
 const LOG = '[industryAssessmentRun]'
@@ -119,7 +120,7 @@ async function _measuredTurn(deps, { userId, userPrompt, chatState, label, timeo
     }
     try {
         const result = await withTimeout(deps.run({
-            messages: [], userPrompt, chatState, userId, signal: abort.signal,
+            messages: openingTurn(userPrompt), chatState, userId, signal: abort.signal,
             onToken: () => {}, onToolStart: () => {}, onReasoning: () => {}, onPhase: () => {},
         }), timeoutMs, label)
         return { result, cost: await cost() }

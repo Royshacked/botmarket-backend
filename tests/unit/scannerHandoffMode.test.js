@@ -48,28 +48,25 @@ test('a hand-off turn gets the module as its own cached block, after the spine',
 
 // ── the destination ──────────────────────────────────────────────────────────
 test('the destination desk is named in the VOLATILE tail, never the cached module', async () => {
-    for (const handoffTo of ['mentor', 'kairos']) {
-        const got = await call({ handoff: true, handoffTo })
-        const expected = handoffTo === 'mentor' ? /Mentor/ : /Kairos/
-        assert.match(got.systemPrompt[2].text, expected, `${handoffTo} unnamed in the tail`)
-        // The module may DISTINGUISH the two desks (it tells Argus how they differ, naming both);
-        // what it must never do is assert which one sent this user, because it is one shared cached
-        // block and that sentence would be wrong for half of them.
-        assert.doesNotMatch(got.systemPrompt[1].text, /sent here by (Mentor|Kairos)/,
-            'the cached module claims a specific sender')
-    }
+    const got = await call({ handoff: true, handoffTo: 'mentor' })
+    assert.match(got.systemPrompt[2].text, /Mentor/, 'mentor unnamed in the tail')
+    // The module must never assert who sent this user: it is one shared cached block, and that
+    // sentence would be wrong for every other destination.
+    assert.doesNotMatch(got.systemPrompt[1].text, /sent here by Mentor/,
+        'the cached module claims a specific sender')
 })
 
-test('the two destinations produce DIFFERENT tails and an IDENTICAL cached module', async () => {
-    const toMentor = await call({ handoff: true, handoffTo: 'mentor' })
-    const toKairos = await call({ handoff: true, handoffTo: 'kairos' })
-    assert.notEqual(toMentor.systemPrompt[2].text, toKairos.systemPrompt[2].text)
+test('a named and a generic destination produce DIFFERENT tails and an IDENTICAL cached module', async () => {
+    const toMentor  = await call({ handoff: true, handoffTo: 'mentor' })
+    const toGeneric = await call({ handoff: true, handoffTo: null })
+    assert.notEqual(toMentor.systemPrompt[2].text, toGeneric.systemPrompt[2].text)
     // Byte-identical, or the shared block stops being one cache entry.
-    assert.equal(toMentor.systemPrompt[1].text, toKairos.systemPrompt[1].text)
+    assert.equal(toMentor.systemPrompt[1].text, toGeneric.systemPrompt[1].text)
 })
 
 test('an unknown or absent destination degrades to generic — never a guessed desk', async () => {
-    for (const handoffTo of [null, undefined, 'atlas', 'DROP TABLE']) {
+    // 'kairos' included: the desk is archived, so its name is just another unknown value now.
+    for (const handoffTo of [null, undefined, 'atlas', 'kairos', 'DROP TABLE']) {
         const tail = (await call({ handoff: true, handoffTo })).systemPrompt[2].text
         assert.match(tail, /the build desk that sent them/)
         assert.doesNotMatch(tail, /\bMentor\b/)
@@ -172,14 +169,16 @@ test('the spine never names a build desk — it does not know which one is liste
     assert.doesNotMatch(SPINE, /\bMentor\b/)
 })
 
-// The module MAY name desks — it has to, to tell Argus how the two differ and to explain why the
-// wire tag is spelled `kairos_pick`. What it must not do is name one ALONE: a lone "Kairos" in a
-// block both destinations read is the exact shape of the bug this fixes. Checked per paragraph,
-// because that is the unit a reader takes a claim from.
-test('the module never names one desk without the other', () => {
-    for (const para of HANDOFF.split(/\n\s*\n/)) {
-        const kairos = /\bKairos\b/.test(para), mentor = /\bMentor\b/.test(para)
-        assert.equal(kairos, mentor,
-            `a paragraph names ${kairos ? 'Kairos' : 'Mentor'} alone:\n${para.trim()}`)
-    }
+// Kairos is archived (2026-08-18): Mentor is the only build desk, so the module may describe it, but
+// an archived desk named in a block every hand-off reads would send the user looking for a desk that
+// is gone. The wire tag keeps its spelling (`kairos_pick`) — that is not a desk name.
+test('the module never names the archived Kairos desk', () => {
+    assert.doesNotMatch(HANDOFF, /\bKairos\b/)
+})
+
+// The module is ONE cached block every hand-off reads — a named sender and a generic one alike. A
+// desk named in it reaches a hand-off that did not come from that desk, and Argus repeats the name
+// in prose. The destination is named only in the volatile ACTIVE MODE line.
+test('the cached module names no build desk at all', () => {
+    assert.doesNotMatch(HANDOFF, /\bMentor\b/)
 })

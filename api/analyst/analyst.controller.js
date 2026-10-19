@@ -1,19 +1,18 @@
-// HTTP handlers for the Analyst: the streaming research agent (P3) + coverage CRUD (P1) +
-// research queue (Argus→Prometheus admin pipeline).
-import { coverageService, revisionSummary } from './coverage.service.js'
+// HTTP handlers for the Analyst: coverage CRUD (P1) + the research queue (Argus→Prometheus admin pipeline). The research
+// conversation itself is a session turn (services/desks/analyst.desk.js) — its HTTP stream went in unified-chat 8e.
+import { sealing } from '../../services/desks/seal.js'
+import { forgetIfDeleted } from '../../services/agentContext.service.js'
+import { coverageService } from './coverage.service.js'
+import { coverageCommit } from './coverageCommit.service.js'
+import { COVERAGE_REASONS } from './coverageReasons.js'
 import { resolveCardsFor }        from '../chat/chat.service.js'
 import { researchQueueService }   from '../../services/researchQueue.service.js'
 import { researchRunService }     from '../../services/researchRun.service.js'
-import { analystAgentService }    from '../../services/agents/analyst.agent.service.js'
-import { streamAgentResponse, sseAgentCallbacks } from '../_shared/sse.util.js'
-import { routeFields }             from '../../services/routing.util.js'
-import { parseChatMessages }      from '../_shared/parse.util.js'
 import { sendReason }             from '../_shared/reason.util.js'
 import { makeHandle }             from '../_shared/handle.util.js'
 import { httpError }              from '../../services/httpError.util.js'
 import { logger }                 from '../../services/logger.service.js'
 import { getExperienceLevel }     from '../../services/experience.service.js'
-import { sanitizeScanSeed }       from '../../services/scanSeed.util.js'
 
 const LOG = '[analystCtrl]'
 // Every handler here rides makeHandle. The queue and run handlers moved first (§6): they had no
@@ -23,82 +22,7 @@ const LOG = '[analystCtrl]'
 // sentence out of a toast.
 const _handle = makeHandle(LOG)
 
-// Enrich chatState with coverage data from the DB so the agent always knows what's already
-// covered — without depending on the frontend to send it. The frontend can still override
-// by pre-populating either field; we only fill what's missing.
-export async function _resolveCoverageContext(chatState, seed) {
-    const state = { ...chatState }
-
-    if (!state.coverage_symbols?.length) {
-        try {
-            state.coverage_symbols = await coverageService.listSymbols({ onError: 'throw' })
-        } catch (err) {
-            logger.warn(LOG, '_resolveCoverageContext: listSymbols failed (non-fatal)', err.message)
-        }
-    }
-
-    // Check the active ticker — seed hand-off takes precedence over chatState.active_symbol.
-    const ticker = seed?.ticker
-        ? String(seed.ticker).toUpperCase().trim()
-        : chatState.active_symbol
-            ? String(chatState.active_symbol).toUpperCase().trim()
-            : null
-
-    if (ticker && !state.existing_coverage) {
-        try {
-            const existing = await coverageService.getCoverageBySymbol(ticker)
-            if (existing) state.existing_coverage = existing
-        } catch (err) {
-            logger.warn(LOG, '_resolveCoverageContext: getCoverageBySymbol failed (non-fatal)', err.message)
-        }
-    }
-
-    return state
-}
-
-export async function streamAnalyst(req, res) {
-    const { messages: rawMessages, userPrompt, model, chatState } = req.body ?? {}
-    const seed = sanitizeScanSeed(req.body?.seed)
-    let messages
-    if (rawMessages != null) {
-        const v = parseChatMessages(rawMessages)
-        if (v.error) return res.status(400).json({ error: v.error })
-        messages = v.messages
-    }
-
-    const resolvedState = await _resolveCoverageContext(
-        (chatState && typeof chatState === 'object') ? chatState : {},
-        seed
-    )
-
-    await streamAgentResponse(req, res, {
-        log: LOG,
-        handler: async ({ sendEvent, signal }) => {
-            const result = await analystAgentService.chatStream({
-                audience:  await getExperienceLevel(req.user._id),
-                messages,
-                userPrompt,
-                chatState:     resolvedState,
-                seed,
-                model,
-                userId: req.user._id,
-                signal,
-                ...sseAgentCallbacks(sendEvent),
-                onPhase:     phase => sendEvent('phase',     { phase }),
-            })
-            // …plus route / routeSymbol / opening: the user asked to be sent to another desk (routing.util).
-            return { reply: result.reply, phase: result.phase ?? null, ...(result.coverage ? { coverage: result.coverage } : {}), ...routeFields(result, req.user.role) }
-        },
-    })
-}
-
 // ─── Coverage CRUD ────────────────────────────────────────────────────────────
-
-const COVERAGE_REASONS = {
-    symbol_required:           [400, 'A symbol is required to initiate coverage'],
-    already_covered:           [409, 'Already covered — update the thesis instead of initiating it again'],
-    rating_contradicts_target: [422, 'The rating and the price target point in opposite directions'],
-}
 
 export const listCoverage = _handle('listCoverage', async (req, res) => {
     res.send(await coverageService.getCoverage({
@@ -129,23 +53,22 @@ export const initiateCoverage = _handle('initiateCoverage', async (req, res) => 
             extra: { ...(result.id ? { id: result.id } : {}), ...(result.detail ? { detail: result.detail } : {}) },
         })
     }
+    // With a sessionId, Prometheus's turns move onto the coverage they produced — per user, even on house
+    // coverage (agentContext.service). Never fails the write.
+    sealing.sealAfterGenerate(req, { kind: 'coverage', entityIds: [result.doc?.id], name: result.doc?.symbol ?? null })
     res.send(result.doc)
 })
 
 export const updateCoverage = _handle('updateCoverage', async (req, res) => {
     const patch = req.body?.patch ?? req.body
     if (!patch || typeof patch !== 'object' || Array.isArray(patch)) throw httpError(400, 'patch must be an object')
-    const result = await coverageService.updateCoverage(req.params.id, patch)
+    // The revision and the cards it satisfies — one service with Prometheus's session action (coverageCommit).
+    const result = await coverageCommit.revise(req.params.id, patch)
     if (!result.ok) return sendReason(res, result.reason, {
         overrides: COVERAGE_REASONS, fallback: 500, fallbackMessage: 'Failed to update coverage',
         extra: result.detail ? { detail: result.detail } : null,
     })
-    // THE WORK LANDED. Coverage writes do not go through makeEntityController, so the one seam
-    // that closes a card when its ask is satisfied never saw them — a verdict card sat "still
-    // waiting on you" after the thesis it asked for was revised. After the write, never before,
-    // and non-fatal (resolveCardsFor swallows its own failures). The note is the revision's own
-    // account of what moved — the trail entry this write just appended.
-    await resolveCardsFor({ kind: 'coverage', id: req.params.id }, { outcome: 'revised', note: revisionSummary(result.doc?.revisions?.[0]) })
+    sealing.sealAfterGenerate(req, { kind: 'coverage', entityIds: [req.params.id], name: result.doc?.symbol ?? null, onlyIfEditing: true })
     res.send(result.doc)
 })
 
@@ -161,6 +84,7 @@ export const deleteCoverage = _handle('deleteCoverage', async (req, res) => {
     const result = await coverageService.deleteCoverage(req.params.id)
     if (!result.ok) return sendReason(res, result.reason, { overrides: COVERAGE_REASONS, fallback: 500, fallbackMessage: 'Failed to delete coverage' })
     logger.info(LOG, 'coverage deleted', { id: req.params.id })
+    forgetIfDeleted('coverage', req.params.id, result)
     // A card asking to revise a thesis that no longer exists is a dead ask — close it as such.
     await resolveCardsFor({ kind: 'coverage', id: req.params.id }, { outcome: 'deleted', note: 'Coverage deleted' })
     res.send({ ok: true })

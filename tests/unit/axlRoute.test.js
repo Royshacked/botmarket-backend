@@ -15,6 +15,7 @@ import {
     VALID_PIPELINES, EDIT_KINDS,
 } from '../../services/routing.util.js'
 import { ALL_EMIT_TAGS } from '../../services/llmStream.util.js'
+import { showLine } from '../../services/desks/sessionTurn.js'
 
 // Axl's desk hand-off: `<route>research NVDA</route>` — the desk AND the name it should open on.
 // The symbol is what turns "routing you to Prometheus" into Prometheus already researching NVDA,
@@ -162,6 +163,17 @@ test('validate show: the same handle gate as an edit, minus the desk', () => {
     assert.equal(_validateShow({ kind: 'coverage', ref: 'c1' }), null, 'kind has no window')
     assert.equal(_validateShow({ kind: 'idea', ref: 'i1' }), null, 'and neither has a nameable id')
     assert.equal(_validateShow(null), null)
+})
+
+test('the two house views are screens: heatmap (an optional symbol to focus) and calendar (no ref) — 2026-10-19', () => {
+    assert.deepEqual(_splitShow('heatmap'), { kind: 'heatmap', ref: null })
+    assert.deepEqual(_splitShow('heatmap NVDA'), { kind: 'heatmap', ref: 'NVDA' })
+    assert.deepEqual(_splitShow('Calendar'), { kind: 'calendar', ref: null })
+    assert.deepEqual(_validateShow({ kind: 'heatmap', ref: 'nvda' }), { kind: 'heatmap', ref: 'NVDA' })
+    assert.deepEqual(_validateShow({ kind: 'heatmap', ref: 'the semis' }), { kind: 'heatmap', ref: null }, 'a phrase is no focus — the map still opens')
+    assert.deepEqual(_validateShow({ kind: 'calendar', ref: 'whatever' }), { kind: 'calendar', ref: null })
+    assert.equal(showLine({ kind: 'calendar' }), "Here's the calendar.")
+    assert.equal(showLine({ kind: 'heatmap', ref: 'NVDA' }), "Here's the forecast heat map, on NVDA.")
 })
 
 test('every kind the prompt teaches as a show is one the controller accepts', () => {

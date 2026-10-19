@@ -1,11 +1,12 @@
 import { fileURLToPath } from 'url'
 import { parseEmitBlock, mergeDraft, runAgentStream } from '../agentIO.js'
 import { dirname, join } from 'path'
-import { makePromptLoader, stripEmitTags, buildAccountLines, buildTimeSection, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, BREVITY_RULE, VENUE_RULE, cachedBlock, buildDeskMessages, makeToolHandler } from '../agentUtils.js'
+import { makePromptLoader, cleanReply, buildAccountLines, buildTimeSection, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, BREVITY_RULE, VENUE_RULE, cachedBlock, normalizeMessages, makeToolHandler } from '../agentUtils.js'
 import { makeNewsHandlers } from '../tools/news.tools.js'
 import { getAnalystActions } from '../../providers/fmp.provider.js'
 import { buildTagCaptures } from '../llmStream.util.js'
-import { makeRouteCapture, ROUTE_TAGS, buildRouteRule } from '../routing.util.js'
+import { DESKS } from '../desks/registry.js'
+import { makeRouteCapture, buildRouteRule } from '../routing.util.js'
 import { TRADING_TOOLS, buildTradingToolHandlers } from '../tools/trading.tools.js'
 import { toolsFor } from '../agentTools.registry.js'
 import { consultDescription } from '../deepThink.service.js'
@@ -41,7 +42,7 @@ import { logger } from '../logger.service.js'
 const __dirname   = dirname(fileURLToPath(import.meta.url))
 const PROMPT_PATH = join(__dirname, '../../prompts/mentor_system_prompt.md')
 const LOG         = '[mentorAgent]'
-const MAX_RECENT_MESSAGES = 8
+const MAX_MESSAGES = DESKS.mentor.maxMessages
 
 const _baseSystemPrompt = makePromptLoader(PROMPT_PATH, LOG)
 
@@ -101,7 +102,7 @@ export function emptyMentorState() {
 export const mentorAgentService = { chatStream }
 
 async function chatStream({
-    messages, userPrompt, chatState = emptyMentorState(), accounts = [], mainAccountId = null,
+    messages, chatState = emptyMentorState(), accounts = [], mainAccountId = null,
     clientTime = null, audience = null, seed = null,
     model: requestedModel, reasoningEffort, userId,
     onToken, onAsset, onInterval, onChart, onToolStart, onReasoning, onCoverage, signal,
@@ -182,7 +183,7 @@ async function chatStream({
     // the system prompt: free cash moves whenever anything fills, so a volatile system block
     // would sit ahead of the whole conversation in the cache prefix. See buildVenueSection.
     const builtMessages = attachTurnContext(
-        attachTurnContext(_buildMessages({ messages, userPrompt }), _buildTurnContext(turnState, clientTime, incoming.settled, { delegated: incoming.delegated, hasAccount })),
+        attachTurnContext(normalizeMessages(messages, MAX_MESSAGES), _buildTurnContext(turnState, clientTime, incoming.settled, { delegated: incoming.delegated, hasAccount })),
         await _venueSection(userId))
 
     // Coverage is CUMULATIVE across the conversation: the model re-states everything it has read,
@@ -208,7 +209,7 @@ async function chatStream({
     const raw = await _run({
         log: LOG, requestedModel, userId, messages: builtMessages, systemPrompt, tools, toolHandlers,
         reasoningEffort, signal, onToken, tagCaptures, onToolStart, onReasoning, onChart,
-        meta: { userPrompt, asset: chatState?.active_asset || '', accounts: accounts?.length ?? 0 },
+        meta: { asset: chatState?.active_asset || '', accounts: accounts?.length ?? 0 },
     })
 
     const { reply, setup, setups, buildOps, spanBlock, entryBlock } = _parseMentorResponse(raw)
@@ -478,7 +479,7 @@ export const _mergeSetupDraft = mergeDraft
  */
 export function _parseMentorResponse(raw) {
     const text  = raw ?? ''
-    const reply = stripEmitTags(text, ['setup', 'setups', 'build', 'spans', 'entries', 'asset', 'interval', 'coverage', ...ROUTE_TAGS]).trim()
+    const reply = cleanReply(text)
 
     return {
         reply,
@@ -989,6 +990,3 @@ function _buildAccountsSection(accounts, mainAccountId = null) {
     return `\n\nACCOUNTS (marked at the bank icon — the setup will bind here):\n${lines.join('\n')}${mainNote}`
 }
 
-function _buildMessages({ messages, userPrompt }) {
-    return buildDeskMessages({ messages, userPrompt, max: MAX_RECENT_MESSAGES })
-}

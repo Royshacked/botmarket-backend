@@ -268,7 +268,7 @@ on the assessment, a board row and a weekly-scan trigger; the map's directions f
 as hypotheses.
 
 Confirming does not answer in the social chat: it resolves the card as read, routes to Axl, and
-streams the brief into his thread (`POST /api/axl/brief/stream`). A page of market prose does not
+asks Axl for it as a turn in the user's chat session (`POST /api/sessions/:id/turn` with `brief: true`). A page of market prose does not
 belong in a surface built for one-liners, and read in Axl's thread the obvious follow-up — "what
 does that mean for my book?" — is the next thing the user types rather than a new journey. (The
 answer to that follow-up still may not join the brief to their book; see the unbound tool above.)
@@ -288,7 +288,7 @@ cards in the same second.
 
 ### Axl reception hand-off: `<route>` vs `<edit>` vs `<show>`
 
-Axl (`POST /api/axl/stream`) is where the user lands, so it is also the way in to the desks. It hands
+Axl (the first voice of the session — `POST /api/sessions/:id/turn`) is where the user lands, so it is also the way in to the desks. It hands
 them over with one of three tags, and they are different acts: a route names a **desk**, an edit names
 a **document**, a show names a **page to read**.
 
@@ -673,8 +673,9 @@ the Nasdaq-100 as the **US100 cash CFD**, but levels are read off the **NQ futur
   TTL). Portfolio drafts persist server-side inline; idea/scanner drive drafts client-side through
   `/api/threads` (their server never holds the full conversation). Fixes the mandate re-send hack —
   construction state is durable before the artifact exists.
-- Portfolio/scanner legacy chat state (`portfolio_chats` / `scanner_chats`) still persists per
-  user/portfolio for post-create edit restore; being superseded by `threads`.
+- Portfolio legacy chat state (`portfolio_chats`) still persists per portfolio for post-create edit
+  restore. The scanner's (`scanner_chats`) lost its routes 2026-10-16 — nothing called them; the
+  collection waits for the unified-chat migration (`docs/design/unified-chat-plan.md`).
 
 ---
 

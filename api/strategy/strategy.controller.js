@@ -5,11 +5,13 @@
 // `req.user._id`. The READS are open to every signed-in user; the stream and publishing are admin-only,
 // gated per route in strategy.routes. A trader's read carries the answers, not the review machinery.
 
-import { strategyAgentService } from '../../services/agents/strategy.agent.service.js'
+import { sealing } from '../../services/desks/seal.js'
+import { strategyDesk }         from '../../services/desks/strategy.desk.js'
 import { industryViewService }  from './industryView.service.js'
+import { publishIndustry as publishIndustryView } from './industryPublish.service.js'
+import { VIEW_REASONS } from './viewReasons.js'
 import { readSubIndustry, listSubIndustries, moneyFacts, largestCompanies, readFlowNodes, flowFacts } from './industryData.service.js'
 import { readGeoFacts } from './geopoliticsData.service.js'
-import { notifyIndustryChanged } from '../../services/industryNotify.service.js'
 import { pythiaWeeklyService } from '../../services/pythiaWeekly.service.js'
 import { industryAssessmentService } from './industryAssessment.service.js'
 import { pythiaCallsService } from './pythiaCalls.service.js'
@@ -17,9 +19,7 @@ import { forecastMapService } from './forecastMap.service.js'
 import { readTimingRow } from './screenerData.service.js'
 import { assessIndustry, assessTheme, proposeThemes, structureOf } from '../../services/industryAssessmentRun.service.js'
 import { themeService } from './theme.service.js'
-import { streamAgentResponse, sseAgentCallbacks }  from '../_shared/sse.util.js'
-import { routeFields }                             from '../../services/routing.util.js'
-import { parseChatMessages }    from '../_shared/parse.util.js'
+import { makeDeskStream }       from '../_shared/deskStream.util.js'
 import { sendReason }           from '../_shared/reason.util.js'
 import { makeHandle }           from '../_shared/handle.util.js'
 import { logger }               from '../../services/logger.service.js'
@@ -32,41 +32,12 @@ const _handle = makeHandle(LOG)
 
 // Streaming industry-desk chat → <industry_view> drafts (returned for preview; POST /industries/:code
 // publishes one).
-export async function streamStrategy(req, res) {
-    const { messages: rawMessages, userPrompt, model, chatState } = req.body ?? {}
-    let messages
-    if (rawMessages != null) {
-        const v = parseChatMessages(rawMessages)
-        if (v.error) return res.status(400).json({ error: v.error })
-        messages = v.messages
-    }
-    await streamAgentResponse(req, res, {
-        log: LOG,
-        handler: async ({ sendEvent, signal }) => {
-            const result = await strategyAgentService.chatStream({
-                messages,
-                userPrompt,
-                chatState: (chatState && typeof chatState === 'object') ? chatState : {},
-                model,
-                userId: req.user._id,
-                signal,
-                ...sseAgentCallbacks(sendEvent),
-                onPhase:     phase => sendEvent('phase',     { phase }),
-            })
-            // The <industry_view> drafts, for preview — publishing is POST /industries/:code.
-            // …plus route / routeSymbol / opening: the user asked to be sent to another desk (routing.util).
-            return { reply: result.reply, phase: result.phase ?? null, views: result.views ?? [], assessments: result.assessments ?? [], ...routeFields(result, req.user.role) }
-        },
-    })
-}
+// The desk itself is services/desks/strategy.desk.js, shared with the session turn (unified-chat plan phase 4).
+export const streamStrategy = makeDeskStream(strategyDesk)
 
 
 // ─── The industry views (Pythia, rebuilt 2026-10-05) ─────────────────────────
 
-const VIEW_REASONS = {
-    bad_draft: [422, 'The view does not hold up — see detail'],
-    unknown_industry: [404, 'Unknown GICS sub-industry'],
-}
 
 /**
  * Every sub-industry: the house's answer where there is one, beside the engine's measured first read.
@@ -155,12 +126,11 @@ export const runWeekNow = _handle('runWeekNow', async (req, res) => {
 
 /** Publish a reviewed draft (the chat preview's Publish). Checked against the measured numbers. */
 export const publishIndustry = _handle('publishIndustry', async (req, res) => {
-    const bundle = await readSubIndustry(req.params.code)
-    if (!bundle) return sendReason(res, 'unknown_industry', { overrides: VIEW_REASONS })
-    await industryViewService.seedMissing([bundle.sub])
-    const r = await industryViewService.publishView(bundle.sub.code, req.body ?? {}, bundle.answering, { note: req.body?.summary ?? null })
+    // The check, the write and the industry card — one service with Pythia's session action.
+    const r = await publishIndustryView(req.params.code, req.body ?? {})
     if (!r.ok) return sendReason(res, r.reason, { overrides: VIEW_REASONS, fallback: 500, ...(r.detail ? { extra: { detail: r.detail } } : {}) })
-    if (r.changed) notifyIndustryChanged(r.doc, r.changed).catch(err => logger.warn(LOG, 'industry card failed (view is published)', err.message))
+    // With a sessionId, Pythia's turns move onto the view they produced (unified-chat §6.2). Never fails the publish.
+    sealing.sealAfterGenerate(req, { kind: 'industry_view', entityIds: [r.sub.code], name: r.sub.name ?? null })
     res.json(r.doc)
 })
 

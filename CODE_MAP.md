@@ -38,7 +38,7 @@ api/
     ideaExecution.service.js  placeOrdersForIdea / placeRestingEntryForIdea / triggerEntryNow ("Buy now")
     exitOrders.service.js     in-position exit (re)arming — through buildExitOrder, so the basis offset is
                               applied once, by the one helper, on this path as on placement
-  mentor/                 Mentor chat SSE /api/mentor/stream — the trader's desk (agents/mentor)
+  mentor/                 (gone, unified-chat 8e — Mentor answers in the session; its setups are api/setups)
     mentor.controller.js      NB: `_mentorResponse(result, role)` is the response shaping, PURE and
                               exported so a test can hold it (mentorResponse.test.js). Everything
                               the panel reads is listed there BY HAND, and twice something was not:
@@ -63,6 +63,11 @@ api/
                               so the sender's later writes cannot resolve the recipient's card. Its
                               own module because chat.service → the Axl agent → its tools → the
                               setups list: importing the pipe from setups.service closed a cycle
+    setupCommit.service.js    what a Generate / an Arm DOES beyond the write (unified-chat 8a): commitSetup
+                              closes an in-place update's cards, armSetup patches to looking and closes its
+                              cards. The generate route and Mentor's session actions both call it.
+                              generateSetups (in setups.service) holds the one MAX_NAMES cap
+    setupReasons.js           the setup refusal table (status + message by reason) — routes and Mentor's actions
   portfolio/              Portfolio Agent + review    /api/portfolio/*
                           A book is NOT a document — it exists as the items carrying its
                           portfolioId — so its CRUD reads are shaped by hand rather than by
@@ -70,6 +75,13 @@ api/
                           GET /:portfolioId/items = the book's holdings, its get-by-id.
                           Both added 2026-08-14 so the client READS a book by id like every
                           other kind instead of filtering it out of its own ideas list
+    portfolioCommit.service.js  what saving a book DOES (unified-chat 8a), one path for the routes and Atlas's
+                              session actions: createBook (the AVOID 409 + the batch — POST /trade-ideas/batch),
+                              recordConstruction (mandate + construction thesis — POST /chat-state), replacePlan
+                              (a re-plan in place: save first, then retire the old legs; refused while a leg is
+                              live — moved off MainPage), rebindAccounts, closeReview, acceptRebalance
+                              ({ closeReview }: only a review's Accept advances the clock)
+    portfolioReasons.js       REBALANCE_REASONS + BOOK_REASONS — the routes' and Atlas's refusal tables
   scanner/                Scanner Agent + saved scans /api/scanner/*
                           GET /scans/:id is crud.get over scanService.getScanById — written
                           long before, wired 2026-08-14 when the frontend needed to open a
@@ -82,6 +94,9 @@ api/
                               pipe it shares with industryView.service: revise = `$set` of ONLY the patched fields +
                               `$push` of the revision at position 0, in one update (`_updateSet` is the pure
                               half). Own collection — NOT the execution-tier entities (P1 of the Analyst)
+    coverageCommit.service.js  revise (the write, then the cards it satisfies) · initiateOrRevise (an
+                              already-covered name is revised as a remodel) — the routes and Prometheus's actions
+    coverageReasons.js        the coverage refusal table, shared the same way
   strategy/               Pythia — the house INDUSTRY VIEWS  /api/strategy/*. Rebuilt 2026-10-05
                           (docs/desks/pythia-industries.md; the tilt desk was deleted). READS are open to
                           every signed-in user (GET /industries, /industries/:code); AUTHORING is admin-only
@@ -95,6 +110,8 @@ api/
                               pending views; viewsForSymbols is THE join (symbol → its industry's answer)
                               behind Atlas's trigger, its fingerprint and the read tool. Writes ride
                               houseArtifact.repo
+    industryPublish.service.js  publishIndustry — the check against the measured numbers, the write, the industry
+                              card on a changed answer; the route and Pythia's session action. viewReasons.js: its table
     geopoliticsData.service.js  Geopolitical risk as the engine measured it (step 4, pythia-geopolitics.md):
                               latestReading (geopolitical_risk, latest COMPLETE run — the GPR index, world and
                               countries, and the exposure map's risks with the sub-industries they hurt/help),
@@ -199,15 +216,6 @@ api/
                           POST /:id/cancel). What is waiting on the user, from BOTH stores —
                           off-hours-queued intents AND entities the market-open sweep unparked.
                           Execute REPLAYS through the origin's own function, never a copy
-  axl/                    Axl chat SSE /api/axl/stream (converse + chart + three hand-off tags:
-                          `<route>desk SYMBOL` opens a desk for NEW work, `<edit>kind ID` reopens an
-                          item the user already has, in the editor that owns it, `<show>setup ID`
-                          opens that setup's own DETAIL page and changes nothing — see APP_SPEC §2)
-                          and POST /api/axl/brief/stream — DELIVERY, not a turn: streams today's
-                          market brief into the Axl chat panel (the confirm behind the offer card).
-                          No model runs on it and the whole brief goes out as ONE token event, but it
-                          speaks the same SSE shape as a turn, so the client's chip/typewriter/Stop
-                          work with the handlers it already has
   chat/                   social DM + bot notifications (chatWs.js = WebSocket, userId → SET of
                           sockets: every tab is a reader of the same inbox, and one socket per user
                           meant a second tab displaced the first WITHOUT closing it — that browser
@@ -249,6 +257,9 @@ api/
                           replaces, never twins). Off without VAPID_PUBLIC_KEY + VAPID_PRIVATE_KEY
   experience/             experience.model — how to TALK to a user (beginner may be inferred,
                           experienced only declared); its own collection, never the user doc
+  sessions/               the unified chat's sessions (/api/sessions: active · new · list · :id/messages);
+                          scope 'main' | 'strategy' | 'aether' (admin desks 403 for a trader). Read-only
+                          + "new" until the turn endpoint lands (unified-chat plan phase 5)
   threads/                the generic draft thread API over thread.service (/api/threads: draft ·
                           link · pin · list · unfinished · get · discard · pipeline drafts). AGENTS is
                           the draft-save whitelist — LIVE desks only, and the second half of a pair
@@ -275,19 +286,68 @@ api/
                           Express never 304s a probe. Reports leader + loop count (roster only in dev)
   _shared/                cross-controller helpers:
       sse.util.js             startSseStream() — SSE headers + heartbeat + abort wiring
-      parse.util.js           parseChatMessages / parseIdeaAccounts
+      deskStream.util.js      makeDeskStream({ log, parse, run, done }) — the streaming desk turn Pythia's and
+                              Aether's POST /stream ride (the other desks answer in the session since unified-chat
+                              8e — their /stream routes are gone): shared parse + 400s, the common agent bag
+                              (messages/model/user/audience/signal/SSE callbacks), the routing gate
+                              appended to every `done`. A desk supplies only its extras, its agent
+                              call and its done shape (unified-chat phase 2, 2026-10-16)
+      parse.util.js           parseDeskTurn (the one desk-turn body: messages required, no userPrompt)
+                              / parseChatMessages / parseIdeaAccounts / parseClientTime / parseCommitArgs (the
+                              one shape a session press carries: account objects + mainAccountId) / parseStringList
       handle.util.js          makeHandle(log) — wrap an async handler so a throw is logged WITH its
                               route and forwarded; errorHandler — THE global error handler (mounted
                               last in server.js): a minted `httpError` answers with its status +
                               sentence, anything else is a 500 (generic body in production). Every
                               controller rides the pair; none hand-rolls `catch → res.status(500)`
-      chatState.util.js       makeGetChatState / makeDeleteChatState factories (over makeHandle)
       reason.util.js          THE reason→HTTP map (in_position=409, forbidden=403 …) + sendReason();
                               route-owned reasons are passed in as `overrides`, never re-mapped locally
       entityController.util.js  makeEntityController() — list/get/patch/delete for any owner-scoped
                               kind (the HTTP twin of services/entity/entityCrud); `envelope` carries
                               the legacy `{idea}/{ideas}` body shape, everything else answers bare
 services/
+  desks/                  THE DESKS as definitions, free of HTTP (unified-chat plan phase 4):
+      registry.js             every agent once — desk key, brand, entity kind, editable, routable, scope,
+                              admin, maxMessages; routing.util / session.util / each agent's MAX_MESSAGES
+                              derive from it. entryOf(desk): where a route lands (composite `trade` →
+                              Argus preset to pick one name for Mentor)
+      <agent>.desk.js         parse(body, turn, user) → { state, input } · run · done · nextState (the fold
+                              the client did on every `done`) · stateFromEntity(entity, opts) (rebuild to edit) ·
+                              prepareInput · onRouted (a route landing) · hasWork · stateFields (what `done`
+                              drops from the live frame) · actions / applyEdit / reasons (the session's commits
+                              and hand edits, 8a). ONE definition, two callers: makeDeskStream (HTTP) and sessionTurn
+      index.js · common.js    DESK_DEFS by agent · hasWork · framePayload (the slimmer done frame) · deskCommon
+      act.js                  THE PIPE for a desk's commits and hand edits (unified-chat 8a): POST /sessions/:id/act
+                              and PATCH /sessions/:id/state — the session read, the speaker rule, the REVISION
+                              check (agentRev; stale → stale_state), the lock, the seal, the state write. The
+                              meaning is the desk's (actions/); an edit answering dropMarkers (Mentor's fresh
+                              plan, 8b) clears editing / chainId instead of keeping them. `discard` is the pipe's
+                              own (8e): unsaved work only (refused over an edit or a table with no work), the desk's
+                              settings kept (`cleanTable`), its chain ended, its turns set aside (putAside)
+      actions/                <agent>.actions.js — each desk's commits from its agentState (never the client's
+                              copy) through the shared commit service, and its hand edits (Mentor's draft, Argus's
+                              lens / read / fresh table, Atlas's adopt mode — staged under the lock); the contract (verbs generate / update /
+                              later + the desk's own, results { <kind>: doc }) is in mentor.actions.js
+      markers.js · scannerMode.js   keepMarkers (editing / chainId survive a fold, an edit, Atlas's onRouted) ·
+                              Argus's mode and radar-board validation (shared by the desk and its actions)
+      context.js              buildConversation — what ONE agent reads: sealed context when editing, its
+                              summary, its own segment (a hand-off to it reads as the user)
+      sessionTurn.js          a desk turn against the session: append → context → run → reply → nextState →
+                              floor (entryOf on a route) → background summary fold. No HTTP until phase 5
+      summarize.js            the rolling per-agent summary past the trimHistory high-water mark (Haiku 4.5,
+                              booked to the user; failure changes nothing)
+      turnLock.js · startTurn.js · turns.js   one turn at a time per session · accept a turn (202) and run it
+                              queued, stoppable, streamed · the turns + chain wired as one pair
+      entityLookup.js         the entity an edit reopens, owner-checked through its own service
+      seal.js                 sealFromSession (Generate: turns move onto the entity, one sealed line) ·
+                              putAside (dropped work's turns: the seal point and summary move past them, 8e) ·
+                              openForEdit (a DIFFERENT item sets the agent's turns aside) · sealAfterGenerate
+  chain/                  THE CHAIN the server runs (unified-chat plan phase 5): artifact.js (candidate_list,
+                          coverage_set) · contracts.js (receiverOf + each receiver's opening brief) · rules.js (the
+                          declared tables: what a reply emits, what makes a turn the user's call) · runner.js (after
+                          every turn: decision → stop, emit → hand-off + the receiver's turn queued; busy rule, step
+                          cap, pause, boot sweep, sleeveSettled; "research the top N" saves Argus's list through its
+                          own action before the run, 8d). Wired with the turns in desks/turns.js
   agents/                 the 6 LLM desks (analyst · axl · mentor · portfolio · scanner ·
                           strategy). A seventh is archived and lives under archive/, imported by
                           nothing — see archive/README.md, and `npm run check:archive`, which
@@ -357,6 +417,9 @@ services/
                             above/below/thin vs Street; the delta read ends on the JSON line the model copies). (P2)
   agentUtils.js           shared tool handlers, makePromptLoader, makeToolHandler,
                           formatMoney/buildAccountLines, stripEmitTags, runtime glue.
+                          cleanReply (every desk's reply, stripped from the shared ALL_EMIT_TAGS,
+                          <ticker> unwrapped); normalizeMessages (the one history helper, depth per
+                          desk via MAX_MESSAGES); openingTurn(text) — how a headless run opens a desk.
                           resolveAgentStream: the model for a turn. SINCE 2026-09-21 EVERY turn — any
                           user, the admin included, and a turn with no user (market brief, coverage
                           re-model) — runs the HOUSE chat model (houseModels.service, one
@@ -652,7 +715,7 @@ services/
                             snapshot, and a 7d calendar filtered to Fed rows + MAJOR_EARNINGS only —
                             then ONE model turn with web_search for the narrative. Cached 45min
                             (MARKET_BRIEF_TTL_MS) + single-flight: the morning fan-out costs one run,
-                            not one per user. Two consumers: Axl's tool and POST /api/axl/brief/stream
+                            not one per user. Two consumers: Axl's tool and Axl's brief turn (axl.desk briefTurn)
   marketBrief.tools.js      get_market_brief — UNBOUND (no userId, so the brief cannot be made
                             personal). Axl RELAYS the brief; it does not write market commentary
   industryViews.tools.js    get_industry_views (Axl + Atlas, replaced get_sector_view 2026-10-05) — UNBOUND;
@@ -796,7 +859,7 @@ services/
   industryLimits.service.js The house's industry LIMITS on a book (step 7), one mechanism for construction (_sizePlan)
                             and every add: hype ×½, no sub-industry above a third (water-filled, the rest
                             cash), AVOID flagged → saved only with the user's OK, which NAMES the symbols
-                            (avoidOkCovers; the batch route's and createTradeIdea's 409). capFor: a
+                            (avoidOkCovers; portfolioCommit.createBook's and createTradeIdea's 409). capFor: a
                             single_industry mandate lifts the cap only for a book 80%+ in one sub-industry.
                             limitAddByRatio = an edit-mode add; a review's add_item / add_to_item go through
                             portfolioRebalance._industryLimitsForAdd / _industryLimitsForScaleIn
@@ -880,6 +943,21 @@ services/
                           agent's emitted phase — NOT content), TTL-expired + LRU-capped, and
                           is `linked` to its artifact (idea/portfolio/scan) on generate.
                           Generalizes portfolio_chats; migrating agents off per-agent chat-state.
+                          BEING REPLACED by session.service (unified-chat plan): deleted when its
+                          last caller moves (plan D1).
+  session.service.js  session.util.js   the unified chat's session store: `sessions` (header — scope,
+                          status, floor, agentState, summaries, links, seq) + `session_messages` (one row
+                          per timeline message, per-session seq). ONE active per user per scope; "new"
+                          archives it; no TTL, no cap. session.util.segmentOf = one agent's context line
+                          (its own turns + hand-offs addressed to it). Factory over getDb (memDb-tested)
+  sessionEvents.js  sessionChannel.js   the unified chat's live channel ON THE EXISTING WebSocket (chatWs): the
+                          store pushes session_message / session_removed / session_state on every change; a running
+                          turn streams session_delta + session_turn (turnEmitter keeps its text so far); session_sync
+                          { sessionId, afterSeq } is answered with a replay to the asking socket (chatWs.onClientEvent)
+  agentContext.service.js  sealed agent context: `agent_contexts`, one row per {userId, kind, entityId,
+                          agent} — an agent's conversation kept with the entity it produced (setup, scan,
+                          coverage, portfolio, industry_view). Per user even on a house entity; a second
+                          seal appends; newest 200 messages kept
 providers/
   anthropic.provider.js         THE ONE Anthropic call path: streamAnthropicWithTools — the request → tool
                                 → request loop, adaptive thinking + effort per model (_thinkingConfig, with
@@ -1308,7 +1386,8 @@ docs/                       docs/README.md is THE index. architecture/ (how it i
 | Task | Touch |
 |------|-------|
 | New HTTP endpoint | `<feature>.routes.js` + handler in controller + logic in service |
-| New SSE stream | `startSseStream()` from `api/_shared/sse.util.js` |
+| New desk stream (an agent turn) | `makeDeskStream()` from `api/_shared/deskStream.util.js` |
+| New SSE stream (not an agent turn) | `streamAgentResponse()` / `startSseStream()` from `api/_shared/sse.util.js` |
 | New agent tool | schema + handler; put shared ones in `agentUtils` (`COMMON_TOOL_HANDLERS`, `makeToolHandler`) |
 | New broker | `providers/<b>.provider.js` + `adapters/<b>.adapter.js` (extend `BrokerAdapter`) + one line in `broker.factory.js`; add aliases in `brokerSymbol.service.js` only if it renames instruments. `capabilities()` is an exhaustive literal, not a spread of the base — state EVERY flag, including `selfExecuted`, or it reads `undefined`. A broker-less venue (the user places the orders) sets `selfExecuted:true` and needs no other change: the eleven card-instead-of-order branches already ask the capability. `tests/unit/selfExecutedVenue.test.js` pins the inventory and fails when a second one arrives |
 | New aliased index future (broker basis) | add to `brokerSymbol.service.ALIASES` + `brokerPrice.service` REAL_TICKER/CASH_INDEX maps; offset auto-measured at fork, candle-shifted in monitor |

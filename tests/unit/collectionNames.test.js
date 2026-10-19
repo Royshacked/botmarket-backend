@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url'
 // already doing this; six other names were not, and the copies straddled the api/ ↔ monitoring/
 // boundary — 'coverage' in the coverage service AND its monitor, 'tilt' in both, 'paperOrders' and
 // 'paperPositions' in the paper broker AND the loops that drain them, plus 'trades' and
-// 'portfolio_chats' typed inline by a cross-module reader.
+// 'portfolio_chats' (now portfolio_books) typed inline by a cross-module reader.
 //
 // Why a duplicate is worse than untidy: nothing FAILS when the two copies disagree. A rename lands
 // in one file, the other keeps reading a collection that no longer receives writes, and the symptom
@@ -45,7 +45,8 @@ const DECLARED = /^\s*(?:export\s+)?const\s+[A-Z_]+\s*=\s*'([a-z][a-zA-Z_]*)'\s*
 // happens to be an uppercase string, so the guard stays quiet about it.
 const COLLECTIONS = new Set([
     'entities', 'users', 'user_experience', 'coverage', 'tilt', 'trades', 'threads', 'scans',
-    'scanner_chats', 'portfolio_chats', 'brokerConnections', 'token_usage',
+    'portfolio_books', 'brokerConnections', 'token_usage',
+    'sessions', 'session_messages', 'agent_contexts',
     'chat_conversations', 'chat_messages',
     'paperAccounts', 'paperPositions', 'paperOrders', 'paperEquity',
 ])

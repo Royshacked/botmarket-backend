@@ -30,6 +30,7 @@
 import { randomUUID } from 'crypto'
 import { researchQueueService } from './researchQueue.service.js'
 import { logger } from './logger.service.js'
+import { openingTurn } from './agentUtils.js'
 
 const LOG = '[researchRun]'
 
@@ -312,7 +313,7 @@ const _io = {
     async research({ opening, covered, userId, audience, model, signal }) {
         const { analystAgentService } = await import('./agents/analyst.agent.service.js')
         return analystAgentService.chatStream({
-            messages: [], userPrompt: opening,
+            messages: openingTurn(opening),
             chatState: { coverage_symbols: [...covered] },
             userId, audience, model: model ?? undefined, signal,
         })

@@ -76,14 +76,6 @@ export async function ensureIdeaIndexes() {
     }
 }
 
-const MAX_PERSISTED_MESSAGES = 40
-function _trimChatState(chatState) {
-    if (!chatState || typeof chatState !== 'object') return chatState ?? null
-    const msgs = chatState.messages
-    if (!Array.isArray(msgs) || msgs.length <= MAX_PERSISTED_MESSAGES) return chatState
-    return { ...chatState, messages: msgs.slice(-MAX_PERSISTED_MESSAGES) }
-}
-
 // True when an entry tree carries any gating leaf (price, indicator, TIME, news, …).
 // resolveConditionTree returns null when there are truly no entry conditions, so a
 // non-null tree always yields ≥1 leaf — but count leaves directly to stay correct
@@ -288,7 +280,6 @@ async function buildIdeaChildren(rawIdea, userId, { born = 'proposed' } = {}) {
         // authored the band). Still written so existing documents keep one shape.
         invalidation_armed:  false,
 
-        chat_state: _trimChatState(tradeIdea.chat_state),
         accounts:      Array.isArray(tradeIdea.accounts) ? tradeIdea.accounts : [],
         mainAccountId: tradeIdea.mainAccountId ?? null,
         userId:        userId               ?? null,
@@ -533,7 +524,6 @@ async function deleteIdea(id, userId) {
 export const EDITABLE_FIELDS = [
     'status', 'type', 'quantity', 'additional_entries',
     'timeframe', 'entry_timeframe', 'stop_timeframe', 'tp_timeframe',
-    'chat_state',
     'entry_conditions', 'entry_logic', 'entry_condition_tree',
     'stop_conditions',  'stop_logic',  'stop_condition_tree',
     'tp_conditions',    'tp_logic',    'tp_condition_tree',
@@ -602,9 +592,6 @@ export function normalizeIdeaPatch(body) {
             }
         }
     }
-
-    if (patch.status === 'closed') patch.chat_state = null
-    else if (patch.chat_state) patch.chat_state = _trimChatState(patch.chat_state)
 
     // The stamps a status word implies BY ITSELF. A transition that also depends on where the idea
     // is coming from (resting→waiting, hit→waiting, the in-position clamp) belongs to phase 2.

@@ -10,15 +10,17 @@ import { getSecFilings } from '../../providers/sec.provider.js'
 import { cleanConviction } from '../conviction.util.js'
 import { formatWorkspaceLine } from '../portfolioMode.util.js'
 import { logger }         from '../logger.service.js'
-import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, buildAccountLines, stripEmitTags, makeToolHandler, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, BREVITY_RULE, VENUE_RULE, buildStandingProposalRule, cachedBlock } from '../agentUtils.js'
+import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, buildAccountLines, cleanReply, makeToolHandler, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, BREVITY_RULE, VENUE_RULE, buildStandingProposalRule, cachedBlock } from '../agentUtils.js'
 import { makeTradingContextHandlers, buildVenueSection } from '../tools/tradingContext.tools.js'
 import { makeMarketHoursHandlers, MARKET_HOURS_TOOL_SPEC } from '../tools/marketHours.tools.js'
 import { makeIndustryViewsHandlers, INDUSTRY_VIEWS_TOOL_SPEC } from '../tools/industryViews.tools.js'
+import { makeHouseIndustriesHandlers, ATLAS_HOUSE_INDUSTRIES_TOOL_SPEC, ATLAS_WORDS } from '../tools/houseIndustries.tools.js'
 import { makeChartHandler } from '../tools/marketData.tools.js'
 import { coverageService } from '../../api/analyst/coverage.service.js'
-import { SECTORS } from '../entity/vocabulary.js'
+import { readCompaniesBySymbol, readSubIndustry } from '../../api/strategy/industryData.service.js'
 import { buildTagCaptures } from '../llmStream.util.js'
-import { makeRouteCapture, ROUTE_TAGS, buildRouteRule } from '../routing.util.js'
+import { DESKS } from '../desks/registry.js'
+import { makeRouteCapture, buildRouteRule } from '../routing.util.js'
 import { buildSchoolSection, normalizeAllocation, normalizeSelection } from '../investorSchools.js'
 import { applyIndustryLimits, industriesFor, avoidNames, capFor } from '../industryLimits.service.js'
 
@@ -26,7 +28,7 @@ const __dirname    = dirname(fileURLToPath(import.meta.url))
 const LOG   = '[portfolioAgent]'
 // Hot-reload the system prompt on file change (mtime-gated) — no restart needed.
 const _systemPrompt = makePromptLoader(join(__dirname, '../../prompts/portfolio_system_prompt.md'), LOG)
-const MAX_MESSAGES = 10
+const MAX_MESSAGES = DESKS.portfolio.maxMessages
 
 export const TOOLS = toolsFor({
     web_search: '',
@@ -37,7 +39,7 @@ export const TOOLS = toolsFor({
     get_risk_metrics: `Get annualized volatility and ATR (from 1y of daily prices) for a ticker. Use this to size positions by risk and to set sensible stop distances.`,
     get_correlations: `Get the pairwise correlation matrix (1y daily returns) for a set of tickers. Use this to verify a portfolio is actually diversified before recommending it.`,
     get_fundamentals: `Get company fundamentals for a single ticker: sector/industry, market cap, valuation (P/E, P/B, EV/EBITDA, FCF yield, earnings yield), quality (margins, ROE, ROIC, debt/equity), growth, AND the forward analyst view — consensus price target with upside vs price, and the buy/hold/sell rating split. Use this to qualify a candidate before including it — especially for multi-month/multi-year holds. For an ETF it returns exposure/profile plus real sector look-through weights (no company statements).`,
-    get_macro_snapshot: `Hard macro read for the Phase-2 regime call: the current Treasury curve (3M/2Y/10Y/30Y with the 2s10s spread — inversion flag), key economic indicators (real GDP, CPI, inflation YoY, unemployment, Fed funds rate, consumer sentiment), and today's sector rotation (leaders/laggards). Call this alongside web_search — the snapshot is the data, web_search is the narrative. No arguments.`,
+    get_macro_snapshot: `Background macro numbers for Phase 2: the current Treasury curve (3M/2Y/10Y/30Y with the 2s10s spread — inversion flag) and key economic indicators (real GDP, CPI, inflation YoY, unemployment, Fed funds rate, consumer sentiment). It also lists today's sector rotation — IGNORE that part: last week's sector leaders are noise for a book, and no sleeve is built or tilted on them. No arguments.`,
     get_sec_filings: `Primary-source due diligence: a company's latest SEC filings — 10-K (annual) and 10-Q (quarterly) statements, plus 8-K material events (item 2.02 = the earnings release) — with dates and links. Use it to verify the fundamentals story and check for material events before committing to a multi-month/multi-year hold. US filers only; most ETFs and foreign tickers aren't in EDGAR.`,
     get_short_interest: `Short interest for a US-listed single stock/ADR: short % of float, days-to-cover (short ratio), and month-over-month change. FINRA data, reported bi-monthly with a ~2-week lag — use it as crowding/sentiment context (a heavily-shorted name carries squeeze risk in either direction), not as a live read. No data for ETFs, crypto, FX or futures.`,
     get_options_context: `Options positioning for a US equity/ETF: put/call ratio (by open interest and by volume) and at-the-money implied volatility for the nearest expiry. Use elevated IV as a flag that the market expects a large move (often around a catalyst) when sizing or timing an entry. Quotes ~15-min delayed. No data for crypto, FX or futures.`,
@@ -47,7 +49,7 @@ export const TOOLS = toolsFor({
         description: `Upcoming earnings dates (with EPS/revenue estimates) between two dates (YYYY-MM-DD, window up to ~3 months). Optionally filter to specific symbols. Use it for entry timing — a candidate reporting in a few days carries gap risk, so you may size in after the print rather than before it. Pass symbols when you have them: a market-wide ask returns only the soonest rows, and says so.`,
         cache: true,
     },
-    get_coverage: `The house coverage pool — every name Prometheus has researched (variant-perception thesis, OUR price target vs the Street = the gap/edge, a rating, the selection schools it fits, and the status). This is the ONLY source for mandate build: fetch filtered by sector (the sleeve being filled) and by the mandate's selection school. Optionally combine both filters. For an uncovered name the user explicitly asks for, emit a <coverage_request> instead of using this tool. Read-only.`,
+    get_coverage: `The house coverage pool — every name Prometheus has researched (variant-perception thesis, OUR price target vs the Street = the gap/edge, a rating, the selection schools it fits, and the status), GROUPED BY GICS SUB-INDUSTRY. This is the ONLY source for mandate build: fetch filtered by \`industry\` (the sleeve being filled — its GICS code or exact name) and the mandate's selection \`school\`. \`sector\` is for a broad look only. For an uncovered name the user explicitly asks for, emit a <coverage_request> instead of using this tool. Read-only.`,
     get_chart: `Render a candlestick chart IMAGE for ONE name and look at it directly. Your job is allocation, not entry timing, so use this for the questions a picture answers better than a number: where a candidate sits in its multi-year range, whether a holding's trend is intact or broken, how ugly a drawdown was, what a long base looks like. Prefer weekly/monthly for a multi-month or multi-year hold; a daily view is for judging whether to phase into a position now or wait. Numbers (valuation, risk metrics, correlations) still decide the WEIGHT — this only informs the read. Set show_to_user true when the picture is part of the case you're making to the user, so they see what you saw.`,
     // APPENDED, never inserted — the snapshot compares by index and prompt caching keys off the
     // array prefix.
@@ -56,12 +58,16 @@ export const TOOLS = toolsFor({
     // broadcast has one text and two readers, not two texts. Advisory: it informs which sectors
     // Atlas sources, and the mandate still wins (see the prompt).
     get_industry_views: INDUSTRY_VIEWS_TOOL_SPEC.get_industry_views,
+    // The house's industries for the book — the candidate sleeves (atlas-industry-sleeves.md). Argus's tool, Atlas's words.
+    get_house_industries: ATLAS_HOUSE_INDUSTRIES_TOOL_SPEC.get_house_industries,
     consult: consultDescription(`Reach for it in exactly three situations: **the final weights on a real-money book** (live or manual — the capital is at risk, and a weight is the one number here that cannot be walked back cheaply); **two names you cannot tell apart as ONE bet or two** — the correlation number is high but not decisive and the concentration call rests on your read of it; and **a rebalance where cutting the winner and adding to the laggard are both defensible** against the mandate, and you have to pick one.`),
 })
 
 const TOOL_HANDLERS = {
     // Unbound — a house view is a broadcast, so the handler takes no userId to leak.
     ...makeIndustryViewsHandlers(),
+    // Unbound for the same reason; Atlas's words around the shared list.
+    ...makeHouseIndustriesHandlers({ words: ATLAS_WORDS }),
     get_quote: makeToolHandler('get_quote',
         ({ ticker }) => getQuote(ticker),
         (err, { ticker }) => `Could not fetch quote for ${ticker}: ${err.message}`, LOG),
@@ -95,21 +101,30 @@ const TOOL_HANDLERS = {
     ...makeMarketHoursHandlers(),
 }
 
-// Coverage the Analyst never classified. Its own bucket, always last: a name with no sector is not a
-// sleeve, and quietly filing it under one would be the guess this grouping exists to prevent.
+// Coverage with no industry and no sector. Its own bucket, always last: such a name is not a sleeve, and quietly
+// filing it under one would be the guess this grouping exists to prevent.
 const UNSECTORED = 'Unclassified'
 
 // P4d: render the house coverage pool as an LLM-ready read for Atlas to construct from. Pure —
 // exported for tests. Shows OUR PT vs the Street (the gap = the edge) and the schools each name fits,
-// grouped by sector so Atlas can see which SLEEVE each name was researched for.
-export function _formatCoverage(rows) {
+// GROUPED BY GICS SUB-INDUSTRY — a sleeve is one sub-industry (docs/design/atlas-industry-sleeves.md, Roy 2026-10-19).
+//
+// `subs`: symbol → its gics_companies row ({ sub_code, sub_industry, sector }), joined at read — coverage docs keep the
+// provider's sector, the sub-industry is the house's own classification. A name the table does not know falls back to
+// its sector, labelled as such: it is not a sleeve until its industry is known. `industry`: the sub-industry the read
+// was filtered to ({ code, name }), so an empty read can say which sleeve to source.
+export function _formatCoverage(rows, { subs = null, industry = null } = {}) {
     const list = (Array.isArray(rows) ? rows : []).filter(c => c && c.symbol)
     // This message is an INSTRUCTION, not a status line — it lands late in the context right where
     // the model is deciding what to do next. The house coverage pool is the ONLY construction source.
     // An empty sleeve is SOURCED, not improvised: <screen_request> runs the Argus → Prometheus hop
     // on the server (sleeveSource.service) and the user is carded when it is done. Never screen or
     // pick names from get_fundamentals / web_search / memory.
-    if (!list.length) return `No house coverage yet for these filters — nothing researched to build from. Emit a <screen_request> for this sleeve (sector + lens = the mandate's selection school): Argus screens it and Prometheus researches the hits on the server, and the user gets a card to resume the build when the sleeve is decided. Say that, then end the turn. For a specific uncovered name the user asked for by ticker, emit a <coverage_request> instead.`
+    if (!list.length) {
+        const which = industry ? ` in ${industry.name} (${industry.code})` : ''
+        const code  = industry ? `"industry_code": "${industry.code}"` : '"industry_code" = the sleeve\'s GICS sub-industry code'
+        return `No house coverage yet${which} for these filters — nothing researched to build from. Emit a <screen_request> for this sleeve (${code}, lens = the mandate's selection school): its companies are screened and Prometheus researches them on the server, and the user gets a card to resume the build when the sleeve is decided. Say that, then end the turn. For a specific uncovered name the user asked for by ticker, emit a <coverage_request> instead.`
+    }
     const line = (c) => {
         const pt      = c.price_target?.value
         const gap     = Number.isFinite(c.gap?.pct) ? ` (${c.gap.pct >= 0 ? '+' : ''}${c.gap.pct}% vs Street${Number.isFinite(c.gap?.consensus_pt) ? ` ${c.gap.consensus_pt}` : ''})` : ''
@@ -118,59 +133,54 @@ export function _formatCoverage(rows) {
         return `- ${c.symbol} [${c.rating ?? 'unrated'}]${pt != null ? ` our PT ${pt}${gap}` : ''} · ${c.status ?? 'active'}${schools}${th}`
     }
 
-    // GROUPED BY SECTOR, not a flat list. Atlas builds a book of SLEEVES, and a sleeve is a sector
-    // bucket from Phase 3 — so "which names do I have for technology" is the question it actually
-    // asks here. Read flat, it had to re-derive that mapping from the tickers it happened to
-    // recognize, which is exactly the guessing the research pipeline exists to remove. The sector is
-    // the Analyst's own (coverage.sector), so the grouping is the researcher's classification, not
-    // Atlas's memory of one.
-    const bySector = new Map()
-    for (const c of list) {
-        const sector = typeof c.sector === 'string' && c.sector.trim() ? c.sector.trim() : UNSECTORED
-        if (!bySector.has(sector)) bySector.set(sector, [])
-        bySector.get(sector).push(c)
+    // GROUPED, not a flat list: "which names do I have for this sleeve" is the question Atlas actually asks here, and
+    // read flat it re-derived the mapping from the tickers it happened to recognize. The heading is the house's GICS
+    // sub-industry; a name the table does not know is grouped by its sector, marked, after the industries.
+    const groups = new Map()
+    const keyOf = (c) => {
+        const g = subs?.[c.symbol]
+        if (g?.sub_code) return { key: `gics:${g.sub_code}`, head: `${g.sub_industry ?? g.sub_code} (${g.sub_code}) [${g.sector ?? 'sector n/a'}]:`, rank: 0 }
+        const sector = typeof c.sector === 'string' && c.sector.trim() ? c.sector.trim() : null
+        return sector
+            ? { key: `sector:${sector}`, head: `${sector} — industry not in the house's GICS table (check which sleeve it belongs to before placing it):`, rank: 1 }
+            : { key: UNSECTORED, head: `${UNSECTORED} (no industry or sector recorded — check the name fits before placing it):`, rank: 2 }
     }
-    // First-seen order, but the unclassified bucket always last — it is a data gap, not a sleeve.
-    const sectors = [...bySector.keys()].filter(s => s !== UNSECTORED)
-    if (bySector.has(UNSECTORED)) sectors.push(UNSECTORED)
-
-    // WHAT IS NOT HERE, said out loud.
-    //
-    // The empty case above ends in a hard instruction; the PARTIAL case had none, so a book with
-    // eight technology names and one financial read as "you have what you need". An absence is not
-    // on the page, and a model works from what is on the page — noticing a missing heading means
-    // remembering an architecture written several turns earlier. Naming the uncovered sectors turns
-    // that into something it reads rather than something it recalls.
-    //
-    // Same fix and same reason as the strategy desk's own coverage read (_coverageBySector).
-    const covered   = new Set(bySector.keys())
-    const uncovered = SECTORS.filter(sec => !covered.has(sec))
-
-    const blocks = sectors.map(sector => [
-        sector === UNSECTORED ? `${UNSECTORED} (no sector recorded — check the name fits before placing it):` : `${sector}:`,
-        ...bySector.get(sector).map(line),
-    ].join('\n'))
+    for (const c of list) {
+        const k = keyOf(c)
+        if (!groups.has(k.key)) groups.set(k.key, { ...k, names: [] })
+        groups.get(k.key).names.push(c)
+    }
+    // First-seen order within a rank: industries, then sector-only names, the unclassified last — a data gap, not a sleeve.
+    const blocks = [...groups.values()].sort((a, b) => a.rank - b.rank).map(g => [g.head, ...g.names.map(line)].join('\n'))
 
     return [
         'House coverage pool (Prometheus-researched theses — build from these; our target vs the Street is the edge).',
-        'Grouped by the sector Prometheus researched each name UNDER — that is the sleeve it was sourced for. A sleeve from your architecture with no heading here has nothing researched behind it yet: do not fill it from another sector\'s names.',
+        'Grouped by GICS sub-industry — a sleeve is one sub-industry. A sleeve from your architecture with no heading here has nothing researched behind it yet: emit a <screen_request> for it (its industry_code + lens) — the companies are screened and Prometheus researches them on the server, and the user is carded to resume when it is done. Do NOT shrink the sleeve to fit what happens to be covered, do not fill it from a neighbouring industry\'s names, and do not pick names from get_fundamentals or memory: what is already researched is a fact about our past work, not a view about this mandate. A specific uncovered name the user asked for → <coverage_request>.',
         ...blocks.flatMap(b => ['', b]),
-        ...(uncovered.length ? ['', `NO COVERAGE AT ALL IN: ${uncovered.join(', ')}.`
-            + ' Emit one <screen_request> per such sleeve (sector + lens) — Argus screens and'
-            + ' Prometheus researches on the server, and the user is carded to resume when it is'
-            + ' done. If the user asks to add a specific name from one of these, emit a'
-            + ' <coverage_request> for it. Do NOT shrink the sleeve to fit what happens to be'
-            + ' covered, do not fill it from a neighbouring sector, and do not pick names from'
-            + ' get_fundamentals or memory: what is already researched is a fact about our past'
-            + ' work, not a view about this mandate.'] : []),
     ].join('\n')
 }
 
-function makeCoverageHandler() {
+/**
+ * get_coverage: sector / school as before, and `industry` — a GICS sub-industry (code or name) — for one sleeve's names.
+ * Every read is grouped by sub-industry (joined from gics_companies). Exported for tests; `deps` are the reads.
+ */
+export function makeCoverageHandler(deps = {}) {
+    const {
+        coverage = (q) => coverageService.getCoverage(q),
+        subsOf   = (symbols) => readCompaniesBySymbol(symbols),
+        readSub  = (key) => readSubIndustry(key),
+    } = deps
     return makeToolHandler('get_coverage',
-        async ({ sector, school } = {}) => _formatCoverage(
-            await coverageService.getCoverage({ status: 'active', sector: sector ?? null, school: school ?? null })
-        ),
+        async ({ sector, school, industry } = {}) => {
+            const want = typeof industry === 'string' && industry.trim() ? industry.trim() : null
+            const sub  = want ? (await readSub(want))?.sub ?? null : null
+            if (want && !sub) return `No GICS sub-industry "${want}" — pass an 8-digit code or the exact name from get_house_industries.`
+            // An industry read is not narrowed by sector too: the two vocabularies differ, and the industry is finer.
+            const rows = await coverage({ status: 'active', sector: sub ? null : (sector ?? null), school: school ?? null })
+            const subs = await subsOf((rows ?? []).map(r => r?.symbol).filter(Boolean)).catch(() => ({}))
+            const list = sub ? (rows ?? []).filter(r => subs?.[r.symbol]?.sub_code === sub.code) : rows
+            return _formatCoverage(list, { subs, industry: sub ? { code: sub.code, name: sub.name } : null })
+        },
         (err) => `Could not fetch coverage: ${err.message}`, LOG)
 }
 
@@ -188,7 +198,7 @@ async function chatStream({ messages = [], ideaAccounts = [], mainAccountId = nu
     // the system prompt: free cash moves whenever anything fills, so a volatile system block
     // would sit ahead of the whole conversation in the cache prefix. See buildVenueSection.
     const normalized = attachTurnContext(
-        attachTurnContext(_buildMessages(messages), _buildStagedBook(adoptDraft)),
+        attachTurnContext(normalizeMessages(messages, MAX_MESSAGES), _buildStagedBook(adoptDraft)),
         await _venueSection(userId))
 
     // Stable base (cached) + volatile per-request sections (accounts, edit
@@ -290,11 +300,7 @@ async function chatStream({ messages = [], ideaAccounts = [], mainAccountId = nu
     // 4th flow: user asked for a name not in house coverage → route to Prometheus via research queue.
     const coverageRequest = _parseCoverageRequest(raw)
 
-    const reply = stripEmitTags(
-        // <ticker> keeps its inner text in the reply (unwrap, don't strip).
-        raw.replace(/<ticker>([\s\S]*?)<\/ticker>/g, '$1'),
-        ['phase', 'portfolio_plan', 'portfolio_update', 'portfolio_mandate', 'portfolio_thesis', 'screen_request', 'coverage_refresh', 'coverage_request', ...ROUTE_TAGS],
-    ).trim()
+    const reply = cleanReply(raw)
 
     if (capturedPlan) capturedPlan = await _sizePlan(capturedPlan, { mandate: capturedMandate ?? mandate })
     if (capturedUpdate) capturedUpdate = await _markAvoidAdds(capturedUpdate)
@@ -351,10 +357,13 @@ export function _parseScreenRequests(raw) {
     return parseEmitBlocks(raw, 'screen_request', LOG).map(_cleanScreenRequest).filter(Boolean)
 }
 
-function _cleanScreenRequest(obj) {
+export function _cleanScreenRequest(obj) {
     const s = k => (typeof obj?.[k] === 'string' && obj[k].trim() ? obj[k].trim() : null)
     const sector = s('sector'), style = s('style')
-    if (!sector && !style) return null   // a screen needs at least a sector or a style to constrain
+    // A sleeve is a GICS sub-industry (atlas-industry-sleeves.md): its 8-digit code is the whole request — the names come
+    // from the house's own GICS table. Anything else in the field is no code, and the request falls back to its sector.
+    const code = /^\d{8}$/.test(String(obj?.industry_code ?? '').trim()) ? String(obj.industry_code).trim() : null
+    if (!sector && !style && !code) return null   // a screen needs an industry, a sector or a style to constrain
     // `lens` is the mandate's SELECTION school riding the hop — the only half of the school Argus has
     // any use for (a screener has nothing to do with how risk is spread). Validated against the same
     // vocabulary both ends read, so a hallucinated school reaches the screen as "no lens" (the neutral
@@ -363,7 +372,7 @@ function _cleanScreenRequest(obj) {
     // view ("semis, not software"). Absent, Argus narrows the sector itself — that is screening
     // mechanics and its job. Present, it is a judgment and therefore has to travel as a field: buried
     // in free-text constraints it is a hint Argus may or may not treat as binding.
-    return { sector, industry: s('industry'), style, cap_band: s('cap_band'), lens: normalizeSelection(s('lens')), constraints: s('constraints'), note: s('note') }
+    return { sector, industry: s('industry'), industry_code: code, style, cap_band: s('cap_band'), lens: normalizeSelection(s('lens')), constraints: s('constraints'), note: s('note') }
 }
 
 /**
@@ -375,7 +384,12 @@ export async function _markAvoidAdds(update, deps = { avoid: (symbols) => avoidN
     // An add's spec rides on `item` (the <portfolio_update> contract; portfolioRebalance._applyOne reads the same).
     const changes = Array.isArray(update?.changes) ? update.changes : []
     const adds = changes.filter(c => c?.action === 'add_item' && c.item?.asset)
-    for (const c of changes) if (c?.item && 'avoid_ok' in c.item) delete c.item.avoid_ok
+    // EVERY model-written OK goes — on the spec (an add) and on the change itself (an add-to reads it there,
+    // _industryLimitsForScaleIn). Only the user's yes may set either (phase 8a CR C2).
+    for (const c of changes) {
+        if (c?.item && 'avoid_ok' in c.item) delete c.item.avoid_ok
+        if (c && 'avoid_ok' in c) delete c.avoid_ok
+    }
     // A share count on a review add is the model's (the prompt has the platform size it from a weight) — and an explicit
     // count skips the hype brake, so it is dropped here (code review 2026-10-11).
     for (const c of adds) if ('quantity' in c.item) delete c.item.quantity
@@ -479,9 +493,6 @@ export async function _sizePlan(plan, { mandate = null } = {}) {
     return plan
 }
 
-function _buildMessages(messages) {
-    return normalizeMessages(messages, MAX_MESSAGES)
-}
 
 // THE EDIT MODE BLOCK IS GONE (2026-09-15), and what it did is worth recording.
 //
