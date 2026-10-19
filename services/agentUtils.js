@@ -578,10 +578,18 @@ export function cleanReply(raw) {
 
 // A whole line that is only a channel marker — "(no final)", "(final)", "(no final answer)".
 const DEBRIS_LINE = /^[ \t]*\((?:no )?final(?: answer)?\)[ \t]*$/gim
+// A stray token in angle brackets (2026-10-19): Argus's reply opened "<չ>\nThe best fit…". Only brackets around one to
+// four NON-ASCII characters, or a special token's `<|name|>` — a tag, "<5%" or "a <-> b" is never that shape. Its
+// spaces go with it, so a reply that opened with one starts on its first word.
+const DEBRIS_TOKEN = /[ \t]*(?:<[^\x00-\x7F<>]{1,4}>|<\|[a-z_]{1,32}\|>)[ \t]*/g
 
-/** The marker lines out, then a paragraph identical to the one before it dropped. Prose is otherwise untouched. */
+/** The stray tokens and marker lines out, then a paragraph identical to the one before it dropped. Prose is otherwise untouched. */
 export function dropDebris(text) {
-    const paras = String(text ?? '').replace(DEBRIS_LINE, '').split(/\n[ \t]*\n/)
+    const paras = String(text ?? '').replace(DEBRIS_TOKEN, (m, offset, all) => {
+        // Between two words, the spaces collapse to one; at a line's edge, nothing is left.
+        const before = all[offset - 1], after = all[offset + m.length]
+        return before && after && !/\s/.test(before) && !/\s/.test(after) ? ' ' : ''
+    }).replace(DEBRIS_LINE, '').split(/\n[ \t]*\n/)
     const out = []
     for (const p of paras) {
         const key = p.trim()
