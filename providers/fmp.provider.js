@@ -182,16 +182,28 @@ async function _profileBasics(ticker) {
         const p   = Array.isArray(arr) ? arr[0] : null
         if (!p) return null
         const cap   = Number(p.marketCap)
+        const vol   = Number(p.averageVolume)
         const entry = {
             sector: p.sector || null,
             industry: p.industry || null,
             marketCap: Number.isFinite(cap) && cap > 0 ? cap : null,
+            // Whether the listing is a live, liquid common stock — a sleeve sourced from the GICS table checks it
+            // (sleeveSource: notes, preferreds and thin OTC lines of a real company sit in that table too).
+            averageVolume: Number.isFinite(vol) && vol >= 0 ? vol : null,
+            activelyTrading: p.isActivelyTrading !== false,
+            fund: p.isEtf === true || p.isFund === true,
         }
         _profileCache.set(symbol, entry)
         return entry
     } catch {
         return null
     }
+}
+
+/** A listing's trading facts — `{ averageVolume, activelyTrading, fund }` — or null when the profile is unreachable. */
+export async function getListingFacts(ticker) {
+    const p = await _profileBasics(ticker)
+    return p ? { averageVolume: p.averageVolume ?? null, activelyTrading: p.activelyTrading !== false, fund: p.fund === true } : null
 }
 
 /**

@@ -120,6 +120,30 @@ export function industryPick(rows, named, school = null, { hits = SLEEVE_HITS } 
     return { symbols, house: house.filter(s => symbols.includes(s)) }
 }
 
+/**
+ * The names that trade as a live, liquid stock — in order, at most `hits`. The GICS table holds a real company's notes,
+ * preferreds and thin OTC lines beside its stock (a payments sleeve picked BSQKZ, Block's notes, 2026-10-19); the
+ * screener path has its volume floor, and this is the same floor (MIN_VOLUME). A profile that cannot be read → not
+ * taken; NONE readable → the provider is down, and the names go on unchecked (Prometheus still judges each).
+ */
+async function _tradable(symbols, deps, hits = SLEEVE_HITS) {
+    if (!deps.listingFacts) return symbols.slice(0, hits)
+    const out = []
+    let read = 0
+    for (const s of symbols) {
+        if (out.length >= hits) break
+        let f = null
+        try { f = await deps.listingFacts(s) } catch { f = null }
+        if (f) read++
+        if (f && f.activelyTrading && !f.fund && (f.averageVolume ?? 0) >= MIN_VOLUME) out.push(s)
+    }
+    if (!read && symbols.length) {
+        logger.warn(LOG, 'no listing readable — the industry sleeve goes on unchecked', { names: symbols.length })
+        return symbols.slice(0, hits)
+    }
+    return out
+}
+
 /** The industry sleeve's names, with the sector screen's fill when the table is thin. → `{ sub, symbols, house }` or `{ reason }`. */
 async function _industrySleeve(code, school, deps) {
     let sub = null
@@ -128,7 +152,10 @@ async function _industrySleeve(code, school, deps) {
     let rows = [], named = new Set()
     try { rows = await deps.industryCompanies(sub.code, INDUSTRY_POOL) ?? [] } catch (err) { logger.warn(LOG, 'industry companies unreadable', err.message) }
     try { named = await deps.industryNamed(sub.code) ?? new Set() } catch (err) { logger.warn(LOG, 'industry assessment unreadable — no house names first', err.message) }
-    let { symbols, house } = industryPick(rows, named, school)
+    // The whole ordered pool, then only what trades — so a junk line does not cost the sleeve a slot.
+    let { symbols, house } = industryPick(rows, named, school, { hits: INDUSTRY_POOL })
+    symbols = await _tradable(symbols, deps)
+    house = house.filter(s => symbols.includes(s))
     if (symbols.length < MIN_INDUSTRY_NAMES) {
         const sector = normalizeSector(sub.sector)
         if (sector) {
@@ -457,6 +484,11 @@ const _io = {
     async industryOf(symbols) {
         const { readCompaniesBySymbol } = await import('../api/strategy/industryData.service.js')
         return Object.fromEntries(Object.entries(await readCompaniesBySymbol(symbols)).map(([s, r]) => [s, r.sub_code]))
+    },
+    // Whether a listing trades (an industry sleeve's names are checked — see _tradable).
+    async listingFacts(symbol) {
+        const { getListingFacts } = await import('../providers/fmp.provider.js')
+        return getListingFacts(symbol)
     },
     // An industry sleeve's reads (atlas-industry-sleeves.md): the sub-industry, its companies, and the ones the house names.
     async subIndustry(code) {

@@ -362,3 +362,30 @@ test('the card names the industry, and counts the companies the house\'s assessm
     assert.match(card.content, /1 of the 2 are named in the house's assessment of the industry/)
     assert.equal(card.payload.industryCode, SEMIS.code)
 })
+
+test('an industry sleeve takes only names that trade: notes, preferreds, funds and thin lines out — the next one takes the slot', async () => {
+    // BSQKZ was Block's notes in the GICS table (2026-10-19). The pool is read in order until twelve trade.
+    const rows = ['BSQKZ', 'V', 'MA', 'FITB-PM', 'PYPL', 'THIN', 'FUND', 'GPN'].map((s, i) => row(s, 1e12 - i))
+    const facts = {
+        BSQKZ: { averageVolume: 1200, activelyTrading: true, fund: false },
+        'FITB-PM': { averageVolume: 30_000, activelyTrading: true, fund: false },
+        THIN: { averageVolume: 90_000, activelyTrading: true, fund: false },
+        FUND: { averageVolume: 9e6, activelyTrading: true, fund: true },
+    }
+    const h = industryHarness({ rows, named: ['BSQKZ'] })
+    h.deps.listingFacts = async (s) => facts[s] ?? { averageVolume: 5e6, activelyTrading: true, fund: false }
+    const out = await sourceSleeve({ userId: 'u1', industryCode: SEMIS.code }, h.deps)
+    assert.deepEqual(out.sleeve.symbols, ['V', 'MA', 'PYPL', 'GPN'])
+    assert.deepEqual(out.sleeve.house, [], 'a named junk line is not a house name either')
+})
+
+test('a profile that cannot be read is not taken — unless NONE can be (the provider is down): then unchecked', async () => {
+    const rows = ['AAA', 'BBB', 'CCC', 'DDD'].map((s, i) => row(s, 1e11 - i))
+    const h = industryHarness({ rows })
+    h.deps.listingFacts = async (s) => (s === 'BBB' ? null : { averageVolume: 2e6, activelyTrading: true, fund: false })
+    assert.deepEqual((await sourceSleeve({ userId: 'u1', industryCode: SEMIS.code }, h.deps)).sleeve.symbols, ['AAA', 'CCC', 'DDD'])
+    _resetSleeves()
+    const down = industryHarness({ rows })
+    down.deps.listingFacts = async () => { throw new Error('fmp down') }
+    assert.deepEqual((await sourceSleeve({ userId: 'u1', industryCode: SEMIS.code }, down.deps)).sleeve.symbols, ['AAA', 'BBB', 'CCC', 'DDD'])
+})
