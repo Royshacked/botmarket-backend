@@ -504,9 +504,11 @@ test('the document has one H1, and the beats are subsections of the opening turn
 // ─── The deeper read (2026-09-29): contradictions between old and new sections ──
 // Eight edits in one day left sections that each read correctly and disagreed with each other.
 
-test('a user with no name is sent to ARGUS, the scanning desk', () => {
+test('a user with no name is asked first, then sent to ARGUS, which hands the name back (2026-10-19)', () => {
     // Roy corrected this in the first minute of the design conversation; the prompt still said Axl.
-    assert.match(PROMPT, /\*\*send them to Argus\*\*, the scanning desk/)
+    assert.match(PROMPT, /your first question is whether they have a name — or a setup — in mind/)
+    assert.match(PROMPT, /offer \*\*Argus\*\*, the scanning desk/)
+    assert.match(PROMPT, /`<route>scan<\/route>`/)
     assert.doesNotMatch(PROMPT, /point them back to Axl/)
 })
 

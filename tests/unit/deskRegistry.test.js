@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { DESKS, AGENT_KEYS, PIPELINE_KEYS, ADMIN_PIPELINE_KEYS, ENTITY_KINDS, agentAtDesk, agentForKind, deskOf, entryOf } from '../../services/desks/registry.js'
+import { DESKS, AGENT_KEYS, PIPELINE_KEYS, ADMIN_PIPELINE_KEYS, ENTITY_KINDS, agentAtDesk, agentForKind, deskOf, entryOf, handBackOf } from '../../services/desks/registry.js'
 import { VALID_PIPELINES, ADMIN_DESKS, ROUTABLE_DESKS, EDIT_KIND_DESKS } from '../../services/routing.util.js'
 import { SESSION_AGENTS, CONTEXT_KINDS } from '../../services/session.util.js'
 
@@ -44,13 +44,21 @@ test('the admin desks talk in their own scope; everyone else in the one chat', (
     for (const d of Object.values(DESKS)) assert.equal(d.scope, d.admin ? d.agent : 'main', d.agent)
 })
 
-test('a route lands on the agent its desk enters at — `trade` enters at Argus, in single-pick mode for Mentor', () => {
-    assert.deepEqual(entryOf('trade'), { agent: 'scanner', state: { handoff: true, handoffTo: 'mentor' } })
+test('a route lands on the agent its desk enters at — every trade starts at Mentor, `trade` included', () => {
+    assert.deepEqual(entryOf('trade'), { agent: 'mentor', state: null })
     assert.deepEqual(entryOf('assist'), { agent: 'mentor', state: null })
+    assert.deepEqual(entryOf('scan'), { agent: 'scanner', state: null })
     assert.equal(entryOf('nowhere'), null)
+})
+
+test('a hand-back: Mentor sending the user to Argus presets single-pick mode for Mentor; nobody else does', () => {
+    assert.deepEqual(handBackOf('mentor', 'scanner'), { handoff: true, handoffTo: 'mentor' })
+    assert.equal(handBackOf('axl', 'scanner'), null)
+    assert.equal(handBackOf('portfolio', 'scanner'), null)
+    assert.equal(handBackOf('mentor', 'analyst'), null)
     // A fresh copy each time — a caller merging into it must not change the registry.
-    entryOf('trade').state.handoff = false
-    assert.equal(entryOf('trade').state.handoff, true)
+    handBackOf('mentor', 'scanner').handoff = false
+    assert.equal(handBackOf('mentor', 'scanner').handoff, true)
 })
 
 test('lookups: agent at a desk, agent for a kind, entry for an agent', () => {

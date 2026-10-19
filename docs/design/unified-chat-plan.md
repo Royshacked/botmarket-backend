@@ -1294,6 +1294,12 @@ session the user said nothing in ("Untitled" — deleted; the 24 already there w
 have a Delete (`DELETE /api/sessions/:id`, archived only — the live one is 409).
 **Carried:** Mentor's "Arm it / Leave it waiting" step in the pane is unreachable now (the session ends at Generate) —
 remove it, and its `arm` / `leave` actions, in a follow-up.
+**Every trade starts at Mentor (Roy, 2026-10-19).** "I want to talk to the trader" landed on Argus: Axl read it as the
+`trade` composite, which ENTERED at Argus in single-pick mode. Now `trade` lands on Mentor like `assist` (registry), and
+Axl's prompt routes every single trade to `assist`. Mentor asks whether the user has a name or a setup; with none it
+offers Argus and routes `scan` — and a route FROM Mentor TO Argus presets Argus's single-pick mode (`handBackOf`, applied
+in sessionTurn's `land`), so the pick rides the chain back to Mentor as before. Live-checked on the real model: Axl →
+Mentor → Argus `{ handoff: true, handoffTo: 'mentor' }`.
 
 ## 11. Phase 9 — Migration (`scripts/migrate-unified-chat.mjs`)
 

@@ -63,11 +63,22 @@ test('a reply that routes moves the floor to that desk’s agent; otherwise the 
     assert.equal((await sessions.get({ sessionId: s.sessionId, userId: 'u1' })).floor, 'mentor')
 })
 
-test('a route to the trade desk hands the floor to Argus, preset to pick one name for Mentor', async () => {
-    const { turn, sessions } = rig({ run: () => ({ reply: 'To the trading desk', route: 'trade', routeSymbol: 'NVDA' }) })
+test('a trade starts at Mentor — a `trade` route hands the floor to Mentor, never to Argus (Roy, 2026-10-19)', async () => {
+    const { turn, sessions } = rig({ run: () => ({ reply: 'Mentor will take it from here', route: 'trade' }) })
+    const s = await sessions.getActive({ userId: 'u1' })
+    await turn({ user, sessionId: s.sessionId, agent: 'axl', text: 'i want to talk to the trader' })
+    const h = await sessions.get({ sessionId: s.sessionId, userId: 'u1' })
+    assert.equal(h.floor, 'mentor')
+    assert.equal(h.agentState?.scanner, undefined)
+})
+
+test('Mentor sending the user to Argus presets Argus to find ONE name and hand it back to Mentor', async () => {
+    const { turn, sessions } = rig({ run: (ctx) => (ctx.common.messages.at(-1).content === 'yes, find me one'
+        ? { reply: 'Argus will find you a name', route: 'scan', opening: 'A swing long in semis' }
+        : { reply: 'ok' }) })
     const s = await sessions.getActive({ userId: 'u1' })
     await sessions.setAgentState({ sessionId: s.sessionId, userId: 'u1', agent: 'scanner', state: { profile: 'trading' } })
-    await turn({ user, sessionId: s.sessionId, agent: 'axl', text: 'trade NVDA' })
+    await turn({ user, sessionId: s.sessionId, agent: 'mentor', text: 'yes, find me one' })
     const h = await sessions.get({ sessionId: s.sessionId, userId: 'u1' })
     assert.equal(h.floor, 'scanner')
     assert.equal(h.agentState.scanner.handoff, true)
@@ -75,13 +86,13 @@ test('a route to the trade desk hands the floor to Argus, preset to pick one nam
     assert.equal(h.agentState.scanner.profile, 'trading')
 })
 
-test('the trade preset never outlives the trade — a later plain scan route finds Argus listing again', async () => {
-    let next = 'trade'
-    const { turn, sessions } = rig({ run: () => ({ reply: 'routing', route: next }) })
+test('the hand-back preset never outlives it — a later plain scan route from Axl finds Argus listing again', async () => {
+    let from = 'mentor'
+    const { turn, sessions } = rig({ run: () => ({ reply: 'routing', route: 'scan' }) })
     const s = await sessions.getActive({ userId: 'u1' })
-    await turn({ user, sessionId: s.sessionId, agent: 'axl', text: 'trade NVDA' })
-    next = 'scan'
-    await turn({ user, sessionId: s.sessionId, agent: 'axl', text: 'now a watchlist' })
+    await turn({ user, sessionId: s.sessionId, agent: from, text: 'find me a name' })
+    from = 'axl'
+    await turn({ user, sessionId: s.sessionId, agent: from, text: 'now a watchlist' })
     const st = (await sessions.get({ sessionId: s.sessionId, userId: 'u1' })).agentState.scanner
     assert.equal(st.handoff, false)
     assert.equal(st.handoffTo, null)

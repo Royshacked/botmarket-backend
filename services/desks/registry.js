@@ -66,12 +66,19 @@ export const DESKS = Object.freeze({
     }),
 })
 
-// A pipeline that is not one agent: `trade` is Axl's composite. A desk never sends anyone there; Axl
-// does. It ENTERS at Argus in single-pick mode — validate one name and hand it to Mentor to build
-// (the client's DESKS 'trade': entryTab scanner, `produces: 'one'`) — so that is who gets the floor
-// and the mode it starts in. (The Argus → Mentor hop is the chain's, unified-chat plan phase 5.)
+// `trade` is Axl's older word for one new trade. A desk never sends anyone there; Axl may. It entered at
+// Argus until 2026-10-19 — "I want to talk to the trader" landed on the scanner. Every trade now STARTS at
+// Mentor (Roy): Mentor asks whether the user has a name or a setup, and sends them to Argus only when they
+// have none (HAND_BACK below brings the name back). Kept as a key so a reply that still says it lands right.
 const COMPOSITES = Object.freeze({
-    trade: Object.freeze({ agent: 'scanner', state: Object.freeze({ handoff: true, handoffTo: 'mentor' }) }),
+    trade: Object.freeze({ agent: 'mentor', state: null }),
+})
+
+// The mode a desk's route PRESETS on its landing when the sender wants the result back: Mentor sending the
+// user to Argus is "find me ONE name to build on", so Argus starts in single-pick mode and the chain carries
+// the pick back to Mentor (unified-chat plan phase 5). sender → landing agent → preset.
+const HAND_BACK = Object.freeze({
+    mentor: Object.freeze({ scanner: Object.freeze({ handoff: true, handoffTo: 'mentor' }) }),
 })
 const COMPOSITE_PIPELINES = Object.freeze(Object.keys(COMPOSITES))
 
@@ -101,9 +108,15 @@ export const agentAtDesk = (desk) => entries.find(d => d.desk === desk)?.agent ?
  * @returns {{ agent: string, state: object|null } | null}
  */
 export function entryOf(desk) {
-    if (COMPOSITES[desk]) return { agent: COMPOSITES[desk].agent, state: { ...COMPOSITES[desk].state } }
+    if (COMPOSITES[desk]) return { agent: COMPOSITES[desk].agent, state: COMPOSITES[desk].state ? { ...COMPOSITES[desk].state } : null }
     const agent = agentAtDesk(desk)
     return agent ? { agent, state: null } : null
+}
+
+/** The mode a route from `from` presets on `to` so the result comes back (a copy), or null. */
+export function handBackOf(from, to) {
+    const preset = HAND_BACK[from]?.[to]
+    return preset ? { ...preset } : null
 }
 
 /** The agent whose work produces an entity kind, or null. */

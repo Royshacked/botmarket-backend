@@ -18,7 +18,7 @@ import { sessionService } from '../session.service.js'
 import { agentContextService } from '../agentContext.service.js'
 import { getExperienceLevel } from '../experience.service.js'
 import { routeFields } from '../routing.util.js'
-import { deskOf, entryOf } from './registry.js'
+import { deskOf, entryOf, handBackOf } from './registry.js'
 import { DESK_DEFS } from './index.js'
 import { deskCommon } from './common.js'
 import { buildConversation } from './context.js'
@@ -95,7 +95,9 @@ export function makeSessionTurn({
         const landing = desks[entry.agent]
         const theirs  = entry.agent === agent ? next : (session.agentState?.[entry.agent] ?? null)
         // `hints`: what the routing desk knows about the landing (Axl's adopt — the user already owns this book).
-        const preset  = hints ? { ...(entry.state ?? {}), ...hints } : entry.state
+        // A sender that wants the result back presets the landing's mode too (Mentor → Argus: find ONE name).
+        const back    = handBackOf(agent, entry.agent)
+        const preset  = (hints || back) ? { ...(entry.state ?? {}), ...(back ?? {}), ...(hints ?? {}) } : entry.state
         const state   = landing?.onRouted ? landing.onRouted(theirs, preset)
             : entry.state ? { ...(theirs ?? {}), ...entry.state } : undefined
         if (state !== undefined) await sessions.setAgentState({ sessionId: session.sessionId, userId: user._id, agent: entry.agent, state })
