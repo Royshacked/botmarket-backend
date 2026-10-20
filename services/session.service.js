@@ -174,6 +174,40 @@ export function makeSessionService({ getDb = _defaultGetDb, events = silentEvent
     }
 
     /**
+     * A LEGACY chat with no entity behind it, filed as one ARCHIVED session in History (unified-chat plan phase 9,
+     * design decision 12). Every message goes through toTimelineMessage, the same gate a live append uses; `source`
+     * ("thread:thr_…") is kept on the session, and a source already imported is skipped — a re-run never doubles it.
+     * A chat the user said nothing in is not filed (no "Untitled" in History — Roy, 2026-10-18).
+     * @returns {Promise<{ imported: boolean, sessionId?: string, reason?: string }>}
+     */
+    async function importArchived({ userId, scope = 'main', title = null, messages = [], createdAt = null, archivedAt = null, source }) {
+        if (!userId || !isScope(scope) || !source) return { imported: false, reason: 'invalid' }
+        const db  = await getDb()
+        const uid = String(userId)
+        if (await db.collection(SESSIONS).findOne({ userId: uid, legacySource: source }, { projection: { _id: 1 } })) {
+            return { imported: false, reason: 'already_imported' }
+        }
+        const now = Date.now()
+        const start = Number.isFinite(createdAt) ? createdAt : now
+        const rows = []
+        for (const raw of Array.isArray(messages) ? messages : []) {
+            const { message } = toTimelineMessage(raw, Number.isFinite(raw?.at) ? raw.at : start)
+            if (message) rows.push(message)
+        }
+        const named = title && String(title).trim() ? String(title).trim().slice(0, 80) : sessionTitle(rows)
+        if (!rows.length || named === UNTITLED) return { imported: false, reason: 'nothing_said' }
+        const sessionId = newSessionId()
+        const ended = Number.isFinite(archivedAt) ? archivedAt : start
+        await db.collection(SESSIONS).insertOne({
+            sessionId, userId: uid, scope, status: 'archived', title: named, summary: null, floor: 'axl',
+            agentState: {}, summaries: {}, seals: {}, links: [], seq: rows.length,
+            createdAt: start, updatedAt: ended, archivedAt: ended, legacySource: source,
+        })
+        await db.collection(MESSAGES).insertMany(rows.map((m, i) => ({ ...m, sessionId, seq: i + 1 })))
+        return { imported: true, sessionId }
+    }
+
+    /**
      * Delete one ARCHIVED session and its rows (History's delete — Roy, 2026-10-18). The live session is not deleted
      * here (`active_session`): "New session" is how it ends. The entities it produced keep their own records.
      * @returns {Promise<{ ok: true } | { reason: 'not_found' | 'active_session' }>}
@@ -399,7 +433,7 @@ export function makeSessionService({ getDb = _defaultGetDb, events = silentEvent
         return r.matchedCount ? { ok: true } : { reason: 'not_found' }
     }
 
-    return { ensureIndexes, getActive, findActive, startNew, resume, list, remove, get, append, messagesSince, messagesForAgent, allMessagesSince, removeMessages, setAgentState, setSealedThrough, setChain, findRunningChains, setFloor, setSummary, addLink }
+    return { ensureIndexes, getActive, findActive, startNew, resume, importArchived, list, remove, get, append, messagesSince, messagesForAgent, allMessagesSince, removeMessages, setAgentState, setSealedThrough, setChain, findRunningChains, setFloor, setSummary, addLink }
 }
 
 export const sessionService = makeSessionService({ events: sessionEvents })

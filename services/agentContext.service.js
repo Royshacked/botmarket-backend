@@ -70,6 +70,37 @@ export function makeAgentContextService({ getDb = _defaultGetDb } = {}) {
         return { context: doc }
     }
 
+    /**
+     * A LEGACY conversation moved onto its entity (unified-chat plan phase 9 — a linked thread, a setup's old
+     * `chat_state.messages`, a scan's `chat`, a book's `messages`). It is OLDER than anything sealed here since, so it
+     * goes IN FRONT of what the context already holds. `source` names where it came from ("thread:thr_…") and is
+     * kept on the doc: a source already imported is skipped, so a migration re-run never duplicates turns.
+     * @returns {Promise<{ imported: boolean, reason?: string }>}
+     */
+    async function importLegacy({ userId, kind, entityId, agent, messages, source, at = null }) {
+        const invalid = _invalid({ userId, kind, entityId, agent })
+        if (invalid) return { imported: false, reason: invalid }
+        if (!source) return { imported: false, reason: 'source is required' }
+        const db   = await getDb()
+        const key  = _key({ userId, kind, entityId, agent })
+        const prev = await db.collection(COLLECTION).findOne(key)
+        if (prev?.legacy?.includes(source)) return { imported: false, reason: 'already_imported' }
+        const when = Number.isFinite(at) ? at : Date.now()
+        const old  = toContextMessages(messages, when)
+        if (!old.length) return { imported: false, reason: 'no_messages' }
+        const now  = Date.now()
+        await db.collection(COLLECTION).replaceOne(key, {
+            ...key,
+            messages:  capSealed([...old, ...(prev?.messages ?? [])]),
+            summary:   prev?.summary ?? null,
+            artifacts: prev?.artifacts ?? [],
+            sealedAt:  prev?.sealedAt ?? when,
+            updatedAt: now,
+            legacy:    [...(prev?.legacy ?? []), source],
+        }, { upsert: true })
+        return { imported: true }
+    }
+
     /** This user's sealed context for an entity, or null. */
     async function load({ userId, kind, entityId, agent }) {
         if (_invalid({ userId, kind, entityId, agent })) return null
@@ -86,7 +117,7 @@ export function makeAgentContextService({ getDb = _defaultGetDb } = {}) {
         return { deleted: r.deletedCount ?? 0 }
     }
 
-    return { ensureIndexes, seal, load, removeFor }
+    return { ensureIndexes, seal, importLegacy, load, removeFor }
 }
 
 export const agentContextService = makeAgentContextService()

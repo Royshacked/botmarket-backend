@@ -1,7 +1,7 @@
 // A small in-memory Mongo — enough for the Pythia services' and the session store's tests. Supports:
 // equality (null also matching a missing field, as in Mongo) and `$ne` / `$in` / `$exists` / `$gt` / `$lt`
 // filters on dotted paths, and a top-level `$or`; multi-key sort; find().sort().limit().next/toArray; skip; findOne;
-// insertOne; deleteOne; deleteMany; updateMany; replaceOne and updateOne with upsert, $setOnInsert, $set (dotted), $inc and
+// insertOne; insertMany; deleteOne; deleteMany; updateMany; replaceOne and updateOne with upsert, $setOnInsert, $set (dotted), $inc and
 // $push (one value, or $each/$position); findOneAndUpdate (returns the document AFTER); createIndex as
 // a no-op — unique indexes are NOT enforced. `rows(name)` exposes a collection's documents for assertions.
 
@@ -69,6 +69,7 @@ export function memDb() {
             findOne: async (q) => structuredClone(rows.find(r => _match(r, q)) ?? null),
             find: (q = {}) => cursor(rows.filter(r => _match(r, q)).map(r => structuredClone(r))),
             insertOne: async (d) => { rows.push(structuredClone(d)); return { acknowledged: true } },
+            insertMany: async (ds) => { for (const d of ds ?? []) rows.push(structuredClone(d)); return { acknowledged: true, insertedCount: ds?.length ?? 0 } },
             replaceOne: async (q, d, { upsert } = {}) => { const i = rows.findIndex(r => _match(r, q)); if (i >= 0) rows[i] = structuredClone(d); else if (upsert) rows.push(structuredClone(d)); return { matchedCount: i >= 0 ? 1 : 0 } },
             updateOne: async (q, u, { upsert } = {}) => {
                 let doc = rows.find(r => _match(r, q))
