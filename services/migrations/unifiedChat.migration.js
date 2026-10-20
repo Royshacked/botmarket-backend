@@ -12,15 +12,21 @@
 //   portfolio_books.messages                            → the book's Atlas context; unset (the book itself stays)
 //   chat_state on idea entities and the old `ideas` copy → unset (the retired Idea agent's transcripts)
 //
+import { ENTITIES, LEGACY_IDEAS } from '../entity/entityCollection.js'
+import { COLLECTION as COVERAGE } from '../../api/analyst/coverage.service.js'
+import { COLLECTION as SCANS } from '../../api/scanner/scan.service.js'
+import { COLLECTION as BOOKS } from '../../api/portfolio/portfolioChat.service.js'
+import { COLLECTION as THREADS } from '../thread.service.js'
+
 // Idempotent: every import records its source and is skipped on a re-run; sources are removed only after their
 // import is written. Dry run unless `apply`. The `call` kind keeps its chat_state (CLAUDE.md — kept data).
 
 // A linked thread's subject → the context it becomes. The retired kinds are absent on purpose: they are deleted.
 export const SUBJECTS = Object.freeze({
-    setup:     { kind: 'setup',     agent: 'mentor',    coll: 'entities',        idField: 'id', filter: { kind: 'setup' } },
-    coverage:  { kind: 'coverage',  agent: 'analyst',   coll: 'coverage',        idField: 'id' },
-    scan:      { kind: 'scan',      agent: 'scanner',   coll: 'scans',           idField: 'id' },
-    portfolio: { kind: 'portfolio', agent: 'portfolio', coll: 'portfolio_books', idField: 'portfolioId' },
+    setup:     { kind: 'setup',     agent: 'mentor',    coll: ENTITIES, idField: 'id', filter: { kind: 'setup' } },
+    coverage:  { kind: 'coverage',  agent: 'analyst',   coll: COVERAGE, idField: 'id' },
+    scan:      { kind: 'scan',      agent: 'scanner',   coll: SCANS,    idField: 'id' },
+    portfolio: { kind: 'portfolio', agent: 'portfolio', coll: BOOKS,    idField: 'portfolioId' },
 })
 // The desks whose drafts become archived sessions — the unified chat's agents.
 const CHAT_DESKS = new Set(['axl', 'mentor', 'analyst', 'scanner', 'portfolio'])
@@ -82,8 +88,8 @@ export async function migrateUnifiedChat({ db, contexts, sessions, apply = false
     }
 
     // ── threads ──
-    if (names.has('threads')) {
-        for (const t of await db.collection('threads').find({}).toArray()) {
+    if (names.has(THREADS)) {
+        for (const t of await db.collection(THREADS).find({}).toArray()) {
             const plan = planThread(t, exists)
             tally(report.threads, plan.action === 'delete' ? `delete:${plan.why}` : plan.action)
             if (!apply || plan.action === 'keep') continue
@@ -103,47 +109,47 @@ export async function migrateUnifiedChat({ db, contexts, sessions, apply = false
                 done = await imported(res, source)
             }
             // The row goes only once what it held is somewhere else (or is meant to go).
-            if (done) await db.collection('threads').deleteOne({ threadId: t.threadId })
+            if (done) await db.collection(THREADS).deleteOne({ threadId: t.threadId })
         }
     }
 
     // ── a setup's old transcript (its draft / coverage stay — Mentor's live worksheet) ──
-    const setups = await db.collection('entities').find({ kind: 'setup', 'chat_state.messages': { $exists: true } }, { projection: { _id: 0, id: 1, userId: 1, savedAt: 1, 'chat_state.messages': 1 } }).toArray()
+    const setups = await db.collection(ENTITIES).find({ kind: 'setup', 'chat_state.messages': { $exists: true } }, { projection: { _id: 0, id: 1, userId: 1, savedAt: 1, 'chat_state.messages': 1 } }).toArray()
     report.unset['setup chat_state.messages'] = setups.length
     for (const s of apply ? setups : []) {
         const source = `setup:${s.id}`
         const res = await contexts.importLegacy({ userId: s.userId, kind: 'setup', entityId: s.id, agent: 'mentor', messages: msgs(s.chat_state?.messages), source, at: s.savedAt })
         if (res.imported) report.contexts++
-        if (await imported(res, source)) await db.collection('entities').updateOne({ id: s.id, kind: 'setup' }, { $unset: { 'chat_state.messages': '' } })
+        if (await imported(res, source)) await db.collection(ENTITIES).updateOne({ id: s.id, kind: 'setup' }, { $unset: { 'chat_state.messages': '' } })
     }
 
     // ── a scan's chat ──
-    const scans = names.has('scans') ? await db.collection('scans').find({ chat: { $exists: true } }, { projection: { _id: 0, id: 1, userId: 1, savedAt: 1, chat: 1 } }).toArray() : []
+    const scans = names.has(SCANS) ? await db.collection(SCANS).find({ chat: { $exists: true } }, { projection: { _id: 0, id: 1, userId: 1, savedAt: 1, chat: 1 } }).toArray() : []
     report.unset['scans.chat'] = scans.length
     for (const s of apply ? scans : []) {
         const source = `scan:${s.id}`
         const res = await contexts.importLegacy({ userId: s.userId, kind: 'scan', entityId: s.id, agent: 'scanner', messages: msgs(s.chat), source, at: s.savedAt })
         if (res.imported) report.contexts++
-        if (await imported(res, source)) await db.collection('scans').updateOne({ id: s.id }, { $unset: { chat: '' } })
+        if (await imported(res, source)) await db.collection(SCANS).updateOne({ id: s.id }, { $unset: { chat: '' } })
     }
 
     // ── a book's chat (the book — mandate, thesis, reviews, Themis — stays) ──
-    const books = names.has('portfolio_books') ? await db.collection('portfolio_books').find({ messages: { $exists: true } }, { projection: { _id: 0, portfolioId: 1, userId: 1, savedAt: 1, messages: 1 } }).toArray() : []
+    const books = names.has(BOOKS) ? await db.collection(BOOKS).find({ messages: { $exists: true } }, { projection: { _id: 0, portfolioId: 1, userId: 1, savedAt: 1, messages: 1 } }).toArray() : []
     report.unset['portfolio_books.messages'] = books.length
     for (const b of apply ? books : []) {
         const source = `book:${b.portfolioId}`
         const res = await contexts.importLegacy({ userId: b.userId, kind: 'portfolio', entityId: b.portfolioId, agent: 'portfolio', messages: msgs(b.messages), source, at: b.savedAt })
         if (res.imported) report.contexts++
-        if (await imported(res, source)) await db.collection('portfolio_books').updateOne({ portfolioId: b.portfolioId, userId: b.userId }, { $unset: { messages: '' } })
+        if (await imported(res, source)) await db.collection(BOOKS).updateOne({ portfolioId: b.portfolioId, userId: b.userId }, { $unset: { messages: '' } })
     }
 
     // ── the retired Idea agent's transcripts: on idea entities, and on the old `ideas` copy ──
     const ideaQ = { kind: 'idea', chat_state: { $exists: true } }
-    report.unset['idea chat_state'] = await db.collection('entities').countDocuments(ideaQ)
-    report.unset['ideas.chat_state (old copy)'] = names.has('ideas') ? await db.collection('ideas').countDocuments({ chat_state: { $exists: true } }) : 0
+    report.unset['idea chat_state'] = await db.collection(ENTITIES).countDocuments(ideaQ)
+    report.unset['ideas.chat_state (old copy)'] = names.has(LEGACY_IDEAS) ? await db.collection(LEGACY_IDEAS).countDocuments({ chat_state: { $exists: true } }) : 0
     if (apply) {
-        await db.collection('entities').updateMany(ideaQ, { $unset: { chat_state: '' } })
-        if (names.has('ideas')) await db.collection('ideas').updateMany({ chat_state: { $exists: true } }, { $unset: { chat_state: '' } })
+        await db.collection(ENTITIES).updateMany(ideaQ, { $unset: { chat_state: '' } })
+        if (names.has(LEGACY_IDEAS)) await db.collection(LEGACY_IDEAS).updateMany({ chat_state: { $exists: true } }, { $unset: { chat_state: '' } })
     }
 
     report.after = await sizeMb(db)

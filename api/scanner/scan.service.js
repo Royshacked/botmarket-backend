@@ -7,7 +7,7 @@ import { makeEntityCrud }  from '../../services/entity/entityCrud.service.js'
 import { logger }  from '../../services/logger.service.js'
 
 const LOG        = '[scan]'
-const COLLECTION = 'scans'
+export const COLLECTION = 'scans'
 
 // Owner-scoped CRUD (the shared mechanism), the same factory the entity kinds and coverage use.
 // A scan is not an execution-tier entity — it is a research artifact in its own collection — but

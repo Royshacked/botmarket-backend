@@ -12,7 +12,7 @@ import { logger } from './logger.service.js'
 import { newThreadId, computeExpiry, draftsToEvict, deriveTitle, pipelineDraftsQuery, DRAFT_CAP } from './thread.util.js'
 
 const LOG        = '[thread]'
-const COLLECTION = 'threads'
+export const COLLECTION = 'threads'
 
 export async function ensureThreadIndexes() {
     try {
