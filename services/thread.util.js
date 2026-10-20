@@ -39,19 +39,6 @@ export function isSubstantive({ agent, phase, hasArtifact = false, mandateReady 
     return Number.isFinite(p) && p >= 2
 }
 
-/**
- * The filter for "this desk run is over — drop what fed it".
- *
- * Pure, and separate from the deleteMany that uses it, because this is the one destructive query in
- * the thread store and `tier: 'draft'` is the whole of its safety: a LINKED thread is the conversation
- * behind a live setup or book, reached by editing that artifact, and must survive its desk being
- * finished with. Dropping that one key would delete the reasoning behind everything the user owns —
- * so it is asserted in a test rather than trusted to stay typed correctly.
- */
-export function pipelineDraftsQuery(userId, pipeline) {
-    return { userId: String(userId), tier: 'draft', pipeline: String(pipeline) }
-}
-
 // expiresAt for a tier: a future Date for drafts (Mongo TTL auto-prunes past it),
 // null for linked/pinned threads (a TTL index skips docs whose field isn't a Date).
 export function computeExpiry(tier, now = Date.now(), ttlMs = DRAFT_TTL_MS) {

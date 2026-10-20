@@ -17,8 +17,6 @@ import { keepMarkers } from './markers.js'
 
 const LOG = '[portfolio:desk]'
 
-const _str = (v) => (typeof v === 'string' && v.trim() ? v.trim() : null)
-
 /**
  * The working state after a turn: the conversation-long fields carry over; the mandate and thesis the
  * turn stated replace the old ones (a built book also persists them to portfolio_books, as today); the
@@ -103,23 +101,17 @@ export const portfolioDesk = {
         input: {
             accounts:      parseIdeaAccounts(body.ideaAccounts),
             mainAccountId: turn.mainAccountId,
-            threadId:      body.threadId ?? null,
-            // Which desk this conversation belongs to, so the badge and the lock can tell an unfinished
-            // BUILD from a standalone chat at the same agent. Validated as a string, never trusted as a key.
-            pipeline:      _str(body.pipeline),
         },
     }),
     run: async ({ user, state, input, signal, emit, common, sessionId = null }) => {
         const { messages } = common
         const { portfolioId = null, reviewMode: isReviewMode = false, mandate: bodyMandate = null, adoptDraftId = null } = state ?? {}
-        const { threadId = null, pipeline: cleanPipeline = null } = input
-        // The last phase this turn actually emitted. A stopped turn has no result to read one off, and
-        // the substantive floor reads it — so it is tracked as it streams.
-        let lastPhase = null
+        // Always null since the unified chat (the session desks pass none) — kept only for the sleeve card's field.
+        const { threadId = null } = input
 
         // Pre-stream context load + mandate carry-forward (business logic → service).
         const { portfolioState, lifecycle, mandate, statedMandate, storedThesis, reviewDelta } = await portfolioChatService.loadStreamContext({
-            userId: user._id, portfolioId, threadId, isReviewMode, bodyMandate,
+            userId: user._id, portfolioId, isReviewMode, bodyMandate,
         })
 
         const lastMessage = messages.at(-1)?.content ?? ''
@@ -148,28 +140,18 @@ export const portfolioDesk = {
             thesis: storedThesis,
             adoptDraft,
             onTicker:    (symbol) => emit('ticker', { symbol }),
-            onPhase:     (phase)  => { lastPhase = phase; emit('phase', { phase }) },
+            onPhase:     (phase)  => emit('phase', { phase }),
         })
 
-        // Post-stream persistence (mandate/thesis/draft) → service. Only when the client is still
-        // listening: what the turn PRODUCED (a mandate, a thesis) is the answer to a turn nobody
-        // received, and writing it back would move the build on behalf of a user who stopped it.
-        //
-        // The CONVERSATION is the exception, and it is the whole of this branch: it is the user's
-        // message and the turns before it, not the model's answer, and walking out of a turn is the
-        // commonest way to leave a desk unfinished.
-        if (signal.aborted) {
-            portfolioChatService.persistStoppedTurn({
-                userId: user._id, threadId, portfolioId, messages,
-                mandate: statedMandate, phase: lastPhase, pipeline: cleanPipeline,
-            })
-            return null
-        }
+        // Post-stream persistence (mandate/thesis) → service. Only when the client is still listening: what
+        // the turn PRODUCED is the answer to a turn nobody received, and writing it back would move the build
+        // on behalf of a user who stopped it. The conversation is the session's — a stopped turn's message is
+        // already on it (the old draft-thread write went in phase 9).
+        if (signal.aborted) return null
         portfolioChatService.persistStreamOutcome({
             // statedMandate, not mandate: only what the user established WITH ATLAS is written back.
-            userId: user._id, portfolioId, threadId, isReviewMode, messages,
+            userId: user._id, portfolioId, isReviewMode,
             mandate: statedMandate, storedThesis, result,
-            pipeline: cleanPipeline,
         })
 
         // G1: Atlas asked Prometheus to re-research a held name. Fire the async refresh-by-hop

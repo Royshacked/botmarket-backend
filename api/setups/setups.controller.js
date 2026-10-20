@@ -1,12 +1,9 @@
-import { sealing } from '../../services/desks/seal.js'
 import { forgetIfDeleted } from '../../services/agentContext.service.js'
-import { logger }       from '../../services/logger.service.js'
 import { sendReason }   from '../_shared/reason.util.js'
 import { makeHandle }   from '../_shared/handle.util.js'
 import { makeEntityController } from '../_shared/entityController.util.js'
 import { setupService } from './setups.service.js'
 import { setupReason } from './setupReasons.js'
-import { setupCommit } from './setupCommit.service.js'
 import { shareSetup as shareSetupService } from './setupShare.service.js'
 import { talosHandoffService } from '../../services/talos.handoff.service.js'
 import { normalizeSetup, setupReadiness, TRADE_MODES, TF_RUNGS, isFetchableRung } from '../../services/setup.schema.js'
@@ -95,74 +92,9 @@ export const shareSetup = _handle('shareSetup', async (req, res) => {
 // It binds the venue, runs the readiness gate and can re-route to an in-place edit, so it stays
 // hand-written — a shared shell has no business knowing any of that.
 
-/**
- * Generate: persist a drafted setup (or update one in place when `updateId` is present).
- *
- * THE RE-DRAW IS THE WORK LANDING. An in-place update is the one write that answers "your setup
- * needs re-drawing" — and it does not come through the shared PATCH door, so the card lifecycle has
- * to be closed from here or not at all. It used to be not at all: the plan rewrite resolved nothing
- * while a mid-edit chat save resolved everything, so the card that asked for a re-draw outlived the
- * re-draw and died to a question instead.
- *
- * Only on `updateId`. A NEW setup satisfies no outstanding ask — nothing was pending about a
- * document that did not exist a moment ago.
- */
-export const generateSetup = _handle('generateSetup', async (req, res) => {
-    const { setup, accounts, mainAccountId, updateId, chat_state } = req.body ?? {}
-    if (!setup || typeof setup !== 'object' || Array.isArray(setup)) {
-        return res.status(400).send({ error: 'setup must be an object' })
-    }
-
-    // The write and, on an update, the cards it satisfies — one service with Mentor's session action.
-    const result = await setupCommit.commitSetup(setup, {
-        userId:   req.user._id,
-        accounts: Array.isArray(accounts) ? accounts : [],
-        mainAccountId,
-        updateId: updateId ?? null,
-        chatState: chat_state,
-    })
-    if (!result.ok) return sendReason(res, result.reason, { overrides: setupReason, fallback: 500 })
-
-    // With a sessionId, Mentor's turns move onto the setup they produced (unified-chat §6.2); without one
-    // (today's frontend) nothing changes. Never fails the Generate.
-    sealing.sealAfterGenerate(req, { kind: 'setup', entityIds: [result.doc?.id], name: result.doc?.asset ? `${result.doc.asset} setup` : null, onlyIfEditing: !!updateId })
-
-    res.send(result.doc)
-})
-
-/**
- * GENERATE ALL — one press, N setups (docs/design/mentor-flow-intent.md #15, step 6).
- *
- * A user may build several names in one conversation, and pressing Generate once per name at the
- * end is a worse version of the same thing: it invites them to stop halfway with three of five
- * saved and no record of which two they meant to keep.
- *
- * **PARTIAL SUCCESS IS THE CONTRACT, and it is Roy's call rather than an implementation
- * convenience**: if three of four pass validation, the three are SAVED and monitored and the
- * fourth comes back with its reason. Rolling back three good setups because a fourth had no size
- * would throw away work the user finished, and leaving the batch half-written with no answer about
- * which half is worse still. So the response says exactly what happened to each one.
- *
- * Generated in sequence, not in parallel: each one does its own account resolution and venue
- * checks, and a burst of those against one broker is how you get rate-limited into a false refusal.
- */
-export const generateSetups = _handle('generateSetups', async (req, res) => {
-    const { setups, accounts, mainAccountId, chat_state } = req.body ?? {}
-    if (!Array.isArray(setups) || !setups.length) {
-        return res.status(400).send({ error: 'setups must be a non-empty array' })
-    }
-    const { saved, failed, reason, max } = await setupService.generateSetups(setups, {
-        userId: req.user._id, accounts: Array.isArray(accounts) ? accounts : [], mainAccountId, chatState: chat_state,
-    })
-    if (reason === 'too_many') return res.status(400).send({ error: `no more than ${max} setups in one batch` })
-
-    logger.info(LOG, `generateSetups: ${saved.length} saved, ${failed.length} refused`)
-    // One conversation, several setups: the same turns are sealed onto each (unified-chat §6.2).
-    if (saved.length) sealing.sealAfterGenerate(req, { kind: 'setup', entityIds: saved.map(d => d.id) })
-    // 200 even with refusals: the batch DID something, and an error status would tell a client to
-    // discard a response that is carrying real saved documents. `failed` is the news, not the code.
-    res.send({ saved, failed })
-})
+// Generate / Generate-all were routes here for Mentor's panel (they took the client's `chat_state`). Mentor's session
+// actions commit through setupCommit / setupService directly (services/desks/actions/mentor.actions.js), and the routes
+// went with the panel in phase 9 (2026-10-20).
 
 // ── Blueprint: opening a plan nobody has sized yet ─────────────────────────────
 

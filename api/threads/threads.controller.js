@@ -1,8 +1,7 @@
-// Generic thread write/read API over threadService. Desks whose server does not persist
-// the conversation drive their own draft persistence from the client through these
-// endpoints. Portfolio
-// persists server-side inline (it already holds the full messages) — both paths land
-// in the same `threads` store; only the write trigger differs.
+// The thread API that is left (unified-chat phase 9, 2026-10-20): Pythia's and Aether's panels keep their own
+// chats in `threads` (phase 8e, D1) and drive their persistence from the client — save a draft, link it to what it
+// produced, discard it. Every other desk talks in the session (api/sessions); the desks' list / get / pin / badge
+// and pipeline-discard endpoints went with the panels that called them.
 
 import { threadService } from '../../services/thread.service.js'
 import { isSubstantive } from '../../services/thread.util.js'
@@ -24,8 +23,11 @@ const handle = makeHandle(LOG)
 //
 // Live desks only. `idea` (deleted 2026-08-07) and `kairos` (archived 2026-08-18) were still here a
 // month on; the one client path that saved under `idea` is MainPage's own dead `/api/idea` flow.
-// Their old threads still READ — this gates writes, and nothing lists by it.
-export const AGENTS = new Set(['portfolio', 'scanner', 'mentor', 'axl', 'analyst', 'strategy', 'aether'])
+//
+// Since the unified chat (phase 9, 2026-10-20) that is Pythia and Aether alone: every other desk talks in the
+// session, its old threads were migrated off this store, and a draft saved under one of them would be legacy data
+// written fresh — so the gate refuses it.
+export const AGENTS = new Set(['strategy', 'aether'])
 
 // The service answers `{ ok:false }` with no reason when its write failed — a fault, not a refusal.
 // Thrown bare so the global handler answers the one 500 shape and the log names the handler.
@@ -60,43 +62,6 @@ export const linkThread = handle('linkThread', async (req, res) => {
     const result = await threadService.linkToArtifact({ threadId, userId: req.user._id, subjectType, subjectId, artifactName })
     if (!result.ok) throw _failed('linkToArtifact')
     res.json({ ok: true })
-})
-
-export const pinThread = handle('pinThread', async (req, res) => {
-    const result = await threadService.pinThread({ threadId: req.params.threadId, userId: req.user._id })
-    if (!result.ok) throw _failed('pinThread')
-    res.json({ ok: true })
-})
-
-/**
- * Unfinished work across every desk — what the route badges read. Drafts only, each saying whether
- * it is waiting on the user.
- */
-export const listUnfinishedThreads = handle('listUnfinishedThreads', async (req, res) => {
-    res.json({ threads: await threadService.listUnfinished({ userId: req.user._id }) })
-})
-
-export const listThreads = handle('listThreads', async (req, res) => {
-    const agent = typeof req.query.agent === 'string' ? req.query.agent : null
-    res.json({ threads: await threadService.listThreads({ userId: req.user._id, agent }) })
-})
-
-export const getThread = handle('getThread', async (req, res) => {
-    const thread = await threadService.getThread({ threadId: req.params.threadId, userId: req.user._id })
-    if (!thread) throw httpError(404, 'Thread not found')
-    res.json({ thread })
-})
-
-/**
- * The desk finished: its artifact exists, so the drafts that fed the run go with it. Drafts only —
- * the thread that AUTHORED the artifact was linked to it and is reached by editing that artifact.
- */
-export const discardPipelineDrafts = handle('discardPipelineDrafts', async (req, res) => {
-    const { pipeline } = req.params
-    if (!pipeline || typeof pipeline !== 'string') throw httpError(400, 'pipeline is required')
-    const result = await threadService.discardPipelineDrafts({ userId: req.user._id, pipeline })
-    if (!result.ok) throw _failed('discardPipelineDrafts')
-    res.json({ ok: true, deleted: result.deleted })
 })
 
 export const discardThread = handle('discardThread', async (req, res) => {

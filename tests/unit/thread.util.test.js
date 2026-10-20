@@ -1,29 +1,9 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-    newThreadId, isSubstantive, computeExpiry, draftsToEvict, deriveTitle, pipelineDraftsQuery,
+    newThreadId, isSubstantive, computeExpiry, draftsToEvict, deriveTitle,
     DRAFT_TTL_MS, DRAFT_CAP,
 } from '../../services/thread.util.js'
-
-// A finished desk drops the conversations that fed it — the one destructive query in the store, so
-// its safety is pinned here rather than trusted to stay typed correctly.
-test('pipelineDraftsQuery: scoped to ONE user, ONE desk, and DRAFTS only', () => {
-    assert.deepEqual(pipelineDraftsQuery('u1', 'trade'), { userId: 'u1', tier: 'draft', pipeline: 'trade' })
-})
-
-test('pipelineDraftsQuery: tier is what stops it deleting a live artifact\'s conversation', () => {
-    // A LINKED thread is the reasoning behind a setup or a book, reopened by editing that artifact.
-    // Without this key the query would take those too — every book the user owns, silently.
-    assert.equal(pipelineDraftsQuery('u1', 'portfolio').tier, 'draft')
-})
-
-test('pipelineDraftsQuery: ids are strings, never a caller\'s object', () => {
-    // userId arrives as req.user._id (the custom string id) and pipeline off the URL — both are
-    // stringified so a stray object cannot widen the match into a query operator.
-    const q = pipelineDraftsQuery(123, 'scan')
-    assert.equal(q.userId, '123')
-    assert.equal(typeof q.pipeline, 'string')
-})
 
 test('newThreadId: prefixed, unique-ish', () => {
     const a = newThreadId()

@@ -17,15 +17,16 @@ import { isSubstantive } from '../../services/thread.util.js'
 // So this is a pinning test on purpose. Adding a desk means adding its agent HERE and making its
 // panel save — neither half fails loudly on its own.
 
-test('every desk agent that drives its own draft persistence is whitelisted', () => {
-    for (const agent of ['portfolio', 'scanner', 'mentor', 'axl', 'analyst', 'strategy', 'aether'])
-        assert.ok(AGENTS.has(agent), `${agent} is missing — its desk would 400 silently on every save`)
+test('the panels that still keep their own chats are whitelisted: Pythia and Aether', () => {
+    for (const agent of ['strategy', 'aether'])
+        assert.ok(AGENTS.has(agent), `${agent} is missing — its panel would 400 silently on every save`)
 })
 
-test('the whitelist is exactly that set — an unknown or archived agent is refused', () => {
-    assert.equal(AGENTS.size, 7)
-    // The archived Kairos and the deleted Idea agent write no drafts; their old threads still read.
-    for (const agent of ['prometheus', 'pythia', 'atlas', 'argus', '', 'ANALYST', 'idea', 'kairos'])
+// Unified chat, phase 9 (2026-10-20): every other desk talks in the session and its old threads were migrated off this
+// store. A draft saved under one of them would be legacy data written fresh, so the gate refuses it.
+test('the whitelist is exactly that set — the session desks, archived and unknown agents are refused', () => {
+    assert.equal(AGENTS.size, 2)
+    for (const agent of ['portfolio', 'scanner', 'mentor', 'axl', 'analyst', 'prometheus', 'pythia', '', 'ANALYST', 'idea', 'kairos'])
         assert.equal(AGENTS.has(agent), false, `${agent} should not be accepted`)
 })
 

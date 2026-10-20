@@ -60,9 +60,8 @@ async function saveScan(scan, userId) {
             sourceRuns: scan.source === 'aether' && Array.isArray(scan.sourceRuns)
                 ? scan.sourceRuns.map(String) : null,
             candidates: Array.isArray(scan.candidates) ? scan.candidates : [],
-            // The scanner conversation that produced this list — lets the user
-            // click the thesis to return to that chat.
-            chat:       Array.isArray(scan.chat) ? scan.chat : [],
+            // No `chat` (phase 9, 2026-10-20): the Argus conversation that produced the list is sealed onto it
+            // (agent_contexts), and a save wrote `chat: []` on every new list.
             savedAt:    Date.now(),
         }
         // Attach company logos (+ fill missing names) so scan tickers render with
@@ -108,7 +107,7 @@ async function updateScan(id, patch, userId) {
             set.candidates = patch.candidates
             await enrichWithProfiles(set.candidates, { key: 'ticker', overwriteName: false })
         }
-        if (Array.isArray(patch.chat))       set.chat       = patch.chat
+        // No `chat` — the conversation is sealed onto the list (phase 9).
 
         const res = await crud.patchOwned(id, userId, set)
         if (!res.ok) return res

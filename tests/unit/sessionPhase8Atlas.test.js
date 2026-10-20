@@ -30,7 +30,7 @@ function commitRig({ avoid = [], items = [], deleteFails = [], saveChat = { ok: 
         chat:       {
             completeReview: async (pid) => { calls.complete.push(pid); return { nextReviewAt: 99 } },
             setPortfolioLifecycle: async (pid, uid, p) => { calls.lifecycle.push(p) },
-            saveChatState: async (pid, messages, uid, mandate) => { calls.chatState.push({ pid, messages, mandate }); return saveChat },
+            recordBook: async (pid, uid, mandate) => { calls.chatState.push({ pid, mandate }); return saveChat },
             setThesis: async (pid, uid, thesis, reason) => { calls.thesis.push({ pid, thesis, reason }) },
         },
         rebalance:  async (pid, uid, update, o) => { calls.rebalance.push(update); calls.rebalanceOpts.push(o); return { ok: true, results: [], nextReviewAt: 77 } },
@@ -50,10 +50,10 @@ test('createBook refuses an AVOID name the OK does not cover, and saves once it 
     assert.deepEqual(calls.save[0].opts.accounts, ['a1'], 'only string account ids reach the batch')
 })
 
-test('recordConstruction writes the mandate and the construction thesis onto the new book', async () => {
+test('recordConstruction writes the mandate and the construction thesis onto the new book — and no messages (phase 9)', async () => {
     const { commit, calls } = commitRig()
     assert.deepEqual(await commit.recordConstruction('p1', 'u1', { mandate: { goal: 'g' }, thesis: { strategy: 's' } }), { ok: true })
-    assert.deepEqual(calls.chatState[0], { pid: 'p1', messages: [], mandate: { goal: 'g' } })
+    assert.deepEqual(calls.chatState[0], { pid: 'p1', mandate: { goal: 'g' } })
     assert.deepEqual(calls.thesis[0], { pid: 'p1', thesis: { strategy: 's' }, reason: 'construction' })
     const failing = commitRig({ saveChat: { ok: false } })
     assert.deepEqual(await failing.commit.recordConstruction('p1', 'u1', { thesis: { strategy: 's' } }), { ok: false })

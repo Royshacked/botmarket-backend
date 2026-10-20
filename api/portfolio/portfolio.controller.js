@@ -1,8 +1,6 @@
 import { forgetIfDeleted } from '../../services/agentContext.service.js'
 import { portfolioChatService }  from './portfolioChat.service.js'
 import { listPortfolioItems, listPortfolios } from '../../services/portfolioState.service.js'
-import { logger }                from '../../services/logger.service.js'
-import { threadService }          from '../../services/thread.service.js'
 import { adoptBookService }  from './adoptBook.service.js'
 import { portfolioCommit }   from './portfolioCommit.service.js'
 import { REBALANCE_REASONS } from './portfolioReasons.js'
@@ -128,28 +126,6 @@ export const removeAdoptedHolding = makeAdoptHandler(
     (req) => adoptBookService.removeHolding({ id: req.params.id, userId: req.user._id }),
     r => ({ asset: r.asset }),
 )
-
-export const savePortfolioChatState = handle('savePortfolioChatState', async (req, res) => {
-    const { portfolioId, messages, mandate, thesis, threadId, portfolioName } = req.body ?? {}
-    if (!portfolioId || !Array.isArray(messages)) throw httpError(400, 'Missing portfolioId or messages')
-    // The book's document — the mandate and the construction thesis — one service with Atlas's session action.
-    const result = await portfolioCommit.recordConstruction(portfolioId, req.user._id, { messages, mandate, thesis })
-    if (!result.ok) return res.status(500).json({ error: 'Failed to save chat state' })
-    // Link the construction draft thread to the now-created portfolio: stamps subjectId,
-    // promotes it to 'linked' and clears its TTL so the conversation lives with the book.
-    if (threadId) {
-        threadService.linkToArtifact({
-            threadId, userId: req.user._id,
-            subjectType: 'portfolio', subjectId: portfolioId, artifactName: portfolioName ?? null,
-        }).catch(err => logger.warn(LOG, 'linkToArtifact failed', err))
-    }
-    res.json({ ok: true })
-})
-
-export const getPortfolioChatState = handle('getPortfolioChatState', async (req, res) => {
-    const chatState = await portfolioChatService.getChatState(req.params.portfolioId, req.user._id)
-    res.json({ chatState: chatState ?? null })
-})
 
 // Deleting a book's document is the portfolio's delete (the client removes its ideas first) — so the
 // book's sealed agent contexts go with it.

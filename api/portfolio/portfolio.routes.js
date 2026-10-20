@@ -1,9 +1,7 @@
 import express         from 'express'
 import { log }         from '../../middleware/logger.middleware.js'
 import { requireAuth } from '../../middleware/auth.middleware.js'
-import {
-    savePortfolioChatState,
-    getPortfolioChatState,
+import {
     deletePortfolioChatState,
     getPendingReviews,
     getPortfolios,
@@ -25,8 +23,6 @@ router.use(requireAuth)
 
 router.get('/',                               log, getPortfolios)       // the user's books
 router.get('/pending-reviews',                log, getPendingReviews)
-router.post('/chat-state',                    log, savePortfolioChatState)
-router.get('/chat-state/:portfolioId',        log, getPortfolioChatState)
 router.delete('/chat-state/:portfolioId',     log, deletePortfolioChatState)
 router.get('/:portfolioId/items',             log, getPortfolioItems)   // the book's holdings — the portfolio's GET /:id
 router.post('/:portfolioId/complete-review',  log, completeReview)
