@@ -147,7 +147,7 @@ export const portfolioDesk = {
         // the turn PRODUCED is the answer to a turn nobody received, and writing it back would move the build
         // on behalf of a user who stopped it. The conversation is the session's — a stopped turn's message is
         // already on it (the old draft-thread write went in phase 9).
-        if (signal.aborted) return null
+        if (signal?.aborted) return null
         portfolioChatService.persistStreamOutcome({
             // statedMandate, not mandate: only what the user established WITH ATLAS is written back.
             userId: user._id, portfolioId, isReviewMode,
