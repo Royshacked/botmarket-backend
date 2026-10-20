@@ -1337,13 +1337,14 @@ What the survey changed in the plan above:
   undoes a run. Verified on a throwaway copy of axl_dev: apply → restore is IDENTICAL to the original; a re-run of
   apply changes nothing.
 
-**axl_dev, applied 2026-10-20** (backup `unified-chat-axl_dev-2026-10-20T16-03-05-010Z.json`): 47 entity contexts
+**axl_dev, applied 2026-10-20** (final run after the review fixes; backup `unified-chat-axl_dev-2026-10-20T17-10-47-849Z.json`): 47 entity contexts
 (18 books, 24 coverage, 4 scans, 1 setup) from 52 threads + 23 fields, 18 copies left out; 73 threads deleted (48
 entity gone, 25 retired desks); idea `chat_state` unset; 51.3 → 47.3 MB.
 
 **Prod (deploy runbook, in this order):** `rename-portfolio-books.mjs` (prod still has `portfolio_chats` — the
 migration refuses until it is moved) → `migrate-unified-chat.mjs --db test` (dry run, read the report) →
-`--db test --apply --yes-not-my-db` → keep the backup file. The dead write paths (the old `/api/threads` desk routes,
+`--db test --apply --yes-not-my-db` → keep the backup file. **Before the new code takes traffic** — `--apply` refuses while session messages are being written (the
+unified code is live), since an import replacing a context could lose a turn sealed mid-run. The dead write paths (the old `/api/threads` desk routes,
 `/api/portfolio/chat-state`, Mentor's old `/generate` with `chat_state`, `scan.chat` on save) are removed in a
 follow-up — nothing live calls them (the session desks pass no `threadId`).
 
