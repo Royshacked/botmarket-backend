@@ -140,8 +140,8 @@ arrow stays Argus's (the tape is what you would actually trade) and the disagree
 **record disagrees** (`readFlagFor`, derived in the panel because only that side knows both directions).
 
 **Then Prometheus, by itself.** The list Argus emits is read against the record before it is saved —
-`services/aetherBatchRead.service.js`, fired automatically from the panel (`_settleScan`), not from a
-button: `contradicted` and `priced_in` are out, `unclear` and unread ship flagged, and the longs cut on
+`services/aetherBatchRead.service.js`, run from Argus's surface on a radar cut — the Prometheus step
+(`PrometheusStep` in the frontend's `ScannerSurface.jsx`), read or skipped by the user: `contradicted` and `priced_in` are out, `unclear` and unread ship flagged, and the longs cut on
 the read's `net` where it has one and Aether's `side` where it does not. Three reads at once
 (`READ_CONCURRENCY`), capped at twelve names (`BATCH_MAX`) with the overflow returned unread rather than
 refused — which is why the module aims at eight to twelve. The user can leave without waiting ("Save

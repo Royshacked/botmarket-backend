@@ -33,35 +33,35 @@ The server owns every gate; the client hides what the server refuses, as a court
 | Atlas | `<coverage_refresh>` runs only for `req.user.role === 'admin'` (`portfolio.controller.js`); a trader's ask is logged and Atlas reads the standing coverage |
 | Client | `DESKS[].adminOnly` (hub cards), the `FloorLists` `Research queue` desk, `CoverageActions`, the "Initiate coverage" button, the StrategyPanel's Publish. The Forecasts board (`IndustryView`) is no longer gated — every user sees it |
 
-## The autonomous sleeve hop — Atlas → Argus → Prometheus → Atlas
+## The autonomous sleeve hop — Atlas → (the house's GICS table) → Prometheus → Atlas
 
 Atlas builds a book from house coverage and nothing else (the Phase 4 hard rule in
-`prompts/portfolio_system_prompt.md`). When a sleeve's filter — sector + the mandate's selection
-school — finds the pool empty, Atlas emits one `<screen_request>` per empty sleeve and ends the
-turn. Before this it stopped and sent the user to the research queue; the older interactive hop
-drew a "send to Argus" button and a three-desk walk a trader (who cannot write coverage) could not
-finish.
+`prompts/portfolio_system_prompt.md`). A sleeve is ONE GICS sub-industry (2026-10-19,
+[design/atlas-industry-sleeves.md](../design/atlas-industry-sleeves.md)); when its filter — the sub-industry + the
+mandate's selection school — finds the pool empty, Atlas emits one `<screen_request>` per empty sleeve and ends the
+turn. Before this it stopped and sent the user to the research queue; the older interactive hop drew a "send to
+Argus" button and a three-desk walk a trader (who cannot write coverage) could not finish.
 
 ```
-Atlas turn: get_coverage(sector, school) → empty
-   └─ emits <screen_request>{ sector, lens, industry?, note? }   (portfolio.controller, any role)
+Atlas turn: get_coverage(industry, school) → empty
+   └─ emits <screen_request>{ industry_code, lens, note? }   (the portfolio desk, any role)
         │
         ▼  services/sleeveSource.service.js   (fire-and-forget; the reply is already out)
-   1. SCREEN   the sector with the FMP screener under the school's pond (SCHOOL_SCREEN — cap floors,
-               a dividend for `income`; `passive` never screens; 12 names). The school filter is a
-               PROXY: FMP has no valuation/quality predicate — Prometheus applies the real bar.
-               HOUSE FIRST (2026-10-13, argus-on-pythia.md §3.5): when Pythia rates long-term industries in
-               the sector, the same screen widens to 50 and their names lead — up to SLEEVE_HOUSE_MAX (6) of
-               the 12 — the screen filling the rest; the card says how many. None, or a failed read: as before.
-   2. DROP     names already in coverage. Every hit covered → the card goes out at once.
-   3. QUEUE    the rest as `research_queue` rows, source 'argus', context { sector, school, sleeve }
+   1. PICK     the sub-industry's companies from the house's OWN GICS table (gics_companies — the screener does
+               not know GICS names): the ones the house's assessment NAMES first, then by market cap, over the
+               school's size floor (SCHOOL_SCREEN — Prometheus applies the real bar); each checked to TRADE as
+               a live, liquid stock (FMP profile: actively trading, not a fund, average volume over the
+               screener's floor — notes, preferreds and thin OTC lines out); at most 12. Fewer than 4 → the
+               sector screen fills in, ONLY with names the table puts in this sub-industry.
+               (A sector-only request — the old shape — still screens the sector, the house's long-term
+               industries first; `passive` never sources.)
+   2. DROP     names already in coverage. Every one covered → settled at once.
+   3. QUEUE    the rest as `research_queue` rows, source 'argus', context { sector, industry, school, sleeve }
    4. RUN      researchRun.startRun AS THE HOUSE (userId null). A run already going is waited for.
-   5. SETTLE   on `onRunSettled`: absorb outcomes; every name decided → post the requester an Atlas
-               card `sleeve_sourced` ("Resume build"); names still queued after a `done` run → start
-               the next; an admin-STOPPED or failed run is not restarted from here.
-        │
-        ▼  client: SleeveSourcedBubble → RESUME_BUILD → the construction thread (threadId) or the
-           book's edit (portfolioId). Atlas resumes and reads the coverage the run wrote.
+   5. SETTLE   on `onRunSettled`: absorb outcomes; every name decided → from the unified chat, Argus's line
+               in the session and the coverage handed back to Atlas on the chain (named by the industry);
+               with no session, an Atlas card `sleeve_sourced` ("Resume build"). Names still queued after a
+               `done` run → start the next; an admin-STOPPED or failed run is not restarted from here.
 ```
 
 **Why the research runs as the house.** The run bills LLM usage to its `userId`, and a user past

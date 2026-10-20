@@ -229,30 +229,38 @@ docs/                  README.md is THE index. architecture/ = how the machinery
 ### 0. Reception — Axl hands the user to a desk
 
 Axl is where the user lands, so he is also the way in. He is **read-only**: he decides only *where*,
-then gets out of the way.
+then gets out of the way. There is ONE chat (the unified chat — `docs/design/unified-chat.md`): every
+desk answers in the same session timeline, and a hand-off moves the FLOOR, not the user to another screen.
 
 ```
 AXL  —  POST /api/sessions/:id/turn (the session's first voice)
 
-  Works out only what decides WHERE: one position or several, do they already
-  have a name for it. Everything else the user said travels as their sentence.
+  Works out only what decides WHERE: one position or several. Every single trade
+  starts at Mentor, name or no name (Mentor asks, and brings Argus in to find one).
+  Everything else the user said travels as their sentence.
 
-  <route>desk SYMBOL</route>   NEW work → the desk's entryTab
-  <open>…</open>               their sentence, sent on arrival as the desk's
-                               FIRST message (rides with a route, never an edit)
-  <edit>kind ID</edit>         reopen something they ALREADY have, in the editor
-                               that owns it, conversation restored
-  <suggest>…</suggest>         up to 3 follow-up chips — never on a routing turn,
-                               because the door he just opened IS the next step
+  <route>desk SYMBOL</route>   NEW work → the floor moves to that desk's agent
+  <open>…</open>               their sentence, run as the desk's FIRST turn — a route
+                               with none carries the user's own words, so the desk
+                               always speaks first (rides with a route, never an edit)
+  <edit>kind ID</edit>         reopen something they ALREADY have, in the live chat,
+                               its sealed conversation loaded (agent_contexts)
+  <show>kind [REF]</show>      open a screen beside the chat: a setup's window, the
+                               order ticket, the forecast heat map, the calendar
+  <suggest>…</suggest>         up to 3 follow-up chips — never on a routing turn
         │
         ▼
-  setup → Mentor (the trading desk) · coverage → Prometheus
-  scan → Argus · portfolio → Atlas (edit or review — the BOOK decides, never the caller)
+  setup → Mentor · coverage → Prometheus · scan → Argus · portfolio → Atlas
+  (a book opens in edit or review — the BOOK decides, never the caller)
 
-  The same three tags are EVERY desk's, not only Axl's (services/routing.util.js):
-  a user at Argus who says "send NVDA to Prometheus" gets a Go button under the
-  reply, and Argus wrote the <open> with what it found. One doorway on the client.
+  The same tags are EVERY desk's, not only Axl's (services/routing.util.js): Argus
+  saying "send NVDA to Prometheus" hands the floor on with what it found. Mentor
+  sending the user to Argus presets Argus to find ONE name and hand it back.
 ```
+
+A desk's work-in-progress is drawn in the **side pane** beside the timeline (the worksheet, the plan, the
+list); a commit (Generate / Update / Accept…) seals the desk's conversation onto the entity it produced and
+opens a fresh session with Axl.
 
 Risk, horizon, constraints and benchmark are the **receiving desk's** first phase, not reception's —
 asking at the door means answering twice. See APP_SPEC §2 for the hand-off contract.
@@ -264,7 +272,7 @@ A trade idea moves through a lifecycle from AI chat → condition monitoring →
 ```
 ┌──────────────────────────────────────────────────────────────────┐
 │    AUTHORING  —  Mentor (setup) · Atlas (book)                   │
-│  POST /api/mentor/stream · /api/portfolio/stream                 │
+│  POST /api/sessions/:id/turn  (floor: Mentor · Atlas)            │
 │                                                                  │
 │  The kinds differ; everything downstream of the save is shared,  │
 │  which is why adding one needs a payload, an evaluator, a prompt │
@@ -272,7 +280,8 @@ A trade idea moves through a lifecycle from AI chat → condition monitoring →
 │                                                                  │
 │             └──► streams tokens + the desk's typed emit block    │
 └──────────────────────────────┬───────────────────────────────────┘
-                               │ frontend captures the emit block
+                               │ the draft is the desk's state on the session;
+                               │ Generate = POST /api/sessions/:id/act (the desk's commit)
                                ▼
 ┌──────────────────────────────────────────────────────────────────┐
 │                         SAVE IDEA                                │
@@ -398,7 +407,7 @@ A portfolio groups multiple ideas under one AI-planned allocation, with a period
 ```
 ┌──────────────────────────────────────────────────────────────────┐
 │                   PORTFOLIO CHAT (Agent)                         │
-│  POST /api/portfolio/stream   (SSE)                              │
+│  POST /api/sessions/:id/turn  (floor: Atlas)                     │
 │                                                                  │
 │  portfolioAgentService.chatStream()                              │
 │    Tools: quotes · correlations · risk metrics · fundamentals    │
@@ -446,7 +455,7 @@ A portfolio groups multiple ideas under one AI-planned allocation, with a period
 │  GET  /api/portfolio/pending-reviews                             │
 │    → returns portfolios overdue for review                       │
 │                                                                  │
-│  POST /api/portfolio/stream  { reviewMode: true }                │
+│  POST /api/sessions/:id/turn  (Atlas, reviewMode)                │
 │    → computePortfolioState() fetches live P&L, drift, notional   │
 │    → TWO modes on the one stream: in-position (scoreboard +      │
 │      rebalance memo) and pre-activation (all-pending, ~$0        │
@@ -493,7 +502,7 @@ The scanner agent produces a watchlist of trade candidates for a given timeframe
 ```
 ┌──────────────────────────────────────────────────────────────────┐
 │                    SCANNER CHAT (Agent)                          │
-│  POST /api/scanner/stream   (SSE)                                │
+│  POST /api/sessions/:id/turn  (floor: Argus)                     │
 │                                                                  │
 │  scannerAgentService.chatStream()                                │
 │    Tools: get_price_action, get_quotes, get_risk_metrics,        │
@@ -542,7 +551,7 @@ Neither Prometheus nor Pythia touches a broker. They produce **artifacts other d
 the data-vs-judgment split: their output is a document, not an instruction.
 
 ```
-PROMETHEUS (buy-side research)        POST /api/analyst/stream
+PROMETHEUS (buy-side research)        POST /api/sessions/:id/turn
   ├─ the edge is the GAP: OUR price target vs the Street's consensus
   ├─ compute_valuation → services/valuation.engine.js (deterministic, not the model's arithmetic)
   └─ emits a `coverage` doc — variant perception · rating · PT + estimates ·
@@ -807,12 +816,12 @@ GET  /equity-curve   equity points (?fromMs=)
 - **Workspace** `/api/workspace` — `GET` and `PUT { workspace }` → `{ workspace, stored }`. Which of
   the three books the user is standing in. Its own surface rather than a field on `/api/paper/state`,
   because a workspace is not a paper concept and `manual` is the one with no paper account behind it.
-- **Mentor / setups** `/api/mentor/stream` + `/api/setups` — the `setup` kind. SCENARIOS are
+- **Mentor / setups** — a session turn (`/api/sessions`) + `/api/setups` — the `setup` kind. SCENARIOS are
   rivals (the first to fulfil takes the position, the rest cancel) and quantity is never summed
   across them; LEGS inside one scenario are the scale-in and every one of them is sized. The build
   itself is server state, not prompt choreography — five stages in a ledger
   (`services/mentorBuild.util.js`, `docs/design/mentor-flow-intent.md`).
-- **Analyst** `/api/analyst` — `POST /stream` + coverage CRUD; `POST /coverage/:id/retire` archives,
+- **Analyst** `/api/analyst` — coverage CRUD (the desk talks in the session); `POST /coverage/:id/retire` archives,
   `DELETE` removes. Two verbs because retire once answered the DELETE route and the API claimed a
   removal that never happened.
 - **Strategy** `/api/strategy` — `GET /industries` (every GICS sub-industry: the engine's measured

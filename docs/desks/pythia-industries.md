@@ -50,8 +50,8 @@ All written by aether-engine into the ENGINE's database; the backend reads them 
 
 | Collection | Job (Render cron) | What |
 |---|---|---|
-| `gics_companies` | `scripts/classify_gics.py` (by hand) | Every company in the universe (US, actively trading, > $300M, ~2,870) → its GICS sub-industry. FMP's industry where it is fine enough (`configs/fmp_to_gics.yaml`); a one-time model classification among the listed candidates where it is not, with a `none_of_these` escape to all 163 when FMP's industry is wrong; Roy's review overrides on top |
-| `fin_statements` | `fin-statements`, Tue–Sat | 15 years annual + 12 quarters per company, three statements merged, point-in-time on SEC acceptance |
+| `gics_companies` | `scripts/classify_gics.py` (by hand) | Every company in the universe (US, actively trading, > $300M, ~2,870) → its GICS sub-industry. FMP's industry where it is fine enough (`configs/fmp_to_gics.yaml`); a one-time model classification among the listed candidates where it is not, with a "none_of_these" escape to all 163 when FMP's industry is wrong; Roy's review overrides on top |
+| "fin_statements" | `fin-statements`, Tue–Sat | 15 years annual + 12 quarters per company, three statements merged, point-in-time on SEC acceptance |
 | `cost_of_capital` | `cost-of-capital`, each January | Damodaran's US cost of capital and of equity by industry, mapped by `configs/damodaran_to_gics.yaml` |
 | `industry_metrics` | `industry-metrics`, Sundays | One document per GICS node per run date: the three questions' numbers, code grades, triggers, `answered_at` |
 

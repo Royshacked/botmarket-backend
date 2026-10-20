@@ -264,7 +264,7 @@ daily checks never needed the result: the claim is stamped, the hop posts its ow
 
 | Caller | Mechanism | What comes back |
 |---|---|---|
-| **Admin at the desk** | `/api/analyst/stream`, then Initiate | a `<coverage>` draft, persisted on Initiate |
+| **Admin at the desk** | a session turn with Prometheus on the floor, then Initiate (the session's commit) | a `<coverage>` draft, persisted on Initiate |
 | **Argus → the research queue** | `researchQueue.service`: Argus enqueues names from overweight sectors WITH the mandate context that surfaced them ("research AAPL because the house is +300bp Technology on a disinflation regime" is a different instruction from "research AAPL"; a duplicate keeps the context it was first queued with) | queued → in_research → done / rejected |
 | **The research run** | `researchRun.service`: the whole queue, headless, one name at a time — the same agent, prompt and context, only the audience changes. Skips a name the house already covers (whether the standing thesis needs a look is the pencil's judgment, not the machine's); a PASS is recorded as `rejected: no_edge`; a failed save stays `in_research` with the error. One run at a time, in memory — the day the backend outlives the laptop is the day it needs a collection | house coverage, then `sleeve_sourced` to the Atlas that asked |
 | **Atlas mid-review** | `<coverage_refresh>` → `coverageRefresh.service`, route-and-return: Prometheus rewrites ONE name's coverage (initiate or append a revision), then a `coverage_refreshed` card tells the user to resume. Artifact-mediated: Prometheus writes the doc, Atlas re-reads it — no live judgment injection between agents | the doc, re-read on resume |

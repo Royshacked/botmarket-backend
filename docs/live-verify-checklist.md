@@ -180,7 +180,7 @@ number — it is an agent that never looks and reasons as if the book were empty
   or inventing, and still routes to a desk the moment the question turns into "should I buy it".
 - [ ] **No desk still expects the removed block** `[ANY]` — skim each desk's first reply for
   references to a positions block that no longer exists, and confirm none of them assert an empty
-  book without having called the tool. Analyst especially: it was reading `brokerContext` from the
+  book without having called the tool. Analyst especially: it was reading ~~`brokerContext`~~ from the
   request body (always empty in practice), so this is the first time Prometheus can see the book at
   all.
 
