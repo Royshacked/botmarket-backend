@@ -38,28 +38,38 @@ test('importLegacy: older turns go in FRONT of what is sealed since; a source al
     const { db } = memDb()
     const ctx = makeAgentContextService({ getDb: async () => db })
     await ctx.seal({ userId: 'u1', kind: 'setup', entityId: 's1', agent: 'mentor', messages: [{ role: 'user', content: 'new turn' }] })
-    const r1 = await ctx.importLegacy({ userId: 'u1', kind: 'setup', entityId: 's1', agent: 'mentor', source: 'thread:thr_1', at: 1000,
+    const r1 = await ctx.importLegacy({ userId: 'u1', kind: 'setup', entityId: 's1', agent: 'mentor', sources: ['thread:thr_1', 'setup:s1'], at: 1000,
         messages: [{ role: 'user', content: 'old ask' }, { role: 'assistant', content: 'old answer' }, { role: 'tool', content: 'x' }] })
     assert.equal(r1.imported, true)
     const doc = await ctx.load({ userId: 'u1', kind: 'setup', entityId: 's1', agent: 'mentor' })
     assert.deepEqual(doc.messages.map(m => m.content), ['old ask', 'old answer', 'new turn'])
     assert.equal(doc.messages[0].at, 1000)
-    assert.deepEqual(doc.legacy, ['thread:thr_1'])
-    assert.deepEqual(await ctx.importLegacy({ userId: 'u1', kind: 'setup', entityId: 's1', agent: 'mentor', source: 'thread:thr_1', messages: [{ role: 'user', content: 'old ask' }] }), { imported: false, reason: 'already_imported' })
+    assert.deepEqual(doc.legacy, ['thread:thr_1', 'setup:s1'])
+    assert.deepEqual(await ctx.importLegacy({ userId: 'u1', kind: 'setup', entityId: 's1', agent: 'mentor', sources: ['setup:s1', 'thread:thr_1'], messages: [{ role: 'user', content: 'old ask' }] }), { imported: false, reason: 'already_imported' })
     assert.equal((await ctx.load({ userId: 'u1', kind: 'setup', entityId: 's1', agent: 'mentor' })).messages.length, 3, 'a re-run doubles nothing')
-    assert.equal((await ctx.importLegacy({ userId: 'u1', kind: 'call', entityId: 'k1', agent: 'mentor', source: 's', messages: [{ role: 'user', content: 'x' }] })).imported, false, 'not a context kind')
+    assert.equal((await ctx.importLegacy({ userId: 'u1', kind: 'call', entityId: 'k1', agent: 'mentor', sources: ['s'], messages: [{ role: 'user', content: 'x' }] })).imported, false, 'not a context kind')
+    assert.equal((await ctx.importLegacy({ userId: 'u1', kind: 'setup', entityId: 's2', agent: 'mentor', sources: [], messages: [{ role: 'user', content: 'x' }] })).reason, 'sources are required')
 })
 
-test('importLegacy: the same conversation from a second source adds only what is new (a book\'s thread AND its messages)', async () => {
-    const { db } = memDb()
-    const ctx = makeAgentContextService({ getDb: async () => db })
-    const convo = [{ role: 'user', content: 'Build me a growth book' }, { role: 'assistant', content: 'What is the horizon?' }]
-    await ctx.importLegacy({ userId: 'u1', kind: 'portfolio', entityId: 'p1', agent: 'portfolio', source: 'thread:thr_1', messages: convo })
-    const r = await ctx.importLegacy({ userId: 'u1', kind: 'portfolio', entityId: 'p1', agent: 'portfolio', source: 'book:p1', messages: [...convo, { role: 'user', content: 'Five years' }] })
-    assert.deepEqual(r, { imported: true, added: 1 })
-    const doc = await ctx.load({ userId: 'u1', kind: 'portfolio', entityId: 'p1', agent: 'portfolio' })
-    assert.equal(doc.messages.length, 3)
-    assert.deepEqual(doc.legacy, ['thread:thr_1', 'book:p1'])
+test('mergeSources: oldest first; a copy of a conversation already taken is left out; one that extends it replaces it', async () => {
+    const { mergeSources } = await import('../../services/migrations/unifiedChat.migration.js')
+    const ask = (t) => ({ role: 'user', content: t }), say = (t) => ({ role: 'assistant', content: t })
+    const book = [ask('Build me a growth book'), say('What is the horizon?')]
+    // A book's thread and its own messages: the same chat, the book's a step further. → once, the longer one.
+    const m1 = mergeSources([
+        { source: 'book:p1', at: 200, messages: [...book, ask('Five years')] },
+        { source: 'thread:t1', at: 100, messages: book },
+    ])
+    assert.deepEqual(m1.messages.map(m => m.content), ['Build me a growth book', 'What is the horizon?', 'Five years'])
+    assert.equal(m1.dropped, 1)
+    // Two separate revisions that open with the SAME ask — both kept, whole, in time order (REGN on axl_dev).
+    const rev1 = [ask('Revise our coverage on REGN.'), say('Holds at 18x.')]
+    const rev2 = [ask('Revise our coverage on REGN.'), say('Now 18.7x–25.3x.')]
+    const m2 = mergeSources([{ source: 'thread:b', at: 300, messages: rev2 }, { source: 'thread:a', at: 100, messages: rev1 }])
+    assert.deepEqual(m2.messages.map(m => m.content), ['Revise our coverage on REGN.', 'Holds at 18x.', 'Revise our coverage on REGN.', 'Now 18.7x–25.3x.'])
+    assert.equal(m2.dropped, 0)
+    assert.equal(m2.at, 100)
+    assert.deepEqual(mergeSources([{ source: 'x', at: 1, messages: [] }]).messages, [])
 })
 
 test('importArchived: one archived session, its rows through the timeline gate; idempotent; nothing filed the user never spoke in', async () => {
@@ -75,4 +85,16 @@ test('importArchived: one archived session, its rows through the timeline gate; 
     assert.equal((await sessions.importArchived({ userId: 'u1', source: 'thread:thr_2', messages: [{ agent: 'mentor', role: 'user', content: 'x' }] })).reason, 'already_imported')
     assert.equal((await sessions.importArchived({ userId: 'u1', source: 'thread:thr_3', messages: [{ agent: 'axl', role: 'assistant', content: 'Hello' }] })).reason, 'nothing_said')
     assert.equal((await sessions.list({ userId: 'u1' })).length, 1)
+})
+
+test('subjectSlice: a thread that went on to a second company moves from the first turn naming ITS company', async () => {
+    const { subjectSlice } = await import('../../services/migrations/unifiedChat.migration.js')
+    const zts = [{ role: 'user', content: 'Revise our coverage on ZTS.' }, { role: 'assistant', content: 'ZTS — holds.' }]
+    const regn = [{ role: 'user', content: 'Revise our coverage on REGN.' }, { role: 'assistant', content: 'REGN — 18.7x.' }]
+    assert.deepEqual(subjectSlice([...zts, ...regn], 'cov_REGN_e747afca'), regn)
+    assert.deepEqual(subjectSlice([...regn, ...zts], 'cov_REGN_e747afca'), [...regn, ...zts], 'already starts on it — whole')
+    assert.deepEqual(subjectSlice(zts, 'cov_REGN_e747afca'), zts, 'never names it — kept whole, nothing to cut on')
+    assert.equal(subjectSlice([{ role: 'user', content: 'gold first' }, { role: 'user', content: 'Long $BRK.B here' }], 'setup_BRK.B_1a').length, 1)
+    assert.equal(subjectSlice([{ role: 'user', content: 'MAREGNX is not it' }, { role: 'user', content: 'REGN' }], 'cov_REGN_x').length, 1, 'a word containing it is not it')
+    assert.deepEqual(subjectSlice([...zts, ...regn], 'scan_1786445452372'), [...zts, ...regn], 'a scan spans names — untouched')
 })

@@ -1318,6 +1318,35 @@ Idempotent, dry-run first, axl_dev before prod.
   `call` kind is kept data, see CLAUDE.md.)
 - Measure the database size before and after (512 MB cap) — migration removes duplicates, so it should shrink.
 
+### 11.1 Built (2026-10-20) — `scripts/migrate-unified-chat.mjs`, `services/migrations/unifiedChat.migration.js`
+
+What the survey changed in the plan above:
+- **`threads` STAYS** — Pythia's and Aether's panels still keep their own chats there (phase 8e, D1). Only the old
+  desk agents' threads move or go. **`portfolio_books` stays** — it is the book; only its `messages` move.
+- **A setup's `chat_state` STAYS** — it is `{ draft, coverage }`, Mentor's live worksheet, read back when the setup is
+  reopened (mentor.desk.js). Only an old `messages` transcript inside it moves.
+- **Retired desks' threads (Kairos `call`, the Idea agent, Pythia's old `tilt`) are deleted** (Roy). So are threads of
+  entities that no longer exist (most are setups from the 2026-09-24 wipe).
+- **One entity's history is merged from ALL its sources before import** (`mergeSources`): oldest first; a source that
+  is a copy of one already taken (a book's thread AND its own `messages` were usually the same chat) is left out; one
+  that extends it replaces it. **An old panel thread that went on to a second company** is cut to the part about ITS
+  company (`subjectSlice` — REGN's history opened on a ZTS revision). The old panels' "Streaming failed" placeholder
+  does not move.
+- **Backup first, restore available:** `--apply` writes every document it will change or delete to
+  `backups/unified-chat-<db>-<stamp>.json` (EJSON, git-ignored) and reads it back before writing; `--restore <file>`
+  undoes a run. Verified on a throwaway copy of axl_dev: apply → restore is IDENTICAL to the original; a re-run of
+  apply changes nothing.
+
+**axl_dev, applied 2026-10-20** (backup `unified-chat-axl_dev-2026-10-20T16-03-05-010Z.json`): 47 entity contexts
+(18 books, 24 coverage, 4 scans, 1 setup) from 52 threads + 23 fields, 18 copies left out; 73 threads deleted (48
+entity gone, 25 retired desks); idea `chat_state` unset; 51.3 → 47.3 MB.
+
+**Prod (deploy runbook, in this order):** `rename-portfolio-books.mjs` (prod still has `portfolio_chats` — the
+migration refuses until it is moved) → `migrate-unified-chat.mjs --db test` (dry run, read the report) →
+`--db test --apply --yes-not-my-db` → keep the backup file. The dead write paths (the old `/api/threads` desk routes,
+`/api/portfolio/chat-state`, Mentor's old `/generate` with `chat_state`, `scan.chat` on save) are removed in a
+follow-up — nothing live calls them (the session desks pass no `threadId`).
+
 ## 12. Phase 10 — Docs, merge, deploy
 
 - Rewrite: APP_SPEC §2 (Axl), CODE_MAP, README chat/flow diagrams, `botmarket-frontend/docs/hand-offs.md`,

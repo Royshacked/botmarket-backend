@@ -59,6 +59,49 @@ const PLACEHOLDERS = new Set(['Streaming failed'])
 const msgs = (v) => (Array.isArray(v) ? v : []).filter(m => !(m?.role === 'assistant' && PLACEHOLDERS.has(String(m?.content ?? '').trim())))
 const tally = (r, k) => { r[k] = (r[k] ?? 0) + 1 }
 
+/**
+ * The part of a thread that is about ITS company. An old panel thread could go on to a second name — revise ZTS, then
+ * REGN, in one Prometheus thread — and was linked to whichever item it produced last (axl_dev 2026-10-20: REGN's
+ * history opened on a ZTS revision, ABBV's on three WPM asks). For an entity of one company (coverage `cov_SYM_…`, a
+ * setup `setup_SYM_…`) the thread is kept from the first USER turn that names that symbol; one that never names it is
+ * kept whole — there is nothing to cut on. Pure. → the messages to move.
+ */
+export function subjectSlice(messages, entityId) {
+    const sym = (String(entityId ?? '').match(/^(?:cov|setup)_([A-Z0-9.-]+)_/) || [])[1]
+    const list = Array.isArray(messages) ? messages : []
+    if (!sym) return list
+    const named = new RegExp(`(^|[^A-Za-z0-9])\\$?${sym.replace(/[.-]/g, '\\$&')}([^A-Za-z0-9]|$)`)
+    const first = list.findIndex(m => m?.role === 'user' && named.test(String(m?.content ?? '')))
+    return first > 0 ? list.slice(first) : list
+}
+
+/**
+ * ONE entity's legacy sources → one history, oldest first. A source whose whole conversation already appears (in order)
+ * inside a source taken before it is a COPY — a book's thread and the book's own `messages` were the same chat (217
+ * repeated turns on axl_dev) — and is left out; one that EXTENDS what is taken replaces it; anything else is a separate
+ * conversation and follows in time order. Compared by role + words. Pure. → { messages, at, dropped }
+ */
+export function mergeSources(sources) {
+    const sig = (m) => `${m.role}\u0000${String(m.content ?? '').trim()}`
+    const contains = (outer, inner) => {
+        if (!inner.length) return true
+        const a = outer.map(sig).join('\u0001'), b = inner.map(sig).join('\u0001')
+        return a.includes(b)
+    }
+    const ordered = [...(sources ?? [])].sort((x, y) => (Number(x.at) || 0) - (Number(y.at) || 0))
+    const taken = []   // separate conversations, each a list of messages
+    let dropped = 0
+    for (const s of ordered) {
+        const list = (s.messages ?? []).filter(m => m && typeof m.content === 'string' && m.content.trim())
+        if (!list.length) continue
+        if (taken.some(t => contains(t, list))) { dropped++; continue }
+        const i = taken.findIndex(t => contains(list, t))
+        if (i >= 0) { taken[i] = list; dropped++ } else taken.push(list)
+    }
+    const first = ordered.find(s => (s.messages ?? []).length)
+    return { messages: taken.flat(), at: Number(first?.at) || null, dropped }
+}
+
 async function sizeMb(db) {
     const s = await db.stats()
     return { data: +(s.dataSize / 1e6).toFixed(1), storage: +(s.storageSize / 1e6).toFixed(1), index: +(s.indexSize / 1e6).toFixed(1) }
@@ -141,68 +184,83 @@ export async function migrateUnifiedChat({ db, contexts, sessions, apply = false
             : new Set()
     }
     const exists = (type, id) => ids[type]?.has(String(id)) ?? false
-    // An import that did not write is fine to clear its source for only when there was nothing to keep, or it is already in.
-    const imported = async (res, source) => {
+    // An import that did not write is fine to clear its sources for only when there was nothing to keep, or it is in.
+    const settled = (res, label) => {
         if (res.imported) return true
         tally(report.skipped, res.reason ?? 'skipped')
-        log(`skip ${source}: ${res.reason}`)
+        log(`skip ${label}: ${res.reason}`)
         return res.reason === 'already_imported' || res.reason === 'no_messages' || res.reason === 'nothing_said'
     }
 
-    // ── threads ──
+    // ── 1. Gather every legacy conversation, by the context it becomes ──
+    // One entity's history can sit in several places (its linked threads AND its own field), so each context is
+    // built from ALL its sources at once, in time order (mergeSources) — not one import per source.
+    const groups = new Map()   // context key → { key, sources: [{ source, at, messages, clear }] }
+    const add = (key, src) => {
+        const k = `${key.userId}|${key.kind}|${key.entityId}|${key.agent}`
+        if (!groups.has(k)) groups.set(k, { key, sources: [] })
+        groups.get(k).sources.push(src)
+    }
+    const threadDeletes = []   // threads to drop outright (retired desks, entities gone)
+    const drafts = []          // threads that become archived sessions
     if (names.has(THREADS)) {
         for (const t of await db.collection(THREADS).find({}).toArray()) {
             const plan = planThread(t, exists)
             tally(report.threads, plan.action === 'delete' ? `delete:${plan.why}` : plan.action)
-            if (!apply || plan.action === 'keep') continue
-            const source = `thread:${t.threadId}`
-            let done = plan.action === 'delete'
-            if (plan.action === 'context') {
-                const res = await contexts.importLegacy({ userId: t.userId, kind: plan.kind, entityId: plan.entityId, agent: plan.agent, messages: msgs(t.messages), source, at: t.updatedAt ?? t.createdAt })
-                if (res.imported) report.contexts++
-                done = await imported(res, source)
-            } else if (plan.action === 'session') {
-                const at = Number.isFinite(t.createdAt) ? t.createdAt : null
-                const res = await sessions.importArchived({
-                    userId: t.userId, title: t.title ?? null, source, createdAt: at, archivedAt: t.updatedAt ?? at,
-                    messages: msgs(t.messages).map(m => ({ agent: CHAT_DESKS.has(t.agent) ? t.agent : 'axl', role: m.role, content: m.content, at })),
+            if (plan.action === 'delete') threadDeletes.push(t.threadId)
+            else if (plan.action === 'session') drafts.push(t)
+            else if (plan.action === 'context') {
+                add({ userId: String(t.userId), kind: plan.kind, entityId: plan.entityId, agent: plan.agent }, {
+                    source: `thread:${t.threadId}`, at: t.updatedAt ?? t.createdAt ?? 0,
+                    messages: subjectSlice(msgs(t.messages), plan.entityId),
+                    clear: () => db.collection(THREADS).deleteOne({ threadId: t.threadId }),
                 })
-                if (res.imported) report.sessions++
-                done = await imported(res, source)
             }
-            // The row goes only once what it held is somewhere else (or is meant to go).
-            if (done) await db.collection(THREADS).deleteOne({ threadId: t.threadId })
         }
     }
-
-    // ── a setup's old transcript (its draft / coverage stay — Mentor's live worksheet) ──
+    // A setup's old transcript (its draft / coverage stay — Mentor's live worksheet).
     const setups = await db.collection(ENTITIES).find({ kind: 'setup', 'chat_state.messages': { $exists: true } }, { projection: { _id: 0, id: 1, userId: 1, savedAt: 1, 'chat_state.messages': 1 } }).toArray()
     report.unset['setup chat_state.messages'] = setups.length
-    for (const s of apply ? setups : []) {
-        const source = `setup:${s.id}`
-        const res = await contexts.importLegacy({ userId: s.userId, kind: 'setup', entityId: s.id, agent: 'mentor', messages: msgs(s.chat_state?.messages), source, at: s.savedAt })
-        if (res.imported) report.contexts++
-        if (await imported(res, source)) await db.collection(ENTITIES).updateOne({ id: s.id, kind: 'setup' }, { $unset: { 'chat_state.messages': '' } })
-    }
-
-    // ── a scan's chat ──
+    for (const s of setups) add({ userId: String(s.userId), kind: 'setup', entityId: s.id, agent: 'mentor' }, {
+        source: `setup:${s.id}`, at: s.savedAt ?? 0, messages: msgs(s.chat_state?.messages),
+        clear: () => db.collection(ENTITIES).updateOne({ id: s.id, kind: 'setup' }, { $unset: { 'chat_state.messages': '' } }),
+    })
+    // A scan's chat.
     const scans = names.has(SCANS) ? await db.collection(SCANS).find({ chat: { $exists: true } }, { projection: { _id: 0, id: 1, userId: 1, savedAt: 1, chat: 1 } }).toArray() : []
     report.unset['scans.chat'] = scans.length
-    for (const s of apply ? scans : []) {
-        const source = `scan:${s.id}`
-        const res = await contexts.importLegacy({ userId: s.userId, kind: 'scan', entityId: s.id, agent: 'scanner', messages: msgs(s.chat), source, at: s.savedAt })
-        if (res.imported) report.contexts++
-        if (await imported(res, source)) await db.collection(SCANS).updateOne({ id: s.id }, { $unset: { chat: '' } })
-    }
-
-    // ── a book's chat (the book — mandate, thesis, reviews, Themis — stays) ──
+    for (const s of scans) add({ userId: String(s.userId), kind: 'scan', entityId: s.id, agent: 'scanner' }, {
+        source: `scan:${s.id}`, at: s.savedAt ?? 0, messages: msgs(s.chat),
+        clear: () => db.collection(SCANS).updateOne({ id: s.id }, { $unset: { chat: '' } }),
+    })
+    // A book's chat (the book — mandate, thesis, reviews, Themis — stays).
     const books = names.has(BOOKS) ? await db.collection(BOOKS).find({ messages: { $exists: true } }, { projection: { _id: 0, portfolioId: 1, userId: 1, savedAt: 1, messages: 1 } }).toArray() : []
     report.unset['portfolio_books.messages'] = books.length
-    for (const b of apply ? books : []) {
-        const source = `book:${b.portfolioId}`
-        const res = await contexts.importLegacy({ userId: b.userId, kind: 'portfolio', entityId: b.portfolioId, agent: 'portfolio', messages: msgs(b.messages), source, at: b.savedAt })
-        if (res.imported) report.contexts++
-        if (await imported(res, source)) await db.collection(BOOKS).updateOne({ portfolioId: b.portfolioId, userId: b.userId }, { $unset: { messages: '' } })
+    for (const b of books) add({ userId: String(b.userId), kind: 'portfolio', entityId: b.portfolioId, agent: 'portfolio' }, {
+        source: `book:${b.portfolioId}`, at: b.savedAt ?? 0, messages: msgs(b.messages),
+        clear: () => db.collection(BOOKS).updateOne({ portfolioId: b.portfolioId, userId: b.userId }, { $unset: { messages: '' } }),
+    })
+    report.merged = { contexts: groups.size, sources: [...groups.values()].reduce((n, g) => n + g.sources.length, 0) }
+
+    if (apply) {
+        // ── 2. One import per context, then its sources go ──
+        for (const { key, sources } of groups.values()) {
+            const merged = mergeSources(sources)
+            const res = await contexts.importLegacy({ ...key, messages: merged.messages, sources: sources.map(s => s.source), at: merged.at })
+            if (res.imported) report.contexts++
+            if (merged.dropped) tally(report.skipped, 'copy_of_another_source')
+            if (settled(res, `${key.kind}:${key.entityId}`)) for (const s of sources) await s.clear()
+        }
+        // ── 3. Drafts → archived sessions; the rest of the threads go ──
+        for (const t of drafts) {
+            const at = Number.isFinite(t.createdAt) ? t.createdAt : null
+            const res = await sessions.importArchived({
+                userId: t.userId, title: t.title ?? null, source: `thread:${t.threadId}`, createdAt: at, archivedAt: t.updatedAt ?? at,
+                messages: msgs(t.messages).map(m => ({ agent: CHAT_DESKS.has(t.agent) ? t.agent : 'axl', role: m.role, content: m.content, at })),
+            })
+            if (res.imported) report.sessions++
+            if (settled(res, `thread:${t.threadId}`)) await db.collection(THREADS).deleteOne({ threadId: t.threadId })
+        }
+        for (const id of threadDeletes) await db.collection(THREADS).deleteOne({ threadId: id })
     }
 
     // ── the retired Idea agent's transcripts: on idea entities, and on the old `ideas` copy ──

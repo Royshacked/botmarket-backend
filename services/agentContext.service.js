@@ -73,38 +73,34 @@ export function makeAgentContextService({ getDb = _defaultGetDb } = {}) {
     /**
      * A LEGACY conversation moved onto its entity (unified-chat plan phase 9 — a linked thread, a setup's old
      * `chat_state.messages`, a scan's `chat`, a book's `messages`). It is OLDER than anything sealed here since, so it
-     * goes IN FRONT of what the context already holds. `source` names where it came from ("thread:thr_…") and is
-     * kept on the doc: a source already imported is skipped, so a migration re-run never duplicates turns.
-     *
-     * The same conversation was often stored TWICE before (a book's linked thread AND the book's own `messages`; a
-     * scan's thread AND its `chat`) — 25 of axl_dev's 75 contexts, 217 repeated turns (2026-10-20 round trip). A turn
-     * the context already holds (same role, same words) is not added again; the source is still recorded as in.
-     * @returns {Promise<{ imported: boolean, added?: number, reason?: string }>}
+     * goes IN FRONT of what the context already holds. `sources` name where it came from ("thread:thr_…", "book:p1")
+     * and are kept on the doc: when every one is already in, the import is skipped, so a migration re-run never
+     * duplicates turns. One entity's several sources are merged BEFORE this (the migration's mergeSources — a book's
+     * thread and its own messages were often the same chat), so this only prepends.
+     * @returns {Promise<{ imported: boolean, reason?: string }>}
      */
-    async function importLegacy({ userId, kind, entityId, agent, messages, source, at = null }) {
+    async function importLegacy({ userId, kind, entityId, agent, messages, sources = [], at = null }) {
         const invalid = _invalid({ userId, kind, entityId, agent })
         if (invalid) return { imported: false, reason: invalid }
-        if (!source) return { imported: false, reason: 'source is required' }
+        const from = (Array.isArray(sources) ? sources : [sources]).filter(Boolean)
+        if (!from.length) return { imported: false, reason: 'sources are required' }
         const db   = await getDb()
         const key  = _key({ userId, kind, entityId, agent })
         const prev = await db.collection(COLLECTION).findOne(key)
-        if (prev?.legacy?.includes(source)) return { imported: false, reason: 'already_imported' }
+        if (from.every(s => prev?.legacy?.includes(s))) return { imported: false, reason: 'already_imported' }
         const when = Number.isFinite(at) ? at : Date.now()
-        const held = new Set((prev?.messages ?? []).map(m => `${m.role}\u0000${m.content}`))
-        const all  = toContextMessages(messages, when)
-        if (!all.length) return { imported: false, reason: 'no_messages' }
-        const old  = all.filter(m => !held.has(`${m.role}\u0000${m.content}`))
-        const now  = Date.now()
+        const old  = toContextMessages(messages, when)
+        if (!old.length) return { imported: false, reason: 'no_messages' }
         await db.collection(COLLECTION).replaceOne(key, {
             ...key,
             messages:  capSealed([...old, ...(prev?.messages ?? [])]),
             summary:   prev?.summary ?? null,
             artifacts: prev?.artifacts ?? [],
             sealedAt:  prev?.sealedAt ?? when,
-            updatedAt: now,
-            legacy:    [...(prev?.legacy ?? []), source],
+            updatedAt: Date.now(),
+            legacy:    [...new Set([...(prev?.legacy ?? []), ...from])],
         }, { upsert: true })
-        return { imported: true, added: old.length }
+        return { imported: true }
     }
 
     /** This user's sealed context for an entity, or null. */
