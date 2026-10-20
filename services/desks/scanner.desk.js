@@ -32,7 +32,8 @@ export function scannerNextState(prev, result, prepared = {}) {
 export const scannerDesk = {
     agent: 'scanner',
     log:   '[scanner:desk]',
-    parse: (body) => ({ state: _scannerMode(body) }),
+    // No `parse`: it served the desk's own HTTP /stream route, gone with the panels (8e); a session turn hands the desk
+    // its state and input directly (phase 9 cleanup, 2026-10-20). Pythia's and Aether's desks keep theirs.
     // The session turn's radar board (the Floor's "scan the radar") — validated and capped before it reaches the prompt.
     prepareInput: (input = {}) => ({ ...input, radarBoard: _radarBoard(input.radarBoard) }),
     nextState: scannerNextState,

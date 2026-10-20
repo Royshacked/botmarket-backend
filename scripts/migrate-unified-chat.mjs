@@ -7,12 +7,17 @@
 //   node scripts/migrate-unified-chat.mjs --db test       # another database by name (dry run)
 //   node scripts/migrate-unified-chat.mjs --db test --apply --yes-not-my-db
 //   node scripts/migrate-unified-chat.mjs --restore backups/unified-chat-axl_dev-<stamp>.json   # undo an apply
+//   --live-ok                                            # apply although the app is in use (see below)
 //
 // BACKUP FIRST (Roy, 2026-10-20): --apply writes every document it will change or delete to
 // backups/unified-chat-<db>-<stamp>.json (EJSON — ids and types survive), reads it back, and only then writes.
 // Idempotent: a re-run skips what is already moved. Order on prod (the deploy runbook): rename-portfolio-books.mjs
 // FIRST — this script refuses while `portfolio_chats` still holds the books — then a dry run, then --apply.
 // Writing to a database other than this process's own needs --yes-not-my-db, said out loud.
+//
+// NOT WHILE THE APP IS IN USE: --apply refuses when a session message was written in the last 10 minutes (only the
+// unified chat writes them) — a user's chat sealing onto an item mid-import would be lost. On prod it runs BEFORE the
+// new code takes traffic. --restore takes off exactly what a run added and keeps anything sealed since.
 
 import dns from 'node:dns'
 import fs from 'node:fs'
@@ -70,7 +75,7 @@ async function run() {
     const sessions = makeSessionService({ getDb: getThis, events: silentEvents })
     await contexts.ensureIndexes()
     console.log(`[migrate-unified-chat] db=${db.databaseName} ${apply ? 'APPLY' : 'DRY RUN'}`)
-    const report = await migrateUnifiedChat({ db, contexts, sessions, apply, backup: writeBackup, log: (l) => console.log(`  ${l}`) })
+    const report = await migrateUnifiedChat({ db, contexts, sessions, apply, backup: writeBackup, liveOk: flag('--live-ok'), log: (l) => console.log(`  ${l}`) })
     console.log(JSON.stringify(report, null, 2))
 }
 

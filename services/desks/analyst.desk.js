@@ -64,7 +64,8 @@ export function analystNextState(prev, result, input = {}) {
 export const analystDesk = {
     agent: 'analyst',
     log:   LOG,
-    parse: (body, turn) => ({ state: turn.chatState ?? {}, input: { seed: sanitizeScanSeed(body.seed) } }),
+    // No `parse`: it served the desk's own HTTP /stream route, gone with the panels (8e); a session turn hands the desk
+    // its state and input directly (phase 9 cleanup, 2026-10-20). Pythia's and Aether's desks keep theirs.
     prepareInput: (input = {}) => ({ ...input, seed: sanitizeScanSeed(input.seed) }),
     nextState: analystNextState,
     // Unsealed work: a coverage draft.

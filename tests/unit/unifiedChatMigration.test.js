@@ -98,3 +98,37 @@ test('subjectSlice: a thread that went on to a second company moves from the fir
     assert.equal(subjectSlice([{ role: 'user', content: 'MAREGNX is not it' }, { role: 'user', content: 'REGN' }], 'cov_REGN_x').length, 1, 'a word containing it is not it')
     assert.deepEqual(subjectSlice([...zts, ...regn], 'scan_1786445452372'), [...zts, ...regn], 'a scan spans names — untouched')
 })
+
+test('mergeSources: only WHOLE messages match — "yes" alone is not a copy of "yes please, go" (2026-10-20 review)', async () => {
+    const { mergeSources } = await import('../../services/migrations/unifiedChat.migration.js')
+    const ask = (t) => ({ role: 'user', content: t }), say = (t) => ({ role: 'assistant', content: t })
+    const r = mergeSources([{ source: 'a', at: 1, messages: [ask('yes please, go'), say('Done.')] }, { source: 'b', at: 2, messages: [ask('yes')] }])
+    assert.deepEqual(r.messages.map(m => m.content), ['yes please, go', 'Done.', 'yes'])
+    assert.equal(r.dropped, 0)
+})
+
+test('importLegacy counts what it put in FRONT — after the cap drops the oldest', async () => {
+    const { db } = memDb()
+    const ctx = makeAgentContextService({ getDb: async () => db })
+    await ctx.seal({ userId: 'u1', kind: 'scan', entityId: 'sc1', agent: 'scanner', messages: [{ role: 'user', content: 'sealed' }] })
+    await ctx.importLegacy({ userId: 'u1', kind: 'scan', entityId: 'sc1', agent: 'scanner', sources: ['x'], messages: Array.from({ length: 3 }, (_, i) => ({ role: 'user', content: `old ${i}` })) })
+    assert.equal((await ctx.load({ userId: 'u1', kind: 'scan', entityId: 'sc1', agent: 'scanner' })).legacyAdded, 3)
+    // 250 more in front: the cap keeps 200, all but the one sealed message are legacy.
+    await ctx.importLegacy({ userId: 'u1', kind: 'scan', entityId: 'sc1', agent: 'scanner', sources: ['y'], messages: Array.from({ length: 250 }, (_, i) => ({ role: 'user', content: `older ${i}` })) })
+    const doc = await ctx.load({ userId: 'u1', kind: 'scan', entityId: 'sc1', agent: 'scanner' })
+    assert.equal(doc.messages.length, 200)
+    assert.equal(doc.legacyAdded, 199)
+    assert.equal(doc.messages.at(-1).content, 'sealed')
+})
+
+test('a live seal after the migration keeps the record of what the migration added (so a restore can still tell)', async () => {
+    const { db } = memDb()
+    const ctx = makeAgentContextService({ getDb: async () => db })
+    await ctx.importLegacy({ userId: 'u1', kind: 'portfolio', entityId: 'p1', agent: 'portfolio', sources: ['book:p1'], messages: [{ role: 'user', content: 'old' }, { role: 'assistant', content: 'older answer' }] })
+    await ctx.seal({ userId: 'u1', kind: 'portfolio', entityId: 'p1', agent: 'portfolio', messages: [{ role: 'user', content: 'new turn' }] })
+    const doc = await ctx.load({ userId: 'u1', kind: 'portfolio', entityId: 'p1', agent: 'portfolio' })
+    assert.deepEqual([doc.legacy, doc.legacyAdded, doc.messages.length], [['book:p1'], 2, 3])
+    // A context never migrated carries no such record.
+    await ctx.seal({ userId: 'u1', kind: 'setup', entityId: 's1', agent: 'mentor', messages: [{ role: 'user', content: 'x' }] })
+    assert.equal((await ctx.load({ userId: 'u1', kind: 'setup', entityId: 's1', agent: 'mentor' })).legacy, undefined)
+})

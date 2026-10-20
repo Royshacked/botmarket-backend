@@ -7,7 +7,6 @@
 import { portfolioAgentService } from '../agents/portfolio.agent.service.js'
 import { portfolioChatService } from '../../api/portfolio/portfolioChat.service.js'
 import { adoptBookService } from '../../api/portfolio/adoptBook.service.js'
-import { parseIdeaAccounts } from '../../api/_shared/parse.util.js'
 import { refreshCoverage } from '../coverageRefresh.service.js'
 import { researchQueueService } from '../researchQueue.service.js'
 import { sourceSleeve } from '../sleeveSource.service.js'
@@ -85,24 +84,8 @@ export const portfolioDesk = {
         if (kept.pendingPlan || kept.reviewUpdate) return keepMarkers({ ...kept, adopt: true }, prev)
         return { ...portfolioNextState(null, null), adopt: true, adoptDraftId: kept.adoptDraftId }
     },
-    // `portfolioIdeas` is still SENT by the client and deliberately not read: the book Atlas sees is
-    // read from the database (portfolioState), not from the list the client happened to be holding.
-    // See _buildPortfolioStateSection — an empty client list is what made Atlas invent item ids.
-    //
-    // Atlas's accounts arrive as `ideaAccounts`, not the shared `accounts` (the client's field name for
-    // this desk). Read here until the unified client sends one shape (unified-chat plan phase 7).
-    parse: (body, turn) => ({
-        state: {
-            portfolioId:  body.portfolioId ?? null,
-            reviewMode:   body.reviewMode === true,
-            mandate:      body.mandate && typeof body.mandate === 'object' ? body.mandate : null,
-            adoptDraftId: body.adoptDraftId ? String(body.adoptDraftId) : null,
-        },
-        input: {
-            accounts:      parseIdeaAccounts(body.ideaAccounts),
-            mainAccountId: turn.mainAccountId,
-        },
-    }),
+    // No `parse`: it served the desk's own HTTP /stream route, gone with the panels (8e); a session turn hands the desk
+    // its state and input directly (phase 9 cleanup, 2026-10-20). Pythia's and Aether's desks keep theirs.
     run: async ({ user, state, input, signal, emit, common, sessionId = null }) => {
         const { messages } = common
         const { portfolioId = null, reviewMode: isReviewMode = false, mandate: bodyMandate = null, adoptDraftId = null } = state ?? {}
