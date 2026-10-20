@@ -1,5 +1,11 @@
 # The pipeline service — one conveyor, artifacts between desks
 
+> **SUPERSEDED (unified chat, 2026-10-17 → 10-20).** The conveyor this designs ran in the FRONTEND; it was moved onto
+> the server as the session's CHAIN (`services/chain/` — rules, contracts, runner; unified-chat plan phase 5) and the
+> client pipeline was deleted (phase 8d–8e). The artifact kinds and the per-desk contracts carried over. This file is
+> the record of the design and why; `docs/design/unified-chat.md` and `unified-chat-plan.md` are the current ones.
+
+
 **Status: BUILT 2026-08-04 → 08-19, in the frontend** — `botmarket-frontend/src/services/pipeline/`:
 `artifact.js` (the envelope, keyed by `kind`: `scan_request` · `mandate` · `candidate_list` ·
 `coverage_set`; `filled | empty | partial`), `contracts.js` (each desk declares what it emits and

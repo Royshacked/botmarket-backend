@@ -1080,8 +1080,8 @@ because the chat pipe imports the Axl agent, whose tools read the setups list �
 blueprint to `POST /api/setups/blueprint`, which hydrates it through the SAME `normalizeSetup` +
 `setupReadiness` a Mentor turn uses and reports `problems` (levels that could not be read, an
 unknown lens, a blueprint from a newer app — the last one refuses the open). The draft lands in the
-recipient's Mentor as a **fresh thread** (`chatRestore.freshThread`, so it never persists over the
-build that was open — which stays resumable), in the recipient's own workspace with their own
+recipient's Mentor as a **fresh plan** on the session (a hand edit `{ draft, fresh: true }` — Mentor's markers are
+cleared, so it is never an edit of a setup the user had open; work Mentor holds is asked about first), in the recipient's own workspace with their own
 marked accounts (a blueprint carries no `mode`, so `alignWorkspaceTo` is not called), and ON A TURN
 (`sharedAsk.js`): *"Roy shared this NVDA long plan with me — their note: … It was drawn with NVDA
 at 187.5. Read it against the tape now … then help me size it."* Mentor reads, the recipient sizes,

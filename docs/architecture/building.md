@@ -37,10 +37,7 @@ Every desk streams over Server-Sent Events; every router applies `requireAuth` +
 | Agent | Route file | Endpoint | Controller |
 |---|---|---|---|
 | Axl | `api/sessions/sessions.routes.js` | `POST /api/sessions/:id/turn` (session only — unified chat phase 7) | `postSessionTurn` → `services/desks/axl.desk.js` |
-| Mentor | `api/mentor/mentor.routes.js` | `POST /api/mentor/stream` | `streamMentor` |
-| Portfolio | `api/portfolio/portfolio.routes.js` | `POST /api/portfolio/stream` | `streamPortfolio` |
-| Scanner | `api/scanner/scanner.routes.js` | `POST /api/scanner/stream` | `streamScanner` |
-| Analyst | `api/analyst/analyst.routes.js` | `POST /api/analyst/stream` | `streamAnalyst` |
+| Mentor · Atlas · Argus · Prometheus | `api/sessions/sessions.routes.js` | `POST /api/sessions/:id/turn` — the desk on the floor answers (their own `/stream` routes went in unified-chat 8e) | `postSessionTurn` → `services/desks/<agent>.desk.js` |
 | Strategy | `api/strategy/strategy.routes.js` | `POST /api/strategy/stream` | `streamStrategy` |
 
 **SSE mechanism** — `api/_shared/sse.util.js` `startSseStream(req, res)` sets
@@ -268,14 +265,14 @@ finalization: the model proposes, the server computes the numbers that matter.
 
 Orchestrated by `pages/MainPage.jsx`.
 
-| Agent | Panel | Generate handler |
+| Agent | Surface (side pane) | Generate |
 |---|---|---|
-| Portfolio | `cmps/PortfolioPanel/PortfolioPanel.jsx` | `handleGeneratePlan` → `POST /api/trade-ideas/batch` |
-| Scanner | `cmps/ScannerPanel/ScannerPanel.jsx` → `cmps/Radar/*` | `handleGenerateList` → scan CRUD |
-| Analyst | `cmps/AnalystPanel/*` | coverage CRUD (`POST /api/analyst/coverage`) |
+| Mentor | `cmps/MentorSurface/MentorSurface.jsx` | a session commit → `services/desks/actions/mentor.actions.js` |
+| Atlas | `cmps/PortfolioSurface/PortfolioSurface.jsx` | a session commit → `portfolio.actions.js` → `portfolioCommit.createBook` |
+| Argus | `cmps/ScannerSurface/ScannerSurface.jsx` → `cmps/Radar/*` | a session commit → `scanner.actions.js` → scan CRUD |
+| Prometheus | `cmps/AnalystSurface/AnalystSurface.jsx` | a session commit → `analyst.actions.js` → coverage CRUD |
 
-A desk's live emit block drives its Generate button. (The `__building__` preview row in the ideas
-list belonged to the archived idea chat and went with it, 2026-10-16.) Emitted/saved items surface in `cmps/TradeIdeas/*`
+The desk's working state on the session drives its Generate button (`POST /api/sessions/:id/act`). Emitted/saved items surface in `cmps/TradeIdeas/*`
 (`TradeIdeasList`, the shared `EntityCard` shell with its status dropdown — every kind's card is
 built on it — `IdeaDetail`, `ConditionTree` renders the AND/OR tree). Dialogs: **OrderConfirmDialog** (idea hit → order plan), **PreEntryDialog**
 (arm-time already-satisfied), plus Delete/ClosePosition/EditOrders dialogs.

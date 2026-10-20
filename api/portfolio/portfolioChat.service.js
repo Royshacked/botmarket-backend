@@ -3,8 +3,6 @@ import { LIVE_POSITION } from '../../services/entity/vocabulary.js'
 import { ENTITIES }         from '../../services/entity/entityCollection.js'
 import { logger }  from '../../services/logger.service.js'
 import { getPortfolioStateCached } from '../../services/portfolioState.service.js'
-import { threadService } from '../../services/thread.service.js'
-import { isSubstantive } from '../../services/thread.util.js'
 import { buildFingerprint, benchmarkTicker, computeReviewDelta, computeReviewTriggers } from '../../services/portfolioReview.util.js'
 import { getMacroRaw } from '../../providers/fmp.provider.js'
 import { getFmpQuote } from '../../providers/fmp.price.provider.js'
@@ -19,8 +17,9 @@ const LOG        = '[portfolioChat]'
 //
 // `portfolio_books`, renamed from `portfolio_chats` 2026-10-16 (unified-chat plan §1 q3): the document
 // is the BOOK — lifecycle, mandate, thesis, reviews, fingerprint, Themis state. Its chat half (`messages`)
-// leaves for the session store when the frontend moves (plan phases 7–8). An existing database is
-// renamed once by scripts/rename-portfolio-books.mjs.
+// is gone: Atlas's conversation is sealed onto the book (agent_contexts), and the old ones were moved there by
+// scripts/migrate-unified-chat.mjs (phase 9, 2026-10-20). An existing database is renamed once by
+// scripts/rename-portfolio-books.mjs.
 export const COLLECTION = 'portfolio_books'
 
 /** Every read and write here is keyed { portfolioId, userId } — one book per portfolio per user. */
@@ -40,7 +39,7 @@ export const CADENCE_MS = { weekly: 7 * 86400000, monthly: 30 * 86400000, quarte
 /**
  * What a book with NO stated cadence is reviewed on.
  *
- * There were three answers to this in one file. `saveChatState`'s $setOnInsert seeded 'weekly',
+ * There were three answers to this in one file. `recordBook`'s $setOnInsert seeded 'weekly',
  * `completeReview` and the due readers fell back to 'weekly', and `getPortfolioLifecycle` — the read
  * Atlas renders its lifecycle block from — fell back to 'monthly'. So a book whose document has no
  * cadence was TOLD it was monthly and BOOKED in a week. The display has to agree with the clock, and
@@ -55,7 +54,7 @@ export const DEFAULT_CADENCE = 'weekly'
 export const cadenceMs = (cadence) => CADENCE_MS[cadence] ?? CADENCE_MS[DEFAULT_CADENCE]
 
 export const portfolioChatService = {
-    saveChatState,
+    recordBook,
     getChatState,
     deleteChatState,
     getPortfolioLifecycle,
@@ -71,16 +70,15 @@ export const portfolioChatService = {
     getPendingThemisChecks,
     loadStreamContext,
     persistStreamOutcome,
-    persistStoppedTurn,
 }
 
 /**
  * Assemble the per-turn context the portfolio agent needs and resolve the effective mandate,
- * which is carried forward across turns: a fresh body mandate wins, then the draft-thread
- * mandate (so first-time construction survives a reload), then the stored one (edit/review).
+ * which is carried forward across turns: a fresh body mandate wins, then the stored one (edit/review). A
+ * construction in progress keeps its mandate in Atlas's state on the session, not in a draft thread (phase 9).
  * Every fetch is best-effort. Returns { portfolioState, lifecycle, mandate, statedMandate, storedThesis }.
  */
-async function loadStreamContext({ userId, portfolioId, threadId, isReviewMode, bodyMandate }) {
+async function loadStreamContext({ userId, portfolioId, isReviewMode, bodyMandate }) {
     const [portfolioState, lifecycle, storedMandate, storedThesis] = await Promise.all([
         // Position/P&L + workspace state is loaded whenever an EXISTING portfolio is open — a
         // scheduled review OR a normal update/edit — so Atlas can always see the live book it's
@@ -93,18 +91,12 @@ async function loadStreamContext({ userId, portfolioId, threadId, isReviewMode, 
         portfolioId ? getThesis(portfolioId, userId).catch(() => null) : Promise.resolve(null),
     ])
 
-    const draftThread = (!portfolioId && threadId)
-        ? await threadService.getThread({ threadId, userId }).catch(() => null)
-        : null
-
     // ONE mandate now. `statedMandate` is what the user established WITH ATLAS, and it is also what
     // the prompt reads — the pair existed because a mandate could also be DERIVED from the intake
-    // objective, and a derived one had to be kept out of `statedMandate`: `isSubstantive` gates a
-    // construction draft thread on `mandateReady`, so folding it in would persist a draft the moment
-    // someone with an open goal opened Atlas. The objective is gone (2026-08-05) and what arrives now
-    // is the user's own opening message, which Atlas reads as a message and answers in Phase 1.
+    // objective, which is gone (2026-08-05): what arrives now is the user's own opening message, which
+    // Atlas reads as a message and answers in Phase 1.
     // `mandate` is kept as a separate name because every caller and the prompt block use it.
-    const statedMandate = bodyMandate ?? draftThread?.mandate ?? storedMandate
+    const statedMandate = bodyMandate ?? storedMandate
     const mandate = statedMandate
 
     // In review mode, resolve the review-window delta (benchmark-relative return + regime shift)
@@ -181,12 +173,12 @@ async function buildReviewDelta(fingerprint, state) {
 }
 
 /**
- * Fire-and-forget persistence after a portfolio stream turn: persist an emitted mandate (edit),
- * a captured thesis (construction/edit only — in review mode a thesis change persists only on
- * accepted rebalance), and, during first-time construction, refresh the draft thread once the
- * mandate floor is crossed. The caller gates this on the client still listening (!aborted).
+ * Fire-and-forget persistence after a portfolio stream turn: persist an emitted mandate (edit), and a captured
+ * thesis (construction/edit only — in review mode a thesis change persists only on accepted rebalance). The
+ * conversation itself is the session's (unified chat); the old draft-thread write went in phase 9. The caller
+ * gates this on the client still listening (!aborted).
  */
-function persistStreamOutcome({ userId, portfolioId, threadId, isReviewMode, messages, mandate, storedThesis, result, pipeline = null }) {
+function persistStreamOutcome({ userId, portfolioId, isReviewMode, mandate, storedThesis, result }) {
     if (result.mandate && portfolioId) {
         setMandate(portfolioId, userId, result.mandate)
             .then(r => { if (!r.ok) logger.warn(LOG, 'setMandate returned not-ok, mandate may not be persisted') })
@@ -196,53 +188,17 @@ function persistStreamOutcome({ userId, portfolioId, threadId, isReviewMode, mes
         setThesis(portfolioId, userId, result.thesis, storedThesis ? 'mandate-edit' : 'construction')
             .catch(err => logger.warn(LOG, 'setThesis unexpected error', err))
     }
-    const knownMandate = result.mandate ?? mandate
-    if (!portfolioId && threadId && isSubstantive({ agent: 'portfolio', phase: result.phase, mandateReady: !!knownMandate })) {
-        const draftMessages = [...messages, { role: 'assistant', content: result.reply }]
-        threadService.saveDraft({
-            threadId, userId, agent: 'portfolio',
-            messages: draftMessages, phase: result.phase ?? null,
-            subjectType: 'portfolio', mandate: knownMandate ?? null,
-            // The desk, so an unfinished build can be told apart from a standalone chat at the same
-            // agent — see thread.service.saveDraft.
-            pipeline,
-        }).catch(err => logger.warn(LOG, 'construction saveDraft failed', err))
-    }
 }
 
 /**
- * THE TURN ANSWERED NOTHING — the user stopped it, or walked out mid-stream — and the conversation
- * they are looking at still exists. Persist it anyway.
- *
- * Atlas is the one desk whose draft is written HERE rather than by its panel, so it needs the rule
- * stated on this side too (the other five get it from useChatStream's `onStopped`). Without it the
- * abort gate above dropped the build outright: the hub's badge had nothing to read, the lock had
- * nothing to close, and the chat the user came back to was React state behind a hidden tab.
- *
- * What is saved is the messages AS SENT — the user's turn and the completed ones before it. No
- * assistant turn is appended, because none arrived, and an empty one would come back on resume as a
- * reply Atlas never gave.
- *
- * `phase` is the last one this turn actually emitted, not a guess at where it was heading: the
- * substantive floor reads it. Below the floor this writes nothing, exactly as a completed turn below
- * it writes nothing.
+ * A new book's document — its lifecycle defaults (on first write) and the mandate the user established with Atlas.
+ * It was `saveChatState` and wrote the old panel's `messages` too; the conversation is sealed onto the book now
+ * (agent_contexts), so nothing here writes it (phase 9, 2026-10-20 — a new book was still getting `messages: []`).
  */
-function persistStoppedTurn({ userId, threadId, portfolioId, messages, mandate, phase = null, pipeline = null }) {
-    // Same gate as the construction branch of persistStreamOutcome: an EDIT writes its conversation
-    // back onto the book it is editing, so a draft of it would be a second copy.
-    if (portfolioId || !threadId) return
-    if (!isSubstantive({ agent: 'portfolio', phase, mandateReady: !!mandate })) return
-    threadService.saveDraft({
-        threadId, userId, agent: 'portfolio',
-        messages: Array.isArray(messages) ? messages : [],
-        phase: phase ?? null, subjectType: 'portfolio', mandate: mandate ?? null, pipeline,
-    }).catch(err => logger.warn(LOG, 'stopped-turn saveDraft failed', err))
-}
-
-async function saveChatState(portfolioId, messages, userId, mandate = null) {
+async function recordBook(portfolioId, userId, mandate = null) {
     try {
         const db = await getDb()
-        const setFields = { portfolioId, messages, userId, savedAt: Date.now() }
+        const setFields = { portfolioId, userId, savedAt: Date.now() }
         if (mandate && typeof mandate === 'object') setFields.mandate = mandate
         await db.collection(COLLECTION).findOneAndUpdate(
             { portfolioId, userId },
@@ -258,10 +214,10 @@ async function saveChatState(portfolioId, messages, userId, mandate = null) {
             },
             { upsert: true }
         )
-        logger.info(LOG, 'Chat state saved', { portfolioId })
+        logger.info(LOG, 'Book recorded', { portfolioId })
         return { ok: true }
     } catch (err) {
-        logger.error(LOG, 'Failed to save chat state', err)
+        logger.error(LOG, 'Failed to record the book', err)
         return { ok: false }
     }
 }

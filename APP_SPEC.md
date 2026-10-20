@@ -292,17 +292,23 @@ Axl (the first voice of the session — `POST /api/sessions/:id/turn`) is where 
 them over with one of three tags, and they are different acts: a route names a **desk**, an edit names
 a **document**, a show names a **page to read**.
 
-- `<route>desk SYMBOL</route>` — NEW work. The desk opens at its `entryTab`, on that name.
-- `<open>…</open>` — the desk's FIRST TURN, in the user's own words, sent on arrival as their own
-  message. Rides with a route (never with an edit, which resumes a conversation that already exists).
-  This is the whole hand-off: Axl works out only what decides WHERE — one position or several, do
-  they have a name — and everything else the user said travels as a sentence. Risk, horizon,
+- `<route>desk SYMBOL</route>` — NEW work. The FLOOR moves to that desk's agent, in the same session
+  timeline (the unified chat — one chat, every desk). **Every single trade starts at Mentor** (2026-10-19):
+  `assist`, and the legacy `trade` key lands there too; Mentor asks whether the user has a name or a setup
+  and routes to Argus only when they have none — a route FROM Mentor TO Argus presets Argus to find ONE
+  name and hand it back (`handBackOf`).
+- `<open>…</open>` — the desk's FIRST TURN, in the user's own words, run as soon as the floor moves.
+  Rides with a route (never with an edit, which resumes a conversation that already exists). A route
+  from Axl with no `<open>` carries the user's own message instead (`ownWords`), so the desk always
+  speaks first. This is the whole hand-off: Axl works out only what decides WHERE — one position or
+  several — and everything else the user said travels as a sentence. Risk, horizon,
   constraints and benchmark are the receiving desk's own first phase, and asking at reception means
   answering twice. Replaced the `objectives` record (2026-08-05), which carried the job as structured
   fields, outlived the job it described, and reached every desk as "already established".
-- `<edit>kind ID</edit>` — reopen something they ALREADY have, in the editor that owns it, with the
-  conversation that built it restored. Same destination as the list-surface pencil, by design: an
-  edit reached from a sentence and an edit reached from a click are one edit.
+- `<edit>kind ID</edit>` — reopen something they ALREADY have, IN THE LIVE CHAT: its desk takes the floor
+  with the conversation that built it loaded (the entity's sealed context, `agent_contexts`) and its work
+  drawn in the side pane. Same destination as the list-surface pencil, by design: an edit reached from a
+  sentence and an edit reached from a click are one edit.
 - `<show>setup ID</show>` (2026-09-25) — open that setup's own DETAIL page: the chart
   with its levels drawn, the plan, the monitor's journal, the positions it holds. **It changes
   nothing**, which is what separates it from an edit — "what's going on with my NVDA setup" is a
@@ -313,11 +319,15 @@ a **document**, a show names a **page to read**.
   `window.open`, which outside a click is what a pop-up blocker exists to stop — and opens it through
   the ONE opener, so it lands on the pop-out window on a desktop and on the in-app full-screen page
   on a phone (§ *The detail surface*). One of the three per turn: a hand-off outranks a look, and the
-  capture enforces that rather than the prompt. `SHOW_KINDS` is **setup alone**: the `idea` kind is
-  alive and central — it is the execution tier and a holding IS an idea document — but nothing an
-  agent reads ever names one (`get_watched_items` lists setups, books, coverage, scans, queued and
-  Aether; positions carry no entity id), and a kind a model cannot quote is a tag it can only emit
-  wrong. The CLIENT still opens idea pages on a click — a different list for a different question.
+  capture enforces that rather than the prompt. `SHOW_KINDS` holds ONE item kind, `setup`, and three
+  SCREENS whose ref is optional: `ticket` (the order ticket, on a symbol), `heatmap` (Pythia's forecast heat
+  map, on a company's industry when a symbol rides along) and `calendar` (the month of earnings, Fed days
+  and IPOs) — the last two open BY THEMSELVES as the reply ends (Roy, 2026-10-19), the row keeping a button
+  to open them again. The `idea` kind is alive and central — it is the execution tier and a holding IS an
+  idea document — but nothing an agent reads ever names one (`get_watched_items` lists setups, books,
+  coverage, scans, queued and Aether; positions carry no entity id), and a kind a model cannot quote is a
+  tag it can only emit wrong. The CLIENT still opens idea pages on a click — a different list for a
+  different question.
 - `<suggest>…</suggest>` — up to three follow-up questions the user can send with one click, offered
   as chips under the reply. They ride INSIDE the reply already streaming (no second model call, so no
   added latency), and `services/suggestions.service.js` owns the wire format — the tag, the capture,
@@ -336,24 +346,27 @@ a **document**, a show names a **page to read**.
 | `scan` | scan | Argus, list primed for refining |
 | `portfolio` | portfolio | Atlas — **edit or review, decided by the book** (§3) |
 
-`kind → desk` resolves server-side (`EDIT_KIND_DESKS`), so the client is told which pipeline it is
-arriving at and the crumb reads like any other arrival. The controller drops an unknown kind or a
+`kind → desk` resolves server-side (`EDIT_KIND_DESKS`). The controller drops an unknown kind or a
 malformed handle and the turn falls back to a plain reply — the same discipline as the desk gate.
 
 The handle is the item's **id**, surfaced by `get_watched_items`, whose every row leads with
 `[kind:id]`. A bare ticker (or a one-word book name) also resolves, but **only when it matches
-exactly one item** — on two live NVDA calls a ticker is a coin flip, and losing it means editing a
-different trade than the user meant, so ambiguity opens nothing. Resolution runs against the lists
-the client already holds, which is also the authorization: a ref that isn't in the user's own list is
-inert. And an edit carries no `<open>` — the document arrives with its own conversation attached.
+exactly one item** — on two live NVDA setups a ticker is a coin flip, and losing it means editing a
+different trade than the user meant, so ambiguity opens nothing. Resolution runs on the SERVER through
+the owner-scoped lookup (`services/desks/entityLookup.js`), which is also the authorization: a ref that
+isn't the user's own is inert. A desk holding other unsaved work asks first (set it aside, or keep
+working). And an edit carries no `<open>` — the document arrives with its own conversation attached.
 
 ---
 
 ## 3. Portfolios
 
-Authored by the **Portfolio Agent** (`POST /api/portfolio/stream`), which emits a
+Authored by the **Portfolio Agent** ("Atlas", a session turn — `POST /api/sessions/:id/turn` with Atlas on the floor), which emits a
 `<portfolio_plan>` sized server-side (`_sizePlan`: allocation ratios → live prices → quantities).
-Saved as one idea per asset linked by `portfolioId` via `POST /api/trade-ideas/batch`.
+Saved as one idea per asset linked by `portfolioId` when the user presses Generate — the session's commit
+(`POST /api/sessions/:id/act`) through `portfolioCommit.createBook`, the same service `POST /api/trade-ideas/batch` uses.
+A book is built on GICS **sub-industry sleeves** from the house's industries for the mandate's horizon (no sector
+rotation) — `docs/design/atlas-industry-sleeves.md`.
 
 - Portfolio ideas start `waiting` with no entry conditions and carry `allocationRatio`.
 - **Data tools (FMP Starter):** beyond quotes/risk/correlation, Atlas grounds decisions in `screen_candidates`
@@ -416,7 +429,7 @@ Saved as one idea per asset linked by `portfolioId` via `POST /api/trade-ideas/b
 
 ## 4. Scans
 
-The **Scanner Agent** ("Argus", `POST /api/scanner/stream`) emits a `<scan_list>` (normalized:
+The **Scanner Agent** ("Argus", a session turn with Argus on the floor) emits a `<scan_list>` (normalized:
 uppercased tickers, guaranteed period/thesis/direction/signals). A scan is a watchlist of
 candidates (`{ ticker, direction, thesis, analysis, signals, conviction, sources }`), not ideas.
 CRUD at `/api/scanner/scans` (`PUT` to update). A user promotes a candidate into **Mentor**, where
@@ -670,12 +683,12 @@ the Nasdaq-100 as the **US100 cash CFD**, but levels are read off the **NQ futur
   agent's substantive floor — `thread.util.isSubstantive` over the agent's *emitted phase*, not
   content → never saved), **draft** (`saveDraft`; TTL-expired via `expiresAt` + LRU-capped per user),
   **linked** (`linkToArtifact` stamps `subjectId` to the generated idea/portfolio/scan and clears the
-  TTL). Portfolio drafts persist server-side inline; idea/scanner drive drafts client-side through
-  `/api/threads` (their server never holds the full conversation). Fixes the mandate re-send hack —
-  construction state is durable before the artifact exists.
-- Portfolio legacy chat state (`portfolio_chats`) still persists per portfolio for post-create edit
-  restore. The scanner's (`scanner_chats`) lost its routes 2026-10-16 — nothing called them; the
-  collection waits for the unified-chat migration (`docs/design/unified-chat-plan.md`).
+  TTL). Since the unified chat (phase 9, 2026-10-20) only Pythia's and Aether's panels write threads, client-side
+  through `/api/threads`; every other desk talks in the session, and its old threads were moved onto the entities
+  they produced (`agent_contexts`, scripts/migrate-unified-chat.mjs).
+- A book's document (`portfolio_books`, renamed from `portfolio_chats`) holds the BOOK — lifecycle, mandate, thesis,
+  reviews, Themis state — and no chat since phase 9: Atlas's conversation is sealed onto the book (`agent_contexts`).
+  `scanner_chats` never existed on axl_dev or prod by the time the migration ran.
 
 ---
 

@@ -1,4 +1,11 @@
-# The trade pipeline — Argus → Mentor → Talos
+# The trade pipeline — Mentor (→ Argus → Mentor) → Talos
+
+> **EVERY TRADE STARTS AT MENTOR (Roy, 2026-10-19).** "I want to talk to the trader" landed on Argus: Axl read it as
+> the `trade` route, which ENTERED at Argus. Now every single trade routes to Mentor (`assist`; `trade` lands there
+> too). Mentor asks whether the user has a name or a setup; with none it offers Argus and routes `scan` — and a route
+> FROM Mentor TO Argus presets Argus to find ONE name and hand it back (`handBackOf`, services/desks/registry.js). The
+> pick rides the chain back to Mentor, who builds; Generate ends the session. All of it is one chat (the unified
+> chat): the floor moves, the user never changes screen. Live-run end to end on 2026-10-19 (SCCO).
 
 How a single asset becomes a monitored trade. One path, three desks, one entity kind (`setup`), one
 monitor (Talos).
@@ -20,7 +27,7 @@ Design record, 2026-08-09. Nothing here is built yet except where marked **BUILT
 
 | | state |
 |---|---|
-| Argus → Mentor → Talos | the live path going forward |
+| Mentor (→ Argus → Mentor) → Talos | the live path — every trade starts at Mentor (2026-10-19) |
 | Kairos + Hermes | **ARCHIVED 2026-08-18** — under `archive/`, imported by nothing |
 | Argus → Mentor handoff | **BUILT 2026-08-10** — backend seed + lens recommendation, FE wired end to end |
 | Trading Desk steps | **REWIRED 2026-08-10** — build step is Mentor, not Kairos (`agentMeta.jsx`) |
@@ -32,11 +39,9 @@ used for legacy tree-`idea`s. Nothing in flight migrates. See
 [kairos-hermes.md](../../archive/docs/kairos-hermes.md), which moved to `archive/` with the desk on
 2026-08-18, for what that path was.
 
-**One capability was dropped, deliberately.** Kairos emitted `<scan_request>` — "let's look for
-another name" — which walked the desk BACKWARDS to Argus. Mentor emits nothing, so on the trading
-desk that hop is now reachable but unused: the route still resolves, there is simply no sender. The
-user re-enters the scan by hand instead. Recorded in `deskSteps.test.jsx` rather than deleted,
-because the premium autonomous Mentor mode is the natural place for it to come back.
+**One capability was dropped, then came back as a route.** Kairos emitted ~~`<scan_request>`~~ — "let's look for
+another name" — which walked the desk BACKWARDS to Argus. Mentor emitted nothing for a while; since 2026-10-19 it
+routes `scan` itself when the user has no name, and Argus hands ONE name back (above).
 
 ---
 

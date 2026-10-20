@@ -6,3 +6,8 @@
 // repoints entityRepo + the CRUD + the portfolio/monitor readers to this constant.
 
 export const ENTITIES = 'entities'
+
+// The PRE-cutover copy: the P2 cutover copied `ideas` into `entities` and left the old collection behind. Nothing
+// reads it; the unified-chat migration (phase 9) unsets the retired Idea agent's transcripts on it too. Dropping it
+// is its own decision — it is named here so that one place says what it was.
+export const LEGACY_IDEAS = 'ideas'

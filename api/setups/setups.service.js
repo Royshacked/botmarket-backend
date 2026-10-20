@@ -458,7 +458,8 @@ async function patchSetup(id, patch, userId) {
         }
         $set.status = patch.status
     }
-    if (patch?.chat_state !== undefined) $set.chat_state = patch.chat_state
+    // `chat_state` is not patchable from outside any more (phase 9, 2026-10-20): it is Mentor's worksheet, written by
+    // Mentor's own commits on the server (chatStateOf). Only the old panel's progressive save sent it here.
 
     if (Object.keys($set).length === 0) return { ok: false, reason: 'nothing_to_patch' }
 

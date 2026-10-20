@@ -50,18 +50,21 @@ presents in flow, they don't ask permission to think":
    "balance my risk" says nothing about what to own; and they are STICKY — changing one weighs the same
    as changing risk tolerance and never happens because the market moved. Emits `<portfolio_mandate>`
    as soon as the minimum is known. **→ Gate 1.**
-2. **Macro regime.** Three horizons, weighted by the mandate's. The forward read must come back as a
-   view, not a headline. Seasonality is deliberately not here — it is a trading-horizon edge and lives
-   in Argus. No Aether tool.
-3. **Architecture.** Sector targets as **deliberate active weights against the benchmark's REAL
-   weights** — fetched (`get_fundamentals` on the benchmark ETF's look-through), never estimated: the
-   S&P is a third technology, so a 30% sleeve is a neutral, and calling it a bet is a mistake about your
-   own book. **The house industry views (Pythia's, via `get_industry_views`) are an input, not an
-   instruction**: descriptions of each GICS sub-industry's demand, economics and cycle, used to
-   question a sleeve (and to check industry concentration), never to build one. Agreement is real
-   support; disagreement must be said and argued, because Atlas can see this mandate and Pythia cannot.
-   **→ Gate 2** — the skeleton is the decision worth the user's input.
-4. **Selection.** THE HARD RULE: **every name placed came out of `get_coverage`.** Not `web_search`,
+2. **The read — the house's industries for this book** (Roy, 2026-10-19; [design/atlas-industry-sleeves.md](../design/atlas-industry-sleeves.md)).
+   `get_house_industries` with the mandate's book (under about a year → swing, a year or more → long term,
+   judgment in between): the GICS sub-industries Pythia rates FOR that book are the candidate sleeves. The
+   macro numbers (curve, indicators) are background only; **no sector rotation and no sector-ETF trend charts** —
+   industry momentum is not this desk's edge (the 2026-10-10 verdict). The forward read must come back as a
+   view, not a headline. No Aether tool.
+3. **Architecture — sleeves are GICS sub-industries,** each with its code and a weight. FOR-this-book
+   industries are the candidates; WATCH only with the date it waits on; AVOID only on the user's ask; HYPE
+   allowed (the platform halves it); an industry not on the list when the user asks for it OR Atlas states the
+   reason. **Sectors are a CHECK, not the plan**: the sleeves add up by sector against the benchmark's REAL
+   weights — fetched (`get_fundamentals` on the benchmark ETF's look-through), never estimated — so the bet the
+   industries make is said in points. The mandate and the user outrank the house. **→ Gate 2** — the skeleton is
+   the decision worth the user's input.
+4. **Selection.** THE HARD RULE: **every name placed came out of `get_coverage`** — read per sleeve by `industry`
+   (grouped by GICS sub-industry, joined from `gics_companies` at read). Not `web_search`,
    not `get_fundamentals`, not a name Atlas already knows — those are read tools for qualifying a
    sourced name; used to find names they make Atlas the screener, and then the book holds names nobody
    researched. The selection school is the bar, named when a name is rejected. An empty pool is not
@@ -90,14 +93,18 @@ presents in flow, they don't ask permission to think":
    gates nothing; a failed verdict read keeps the review fingerprint's previous verdict.
    `get_industry_views` carries each industry's verdict and hype; a held industry newly AVOID or HYPE is a
    review trigger (`industry_verdict`). A base/bull/bear pressure test before the plan. Then
-   `<portfolio_plan>`, sized server-side (`_sizePlan`: ratios → live prices → quantities) and saved as
-   one idea per asset via `POST /api/trade-ideas/batch`, every leg `waiting` with no entry conditions.
+   `<portfolio_plan>`, sized server-side (`_sizePlan`: ratios → live prices → quantities) and saved on Generate
+   (the session's commit, `portfolioCommit.createBook`) as one idea per asset, every leg `waiting` with no entry
+   conditions.
 
 **An empty sleeve is SOURCED, not improvised — and it ends the turn.** Atlas emits one
-`<screen_request>` per empty sleeve and stops; `sleeveSource.service` screens the sector under the
-school (a coarse pond filter, honestly labelled a proxy — FMP's screener cannot express a school's
-real bar), queues the hits with the sleeve as their reason, starts the research run if none is going,
-and posts the requester a `sleeve_sourced` card — "Resume build" — when every name is decided. The
+`<screen_request>` per empty sleeve — its `industry_code` — and stops; `sleeveSource.service` takes the
+sub-industry's companies from the house's own GICS table (the ones its assessment names first, over the school's
+size floor, each checked to trade as a live, liquid stock — notes, preferreds and thin OTC lines out — at most 12;
+the sector screen fills in only with names in the same sub-industry), queues them with the sleeve as their reason,
+starts the research run if none is going, and — from the unified chat — settles into the session's chain, handing
+the coverage back to Atlas (a `sleeve_sourced` card when there is no session). Live-run end to end 2026-10-19
+(Oil & Gas Drilling). The
 research runs **as the house** (`userId: null`): a thesis every book builds from must not be written on
 the cheap model a trader past their ceiling is degraded to, and an hour of Prometheus is the house's
 spend, not the price of asking Atlas a question. Before 2026-09-14 this hop was a button and the user
@@ -176,7 +183,7 @@ exists for any kind.
 | With | Direction | Mechanism |
 |---|---|---|
 | **Pythia** | reads | `get_industry_views` in the build (advisory — the mandate wins); `industryViewService.viewsForSymbols` into the review snapshot and the fingerprint; a held industry's changed answer is a Themis trigger (`industry_view`) |
-| **Prometheus** | reads; asks | `get_coverage` (the only source of names, filtered by sector + school); `<screen_request>` / `<coverage_request>` to fill a sleeve; `<coverage_refresh>` mid-review |
+| **Prometheus** | reads; asks | `get_coverage` (the only source of names, filtered by sub-industry + school); `<screen_request>` / `<coverage_request>` to fill a sleeve; `<coverage_refresh>` mid-review |
 | **Argus** | via the sleeve | never directly — the screen inside `sleeveSource` is the same mechanism as Argus's house scan (paused since the tilt was deleted), and Atlas has no screener of its own |
 | **Axl** | hand-off in | `<edit>portfolio` opens the book through the same edit-vs-review gate as the pencils |
 | **Mentor** | none | a single-name conviction trade is Mentor's; Atlas does not build a one-asset book for it *(the vision lists one — see Open)* |

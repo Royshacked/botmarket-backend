@@ -38,13 +38,8 @@ api/
     ideaExecution.service.js  placeOrdersForIdea / placeRestingEntryForIdea / triggerEntryNow ("Buy now")
     exitOrders.service.js     in-position exit (re)arming — through buildExitOrder, so the basis offset is
                               applied once, by the one helper, on this path as on placement
-  mentor/                 (gone, unified-chat 8e — Mentor answers in the session; its setups are api/setups)
-    mentor.controller.js      NB: `_mentorResponse(result, role)` is the response shaping, PURE and
-                              exported so a test can hold it (mentorResponse.test.js). Everything
-                              the panel reads is listed there BY HAND, and twice something was not:
-                              `build` first, then `gate` — which blanked both build gate cards while
-                              the server went on computing which one was open. A new field the client
-                              reads is added HERE, with a line in that test.
+  mentor/                 (gone, unified-chat 8e — Mentor answers in the session; its setups are api/setups. What a
+                          Mentor turn hands the client is the desk's `done` + framePayload, services/desks/)
   setups/                 the `setup` kind — Mentor's artifact, Talos's charge  /api/setups/*
     setups.service.js         Generate (the readiness gate + the server-stamped binding: mode /
                               broker / accounts / venue / event_risk) and owner-scoped CRUD over
@@ -52,7 +47,8 @@ api/
                               in-position edit touches CONTEXT only and clears monitor_state.dormant
                               (a condition may have been added to a live leg); a pre-position edit
                               clears last_assessment so the next read is a first_look. A live
-                              position is delete-locked. Routes: generate · blueprint · validate ·
+                              position is delete-locked. Routes (the panel's generate / generate-all went in phase 9 —
+                              Mentor commits through its session actions): blueprint · validate ·
                               list/get · :id/journal (Talos's rows, newest first, paged by `before`)
                               · :id/action (talos.handoff) · :id/disarm (cancel a resting limit) ·
                               :id/share (setupShare.service) · patch · delete
@@ -77,7 +73,7 @@ api/
                           other kind instead of filtering it out of its own ideas list
     portfolioCommit.service.js  what saving a book DOES (unified-chat 8a), one path for the routes and Atlas's
                               session actions: createBook (the AVOID 409 + the batch — POST /trade-ideas/batch),
-                              recordConstruction (mandate + construction thesis — POST /chat-state), replacePlan
+                              recordConstruction (mandate + construction thesis — Atlas's Generate), replacePlan
                               (a re-plan in place: save first, then retire the old legs; refused while a leg is
                               live — moved off MainPage), rebindAccounts, closeReview, acceptRebalance
                               ({ closeReview }: only a review's Accept advances the clock)
@@ -260,10 +256,10 @@ api/
   sessions/               the unified chat's sessions (/api/sessions: active · new · list · :id/messages);
                           scope 'main' | 'strategy' | 'aether' (admin desks 403 for a trader). Read-only
                           + "new" until the turn endpoint lands (unified-chat plan phase 5)
-  threads/                the generic draft thread API over thread.service (/api/threads: draft ·
-                          link · pin · list · unfinished · get · discard · pipeline drafts). AGENTS is
-                          the draft-save whitelist — LIVE desks only, and the second half of a pair
-                          with each panel's saveDraft (threadAgents.test pins it)
+  threads/                Pythia's and Aether's own chats (/api/threads: draft · link · discard) —
+                          the desks' list / get / pin / unfinished / pipeline routes went in phase 9.
+                          AGENTS (the draft-save whitelist) is strategy + aether only; a session desk's
+                          draft would be legacy data written fresh (threadAgents.test pins it)
   turns/                  POST /api/turns/:turnId/stop — stopping a turn is spoken, walking away is
                           silent (turnRegistry); owner-scoped
   market/ calendar/       chart candles + quotes + market status; the week's earnings / Fed / IPO
@@ -942,9 +938,10 @@ services/
                           the agent's substantive floor (thread.util.isSubstantive over the
                           agent's emitted phase — NOT content), TTL-expired + LRU-capped, and
                           is `linked` to its artifact (idea/portfolio/scan) on generate.
-                          Generalizes portfolio_chats; migrating agents off per-agent chat-state.
-                          BEING REPLACED by session.service (unified-chat plan): deleted when its
-                          last caller moves (plan D1).
+                          Since phase 9 (2026-10-20) only Pythia's and Aether's panels write here
+                          (saveDraft · linkToArtifact · discardThread); every other desk's old
+                          threads were moved onto their entities (scripts/migrate-unified-chat.mjs).
+                          Deleted when those two panels move onto the session (plan D1).
   session.service.js  session.util.js   the unified chat's session store: `sessions` (header — scope,
                           status, floor, agentState, summaries, links, seq) + `session_messages` (one row
                           per timeline message, per-session seq). ONE active per user per scope; "new"
@@ -1396,7 +1393,7 @@ docs/                       docs/README.md is THE index. architecture/ (how it i
 | New background loop | `startLoop('name', svc)` in `server.js` — and the service MUST export both `start` and `stop`. `startLoop` refuses one without a `stop()` with a log line and returns false, so a missing `stop` means the loop silently never runs (this happened to `execution.reconciler`). `tests/unit/loopContract.test.js` is the guard |
 | New env var | one getter in `services/config.js`, reading through `_raw` / `_str` / `_num` / `_bool` — the known-key set is derived from the readers (`knownKeys()`), and `config.test` fails on a getter that reads `process.env` directly |
 | New Axl tool | APPEND to `TOOLS` in `axl.agent.service.js` (never insert — the snapshot compares by index and the prompt cache keys off the array prefix) + append the built entry to the `axl` array in `tests/fixtures/agentTools.snapshot.json` in the same commit |
-| New field the Mentor panel reads | list it in `_mentorResponse` (`mentor.controller.js`) AND in `tests/unit/mentorResponse.test.js` — the controller names every forwarded field by hand, and a field computed but never sent is invisible in the only way that matters. Then drive it: `node scripts/drive-mentor-ui.mjs` |
+| New field Mentor's surface reads | put it on Mentor's working state in the session (`services/desks/mentor.desk.js` — `nextState`, or `done` for what a turn hands the client) — the side pane reads `agentState.mentor`, never a reply. Then drive it: `node scripts/drive-mentor-surface.mjs` |
 | New Mentor tool | its own `toolsFor({...})` block in `MENTOR_TOOLS` (`mentor.agent.service.js`) AFTER the spread `TRADING_TOOLS` kit and BEFORE `consult` (contractually last) + its handler in `chatStream`'s `toolHandlers` with an injectable seam + rebuild the `mentor` row of the snapshot in live order; `promptToolDrift.test` then checks the prompt only names tools the kit has |
 | New agent tool that is a FACT about the venue/instrument | ride it on `get_quote` (`makeQuoteHandler`) as well as giving it a tool — a desk cannot then be unaware of it |
 | New notification card | build it through `postCard` (notifyCard.js), give it `actions` only if it's actionable, add a bubble + a `msg.type` branch in the FE `ChatWindow.jsx`; a recurring fan-out dedupes via `listCardRecipientsSince`. It reaches the user's devices as a push on its own — nothing to add |

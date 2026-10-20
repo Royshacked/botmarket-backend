@@ -100,7 +100,7 @@ Existing checklist: `docs/live-verify-checklist.md` (pending for Themis, the ord
 
 In order:
 
-- [ ] **Restart the backend** (the stall guard, Atlas industry sleeves) and **delete the sleeve test session** (`ses_1792423146682_i8his4bi`, ui-smoke).
+- [ ] **Restart the backend** (the stall guard, Atlas industry sleeves) and **delete the sleeve test session** (the ui-smoke session from the Oil & Gas Drilling run).
 - [ ] **QA / CR / docs cycle on 2026-10-19's work** — trades start at Mentor (→ Argus → back), the desk speaks first, History resume, the reply cleaner, tool status names, Atlas industry sleeves + the trading check, the stall guard, the pane hint, the Mentor account picker.
 - [ ] **Re-run the drives** not yet run against current code: portfolio-surface, scanner-analyst, pane-tabs, doorways, live-mentor. ≤ 3 per 15 min, or raise `RATE_LIMIT_AUTH_PER_15M` first.
 - [ ] **Phase 9** — the migration (`scripts/migrate-unified-chat.mjs`): legacy chats → sessions.

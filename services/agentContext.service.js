@@ -19,7 +19,7 @@ import { logger } from './logger.service.js'
 import { isAgent, isContextKind, toContextMessages, capSealed } from './session.util.js'
 
 const LOG        = '[agentContext]'
-const COLLECTION = 'agent_contexts'
+export const COLLECTION = 'agent_contexts'
 const MAX_SEALED_ARTIFACTS = 50
 
 const _key = ({ userId, kind, entityId, agent }) =>
@@ -57,17 +57,62 @@ export function makeAgentContextService({ getDb = _defaultGetDb } = {}) {
         const key  = _key({ userId, kind, entityId, agent })
         const now  = Date.now()
         const prev = await db.collection(COLLECTION).findOne(key)
+        const all  = [...(prev?.messages ?? []), ...toContextMessages(messages, now)]
+        const kept = capSealed(all)
         const doc  = {
             ...key,
-            messages:  capSealed([...(prev?.messages ?? []), ...toContextMessages(messages, now)]),
+            messages:  kept,
             summary:   typeof summary === 'string' && summary.trim() ? summary.trim() : (prev?.summary ?? null),
             // References, not payloads (§3.10); the newest MAX_SEALED_ARTIFACTS are plenty to reopen on.
             artifacts: [...(prev?.artifacts ?? []), ...(Array.isArray(artifacts) ? artifacts : [])].slice(-MAX_SEALED_ARTIFACTS),
             sealedAt:  prev?.sealedAt ?? now,
             updatedAt: now,
+            // A migrated context's record of what the migration put in front (importLegacy) survives a live seal — the
+            // cap drops from the front, so the count shrinks by what it dropped. Without it a restore cannot tell them apart.
+            ...(prev?.legacy ? { legacy: prev.legacy, legacyAdded: Math.max(0, (prev.legacyAdded ?? 0) - (all.length - kept.length)) } : {}),
         }
         await db.collection(COLLECTION).replaceOne(key, doc, { upsert: true })
         return { context: doc }
+    }
+
+    /**
+     * A LEGACY conversation moved onto its entity (unified-chat plan phase 9 — a linked thread, a setup's old
+     * `chat_state.messages`, a scan's `chat`, a book's `messages`). It is OLDER than anything sealed here since, so it
+     * goes IN FRONT of what the context already holds. `sources` name where it came from ("thread:thr_…", "book:p1")
+     * and are kept on the doc: when every one is already in, the import is skipped, so a migration re-run never
+     * duplicates turns. One entity's several sources are merged BEFORE this (the migration's mergeSources — a book's
+     * thread and its own messages were often the same chat), so this only prepends.
+     *
+     * `legacyAdded` counts the legacy messages at the FRONT of `messages` (after the cap, which drops the oldest — legacy
+     * — ones first), so a restore can take exactly those off and keep anything sealed since (restoreUnifiedChat).
+     * @returns {Promise<{ imported: boolean, reason?: string }>}
+     */
+    async function importLegacy({ userId, kind, entityId, agent, messages, sources = [], at = null }) {
+        const invalid = _invalid({ userId, kind, entityId, agent })
+        if (invalid) return { imported: false, reason: invalid }
+        const from = (Array.isArray(sources) ? sources : [sources]).filter(Boolean)
+        if (!from.length) return { imported: false, reason: 'sources are required' }
+        const db   = await getDb()
+        const key  = _key({ userId, kind, entityId, agent })
+        const prev = await db.collection(COLLECTION).findOne(key)
+        if (from.every(s => prev?.legacy?.includes(s))) return { imported: false, reason: 'already_imported' }
+        const when = Number.isFinite(at) ? at : Date.now()
+        const old  = toContextMessages(messages, when)
+        if (!old.length) return { imported: false, reason: 'no_messages' }
+        const all     = [...old, ...(prev?.messages ?? [])]
+        const kept    = capSealed(all)
+        const dropped = all.length - kept.length
+        await db.collection(COLLECTION).replaceOne(key, {
+            ...key,
+            messages:    kept,
+            summary:     prev?.summary ?? null,
+            artifacts:   prev?.artifacts ?? [],
+            sealedAt:    prev?.sealedAt ?? when,
+            updatedAt:   Date.now(),
+            legacy:      [...new Set([...(prev?.legacy ?? []), ...from])],
+            legacyAdded: Math.max(0, old.length + (prev?.legacyAdded ?? 0) - dropped),
+        }, { upsert: true })
+        return { imported: true }
     }
 
     /** This user's sealed context for an entity, or null. */
@@ -86,7 +131,7 @@ export function makeAgentContextService({ getDb = _defaultGetDb } = {}) {
         return { deleted: r.deletedCount ?? 0 }
     }
 
-    return { ensureIndexes, seal, load, removeFor }
+    return { ensureIndexes, seal, importLegacy, load, removeFor }
 }
 
 export const agentContextService = makeAgentContextService()

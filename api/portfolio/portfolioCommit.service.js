@@ -2,7 +2,7 @@
 // 8, K2), so the button in the drawer and the route behind the old panel can never commit two different ways.
 //
 //   createBook       a new book from Atlas's plan (POST /trade-ideas/batch) — the AVOID ask, then the batch
-//   recordConstruction  the new book's document: the conversation (legacy), the mandate, the construction thesis
+//   recordConstruction  the new book's document: the mandate, the construction thesis
 //                    (POST /portfolio/chat-state)
 //   replacePlan      a re-plan of an existing book, in place (was MainPage.handleUpdatePlan) — save first, then
 //                    retire the old legs, refused while a leg is live
@@ -51,11 +51,11 @@ export function makePortfolioCommit({
 
     /**
      * The book's document once the book exists: the mandate the user established with Atlas and the construction
-     * thesis. `messages` is the old panel's copy of the conversation — the session seals it onto the book instead
-     * (agent_contexts), so its caller passes none. The thesis write is best-effort: the book is saved either way.
+     * thesis. The conversation is not here — the session seals it onto the book (agent_contexts). The thesis write is
+     * best-effort: the book is saved either way.
      */
-    async function recordConstruction(portfolioId, userId, { messages = [], mandate = null, thesis = null } = {}) {
-        const out = await chat.saveChatState(portfolioId, Array.isArray(messages) ? messages : [], userId, mandate && typeof mandate === 'object' ? mandate : null)
+    async function recordConstruction(portfolioId, userId, { mandate = null, thesis = null } = {}) {
+        const out = await chat.recordBook(portfolioId, userId, mandate && typeof mandate === 'object' ? mandate : null)
         if (!out.ok) return out
         if (thesis && typeof thesis === 'object') await chat.setThesis(portfolioId, userId, thesis, 'construction').catch(() => {})
         return { ok: true }
