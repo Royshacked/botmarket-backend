@@ -50,6 +50,18 @@ test('importLegacy: older turns go in FRONT of what is sealed since; a source al
     assert.equal((await ctx.importLegacy({ userId: 'u1', kind: 'call', entityId: 'k1', agent: 'mentor', source: 's', messages: [{ role: 'user', content: 'x' }] })).imported, false, 'not a context kind')
 })
 
+test('importLegacy: the same conversation from a second source adds only what is new (a book\'s thread AND its messages)', async () => {
+    const { db } = memDb()
+    const ctx = makeAgentContextService({ getDb: async () => db })
+    const convo = [{ role: 'user', content: 'Build me a growth book' }, { role: 'assistant', content: 'What is the horizon?' }]
+    await ctx.importLegacy({ userId: 'u1', kind: 'portfolio', entityId: 'p1', agent: 'portfolio', source: 'thread:thr_1', messages: convo })
+    const r = await ctx.importLegacy({ userId: 'u1', kind: 'portfolio', entityId: 'p1', agent: 'portfolio', source: 'book:p1', messages: [...convo, { role: 'user', content: 'Five years' }] })
+    assert.deepEqual(r, { imported: true, added: 1 })
+    const doc = await ctx.load({ userId: 'u1', kind: 'portfolio', entityId: 'p1', agent: 'portfolio' })
+    assert.equal(doc.messages.length, 3)
+    assert.deepEqual(doc.legacy, ['thread:thr_1', 'book:p1'])
+})
+
 test('importArchived: one archived session, its rows through the timeline gate; idempotent; nothing filed the user never spoke in', async () => {
     const { db } = memDb()
     const sessions = makeSessionService({ getDb: async () => db })

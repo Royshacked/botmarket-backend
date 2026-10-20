@@ -10,3 +10,6 @@ _tmp_*
 _edit.mjs
 *.backup*.md
 _smoke.tmp.mjs
+
+# Data snapshots a migration writes before it changes anything (scripts/migrate-unified-chat.mjs) — never committed.
+/backups/

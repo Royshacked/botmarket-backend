@@ -23,8 +23,8 @@ import { newSessionId, isScope, isAgent, toTimelineMessage, sessionTitle, segmen
 import { sessionEvents, silentEvents } from './sessionEvents.js'
 
 const LOG       = '[session]'
-const SESSIONS  = 'sessions'
-const MESSAGES  = 'session_messages'
+export const SESSIONS  = 'sessions'
+export const MESSAGES  = 'session_messages'
 const LIST_MAX  = 50
 const PAGE_MAX  = 500
 

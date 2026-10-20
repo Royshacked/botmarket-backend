@@ -17,6 +17,8 @@ import { COLLECTION as COVERAGE } from '../../api/analyst/coverage.service.js'
 import { COLLECTION as SCANS } from '../../api/scanner/scan.service.js'
 import { COLLECTION as BOOKS } from '../../api/portfolio/portfolioChat.service.js'
 import { COLLECTION as THREADS } from '../thread.service.js'
+import { COLLECTION as CONTEXTS } from '../agentContext.service.js'
+import { SESSIONS, MESSAGES } from '../session.service.js'
 
 // Idempotent: every import records its source and is skipped on a re-run; sources are removed only after their
 // import is written. Dry run unless `apply`. The `call` kind keeps its chat_state (CLAUDE.md — kept data).
@@ -51,7 +53,10 @@ export function planThread(t, exists) {
     return { action: 'delete', why: `retired:${agent ?? 'unknown'}` }
 }
 
-const msgs = (v) => (Array.isArray(v) ? v : [])
+// The old panels saved their error placeholder as an assistant turn ("Streaming failed"). It is not the agent's words,
+// and the agent rereads this history when the item is reopened — so it does not move.
+const PLACEHOLDERS = new Set(['Streaming failed'])
+const msgs = (v) => (Array.isArray(v) ? v : []).filter(m => !(m?.role === 'assistant' && PLACEHOLDERS.has(String(m?.content ?? '').trim())))
 const tally = (r, k) => { r[k] = (r[k] ?? 0) + 1 }
 
 async function sizeMb(db) {
@@ -60,16 +65,73 @@ async function sizeMb(db) {
 }
 
 /**
- * Run (or, without `apply`, rehearse) the migration on one database. `contexts` / `sessions` are services bound to
- * the SAME database. → a report: what was (or would be) moved, filed, deleted and unset, and the size before/after.
+ * Every document this migration may change or delete, whole — what a restore needs (Roy, 2026-10-20: back up before
+ * anything is deleted). Pythia's and Aether's own threads are left out: nothing touches them. The existing
+ * agent_contexts are in it too: an import rewrites the context it lands on.
  */
-export async function migrateUnifiedChat({ db, contexts, sessions, apply = false, log = () => {} }) {
+export async function snapshotAffected(db) {
+    const names = new Set((await db.listCollections().toArray()).map(c => c.name))
+    const read = (coll, q) => (names.has(coll) ? db.collection(coll).find(q).toArray() : [])
+    const threads = (await read(THREADS, {})).filter(t => planThread(t, () => true).action !== 'keep')
+    return {
+        takenAt: new Date().toISOString(), db: db.databaseName,
+        [THREADS]:        threads,
+        [`${ENTITIES}:setup.chat_state`]: await read(ENTITIES, { kind: 'setup', 'chat_state.messages': { $exists: true } }),
+        [`${ENTITIES}:idea.chat_state`]:  await read(ENTITIES, { kind: 'idea', chat_state: { $exists: true } }),
+        [`${SCANS}.chat`]:      await read(SCANS, { chat: { $exists: true } }),
+        [`${BOOKS}.messages`]:  await read(BOOKS, { messages: { $exists: true } }),
+        [`${LEGACY_IDEAS}.chat_state`]: await read(LEGACY_IDEAS, { chat_state: { $exists: true } }),
+        [CONTEXTS]: await read(CONTEXTS, {}),
+    }
+}
+
+/**
+ * Undo an applied run from its snapshot: the deleted threads come back, the unset fields are set again, the contexts
+ * go back to what they were (a context the run CREATED — it carries `legacy` and was not in the snapshot — is removed),
+ * and the archived sessions it filed (`legacySource`) are deleted with their rows. → counts.
+ */
+export async function restoreUnifiedChat({ db, snapshot }) {
+    const out = { threads: 0, fields: 0, contexts: 0, contextsRemoved: 0, sessionsRemoved: 0 }
+    for (const t of snapshot[THREADS] ?? []) { await db.collection(THREADS).replaceOne({ threadId: t.threadId }, t, { upsert: true }); out.threads++ }
+    const setBack = async (coll, rows, keyOf, field, valueOf) => {
+        for (const r of rows ?? []) { await db.collection(coll).updateOne(keyOf(r), { $set: { [field]: valueOf(r) } }); out.fields++ }
+    }
+    await setBack(ENTITIES, snapshot[`${ENTITIES}:setup.chat_state`], r => ({ id: r.id, kind: 'setup' }), 'chat_state.messages', r => r.chat_state?.messages ?? [])
+    await setBack(ENTITIES, snapshot[`${ENTITIES}:idea.chat_state`], r => ({ id: r.id, kind: 'idea' }), 'chat_state', r => r.chat_state ?? null)
+    await setBack(SCANS, snapshot[`${SCANS}.chat`], r => ({ id: r.id }), 'chat', r => r.chat ?? [])
+    await setBack(BOOKS, snapshot[`${BOOKS}.messages`], r => ({ portfolioId: r.portfolioId, userId: r.userId }), 'messages', r => r.messages ?? [])
+    await setBack(LEGACY_IDEAS, snapshot[`${LEGACY_IDEAS}.chat_state`], r => ({ id: r.id }), 'chat_state', r => r.chat_state ?? null)
+    const ctxKey = (c) => ({ userId: c.userId, kind: c.kind, entityId: c.entityId, agent: c.agent })
+    const had = new Set((snapshot[CONTEXTS] ?? []).map(c => JSON.stringify(ctxKey(c))))
+    for (const c of await db.collection(CONTEXTS).find({ legacy: { $exists: true } }).toArray()) {
+        if (!had.has(JSON.stringify(ctxKey(c)))) { await db.collection(CONTEXTS).deleteOne(ctxKey(c)); out.contextsRemoved++ }
+    }
+    for (const c of snapshot[CONTEXTS] ?? []) { await db.collection(CONTEXTS).replaceOne(ctxKey(c), c, { upsert: true }); out.contexts++ }
+    for (const s of await db.collection(SESSIONS).find({ legacySource: { $exists: true } }).toArray()) {
+        await db.collection(MESSAGES).deleteMany({ sessionId: s.sessionId })
+        await db.collection(SESSIONS).deleteOne({ sessionId: s.sessionId })
+        out.sessionsRemoved++
+    }
+    return out
+}
+
+/**
+ * Run (or, without `apply`, rehearse) the migration on one database. `contexts` / `sessions` are services bound to
+ * the SAME database. `backup(snapshot)` is called before the first write and must resolve, or nothing is written.
+ * → a report: what was (or would be) moved, filed, deleted and unset, and the size before/after.
+ */
+export async function migrateUnifiedChat({ db, contexts, sessions, apply = false, backup = null, log = () => {} }) {
     const names = new Set((await db.listCollections().toArray()).map(c => c.name))
     // Prod's Atlas chats are still in `portfolio_chats` until scripts/rename-portfolio-books.mjs runs (phase 3).
     if (names.has('portfolio_chats') && await db.collection('portfolio_chats').countDocuments() > 0) {
         return { refused: 'portfolio_chats still holds the books — run scripts/rename-portfolio-books.mjs first' }
     }
     const report = { apply, db: db.databaseName, before: await sizeMb(db), threads: {}, contexts: 0, sessions: 0, skipped: {}, unset: {} }
+    // No write without a backup in hand: a failed or missing backup stops the run here.
+    if (apply) {
+        if (typeof backup !== 'function') return { refused: 'no backup step — pass one, the deletes cannot be undone without it' }
+        report.backup = await backup(await snapshotAffected(db))
+    }
 
     // The entities a thread may point at, read once per kind.
     const ids = {}

@@ -19,7 +19,7 @@ import { logger } from './logger.service.js'
 import { isAgent, isContextKind, toContextMessages, capSealed } from './session.util.js'
 
 const LOG        = '[agentContext]'
-const COLLECTION = 'agent_contexts'
+export const COLLECTION = 'agent_contexts'
 const MAX_SEALED_ARTIFACTS = 50
 
 const _key = ({ userId, kind, entityId, agent }) =>
@@ -75,7 +75,11 @@ export function makeAgentContextService({ getDb = _defaultGetDb } = {}) {
      * `chat_state.messages`, a scan's `chat`, a book's `messages`). It is OLDER than anything sealed here since, so it
      * goes IN FRONT of what the context already holds. `source` names where it came from ("thread:thr_…") and is
      * kept on the doc: a source already imported is skipped, so a migration re-run never duplicates turns.
-     * @returns {Promise<{ imported: boolean, reason?: string }>}
+     *
+     * The same conversation was often stored TWICE before (a book's linked thread AND the book's own `messages`; a
+     * scan's thread AND its `chat`) — 25 of axl_dev's 75 contexts, 217 repeated turns (2026-10-20 round trip). A turn
+     * the context already holds (same role, same words) is not added again; the source is still recorded as in.
+     * @returns {Promise<{ imported: boolean, added?: number, reason?: string }>}
      */
     async function importLegacy({ userId, kind, entityId, agent, messages, source, at = null }) {
         const invalid = _invalid({ userId, kind, entityId, agent })
@@ -86,8 +90,10 @@ export function makeAgentContextService({ getDb = _defaultGetDb } = {}) {
         const prev = await db.collection(COLLECTION).findOne(key)
         if (prev?.legacy?.includes(source)) return { imported: false, reason: 'already_imported' }
         const when = Number.isFinite(at) ? at : Date.now()
-        const old  = toContextMessages(messages, when)
-        if (!old.length) return { imported: false, reason: 'no_messages' }
+        const held = new Set((prev?.messages ?? []).map(m => `${m.role}\u0000${m.content}`))
+        const all  = toContextMessages(messages, when)
+        if (!all.length) return { imported: false, reason: 'no_messages' }
+        const old  = all.filter(m => !held.has(`${m.role}\u0000${m.content}`))
         const now  = Date.now()
         await db.collection(COLLECTION).replaceOne(key, {
             ...key,
@@ -98,7 +104,7 @@ export function makeAgentContextService({ getDb = _defaultGetDb } = {}) {
             updatedAt: now,
             legacy:    [...(prev?.legacy ?? []), source],
         }, { upsert: true })
-        return { imported: true }
+        return { imported: true, added: old.length }
     }
 
     /** This user's sealed context for an entity, or null. */
