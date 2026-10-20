@@ -77,7 +77,7 @@ api/
                           other kind instead of filtering it out of its own ideas list
     portfolioCommit.service.js  what saving a book DOES (unified-chat 8a), one path for the routes and Atlas's
                               session actions: createBook (the AVOID 409 + the batch — POST /trade-ideas/batch),
-                              recordConstruction (mandate + construction thesis — POST /chat-state), replacePlan
+                              recordConstruction (mandate + construction thesis — Atlas's Generate), replacePlan
                               (a re-plan in place: save first, then retire the old legs; refused while a leg is
                               live — moved off MainPage), rebindAccounts, closeReview, acceptRebalance
                               ({ closeReview }: only a review's Accept advances the clock)
@@ -260,10 +260,10 @@ api/
   sessions/               the unified chat's sessions (/api/sessions: active · new · list · :id/messages);
                           scope 'main' | 'strategy' | 'aether' (admin desks 403 for a trader). Read-only
                           + "new" until the turn endpoint lands (unified-chat plan phase 5)
-  threads/                the generic draft thread API over thread.service (/api/threads: draft ·
-                          link · pin · list · unfinished · get · discard · pipeline drafts). AGENTS is
-                          the draft-save whitelist — LIVE desks only, and the second half of a pair
-                          with each panel's saveDraft (threadAgents.test pins it)
+  threads/                Pythia's and Aether's own chats (/api/threads: draft · link · discard) —
+                          the desks' list / get / pin / unfinished / pipeline routes went in phase 9.
+                          AGENTS (the draft-save whitelist) is strategy + aether only; a session desk's
+                          draft would be legacy data written fresh (threadAgents.test pins it)
   turns/                  POST /api/turns/:turnId/stop — stopping a turn is spoken, walking away is
                           silent (turnRegistry); owner-scoped
   market/ calendar/       chart candles + quotes + market status; the week's earnings / Fed / IPO
@@ -942,9 +942,10 @@ services/
                           the agent's substantive floor (thread.util.isSubstantive over the
                           agent's emitted phase — NOT content), TTL-expired + LRU-capped, and
                           is `linked` to its artifact (idea/portfolio/scan) on generate.
-                          Generalizes portfolio_chats; migrating agents off per-agent chat-state.
-                          BEING REPLACED by session.service (unified-chat plan): deleted when its
-                          last caller moves (plan D1).
+                          Since phase 9 (2026-10-20) only Pythia's and Aether's panels write here
+                          (saveDraft · linkToArtifact · discardThread); every other desk's old
+                          threads were moved onto their entities (scripts/migrate-unified-chat.mjs).
+                          Deleted when those two panels move onto the session (plan D1).
   session.service.js  session.util.js   the unified chat's session store: `sessions` (header — scope,
                           status, floor, agentState, summaries, links, seq) + `session_messages` (one row
                           per timeline message, per-session seq). ONE active per user per scope; "new"

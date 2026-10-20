@@ -670,12 +670,12 @@ the Nasdaq-100 as the **US100 cash CFD**, but levels are read off the **NQ futur
   agent's substantive floor — `thread.util.isSubstantive` over the agent's *emitted phase*, not
   content → never saved), **draft** (`saveDraft`; TTL-expired via `expiresAt` + LRU-capped per user),
   **linked** (`linkToArtifact` stamps `subjectId` to the generated idea/portfolio/scan and clears the
-  TTL). Portfolio drafts persist server-side inline; idea/scanner drive drafts client-side through
-  `/api/threads` (their server never holds the full conversation). Fixes the mandate re-send hack —
-  construction state is durable before the artifact exists.
-- Portfolio legacy chat state (`portfolio_chats`) still persists per portfolio for post-create edit
-  restore. The scanner's (`scanner_chats`) lost its routes 2026-10-16 — nothing called them; the
-  collection waits for the unified-chat migration (`docs/design/unified-chat-plan.md`).
+  TTL). Since the unified chat (phase 9, 2026-10-20) only Pythia's and Aether's panels write threads, client-side
+  through `/api/threads`; every other desk talks in the session, and its old threads were moved onto the entities
+  they produced (`agent_contexts`, scripts/migrate-unified-chat.mjs).
+- A book's document (`portfolio_books`, renamed from `portfolio_chats`) holds the BOOK — lifecycle, mandate, thesis,
+  reviews, Themis state — and no chat since phase 9: Atlas's conversation is sealed onto the book (`agent_contexts`).
+  `scanner_chats` never existed on axl_dev or prod by the time the migration ran.
 
 ---
 

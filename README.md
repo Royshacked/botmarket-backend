@@ -821,8 +821,8 @@ GET  /equity-curve   equity points (?fromMs=)
   against the measured numbers) — admin-only.
 - **Pending actions** `/api/pending-actions` — `GET /` (the queued list), `POST /:id/execute`,
   `POST /:id/cancel`. See the off-hours queue above.
-- **Threads** `/api/threads` — the unified build-conversation drafts (subject-bound, TTL-expired,
-  linked to their artifact on generate).
+- **Threads** `/api/threads` — Pythia's and Aether's own panel chats (draft · link · discard). Every other desk
+  talks in the session (`/api/sessions`); an entity's conversation is sealed onto it (`agent_contexts`).
 - **Trades** `/api/trades` + `/api/trades/stats` — the frozen-at-fill analytics ledger (paper + live).
 - **Social chat** `/api/chat` — user-to-user messaging (`/conversations`, messages, read
   receipts, `GET /users/search`). Realtime via WebSocket (`api/chat/chatWs.js`, `userId` → a SET of
