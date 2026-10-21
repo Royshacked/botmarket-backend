@@ -237,7 +237,7 @@ column, per grade. After ~6–8 weeks that is our own backtest, and later a real
 
 ## 9. Not discussed yet
 
-- **Shorts.** Everything above is the long side. The short side — gates (borrow, hard-to-borrow,
+- **Shorts — deferred by Roy (2026-10-21), not for now; not a prerequisite for building.** Everything above is the long side. The short side — gates (borrow, hard-to-borrow,
   short-sale restriction after a −10% day), free range DOWN to support, catalyst reading in reverse,
   and whether the board shows shorts at all — is not designed.
 
