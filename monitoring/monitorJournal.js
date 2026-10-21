@@ -128,7 +128,9 @@ export function journalEntry(reason, {
         // Omitted when intact, which is most rows — the journal should show a flagged map, not
         // repeat the absence of one.
         ...(raw?.premise && raw.premise !== 'intact' ? { premise: raw.premise } : {}),
-        note:    read || (tier === 'cheap' ? 'Checked the numbers — nothing the plan is waiting on has moved.'
+        // Only on a ripe wait — the read that stepped the next look down to the finest rung.
+        ...(raw?.ripe === true && raw?.verdict === 'wait' ? { ripe: true } : {}),
+        note:   read || (tier === 'cheap' ? 'Checked the numbers — nothing the plan is waiting on has moved.'
                                           : verdictFallbackNote(raw?.verdict)),
         ...(raw?.warning ? { warning: String(raw.warning) } : {}),
         ...(Array.isArray(raw?.conditions) && raw.conditions.length ? { conditions: raw.conditions } : {}),

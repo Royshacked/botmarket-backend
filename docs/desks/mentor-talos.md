@@ -362,6 +362,21 @@ derived from the conditions at Generate (`defaultReadMode`) and owned by Talos a
 `cheap_only` still escalates — it only declines the expensive read *on a schedule*. A setup that can
 never be looked at properly is one bad `not_fired` away from a missed trade.
 
+> **2026-10-21 — the CHEAP row is off by default** (`TALOS_CHEAP_TIER`, opt-in). With the full read
+> on Luna (~$0.003) a cheap pass cost as much as the read it skipped, or ten times it on Haiku, which
+> also slept through actions. Off, every would-be cheap wake is EXPENSIVE; NOTHING is unchanged.
+> Numbers and reasoning: [design/talos-two-tier.md](../design/talos-two-tier.md).
+
+**The step-down (2026-10-21).** Every pre-entry read also answers `ripe`: the premise is intact and
+everything is met or settled except the trigger itself. A `wait` that is ripe changes the next look,
+and the CODE decides how (`talos.gates.ripeStepDown`), not the model: the setup's FINEST pace rung,
+a full read on its very next close (`expensive_due: 1`), and an ENTRY guard at the firing leg's price
+unless the read armed one there. The guard's side comes from price (above the level it waits for the
+pullback, below it for the break); one sitting on the level is already true and dropped, so a price
+hovering at the entry cannot buy a read every sweep. Recorded as `ripe` on the assessment and the
+journal row. The case it exists for: EXPD on 2026-10-19, ripe on the 4hr with 2hr allowed and no entry
+guard — the pullback to its 196 entry printed (low 196.00) and nothing woke until noon the next day.
+
 ---
 
 ## Guards — exact prices, not bands

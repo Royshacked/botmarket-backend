@@ -1,6 +1,6 @@
 import { INVALIDATION } from '../services/entity/vocabulary.js'
 import { toNum } from '../services/format.util.js'
-import { scenarioLabel, legPrice } from '../services/setup.schema.js'
+import { scenarioLabel, legPrice, paceRungs, firingLeg, clampGuards } from '../services/setup.schema.js'
 
 // Talos's PURE TIER — every decision the monitor makes without touching the network.
 //
@@ -9,13 +9,14 @@ import { scenarioLabel, legPrice } from '../services/setup.schema.js'
 // talos.assess.js, monitorJournal.js and readinessGates.js each came out of it before — what is
 // left reads as orchestration, which is what that file's own header claims it is.
 //
-// EVERYTHING HERE IS PURE. No IO, no clock beyond an explicit `nowMs`, no injected deps. Four
+// EVERYTHING HERE IS PURE. No IO, no clock beyond an explicit `nowMs`, no injected deps. Five
 // groups, in the order a wake asks them:
 //
 //   1. THE LEVEL GATES     is price at one of this setup's legs, and whose premise is it?
 //   2. IN-POSITION         where does the trade stand (R, MAE, MFE)?
 //   3. THE VALIDITY GATE   has the premise broken, or has price simply run away?
 //   4. THE RECORD          what the model answered, folded onto what the setup declared.
+//   5. THE STEP-DOWN       a ripe wait: the finest rung, the next close, a guard at the entry.
 //
 // Imported by talos.monitor.service.js (the loop) and asserted directly by talosMonitor.test.js.
 
@@ -394,5 +395,49 @@ export function costPatch(setup, calls) {
             assessments: (Number(prior.assessments) || 0) + 1,
             last:        calls,
         },
+    }
+}
+
+// ─── 5. THE STEP-DOWN ─────────────────────────────────────────────────────────
+
+/**
+ * What a `wait` read that came back RIPE changes about the next look (2026-10-21). Pure.
+ *
+ * "Ripe" is the model's answer to one question — is the premise intact and ONLY the trigger left?
+ * What it means for the pacing is not left to the model, because a read that knows the moment is
+ * close still asked for the same coarse rung before: EXPD (2026-10-19) was ripe on a 4hr rung with
+ * 2hr allowed and no entry guard armed, so the pullback to its 196 level printed and nothing woke.
+ *
+ * So, when ripe: the FINEST rung this setup may be paced on, a full read on the very next close of
+ * it, and an ENTRY guard at the level that would fire — unless the read armed one there itself. The
+ * guard's side comes from where price is (clampGuards infers it): above the level it waits for the
+ * pullback, below it for the break. One sitting exactly on the level is already true and dropped
+ * (clampGuards), which is what keeps a price hovering at the entry from paying for a read every
+ * sweep. The model's own guards keep their place after it, inside the same cap.
+ *
+ * Null when the read is not a ripe `wait` with an intact premise — the read's own pacing stands.
+ *
+ * @param {object}   setup
+ * @param {?object}  scenario  the scenario on the table
+ * @param {object}   raw       the read's answer
+ * @param {object[]} guards    the read's guards, already clamped
+ * @param {?number}  price
+ * @returns {null | { rung: string, expensiveDue: 1, guards: object[], level: ?number }}
+ */
+export function ripeStepDown(setup, scenario, raw, guards, price) {
+    if (raw?.ripe !== true || raw.verdict !== 'wait') return null
+    if (String(raw.premise ?? 'intact') !== 'intact') return null
+
+    const rung  = paceRungs(setup).at(-1) ?? null
+    const level = legPrice(firingLeg(scenario))
+    const have  = Array.isArray(guards) ? guards : []
+    const armed = Number.isFinite(level) && have.some(g => g.means === 'entry' && Math.abs(g.price - level) < 1e-9)
+    const entryGuard = Number.isFinite(level) && !armed ? [{ price: level, means: 'entry' }] : []
+
+    return {
+        rung,
+        expensiveDue: 1,
+        guards: clampGuards([...entryGuard, ...have], price),
+        level: Number.isFinite(level) ? level : null,
     }
 }

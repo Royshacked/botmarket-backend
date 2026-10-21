@@ -20,7 +20,7 @@ import { isSelfExecuted } from '../services/venue.resolve.service.js'
 import { brokerService } from '../api/broker/broker.service.js'
 import { brokerEntryPrice } from '../services/positionManage.service.js'
 import { config } from '../services/config.js'
-import { legGate, scenarioGate, liveScenarios, _hitFromGuard, computeMetrics, metricsSet, validityBreach, breachPatch, rollUpBreaches, normalizeConditionResults, latchPatch, costPatch } from './talos.gates.js'
+import { legGate, scenarioGate, liveScenarios, _hitFromGuard, computeMetrics, metricsSet, validityBreach, breachPatch, rollUpBreaches, normalizeConditionResults, latchPatch, costPatch, ripeStepDown } from './talos.gates.js'
 
 // Talos — the guardian of the `setup` kind (docs/design/talos-per-candle.md).
 //
@@ -117,7 +117,7 @@ export async function _checkSetup(setup, nowMs, deps = _deps) {
         const leg = sc?.entry_legs?.[0] ?? null
         if (sc && !leg) logger.warn(LOG, `[${setup.id}] limit setup has scenario but no entry_legs — falling through to normal path`)
         if (sc && leg) {
-            if (!deps.isAssetOpen(setup.asset, setup.asset_class)) return _sleepShut(setup, nowMs, deps)
+            if (!deps.isAssetOpen(setup.asset, setup.asset_class, new Date(nowMs))) return _sleepShut(setup, nowMs, deps)
             if (liveScenarios(setup).some(s => s.validity)) {
                 const price    = await deps.getPrice(setup)
                 const breached = await _checkValidity(setup, price, nowMs, deps)
@@ -460,7 +460,7 @@ async function _managePosition(setup, ps, scenario, watched, nowMs, deps) {
             if (plan.length > 0) {
                 set.armed_leg_id = firing.id
                 set.pendingOrder  = { plan, builtAt: nowMs }
-                set.orderState    = deps.isAssetOpen(setup.asset, setup.asset_class) ? 'awaiting_confirm' : 'awaiting_market'
+                set.orderState    = deps.isAssetOpen(setup.asset, setup.asset_class, new Date(nowMs)) ? 'awaiting_confirm' : 'awaiting_market'
             } else {
                 logger.info(LOG, `[${setup.id}] planned leg printed with no placeable accounts — alert only`)
             }
@@ -604,8 +604,11 @@ async function _applyVerdict(setup, hit, raw, nowMs, reason, price, deps) {
     const leg      = raw.verdict === 'enter' ? firingLeg(scenario, armed) : null
 
     const conditions = normalizeConditionResults(raw.conditions, declared)
-    const armedNow   = clampGuards(raw.guards, price)
-    const nextRung   = resolveRung(raw.next_timeframe, setup)
+    // A RIPE wait steps the next look down (talos.gates ripeStepDown): the finest rung, the next
+    // close, an entry guard at the level. Otherwise the read's own pacing stands.
+    const ripe       = ripeStepDown(setup, scenario, raw, clampGuards(raw.guards, price), price)
+    const armedNow   = ripe?.guards ?? clampGuards(raw.guards, price)
+    const nextRung   = ripe?.rung ?? resolveRung(raw.next_timeframe, setup)
     const assessment = _assessmentRecord({ nowMs, reason, leg: armed, scenario, raw, verdict: raw.verdict, conditions, price, rung })
     const nextAt     = _nextReadAt(setup, nowMs, nextRung ?? rung, deps)
 
@@ -621,8 +624,8 @@ async function _applyVerdict(setup, hit, raw, nowMs, reason, price, deps) {
         // A read that flagged the map is not triaged next time: whatever countdown it asked for,
         // a damaged or stale premise comes back to the expensive tier on the very next close. The
         // cheap tier cannot judge a map — it can only check numbers against conditions.
-        'monitor_state.expensive_due': normalizePremise(raw.premise) === 'intact'
-            ? clampExpensiveGap(raw.next_expensive_in)
+        'monitor_state.expensive_due': ripe ? ripe.expensiveDue
+            : normalizePremise(raw.premise) === 'intact' ? clampExpensiveGap(raw.next_expensive_in)
             : 1,
         'monitor_state.watch':         normalizeWatch(raw.watch),
         ...latchPatch(setup, conditions, nowMs, declared),
@@ -680,7 +683,7 @@ async function _applyVerdict(setup, hit, raw, nowMs, reason, price, deps) {
         })
         if (plan.length > 0) {
             patch.pendingOrder = { plan, builtAt: nowMs }
-            patch.orderState   = deps.isAssetOpen(setup.asset, setup.asset_class) ? 'awaiting_confirm' : 'awaiting_market'
+            patch.orderState   = deps.isAssetOpen(setup.asset, setup.asset_class, new Date(nowMs)) ? 'awaiting_confirm' : 'awaiting_market'
         } else {
             logger.info(LOG, `[${setup.id}] level reached with no placeable accounts — alert only`)
         }
@@ -741,6 +744,8 @@ function _assessmentRecord({ nowMs, reason, leg = null, scenario, raw, verdict, 
         // The MAP, asked separately from the moment — a read can wait on an intact premise for weeks
         // or wait on a stale one, and those are different things to be told.
         premise:        normalizePremise(raw.premise),
+        // Only the trigger left — the wait that stepped the next look down (talos.gates ripeStepDown).
+        ripe:           raw.ripe === true,
         read:           raw.read ?? null,
         warning:        verdict === 'enter' ? null : (raw.warning ?? null),
         conditions,
