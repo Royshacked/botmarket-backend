@@ -250,7 +250,7 @@ column, per grade. After ~6–8 weeks that is our own backtest, and later a real
   hours (a weekend or after 20:00 ET), because the key is shared with live pricing.
 - **Options** — build on the Yahoo snapshot; a paid flow feed only if the board proves it is missing.
 - **Grade thresholds** — the starting cut-offs in §5.1; tuned from the outcome log, never by feel.
-- **Names** — the service is **DailyScreener** (`dailyScreener.service.js`, following the `*.service.js` convention); the Floor row is **Daily watchlist**.
+- **Names** — the service is **DailyScreener** (to be built as services/dailyScreener.service.js, the usual *.service.js shape); the Floor row is **Daily watchlist**.
 - **Horizon vocabulary** — `swing` is split into **short swing** (2–5 days) and **swing**
   (1–3 weeks). `TRADE_HORIZONS` is a shared cross-agent constant (scans, Mentor, Atlas holdings), so
   the split needs its own conflict check and a migration plan for saved values before it lands.
