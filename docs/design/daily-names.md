@@ -157,6 +157,10 @@ half a session. The grade reads the ATR multiple; the % is shown beside it.
   per-name horizon label.
 - **Open sky** — no level overhead (above its 52-week / all-time high). Shown as its own flag,
   graded on the ATR alone, never as an infinite range.
+- **Breaking out** (Roy, 2026-10-21) — a live price is always at or under the session's own high, and
+  the in-session columns want it near it, so as a ceiling the high of day would grade nearly every
+  in-session name C. Within **0.1 × ATR** of the high of day, price is breaking out: the high is
+  skipped and the range is measured to the next level up (open sky when there is none).
 - This keeps the board as analysis, not a signal service: no entry, no stop, no target is shown —
   the payments plan's trading-signals edge.
 - Every grade carries an **"unverified"** label until its column has ~8 weeks of outcomes (§7, §10).
@@ -323,3 +327,22 @@ phase 2's overnight pass is switched on anywhere.
    `scripts/drive-hotlist.mjs` 21/21 on Vite against the running dev backend — a fixture board, the
    two hand-off turns captured and aborted (no model call); the first run caught the row actions
    overflowing the panel, fixed by stacking them.
+
+**QA/CR cycle, 2026-10-21** (three reviews; Roy approved all but two, with the breakout rule for the
+in-session columns):
+- An overnight run that stopped short (a 429, an outage, an empty universe) is retried ONCE an hour
+  later, then left for the next day — it used to restart on every five-minute tick until the open.
+- The in-session columns skip the high of day when price is breaking out (§5).
+- The outcome log reads 5-minute bars: mid and eod start at the first bar after the row was quoted
+  (each row now stores `quoted_at`), so a high printed before the entry no longer counts as reached.
+  A session's windows are due from 18:00 ET (with the overnight pass); a window that comes back short
+  is read again rather than written for good, and is kept flagged `partial` once it is long closed.
+  The log keeps ~120 sessions.
+- The checkpoint takes its board with the overnight pass's atomic claim (`claimRun`).
+- A missing number is null in the columns, not 0, so the `??` fallbacks work.
+- Frontend: a slow board read for a tab the user has left no longer replaces the one on screen; an
+  unknown SPY reading is hidden instead of shown as "below".
+- Open: **pre-market volume** — `aftermarket-quote`'s `volume` may be the previous session's total,
+  which would make the open column's volume test always pass. To be checked live before 09:30 ET; if
+  so, pre-market volume comes from the morning's 5-minute bars instead. Declining Argus's "put aside
+  your current work?" after Ask Argus leaves the Hotlist closed — accepted as is.

@@ -21,7 +21,7 @@ import { COLUMNS, cell, relativeVolume } from './hotlist.columns.js'
 import { labelNews } from './hotlist.news.js'
 import { argusRead } from './hotlist.argus.js'
 import { BOARDS, outcomeSummary } from './hotlist.outcomes.js'
-import { COLLECTION as STATS, latestRun } from './dailyScreener.service.js'
+import { COLLECTION as STATS, latestRun, claimRun } from './dailyScreener.service.js'
 import { config } from './config.js'
 import { logger } from './logger.service.js'
 
@@ -123,7 +123,7 @@ export function structureNames(statsList, max = 60) {
 /**
  * One name's row on a board: its context and a cell per column. Null when no column graded it. Pure.
  */
-export function boardRow(stats, q, columns, { book, etMin, day, catalyst }) {
+export function boardRow(stats, q, columns, { book, etMin, day, catalyst, quotedAt = null }) {
     const extended = book === 'extended'
     const prevClose = extended ? stats.close : (q.previousClose ?? stats.close)
     const ctx = extended
@@ -136,6 +136,8 @@ export function boardRow(stats, q, columns, { book, etMin, day, catalyst }) {
     return {
         symbol: stats.symbol, name: stats.name ?? null, sector: stats.sector ?? null,
         price: _r(ctx.price, 4), gap_pct: _r(gap), rvol: ctx.rvol ?? null,
+        // When the price was read — the outcome log measures from the bars AFTER it (hotlist.outcomes).
+        quoted_at: quotedAt,
         pm_vol_pct: _r(ctx.pmVolPct), spread_pct: _r(ctx.spreadPct, 3),
         atr_pct: stats.atr_pct, next_earnings: stats.next_earnings ?? null,
         catalyst: catalyst ?? null,
@@ -179,7 +181,8 @@ export async function runCheckpoint({ deps = _deps } = {}) {
 
         const run = await deps.latestRun()
         if (!run?.day) return { ok: false, outcome: 'no_stats', id }
-        await boards.updateOne({ id }, { $setOnInsert: { id, day, checkpoint: cp.id }, $set: { status: 'running', started_at: deps.now() } }, { upsert: true })
+        // Claimed atomically (the overnight pass's claim): two servers on one window build one board.
+        if (!(await claimRun(boards, id, { day, checkpoint: cp.id }, prior, deps.now()))) return { ok: false, outcome: 'already_running', id }
 
         const board = await _build(db, cp, day, etMin, run, deps)
         await boards.updateOne({ id }, { $set: { ...board, finished_at: deps.now() } })
@@ -244,12 +247,12 @@ async function _build(db, cp, day, etMin, run, deps) {
     const pool = buildPool({ earnings: reported, news: headlines.keys(), grades: rated, movers: moving, structure: structureNames(statsList) }, new Set(byStats.keys()))
 
     // ── Quotes ──
-    const quotes = new Map()
+    const quotes = new Map(), quotedAt = new Map()
     for (const sym of pool) {
         if (stopped) break
         try {
             const q = await paced(() => (cp.book === 'extended' ? deps.extQuote(sym) : deps.quote(sym)))
-            if (q) quotes.set(sym, q)
+            if (q) { quotes.set(sym, q); quotedAt.set(sym, deps.now()) }
         } catch (err) {
             if (err?.status === 429) stopped = 'rate_limited'
         }
@@ -262,7 +265,7 @@ async function _build(db, cp, day, etMin, run, deps) {
     // ── The board ──
     const rows = []
     for (const [sym, q] of quotes) {
-        const row = boardRow(byStats.get(sym), q, cp.columns, { book: cp.book, etMin, day, catalyst: labels.get(sym) ?? null })
+        const row = boardRow(byStats.get(sym), q, cp.columns, { book: cp.book, etMin, day, catalyst: labels.get(sym) ?? null, quotedAt: quotedAt.get(sym) })
         if (row) rows.push(row)
     }
     const ranked = rankRows(rows).slice(0, BOARD_MAX)

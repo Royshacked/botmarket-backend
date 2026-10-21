@@ -29,6 +29,25 @@ test('each column counts its own levels (§5): open the prior-day high, week the
     assert.deepEqual(overheadLevels('open', S), [101, 103, 106])
     assert.deepEqual(overheadLevels('week', S), [106, 110, 120])
     assert.deepEqual(overheadLevels('mid', S, { dayHigh: 102 }), [102, 101, 103, 106], 'today\'s own high comes first in session')
+    assert.deepEqual(overheadLevels('mid', S, { dayHigh: 102, price: 99 }), [102, 101, 103, 106], 'a pullback under the high: still overhead')
+})
+
+test('breaking out: a price within 0.1 ATR of the session\'s high measures to the NEXT level (Roy, 2026-10-21)', () => {
+    // ATR 4 → 0.4 points. At 104.7 under a 105 high, the high is the breakout, not a ceiling.
+    assert.deepEqual(overheadLevels('eod', S, { dayHigh: 105, price: 104.7 }), [103, 106])
+    const eod = cell('eod', S, { price: 104.7, prevClose: 100, dayHigh: 105, dayLow: 100.5, rvol: 1.5 })
+    assert.equal(eod.range.level, 106, 'not the 105 it is pressing on')
+    assert.equal(eod.grade, 'B', '1.3 points / 4 ATR = 0.33× → B on eod\'s [0.5, 0.25]')
+    // 0.6 under the high is more than 0.1 ATR: the high is still in the way.
+    assert.equal(cell('eod', S, { price: 104.4, prevClose: 100, dayHigh: 105, dayLow: 100.5, rvol: 1.5 }).range.level, 105)
+    // Over every level: open sky is possible again in session.
+    assert.equal(cell('tomorrow', { ...S, high50: 0 }, { price: 107.9, prevClose: 100, dayHigh: 108, dayLow: 100, rvol: 1.5 }).range.open_sky, true)
+})
+
+test('a missing value is missing, not 0 — the fallbacks still apply', () => {
+    // prevClose null → falls back to the stats close (100), so the gap is +4%, not "no previous close".
+    assert.equal(inPlay('open', S, { price: 104, prevClose: null, pmVolPct: 2 }).in, true)
+    assert.equal(failedGate('open', S, { price: null }), null, 'no live price → the close is the price')
 })
 
 // ─── Grades ───────────────────────────────────────────────────────────────────

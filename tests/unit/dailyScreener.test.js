@@ -159,6 +159,41 @@ test('run: a 429 ENDS the pass — partial, with what it has, nothing retried th
     assert.equal(rows(RUNS)[0].status, 'partial')
 })
 
+test('run: a partial run is retried ONCE, an hour later — not on every five-minute tick', async () => {
+    let t = WED_EVENING
+    let limited = true
+    const { deps, calls } = rig({
+        now: () => t,
+        bars: async (sym) => {
+            calls.push(sym)
+            if (sym === 'BBB' && limited) throw Object.assign(new Error('Too Many Requests'), { status: 429 })
+            return series(260)
+        },
+    })
+    assert.equal((await runNightly({ deps })).outcome, 'partial')
+    t += 5 * 60_000
+    const tick = await runNightly({ deps })
+    assert.equal(tick.outcome, 'exists', 'five minutes on: left alone')
+    assert.equal(calls.length, 3, 'nothing read')
+
+    t += 60 * 60_000
+    assert.equal((await runNightly({ deps })).outcome, 'partial', 'an hour on: the one retry (still limited)')
+    limited = false
+    t += 2 * 60 * 60_000
+    assert.equal((await runNightly({ deps })).outcome, 'exists', 'two attempts and done trying')
+    assert.equal(calls.length, 6)
+    assert.equal((await runNightly({ deps, force: true })).outcome, 'done', 'force still runs it')
+})
+
+test('run: an empty universe is tried again the same way, not every tick', async () => {
+    let t = WED_EVENING, reads = 0
+    const { deps } = rig({ now: () => t, universe: async () => { reads++; return [] } })
+    assert.equal((await runNightly({ deps })).outcome, 'no_universe')
+    t += 5 * 60_000
+    await runNightly({ deps })
+    assert.equal(reads, 1)
+})
+
 test('run: a bad ticker is skipped; a long run of failures is an outage and stops', async () => {
     const bad = rig({ bars: async (sym) => { if (sym === 'BBB') throw new Error('500'); return series(260) } })
     const r1 = await runNightly({ deps: bad.deps })

@@ -140,6 +140,27 @@ test('run: one board per checkpoint; no overnight stats → nothing published', 
     assert.equal(b.rows(BOARDS).length, 0)
 })
 
+test('run: the board is CLAIMED — a second server that loses the claim reads nothing', async () => {
+    const { deps, calls } = rig()
+    const db = await deps.db()
+    const real = db.collection.bind(db)
+    db.collection = (name) => {
+        const c = real(name)
+        if (name !== BOARDS) return c
+        // The other server inserted the board between this one's read and its claim.
+        return { ...c, updateOne: async (q, u, o) => { if (o?.upsert) throw Object.assign(new Error('E11000 duplicate key'), { code: 11000 }); return c.updateOne(q, u, o) } }
+    }
+    assert.equal((await runCheckpoint({ deps })).outcome, 'already_running')
+    assert.equal(calls.length, 0, 'no quotes spent on a board the other server is building')
+})
+
+test('run: each row says when it was quoted — the outcome log measures from after it', async () => {
+    const { deps, rows } = rig()
+    await runCheckpoint({ deps })
+    assert.equal(rows(BOARDS)[0].rows[0].quoted_at, PREMARKET)
+    assert.equal(rows(BOARDS)[0].attempts, 1)
+})
+
 test('run: outside every window, nothing is read', async () => {
     const { deps, calls } = rig({ now: () => Date.parse('2026-10-21T16:00:00Z') })
     assert.equal((await runCheckpoint({ deps })).outcome, 'not_due')

@@ -38,6 +38,11 @@ const KEEP_RUNS = 30
 const MAX_FAILED_IN_A_ROW = 25
 /** A run still `running` after this is a dead process's, and may be taken over. */
 const STALE_MS = 2 * 60 * 60 * 1000
+/** A run that stopped short (a 429, an outage, an empty universe) is tried again ONCE, this long after —
+ *  not on every tick, which would spend the shared quota all night on the pass that just hit its limit. */
+const RETRY_AFTER_MS = 60 * 60 * 1000
+const MAX_ATTEMPTS = 2
+const UNFINISHED = new Set(['partial', 'no_universe'])
 /** The run is due from this ET time on a trading day — the close is in and FMP has the bar. */
 const DUE_ET_MIN = 18 * 60
 const OPEN_ET_MIN = 9 * 60 + 30
@@ -93,7 +98,8 @@ export function dueSessionDay(nowMs) {
 let _active = false
 
 /**
- * The overnight pass for the due day, unless it is done (`force` runs it again).
+ * The overnight pass for the due day, unless it is done (`force` runs it again). A run that stopped
+ * short is tried once more an hour later, then left as it is until the next day's.
  * → `{ ok, outcome, day?, names?, written?, failed?, stopped? }`; outcome is one of
  * `not_due` · `exists` · `already_running` · `no_universe` · `done` · `partial`. Never throws.
  */
@@ -110,8 +116,12 @@ export async function runNightly({ force = false, deps = _deps } = {}) {
         const id   = `ds_${day}`
         const prior = await runs.findOne({ id })
         if (prior?.status === 'done' && !force) return { ok: true, outcome: 'exists', day }
+        if (UNFINISHED.has(prior?.status) && !force
+            && ((prior.attempts ?? 1) >= MAX_ATTEMPTS || nowMs - (prior.finished_at ?? 0) < RETRY_AFTER_MS)) {
+            return { ok: false, outcome: 'exists', day, status: prior.status }
+        }
         if (prior?.status === 'running' && nowMs - (prior.started_at ?? 0) < STALE_MS) return { ok: false, outcome: 'already_running', day }
-        if (!(await _claim(runs, id, day, prior, nowMs))) return { ok: false, outcome: 'already_running', day }
+        if (!(await claimRun(runs, id, { day }, prior, nowMs))) return { ok: false, outcome: 'already_running', day }
 
         const result = await _run(db, day, nowMs, deps)
         await runs.updateOne({ id }, { $set: { ...result, status: result.outcome, finished_at: deps.now() } })
@@ -126,12 +136,17 @@ export async function runNightly({ force = false, deps = _deps } = {}) {
     }
 }
 
-/** Take the day's run document atomically; false when another process holds it. */
-async function _claim(runs, id, day, prior, nowMs) {
+/**
+ * Take a run document atomically — matched on the `started_at` this process READ, so of two processes
+ * that read the same prior, one wins; false when another holds it. Shared with the checkpoint pass.
+ * Counts `attempts`. `insert` is what a new document starts with besides its id.
+ */
+export async function claimRun(coll, id, insert, prior, nowMs) {
     try {
-        const r = await runs.updateOne({ id, started_at: prior?.started_at ?? null }, {
-            $setOnInsert: { id, day },
+        const r = await coll.updateOne({ id, started_at: prior?.started_at ?? null }, {
+            $setOnInsert: { id, ...insert },
             $set: { status: 'running', started_at: nowMs },
+            $inc: { attempts: 1 },
         }, { upsert: true })
         return (r?.matchedCount ?? 0) + (r?.upsertedCount ?? 0) > 0
     } catch (err) {

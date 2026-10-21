@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { memDb } from '../helpers/memDb.js'
 import { fmpDateToEpochSec } from '../../providers/fmp.price.provider.js'
 import {
-    sessionsAfter, windowEnd, lastClosedSession, scoringWindow, windowBars, scoreWindow, summarize, columnVerified,
+    sessionsAfter, windowEnd, lastClosedSession, scoringWindow, windowBars, windowPartial, scoreWindow, summarize, columnVerified,
     runOutcomes, OUTCOMES, BOARDS, VERIFY_MIN_SESSIONS, VERIFY_MIN_SAMPLES,
 } from '../../services/hotlist.outcomes.js'
 import { runCheckpoint } from '../../services/dailyScreener.checkpoint.js'
@@ -25,7 +25,8 @@ test('sessions skip the weekend; each column\'s window ends where it should', ()
 })
 
 test('the last closed session, and when scoring may run', () => {
-    assert.equal(lastClosedSession(Date.parse('2026-10-21T21:00:00Z')), '2026-10-21', 'Wed 17:00 ET')
+    assert.equal(lastClosedSession(Date.parse('2026-10-21T22:00:00Z')), '2026-10-21', 'Wed 18:00 ET')
+    assert.equal(lastClosedSession(Date.parse('2026-10-21T21:00:00Z')), '2026-10-20', 'Wed 17:00 ET — FMP may not have the close yet')
     assert.equal(lastClosedSession(Date.parse('2026-10-21T15:00:00Z')), '2026-10-20', 'Wed 11:00 ET — today is not closed')
     assert.equal(lastClosedSession(Date.parse('2026-10-25T15:00:00Z')), '2026-10-23', 'Sunday → Friday')
     assert.equal(scoringWindow(Date.parse('2026-10-21T15:00:00Z')), false, 'mid-session: the quota is the checkpoints\'')
@@ -36,25 +37,44 @@ test('the last closed session, and when scoring may run', () => {
 // ─── The windows ──────────────────────────────────────────────────────────────
 
 const DAY = '2026-10-21'
-const HOURLY = ['09:30', '10:30', '11:30', '12:30', '13:30', '14:30', '15:30'].map((t, i) => bar(ET(DAY, t), 100 + i, 101 + i, 99 + i, 100.5 + i))
+/** The session in 5-minute bars, 09:30 … 15:55: bar i opens at 100 + 0.1·i, ±1 around it. */
+const hhmm = (min) => `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`
+const FIVE = Array.from({ length: 78 }, (_, i) => { const o = 100 + i / 10; return bar(ET(DAY, hhmm(570 + 5 * i)), o, o + 1, o - 1, o + 0.5) })
+const QUOTED_1033 = ET(DAY, '10:33') * 1000
 const DAILY = ['2026-10-20', '2026-10-21', '2026-10-22', '2026-10-23', '2026-10-26', '2026-10-27', '2026-10-28']
     .map((d, i) => bar(ET(d, '00:00'), 100 + i, 102 + i, 98 + i, 101 + i))
 
 test('each column reads its own bars', () => {
-    assert.deepEqual(windowBars('open', DAY, { hourly: HOURLY }).map(b => b.open), [100], 'the first hour only')
-    assert.equal(windowBars('mid', DAY, { hourly: HOURLY }).length, 6, '10:30 to the close')
-    assert.equal(windowBars('eod', DAY, { hourly: HOURLY }).length, 2, '14:30 and 15:30')
+    assert.equal(windowBars('open', DAY, { intraday: FIVE }).length, 12, 'the first hour only')
+    assert.equal(windowBars('mid', DAY, { intraday: FIVE }).length, 66, '10:30 to the close, when the quote time is unknown')
+    assert.equal(windowBars('eod', DAY, { intraday: FIVE }).length, 18, '14:30 to the close')
     assert.deepEqual(windowBars('tomorrow', DAY, { daily: DAILY }).map(b => b.open), [102], 'the NEXT session, not the board\'s')
     assert.equal(windowBars('week', DAY, { daily: DAILY }).length, 5)
     assert.equal(windowBars('week', DAY, { daily: DAILY })[0].open, 101, 'starting on the board\'s own day')
 })
 
+test('mid and eod start at the first bar AFTER the quote — a high printed before the entry does not count', () => {
+    const spiked = FIVE.map(b => (b.timestamp === ET(DAY, '10:30') ? { ...b, high: 120 } : b))
+    const win = windowBars('mid', DAY, { intraday: spiked }, { after: QUOTED_1033 })
+    assert.equal(win.length, 65)
+    assert.equal(win[0].timestamp, ET(DAY, '10:35'), 'the 10:30 bar began before a 10:33 quote')
+    assert.equal(scoreWindow({ entry: 101, level: 115 }, win).reached, false, 'the 10:30 spike to 120 was before the entry')
+})
+
 test('a window scores MFE, MAE, the return at its end, and whether the level was reached', () => {
-    const s = scoreWindow({ entry: 100, level: 103 }, windowBars('mid', DAY, { hourly: HOURLY }))
-    assert.deepEqual(s, { mfe_pct: 7, mae_pct: 0, ret_pct: 6.5, reached: true, bars: 6, end: DAY })
-    assert.equal(scoreWindow({ entry: 100, level: null }, HOURLY.slice(0, 1)).reached, null, 'open sky has no level to reach')
+    const s = scoreWindow({ entry: 100, level: 103 }, windowBars('mid', DAY, { intraday: FIVE }, { after: QUOTED_1033 }))
+    assert.deepEqual(s, { mfe_pct: 8.7, mae_pct: 0.3, ret_pct: 8.2, reached: true, bars: 65, end: DAY })
+    assert.equal(scoreWindow({ entry: 100, level: null }, FIVE.slice(0, 1)).reached, null, 'open sky has no level to reach')
     assert.equal(scoreWindow({ entry: 100, level: 103 }, []), null)
-    assert.equal(scoreWindow({ entry: 100, level: 110 }, DAILY.slice(1, 3), 5).partial, true, 'two of the week\'s five sessions')
+    assert.equal(scoreWindow({ entry: 100, level: 110 }, DAILY.slice(1, 3), true).partial, true)
+})
+
+test('a window short of what it spans is partial: the close not in, a session missing', () => {
+    assert.equal(windowPartial('mid', windowBars('mid', DAY, { intraday: FIVE })), false)
+    assert.equal(windowPartial('mid', windowBars('mid', DAY, { intraday: FIVE.slice(0, 50) })), true, 'stops at 13:35')
+    assert.equal(windowPartial('open', windowBars('open', DAY, { intraday: FIVE })), false)
+    assert.equal(windowPartial('week', DAILY.slice(1, 3)), true, 'two of the week\'s five sessions')
+    assert.equal(windowPartial('tomorrow', DAILY.slice(2, 3)), false)
 })
 
 // ─── The summary ──────────────────────────────────────────────────────────────
@@ -79,7 +99,7 @@ test('a column is verified on enough sessions AND enough samples — not either 
 
 // ─── The run ──────────────────────────────────────────────────────────────────
 
-const AFTER_CLOSE = Date.parse('2026-10-21T21:30:00Z')   // Wed 17:30 ET
+const AFTER_CLOSE = Date.parse('2026-10-21T22:30:00Z')   // Wed 18:30 ET
 const BOARD = {
     id: 'hb_2026-10-21_mid', day: DAY, checkpoint: 'mid', status: 'done', columns: ['mid'],
     rows: [
@@ -94,7 +114,7 @@ function rig(over = {}) {
     const calls = []
     const deps = {
         db: async () => db,
-        hourly: async (sym) => { calls.push(sym); return HOURLY },
+        intraday: async (sym) => { calls.push(sym); return FIVE },
         daily: async () => DAILY,
         perMinute: () => 6000, now: () => AFTER_CLOSE, sleep: async () => {},
         ...over,
@@ -125,20 +145,39 @@ test('run: a window that has not closed yet is left for later', async () => {
 })
 
 test('run: missing bars are retried — until the window is long closed, then given up on', async () => {
-    const empty = rig({ hourly: async () => [] })
+    const empty = rig({ intraday: async () => [] })
     const r1 = await runOutcomes({ force: true, deps: empty.deps })
     assert.equal(r1.scored, 0)
     assert.equal(empty.rows(BOARDS)[0].scored, undefined, 'not marked: the bars may just be late')
 
-    const late = rig({ hourly: async () => [], now: () => Date.parse('2026-10-27T21:30:00Z') })
+    const late = rig({ intraday: async () => [], now: () => Date.parse('2026-10-27T22:30:00Z') })
     const r2 = await runOutcomes({ force: true, deps: late.deps })
     assert.equal(r2.gave_up, 1)
     assert.equal(late.rows(BOARDS)[0].scored.mid, true)
     assert.equal(late.rows(OUTCOMES)[0].outcome, null, 'recorded as no outcome — and summarize skips it')
 })
 
+test('run: a SHORT window is read again, not written for good — and kept, flagged, once it is long closed', async () => {
+    const short = rig({ intraday: async () => FIVE.slice(0, 50) })
+    await runOutcomes({ force: true, deps: short.deps })
+    assert.equal(short.rows(BOARDS)[0].scored, undefined, 'FMP may not have the afternoon yet')
+    assert.equal(short.rows(OUTCOMES).length, 0)
+
+    const late = rig({ intraday: async () => FIVE.slice(0, 50), now: () => Date.parse('2026-10-27T22:30:00Z') })
+    await runOutcomes({ force: true, deps: late.deps })
+    assert.equal(late.rows(BOARDS)[0].scored.mid, true)
+    assert.equal(late.rows(OUTCOMES)[0].outcome.partial, true)
+})
+
+test('run: the log keeps ~120 sessions', async () => {
+    const { deps, rows } = rig()
+    rows(OUTCOMES).push({ id: 'old', day: '2026-01-05', column: 'mid' }, { id: 'recent', day: '2026-09-01', column: 'mid' })
+    await runOutcomes({ force: true, deps })
+    assert.deepEqual(rows(OUTCOMES).map(o => o.id).sort(), ['hb_2026-10-21_mid:ABC:mid', 'recent'])
+})
+
 test('run: a 429 stops the scoring', async () => {
-    const { deps, rows } = rig({ hourly: async () => { throw Object.assign(new Error('429'), { status: 429 }) } })
+    const { deps, rows } = rig({ intraday: async () => { throw Object.assign(new Error('429'), { status: 429 }) } })
     const r = await runOutcomes({ force: true, deps })
     assert.equal(r.outcome, 'partial')
     assert.equal(r.stopped, 'rate_limited')

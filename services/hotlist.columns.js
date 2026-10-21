@@ -31,17 +31,28 @@ export const CUTOFFS = Object.freeze({
     open: [1.0, 0.5], mid: [0.75, 0.4], eod: [0.5, 0.25], tomorrow: [1.0, 0.5], week: [2.5, 1.5],
 })
 
-const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : null)
+// Missing is null, not 0 — `Number(null)` is 0, and a 0 would defeat every `??` fallback below.
+const num = (v) => (v == null || v === '' ? null : Number.isFinite(Number(v)) ? Number(v) : null)
+
+/** Within this many ATR of the session's own high, a price is breaking out: that high is not overhead. */
+export const BREAKOUT_ATR = 0.1
 const round = (n, d = 2) => (Number.isFinite(n) ? Math.round(n * 10 ** d) / 10 ** d : null)
 
 /**
  * The levels overhead that count for a column (§5's table), from the overnight stats and the
  * quote. `today_high` is the session's own high (in-session columns only); `day_high` in the
  * overnight stats is the LAST session's high — the open column's "prior-day high".
+ *
+ * A live price is always at or under the session's high, and the in-play rules want it NEAR it — so
+ * counted as a ceiling, today's high would grade nearly every in-session name C and make open sky
+ * impossible. A price within BREAKOUT_ATR of it is breaking out: the range is measured to the next
+ * level instead (Roy, 2026-10-21).
  */
 export function overheadLevels(column, stats, quote = {}) {
     const s = stats ?? {}
-    const todayHigh = num(quote.dayHigh)
+    const sessionHigh = num(quote.dayHigh), price = num(quote.price), atr = num(s.atr14)
+    const breaking = sessionHigh != null && price > 0 && atr > 0 && sessionHigh - price <= BREAKOUT_ATR * atr
+    const todayHigh = breaking ? null : sessionHigh
     const pick = {
         open:     [s.day_high, s.high5, s.high20],
         mid:      [todayHigh, s.day_high, s.high5, s.high20],
