@@ -67,7 +67,9 @@ test('server.js registers the full fleet', () => {
         // 'pythiaWeekly' (2026-10-11, replaced 'industryScreen') runs Pythia's change scan and its assessments
         // when the engine has a new run (pythia-assessment.md §8).
         // 'pythiaCalls' (2026-10-10) grades Pythia's logged calls at 3 and 12 months (pythia-assessment.md §7).
-        'coverage', 'entries', 'exits', 'guardSweep', 'industryView', 'marketBrief', 'marketOpen', 'paperEquity',
+        // 'dailyScreener' (2026-10-21) is the hotlist's overnight pass; opt-in (DAILY_SCREENER), so it
+        // registers everywhere and does nothing until turned on (daily-names.md §11).
+        'coverage', 'dailyScreener', 'entries', 'exits', 'guardSweep', 'industryView', 'marketBrief', 'marketOpen', 'paperEquity',
         'paperFill', 'paperMark', 'pythiaCalls', 'pythiaWeekly', 'reconciler', 'talos', 'themis',
     ])
 })

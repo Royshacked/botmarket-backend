@@ -589,6 +589,8 @@ services/
                           batch: results in INPUT order, a shared cursor so a slow item parks nobody,
                           rejections raised (no swallow mode — that judgment is the caller's). Used by
                           companyProfile.util (Finnhub fan-out) and aetherBatchRead (3 reads at once).
+                          createPacer({ perMinute }) (2026-10-21) bounds STARTS per minute rather than
+                          calls at once — what a provider rate limit counts. First user: dailyScreener
                           NOT klineRender's semaphore, which caps a process-wide resource across
                           unrelated callers — same shape, different mechanism
   tokenUsage.service.js     recordUsage(userId, model, usage, agent, { monitor }) books every LLM
@@ -865,6 +867,16 @@ services/
                             single_industry mandate lifts the cap only for a book 80%+ in one sub-industry.
                             limitAddByRatio = an edit-mode add; a review's add_item / add_to_item go through
                             portfolioRebalance._industryLimitsForAdd / _industryLimitsForScaleIn
+  dailyScreener.service.js  the HOTLIST's overnight pass (docs/design/daily-names.md §6, build phase 2):
+                            once per trading day (dueSessionDay: after 18:00 ET, or before the next open
+                            to catch up), the liquid universe (fmp screenUniverseRaw, one read), SPY and
+                            each name's daily bars PACED at DAILY_SCREENER_RPM, the next earnings date →
+                            one small doc per symbol in `daily_screener_stats` (no bars: the M0 cap) and a
+                            run in `daily_screener_runs` (breadth, SPY, counts). A 429 ENDS the run as
+                            partial — never retried through the quota live pricing shares. Opt-in
+                            DAILY_SCREENER. The arithmetic is dailyScreener.stats.js (pure): the §2.1
+                            gates, RS vs SPY matched by session, the overhead levels, NR7 / inside day,
+                            the trough cycle
   pythiaWeekly.service.js   Pythia's WEEK (step 6): on a new complete price run, changeScan → assess every
                             flagged subject, biggest change first, until PYTHIA_WEEKLY_MAX_USD ($3) →
                             `pythia_weekly` (one doc per run date: flagged, results, waiting, held_back, cost,
@@ -1235,6 +1247,8 @@ monitoring/
                             claim is handed back and nothing is spent)
   pythiaCalls.monitor.service.js  The grader — every 6h from boot, scores Pythia's logged calls at 3 and 12
                             months (pythiaCalls.gradeDue). Quotes only, no model; ungated
+  dailyScreener.monitor.service.js  Every 30 min: runs the hotlist's overnight pass when a trading day's
+                            is due and not done (runNightly). Opt-in DAILY_SCREENER
   pythiaWeekly.monitor.service.js  Every 3h: runs (or resumes) Pythia's week when the engine's latest complete
                             price run has none. Opt-in PYTHIA_WEEKLY (replaced INDUSTRY_SCREEN, 2026-10-11)
   coverage.monitor.service.js  Prometheus's slow loop (dueLoop, hourly tick, ~daily per name, every

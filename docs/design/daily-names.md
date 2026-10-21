@@ -1,6 +1,6 @@
 # Hotlist — the short-horizon board (session · day · days · week)
 
-**Status: BUILDING — phase 1 of 6 done (§11).** The screener is **DailyScreener**; the Floor row is **Hotlist**. Discussed with Roy on 2026-10-21; the open decisions were
+**Status: BUILDING — phases 1–2 of 6 done (§11); the overnight pass is OFF.** The screener is **DailyScreener**; the Floor row is **Hotlist**. Discussed with Roy on 2026-10-21; the open decisions were
 settled the same day (§10). Argus already finds names
 for weeks, months and years; this is how it finds names for **a week, a few days, a day, and the
 session itself**. The thresholds below are first proposals, not tuned values. **Shorts are not
@@ -274,8 +274,15 @@ phase 2's overnight pass is switched on anywhere.
    tie-break), the counter-case tool's enum (now the vocabulary itself, not a copy), and the scanner /
    Mentor / Atlas prompts. The scanner prompt's `swing` said "days–weeks"; it now says weeks to
    months, the span Pythia's book means.
-2. **DailyScreener, overnight pass** — the liquid universe and its daily bars → dollar volume, ATR %,
-   relative strength, structure flags, cycles, breadth, earnings dates, overhead levels.
+2. **DailyScreener, overnight pass** — **BUILT 2026-10-21, OFF** (`DAILY_SCREENER`, opt-in;
+   `DAILY_SCREENER_RPM` 60). `services/dailyScreener.service.js` + `dailyScreener.stats.js` + the
+   monitor. The universe is ONE screener read (439 names on 2026-10-21: , 1M shares, common stock,
+   NYSE/NASDAQ/AMEX), then SPY and each name's daily bars, paced; per name: dollar volume, ATR %,
+   RS vs SPY (5/20 sessions, matched by session), SMA 20/50, the overhead levels (day high, 5/20/50-day
+   and 52-week highs), NR7, inside day, the trough cycle, the next earnings date; per run: breadth
+   and SPY. A 429 ends the run as partial. FMP bulk EOD is 402 on this plan, and the engine's
+   daily_prices_recent (written by aether-engine) is weekly and has no SPY, so neither replaces the per-name read. **Turn on
+   only after the rate-limit burst (§10).**
 3. **Checkpoint pass** — the pool → quotes → gates → free range → grades, plus the news labels.
 4. **The board and the outcome log** — the published board per checkpoint, and what each name did.
 5. **Argus picks from the board** — the hand-off to Mentor.

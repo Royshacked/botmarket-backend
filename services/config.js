@@ -257,6 +257,12 @@ export const config = {
     // sleeps too — and the prompt drops the countdown and `watch` (talos.assess). Turn it back on if the
     // house Talos model moves somewhere expensive again.
     get talosCheapTier()   { return _bool('TALOS_CHEAP_TIER', 'opt-in') },
+    // DailyScreener's overnight pass (services/dailyScreener.service.js, docs/design/daily-names.md).
+    // OPT-IN: ~430 FMP reads a night on the key live pricing shares, and that key's rate limit has
+    // not been measured yet — measure it (outside market hours) before turning this on anywhere.
+    // DAILY_SCREENER_RPM is the pace; the run stops on the first 429 rather than retrying through.
+    get dailyScreener()    { return _bool('DAILY_SCREENER', 'opt-in') },
+    get dailyScreenerRpm() { return _num('DAILY_SCREENER_RPM', 60) },
 
     // ── market brief ──
     get marketBriefTtlMs()       { return _num('MARKET_BRIEF_TTL_MS', 45 * 60 * 1000) },

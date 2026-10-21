@@ -79,6 +79,18 @@ export function memDb() {
                 _apply(doc, u)
                 return upserted ? { matchedCount: 0, upsertedCount: 1 } : { matchedCount: 1 }
             },
+            // The `updateOne` op form only (DailyScreener's nightly upsert), each one through updateOne above.
+            async bulkWrite(ops) {
+                let upserted = 0, matched = 0
+                for (const op of ops ?? []) {
+                    if (!op?.updateOne) throw new Error('memDb.bulkWrite: only updateOne ops are supported')
+                    const { filter, update, upsert } = op.updateOne
+                    const r = await this.updateOne(filter, update, { upsert })
+                    upserted += r.upsertedCount ?? 0
+                    matched  += r.matchedCount ?? 0
+                }
+                return { upsertedCount: upserted, matchedCount: matched }
+            },
             updateMany: async (q, u) => {
                 const docs = rows.filter(r => _match(r, q))
                 for (const d of docs) _apply(d, u)

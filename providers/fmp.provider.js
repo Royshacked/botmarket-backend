@@ -571,6 +571,25 @@ export function formatScreenerRows(rows, filters = {}) {
 }
 
 /**
+ * The whole liquid US common-stock universe, raw — DailyScreener's overnight pass (2026-10-21).
+ *
+ * NOT screenCandidatesRaw: that one is the agents' discovery leg, capped at 50 rows because a model
+ * reads the result, and it cannot ask for funds to be left out. This reads every row the screener
+ * holds (431 on 2026-10-21 at $5 / 1M shares), common stock only, on the three US exchanges. One
+ * request. Uncached: it runs once a night.
+ */
+export const UNIVERSE_EXCHANGES = Object.freeze(['NYSE', 'NASDAQ', 'AMEX'])
+export async function screenUniverseRaw({ priceMoreThan = 5, volumeMoreThan = 1_000_000, limit = 5000 } = {}) {
+    const qs = new URLSearchParams({
+        priceMoreThan: String(priceMoreThan), volumeMoreThan: String(volumeMoreThan),
+        isEtf: 'false', isFund: 'false', isActivelyTrading: 'true', country: 'US', limit: String(limit),
+    }).toString()
+    const rows = await _fmpGet(`/company-screener?${qs}`)
+    return (Array.isArray(rows) ? rows : [])
+        .filter(r => r?.symbol && UNIVERSE_EXCHANGES.includes(r.exchangeShortName ?? r.exchange))
+}
+
+/**
  * Screen the US universe and return the raw rows array.
  * The canonical fetch — one cache entry serves both the LLM (screenCandidates)
  * and the house scan (screenCandidatesRaw).

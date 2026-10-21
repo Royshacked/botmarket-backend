@@ -50,3 +50,26 @@ export async function mapLimit(items, fn, { concurrency = 5 } = {}) {
     await Promise.all(Array.from({ length: width }, worker))
     return out
 }
+
+/**
+ * A request PACER: at most `perMinute` starts a minute, spaced evenly — `await pace()` before each
+ * call. Not mapLimit: that bounds how many run AT ONCE, this bounds how many START per minute, which
+ * is what a provider's rate limit counts. Built for DailyScreener's overnight pass (2026-10-21), whose
+ * ~430 FMP reads share the key with live pricing and must never crowd it; the first in the app.
+ *
+ * Deps injectable (`now`, `sleep`) so a test can run it without waiting. Pure apart from those.
+ *
+ * @param {{ perMinute: number, now?: () => number, sleep?: (ms: number) => Promise<void> }} opts
+ * @returns {() => Promise<void>}
+ */
+export function createPacer({ perMinute, now = Date.now, sleep = (ms) => new Promise(r => setTimeout(r, ms)) }) {
+    const gapMs = 60_000 / Math.max(1, Number(perMinute) || 1)
+    let nextAt = 0
+    return async function pace() {
+        const t    = now()
+        const wait = Math.max(0, nextAt - t)
+        // Reserved BEFORE the wait, so two callers that pace at once queue rather than both firing.
+        nextAt = Math.max(t, nextAt) + gapMs
+        if (wait > 0) await sleep(wait)
+    }
+}

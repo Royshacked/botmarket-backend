@@ -80,6 +80,8 @@ import { industryViewMonitorService } from './monitoring/industryView.monitor.se
 import { ensureIndustryViewIndexes } from './api/strategy/industryView.service.js'
 import { pythiaWeeklyMonitorService } from './monitoring/pythiaWeekly.monitor.service.js'
 import { ensurePythiaWeeklyIndexes } from './services/pythiaWeekly.service.js'
+import { dailyScreenerMonitorService } from './monitoring/dailyScreener.monitor.service.js'
+import { ensureDailyScreenerIndexes } from './services/dailyScreener.service.js'
 import { ensureIndustryAssessmentIndexes } from './api/strategy/industryAssessment.service.js'
 import { ensurePythiaCallsIndexes } from './api/strategy/pythiaCalls.service.js'
 import { ensureThemeIndexes } from './api/strategy/theme.service.js'
@@ -233,6 +235,7 @@ ensureWorkspaceIndexes()
 ensurePendingActionIndexes()
 ensureAetherIndexes()
 ensureIndustryViewIndexes().catch(() => {})   // Pythia's industry_view (api/strategy/industryView.service.js)
+ensureDailyScreenerIndexes().catch(() => {})       // the hotlist's overnight pass (services/dailyScreener.service.js)
 ensurePythiaWeeklyIndexes().catch(() => {})      // Pythia's week: the change scan and its assessments (services/pythiaWeekly.service.js)
 ensureIndustryAssessmentIndexes().catch(() => {}) // Pythia's industry_assessment (api/strategy/industryAssessment.service.js)
 ensurePythiaCallsIndexes().catch(() => {})        // Pythia's forward log, pythia_calls (api/strategy/pythiaCalls.service.js)
@@ -277,6 +280,7 @@ function startBackgroundLoops() {
     startLoop('coverage',     coverageMonitorService)
     startLoop('industryView', industryViewMonitorService)
     startLoop('pythiaWeekly', pythiaWeeklyMonitorService)
+    startLoop('dailyScreener', dailyScreenerMonitorService)   // opt-in: DAILY_SCREENER
     startLoop('pythiaCalls', pythiaCallsMonitorService)
     startLoop('themis',       themisService)
     startLoop('reconciler',   executionReconciler)
