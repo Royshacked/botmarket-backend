@@ -75,3 +75,16 @@ test('confirm guard: at the plan, or with no price to judge by, it lets the orde
     assert.equal(priceMovedRefusal(LONG, 196.2), null)
     assert.equal(priceMovedRefusal(LONG, null), null, 'a feed outage must not block every confirm')
 })
+
+test('confirm guard: past the stop is FINAL — acceptPrice does not place it', () => {
+    // A long bought under its own stop has the protective order on the wrong side of the market:
+    // rejected, or filled at once. No second press makes that a trade (code review 2026-10-21).
+    const r = priceMovedRefusal(LONG, 189.5, { acceptPrice: true })
+    assert.equal(r?.reason, 'past_stop')
+    assert.equal(priceMovedRefusal(LONG, 189.5).reason, 'past_stop', 'and it says so on the first press too')
+})
+
+test('confirm guard: acceptPrice takes an adverse price, nothing more', () => {
+    assert.equal(priceMovedRefusal(LONG, 198.81, { acceptPrice: true }), null)
+    assert.equal(priceMovedRefusal(LONG, 198.81).reason, 'price_moved')
+})

@@ -21,6 +21,8 @@ import { getFmpCandles }                              from './fmp.price.provider
 import { getTickerAggregates as getMassiveAggregates } from './massive.provider.js'
 import { logger }                                     from '../services/logger.service.js'
 import { config } from '../services/config.js'
+import { aggregateCandles } from '../services/candleInterval.util.js'
+import { barBucketOf } from '../services/market.service.js'
 
 const LOG = '[candles.provider]'
 
@@ -47,7 +49,7 @@ export const _deps = {
  * @returns {Promise<Array<{timestamp,open,high,low,close,volume}>>}
  */
 export async function getTickerAggregates(ticker, options = {}, deps = _deps) {
-    if (!deps.useFmp) return deps.getMassiveAggregates(ticker, options)
+    if (!deps.useFmp) return _fallback(ticker, options, deps)
 
     try {
         const fmp = await deps.getFmpCandles(ticker, options)
@@ -57,5 +59,20 @@ export async function getTickerAggregates(ticker, options = {}, deps = _deps) {
     } catch (err) {
         logger.warn(LOG, `FMP candles failed for ${ticker} (${options.timeSpan}x${options.multiplier}) — falling back: ${err.message}`)
     }
-    return deps.getMassiveAggregates(ticker, options)
+    return _fallback(ticker, options, deps)
+}
+
+/**
+ * The fallback, holding it to the bar it was asked for. Intraday hours go to Yahoo, which has no
+ * 2hr or 4hr interval and answers both with 1h bars (`_toInterval`: "1h is closest") — so a caller
+ * asking for 4hr got hourlies LABELLED 4hr, and anything reading "the last closed bar" judged an
+ * hourly close (code review 2026-10-21). Folded here, once, into the instrument's own bars
+ * (market.service barBucketOf — 09:30-anchored for an equity), so every caller of the router gets
+ * the same 4hr bar FMP serves natively.
+ */
+async function _fallback(ticker, options, deps) {
+    const rows = await deps.getMassiveAggregates(ticker, options)
+    const mult = Number(options.multiplier) || 1
+    if (options.timeSpan !== 'hour' || mult <= 1 || !Array.isArray(rows)) return rows
+    return aggregateCandles(rows, mult, barBucketOf(ticker, null, mult * 60))
 }

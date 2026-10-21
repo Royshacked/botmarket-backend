@@ -370,11 +370,13 @@ never be looked at properly is one bad `not_fired` away from a missed trade.
 **The step-down (2026-10-21).** Every pre-entry read also answers `ripe`: the premise is intact and
 everything is met or settled except the trigger itself. A `wait` that is ripe changes the next look,
 and the CODE decides how (`talos.gates.ripeStepDown`), not the model: the setup's FINEST pace rung,
-a full read on its very next close (`expensive_due: 1`), and an ENTRY guard at the firing leg's price
+a full read on its very next close (`expensive_due: 0` — the countdown spent), and an ENTRY guard at the firing leg's price
 unless the read armed one there. The guard's side comes from price (above the level it waits for the
 pullback, below it for the break); one sitting on the level is already true and dropped, so a price
-hovering at the entry cannot buy a read every sweep. Recorded as `ripe` on the assessment and the
-journal row. The case it exists for: EXPD on 2026-10-19, ripe on the 4hr with 2hr allowed and no entry
+hovering at the entry cannot buy a read every sweep. The rung it stepped FROM is kept
+(`monitor_state.stepped_from`): a later read that is not ripe and names no usable rung goes back up
+there, so the step-down is not a one-way door. Recorded as `ripe` on the assessment and the journal
+row only when the step-down was applied. The case it exists for: EXPD on 2026-10-19, ripe on the 4hr with 2hr allowed and no entry
 guard — the pullback to its 196 entry printed (low 196.00) and nothing woke until noon the next day.
 
 ---
@@ -572,6 +574,28 @@ map rather than repeat the absence of one.
 **An `enter` verdict fires the confirm card. That is the whole gate.** It does not additionally have
 to be standing on a level that a containment test agrees about. Whether the setup is fulfilled is
 what `conditions[]` is for, and the READ is what judges them.
+
+**What the confirm places, and at what price (2026-10-21).** A conditional entry goes out at MARKET
+when the user presses Confirm (`orderPlan` → `'market'`), so it fills where the market is then — not
+at the leg. EXPD showed all three ways that went unsaid: Talos read `enter` at 198.60 on a 196 plan
+("entering at the plan's 196, not chasing" — the prompt had told it a priced enter rests at the
+plan's price), the card said "filled in at your level", the user confirmed 1h47m later, the fill was
+198.81, and the setup recorded 196. Now:
+
+- **The prompt** says a confirmed entry fills at market, and that price past the level means `wait`
+  with a guard at the level (or `edit`).
+- **The card** states the price at the read against the plan, with the R:R it now carries
+  (`setup.schema.entryDrift`, on the payload as `drift`).
+- **The confirm re-prices** (`ideaExecution.priceMovedRefusal`): worse than the plan by more than a
+  tenth of its risk (`ENTRY_DRIFT_TOLERANCE_R`) is refused once — 409 `price_moved` with the
+  numbers — and `OrderConfirmDialog` shows them with **Buy at market anyway** (Sell, on a short);
+  that press carries `acceptPrice`. Past the stop is FINAL — 409 `past_stop`, no press places it, the
+  dialog offers none and the card says re-draw. No live price → no verdict, the order places as before.
+- **The fill is the broker's** (`positionManage.brokerEntryPrice`, size-weighted over the accounts,
+  back in the plan's price space): the first post-fill wake stamps it, the plan's price only when no
+  broker answers. A broker venue whose slot has no positionId yet is retried each minute for
+  `FILL_PRICE_WAIT_MS` (30 min) rather than stamped from the plan for good.
+  `scripts/backfill-setup-fill-price.mjs` corrects positions stamped before.
 
 What the level still decides is WHICH leg (`firingLeg`): the one price is at when the wake resolved
 to a specific zone, else the scenario's first unfilled leg. `hit` is still computed and still told to

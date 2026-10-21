@@ -35,7 +35,9 @@ api/
                               the authored assetClass (null → the client's symbol heuristic) and
                               the owning callId. §1 flagged it homeless inside broker.controller;
                               §4 placed it here, beside the two maps it reads
-    ideaExecution.service.js  placeOrdersForIdea / placeRestingEntryForIdea / triggerEntryNow ("Buy now")
+    ideaExecution.service.js  placeOrdersForIdea / placeRestingEntryForIdea / triggerEntryNow ("Buy now").
+                              A setup is re-priced at confirm (priceMovedRefusal → 409 price_moved
+                              with setup.schema.entryDrift) unless the press carries acceptPrice
     exitOrders.service.js     in-position exit (re)arming — through buildExitOrder, so the basis offset is
                               applied once, by the one helper, on this path as on placement
   mentor/                 (gone, unified-chat 8e — Mentor answers in the session; its setups are api/setups. What a
@@ -530,7 +532,11 @@ services/
                           sessionStartMs, and nextCandleCloseMs(symbol, assetClass, rung, nowMs) —
                           the ONE place "when does the next `rung` candle close for this instrument"
                           is computed (session-aligned intraday, session close for `day`, first close
-                          of the next session when shut), which is Talos's whole schedule. Four
+                          of the next session when shut), which is Talos's whole schedule. Where an
+                          intraday bar STARTS is barStartMs (2026-10-21) — 09:30 ET for an equity,
+                          ET midnight futures/forex, UTC midnight crypto — taken by the schedule, the
+                          FMP dedupe and aggregateCandles (barBucketOf), so a 4hr bar is the same
+                          09:30–13:30 bar in all three. Four
                           calendars — crypto 24/7 · forex 24/5 · CME index futures near-24/5 · US
                           equity RTH. sessionFor is the ONE classifier (explicit asset_class first,
                           symbol heuristic second). NO holidays or half-days, and no non-US exchange
@@ -891,7 +897,9 @@ services/
                             row with it (manageApplied → repo.update's journal seam). Kind-BLIND — the caller
                             passes `entity` (owns position_state) + `holder` (owns brokerOrders); for a
                             setup they are the same doc, and the split exists for kinds where they
-                            are not.
+                            are not. brokerEntryPrice (2026-10-21): what the broker actually filled,
+                            size-weighted over the accounts, in the plan's price space — Talos stamps
+                            the fill from it, not from the plan's leg
                             Execution contract: move_stop{new_stop} take_partial{size_pct}
                             exit_now{}. MANAGE_VERBS is a GATE as of 2026-09-29 — applyManage asks
                             it before anything else, on every venue. It never did, so the set was
@@ -1018,7 +1026,9 @@ providers/
                                 9055 rows from 2026-09-28. The LLM string's own 40-row cap now says "the 40 soonest
                                 of N" — the same silent-hole bug one layer up.
                                 fmp.price.provider.js = live quote + candles (paper feed); week/month
-                                aggregated from daily EOD via groupOhlcByPeriod (FMP has no native week/month endpoint)
+                                aggregated from daily EOD via groupOhlcByPeriod (FMP has no native week/month endpoint).
+                                candles.provider (the router) holds its FALLBACK to the bar asked for: Yahoo has no
+                                2hr/4hr and answers 1h, so those fold into session bars there (barBucketOf, 2026-10-21)
   chartImg.provider.js          chart-img (TradingView) PNG — now the FALLBACK behind the own-chart
                                 renderer (services/chartRender); still primary when OWN_CHART_RENDER=false
   ctrader.provider.js  ctrader.session.provider.js (getTrendbars + trendbarToOHLCV)  ctrader.ws.provider.js
@@ -1090,6 +1100,9 @@ monitoring/
                             declared, nothing when it was null. clampExpensiveGap floors at 1 (the safe
                             direction for a field the model may not fill) and caps at 24 — the only
                             backstop for a setup whose completion has no price to guard
+                            OFF SWITCH (2026-10-21): config.talosCheapTier (TALOS_CHEAP_TIER, opt-in) —
+                            off, a would-be cheap wake is the full read; a sleep stays a sleep. The
+                            replay that turned it off: scripts/eval/talos-replay/cheap-tier-replay.mjs
   talos.cheap.js            the CHEAP read (2026-09-23): one model call, NO tools, no vision, its own
                             model knob (TALOS_CHEAP_MODEL, default Haiku 4.5) and its own ledger key
                             (`talosCheap`). Answers is-it-fired + should-the-expensive-read-run, three
@@ -1099,6 +1112,9 @@ monitoring/
                             state, a condition the model skipped, junk, a dead provider and an
                             unparseable reply ALL escalate; the model may ask for a read but can never
                             decline one. No verdict vocabulary, no guards, no order ever placed off it
+                            OFF by default since 2026-10-21 (talos.tiers). cheapWatch reads the rung the
+                            expensive read declared from monitor_state.watch (it read a top-level field
+                            nothing writes until that date)
   talos.gates.js            its PURE tier, split out 2026-09-15: the zone/scenario gates, guard
                             resolution (_hitFromGuard), the in-position arithmetic (rMultiple /
                             computeMetrics — R, MAE, MFE for the read and the UI), the validity + breach
@@ -1106,6 +1122,9 @@ monitoring/
                             latchPatch, costPatch). No IO, no clock beyond an explicit nowMs.
                             positionGate / reviewDue went 2026-09-17 — nothing decides WHETHER to read
                             any more, only whether a leg is watched
+                            ripeStepDown (2026-10-21): a  the read calls RIPE (only the trigger left)
+                            moves the next look to the finest pace rung, the next close, and an entry
+                            guard at the firing leg — the code decides the pacing, the model only says ripe
   talos.assess.js           the setup read (readiness + in-position). Conditions are PROSE with a
                             weight/mode, graded one entry per declared id — the model goes and checks
                             them with the shared assessTools kit rather than being pre-fetched at.

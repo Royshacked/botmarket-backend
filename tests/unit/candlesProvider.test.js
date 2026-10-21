@@ -79,3 +79,34 @@ test('the real _deps expose the flag live, not a boot-time snapshot', () => {
     assert.equal(typeof _deps.getFmpCandles, 'function')
     assert.equal(typeof _deps.getMassiveAggregates, 'function')
 })
+
+// ─── The fallback holds a 2hr/4hr request to its own bars (code review 2026-10-21) ──
+// Yahoo has no 2hr/4hr interval and answers both with 1h bars. Before this, a 4hr request that fell
+// back came back as hourlies labelled 4hr, and anything reading the last closed bar judged an hourly.
+
+const ETs = (iso) => Math.floor(Date.parse(iso) / 1000)
+const HOURLIES = ['13:30', '14:30', '15:30', '16:30', '17:30', '18:30', '19:30']   // 09:30–15:30 ET, EDT
+    .map((t, i) => ({ timestamp: ETs(`2026-10-19T${t}:00Z`), open: 100 + i, high: 101 + i, low: 99 + i, close: 100.5 + i, volume: 1 }))
+
+test('fallback asked for 4hr folds the hourlies into the session\'s 09:30 and 13:30 bars', async () => {
+    const out = await getTickerAggregates('EXPD', { timeSpan: 'hour', multiplier: 4 }, deps({
+        fmp: async () => null, massive: async () => HOURLIES,
+    }))
+    assert.deepEqual(out.map(b => new Date(b.timestamp * 1000).toISOString()), ['2026-10-19T13:30:00.000Z', '2026-10-19T17:30:00.000Z'])
+    assert.equal(out[0].close, 103.5, 'the 12:30 hourly closes the 09:30 bar')
+    assert.equal(out[1].low, 103, 'the afternoon bar is 13:30–16:00 only')
+})
+
+test('fallback with the flag OFF is held to the bar too', async () => {
+    const out = await getTickerAggregates('EXPD', { timeSpan: 'hour', multiplier: 2 }, deps({
+        useFmp: false, massive: async () => HOURLIES,
+    }))
+    assert.equal(out.length, 4, '09:30, 11:30, 13:30, 15:30')
+})
+
+test('a 1hr or daily fallback is passed through untouched', async () => {
+    const hourly = await getTickerAggregates('EXPD', { timeSpan: 'hour', multiplier: 1 }, deps({ fmp: async () => null, massive: async () => HOURLIES }))
+    assert.equal(hourly, HOURLIES)
+    const daily = await getTickerAggregates('EXPD', SPEC, deps({ fmp: async () => null, massive: async () => [ROW] }))
+    assert.deepEqual(daily, [ROW])
+})

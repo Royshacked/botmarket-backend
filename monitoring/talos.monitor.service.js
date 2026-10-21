@@ -317,8 +317,15 @@ async function _checkPosition(setup, nowMs, deps) {
     // the off-hours gate so a setup filled at the close has its position_state before the open.
     // The BROKER's fill first: a confirmed entry goes out at market, so the plan's price is only
     // what was hoped for. The plan's price is the fallback when no broker answers (manual venue).
-    const fillPrice = toNum(await deps.getFillPrice(setup))
-        ?? toNum(ps.entry?.intended) ?? legPrice(_legById(setup, setup.armed_leg_id))
+    const paid = toNum(await deps.getFillPrice(setup))
+    // NOT YET is not NO. This wake runs once — it stamps `fill_at` — so stamping the plan's price
+    // because the execution feed has not linked a positionId yet would make it permanent. A broker
+    // venue with an unlinked slot is retried each minute for FILL_PRICE_WAIT_MS, then gives up.
+    if (paid == null && _fillPending(setup, nowMs)) {
+        await deps.persist(setup.id, _wakePatch(setup, new Date(nowMs + FILL_RETRY_MS).toISOString()), null)
+        return { reason: 'awaiting_fill_price' }
+    }
+    const fillPrice = paid ?? toNum(ps.entry?.intended) ?? legPrice(_legById(setup, setup.armed_leg_id))
     const fillAtMs  = setup.ordersPlacedAt ?? setup.entryTriggeredAt ?? nowMs
     // The WORKING stop, chosen by price rather than by array position (setup.schema stopEdge).
     const stop = stopEdge(setup)
@@ -607,8 +614,17 @@ async function _applyVerdict(setup, hit, raw, nowMs, reason, price, deps) {
     // A RIPE wait steps the next look down (talos.gates ripeStepDown): the finest rung, the next
     // close, an entry guard at the level. Otherwise the read's own pacing stands.
     const ripe       = ripeStepDown(setup, scenario, raw, clampGuards(raw.guards, price), price)
+    // What is RECORDED as ripe is what was ACTED on: a "ripe" on a damaged premise or a non-wait
+    // changed nothing, and the journal must not explain a pace change that never happened.
+    raw = { ...raw, ripe: ripe != null }
     const armedNow   = ripe?.guards ?? clampGuards(raw.guards, price)
-    const nextRung   = ripe?.rung ?? resolveRung(raw.next_timeframe, setup)
+    // The rung a step-down came FROM, so the step-down is not a one-way door: a later read that is
+    // not ripe and names no rung this setup may use goes back up, instead of paying for a full
+    // read on every fine close for the rest of its life.
+    const steppedFrom = setup.monitor_state?.stepped_from ?? null
+    const nextRung   = ripe?.rung
+        ?? resolveRung(raw.next_timeframe, setup)
+        ?? (steppedFrom ? resolveRung(steppedFrom, setup) : null)
     const assessment = _assessmentRecord({ nowMs, reason, leg: armed, scenario, raw, verdict: raw.verdict, conditions, price, rung })
     const nextAt     = _nextReadAt(setup, nowMs, nextRung ?? rung, deps)
 
@@ -617,6 +633,9 @@ async function _applyVerdict(setup, hit, raw, nowMs, reason, price, deps) {
         'monitor_state.memo':            raw.memo_update ?? setup.monitor_state?.memo ?? null,
         'monitor_state.last_assessment': assessment,
         ...(nextRung ? { 'monitor_state.timeframe': nextRung } : {}),
+        // Kept across consecutive ripe reads (the FIRST rung stepped down from), cleared by any read
+        // that is not ripe — the way back up is used once.
+        'monitor_state.stepped_from': ripe ? (steppedFrom ?? setup.monitor_state?.timeframe ?? rung) : null,
         // Written WHOLE on every read, never merged: what the model does not re-arm is forgotten.
         'monitor_state.guards': armedNow,
         // The two fields that pace the NEXT expensive read and configure the cheap passes between
@@ -660,6 +679,10 @@ async function _applyVerdict(setup, hit, raw, nowMs, reason, price, deps) {
         const executable = {
             ...setup, ...projection,
             quantity: legQuantity(scenario, leg.id) ?? projection.quantity,
+            // The FIRING leg, so the card's drift (entryDrift reads armed_leg_id) is measured from
+            // the leg this confirm places — the same one the confirm-time check reads once persisted.
+            armed_leg_id: leg.id,
+            armed_scenario_id: scenario?.id ?? setup.armed_scenario_id ?? null,
         }
         const patch = {
             ...base, ...projection,
@@ -806,6 +829,20 @@ export function _nextReadAt(setup, nowMs, rung, deps = _deps) {
 }
 
 /** The three fields every wake writes. `woke_on` is ONE-SHOT: it describes this wake and no later one. */
+// How long the first post-fill wake waits for a broker venue to link its position (and so its
+// fill price) before it stamps the plan's price instead, and how often it looks meanwhile.
+export const FILL_PRICE_WAIT_MS = 30 * 60_000
+const FILL_RETRY_MS = 60_000
+
+/** A broker venue whose fill cannot be read YET: a slot with no positionId, inside the wait. Pure. */
+function _fillPending(setup, nowMs) {
+    if (isSelfExecuted(setup.broker)) return false
+    const slots = Array.isArray(setup.brokerOrders) ? setup.brokerOrders : []
+    if (!slots.some(b => b?.positionId == null)) return false
+    const placedAt = setup.ordersPlacedAt ?? setup.entryTriggeredAt ?? nowMs
+    return nowMs - placedAt < FILL_PRICE_WAIT_MS
+}
+
 function _wakePatch(setup, nextAt) {
     return {
         'monitor_state.check_count':   (setup.monitor_state?.check_count ?? 0) + 1,

@@ -100,10 +100,11 @@ export function buildSetupEntryConfirm(setup, assessment = null) {
     // price has moved off the plan the card says so, with the R:R it now carries; the dialog
     // re-prices at the moment of Confirm (entryDrift, ideaExecution).
     const drift = entryDrift(setup, assessment?.price)
+    const short = setup?.direction === 'short'
     const where = drift?.adverse
         ? drift.pastStop
-            ? ` Price is ${fmtNum(drift.live)} — already past your stop. Confirming would buy at market into a broken plan.`
-            : ` Price is ${fmtNum(drift.live)}, ${fmtNum(Math.abs(drift.slippage))} ${setup?.direction === 'short' ? 'below' : 'above'} your ${fmtNum(drift.planned)} plan${drift.liveRr != null ? ` — R:R now ${drift.liveRr} (planned ${drift.plannedRr})` : ''}. Confirming buys at market.`
+            ? ` Price is ${fmtNum(drift.live)} — already past your stop, so this plan is broken and cannot be placed. Re-draw it with Mentor.`
+            : ` Price is ${fmtNum(drift.live)}, ${fmtNum(Math.abs(drift.slippage))} ${short ? 'below' : 'above'} your ${fmtNum(drift.planned)} plan${drift.liveRr != null ? ` — R:R now ${drift.liveRr} (planned ${drift.plannedRr})` : ''}. Confirming ${short ? 'sells' : 'buys'} at market.`
         : ' Confirm to place your order at market.'
 
     return {

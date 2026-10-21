@@ -201,3 +201,17 @@ test('every invalidation card is owner-scoped and routes to Mentor', () => {
         assert.equal(card.payload.setupId, SETUP.id, kind)
     }
 })
+
+test('a short off its plan is SOLD at market, not bought', () => {
+    const SHORT = { ...EXPD, direction: 'short', entry_legs: [{ id: 's3e1', price: 100 }], stop_legs: [{ price: 105 }], target_legs: [{ price: 90 }] }
+    const card = buildSetupEntryConfirm(SHORT, { verdict: 'enter', price: 98 })
+    assert.match(card.content, /2\.00 below your 100\.00 plan/)
+    assert.match(card.content, /Confirming sells at market\./)
+    assert.doesNotMatch(card.content, /buys/)
+})
+
+test('past the stop the card says the plan cannot be placed — no "confirm anyway"', () => {
+    const card = buildSetupEntryConfirm(EXPD, { verdict: 'enter', price: 189 })
+    assert.match(card.content, /cannot be placed/)
+    assert.doesNotMatch(card.content, /Confirming (buys|sells)/)
+})

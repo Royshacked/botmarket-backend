@@ -1,6 +1,6 @@
 import { INVALIDATION } from '../services/entity/vocabulary.js'
 import { toNum } from '../services/format.util.js'
-import { scenarioLabel, legPrice, paceRungs, firingLeg, clampGuards } from '../services/setup.schema.js'
+import { scenarioLabel, legPrice, paceRungs, firingLeg, clampGuards, normalizePremise } from '../services/setup.schema.js'
 
 // Talos's PURE TIER — every decision the monitor makes without touching the network.
 //
@@ -422,11 +422,11 @@ export function costPatch(setup, calls) {
  * @param {object}   raw       the read's answer
  * @param {object[]} guards    the read's guards, already clamped
  * @param {?number}  price
- * @returns {null | { rung: string, expensiveDue: 1, guards: object[], level: ?number }}
+ * @returns {null | { rung: string, expensiveDue: 0, guards: object[], level: ?number }}
  */
 export function ripeStepDown(setup, scenario, raw, guards, price) {
     if (raw?.ripe !== true || raw.verdict !== 'wait') return null
-    if (String(raw.premise ?? 'intact') !== 'intact') return null
+    if (normalizePremise(raw.premise) !== 'intact') return null
 
     const rung  = paceRungs(setup).at(-1) ?? null
     const level = legPrice(firingLeg(scenario))
@@ -436,7 +436,9 @@ export function ripeStepDown(setup, scenario, raw, guards, price) {
 
     return {
         rung,
-        expensiveDue: 1,
+        // ZERO, not one: talos.tiers counts a close as due only when the countdown is spent
+        // (`!(due > 0)`), so 1 would buy one more skipped close — the very close this exists for.
+        expensiveDue: 0,
         guards: clampGuards([...entryGuard, ...have], price),
         level: Number.isFinite(level) ? level : null,
     }

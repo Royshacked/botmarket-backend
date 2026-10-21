@@ -146,3 +146,13 @@ test('2hour, built from hourlies, is the session\'s own 2hr bars — never acros
         ])
     } finally { restore() }
 })
+
+test('dedup: a forex 4hour bar keeps its UTC grid — the 09:30 / ET-midnight anchor is equity only', async () => {
+    // EURUSD in January (EST): ET midnight is 05:00Z. Anchored there, a 08:00Z bar would be relabelled
+    // 05:00Z; the epoch floor it always had keeps it at 08:00Z.
+    const restore = stubFetch([row('2026-01-15 03:00:00')])   // 03:00 ET = 08:00Z
+    try {
+        const out = await getFmpCandles('EURUSD', { timeSpan: 'hour', multiplier: 4 })
+        assert.equal(new Date(out[0].timestamp * 1000).toISOString(), '2026-01-15T08:00:00.000Z')
+    } finally { restore() }
+})

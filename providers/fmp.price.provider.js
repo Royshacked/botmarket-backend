@@ -13,7 +13,7 @@ import { logger }         from '../services/logger.service.js'
 import { createTtlCache } from '../services/ttlCache.util.js'
 import { getJson }        from '../services/http.util.js'
 import { aggregateCandles } from '../services/candleInterval.util.js'
-import { tzOffsetMs, barStartMs, barBucketOf } from '../services/market.service.js'
+import { tzOffsetMs, barStartMs, barBucketOf, sessionFor } from '../services/market.service.js'
 import { config } from '../services/config.js'
 
 const LOG     = '[fmp.price]'
@@ -352,9 +352,16 @@ export async function getFmpCandles(ticker, options = {}) {
     const barMin = spec.interval.endsWith('min')
         ? parseInt(spec.interval, 10)
         : parseInt(spec.interval, 10) * 60
+    //
+    // EQUITY ONLY. FMP's forex/crypto bars are not known to share an ET-midnight grid, and a 4hr
+    // bar on a UTC grid would be relabelled an hour early for half the year (EST) by that anchor —
+    // so everything else keeps the epoch floor it always had.
+    const equity = sessionFor(sym, null) === 'equity'
     const bySlot = new Map()
     for (const c of mapped) {
-        const slot = Math.round(barStartMs(sym, null, c.timestamp * 1000, barMin) / 1000)
+        const slot = equity
+            ? Math.round(barStartMs(sym, null, c.timestamp * 1000, barMin) / 1000)
+            : Math.floor(c.timestamp / (barMin * 60)) * barMin * 60
         if (!bySlot.has(slot)) bySlot.set(slot, { ...c, timestamp: slot })
     }
     const deduped = [...bySlot.values()]

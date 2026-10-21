@@ -176,12 +176,14 @@ export const placeTradeIdeaOrders = _handle('placeTradeIdeaOrders', async (req, 
             // Not a failure: the market moved off the plan since the read. 409 + the numbers, so the
             // dialog can show them and the user's second press (acceptPrice) places at market.
             price_moved: [409, 'The price has moved off the plan'],
+            // Final: no second press places this one (priceMovedRefusal).
+            past_stop:   [409, 'Price is already past the stop — the plan is broken'],
         }
         return sendReason(res, result.reason, {
             overrides: PLACE, fallback: 500, fallbackMessage: 'Failed to place orders',
             extra: ['all_failed', 'no_price'].includes(result.reason)
                 ? { results: result.results, ...(result.symbol && { symbol: result.symbol }) }
-                : result.reason === 'price_moved' ? { drift: result.drift } : null,
+                : ['price_moved', 'past_stop'].includes(result.reason) ? { drift: result.drift } : null,
         })
     }
 

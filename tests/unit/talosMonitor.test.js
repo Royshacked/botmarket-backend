@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
     _isPreActive, _isExpiring, _nextReadAt, _checkSetup,
-    _nextStatus, _isPastExpiry, _effectiveVerdict, READ_LAG_MS, CLOSE_GRACE_MS,
+    _nextStatus, _isPastExpiry, _effectiveVerdict, READ_LAG_MS, CLOSE_GRACE_MS, FILL_PRICE_WAIT_MS,
 } from '../../monitoring/talos.monitor.service.js'
 import { isAssetOpen } from '../../services/market.service.js'
 // The pure tier — the decisions a wake makes before it spends anything. Split out of the monitor
@@ -819,6 +819,21 @@ test('an off-menu verdict is coerced to wait rather than acted on', async () => 
     assert.equal(res.verdict, 'wait')
 })
 
+// The card is built from the FIRING leg (code review 2026-10-21): with two entry legs, a stale
+// armed_leg_id must not make the card measure drift from a leg this confirm does not place.
+test('the entry card carries the firing leg, so its drift is measured from what the confirm places', async () => {
+    let carded = null
+    const two = { ...mk({ entry_legs: [{ id: 'ez1', price: 230, quantity: 50 }, { id: 'ez2', price: 238.6, quantity: 50 }] }, VENUE), armed_leg_id: 'stale', quantity: 50 }
+    await _checkSetup(two, T, stubDeps({
+        assess: async () => ({ verdict: 'enter', read: 'Now.', leg_id: 'ez2' }),
+        getPrice: async () => 238.6,
+        onCard: async (s) => { carded = s },
+    }))
+    assert.ok(carded, 'a card went out')
+    assert.notEqual(carded.armed_leg_id, 'stale', 'not the stale leg')
+    assert.ok(carded.entry_legs.some(l => l.id === carded.armed_leg_id), 'one of this scenario\'s own legs')
+})
+
 test('a failed assessment reschedules instead of firing a card', async () => {
     let carded = false
     const res = await _checkSetup(LIVE, T, stubDeps({
@@ -1036,6 +1051,33 @@ test('no broker answer (manual venue, unreachable) keeps the plan\'s price', asy
     const bad = stubDeps({ getFillPrice: async () => 'n/a' })
     await _checkSetup(armed, T, bad)
     assert.equal(bad.writes[0]['position_state.entry.fill_price'], planned, 'a garbage answer is no answer')
+})
+
+// NOT YET is not NO (code review 2026-10-21). The first post-fill wake runs once — it stamps
+// fill_at — so a broker venue whose execution feed has not linked a positionId yet must not have
+// the plan's price stamped for good. It retries for FILL_PRICE_WAIT_MS, then gives up.
+test('an unlinked broker slot defers the fill stamp instead of making the plan\'s price permanent', async () => {
+    const unlinked = { ...FILLED, armed_leg_id: FILLED.entry_legs[0].id, brokerOrders: [{ broker: 'ctrader', accountId: 'a1', orderId: 'o1', positionId: null, quantity: 100 }] }
+    const deps = stubDeps()
+    const res = await _checkSetup(unlinked, T, deps)
+    assert.equal(res.reason, 'awaiting_fill_price')
+    assert.equal(deps.writes[0]['position_state.entry.fill_price'], undefined, 'nothing stamped')
+    assert.equal(deps.writes[0]['monitor_state.next_check_at'], new Date(T + 60_000).toISOString(), 'looks again in a minute')
+})
+
+test('…and stamps the plan\'s price once the wait is over', async () => {
+    const stale = { ...FILLED, armed_leg_id: FILLED.entry_legs[0].id, ordersPlacedAt: T - FILL_PRICE_WAIT_MS - 1,
+        brokerOrders: [{ broker: 'ctrader', accountId: 'a1', orderId: 'o1', positionId: null, quantity: 100 }] }
+    const deps = stubDeps()
+    const res = await _checkSetup(stale, T, deps)
+    assert.equal(res.promoted, true)
+    assert.ok(Number.isFinite(deps.writes[0]['position_state.entry.fill_price']))
+})
+
+test('a linked slot the broker cannot price is not waited on — that is a real "no answer"', async () => {
+    const linked = { ...FILLED, armed_leg_id: FILLED.entry_legs[0].id, brokerOrders: [{ broker: 'ctrader', accountId: 'a1', orderId: 'o1', positionId: 'p1', quantity: 100 }] }
+    const res = await _checkSetup(linked, T, stubDeps())
+    assert.equal(res.promoted, true)
 })
 
 // The fill also SEEDS what an in-position gate measures against. Without this the gate reads

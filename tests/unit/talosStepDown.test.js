@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { ripeStepDown } from '../../monitoring/talos.gates.js'
 import { clampGuards, normalizeSetup } from '../../services/setup.schema.js'
 import { _checkSetup } from '../../monitoring/talos.monitor.service.js'
+import { tierFor } from '../../monitoring/talos.tiers.js'
 
 // THE STEP-DOWN (talos.gates ripeStepDown). A `wait` whose only missing piece is the trigger is
 // "ripe": the next look moves to the setup's FINEST rung, on its very next close, with an entry
@@ -24,7 +25,7 @@ const RIPE = { verdict: 'wait', premise: 'intact', ripe: true }
 test('a ripe wait: the finest rung, the next close, and an entry guard at the level', () => {
     const r = ripeStepDown(EXPD, S3, RIPE, [], 197.6)
     assert.equal(r.rung, '2hr', 'pace_rungs run coarse → fine; the last is the finest')
-    assert.equal(r.expensiveDue, 1)
+    assert.equal(r.expensiveDue, 0, 'spent — talos.tiers reads a close as due only at 0')
     assert.deepEqual(r.guards, [{ price: 196, direction: 'below', means: 'entry' }],
         'price is above the level, so it waits for the pullback')
     assert.equal(r.level, 196)
@@ -113,7 +114,7 @@ test('monitor: a ripe wait on a 4hr setup writes the 2hr rung, a read next close
     const $set = d.writes.at(-1)
     assert.ok($set, JSON.stringify(res))
     assert.equal($set['monitor_state.timeframe'], '2hr', 'not the 4hr the read asked for')
-    assert.equal($set['monitor_state.expensive_due'], 1, 'not the 3 closes it asked for')
+    assert.equal($set['monitor_state.expensive_due'], 0, 'not the 3 closes it asked for')
     assert.deepEqual($set['monitor_state.guards'][0], { price: 196, direction: 'below', means: 'entry' })
     assert.ok($set['monitor_state.guards'].some(g => g.means === 'invalidation'), 'its own guard survives')
     assert.equal($set['monitor_state.last_assessment'].ripe, true)
@@ -128,4 +129,52 @@ test('monitor: a plain wait keeps the pace the read asked for', async () => {
     assert.equal($set['monitor_state.expensive_due'], 3)
     assert.deepEqual($set['monitor_state.guards'], [])
     assert.equal($set['monitor_state.last_assessment'].ripe, false)
+})
+
+// ─── Code review 2026-10-21 ───────────────────────────────────────────────────
+
+test('the countdown the step-down writes makes the very next close a FULL read, watch or no watch', async () => {
+    const d = deps(async () => ({ verdict: 'wait', premise: 'intact', ripe: true, read: 'Only the pullback left.', watch: null, guards: [] }))
+    await _checkSetup(LIVE, T, d)
+    const $set = d.writes.at(-1)
+    const after = { ...LIVE, monitor_state: { ...LIVE.monitor_state, expensive_due: $set['monitor_state.expensive_due'], watch: $set['monitor_state.watch'] } }
+    assert.equal(tierFor(after, { reason: 'candle', cheapTier: false }), 'expensive', 'a 1 here would have slept through it')
+    // With the cheap tier back ON, the spent countdown makes it expensive for every mode but
+    // `cheap_only`, which by design is always triaged (and escalates on anything it cannot settle).
+    assert.equal(tierFor({ ...after, read_mode: 'cheap_then_expensive' }, { reason: 'candle', cheapTier: true }), 'expensive')
+    assert.equal(tierFor(after, { reason: 'candle', cheapTier: true }), 'cheap', 'this fixture derives cheap_only')
+})
+
+test('the step-down is not a one-way door: a later read that names no usable rung goes back up', async () => {
+    const ripeRead = deps(async () => ({ verdict: 'wait', premise: 'intact', ripe: true, read: 'x', guards: [] }))
+    await _checkSetup(LIVE, T, ripeRead)
+    const stepped = ripeRead.writes.at(-1)
+    assert.equal(stepped['monitor_state.stepped_from'], '4hr', 'where it came from is remembered')
+
+    const after = { ...LIVE, monitor_state: { ...LIVE.monitor_state, timeframe: '2hr', stepped_from: '4hr', last_assessment: { at: 'earlier' } } }
+    const plain = deps(async () => ({ verdict: 'wait', premise: 'intact', read: 'Drifted away.', next_timeframe: '1min', guards: [] }))
+    await _checkSetup(after, T, plain)
+    const back = plain.writes.at(-1)
+    assert.equal(back['monitor_state.timeframe'], '4hr', 'an off-ladder rung falls back to where it stepped from')
+    assert.equal(back['monitor_state.stepped_from'], null, 'and the way back is used once')
+})
+
+test('a second ripe read keeps the FIRST rung it stepped down from', async () => {
+    const again = { ...LIVE, monitor_state: { ...LIVE.monitor_state, timeframe: '2hr', stepped_from: '4hr' } }
+    const d = deps(async () => ({ verdict: 'wait', premise: 'intact', ripe: true, read: 'Still close.', guards: [] }))
+    await _checkSetup(again, T, d)
+    assert.equal(d.writes.at(-1)['monitor_state.stepped_from'], '4hr', 'not 2hr')
+})
+
+test('"ripe" on a damaged premise changed nothing, so nothing records it as ripe', async () => {
+    const d = deps(async () => ({ verdict: 'wait', premise: 'damaged', ripe: true, read: 'Hurt.', next_timeframe: '4hr', guards: [] }))
+    await _checkSetup(LIVE, T, d)
+    assert.equal(d.writes.at(-1)['monitor_state.last_assessment'].ripe, false)
+    assert.equal(d.entries.at(-1).ripe, undefined)
+    assert.equal(d.writes.at(-1)['monitor_state.timeframe'], '4hr')
+})
+
+test('an off-vocabulary premise is read the way the rest of the monitor reads it', () => {
+    const r = ripeStepDown(EXPD, S3, { ...RIPE, premise: 'Intact' }, [], 197.6)
+    assert.ok(r, 'normalizePremise, not a raw string compare')
 })
