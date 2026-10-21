@@ -102,14 +102,47 @@ test('dedup: 15min slot normalisation — off-boundary bar snapped to slot floor
     } finally { restore() }
 })
 
-test('dedup: 1hour slot normalisation — off-boundary bar snapped to slot floor', async () => {
-    // "10:05:00" (5 min into the 10:00–11:00 slot) should normalise to 10:00:00.
+test('dedup: 1hour slot normalisation — snapped to the EQUITY bar, which starts at :30', async () => {
+    // An equity's hourly bars run from the 09:30 open, so "10:35:00" (5 min into the 10:30–11:30
+    // bar) normalises to 10:30:00. A plain epoch floor said 10:00 — half an hour early on every
+    // hour-scale bar — and the canonical "09:30" row became "09:00".
     const restore = stubFetch([
-        row('2026-09-03 10:05:00'),
+        row('2026-09-03 10:35:00'),
+        row('2026-09-03 09:30:00'),
     ])
     try {
         const out = await getFmpCandles('TSLA', { timeSpan: 'hour', multiplier: 1 })
-        assert.equal(out.length, 1)
-        assert.equal(out[0].timestamp, fmpDateToEpochSec('2026-09-03 10:00:00'))
+        assert.equal(out.length, 2)
+        assert.equal(out[0].timestamp, fmpDateToEpochSec('2026-09-03 09:30:00'), 'the open bar keeps its own stamp')
+        assert.equal(out[1].timestamp, fmpDateToEpochSec('2026-09-03 10:30:00'))
+    } finally { restore() }
+})
+
+test('dedup: FMP\'s native 4hour bars keep their 09:30 / 13:30 stamps', async () => {
+    const restore = stubFetch([
+        row('2026-10-19 13:30:00'),
+        row('2026-10-19 09:30:00'),
+    ])
+    try {
+        const out = await getFmpCandles('EXPD', { timeSpan: 'hour', multiplier: 4 })
+        assert.deepEqual(out.map(c => c.timestamp), [
+            fmpDateToEpochSec('2026-10-19 09:30:00'),
+            fmpDateToEpochSec('2026-10-19 13:30:00'),
+        ], 'not 08:00 / 12:00')
+    } finally { restore() }
+})
+
+test('2hour, built from hourlies, is the session\'s own 2hr bars — never across two days', async () => {
+    // Seven hourlies a day. Counted in pairs from the newest, day two's first pair would have been
+    // [day-one 15:30, day-two 09:30]; bucketed, each day is 09:30, 11:30, 13:30, 15:30 (a stub).
+    const day = d => ['09:30', '10:30', '11:30', '12:30', '13:30', '14:30', '15:30'].map(t => row(`${d} ${t}:00`))
+    const restore = stubFetch([...day('2026-10-19'), ...day('2026-10-20')].reverse())
+    try {
+        const out = await getFmpCandles('EXPD', { timeSpan: 'hour', multiplier: 2 })
+        const stamps = out.map(c => new Date(c.timestamp * 1000).toISOString())
+        assert.deepEqual(stamps, [
+            '2026-10-19T13:30:00.000Z', '2026-10-19T15:30:00.000Z', '2026-10-19T17:30:00.000Z', '2026-10-19T19:30:00.000Z',
+            '2026-10-20T13:30:00.000Z', '2026-10-20T15:30:00.000Z', '2026-10-20T17:30:00.000Z', '2026-10-20T19:30:00.000Z',
+        ])
     } finally { restore() }
 })

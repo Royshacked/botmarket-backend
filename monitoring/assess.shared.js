@@ -1,5 +1,5 @@
 import { getTickerAggregates } from '../providers/candles.provider.js'
-import { CANDLE_CFG, aggregateCandles, _formatIndicator } from '../services/tools/marketData.tools.js'
+import { CANDLE_CFG, aggregateCandles, aggregateBucket, _formatIndicator } from '../services/tools/marketData.tools.js'
 import { sessionStartMs } from '../services/market.service.js'
 import { isIntradayTimeframe } from '../services/timeframe.service.js'
 import { userService } from '../api/user/user.service.js'
@@ -228,7 +228,8 @@ export async function candleRows(asset, tf) {
     const cfg  = CANDLE_CFG[tf] ?? CANDLE_CFG['day']
     const from = Date.now() - cfg.windowDays * 24 * 60 * 60 * 1000
     const raw  = await getTickerAggregates(String(asset).toUpperCase(), { timeSpan: cfg.timeSpan, multiplier: cfg.multiplier, from })
-    const bars = cfg.aggregate ? aggregateCandles(raw, cfg.aggregate) : raw
+    const sym  = String(asset).toUpperCase()
+    const bars = cfg.aggregate ? aggregateCandles(raw, cfg.aggregate, aggregateBucket(sym, cfg)) : raw
     return (bars ?? []).slice(-cfg.count)
 }
 

@@ -13,7 +13,7 @@ import { logger }         from '../services/logger.service.js'
 import { createTtlCache } from '../services/ttlCache.util.js'
 import { getJson }        from '../services/http.util.js'
 import { aggregateCandles } from '../services/candleInterval.util.js'
-import { tzOffsetMs } from '../services/market.service.js'
+import { tzOffsetMs, barStartMs, barBucketOf } from '../services/market.service.js'
 import { config } from '../services/config.js'
 
 const LOG     = '[fmp.price]'
@@ -343,17 +343,23 @@ export async function getFmpCandles(ticker, options = {}) {
 
     // FMP occasionally emits two rows within the same bar period — e.g. "10:30:00" and "10:30:30"
     // for a 5-min bar — causing duplicate candles on the chart. Normalise every timestamp to its
-    // slot floor and keep the first occurrence (the array is ascending, so the canonical ":00" row
-    // wins when it exists; an off-boundary-only bar is corrected in place).
-    const barSec = spec.interval.endsWith('min')
-        ? parseInt(spec.interval, 10) * 60
-        : parseInt(spec.interval, 10) * 3600
+    // slot start and keep the first occurrence (the array is ascending, so the canonical row wins
+    // when it exists; an off-boundary-only bar is corrected in place).
+    //
+    // The slot is the instrument's OWN bar (market.service barStartMs): an equity's hourly bars
+    // start at :30 from the 09:30 open. A plain floor of the epoch stamped the 09:30 bar "09:00"
+    // and the 09:30–13:30 4hr bar "08:00", so every hour-scale bar was labelled half an hour early.
+    const barMin = spec.interval.endsWith('min')
+        ? parseInt(spec.interval, 10)
+        : parseInt(spec.interval, 10) * 60
     const bySlot = new Map()
     for (const c of mapped) {
-        const slot = Math.floor(c.timestamp / barSec) * barSec
+        const slot = Math.round(barStartMs(sym, null, c.timestamp * 1000, barMin) / 1000)
         if (!bySlot.has(slot)) bySlot.set(slot, { ...c, timestamp: slot })
     }
     const deduped = [...bySlot.values()]
 
-    return spec.aggregate > 1 ? aggregateCandles(deduped, spec.aggregate) : deduped
+    return spec.aggregate > 1
+        ? aggregateCandles(deduped, spec.aggregate, barBucketOf(sym, null, barMin * spec.aggregate))
+        : deduped
 }

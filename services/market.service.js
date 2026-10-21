@@ -410,11 +410,52 @@ export function sessionStartMs(symbol, assetClass, date = new Date()) {
 // at 20:00 ET closes at 16:00 when the equity session does, and a daily bar closes when the
 // session closes, not at midnight.
 //
-// Alignment follows the providers' bars: intraday rungs are clock-aligned (multiples of the width
-// from midnight — ET for session-bound instruments, UTC for crypto), and a bar cut short by the
-// session close closes WITH the session. Daily/weekly/monthly bars close at the session's daily
-// close (equity 16:00 ET, futures/forex 17:00 ET, crypto 00:00 UTC), on the last trading day of
-// the week/month respectively. Holidays are not excluded — same approximation as the gate.
+// Alignment follows the providers' bars, and barStartMs below is the one statement of it: intraday
+// bars are multiples of the width from an ANCHOR — the 09:30 ET open for an equity (FMP's hourly
+// bars run 09:30, 10:30 … and its 4hr bars 09:30–13:30, 13:30–16:00), ET midnight for futures and
+// forex, UTC midnight for crypto — and a bar cut short by the session close closes WITH the
+// session. Daily/weekly/monthly bars close at the session's daily close (equity 16:00 ET,
+// futures/forex 17:00 ET, crypto 00:00 UTC), on the last trading day of the week/month
+// respectively. Holidays are not excluded — same approximation as the gate.
+//
+// UNTIL 2026-10-21 EQUITY BARS WERE ANCHORED AT MIDNIGHT TOO, which is not where the provider puts
+// them: a 4hr read woke at 12:00 ET onto a bar that closes at 13:30, the FMP dedupe stamped the
+// 09:30 hourly bar "09:00", and the 2hr/4hr bars built from hourlies were counted back from the
+// newest bar, so they started somewhere different every day and spanned two sessions. EXPD
+// (2026-10-19) was read at 13:24 ET, six minutes before the retest bar it was waiting for closed.
+
+/**
+ * Where the `widthMin` intraday bar that contains `ms` STARTS, for this instrument. THE answer the
+ * scheduler (nextCandleCloseMs), the provider's dedupe (fmp.price) and the 2hr/4hr aggregation
+ * (candleInterval.aggregateCandles) all take, so a bar is the same bar in all three. Pure.
+ *
+ * @param {string} symbol
+ * @param {string|null} assetClass
+ * @param {number} ms        any instant inside the bar
+ * @param {number} widthMin  bar width in minutes
+ * @returns {number} epoch ms
+ */
+export function barStartMs(symbol, assetClass, ms, widthMin) {
+    const widthMs = widthMin * 60_000
+    const session = sessionFor(symbol, assetClass)
+    let anchor
+    if (session === 'crypto') {
+        const t = new Date(ms)
+        anchor = Date.UTC(t.getUTCFullYear(), t.getUTCMonth(), t.getUTCDate())
+    } else {
+        const { y, m, d } = _etParts(ms)
+        anchor = _etMs(y, m, d, session === 'equity' ? OPEN : 0)
+    }
+    return anchor + Math.floor((ms - anchor) / widthMs) * widthMs
+}
+
+/**
+ * barStartMs as a bucket key over EPOCH-SECOND candle timestamps — what aggregateCandles takes to
+ * build a `widthMin` bar from finer ones. Pure.
+ */
+export function barBucketOf(symbol, assetClass, widthMin) {
+    return tsSec => barStartMs(symbol, assetClass, tsSec * 1000, widthMin)
+}
 
 /** ET daily close, in minutes from midnight, per session. Crypto closes its day at UTC midnight. */
 const DAILY_CLOSE_MIN = { equity: CLOSE, futures: FUT_DAY_CLOSE, forex: FX_OPEN_CLOSE }
@@ -467,16 +508,8 @@ function _nextIntradayClose(symbol, assetClass, session, widthMin, nowMs) {
         ? nowMs
         : getMarketStatus(symbol, assetClass, new Date(nowMs)).nextOpenMs
 
-    // Clock-aligned from midnight in the instrument's zone, strictly after `start`.
-    let midnight
-    if (session === 'crypto') {
-        const t = new Date(start)
-        midnight = Date.UTC(t.getUTCFullYear(), t.getUTCMonth(), t.getUTCDate())
-    } else {
-        const { y, m, d } = _etParts(start)
-        midnight = _etMs(y, m, d, 0)
-    }
-    const candidate = midnight + (Math.floor((start - midnight) / widthMs) + 1) * widthMs
+    // The end of the bar `start` falls in — the same bar the provider serves (barStartMs).
+    const candidate = barStartMs(symbol, assetClass, start, widthMin) + widthMs
     if (session === 'crypto') return candidate
 
     // The session may shut before the clock boundary — then the bar closes with the session. The

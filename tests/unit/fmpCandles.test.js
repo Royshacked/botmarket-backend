@@ -2,6 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { fmpDateToEpochSec, fmpCandleSpec, groupOhlcByPeriod, etPeriodKey, etCalendarDate } from '../../providers/fmp.price.provider.js'
 import { aggregateCandles } from '../../services/candleInterval.util.js'
+import { barBucketOf } from '../../services/market.service.js'
 
 // Stage 2 build-step 1 (reference_fmp_pricing): the pure pieces of the FMP candle provider.
 // The timezone conversion is the critical one — FMP intraday dates are ET wall-clock, but the
@@ -59,6 +60,40 @@ test('groupSize 1 or empty → passthrough', () => {
     const rows = [bar(1, 1, 1, 1, 1, 1)]
     assert.equal(aggregateCandles(rows, 1), rows)
     assert.deepEqual(aggregateCandles([], 4), [])
+})
+
+// ── With a bucket: the instrument's real bars (market.service barBucketOf) ────
+// The EXPD hourlies of 2026-10-16 and -19 (FMP, as served): a 4hr read is the 09:30–13:30 and
+// 13:30–16:00 bars FMP itself publishes — the Oct 19 retest bar low 196.00, close 197.60.
+const ET = (d, t) => fmpDateToEpochSec(`${d} ${t}:00`)
+const EXPD_1H = [
+    ['2026-10-16', '09:30', 199.82, 200.42, 198.64, 198.96], ['2026-10-16', '10:30', 199.13, 199.49, 197.51, 197.53],
+    ['2026-10-16', '11:30', 197.5, 197.63, 194.17, 195.32],  ['2026-10-16', '12:30', 195.56, 196.17, 195.36, 195.81],
+    ['2026-10-16', '13:30', 195.92, 196.13, 195.36, 195.53], ['2026-10-16', '14:30', 195.61, 196.23, 195.51, 196.12],
+    ['2026-10-16', '15:30', 196, 196.2, 195.28, 195.83],
+    ['2026-10-19', '09:30', 196.9, 197.9, 196.29, 196.37],   ['2026-10-19', '10:30', 196.31, 196.83, 196, 196.79],
+    ['2026-10-19', '11:30', 196.71, 196.98, 196.46, 196.94], ['2026-10-19', '12:30', 196.9, 197.79, 196.82, 197.6],
+].map(([d, t, o, h, l, c]) => bar(ET(d, t), o, h, l, c, 1))
+
+test('bucketed: EXPD hourlies fold into FMP\'s own 4hr bars, not fours from the newest', () => {
+    const out = aggregateCandles(EXPD_1H, 4, barBucketOf('EXPD', null, 240))
+    assert.deepEqual(out.map(b => [b.timestamp, b.low, b.close]), [
+        [ET('2026-10-16', '09:30'), 194.17, 195.81],
+        [ET('2026-10-16', '13:30'), 195.28, 195.83],
+        [ET('2026-10-19', '09:30'), 196,    197.6],
+    ])
+    // Counted in fours from the newest, the same rows give a Friday "4hr" bar of 12:30–16:00 — a bar
+    // FMP never published, whose start moves with every new hourly. Its low hides the 11:30 wick.
+    const counted = aggregateCandles(EXPD_1H, 4)
+    assert.equal(counted[0].timestamp, ET('2026-10-16', '12:30'), 'the old way: a bar starting at 12:30')
+    assert.equal(counted[0].low, 195.28)
+})
+
+test('bucketed: an oldest bucket the window cut into is dropped; a forming newest is kept', () => {
+    const cut = EXPD_1H.slice(2)   // starts at 11:30 — half of the 09:30 bucket is missing
+    const out = aggregateCandles(cut, 4, barBucketOf('EXPD', null, 240))
+    assert.equal(out[0].timestamp, ET('2026-10-16', '13:30'), 'a 4hr bar with half its hours would lie about its range')
+    assert.equal(out.at(-1).timestamp, ET('2026-10-19', '09:30'))
 })
 
 // ── fmpCandleSpec (bar-spec → FMP fetch plan; null = fall back to Massive/Yahoo) ──

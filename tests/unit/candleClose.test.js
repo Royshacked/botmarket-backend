@@ -9,17 +9,19 @@ const ms  = (iso) => Date.parse(iso)
 const iso = (t) => new Date(t).toISOString()
 const at  = (sym, rung, from, cls = null) => iso(nextCandleCloseMs(sym, cls, rung, ms(from)))
 
-// ─── Intraday: clock-aligned, strictly after now ──────────────────────────────
+// ─── Intraday: the instrument's own bars, strictly after now ──────────────────
 
-test('an intraday rung closes on the next clock boundary, strictly after now', () => {
+test('an intraday rung closes on the next bar boundary, strictly after now', () => {
     assert.equal(at('AAPL', '5min',  '2026-07-15T18:03:00Z'), '2026-07-15T18:05:00.000Z')
     assert.equal(at('AAPL', '5min',  '2026-07-15T18:05:00Z'), '2026-07-15T18:10:00.000Z', 'exactly on a boundary → the NEXT one')
     assert.equal(at('AAPL', '15min', '2026-07-15T18:03:00Z'), '2026-07-15T18:15:00.000Z')
-    assert.equal(at('AAPL', '1hr',   '2026-07-15T18:03:00Z'), '2026-07-15T19:00:00.000Z')
+    // 14:03 ET: an equity's hourly bars run from the 09:30 open (13:30–14:30), so the next close is
+    // 14:30 ET — not the clock hour, which is where the provider does NOT put the bar.
+    assert.equal(at('AAPL', '1hr',   '2026-07-15T18:03:00Z'), '2026-07-15T18:30:00.000Z')
 })
 
-test('multi-hour rungs align to ET midnight for session-bound instruments and UTC for crypto', () => {
-    // 14:03 ET: ET-aligned 4hr bars close 12:00 / 16:00 / 20:00 ET → 16:00 ET = 20:00Z
+test('multi-hour rungs: an equity from its 09:30 open, futures/forex from ET midnight, crypto from UTC', () => {
+    // 14:03 ET: the equity 4hr bars are 09:30–13:30 and 13:30–16:00 (cut by the close) → 16:00 ET = 20:00Z
     assert.equal(at('AAPL',   '4hr', '2026-07-15T18:03:00Z'), '2026-07-15T20:00:00.000Z')
     // 18:03Z: UTC-aligned 4hr bars close 16:00Z / 20:00Z → 20:00Z
     assert.equal(at('BTCUSD', '4hr', '2026-07-15T18:03:00Z'), '2026-07-15T20:00:00.000Z')
@@ -48,8 +50,8 @@ test('a shut market closes the FIRST bar of the next session', () => {
     assert.equal(at('AAPL', '5min', '2026-07-15T20:30:00Z'), '2026-07-16T13:35:00.000Z')
     // Saturday → Monday 09:35 ET
     assert.equal(at('AAPL', '5min', '2026-07-18T16:00:00Z'), '2026-07-20T13:35:00.000Z')
-    // A 1hr rung at the open: the 09:00–10:00 ET clock bar closes at 10:00 ET
-    assert.equal(at('AAPL', '1hr',  '2026-07-15T07:00:00Z'), '2026-07-15T14:00:00.000Z')
+    // A 1hr rung at the open: the 09:30–10:30 ET bar closes at 10:30 ET
+    assert.equal(at('AAPL', '1hr',  '2026-07-15T07:00:00Z'), '2026-07-15T14:30:00.000Z')
     // Forex on Saturday → Sunday 17:00 ET open → first 15min bar closes 17:15 ET = 21:15Z
     assert.equal(at('EURUSD', '15min', '2026-07-18T16:00:00Z'), '2026-07-19T21:15:00.000Z')
 })
@@ -92,4 +94,27 @@ test('an unknown rung is null — the caller owns the fallback', () => {
 test('the explicit asset_class beats the symbol heuristic', () => {
     // 'XYZ' looks like an equity; told it is crypto, it pages on UTC and never waits for an open.
     assert.equal(at('XYZ', '5min', '2026-07-18T16:03:00Z', 'crypto'), '2026-07-18T16:05:00.000Z')
+})
+
+// ─── The equity session anchor (2026-10-21) ───────────────────────────────────
+// FMP's equity bars start at the 09:30 open: hourlies 09:30, 10:30 …; 4hr 09:30–13:30, 13:30–16:00.
+// Until this date the schedule was anchored at midnight and woke a 4hr read at 12:00 ET onto a bar
+// still forming until 13:30. EXPD (2026-10-19) was read at 13:24 ET, six minutes before the retest
+// bar it was waiting on closed, and judged the previous one.
+
+test('EXPD: a 4hr equity read lands on 13:30 and 16:00 ET, never 12:00', () => {
+    // 2026-10-19, EDT (ET = UTC-4)
+    assert.equal(at('EXPD', '4hr', '2026-10-19T13:31:00Z'), '2026-10-19T17:30:00.000Z', '09:31 ET → 13:30 ET')
+    assert.equal(at('EXPD', '4hr', '2026-10-19T17:24:00Z'), '2026-10-19T17:30:00.000Z', '13:24 ET → the bar closing at 13:30')
+    assert.equal(at('EXPD', '4hr', '2026-10-19T17:30:00Z'), '2026-10-19T20:00:00.000Z', 'at 13:30 → the session close')
+})
+
+test('a 2hr equity rung: 11:30, 13:30, 15:30, then the close', () => {
+    assert.equal(at('AAPL', '2hr', '2026-07-15T14:00:00Z'), '2026-07-15T15:30:00.000Z', '10:00 ET → 11:30 ET')
+    assert.equal(at('AAPL', '2hr', '2026-07-15T19:31:00Z'), '2026-07-15T20:00:00.000Z', '15:31 ET → the 15:30 bar ends with the session')
+})
+
+test('the anchor follows the clock change: winter bars still start at 09:30 ET', () => {
+    // 2026-12-02, EST (ET = UTC-5): 10:00 ET → the 09:30–10:30 hourly closes 10:30 ET = 15:30Z
+    assert.equal(at('AAPL', '1hr', '2026-12-02T15:00:00Z'), '2026-12-02T15:30:00.000Z')
 })

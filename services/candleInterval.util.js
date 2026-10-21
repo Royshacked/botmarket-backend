@@ -43,27 +43,51 @@ export function parseChartInterval(interval) {
  * marketData.tools (the agents' get_candles) each carried a copy, one documented as a "mirror" of
  * the other, which is the shape duplication takes just before it drifts.
  *
+ * WITH `bucketOf` (market.service barBucketOf) the groups are the instrument's REAL bars instead:
+ * rows sharing a bar start fold together, wherever the count lands. A US session holds seven
+ * hourly bars, so counting in fours from the newest started each "4hr" bar somewhere new every day
+ * and ran it across two sessions; bucketing gives 09:30–13:30 and 13:30–16:00, the bars the
+ * provider itself serves. The oldest bucket is dropped when the window cut into it (its first row
+ * starts after the bucket does), and the newest stays even if still forming, as before.
+ *
  * @param {Array<{timestamp:number,open:number,high:number,low:number,close:number,volume?:number}>} rows
  * @param {number} groupSize
+ * @param {(tsSec:number) => number} [bucketOf]  bar start (epoch ms) for a row's timestamp
  */
-export function aggregateCandles(rows, groupSize) {
+export function aggregateCandles(rows, groupSize, bucketOf = null) {
     if (!Array.isArray(rows)) return []
     if (rows.length === 0 || !(groupSize > 1)) return rows
+    if (bucketOf) return _aggregateByBucket(rows, bucketOf)
     const rem     = rows.length % groupSize
     const aligned = rem ? rows.slice(rem) : rows
     const out = []
     for (let i = 0; i < aligned.length; i += groupSize) {
-        const grp = aligned.slice(i, i + groupSize)
-        out.push({
-            timestamp: grp[0].timestamp,
-            open:      grp[0].open,
-            high:      Math.max(...grp.map(c => c.high)),
-            low:       Math.min(...grp.map(c => c.low)),
-            close:     grp[grp.length - 1].close,
-            volume:    grp.reduce((s, c) => s + (c.volume || 0), 0),
-        })
+        out.push(_fold(aligned.slice(i, i + groupSize), aligned[i].timestamp))
     }
     return out
+}
+
+function _aggregateByBucket(rows, bucketOf) {
+    const groups = []
+    for (const c of rows) {
+        const key = bucketOf(c.timestamp)
+        const last = groups.at(-1)
+        if (last && last.key === key) last.rows.push(c)
+        else groups.push({ key, rows: [c] })
+    }
+    if (groups.length && groups[0].rows[0].timestamp * 1000 > groups[0].key) groups.shift()
+    return groups.map(g => _fold(g.rows, Math.round(g.key / 1000)))
+}
+
+function _fold(grp, timestamp) {
+    return {
+        timestamp,
+        open:      grp[0].open,
+        high:      Math.max(...grp.map(c => c.high)),
+        low:       Math.min(...grp.map(c => c.low)),
+        close:     grp[grp.length - 1].close,
+        volume:    grp.reduce((s, c) => s + (c.volume || 0), 0),
+    }
 }
 
 /**

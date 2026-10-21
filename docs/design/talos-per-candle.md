@@ -146,6 +146,16 @@ aware through what is already there (`sessionFor`, `sessionStartMs`, `isAssetOpe
 Pure given `nowMs`. Tests per instrument class and rung, including "shut now" and "a 4hr rung on a
 6.5h session".
 
+> **2026-10-21 — the equity anchor, restored.** As built, intraday rungs were anchored at ET
+> midnight for every session, not at the session start this section specifies. For an equity that
+> is not where the provider puts the bars (FMP: hourlies 09:30, 10:30 …; 4hr 09:30–13:30,
+> 13:30–16:00), so a 4hr read woke at 12:00 ET onto a bar still forming until 13:30. Three places
+> also built bars their own way: the FMP dedupe floored stamps to the epoch (the 09:30 hourly became
+> "09:00"), and 2hr/4hr bars made from hourlies were counted back from the newest bar, so they moved
+> every day and spanned sessions. All three now take `market.service.barStartMs` — 09:30 ET for an
+> equity, ET midnight for futures/forex, UTC midnight for crypto. EXPD 2026-10-19 is the case: read
+> at 13:24 ET, six minutes before the retest bar it was waiting on closed.
+
 ### 0.2 `services/journal.service.js`
 
 ```

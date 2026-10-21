@@ -7,7 +7,7 @@ import { cachedChart, cachedChartImage, CHART_SOURCE } from '../chartImgCache.se
 import { normalizeChartLevels } from '../chartRender/klineRender.provider.js'
 import { buildStudies } from '../../monitoring/evaluators/chart.evaluator.js'
 import { calcSMASeries, calcEMASeries, calcRSISeries, calcMACDSeries, calcATRSeries, calcVWAPSeries } from '../../monitoring/evaluators/structured.evaluator.js'
-import { sessionStartMs } from '../market.service.js'
+import { sessionStartMs, barBucketOf } from '../market.service.js'
 import { aggregateCandles } from '../candleInterval.util.js'
 import { toolError } from '../toolResult.util.js'
 import { VISION_BUDGET_SPENT } from '../llmStream.util.js'
@@ -57,6 +57,17 @@ export function fmtVol(v) {
 // with the FMP provider); re-exported here for the callers that always read it from this module.
 export { aggregateCandles }
 
+/**
+ * The bucket a CANDLE_CFG aggregate folds by: the instrument's real `aggregate × base` bar
+ * (market.service barBucketOf), so a 4hr built from hourlies is 09:30–13:30 on an equity rather
+ * than four hourlies counted back from the newest. Null when the config does not aggregate.
+ */
+export function aggregateBucket(symbol, cfg) {
+    if (!cfg?.aggregate) return null
+    const baseMin = cfg.timeSpan === 'hour' ? cfg.multiplier * 60 : cfg.multiplier
+    return barBucketOf(symbol, null, baseMin * cfg.aggregate)
+}
+
 // Fetch → (optionally aggregate) → slice to `count` most recent bars for a timeframe.
 // Exported so other OHLCV-compute tools (the SMC engine's tools) reuse ONE candle-fetch path (DRY).
 export async function _fetchCandleRows(ticker, timeframe) {
@@ -70,7 +81,7 @@ export async function _fetchCandleRows(ticker, timeframe) {
     const to   = Date.now()
     const raw  = await _withFormingBar(sym, cfg, to,
         await getTickerAggregates(sym, { timeSpan: cfg.timeSpan, multiplier: cfg.multiplier, from, to }))
-    const bars = cfg.aggregate ? aggregateCandles(raw, cfg.aggregate) : raw
+    const bars = cfg.aggregate ? aggregateCandles(raw, cfg.aggregate, aggregateBucket(sym, cfg)) : raw
     return { cfg, bars }
 }
 
