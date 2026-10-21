@@ -93,8 +93,11 @@ test('cheap tier off: every would-be cheap wake is the full read, cheap_only inc
     }
 })
 
-test('cheap tier off: a sleep the full read chose is still a sleep — it costs nothing either way', () => {
-    assert.equal(tierFor(mid({}, { watch: null }), { reason: 'candle', cheapTier: false }), 'sleep')
+test('cheap tier off: a would-be sleep is a full read too — every close is read (Roy, 2026-10-21)', () => {
+    // ~$0.003 a read on Luna: a close skipped to save it is not worth the close that mattered. The
+    // countdown and `watch` route between tiers; with one tier they route nothing.
+    assert.equal(tierFor(mid({}, { watch: null }), { reason: 'candle', cheapTier: false }), 'expensive')
+    assert.equal(tierFor(mid({}, { expensive_due: 12, watch: null }), { reason: 'candle', cheapTier: false }), 'expensive')
 })
 
 test('the switch defaults ON in the pure function, so the rules above read as designed', () => {

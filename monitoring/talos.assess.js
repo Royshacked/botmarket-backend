@@ -203,6 +203,34 @@ Return one entry per WATCHED condition, keyed by its id:
 {"timeframe_used":"15min","read":"<one first-person sentence>","conditions":[{"id":"s1c1","met":"yes|no|unchecked","note":"what you actually saw"}],"verdict":"<one of YOU MAY ANSWER>","proposal":{"leg":"t2"} | {"stop":123.45,"why":"<what the level is anchored to>"},"next_timeframe":"15min","guards":[{"price":306,"direction":"below","means":"invalidation"}],"memo_update":"..."}
 Include "proposal" ONLY for take_partial / add_leg ({"leg": the zone id}) or move_stop ({"stop", "why"}). Omit it otherwise.`
 
+// ─── One tier: the same prompts, with the pacing a single tier has no use for taken out ─────────
+//
+// With the cheap tier OFF (config.talosCheapTier, the default since 2026-10-21) every candle close is
+// a full read (talos.tiers), so `next_expensive_in` and `watch` route nothing — and a prompt that
+// still told the model a cheap pass watches between its reads, and to pick long countdowns to save
+// money, described a monitor that is not running. DERIVED from the two-tier text rather than written
+// twice, so the two cannot drift: exactly the pacing paragraphs and the two answer fields go.
+
+const _ONE_TIER_PACING = `WHEN YOU ARE READ AGAIN. You are read IN FULL at the close of every candle of the rung you are on, and ahead of it when a guard you armed fires — there is no countdown to set and no cheaper pass between your reads. "next_timeframe" is the rung you want to be read on next time: a coarser rung means fewer, bigger looks; a finer one means you are close to the moment. Pick it from the ones RUNGS says you may be read on — anything else is ignored and you stay where you are. Charting is separate and unrestricted: pull any timeframe a condition needs, whatever you are paced on.`
+
+/** The two-tier text, single-tiered. Pure; exported for the test that pins what goes. */
+export function oneTierPrompt(text) {
+    return text
+        .split('\n\n')
+        .filter(p => !p.startsWith('"next_expensive_in" IS') && !p.startsWith('"watch" IS'))
+        .map(p => (p.startsWith('WHEN YOU ARE READ AGAIN.') ? _ONE_TIER_PACING : p))
+        .join('\n\n')
+        .replace('"next_expensive_in":1,', '')
+        .replace('"watch":{"rung":"15min","indicators":["vwap","ema(20)"]},', '')
+}
+
+const _PRE_ENTRY_ONE_TIER   = oneTierPrompt(_PRE_ENTRY)
+const _IN_POSITION_ONE_TIER = oneTierPrompt(_IN_POSITION)
+
+/** The system text for a read, matching the tier switch the monitor routes by. */
+export function preEntrySystem(cheapTier = config.talosCheapTier)   { return cheapTier ? _PRE_ENTRY : _PRE_ENTRY_ONE_TIER }
+export function inPositionSystem(cheapTier = config.talosCheapTier) { return cheapTier ? _IN_POSITION : _IN_POSITION_ONE_TIER }
+
 // ─── Blocks ───────────────────────────────────────────────────────────────────
 
 /**
@@ -390,7 +418,7 @@ export async function assessSetup(setup, hit, ctx = {}) {
             ..._dataBlocks(setup, g, tf),
         ].filter(Boolean).join('\n\n')
 
-        return _runRead(setup, _PRE_ENTRY, userText,
+        return _runRead(setup, preEntrySystem(), userText,
             { kind: 'pre_entry', reason: ctx.reason, woke: ctx.woke, price: ctx.price, rung: tf, pace: rungs, scenario, zone })
     } catch (err) {
         logger.warn(LOG, `assessment failed for ${setup?.id}:`, err.message)
@@ -445,7 +473,7 @@ export async function assessPosition(setup, ps, ctx = {}) {
             ..._dataBlocks(setup, g, tf),
         ].filter(Boolean).join('\n\n')
 
-        return _runRead(setup, _IN_POSITION, userText,
+        return _runRead(setup, inPositionSystem(), userText,
             { kind: 'in_position', reason: ctx.reason, woke: ctx.woke, price: ctx.price, rung: tf, pace: rungs, scenario, watched })
     } catch (err) {
         logger.warn(LOG, `position assessment failed for ${setup?.id}:`, err.message)

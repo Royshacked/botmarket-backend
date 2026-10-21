@@ -1101,7 +1101,8 @@ monitoring/
                             direction for a field the model may not fill) and caps at 24 — the only
                             backstop for a setup whose completion has no price to guard
                             OFF SWITCH (2026-10-21): config.talosCheapTier (TALOS_CHEAP_TIER, opt-in) —
-                            off, a would-be cheap wake is the full read; a sleep stays a sleep. The
+                            off, EVERY candle wake is the full read (sleeps too — the countdown and watch
+                            route nothing, and the prompt drops them: talos.assess oneTierPrompt). The
                             replay that turned it off: scripts/eval/talos-replay/cheap-tier-replay.mjs
   talos.cheap.js            the CHEAP read (2026-09-23): one model call, NO tools, no vision, its own
                             model knob (TALOS_CHEAP_MODEL, default Haiku 4.5) and its own ledger key

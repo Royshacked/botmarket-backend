@@ -253,8 +253,8 @@ export const config = {
     // Whether the cheap tier runs at all. OPT-IN since 2026-10-21: with the full read on Luna
     // (~$0.003), the cheap pass costs as much as the read it skips (Luna $0.0038 at 18% slept) or
     // ten times it (Haiku $0.032, and it slept through 2 of 5 actions and EXPD's retest) —
-    // scripts/eval/talos-replay/cheap-tier-replay.mjs. Off, a wake that would have been cheap gets
-    // the full read; a sleep the full read chose itself is still a sleep. Turn it back on if the
+    // scripts/eval/talos-replay/cheap-tier-replay.mjs. Off, EVERY candle wake is the full read —
+    // sleeps too — and the prompt drops the countdown and `watch` (talos.assess). Turn it back on if the
     // house Talos model moves somewhere expensive again.
     get talosCheapTier()   { return _bool('TALOS_CHEAP_TIER', 'opt-in') },
 

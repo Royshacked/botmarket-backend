@@ -32,9 +32,11 @@ const ALWAYS_EXPENSIVE_REASONS = new Set([
 /**
  * Which tier this wake runs on: `'expensive'` · `'cheap'` · `'sleep'`.
  *
- * `cheapTier: false` (config.talosCheapTier, OFF since 2026-10-21) turns every wake that would have
- * been cheap into the full read — `cheap_only` included. A `sleep` is untouched: that is the full
- * read's own answer (nothing a number could check, nothing due), and it costs nothing.
+ * `cheapTier: false` (config.talosCheapTier, OFF since 2026-10-21) makes EVERY candle wake the full
+ * read — the would-be cheap ones and the would-be sleeps alike, `cheap_only` included. Roy's call the
+ * same day: a full read on Luna is ~$0.003, so a close skipped to save it is not worth the risk of
+ * the close that mattered (EXPD). The countdown and `watch` exist to route between tiers; with one
+ * tier they route nothing, and the prompt stops asking for them (talos.assess).
  *
  * @param {object} setup
  * @param {object} ctx  `{ reason, woke, cheapTier }` — the wake kind, the guard that caused it if
@@ -42,8 +44,7 @@ const ALWAYS_EXPENSIVE_REASONS = new Set([
  *                      read as they were designed; the monitor passes the config)
  */
 export function tierFor(setup, { reason, woke, cheapTier = true } = {}) {
-    const tier = _tierFor(setup, { reason, woke })
-    return tier === 'cheap' && !cheapTier ? 'expensive' : tier
+    return cheapTier ? _tierFor(setup, { reason, woke }) : 'expensive'
 }
 
 function _tierFor(setup, { reason, woke } = {}) {

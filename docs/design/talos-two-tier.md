@@ -9,8 +9,9 @@ lint clean, committed on `talos-two-tier`. NOT built: phase 4.2 (per-lens tool k
 > (`scripts/eval/talos-replay/cheap-tier-replay.mjs`): Haiku 4.5 slept 59% but missed 2 of 5
 > enter/edit, contradicted the full read on 20 conditions and slept through EXPD — at $0.032 a read,
 > ten times the read it skips. Luna missed nothing and escalated EXPD every time, but slept only 18%
-> at $0.0038 — as much as the read it skips. Off, a wake that would have been cheap is the full read;
-> a sleep the full read chose is still a sleep. Turn it on (with Luna) if the house model moves
+> at $0.0038 — as much as the read it skips. Off, EVERY candle wake is the full read, sleeps included
+> (Roy, the same day: a skipped close is not worth ~$0.003), and the prompt drops the countdown and
+> `watch`, which route nothing with one tier (`talos.assess.oneTierPrompt`). Turn it on (with Luna) if the house model moves
 > somewhere expensive again. Same day: `cheapWatch` read `setup.watch`, a field nothing writes — the
 > declared watch rung was never used; it reads `monitor_state.watch` now.
 

@@ -364,7 +364,9 @@ never be looked at properly is one bad `not_fired` away from a missed trade.
 
 > **2026-10-21 — the CHEAP row is off by default** (`TALOS_CHEAP_TIER`, opt-in). With the full read
 > on Luna (~$0.003) a cheap pass cost as much as the read it skipped, or ten times it on Haiku, which
-> also slept through actions. Off, every would-be cheap wake is EXPENSIVE; NOTHING is unchanged.
+> also slept through actions. Off, EVERY candle wake is EXPENSIVE — NOTHING too (Roy, the same day:
+> a skipped close is not worth ~$0.003). The countdown and `watch` route nothing then, so the prompt
+> leaves them out (`talos.assess` `oneTierPrompt`, derived from the two-tier text).
 > Numbers and reasoning: [design/talos-two-tier.md](../design/talos-two-tier.md).
 
 **The step-down (2026-10-21).** Every pre-entry read also answers `ripe`: the premise is intact and
