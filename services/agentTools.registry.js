@@ -19,6 +19,8 @@
 // Structural differences that ARE deliberate are expressed as an explicit `omit`, so they read as
 // decisions rather than as copies someone forgot to update.
 
+import { TRADE_HORIZONS } from './entity/vocabulary.js'
+
 /** Canonical input_schema per tool — the union of every agent's parameters. */
 export const TOOL_SCHEMAS = {
     get_analyst_actions: {
@@ -308,7 +310,8 @@ export const TOOL_SCHEMAS = {
             },
             "horizon": {
                 "type": "string",
-                "enum": ["intraday", "day", "swing", "long term"],
+                // THE vocabulary, not a copy of it: a literal here missed `short term swing` the day it was added.
+                "enum": TRADE_HORIZONS,
                 "description": "The trade's horizon, so the counter-case is argued over the same holding period."
             },
             "direction": {

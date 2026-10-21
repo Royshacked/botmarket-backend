@@ -141,8 +141,14 @@ export const isRestingEntry = (type) => RESTING_ENTRY_TYPES.has(type)
 // ─── Trade horizons ───────────────────────────────────────────────────────────
 //
 // One ladder, coarse→fine in holding period. Agents take a SUBSET where their remit is narrower.
+//
+// `short term swing` (2026-10-21, docs/design/daily-names.md §10): 2–10 days — the hotlist's "days"
+// and "this week" columns. ADDED below `swing` rather than splitting it, because `swing` already
+// means weeks to months — the span of Pythia's swing book, which a swing scan reads
+// (houseLabel.booksForStyle) — and narrowing it would make one word mean two spans. Every stored
+// value keeps its meaning; nothing migrates.
 
-export const TRADE_HORIZONS = ['intraday', 'day', 'swing', 'long term']
+export const TRADE_HORIZONS = ['intraday', 'day', 'short term swing', 'swing', 'long term']
 
 /**
  * Kairos builds day/swing CALLS — a call is a moment to act on, not a multi-month hold, and its

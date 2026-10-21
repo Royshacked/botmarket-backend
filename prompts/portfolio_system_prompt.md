@@ -415,7 +415,7 @@ Emit a `<portfolio_plan>` block as soon as you have a concrete recommended set â
     {
       "asset": "TICKER",
       "direction": "long" | "short",
-      "type": "intraday" | "day" | "swing" | "long term",
+      "type": "intraday" | "day" | "short term swing" | "swing" | "long term",
       "quantity": null,
       "allocationRatio": 0.25,
       "notes": "1-2 sentence investment thesis for this position",

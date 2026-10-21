@@ -586,6 +586,8 @@ const TRADING_COMPONENTS = ['catalyst', 'technical', 'relativeStrength', 'liquid
 const TRADING_WEIGHTS = {
     intraday:    { catalyst: 0.20, technical: 0.40, relativeStrength: 0.30, liquidity: 0.10 },
     day:         { catalyst: 0.25, technical: 0.35, relativeStrength: 0.30, liquidity: 0.10 },
+    // 2–10 days: the catalyst's life sets the horizon (docs/design/daily-names.md §2.3), structure confirms it.
+    'short term swing': { catalyst: 0.30, technical: 0.35, relativeStrength: 0.25, liquidity: 0.10 },
     swing:       { catalyst: 0.30, technical: 0.30, relativeStrength: 0.25, liquidity: 0.15 },
     'long term': { catalyst: 0.35, technical: 0.20, relativeStrength: 0.25, liquidity: 0.20 },
 }

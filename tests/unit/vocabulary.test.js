@@ -117,12 +117,13 @@ test('an unknown kind or status is rejected rather than defaulted', () => {
 // ─── Horizons ─────────────────────────────────────────────────────────────────
 
 test('one horizon ladder, ordered by holding period', () => {
-    assert.deepEqual(TRADE_HORIZONS, ['intraday', 'day', 'swing', 'long term'])
+    // `short term swing` (2026-10-21) sits below `swing`; `swing` keeps its weeks-to-months meaning.
+    assert.deepEqual(TRADE_HORIZONS, ['intraday', 'day', 'short term swing', 'swing', 'long term'])
 })
 
 test('a call cannot be long term — the narrowing is a SUBSET, not a second list', () => {
     // Kairos builds a moment to act on, not a multi-month hold.
-    assert.deepEqual(CALL_HORIZONS, ['intraday', 'day', 'swing'])
+    assert.deepEqual(CALL_HORIZONS, ['intraday', 'day', 'short term swing', 'swing'])
     for (const h of CALL_HORIZONS) assert.ok(TRADE_HORIZONS.includes(h), `${h} drifted off the ladder`)
     assert.ok(!CALL_HORIZONS.includes('long term'))
 })

@@ -17,6 +17,8 @@ const IND = { LITE: '45201020', MSFT: '45103020', XOM: '10102010' }
 test('the style asks its own book; intraday and day ask none', () => {
     assert.deepEqual(booksForStyle('swing'), ['swing'])
     assert.deepEqual(booksForStyle('long term'), ['long_term'])
+    // 2–10 days reads the swing book as context, a tie-break — the session put the name in play.
+    assert.deepEqual(booksForStyle('short term swing'), ['swing'])
     for (const s of ['intraday', 'day', null, 'scalp']) assert.deepEqual(booksForStyle(s), [])
 })
 

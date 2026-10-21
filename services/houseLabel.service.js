@@ -22,9 +22,13 @@ const _deps = {
 /** Test seam. */
 export function _setHouseLabelDeps(d) { Object.assign(_deps, d) }
 
-/** The books a scan's style asks about: swing → swing, long term → long_term; intraday / day → none. Pure. */
+/**
+ * The books a scan's style asks about: swing → swing, long term → long_term; intraday / day → none.
+ * A `short term swing` (2–10 days) reads the swing book too — as CONTEXT, a tie-break between names
+ * the session already put in play (docs/design/daily-names.md §1), never the reason a name is in. Pure.
+ */
 export function booksForStyle(style) {
-    if (style === 'swing') return ['swing']
+    if (style === 'swing' || style === 'short term swing') return ['swing']
     if (style === 'long term') return ['long_term']
     return []
 }

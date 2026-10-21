@@ -235,7 +235,10 @@ blend, the order silently changing while the user watches, for a school they nev
 so), each with its reason. It pulls the fitting ones' companies from that tool — **never by passing a house name to
 the screener**, which speaks FMP's taxonomy, not GICS's — then casts the usual net. **A preference, not a filter**
 (Roy): the list adds nothing to a score, a stronger name from outside it outranks one inside, an empty list means an
-ordinary scan, and intraday / day scans skip it. The prose is the model's; the **label** is not —
+ordinary scan, and intraday / day scans skip it. A **short term swing** scan (2–10 days, added 2026-10-21 below
+`swing`, which keeps its weeks-to-months meaning) reads the swing book too, as context and a tie-break only — the
+session puts those names in play, not the industry (`booksForStyle`; [design/daily-names.md](../design/daily-names.md)).
+The prose is the model's; the **label** is not —
 `houseLabel.service` works out each candidate's `house` from its industry, so the "House · swing" chip on the list
 is a fact. The investing profile does the same for long term, and a brief's named industry stays fixed.
 

@@ -105,6 +105,8 @@ export function rungsBetween(a, b) {
 const LADDER = {
     intraday:    { mega: ['5min', '1hr'],  large: ['5min', '1hr'],  mid: ['15min', '1hr'], small: ['30min', '2hr'], micro: ['30min', '2hr'] },
     day:         { mega: ['15min', '4hr'], large: ['15min', '4hr'], mid: ['30min', '4hr'], small: ['1hr', '4hr'],   micro: ['1hr', '4hr'] },
+    // 2–10 days: the daily holds the premise, the session the moment — between day and swing on both ends.
+    'short term swing': { mega: ['30min', 'day'], large: ['30min', 'day'], mid: ['1hr', 'day'], small: ['2hr', 'day'], micro: ['2hr', 'day'] },
     swing:       { mega: ['1hr', 'day'],   large: ['1hr', 'day'],   mid: ['2hr', 'day'],   small: ['4hr', 'day'],   micro: ['4hr', 'day'] },
     'long term': { mega: ['day', 'week'],  large: ['day', 'week'],  mid: ['day', 'week'],  small: ['day', 'week'],  micro: ['day', 'week'] },
 }

@@ -88,7 +88,7 @@ Generate it. Say your piece once, then build.
 ### What must be true, whatever stage you are at
 
 **The nucleus** — before there is a setup at all: **ticker · direction (long/short) · horizon
-(intraday | day | swing | long term) · when**. "When" may be *now*, a date, or a window — and it may
+(intraday | day | short term swing | swing | long term) · when**. A short term swing is 2–10 days; a swing is weeks to months. "When" may be *now*, a date, or a window — and it may
 be null.
 
 **Never commit on an unread dimension.** You may *talk* about anything freely, but you don't
@@ -1072,8 +1072,8 @@ level — no candle close, no indicator, no pattern, no time gate, nothing else 
 setup fires the confirm card on the first armed wake with no assessment cost. If any condition
 requires a read or a judgment, leave `entry_mode` out (it defaults to `"conditional"`).
 
-`valid_until` matches the horizon: intraday dies at today's close, day 1–few days, swing
-days–weeks, long term open-ended (null is fine). ISO-8601 UTC. `active_from` only when the trade
+`valid_until` matches the horizon: intraday dies at today's close, day 1–few days, short term swing
+up to ~2 weeks, swing weeks to months, long term open-ended (null is fine). ISO-8601 UTC. `active_from` only when the trade
 shouldn't be watched until a future date.
 
 `time_exit` is the OTHER clock, and it is a different question: `valid_until` retires a setup that

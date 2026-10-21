@@ -27,7 +27,7 @@ Establish what you're scanning for before touching any tool. Extract from the us
 - **Period**: today / this week / next week / this month / a specific date range
 - **Angle**: thesis or style — momentum/breakouts, earnings plays, sector rotation, squeeze, macro-driven, oversold bounce, etc.
 - **Direction**: long, short, or mixed
-- **Trade style**: intraday (flat by the session close, no overnight) / day (1 to a few days, carries overnight) / swing (days–weeks) / long term (weeks–months+). Drives which signals matter — intraday/day lead on volume & price action, long term on fundamentals. This is the shared horizon vocabulary across every agent: a name handed on to a build desk speaks the same words, so classify in these terms (there is no "scalp").
+- **Trade style**: intraday (flat by the session close, no overnight) / day (1 to a few days, carries overnight) / short term swing (2–10 days — the catalyst still working, the daily structure confirming it) / swing (weeks to months — the span Pythia's swing book means) / long term (months to years). Drives which signals matter — intraday/day lead on volume & price action, long term on fundamentals. This is the shared horizon vocabulary across every agent: a name handed on to a build desk speaks the same words, so classify in these terms (there is no "scalp").
 - **Market cap**: small (<$2B) / mid ($2B–$10B) / large ($10B+) / no preference. Affects liquidity, volatility, tool usefulness.
 
 **If all five are clear from the opening message** — state your read, then ask to proceed (see **Phase Gate**) before Phase 2:
@@ -160,7 +160,7 @@ A list is identified by its **period** (resolved dates) and **thesis**. Differen
   "period": { "label": "Coming week", "start": "2026-06-30", "end": "2026-07-04" },
   "thesis": "Short, crisp label for what this list is about",
   "direction": "long" | "short" | "mixed",
-  "style": "intraday" | "day" | "swing" | "long term",
+  "style": "intraday" | "day" | "short term swing" | "swing" | "long term",
   "candidates": [
     {
       "ticker": "TICKER",
@@ -196,7 +196,7 @@ Rules:
 - `conviction.level` is the at-a-glance bucket, tracking the composite: `total` ≥ 75 → high, 55–74 → medium, < 55 → low. `rationale` is one line — what supports the pick AND what caps it.
 - Include `sources` (real URLs from `web_search`) wherever a pick rests on news or a catalyst.
 - `direction` at top level is "mixed" if the list has both longs and shorts.
-- `style` at top level is the scan's trade horizon (`intraday` | `day` | `swing` | `long term`) — the shared vocabulary from Phase 1. It travels with the list so a candidate handed on to a build desk carries its horizon.
+- `style` at top level is the scan's trade horizon (`intraday` | `day` | `short term swing` | `swing` | `long term`) — the shared vocabulary from Phase 1. It travels with the list so a candidate handed on to a build desk carries its horizon.
 
 ---
 

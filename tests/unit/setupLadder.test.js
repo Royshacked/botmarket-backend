@@ -115,3 +115,11 @@ test('an unknown cap is not a reason to refuse a setup — it lands in the middl
     assert.equal(bucketForMarketCap(null), null)
     assert.deepEqual(ladderFor('swing', bucketForMarketCap(null)), ladderFor('swing', 'mid'))
 })
+
+test('short term swing has its own band — between day and swing, never the day fallback', () => {
+    // 2–10 days (2026-10-21): the daily holds the premise, the session the moment. An unknown
+    // horizon falls to `day`; a real one must not land there by accident.
+    assert.deepEqual(ladderFor('short term swing', 'mid'), ['day', '4hr', '2hr', '1hr'])
+    assert.notDeepEqual(ladderFor('short term swing', 'mid'), ladderFor('day', 'mid'))
+    assert.notDeepEqual(ladderFor('short term swing', 'mid'), ladderFor('swing', 'mid'))
+})

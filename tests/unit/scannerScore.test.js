@@ -48,6 +48,13 @@ test('cleanScore: same axes, intraday vs long-term diverge (technical- vs cataly
     assert.equal(_cleanScore(axes, 'long term').total, 68)
 })
 
+test('cleanScore: short term swing has its OWN weights — not the swing fallback an unknown style gets', () => {
+    const axes = { catalyst: 90, technical: 30, relativeStrength: null, liquidity: null }
+    // short term swing C.30 T.35 → (27+10.5)/.65 = 57.69 → 58; swing C.30 T.30 → (27+9)/.60 = 60
+    assert.equal(_cleanScore(axes, 'short term swing').total, 58)
+    assert.equal(_cleanScore(axes, 'swing').total, 60)
+})
+
 test('cleanScore: an unknown/null style falls back to swing weights', () => {
     const axes = { catalyst: 90, technical: 30, relativeStrength: null, liquidity: null }
     // swing C.30 T.30 → (90*.30 + 30*.30)/(.30+.30) = (27+9)/.60 = 60
@@ -92,7 +99,7 @@ test('normalizeScan: clean candidate carries the axes + deterministic total', ()
 
 // ── _normalizeScan style (shared trade-horizon vocabulary) ──────────────
 test('normalizeScan: a valid style is carried through', () => {
-    for (const style of ['intraday', 'day', 'swing', 'long term']) {
+    for (const style of ['intraday', 'day', 'short term swing', 'swing', 'long term']) {
         const scan = { thesis: 's', direction: 'long', style, candidates: [cand('AAA', 80)] }
         assert.equal(_normalizeScan(scan).style, style)
     }

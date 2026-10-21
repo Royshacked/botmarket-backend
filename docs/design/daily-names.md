@@ -1,6 +1,6 @@
 # Hotlist — the short-horizon board (session · day · days · week)
 
-**Status: DESIGN ONLY, nothing built.** The screener is **DailyScreener**; the Floor row is **Hotlist**. Discussed with Roy on 2026-10-21; the open decisions were
+**Status: BUILDING — phase 1 of 6 done (§11).** The screener is **DailyScreener**; the Floor row is **Hotlist**. Discussed with Roy on 2026-10-21; the open decisions were
 settled the same day (§10). Argus already finds names
 for weeks, months and years; this is how it finds names for **a week, a few days, a day, and the
 session itself**. The thresholds below are first proposals, not tuned values. **Shorts are not
@@ -260,3 +260,23 @@ column, per grade. After ~6–8 weeks that is our own backtest, and later a real
   is every reader of the horizon (the scan score weights, the scan→Pythia book mapping — short-term
   swing reads the swing book as a tie-break only) — its own conflict check when it is built. (First
   decided as a split into short swing / swing; reversed the same day once Pythia's span was checked.)
+
+## 11. Build
+
+Six phases, in order. Each ends tested and committed; the FMP rate limit gets measured (§10) before
+phase 2's overnight pass is switched on anywhere.
+
+1. **`short term swing` in the horizon vocabulary** — **DONE 2026-10-21.** `TRADE_HORIZONS` is
+   `intraday · day · short term swing · swing · long term`; no stored value changed meaning, nothing
+   migrated. Every reader that branches on a horizon got its own row rather than a fallback: Argus's
+   score weights (`TRADING_WEIGHTS`, else it fell to the swing row), the Talos ladder (`setup.ladder`,
+   else it fell to `day`), the house-book mapping (`houseLabel.booksForStyle` — the swing book, as a
+   tie-break), the counter-case tool's enum (now the vocabulary itself, not a copy), and the scanner /
+   Mentor / Atlas prompts. The scanner prompt's `swing` said "days–weeks"; it now says weeks to
+   months, the span Pythia's book means.
+2. **DailyScreener, overnight pass** — the liquid universe and its daily bars → dollar volume, ATR %,
+   relative strength, structure flags, cycles, breadth, earnings dates, overhead levels.
+3. **Checkpoint pass** — the pool → quotes → gates → free range → grades, plus the news labels.
+4. **The board and the outcome log** — the published board per checkpoint, and what each name did.
+5. **Argus picks from the board** — the hand-off to Mentor.
+6. **Frontend** — the Floor's Hotlist row and the pane over the chat, then a browser drive.

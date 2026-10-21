@@ -3011,6 +3011,7 @@
                         "enum": [
                             "intraday",
                             "day",
+                            "short term swing",
                             "swing",
                             "long term"
                         ],
