@@ -81,6 +81,26 @@ test('the three middle modes are the SAME machine — the countdown is what diff
     }
 })
 
+// ─── The off-switch (config.talosCheapTier, OFF since 2026-10-21) ─────────────
+// With the full read on Luna (~$0.003) the cheap pass cost as much as the read it skipped (Luna) or
+// ten times it while missing actions (Haiku) — scripts/eval/talos-replay/cheap-tier-replay.mjs.
+
+test('cheap tier off: every would-be cheap wake is the full read, cheap_only included', () => {
+    assert.equal(tierFor(mid(), { reason: 'candle', cheapTier: false }), 'expensive')
+    assert.equal(tierFor(mid({ read_mode: 'cheap_only' }, { watch: null }), { reason: 'candle', cheapTier: false }), 'expensive')
+    for (const m of ['cheap_then_expensive', 'expensive_then_cheap', 'both']) {
+        assert.equal(tierFor(mid({ read_mode: m }), { reason: 'candle', cheapTier: false }), 'expensive', m)
+    }
+})
+
+test('cheap tier off: a sleep the full read chose is still a sleep — it costs nothing either way', () => {
+    assert.equal(tierFor(mid({}, { watch: null }), { reason: 'candle', cheapTier: false }), 'sleep')
+})
+
+test('the switch defaults ON in the pure function, so the rules above read as designed', () => {
+    assert.equal(tierFor(mid(), { reason: 'candle' }), 'cheap')
+})
+
 // ─── The countdown arithmetic ─────────────────────────────────────────────────
 
 test('an absent or junk countdown means "read me next close" — the safe direction', () => {

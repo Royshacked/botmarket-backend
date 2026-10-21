@@ -19,6 +19,7 @@ import { notifySetupEntryConfirm, notifySetupInvalidation, notifySetupManage, no
 import { isSelfExecuted } from '../services/venue.resolve.service.js'
 import { brokerService } from '../api/broker/broker.service.js'
 import { brokerEntryPrice } from '../services/positionManage.service.js'
+import { config } from '../services/config.js'
 import { legGate, scenarioGate, liveScenarios, _hitFromGuard, computeMetrics, metricsSet, validityBreach, breachPatch, rollUpBreaches, normalizeConditionResults, latchPatch, costPatch } from './talos.gates.js'
 
 // Talos — the guardian of the `setup` kind (docs/design/talos-per-candle.md).
@@ -163,7 +164,7 @@ export async function _checkSetup(setup, nowMs, deps = _deps) {
 
     // WHAT THIS WAKE COSTS (talos.tiers). Until 2026-09-23 every wake was a full read; measured on
     // 95 recorded reads, 78% of them needed no such thing.
-    const tier = tierFor(setup, { reason, woke })
+    const tier = tierFor(setup, { reason, woke, cheapTier: deps.cheapTier() })
 
     // Nothing a numbers-only pass could check, and the countdown has not elapsed — the last
     // expensive read said so by returning `watch: null`. The guard sweep is still watching prices.
@@ -834,6 +835,8 @@ const _deps = {
     getPrice:   (setup) => fetchLastPrice(setup.asset),
     assess:     assessSetup,
     cheapRead:  _cheapRead,
+    // TALOS_CHEAP_TIER (off by default since 2026-10-21) — a dep so tests can run either way.
+    cheapTier:  () => config.talosCheapTier,
     assessPosition,
     persist:    _persist,
     // The CLOSE of the last completed candle on a timeframe — the validity gate's verdict, as

@@ -78,7 +78,11 @@ Output ONLY a JSON object, no prose:
  * cheap tier is usable before Phase 4.3 teaches the expensive read to declare anything. Pure.
  */
 export function cheapWatch(setup) {
-    const w = setup?.watch
+    // WHERE THE MONITOR KEEPS IT: `monitor_state.watch` (talos.monitor writes it there, and
+    // talos.tiers reads it there to decide a wake is cheap at all). This read `setup.watch` until
+    // 2026-10-21 — a field nothing writes — so every cheap read ran on the fallback rung, never the
+    // one the expensive read had asked for.
+    const w = setup?.monitor_state?.watch
     if (w?.rung) return { rung: w.rung, indicators: w.indicators ?? [] }
     return { rung: setup?.monitor_state?.timeframe || setup?.timeframe || paceRungs(setup)[0], indicators: [] }
 }

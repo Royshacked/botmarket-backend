@@ -3,6 +3,17 @@
 **STATUS: BUILT 2026-09-23** — phases 1, 2, 3, 4.1, 4.3, 5, 6, 7, and the docs pass. Suite 3287/0,
 lint clean, committed on `talos-two-tier`. NOT built: phase 4.2 (per-lens tool kits).
 
+> **2026-10-21 — the cheap tier is OFF by default (`TALOS_CHEAP_TIER`, opt-in).** It was measured
+> against a Sonnet full read (~$0.057); the house Talos model has been Luna since 2026-09-21, a full
+> read of ~$0.003. Replayed over 211 recorded candle wakes plus EXPD's missed retest
+> (`scripts/eval/talos-replay/cheap-tier-replay.mjs`): Haiku 4.5 slept 59% but missed 2 of 5
+> enter/edit, contradicted the full read on 20 conditions and slept through EXPD — at $0.032 a read,
+> ten times the read it skips. Luna missed nothing and escalated EXPD every time, but slept only 18%
+> at $0.0038 — as much as the read it skips. Off, a wake that would have been cheap is the full read;
+> a sleep the full read chose is still a sleep. Turn it on (with Luna) if the house model moves
+> somewhere expensive again. Same day: `cheapWatch` read `setup.watch`, a field nothing writes — the
+> declared watch rung was never used; it reads `monitor_state.watch` now.
+
 **Both measurements are in and both hold.** The cheap tier would sleep through 78% of wakes (95
 bundles, Haiku 4.5, $0.33 — Open decision 4). The richer opening block cuts round-one tool calls 39%
 and halves the chart pulls (100 bundles, $2.99 — Phase 4.1). They compound rather than overlap: one

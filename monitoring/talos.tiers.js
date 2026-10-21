@@ -32,10 +32,21 @@ const ALWAYS_EXPENSIVE_REASONS = new Set([
 /**
  * Which tier this wake runs on: `'expensive'` · `'cheap'` · `'sleep'`.
  *
+ * `cheapTier: false` (config.talosCheapTier, OFF since 2026-10-21) turns every wake that would have
+ * been cheap into the full read — `cheap_only` included. A `sleep` is untouched: that is the full
+ * read's own answer (nothing a number could check, nothing due), and it costs nothing.
+ *
  * @param {object} setup
- * @param {object} ctx  `{ reason, woke }` — the wake kind, and the guard that caused it if any
+ * @param {object} ctx  `{ reason, woke, cheapTier }` — the wake kind, the guard that caused it if
+ *                      any, and whether the cheap tier is on (default on, so the pure rules below
+ *                      read as they were designed; the monitor passes the config)
  */
-export function tierFor(setup, { reason, woke } = {}) {
+export function tierFor(setup, { reason, woke, cheapTier = true } = {}) {
+    const tier = _tierFor(setup, { reason, woke })
+    return tier === 'cheap' && !cheapTier ? 'expensive' : tier
+}
+
+function _tierFor(setup, { reason, woke } = {}) {
     if (ALWAYS_EXPENSIVE_REASONS.has(reason)) return 'expensive'
 
     // A fired price guard is the model's OWN alarm — it armed that level precisely because it

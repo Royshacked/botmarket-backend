@@ -692,6 +692,9 @@ function stubDeps(over = {}) {
         // expensive path still exercises it. The tier routing has its own tests (talosTiers) and
         // the sleep/escalate wiring is pinned below.
         cheapRead:   async () => ({ conditions: [], escalate: true, read: null }),
+        // ON in this harness, so the two-tier paths below keep being exercised as designed. The
+        // production default is OFF (config.talosCheapTier); the off-switch has its own tests.
+        cheapTier:   () => true,
         buildOrderPlan: async () => [{ accountId: 'a1', quantity: 100 }],
         onCard:         async () => {},
         onManualCard:   async () => {},
@@ -1494,6 +1497,19 @@ test('a cheap read that clears sleeps: no expensive read, one journal row, no ca
     assert.equal(carded, false)
     assert.equal(deps.writes[0]['monitor_state.expensive_due'], 2, 'the countdown ticked')
     assert.ok(deps.entries[0], 'and the wake is still on the record')
+})
+
+test('cheap tier OFF (the production default): the same wake is a full read, the cheap one never runs', async () => {
+    let assessed = false, cheap = false
+    const deps = stubDeps({
+        cheapTier: () => false,
+        assess:    async () => { assessed = true; return { verdict: 'wait', read: 'Not yet.' } },
+        cheapRead: async () => { cheap = true; return { conditions: [], escalate: false, read: null } },
+    })
+    const res = await _checkSetup(MID(), T, deps)
+    assert.equal(cheap, false, 'no cheap call is made at all')
+    assert.equal(assessed, true, 'the full read ran on this wake')
+    assert.notEqual(res.tier, 'cheap')
 })
 
 test('an escalating cheap read runs the expensive one on the SAME wake, not the next', async () => {

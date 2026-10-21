@@ -82,9 +82,13 @@ test('a junk reply escalates rather than reading as all-clear', () => {
 
 // ─── cheapWatch ───────────────────────────────────────────────────────────────
 
-test('the watched rung is what the last EXPENSIVE read declared', () => {
-    const w = cheapWatch({ ...SETUP, watch: { rung: '15min', indicators: ['vwap'] } })
+test('the watched rung is what the last EXPENSIVE read declared — read where the monitor stores it', () => {
+    // talos.monitor writes `monitor_state.watch`; this test used to put it at the top level, which
+    // is where cheapWatch was (wrongly) looking, so both agreed and production never matched either.
+    const w = cheapWatch({ ...SETUP, monitor_state: { timeframe: '4hr', watch: { rung: '15min', indicators: ['vwap'] } } })
     assert.deepEqual(w, { rung: '15min', indicators: ['vwap'] })
+    assert.equal(cheapWatch({ ...SETUP, watch: { rung: '15min' }, monitor_state: { timeframe: '4hr' } }).rung, '4hr',
+        'a top-level `watch` is nothing the monitor ever writes')
 })
 
 test('with nothing declared it falls to the stored rung, then the premise', () => {
