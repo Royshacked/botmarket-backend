@@ -251,6 +251,12 @@ column, per grade. After ~6–8 weeks that is our own backtest, and later a real
 - **Options** — build on the Yahoo snapshot; a paid flow feed only if the board proves it is missing.
 - **Grade thresholds** — the starting cut-offs in §5.1; tuned from the outcome log, never by feel.
 - **Names** — the service is **DailyScreener** (to be built as services/dailyScreener.service.js, the usual *.service.js shape); the Floor row is **Hotlist**.
-- **Horizon vocabulary** — `swing` is split into **short swing** (2–5 days) and **swing**
-  (1–3 weeks). `TRADE_HORIZONS` is a shared cross-agent constant (scans, Mentor, Atlas holdings), so
-  the split needs its own conflict check and a migration plan for saved values before it lands.
+- **Horizon vocabulary** — `swing` is NOT split. It already means weeks to months, the same span as
+  Pythia's swing book (`prompts/strategy_system_prompt.md`), and `services/houseLabel.service.js`
+  maps a swing scan to that book — narrowing it would make one word mean two spans. Instead ONE value
+  is added below it: **short-term swing**, 2–10 days (the hotlist's days and week columns). Stored as
+  `short term swing`, in the style of `long term`. `TRADE_HORIZONS` becomes `intraday · day ·
+  short term swing · swing · long term`. No saved value changes meaning, so no migration; what changes
+  is every reader of the horizon (the scan score weights, the scan→Pythia book mapping — short-term
+  swing reads the swing book as a tie-break only) — its own conflict check when it is built. (First
+  decided as a split into short swing / swing; reversed the same day once Pythia's span was checked.)
