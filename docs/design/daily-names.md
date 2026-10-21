@@ -1,6 +1,6 @@
 # Hotlist — the short-horizon board (session · day · days · week)
 
-**Status: BUILDING — phases 1–2 of 6 done (§11); the overnight pass is OFF.** The screener is **DailyScreener**; the Floor row is **Hotlist**. Discussed with Roy on 2026-10-21; the open decisions were
+**Status: BUILDING — phases 1–3 of 6 done (§11); both passes are OFF.** The screener is **DailyScreener**; the Floor row is **Hotlist**. Discussed with Roy on 2026-10-21; the open decisions were
 settled the same day (§10). Argus already finds names
 for weeks, months and years; this is how it finds names for **a week, a few days, a day, and the
 session itself**. The thresholds below are first proposals, not tuned values. **Shorts are not
@@ -283,7 +283,17 @@ phase 2's overnight pass is switched on anywhere.
    and SPY. A 429 ends the run as partial. FMP bulk EOD is 402 on this plan, and the engine's
    daily_prices_recent (written by aether-engine) is weekly and has no SPY, so neither replaces the per-name read. **Turn on
    only after the rate-limit burst (§10).**
-3. **Checkpoint pass** — the pool → quotes → gates → free range → grades, plus the news labels.
-4. **The board and the outcome log** — the published board per checkpoint, and what each name did.
+3. **Checkpoint pass** — **BUILT 2026-10-21, OFF** (the same `DAILY_SCREENER` switch).
+   `services/dailyScreener.checkpoint.js` (the pool, the paced quotes, the board), `hotlist.columns.js`
+   (pure: gates, in play, overhead levels, free range, grades), `hotlist.news.js` (the labels). Five
+   checkpoints, each with a 30-minute window; pre-market reads the extended-hours book
+   (`aftermarket-quote`: bid / ask / volume → midpoint, spread, % of a day's volume), in session the
+   regular quote. One board per checkpoint in `hotlist_boards`. A 429 publishes a partial board; a
+   failed label call (no credits) publishes an unlabelled one. Live-checked on 2026-10-21's movers
+   with no writes — it graded SPCX B mid-session (+10%, 3.4× volume, 0.45× ATR to 166.18), and its
+   first run caught a long-side hole (a NEGATIVE drift qualified the week column), fixed the same day.
+   Not in this phase: short interest and options context for the board's rows (§6).
+4. **The outcome log** — what each graded name did afterwards, per column and grade (§7), and the
+   board history the Floor reads. (The board itself landed in phase 3.)
 5. **Argus picks from the board** — the hand-off to Mentor.
 6. **Frontend** — the Floor's Hotlist row and the pane over the chat, then a browser drive.

@@ -263,6 +263,10 @@ export const config = {
     // DAILY_SCREENER_RPM is the pace; the run stops on the first 429 rather than retrying through.
     get dailyScreener()    { return _bool('DAILY_SCREENER', 'opt-in') },
     get dailyScreenerRpm() { return _num('DAILY_SCREENER_RPM', 60) },
+    // The model that labels the checkpoint pool's headlines (services/hotlist.news.js) — once per
+    // checkpoint for every user. Empty → Haiku 4.5 (Roy's decision, daily-names.md §10); any id in
+    // the llmModels registry works, e.g. gpt-6-luna.
+    get dailyScreenerNewsModel() { return _str('DAILY_SCREENER_NEWS_MODEL', '') },
 
     // ── market brief ──
     get marketBriefTtlMs()       { return _num('MARKET_BRIEF_TTL_MS', 45 * 60 * 1000) },

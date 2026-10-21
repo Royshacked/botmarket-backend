@@ -798,13 +798,23 @@ export function formatMovers(kind, rows, limit = 20) {
 export async function getMarketMovers(kind = 'gainers', limit = 20) {
     const k = MOVER_KINDS[kind] ? kind : 'gainers'
     const n = Math.min(Math.max(parseInt(limit, 10) || 20, 1), 50)
+    return formatMovers(k, await marketMoversRaw(k), n)
+}
+
+/**
+ * The movers feed itself, raw — ONE cached read behind both the agents' formatted list above and
+ * DailyScreener's checkpoint pool (2026-10-21). Regular-session only, and full of sub-$1 names: a
+ * caller gates it.
+ */
+export async function marketMoversRaw(kind = 'gainers') {
+    const k = MOVER_KINDS[kind] ? kind : 'gainers'
     let rows = _moversCache.get(k)
     if (!rows) {
         const arr = await _fmpGet(`/${MOVER_KINDS[k][0]}`)
         rows = Array.isArray(arr) ? arr : []
         _moversCache.set(k, rows)
     }
-    return formatMovers(k, rows, n)
+    return rows
 }
 
 // ─── Analyst actions (rating-change discovery) ──────────────────────────────
@@ -872,13 +882,21 @@ export async function getAnalystActions(symbols = [], limit = 25) {
     }
 
     const n = Math.min(Math.max(parseInt(limit, 10) || 25, 1), 50)
+    return formatAnalystActionsBulk(await latestGradesRaw(), n)
+}
+
+/**
+ * The market-wide latest rating changes, raw — one cached read behind the agents' bulk list above
+ * and DailyScreener's checkpoint pool (2026-10-21). Never throws: a failed read is an empty feed.
+ */
+export async function latestGradesRaw() {
     let rows = _gradesCache.get('bulk')
     if (!rows) {
         const arr = await _fmpGet('/grades-latest-news?page=0&limit=100').catch(() => [])
         rows = Array.isArray(arr) ? arr : []
         _gradesCache.set('bulk', rows)
     }
-    return formatAnalystActionsBulk(rows, n)
+    return rows
 }
 
 // ─── Stock peers (the correlation-read peer set) ────────────────────────────

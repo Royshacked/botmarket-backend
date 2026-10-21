@@ -877,6 +877,24 @@ services/
                             DAILY_SCREENER. The arithmetic is dailyScreener.stats.js (pure): the §2.1
                             gates, RS vs SPY matched by session, the overhead levels, NR7 / inside day,
                             the trough cycle
+  dailyScreener.checkpoint.js  the hotlist's CHECKPOINT pass (daily-names.md §5–§6, build phase 3): at
+                            08:00 · 09:20 (open + week columns, the EXTENDED book — fmp getAftermarketQuote)
+                            · 10:30 · 14:30 · 15:30 ET (mid / eod / tomorrow, the session quote), each with
+                            a 30-min window (missed = skipped, never late). The POOL — news since the last
+                            close (fetchStockNews in chunks of 50), earnings reported since, today's rating
+                            changes (latestGradesRaw), the movers in session (marketMoversRaw), the overnight
+                            list's structures — ∩ names with overnight stats, catalysts first, ≤300; quoted
+                            PACED; labelled once (hotlist.news); graded (hotlist.columns) → one board per
+                            checkpoint in `hotlist_boards` (≤30 rows, regime, counts, `unverified`). A 429
+                            publishes what it has as partial. Same switch: DAILY_SCREENER
+  hotlist.columns.js        the hotlist's columns, PURE: the §2.1 gates per column, in play per column (§2.2,
+                            §5), the overhead levels each counts, FREE RANGE to the nearest (% and × ATR;
+                            nothing above = open sky), the §5.1 A/B/C cut-offs. Long side only — the week's
+                            catalyst must have surprised UP. No entry, stop, target or R:R (§5)
+  hotlist.news.js           the one judgment in the checkpoint: one call labels every pooled name's fresh
+                            headlines — material, catalyst type (short / drift / lasting), surprise,
+                            magnitude. DAILY_SCREENER_NEWS_MODEL (default Haiku 4.5, any registry id via
+                            modelRoute). FAILS SOFT: any error → no labels, the board still goes out
   pythiaWeekly.service.js   Pythia's WEEK (step 6): on a new complete price run, changeScan → assess every
                             flagged subject, biggest change first, until PYTHIA_WEEKLY_MAX_USD ($3) →
                             `pythia_weekly` (one doc per run date: flagged, results, waiting, held_back, cost,

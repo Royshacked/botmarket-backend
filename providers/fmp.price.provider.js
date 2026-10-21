@@ -117,6 +117,38 @@ export async function getFmpQuoteFull(symbol, { fresh = false } = {}) {
     return quote
 }
 
+/**
+ * Normalise an FMP `/aftermarket-quote` row (the extended-hours book) → `{ bid, ask, mid,
+ * spreadPct, volume, tsSec }`, or null without a two-sided book. Pure — exported for testing.
+ */
+export function normalizeAftermarketQuote(row) {
+    if (!row || typeof row !== 'object') return null
+    const bid = Number(row.bidPrice), ask = Number(row.askPrice)
+    if (!(bid > 0) || !(ask > 0) || ask < bid) return null
+    const mid = (bid + ask) / 2
+    const vol = Number(row.volume)
+    return {
+        bid, ask, mid,
+        spreadPct: ((ask - bid) / mid) * 100,
+        volume: Number.isFinite(vol) ? vol : null,
+        // FMP stamps this one in MILLISECONDS (the regular quote is seconds).
+        tsSec: Number.isFinite(Number(row.timestamp)) ? Math.floor(Number(row.timestamp) / 1000) : null,
+    }
+}
+
+/**
+ * The PRE/POST-market book for a symbol — bid, ask, their midpoint, the spread and the extended
+ * session's volume (2026-10-21, DailyScreener's pre-market checkpoints). On the Starter plan; no
+ * batch form. `retries: 0` for the same reason the regular quote has it: the caller is a paced
+ * pass, and a 429 must reach it rather than be retried into the shared quota.
+ */
+export async function getAftermarketQuote(symbol) {
+    const key = String(symbol || '').toUpperCase().trim()
+    if (!key) return null
+    const arr = await fmpGet(`/aftermarket-quote?symbol=${encodeURIComponent(key)}`, { label: `FMP /aftermarket-quote ${key}`, retries: 0 })
+    return normalizeAftermarketQuote(Array.isArray(arr) ? arr[0] : arr)
+}
+
 /** Real-time last price for a symbol, or null. Convenience over getFmpQuoteFull. */
 export async function getFmpQuote(symbol, opts) {
     return (await getFmpQuoteFull(symbol, opts))?.price ?? null
