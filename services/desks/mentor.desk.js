@@ -8,6 +8,7 @@
 import { mentorAgentService, emptyMentorState } from '../agents/mentor.agent.service.js'
 import { parseClientTime } from '../../api/_shared/parse.util.js'
 import { sanitizeScanSeed } from '../scanSeed.util.js'
+import { hotlistSeed } from '../hotlist.service.js'
 import { houseLabels, formatHouseLabel } from '../houseLabel.service.js'
 import { mentorActions, mentorApplyEdit } from './actions/mentor.actions.js'
 import { setupReason } from '../../api/setups/setupReasons.js'
@@ -43,6 +44,19 @@ export function _mentorResponse(result) {
  */
 async function _labelSeed(seed) {
     if (seed) seed.house = formatHouseLabel((await houseLabels([seed.ticker], { books: ['swing', 'long_term'] })).get(seed.ticker)) || null
+    // A HOTLIST hand-off (daily-names.md §8) names a board and a column; what it says about the name —
+    // the horizon, the grade, the free range, the catalyst, Argus's pick note — is read back from the
+    // stored board, never taken off the request. A board that is gone leaves an ordinary seed.
+    if (seed?.hotlist) {
+        const h = await hotlistSeed(seed.hotlist).catch(() => null)
+        if (h) {
+            seed.horizon            = h.horizon
+            seed.hotlist_facts      = h.hotlist_facts
+            seed.hotlist_unverified = h.unverified
+            seed.thesis           ??= h.thesis ?? null
+            seed.caution            = h.caution ?? null
+        }
+    }
     return seed
 }
 

@@ -57,3 +57,19 @@ test('nothing to label → no call at all', async () => {
     assert.equal(out.size, 0)
     assert.equal(called, false)
 })
+
+test('a big pool is labelled in chunks — a cut-off chunk loses only its own labels', async () => {
+    // The first live run (24 tickers on Luna) came back cut off mid-JSON: one reply cannot hold a pool.
+    const pool = new Map(Array.from({ length: 90 }, (_, i) => [`T${i}`, [{ title: `news ${i}` }]]))
+    let calls = 0
+    const out = await labelNews(pool, { send: async ({ userText }) => {
+        calls++
+        if (calls === 2) return '{"labels":[{"ticker":"T40","material":true'   // the cut-off one
+        const tickers = [...userText.matchAll(/^(T\d+):/gm)].map(m => m[1])
+        return JSON.stringify({ labels: tickers.map(t => ({ ticker: t, material: true, type: 'short', surprise: 'positive' })) })
+    } })
+    assert.equal(calls, 3, '90 tickers in chunks of 40')
+    assert.equal(out.size, 50, 'the 40 of the cut-off chunk are missing; the other 50 are labelled')
+    assert.equal(out.has('T0'), true)
+    assert.equal(out.has('T40'), false)
+})

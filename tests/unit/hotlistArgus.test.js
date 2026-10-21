@@ -1,0 +1,155 @@
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import { memDb } from '../helpers/memDb.js'
+import { argusRead, normalizeRead, boardText, MAX_PICKS } from '../../services/hotlist.argus.js'
+import { hotlistSeed, seedFacts, todayHotlist, COLUMN_HORIZON } from '../../services/hotlist.service.js'
+import { sanitizeScanSeed } from '../../services/scanSeed.util.js'
+import { _buildSeedSection } from '../../services/agents/mentor.agent.service.js'
+import { runCheckpoint, BOARDS } from '../../services/dailyScreener.checkpoint.js'
+
+// Build phase 5 (docs/design/daily-names.md §1, §8; Roy, 2026-10-21): Argus reads each checkpoint's
+// board once, for everyone — a summary, its picks, the traps — and the user hands names to Mentor
+// ONE AT A TIME; picks live on the board, not in Watchlists.
+
+const ROW = (symbol, cells, extra = {}) => ({ symbol, sector: 'Technology', price: 100, gap_pct: 4, rvol: 2.5, atr_pct: 4, cells, ...extra })
+const BOARD = {
+    id: 'hb_2026-10-21_mid', day: '2026-10-21', checkpoint: 'mid', status: 'done', columns: ['mid'],
+    regime: { breadth_above_sma20: 58, spy: { above_sma20: true, ret5: 1.2 } },
+    unverified_columns: ['mid'],
+    rows: [
+        ROW('SPCX', { mid: { grade: 'B', why: ['3.4× volume'], range: { level: 166.18, pct: 2.09, atr_mult: 0.45 } } },
+            { price: 162.77, gap_pct: 10.14, rvol: 3.39, catalyst: { material: true, type: 'drift', surprise: 'mixed', headline: 'SpaceX swings to profit' },
+              pick: { symbol: 'SPCX', column: 'mid', why: 'A real profit swing with room to the prior high.', caution: 'Capex worries can cap it.' } }),
+        ROW('FADE', { mid: { grade: 'A', range: { open_sky: true } } }, { fade_check: true }),
+        ROW('NOPE', { mid: { grade: null } }),
+    ],
+}
+
+// ─── Argus's read ─────────────────────────────────────────────────────────────
+
+test('the board text carries the numbers Argus judges — and flags, catalysts, free range', () => {
+    const t = boardText(BOARD)
+    assert.match(t, /CHECKPOINT: mid on 2026-10-21/)
+    assert.match(t, /breadth 58\.0%/)
+    assert.match(t, /SPCX .*gap 10\.14% rvol 3\.39× .*drift mixed: "SpaceX swings to profit".* mid B \(2\.09% \/ 0\.45× ATR to 166\.18\)/)
+    assert.match(t, /FADE .*FLAG: minor story under a big gap.*mid A \(open sky\)/)
+})
+
+test('a pick must be a board row on a column it is GRADED on; extras and repeats go', () => {
+    const r = normalizeRead({
+        summary: 'Breadth is fine; the room is in two names.',
+        picks: [
+            { symbol: 'spcx', column: 'mid', why: 'Profit swing.', caution: 'Capex.' },
+            { symbol: 'SPCX', column: 'mid', why: 'again' },
+            { symbol: 'NOPE', column: 'mid', why: 'not graded' },
+            { symbol: 'GHOST', column: 'mid', why: 'not on the board' },
+            { symbol: 'FADE', column: 'eod', why: 'wrong column' },
+        ],
+        avoid: [{ symbol: 'FADE', why: 'A minor story under a big gap.' }, { symbol: 'SPCX', why: 'already a pick' }],
+    }, BOARD)
+    assert.deepEqual(r.picks.map(p => p.symbol), ['SPCX'])
+    assert.deepEqual(r.avoid, [{ symbol: 'FADE', why: 'A minor story under a big gap.' }])
+    assert.equal(r.summary, 'Breadth is fine; the room is in two names.')
+})
+
+test('picks are capped', () => {
+    const rows = Array.from({ length: 12 }, (_, i) => ROW(`S${i}`, { mid: { grade: 'B', range: { atr_mult: 1 } } }))
+    const r = normalizeRead({ picks: rows.map(x => ({ symbol: x.symbol, column: 'mid', why: 'x' })) }, { rows })
+    assert.equal(r.picks.length, MAX_PICKS)
+})
+
+test('one call on the house model; a failed call is NO read, never a throw', async () => {
+    let asked = null
+    const ok = await argusRead(BOARD, {
+        model: async () => 'gpt-6-luna',
+        send: async (p) => { asked = p; return '{"summary":"s","picks":[{"symbol":"SPCX","column":"mid","why":"w","caution":"c"}],"avoid":[]}' },
+    })
+    assert.equal(asked.model, 'gpt-6-luna')
+    assert.equal(ok.picks[0].symbol, 'SPCX')
+    assert.equal(ok.model, 'gpt-6-luna')
+    assert.equal(await argusRead(BOARD, { model: async () => 'x', send: async () => { throw new Error('no credits') } }), null)
+    assert.equal(await argusRead({ rows: [] }, { send: async () => { throw new Error('never called') } }), null)
+})
+
+// ─── The checkpoint marks Argus's picks on their rows ─────────────────────────
+
+test('the checkpoint stores Argus\'s summary and marks picks and traps in place', async () => {
+    const { db, rows } = memDb()
+    rows('daily_screener_stats').push({ symbol: 'ABC', day: '2026-10-20', close: 100, atr14: 4, atr_pct: 4, adv20_usd: 100e6, avg_vol20: 1e6,
+        day_high: 101, high5: 103, high20: 106, high50: 110, high52w: 120, rs20: 3, nr7: true, next_earnings: '2026-10-27' })
+    await runCheckpoint({ deps: {
+        db: async () => db, latestRun: async () => ({ day: '2026-10-20' }),
+        news: async () => [], earnings: async () => [], grades: async () => [], movers: async () => [],
+        extQuote: async () => ({ mid: 104, spreadPct: 0.02, volume: 30_000 }), quote: async () => null,
+        label: async () => new Map(),
+        argus: async (b) => ({ summary: 'One name in play.', model: 'gpt-6-luna', picks: [{ symbol: b.rows[0].symbol, column: 'open', why: 'gap on volume', caution: 'thin' }], avoid: [] }),
+        perMinute: () => 6000, now: () => Date.parse('2026-10-21T12:05:00Z'), sleep: async () => {},
+    } })
+    const board = rows(BOARDS)[0]
+    assert.equal(board.argus.summary, 'One name in play.')
+    assert.equal(board.rows[0].pick.rank, 1)
+    assert.equal(board.rows[0].pick.why, 'gap on volume')
+})
+
+// ─── The hand-off: a reference in, the board's facts out ──────────────────────
+
+test('the seed carries a REFERENCE to the board, never its facts — and only a well-formed one', () => {
+    const s = sanitizeScanSeed({ ticker: 'spcx', hotlist: { board: 'hb_2026-10-21_mid', column: 'mid', grade: 'A', facts: 'injected' } })
+    assert.deepEqual(s.hotlist, { board: 'hb_2026-10-21_mid', column: 'mid', symbol: 'SPCX' }, 'grade/facts off the request are dropped')
+    assert.equal(sanitizeScanSeed({ ticker: 'X', hotlist: { board: 'hb_bad', column: 'mid' } }).hotlist, null)
+    assert.equal(sanitizeScanSeed({ ticker: 'X', hotlist: { board: 'hb_2026-10-21_mid', column: 'lunch' } }).hotlist, null)
+})
+
+test('each column hands Mentor its horizon', () => {
+    assert.deepEqual(COLUMN_HORIZON, { open: 'intraday', mid: 'intraday', eod: 'intraday', tomorrow: 'day', week: 'short term swing' })
+})
+
+test('the facts line: grade, tape, free range, catalyst — or open sky', () => {
+    assert.equal(seedFacts(BOARD.rows[0], 'mid'),
+        'mid-session B — +10.14% gap, 3.39× volume; free range 2.09% (0.45× ATR) to 166.18; catalyst: drift, mixed — "SpaceX swings to profit"')
+    assert.match(seedFacts(BOARD.rows[1], 'mid'), /open sky/)
+    assert.equal(seedFacts(BOARD.rows[2], 'mid'), null, 'an ungraded cell is not a hand-off')
+})
+
+test('hotlistSeed reads the STORED board: the horizon, the facts, Argus\'s note, the unverified flag', async () => {
+    const { db, rows } = memDb()
+    rows(BOARDS).push(structuredClone(BOARD))
+    const seed = await hotlistSeed({ board: 'hb_2026-10-21_mid', column: 'mid', symbol: 'SPCX' }, { db: async () => db })
+    assert.equal(seed.horizon, 'intraday')
+    assert.match(seed.hotlist_facts, /free range 2\.09%/)
+    assert.equal(seed.thesis, 'A real profit swing with room to the prior high.')
+    assert.equal(seed.caution, 'Capex worries can cap it.')
+    assert.equal(seed.unverified, true)
+    assert.equal(await hotlistSeed({ board: 'hb_2026-10-01_mid', column: 'mid', symbol: 'SPCX' }, { db: async () => db }), null, 'a pruned board')
+    assert.equal(await hotlistSeed({ board: 'hb_2026-10-21_mid', column: 'mid', symbol: 'NOPE' }, { db: async () => db }), null, 'not graded')
+})
+
+test('Mentor is told the board\'s facts, the horizon, and that free range is not a target', () => {
+    const text = _buildSeedSection({
+        ticker: 'SPCX', direction: 'long', thesis: 'A real profit swing.', horizon: 'intraday',
+        hotlist_facts: seedFacts(BOARD.rows[0], 'mid'), caution: 'Capex worries.', hotlist_unverified: true,
+    })
+    assert.match(text, /From today's HOTLIST: mid-session B/)
+    assert.match(text, /That column's horizon is intraday/)
+    assert.match(text, /Argus's caution: Capex worries\./)
+    assert.match(text, /UNVERIFIED/)
+    assert.match(text, /no entry, stop or target/)
+    assert.doesNotMatch(_buildSeedSection({ ticker: 'SPCX' }), /HOTLIST/, 'an ordinary hand-off is unchanged')
+})
+
+// ─── The read API's service ───────────────────────────────────────────────────
+
+test('today: the latest board in full, the day\'s checkpoints as one-liners', async () => {
+    const { db, rows } = memDb()
+    rows(BOARDS).push(
+        { ...structuredClone(BOARD), id: 'hb_2026-10-21_premarket', checkpoint: 'premarket', finished_at: 1, counts: { graded: 4 }, argus: { summary: 'a' } },
+        { ...structuredClone(BOARD), finished_at: 2, counts: { graded: 3 }, started_at: 99, scored: { mid: true } },
+        { id: 'hb_2026-10-21_eod', day: '2026-10-21', status: 'running', finished_at: 3 },
+    )
+    const t = await todayHotlist({ deps: { db: async () => db } })
+    assert.equal(t.day, '2026-10-21')
+    assert.equal(t.latest.id, 'hb_2026-10-21_mid', 'a running board is not shown')
+    assert.equal(t.latest.started_at, undefined, 'no claim bookkeeping leaves the server')
+    assert.deepEqual(t.checkpoints.map(c => c.checkpoint), ['premarket', 'mid'])
+    assert.equal(t.checkpoints[0].argus, true)
+})

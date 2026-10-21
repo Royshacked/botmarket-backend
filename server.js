@@ -74,6 +74,7 @@ import { sessionsRoutes }    from './api/sessions/sessions.routes.js'
 import { turnsRoutes }       from './api/turns/turns.routes.js'
 import { marketRoutes }      from './api/market/market.routes.js'
 import { calendarRoutes }    from './api/calendar/calendar.routes.js'
+import { hotlistRoutes }     from './api/hotlist/hotlist.routes.js'
 import { talosService }     from './monitoring/talos.monitor.service.js'
 import { coverageMonitorService } from './monitoring/coverage.monitor.service.js'
 import { industryViewMonitorService } from './monitoring/industryView.monitor.service.js'
@@ -223,6 +224,7 @@ app.use('/api/sessions',    sessionsRoutes)
 app.use('/api/turns',       turnsRoutes)
 app.use('/api/market',      marketRoutes)
 app.use('/api/calendar',    calendarRoutes)
+app.use('/api/hotlist',     hotlistRoutes)
 app.use('/api/chat',        chatRoutes)
 
 attachChatWs(server)

@@ -174,7 +174,7 @@ test('seed: uppercases ticker, keeps sector/thesis/analysis, requires a ticker',
     assert.equal(s.thesis, 'quality compounder')
     assert.equal(s.analysis, 'ROIC 28%, net cash')
     assert.deepEqual(sanitizeScanSeed({ ticker: 'aapl' }),
-        { ticker: 'AAPL', direction: null, sector: null, thesis: null, analysis: null, recommended_mode: null, window: null })
+        { ticker: 'AAPL', direction: null, sector: null, thesis: null, analysis: null, recommended_mode: null, window: null, hotlist: null })
     assert.equal(sanitizeScanSeed({ thesis: 'no ticker' }), null)
     assert.equal(sanitizeScanSeed({ ticker: '  ' }), null)
     assert.equal(sanitizeScanSeed(null), null)

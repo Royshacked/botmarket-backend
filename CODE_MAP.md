@@ -274,6 +274,10 @@ api/
                           read — the week list too) asks 7-day chunks, keeps a capped answer's whole
                           days and re-asks only the cut ones, and never caches a window with a failed
                           part. docs/design/floor-calendar.md
+  hotlist/                the HOTLIST's reads (docs/design/daily-names.md §8): GET /api/hotlist?day (the
+                          latest board in full + the day's checkpoints as one-liners), /boards/:id,
+                          /outcomes (the log summarised). Read-only and shared — research binds to no
+                          account, so no workspace scope. Shaping lives in services/hotlist.service
   transcribe/             raw audio → Whisper (OpenAI SDK, the only OpenAI use). Mounted BEFORE
                           express.json so the raw-body parser sees the bytes; authed — it is a paid API.
                           The language is TOLD (`en`, or a client's 2-letter `?language=`), never
@@ -905,6 +909,19 @@ services/
                             MFE, mean return; a column is VERIFIED at 40 sessions AND 30 samples, which
                             the board stamps (`unverified_columns`). Also names the `hotlist_boards`
                             collection (dailyScreener.checkpoint re-exports it: no import cycle)
+  hotlist.argus.js          ARGUS'S READ of each checkpoint board (phase 5, Roy 2026-10-21): once, for
+                            everyone, on the HOUSE chat model — a summary, ≤8 picks (symbol, column, why,
+                            caution) and ≤5 traps. normalizeRead holds every pick to a board row on a
+                            column the board GRADED. Stored on the board; picks marked on their rows.
+                            Fails soft (no read)
+  hotlist.service.js        the hotlist's READ side: todayHotlist / boardById / hotlistOutcomes for the
+                            API, and hotlistSeed — a "Build with Mentor" hand-off is a REFERENCE (board
+                            id + column, scanSeed.util), resolved here from the STORED board into the
+                            horizon (COLUMN_HORIZON), the facts line, Argus's note and the unverified
+                            flag; Mentor's seed section relays them (free range is room, not a target)
+  oneShot.service.js        ONE model call, no tools, to whichever provider a registry id lives on
+                            (modelRoute → callAnthropicOnce / callOpenAICompatOnce). The hotlist's news
+                            labels and Argus's read use it; monitor.claude still carries its own copy
   pythiaWeekly.service.js   Pythia's WEEK (step 6): on a new complete price run, changeScan → assess every
                             flagged subject, biggest change first, until PYTHIA_WEEKLY_MAX_USD ($3) →
                             `pythia_weekly` (one doc per run date: flagged, results, waiting, held_back, cost,

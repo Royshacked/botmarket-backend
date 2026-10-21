@@ -588,7 +588,7 @@ Active asset: ${asset}${_buildAccountsSection(accounts, mainAccountId)}${_buildS
  * It also has to be SAID. A recommendation the user never hears is indistinguishable from Mentor
  * having decided.
  */
-function _buildSeedSection(seed) {
+export function _buildSeedSection(seed) {
     if (!seed?.ticker) return ''
     const lens = String(seed.recommended_mode ?? '').trim()
     return `
@@ -600,6 +600,14 @@ ARGUS HANDED YOU THIS NAME: ${seed.ticker}${seed.direction ? ` (${seed.direction
   Argus's read: ${seed.analysis}` : ''}`
         + (lens ? `
   Argus recommends the ${lens} lens.` : '')
+        // From today's HOTLIST (daily-names.md): read back from the stored board by code, not from the
+        // request. The board measures ROOM — free range to the next overhead level — and sets no
+        // entry, stop or target; those are built here, with the user.
+        + (seed.hotlist_facts ? `
+  From today's HOTLIST: ${seed.hotlist_facts}.${seed.horizon ? ` That column's horizon is ${seed.horizon} — the user's to confirm.` : ''}${seed.caution ? `
+  Argus's caution: ${seed.caution}` : ''}${seed.hotlist_unverified ? `
+  The hotlist's grades for this column are still UNVERIFIED (not enough logged outcomes yet) — say so if you lean on the grade.` : ''}
+  Free range is room, not a target: the board has no entry, stop or target, and you build those with the user.` : '')
         // Worked out by code from the ticker (houseLabel.service), not by Argus: the house's industry desk holds this
         // name's industry on its list. Context the user hears once — never a reason the trade will work.
         + (seed.house ? `

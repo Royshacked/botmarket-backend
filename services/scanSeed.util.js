@@ -48,5 +48,22 @@ export function sanitizeScanSeed(raw) {
         analysis:         s('analysis'),
         recommended_mode: s('recommended_mode'),
         window:           (from || to) ? { from, to } : null,
+        hotlist:          _hotlistRef(raw.hotlist, ticker.toUpperCase()),
     }
+}
+
+const HOTLIST_BOARD_ID = /^hb_\d{4}-\d{2}-\d{2}_[a-z]+$/
+const HOTLIST_COLUMNS  = new Set(['open', 'mid', 'eod', 'tomorrow', 'week'])
+
+/**
+ * A hotlist hand-off is a REFERENCE — which board, which column — never the board's facts: those are
+ * read back from the board by the server (hotlist.service hotlistSeed), the way the house label is
+ * worked out from the ticker rather than taken off a request. Null unless both parts are well-formed.
+ */
+function _hotlistRef(raw, ticker) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+    const board  = typeof raw.board === 'string' ? raw.board.trim() : ''
+    const column = typeof raw.column === 'string' ? raw.column.trim() : ''
+    if (!HOTLIST_BOARD_ID.test(board) || !HOTLIST_COLUMNS.has(column)) return null
+    return { board, column, symbol: ticker }
 }

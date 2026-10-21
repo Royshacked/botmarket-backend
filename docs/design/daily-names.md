@@ -1,6 +1,6 @@
 # Hotlist — the short-horizon board (session · day · days · week)
 
-**Status: BUILDING — phases 1–4 of 6 done (§11); everything is OFF behind `DAILY_SCREENER`.** The screener is **DailyScreener**; the Floor row is **Hotlist**. Discussed with Roy on 2026-10-21; the open decisions were
+**Status: BUILDING — phases 1–5 of 6 done (§11); everything is OFF behind `DAILY_SCREENER`.** The screener is **DailyScreener**; the Floor row is **Hotlist**. Discussed with Roy on 2026-10-21; the open decisions were
 settled the same day (§10). Argus already finds names
 for weeks, months and years; this is how it finds names for **a week, a few days, a day, and the
 session itself**. The thresholds below are first proposals, not tuned values. **Shorts are not
@@ -302,5 +302,16 @@ phase 2's overnight pass is switched on anywhere.
    40 sessions and 30 samples (§7's "~8 weeks"), and each board stamps which of its columns are not
    yet. `boardsForDay` is the history the Floor reads. Live-checked on EXPD's real hourly and daily
    bars (no writes).
-5. **Argus picks from the board** — the hand-off to Mentor.
+5. **Argus reads the board; the user hands names to Mentor** — **BUILT 2026-10-21** (off with the rest).
+   Decided by Roy the same day: Argus reads **every checkpoint, once for everyone** (a summary, up to
+   8 picks with why and a caution, up to 5 traps — `services/hotlist.argus.js`, on the house chat
+   model, every pick held to a graded cell on the board); the user sends names to Mentor **one at a
+   time**, exactly like a scan pick; picks **live on the board**, not in Watchlists. The hand-off is a
+   reference — board id + column — and the server reads the facts back from the stored board
+   (`hotlist.service.hotlistSeed`): the column's horizon (open / mid / eod → intraday, tomorrow →
+   day, week → short term swing), the grade and free range, the catalyst, Argus's note, the unverified
+   flag; Mentor relays them and builds entry, stop and size with the user. Read API: `GET
+   /api/hotlist`, `/boards/:id`, `/outcomes`. Live-checked: on a real board Argus put TSLA on the
+   avoid list (no catalyst, 0.31% of room) and picked nothing; the run also showed one label call
+   cannot hold a pool, so labels go 40 tickers a call.
 6. **Frontend** — the Floor's Hotlist row and the pane over the chat, then a browser drive.

@@ -19,6 +19,7 @@ import { getFmpQuoteFull, getAftermarketQuote, fmpDateToEpochSec } from '../prov
 import { createPacer } from './concurrency.util.js'
 import { COLUMNS, cell, relativeVolume } from './hotlist.columns.js'
 import { labelNews } from './hotlist.news.js'
+import { argusRead } from './hotlist.argus.js'
 import { BOARDS, outcomeSummary } from './hotlist.outcomes.js'
 import { COLLECTION as STATS, latestRun } from './dailyScreener.service.js'
 import { config } from './config.js'
@@ -58,6 +59,7 @@ const _deps = {
     extQuote:  (symbol) => getAftermarketQuote(symbol),
     quote:     (symbol) => getFmpQuoteFull(symbol, { fresh: true }),
     label:     (byTicker) => labelNews(byTicker),
+    argus:     (board) => argusRead(board),
     // Which columns have earned "verified" (§7) — from the outcome log; a failed read verifies nothing.
     verified:  async () => new Set(Object.entries(await outcomeSummary()).filter(([, s]) => s.verified).map(([c]) => c)),
     perMinute: () => config.dailyScreenerRpm,
@@ -265,6 +267,20 @@ async function _build(db, cp, day, etMin, run, deps) {
     }
     const ranked = rankRows(rows).slice(0, BOARD_MAX)
     const verified = await Promise.resolve().then(() => deps.verified?.() ?? new Set()).catch(() => new Set())
+    const regime = { breadth_above_sma20: run.breadth_above_sma20 ?? null, spy: run.spy ?? null }
+
+    // Argus's read of the finished board — once, for everyone (hotlist.argus). Its picks are marked on
+    // their rows so the list shows them in place; a failed read leaves the board without one.
+    const argus = await Promise.resolve()
+        .then(() => deps.argus?.({ day, checkpoint: cp.id, columns: cp.columns, regime, rows: ranked }) ?? null)
+        .catch(() => null)
+    const pickBy = new Map((argus?.picks ?? []).map((p, i) => [p.symbol, { ...p, rank: i + 1 }]))
+    const avoidBy = new Map((argus?.avoid ?? []).map(a => [a.symbol, a.why]))
+    const marked = ranked.map(r => ({
+        ...r,
+        ...(pickBy.has(r.symbol) ? { pick: pickBy.get(r.symbol) } : {}),
+        ...(avoidBy.has(r.symbol) ? { avoid: avoidBy.get(r.symbol) } : {}),
+    }))
 
     return {
         status: stopped ? 'partial' : 'done',
@@ -274,11 +290,12 @@ async function _build(db, cp, day, etMin, run, deps) {
         // §7: a column's grades are unverified until the outcome log has ~8 weeks of them (hotlist.outcomes).
         unverified_columns: cp.columns.filter(c => !verified.has(c)),
         unverified: cp.columns.some(c => !verified.has(c)),
-        regime: { breadth_above_sma20: run.breadth_above_sma20 ?? null, spy: run.spy ?? null },
+        regime,
         labels: toLabel.size ? (labels.size ? 'labelled' : 'failed') : 'none',
+        argus: argus ? { summary: argus.summary, model: argus.model, picks: argus.picks.length } : null,
         counts: { pool: pool.length, quoted: quotes.size, graded: rows.length, headlines: headlines.size },
         requests,
-        rows: ranked,
+        rows: marked,
     }
 }
 

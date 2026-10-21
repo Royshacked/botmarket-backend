@@ -8,15 +8,13 @@
 // board is published unlabelled, never not at all. The model is DAILY_SCREENER_NEWS_MODEL (Haiku 4.5
 // by Roy's decision, §10), reached through the registry so a different one is a setting, not code.
 
-import Anthropic from '@anthropic-ai/sdk'
-import { modelRoute, CHEAP_MODEL } from './llmModels.js'
-import { callOpenAICompatOnce } from '../providers/openaiCompat.provider.js'
+import { CHEAP_MODEL } from './llmModels.js'
+import { oneShotText } from './oneShot.service.js'
 import { extractFirstJSON } from '../monitoring/parsers/llmReply.parser.js'
 import { config } from './config.js'
 import { logger } from './logger.service.js'
 
 const LOG = '[hotlist.news]'
-const _client = new Anthropic({ apiKey: config.anthropicApiKey })
 
 /** Headlines read per name, and how much of each. */
 const PER_TICKER = 5
@@ -67,30 +65,37 @@ export function normalizeLabels(raw, wanted) {
     return out
 }
 
-async function _send({ model, systemText, userText }) {
-    const route = modelRoute(model)
-    if (route.provider === 'openai-compat') {
-        return callOpenAICompatOnce({ endpoint: route.endpoint, wire: route.wire, model: route.model, systemText, userText, maxTokens: 4000 })
-    }
-    const res = await _client.messages.create({
-        model: route.model, max_tokens: 4000, system: systemText, messages: [{ role: 'user', content: userText }],
-    })
-    return (res?.content ?? []).filter(b => b?.type === 'text').map(b => b.text).join('')
-}
+const _send = ({ model, systemText, userText }) => oneShotText({ model, systemText, userText, maxTokens: 8000 })
 
 /**
- * Label the pooled names' headlines in ONE call. → Map ticker → label; empty on any failure.
+ * Tickers per call. A pool of 300 does not fit one reply: the first live run, 24 tickers on Luna,
+ * came back cut off ("unclosed JSON object") — a reasoning model spends its reply budget thinking
+ * before it writes. Forty labels is well inside one reply, and a cut-off chunk loses only its own.
+ */
+export const LABEL_CHUNK = 40
+
+/**
+ * Label the pooled names' headlines, LABEL_CHUNK tickers a call. → Map ticker → label. A chunk that
+ * fails loses only its own labels; all failing is an empty map — never a throw.
  *
  * @param {Map<string, {title:string}[]>} byTicker
  * @param {{ model?: string, send?: Function }} [opts]  `send` is the test seam
  */
 export async function labelNews(byTicker, { model = config.dailyScreenerNewsModel || CHEAP_MODEL, send = _send } = {}) {
     if (!byTicker?.size) return new Map()
-    try {
-        const text = await send({ model, systemText: SYSTEM, userText: buildNewsText(byTicker) })
-        return normalizeLabels(extractFirstJSON(text), byTicker.keys())
-    } catch (err) {
-        logger.warn(LOG, `labels skipped — the board goes out unlabelled: ${err.message}`)
-        return new Map()
+    const entries = [...byTicker.entries()]
+    const out = new Map()
+    let failed = 0
+    for (let i = 0; i < entries.length; i += LABEL_CHUNK) {
+        const chunk = new Map(entries.slice(i, i + LABEL_CHUNK))
+        try {
+            const text = await send({ model, systemText: SYSTEM, userText: buildNewsText(chunk) })
+            for (const [t, l] of normalizeLabels(extractFirstJSON(text), chunk.keys())) out.set(t, l)
+        } catch (err) {
+            failed++
+            logger.warn(LOG, `labels skipped for ${chunk.size} ticker(s) — they go out unlabelled: ${err.message}`)
+        }
     }
+    if (failed && !out.size) logger.warn(LOG, 'no labels at all — the board goes out unlabelled')
+    return out
 }
