@@ -5,6 +5,7 @@ import {
     _nextStatus, _isPastExpiry, _effectiveVerdict, READ_LAG_MS, CLOSE_GRACE_MS, FILL_PRICE_WAIT_MS,
 } from '../../monitoring/talos.monitor.service.js'
 import { isAssetOpen } from '../../services/market.service.js'
+import { tierFor } from '../../monitoring/talos.tiers.js'
 // The pure tier — the decisions a wake makes before it spends anything. Split out of the monitor
 // (which kept the loop, the scheduling and the writes) when that file passed 1500 lines.
 import {
@@ -1074,6 +1075,77 @@ test('…and stamps the plan\'s price once the wait is over', async () => {
     assert.ok(Number.isFinite(deps.writes[0]['position_state.entry.fill_price']))
 })
 
+// Code review 2026-10-21 (5): an `enter` with price already through the stop used to fire, park the
+// setup in `hit`, and meet a confirm that refuses past_stop — a card nobody could act on. It is held
+// as a wait; killing the premise stays the CLOSE's call (the wick tests above).
+test('an ENTER past the stop is held as a wait — no card, not parked in hit, the record says why', async () => {
+    let carded = false, invalidated = false
+    const deps = stubDeps({
+        getPrice: async () => 234.1,   // under the 234.8 stop of a 238.6 long
+        assess: async () => ({ verdict: 'enter', read: 'Trigger is live.', premise: 'intact' }),
+        onCard: async () => { carded = true },
+        onInvalidation: async () => { invalidated = true },
+    })
+    const res = await _checkSetup({ ...ARMED, monitor_state: { ...ARMED.monitor_state, last_assessment: { at: 'earlier' } } }, T, deps)
+    assert.equal(res.verdict, 'wait')
+    assert.equal(carded, false, 'no entry card for a trade the confirm would refuse')
+    assert.equal(invalidated, false, 'a tick is not a close')
+    const $set = deps.writes.at(-1)
+    assert.equal($set.status, undefined, 'not parked awaiting a confirm that cannot happen')
+    assert.equal($set.pendingOrder, undefined)
+    assert.match($set['monitor_state.last_assessment'].warning, /through the stop/)
+})
+
+test('an ENTER above the stop still fires', async () => {
+    const deps = stubDeps({ getPrice: async () => 238.6, assess: async () => ({ verdict: 'enter', read: 'Trigger is live.', premise: 'intact' }) })
+    const res = await _checkSetup({ ...ARMED, monitor_state: { ...ARMED.monitor_state, last_assessment: { at: 'earlier' } } }, T, deps)
+    assert.equal(res.fired, true)
+})
+
+// Code review 2026-10-21 (2): once ONE account has reported, the position is stamped and managed —
+// and the average is re-read until the rest have, instead of the first account's price for good.
+const TWO_ACCOUNTS = [
+    { broker: 'ctrader', accountId: 'a1', orderId: 'o1', positionId: 'p1', quantity: 50 },
+    { broker: 'ctrader', accountId: 'a2', orderId: 'o2', positionId: null, quantity: 50 },
+]
+test('one account of two reported: stamped now (managed from here), marked provisional', async () => {
+    const half = { ...FILLED, armed_leg_id: FILLED.entry_legs[0].id, brokerOrders: TWO_ACCOUNTS }
+    const deps = stubDeps({ getFillPrice: async () => 198.5 })
+    const res = await _checkSetup(half, T, deps)
+    assert.equal(res.promoted, true, 'not left unmanaged while the second account links')
+    assert.equal(deps.writes[0]['position_state.entry.fill_price'], 198.5)
+    assert.equal(deps.writes[0]['position_state.entry.fill_provisional'], true)
+})
+
+test('a provisional fill is re-read on the next wake and corrected to the whole position\'s average', async () => {
+    const stamped = {
+        ...FILLED, armed_leg_id: FILLED.entry_legs[0].id,
+        brokerOrders: TWO_ACCOUNTS.map(b => ({ ...b, positionId: b.positionId ?? 'p2' })),
+        position_state: { phase: 'running', entry: { fill_at: new Date(T - 60_000).toISOString(), fill_price: 198.5, size: 100,
+            legs: [{ leg_id: FILLED.entry_legs[0].id, price: 198.5, quantity: 100, at: new Date(T - 60_000).toISOString() }], fill_provisional: true } },
+    }
+    const deps = stubDeps({ getFillPrice: async () => 199.1 })
+    await _checkSetup(stamped, T + 5 * 60_000, deps)
+    assert.equal(deps.writes[0]['position_state.entry.fill_price'], 199.1)
+    assert.equal(deps.writes[0]['position_state.entry.legs'][0].price, 199.1)
+    assert.equal(deps.writes[0]['position_state.entry.fill_provisional'], false, 'every account is in — done re-reading')
+})
+
+test('a provisional fill with nothing watched waits a minute instead of going dormant (or it is never re-read)', async () => {
+    const stamped = {
+        ...FILLED, armed_leg_id: FILLED.entry_legs[0].id, brokerOrders: TWO_ACCOUNTS,
+        position_state: { phase: 'running', entry: { fill_at: new Date(T - 60_000).toISOString(), fill_price: 198.5, size: 100,
+            legs: [{ leg_id: 'ez1', price: 198.5, quantity: 100 }], fill_provisional: true } },
+    }
+    const deps = stubDeps({ getFillPrice: async () => 198.5 })
+    const res = await _checkSetup(stamped, T, deps)
+    // FILLED's legs are plain levels resting at the broker — nothing watched.
+    assert.equal(res.reason, 'awaiting_fill_price')
+    assert.equal(deps.writes[0]['monitor_state.next_check_at'], new Date(T + 60_000).toISOString())
+    assert.equal(deps.writes[0]['monitor_state.dormant'], undefined)
+    assert.equal(deps.writes[0]['position_state.entry.fill_provisional'], true)
+})
+
 test('a linked slot the broker cannot price is not waited on — that is a real "no answer"', async () => {
     const linked = { ...FILLED, armed_leg_id: FILLED.entry_legs[0].id, brokerOrders: [{ broker: 'ctrader', accountId: 'a1', orderId: 'o1', positionId: 'p1', quantity: 100 }] }
     const res = await _checkSetup(linked, T, stubDeps())
@@ -1587,14 +1659,14 @@ test('an expensive read stores the countdown and the watch it declared', async (
         }),
     })
     await _checkSetup({ ...LIVE, monitor_state: { ...LIVE.monitor_state, last_assessment: { at: 'earlier' } } }, T, deps)
-    assert.equal(deps.writes[0]['monitor_state.expensive_due'], 12)
+    assert.equal(deps.writes[0]['monitor_state.expensive_due'], 11, 'twelve closes asked for = eleven skipped')
     assert.deepEqual(deps.writes[0]['monitor_state.watch'], { rung: '15min', indicators: ['vwap'] })
 })
 
 test('an expensive read that declares NOTHING falls back to "read me next close"', async () => {
     const deps = stubDeps({ assess: async () => ({ verdict: 'wait', read: 'x' }) })
     await _checkSetup({ ...LIVE, monitor_state: { ...LIVE.monitor_state, last_assessment: { at: 'earlier' } } }, T, deps)
-    assert.equal(deps.writes[0]['monitor_state.expensive_due'], 1, 'the safe direction for an unfilled field')
+    assert.equal(deps.writes[0]['monitor_state.expensive_due'], 0, 'the safe direction for an unfilled field: the very next close')
     assert.equal(deps.writes[0]['monitor_state.watch'], null)
 })
 
@@ -1617,7 +1689,7 @@ test('a read can WAIT on an intact premise — the normal case, and the countdow
     const deps = stubDeps({ assess: async () => ({ verdict: 'wait', read: 'Building.', premise: 'intact', next_expensive_in: 8 }) })
     await _checkSetup({ ...LIVE, monitor_state: { ...LIVE.monitor_state, last_assessment: { at: 'earlier' } } }, T, deps)
     assert.equal(deps.writes[0]['monitor_state.last_assessment'].premise, 'intact')
-    assert.equal(deps.writes[0]['monitor_state.expensive_due'], 8)
+    assert.equal(deps.writes[0]['monitor_state.expensive_due'], 7)
 })
 
 test('a read can WAIT on a STALE premise — the thing it could not say before', async () => {
@@ -1635,7 +1707,9 @@ test('a flagged map is NOT triaged next time — it comes back to the expensive 
     for (const premise of ['damaged', 'stale']) {
         const deps = stubDeps({ assess: async () => ({ verdict: 'wait', read: 'x', premise, next_expensive_in: 24 }) })
         await _checkSetup({ ...LIVE, monitor_state: { ...LIVE.monitor_state, last_assessment: { at: 'earlier' } } }, T, deps)
-        assert.equal(deps.writes[0]['monitor_state.expensive_due'], 1, `${premise} overrides the countdown it asked for`)
+        assert.equal(deps.writes[0]['monitor_state.expensive_due'], 0, `${premise} overrides the countdown it asked for`)
+        const after = { ...LIVE, read_mode: 'cheap_then_expensive', monitor_state: { ...LIVE.monitor_state, expensive_due: 0, watch: { rung: '15min', indicators: [] } } }
+        assert.equal(tierFor(after, { reason: 'candle', cheapTier: true }), 'expensive', 'the NEXT close, not the one after')
     }
 })
 

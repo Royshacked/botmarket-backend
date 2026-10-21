@@ -135,7 +135,9 @@ read_mode:  'cheap_then_expensive' // NEW: the five below
 
 // on monitor_state — MONITOR OUTPUT, rewritten whole by every expensive read, like guards
 watch:          { rung: '15min', indicators: ['vwap', 'ema(20)'] },   // null = sleep
-expensive_due:  12,               // closes until the next expensive read
+expensive_due:  11,               // closes to SKIP before the next expensive read — the read's
+                                  // next_expensive_in minus one (1 = the very next close → 0);
+                                  // a damaged/stale premise or a ripe wait writes 0 (2026-10-21 CR)
 ```
 
 **Two corrections the build made to this list.** `read_mode`, not `mode` — a setup's `mode` is

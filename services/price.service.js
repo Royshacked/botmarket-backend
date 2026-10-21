@@ -1,6 +1,5 @@
 import { getTickerAggregates } from '../providers/candles.provider.js'
 import { isCacheFresh } from './ttlCache.util.js'
-import { barDurationSeconds } from './timeframe.service.js'
 
 const DEFAULT_RANGE_DAYS = 30
 const CANDLE_CACHE_TTL_MS = 60 * 60 * 1000
@@ -57,7 +56,7 @@ export const _deps = { getTickerAggregates }
  * WHERE A FETCH STARTS — the tail, or the whole requested window. Pure; exported for tests.
  *
  * FETCH ONLY THE TAIL when the cache already reaches back as far as the caller asked. The
- * incremental start (newest bar + one step) is what keeps a monitor tick cheap: intraday callers
+ * incremental start (the newest bar) is what keeps a monitor tick cheap: intraday callers
  * pass `refresh`, so this runs on EVERY wake, and re-pulling the whole window each time is exactly
  * the self-inflicted quota burn that once had FMP answering 429.
  *
@@ -66,14 +65,19 @@ export const _deps = { getTickerAggregates }
  * ever adds to the NEWEST end — the older bars it needs are behind it and nothing would go and get
  * them. After one full pass the cache covers the range and this goes back to tails.
  *
- * @param {{requestedFromMs?: number, toMs: number, earliestTs: number|null, latestTs: number|null, stepSec: number}} spec
+ * THE TAIL STARTS AT the newest cached bar, not one step after it: that bar may have been cached
+ * while it was still FORMING (a 4hr bar read at 11:00 holds two hours of it), and starting past it
+ * meant it was never read again — the merge lets the re-read bar replace it (code review
+ * 2026-10-21). One bar more per request; FMP's from/to are whole days, so it already re-read it.
+ *
+ * @param {{requestedFromMs?: number, toMs: number, earliestTs: number|null, latestTs: number|null}} spec
  *   `earliestTs` / `latestTs` are the cache's bounds in SECONDS (the stored candle unit).
  * @returns {number} epoch ms
  */
-export function fetchStartMs({ requestedFromMs, toMs, earliestTs, latestTs, stepSec }) {
+export function fetchStartMs({ requestedFromMs, toMs, earliestTs, latestTs }) {
     const asked = Number.isFinite(requestedFromMs) ? requestedFromMs : null
     const coversStart = asked == null || (earliestTs != null && earliestTs * 1000 <= asked)
-    if (latestTs != null && coversStart) return (latestTs + stepSec) * 1000
+    if (latestTs != null && coversStart) return latestTs * 1000
     if (asked != null) return asked
     return toMs - DEFAULT_RANGE_DAYS * 24 * 60 * 60 * 1000
 }
@@ -90,7 +94,6 @@ async function syncCandles(ticker, options = {}) {
         toMs,
         earliestTs: _minCandleTimestamp(existingCandles),
         latestTs:   _maxCandleTimestamp(existingCandles),
-        stepSec:    barDurationSeconds(barOpts.timeSpan, barOpts.multiplier),
     })
 
     const fetchOptions = { ...barOpts, from: fromMs, to: toMs }

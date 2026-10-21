@@ -99,7 +99,7 @@ test('cache already covers the request → fetch only the new tail', () => {
         latestTs:   SEC.now - DAY,
         stepSec: SEC.step,
     })
-    assert.equal(start, (SEC.now - DAY + SEC.step) * 1000, 'must resume from the newest bar, not the request')
+    assert.equal(start, (SEC.now - DAY) * 1000, 'must resume from the newest bar, not the request — AT it, since it may have been forming')
 })
 
 test('request reaches further back than the cache → backfill the whole window, once', () => {
@@ -126,7 +126,7 @@ test('no window named and nothing cached → the 30-day default, as before', () 
 
 test('no window named but a cache present → still the tail', () => {
     const start = fetchStartMs({ toMs: Date.now(), earliestTs: SEC.now - 30 * DAY, latestTs: SEC.now - DAY, stepSec: SEC.step })
-    assert.equal(start, (SEC.now - DAY + SEC.step) * 1000)
+    assert.equal(start, (SEC.now - DAY) * 1000)
 })
 
 // ── the cache lives in the process, not on the disk ──────────────────────────
@@ -136,6 +136,24 @@ test('no window named but a cache present → still the tail', () => {
 // the file was overhead at both ends — and it was unsafe twice over: an unlocked read-modify-write
 // (two loops on one symbol, later write drops the earlier one's bars) and a non-atomic write (a
 // restart mid-write leaves truncated JSON that parses as nothing).
+
+test('a bar cached while FORMING is read again and replaced — not frozen at what it held then', async () => {
+    _resetCandleCache()
+    const H = 3600, start = SEC.now - 10 * H
+    const forming  = { timestamp: start, open: 10, high: 11, low: 9.5, close: 10.5, volume: 100 }
+    const complete = { ...forming, high: 13, close: 12.8, volume: 400 }
+    let asked = null
+    const restore = mockAggregates(async (_sym, opts) => {
+        asked = opts.from
+        return asked == null || asked <= start * 1000 ? [asked === start * 1000 ? complete : forming] : []
+    })
+    try {
+        await priceService.getCandles('SPCX', { timeSpan: 'hour', multiplier: 4, format: 'object', refresh: true })
+        const after = await priceService.getCandles('SPCX', { timeSpan: 'hour', multiplier: 4, format: 'object', refresh: true })
+        assert.equal(asked, start * 1000, 'the tail starts AT the newest bar')
+        assert.equal(after.candles.at(-1).high, 13, 'the finished bar replaced the forming one')
+    } finally { restore() }
+})
 
 test('a synced series is served from memory on the next read, with no disk anywhere', async () => {
     _resetCandleCache()

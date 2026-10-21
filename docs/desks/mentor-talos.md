@@ -593,10 +593,17 @@ plan's price), the card said "filled in at your level", the user confirmed 1h47m
   numbers — and `OrderConfirmDialog` shows them with **Buy at market anyway** (Sell, on a short);
   that press carries `acceptPrice`. Past the stop is FINAL — 409 `past_stop`, no press places it, the
   dialog offers none and the card says re-draw. No live price → no verdict, the order places as before.
+- **An `enter` past the stop is not fired** (2026-10-21 review): Talos holds it as a `wait` with a
+  warning, so no card goes out that the confirm would refuse and the setup is not parked in `hit`.
+  It does not invalidate either — a tick through the stop is not a close, and killing a premise
+  stays the validity gate's call.
 - **The fill is the broker's** (`positionManage.brokerEntryPrice`, size-weighted over the accounts,
   back in the plan's price space): the first post-fill wake stamps it, the plan's price only when no
-  broker answers. A broker venue whose slot has no positionId yet is retried each minute for
-  `FILL_PRICE_WAIT_MS` (30 min) rather than stamped from the plan for good.
+  broker answers. A broker venue with NO account priced yet is retried each minute for
+  `FILL_PRICE_WAIT_MS` (30 min) rather than stamped from the plan for good. Once one account has
+  reported, the fill is stamped at once (so the position is managed) and marked
+  `fill_provisional`; later wakes re-read it (bookkeeping, no model) until every account is in, and
+  a provisional position with nothing watched waits a minute rather than going dormant.
   `scripts/backfill-setup-fill-price.mjs` corrects positions stamped before.
 
 What the level still decides is WHICH leg (`firingLeg`): the one price is at when the wake resolved

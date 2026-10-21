@@ -412,8 +412,8 @@ export function sessionStartMs(symbol, assetClass, date = new Date()) {
 //
 // Alignment follows the providers' bars, and barStartMs below is the one statement of it: intraday
 // bars are multiples of the width from an ANCHOR — the 09:30 ET open for an equity (FMP's hourly
-// bars run 09:30, 10:30 … and its 4hr bars 09:30–13:30, 13:30–16:00), ET midnight for futures and
-// forex, UTC midnight for crypto — and a bar cut short by the session close closes WITH the
+// bars run 09:30, 10:30 … and its 4hr bars 09:30–13:30, 13:30–16:00), ET midnight for futures,
+// UTC midnight for crypto and forex — and a bar cut short by the session close closes WITH the
 // session. Daily/weekly/monthly bars close at the session's daily close (equity 16:00 ET,
 // futures/forex 17:00 ET, crypto 00:00 UTC), on the last trading day of the week/month
 // respectively. Holidays are not excluded — same approximation as the gate.
@@ -423,6 +423,9 @@ export function sessionStartMs(symbol, assetClass, date = new Date()) {
 // 09:30 hourly bar "09:00", and the 2hr/4hr bars built from hourlies were counted back from the
 // newest bar, so they started somewhere different every day and spanned two sessions. EXPD
 // (2026-10-19) was read at 13:24 ET, six minutes before the retest bar it was waiting for closed.
+// FOREX moved from ET to UTC midnight the same week: FMP's forex bars sit on the UTC grid (its
+// dedupe floors them on the epoch), so an ET-anchored 4hr schedule woke an hour off every bar, and
+// 2hr/4hr bars the fallback built from hourlies landed on a different grid from FMP's own.
 
 /**
  * Where the `widthMin` intraday bar that contains `ms` STARTS, for this instrument. THE answer the
@@ -439,7 +442,7 @@ export function barStartMs(symbol, assetClass, ms, widthMin) {
     const widthMs = widthMin * 60_000
     const session = sessionFor(symbol, assetClass)
     let anchor
-    if (session === 'crypto') {
+    if (session === 'crypto' || session === 'forex') {
         const t = new Date(ms)
         anchor = Date.UTC(t.getUTCFullYear(), t.getUTCMonth(), t.getUTCDate())
     } else {

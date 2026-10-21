@@ -20,7 +20,13 @@ test('an intraday rung closes on the next bar boundary, strictly after now', () 
     assert.equal(at('AAPL', '1hr',   '2026-07-15T18:03:00Z'), '2026-07-15T18:30:00.000Z')
 })
 
-test('multi-hour rungs: an equity from its 09:30 open, futures/forex from ET midnight, crypto from UTC', () => {
+test('forex 4hr bars sit on FMP\'s UTC grid — in winter too, when ET midnight is 05:00Z', () => {
+    // 18:03Z in January: UTC grid → the 16:00–20:00Z bar; an ET-midnight grid would say 21:00Z.
+    assert.equal(at('EURUSD', '4hr', '2026-01-14T18:03:00Z'), '2026-01-14T20:00:00.000Z')
+    assert.equal(at('EURUSD', '2hr', '2026-01-14T18:03:00Z'), '2026-01-14T20:00:00.000Z')
+})
+
+test('multi-hour rungs: an equity from its 09:30 open, futures from ET midnight, crypto and forex from UTC', () => {
     // 14:03 ET: the equity 4hr bars are 09:30–13:30 and 13:30–16:00 (cut by the close) → 16:00 ET = 20:00Z
     assert.equal(at('AAPL',   '4hr', '2026-07-15T18:03:00Z'), '2026-07-15T20:00:00.000Z')
     // 18:03Z: UTC-aligned 4hr bars close 16:00Z / 20:00Z → 20:00Z

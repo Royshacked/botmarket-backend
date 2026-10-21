@@ -11,7 +11,7 @@ import { isPreActive, isExpiring, isPastExpiry, effectiveVerdict, nextStatus, ha
 import { buildOrderPlanForIdea } from '../services/orderPlan.service.js'
 import { notifyManualEntry, entryLegFromIdea } from '../services/manualNotify.service.js'
 import { assessSetup, assessPosition, READINESS_VERDICTS, openingRung } from './talos.assess.js'
-import { scenarioView, scenarioLabel, declaredConditions, projectScenario, pickScenario, stopEdge, targetLevels, addEntryLeg, legQuantity, legPrice, firingLeg, resolveRung, clampGuards, normalizeWatch, normalizePremise, disarmedSetupPatch, watchedLegs, hasWatchedLegs, allowedVerdicts } from '../services/setup.schema.js'
+import { scenarioView, scenarioLabel, declaredConditions, projectScenario, pickScenario, stopEdge, entryDrift, targetLevels, addEntryLeg, legQuantity, legPrice, firingLeg, resolveRung, clampGuards, normalizeWatch, normalizePremise, disarmedSetupPatch, watchedLegs, hasWatchedLegs, allowedVerdicts } from '../services/setup.schema.js'
 import { tierFor, clampExpensiveGap, tickExpensiveDue } from './talos.tiers.js'
 import { cheapRead as _cheapRead } from './talos.cheap.js'
 import { cancelRestingEntryOrders } from '../services/restingOrders.service.js'
@@ -267,7 +267,7 @@ async function _disarmLimit(setup, disarmReason, nowMs, deps) {
  * status flip (entityRepo.finalizeClose).
  */
 async function _checkPosition(setup, nowMs, deps) {
-    const ps    = setup.position_state ?? {}
+    let ps      = setup.position_state ?? {}
     const inPos = setup.status === 'long' || setup.status === 'short'
 
     // Awaiting confirm/fill → check disarm triggers for limit orders, then keep the schedule moving.
@@ -286,6 +286,14 @@ async function _checkPosition(setup, nowMs, deps) {
 
     // Already stamped → the management path.
     if (ps.entry?.fill_at != null) {
+        // A fill stamped while some account had not reported yet is re-read first (bookkeeping, no
+        // model), so the average every R is measured from ends up the whole position's.
+        if (ps.entry.fill_provisional) {
+            const refined = await _refineFill(setup, ps, nowMs, deps)
+            if (refined.waiting) return { reason: 'awaiting_fill_price' }
+            setup = refined.setup
+            ps    = setup.position_state
+        }
         const scenario = _armedScenario(setup)
         const watched  = watchedLegs(setup, scenario, ps.entry)
 
@@ -320,8 +328,11 @@ async function _checkPosition(setup, nowMs, deps) {
     const paid = toNum(await deps.getFillPrice(setup))
     // NOT YET is not NO. This wake runs once — it stamps `fill_at` — so stamping the plan's price
     // because the execution feed has not linked a positionId yet would make it permanent. A broker
-    // venue with an unlinked slot is retried each minute for FILL_PRICE_WAIT_MS, then gives up.
-    if (paid == null && _fillPending(setup, nowMs)) {
+    // venue with NO account priced yet is retried each minute for FILL_PRICE_WAIT_MS, then gives up.
+    // Once ONE account has reported, the fill is stamped — so the position is managed from here —
+    // and marked provisional: the next wakes re-read it until every account has (_refineFill).
+    const pending = _fillPending(setup, nowMs)
+    if (paid == null && pending) {
         await deps.persist(setup.id, _wakePatch(setup, new Date(nowMs + FILL_RETRY_MS).toISOString()), null)
         return { reason: 'awaiting_fill_price' }
     }
@@ -347,6 +358,7 @@ async function _checkPosition(setup, nowMs, deps) {
         'position_state.entry.fill_at':    new Date(fillAtMs).toISOString(),
         'position_state.entry.size':       entry.size,
         'position_state.entry.direction':  setup.direction ?? (setup.status === 'short' ? 'short' : 'long'),
+        'position_state.entry.fill_provisional': pending,
         'position_state.phase':            'running',
         // FROZEN AT FILL, and deliberately not read live off the scenario afterwards. What protects
         // the position is the order resting at the broker. `current` is what a `move_stop` verdict
@@ -607,6 +619,18 @@ async function _applyVerdict(setup, hit, raw, nowMs, reason, price, deps) {
     const scenario = hit?.scenario ?? pickScenario(setup)
     const declared = declaredConditions(setup, scenario)
     const rung     = openingRung(setup)
+    // AN ENTER PAST THE STOP IS NOT FIRED. The confirm refuses it (ideaExecution priceMovedRefusal →
+    // past_stop), so firing would park the setup in `hit` behind a card nobody can act on. Whether the
+    // premise is BROKEN is not this tick's to say — a wick is not a close, and the validity gate is
+    // what kills a premise — so it is held as a wait, and the record says why.
+    if (raw.verdict === 'enter') {
+        const candidate = firingLeg(scenario, armed)
+        const drift = candidate ? entryDrift({ ...setup, ...projectScenario(setup, scenario?.id ?? null), armed_leg_id: candidate.id }, price) : null
+        if (drift?.pastStop) {
+            logger.info(LOG, `[${setup.id}] enter at ${price} is through the stop — held as a wait`)
+            raw = { ...raw, verdict: 'wait', ripe: false, warning: `Price ${price} is already through the stop — not entering; the trade is gone at this price, and the close decides whether the premise is.` }
+        }
+    }
     // Resolved for an `enter` whether or not price is standing on a level right now.
     const leg      = raw.verdict === 'enter' ? firingLeg(scenario, armed) : null
 
@@ -634,8 +658,9 @@ async function _applyVerdict(setup, hit, raw, nowMs, reason, price, deps) {
         'monitor_state.last_assessment': assessment,
         ...(nextRung ? { 'monitor_state.timeframe': nextRung } : {}),
         // Kept across consecutive ripe reads (the FIRST rung stepped down from), cleared by any read
-        // that is not ripe — the way back up is used once.
-        'monitor_state.stepped_from': ripe ? (steppedFrom ?? setup.monitor_state?.timeframe ?? rung) : null,
+        // that is not ripe — the way back up is used once. Stored RESOLVED: a raw timeframe this
+        // setup may not be read on would resolve to nothing later, and the way back up would be lost.
+        'monitor_state.stepped_from': ripe ? (steppedFrom ?? resolveRung(setup.monitor_state?.timeframe, setup) ?? rung) : null,
         // Written WHOLE on every read, never merged: what the model does not re-arm is forgotten.
         'monitor_state.guards': armedNow,
         // The two fields that pace the NEXT expensive read and configure the cheap passes between
@@ -643,9 +668,12 @@ async function _applyVerdict(setup, hit, raw, nowMs, reason, price, deps) {
         // A read that flagged the map is not triaged next time: whatever countdown it asked for,
         // a damaged or stale premise comes back to the expensive tier on the very next close. The
         // cheap tier cannot judge a map — it can only check numbers against conditions.
+        // STORED AS CLOSES SKIPPED: the read's "next_expensive_in: 1" means the next close, and
+        // talos.tiers reads a close as due only once the countdown is spent (0) — so the stored
+        // value is one less than what was asked for, and a flagged map is 0.
         'monitor_state.expensive_due': ripe ? ripe.expensiveDue
-            : normalizePremise(raw.premise) === 'intact' ? clampExpensiveGap(raw.next_expensive_in)
-            : 1,
+            : normalizePremise(raw.premise) === 'intact' ? clampExpensiveGap(raw.next_expensive_in) - 1
+            : 0,
         'monitor_state.watch':         normalizeWatch(raw.watch),
         ...latchPatch(setup, conditions, nowMs, declared),
         ...costPatch(setup, raw._tools),
@@ -688,7 +716,8 @@ async function _applyVerdict(setup, hit, raw, nowMs, reason, price, deps) {
             ...base, ...projection,
             status: _nextStatus(raw.verdict),
             armed_leg_id: leg.id,
-            armed_scenario_id: scenario?.id ?? null,
+            // The executable's own value, so the card and the saved setup name the same premise.
+            armed_scenario_id: executable.armed_scenario_id,
             entryTriggeredAt: nowMs,
         }
 
@@ -828,9 +857,9 @@ export function _nextReadAt(setup, nowMs, rung, deps = _deps) {
     return new Date(at).toISOString()
 }
 
-/** The three fields every wake writes. `woke_on` is ONE-SHOT: it describes this wake and no later one. */
 // How long the first post-fill wake waits for a broker venue to link its position (and so its
-// fill price) before it stamps the plan's price instead, and how often it looks meanwhile.
+// fill price) before it stamps the plan's price instead, and how often it looks meanwhile. Also how
+// long a provisional fill keeps being re-read for the accounts still unreported.
 export const FILL_PRICE_WAIT_MS = 30 * 60_000
 const FILL_RETRY_MS = 60_000
 
@@ -843,6 +872,37 @@ function _fillPending(setup, nowMs) {
     return nowMs - placedAt < FILL_PRICE_WAIT_MS
 }
 
+/**
+ * Re-read a PROVISIONAL fill — one stamped while some account had not reported — and write the
+ * whole position's price once it is in. Bookkeeping only: no model, no card. A single-leg entry is
+ * corrected in place; a position that has scaled in since is left as it is (its later legs carry
+ * their own prices), and so is one the broker cannot price. → `{ setup, waiting }`: the setup as
+ * it now stands, and whether this wake should stop here — a position with nothing watched waits
+ * a minute instead of going dormant, or it would never be read again.
+ */
+async function _refineFill(setup, ps, nowMs, deps) {
+    const paid = toNum(await deps.getFillPrice(setup))
+    const still = _fillPending(setup, nowMs)
+    const legs = Array.isArray(ps.entry?.legs) ? ps.entry.legs : []
+    const patch = { 'position_state.entry.fill_provisional': still }
+    let entry = ps.entry
+    if (paid != null && legs.length === 1 && paid !== toNum(ps.entry.fill_price)) {
+        entry = { ...ps.entry, ...addEntryLeg({ ...ps.entry, legs: [] }, { ...legs[0], price: paid }) }
+        patch['position_state.entry.legs'] = entry.legs
+        patch['position_state.entry.fill_price'] = entry.fill_price
+        logger.info(LOG, `[${setup.id}] fill re-read: ${ps.entry.fill_price} → ${entry.fill_price}${still ? ' (accounts still unreported)' : ''}`)
+    }
+    const next = { ...setup, position_state: { ...ps, entry: { ...entry, fill_provisional: still } } }
+    const watching = hasWatchedLegs(watchedLegs(next, _armedScenario(next), next.position_state.entry)) || !!setup.time_exit
+    if (still && !watching) {
+        await deps.persist(setup.id, { ...patch, ..._wakePatch(setup, new Date(nowMs + FILL_RETRY_MS).toISOString()) }, null)
+        return { setup: next, waiting: true }
+    }
+    await deps.persist(setup.id, patch, null)
+    return { setup: next, waiting: false }
+}
+
+/** The three fields every wake writes. `woke_on` is ONE-SHOT: it describes this wake and no later one. */
 function _wakePatch(setup, nextAt) {
     return {
         'monitor_state.check_count':   (setup.monitor_state?.check_count ?? 0) + 1,

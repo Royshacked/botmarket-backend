@@ -126,7 +126,7 @@ test('monitor: a plain wait keeps the pace the read asked for', async () => {
     await _checkSetup(LIVE, T, d)
     const $set = d.writes.at(-1)
     assert.equal($set['monitor_state.timeframe'], '4hr')
-    assert.equal($set['monitor_state.expensive_due'], 3)
+    assert.equal($set['monitor_state.expensive_due'], 2, 'three closes asked for: two skipped, the third read')
     assert.deepEqual($set['monitor_state.guards'], [])
     assert.equal($set['monitor_state.last_assessment'].ripe, false)
 })
@@ -157,6 +157,15 @@ test('the step-down is not a one-way door: a later read that names no usable run
     const back = plain.writes.at(-1)
     assert.equal(back['monitor_state.timeframe'], '4hr', 'an off-ladder rung falls back to where it stepped from')
     assert.equal(back['monitor_state.stepped_from'], null, 'and the way back is used once')
+})
+
+test('the rung stepped down FROM is stored resolved — an unusable timeframe cannot lose the way back up', async () => {
+    const junk = { ...LIVE, monitor_state: { ...LIVE.monitor_state, timeframe: '7min', last_assessment: { at: 'earlier' } } }
+    const d = deps(async () => ({ verdict: 'wait', premise: 'intact', ripe: true, read: 'x', guards: [] }))
+    await _checkSetup(junk, T, d)
+    const from = d.writes.at(-1)['monitor_state.stepped_from']
+    assert.notEqual(from, '7min')
+    assert.ok(from, 'a real rung to go back up to')
 })
 
 test('a second ripe read keeps the FIRST rung it stepped down from', async () => {

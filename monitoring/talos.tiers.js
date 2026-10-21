@@ -84,9 +84,10 @@ function _tierFor(setup, { reason, woke } = {}) {
 export const MAX_EXPENSIVE_GAP = 24
 
 /**
- * The countdown a read asked for, held to something sane. Absent/junk → 1, which means "read me
- * again next close" — the old behaviour, and the safe direction for a field the model may simply
- * not fill in.
+ * The countdown a read asked for, held to something sane — in the read's own terms, where 1 is
+ * "read me again next close". Absent/junk → 1, the safe direction for a field the model may simply
+ * not fill in. What the monitor STORES is this minus one: the closes to skip before the next full
+ * read, since `_tierFor` treats a close as due once `expensive_due` is spent.
  *
  * The CAP is the backstop for a setup whose completion has no price. Most chart patterns finish AT
  * a level — a neckline, a prior high — and a guard covers those exactly; "RSI divergence forming"

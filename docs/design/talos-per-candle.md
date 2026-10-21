@@ -153,8 +153,11 @@ Pure given `nowMs`. Tests per instrument class and rung, including "shut now" an
 > also built bars their own way: the FMP dedupe floored stamps to the epoch (the 09:30 hourly became
 > "09:00"), and 2hr/4hr bars made from hourlies were counted back from the newest bar, so they moved
 > every day and spanned sessions. All three now take `market.service.barStartMs` — 09:30 ET for an
-> equity, ET midnight for futures/forex, UTC midnight for crypto. EXPD 2026-10-19 is the case: read
-> at 13:24 ET, six minutes before the retest bar it was waiting on closed.
+> equity, ET midnight for futures, UTC midnight for crypto and forex (forex moved to UTC in the
+> 2026-10-21 review: FMP's forex bars sit on the UTC grid, and in winter an ET grid is an hour off).
+> EXPD 2026-10-19 is the case: read at 13:24 ET, six minutes before the retest bar it was waiting on
+> closed. The candle cache's incremental sync also starts AT its newest bar now, not after it, so a
+> bar cached while still forming is read again and replaced.
 
 ### 0.2 `services/journal.service.js`
 
