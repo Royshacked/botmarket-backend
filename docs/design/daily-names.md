@@ -1,6 +1,6 @@
-# Daily names — the short-horizon board (session · day · days · week)
+# Hotlist — the short-horizon board (session · day · days · week)
 
-**Status: DESIGN ONLY, nothing built.** The screener is **DailyScreener**; the Floor row is **Daily watchlist**. Discussed with Roy on 2026-10-21; the open decisions were
+**Status: DESIGN ONLY, nothing built.** The screener is **DailyScreener**; the Floor row is **Hotlist**. Discussed with Roy on 2026-10-21; the open decisions were
 settled the same day (§10). Argus already finds names
 for weeks, months and years; this is how it finds names for **a week, a few days, a day, and the
 session itself**. The thresholds below are first proposals, not tuned values. **Shorts are not
@@ -223,9 +223,9 @@ backtest. Here:
 So the board **logs every publication and what each name did afterwards from day one** — per
 column, per grade. After ~6–8 weeks that is our own backtest, and later a real hit rate per column.
 
-## 8. The Floor — "Daily watchlist"
+## 8. The Floor — "Hotlist"
 
-- A **"Daily watchlist"** row in Floor Lists — the board, one for everyone. It sits beside the existing **Watchlists** row (the scan lists), so the two labels must stay visibly distinct.
+- A **"Hotlist"** row in Floor Lists — the board, one for everyone. (Renamed from "Daily watchlist" on 2026-10-21 to stay clear of the existing **Watchlists** row, the scan lists.)
 - Clicking it opens the board in the **window over the chat box**, as a pane tab (the way Pythia and
   Aether open).
 - A row: ticker · gap · relative volume · catalyst label · the five column grades · free range
@@ -250,7 +250,7 @@ column, per grade. After ~6–8 weeks that is our own backtest, and later a real
   hours (a weekend or after 20:00 ET), because the key is shared with live pricing.
 - **Options** — build on the Yahoo snapshot; a paid flow feed only if the board proves it is missing.
 - **Grade thresholds** — the starting cut-offs in §5.1; tuned from the outcome log, never by feel.
-- **Names** — the service is **DailyScreener** (to be built as services/dailyScreener.service.js, the usual *.service.js shape); the Floor row is **Daily watchlist**.
+- **Names** — the service is **DailyScreener** (to be built as services/dailyScreener.service.js, the usual *.service.js shape); the Floor row is **Hotlist**.
 - **Horizon vocabulary** — `swing` is split into **short swing** (2–5 days) and **swing**
   (1–3 weeks). `TRADE_HORIZONS` is a shared cross-agent constant (scans, Mentor, Atlas holdings), so
   the split needs its own conflict check and a migration plan for saved values before it lands.
