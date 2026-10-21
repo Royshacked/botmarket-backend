@@ -19,13 +19,16 @@ import { getFmpQuoteFull, getAftermarketQuote, fmpDateToEpochSec } from '../prov
 import { createPacer } from './concurrency.util.js'
 import { COLUMNS, cell, relativeVolume } from './hotlist.columns.js'
 import { labelNews } from './hotlist.news.js'
+import { BOARDS, outcomeSummary } from './hotlist.outcomes.js'
 import { COLLECTION as STATS, latestRun } from './dailyScreener.service.js'
 import { config } from './config.js'
 import { logger } from './logger.service.js'
 
 const LOG = '[dailyScreener.checkpoint]'
 
-export const BOARDS = 'hotlist_boards'
+// The boards' collection is named in hotlist.outcomes (which reads them) so this module can read its
+// summary without an import cycle; re-exported for the callers that know it from here.
+export { BOARDS }
 
 /** The day's checkpoints (ET minutes). `book` says which quote: the extended-hours book or the session's. */
 export const CHECKPOINTS = Object.freeze([
@@ -55,6 +58,8 @@ const _deps = {
     extQuote:  (symbol) => getAftermarketQuote(symbol),
     quote:     (symbol) => getFmpQuoteFull(symbol, { fresh: true }),
     label:     (byTicker) => labelNews(byTicker),
+    // Which columns have earned "verified" (§7) — from the outcome log; a failed read verifies nothing.
+    verified:  async () => new Set(Object.entries(await outcomeSummary()).filter(([, s]) => s.verified).map(([c]) => c)),
     perMinute: () => config.dailyScreenerRpm,
     now:       () => Date.now(),
     sleep:     (ms) => new Promise(r => setTimeout(r, ms)),
@@ -259,14 +264,16 @@ async function _build(db, cp, day, etMin, run, deps) {
         if (row) rows.push(row)
     }
     const ranked = rankRows(rows).slice(0, BOARD_MAX)
+    const verified = await Promise.resolve().then(() => deps.verified?.() ?? new Set()).catch(() => new Set())
 
     return {
         status: stopped ? 'partial' : 'done',
         stopped,
         columns: cp.columns,
         stats_day: run.day,
-        // §7: every grade is unverified until its column has ~8 weeks of logged outcomes.
-        unverified: true,
+        // §7: a column's grades are unverified until the outcome log has ~8 weeks of them (hotlist.outcomes).
+        unverified_columns: cp.columns.filter(c => !verified.has(c)),
+        unverified: cp.columns.some(c => !verified.has(c)),
         regime: { breadth_above_sma20: run.breadth_above_sma20 ?? null, spy: run.spy ?? null },
         labels: toLabel.size ? (labels.size ? 'labelled' : 'failed') : 'none',
         counts: { pool: pool.length, quoted: quotes.size, graded: rows.length, headlines: headlines.size },

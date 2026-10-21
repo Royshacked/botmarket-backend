@@ -895,6 +895,16 @@ services/
                             headlines — material, catalyst type (short / drift / lasting), surprise,
                             magnitude. DAILY_SCREENER_NEWS_MODEL (default Haiku 4.5, any registry id via
                             modelRoute). FAILS SOFT: any error → no labels, the board still goes out
+  hotlist.outcomes.js       the hotlist's OUTCOME LOG (§7, build phase 4): every graded cell, scored LONG
+                            from the board's price over its column's window (open = the 09:30 hourly bar,
+                            mid 10:30→close, eod 14:30→close, tomorrow the next session, week five
+                            sessions) — MFE, MAE, the return at the end, and whether it REACHED its
+                            free-range level → `hotlist_outcomes`. Off-session, at most hourly, paced,
+                            stops on a 429; bars still missing three sessions after a window closed are
+                            given up (no outcome). summarize → per column and grade: n, hit rate, median
+                            MFE, mean return; a column is VERIFIED at 40 sessions AND 30 samples, which
+                            the board stamps (`unverified_columns`). Also names the `hotlist_boards`
+                            collection (dailyScreener.checkpoint re-exports it: no import cycle)
   pythiaWeekly.service.js   Pythia's WEEK (step 6): on a new complete price run, changeScan → assess every
                             flagged subject, biggest change first, until PYTHIA_WEEKLY_MAX_USD ($3) →
                             `pythia_weekly` (one doc per run date: flagged, results, waiting, held_back, cost,

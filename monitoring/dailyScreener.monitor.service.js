@@ -8,24 +8,27 @@
 import { createPollLoop } from './pollLoop.js'
 import { runNightly } from '../services/dailyScreener.service.js'
 import { runCheckpoint } from '../services/dailyScreener.checkpoint.js'
+import { runOutcomes } from '../services/hotlist.outcomes.js'
 import { config } from '../services/config.js'
 
 const LOG = '[dailyScreenerMonitor]'
 export const CHECK_INTERVAL_MS = 5 * 60 * 1000
 
-const _deps = { enabled: () => config.dailyScreener, nightly: () => runNightly(), checkpoint: () => runCheckpoint() }
+const _deps = { enabled: () => config.dailyScreener, nightly: () => runNightly(), outcomes: () => runOutcomes(), checkpoint: () => runCheckpoint() }
 export function _setDeps(d) { Object.assign(_deps, d) }
 
 /**
  * One check: the overnight pass first (before the open it is the catch-up the morning's boards
- * read from), then whichever checkpoint is due. Each is a cheap no-op when not due. → both results,
- * or `{ outcome: 'off' }`. Never throws (neither run does).
+ * read from), then the outcome scoring (off-session only, at most hourly), then whichever checkpoint
+ * is due. Each is a cheap no-op when not due. → all three results, or `{ outcome: 'off' }`. Never
+ * throws (none of the runs does).
  */
 export async function _tick(deps = _deps) {
     if (!deps.enabled()) return { outcome: 'off' }
-    const nightly = await deps.nightly()
+    const nightly    = await deps.nightly()
+    const outcomes   = await (deps.outcomes?.() ?? { outcome: 'not_due' })
     const checkpoint = await deps.checkpoint()
-    return { nightly, checkpoint }
+    return { nightly, outcomes, checkpoint }
 }
 
 const _loop = createPollLoop({ intervalMs: CHECK_INTERVAL_MS, tick: () => _tick(), eager: false, log: LOG, name: 'daily screener' })

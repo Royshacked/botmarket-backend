@@ -1,6 +1,6 @@
 # Hotlist — the short-horizon board (session · day · days · week)
 
-**Status: BUILDING — phases 1–3 of 6 done (§11); both passes are OFF.** The screener is **DailyScreener**; the Floor row is **Hotlist**. Discussed with Roy on 2026-10-21; the open decisions were
+**Status: BUILDING — phases 1–4 of 6 done (§11); everything is OFF behind `DAILY_SCREENER`.** The screener is **DailyScreener**; the Floor row is **Hotlist**. Discussed with Roy on 2026-10-21; the open decisions were
 settled the same day (§10). Argus already finds names
 for weeks, months and years; this is how it finds names for **a week, a few days, a day, and the
 session itself**. The thresholds below are first proposals, not tuned values. **Shorts are not
@@ -293,7 +293,14 @@ phase 2's overnight pass is switched on anywhere.
    with no writes — it graded SPCX B mid-session (+10%, 3.4× volume, 0.45× ATR to 166.18), and its
    first run caught a long-side hole (a NEGATIVE drift qualified the week column), fixed the same day.
    Not in this phase: short interest and options context for the board's rows (§6).
-4. **The outcome log** — what each graded name did afterwards, per column and grade (§7), and the
-   board history the Floor reads. (The board itself landed in phase 3.)
+4. **The outcome log** — **BUILT 2026-10-21, OFF** (the same switch). `services/hotlist.outcomes.js`:
+   every graded cell scored long from the board's price over its own window — open the first session
+   hour, mid 10:30 → close, eod 14:30 → close, tomorrow the next session, week five sessions — for
+   MFE, MAE, the return at the window's end and whether it reached its free-range level. Scored
+   off-session only, at most hourly, paced. The summary gives, per column and grade, samples, the
+   share that reached the level, the median best move and the mean return; a column is VERIFIED at
+   40 sessions and 30 samples (§7's "~8 weeks"), and each board stamps which of its columns are not
+   yet. `boardsForDay` is the history the Floor reads. Live-checked on EXPD's real hourly and daily
+   bars (no writes).
 5. **Argus picks from the board** — the hand-off to Mentor.
 6. **Frontend** — the Floor's Hotlist row and the pane over the chat, then a browser drive.
