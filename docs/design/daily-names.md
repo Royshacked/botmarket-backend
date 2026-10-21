@@ -1,6 +1,6 @@
 # Hotlist — the short-horizon board (session · day · days · week)
 
-**Status: BUILDING — phases 1–5 of 6 done (§11); everything is OFF behind `DAILY_SCREENER`.** The screener is **DailyScreener**; the Floor row is **Hotlist**. Discussed with Roy on 2026-10-21; the open decisions were
+**Status: BUILT — all six phases (§11); everything is OFF behind `DAILY_SCREENER` until the FMP limit is measured.** The screener is **DailyScreener**; the Floor row is **Hotlist**. Discussed with Roy on 2026-10-21; the open decisions were
 settled the same day (§10). Argus already finds names
 for weeks, months and years; this is how it finds names for **a week, a few days, a day, and the
 session itself**. The thresholds below are first proposals, not tuned values. **Shorts are not
@@ -314,4 +314,12 @@ phase 2's overnight pass is switched on anywhere.
    /api/hotlist`, `/boards/:id`, `/outcomes`. Live-checked: on a real board Argus put TSLA on the
    avoid list (no catalyst, 0.31% of room) and picked nothing; the run also showed one label call
    cannot hold a pool, so labels go 40 tickers a call.
-6. **Frontend** — the Floor's Hotlist row and the pane over the chat, then a browser drive.
+6. **Frontend** — **BUILT 2026-10-21.** The Floor's **Hotlist** row (after Watchlists) opens
+   `HotlistPanel` over the chat, a DetailPanel like the Calendar: Argus's summary on top, the regime,
+   the unverified note, one row per name (Argus's ★ and note or "avoid", price, gap, volume, the
+   catalyst, a grade + free range per column), the day's checkpoints as tabs, "Argus's picks only".
+   **Build with Mentor** sends the row's best column (Argus's pick column first) as a board reference;
+   **Ask Argus** puts the row's facts to Argus as the user's question. Driven:
+   `scripts/drive-hotlist.mjs` 21/21 on Vite against the running dev backend — a fixture board, the
+   two hand-off turns captured and aborted (no model call); the first run caught the row actions
+   overflowing the panel, fixed by stacking them.

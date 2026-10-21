@@ -1374,6 +1374,12 @@ scripts/                    ops one-offs — none run by `npm test`. Kinds: migr
                             (counts, the important Fed days named), a busy day's page, back, Esc. Reuses its
                             sign-in session from the out dir (sign-in is rate-limited); needs the backend
                             RUNNING the calendar routes. `node scripts/drive-floor-lists.mjs [baseUrl] [outDir]`
+  drive-hotlist.mjs         Drives the Floor's HOTLIST (2026-10-21, daily-names.md §11 phase 6): the row, the
+                            panel over the chat (Argus's read, stars, grades, free range, checkpoint tabs,
+                            picks-only), Build with Mentor and Ask Argus. The board is a FIXTURE served for
+                            /api/hotlist and the two hand-off turns are captured then aborted — it checks
+                            the seed's board reference and Argus's question without a model call or a
+                            turn written. `node scripts/drive-hotlist.mjs [baseUrl] [outDir]`
   scan-week.mjs             Pythia's change scan, DRY: what this week would assess and why — no model, no
                             writes. `node scripts/scan-week.mjs [cap]`
   assess-industry.mjs       One Pythia "Assess now" from the command line, as an admin; prints the cost
