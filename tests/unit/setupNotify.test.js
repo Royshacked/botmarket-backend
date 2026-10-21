@@ -11,7 +11,43 @@ const SETUP = { id: 'setup_NVDA_1', userId: 'u1', asset: 'NVDA', direction: 'lon
 test('the copy says the SETUP is confirmed, not merely that price tagged a zone', () => {
     const card = buildSetupEntryConfirm(SETUP, { verdict: 'enter', read: 'Trigger is live.' })
     assert.match(card.content, /LONG NVDA setup is confirmed/)
-    assert.match(card.content, /Confirm to place your order\./)
+    assert.match(card.content, /Confirm to place your order at market\./, 'it says HOW the order goes out')
+    assert.doesNotMatch(card.content, /filled in at your level/, 'a promise a market order cannot keep')
+})
+
+// THE PRICE ON THE CARD. EXPD (2026-10-20): Talos read 198.60 on a 196 plan, the card said "filled
+// in at your level", the user confirmed later and paid 198.81 — R:R 1.86 planned, 0.95 paid.
+const EXPD = {
+    id: 'setup_EXPD_1', userId: 'u1', asset: 'EXPD', direction: 'long', armed_leg_id: 's3e1',
+    entry_legs:  [{ id: 's3e1', price: 196, quantity: 16 }],
+    stop_legs:   [{ id: 's3s1', price: 190.01 }],
+    target_legs: [{ id: 's3t1', price: 207.14, quantity: 16 }],
+}
+
+test('a price off the plan is ON the card, with the R:R it now carries', () => {
+    const card = buildSetupEntryConfirm(EXPD, { verdict: 'enter', price: 198.6 })
+    assert.match(card.content, /Price is 198\.60, 2\.60 above your 196\.00 plan — R:R now 0\.99 \(planned 1\.86\)\. Confirming buys at market\./)
+    assert.equal(card.payload.drift.adverse, true)
+    assert.equal(card.payload.drift.live, 198.6)
+})
+
+test('a price at (or better than) the plan keeps the plain copy', () => {
+    for (const price of [196, 196.3, 195]) {
+        const card = buildSetupEntryConfirm(EXPD, { verdict: 'enter', price })
+        assert.doesNotMatch(card.content, /Price is/, `${price} is within the plan`)
+        assert.equal(card.payload.drift.adverse, false)
+    }
+})
+
+test('a price already past the stop says the plan is broken', () => {
+    const card = buildSetupEntryConfirm(EXPD, { verdict: 'enter', price: 189 })
+    assert.match(card.content, /already past your stop/)
+})
+
+test('no price on the read → plain copy, no drift', () => {
+    const card = buildSetupEntryConfirm(EXPD, { verdict: 'enter' })
+    assert.equal(card.payload.drift, null)
+    assert.match(card.content, /Confirm to place your order at market\./)
 })
 
 test('the card carries NO warning channel — a hedged confirm is what the gate exists to prevent', () => {

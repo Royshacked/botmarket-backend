@@ -17,6 +17,10 @@ import { cardActions, botForKind, BOT_USER_ID } from '../api/chat/chat.service.j
 import { siblingOf } from './setup.taxonomy.js'
 import { kindForDoc } from './entity/envelope.js'
 import { postCard } from './notifyCard.js'
+import { entryDrift } from './setup.schema.js'
+
+// A price in card copy: two decimals, so 198.6 reads as 198.60 beside a 196.00 plan.
+const fmtNum = n => Number(n).toFixed(2)
 
 const LOG = '[tradeNotify]'
 
@@ -91,9 +95,20 @@ export function buildSetupEntryConfirm(setup, assessment = null) {
     const many     = (setup?.scenarios?.length ?? 0) > 1
     const named    = many && scenario ? ` — the ${scenario.name?.trim() || armedId} way in` : ''
 
+    // The price at the READ, against the plan. Confirming buys at market, so "filled in at your
+    // level" was a promise this card could not keep — EXPD said it at 198.60 on a 196 plan. When the
+    // price has moved off the plan the card says so, with the R:R it now carries; the dialog
+    // re-prices at the moment of Confirm (entryDrift, ideaExecution).
+    const drift = entryDrift(setup, assessment?.price)
+    const where = drift?.adverse
+        ? drift.pastStop
+            ? ` Price is ${fmtNum(drift.live)} — already past your stop. Confirming would buy at market into a broken plan.`
+            : ` Price is ${fmtNum(drift.live)}, ${fmtNum(Math.abs(drift.slippage))} ${setup?.direction === 'short' ? 'below' : 'above'} your ${fmtNum(drift.planned)} plan${drift.liveRr != null ? ` — R:R now ${drift.liveRr} (planned ${drift.plannedRr})` : ''}. Confirming buys at market.`
+        : ' Confirm to place your order at market.'
+
     return {
         userId:  setup?.userId ?? null,
-        content: `Your ${dir} ${setup?.asset} setup is confirmed${named} — the setup filled in at your level. Confirm to place your order.`,
+        content: `Your ${dir} ${setup?.asset} setup is confirmed${named}.${where}`,
         type:    'entry_confirm',
         payload: {
             kind:      'setup',
@@ -105,6 +120,7 @@ export function buildSetupEntryConfirm(setup, assessment = null) {
             scenario:   scenario ? (scenario.name?.trim() || armedId) : null,
             verdict:   assessment?.verdict ?? null,
             read:      assessment?.read ?? null,
+            drift:     drift ?? null,
         },
         botId:   'mentor',
         actions: cardActions('Confirm order'),

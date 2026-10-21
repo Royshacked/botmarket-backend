@@ -84,6 +84,34 @@ const _repo = deps => makeEntityRepo({
 const _syncExit = deps => deps.syncExit ?? ((holderId, accountId, leg, patch) =>
     _repo(deps).syncExitOrder(holderId, { accountId, leg }, patch ?? {}))
 
+/**
+ * What the broker ACTUALLY filled: the entry price each account's open position reports, averaged
+ * by the size each account was sent. The plan's price is what the user hoped for; a confirmed entry
+ * is a market order, so the fill is wherever the market was when they pressed Confirm — EXPD planned
+ * at 196 filled at 198.81, and every R measured from 196 was fiction.
+ *
+ * Null when no account answers with a price (a manual venue, a broker that cannot be reached, a
+ * position already gone) — the caller keeps the plan's price then, which is all it ever had.
+ *
+ * Returned in the PLAN's price space. A broker that trades an aliased instrument (an index CFD)
+ * fills in its own space, `basisOffset` above the real one (brokerPrice.applyOffset), while the
+ * stop and targets this is measured against are authored in the real one — so the offset comes off.
+ */
+export async function brokerEntryPrice(entity, deps = _deps) {
+    let sum = 0, weight = 0
+    for (const link of resolveAllLinks(entity, entity)) {
+        let open
+        try { open = await deps.findOpenPosition(link.broker, entity.userId, link.accountId, link.positionId) }
+        catch { continue }
+        const px = Number(open?.entryPrice)
+        if (!(px > 0)) continue
+        const w = link.quantity > 0 ? link.quantity : 1
+        sum += px * w
+        weight += w
+    }
+    return weight > 0 ? sum / weight - (Number(entity.basisOffset) || 0) : null
+}
+
 // ── Pure helpers ──────────────────────────────────────────────────────────────
 
 /**

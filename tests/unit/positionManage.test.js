@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { applyManage, manageApplied } from '../../services/positionManage.service.js'
+import { applyManage, manageApplied, brokerEntryPrice } from '../../services/positionManage.service.js'
 
 // THE HANDS of in-position management, and until now it had no direct test — only the coverage it
 // picked up through talosHandoff. That is exactly the gap this file exists to close, because the
@@ -210,4 +210,55 @@ test('applyManage journals through the repo — one write, then the line', async
     assert.equal(journal[0].reason, 'manage')
     assert.equal(journal[0].verdict, 'exit_now')
     assert.equal(updates[0].$push, undefined, 'and nothing on the entity itself')
+})
+
+// ── brokerEntryPrice: what was PAID, read from the broker ────────────────────
+// Talos stamps the position's entry from this. A confirmed entry is a market order, so the plan's
+// price is a hope; the position each account holds says what it cost.
+
+const placed = (brokerOrders) => ({ id: 's1', userId: 'u1', accounts: brokerOrders.map(b => b.accountId), brokerOrders })
+
+test('brokerEntryPrice: one account — the position\'s own entry price', async () => {
+    const e = placed([{ broker: 'paper', accountId: 'a1', positionId: 'p1', quantity: 16 }])
+    const seen = []
+    const px = await brokerEntryPrice(e, { findOpenPosition: async (...a) => { seen.push(a); return { entryPrice: 198.809879 } } })
+    assert.equal(px, 198.809879)
+    assert.deepEqual(seen[0], ['paper', 'u1', 'a1', 'p1'], 'asks the right broker for the right position')
+})
+
+test('brokerEntryPrice: several accounts — averaged by the size each was sent', async () => {
+    const e = placed([
+        { broker: 'paper', accountId: 'a1', positionId: 'p1', quantity: 30 },
+        { broker: 'paper', accountId: 'a2', positionId: 'p2', quantity: 10 },
+    ])
+    const px = await brokerEntryPrice(e, { findOpenPosition: async (_b, _u, acct) => ({ entryPrice: acct === 'a1' ? 100 : 104 }) })
+    assert.equal(px, 101)
+})
+
+test('brokerEntryPrice: an account that throws or reports no price is skipped, not zeroed', async () => {
+    const e = placed([
+        { broker: 'paper',   accountId: 'a1', positionId: 'p1', quantity: 10 },
+        { broker: 'ctrader', accountId: 'a2', positionId: 'p2', quantity: 10 },
+        { broker: 'paper',   accountId: 'a3', positionId: 'p3', quantity: 10 },
+    ])
+    const px = await brokerEntryPrice(e, { findOpenPosition: async (_b, _u, acct) => {
+        if (acct === 'a2') throw new Error('socket down')
+        return acct === 'a3' ? { entryPrice: null } : { entryPrice: 50 }
+    } })
+    assert.equal(px, 50)
+})
+
+test('brokerEntryPrice: an aliased instrument\'s fill comes back in the PLAN\'s price space', async () => {
+    // The CFD trades 12 above the cash index the plan was drawn on (brokerPrice.applyOffset adds it
+    // on the way out); a stop at 5000 measured against a 5112 "entry" would read a 112-point risk.
+    const e = { ...placed([{ broker: 'ctrader', accountId: 'a1', positionId: 'p1', quantity: 1 }]), basisOffset: 12 }
+    assert.equal(await brokerEntryPrice(e, { findOpenPosition: async () => ({ entryPrice: 5112 }) }), 5100)
+})
+
+test('brokerEntryPrice: nothing to ask, or nobody answers → null (the caller keeps the plan)', async () => {
+    assert.equal(await brokerEntryPrice({ id: 's1', userId: 'u1' }, { findOpenPosition: async () => ({ entryPrice: 1 }) }), null,
+        'no brokerOrders — a manual venue')
+    const e = placed([{ broker: 'paper', accountId: 'a1', positionId: 'p1', quantity: 5 }])
+    assert.equal(await brokerEntryPrice(e, { findOpenPosition: async () => null }), null, 'the position is gone')
+    assert.equal(await brokerEntryPrice(e, { findOpenPosition: async () => undefined }), null, 'the adapter cannot look one up')
 })

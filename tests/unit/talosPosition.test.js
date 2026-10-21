@@ -54,6 +54,7 @@ function stubDeps(over = {}) {
         getPrice:    async () => 240,
         assessPosition: async () => ({ verdict: 'hold', read: 'Doing what it should.' }),
         onManageCard:   async () => {},
+        getFillPrice:   async () => null,
         writes, entries,
         persist: async (_id, $set, entry = null) => { writes.push($set); entries.push(entry) },
         ...over,

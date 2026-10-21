@@ -701,6 +701,9 @@ function stubDeps(over = {}) {
         assessPosition: async () => ({ verdict: 'hold', read: 'Doing what it should.' }),
         onManageCard:   async () => {},
         cancelOrder:    async () => {},
+        // No broker answers by default, so the plan's price is the fill — what every test below
+        // was written against. The broker-fill cases set it.
+        getFillPrice:   async () => null,
         onDisarmCard:   async () => {},
         writes,
         // The journal line rides alongside the $set. Kept as a SECOND array rather than folded into
@@ -1005,6 +1008,31 @@ test('the first wake after a fill writes the entry into the journal', async () =
     assert.equal($set['position_state.entry.fill_at'], new Date(T - 60_000).toISOString(),
         'stamped when the orders were placed, not when we noticed')
     assert.equal($set['position_state.phase'], 'running')
+})
+
+// A confirmed entry goes out at MARKET, so the plan's price is what was hoped for, not what was
+// paid. EXPD (2026-10-20): planned at 196, confirmed 1h47m after the read, filled at 198.81 — and
+// the setup recorded 196, so every R after it was measured from a price nobody paid.
+test('the fill is the BROKER\'s price, not the plan\'s', async () => {
+    const deps = stubDeps({ getFillPrice: async () => 198.809879 })
+    await _checkSetup(FILLED, T, deps)
+    const $set = deps.writes[0]
+    assert.equal($set['position_state.entry.fill_price'], 198.809879)
+    assert.equal($set['position_state.entry.legs'][0].price, 198.809879, 'the leg carries what was paid too')
+    assert.match(deps.entries[0].note, /around 198\.809879/, 'and so does the journal line')
+})
+
+test('no broker answer (manual venue, unreachable) keeps the plan\'s price', async () => {
+    // Armed on its entry leg, so the plan has a price to fall back to.
+    const armed = { ...FILLED, armed_leg_id: FILLED.entry_legs[0].id }
+    const plan = stubDeps()
+    await _checkSetup(armed, T, plan)
+    const planned = plan.writes[0]['position_state.entry.fill_price']
+    assert.ok(Number.isFinite(planned), 'the plan still prices the entry')
+
+    const bad = stubDeps({ getFillPrice: async () => 'n/a' })
+    await _checkSetup(armed, T, bad)
+    assert.equal(bad.writes[0]['position_state.entry.fill_price'], planned, 'a garbage answer is no answer')
 })
 
 // The fill also SEEDS what an in-position gate measures against. Without this the gate reads

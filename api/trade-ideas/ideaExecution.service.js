@@ -15,6 +15,9 @@ import { AWAITING_CONFIRM, isRestingEntry, isArmed } from '../../services/entity
 import { coverageService }     from '../analyst/coverage.service.js'
 import { NO_PRICE }            from '../broker/adapters/broker.interface.js'
 import { applyOffset }         from '../broker/brokerPrice.service.js'
+import { KINDS, kindForDoc }   from '../../services/entity/envelope.js'
+import { entryDrift }          from '../../services/setup.schema.js'
+import { fetchLastPrice }      from '../../services/lastPrice.service.js'
 
 const LOG = '[ideaExecution]'
 
@@ -40,10 +43,20 @@ export function restingEntryPrice(entryOrderType, price) {
 }
 
 /**
+ * The confirm-time price check for a setup: the refusal to return when the live price is worse than
+ * the plan (or past its stop), else null. Null too when there is no price to judge by — the order
+ * then places as it always did. Pure, so the decision is testable without a broker or a feed.
+ */
+export function priceMovedRefusal(setup, livePrice) {
+    const drift = entryDrift(setup, livePrice)
+    return drift?.adverse ? { ok: false, reason: 'price_moved', drift } : null
+}
+
+/**
  * Place broker orders for a triggered ('hit') idea after the user confirms.
  * On at least one success the idea advances to long/short so stop/TP monitoring begins.
  */
-export async function placeOrdersForIdea(id, orders, userId) {
+export async function placeOrdersForIdea(id, orders, userId, { acceptPrice = false } = {}) {
     try {
         const idea = await entityRepo.getById(id)
         if (!idea) return { ok: false, reason: 'not_found' }
@@ -60,6 +73,16 @@ export async function placeOrdersForIdea(id, orders, userId) {
         // meant to hold until price comes to it, so it is not gated here — placeRestingEntryForIdea
         // owns that path, and its own venue rules apply.
         if (!isAssetOpen(idea.asset, idea.asset_class)) return { ok: false, reason: 'market_closed' }
+
+        // THE PRICE AT CONFIRM, not at the read. The entry goes out at market, so it fills where the
+        // market is now — which can be hours and dollars from where the plan was drawn. A setup whose
+        // live price is worse than its plan (or past its stop) is refused with the numbers, once; the
+        // user's second press carries `acceptPrice` and places. Setups only: they carry the priced
+        // entry and stop legs this is measured from. No live price → no verdict, so place as before.
+        if (kindForDoc(idea) === KINDS.SETUP && !acceptPrice) {
+            const refusal = priceMovedRefusal(idea, await fetchLastPrice(idea.asset).catch(() => null))
+            if (refusal) return refusal
+        }
 
         const plan = (idea.pendingOrder?.plan?.length) ? idea.pendingOrder.plan : orders
         if (!Array.isArray(plan) || plan.length === 0) return { ok: false, reason: 'no_orders' }

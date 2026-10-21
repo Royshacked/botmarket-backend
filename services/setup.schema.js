@@ -1357,3 +1357,47 @@ export function computeRR(setup, entryPrice = null) {
 
     return Math.round((reward / risk) * 100) / 100
 }
+
+// How far past the plan's entry a market fill may land before the user has to see it. As a share
+// of the plan's own risk, not a percent of price: 0.60 on a 5.99 stop is a tenth of the trade's
+// risk, on a 0.60 stop it is all of it.
+export const ENTRY_DRIFT_TOLERANCE_R = 0.1
+
+/**
+ * The plan's entry against the LIVE price, for a confirmed entry — which goes out at market, so it
+ * fills where the market is, not where the plan was drawn. EXPD (2026-10-20): planned at 196, read
+ * at 198.60, confirmed 1h47m later and filled at 198.81 — R:R 1.86 on paper, 0.95 paid, and nothing
+ * on the card or the dialog said so.
+ *
+ * `adverse` is the one bit a caller acts on: the price is WORSE than the plan by more than the
+ * tolerance, or already past the stop (a long below its stop has no trade left at any R:R). A price
+ * better than the plan is never adverse.
+ *
+ * Null when there is nothing to compare: no live price, no priced entry leg, or no stop. Pure.
+ */
+export function entryDrift(setup, livePrice) {
+    const live = Number(livePrice)
+    if (!(live > 0)) return null
+    const isLong  = setup?.direction === 'long'   // stopEdge's and computeRR's reading, so the three agree
+    const leg     = setup?.entry_legs?.find(l => l?.id === setup?.armed_leg_id) ?? setup?.entry_legs?.[0]
+    const planned = legPrice(leg)
+    const stop    = stopEdge(setup)
+    if (!Number.isFinite(planned) || stop == null) return null
+
+    const risk = isLong ? planned - stop : stop - planned
+    if (!(risk > 0)) return null
+
+    const slippage  = isLong ? live - planned : planned - live
+    const pastStop  = isLong ? live <= stop : live >= stop
+    const round2    = n => Math.round(n * 100) / 100
+    return {
+        planned,
+        live,
+        slippage:   round2(slippage),
+        slippageR:  round2(slippage / risk),
+        plannedRr:  computeRR(setup, planned),
+        liveRr:     pastStop ? null : computeRR(setup, live),
+        pastStop,
+        adverse:    pastStop || slippage / risk > ENTRY_DRIFT_TOLERANCE_R,
+    }
+}

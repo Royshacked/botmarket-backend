@@ -160,8 +160,8 @@ export const placeTradeIdeaOrders = _handle('placeTradeIdeaOrders', async (req, 
     const id = _requireId(req, res)
     if (!id) return
 
-    const { orders } = req.body ?? {}
-    const result = await ideaService.placeOrdersForIdea(id, orders, req.user._id)
+    const { orders, acceptPrice } = req.body ?? {}
+    const result = await ideaService.placeOrdersForIdea(id, orders, req.user._id, { acceptPrice: acceptPrice === true })
     if (!result.ok) {
         // `all_failed` is the one refusal that isn't the client's fault or the entity's state:
         // the request was fine and every broker rejected it — 502, with the per-order results.
@@ -173,12 +173,15 @@ export const placeTradeIdeaOrders = _handle('placeTradeIdeaOrders', async (req, 
             // briefly unavailable. 503 (+ the symbol) so the client can say "try again in a
             // moment" rather than implying a venue turned the trade down.
             no_price:   [503, 'No live price right now — try again in a moment'],
+            // Not a failure: the market moved off the plan since the read. 409 + the numbers, so the
+            // dialog can show them and the user's second press (acceptPrice) places at market.
+            price_moved: [409, 'The price has moved off the plan'],
         }
         return sendReason(res, result.reason, {
             overrides: PLACE, fallback: 500, fallbackMessage: 'Failed to place orders',
             extra: ['all_failed', 'no_price'].includes(result.reason)
                 ? { results: result.results, ...(result.symbol && { symbol: result.symbol }) }
-                : null,
+                : result.reason === 'price_moved' ? { drift: result.drift } : null,
         })
     }
 

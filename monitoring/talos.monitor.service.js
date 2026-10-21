@@ -18,6 +18,7 @@ import { cancelRestingEntryOrders } from '../services/restingOrders.service.js'
 import { notifySetupEntryConfirm, notifySetupInvalidation, notifySetupManage, notifySetupLimitDisarm } from '../services/tradeNotify.service.js'
 import { isSelfExecuted } from '../services/venue.resolve.service.js'
 import { brokerService } from '../api/broker/broker.service.js'
+import { brokerEntryPrice } from '../services/positionManage.service.js'
 import { legGate, scenarioGate, liveScenarios, _hitFromGuard, computeMetrics, metricsSet, validityBreach, breachPatch, rollUpBreaches, normalizeConditionResults, latchPatch, costPatch } from './talos.gates.js'
 
 // Talos — the guardian of the `setup` kind (docs/design/talos-per-candle.md).
@@ -313,7 +314,10 @@ async function _checkPosition(setup, nowMs, deps) {
     // First wake after the fill. Bookkeeping, not monitoring: it fetches no price, calls no model
     // and posts no card — it writes down a fill that has already happened. Deliberately ahead of
     // the off-hours gate so a setup filled at the close has its position_state before the open.
-    const fillPrice = toNum(ps.entry?.intended) ?? legPrice(_legById(setup, setup.armed_leg_id))
+    // The BROKER's fill first: a confirmed entry goes out at market, so the plan's price is only
+    // what was hoped for. The plan's price is the fallback when no broker answers (manual venue).
+    const fillPrice = toNum(await deps.getFillPrice(setup))
+        ?? toNum(ps.entry?.intended) ?? legPrice(_legById(setup, setup.armed_leg_id))
     const fillAtMs  = setup.ordersPlacedAt ?? setup.entryTriggeredAt ?? nowMs
     // The WORKING stop, chosen by price rather than by array position (setup.schema stopEdge).
     const stop = stopEdge(setup)
@@ -852,6 +856,7 @@ const _deps = {
     onManualCard: (setup) => notifyManualEntry(setup.userId, { legs: [entryLegFromIdea(setup)], kind: 'setup' }),
     onManageCard: notifySetupManage,
     cancelOrder: (broker, userId, acct, orderId) => brokerService.cancelOrder(broker, userId, acct, orderId),
+    getFillPrice: (setup) => brokerEntryPrice(setup),
     onDisarmCard: notifySetupLimitDisarm,
 }
 
