@@ -3329,6 +3329,19 @@
                     "category"
                 ]
             }
+        },
+        {
+            "name": "get_hotlist",
+            "description": "Today's HOTLIST — the screener's names in play, from the day's checkpoint boards (08:00 and 09:20 ET pre-market, then 10:30, 14:30, 15:30), long side only. For each name: its status (IN PLAY now; BUILDING — money arriving; SETTING UP — quiet, with a known date ahead, usually earnings, a run-up to be out of before the report), its best horizon and grade (A/B/C by free range — the room to the next level overhead, NOT a target), the reason, the price as of its checkpoint (not live), and Argus's pick or avoid where he made one. Also the counts per status and Argus's read of the latest board. Use it to say what is on the hotlist in a line or two; the grades are unverified until enough outcomes are logged, so never present one as a reason a stock will rise.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "limit": {
+                        "type": "number",
+                        "description": "How many names to list, 1–30 (default 10). Picks and in-play names come first."
+                    }
+                }
+            }
         }
     ]
 }
