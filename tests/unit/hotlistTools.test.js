@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { splitShow, validateShow, SHOW_LISTS } from '../../services/routing.util.js'
+import { splitShow, validateShow, showFor, routeFields, SHOW_LISTS } from '../../services/routing.util.js'
 import { showLine } from '../../services/desks/sessionTurn.js'
 import { formatHotlist, makeHotlistHandlers, HOTLIST_TOOL_SPEC } from '../../services/tools/hotlist.tools.js'
 import { TOOLS as AXL_TOOLS } from '../../services/agents/axl.agent.service.js'
@@ -12,8 +12,8 @@ import { isToolError, toolErrorText } from '../../services/toolResult.util.js'
 // ─── The show kinds ───────────────────────────────────────────────────────────
 
 test('each list is a screen Axl can show — no ref, like the calendar', () => {
-    assert.deepEqual([...SHOW_LISTS], ['orders', 'trades', 'portfolios', 'watchlists', 'hotlist'])
-    assert.equal(validateShow({ kind: 'positions' }), null, 'positions is the left column, not a window')
+    // Every list (Roy, 2026-10-22: "the user should be able to see all lists through Axl").
+    assert.deepEqual([...SHOW_LISTS], ['positions', 'orders', 'trades', 'portfolios', 'watchlists', 'hotlist', 'board', 'research'])
     for (const kind of SHOW_LISTS) {
         assert.deepEqual(splitShow(kind), { kind, ref: null }, kind)
         assert.deepEqual(validateShow({ kind, ref: 'ignored junk' }), { kind, ref: null }, `${kind}: a list takes no ref`)
@@ -25,11 +25,21 @@ test('each list is a screen Axl can show — no ref, like the calendar', () => {
     assert.equal(validateShow({ kind: 'setup' }), null, 'a setup still needs its handle')
 })
 
+test("the research queue is an admin's list — a trader's show of it is dropped; every other list is anyone's", () => {
+    assert.deepEqual(showFor('admin', { kind: 'research' }), { kind: 'research', ref: null })
+    assert.equal(showFor('user', { kind: 'research' }), null)
+    assert.equal(routeFields({ show: { kind: 'research' } }, 'user').show, null, 'through the controller too')
+    assert.deepEqual(showFor('user', { kind: 'board' }), { kind: 'board', ref: null })
+    assert.deepEqual(showFor('user', { kind: 'positions' }), { kind: 'positions', ref: null })
+})
+
 test('a show-only reply says which list it opened', () => {
     assert.equal(showLine({ kind: 'trades' }), 'Here are your trades.')
     assert.equal(showLine({ kind: 'hotlist' }), "Here's today's hotlist.")
     assert.equal(showLine({ kind: 'orders' }), "Here's what's awaiting orders.")
     assert.equal(showLine({ kind: 'calendar' }), "Here's the calendar.")
+    assert.equal(showLine({ kind: 'positions' }), 'Here are your positions.')
+    assert.equal(showLine({ kind: 'board' }), "Here's Pythia's forecast board.")
 })
 
 // ─── The hotlist read ─────────────────────────────────────────────────────────

@@ -60,6 +60,7 @@ export function replyExtras(payload) {
 const LIST_LINES = Object.freeze({
     orders: "Here's what's awaiting orders.", trades: "Here are your trades.",
     portfolios: "Here are your portfolios.", watchlists: "Here are your watchlists.", hotlist: "Here's today's hotlist.",
+    positions: "Here are your positions.", board: "Here's Pythia's forecast board.", research: "Here's the research queue.",
 })
 
 /**

@@ -129,10 +129,13 @@ export function splitEdit(raw) {
 // `ticket` opens the order ticket (plan phase 7) — a code screen, no desk; its ref is an optional symbol.
 // `heatmap` and `calendar` (Roy, 2026-10-19) open the house's two read-only VIEWS: the forecast heat map (Pythia's
 // industries — its ref an optional symbol to focus on) and the month calendar. Screens, like the ticket: no desk, no item.
-// The Floor's LISTS (Roy, 2026-10-22: "I want Axl to be able to present them all") — each opens its window over
-// the chat, the same one its chip in the strip opens. Named in the user's words; the client maps them to its desks.
-// Positions is not one: it is the Floor's left column, not a window.
-export const SHOW_LISTS = new Set(['orders', 'trades', 'portfolios', 'watchlists', 'hotlist'])
+// The Floor's LISTS (Roy, 2026-10-22: "I want Axl to be able to present them all" … "the user should be able to see
+// all lists through Axl") — each opens its window over the chat, the same one its header in the list column opens.
+// Named in the user's words; the client maps them to its desks. `positions` opens the book in a window too (the left
+// column is hidden on a narrower screen); `board` is Pythia's Forecast board; `research` the house research queue —
+// an ADMIN's list, so a trader's show of it is dropped (`routeFields`).
+export const SHOW_LISTS = new Set(['positions', 'orders', 'trades', 'portfolios', 'watchlists', 'hotlist', 'board', 'research'])
+const ADMIN_SHOWS = new Set(['research'])
 export const SHOW_KINDS = new Set(['setup', 'ticket', 'heatmap', 'calendar', ...SHOW_LISTS])
 // The screens — a show whose ref is optional, because what it opens exists without one.
 const SHOW_SCREENS = new Set(['ticket', 'heatmap', 'calendar', ...SHOW_LISTS])
@@ -220,6 +223,12 @@ export function validateShow(show) {
     return ref ? { kind: show.kind, ref } : null
 }
 
+/** The show THIS user may be given: an admin's list (the research queue) is dropped for anyone else. */
+export function showFor(role, show) {
+    const v = validateShow(show)
+    return v && ADMIN_SHOWS.has(v.kind) && role !== 'admin' ? null : v
+}
+
 /**
  * The routing fields of a `done` payload, validated for this user. Spread into the controller's
  * return beside the agent's own fields. Every gate is the same one: a symbol, an opening or an
@@ -234,7 +243,7 @@ export function routeFields(result, role) {
         // it carries its own desk.
         edit:    validateEdit(result?.edit),
         // Open an item's own detail surface. Independent of both — it goes to no desk at all.
-        show:    validateShow(result?.show),
+        show:    showFor(role, result?.show),
         opening: route ? (result?.opening ?? null) : null,
     }
 }
