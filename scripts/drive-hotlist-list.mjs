@@ -144,6 +144,21 @@ try {
     check('the open row says why, in plain words', /earnings in 8 days — a run-up: out before the report/.test(detail), detail.slice(0, 120))
     check('…and when it was listed', /listed at 08:00 · price as of/.test(detail))
     await shot(page, '1b-open-row')
+
+    // ── The header is sticky (Roy, 2026-10-22): a short window, the panel scrolled to the bottom ──
+    await page.setViewportSize({ width: 1600, height: 480 })
+    await page.waitForTimeout(300)
+    const sticky = await page.evaluate(() => {
+        const body = document.querySelector('.hot-panel .detail-panel__body')
+        const th = document.querySelector('.hot-panel .hot-table--list thead th')
+        body.scrollTop = body.scrollHeight
+        return { scrolled: Math.round(body.scrollTop), th: Math.round(th.getBoundingClientRect().top), body: Math.round(body.getBoundingClientRect().top) }
+    })
+    check('the table header stays at the top while the panel scrolls', sticky.scrolled > 0 && Math.abs(sticky.th - sticky.body) <= 2, JSON.stringify(sticky))
+    await shot(page, '1c-sticky')
+    await page.evaluate(() => { document.querySelector('.hot-panel .detail-panel__body').scrollTop = 0 })
+    await page.setViewportSize({ width: 1600, height: 900 })
+    await page.waitForTimeout(300)
     check('Argus\'s read is labelled with its checkpoint', view.argus === 'Argus · 10:30', view.argus)
     check('prices are marked as of the checkpoint, not live', view.asOf)
     check('the table fits the panel at 1600 px', !view.overflow, view.widths)
