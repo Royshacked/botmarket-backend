@@ -59,6 +59,16 @@ export function createInstanceLock({
 
     let leader = false
     let timer  = null
+    // What the latest lease check says we should be, and the transition now being applied. The
+    // callbacks are slow (stopping every loop waits on each one), and a lease lost and won back
+    // inside that window used to run onAcquired WHILE onLost was still stopping loops: the stop then
+    // popped the fresh loops too, and the process sat as leader with nothing running until a
+    // restart (dev backend, 2026-10-22, a 60 s network drop). Transitions now run one at a time,
+    // each to the latest wish.
+    let want    = false
+    let settling = null
+    // Set by stop(): a lease check still in flight when the process shuts down must not start the loops.
+    let stopped = false
 
     /**
      * Try to take or extend the lease. NEVER throws: an unreachable database means we cannot prove
@@ -87,24 +97,36 @@ export function createInstanceLock({
         }
     }
 
-    /** Apply a leadership transition exactly once, and never let a callback throw into the timer. */
-    async function _settle(nextLeader) {
-        if (nextLeader === leader) return
-        leader = nextLeader
-        try {
-            if (leader) {
-                logger.info(LOG, `${instanceId} IS the leader — starting background loops`)
-                await onAcquired?.()
-            } else {
-                // THE case that keeps two leaders from coexisting. If renewal fails — a Mongo blip,
-                // a long GC pause — the lease can expire and another process can legitimately take
-                // it. This process must then stand its loops down, or for a while there are two
-                // reconcilers, which is the exact failure the whole file exists to prevent.
-                logger.error(LOG, `${instanceId} LOST the lease — stopping background loops`)
-                await onLost?.()
+    /**
+     * Apply a leadership transition exactly once, and never let a callback throw into the timer.
+     * One transition at a time: a call that arrives while one is running records its wish and
+     * returns that transition's promise; the running one then settles to the LATEST wish — so
+     * lost-then-won during a slow stop ends with the loops started again, not stopped.
+     */
+    function _settle(nextLeader) {
+        want = nextLeader && !stopped
+        if (!settling) settling = _drain().finally(() => { settling = null })
+        return settling
+    }
+
+    async function _drain() {
+        while (want !== leader) {
+            leader = want
+            try {
+                if (leader) {
+                    logger.info(LOG, `${instanceId} IS the leader — starting background loops`)
+                    await onAcquired?.()
+                } else {
+                    // THE case that keeps two leaders from coexisting. If renewal fails — a Mongo blip,
+                    // a long GC pause — the lease can expire and another process can legitimately take
+                    // it. This process must then stand its loops down, or for a while there are two
+                    // reconcilers, which is the exact failure the whole file exists to prevent.
+                    logger.error(LOG, `${instanceId} LOST the lease — stopping background loops`)
+                    await onLost?.()
+                }
+            } catch (err) {
+                logger.error(LOG, 'leadership callback failed:', err?.message ?? err)
             }
-        } catch (err) {
-            logger.error(LOG, 'leadership callback failed:', err?.message ?? err)
         }
     }
 
@@ -116,6 +138,7 @@ export function createInstanceLock({
          */
         async start() {
             if (timer) return
+            stopped = false
             await _settle(await tryAcquire())
             if (!leader) {
                 logger.warn(LOG, `${instanceId} is a FOLLOWER — another instance holds the lease. `
@@ -134,6 +157,10 @@ export function createInstanceLock({
          */
         async stop() {
             if (timer) { clearInterval(timer); timer = null }
+            // A transition still running must not start the loops again behind the shutdown.
+            stopped = true
+            want = false
+            await settling
             if (!leader) return
             leader = false
             try {

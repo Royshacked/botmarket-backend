@@ -122,6 +122,53 @@ test('callbacks fire ONCE per transition, not once per tick', async () => {
     await a.stop()
 })
 
+test('lost and won back DURING a slow stop: the loops end up started, not stopped (2026-10-22)', async () => {
+    // The dev backend, a 60 s network drop: onLost was still stopping loops one by one when the
+    // lease came back, onAcquired started them, and the unfinished stop then stopped those too —
+    // a leader with nothing running. Transitions now run one at a time, to the latest wish.
+    const col = fakeCollection()
+    const log = []
+    let releaseStop
+    const a = lockFor(col, 'A', {
+        onAcquired: () => { log.push('start') },
+        onLost: () => new Promise(r => { log.push('stopping'); releaseStop = () => { log.push('stopped'); r() } }),
+    })
+    await a.start()
+    col.doc = { _id: LOOPS_LOCK_KEY, holder: 'B', expiresAt: new Date(Date.now() + 60_000).toISOString() }
+    const losing = a._tick()                      // the stop begins, and hangs
+    await new Promise(r => setImmediate(r))
+    col.doc = null                                // B is gone; the lease is winnable again
+    const winning = a._tick()                     // won back while the stop is still running
+    await new Promise(r => setImmediate(r))
+    assert.deepEqual(log, ['start', 'stopping'], 'no start while the stop is in flight')
+    releaseStop()
+    await Promise.all([losing, winning])
+    assert.deepEqual(log, ['start', 'stopping', 'stopped', 'start'], 'the stop finishes, THEN the loops start again')
+    assert.equal(a.isLeader(), true)
+    await a.stop()
+})
+
+test('stop() during a transition waits for it, and does not start the loops behind the shutdown', async () => {
+    const col = fakeCollection()
+    const log = []
+    let releaseStop
+    const a = lockFor(col, 'A', {
+        onAcquired: () => { log.push('start') },
+        onLost: () => new Promise(r => { releaseStop = () => { log.push('stopped'); r() } }),
+    })
+    await a.start()
+    col.doc = { _id: LOOPS_LOCK_KEY, holder: 'B', expiresAt: new Date(Date.now() + 60_000).toISOString() }
+    const losing = a._tick()
+    await new Promise(r => setImmediate(r))
+    col.doc = null
+    const winning = a._tick()
+    const stopping = a.stop()
+    releaseStop()
+    await Promise.all([losing, winning, stopping])
+    assert.deepEqual(log, ['start', 'stopped'], 'shutting down wins over the re-acquire')
+    assert.equal(a.isLeader(), false)
+})
+
 test('release is guarded on the holder — a former leader cannot delete the new one’s lease', async () => {
     const col = fakeCollection()
     const a = lockFor(col, 'A')
