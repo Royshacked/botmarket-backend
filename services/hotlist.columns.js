@@ -159,23 +159,55 @@ export function inPlay(column, stats, ctx = {}) {
         break
     }
     case 'week': {
-        const structure = s.nr7 || s.inside_day || (num(s.high20) > 0 && num(s.close) >= num(s.high20) * 0.97)
-        const days = _daysUntil(ctx.today, s.next_earnings)
-        const scheduled = days != null && days >= 2 && days <= 10
+        const w = weekSetup(s, ctx.today)
+        // A report tonight or tomorrow makes the hold a coin toss (§2.7), whatever else qualifies it.
+        if (w.binary) break
         // LONG SIDE ONLY (§9): a lasting catalyst counts for a long only when it surprised UP — the
         // first live run had Netflix's "disappointing outlook" (a negative drift) qualifying a long.
         const drift = material && ['drift', 'lasting'].includes(ctx.catalyst?.type) && ctx.catalyst?.surprise === 'positive'
-        if (num(s.rs20) > 0 && structure && (scheduled || drift)) {
+        if (w.base && (w.scheduled || w.accumulation || drift)) {
             why.push([
                 s.nr7 ? 'NR7' : s.inside_day ? 'inside day' : 'near the 20-day high',
                 `RS +${s.rs20} vs SPY (20d)`,
-                scheduled ? `earnings in ${days} days` : `${ctx.catalyst.type} catalyst`,
+                ...(w.accumulation ? [`volume ${s.vol5_vs_50}× its 50-day pace (5d)`] : []),
+                ...(drift ? [`${ctx.catalyst.type} catalyst`] : []),
+                // The report is inside the window: the trade is the run-up INTO it, and ends before it
+                // (§2.7 "unless earnings IS the trade" — Roy, 2026-10-22).
+                ...(w.scheduled ? [`earnings in ${w.days} days — a run-up: out before the report`] : []),
             ].join(' · '))
         }
-        break
+        if (!why.length) return { in: false, why }
+        // Which path let it in, strongest first: a story moving it now, money arriving, or a date
+        // ahead — what `rowStatus` reads as in play / building / setting up (Roy, 2026-10-22).
+        const path = drift ? 'catalyst' : w.accumulation ? 'accumulation' : 'scheduled'
+        return { in: true, why, path, ...(w.scheduled ? { exit_before: s.next_earnings } : {}) }
     }
     }
     return { in: why.length > 0, why }
+}
+
+/** §2.2: 5-day volume at least this × the 50-day average — money arriving, the week's no-news path. */
+export const ACCUMULATION = 1.5
+
+/**
+ * The week column's stats-only half (§2.2, §2.4): what the overnight numbers already say before any
+ * quote or news. Shared by `inPlay` and the checkpoint's pool, so both read one rule. Pure.
+ * → `{ base, structure, days, scheduled, accumulation, binary }` — `base` is RS + a structure;
+ * `binary` a report within a day (excluded, §2.7); `accumulation` also wants the last 5 sessions up,
+ * since heavy volume into a falling price is selling, not arriving.
+ */
+export function weekSetup(stats, today) {
+    const s = stats ?? {}
+    const structure = Boolean(s.nr7 || s.inside_day || (num(s.high20) > 0 && num(s.close) >= num(s.high20) * 0.97))
+    const days = _daysUntil(today, s.next_earnings)
+    return {
+        base:         num(s.rs20) > 0 && structure,
+        structure,
+        days,
+        scheduled:    days != null && days >= 2 && days <= 10,
+        accumulation: num(s.vol5_vs_50) >= ACCUMULATION && num(s.ret5) >= 0,
+        binary:       days != null && days >= 0 && days <= 1,
+    }
 }
 
 function _daysUntil(today, date) {
@@ -195,5 +227,27 @@ export function cell(column, stats, ctx = {}) {
     const play = inPlay(column, stats, ctx)
     if (!play.in) return { grade: null, gate: null, why: [], range: null }
     const range = freeRange(num(ctx.price) ?? num(stats?.close), overheadLevels(column, stats, ctx), stats?.atr14)
-    return { grade: gradeFor(column, range), gate: null, why: play.why, range }
+    return {
+        grade: gradeFor(column, range), gate: null, why: play.why, range,
+        ...(play.path ? { path: play.path } : {}),
+        ...(play.exit_before ? { exit_before: play.exit_before } : {}),
+    }
+}
+
+/** A row's status, best first — what the Hotlist's watchlist shows and filters by. */
+export const STATUSES = Object.freeze(['in_play', 'building', 'setting_up'])
+
+/**
+ * Is the name IN PLAY now, BUILDING, or SETTING UP (§2.2 "in play, or about to be")? From its graded
+ * cells: any session column, or a week cell let in by a story, is in play; a week cell let in by
+ * money arriving is building; one let in only by a date ahead is setting up. Null when nothing is
+ * graded, or the only graded cell is a week cell with no `path` (written before 2026-10-22). Pure.
+ */
+export function rowStatus(cells) {
+    const graded = Object.entries(cells ?? {}).filter(([, c]) => c?.grade)
+    if (!graded.length) return null
+    if (graded.some(([col, c]) => col !== 'week' || c.path === 'catalyst')) return 'in_play'
+    const path = graded.find(([col]) => col === 'week')?.[1]?.path
+    // A week cell written before paths existed says nothing — null, and the caller decides.
+    return path === 'accumulation' ? 'building' : path === 'scheduled' ? 'setting_up' : null
 }

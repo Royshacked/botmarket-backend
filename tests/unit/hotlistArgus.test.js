@@ -111,6 +111,13 @@ test('the facts line: grade, tape, free range, catalyst — or open sky', () => 
     assert.equal(seedFacts(BOARD.rows[2], 'mid'), null, 'an ungraded cell is not a hand-off')
 })
 
+test('a run-up week cell tells Mentor AND Argus to be out before the report (Roy, 2026-10-22)', () => {
+    const row = ROW('RUN', { week: { grade: 'B', range: { level: 110, pct: 4, atr_mult: 1.6 }, exit_before: '2026-10-28' } }, { next_earnings: '2026-10-28' })
+    assert.match(seedFacts(row, 'week'), /earnings 2026-10-28 — a run-up into the report: the setup must be out before it$/)
+    assert.match(seedFacts({ ...row, cells: { week: { ...row.cells.week, exit_before: undefined } } }, 'week'), /; earnings 2026-10-28$/)
+    assert.match(boardText({ ...BOARD, columns: ['week'], rows: [row] }), /week B \(4\.00% \/ 1\.60× ATR to 110\.00\), RUN-UP: out before earnings 2026-10-28/)
+})
+
 test('hotlistSeed reads the STORED board: the horizon, the facts, Argus\'s note, the unverified flag', async () => {
     const { db, rows } = memDb()
     rows(BOARDS).push(structuredClone(BOARD))
@@ -146,7 +153,7 @@ test('today: the latest board in full, the day\'s checkpoints as one-liners', as
         { ...structuredClone(BOARD), finished_at: 2, counts: { graded: 3 }, started_at: 99, scored: { mid: true } },
         { id: 'hb_2026-10-21_eod', day: '2026-10-21', status: 'running', finished_at: 3 },
     )
-    const t = await todayHotlist({ deps: { db: async () => db } })
+    const t = await todayHotlist({ deps: { db: async () => db, now: () => 10, latestRun: async () => null } })
     assert.equal(t.day, '2026-10-21')
     assert.equal(t.latest.id, 'hb_2026-10-21_mid', 'a running board is not shown')
     assert.equal(t.latest.started_at, undefined, 'no claim bookkeeping leaves the server')

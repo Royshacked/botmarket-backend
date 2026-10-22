@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { memDb } from '../helpers/memDb.js'
 import {
-    runCheckpoint, dueCheckpoint, buildPool, structureNames, boardRow, rankRows, BOARDS, CHECKPOINTS,
+    runCheckpoint, dueCheckpoint, buildPool, structureNames, eligibleNames, READY_MAX, RETRY_429, RETRY_429_BUDGET, boardRow, rankRows, BOARDS, CHECKPOINTS,
 } from '../../services/dailyScreener.checkpoint.js'
 import { COLLECTION as STATS } from '../../services/dailyScreener.service.js'
 import { _tick } from '../../monitoring/dailyScreener.monitor.service.js'
@@ -26,23 +26,57 @@ test('checkpoints: inside a window → that one; outside every window, or a week
 
 // ─── The pool ─────────────────────────────────────────────────────────────────
 
-test('pool: catalysts first, only names with overnight stats, capped', () => {
-    const have = new Set(['A', 'B', 'C', 'D', 'E'])
+test('pool: earnings, then the stats-ready week names, before ratings, news, movers and structures; only eligible names; capped', () => {
+    const have = new Set(['A', 'B', 'C', 'D', 'E', 'R'])
     const pool = buildPool({
-        earnings: new Set(['B']), news: ['A', 'B', 'NOSTATS'], grades: new Set(['C']), movers: new Set(['D']), structure: ['E', 'A'],
+        earnings: new Set(['B']), ready: ['R'], news: ['A', 'B', 'NOGATE'], grades: new Set(['C']), movers: new Set(['D']), structure: ['E', 'A'],
     }, have)
-    assert.deepEqual(pool, ['B', 'A', 'C', 'D', 'E'])
+    assert.deepEqual(pool, ['B', 'R', 'C', 'A', 'D', 'E'])
     assert.deepEqual(buildPool({ news: ['A', 'B', 'C'] }, have, 2), ['A', 'B'])
 })
 
-test('structure names: compression or near the 20-day high, liquid, biggest first', () => {
+// A week-gated name: $30M a day, 3% ATR, RS +2, NR7.
+const W = { close: 50, atr_pct: 3, adv20_usd: 30e6, high20: 60, rs20: 2, nr7: true }
+const TODAY = '2026-10-22'
+
+test('structure names: week gate + RS + a structure, the strongest RS first — not the biggest', () => {
     const out = structureNames([
-        { symbol: 'NR', nr7: true, adv20_usd: 30e6, close: 50, high20: 60 },
-        { symbol: 'HI', close: 59.5, high20: 60, adv20_usd: 90e6 },
-        { symbol: 'THIN', nr7: true, adv20_usd: 5e6 },
-        { symbol: 'NONE', close: 40, high20: 60, adv20_usd: 200e6 },
-    ])
-    assert.deepEqual(out, ['HI', 'NR'])
+        { ...W, symbol: 'NR' },
+        { ...W, symbol: 'HI', nr7: false, close: 59.5, rs20: 6, adv20_usd: 900e6 },
+        { ...W, symbol: 'THIN', adv20_usd: 5e6 },
+        { ...W, symbol: 'CALM', atr_pct: 1 },
+        { ...W, symbol: 'WEAK', rs20: -1 },
+        { ...W, symbol: 'NONE', nr7: false, close: 40 },
+        { ...W, symbol: 'TONIGHT', rs20: 9, next_earnings: '2026-10-22' },
+    ], TODAY)
+    assert.deepEqual(out, ['HI', 'NR'], 'a report tonight is a coin toss, not a week candidate')
+})
+
+test('ready names: the stats alone put them in play — a report in 2–10 days, or money arriving on a rising week', () => {
+    const out = structureNames([
+        { ...W, symbol: 'DATE', next_earnings: '2026-10-28' },
+        { ...W, symbol: 'ACC', vol5_vs_50: 1.8, ret5: 2, rs20: 5 },
+        { ...W, symbol: 'DUMP', vol5_vs_50: 2.5, ret5: -4 },
+        { ...W, symbol: 'PLAIN' },
+        { ...W, symbol: 'FAR', next_earnings: '2026-11-20' },
+    ], TODAY, { ready: true })
+    assert.deepEqual(out, ['ACC', 'DATE'])
+})
+
+test('ready names take at most READY_MAX of the pool — news still gets in behind them', () => {
+    const stats = Array.from({ length: READY_MAX + 30 }, (_, i) => ({ ...W, symbol: `R${i}`, next_earnings: '2026-10-28' }))
+    const ready = structureNames(stats, TODAY, { ready: true, max: READY_MAX })
+    assert.equal(ready.length, READY_MAX)
+    const pool = buildPool({ ready, news: ['NEWS'] }, new Set([...stats.map(s => s.symbol), 'NEWS']))
+    assert.equal(pool.length, READY_MAX + 1)
+    assert.equal(pool.at(-1), 'NEWS')
+    assert.ok(READY_MAX < 300)
+})
+
+test('eligible names: the stats half of ANY of the checkpoint\'s gates', () => {
+    const stats = [{ ...W, symbol: 'WK' }, { ...W, symbol: 'BIG', adv20_usd: 80e6, atr_pct: 4 }, { ...W, symbol: 'NO', atr_pct: 1 }]
+    assert.deepEqual([...eligibleNames(stats, ['open', 'week'])], ['WK', 'BIG'])
+    assert.deepEqual([...eligibleNames(stats, ['mid'])], ['BIG'])
 })
 
 // ─── A row ────────────────────────────────────────────────────────────────────
@@ -59,6 +93,12 @@ test('pre-market row: price is the book\'s midpoint, gap against last night\'s c
     // 4-point ATR: 0.5×, under the week's 1.5× bar for a B.
     assert.equal(row.cells.week.grade, 'C')
     assert.equal(row.cells.week.range.level, 106)
+    assert.equal(row.cells.week.exit_before, '2026-10-27', 'the report is inside the window: out before it')
+    assert.equal(row.cells.open.exit_before, undefined)
+    assert.equal(row.cells.week.path, 'scheduled')
+    assert.equal(row.status, 'in_play', 'the open column graded it')
+    const quiet = boardRow(S, { mid: 100.2, spreadPct: 0.02, volume: 100 }, ['open', 'week'], { book: 'extended', etMin: 480, day: '2026-10-21', catalyst: null })
+    assert.equal(quiet.status, 'setting_up', 'only the date ahead: about to be in play')
 })
 
 test('a name no column grades is not a row', () => {
@@ -116,11 +156,53 @@ test('run: pools, quotes the extended book, labels, grades and publishes one boa
     assert.equal(board.regime.breadth_above_sma20, 55)
 })
 
-test('run: a 429 mid-quotes publishes a PARTIAL board with what it has', async () => {
-    const { deps, rows } = rig({ extQuote: async (s) => { if (s === 'QUIET') throw Object.assign(new Error('429'), { status: 429 }); return { mid: 104, spreadPct: 0.02, volume: 30_000 } } })
+const E429 = () => Object.assign(new Error('429'), { status: 429 })
+
+test('run: a 429 that outlasts its retries publishes a PARTIAL board with what it has', async () => {
+    const slept = []
+    const { deps, rows } = rig({
+        extQuote: async (s) => { if (s === 'QUIET') throw E429(); return { mid: 104, spreadPct: 0.02, volume: 30_000 } },
+        sleep: async (ms) => { slept.push(ms) },
+    })
     const r = await runCheckpoint({ deps })
     assert.equal(r.outcome, 'partial')
     assert.equal(rows(BOARDS)[0].stopped, 'rate_limited')
+    assert.equal(rows(BOARDS)[0].retried_429, RETRY_429)
+    assert.equal(slept.filter(ms => ms === 20_000).length, RETRY_429, 'waited ~20 s between tries')
+})
+
+test('run: a brief 429 is waited out — the board finishes done (2026-10-22: the 10:30 board stopped at its 9th quote)', async () => {
+    let fails = 2
+    const { deps, rows } = rig({ extQuote: async (s) => {
+        if (s === 'QUIET' && fails-- > 0) throw E429()
+        return s === 'ABC' ? { mid: 104, spreadPct: 0.02, volume: 30_000 } : { mid: 100.1, spreadPct: 0.02, volume: 10 }
+    } })
+    const r = await runCheckpoint({ deps })
+    assert.equal(r.outcome, 'done')
+    assert.equal(rows(BOARDS)[0].retried_429, 2)
+    assert.equal(rows(BOARDS)[0].counts.quoted, 2)
+})
+
+test('run: a key that keeps hitting its limit spends the board\'s retry budget, then stops', async () => {
+    // Every name gets through only on its last retry: 3 waits each, so 12 names would wait 36 times.
+    const stats = Array.from({ length: 12 }, (_, i) => ({ ...S, symbol: `N${i}`, day: '2026-10-20' }))
+    const tries = new Map()
+    const { deps, rows } = rig({ extQuote: async (s) => {
+        tries.set(s, (tries.get(s) ?? 0) + 1)
+        if (tries.get(s) <= RETRY_429) throw E429()
+        return { mid: 100.1, spreadPct: 0.02, volume: 10 }
+    } })
+    rows(STATS).push(...stats)
+    const r = await runCheckpoint({ deps })
+    assert.equal(r.outcome, 'partial')
+    assert.equal(rows(BOARDS)[0].retried_429, RETRY_429_BUDGET, 'never more than the budget, however many names wait')
+})
+
+test('run: anything but a 429 is not retried', async () => {
+    const tried = []
+    const { deps } = rig({ extQuote: async (s) => { tried.push(s); if (s === 'QUIET') throw new Error('boom'); return { mid: 104, spreadPct: 0.02, volume: 30_000 } } })
+    await runCheckpoint({ deps })
+    assert.equal(tried.filter(s => s === 'QUIET').length, 1)
 })
 
 test('run: no credits for the labels → the board still goes out, unlabelled', async () => {
@@ -207,4 +289,12 @@ test('no admin to book to → the board still goes out, unbooked', async () => {
     const { deps, rows } = rig({ bookTo: async () => null, record: async () => { throw new Error('never called') } })
     assert.equal((await runCheckpoint({ deps })).outcome, 'done')
     assert.equal(rows(BOARDS)[0].booked_to, null)
+})
+
+test('a row carries the sparkline closes from the overnight stats; stats saved before them carry none', () => {
+    const q = { mid: 104, spreadPct: 0.02, volume: 30_000 }
+    const ctx = { book: 'extended', etMin: 480, day: '2026-10-21', catalyst: null }
+    const closes20 = Array.from({ length: 20 }, (_, i) => 90 + i / 2)
+    assert.deepEqual(boardRow({ ...S, closes20 }, q, ['open'], ctx).spark, closes20)
+    assert.equal(boardRow(S, q, ['open'], ctx).spark, null)
 })

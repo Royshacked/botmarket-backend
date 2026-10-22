@@ -38,6 +38,26 @@ const KEEP_RUNS = 30
 const MAX_FAILED_IN_A_ROW = 25
 /** A run still `running` after this is a dead process's, and may be taken over. */
 const STALE_MS = 2 * 60 * 60 * 1000
+/** Read by the Hotlist's "running" line, which treats an older `running` the same way. */
+export const RUN_STALE_MS = STALE_MS
+/** How often (in names) the pass writes its progress to the run document, for the Floor's Hotlist. */
+const PROGRESS_EVERY = 25
+/** A pass whose progress has not moved for this long is a dead process's (progress lands every 25
+ *  names — under a minute at the default pace), so a crash blocks the retry minutes, not two hours. */
+export const HEARTBEAT_STALE_MS = 10 * 60 * 1000
+/** Stats are saved in batches of this many names, so a database blip loses one batch, not the night. */
+const WRITE_EVERY = 100
+
+/**
+ * Is this run document a pass that is still alive? `running`, and its progress moved within
+ * HEARTBEAT_STALE_MS — or, before its first progress write, started within STALE_MS. Shared by the
+ * claim below and the Hotlist's "running" line, so both read a dead pass the same way. Pure.
+ */
+export function runIsLive(run, nowMs) {
+    if (run?.status !== 'running') return false
+    if (Number.isFinite(run.progress_at)) return nowMs - run.progress_at < HEARTBEAT_STALE_MS
+    return nowMs - (run.started_at ?? 0) < STALE_MS
+}
 /** A run that stopped short (a 429, an outage, an empty universe) is tried again ONCE, this long after —
  *  not on every tick, which would spend the shared quota all night on the pass that just hit its limit. */
 const RETRY_AFTER_MS = 60 * 60 * 1000
@@ -106,6 +126,7 @@ let _active = false
 export async function runNightly({ force = false, deps = _deps } = {}) {
     if (_active) return { ok: false, outcome: 'already_running' }
     _active = true
+    let claimed = null
     try {
         const nowMs = deps.now()
         const day   = dueSessionDay(nowMs)
@@ -120,16 +141,27 @@ export async function runNightly({ force = false, deps = _deps } = {}) {
             && ((prior.attempts ?? 1) >= MAX_ATTEMPTS || nowMs - (prior.finished_at ?? 0) < RETRY_AFTER_MS)) {
             return { ok: false, outcome: 'exists', day, status: prior.status }
         }
-        if (prior?.status === 'running' && nowMs - (prior.started_at ?? 0) < STALE_MS) return { ok: false, outcome: 'already_running', day }
+        if (runIsLive(prior, nowMs)) return { ok: false, outcome: 'already_running', day }
         if (!(await claimRun(runs, id, { day }, prior, nowMs))) return { ok: false, outcome: 'already_running', day }
+        claimed = { runs, id }
 
-        const result = await _run(db, day, nowMs, deps)
+        // Progress for the Floor's "running" line, and the pass's heartbeat (runIsLive) — best
+        // effort, never a reason to stop the pass.
+        const progress = (done, of) => runs.updateOne({ id }, { $set: { progress: { done, of }, progress_at: deps.now() } }).catch(() => {})
+        const result = await _run(db, day, nowMs, deps, progress, { force })
         await runs.updateOne({ id }, { $set: { ...result, status: result.outcome, finished_at: deps.now() } })
         await _prune(db, runs, day)
         logger.info(LOG, `${day}: ${result.outcome} — ${result.written}/${result.names} names written${result.stopped ? `, stopped: ${result.stopped}` : ''}`)
         return { ok: result.outcome === 'done', ...result, day }
     } catch (err) {
         logger.error(LOG, 'run failed:', err.message)
+        // A claimed run that throws is a stopped-short run: `partial`, so the one retry an hour later
+        // applies — not `running`, which blocked every retry for two hours (2026-10-22, a DNS blip on
+        // the final write). If this write fails too, the heartbeat still frees it in minutes.
+        if (claimed) {
+            await claimed.runs.updateOne({ id: claimed.id }, { $set: { status: 'partial', stopped: 'error', detail: err.message, finished_at: deps.now() } })
+                .catch(() => {})
+        }
         return { ok: false, outcome: 'error', detail: err.message }
     } finally {
         _active = false
@@ -155,9 +187,24 @@ export async function claimRun(coll, id, insert, prior, nowMs) {
     }
 }
 
-async function _run(db, day, nowMs, deps) {
+async function _run(db, day, nowMs, deps, progress = async () => {}, { force = false } = {}) {
     const universe = await deps.universe()
     if (!universe.length) return { outcome: 'no_universe', names: 0, written: 0, failed: 0, requests: 1 }
+    await progress(0, universe.length)
+
+    // A retry picks up where the last attempt stopped: the names already saved for this day are not
+    // read again (`force` reads everything).
+    const statsColl = db.collection(COLLECTION)
+    const have = force ? new Set()
+        : new Set((await statsColl.find({ day }, { projection: { symbol: 1 } }).toArray()).map(d => d.symbol))
+    let pending = []
+    const flush = async () => {
+        if (!pending.length) return
+        await statsColl.bulkWrite(
+            pending.map(d => ({ updateOne: { filter: { symbol: d.symbol }, update: { $set: d }, upsert: true } })),
+            { ordered: false })
+        pending = []
+    }
 
     const pace = createPacer({ perMinute: deps.perMinute(), now: deps.now, sleep: deps.sleep })
     const from = nowMs - HISTORY_DAYS * 86_400_000
@@ -173,9 +220,12 @@ async function _run(db, day, nowMs, deps) {
     requests++
     const nextEarnings = earningsBySymbol(await deps.earnings(iso(nowMs), iso(nowMs + EARNINGS_DAYS * 86_400_000), symbols).catch(() => []))
 
-    const docs = []
+    let read = 0, seen = 0
     for (const u of universe) {
+        if (seen > 0 && seen % PROGRESS_EVERY === 0) await progress(seen, universe.length)
+        seen++
         const symbol = String(u.symbol).toUpperCase()
+        if (have.has(symbol)) continue
         await pace()
         requests++
         let bars
@@ -192,7 +242,8 @@ async function _run(db, day, nowMs, deps) {
         }
         const stats = screenerStats(bars, bench)
         if (!stats) { failed++; continue }
-        docs.push({
+        read++
+        pending.push({
             symbol, day,
             name: u.companyName ?? null, sector: u.sector ?? null, industry: u.industry ?? null,
             market_cap: u.marketCap ?? null, exchange: u.exchangeShortName ?? u.exchange ?? null,
@@ -200,20 +251,24 @@ async function _run(db, day, nowMs, deps) {
             ...stats,
             updated_at: deps.now(),
         })
+        // A failed batch stays pending and goes with the next one; only the LAST write's failure
+        // ends the pass (as `partial`, see runNightly).
+        if (pending.length >= WRITE_EVERY) {
+            await flush().catch(err => logger.warn(LOG, `stats batch not saved, kept for the next one: ${err.message}`))
+        }
     }
+    await flush()
 
-    if (docs.length) {
-        await db.collection(COLLECTION).bulkWrite(
-            docs.map(d => ({ updateOne: { filter: { symbol: d.symbol }, update: { $set: d }, upsert: true } })),
-            { ordered: false })
-    }
-
+    // The day's whole set — this attempt's names and any an earlier attempt saved.
+    const docs  = await statsColl.find({ day }).toArray()
     const stale = docs.filter(d => d.last_date !== day).length
     const spy   = screenerStats(bench, bench)
     return {
         outcome:     stopped ? 'partial' : 'done',
         names:       universe.length,
         written:     docs.length,
+        read,
+        reused:      have.size,
         failed,
         stopped,
         requests,

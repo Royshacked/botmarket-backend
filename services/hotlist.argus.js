@@ -32,7 +32,7 @@ export const COLUMN_WORDS = Object.freeze({
 
 export const SYSTEM = `You are Argus, the scanning desk, reading today's HOTLIST — a screened board of US stocks that are in play right now, long side only. The numbers are computed and the grades are given; your job is the judgment the numbers cannot make.
 
-Each row: the ticker, its price and gap, volume against an ordinary day, ATR %, the catalyst label and headline if any, earnings date, and one cell per column it was graded on: the grade (A/B/C) and its FREE RANGE — how far price can travel before the nearest overhead level, in % and in × ATR. A is the most room. Free range is not a target and the board has no entries or stops; never invent them.
+Each row: the ticker, its price and gap, volume against an ordinary day, ATR %, the catalyst label and headline if any, earnings date, and one cell per column it was graded on: the grade (A/B/C) and its FREE RANGE — how far price can travel before the nearest overhead level, in % and in × ATR. A is the most room. Free range is not a target and the board has no entries or stops; never invent them. A week cell marked RUN-UP holds a report inside its window: the trade is the run-up into it and ends before it — if you pick one, the caution says so.
 
 Answer:
 - "summary": 2–4 plain sentences on the tape — the regime, what is moving and why, where the room is.
@@ -54,7 +54,7 @@ export function boardText(board) {
     ]
     const rows = (board.rows ?? []).map(r => {
         const cells = Object.entries(r.cells ?? {}).filter(([, c]) => c.grade).map(([col, c]) =>
-            `${col} ${c.grade} (${c.range?.open_sky ? 'open sky' : `${_f(c.range?.pct)}% / ${_f(c.range?.atr_mult)}× ATR to ${_f(c.range?.level)}`})`).join('; ')
+            `${col} ${c.grade} (${c.range?.open_sky ? 'open sky' : `${_f(c.range?.pct)}% / ${_f(c.range?.atr_mult)}× ATR to ${_f(c.range?.level)}`})${c.exit_before ? `, RUN-UP: out before earnings ${c.exit_before}` : ''}`).join('; ')
         const cat = r.catalyst ? `${r.catalyst.material ? `${r.catalyst.type} ${r.catalyst.surprise}` : 'not material'}${r.catalyst.headline ? `: "${r.catalyst.headline}"` : ''}` : 'no news label'
         return `${r.symbol} ${r.sector ?? ''} | $${_f(r.price)} gap ${_f(r.gap_pct)}%${r.rvol != null ? ` rvol ${r.rvol}×` : ''}${r.pm_vol_pct != null ? ` pre-mkt vol ${_f(r.pm_vol_pct, 1)}% of a day` : ''} ATR ${_f(r.atr_pct)}% | ${cat}${r.fade_check ? ' | FLAG: minor story under a big gap' : ''}${r.next_earnings ? ` | earnings ${r.next_earnings}` : ''} | ${cells}`
     })

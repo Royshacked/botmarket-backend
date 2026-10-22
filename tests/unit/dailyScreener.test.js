@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { memDb } from '../helpers/memDb.js'
 import { createPacer } from '../../services/concurrency.util.js'
 import { screenerStats, breadthAboveSma20, MIN_BARS } from '../../services/dailyScreener.stats.js'
-import { runNightly, dueSessionDay, COLLECTION, RUNS } from '../../services/dailyScreener.service.js'
+import { runNightly, dueSessionDay, runIsLive, COLLECTION, RUNS, HEARTBEAT_STALE_MS, RUN_STALE_MS } from '../../services/dailyScreener.service.js'
 import { _tick } from '../../monitoring/dailyScreener.monitor.service.js'
 
 // DailyScreener's overnight pass (docs/design/daily-names.md §6, build phase 2). Off by default; when
@@ -79,6 +79,15 @@ test('stats: NR7 and the inside day', () => {
     assert.equal(s.nr7, true)
     assert.equal(s.inside_day, true)
     assert.equal(screenerStats(series(80)).inside_day, false)
+})
+
+test('stats: 5-day volume against the 50-day — the week\'s "money is arriving" (§2.2)', () => {
+    assert.equal(screenerStats(series(80)).vol5_vs_50, 1, 'flat volume')
+    const bars = series(80)
+    for (const b of bars.slice(-5)) b.volume = 6_000_000                 // 3× for the last five sessions
+    // 50-day mean = (45 × 2M + 5 × 6M) / 50 = 2.4M → 6 / 2.4 = 2.5
+    assert.equal(screenerStats(bars).vol5_vs_50, 2.5)
+    assert.equal(screenerStats(series(80, { vol: 0 })).vol5_vs_50, null, 'no volume → unknown, not a ratio')
 })
 
 test('breadth: the share closing above the 20-day average, ignoring unknowns', () => {
@@ -181,7 +190,7 @@ test('run: a partial run is retried ONCE, an hour later — not on every five-mi
     limited = false
     t += 2 * 60 * 60_000
     assert.equal((await runNightly({ deps })).outcome, 'exists', 'two attempts and done trying')
-    assert.equal(calls.length, 6)
+    assert.equal(calls.length, 5, 'the retry reads SPY and BBB — AAA was saved by the first attempt')
     assert.equal((await runNightly({ deps, force: true })).outcome, 'done', 'force still runs it')
 })
 
@@ -233,6 +242,116 @@ test('run: the pace is applied between reads', async () => {
     assert.deepEqual(slept, [1000, 1000, 1000, 1000])
 })
 
+test('run: progress lands on the run document every 25 names, for the Floor\'s "running" line', async () => {
+    const many = Array.from({ length: 60 }, (_, i) => ({ symbol: `N${i}` }))
+    const { deps, rows } = rig({ universe: async () => many })
+    const writes = []
+    const db = await deps.db()
+    deps.db = async () => ({ ...db, collection: (name) => {
+        const c = db.collection(name)
+        if (name !== RUNS) return c
+        return { ...c, updateOne: (q, u, o) => { if (u?.$set?.progress) writes.push(u.$set.progress); return c.updateOne(q, u, o) } }
+    } })
+    assert.equal((await runNightly({ deps })).outcome, 'done')
+    assert.deepEqual(writes, [{ done: 0, of: 60 }, { done: 25, of: 60 }, { done: 50, of: 60 }])
+    assert.deepEqual(rows(RUNS)[0].progress, { done: 50, of: 60 })
+})
+
+test('run: a progress write that fails never stops the pass', async () => {
+    const { deps } = rig()
+    const db = await deps.db()
+    deps.db = async () => ({ ...db, collection: (name) => {
+        const c = db.collection(name)
+        if (name !== RUNS) return c
+        return { ...c, updateOne: (q, u, o) => (u?.$set?.progress ? Promise.reject(new Error('M0 full')) : c.updateOne(q, u, o)) }
+    } })
+    const r = await runNightly({ deps })
+    assert.equal(r.outcome, 'done')
+    assert.equal(r.written, 3)
+})
+
+// ─── Surviving a blip (2026-10-22: a DNS failure on the final write lost a whole pass) ───
+
+/** A db whose stats bulkWrite fails on the calls listed (1-based). */
+function failingWrites(db, failOn) {
+    let n = 0
+    return { ...db, collection: (name) => {
+        const c = db.collection(name)
+        if (name !== COLLECTION) return c
+        return { ...c, bulkWrite: (ops, o) => (failOn.includes(++n) ? Promise.reject(new Error('getaddrinfo ENOTFOUND')) : c.bulkWrite(ops, o)) }
+    } }
+}
+
+test('stats are saved in batches of 100 — a failed LAST write keeps the earlier batches, and the run is partial', async () => {
+    const many = Array.from({ length: 250 }, (_, i) => ({ symbol: `N${i}` }))
+    const { deps, rows } = rig({ universe: async () => many })
+    const db = await deps.db()
+    deps.db = async () => failingWrites(db, [3])
+    const r = await runNightly({ deps })
+    assert.equal(r.outcome, 'error')
+    assert.equal(rows(COLLECTION).length, 200, 'two batches made it')
+    const run = rows(RUNS)[0]
+    assert.equal(run.status, 'partial', 'not left "running" for two hours')
+    assert.equal(run.stopped, 'error')
+    assert.match(run.detail, /ENOTFOUND/)
+})
+
+test('a failed middle batch rides with the next one — nothing is lost', async () => {
+    const many = Array.from({ length: 250 }, (_, i) => ({ symbol: `N${i}` }))
+    const { deps, rows } = rig({ universe: async () => many })
+    const db = await deps.db()
+    deps.db = async () => failingWrites(db, [1])
+    const r = await runNightly({ deps })
+    assert.equal(r.outcome, 'done')
+    assert.equal(rows(COLLECTION).length, 250)
+})
+
+test('the retry reads only the names the failed attempt did not save', async () => {
+    let t = WED_EVENING
+    const many = Array.from({ length: 250 }, (_, i) => ({ symbol: `N${i}` }))
+    const { deps, rows, calls } = rig({ universe: async () => many, now: () => t })
+    const db = await deps.db()
+    deps.db = async () => failingWrites(db, [3])
+    await runNightly({ deps })
+    deps.db = async () => db
+    calls.length = 0
+    t += 61 * 60_000                               // the one retry, an hour on
+    const r = await runNightly({ deps })
+    assert.equal(r.outcome, 'done')
+    assert.equal(calls.filter(s => s !== 'SPY').length, 50, 'the 200 saved names are not read again')
+    assert.equal(r.written, 250, 'the day\'s whole set')
+    assert.equal(r.reused, 200)
+    assert.equal(rows(COLLECTION).length, 250)
+})
+
+test('force reads every name again', async () => {
+    const { deps, calls } = rig()
+    await runNightly({ deps })
+    calls.length = 0
+    await runNightly({ deps, force: true })
+    assert.deepEqual(calls, ['SPY', 'AAA', 'BBB', 'CCC'])
+})
+
+test('liveness: the heartbeat, not the start, says whether a running pass is alive', () => {
+    const now = 10 * 3_600_000
+    assert.equal(runIsLive({ status: 'running', started_at: now - 3_600_000, progress_at: now - 60_000 }, now), true)
+    assert.equal(runIsLive({ status: 'running', started_at: now - 600_000, progress_at: now - HEARTBEAT_STALE_MS - 1 }, now), false,
+        'a dead process frees the run in minutes')
+    assert.equal(runIsLive({ status: 'running', started_at: now - 60_000 }, now), true, 'claimed, no progress yet')
+    assert.equal(runIsLive({ status: 'running', started_at: now - RUN_STALE_MS - 1 }, now), false)
+    assert.equal(runIsLive({ status: 'done', progress_at: now }, now), false)
+    assert.equal(runIsLive(null, now), false)
+})
+
+test('a pass whose heartbeat stopped is taken over at once', async () => {
+    const { deps, rows } = rig()
+    const db = await deps.db()
+    await db.collection(RUNS).insertOne({ id: 'ds_2026-10-21', day: '2026-10-21', status: 'running',
+        started_at: WED_EVENING - 20 * 60_000, progress_at: WED_EVENING - 11 * 60_000, attempts: 1 })
+    assert.equal((await runNightly({ deps })).outcome, 'done')
+    assert.equal(rows(RUNS)[0].attempts, 2)
+})
+
 // ─── The monitor ──────────────────────────────────────────────────────────────
 
 test('monitor: off by default — nothing runs', async () => {
@@ -240,4 +359,12 @@ test('monitor: off by default — nothing runs', async () => {
     const r = await _tick({ enabled: () => false, run: async () => { ran = true } })
     assert.deepEqual(r, { outcome: 'off' })
     assert.equal(ran, false)
+})
+
+test('stats: the last 20 closes are kept for the Hotlist\u2019s sparkline, oldest first', () => {
+    const bars = series(80)
+    const s = screenerStats(bars)
+    assert.equal(s.closes20.length, 20)
+    assert.equal(s.closes20.at(-1), bars.at(-1).close)
+    assert.equal(s.closes20[0], bars.at(-20).close)
 })

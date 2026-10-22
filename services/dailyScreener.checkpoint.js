@@ -7,8 +7,10 @@
 //
 // THE POOL, because there is no batch quote on this plan (§6): fresh news since the last close,
 // earnings reported since then, today's rating changes, the movers (in session only — they are
-// regular-session data), and the overnight list's best structures. Only names with overnight stats
-// get in: the gates read them. Capped at POOL_MAX, catalysts first.
+// regular-session data), the names the overnight stats already qualify for the week, and the overnight
+// list's best structures. Only names that clear the stats half of a column's gates get in. Capped at
+// POOL_MAX, in `buildPool`'s order. There is no pre-market movers source on this plan (probed
+// 2026-10-22: batch pre-market 402, the legacy pre-post-market 403).
 //
 // Same switch as the overnight pass (DAILY_SCREENER), same pace (DAILY_SCREENER_RPM), same rule on a
 // 429: the pass stops and publishes what it has, marked partial.
@@ -17,7 +19,7 @@ import { getDb } from '../providers/mongodb.provider.js'
 import { fetchStockNews, getEarningsCalendarRaw, latestGradesRaw, marketMoversRaw } from '../providers/fmp.provider.js'
 import { getFmpQuoteFull, getAftermarketQuote, fmpDateToEpochSec } from '../providers/fmp.price.provider.js'
 import { createPacer } from './concurrency.util.js'
-import { COLUMNS, cell, relativeVolume } from './hotlist.columns.js'
+import { COLUMNS, cell, relativeVolume, failedGate, weekSetup, rowStatus } from './hotlist.columns.js'
 import { labelNews } from './hotlist.news.js'
 import { argusRead } from './hotlist.argus.js'
 import { BOARDS, outcomeSummary } from './hotlist.outcomes.js'
@@ -47,10 +49,21 @@ export const CHECKPOINTS = Object.freeze([
 /** A checkpoint missed by more than this is skipped, not run late — a 10:30 board at 13:00 is wrong. */
 const WINDOW_MIN = 30
 const POOL_MAX   = 300
+/** The week's stats-ready names take at most this much of the pool, so news (the open column's gap
+ *  candidates) is never crowded out once money-arriving names join the dated ones. */
+export const READY_MAX = 120
+/** A 429 is retried this many times, this far apart, before the board stops partial — and a board
+ *  waits out at most RETRY_429_BUDGET of them in all (~5 min), so a key held at its limit cannot
+ *  stretch a board toward its hour. */
+export const RETRY_429 = 3
+export const RETRY_429_BUDGET = 15
+const RETRY_429_MS = 20_000
 const BOARD_MAX  = 30
 const KEEP_DAYS  = 10
 const NEWS_CHUNK = 50
 const STALE_MS   = 60 * 60 * 1000
+/** Read by the Hotlist's "running" line, which treats an older `running` board the same way. */
+export const BOARD_STALE_MS = STALE_MS
 const OPEN_MIN = 9 * 60 + 30, SESSION_MIN = 390
 const GRADE_RANK = { A: 3, B: 2, C: 1 }
 
@@ -103,16 +116,21 @@ export function dueCheckpoint(nowMs) {
 }
 
 /**
- * The pool's sources folded into one ordered list of symbols, catalysts first. Pure.
- * Each source is a Set of symbols; only names with overnight stats survive.
+ * The pool's sources folded into one ordered list of symbols. Pure. Each source is an iterable of
+ * symbols; only names in `eligible` survive (the caller passes those that clear the stats half of a
+ * column's gates — a name no column could grade is a wasted quote).
+ *
+ * Order (Roy, 2026-10-22 — the first live day's pool was 200 news names deep before anything else):
+ * earnings reported → names the overnight stats already qualify for the week (`ready`) → rating
+ * changes → news (most headlines first) → movers → the best remaining structures.
  */
-export function buildPool({ news, earnings, grades, movers, structure }, haveStats, max = POOL_MAX) {
+export function buildPool({ earnings, ready, grades, news, movers, structure }, eligible, max = POOL_MAX) {
     const out = []
     const seen = new Set()
-    for (const src of [earnings, news, grades, movers, structure]) {
+    for (const src of [earnings, ready, grades, news, movers, structure]) {
         for (const s of src ?? []) {
             const sym = String(s).toUpperCase()
-            if (seen.has(sym) || !haveStats.has(sym)) continue
+            if (seen.has(sym) || !eligible.has(sym)) continue
             seen.add(sym)
             out.push(sym)
             if (out.length >= max) return out
@@ -121,13 +139,28 @@ export function buildPool({ news, earnings, grades, movers, structure }, haveSta
     return out
 }
 
-/** The overnight list's best structures — the "about to be in play" names (§2.2). Pure. */
-export function structureNames(statsList, max = 60) {
+/**
+ * The overnight list's week candidates (§2.2 "about to be in play"), strongest RS first. Pure.
+ * `ready`: the stats alone already put them in play for the week — a date in the window or money
+ * arriving — so a quote is all they need. Otherwise: RS + a structure, still waiting on a catalyst.
+ * Both clear the week's stats gates and skip a report within a day. Ranked by RS, not by size: by
+ * dollar volume the list was the mega caps (the first live day).
+ */
+export function structureNames(statsList, today, { ready = false, max = 60 } = {}) {
     return statsList
-        .filter(s => (s.nr7 || s.inside_day || (s.high20 > 0 && s.close >= s.high20 * 0.98)) && s.adv20_usd >= 20e6)
-        .sort((a, b) => (b.adv20_usd ?? 0) - (a.adv20_usd ?? 0))
+        .filter(s => {
+            if (failedGate('week', s)) return false
+            const w = weekSetup(s, today)
+            return w.base && !w.binary && (!ready || w.scheduled || w.accumulation)
+        })
+        .sort((a, b) => (b.rs20 ?? 0) - (a.rs20 ?? 0))
         .slice(0, max)
         .map(s => s.symbol)
+}
+
+/** The names a checkpoint could grade at all: the stats half of any of its columns' gates. Pure. */
+export function eligibleNames(statsList, columns) {
+    return new Set(statsList.filter(s => columns.some(c => !failedGate(c, s))).map(s => s.symbol))
 }
 
 /**
@@ -150,12 +183,16 @@ export function boardRow(stats, q, columns, { book, etMin, day, catalyst, quoted
         quoted_at: quotedAt,
         pm_vol_pct: _r(ctx.pmVolPct), spread_pct: _r(ctx.spreadPct, 3),
         atr_pct: stats.atr_pct, next_earnings: stats.next_earnings ?? null,
+        // The panel's sparkline: the last 20 closes from the overnight pass (none before it saved them).
+        spark: Array.isArray(stats.closes20) && stats.closes20.length >= 2 ? stats.closes20 : null,
         catalyst: catalyst ?? null,
         // §3 "priced in?": a minor story under a big gap is a fade candidate, not a follow-through.
         fade_check: catalyst && catalyst.magnitude === 'minor' && gap != null && gap >= 6 ? true : undefined,
         cells: Object.fromEntries(Object.entries(cells).map(([c, v]) => [c, v.grade
-            ? { grade: v.grade, why: v.why, range: v.range }
+            ? { grade: v.grade, why: v.why, range: v.range, ...(v.path ? { path: v.path } : {}), ...(v.exit_before ? { exit_before: v.exit_before } : {}) }
             : { grade: null, ...(v.gate ? { gate: v.gate } : {}) }])),
+        // In play / building / setting up — the watchlist's status (hotlist.columns rowStatus).
+        status: rowStatus(cells),
     }
 }
 
@@ -213,8 +250,21 @@ async function _build(db, cp, day, etMin, run, deps) {
     const statsList = await db.collection(STATS).find({ day: run.day }).toArray()
     const byStats = new Map(statsList.map(s => [s.symbol, s]))
     const pace = createPacer({ perMinute: deps.perMinute(), now: deps.now, sleep: deps.sleep })
-    let requests = 0, stopped = null
-    const paced = async (fn) => { await pace(); requests++; return fn() }
+    let requests = 0, stopped = null, retried429 = 0
+    // A 429 is waited out before it stops the board: FMP's window lets requests through again after
+    // ~18 s, and in session the key is shared with live pricing (and, today, another backend), so a
+    // brief spike over the limit is ordinary (2026-10-22: the 10:30 board stopped at its 9th quote).
+    // Only a limit that outlasts every retry rethrows, and the caller marks the board partial.
+    const paced = async (fn) => {
+        for (let attempt = 0; ; attempt++) {
+            await pace(); requests++
+            try { return await fn() } catch (err) {
+                if (err?.status !== 429 || attempt >= RETRY_429 || retried429 >= RETRY_429_BUDGET) throw err
+                retried429++
+                await deps.sleep(RETRY_429_MS)
+            }
+        }
+    }
 
     // ── The pool ──
     // Fresh = after the overnight run's session closed (16:00 ET on run.day).
@@ -254,7 +304,14 @@ async function _build(db, cp, day, etMin, run, deps) {
             catch (err) { if (err?.status === 429) { stopped = 'rate_limited'; break } }
         }
     }
-    const pool = buildPool({ earnings: reported, news: headlines.keys(), grades: rated, movers: moving, structure: structureNames(statsList) }, new Set(byStats.keys()))
+    const news = [...headlines].sort((a, b) => b[1].length - a[1].length).map(([s]) => s)
+    const pool = buildPool({
+        earnings: reported, grades: rated, news, movers: moving,
+        // `ready` is the week column's; the structures stay in every pool as before — in session a
+        // strong base can come into play on the tape alone.
+        ready:     cp.columns.includes('week') ? structureNames(statsList, day, { ready: true, max: READY_MAX }) : [],
+        structure: structureNames(statsList, day),
+    }, eligibleNames(statsList, cp.columns))
 
     // ── Quotes ──
     const quotes = new Map(), quotedAt = new Map()
@@ -316,6 +373,7 @@ async function _build(db, cp, day, etMin, run, deps) {
         argus: argus ? { summary: argus.summary, model: argus.model, picks: argus.picks.length } : null,
         counts: { pool: pool.length, quoted: quotes.size, graded: rows.length, headlines: headlines.size },
         requests,
+        retried_429: retried429,
         rows: marked,
     }
 }

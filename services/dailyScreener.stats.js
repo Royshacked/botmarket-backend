@@ -27,6 +27,12 @@ function _ret(closes, n) {
     return from > 0 ? closes[closes.length - 1] / from - 1 : null
 }
 
+/** Average volume of the last 5 sessions over the last 50's; null when the 50-day average is 0. */
+function _volRatio(rows) {
+    const v5 = mean(rows.slice(-5).map(b => b.volume || 0)), v50 = mean(rows.slice(-50).map(b => b.volume || 0))
+    return v50 > 0 ? round(v5 / v50, 2) : null
+}
+
 /**
  * Return over `n` sessions for the benchmark, ENDING ON THE SAME SESSION as the stock — matched by
  * timestamp, not by position, so a stock missing a session (a halt, a late listing) is not compared
@@ -75,9 +81,15 @@ export function screenerStats(bars, bench = []) {
     return {
         last_date:   new Date(last.timestamp * 1000).toISOString().slice(0, 10),
         close:       round(last.close),
+        // The Hotlist row's sparkline (Roy, 2026-10-22): the last 20 closes, oldest first — from the
+        // bars this pass already read, so no extra request.
+        closes20:    last20.map(b => round(b.close)),
         // §2.1 gates
         adv20_usd:   round(mean(last20.map(b => b.close * (b.volume || 0))), 0),
         avg_vol20:   round(mean(last20.map(b => b.volume || 0)), 0),
+        // §2.2 "money is arriving" for the week column: the last 5 sessions' average volume against
+        // the last 50's (Roy, 2026-10-22 — the week's path in without a date or a story).
+        vol5_vs_50:  _volRatio(rows),
         atr14:       round(atr14),
         atr_pct:     round(atr14 != null ? (atr14 / last.close) * 100 : null, 2),
         // §2.5 relative strength — return minus SPY's over the same sessions, in percentage points

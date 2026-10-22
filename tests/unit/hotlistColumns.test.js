@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-    overheadLevels, freeRange, gradeFor, failedGate, inPlay, relativeVolume, cell, CUTOFFS,
+    overheadLevels, freeRange, gradeFor, failedGate, inPlay, relativeVolume, cell, rowStatus, CUTOFFS,
 } from '../../services/hotlist.columns.js'
 
 // The hotlist's columns (docs/design/daily-names.md §2, §5). The board grades by FREE RANGE — the
@@ -107,6 +107,56 @@ test('week: relative strength + a structure + a scheduled date or a lasting cata
     assert.equal(inPlay('week', S, { ...ctx, catalyst: { material: true, type: 'drift', surprise: 'negative' } }).in, false)
     assert.equal(inPlay('week', S, { ...ctx, catalyst: { material: true, type: 'short' } }).in, false, 'a short-lived catalyst is a day trade')
     assert.equal(inPlay('week', { ...S, rs20: -1, next_earnings: '2026-10-27' }, ctx).in, false)
+})
+
+test('week: a report in the window is a RUN-UP trade — it says so and carries the exit date (§2.7, Roy 2026-10-22)', () => {
+    const ctx = { price: 100, today: '2026-10-21' }
+    const p = inPlay('week', { ...S, next_earnings: '2026-10-27' }, ctx)
+    assert.match(p.why[0], /earnings in 6 days — a run-up: out before the report/)
+    assert.equal(p.exit_before, '2026-10-27')
+    assert.equal(cell('week', { ...S, next_earnings: '2026-10-27' }, ctx).exit_before, '2026-10-27')
+    // Qualified by a story, but the report still lands inside the window: same exit.
+    const drift = { material: true, type: 'drift', surprise: 'positive' }
+    assert.equal(inPlay('week', { ...S, next_earnings: '2026-10-29' }, { ...ctx, catalyst: drift }).exit_before, '2026-10-29')
+    assert.equal(inPlay('week', S, { ...ctx, catalyst: drift }).exit_before, undefined, 'no report in the window')
+})
+
+test('week: a report tonight or tomorrow excludes the name, whatever else qualifies it (§2.7)', () => {
+    const ctx = { price: 100, today: '2026-10-21', catalyst: { material: true, type: 'drift', surprise: 'positive' } }
+    assert.equal(inPlay('week', { ...S, next_earnings: '2026-10-21' }, ctx).in, false)
+    assert.equal(inPlay('week', { ...S, next_earnings: '2026-10-22' }, ctx).in, false)
+})
+
+test('week: money arriving — 5-day volume ≥ 1.5× the 50-day, on a week that rose — is a path in without a date or a story', () => {
+    const ctx = { price: 100, today: '2026-10-21' }
+    const p = inPlay('week', { ...S, vol5_vs_50: 1.8, ret5: 2 }, ctx)
+    assert.equal(p.in, true)
+    assert.match(p.why[0], /volume 1\.8× its 50-day pace \(5d\)/)
+    assert.equal(p.exit_before, undefined)
+    assert.equal(inPlay('week', { ...S, vol5_vs_50: 1.4, ret5: 2 }, ctx).in, false, 'under the bar')
+    assert.equal(inPlay('week', { ...S, vol5_vs_50: 2.5, ret5: -3 }, ctx).in, false, 'heavy volume into a falling week is selling')
+    assert.equal(inPlay('week', { ...S, vol5_vs_50: 2, ret5: 1, rs20: -2 }, ctx).in, false, 'still needs RS')
+})
+
+test('week: the path that let it in — a story, money arriving, or a date — strongest first', () => {
+    const ctx = { price: 100, today: '2026-10-21' }
+    const drift = { material: true, type: 'drift', surprise: 'positive' }
+    assert.equal(inPlay('week', { ...S, next_earnings: '2026-10-27' }, ctx).path, 'scheduled')
+    assert.equal(inPlay('week', { ...S, vol5_vs_50: 2, ret5: 1, next_earnings: '2026-10-27' }, ctx).path, 'accumulation')
+    assert.equal(inPlay('week', { ...S, vol5_vs_50: 2, ret5: 1 }, { ...ctx, catalyst: drift }).path, 'catalyst')
+    assert.equal(cell('week', { ...S, next_earnings: '2026-10-27' }, ctx).path, 'scheduled')
+    assert.equal(inPlay('week', S, ctx).path, undefined, 'not in play: no path')
+})
+
+test('row status: in play now, building, or setting up (§2.2 "or about to be")', () => {
+    const wk = (path) => ({ grade: 'B', path })
+    assert.equal(rowStatus({ mid: { grade: 'C' } }), 'in_play', 'any session column is in play')
+    assert.equal(rowStatus({ open: { grade: null }, week: wk('catalyst') }), 'in_play')
+    assert.equal(rowStatus({ week: wk('accumulation') }), 'building')
+    assert.equal(rowStatus({ week: wk('scheduled') }), 'setting_up')
+    assert.equal(rowStatus({ open: { grade: 'B' }, week: wk('scheduled') }), 'in_play', 'the strongest wins')
+    assert.equal(rowStatus({ week: { grade: 'B' } }), null, 'a pre-path week cell: unknown, the caller decides')
+    assert.equal(rowStatus({ open: { grade: null } }), null)
 })
 
 test('relative volume is paced by how much of the session has passed', () => {

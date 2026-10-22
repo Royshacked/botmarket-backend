@@ -94,7 +94,10 @@ The same 4% gap on 3× volume can be either — what decides it is *why* it gapp
 
 ### 2.7 Exclusions
 
-- Earnings inside the holding window, unless earnings IS the trade.
+- Earnings inside the holding window, unless earnings IS the trade. On the week column a report 2–10
+  days out IS the trade — the run-up into it — and the cell carries `exit_before` (the date): the
+  board, Argus and Mentor's hand-off all say to be out before the report. A report tonight or
+  tomorrow excludes the week cell outright (Roy, 2026-10-22).
 - Halt-prone microcaps.
 - Names in a pending merger deal (pinned to the deal price).
 - An overnight hold on a session/day name.
@@ -151,7 +154,7 @@ half a session. The grade reads the ATR multiple; the % is shown beside it.
 | **Mid-session** | ~10:30 | Trend day above VWAP, opening-range break | high of day, prior-day high, multi-day high |
 | **End of day** | ~14:30 | Strength into the close, near the high of day | high of day, multi-day high |
 | **Tomorrow** (overnight) | ~15:30 | Closing strong at the highs + an after-hours catalyst; no binary event tonight unless it is the trade | prior-day high, multi-day high |
-| **This week** | pre-market | Drift catalyst + daily structure + a scheduled date in the window | multi-week range top, 20/50-day high, 52-week high |
+| **This week** | pre-market | RS + daily structure + one of: a scheduled date in 2–10 days (a run-up, out before it), money arriving (5-day volume ≥ 1.5× the 50-day on a rising week, `vol5_vs_50`), a positive drift/lasting catalyst | multi-week range top, 20/50-day high, 52-week high |
 
 - Each name gets **A / B / C per column**; its best column is highlighted — that is the
   per-name horizon label.
@@ -207,8 +210,13 @@ above) to be graded at all — otherwise that column shows "—". First proposal
 1. **Overnight, once** — the liquid universe (~1,000–1,500 names: price ≥ $5, ≥ 1M shares/day) and
    their daily bars → average dollar volume, ATR %, RS, structure flags, cycles, breadth, earnings
    dates, the overhead levels. ~1,500 requests, paced so they never crowd live pricing.
-2. **At each checkpoint** — a **pool of ~200–300**: news since the close, earnings today / yesterday,
-   today's rating changes and 8-Ks, the gated movers, the top of the overnight structure list. Quote
+2. **At each checkpoint** — a **pool of ~200–300**, in this order (Roy, 2026-10-22): earnings
+   reported yesterday / today; the names the overnight stats alone already qualify for the week
+   (`ready`: RS + structure + a date or money arriving — week checkpoints only); today's rating
+   changes; news since the close, most headlines first; the movers (in session); the best remaining
+   structures by RS (not by size — by dollar volume the list was the mega caps). Only names that clear
+   the stats half of a column's gates enter. No pre-market movers source exists on this plan (probed
+   2026-10-22: batch pre-market 402, legacy pre-post-market 403). Quote
    only the pool, compute gap / relative volume / free range, apply the gates, publish the board
    (~30). Yahoo short and options data only for those ~30.
 
@@ -235,6 +243,16 @@ column, per grade. After ~6–8 weeks that is our own backtest, and later a real
 - A row: ticker · gap · relative volume · catalyst label · the five column grades · free range
   (% and × ATR) · **Ask Argus** / **Build with Mentor**.
 - The board **updates at each checkpoint** (§5); a name can rise, fall or leave during the day.
+- **Today's list** (Roy, 2026-10-22) — the panel's default view, a classic watchlist: every name any
+  of the day's boards graded, once (`day_list` on `/api/hotlist`, `hotlist.service dayList`). A name
+  keeps each column's latest cell, with the board that cell lives on (`cell_board` — the Mentor
+  hand-off references it). Each row has a **status** — *in play* (a session column, or a week cell
+  let in by a story), *building* (money arriving), *setting up* (only a date ahead) — from the
+  week cell's `path` (`hotlist.columns rowStatus`), the reason in plain words under the name, and
+  "since <checkpoint>". Sortable by name, price, change, volume, status and best grade; filterable
+  by status. Prices are as of each name's last checkpoint, **never live** — live quotes would cost
+  the shared FMP key requests it lacks in session. **Boards** keeps the one-checkpoint view.
+  Driven by `scripts/drive-hotlist-list.mjs` (21/21).
 - The user's preset (§4) filters it on open.
 - Lifetime: session/day names expire at the close, days names after ~3 sessions, week names after
   ~5–10.
@@ -354,7 +372,39 @@ in-session columns):
 - A missing number is null in the columns, not 0, so the `??` fallbacks work.
 - Frontend: a slow board read for a tab the user has left no longer replaces the one on screen; an
   unknown SPY reading is hidden instead of shown as "below".
-- Open: **pre-market volume** — `aftermarket-quote`'s `volume` may be the previous session's total,
-  which would make the open column's volume test always pass. To be checked live before 09:30 ET; if
-  so, pre-market volume comes from the morning's 5-minute bars instead. Declining Argus's "put aside
+- ~~Open: **pre-market volume**~~ — **closed 2026-10-22**: `aftermarket-quote`'s `volume` IS the
+  morning's pre-market volume (the first live board read 0.1–3.1% of a normal day at 08:10 ET, not
+  ~100%). Declining Argus's "put aside
   your current work?" after Ask Argus leaves the Hotlist closed — accepted as is.
+
+### First live day — 2026-10-22 (dev backend)
+
+- **Overnight pass:** 1,187 of 1,190 names. The first attempt read the whole universe and then lost
+  it to a DNS failure on its single final write, and its run stayed `running` for two hours. Fixed:
+  stats are saved every 100 names, a retry reads only the names not yet saved, a pass that throws is
+  marked `partial` (the hourly retry applies), and liveness is a heartbeat (`runIsLive`: progress
+  within 10 minutes), shared by the claim and the Floor.
+- **The lease:** a network drop lost and regained the background-loops lease inside one slow stop;
+  the stop then stopped the freshly started loops and the process sat as leader with nothing running.
+  `instanceLock` now applies one transition at a time, to the latest wish (verified live at 14:59).
+- **08:00 board:** 5 rows from a pool of 300, all "this week" (earnings-driven); Argus read it on Luna
+  and starred CVX. The news labels failed (Haiku, Anthropic credit at zero), so no name could qualify
+  on news — a thin board, as expected. The open column graded nothing: the large caps fail the 3% ATR
+  gate, and their 0.13–0.26% pre-market spreads exceed even the 08:00 allowance.
+- **The Floor:** the panel shows what the screener is doing (`working`: the overnight pass with its
+  count, or a board being built) and the latest finished pass (`stats`), refreshing every 30 s while
+  something runs. Each row has a sparkline: the last 20 closes (saved by the overnight pass,
+  `closes20` → row `spark`), today's price as a dot, the best grade's overhead level dashed.
+- **09:20 board:** 3 rows (AMZN, LLY, SBUX), all week C, all on Argus's avoid list; labels failed again.
+- **Why so few (funnel from the stats):** week gate 938 → RS 426 → structure 310 → a report in 2–10
+  days 69. A dated report was the ONLY non-news way into the week column, and the pool never reached
+  most of those 69: 200 of its 300 slots went to news names (unlabelled, so useless), and the
+  structure source was ranked by dollar volume — the mega caps. Fixed the same day: the pool order
+  above (the 69 go first), the gate filter, structure by RS, and a second non-news path into the week
+  (money arriving, `vol5_vs_50`, from the next overnight pass). The earnings path is kept as a run-up
+  trade with `exit_before` (§2.7).
+- **10:30 board:** partial — 4 rows, stopped at its 9th quote on a 429. This backend sent ~150/min
+  that minute and had 52 refused, so another user of the shared key (most likely Render's live
+  pricing) took the rest of the ~300. Fixed: a 429 is waited out (20 s, up to 3 tries per request,
+  at most 15 waits per board, `retried_429` on the board) before the board stops partial. The real
+  fix is one live-pricing backend per key, or a second key.
