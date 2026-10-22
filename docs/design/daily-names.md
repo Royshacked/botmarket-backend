@@ -200,7 +200,7 @@ above) to be graded at all — otherwise that column shows "—". First proposal
 | **Regular-hours spread** | — | ❌ the regular quote has no bid/ask; pre-market has it |
 | **Options flow (sweeps)** | — | ❌ needs a paid feed |
 | **Dark-pool / blocks** | — | ❌ B3 |
-| **FMP rate limit** | — | ❓ unknown, no headers; the screener shares it with live pricing |
+| **FMP rate limit** | — | ✅ measured 2026-10-21: **~300 requests / rolling minute** per key (first 429 at 310 in the prior 60 s), back after ~18 s; shared with live pricing (§10) |
 
 ### Two passes (because there is no batch quote)
 
@@ -252,8 +252,20 @@ column, per grade. After ~6–8 weeks that is our own backtest, and later a real
 - **News labels** — Haiku, once per checkpoint, for all users (§3).
 - **FMP rate limit** — measured with a controlled burst BEFORE the screener is built, outside market
   hours (a weekend or after 20:00 ET), because the key is shared with live pricing.
+  **Measured 2026-10-21, 23:00 ET** (`scripts/fmp-burst-test.mjs`, dev backend stopped; Render may have
+  been on the same key, so this is a floor): 120 and 240/min clean, the first 429 during the 360/min
+  step with 310 sent in the 60 s before it — **~300/min**, a rolling window, answering again after ~18 s.
+  The 429 body is `"Limit Reach"`. Live pricing runs ~145/min per backend in session, so two backends on
+  one key already use most of it (dev and Render DO share one key — Roy, 2026-10-22); `DAILY_SCREENER_RPM` stays **60**.
+  So the screener runs on **one backend only** (`DAILY_SCREENER=true` on dev OR Render, never both).
 - **Options** — build on the Yahoo snapshot; a paid flow feed only if the board proves it is missing.
 - **Grade thresholds** — the starting cut-offs in §5.1; tuned from the outcome log, never by feel.
+- **Pre-market spread gate** — 3× the column's spread limit at the 08:00 checkpoint (the book is thin that
+  early), strict at 09:20 (`CHECKPOINTS[].spreadSlack`).
+- **Who pays** — a board's news labels and Argus read are house spend, booked to the admin ledger
+  (`user.model.houseLedgerUserId`, the first admin by id — the same one Pythia's weekly run books
+  to), as monitor spend so it does not count against that admin's chat ceiling. Agents
+  `hotlist_news` and `hotlist_argus` in token_usage; each board stores `booked_to`.
 - **Names** — the service is **DailyScreener** (to be built as services/dailyScreener.service.js, the usual *.service.js shape); the Floor row is **Hotlist**.
 - **Horizon vocabulary** — `swing` is NOT split. It already means weeks to months, the same span as
   Pythia's swing book (`prompts/strategy_system_prompt.md`), and `services/houseLabel.service.js`
