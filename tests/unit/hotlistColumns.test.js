@@ -131,3 +131,9 @@ test('cell: graded only when it passes the gate AND is in play; otherwise "—" 
     const gated = cell('open', { ...S, atr_pct: 1.5 }, { price: 104, prevClose: 100, pmVolPct: 2 })
     assert.equal(gated.gate, 'atr')
 })
+
+test('the spread gate is widened by the checkpoint\'s slack — 3× at 08:00, strict at 09:20 (Roy, 2026-10-21)', () => {
+    assert.equal(failedGate('open', S, { spreadPct: 0.12 }), 'spread', 'strict: the open column wants 0.05%')
+    assert.equal(failedGate('open', S, { spreadPct: 0.12, spreadSlack: 3 }), null, '0.12% is inside 3 × 0.05%')
+    assert.equal(failedGate('open', S, { spreadPct: 0.2, spreadSlack: 3 }), 'spread', 'but not 0.2%')
+})

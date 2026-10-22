@@ -96,13 +96,14 @@ async function _houseModel() {
  * nothing to read or the call failed (the board then goes out without it).
  *
  * @param {object} board  the board as _build made it (rows, columns, regime, day, checkpoint)
- * @param {{ send?: Function, model?: () => Promise<string> }} [deps]  test seams
+ * @param {{ send?: Function, model?: () => Promise<string>, onUsage?: Function }} [deps]  test seams;
+ *   `onUsage(usage, model)` books the call's spend
  */
-export async function argusRead(board, { send = oneShotText, model = _houseModel } = {}) {
+export async function argusRead(board, { send = oneShotText, model = _houseModel, onUsage } = {}) {
     if (!board?.rows?.length) return null
     try {
         const m = await model()
-        const text = await send({ model: m, systemText: SYSTEM, userText: boardText(board), maxTokens: 2000 })
+        const text = await send({ model: m, systemText: SYSTEM, userText: boardText(board), maxTokens: 2000, onUsage: onUsage && (u => onUsage(u, m)) })
         const read = normalizeRead(extractFirstJSON(text), board)
         if (!read.summary && !read.picks.length) return null
         return { ...read, model: m }

@@ -98,6 +98,15 @@ export async function listAdminUserIds() {
     return rows.map(r => r?.id).filter(Boolean).map(String)
 }
 
+/**
+ * The ONE admin a house run's model spend is booked to — the first by id, so it is the same ledger
+ * every time (there are two admins, and the roster's order is not guaranteed). Null with no admin.
+ * Pythia's weekly run and the hotlist's labels and Argus read book here.
+ */
+export async function houseLedgerUserId() {
+    return [...(await listAdminUserIds()) ?? []].map(String).sort()[0] ?? null
+}
+
 /** Is this one user an admin — the same `role ?? isAdmin` rule as listAdminUserIds, for one id. */
 export async function isAdminUser(id) {
     if (!id) return false

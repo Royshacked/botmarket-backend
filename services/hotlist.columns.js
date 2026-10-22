@@ -98,8 +98,10 @@ export function failedGate(column, stats, ctx = {}) {
     if (!(price >= MIN_PRICE)) return 'price'
     if (!(num(stats?.adv20_usd) >= g.minAdvUsd)) return 'dollar_volume'
     if (!(num(stats?.atr_pct) >= g.minAtrPct)) return 'atr'
+    // `spreadSlack` widens the bar where the book is thin by nature: 3 at 08:00, when pre-market
+    // spreads are routinely wider than they will be at the open; 1 (strict) at 09:20 (Roy, 2026-10-21).
     const spread = num(ctx.spreadPct)
-    if (spread != null && spread > g.maxSpreadPct) return 'spread'
+    if (spread != null && spread > g.maxSpreadPct * (num(ctx.spreadSlack) ?? 1)) return 'spread'
     return null
 }
 

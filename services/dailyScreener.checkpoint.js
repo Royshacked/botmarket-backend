@@ -22,6 +22,8 @@ import { labelNews } from './hotlist.news.js'
 import { argusRead } from './hotlist.argus.js'
 import { BOARDS, outcomeSummary } from './hotlist.outcomes.js'
 import { COLLECTION as STATS, latestRun, claimRun } from './dailyScreener.service.js'
+import { recordUsage } from './tokenUsage.service.js'
+import { houseLedgerUserId } from '../api/user/user.model.js'
 import { config } from './config.js'
 import { logger } from './logger.service.js'
 
@@ -31,9 +33,12 @@ const LOG = '[dailyScreener.checkpoint]'
 // summary without an import cycle; re-exported for the callers that know it from here.
 export { BOARDS }
 
-/** The day's checkpoints (ET minutes). `book` says which quote: the extended-hours book or the session's. */
+/**
+ * The day's checkpoints (ET minutes). `book` says which quote: the extended-hours book or the session's.
+ * `spreadSlack` multiplies the columns' spread gate — 08:00's book is thin, 09:20's is held strict.
+ */
 export const CHECKPOINTS = Object.freeze([
-    { id: 'premarket', etMin: 8 * 60,       columns: ['open', 'week'], book: 'extended' },
+    { id: 'premarket', etMin: 8 * 60,       columns: ['open', 'week'], book: 'extended', spreadSlack: 3 },
     { id: 'preopen',   etMin: 9 * 60 + 20,  columns: ['open', 'week'], book: 'extended' },
     { id: 'mid',       etMin: 10 * 60 + 30, columns: ['mid'],          book: 'session' },
     { id: 'eod',       etMin: 14 * 60 + 30, columns: ['eod'],          book: 'session' },
@@ -58,8 +63,13 @@ const _deps = {
     movers:    (kind) => marketMoversRaw(kind),
     extQuote:  (symbol) => getAftermarketQuote(symbol),
     quote:     (symbol) => getFmpQuoteFull(symbol, { fresh: true }),
-    label:     (byTicker) => labelNews(byTicker),
-    argus:     (board) => argusRead(board),
+    label:     (byTicker, opts) => labelNews(byTicker, opts),
+    argus:     (board, opts) => argusRead(board, opts),
+    // The spend of a board's model calls — the labels and Argus's read, made once for everyone — is
+    // the house's: booked to the admin ledger (Roy, 2026-10-21), as monitor spend so it does not eat
+    // into that admin's own chat ceiling.
+    bookTo:    () => houseLedgerUserId(),
+    record:    (userId, model, usage, agent) => recordUsage(userId, model, usage, agent, { monitor: true }),
     // Which columns have earned "verified" (§7) — from the outcome log; a failed read verifies nothing.
     verified:  async () => new Set(Object.entries(await outcomeSummary()).filter(([, s]) => s.verified).map(([c]) => c)),
     perMinute: () => config.dailyScreenerRpm,
@@ -123,11 +133,11 @@ export function structureNames(statsList, max = 60) {
 /**
  * One name's row on a board: its context and a cell per column. Null when no column graded it. Pure.
  */
-export function boardRow(stats, q, columns, { book, etMin, day, catalyst, quotedAt = null }) {
+export function boardRow(stats, q, columns, { book, etMin, day, catalyst, quotedAt = null, spreadSlack = 1 }) {
     const extended = book === 'extended'
     const prevClose = extended ? stats.close : (q.previousClose ?? stats.close)
     const ctx = extended
-        ? { price: q.mid, prevClose, spreadPct: q.spreadPct, pmVolPct: stats.avg_vol20 > 0 && q.volume != null ? (q.volume / stats.avg_vol20) * 100 : null, catalyst, today: day }
+        ? { price: q.mid, prevClose, spreadPct: q.spreadPct, spreadSlack, pmVolPct: stats.avg_vol20 > 0 && q.volume != null ? (q.volume / stats.avg_vol20) * 100 : null, catalyst, today: day }
         : { price: q.price, prevClose, open: q.open, dayHigh: q.dayHigh, dayLow: q.dayLow,
             rvol: relativeVolume(q.volume, stats.avg_vol20, (etMin - OPEN_MIN) / SESSION_MIN), catalyst, today: day }
     const cells = Object.fromEntries(columns.map(c => [c, cell(c, stats, ctx)]))
@@ -258,14 +268,21 @@ async function _build(db, cp, day, etMin, run, deps) {
         }
     }
 
+    // ── The ledger the board's model calls are booked to (none found → they run unbooked) ──
+    const bookedTo = await Promise.resolve().then(() => deps.bookTo?.() ?? null).catch(() => null)
+    const booker = (agent) => (bookedTo && deps.record
+        ? (usage, model) => Promise.resolve().then(() => deps.record(bookedTo, model, usage, agent))
+            .catch(err => logger.warn(LOG, `${agent} spend not booked: ${err.message}`))
+        : undefined)
+
     // ── News labels: one call for every quoted name that has headlines ──
     const toLabel = new Map([...headlines].filter(([s]) => quotes.has(s)))
-    const labels = await deps.label(toLabel).catch(() => new Map())
+    const labels = await deps.label(toLabel, { onUsage: booker('hotlist_news') }).catch(() => new Map())
 
     // ── The board ──
     const rows = []
     for (const [sym, q] of quotes) {
-        const row = boardRow(byStats.get(sym), q, cp.columns, { book: cp.book, etMin, day, catalyst: labels.get(sym) ?? null, quotedAt: quotedAt.get(sym) })
+        const row = boardRow(byStats.get(sym), q, cp.columns, { book: cp.book, etMin, day, catalyst: labels.get(sym) ?? null, quotedAt: quotedAt.get(sym), spreadSlack: cp.spreadSlack ?? 1 })
         if (row) rows.push(row)
     }
     const ranked = rankRows(rows).slice(0, BOARD_MAX)
@@ -275,7 +292,7 @@ async function _build(db, cp, day, etMin, run, deps) {
     // Argus's read of the finished board — once, for everyone (hotlist.argus). Its picks are marked on
     // their rows so the list shows them in place; a failed read leaves the board without one.
     const argus = await Promise.resolve()
-        .then(() => deps.argus?.({ day, checkpoint: cp.id, columns: cp.columns, regime, rows: ranked }) ?? null)
+        .then(() => deps.argus?.({ day, checkpoint: cp.id, columns: cp.columns, regime, rows: ranked }, { onUsage: booker('hotlist_argus') }) ?? null)
         .catch(() => null)
     const pickBy = new Map((argus?.picks ?? []).map((p, i) => [p.symbol, { ...p, rank: i + 1 }]))
     const avoidBy = new Map((argus?.avoid ?? []).map(a => [a.symbol, a.why]))
@@ -295,6 +312,7 @@ async function _build(db, cp, day, etMin, run, deps) {
         unverified: cp.columns.some(c => !verified.has(c)),
         regime,
         labels: toLabel.size ? (labels.size ? 'labelled' : 'failed') : 'none',
+        booked_to: bookedTo,
         argus: argus ? { summary: argus.summary, model: argus.model, picks: argus.picks.length } : null,
         counts: { pool: pool.length, quoted: quotes.size, graded: rows.length, headlines: headlines.size },
         requests,

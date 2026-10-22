@@ -65,7 +65,7 @@ export function normalizeLabels(raw, wanted) {
     return out
 }
 
-const _send = ({ model, systemText, userText }) => oneShotText({ model, systemText, userText, maxTokens: 8000 })
+const _send = ({ model, systemText, userText, onUsage }) => oneShotText({ model, systemText, userText, maxTokens: 8000, onUsage })
 
 /**
  * Tickers per call. A pool of 300 does not fit one reply: the first live run, 24 tickers on Luna,
@@ -79,9 +79,10 @@ export const LABEL_CHUNK = 40
  * fails loses only its own labels; all failing is an empty map — never a throw.
  *
  * @param {Map<string, {title:string}[]>} byTicker
- * @param {{ model?: string, send?: Function }} [opts]  `send` is the test seam
+ * @param {{ model?: string, send?: Function, onUsage?: Function }} [opts]  `send` is the test seam;
+ *   `onUsage(usage, model)` books each call's spend (the checkpoint books it to the house ledger)
  */
-export async function labelNews(byTicker, { model = config.dailyScreenerNewsModel || CHEAP_MODEL, send = _send } = {}) {
+export async function labelNews(byTicker, { model = config.dailyScreenerNewsModel || CHEAP_MODEL, send = _send, onUsage } = {}) {
     if (!byTicker?.size) return new Map()
     const entries = [...byTicker.entries()]
     const out = new Map()
@@ -89,7 +90,9 @@ export async function labelNews(byTicker, { model = config.dailyScreenerNewsMode
     for (let i = 0; i < entries.length; i += LABEL_CHUNK) {
         const chunk = new Map(entries.slice(i, i + LABEL_CHUNK))
         try {
-            const text = await send({ model, systemText: SYSTEM, userText: buildNewsText(chunk) })
+            // Booked under the id ASKED for — the provider reports its own wire name, which the
+            // price table may not know.
+            const text = await send({ model, systemText: SYSTEM, userText: buildNewsText(chunk), onUsage: onUsage && (u => onUsage(u, model)) })
             for (const [t, l] of normalizeLabels(extractFirstJSON(text), chunk.keys())) out.set(t, l)
         } catch (err) {
             failed++

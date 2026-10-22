@@ -153,3 +153,13 @@ test('today: the latest board in full, the day\'s checkpoints as one-liners', as
     assert.deepEqual(t.checkpoints.map(c => c.checkpoint), ['premarket', 'mid'])
     assert.equal(t.checkpoints[0].argus, true)
 })
+
+test('Argus\'s read reports its spend under the house model id', async () => {
+    const booked = []
+    await argusRead(BOARD, {
+        model: async () => 'gpt-6-luna',
+        send: async ({ onUsage }) => { onUsage?.({ input_tokens: 5 }, 'wire'); return '{"summary":"s","picks":[],"avoid":[]}' },
+        onUsage: (usage, model) => booked.push(model),
+    })
+    assert.deepEqual(booked, ['gpt-6-luna'])
+})

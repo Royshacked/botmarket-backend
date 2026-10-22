@@ -177,3 +177,34 @@ test('monitor: the overnight pass first, then the checkpoint — and off means n
     assert.deepEqual(await _tick({ enabled: () => false, nightly: async () => order.push('x'), checkpoint: async () => order.push('x') }), { outcome: 'off' })
     assert.deepEqual(order, ['n', 'c'])
 })
+
+// ─── Roy, 2026-10-21: the 08:00 spread allowance, and the board's spend on the admin ledger ───
+
+test('08:00 allows 3× the spread; 09:20 holds the gate strict', () => {
+    const q = { mid: 104, spreadPct: 0.12, volume: 30_000 }
+    const ctx = { book: 'extended', etMin: 480, day: '2026-10-21', catalyst: null }
+    const at8 = boardRow(S, q, ['open'], { ...ctx, spreadSlack: CHECKPOINTS.find(c => c.id === 'premarket').spreadSlack })
+    assert.equal(at8.cells.open.grade, 'B')
+    const at920 = boardRow(S, q, ['open', 'week'], { ...ctx, etMin: 560, spreadSlack: CHECKPOINTS.find(c => c.id === 'preopen').spreadSlack ?? 1 })
+    assert.equal(at920?.cells.open.gate ?? 'no row', 'spread')
+})
+
+test('the labels and Argus\'s read are booked to the house ledger, as monitor spend', async () => {
+    const booked = []
+    const { deps, rows } = rig({
+        bookTo: async () => 'admin-1',
+        record: async (userId, model, usage, agent) => { booked.push({ userId, model, agent, tokens: usage.input_tokens }) },
+        label: async (m, opts) => { opts?.onUsage?.({ input_tokens: 40 }, 'gpt-6-luna'); return new Map([...m.keys()].map(k => [k, { material: true, type: 'drift', surprise: 'positive', magnitude: 'major' }])) },
+        argus: async (_board, opts) => { opts?.onUsage?.({ input_tokens: 90 }, 'gpt-6-luna'); return { summary: 's', picks: [], avoid: [], model: 'gpt-6-luna' } },
+    })
+    await runCheckpoint({ deps })
+    await new Promise(r => setImmediate(r))
+    assert.deepEqual(booked.map(b => [b.userId, b.agent, b.tokens]), [['admin-1', 'hotlist_news', 40], ['admin-1', 'hotlist_argus', 90]])
+    assert.equal(rows(BOARDS)[0].booked_to, 'admin-1')
+})
+
+test('no admin to book to → the board still goes out, unbooked', async () => {
+    const { deps, rows } = rig({ bookTo: async () => null, record: async () => { throw new Error('never called') } })
+    assert.equal((await runCheckpoint({ deps })).outcome, 'done')
+    assert.equal(rows(BOARDS)[0].booked_to, null)
+})

@@ -23,7 +23,7 @@ import { themeService } from '../api/strategy/theme.service.js'
 import { scanIndustry, scanTheme, pickForWeek } from '../api/strategy/changeScan.service.js'
 import { assessIndustry, assessTheme } from './industryAssessmentRun.service.js'
 import { runHouseScan } from './houseScan.service.js'
-import { listAdminUserIds } from '../api/user/user.model.js'
+import { houseLedgerUserId } from '../api/user/user.model.js'
 import { getDb } from '../providers/mongodb.provider.js'
 import { config } from './config.js'
 import { logger } from './logger.service.js'
@@ -46,8 +46,8 @@ const _deps = {
     listThemes: () => themeService.listThemes({ statuses: ['approved'] }),
     assessIndustry: (code, opts) => assessIndustry(code, opts),
     assessTheme: (id, opts) => assessTheme(id, opts),
-    // The FIRST admin by id, so the same ledger every week (two admins; the roster's order is not guaranteed).
-    bookTo: async () => [...(await listAdminUserIds()) ?? []].map(String).sort()[0] ?? null,
+    // The FIRST admin by id, so the same ledger every week (user.model houseLedgerUserId).
+    bookTo: () => houseLedgerUserId(),
     cap: () => config.pythiaWeeklyCap,
     maxUsd: () => config.pythiaWeeklyMaxUsd,
     // Step 7: the week's FOR SWING / FOR LONG TERM verdicts send names to Prometheus's research queue.

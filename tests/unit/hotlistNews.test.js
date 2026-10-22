@@ -73,3 +73,15 @@ test('a big pool is labelled in chunks — a cut-off chunk loses only its own la
     assert.equal(out.has('T0'), true)
     assert.equal(out.has('T40'), false)
 })
+
+test('each label call\'s spend is reported under the model id ASKED for', async () => {
+    const booked = []
+    await labelNews(HEADLINES, {
+        model: 'gpt-6-luna',
+        send: async ({ onUsage }) => { onUsage?.({ input_tokens: 100, output_tokens: 20 }, 'luna-wire-name'); return '{}' },
+        onUsage: (usage, model) => booked.push({ usage, model }),
+    })
+    assert.equal(booked.length, 1)
+    assert.equal(booked[0].model, 'gpt-6-luna')
+    assert.equal(booked[0].usage.input_tokens, 100)
+})
