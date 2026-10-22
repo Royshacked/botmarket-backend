@@ -115,10 +115,11 @@ try {
             spcxStatus: row('SPCX')?.querySelector('.hot-status')?.textContent,
             spcxBest: row('SPCX')?.querySelector('.hot-best__col')?.textContent,
             spcxPriceTitle: row('SPCX')?.querySelectorAll('.hot-table__num')[0]?.getAttribute('title'),
-            dxcReason: row('DXC')?.querySelector('.hot-reason')?.textContent,
             dxcEarn: row('DXC')?.querySelector('.hot-earn')?.textContent,
-            dxcFound: [...(row('DXC')?.querySelectorAll('.hot-sub') ?? [])].map(s => s.textContent).find(t => t.startsWith('since')),
             accStatus: row('ACC')?.querySelector('.hot-status')?.textContent,
+            // One line per name: every row the same height, and no words until a row is opened.
+            heights: [...p.querySelectorAll('tr.hot-row')].map(r => Math.round(r.getBoundingClientRect().height)),
+            closed: !p.querySelector('.hot-detail'),
             argus: p.querySelector('.hot-argus__who')?.textContent,
             asOf: /Prices as of each name’s last checkpoint/.test(p.textContent),
             overflow: wrap.scrollWidth > wrap.clientWidth + 1,
@@ -131,10 +132,18 @@ try {
     check('SPCX was setting up at 08:00, in play by 10:30 — the list says in play', view.spcxStatus === 'In play', view.spcxStatus)
     check('its best column is named on the row', view.spcxBest === 'Mid-day', view.spcxBest)
     check('the price says when it was read', /^As of /.test(view.spcxPriceTitle ?? ''), view.spcxPriceTitle)
-    check('the why is on the row in plain words', /earnings in 8 days — a run-up: out before the report/.test(view.dxcReason ?? ''), view.dxcReason)
-    check('an earnings run-up says out before', view.dxcEarn === 'E 10-29 · out before', view.dxcEarn)
-    check('found at 08:00', view.dxcFound === 'since 08:00', view.dxcFound)
+    // One text line is ~36 px with its padding; a second line would take it past 50.
+    check('one line per name: every row one text line tall', Math.max(...view.heights) < 44 && view.closed, view.heights.join(','))
+    check('an earnings run-up is flagged in the Earn column', view.dxcEarn === '10-29!', view.dxcEarn)
     check('money arriving reads as Building', view.accStatus === 'Building', view.accStatus)
+
+    // ── A row opens on a click: the words ──
+    await page.locator('.hot-panel tr.hot-row[data-symbol="DXC"] td').nth(3).click()
+    await page.waitForSelector('#hot-detail-DXC', { timeout: 3000 })
+    const detail = await page.locator('#hot-detail-DXC').textContent()
+    check('the open row says why, in plain words', /earnings in 8 days — a run-up: out before the report/.test(detail), detail.slice(0, 120))
+    check('…and when it was listed', /listed at 08:00 · price as of/.test(detail))
+    await shot(page, '1b-open-row')
     check('Argus\'s read is labelled with its checkpoint', view.argus === 'Argus · 10:30', view.argus)
     check('prices are marked as of the checkpoint, not live', view.asOf)
     check('the table fits the panel at 1600 px', !view.overflow, view.widths)
@@ -143,9 +152,9 @@ try {
     await page.getByRole('button', { name: 'Setting up 1' }).click()
     check('the status filter narrows the list', await listOrder(page) === 'DXC', await listOrder(page))
     await page.getByRole('button', { name: 'All 4' }).click()
-    await page.locator('.hot-panel').getByRole('button', { name: 'Price', exact: true }).click()
-    check('Price sorts high first', await listOrder(page) === 'TSLA,SPCX,ACC,DXC', await listOrder(page))
-    await page.locator('.hot-panel').getByRole('button', { name: /^Price/ }).click()
+    await page.locator('.hot-panel').getByRole('button', { name: 'Last', exact: true }).click()
+    check('Last sorts high first', await listOrder(page) === 'TSLA,SPCX,ACC,DXC', await listOrder(page))
+    await page.locator('.hot-panel').getByRole('button', { name: /^Last/ }).click()
     check('a second click flips it', await listOrder(page) === 'DXC,ACC,SPCX,TSLA', await listOrder(page))
     await shot(page, '2-sorted')
 
@@ -161,7 +170,8 @@ try {
     await page.waitForTimeout(300)
 
     // ── Build with Mentor from the list: the week cell lives on the 08:00 board ──
-    await page.locator('.hot-panel tr.hot-row[data-symbol="DXC"]').getByRole('button', { name: 'Build with Mentor' }).click()
+    if (!(await page.locator('#hot-detail-DXC').count())) await page.getByRole('button', { name: 'Show DXC details' }).click()
+    await page.locator('#hot-detail-DXC').getByRole('button', { name: 'Build with Mentor' }).click()
     await page.waitForTimeout(1500)
     const t = turns.find(x => x.agent === 'mentor')
     check('the panel closes before Mentor gets the name', !(await page.locator('.hot-panel').isVisible().catch(() => false)))
