@@ -95,12 +95,12 @@ try {
     await ctx.storageState({ path: sessionFile })
     await page.evaluate(() => localStorage.setItem('design', 'floor'))
     await page.reload({ waitUntil: 'domcontentloaded' })
-    await page.waitForSelector('.floor-lists', { timeout: 15000 })
+    await page.waitForSelector('.floor-strip--top', { timeout: 15000 })
     await page.waitForTimeout(2500)
 
-    const desk = page.locator('.floor-desk__head', { has: page.locator('.floor-desk__label', { hasText: /^Hotlist$/ }) })
+    const desk = page.locator('.floor-strip--top [data-desk="hotlist"]')
     check('the Floor lists a Hotlist row', await desk.count() === 1)
-    const order = await page.evaluate(() => [...document.querySelectorAll('.floor-lists .floor-desk__label')].map(l => l.textContent))
+    const order = await page.evaluate(() => [...document.querySelectorAll('.floor-strip--top .floor-strip__chip')].map(b => b.textContent.replace(/\(\d+\)$/, '')))
     check('it sits after Watchlists', order.indexOf('Hotlist') === order.indexOf('Watchlists') + 1, order.join(' · '))
 
     // ── Open it ──
@@ -154,7 +154,9 @@ try {
     await page.waitForTimeout(1500)
     await shot(page, '3-mentor')
     const mentorTurn = turns.find(t => t.agent === 'mentor')
-    check('the panel closes before Mentor gets the name', !(await page.locator('.hot-panel').isVisible().catch(() => false)))
+    // On the Floor's stage the Hotlist stays UNDER Mentor's surface, mounted and hidden — closing Mentor comes back to it
+    // (floor-stage.md; Roy, 2026-10-22). Off the stage it closed first.
+    check('Mentor covers the Hotlist on the stage; the Hotlist stays under it', !(await page.locator('.hot-panel').isVisible().catch(() => false)) && !!(await page.$('.stage.stage--surface')) && (await page.locator('.hot-panel').count()) === 1)
     check('Mentor is sent the name as the user\'s turn', /SPCX/.test(mentorTurn?.text ?? ''), mentorTurn?.text)
     check('the seed carries the board REFERENCE — board id and column', mentorTurn?.seed?.hotlist?.board === MID.id && mentorTurn?.seed?.hotlist?.column === 'mid', JSON.stringify(mentorTurn?.seed?.hotlist))
     check('no board facts ride in the seed', !('grade' in (mentorTurn?.seed?.hotlist ?? {})) && !mentorTurn?.seed?.hotlist_facts)

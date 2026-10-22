@@ -57,15 +57,11 @@ const panelState = (page) => page.evaluate(() => {
     }
 })
 
-// One desk open at a time and the rest folded away, so another desk is reached by closing the open
-// one first. Clicking the open desk's own name closes it.
+// Every list opens from its chip in the strip under the chat header (since 2026-10-22: the columns went).
+// A chip switches lists; clicking the OPEN list's chip would close it, so that one is left alone.
 async function openDesk(page, name) {
-    const open = page.locator('.floor-desk--open > .floor-desk__head')
-    if (await open.count() && !(await open.first().textContent()).includes(name)) {
-        await open.first().click()
-        await page.waitForTimeout(600)
-    }
-    await page.locator('.floor-desk__head').filter({ hasText: name }).first().click()
+    const chip = page.locator('.floor-strip--top .floor-strip__chip').filter({ hasText: name }).first()
+    if ((await chip.getAttribute('aria-expanded')) !== 'true') await chip.click()
     await page.waitForTimeout(1500)
 }
 

@@ -95,10 +95,10 @@ try {
     await ctx.storageState({ path: sessionFile })
     await page.evaluate(() => localStorage.setItem('design', 'floor'))
     await page.reload({ waitUntil: 'domcontentloaded' })
-    await page.waitForSelector('.floor-lists', { timeout: 15000 })
+    await page.waitForSelector('.floor-strip--top', { timeout: 15000 })
     await page.waitForTimeout(2500)
 
-    const desk = page.locator('.floor-desk__head', { has: page.locator('.floor-desk__label', { hasText: /^Hotlist$/ }) })
+    const desk = page.locator('.floor-strip--top [data-desk="hotlist"]')
     await desk.click()
     await page.waitForSelector('.hot-panel .hot-table--list', { timeout: 10000 })
     await page.waitForTimeout(600)
@@ -189,7 +189,9 @@ try {
     await page.locator('#hot-detail-DXC').getByRole('button', { name: 'Build with Mentor' }).click()
     await page.waitForTimeout(1500)
     const t = turns.find(x => x.agent === 'mentor')
-    check('the panel closes before Mentor gets the name', !(await page.locator('.hot-panel').isVisible().catch(() => false)))
+    // On the Floor's stage the Hotlist stays UNDER Mentor's surface, mounted and hidden — closing Mentor comes back to it
+    // (floor-stage.md; Roy, 2026-10-22). Off the stage it closed first.
+    check('Mentor covers the Hotlist on the stage; the Hotlist stays under it', !(await page.locator('.hot-panel').isVisible().catch(() => false)) && !!(await page.$('.stage.stage--surface')) && (await page.locator('.hot-panel').count()) === 1)
     check('Mentor gets the cell\'s OWN board (08:00) and column (week)', t?.seed?.hotlist?.board === PREMARKET.id && t?.seed?.hotlist?.column === 'week', JSON.stringify(t?.seed?.hotlist))
     check('the opening read is the run-up reason', /out before the report/.test(t?.seed?.thesis ?? ''), t?.seed?.thesis)
 
