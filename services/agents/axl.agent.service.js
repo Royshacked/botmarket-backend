@@ -16,6 +16,7 @@ import { makeExperienceHandlers, EXPERIENCE_TOOL_SPEC } from '../tools/experienc
 import { makeMarketBriefHandlers, MARKET_BRIEF_TOOL_SPEC } from '../tools/marketBrief.tools.js'
 import { makeIndustryViewsHandlers, INDUSTRY_VIEWS_TOOL_SPEC } from '../tools/industryViews.tools.js'
 import { makeNewsHandlers, NEWS_TOOL_SPEC } from '../tools/news.tools.js'
+import { makeHotlistHandlers, HOTLIST_TOOL_SPEC } from '../tools/hotlist.tools.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const LOG = '[axlAgent]'
@@ -70,6 +71,9 @@ export const TOOLS = toolsFor({
     // that can answer only the broadcast half has to send a headline question to a desk that would
     // then have to form a view to answer it.
     get_news: NEWS_TOOL_SPEC.get_news,
+    // Appended last, per the rule above. Today's hotlist, so a `<show>hotlist` comes with a line on
+    // what is in it (Roy, 2026-10-22). A broadcast, like the brief: the handler is unbound.
+    get_hotlist: HOTLIST_TOOL_SPEC.get_hotlist,
 })
 
 // NO `consult` HERE, deliberately — the reasoning sidecar reached the other five desks on
@@ -148,6 +152,7 @@ async function chatStream({ messages = [], audience = null, isAdmin = false, sur
     _marketHoursHandlers = makeMarketHoursHandlers,
     _industryViewsHandlers = makeIndustryViewsHandlers,
     _newsHandlers = makeNewsHandlers,
+    _hotlistHandlers = makeHotlistHandlers,
     _venueSection = buildVenueSection,
 } = {}) {
     // The venue rides the last USER message, not the system prompt: free cash moves whenever
@@ -206,6 +211,8 @@ ${audienceBlock}` : ''}` },
         // Unbound as well, and here it is the load-bearing kind: the tool that fetches headlines about
         // a name the user very likely holds is the one that must not be able to see that they hold it.
         ..._newsHandlers(),
+        // Unbound: the hotlist is built once for everyone.
+        ..._hotlistHandlers(),
         ..._experienceHandlers(userId),
     }
 

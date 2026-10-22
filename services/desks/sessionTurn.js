@@ -56,6 +56,12 @@ export function replyExtras(payload) {
     return Object.keys(out).length ? out : null
 }
 
+// The Floor's lists, as a `<show>` opens them (routing.util SHOW_LISTS; Roy, 2026-10-22).
+const LIST_LINES = Object.freeze({
+    positions: "Here are your positions.", orders: "Here's what's awaiting orders.", trades: "Here are your trades.",
+    portfolios: "Here are your portfolios.", watchlists: "Here are your watchlists.", hotlist: "Here's today's hotlist.",
+})
+
 /**
  * A reply that was ONLY a `<show>` still offers its button, so it gets a row — one plain line saying what it
  * offers (the agent's memory then knows it offered it, too). Null when there is no show. Exported for tests.
@@ -65,6 +71,7 @@ export function showLine(show) {
     if (show.kind === 'ticket') return show.ref ? `Here's the order ticket for ${show.ref}.` : "Here's the order ticket."
     if (show.kind === 'heatmap') return show.ref ? `Here's the forecast heat map, on ${show.ref}.` : "Here's the forecast heat map."
     if (show.kind === 'calendar') return "Here's the calendar."
+    if (LIST_LINES[show.kind]) return LIST_LINES[show.kind]
     return 'Here it is.'
 }
 

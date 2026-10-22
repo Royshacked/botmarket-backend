@@ -1,0 +1,83 @@
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import { splitShow, validateShow, SHOW_LISTS } from '../../services/routing.util.js'
+import { showLine } from '../../services/desks/sessionTurn.js'
+import { formatHotlist, makeHotlistHandlers, HOTLIST_TOOL_SPEC } from '../../services/tools/hotlist.tools.js'
+import { TOOLS as AXL_TOOLS } from '../../services/agents/axl.agent.service.js'
+import { isToolError, toolErrorText } from '../../services/toolResult.util.js'
+
+// Every Floor list opens in the detail window, and Axl can present each one (Roy, 2026-10-22: "I want
+// axl to be able to present them all if user asks" — open it + a one-line summary).
+
+// ─── The show kinds ───────────────────────────────────────────────────────────
+
+test('each list is a screen Axl can show — no ref, like the calendar', () => {
+    assert.deepEqual([...SHOW_LISTS], ['positions', 'orders', 'trades', 'portfolios', 'watchlists', 'hotlist'])
+    for (const kind of SHOW_LISTS) {
+        assert.deepEqual(splitShow(kind), { kind, ref: null }, kind)
+        assert.deepEqual(validateShow({ kind, ref: 'ignored junk' }), { kind, ref: null }, `${kind}: a list takes no ref`)
+    }
+    assert.deepEqual(splitShow('Trades'), { kind: 'trades', ref: null }, 'case-blind')
+    assert.equal(validateShow({ kind: 'everything' }), null, 'an unknown kind opens nothing')
+    // The existing kinds are untouched.
+    assert.deepEqual(validateShow({ kind: 'heatmap', ref: 'nvda' }), { kind: 'heatmap', ref: 'NVDA' })
+    assert.equal(validateShow({ kind: 'setup' }), null, 'a setup still needs its handle')
+})
+
+test('a show-only reply says which list it opened', () => {
+    assert.equal(showLine({ kind: 'trades' }), 'Here are your trades.')
+    assert.equal(showLine({ kind: 'hotlist' }), "Here's today's hotlist.")
+    assert.equal(showLine({ kind: 'orders' }), "Here's what's awaiting orders.")
+    assert.equal(showLine({ kind: 'calendar' }), "Here's the calendar.")
+})
+
+// ─── The hotlist read ─────────────────────────────────────────────────────────
+
+const TODAY = {
+    day: '2026-10-22',
+    latest: { checkpoint: 'mid', argus: { summary: 'Breadth is fine; the room is in EPAM.' } },
+    day_list: [
+        { symbol: 'EPAM', name: 'EPAM Systems', status: 'in_play', price: 180.5, gap_pct: 1.6,
+          cells: { mid: { grade: 'A', why: ['1.56× normal volume, above the open'], range: { pct: 2.4, atr_mult: 0.8 } } },
+          pick: { rank: 1, column: 'mid', why: 'Volume behind a clean open.' } },
+        { symbol: 'DXC', status: 'setting_up', price: 20.5,
+          cells: { week: { grade: 'B', why: ['NR7 · earnings in 7 days — a run-up: out before the report'], range: { pct: 7.3, atr_mult: 2.3 } } } },
+        { symbol: 'TSCO', status: 'in_play', avoid: 'Volume with no story.', cells: { mid: { grade: 'C', range: { open_sky: true } } } },
+    ],
+}
+
+test('the hotlist reads as counts, Argus\'s read, then one line per name with its reason', () => {
+    const t = formatHotlist(TODAY)
+    assert.match(t, /^Hotlist for 2026-10-22 — 3 names \(2 in play, 1 setting up\)\. Grades unverified; prices as of each name's checkpoint, not live\./)
+    assert.match(t, /Argus on the mid board: Breadth is fine/)
+    assert.match(t, /EPAM \(EPAM Systems\) · in play · mid-day A, 2\.4% room · \$180\.50 \(\+1\.6%\) · ARGUS PICK #1\n {6}1\.56× normal volume, above the open\n {6}Argus: Volume behind a clean open\./)
+    assert.match(t, /DXC · setting up · this week B, 7\.3% room · \$20\.50\n {6}NR7 · earnings in 7 days — a run-up: out before the report/)
+    assert.match(t, /TSCO · in play · mid-day C, open sky · Argus: avoid\n {6}Argus \(avoid\): Volume with no story\./)
+})
+
+test('the hotlist caps the names it lists, and says how many more', () => {
+    const t = formatHotlist(TODAY, 1)
+    assert.match(t, /EPAM/)
+    assert.doesNotMatch(t, /DXC/)
+    assert.match(t, /…and 2 more on the list\./)
+})
+
+test('no board yet, or a board with nothing on it, is said plainly', () => {
+    assert.match(formatHotlist({ day: null, day_list: [] }), /^No hotlist yet/)
+    assert.equal(formatHotlist({ day: '2026-10-22', day_list: [] }), 'Hotlist for 2026-10-22: no names in play on any board yet.')
+})
+
+test('the handler is unbound and never throws — a failed read is an error line, not data', async () => {
+    const ok = makeHotlistHandlers({ read: async () => TODAY })
+    assert.match(await ok.get_hotlist({ limit: 2 }), /…and 1 more/)
+    const bad = makeHotlistHandlers({ read: async () => { throw new Error('db down') } })
+    const err = await bad.get_hotlist({})
+    assert.ok(isToolError(err), 'flagged as an error, so it is never read as data')
+    assert.match(toolErrorText(err), /Could not read today's hotlist: db down/)
+})
+
+test('Axl carries get_hotlist, appended last; its description holds the line on grades', () => {
+    assert.equal(AXL_TOOLS.at(-1).name, 'get_hotlist')
+    assert.match(HOTLIST_TOOL_SPEC.get_hotlist, /NOT a target/)
+    assert.match(HOTLIST_TOOL_SPEC.get_hotlist, /never present one as a reason a stock will rise/)
+})

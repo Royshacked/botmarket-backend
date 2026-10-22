@@ -129,9 +129,12 @@ export function splitEdit(raw) {
 // `ticket` opens the order ticket (plan phase 7) — a code screen, no desk; its ref is an optional symbol.
 // `heatmap` and `calendar` (Roy, 2026-10-19) open the house's two read-only VIEWS: the forecast heat map (Pythia's
 // industries — its ref an optional symbol to focus on) and the month calendar. Screens, like the ticket: no desk, no item.
-export const SHOW_KINDS = new Set(['setup', 'ticket', 'heatmap', 'calendar'])
+// The Floor's LISTS (Roy, 2026-10-22: "I want Axl to be able to present them all") — each opens its window over
+// the chat, the same one its chip in the strip opens. Named in the user's words; the client maps them to its desks.
+export const SHOW_LISTS = new Set(['positions', 'orders', 'trades', 'portfolios', 'watchlists', 'hotlist'])
+export const SHOW_KINDS = new Set(['setup', 'ticket', 'heatmap', 'calendar', ...SHOW_LISTS])
 // The screens — a show whose ref is optional, because what it opens exists without one.
-const SHOW_SCREENS = new Set(['ticket', 'heatmap', 'calendar'])
+const SHOW_SCREENS = new Set(['ticket', 'heatmap', 'calendar', ...SHOW_LISTS])
 
 /** `<show>setup 3f9c…</show>` → { kind, ref }, or null. Both halves or nothing, as with an edit — a screen's ref is optional. */
 export function splitShow(raw) {
@@ -210,7 +213,7 @@ export function validateEdit(edit) {
 export function validateShow(show) {
     if (!show || !SHOW_KINDS.has(show.kind)) return null
     // A screen's ref is a symbol at most (the ticket's, the heat map's focus); the calendar takes none.
-    if (show.kind === 'calendar') return { kind: 'calendar', ref: null }
+    if (show.kind === 'calendar' || SHOW_LISTS.has(show.kind)) return { kind: show.kind, ref: null }
     if (SHOW_SCREENS.has(show.kind)) return { kind: show.kind, ref: sanitizeRouteSymbol(show.ref) }
     const ref = sanitizeEditRef(show.ref)
     return ref ? { kind: show.kind, ref } : null

@@ -671,6 +671,13 @@ export const TOOL_SCHEMAS = {
             "sector": { "type": "string", "description": "A GICS sector (e.g. Information Technology) — every sub-industry in it. Used when no symbols are passed." }
         }
     },
+    // Axl's read of today's hotlist (services/tools/hotlist.tools.js; Roy, 2026-10-22).
+    get_hotlist: {
+        "type": "object",
+        "properties": {
+            "limit": { "type": "number", "description": "How many names to list, 1–30 (default 10). Picks and in-play names come first." }
+        }
+    },
     // Argus's read of the house's industries for a book (docs/design/argus-on-pythia.md §3.2).
     get_house_industries: {
         "type": "object",
