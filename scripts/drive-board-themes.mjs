@@ -1,3 +1,4 @@
+/* global document -- page.evaluate bodies run in the browser */
 // DRIVE THE THEMES — on the Forecast map (a row above the sectors) and on Pythia's board (bug 2026-10-23: a board
 // theme never opened its panel).
 //
