@@ -96,7 +96,8 @@ As designed, with these specifics:
 - **Argus**: the book list's `the house names: …` line (own names, and a theme's); the `{industry}` call lists a
   STANDING assessment's names first as company rows — grounded through the same extract — then the largest.
 - **The weekly house scan**: an industry's names and its largest share the count; a theme's names take a count of their
-  own ahead of its links. The queue row carries `named_why`, and Prometheus's opening then says whose assessment named
+  own ahead of its links *(since 2026-10-23 they lead Argus's candidate list instead — each link's, for a theme — and he
+  picks; [house-research-chain.md](./house-research-chain.md))*. The queue row carries `named_why`, and Prometheus's opening then says whose assessment named
   the company and why — not "its industry", which a second-order name is not in.
 - **The sleeve**: a named company inside the 50-wide screen joins the house-first slots, wherever it is classified; an
   Avoid industry's names never do.

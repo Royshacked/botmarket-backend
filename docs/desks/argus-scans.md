@@ -147,13 +147,15 @@ the read's `net` where it has one and Aether's `side` where it does not. Three r
 refused — which is why the module aims at eight to twelve. The user can leave without waiting ("Save
 without the read"), and a read that lands after they did is discarded rather than applied.
 
-A fourth shape has **no agent at all**: the **house scan** (`services/houseScan.service.js`). The first
+A fourth shape is the **house scan** (`services/houseScan.service.js`), with Argus as its first filter. The first
 one ran on Pythia's tilt and was deleted with it on 2026-10-05; **it is back since 2026-10-11 (step 7 of
 pythia-assessment.md) on Pythia's VERDICTS**: after each weekly run, every industry rated FOR SWING / FOR
-LONG TERM — and every approved theme so rated, its supplier links first — sends its largest names we do not
-cover to Prometheus's research queue, `HOUSE_SCAN_PER_INDUSTRY` (3) each, at most `HOUSE_SCAN_WEEKLY_MAX` (30)
-a week, the verdict's thesis and risks on the row. Code picks the names for now; Argus choosing them is an open
-decision (Roy, after seeing the code's picks). The sleeve hop Atlas uses
+LONG TERM — and every approved theme so rated, its supplier links first — gets a measured candidate list
+(`houseScan.candidates.js`: every company above a liquidity floor, her named ones first) and **Argus picks the best
+`HOUSE_SCAN_PER_INDUSTRY` (5)** for her thesis (`houseScan.argus.js`, one call per industry; the code order when it
+fails), at most `HOUSE_SCAN_WEEKLY_MAX` (50) a week, the verdict's thesis, risks and his reason on the row.
+Prometheus then researches them by himself ([house-research-chain.md](../design/house-research-chain.md), Roy
+2026-10-23; until then code picked by size and the admin pressed Start). The sleeve hop Atlas uses
 (`sleeveSource.service`) is the same screen with the school as its coarse filter
 ([atlas-themis.md](atlas-themis.md)).
 
@@ -267,15 +269,12 @@ fields the receiver's UI needs.
   is modular.
 - **No monitor, because a scan is a question about a period.** It ages out; the thing that needs
   watching is the trade built from it, and that has Talos.
-- **The house scan has no agent, on purpose** (paused 2026-10-05, back on Pythia's verdicts 2026-10-11). Screening on a published
-  stance is arithmetic on a whitelist; the judgment (does this name clear the school's real bar?) is
-  Prometheus's, four minutes a name, and the queue row carries the reason so he can apply it.
+- **The house scan's list is code, the choice is Argus's** (since 2026-10-23; before it, code picked by size). The
+  numbers are arithmetic; which names carry Pythia's thesis is judgment; whether a name is priced for it is
+  Prometheus's, a research turn a name. "Already moved" is never a reason to skip a name (Roy).
 
 ## Open
 
-- **Argus choosing the house scan's names** instead of code (pythia-assessment.md open item 3) — Roy
-  decides after seeing the code's picks. (Argus's OWN scans have looked in Pythia's industries first since
-  2026-10-13; the weekly house scan still picks by size.)
 - **Scans are the one artifact that never learns.** A stale list is kept for the user, but nothing
   scores whether its candidates went the way the thesis said. *(Inferred gap — the coverage grades; the scan does
   not.)*

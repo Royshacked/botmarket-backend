@@ -5,7 +5,8 @@
 > and the Argus house scan was paused until the 5-year funnel in [horizons.md](./horizons.md). **2026-10-11:**
 > it is back, on Pythia's weekly verdicts instead (step 7 of [pythia-assessment.md](./pythia-assessment.md)):
 > code queues the largest uncovered names of every FOR SWING / FOR LONG TERM industry for Prometheus
-> (queue source `pythia`), and the house's industry limits bind Atlas. Argus choosing the names is still open.
+> (queue source `pythia`), and the house's industry limits bind Atlas. **2026-10-23:** Argus picks the best 5 per
+> industry and Prometheus researches them by himself ([house-research-chain.md](./house-research-chain.md)).
 
 > **Revised 2026-09-10.** Aether's channel-graph engine was deleted, not paused — it was
 > measured against held-out data and did not work. Every section describing Aether now
