@@ -16,8 +16,8 @@ import { chromium } from 'playwright'
 
 const [BASE = 'http://localhost:5173', OUT = '.'] = process.argv.slice(2)
 const USER = { username: 'ui-smoke-panel', fullname: 'UI Smoke', password: 'Sm0ke!Drive#29' }
-const LISTS = ['Awaiting orders', 'Your trades', 'Your portfolios', 'Watchlists', 'Hotlist', 'Calendar', 'Forecasts']
-const BARE = ['Awaiting orders', 'Your trades', 'Your portfolios', 'Watchlists']   // no controls of their own
+const LISTS = ['Positions', 'Awaiting orders', 'Your trades', 'Your portfolios', 'Watchlists', 'Hotlist', 'Calendar', 'Forecasts']
+const BARE = ['Positions', 'Awaiting orders', 'Your trades', 'Your portfolios', 'Watchlists']   // no controls of their own
 
 dns.setServers(['8.8.8.8', '1.1.1.1'])
 
@@ -76,8 +76,16 @@ try {
     await page.waitForTimeout(2500)
     await shot(page, '1-page')
 
+    // The columns (Roy, 2026-10-23): MENU on the left — every list — the chat, INFO on the right.
+    const cols = await page.evaluate(() => ({
+        left: document.querySelector('.workspace__left .floor-sec__title')?.textContent,
+        menuLeft: !!document.querySelector('.workspace__left .floor-lists'),
+        right: document.querySelector('.workspace__right .floor-sec__title')?.textContent,
+    }))
+    check('the left column is the Menu, holding the lists', cols.left === 'Menu' && cols.menuLeft, JSON.stringify(cols))
+    check('the right column is Info', cols.right === 'Info', cols.right)
     const labels = await page.evaluate(() => [...document.querySelectorAll('.floor-lists .floor-desk__label')].map(l => l.textContent))
-    check('the column lists every desk', LISTS.every(l => labels.includes(l)), labels.join(' · '))
+    check('the Menu lists every list, Positions first', LISTS.every(l => labels.includes(l)) && labels[0] === 'Positions', labels.join(' · '))
     check('nothing is open on a fresh load', !(await panel(page)))
 
     for (const label of LISTS) {
