@@ -14,6 +14,7 @@ import { TRADING_TOOLS }             from '../../services/tools/trading.tools.js
 import { MENTOR_TOOLS }             from '../../services/agents/mentor.agent.service.js'
 import { SMC_TOOLS }                from '../../services/tools/smc.tools.js'
 import { VALUATION_TOOLS }          from '../../services/tools/valuation.tools.js'
+import { RUNUP_TOOLS }              from '../../services/tools/runup.tools.js'
 
 // EQUIVALENCE HARNESS for the tool-registry consolidation.
 //
@@ -101,7 +102,7 @@ for (const [agent, live] of Object.entries(LIVE)) {
 // Tools owned by a dedicated shared module already have exactly one home, so they stay there —
 // copying them into the registry would recreate the duplication this whole change removes. Agents
 // spread those arrays in directly.
-const MODULE_OWNED = new Set([...SMC_TOOLS, ...VALUATION_TOOLS].map(t => t.name))
+const MODULE_OWNED = new Set([...SMC_TOOLS, ...VALUATION_TOOLS, ...RUNUP_TOOLS].map(t => t.name))
 
 test('every tool an agent uses has exactly one home — registry or a shared module', () => {
     const used = new Set(Object.values(LIVE).flat().map(t => t.name))

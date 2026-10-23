@@ -19,7 +19,7 @@ import { logger }     from './logger.service.js'
 const LOG = '[researchQueue]'
 export const COLLECTION = 'research_queue'
 // `pythia`: the house scan on Pythia's verdicts (services/houseScan.service.js, step 7) — not Argus's pick.
-export const SOURCES    = ['argus', 'manual', 'pythia']
+export const SOURCES    = ['argus', 'manual', 'pythia', 'hotlist']
 export const STATUSES   = ['queued', 'in_research', 'done', 'rejected']
 
 async function _ensureIndexes(db) {

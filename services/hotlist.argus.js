@@ -21,7 +21,12 @@ import { logger } from './logger.service.js'
 
 const LOG = '[hotlist.argus]'
 
-export const MAX_PICKS = 8
+/**
+ * Picks PER COLUMN (docs/design/horizon-chains.md §2; Roy, 2026-10-23: "a list for each horizon"). Until then he picked
+ * 8 across every column, so a board with an open and a week column could hand one horizon nothing. A name may be his
+ * pick on two columns of one board — the open trade and the week's are different trades.
+ */
+export const MAX_PICKS = 5
 const MAX_AVOID = 5
 const TEXT_CHARS = 280
 
@@ -36,7 +41,7 @@ Each row: the ticker, its price and gap, volume against an ordinary day, ATR %, 
 
 Answer:
 - "summary": 2–4 plain sentences on the tape — the regime, what is moving and why, where the room is.
-- "picks": up to ${MAX_PICKS} names you would look at FIRST, best first. Each: "symbol", "column" (one the row is graded on), "why" (one sentence: what makes this the trade — the catalyst, the structure, the room), "caution" (one sentence: what would make it wrong). Prefer a real catalyst with room over a big grade on a thin story. Fewer is fine; none is fine on a weak board.
+- "picks": for EACH column on the board, up to ${MAX_PICKS} names you would look at FIRST for THAT horizon, best first — every column is its own list (the open's trade and this week's are different trades; a name can be a pick on both when it carries both). Each: "symbol", "column" (one the row is graded on), "why" (one sentence: what makes this the trade on this horizon — the catalyst, the structure, the room), "caution" (one sentence: what would make it wrong). Prefer a real catalyst with room over a big grade on a thin story. Fewer is fine; none is fine for a column with nothing worth it.
 - "avoid": up to ${MAX_AVOID} names on the board that look better than they are — a minor story under a big gap, a catalyst already priced, an earnings coin-toss — each with "symbol" and "why".
 
 Output ONLY a JSON object, no prose:
@@ -63,24 +68,28 @@ export function boardText(board) {
 
 /**
  * The model's reply, held to the board: a pick must be a row, on a column that row is GRADED on;
- * duplicates and extras are dropped; text is trimmed and capped. Pure.
+ * a repeat of the same name on the same column and anything past MAX_PICKS on a column are dropped;
+ * text is trimmed and capped. Pure.
  */
 export function normalizeRead(raw, board) {
     const bySym = new Map((board.rows ?? []).map(r => [r.symbol, r]))
     const txt = (v) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, TEXT_CHARS) : null)
-    const picks = [], seen = new Set()
+    const picks = [], seen = new Set(), perColumn = new Map()
     for (const p of Array.isArray(raw?.picks) ? raw.picks : []) {
         const symbol = String(p?.symbol ?? '').toUpperCase()
         const row = bySym.get(symbol)
-        if (!row || seen.has(symbol) || !row.cells?.[p.column]?.grade) continue
-        seen.add(symbol)
+        const key = `${symbol}|${p?.column}`
+        if (!row || seen.has(key) || !row.cells?.[p.column]?.grade) continue
+        if ((perColumn.get(p.column) ?? 0) >= MAX_PICKS) continue
+        seen.add(key)
+        perColumn.set(p.column, (perColumn.get(p.column) ?? 0) + 1)
         picks.push({ symbol, column: p.column, why: txt(p.why), caution: txt(p.caution) })
-        if (picks.length >= MAX_PICKS) break
     }
+    const picked = new Set(picks.map(p => p.symbol))
     const avoid = []
     for (const a of Array.isArray(raw?.avoid) ? raw.avoid : []) {
         const symbol = String(a?.symbol ?? '').toUpperCase()
-        if (!bySym.has(symbol) || seen.has(symbol) || avoid.some(x => x.symbol === symbol)) continue
+        if (!bySym.has(symbol) || picked.has(symbol) || avoid.some(x => x.symbol === symbol)) continue
         avoid.push({ symbol, why: txt(a.why) })
         if (avoid.length >= MAX_AVOID) break
     }
@@ -103,7 +112,7 @@ export async function argusRead(board, { send = oneShotText, model = _houseModel
     if (!board?.rows?.length) return null
     try {
         const m = await model()
-        const text = await send({ model: m, systemText: SYSTEM, userText: boardText(board), maxTokens: 2000, onUsage: onUsage && (u => onUsage(u, m)) })
+        const text = await send({ model: m, systemText: SYSTEM, userText: boardText(board), maxTokens: 4000, onUsage: onUsage && (u => onUsage(u, m)) })
         const read = normalizeRead(extractFirstJSON(text), board)
         if (!read.summary && !read.picks.length) return null
         return { ...read, model: m }

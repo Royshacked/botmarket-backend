@@ -417,6 +417,9 @@ services/
   valuation.tools.js        get_consensus + compute_valuation + compute_event_delta agent tools over
                             valuation.engine + FMP consensus feeds; pure LLM-ready formatters (edge classified
                             above/below/thin vs Street; the delta read ends on the JSON line the model copies). (P2)
+  runup.tools.js            get_runup_history — the RUN-UP yardstick for a catalyst read (horizon-chains.md §3):
+                            the stock's move into each of its last reports over the sessions left, vs SPY;
+                            median / quartiles / up share, ending on the JSON line the model copies as `runup`
   agentUtils.js           shared tool handlers, makePromptLoader, makeToolHandler,
                           formatMoney/buildAccountLines, stripEmitTags, runtime glue.
                           cleanReply (every desk's reply, stripped from the shared ALL_EMIT_TAGS,
@@ -919,10 +922,21 @@ services/
                             the board stamps (`unverified_columns`). Also names the `hotlist_boards`
                             collection (dailyScreener.checkpoint re-exports it: no import cycle)
   hotlist.argus.js          ARGUS'S READ of each checkpoint board (phase 5, Roy 2026-10-21): once, for
-                            everyone, on the HOUSE chat model — a summary, ≤8 picks (symbol, column, why,
-                            caution) and ≤5 traps. normalizeRead holds every pick to a board row on a
-                            column the board GRADED. Stored on the board; picks marked on their rows.
+                            everyone, on the HOUSE chat model — a summary, ≤5 picks PER COLUMN (since
+                            2026-10-23, docs/design/horizon-chains.md §2; symbol, column, why, caution) and
+                            ≤5 traps. normalizeRead holds every pick to a board row on a column the board
+                            GRADED. Stored on the board; picks marked on their rows (`picks.<column>`).
                             Fails soft (no read)
+  hotlistResearch.service.js the SHORT-SWING CHAIN (horizon-chains.md §4): after the 09:20 board, Argus's week
+                            picks → research queue (source `hotlist`) → Prometheus's catalyst reads, inside a
+                            DAILY cap (HOTLIST_RESEARCH_MAX_NAMES / _MAX_USD), on the screener's monitor tick;
+                            the budget pipe is houseResearch.researchQueued / resumeQueued (shared)
+  catalystRead.service.js   CATALYST READS (horizon-chains.md §3) — Prometheus's short-swing answer in its own
+                            collection `catalyst_reads`, never coverage: target = spot × (1 + what is still
+                            open) off compute_event_delta, or spot × (1 + the median run-up) off get_runup_history
+                            for a report ahead; band, priced share, a 5–30 day window ending the session before a
+                            report inside it; a target at or under spot is a `pass`; graded hit / expired (vs
+                            SPY). GET /api/hotlist/reads
   hotlist.service.js        the hotlist's READ side: todayHotlist / boardById / hotlistOutcomes for the
                             API, and hotlistSeed — a "Build with Mentor" hand-off is a REFERENCE (board
                             id + column, scanSeed.util), resolved here from the STORED board into the

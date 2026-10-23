@@ -1,0 +1,129 @@
+// THE RUN-UP YARDSTICK — what a stock has done INTO its own reports (docs/design/horizon-chains.md §3, "Found live").
+//
+// A Hotlist "this week" name with a report inside the window is a run-up trade: in on the board, out the day before the
+// report. compute_event_delta cannot size that — nothing has happened yet, so there is no event to put in revenue terms
+// (RCL, 2026-10-23: a pass with no target). The honest yardstick is the stock's own record: over each of its last
+// reports, the move from the same number of sessions before the report to the close before it, and the same for SPY.
+// The median is the target, the quartiles the band; the options' implied move is the outside check (the prompt's).
+//
+// Deterministic: the tool reads the report dates and the daily closes and does the arithmetic; the model copies its
+// line into the <catalyst_read> block as `runup`, and catalystRead.service turns it into the target.
+
+import { getEarningsRowsRaw } from '../../providers/fmp.provider.js'
+import { getTickerAggregates } from '../../providers/candles.provider.js'
+import { makeToolHandler } from '../agentUtils.js'
+
+const LOG = '[runupTools]'
+const DAY_MS = 86_400_000
+/** Sessions before a report a run-up is measured over: at least 2, at most 15 (three weeks). */
+export const LEAD_MIN = 2, LEAD_MAX = 15
+/** Fewer past reports than this and the record says nothing. */
+export const MIN_REPORTS = 4
+
+const _r2 = (v) => (Number.isFinite(v) ? Math.round(v * 100) / 100 : null)
+const _etDay = (ts) => new Date(ts > 1e12 ? ts : ts * 1000).toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
+
+/** Weekdays strictly between `from` and `report` (YYYY-MM-DD) — the sessions left to hold before the report. Pure. */
+export function sessionsBefore(from, report) {
+    let n = 0
+    for (let t = Date.parse(`${from}T12:00:00Z`) + DAY_MS; t < Date.parse(`${report}T12:00:00Z`); t += DAY_MS) {
+        const d = new Date(t).getUTCDay()
+        if (d !== 0 && d !== 6) n++
+    }
+    return n
+}
+
+/** The q-quantile of a sorted array, interpolated. Pure. */
+function _quantile(sorted, q) {
+    if (!sorted.length) return null
+    const i = (sorted.length - 1) * q, lo = Math.floor(i), hi = Math.ceil(i)
+    return sorted[lo] + (sorted[hi] - sorted[lo]) * (i - lo)
+}
+
+/**
+ * The run-up record. Pure. `reports` — past report dates (YYYY-MM-DD); `bars` / `spyBars` — ascending daily candles
+ * ({timestamp, close}); `lead` — sessions. For each report: entry = the close `lead` sessions before the last session
+ * BEFORE the report, exit = that last session's close (safe for a report before the open or after the close alike).
+ * → `{ n, rows, median_pct, mean_pct, p25_pct, p75_pct, up_share, median_excess_pct }`, the stats null when n is 0.
+ */
+export function runUpStats({ reports = [], bars = [], spyBars = [], lead }) {
+    const days = bars.map(b => _etDay(b.timestamp))
+    const spy = new Map(spyBars.map(b => [_etDay(b.timestamp), b.close]))
+    const rows = []
+    for (const report of [...new Set(reports)].sort().reverse()) {
+        let exit = -1
+        for (let i = days.length - 1; i >= 0; i--) if (days[i] < report) { exit = i; break }
+        const entry = exit - lead
+        if (exit < 0 || entry < 0 || !(bars[entry].close > 0)) continue
+        const pct = (bars[exit].close / bars[entry].close - 1) * 100
+        const s0 = spy.get(days[entry]), s1 = spy.get(days[exit])
+        const spyPct = s0 > 0 && s1 > 0 ? (s1 / s0 - 1) * 100 : null
+        rows.push({ report, from: days[entry], to: days[exit], pct: _r2(pct), excess_pct: spyPct == null ? null : _r2(pct - spyPct) })
+    }
+    const sorted = rows.map(r => r.pct).sort((a, b) => a - b)
+    const ex = rows.map(r => r.excess_pct).filter(v => v != null).sort((a, b) => a - b)
+    const n = rows.length
+    return {
+        n, rows,
+        median_pct: _r2(_quantile(sorted, 0.5)),
+        mean_pct:   n ? _r2(sorted.reduce((a, b) => a + b, 0) / n) : null,
+        p25_pct:    _r2(_quantile(sorted, 0.25)),
+        p75_pct:    _r2(_quantile(sorted, 0.75)),
+        up_share:   n ? _r2(rows.filter(r => r.pct > 0).length / n) : null,
+        median_excess_pct: _r2(_quantile(ex, 0.5)),
+    }
+}
+
+/** The tool's reply: the record per report, the summary, and the one line to copy. Pure. */
+export function runUpReadText(sym, { report, lead, stats }) {
+    const head = `${sym} — run-up into its reports, the last ${lead} session${lead === 1 ? '' : 's'} before each (close before the report):`
+    if (stats.n < MIN_REPORTS) return `${head}\nOnly ${stats.n} past report${stats.n === 1 ? '' : 's'} with prices — too few to size a run-up. Say so; no runup line.`
+    const lines = [head, ...stats.rows.map(r => `  ${r.report}: ${r.pct > 0 ? '+' : ''}${r.pct}% (${r.from} → ${r.to})${r.excess_pct != null ? `, ${r.excess_pct > 0 ? '+' : ''}${r.excess_pct}% vs SPY` : ''}`)]
+    lines.push(`Median ${stats.median_pct}% (quartiles ${stats.p25_pct}% to ${stats.p75_pct}%), up ${Math.round(stats.up_share * 100)}% of the time, median vs SPY ${stats.median_excess_pct ?? 'n/a'}%.`)
+    const line = { basis: 'run_up', report, lead_days: lead, n: stats.n, median_pct: stats.median_pct, p25_pct: stats.p25_pct, p75_pct: stats.p75_pct,
+        up_share: stats.up_share, median_excess_pct: stats.median_excess_pct }
+    lines.push(`Copy this line, unchanged, as "runup" in your block: ${JSON.stringify(line)}`)
+    return lines.join('\n')
+}
+
+const _io = {
+    earnings: (sym) => getEarningsRowsRaw(sym, 12),
+    bars:     (sym, from, to) => getTickerAggregates(sym, { timeSpan: 'day', multiplier: 1, from, to }),
+    today:    () => _etDay(Date.now()),
+}
+/** Test seam. */
+export function _setIO(io) { Object.assign(_io, io) }
+
+async function _getRunupHistory({ ticker, lead_days } = {}) {
+    const sym = String(ticker || '').toUpperCase().trim()
+    if (!sym) throw new Error('no ticker')
+    const today = _io.today()
+    const rows = (await _io.earnings(sym)) ?? []
+    const next = rows.filter(r => r.date && r.date > today).map(r => r.date).sort()[0] ?? null
+    const past = rows.filter(r => r.date && r.date <= today && r.epsActual != null).map(r => r.date)
+    if (!next) return `${sym}: no report date ahead in the feed — this is not a run-up trade. No runup line.`
+    if (past.length < MIN_REPORTS) return `${sym}: only ${past.length} past reports in the feed — too few to size a run-up. No runup line.`
+    const asked = Number(lead_days)
+    const lead = Math.min(LEAD_MAX, Math.max(LEAD_MIN, Number.isFinite(asked) && asked > 0 ? Math.round(asked) : sessionsBefore(today, next) + 1))
+    const from = Date.parse(`${[...past].sort()[0]}T00:00:00Z`) - 40 * DAY_MS
+    const [bars, spyBars] = await Promise.all([_io.bars(sym, from, Date.now()), _io.bars('SPY', from, Date.now())])
+    if (!bars?.length) throw new Error('no daily prices')
+    return runUpReadText(sym, { report: next, lead, stats: runUpStats({ reports: past, bars, spyBars: spyBars ?? [], lead }) })
+}
+
+export const RUNUP_TOOLS = [{
+    name: 'get_runup_history',
+    description: 'The run-up yardstick for a name with a report AHEAD: over each of its last reports (up to 12), the move from `lead_days` sessions before the report to the close before it, and the same against SPY — the median, the quartiles, how often it rose. The target for a run-up trade (in now, out the day before the report) comes from this line, not from compute_event_delta, which needs an event that has happened. lead_days defaults to the sessions left until the report, today included.',
+    input_schema: {
+        type: 'object',
+        properties: {
+            ticker:    { type: 'string', description: 'e.g. RCL' },
+            lead_days: { type: 'number', description: `Optional: sessions before the report to measure from (${LEAD_MIN}–${LEAD_MAX}). Omit to use the sessions left until the next report.` },
+        },
+        required: ['ticker'],
+    },
+}]
+
+export const RUNUP_TOOL_HANDLERS = {
+    get_runup_history: makeToolHandler('get_runup_history', _getRunupHistory, (e, { ticker }) => `Could not read the run-up record for ${ticker}: ${e.message}`, LOG),
+}

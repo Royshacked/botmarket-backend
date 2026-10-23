@@ -52,25 +52,35 @@ const _since = (weeks) => weeks.map(w => w.started_at).filter(Boolean).sort()[0]
  * no_names | queue_unavailable | error. `weeks` is one pythia_weekly document after its house scan, or several.
  */
 export async function researchWeeks(weeks, deps = _deps, { now = Date.now() } = {}) {
+    const list = (Array.isArray(weeks) ? weeks : [weeks]).filter(Boolean)
+    // The budget is ALL of the last seven days' research on Pythia's names, whichever week sent them — read on its own,
+    // or the week that just finished would not see what the pick-up spent on older weeks two days ago (code review
+    // 2026-10-23).
+    return researchQueued({ symbols: weekSymbols(list), since: _since(list), source: 'pythia', maxUsd: deps.maxUsd(),
+        budgetSince: new Date(now - BUDGET_WINDOW_MS).toISOString() }, deps)
+}
+
+/**
+ * THE PIPE both automatic chains share (horizon-chains.md §4 — the Pythia week's and the Hotlist's day): research the
+ * given names that are still `queued` from `source`, as the house, inside what is left of a budget — `maxUsd` less
+ * everything researched from `source` since `budgetSince` (read back from the rows' `cost_usd`). Names in `symbols`'
+ * order. → `{ ok, outcome, ... }`, outcome one of started | nothing_queued | budget_spent | busy | no_names |
+ * queue_unavailable | error. Each chain owns its own names, budget and window; this owns the mechanism.
+ */
+export async function researchQueued({ symbols, since = null, source, maxUsd, budgetSince }, deps = _deps) {
     try {
-        const list = (Array.isArray(weeks) ? weeks : [weeks]).filter(Boolean)
-        const symbols = weekSymbols(list)
-        if (!symbols.length) return { ok: true, outcome: 'no_names' }
-        const rows = await deps.listQueue({ symbols, since: _since(list), limit: 500 })
-        // The budget is ALL of the last seven days' research on Pythia's names, whichever week sent them — read on its
-        // own, or the week that just finished would not see what the pick-up spent on older weeks two days ago
-        // (code review 2026-10-23).
-        const recent = await deps.listQueue({ source: 'pythia', updatedSince: new Date(now - BUDGET_WINDOW_MS).toISOString(), limit: 1000 })
+        if (!symbols?.length) return { ok: true, outcome: 'no_names' }
+        const rows = await deps.listQueue({ symbols, since, limit: 500 })
+        const recent = await deps.listQueue({ source, updatedSince: budgetSince, limit: 1000 })
         if (rows === null || recent === null) return { ok: false, outcome: 'queue_unavailable' }
-        const pythia = rows.filter(r => r.source === 'pythia')
+        const own = rows.filter(r => r.source === source)
         const spent = recent.reduce((s, r) => s + (Number(r.cost_usd) || 0), 0)
-        const left = Math.max(0, (Number(deps.maxUsd()) || 0) - spent)
-        // Oldest week's names first: they have waited longest.
+        const left = Math.max(0, (Number(maxUsd) || 0) - spent)
         const order = new Map(symbols.map((s, i) => [s, i]))
-        const waiting = pythia.filter(r => r.status === 'queued').map(r => r.symbol).sort((a, b) => order.get(a) - order.get(b))
+        const waiting = own.filter(r => r.status === 'queued').map(r => r.symbol).sort((a, b) => (order.get(a) ?? 0) - (order.get(b) ?? 0))
         if (!waiting.length) return { ok: true, outcome: 'nothing_queued', spent_usd: spent }
         if (left <= 0) {
-            logger.info(LOG, 'the week\'s research budget is spent — names wait', { waiting: waiting.length, spent_usd: spent })
+            logger.info(LOG, `the ${source} research budget is spent — names wait`, { waiting: waiting.length, spent_usd: spent })
             return { ok: true, outcome: 'budget_spent', waiting: waiting.length, spent_usd: spent }
         }
         const res = await deps.startRun({ userId: null, symbols: waiting, maxUsd: left })
@@ -96,8 +106,15 @@ export const researchWeek = (week, deps = _deps, opts) => researchWeeks([week], 
  */
 export async function resumeWeeks(weeks, deps = _deps, { now = Date.now() } = {}) {
     const list = (Array.isArray(weeks) ? weeks : [weeks]).filter(Boolean)
-    const symbols = weekSymbols(list)
-    if (!symbols.length) return { ok: true, outcome: 'no_names' }
+    return resumeQueued(weekSymbols(list), () => researchWeeks(list, deps, { now }), deps, { now })
+}
+
+/**
+ * The pick-up both chains share: names a dead run left claimed go back in line, then `research()` runs what waits. A
+ * run going → nothing is touched (its claim is live).
+ */
+export async function resumeQueued(symbols, research, deps = _deps, { now = Date.now() } = {}) {
+    if (!symbols?.length) return { ok: true, outcome: 'no_names' }
     const last = deps.getRun()
     if (last?.status === 'running') return { ok: true, outcome: 'busy' }
     // The admin pressed STOP: the pick-up does not start it again behind their back. The next Start, or the next
@@ -105,7 +122,7 @@ export async function resumeWeeks(weeks, deps = _deps, { now = Date.now() } = {}
     // but the stopped claim keeps its `stopped` reason, so that name still waits for the admin.
     if (last?.status === 'stopped') return { ok: true, outcome: 'stopped_by_admin' }
     await Promise.resolve(deps.requeueStale({ symbols, olderThanMs: STALE_CLAIM_MS, now })).catch(() => null)
-    return researchWeeks(list, deps, { now })
+    return research()
 }
 
-export const houseResearchService = { researchWeek, researchWeeks, resumeWeeks }
+export const houseResearchService = { researchWeek, researchWeeks, resumeWeeks, researchQueued, resumeQueued }

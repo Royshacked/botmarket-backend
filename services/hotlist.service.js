@@ -61,7 +61,11 @@ export async function hotlistSeed(ref, deps = _deps) {
         board_day:     board.day,
         checkpoint:    board.checkpoint,
         unverified:    (board.unverified_columns ?? [ref.column]).includes(ref.column),
-        ...(row.pick ? { thesis: row.pick.why ?? null, caution: row.pick.caution ?? null } : {}),
+        // His pick for THIS column (horizon-chains.md §2); a board from before per-column picks has only `pick`.
+        ...(() => {
+            const p = row.picks?.[ref.column] ?? (row.picks ? null : row.pick)
+            return p ? { thesis: p.why ?? null, caution: p.caution ?? null } : {}
+        })(),
     }
 }
 
@@ -109,10 +113,16 @@ export function dayList(boards) {
             // board did not list at all keeps its cells — it may simply not have been quoted.
             const revoked = new Set(Object.entries(row.cells ?? {}).filter(([, c]) => c && !c.grade).map(([col]) => col))
             const keep = (m) => Object.fromEntries(Object.entries(m ?? {}).filter(([col]) => !revoked.has(col)))
-            const { pick, avoid, cells, ...rest } = row
+            const { pick, picks, avoid, cells, ...rest } = row
+            // Argus's picks per column (horizon-chains.md §2), by the cells' rule: a column this board graded takes
+            // ITS pick (or none — he did not pick it this time); a column it did not grade keeps the earlier one.
+            const gradedCols = new Set(graded.map(([c]) => c))
+            const keptPicks = Object.fromEntries(Object.entries(keep(prev?.picks)).filter(([c]) => !gradedCols.has(c)))
+            const mergedPicks = { ...keptPicks, ...(picks ?? {}) }
             const merged = {
                 ...rest,
                 ...(pick ? { pick } : {}),
+                ...(Object.keys(mergedPicks).length ? { picks: mergedPicks } : {}),
                 ...(avoid ? { avoid } : {}),
                 cells:      { ...keep(prev?.cells), ...Object.fromEntries(graded) },
                 cell_board: { ...keep(prev?.cell_board), ...Object.fromEntries(graded.map(([c]) => [c, b.id])) },
@@ -128,7 +138,8 @@ export function dayList(boards) {
         }
     }
     const rank = (s) => { const i = STATUSES.indexOf(s); return i < 0 ? STATUSES.length : i }
-    return [...by.values()].sort((a, b) => (a.pick ? 0 : 1) - (b.pick ? 0 : 1) || rank(a.status) - rank(b.status) || a.symbol.localeCompare(b.symbol))
+    const picked = (r) => (r.pick || (r.picks && Object.keys(r.picks).length) ? 0 : 1)
+    return [...by.values()].sort((a, b) => picked(a) - picked(b) || rank(a.status) - rank(b.status) || a.symbol.localeCompare(b.symbol))
 }
 
 // Rows written before 2026-10-22 carry no week `path`: a material story on the row means it came in

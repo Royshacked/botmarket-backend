@@ -1,4 +1,5 @@
 import { todayHotlist, boardById, hotlistOutcomes } from '../../services/hotlist.service.js'
+import { catalystReadService } from '../../services/catalystRead.service.js'
 import { makeHandle } from '../_shared/handle.util.js'
 import { httpError } from '../../services/httpError.util.js'
 
@@ -28,3 +29,9 @@ export const getBoard = handle('getBoard', async (req, res) => {
 
 /** GET /api/hotlist/outcomes — the outcome log summarised: per column and grade, and what is verified. */
 export const getOutcomes = handle('getOutcomes', async (req, res) => { res.json(await hotlistOutcomes()) })
+
+/**
+ * GET /api/hotlist/reads — Prometheus's catalyst reads on the week's picks (docs/design/horizon-chains.md §3): the live ones
+ * and those settled in the last two weeks, with their targets, what is still open, the window and the grade.
+ */
+export const getReads = handle('getReads', async (req, res) => { res.json(await catalystReadService.listReads()) })

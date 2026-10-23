@@ -267,6 +267,12 @@ export const config = {
     // not been measured yet — measure it (outside market hours) before turning this on anywhere.
     // DAILY_SCREENER_RPM is the pace; the run stops on the first 429 rather than retrying through.
     get dailyScreener()    { return _bool('DAILY_SCREENER', 'opt-in') },
+    // The short-swing chain (docs/design/horizon-chains.md §4): after the 09:20 board, Argus's "this week" picks are
+    // researched by Prometheus as catalyst reads, automatically — on with the screener (Roy, 2026-10-23: "without the
+    // user having to activate Argus or Prometheus"); HOTLIST_RESEARCH=false is the kill switch. A DAILY cap: names and $.
+    get hotlistResearch()        { return _bool('HOTLIST_RESEARCH', 'false-0') },
+    get hotlistResearchMaxNames() { return _num('HOTLIST_RESEARCH_MAX_NAMES', 10) },
+    get hotlistResearchMaxUsd()   { return _num('HOTLIST_RESEARCH_MAX_USD', 1) },
     get dailyScreenerRpm() { return _num('DAILY_SCREENER_RPM', 60) },
     // The model that labels the checkpoint pool's headlines (services/hotlist.news.js) — once per
     // checkpoint for every user. Empty → Haiku 4.5 (Roy's decision, daily-names.md §10); any id in

@@ -105,6 +105,8 @@ export const ALL_EMIT_TAGS = [
     // Prometheus's quick read on an Aether name (analyst_mode_quickread.md) — a verdict, not
     // coverage. Registered for the same reason as `suggest`.
     'quickread',
+    // Prometheus's catalyst read on a Hotlist "this week" name (analyst_mode_catalyst.md, horizon-chains.md §3).
+    'catalyst_read',
     // Atlas's two research hops (portfolio_system_prompt.md) and Argus's "send this name to
     // Prometheus" (the scanner prompts). Unregistered until 2026-09-18, so the block streamed raw
     // into the Atlas bubble until the settled reply replaced it.

@@ -393,6 +393,14 @@ export async function fetchStockNews({ symbols = [], from, to, limit = 50 } = {}
 const EARN_ROW_TTL_MS = 6 * 60 * 60 * 1000
 const _earnRowCache = createTtlCache({ ttlMs: EARN_ROW_TTL_MS, max: 300 }) // SYMBOL -> text
 
+/** The raw earnings rows for one symbol (past actuals and the next date), newest first — [] on a miss. The run-up tool reads the dates. */
+export async function getEarningsRowsRaw(ticker, limit = 12) {
+    const sym = String(ticker || '').toUpperCase().trim()
+    if (!sym) return []
+    const arr = await _fmpGet(`/earnings?symbol=${sym}&limit=${limit}`)
+    return Array.isArray(arr) ? arr : []
+}
+
 /** Earnings summary for a ticker (next date + last 4 quarters actual vs estimate), LLM-ready. */
 export async function getEarnings(ticker) {
     const sym = String(ticker || '').toUpperCase().trim()

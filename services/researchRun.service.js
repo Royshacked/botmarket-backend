@@ -72,7 +72,7 @@ export async function startRun({ userId, audience = null, model = null, symbols 
     if (state.run?.status === 'running' || state.starting) return { ok: false, reason: 'already_running', run: getRun() }
     state.starting = true
 
-    let queued, covered
+    let queued, covered, liveReads = new Set()
     try {
         // `symbols`: a run for these names only (a sleeve's, the house week's) — read BY them, not filtered out of the
         // queue's first page, where a backlog of older rows hid them (code review 2026-10-23); without it, the whole
@@ -87,6 +87,8 @@ export async function startRun({ userId, audience = null, model = null, symbols 
 
         try { covered = await deps.coveredSymbols() }
         catch (err) { logger.error(LOG, 'could not read the coverage book — run not started', err); return { ok: false, reason: 'coverage_unavailable' } }
+        // A Hotlist row is a CATALYST read (horizon-chains.md §3): what skips it is a live read on the name, not coverage.
+        if (queued.some(isCatalystItem)) liveReads = await Promise.resolve(deps.liveCatalystSymbols?.()).catch(() => null) ?? new Set()
     } finally {
         state.starting = false
     }
@@ -100,6 +102,7 @@ export async function startRun({ userId, audience = null, model = null, symbols 
         position:   0,           // names decided so far (any outcome)
         current:    null,        // the symbol mid-turn
         covered:    0,
+        read:       0,           // catalyst reads stored (horizon-chains.md §3)
         skipped:    0,
         passed:     0,
         failed:     0,
@@ -117,7 +120,7 @@ export async function startRun({ userId, audience = null, model = null, symbols 
     // promise resolves (the listener runs inside it), and nulling that run's controller would leave
     // it unstoppable.
     const abort = state.abort
-    _loop(run, queued, covered, { userId, audience, model, signal: abort.signal }, deps)
+    _loop(run, queued, covered, { userId, audience, model, signal: abort.signal, liveReads }, deps)
         .catch(err => logger.error(LOG, 'run loop crashed', err))
         .finally(() => { if (state.abort === abort) state.abort = null })
 
@@ -155,17 +158,21 @@ export async function requeueStalled(deps = _io) {
     return { ok: true, requeued: res.requeued }
 }
 
-async function _loop(run, queued, covered, { userId, audience, model, signal }, deps) {
+async function _loop(run, queued, covered, { userId, audience, model, signal, liveReads = new Set() }, deps) {
     for (const item of queued) {
         if (run.stop) break
         // A BUDGET (the house week's, house-research-chain.md step 5): no new name once it is spent. The names left are
         // still `queued`, and the next run takes them.
         if (run.max_usd != null && run.cost_usd >= run.max_usd) { run.budget_hit = true; break }
         const symbol = _sym(item.symbol)
+        const catalyst = isCatalystItem(item)
 
-        if (covered.has(symbol)) {
-            await deps.reject(item.id, 'already_covered')
-            _settle(run, { symbol, outcome: 'skipped', reason: 'already_covered' })
+        // Coverage skips a covered name; a catalyst read skips a name with a LIVE read — a covered name still gets one
+        // (a catalyst read never blocks or replaces coverage).
+        if (catalyst ? liveReads.has(symbol) : covered.has(symbol)) {
+            const reason = catalyst ? 'live_read' : 'already_covered'
+            await deps.reject(item.id, reason)
+            _settle(run, { symbol, outcome: 'skipped', reason })
             run.skipped++
             continue
         }
@@ -202,9 +209,41 @@ async function _loop(run, queued, covered, { userId, audience, model, signal }, 
             return Promise.resolve(deps.annotate?.(item.id, { addCost, ...extra })).catch(() => null)
         }
         try {
-            const { coverage } = await deps.research({ item, symbol, opening: researchOpening(item), covered, userId, audience, model, signal, onSpend })
+            const result = await deps.research({ item, symbol, opening: researchOpening(item), covered, userId, audience, model, signal, onSpend,
+                mode: catalyst ? 'catalyst' : null })
+            const { coverage } = result ?? {}
             if (run.stop) { await leave({ reason: 'stopped' }); _settle(run, { symbol, outcome: 'stopped', cost_usd: priced() }); break }   // aborted mid-turn: row stays in_research
             await leave()
+
+            if (catalyst) {
+                // The catalyst read (horizon-chains.md §3) goes to its own collection; a read with no target (contradicted,
+                // unsized) is stored too — as a pass — so the day's record says the name was looked at.
+                const parsed = result?.catalyst ?? null
+                if (!parsed) {
+                    await deps.reject(item.id, 'no_read')
+                    _settle(run, { symbol, outcome: 'passed', reason: 'no_read', cost_usd: priced() })
+                    run.passed++
+                    continue
+                }
+                const saved = await deps.saveCatalyst(parsed, { symbol, source: item.source ?? 'hotlist', context: item.context ?? null })
+                if (saved?.ok) {
+                    await deps.markDone(item.id)
+                    liveReads.add(symbol)
+                    const live = saved.doc?.status === 'active'
+                    _settle(run, { symbol, outcome: live ? 'read' : 'passed', reason: live ? null : saved.doc?.verdict ?? 'pass', readId: saved.doc?.id ?? null, cost_usd: priced() })
+                    if (live) run.read++
+                    else run.passed++
+                } else if (saved?.reason === 'live_read') {
+                    await deps.reject(item.id, 'live_read')
+                    _settle(run, { symbol, outcome: 'skipped', reason: 'live_read', cost_usd: priced() })
+                    run.skipped++
+                } else {
+                    await leave({ reason: saved?.reason ?? 'save_failed', detail: saved?.detail ?? null })
+                    _settle(run, { symbol, outcome: 'failed', reason: saved?.reason ?? 'save_failed', cost_usd: priced() })
+                    run.failed++
+                }
+                continue
+            }
 
             if (!coverage) {
                 await deps.reject(item.id, 'no_edge')
@@ -261,7 +300,7 @@ async function _loop(run, queued, covered, { userId, audience, model, signal }, 
     run.current    = null
     run.status     = run.error ? 'failed' : run.stop ? 'stopped' : 'done'
     run.finishedAt = new Date().toISOString()
-    logger.info(LOG, `run ${run.status}`, { id: run.id, total: run.total, covered: run.covered, skipped: run.skipped, passed: run.passed, failed: run.failed, cost_usd: run.cost_usd })
+    logger.info(LOG, `run ${run.status}`, { id: run.id, total: run.total, covered: run.covered, read: run.read, skipped: run.skipped, passed: run.passed, failed: run.failed, cost_usd: run.cost_usd })
     for (const fn of _settledListeners) {
         try { await fn(getRun()) }
         catch (err) { logger.warn(LOG, 'a run-settled listener threw (run unaffected)', err.message) }
@@ -301,6 +340,11 @@ const _cost = usd => Number((Number(usd) || 0).toFixed(4))
 
 const _sym = s => String(s ?? '').toUpperCase().trim()
 
+/** A queue row the Hotlist sent — researched as a catalyst read, saved beside coverage (horizon-chains.md §3-§4). Pure. */
+export function isCatalystItem(item) {
+    return Boolean(item?.context?.hotlist)
+}
+
 /** The price-target horizons each of Pythia's books may be graded on (coverage's own five, analyst_system_prompt.md). */
 export const BOOK_PT_HORIZONS = Object.freeze({ swing: ['3m', '6m'], long_term: ['12m', '18m', '24m'] })
 
@@ -325,6 +369,13 @@ export function offBookHorizon(item, coverage) {
 export function researchOpening(item) {
     const c = item?.context
     const symbol = _sym(item?.symbol)
+    // From the HOTLIST (horizon-chains.md §4): Argus's "this week" pick — a CATALYST READ, not coverage. The board's facts
+    // and his reason travel; the mode block (analyst_mode_catalyst.md) says what to do with them.
+    if (isCatalystItem(item)) {
+        const facts = c.facts ? ` The board: ${c.facts}.` : ''
+        const argus = c.why ? ` Argus picked it: ${c.why}${c.caution ? ` What would make it wrong: ${c.caution}` : ''}` : ''
+        return `Catalyst read on ${symbol} — the Hotlist graded it THIS WEEK (2–10 days) on ${c.day ?? 'today'}.${facts}${argus} Is the catalyst real, what is it worth, how much is still open, and what can break it inside the window?`
+    }
     // From the HOUSE SCAN (step 7): Pythia's verdict on the industry or theme sent it — the thesis and risks travel,
     // and "priced in" is Prometheus's question, name by name (pythia-assessment.md §10).
     if (c?.pythia) {
@@ -389,13 +440,24 @@ const _io = {
     // rides in chatState as it does at the desk — Prometheus is told which names are taken so it
     // never starts a second thesis by mistake. `existing_coverage` is not set: the run never
     // researches a covered name.
-    async research({ opening, covered, userId, audience, model, signal, onSpend }) {
+    async research({ opening, covered, userId, audience, model, signal, onSpend, mode = null }) {
         const { analystAgentService } = await import('./agents/analyst.agent.service.js')
         return analystAgentService.chatStream({
             messages: openingTurn(opening),
-            chatState: { coverage_symbols: [...covered] },
-            userId, audience, model: model ?? undefined, signal, onSpend,
+            // A catalyst read is not coverage: the book's names are not its business (horizon-chains.md §3).
+            chatState: mode ? {} : { coverage_symbols: [...covered] },
+            userId, audience, model: model ?? undefined, signal, onSpend, ...(mode ? { mode } : {}),
         })
+    },
+
+    // The catalyst reads (horizon-chains.md §3): their own collection, beside coverage.
+    async saveCatalyst(parsed, opts) {
+        const { catalystReadService } = await import('./catalystRead.service.js')
+        return catalystReadService.saveRead(parsed, opts)
+    },
+    async liveCatalystSymbols() {
+        const { catalystReadService } = await import('./catalystRead.service.js')
+        return catalystReadService.liveSymbols()
     },
 
     async initiate(coverage) {

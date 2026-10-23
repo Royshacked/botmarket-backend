@@ -107,6 +107,9 @@ function _etNow(ms) {
     return { date: `${p.year}-${p.month}-${p.day}`, weekday: p.weekday, min: Number(p.hour) * 60 + Number(p.minute) }
 }
 
+/** The ET calendar date of `nowMs` (YYYY-MM-DD) — the session day the boards are keyed by. Pure. */
+export const etDate = (nowMs) => _etNow(nowMs).date
+
 /** The checkpoint whose window `nowMs` falls in, with the ET session date — or null. Pure. */
 export function dueCheckpoint(nowMs) {
     const now = _etNow(nowMs)
@@ -351,11 +354,22 @@ async function _build(db, cp, day, etMin, run, deps) {
     const argus = await Promise.resolve()
         .then(() => deps.argus?.({ day, checkpoint: cp.id, columns: cp.columns, regime, rows: ranked }, { onUsage: booker('hotlist_argus') }) ?? null)
         .catch(() => null)
-    const pickBy = new Map((argus?.picks ?? []).map((p, i) => [p.symbol, { ...p, rank: i + 1 }]))
+    // Picks are PER COLUMN (horizon-chains.md §2): `picks.<column>` on the row with its rank in that column's list;
+    // `pick` stays the row's first one (any column), for the readers that know a single pick.
+    const picksBy = new Map()
+    const rankIn = new Map()
+    for (const p of argus?.picks ?? []) {
+        const rank = (rankIn.get(p.column) ?? 0) + 1
+        rankIn.set(p.column, rank)
+        if (!picksBy.has(p.symbol)) picksBy.set(p.symbol, {})
+        picksBy.get(p.symbol)[p.column] = { why: p.why, caution: p.caution, rank }
+    }
+    const firstPick = new Map()
+    for (const p of argus?.picks ?? []) if (!firstPick.has(p.symbol)) firstPick.set(p.symbol, { ...p, rank: picksBy.get(p.symbol)[p.column].rank })
     const avoidBy = new Map((argus?.avoid ?? []).map(a => [a.symbol, a.why]))
     const marked = ranked.map(r => ({
         ...r,
-        ...(pickBy.has(r.symbol) ? { pick: pickBy.get(r.symbol) } : {}),
+        ...(picksBy.has(r.symbol) ? { pick: firstPick.get(r.symbol), picks: picksBy.get(r.symbol) } : {}),
         ...(avoidBy.has(r.symbol) ? { avoid: avoidBy.get(r.symbol) } : {}),
     }))
 

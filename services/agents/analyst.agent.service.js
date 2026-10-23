@@ -21,6 +21,7 @@ import { buildTagCaptures } from '../llmStream.util.js'
 import { DESKS } from '../desks/registry.js'
 import { makeRouteCapture, buildRouteRule } from '../routing.util.js'
 import { VALUATION_TOOLS, VALUATION_TOOL_HANDLERS } from '../tools/valuation.tools.js'
+import { RUNUP_TOOLS, RUNUP_TOOL_HANDLERS } from '../tools/runup.tools.js'
 import { logger } from '../logger.service.js'
 
 const __dirname   = dirname(fileURLToPath(import.meta.url))
@@ -35,7 +36,11 @@ const MAX_MESSAGES = DESKS.analyst.maxMessages
 // narrows it to phases 1–2 and a <quickread> verdict instead of a <coverage> draft. Injected as its
 // own block so the coverage-mode prefix stays byte-identical and keeps its cache.
 const _quickreadMode = makePromptLoader(join(__dirname, '../../prompts/analyst_mode_quickread.md'), LOG)
-export const MODES = Object.freeze({ COVERAGE: null, QUICKREAD: 'quickread' })
+// CATALYST READ — the short swing's mode (docs/design/horizon-chains.md §3): the Hotlist's "this week" picks get a
+// catalyst target (what the catalyst is worth, what is still open) instead of coverage. Same shape as the quick read.
+const _catalystMode = makePromptLoader(join(__dirname, '../../prompts/analyst_mode_catalyst.md'), LOG)
+const CATALYST_LOG = '[analystAgent-catalyst]'   // its own ledger row
+export const MODES = Object.freeze({ COVERAGE: null, QUICKREAD: 'quickread', CATALYST: 'catalyst' })
 
 export const TOOLS = [
     // web_search leads, then the SHARED valuation module (its own single home), then the
@@ -58,6 +63,10 @@ export const TOOLS = [
         // APPENDED, never inserted — the snapshot compares by index and prompt caching keys off
         // the array prefix.
         get_market_hours: MARKET_HOURS_TOOL_SPEC.get_market_hours,
+    }),
+    // The catalyst read's run-up yardstick (runup.tools.js) — inserted ahead of consult, which stays last.
+    ...RUNUP_TOOLS,
+    ...toolsFor({
         // Appended too. The reasoning sidecar (services/deepThink.service.js): one bounded decision
         // put to a stronger model and handed back as a tool result. The mechanism half of this
         // description is shared with every other desk; the clause below is this desk's own judgment
@@ -70,6 +79,7 @@ export const TOOLS = [
 
 const TOOL_HANDLERS = {
     ...VALUATION_TOOL_HANDLERS,
+    ...RUNUP_TOOL_HANDLERS,
     get_fundamentals:    makeToolHandler('get_fundamentals',    ({ ticker }) => getFundamentals(ticker),  (e, { ticker }) => `Could not fetch fundamentals for ${ticker}: ${e.message}`, LOG),
     get_sec_filings:     makeToolHandler('get_sec_filings',     ({ ticker }) => getSecFilings(ticker),    (e, { ticker }) => `Could not fetch SEC filings for ${ticker}: ${e.message}`, LOG),
     get_earnings:        makeToolHandler('get_earnings',        ({ ticker }) => getEarnings(ticker),      (e, { ticker }) => `Could not fetch earnings for ${ticker}: ${e.message}`, LOG),
@@ -111,7 +121,7 @@ async function chatStream({
     // `analystAgent` with full coverage turns, which is how "what does a read cost" could only be
     // estimated (2026-09-20). The log tag is the key, so the tag is what differs.
     const raw = await _run({
-        log: mode === MODES.QUICKREAD ? QUICKREAD_LOG : LOG, requestedModel, userId, messages: builtMessages, systemPrompt,
+        log: mode === MODES.QUICKREAD ? QUICKREAD_LOG : mode === MODES.CATALYST ? CATALYST_LOG : LOG, requestedModel, userId, messages: builtMessages, systemPrompt,
         tools: TOOLS, toolHandlers: { ...TOOL_HANDLERS, ...makeTradingContextHandlers(userId) },
         reasoningEffort, signal, onToken, tagCaptures, onToolStart, onReasoning, onChart, onSpend,
     })
@@ -123,6 +133,8 @@ async function chatStream({
     logger.info(LOG, 'chatStream done', { replyLength: reply.length, hasCoverage: Boolean(coverage), mode, phase: phase.get() })
     const routing = route.result()   // { route, routeSymbol, opening, edit } — the controller validates
     if (mode === MODES.QUICKREAD) return { reply, phase: phase.get(), quickread, ...routing }
+    // A catalyst read never enters the book either: its <catalyst_read> is what comes back, any <coverage> dropped.
+    if (mode === MODES.CATALYST) return { reply, phase: phase.get(), catalyst: _parseCatalystRead(raw), ...routing }
     // The coverage is a DRAFT — returned for preview, NOT saved. Initiating persists it (P1).
     return { reply, phase: phase.get(), ...(coverage ? { coverage } : {}), ...routing }
 }
@@ -164,6 +176,46 @@ export function _parseQuickRead(raw) {
     }
 }
 
+const CATALYST_VERDICTS = new Set(['credible', 'priced_in', 'contradicted', 'unclear'])
+const CATALYST_KINDS = new Set(['earnings', 'guidance', 'contract', 'regulatory', 'product', 'rating', 'deal', 'other'])
+const _txt = (v, n = 600) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, n) : null)
+const _list = (v, n = 6) => (Array.isArray(v) ? v : []).map(x => _txt(x, 300)).filter(Boolean).slice(0, n)
+const _numOr = (v) => { const n = Number(v); return v == null || !Number.isFinite(n) ? null : n }
+
+/**
+ * The <catalyst_read> block (horizon-chains.md §3), checked rather than trusted: the quick read's rules — a verdict
+ * outside the four is `unclear`, confidence clamped, evidence kept only with a fact, the delta only as the tool's own
+ * numbers — plus the catalyst, the window (5–30 days) and the short-swing clauses. Null when there is no block.
+ */
+export function _parseCatalystRead(raw) {
+    const q = parseEmitBlock(raw ?? '', 'catalyst_read', LOG)
+    if (!q || typeof q !== 'object' || Array.isArray(q)) return null
+    const conf = Number(q.confidence)
+    const c = q.catalyst && typeof q.catalyst === 'object' ? q.catalyst : {}
+    const days = Number(q.window_days)
+    return {
+        ticker:      _txt(q.ticker, 12)?.toUpperCase() ?? null,
+        verdict:     CATALYST_VERDICTS.has(q.verdict) ? q.verdict : 'unclear',
+        catalyst:    { what: _txt(c.what, 300), date: /^\d{4}-\d{2}-\d{2}$/.test(c.date ?? '') ? c.date : null,
+            kind: CATALYST_KINDS.has(c.kind) ? c.kind : 'other', material: c.material === true },
+        news_driven: typeof q.news_driven === 'boolean' ? q.news_driven : null,
+        window_days: Number.isFinite(days) ? Math.min(30, Math.max(5, Math.round(days))) : 14,
+        confidence:  Number.isFinite(conf) ? Math.min(Math.max(conf, 0), 1) : null,
+        read:        _txt(q.read, 1200) ?? '',
+        delta:       _cleanDelta(q.delta),
+        runup:       _cleanRunup(q.runup),
+        delta_basis: _txt(q.delta_basis, 400),
+        implied_move_pct: _numOr(q.implied_move_pct),
+        history:     _txt(q.history, 300),
+        positioning: _txt(q.positioning, 300),
+        event_risk:  _list(q.event_risk),
+        kill:        _list(q.kill),
+        evidence:    (Array.isArray(q.evidence) ? q.evidence : [])
+            .filter(e => e && typeof e.fact === 'string' && e.fact.trim()).slice(0, 10)
+            .map(e => ({ fact: e.fact.trim().slice(0, 300), source: typeof e.source === 'string' ? e.source.trim().slice(0, 120) : '' })),
+    }
+}
+
 // The `delta` the model copied off compute_event_delta: numbers or null per field, nothing else
 // kept, and null when there is no usable percentage in it (an unsized read, a loss-maker's dollar
 // figure alone, or a block the model typed by hand with words in the numbers).
@@ -178,6 +230,16 @@ export function _cleanDelta(d) {
     }
     out.fy = typeof d.fy === 'string' || typeof d.fy === 'number' ? String(d.fy) : null
     return out.delta_price_pct === null ? null : out
+}
+
+// The `runup` line copied off get_runup_history (runup.tools.js): its numbers, the report date and the basis, nothing
+// else — and null without a median or a report date to end the window on.
+const RUNUP_FIELDS = ['lead_days', 'n', 'median_pct', 'p25_pct', 'p75_pct', 'up_share', 'median_excess_pct']
+export function _cleanRunup(u) {
+    if (!u || typeof u !== 'object' || Array.isArray(u)) return null
+    const out = { basis: 'run_up', report: /^\d{4}-\d{2}-\d{2}$/.test(u.report ?? '') ? u.report : null }
+    for (const k of RUNUP_FIELDS) out[k] = _numOr(u[k])
+    return out.median_pct === null || !out.report ? null : out
 }
 
 // Light guard on the draft (full normalization happens at initiate): must be an object with a symbol.
@@ -263,6 +325,7 @@ ${audienceBlock}
         // The mode module AFTER the spine and BEFORE the dynamic block, as its own cached block:
         // coverage turns keep their prefix untouched, and quick-read turns share one across names.
         ...(mode === MODES.QUICKREAD ? [cachedBlock(_quickreadMode())] : []),
+        ...(mode === MODES.CATALYST ? [cachedBlock(_catalystMode())] : []),
         { type: 'text', text: dynamic },
     ]
 }
