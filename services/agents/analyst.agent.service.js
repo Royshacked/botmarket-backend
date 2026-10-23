@@ -87,7 +87,7 @@ export const analystAgentService = { chatStream }
 async function chatStream({
     messages, chatState = {}, seed = null, audience = null, mode = MODES.COVERAGE,
     model: requestedModel, reasoningEffort, userId,
-    onToken, onToolStart, onReasoning, onPhase, onChart, signal,
+    onToken, onToolStart, onReasoning, onPhase, onChart, signal, onSpend,
     _run = runAgentStream,   // the shared contract-test seam — see runAgentStream in agentIO.js
     _venueSection = buildVenueSection,
 }) {
@@ -113,7 +113,7 @@ async function chatStream({
     const raw = await _run({
         log: mode === MODES.QUICKREAD ? QUICKREAD_LOG : LOG, requestedModel, userId, messages: builtMessages, systemPrompt,
         tools: TOOLS, toolHandlers: { ...TOOL_HANDLERS, ...makeTradingContextHandlers(userId) },
-        reasoningEffort, signal, onToken, tagCaptures, onToolStart, onReasoning, onChart,
+        reasoningEffort, signal, onToken, tagCaptures, onToolStart, onReasoning, onChart, onSpend,
     })
 
     const { reply, coverage } = _parseAnalystResponse(raw)

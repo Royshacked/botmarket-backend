@@ -110,8 +110,8 @@ async function startResearch(id) {
 /**
  * Mark a queue entry done — called when house coverage is written for the symbol.
  */
-async function markDone(id) {
-    return _transition(id, 'done', ['in_research', 'queued'])
+async function markDone(id, extra = {}) {
+    return _transition(id, 'done', ['in_research', 'queued'], extra)
 }
 
 /**
@@ -123,8 +123,8 @@ async function markDone(id) {
  * it was is a row the admin has to re-derive. Free text, stored as given; absent on a manual
  * reject.
  */
-async function reject(id, reason = null) {
-    return _transition(id, 'rejected', ['queued', 'in_research'], reason ? { reason } : {})
+async function reject(id, reason = null, extra = {}) {
+    return _transition(id, 'rejected', ['queued', 'in_research'], { ...extra, ...(reason ? { reason } : {}) })
 }
 
 /**

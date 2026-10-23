@@ -251,3 +251,55 @@ test('researchRun: a run for given symbols researches only those — a sleeve do
     assert.deepEqual(deps.calls.researched.map(r => r.symbol), ['AAA'])
     assert.equal((await startRun({ symbols: ['ZZZ'] }, makeDeps({ queued: [q('AAA')] }))).reason, 'nothing_queued')
 })
+
+// ─── what each name cost (house-research-chain.md step 1) ─────────────────────
+
+function meteredDeps(over = {}) {
+    const d = makeDeps(over)
+    d.calls.booked = []; d.calls.doneExtra = []; d.calls.rejectExtra = []
+    d.costOf      = (model, usage) => usage.usd
+    d.houseLedger = async () => 'admin1'
+    d.book        = async (userId, model, usage) => { d.calls.booked.push([userId, model, usage.usd]) }
+    d.markDone    = async (id, extra) => { d.calls.done.push(id); d.calls.doneExtra.push(extra); return { ok: true } }
+    d.reject      = async (id, reason, extra) => { d.calls.rejected.push([id, reason]); d.calls.rejectExtra.push(extra); return { ok: true } }
+    const inner = d.research
+    // The turn spends: the desk's own call and a consult, through the tap the run hands it.
+    d.research = async (args) => {
+        args.onSpend({ usd: 0.1 }, 'gpt-6-luna')
+        args.onSpend({ usd: 0.25 }, 'claude-opus-5-5')
+        return inner(args)
+    }
+    return d
+}
+
+test('researchRun: a HOUSE run measures each name and books it to the house ledger', async () => {
+    const d = meteredDeps({ queued: [q('AAA'), q('BBB')], answers: { AAA: draft('AAA') } })
+    await startRun({ userId: null }, d)
+    const run = await settled()
+    assert.deepEqual(run.results.map(r => [r.symbol, r.outcome, r.cost_usd]), [['AAA', 'covered', 0.35], ['BBB', 'passed', 0.35]])
+    assert.equal(run.cost_usd, 0.7)
+    assert.deepEqual(d.calls.doneExtra, [{ cost_usd: 0.35 }], 'the queue row carries what it cost')
+    assert.deepEqual(d.calls.rejectExtra, [{ cost_usd: 0.35 }])
+    assert.deepEqual(d.calls.booked, [['admin1', 'gpt-6-luna', 0.1], ['admin1', 'claude-opus-5-5', 0.25], ['admin1', 'gpt-6-luna', 0.1], ['admin1', 'claude-opus-5-5', 0.25]])
+})
+
+test('researchRun: a user\'s run is measured but not booked again — the turn already booked it', async () => {
+    const d = meteredDeps({ queued: [q('AAA')], answers: { AAA: draft('AAA') } })
+    let asked = 0
+    d.houseLedger = async () => { asked++; return 'admin1' }
+    await startRun({ userId: 'u1' }, d)
+    const run = await settled()
+    assert.equal(run.cost_usd, 0.35)
+    assert.deepEqual(d.calls.booked, [])
+    assert.equal(asked, 0)
+})
+
+test('researchRun: no house ledger → the name is still measured, nothing booked, the run goes on', async () => {
+    const d = meteredDeps({ queued: [q('AAA')] })
+    d.houseLedger = async () => { throw new Error('users unreadable') }
+    await startRun({}, d)
+    const run = await settled()
+    assert.equal(run.status, 'done')
+    assert.equal(run.results[0].cost_usd, 0.35)
+    assert.deepEqual(d.calls.booked, [])
+})

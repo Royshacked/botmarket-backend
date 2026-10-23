@@ -403,6 +403,10 @@ export async function runAgentStream({
     log = '[agentIO]', requestedModel, userId,
     messages, systemPrompt, tools, toolHandlers,
     reasoningEffort, signal, onToken, tagCaptures, onToolStart, onReasoning, onChart,
+    // A TAP on the turn's spend: `(usage, model)` for every model call this turn makes — the desk's own and
+    // its consults — whoever the ledger is, and with no user too. The ledger write is unchanged; this is for
+    // a caller that has to know what ONE turn cost (the research run's per-name cost, house-research-chain.md).
+    onSpend,
     meta = {},
     // Injectable so the argument-bag contract can be tested without a provider or a real model id.
     _resolve = resolveAgentStream,
@@ -415,7 +419,9 @@ export async function runAgentStream({
     // it from the tag is what makes this zero edits at the eight call sites — a new agent is
     // attributed the moment it exists, with nothing to remember to wire.
     const agentKey = agentKeyFromLog(log)
-    const { model, streamFn, provider, onUsage, degraded } = await _resolve(requestedModel, userId, agentKey)
+    const { model, streamFn, provider, onUsage: record, degraded } = await _resolve(requestedModel, userId, agentKey)
+    const spend   = onSpend ? (usage, usedModel) => { try { onSpend(usage, usedModel) } catch { /* a tap never fails a turn */ } } : null
+    const onUsage = spend ? (usage, usedModel = model) => { record?.(usage, usedModel); spend(usage, usedModel) } : record
 
     const chart = onChart ? makeChartChatPipe(onChart, { log }) : null
 
@@ -440,7 +446,7 @@ export async function runAgentStream({
     // A desk that supplies its own `consult` handler keeps it; the injected one only fills a gap.
     const wantsConsult   = Array.isArray(tools) && tools.some(t => t?.name === CONSULT_TOOL)
     const resolvedHandlers = announceTargets(wantsConsult
-        ? { [CONSULT_TOOL]: _makeConsult({ userId, agent: agentKey, onReasoning: tagReasoning(REASONING_CONSULT) }), ...toolHandlers }
+        ? { [CONSULT_TOOL]: _makeConsult({ userId, agent: agentKey, onReasoning: tagReasoning(REASONING_CONSULT), ...(spend ? { onSpend: spend } : {}) }), ...toolHandlers }
         : toolHandlers, onToolStart)
 
     logger.info(log, 'chatStream start', { messageCount: messages?.length ?? 0, model, provider, ...(degraded ? { degraded: true } : {}), ...(wantsConsult ? { consult: true } : {}), ...meta })

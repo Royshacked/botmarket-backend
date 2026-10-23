@@ -31,6 +31,7 @@ import { randomUUID } from 'crypto'
 import { researchQueueService } from './researchQueue.service.js'
 import { logger } from './logger.service.js'
 import { openingTurn } from './agentUtils.js'
+import { calcCost } from './tokenUsage.service.js'
 
 const LOG = '[researchRun]'
 
@@ -99,7 +100,8 @@ export async function startRun({ userId, audience = null, model = null, symbols 
         skipped:    0,
         passed:     0,
         failed:     0,
-        results:    [],          // { symbol, outcome, reason? }, in order
+        cost_usd:   0,           // the run's spend so far, summed from the names' (house-research-chain.md step 1)
+        results:    [],          // { symbol, outcome, reason?, cost_usd }, in order
         stop:       false,
     }
     state.run   = run
@@ -172,36 +174,46 @@ async function _loop(run, queued, covered, { userId, audience, model, signal }, 
             continue
         }
         run.current = symbol
+        // What THIS name's turn cost (house-research-chain.md step 1): every model call it makes, the desk's own and
+        // its consults. A house run (no user) has no ledger of its own, so its spend is booked to the house ledger
+        // here; a user's run is already booked by the turn itself, and booking it again would count it twice.
+        const meter = { cost: 0 }
+        const ledger = userId ? null : await Promise.resolve(deps.houseLedger?.()).catch(() => null)
+        const onSpend = (usage, usedModel) => {
+            meter.cost += deps.costOf(usedModel, usage) || 0
+            if (ledger) Promise.resolve(deps.book(ledger, usedModel, usage)).catch(() => {})
+        }
+        const priced = () => _cost(meter.cost)
         try {
-            const { coverage } = await deps.research({ item, symbol, opening: researchOpening(item), covered, userId, audience, model, signal })
-            if (run.stop) { _settle(run, { symbol, outcome: 'stopped' }); break }   // aborted mid-turn: row stays in_research
+            const { coverage } = await deps.research({ item, symbol, opening: researchOpening(item), covered, userId, audience, model, signal, onSpend })
+            if (run.stop) { _settle(run, { symbol, outcome: 'stopped', cost_usd: priced() }); break }   // aborted mid-turn: row stays in_research
 
             if (!coverage) {
-                await deps.reject(item.id, 'no_edge')
-                _settle(run, { symbol, outcome: 'passed', reason: 'no_edge' })
+                await deps.reject(item.id, 'no_edge', { cost_usd: priced() })
+                _settle(run, { symbol, outcome: 'passed', reason: 'no_edge', cost_usd: priced() })
                 run.passed++
                 continue
             }
 
             const saved = await deps.initiate(coverage)
             if (saved.ok) {
-                await deps.markDone(item.id)
+                await deps.markDone(item.id, { cost_usd: priced() })
                 covered.add(symbol)   // a later duplicate row (there should be none) is now a skip
-                _settle(run, { symbol, outcome: 'covered', coverageId: saved.doc?.id ?? null })
+                _settle(run, { symbol, outcome: 'covered', coverageId: saved.doc?.id ?? null, cost_usd: priced() })
                 run.covered++
             } else if (saved.reason === 'already_covered') {
                 // Covered between the run's read of the book and now — by hand, at the desk.
-                await deps.reject(item.id, 'already_covered')
-                _settle(run, { symbol, outcome: 'skipped', reason: 'already_covered' })
+                await deps.reject(item.id, 'already_covered', { cost_usd: priced() })
+                _settle(run, { symbol, outcome: 'skipped', reason: 'already_covered', cost_usd: priced() })
                 run.skipped++
             } else {
                 // Left in_research on purpose: the research happened, the save did not.
-                _settle(run, { symbol, outcome: 'failed', reason: saved.reason ?? 'save_failed', detail: saved.detail ?? null })
+                _settle(run, { symbol, outcome: 'failed', reason: saved.reason ?? 'save_failed', detail: saved.detail ?? null, cost_usd: priced() })
                 run.failed++
             }
         } catch (err) {
-            if (run.stop) { _settle(run, { symbol, outcome: 'stopped' }); break }
-            _settle(run, { symbol, outcome: 'failed', reason: _reason(err) })
+            if (run.stop) { _settle(run, { symbol, outcome: 'stopped', cost_usd: priced() }); break }
+            _settle(run, { symbol, outcome: 'failed', reason: _reason(err), cost_usd: priced() })
             run.failed++
             // A refusal that is about the ACCOUNT, not the name — no credit, a bad key, no
             // permission — fails every name after it the same way. The first run hit this at
@@ -218,7 +230,7 @@ async function _loop(run, queued, covered, { userId, audience, model, signal }, 
     run.current    = null
     run.status     = run.error ? 'failed' : run.stop ? 'stopped' : 'done'
     run.finishedAt = new Date().toISOString()
-    logger.info(LOG, `run ${run.status}`, { id: run.id, total: run.total, covered: run.covered, skipped: run.skipped, passed: run.passed, failed: run.failed })
+    logger.info(LOG, `run ${run.status}`, { id: run.id, total: run.total, covered: run.covered, skipped: run.skipped, passed: run.passed, failed: run.failed, cost_usd: run.cost_usd })
     for (const fn of _settledListeners) {
         try { await fn(getRun()) }
         catch (err) { logger.warn(LOG, 'a run-settled listener threw (run unaffected)', err.message) }
@@ -250,8 +262,11 @@ function _settle(run, result) {
     run.results.push(result)
     run.position++
     run.current = null
-    logger.info(LOG, result.outcome, { symbol: result.symbol, reason: result.reason ?? null, position: `${run.position}/${run.total}` })
+    if (result.cost_usd) run.cost_usd = _cost(run.cost_usd + result.cost_usd)
+    logger.info(LOG, result.outcome, { symbol: result.symbol, reason: result.reason ?? null, cost_usd: result.cost_usd ?? 0, position: `${run.position}/${run.total}` })
 }
+
+const _cost = usd => Number((Number(usd) || 0).toFixed(4))
 
 const _sym = s => String(s ?? '').toUpperCase().trim()
 
@@ -294,8 +309,20 @@ export function researchOpening(item) {
 const _io = {
     listQueue:     (q) => researchQueueService.listQueue(q),
     startResearch: (id) => researchQueueService.startResearch(id),
-    markDone:      (id) => researchQueueService.markDone(id),
-    reject:        (id, reason) => researchQueueService.reject(id, reason),
+    markDone:      (id, extra) => researchQueueService.markDone(id, extra),
+    reject:        (id, reason, extra) => researchQueueService.reject(id, reason, extra),
+
+    // The spend of one name (house-research-chain.md step 1). A house run books to the first admin's ledger, like
+    // Pythia's week, under its own key and as monitor spend: inside the admin's total, outside their chat ceiling.
+    costOf:        (model, usage) => calcCost(model, usage),
+    async houseLedger() {
+        const { houseLedgerUserId } = await import('../api/user/user.model.js')
+        return houseLedgerUserId()
+    },
+    async book(userId, model, usage) {
+        const { recordUsage } = await import('./tokenUsage.service.js')
+        return recordUsage(userId, model, usage, 'researchRun', { monitor: true })
+    },
     requeueInResearch: (o) => researchQueueService.requeueInResearch(o),
 
     // `throw`, not the service's default empty list: a book that could not be read would look like
@@ -310,12 +337,12 @@ const _io = {
     // rides in chatState as it does at the desk — Prometheus is told which names are taken so it
     // never starts a second thesis by mistake. `existing_coverage` is not set: the run never
     // researches a covered name.
-    async research({ opening, covered, userId, audience, model, signal }) {
+    async research({ opening, covered, userId, audience, model, signal, onSpend }) {
         const { analystAgentService } = await import('./agents/analyst.agent.service.js')
         return analystAgentService.chatStream({
             messages: openingTurn(opening),
             chatState: { coverage_symbols: [...covered] },
-            userId, audience, model: model ?? undefined, signal,
+            userId, audience, model: model ?? undefined, signal, onSpend,
         })
     },
 

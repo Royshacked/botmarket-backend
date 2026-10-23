@@ -225,3 +225,15 @@ test('a caller may bring its own framing, and the desk-head prompt is the defaul
         assert.match(seen[seen.length - 1], /senior trading desk head/, String(bad))
     }
 })
+
+test('a consult reports into the turn\'s spend tap as well as the ledger, and a throwing tap is swallowed', async () => {
+    const tapped = []
+    const handler = makeConsultHandler({
+        userId: null,
+        _record: () => {},
+        onSpend: (usage, model) => { tapped.push([usage.input_tokens, model]); throw new Error('tap') },
+        _deepThink: async ({ onUsage }) => { onUsage?.({ input_tokens: 10 }, 'claude-opus-5-5'); return 'ok' },
+    })
+    assert.equal(await handler({ question: 'q', context: 'c' }), 'ok')
+    assert.deepEqual(tapped, [[10, 'claude-opus-5-5']])
+})

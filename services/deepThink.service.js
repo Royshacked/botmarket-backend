@@ -165,6 +165,8 @@ export function makeConsultHandler({
     agent = null,
     maxPerTurn = 3,
     onReasoning = null,
+    // The turn's spend tap (agentIO.runAgentStream `onSpend`): a consult is part of the turn that asked.
+    onSpend = null,
     _deepThink = deepThink,
     _record = recordUsage,
 } = {}) {
@@ -184,6 +186,7 @@ export function makeConsultHandler({
             onUsage: (usage, model) => {
                 try { Promise.resolve(_record(userId, model, usage, tag)).catch(() => {}) }
                 catch { /* ledger is not worth an answer */ }
+                try { onSpend?.(usage, model) } catch { /* nor is a tap */ }
             },
         })
     }

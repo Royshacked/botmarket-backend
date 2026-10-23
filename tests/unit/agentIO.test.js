@@ -282,3 +282,40 @@ test('runAgentStream hands the provider handlers that announce their names', asy
     await got.toolHandlers.get_candles({ ticker: 'nvda' })
     assert.deepEqual(told, [['get_candles', { targets: ['NVDA'] }]])
 })
+
+// ─── the spend tap (house-research-chain.md step 1) ───────────────────────────
+
+test('onSpend taps every model call of the turn — beside the ledger, and with no user too', async () => {
+    const booked = [], tapped = []
+    let consultOpts = null
+    await runAgentStream({
+        log: '[t]', requestedModel: 'm', userId: 'u1',
+        messages: [{ role: 'user', content: 'hi' }], systemPrompt: 'sys', tools: [CONSULT_TOOL_DECL], toolHandlers: {},
+        onSpend: (usage, model) => tapped.push([usage.n, model]),
+        _resolve: () => ({ model: 'resolved', provider: 'p', onUsage: (usage, model) => booked.push([usage.n, model]),
+            streamFn: async (a) => { a.onUsage({ n: 1 }); a.onUsage({ n: 2 }, 'vision'); return 'raw' } }),
+        _makeConsult: (opts) => { consultOpts = opts; return async () => 'advice' },
+    })
+    assert.deepEqual(booked, [[1, 'resolved'], [2, 'vision']], 'the ledger still gets every call (the turn model is its own default too)')
+    assert.deepEqual(tapped, [[1, 'resolved'], [2, 'vision']])
+    assert.equal(typeof consultOpts.onSpend, 'function', 'the consult reports into the same tap')
+
+    const noUser = []
+    await runAgentStream({
+        log: '[t]', requestedModel: 'm', userId: null, messages: [], systemPrompt: 's',
+        onSpend: (usage) => { noUser.push(usage.n); throw new Error('a tap must never fail the turn') },
+        _resolve: () => ({ model: 'r', provider: 'p', onUsage: undefined, streamFn: async (a) => { a.onUsage({ n: 7 }); return 'raw' } }),
+    })
+    assert.deepEqual(noUser, [7])
+})
+
+test('without onSpend the provider gets the ledger recorder itself', async () => {
+    const record = () => {}
+    let got = null
+    await runAgentStream({
+        log: '[t]', requestedModel: 'm', userId: 'u1', messages: [], systemPrompt: 's', tools: [CONSULT_TOOL_DECL],
+        _resolve: () => ({ model: 'r', provider: 'p', onUsage: record, streamFn: async (a) => { got = a; return 'raw' } }),
+        _makeConsult: (opts) => { assert.equal('onSpend' in opts, false); return async () => 'a' },
+    })
+    assert.equal(got.onUsage, record)
+})
