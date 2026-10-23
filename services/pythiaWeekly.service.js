@@ -23,7 +23,7 @@ import { themeService } from '../api/strategy/theme.service.js'
 import { scanIndustry, scanTheme, pickForWeek } from '../api/strategy/changeScan.service.js'
 import { assessIndustry, assessTheme } from './industryAssessmentRun.service.js'
 import { runHouseScan } from './houseScan.service.js'
-import { houseResearchService } from './houseResearch.service.js'
+import { houseResearchService, RESUME_WEEKS } from './houseResearch.service.js'
 import { houseLedgerUserId } from '../api/user/user.model.js'
 import { getDb } from '../providers/mongodb.provider.js'
 import { config } from './config.js'
@@ -55,7 +55,7 @@ const _deps = {
     houseScan: (results, opts) => runHouseScan(results, undefined, opts),
     // ...and Prometheus researches them by himself (house-research-chain.md steps 5-6).
     research: (week) => houseResearchService.researchWeek(week),
-    resumeResearch: (week) => houseResearchService.resumeWeek(week),
+    resumeResearch: (weeks) => houseResearchService.resumeWeeks(weeks),
     db: () => getDb(),
     now: () => new Date().toISOString(),
 }
@@ -296,15 +296,17 @@ export async function latestWeek(deps = _deps) {
 }
 
 /**
- * The monitor's pick-up of the latest DONE week's research (house-research-chain.md step 6): its dead claims back
- * in line, and a run over what still waits. Never throws.
+ * The monitor's pick-up of the recent DONE weeks' research (house-research-chain.md step 6): their dead claims back
+ * in line, and a run over what still waits — a name left by one week is not orphaned when the next finishes. Never
+ * throws.
  */
 export async function resumeResearch(deps = _deps) {
     try {
         const db = await deps.db()
-        const week = await db.collection(COLLECTION).find({ status: 'done' }, { projection: { _id: 0, claim: 0 } }).sort({ asof: -1 }).limit(1).next()
-        if (!week?.house_scan?.queued?.length) return { ok: true, outcome: 'no_names' }
-        return await deps.resumeResearch(week)
+        const weeks = await db.collection(COLLECTION).find({ status: 'done' }, { projection: { _id: 0, asof: 1, started_at: 1, house_scan: 1 } })
+            .sort({ asof: -1 }).limit(RESUME_WEEKS).toArray()
+        if (!weeks.some(w => w.house_scan?.queued?.length)) return { ok: true, outcome: 'no_names' }
+        return await deps.resumeResearch(weeks)
     } catch (err) {
         logger.warn(LOG, 'research pick-up failed', { error: err.message })
         return { ok: false, outcome: 'error', detail: err.message }

@@ -5,7 +5,7 @@ import { unpackFloats, dailyRows, priceStats, beta, businessStats, estimateStats
     from '../../services/houseScan.candidates.js'
 import { normalizePicks, codePicks, argusPicks, pickText } from '../../services/houseScan.argus.js'
 import { runHouseScan } from '../../services/houseScan.service.js'
-import { researchWeek, resumeWeek, weekSymbols, STALE_CLAIM_MS } from '../../services/houseResearch.service.js'
+import { researchWeek, resumeWeeks, weekSymbols, STALE_CLAIM_MS, BUDGET_WINDOW_MS } from '../../services/houseResearch.service.js'
 import { startRun, getRun, researchOpening, offBookHorizon } from '../../services/researchRun.service.js'
 import { gradePicks } from '../../api/strategy/pythiaCalls.service.js'
 import { weekForTraders } from '../../api/strategy/strategy.controller.js'
@@ -226,6 +226,7 @@ test('the run rejects an off-book horizon with its reason, and stops starting na
 
 // ─── the week's research, by itself ──────────────────────────────────────────
 
+const NOW_MS = Date.parse('2026-10-23T12:00:00Z')
 const WEEK = { asof: '2026-10-19', started_at: '2026-10-20T00:00:00Z', house_scan: { queued: [{ symbol: 'nue' }, { symbol: 'STLD' }, { symbol: 'NUE' }] } }
 
 function weekDeps(rows, over = {}) {
@@ -242,20 +243,20 @@ function weekDeps(rows, over = {}) {
 
 test('the week researches its queued names as the house, with what is left of its budget', async () => {
     const rows = [
-        { symbol: 'NUE', source: 'pythia', status: 'done', cost_usd: 1.5 },
+        { symbol: 'NUE', source: 'pythia', status: 'done', cost_usd: 1.5, updated_at: new Date(NOW_MS - 3600e3).toISOString() },
         { symbol: 'STLD', source: 'pythia', status: 'queued' },
         { symbol: 'STLD', source: 'argus', status: 'queued', cost_usd: 9 },   // not the week's
     ]
     const { calls, deps } = weekDeps(rows)
     assert.deepEqual(weekSymbols(WEEK), ['NUE', 'STLD'])
-    const r = await researchWeek(WEEK, deps)
+    const r = await researchWeek(WEEK, deps, { now: NOW_MS })
     assert.equal(r.outcome, 'started')
     assert.deepEqual(calls.query, { symbols: ['NUE', 'STLD'], since: WEEK.started_at, limit: 500 })
     assert.deepEqual(calls.starts, [{ userId: null, symbols: ['STLD'], maxUsd: 3.5 }])
 })
 
 test('a spent budget, a busy run and an unreadable queue start nothing', async () => {
-    assert.equal((await researchWeek(WEEK, weekDeps([{ symbol: 'STLD', source: 'pythia', status: 'queued', cost_usd: 6 }]).deps)).outcome, 'budget_spent')
+    assert.equal((await researchWeek(WEEK, weekDeps([{ symbol: 'STLD', source: 'pythia', status: 'queued', cost_usd: 6, updated_at: new Date(NOW_MS).toISOString() }]).deps, { now: NOW_MS })).outcome, 'budget_spent')
     assert.equal((await researchWeek(WEEK, weekDeps([{ symbol: 'STLD', source: 'pythia', status: 'queued' }], { startRun: async () => ({ ok: false, reason: 'already_running' }) }).deps)).outcome, 'busy')
     assert.equal((await researchWeek(WEEK, weekDeps(null).deps)).outcome, 'queue_unavailable')
     assert.equal((await researchWeek({}, weekDeps([]).deps)).outcome, 'no_names')
@@ -263,11 +264,11 @@ test('a spent budget, a busy run and an unreadable queue start nothing', async (
 
 test('the pick-up requeues the week\'s dead claims first — and touches nothing while a run is live', async () => {
     const { calls, deps } = weekDeps([{ symbol: 'NUE', source: 'pythia', status: 'queued' }])
-    await resumeWeek(WEEK, deps, { now: 1000 })
+    await resumeWeeks([WEEK], deps, { now: 1000 })
     assert.deepEqual(calls.requeued, [{ symbols: ['NUE', 'STLD'], olderThanMs: STALE_CLAIM_MS, now: 1000 }])
     assert.equal(calls.starts.length, 1)
     const busy = weekDeps([], { getRun: () => ({ status: 'running' }) })
-    assert.equal((await resumeWeek(WEEK, busy.deps)).outcome, 'busy')
+    assert.equal((await resumeWeeks([WEEK], busy.deps)).outcome, 'busy')
     assert.equal(busy.calls.requeued.length, 0)
 })
 
@@ -303,4 +304,18 @@ test('a name already in line is off the list before Argus picks, so it never cos
     await runHouseScan([{ kind: 'industry', code: 'A', name: 'Steel', outcome: 'published', verdict: 'swing' }], deps)
     assert.deepEqual(seen, ['A2'])
     assert.deepEqual(queued.map(q => q.symbol), ['A2'])
+})
+
+test("the pick-up spans the recent weeks: an older week's name goes first, and the budget is the last seven days' spend", async () => {
+    const old = { asof: '2026-10-07', started_at: '2026-10-08T00:00:00Z', house_scan: { queued: [{ symbol: 'OLD' }] } }
+    const rows = [
+        { symbol: 'STLD', source: 'pythia', status: 'queued' },
+        { symbol: 'OLD', source: 'pythia', status: 'queued' },
+        { symbol: 'NUE', source: 'pythia', status: 'done', cost_usd: 4, updated_at: new Date(NOW_MS - BUDGET_WINDOW_MS - 86400e3).toISOString() },   // eight days ago
+    ]
+    const { calls, deps } = weekDeps(rows)
+    assert.deepEqual(weekSymbols([WEEK, old]), ['OLD', 'NUE', 'STLD'])
+    await resumeWeeks([WEEK, old], deps, { now: NOW_MS })
+    assert.equal(calls.query.since, old.started_at)
+    assert.deepEqual(calls.starts, [{ userId: null, symbols: ['OLD', 'STLD'], maxUsd: 5 }], "last week's spend is outside the window")
 })

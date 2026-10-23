@@ -67,8 +67,11 @@ Everything stays behind `PYTHIA_WEEKLY` — off, no week, no names, no research.
 - Step 5: `services/houseResearch.service.js` — the budget (`HOUSE_RESEARCH_MAX_USD`, $5) is read back from the
   queue rows' `cost_usd`; `startRun({ maxUsd })` stops starting names when spent; an off-book horizon is rejected
   `horizon_off_book` (never retried). `scripts/run-week.mjs` waits for the research before it exits.
-- Step 6: the weekly monitor's tick calls `resumeResearch` — stale claims (30 min) of the latest done week's names
-  back to `queued`, then a run over what waits. Traders' copy of the week drops `house_scan.picks` and its cost.
+- Step 6: the weekly monitor's tick calls `resumeResearch` over the last 4 done weeks (`RESUME_WEEKS`) — stale
+  claims (30 min) back to `queued`, then a run over what waits, oldest week first — so a name one week left behind is
+  not orphaned when the next finishes. The budget is the last 7 days' research spend on Pythia names.
+- Horizon rule live-checked 2026-10-23: PGR (swing) with the new opening came back on a 6m target, covered, $0.038
+  (axl_dev). Before it, Prometheus set 12m on 77 of 88 coverages. Traders' copy of the week drops `house_scan.picks` and its cost.
 - **Engine jobs have not run since ~2026-10-11** (daily prices 10-08, timing 10-07); the week only starts on a new
   price run, so the chain fires weekly only once the Render crons run.
 
