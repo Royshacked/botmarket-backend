@@ -32,6 +32,7 @@ import { researchQueueService } from './researchQueue.service.js'
 import { logger } from './logger.service.js'
 import { openingTurn } from './agentUtils.js'
 import { calcCost } from './tokenUsage.service.js'
+import { normalizeHorizon } from './forecastClock.js'
 
 const LOG = '[researchRun]'
 
@@ -73,9 +74,11 @@ export async function startRun({ userId, audience = null, model = null, symbols 
 
     let queued, covered
     try {
-        queued = await deps.listQueue({ status: 'queued' })
+        // `symbols`: a run for these names only (a sleeve's, the house week's) — read BY them, not filtered out of the
+        // queue's first page, where a backlog of older rows hid them (code review 2026-10-23); without it, the whole
+        // queue (the admin's Start).
+        queued = await deps.listQueue(Array.isArray(symbols) ? { status: 'queued', symbols: symbols.map(_sym), limit: 1000 } : { status: 'queued' })
         if (queued === null) return { ok: false, reason: 'queue_unavailable' }   // a failed read, not an empty queue
-        // `symbols`: a run for these names only (a sleeve's); without it, the whole queue (the admin's Start).
         if (Array.isArray(symbols)) {
             const want = new Set(symbols.map(_sym))
             queued = queued.filter(q => want.has(_sym(q.symbol)))
@@ -189,12 +192,22 @@ async function _loop(run, queued, covered, { userId, audience, model, signal }, 
             if (ledger) Promise.resolve(deps.book(ledger, usedModel, usage)).catch(() => {})
         }
         const priced = () => _cost(meter.cost)
+        // EVERY turn leaves its cost on the row, added to what earlier turns on it cost — the house budget reads the
+        // rows (houseResearch) — and a claim the turn does not close keeps a reason, so the pick-up leaves it to the
+        // admin instead of buying it again every tick (code review 2026-10-23).
+        let costLeft = false   // the turn's cost goes on the row ONCE, however many paths touch it after
+        const leave = (extra = {}) => {
+            const addCost = costLeft ? 0 : priced()
+            costLeft = true
+            return Promise.resolve(deps.annotate?.(item.id, { addCost, ...extra })).catch(() => null)
+        }
         try {
             const { coverage } = await deps.research({ item, symbol, opening: researchOpening(item), covered, userId, audience, model, signal, onSpend })
-            if (run.stop) { _settle(run, { symbol, outcome: 'stopped', cost_usd: priced() }); break }   // aborted mid-turn: row stays in_research
+            if (run.stop) { await leave({ reason: 'stopped' }); _settle(run, { symbol, outcome: 'stopped', cost_usd: priced() }); break }   // aborted mid-turn: row stays in_research
+            await leave()
 
             if (!coverage) {
-                await deps.reject(item.id, 'no_edge', { cost_usd: priced() })
+                await deps.reject(item.id, 'no_edge')
                 _settle(run, { symbol, outcome: 'passed', reason: 'no_edge', cost_usd: priced() })
                 run.passed++
                 continue
@@ -204,7 +217,7 @@ async function _loop(run, queued, covered, { userId, audience, model, signal }, 
             // name with a two-year target answers a question nobody asked. Rejected with the reason, not retried.
             const offBook = offBookHorizon(item, coverage)
             if (offBook) {
-                await deps.reject(item.id, 'horizon_off_book', { cost_usd: priced(), detail: offBook })
+                await deps.reject(item.id, 'horizon_off_book', { detail: offBook })
                 _settle(run, { symbol, outcome: 'passed', reason: 'horizon_off_book', detail: offBook, cost_usd: priced() })
                 run.passed++
                 continue
@@ -212,22 +225,25 @@ async function _loop(run, queued, covered, { userId, audience, model, signal }, 
 
             const saved = await deps.initiate(coverage)
             if (saved.ok) {
-                await deps.markDone(item.id, { cost_usd: priced() })
+                await deps.markDone(item.id)
                 covered.add(symbol)   // a later duplicate row (there should be none) is now a skip
                 _settle(run, { symbol, outcome: 'covered', coverageId: saved.doc?.id ?? null, cost_usd: priced() })
                 run.covered++
             } else if (saved.reason === 'already_covered') {
                 // Covered between the run's read of the book and now — by hand, at the desk.
-                await deps.reject(item.id, 'already_covered', { cost_usd: priced() })
+                await deps.reject(item.id, 'already_covered')
                 _settle(run, { symbol, outcome: 'skipped', reason: 'already_covered', cost_usd: priced() })
                 run.skipped++
             } else {
-                // Left in_research on purpose: the research happened, the save did not.
+                // Left in_research on purpose: the research happened, the save did not. The reason on the row is what
+                // keeps the pick-up from paying for it again.
+                await leave({ reason: saved.reason ?? 'save_failed', detail: saved.detail ?? null })
                 _settle(run, { symbol, outcome: 'failed', reason: saved.reason ?? 'save_failed', detail: saved.detail ?? null, cost_usd: priced() })
                 run.failed++
             }
         } catch (err) {
-            if (run.stop) { _settle(run, { symbol, outcome: 'stopped', cost_usd: priced() }); break }
+            if (run.stop) { await leave({ reason: 'stopped' }); _settle(run, { symbol, outcome: 'stopped', cost_usd: priced() }); break }
+            await leave({ reason: 'failed', detail: _reason(err) })
             _settle(run, { symbol, outcome: 'failed', reason: _reason(err), cost_usd: priced() })
             run.failed++
             // A refusal that is about the ACCOUNT, not the name — no credit, a bad key, no
@@ -288,12 +304,17 @@ const _sym = s => String(s ?? '').toUpperCase().trim()
 /** The price-target horizons each of Pythia's books may be graded on (coverage's own five, analyst_system_prompt.md). */
 export const BOOK_PT_HORIZONS = Object.freeze({ swing: ['3m', '6m'], long_term: ['12m', '18m', '24m'] })
 
-/** Why a Pythia name's coverage is off its book's horizon, or null. Only a Pythia row with a known book is held. Pure. */
+/**
+ * Why a Pythia name's coverage is off its book's horizon, or null. Only a Pythia row with a known book is held. The
+ * horizon is read the way the SAVE will store it (forecastClock.normalizeHorizon: a missing or unknown one is 12m), so
+ * what is judged is what would be graded (code review 2026-10-23). Pure.
+ */
 export function offBookHorizon(item, coverage) {
     const allowed = item?.context?.pythia ? BOOK_PT_HORIZONS[item.context.verdict] : null
     if (!allowed) return null
-    const h = coverage?.price_target?.horizon
-    return allowed.includes(h) ? null : `price target horizon ${h ?? 'missing'} — ${item.context.verdict} takes ${allowed.join('/')}`
+    const pt = coverage?.price_target
+    const h = normalizeHorizon(pt && typeof pt === 'object' ? pt.horizon : undefined)
+    return allowed.includes(h) ? null : `price target horizon ${h} — ${item.context.verdict} takes ${allowed.join('/')}`
 }
 
 /**
@@ -341,6 +362,7 @@ const _io = {
     startResearch: (id) => researchQueueService.startResearch(id),
     markDone:      (id, extra) => researchQueueService.markDone(id, extra),
     reject:        (id, reason, extra) => researchQueueService.reject(id, reason, extra),
+    annotate:      (id, o) => researchQueueService.annotate(id, o),
 
     // The spend of one name (house-research-chain.md step 1). A house run books to the first admin's ledger, like
     // Pythia's week, under its own key and as monitor spend: inside the admin's total, outside their chat ceiling.

@@ -256,12 +256,11 @@ test('researchRun: a run for given symbols researches only those — a sleeve do
 
 function meteredDeps(over = {}) {
     const d = makeDeps(over)
-    d.calls.booked = []; d.calls.doneExtra = []; d.calls.rejectExtra = []
+    d.calls.booked = []; d.calls.annotated = []
     d.costOf      = (model, usage) => usage.usd
     d.houseLedger = async () => 'admin1'
     d.book        = async (userId, model, usage) => { d.calls.booked.push([userId, model, usage.usd]) }
-    d.markDone    = async (id, extra) => { d.calls.done.push(id); d.calls.doneExtra.push(extra); return { ok: true } }
-    d.reject      = async (id, reason, extra) => { d.calls.rejected.push([id, reason]); d.calls.rejectExtra.push(extra); return { ok: true } }
+    d.annotate    = async (id, o) => { d.calls.annotated.push([id, o]); return { ok: true } }
     const inner = d.research
     // The turn spends: the desk's own call and a consult, through the tap the run hands it.
     d.research = async (args) => {
@@ -278,8 +277,7 @@ test('researchRun: a HOUSE run measures each name and books it to the house ledg
     const run = await settled()
     assert.deepEqual(run.results.map(r => [r.symbol, r.outcome, r.cost_usd]), [['AAA', 'covered', 0.35], ['BBB', 'passed', 0.35]])
     assert.equal(run.cost_usd, 0.7)
-    assert.deepEqual(d.calls.doneExtra, [{ cost_usd: 0.35 }], 'the queue row carries what it cost')
-    assert.deepEqual(d.calls.rejectExtra, [{ cost_usd: 0.35 }])
+    assert.deepEqual(d.calls.annotated, [['rq_AAA', { addCost: 0.35 }], ['rq_BBB', { addCost: 0.35 }]], 'the queue row carries what it cost')
     assert.deepEqual(d.calls.booked, [['admin1', 'gpt-6-luna', 0.1], ['admin1', 'claude-opus-5-5', 0.25], ['admin1', 'gpt-6-luna', 0.1], ['admin1', 'claude-opus-5-5', 0.25]])
 })
 

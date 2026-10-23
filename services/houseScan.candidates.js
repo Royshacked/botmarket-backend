@@ -226,7 +226,17 @@ const _today = () => new Date().toISOString().slice(0, 10)
  * Argus sees why). → `{ rows, total, below_floor }`, rows ordered and cut to POOL_MAX; `{ rows: [] }` on a
  * failed company read.
  */
-export async function industryCandidates(sub, book, { named = [], covered = new Set(), today = _today(), deps = _io } = {}) {
+export async function industryCandidates(sub, book, opts = {}) {
+    // The promise the module makes — a failed read leaves numbers n/a, it never drops the WEEK: anything this throws
+    // (the engine's handle, a malformed row) is this industry's empty list (code review 2026-10-23).
+    try { return await _industryCandidates(sub, book, opts) }
+    catch (err) { logger.warn(LOG, 'candidate list failed — empty', { code: sub?.code, error: err.message }); return { rows: [], total: 0, below_floor: 0 } }
+}
+
+/** Quarters read for the long-term book: the eight it uses, with room for a late filer. */
+const STATEMENT_DAYS = 900
+
+async function _industryCandidates(sub, book, { named = [], covered = new Set(), today = _today(), deps = _io } = {}) {
     let companies
     try { companies = (await deps.companies(sub)) ?? [] }
     catch (err) { logger.warn(LOG, 'company read failed', { code: sub?.code, error: err.message }); return { rows: [], total: 0, below_floor: 0 } }
@@ -246,7 +256,11 @@ export async function industryCandidates(sub, book, { named = [], covered = new 
     const [prices, quarters, estimates, screener, insiders, gics] = await Promise.all([
         read('prices', () => db.collection('daily_prices_recent').find({ symbol: { $in: symbols } }, { projection: { _id: 0, symbol: 1, format: 1, close: 1, volume: 1, last_date: 1 } }).toArray()),
         book === 'long_term'
-            ? read('statements', () => db.collection('fin_statements').find({ symbol: { $in: symbols }, kind: 'quarter' }, { projection: { _id: 0, symbol: 1, date: 1, is: 1, bs: 1 } }).sort({ date: -1 }).toArray())
+            // Only the last ~2.5 years: every quarter of every company was thousands of documents for Regional Banks on
+            // the 512 MB cluster, for eight a name (code review 2026-10-23).
+            ? read('statements', () => db.collection('fin_statements').find({ symbol: { $in: symbols }, kind: 'quarter',
+                date: { $gte: new Date(Date.parse(today) - STATEMENT_DAYS * 86_400_000).toISOString().slice(0, 10) } },
+            { projection: { _id: 0, symbol: 1, date: 1, is: 1, bs: 1 } }).sort({ date: -1 }).toArray())
             : [],
         read('estimates', () => db.collection('signal_estimate_snapshots').find({ symbol: { $in: symbols } }, { projection: { _id: 0, symbol: 1, asof: 1, years: 1 } }).sort({ asof: -1 }).toArray()),
         read('earnings', () => db.collection('daily_screener_stats').find({ symbol: { $in: symbols } }, { projection: { _id: 0, symbol: 1, next_earnings: 1 } }).toArray()),

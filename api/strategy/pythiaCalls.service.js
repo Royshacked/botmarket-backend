@@ -93,13 +93,17 @@ export function gradeCall(call, exit, at) {
  * against the call's own basket, and against the LARGEST uncovered names the scan picked before Argus did — so the
  * record answers whether choosing beats size. Null under one priced pick or without a basket grade. Pure.
  */
-export function gradePicks(picks, exit, basketReturn) {
-    const ret = (symbols) => {
-        const rs = (symbols ?? []).map(s => (_ok(picks.entry?.[s]) && _ok(exit[s]) ? exit[s] / picks.entry[s] - 1 : null)).filter(r => r != null)
+export function gradePicks(picks, exit, basket) {
+    const ret = (symbols, entry = picks.entry) => {
+        const rs = (symbols ?? []).map(s => (_ok(entry?.[s]) && _ok(exit[s]) ? exit[s] / entry[s] - 1 : null)).filter(r => r != null)
         return rs.length ? { n: rs.length, ret: rs.reduce((x, y) => x + y, 0) / rs.length } : null
     }
     const chosen = ret(picks.symbols), largest = ret(picks.largest)
-    if (!chosen || typeof basketReturn !== 'number') return null
+    // The basket over the PICKS' window — priced again when they were frozen (`basket_entry`), so a move between the
+    // call and the house scan counts for neither side (code review 2026-10-23).
+    const own = ret(basket, picks.basket_entry)
+    const basketReturn = own && own.n >= BASKET_MIN ? own.ret : null
+    if (!chosen || basketReturn == null) return null
     return {
         source: picks.source, n: chosen.n, return: chosen.ret, vs_basket: chosen.ret - basketReturn,
         ...(largest ? { largest_return: largest.ret, vs_largest: chosen.ret - largest.ret } : {}),
@@ -124,10 +128,12 @@ async function attachPicks(subject, { symbols, source, covered = new Set(), now 
     if (call.picks) return { attached: false, reason: 'already has picks' }
     if (_days(call.called_at, now) > PICKS_MAX_AGE_DAYS) return { attached: false, reason: 'call too old' }
     const largest = (call.basket ?? []).filter(s => !covered.has(s)).slice(0, symbols.length)
-    const prices = await _prices([...new Set([...symbols, ...largest])])
+    const prices = await _prices([...new Set([...symbols, ...largest, ...(call.basket ?? [])])])
     const priced = symbols.filter(s => prices[s])
     if (!priced.length) return { attached: false, reason: 'could not price the picks' }
-    const picks = { at: now, source, symbols: priced, largest: largest.filter(s => prices[s]), entry: prices }
+    const pick = (list) => Object.fromEntries(list.filter(s => prices[s]).map(s => [s, prices[s]]))
+    const picks = { at: now, source, symbols: priced, largest: largest.filter(s => prices[s]),
+        entry: pick([...new Set([...symbols, ...largest])]), basket_entry: pick(call.basket ?? []) }
     await db.collection(COLLECTION).updateOne({ id: call.id, picks: { $exists: false } }, { $set: { picks } })
     return { attached: true, call: call.id }
 }
@@ -212,7 +218,7 @@ async function gradeDue({ now = new Date().toISOString() } = {}) {
             const exit = inTime.length ? await _prices([...new Set([...call.basket, ...pickSyms, ...BENCHMARKS])]) : {}
             for (const x of inTime) {
                 const g = gradeCall(call, exit, now)
-                const p = g && call.picks ? gradePicks(call.picks, exit, g.basket_return) : null
+                const p = g && call.picks ? gradePicks(call.picks, exit, call.basket) : null
                 if (g) { set[`grades.${x.k}`] = { ...g, ...(p ? { picks: p } : {}), late_days: Math.round(x.late) }; graded++ }
                 else failed++
             }

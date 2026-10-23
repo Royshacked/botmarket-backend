@@ -57,10 +57,13 @@ export async function researchWeeks(weeks, deps = _deps, { now = Date.now() } = 
         const symbols = weekSymbols(list)
         if (!symbols.length) return { ok: true, outcome: 'no_names' }
         const rows = await deps.listQueue({ symbols, since: _since(list), limit: 500 })
-        if (rows === null) return { ok: false, outcome: 'queue_unavailable' }
+        // The budget is ALL of the last seven days' research on Pythia's names, whichever week sent them — read on its
+        // own, or the week that just finished would not see what the pick-up spent on older weeks two days ago
+        // (code review 2026-10-23).
+        const recent = await deps.listQueue({ source: 'pythia', updatedSince: new Date(now - BUDGET_WINDOW_MS).toISOString(), limit: 1000 })
+        if (rows === null || recent === null) return { ok: false, outcome: 'queue_unavailable' }
         const pythia = rows.filter(r => r.source === 'pythia')
-        const windowStart = now - BUDGET_WINDOW_MS
-        const spent = pythia.filter(r => Date.parse(r.updated_at ?? '') >= windowStart).reduce((s, r) => s + (Number(r.cost_usd) || 0), 0)
+        const spent = recent.reduce((s, r) => s + (Number(r.cost_usd) || 0), 0)
         const left = Math.max(0, (Number(deps.maxUsd()) || 0) - spent)
         // Oldest week's names first: they have waited longest.
         const order = new Map(symbols.map((s, i) => [s, i]))
@@ -95,7 +98,12 @@ export async function resumeWeeks(weeks, deps = _deps, { now = Date.now() } = {}
     const list = (Array.isArray(weeks) ? weeks : [weeks]).filter(Boolean)
     const symbols = weekSymbols(list)
     if (!symbols.length) return { ok: true, outcome: 'no_names' }
-    if (deps.getRun()?.status === 'running') return { ok: true, outcome: 'busy' }
+    const last = deps.getRun()
+    if (last?.status === 'running') return { ok: true, outcome: 'busy' }
+    // The admin pressed STOP: the pick-up does not start it again behind their back. The next Start, or the next
+    // week's own research, is what resumes (code review 2026-10-23). In memory, like the run: a restart forgets it,
+    // but the stopped claim keeps its `stopped` reason, so that name still waits for the admin.
+    if (last?.status === 'stopped') return { ok: true, outcome: 'stopped_by_admin' }
     await Promise.resolve(deps.requeueStale({ symbols, olderThanMs: STALE_CLAIM_MS, now })).catch(() => null)
     return researchWeeks(list, deps, { now })
 }

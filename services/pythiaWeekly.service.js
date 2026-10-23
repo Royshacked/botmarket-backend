@@ -167,8 +167,11 @@ const _token = () => `${Date.now().toString(36)}${Math.random().toString(36).sli
 async function _claim(coll, { id, asof, week, token, now, by, userId }) {
     try {
         const r = await coll.updateOne({ id, claim: week?.claim ?? null }, {
-            $setOnInsert: { id, asof, created_at: now, results: [] },
-            $set: { claim: token, status: 'running', started_at: now, updated_at: now, by, booked_to: String(userId) },
+            // `started_at` is the week's FIRST start: the names its house scan queued are read from it, and a resume or a
+            // forced rerun that moved it hid the first finish's names from the research pick-up (code review 2026-10-23).
+            // Each claim's own time is `claimed_at`.
+            $setOnInsert: { id, asof, created_at: now, results: [], started_at: now },
+            $set: { claim: token, status: 'running', claimed_at: now, updated_at: now, by, booked_to: String(userId) },
         }, { upsert: true })
         return (r?.matchedCount ?? 0) + (r?.upsertedCount ?? 0) > 0
     } catch (err) {

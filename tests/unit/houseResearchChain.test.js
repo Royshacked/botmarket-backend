@@ -191,7 +191,7 @@ test('a Pythia name off its book\'s horizon is held; other names never are', () 
     const item = (verdict) => ({ context: { pythia: true, verdict } })
     assert.equal(offBookHorizon(item('swing'), { price_target: { horizon: '6m' } }), null)
     assert.match(offBookHorizon(item('swing'), { price_target: { horizon: '24m' } }), /24m — swing takes 3m\/6m/)
-    assert.match(offBookHorizon(item('long_term'), { price_target: {} }), /missing/)
+    assert.equal(offBookHorizon(item('long_term'), { price_target: {} }), null, 'stored as 12m — long term takes it')
     assert.equal(offBookHorizon({ context: { sector: 'x' } }, { price_target: { horizon: '24m' } }), null)
 })
 
@@ -230,9 +230,14 @@ const NOW_MS = Date.parse('2026-10-23T12:00:00Z')
 const WEEK = { asof: '2026-10-19', started_at: '2026-10-20T00:00:00Z', house_scan: { queued: [{ symbol: 'nue' }, { symbol: 'STLD' }, { symbol: 'NUE' }] } }
 
 function weekDeps(rows, over = {}) {
-    const calls = { starts: [], requeued: [] }
+    const calls = { starts: [], requeued: [], queries: [] }
     return { calls, deps: {
-        listQueue: async (q) => { calls.query = q; return rows },
+        // The queue's own filters, so the week's read and the budget's read see what Mongo would give them.
+        listQueue: async (q) => {
+            calls.queries.push(q); calls.query ??= q
+            if (rows === null) return null
+            return rows.filter(r => (!q.source || r.source === q.source) && (!q.updatedSince || (r.updated_at ?? '') >= q.updatedSince) && (!q.symbols || q.symbols.includes(r.symbol)))
+        },
         requeueStale: async (o) => { calls.requeued.push(o); return { ok: true } },
         startRun: async (o) => { calls.starts.push(o); return { ok: true, run: { id: 'run_1' } } },
         getRun: () => null,
@@ -282,12 +287,15 @@ test('the monitor tick runs the week, then picks up its research', async () => {
 // ─── the record, and who sees what ───────────────────────────────────────────
 
 test('the picks are graded against the basket and against the largest names', () => {
-    const picks = { source: 'argus', symbols: ['A', 'B'], largest: ['L'], entry: { A: 10, B: 10, L: 10 } }
-    const g = gradePicks(picks, { A: 12, B: 11, L: 10.5 }, 0.05)
+    // The basket is priced again with the picks: X/Y/Z from 20 → 21 is +5% over the picks' own window.
+    const picks = { source: 'argus', symbols: ['A', 'B'], largest: ['L'], entry: { A: 10, B: 10, L: 10 }, basket_entry: { X: 20, Y: 20, Z: 20 } }
+    const exit = { A: 12, B: 11, L: 10.5, X: 21, Y: 21, Z: 21 }
+    const g = gradePicks(picks, exit, ['X', 'Y', 'Z'])
     assert.equal(g.return.toFixed(3), '0.150')
     assert.equal(g.vs_basket.toFixed(3), '0.100')
     assert.equal(g.vs_largest.toFixed(3), '0.100')
-    assert.equal(gradePicks(picks, {}, 0.05), null)
+    assert.equal(gradePicks(picks, {}, ['X', 'Y', 'Z']), null)
+    assert.equal(gradePicks({ ...picks, basket_entry: undefined }, exit, ['X', 'Y', 'Z']), null, 'no basket over the same window → no grade, never a mismatched one')
 })
 
 test('a trader sees the queued names, not Argus\'s lists or their spend', () => {
@@ -318,4 +326,72 @@ test("the pick-up spans the recent weeks: an older week's name goes first, and t
     await resumeWeeks([WEEK, old], deps, { now: NOW_MS })
     assert.equal(calls.query.since, old.started_at)
     assert.deepEqual(calls.starts, [{ userId: null, symbols: ['OLD', 'STLD'], maxUsd: 5 }], "last week's spend is outside the window")
+})
+
+// ─── the code review of 2026-10-23 ──────────────────────────────────────────
+
+test("the budget counts every Pythia name researched in the last seven days, not only this week's", async () => {
+    const rows = [
+        { symbol: 'STLD', source: 'pythia', status: 'queued' },
+        { symbol: 'OLDER', source: 'pythia', status: 'done', cost_usd: 4.5, updated_at: new Date(NOW_MS - 2 * 86400e3).toISOString() },   // an older week's name, two days ago
+    ]
+    const { calls, deps } = weekDeps(rows)
+    await researchWeek(WEEK, deps, { now: NOW_MS })
+    assert.deepEqual(calls.starts, [{ userId: null, symbols: ['STLD'], maxUsd: 0.5 }])
+})
+
+test('a run the admin stopped is not started again by the pick-up', async () => {
+    const { calls, deps } = weekDeps([{ symbol: 'NUE', source: 'pythia', status: 'queued' }], { getRun: () => ({ status: 'stopped' }) })
+    assert.equal((await resumeWeeks([WEEK], deps)).outcome, 'stopped_by_admin')
+    assert.equal(calls.requeued.length, 0)
+    assert.equal(calls.starts.length, 0)
+})
+
+test('a failed save leaves its cost ONCE and a reason on the row; a turn that throws after the save leaves it once too', async () => {
+    const annotated = []
+    const base = runDeps({ A: { coverage: { symbol: 'A', price_target: { horizon: '3m' } } } })
+    const deps = { ...base.deps, annotate: async (id, o) => { annotated.push([id, o]) }, initiate: async () => ({ ok: false, reason: 'rating_contradicts_target' }) }
+    await startRun({ userId: null }, deps)
+    await settled()
+    assert.deepEqual(annotated, [['rq_A', { addCost: 0.04 }], ['rq_A', { addCost: 0, reason: 'rating_contradicts_target', detail: null }]])
+    annotated.length = 0
+    await startRun({ userId: null }, { ...deps, initiate: async () => { throw new Error('mongo') } })
+    await settled()
+    assert.equal(annotated.reduce((s, [, o]) => s + o.addCost, 0), 0.04, 'the cost once, however many paths touch the row')
+    assert.equal(annotated.at(-1)[1].reason, 'failed')
+})
+
+test('the horizon is judged as the save stores it: a missing one is 12m — right for long term, off book for swing', () => {
+    const item = (verdict) => ({ context: { pythia: true, verdict } })
+    assert.equal(offBookHorizon(item('long_term'), { price_target: { value: 180 } }), null)
+    assert.equal(offBookHorizon(item('long_term'), { price_target: 180 }), null)
+    assert.match(offBookHorizon(item('swing'), { price_target: 180 }), /12m — swing/)
+})
+
+test('a run for given symbols reads the queue BY them, not out of its first page', async () => {
+    let asked = null
+    const { deps } = runDeps({ A: { coverage: null } })
+    await startRun({ userId: null, symbols: ['a'] }, { ...deps, listQueue: async (q) => { asked = q; return [{ id: 'rq_A', symbol: 'A', context: {} }] } })
+    await settled()
+    assert.deepEqual(asked, { status: 'queued', symbols: ['A'], limit: 1000 })
+})
+
+test("one list that throws is that industry's; the week's other verdicts still send names", async () => {
+    const { queued, deps } = scanDeps({ candidates: async (sub) => { if (sub.code === 'A') throw new Error('engine'); return { rows: [{ symbol: 'B1' }] } } })
+    await runHouseScan([
+        { kind: 'industry', code: 'A', name: 'Steel', outcome: 'published', verdict: 'swing' },
+        { kind: 'industry', code: 'B', name: 'Banks', outcome: 'published', verdict: 'swing' },
+    ], deps)
+    assert.deepEqual(queued.map(q => q.symbol), ['B1'])
+    assert.deepEqual((await industryCandidates({ code: '1' }, 'swing', { deps: { db: async () => { throw new Error('down') }, companies: async () => [{ symbol: 'X' }] } })).rows, [])
+})
+
+test('a theme with no link to read still sends the companies she named', async () => {
+    const { queued, deps } = scanDeps({
+        theme: async () => ({ links: [{ code: 'X', name: 'Far', order: 3 }] }),
+        assessment: async () => ({ subject: { kind: 'theme', id: 'th_ai', name: 'AI' }, verdict: 'swing', thesis: 't', risks: [], names: [{ symbol: 'NVDA', why: 'w' }] }),
+    })
+    await runHouseScan([{ kind: 'theme', id: 'th_ai', name: 'AI', outcome: 'published', verdict: 'swing' }], deps)
+    assert.deepEqual(queued.map(q => q.symbol), ['NVDA'])
+    assert.equal(queued[0].context.named_why, 'w')
 })

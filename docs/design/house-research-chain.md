@@ -75,6 +75,21 @@ Everything stays behind `PYTHIA_WEEKLY` — off, no week, no names, no research.
 - **Engine jobs have not run since ~2026-10-11** (daily prices 10-08, timing 10-07); the week only starts on a new
   price run, so the chain fires weekly only once the Render crons run.
 
+## Code review 2026-10-23 — ten findings, all applied (Roy: "apply all 10")
+
+1. A failed turn left no cost on its row and was re-bought every tick → every turn's cost goes on the row ONCE
+   (`researchQueue.annotate`, `$inc`), a claim the turn does not close keeps a reason, and the pick-up requeues only
+   claims with none (a run that died mid-turn).
+2. The budget read only the finishing week's rows → its own read: all `pythia` rows touched in the last 7 days.
+3. The horizon check read the draft raw → it reads it as the save stores it (`normalizeHorizon`, missing = 12m).
+4. `startRun({ symbols })` filtered the queue's first 200 rows → it reads by the symbols.
+5. One industry's throw stopped the week's scan → caught per list (and inside `industryCandidates`).
+6. The pick-up restarted a run the admin had stopped → `stopped_by_admin` until the next Start or the next week.
+7. Picks and basket were graded over different windows → the basket is priced again with the picks (`basket_entry`).
+8. A theme with no readable link sent none of its named companies → they get a list of their own.
+9. A claim overwrote the week's `started_at` → kept from the first start; each claim writes `claimed_at`.
+10. Long-term lists read every quarter on record → the last ~2.5 years.
+
 ## Open
 
 - **Hold / sell coverage from the chain** — kept like any coverage for now; whether it drops out after N weeks

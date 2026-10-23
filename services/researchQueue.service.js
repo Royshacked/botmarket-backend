@@ -85,14 +85,17 @@ async function enqueue({ symbol, source, requestedBy = 'house', context = null }
  * surface, because it answers the question you are asking it with a confident lie. The caller turns
  * null into a 503; an empty array still means empty.
  */
-async function listQueue({ status, symbols = null, since = null, limit = 200 } = {}) {
+async function listQueue({ status, symbols = null, since = null, source = null, updatedSince = null, limit = 200 } = {}) {
     try {
         const db = await getDb()
         const q  = {}
         if (status) q.status = Array.isArray(status) ? { $in: status } : status
-        // A week's own names (house-research-chain.md step 5): its symbols, queued since the week ran.
+        // A week's own names (house-research-chain.md step 5): its symbols, queued since the week ran; and the
+        // budget's read — one source's rows touched in the window.
         if (Array.isArray(symbols)) q.symbol = { $in: symbols.map(s => String(s).toUpperCase()) }
         if (since) q.created_at = { $gte: since }
+        if (source) q.source = source
+        if (updatedSince) q.updated_at = { $gte: updatedSince }
         const docs = await db.collection(COLLECTION)
             .find(q).sort({ created_at: 1 }).limit(limit).toArray()
         return docs.map(stripId)
@@ -171,13 +174,34 @@ async function requeueStale({ symbols = [], olderThanMs, now = Date.now() } = {}
     try {
         const db = await getDb()
         const cutoff = new Date(now - olderThanMs).toISOString()
+        // A claim with a REASON was decided — a save that failed, a run the admin stopped (researchRun.annotate) — and
+        // is the admin's to reopen; only a claim with none is a run that died mid-turn (code review 2026-10-23: a
+        // failing name was re-bought every tick).
         const res = await db.collection(COLLECTION).updateMany(
-            { status: 'in_research', symbol: { $in: symbols.map(s => String(s).toUpperCase()) }, updated_at: { $lt: cutoff } },
+            { status: 'in_research', symbol: { $in: symbols.map(s => String(s).toUpperCase()) }, updated_at: { $lt: cutoff }, reason: { $in: [null] } },
             { $set: { status: 'queued', updated_at: new Date(now).toISOString(), reason: null } })
         if (res.modifiedCount) logger.info(LOG, 'requeued stale claims', { requeued: res.modifiedCount })
         return { ok: true, requeued: res.modifiedCount }
     } catch (err) {
         logger.error(LOG, 'requeueStale failed', err)
+        return { ok: false, error: err }
+    }
+}
+
+/**
+ * What a research turn left on its row, whatever its outcome (house-research-chain.md; code review 2026-10-23):
+ * its cost ADDED to what earlier turns on the row cost — a name failed once and researched again cost both — and,
+ * on a claim the turn did not close (a failed save, a stop), the reason, so the pick-up leaves it to the admin.
+ */
+async function annotate(id, { addCost = 0, reason = null, detail = null } = {}) {
+    try {
+        const db = await getDb()
+        const update = { $set: { updated_at: new Date().toISOString(), ...(reason ? { reason } : {}), ...(detail ? { detail: String(detail).slice(0, 300) } : {}) } }
+        if (Number(addCost) > 0) update.$inc = { cost_usd: Number(addCost) }
+        await db.collection(COLLECTION).updateOne({ id }, update)
+        return { ok: true }
+    } catch (err) {
+        logger.error(LOG, 'annotate failed', err)
         return { ok: false, error: err }
     }
 }
@@ -200,4 +224,4 @@ async function _transition(id, to, from, extra = {}) {
     }
 }
 
-export const researchQueueService = { enqueue, listQueue, startResearch, markDone, reject, requeue, requeueInResearch, requeueStale }
+export const researchQueueService = { enqueue, listQueue, startResearch, markDone, reject, requeue, requeueInResearch, requeueStale, annotate }

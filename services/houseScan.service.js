@@ -100,22 +100,41 @@ export async function runHouseScan(results, deps = _deps, { alreadyQueued = 0, b
             if (!a || !BOOKS.includes(a.verdict)) continue      // re-assessed since: the verdict that would send it is gone
             const named = new Map((a.names ?? []).map(x => [String(x.symbol).toUpperCase(), x.why ?? null]))
             // Industries: their own list. Themes: supplier links (order 2) first — the less obvious names — then direct.
-            const sources = r.kind === 'theme'
-                ? ((await deps.theme(r.id))?.links ?? []).filter(l => l.order <= 2).sort((x, y) => y.order - x.order).map(l => ({ code: l.code, link: l.name }))
+            let sources = r.kind === 'theme'
+                ? ((await Promise.resolve(deps.theme(r.id)).catch(() => null))?.links ?? []).filter(l => l.order <= 2).sort((x, y) => y.order - x.order).map(l => ({ code: l.code, link: l.name }))
                 : [{ code: r.code, link: null }]
+            // A theme with no link to read (only order 3, or the theme unreadable) still sends the companies she named —
+            // their own list (code review 2026-10-23).
+            if (!sources.length && named.size) sources = [{ code: null, link: null }]
             const chosen = [], sourcesUsed = new Set()
             for (const src of sources) {
                 if (queued.length >= max) break
-                const sub = await deps.sub(src.code)
-                if (!sub) continue
-                const list = await deps.candidates(sub, a.verdict, { named: [...named.keys()], covered })
-                // Names already sent or passed on recently are not Argus's to pick again; covered ones stay visible.
-                const rows = (list?.rows ?? []).filter(x => !taken.has(x.symbol) && !rejected.has(x.symbol))
-                const take = Math.min(per, max - queued.length)
-                const pick = await deps.pick({ assessment: a, subject: r.name ?? a.subject?.name, link: src.link, rows, max: take }, { onUsage })
+                // ONE industry's failure (an engine read, a malformed row) is that industry's: logged, and the week's
+                // other verdicts still send names (code review 2026-10-23).
+                let rows, pick, total = 0
+                try {
+                    let listed
+                    if (src.code) {
+                        const sub = await deps.sub(src.code)
+                        if (!sub) continue
+                        const list = await deps.candidates(sub, a.verdict, { named: [...named.keys()], covered })
+                        listed = list?.rows ?? []
+                        total = list?.total ?? 0
+                    } else {
+                        listed = [...named.keys()].map(symbol => ({ symbol, named: true, covered: covered.has(symbol) }))
+                        total = listed.length
+                    }
+                    // Names already sent or passed on recently are not Argus's to pick again; covered ones stay visible.
+                    rows = listed.filter(x => !taken.has(x.symbol) && !rejected.has(x.symbol))
+                    const take = Math.min(per, max - queued.length)
+                    pick = await deps.pick({ assessment: a, subject: r.name ?? a.subject?.name, link: src.link, rows, max: take }, { onUsage })
+                } catch (err) {
+                    logger.warn(LOG, 'one list failed — the week goes on', { subject: r.name, code: src.code, error: err.message })
+                    continue
+                }
                 sourcesUsed.add(pick.source)
                 lists.push({ subject: r.name ?? a.subject?.name, code: src.code, link: src.link, verdict: a.verdict, source: pick.source,
-                    listed: rows.length, total: list?.total ?? 0, picks: pick.picks.map(p => p.symbol), passed: pick.passed ?? [],
+                    listed: rows.length, total, picks: pick.picks.map(p => p.symbol), passed: pick.passed ?? [],
                     ...(pick.note ? { note: pick.note } : {}), ...(pick.fallback ? { fallback: pick.fallback } : {}) })
                 for (const p of pick.picks) {
                     if (queued.length >= max) break
