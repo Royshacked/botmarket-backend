@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 
 import { applyIndustryLimits, avoidNames, INDUSTRY_CAP, HYPE_FACTOR, _setDeps as setLimitsDeps } from '../../services/industryLimits.service.js'
 import { runHouseScan, pythiaContext } from '../../services/houseScan.service.js'
+import { codePicks } from '../../services/houseScan.argus.js'
 import { _industryLimitsForAdd } from '../../api/portfolio/portfolioRebalance.service.js'
 import { industryAssessmentService, _setAssessmentIO } from '../../api/strategy/industryAssessment.service.js'
 import { industryViewService, _setViewIO } from '../../api/strategy/industryView.service.js'
@@ -135,6 +136,15 @@ test('Atlas and Axl read the verdict on each name\'s line', () => {
 
 // ── the house scan ───────────────────────────────────────────────────────────
 
+// The pre-Argus seams through the new ones (house-research-chain.md): the list is the named, then the largest, and the
+// pick answers in the code order — what these tests check is the queue's rules, not Argus's choice.
+const viaCode = (largest) => ({
+    sub: async (code) => ({ code }),
+    candidates: async (sub, book, { named = [], covered = new Set() } = {}) => ({ rows: [...new Set([...named, ...(await largest(sub.code))])].map(symbol => ({ symbol, covered: covered.has(symbol), named: named.includes(symbol) })) }),
+    pick: async ({ rows, max }) => ({ picks: codePicks(rows, max), source: 'code' }),
+    attachPicks: async () => ({}),
+})
+
 function houseDeps(over = {}) {
     const queued = []
     const assessments = {
@@ -147,7 +157,7 @@ function houseDeps(over = {}) {
         queued,
         deps: {
             covered: async () => new Set(['NUE']),
-            largest: async (code) => largest[code] ?? [],
+            ...viaCode(async (code) => largest[code] ?? []),
             theme: async () => ({ links: [{ code: '31', name: 'Semis', order: 1 }, { code: '32', name: 'Chip equipment', order: 2 }, { code: '33', name: 'Copper', order: 3 }] }),
             assessment: async (r) => assessments[`${r.kind}:${r.code ?? r.id}`],
             enqueue: async (row) => { queued.push(row); return { ok: true, id: 'x' } },
@@ -185,7 +195,7 @@ test('the weekly ceiling holds, a duplicate does not count, and a verdict change
     ], capped.deps)
     assert.equal(r.queued.length, 4)
 
-    const dup = houseDeps({ enqueue: async (row) => ({ ok: true, duplicate: row.symbol === 'STLD' }) })
+    const dup = houseDeps({ inLine: async () => [{ symbol: 'STLD' }], enqueue: async (row) => ({ ok: true, duplicate: row.symbol === 'STLD' }) })
     const d = await runHouseScan([{ kind: 'industry', code: '11', name: 'Steel', outcome: 'published', verdict: 'swing' }], dup.deps)
     assert.deepEqual(d.queued.map(q => q.symbol), ['CLF', 'X', 'CMC'], 'STLD was already queued — the next name takes its place')
 

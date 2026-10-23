@@ -88,6 +88,50 @@ export function gradeCall(call, exit, at) {
     }
 }
 
+/**
+ * The house scan's picks at one horizon (docs/design/house-research-chain.md step 4): their equal-weight return
+ * against the call's own basket, and against the LARGEST uncovered names the scan picked before Argus did — so the
+ * record answers whether choosing beats size. Null under one priced pick or without a basket grade. Pure.
+ */
+export function gradePicks(picks, exit, basketReturn) {
+    const ret = (symbols) => {
+        const rs = (symbols ?? []).map(s => (_ok(picks.entry?.[s]) && _ok(exit[s]) ? exit[s] / picks.entry[s] - 1 : null)).filter(r => r != null)
+        return rs.length ? { n: rs.length, ret: rs.reduce((x, y) => x + y, 0) / rs.length } : null
+    }
+    const chosen = ret(picks.symbols), largest = ret(picks.largest)
+    if (!chosen || typeof basketReturn !== 'number') return null
+    return {
+        source: picks.source, n: chosen.n, return: chosen.ret, vs_basket: chosen.ret - basketReturn,
+        ...(largest ? { largest_return: largest.ret, vs_largest: chosen.ret - largest.ret } : {}),
+    }
+}
+
+/** A call this young takes the week's picks; an older one was priced too long before them to compare. */
+export const PICKS_MAX_AGE_DAYS = 3
+
+/**
+ * Freeze the house scan's picks on the subject's latest call (house-research-chain.md step 4) → `{ attached }`.
+ * Only a call made within PICKS_MAX_AGE_DAYS (the week that published it), and only once: the first picks a call
+ * gets are the ones it grades. `largest` is the old way's choice — the first `symbols.length` uncovered names of
+ * the call's basket (largest first) — priced beside them. Throws on a db failure; the caller logs it.
+ */
+async function attachPicks(subject, { symbols, source, covered = new Set(), now = new Date().toISOString() } = {}) {
+    if (!symbols?.length) return { attached: false, reason: 'no picks' }
+    const db = await _io.db()
+    const field = subject?.code ? 'subject.code' : 'subject.id'
+    const call = await db.collection(COLLECTION).find({ [field]: subject?.code ?? subject?.id }).sort({ called_at: -1 }).limit(1).next()
+    if (!call) return { attached: false, reason: 'no call' }
+    if (call.picks) return { attached: false, reason: 'already has picks' }
+    if (_days(call.called_at, now) > PICKS_MAX_AGE_DAYS) return { attached: false, reason: 'call too old' }
+    const largest = (call.basket ?? []).filter(s => !covered.has(s)).slice(0, symbols.length)
+    const prices = await _prices([...new Set([...symbols, ...largest])])
+    const priced = symbols.filter(s => prices[s])
+    if (!priced.length) return { attached: false, reason: 'could not price the picks' }
+    const picks = { at: now, source, symbols: priced, largest: largest.filter(s => prices[s]), entry: prices }
+    await db.collection(COLLECTION).updateOne({ id: call.id, picks: { $exists: false } }, { $set: { picks } })
+    return { attached: true, call: call.id }
+}
+
 async function _prices(symbols) {
     const rows = await mapLimit(symbols, async (s) => {
         try { return [s, await _io.price(s)] } catch { return [s, null] }
@@ -164,10 +208,12 @@ async function gradeDue({ now = new Date().toISOString() } = {}) {
             const voidIt = (k, reason) => { set[`grades.${k}`] = { at: now, void: true, reason }; voided++ }
             const inTime = due.filter(x => x.late <= GRADE_GRACE_DAYS)
             for (const x of due.filter(x => x.late > GRADE_GRACE_DAYS)) voidIt(x.k, `not graded until ${Math.round(x.late)} days after it fell due`)
-            const exit = inTime.length ? await _prices([...call.basket, ...BENCHMARKS]) : {}
+            const pickSyms = call.picks ? [...(call.picks.symbols ?? []), ...(call.picks.largest ?? [])] : []
+            const exit = inTime.length ? await _prices([...new Set([...call.basket, ...pickSyms, ...BENCHMARKS])]) : {}
             for (const x of inTime) {
                 const g = gradeCall(call, exit, now)
-                if (g) { set[`grades.${x.k}`] = { ...g, late_days: Math.round(x.late) }; graded++ }
+                const p = g && call.picks ? gradePicks(call.picks, exit, g.basket_return) : null
+                if (g) { set[`grades.${x.k}`] = { ...g, ...(p ? { picks: p } : {}), late_days: Math.round(x.late) }; graded++ }
                 else failed++
             }
             const done = Object.keys(HORIZON_DAYS).every(k => call.grades?.[k] || set[`grades.${k}`])
@@ -222,4 +268,4 @@ async function listCalls({ limit = 100 } = {}) {
         .sort({ called_at: -1 }).limit(Math.min(Math.max(limit, 1), 500)).toArray()
 }
 
-export const pythiaCallsService = { recordCall, gradeDue, trackRecord, listCalls }
+export const pythiaCallsService = { recordCall, attachPicks, gradeDue, trackRecord, listCalls }

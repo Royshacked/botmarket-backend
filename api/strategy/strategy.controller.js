@@ -104,6 +104,8 @@ export function weekForTraders(week, approvedThemes = null) {
         ...(rest.flagged ? { flagged: list('flagged') } : {}),
         ...(rest.waiting ? { waiting: list('waiting') } : {}),
         ...(rest.held_back ? { held_back: list('held_back') } : {}),
+        // The names queued stay visible; Argus's lists and their spend are the house's (house-research-chain.md).
+        ...(rest.house_scan ? { house_scan: (({ cost_usd: c, picks, ...h }) => h)(rest.house_scan) } : {}),   // eslint-disable-line no-unused-vars
     }
 }
 

@@ -184,10 +184,11 @@ Two loops, because they cost different things:
   changing raises the `industry_view` trigger (`portfolioReview.util.industryChanges`). Gated on
   holdings, unlike the ungated `sector_view` it replaced: 163 industries reviewed through the year would
   otherwise ring on most reviews.
-- **Argus, by code.** The house scan was driven by overweight tilt rows and paused with the tilt; since
-  2026-10-11 it runs on her verdicts (step 7): after each completed week, the largest uncovered names of every
-  FOR SWING / FOR LONG TERM industry go to Prometheus's queue (source `pythia`). Argus choosing the names
-  instead of size is open item 3 of [pythia-assessment.md](../design/pythia-assessment.md).
+- **Argus, then Prometheus, by themselves** ([house-research-chain.md](../design/house-research-chain.md), 2026-10-23).
+  After each completed week, every FOR SWING / FOR LONG TERM industry's companies are measured (code) and Argus picks
+  the best 5 for her thesis; they go to Prometheus's queue (source `pythia`) and are researched automatically,
+  inside a weekly $ budget, on a price-target horizon bound to her book. Replaced "the largest uncovered names"
+  (open item 3 of [pythia-assessment.md](../design/pythia-assessment.md)).
 - **Argus and Atlas's sleeves, as a preference** (2026-10-13, [argus-on-pythia.md](../design/argus-on-pythia.md)):
   a swing or long-term scan looks in her industries first (`get_house_industries`, `listForBook`); an Atlas sleeve
   takes names from her long-term industries in its sector first, up to half; a scanned or handed-over name carries

@@ -8,19 +8,25 @@
 // Opt-in (PYTHIA_WEEKLY): off, nothing is scanned or spent.
 
 import { createPollLoop } from './pollLoop.js'
-import { runWeekly } from '../services/pythiaWeekly.service.js'
+import { runWeekly, resumeResearch } from '../services/pythiaWeekly.service.js'
 import { config } from '../services/config.js'
 
 const LOG = '[pythiaWeeklyMonitor]'
 export const CHECK_INTERVAL_MS = 3 * 60 * 60 * 1000
 
-const _deps = { enabled: () => config.pythiaWeekly, run: () => runWeekly() }
+const _deps = { enabled: () => config.pythiaWeekly, run: () => runWeekly(), resume: () => resumeResearch() }
 export function _setDeps(d) { Object.assign(_deps, d) }
 
-/** One check. → the run's result, or `{ outcome: 'off' }`. Never throws (runWeekly does not). */
+/**
+ * One check. → the run's result (with the research pick-up's as `research`), or `{ outcome: 'off' }`. Never throws
+ * (neither callee does). After the week, the latest done week's research is picked up (house-research-chain.md
+ * step 6): names a dead run left, or a budget that waited on a busy run.
+ */
 export async function _tick(deps = _deps) {
     if (!deps.enabled()) return { outcome: 'off' }
-    return deps.run()
+    const week = await deps.run()
+    const research = await deps.resume()
+    return { ...week, research }
 }
 
 const _loop = createPollLoop({ intervalMs: CHECK_INTERVAL_MS, tick: () => _tick(), eager: false, log: LOG, name: 'pythia weekly' })

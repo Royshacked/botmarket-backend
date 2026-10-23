@@ -67,7 +67,7 @@ export function getRun() {
  * house-owned but the research turn is still made through a user's tools and level. `model` is
  * passed through untouched: absent, the agent's own default (the same one the desk uses).
  */
-export async function startRun({ userId, audience = null, model = null, symbols = null } = {}, deps = _io) {
+export async function startRun({ userId, audience = null, model = null, symbols = null, maxUsd = null } = {}, deps = _io) {
     if (state.run?.status === 'running' || state.starting) return { ok: false, reason: 'already_running', run: getRun() }
     state.starting = true
 
@@ -101,6 +101,8 @@ export async function startRun({ userId, audience = null, model = null, symbols 
         passed:     0,
         failed:     0,
         cost_usd:   0,           // the run's spend so far, summed from the names' (house-research-chain.md step 1)
+        max_usd:    Number.isFinite(Number(maxUsd)) && maxUsd !== null ? Number(maxUsd) : null,   // a budget: no new name once spent
+        budget_hit: false,
         results:    [],          // { symbol, outcome, reason?, cost_usd }, in order
         stop:       false,
     }
@@ -153,6 +155,9 @@ export async function requeueStalled(deps = _io) {
 async function _loop(run, queued, covered, { userId, audience, model, signal }, deps) {
     for (const item of queued) {
         if (run.stop) break
+        // A BUDGET (the house week's, house-research-chain.md step 5): no new name once it is spent. The names left are
+        // still `queued`, and the next run takes them.
+        if (run.max_usd != null && run.cost_usd >= run.max_usd) { run.budget_hit = true; break }
         const symbol = _sym(item.symbol)
 
         if (covered.has(symbol)) {
@@ -191,6 +196,16 @@ async function _loop(run, queued, covered, { userId, audience, model, signal }, 
             if (!coverage) {
                 await deps.reject(item.id, 'no_edge', { cost_usd: priced() })
                 _settle(run, { symbol, outcome: 'passed', reason: 'no_edge', cost_usd: priced() })
+                run.passed++
+                continue
+            }
+
+            // A name Pythia's verdict sent is graded on HER book's horizon (house-research-chain.md step 5): a swing
+            // name with a two-year target answers a question nobody asked. Rejected with the reason, not retried.
+            const offBook = offBookHorizon(item, coverage)
+            if (offBook) {
+                await deps.reject(item.id, 'horizon_off_book', { cost_usd: priced(), detail: offBook })
+                _settle(run, { symbol, outcome: 'passed', reason: 'horizon_off_book', detail: offBook, cost_usd: priced() })
                 run.passed++
                 continue
             }
@@ -270,6 +285,17 @@ const _cost = usd => Number((Number(usd) || 0).toFixed(4))
 
 const _sym = s => String(s ?? '').toUpperCase().trim()
 
+/** The price-target horizons each of Pythia's books may be graded on (coverage's own five, analyst_system_prompt.md). */
+export const BOOK_PT_HORIZONS = Object.freeze({ swing: ['3m', '6m'], long_term: ['12m', '18m', '24m'] })
+
+/** Why a Pythia name's coverage is off its book's horizon, or null. Only a Pythia row with a known book is held. Pure. */
+export function offBookHorizon(item, coverage) {
+    const allowed = item?.context?.pythia ? BOOK_PT_HORIZONS[item.context.verdict] : null
+    if (!allowed) return null
+    const h = coverage?.price_target?.horizon
+    return allowed.includes(h) ? null : `price target horizon ${h ?? 'missing'} — ${item.context.verdict} takes ${allowed.join('/')}`
+}
+
 /**
  * The opening turn — the same sentence the desk sends when the admin presses Start (MainPage's
  * researchOpening), so a name researched by the run and one researched by hand are the same
@@ -285,13 +311,17 @@ export function researchOpening(item) {
         const where = c.kind === 'theme' ? `the theme ${c.subject}${c.link ? ` (via ${c.link})` : ''}` : `its industry, ${c.subject}`
         const risks = c.risks?.length ? ` Risks it named: ${c.risks.join('; ')}.` : ''
         const thesis = c.thesis ? `: ${c.thesis}` : '.'
+        // Filter 1's reason, and the horizon the book is graded on (house-research-chain.md steps 4-5).
+        const argus = c.argus?.why ? ` Argus chose it from the industry: ${c.argus.why}${c.argus.caution ? ` What would make it wrong: ${c.argus.caution}` : ''}` : ''
+        const pt = BOOK_PT_HORIZONS[c.verdict] ? ` Set the price target on a ${BOOK_PT_HORIZONS[c.verdict].join(' or ')} horizon — ${book} is graded there.` : ''
+        const tail = `${argus}${pt}`
         // NAMED by the assessment (pythia-names.md): it may sit in another industry (second order), so the opening says
         // whose assessment named it and why, not "its industry".
         if (c.named_why) {
             const of = c.kind === 'theme' ? `the theme ${c.subject}` : c.subject
-            return `Research ${symbol} for coverage — Pythia's ${book} assessment of ${of}${c.horizon ? ` (${c.horizon})` : ''} names it: ${c.named_why}. Her case${thesis}${risks} Judge whether ${symbol} is already priced for it.`
+            return `Research ${symbol} for coverage — Pythia's ${book} assessment of ${of}${c.horizon ? ` (${c.horizon})` : ''} names it: ${c.named_why}. Her case${thesis}${risks} Judge whether ${symbol} is already priced for it.${tail}`
         }
-        return `Research ${symbol} for coverage — Pythia rates ${where} ${book}${c.horizon ? ` (${c.horizon})` : ''}${thesis}${risks} Judge whether ${symbol} is already priced for it.`
+        return `Research ${symbol} for coverage — Pythia rates ${where} ${book}${c.horizon ? ` (${c.horizon})` : ''}${thesis}${risks} Judge whether ${symbol} is already priced for it.${tail}`
     }
     if (!c?.sector) return `Research ${symbol} for coverage.`
     // A SLEEVE candidate (sleeveSource): the mandate that surfaced it is a user's book, not the house

@@ -95,6 +95,16 @@ test('a failed universe read publishes the assessment without names, saying why'
 // ── the readers (pythia-names.md §4) ──────────────────────────────────────────
 
 import { runHouseScan } from '../../services/houseScan.service.js'
+import { codePicks } from '../../services/houseScan.argus.js'
+// The pre-Argus seams through the new ones (house-research-chain.md): the list is the named, then the largest, and the
+// pick answers in the code order — what these tests check is the queue's rules, not Argus's choice.
+const viaCode = (largest) => ({
+    sub: async (code) => ({ code }),
+    candidates: async (sub, book, { named = [], covered = new Set() } = {}) => ({ rows: [...new Set([...named, ...(await largest(sub.code))])].map(symbol => ({ symbol, covered: covered.has(symbol), named: named.includes(symbol) })) }),
+    pick: async ({ rows, max }) => ({ picks: codePicks(rows, max), source: 'code' }),
+    attachPicks: async () => ({}),
+})
+
 import { researchOpening } from '../../services/researchRun.service.js'
 import { formatHouseIndustries, formatIndustryCompanies, namesLine, makeHouseIndustriesHandlers } from '../../services/tools/houseIndustries.tools.js'
 import { _wrapForGrounding } from '../../services/agents/scanner.agent.service.js'
@@ -133,7 +143,7 @@ test('the weekly house scan queues the named companies first, inside the same co
     const queued = []
     const a = { id: 'ia_ind_11', subject: { kind: 'industry', name: 'Comms' }, verdict: 'swing', horizon: 'months', thesis: 'sold out', risks: [], names: NAMED }
     const deps = {
-        covered: async () => new Set(), largest: async () => ['CSCO', 'MSI', 'UI'], theme: async () => null,
+        covered: async () => new Set(), ...viaCode(async () => ['CSCO', 'MSI', 'UI']), theme: async () => null,
         assessment: async () => a, enqueue: async (row) => { queued.push(row); return { ok: true } },
         perIndustry: () => 3, weeklyMax: () => 30,
     }
@@ -145,17 +155,19 @@ test('the weekly house scan queues the named companies first, inside the same co
     assert.doesNotMatch(researchOpening(queued[1]), /its industry/, 'a second-order name is not in "its industry"')
 })
 
-test("a theme's names take their own count, ahead of its links", async () => {
+// Since 2026-10-23 (house-research-chain.md) a theme's named companies join each link's list, supplier links first,
+// and Argus decides — they no longer take a count of their own.
+test("a theme's names lead its supplier link's list", async () => {
     const queued = []
     const a = { id: 'ia_th_ai', subject: { kind: 'theme', name: 'AI' }, verdict: 'long_term', horizon: 'years', thesis: 'capex', risks: [], names: NAMED }
     const deps = {
-        covered: async () => new Set(), largest: async (code) => ({ 31: ['NVDA', 'AVGO'], 32: ['LRCX', 'AMAT'] }[code] ?? []),
+        covered: async () => new Set(), ...viaCode(async (code) => ({ 31: ['NVDA', 'AVGO'], 32: ['LRCX', 'AMAT'] }[code] ?? [])),
         theme: async () => ({ links: [{ code: '31', name: 'Semis', order: 1 }, { code: '32', name: 'Chip equipment', order: 2 }] }),
         assessment: async () => a, enqueue: async (row) => { queued.push(row); return { ok: true } },
         perIndustry: () => 2, weeklyMax: () => 30,
     }
     await runHouseScan([{ kind: 'theme', id: 'th_ai', name: 'AI', outcome: 'published', verdict: 'long_term' }], deps)
-    assert.deepEqual(queued.map(q => q.symbol), ['CIEN', 'VRT', 'LRCX', 'AMAT', 'NVDA', 'AVGO'])
+    assert.deepEqual(queued.map(q => q.symbol), ['CIEN', 'VRT', 'NVDA', 'AVGO'])
 })
 
 import { houseFirst, sourceSleeve, _resetSleeves } from '../../services/sleeveSource.service.js'

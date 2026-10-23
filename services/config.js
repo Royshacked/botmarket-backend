@@ -229,11 +229,16 @@ export const config = {
     // it OpenRouter's own web_search server tool — native search on Luna; `gnews` the old news-only stand-in.
     get openrouterWebSearch() { return _str('OPENROUTER_WEB_SEARCH', 'server') },
     get pythiaWeekly()       { return _bool('PYTHIA_WEEKLY', 'opt-in') },
-    // The house scan after each week (services/houseScan.service.js, step 7; Roy 2026-10-11): names queued for
-    // Prometheus per FOR SWING / FOR LONG TERM industry (per theme LINK), and at most this many a week. Queuing is free;
-    // the research run that follows is the admin's.
-    get houseScanPerIndustry() { return _num('HOUSE_SCAN_PER_INDUSTRY', 3) },
-    get houseScanWeeklyMax()   { return _num('HOUSE_SCAN_WEEKLY_MAX', 30) },
+    // The house scan after each week (services/houseScan.service.js; docs/design/house-research-chain.md): Argus's
+    // picks per FOR SWING / FOR LONG TERM industry (per theme LINK) — Roy 2026-10-23: the best 5 — at most this many a
+    // week, researched by Prometheus automatically up to the weekly $ ceiling (a research name is ~$0.04 on Luna).
+    get houseScanPerIndustry() { return _num('HOUSE_SCAN_PER_INDUSTRY', 5) },
+    get houseScanWeeklyMax()   { return _num('HOUSE_SCAN_WEEKLY_MAX', 50) },
+    get houseResearchMaxUsd()  { return _num('HOUSE_RESEARCH_MAX_USD', 5) },
+    // The candidate list's liquidity floor, dollars traded a day (20-day average; houseScan.candidates.js). A swing
+    // trade has to get in and out; a long-term holding barely trades.
+    get houseScanMinAdvSwing() { return _num('HOUSE_SCAN_MIN_ADV_SWING', 20e6) },
+    get houseScanMinAdvLong()  { return _num('HOUSE_SCAN_MIN_ADV_LONG', 5e6) },
     // Of a sleeve's twelve screened names, at most this many from Pythia's long-term industries in its sector
     // (services/sleeveSource.service.js; docs/design/argus-on-pythia.md §3.5 — Roy 2026-10-13: half). A ceiling.
     get sleeveHouseMax()       { return _num('SLEEVE_HOUSE_MAX', 6) },

@@ -306,7 +306,7 @@ own money (capex, buybacks, dividends, deals — §4.3) stays, beside funds, ins
 **Open:**
 1. ~~The weekly assessment cap~~ — DECIDED (Roy, 2026-10-11): every flagged subject, stopping at $3 a week
    (`PYTHIA_WEEKLY_MAX_USD`); `PYTHIA_WEEKLY_CAP` stays as an optional count cap, unset.
-3. **Argus choosing the house scan's names** — LEFT FOR LATER (Roy, 2026-10-11). Step 7 starts with code picking
+3. **Argus choosing the house scan's names** — BUILT 2026-10-23 ([house-research-chain.md](./house-research-chain.md): Argus picks the best 5 per industry, Prometheus researches them by himself). Was: LEFT FOR LATER (Roy, 2026-10-11). Step 7 starts with code picking
    each For swing / For long term industry's largest uncovered names (free, repeatable); an Argus run per industry
    (judgment, a paid run each) is the alternative. Roy decides once he has seen the code's picks.
    (Argus's own scans read the verdicts since 2026-10-13 — argus-on-pythia.md; the weekly house scan is unchanged.)

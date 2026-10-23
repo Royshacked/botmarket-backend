@@ -23,6 +23,7 @@ import { themeService } from '../api/strategy/theme.service.js'
 import { scanIndustry, scanTheme, pickForWeek } from '../api/strategy/changeScan.service.js'
 import { assessIndustry, assessTheme } from './industryAssessmentRun.service.js'
 import { runHouseScan } from './houseScan.service.js'
+import { houseResearchService } from './houseResearch.service.js'
 import { houseLedgerUserId } from '../api/user/user.model.js'
 import { getDb } from '../providers/mongodb.provider.js'
 import { config } from './config.js'
@@ -52,6 +53,9 @@ const _deps = {
     maxUsd: () => config.pythiaWeeklyMaxUsd,
     // Step 7: the week's FOR SWING / FOR LONG TERM verdicts send names to Prometheus's research queue.
     houseScan: (results, opts) => runHouseScan(results, undefined, opts),
+    // ...and Prometheus researches them by himself (house-research-chain.md steps 5-6).
+    research: (week) => houseResearchService.researchWeek(week),
+    resumeResearch: (week) => houseResearchService.resumeWeek(week),
     db: () => getDb(),
     now: () => new Date().toISOString(),
 }
@@ -252,8 +256,17 @@ export async function runWeekly({ force = false, by = null, limit = Infinity, de
             // The hand-off (step 7): the whole week's results, a resumed week's earlier chunks included. Never fatal —
             // the week is done whether or not the queue took its names.
             const before = week?.house_scan?.queued ?? []
-            const house = await Promise.resolve(deps.houseScan?.([...prior, ...results], { alreadyQueued: before.length })).catch(err => ({ error: err.message }))
-            if (house) await coll.updateOne({ id }, { $set: { house_scan: { queued: [...before, ...(house.queued ?? [])], considered: house.considered ?? 0, skipped_full: house.skipped_full ?? 0, ...(house.error ? { error: house.error } : {}) } } })
+            const house = await Promise.resolve(deps.houseScan?.([...prior, ...results], { alreadyQueued: before.length, bookTo: userId })).catch(err => ({ error: err.message }))
+            if (house) {
+                const house_scan = { queued: [...before, ...(house.queued ?? [])], considered: house.considered ?? 0, skipped_full: house.skipped_full ?? 0,
+                    // Argus's lists — what he saw, chose and passed (house-research-chain.md step 4) — and their spend.
+                    picks: [...(week?.house_scan?.picks ?? []), ...(house.picks ?? [])],
+                    cost_usd: (Number(week?.house_scan?.cost_usd) || 0) + (Number(house.cost_usd) || 0),
+                    ...(house.error ? { error: house.error } : {}) }
+                await coll.updateOne({ id }, { $set: { house_scan } })
+                // Filter 2 starts by itself (step 5); a run already going leaves it to the monitor's next tick.
+                await Promise.resolve(deps.research?.({ ...(week ?? {}), id, asof, started_at: week?.started_at ?? started, house_scan })).catch(() => null)
+            }
             await _prune(coll)
         }
         const published = results.filter(r => r.outcome === 'published').length
@@ -282,4 +295,20 @@ export async function latestWeek(deps = _deps) {
     return week ? { ...week, status: weekStatus(week, { active: _active, now: Date.parse(deps.now()) }) } : null
 }
 
-export const pythiaWeeklyService = { runWeekly, latestWeek, scanWeek, weeklyRunning }
+/**
+ * The monitor's pick-up of the latest DONE week's research (house-research-chain.md step 6): its dead claims back
+ * in line, and a run over what still waits. Never throws.
+ */
+export async function resumeResearch(deps = _deps) {
+    try {
+        const db = await deps.db()
+        const week = await db.collection(COLLECTION).find({ status: 'done' }, { projection: { _id: 0, claim: 0 } }).sort({ asof: -1 }).limit(1).next()
+        if (!week?.house_scan?.queued?.length) return { ok: true, outcome: 'no_names' }
+        return await deps.resumeResearch(week)
+    } catch (err) {
+        logger.warn(LOG, 'research pick-up failed', { error: err.message })
+        return { ok: false, outcome: 'error', detail: err.message }
+    }
+}
+
+export const pythiaWeeklyService = { runWeekly, latestWeek, scanWeek, weeklyRunning, resumeResearch }

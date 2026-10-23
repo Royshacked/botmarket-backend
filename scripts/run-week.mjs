@@ -25,6 +25,12 @@ const started = Date.now()
 try {
     const r = await runWeekly({ force, by: 'script', limit })
     console.log(JSON.stringify({ ...r, minutes: Math.round((Date.now() - started) / 60000) }))
+    // A finished week starts Prometheus's research on its names (docs/design/house-research-chain.md step 5), in THIS
+    // process: wait for it, or the exit below would kill a paid turn mid-way.
+    const { researchRunService } = await import('../services/researchRun.service.js')
+    while (researchRunService.getRun()?.status === 'running') await new Promise(res => setTimeout(res, 10_000))
+    const run = researchRunService.getRun()
+    if (run) console.log(JSON.stringify({ research: { status: run.status, covered: run.covered, passed: run.passed, failed: run.failed, cost_usd: run.cost_usd } }))
 } finally {
     await closeDb().catch(() => {})
     process.exit(0)

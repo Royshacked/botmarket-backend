@@ -14,7 +14,11 @@ const deps = (over = {}) => {
         queued,
         deps: {
             covered: async () => new Set(),
-            largest: async () => ['NUE', 'STLD', 'CLF', 'X', 'CMC'],
+            sub: async (code) => ({ code }),
+            candidates: async () => ({ rows: ['NUE', 'STLD', 'CLF', 'X', 'CMC'].map(symbol => ({ symbol, covered: false })), total: 5 }),
+            // The code order (Argus's fallback) — what the test is about is the queue's rules, not his choice.
+            pick: async ({ rows, max }) => ({ picks: rows.slice(0, max).map(r => ({ symbol: r.symbol })), source: 'code' }),
+            attachPicks: async () => ({ attached: true }),
             theme: async () => null,
             assessment: async () => ({ subject: { name: 'Steel' }, verdict: 'swing', thesis: 't', risks: [] }),
             enqueue: async (row) => { queued.push(row); return { ok: true } },

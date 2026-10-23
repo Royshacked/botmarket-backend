@@ -854,10 +854,19 @@ services/
                             (or theme, or a proposal run), run AS an admin so the spend is booked; returns
                             cost_usd (ledger after − before, desk + sidecar). One run per subject (409).
                             A weekly run passes the scan's reasons as `trigger` — to the turn and the doc
-  houseScan.service.js      The HOUSE SCAN on Pythia's verdicts (step 7): after a completed week, every FOR SWING /
-                            FOR LONG TERM industry (and approved theme — supplier links first) queues its largest
-                            uncovered names for Prometheus (HOUSE_SCAN_PER_INDUSTRY 3, HOUSE_SCAN_WEEKLY_MAX 30),
-                            the verdict's thesis and risks on the row (researchRun.researchOpening reads them).
+  houseScan.service.js      The HOUSE SCAN on Pythia's verdicts (step 7; docs/design/house-research-chain.md): after a
+                            completed week, every FOR SWING / FOR LONG TERM industry (and approved theme — supplier
+                            links first) gets its candidate list and ARGUS'S PICKS (HOUSE_SCAN_PER_INDUSTRY 5,
+                            HOUSE_SCAN_WEEKLY_MAX 50), queued for Prometheus with the verdict's thesis, risks and
+                            Argus's why on the row; picks frozen on the call (pythiaCalls.attachPicks) for grading.
+  houseScan.candidates.js   The candidate list (code): an industry's companies above a liquidity floor with returns vs
+                            the industry, beta to its basket, $ volume, ROIC/growth (long term), Street EPS growth,
+                            insiders, next report; named first, then the book's order, cut to 40.
+  houseScan.argus.js        Filter 1: Argus picks the best N from the list for her thesis (one-shot, house model);
+                            held to the list; the code order when his call fails.
+  houseResearch.service.js  Filter 2, by itself: a house research run over the week's names inside
+                            HOUSE_RESEARCH_MAX_USD (read back from the queue rows' cost_usd); resumeWeek puts a dead
+                            run's claims back in line (the weekly monitor's tick).
                             Queue source 'pythia'; a name rejected in the last 8 weeks is not queued again;
                             a rerun stays inside the week's ceiling (alreadyQueued)
   houseLabel.service.js     the HOUSE LABEL on a name ("on the house's swing / long-term list") worked out by CODE from its

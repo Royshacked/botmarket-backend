@@ -1,6 +1,6 @@
 # The house research chain — Pythia → Argus → Prometheus, no admin in between
 
-**Status: PLAN, 2026-10-23 (Roy). Steps 1–2 DONE (uncommitted); design of 3–6 agreed the same day.**
+**Status: BUILT 2026-10-23 (Roy) — steps 1–6, unit-tested, Argus live-checked on prod data (read-only). Not deployed; runs only with `PYTHIA_WEEKLY=true`.**
 
 ## What changes and why
 
@@ -52,6 +52,25 @@ by hand take a company from there. No new hand-off.
    and nothing restarts it. The weekly monitor's tick requeues stalled claims and resumes the week's names.
 
 Everything stays behind `PYTHIA_WEEKLY` — off, no week, no names, no research.
+
+## As built
+
+- Step 3: `services/houseScan.candidates.js` (floors `HOUSE_SCAN_MIN_ADV_SWING` $20M / `_LONG` $5M a day; ~0.6 s an
+  industry). Names already queued or in research are off the list before Argus sees it. A theme's named companies
+  join each link's list (supplier links first) instead of taking a count of their own.
+- Step 4: `services/houseScan.argus.js` (house model, max 4,000 tokens — 1,500 left Regional Banks' 40 rows with an
+  empty answer). Live check 2026-10-23 on Steel / Broadline Retail / Regional Banks: $0.002–0.003 for all three.
+  The first prompt treated her named companies as reserved seats and he picked only those; the revised one says
+  the remaining slots are his — Regional Banks then took CLBK, the industry's leader, as the fifth. Picks frozen on
+  the call (`pythiaCalls.attachPicks`, only a call ≤ 3 days old, once) and graded at 3m / 12m against the basket
+  and against the largest uncovered names (`grades.<h>.picks`). Argus's spend books as `houseScanArgus`.
+- Step 5: `services/houseResearch.service.js` — the budget (`HOUSE_RESEARCH_MAX_USD`, $5) is read back from the
+  queue rows' `cost_usd`; `startRun({ maxUsd })` stops starting names when spent; an off-book horizon is rejected
+  `horizon_off_book` (never retried). `scripts/run-week.mjs` waits for the research before it exits.
+- Step 6: the weekly monitor's tick calls `resumeResearch` — stale claims (30 min) of the latest done week's names
+  back to `queued`, then a run over what waits. Traders' copy of the week drops `house_scan.picks` and its cost.
+- **Engine jobs have not run since ~2026-10-11** (daily prices 10-08, timing 10-07); the week only starts on a new
+  price run, so the chain fires weekly only once the Render crons run.
 
 ## Open
 

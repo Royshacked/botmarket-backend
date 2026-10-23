@@ -85,11 +85,14 @@ async function enqueue({ symbol, source, requestedBy = 'house', context = null }
  * surface, because it answers the question you are asking it with a confident lie. The caller turns
  * null into a 503; an empty array still means empty.
  */
-async function listQueue({ status, limit = 200 } = {}) {
+async function listQueue({ status, symbols = null, since = null, limit = 200 } = {}) {
     try {
         const db = await getDb()
         const q  = {}
         if (status) q.status = Array.isArray(status) ? { $in: status } : status
+        // A week's own names (house-research-chain.md step 5): its symbols, queued since the week ran.
+        if (Array.isArray(symbols)) q.symbol = { $in: symbols.map(s => String(s).toUpperCase()) }
+        if (since) q.created_at = { $gte: since }
         const docs = await db.collection(COLLECTION)
             .find(q).sort({ created_at: 1 }).limit(limit).toArray()
         return docs.map(stripId)
@@ -158,6 +161,27 @@ async function requeueInResearch({ except = [] } = {}) {
     }
 }
 
+/**
+ * These symbols' claims back to the line when untouched for `olderThanMs` — a research run that died with its
+ * process (a deploy) left them `in_research` (house-research-chain.md step 6). Scoped to the symbols and to an
+ * age a live turn never reaches, so a name open at the desk by hand is left alone.
+ */
+async function requeueStale({ symbols = [], olderThanMs, now = Date.now() } = {}) {
+    if (!symbols.length || !(olderThanMs > 0)) return { ok: true, requeued: 0 }
+    try {
+        const db = await getDb()
+        const cutoff = new Date(now - olderThanMs).toISOString()
+        const res = await db.collection(COLLECTION).updateMany(
+            { status: 'in_research', symbol: { $in: symbols.map(s => String(s).toUpperCase()) }, updated_at: { $lt: cutoff } },
+            { $set: { status: 'queued', updated_at: new Date(now).toISOString(), reason: null } })
+        if (res.modifiedCount) logger.info(LOG, 'requeued stale claims', { requeued: res.modifiedCount })
+        return { ok: true, requeued: res.modifiedCount }
+    } catch (err) {
+        logger.error(LOG, 'requeueStale failed', err)
+        return { ok: false, error: err }
+    }
+}
+
 async function _transition(id, to, from, extra = {}) {
     try {
         const db  = await getDb()
@@ -176,4 +200,4 @@ async function _transition(id, to, from, extra = {}) {
     }
 }
 
-export const researchQueueService = { enqueue, listQueue, startResearch, markDone, reject, requeue, requeueInResearch }
+export const researchQueueService = { enqueue, listQueue, startResearch, markDone, reject, requeue, requeueInResearch, requeueStale }

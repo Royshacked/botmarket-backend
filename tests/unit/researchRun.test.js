@@ -144,7 +144,7 @@ test('researchRun: the opening turn carries the mandate, and is the desk\'s sent
     // The house scan on Pythia's verdicts (step 7): the verdict, its thesis and risks travel; priced-in is the question.
     assert.equal(
         researchOpening({ symbol: 'lrcx', context: { pythia: true, kind: 'theme', subject: 'AI compute', link: 'Semiconductor Materials & Equipment', verdict: 'swing', horizon: 'months', thesis: 'Capex is still rising.', risks: ['capex pause'] } }),
-        'Research LRCX for coverage — Pythia rates the theme AI compute (via Semiconductor Materials & Equipment) FOR SWING (months): Capex is still rising. Risks it named: capex pause. Judge whether LRCX is already priced for it.',
+        'Research LRCX for coverage — Pythia rates the theme AI compute (via Semiconductor Materials & Equipment) FOR SWING (months): Capex is still rising. Risks it named: capex pause. Judge whether LRCX is already priced for it. Set the price target on a 3m or 6m horizon — FOR SWING is graded there.',
     )
 })
 
