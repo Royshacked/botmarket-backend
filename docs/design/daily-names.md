@@ -301,6 +301,21 @@ table, they have no grade. On the wide rows, the names he was shown carry `seen`
 log scores them: his record adds **spotted in the pool** against **pool passed on**. Live (a stand-in pool from the
 universe, no news or volume): $0.001 a board on Luna, 16 s, and no spots — rightly, on names with nothing behind them.
 
+### 7.5 The week replay (Roy, 2026-10-24: "can't we score retrospectively?")
+
+The live record grows a few names a day. The THIS WEEK column is built from daily data only, so its rules can be run
+over past sessions honestly (services/hotlistBacktest.service.js, `scripts/replay-hotlist-week.mjs`): each past session
+D, for each name in today's universe — the overnight stats from the bars BEFORE D (`screenerStats`), the report the
+pass would have seen (`nextReportFor`: first on or after D−1, within 21 days), D's OPEN as the price, the live week cell
+(`cell`) and the live five-session window and score (`windowBars` / `scoreWindow`). A name clearing the week's gates
+but grading nothing is the pool. ~125 sessions (six months) by default; ~1,200 daily-bars reads, paced, off-session.
+
+Caveats, shown with it: no drift path (no past news labels — scheduled and accumulation only); today's universe
+(survivorship); the open, not the 09:20 quote. Stored as ONE summary document (`hotlist_backtest`, per grade, per path,
+the graded set, the pool), carried by GET /api/hotlist/outcomes as `backtest`, shown on This week as its own line —
+never mixed with the live record, never toward verified. The session-intraday columns (open, mid, eod) are not replayed:
+their gates need pre-market quotes and that morning's news labels, which do not exist for the past.
+
 ## 8. The Floor — "Hotlist"
 
 - A **"Hotlist"** row in Floor Lists — the board, one for everyone. (Renamed from "Daily watchlist" on 2026-10-21 to stay clear of the existing **Watchlists** row, the scan lists.)

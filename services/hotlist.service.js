@@ -9,6 +9,7 @@ import { getDb } from '../providers/mongodb.provider.js'
 import { BOARDS, OUTCOMES, outcomeSummary, argusSummary, windowEnd, lastClosedSession } from './hotlist.outcomes.js'
 import { COLUMN_WORDS } from './hotlist.argus.js'
 import { RUNS, latestRun, runIsLive } from './dailyScreener.service.js'
+import { backtestSummary } from './hotlistBacktest.service.js'
 import { BOARD_STALE_MS } from './dailyScreener.checkpoint.js'
 import { rowStatus, STATUSES } from './hotlist.columns.js'
 
@@ -17,7 +18,7 @@ export const COLUMN_HORIZON = Object.freeze({
     open: 'intraday', mid: 'intraday', eod: 'intraday', tomorrow: 'day', week: 'short term swing',
 })
 
-const _deps = { db: () => getDb(), summary: () => outcomeSummary(), argus: () => argusSummary(), now: () => Date.now(), latestRun: () => latestRun() }
+const _deps = { db: () => getDb(), summary: () => outcomeSummary(), argus: () => argusSummary(), backtest: () => backtestSummary(), now: () => Date.now(), latestRun: () => latestRun() }
 /** Test seam. */
 export function _setDeps(d) { Object.assign(_deps, d) }
 
@@ -241,8 +242,10 @@ export async function boardWithResults(id, deps = _deps) {
  * record: his picks, avoids and unmarked names by how often they ended up (hotlist.outcomes argusRecord).
  */
 export async function hotlistOutcomes(deps = _deps) {
-    const [summary, argus] = await Promise.all([deps.summary(), Promise.resolve(deps.argus?.()).catch(() => null)])
-    return { ...summary, ...(argus ? { argus } : {}) }
+    const [summary, argus, backtest] = await Promise.all([deps.summary(), Promise.resolve(deps.argus?.()).catch(() => null),
+        Promise.resolve(deps.backtest?.()).catch(() => null)])
+    // `backtest` — the week replay over past sessions (hotlistBacktest.service), kept apart from the live record.
+    return { ...summary, ...(argus ? { argus } : {}), ...(backtest ? { backtest } : {}) }
 }
 
 /** What a client sees of a board: no Mongo id, no claim bookkeeping. Pure. */

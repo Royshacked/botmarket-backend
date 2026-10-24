@@ -952,6 +952,9 @@ services/
                             (scanSeed `book` ref) resolved from the coverage: horizon + the thesis in numbers
   hotlist.argus.js (pool)   Argus also reads the board's POOL — quoted names graded on no column (40, poolForArgus) —
                             and SPOTS up to 10 the rules missed (daily-names.md §7.4); scored and in his record
+  hotlistBacktest.service.js THE WEEK REPLAY (daily-names.md §7.5): the live This week rules over past sessions —
+                            stats before D, D's open, the live cell and window — per grade, path and the pool, one
+                            summary doc in `hotlist_backtest`; run by scripts/replay-hotlist-week.mjs
   hotlist.service.js        the hotlist's READ side: todayHotlist / boardById / hotlistOutcomes for the
                             API, and hotlistSeed — a "Build with Mentor" hand-off is a REFERENCE (board
                             id + column, scanSeed.util), resolved here from the STORED board into the
