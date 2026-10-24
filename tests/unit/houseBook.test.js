@@ -80,3 +80,39 @@ test('the book from the database: live coverage by book, the chain names first, 
     await houseBook({ deps })
     assert.equal(asked.length, reads, 'nothing read again: the marks are kept, the last close is fresh for an hour')
 })
+
+// Roy, 2026-10-24: "hand off to Mentor — tell Mentor the horizon".
+test('a book hand-off is a reference — which list — and the server reads the horizon off the coverage', async () => {
+    const { sanitizeScanSeed } = await import('../../services/scanSeed.util.js')
+    assert.deepEqual(sanitizeScanSeed({ ticker: 'chn', book: { column: 'long_term', horizon: 'intraday' } }).book, { column: 'long_term', symbol: 'CHN' })
+    assert.equal(sanitizeScanSeed({ ticker: 'CHN', book: { column: 'week' } }).book, null)
+    const { bookSeed, bookFacts } = await import('../../services/houseBook.service.js')
+    const { db, rows } = memDb()
+    rows('coverage').push({ symbol: 'CHN', status: 'active', rating: 'buy', conviction: { level: 'medium' }, thesis: 'Volumes recover into the cycle. More detail follows.',
+        kill_criteria: ['volumes fall two quarters running'], price_target: { value: 130, horizon: '6m', target_date: '2027-03-01' } })
+    rows('daily_screener_stats').push({ symbol: 'CHN', day: '2026-10-23', close: 100 })
+    rows('research_queue').push({ symbol: 'CHN', source: 'pythia', status: 'done', updated_at: '2026-10-20', context: { subject: 'Railroads', verdict: 'swing', argus: { why: 'the leader' } } })
+    // The request said long term; the coverage's 6m target makes it a SWING name.
+    const s = await bookSeed({ column: 'long_term', symbol: 'CHN' }, { db: async () => db })
+    assert.deepEqual([s.book, s.horizon], ['swing', 'swing'])
+    assert.equal(s.book_facts, "Prometheus buy (medium conviction), target 130.00 by 2027-03-01 (a 6m target), +30.0% from 100.00; from the weekly chain: Pythia's swing call on Railroads")
+    assert.equal(s.thesis, 'the leader')
+    assert.equal(s.caution, 'volumes fall two quarters running')
+    assert.equal(await bookSeed({ column: 'swing', symbol: 'NONE' }, { db: async () => db }), null)
+    assert.match(bookFacts({ rating: 'hold', price_target: { value: 50, horizon: '12m' } }), /^Prometheus hold, target 50\.00 \(a 12m target\); researched at the desk$/)
+})
+
+test("Mentor's seed section says the book, the horizon (the user's to confirm), and what breaks it", async () => {
+    const { _buildSeedSection } = await import('../../services/agents/mentor.agent.service.js')
+    const text = _buildSeedSection({ ticker: 'CHN', direction: 'long', thesis: 'the leader', horizon: 'swing', book_name: 'swing',
+        book_facts: 'Prometheus buy, target 130.00 by 2027-03-01 (a 6m target)', caution: 'volumes fall' })
+    assert.match(text, /From the house's SWING book: Prometheus buy, target 130\.00 by 2027-03-01 \(a 6m target\)\. The horizon is swing — the user's to confirm\./)
+    assert.match(text, /What would break the thesis: volumes fall/)
+    assert.match(text, /not a take-profit/)
+})
+
+test("a book name's seed section is headed as the house's book, not as Argus's hand-off", async () => {
+    const { _buildSeedSection } = await import('../../services/agents/mentor.agent.service.js')
+    assert.match(_buildSeedSection({ ticker: 'CHN', book_name: 'swing', book_facts: 'Prometheus buy' }), /FROM THE HOUSE'S BOOK: CHN/)
+    assert.match(_buildSeedSection({ ticker: 'SPCX' }), /ARGUS HANDED YOU THIS NAME: SPCX/)
+})

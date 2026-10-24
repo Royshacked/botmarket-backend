@@ -173,7 +173,11 @@ buttons after This week (services/houseBook.service.js, GET /api/hotlist/book; H
   BACKGROUND (12 per open) and kept in `house_book_marks` — the coverage documents are not touched; a re-set target has
   a new set_at and is read again; a miss is retried after a day.
 - **The opened row** is the thesis itself (CoverageDetail, from the coverage list the Floor already holds), with Build
-  with Mentor (a plain seed: the thesis in numbers, long) and Ask Argus (is now the time to buy it).
+  with Mentor and Ask Argus (is now the time to buy it). Build with Mentor rides as a REFERENCE — which list
+  (scanSeed \`book: { column }\`) — and the server reads the name's coverage back (houseBook \`bookSeed\`): the horizon
+  is the coverage's own book (swing / long term, from the target's horizon, whatever the request said), and Mentor's
+  seed section, headed "FROM THE HOUSE'S BOOK", carries the rating, target and date, the upside, where it came from
+  and what would break it — the horizon the user's to confirm, the target a valuation, not a take-profit.
 
 ## Build order
 

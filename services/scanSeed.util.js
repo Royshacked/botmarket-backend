@@ -49,6 +49,7 @@ export function sanitizeScanSeed(raw) {
         recommended_mode: s('recommended_mode'),
         window:           (from || to) ? { from, to } : null,
         hotlist:          _hotlistRef(raw.hotlist, ticker.toUpperCase()),
+        book:             _bookRef(raw.book, ticker.toUpperCase()),
     }
 }
 
@@ -66,4 +67,17 @@ function _hotlistRef(raw, ticker) {
     const column = typeof raw.column === 'string' ? raw.column.trim() : ''
     if (!HOTLIST_BOARD_ID.test(board) || !HOTLIST_COLUMNS.has(column)) return null
     return { board, column, symbol: ticker }
+}
+
+const BOOK_COLUMNS = new Set(['swing', 'long_term'])
+
+/**
+ * A hand-off off the Hotlist's SWING / LONG TERM lists (the house's coverage, houseBook.service) is a reference too —
+ * which list — and the name's coverage is read back by the server (houseBook bookSeed): its horizon comes from the
+ * stored price target, never from the request. Null unless the list is one of the two.
+ */
+function _bookRef(raw, ticker) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+    const column = typeof raw.column === 'string' ? raw.column.trim() : ''
+    return BOOK_COLUMNS.has(column) ? { column, symbol: ticker } : null
 }

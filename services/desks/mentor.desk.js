@@ -9,6 +9,7 @@ import { mentorAgentService, emptyMentorState } from '../agents/mentor.agent.ser
 import { parseClientTime } from '../../api/_shared/parse.util.js'
 import { sanitizeScanSeed } from '../scanSeed.util.js'
 import { hotlistSeed } from '../hotlist.service.js'
+import { bookSeed } from '../houseBook.service.js'
 import { houseLabels, formatHouseLabel } from '../houseLabel.service.js'
 import { mentorActions, mentorApplyEdit } from './actions/mentor.actions.js'
 import { setupReason } from '../../api/setups/setupReasons.js'
@@ -55,6 +56,18 @@ async function _labelSeed(seed) {
             seed.hotlist_unverified = h.unverified
             seed.thesis           ??= h.thesis ?? null
             seed.caution            = h.caution ?? null
+        }
+    }
+    // A hand-off off the Hotlist's SWING / LONG TERM lists (the house's coverage, 2026-10-24): the name's coverage is
+    // read back by code — its book (the target's horizon) sets the trade's horizon; the thesis in numbers rides along.
+    if (seed?.book) {
+        const b = await bookSeed(seed.book).catch(() => null)
+        if (b) {
+            seed.horizon    = b.horizon
+            seed.book_name  = b.book
+            seed.book_facts = b.book_facts
+            seed.thesis   ??= b.thesis ?? null
+            seed.caution  ??= b.caution ?? null
         }
     }
     return seed

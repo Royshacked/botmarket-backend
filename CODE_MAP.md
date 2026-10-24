@@ -947,7 +947,8 @@ services/
                             horizon (3m/6m · 12m+), each name's origin (the weekly chain's research_queue row, or
                             the desk), the move since its target was set vs SPY, progress to target, and each
                             book's record; set-day prices + outside-universe closes read in the background into
-                            `house_book_marks`. GET /api/hotlist/book
+                            `house_book_marks`. GET /api/hotlist/book. bookSeed — a Mentor hand-off off the lists
+                            (scanSeed `book` ref) resolved from the coverage: horizon + the thesis in numbers
   hotlist.service.js        the hotlist's READ side: todayHotlist / boardById / hotlistOutcomes for the
                             API, and hotlistSeed — a "Build with Mentor" hand-off is a REFERENCE (board
                             id + column, scanSeed.util), resolved here from the STORED board into the

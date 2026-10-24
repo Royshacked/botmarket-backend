@@ -593,7 +593,7 @@ export function _buildSeedSection(seed) {
     const lens = String(seed.recommended_mode ?? '').trim()
     return `
 
-ARGUS HANDED YOU THIS NAME: ${seed.ticker}${seed.direction ? ` (${seed.direction})` : ''}`
+${seed.book_facts ? "FROM THE HOUSE'S BOOK" : 'ARGUS HANDED YOU THIS NAME'}: ${seed.ticker}${seed.direction ? ` (${seed.direction})` : ''}`
         + `${seed.thesis ? `
   thesis: ${seed.thesis}` : ''}`
         + `${seed.analysis ? `
@@ -608,6 +608,12 @@ ARGUS HANDED YOU THIS NAME: ${seed.ticker}${seed.direction ? ` (${seed.direction
   Argus's caution: ${seed.caution}` : ''}${seed.hotlist_unverified ? `
   The hotlist's grades for this column are still UNVERIFIED (not enough logged outcomes yet) — say so if you lean on the grade.` : ''}
   Free range is room, not a target: the board has no entry, stop or target, and you build those with the user.` : '')
+        // From the house's SWING / LONG TERM book (the Hotlist's longer lists, 2026-10-24): read back from the name's
+        // coverage by code. Its horizon is the price target's; the target is Prometheus's valuation, not a take-profit.
+        + (seed.book_facts ? `
+  From the house's ${seed.book_name === 'long_term' ? 'LONG TERM' : 'SWING'} book: ${seed.book_facts}.${seed.horizon ? ` The horizon is ${seed.horizon} — the user's to confirm.` : ''}${seed.caution ? `
+  What would break the thesis: ${seed.caution}` : ''}
+  The target is Prometheus's valuation over that horizon, not a take-profit: the entry, the stop and any exit are built here, with the user.` : '')
         // Worked out by code from the ticker (houseLabel.service), not by Argus: the house's industry desk holds this
         // name's industry on its list. Context the user hears once — never a reason the trade will work.
         + (seed.house ? `

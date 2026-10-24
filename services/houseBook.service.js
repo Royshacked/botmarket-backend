@@ -256,3 +256,54 @@ export async function houseBook({ deps = _deps } = {}) {
     for (const b of Object.keys(BOOKS)) { out[b].sort(order); out.record[b] = bookRecord(out[b]) }
     return out
 }
+
+// ─── The hand-off to Mentor (Roy, 2026-10-24: "hand off to Mentor — tell Mentor the horizon") ───
+
+/** The trade horizon each book hands Mentor (entity/vocabulary TRADE_HORIZONS). */
+export const BOOK_HORIZON = Object.freeze({ swing: 'swing', long_term: 'long term' })
+
+const _killText = (k) => (typeof k === 'string' ? k : k?.condition ?? k?.what ?? k?.note ?? null)
+const _firstSentence = (t) => { const s = String(t ?? '').trim(); const m = s.match(/^.{20,400}?[.!?](\s|$)/); return (m ? m[0] : s.slice(0, 300)).trim() || null }
+
+/**
+ * What a book name's coverage says, as one line Mentor can relay. Pure. e.g. "Prometheus buy (medium conviction),
+ * target 130.00 by 2027-03-01 (a 6m target), +30.0% from 100.00; from the weekly chain: Pythia's swing call on
+ * Railroads".
+ */
+export function bookFacts(cov, { close = null, origin = null } = {}) {
+    const pt = cov?.price_target ?? {}
+    const target = Number(pt.value)
+    const parts = [
+        `Prometheus ${String(cov?.rating ?? 'unrated').replace('_', ' ')}${cov?.conviction?.level ? ` (${cov.conviction.level} conviction)` : ''}`,
+        _ok(target) ? `target ${target.toFixed(2)}${pt.target_date ? ` by ${String(pt.target_date).slice(0, 10)}` : ''}${pt.horizon ? ` (a ${pt.horizon} target)` : ''}` : null,
+        _ok(target) && _ok(close) ? `${(target / close - 1) * 100 > 0 ? '+' : ''}${((target / close - 1) * 100).toFixed(1)}% from ${close.toFixed(2)}` : null,
+    ].filter(Boolean)
+    const line = parts.join(', ')
+    const from = origin ? `from the weekly chain: Pythia's ${origin.verdict === 'long_term' ? 'long-term' : origin.verdict ?? ''} call on ${origin.subject ?? 'an industry'}` : 'researched at the desk'
+    return `${line}; ${from}`
+}
+
+/**
+ * Resolve a book hand-off reference (scanSeed `book: { column, symbol }`) into the seed fields Mentor reads →
+ * `{ book, horizon, book_facts, thesis, caution }`, or null when the name has no live coverage on a book's horizon. The
+ * BOOK is the coverage's own (its target's horizon), not the request's column — a re-set target moves the name.
+ */
+export async function bookSeed(ref, deps = _deps) {
+    if (!ref?.symbol) return null
+    const db = await deps.db()
+    const cov = await db.collection(COVERAGE).findOne({ symbol: ref.symbol, status: { $in: ['active', 'target_hit', 'thesis_broken'] } },
+        { projection: { _id: 0, symbol: 1, rating: 1, conviction: 1, price_target: 1, thesis: 1, kill_criteria: 1 } })
+    const book = bookOf(cov)
+    if (!book) return null
+    const [closes, origins, lasts] = await Promise.all([_closes(db, [cov.symbol]), _origins(db, [cov.symbol]), _lasts(db, [cov.symbol])])
+    const origin = origins.get(cov.symbol) ?? null
+    const kill = (Array.isArray(cov.kill_criteria) ? cov.kill_criteria : []).map(_killText).filter(Boolean)
+    return {
+        book,
+        horizon: BOOK_HORIZON[book],
+        // A name outside the screener's universe: the last close the list keeps for it (_lasts).
+        book_facts: bookFacts(cov, { close: closes.by.get(cov.symbol)?.close ?? lasts.get(cov.symbol)?.close ?? null, origin }),
+        thesis: origin?.argus?.why ?? _firstSentence(cov.thesis),
+        caution: kill[0] ?? origin?.argus?.caution ?? null,
+    }
+}
