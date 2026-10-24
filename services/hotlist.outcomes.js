@@ -47,6 +47,10 @@ const MIN_GAP_MS = 60 * 60 * 1000
 const CLOSED_ET_MIN = 18 * 60
 /** The log is kept this long: ~120 sessions, three times what a column needs to be verified (§7). */
 const KEEP_DAYS = 168
+/** The wide set's outcomes (graded names off the board, `shown: false`) are kept this long (Roy, 2026-10-24: 60 days). */
+export const KEEP_WIDE_DAYS = 60
+/** The grade a POOL name is scored under (checkpoint poolRow) — quoted, graded on no column: the control group. */
+export const POOL_GRADE = '-'
 const OPEN_MIN = 9 * 60 + 30, CLOSE_MIN = 16 * 60, BAR_MIN = 5
 /** Where an in-session window starts when the row does not say when it was quoted (older boards). */
 const START_MIN = { open: OPEN_MIN, mid: 10 * 60 + 30, eod: 14 * 60 + 30 }
@@ -196,7 +200,9 @@ const _median = (xs) => {
 export function summarize(outcomes) {
     const out = {}
     for (const col of COLUMNS) {
-        const rows = outcomes.filter(o => o.column === col && o.outcome)
+        const scored = outcomes.filter(o => o.column === col && o.outcome)
+        // The POOL (graded on no column) is the control group — not a grade: it never counts toward one, or toward verified.
+        const rows = scored.filter(o => o.grade !== POOL_GRADE)
         const days = new Set(rows.map(o => o.day))
         const byGrade = {}
         for (const g of ['A', 'B', 'C']) {
@@ -213,7 +219,14 @@ export function summarize(outcomes) {
                 ret_mean:   gr.length ? _r(gr.reduce((s, o) => s + (o.outcome.ret_pct ?? 0), 0) / gr.length) : null,
             }
         }
-        out[col] = { n: rows.length, sessions: days.size, grades: byGrade, verified: columnVerified({ n: rows.length, sessions: days.size }) }
+        out[col] = {
+            n: rows.length, sessions: days.size, grades: byGrade, verified: columnVerified({ n: rows.length, sessions: days.size }),
+            // The board's cut against the rest (2026-10-24): the names it SHOWED (`shown` absent before the wide set)
+            // and the graded names past it — does ranking the top of the board pick better names?
+            board: _group(rows.filter(o => o.shown !== false)), off: _group(rows.filter(o => o.shown === false)),
+            // …and both against the pool it chose from: do the graded names beat the names it passed over?
+            pool: _group(scored.filter(o => o.grade === POOL_GRADE)),
+        }
     }
     return out
 }
@@ -272,7 +285,10 @@ export async function runOutcomes({ force = false, deps = _deps } = {}) {
             const isIntraday = ['open', 'mid', 'eod'].includes(column)
             const docs = []
             try {
-                for (const row of board.rows ?? []) {
+                // The board's rows AND the wide set — every graded name past its cut (checkpoint `wide`), scored the same way
+                // and marked `shown: false` (Roy, 2026-10-24: "with the analysis we lose good statistics").
+                const scoredRows = [...(board.rows ?? []).map(r => ({ row: r, shown: true })), ...(board.wide ?? []).map(r => ({ row: r, shown: false }))]
+                for (const { row, shown } of scoredRows) {
                     const c = row.cells?.[column]
                     if (!c?.grade) continue
                     const bars = isIntraday
@@ -284,7 +300,7 @@ export async function runOutcomes({ force = false, deps = _deps } = {}) {
                         id: `${board.id}:${row.symbol}:${column}`, board: board.id, day: board.day, checkpoint: board.checkpoint,
                         column, symbol: row.symbol, grade: c.grade, entry: row.price,
                         level: c.range?.level ?? null, atr_mult: c.range?.atr_mult ?? null, open_sky: c.range?.open_sky ?? false,
-                        outcome, scored_at: deps.now(),
+                        outcome, scored_at: deps.now(), shown,
                     })
                 }
             } catch (err) {
@@ -308,7 +324,11 @@ export async function runOutcomes({ force = false, deps = _deps } = {}) {
             scored += docs.length
         }
 
-        if (!stopped) await db.collection(OUTCOMES).deleteMany({ day: { $lt: _addDays(closed, -KEEP_DAYS) } })
+        if (!stopped) {
+            await db.collection(OUTCOMES).deleteMany({ day: { $lt: _addDays(closed, -KEEP_DAYS) } })
+            // The wide set is ten times the board: 60 days of it, not 168 (the Atlas free tier's 512 MB is shared).
+            await db.collection(OUTCOMES).deleteMany({ shown: false, day: { $lt: _addDays(closed, -KEEP_WIDE_DAYS) } })
+        }
         logger.info(LOG, `scored ${scored} cell(s)${gaveUp ? `, ${gaveUp} without bars` : ''}${stopped ? `, stopped: ${stopped}` : ''}`)
         return { ok: !stopped, outcome: stopped ? 'partial' : 'done', scored, gave_up: gaveUp, stopped }
     } catch (err) {
@@ -322,7 +342,7 @@ export async function runOutcomes({ force = false, deps = _deps } = {}) {
 /** The whole log, summarised (summarize) — for the board's `verified` stamp and the Floor. */
 export async function outcomeSummary(deps = _deps) {
     const db = await deps.db()
-    const rows = await db.collection(OUTCOMES).find({}, { projection: { column: 1, day: 1, grade: 1, outcome: 1 } }).toArray()
+    const rows = await db.collection(OUTCOMES).find({}, { projection: { column: 1, day: 1, grade: 1, outcome: 1, shown: 1 } }).toArray()
     return summarize(rows)
 }
 
@@ -354,7 +374,8 @@ export function argusRecord(outcomes, boards) {
     const byBoard = new Map((boards ?? []).filter(b => b.argus).map(b => [b.id, new Map((b.rows ?? []).map(r => [r.symbol, r]))]))
     const out = { all: { pick: [], avoid: [], unmarked: [] } }
     for (const o of outcomes ?? []) {
-        if (!o.outcome) continue
+        // A name off the board was never in front of him: his record is the board's names only.
+        if (!o.outcome || o.shown === false) continue
         const row = byBoard.get(o.board)?.get(o.symbol)
         if (!row) continue
         const kind = _pickedFor(row, o.column) ? 'pick' : row.avoid ? 'avoid' : 'unmarked'
@@ -367,7 +388,7 @@ export function argusRecord(outcomes, boards) {
 /** Argus's record from the log and the boards it scored. */
 export async function argusSummary(deps = _deps) {
     const db = await deps.db()
-    const outcomes = await db.collection(OUTCOMES).find({}, { projection: { _id: 0, board: 1, symbol: 1, column: 1, outcome: 1 } }).toArray()
+    const outcomes = await db.collection(OUTCOMES).find({}, { projection: { _id: 0, board: 1, symbol: 1, column: 1, outcome: 1, shown: 1 } }).toArray()
     const ids = [...new Set(outcomes.map(o => o.board))]
     const boards = await db.collection(BOARDS).find({ id: { $in: ids } },
         { projection: { _id: 0, id: 1, argus: 1, 'rows.symbol': 1, 'rows.picks': 1, 'rows.pick': 1, 'rows.avoid': 1 } }).toArray()

@@ -24,10 +24,11 @@ const LOG = '[hotlist.argus]'
 /**
  * Picks PER COLUMN (docs/design/horizon-chains.md §2; Roy, 2026-10-23: "a list for each horizon"). Until then he picked
  * 8 across every column, so a board with an open and a week column could hand one horizon nothing. A name may be his
- * pick on two columns of one board — the open trade and the week's are different trades.
+ * pick on two columns of one board — the open trade and the week's are different trades. DOUBLED 2026-10-24 (Roy: "more
+ * Argus checks — double"): ten per column and ten avoids, over a board of sixty — a record twice as fast.
  */
-export const MAX_PICKS = 5
-const MAX_AVOID = 5
+export const MAX_PICKS = 10
+export const MAX_AVOID = 10
 const TEXT_CHARS = 280
 
 /** The board's column ids in the words a trader uses — the prompt and the summary speak these. */
@@ -112,7 +113,7 @@ export async function argusRead(board, { send = oneShotText, model = _houseModel
     if (!board?.rows?.length) return null
     try {
         const m = await model()
-        const text = await send({ model: m, systemText: SYSTEM, userText: boardText(board), maxTokens: 4000, onUsage: onUsage && (u => onUsage(u, m)) })
+        const text = await send({ model: m, systemText: SYSTEM, userText: boardText(board), maxTokens: 8000, onUsage: onUsage && (u => onUsage(u, m)) })
         const read = normalizeRead(extractFirstJSON(text), board)
         if (!read.summary && !read.picks.length) return null
         return { ...read, model: m }

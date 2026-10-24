@@ -22,7 +22,7 @@ import { createPacer } from './concurrency.util.js'
 import { COLUMNS, cell, relativeVolume, failedGate, weekSetup, rowStatus } from './hotlist.columns.js'
 import { labelNews } from './hotlist.news.js'
 import { argusRead } from './hotlist.argus.js'
-import { BOARDS, outcomeSummary } from './hotlist.outcomes.js'
+import { BOARDS, outcomeSummary, POOL_GRADE } from './hotlist.outcomes.js'
 import { COLLECTION as STATS, latestRun, claimRun } from './dailyScreener.service.js'
 import { recordUsage } from './tokenUsage.service.js'
 import { houseLedgerUserId } from '../api/user/user.model.js'
@@ -58,7 +58,8 @@ export const READY_MAX = 120
 export const RETRY_429 = 3
 export const RETRY_429_BUDGET = 15
 const RETRY_429_MS = 20_000
-const BOARD_MAX  = 30
+/** The names a board SHOWS — and Argus reads. Doubled from 30 on 2026-10-24 (Roy: "more Argus checks — double"). */
+export const BOARD_MAX = 60
 const KEEP_DAYS  = 10
 const NEWS_CHUNK = 50
 const STALE_MS   = 60 * 60 * 1000
@@ -345,7 +346,17 @@ async function _build(db, cp, day, etMin, run, deps) {
         const row = boardRow(byStats.get(sym), q, cp.columns, { book: cp.book, etMin, day, catalyst: labels.get(sym) ?? null, quotedAt: quotedAt.get(sym), spreadSlack: cp.spreadSlack ?? 1 })
         if (row) rows.push(row)
     }
-    const ranked = rankRows(rows).slice(0, BOARD_MAX)
+    const all = rankRows(rows)
+    const ranked = all.slice(0, BOARD_MAX)
+    // THE WIDE SET (Roy, 2026-10-24: "with the analysis we lose good statistics"): every graded name past the board's
+    // cut, compactly — not shown, not read by Argus, but SCORED like the board (hotlist.outcomes), so the grades' record
+    // counts every name the screener graded, and the board's cut can be measured against the rest.
+    // And THE POOL it chose from: every quoted name that graded on no column — the control group. On the first two live
+    // days a board quoted 168–300 names and graded 3–19, so the cut at the board was never where the record was lost.
+    const gradedSyms = new Set(rows.map(r => r.symbol))
+    const poolRows = [...quotes].filter(([s]) => !gradedSyms.has(s))
+        .map(([s, q]) => poolRow(s, q, cp.columns, { book: cp.book, quotedAt: quotedAt.get(s) })).filter(Boolean)
+    const wide = [...all.slice(BOARD_MAX).map(wideRow), ...poolRows]
     const verified = await Promise.resolve().then(() => deps.verified?.() ?? new Set()).catch(() => new Set())
     const regime = { breadth_above_sma20: run.breadth_above_sma20 ?? null, spy: run.spy ?? null }
 
@@ -385,11 +396,33 @@ async function _build(db, cp, day, etMin, run, deps) {
         labels: toLabel.size ? (labels.size ? 'labelled' : 'failed') : 'none',
         booked_to: bookedTo,
         argus: argus ? { summary: argus.summary, model: argus.model, picks: argus.picks.length } : null,
-        counts: { pool: pool.length, quoted: quotes.size, graded: rows.length, headlines: headlines.size },
+        counts: { pool: pool.length, quoted: quotes.size, graded: rows.length, headlines: headlines.size, wide: wide.length - poolRows.length, ungraded: poolRows.length },
         requests,
         retried_429: retried429,
         rows: marked,
+        wide,
     }
+}
+
+/**
+ * A graded name off the board, as the outcome log needs it and nothing more: the price it was quoted at and when, and
+ * each graded column's grade and level. Pure.
+ */
+export function wideRow(row) {
+    const cells = Object.fromEntries(Object.entries(row.cells ?? {}).filter(([, c]) => c?.grade)
+        .map(([col, c]) => [col, { grade: c.grade, range: { level: c.range?.level ?? null, atr_mult: c.range?.atr_mult ?? null, open_sky: c.range?.open_sky ?? false } }]))
+    return { symbol: row.symbol, price: row.price ?? null, quoted_at: row.quoted_at ?? null, cells }
+}
+
+/**
+ * A quoted name that graded on no column, as the outcome log needs it: its price at the quote (the mid before the
+ * open, the last trade in session) and when, on each of the board's columns under POOL_GRADE. Pure. Null without a price.
+ */
+export function poolRow(symbol, q, columns, { book, quotedAt = null } = {}) {
+    const price = Number(book === 'extended' ? q?.mid : q?.price)
+    if (!(price > 0)) return null
+    return { symbol, price: Math.round(price * 10000) / 10000, quoted_at: quotedAt, pool: true,
+        cells: Object.fromEntries((columns ?? []).map(c => [c, { grade: POOL_GRADE, range: { level: null, atr_mult: null, open_sky: false } }])) }
 }
 
 /** The latest board of a day (or of the latest day) — what the Floor's Hotlist reads (phase 6). */

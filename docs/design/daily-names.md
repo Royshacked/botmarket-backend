@@ -265,6 +265,30 @@ horizon's); GET /api/hotlist/outcomes carries it as `argus`. First two days on a
 avoids 20 up 60% (+0.46%), unmarked 23 up 44% (−0.26%) — his avoids did better than the names he left alone; far too
 few to say yet.
 
+### 7.3 Scoring every quoted name; Argus and Prometheus doubled (Roy, 2026-10-24)
+
+"With the analysis we lose good statistics." The log scored only the board's names. The first two live days showed
+where the record was really lost: a board QUOTED 168–300 names and GRADED 3–19 — the board's cut never bit; the names
+that graded on no horizon were never measured. Now every quoted name is scored:
+
+- **The board** — its graded names (now up to 60, `BOARD_MAX`; was 30), shown, read by Argus.
+- **Graded off it** — graded names past the cut (checkpoint `wide`, compact: symbol, price, when, grade and level).
+- **The pool** — quoted names that graded on no column (`poolRow`, grade `-` = `POOL_GRADE`): the control group,
+  scored by whether it ended up and its return (no level to reach). It never counts toward a grade or toward verified.
+
+Both off-board kinds are stored on the board as `wide` (never sent to the client), scored by the same run, marked
+`shown: false`, and kept **60 days** (`KEEP_WIDE_DAYS`; the board's 168) — ~1,500 outcome rows a day, ~30 MB at 60
+days, against the Atlas free tier's 512 MB. Each column's summary carries `board`, `off` and `pool` groups; the
+track-record strip sets them side by side. Argus's record stays the board's names (`shown: false` is left out — he
+never saw them). Scoring cost: one intraday read per name a day for open / mid / eod and one daily read for tomorrow /
+week — ~1,000 FMP requests a night, paced, after hours.
+
+**Doubled** the same day ("more Argus checks and Prometheus checks — double"): Argus up to 10 picks per column and 10
+avoids (`MAX_PICKS` / `MAX_AVOID`, his answer up to 8,000 tokens) over a board of 60; Prometheus's automatic catalyst
+reads 20 a day for $2 (`HOTLIST_RESEARCH_MAX_NAMES` / `_MAX_USD`), user reads 20 a day; the weekly chain 10 per industry
+(`HOUSE_SCAN_PER_INDUSTRY`), 100 a week (`HOUSE_SCAN_WEEKLY_MAX`), $10 a week (`HOUSE_RESEARCH_MAX_USD`). Each is an
+env setting to turn back.
+
 ## 8. The Floor — "Hotlist"
 
 - A **"Hotlist"** row in Floor Lists — the board, one for everyone. (Renamed from "Daily watchlist" on 2026-10-21 to stay clear of the existing **Watchlists** row, the scan lists.)

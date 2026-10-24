@@ -16,7 +16,7 @@ import { _tick, _resetGrade } from '../../monitoring/dailyScreener.monitor.servi
 const row = (symbol, cols) => ({ symbol, cells: Object.fromEntries(cols.map(c => [c, { grade: 'B', range: { atr_mult: 1 } }])) })
 
 test('Argus picks per column: each column capped on its own, a name can be a pick on two columns', () => {
-    const rows = [...Array.from({ length: 8 }, (_, i) => row(`O${i}`, ['open'])), ...Array.from({ length: 8 }, (_, i) => row(`W${i}`, ['week'])), row('BOTH', ['open', 'week'])]
+    const rows = [...Array.from({ length: 12 }, (_, i) => row(`O${i}`, ['open'])), ...Array.from({ length: 12 }, (_, i) => row(`W${i}`, ['week'])), row('BOTH', ['open', 'week'])]
     const raw = { picks: [
         { symbol: 'BOTH', column: 'open', why: 'gap' }, { symbol: 'BOTH', column: 'week', why: 'drift' }, { symbol: 'BOTH', column: 'week', why: 'repeat' },
         ...rows.filter(r => r.symbol !== 'BOTH').map(r => ({ symbol: r.symbol, column: Object.keys(r.cells)[0], why: 'x' })),

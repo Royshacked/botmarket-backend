@@ -108,7 +108,7 @@ export async function argusPicks(input, { send = oneShotText, model = _houseMode
     }
     try {
         const m = await model()
-        const text = await send({ model: m, systemText: SYSTEM, userText: pickText(input), maxTokens: 4000, onUsage: onUsage && (u => onUsage(u, m)) })
+        const text = await send({ model: m, systemText: SYSTEM, userText: pickText(input), maxTokens: 6000, onUsage: onUsage && (u => onUsage(u, m)) })
         const raw = extractFirstJSON(text)
         if (!raw || typeof raw !== 'object') return fallback('no readable answer')
         const read = normalizePicks(raw, rows, max)

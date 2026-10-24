@@ -230,11 +230,12 @@ export const config = {
     get openrouterWebSearch() { return _str('OPENROUTER_WEB_SEARCH', 'server') },
     get pythiaWeekly()       { return _bool('PYTHIA_WEEKLY', 'opt-in') },
     // The house scan after each week (services/houseScan.service.js; docs/design/house-research-chain.md): Argus's
-    // picks per FOR SWING / FOR LONG TERM industry (per theme LINK) — Roy 2026-10-23: the best 5 — at most this many a
-    // week, researched by Prometheus automatically up to the weekly $ ceiling (a research name is ~$0.04 on Luna).
-    get houseScanPerIndustry() { return _num('HOUSE_SCAN_PER_INDUSTRY', 5) },
-    get houseScanWeeklyMax()   { return _num('HOUSE_SCAN_WEEKLY_MAX', 50) },
-    get houseResearchMaxUsd()  { return _num('HOUSE_RESEARCH_MAX_USD', 5) },
+    // picks per FOR SWING / FOR LONG TERM industry (per theme LINK) — Roy 2026-10-23: the best 5; DOUBLED 2026-10-24
+    // ("more Argus checks and Prometheus checks — double": more names, more record) — at most this many a week,
+    // researched by Prometheus automatically up to the weekly $ ceiling (a research name is ~$0.04 on Luna).
+    get houseScanPerIndustry() { return _num('HOUSE_SCAN_PER_INDUSTRY', 10) },
+    get houseScanWeeklyMax()   { return _num('HOUSE_SCAN_WEEKLY_MAX', 100) },
+    get houseResearchMaxUsd()  { return _num('HOUSE_RESEARCH_MAX_USD', 10) },
     // The candidate list's liquidity floor, dollars traded a day (20-day average; houseScan.candidates.js). A swing
     // trade has to get in and out; a long-term holding barely trades.
     get houseScanMinAdvSwing() { return _num('HOUSE_SCAN_MIN_ADV_SWING', 20e6) },
@@ -271,11 +272,12 @@ export const config = {
     // researched by Prometheus as catalyst reads, automatically — on with the screener (Roy, 2026-10-23: "without the
     // user having to activate Argus or Prometheus"); HOTLIST_RESEARCH=false is the kill switch. A DAILY cap: names and $.
     get hotlistResearch()        { return _bool('HOTLIST_RESEARCH', 'false-0') },
-    get hotlistResearchMaxNames() { return _num('HOTLIST_RESEARCH_MAX_NAMES', 10) },
-    get hotlistResearchMaxUsd()   { return _num('HOTLIST_RESEARCH_MAX_USD', 1) },
+    // Doubled 2026-10-24 with Argus's week picks (10 per column): a read for each, and a record twice as fast.
+    get hotlistResearchMaxNames() { return _num('HOTLIST_RESEARCH_MAX_NAMES', 20) },
+    get hotlistResearchMaxUsd()   { return _num('HOTLIST_RESEARCH_MAX_USD', 2) },
     // A catalyst read a USER asked for from the Hotlist ("Catalyst read" on a This week row): outside the house's daily $,
     // capped by count instead — this many a day, everyone's together (~$0.015–0.03 each).
-    get hotlistManualReads()      { return _num('HOTLIST_MANUAL_READS', 10) },
+    get hotlistManualReads()      { return _num('HOTLIST_MANUAL_READS', 20) },
     get dailyScreenerRpm() { return _num('DAILY_SCREENER_RPM', 60) },
     // The model that labels the checkpoint pool's headlines (services/hotlist.news.js) — once per
     // checkpoint for every user. Empty → Haiku 4.5 (Roy's decision, daily-names.md §10); any id in

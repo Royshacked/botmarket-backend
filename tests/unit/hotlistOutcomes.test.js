@@ -208,3 +208,64 @@ test('a board stamps which of its columns are still unverified', async () => {
     assert.deepEqual(board.unverified_columns, ['open'])
     assert.equal(board.unverified, true)
 })
+
+// ─── The wide set (Roy, 2026-10-24: "with the analysis we lose good statistics") ───
+
+test('the wide set: every graded name past the board is scored too, marked not shown', async () => {
+    const { deps, rows, calls } = rig()
+    rows(BOARDS)[0].wide = [{ symbol: 'OFF', price: 20, cells: { mid: { grade: 'C', range: { level: 20.2, atr_mult: 0.2, open_sky: false } } } }]
+    const r = await runOutcomes({ force: true, deps })
+    assert.equal(r.scored, 2)
+    assert.deepEqual(calls.sort(), ['ABC', 'OFF'])
+    const by = Object.fromEntries(rows(OUTCOMES).map(o => [o.symbol, o.shown]))
+    assert.deepEqual(by, { ABC: true, OFF: false })
+})
+
+test('the wide set is kept 60 days, the board 168', async () => {
+    const { deps, rows } = rig()
+    const old = (day, shown) => ({ id: `x_${day}_${shown}`, day, column: 'mid', shown, outcome: { ret_pct: 1 } })
+    rows(OUTCOMES).push(old('2026-07-01', false), old('2026-07-01', true), old('2026-09-15', false))
+    await runOutcomes({ force: true, deps })
+    const left = rows(OUTCOMES).filter(o => o.id.startsWith('x_')).map(o => o.id).sort()
+    assert.deepEqual(left, ['x_2026-07-01_true', 'x_2026-09-15_false'], 'July off the board: past 60 days; on it: kept')
+})
+
+test("each column's summary sets the board's names against the graded names off it", () => {
+    const o = (shown, ret) => ({ column: 'mid', day: DAY, grade: 'B', ...(shown == null ? {} : { shown }), outcome: { ret_pct: ret, reached: null } })
+    const s = summarize([o(null, 2), o(true, -1), o(false, 1), o(false, -3), o(false, -2)])
+    assert.deepEqual([s.mid.n, s.mid.board.n, s.mid.board.up_rate, s.mid.off.n, s.mid.off.up_rate], [5, 2, 50, 3, 33.3], 'a row from before the wide set counts as the board\'s')
+})
+
+test("Argus's record stays the board's: a name off it was never in front of him", async () => {
+    const { argusRecord } = await import('../../services/hotlist.outcomes.js')
+    const boards = [{ id: 'b', argus: { summary: 's' }, rows: [{ symbol: 'ON' }] }]
+    const r = argusRecord([{ board: 'b', symbol: 'ON', column: 'mid', outcome: { ret_pct: 1 } }, { board: 'b', symbol: 'OFF', column: 'mid', shown: false, outcome: { ret_pct: 1 } }], boards)
+    assert.equal(r.all.unmarked.n, 1)
+})
+
+test('the checkpoint keeps the graded names past its cut, compactly; the client never gets them', async () => {
+    const { wideRow, BOARD_MAX } = await import('../../services/dailyScreener.checkpoint.js')
+    assert.equal(BOARD_MAX, 60)
+    assert.deepEqual(wideRow({ symbol: 'A', price: 10, quoted_at: 5, why: 'long text', cells: { mid: { grade: 'B', why: ['x'], range: { level: 11, atr_mult: 0.5, pct: 10 } }, eod: { grade: null } } }),
+        { symbol: 'A', price: 10, quoted_at: 5, cells: { mid: { grade: 'B', range: { level: 11, atr_mult: 0.5, open_sky: false } } } })
+    const { boardById } = await import('../../services/hotlist.service.js')
+    const { db, rows } = memDb()
+    rows(BOARDS).push({ id: 'hb_x', status: 'done', rows: [], wide: [{ symbol: 'A' }] })
+    assert.equal((await boardById('hb_x', { db: async () => db })).wide, undefined)
+})
+
+test('the pool — quoted names graded on no column — is scored as the control group, never as a grade', async () => {
+    const { poolRow } = await import('../../services/dailyScreener.checkpoint.js')
+    const { POOL_GRADE } = await import('../../services/hotlist.outcomes.js')
+    assert.deepEqual(poolRow('P', { mid: 10.5, price: 11 }, ['open', 'week'], { book: 'extended', quotedAt: 7 }),
+        { symbol: 'P', price: 10.5, quoted_at: 7, pool: true, cells: { open: { grade: POOL_GRADE, range: { level: null, atr_mult: null, open_sky: false } }, week: { grade: POOL_GRADE, range: { level: null, atr_mult: null, open_sky: false } } } })
+    assert.equal(poolRow('P', { price: 11 }, ['mid'], { book: 'session' }).price, 11)
+    assert.equal(poolRow('P', { price: 0 }, ['mid'], { book: 'session' }), null)
+    const { deps, rows } = rig()
+    rows(BOARDS)[0].wide = [poolRow('POOL', { price: 30 }, ['mid'], { book: 'session' })]
+    await runOutcomes({ force: true, deps })
+    const pool = rows(OUTCOMES).find(o => o.symbol === 'POOL')
+    assert.deepEqual([pool.grade, pool.shown, pool.outcome.reached], [POOL_GRADE, false, null], 'no level to reach — up or down only')
+    const s = summarize(rows(OUTCOMES))
+    assert.deepEqual([s.mid.n, s.mid.pool.n], [1, 1], 'the pool is not a grade and does not count toward verified')
+})

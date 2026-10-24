@@ -247,6 +247,7 @@ export async function hotlistOutcomes(deps = _deps) {
 
 /** What a client sees of a board: no Mongo id, no claim bookkeeping. Pure. */
 function _public(b) {
-    const { _id, started_at, scored, requests, ...rest } = b
+    // `wide` — the graded names past the board's cut — is the outcome log's, not the client's (hundreds of rows).
+    const { _id, started_at, scored, requests, wide, ...rest } = b
     return rest
 }
