@@ -108,8 +108,8 @@ api/
                               pending views; viewsForSymbols is THE join (symbol → its industry's answer)
                               behind Atlas's trigger, its fingerprint and the read tool. Writes ride
                               houseArtifact.repo
-    industryPublish.service.js  publishIndustry — the check against the measured numbers, the write, the industry
-                              card on a changed answer; the route and Pythia's session action. viewReasons.js: its table
+    industryPublish.service.js  publishIndustry — the check against the measured numbers and the write (no card
+                              since 2026-10-24: Pythia posts none); the route and Pythia's session action. viewReasons.js: its table
     geopoliticsData.service.js  Geopolitical risk as the engine measured it (step 4, pythia-geopolitics.md):
                               latestReading (geopolitical_risk, latest COMPLETE run — the GPR index, world and
                               countries, and the exposure map's risks with the sub-industries they hurt/help),
@@ -276,8 +276,11 @@ api/
                           part. docs/design/floor-calendar.md
   hotlist/                the HOTLIST's reads (docs/design/daily-names.md §8): GET /api/hotlist?day (the
                           latest board in full + the day's checkpoints as one-liners), /boards/:id,
-                          /outcomes (the log summarised). Read-only and shared — research binds to no
-                          account, so no workspace scope. Shaping lives in services/hotlist.service
+                          /outcomes (the log summarised, + `backtest`, the week replay's summary), GET /reads
+                          (the catalyst reads), POST /reads (a user's "Catalyst read" on a This week row,
+                          HOTLIST_MANUAL_READS a day), GET /book (the Swing / Long term lists + the chain's
+                          `picks`). Shared — research binds to no account, so no workspace scope. Shaping
+                          lives in services/hotlist.service, catalystRead.service, houseBook.service
   transcribe/             raw audio → Whisper (OpenAI SDK, the only OpenAI use). Mounted BEFORE
                           express.json so the raw-body parser sees the bytes; authed — it is a paid API.
                           The language is TOLD (`en`, or a client's 2-letter `?language=`), never
@@ -730,6 +733,12 @@ services/
                             not one per user. Two consumers: Axl's tool and Axl's brief turn (axl.desk briefTurn)
   marketBrief.tools.js      get_market_brief — UNBOUND (no userId, so the brief cannot be made
                             personal). Axl RELAYS the brief; it does not write market commentary
+  news.tools.js             get_news — UNBOUND; `companies` (a ticker), `headlines` (the front page) or `topic`
+                            (free text; anything unrecognised falls back to it). Every fetch through
+                            news.service (one news pipe); formatNewsDigest — ≤12 dated, sourced headlines,
+                            newest first, mojibake repaired, peer tags on a ticker read, an explicit "nothing
+                            found" instead of an empty string. Axl, Mentor, Argus (scanner desk) and Pythia
+                            each carry it with their own description. capPerSymbol — ≤3 per ticker in a basket
   industryViews.tools.js    get_industry_views (Axl + Atlas, replaced get_sector_view 2026-10-05) — UNBOUND;
                             the caller passes `symbols` (the industry each is in + the house's three
                             answers, through industryView.viewsForSymbols) or a GICS `sector`. Reads say
@@ -920,11 +929,14 @@ services/
                             the board stamps (`unverified_columns`). Also names the `hotlist_boards`
                             collection (dailyScreener.checkpoint re-exports it: no import cycle)
   hotlist.argus.js          ARGUS'S READ of each checkpoint board (phase 5, Roy 2026-10-21): once, for
-                            everyone, on the HOUSE chat model — a summary, ≤5 picks PER COLUMN (since
-                            2026-10-23, docs/design/horizon-chains.md §2; symbol, column, why, caution) and
-                            ≤5 traps. normalizeRead holds every pick to a board row on a column the board
-                            GRADED. Stored on the board; picks marked on their rows (`picks.<column>`).
-                            Fails soft (no read)
+                            everyone, on the HOUSE chat model — a summary, ≤10 picks PER COLUMN (MAX_PICKS;
+                            docs/design/horizon-chains.md §2; symbol, column, why, caution) and ≤10 avoids
+                            (MAX_AVOID). Each row reaches him with its newest 3 headlines (checkpoint withNews,
+                            NEWS_FOR_ARGUS) and its free range — no grade in his board text (2026-10-24).
+                            normalizeRead holds every pick to a board row on a column the board GRADED. Stored
+                            on the board; picks marked on their rows (`picks.<column>`). On the day columns
+                            (DAY_COLUMNS: open / mid / eod / tomorrow) his picks ARE the list; his week picks go
+                            on to Prometheus (hotlistResearch). Fails soft (no read)
   hotlistResearch.service.js the SHORT-SWING CHAIN (horizon-chains.md §4): after the 09:20 board, Argus's week
                             picks → research queue (source `hotlist`) → Prometheus's catalyst reads, inside a
                             DAILY cap (HOTLIST_RESEARCH_MAX_NAMES / _MAX_USD), on the screener's monitor tick;
@@ -934,29 +946,46 @@ services/
                             a USER's "Catalyst read" on a This week row (POST /api/hotlist/reads), outside the
                             house $, HOTLIST_MANUAL_READS a day
   catalystRead.service.js   CATALYST READS (horizon-chains.md §3) — Prometheus's short-swing answer in its own
-                            collection `catalyst_reads`, never coverage: target = spot × (1 + what is still
-                            open) off compute_event_delta, or spot × (1 + the median run-up) off get_runup_history
-                            for a report ahead; band, priced share, a 5–30 day window ending the session before a
-                            report inside it; a target at or under spot, or no window left, is a `pass`
-                            (`pass_reason`); graded hit by the live price inside the window, and past it by the
-                            window's own daily bars (hit / expired vs SPY). One active read per symbol — the
-                            `one_active_read` partial unique index. GET /api/hotlist/reads
+                            collection `catalyst_reads`, never coverage. He reads the catalyst AND the company
+                            (get_fundamentals; `company` sound / weak / broken) and sets HIS OWN target
+                            `{price, low, high, why}` from a fresh quote (ownTarget, 2026-10-24). The tools'
+                            number — spot × (1 + what is open) off compute_event_delta, or the run-up off
+                            get_runup_history — is his YARDSTICK (`target.yardstick`), never the target: no
+                            number of his on a credible / priced_in read is a pass, `no_target`. Other passes
+                            (`pass_reason`): the verdict, `company` (broken), `too_small` (minOpenPct),
+                            `already_ran`, `report_too_close`, `nothing_open`. A target past STRETCH_X (3) × the
+                            implied move or the yardstick is flagged `target.stretch` — shown, never blocked. A
+                            5–30 day window ending the session before a report inside it; graded hit by the live
+                            price inside the window, and past it by the window's own daily bars (hit / expired vs
+                            SPY). One active read per symbol — the `one_active_read` partial unique index.
+                            liveRead (a symbol's active read) + readFacts (it as one line) feed Mentor's week
+                            hand-off. GET /api/hotlist/reads
   houseBook.service.js      the Hotlist's SWING / LONG TERM lists (horizon-chains.md): live coverage by its target's
                             horizon (3m/6m · 12m+), each name's origin (the weekly chain's research_queue row, or
                             the desk), the move since its target was set vs SPY, progress to target, and each
                             book's record; set-day prices + outside-universe closes read in the background into
-                            `house_book_marks`. GET /api/hotlist/book. bookSeed — a Mentor hand-off off the lists
+                            `house_book_marks`. `picks: {swing, long_term}` — the chain's `pythia` research_queue
+                            rows of the last PICK_DAYS (56), newest per symbol, each `pickState` covered / passed /
+                            already_covered / waiting; `picks: null` = the read failed (the list says so). The
+                            list is the chain's COVERED names whatever the rating, plus chain picks already
+                            covered at the desk. GET /api/hotlist/book. bookSeed — a Mentor hand-off off the lists
                             (scanSeed `book` ref) resolved from the coverage: horizon + the thesis in numbers
   hotlist.argus.js (pool)   Argus also reads the board's POOL — quoted names graded on no column (40, poolForArgus) —
                             and SPOTS up to 10 the rules missed (daily-names.md §7.4); scored and in his record
   hotlistBacktest.service.js THE WEEK REPLAY (daily-names.md §7.5): the live This week rules over past sessions —
                             stats before D, D's open, the live cell and window — per grade, path and the pool, one
-                            summary doc in `hotlist_backtest`; run by scripts/replay-hotlist-week.mjs
+                            summary doc in `hotlist_backtest`; run by scripts/replay-hotlist-week.mjs. A run-up
+                            trade (a report inside the window) is scored up to the close BEFORE the report, as
+                            the live outcome log does. The summary rides GET /api/hotlist/outcomes as `backtest`
   hotlist.service.js        the hotlist's READ side: todayHotlist / boardById / hotlistOutcomes for the
                             API, and hotlistSeed — a "Build with Mentor" hand-off is a REFERENCE (board
                             id + column, scanSeed.util), resolved here from the STORED board into the
-                            horizon (COLUMN_HORIZON), the facts line, Argus's note and the unverified
-                            flag; Mentor's seed section relays them (free range is room, not a target).
+                            horizon (COLUMN_HORIZON), the facts line and Argus's note — no grade is handed on
+                            (`unverified` is always false, 2026-10-24); on a week hand-off, `catalyst_facts`
+                            (Prometheus's live read via catalystRead liveRead + readFacts: the take-profit at
+                            his target, out by the read's date). Mentor's seed section relays them (free range
+                            is room, not a target). No grade letter reaches any client; the grades still gate
+                            the columns, order the board, and are scored by the outcome log and the replay.
                             "Did it work" (daily-names.md §7.1): cellResult / withResults put each graded
                             cell's outcome-log result on the day list and every board (boardWithResults);
                             todayHotlist lists the past `days`. A board's `wide` (graded names past the cut + the

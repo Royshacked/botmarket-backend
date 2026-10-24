@@ -106,6 +106,21 @@ The events-radar name's detail panel shows it under the verdict (`Sized: worth �
 conclusion line carries it, and the Mentor seed hands it over as a target-shaped number with what is
 already gone taken out.
 
+### The catalyst read — the short-swing mode (2026-10-23; his own target 2026-10-24)
+
+[horizon-chains.md](../design/horizon-chains.md). The Hotlist's This week picks (Argus's, queued source `hotlist`, or a
+user's "Catalyst read" on a row) are read in mode `catalyst` (`prompts/analyst_mode_catalyst.md`, ledger key
+`analystAgent-catalyst`, emit tag `catalyst_read`) and saved by `services/catalystRead.service.js` in their own
+collection, **`catalyst_reads` — never coverage** (coverage is one doc per symbol and Atlas sizes off it). He reads the
+catalyst AND the company (`get_fundamentals` once; `company` sound / weak / broken) and decides **his own short-swing
+target** `{price, low, high, why}`, measured from a fresh quote. The tools' number — the event delta, or the run-up
+record (`get_runup_history`) for a report ahead — is his **yardstick** (`target.yardstick`), never the target. Passes
+(`pass_reason`): no number of his (`no_target`), `company` (broken), `too_small`, `already_ran`, `report_too_close`,
+`nothing_open`, or the verdict itself. A target past 3× the implied move or the yardstick is flagged `target.stretch`,
+not blocked. One live read per symbol, a window ending the session before a report inside it, **graded at the window's
+end** (`hit` / `expired` vs SPY; a pass is on record, not a trade). A covered name still gets one; a read never touches
+its coverage.
+
 ## The gates — what the write refuses, and what it merely flags
 
 `coverage.service.js` holds two kinds of check, and the distinction is the point:
@@ -270,6 +285,7 @@ daily checks never needed the result: the claim is stamped, the hop posts its ow
 | **Atlas mid-review** | `<coverage_refresh>` → `coverageRefresh.service`, route-and-return: Prometheus rewrites ONE name's coverage (initiate or append a revision), then a `coverage_refreshed` card tells the user to resume. Artifact-mediated: Prometheus writes the doc, Atlas re-reads it — no live judgment injection between agents | the doc, re-read on resume |
 | **The monitor** | the same hop, `userId: null` — a house run; the card fans out to every admin | a fresh target and band |
 | **Aether** | quick-read mode (above) | a `<quickread>` verdict, no doc |
+| **The Hotlist** | catalyst-read mode (above): Argus's This week picks by code (`hotlistResearch.service`, a daily cap), or a user's "Catalyst read" (POST /api/hotlist/reads) | a `catalyst_reads` row — his target, or a pass with its reason |
 | **Every desk, reading** | `getCoverage` / `listSymbols` (the one-field projection — Prometheus's own context, the run's skip list and the sleeve orchestrator used to pull whole documents to learn a ticker) | the house view |
 
 **What a trade keeps of it.** At execution (`ideaExecution`, `manualIdea`), `captureResearchBasis`

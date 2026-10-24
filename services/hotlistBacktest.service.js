@@ -78,8 +78,10 @@ export function replaySymbol({ symbol, bars, bench, reports = [], days }) {
         const price = rows[i].open > 0 ? rows[i].open : rows[i - 1].close
         if (failedGate('week', stats, { price })) continue
         const c = cell('week', stats, { price, today: day, catalyst: null })
-        const win = windowBars('week', day, { daily: rows })
-        if (win.length < WEEK_SESSIONS || windowPartial('week', win)) continue
+        // A run-up is scored to the close before its report, as live (hotlist.outcomes windowBars `exitBefore`).
+        const exitBefore = c.exit_before ?? null
+        const win = windowBars('week', day, { daily: rows }, { exitBefore })
+        if (!win.length || windowPartial('week', win, { day, exitBefore }) || (!exitBefore && win.length < WEEK_SESSIONS)) continue
         const outcome = scoreWindow({ entry: price, level: c.range?.level ?? null }, win)
         if (!outcome) continue
         out.push({ day, symbol, grade: c.grade ?? POOL_GRADE, path: c.path ?? null, outcome })
@@ -142,7 +144,15 @@ export async function replayWeek({ sessions = REPLAY_SESSIONS, deps = _deps, onP
     if (!days.length) return { ok: false, outcome: 'no_history' }
 
     await pace()
-    const calendar = await deps.earnings(_addDays(days[0], -1), _addDays(days.at(-1), EARNINGS_DAYS)).catch(() => [])
+    // No calendar, no run-up path: every name would lose its report and the scheduled path would sink into the pool, stored
+    // as if it were the result (code review 2026-10-24). A failed read stops the replay; the stored one stays.
+    let calendar
+    try {
+        calendar = await deps.earnings(_addDays(days[0], -1), _addDays(days.at(-1), EARNINGS_DAYS))
+    } catch (err) {
+        logger.warn(LOG, 'week replay stopped — the earnings calendar was not read', { error: err.message })
+        return { ok: false, outcome: 'no_calendar' }
+    }
     const reports = new Map()
     for (const e of calendar ?? []) {
         const s = String(e?.symbol ?? '').toUpperCase()
@@ -171,11 +181,17 @@ export async function replayWeek({ sessions = REPLAY_SESSIONS, deps = _deps, onP
         id: 'week', column: 'week', run_at: new Date(nowMs).toISOString(), from: days[0], to: days.at(-1),
         sessions: days.length, universe: universe.length, universe_day: last.day, read, failed, stopped,
         summary: summarizeReplay(rows),
-        caveats: ['no drift path (no past news labels): scheduled and accumulation only', "today's universe (survivorship)", "entry at the session's open, not the 09:20 quote"],
+        caveats: ['no drift path (no past news labels): scheduled and accumulation only', "today's universe (survivorship)", "entry at the session's open, not the 09:20 quote", 'a run-up is scored to the close before its report'],
+    }
+    // A run stopped short (rate-limited) is NOT stored: it would replace a whole universe's summary with a few names'
+    // (code review 2026-10-24). It is returned, so the script still prints it.
+    if (stopped) {
+        logger.warn(LOG, 'week replay stopped short — the stored one kept', { read, failed, stopped })
+        return { ok: false, outcome: 'partial', ...doc }
     }
     await db.collection(BACKTEST).updateOne({ id: 'week' }, { $set: doc }, { upsert: true })
-    logger.info(LOG, 'week replay stored', { from: doc.from, to: doc.to, read, failed, stopped, graded: doc.summary.graded.n, pool: doc.summary.pool.n })
-    return { ok: !stopped, outcome: stopped ? 'partial' : 'done', ...doc }
+    logger.info(LOG, 'week replay stored', { from: doc.from, to: doc.to, read, failed, graded: doc.summary.graded.n, pool: doc.summary.pool.n })
+    return { ok: true, outcome: 'done', ...doc }
 }
 
 /** The stored replays, keyed by column — what the API's outcomes carry as `backtest`. Null on none. */

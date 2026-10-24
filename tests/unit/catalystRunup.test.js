@@ -102,18 +102,20 @@ test('the window ends the session before a report inside it; a report past the w
 
 test('a run-up read is ACTIVE with a target and dated to the report; a target at or under spot is a pass', () => {
     const now = Date.parse('2026-10-23T13:40:00Z')
-    const parsed = { verdict: 'credible', window_days: 5, runup: { report: '2026-10-27', median_pct: 3, p25_pct: 1, p75_pct: 5, n: 8 } }
+    // The target is HIS (2026-10-24); the run-up record is the yardstick beside it.
+    const parsed = { verdict: 'credible', window_days: 5, runup: { report: '2026-10-27', median_pct: 3, p25_pct: 1, p75_pct: 5, n: 8 }, target: { price: 267.8 } }
     const r = buildCatalystRead(parsed, { symbol: 'RCL', spot: 260, nowMs: now, context: { exit_before: '2026-10-27' } })
     assert.equal(r.status, 'active')
     assert.equal(r.target.value, 267.8)
+    assert.equal(r.target.yardstick.value, 267.8, 'the record: +3% from 260')
     assert.equal(r.valid_until, '2026-10-26T21:00:00.000Z')
     assert.equal(r.exit_before, '2026-10-27')
     assert.equal(r.runup.n, 8)
-    const flat = buildCatalystRead({ ...parsed, runup: { ...parsed.runup, median_pct: -0.5 } }, { symbol: 'RCL', spot: 260, nowMs: now })
-    assert.equal(flat.status, 'pass', 'a long whose record runs DOWN into the report is no trade')
+    const flat = buildCatalystRead({ ...parsed, runup: { ...parsed.runup, median_pct: -0.5 }, target: { price: 259 } }, { symbol: 'RCL', spot: 260, nowMs: now })
+    assert.equal(flat.status, 'pass', 'a long whose target is under the price is no trade')
     assert.equal(flat.target, null)
     const gone = buildCatalystRead({ verdict: 'priced_in', delta: { delta_price_pct: 4, moved_pct: 6 } }, { symbol: 'X', spot: 50, nowMs: now })
-    assert.equal(gone.status, 'pass', 'an event fully taken: nothing open, no instant hit')
+    assert.deepEqual([gone.status, gone.pass_reason], ['pass', 'no_target'], 'no number of his: a pass, never the yardstick in his place')
 })
 
 test("the board's report date travels with the name to Prometheus", () => {
@@ -166,22 +168,27 @@ test('this cycle on its usual path: the usual last-sessions move is still ahead 
     const { text, line } = await cycleLine(1.01)
     assert.match(text, /This cycle: its usual run-up over the full 10 sessions before a report is a median 10\.46%; over the 8 sessions of it already gone it has moved 8\.29%\./)
     assert.doesNotMatch(text, /ALREADY RUN/)
-    const r = buildCatalystRead({ verdict: 'credible', window_days: 5, runup: line }, { symbol: 'RCL', spot: 120, nowMs: NOW })
+    // The yardstick's arithmetic (his target is set beside it).
+    const y = runupTarget(line, 120)
+    assert.equal(y.open_pct, 2.01, 'the usual 2.01% left — no cut')
+    assert.equal(y.cycle_cut_pct, undefined)
+    const r = buildCatalystRead({ verdict: 'credible', window_days: 5, runup: line, target: { price: y.value } }, { symbol: 'RCL', spot: 120, nowMs: NOW })
     assert.equal(r.status, 'active')
-    assert.equal(r.target.open_pct, 2.01, 'the usual 2.01% left — no cut')
-    assert.equal(r.target.cycle_cut_pct, undefined)
+    assert.equal(r.target.yardstick.open_pct, 2.01)
 })
 
 test('a cycle that ran AHEAD of its path has less left: the target is the full run-up less the move so far', async () => {
     const { line } = await cycleLine(1.0108)   // 8 sessions at 1.08% ≈ +8.98% of a usual 10.46%: about 1.5% left
-    const r = buildCatalystRead({ verdict: 'credible', window_days: 5, runup: line }, { symbol: 'RCL', spot: 120, nowMs: NOW })
+    const y = runupTarget(line, 120)
+    assert.equal(y.open_pct, _round2(line.full_median_pct - line.so_far_pct))
+    assert.ok(y.open_pct < 2.01 && y.cycle_cut_pct > 0)
+    assert.equal(y.moved_pct, line.so_far_pct)
+    const r = buildCatalystRead({ verdict: 'credible', window_days: 5, runup: line, target: { price: y.value } }, { symbol: 'RCL', spot: 120, nowMs: NOW })
     assert.equal(r.status, 'active')
-    assert.equal(r.target.open_pct, _round2(line.full_median_pct - line.so_far_pct))
-    assert.ok(r.target.open_pct < 2.01 && r.target.cycle_cut_pct > 0)
-    assert.equal(r.target.moved_pct, line.so_far_pct)
+    assert.equal(r.target.moved_pct, line.so_far_pct, "the yardstick's head start rides with his target")
     const tight = await cycleLine(1.0118)   // ≈ +9.85%: about 0.6% left — under the 1% bar, because the cycle ran ahead
-    const t = buildCatalystRead({ verdict: 'credible', window_days: 5, runup: tight.line }, { symbol: 'RCL', spot: 120, nowMs: NOW })
-    assert.deepEqual([t.status, t.pass_reason], ['pass', 'already_ran'])
+    const t = buildCatalystRead({ verdict: 'credible', window_days: 5, runup: tight.line, target: { price: runupTarget(tight.line, 120).value } }, { symbol: 'RCL', spot: 120, nowMs: NOW })
+    assert.deepEqual([t.status, t.pass_reason], ['pass', 'already_ran'], "too little left because the cycle ran ahead (the yardstick's cut)")
 })
 
 test('a cycle that already moved its whole usual run-up: the tool says so, and the read is a pass — already ran', async () => {

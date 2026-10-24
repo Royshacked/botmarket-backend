@@ -128,7 +128,7 @@ test('hotlistSeed reads the STORED board: the horizon, the facts, Argus\'s note,
     assert.match(seed.hotlist_facts, /free range 2\.09%/)
     assert.equal(seed.thesis, 'A real profit swing with room to the prior high.')
     assert.equal(seed.caution, 'Capex worries can cap it.')
-    assert.equal(seed.unverified, false, 'a session column has no grade to be unverified (2026-10-24)')
+    assert.equal('unverified' in seed, false, 'no grade is handed on, so nothing is unverified (2026-10-24)')
     assert.equal(await hotlistSeed({ board: 'hb_2026-10-01_mid', column: 'mid', symbol: 'SPCX' }, { db: async () => db }), null, 'a pruned board')
     assert.equal(await hotlistSeed({ board: 'hb_2026-10-21_mid', column: 'mid', symbol: 'NOPE' }, { db: async () => db }), null, 'not graded')
 })
@@ -136,13 +136,18 @@ test('hotlistSeed reads the STORED board: the horizon, the facts, Argus\'s note,
 test('Mentor is told the board\'s facts, the horizon, and that free range is not a target', () => {
     const text = _buildSeedSection({
         ticker: 'SPCX', direction: 'long', thesis: 'A real profit swing.', horizon: 'intraday',
-        hotlist_facts: seedFacts(BOARD.rows[0], 'mid'), caution: 'Capex worries.', hotlist_unverified: true,
+        hotlist_facts: seedFacts(BOARD.rows[0], 'mid'), caution: 'Capex worries.',
     })
     assert.match(text, /From today's HOTLIST: mid-session — /)
     assert.match(text, /That column's horizon is intraday/)
     assert.match(text, /Argus's caution: Capex worries\./)
-    assert.match(text, /UNVERIFIED/)
+    assert.doesNotMatch(text, /UNVERIFIED/, 'no grade is handed on, so nothing is unverified (2026-10-24)')
     assert.match(text, /no entry, stop or target/)
+    // On a week name his target IS the target: no "no target" line beside it (code review 2026-10-24).
+    const week = _buildSeedSection({ ticker: 'X', hotlist_facts: 'this week (2–10 days)', catalyst_facts: 'Prometheus (credible): target 54.20' })
+    assert.doesNotMatch(week, /stop or target/)
+    assert.match(week, /no entry, stop, and you build them with the user/)
+    assert.match(week, /His target is the desk's price for this swing/)
     assert.doesNotMatch(_buildSeedSection({ ticker: 'SPCX' }), /HOTLIST/, 'an ordinary hand-off is unchanged')
 })
 

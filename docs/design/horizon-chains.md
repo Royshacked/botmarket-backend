@@ -1,7 +1,9 @@
 # The horizon chains — every horizon automatic, and the Hotlist a list per horizon
 
 **Status: BUILT 2026-10-23 (Roy: "go ahead, write the doc and build") — steps 1-4 unit-tested, Argus per horizon
-live-checked on a stored board, the Hotlist tabs driven in a browser (`scripts/drive-hotlist-horizons.mjs`). Not pushed.**
+live-checked on a stored board, the Hotlist tabs driven in a browser (`scripts/drive-hotlist-horizons.mjs`). Pushed
+2026-10-24, with the same day's rework: no grade shown anywhere, Prometheus's own target on This week, Swing / Long term
+as the weekly chain's survivors (sections from "The Hotlist's Swing and Long term" on).**
 
 ## What Roy asked for
 
@@ -10,7 +12,7 @@ Three chains, each running by itself — nobody activates Argus or Prometheus:
 | Horizon | Chain | What arrives |
 |---|---|---|
 | **Long swing / long term** (3m–24m) | Pythia → Argus → Prometheus | covered names with a VALUATION target and its horizon — built ([house-research-chain.md](./house-research-chain.md)) |
-| **Short swing** (2–10 days, the Hotlist's `week`) | Hotlist → Argus → Prometheus | names with a CATALYST target, a 1-month horizon and a valid-until date — **this doc** |
+| **Short swing** (2–10 days, the Hotlist's `week`) | Hotlist → Argus → Prometheus | names with Prometheus's own short-swing target (the catalyst's worth is his yardstick — see "This week: Prometheus confirms and sets the target"), a 1-month horizon and a valid-until date — **this doc** |
 | **Day trade** (open · mid-day · into close · tomorrow) | Hotlist → Argus | names with their room (free range) and their time in the session — **this doc** (Argus already reads every board; he now picks per horizon) |
 
 And in the Hotlist: **a list per horizon**.
@@ -33,8 +35,9 @@ And in the Hotlist: **a list per horizon**.
 ### 1. The Hotlist — a list per horizon (frontend)
 
 Today's list gets horizon tabs: **All · Open · Mid-day · Into close · Tomorrow · This week**. A horizon's tab lists the
-names graded on that column — Argus's picks for THAT horizon first, then grade, then room — and its Best/Room cells read
-that column, not the name's best. On **This week**, a name with a catalyst read shows its target, what is still open,
+names graded on that column — Argus's picks for THAT horizon first, then room — and its Room cells read that column,
+not the name's best. No grade is shown (2026-10-24; Swing and Long term were added the same day — see the sections
+below). On **This week**, a name with a catalyst read shows its target, what is still open,
 and its valid-until.
 
 ### 2. Argus picks per horizon (backend)
@@ -57,7 +60,8 @@ A mode of the research desk (like the quick read: `prompts/analyst_mode_catalyst
   interest, options), event risk inside the window (earnings, FDA, lockup…). It emits `<catalyst_read>`.
 - **What code does:** the target from his delta — `spot × (1 + remaining)`, band from the delta's low/high — the share
   already priced, the window (`1m`, `valid_until`), the price and SPY at the read. A `contradicted` or unsized read is
-  stored with no target (a pass).
+  stored with no target (a pass). *Superseded 2026-10-24: the target is his own and the delta only its yardstick — see
+  "This week: Prometheus confirms and sets the target".*
 - **Graded at expiry** (the screener's off-session tick): `hit` when the price reached the target, else at valid-until
   `expired` with its return and SPY's over the window. One record per kind; never mixed with coverage's.
 
@@ -66,8 +70,8 @@ A mode of the research desk (like the quick read: `prompts/analyst_mode_catalyst
 - **When:** after the **09:20 board** (`preopen` — open + week columns, the strict spreads), Argus's **This week** picks are
   queued for research (source `hotlist`), the board's facts and his why/caution on the row.
 - **The run:** the same research run as the Pythia chain (`startRun({ symbols, maxUsd })`), in catalyst mode for these
-  rows; the budget pipe of `houseResearch` shared, not copied — a **daily** budget: `HOTLIST_RESEARCH_MAX_USD` ($1) and
-  `HOTLIST_RESEARCH_MAX_NAMES` (10) per ET day. A run already going → the names wait for the next screener tick (5 min).
+  rows; the budget pipe of `houseResearch` shared, not copied — a **daily** budget: `HOTLIST_RESEARCH_MAX_USD` ($2) and
+  `HOTLIST_RESEARCH_MAX_NAMES` (20) per ET day (doubled 2026-10-24 from $1 / 10). A run already going → the names wait for the next screener tick (5 min).
 - A name with a live catalyst read is not read again; a covered name IS read (a catalyst read never blocks or replaces
   coverage).
 
@@ -86,7 +90,8 @@ Everything stays behind `DAILY_SCREENER` — off, no boards, no picks, no reads.
 - **§4** `services/hotlistResearch.service.js` on the screener's monitor tick: `afterCheckpoint` (the `preopen` board's
   week picks → queue source `hotlist` → the run), `resume` (today's names), and the hourly grading. The budget pipe is
   `houseResearch.researchQueued` / `resumeQueued`, shared with the Pythia week. Env: `HOTLIST_RESEARCH` (on unless
-  `false`), `HOTLIST_RESEARCH_MAX_NAMES` (10/day), `HOTLIST_RESEARCH_MAX_USD` ($1/day). `GET /api/hotlist/reads`.
+  `false`), `HOTLIST_RESEARCH_MAX_NAMES` (10/day), `HOTLIST_RESEARCH_MAX_USD` ($1/day) — 20/day and $2/day since
+  2026-10-24 (services/config.js). `GET /api/hotlist/reads`.
 - **§1** `HotlistPanel`: the horizon tabs above Today's list, the row reading THAT column (grade, room, ★ rank), the
   Target column and Prometheus's read on This week.
 
@@ -174,6 +179,8 @@ buttons after This week (services/houseBook.service.js, GET /api/hotlist/book; H
 
 - **Membership** — live coverage (active, target hit, thesis broken) split by the price target's horizon, the way the
   research run books it: 3m / 6m **Swing**, 12m / 18m / 24m **Long term**. Buy-rated first; All shows holds and sells.
+  *(Superseded the same day: the views are Prometheus confirmed · Argus's names · All coverage — see "Swing and Long
+  term: the weekly chain's survivors".)*
 - **From** — the weekly chain (Pythia's verdict on an industry or theme → Argus → Prometheus), read back from the
   name's latest done `pythia` research_queue row (the only place that context lives), or the desk. Live on axl_dev, 4
   of 89 names came through the chain; the chain's names list first.
@@ -201,9 +208,15 @@ Roy: "hotlist ⇒ Argus automatically ⇒ names ⇒ Prometheus confirms catalyst
   concern, distress). `broken` is a pass, `pass_reason: 'company'`, whatever the verdict.
 - **His target.** The block carries `target: { price, low, high, why }`: his own short-swing price, decided from the
   catalyst and the company. The tools' number (the run-up line, or the event delta) is his YARDSTICK, not the answer. It
-  is stored beside his as `target.yardstick` (`basis: 'prometheus'`), and it is the target only when he gave none, as
-  before. His price is measured from a fresh quote at the read. The trade's rules still hold whoever set it: above the
-  price, `minOpenPct`, a window before the report, a run-up not already run, a company not `broken`.
+  is stored beside his as `target.yardstick` (`basis: 'prometheus'`), and it is NEVER the target: no target of his on
+  a `credible` / `priced_in` read is a pass, `pass_reason: 'no_target'`. His price is measured from a fresh quote at
+  the read. The trade's rules still hold: above the price, `minOpenPct`, a window before the report, a run-up not
+  already run, a company not `broken`.
+- **A stretch is flagged, not blocked.** A target more than `STRETCH_X` (3) × the options' implied move or the
+  yardstick (the larger) is stored with `target.stretch` (`ref_pct`, `times`) — shown with the read and told to Mentor;
+  his number is his call.
+- **Scored to the report.** A run-up week trade (a report inside the window) is scored up to the close BEFORE the
+  report — live (hotlist.outcomes) and in the replay (hotlistBacktest.service.js): the trade is out before it.
 - **The list.** This week opens on **Prometheus confirmed**: the names with a target of his. Then come **Argus's
   names** (every pick, each with his answer; a pass says why) and **All screened**. When the confirmed list is empty it
   says where the reads stand: still to come, all passes, or not loaded.
@@ -232,7 +245,7 @@ the whole book. Now:
   `picks: null` means the read failed, not that the chain sent nothing.
 - **All coverage**: the live book on that horizon, the desk's names, holds and sells too.
 - When the survivors list is empty, it says why: the chain sent nothing yet, names are still waiting for research, or
-  he rated none a buy.
+  he covered none.
 
 On prod the chain has not run (2026-10-24: 30 old `queued` rows, no chain coverage). It needs `PYTHIA_WEEKLY=true`
 and the engine crons on Render (house-research-chain.md, "As built").

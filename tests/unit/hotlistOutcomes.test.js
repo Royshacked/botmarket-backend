@@ -269,3 +269,17 @@ test('the pool — quoted names graded on no column — is scored as the control
     const s = summarize(rows(OUTCOMES))
     assert.deepEqual([s.mid.n, s.mid.pool.n], [1, 1], 'the pool is not a grade and does not count toward verified')
 })
+
+// Code review 2026-10-24: a run-up week trade is OUT before its report — scored to the close before it, not through it.
+test('a week window with a report inside it stops at the close before the report; a shorter window is not "missing bars"', async () => {
+    const { weekSessions } = await import('../../services/hotlist.outcomes.js')
+    assert.equal(weekSessions(DAY, null), 5)
+    assert.equal(weekSessions(DAY, '2026-10-26'), 3, 'Wed, Thu, Fri — out before Monday\'s report')
+    assert.equal(weekSessions(DAY, DAY), 0)
+    const win = windowBars('week', DAY, { daily: DAILY }, { exitBefore: '2026-10-26' })
+    assert.deepEqual(win.map(b => b.open), [101, 102, 103], 'the report day and after are out')
+    assert.equal(windowPartial('week', win, { day: DAY, exitBefore: '2026-10-26' }), false, 'three of three sessions: complete')
+    assert.equal(windowPartial('week', win.slice(0, 2), { day: DAY, exitBefore: '2026-10-26' }), true)
+    assert.equal(windowPartial('week', win), true, 'without the report it would be short of five')
+    assert.equal(windowBars('week', DAY, { daily: DAILY }).length, 5, 'no report: five sessions, as before')
+})

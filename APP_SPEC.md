@@ -246,8 +246,9 @@ restart mid-fan-out resumes instead of double-posting. It is an **offer**: poste
 spent, the work only runs when someone confirms. Axl relays that same brief in chat via
 `get_market_brief`.
 
-The three HOUSE cards — `industry_view`, `coverage_event`, the scheduled half of
-`coverage_refreshed` — describe an artifact with no owner, so their audience is derived at
+The two live HOUSE cards — `coverage_event` and the scheduled half of `coverage_refreshed`
+(`industry_view` retired 2026-10-24: Pythia posts no cards; old ones still render) — describe an
+artifact with no owner, so their audience is derived at
 delivery: the admin roster, every time. There is no narrower audience left in the data (coverage
 carries no `userId` since 2026-08-26), and the one card that tried to derive one from it went to
 nobody for three weeks.

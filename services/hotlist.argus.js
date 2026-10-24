@@ -52,7 +52,7 @@ Answer:
 - "summary": 2–4 plain sentences on the tape — the regime, what is moving and why, where the room is.
 - "picks": for EACH column on the board, up to ${MAX_PICKS} names you would look at FIRST for THAT horizon, best first — every column is its own list (the open's trade and this week's are different trades; a name can be a pick on both when it carries both). Each: "symbol", "column" (one the row has a cell on), "why" (one sentence: what makes this the trade on this horizon — the catalyst, the structure, the room), "caution" (one sentence: what would make it wrong). Prefer a real catalyst with room over wide room on a thin story. Fewer is fine; none is fine for a column with nothing worth it.
 - "avoid": up to ${MAX_AVOID} names on the board that look better than they are — a minor story under a big gap, a catalyst already priced, an earnings coin-toss — each with "symbol" and "why".
-- "spots": the POOL section lists names the screener QUOTED but graded on NO column — its rules passed them over (the reason is on each line: a gate failed, or it did not qualify). Up to ${MAX_SPOTS} it MISSED: a real trade on one of THIS board's columns anyway — a story the rules cannot weigh, a move the gates were too strict for. Each: "symbol", "column" (one of the board's columns), "why", "caution". Most of the pool is rightly passed over; spot only what you would actually trade, and say plainly which rule it fails. Fewer is fine; none is fine.
+- "spots": the POOL section lists names the screener QUOTED but put in play on NO column — its rules passed them over (the reason is on each line: a gate failed, or it did not qualify). Up to ${MAX_SPOTS} it MISSED: a real trade on one of THIS board's columns anyway — a story the rules cannot weigh, a move the gates were too strict for. Each: "symbol", "column" (one of the board's columns), "why", "caution". Most of the pool is rightly passed over; spot only what you would actually trade, and say plainly which rule it fails. Fewer is fine; none is fine.
 
 Output ONLY a JSON object, no prose:
 {"summary":"...","picks":[{"symbol":"ABC","column":"mid","why":"...","caution":"..."}],"avoid":[{"symbol":"XYZ","why":"..."}],"spots":[{"symbol":"QRS","column":"mid","why":"...","caution":"..."}]}`
@@ -89,9 +89,9 @@ export function boardText(board) {
     // THE POOL (2026-10-24): quoted, graded on no column — each with why, per column: the gate it failed, or not in play.
     const pool = (board.pool ?? []).map(r => {
         const why = Object.entries(r.cells ?? {}).map(([col, c]) => `${col}: ${c?.gate ? `fails the ${String(c.gate).replace('_', ' ')} gate` : 'did not qualify'}`).join('; ')
-        return `${facts(r)} | not graded — ${why}`
+        return `${facts(r)} | on no column — ${why}`
     })
-    return [...head, ...rows, ...(pool.length ? ['POOL (quoted, graded on no column — spot what the rules missed):', ...pool] : [])].join('\n')
+    return [...head, ...rows, ...(pool.length ? ['POOL (quoted, in play on no column — spot what the rules missed):', ...pool] : [])].join('\n')
 }
 
 /**

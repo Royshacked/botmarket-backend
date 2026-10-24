@@ -49,8 +49,8 @@ export function seedFacts(row, column) {
 
 /**
  * Resolve a hotlist hand-off reference into the seed fields Mentor reads. → `{ horizon, hotlist_facts,
- * catalyst_facts, thesis?, caution?, unverified }`, or null when the board, the row or a graded cell is not there
- * (a stale tab, a pruned board) — the seed then goes on as an ordinary one.
+ * catalyst_facts, thesis?, caution? }`, or null when the board, the row or a graded cell is not there (a stale tab, a
+ * pruned board) — the seed then goes on as an ordinary one. No grade is handed on (2026-10-24), so nothing is unverified.
  */
 export async function hotlistSeed(ref, deps = _deps) {
     if (!ref?.board || !ref?.column || !ref?.symbol) return null
@@ -68,8 +68,6 @@ export async function hotlistSeed(ref, deps = _deps) {
         // A failed read leaves the hand-off as it was, without it.
         catalyst_facts: ref.column === 'week' && deps.liveRead
             ? readFacts(await Promise.resolve().then(() => deps.liveRead(ref.symbol)).catch(() => null)) : null,
-        // Nothing for Mentor to lean on that could be unverified: no column hands on a grade (2026-10-24).
-        unverified:    false,
         // His pick for THIS column (horizon-chains.md §2); a board from before per-column picks has only `pick`.
         ...(() => {
             const p = row.picks?.[ref.column] ?? (row.picks ? null : row.pick)

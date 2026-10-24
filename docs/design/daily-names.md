@@ -27,7 +27,7 @@ money arriving — events and big-money flows, which is where Roy's edge is.
 | Layer | What it is | Does | Output |
 |---|---|---|---|
 | **In-play screener** | A deterministic HOUSE service, not an agent. Scheduled. Shared by every user (research binds to no account → all three workspaces). | Gates, in-play numbers, news freshness, news labels (§3), structure flags, free range (§5), regime | **The board**: ~20–50 names with their numbers |
-| **Argus** | The agent | Catalyst reading, structure confirmation, exclusions, the contrarian read, the user's own judgment criteria (§4) | 3–8 picks, each with a horizon and a thesis |
+| **Argus** | The agent | Catalyst reading, structure confirmation, exclusions, the contrarian read, the user's own judgment criteria (§4) | Up to 10 picks per column (`MAX_PICKS`, services/hotlist.argus.js), each with a horizon, a why and a caution; up to 10 avoids (`MAX_AVOID`) and 10 spots from the pool (`MAX_SPOTS`, §7.4) |
 | **Mentor** | The trader | Entry, stop, size; Talos watches it per candle | A setup |
 
 Why not a new agent like Pythia: "in play" is arithmetic (relative volume, gap, ATR, spread, dollar
@@ -248,7 +248,8 @@ working?" The log was there; it only fed the "unverified" note. Now:
   with ‹ › — a week name's result lands five sessions after its day.
 - **Each grade's track record** (summarize gained `judged` and `up_rate`): over a horizon's list, per grade, how often
   it reached its level (of the names that had one) and how often it ended up (of all), and how far the column is from
-  verified (40 sessions, 30 names); on the grade's hover too.
+  verified (40 sessions, 30 names); on the grade's hover too. *Superseded 2026-10-24 (§7.6): no grade letter is shown —
+  the record is shown as the board against its cut and the pool, no letters; the grades are still scored underneath.*
 
 **Read the hit rate with care.** A grade is the room to the level in ATRs, so a C's level is CLOSER than an A's — "reached"
 is easier for a C by construction. On the first two days of mid-day names, C reached 76% (21) and A 33% (3). The up
@@ -321,18 +322,30 @@ their gates need pre-market quotes and that morning's news labels, which do not 
 The day horizons (`DAY_COLUMNS`: open, mid, eod, tomorrow) show no grade anywhere — table, Argus's board text,
 Axl's `get_hotlist`, the Mentor seed (which is not marked unverified for them), the track record. The screener still
 computes its cells: they are the gates and the free range Argus reads. The day list a user sees is Argus's picks for
-that horizon; "All screened" shows every name the screener let through. THIS WEEK keeps its grade, and Prometheus's
-target is its yardstick. Argus reads each board with the newest three headlines per name (`withNews`,
-`NEWS_FOR_ARGUS`), and chat Argus has `get_news`. The flow is automatic: checkpoint → Argus → his names, then Build with
-Mentor on the row. The user never has to go to Argus.
+that horizon; "All screened" shows every name the screener let through. Argus reads each board with the newest three
+headlines per name (`withNews`, `NEWS_FOR_ARGUS`), and chat Argus has `get_news`. The flow is automatic: checkpoint →
+Argus → his names, then Build with Mentor on the row. The user never has to go to Argus.
+
+THIS WEEK went the same way the same day: no grade shown there either. Argus picks; Prometheus's catalyst read confirms
+— he reads the catalyst and the company and sets his OWN short-swing target; the tools' number (event delta or run-up
+record) is only his yardstick, and no target of his is a pass (`no_target`). The week list opens on **Prometheus
+confirmed**, then **Argus's names**, then **All screened** (docs/design/horizon-chains.md, "This week: Prometheus
+confirms and sets the target"). So NO grade letter reaches any surface — table, Boards, track record, the backtest
+line, Argus's board text, `get_hotlist`, the Mentor seed (`unverified` is always false). The screener still computes the
+grades: they gate which names reach a column and order the board, and the outcome log and the replay still score them.
 
 ## 8. The Floor — "Hotlist"
 
 - A **"Hotlist"** row in Floor Lists — the board, one for everyone. (Renamed from "Daily watchlist" on 2026-10-21 to stay clear of the existing **Watchlists** row, the scan lists.)
 - Clicking it opens the board in the **window over the chat box**, as a pane tab (the way Pythia and
   Aether open).
-- A row: ticker · gap · relative volume · catalyst label · the five column grades · free range
-  (% and × ATR) · **Ask Argus** / **Build with Mentor**.
+- **Horizon tabs** (2026-10-24): All · Open · Mid-day · Into close · Tomorrow · This week · Swing · Long term. Each
+  tab's count is the list it opens on. Day tabs open on **Argus's names** (his picks for that column), **All screened**
+  one click away; This week opens on **Prometheus confirmed** (a target of his), then **Argus's names**, then **All
+  screened**; Swing / Long term are the weekly chain's survivors — **Prometheus confirmed** · **Argus's names** · **All
+  coverage** (docs/design/horizon-chains.md).
+- A row: ticker · gap · relative volume · catalyst label · free range (% and × ATR) · **Ask Argus** / **Build with
+  Mentor**. No grade letter (§7.6).
 - The board **updates at each checkpoint** (§5); a name can rise, fall or leave during the day.
 - **Today's list** (Roy, 2026-10-22) — the panel's default view, a classic watchlist: every name any
   of the day's boards graded, once (`day_list` on `/api/hotlist`, `hotlist.service dayList`). A name
@@ -340,8 +353,9 @@ Mentor on the row. The user never has to go to Argus.
   hand-off references it). Each row has a **status** — *in play* (a session column, or a week cell
   let in by a story), *building* (money arriving), *setting up* (only a date ahead) — from the
   week cell's `path` (`hotlist.columns rowStatus`), the reason in plain words under the name, and
-  "since <checkpoint>". Sortable by name, price, change, volume, status and best grade; filterable
-  by status. Prices are as of each name's last checkpoint, **never live** — live quotes would cost
+  "since <checkpoint>". Sortable by name, price, change, volume and status; on All, by **Horizon** — the horizon a
+  name is best on, which replaced the best-grade column on 2026-10-24 (no letters; a horizon tab keeps Argus's order
+  until a header is clicked); filterable by status. Prices are as of each name's last checkpoint, **never live** — live quotes would cost
   the shared FMP key requests it lacks in session. **Boards** keeps the one-checkpoint view.
   Driven by `scripts/drive-hotlist-list.mjs` (21/21).
 - The user's preset (§4) filters it on open.

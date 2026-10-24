@@ -116,17 +116,27 @@ export function readValidUntil({ nowMs, windowDays, exitBefore = null }) {
  * short-term swing PT"), or null. Pure. `own` is the block's `target` ({ price, low, high, why }); `yard` the target the
  * tools' line gives (runupTarget / catalystTarget) — kept beside his as `yardstick`, so a read shows how far he moved off
  * it, and its worth / moved / priced share ride along. Null without a price or a spot to measure what is open from.
+ *
+ * STRETCH (code review 2026-10-24): a target more than STRETCH_X times the larger of the options' implied move and the
+ * yardstick is flagged `stretch` — shown with the read and told to Mentor, never blocked: his number is his call.
  */
-export function ownTarget(own, spot, yard = null) {
+export function ownTarget(own, spot, yard = null, { impliedMovePct = null } = {}) {
     if (!_ok(own?.price) || !_ok(spot)) return null
+    const open = (own.price / spot - 1) * 100
+    const refs = [Math.abs(Number(impliedMovePct)), yard?.open_pct].filter(v => Number.isFinite(v) && v > 0)
+    const ref = refs.length ? Math.max(...refs) : null
     return {
         value: _r2(own.price), low: _ok(own.low) ? _r2(own.low) : null, high: _ok(own.high) ? _r2(own.high) : null,
-        open_pct: _r2((own.price / spot - 1) * 100),
+        open_pct: _r2(open),
         worth_pct: yard?.worth_pct ?? null, moved_pct: yard?.moved_pct ?? null, priced_share: yard?.priced_share ?? null,
         spot: _r2(spot), basis: 'prometheus', why: own.why ?? null,
         yardstick: yard ? { value: yard.value, open_pct: yard.open_pct, basis: yard.basis ?? 'event' } : null,
+        ...(ref != null && open > STRETCH_X * ref ? { stretch: { ref_pct: _r2(ref), times: _r2(open / ref) } } : {}),
     }
 }
+
+/** How many times the implied move (or the yardstick, the larger) a target may sit before it is flagged a stretch. */
+export const STRETCH_X = 3
 
 /** The least a target may leave open to be a trade: 1%. */
 export const MIN_OPEN_PCT = 1
@@ -156,9 +166,11 @@ export function buildCatalystRead(parsed, { symbol, spot = null, spy = null, now
     const yard = !sized ? null
         : parsed?.runup ? runupTarget(parsed.runup, spot ?? parsed?.delta?.spot)
             : catalystTarget(parsed?.delta, parsed?.delta?.spot ?? spot)
-    // His number when he gave one (measured from the read's price); the tools' line only when he did not.
-    const own = sized ? ownTarget(parsed?.target, spot ?? parsed?.delta?.spot, yard) : null
-    const raw = own ?? yard
+    // HIS number, measured from the read's price — and only his: no target of his is a pass (`no_target`), never the
+    // tools' line (code review 2026-10-24: the prompt tells him to leave it out when he would not trade toward one, and
+    // the yardstick in its place built Mentor a take-profit he had refused). The tools' line is his yardstick.
+    const own = sized ? ownTarget(parsed?.target, spot ?? parsed?.delta?.spot, yard, { impliedMovePct: parsed?.implied_move_pct }) : null
+    const raw = own
     // A company that cannot carry the trade (dilution, distress) has no target, whatever the catalyst.
     const broken = parsed?.company?.verdict === 'broken'
     const windowDays = parsed?.window_days ?? 14
@@ -170,9 +182,11 @@ export function buildCatalystRead(parsed, { symbol, spot = null, spy = null, now
     const spent = Boolean(parsed?.runup) && runupSpent(parsed.runup)
     const target = raw && raw.open_pct >= minOpen && validUntil && !spent && !broken ? raw : null
     // Why a read carries no target: the verdict, a broken company, no window left before the report, the run-up already
-    // run this cycle (all of it, or so much that too little is left), too little open to trade, nothing open, or not sized.
+    // run this cycle, no number of his (or none to measure it from), too little open to trade — less after this cycle's
+    // run-up (the YARDSTICK's cut, code review 2026-10-24) — or nothing open.
     const passReason = target ? null : !sized ? (parsed?.verdict ?? 'unclear') : broken ? 'company' : !validUntil ? 'report_too_close'
-        : !raw ? 'unsized' : spent || raw.cycle_cut_pct > 0 ? 'already_ran' : raw.open_pct > 0 ? 'too_small' : 'nothing_open'
+        : spent ? 'already_ran' : !raw ? (parsed?.target ? 'unsized' : 'no_target')
+            : yard?.cycle_cut_pct > 0 && raw.open_pct > 0 ? 'already_ran' : raw.open_pct > 0 ? 'too_small' : 'nothing_open'
     return {
         id: `cr_${sym}_${randomUUID().slice(0, 8)}`,
         symbol: sym,
@@ -360,11 +374,13 @@ export function readFacts(read) {
     const parts = [`Prometheus (${read.verdict}${Number.isFinite(read.confidence) ? `, ${read.confidence}` : ''}): target ${t.value.toFixed(2)}`
         + `${_ok(t.low) && _ok(t.high) ? ` (band ${t.low.toFixed(2)}–${t.high.toFixed(2)})` : ''}`
         + `${Number.isFinite(t.open_pct) && _ok(t.spot) ? `, ${pct(t.open_pct)} from ${t.spot.toFixed(2)}` : ''}`
-        + ` by ${String(read.valid_until).slice(0, 10)}${read.exit_before ? ` — out before the report ${read.exit_before}` : ''}`]
+        // The window's end as its ET session date — a UTC date reads a day late on an evening read (code review 2026-10-24).
+        + `${Number.isFinite(Date.parse(read.valid_until)) ? ` by ${_etDay(Date.parse(read.valid_until))}` : ''}${read.exit_before ? ` — out before the report ${read.exit_before}` : ''}`]
     if (t.basis === 'prometheus') {
         const y = t.yardstick
         parts.push(`his own number${y && Number.isFinite(y.open_pct) ? `, the ${y.basis === 'run_up' ? 'run-up' : 'event'} yardstick ${pct(y.open_pct)}` : ''}${t.why ? `: ${t.why}` : ''}`)
-    } else parts.push(`the ${t.basis === 'run_up' ? 'run-up' : 'event'} yardstick, as he gave no number of his own`)
+        if (t.stretch) parts.push(`a STRETCH — ${t.stretch.times}× the larger of the options' implied move and the yardstick (${pct(t.stretch.ref_pct)}): say so if you lean on it`)
+    } else parts.push(`the ${t.basis === 'run_up' ? 'run-up' : 'event'} yardstick (a read from before his own targets)`)
     if (read.company?.verdict) parts.push(`company ${read.company.verdict}${read.company.why ? ` — ${read.company.why}` : ''}`)
     if (read.kill?.length) parts.push(`kill: ${read.kill.slice(0, 2).join('; ')}`)
     return parts.join('; ')

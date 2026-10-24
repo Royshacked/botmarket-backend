@@ -36,18 +36,21 @@ by hand take a company from there. No new hand-off.
    order — **swing:** relative strength inside the industry's move, beta to the industry basket, liquidity, a
    catalyst in the window, estimates rising; **long term:** ROIC over its hurdle, purity (revenue in the
    sub-industry), reinvestment. Each row carries those numbers to Argus.
-4. **Filter 1 — Argus gives the best 5.** One one-shot call per industry (the `hotlist.argus.js` pattern, house
+4. **Filter 1 — Argus gives the best 5 (10 since 2026-10-24).** One one-shot call per industry (the `hotlist.argus.js` pattern, house
    model): her verdict, horizon, thesis, cause, second-order view, risks and named companies, and the list. He
    picks the names that best carry HER thesis, each with why and what would make it wrong; fewer is allowed,
    and a second-order name that has not moved yet is his to add when the thesis points at it. Code holds every
-   pick to the list. `HOUSE_SCAN_PER_INDUSTRY` default → 5. A failed call falls back to the code order of step 3,
+   pick to the list. `HOUSE_SCAN_PER_INDUSTRY` default → 5 (10 since 2026-10-24, services/config.js). A failed call falls back to the code order of step 3,
    so a week always sends names. Every pick is logged and priced against the industry basket at the horizon, so
    Argus's picks get a track record against "the largest names".
 5. **Filter 2 — Prometheus, automatically.** After the house scan queues, the week starts a house research run over
    those names (`startRun({ symbols })`, as `sleeveSource` does). A run already going → the names wait for it to
    settle, then run. **The price target's horizon is bound to the book** — swing → `3m`/`6m`, long term →
    `12m`/`18m`/`24m` — checked in code at save, so a swing name is never graded on a two-year question. Caps:
-   `HOUSE_SCAN_WEEKLY_MAX` → 50, plus a weekly $ ceiling (env, ~$5).
+   `HOUSE_SCAN_WEEKLY_MAX` → 50, plus a weekly $ ceiling (env, ~$5) — doubled 2026-10-24 (Roy: "more Argus checks
+   and Prometheus checks — double") to 100 a week and `HOUSE_RESEARCH_MAX_USD` $10.
+   The chain's COVERED names are the Hotlist's Swing / Long term lists ("Prometheus confirmed", whatever the rating;
+   [horizon-chains.md](./horizon-chains.md), "Swing and Long term: the weekly chain's survivors").
 6. **Pick up a dead run.** The run lives in memory; a Render restart mid-run leaves rows `in_research`/`queued`
    and nothing restarts it. The weekly monitor's tick requeues stalled claims and resumes the week's names.
 
@@ -64,7 +67,7 @@ Everything stays behind `PYTHIA_WEEKLY` — off, no week, no names, no research.
   the remaining slots are his — Regional Banks then took CLBK, the industry's leader, as the fifth. Picks frozen on
   the call (`pythiaCalls.attachPicks`, only a call ≤ 3 days old, once) and graded at 3m / 12m against the basket
   and against the largest uncovered names (`grades.<h>.picks`). Argus's spend books as `houseScanArgus`.
-- Step 5: `services/houseResearch.service.js` — the budget (`HOUSE_RESEARCH_MAX_USD`, $5) is read back from the
+- Step 5: `services/houseResearch.service.js` — the budget (`HOUSE_RESEARCH_MAX_USD`, $5; $10 since 2026-10-24) is read back from the
   queue rows' `cost_usd`; `startRun({ maxUsd })` stops starting names when spent; an off-book horizon is rejected
   `horizon_off_book` (never retried). `scripts/run-week.mjs` waits for the research before it exits.
 - Step 6: the weekly monitor's tick calls `resumeResearch` over the last 4 done weeks (`RESUME_WEEKS`) — stale

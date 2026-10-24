@@ -154,7 +154,7 @@ test('#15 the single pick follows the merged picks — a later board that lists 
 
 test('#3 past its window a read is graded by the window\'s bars — a gap after the report is not a hit', () => {
     const now = Date.parse('2026-10-23T13:40:00Z')
-    const read = buildCatalystRead({ verdict: 'credible', window_days: 5, runup: { report: '2026-10-27', median_pct: 3, p25_pct: 1, p75_pct: 5 } },
+    const read = buildCatalystRead({ verdict: 'credible', window_days: 5, runup: { report: '2026-10-27', median_pct: 3, p25_pct: 1, p75_pct: 5 }, target: { price: 267.8 } },
         { symbol: 'RCL', spot: 260, spy: 700, nowMs: now })
     const after = Date.parse('2026-10-27T15:00:00Z')   // the report day: the stock gapped to 290
     const missed = gradeCatalystRead(read, { price: 290, spy: 705, nowMs: after, window: { high: 266, close: 263, spy_close: 702 } })
@@ -269,10 +269,11 @@ test('a target that leaves less than 1% open, or half the daily range, is a pass
     assert.equal(minOpenPct(1.4), 1, 'half a 1.4% range is under the floor')
     assert.equal(minOpenPct(3.2), 1.6)
     const now = Date.parse('2026-10-23T19:51:00Z')
-    const rcl = { verdict: 'credible', window_days: 5, runup: { report: '2026-10-27', median_pct: 0.23, p25_pct: -0.55, p75_pct: 1.72 } }
+    // His target at the record's +0.23% (277.34), then at +2% (282.23).
+    const rcl = { verdict: 'credible', window_days: 5, runup: { report: '2026-10-27', median_pct: 0.23, p25_pct: -0.55, p75_pct: 1.72 }, target: { price: 277.34 } }
     const r = buildCatalystRead(rcl, { symbol: 'RCL', spot: 276.7, nowMs: now, context: { exit_before: '2026-10-27', atr_pct: 3.2 } })
     assert.deepEqual([r.status, r.pass_reason, r.target], ['pass', 'too_small', null])
-    const big = buildCatalystRead({ ...rcl, runup: { ...rcl.runup, median_pct: 2 } }, { symbol: 'RCL', spot: 276.7, nowMs: now, context: { atr_pct: 3.2 } })
+    const big = buildCatalystRead({ ...rcl, runup: { ...rcl.runup, median_pct: 2 }, target: { price: 282.23 } }, { symbol: 'RCL', spot: 276.7, nowMs: now, context: { atr_pct: 3.2 } })
     assert.equal(big.status, 'active', '2% clears a 1.6% bar')
 })
 

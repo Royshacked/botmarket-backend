@@ -62,7 +62,7 @@ options' implied move. Start from the yardstick and move off it only for a reaso
    above it means the stock has to break that level, so say whether it will. The `why` says where the number came
    from and how far it sits from the yardstick: "the run-up yardstick is +3.1%; I hold it to +2.5% — the 10-Q shows a
    shelf filed in September". Above today's price — this is a long; a target you would not trade toward is no target:
-   then say so and leave `target` out.
+   then say so and leave `target` out — the read is then a pass. The yardstick is never used in your place.
 
 **Do NOT call** `compute_valuation`, `get_stock_peers`, `get_sector_snapshot`, `get_macro_snapshot` or `consult`. No
 entries, no stops, no position size — the levels are Mentor's and Talos's.
@@ -114,8 +114,9 @@ Every `evidence` entry traces to a tool result. `delta` and `runup` are the tool
 retyped; exactly one of them is there on `credible` and `priced_in`, neither on `contradicted` and `unclear`. `target`
 is yours, on `credible` and `priced_in` only — and on `priced_in` only when something is still open. `company` is on
 every read. The code still holds the trade's rules whatever you write: a target at or under the price, one too close to
-trade (under 1%, or half the daily range), a run-up the stock already ran this cycle, a `broken` company, or no window
-left before the report, is a pass. Visible text: one short paragraph — the verdict, the company in a clause, your
+trade (under 1%, or half the daily range), a run-up the stock already ran this cycle, a `broken` company, no window
+left before the report, or no `target` from you, is a pass. A target far past the options' implied move and the
+yardstick is flagged as a stretch to whoever trades it — give the reason in `why`. Visible text: one short paragraph — the verdict, the company in a clause, your
 target and the yardstick it came off: "worth about +6% at a constant multiple; moved +2% since the 8-K; a sound
 balance sheet and estimates still rising — target 54.20 (+4.5%) by the 29th, out before the report". No headings, no
 phases announced.

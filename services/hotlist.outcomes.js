@@ -126,9 +126,11 @@ const _etMinOf  = (tsSec) => _et(tsSec * 1000).min
 /**
  * The bars a column's window covers, from the name's 5-minute bars of `day` and its daily bars.
  * `after` (epoch ms) is when the row was quoted: mid and eod start at the first bar that begins at or
- * after it. Pure.
+ * after it. `exitBefore` (YYYY-MM-DD) — a week cell's report inside its window: a RUN-UP trade is out before it, so the
+ * window stops at the close before the report (code review 2026-10-24: scored through it, the gap the rule says to be
+ * out of counted in the record). Pure.
  */
-export function windowBars(column, day, { intraday = [], daily = [] } = {}, { after = null } = {}) {
+export function windowBars(column, day, { intraday = [], daily = [] } = {}, { after = null, exitBefore = null } = {}) {
     const session = intraday.filter(b => {
         const m = _etMinOf(b.timestamp)
         return _etDateOf(b.timestamp) === day && m >= OPEN_MIN && m < CLOSE_MIN
@@ -141,23 +143,32 @@ export function windowBars(column, day, { intraday = [], daily = [] } = {}, { af
         const next = daily.find(b => _etDateOf(b.timestamp) > day)
         return next ? [next] : []
     }
-    case 'week': return daily.filter(b => _etDateOf(b.timestamp) >= day).slice(0, WEEK_SESSIONS)
+    case 'week': return daily.filter(b => { const d = _etDateOf(b.timestamp); return d >= day && (!exitBefore || d < exitBefore) }).slice(0, WEEK_SESSIONS)
     default: return []
     }
+}
+
+/** How many sessions a week window spans: five, or fewer when a report inside it ends it the session before. Pure. */
+export function weekSessions(day, exitBefore = null) {
+    if (!exitBefore) return WEEK_SESSIONS
+    let n = 0
+    for (let d = day; n < WEEK_SESSIONS && d < exitBefore; d = _addDays(d, 1)) if (_isWeekday(d)) n++
+    return n
 }
 
 const _r = (n, d = 2) => (Number.isFinite(n) ? Math.round(n * 10 ** d) / 10 ** d : null)
 
 /**
  * Is a non-empty window SHORT of what it spans — the close not in yet, a session missing? Pure.
- * open must reach its 10:25 bar, mid and eod the 15:55 one, the week five sessions.
+ * open must reach its 10:25 bar, mid and eod the 15:55 one, the week five sessions — or, with a report inside it
+ * (`day` + `exitBefore`), the sessions before the report (weekSessions).
  */
-export function windowPartial(column, bars) {
+export function windowPartial(column, bars, { day = null, exitBefore = null } = {}) {
     if (!bars?.length) return false
     const lastMin = _etMinOf(bars.at(-1).timestamp)
     if (column === 'open') return lastMin < OPEN_MIN + 60 - BAR_MIN
     if (column === 'mid' || column === 'eod') return lastMin < CLOSE_MIN - BAR_MIN
-    if (column === 'week') return bars.length < WEEK_SESSIONS
+    if (column === 'week') return bars.length < (day && exitBefore ? weekSessions(day, exitBefore) : WEEK_SESSIONS)
     return false
 }
 
@@ -294,13 +305,15 @@ export async function runOutcomes({ force = false, deps = _deps } = {}) {
                     const bars = isIntraday
                         ? { intraday: await fetchOnce(intradayCache, `${row.symbol}|${board.day}`, () => deps.intraday(row.symbol, board.day)) }
                         : { daily: await fetchOnce(dailyCache, `${row.symbol}|${board.day}`, () => deps.daily(row.symbol, board.day, sessionsAfter(board.day, WEEK_SESSIONS + 2))) }
-                    const win = windowBars(column, board.day, bars, { after: row.quoted_at ?? board.finished_at ?? null })
-                    const outcome = scoreWindow({ entry: row.price, level: c.range?.level ?? null }, win, windowPartial(column, win))
+                    // A run-up week cell is scored to the close before its report (windowBars `exitBefore`).
+                    const exitBefore = column === 'week' ? c.exit_before ?? null : null
+                    const win = windowBars(column, board.day, bars, { after: row.quoted_at ?? board.finished_at ?? null, exitBefore })
+                    const outcome = scoreWindow({ entry: row.price, level: c.range?.level ?? null }, win, windowPartial(column, win, { day: board.day, exitBefore }))
                     docs.push({
                         id: `${board.id}:${row.symbol}:${column}`, board: board.id, day: board.day, checkpoint: board.checkpoint,
                         column, symbol: row.symbol, grade: c.grade, entry: row.price,
                         level: c.range?.level ?? null, atr_mult: c.range?.atr_mult ?? null, open_sky: c.range?.open_sky ?? false,
-                        outcome, scored_at: deps.now(), shown,
+                        outcome, scored_at: deps.now(), shown, ...(exitBefore ? { exit_before: exitBefore } : {}),
                         // A pool name Argus read beside the board, and whether he SPOTTED it on this column (2026-10-24).
                         ...(row.seen ? { seen: true } : {}), ...(row.spot?.[column] ? { spot: true } : {}),
                     })

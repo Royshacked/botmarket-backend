@@ -89,3 +89,20 @@ test('the run: today’s universe, SPY’s sessions, the calendar — one summar
     const api = await hotlistOutcomes({ summary: async () => ({ mid: { n: 1 } }), backtest: async () => stored })
     assert.equal(api.backtest.week.sessions, 20)
 })
+
+// Code review 2026-10-24: a replay that could not read the calendar, or was rate-limited, never replaces the stored one.
+test('no calendar stops the replay; a rate-limited run is returned but not stored', async () => {
+    const { db, rows } = memDb()
+    rows('daily_screener_stats').push({ symbol: 'UP', day: '2026-10-23' }, { symbol: 'FLAT', day: '2026-10-23' })
+    rows(BACKTEST).push({ id: 'week', column: 'week', sessions: 125, keep: true })
+    const spy = bars('2025-06-02', 330, () => ({ close: 500 }))
+    const up = bars('2025-06-02', 330, (i) => ({ close: 50 + i * 0.1, volume: 3e6 }))
+    const base = { db: async () => db, now: () => Date.parse('2026-10-24T15:00:00Z'), perMinute: () => 6000, sleep: async () => {} }
+    const noCal = await replayWeek({ sessions: 20, deps: { ...base, bars: async () => spy, earnings: async () => { throw new Error('429') } } })
+    assert.equal(noCal.outcome, 'no_calendar')
+    const limited = await replayWeek({ sessions: 20, deps: { ...base, earnings: async () => [],
+        bars: async (s) => { if (s === 'FLAT') { const e = new Error('rate'); e.status = 429; throw e } return s === 'SPY' ? spy : up } } })
+    assert.deepEqual([limited.ok, limited.outcome, limited.stopped], [false, 'partial', 'rate_limited'])
+    assert.equal(rows(BACKTEST).length, 1)
+    assert.equal(rows(BACKTEST)[0].keep, true, 'the complete replay stays')
+})

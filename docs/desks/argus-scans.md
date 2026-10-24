@@ -152,8 +152,8 @@ one ran on Pythia's tilt and was deleted with it on 2026-10-05; **it is back sin
 pythia-assessment.md) on Pythia's VERDICTS**: after each weekly run, every industry rated FOR SWING / FOR
 LONG TERM — and every approved theme so rated, its supplier links first — gets a measured candidate list
 (`houseScan.candidates.js`: every company above a liquidity floor, her named ones first) and **Argus picks the best
-`HOUSE_SCAN_PER_INDUSTRY` (5)** for her thesis (`houseScan.argus.js`, one call per industry; the code order when it
-fails), at most `HOUSE_SCAN_WEEKLY_MAX` (50) a week, the verdict's thesis, risks and his reason on the row.
+`HOUSE_SCAN_PER_INDUSTRY` (10; 5 until 2026-10-24)** for her thesis (`houseScan.argus.js`, one call per industry; the
+code order when it fails), at most `HOUSE_SCAN_WEEKLY_MAX` (100; was 50) a week, the verdict's thesis, risks and his reason on the row.
 Prometheus then researches them by himself ([house-research-chain.md](../design/house-research-chain.md), Roy
 2026-10-23; until then code picked by size and the admin pressed Start). The sleeve hop Atlas uses
 (`sleeveSource.service`) is the same screen with the school as its coarse filter
@@ -169,7 +169,8 @@ filter first; the expensive per-name tools touch only the survivors":
 2. **Discovery** — read the tape first (`get_quotes` on SPY/QQQ/IWM for the regime and the
    relative-strength benchmark), then cast the net from **grounded sources only**: `screen_candidates`
    (a fundamental and liquidity screen — it cannot find chart setups), `get_market_movers`,
-   `get_analyst_actions`, `get_earnings_calendar`, and `web_search` — which reaches names the feeds miss
+   `get_analyst_actions`, `get_earnings_calendar`, `get_news` (a ticker's or a topic's dated headlines —
+   services/tools/news.tools.js; is there a real story under the move? read before the web), and `web_search` — which reaches names the feeds miss
    but **is a lead, not a candidate**: a searched name must be confirmed by a per-name tool before it
    can appear. Dedupe to 20–40, coarse-triage with `get_price_action` to 8–15.
 3. **Validation** — a baseline on every survivor (`get_candles` for structure, `get_indicators` for
@@ -244,12 +245,25 @@ The prose is the model's; the **label** is not —
 `houseLabel.service` works out each candidate's `house` from its industry, so the "House · swing" chip on the list
 is a fact. The investing profile does the same for long term, and a brief's named industry stays fixed.
 
+## The Hotlist — Argus reads every checkpoint board (2026-10-21; per horizon 2026-10-23; no grades 2026-10-24)
+
+[daily-names.md](../design/daily-names.md), [horizon-chains.md](../design/horizon-chains.md). Not a chat: at each
+DailyScreener checkpoint, `services/hotlist.argus.js` makes ONE call on the house model, for everyone. Each row reaches
+him with its facts, its free range per column and its newest 3 headlines (checkpoint `withNews`, `NEWS_FOR_ARGUS`) —
+no grade. He answers with up to 10 picks per column (`MAX_PICKS`, each with why and caution), up to 10 avoids
+(`MAX_AVOID`) and up to 10 spots from the ungraded pool (`MAX_SPOTS`); code holds each to the board. On the day columns
+(`DAY_COLUMNS`: open · mid · eod · tomorrow) **his picks are the list** the user sees; his **This week** picks go on to
+Prometheus for a catalyst read (`hotlistResearch.service`), whose own target decides the week list. His record — picks,
+avoids, unmarked, spots — is scored by the outcome log (`argusRecord`).
+
 ## The hops
 
 | With | Direction | Mechanism |
 |---|---|---|
 | **Mentor** | out | the single pick — `<kairos_pick>` → `{ ticker, direction, thesis, analysis, recommended_mode }` seeds Mentor's first turn (`scanSeed.util`); or a clicked candidate on a saved trading list |
 | **Prometheus** | out | an investing list's top N by the app's button, one name by click — the research queue, house-owned; or by asking ("send NVDA to Prometheus") through the shared `<route>` hand-off |
+| **Hotlist** | in (house) | every checkpoint board, read automatically with its headlines (`hotlist.argus.js`); his day picks are the Hotlist's day lists |
+| **Prometheus** | out (house) | his Hotlist This week picks → the research queue (source `hotlist`) → catalyst reads, by code (`hotlistResearch.service`, 2026-10-23) |
 | **Pythia** | in (house) | the house scan: her weekly FOR SWING / FOR LONG TERM verdicts → the research queue, by code (step 7, 2026-10-11); and, since 2026-10-13, every swing / long-term scan looks in her industries first (`get_house_industries`) |
 | **Atlas** | in | the sleeve hop — the same screener under the school; never Argus's chat |
 | **Axl** | in / out | the user is routed here with a name; Argus can route the user on by their ask |

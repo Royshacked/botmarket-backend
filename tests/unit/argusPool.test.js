@@ -28,13 +28,13 @@ test("the pool's most active names go to Argus: a material story first, then the
     assert.equal(POOL_FOR_ARGUS, 40)
 })
 
-test('the board text carries the pool, each name with why it was not graded', () => {
+test('the board text carries the pool, each name with why it is on no column', () => {
     const text = boardText({ checkpoint: 'mid', day: '2026-10-21', columns: ['mid'], rows: [],
         pool: [{ symbol: 'PPP', price: 20, gap_pct: 6, rvol: 3, atr_pct: 2, catalyst: null, cells: { mid: { grade: null, gate: 'dollar_volume' } } },
             { symbol: 'QQQ', price: 10, gap_pct: 1, atr_pct: 4, cells: { mid: { grade: null } } }] })
-    assert.match(text, /POOL \(quoted, graded on no column/)
-    assert.match(text, /PPP .*\| not graded — mid: fails the dollar volume gate/)
-    assert.match(text, /QQQ .*\| not graded — mid: did not qualify/)
+    assert.match(text, /POOL \(quoted, in play on no column/)
+    assert.match(text, /PPP .*\| on no column — mid: fails the dollar volume gate/)
+    assert.match(text, /QQQ .*\| on no column — mid: did not qualify/)
 })
 
 test("a spot is held to the pool and to the board's columns, once per name and column, at most ten", () => {

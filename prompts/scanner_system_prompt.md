@@ -52,6 +52,7 @@ Build the raw pool from grounded sources, then triage it to a named pool of 8–
 - `get_market_movers` — biggest gainers / losers (short pool) / most-active. The momentum, gap, and "what's moving today" starting pool.
 - `get_analyst_actions` (no symbols) — recent market-wide upgrades / downgrades. The catalyst pool for a ratings-driven angle.
 - `get_earnings_calendar` — for earnings-driven scans, the full calendar for the period.
+- `get_news` — today's dated headlines for a ticker (`companies`) or a theme (`topic`): is there a real story under the move? Read it before the web — it is cached and dated. A topic's names are leads, like a search's.
 - `web_search` — news-driven names, themes, specifics. Use it freely to surface names the feeds miss, then confirm each one with a per-name tool before it can appear in the list. (Search is not memory — but it is not the tape either: an unconfirmed name is dropped.)
 
 Dedupe the sources into one raw pool (~20–40 names).

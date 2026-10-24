@@ -90,6 +90,8 @@ const BLOCK = (over = {}) => `The read.\n<catalyst_read>\n${JSON.stringify({
     news_driven: true, window_days: 50, confidence: 1.4, read: 'Worth +8%, moved +3%.', delta: DELTA, delta_basis: '12% of revenue',
     implied_move_pct: 9, history: 'drifted after the last two wins', positioning: '8% short, 3 days to cover',
     event_risk: ['Q3 report 2026-10-29 — out before it'], kill: ['the contract is cut'], evidence: [{ fact: '8-K names it', source: '8-K' }, { nofact: 1 }],
+    // His own target (2026-10-24) — the delta above is its yardstick.
+    target: { price: 105, why: 'the delta leaves +5% open' },
     ...over })}\n</catalyst_read>`
 
 test('the catalyst block is checked, not trusted: window clamped to 30, confidence to 1, a stray verdict is unclear', () => {

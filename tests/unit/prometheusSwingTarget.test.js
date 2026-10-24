@@ -41,10 +41,29 @@ test('his number is the target, measured from the read\'s price; the tools\' lin
     assert.equal(r.valid_until, '2026-10-29T21:00:00.000Z', 'still out before the report')
 })
 
-test('no number of his: the yardstick is the target, as before', () => {
+test('no number of his is a pass — never the yardstick in his place (code review 2026-10-24)', () => {
     const r = buildCatalystRead(_parseCatalystRead(BLOCK({ target: null })), { symbol: 'ABC', spot: 100, nowMs: NOW })
-    assert.equal(r.target.value, 103)
-    assert.equal(r.target.basis, 'run_up')
+    assert.deepEqual([r.status, r.pass_reason, r.target], ['pass', 'no_target', null])
+    assert.equal(readFacts(r), null, 'and Mentor is handed nothing to build on')
+})
+
+test("a target far past the options' implied move and the yardstick is flagged a stretch — shown, never blocked", async () => {
+    const { STRETCH_X } = await import('../../services/catalystRead.service.js')
+    assert.equal(STRETCH_X, 3)
+    const far = buildCatalystRead(_parseCatalystRead(BLOCK({ target: { price: 125 }, implied_move_pct: 6 })), { symbol: 'ABC', spot: 100, nowMs: NOW })
+    assert.equal(far.status, 'active')
+    assert.deepEqual(far.target.stretch, { ref_pct: 6, times: 4.17 }, '+25% against the larger of a 6% implied move and the +3% yardstick')
+    assert.match(readFacts(far), /a STRETCH — 4\.17× the larger of the options' implied move and the yardstick \(\+6\.0%\)/)
+    assert.equal(buildCatalystRead(_parseCatalystRead(BLOCK({ implied_move_pct: 6 })), { symbol: 'ABC', spot: 100, nowMs: NOW }).target.stretch, undefined, '+4.5% is no stretch')
+})
+
+test("the out-by date is the window's ET session date, not its UTC date", () => {
+    const evening = Date.parse('2026-10-23T23:30:00Z')   // 19:30 ET — a 5-day window ends 2026-10-28T23:30Z, still the 28th in ET
+    const r = buildCatalystRead(_parseCatalystRead(BLOCK({ runup: undefined, window_days: 5, delta: { delta_price_pct: 6, spot: 100, moved_pct: 0 } })), { symbol: 'ABC', spot: 100, nowMs: evening })
+    assert.equal(r.valid_until, '2026-10-28T23:30:00.000Z')
+    assert.match(readFacts(r), / by 2026-10-28/)
+    const late = buildCatalystRead(_parseCatalystRead(BLOCK({ runup: undefined, window_days: 5, delta: { delta_price_pct: 6, spot: 100, moved_pct: 0 } })), { symbol: 'ABC', spot: 100, nowMs: Date.parse('2026-10-24T02:30:00Z') })
+    assert.match(readFacts(late), / by 2026-10-28/, '22:30 ET on the 23rd: a UTC date would have said the 29th')
 })
 
 test('the trade\'s rules hold over his number: a broken company, too little open, at or under the price, a run-up already run', () => {

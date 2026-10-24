@@ -950,6 +950,16 @@ ledger as a CLAIM; the opening turn validates the claims and proposes the blanks
 at the first unsettled stage. A brought plan differs only in what the ledger already holds, which is
 why it lands on sizing by itself and Mentor asks only for what is missing.
 
+**From the Hotlist and the house's book** (2026-10-21 / 2026-10-24). "Build with Mentor" on a Hotlist row is a
+REFERENCE the server resolves (`scanSeed.util`), never request text. A `hotlist` ref (board id + column →
+`hotlist.service hotlistSeed`) carries the board's facts line (free range is room, not a target), the column's horizon
+(the user's to confirm), Argus's why and caution — no grade (`unverified` is always false) — and, on **This week**,
+`catalyst_facts`: Prometheus's live catalyst read (`catalystRead readFacts`). Mentor is told his target is the desk's
+price for the swing: build the take-profit at it (the user may move it), out by the read's date. A `book` ref (Swing /
+Long term → `houseBook bookSeed`) carries the coverage's facts — rating, target and date, upside, origin, what would
+break it — and its horizon from the target's own book; the target is a valuation, not a take-profit. Both land in
+`_buildSeedSection` ("ARGUS HANDED YOU THIS NAME" / "FROM THE HOUSE'S BOOK").
+
 **The ledger** (`mentorBuild.util.js`, pure — no clock, no I/O) holds five stages: `opening`
 (direction · horizon · lens) → `spans` → `entries` → `sizing` → `summary`. Two rules give it teeth:
 nothing settles out of order, and a settled field changes only through `unsettle`, which cascades to
