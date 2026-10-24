@@ -289,6 +289,18 @@ reads 20 a day for $2 (`HOTLIST_RESEARCH_MAX_NAMES` / `_MAX_USD`), user reads 20
 (`HOUSE_SCAN_PER_INDUSTRY`), 100 a week (`HOUSE_SCAN_WEEKLY_MAX`), $10 a week (`HOUSE_RESEARCH_MAX_USD`). Each is an
 env setting to turn back.
 
+### 7.4 Argus reads the pool (Roy, 2026-10-24)
+
+Doubling Argus's picks did little on boards that graded 3–19 names. So he also reads the POOL: the 40 most active quoted
+names that graded on no column (`poolForArgus`: a material story first, then the biggest move, then volume), each with
+its facts and why it was not graded per column — the gate it failed, or "did not qualify" (`boardRow` with
+`keepUngraded`). He may SPOT up to 10 (`MAX_SPOTS`) the rules missed — a symbol, one of the board's columns, why and a
+caution; code holds a spot to the pool and the board's columns. A board with nothing graded is still read when it has a
+pool. His spots are stored on the board (`argus.spots`, `argus.pool_read`) and shown under his read — not on the
+table, they have no grade. On the wide rows, the names he was shown carry `seen` and his spots `spot`, so the outcome
+log scores them: his record adds **spotted in the pool** against **pool passed on**. Live (a stand-in pool from the
+universe, no news or volume): $0.001 a board on Luna, 16 s, and no spots — rightly, on names with nothing behind them.
+
 ## 8. The Floor — "Hotlist"
 
 - A **"Hotlist"** row in Floor Lists — the board, one for everyone. (Renamed from "Daily watchlist" on 2026-10-21 to stay clear of the existing **Watchlists** row, the scan lists.)

@@ -301,6 +301,8 @@ export async function runOutcomes({ force = false, deps = _deps } = {}) {
                         column, symbol: row.symbol, grade: c.grade, entry: row.price,
                         level: c.range?.level ?? null, atr_mult: c.range?.atr_mult ?? null, open_sky: c.range?.open_sky ?? false,
                         outcome, scored_at: deps.now(), shown,
+                        // A pool name Argus read beside the board, and whether he SPOTTED it on this column (2026-10-24).
+                        ...(row.seen ? { seen: true } : {}), ...(row.spot?.[column] ? { spot: true } : {}),
                     })
                 }
             } catch (err) {
@@ -369,26 +371,36 @@ function _group(xs) {
  * level is close and "reached" says little). Overall and per column. Pure. `boards` — the scored boards' `{ id, argus,
  * rows: [{ symbol, picks, pick, avoid }] }`; a board without his read is left out, so "unmarked" means seen and left.
  * An avoid is the name's on that board, whichever column the outcome is for.
+ *
+ * THE POOL HE READ (2026-10-24): a pool name he was shown beside the board (`seen`) is his SPOT on a column where he
+ * spotted it, else one he PASSED on — spots against passes is whether his eye beats the screener's rules. A pool name
+ * he never saw, and a graded name past the board's cut, stay out: never in front of him.
  */
 export function argusRecord(outcomes, boards) {
     const byBoard = new Map((boards ?? []).filter(b => b.argus).map(b => [b.id, new Map((b.rows ?? []).map(r => [r.symbol, r]))]))
-    const out = { all: { pick: [], avoid: [], unmarked: [] } }
+    const fresh = () => ({ pick: [], avoid: [], unmarked: [], spot: [], passed: [] })
+    const out = { all: fresh() }
     for (const o of outcomes ?? []) {
-        // A name off the board was never in front of him: his record is the board's names only.
-        if (!o.outcome || o.shown === false) continue
-        const row = byBoard.get(o.board)?.get(o.symbol)
-        if (!row) continue
-        const kind = _pickedFor(row, o.column) ? 'pick' : row.avoid ? 'avoid' : 'unmarked'
+        if (!o.outcome || !byBoard.has(o.board)) continue
+        let kind
+        if (o.shown === false) {
+            if (o.grade !== POOL_GRADE || !o.seen) continue
+            kind = o.spot ? 'spot' : 'passed'
+        } else {
+            const row = byBoard.get(o.board).get(o.symbol)
+            if (!row) continue
+            kind = _pickedFor(row, o.column) ? 'pick' : row.avoid ? 'avoid' : 'unmarked'
+        }
         out.all[kind].push(o)
-        ;(out[o.column] ??= { pick: [], avoid: [], unmarked: [] })[kind].push(o)
+        ;(out[o.column] ??= fresh())[kind].push(o)
     }
-    return Object.fromEntries(Object.entries(out).map(([k, g]) => [k, { pick: _group(g.pick), avoid: _group(g.avoid), unmarked: _group(g.unmarked) }]))
+    return Object.fromEntries(Object.entries(out).map(([k, g]) => [k, Object.fromEntries(Object.entries(g).map(([kind, xs]) => [kind, _group(xs)]))]))
 }
 
 /** Argus's record from the log and the boards it scored. */
 export async function argusSummary(deps = _deps) {
     const db = await deps.db()
-    const outcomes = await db.collection(OUTCOMES).find({}, { projection: { _id: 0, board: 1, symbol: 1, column: 1, outcome: 1, shown: 1 } }).toArray()
+    const outcomes = await db.collection(OUTCOMES).find({}, { projection: { _id: 0, board: 1, symbol: 1, column: 1, grade: 1, outcome: 1, shown: 1, seen: 1, spot: 1 } }).toArray()
     const ids = [...new Set(outcomes.map(o => o.board))]
     const boards = await db.collection(BOARDS).find({ id: { $in: ids } },
         { projection: { _id: 0, id: 1, argus: 1, 'rows.symbol': 1, 'rows.picks': 1, 'rows.pick': 1, 'rows.avoid': 1 } }).toArray()

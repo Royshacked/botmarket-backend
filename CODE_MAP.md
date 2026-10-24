@@ -950,6 +950,8 @@ services/
                             book's record; set-day prices + outside-universe closes read in the background into
                             `house_book_marks`. GET /api/hotlist/book. bookSeed — a Mentor hand-off off the lists
                             (scanSeed `book` ref) resolved from the coverage: horizon + the thesis in numbers
+  hotlist.argus.js (pool)   Argus also reads the board's POOL — quoted names graded on no column (40, poolForArgus) —
+                            and SPOTS up to 10 the rules missed (daily-names.md §7.4); scored and in his record
   hotlist.service.js        the hotlist's READ side: todayHotlist / boardById / hotlistOutcomes for the
                             API, and hotlistSeed — a "Build with Mentor" hand-off is a REFERENCE (board
                             id + column, scanSeed.util), resolved here from the STORED board into the

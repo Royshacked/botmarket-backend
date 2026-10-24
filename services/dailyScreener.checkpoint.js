@@ -168,9 +168,10 @@ export function eligibleNames(statsList, columns) {
 }
 
 /**
- * One name's row on a board: its context and a cell per column. Null when no column graded it. Pure.
+ * One name's row on a board: its context and a cell per column. Null when no column graded it — unless `keepUngraded`
+ * (the pool's facts for Argus, 2026-10-24): then the row comes back with every cell ungraded and the gate it failed. Pure.
  */
-export function boardRow(stats, q, columns, { book, etMin, day, catalyst, quotedAt = null, spreadSlack = 1 }) {
+export function boardRow(stats, q, columns, { book, etMin, day, catalyst, quotedAt = null, spreadSlack = 1, keepUngraded = false }) {
     const extended = book === 'extended'
     const prevClose = extended ? stats.close : (q.previousClose ?? stats.close)
     const ctx = extended
@@ -178,7 +179,7 @@ export function boardRow(stats, q, columns, { book, etMin, day, catalyst, quoted
         : { price: q.price, prevClose, open: q.open, dayHigh: q.dayHigh, dayLow: q.dayLow,
             rvol: relativeVolume(q.volume, stats.avg_vol20, (etMin - OPEN_MIN) / SESSION_MIN), catalyst, today: day }
     const cells = Object.fromEntries(columns.map(c => [c, cell(c, stats, ctx)]))
-    if (!Object.values(cells).some(c => c.grade)) return null
+    if (!keepUngraded && !Object.values(cells).some(c => c.grade)) return null
     const gap = ctx.price > 0 && prevClose > 0 ? ((ctx.price - prevClose) / prevClose) * 100 : null
     return {
         symbol: stats.symbol, name: stats.name ?? null, sector: stats.sector ?? null,
@@ -341,11 +342,16 @@ async function _build(db, cp, day, etMin, run, deps) {
     const labels = await deps.label(toLabel, { onUsage: booker('hotlist_news') }).catch(() => new Map())
 
     // ── The board ──
-    const rows = []
+    const rows = [], ungraded = []
     for (const [sym, q] of quotes) {
-        const row = boardRow(byStats.get(sym), q, cp.columns, { book: cp.book, etMin, day, catalyst: labels.get(sym) ?? null, quotedAt: quotedAt.get(sym), spreadSlack: cp.spreadSlack ?? 1 })
+        const opts = { book: cp.book, etMin, day, catalyst: labels.get(sym) ?? null, quotedAt: quotedAt.get(sym), spreadSlack: cp.spreadSlack ?? 1 }
+        const row = boardRow(byStats.get(sym), q, cp.columns, opts)
         if (row) rows.push(row)
+        else if (byStats.get(sym)) ungraded.push(boardRow(byStats.get(sym), q, cp.columns, { ...opts, keepUngraded: true }))
     }
+    // The pool's most active names, with their facts, go to Argus beside the board (2026-10-24: "let Argus read the
+    // pool") — he may SPOT a trade the screener's rules passed over.
+    const poolTop = poolForArgus(ungraded, POOL_FOR_ARGUS)
     const all = rankRows(rows)
     const ranked = all.slice(0, BOARD_MAX)
     // THE WIDE SET (Roy, 2026-10-24: "with the analysis we lose good statistics"): every graded name past the board's
@@ -363,7 +369,7 @@ async function _build(db, cp, day, etMin, run, deps) {
     // Argus's read of the finished board — once, for everyone (hotlist.argus). Its picks are marked on
     // their rows so the list shows them in place; a failed read leaves the board without one.
     const argus = await Promise.resolve()
-        .then(() => deps.argus?.({ day, checkpoint: cp.id, columns: cp.columns, regime, rows: ranked }, { onUsage: booker('hotlist_argus') }) ?? null)
+        .then(() => deps.argus?.({ day, checkpoint: cp.id, columns: cp.columns, regime, rows: ranked, pool: poolTop }, { onUsage: booker('hotlist_argus') }) ?? null)
         .catch(() => null)
     // Picks are PER COLUMN (horizon-chains.md §2): `picks.<column>` on the row with its rank in that column's list;
     // `pick` stays the row's first one (any column), for the readers that know a single pick.
@@ -378,6 +384,16 @@ async function _build(db, cp, day, etMin, run, deps) {
     const firstPick = new Map()
     for (const p of argus?.picks ?? []) if (!firstPick.has(p.symbol)) firstPick.set(p.symbol, { ...p, rank: picksBy.get(p.symbol)[p.column].rank })
     const avoidBy = new Map((argus?.avoid ?? []).map(a => [a.symbol, a.why]))
+    // His SPOTS in the pool, marked on its wide rows for the outcome log — with which pool names he SAW (the top he was
+    // given), so his record can set his spots against the pool names he passed on.
+    const seenPool = new Set(poolTop.map(r => r.symbol))
+    const spotBy = new Map()
+    for (const sp of argus?.spots ?? []) {
+        if (!spotBy.has(sp.symbol)) spotBy.set(sp.symbol, {})
+        spotBy.get(sp.symbol)[sp.column] = { why: sp.why, caution: sp.caution }
+    }
+    const wideMarked = wide.map(w => (w.pool && seenPool.has(w.symbol)
+        ? { ...w, seen: true, ...(spotBy.has(w.symbol) ? { spot: spotBy.get(w.symbol) } : {}) } : w))
     const marked = ranked.map(r => ({
         ...r,
         ...(picksBy.has(r.symbol) ? { pick: firstPick.get(r.symbol), picks: picksBy.get(r.symbol) } : {}),
@@ -395,13 +411,28 @@ async function _build(db, cp, day, etMin, run, deps) {
         regime,
         labels: toLabel.size ? (labels.size ? 'labelled' : 'failed') : 'none',
         booked_to: bookedTo,
-        argus: argus ? { summary: argus.summary, model: argus.model, picks: argus.picks.length } : null,
+        argus: argus ? { summary: argus.summary, model: argus.model, picks: argus.picks.length, pool_read: poolTop.length, spots: argus.spots ?? [] } : null,
         counts: { pool: pool.length, quoted: quotes.size, graded: rows.length, headlines: headlines.size, wide: wide.length - poolRows.length, ungraded: poolRows.length },
         requests,
         retried_429: retried429,
         rows: marked,
-        wide,
+        wide: wideMarked,
     }
+}
+
+/** The pool names Argus reads beside a board. */
+export const POOL_FOR_ARGUS = 40
+
+/**
+ * The pool's most active names for Argus: a material story first, then the biggest move (the gap, either way), then
+ * volume against an ordinary day. Pure. `rows` — ungraded boardRows (keepUngraded).
+ */
+export function poolForArgus(rows, max = POOL_FOR_ARGUS) {
+    const vol = (r) => r.rvol ?? (Number.isFinite(r.pm_vol_pct) ? r.pm_vol_pct / 10 : 0)
+    return [...(rows ?? [])].filter(Boolean)
+        .sort((a, b) => (b.catalyst?.material ? 1 : 0) - (a.catalyst?.material ? 1 : 0)
+            || Math.abs(b.gap_pct ?? 0) - Math.abs(a.gap_pct ?? 0) || vol(b) - vol(a))
+        .slice(0, max)
 }
 
 /**

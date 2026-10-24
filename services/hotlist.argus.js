@@ -29,6 +29,12 @@ const LOG = '[hotlist.argus]'
  */
 export const MAX_PICKS = 10
 export const MAX_AVOID = 10
+/**
+ * Spots in the POOL (Roy, 2026-10-24: "let Argus read the pool"): the names the screener quoted but graded on no horizon
+ * reach him beside the board, and he may name up to this many it MISSED — scored like everything else, so his record
+ * says whether his eye beats the screener's rules.
+ */
+export const MAX_SPOTS = 10
 const TEXT_CHARS = 280
 
 /** The board's column ids in the words a trader uses — the prompt and the summary speak these. */
@@ -44,9 +50,10 @@ Answer:
 - "summary": 2–4 plain sentences on the tape — the regime, what is moving and why, where the room is.
 - "picks": for EACH column on the board, up to ${MAX_PICKS} names you would look at FIRST for THAT horizon, best first — every column is its own list (the open's trade and this week's are different trades; a name can be a pick on both when it carries both). Each: "symbol", "column" (one the row is graded on), "why" (one sentence: what makes this the trade on this horizon — the catalyst, the structure, the room), "caution" (one sentence: what would make it wrong). Prefer a real catalyst with room over a big grade on a thin story. Fewer is fine; none is fine for a column with nothing worth it.
 - "avoid": up to ${MAX_AVOID} names on the board that look better than they are — a minor story under a big gap, a catalyst already priced, an earnings coin-toss — each with "symbol" and "why".
+- "spots": the POOL section lists names the screener QUOTED but graded on NO column — its rules passed them over (the reason is on each line: a gate failed, or it did not qualify). Up to ${MAX_SPOTS} it MISSED: a real trade on one of THIS board's columns anyway — a story the rules cannot weigh, a move the gates were too strict for. Each: "symbol", "column" (one of the board's columns), "why", "caution". Most of the pool is rightly passed over; spot only what you would actually trade, and say plainly which rule it fails. Fewer is fine; none is fine.
 
 Output ONLY a JSON object, no prose:
-{"summary":"...","picks":[{"symbol":"ABC","column":"mid","why":"...","caution":"..."}],"avoid":[{"symbol":"XYZ","why":"..."}]}`
+{"summary":"...","picks":[{"symbol":"ABC","column":"mid","why":"...","caution":"..."}],"avoid":[{"symbol":"XYZ","why":"..."}],"spots":[{"symbol":"QRS","column":"mid","why":"...","caution":"..."}]}`
 
 const _f = (n, d = 2) => (Number.isFinite(n) ? n.toFixed(d) : '—')
 
@@ -58,13 +65,21 @@ export function boardText(board) {
         `REGIME: breadth ${_f(regime.breadth_above_sma20, 1)}% of the universe above its 20-day average; SPY ${regime.spy?.above_sma20 ? 'above' : 'below'} its own, ${_f(regime.spy?.ret5)}% over 5 sessions`,
         'ROWS:',
     ]
+    const facts = (r) => {
+        const cat = r.catalyst ? `${r.catalyst.material ? `${r.catalyst.type} ${r.catalyst.surprise}` : 'not material'}${r.catalyst.headline ? `: "${r.catalyst.headline}"` : ''}` : 'no news label'
+        return `${r.symbol} ${r.sector ?? ''} | $${_f(r.price)} gap ${_f(r.gap_pct)}%${r.rvol != null ? ` rvol ${r.rvol}×` : ''}${r.pm_vol_pct != null ? ` pre-mkt vol ${_f(r.pm_vol_pct, 1)}% of a day` : ''} ATR ${_f(r.atr_pct)}% | ${cat}${r.fade_check ? ' | FLAG: minor story under a big gap' : ''}${r.next_earnings ? ` | earnings ${r.next_earnings}` : ''}`
+    }
     const rows = (board.rows ?? []).map(r => {
         const cells = Object.entries(r.cells ?? {}).filter(([, c]) => c.grade).map(([col, c]) =>
             `${col} ${c.grade} (${c.range?.open_sky ? 'open sky' : `${_f(c.range?.pct)}% / ${_f(c.range?.atr_mult)}× ATR to ${_f(c.range?.level)}`})${c.exit_before ? `, RUN-UP: out before earnings ${c.exit_before}` : ''}`).join('; ')
-        const cat = r.catalyst ? `${r.catalyst.material ? `${r.catalyst.type} ${r.catalyst.surprise}` : 'not material'}${r.catalyst.headline ? `: "${r.catalyst.headline}"` : ''}` : 'no news label'
-        return `${r.symbol} ${r.sector ?? ''} | $${_f(r.price)} gap ${_f(r.gap_pct)}%${r.rvol != null ? ` rvol ${r.rvol}×` : ''}${r.pm_vol_pct != null ? ` pre-mkt vol ${_f(r.pm_vol_pct, 1)}% of a day` : ''} ATR ${_f(r.atr_pct)}% | ${cat}${r.fade_check ? ' | FLAG: minor story under a big gap' : ''}${r.next_earnings ? ` | earnings ${r.next_earnings}` : ''} | ${cells}`
+        return `${facts(r)} | ${cells}`
     })
-    return [...head, ...rows].join('\n')
+    // THE POOL (2026-10-24): quoted, graded on no column — each with why, per column: the gate it failed, or not in play.
+    const pool = (board.pool ?? []).map(r => {
+        const why = Object.entries(r.cells ?? {}).map(([col, c]) => `${col}: ${c?.gate ? `fails the ${String(c.gate).replace('_', ' ')} gate` : 'did not qualify'}`).join('; ')
+        return `${facts(r)} | not graded — ${why}`
+    })
+    return [...head, ...rows, ...(pool.length ? ['POOL (quoted, graded on no column — spot what the rules missed):', ...pool] : [])].join('\n')
 }
 
 /**
@@ -94,7 +109,17 @@ export function normalizeRead(raw, board) {
         avoid.push({ symbol, why: txt(a.why) })
         if (avoid.length >= MAX_AVOID) break
     }
-    return { summary: txt(raw?.summary), picks, avoid }
+    // A spot must be a POOL name, on one of the board's columns — code holds it there, as it holds a pick to the board.
+    const inPool = new Set((board.pool ?? []).map(r => r.symbol))
+    const columns = new Set(board.columns ?? [])
+    const spots = []
+    for (const sp of Array.isArray(raw?.spots) ? raw.spots : []) {
+        const symbol = String(sp?.symbol ?? '').toUpperCase()
+        if (!inPool.has(symbol) || !columns.has(sp?.column) || spots.some(x => x.symbol === symbol && x.column === sp.column)) continue
+        spots.push({ symbol, column: sp.column, why: txt(sp.why), caution: txt(sp.caution) })
+        if (spots.length >= MAX_SPOTS) break
+    }
+    return { summary: txt(raw?.summary), picks, avoid, spots }
 }
 
 async function _houseModel() {
@@ -110,12 +135,13 @@ async function _houseModel() {
  *   `onUsage(usage, model)` books the call's spend
  */
 export async function argusRead(board, { send = oneShotText, model = _houseModel, onUsage } = {}) {
-    if (!board?.rows?.length) return null
+    // A board with nothing graded may still have a pool worth reading.
+    if (!board?.rows?.length && !board?.pool?.length) return null
     try {
         const m = await model()
         const text = await send({ model: m, systemText: SYSTEM, userText: boardText(board), maxTokens: 8000, onUsage: onUsage && (u => onUsage(u, m)) })
         const read = normalizeRead(extractFirstJSON(text), board)
-        if (!read.summary && !read.picks.length) return null
+        if (!read.summary && !read.picks.length && !read.spots.length) return null
         return { ...read, model: m }
     } catch (err) {
         logger.warn(LOG, `no read on ${board.id ?? board.checkpoint} — the board goes out without it: ${err.message}`)
