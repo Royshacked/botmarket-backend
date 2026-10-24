@@ -913,7 +913,8 @@ services/
   hotlist.columns.js        the hotlist's columns, PURE: the §2.1 gates per column, in play per column (§2.2,
                             §5), the overhead levels each counts, FREE RANGE to the nearest (% and × ATR;
                             nothing above = open sky), the §5.1 A/B/C cut-offs. Long side only — the week's
-                            catalyst must have surprised UP. No entry, stop, target or R:R (§5)
+                            catalyst must have surprised UP. The week's two ways in: a catalyst, or a report
+                            2–10 days ahead (money arriving dropped 2026-10-24). No entry, stop, target or R:R (§5)
   hotlist.news.js           the one judgment in the checkpoint: one call labels every pooled name's fresh
                             headlines — material, catalyst type (short / drift / lasting), surprise,
                             magnitude. DAILY_SCREENER_NEWS_MODEL (default Haiku 4.5, any registry id via
@@ -976,7 +977,9 @@ services/
                             stats before D, D's open, the live cell and window — per grade, path and the pool, one
                             summary doc in `hotlist_backtest`; run by scripts/replay-hotlist-week.mjs. A run-up
                             trade (a report inside the window) is scored up to the close BEFORE the report, as
-                            the live outcome log does. The summary rides GET /api/hotlist/outcomes as `backtest`
+                            the live outcome log does. The catalyst path is replayed by proxy (`earningsBeat`:
+                            an EPS beat of 5%+ reported the session before, from the calendar's actuals). The
+                            summary rides GET /api/hotlist/outcomes as `backtest`
   hotlist.service.js        the hotlist's READ side: todayHotlist / boardById / hotlistOutcomes for the
                             API, and hotlistSeed — a "Build with Mentor" hand-off is a REFERENCE (board
                             id + column, scanSeed.util), resolved here from the STORED board into the

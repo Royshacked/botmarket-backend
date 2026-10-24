@@ -8,8 +8,9 @@
 // five-session window and score (hotlist.outcomes windowBars / scoreWindow). A name that clears the week's gates but
 // grades nothing is the POOL — the control group. No lookahead: the stats and the level are from bars before D.
 //
-// WHAT IT CANNOT REPLAY, said wherever it is shown: the "drift" path (a material story that morning — no news labels
-// for the past), so only the scheduled-report and money-arriving paths; and survivorship — today's universe, so names
+// WHAT IT CANNOT REPLAY, said wherever it is shown: the news that drives the CATALYST path — there are no news labels for
+// the past — so that path is an earnings beat reported the session before (earningsBeat, 2026-10-24), its largest case;
+// contracts, FDA decisions, index changes and the rest are not replayed. And survivorship — today's universe, so names
 // that delisted or fell under $5 since are missing. It is kept APART from the live record (`hotlist_backtest`, one
 // summary document) and never counts toward "verified".
 //
@@ -52,6 +53,27 @@ const _deps = {
 /** Test seam. */
 export function _setDeps(d) { Object.assign(_deps, d) }
 
+/** The least EPS beat, as a share of the estimate, the catalyst proxy calls a positive surprise (and at least a cent). */
+export const BEAT_MIN = 0.05
+
+/**
+ * THE CATALYST PATH, BY PROXY (Roy, 2026-10-24: "why didn't we have the catalyst path?"). Live, the path is a news label
+ * a model put on that morning's headlines — a material, positive "drift" or "lasting" story — and the past has none. The
+ * largest drift catalyst is an earnings beat, and the calendar keeps every past report's actuals: a report in the
+ * session BEFORE D whose EPS beat its estimate by BEAT_MIN (and a cent), with revenue at or over its estimate when both
+ * are known, stands in for a positive drift label on D. The session before, not D itself: a report dated D may come
+ * after the close (lookahead); one dated D−1 was out before D's open, after the close or before the open of D−1.
+ * → the catalyst a live label would carry, or null. Pure.
+ */
+export function earningsBeat(report) {
+    const a = Number(report?.epsActual), e = Number(report?.epsEstimated)
+    if (report?.epsActual == null || report?.epsEstimated == null || !Number.isFinite(a) || !Number.isFinite(e)) return null
+    if (a < e + Math.max(0.01, Math.abs(e) * BEAT_MIN)) return null
+    const ra = Number(report.revenueActual), re = Number(report.revenueEstimated)
+    if (report.revenueActual != null && report.revenueEstimated != null && Number.isFinite(ra) && Number.isFinite(re) && ra < re) return null
+    return { material: true, type: 'drift', surprise: 'positive', proxy: 'earnings_beat' }
+}
+
 /** The report the overnight pass would have seen for session `day`: the first on or after the evening before, within 21 days. Pure. */
 export function nextReportFor(dates, day) {
     const from = _addDays(day, -1), to = _addDays(from, EARNINGS_DAYS)
@@ -61,9 +83,10 @@ export function nextReportFor(dates, day) {
 /**
  * One name's replay over `days` (ascending ET dates) → rows `{ day, symbol, grade, path, outcome }`; grade POOL_GRADE for
  * a name that clears the week's gates but grades nothing. A day with no bar, too little history, a failed gate or a
- * window not complete yet is skipped. Pure. `bars` / `bench` ascending daily bars; `reports` the name's report dates.
+ * window not complete yet is skipped. Pure. `bars` / `bench` ascending daily bars; `reports` the name's report dates;
+ * `results` its reports by date (the calendar's rows, actuals and estimates) — the catalyst proxy reads them.
  */
-export function replaySymbol({ symbol, bars, bench, reports = [], days }) {
+export function replaySymbol({ symbol, bars, bench, reports = [], results = new Map(), days }) {
     const out = []
     const rows = (bars ?? []).filter(b => b?.close > 0)
     const dateOf = rows.map(b => _etDay(b.timestamp))
@@ -77,15 +100,49 @@ export function replaySymbol({ symbol, bars, bench, reports = [], days }) {
         stats.next_earnings = nextReportFor(reports, day)
         const price = rows[i].open > 0 ? rows[i].open : rows[i - 1].close
         if (failedGate('week', stats, { price })) continue
-        const c = cell('week', stats, { price, today: day, catalyst: null })
-        // A run-up is scored to the close before its report, as live (hotlist.outcomes windowBars `exitBefore`).
-        const exitBefore = c.exit_before ?? null
-        const win = windowBars('week', day, { daily: rows }, { exitBefore })
-        if (!win.length || windowPartial('week', win, { day, exitBefore }) || (!exitBefore && win.length < WEEK_SESSIONS)) continue
-        const outcome = scoreWindow({ entry: price, level: c.range?.level ?? null }, win)
-        if (!outcome) continue
-        out.push({ day, symbol, grade: c.grade ?? POOL_GRADE, path: c.path ?? null, outcome })
+        // The live cell for a catalyst, scored over its window → `{ c, outcome }`, or null on no complete window.
+        const scored = (catalyst) => {
+            const c = cell('week', stats, { price, today: day, catalyst })
+            // A run-up is scored to the close before its report, as live (hotlist.outcomes windowBars `exitBefore`).
+            const exitBefore = c.exit_before ?? null
+            const win = windowBars('week', day, { daily: rows }, { exitBefore })
+            if (!win.length || windowPartial('week', win, { day, exitBefore }) || (!exitBefore && win.length < WEEK_SESSIONS)) return null
+            const outcome = scoreWindow({ entry: price, level: c.range?.level ?? null }, win)
+            return outcome ? { c, outcome } : null
+        }
+        // A beat reported the session before stands in for that morning's positive drift label (earningsBeat).
+        const beat = earningsBeat(results.get(dateOf[i - 1]))
+        const main = scored(beat)
+        if (!main) continue
+        out.push({ day, symbol, grade: main.c.grade ?? POOL_GRADE, path: main.c.path ?? null, outcome: main.outcome })
+        // THE STAND-IN'S VARIANTS (Roy, 2026-10-24) — kept apart from the rows above, so they change no other number:
+        for (const [variant, catalyst] of catalystVariants({ rows, dateOf, i, results, beat })) {
+            const v = scored(catalyst)
+            if (v?.c.path === 'catalyst') out.push({ day, symbol, grade: v.c.grade ?? POOL_GRADE, path: 'catalyst', variant, outcome: v.outcome })
+        }
     }
+    return out
+}
+
+/** The most a "small move" may have run, from the close before the report to the entry, in %. */
+export const SMALL_MOVE_MAX = 3
+
+/**
+ * The catalyst stand-in's variants for session i → `[[variant, catalyst]]`, each one it applies to. Pure. Asked after
+ * the plain stand-in lost money (2026-10-24: a beat the session before, bought at the next open, −0.62% over the week):
+ * is it the entry? `small_move` — the same beat, but the stock moved 0 to SMALL_MOVE_MAX % from the close before the
+ * report (the session before it) to D's open: not already run. `day_two` — a beat reported TWO sessions before, bought on
+ * the second session after the report instead of the first.
+ */
+export function catalystVariants({ rows, dateOf, i, results, beat }) {
+    const out = []
+    if (beat && i >= 2) {
+        const from = rows[i - 2].close, entry = rows[i].open > 0 ? rows[i].open : rows[i - 1].close
+        const moved = from > 0 ? (entry / from - 1) * 100 : NaN
+        if (Number.isFinite(moved) && moved >= 0 && moved <= SMALL_MOVE_MAX) out.push(['small_move', beat])
+    }
+    const twoBack = i >= 2 ? earningsBeat(results.get(dateOf[i - 2])) : null
+    if (twoBack) out.push(['day_two', twoBack])
     return out
 }
 
@@ -112,13 +169,19 @@ export function groupStats(xs) {
 
 /** The replay's rows → per grade, per path, the pool, and the whole graded set. Pure. */
 export function summarizeReplay(rows) {
-    const graded = rows.filter(r => r.grade !== POOL_GRADE)
+    // The stand-in's variants (catalystVariants) are their own rows: they count in nothing but `catalyst_variants`.
+    const main = rows.filter(r => !r.variant)
+    const graded = main.filter(r => r.grade !== POOL_GRADE)
     return {
         grades: Object.fromEntries(['A', 'B', 'C'].map(g => [g, groupStats(graded.filter(r => r.grade === g))])),
-        paths: Object.fromEntries(['scheduled', 'accumulation'].map(p => [p, groupStats(graded.filter(r => r.path === p))])),
+        paths: Object.fromEntries(['catalyst', 'scheduled'].map(p => [p, groupStats(graded.filter(r => r.path === p))])),
+        catalyst_variants: {
+            next_open: groupStats(graded.filter(r => r.path === 'catalyst')),
+            ...Object.fromEntries(['small_move', 'day_two'].map(v => [v, groupStats(rows.filter(r => r.variant === v))])),
+        },
         graded: groupStats(graded),
-        pool: groupStats(rows.filter(r => r.grade === POOL_GRADE)),
-        sessions: new Set(rows.map(r => r.day)).size,
+        pool: groupStats(main.filter(r => r.grade === POOL_GRADE)),
+        sessions: new Set(main.map(r => r.day)).size,
     }
 }
 
@@ -148,17 +211,20 @@ export async function replayWeek({ sessions = REPLAY_SESSIONS, deps = _deps, onP
     // as if it were the result (code review 2026-10-24). A failed read stops the replay; the stored one stays.
     let calendar
     try {
-        calendar = await deps.earnings(_addDays(days[0], -1), _addDays(days.at(-1), EARNINGS_DAYS))
+        // From a few days before the first session: its previous session may be across a weekend (the catalyst proxy).
+        calendar = await deps.earnings(_addDays(days[0], -5), _addDays(days.at(-1), EARNINGS_DAYS))
     } catch (err) {
         logger.warn(LOG, 'week replay stopped — the earnings calendar was not read', { error: err.message })
         return { ok: false, outcome: 'no_calendar' }
     }
-    const reports = new Map()
+    // Per name: its report dates (the run-up path) and its reports by date (the catalyst proxy's actuals and estimates).
+    const reports = new Map(), results = new Map()
     for (const e of calendar ?? []) {
         const s = String(e?.symbol ?? '').toUpperCase()
         if (!s || !e.date) continue
-        if (!reports.has(s)) reports.set(s, [])
+        if (!reports.has(s)) { reports.set(s, []); results.set(s, new Map()) }
         reports.get(s).push(e.date)
+        results.get(s).set(e.date, e)
     }
     for (const list of reports.values()) list.sort()
 
@@ -168,7 +234,7 @@ export async function replayWeek({ sessions = REPLAY_SESSIONS, deps = _deps, onP
         await pace()
         try {
             const bars = await deps.bars(symbol, from, nowMs)
-            rows.push(...replaySymbol({ symbol, bars, bench, reports: reports.get(symbol) ?? [], days }))
+            rows.push(...replaySymbol({ symbol, bars, bench, reports: reports.get(symbol) ?? [], results: results.get(symbol) ?? new Map(), days }))
             read++
         } catch (err) {
             if (err?.status === 429) { stopped = 'rate_limited'; break }
@@ -181,7 +247,7 @@ export async function replayWeek({ sessions = REPLAY_SESSIONS, deps = _deps, onP
         id: 'week', column: 'week', run_at: new Date(nowMs).toISOString(), from: days[0], to: days.at(-1),
         sessions: days.length, universe: universe.length, universe_day: last.day, read, failed, stopped,
         summary: summarizeReplay(rows),
-        caveats: ['no drift path (no past news labels): scheduled and accumulation only', "today's universe (survivorship)", "entry at the session's open, not the 09:20 quote", 'a run-up is scored to the close before its report'],
+        caveats: ['the catalyst path is an earnings-beat stand-in (EPS beat 5%+, revenue not missed, reported the session before) — other news is not replayed', "today's universe (survivorship)", "entry at the session's open, not the 09:20 quote", 'a run-up is scored to the close before its report'],
     }
     // A run stopped short (rate-limited) is NOT stored: it would replace a whole universe's summary with a few names'
     // (code review 2026-10-24). It is returned, so the script still prints it.

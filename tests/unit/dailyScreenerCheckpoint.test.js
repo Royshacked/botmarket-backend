@@ -52,7 +52,7 @@ test('structure names: week gate + RS + a structure, the strongest RS first — 
     assert.deepEqual(out, ['HI', 'NR'], 'a report tonight is a coin toss, not a week candidate')
 })
 
-test('ready names: the stats alone put them in play — a report in 2–10 days, or money arriving on a rising week', () => {
+test('ready names: the stats alone put them in play — a report in 2–10 days (money arriving no longer, 2026-10-24)', () => {
     const out = structureNames([
         { ...W, symbol: 'DATE', next_earnings: '2026-10-28' },
         { ...W, symbol: 'ACC', vol5_vs_50: 1.8, ret5: 2, rs20: 5 },
@@ -60,7 +60,7 @@ test('ready names: the stats alone put them in play — a report in 2–10 days,
         { ...W, symbol: 'PLAIN' },
         { ...W, symbol: 'FAR', next_earnings: '2026-11-20' },
     ], TODAY, { ready: true })
-    assert.deepEqual(out, ['ACC', 'DATE'])
+    assert.deepEqual(out, ['DATE'])
 })
 
 test('ready names take at most READY_MAX of the pool — news still gets in behind them', () => {

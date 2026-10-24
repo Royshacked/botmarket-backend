@@ -165,11 +165,13 @@ export function inPlay(column, stats, ctx = {}) {
         // LONG SIDE ONLY (§9): a lasting catalyst counts for a long only when it surprised UP — the
         // first live run had Netflix's "disappointing outlook" (a negative drift) qualifying a long.
         const drift = material && ['drift', 'lasting'].includes(ctx.catalyst?.type) && ctx.catalyst?.surprise === 'positive'
-        if (w.base && (w.scheduled || w.accumulation || drift)) {
+        // TWO WAYS IN: a story moving it now, or a date ahead. The third — money arriving (5-session volume 1.5× its
+        // 50-day pace) — was DROPPED 2026-10-24 (Roy): replayed over 125 sessions it averaged −0.04% a week against the
+        // pool's +0.11%.
+        if (w.base && (w.scheduled || drift)) {
             why.push([
                 s.nr7 ? 'NR7' : s.inside_day ? 'inside day' : 'near the 20-day high',
                 `RS +${s.rs20} vs SPY (20d)`,
-                ...(w.accumulation ? [`volume ${s.vol5_vs_50}× its 50-day pace (5d)`] : []),
                 ...(drift ? [`${ctx.catalyst.type} catalyst`] : []),
                 // The report is inside the window: the trade is the run-up INTO it, and ends before it
                 // (§2.7 "unless earnings IS the trade" — Roy, 2026-10-22).
@@ -177,24 +179,20 @@ export function inPlay(column, stats, ctx = {}) {
             ].join(' · '))
         }
         if (!why.length) return { in: false, why }
-        // Which path let it in, strongest first: a story moving it now, money arriving, or a date
-        // ahead — what `rowStatus` reads as in play / building / setting up (Roy, 2026-10-22).
-        const path = drift ? 'catalyst' : w.accumulation ? 'accumulation' : 'scheduled'
+        // Which path let it in, strongest first: a story moving it now, or a date ahead — what `rowStatus` reads as in
+        // play / setting up (Roy, 2026-10-22).
+        const path = drift ? 'catalyst' : 'scheduled'
         return { in: true, why, path, ...(w.scheduled ? { exit_before: s.next_earnings } : {}) }
     }
     }
     return { in: why.length > 0, why }
 }
 
-/** §2.2: 5-day volume at least this × the 50-day average — money arriving, the week's no-news path. */
-export const ACCUMULATION = 1.5
-
 /**
  * The week column's stats-only half (§2.2, §2.4): what the overnight numbers already say before any
  * quote or news. Shared by `inPlay` and the checkpoint's pool, so both read one rule. Pure.
- * → `{ base, structure, days, scheduled, accumulation, binary }` — `base` is RS + a structure;
- * `binary` a report within a day (excluded, §2.7); `accumulation` also wants the last 5 sessions up,
- * since heavy volume into a falling price is selling, not arriving.
+ * → `{ base, structure, days, scheduled, binary }` — `base` is RS + a structure; `binary` a report
+ * within a day (excluded, §2.7). (The money-arriving path went 2026-10-24 — see `inPlay`.)
  */
 export function weekSetup(stats, today) {
     const s = stats ?? {}
@@ -205,7 +203,6 @@ export function weekSetup(stats, today) {
         structure,
         days,
         scheduled:    days != null && days >= 2 && days <= 10,
-        accumulation: num(s.vol5_vs_50) >= ACCUMULATION && num(s.ret5) >= 0,
         binary:       days != null && days >= 0 && days <= 1,
     }
 }
@@ -248,6 +245,7 @@ export function rowStatus(cells) {
     if (!graded.length) return null
     if (graded.some(([col, c]) => col !== 'week' || c.path === 'catalyst')) return 'in_play'
     const path = graded.find(([col]) => col === 'week')?.[1]?.path
-    // A week cell written before paths existed says nothing — null, and the caller decides.
+    // A week cell written before paths existed says nothing — null, and the caller decides. `building` (money arriving)
+    // is no longer written since 2026-10-24; a past day's board still reads as it was.
     return path === 'accumulation' ? 'building' : path === 'scheduled' ? 'setting_up' : null
 }

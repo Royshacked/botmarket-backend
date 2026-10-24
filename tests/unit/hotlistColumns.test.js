@@ -127,22 +127,19 @@ test('week: a report tonight or tomorrow excludes the name, whatever else qualif
     assert.equal(inPlay('week', { ...S, next_earnings: '2026-10-22' }, ctx).in, false)
 })
 
-test('week: money arriving — 5-day volume ≥ 1.5× the 50-day, on a week that rose — is a path in without a date or a story', () => {
+// Roy, 2026-10-24: money arriving dropped — replayed over 125 sessions it averaged −0.04% a week against the pool's +0.11%.
+test('week: money arriving alone no longer lets a name in — a story or a date does', () => {
     const ctx = { price: 100, today: '2026-10-21' }
     const p = inPlay('week', { ...S, vol5_vs_50: 1.8, ret5: 2 }, ctx)
-    assert.equal(p.in, true)
-    assert.match(p.why[0], /volume 1\.8× its 50-day pace \(5d\)/)
-    assert.equal(p.exit_before, undefined)
-    assert.equal(inPlay('week', { ...S, vol5_vs_50: 1.4, ret5: 2 }, ctx).in, false, 'under the bar')
-    assert.equal(inPlay('week', { ...S, vol5_vs_50: 2.5, ret5: -3 }, ctx).in, false, 'heavy volume into a falling week is selling')
-    assert.equal(inPlay('week', { ...S, vol5_vs_50: 2, ret5: 1, rs20: -2 }, ctx).in, false, 'still needs RS')
+    assert.equal(p.in, false)
+    assert.equal(inPlay('week', { ...S, vol5_vs_50: 2.5, ret5: 3, next_earnings: '2026-10-27' }, ctx).path, 'scheduled', 'heavy volume with a report ahead: the run-up')
+    assert.doesNotMatch(inPlay('week', { ...S, vol5_vs_50: 2.5, ret5: 3, next_earnings: '2026-10-27' }, ctx).why[0], /50-day pace/)
 })
 
-test('week: the path that let it in — a story, money arriving, or a date — strongest first', () => {
+test('week: the path that let it in — a story or a date — strongest first', () => {
     const ctx = { price: 100, today: '2026-10-21' }
     const drift = { material: true, type: 'drift', surprise: 'positive' }
     assert.equal(inPlay('week', { ...S, next_earnings: '2026-10-27' }, ctx).path, 'scheduled')
-    assert.equal(inPlay('week', { ...S, vol5_vs_50: 2, ret5: 1, next_earnings: '2026-10-27' }, ctx).path, 'accumulation')
     assert.equal(inPlay('week', { ...S, vol5_vs_50: 2, ret5: 1 }, { ...ctx, catalyst: drift }).path, 'catalyst')
     assert.equal(cell('week', { ...S, next_earnings: '2026-10-27' }, ctx).path, 'scheduled')
     assert.equal(inPlay('week', S, ctx).path, undefined, 'not in play: no path')

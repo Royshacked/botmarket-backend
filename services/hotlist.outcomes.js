@@ -237,6 +237,8 @@ export function summarize(outcomes) {
             board: _group(rows.filter(o => o.shown !== false)), off: _group(rows.filter(o => o.shown === false)),
             // …and both against the pool it chose from: do the graded names beat the names it passed over?
             pool: _group(scored.filter(o => o.grade === POOL_GRADE)),
+            // THIS WEEK by the path that let each name in (2026-10-24) — outcomes logged before the path was are in none.
+            ...(col === 'week' ? { paths: Object.fromEntries(['catalyst', 'scheduled'].map(p => [p, _group(rows.filter(o => o.path === p))])) } : {}),
         }
     }
     return out
@@ -314,6 +316,9 @@ export async function runOutcomes({ force = false, deps = _deps } = {}) {
                         column, symbol: row.symbol, grade: c.grade, entry: row.price,
                         level: c.range?.level ?? null, atr_mult: c.range?.atr_mult ?? null, open_sky: c.range?.open_sky ?? false,
                         outcome, scored_at: deps.now(), shown, ...(exitBefore ? { exit_before: exitBefore } : {}),
+                        // Which path let it in on the week — catalyst / scheduled — so each path has its own
+                        // record (2026-10-24: the catalyst path had none; money arriving, which the replay showed adding nothing, was dropped).
+                        ...(c.path ? { path: c.path } : {}),
                         // A pool name Argus read beside the board, and whether he SPOTTED it on this column (2026-10-24).
                         ...(row.seen ? { seen: true } : {}), ...(row.spot?.[column] ? { spot: true } : {}),
                     })

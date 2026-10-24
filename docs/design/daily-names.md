@@ -154,7 +154,7 @@ half a session. The grade reads the ATR multiple; the % is shown beside it.
 | **Mid-session** | ~10:30 | Trend day above VWAP, opening-range break | high of day, prior-day high, multi-day high |
 | **End of day** | ~14:30 | Strength into the close, near the high of day | high of day, multi-day high |
 | **Tomorrow** (overnight) | ~15:30 | Closing strong at the highs + an after-hours catalyst; no binary event tonight unless it is the trade | prior-day high, multi-day high |
-| **This week** | pre-market | RS + daily structure + one of: a scheduled date in 2–10 days (a run-up, out before it), money arriving (5-day volume ≥ 1.5× the 50-day on a rising week, `vol5_vs_50`), a positive drift/lasting catalyst | multi-week range top, 20/50-day high, 52-week high |
+| **This week** | pre-market | RS + daily structure + one of: a scheduled date in 2–10 days (a run-up, out before it), a positive drift/lasting catalyst. (Money arriving — 5-day volume ≥ 1.5× the 50-day on a rising week — was DROPPED 2026-10-24: replayed, −0.04% a week against the pool's +0.11%, §7.5.) | multi-week range top, 20/50-day high, 52-week high |
 
 - Each name gets **A / B / C per column**; its best column is highlighted — that is the
   per-name horizon label.
@@ -212,7 +212,7 @@ above) to be graded at all — otherwise that column shows "—". First proposal
    dates, the overhead levels. ~1,500 requests, paced so they never crowd live pricing.
 2. **At each checkpoint** — a **pool of ~200–300**, in this order (Roy, 2026-10-22): earnings
    reported yesterday / today; the names the overnight stats alone already qualify for the week
-   (`ready`: RS + structure + a date or money arriving — week checkpoints only); today's rating
+   (`ready`: RS + structure + a date — week checkpoints only; money arriving dropped 2026-10-24); today's rating
    changes; news since the close, most headlines first; the movers (in session); the best remaining
    structures by RS (not by size — by dollar volume the list was the mega caps). Only names that clear
    the stats half of a column's gates enter. No pre-market movers source exists on this plan (probed
@@ -311,8 +311,11 @@ pass would have seen (`nextReportFor`: first on or after D−1, within 21 days),
 (`cell`) and the live five-session window and score (`windowBars` / `scoreWindow`). A name clearing the week's gates
 but grading nothing is the pool. ~125 sessions (six months) by default; ~1,200 daily-bars reads, paced, off-session.
 
-Caveats, shown with it: no drift path (no past news labels — scheduled and accumulation only); today's universe
-(survivorship); the open, not the 09:20 quote. Stored as ONE summary document (`hotlist_backtest`, per grade, per path,
+Caveats, shown with it: the catalyst path is a stand-in, since the past has no news labels. Since 2026-10-24 it is
+`earningsBeat`: EPS beat its estimate by 5% and a cent, revenue not missed, reported the session BEFORE D (a report
+dated D may come after the close). Contracts, FDA decisions, index changes and the like are not replayed. Also:
+today's universe (survivorship); the open, not the 09:20 quote; a run-up is scored to the close before its report. The
+live outcome log keeps each week name's `path` from 2026-10-24, and `summarize` splits This week by it. Stored as ONE summary document (`hotlist_backtest`, per grade, per path,
 the graded set, the pool), carried by GET /api/hotlist/outcomes as `backtest`, shown on This week as its own line —
 never mixed with the live record, never toward verified. The session-intraday columns (open, mid, eod) are not replayed:
 their gates need pre-market quotes and that morning's news labels, which do not exist for the past.
@@ -351,7 +354,8 @@ grades: they gate which names reach a column and order the board, and the outcom
   of the day's boards graded, once (`day_list` on `/api/hotlist`, `hotlist.service dayList`). A name
   keeps each column's latest cell, with the board that cell lives on (`cell_board` — the Mentor
   hand-off references it). Each row has a **status** — *in play* (a session column, or a week cell
-  let in by a story), *building* (money arriving), *setting up* (only a date ahead) — from the
+  let in by a story), *setting up* (only a date ahead) — and, on a day before 2026-10-24, *building* (money
+  arriving, a path since dropped) — from the
   week cell's `path` (`hotlist.columns rowStatus`), the reason in plain words under the name, and
   "since <checkpoint>". Sortable by name, price, change, volume and status; on All, by **Horizon** — the horizon a
   name is best on, which replaced the best-grade column on 2026-10-24 (no letters; a horizon tab keeps Argus's order

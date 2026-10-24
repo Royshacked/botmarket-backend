@@ -145,8 +145,8 @@ export function buildPool({ earnings, ready, grades, news, movers, structure }, 
 
 /**
  * The overnight list's week candidates (§2.2 "about to be in play"), strongest RS first. Pure.
- * `ready`: the stats alone already put them in play for the week — a date in the window or money
- * arriving — so a quote is all they need. Otherwise: RS + a structure, still waiting on a catalyst.
+ * `ready`: the stats alone already put them in play for the week — a date in the window (money
+ * arriving was dropped 2026-10-24) — so a quote is all they need. Otherwise: RS + a structure, still waiting on a catalyst.
  * Both clear the week's stats gates and skip a report within a day. Ranked by RS, not by size: by
  * dollar volume the list was the mega caps (the first live day).
  */
@@ -155,7 +155,7 @@ export function structureNames(statsList, today, { ready = false, max = 60 } = {
         .filter(s => {
             if (failedGate('week', s)) return false
             const w = weekSetup(s, today)
-            return w.base && !w.binary && (!ready || w.scheduled || w.accumulation)
+            return w.base && !w.binary && (!ready || w.scheduled)
         })
         .sort((a, b) => (b.rs20 ?? 0) - (a.rs20 ?? 0))
         .slice(0, max)

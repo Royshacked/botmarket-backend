@@ -60,9 +60,9 @@ test('a name that clears the gates but grades nothing is the pool; a failed gate
 
 test('the summary: per grade, per path, the graded set and the pool apart', () => {
     const o = (grade, ret, path = null) => ({ day: 'd', grade, path, outcome: { ret_pct: ret, reached: grade === POOL_GRADE ? null : ret > 1, mfe_pct: 2 } })
-    const s = summarizeReplay([o('A', 2, 'scheduled'), o('A', -1, 'accumulation'), o('C', 3, 'scheduled'), o(POOL_GRADE, 1), o(POOL_GRADE, -2)])
+    const s = summarizeReplay([o('A', 2, 'scheduled'), o('A', -1, 'catalyst'), o('C', 3, 'scheduled'), o(POOL_GRADE, 1), o(POOL_GRADE, -2)])
     assert.deepEqual([s.grades.A.n, s.grades.A.up_rate, s.grades.C.n, s.graded.n, s.pool.n, s.pool.up_rate], [2, 50, 1, 3, 2, 50])
-    assert.deepEqual([s.paths.scheduled.n, s.paths.accumulation.n], [2, 1])
+    assert.deepEqual([s.paths.scheduled.n, s.paths.catalyst.n, s.paths.accumulation], [2, 1, undefined], 'money arriving is gone (2026-10-24)')
     assert.equal(s.pool.hit_rate, null, 'the pool has no level to reach')
 })
 
@@ -105,4 +105,61 @@ test('no calendar stops the replay; a rate-limited run is returned but not store
     assert.deepEqual([limited.ok, limited.outcome, limited.stopped], [false, 'partial', 'rate_limited'])
     assert.equal(rows(BACKTEST).length, 1)
     assert.equal(rows(BACKTEST)[0].keep, true, 'the complete replay stays')
+})
+
+// Roy, 2026-10-24: "why didn't we have the catalyst path?" — an earnings beat reported the session before stands in for
+// that morning's positive drift label.
+test('the catalyst proxy: an EPS beat of 5% (and a cent), revenue not missed', async () => {
+    const { earningsBeat, BEAT_MIN } = await import('../../services/hotlistBacktest.service.js')
+    assert.equal(BEAT_MIN, 0.05)
+    assert.deepEqual(earningsBeat({ epsActual: 1.1, epsEstimated: 1, revenueActual: 105, revenueEstimated: 100 }),
+        { material: true, type: 'drift', surprise: 'positive', proxy: 'earnings_beat' })
+    assert.equal(earningsBeat({ epsActual: 1.04, epsEstimated: 1 }), null, 'a 4% beat is no surprise')
+    assert.equal(earningsBeat({ epsActual: 0.105, epsEstimated: 0.1 }), null, 'a 5% beat under a cent is noise')
+    assert.ok(earningsBeat({ epsActual: -0.1, epsEstimated: -0.3 }), 'a smaller loss than expected is a beat')
+    assert.equal(earningsBeat({ epsActual: 1.2, epsEstimated: 1, revenueActual: 95, revenueEstimated: 100 }), null, 'revenue missed')
+    assert.ok(earningsBeat({ epsActual: 1.2, epsEstimated: 1, revenueActual: null, revenueEstimated: 100 }), 'revenue unknown: EPS decides')
+    assert.equal(earningsBeat({ epsActual: 1.2, epsEstimated: null }), null, 'no estimate, no surprise')
+    assert.equal(earningsBeat({ epsActual: null, epsEstimated: 1 }), null, 'not reported yet')
+    assert.equal(earningsBeat(undefined), null)
+})
+
+test('a beat reported the session before puts a name on the catalyst path; one reported that day does not (lookahead)', () => {
+    const b = bars('2025-06-02', 330, (i) => ({ close: 50 + i * 0.1, volume: 2e6 }))
+    const spy = bars('2025-06-02', 330, () => ({ close: 500 }))
+    const days = b.slice(-12, -5).map(day)
+    const D = days.at(-1)
+    const prev = day(b[b.findIndex(x => day(x) === D) - 1])
+    const beat = { epsActual: 1.2, epsEstimated: 1, revenueActual: 110, revenueEstimated: 100 }
+    const on = replaySymbol({ symbol: 'UP', bars: b, bench: spy, reports: [prev], results: new Map([[prev, beat]]), days: [D] })
+    assert.equal(on[0]?.path, 'catalyst')
+    assert.ok(on[0].grade !== POOL_GRADE)
+    const same = replaySymbol({ symbol: 'UP', bars: b, bench: spy, reports: [D], results: new Map([[D, beat]]), days: [D] })
+    assert.notEqual(same[0]?.path, 'catalyst', 'a report dated D may come after the close')
+})
+
+test('the replay summary splits the catalyst path out', () => {
+    const r = (path, ret) => ({ day: '2026-10-01', grade: 'B', path, outcome: { ret_pct: ret, mfe_pct: 1, reached: null } })
+    const s = summarizeReplay([r('catalyst', 2), r('catalyst', -1), r('scheduled', 1),
+        // The stand-in's variants count in their own line and nowhere else.
+        { ...r('catalyst', 5), variant: 'small_move' }, { ...r('catalyst', -3), variant: 'day_two' }, { ...r('catalyst', 1), variant: 'day_two' }])
+    assert.deepEqual([s.paths.catalyst.n, s.paths.scheduled.n, s.graded.n], [2, 1, 3])
+    assert.deepEqual([s.catalyst_variants.next_open.n, s.catalyst_variants.small_move.n, s.catalyst_variants.day_two.n], [2, 1, 2])
+    assert.equal(s.catalyst_variants.day_two.ret_mean, -1)
+})
+
+test("the stand-in's variants: a beat with a small move since before the report, and a beat two sessions back", async () => {
+    const { catalystVariants, earningsBeat, SMALL_MOVE_MAX } = await import('../../services/hotlistBacktest.service.js')
+    assert.equal(SMALL_MOVE_MAX, 3)
+    const beatRow = { epsActual: 1.2, epsEstimated: 1 }
+    const beat = earningsBeat(beatRow)
+    const rows = [{ close: 100 }, { close: 101, open: 100.5 }, { open: 102, close: 103 }]   // i = 2: from 100 (before the report) to the 102 open
+    const dateOf = ['d0', 'd1', 'd2']
+    assert.deepEqual(catalystVariants({ rows, dateOf, i: 2, results: new Map(), beat }).map(v => v[0]), ['small_move'], '+2% since before the report')
+    const ran = [{ close: 100 }, { close: 106 }, { open: 108, close: 109 }]
+    assert.deepEqual(catalystVariants({ rows: ran, dateOf, i: 2, results: new Map(), beat }), [], '+8%: already ran')
+    const down = [{ close: 100 }, { close: 98 }, { open: 97, close: 99 }]
+    assert.deepEqual(catalystVariants({ rows: down, dateOf, i: 2, results: new Map(), beat }), [], 'a beat it sold off on: not a small move')
+    const two = catalystVariants({ rows, dateOf, i: 2, results: new Map([['d0', beatRow]]), beat: null })
+    assert.deepEqual(two.map(v => v[0]), ['day_two'], 'reported two sessions back: bought on the second day after it')
 })

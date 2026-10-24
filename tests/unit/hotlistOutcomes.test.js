@@ -283,3 +283,24 @@ test('a week window with a report inside it stops at the close before the report
     assert.equal(windowPartial('week', win), true, 'without the report it would be short of five')
     assert.equal(windowBars('week', DAY, { daily: DAILY }).length, 5, 'no report: five sessions, as before')
 })
+
+test("the live record keeps the week's path, and splits This week by it", () => {
+    const o = (path, ret) => ({ column: 'week', grade: 'B', day: '2026-10-21', path, outcome: { ret_pct: ret, mfe_pct: 1, reached: null } })
+    const s = summarize([o('catalyst', 2), o('scheduled', -1), o('scheduled', 1), o(undefined, 3)])
+    assert.deepEqual([s.week.paths.catalyst.n, s.week.paths.scheduled.n], [1, 2], 'an outcome from before the path was logged is in none')
+    assert.equal(s.week.paths.scheduled.ret_mean, 0)
+    assert.equal(s.week.paths.accumulation, undefined, 'money arriving is gone (2026-10-24)')
+    assert.equal(s.mid.paths, undefined, 'the session columns have one path')
+})
+
+test('run: a run-up week cell is scored to the close before its report, and its path is logged', async () => {
+    const { db, rows } = memDb()
+    rows(BOARDS).push({ id: 'hb_2026-10-21_preopen', day: DAY, checkpoint: 'preopen', status: 'done', columns: ['week'],
+        rows: [{ symbol: 'RUN', price: 100, cells: { week: { grade: 'B', path: 'scheduled', exit_before: '2026-10-26', range: { level: 110, atr_mult: 1, open_sky: false } } } }] })
+    const deps = { db: async () => db, intraday: async () => [], daily: async () => DAILY, perMinute: () => 6000,
+        now: () => Date.parse('2026-11-02T22:30:00Z'), sleep: async () => {} }
+    const r = await runOutcomes({ force: true, deps })
+    assert.equal(r.scored, 1)
+    const o = rows(OUTCOMES)[0]
+    assert.deepEqual([o.path, o.exit_before, o.outcome.bars, o.outcome.partial, o.outcome.end], ['scheduled', '2026-10-26', 3, undefined, '2026-10-23'])
+})
