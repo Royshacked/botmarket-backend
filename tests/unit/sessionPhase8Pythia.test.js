@@ -13,22 +13,17 @@ const OIL    = { industry: '10102010', summary: 'Supply discipline holds', swing
 
 // ─── the publish service ──────────────────────────────────────────────────────
 
-test('publishIndustry checks the draft, writes it, and posts the card only when the answer changed', async () => {
-    const calls = { seed: [], publish: [], notify: [] }
+test('publishIndustry checks the draft and writes it — no card (Roy, 2026-10-24: "Pythia — stop posting cards")', async () => {
+    const calls = { seed: [], publish: [] }
     const make = (r) => makeIndustryPublish({
         readSub: async (code) => (code === '45301020' ? { sub: { code, name: 'Semiconductors' }, answering: { m: 1 } } : null),
         views:   { seedMissing: async (subs) => { calls.seed.push(subs) }, publishView: async (code, draft, answering, o) => { calls.publish.push({ code, draft, answering, o }); return r } },
-        notify:  async (doc, changed) => { calls.notify.push({ doc, changed }) },
     })
     assert.deepEqual(await make({ ok: true })('99999999', SEMIS), { ok: false, reason: 'unknown_industry' })
 
     const out = await make({ ok: true, doc: { id: 'v1' }, changed: ['swing'] })('45301020', SEMIS)
     assert.deepEqual(out, { ok: true, doc: { id: 'v1' }, sub: { code: '45301020', name: 'Semiconductors' } })
     assert.deepEqual(calls.publish[0], { code: '45301020', draft: SEMIS, answering: { m: 1 }, o: { note: 'Capex cycle intact' } })
-    assert.equal(calls.notify.length, 1)
-
-    await make({ ok: true, doc: { id: 'v1' }, changed: null })('45301020', SEMIS)
-    assert.equal(calls.notify.length, 1, 'an unchanged answer posts no card')
     assert.deepEqual(await make({ ok: false, reason: 'bad_draft', detail: 'q2 departs from the read' })('45301020', SEMIS), { ok: false, reason: 'bad_draft', detail: 'q2 departs from the read' })
 })
 

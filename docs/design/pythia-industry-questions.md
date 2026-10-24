@@ -190,8 +190,8 @@ Decided by Roy on 2026-10-05:
    - **readers:** `api/strategy/industryData.service.js` reads the engine's database
      (`services/engineDb.js`).
    - **desk:** the rewritten `strategy.agent.service.js` and prompt, emitting `<industry_view>`.
-   - **headless review:** `services/industryReview.service.js`; a changed answer posts an admin card
-     (`industryNotify.service.js`).
+   - **headless review:** `services/industryReview.service.js`. It posts no card (2026-10-24, Roy: "Pythia —
+     stop posting cards"; `industryNotify.service.js` deleted).
    - **monitor:** `monitoring/industryView.monitor.service.js` seeds and brings views forward on new
      triggers every 6h, and reviews due views at most 3 an hour, but only when `INDUSTRY_REVIEWS=true`.
    - **API:** `GET /api/strategy/industries`, `GET /api/strategy/industries/:code` and

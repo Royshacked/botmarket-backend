@@ -4,7 +4,6 @@ import assert from 'node:assert/strict'
 import { checkDraft, nextReviewAt, pendingDoc, GRADES, nextAfterPass, failureBackoff, PENDING_RETRY_DAYS } from '../../api/strategy/industryView.service.js'
 import { forTraders } from '../../api/strategy/strategy.controller.js'
 import { formatNode, formatSubIndustry, formatCompanies, companiesQuery } from '../../api/strategy/industryData.service.js'
-import { buildIndustryChanged, notifyIndustryChanged } from '../../services/industryNotify.service.js'
 import { reviewIndustry, _reviewPrompt, _lastParagraph } from '../../services/industryReview.service.js'
 import { _triggered, _sync, _reason, TRIGGER_COOLDOWN_DAYS } from '../../monitoring/industryView.monitor.service.js'
 
@@ -108,47 +107,26 @@ test('companies are listed largest first, our coverage marked', () => {
     assert.match(t, /TXN .*\[OUR COVERAGE\]/)
 })
 
-// ── the card ─────────────────────────────────────────────────────────────────
-test('a changed answer posts a card per admin naming what moved; an unchanged review posts nothing', async () => {
-    const doc = { code: '45301020', id: 'iv_45301020', name: 'Semiconductors', summary: 'Top of the cycle.' }
-    const card = buildIndustryChanged(doc, { cycle: { from: 'mid', to: 'peak' } }, 'u1')
-    assert.equal(card.content, 'Semiconductors: cycle mid → peak. Top of the cycle.')
-    assert.equal(card.payload.name, 'Semiconductors', 'the frontend heading names the industry')
-    assert.equal(card.visibility, 'admin')
-    assert.equal(buildIndustryChanged(doc, null, 'u1'), null)
-
-    const posted = []
-    const n = await notifyIndustryChanged(doc, { demand: { from: null, to: 'growing' } }, { adminUserIds: async () => ['a', 'b'], post: async c => { posted.push(c); return c } })
-    assert.equal(n, 2)
-    assert.equal(posted[0].content, 'Semiconductors: first answer — demand growing. Top of the cycle.')
-})
-
-test('a revision that newly answers one question among changed ones still reads as moves', () => {
-    const card = buildIndustryChanged({ code: 'x', name: 'Airlines' }, { cycle: { from: 'mid', to: 'trough' }, demand: { from: null, to: 'shrinking' } }, 'u1')
-    assert.equal(card.content, 'Airlines: cycle mid → trough, demand unanswered → shrinking.')
-})
-
 // ── the headless review ──────────────────────────────────────────────────────
 function deps(over = {}) {
-    const calls = { published: [], passes: [], notified: [], failures: [] }
+    const calls = { published: [], passes: [], failures: [] }
     return {
         calls,
         read: async () => ({ sub: { code: '45301020', name: 'Semiconductors' }, answering: NODE }),
         run: async () => ({ reply: 'done', views: [{ industry: '45301020', ...ANSWER() }] }),
         publish: async (code, draft, node) => { calls.published.push({ code, draft, node }); return { ok: true, doc: { code }, changed: { cycle: { from: null, to: 'peak' } } } },
         pass: async (code, reason, cyclical) => { calls.passes.push({ code, reason, cyclical }) },
-        notify: async (doc, changed) => { calls.notified.push(changed) },
         fail: async (code, reason) => { calls.failures.push({ code, reason }) },
         ...over,
     }
 }
 
-test('a review that answers is published against the answering node, and a change is announced', async () => {
+test('a review that answers is published against the answering node — and a change posts no card (Pythia posts none)', async () => {
     const d = deps()
     const r = await reviewIndustry('45301020', 'scheduled review', d)
     assert.equal(r.outcome, 'published')
     assert.equal(d.calls.published[0].node, NODE)
-    assert.equal(d.calls.notified.length, 1)
+    assert.deepEqual(r.changed, { cycle: { from: null, to: 'peak' } }, 'the change is still reported to the caller')
 })
 
 test('a review that answers nothing is a pass with its last paragraph as the reason, and the cycle clock', async () => {

@@ -170,8 +170,8 @@ Two loops, because they cost different things:
 - **Review (hourly).** A due view (pending, scheduled — yearly, quarterly for a cyclical industry — or
   brought forward) gets a headless Pythia review (`services/industryReview.service.js`), **at most three
   an hour, and only when `INDUSTRY_REVIEWS=true`**. A review publishes, or records a pass (or a refused
-  answer) on the trail and restarts the clock. A changed answer posts an admin card
-  (`industryNotify.service.js`, type `industry_view`). Off, nothing is spent and due views wait.
+  answer) on the trail and restarts the clock. It posts no card (2026-10-24, Roy: "Pythia —
+  stop posting cards"): her answers are read on the Forecasts board. Off, nothing is spent and due views wait.
 
 ## Who reads it
 

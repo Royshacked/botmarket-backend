@@ -35,8 +35,9 @@ test('every botId a notifier declares is a REGISTERED bot', () => {
         for (const m of src.matchAll(/botId:\s*[^,\n]*?:\s*'([a-z_]+)'/g)) declared.add(m[1])
     }
     // The floor is low because most senders are now DERIVED (botForKind) rather than literal —
-    // the test below covers that path. This one only has to catch a hardcoded stray.
-    assert.ok(declared.size >= 4, `expected several senders, found ${[...declared]}`)
+    // the test below covers that path. This one only has to catch a hardcoded stray. Three since Pythia's card went
+    // (2026-10-24, "Pythia — stop posting cards"): analyst, portfolio, mentor.
+    assert.ok(declared.size >= 3, `expected several senders, found ${[...declared]}`)
     for (const id of declared) {
         assert.ok(isBot(id), `botId '${id}' is not in BOT_IDS — its cards would silently post AS AXL`)
     }

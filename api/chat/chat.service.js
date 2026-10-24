@@ -44,8 +44,8 @@ export const isBot = (id) => BOT_IDS.includes(String(id))
 export const RETIRED_BOT_IDS = ['idea']
 export const isRetiredBot = (id) => RETIRED_BOT_IDS.includes(String(id))
 
-// ADMIN-ONLY feeds. Pythia and Prometheus post only to admins (industryNotify and coverageNotify both
-// narrow to `listAdminUserIds`), so a trader should never own one of these threads — but a demoted
+// ADMIN-ONLY feeds. Prometheus posts only to admins (coverageNotify narrows to `listAdminUserIds`; Pythia's
+// old cards were admin-only too, and she posts none since 2026-10-24), so a trader should never own one of these threads — but a demoted
 // admin still does, and the client dropping it (agentMeta ADMIN_BOT_IDS) was the only gate.
 // getConversations drops it too, so the served set equals the visible set, the same rule the
 // routes under /api/strategy apply. Prometheus joined 2026-09-14: coverage is a house artifact

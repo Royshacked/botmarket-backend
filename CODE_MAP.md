@@ -844,13 +844,10 @@ services/
                             service; injectable getDb so the update's shape is testable
   coverageNotify.service.js Prometheus's cards. coverage_event = the monitor's material verdict,
                             fanned out to EVERY ADMIN (listAdminUserIds, visibility 'admin') — house
-                            coverage has no owner, so the audience is derived at delivery, as
-                            industryNotify does. coverage_refreshed = the ping after a
+                            coverage has no owner, so the audience is derived at delivery.
+                            coverage_refreshed = the ping after a
                             headless refresh: to the ONE user whose <coverage_refresh> hop asked, or
                             — for the monitor's scheduled re-model, which has no user — to every admin
-  industryNotify.service.js Pythia's card, to the ADMIN ROSTER: `industry_view` when a review CHANGED an
-                            industry's answer (payload industryViewId — a card subject, so it can be
-                            superseded and completed). A review that reaffirms every grade posts nothing
   industryReview.service.js A headless Pythia review of ONE sub-industry (the desk with userId null):
                             publishes the <industry_view> it gets, or records a pass / a refused answer
                             on the trail. Never throws — the caller is a monitor tick

@@ -16,7 +16,6 @@
 import { strategyAgentService } from './agents/strategy.agent.service.js'
 import { industryViewService } from '../api/strategy/industryView.service.js'
 import { readSubIndustry } from '../api/strategy/industryData.service.js'
-import { notifyIndustryChanged } from './industryNotify.service.js'
 import { withTimeout } from './timeout.util.js'
 import { openingTurn } from './agentUtils.js'
 import { logger } from './logger.service.js'
@@ -31,7 +30,6 @@ const _deps = {
     publish: (code, draft, node, opts) => industryViewService.publishView(code, draft, node, opts),
     pass:    (code, reason, cyclical) => industryViewService.recordPass(code, reason, cyclical),
     fail:    (code, reason) => industryViewService.recordFailure(code, reason),
-    notify:  (doc, changed) => notifyIndustryChanged(doc, changed),
 }
 export function _setDeps(d) { Object.assign(_deps, d) }
 
@@ -89,7 +87,7 @@ export async function reviewIndustry(code, reason = null, deps = _deps, { timeou
             logger.warn(LOG, 'review answer refused', { code: sub.code, reason: r.reason, detail: r.detail })
             return { ok: false, outcome: 'refused' }
         }
-        if (r.changed) await deps.notify(r.doc, r.changed)
+        // No card (Roy, 2026-10-24: "Pythia — stop posting cards"): her answers are read on the Forecasts board.
         logger.info(LOG, 'review published', { code: sub.code, changed: Boolean(r.changed) })
         return { ok: true, outcome: 'published', changed: r.changed ?? null }
     } catch (err) {
