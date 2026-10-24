@@ -235,6 +235,25 @@ backtest. Here:
 So the board **logs every publication and what each name did afterwards from day one** — per
 column, per grade. After ~6–8 weeks that is our own backtest, and later a real hit rate per column.
 
+### 7.1 Shown on the name — "did it work" (Roy, 2026-10-24)
+
+"The hotlist says something about a name — can we put some kind of signal to know if what the hotlist said is
+working?" The log was there; it only fed the "unverified" note. Now:
+
+- **Each graded cell carries its RESULT** (hotlist.service `cellResult` / `withResults`, on the day list and on every
+  board): `reached` the free-range level the grade measured room to, or `missed` it (its best move); open sky has no
+  level, so `up` / `down` by the window's end; before that `open` (the window runs, until `ends`) or `scoring`
+  (closed; scored after 18:00 ET). The list's **Result** column; the opened row says best / worst / end.
+- **Past days**: the API lists the days there are lists for (`days`, newest first, 20 kept) and the panel steps back
+  with ‹ › — a week name's result lands five sessions after its day.
+- **Each grade's track record** (summarize gained `judged` and `up_rate`): over a horizon's list, per grade, how often
+  it reached its level (of the names that had one) and how often it ended up (of all), and how far the column is from
+  verified (40 sessions, 30 names); on the grade's hover too.
+
+**Read the hit rate with care.** A grade is the room to the level in ATRs, so a C's level is CLOSER than an A's — "reached"
+is easier for a C by construction. On the first two days of mid-day names, C reached 76% (21) and A 33% (3). The up
+rate and the mean return compare grades on one footing; the hit rate says whether the room the grade promised was there.
+
 ## 8. The Floor — "Hotlist"
 
 - A **"Hotlist"** row in Floor Lists — the board, one for everyone. (Renamed from "Daily watchlist" on 2026-10-21 to stay clear of the existing **Watchlists** row, the scan lists.)

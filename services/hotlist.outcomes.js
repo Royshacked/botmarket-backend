@@ -205,6 +205,10 @@ export function summarize(outcomes) {
             byGrade[g] = {
                 n: gr.length,
                 hit_rate:   judged.length ? _r((judged.filter(o => o.outcome.reached).length / judged.length) * 100, 1) : null,
+                // Of the names that had a level to reach (open sky has none) — the hit rate's own base.
+                judged:     judged.length,
+                // How often the window ENDED up, every name counted (open sky too) — the plain "did it work" rate.
+                up_rate:    gr.length ? _r((gr.filter(o => o.outcome.ret_pct > 0).length / gr.length) * 100, 1) : null,
                 mfe_median: _r(_median(gr.map(o => o.outcome.mfe_pct))),
                 ret_mean:   gr.length ? _r(gr.reduce((s, o) => s + (o.outcome.ret_pct ?? 0), 0) / gr.length) : null,
             }

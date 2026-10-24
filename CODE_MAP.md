@@ -947,7 +947,10 @@ services/
                             API, and hotlistSeed — a "Build with Mentor" hand-off is a REFERENCE (board
                             id + column, scanSeed.util), resolved here from the STORED board into the
                             horizon (COLUMN_HORIZON), the facts line, Argus's note and the unverified
-                            flag; Mentor's seed section relays them (free range is room, not a target)
+                            flag; Mentor's seed section relays them (free range is room, not a target).
+                            "Did it work" (daily-names.md §7.1): cellResult / withResults put each graded
+                            cell's outcome-log result on the day list and every board (boardWithResults);
+                            todayHotlist lists the past `days`
   oneShot.service.js        ONE model call, no tools, to whichever provider a registry id lives on
                             (modelRoute → callAnthropicOnce / callOpenAICompatOnce). The hotlist's news
                             labels and Argus's read use it; monitor.claude still carries its own copy

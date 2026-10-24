@@ -1,4 +1,4 @@
-import { todayHotlist, boardById, hotlistOutcomes } from '../../services/hotlist.service.js'
+import { todayHotlist, boardWithResults, hotlistOutcomes } from '../../services/hotlist.service.js'
 import { catalystReadService } from '../../services/catalystRead.service.js'
 import { hotlistResearchService } from '../../services/hotlistResearch.service.js'
 import { makeHandle } from '../_shared/handle.util.js'
@@ -20,10 +20,10 @@ export const getToday = handle('getToday', async (req, res) => {
     res.json(await todayHotlist({ day: day ?? null }))
 })
 
-/** GET /api/hotlist/boards/:id — one checkpoint's board. */
+/** GET /api/hotlist/boards/:id — one checkpoint's board, each row with its results once scored. */
 export const getBoard = handle('getBoard', async (req, res) => {
     if (!BOARD_ID.test(String(req.params.id))) throw httpError(400, 'not a board id')
-    const board = await boardById(req.params.id)
+    const board = await boardWithResults(req.params.id)
     if (!board) throw httpError(404, 'no such board')
     res.json(board)
 })

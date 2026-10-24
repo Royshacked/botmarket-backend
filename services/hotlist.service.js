@@ -6,7 +6,7 @@
 // and the facts Mentor is told come from the stored board — never from the request.
 
 import { getDb } from '../providers/mongodb.provider.js'
-import { BOARDS, outcomeSummary } from './hotlist.outcomes.js'
+import { BOARDS, OUTCOMES, outcomeSummary, windowEnd, lastClosedSession } from './hotlist.outcomes.js'
 import { COLUMN_WORDS } from './hotlist.argus.js'
 import { RUNS, latestRun, runIsLive } from './dailyScreener.service.js'
 import { BOARD_STALE_MS } from './dailyScreener.checkpoint.js'
@@ -81,17 +81,64 @@ export async function todayHotlist({ day = null, deps = _deps } = {}) {
     const [working, stats] = await Promise.all([_working(db, coll, deps), _stats(deps)])
     const done = { status: { $in: ['done', 'partial'] } }
     const latest = await coll.find({ ...done, ...(day ? { day } : {}) }).sort({ finished_at: -1 }).limit(1).next()
-    if (!latest) return { day: day ?? null, latest: null, checkpoints: [], working, stats }
+    // The days there are lists for, newest first — a past day is where a name's result is (Roy, 2026-10-24).
+    // A projected find, not `distinct`: the client runs the Stable API strictly, and `distinct` is not in API v1 — it
+    // threw on the live database while every test passed (2026-10-24). A day has at most five boards.
+    const recent = await coll.find(done, { projection: { _id: 0, day: 1 } }).sort({ day: -1 }).limit(DAYS_KEPT * 5).toArray()
+    const days = [...new Set(recent.map(b => b.day).filter(Boolean))].slice(0, DAYS_KEPT)
+    if (!latest) return { day: day ?? null, latest: null, checkpoints: [], working, stats, days }
     const ofDay = await coll.find({ ...done, day: latest.day }, { projection: { id: 1, checkpoint: 1, finished_at: 1, status: 1, columns: 1, argus: 1, counts: 1, rows: 1 } })
         .sort({ finished_at: 1 }).toArray()
+    const outcomes = await _outcomesOf(db, { day: latest.day })
+    const closed = lastClosedSession(deps.now())
+    const pub = _public(latest)
     return {
         day: latest.day,
-        latest: _public(latest),
+        latest: { ...pub, rows: withResults(pub.rows, outcomes, { day: latest.day, closed, boardOf: () => latest.id }) },
         checkpoints: ofDay.map(b => ({ id: b.id, checkpoint: b.checkpoint, status: b.status, columns: b.columns, finished_at: b.finished_at, rows: b.counts?.graded ?? null, argus: !!b.argus })),
-        day_list: dayList(ofDay),
+        day_list: withResults(dayList(ofDay), outcomes, { day: latest.day, closed, boardOf: (r, col) => r.cell_board?.[col] ?? r.board }),
+        days,
         working,
         stats,
     }
+}
+
+/** The past days the Hotlist can step back to — a week name's result lands five sessions after its day. */
+export const DAYS_KEPT = 20
+
+// ─── Did it work? (Roy, 2026-10-24: "can we put some kind of signal to know if what the hotlist said is working") ───
+//
+// The outcome log (hotlist.outcomes) scores every graded cell once its window closes; until now it fed only the
+// "unverified" note. Each graded column of a row now carries its RESULT — the board's own claim checked against the
+// tape: `reached` the free-range level the grade was measured to, or `missed` it (with the best and the closing move);
+// an open-sky cell has no level, so `up` or `down` by the window's return. Before that: `open` (the window is still
+// running, until `ends`) or `scoring` (closed; the scoring pass runs after 18:00 ET). `no_data`: no bars came.
+
+/** One cell's result. Pure. `doc` is its hotlist_outcomes row, or null; `closed` the last closed session. */
+export function cellResult(doc, { day, column, closed }) {
+    if (doc) {
+        const o = doc.outcome
+        if (!o) return { state: 'no_data' }
+        const state = o.reached === true ? 'reached' : o.reached === false ? 'missed' : o.ret_pct > 0 ? 'up' : 'down'
+        return { state, ret_pct: o.ret_pct ?? null, mfe_pct: o.mfe_pct ?? null, mae_pct: o.mae_pct ?? null, level: doc.level ?? null,
+            entry: doc.entry ?? null, end: o.end ?? null, ...(o.partial ? { partial: true } : {}) }
+    }
+    const ends = windowEnd(day, column)
+    return { state: ends > closed ? 'open' : 'scoring', ends }
+}
+
+/** Rows with `results: { column: cellResult }` for every graded column. Pure. `boardOf(row, column)` — the board the cell lives on. */
+export function withResults(rows, outcomes, { day, closed, boardOf }) {
+    const by = new Map((outcomes ?? []).map(o => [`${o.board}:${o.symbol}:${o.column}`, o]))
+    return (rows ?? []).map(r => {
+        const cols = Object.entries(r.cells ?? {}).filter(([, c]) => c?.grade).map(([col]) => col)
+        if (!cols.length) return r
+        return { ...r, results: Object.fromEntries(cols.map(col => [col, cellResult(by.get(`${boardOf(r, col)}:${r.symbol}:${col}`) ?? null, { day, column: col, closed })])) }
+    })
+}
+
+async function _outcomesOf(db, q) {
+    return db.collection(OUTCOMES).find(q, { projection: { _id: 0, board: 1, symbol: 1, column: 1, entry: 1, level: 1, outcome: 1 } }).toArray()
 }
 
 /**
@@ -178,6 +225,15 @@ export async function boardById(id, deps = _deps) {
     const db = await deps.db()
     const b = await db.collection(BOARDS).findOne({ id: String(id) })
     return b && ['done', 'partial'].includes(b.status) ? _public(b) : null
+}
+
+/** One board for the Floor: boardById, each row with its results (withResults). */
+export async function boardWithResults(id, deps = _deps) {
+    const b = await boardById(id, deps)
+    if (!b) return null
+    const db = await deps.db()
+    const outcomes = await _outcomesOf(db, { board: b.id })
+    return { ...b, rows: withResults(b.rows, outcomes, { day: b.day, closed: lastClosedSession(deps.now()), boardOf: () => b.id }) }
 }
 
 /** The outcome log summarised — per column and grade, and which columns are verified. */
