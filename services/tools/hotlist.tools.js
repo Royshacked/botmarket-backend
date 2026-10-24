@@ -6,9 +6,8 @@
  * UNBOUND — no userId. The boards are a broadcast built once for everyone; there is nothing per user
  * to read, and a handler that cannot see a user cannot leak one into it.
  *
- * READ-ONLY. It reports the board — status, best grade, the reason, Argus's read — and never turns a
- * grade into advice: free range is room, not a target, and the grades are unverified until the
- * outcome log says otherwise.
+ * READ-ONLY. It reports the board — status, best horizon and its room, the reason, Argus's read — and
+ * never turns it into advice: free range is room, not a target. No grade is shown (2026-10-24).
  */
 
 import { makeToolHandler } from '../agentUtils.js'
@@ -23,7 +22,7 @@ const COLUMN_WORDS = { open: 'the open', mid: 'mid-day', eod: 'into the close', 
 const GRADE_RANK = { A: 3, B: 2, C: 1 }
 
 export const HOTLIST_TOOL_SPEC = {
-    get_hotlist: `Today's HOTLIST — the screener's names in play, from the day's checkpoint boards (08:00 and 09:20 ET pre-market, then 10:30, 14:30, 15:30), long side only. For each name: its status (IN PLAY now; BUILDING — money arriving; SETTING UP — quiet, with a known date ahead, usually earnings, a run-up to be out of before the report), its best horizon and grade (A/B/C by free range — the room to the next level overhead, NOT a target), the reason, the price as of its checkpoint (not live), and Argus's pick or avoid where he made one. Also the counts per status and Argus's read of the latest board. Use it to say what is on the hotlist in a line or two; the grades are unverified until enough outcomes are logged, so never present one as a reason a stock will rise.`,
+    get_hotlist: `Today's HOTLIST — the screener's names in play, from the day's checkpoint boards (08:00 and 09:20 ET pre-market, then 10:30, 14:30, 15:30), long side only. For each name: its status (IN PLAY now; BUILDING — money arriving; SETTING UP — quiet, with a known date ahead, usually earnings, a run-up to be out of before the report), its best horizon and its free range (the room to the next level overhead, NOT a target; no horizon carries a grade: Argus's pick is the verdict, and on this week Prometheus's read) — the reason, the price as of its checkpoint (not live), and Argus's pick or avoid where he made one. Also the counts per status and Argus's read of the latest board. Use it to say what is on the hotlist in a line or two; room is NOT a target, so never present it as a reason a stock will rise.`,
 }
 
 const _f = (n, d = 2) => (Number.isFinite(n) ? n.toFixed(d) : null)
@@ -43,7 +42,7 @@ export function formatHotlist(today, limit = DEFAULT_LIMIT) {
     if (!list.length) return `Hotlist for ${today.day}: no names in play on any board yet.`
     const counts = Object.keys(STATUS_WORDS).map(s => [s, list.filter(r => r.status === s).length]).filter(([, n]) => n)
     const lines = [
-        `Hotlist for ${today.day} — ${list.length} name${list.length === 1 ? '' : 's'} (${counts.map(([s, n]) => `${n} ${STATUS_WORDS[s]}`).join(', ')}). Grades unverified; prices as of each name's checkpoint, not live.`,
+        `Hotlist for ${today.day} — ${list.length} name${list.length === 1 ? '' : 's'} (${counts.map(([s, n]) => `${n} ${STATUS_WORDS[s]}`).join(', ')}). Prices as of each name's checkpoint, not live.`,
     ]
     const latest = today.latest
     if (latest?.argus?.summary) lines.push(`Argus on the ${latest.checkpoint} board: ${latest.argus.summary}`)
@@ -53,7 +52,8 @@ export function formatHotlist(today, limit = DEFAULT_LIMIT) {
         const head = [
             `${r.symbol}${r.name ? ` (${r.name})` : ''}`,
             STATUS_WORDS[r.status] ?? r.status ?? '',
-            best ? `${COLUMN_WORDS[best[0]] ?? best[0]} ${best[1].grade}${room ? `, ${room}` : ''}` : null,
+            // No horizon carries a grade (2026-10-24) — the horizon and its room.
+            best ? `${COLUMN_WORDS[best[0]] ?? best[0]}${room ? `, ${room}` : ''}` : null,
             Number.isFinite(r.price) ? `$${_f(r.price)}${Number.isFinite(r.gap_pct) ? ` (${r.gap_pct > 0 ? '+' : ''}${_f(r.gap_pct, 1)}%)` : ''}` : null,
             r.pick ? `ARGUS PICK #${r.pick.rank}` : r.avoid ? 'Argus: avoid' : null,
         ].filter(Boolean).join(' · ')

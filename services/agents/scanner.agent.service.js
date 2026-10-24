@@ -12,6 +12,7 @@ import { isMode } from '../analysisModes.js'
 import { makeStructureVisionHandler, OB_VISION, FB_VISION } from '../tools/priceStructure.tools.js'
 import { cleanConviction } from '../conviction.util.js'
 import { logger }        from '../logger.service.js'
+import { makeNewsHandlers } from '../tools/news.tools.js'
 import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, cleanReply, makeToolHandler, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, BREVITY_RULE, VENUE_RULE, TRADE_HORIZONS, cachedBlock } from '../agentUtils.js'
 import { makeTradingContextHandlers, buildVenueSection } from '../tools/tradingContext.tools.js'
 import { makeMarketHoursHandlers, MARKET_HOURS_TOOL_SPEC } from '../tools/marketHours.tools.js'
@@ -92,6 +93,8 @@ export const TOOLS = toolsFor({
     // Pythia's industries for the scan's book — where a swing / long-term scan looks FIRST (argus-on-pythia.md §3.2).
     // Inserted before `consult`, which stays last.
     get_house_industries: HOUSE_INDUSTRIES_TOOL_SPEC.get_house_industries,
+    // Argus had web search and no news feed (Roy, 2026-10-24: "Argus needs a news tool") — inserted before `consult`.
+    get_news: `Recent NEWS on a name — dated, attributed headlines with the publisher's own summary, newest first. \`companies\` with the TICKER as \`subject\` is the one you reach for: is there a real, DATED story under this move, or a stale or recycled one? It is the first place to look before web_search — cached and dated where a search is neither. \`topic\` for a theme with no ticker; \`headlines\` for the market's front page. A headline is a fact to weigh — what was WRITTEN — never a level or a call.`,
     // Appended last — contractually. The reasoning sidecar (services/deepThink.service.js): one
     // bounded decision put to a stronger model and handed back as a tool result. The mechanism half
     // of this description is shared with every other desk; the clause below is Argus's own judgment
@@ -150,6 +153,7 @@ const TOOL_HANDLERS = {
         ({ ticker, mode, calendar_window, lookback_years }) => getCycleAnalysis(ticker, mode, calendar_window ?? null, lookback_years ?? 4),
         (err, { ticker }) => `Could not compute cycle analysis for ${ticker}: ${err.message}`, LOG),
     ...COMMON_TOOL_HANDLERS,
+    ...makeNewsHandlers(),
     // Unbound (market hours belong to the instrument, not the user) — so it lives in the
     // static map, unlike the venue handlers that are rebuilt per request around a userId.
     ...makeMarketHoursHandlers(),

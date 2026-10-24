@@ -59,11 +59,11 @@ const TODAY = {
 
 test('the hotlist reads as counts, Argus\'s read, then one line per name with its reason', () => {
     const t = formatHotlist(TODAY)
-    assert.match(t, /^Hotlist for 2026-10-22 — 3 names \(2 in play, 1 setting up\)\. Grades unverified; prices as of each name's checkpoint, not live\./)
+    assert.match(t, /^Hotlist for 2026-10-22 — 3 names \(2 in play, 1 setting up\)\. Prices as of each name's checkpoint, not live\./)
     assert.match(t, /Argus on the mid board: Breadth is fine/)
-    assert.match(t, /EPAM \(EPAM Systems\) · in play · mid-day A, 2\.4% room · \$180\.50 \(\+1\.6%\) · ARGUS PICK #1\n {6}1\.56× normal volume, above the open\n {6}Argus: Volume behind a clean open\./)
-    assert.match(t, /DXC · setting up · this week B, 7\.3% room · \$20\.50\n {6}NR7 · earnings in 7 days — a run-up: out before the report/)
-    assert.match(t, /TSCO · in play · mid-day C, open sky · Argus: avoid\n {6}Argus \(avoid\): Volume with no story\./)
+    assert.match(t, /EPAM \(EPAM Systems\) · in play · mid-day, 2\.4% room · \$180\.50 \(\+1\.6%\) · ARGUS PICK #1\n {6}1\.56× normal volume, above the open\n {6}Argus: Volume behind a clean open\./)
+    assert.match(t, /DXC · setting up · this week, 7\.3% room · \$20\.50\n {6}NR7 · earnings in 7 days — a run-up: out before the report/)
+    assert.match(t, /TSCO · in play · mid-day, open sky · Argus: avoid\n {6}Argus \(avoid\): Volume with no story\./)
 })
 
 test('the hotlist caps the names it lists, and says how many more', () => {
@@ -87,8 +87,9 @@ test('the handler is unbound and never throws — a failed read is an error line
     assert.match(toolErrorText(err), /Could not read today's hotlist: db down/)
 })
 
-test('Axl carries get_hotlist, appended last; its description holds the line on grades', () => {
+test('Axl carries get_hotlist, appended last; its description holds the line on room', () => {
     assert.equal(AXL_TOOLS.at(-1).name, 'get_hotlist')
     assert.match(HOTLIST_TOOL_SPEC.get_hotlist, /NOT a target/)
-    assert.match(HOTLIST_TOOL_SPEC.get_hotlist, /never present one as a reason a stock will rise/)
+    assert.match(HOTLIST_TOOL_SPEC.get_hotlist, /never present it as a reason a stock will rise/)
+    assert.match(HOTLIST_TOOL_SPEC.get_hotlist, /no horizon carries a grade/)
 })

@@ -369,7 +369,7 @@ async function _build(db, cp, day, etMin, run, deps) {
     // Argus's read of the finished board — once, for everyone (hotlist.argus). Its picks are marked on
     // their rows so the list shows them in place; a failed read leaves the board without one.
     const argus = await Promise.resolve()
-        .then(() => deps.argus?.({ day, checkpoint: cp.id, columns: cp.columns, regime, rows: ranked, pool: poolTop }, { onUsage: booker('hotlist_argus') }) ?? null)
+        .then(() => deps.argus?.({ day, checkpoint: cp.id, columns: cp.columns, regime, rows: withNews(ranked, headlines), pool: withNews(poolTop, headlines) }, { onUsage: booker('hotlist_argus') }) ?? null)
         .catch(() => null)
     // Picks are PER COLUMN (horizon-chains.md §2): `picks.<column>` on the row with its rank in that column's list;
     // `pick` stays the row's first one (any column), for the readers that know a single pick.
@@ -418,6 +418,20 @@ async function _build(db, cp, day, etMin, run, deps) {
         rows: marked,
         wide: wideMarked,
     }
+}
+
+/** The headlines Argus reads per name — the latest few, with their times (2026-10-24: "Argus needs news"). */
+export const NEWS_FOR_ARGUS = 3
+
+/**
+ * Rows as Argus reads them: each with its latest headlines since the last close (`news`, newest first, at most
+ * NEWS_FOR_ARGUS) — what the labeller boiled down to one label, in full. For his read only; not stored on the board. Pure.
+ */
+export function withNews(rows, headlines) {
+    return (rows ?? []).map(r => {
+        const list = [...(headlines?.get(r.symbol) ?? [])].sort((a, b) => String(b.at).localeCompare(String(a.at))).slice(0, NEWS_FOR_ARGUS)
+        return list.length ? { ...r, news: list } : r
+    })
 }
 
 /** The pool names Argus reads beside a board. */

@@ -116,3 +116,30 @@ test("a book name's seed section is headed as the house's book, not as Argus's h
     assert.match(_buildSeedSection({ ticker: 'CHN', book_name: 'swing', book_facts: 'Prometheus buy' }), /FROM THE HOUSE'S BOOK: CHN/)
     assert.match(_buildSeedSection({ ticker: 'SPCX' }), /ARGUS HANDED YOU THIS NAME: SPCX/)
 })
+
+// Roy, 2026-10-24: "Pythia brings the industry → Argus brings names from it → Prometheus analyses them and brings a
+// thesis and PT — the survivors in the Hotlist". The book carries the chain's picks and where each stands.
+test("the chain's picks per book: covered, passed (and why), waiting — newest row per name, the last eight weeks only", async () => {
+    const { pickState, PICK_DAYS } = await import('../../services/houseBook.service.js')
+    assert.equal(pickState({ status: 'done' }), 'covered')
+    assert.equal(pickState({ status: 'rejected', reason: 'no_edge' }), 'passed')
+    assert.equal(pickState({ status: 'rejected', reason: 'already_covered' }), 'already_covered')
+    assert.equal(pickState({ status: 'in_research' }), 'waiting')
+    const { db, rows } = memDb()
+    const at = (d) => `${d}T10:00:00.000Z`
+    const ctx = (verdict, extra = {}) => ({ subject: 'Rails', kind: 'industry', verdict, argus: { why: 'the leader', caution: 'freight' }, ...extra })
+    rows('research_queue').push(
+        { symbol: 'NEW', source: 'pythia', status: 'done', created_at: at('2026-10-20'), context: ctx('swing') },
+        { symbol: 'NEW', source: 'pythia', status: 'rejected', reason: 'no_edge', created_at: at('2026-10-06'), context: ctx('swing') },
+        { symbol: 'PSS', source: 'pythia', status: 'rejected', reason: 'horizon_off_book', created_at: at('2026-10-19'), context: ctx('swing') },
+        { symbol: 'WAI', source: 'pythia', status: 'queued', created_at: at('2026-10-21'), context: ctx('long_term') },
+        { symbol: 'OLD', source: 'pythia', status: 'done', created_at: at('2026-08-01'), context: ctx('swing') },
+        { symbol: 'HOT', source: 'hotlist', status: 'done', created_at: at('2026-10-21'), context: ctx('swing') })
+    const book = await houseBook({ deps: { db: async () => db, now: () => Date.parse(`${TODAY}T15:00:00Z`), price: async () => null, bars: async () => null } })
+    assert.deepEqual(book.picks.swing.map(p => [p.symbol, p.state, p.reason]), [['NEW', 'covered', null], ['PSS', 'passed', 'horizon_off_book']],
+        'the newest row per name; older than PICK_DAYS and the other sources out')
+    assert.equal(PICK_DAYS, 56)
+    assert.deepEqual(book.picks.long_term.map(p => [p.symbol, p.state]), [['WAI', 'waiting']])
+    assert.equal(book.picks.swing[0].why, 'the leader')
+    assert.equal(book.picks.swing[0].subject, 'Rails')
+})

@@ -28,7 +28,7 @@ import { researchRunService } from './researchRun.service.js'
 import { researchQueued, resumeQueued } from './houseResearch.service.js'
 import { boardById, seedFacts } from './hotlist.service.js'
 import { BOARDS } from './hotlist.outcomes.js'
-import { etDate } from './dailyScreener.checkpoint.js'
+import { latestBoard } from './dailyScreener.checkpoint.js'
 import { catalystReadService } from './catalystRead.service.js'
 import { config } from './config.js'
 import { logger } from './logger.service.js'
@@ -47,6 +47,8 @@ const _deps = {
     maxUsd:       () => config.hotlistResearchMaxUsd,
     manualMax:    () => config.hotlistManualReads,
     board:        (id) => boardById(id),
+    // The latest board's day — a read is asked for on that list, today's or (a weekend, before the 08:00 board) the last one.
+    latestDay:    () => latestBoard().then(b => b?.day ?? null),
     markBoard:    async (id, at) => { const db = await getDb(); await db.collection(BOARDS).updateOne({ id }, { $set: { research_queued_at: at } }) },
     liveSymbols:  () => catalystReadService.liveSymbols(),
     enqueue:      (row) => researchQueueService.enqueue(row),
@@ -202,14 +204,14 @@ export async function resume(day, deps = _deps) {
 
 /**
  * A user asked for a catalyst read on a This week row (the Hotlist's "Catalyst read") → `{ ok, outcome }`: `started`,
- * `queued` (a run is going — it is read after it), or `{ ok: false, reason }`: `no_board`, `stale_board` (not today's),
+ * `queued` (a run is going — it is read after it), or `{ ok: false, reason }`: `no_board`, `stale_board` (not the latest board's day — Roy, 2026-10-24: on a weekend "today's" refused Friday's list),
  * `not_on_week`, `live_read`, `already_queued`, `daily_cap`, `queue_unavailable`.
  */
 export async function requestRead({ boardId, symbol, userId }, deps = _deps) {
     const sym = String(symbol ?? '').toUpperCase().trim()
     const board = await deps.board(boardId)
     if (!board) return { ok: false, reason: 'no_board' }
-    if (board.day !== etDate(deps.now())) return { ok: false, reason: 'stale_board' }
+    if (board.day !== await deps.latestDay()) return { ok: false, reason: 'stale_board' }
     const row = board.rows?.find(r => r.symbol === sym)
     if (!row?.cells?.[COLUMN]?.grade) return { ok: false, reason: 'not_on_week' }
     const live = await Promise.resolve(deps.liveSymbols()).catch(() => new Set()) ?? new Set()

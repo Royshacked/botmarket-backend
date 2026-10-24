@@ -53,6 +53,7 @@ async function _labelSeed(seed) {
         if (h) {
             seed.horizon            = h.horizon
             seed.hotlist_facts      = h.hotlist_facts
+            seed.catalyst_facts     = h.catalyst_facts ?? null
             seed.hotlist_unverified = h.unverified
             seed.thesis           ??= h.thesis ?? null
             seed.caution            = h.caution ?? null

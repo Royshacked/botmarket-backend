@@ -1,7 +1,12 @@
 // CATALYST READS — Prometheus's short-swing answer, kept beside coverage, never in it (docs/design/horizon-chains.md §3).
 //
-// A Hotlist "this week" pick gets a catalyst read: is the catalyst real, what is it worth at a constant multiple, how
-// much of it is still open, what can break it inside the window. Its TARGET is what makes "priced in" a number (Roy,
+// A Hotlist "this week" pick gets a catalyst read: is the catalyst real, can the company carry it, what is it worth at a
+// constant multiple, how much of it is still open, what can break it inside the window.
+//
+// THE TARGET IS HIS (Roy, 2026-10-24): Prometheus decides a short-swing price from the catalyst and the company
+// (`ownTarget`); the tools' number below — the event delta, or the run-up — is his YARDSTICK, kept beside it, and the
+// target only when he gave none. Whoever set it, the trade's rules hold: above the price, enough open (minOpenPct), a
+// window before the report, a run-up not already run, a company not `broken`. Its TARGET is what makes "priced in" a number (Roy,
 // 2026-10-23): the price before the catalyst plus what the catalyst is worth — here, spot × (1 + what is still open),
 // from the delta Prometheus copied off compute_event_delta. The band comes from the delta's own low / high. A RUN-UP
 // (a report ahead, nothing happened yet) is sized off get_runup_history instead: spot × (1 + the stock's median run-up).
@@ -106,6 +111,23 @@ export function readValidUntil({ nowMs, windowDays, exitBefore = null }) {
     return report > nowMs ? new Date(Math.min(byWindow, report)).toISOString() : null
 }
 
+/**
+ * PROMETHEUS'S OWN TARGET (Roy, 2026-10-24: "Prometheus should analyze the catalyst and company and decide of a
+ * short-term swing PT"), or null. Pure. `own` is the block's `target` ({ price, low, high, why }); `yard` the target the
+ * tools' line gives (runupTarget / catalystTarget) — kept beside his as `yardstick`, so a read shows how far he moved off
+ * it, and its worth / moved / priced share ride along. Null without a price or a spot to measure what is open from.
+ */
+export function ownTarget(own, spot, yard = null) {
+    if (!_ok(own?.price) || !_ok(spot)) return null
+    return {
+        value: _r2(own.price), low: _ok(own.low) ? _r2(own.low) : null, high: _ok(own.high) ? _r2(own.high) : null,
+        open_pct: _r2((own.price / spot - 1) * 100),
+        worth_pct: yard?.worth_pct ?? null, moved_pct: yard?.moved_pct ?? null, priced_share: yard?.priced_share ?? null,
+        spot: _r2(spot), basis: 'prometheus', why: own.why ?? null,
+        yardstick: yard ? { value: yard.value, open_pct: yard.open_pct, basis: yard.basis ?? 'event' } : null,
+    }
+}
+
 /** The least a target may leave open to be a trade: 1%. */
 export const MIN_OPEN_PCT = 1
 
@@ -131,9 +153,14 @@ export function buildCatalystRead(parsed, { symbol, spot = null, spy = null, now
     const sym = String(symbol ?? parsed?.ticker ?? '').toUpperCase().trim()
     const at = new Date(nowMs).toISOString()
     const sized = ['credible', 'priced_in'].includes(parsed?.verdict)
-    const raw = !sized ? null
+    const yard = !sized ? null
         : parsed?.runup ? runupTarget(parsed.runup, spot ?? parsed?.delta?.spot)
             : catalystTarget(parsed?.delta, parsed?.delta?.spot ?? spot)
+    // His number when he gave one (measured from the read's price); the tools' line only when he did not.
+    const own = sized ? ownTarget(parsed?.target, spot ?? parsed?.delta?.spot, yard) : null
+    const raw = own ?? yard
+    // A company that cannot carry the trade (dilution, distress) has no target, whatever the catalyst.
+    const broken = parsed?.company?.verdict === 'broken'
     const windowDays = parsed?.window_days ?? 14
     const exitBefore = [context?.exit_before, parsed?.runup?.report].filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d ?? '')).sort()[0] ?? null
     const validUntil = readValidUntil({ nowMs, windowDays, exitBefore })
@@ -141,10 +168,10 @@ export function buildCatalystRead(parsed, { symbol, spot = null, spy = null, now
     // A run-up the stock has ALREADY RUN this cycle has nothing typical left (runup.tools runupSpent) — worked out here
     // from the line's numbers, whatever verdict the model wrote.
     const spent = Boolean(parsed?.runup) && runupSpent(parsed.runup)
-    const target = raw && raw.open_pct >= minOpen && validUntil && !spent ? raw : null
-    // Why a read carries no target: the verdict, no window left before the report, the run-up already run this cycle
-    // (all of it, or so much that too little is left), too little open to trade, nothing open, or not sized.
-    const passReason = target ? null : !sized ? (parsed?.verdict ?? 'unclear') : !validUntil ? 'report_too_close'
+    const target = raw && raw.open_pct >= minOpen && validUntil && !spent && !broken ? raw : null
+    // Why a read carries no target: the verdict, a broken company, no window left before the report, the run-up already
+    // run this cycle (all of it, or so much that too little is left), too little open to trade, nothing open, or not sized.
+    const passReason = target ? null : !sized ? (parsed?.verdict ?? 'unclear') : broken ? 'company' : !validUntil ? 'report_too_close'
         : !raw ? 'unsized' : spent || raw.cycle_cut_pct > 0 ? 'already_ran' : raw.open_pct > 0 ? 'too_small' : 'nothing_open'
     return {
         id: `cr_${sym}_${randomUUID().slice(0, 8)}`,
@@ -158,6 +185,7 @@ export function buildCatalystRead(parsed, { symbol, spot = null, spy = null, now
         confidence: parsed?.confidence ?? null,
         read: parsed?.read ?? '',
         target,
+        company: parsed?.company ?? null,
         horizon: '1m',
         window_days: windowDays,
         set_at: at,
@@ -287,8 +315,8 @@ async function saveRead(parsed, { symbol, source = 'hotlist', context = null } =
         const nowMs = deps.now()
         if (await coll.findOne({ symbol: sym, ..._liveQuery(nowMs) })) return { ok: false, reason: 'live_read' }
         for (const old of await coll.find({ symbol: sym, status: 'active' }).toArray()) await _gradeOne(coll, old, { spy: null, nowMs, deps, force: true })
-        // The run-up's target is priced off a fresh quote; an event's off the spot its delta was sized against.
-        const toolSpot = parsed.runup ? null : parsed.delta?.spot ?? null
+        // His own target and a run-up's are priced off a fresh quote; the delta's alone off the spot it was sized against.
+        const toolSpot = parsed.runup || parsed.target ? null : parsed.delta?.spot ?? null
         const [spot, spy] = await Promise.all([toolSpot ? null : deps.price(sym), deps.price('SPY')])
         const doc = buildCatalystRead(parsed, { symbol: sym, spot: toolSpot ?? spot, spy, nowMs, source, context })
         try {
@@ -311,6 +339,35 @@ async function listReads({ days = 14, deps = _deps } = {}) {
     const since = new Date(deps.now() - days * DAY_MS).toISOString()
     const rows = await coll.find({ $or: [{ status: { $in: LIVE } }, { updated_at: { $gte: since } }] }).sort({ set_at: -1 }).limit(200).toArray()
     return rows.map(stripId)
+}
+
+/** The name's live read (active, its window still running), or null. */
+async function liveRead(symbol, deps = _deps) {
+    const coll = await _coll(deps)
+    const row = await coll.findOne({ symbol: String(symbol ?? '').toUpperCase(), ..._liveQuery(deps.now()) })
+    return row ? stripId(row) : null
+}
+
+/**
+ * A live read as one line Mentor can relay (the Hotlist's week hand-off), or null without a target. Pure.
+ * e.g. "Prometheus (credible, 0.7): target 54.20 (band 53.10–56.00), +4.5% from 51.87 by 2026-10-28 — out before the
+ *       report 2026-10-29; his own number, the run-up yardstick +3.1%: <why>; company sound — <why>; kill: <…>"
+ */
+export function readFacts(read) {
+    const t = read?.target
+    if (!t || !_ok(t.value)) return null
+    const pct = (v) => `${v > 0 ? '+' : ''}${v.toFixed(1)}%`
+    const parts = [`Prometheus (${read.verdict}${Number.isFinite(read.confidence) ? `, ${read.confidence}` : ''}): target ${t.value.toFixed(2)}`
+        + `${_ok(t.low) && _ok(t.high) ? ` (band ${t.low.toFixed(2)}–${t.high.toFixed(2)})` : ''}`
+        + `${Number.isFinite(t.open_pct) && _ok(t.spot) ? `, ${pct(t.open_pct)} from ${t.spot.toFixed(2)}` : ''}`
+        + ` by ${String(read.valid_until).slice(0, 10)}${read.exit_before ? ` — out before the report ${read.exit_before}` : ''}`]
+    if (t.basis === 'prometheus') {
+        const y = t.yardstick
+        parts.push(`his own number${y && Number.isFinite(y.open_pct) ? `, the ${y.basis === 'run_up' ? 'run-up' : 'event'} yardstick ${pct(y.open_pct)}` : ''}${t.why ? `: ${t.why}` : ''}`)
+    } else parts.push(`the ${t.basis === 'run_up' ? 'run-up' : 'event'} yardstick, as he gave no number of his own`)
+    if (read.company?.verdict) parts.push(`company ${read.company.verdict}${read.company.why ? ` — ${read.company.why}` : ''}`)
+    if (read.kill?.length) parts.push(`kill: ${read.kill.slice(0, 2).join('; ')}`)
+    return parts.join('; ')
 }
 
 /** Grade every active read → `{ graded, hit, expired, failed }`. Never throws: one bad quote or write does not stop the rest. */
@@ -340,4 +397,4 @@ async function gradeDue(deps = _deps) {
     return out
 }
 
-export const catalystReadService = { saveRead, listReads, liveSymbols, gradeDue }
+export const catalystReadService = { saveRead, listReads, liveSymbols, liveRead, gradeDue }

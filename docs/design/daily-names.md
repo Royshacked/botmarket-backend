@@ -316,6 +316,16 @@ the graded set, the pool), carried by GET /api/hotlist/outcomes as `backtest`, s
 never mixed with the live record, never toward verified. The session-intraday columns (open, mid, eod) are not replayed:
 their gates need pre-market quotes and that morning's news labels, which do not exist for the past.
 
+### 7.6 Day trades are Argus's names (Roy, 2026-10-24: "remove the grades from day trades")
+
+The day horizons (`DAY_COLUMNS`: open, mid, eod, tomorrow) show no grade anywhere — table, Argus's board text,
+Axl's `get_hotlist`, the Mentor seed (which is not marked unverified for them), the track record. The screener still
+computes its cells: they are the gates and the free range Argus reads. The day list a user sees is Argus's picks for
+that horizon; "All screened" shows every name the screener let through. THIS WEEK keeps its grade, and Prometheus's
+target is its yardstick. Argus reads each board with the newest three headlines per name (`withNews`,
+`NEWS_FOR_ARGUS`), and chat Argus has `get_news`. The flow is automatic: checkpoint → Argus → his names, then Build with
+Mentor on the row. The user never has to go to Argus.
+
 ## 8. The Floor — "Hotlist"
 
 - A **"Hotlist"** row in Floor Lists — the board, one for everyone. (Renamed from "Daily watchlist" on 2026-10-21 to stay clear of the existing **Watchlists** row, the scan lists.)

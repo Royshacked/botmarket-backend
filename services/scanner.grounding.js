@@ -51,6 +51,8 @@ export const PER_NAME_TICKER_ARGS = {
     get_options_context:     a => [a?.ticker],
     get_derivatives_context: a => [a?.symbol],
     get_quotes:              a => a?.tickers,   // array
+    // A company's news grounds the ticker it was asked about; a topic or the front page grounds none.
+    get_news:                a => (['companies', 'company'].includes(String(a?.category ?? '').toLowerCase()) ? [a?.subject] : []),
 }
 
 export function normTicker(t) {

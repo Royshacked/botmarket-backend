@@ -12,13 +12,14 @@ import { RUNS, latestRun, runIsLive } from './dailyScreener.service.js'
 import { backtestSummary } from './hotlistBacktest.service.js'
 import { BOARD_STALE_MS } from './dailyScreener.checkpoint.js'
 import { rowStatus, STATUSES } from './hotlist.columns.js'
+import { catalystReadService, readFacts } from './catalystRead.service.js'
 
 /** The trade horizon each column hands Mentor (entity/vocabulary TRADE_HORIZONS). */
 export const COLUMN_HORIZON = Object.freeze({
     open: 'intraday', mid: 'intraday', eod: 'intraday', tomorrow: 'day', week: 'short term swing',
 })
 
-const _deps = { db: () => getDb(), summary: () => outcomeSummary(), argus: () => argusSummary(), backtest: () => backtestSummary(), now: () => Date.now(), latestRun: () => latestRun() }
+const _deps = { db: () => getDb(), summary: () => outcomeSummary(), argus: () => argusSummary(), backtest: () => backtestSummary(), liveRead: (s) => catalystReadService.liveRead(s), now: () => Date.now(), latestRun: () => latestRun() }
 /** Test seam. */
 export function _setDeps(d) { Object.assign(_deps, d) }
 
@@ -32,7 +33,9 @@ const _f = (n, d = 2) => (Number.isFinite(n) ? n.toFixed(d) : null)
 export function seedFacts(row, column) {
     const c = row?.cells?.[column]
     if (!c?.grade) return null
-    const parts = [`${COLUMN_WORDS[column] ?? column} ${c.grade}`]
+    // No column has a grade to hand on (Roy, 2026-10-24: the day trades, then the week) — Argus's pick, and on the week
+    // Prometheus's read, are the verdict.
+    const parts = [`${COLUMN_WORDS[column] ?? column}`]
     const tape = [row.gap_pct != null ? `${row.gap_pct > 0 ? '+' : ''}${_f(row.gap_pct)}% gap` : null, row.rvol != null ? `${row.rvol}× volume` : null].filter(Boolean)
     if (tape.length) parts[0] += ` — ${tape.join(', ')}`
     parts.push(c.range?.open_sky ? 'open sky (no level overhead)' : `free range ${_f(c.range?.pct)}% (${_f(c.range?.atr_mult)}× ATR) to ${_f(c.range?.level)}`)
@@ -46,7 +49,7 @@ export function seedFacts(row, column) {
 
 /**
  * Resolve a hotlist hand-off reference into the seed fields Mentor reads. → `{ horizon, hotlist_facts,
- * thesis?, caution?, unverified }`, or null when the board, the row or a graded cell is not there
+ * catalyst_facts, thesis?, caution?, unverified }`, or null when the board, the row or a graded cell is not there
  * (a stale tab, a pruned board) — the seed then goes on as an ordinary one.
  */
 export async function hotlistSeed(ref, deps = _deps) {
@@ -61,7 +64,12 @@ export async function hotlistSeed(ref, deps = _deps) {
         hotlist_facts: facts,
         board_day:     board.day,
         checkpoint:    board.checkpoint,
-        unverified:    (board.unverified_columns ?? [ref.column]).includes(ref.column),
+        // THIS WEEK: Prometheus's live catalyst read on the name — his target, the company, the window (Roy, 2026-10-24).
+        // A failed read leaves the hand-off as it was, without it.
+        catalyst_facts: ref.column === 'week' && deps.liveRead
+            ? readFacts(await Promise.resolve().then(() => deps.liveRead(ref.symbol)).catch(() => null)) : null,
+        // Nothing for Mentor to lean on that could be unverified: no column hands on a grade (2026-10-24).
+        unverified:    false,
         // His pick for THIS column (horizon-chains.md §2); a board from before per-column picks has only `pick`.
         ...(() => {
             const p = row.picks?.[ref.column] ?? (row.picks ? null : row.pick)

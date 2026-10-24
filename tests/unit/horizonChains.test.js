@@ -227,7 +227,7 @@ test("the 09:20 board's WEEK picks, in his order, go to Prometheus with the boar
     const ctx = hotlistContext(HBOARD, HBOARD.rows[1])
     assert.equal(ctx.hotlist, true)
     assert.equal(ctx.why, 'first')
-    assert.match(ctx.facts, /this week \(2–10 days\) A/)
+    assert.match(ctx.facts, /^this week \(2–10 days\)(?! [ABC]\b)/, 'no grade handed on (2026-10-24)')
     const { queued, starts, marks, deps } = handDeps()
     const r = await afterCheckpoint({ outcome: 'done', id: 'hb_2026-10-23_preopen' }, deps)
     assert.deepEqual(r.queued, ['ONE', 'TWO'])

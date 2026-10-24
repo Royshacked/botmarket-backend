@@ -31,6 +31,7 @@ function rig(over = {}) {
     const deps = {
         enabled: () => true, maxNames: () => 10, maxUsd: () => 1, manualMax: () => 2, now: () => NOW,
         board: async () => BOARD,
+        latestDay: async () => DAY,
         markBoard: async (id) => { marks.push(id) },
         liveSymbols: async () => new Set(),
         enqueue: async (row) => { rows.push({ id: `rq_${row.symbol}`, status: 'queued', created_at: new Date(NOW).toISOString(), ...row }); return { ok: true } },
@@ -240,7 +241,7 @@ test("a user's read on a week name Argus did not pick: today's board only, a wee
     assert.equal((await requestRead({ boardId: BOARD.id, symbol: 'XOM' }, deps)).reason, 'already_queued')
     assert.equal((await requestRead({ boardId: BOARD.id, symbol: 'OPN' }, deps)).reason, 'not_on_week')
     assert.equal((await requestRead({ boardId: BOARD.id, symbol: 'ONE' }, { ...deps, liveSymbols: async () => new Set(['ONE']) })).reason, 'live_read')
-    assert.equal((await requestRead({ boardId: BOARD.id, symbol: 'ONE' }, { ...deps, now: () => NOW + 86_400_000 })).reason, 'stale_board')
+    assert.equal((await requestRead({ boardId: BOARD.id, symbol: 'ONE' }, { ...deps, latestDay: async () => '2026-10-26' })).reason, 'stale_board', 'a newer board replaced it')
     assert.equal((await requestRead({ boardId: BOARD.id, symbol: 'TWO' }, { ...deps, getRun: () => null, startRun: async () => ({ ok: false, reason: 'already_running' }) })).outcome, 'queued')
     assert.equal((await requestRead({ boardId: BOARD.id, symbol: 'ONE' }, deps)).reason, 'daily_cap', 'two asked for today: the cap')
 })
@@ -273,4 +274,10 @@ test('a target that leaves less than 1% open, or half the daily range, is a pass
     assert.deepEqual([r.status, r.pass_reason, r.target], ['pass', 'too_small', null])
     const big = buildCatalystRead({ ...rcl, runup: { ...rcl.runup, median_pct: 2 } }, { symbol: 'RCL', spot: 276.7, nowMs: now, context: { atr_pct: 3.2 } })
     assert.equal(big.status, 'active', '2% clears a 1.6% bar')
+})
+
+test("on a weekend the latest list is still Friday's: a read is asked for on it (Roy, 2026-10-24: \"nothing happens\")", async () => {
+    const { rows, deps } = rig({ now: () => Date.parse('2026-10-24T15:00:00Z'), latestDay: async () => DAY })
+    assert.deepEqual(await requestRead({ boardId: BOARD.id, symbol: 'XOM', userId: 'u' }, deps), { ok: true, outcome: 'started' })
+    assert.equal(rows[0].context.day, DAY)
 })

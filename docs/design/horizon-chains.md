@@ -191,6 +191,52 @@ buttons after This week (services/houseBook.service.js, GET /api/hotlist/book; H
   seed section, headed "FROM THE HOUSE'S BOOK", carries the rating, target and date, the upside, where it came from
   and what would break it — the horizon the user's to confirm, the target a valuation, not a take-profit.
 
+## This week: Prometheus confirms and sets the target (2026-10-24)
+
+Roy: "hotlist ⇒ Argus automatically ⇒ names ⇒ Prometheus confirms catalyst and fundamentals and gives PT", then
+"Prometheus should analyze the catalyst and company and decide of a short-term swing PT".
+
+- **The company.** The catalyst mode now calls `get_fundamentals` once and judges `company`: `sound`, `weak` (it can
+  carry the move, the why says what holds the target down) or `broken` (dilution likely inside the window, going
+  concern, distress). `broken` is a pass, `pass_reason: 'company'`, whatever the verdict.
+- **His target.** The block carries `target: { price, low, high, why }`: his own short-swing price, decided from the
+  catalyst and the company. The tools' number (the run-up line, or the event delta) is his YARDSTICK, not the answer. It
+  is stored beside his as `target.yardstick` (`basis: 'prometheus'`), and it is the target only when he gave none, as
+  before. His price is measured from a fresh quote at the read. The trade's rules still hold whoever set it: above the
+  price, `minOpenPct`, a window before the report, a run-up not already run, a company not `broken`.
+- **The list.** This week opens on **Prometheus confirmed**: the names with a target of his. Then come **Argus's
+  names** (every pick, each with his answer; a pass says why) and **All screened**. When the confirmed list is empty it
+  says where the reads stand: still to come, all passes, or not loaded.
+- **To Mentor.** A week hand-off carries the live read (`catalystRead.readFacts`, via `hotlistSeed`'s
+  `catalyst_facts`): his target and band, the date to be out by, the yardstick, the company and the kill. Mentor is
+  told his target is the desk's price for the swing: build the take-profit at it, and the user may move it.
+- **The week grade is hidden too** (Roy: "hidden"). No horizon shows a grade anywhere: not in the table (the All tab
+  keeps a Horizon column, no letter), the track record (the board against its cut and the pool), the replay line (the
+  screener's names against the pool), Argus's board and prompt, Axl's `get_hotlist`, or Mentor's hand-off (never
+  `unverified`). The screener still computes the grades: they gate which names reach a column and order the board, and
+  the outcome log and the replay still score them, out of sight.
+
+## Swing and Long term: the weekly chain's survivors (2026-10-24)
+
+Roy: "Pythia brings the industry ⇒ Argus brings names from the industry ⇒ Prometheus analyses names and brings a thesis
+and PT — the survived names in the Hotlist". The chain was already automatic (house-research-chain.md); the lists were
+the whole book. Now:
+
+- **Prometheus confirmed** (the default, and the tab's count; `chainSurvivors`): Argus's picks that survived coverage,
+  i.e. they have a thesis and a PT, whatever the rating (Roy: "show the Argus-filtered names that survived coverage";
+  the first cut kept buys only and was wrong). That's book rows covered through the chain (`origin.source 'pythia'`),
+  plus picks the desk had already covered (`already_covered`). A pass has no live row.
+- **Argus's names**: `houseBook().picks[book]` — every `pythia` research_queue row of the last `PICK_DAYS` (56, the
+  scan's `REJECTED_DAYS`), the newest per name, by its verdict's book: `covered` (his rating and target from the book
+  row), `passed` (`no_edge` / `horizon_off_book` / `no_read`, in words), `already_covered` (at the desk), `waiting`.
+  `picks: null` means the read failed, not that the chain sent nothing.
+- **All coverage**: the live book on that horizon, the desk's names, holds and sells too.
+- When the survivors list is empty, it says why: the chain sent nothing yet, names are still waiting for research, or
+  he rated none a buy.
+
+On prod the chain has not run (2026-10-24: 30 old `queued` rows, no chain coverage). It needs `PYTHIA_WEEKLY=true`
+and the engine crons on Render (house-research-chain.md, "As built").
+
 ## Build order
 
 1. Argus per horizon + the day's picks per column (backend) — tests.

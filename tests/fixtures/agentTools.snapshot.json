@@ -1324,6 +1324,31 @@
             }
         },
         {
+            "name": "get_news",
+            "description": "Recent NEWS on a name — dated, attributed headlines with the publisher's own summary, newest first. `companies` with the TICKER as `subject` is the one you reach for: is there a real, DATED story under this move, or a stale or recycled one? It is the first place to look before web_search — cached and dated where a search is neither. `topic` for a theme with no ticker; `headlines` for the market's front page. A headline is a fact to weigh — what was WRITTEN — never a level or a call.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "category": {
+                        "type": "string",
+                        "enum": [
+                            "companies",
+                            "headlines",
+                            "topic"
+                        ],
+                        "description": "which kind of news read this is. `companies` — one listed company, `subject` is its TICKER. `headlines` — the market's front page, no subject needed. `topic` — free-text search for a theme, an institution or an asset with no ticker."
+                    },
+                    "subject": {
+                        "type": "string",
+                        "description": "for `companies`, the TICKER (NVDA, BA, AAPL). For `topic`, the theme in the words a paper would print (\"Federal Reserve\", \"OPEC\", \"semiconductors\", \"gold\"). Omit for `headlines`. It is both the search and the cache key, so ask for the same subject the same way each time."
+                    }
+                },
+                "required": [
+                    "category"
+                ]
+            }
+        },
+        {
             "name": "consult",
             "description": "Put ONE decision to a more capable desk head and get a straight answer back. It cannot see this conversation and cannot fetch anything — you hand it the question and every number it needs, and it thinks harder than you can in-line.\n\nThis desk screens in BULK, so the bar is higher here than anywhere else: a consult per candidate would cost more than the scan is worth. Reach for it in exactly two situations, both of which happen at most once per scan: **the final cut**, when two or three finalists are genuinely close and the ranking is the thing the user will act on; and **an angle that resists screening** — a thesis the tools cannot express, where you have to decide what to screen FOR before you can screen at all. Never per candidate, and never to qualify a name a tool call would qualify.\n\nDo NOT reach for it to look something up, to double-check work you are already confident in, to summarize, or because a question feels big. A consult costs a full model call and adds seconds to the turn: if you already know the answer, or a tool call would settle it, that is the cheaper and better move. Most turns should end without it.",
             "input_schema": {
@@ -3352,7 +3377,7 @@
         },
         {
             "name": "get_hotlist",
-            "description": "Today's HOTLIST — the screener's names in play, from the day's checkpoint boards (08:00 and 09:20 ET pre-market, then 10:30, 14:30, 15:30), long side only. For each name: its status (IN PLAY now; BUILDING — money arriving; SETTING UP — quiet, with a known date ahead, usually earnings, a run-up to be out of before the report), its best horizon and grade (A/B/C by free range — the room to the next level overhead, NOT a target), the reason, the price as of its checkpoint (not live), and Argus's pick or avoid where he made one. Also the counts per status and Argus's read of the latest board. Use it to say what is on the hotlist in a line or two; the grades are unverified until enough outcomes are logged, so never present one as a reason a stock will rise.",
+            "description": "Today's HOTLIST — the screener's names in play, from the day's checkpoint boards (08:00 and 09:20 ET pre-market, then 10:30, 14:30, 15:30), long side only. For each name: its status (IN PLAY now; BUILDING — money arriving; SETTING UP — quiet, with a known date ahead, usually earnings, a run-up to be out of before the report), its best horizon and its free range (the room to the next level overhead, NOT a target; no horizon carries a grade: Argus's pick is the verdict, and on this week Prometheus's read) — the reason, the price as of its checkpoint (not live), and Argus's pick or avoid where he made one. Also the counts per status and Argus's read of the latest board. Use it to say what is on the hotlist in a line or two; room is NOT a target, so never present it as a reason a stock will rise.",
             "input_schema": {
                 "type": "object",
                 "properties": {

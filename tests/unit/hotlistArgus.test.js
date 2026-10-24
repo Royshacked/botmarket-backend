@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { memDb } from '../helpers/memDb.js'
-import { argusRead, normalizeRead, boardText, MAX_PICKS } from '../../services/hotlist.argus.js'
+import { argusRead, normalizeRead, boardText, MAX_PICKS, SYSTEM } from '../../services/hotlist.argus.js'
 import { hotlistSeed, seedFacts, todayHotlist, COLUMN_HORIZON } from '../../services/hotlist.service.js'
 import { sanitizeScanSeed } from '../../services/scanSeed.util.js'
 import { _buildSeedSection } from '../../services/agents/mentor.agent.service.js'
@@ -31,8 +31,10 @@ test('the board text carries the numbers Argus judges — and flags, catalysts, 
     const t = boardText(BOARD)
     assert.match(t, /CHECKPOINT: mid on 2026-10-21/)
     assert.match(t, /breadth 58\.0%/)
-    assert.match(t, /SPCX .*gap 10\.14% rvol 3\.39× .*drift mixed: "SpaceX swings to profit".* mid B \(2\.09% \/ 0\.45× ATR to 166\.18\)/)
-    assert.match(t, /FADE .*FLAG: minor story under a big gap.*mid A \(open sky\)/)
+    // A session column carries NO grade (Roy, 2026-10-24) — the room only; the headline reads as news.
+    assert.match(t, /SPCX .*gap 10\.14% rvol 3\.39× .*drift mixed \| news: "SpaceX swings to profit".* mid \(2\.09% \/ 0\.45× ATR to 166\.18\)/)
+    assert.match(t, /FADE .*FLAG: minor story under a big gap.*mid \(open sky\)/)
+    assert.doesNotMatch(t, /mid [ABC] \(/)
 })
 
 test('a pick must be a board row on a column it is GRADED on; extras and repeats go', () => {
@@ -106,7 +108,7 @@ test('each column hands Mentor its horizon', () => {
 
 test('the facts line: grade, tape, free range, catalyst — or open sky', () => {
     assert.equal(seedFacts(BOARD.rows[0], 'mid'),
-        'mid-session B — +10.14% gap, 3.39× volume; free range 2.09% (0.45× ATR) to 166.18; catalyst: drift, mixed — "SpaceX swings to profit"')
+        'mid-session — +10.14% gap, 3.39× volume; free range 2.09% (0.45× ATR) to 166.18; catalyst: drift, mixed — "SpaceX swings to profit"')
     assert.match(seedFacts(BOARD.rows[1], 'mid'), /open sky/)
     assert.equal(seedFacts(BOARD.rows[2], 'mid'), null, 'an ungraded cell is not a hand-off')
 })
@@ -115,7 +117,7 @@ test('a run-up week cell tells Mentor AND Argus to be out before the report (Roy
     const row = ROW('RUN', { week: { grade: 'B', range: { level: 110, pct: 4, atr_mult: 1.6 }, exit_before: '2026-10-28' } }, { next_earnings: '2026-10-28' })
     assert.match(seedFacts(row, 'week'), /earnings 2026-10-28 — a run-up into the report: the setup must be out before it$/)
     assert.match(seedFacts({ ...row, cells: { week: { ...row.cells.week, exit_before: undefined } } }, 'week'), /; earnings 2026-10-28$/)
-    assert.match(boardText({ ...BOARD, columns: ['week'], rows: [row] }), /week B \(4\.00% \/ 1\.60× ATR to 110\.00\), RUN-UP: out before earnings 2026-10-28/)
+    assert.match(boardText({ ...BOARD, columns: ['week'], rows: [row] }), /week \(4\.00% \/ 1\.60× ATR to 110\.00\), RUN-UP: out before earnings 2026-10-28/)
 })
 
 test('hotlistSeed reads the STORED board: the horizon, the facts, Argus\'s note, the unverified flag', async () => {
@@ -126,7 +128,7 @@ test('hotlistSeed reads the STORED board: the horizon, the facts, Argus\'s note,
     assert.match(seed.hotlist_facts, /free range 2\.09%/)
     assert.equal(seed.thesis, 'A real profit swing with room to the prior high.')
     assert.equal(seed.caution, 'Capex worries can cap it.')
-    assert.equal(seed.unverified, true)
+    assert.equal(seed.unverified, false, 'a session column has no grade to be unverified (2026-10-24)')
     assert.equal(await hotlistSeed({ board: 'hb_2026-10-01_mid', column: 'mid', symbol: 'SPCX' }, { db: async () => db }), null, 'a pruned board')
     assert.equal(await hotlistSeed({ board: 'hb_2026-10-21_mid', column: 'mid', symbol: 'NOPE' }, { db: async () => db }), null, 'not graded')
 })
@@ -136,7 +138,7 @@ test('Mentor is told the board\'s facts, the horizon, and that free range is not
         ticker: 'SPCX', direction: 'long', thesis: 'A real profit swing.', horizon: 'intraday',
         hotlist_facts: seedFacts(BOARD.rows[0], 'mid'), caution: 'Capex worries.', hotlist_unverified: true,
     })
-    assert.match(text, /From today's HOTLIST: mid-session B/)
+    assert.match(text, /From today's HOTLIST: mid-session — /)
     assert.match(text, /That column's horizon is intraday/)
     assert.match(text, /Argus's caution: Capex worries\./)
     assert.match(text, /UNVERIFIED/)
@@ -169,4 +171,26 @@ test('Argus\'s read reports its spend under the house model id', async () => {
         onUsage: (usage, model) => booked.push(model),
     })
     assert.deepEqual(booked, ['gpt-6-luna'])
+})
+
+// Day trades (Roy, 2026-10-24): no grade on the session columns; Argus reads the latest headlines in full.
+test("Argus reads each name's latest headlines with their times, and no cell carries a grade", async () => {
+    const { withNews } = await import('../../services/dailyScreener.checkpoint.js')
+    const headlines = new Map([['SPCX', [{ title: 'old', at: '2026-10-21 06:00:00' }, { title: 'new', at: '2026-10-21 09:15:00' },
+        { title: 'mid', at: '2026-10-21 08:00:00' }, { title: 'oldest', at: '2026-10-20 19:00:00' }]]])
+    const [row, other] = withNews([{ symbol: 'SPCX' }, { symbol: 'NONE' }], headlines)
+    assert.deepEqual(row.news.map(h => h.title), ['new', 'mid', 'old'], 'newest first, three')
+    assert.equal(other.news, undefined)
+    const t = boardText({ checkpoint: 'preopen', day: '2026-10-21', columns: ['open', 'week'], rows: [{ symbol: 'SPCX', price: 10, gap_pct: 5, atr_pct: 4,
+        catalyst: { material: true, type: 'drift', surprise: 'positive' }, news: row.news,
+        cells: { open: { grade: 'A', range: { pct: 2, atr_mult: 0.5, level: 11 } }, week: { grade: 'B', range: { pct: 3, atr_mult: 1, level: 12 } } } }] })
+    assert.match(t, /news: "new" \(09:15\); "mid" \(08:00\); "old" \(06:00\)/)
+    assert.match(t, /open \(2\.00% \/ 0\.50× ATR to 11\.00\); week \(3\.00%/, 'no letter on the open or the week')
+    assert.doesNotMatch(SYSTEM, /A\/B\/C/)
+})
+
+test('the hand-off facts say no grade, on a session column or this week', () => {
+    const row = { symbol: 'X', gap_pct: 2, cells: { open: { grade: 'A', range: { pct: 2, atr_mult: 0.5, level: 11 } }, week: { grade: 'B', range: { pct: 3, atr_mult: 1, level: 12 } } } }
+    assert.match(seedFacts(row, 'open'), /^the session open — \+2\.00% gap/)
+    assert.match(seedFacts(row, 'week'), /^this week \(2–10 days\) — /)
 })

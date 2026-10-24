@@ -42,7 +42,7 @@ const SYMBOL = /^[A-Z][A-Z0-9.-]{0,9}$/
 // What a refused ask says — a 409 the panel shows as it is, never a failure.
 const READ_REFUSED = {
     no_board: [404, 'That board is gone — reload the Hotlist.'],
-    stale_board: [409, 'Reads are asked for on today\'s board only.'],
+    stale_board: [409, 'Reads are asked for on the latest list only — that board has been replaced.'],
     not_on_week: [409, 'That name is not graded for this week.'],
     live_read: [409, 'Prometheus already has a live read on that name.'],
     already_queued: [409, 'That name is already waiting for a read.'],

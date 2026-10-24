@@ -42,13 +42,15 @@ export const COLUMN_WORDS = Object.freeze({
     open: 'the session open', mid: 'mid-session', eod: 'into the close', tomorrow: 'tomorrow (overnight)', week: 'this week (2–10 days)',
 })
 
-export const SYSTEM = `You are Argus, the scanning desk, reading today's HOTLIST — a screened board of US stocks that are in play right now, long side only. The numbers are computed and the grades are given; your job is the judgment the numbers cannot make.
+export const SYSTEM = `You are Argus, the scanning desk, reading today's HOTLIST — a screened board of US stocks that are in play right now, long side only. The numbers are computed; your job is the judgment the numbers cannot make.
 
-Each row: the ticker, its price and gap, volume against an ordinary day, ATR %, the catalyst label and headline if any, earnings date, and one cell per column it was graded on: the grade (A/B/C) and its FREE RANGE — how far price can travel before the nearest overhead level, in % and in × ATR. A is the most room. Free range is not a target and the board has no entries or stops; never invent them. A week cell marked RUN-UP holds a report inside its window: the trade is the run-up into it and ends before it — if you pick one, the caution says so.
+Each row: the ticker, its price and gap, volume against an ordinary day, ATR %, the catalyst label, its latest HEADLINES with their times (read them — a real, dated story under the move is what makes a day trade; a stale or recycled one is a trap), earnings date, and one cell per column it is in play on with its FREE RANGE — how far price can travel before the nearest overhead level, in % and in × ATR. No column carries a grade: the room is information, not a verdict — YOU decide which names are the trade, from the story, the tape and the room together. Free range is not a target and the board has no entries or stops; never invent them. A week cell marked RUN-UP holds a report inside its window: the trade is the run-up into it and ends before it — if you pick one, the caution says so.
+
+Your picks ARE the list: on the session columns the user sees only the names you confirm (the rest stay one click away) and builds the trade with Mentor from them; on the week column each pick goes on to Prometheus, who reads the catalyst and the company and sets the target. Confirm only what you would actually trade.
 
 Answer:
 - "summary": 2–4 plain sentences on the tape — the regime, what is moving and why, where the room is.
-- "picks": for EACH column on the board, up to ${MAX_PICKS} names you would look at FIRST for THAT horizon, best first — every column is its own list (the open's trade and this week's are different trades; a name can be a pick on both when it carries both). Each: "symbol", "column" (one the row is graded on), "why" (one sentence: what makes this the trade on this horizon — the catalyst, the structure, the room), "caution" (one sentence: what would make it wrong). Prefer a real catalyst with room over a big grade on a thin story. Fewer is fine; none is fine for a column with nothing worth it.
+- "picks": for EACH column on the board, up to ${MAX_PICKS} names you would look at FIRST for THAT horizon, best first — every column is its own list (the open's trade and this week's are different trades; a name can be a pick on both when it carries both). Each: "symbol", "column" (one the row has a cell on), "why" (one sentence: what makes this the trade on this horizon — the catalyst, the structure, the room), "caution" (one sentence: what would make it wrong). Prefer a real catalyst with room over wide room on a thin story. Fewer is fine; none is fine for a column with nothing worth it.
 - "avoid": up to ${MAX_AVOID} names on the board that look better than they are — a minor story under a big gap, a catalyst already priced, an earnings coin-toss — each with "symbol" and "why".
 - "spots": the POOL section lists names the screener QUOTED but graded on NO column — its rules passed them over (the reason is on each line: a gate failed, or it did not qualify). Up to ${MAX_SPOTS} it MISSED: a real trade on one of THIS board's columns anyway — a story the rules cannot weigh, a move the gates were too strict for. Each: "symbol", "column" (one of the board's columns), "why", "caution". Most of the pool is rightly passed over; spot only what you would actually trade, and say plainly which rule it fails. Fewer is fine; none is fine.
 
@@ -56,6 +58,11 @@ Output ONLY a JSON object, no prose:
 {"summary":"...","picks":[{"symbol":"ABC","column":"mid","why":"...","caution":"..."}],"avoid":[{"symbol":"XYZ","why":"..."}],"spots":[{"symbol":"QRS","column":"mid","why":"...","caution":"..."}]}`
 
 const _f = (n, d = 2) => (Number.isFinite(n) ? n.toFixed(d) : '—')
+// A headline's time, HH:MM as the feed stamps it ("YYYY-MM-DD HH:MM:SS") — enough to tell this morning's from last night's.
+const _hm = (at) => (String(at ?? '').match(/(\d{2}:\d{2})/)?.[1] ?? '—')
+
+/** The session columns — day trades: Argus's confirmation is the list (Roy, 2026-10-24). No column shows a grade. */
+export const DAY_COLUMNS = Object.freeze(['open', 'mid', 'eod', 'tomorrow'])
 
 /** The board as the user turn — one compact line per row. Pure. */
 export function boardText(board) {
@@ -66,12 +73,17 @@ export function boardText(board) {
         'ROWS:',
     ]
     const facts = (r) => {
-        const cat = r.catalyst ? `${r.catalyst.material ? `${r.catalyst.type} ${r.catalyst.surprise}` : 'not material'}${r.catalyst.headline ? `: "${r.catalyst.headline}"` : ''}` : 'no news label'
-        return `${r.symbol} ${r.sector ?? ''} | $${_f(r.price)} gap ${_f(r.gap_pct)}%${r.rvol != null ? ` rvol ${r.rvol}×` : ''}${r.pm_vol_pct != null ? ` pre-mkt vol ${_f(r.pm_vol_pct, 1)}% of a day` : ''} ATR ${_f(r.atr_pct)}% | ${cat}${r.fade_check ? ' | FLAG: minor story under a big gap' : ''}${r.next_earnings ? ` | earnings ${r.next_earnings}` : ''}`
+        const cat = r.catalyst ? `${r.catalyst.material ? `${r.catalyst.type} ${r.catalyst.surprise}` : 'not material'}` : 'no news label'
+        // The latest headlines in full, with their times (checkpoint withNews) — the label alone was one line of it.
+        const news = (r.news ?? []).length
+            ? ` | news: ${r.news.map(h => `"${String(h.title ?? '').slice(0, 160)}" (${_hm(h.at)})`).join('; ')}`
+            : (r.catalyst?.headline ? ` | news: "${r.catalyst.headline}"` : '')
+        return `${r.symbol} ${r.sector ?? ''} | $${_f(r.price)} gap ${_f(r.gap_pct)}%${r.rvol != null ? ` rvol ${r.rvol}×` : ''}${r.pm_vol_pct != null ? ` pre-mkt vol ${_f(r.pm_vol_pct, 1)}% of a day` : ''} ATR ${_f(r.atr_pct)}% | ${cat}${news}${r.fade_check ? ' | FLAG: minor story under a big gap' : ''}${r.next_earnings ? ` | earnings ${r.next_earnings}` : ''}`
     }
     const rows = (board.rows ?? []).map(r => {
+        // No column carries a grade (Roy, 2026-10-24: the day trades, then the week) — the room only.
         const cells = Object.entries(r.cells ?? {}).filter(([, c]) => c.grade).map(([col, c]) =>
-            `${col} ${c.grade} (${c.range?.open_sky ? 'open sky' : `${_f(c.range?.pct)}% / ${_f(c.range?.atr_mult)}× ATR to ${_f(c.range?.level)}`})${c.exit_before ? `, RUN-UP: out before earnings ${c.exit_before}` : ''}`).join('; ')
+            `${col} (${c.range?.open_sky ? 'open sky' : `${_f(c.range?.pct)}% / ${_f(c.range?.atr_mult)}× ATR to ${_f(c.range?.level)}`})${c.exit_before ? `, RUN-UP: out before earnings ${c.exit_before}` : ''}`).join('; ')
         return `${facts(r)} | ${cells}`
     })
     // THE POOL (2026-10-24): quoted, graded on no column — each with why, per column: the gate it failed, or not in play.

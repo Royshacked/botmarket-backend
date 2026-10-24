@@ -136,6 +136,46 @@ async function _origins(db, symbols) {
     return by
 }
 
+/** How far back the chain's picks are listed — the house scan keeps a passed name out this long (REJECTED_DAYS). */
+export const PICK_DAYS = 56
+
+/**
+ * Where one of the chain's picks stands, from its research_queue row. Pure. `done` — Prometheus covered it (`covered`);
+ * `rejected` — he passed, or it was already covered at the desk (`passed`, `already_covered` — the reason says which);
+ * `queued` / `in_research` — `waiting`.
+ */
+export function pickState(row) {
+    if (row?.status === 'done') return 'covered'
+    if (row?.status === 'rejected') return row.reason === 'already_covered' ? 'already_covered' : 'passed'
+    return 'waiting'
+}
+
+/**
+ * THE CHAIN'S PICKS per book (Roy, 2026-10-24: "Pythia brings the industry → Argus brings names from it → Prometheus
+ * analyses them and brings a thesis and PT — the survivors in the Hotlist"): every name Argus sent from a FOR SWING /
+ * FOR LONG TERM verdict in the last PICK_DAYS, its latest row per symbol, newest first — what Pythia called, why Argus
+ * chose it, and where Prometheus has it. Its coverage, when live, is the book's own row.
+ */
+async function _picks(db, nowMs) {
+    const since = new Date(nowMs - PICK_DAYS * DAY_MS).toISOString()
+    const rows = await db.collection(QUEUE).find({ source: 'pythia', created_at: { $gt: since } },
+        { projection: { _id: 0, symbol: 1, status: 1, reason: 1, context: 1, created_at: 1, updated_at: 1 } }).sort({ created_at: -1 }).toArray()
+    const out = { swing: [], long_term: [] }
+    const seen = new Set()
+    for (const r of rows) {
+        const book = r.context?.verdict
+        if (!out[book] || seen.has(`${book}|${r.symbol}`)) continue
+        seen.add(`${book}|${r.symbol}`)
+        out[book].push({
+            symbol: r.symbol, state: pickState(r), reason: r.status === 'rejected' ? r.reason ?? null : null,
+            subject: r.context?.subject ?? null, kind: r.context?.kind ?? null,
+            why: r.context?.argus?.why ?? null, caution: r.context?.argus?.caution ?? null,
+            at: r.created_at ?? null,
+        })
+    }
+    return out
+}
+
 /** Today's closes (and names) from the screener's latest overnight pass. */
 async function _closes(db, symbols) {
     const last = await db.collection(STATS).find({}, { projection: { _id: 0, day: 1 } }).sort({ day: -1 }).limit(1).next()
@@ -226,8 +266,9 @@ async function _fillNow(db, covs, by, stale, deps) {
 
 let _indexed = false
 /**
- * The book → `{ asof, today, swing: [rows], long_term: [rows], record: { swing, long_term } }`. Live coverage only
- * (retired and watchlist names are out); rows by book, the chain's names first, then the most upside.
+ * The book → `{ asof, today, swing: [rows], long_term: [rows], record: { swing, long_term }, picks: { swing, long_term } }`.
+ * Live coverage only (retired and watchlist names are out); rows by book, the chain's names first, then the most upside.
+ * `picks` — the chain's picks per book and where each stands (`_picks`), or null when they could not be read.
  */
 export async function houseBook({ deps = _deps } = {}) {
     const db = await deps.db()
@@ -236,7 +277,8 @@ export async function houseBook({ deps = _deps } = {}) {
         { projection: { _id: 0, symbol: 1, sector: 1, industry: 1, rating: 1, status: 1, conviction: 1, price_target: 1 } }).toArray())
         .filter(c => bookOf(c))
     const symbols = covs.map(c => c.symbol)
-    const [closes, origins, marks, spyNow] = await Promise.all([_closes(db, symbols), _origins(db, symbols), _marks(db, covs), deps.price('SPY')])
+    const [closes, origins, marks, spyNow, picks] = await Promise.all([_closes(db, symbols), _origins(db, symbols), _marks(db, covs), deps.price('SPY'),
+        _picks(db, deps.now()).catch(err => { logger.warn(LOG, 'the chain\'s picks were not read', { error: err.message }); return null })])
     const today = _etDay(deps.now())
     const noClose = symbols.filter(s => !closes.by.get(s)?.close)
     let lasts = await _lasts(db, noClose)
@@ -244,7 +286,8 @@ export async function houseBook({ deps = _deps } = {}) {
     // In the background: this read answers with what is kept; the next has the rest.
     const filled = _fill(db, covs, marks, stale, deps)
     if (deps.awaitFill) { await filled; lasts = await _lasts(db, noClose) }
-    const out = { asof: closes.day, today, swing: [], long_term: [], record: {} }
+    // `picks` null = could not be read (the list says so), not "the chain sent nothing".
+    const out = { asof: closes.day, today, swing: [], long_term: [], record: {}, picks }
     for (const c of covs) {
         const s = closes.by.get(c.symbol)
         const l = s?.close ? null : lasts.get(c.symbol)

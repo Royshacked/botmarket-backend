@@ -181,6 +181,24 @@ const CATALYST_KINDS = new Set(['earnings', 'guidance', 'contract', 'regulatory'
 const _txt = (v, n = 600) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, n) : null)
 const _list = (v, n = 6) => (Array.isArray(v) ? v : []).map(x => _txt(x, 300)).filter(Boolean).slice(0, n)
 const _numOr = (v) => { const n = Number(v); return v == null || !Number.isFinite(n) ? null : n }
+const COMPANY_VERDICTS = new Set(['sound', 'weak', 'broken'])
+
+// HIS TARGET (Roy, 2026-10-24: "Prometheus should analyze the catalyst and company and decide of a short-term swing PT"):
+// the price, a positive number, or no target; the band kept only as a band (both ends, around the price).
+export function _cleanOwnTarget(t) {
+    if (!t || typeof t !== 'object' || Array.isArray(t)) return null
+    const price = _numOr(t.price)
+    if (!(price > 0)) return null
+    const low = _numOr(t.low), high = _numOr(t.high)
+    const band = low > 0 && high > 0 && low <= price && price <= high
+    return { price, low: band ? low : null, high: band ? high : null, why: _txt(t.why, 400) }
+}
+
+// How the company stands under the trade — sound / weak / broken, else unchecked (null).
+export function _cleanCompany(c) {
+    if (!c || typeof c !== 'object' || !COMPANY_VERDICTS.has(c.verdict)) return null
+    return { verdict: c.verdict, why: _txt(c.why, 400) }
+}
 
 /**
  * The <catalyst_read> block (horizon-chains.md §3), checked rather than trusted: the quick read's rules — a verdict
@@ -202,6 +220,8 @@ export function _parseCatalystRead(raw) {
         window_days: Number.isFinite(days) ? Math.min(30, Math.max(5, Math.round(days))) : 14,
         confidence:  Number.isFinite(conf) ? Math.min(Math.max(conf, 0), 1) : null,
         read:        _txt(q.read, 1200) ?? '',
+        target:      _cleanOwnTarget(q.target),
+        company:     _cleanCompany(q.company),
         // Exactly one yardstick: a run-up line wins (a report ahead is what the trade is), and a delta beside it is
         // dropped — or the run-up's target would be priced off the delta's spot (code review 2026-10-24).
         delta:       _cleanRunup(q.runup) ? null : _cleanDelta(q.delta),
