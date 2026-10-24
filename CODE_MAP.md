@@ -943,6 +943,11 @@ services/
                             (`pass_reason`); graded hit by the live price inside the window, and past it by the
                             window's own daily bars (hit / expired vs SPY). One active read per symbol — the
                             `one_active_read` partial unique index. GET /api/hotlist/reads
+  houseBook.service.js      the Hotlist's SWING / LONG TERM lists (horizon-chains.md): live coverage by its target's
+                            horizon (3m/6m · 12m+), each name's origin (the weekly chain's research_queue row, or
+                            the desk), the move since its target was set vs SPY, progress to target, and each
+                            book's record; set-day prices + outside-universe closes read in the background into
+                            `house_book_marks`. GET /api/hotlist/book
   hotlist.service.js        the hotlist's READ side: todayHotlist / boardById / hotlistOutcomes for the
                             API, and hotlistSeed — a "Build with Mentor" hand-off is a REFERENCE (board
                             id + column, scanSeed.util), resolved here from the STORED board into the

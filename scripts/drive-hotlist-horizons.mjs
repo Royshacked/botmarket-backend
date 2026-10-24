@@ -98,7 +98,7 @@ try {
     await page.waitForSelector('.hot-horizons', { timeout: 10000 }).catch(async e => { await shot(page, '0-no-tabs'); throw e })
     const tabs = await page.$$eval('.hot-horizons button', ts => ts.map(t => t.textContent))
     await shot(page, '1-all')
-    check('a tab per horizon, with its count', tabs.join(' | ') === 'All 4 | Open 1 | Mid-day 0 | Into close 0 | Tomorrow 0 | This week 3', tabs.join(' | '))
+    check('a tab per horizon, with its count', tabs.join(' | ') === 'All 4 | Open 1 | Mid-day 0 | Into close 0 | Tomorrow 0 | This week 3 | Swing 0 | Long term 0', tabs.join(' | '))
 
     await page.getByRole('button', { name: 'This week 3' }).click()
     await page.waitForTimeout(400)
@@ -106,7 +106,7 @@ try {
     await shot(page, '2-this-week')
     check("This week: Argus's picks first in his order, then the grade", week === 'RCL,LMT,XOM', week)
     const target = await page.locator('tr[data-symbol="RCL"] .hot-target').textContent()
-    check("Prometheus's catalyst target on the row, and what is still open", target === '268.20 · +3% open', target)
+    check("Prometheus's catalyst target on the row, measured from the price it was set from", target === '268.20 · +3.1% from 260.00', target)
     const star = await page.locator('tr[data-symbol="RCL"] .hot-star').textContent()
     check("his rank in THIS horizon's list", star === '★1', star)
 

@@ -1,6 +1,7 @@
 import { todayHotlist, boardWithResults, hotlistOutcomes } from '../../services/hotlist.service.js'
 import { catalystReadService } from '../../services/catalystRead.service.js'
 import { hotlistResearchService } from '../../services/hotlistResearch.service.js'
+import { houseBook } from '../../services/houseBook.service.js'
 import { makeHandle } from '../_shared/handle.util.js'
 import { httpError } from '../../services/httpError.util.js'
 
@@ -62,3 +63,9 @@ export const requestRead = handle('requestRead', async (req, res) => {
     if (!r.ok) { const [code, msg] = READ_REFUSED[r.reason] ?? [500, 'The read was not asked for.']; throw httpError(code, msg) }
     res.status(202).json({ outcome: r.outcome })
 })
+
+/**
+ * GET /api/hotlist/book — the house's SWING and LONG TERM names (services/houseBook.service.js): live coverage split by its
+ * target's horizon, each with where it came from and how it is doing since the target was set, and each book's record.
+ */
+export const getBook = handle('getBook', async (req, res) => { res.json(await houseBook()) })

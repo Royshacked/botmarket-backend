@@ -142,6 +142,39 @@ run-up tool counts weekends but not market holidays — a lead one session long 
 - **The table's headers** sit over their data: a global `button { margin: 5px }` pushed every sort label 5px inside
   its cell. The Info column explains the table while the Hotlist is open (HotlistInfo).
 
+## A target too small to trade (2026-10-24)
+
+Roy saw RCL's Last above its target. The Last was the 08:00 pre-market quote (283.45); the target (277.34) was set at
+15:51 from 276.70, and the close was 276.48 — no hit. Two fixes:
+
+- **The This week target cell is measured from the read's own price** ("277.34 · +0.2% from 276.70"), with the read's
+  time on hover and in the opened row: the row's Last is an earlier checkpoint's quote, by design.
+- **A target that leaves less than 1% open — or half the stock's daily range, when wider — is a `pass`
+  (`too_small`)** (catalystRead `minOpenPct`; the board row's ATR % rides the hand-off as `atr_pct`). RCL's run-up
+  record was a median +0.23%: noise any session reaches, which would have booked a "hit" and flattered the record. Its
+  read on axl_dev was set to the pass it would now be (`target_rejected` keeps the old target).
+
+## The Hotlist's Swing and Long term (2026-10-24)
+
+"In hotlist — what about longer swings and long-term names?" The day's boards stop at This week; the longer horizons are
+the house's COVERAGE, and they had no list of their own — only a company page inside a Forecasts industry. Two more
+buttons after This week (services/houseBook.service.js, GET /api/hotlist/book; HotlistBook.jsx):
+
+- **Membership** — live coverage (active, target hit, thesis broken) split by the price target's horizon, the way the
+  research run books it: 3m / 6m **Swing**, 12m / 18m / 24m **Long term**. Buy-rated first; All shows holds and sells.
+- **From** — the weekly chain (Pythia's verdict on an industry or theme → Argus → Prometheus), read back from the
+  name's latest done `pythia` research_queue row (the only place that context lives), or the desk. Live on axl_dev, 4
+  of 89 names came through the chain; the chain's names list first.
+- **Did it work** — the move since the target was set, against SPY over the same days, and how far toward the target
+  (only for a target at least 5% over the set-day price). Hit / broken are the coverage monitor's; a passed target date
+  without a hit is expired. Each book's track record: what came due and was hit, and how the live names stand vs SPY.
+- **Prices without a burst** — today's is the screener's overnight close; a name outside its universe (29 of 89: ADRs,
+  some large caps) gets its last daily close, and every name its set-day price (and SPY's), read once in the
+  BACKGROUND (12 per open) and kept in `house_book_marks` — the coverage documents are not touched; a re-set target has
+  a new set_at and is read again; a miss is retried after a day.
+- **The opened row** is the thesis itself (CoverageDetail, from the coverage list the Floor already holds), with Build
+  with Mentor (a plain seed: the thesis in numbers, long) and Ask Argus (is now the time to buy it).
+
 ## Build order
 
 1. Argus per horizon + the day's picks per column (backend) — tests.

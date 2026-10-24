@@ -83,6 +83,8 @@ export function hotlistContext(board, row) {
         facts: seedFacts(row, COLUMN),
         // The report inside the window (the board's run-up): the read's window ends the session before it.
         exit_before: row.cells?.[COLUMN]?.exit_before ?? null,
+        // The stock's daily range: a target that leaves less than half of it open is too small to trade (minOpenPct).
+        atr_pct: Number.isFinite(row.atr_pct) ? row.atr_pct : null,
         catalyst: row.catalyst ? { type: row.catalyst.type ?? null, headline: row.catalyst.headline ?? null, surprise: row.catalyst.surprise ?? null, material: row.catalyst.material ?? null } : null,
     }
 }

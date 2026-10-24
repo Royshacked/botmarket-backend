@@ -260,3 +260,17 @@ test("users' waiting reads go first and never count against the house's budget o
     assert.equal(off.outcome, 'started')
     assert.deepEqual(starts.at(-1).symbols, ['LMT'])
 })
+
+// Roy, 2026-10-24: "I see RCL's last price above its price target" — a +0.23% target is not a trade.
+test('a target that leaves less than 1% open, or half the daily range, is a pass: too small to trade', async () => {
+    const { minOpenPct } = await import('../../services/catalystRead.service.js')
+    assert.equal(minOpenPct(null), 1)
+    assert.equal(minOpenPct(1.4), 1, 'half a 1.4% range is under the floor')
+    assert.equal(minOpenPct(3.2), 1.6)
+    const now = Date.parse('2026-10-23T19:51:00Z')
+    const rcl = { verdict: 'credible', window_days: 5, runup: { report: '2026-10-27', median_pct: 0.23, p25_pct: -0.55, p75_pct: 1.72 } }
+    const r = buildCatalystRead(rcl, { symbol: 'RCL', spot: 276.7, nowMs: now, context: { exit_before: '2026-10-27', atr_pct: 3.2 } })
+    assert.deepEqual([r.status, r.pass_reason, r.target], ['pass', 'too_small', null])
+    const big = buildCatalystRead({ ...rcl, runup: { ...rcl.runup, median_pct: 2 } }, { symbol: 'RCL', spot: 276.7, nowMs: now, context: { atr_pct: 3.2 } })
+    assert.equal(big.status, 'active', '2% clears a 1.6% bar')
+})

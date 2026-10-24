@@ -94,11 +94,26 @@ export function readValidUntil({ nowMs, windowDays, exitBefore = null }) {
     return report > nowMs ? new Date(Math.min(byWindow, report)).toISOString() : null
 }
 
+/** The least a target may leave open to be a trade: 1%. */
+export const MIN_OPEN_PCT = 1
+
+/**
+ * The least open move a target needs to be a TRADE, in % — 1%, or half the stock's daily range when that is wider. Pure.
+ * Below it a target is noise a single session's wiggle reaches: RCL's run-up record was +0.23% over 11 reports, stored as
+ * a credible read with a live target 0.2% above the price (Roy, 2026-10-24) — any tick over it would have booked a "hit"
+ * and flattered the record. `atrPct` is the board row's ATR % (the hand-off's context); unknown → the 1% floor.
+ */
+export function minOpenPct(atrPct) {
+    const half = Number(atrPct) / 2
+    return Number.isFinite(half) && half > MIN_OPEN_PCT ? half : MIN_OPEN_PCT
+}
+
 /**
  * A stored read from the parsed block (analyst.agent _parseCatalystRead). Pure. `context` is the queue row's (the board
  * and Argus's reason). A target only on `credible` / `priced_in` with a delta or a run-up line (the run-up wins: a
  * report ahead is what the trade is), and only above the price — a long whose target is at or under spot is a `pass`,
- * never a hit on the first grade. A read made after the close before its report is a `pass` too (`report_too_close`).
+ * never a hit on the first grade. A read made after the close before its report is a `pass` too (`report_too_close`),
+ * and so is one whose target is too close to trade (`too_small`, minOpenPct).
  */
 export function buildCatalystRead(parsed, { symbol, spot = null, spy = null, nowMs, source = 'hotlist', context = null } = {}) {
     const sym = String(symbol ?? parsed?.ticker ?? '').toUpperCase().trim()
@@ -110,9 +125,12 @@ export function buildCatalystRead(parsed, { symbol, spot = null, spy = null, now
     const windowDays = parsed?.window_days ?? 14
     const exitBefore = [context?.exit_before, parsed?.runup?.report].filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d ?? '')).sort()[0] ?? null
     const validUntil = readValidUntil({ nowMs, windowDays, exitBefore })
-    const target = raw && raw.open_pct > 0 && validUntil ? raw : null
-    // Why a read carries no target: the verdict, no window left before the report, nothing left open, or not sized.
-    const passReason = target ? null : !sized ? (parsed?.verdict ?? 'unclear') : !validUntil ? 'report_too_close' : raw ? 'nothing_open' : 'unsized'
+    const minOpen = minOpenPct(context?.atr_pct)
+    const target = raw && raw.open_pct >= minOpen && validUntil ? raw : null
+    // Why a read carries no target: the verdict, no window left before the report, nothing left open, too little open to
+    // trade, or not sized.
+    const passReason = target ? null : !sized ? (parsed?.verdict ?? 'unclear') : !validUntil ? 'report_too_close'
+        : !raw ? 'unsized' : raw.open_pct > 0 ? 'too_small' : 'nothing_open'
     return {
         id: `cr_${sym}_${randomUUID().slice(0, 8)}`,
         symbol: sym,
