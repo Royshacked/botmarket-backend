@@ -419,7 +419,8 @@ services/
                             above/below/thin vs Street; the delta read ends on the JSON line the model copies). (P2)
   runup.tools.js            get_runup_history — the RUN-UP yardstick for a catalyst read (horizon-chains.md §3):
                             the stock's move into each of its last reports over the sessions left, vs SPY;
-                            median / quartiles / up share, ending on the JSON line the model copies as `runup`
+                            median / quartiles / up share, and THIS CYCLE (the usual full 10-session run-up and
+                            how much is already moved — runupSpent), ending on the JSON line copied as `runup`
   agentUtils.js           shared tool handlers, makePromptLoader, makeToolHandler,
                           formatMoney/buildAccountLines, stripEmitTags, runtime glue.
                           cleanReply (every desk's reply, stripped from the shared ALL_EMIT_TAGS,

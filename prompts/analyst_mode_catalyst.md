@@ -26,7 +26,9 @@ code turns your delta into the target, its band and the share already priced.
    last reports, over the sessions left until this one — and copy its line as `runup`. That line IS the target; the
    verdict is about the record and what could break it: `credible` when it has run up into most of its reports and
    nothing in the filings or the estimates cuts against this one; `priced_in` when it has already run this cycle
-   (say by how much); `unclear` when the record is mixed or too short (the tool says so — then no `runup`). No
+   (say by how much) — the tool's "This cycle" line says whether the stock has already moved its usual full run-up,
+   and when it has, the read is a pass whatever you write; `unclear` when the record is mixed or too short (the tool
+   says so — then no `runup`). No
    `compute_event_delta` on a run-up.
 
    **AN EVENT THAT HAS HAPPENED** — `compute_event_delta`, ONCE. Not optional unless the catalyst cannot be put in

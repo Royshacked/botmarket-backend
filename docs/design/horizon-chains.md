@@ -154,6 +154,18 @@ Roy saw RCL's Last above its target. The Last was the 08:00 pre-market quote (28
   record was a median +0.23%: noise any session reaches, which would have booked a "hit" and flattered the record. Its
   read on axl_dev was set to the pass it would now be (`target_rejected` keeps the old target).
 
+## A run-up already run this cycle (2026-10-24)
+
+Measured only from today, a run-up read did not know how far the stock had ALREADY run into this report: one up 5% over
+the last week still looked like it had its whole usual run-up ahead. get_runup_history now also measures the usual FULL
+run-up (the 10 sessions before a report, `FULL_LEAD`) and how much of it this cycle has already moved (`soFarPct`, from
+the last close — a session in progress left out); its line carries `full_lead`, `full_median_pct`, `so_far_pct`. The
+target (catalystRead `runupTarget`) is the smaller of the usual last-sessions move and what is LEFT of the full run-up;
+a cycle that ran ahead has its target cut (`cycle_cut_pct`), and one that already moved its whole usual run-up — or so
+much that too little is left to trade — is a pass, `already_ran`, worked out from the numbers whatever verdict the model
+wrote. Live: XOM, SBUX and CVX had already run theirs (all three Argus avoids); RCL was behind its path (−1.8% of a usual
++4.2%) and kept its small usual move.
+
 ## The Hotlist's Swing and Long term (2026-10-24)
 
 "In hotlist — what about longer swings and long-term names?" The day's boards stop at This week; the longer horizons are

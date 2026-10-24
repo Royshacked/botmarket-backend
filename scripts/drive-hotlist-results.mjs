@@ -82,9 +82,12 @@ try {
     if (await mid.count() && !(await mid.isDisabled())) {
         await mid.click()
         await page.waitForTimeout(500)
-        const strip = await page.locator('.hot-record').textContent()
+        const strip = await page.locator('.hot-record').first().textContent()
         await shot(page, '3-mid-record')
         check("Mid-day's list carries its track record", /Track record · mid-day/.test(strip) && /(reached|up) \d+% of \d+/.test(strip), strip)
+        // Argus's record (2026-10-24): his picks, avoids and unmarked names on this horizon, by how they ended.
+        const argus = (await page.locator('.hot-record').allTextContents()).find(t => /Argus/.test(t)) ?? ''
+        check("Argus's record over the horizon: picks, avoids, unmarked", /picks up \d+% · avg [+-]?\d/.test(argus) && /avoids/.test(argus) && /unmarked/.test(argus), argus)
         const first = page.locator('.hot-panel tr.hot-row').first()
         await first.locator('td').nth(4).click()
         await page.waitForTimeout(300)
@@ -100,7 +103,7 @@ try {
     await long.click()
     await page.waitForTimeout(500)
     const bookRows = await page.locator('.hot-panel tr.hot-row').count()
-    const strip = await page.locator('.hot-record').textContent().catch(() => '')
+    const strip = await page.locator('.hot-record').first().textContent().catch(() => '')
     await shot(page, '4-long-term')
     check('Long term lists the buy-rated coverage of the house, with its track record', bookRows > 0 && /Track record · long term/.test(strip), `${longLabel}: ${bookRows} buys · ${strip}`)
     const first = page.locator('.hot-panel tr.hot-row').first()

@@ -79,7 +79,7 @@ test('the analyst offers the run-up tool, and consult stays last', () => {
 
 test('the runup line is checked: numbers only, and no median or report date is no line', () => {
     assert.deepEqual(_cleanRunup({ report: '2026-10-27', median_pct: '2.5', n: 6, junk: 1 }),
-        { basis: 'run_up', report: '2026-10-27', lead_days: null, n: 6, median_pct: 2.5, p25_pct: null, p75_pct: null, up_share: null, median_excess_pct: null })
+        { basis: 'run_up', report: '2026-10-27', lead_days: null, n: 6, median_pct: 2.5, p25_pct: null, p75_pct: null, up_share: null, median_excess_pct: null, full_lead: null, full_median_pct: null, so_far_pct: null })
     assert.equal(_cleanRunup({ report: '2026-10-27' }), null)
     assert.equal(_cleanRunup({ median_pct: 2 }), null)
     const raw = '<catalyst_read>{"ticker":"RCL","verdict":"credible","runup":{"report":"2026-10-27","median_pct":3.1,"p25_pct":1.2,"p75_pct":4.4,"n":8,"up_share":0.75}}</catalyst_read>'
@@ -120,3 +120,75 @@ test("the board's report date travels with the name to Prometheus", () => {
     const row = { symbol: 'RCL', cells: { week: { grade: 'C', exit_before: '2026-10-27', range: { pct: 4, atr_mult: 1.4, level: 272 } } }, picks: { week: { why: 'run-up', rank: 1 } } }
     assert.equal(hotlistContext({ id: 'b', day: '2026-10-23' }, row).exit_before, '2026-10-27')
 })
+
+// Roy, 2026-10-24: a run-up read must know how far the stock has ALREADY run this cycle.
+import { soFarPct, runupSpent, FULL_LEAD } from '../../services/tools/runup.tools.js'
+
+test("this cycle so far: the last close against the full window's start; a session in progress left out", () => {
+    const b = bars('2026-10-12', 10, (i) => 100 + i)   // Oct 12 … Oct 23, closes 100 … 109
+    assert.equal(soFarPct(b, 3, '2026-10-23'), 2.86, "last closed is Oct 22 (108), three sessions back is Oct 19 (105) — today's bar is out")
+    assert.equal(soFarPct(b, 0, '2026-10-24'), null, 'nothing elapsed: the full window starts now')
+    assert.equal(soFarPct(b, 50, '2026-10-24'), null)
+})
+
+test('spent: the cycle has already moved its usual full run-up — only a positive usual run-up can be spent', () => {
+    assert.equal(runupSpent({ full_median_pct: 3, so_far_pct: 4 }), true)
+    assert.equal(runupSpent({ full_median_pct: 3, so_far_pct: 1 }), false)
+    assert.equal(runupSpent({ full_median_pct: -1, so_far_pct: 4 }), false)
+    assert.equal(runupSpent({ full_median_pct: 3, so_far_pct: null }), false)
+    assert.equal(FULL_LEAD, 10)
+})
+
+// A stock that rises 1% a session for the 10 sessions into each past report; THIS cycle at `step` a session so far.
+async function cycleLine(step) {
+    const past = ['2025-10-28', '2026-01-27', '2026-04-28', '2026-07-28']
+    _setIO({
+        today: () => '2026-10-23',
+        earnings: async () => [{ date: '2026-10-27', epsActual: null }, ...past.map(date => ({ date, epsActual: 1 }))],
+        bars: async (sym) => {
+            const all = bars('2025-09-01', 300, () => 100)
+            const days = all.map(x => new Date(x.timestamp * 1000).toISOString().slice(0, 10))
+            const pre = new Map()
+            for (const r of [...past, '2026-10-27']) {
+                const last = days.filter(d => d < r).length - 1
+                for (let k = last - 9; k <= last; k++) pre.set(days[k], r === '2026-10-27' ? step : 1.01)
+            }
+            let px = 100
+            return all.map((x, i) => { if (sym !== 'SPY' && pre.has(days[i])) px *= pre.get(days[i]); return { ...x, close: px } })
+        },
+    })
+    const text = await RUNUP_TOOL_HANDLERS.get_runup_history({ ticker: 'RCL' })
+    return { text, line: _cleanRunup(JSON.parse(text.split('in your block: ')[1])) }
+}
+const NOW = Date.parse('2026-10-23T13:40:00Z')
+
+test('this cycle on its usual path: the usual last-sessions move is still ahead — the target stands', async () => {
+    const { text, line } = await cycleLine(1.01)
+    assert.match(text, /This cycle: its usual run-up over the full 10 sessions before a report is a median 10\.46%; over the 8 sessions of it already gone it has moved 8\.29%\./)
+    assert.doesNotMatch(text, /ALREADY RUN/)
+    const r = buildCatalystRead({ verdict: 'credible', window_days: 5, runup: line }, { symbol: 'RCL', spot: 120, nowMs: NOW })
+    assert.equal(r.status, 'active')
+    assert.equal(r.target.open_pct, 2.01, 'the usual 2.01% left — no cut')
+    assert.equal(r.target.cycle_cut_pct, undefined)
+})
+
+test('a cycle that ran AHEAD of its path has less left: the target is the full run-up less the move so far', async () => {
+    const { line } = await cycleLine(1.0108)   // 8 sessions at 1.08% ≈ +8.98% of a usual 10.46%: about 1.5% left
+    const r = buildCatalystRead({ verdict: 'credible', window_days: 5, runup: line }, { symbol: 'RCL', spot: 120, nowMs: NOW })
+    assert.equal(r.status, 'active')
+    assert.equal(r.target.open_pct, _round2(line.full_median_pct - line.so_far_pct))
+    assert.ok(r.target.open_pct < 2.01 && r.target.cycle_cut_pct > 0)
+    assert.equal(r.target.moved_pct, line.so_far_pct)
+    const tight = await cycleLine(1.0118)   // ≈ +9.85%: about 0.6% left — under the 1% bar, because the cycle ran ahead
+    const t = buildCatalystRead({ verdict: 'credible', window_days: 5, runup: tight.line }, { symbol: 'RCL', spot: 120, nowMs: NOW })
+    assert.deepEqual([t.status, t.pass_reason], ['pass', 'already_ran'])
+})
+
+test('a cycle that already moved its whole usual run-up: the tool says so, and the read is a pass — already ran', async () => {
+    const { text, line } = await cycleLine(1.015)
+    assert.match(text, /ALREADY RUN/)
+    const r = buildCatalystRead({ verdict: 'credible', window_days: 5, runup: line }, { symbol: 'RCL', spot: 120, nowMs: NOW })
+    assert.deepEqual([r.status, r.pass_reason], ['pass', 'already_ran'], 'whatever verdict the model wrote')
+})
+
+const _round2 = (v) => Math.round(v * 100) / 100

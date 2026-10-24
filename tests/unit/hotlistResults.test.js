@@ -61,3 +61,26 @@ test('the day list and the board carry results; the API lists the days there are
     const b = await boardWithResults('hb_2026-10-21_mid', deps)
     assert.equal(b.rows[0].results.mid.state, 'reached')
 })
+
+// Argus's record (Roy, 2026-10-24: "why did Argus say avoid?") — his picks, avoids and unmarked names, side by side.
+test("Argus's record: picks (per column), avoids (the row's) and unmarked, each by how often it ended up; boards he did not read are out", async () => {
+    const { argusRecord } = await import('../../services/hotlist.outcomes.js')
+    const o = (board, symbol, column, ret, reached = null) => ({ board, symbol, column, outcome: { ret_pct: ret, reached } })
+    const boards = [
+        { id: 'b1', argus: { summary: 's' }, rows: [{ symbol: 'PK', picks: { mid: { rank: 1 } } }, { symbol: 'AV', avoid: 'too little room' }, { symbol: 'UN' }, { symbol: 'OLD', pick: { column: 'eod' } }] },
+        { id: 'b2', argus: null, rows: [{ symbol: 'XX' }] },
+    ]
+    const r = argusRecord([o('b1', 'PK', 'mid', 2, true), o('b1', 'PK', 'eod', -1), o('b1', 'AV', 'mid', 1, true), o('b1', 'UN', 'mid', -2, false),
+        o('b1', 'OLD', 'eod', 3), o('b2', 'XX', 'mid', 5), { board: 'b1', symbol: 'UN', column: 'mid', outcome: null }], boards)
+    assert.deepEqual([r.all.pick.n, r.all.avoid.n, r.all.unmarked.n], [2, 1, 2], "PK's eod is unmarked (picked for mid only); OLD's legacy pick counts on its column; b2 is out")
+    assert.deepEqual([r.all.pick.up_rate, r.all.pick.ret_mean, r.all.pick.hit_rate], [100, 2.5, 100])
+    assert.deepEqual([r.mid.pick.n, r.mid.avoid.up_rate, r.mid.unmarked.ret_mean], [1, 100, -2])
+    assert.equal(r.eod.unmarked.n, 1)
+})
+
+test("the API's outcomes carry Argus's record beside the columns — and stay whole when it fails", async () => {
+    const { hotlistOutcomes } = await import('../../services/hotlist.service.js')
+    const summary = { mid: { n: 3 } }
+    assert.deepEqual(await hotlistOutcomes({ summary: async () => summary, argus: async () => ({ all: { pick: { n: 1 } } }) }), { mid: { n: 3 }, argus: { all: { pick: { n: 1 } } } })
+    assert.deepEqual(await hotlistOutcomes({ summary: async () => summary, argus: async () => { throw new Error('down') } }), { mid: { n: 3 } })
+})

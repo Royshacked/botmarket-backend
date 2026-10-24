@@ -19,6 +19,7 @@ import { randomUUID } from 'crypto'
 import { getDb, stripId } from '../providers/mongodb.provider.js'
 import { getTickerAggregates } from '../providers/candles.provider.js'
 import { fetchLastPrice } from './lastPrice.service.js'
+import { runupSpent } from './tools/runup.tools.js'
 import { logger } from './logger.service.js'
 
 const LOG = '[catalystRead]'
@@ -67,16 +68,27 @@ export function catalystTarget(delta, spot) {
 
 /**
  * The target of a RUN-UP read, or null. Pure. `runup` is the line Prometheus copied off get_runup_history: the stock's
- * median move into its last reports over the same lead, the quartiles for the band. Nothing has moved yet — the lead
- * starts at the read — so all of it is open, and `priced_share` is unknown rather than 0.
+ * median move into its last reports over the same lead, the quartiles for the band.
+ *
+ * THIS CYCLE (2026-10-24): with the line's `full_median_pct` (the usual run-up over the full window) and `so_far_pct`
+ * (how much of it this cycle has already moved), what is typically LEFT is the full run-up less the move so far. The
+ * target is the smaller of that and the usual last-sessions move — a stock that ran ahead of its path has less left;
+ * one on its path keeps the usual. The band moves down by the same cut. `moved_pct` is the head start, `worth_pct` the
+ * full run-up, `priced_share` how much of it is gone.
  */
 export function runupTarget(runup, spot) {
     const med = runup?.median_pct
     if (!Number.isFinite(med) || !_ok(spot)) return null
-    const at = (pct) => (Number.isFinite(pct) ? _r2(spot * (1 + pct / 100)) : null)
+    const cycle = Number.isFinite(runup.full_median_pct) && Number.isFinite(runup.so_far_pct)
+    const left = cycle ? runup.full_median_pct - runup.so_far_pct : null
+    const open = cycle ? Math.min(med, left) : med
+    const cut = med - open
+    const at = (pct) => (Number.isFinite(pct) ? _r2(spot * (1 + (pct - cut) / 100)) : null)
     return {
-        value: at(med), low: at(runup.p25_pct), high: at(runup.p75_pct),
-        open_pct: _r2(med), worth_pct: _r2(med), moved_pct: 0, priced_share: null, spot: _r2(spot), basis: 'run_up',
+        value: _r2(spot * (1 + open / 100)), low: at(runup.p25_pct), high: at(runup.p75_pct),
+        open_pct: _r2(open), worth_pct: _r2(cycle ? runup.full_median_pct : med), moved_pct: cycle ? _r2(runup.so_far_pct) : 0,
+        priced_share: cycle && runup.full_median_pct > 0 ? _r2(Math.max(0, runup.so_far_pct / runup.full_median_pct)) : null,
+        spot: _r2(spot), basis: 'run_up', ...(cut > 0 ? { cycle_cut_pct: _r2(cut) } : {}),
     }
 }
 
@@ -126,11 +138,14 @@ export function buildCatalystRead(parsed, { symbol, spot = null, spy = null, now
     const exitBefore = [context?.exit_before, parsed?.runup?.report].filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d ?? '')).sort()[0] ?? null
     const validUntil = readValidUntil({ nowMs, windowDays, exitBefore })
     const minOpen = minOpenPct(context?.atr_pct)
-    const target = raw && raw.open_pct >= minOpen && validUntil ? raw : null
-    // Why a read carries no target: the verdict, no window left before the report, nothing left open, too little open to
-    // trade, or not sized.
+    // A run-up the stock has ALREADY RUN this cycle has nothing typical left (runup.tools runupSpent) — worked out here
+    // from the line's numbers, whatever verdict the model wrote.
+    const spent = Boolean(parsed?.runup) && runupSpent(parsed.runup)
+    const target = raw && raw.open_pct >= minOpen && validUntil && !spent ? raw : null
+    // Why a read carries no target: the verdict, no window left before the report, the run-up already run this cycle
+    // (all of it, or so much that too little is left), too little open to trade, nothing open, or not sized.
     const passReason = target ? null : !sized ? (parsed?.verdict ?? 'unclear') : !validUntil ? 'report_too_close'
-        : !raw ? 'unsized' : raw.open_pct > 0 ? 'too_small' : 'nothing_open'
+        : !raw ? 'unsized' : spent || raw.cycle_cut_pct > 0 ? 'already_ran' : raw.open_pct > 0 ? 'too_small' : 'nothing_open'
     return {
         id: `cr_${sym}_${randomUUID().slice(0, 8)}`,
         symbol: sym,

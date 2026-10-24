@@ -254,6 +254,17 @@ working?" The log was there; it only fed the "unverified" note. Now:
 is easier for a C by construction. On the first two days of mid-day names, C reached 76% (21) and A 33% (3). The up
 rate and the mean return compare grades on one footing; the hit rate says whether the room the grade promised was there.
 
+### 7.2 Argus's record (Roy, 2026-10-24: "why did Argus say avoid?")
+
+His avoids give one of four reasons: too little room to the level, earnings that day (a coin-toss), a big gap on a minor
+story (a fade), no catalyst and thin volume. Most are "too little room", so their level is close and "reached" says
+little — his record is read by how often a name ENDED UP and its mean move. `argusRecord` (hotlist.outcomes) joins the
+log to the boards he read: his picks (per column), his avoids (the row's) and the names he left unmarked, overall and per
+column; a board without his read is left out. On the Hotlist: a strip over All (overall) and over each horizon (that
+horizon's); GET /api/hotlist/outcomes carries it as `argus`. First two days on axl_dev: picks 11 up 73% (avg +0.58%),
+avoids 20 up 60% (+0.46%), unmarked 23 up 44% (−0.26%) — his avoids did better than the names he left alone; far too
+few to say yet.
+
 ## 8. The Floor — "Hotlist"
 
 - A **"Hotlist"** row in Floor Lists — the board, one for everyone. (Renamed from "Daily watchlist" on 2026-10-21 to stay clear of the existing **Watchlists** row, the scan lists.)

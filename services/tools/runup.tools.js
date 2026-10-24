@@ -17,6 +17,28 @@ const LOG = '[runupTools]'
 const DAY_MS = 86_400_000
 /** Sessions before a report a run-up is measured over: at least 2, at most 15 (three weeks). */
 export const LEAD_MIN = 2, LEAD_MAX = 15
+/**
+ * The FULL run-up a cycle is measured against: the sessions before a report a run-up usually takes (Roy, 2026-10-24:
+ * "run-up reads — explain" → the read did not know how far the stock had ALREADY run this cycle). Measuring only from
+ * today, a stock up 5% over the last week into its report still looked like it had its whole usual run-up ahead.
+ */
+export const FULL_LEAD = 10
+
+/**
+ * This cycle's move so far: the last close against the close `elapsed` sessions before it — the start of the full
+ * run-up window. Pure. A bar dated `today` (a session in progress) is left out: the read prices from the last close.
+ * Null when there is nothing elapsed or too few bars.
+ */
+export function soFarPct(bars, elapsed, today) {
+    const closed = (bars ?? []).filter(b => _etDay(b.timestamp) < today && b.close > 0)
+    if (!(elapsed > 0) || closed.length <= elapsed) return null
+    return _r2((closed.at(-1).close / closed.at(-1 - elapsed).close - 1) * 100)
+}
+
+/** Whether this cycle has already moved its usual full run-up — then nothing typical is left for the trade. Pure. */
+export function runupSpent({ full_median_pct, so_far_pct } = {}) {
+    return Number.isFinite(full_median_pct) && full_median_pct > 0 && Number.isFinite(so_far_pct) && so_far_pct >= full_median_pct
+}
 /** Fewer past reports than this and the record says nothing. */
 export const MIN_REPORTS = 4
 
@@ -75,13 +97,22 @@ export function runUpStats({ reports = [], bars = [], spyBars = [], lead }) {
 }
 
 /** The tool's reply: the record per report, the summary, and the one line to copy. Pure. */
-export function runUpReadText(sym, { report, lead, stats }) {
+export function runUpReadText(sym, { report, lead, stats, cycle = null }) {
     const head = `${sym} — run-up into its reports, the last ${lead} session${lead === 1 ? '' : 's'} before each (close before the report):`
     if (stats.n < MIN_REPORTS) return `${head}\nOnly ${stats.n} past report${stats.n === 1 ? '' : 's'} with prices — too few to size a run-up. Say so; no runup line.`
     const lines = [head, ...stats.rows.map(r => `  ${r.report}: ${r.pct > 0 ? '+' : ''}${r.pct}% (${r.from} → ${r.to})${r.excess_pct != null ? `, ${r.excess_pct > 0 ? '+' : ''}${r.excess_pct}% vs SPY` : ''}`)]
     lines.push(`Median ${stats.median_pct}% (quartiles ${stats.p25_pct}% to ${stats.p75_pct}%), up ${Math.round(stats.up_share * 100)}% of the time, median vs SPY ${stats.median_excess_pct ?? 'n/a'}%.`)
+    // THIS CYCLE: the usual FULL run-up, and how much of it the stock has already moved — the remaining median above is
+    // what is typically left only if the cycle has not run yet.
+    if (cycle?.full_median_pct != null && cycle.full_lead > lead) {
+        const spent = runupSpent(cycle)
+        lines.push(`This cycle: its usual run-up over the full ${cycle.full_lead} sessions before a report is a median ${cycle.full_median_pct}%; `
+            + `over the ${cycle.full_lead - lead} sessions of it already gone it has moved ${cycle.so_far_pct ?? 'n/a'}%.`
+            + (spent ? ' It has ALREADY RUN its usual run-up — the typical move is spent: verdict priced_in, and say so.' : ''))
+    }
     const line = { basis: 'run_up', report, lead_days: lead, n: stats.n, median_pct: stats.median_pct, p25_pct: stats.p25_pct, p75_pct: stats.p75_pct,
-        up_share: stats.up_share, median_excess_pct: stats.median_excess_pct }
+        up_share: stats.up_share, median_excess_pct: stats.median_excess_pct,
+        ...(cycle?.full_median_pct != null && cycle.full_lead > lead ? { full_lead: cycle.full_lead, full_median_pct: cycle.full_median_pct, so_far_pct: cycle.so_far_pct ?? null } : {}) }
     lines.push(`Copy this line, unchanged, as "runup" in your block: ${JSON.stringify(line)}`)
     return lines.join('\n')
 }
@@ -114,7 +145,13 @@ async function _getRunupHistory({ ticker, lead_days } = {}) {
     const from = Date.parse(`${[...past].sort()[0]}T00:00:00Z`) - 40 * DAY_MS
     const [bars, spyBars] = await Promise.all([_io.bars(sym, from, Date.now()), _io.bars('SPY', from, Date.now())])
     if (!bars?.length) throw new Error('no daily prices')
-    return runUpReadText(sym, { report: next, lead, stats: runUpStats({ reports: past, bars, spyBars: spyBars ?? [], lead }) })
+    const stats = runUpStats({ reports: past, bars, spyBars: spyBars ?? [], lead })
+    // The full window and this cycle's share of it: only when part of it has already gone.
+    const full = Math.max(lead, FULL_LEAD)
+    const cycle = full > lead
+        ? { full_lead: full, full_median_pct: runUpStats({ reports: past, bars, spyBars: [], lead: full }).median_pct, so_far_pct: soFarPct(bars, full - lead, today) }
+        : null
+    return runUpReadText(sym, { report: next, lead, stats, cycle })
 }
 
 export const RUNUP_TOOLS = [{

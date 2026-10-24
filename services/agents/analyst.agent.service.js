@@ -236,7 +236,8 @@ export function _cleanDelta(d) {
 
 // The `runup` line copied off get_runup_history (runup.tools.js): its numbers, the report date and the basis, nothing
 // else — and null without a median or a report date to end the window on.
-const RUNUP_FIELDS = ['lead_days', 'n', 'median_pct', 'p25_pct', 'p75_pct', 'up_share', 'median_excess_pct']
+// The cycle's three (2026-10-24): the usual FULL run-up and how much of it this cycle has already moved.
+const RUNUP_FIELDS = ['lead_days', 'n', 'median_pct', 'p25_pct', 'p75_pct', 'up_share', 'median_excess_pct', 'full_lead', 'full_median_pct', 'so_far_pct']
 export function _cleanRunup(u) {
     if (!u || typeof u !== 'object' || Array.isArray(u)) return null
     const out = { basis: 'run_up', report: /^\d{4}-\d{2}-\d{2}$/.test(u.report ?? '') ? u.report : null }

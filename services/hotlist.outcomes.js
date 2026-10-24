@@ -326,6 +326,54 @@ export async function outcomeSummary(deps = _deps) {
     return summarize(rows)
 }
 
+// ─── Argus's record (Roy, 2026-10-24: "Argus — why did Argus say avoid?") ─────────────────────
+
+/** Was the name Argus's pick for THIS column on its board — per column since 2026-10-23, the single `pick` before. Pure. */
+const _pickedFor = (row, column) => Boolean(row?.picks ? row.picks[column] : row?.pick?.column === column)
+
+/** One group's numbers: how often it ended up, its mean and median return, and how often it reached its level. Pure. */
+function _group(xs) {
+    const judged = xs.filter(o => o.outcome.reached != null)
+    return {
+        n: xs.length,
+        up_rate:    xs.length ? _r((xs.filter(o => o.outcome.ret_pct > 0).length / xs.length) * 100, 1) : null,
+        ret_mean:   xs.length ? _r(xs.reduce((s, o) => s + (o.outcome.ret_pct ?? 0), 0) / xs.length) : null,
+        ret_median: _r(_median(xs.map(o => o.outcome.ret_pct))),
+        hit_rate:   judged.length ? _r((judged.filter(o => o.outcome.reached).length / judged.length) * 100, 1) : null,
+    }
+}
+
+/**
+ * ARGUS'S RECORD on the boards he read — his picks, his avoids and the names he left unmarked, side by side, each by how
+ * often it ENDED UP and its mean return (the plain "did it work": an avoid is mostly a name with little room, so its
+ * level is close and "reached" says little). Overall and per column. Pure. `boards` — the scored boards' `{ id, argus,
+ * rows: [{ symbol, picks, pick, avoid }] }`; a board without his read is left out, so "unmarked" means seen and left.
+ * An avoid is the name's on that board, whichever column the outcome is for.
+ */
+export function argusRecord(outcomes, boards) {
+    const byBoard = new Map((boards ?? []).filter(b => b.argus).map(b => [b.id, new Map((b.rows ?? []).map(r => [r.symbol, r]))]))
+    const out = { all: { pick: [], avoid: [], unmarked: [] } }
+    for (const o of outcomes ?? []) {
+        if (!o.outcome) continue
+        const row = byBoard.get(o.board)?.get(o.symbol)
+        if (!row) continue
+        const kind = _pickedFor(row, o.column) ? 'pick' : row.avoid ? 'avoid' : 'unmarked'
+        out.all[kind].push(o)
+        ;(out[o.column] ??= { pick: [], avoid: [], unmarked: [] })[kind].push(o)
+    }
+    return Object.fromEntries(Object.entries(out).map(([k, g]) => [k, { pick: _group(g.pick), avoid: _group(g.avoid), unmarked: _group(g.unmarked) }]))
+}
+
+/** Argus's record from the log and the boards it scored. */
+export async function argusSummary(deps = _deps) {
+    const db = await deps.db()
+    const outcomes = await db.collection(OUTCOMES).find({}, { projection: { _id: 0, board: 1, symbol: 1, column: 1, outcome: 1 } }).toArray()
+    const ids = [...new Set(outcomes.map(o => o.board))]
+    const boards = await db.collection(BOARDS).find({ id: { $in: ids } },
+        { projection: { _id: 0, id: 1, argus: 1, 'rows.symbol': 1, 'rows.picks': 1, 'rows.pick': 1, 'rows.avoid': 1 } }).toArray()
+    return argusRecord(outcomes, boards)
+}
+
 /** Every board of a day, oldest checkpoint first — the Floor's Hotlist history (phase 6). */
 export async function boardsForDay(day, deps = _deps) {
     const db = await deps.db()
