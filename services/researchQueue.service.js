@@ -51,8 +51,11 @@ async function enqueue({ symbol, source, requestedBy = 'house', context = null }
         const db = await getDb()
         await _ensureIndexes(db)
 
+        // A duplicate is the same name waiting for the same KIND of answer: a catalyst read (a Hotlist row) and coverage
+        // are different questions, and one must not swallow the other (horizon-chains.md §3; code review 2026-10-24).
+        const catalyst = context?.hotlist === true
         const existing = await db.collection(COLLECTION).findOne(
-            { symbol: sym, status: { $in: ['queued', 'in_research'] } }
+            { symbol: sym, status: { $in: ['queued', 'in_research'] }, 'context.hotlist': catalyst ? true : { $ne: true } }
         )
         if (existing) return { ok: true, duplicate: true, id: existing.id }
 

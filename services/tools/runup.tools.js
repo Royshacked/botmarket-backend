@@ -99,12 +99,18 @@ async function _getRunupHistory({ ticker, lead_days } = {}) {
     if (!sym) throw new Error('no ticker')
     const today = _io.today()
     const rows = (await _io.earnings(sym)) ?? []
-    const next = rows.filter(r => r.date && r.date > today).map(r => r.date).sort()[0] ?? null
+    // The next report: the first one not yet reported — TODAY's included (after the close, it has no actual yet), or the
+    // tool would skip to next quarter's (code review 2026-10-24).
+    const next = rows.filter(r => r.date && r.date >= today && r.epsActual == null).map(r => r.date).sort()[0] ?? null
     const past = rows.filter(r => r.date && r.date <= today && r.epsActual != null).map(r => r.date)
     if (!next) return `${sym}: no report date ahead in the feed — this is not a run-up trade. No runup line.`
+    if (next === today) return `${sym}: the report is TODAY (${next}) — no run-up is left to trade; out before it. No runup line.`
+    // A report past the short swing's reach is not a run-up inside the window — the line would size a move weeks away.
+    const left = sessionsBefore(today, next) + 1
+    if (left > LEAD_MAX) return `${sym}: the next report (${next}) is ${left} sessions away — past a short swing's window, so this is not a run-up trade. No runup line.`
     if (past.length < MIN_REPORTS) return `${sym}: only ${past.length} past reports in the feed — too few to size a run-up. No runup line.`
     const asked = Number(lead_days)
-    const lead = Math.min(LEAD_MAX, Math.max(LEAD_MIN, Number.isFinite(asked) && asked > 0 ? Math.round(asked) : sessionsBefore(today, next) + 1))
+    const lead = Math.min(LEAD_MAX, Math.max(LEAD_MIN, Number.isFinite(asked) && asked > 0 ? Math.round(asked) : left))
     const from = Date.parse(`${[...past].sort()[0]}T00:00:00Z`) - 40 * DAY_MS
     const [bars, spyBars] = await Promise.all([_io.bars(sym, from, Date.now()), _io.bars('SPY', from, Date.now())])
     if (!bars?.length) throw new Error('no daily prices')

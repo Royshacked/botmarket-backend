@@ -930,13 +930,19 @@ services/
   hotlistResearch.service.js the SHORT-SWING CHAIN (horizon-chains.md §4): after the 09:20 board, Argus's week
                             picks → research queue (source `hotlist`) → Prometheus's catalyst reads, inside a
                             DAILY cap (HOTLIST_RESEARCH_MAX_NAMES / _MAX_USD), on the screener's monitor tick;
-                            the budget pipe is houseResearch.researchQueued / resumeQueued (shared)
+                            the budget pipe is houseResearch.researchQueued / resumeQueued (shared). A day's rows
+                            are keyed by `context.day`; earlier days' waiting rows expire; the board is stamped
+                            `research_queued_at` on hand-off (the tick catches up an unstamped one). requestRead —
+                            a USER's "Catalyst read" on a This week row (POST /api/hotlist/reads), outside the
+                            house $, HOTLIST_MANUAL_READS a day
   catalystRead.service.js   CATALYST READS (horizon-chains.md §3) — Prometheus's short-swing answer in its own
                             collection `catalyst_reads`, never coverage: target = spot × (1 + what is still
                             open) off compute_event_delta, or spot × (1 + the median run-up) off get_runup_history
                             for a report ahead; band, priced share, a 5–30 day window ending the session before a
-                            report inside it; a target at or under spot is a `pass`; graded hit / expired (vs
-                            SPY). GET /api/hotlist/reads
+                            report inside it; a target at or under spot, or no window left, is a `pass`
+                            (`pass_reason`); graded hit by the live price inside the window, and past it by the
+                            window's own daily bars (hit / expired vs SPY). One active read per symbol — the
+                            `one_active_read` partial unique index. GET /api/hotlist/reads
   hotlist.service.js        the hotlist's READ side: todayHotlist / boardById / hotlistOutcomes for the
                             API, and hotlistSeed — a "Build with Mentor" hand-off is a REFERENCE (board
                             id + column, scanSeed.util), resolved here from the STORED board into the

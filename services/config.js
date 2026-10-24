@@ -273,6 +273,9 @@ export const config = {
     get hotlistResearch()        { return _bool('HOTLIST_RESEARCH', 'false-0') },
     get hotlistResearchMaxNames() { return _num('HOTLIST_RESEARCH_MAX_NAMES', 10) },
     get hotlistResearchMaxUsd()   { return _num('HOTLIST_RESEARCH_MAX_USD', 1) },
+    // A catalyst read a USER asked for from the Hotlist ("Catalyst read" on a This week row): outside the house's daily $,
+    // capped by count instead — this many a day, everyone's together (~$0.015–0.03 each).
+    get hotlistManualReads()      { return _num('HOTLIST_MANUAL_READS', 10) },
     get dailyScreenerRpm() { return _num('DAILY_SCREENER_RPM', 60) },
     // The model that labels the checkpoint pool's headlines (services/hotlist.news.js) — once per
     // checkpoint for every user. Empty → Haiku 4.5 (Roy's decision, daily-names.md §10); any id in

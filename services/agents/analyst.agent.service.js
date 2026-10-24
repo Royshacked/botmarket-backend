@@ -202,7 +202,9 @@ export function _parseCatalystRead(raw) {
         window_days: Number.isFinite(days) ? Math.min(30, Math.max(5, Math.round(days))) : 14,
         confidence:  Number.isFinite(conf) ? Math.min(Math.max(conf, 0), 1) : null,
         read:        _txt(q.read, 1200) ?? '',
-        delta:       _cleanDelta(q.delta),
+        // Exactly one yardstick: a run-up line wins (a report ahead is what the trade is), and a delta beside it is
+        // dropped — or the run-up's target would be priced off the delta's spot (code review 2026-10-24).
+        delta:       _cleanRunup(q.runup) ? null : _cleanDelta(q.delta),
         runup:       _cleanRunup(q.runup),
         delta_basis: _txt(q.delta_basis, 400),
         implied_move_pct: _numOr(q.implied_move_pct),

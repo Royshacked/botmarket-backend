@@ -68,7 +68,7 @@ export function getRun() {
  * house-owned but the research turn is still made through a user's tools and level. `model` is
  * passed through untouched: absent, the agent's own default (the same one the desk uses).
  */
-export async function startRun({ userId, audience = null, model = null, symbols = null, maxUsd = null } = {}, deps = _io) {
+export async function startRun({ userId, audience = null, model = null, symbols = null, maxUsd = null, source = null } = {}, deps = _io) {
     if (state.run?.status === 'running' || state.starting) return { ok: false, reason: 'already_running', run: getRun() }
     state.starting = true
 
@@ -83,6 +83,9 @@ export async function startRun({ userId, audience = null, model = null, symbols 
             const want = new Set(symbols.map(_sym))
             queued = queued.filter(q => want.has(_sym(q.symbol)))
         }
+        // `source`: one chain's rows only (horizon-chains.md §4) — a symbol can wait for a catalyst read AND for coverage,
+        // and the Hotlist's run must not spend its day's budget on Pythia's row for the same name, or the reverse.
+        if (source) queued = queued.filter(q => q.source === source)
         if (!queued.length)  return { ok: false, reason: 'nothing_queued' }
 
         try { covered = await deps.coveredSymbols() }
@@ -95,6 +98,7 @@ export async function startRun({ userId, audience = null, model = null, symbols 
     const run = {
         id:         `run_${randomUUID().slice(0, 8)}`,
         status:     'running',   // running → done | stopped | failed (the account, not a name — see isRunFatal)
+        source:     source ?? null,   // the chain whose run this is (null: the admin's Start, every source)
         error:      null,        // the sentence behind `failed`
         startedAt:  new Date().toISOString(),
         finishedAt: null,
@@ -373,7 +377,9 @@ export function researchOpening(item) {
     // and his reason travel; the mode block (analyst_mode_catalyst.md) says what to do with them.
     if (isCatalystItem(item)) {
         const facts = c.facts ? ` The board: ${c.facts}.` : ''
-        const argus = c.why ? ` Argus picked it: ${c.why}${c.caution ? ` What would make it wrong: ${c.caution}` : ''}` : ''
+        // A read a user asked for (`requested`) on a name Argus did not pick says so, rather than nothing.
+        const argus = c.why ? ` Argus picked it: ${c.why}${c.caution ? ` What would make it wrong: ${c.caution}` : ''}`
+            : c.requested ? ' Argus did not pick it; a user asked for this read.' : ''
         return `Catalyst read on ${symbol} — the Hotlist graded it THIS WEEK (2–10 days) on ${c.day ?? 'today'}.${facts}${argus} Is the catalyst real, what is it worth, how much is still open, and what can break it inside the window?`
     }
     // From the HOUSE SCAN (step 7): Pythia's verdict on the industry or theme sent it — the thesis and risks travel,

@@ -1,5 +1,6 @@
 import { todayHotlist, boardById, hotlistOutcomes } from '../../services/hotlist.service.js'
 import { catalystReadService } from '../../services/catalystRead.service.js'
+import { hotlistResearchService } from '../../services/hotlistResearch.service.js'
 import { makeHandle } from '../_shared/handle.util.js'
 import { httpError } from '../../services/httpError.util.js'
 
@@ -35,3 +36,29 @@ export const getOutcomes = handle('getOutcomes', async (req, res) => { res.json(
  * and those settled in the last two weeks, with their targets, what is still open, the window and the grade.
  */
 export const getReads = handle('getReads', async (req, res) => { res.json(await catalystReadService.listReads()) })
+
+const SYMBOL = /^[A-Z][A-Z0-9.-]{0,9}$/
+// What a refused ask says — a 409 the panel shows as it is, never a failure.
+const READ_REFUSED = {
+    no_board: [404, 'That board is gone — reload the Hotlist.'],
+    stale_board: [409, 'Reads are asked for on today\'s board only.'],
+    not_on_week: [409, 'That name is not graded for this week.'],
+    live_read: [409, 'Prometheus already has a live read on that name.'],
+    already_queued: [409, 'That name is already waiting for a read.'],
+    daily_cap: [429, 'Today\'s catalyst reads are used up — try again tomorrow.'],
+    queue_unavailable: [503, 'The research queue could not be reached.'],
+}
+
+/**
+ * POST /api/hotlist/reads { board, symbol } — a user asks Prometheus for a catalyst read on a This week row Argus did not
+ * pick (horizon-chains.md §3). → `{ outcome: 'started' | 'queued' }`; the read lands in GET /reads when it is done.
+ */
+export const requestRead = handle('requestRead', async (req, res) => {
+    const board = String(req.body?.board ?? '')
+    const symbol = String(req.body?.symbol ?? '').toUpperCase().trim()
+    if (!BOARD_ID.test(board)) throw httpError(400, 'not a board id')
+    if (!SYMBOL.test(symbol)) throw httpError(400, 'not a symbol')
+    const r = await hotlistResearchService.requestRead({ boardId: board, symbol, userId: req.user?._id })
+    if (!r.ok) { const [code, msg] = READ_REFUSED[r.reason] ?? [500, 'The read was not asked for.']; throw httpError(code, msg) }
+    res.status(202).json({ outcome: r.outcome })
+})

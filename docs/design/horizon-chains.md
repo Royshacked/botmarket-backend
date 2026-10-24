@@ -110,6 +110,38 @@ Everything stays behind `DAILY_SCREENER` — off, no boards, no picks, no reads.
   queued anything, so a finished name is not bought twice). And a long whose target is at or under spot (a run-up
   record that runs DOWN, an event fully taken) is a `pass`, never an instant hit on the first grade.
 
+## Code review (2026-10-24) — applied
+
+Three reviewers over the build (catalyst read, hand-off, the Hotlist's tabs); 22 findings applied, one accepted (the
+run-up tool counts weekends but not market holidays — a lead one session long around a holiday).
+
+- **The queue keeps kinds apart.** A catalyst read and coverage for the same name are different questions: the
+  duplicate check is symbol + kind, and a chain's run takes only its own source's rows (`startRun({ source })`), so the
+  Hotlist's day budget is never spent on Pythia's row, or the reverse. The run records its source; an admin's stop
+  halts only that chain's pick-up (a stopped Start-all still halts both).
+- **A day is its session date.** The Hotlist's rows are matched on `context.day`, not "created since UTC midnight"
+  (20:00 ET the day before). Earlier days' waiting rows are expired by the next pick-up — they blocked the name for
+  every desk. The hand-off stamps the board `research_queued_at`; the tick catches up an unstamped 09:20 board once,
+  and never re-queues a name the day already has a row for. Names with a live read are not queued.
+- **Grading.** Inside the window, the live price at the target is a hit. Past it, the window's own daily bars decide
+  (its high against the target, its last close for the return) — the hourly grade can miss the evening before a
+  report and see the gap after it. The read's own day counts only for a read made before the open: RCL's read day had
+  a 280 high above its 277.34 target from before the read existed (live check). One active read per symbol is held by
+  a partial unique index; a read past its window no longer blocks a new one, and is graded (or closed unpriced) first.
+- **The window.** A read made after the close before its report is a `pass` (`report_too_close`), never the full
+  window run through the report. Every pass says why (`pass_reason`).
+- **The run-up tool** counts a report today as the next one (it was skipping to next quarter's) and refuses a report
+  more than 15 sessions away (`LEAD_MAX`). A block with both lines keeps the run-up and drops the delta.
+- **The Hotlist** — a one-ended band no longer crashes the table; a settled read shows only on its own day's list;
+  a horizon's Grade sort and its tie-break are that horizon's; a new horizon opens in Argus's order and a third header
+  click returns to it; the counts follow the status filter; a horizon that empties falls back to All; a failed reads
+  load says so; the horizon buttons are a filter group (`aria-pressed`), like the status filter.
+- **"Catalyst read" (Roy, 2026-10-24).** On a This week row with no read, the user asks Prometheus for one — the same
+  queue, mode and store, outside the house's daily $ and counted instead (HOTLIST_MANUAL_READS, 10 a day, everyone's).
+  Live: XOM, asked for by hand — the run-up tool (median +0.02% over 11 reports), an honest pass, $0.024.
+- **The table's headers** sit over their data: a global `button { margin: 5px }` pushed every sort label 5px inside
+  its cell. The Info column explains the table while the Hotlist is open (HotlistInfo).
+
 ## Build order
 
 1. Argus per horizon + the day's picks per column (backend) — tests.

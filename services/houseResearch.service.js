@@ -56,8 +56,17 @@ export async function researchWeeks(weeks, deps = _deps, { now = Date.now() } = 
     // The budget is ALL of the last seven days' research on Pythia's names, whichever week sent them — read on its own,
     // or the week that just finished would not see what the pick-up spent on older weeks two days ago (code review
     // 2026-10-23).
-    return researchQueued({ symbols: weekSymbols(list), since: _since(list), source: 'pythia', maxUsd: deps.maxUsd(),
-        budgetSince: new Date(now - BUDGET_WINDOW_MS).toISOString() }, deps)
+    // The arguments are worked out inside the try: a bad `now` returns an error outcome, as it did before the pipe was
+    // shared, instead of throwing into the weekly run (code review 2026-10-24).
+    let args
+    try {
+        args = { symbols: weekSymbols(list), since: _since(list), source: 'pythia', maxUsd: deps.maxUsd(),
+            budgetSince: new Date(now - BUDGET_WINDOW_MS).toISOString() }
+    } catch (err) {
+        logger.warn(LOG, 'research not started', { error: err.message })
+        return { ok: false, outcome: 'error', detail: err.message }
+    }
+    return researchQueued(args, deps)
 }
 
 /**
@@ -65,16 +74,18 @@ export async function researchWeeks(weeks, deps = _deps, { now = Date.now() } = 
  * given names that are still `queued` from `source`, as the house, inside what is left of a budget — `maxUsd` less
  * everything researched from `source` since `budgetSince` (read back from the rows' `cost_usd`). Names in `symbols`'
  * order. → `{ ok, outcome, ... }`, outcome one of started | nothing_queued | budget_spent | busy | no_names |
- * queue_unavailable | error. Each chain owns its own names, budget and window; this owns the mechanism.
+ * queue_unavailable | error. Each chain owns its own names, budget and window; this owns the mechanism. `spentBy` — which
+ * of the source's recent rows count against the budget (the Hotlist: its own day's, the house's only); default all.
+ * `maxUsd` Infinity: no budget (a read the user asked for, capped by count where it was queued).
  */
-export async function researchQueued({ symbols, since = null, source, maxUsd, budgetSince }, deps = _deps) {
+export async function researchQueued({ symbols, since = null, source, maxUsd, budgetSince, spentBy = null }, deps = _deps) {
     try {
         if (!symbols?.length) return { ok: true, outcome: 'no_names' }
         const rows = await deps.listQueue({ symbols, since, limit: 500 })
         const recent = await deps.listQueue({ source, updatedSince: budgetSince, limit: 1000 })
         if (rows === null || recent === null) return { ok: false, outcome: 'queue_unavailable' }
         const own = rows.filter(r => r.source === source)
-        const spent = recent.reduce((s, r) => s + (Number(r.cost_usd) || 0), 0)
+        const spent = (spentBy ? recent.filter(spentBy) : recent).reduce((s, r) => s + (Number(r.cost_usd) || 0), 0)
         const left = Math.max(0, (Number(maxUsd) || 0) - spent)
         const order = new Map(symbols.map((s, i) => [s, i]))
         const waiting = own.filter(r => r.status === 'queued').map(r => r.symbol).sort((a, b) => (order.get(a) ?? 0) - (order.get(b) ?? 0))
@@ -83,13 +94,13 @@ export async function researchQueued({ symbols, since = null, source, maxUsd, bu
             logger.info(LOG, `the ${source} research budget is spent — names wait`, { waiting: waiting.length, spent_usd: spent })
             return { ok: true, outcome: 'budget_spent', waiting: waiting.length, spent_usd: spent }
         }
-        const res = await deps.startRun({ userId: null, symbols: waiting, maxUsd: left })
+        const res = await deps.startRun({ userId: null, symbols: waiting, maxUsd: Number.isFinite(left) ? left : null, source })
         if (!res?.ok) {
             const outcome = res?.reason === 'already_running' ? 'busy' : (res?.reason ?? 'error')
             logger.info(LOG, `research not started: ${outcome}`, { waiting: waiting.length })
             return { ok: outcome === 'busy' || outcome === 'nothing_queued', outcome, waiting: waiting.length }
         }
-        logger.info(LOG, 'research started', { names: waiting.length, budget_usd: Number(left.toFixed(4)), run: res.run?.id })
+        logger.info(LOG, 'research started', { source, names: waiting.length, budget_usd: Number.isFinite(left) ? Number(left.toFixed(4)) : null, run: res.run?.id })
         return { ok: true, outcome: 'started', names: waiting.length, budget_usd: left, run: res.run?.id ?? null }
     } catch (err) {
         logger.warn(LOG, 'research not started', { error: err.message })
@@ -106,21 +117,22 @@ export const researchWeek = (week, deps = _deps, opts) => researchWeeks([week], 
  */
 export async function resumeWeeks(weeks, deps = _deps, { now = Date.now() } = {}) {
     const list = (Array.isArray(weeks) ? weeks : [weeks]).filter(Boolean)
-    return resumeQueued(weekSymbols(list), () => researchWeeks(list, deps, { now }), deps, { now })
+    return resumeQueued(weekSymbols(list), () => researchWeeks(list, deps, { now }), deps, { now, source: 'pythia' })
 }
 
 /**
  * The pick-up both chains share: names a dead run left claimed go back in line, then `research()` runs what waits. A
- * run going → nothing is touched (its claim is live).
+ * run going → nothing is touched (its claim is live). `source` is the chain asking: an admin's STOP on another chain's
+ * run does not halt this one (code review 2026-10-24); a stopped Start-all (no source) halts both.
  */
-export async function resumeQueued(symbols, research, deps = _deps, { now = Date.now() } = {}) {
+export async function resumeQueued(symbols, research, deps = _deps, { now = Date.now(), source = null } = {}) {
     if (!symbols?.length) return { ok: true, outcome: 'no_names' }
     const last = deps.getRun()
     if (last?.status === 'running') return { ok: true, outcome: 'busy' }
     // The admin pressed STOP: the pick-up does not start it again behind their back. The next Start, or the next
     // week's own research, is what resumes (code review 2026-10-23). In memory, like the run: a restart forgets it,
     // but the stopped claim keeps its `stopped` reason, so that name still waits for the admin.
-    if (last?.status === 'stopped') return { ok: true, outcome: 'stopped_by_admin' }
+    if (last?.status === 'stopped' && (!last.source || !source || last.source === source)) return { ok: true, outcome: 'stopped_by_admin' }
     await Promise.resolve(deps.requeueStale({ symbols, olderThanMs: STALE_CLAIM_MS, now })).catch(() => null)
     return research()
 }

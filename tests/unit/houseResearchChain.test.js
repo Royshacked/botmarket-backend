@@ -257,7 +257,7 @@ test('the week researches its queued names as the house, with what is left of it
     const r = await researchWeek(WEEK, deps, { now: NOW_MS })
     assert.equal(r.outcome, 'started')
     assert.deepEqual(calls.query, { symbols: ['NUE', 'STLD'], since: WEEK.started_at, limit: 500 })
-    assert.deepEqual(calls.starts, [{ userId: null, symbols: ['STLD'], maxUsd: 3.5 }])
+    assert.deepEqual(calls.starts, [{ userId: null, symbols: ['STLD'], maxUsd: 3.5, source: 'pythia' }])
 })
 
 test('a spent budget, a busy run and an unreadable queue start nothing', async () => {
@@ -325,7 +325,7 @@ test("the pick-up spans the recent weeks: an older week's name goes first, and t
     assert.deepEqual(weekSymbols([WEEK, old]), ['OLD', 'NUE', 'STLD'])
     await resumeWeeks([WEEK, old], deps, { now: NOW_MS })
     assert.equal(calls.query.since, old.started_at)
-    assert.deepEqual(calls.starts, [{ userId: null, symbols: ['OLD', 'STLD'], maxUsd: 5 }], "last week's spend is outside the window")
+    assert.deepEqual(calls.starts, [{ userId: null, symbols: ['OLD', 'STLD'], maxUsd: 5, source: 'pythia' }], "last week's spend is outside the window")
 })
 
 // ─── the code review of 2026-10-23 ──────────────────────────────────────────
@@ -337,7 +337,7 @@ test("the budget counts every Pythia name researched in the last seven days, not
     ]
     const { calls, deps } = weekDeps(rows)
     await researchWeek(WEEK, deps, { now: NOW_MS })
-    assert.deepEqual(calls.starts, [{ userId: null, symbols: ['STLD'], maxUsd: 0.5 }])
+    assert.deepEqual(calls.starts, [{ userId: null, symbols: ['STLD'], maxUsd: 0.5, source: 'pythia' }])
 })
 
 test('a run the admin stopped is not started again by the pick-up', async () => {

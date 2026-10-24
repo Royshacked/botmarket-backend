@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { runUpStats, runUpReadText, sessionsBefore, RUNUP_TOOL_HANDLERS, _setIO, MIN_REPORTS } from '../../services/tools/runup.tools.js'
 import { _parseCatalystRead, _cleanRunup, TOOLS } from '../../services/agents/analyst.agent.service.js'
 import { runupTarget, readValidUntil, buildCatalystRead } from '../../services/catalystRead.service.js'
-import { hotlistContext, resume } from '../../services/hotlistResearch.service.js'
+import { hotlistContext } from '../../services/hotlistResearch.service.js'
 
 // The three fixes after the first live catalyst read (docs/design/horizon-chains.md, "Found live"; Roy, 2026-10-23):
 // a run-up gets its own yardstick, the window ends before the report, and a board whose picks were never queued is
@@ -97,7 +97,7 @@ test('the window ends the session before a report inside it; a report past the w
     assert.equal(readValidUntil({ nowMs: now, windowDays: 5, exitBefore: '2026-10-27' }), '2026-10-26T21:00:00.000Z')
     assert.equal(readValidUntil({ nowMs: now, windowDays: 5, exitBefore: '2026-11-20' }), '2026-10-28T13:40:00.000Z')
     assert.equal(readValidUntil({ nowMs: now, windowDays: 5, exitBefore: null }), '2026-10-28T13:40:00.000Z')
-    assert.equal(readValidUntil({ nowMs: now, windowDays: 5, exitBefore: '2026-10-23' }), '2026-10-28T13:40:00.000Z', 'a date already past is ignored')
+    assert.equal(readValidUntil({ nowMs: now, windowDays: 5, exitBefore: '2026-10-23' }), null, 'the close before the report has passed: no window left')
 })
 
 test('a run-up read is ACTIVE with a target and dated to the report; a target at or under spot is a pass', () => {
@@ -119,31 +119,4 @@ test('a run-up read is ACTIVE with a target and dated to the report; a target at
 test("the board's report date travels with the name to Prometheus", () => {
     const row = { symbol: 'RCL', cells: { week: { grade: 'C', exit_before: '2026-10-27', range: { pct: 4, atr_mult: 1.4, level: 272 } } }, picks: { week: { why: 'run-up', rank: 1 } } }
     assert.equal(hotlistContext({ id: 'b', day: '2026-10-23' }, row).exit_before, '2026-10-27')
-})
-
-test('the pick-up: an empty day with a 09:20 board is caught up; a day that queued anything is not re-queued', async () => {
-    const BOARD = { id: 'hb_2026-10-23_preopen', day: '2026-10-23', rows: [
-        { symbol: 'ONE', cells: { week: { grade: 'A', range: { open_sky: true } } }, picks: { week: { why: 'first', rank: 1 } } }] }
-    const queued = [], asked = [], starts = []
-    const deps = {
-        enabled: () => true, maxNames: () => 10, maxUsd: () => 1, now: () => Date.parse('2026-10-23T13:30:00Z'),
-        board: async (id) => { asked.push(id); return BOARD },
-        enqueue: async (row) => { queued.push(row); return { ok: true } },
-        listQueue: async (q) => (q.updatedSince ? [] : queued.map(r => ({ ...r, status: 'queued' }))),
-        requeueStale: async () => ({ ok: true }),
-        startRun: async (o) => { starts.push(o); return { ok: true, run: { id: 'r' } } },
-        getRun: () => null,
-    }
-    const r = await resume('2026-10-23', deps)
-    assert.equal(r.outcome, 'caught_up')
-    assert.deepEqual(r.queued, ['ONE'])
-    assert.deepEqual(asked, ['hb_2026-10-23_preopen'])
-    assert.deepEqual(starts[0].symbols, ['ONE'])
-    // Now the day has a row: the next tick resumes it, and never reads the board to queue it again.
-    queued[0] = { ...queued[0] }
-    const again = await resume('2026-10-23', { ...deps, listQueue: async (q) => (q.updatedSince ? [] : [{ symbol: 'ONE', source: 'hotlist', status: 'done' }]) })
-    assert.equal(again.outcome, 'nothing_queued')
-    assert.equal(asked.length, 1)
-    assert.equal((await resume('2026-10-23', { ...deps, board: async () => null, listQueue: async () => [] })).outcome, 'no_names')
-    assert.equal((await resume('2026-10-23', { ...deps, listQueue: async () => null })).outcome, 'queue_unavailable')
 })

@@ -140,7 +140,8 @@ test('graded: a hit the day the target is reached; otherwise expired at the wind
     const hit = gradeCatalystRead(read, { price: 105.5, spy: 505, nowMs: now + 2 * 86_400_000 })
     assert.equal(hit.status, 'hit')
     assert.deepEqual([hit.outcome.return_pct, hit.outcome.spy_return_pct, hit.outcome.vs_spy], [5.5, 1, 4.5])
-    const exp = gradeCatalystRead(read, { price: 99, spy: 510, nowMs: Date.parse(read.valid_until) })
+    // Past the window, the window's own bars grade it: its high never reached the target, its last close is the return.
+    const exp = gradeCatalystRead(read, { price: 120, spy: 510, nowMs: Date.parse(read.valid_until), window: { high: 104, close: 99, spy_close: 510 } })
     assert.equal(exp.status, 'expired')
     assert.equal(exp.outcome.hit, false)
     assert.equal(gradeCatalystRead({ ...read, status: 'pass' }, { price: 200, nowMs: now }), null)
@@ -204,10 +205,13 @@ const HBOARD = {
 }
 
 function handDeps(over = {}) {
-    const queued = [], starts = []
-    return { queued, starts, deps: {
+    const queued = [], starts = [], marks = [], rejects = []
+    return { queued, starts, marks, rejects, deps: {
         enabled: () => true, maxNames: () => 10, maxUsd: () => 1, now: () => Date.parse('2026-10-23T13:25:00Z'),
         board: async () => HBOARD,
+        markBoard: async (id) => { marks.push(id) },
+        liveSymbols: async () => new Set(),
+        reject: async (id, reason) => { rejects.push([id, reason]) },
         enqueue: async (row) => { queued.push(row); return { ok: true } },
         // The day's rows (and the week's names) read back; the budget's read finds nothing spent.
         listQueue: async (q) => (q.updatedSince ? [] : queued.map(r => ({ ...r, status: 'queued' }))),
@@ -224,11 +228,12 @@ test("the 09:20 board's WEEK picks, in his order, go to Prometheus with the boar
     assert.equal(ctx.hotlist, true)
     assert.equal(ctx.why, 'first')
     assert.match(ctx.facts, /this week \(2–10 days\) A/)
-    const { queued, starts, deps } = handDeps()
+    const { queued, starts, marks, deps } = handDeps()
     const r = await afterCheckpoint({ outcome: 'done', id: 'hb_2026-10-23_preopen' }, deps)
     assert.deepEqual(r.queued, ['ONE', 'TWO'])
     assert.deepEqual(queued.map(q => [q.symbol, q.source]), [['ONE', 'hotlist'], ['TWO', 'hotlist']])
-    assert.deepEqual(starts, [{ userId: null, symbols: ['ONE', 'TWO'], maxUsd: 1 }])
+    assert.deepEqual(starts, [{ userId: null, symbols: ['ONE', 'TWO'], maxUsd: 1, source: 'hotlist' }])
+    assert.deepEqual(marks, ['hb_2026-10-23_preopen'], 'the board is stamped: handed off')
 })
 
 test("only the 09:20 board, only when on, and never past the day's name cap", async () => {
@@ -236,13 +241,14 @@ test("only the 09:20 board, only when on, and never past the day's name cap", as
     assert.equal((await afterCheckpoint({ outcome: 'done', id: 'hb_2026-10-23_preopen' }, handDeps({ enabled: () => false }).deps)).outcome, 'off')
     const capped = handDeps({ maxNames: () => 1 })
     const r = await queueWeekPicks(HBOARD, capped.deps)
-    assert.deepEqual(r, { queued: ['ONE'], skipped: 1 })
+    assert.deepEqual(r, { queued: ['ONE'], skipped: 1, live: 0 })
     assert.equal(dayStart('2026-10-23'), '2026-10-23T00:00:00.000Z')
 })
 
 test("the pick-up researches today's waiting names; a run going touches nothing", async () => {
-    const { queued, starts, deps } = handDeps()
-    queued.push({ symbol: 'ONE', source: 'hotlist' })
+    // The board was handed off already (stamped): the tick only picks up what waits.
+    const { queued, starts, deps } = handDeps({ board: async () => ({ ...HBOARD, research_queued_at: '2026-10-23T13:21:00Z' }) })
+    queued.push({ symbol: 'ONE', source: 'hotlist', requestedBy: 'house', context: { hotlist: true, day: '2026-10-23' } })
     assert.equal((await resume('2026-10-23', deps)).outcome, 'started')
     assert.deepEqual(starts[0].symbols, ['ONE'])
     assert.equal((await resume('2026-10-23', { ...deps, getRun: () => ({ status: 'running' }) })).outcome, 'busy')

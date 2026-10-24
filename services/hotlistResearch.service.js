@@ -9,29 +9,48 @@
 // its DAILY caps — HOTLIST_RESEARCH_MAX_NAMES queued a day, HOTLIST_RESEARCH_MAX_USD spent a day, both read back from
 // the queue — and when it runs; the run, the budget arithmetic and the pick-up of a dead run are shared.
 //
+// A DAY'S ROWS are the ones whose context carries that session date (`context.day`), not the ones created since a UTC
+// midnight — that is 20:00 ET the day before, and a late catch-up would have spent the next day's caps (code review
+// 2026-10-24). A day's rows still waiting when the next session's pick-up runs are EXPIRED: a week pick's board is a
+// day old, and a waiting row would block the name for every desk.
+//
+// A USER can ask for a read on a This week row Argus did not pick (`requestRead`, the Hotlist's "Catalyst read"): the
+// same queue and mode, outside the house's daily $ and counted instead (HOTLIST_MANUAL_READS a day, everyone's).
+//
 // Driven by the screener's monitor (every 5 minutes, DAILY_SCREENER): `afterCheckpoint` on the board that just
 // finished, `resume` on every tick — so a run that was busy (the Pythia week's, a sleeve's) or died is picked up the
-// next tick. HOTLIST_RESEARCH=false is the kill switch. Never throws.
+// next tick, and a board whose picks a dead process never queued is caught up (its `research_queued_at` stamp is
+// missing). HOTLIST_RESEARCH=false is the kill switch for the house's reads. Never throws.
 
+import { getDb } from '../providers/mongodb.provider.js'
 import { researchQueueService } from './researchQueue.service.js'
 import { researchRunService } from './researchRun.service.js'
 import { researchQueued, resumeQueued } from './houseResearch.service.js'
 import { boardById, seedFacts } from './hotlist.service.js'
+import { BOARDS } from './hotlist.outcomes.js'
+import { etDate } from './dailyScreener.checkpoint.js'
+import { catalystReadService } from './catalystRead.service.js'
 import { config } from './config.js'
 import { logger } from './logger.service.js'
 
 const LOG = '[hotlistResearch]'
 const SOURCE = 'hotlist'
+const HOUSE = 'house'
 /** The board whose "this week" picks are read: 09:20, the strict spreads (08:00's book is thin). */
 export const READ_CHECKPOINT = 'preopen'
 const COLUMN = 'week'
+const WAITING = ['queued', 'in_research']
 
 const _deps = {
     enabled:      () => config.hotlistResearch,
     maxNames:     () => config.hotlistResearchMaxNames,
     maxUsd:       () => config.hotlistResearchMaxUsd,
+    manualMax:    () => config.hotlistManualReads,
     board:        (id) => boardById(id),
+    markBoard:    async (id, at) => { const db = await getDb(); await db.collection(BOARDS).updateOne({ id }, { $set: { research_queued_at: at } }) },
+    liveSymbols:  () => catalystReadService.liveSymbols(),
     enqueue:      (row) => researchQueueService.enqueue(row),
+    reject:       (id, reason) => researchQueueService.reject(id, reason),
     listQueue:    (q) => researchQueueService.listQueue(q),
     requeueStale: (o) => researchQueueService.requeueStale(o),
     startRun:     (o) => researchRunService.startRun(o),
@@ -40,8 +59,11 @@ const _deps = {
 }
 export function _setDeps(d) { Object.assign(_deps, d) }
 
-/** The day's start, for "queued today" and "spent today" — the session date's UTC midnight (before any ET board). */
+/** The day's start, as the lower bound of its rows' query — the session date's UTC midnight (before any ET board). */
 export const dayStart = (day) => `${day}T00:00:00.000Z`
+/** The board the chain reads on a day. */
+export const readBoardId = (day) => `hb_${day}_${READ_CHECKPOINT}`
+const _house = (r) => (r.requestedBy ?? HOUSE) === HOUSE
 
 /** Argus's picks for the week column on a board, his order. Pure. */
 export function weekPicks(board) {
@@ -65,38 +87,60 @@ export function hotlistContext(board, row) {
     }
 }
 
-/** Today's Hotlist rows in the queue (any status), oldest first. Null on a failed read. */
+/** The day's Hotlist rows in the queue (any status, anyone's), oldest first — by their session date. Null on a failed read. */
 async function _today(day, deps) {
-    return deps.listQueue({ source: SOURCE, since: dayStart(day), limit: 500 })
+    const rows = await deps.listQueue({ source: SOURCE, since: dayStart(day), limit: 500 })
+    return rows === null ? null : rows.filter(r => r.context?.day === day)
 }
 
 /**
- * Queue the board's week picks, inside the day's name cap → `{ queued: [symbols], skipped }`. A name already in line
- * (any desk) is the queue's duplicate, and does not count against the cap.
+ * Queue the board's week picks, inside the day's name cap → `{ queued: [symbols], skipped, live }`. A name the day
+ * already has a row for (any status — a finished read is not bought twice), or with a LIVE read, is not queued and not
+ * counted; one already waiting for this kind at the queue is its duplicate. The cap counts the house's rows only.
  */
 export async function queueWeekPicks(board, deps = _deps) {
     const picks = weekPicks(board)
-    if (!picks.length) return { queued: [], skipped: 0 }
+    if (!picks.length) return { queued: [], skipped: 0, live: 0 }
     const already = await _today(board.day, deps)
-    if (already === null) return { queued: [], skipped: picks.length, error: 'queue_unavailable' }
-    let room = Math.max(0, (Number(deps.maxNames()) || 0) - already.length)
+    if (already === null) return { queued: [], skipped: picks.length, live: 0, error: 'queue_unavailable' }
+    const live = await Promise.resolve(deps.liveSymbols()).catch(() => new Set()) ?? new Set()
+    const seen = new Set(already.map(r => r.symbol))
+    let room = Math.max(0, (Number(deps.maxNames()) || 0) - already.filter(_house).length)
     const queued = []
-    let skipped = 0
+    let skipped = 0, liveCount = 0
     for (const row of picks) {
+        if (seen.has(row.symbol)) continue
+        if (live.has(row.symbol)) { liveCount++; continue }
         if (room <= 0) { skipped++; continue }
-        const q = await deps.enqueue({ symbol: row.symbol, source: SOURCE, requestedBy: 'house', context: hotlistContext(board, row) })
+        const q = await deps.enqueue({ symbol: row.symbol, source: SOURCE, requestedBy: HOUSE, context: hotlistContext(board, row) })
         if (q?.ok && !q.duplicate) { queued.push(row.symbol); room-- }
     }
-    if (queued.length || skipped) logger.info(LOG, 'week picks queued', { board: board.id, queued: queued.length, skipped_cap: skipped })
-    return { queued, skipped }
+    if (queued.length || skipped || liveCount) logger.info(LOG, 'week picks queued', { board: board.id, queued: queued.length, skipped_cap: skipped, live_read: liveCount })
+    return { queued, skipped, live: liveCount }
 }
 
-/** Research today's Hotlist names that still wait, inside the day's budget (the shared pipe). */
-export async function researchDay(day, deps = _deps) {
+/** Queue a board's picks and stamp it — the stamp is what tells the pick-up the hand-off happened, whatever it queued. */
+async function _handOff(board, deps) {
+    const q = await queueWeekPicks(board, deps)
+    if (q.error) return q
+    await Promise.resolve(deps.markBoard(board.id, new Date(deps.now()).toISOString())).catch(err => logger.warn(LOG, 'board not stamped', { board: board.id, error: err.message }))
+    return q
+}
+
+/**
+ * Research the day's Hotlist names that still wait. A user's waiting reads go first, with no $ budget (they were
+ * counted when asked for); then the house's, inside the day's budget — the house's own rows of that day. `houseToo`
+ * false: only the users' (the house's reads are switched off).
+ */
+export async function researchDay(day, deps = _deps, { houseToo = true } = {}) {
     const rows = await _today(day, deps)
     if (rows === null) return { ok: false, outcome: 'queue_unavailable' }
-    return researchQueued({ symbols: [...new Set(rows.map(r => r.symbol))], since: dayStart(day), source: SOURCE,
-        maxUsd: deps.maxUsd(), budgetSince: dayStart(day) }, deps)
+    const waiting = (pred) => [...new Set(rows.filter(r => r.status === 'queued' && pred(r)).map(r => r.symbol))]
+    const users = waiting(r => !_house(r))
+    if (users.length) return researchQueued({ symbols: users, since: dayStart(day), source: SOURCE, maxUsd: Infinity, budgetSince: dayStart(day), spentBy: () => false }, deps)
+    if (!houseToo) return { ok: true, outcome: 'nothing_queued' }
+    return researchQueued({ symbols: waiting(_house), since: dayStart(day), source: SOURCE, maxUsd: deps.maxUsd(), budgetSince: dayStart(day),
+        spentBy: (r) => r.context?.day === day && _house(r) }, deps)
 }
 
 /**
@@ -109,7 +153,7 @@ export async function afterCheckpoint(result, deps = _deps) {
         if (!['done', 'partial'].includes(result?.outcome) || !String(result?.id ?? '').endsWith(`_${READ_CHECKPOINT}`)) return { outcome: 'not_this_board' }
         const board = await deps.board(result.id)
         if (!board) return { outcome: 'no_board' }
-        const q = await queueWeekPicks(board, deps)
+        const q = await _handOff(board, deps)
         const research = await researchDay(board.day, deps)
         return { outcome: 'queued', queued: q.queued, research }
     } catch (err) {
@@ -118,31 +162,66 @@ export async function afterCheckpoint(result, deps = _deps) {
     }
 }
 
+/** Earlier days' rows still `queued` → rejected as `expired` (their board is old; a waiting row blocks the name). */
+async function _expireOld(day, deps) {
+    const rows = await deps.listQueue({ source: SOURCE, status: 'queued', limit: 500 })
+    const old = (rows ?? []).filter(r => (r.context?.day ?? '') < day)
+    for (const r of old) await Promise.resolve(deps.reject(r.id, 'expired')).catch(() => null)
+    if (old.length) logger.info(LOG, 'earlier days\' names expired', { expired: old.length })
+    return old.length
+}
+
 /**
- * Every tick: today's names a busy or dead run left — put back in line and researched (the shared pick-up). And when
- * NOTHING of today's is in the queue yet but today's 09:20 board is there, the process died between saving the board
- * and queueing its picks: they are queued now. Only on an empty day — a day that queued anything has had its turn, and
- * re-queueing a finished name would buy a second read.
+ * Every tick: earlier days' waiting names expired; today's 09:20 board handed off if a dead process never did (no
+ * stamp); then today's names a busy or dead run left — put back in line and researched (the shared pick-up). With the
+ * house's reads off, a user's waiting read is still picked up.
  */
 export async function resume(day, deps = _deps) {
     try {
-        if (!deps.enabled() || !day) return { outcome: 'off' }
+        if (!day) return { outcome: 'off' }
+        const on = deps.enabled()
+        await _expireOld(day, deps)
+        let caught = null
+        if (on) {
+            const board = await deps.board(readBoardId(day))
+            if (board && !board.research_queued_at) caught = await _handOff(board, deps)
+        }
         const rows = await _today(day, deps)
         if (rows === null) return { outcome: 'queue_unavailable' }
-        if (!rows.length) {
-            const board = await deps.board(`hb_${day}_${READ_CHECKPOINT}`)
-            if (!board || !weekPicks(board).length) return { outcome: 'no_names' }
-            const q = await queueWeekPicks(board, deps)
-            const research = q.queued.length ? await researchDay(day, deps) : null
-            return { outcome: 'caught_up', queued: q.queued, research }
-        }
-        const waiting = rows.filter(r => ['queued', 'in_research'].includes(r.status))
-        if (!waiting.length) return { outcome: 'nothing_queued' }
-        return await resumeQueued([...new Set(waiting.map(r => r.symbol))], () => researchDay(day, deps), deps, { now: deps.now() })
+        const waiting = rows.filter(r => WAITING.includes(r.status) && (on || !_house(r)))
+        if (!waiting.length) return { outcome: caught ? 'caught_up' : on ? 'nothing_queued' : 'off', ...(caught ? { queued: caught.queued } : {}) }
+        const res = await resumeQueued([...new Set(waiting.map(r => r.symbol))], () => researchDay(day, deps, { houseToo: on }), deps, { now: deps.now(), source: SOURCE })
+        return caught ? { ...res, outcome: res.outcome === 'started' ? 'caught_up' : res.outcome, queued: caught.queued } : res
     } catch (err) {
         logger.warn(LOG, 'pick-up failed', { error: err.message })
         return { outcome: 'error', detail: err.message }
     }
 }
 
-export const hotlistResearchService = { afterCheckpoint, resume, queueWeekPicks, researchDay }
+/**
+ * A user asked for a catalyst read on a This week row (the Hotlist's "Catalyst read") → `{ ok, outcome }`: `started`,
+ * `queued` (a run is going — it is read after it), or `{ ok: false, reason }`: `no_board`, `stale_board` (not today's),
+ * `not_on_week`, `live_read`, `already_queued`, `daily_cap`, `queue_unavailable`.
+ */
+export async function requestRead({ boardId, symbol, userId }, deps = _deps) {
+    const sym = String(symbol ?? '').toUpperCase().trim()
+    const board = await deps.board(boardId)
+    if (!board) return { ok: false, reason: 'no_board' }
+    if (board.day !== etDate(deps.now())) return { ok: false, reason: 'stale_board' }
+    const row = board.rows?.find(r => r.symbol === sym)
+    if (!row?.cells?.[COLUMN]?.grade) return { ok: false, reason: 'not_on_week' }
+    const live = await Promise.resolve(deps.liveSymbols()).catch(() => new Set()) ?? new Set()
+    if (live.has(sym)) return { ok: false, reason: 'live_read' }
+    const rows = await _today(board.day, deps)
+    if (rows === null) return { ok: false, reason: 'queue_unavailable' }
+    if (rows.some(r => r.symbol === sym && WAITING.includes(r.status))) return { ok: false, reason: 'already_queued' }
+    if (rows.filter(r => !_house(r)).length >= (Number(deps.manualMax()) || 0)) return { ok: false, reason: 'daily_cap' }
+    const q = await deps.enqueue({ symbol: sym, source: SOURCE, requestedBy: String(userId ?? 'user'), context: { ...hotlistContext(board, row), requested: true } })
+    if (!q?.ok) return { ok: false, reason: 'queue_unavailable' }
+    if (q.duplicate) return { ok: false, reason: 'already_queued' }
+    logger.info(LOG, 'catalyst read asked for', { symbol: sym, board: board.id })
+    const res = await researchQueued({ symbols: [sym], since: dayStart(board.day), source: SOURCE, maxUsd: Infinity, budgetSince: dayStart(board.day), spentBy: () => false }, deps)
+    return { ok: true, outcome: res.outcome === 'started' ? 'started' : 'queued' }
+}
+
+export const hotlistResearchService = { afterCheckpoint, resume, queueWeekPicks, researchDay, requestRead }

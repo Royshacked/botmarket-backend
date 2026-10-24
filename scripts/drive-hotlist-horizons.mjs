@@ -75,8 +75,14 @@ try {
     const ctx = await browser.newContext({ viewport: { width: 1600, height: 900 }, ...(existsSync(sessionFile) ? { storageState: sessionFile } : {}) })
     page = await ctx.newPage()
     page.on('pageerror', e => errors.push(e.message))
+    const asked = []
     await page.route('**/api/hotlist**', route => {
         const url = route.request().url()
+        // "Catalyst read" (a user's ask): recorded, answered as the server does when the read starts.
+        if (route.request().method() === 'POST') {
+            asked.push(route.request().postDataJSON())
+            return route.fulfill({ status: 202, contentType: 'application/json', body: JSON.stringify({ outcome: 'started' }) })
+        }
         const body = url.includes('/reads') ? READS : url.includes('/boards/') ? PREOPEN : TODAY
         return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) })
     })
@@ -90,11 +96,11 @@ try {
 
     await page.locator('.floor-desk__head', { has: page.locator('.floor-desk__label', { hasText: /^Hotlist$/ }) }).click()
     await page.waitForSelector('.hot-horizons', { timeout: 10000 }).catch(async e => { await shot(page, '0-no-tabs'); throw e })
-    const tabs = await page.$$eval('.hot-horizons [role="tab"]', ts => ts.map(t => t.textContent))
+    const tabs = await page.$$eval('.hot-horizons button', ts => ts.map(t => t.textContent))
     await shot(page, '1-all')
     check('a tab per horizon, with its count', tabs.join(' | ') === 'All 4 | Open 1 | Mid-day 0 | Into close 0 | Tomorrow 0 | This week 3', tabs.join(' | '))
 
-    await page.getByRole('tab', { name: 'This week 3' }).click()
+    await page.getByRole('button', { name: 'This week 3' }).click()
     await page.waitForTimeout(400)
     const week = await listOrder(page)
     await shot(page, '2-this-week')
@@ -111,7 +117,45 @@ try {
     check("the opened row: Argus's reason for the week, and Prometheus's read", /The earnings run-up has room/.test(detail) && /target 268\.20/.test(detail) && /Inside the window: Q3 report/.test(detail), detail.slice(0, 200))
     check('a run-up read says its record and the report it ends before', /its run-up into the last 11 reports: median \+3\.15%, up 73% of the time/.test(detail) && /out before the 2026-10-27 report/.test(detail) && !/moved/.test(detail), detail.slice(0, 300))
 
-    await page.getByRole('tab', { name: 'Open 1' }).click()
+    // XOM — a week name Argus did not pick, no read: the user asks Prometheus for one.
+    await page.locator('tr[data-symbol="XOM"] td').nth(4).click()
+    await page.waitForTimeout(300)
+    await page.getByRole('button', { name: 'Catalyst read' }).click()
+    await page.waitForTimeout(500)
+    const xom = await page.locator('tr[data-symbol="XOM"] .hot-target').textContent()
+    const said = await page.locator('.hot-detail', { hasText: 'Prometheus is reading it' }).count()
+    await shot(page, '3b-xom-asked')
+    check('"Catalyst read" asks on the week board of the row; the row says it is reading', asked.length === 1 && asked[0].symbol === 'XOM' && asked[0].board === 'hb_2026-10-23_preopen' && xom === 'reading…' && said === 1,
+        `${JSON.stringify(asked)} · ${xom} · note ${said}`)
+
+    // THE HEADERS sit over their data (Roy, 2026-10-24): a number's header right-aligned over its numbers, a word's left
+    // over its words — measured from the header's label to the first row's text, column by column.
+    const misaligned = await page.evaluate(() => {
+        const ths = [...document.querySelectorAll('.hot-panel thead th')]
+        const row = document.querySelector('.hot-panel tbody tr.hot-row')
+        const tds = [...row.children]
+        const out = []
+        ths.forEach((th, i) => {
+            const label = th.querySelector('button') ?? th
+            if (!label.textContent.trim() || th.querySelector('.hot-sr') || !tds[i]) return
+            const rg = document.createRange(); rg.selectNodeContents(tds[i])
+            const text = rg.getBoundingClientRect()
+            if (!text.width) return
+            const lab = (() => { const r2 = document.createRange(); r2.selectNodeContents(label); return r2.getBoundingClientRect() })()
+            const num = th.classList.contains('hot-table__num')
+            const off = num ? Math.abs(lab.right - text.right) : Math.abs(lab.left - text.left)
+            if (off > 4) out.push(`${label.textContent.trim()} ${num ? 'right' : 'left'} off ${off.toFixed(0)}px`)
+        })
+        return out
+    })
+    check('every header sits over its data — numbers right, words left', misaligned.length === 0, misaligned.join('; '))
+
+    // INFO, the right column, explains the table while the Hotlist is open.
+    const info = await page.locator('.floor-info').textContent()
+    await page.locator('.floor-info').screenshot({ path: `${OUT}/hotlist-horizons-5-info.png` })
+    check('the Info column explains the table', /The Hotlist/.test(info) && /Free range|free range/.test(info) && /Target/.test(info) && /Catalyst read/.test(info), info.slice(0, 160))
+
+    await page.getByRole('button', { name: 'Open 1' }).click()
     await page.waitForTimeout(300)
     const open = await listOrder(page)
     const noTarget = await page.locator('.hot-panel th', { hasText: 'Target' }).count()

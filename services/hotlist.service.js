@@ -119,9 +119,12 @@ export function dayList(boards) {
             const gradedCols = new Set(graded.map(([c]) => c))
             const keptPicks = Object.fromEntries(Object.entries(keep(prev?.picks)).filter(([c]) => !gradedCols.has(c)))
             const mergedPicks = { ...keptPicks, ...(picks ?? {}) }
+            // The single `pick` (what older readers read) follows the merged picks: this board's, else the best-ranked one
+            // the name kept from an earlier board — never dropped while a column still carries one (code review 2026-10-24).
+            const onePick = pick ?? Object.values(mergedPicks).sort((a, b) => (a.rank ?? 99) - (b.rank ?? 99))[0] ?? null
             const merged = {
                 ...rest,
-                ...(pick ? { pick } : {}),
+                ...(onePick ? { pick: onePick } : {}),
                 ...(Object.keys(mergedPicks).length ? { picks: mergedPicks } : {}),
                 ...(avoid ? { avoid } : {}),
                 cells:      { ...keep(prev?.cells), ...Object.fromEntries(graded) },
