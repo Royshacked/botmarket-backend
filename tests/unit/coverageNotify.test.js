@@ -133,7 +133,7 @@ test('a house refresh (no user) → every admin, admin-visible, and the copy sto
         assert.equal(c.forUserId, undefined)
         assert.equal(c.payload.house, true)
         assert.equal(c.type, 'coverage_refreshed')
-        assert.match(c.content, /Scheduled re-model of NVDA is in — AI capex intact/)
+        assert.match(c.content, /Prometheus revised NVDA — AI capex intact\./)
         assert.doesNotMatch(c.content, /review/i)
     }
 })
@@ -173,12 +173,15 @@ test('a verdict card says REVISE — the label is what separates it from the ref
 // 2026-10-03: the button goes to Prometheus to REVISE (the verdict card's doorway). Until 09-24 it
 // switched to the desk (which showed the last name's turn); 09-24 to 10-03 it opened only the book,
 // which the Floor never renders and a phone hides — a dead button.
-test('a SUCCESSFUL house refresh goes to Prometheus to revise, and stays open until the revision lands', async () => {
+// 2026-10-25: a house re-model is DONE work (Roy: "only send msg when it's done") — the card tells what
+// was revised and why, and its button opens the thesis to read; opening it completes it.
+test('a SUCCESSFUL house refresh says what was revised and why, and opens the thesis to read', async () => {
     const d = deps(['a1'])
-    await notifyCoverageRefreshed({ userId: null, ticker: 'NVDA', coverageId: 'cov_1', ok: true }, d)
-    assert.equal(d.posted[0].actions.primary.label, 'Revise thesis')
-    assert.equal(d.posted[0].actions.primary.resolvesOn, 'work')
-    assert.match(d.posted[0].content, /Take it to Prometheus to revise\./)
+    await notifyCoverageRefreshed({ userId: null, ticker: 'NVDA', coverageId: 'cov_1', ok: true, trigger: 'the price reached our target', note: 'Re-modelled — PT 200 → 240' }, d)
+    assert.equal(d.posted[0].actions.primary.label, 'Open thesis')
+    assert.equal(d.posted[0].actions.primary.resolvesOn, 'open')
+    assert.equal(d.posted[0].content, 'Prometheus revised NVDA — the price reached our target: Re-modelled — PT 200 → 240.')
+    assert.doesNotMatch(d.posted[0].content, /Take it to Prometheus/)
 })
 
 test('a FAILED house refresh carries a Dismiss and NO primary — it stored nothing to open', async () => {

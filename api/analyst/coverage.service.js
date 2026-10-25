@@ -71,8 +71,10 @@ async function claimRemodel(id, { previousAt = null, reason, at = new Date().toI
     const res = await db.collection(COLLECTION).updateOne(
         { id, 'monitor.last_remodel_at': previousAt ?? null },
         {
-            $set: { 'monitor.last_remodel_at': at, 'monitor.last_remodel_reason': reason },
-            $inc: { 'monitor.remodels': 1 },
+            $set:   { 'monitor.last_remodel_at': at, 'monitor.last_remodel_reason': reason },
+            $inc:   { 'monitor.remodels': 1 },
+            // The run that claims the name answers the verdict waiting on it (coverage.remodel).
+            $unset: { 'monitor.pending_revision': '' },
         },
     )
     return res.modifiedCount === 1

@@ -173,6 +173,18 @@ fact about our own thesis; the rest are signals. A material state appends a revi
 traders never see it). A quiet day refreshes the recorded gap and bookkeeping with no revision — the
 quiet path is what keeps the trail auditable instead of buried under daily noise.
 
+**PROMETHEUS REVISES ON HIS OWN (Roy, 2026-10-25: "if a ticker needs revision — Prometheus should do it
+without asking the user — only send a msg when it's done").** The verdicts that ask for a new look —
+`target_hit`, `target_hit_early`, `diverging` (`coverage.remodel` `REVISE_STATES`) — still append their
+revision, but post **no card**: they are re-model triggers. Each is kept as `monitor.pending_revision`
+until a run claims it (`claimRemodel` clears it), so the per-tick cap or a cooldown puts it off without
+losing it; it is stale once our target was set after it (someone revised the name in between). A verdict
+outranks the 14-day cooldown but waits out a 3-day one after a run that has just landed
+(`VERDICT_COOLDOWN_DAYS`), and takes a slot after held names and before the schedule. The only message is
+the re-model's own `coverage_refreshed` card (below): "Prometheus revised X — <why>: <what moved> — <gist>",
+"… and kept the target: <reason>", or "… tried to re-model X but produced nothing to store". Only
+`validating` — the Street catching up, which asks for nothing — still posts a `coverage_event` card. A re-model that moves a hit target re-opens the thesis (`coverageRefresh._reopenTarget`: status back to `active`), or the next hit on the new number would be swallowed by the `target_hit` ratchet.
+
 Its primary reads **"Revise thesis"**, not "Open coverage" — the refresh card below used the same
 words while doing something entirely different, so in the feed the two were one button. (2026-09-24)
 

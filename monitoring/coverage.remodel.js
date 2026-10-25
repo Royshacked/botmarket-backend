@@ -51,6 +51,43 @@ const DAY_MS = 24 * 60 * 60 * 1000
 export const COOLDOWN_DAYS = 14   // never re-model the same name twice inside this window
 export const FLOOR_DAYS    = 90   // ...but never leave one un-modelled longer than this
 
+// PROMETHEUS REVISES ON HIS OWN (Roy, 2026-10-25: "if a ticker needs revision — Prometheus should do it
+// without asking the user — only send a msg when it's done"). The monitor's verdicts that used to post a
+// "Revise thesis" card and wait for an admin's click are now re-model triggers, and the only card is the
+// re-model's own "done" card (coverageNotify, house). `validating` is not here: the Street catching up to
+// us asks for nothing.
+export const REVISE_STATES = new Set(['target_hit', 'target_hit_early', 'diverging'])
+// A verdict outranks the 14-day cooldown — a thesis that needs revising must not wait two weeks in
+// silence now that no card says so — but not a run that has just landed: the verdict waits this long
+// (kept as `monitor.pending_revision`, so it is not lost) rather than buying the same research twice.
+export const VERDICT_COOLDOWN_DAYS = 3
+const VERDICT_WHY = {
+    target_hit:       'the price reached our target',
+    target_hit_early: 'target reached early — the model was too conservative',
+    diverging:        'the Street is moving away from our target',
+}
+
+/**
+ * The verdict waiting for a re-model, if any — today's, or one an earlier tick stored and no run has
+ * claimed yet (the per-tick cap, the short cooldown, a lost claim). A stored one is STALE once our
+ * target was set after it: someone revised the name in between, and that answered it. Pure.
+ */
+export function pendingRevision(coverage, { gapState = null, gapReason = null } = {}) {
+    if (REVISE_STATES.has(gapState)) return { state: gapState, reason: gapReason ?? null }
+    const p = coverage?.monitor?.pending_revision
+    if (!p || !REVISE_STATES.has(p.state)) return null
+    const atMs = Date.parse(p.at ?? '')
+    const setMs = Date.parse(coverage?.price_target?.set_at ?? '')
+    if (Number.isFinite(atMs) && Number.isFinite(setMs) && setMs > atMs) return null
+    return { state: p.state, reason: p.reason ?? null }
+}
+
+/** The re-model's reason for a verdict — what the run is asked and what the done card says. */
+export function verdictReason(v) {
+    const why = VERDICT_WHY[v?.state] ?? v?.state
+    return v?.reason ? `${why} (${v.reason})` : why
+}
+
 const _num = toNum   // the one safe coercion — see format.util.toNum
 // A leg is {value, multiple, forward_metric} after the scenario change; tolerate a bare legacy number.
 const _legValue = leg => (leg && typeof leg === 'object' ? _num(leg.value) : _num(leg))
@@ -137,7 +174,7 @@ function _lastModelledMs(coverage) {
  *   `next_remodel_reason` labels the SCHEDULED date — which of the two branches below produced it.
  *   It is not `reason`: that one says why a re-model is due NOW, and is null on a quiet tick.
  */
-export function remodelDecision(coverage, { street = null, nowMs = 0, gapState = null } = {}) {
+export function remodelDecision(coverage, { street = null, nowMs = 0, gapState = null, gapReason = null } = {}) {
     const edge = classifyEdge(coverage, street)
     const lastMs = _lastModelledMs(coverage)
     const dates  = parseCatalystDates(coverage?.catalysts)
@@ -160,18 +197,20 @@ export function remodelDecision(coverage, { street = null, nowMs = 0, gapState =
         next_remodel_at: nextRemodelAt, next_remodel_reason: nextRemodelReason,
     }
 
-    // The cooldown outranks every trigger. A name in the news can trip several in the same week, and
-    // three research runs on one ticker in three days buys nothing the first one didn't.
-    if (lastMs !== null && nowMs - lastMs < COOLDOWN_DAYS * DAY_MS) return quiet
-
-    // 0. The target was reached almost immediately (coverage.assess.classifyGapState). The exception
-    //    to "price is never a trigger" below, and it isn't really one: the claim isn't that the tape
-    //    moved, it's that our own number was reached in a fraction of the time we said it would take,
-    //    which contradicts the model directly. Sits UNDER the cooldown like every other trigger, and
-    //    the monitor's `early_hit_at` stamp keeps it firing once.
-    if (gapState === 'target_hit_early') {
-        return { ...quiet, due: true, reason: 'target reached early — the model was too conservative' }
+    // 0. A VERDICT that needs revising (REVISE_STATES): our target reached, reached early (the claim
+    //    isn't that the tape moved, it's that our own number was reached in a fraction of the time we
+    //    said it would take), or the Street moving away. Each fires once — the status, the
+    //    `early_hit_at` stamp and the recorded gap are their ratchets — and waits as
+    //    `monitor.pending_revision` until a run claims it. Under the SHORT cooldown only (above).
+    const verdict = pendingRevision(coverage, { gapState, gapReason })
+    if (verdict) {
+        if (lastMs !== null && nowMs - lastMs < VERDICT_COOLDOWN_DAYS * DAY_MS) return { ...quiet, pending: verdict }
+        return { ...quiet, due: true, reason: verdictReason(verdict), verdict: true }
     }
+
+    // The cooldown outranks every other trigger. A name in the news can trip several in the same week,
+    // and three research runs on one ticker in three days buys nothing the first one didn't.
+    if (lastMs !== null && nowMs - lastMs < COOLDOWN_DAYS * DAY_MS) return quiet
 
     // 1. A dated catalyst has landed since we last modelled.
     const passed = dates.filter(d => {

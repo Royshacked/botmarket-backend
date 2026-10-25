@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { refreshCoverage, _buildRefreshPrompt, _passReason, PASS_REASON_MAX } from '../../services/coverageRefresh.service.js'
+import { _reopenTarget, refreshCoverage, _buildRefreshPrompt, _passReason, PASS_REASON_MAX } from '../../services/coverageRefresh.service.js'
 import { buildCoverageRefreshed } from '../../services/coverageNotify.service.js'
 import { _parseCoverageRefresh } from '../../services/agents/portfolio.agent.service.js'
 
@@ -201,7 +201,7 @@ test('a house run that produces no draft still reports it — with no user on th
     const r = await refreshCoverage({ userId: null, ticker: 'NVDA' }, h.deps)
     assert.equal(r.ok, false)
     assert.equal(r.reason, 'no_draft')
-    assert.deepEqual(h.calls.notify[0], { userId: null, ticker: 'NVDA', portfolioId: null, portfolioName: null, coverageId: null, ok: false })
+    assert.deepEqual(h.calls.notify[0], { userId: null, ticker: 'NVDA', portfolioId: null, portfolioName: null, coverageId: null, ok: false, trigger: null })
 })
 
 // THE UNREACHABLE CARD. A failure card on a name the house already covers must still name the doc:
@@ -295,14 +295,29 @@ test('a pass on a name we do NOT hold is still a plain no-draft — there is no 
     assert.equal(h.calls.update.length, 0)
 })
 
-test('the pass card reads as a kept target with its reason, and offers the revise', () => {
+test('the pass card reads as a kept target with its reason, and opens the thesis to read', () => {
     const house = buildCoverageRefreshed({ userId: 'a1', ticker: 'TEM', coverageId: 'cov_TEM_1', ok: false, house: true, pass: 'not like-for-like.' })
-    assert.equal(house.content, 'Scheduled re-model of TEM kept the existing target — not like-for-like.')
+    assert.equal(house.content, 'Prometheus re-modelled TEM and kept the target: not like-for-like.')
     assert.doesNotMatch(house.content, /nothing to store/)
     assert.equal(house.payload.pass, true)
-    assert.equal(house.actions.primary.label, 'Revise thesis')
+    assert.equal(house.actions.primary.label, 'Open thesis')
+    assert.equal(house.actions.primary.resolvesOn, 'open')
     assert.equal(house.visibility, 'admin')
     const mine = buildCoverageRefreshed({ userId: 'u1', ticker: 'TEM', portfolioId: 'p1', ok: false, pass: 'why.' })
     assert.match(mine.content, /no new target — why\. You can resume the review\./)
     assert.equal(mine.actions.primary.label, 'Resume review')
+})
+
+// A target-hit name re-modelled to a NEW target is live again — or the next hit on it is swallowed.
+test('a re-model that moves a hit target re-opens the thesis; one that keeps it, or names a status, does not', async () => {
+    const hit = { id: 'covH', symbol: 'NVDA', status: 'target_hit', price_target: { value: 200 } }
+    assert.equal(_reopenTarget(hit, { symbol: 'NVDA', price_target: { value: 240 } }).status, 'active')
+    assert.equal(_reopenTarget(hit, { symbol: 'NVDA', price_target: 240 }).status, 'active')
+    assert.equal(_reopenTarget(hit, { symbol: 'NVDA', price_target: { value: 200 } }).status, undefined)
+    assert.equal(_reopenTarget(hit, { symbol: 'NVDA', price_target: { value: 240 }, status: 'retired' }).status, 'retired')
+    assert.equal(_reopenTarget({ ...hit, status: 'active' }, { symbol: 'NVDA', price_target: { value: 240 } }).status, undefined)
+
+    const h = harness({ draft: { symbol: 'NVDA', price_target: { value: 240 } }, initResult: { ok: false, reason: 'already_covered', id: 'covH' }, existing: hit })
+    await refreshCoverage({ userId: null, ticker: 'NVDA' }, h.deps)
+    assert.equal(h.calls.update[0].patch.status, 'active')
 })

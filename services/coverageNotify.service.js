@@ -106,6 +106,10 @@ export async function notifyCoverageEvent(coverage, verdict, deps = _deps) {
 // What every refresh card's button says when there is a thesis to revise — the verdict card's words,
 // because it is the verdict card's doorway (FE CoverageRefreshedBubble → OPEN_COVERAGE 'revise').
 export const REVISE_LABEL = 'Revise thesis'
+// A HOUSE re-model's card (Roy, 2026-10-25: Prometheus revises without asking, and says so when it is
+// done). The revision is made; the button opens it to READ — opening it is the completion.
+export const READ_LABEL = 'Open thesis'
+const _why = trigger => (typeof trigger === 'string' && trigger.trim() ? ` — ${trigger.trim()}` : '')
 // Prometheus says when a headless refresh has rewritten a name's coverage. Two askers, two audiences:
 //
 //   • Atlas's refresh-by-hop (mid-review) names the USER who asked. The card is theirs alone — so the
@@ -121,7 +125,7 @@ export const REVISE_LABEL = 'Revise thesis'
  * (the existing thesis is left in place). `house` = a scheduled re-model, not a user's request: the
  * copy stops talking about "the review" and the card is admin-visible rather than own-only.
  */
-export function buildCoverageRefreshed({ userId, ticker, portfolioId = null, portfolioName = null, coverageId = null, summary = null, ok = true, house = false, pass = null }) {
+export function buildCoverageRefreshed({ userId, ticker, portfolioId = null, portfolioName = null, coverageId = null, summary = null, ok = true, house = false, pass = null, trigger = null, note = null }) {
     const sym = String(ticker ?? '').toUpperCase().trim()
     if (!userId || !sym) return null
     // A PASS — the model reviewed the thesis and declined to set a new number, and said why (see
@@ -131,12 +135,14 @@ export function buildCoverageRefreshed({ userId, ticker, portfolioId = null, por
         return {
             userId,
             content: house
-                ? `Scheduled re-model of ${sym} kept the existing target — ${passWhy}`
+                ? `Prometheus re-modelled ${sym}${_why(trigger)} and kept the target: ${passWhy}`
                 : `Re-researched ${sym}${portfolioName ? ` for "${portfolioName}"` : ''}: no new target — ${passWhy}${portfolioId ? ' You can resume the review.' : ''}`,
             type:       'coverage_refreshed',
             payload:    { kind: 'coverage', symbol: sym, coverageId, portfolioId, ok: false, house, pass: true },
             botId:      'analyst',
-            actions:    portfolioId ? cardActions('Resume review') : cardActions(REVISE_LABEL),
+            actions:    portfolioId ? cardActions('Resume review')
+                      : house       ? cardActions(READ_LABEL, { resolvesOn: 'open' })
+                      :               cardActions(REVISE_LABEL),
             ...(house ? { visibility: 'admin' } : { visibility: 'own', forUserId: userId }),
         }
     }
@@ -150,10 +156,12 @@ export function buildCoverageRefreshed({ userId, ticker, portfolioId = null, por
     // half said "You can resume the review" either way. That was merely wrong before; now that a
     // failed refresh with no review is posted Dismiss-only, it would name an action with no button.
     const resume = portfolioId ? ' You can resume the review.' : ''
+    // The revision's own account ("Re-modelled — PT 85 → 92") is what was done; the gist is the view.
+    const done = typeof note === 'string' && note.trim() ? `: ${note.trim()}` : ''
     const content = house
         ? (ok
-            ? `Scheduled re-model of ${sym} is in${gist}. Take it to Prometheus to revise.`
-            : `Scheduled re-model of ${sym} produced nothing to store — the existing coverage stands.`)
+            ? `Prometheus revised ${sym}${_why(trigger)}${done}${gist}.`
+            : `Prometheus tried to re-model ${sym}${_why(trigger)} but produced nothing to store — the existing coverage stands.`)
         : (ok
             ? `Fresh research on ${sym} is ready${forBook}${gist}.${portfolioId ? ' Resume the review to fold it in.' : ''}`
             : `Couldn't refresh research on ${sym} right now — leaving the existing coverage in place.${resume}`)
@@ -176,9 +184,11 @@ export function buildCoverageRefreshed({ userId, ticker, portfolioId = null, por
         // Floor never renders and a phone hides — a dead button. The revise doorway has neither
         // problem. A refresh that stored NOTHING still asks for nothing (Dismiss only, 2026-09-24) —
         // unchanged here; whether it should offer the revise too is Roy's call, not taken silently.
+        // A HOUSE re-model (2026-10-25) is done work: the button opens the revised thesis to read.
         actions:    portfolioId ? cardActions('Resume review')
-                  : ok          ? cardActions(REVISE_LABEL)
-                  :               dismissOnly(),
+                  : !ok         ? dismissOnly()
+                  : house       ? cardActions(READ_LABEL, { resolvesOn: 'open' })
+                  :               cardActions(REVISE_LABEL),
         ...(house
             ? { visibility: 'admin' }
             : { visibility: 'own', forUserId: userId }),

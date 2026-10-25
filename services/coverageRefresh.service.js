@@ -8,6 +8,7 @@
 import { analystAgentService } from './agents/analyst.agent.service.js'
 import { coverageService, revisionSummary } from '../api/analyst/coverage.service.js'
 import { notifyCoverageRefreshed } from './coverageNotify.service.js'
+import { toNum } from './format.util.js'
 import { resolveCardsFor }     from '../api/chat/chat.service.js'
 import { withTimeout }         from './timeout.util.js'
 import { openingTurn }         from './agentUtils.js'
@@ -80,6 +81,18 @@ export function _buildRefreshPrompt(ticker, question) {
         + ` End with the <coverage> block. Skip it only if you cannot defend a number at all, and then say why in one line beginning "PASS —".`
 }
 
+// A target-hit name re-modelled to a NEW target is live again (2026-10-25). The status `target_hit` is the
+// monitor's ratchet against re-ringing a price parked above our number — left standing over a fresh
+// target it swallowed the next hit in silence, and since Prometheus re-models every hit on his own that
+// is the common path, not the corner. A draft that names its own status keeps it. Pure.
+const _ptValue = pt => toNum(pt && typeof pt === 'object' ? pt.value : pt)
+export function _reopenTarget(existing, draft) {
+    if (existing?.status !== 'target_hit' || !draft || draft.status != null) return draft
+    const was = _ptValue(existing.price_target), now = _ptValue(draft.price_target)
+    if (now === null || now === was) return draft
+    return { ...draft, status: 'active' }
+}
+
 /**
  * Run one async coverage refresh for a name and say so when done. Fire-and-forget from the review
  * controller and from the coverage monitor — NEVER throws (best-effort end to end). Returns a small
@@ -98,7 +111,7 @@ export function _buildRefreshPrompt(ticker, question) {
  *
  * @param {{ userId:string|null, ticker:string, question?:string|null, portfolioId?:string|null, portfolioName?:string|null }} args
  */
-export async function refreshCoverage({ userId = null, ticker, question = null, portfolioId = null, portfolioName = null }, deps = _deps) {
+export async function refreshCoverage({ userId = null, ticker, question = null, portfolioId = null, portfolioName = null, trigger = null }, deps = _deps) {
     const sym = String(ticker ?? '').toUpperCase().trim()
     if (!sym) return { ok: false, reason: 'bad_args' }
 
@@ -122,7 +135,7 @@ export async function refreshCoverage({ userId = null, ticker, question = null, 
             onToken: () => {}, onToolStart: () => {}, onReasoning: () => {}, onPhase: () => {},
         }), RESEARCH_TIMEOUT_MS, `coverage research ${sym}`)
 
-        const draft = result?.coverage
+        const draft = _reopenTarget(existing, result?.coverage)
 
         // A PASS IS A VERDICT, NOT A FAILURE (2026-10-02). The model looked at the thesis and declined
         // to set a new number — and says why. That reasoning used to be thrown away and the card read
@@ -134,7 +147,7 @@ export async function refreshCoverage({ userId = null, ticker, question = null, 
             logger.info(LOG, 're-model passed — reason recorded', { ticker: sym })
             const rec = await deps.update(existing.id, { revision_kind: 'remodel_pass', revision_note: pass })
             if (!rec?.ok) logger.warn(LOG, 'pass reason not recorded (card still says it)', { id: existing.id, reason: rec?.reason })
-            await deps.notify({ userId, ticker: sym, portfolioId, portfolioName, coverageId: existing.id, ok: false, pass })
+            await deps.notify({ userId, ticker: sym, portfolioId, portfolioName, coverageId: existing.id, ok: false, pass, trigger })
             return { ok: false, reason: 'pass', pass }
         }
 
@@ -142,7 +155,7 @@ export async function refreshCoverage({ userId = null, ticker, question = null, 
         // user we left the existing coverage in place so the review can still resume.
         if (!draft || String(draft.symbol ?? '').toUpperCase().trim() !== sym) {
             logger.warn(LOG, 'no usable coverage draft', { ticker: sym })
-            await deps.notify({ userId, ticker: sym, portfolioId, portfolioName, coverageId: existing?.id ?? null, ok: false })
+            await deps.notify({ userId, ticker: sym, portfolioId, portfolioName, coverageId: existing?.id ?? null, ok: false, trigger })
             return { ok: false, reason: 'no_draft' }
         }
 
@@ -167,7 +180,7 @@ export async function refreshCoverage({ userId = null, ticker, question = null, 
         // a thesis that never changed is worse than reporting the failure: the review resumes on the
         // OLD artifact either way, and only one of those messages is true.
         if (!persisted) {
-            await deps.notify({ userId, ticker: sym, portfolioId, portfolioName, coverageId: coverageId ?? existing?.id ?? null, ok: false })
+            await deps.notify({ userId, ticker: sym, portfolioId, portfolioName, coverageId: coverageId ?? existing?.id ?? null, ok: false, trigger })
             return { ok: false, reason: failReason }
         }
 
@@ -177,17 +190,15 @@ export async function refreshCoverage({ userId = null, ticker, question = null, 
         // still asking for a click. Before the "re-model is in" card goes out, so the feed reads in
         // order: asked → answered → here is the answer. The note is the revision's own account; a
         // fresh initiation has no diff to describe.
-        if (coverageId) {
-            const note = upd?.doc ? revisionSummary(upd.doc.revisions?.[0]) : 'Coverage initiated'
-            await deps.resolve({ kind: 'coverage', id: coverageId }, { outcome: 'revised', note })
-        }
-        await deps.notify({ userId, ticker: sym, portfolioId, portfolioName, coverageId, summary: draft.thesis ?? null, ok: true })
+        const note = upd?.doc ? revisionSummary(upd.doc.revisions?.[0]) : 'Coverage initiated'
+        if (coverageId) await deps.resolve({ kind: 'coverage', id: coverageId }, { outcome: 'revised', note })
+        await deps.notify({ userId, ticker: sym, portfolioId, portfolioName, coverageId, summary: draft.thesis ?? null, ok: true, trigger, note })
         logger.info(LOG, 'refresh done', { ticker: sym, coverageId })
         return { ok: true, coverageId }
     } catch (err) {
         logger.warn(LOG, 'refresh failed', err.message)
         // Best-effort ping so the user isn't left waiting on a silent failure.
-        try { await deps.notify({ userId, ticker: sym, portfolioId, portfolioName, coverageId: existing?.id ?? null, ok: false }) } catch { /* ignore */ }
+        try { await deps.notify({ userId, ticker: sym, portfolioId, portfolioName, coverageId: existing?.id ?? null, ok: false, trigger }) } catch { /* ignore */ }
         return { ok: false, reason: 'error' }
     }
 }

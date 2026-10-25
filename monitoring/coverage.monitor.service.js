@@ -16,7 +16,7 @@
 import { getPriceTargetConsensus } from '../providers/fmp.provider.js'
 import { coverageService, COLLECTION } from '../api/analyst/coverage.service.js'
 import { classifyGapState, recomputeGap, statusForState, nextCheckAt } from './coverage.assess.js'
-import { remodelDecision }        from './coverage.remodel.js'
+import { remodelDecision, REVISE_STATES } from './coverage.remodel.js'
 import { refreshCoverage }        from '../services/coverageRefresh.service.js'
 import { notifyCoverageEvent }    from '../services/coverageNotify.service.js'
 import { entityRepo }             from '../services/entity/entityRepo.service.js'
@@ -60,6 +60,9 @@ const _deps = {
         userId:   null,
         ticker:   cov.symbol,
         question: `Scheduled re-model (${reason}). Re-run the valuation with fresh estimates and restate the variant view.`,
+        // The done card names why the run happened — since 2026-10-25 it is the ONLY card a verdict
+        // that needs revising produces (coverage.remodel REVISE_STATES).
+        trigger:  reason,
     }),
     // Symbols held by ANY user — house coverage priority is based on cross-user exposure.
     // Names actively held somewhere in the system get re-model slots first.
@@ -75,8 +78,9 @@ const _deps = {
         }
     },
     // Every admin hears a material verdict (coverageNotify derives the audience — house coverage has
-    // no userId). Traders never do: the feed is admin-only, and the card asks for a revision only an
-    // admin can make. Logged as well, so the verdict is on record even when the roster is empty.
+    // no userId). Traders never do: the feed is admin-only. Logged as well, so the verdict is on record
+    // even when the roster is empty. Since 2026-10-25 only a verdict that needs NO revision (validating)
+    // comes here; the rest are re-modelled and the re-model's card says so when it is done.
     notify: (cov, verdict) => {
         logger.info(LOG, 'coverage event', { symbol: cov.symbol, state: verdict.state, reason: verdict.reason })
         return notifyCoverageEvent(cov, verdict)
@@ -104,7 +108,7 @@ const _loop = createDueLoop({
     // The re-model budget is the one decision no single check can make — it is spent ACROSS the due
     // set (held names first, then capped), so it belongs after all of them rather than inside any.
     afterTick:  (results) => _runRemodels(
-        results.filter(r => r.result?.remodel?.due).map(r => ({ cov: r.entity, reason: r.result.remodel.reason })),
+        results.filter(r => r.result?.remodel?.due).map(r => ({ cov: r.entity, reason: r.result.remodel.reason, verdict: Boolean(r.result.remodel.verdict) })),
         _deps,
     ),
     intervalMs: POLL_INTERVAL_MS,
@@ -134,7 +138,10 @@ export async function _runRemodels(candidates, deps = _deps) {
     const held = await deps.getHeldSymbols()
     const isHeld = c => held.has(String(c.cov.symbol).toUpperCase())
 
-    const ordered = [...candidates].sort((a, b) => (isHeld(b) ? 1 : 0) - (isHeld(a) ? 1 : 0))
+    // Held names first, then a VERDICT waiting for its revision (no card asked an admin for it, so a
+    // late run is the only answer it gets), then the schedule. Stable within each group.
+    const rank = c => (isHeld(c) ? 2 : 0) + (c.verdict ? 1 : 0)
+    const ordered = [...candidates].sort((a, b) => rank(b) - rank(a))
     const run = ordered.slice(0, MAX_REMODELS_PER_TICK)
     const deferred = ordered.slice(MAX_REMODELS_PER_TICK)
     if (deferred.length) {
@@ -186,7 +193,15 @@ export async function _checkCoverage(cov, nowMs, deps = _deps) {
     // The expensive-tier decision rides the SAME daily fetch — no extra call to ask "is a re-model
     // earned?". `edge_category` is persisted on every tick precisely so the next one can spot a
     // CHANGE; recording it is what makes that trigger possible at all.
-    const remodel = remodelDecision(cov, { street, nowMs, gapState: verdict.state })
+    // A verdict the doc ALREADY records (below) is no new trigger — a price parked above our target
+    // must not re-model the name every few days.
+    const earlyStampMs = Date.parse(cov.monitor?.early_hit_at ?? '')
+    const targetSetMs  = Date.parse(cov.price_target?.set_at ?? '')
+    const earlyAlreadyStamped = Number.isFinite(earlyStampMs)
+        && (!Number.isFinite(targetSetMs) || earlyStampMs >= targetSetMs)
+    const alreadyRecorded = (verdict.state === 'target_hit'       && cov.status === 'target_hit')
+                         || (verdict.state === 'target_hit_early' && earlyAlreadyStamped)
+    const remodel = remodelDecision(cov, { street, nowMs, gapState: alreadyRecorded ? null : verdict.state, gapReason: verdict.reason })
     // (An Aether-triggered override rode here until 2026-09-16 — a `pending_aether_remodel` flag
     // set by a change stream on the channel engine's opportunity collections. Those collections
     // went with the engine on 2026-09-09 and the stream had been watching a collection named
@@ -207,6 +222,12 @@ export async function _checkCoverage(cov, nowMs, deps = _deps) {
             // stamping it on the quiet path would be a no-op, since the quiet path for this state is
             // reached only when the stamp already exists.
             ...(verdict.state === 'target_hit_early' ? { 'monitor.early_hit_at': new Date(nowMs).toISOString() } : {}),
+            // A verdict that needs revising waits here until a re-model claims it (claimRemodel clears
+            // it) — the per-tick cap or the short cooldown can put the run off, and nothing re-derives
+            // it: the verdict's own ratchet keeps it from firing again.
+            ...(!alreadyRecorded && REVISE_STATES.has(verdict.state)
+                ? { 'monitor.pending_revision': { state: verdict.state, reason: verdict.reason ?? null, at: new Date(nowMs).toISOString() } }
+                : {}),
         },
         $inc: { 'monitor.checks': 1 },
     }
@@ -226,14 +247,7 @@ export async function _checkCoverage(cov, nowMs, deps = _deps) {
     // standing from the previous target would then swallow the next early hit in silence, which is the
     // one verdict that must never go unheard twice in a row. A stamp older than the current target has
     // outlived its subject and no longer ratchets anything.
-    const earlyStampMs = Date.parse(cov.monitor?.early_hit_at ?? '')
-    const targetSetMs  = Date.parse(cov.price_target?.set_at ?? '')
-    const earlyAlreadyStamped = Number.isFinite(earlyStampMs)
-        && (!Number.isFinite(targetSetMs) || earlyStampMs >= targetSetMs)
-
-    const alreadyRecorded = (verdict.state === 'target_hit'       && cov.status === 'target_hit')
-                         || (verdict.state === 'target_hit_early' && earlyAlreadyStamped)
-
+    // (earlyAlreadyStamped / alreadyRecorded are computed above, before the re-model decision.)
     if (verdict.state === 'stable' || alreadyRecorded) {
         // Quiet day — refresh the recorded gap + bookkeeping directly (no revision, no notify).
         // A quiet DAY is not a quiet QUARTER: the re-model decision still stands, since a catalyst
@@ -262,6 +276,9 @@ export async function _checkCoverage(cov, nowMs, deps = _deps) {
     // updateCoverage owns the THESIS; this owns the monitor's record of its own work. Both writes
     // now go through coverageService, which is the only module that knows this collection's shape.
     await deps.recordMonitorState(cov.id, { set: bookkeeping.$set, inc: bookkeeping.$inc })
-    deps.notify(cov, verdict)
+    // NO CARD for a verdict that needs revising (Roy, 2026-10-25) — Prometheus re-models it on his own
+    // and the re-model's card is the message, when it is done.
+    if (!REVISE_STATES.has(verdict.state)) deps.notify(cov, verdict)
+    else logger.info(LOG, 'coverage event → re-model, no card', { symbol: cov.symbol, state: verdict.state, reason: verdict.reason, due: remodel.due })
     return { ...verdict, remodel }
 }

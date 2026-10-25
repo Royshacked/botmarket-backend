@@ -32,14 +32,16 @@ function harness({ price, consensusPt }) {
     return { deps, updates, writes, notifies }
 }
 
-test('target_hit: updates status + gap + revision, notifies, and KEEPS watching', async () => {
+test('target_hit: updates status + gap + revision, posts NO card (a re-model is queued), and KEEPS watching', async () => {
     const h = harness({ price: 205, consensusPt: 190 })
     const v = await _checkCoverage(cov(), 0, h.deps)
     assert.equal(v.state, 'target_hit')
     assert.equal(h.updates.length, 1)
     assert.equal(h.updates[0].patch.status, 'target_hit')
     assert.equal(h.updates[0].patch.revision_kind, 'target_hit')
-    assert.equal(h.notifies.length, 1)
+    assert.equal(h.notifies.length, 0)   // Prometheus revises on his own; the re-model's card is the message
+    assert.equal(v.remodel.due, true)
+    assert.equal(h.writes.at(-1).set['monitor.pending_revision'].state, 'target_hit')
     // Hitting our target ends nothing — it prompts the next question (harvest? re-model?).
     const book = h.writes.at(-1)
     assert.equal(book.set['monitor.next_check_at'], '1970-01-02T00:00:00.000Z')
@@ -247,14 +249,14 @@ const earlyCov = (over = {}) => cov({
     ...over,
 })
 
-test('target_hit_early: notifies + appends a revision but does NOT retire the thesis', async () => {
+test('target_hit_early: appends a revision, no card, and does NOT retire the thesis', async () => {
     const h = harness({ price: 205, consensusPt: 190 })
     const v = await _checkCoverage(earlyCov(), T0 + 21 * DAY, h.deps)
     assert.equal(v.state, 'target_hit_early')
     assert.equal(h.updates.length, 1)
     assert.equal(h.updates[0].patch.revision_kind, 'target_hit_early')
     assert.equal(h.updates[0].patch.status, undefined)   // stays active — the call is re-opened, not booked
-    assert.equal(h.notifies.length, 1)
+    assert.equal(h.notifies.length, 0)
     assert.ok(h.writes.at(-1).set['monitor.early_hit_at'])   // the ratchet is stamped
 })
 
@@ -275,12 +277,13 @@ test('an early hit earns a re-model — the model was too conservative', async (
     assert.match(v.remodel.reason, /early/)
 })
 
-test('...but it still sits under the re-model cooldown, like every other trigger', async () => {
+test('...but it waits out the SHORT verdict cooldown after a run that has just landed — kept pending', async () => {
     const h = harness({ price: 205, consensusPt: 190 })
     const recent = earlyCov({ monitor: { last_remodel_at: new Date(T0 + 20 * DAY).toISOString() } })
     const v = await _checkCoverage(recent, T0 + 21 * DAY, h.deps)
     assert.equal(v.state, 'target_hit_early')
     assert.equal(v.remodel.due, false)
+    assert.equal(h.writes.at(-1).set['monitor.pending_revision'].state, 'target_hit_early')   // not lost
 })
 
 test('the early-hit stamp is scoped to the TARGET, not the name — a re-modelled PT can fire again', async () => {
@@ -293,6 +296,56 @@ test('the early-hit stamp is scoped to the TARGET, not the name — a re-modelle
     })
     const v = await _checkCoverage(remodelled, Date.parse('2026-02-20T00:00:00.000Z'), h.deps)
     assert.equal(v.state, 'target_hit_early')
-    assert.equal(h.notifies.length, 1)   // heard, not swallowed
+    assert.equal(v.remodel.due, true)    // heard, not swallowed — re-modelled again
     assert.equal(h.writes.at(-1).set['monitor.early_hit_at'], '2026-02-20T00:00:00.000Z')
+})
+
+// ── Prometheus revises on his own (Roy, 2026-10-25) ──────────────────────────
+// A verdict that needs revising posts no card: it is queued as a re-model, kept as
+// `monitor.pending_revision` until a run claims it, and the re-model's own card is the only message.
+
+test('diverging: no card, a re-model due now — even inside the 14-day cooldown', async () => {
+    const h = harness({ price: 190, consensusPt: 160 })   // 180 → 160, away from our 200 → diverging
+    const c = cov({ created_at: '2026-01-01T00:00:00.000Z', monitor: { last_remodel_at: new Date(T0 - 7 * DAY).toISOString() } })
+    const v = await _checkCoverage(c, T0, h.deps)
+    assert.equal(v.state, 'diverging')
+    assert.equal(h.notifies.length, 0)
+    assert.equal(v.remodel.due, true)
+    assert.equal(v.remodel.verdict, true)
+    assert.match(v.remodel.reason, /Street is moving away/)
+})
+
+test('validating asks for nothing — it keeps its card and queues no re-model', async () => {
+    const h = harness({ price: 190, consensusPt: 195 })
+    const v = await _checkCoverage(cov({ created_at: '2026-01-01T00:00:00.000Z' }), T0, h.deps)
+    assert.equal(v.state, 'validating')
+    assert.equal(h.notifies.length, 1)
+    assert.equal(v.remodel.due, false)
+    assert.equal(h.writes.at(-1).set['monitor.pending_revision'], undefined)
+})
+
+test('a pending revision survives a quiet day and fires once the short cooldown is over', async () => {
+    const h = harness({ price: 150, consensusPt: 180 })   // stable today
+    const c = cov({
+        created_at: '2026-01-01T00:00:00.000Z',
+        monitor: { last_remodel_at: new Date(T0 - 5 * DAY).toISOString(), pending_revision: { state: 'diverging', reason: 'Street 200 → 180', at: new Date(T0 - 2 * DAY).toISOString() } },
+    })
+    const v = await _checkCoverage(c, T0, h.deps)
+    assert.equal(v.state, 'stable')
+    assert.equal(v.remodel.due, true)
+    assert.match(v.remodel.reason, /Street 200 → 180/)
+})
+
+test('a price parked above an already-recorded target_hit queues nothing again', async () => {
+    const h = harness({ price: 205, consensusPt: 190 })
+    const v = await _checkCoverage(cov({ status: 'target_hit', created_at: '2026-01-01T00:00:00.000Z' }), T0, h.deps)
+    assert.equal(v.applied, false)
+    assert.equal(v.remodel.due, false)
+    assert.equal(h.notifies.length, 0)
+})
+
+test('a verdict waiting for its revision outranks the schedule for a slot, held names still first', async () => {
+    const h = remodelHarness({ heldSymbols: ['H'] })
+    await _runRemodels([cand('A'), cand('B'), { ...cand('V', 'the Street is moving away'), verdict: true }, cand('H')], h.deps)
+    assert.deepEqual(h.ran.map(r => r.symbol), ['H', 'V', 'A'])
 })

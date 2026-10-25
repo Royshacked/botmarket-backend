@@ -250,3 +250,30 @@ test('the label is reported on a DUE tick too — the next date is already sched
     assert.equal(d.due, true)
     assert.equal(d.next_remodel_reason, 'Q3 earnings')
 })
+
+// ── verdict triggers (Roy, 2026-10-25: Prometheus revises without asking) ───
+import { pendingRevision, verdictReason, VERDICT_COOLDOWN_DAYS } from '../../monitoring/coverage.remodel.js'
+
+test('a stored pending revision is stale once our target was set after it — someone revised it', () => {
+    const p = { state: 'target_hit', reason: null, at: '2026-03-01T00:00:00.000Z' }
+    assert.deepEqual(pendingRevision({ monitor: { pending_revision: p }, price_target: { set_at: '2026-02-01T00:00:00.000Z' } }), { state: 'target_hit', reason: null })
+    assert.equal(pendingRevision({ monitor: { pending_revision: p }, price_target: { set_at: '2026-03-02T00:00:00.000Z' } }), null)
+    assert.equal(pendingRevision({ monitor: { pending_revision: { state: 'validating' } } }), null)
+    assert.equal(pendingRevision({}, { gapState: 'stable' }), null)
+})
+
+test('the verdict reason says what happened, with the classifier\'s own detail', () => {
+    assert.equal(verdictReason({ state: 'target_hit' }), 'the price reached our target')
+    assert.equal(verdictReason({ state: 'diverging', reason: 'Street 190 → 170' }), 'the Street is moving away from our target (Street 190 → 170)')
+})
+
+test('a verdict outranks the 14-day cooldown but not a run inside the short one', () => {
+    const lastAt = Date.parse('2026-03-01T00:00:00Z')
+    const c = { created_at: '2026-01-01T00:00:00Z', monitor: { last_remodel_at: new Date(lastAt).toISOString() } }
+    const early = remodelDecision(c, { nowMs: lastAt + (VERDICT_COOLDOWN_DAYS - 1) * DAY, gapState: 'diverging' })
+    assert.equal(early.due, false)
+    assert.equal(early.pending.state, 'diverging')
+    const later = remodelDecision(c, { nowMs: lastAt + (VERDICT_COOLDOWN_DAYS + 1) * DAY, gapState: 'diverging' })
+    assert.equal(later.due, true)
+    assert.equal(later.verdict, true)
+})
