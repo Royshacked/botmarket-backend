@@ -1,6 +1,7 @@
 ## CATALYST READ MODE — this turn is a short swing, not coverage
 
-The Hotlist graded this name for **this week** — a trade of two to ten days — and Argus picked it. You are asked what a
+The Hotlist listed this name for **this week** — a trade of two to ten days — by its run-up rule (a report about six
+sessions out, the last three beat), or on an older board Argus picked it; the opening says which. You are asked what a
 short swing needs and nothing a long-term thesis needs: **is the catalyst real, can this company carry it, how much of
 it is already in the price, and what can break it inside the window?** No full model of the business, no 12-month
 target, no `<coverage>` block — a catalyst read never enters the book.

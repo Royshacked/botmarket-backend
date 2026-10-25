@@ -8,11 +8,11 @@
 // board is published unlabelled, never not at all. The model is DAILY_SCREENER_NEWS_MODEL (Haiku 4.5
 // by Roy's decision, §10), reached through the registry so a different one is a setting, not code.
 
-import { CHEAP_MODEL } from './llmModels.js'
-import { oneShotText } from './oneShot.service.js'
-import { extractFirstJSON } from '../monitoring/parsers/llmReply.parser.js'
-import { config } from './config.js'
-import { logger } from './logger.service.js'
+import { CHEAP_MODEL } from '../../services/llmModels.js'
+import { oneShotText } from '../../services/oneShot.service.js'
+import { extractFirstJSON } from '../../monitoring/parsers/llmReply.parser.js'
+import { config } from '../../services/config.js'
+import { logger } from '../../services/logger.service.js'
 
 const LOG = '[hotlist.news]'
 

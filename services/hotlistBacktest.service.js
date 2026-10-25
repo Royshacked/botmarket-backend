@@ -66,12 +66,23 @@ export const BEAT_MIN = 0.05
  * → the catalyst a live label would carry, or null. Pure.
  */
 export function earningsBeat(report) {
+    const b = beatSurprise(report)
+    if (!b || b.revenueMissed) return null
+    return { material: true, type: 'drift', surprise: 'positive', proxy: 'earnings_beat' }
+}
+
+/**
+ * The beat itself, shared by the proxy above and the screener lab (screenerLab.service): an EPS beat of BEAT_MIN (and a
+ * cent) → `{ surprise, revenueMissed }` — the surprise as a share of the estimate (null on a zero estimate); revenue
+ * missed when both its numbers are known and the actual is under. Null on no beat or no numbers. Pure.
+ */
+export function beatSurprise(report) {
     const a = Number(report?.epsActual), e = Number(report?.epsEstimated)
     if (report?.epsActual == null || report?.epsEstimated == null || !Number.isFinite(a) || !Number.isFinite(e)) return null
     if (a < e + Math.max(0.01, Math.abs(e) * BEAT_MIN)) return null
     const ra = Number(report.revenueActual), re = Number(report.revenueEstimated)
-    if (report.revenueActual != null && report.revenueEstimated != null && Number.isFinite(ra) && Number.isFinite(re) && ra < re) return null
-    return { material: true, type: 'drift', surprise: 'positive', proxy: 'earnings_beat' }
+    const revenueMissed = report.revenueActual != null && report.revenueEstimated != null && Number.isFinite(ra) && Number.isFinite(re) && ra < re
+    return { surprise: e !== 0 ? (a - e) / Math.abs(e) : null, revenueMissed }
 }
 
 /** The report the overnight pass would have seen for session `day`: the first on or after the evening before, within 21 days. Pure. */
@@ -153,7 +164,58 @@ const _median = (xs) => {
     return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2
 }
 
-/** One group's numbers, as the live record's (hotlist.outcomes): ended up, mean and median return, reached its level. Pure. */
+/** The return buckets of a group's distribution, in % — edges between them (DIST_EDGES[k] is bucket k+1's floor). */
+export const DIST_EDGES = Object.freeze([-10, -5, -2, 0, 2, 5, 10])
+/** The percentiles a group's distribution reports. */
+export const DIST_PCTS = Object.freeze([5, 10, 25, 50, 75, 90, 95])
+
+const _pct = (sorted, p) => {
+    if (!sorted.length) return null
+    const k = (sorted.length - 1) * p / 100, lo = Math.floor(k), hi = Math.ceil(k)
+    return sorted[lo] + (sorted[hi] - sorted[lo]) * (k - lo)
+}
+const _sd = (xs) => {
+    if (xs.length < 2) return null
+    const m = xs.reduce((s, x) => s + x, 0) / xs.length
+    return Math.sqrt(xs.reduce((s, x) => s + (x - m) ** 2, 0) / (xs.length - 1))
+}
+
+/**
+ * How a group's returns spread (Roy, 2026-10-24: "do you have a distribution of the percent profit?") → `{ sd,
+ * pcts: {p5…p95}, buckets: [{ from, to, n, share }], sessions, session_mean, ci95 }`. The CONFIDENCE RANGE counts each
+ * SESSION once — the names of one day move together with the market, so treating thousands of them as independent
+ * would make a range far too narrow: the mean of the sessions' means, ±1.96 standard errors across sessions. Null on
+ * an empty group. Pure.
+ */
+export function distribution(xs) {
+    const rets = xs.map(o => o.outcome.ret_pct).filter(Number.isFinite)
+    if (!rets.length) return null
+    const sorted = [...rets].sort((a, b) => a - b)
+    const edges = [-Infinity, ...DIST_EDGES, Infinity]
+    const buckets = edges.slice(0, -1).map((from, k) => {
+        const to = edges[k + 1], n = rets.filter(r => r >= from && r < to).length
+        return { from: Number.isFinite(from) ? from : null, to: Number.isFinite(to) ? to : null, n, share: _r((n / rets.length) * 100, 1) }
+    })
+    const byDay = new Map()
+    for (const o of xs) {
+        if (!Number.isFinite(o.outcome.ret_pct)) continue
+        if (!byDay.has(o.day)) byDay.set(o.day, [])
+        byDay.get(o.day).push(o.outcome.ret_pct)
+    }
+    const means = [...byDay.values()].map(v => v.reduce((s, x) => s + x, 0) / v.length)
+    const sessionMean = means.reduce((s, x) => s + x, 0) / means.length
+    const se = means.length >= 2 ? _sd(means) / Math.sqrt(means.length) : null
+    return {
+        sd: _r(_sd(rets)),
+        pcts: Object.fromEntries(DIST_PCTS.map(p => [`p${p}`, _r(_pct(sorted, p))])),
+        buckets,
+        sessions: means.length,
+        session_mean: _r(sessionMean),
+        ci95: se != null ? [_r(sessionMean - 1.96 * se), _r(sessionMean + 1.96 * se)] : null,
+    }
+}
+
+/** One group's numbers, as the live record's (hotlist.outcomes): ended up, mean and median return, reached its level — and how the returns spread (distribution). Pure. */
 export function groupStats(xs) {
     const judged = xs.filter(o => o.outcome.reached != null)
     return {
@@ -164,6 +226,7 @@ export function groupStats(xs) {
         hit_rate:   judged.length ? _r((judged.filter(o => o.outcome.reached).length / judged.length) * 100, 1) : null,
         judged:     judged.length,
         mfe_median: _r(_median(xs.map(o => o.outcome.mfe_pct))),
+        dist:       distribution(xs),
     }
 }
 

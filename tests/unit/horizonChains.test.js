@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { memDb } from '../helpers/memDb.js'
 import { normalizeRead, MAX_PICKS } from '../../services/hotlist.argus.js'
 import { dayList, hotlistSeed } from '../../services/hotlist.service.js'
-import { runCheckpoint, BOARDS } from '../../services/dailyScreener.checkpoint.js'
+import { BOARDS } from '../../services/hotlist.boards.js'
 import { _parseCatalystRead, MODES, _buildSystemPrompt } from '../../services/agents/analyst.agent.service.js'
 import { catalystTarget, buildCatalystRead, gradeCatalystRead } from '../../services/catalystRead.service.js'
 import { startRun, getRun, researchOpening, isCatalystItem } from '../../services/researchRun.service.js'
@@ -28,33 +28,6 @@ test('Argus picks per column: each column capped on its own, a name can be a pic
     assert.equal(by('open')[0], 'BOTH')
     assert.equal(by('week')[0], 'BOTH')
     assert.equal(r.picks.filter(p => p.symbol === 'BOTH' && p.column === 'week').length, 1, 'a repeat on the same column goes')
-})
-
-test('the checkpoint marks each pick in its column, ranked in that column\'s list; `pick` stays the first', async () => {
-    const { db, rows } = memDb()
-    for (const s of ['AAA', 'BBB']) {
-        rows('daily_screener_stats').push({ symbol: s, day: '2026-10-20', close: 100, atr14: 4, atr_pct: 4, adv20_usd: 100e6, avg_vol20: 1e6,
-            day_high: 101, high5: 103, high20: 106, high50: 110, high52w: 120, rs20: 3, nr7: true, next_earnings: '2026-10-27' })
-    }
-    await runCheckpoint({ deps: {
-        db: async () => db, latestRun: async () => ({ day: '2026-10-20' }),
-        news: async () => [], earnings: async () => [], grades: async () => [], movers: async () => [],
-        extQuote: async () => ({ mid: 104, spreadPct: 0.02, volume: 30_000 }), quote: async () => null,
-        label: async () => new Map(),
-        argus: async (b) => {
-            const syms = b.rows.map(r => r.symbol)
-            return { summary: 's', model: 'm', avoid: [], picks: [
-                { symbol: syms[0], column: 'open', why: 'o1' }, { symbol: syms[1], column: 'open', why: 'o2' },
-                { symbol: syms[1], column: 'week', why: 'w1', caution: 'c' },
-            ] }
-        },
-        perMinute: () => 6000, now: () => Date.parse('2026-10-21T12:05:00Z'), sleep: async () => {},
-    } })
-    const board = rows(BOARDS)[0]
-    const [first, second] = board.rows
-    assert.deepEqual(first.picks, { open: { why: 'o1', caution: undefined, rank: 1 } })
-    assert.deepEqual(second.picks, { open: { why: 'o2', caution: undefined, rank: 2 }, week: { why: 'w1', caution: 'c', rank: 1 } })
-    assert.equal(second.pick.column, 'open', 'the first pick on the row')
 })
 
 test('the day\'s list: a column\'s pick comes from the latest board that graded it', () => {
@@ -194,6 +167,11 @@ test('a name with a LIVE read is skipped; a read with no target is a pass', asyn
     assert.deepEqual(run.results.map(r => [r.symbol, r.outcome, r.reason]), [['LIVE', 'skipped', 'live_read'], ['THIN', 'passed', 'unclear']])
     assert.equal(isCatalystItem({ context: { pythia: true } }), false)
     assert.doesNotMatch(researchOpening({ symbol: 'X', context: { sector: 'Tech' } }), /Catalyst/)
+    // The overnight board's names were listed by the run-up rule — the opening says so, never "Argus picked it".
+    const rule = researchOpening({ symbol: 'R', context: { hotlist: true, day: '2026-10-26', rule: true, facts: 'run-up rule: reports 2026-11-02' } })
+    assert.match(rule, /The run-up rule listed it/)
+    assert.doesNotMatch(rule, /Argus picked it/)
+    assert.match(researchOpening({ symbol: 'R', context: { hotlist: true, rule: true, requested: true } }), /A user asked for this read now/)
 })
 
 // ─── §4 the automatic hand-off ──────────────────────────────────────────────
@@ -224,18 +202,19 @@ function handDeps(over = {}) {
     } }
 }
 
-test("the 09:20 board's WEEK picks, in his order, go to Prometheus with the board's facts and his reason", async () => {
+test("an older 09:20 board's WEEK picks keep his order; the hand-off now follows the overnight week board", async () => {
     assert.deepEqual(weekPicks(HBOARD).map(r => r.symbol), ['ONE', 'TWO'])
     const ctx = hotlistContext(HBOARD, HBOARD.rows[1])
     assert.equal(ctx.hotlist, true)
     assert.equal(ctx.why, 'first')
     assert.match(ctx.facts, /^this week \(2–10 days\)(?! [ABC]\b)/, 'no grade handed on (2026-10-24)')
     const { queued, starts, marks, deps } = handDeps()
-    const r = await afterCheckpoint({ outcome: 'done', id: 'hb_2026-10-23_preopen' }, deps)
+    assert.equal((await afterCheckpoint({ outcome: 'done', id: 'hb_2026-10-23_preopen' }, deps)).outcome, 'not_this_board', 'the 09:20 board hands nothing on any more (2026-10-25)')
+    const r = await afterCheckpoint({ outcome: 'done', id: 'hb_2026-10-23_week' }, deps)
     assert.deepEqual(r.queued, ['ONE', 'TWO'])
     assert.deepEqual(queued.map(q => [q.symbol, q.source]), [['ONE', 'hotlist'], ['TWO', 'hotlist']])
     assert.deepEqual(starts, [{ userId: null, symbols: ['ONE', 'TWO'], maxUsd: 1, source: 'hotlist' }])
-    assert.deepEqual(marks, ['hb_2026-10-23_preopen'], 'the board is stamped: handed off')
+    assert.deepEqual(marks, [HBOARD.id], 'the board read is stamped: handed off')
 })
 
 test("only the 09:20 board, only when on, and never past the day's name cap", async () => {
@@ -244,7 +223,9 @@ test("only the 09:20 board, only when on, and never past the day's name cap", as
     const capped = handDeps({ maxNames: () => 1 })
     const r = await queueWeekPicks(HBOARD, capped.deps)
     assert.deepEqual(r, { queued: ['ONE'], skipped: 1, live: 0 })
-    assert.equal(dayStart('2026-10-23'), '2026-10-23T00:00:00.000Z')
+    // The previous weekday's UTC midnight: the overnight board for a day is built the evening before (code review 2026-10-25).
+    assert.equal(dayStart('2026-10-23'), '2026-10-22T00:00:00.000Z')
+    assert.equal(dayStart('2026-10-26'), '2026-10-23T00:00:00.000Z', 'Monday — from Friday')
 })
 
 test("the pick-up researches today's waiting names; a run going touches nothing", async () => {
@@ -257,18 +238,18 @@ test("the pick-up researches today's waiting names; a run going touches nothing"
     assert.equal((await resume('2026-10-23', { ...deps, enabled: () => false })).outcome, 'off')
 })
 
-test('the screener tick: checkpoint, then the hand-off, then the pick-up, then (hourly) the grading', async () => {
+test('the screener tick: the nightly pass, the week board, outcomes, the week board’s hand-off, the pick-up, the grading — no checkpoint', async () => {
     _resetGrade()
     const order = []
     const deps = {
         enabled: () => true, now: () => Date.parse('2026-10-23T13:25:00Z'),
-        nightly: async () => { order.push('nightly') }, outcomes: async () => { order.push('outcomes') },
-        checkpoint: async () => { order.push('checkpoint'); return { outcome: 'done', id: 'hb_2026-10-23_preopen' } },
+        nightly: async () => { order.push('nightly') }, week: async () => { order.push('week'); return { outcome: 'done', id: 'hb_2026-10-26_week' } },
+        outcomes: async () => { order.push('outcomes') },
         afterCheckpoint: async (r) => { order.push(`after:${r.id}`) }, resume: async (day) => { order.push(`resume:${day}`) },
         gradeReads: async () => { order.push('grade') },
     }
     await _tick(deps)
-    assert.deepEqual(order, ['nightly', 'outcomes', 'checkpoint', 'after:hb_2026-10-23_preopen', 'resume:2026-10-23', 'grade'])
+    assert.deepEqual(order, ['nightly', 'week', 'outcomes', 'after:hb_2026-10-26_week', 'resume:2026-10-23', 'grade'])
     order.length = 0
     await _tick(deps)
     assert.ok(!order.includes('grade'), 'graded at most hourly')

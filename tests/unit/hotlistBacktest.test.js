@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { memDb } from '../helpers/memDb.js'
-import { nextReportFor, replaySymbol, summarizeReplay, replayWeek, backtestSummary, BACKTEST } from '../../services/hotlistBacktest.service.js'
+import { nextReportFor, replaySymbol, summarizeReplay, replayWeek, backtestSummary, BACKTEST, distribution, groupStats } from '../../services/hotlistBacktest.service.js'
 import { POOL_GRADE } from '../../services/hotlist.outcomes.js'
 import { hotlistOutcomes } from '../../services/hotlist.service.js'
 
@@ -162,4 +162,23 @@ test("the stand-in's variants: a beat with a small move since before the report,
     assert.deepEqual(catalystVariants({ rows: down, dateOf, i: 2, results: new Map(), beat }), [], 'a beat it sold off on: not a small move')
     const two = catalystVariants({ rows, dateOf, i: 2, results: new Map([['d0', beatRow]]), beat: null })
     assert.deepEqual(two.map(v => v[0]), ['day_two'], 'reported two sessions back: bought on the second day after it')
+})
+
+// Roy, 2026-10-24: "do you have a distribution of the percent profit?"
+test('the distribution: percentiles, buckets, and a confidence range that counts each session once', () => {
+    const o = (day, ret) => ({ day, outcome: { ret_pct: ret, reached: null, mfe_pct: 1 } })
+    const xs = [o('a', -12), o('a', -1), o('a', 1), o('b', 3), o('b', 6), o('b', 11), o('c', 0), o('c', 0.5)]
+    const d = distribution(xs)
+    assert.deepEqual(d.buckets.map(b => b.n), [1, 0, 0, 1, 3, 1, 1, 1], '≤−10 · −10…−5 · −5…−2 · −2…0 · 0…2 · 2…5 · 5…10 · ≥10 (0 counts up)')
+    assert.deepEqual([d.buckets[0].from, d.buckets[0].to, d.buckets.at(-1).from, d.buckets.at(-1).to], [null, -10, 10, null])
+    assert.equal(d.buckets.reduce((s, b) => s + b.n, 0), 8)
+    assert.equal(d.pcts.p50, 0.75)
+    assert.equal(d.sessions, 3)
+    // Session means: a −4, b +6.67, c +0.25 → their mean +0.97; the range spans the sessions, not the eight names.
+    assert.equal(d.session_mean, 0.97)
+    assert.ok(d.ci95[0] < 0 && d.ci95[1] > 5, 'three sessions far apart: a wide range')
+    assert.equal(distribution([]), null)
+    assert.equal(distribution([o('a', 1)]).ci95, null, 'one session: no range')
+    assert.ok(groupStats(xs).dist.pcts.p95 > 6)
+    assert.equal(groupStats([]).dist, null)
 })

@@ -6,7 +6,6 @@ import {
     sessionsAfter, windowEnd, lastClosedSession, scoringWindow, windowBars, windowPartial, scoreWindow, summarize, columnVerified,
     runOutcomes, OUTCOMES, BOARDS, VERIFY_MIN_SESSIONS, VERIFY_MIN_SAMPLES,
 } from '../../services/hotlist.outcomes.js'
-import { runCheckpoint } from '../../services/dailyScreener.checkpoint.js'
 
 // The hotlist's OUTCOME LOG (docs/design/daily-names.md §7, build phase 4): what every graded cell
 // did afterwards, so a column's grades can stop being "unverified" — or be shown not to mean much.
@@ -192,23 +191,6 @@ test('run: mid-session it does not compete with the checkpoints for the quota', 
 
 // ─── The board's verified stamp ───────────────────────────────────────────────
 
-test('a board stamps which of its columns are still unverified', async () => {
-    const { db, rows } = memDb()
-    rows('daily_screener_stats').push({ symbol: 'ABC', day: '2026-10-20', close: 100, atr14: 4, atr_pct: 4, adv20_usd: 100e6, avg_vol20: 1e6,
-        day_high: 101, high5: 103, high20: 106, high50: 110, high52w: 120, rs20: 3, nr7: true, next_earnings: '2026-10-27' })
-    const deps = {
-        db: async () => db, latestRun: async () => ({ day: '2026-10-20' }),
-        news: async () => [], earnings: async () => [], grades: async () => [], movers: async () => [],
-        extQuote: async () => ({ mid: 104, spreadPct: 0.02, volume: 30_000 }), quote: async () => null,
-        label: async () => new Map(), verified: async () => new Set(['week']),
-        perMinute: () => 6000, now: () => Date.parse('2026-10-21T12:05:00Z'), sleep: async () => {},
-    }
-    await runCheckpoint({ deps })
-    const board = rows(BOARDS)[0]
-    assert.deepEqual(board.unverified_columns, ['open'])
-    assert.equal(board.unverified, true)
-})
-
 // ─── The wide set (Roy, 2026-10-24: "with the analysis we lose good statistics") ───
 
 test('the wide set: every graded name past the board is scored too, marked not shown', async () => {
@@ -243,34 +225,13 @@ test("Argus's record stays the board's: a name off it was never in front of him"
     assert.equal(r.all.unmarked.n, 1)
 })
 
-test('the checkpoint keeps the graded names past its cut, compactly; the client never gets them', async () => {
-    const { wideRow, BOARD_MAX } = await import('../../services/dailyScreener.checkpoint.js')
-    assert.equal(BOARD_MAX, 60)
-    assert.deepEqual(wideRow({ symbol: 'A', price: 10, quoted_at: 5, why: 'long text', cells: { mid: { grade: 'B', why: ['x'], range: { level: 11, atr_mult: 0.5, pct: 10 } }, eod: { grade: null } } }),
-        { symbol: 'A', price: 10, quoted_at: 5, cells: { mid: { grade: 'B', range: { level: 11, atr_mult: 0.5, open_sky: false } } } })
+test('the client never gets a board’s wide set', async () => {
     const { boardById } = await import('../../services/hotlist.service.js')
     const { db, rows } = memDb()
     rows(BOARDS).push({ id: 'hb_x', status: 'done', rows: [], wide: [{ symbol: 'A' }] })
     assert.equal((await boardById('hb_x', { db: async () => db })).wide, undefined)
 })
 
-test('the pool — quoted names graded on no column — is scored as the control group, never as a grade', async () => {
-    const { poolRow } = await import('../../services/dailyScreener.checkpoint.js')
-    const { POOL_GRADE } = await import('../../services/hotlist.outcomes.js')
-    assert.deepEqual(poolRow('P', { mid: 10.5, price: 11 }, ['open', 'week'], { book: 'extended', quotedAt: 7 }),
-        { symbol: 'P', price: 10.5, quoted_at: 7, pool: true, cells: { open: { grade: POOL_GRADE, range: { level: null, atr_mult: null, open_sky: false } }, week: { grade: POOL_GRADE, range: { level: null, atr_mult: null, open_sky: false } } } })
-    assert.equal(poolRow('P', { price: 11 }, ['mid'], { book: 'session' }).price, 11)
-    assert.equal(poolRow('P', { price: 0 }, ['mid'], { book: 'session' }), null)
-    const { deps, rows } = rig()
-    rows(BOARDS)[0].wide = [poolRow('POOL', { price: 30 }, ['mid'], { book: 'session' })]
-    await runOutcomes({ force: true, deps })
-    const pool = rows(OUTCOMES).find(o => o.symbol === 'POOL')
-    assert.deepEqual([pool.grade, pool.shown, pool.outcome.reached], [POOL_GRADE, false, null], 'no level to reach — up or down only')
-    const s = summarize(rows(OUTCOMES))
-    assert.deepEqual([s.mid.n, s.mid.pool.n], [1, 1], 'the pool is not a grade and does not count toward verified')
-})
-
-// Code review 2026-10-24: a run-up week trade is OUT before its report — scored to the close before it, not through it.
 test('a week window with a report inside it stops at the close before the report; a shorter window is not "missing bars"', async () => {
     const { weekSessions } = await import('../../services/hotlist.outcomes.js')
     assert.equal(weekSessions(DAY, null), 5)

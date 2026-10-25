@@ -26,6 +26,28 @@ unlike these two it had already been proven redundant: it watched a kind nothing
 tick was picking up `setup` entities belonging to Talos. `git log` is where it lives now. Its one
 piece of live behaviour was lifted out first, to `monitoring/preflightEntry.js`.
 
+### The Hotlist's day columns (archived 2026-10-25)
+
+| | |
+|---|---|
+| `services/dailyScreener.checkpoint.js` | the CHECKPOINT pass — 08:00 · 09:20 · 10:30 · 14:30 · 15:30 ET, the pool, the quotes, the grades, Argus's read per board |
+| `services/hotlistBacktest.day.js`, `scripts/replay-hotlist-day.mjs` | the day replay (open · mid · eod · tomorrow over past sessions) |
+| `services/hotlist.news.js` | the checkpoint pool's news labeller (a cheap model call per board) — moved after the code review: nothing live read it |
+| `tests/dailyScreenerCheckpoint.test.js`, `argusPool.test.js`, `hotlistBacktestDay.test.js`, `hotlistCheckpoint.test.js`, `hotlistNews.test.js` | their tests — the last gathered from the live suites, its `rig` fixture noted as left behind |
+
+**Why:** the screener lab (`docs/design/screener-lab.md`) replayed them — every day column lost to the names it passed
+over (30 sessions: open −0.74%, tomorrow −1.98%), and Argus, replayed blind on 48 weeks with the headlines and the chart,
+picked no better than he avoided. Roy: archive the short-term part; This week rebuilt on the one rule that held, the
+run-up (`services/hotlist.week.js`, overnight). Plan and record: `docs/design/hotlist-day-archive.md`.
+
+**What stayed live, lifted out first:** the boards' indexes, `latestBoard`, `etDate`, `BOARD_STALE_MS`, `withNews` →
+`services/hotlist.boards.js`. **What stayed live as it was:** `hotlist.columns.js` (pure; the week replay and the lab use
+its week rule and free range), `hotlist.argus.js` (the lab's Argus replay calls `argusRead`), `hotlist.outcomes.js`
+(scores the boards still in Mongo — the day boards age out in 10 days, their outcomes in 168 — and the week board), and
+the frontend's day views, shown only on a past day that still has day names. Reviving: put the checkpoint back in the
+monitor's tick (`monitoring/dailyScreener.monitor.service.js`, its `checkpoint` dep, and the week hand-off's board id in
+`hotlistResearch.service.js`), its import in `server.js` if its indexes move back.
+
 ## Why it was safe to archive
 
 Checked against production before the move: exactly **one** `kind: 'call'` document existed, at

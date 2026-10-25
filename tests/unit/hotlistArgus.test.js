@@ -5,7 +5,7 @@ import { argusRead, normalizeRead, boardText, MAX_PICKS, SYSTEM } from '../../se
 import { hotlistSeed, seedFacts, todayHotlist, COLUMN_HORIZON } from '../../services/hotlist.service.js'
 import { sanitizeScanSeed } from '../../services/scanSeed.util.js'
 import { _buildSeedSection } from '../../services/agents/mentor.agent.service.js'
-import { runCheckpoint, BOARDS } from '../../services/dailyScreener.checkpoint.js'
+import { BOARDS } from '../../services/hotlist.boards.js'
 
 // Build phase 5 (docs/design/daily-names.md §1, §8; Roy, 2026-10-21): Argus reads each checkpoint's
 // board once, for everyone — a summary, its picks, the traps — and the user hands names to Mentor
@@ -74,24 +74,6 @@ test('one call on the house model; a failed call is NO read, never a throw', asy
 })
 
 // ─── The checkpoint marks Argus's picks on their rows ─────────────────────────
-
-test('the checkpoint stores Argus\'s summary and marks picks and traps in place', async () => {
-    const { db, rows } = memDb()
-    rows('daily_screener_stats').push({ symbol: 'ABC', day: '2026-10-20', close: 100, atr14: 4, atr_pct: 4, adv20_usd: 100e6, avg_vol20: 1e6,
-        day_high: 101, high5: 103, high20: 106, high50: 110, high52w: 120, rs20: 3, nr7: true, next_earnings: '2026-10-27' })
-    await runCheckpoint({ deps: {
-        db: async () => db, latestRun: async () => ({ day: '2026-10-20' }),
-        news: async () => [], earnings: async () => [], grades: async () => [], movers: async () => [],
-        extQuote: async () => ({ mid: 104, spreadPct: 0.02, volume: 30_000 }), quote: async () => null,
-        label: async () => new Map(),
-        argus: async (b) => ({ summary: 'One name in play.', model: 'gpt-6-luna', picks: [{ symbol: b.rows[0].symbol, column: 'open', why: 'gap on volume', caution: 'thin' }], avoid: [] }),
-        perMinute: () => 6000, now: () => Date.parse('2026-10-21T12:05:00Z'), sleep: async () => {},
-    } })
-    const board = rows(BOARDS)[0]
-    assert.equal(board.argus.summary, 'One name in play.')
-    assert.equal(board.rows[0].pick.rank, 1)
-    assert.equal(board.rows[0].pick.why, 'gap on volume')
-})
 
 // ─── The hand-off: a reference in, the board's facts out ──────────────────────
 
@@ -180,7 +162,7 @@ test('Argus\'s read reports its spend under the house model id', async () => {
 
 // Day trades (Roy, 2026-10-24): no grade on the session columns; Argus reads the latest headlines in full.
 test("Argus reads each name's latest headlines with their times, and no cell carries a grade", async () => {
-    const { withNews } = await import('../../services/dailyScreener.checkpoint.js')
+    const { withNews } = await import('../../services/hotlist.boards.js')
     const headlines = new Map([['SPCX', [{ title: 'old', at: '2026-10-21 06:00:00' }, { title: 'new', at: '2026-10-21 09:15:00' },
         { title: 'mid', at: '2026-10-21 08:00:00' }, { title: 'oldest', at: '2026-10-20 19:00:00' }]]])
     const [row, other] = withNews([{ symbol: 'SPCX' }, { symbol: 'NONE' }], headlines)

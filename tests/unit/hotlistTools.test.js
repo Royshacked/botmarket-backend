@@ -75,7 +75,9 @@ test('the hotlist caps the names it lists, and says how many more', () => {
 
 test('no board yet, or a board with nothing on it, is said plainly', () => {
     assert.match(formatHotlist({ day: null, day_list: [] }), /^No hotlist yet/)
-    assert.equal(formatHotlist({ day: '2026-10-22', day_list: [] }), 'Hotlist for 2026-10-22: no names in play on any board yet.')
+    assert.equal(formatHotlist({ day: '2026-10-22', day_list: [] }), 'Hotlist for 2026-10-22: no names on the list.')
+    // The week board's own reason when the market gate is shut (hotlist.week, 2026-10-25).
+    assert.match(formatHotlist({ day: '2026-10-26', day_list: [], latest: { closed: 'SPY is under its 200-day' } }), /no names — SPY is under its 200-day/)
 })
 
 test('the handler is unbound and never throws — a failed read is an error line, not data', async () => {
@@ -87,9 +89,9 @@ test('the handler is unbound and never throws — a failed read is an error line
     assert.match(toolErrorText(err), /Could not read today's hotlist: db down/)
 })
 
-test('Axl carries get_hotlist, appended last; its description holds the line on room', () => {
+test('Axl carries get_hotlist, appended last; its description says the run-up rule and never sells a name', () => {
     assert.equal(AXL_TOOLS.at(-1).name, 'get_hotlist')
-    assert.match(HOTLIST_TOOL_SPEC.get_hotlist, /NOT a target/)
-    assert.match(HOTLIST_TOOL_SPEC.get_hotlist, /never present it as a reason a stock will rise/)
-    assert.match(HOTLIST_TOOL_SPEC.get_hotlist, /no horizon carries a grade/)
+    assert.match(HOTLIST_TOOL_SPEC.get_hotlist, /run-up names/)
+    assert.match(HOTLIST_TOOL_SPEC.get_hotlist, /last three reports all beat/)
+    assert.match(HOTLIST_TOOL_SPEC.get_hotlist, /never present a name as a reason a stock will rise/)
 })

@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { memDb } from '../helpers/memDb.js'
-import { boardRow, poolForArgus, runCheckpoint, POOL_FOR_ARGUS } from '../../services/dailyScreener.checkpoint.js'
+import { memDb } from '../../tests/helpers/memDb.js'
+import { boardRow, poolForArgus, runCheckpoint, POOL_FOR_ARGUS } from '../services/dailyScreener.checkpoint.js'
 import { boardText, normalizeRead, argusRead, MAX_SPOTS } from '../../services/hotlist.argus.js'
 import { BOARDS, argusRecord, POOL_GRADE } from '../../services/hotlist.outcomes.js'
 

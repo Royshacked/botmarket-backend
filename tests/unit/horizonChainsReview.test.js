@@ -17,7 +17,9 @@ import { dayList } from '../../services/hotlist.service.js'
 const DAY = '2026-10-23'
 const NOW = Date.parse('2026-10-23T13:25:00Z')   // 09:25 ET
 const BOARD = {
-    id: `hb_${DAY}_preopen`, day: DAY, checkpoint: 'preopen', rows: [
+    // The board the hand-off reads is the week board since 2026-10-25 (hotlistResearch readBoardId); its rows here are an
+    // older board's, with Argus's picks — the stamping and the pick-up do not depend on which.
+    id: `hb_${DAY}_week`, day: DAY, checkpoint: 'preopen', rows: [
         { symbol: 'ONE', cells: { week: { grade: 'A', range: { open_sky: true } } }, picks: { week: { why: 'first', rank: 1 } } },
         { symbol: 'TWO', cells: { week: { grade: 'B', range: { pct: 3, atr_mult: 1, level: 10 } } }, picks: { week: { why: 'second', rank: 2 } } },
         { symbol: 'XOM', cells: { week: { grade: 'B', range: { pct: 2, atr_mult: 1, level: 117 } } } },
@@ -281,4 +283,35 @@ test("on a weekend the latest list is still Friday's: a read is asked for on it 
     const { rows, deps } = rig({ now: () => Date.parse('2026-10-24T15:00:00Z'), latestDay: async () => DAY })
     assert.deepEqual(await requestRead({ boardId: BOARD.id, symbol: 'XOM', userId: 'u' }, deps), { ok: true, outcome: 'started' })
     assert.equal(rows[0].context.day, DAY)
+})
+
+// Code review 2026-10-25 (#1, high): the overnight week board for a day is built the EVENING BEFORE, so its rows are
+// created before that day's UTC midnight — a queue read bounded there found none of them and Prometheus read nothing.
+test('#25-1 the overnight board\'s names, queued the evening before, are researched — a queue that honours `since`', async () => {
+    const WEEK = { id: `hb_${DAY}_week`, day: DAY, checkpoint: 'overnight', rows: [
+        { symbol: 'RU1', cells: { week: { grade: 'R', why: ['reports 2026-10-30'], exit_before: '2026-10-30' } } },
+        { symbol: 'RU2', cells: { week: { grade: 'R', why: ['reports 2026-10-30'], exit_before: '2026-10-30' } } },
+    ] }
+    const evening = '2026-10-22T22:20:00.000Z'   // Thursday 18:20 ET — the board for Friday 10-23
+    const { rows, starts, deps } = rig({ board: async () => WEEK, now: () => Date.parse(evening) })
+    deps.enqueue = async (row) => { rows.push({ id: `rq_${row.symbol}`, status: 'queued', created_at: evening, ...row }); return { ok: true } }
+    deps.listQueue = async (q) => rows.filter(r => (!q.source || r.source === q.source) && (!q.status || r.status === q.status)
+        && (!q.symbols || q.symbols.includes(r.symbol)) && (!q.since || r.created_at >= q.since))
+    const r = await afterCheckpoint({ outcome: 'done', id: WEEK.id }, deps)
+    assert.deepEqual(r.queued, ['RU1', 'RU2'])
+    assert.deepEqual(starts[0]?.symbols, ['RU1', 'RU2'], 'researched at once, not left to expire')
+    assert.equal(rows[0].context.rule, true, 'listed by the rule — not "Argus picked it"')
+    assert.equal(rows[0].context.why, null)
+})
+
+test('#25-9 the pick-up hands off the NEXT session\'s board when the evening hand-off failed', async () => {
+    const NEXT = { id: 'hb_2026-10-26_week', day: '2026-10-26', checkpoint: 'overnight', rows: [{ symbol: 'NX', cells: { week: { grade: 'R' } } }] }
+    const { marks, starts, deps } = rig({ board: async () => ({ ...BOARD, research_queued_at: 'x' }), latestBoard: async () => NEXT })
+    const r = await resume(DAY, deps)
+    assert.deepEqual(marks, [NEXT.id])
+    assert.deepEqual(r.next.queued, ['NX'])
+    assert.ok(starts.some(s => s.symbols.includes('NX')))
+    // Stamped: not again.
+    const again = await resume(DAY, { ...deps, latestBoard: async () => ({ ...NEXT, research_queued_at: 'y' }) })
+    assert.equal(again.next, undefined)
 })

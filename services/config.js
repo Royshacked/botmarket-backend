@@ -268,17 +268,19 @@ export const config = {
     // not been measured yet — measure it (outside market hours) before turning this on anywhere.
     // DAILY_SCREENER_RPM is the pace; the run stops on the first 429 rather than retrying through.
     get dailyScreener()    { return _bool('DAILY_SCREENER', 'opt-in') },
-    // The short-swing chain (docs/design/horizon-chains.md §4): after the 09:20 board, Argus's "this week" picks are
-    // researched by Prometheus as catalyst reads, automatically — on with the screener (Roy, 2026-10-23: "without the
+    // The short-swing chain (docs/design/horizon-chains.md §4): every name on the overnight week board (the run-up rule; 2026-10-25 —
+    // before it, Argus's picks after the 09:20 board) is researched by Prometheus as catalyst reads, automatically — on with the screener (Roy, 2026-10-23: "without the
     // user having to activate Argus or Prometheus"); HOTLIST_RESEARCH=false is the kill switch. A DAILY cap: names and $.
     get hotlistResearch()        { return _bool('HOTLIST_RESEARCH', 'false-0') },
-    // Doubled 2026-10-24 with Argus's week picks (10 per column): a read for each, and a record twice as fast.
+    // Doubled 2026-10-24 with Argus's week picks (10 per column); kept at 20 for the run-up rule's names (Roy, 2026-10-25) —
+    // a busy earnings night can list more, and those stay unread on the list.
     get hotlistResearchMaxNames() { return _num('HOTLIST_RESEARCH_MAX_NAMES', 20) },
     get hotlistResearchMaxUsd()   { return _num('HOTLIST_RESEARCH_MAX_USD', 2) },
     // A catalyst read a USER asked for from the Hotlist ("Catalyst read" on a This week row): outside the house's daily $,
     // capped by count instead — this many a day, everyone's together (~$0.015–0.03 each).
     get hotlistManualReads()      { return _num('HOTLIST_MANUAL_READS', 20) },
     get dailyScreenerRpm() { return _num('DAILY_SCREENER_RPM', 60) },
+    // (ARCHIVED with the checkpoints 2026-10-25 — archive/services/hotlist.news.js; read by nothing live.)
     // The model that labels the checkpoint pool's headlines (services/hotlist.news.js) — once per
     // checkpoint for every user. Empty → Haiku 4.5 (Roy's decision, daily-names.md §10); any id in
     // the llmModels registry works, e.g. gpt-6-luna.

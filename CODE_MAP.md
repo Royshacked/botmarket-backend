@@ -900,25 +900,22 @@ services/
                             DAILY_SCREENER. The arithmetic is dailyScreener.stats.js (pure): the §2.1
                             gates, RS vs SPY matched by session, the overhead levels, NR7 / inside day,
                             the trough cycle
-  dailyScreener.checkpoint.js  the hotlist's CHECKPOINT pass (daily-names.md §5–§6, build phase 3): at
-                            08:00 · 09:20 (open + week columns, the EXTENDED book — fmp getAftermarketQuote)
-                            · 10:30 · 14:30 · 15:30 ET (mid / eod / tomorrow, the session quote), each with
-                            a 30-min window (missed = skipped, never late). The POOL — news since the last
-                            close (fetchStockNews in chunks of 50), earnings reported since, today's rating
-                            changes (latestGradesRaw), the movers in session (marketMoversRaw), the overnight
-                            list's structures — ∩ names with overnight stats, catalysts first, ≤300; quoted
-                            PACED; labelled once (hotlist.news); graded (hotlist.columns) → one board per
-                            checkpoint in `hotlist_boards` (≤30 rows, regime, counts, `unverified`). A 429
-                            publishes what it has as partial. Same switch: DAILY_SCREENER
+  hotlist.week.js           THIS WEEK, OVERNIGHT (hotlist-day-archive.md §3, 2026-10-25): after the nightly stats, the
+                            RUN-UP rule — a report on the 6th session (inWindow), the last 3 reports beat (beatStreak,
+                            one FMP /earnings read per window name), price ≥ $5 and $5M a day, SPY over its 200-day
+                            (the run's `spy.over_sma200`, dailyScreener.service spyOverSma200; under it the board is
+                            written EMPTY with `closed`). Every name equal, grade 'R', `hb_<day>_week`, checkpoint
+                            'overnight'; rebuilt once a partial run is done. Its outcomes enter at the board day's OPEN;
+                            hotlistResearch hands EVERY name to Prometheus. runWeekBoard, in the screener's monitor tick
+  hotlist.boards.js         the boards, shared: indexes, latestBoard, etDate, BOARD_STALE_MS, withNews — lifted out of
+                            the archived checkpoint pass (2026-10-25)
+  (the day CHECKPOINT pass and the day replay were ARCHIVED 2026-10-25 — see archive/README.md)
   hotlist.columns.js        the hotlist's columns, PURE: the §2.1 gates per column, in play per column (§2.2,
                             §5), the overhead levels each counts, FREE RANGE to the nearest (% and × ATR;
                             nothing above = open sky), the §5.1 A/B/C cut-offs. Long side only — the week's
                             catalyst must have surprised UP. The week's two ways in: a catalyst, or a report
                             2–10 days ahead (money arriving dropped 2026-10-24). No entry, stop, target or R:R (§5)
-  hotlist.news.js           the one judgment in the checkpoint: one call labels every pooled name's fresh
-                            headlines — material, catalyst type (short / drift / lasting), surprise,
-                            magnitude. DAILY_SCREENER_NEWS_MODEL (default Haiku 4.5, any registry id via
-                            modelRoute). FAILS SOFT: any error → no labels, the board still goes out
+  (the checkpoint's news labeller was ARCHIVED 2026-10-25 with it — archive/README.md)
   hotlist.outcomes.js       the hotlist's OUTCOME LOG (§7, build phase 4): every graded cell, scored LONG
                             from the board's price over its column's window (open = the 09:30 hourly bar,
                             mid 10:30→close, eod 14:30→close, tomorrow the next session, week five
@@ -928,18 +925,23 @@ services/
                             given up (no outcome). summarize → per column and grade: n, hit rate, median
                             MFE, mean return; a column is VERIFIED at 40 sessions AND 30 samples, which
                             the board stamps (`unverified_columns`). Also names the `hotlist_boards`
-                            collection (dailyScreener.checkpoint re-exports it: no import cycle)
-  hotlist.argus.js          ARGUS'S READ of each checkpoint board (phase 5, Roy 2026-10-21): once, for
+                            collection (hotlist.boards re-exports it: no import cycle). Since 2026-10-25 the
+                            overnight board enters at the board day's OPEN, and the week's summary carries
+                            `rule` — the run-up rule's own record (grade 'R')
+  hotlist.argus.js          (since 2026-10-25 read by nothing on a live board — the checkpoints are archived; the
+                            lab's Argus replay, argusReplay.service, calls argusRead, and techLine is its own.)
+                            ARGUS'S READ of each checkpoint board (phase 5, Roy 2026-10-21): once, for
                             everyone, on the HOUSE chat model — a summary, ≤10 picks PER COLUMN (MAX_PICKS;
                             docs/design/horizon-chains.md §2; symbol, column, why, caution) and ≤10 avoids
-                            (MAX_AVOID). Each row reaches him with its newest 3 headlines (checkpoint withNews,
+                            (MAX_AVOID). Each row reaches him with its newest 3 headlines (hotlist.boards withNews,
                             NEWS_FOR_ARGUS) and its free range — no grade in his board text (2026-10-24).
                             normalizeRead holds every pick to a board row on a column the board GRADED. Stored
                             on the board; picks marked on their rows (`picks.<column>`). On the day columns
                             (DAY_COLUMNS: open / mid / eod / tomorrow) his picks ARE the list; his week picks go
                             on to Prometheus (hotlistResearch). Fails soft (no read)
-  hotlistResearch.service.js the SHORT-SWING CHAIN (horizon-chains.md §4): after the 09:20 board, Argus's week
-                            picks → research queue (source `hotlist`) → Prometheus's catalyst reads, inside a
+  hotlistResearch.service.js the SHORT-SWING CHAIN (horizon-chains.md §4): after the OVERNIGHT week board (hotlist.week,
+                            2026-10-25) EVERY name — `context.rule`, no Argus (on an older 09:20 board, Argus's
+                            picks) → research queue (source `hotlist`) → Prometheus's catalyst reads, inside a
                             DAILY cap (HOTLIST_RESEARCH_MAX_NAMES / _MAX_USD), on the screener's monitor tick;
                             the budget pipe is houseResearch.researchQueued / resumeQueued (shared). A day's rows
                             are keyed by `context.day`; earlier days' waiting rows expire; the board is stamped
@@ -980,6 +982,25 @@ services/
                             the live outcome log does. The catalyst path is replayed by proxy (`earningsBeat`:
                             an EPS beat of 5%+ reported the session before, from the calendar's actuals). The
                             summary rides GET /api/hotlist/outcomes as `backtest`
+  screenerLab.service.js    THE SCREENER LAB (docs/design/screener-lab.md): candidate screener rules tested one by
+                            one on one yardstick — net of a cost by dollar volume, against SPY over the same
+                            sessions, each session once, a block range for multi-day holds, two halves. HYPOTHESES
+                            (signal / hold / exit / extras), runHypothesis (null = the baseline), report;
+                            winnersStudy (a week's biggest movers vs every name on traitsAt; `side: 'down'` the
+                            mirror) — scripts/lab-winners.mjs
+  screenerLab.data.js       the lab's data: a universe (UNIVERSES: screener · smallcap) read ONCE into data/lab/
+                            (gitignored) — daily bars, sectors, SPY, the calendar; extras on request (the earnings
+                            history, insider purchases, month-end closes); resumable, waits out the per-minute 429.
+                            scripts/lab.mjs
+  argusReplay.service.js    ARGUS'S JUDGMENT ON PAST WEEKS (screener-lab.md §9): each week's likely movers, a third
+                            up hard, a third down, the outcome hidden, as a live week-column board (screenerStats,
+                            freeRange, withNews) through argusRead itself; picks / avoids scored on the week.
+                            scripts/replay-argus-weeks.mjs (resumable, data/lab/argus-replay.json; --tech adds
+                            each row's techLine)
+  moverDiff.service.js      UP MOVERS AGAINST DOWN MOVERS (screener-lab.md §10): every name-week 5%+ either way vs
+                            SPY on 27 facts at Monday's open (featuresAt); per-fact quintiles cut before the held-out
+                            year (binByFeature) and a logistic regression fitted before, scored after (fitAndScore).
+                            scripts/lab-movers.mjs
   hotlist.service.js        the hotlist's READ side: todayHotlist / boardById / hotlistOutcomes for the
                             API, and hotlistSeed — a "Build with Mentor" hand-off is a REFERENCE (board
                             id + column, scanSeed.util), resolved here from the STORED board into the
@@ -1454,6 +1475,10 @@ scripts/                    ops one-offs — none run by `npm test`. Kinds: migr
                             /api/hotlist and the two hand-off turns are captured then aborted — it checks
                             the seed's board reference and Argus's question without a model call or a
                             turn written. `node scripts/drive-hotlist.mjs [baseUrl] [outDir]`
+  drive-hotlist-week.mjs    Drives THIS WEEK on the run-up rule (2026-10-25) against the REAL dev server: the latest
+                            overnight week board as /api/hotlist serves it, one stubbed Prometheus read — no day tabs,
+                            no Boards view, the confirmed / Run-up names views, no tape or room columns, the Info text.
+                            `node scripts/drive-hotlist-week.mjs [baseUrl] [outDir]`
   scan-week.mjs             Pythia's change scan, DRY: what this week would assess and why — no model, no
                             writes. `node scripts/scan-week.mjs [cap]`
   assess-industry.mjs       One Pythia "Assess now" from the command line, as an admin; prints the cost

@@ -31,7 +31,7 @@ import { logger } from './logger.service.js'
 const LOG = '[hotlist.outcomes]'
 
 export const OUTCOMES = 'hotlist_outcomes'
-/** The checkpoint boards (written by dailyScreener.checkpoint). Named here so that module can read this one's
+/** The Hotlist's boards (the overnight week board, hotlist.week; the archived checkpoint pass's before it). Named here so a writer can read this one's
  *  summary without an import cycle. */
 export const BOARDS = 'hotlist_boards'
 
@@ -216,7 +216,8 @@ export function summarize(outcomes) {
         const rows = scored.filter(o => o.grade !== POOL_GRADE)
         const days = new Set(rows.map(o => o.day))
         const byGrade = {}
-        for (const g of ['A', 'B', 'C']) {
+        // 'R' — the overnight week board's one grade (hotlist.week RUNUP_GRADE): on the run-up rule or not.
+        for (const g of ['A', 'B', 'C', 'R']) {
             const gr = rows.filter(o => o.grade === g)
             const judged = gr.filter(o => o.outcome.reached != null)
             byGrade[g] = {
@@ -239,6 +240,13 @@ export function summarize(outcomes) {
             pool: _group(scored.filter(o => o.grade === POOL_GRADE)),
             // THIS WEEK by the path that let each name in (2026-10-24) — outcomes logged before the path was are in none.
             ...(col === 'week' ? { paths: Object.fromEntries(['catalyst', 'scheduled'].map(p => [p, _group(rows.filter(o => o.path === p))])) } : {}),
+            // THE RUN-UP RULE's own record (grade 'R', the overnight board — 2026-10-25): the week's older outcomes (Argus's
+            // era, A/B/C) stay in the log for six months; this group is the rule's alone, with its sessions and verified.
+            ...(col === 'week' ? (() => {
+                const rule = rows.filter(o => o.grade === 'R')
+                const sessions = new Set(rule.map(o => o.day)).size
+                return { rule: { ..._group(rule), sessions, verified: columnVerified({ n: rule.length, sessions }) } }
+            })() : {}),
         }
     }
     return out
@@ -310,10 +318,12 @@ export async function runOutcomes({ force = false, deps = _deps } = {}) {
                     // A run-up week cell is scored to the close before its report (windowBars `exitBefore`).
                     const exitBefore = column === 'week' ? c.exit_before ?? null : null
                     const win = windowBars(column, board.day, bars, { after: row.quoted_at ?? board.finished_at ?? null, exitBefore })
-                    const outcome = scoreWindow({ entry: row.price, level: c.range?.level ?? null }, win, windowPartial(column, win, { day: board.day, exitBefore }))
+                    // The overnight week board (hotlist.week) lists at the stats' close; its trade is bought at the board day's OPEN.
+                    const entry = board.checkpoint === 'overnight' ? win[0]?.open ?? null : row.price
+                    const outcome = scoreWindow({ entry, level: c.range?.level ?? null }, win, windowPartial(column, win, { day: board.day, exitBefore }))
                     docs.push({
                         id: `${board.id}:${row.symbol}:${column}`, board: board.id, day: board.day, checkpoint: board.checkpoint,
-                        column, symbol: row.symbol, grade: c.grade, entry: row.price,
+                        column, symbol: row.symbol, grade: c.grade, entry,
                         level: c.range?.level ?? null, atr_mult: c.range?.atr_mult ?? null, open_sky: c.range?.open_sky ?? false,
                         outcome, scored_at: deps.now(), shown, ...(exitBefore ? { exit_before: exitBefore } : {}),
                         // Which path let it in on the week — catalyst / scheduled — so each path has its own

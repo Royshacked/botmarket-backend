@@ -44,7 +44,7 @@ export const COLUMN_WORDS = Object.freeze({
 
 export const SYSTEM = `You are Argus, the scanning desk, reading today's HOTLIST — a screened board of US stocks that are in play right now, long side only. The numbers are computed; your job is the judgment the numbers cannot make.
 
-Each row: the ticker, its price and gap, volume against an ordinary day, ATR %, the catalyst label, its latest HEADLINES with their times (read them — a real, dated story under the move is what makes a day trade; a stale or recycled one is a trap), earnings date, and one cell per column it is in play on with its FREE RANGE — how far price can travel before the nearest overhead level, in % and in × ATR. No column carries a grade: the room is information, not a verdict — YOU decide which names are the trade, from the story, the tape and the room together. Free range is not a target and the board has no entries or stops; never invent them. A week cell marked RUN-UP holds a report inside its window: the trade is the run-up into it and ends before it — if you pick one, the caution says so.
+Each row: the ticker, its price and gap, volume against an ordinary day, ATR %, the catalyst label, its latest HEADLINES with their times (read them — a real, dated story under the move is what makes a day trade; a stale or recycled one is a trap), earnings date, when present its TECHNICALS (the trend against its 20/50/200-day averages, the 5- and 20-session return with relative strength against SPY, volume against its 50-day, distance from the 52-week high and low — read them with the story: a headline into a broken chart is not the same trade as one into a base), and one cell per column it is in play on with its FREE RANGE — how far price can travel before the nearest overhead level, in % and in × ATR. No column carries a grade: the room is information, not a verdict — YOU decide which names are the trade, from the story, the tape and the room together. Free range is not a target and the board has no entries or stops; never invent them. A week cell marked RUN-UP holds a report inside its window: the trade is the run-up into it and ends before it — if you pick one, the caution says so.
 
 Your picks ARE the list: on the session columns the user sees only the names you confirm (the rest stay one click away) and builds the trade with Mentor from them; on the week column each pick goes on to Prometheus, who reads the catalyst and the company and sets the target. Confirm only what you would actually trade.
 
@@ -64,6 +64,25 @@ const _hm = (at) => (String(at ?? '').match(/(\d{2}:\d{2})/)?.[1] ?? '—')
 /** The session columns — day trades: Argus's confirmation is the list (Roy, 2026-10-24). No column shows a grade. */
 export const DAY_COLUMNS = Object.freeze(['open', 'mid', 'eod', 'tomorrow'])
 
+/**
+ * A row's TECHNICALS in one line, from its overnight stats (dailyScreener.stats screenerStats) — `sma200` beside them
+ * when the caller has it (the stats stop at the 50-day). Null without stats. Pure. (2026-10-25: Argus read the story and
+ * the room but not the chart — the replay found he could not tell a week's winners from its losers on that.)
+ */
+export function techLine(stats, { sma200 = null } = {}) {
+    if (!stats?.close) return null
+    const c = stats.close, sg = (v, d = 1) => (Number.isFinite(v) ? `${v >= 0 ? '+' : ''}${v.toFixed(d)}` : '—')
+    const vs = (ma) => (Number.isFinite(ma) && ma > 0 ? (c > ma ? 'over' : 'under') : '?')
+    const pct = (lvl) => (Number.isFinite(lvl) && lvl > 0 ? Math.abs((c / lvl - 1) * 100).toFixed(0) : '—')
+    return [
+        `trend ${vs(stats.sma20)} 20d · ${vs(stats.sma50)} 50d${sma200 != null ? ` · ${vs(sma200)} 200d` : ''}`,
+        `5d ${sg(stats.ret5)}% (RS ${sg(stats.rs5)}) · 20d ${sg(stats.ret20)}% (RS ${sg(stats.rs20)})`,
+        `vol ${Number.isFinite(stats.vol5_vs_50) ? `${stats.vol5_vs_50.toFixed(1)}×` : '—'} its 50d`,
+        `${pct(stats.high52w)}% under 52w high · ${pct(stats.low52w)}% over 52w low`,
+        ...(stats.nr7 ? ['NR7'] : []), ...(stats.inside_day ? ['inside day'] : []),
+    ].join(' · ')
+}
+
 /** The board as the user turn — one compact line per row. Pure. */
 export function boardText(board) {
     const regime = board.regime ?? {}
@@ -78,7 +97,7 @@ export function boardText(board) {
         const news = (r.news ?? []).length
             ? ` | news: ${r.news.map(h => `"${String(h.title ?? '').slice(0, 160)}" (${_hm(h.at)})`).join('; ')}`
             : (r.catalyst?.headline ? ` | news: "${r.catalyst.headline}"` : '')
-        return `${r.symbol} ${r.sector ?? ''} | $${_f(r.price)} gap ${_f(r.gap_pct)}%${r.rvol != null ? ` rvol ${r.rvol}×` : ''}${r.pm_vol_pct != null ? ` pre-mkt vol ${_f(r.pm_vol_pct, 1)}% of a day` : ''} ATR ${_f(r.atr_pct)}% | ${cat}${news}${r.fade_check ? ' | FLAG: minor story under a big gap' : ''}${r.next_earnings ? ` | earnings ${r.next_earnings}` : ''}`
+        return `${r.symbol} ${r.sector ?? ''} | $${_f(r.price)} gap ${_f(r.gap_pct)}%${r.rvol != null ? ` rvol ${r.rvol}×` : ''}${r.pm_vol_pct != null ? ` pre-mkt vol ${_f(r.pm_vol_pct, 1)}% of a day` : ''} ATR ${_f(r.atr_pct)}%${r.tech ? ` | tech: ${r.tech}` : ''} | ${cat}${news}${r.fade_check ? ' | FLAG: minor story under a big gap' : ''}${r.next_earnings ? ` | earnings ${r.next_earnings}` : ''}`
     }
     const rows = (board.rows ?? []).map(r => {
         // No column carries a grade (Roy, 2026-10-24: the day trades, then the week) — the room only.

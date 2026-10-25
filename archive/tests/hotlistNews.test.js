@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { labelNews, normalizeLabels, buildNewsText } from '../../services/hotlist.news.js'
+import { labelNews, normalizeLabels, buildNewsText } from '../services/hotlist.news.js'
 
 // The hotlist's news labels (docs/design/daily-names.md §3). One cheap call per checkpoint; it must
 // FAIL SOFT — a board goes out unlabelled rather than not at all (on 2026-10-21 the Anthropic credit

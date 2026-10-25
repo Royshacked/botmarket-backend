@@ -1,9 +1,11 @@
 // THE SHORT-SWING CHAIN, BY ITSELF — Hotlist → Argus → Prometheus (docs/design/horizon-chains.md §4; Roy, 2026-10-23:
 // "I want this to work automatically — without the user having to activate Argus or Prometheus").
 //
-// After the 09:20 board (`preopen` — the open and this week, on the strict spreads), Argus's THIS WEEK picks go to the
-// research queue (source `hotlist`), the board's facts and his why / caution on the row, and Prometheus reads each one
-// as a CATALYST READ (analyst_mode_catalyst.md → catalystRead.service): a catalyst target, what is still open, a window.
+// After the overnight WEEK board (hotlist.week — the run-up rule; hotlist-day-archive.md, 2026-10-25: Roy, "Prometheus
+// reads every run-up name"), EVERY name on it goes to the research queue (source `hotlist`), the board's facts on the
+// row, and Prometheus reads each one as a CATALYST READ (analyst_mode_catalyst.md → catalystRead.service): a catalyst
+// target, what is still open, a window. (Before it, Argus's picks on the 09:20 `preopen` board — weekPicks still reads
+// those for an old board.)
 //
 // THE SAME PIPE AS THE PYTHIA WEEK (houseResearch.researchQueued / resumeQueued): this module owns the Hotlist's names,
 // its DAILY caps — HOTLIST_RESEARCH_MAX_NAMES queued a day, HOTLIST_RESEARCH_MAX_USD spent a day, both read back from
@@ -28,7 +30,8 @@ import { researchRunService } from './researchRun.service.js'
 import { researchQueued, resumeQueued } from './houseResearch.service.js'
 import { boardById, seedFacts } from './hotlist.service.js'
 import { BOARDS } from './hotlist.outcomes.js'
-import { latestBoard } from './dailyScreener.checkpoint.js'
+import { latestBoard } from './hotlist.boards.js'
+import { boardId as weekBoardId, CHECKPOINT as OVERNIGHT } from './hotlist.week.js'
 import { catalystReadService } from './catalystRead.service.js'
 import { config } from './config.js'
 import { logger } from './logger.service.js'
@@ -36,8 +39,8 @@ import { logger } from './logger.service.js'
 const LOG = '[hotlistResearch]'
 const SOURCE = 'hotlist'
 const HOUSE = 'house'
-/** The board whose "this week" picks are read: 09:20, the strict spreads (08:00's book is thin). */
-export const READ_CHECKPOINT = 'preopen'
+/** The board whose "this week" names are read: the overnight week board (hotlist.week). */
+export const READ_CHECKPOINT = 'week'
 const COLUMN = 'week'
 const WAITING = ['queued', 'in_research']
 
@@ -49,6 +52,8 @@ const _deps = {
     board:        (id) => boardById(id),
     // The latest board's day — a read is asked for on that list, today's or (a weekend, before the 08:00 board) the last one.
     latestDay:    () => latestBoard().then(b => b?.day ?? null),
+    // The newest board — the overnight one for the NEXT session, built the evening before (resume's catch-up).
+    latestBoard:  () => latestBoard(),
     markBoard:    async (id, at) => { const db = await getDb(); await db.collection(BOARDS).updateOne({ id }, { $set: { research_queued_at: at } }) },
     liveSymbols:  () => catalystReadService.liveSymbols(),
     enqueue:      (row) => researchQueueService.enqueue(row),
@@ -61,14 +66,27 @@ const _deps = {
 }
 export function _setDeps(d) { Object.assign(_deps, d) }
 
-/** The day's start, as the lower bound of its rows' query — the session date's UTC midnight (before any ET board). */
-export const dayStart = (day) => `${day}T00:00:00.000Z`
+/**
+ * The lower bound of a day's rows' query: the PREVIOUS weekday's UTC midnight. The overnight week board for `day` is built
+ * the evening before (about 18:20 ET — after `day`'s own UTC midnight is still hours away), so its rows predate the day
+ * itself; a bound at `day`'s midnight found none of them and Prometheus read nothing (code review 2026-10-25). The rows
+ * are then held to their session date (`context.day`), so the wider bound lets in no other day's. Pure.
+ */
+export function dayStart(day) {
+    let t = Date.parse(`${day}T12:00:00Z`)
+    do { t -= 86_400_000 } while ([0, 6].includes(new Date(t).getUTCDay()))
+    return `${new Date(t).toISOString().slice(0, 10)}T00:00:00.000Z`
+}
 /** The board the chain reads on a day. */
-export const readBoardId = (day) => `hb_${day}_${READ_CHECKPOINT}`
+export const readBoardId = (day) => weekBoardId(day)
 const _house = (r) => (r.requestedBy ?? HOUSE) === HOUSE
 
-/** Argus's picks for the week column on a board, his order. Pure. */
+/**
+ * The week names a board hands Prometheus: on the overnight board EVERY name the rule listed (its order — one rule, no
+ * ranking); on an older checkpoint board Argus's picks, his order. Pure.
+ */
 export function weekPicks(board) {
+    if (board?.checkpoint === OVERNIGHT) return (board.rows ?? []).filter(r => r.cells?.[COLUMN]?.grade)
     return (board?.rows ?? [])
         .filter(r => r.picks?.[COLUMN] && r.cells?.[COLUMN]?.grade)
         .sort((a, b) => (a.picks[COLUMN].rank ?? 99) - (b.picks[COLUMN].rank ?? 99))
@@ -81,7 +99,10 @@ export function hotlistContext(board, row) {
         hotlist: true,
         reason: `Hotlist: this week (${board.day})`,
         day: board.day, board: board.id, column: COLUMN,
+        // Argus's why on an older board. The overnight board's names were LISTED by the run-up rule, not picked (code
+        // review 2026-10-25: its reason in `why` told Prometheus "Argus picked it") — `rule`, and the facts carry its reason.
         why: p.why ?? null, caution: p.caution ?? null,
+        ...(board.checkpoint === OVERNIGHT ? { rule: true } : {}),
         facts: seedFacts(row, COLUMN),
         // The report inside the window (the board's run-up): the read's window ends the session before it.
         exit_before: row.cells?.[COLUMN]?.exit_before ?? null,
@@ -148,8 +169,8 @@ export async function researchDay(day, deps = _deps, { houseToo = true } = {}) {
 }
 
 /**
- * The screener's checkpoint just ran → when it is the 09:20 board, queue its week picks and start their research.
- * `result` is runCheckpoint's. → what happened, or `{ outcome: 'not_this_board' }`.
+ * The week board was just built → queue its names and start their research. `result` is runWeekBoard's (hotlist.week).
+ * → what happened, or `{ outcome: 'not_this_board' }`.
  */
 export async function afterCheckpoint(result, deps = _deps) {
     try {
@@ -176,11 +197,27 @@ async function _expireOld(day, deps) {
 }
 
 /**
- * Every tick: earlier days' waiting names expired; today's 09:20 board handed off if a dead process never did (no
+ * Every tick: earlier days' waiting names expired; today's week board handed off if a dead process never did (no
  * stamp); then today's names a busy or dead run left — put back in line and researched (the shared pick-up). With the
- * house's reads off, a user's waiting read is still picked up.
+ * house's reads off, a user's waiting read is still picked up. And the NEXT session's board (built this evening): handed
+ * off and researched if the evening's hand-off failed — not left until midnight ET, or Monday (code review 2026-10-25).
  */
 export async function resume(day, deps = _deps) {
+    const res = await _resumeDay(day, deps)
+    try {
+        if (!day || !deps.enabled() || !deps.latestBoard) return res
+        const next = await Promise.resolve(deps.latestBoard()).catch(() => null)
+        if (!next || !(next.day > day) || next.checkpoint !== OVERNIGHT || next.research_queued_at) return res
+        const q = await _handOff(next, deps)
+        const research = q.error ? null : await researchDay(next.day, deps)
+        return { ...res, next: { day: next.day, queued: q.queued ?? [], research } }
+    } catch (err) {
+        logger.warn(LOG, 'the next board\'s catch-up failed', { error: err.message })
+        return res
+    }
+}
+
+async function _resumeDay(day, deps) {
     try {
         if (!day) return { outcome: 'off' }
         const on = deps.enabled()

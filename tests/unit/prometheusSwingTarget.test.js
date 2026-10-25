@@ -4,7 +4,7 @@ import { memDb } from '../helpers/memDb.js'
 import { _parseCatalystRead, _cleanOwnTarget, _cleanCompany, MODES, _buildSystemPrompt } from '../../services/agents/analyst.agent.service.js'
 import { buildCatalystRead, ownTarget, readFacts, catalystReadService, _setDeps as setReadDeps } from '../../services/catalystRead.service.js'
 import { hotlistSeed } from '../../services/hotlist.service.js'
-import { BOARDS } from '../../services/dailyScreener.checkpoint.js'
+import { BOARDS } from '../../services/hotlist.boards.js'
 
 // THE WEEK'S TARGET IS PROMETHEUS'S (Roy, 2026-10-24: "Prometheus should analyze the catalyst and company and decide of a
 // short-term swing PT"): he reads the catalyst AND the company and sets the price; the tools' number is his yardstick;

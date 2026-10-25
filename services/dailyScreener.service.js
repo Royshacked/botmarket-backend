@@ -218,7 +218,10 @@ async function _run(db, day, nowMs, deps, progress = async () => {}, { force = f
     const symbols = universe.map(u => String(u.symbol).toUpperCase())
     await pace()
     requests++
-    const nextEarnings = earningsBySymbol(await deps.earnings(iso(nowMs), iso(nowMs + EARNINGS_DAYS * 86_400_000), symbols).catch(() => []))
+    // A failed calendar is SAID on the run (`calendar_failed`): the week board would otherwise read every report date as
+    // missing and list nothing, the same as a quiet week (code review 2026-10-25).
+    let calendarFailed = false
+    const nextEarnings = earningsBySymbol(await deps.earnings(iso(nowMs), iso(nowMs + EARNINGS_DAYS * 86_400_000), symbols).catch(() => { calendarFailed = true; return [] }))
 
     let read = 0, seen = 0
     for (const u of universe) {
@@ -274,9 +277,21 @@ async function _run(db, day, nowMs, deps, progress = async () => {}, { force = f
         requests,
         // A name whose last bar is not the run's day — a holiday, or FMP not yet carrying the close.
         stale_bars:  stale,
+        ...(calendarFailed ? { calendar_failed: true } : {}),
         breadth_above_sma20: breadthAboveSma20(docs),
-        spy: spy ? { close: spy.close, above_sma20: spy.above_sma20, ret5: spy.ret5, ret20: spy.ret20, atr_pct: spy.atr_pct } : null,
+        spy: spy ? { close: spy.close, above_sma20: spy.above_sma20, ret5: spy.ret5, ret20: spy.ret20, atr_pct: spy.atr_pct, over_sma200: spyOverSma200(bench) } : null,
     }
+}
+
+/**
+ * SPY over its 200-day average at its last close (2026-10-25: the week board's market gate — the run-up loses under it,
+ * screener-lab §6). Null short of 200 bars. Pure.
+ */
+export function spyOverSma200(bench) {
+    const closes = (bench ?? []).map(b => b?.close).filter(c => c > 0)
+    if (closes.length < 200) return null
+    const sma = closes.slice(-200).reduce((s, c) => s + c, 0) / 200
+    return closes.at(-1) > sma
 }
 
 async function _prune(db, runs, day) {

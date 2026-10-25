@@ -3,7 +3,9 @@
 **Status: BUILT 2026-10-23 (Roy: "go ahead, write the doc and build") — steps 1-4 unit-tested, Argus per horizon
 live-checked on a stored board, the Hotlist tabs driven in a browser (`scripts/drive-hotlist-horizons.mjs`). Pushed
 2026-10-24, with the same day's rework: no grade shown anywhere, Prometheus's own target on This week, Swing / Long term
-as the weekly chain's survivors (sections from "The Hotlist's Swing and Long term" on).**
+as the weekly chain's survivors (sections from "The Hotlist's Swing and Long term" on). 2026-10-25: the DAY trade row
+and Argus's per-column picks are ARCHIVED, and This week is the overnight run-up rule — every name to Prometheus, no Argus
+(`docs/design/hotlist-day-archive.md`).**
 
 ## What Roy asked for
 
@@ -67,8 +69,11 @@ A mode of the research desk (like the quick read: `prompts/analyst_mode_catalyst
 
 ### 4. Hotlist → Argus → Prometheus, automatic (backend)
 
-- **When:** after the **09:20 board** (`preopen` — open + week columns, the strict spreads), Argus's **This week** picks are
-  queued for research (source `hotlist`), the board's facts and his why/caution on the row.
+- **When (since 2026-10-25):** after the **overnight week board** (`hb_<day>_week`, the run-up rule — hotlist-day-archive.md)
+  EVERY name is queued for research (source `hotlist`, `context.rule`), the board's facts on the row; the queue's window
+  opens at the previous weekday's UTC midnight, because the board is built the evening before. **As first built:** after
+  the **09:20 board** (`preopen` — open + week columns, the strict spreads), Argus's **This week** picks, his why/caution
+  on the row.
 - **The run:** the same research run as the Pythia chain (`startRun({ symbols, maxUsd })`), in catalyst mode for these
   rows; the budget pipe of `houseResearch` shared, not copied — a **daily** budget: `HOTLIST_RESEARCH_MAX_USD` ($2) and
   `HOTLIST_RESEARCH_MAX_NAMES` (20) per ET day (doubled 2026-10-24 from $1 / 10). A run already going → the names wait for the next screener tick (5 min).
@@ -87,8 +92,8 @@ Everything stays behind `DAILY_SCREENER` — off, no boards, no picks, no reads.
   `catalyst_read`), `services/catalystRead.service.js` (`catalyst_reads`: target = spot × (1 + open), band, priced
   share, window 5–30 days, `hit` / `expired` / `pass`). `researchRun` reads a `context.hotlist` row in that mode and
   saves it there — never `initiateCoverage`; a covered name still gets a read, a name with a LIVE read is skipped.
-- **§4** `services/hotlistResearch.service.js` on the screener's monitor tick: `afterCheckpoint` (the `preopen` board's
-  week picks → queue source `hotlist` → the run), `resume` (today's names), and the hourly grading. The budget pipe is
+- **§4** `services/hotlistResearch.service.js` on the screener's monitor tick: `afterCheckpoint` (the week board's
+  names — the `preopen` board's week picks until 2026-10-25 → queue source `hotlist` → the run), `resume` (today's names), and the hourly grading. The budget pipe is
   `houseResearch.researchQueued` / `resumeQueued`, shared with the Pythia week. Env: `HOTLIST_RESEARCH` (on unless
   `false`), `HOTLIST_RESEARCH_MAX_NAMES` (10/day), `HOTLIST_RESEARCH_MAX_USD` ($1/day) — 20/day and $2/day since
   2026-10-24 (services/config.js). `GET /api/hotlist/reads`.

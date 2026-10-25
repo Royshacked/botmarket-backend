@@ -377,9 +377,11 @@ export function researchOpening(item) {
     // and his reason travel; the mode block (analyst_mode_catalyst.md) says what to do with them.
     if (isCatalystItem(item)) {
         const facts = c.facts ? ` The board: ${c.facts}.` : ''
-        // A read a user asked for (`requested`) on a name Argus did not pick says so, rather than nothing.
+        // A read a user asked for (`requested`) on a name Argus did not pick says so, rather than nothing. The overnight
+        // board's names (`rule`, 2026-10-25) were listed by the run-up rule — no one picked them, and it says so.
         const argus = c.why ? ` Argus picked it: ${c.why}${c.caution ? ` What would make it wrong: ${c.caution}` : ''}`
-            : c.requested ? ' Argus did not pick it; a user asked for this read.' : ''
+            : c.rule ? ` The run-up rule listed it — a report about six sessions out, the last three beat; no one picked it.${c.requested ? ' A user asked for this read now.' : ''}`
+                : c.requested ? ' Argus did not pick it; a user asked for this read.' : ''
         return `Catalyst read on ${symbol} — the Hotlist graded it THIS WEEK (2–10 days) on ${c.day ?? 'today'}.${facts}${argus} Is the catalyst real, what is it worth, how much is still open, and what can break it inside the window?`
     }
     // From the HOUSE SCAN (step 7): Pythia's verdict on the industry or theme sent it — the thesis and risks travel,

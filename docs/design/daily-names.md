@@ -1,6 +1,10 @@
 # Hotlist — the short-horizon board (session · day · days · week)
 
-**Status: BUILT — all six phases (§11); everything is OFF behind `DAILY_SCREENER` until the FMP limit is measured.** The screener is **DailyScreener**; the Floor row is **Hotlist**. Discussed with Roy on 2026-10-21; the open decisions were
+**Status: the DAY COLUMNS ARE ARCHIVED (2026-10-25, `docs/design/hotlist-day-archive.md`): the checkpoints, the session
+boards and their replay are in `archive/`; This week is built OVERNIGHT on the run-up rule (`services/hotlist.week.js`).
+Read §2–§7 for what the day columns were; §7.5 for their replay, and screener-lab.md (§1, §9) and
+hotlist-day-archive.md §1 for why they went. Before that: BUILT — all six phases (§11); everything is
+OFF behind `DAILY_SCREENER` until the FMP limit is measured.** The screener is **DailyScreener**; the Floor row is **Hotlist**. Discussed with Roy on 2026-10-21; the open decisions were
 settled the same day (§10). Argus already finds names
 for weeks, months and years; this is how it finds names for **a week, a few days, a day, and the
 session itself**. The thresholds below are first proposals, not tuned values. **Shorts are not
@@ -317,8 +321,21 @@ dated D may come after the close). Contracts, FDA decisions, index changes and t
 today's universe (survivorship); the open, not the 09:20 quote; a run-up is scored to the close before its report. The
 live outcome log keeps each week name's `path` from 2026-10-24, and `summarize` splits This week by it. Stored as ONE summary document (`hotlist_backtest`, per grade, per path,
 the graded set, the pool), carried by GET /api/hotlist/outcomes as `backtest`, shown on This week as its own line —
-never mixed with the live record, never toward verified. The session-intraday columns (open, mid, eod) are not replayed:
-their gates need pre-market quotes and that morning's news labels, which do not exist for the past.
+never mixed with the live record, never toward verified.
+
+**The day columns** (Roy, 2026-10-24: "replay the day columns") — archive/services/hotlistBacktest.day.js,
+`archive/scripts/replay-hotlist-day.mjs [sessions] [limit]` (archived 2026-10-25 with the columns). The same idea at each column's checkpoint: the quote the board would
+have read, rebuilt from D's 5-minute bars up to that minute (`daySnapshot`: price, the session's open/high/low, volume
+so far → the live ctx, `dayCtx`), the live cell, the live window from that price. Open at 09:20 reads its price from
+D's extended-hours bars (`premarketSnapshot`), fetched only on a day that opened gapped (`openGapped`). One summary per
+column in `hotlist_backtest` (id = the column), shown on that column's list beside the week's. ~60 sessions by default:
+5-minute bars come ~8 sessions a read (`BLOCK` 7), and only for the sessions a name passed a day column's gates.
+What it cannot replay, in its caveats: the open's "gap on news" (the `earningsBeat` stand-in again); the open's
+PRE-MARKET VOLUME — FMP's extended bars carry 3–25× less than the live pre-market quote (checked on 2026-10-23's 09:20
+board), so the "1% of a day" condition is taken as met (`PM_VOL_NOT_REPLAYED`) and the open is judged on its 09:20 gap;
+relative volume in session runs under the live quote's (which counts pre-market trading — the same to half on
+2026-10-23's boards), so mid/eod/tomorrow are if anything stricter than live; no spread gate; every gate-passing name
+is judged, where a live board quotes only its pool.
 
 ### 7.6 Day trades are Argus's names (Roy, 2026-10-24: "remove the grades from day trades")
 
@@ -427,7 +444,7 @@ phase 2's overnight pass is switched on anywhere.
    daily_prices_recent (written by aether-engine) is weekly and has no SPY, so neither replaces the per-name read. **Turn on
    only after the rate-limit burst (§10).**
 3. **Checkpoint pass** — **BUILT 2026-10-21, OFF** (the same `DAILY_SCREENER` switch).
-   `services/dailyScreener.checkpoint.js` (the pool, the paced quotes, the board), `hotlist.columns.js`
+   `archive/services/dailyScreener.checkpoint.js` (archived 2026-10-25; the pool, the paced quotes, the board), `hotlist.columns.js`
    (pure: gates, in play, overhead levels, free range, grades), `hotlist.news.js` (the labels). Five
    checkpoints, each with a 30-minute window; pre-market reads the extended-hours book
    (`aftermarket-quote`: bid / ask / volume → midpoint, spread, % of a day's volume), in session the

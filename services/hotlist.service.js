@@ -1,7 +1,7 @@
 // The HOTLIST's read side (docs/design/daily-names.md §8, build phase 5): what the Floor's Hotlist
 // row and the API read, and what a "Build with Mentor" hand-off is resolved into.
 //
-// The boards are written by dailyScreener.checkpoint and scored by hotlist.outcomes; nothing here
+// The boards are written by hotlist.week (overnight; the checkpoint pass before it is archived) and scored by hotlist.outcomes; nothing here
 // writes. A hand-off from the board is a REFERENCE (scanSeed.util: board id + column + the ticker),
 // and the facts Mentor is told come from the stored board — never from the request.
 
@@ -10,7 +10,7 @@ import { BOARDS, OUTCOMES, outcomeSummary, argusSummary, windowEnd, lastClosedSe
 import { COLUMN_WORDS } from './hotlist.argus.js'
 import { RUNS, latestRun, runIsLive } from './dailyScreener.service.js'
 import { backtestSummary } from './hotlistBacktest.service.js'
-import { BOARD_STALE_MS } from './dailyScreener.checkpoint.js'
+import { BOARD_STALE_MS } from './hotlist.boards.js'
 import { rowStatus, STATUSES } from './hotlist.columns.js'
 import { catalystReadService, readFacts } from './catalystRead.service.js'
 
@@ -38,7 +38,9 @@ export function seedFacts(row, column) {
     const parts = [`${COLUMN_WORDS[column] ?? column}`]
     const tape = [row.gap_pct != null ? `${row.gap_pct > 0 ? '+' : ''}${_f(row.gap_pct)}% gap` : null, row.rvol != null ? `${row.rvol}× volume` : null].filter(Boolean)
     if (tape.length) parts[0] += ` — ${tape.join(', ')}`
-    parts.push(c.range?.open_sky ? 'open sky (no level overhead)' : `free range ${_f(c.range?.pct)}% (${_f(c.range?.atr_mult)}× ATR) to ${_f(c.range?.level)}`)
+    // The overnight week board (hotlist.week) has no free range: its cell is the run-up rule's — the why says it.
+    if (c.range) parts.push(c.range.open_sky ? 'open sky (no level overhead)' : `free range ${_f(c.range.pct)}% (${_f(c.range.atr_mult)}× ATR) to ${_f(c.range.level)}`)
+    else if (c.why?.length) parts.push(`run-up rule: ${c.why.join('; ')}`)
     if (row.catalyst?.material) parts.push(`catalyst: ${row.catalyst.type}, ${row.catalyst.surprise}${row.catalyst.headline ? ` — "${row.catalyst.headline}"` : ''}`)
     // A report inside the window makes this a run-up trade (§2.7): Mentor's exit has to come before it.
     if (c.exit_before) parts.push(`earnings ${c.exit_before} — a run-up into the report: the setup must be out before it`)

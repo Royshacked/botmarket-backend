@@ -308,14 +308,15 @@ function _normalizeFmpCandle(r) {
 /**
  * OHLCV candles from FMP as the canonical CandleObject[] (drop-in for
  * massive.getTickerAggregates). Returns null when FMP shouldn't serve this bar spec
- * (week/month/odd multiplier) so the caller can fall back. `from`/`to` are epoch ms.
+ * (week/month/odd multiplier) so the caller can fall back. `from`/`to` are epoch ms. `extended` (intraday only) adds
+ * the pre- and post-market bars, 04:00–20:00 ET — the day replay's 09:20 price and pre-market volume.
  *
  * @param {string} ticker
- * @param {{ timeSpan?: string, multiplier?: number, from?: number, to?: number }} options
+ * @param {{ timeSpan?: string, multiplier?: number, from?: number, to?: number, extended?: boolean }} options
  * @returns {Promise<Array<{timestamp,open,high,low,close,volume}> | null>}
  */
 export async function getFmpCandles(ticker, options = {}) {
-    const { timeSpan = 'day', multiplier = 1, from, to } = options
+    const { timeSpan = 'day', multiplier = 1, from, to, extended = false } = options
     const spec = fmpCandleSpec(timeSpan, multiplier)
     if (!spec) return null
 
@@ -342,6 +343,7 @@ export async function getFmpCandles(ticker, options = {}) {
     const parts = [`symbol=${encodeURIComponent(sym)}`]
     if (from != null) parts.push(`from=${dateStr(from)}`)
     if (to   != null) parts.push(`to=${dateStr(to)}`)
+    if (extended && spec.kind === 'intraday') parts.push('extended=true')
     const qs   = parts.join('&')
     const path = spec.kind === 'intraday' ? `/historical-chart/${spec.interval}?${qs}` : `/historical-price-eod/full?${qs}`
 

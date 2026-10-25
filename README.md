@@ -156,8 +156,8 @@ api/                   HTTP surface — one folder per feature (routes + control
                        which is what `portfolio_item` holdings ride
   portfolio/           Atlas chat + portfolio review/rebalance lifecycle
   scanner/             Argus chat + saved scans
-  hotlist/             the Floor's HOTLIST (/api/hotlist): each horizon a chain's survivors — Argus's day
-                       picks, Prometheus's catalyst reads on This week, the weekly chain's coverage on
+  hotlist/             the Floor's HOTLIST (/api/hotlist): This week's run-up names (built overnight; the day
+                       columns archived 2026-10-25), Prometheus's catalyst reads on them, the weekly chain's coverage on
                        Swing / Long term; no grade letter shown. Shared, read-only bar POST /reads
   pendingAction/       the QUEUED list (/api/pending-actions) — everything waiting on the user, from
                        both the off-hours queue and the entities the market-open sweep unparked

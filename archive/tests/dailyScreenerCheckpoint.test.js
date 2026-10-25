@@ -1,9 +1,9 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { memDb } from '../helpers/memDb.js'
+import { memDb } from '../../tests/helpers/memDb.js'
 import {
     runCheckpoint, dueCheckpoint, buildPool, structureNames, eligibleNames, READY_MAX, RETRY_429, RETRY_429_BUDGET, boardRow, rankRows, BOARDS, CHECKPOINTS,
-} from '../../services/dailyScreener.checkpoint.js'
+} from '../services/dailyScreener.checkpoint.js'
 import { COLLECTION as STATS } from '../../services/dailyScreener.service.js'
 import { _tick } from '../../monitoring/dailyScreener.monitor.service.js'
 
