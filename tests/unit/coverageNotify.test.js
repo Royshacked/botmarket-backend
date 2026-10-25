@@ -163,7 +163,7 @@ test('a house refresh with no roster, or a roster read that fails, posts nothing
 // other half is the router (MainPage's OPEN_COVERAGE no longer switches desks on an 'open').
 
 test('a verdict card says REVISE — the label is what separates it from the refresh card', () => {
-    for (const state of ['target_hit', 'thesis_broken', 'validating', 'diverging']) {
+    for (const state of ['target_hit', 'thesis_broken', 'diverging']) {
         const c = buildCoverageEvent(cov(), { state, reason: 'r' }, 'a1')
         assert.equal(c.actions.primary.label, 'Revise thesis')
         assert.equal(c.actions.primary.resolvesOn, 'work')   // opening it is not doing it
@@ -200,4 +200,11 @@ test('a failed refresh WITH a review behind it keeps its primary — there is st
     await notifyCoverageRefreshed({ userId: 'u1', ticker: 'NVDA', portfolioId: 'p1', ok: false }, d)
     assert.equal(d.posted[0].actions.primary.label, 'Resume review')
     assert.equal(d.posted[0].actions.primary.resolvesOn, 'work')
+})
+
+// 2026-10-25 (Roy): the Street catching up asks for nothing — the card opens the thesis to read.
+test('the validating card is a READ — Open thesis, done on open', () => {
+    const c = buildCoverageEvent(cov(), { state: 'validating', reason: 'r' }, 'a1')
+    assert.equal(c.actions.primary.label, 'Open thesis')
+    assert.equal(c.actions.primary.resolvesOn, 'open')
 })

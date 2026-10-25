@@ -17,6 +17,11 @@ import { logger }           from './logger.service.js'
 
 const LOG = '[coverageNotify]'
 
+// A card that TELLS rather than asks (Roy, 2026-10-25): the button opens the thesis to READ, and opening
+// it completes the card. A house re-model's done card, and the `validating` verdict (the Street catching
+// up asks for nothing).
+export const READ_LABEL = 'Open thesis'
+
 // Injectable so the admin fan-out is assertable without a DB.
 // `post` is still postCard: a test seam, not a second way for a card to reach the user.
 const _deps = {
@@ -66,12 +71,15 @@ export function buildCoverageEvent(coverage, verdict, userId) {
         type:       'coverage_event',
         payload:    { kind: 'coverage', symbol: sym, coverageId: coverage.id ?? null, state },
         botId:      'analyst',
-        // "Revise thesis", not "Open coverage". This card's primary runs the REVISE doorway — it
+        // `validating` is a READ since 2026-10-25 (Roy: "make the catching up card a read card too") — the
+        // only verdict still posted; the others are re-modelled on their own (coverage.monitor).
+        //
+        // Otherwise "Revise thesis", not "Open coverage". This card's primary runs the REVISE doorway — it
         // opens Prometheus on the thesis with the turn already in flight — while the refresh card
         // below merely shows the book. Both said "Open coverage", so the two were indistinguishable
         // in the feed and a user who had just revised one name read the other's click as the desk
         // answering with the wrong thesis. The label is the only thing that told them apart.
-        actions:    cardActions('Revise thesis'),
+        actions:    state === 'validating' ? cardActions(READ_LABEL, { resolvesOn: 'open' }) : cardActions('Revise thesis'),
         visibility: 'admin',
     }
 }
@@ -107,8 +115,7 @@ export async function notifyCoverageEvent(coverage, verdict, deps = _deps) {
 // because it is the verdict card's doorway (FE CoverageRefreshedBubble → OPEN_COVERAGE 'revise').
 export const REVISE_LABEL = 'Revise thesis'
 // A HOUSE re-model's card (Roy, 2026-10-25: Prometheus revises without asking, and says so when it is
-// done). The revision is made; the button opens it to READ — opening it is the completion.
-export const READ_LABEL = 'Open thesis'
+// done) is a READ_LABEL card (above): the revision is made; the button opens it.
 const _why = trigger => (typeof trigger === 'string' && trigger.trim() ? ` — ${trigger.trim()}` : '')
 // Prometheus says when a headless refresh has rewritten a name's coverage. Two askers, two audiences:
 //

@@ -183,7 +183,8 @@ outranks the 14-day cooldown but waits out a 3-day one after a run that has just
 (`VERDICT_COOLDOWN_DAYS`), and takes a slot after held names and before the schedule. The only message is
 the re-model's own `coverage_refreshed` card (below): "Prometheus revised X — <why>: <what moved> — <gist>",
 "… and kept the target: <reason>", or "… tried to re-model X but produced nothing to store". Only
-`validating` — the Street catching up, which asks for nothing — still posts a `coverage_event` card. A re-model that moves a hit target re-opens the thesis (`coverageRefresh._reopenTarget`: status back to `active`), or the next hit on the new number would be swallowed by the `target_hit` ratchet.
+`validating` — the Street catching up, which asks for nothing — still posts a `coverage_event` card, and
+it is a READ card: "Open thesis" opens the thesis and completes it (Roy, 2026-10-25). A re-model that moves a hit target re-opens the thesis (`coverageRefresh._reopenTarget`: status back to `active`), or the next hit on the new number would be swallowed by the `target_hit` ratchet.
 
 Its primary reads **"Revise thesis"**, not "Open coverage" — the refresh card below used the same
 words while doing something entirely different, so in the feed the two were one button. (2026-09-24)
