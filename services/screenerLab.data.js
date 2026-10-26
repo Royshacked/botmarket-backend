@@ -39,6 +39,19 @@ const _deps = {
     history:   (symbol) => fmpGet(`/earnings?symbol=${encodeURIComponent(symbol)}&limit=40`, { label: `FMP earnings ${symbol}` }),
     insiders:  (symbol) => fmpGet(`/insider-trading/search?symbol=${encodeURIComponent(symbol)}&transactionType=P-Purchase&page=0&limit=100`, { label: `FMP insiders ${symbol}` }),
     screen:    (qs) => fmpGet(`/company-screener?${qs}`, { label: 'FMP screener' }),
+    // The report test (2026-10-26): what the analysts did before each report — every rating change, and every price-target
+    // note (100 a page, newest first), from ANALYST_FROM; compact rows (newsShock.service reads them).
+    grades:    async (symbol) => ((await fmpGet(`/grades?symbol=${encodeURIComponent(symbol)}`, { label: `FMP grades ${symbol}` })) ?? [])
+        .filter(g => String(g.date) >= ANALYST_FROM).map(g => [String(g.date).slice(0, 10), g.action]),
+    targets:   async (symbol) => {
+        const out = []
+        for (let page = 0; page < 10; page++) {
+            const rows = (await fmpGet(`/price-target-news?symbol=${encodeURIComponent(symbol)}&page=${page}&limit=100`, { label: `FMP targets ${symbol}` })) ?? []
+            out.push(...rows.filter(r => String(r.publishedDate) >= ANALYST_FROM).map(targetRow))
+            if (rows.length < 100 || String(rows.at(-1)?.publishedDate) < ANALYST_FROM) break
+        }
+        return out
+    },
     // The seasonal test (2026-10-25): month-end closes since MONTHS_FROM — the daily bars read once, kept as months.
     months:    async (symbol) => monthEnds(await getFmpCandles(symbol, { timeSpan: 'day', multiplier: 1, from: Date.parse(MONTHS_FROM), to: Date.now() })),
     // The short tests (2026-10-25) — FINRA, in BULK: one read a settlement date / a trading day for the whole market.
@@ -49,6 +62,20 @@ const _deps = {
     perMinute: () => config.dailyScreenerRpm,
     now:       () => Date.now(),
     sleep:     (ms) => new Promise(r => setTimeout(r, ms)),
+}
+
+/** How far back the analysts' notes are read: the three-year span's first report, less the 90 days it looks back. */
+const ANALYST_FROM = '2023-06-01'
+
+/**
+ * A price-target note → `[day, target, price when posted, direction]` — the day in ET (FMP stamps it in UTC), the
+ * direction off the title: +1 raised, −1 lowered, 0 anything else (an initiation, a reiteration). Pure.
+ */
+export function targetRow(r) {
+    const t = String(r?.newsTitle ?? '')
+    const dir = /\b(raised|raises|boost(s|ed)?|lift(s|ed)?|increase[sd]?|hike[sd]?|bump(s|ed)?)\b/i.test(t) ? 1
+        : /\b(lowered|lowers|cut(s)?|reduce[sd]?|trim(s|med)?|slash(es|ed)?)\b/i.test(t) ? -1 : 0
+    return [_etDay(Date.parse(r?.publishedDate)), Number(r?.priceTarget) || null, Number(r?.priceWhenPosted) || null, dir]
 }
 
 /** How far back the short data is read (the three-year span's first session is 2023-10-09). */
@@ -130,6 +157,39 @@ async function readEach({ file, symbols, read, deps, pace, label, onProgress }) 
     return { out, done: () => fs.rmSync(partial, { force: true }) }
 }
 
+/**
+ * Two caches of one universe joined into one span (test J, 2026-10-26: the 2019–2023 window + the 3-year cache): per name,
+ * the NEWER cache's bars, with the older one's bars before its first day in front. Each cache is adjusted as of the day
+ * it was fetched, so the older bars are scaled by the ratio of the two closes on the last day both have — a split or a
+ * dividend between the two fetches would otherwise be a jump. A name whose ratio is off by more than `tol` is listed in
+ * `scaled` (it was scaled); one with no common day is joined unscaled and listed in `unmatched`. The rest of the newer
+ * cache is kept. Pure.
+ */
+export function joinWindows(older, newer, { tol = 0.005 } = {}) {
+    const scaled = [], unmatched = []
+    const join = (sym, a = [], b = []) => {
+        if (!a.length) return b
+        if (!b.length) return a
+        const first = b[0].timestamp
+        const day = (ts) => _etDay(ts)
+        const bByDay = new Map(b.map(x => [day(x.timestamp), x]))
+        let ratio = null
+        for (let k = a.length - 1; k >= 0; k--) {
+            const m = bByDay.get(day(a[k].timestamp))
+            if (m && a[k].close > 0 && m.close > 0) { ratio = m.close / a[k].close; break }
+        }
+        if (ratio == null) unmatched.push(sym)
+        else if (Math.abs(ratio - 1) > tol) scaled.push([sym, ratio])
+        const r = ratio ?? 1
+        const head = a.filter(x => x.timestamp < first).map(x => ({ ...x, open: x.open * r, high: x.high * r, low: x.low * r, close: x.close * r }))
+        return [...head, ...b]
+    }
+    const names = {}
+    for (const sym of new Set([...Object.keys(older.names ?? {}), ...Object.keys(newer.names ?? {})])) names[sym] = join(sym, older.names?.[sym], newer.names?.[sym])
+    const spy = join('SPY', older.spy, newer.spy)
+    return { raw: { ...newer, names, spy, bars_from: older.bars_from ?? newer.bars_from, window: null }, scaled, unmatched }
+}
+
 /** Daily bars → `[['YYYY-MM', month-end close], …]`, oldest first. Pure. */
 export function monthEnds(bars) {
     const out = new Map()
@@ -203,7 +263,8 @@ export function prepare(raw, extras = {}) {
             .map(t => ({ filed: String(t.filingDate).slice(0, 10), who: t.reportingCik ?? t.reportingName, role: t.typeOfOwner ?? '', usd: (Number(t.securitiesTransacted) || 0) * (Number(t.price) || 0) }))
             .sort((a, b) => a.filed.localeCompare(b.filed))
         names.set(s, { rows, ind: indicators(rows, dates), reports: byName.get(s) ?? new Map(), sector: raw.sectors?.[s] ?? null, insiders,
-            months: new Map(extras.months?.[s] ?? []), si: si.get(s) ?? [], sv: sv.get(s) ?? new Map(), dp: dp.get(s) ?? [] })
+            months: new Map(extras.months?.[s] ?? []), si: si.get(s) ?? [], sv: sv.get(s) ?? new Map(), dp: dp.get(s) ?? [],
+            grades: extras.grades?.[s] ?? [], targets: extras.targets?.[s] ?? [] })
     }
     const spyByDay = new Map((raw.spy ?? []).map(b => [_etDay(b.timestamp), b]))
     const spyDays = [...spyByDay.keys()].sort()
@@ -245,7 +306,7 @@ export function sectorStats(names) {
  * The lab's data for a universe (`screener` by default) from the cache — or, absent or on `refresh`, the provider.
  * `years` — bars that far back (its own cache, `<name>-<years>y.json`); the calendar stays a year. `window` — `{ from, to }`,
  * a span of the past instead (`<name>-<from>_<to>.json`, no calendar). `extras` —
- * `['history', 'insiders', 'months', 'shortInterest', 'shortVolume', 'darkPool']`, any (the FINRA three read in BULK, per date) — read once per universe into `<name>.extras.json` (shared by every span), cached too.
+ * `['history', 'insiders', 'months', 'grades', 'targets', 'shortInterest', 'shortVolume', 'darkPool']`, any (the FINRA three read in BULK, per date) — read once per universe into `<name>.extras.json` (shared by every span), cached too.
  */
 export async function loadLabData({ name = 'screener', years = 1, window = null, refresh = false, extras = [], deps = _deps, onProgress } = {}) {
     const file = path.join(DIR, window ? `${name}-${window.from}_${window.to}.json` : years > 1 ? `${name}-${years}y.json` : `${name}.json`)

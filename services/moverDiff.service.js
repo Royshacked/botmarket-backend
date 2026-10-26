@@ -111,11 +111,11 @@ export function collectMovers(data, { weeks = 150, min = 5, daily = false, hold 
  * Per feature: five bins cut on the movers before `splitAt` (its quintiles), the share that went UP in each bin, before
  * and held out → `{ feature: { cuts, bins: [{ before: {n, up}, held: {n, up} }], spread_before, spread_held } }`;
  * `spread` the top bin's up-share less the bottom's (points). A feature whose spread keeps its sign and size held out
- * tells something. Pure.
+ * tells something. `features` the names of `x`'s slots (FEATURES by default; the report test passes its own). Pure.
  */
-export function binByFeature(movers, splitAt) {
+export function binByFeature(movers, splitAt, features = FEATURES) {
     const out = {}
-    for (const [fi, k] of FEATURES.entries()) {
+    for (const [fi, k] of features.entries()) {
         const vals = movers.filter(m => m.week < splitAt && Number.isFinite(m.x[fi])).map(m => m.x[fi]).sort((a, b) => a - b)
         if (vals.length < 50) continue
         // Distinct cuts: a 0/1 feature has two bins, not five.
@@ -146,19 +146,19 @@ export function binByFeature(movers, splitAt) {
  * them; a missing value is the mean), scored on the held-out ones. → `{ weights, held: { n, auc, deciles: [{ n, up,
  * net_mean }] } }` — `auc` 0.5 is no better than a coin; the deciles from the model's least to its most bullish. Pure.
  */
-export function fitAndScore(movers, splitAt, { epochs = 300, rate = 0.1, l2 = 0.001 } = {}) {
+export function fitAndScore(movers, splitAt, { epochs = 300, rate = 0.1, l2 = 0.001, features = FEATURES } = {}) {
     const train = movers.filter(m => m.week < splitAt), test = movers.filter(m => m.week >= splitAt)
     const mu = {}, sd = {}
-    for (const [fi, k] of FEATURES.entries()) {
+    for (const [fi, k] of features.entries()) {
         const xs = train.map(m => m.x[fi]).filter(Number.isFinite)
         mu[k] = _mean(xs) ?? 0
         const v = xs.length > 1 ? xs.reduce((s, x) => s + (x - mu[k]) ** 2, 0) / (xs.length - 1) : 1
         sd[k] = Math.sqrt(v) || 1
     }
     // Clipped at ±4 sd: one 900% week would otherwise steer the fit.
-    const vec = (m) => FEATURES.map((k, fi) => Math.max(-4, Math.min(4, Number.isFinite(m.x[fi]) ? (m.x[fi] - mu[k]) / sd[k] : 0)))
+    const vec = (m) => features.map((k, fi) => Math.max(-4, Math.min(4, Number.isFinite(m.x[fi]) ? (m.x[fi] - mu[k]) / sd[k] : 0)))
     const X = train.map(vec), y = train.map(m => (m.up ? 1 : 0))
-    const w = new Array(FEATURES.length).fill(0)
+    const w = new Array(features.length).fill(0)
     let b = 0
     const sig = (z) => 1 / (1 + Math.exp(-z))
     for (let e = 0; e < epochs; e++) {
@@ -188,7 +188,7 @@ export function fitAndScore(movers, splitAt, { epochs = 300, rate = 0.1, l2 = 0.
             up_per_session: _r(_mean([...byDay.values()].map(v => _mean(v))) * 100, 1), sessions: byDay.size, net_mean: _r(_mean(xs.map(x => x.net))) }
     })
     return {
-        weights: Object.fromEntries(FEATURES.map((k, i) => [k, _r(w[i], 3)]).sort((a, z) => Math.abs(z[1]) - Math.abs(a[1]))),
+        weights: Object.fromEntries(features.map((k, i) => [k, _r(w[i], 3)]).sort((a, z) => Math.abs(z[1]) - Math.abs(a[1]))),
         train: train.length, held: { n: test.length, auc: _r(auc, 3), deciles },
     }
 }

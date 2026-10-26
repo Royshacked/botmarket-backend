@@ -308,3 +308,335 @@ eight weeks published before (`dpShares`). Declared before the run, three years,
   flow is ordinary — not an order a filter can use with confidence.
 
 Weekly and late, the dark-pool figure carries no edge here — on its own or under the run-up.
+
+## 16. After the news — test A (2026-10-26)
+
+Roy: "does news move stocks — run test A". `services/newsShock.service.js`, `scripts/lab-news-shock.mjs`. Declared before
+the run: a SHOCK is a session that closed 5%+ against SPY (close to close) on 2× its 20-day dollar volume; bought at the
+NEXT open (the whole shock known), held 1 / 5 / 10 / 20, net of SPY and the cost; by direction and by a report that day
+or the day before; three years (2023-10-09 → 2026-10-23, 13,759 shocks), the last year held out. Drift = the next
+sessions go the shock's way.
+
+| Shock | n | Held 1 | Held 5 | Held 20 [per-session 95%] | Before / held out (20) |
+|---|---|---|---|---|---|
+| Up, no report | 5,749 | −0.37% [−0.63 … −0.12] | +0.09% | +1.29% [+0.21 … +2.37]; blocks of 20 +0.79% [−1.78 … +3.35] | +0.96 / +1.99 |
+| — of which 10–20% | 1,847 | −0.12% | +0.46% | +1.90% [+0.12 … +3.69] | +2.09 / +1.57 |
+| Up, earnings | 2,750 | +0.16% | −0.38% | +0.02% | −0.36 / +0.82 |
+| Down, no report | 2,767 | −0.15% | −0.61% [−1.23 … 0] | +0.01% | −0.23 / +0.51 |
+| Down, earnings | 2,493 | −0.27% [−0.54 … −0.01] | −0.32% | +0.19% | −0.71 / +1.96 |
+
+- **Earnings shocks leave nothing** — no post-earnings drift at this cut, either way.
+- **Up on no report** gives a little back the next session, then leans on over a month; both periods positive, but the
+  honest range (non-overlapping 20-session blocks) crosses zero and fewer than half go up (45.7%) — a few big winners
+  carry it. The 10–20% band is the sharpest: a LEAD, not a finding.
+- **Down shocks** lean on down for 5–10 sessions (−0.3 … −0.6%) and recover by 20. Nothing clears zero.
+
+**By headline type, the last year** (non-earnings shocks, 2025-11-13 →; FMP `/news/stock` from 16:00 the session before
+to 13:00 on the entry day, keywords on titles — `NEWS_TYPES`; 502 reads, four days hit the 250 cap): 'other' and 'no
+headline' are 1,902 of the 3,163 (up 861 + 514, down 345 + 182) — the titles rarely say why. Groups
+of 31–261, ranges wide, the year's halves often opposite (Nov–Apr a speculative run, May–Oct not). The one cell that
+clears zero with both halves agreeing: **down on NO headline, held 5: +2.82% [+0.34 … +5.31], +2.95 / +2.70 (182)** —
+a hard fall nobody explained comes back. One of ~80 cells on one year: a lead to test on a wider universe. Deals,
+analyst notes, guidance, FDA, contracts, offerings: none separates.
+
+**Verdict:** on this universe, once the shock day is over, news shocks leave no drift or reversal you can trade with
+confidence. Two leads: up 10–20% with no report (drift over a month) and down with no headline (a week's bounce).
+Caveats: today's universe (survivorship flatters the down-shock bounces), keyword types, one year of headlines.
+
+## 17. The second order — test B (2026-10-26)
+
+Roy: "does news move 2nd order stocks — test b". `peerRows` (newsShock.service), `scripts/lab-peers.mjs`. The link is
+the INDUSTRY (FMP's, off the latest screener stats: 133 industries, 88 with 4+ names) — no supplier/customer map is on
+our data. Declared before the run: §16's shocks grouped into one-way industry-days (8,826; mixed days dropped); every
+other name of the industry is a PEER (133,023 rows); its own move that session against SPY is its reaction (quiet under
+2%, along, against); bought at the next open, held 1 / 5 / 10 / 20, net of SPY and the cost, three years, the last held
+out.
+
+- **Day 0 — yes, the peers move with it**: up shocks +0.67…+0.72% (61% of peers up), down −0.76…−0.96% (33–37% up),
+  every range well clear of zero. About 60% of peers stay quiet, 28% move along, 11% against.
+- **After — nothing reads through.** By the shock: every cell's block range crosses zero at every hold (up, no report,
+  held 20: +0.67%, blocks +0.52 [−0.53 … +1.57]; the down shocks' peers show no matching fall — the up-shock number is
+  the universe's drift, not the shock's).
+- **By the peer's own reaction**: the 'against' peers lean up later on BOTH sides (+1.5…+1.6% held 20) — direction-free,
+  so it is the volatile names' drift, not read-through.
+- **Leader → laggard** (a bigger name shocked, quiet peers): first run showed down-earnings leaders' peers −1.18% held 20
+  (blocks −1.34 [−2.30 … −0.39]) — a LOOK-AHEAD: "bigger" was read on TODAY's caps, and a peer that fell since is smaller
+  today. On the cap THAT DAY (today's × the day's close over the last) it is −0.19% (blocks −0.52 [−1.64 … +0.59]).
+  Nothing.
+- **Earnings read-through** (quiet peers whose own report falls within 20 sessions): nothing either way.
+
+**Verdict:** news moves the second order the SAME DAY — about a tenth of the shock, at once — and leaves nothing after.
+On this universe, at the industry level, the market prices the read-through on the day. What is left untested: links the
+industry label cannot see (suppliers, customers, competitors across industries) and smaller, less-followed names.
+
+## 18. Can the run-up trade the report? — test C (2026-10-26)
+
+Roy: "after a report we have a prediction of the next one, the analysts' pricing, the news between — so in some cases
+the run-up can also trade the report". `services/reportReaction.service.js`, `scripts/lab-report.mjs`. The REACTION is
+the close before the report date to the close after it, against SPY (it holds the move before the open or after the
+close) — exactly what holding through adds to the run-up. Thirteen facts known the evening before (`REPORT_FEATURES`):
+the last three reports' beats, the last EPS and revenue surprise, the last reaction, this estimate against the actual a
+year before, the run into it (5 and 20 sessions), SPY over its 200-day, and the ANALYSTS — upgrades less downgrades in
+the 60 days before, price-target raises less cuts in the 45 days before, how many notes, the median target's upside
+(new lab extras `grades` and `targets`: FMP `/grades` and `/price-target-news`, 111,017 and 47,003 rows from 2023-06; the
+estimate HISTORY is a 402 on our plan). Bins cut and a logistic fitted on 2023-10 → 2025-10, scored on the held-out
+year; 12,662 reports, 2,517 of them the run-up's own names (the last three beat, SPY over its 200-day).
+
+- **The reaction is a coin with a wide spread**: 48% up, mean ~0, sd 10.4%. The run-up's names: 46–47% up, per report
+  day −0.15% / +0.57% (both ranges cross zero).
+- **All thirteen together**: AUC 0.518 held out on every report, **0.494 on the run-up's names** — no better than a coin.
+  No decile is clear of the others.
+- **The analysts**: on the run-up's names, net upgrades and target raises flip between the periods (raised ≥ 2: −0.63%
+  before, +1.65% held out, both ranges across zero). Target cuts lean negative in both (−1.42% / −0.68%) — not separated.
+- **Only two facts keep their sign and size**, both as AVOIDS on the run-up's names: a falling estimate (this report's
+  EPS estimate 21%+ under a year before: 42% / 37% up, against ~47–51% above it) and quiet volume into it (the bottom
+  fifth, 42% / 41% up). Neither makes a group whose reaction is reliably UP.
+
+**Verdict:** nothing known the evening before tells which way the report goes — not the history, not the run, not the
+analysts. Holding through stays a coin at twice the spread. Two leads, both "get out / skip": the run-up name whose
+estimate is falling year on year, and the one arriving on quiet volume — to test as run-up FILTERS (does the run-up
+itself do worse on them?), not as report trades. Caveats: the analysts' direction comes from title keywords; the
+estimate is the final one (its revisions are not on our plan); today's universe.
+
+## 19. Where a trend comes from — test D (2026-10-26)
+
+Roy: "events keep affecting prices even when far from the event date". `services/trendSource.service.js`,
+`scripts/lab-trend-source.mjs`. Each name's year against SPY, in log points so the parts add, cut three ways: its REPORT
+windows (the close before each report date → the close after), its INDUSTRY's mean move on every other session (the
+name left out; FMP industries), and its OWN move on those sessions. Three yearly windows, the last held out; ~900–1,000
+names each. The report windows are 3.2% of the sessions.
+
+| Winners (20%+ over SPY) | Names | Total | Reports | Industry between | Own between | Reports' share |
+|---|---|---|---|---|---|---|
+| 2023-10 → 2024-10 | 164 | +45.1 | +12.0 | +0.7 | +32.4 | 27% |
+| 2024-10 → 2025-10 | 155 | +52.3 | +13.0 | +8.3 | +31.0 | 25% |
+| 2025-10 → 2026-10 (held out) | 197 | +50.1 | +11.6 | +5.7 | +32.8 | 23% |
+
+- **A report session moves a winner 7–10× an ordinary one** (+1.4…+1.6 against +0.1…+0.2 points a session) — and the
+  losers mirror it (−1.5…−1.7). The reports are DENSE.
+- **But three quarters of a winner's year is made BETWEEN reports, and mostly its OWN** — the industry carries 1–16% of
+  it (it beat the name's own between-report move for only 20–32% of winners). Reports were negative for a quarter to a
+  third of the winners. The losers lean more on the industry (−11 … −18 of ~−50).
+- PEB, the held-out year: +49.4 = reports +7.7 + industry +18.9 + own +22.8. CAKE: +51.9 = reports +4.5 + industry −34.6
+  (restaurants fell) + own +82.0.
+
+## 20. The drift after a report, by its surprise — test E (2026-10-26)
+
+`collectDrift` (reportReaction.service), `scripts/lab-report-drift.mjs`. Every report with an actual, by the EPS
+surprise (the estimate floored at 5 cents: miss under −2%, in line, beat to +10%, big beat), crossed with the reaction's
+sign; bought at the open of the SECOND session after the report date (both known), held 20 / 40 / 60, net of SPY and
+the cost; 13,297 reports, the last year held out.
+
+- **No classic drift** (a beat leaning on up, a miss on down). Every surprise band's block range crosses zero at every
+  hold; up-shares are 40–47% — the means are carried by a few big winners (big beat held 60: +7.3%, range −3.5 … +18).
+- **The leans run AGAINST the event**: a beat the market bought fades (held 40: −1.64% [−2.72 … −0.56], before −1.57 /
+  held out −1.83; blocks cross zero); a MISS the market sold recovers (held 60: +4.37% [+0.58 … +8.17], blocks +3.99
+  [+0.31 … +7.67], before +5.33 / held out +1.85) — the one cell clear on both ranges. Survivorship flatters exactly that
+  cell (today's universe: the misses that kept falling are gone), and 43% of them went up. A lead at most.
+
+**Verdict on Roy's question:** events keep moving prices far from their date only in the sense that NEW events keep
+arriving — three quarters of a trend is made between reports, mostly by the company's own flow, not its industry. The
+report itself does not keep pushing its way; if anything its move partly comes back.
+
+## 21. The early reporters → the late one — test F (2026-10-26)
+
+Roy: "we need to anticipate the price movement after earnings". `peerSeason` (reportReaction.service),
+`scripts/lab-peer-season.mjs`. For each report, its industry's EARLY reporters: the other names with a report in the 45
+days before it whose reaction window closed by its evening before (2+ needed). Their mean EPS surprise, the share that
+beat (over +2%), their mean reaction, how many. Two outcomes: did the target BEAT, which way did it REACT. Terciles and a
+logistic cut/fitted on 2023-10 → 2025-10, scored on the held-out year; 8,865 reports.
+
+| Early reporters' beat share | Target beat — before / held out | Target reacted up — before / held out |
+|---|---|---|
+| low (≤ 50%) | 58.7% / 58.2% | 49.0% / 50.6% |
+| mid | 62.4% / 62.7% | 47.4% / 48.0% |
+| high (> 73%) | 68.5% / 68.2% | 46.4% / 44.8% |
+
+- **The RESULTS read through**: when the early reporters beat, the late one beats more often — 58% → 68%, the same in
+  both periods; the four facts together AUC 0.553 held out for the beat (the first fact in the lab that predicts a report
+  outcome out of sample). The early surprise's size says the same (+8.6 / +10.5 points top to bottom).
+- **The PRICE does not**: for the reaction the same facts score AUC 0.505, and the reacted-up share runs slightly the
+  OTHER way (49% → 46%, 51% → 45% held out). Every reaction range crosses zero.
+
+**Verdict:** the market reads the peers too — the better the season, the higher the bar, and the late beat is in the
+price before it prints. Real business information flows between peers, and it is already in the expectation.
+
+**As a run-up filter** (`scratch/peer-runup.mjs`; `peerSeason` `lead: 5` — only the early reporters known at the
+run-up's ENTRY): the 5-session run-up by the early reporters' beat share, net vs SPY per session. Held out, a weak season
+looks like an avoid (every report −0.57%, the rule's names −0.66% with 39% up; mid/high +0.6 … +1.05%) — but the years
+before do not agree (low +0.31% / −0.01%, high the weakest), and every range crosses zero. Not a filter.
+
+## 22. The funds (13F) — test G (2026-10-26)
+
+Roy: "start with EDGAR". The data is already ours: `fund_holdings` in `test` (pythia-money-flows.md §3.2 — SEC's
+quarterly 13F data sets, shares only, one filing per filer, split-safe), one row per company per quarter, 9 quarters
+2024-06 → 2026-06, ~2,500 companies. `services/fundFlow.service.js`, `scripts/lab-funds.mjs`.
+
+**Declared before the run.**
+- **Facts, per company per quarter** (vs the quarter before): `own_chg` — the change in institutional ownership, 13F
+  dollars ÷ the market cap at the quarter end (today's cap × that close ÷ the last close, so a split cannot move it), in
+  points; `holders_chg` — the change in the NUMBER of filers holding it, log (breadth, Chen–Hong–Stein 2002);
+  `own_level` — the ownership itself (crowding). A change that more than doubles or halves ownership is a CUSIP or
+  filing break and is dropped (§3.2's rule).
+- **The trade:** buy at the first open on or after quarter end + 46 days (the filing deadline is day 45, so every
+  filing is public on EDGAR by then), hold 63 sessions (to the next quarter's facts), net vs SPY after cost; the lab's
+  price and volume floor. Quintiles WITHIN each quarter, so the drift every quarter shares (§3.2 trap 4) cancels.
+- **Eight periods:** four before the split (entries Nov 2024 → Aug 2025), four held out (Nov 2025 → Aug 2026; the
+  last is scored to the latest close, ~50 sessions, and said so).
+- **Expected direction** (the literature): ownership and breadth RISING → better; a high level (crowded) → worse.
+- **Bar — a fact passes only if:** the top-minus-bottom quintile has the expected sign in BOTH halves and in at least
+  6 of the 8 periods; it is a long-only rule only if the top quintile is also above SPY after cost in both halves.
+- **Secondary:** the same, entered 20 sessions later — when SEC's data set (what our job reads) is out, not the
+  filings one by one.
+- Known limits: 8 periods is thin (a pass is a "maybe", a fail is a fail); share issuance reads as funds buying (the
+  cap proxy keeps today's share count); the universe is the lab's names that `fund_holdings` also holds.
+
+**Result (2026-10-26).** 22,865 rows, 9,721 in the lab → 8,488 changes, 8,213 traded (~1,000 names a quarter). Top
+minus bottom quintile, net vs SPY over the hold, mean of the periods:
+
+| Fact | At the deadline — before / held out (expected sign) | 20 sessions later — before / held out |
+|---|---|---|
+| own_chg | +3.70% / −3.22% (4 of 8) — **FAIL** | +1.90% / −1.31% (3 of 7) — FAIL |
+| holders_chg | +4.51% / +0.55% (5 of 8) — **FAIL** | +4.44% / +4.54% (6 of 7) — pass |
+| own_level | −5.74% / −0.64% (5 of 8) — **FAIL** | −5.90% / −1.47% (6 of 7) — pass |
+| *mom (control, not declared)* | +2.28% / −4.12% (3 of 8) | +3.59% / +0.23% (5 of 7) |
+
+- **The declared test fails** on all three. Ownership CHANGE (the "funds are buying" fact) has no sign at all — it flips
+  between the halves.
+- **The secondary's two passes are not trusted:** they pass by the minimum (6 of 7), the 20-session entry loses the last
+  period — the worst one for breadth (−13.6%) — and the two entries share 43 of their 63 sessions, so a fact that fails
+  at one and passes at the other is mostly noise. A period's spread swings ±10–15 points; over 7–8 periods a +4.5% mean
+  is about t 1.3.
+- **Breadth is not just momentum:** it correlates 0.52 with the quarter's price move, but the price move alone does worse
+  (3 of 8, 5 of 7). Low ownership doing better is most likely the small / foreign / newly listed names this period
+  favoured — a style, not the funds.
+
+**Verdict:** FAIL — no rule. Breadth (more filers) and low crowding lean the way the literature says, which is a
+"maybe" for a longer history, nothing to trade. The way to settle it: 13F back to 2019 (SEC's data sets, ~20 more
+quarters, the aether job's backfill) against the lab's 2019 → 2023 bars — ~27 periods instead of 8.
+
+## 23. The funds on the run-up — stay to the next report? — test H (2026-10-26)
+
+Roy: "test it on the run up — as a rule for staying for the report, until following earnings". `factsKnown`
+(fundFlow.service), `scripts/lab-funds-runup.mjs`.
+
+**Declared before the run.**
+- **The names:** the run-up rule's (§ run-up: the last three reports beat, SPY over its 200-day), entered at the open 5
+  sessions before report k — only entries from 2024-11-15, the first day a 13F change is public.
+- **The facts:** each name's latest 13F change PUBLIC on the entry day (publicDay ≤ entry), its quintile within that
+  quarter's whole cross-section (test G's quintiles, every company, not only the rule's).
+- **Three numbers per trade,** net vs SPY: the RUN-UP (open k−5 → close k−1, after cost — the rule as it is); the STAY
+  part (close k−1 → close before the next report, vs SPY; no extra cost — one round trip either way); the WHOLE (open
+  k−5 → close before the next report, after cost). A next report 40–110 sessions after k, inside the data; otherwise the
+  trade is out.
+- **Primary:** `holders_chg` Q5 (breadth rising most — test G's best lean). **Also shown:** `own_chg`, `own_level` (Q1
+  is the "uncrowded" side) and every rule name.
+- **Bar — staying is a rule only if** the primary group's STAY part is above zero in both halves (split 2025-10-23),
+  beats the bottom quintile's stay in both halves, and its 21-session block range over all of it excludes zero.
+- Known limits: ~2 years of entries; the stay holds overlap (each ~60 sessions), so the block range is the honest
+  range, not the per-name one; test G's limits carry over.
+
+**Result (2026-10-26).** 1,216 run-up trades (entries 2024-11-15 →), held to the next report a median 67 sessions.
+Net vs SPY, mean per trade; the stay part's 21-session block range:
+
+| Group | Run-up | Stay — before / held out | Stay up | Stay blocks |
+|---|---|---|---|---|
+| every rule name | −0.10% | −0.97% / +2.75% | 46% | −4.0 … +2.4 |
+| holders_chg Q5 (declared) | +0.30% | +1.18% / +5.01% | 47% | −8.8 … +4.2 |
+| holders_chg Q1 | −0.68% | +0.71% / +4.43% | 51% | −6.2 … +7.3 |
+| own_chg Q5 | +0.51% | −1.09% / −0.73% | 39% | −10.0 … +2.8 |
+| own_level Q1 (uncrowded) | +0.03% | −6.27% / +0.07% | 38% | −11.0 … +0.1 |
+
+- **The declared rule FAILS:** breadth Q5 stays better than Q1 in both halves, but by 0.5 points — and its range runs
+  −8.8 … +4.2. Across the quintiles nothing is in order (breadth: +2.7, −0.6, +0.5, −0.9, +3.4).
+- **Staying itself is not an edge:** fewer than half the stays end above SPY (46%); the means are the tails and the
+  period — every group lost before the split and gained in the held-out year, the market's year, not the funds'.
+- **Test G's leads turn over:** the "uncrowded" side (own_level Q1) is the WORST stay (−2.8%, 38% up); funds buying
+  most (own_chg Q5) is below SPY in both halves.
+- Seen on the way: since 2024-11 the run-up on these names is flat (−0.10% over the 5 sessions) — a shorter, later
+  window than the rule's own test; read with the rule's full record, not instead of it.
+
+**Verdict:** FAIL. 13F says nothing about which run-up names to keep through the report. Exit at the close before the
+report, as the rule does.
+
+## 24. The funds at the report — hold through it or sell before? — test I (2026-10-26)
+
+Roy: "can I use this data when deciding on the following earnings — keep holding or sell before?" `scripts/lab-funds-report.mjs`.
+
+**Declared before the run.**
+- **Every report** from 2024-11-15 (and the run-up rule's names apart), the REACTION as test C has it (close k−1 →
+  close k+1, vs SPY — `collectReports`), by the latest 13F change PUBLIC on day k−1 (`factsKnown`), its quintile within
+  its quarter's whole cross-section.
+- **Read:** the mean reaction and the reacted-up share per quintile, before / held out (split 2025-10-23); the three facts'
+  AUC for "reacted up", cut on the years before and scored on the held-out year (`fitAndScore`, test C's way).
+- **Bar — a hold-or-sell fact only if:** top-minus-bottom reaction has one sign in BOTH halves, the up share moves
+  the same way, and the held-out AUC ≥ 0.53 (test F's beat read was 0.553; test C's reaction reads ~0.50).
+
+**Result (2026-10-26).** 7,502 reports with 13F facts known the day before (1,480 of them the run-up rule's names).
+Top-minus-bottom quintile, the reaction vs SPY (the up share's gap in brackets):
+
+| Fact | Every report — before / held out | The rule's names — before / held out |
+|---|---|---|
+| own_chg | +1.17% (+6.0) / +0.18% (−0.5) | +4.62% (+17.9) / −1.22% (−2.3) |
+| holders_chg | +1.13% (+3.0) / +0.85% (+0.8) | +0.61% (−5.5) / −1.65% (−5.0) |
+| own_level | −2.47% (−7.3) / −0.56% (−0.2) | −3.97% (−11.0) / −0.97% (+2.8) |
+| AUC, the three facts (held out) | 0.505 | 0.494 |
+
+- **FAIL on the bar** — the AUC is test C's coin (0.505, 0.494), and on the rule's names every fact flips between the
+  halves.
+- **Two leans across all reports**, the same way in both halves: breadth rising reacts a little better (+0.85 points held
+  out), crowded a little worse (−0.56). Both shrink to under a point held out against a reaction that swings ±10% —
+  a tilt across thousands of reports, nothing for the one name in front of you.
+
+**Verdict:** FAIL. 13F does not decide hold-through-the-report or sell-before; that call stays "sell before" (the
+reaction is a coin, §18).
+
+## 25. The 13F spot-check (2026-10-26)
+
+Roy: "did you read each 13F report?" — no: tests G–I read `fund_holdings`, the aether job's per-company totals. Checked
+before going further (scratchpad scripts, independent of aether_engine's code):
+
+- **The job against the data set:** SEC's Jun–Aug 2026 file (11,852 filings; 8,891 counted from 8,857 filers), 10 companies
+  from AAPL to two small caps picked by rank (ORBS, BBW): shares and dollars EXACTLY equal (0.000%) for all 10; filers +1
+  for each — Vanguard's two new CIKs, which the job counts as one (FILER_SUCCESSORS), as documented.
+- **The data set against EDGAR:** 9 filings fetched from EDGAR's archive (BlackRock, FMR, T. Rowe Price, Barclays,
+  CalSTRS ×2, three small filers), PEB and CAKE summed from each info table: every share count equal to the data set.
+- **The CUSIPs:** every row's issuer name for the 10 is the company (a handful of filers' own typos).
+- **Found:** (1) T. Rowe Price Associates files VALUE in THOUSANDS (its PEB $166M reads $166K; table total $999M for a
+  ~$1T book) — dollar facts understate such a filer 1,000× (shares are right); (2) CalSTRS swapped shares and value, then
+  filed a restatement — the job keeps the restatement only (correct); an unrestated misfiling stays in the stored rows
+  (the job's `jumpy_out` runs at the node level, not on them); (3) PEB's funds report 143M shares of 113M outstanding
+  (127%): 17.5M were short (lent shares are reported twice), the rest shared discretion (70M of it "DFND"). LEVELS read
+  high; CHANGES are what the data is good for.
+- **Carried into the next tests:** test G's caps were today's share count — FMP's historical caps (`monthly_prices.caps`)
+  exist and are used from here; dollar values get a per-filing unit check.
+
+## 26. The managers — test J (2026-10-26)
+
+Roy: "test the managers — do not make short cuts". Not every fund together (index money swamps it — tests G–I) but
+WHICH manager bought, from each filing's own holdings. `scripts/lab-13f-extract.py` (SEC data sets → per filer per
+quarter), `scripts/lab-managers.mjs`. Literature: Cohen, Polk & Silli (2010), "Best Ideas" — a manager's
+highest-conviction positions beat the market; most of a fund's other holdings do not.
+
+**Declared before the run.**
+- **Span:** filings for quarters 2018-12-31 → 2026-06-30 (31 files), against the lab's bars 2019-01 → now (the 2019–2023
+  and 3-year caches joined). Held out: entries from 2025-10-23.
+- **Each filing read whole** (every holding, not only our companies): the filer's book value V and its number of
+  positions N. Counted as the job does (shares only, no options, the restatement/new-holdings rule, the quarter's own
+  period). **Units checked per filing:** each position's value/shares against the median of every filer for that CUSIP;
+  a filing whose median ratio is ~1/1000 is in thousands (×1000), ~1000 in dollars where thousands were due (÷1000);
+  any other far-off filing is left out of V-based rules and counted.
+- **A conviction bet:** a company in the lab's names that the filer did NOT hold in its filing for the quarter before
+  (it must have filed one), at ≥ 3% of its book.
+- **Groups:** PRIMARY — conviction bets by CONCENTRATED managers (N ≤ 40 positions, V ≥ $100M). CONTROL — ≥ 3% new
+  bets by every other filer (N > 40). Secondary: (a) concentrated managers ADDING ≥ 50% to a ≥ 3% position (dollar value
+  ÷ the price move, so a split cannot fake it); (b) CONSENSUS — 2+ concentrated managers' new bets on one company in one
+  quarter; (c) TRACK RECORD — concentrated managers whose earlier primary bets (5+, only holds already finished on the
+  filing day) averaged above SPY.
+- **The trade:** the first session AFTER the filing's own date (EDGAR posts it that day), held 63 sessions, net vs SPY
+  after cost, the lab's price/volume floor; one trade per company per quarter per group (the earliest filing).
+- **Bar — PRIMARY passes only if all hold:** mean net > 0 before AND held out; the 21-session block range over the whole
+  span above zero; above CONTROL in both halves; and — the minority check — the mean with the best 1% of trades removed
+  still above zero (the median shown).
+- Known limits: the lab's names are TODAY's (survivors) — every group is flattered, so the CONTROL is the comparison
+  that counts; a CUSIP that changed is missed in the quarters before the change.
