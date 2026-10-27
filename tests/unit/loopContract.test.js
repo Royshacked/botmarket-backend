@@ -69,8 +69,9 @@ test('server.js registers the full fleet', () => {
         // 'pythiaCalls' (2026-10-10) grades Pythia's logged calls at 3 and 12 months (pythia-assessment.md §7).
         // 'dailyScreener' (2026-10-21) is the hotlist's overnight pass; opt-in (DAILY_SCREENER), so it
         // registers everywhere and does nothing until turned on (daily-names.md §11).
+        // 'prometheusScorecard' (2026-10-27) grades Prometheus's frozen calls vs SPY and the catalyst reads' windows.
         'coverage', 'dailyScreener', 'entries', 'exits', 'guardSweep', 'industryView', 'marketBrief', 'marketOpen', 'paperEquity',
-        'paperFill', 'paperMark', 'pythiaCalls', 'pythiaWeekly', 'reconciler', 'talos', 'themis',
+        'paperFill', 'paperMark', 'prometheusScorecard', 'pythiaCalls', 'pythiaWeekly', 'reconciler', 'talos', 'themis',
     ])
 })
 

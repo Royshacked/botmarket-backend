@@ -272,10 +272,10 @@ export const config = {
     // before it, Argus's picks after the 09:20 board) is researched by Prometheus as catalyst reads, automatically — on with the screener (Roy, 2026-10-23: "without the
     // user having to activate Argus or Prometheus"); HOTLIST_RESEARCH=false is the kill switch. A DAILY cap: names and $.
     get hotlistResearch()        { return _bool('HOTLIST_RESEARCH', 'false-0') },
-    // Doubled 2026-10-24 with Argus's week picks (10 per column); kept at 20 for the run-up rule's names (Roy, 2026-10-25) —
-    // a busy earnings night can list more, and those stay unread on the list.
-    get hotlistResearchMaxNames() { return _num('HOTLIST_RESEARCH_MAX_NAMES', 20) },
-    get hotlistResearchMaxUsd()   { return _num('HOTLIST_RESEARCH_MAX_USD', 2) },
+    // Raised to 60 / $3 (Roy, 2026-10-27: "raise it") — every name of the busiest night in three years of the run-up rule
+    // (60 on ~1,190 names; mean 6, top tenth 21+) at ~$0.015–0.03 a read. Was 20 / $2, and a busy night left names unread.
+    get hotlistResearchMaxNames() { return _num('HOTLIST_RESEARCH_MAX_NAMES', 60) },
+    get hotlistResearchMaxUsd()   { return _num('HOTLIST_RESEARCH_MAX_USD', 3) },
     // A catalyst read a USER asked for from the Hotlist ("Catalyst read" on a This week row): outside the house's daily $,
     // capped by count instead — this many a day, everyone's together (~$0.015–0.03 each).
     get hotlistManualReads()      { return _num('HOTLIST_MANUAL_READS', 20) },

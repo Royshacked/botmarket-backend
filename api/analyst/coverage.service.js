@@ -18,7 +18,7 @@ import { fetchLastPrice }  from '../../services/lastPrice.service.js'
 import { logger }          from '../../services/logger.service.js'
 import { cleanConviction } from '../../services/conviction.util.js'
 import { toNum }           from '../../services/format.util.js'
-import { HORIZONS, DEFAULT_HORIZON, openWindow } from '../../services/forecastClock.js'
+import { HORIZONS, DEFAULT_HORIZON, openWindow, normalizeHorizon } from '../../services/forecastClock.js'
 import { normalizeSector, normalizeIndustry }  from '../../services/entity/vocabulary.js'
 import { newRevision, diffFields } from '../../services/revisionTrail.js'
 
@@ -367,6 +367,7 @@ async function initiateCoverage(raw) {
         doc.revisions = [newRevision({ kind: 'initiate', note: _str(raw?.init_note) ?? `Initiated coverage on ${symbol}` })]
         await db.collection(COLLECTION).insertOne({ ...doc })
         logger.info(LOG, 'coverage initiated', { id: doc.id, symbol, sector: doc.sector, industry: doc.industry })
+        _logCall(doc, null)
         return { ok: true, doc: stripId(doc) }
     } catch (err) {
         if (err?.code === 11000) return { ok: false, reason: 'already_covered' }
@@ -502,12 +503,25 @@ export function _updateSet(patch, merged, { flagsRecomputed = false } = {}) {
     return $set
 }
 
+/**
+ * A patch's price target with the stored CLOCK carried over when it reaffirms the call — the same value and horizon, no
+ * `set_at` of its own — else the patch's as given. Pure. forecastClock's rule ("reaffirming a call keeps its clock") only
+ * holds when `set_at` rides along, and Prometheus's draft never carries one: before this (2026-10-27) every re-model that
+ * restated its target restarted the window and pushed its deadline out, so it never came due.
+ */
+export function keepClock(cur, next) {
+    if (!next || typeof next !== 'object' || next.set_at || !cur?.set_at) return next
+    const same = _num(next.value) !== null && _num(next.value) === _num(cur.value) && normalizeHorizon(next.horizon) === cur.horizon
+    return same ? { ...next, set_at: cur.set_at } : next
+}
+
 async function updateCoverage(id, patch = {}) {
     const found = await getCoverageById(id)
     if (!found.ok) return found
 
     const cur = found.doc
-    const p   = (patch && typeof patch === 'object') ? patch : {}
+    const p   = (patch && typeof patch === 'object') ? { ...patch } : {}
+    if ('price_target' in p) p.price_target = keepClock(cur.price_target, p.price_target)
     const merged = normalizeCoverage({ ...cur, ...p, id: cur.id, symbol: cur.symbol, created_at: cur.created_at, revisions: cur.revisions })
 
     if ('rating' in p || 'price_target' in p) {
@@ -530,12 +544,24 @@ async function updateCoverage(id, patch = {}) {
         const res = await _repo.revise(id, _updateSet(p, merged, { flagsRecomputed }), revision)
         if (!res.ok) return { ok: false, reason: 'not_found' }
         logger.info(LOG, 'coverage updated', { id, kind: revision.kind })
+        if ('rating' in p || 'price_target' in p) _logCall(merged, cur)
         // The caller's view of the result — merged in memory, the trail as it now reads.
         return { ok: true, doc: { ...stripId(merged), revisions: [revision, ..._arr(cur.revisions)] } }
     } catch (err) {
         logger.error(LOG, 'coverage update failed', err)
         return { ok: false, error: err }
     }
+}
+
+/**
+ * The call, to Prometheus's scorecard (services/prometheusCalls.service.js) — a new rating, target or horizon is logged
+ * frozen there. Fire-and-forget, and loaded on first use: the ledger reads the house book's helpers, which read this
+ * module, so a static import would be a cycle. Nothing here waits on it or fails with it.
+ */
+function _logCall(doc, prev) {
+    import('../../services/prometheusCalls.service.js')
+        .then(m => m.prometheusCallsService.recordCoverageCall(doc, { prev }))
+        .catch(err => logger.warn(LOG, 'scorecard call not logged (thesis unaffected)', err.message))
 }
 
 async function captureResearchBasis({ symbol } = {}, deps = { getBySymbol: getCoverageBySymbol }) {

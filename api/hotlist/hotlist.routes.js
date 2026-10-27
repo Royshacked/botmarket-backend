@@ -1,7 +1,7 @@
 import express from 'express'
 import { log } from '../../middleware/logger.middleware.js'
 import { requireAuth } from '../../middleware/auth.middleware.js'
-import { getToday, getBoard, getOutcomes, getReads, requestRead, getBook } from './hotlist.controller.js'
+import { getToday, getBoard, getOutcomes, getReads, requestRead, getBook, getScorecard } from './hotlist.controller.js'
 
 const router = express.Router()
 
@@ -12,5 +12,6 @@ router.get('/outcomes',   log, getOutcomes)
 router.get('/reads',      log, getReads)       // the catalyst reads — short-swing targets
 router.post('/reads',     log, requestRead)    // a user asks for one on a This week row
 router.get('/book',       log, getBook)        // the house's Swing and Long term names (coverage, by target horizon)
+router.get('/scorecard',  log, getScorecard)   // Prometheus's calls vs SPY: coverage marks, catalyst reads vs passes
 
 export const hotlistRoutes = router

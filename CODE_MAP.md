@@ -962,7 +962,15 @@ services/
                             price inside the window, and past it by the window's own daily bars (hit / expired vs
                             SPY). One active read per symbol — the `one_active_read` partial unique index.
                             liveRead (a symbol's active read) + readFacts (it as one line) feed Mentor's week
-                            hand-off. GET /api/hotlist/reads
+                            hand-off. GET /api/hotlist/reads. markWindows (2026-10-27): every settled read AND pass
+                            held to its window's last close vs SPY → `window_mark` — the scorecard's yardstick
+  prometheusCalls.service.js PROMETHEUS'S SCORECARD (2026-10-27): every coverage call (a new rating, target or
+                            horizon) FROZEN in `prometheus_calls` when made — coverage.service logs it on initiate /
+                            update (loaded lazily: a static import is a cycle via houseBook) — graded vs SPY at
+                            1/3/6/12/18/24 months up to its horizon (`signed` by the rating; holds apart) and
+                            target_reached. `source` forward | backfill (prometheusCalls.backfill callsFromTrail,
+                            scripts/backfill-prometheus-calls.mjs — the revision trail walked back). scorecard():
+                            coverage by source/mark/rating + catalyst reads backed vs passed. GET /api/hotlist/scorecard
   houseBook.service.js      the Hotlist's SWING / LONG TERM lists (horizon-chains.md): live coverage by its target's
                             horizon (3m/6m · 12m+), each name's origin (the weekly chain's research_queue row, or
                             the desk), the move since its target was set vs SPY, progress to target, and each
@@ -1387,6 +1395,8 @@ monitoring/
                             claim is handed back and nothing is spent)
   pythiaCalls.monitor.service.js  The grader — every 6h from boot, scores Pythia's logged calls at 3 and 12
                             months (pythiaCalls.gradeDue). Quotes only, no model; ungated
+  prometheusScorecard.monitor.service.js  Every 6h from boot: Prometheus's calls due a mark
+                            (prometheusCalls.gradeDue, paced 400 ms a name) + the catalyst reads' window marks. Ungated
   dailyScreener.monitor.service.js  Every 30 min: runs the hotlist's overnight pass when a trading day's
                             is due and not done (runNightly). Opt-in DAILY_SCREENER
   pythiaWeekly.monitor.service.js  Every 3h: runs (or resumes) Pythia's week when the engine's latest complete

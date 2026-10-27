@@ -2,6 +2,7 @@ import { todayHotlist, boardWithResults, hotlistOutcomes } from '../../services/
 import { catalystReadService } from '../../services/catalystRead.service.js'
 import { hotlistResearchService } from '../../services/hotlistResearch.service.js'
 import { houseBook } from '../../services/houseBook.service.js'
+import { prometheusCallsService } from '../../services/prometheusCalls.service.js'
 import { makeHandle } from '../_shared/handle.util.js'
 import { httpError } from '../../services/httpError.util.js'
 
@@ -69,3 +70,9 @@ export const requestRead = handle('requestRead', async (req, res) => {
  * target's horizon, each with where it came from and how it is doing since the target was set, and each book's record.
  */
 export const getBook = handle('getBook', async (req, res) => { res.json(await houseBook()) })
+
+/**
+ * GET /api/hotlist/scorecard — Prometheus's record (services/prometheusCalls.service.js): his coverage calls, frozen when made
+ * and graded vs SPY at 1/3/6/12+ months (forward and seeded apart), and his catalyst reads he backed against the ones he passed.
+ */
+export const getScorecard = handle('getScorecard', async (req, res) => { res.json(await prometheusCallsService.scorecard()) })

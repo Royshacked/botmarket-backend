@@ -76,7 +76,7 @@ A mode of the research desk (like the quick read: `prompts/analyst_mode_catalyst
   on the row.
 - **The run:** the same research run as the Pythia chain (`startRun({ symbols, maxUsd })`), in catalyst mode for these
   rows; the budget pipe of `houseResearch` shared, not copied — a **daily** budget: `HOTLIST_RESEARCH_MAX_USD` ($2) and
-  `HOTLIST_RESEARCH_MAX_NAMES` (20) per ET day (doubled 2026-10-24 from $1 / 10). A run already going → the names wait for the next screener tick (5 min).
+  `HOTLIST_RESEARCH_MAX_NAMES` (20) per ET day (doubled 2026-10-24 from $1 / 10; 60 / $3 since 2026-10-27 — the busiest night of the run-up rule). A run already going → the names wait for the next screener tick (5 min).
 - A name with a live catalyst read is not read again; a covered name IS read (a catalyst read never blocks or replaces
   coverage).
 
@@ -96,7 +96,7 @@ Everything stays behind `DAILY_SCREENER` — off, no boards, no picks, no reads.
   names — the `preopen` board's week picks until 2026-10-25 → queue source `hotlist` → the run), `resume` (today's names), and the hourly grading. The budget pipe is
   `houseResearch.researchQueued` / `resumeQueued`, shared with the Pythia week. Env: `HOTLIST_RESEARCH` (on unless
   `false`), `HOTLIST_RESEARCH_MAX_NAMES` (10/day), `HOTLIST_RESEARCH_MAX_USD` ($1/day) — 20/day and $2/day since
-  2026-10-24 (services/config.js). `GET /api/hotlist/reads`.
+  2026-10-24, 60/day and $3/day since 2026-10-27 (services/config.js). `GET /api/hotlist/reads`.
 - **§1** `HotlistPanel`: the horizon tabs above Today's list, the row reading THAT column (grade, room, ★ rank), the
   Target column and Prometheus's read on This week.
 

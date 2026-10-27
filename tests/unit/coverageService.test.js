@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { normalizeCoverage, newRevision, revisionSummary, RATINGS, STATUSES, HORIZONS, DEFAULT_HORIZON, coverageService } from '../../api/analyst/coverage.service.js'
+import { normalizeCoverage, newRevision, revisionSummary, RATINGS, STATUSES, HORIZONS, DEFAULT_HORIZON, coverageService, keepClock } from '../../api/analyst/coverage.service.js'
 
 // Analyst P1 — coverage schema normalizer (pure). The CRUD methods are DB-bound (not unit-tested,
 // mirroring normalizeCall vs saveKairosCall).
@@ -221,4 +221,18 @@ test('revisionSummary: an unknown kind reads as an update; underscores in rating
     const rev = newRevision({ kind: 'weird', changed: { rating: { from: 'strong_buy', to: null }, price_target: { from: null, to: { value: 10 } } } })
     assert.equal(revisionSummary(rev), 'Updated — rating strong buy → —, PT — → 10')
     assert.equal(revisionSummary(null), null)
+})
+
+// ── keepClock: a reaffirmed target keeps its window (2026-10-27) ─────────────
+test('keepClock: the same value and horizon keep the stored set_at; a new value, horizon or a set_at of its own does not', () => {
+    const cur = { value: 200, horizon: '12m', set_at: '2026-01-15T00:00:00.000Z' }
+    assert.equal(keepClock(cur, { value: 200, horizon: '12m', basis: 'b' }).set_at, cur.set_at)
+    assert.equal(keepClock(cur, { value: '200' }).set_at, cur.set_at, 'an omitted horizon is the 12m default')
+    assert.equal(keepClock(cur, { value: 210, horizon: '12m' }).set_at, undefined)
+    assert.equal(keepClock(cur, { value: 200, horizon: '6m' }).set_at, undefined)
+    assert.equal(keepClock(cur, { value: 200, horizon: '12m', set_at: '2026-03-01T00:00:00.000Z' }).set_at, '2026-03-01T00:00:00.000Z')
+    assert.equal(keepClock(null, { value: 200 }).set_at, undefined, 'no stored target')
+    assert.equal(keepClock(cur, null), null)
+    // Normalised, the deadline stays where the original call put it.
+    assert.equal(normalizeCoverage({ symbol: 'X', price_target: keepClock(cur, { value: 200, horizon: '12m' }) }).price_target.target_date, '2027-01-15T00:00:00.000Z')
 })

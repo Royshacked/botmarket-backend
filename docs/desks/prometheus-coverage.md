@@ -288,6 +288,23 @@ until 2026-09-19 the tick awaited the run under a 3-minute guard that was abando
 (a good one takes ~3 min — INTU/CRCL/SCHW, three research runs paid for and nothing stored). The
 daily checks never needed the result: the claim is stamped, the hop posts its own card.
 
+## The scorecard — graded against SPY (2026-10-27)
+
+Roy, 2026-10-27: "do the scorecard". The coverage document is a living view — a revision overwrites its rating
+and target — so it cannot say what Prometheus said back then. `prometheus_calls` can: every CALL (a new rating,
+target value or horizon) is frozen when made and graded against SPY at 1, 3, 6, 12 (18, 24) months up to its
+horizon, signed by the rating (a sell that fell scores like a buy that rose; holds shown apart), plus whether the
+target was reached inside the horizon. A later call supersedes the one before; both keep being graded. Calls from
+before the scorecard are seeded from each document's revision trail (`source: backfill`) and shown apart.
+The catalyst reads he backed are set against the ones he passed on, both held to the window's end (`window_mark`).
+Shown in the Hotlist's Book ("Prometheus's scorecard"); `GET /api/hotlist/scorecard`; graded every 6 h
+(prometheusScorecard.monitor). Under 20 graded calls a number is shown dim.
+
+**The clock rule now holds** (same day): forecastClock's "reaffirming a call keeps its clock" only worked when
+`set_at` rode along, and Prometheus's draft never carries one, so every re-model that restated its target
+restarted the window (and cleared the early-hit ratchet). `keepClock` in updateCoverage carries the stored
+`set_at` when the value and horizon are unchanged.
+
 ## The hops — who asks Prometheus for what
 
 | Caller | Mechanism | What comes back |

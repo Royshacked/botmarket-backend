@@ -269,6 +269,50 @@ export function windowPrices(read, bars, spyBars) {
     return { high: Math.max(...own.map(b => Number(b.high) || Number(b.close) || 0)), close: own.at(-1).close, spy_close: spyIn.at(-1)?.close ?? null }
 }
 
+/**
+ * THE SCORECARD'S YARDSTICK (Roy, 2026-10-27: "grade passes too") — any settled read (hit, expired) or pass, held to its
+ * window's LAST close against SPY → `window_mark`, or null when the bars are not in yet. Pure. The outcome above stops at
+ * a hit (a trade out at its target); the scorecard compares the reads he BACKED with the ones he PASSED on, so both are
+ * held the same way, to the window's end. A read with no window (made after the close before its report) has none to
+ * hold: `no_window`. Past GRADE_GIVE_UP_MS with no bars: `unpriced`.
+ */
+export function windowMark(read, window, nowMs) {
+    const at = new Date(nowMs).toISOString()
+    if (!(Date.parse(read.valid_until) > Date.parse(read.set_at))) return { basis: 'no_window', at }
+    if (window && _ok(window.close) && _ok(read.price_at_read) && _ok(window.spy_close) && _ok(read.spy_at_read)) {
+        const ret = (window.close / read.price_at_read - 1) * 100, spy = (window.spy_close / read.spy_at_read - 1) * 100
+        return { return_pct: _r2(ret), spy_return_pct: _r2(spy), vs_spy: _r2(ret - spy), basis: 'window', at }
+    }
+    if (window && (!_ok(read.price_at_read) || !_ok(read.spy_at_read))) return { basis: 'unpriced', at }
+    return nowMs >= Date.parse(read.valid_until) + GRADE_GIVE_UP_MS ? { basis: 'unpriced', at } : null
+}
+
+/** Mark every settled read and pass whose window is over → `{ marked, failed }`. Never throws. */
+async function markWindows(deps = _deps) {
+    const out = { marked: 0, failed: 0 }
+    try {
+        const coll = await _coll(deps)
+        const nowMs = deps.now()
+        const due = await coll.find({ status: { $in: ['hit', 'expired', 'pass'] }, window_mark: { $exists: false }, valid_until: { $lte: new Date(nowMs).toISOString() } }).toArray()
+        for (const read of due) {
+            try {
+                const hasWindow = Date.parse(read.valid_until) > Date.parse(read.set_at)
+                const m = windowMark(read, hasWindow ? await _window(read, deps) : null, nowMs)
+                if (!m) continue
+                await coll.updateOne({ id: read.id }, { $set: { window_mark: m } })
+                out.marked++
+            } catch (err) {
+                out.failed++
+                logger.warn(LOG, 'one window not marked', { id: read.id, error: err.message })
+            }
+        }
+        if (out.marked || out.failed) logger.info(LOG, 'read windows marked', out)
+    } catch (err) {
+        logger.warn(LOG, 'window marking failed', { error: err.message })
+    }
+    return out
+}
+
 async function _coll(deps) {
     const db = await deps.db()
     return db.collection(COLLECTION)
@@ -413,4 +457,4 @@ async function gradeDue(deps = _deps) {
     return out
 }
 
-export const catalystReadService = { saveRead, listReads, liveSymbols, liveRead, gradeDue }
+export const catalystReadService = { saveRead, listReads, liveSymbols, liveRead, gradeDue, markWindows }
