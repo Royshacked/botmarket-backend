@@ -702,3 +702,22 @@ OWN trades — the one rule with an edge (§6) — which to skip. Known in the t
   2020 +0.58 (+0.94) · 2021 −0.47 (−0.33) · 2022 −0.30 (+0.92, 28 sessions) · 2023 +0.05 (+0.09) · 2024 +0.41 (+0.34) ·
   2025 −0.06 (+0.34) · 2026 +0.73 (+0.33). **The live rule on 2019 → 2023-10-08, years §6 never saw: +0.02% a session**;
   from 2023-10-09 +0.38%. The run-up's edge (§6, §7) is a three-year one; on the five years before it, it is not there.
+
+## 28. The run-up re-tested on 2019 → now (2026-10-27)
+
+Roy agreed (2026-10-27) to re-test the run-up over the joined span before it goes live anywhere. From test K's table
+(`runup_5` entries; net per session, 5-session block range):
+
+| Group | 2019 → 2023-10-08 | 2023-10-09 → 2025-10-22 | Held out 2025-10-23 → | Whole |
+|---|---|---|---|---|
+| Every run-up entry | −0.11% (−0.41 … +0.22) | +0.30% (−0.01 … +0.75) | +0.55% (−0.15 … +1.37) | +0.08% (−0.12 … +0.36) |
+| 3 of 3 beat, any market | −0.02% | +0.44% (+0.15 … +0.99) | +0.39% | +0.16% (−0.12 … +0.61) |
+| **LIVE: 3 beat, SPY over 200d** | **+0.02%** (−0.23 … +0.43) | +0.36% (−0.02 … +0.88) | +0.43% (−0.60 … +0.90) | **+0.18% (−0.04 … +0.46)** |
+| Live, calm | −0.14% | +0.11% | +0.37% | −0.01% |
+| Live, stormy | +0.40% | +0.68% | +0.49% | +0.52% (+0.14 … +0.99) |
+
+- **Over eight years the live rule no longer clears the lab's bar**: +0.18% a session, range across zero; on the four
+  and a half years before §6's window it is nothing (+0.02%). §7's "the only rule with an edge" holds only on 2023-10 →.
+- §6's choice of the CALM market is reversed on the longer span (calm −0.01%, stormy +0.52% and above zero). Stormy is
+  read AFTER seeing the numbers — a lead for a forward check, not a rule.
+- Not taken from this: the live Hotlist is unchanged; nothing here is wired into the app.
