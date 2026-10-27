@@ -14,6 +14,9 @@ export const LIBRARY = Object.freeze({
     first_52w_high_20: null, insider_cluster_20: null,
 })
 
+/** Test M (§31): the library and five new rules — the report's reaction both ways, the index's own changes, big money out. */
+export const LIBRARY_M = Object.freeze({ ...LIBRARY, report_popped: null, report_sold: null, index_added: null, index_removed: null, capitulation: null })
+
 /**
  * Trades → the rule's book by day: Map(day → { sum, n }) — each open position's excess over SPY that day in % (the
  * entry day open → close, after it close → close), the trade's cost taken on its entry day. Pure.
@@ -42,13 +45,13 @@ export function dailyBook(trades, data) {
 }
 
 /**
- * Every rule in `library` over `days` → { rule: { trades, book } }. `keep(trade)` — a point-in-time universe (§30):
- * only the trades entered while the name was in it. Pure.
+ * Every rule in `library` over `days` → { rule: { trades, book } }. `keep(trade, rule)` — a point-in-time universe
+ * (§30): only the trades entered while the name was in it. Pure.
  */
 export function libraryBooks(data, days, library = LIBRARY, { keep = null } = {}) {
     const out = {}
     for (const [rule, tags] of Object.entries(library)) {
-        const trades = runHypothesis(HYPOTHESES[rule], data, { days }).filter(t => (!tags || tags.includes(t.tag)) && (!keep || keep(t)))
+        const trades = runHypothesis(HYPOTHESES[rule], data, { days }).filter(t => (!tags || tags.includes(t.tag)) && (!keep || keep(t, rule)))
         out[rule] = { trades: trades.length, book: dailyBook(trades, data) }
     }
     return out

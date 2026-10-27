@@ -339,7 +339,62 @@ export const HYPOTHESES = Object.freeze({
         label: `2+ insiders buying within 14 days, $50k+, held ${hold}`, hold, extras: ['insiders'],
         signal: ({ i, ind, name }) => clusterOn(name.insiders, ind.date[i - 1], ind.date[i - 2] ?? null),
     }])),
+    // NEW RULES FOR THE ROTATION — test M (Roy, 2026-10-27: "build the new rules and rerun the rotation"), declared in
+    // screener-lab.md §31 before the run, graded on the S&P 500 as it was.
+    // THE REPORT'S REACTION, held 20: the move from the close before the report to the close of the session after it
+    // (either side of the bell), against SPY — a 5%+ pop on an EPS beat (the drift), or a 5%+ drop (the recovery).
+    report_popped: reportReaction('popped'),
+    report_sold: reportReaction('sold'),
+    // THE INDEX ITSELF (`name.indexAdded` / `name.indexRemoved`, the effective dates — announced days before, so known):
+    // bought at the open of the first session the change is in effect, held 20 — the forced buying or selling is done.
+    index_added: indexChange('indexAdded'),
+    index_removed: indexChange('indexRemoved'),
+    // BIG MONEY OUT — a session down 6%+ against SPY on 3×+ its 20-session average volume, with no report on it or the
+    // session before: bought at the next open, held 10. Tagged by where it closed in its range.
+    capitulation: {
+        label: 'down 6%+ vs SPY on 3x volume, no report, held 10 — by the close in its range', hold: 10,
+        signal: ({ rows, i, ind, reports, data }) => {
+            if (i < 22) return null
+            const d = rows[i - 1], s1 = data.spyByDay.get(ind.date[i - 1]), s0 = data.spyByDay.get(ind.date[i - 2])
+            if (!(s0?.close > 0) || !(s1?.close > 0) || !(rows[i - 2].close > 0)) return null
+            const rel = (d.close / rows[i - 2].close - s1.close / s0.close) * 100
+            if (!(rel <= -6) || reports.has(ind.date[i - 1]) || reports.has(ind.date[i - 2])) return null
+            let v = 0
+            for (let k = i - 21; k < i - 1; k++) v += rows[k].volume || 0
+            if (!(v > 0) || !((d.volume || 0) >= 3 * (v / 20))) return null
+            return d.high > d.low && (d.close - d.low) / (d.high - d.low) >= 0.5 ? 'closed top half' : 'closed bottom half'
+        },
+    },
 })
+
+/** The report's reaction, held 20 — `side` 'popped' (5%+ over SPY on an EPS beat) or 'sold' (5%+ under SPY). Tagged by its size. */
+function reportReaction(side) {
+    return {
+        label: `the report’s reaction ${side === 'popped' ? 'up 5%+ vs SPY on a beat' : 'down 5%+ vs SPY'}, bought day two, held 20`, hold: 20,
+        signal: ({ rows, i, ind, reports, data }) => {
+            if (i < 4) return null
+            const rep = reports.get(ind.date[i - 2])
+            if (!rep) return null
+            const s0 = data.spyByDay.get(ind.date[i - 3]), s1 = data.spyByDay.get(ind.date[i - 1])
+            if (!(s0?.close > 0) || !(s1?.close > 0) || !(rows[i - 3].close > 0)) return null
+            const rel = (rows[i - 1].close / rows[i - 3].close - s1.close / s0.close) * 100
+            if (side === 'popped') {
+                const a = Number(rep.epsActual), e = Number(rep.epsEstimated)
+                if (rep.epsActual == null || rep.epsEstimated == null || !Number.isFinite(a) || !Number.isFinite(e) || !(a > e) || !(rel >= 5)) return null
+                return rel < 10 ? 'up 5-10%' : 'up 10%+'
+            }
+            return rel <= -10 ? 'down 10%+' : rel <= -5 ? 'down 5-10%' : null
+        },
+    }
+}
+
+/** An index change in effect — bought at the open of the first session on or after an effective date in `name[key]`, held 20. */
+function indexChange(key) {
+    return {
+        label: `S&P 500 ${key === 'indexAdded' ? 'addition' : 'removal'}, bought the first session in effect, held 20`, hold: 20,
+        signal: ({ i, ind, name }) => (name[key]?.some(d => ind.date[i] >= d && ind.date[i - 1] < d) ? true : null),
+    }
+}
 
 /**
  * A RUN-UP hypothesis: bought `n` sessions before the name's next report (one entry per report), out at the close before

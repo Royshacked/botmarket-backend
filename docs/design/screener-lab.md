@@ -826,3 +826,93 @@ RHT, APC, NBL, ARNC, DWDP, SCG; VYLR too new). Outputs: `data/lab/rotation-sp500
   RELATIVE skill. (2) Most of the library loses to SPY once the dead names are back; only gap-down-held and the run-up
   stay above it, neither significant alone. A rotation is only as good as the rules it rotates — the next work is better
   rules for it to pick from, graded the same point-in-time way.
+
+## 31. New rules for the rotation — test M (2026-10-27)
+
+Roy, 2026-10-27: "build the new rules and rerun the rotation". §30 found that picking rules by the market state is a real
+skill, but the library it picks from mostly loses to SPY — its lead over SPY rests on one rule (gapdown_held). Test M
+adds five rules of a different kind, graded the §30 way (the S&P 500 as it was, each rule a daily book, monthly sums vs
+SPY after cost), and reruns the rotation on all 19. **Declared before the run.**
+
+The five rules (screenerLab.service, `LIBRARY_M` in rotation.service):
+
+| Rule | Signal | Hold |
+|---|---|---|
+| `report_popped` | the report's reaction (close before it → close of the session after) 5%+ over SPY, on an EPS beat; bought day two | 20 |
+| `report_sold` | the same reaction 5%+ under SPY, any surprise; bought day two | 20 |
+| `index_added` | joined the S&P 500 — bought the open of the first session it is in effect (effective dates are announced days before) | 20 |
+| `index_removed` | left it — the same, on its first session out (the one rule kept on a name no longer in the index) | 20 |
+| `capitulation` | a session down 6%+ vs SPY on 3×+ its 20-session average volume, no report that day or the day before; bought the next open | 10 |
+
+Index dates come from the §30 membership (`indexEvents`): a span's start after the walk-back floor is an addition, its end
+a removal. A name removed because it was bought has no bars after and drops out by itself.
+
+The bars:
+
+1. **A rule on its own** passes if its mean month vs SPY is above 0 both before (2019-07 → 2023-12) and held out
+   (2024-01 → 2026-09), and the whole span's t is 2 or more.
+2. **The rotation on the 19** (state map, top 3, learned 2019-01 → 2023-12, fixed held out) passes as in §30 — above ALL
+   and above the random 95th percentile held out — **and** above 0 against SPY held out, **and** still above 0 against
+   SPY without gapdown_held (`--drop=gapdown_held`). The expanding (live) form and K 1/2/3/5 are shown.
+
+Unchanged from §30: the 14 rules, the spans, the market states, MIN_STATE 6, the random draws.
+
+Run: `node --max-old-space-size=6000 scripts/lab-rotation.mjs --universe=sp500 --library=m`, then
+`python scripts/lab-rotation.py --tag=sp500-m` (and `--drop=gapdown_held`).
+
+### Results (2026-10-27) — FAIL
+
+Outputs: `data/lab/rotation-sp500-m.out.txt`, `rotation-sp500-m-nogap.out.txt`.
+
+**Bar 1 — no new rule stands alone.** Mean month vs SPY after cost:
+
+| Rule | Trades | Before | Held out | Whole (t) |
+|---|---|---|---|---|
+| `report_popped` | 2,284 | +0.14% | −0.69% | −0.17% (−0.54) |
+| `report_sold` | 2,661 | −0.11% | −0.50% | −0.26% (−0.60) |
+| `index_added` | 125 | −0.69% | −1.13% | −0.86% (−0.77) |
+| `index_removed` | 85 | −2.82% | −0.48% | −1.94% (−1.95) |
+| `capitulation` | 723 | +0.28% | −1.74% | −0.48% (−0.44) |
+
+- The drift after a report is not there on large caps either, and nor is the bounce after a sold report (§20's
+  "sold misses recover" was today's survivors).
+- Index removals keep falling for a month after they leave — the opposite of the textbook rebound, and the closest to
+  significant of all (t −1.95). It is an AVOID, on few trades.
+- Capitulation made +5.1% / +3.8% a month in 2019–2020 and lost every year since.
+- No rule of the 19 passes bar 1. The best are still `gapdown_held` (+1.66%, t 1.57) and `runup_5` (+0.72%, t 1.24).
+
+**Bar 2 — the rotation on 19 passes against ALL, fails against SPY without gap-down.**
+
+| | Held out, fixed map (K 3) | Expanding (live) | ALL | Random p95 |
+|---|---|---|---|---|
+| §30, 14 rules | +0.46% | +0.55% | −0.52% | +0.23% |
+| 19 rules | **+0.72%** (t vs SPY 1.24) | +0.67% | −0.62% | +0.26% |
+| 19 rules without `gapdown_held` | **−0.31%** | +0.13% | −0.84% | −0.09% |
+
+- With all 19 it again beats ALL (t 2.64) and random, and is above SPY held out — but not significantly (t 1.24), and
+  it lost in 2024 (−0.21%).
+- The new rules enter the map in two states only: `report_popped` takes the calm-uptrend third slot (+0.05% learned, was
+  `pullback_50` at −0.37%), `capitulation` leads the stormy-downtrend state (+5.50% learned, from 2020–2022). The held-out
+  span has only 3 stormy-downtrend months, so the gain is mostly a weaker third pick swapped out.
+- Without `gapdown_held` the switcher is −0.31% a month against SPY and below the random 95th percentile → **FAIL**.
+- The expanding (live) form LOST before 2024 (−0.88% vs ALL −0.10%) — early on it learns from a handful of months per
+  state. Shown, not a bar; it is a caution for running it live.
+
+**Verdict.** Test M fails. Five rules of a new kind add nothing that beats SPY on the S&P 500 as it was; the market-state
+rotation remains a relative skill whose lead over SPY is one rule, gap-down held. What the lab has that beats SPY on the
+point-in-time large caps is the same two rules as §30, neither significant on its own. Kept: `index_removed` as an avoid
+lead.
+
+### The forward log (2026-10-27)
+
+Roy kept the switcher as something graded, not traded: "yes build the monthly log". `services/rotationLog.service.js`
++ `scripts/lab-rotation-log.mjs` write `docs/design/rotation-log.csv` (committed): from **2026-11**, each month's state,
+the fixed map's picks (learned 2019-01 → 2023-12, the §31 map on 19 rules, frozen) and the expanding map's, and once the
+month is over each one's month vs SPY next to ALL, `runup_5` and `gapdown_held`. A logged month's picks are never
+rewritten; a revised dataset that would pick differently is reported, not applied. The JS map reproduces
+`lab-rotation.py` on the held-out span exactly (`--check`: fixed +0.72%, expanding +0.67%, ALL −0.62%).
+
+Monthly, after the month's first sessions: `node scripts/lab-sp500-universe.mjs`, then
+`node --max-old-space-size=6000 scripts/lab-rotation.mjs --universe=sp500 --library=m --to=<today> --refresh`, then
+`node scripts/lab-rotation-log.mjs`. The bar to go live (decided 2026-10-27): 6–12 logged months above SPY, and 3+ rules
+that beat SPY on their own.

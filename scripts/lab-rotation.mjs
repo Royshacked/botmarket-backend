@@ -3,7 +3,8 @@
 //
 //   node --max-old-space-size=6000 scripts/lab-rotation.mjs                  (the screener's names — today's)
 //   node --max-old-space-size=6000 scripts/lab-rotation.mjs --universe=sp500 (the S&P 500 as it was, AND as it is today)
-//   python scripts/lab-rotation.py [--tag=sp500 | --tag=sp500-today]
+//   node --max-old-space-size=6000 scripts/lab-rotation.mjs --universe=sp500 --library=m (test M, §31: + the new rules)
+//   python scripts/lab-rotation.py [--tag=sp500 | --tag=sp500-today | --tag=sp500-m] [--drop=rule,rule]
 //
 // screener: the 2019–2023 and 3-year caches joined (screenerLab.data joinWindows), offline. sp500: data/lab/sp500-universe.json
 // (scripts/lab-sp500-universe.mjs) — bars, history and insiders read from FMP once, then cached.
@@ -13,15 +14,20 @@ import 'dotenv/config'
 
 dns.setServers(['8.8.8.8', '1.1.1.1'])
 const universe = process.argv.find(a => a.startsWith('--universe='))?.slice(11) ?? 'screener'
+// --library=m (test M, §31): the 14 and the five new rules, point in time only → rotation-daily-sp500-m.csv.
+const withNew = process.argv.includes('--library=m')
+// --to=YYYY-MM-DD --refresh (the monthly log, scripts/lab-rotation-log.mjs): the bars through that day, read afresh.
+const to = process.argv.find(a => a.startsWith('--to='))?.slice(5) ?? '2026-10-26'
+const refresh = process.argv.includes('--refresh')
 const { joinWindows, prepare, loadLabData, sectorStats } = await import('../services/screenerLab.data.js')
-const { libraryBooks } = await import('../services/rotation.service.js')
-const { memberOn } = await import('../services/sp500History.service.js')
+const { libraryBooks, LIBRARY, LIBRARY_M } = await import('../services/rotation.service.js')
+const { memberOn, indexEvents } = await import('../services/sp500History.service.js')
 
 /** The members' share of their sessions in the index that have a bar — under it, the ticker is not the company (reused) or FMP lacks it. */
 const COVERAGE = 0.9
 
 function write(tag, data, days, opts) {
-    const books = libraryBooks(data, days, undefined, opts)
+    const books = libraryBooks(data, days, withNew ? LIBRARY_M : LIBRARY, opts)
     const lines = ['rule,day,ret,n']
     for (const [rule, { trades, book }] of Object.entries(books)) {
         console.log(`  ${rule.padEnd(20)} ${String(trades).padStart(7)} trades · ${book.size} days with a position`)
@@ -36,7 +42,7 @@ let data
 if (universe === 'sp500') {
     const u = JSON.parse(fs.readFileSync('data/lab/sp500-universe.json', 'utf8'))
     const member = (sym, day) => memberOn(u.spans, sym, day)
-    data = await loadLabData({ name: 'sp500', window: { from: '2019-01-02', to: '2026-10-26' }, extras: ['history', 'insiders'], member,
+    data = await loadLabData({ name: 'sp500', window: { from: '2019-01-02', to }, refresh, extras: ['history', 'insiders'], member,
         onProgress: (label, k, n) => console.log(`  ${label} ${k}/${n}`) })
     const days = data.spyDays.slice(260)
     // A name counts only if its bars cover its sessions in the index (within the span).
@@ -53,11 +59,20 @@ if (universe === 'sp500') {
     console.log(`${data.names.size} names with bars · in the index during ${days[0]} → ${days.at(-1)}: ${covered.size + short.length} · covered ${covered.size} · left out ${short.length}`)
     for (const x of short) console.log(`  left out ${x}`)
     console.log('\nTHE S&P 500 AS IT WAS (point in time)')
-    write('sp500', data, days, { keep: (t) => covered.has(t.symbol) && member(t.symbol, t.day) })
-    // The survivor version: today's members, on every day — the bias the lab's own universe carries.
-    data.sectorDay = sectorStats(data.names, (sym) => today.has(sym))
-    console.log('\nTHE S&P 500 AS IT IS TODAY, on every day (survivors)')
-    write('sp500-today', data, days, { keep: (t) => today.has(t.symbol) })
+    if (withNew) {
+        // The index's own changes (index_added / index_removed); a removed name is bought on its first session OUT.
+        for (const [sym, ev] of Object.entries(indexEvents(u.spans, u.from))) {
+            const s = data.names.get(sym)
+            if (s) { s.indexAdded = ev.added; s.indexRemoved = ev.removed }
+        }
+        write('sp500-m', data, days, { keep: (t, rule) => covered.has(t.symbol) && (rule === 'index_removed' || member(t.symbol, t.day)) })
+    } else {
+        write('sp500', data, days, { keep: (t) => covered.has(t.symbol) && member(t.symbol, t.day) })
+        // The survivor version: today's members, on every day — the bias the lab's own universe carries.
+        data.sectorDay = sectorStats(data.names, (sym) => today.has(sym))
+        console.log('\nTHE S&P 500 AS IT IS TODAY, on every day (survivors)')
+        write('sp500-today', data, days, { keep: (t) => today.has(t.symbol) })
+    }
 } else {
     let joined = joinWindows(JSON.parse(fs.readFileSync('data/lab/screener-2019-01-02_2023-10-06.json', 'utf8')), JSON.parse(fs.readFileSync('data/lab/screener-3y.json', 'utf8')))
     const { history, insiders } = JSON.parse(fs.readFileSync('data/lab/screener.extras.json', 'utf8'))

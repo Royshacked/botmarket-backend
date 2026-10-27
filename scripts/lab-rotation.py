@@ -12,11 +12,12 @@ L0, K0, DRAWS, MIN_STATE = 6, 3, 2000, 6
 rng = np.random.default_rng(5)
 
 TAG = next((a.split('=', 1)[1] for a in sys.argv[1:] if a.startswith('--tag=')), '')
+DROP = next((a.split('=', 1)[1].split(',') for a in sys.argv[1:] if a.startswith('--drop=')), [])
 d = pd.read_csv(f'data/lab/rotation-daily{"-" + TAG if TAG else ""}.csv')
-print(f'universe: {TAG or "screener (today's names)"}')
+print(f'universe: {TAG or "screener (today's names)"}' + (f' · without {", ".join(DROP)}' if DROP else ''))
 d['month'] = d.day.str[:7]
 M = d.groupby(['month', 'rule']).ret.sum().unstack()
-M = M[(M.index >= '2019-01') & (M.index <= END)]
+M = M[(M.index >= '2019-01') & (M.index <= END)].drop(columns=DROP)
 rules = list(M.columns)
 reg = pd.read_csv('data/lab/rotation-regimes.csv').fillna('')
 last_of = reg.assign(month=reg.day.str[:7]).groupby('month').regime.last()
@@ -45,9 +46,18 @@ print('  ' + 'rule'.ljust(20) + ''.join(y.rjust(8) for y in yr.index) + '   whol
 for r in rules:
     print('  ' + r.ljust(20) + ''.join(f(v).rjust(8) for v in yr[r]) + '  ' + f(M[r].mean()))
 ew = R.mean(axis=1)
-print('  ' + 'ALL 14 equally'.ljust(20) + ''.join(f(v).rjust(8) for v in pd.Series(ew, index=months).groupby(np.array(months).astype(str).astype('U4')).mean()) + '  ' + f(ew.mean()))
+print('  ' + f'ALL {len(rules)} equally'.ljust(20) + ''.join(f(v).rjust(8) for v in pd.Series(ew, index=months).groupby(np.array(months).astype(str).astype('U4')).mean()) + '  ' + f(ew.mean()))
 best = M.groupby(M.index.str[:4]).mean().idxmax(axis=1)
 print('  the best rule each year: ' + ', '.join(f'{y} {r}' for y, r in best.items()))
+
+# Test M's bar for a rule on its own (section 31): above 0 before AND held out, whole t >= 2.
+print('\n== each rule on its own: mean month vs SPY, before | held out | whole (t) — the bar: >0, >0, t >= 2')
+mb, mh = M[(M.index >= BEFORE[0]) & (M.index <= BEFORE[1])], M[(M.index >= HELD[0]) & (M.index <= HELD[1])]
+mw = M[M.index >= BEFORE[0]]
+for r in rules:
+    ok = mb[r].mean() > 0 and mh[r].mean() > 0 and tstat(mw[r]) >= 2
+    print(f'  {r:<20} {f(mb[r].mean())} | {f(mh[r].mean())} | {f(mw[r].mean())} (t {tstat(mw[r]):+.2f}, '
+          f'{(mw[r] > 0).mean() * 100:.0f}% months up, {(mw[r] != 0).sum()} with a position)  {"PASS" if ok else ""}')
 
 
 def momentum(L, K):
@@ -112,6 +122,18 @@ expanding = np.array([by_state(k, list(range(k))) if k >= 12 else np.nan for k i
 report('before (expanding, shown)', expanding, [k for k in b if np.isfinite(expanding[k])], K0)
 report('held out (expanding, shown)', expanding, h, K0)
 print(f'DECLARED (market state): held out above ALL {s1}, above random p95 {s2} -> {"PASS" if s1 and s2 else "FAIL"}')
+s3 = fixed[h].mean() > 0
+print(f'DECLARED (test M, vs SPY): held out fixed map {f(fixed[h].mean())} a month (t {tstat(fixed[h]):+.2f}) above 0 {s3}; '
+      f'expanding {f(expanding[h].mean())} (t {tstat(expanding[h]):+.2f})')
+print('  by year, fixed | expanding | ALL: ' + '   '.join(
+    f'{y} {f(np.nanmean(fixed[[k for k in h if months[k][:4] == y]]))} | {f(np.nanmean(expanding[[k for k in h if months[k][:4] == y]]))} | '
+    f'{f(ew[[k for k in h if months[k][:4] == y]].mean())}' for y in sorted({months[k][:4] for k in h})))
+for K in (1, 2, 3, 5):
+    K0, k0 = K, K0
+    fx = np.array([by_state(k, learn) if k in h else np.nan for k in range(len(months))])
+    ex = np.array([by_state(k, list(range(k))) if k >= 12 else np.nan for k in range(len(months))])
+    K0 = k0
+    print(f'  K={K}: held out fixed {f(fx[h].mean())}  expanding {f(ex[h].mean())}  ALL {f(ew[h].mean())}')
 
 # For the eye: does a rule's good stretch carry? Each rule's month against its own last 6 (rank correlation, pooled).
 ranks_now, ranks_past = [], []

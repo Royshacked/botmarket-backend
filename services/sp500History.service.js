@@ -91,5 +91,18 @@ export function membership(current, changes, { from }) {
     return { spans, names, unmatched }
 }
 
+/**
+ * Each name's index EVENTS from its spans → `{ SYM: { added: [date], removed: [date] } }` — a span's start is an addition
+ * unless it is the walk-back floor `from` (the name was already in), its end a removal. Pure.
+ */
+export function indexEvents(spans, from) {
+    const out = {}
+    for (const [sym, sp] of Object.entries(spans)) {
+        const added = sp.map(([a]) => a).filter(a => a > from), removed = sp.map(([, b]) => b).filter(b => b != null)
+        if (added.length || removed.length) out[sym] = { added, removed }
+    }
+    return out
+}
+
 /** Was `sym` in the index on `day`? `spans` from membership. Pure. */
 export const memberOn = (spans, sym, day) => (spans[sym] ?? []).some(([a, b]) => day >= a && (b == null || day < b))
