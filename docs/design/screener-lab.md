@@ -721,3 +721,59 @@ Roy agreed (2026-10-27) to re-test the run-up over the joined span before it goe
 - §6's choice of the CALM market is reversed on the longer span (calm −0.01%, stormy +0.52% and above zero). Stormy is
   read AFTER seeing the numbers — a lead for a forward check, not a rule.
 - Not taken from this: the live Hotlist is unchanged; nothing here is wired into the app.
+
+## 29. Which rule, when — rotation — test L (2026-10-27)
+
+Roy, 2026-10-27: "maybe the backtest isn't about which rules work always — maybe different rules work at different
+times in different combinations, and we need to find the rules that set which rules will work". Known as strategy
+rotation / regime switching; on stock factors, "factor momentum" (Ehsani & Linnainmaa, 2022) found a factor's last
+year predicts its next month. `scripts/lab-rotation.mjs` (each rule's daily book → `data/lab/rotation-daily.csv`),
+`scripts/lab-rotation.py` (the switchers).
+
+**Declared before the run.**
+- **The library — 14 rules** that run on bars, report history and insiders over 2019 → now (the joined caches): the
+  run-up (`runup_5`, 3 of 3 beat — no market filter, the switcher does the timing), `beat_day2`, `beat_held`,
+  `reversal_1w`, `rsi2_uptrend`, `gapdown_held`, `swing_low`, `range_low`, `pullback_50`, `falsebreak_10`,
+  `wyckoff_spring`, `sector_laggard`, `first_52w_high_20`, `insider_cluster_20` — each as it stands in
+  screenerLab.service, every tag taken.
+- **Each rule's book:** every trade (screenerLab `trade`, entries from the 261st session) held to its own exit; its
+  DAILY excess over SPY (the entry day open → close, after it close → close), the cost on the entry day; the rule's day
+  = the mean over its open positions (0 on a day with none). A month = the sum of its days. Months 2019-01 → 2026-09.
+- **Step 2, MOMENTUM:** at each month's start, the rules ranked by their sum over the L months before; the top K held
+  equally that month. **Primary L = 6, K = 3**; L ∈ {1, 3, 6, 12} × K ∈ {1, 3, 5} shown, not used for the bar.
+- **Step 3, THE MARKET STATE:** the state the evening before a month's first session (spyRegimes: SPY over/under its
+  200-day × calm/stormy, 4 states). Each rule's mean month in each state learned on 2019-01 → 2023-12; in the held-out
+  months, the top K = 3 for the month's state (a state seen in under 6 months before → all 14 equally). Shown beside it,
+  not for the bar: the same learned on every month before each month (expanding).
+- **Benchmarks:** ALL 14 held equally every month (EW); RANDOM — K rules drawn each month, 2,000 times.
+- **Held out: months 2024-01 → 2026-09** (33); before: 2019-07 → 2023-12 (the first months that have L = 6 behind them).
+- **PASS (each step on its own):** the switcher's mean month above EW's BEFORE and HELD OUT (step 3: held out only — its
+  before is in-sample), and above the 95th percentile of RANDOM over the same months. The switcher-less-EW difference's
+  t is shown.
+- Known limits: today's names (survivors) — the same for every rule, so the comparisons stand; 33 held-out months is
+  little — a pass is a lead to keep grading, not a proof.
+
+**Run 2026-10-27 — momentum FAILS; the market-state switch PASSES its bar, with three warnings.** Output:
+`data/lab/rotation.out.txt`.
+
+- **The premise holds:** the rules do take turns. Best rule by year: 2019–2020 gapdown_held, 2021 insider_cluster_20,
+  2022 wyckoff_spring, 2023 beat_held, 2024–2025 runup_5, 2026 gapdown_held. All 14 held equally: +0.02% a month.
+- **Step 2, momentum — FAILS.** L 6, K 3: before +0.27% vs ALL +0.25% (t 0.06); held out −0.83% vs −0.43%. A rule's last
+  6 months against its next: rank correlation −0.006 (t −0.17, 87 months). **A rule's recent run says nothing about its
+  next month.** No L × K cell is positive both before and held out except L 3 K 1 (+0.78 / +0.35, not the bar).
+- **Step 3, the market state — PASSES.** Learned on 2019–2023: SPY over its 200-day & calm → reversal_1w, gapdown_held,
+  beat_held (the DIPS); over & stormy → first_52w_high_20, range_low, runup_5; under & stormy → gapdown_held,
+  sector_laggard, reversal_1w. Held out (33 months): **+0.90% a month against ALL −0.43%** (difference t 2.31), above
+  RANDOM's 95th percentile (+0.35%). Not one K: K 1…7 all above ALL (+2.28 … +0.10), and so is ranking by the MEDIAN month.
+- **Warning 1 — the expanding map fails.** Learned on EVERY month before each month (the way it would run live), the
+  held-out months give −0.07% (and before −0.09% vs +0.33%). It learned 2024's calm months — where the dips lost badly
+  (2024-01, -04, -06, -07: −5.4, −6.9, −9.8, −3.6%) — dropped gapdown_held/beat_held for runup_5/insiders, and missed the
+  dips' 2025–2026 comeback. The state → rule map is not stable: which rule a state favours flips between periods.
+- **Warning 2 — the pass is 2025–2026.** Less ALL by year (K 3): 2024 −0.71, 2025 +1.97, 2026 +3.19. Without its best
+  two months +0.30% (still above ALL). Its median month +0.69%.
+- **Warning 3 — survivors.** Five of the nine picks are DIP rules (reversal_1w, gapdown_held, sector_laggard), the ones
+  today's-names survivorship flatters most (§5); the switcher leans into them harder than ALL does. A survivorship-free
+  universe (the delisted names) is what would settle it.
+- **Verdict:** a lead, not a rule — the first in the lab where a held-out test passed its declared bar, but the live
+  (expanding) form of the same idea does not. Next: grade the fixed 2019–2023 map forward from 2026-10, month by month,
+  and/or rebuild the library on a survivorship-free universe.
