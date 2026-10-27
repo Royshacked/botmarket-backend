@@ -640,3 +640,65 @@ highest-conviction positions beat the market; most of a fund's other holdings do
   still above zero (the median shown).
 - Known limits: the lab's names are TODAY's (survivors) — every group is flattered, so the CONTROL is the comparison
   that counts; a CUSIP that changed is missed in the quarters before the change.
+
+## 27. A model on the run-up, and rules combined — test K (2026-10-27)
+
+Roy, 2026-10-27: "start with a [a model that filters the run-up trades], and test also combination of rules". Every test
+so far asked "which name goes up" and failed (§10 AUC 0.51, §18 0.518). This one asks a smaller question: of the run-up's
+OWN trades — the one rule with an edge (§6) — which to skip. Known in the trade as meta-labelling. `services/runupModel.service.js`
+(the trades and their facts), `scripts/lab-runup-ml.mjs` (→ `data/lab/runup-ml.csv`), `scripts/lab-runup-ml.py`
+(the model and the rule search; LightGBM 4.7, scikit-learn 1.9).
+
+**Declared before the run.**
+- **The trades:** EVERY run-up entry (bought at the open 5 sessions before a report, out at the close before it —
+  `runup_5`), any streak, any market: the live rule (3 of 3 beat, SPY over its 200-day) is one combination INSIDE the
+  population, so the search can find it, beat it, or not. Span: the 2019–2023 and 3-year caches joined (joinWindows),
+  entries from the 261st session. Held out: entries from **2025-10-23** (as §22–§26).
+- **The label:** the trade's net vs SPY after cost (screenerLab `trade`) > 0. The net itself is kept for scoring.
+- **The facts** — each known by the close before the entry (the entry open only for the gap): moverDiff's 26 (less
+  `report_in_week`, always 1 here); the report's own (exp_growth, last_rev_surprise, upgrades less downgrades 60 days,
+  price-target raises less cuts / notes 45 days, the median target's upside 90 days); short interest days to cover and
+  its change (§14), the short-volume share against its 60 sessions, the dark-pool jump (§15) — these three only from
+  2023-06, MISSING before (the trees treat missing as its own branch; read with that in mind); insider buyers 90 days;
+  the season so far — of the same sector's names that reported in the 30 days before, the share that beat; the market
+  regime calm/stormy (spyRegimes).
+- **THE MODEL** (one setting, NOT tuned): LightGBM, 300 trees, learning rate 0.03, 15 leaves, ≥ 200 trades a leaf, 80%
+  of the facts a tree, L2 1. Beside it a logistic regression (the §10 kind) on the same facts.
+  - **Walk-forward:** test years 2021, 2022, 2023, 2024, 2025 (to the held-out day); each fitted on every trade whose EXIT
+    came before the test year's first day (no overlap leaks), scored on that year only.
+  - **The held-out year:** fitted on every trade exiting before 2025-10-23, scored once.
+  - Within each scored period the trades are cut in thirds by score; each third's net per session (each session once)
+    with the 5-session block range.
+  - **PASS only if all hold:** the pooled walk-forward AUC ≥ 0.53 and above 0.5 in 4 of 5 years; the top third above the
+    bottom third in 4 of 5 years; on the held-out year the top third's net per session above BOTH every run-up trade's and
+    the live rule's, with its block range above zero.
+- **RULES COMBINED:** each fact cut at its tertiles on the trades before the held-out day (low ≤ ⅓, high ≥ ⅔, and the
+  0/1 facts as they are) → conditions; every single, pair and triple of conditions on different facts. On the trades
+  before the held-out day a combination qualifies with ≥ 300 trades on ≥ 100 sessions and a positive net in BOTH halves
+  of that span (cut at 2022-10-23); ranked by its 5-session block range's LOWER bound.
+  - **The luck check:** the same search run 20 times with the nets shuffled among the trades of each session (the day's
+    market kept, the names' order broken) — the real best must clear the 95th percentile of the 20 shuffled bests.
+  - **PASS only if all hold:** the real best clears the luck check; and on the held-out year the #1 combination's net per
+    session is above zero, above the live rule's, with its block range above zero. The top 10 are shown held out.
+- Known limits: today's names (survivors — they flatter every group, so the comparisons against the population and the
+  live rule are what count); the short / dark-pool facts cover only the last three years; the report date taken as known
+  in advance (§5).
+
+**Run 2026-10-27 — FAILS, both parts.** 28,856 run-up trades 2018-12 → 2026-10 (9,495 under the live rule), 40 facts
+(the short and dark-pool facts missing on ~55%, price targets on 70%). Full output: `data/lab/runup-ml.out.txt`.
+
+- **The model.** Walk-forward AUC 2021 0.515 · 2022 0.517 · 2023 0.497 · 2024 0.502 · 2025 0.537 — pooled **0.507**
+  (logistic 0.519); top third over bottom third in **1 of 5** years. Held out: AUC 0.510; top third +0.51% a session,
+  bottom third +0.87%, every run-up trade +0.55%, the live rule +0.43%. Within the live rule the model's top half +0.70%
+  against +0.35% — ranges overlapping, and the walk-forward does not back it. Gain went to the MARKET's facts (SPY's 5
+  days, the sector's, the season) — a day's tide, not which name. Bar: AUC ≥ 0.53 ✗, 4/5 ✓, top > bottom 1/5 ✗, held out ✗.
+- **Rules combined.** 79 conditions, 79,197 combinations, 20,306 qualify. The best (block low +1.18%) clears the luck
+  check (shuffled bests 0.49 … 0.95, 95th percentile +0.93%) — so the search found SOME order among the names before the
+  held-out day. It does not carry: **#1** (a volatile name, its sector down the week, the season beating) **−0.21%** held
+  out (−1.98 … +2.24); #2 −0.49%. Of the top 10, 8 are positive held out but every range crosses zero. 7 of the 10 share
+  one shape — a VOLATILE name that DIPPED the week before (rs5 / ret5 / the Friday down) while still OVER its 50-day: a
+  pullback into the report. Chosen after seeing the held-out year, it is a lead to grade forward, not a rule.
+- **Found on the way — the run-up itself, by year** (net per session; the live rule in brackets): 2019 −0.16 (−0.35) ·
+  2020 +0.58 (+0.94) · 2021 −0.47 (−0.33) · 2022 −0.30 (+0.92, 28 sessions) · 2023 +0.05 (+0.09) · 2024 +0.41 (+0.34) ·
+  2025 −0.06 (+0.34) · 2026 +0.73 (+0.33). **The live rule on 2019 → 2023-10-08, years §6 never saw: +0.02% a session**;
+  from 2023-10-09 +0.38%. The run-up's edge (§6, §7) is a three-year one; on the five years before it, it is not there.
