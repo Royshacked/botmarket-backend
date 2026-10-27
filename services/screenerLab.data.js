@@ -129,6 +129,12 @@ export const UNIVERSES = Object.freeze({
         return ((await deps.screen(qs)) ?? []).filter(r => r?.symbol && UNIVERSE_EXCHANGES.includes(r.exchangeShortName ?? r.exchange))
             .map(r => ({ symbol: String(r.symbol).toUpperCase(), sector: r.sector ?? null }))
     },
+    // §30 — every name in the S&P 500 at any time since 2017-11, removed ones too (scripts/lab-sp500-universe.mjs writes
+    // the file: the spans from Wikipedia, the sector from FMP's profile); the lab keeps each to its spans (`member`).
+    sp500: async () => {
+        const u = JSON.parse(fs.readFileSync(path.join(DIR, 'sp500-universe.json'), 'utf8'))
+        return Object.keys(u.spans).filter(s => !u.dropped?.[s]).map(s => ({ symbol: s, sector: u.profiles?.[s]?.sector ?? null }))
+    },
 })
 
 /**
@@ -224,7 +230,7 @@ async function fetchRaw({ name, file, list, years, window = null, deps, pace, on
  * earnings history merged in when read; `insiders` its purchases, oldest first; `sectorDay` (sectorStats) the sectors'
  * five-session returns per session. Pure.
  */
-export function prepare(raw, extras = {}) {
+export function prepare(raw, extras = {}, { member = null } = {}) {
     const byName = new Map()
     const add = (e) => {
         const s = String(e?.symbol ?? '').toUpperCase()
@@ -268,21 +274,22 @@ export function prepare(raw, extras = {}) {
     }
     const spyByDay = new Map((raw.spy ?? []).map(b => [_etDay(b.timestamp), b]))
     const spyDays = [...spyByDay.keys()].sort()
-    return { names, spyByDay, spyDays, calendarFrom: raw.calendar_from, barsFrom: raw.bars_from ?? null, years: raw.years ?? 1, window: raw.window ?? null, builtAt: raw.built_at, universe: raw.universe, sectorDay: sectorStats(names),
+    return { names, spyByDay, spyDays, calendarFrom: raw.calendar_from, barsFrom: raw.bars_from ?? null, years: raw.years ?? 1, window: raw.window ?? null, builtAt: raw.built_at, universe: raw.universe, sectorDay: sectorStats(names, member),
         regimes: spyRegimes(spyDays.map(d => ({ day: d, close: spyByDay.get(d).close }))), spyMonths: new Map(extras.months?.SPY ?? []) }
 }
 
 /**
  * Per session, per sector: the members' five-session returns as of that close → `Map(day → Map(sector → { median, p10,
- * n }))` — #8 reads a name against its sector. A sector with fewer than 8 names that day is left out. Pure.
+ * n }))` — #8 reads a name against its sector. A sector with fewer than 8 names that day is left out. `member(sym, day)`, when
+ * given, keeps only the names in the universe that day (the point-in-time S&P 500, §30). Pure.
  */
-export function sectorStats(names) {
+export function sectorStats(names, member = null) {
     const acc = new Map()
-    for (const s of names.values()) {
+    for (const [sym, s] of names) {
         if (!s.sector) continue
         s.ind.date.forEach((d, i) => {
             const r = s.ind.ret5[i]
-            if (r == null) return
+            if (r == null || (member && !member(sym, d))) return
             if (!acc.has(d)) acc.set(d, new Map())
             const m = acc.get(d)
             if (!m.has(s.sector)) m.set(s.sector, [])
@@ -307,8 +314,9 @@ export function sectorStats(names) {
  * `years` — bars that far back (its own cache, `<name>-<years>y.json`); the calendar stays a year. `window` — `{ from, to }`,
  * a span of the past instead (`<name>-<from>_<to>.json`, no calendar). `extras` —
  * `['history', 'insiders', 'months', 'grades', 'targets', 'shortInterest', 'shortVolume', 'darkPool']`, any (the FINRA three read in BULK, per date) — read once per universe into `<name>.extras.json` (shared by every span), cached too.
+ * `member(sym, day)` — a point-in-time universe (§30): the sectors' stats count only the names in it that day (prepare).
  */
-export async function loadLabData({ name = 'screener', years = 1, window = null, refresh = false, extras = [], deps = _deps, onProgress } = {}) {
+export async function loadLabData({ name = 'screener', years = 1, window = null, refresh = false, extras = [], member = null, deps = _deps, onProgress } = {}) {
     const file = path.join(DIR, window ? `${name}-${window.from}_${window.to}.json` : years > 1 ? `${name}-${years}y.json` : `${name}.json`)
     const pace = createPacer({ perMinute: deps.perMinute(), now: deps.now, sleep: deps.sleep })
     let raw
@@ -345,5 +353,5 @@ export async function loadLabData({ name = 'screener', years = 1, window = null,
         fs.writeFileSync(xfile, JSON.stringify(have))
         done()
     }
-    return prepare(raw, have)
+    return prepare(raw, have, { member })
 }

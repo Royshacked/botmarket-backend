@@ -777,3 +777,52 @@ year predicts its next month. `scripts/lab-rotation.mjs` (each rule's daily book
 - **Verdict:** a lead, not a rule — the first in the lab where a held-out test passed its declared bar, but the live
   (expanding) form of the same idea does not. Next: grade the fixed 2019–2023 map forward from 2026-10, month by month,
   and/or rebuild the library on a survivorship-free universe.
+
+## 30. The S&P 500 as it was — test L without the survivors (2026-10-27)
+
+Roy, 2026-10-27: "rebuild with the delisted names". The lab's universe is TODAY's Hotlist names (over $5 and 1M
+shares a day NOW) — the companies that failed, were bought or shrank are missing, and the dip rules gain most from that
+(§5). FMP's plan serves only the latest 100 delistings and no index history (402), so the universe is the **S&P 500 as
+it was**: Wikipedia's "List of S&P 500 companies" (today's 503) and "Historical components of the S&P 500" (every
+change by effective date), walked back from today (`services/sp500History.service.js`) — 670 names since 2017-11, about
+505 members on any day, removed ones included (SVB 2018-03-19 → 2023-03-15). `scripts/lab-sp500-universe.mjs`.
+
+**Declared before the run.**
+- **Point in time:** a trade counts only when its entry day falls inside the name's span in the index; the sectors'
+  stats (sector_laggard, the season) count only that day's members. FMP's bars for a removed ticker must cover ≥ 90% of
+  its sessions in the index, or the name is left out and listed (a reused ticker — CA, MON, NFX now name an ETF or a
+  SPAC — has bars only from later; an acquired one such as Celgene or Tiffany has its bars).
+- **The survivor twin:** the same data, the same rules, but TODAY's 503 members on every day (sector stats likewise) —
+  the difference between the two runs IS the survivorship bias, measured on one index.
+- **The test:** test L as declared in §29, unchanged — the 14 rules, momentum L 6 K 3, the market-state map learned on
+  2019–2023 and held out 2024-01 → 2026-09, ALL and RANDOM — on both universes.
+- **Reading it:** the market-state switch's pass (§29) is taken as REAL only if it passes again on the point-in-time
+  S&P 500 by the same bar. Known differences from §29: large caps only (the screener's names reach down to ~$1B), and a
+  ticker renamed while in the index (FleetCor → Corpay) counts from 2017-11 (2 unmatched rows, listed).
+
+**Run 2026-10-27.** 670 names since 2017-11, 638 covered, 11 left out (reused tickers INFO, STI, LLL, NFX; no bars:
+RHT, APC, NBL, ARNC, DWDP, SCG; VYLR too new). Outputs: `data/lab/rotation-sp500.out.txt`, `rotation-sp500-today.out.txt`.
+
+- **The survivorship bias, measured:** all 14 rules held equally, a month vs SPY — point in time **−0.10%** (t −0.47),
+  today's members **+0.40%** (t +1.82). About **+0.5% a month** of flattery, and every rule but one gains from it — most
+  the DIPS: reversal_1w +0.34 → +1.44, gapdown_held +1.80 → +2.85, insider_cluster_20 −0.07 → +0.63, pullback_50 +0.01 →
+  +0.57. §5's warning was right, and larger than guessed.
+- **Per rule, point in time** (a month, t, months up): gapdown_held +1.80% (t 1.75, 54%), **runup_5 +0.72% (t 1.31,
+  56%)**, reversal_1w +0.34%; the other 11 below zero (first_52w_high −0.56, t −1.99; sector_laggard −0.50, t −1.60).
+  The run-up is the one rule the survivors do NOT flatter (+0.72 as it was, +0.50 today's) and, unlike on the screener's
+  names (§28), it holds before 2023-10 too (+0.94) and after (+0.36) — on large caps; not significant alone.
+- **Momentum — FAILS again:** before −0.26% vs ALL +0.12%; held out +0.96% vs −0.52% (t 2.57). Every L × K is positive
+  held out and most negative before — it does not hold across the two periods.
+- **The market state — PASSES again,** by the §29 bar: held out **+0.46% a month vs ALL −0.52%** (t 2.03), above
+  RANDOM's 95th percentile (+0.23%). The map (learned 2019–2023): over & calm → reversal_1w, runup_5, pullback_50; over &
+  stormy → runup_5, gapdown_held, wyckoff_spring; under & stormy → gapdown_held, reversal_1w, rsi2_uptrend. This time
+  the **expanding (live) form passes too: +0.55% vs −0.52% (t 1.82)**, and the switcher beats ALL in each of 2024, 2025,
+  2026 for K 1, 2, 3 in both forms.
+- **But against SPY it rests on one rule.** Without gapdown_held (2,771 trades, months up to +8%), the switcher stays
+  above ALL (K 3: fixed −0.63 vs −0.81, expanding +0.10 vs −0.81) but no longer above SPY in the fixed form. Ranked by the
+  median month instead of the mean, the fixed map loses its edge (K 3 −0.17%).
+- **Verdict:** two things are real enough to keep. (1) **Which rule, when** — the state switch picks better-than-average
+  rules out of sample, on a survivorship-free index, in its live form, every held-out year: the rotation idea holds as a
+  RELATIVE skill. (2) Most of the library loses to SPY once the dead names are back; only gap-down-held and the run-up
+  stay above it, neither significant alone. A rotation is only as good as the rules it rotates — the next work is better
+  rules for it to pick from, graded the same point-in-time way.

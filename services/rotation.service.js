@@ -41,11 +41,14 @@ export function dailyBook(trades, data) {
     return book
 }
 
-/** Every rule in `library` over `days` → { rule: { trades, book } }. Pure. */
-export function libraryBooks(data, days, library = LIBRARY) {
+/**
+ * Every rule in `library` over `days` → { rule: { trades, book } }. `keep(trade)` — a point-in-time universe (§30):
+ * only the trades entered while the name was in it. Pure.
+ */
+export function libraryBooks(data, days, library = LIBRARY, { keep = null } = {}) {
     const out = {}
     for (const [rule, tags] of Object.entries(library)) {
-        const trades = runHypothesis(HYPOTHESES[rule], data, { days }).filter(t => !tags || tags.includes(t.tag))
+        const trades = runHypothesis(HYPOTHESES[rule], data, { days }).filter(t => (!tags || tags.includes(t.tag)) && (!keep || keep(t)))
         out[rule] = { trades: trades.length, book: dailyBook(trades, data) }
     }
     return out

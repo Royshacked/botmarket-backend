@@ -2,15 +2,18 @@
 # writes: each library rule's daily excess over SPY. Step 2 MOMENTUM (the rules that did best lately), step 3 THE MARKET
 # STATE (the rules that did best in this kind of market), against ALL rules held equally and RANDOM picks.
 #
-#   python scripts/lab-rotation.py
+#   python scripts/lab-rotation.py [--tag=sp500 | --tag=sp500-today]
 import numpy as np
+import sys
 import pandas as pd
 
 BEFORE, HELD, END = ('2019-07', '2023-12'), ('2024-01', '2026-09'), '2026-09'
 L0, K0, DRAWS, MIN_STATE = 6, 3, 2000, 6
 rng = np.random.default_rng(5)
 
-d = pd.read_csv('data/lab/rotation-daily.csv')
+TAG = next((a.split('=', 1)[1] for a in sys.argv[1:] if a.startswith('--tag=')), '')
+d = pd.read_csv(f'data/lab/rotation-daily{"-" + TAG if TAG else ""}.csv')
+print(f'universe: {TAG or "screener (today's names)"}')
 d['month'] = d.day.str[:7]
 M = d.groupby(['month', 'rule']).ret.sum().unstack()
 M = M[(M.index >= '2019-01') & (M.index <= END)]
