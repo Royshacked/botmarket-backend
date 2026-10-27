@@ -33,7 +33,8 @@ const BARE      = /import\s+'(\.\.?\/[^']+)'/g
  *  nothing to check per-export, so it carries []; the module resolution is still verified. */
 export function relativeImports(src) {
     const out = []
-    const names = list => list.split(',').map(s => s.trim()).filter(Boolean).map(s => s.split(/\s+as\s+/)[0].trim())
+    // `b as c` (static) and `b: c` (a dynamic import's destructuring rename) both name the export `b`.
+    const names = list => list.split(',').map(s => s.trim()).filter(Boolean).map(s => s.split(/\s+as\s+|\s*:\s*/)[0].trim())
     // Combined first, and blank its match out, so DEFAULT and STATIC below do not each half-match it.
     let rest = src
     for (const m of src.matchAll(COMBINED)) out.push({ names: ['default', ...names(m[2])], spec: m[3] })
@@ -88,6 +89,7 @@ import * as ns from '../namespace.js'
   import indented from '../indented.js'
 import './side-effect.js'
 const { d, e } = await import('../z.js')
+const { COLLECTION: STATS, h } = await import('../renamed.js')
 `
     const got = relativeImports(src)
     // order-independent — assert the set of (spec → names)
@@ -99,6 +101,7 @@ const { d, e } = await import('../z.js')
     assert.deepEqual(bySpec['../indented.js'], ['default'], 'an indented default import is still seen')
     assert.deepEqual(bySpec['./side-effect.js'], [])
     assert.deepEqual(bySpec['../z.js'], ['d', 'e'])
+    assert.deepEqual(bySpec['../renamed.js'], ['COLLECTION', 'h'], 'a destructuring rename names the export, not the local')
     // and the bare npm imports (dotenv) are not ours to resolve
     assert.equal(got.some(i => i.spec === 'dotenv'), false)
 })

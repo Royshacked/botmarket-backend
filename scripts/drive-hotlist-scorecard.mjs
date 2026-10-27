@@ -92,6 +92,12 @@ try {
     await page.waitForTimeout(500)
     check('All coverage brings the book back', await page.locator('.hot-score').count() === 0 && await page.locator('.hot-panel tr.hot-row').count() > 0)
     check('the scorecard was asked of the server once per opening', asked === 2, `${asked} requests`)
+    // Argus's names read the book's `picks` — the FE service once dropped them, so the list always said "could not be loaded".
+    await page.getByRole('button', { name: /^Argus’s names/ }).click()
+    await page.waitForTimeout(500)
+    await shot(page, '3-argus-names')
+    const argus = await page.locator('.hot-panel').textContent()
+    check('Argus’s names load (the book’s picks reach the list)', !/could not be loaded/.test(argus), argus.slice(0, 160))
     check('no page errors', errors.length === 0, errors.join(' | '))
 } catch (err) {
     results.push(`FAIL  the drive stopped — ${err.message}`)
