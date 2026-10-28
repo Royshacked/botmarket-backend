@@ -67,6 +67,11 @@ try {
     const tabs = await page.locator('.hot-horizons button').allTextContents()
     check('four tabs, This week first and pressed', tabs.length === 4 && /^This week/.test(tabs[0]) && /^Swing/.test(tabs[1]) && /^Long term/.test(tabs[2]) && /^Covered companies \d+/.test(tabs[3])
         && await page.locator('.hot-horizons button').first().getAttribute('aria-pressed') === 'true', tabs.join(' | '))
+    // No Status column or status filter (Roy, 2026-10-28) — read on the week's whole list.
+    const runUp = page.getByRole('button', { name: /^(Run-up names|All screened) \d+/ })
+    if (await runUp.count()) { await runUp.click(); await page.waitForTimeout(500) }
+    const heads = await page.locator('.hot-panel thead th').allTextContents()
+    check('no Status column, no status filter', !heads.some(h => /Status/.test(h)) && await page.getByRole('group', { name: 'Show' }).count() === 0, heads.map(h => h.trim()).filter(Boolean).join(' | '))
     await shot(page, '0-this-week')
     await page.getByRole('button', { name: /^Long term \d+/ }).click()
     await page.waitForTimeout(1500)
