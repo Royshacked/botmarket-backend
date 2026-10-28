@@ -227,7 +227,11 @@ function _priceTarget(pt, now) {
     const value = _num(pt.value)
     if (value === null) return null
     const { horizon, set_at, ends_at } = openWindow(pt, now)
-    return { value, horizon, basis: _str(pt.basis), set_at, target_date: ends_at }
+    // A target with NO horizon of its own stores as the house's 12m — and says so (2026-10-28): 84% of the book sat on
+    // 12m and nothing told a chosen one from a default. Marked, not refused: a refused save strands an automatic run's name.
+    // A stored target keeps its mark when it is normalised again (an update merges it); a new one with a horizon clears it.
+    const defaulted = !HORIZONS.includes(pt.horizon) || pt.horizon_defaulted === true
+    return { value, horizon, basis: _str(pt.basis), set_at, target_date: ends_at, ...(defaulted ? { horizon_defaulted: true } : {}) }
 }
 
 function _gap(g) {
@@ -380,6 +384,7 @@ async function initiateCoverage(raw) {
         doc.revisions = [newRevision({ kind: 'initiate', note: rerated ? `${initNote}. ${rerated}` : initNote })]
         await db.collection(COLLECTION).insertOne({ ...doc })
         logger.info(LOG, 'coverage initiated', { id: doc.id, symbol, sector: doc.sector, industry: doc.industry })
+        if (doc.price_target?.horizon_defaulted) logger.warn(LOG, 'coverage target has NO horizon — stored as 12m (horizon_defaulted)', { symbol })
         _logCall(doc, null)
         return { ok: true, doc: stripId(doc) }
     } catch (err) {
@@ -561,6 +566,9 @@ async function updateCoverage(id, patch = {}) {
         const res = await _repo.revise(id, _updateSet(p, merged, { flagsRecomputed }), revision)
         if (!res.ok) return { ok: false, reason: 'not_found' }
         logger.info(LOG, 'coverage updated', { id, kind: revision.kind })
+        if ('price_target' in p && merged.price_target?.horizon_defaulted && !cur.price_target?.horizon_defaulted) {
+            logger.warn(LOG, 'coverage target has NO horizon — stored as 12m (horizon_defaulted)', { id, symbol: merged.symbol })
+        }
         if ('rating' in p || 'price_target' in p) _logCall(merged, cur)
         // The caller's view of the result — merged in memory, the trail as it now reads.
         return { ok: true, doc: { ...stripId(merged), revisions: [revision, ..._arr(cur.revisions)] } }

@@ -82,6 +82,22 @@ test('a save takes the house\'s rating: a +37% "hold" initiates as a strong buy,
     assert.equal(rows('coverage').find(d => d.symbol === 'SLL').rating, 'strong_buy', '+10% in 3 months is far over SPY\'s ~+2%')
 })
 
+// 2026-10-28: 84% of the book sat on 12m and nothing told a chosen 12m from a default.
+test('a target with no horizon stores as 12m and SAYS so; a horizon given later clears the mark', async () => {
+    _setCoverageIO({ getPrice: async () => 100, getMultipleHistory: async () => [], sectorRaw: async () => ({ sector: 'Technology', industry: 'Software' }) })
+    const made = await coverageService.initiateCoverage({ symbol: 'NOH', sector: 'Technology', thesis: 't', rating: 'buy', price_target: { value: 130, basis: 'b' } })
+    assert.equal(made.ok, true)
+    const doc = rows('coverage').find(d => d.symbol === 'NOH')
+    assert.deepEqual([doc.price_target.horizon, doc.price_target.horizon_defaulted], ['12m', true])
+    const kept = await coverageService.updateCoverage(doc.id, { thesis: 't2' })
+    assert.equal(kept.doc.price_target.horizon_defaulted, true, 'kept through an update that does not touch the target')
+    const chosen = await coverageService.updateCoverage(doc.id, { price_target: { value: 130, horizon: '12m', basis: 'b' } })
+    assert.equal(chosen.doc.price_target.horizon_defaulted, undefined, 'chosen now')
+    const given = await coverageService.initiateCoverage(draft('HAS', 'buy', 130, '6m'))
+    assert.equal(given.ok, true)
+    assert.equal(rows('coverage').find(d => d.symbol === 'HAS').price_target.horizon_defaulted, undefined)
+})
+
 test('no price → his rating stands, unchanged', async () => {
     _setCoverageIO({ getPrice: async () => null })
     const made = await coverageService.initiateCoverage(draft('NOP', 'buy', 120))

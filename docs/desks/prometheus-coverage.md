@@ -308,6 +308,16 @@ fails — so a save is never refused for the rating, and a research run never st
 judgment; the rating is its label. The numbers are a starting point: the scorecard shows whether they separate anything.
 Live coverage keeps its old rating until its next save.
 
+**The horizon, marked when it was not chosen (same day).** 84% of the book sat on `12m`, and a missing horizon stored as
+`12m` silently. It still does — a refused save would strand an automatic run's name — but the target now carries
+`horizon_defaulted: true` and the log a warning, and the prompt says the horizon is required. Count the warnings before
+deciding whether a missing one should be refused in a conversation.
+
+**A hit counts though the re-model moves past it (same day).** A target reached re-models the coverage on its own, and
+the re-model sets a new target and the status back to `active` — so the Hotlist book's track record ("no target has come
+due") never saw a hit. Its hits and expiries now come from the frozen calls (`houseBook.callsSettled`, the scorecard's
+`target_reached`); `broken` is still the coverage's own.
+
 ## The scorecard — graded against SPY (2026-10-27)
 
 Roy, 2026-10-27: "do the scorecard". The coverage document is a living view — a revision overwrites its rating

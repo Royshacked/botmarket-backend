@@ -21,6 +21,7 @@ import { COLLECTION as COVERAGE } from '../api/analyst/coverage.service.js'
 import { COLLECTION as QUEUE } from './researchQueue.service.js'
 import { COLLECTION as STATS } from './dailyScreener.service.js'
 import { COLLECTION as ASSESSMENTS } from '../api/strategy/industryAssessment.service.js'
+import { addMonths } from './forecastClock.js'
 import { getTickerAggregates } from '../providers/candles.provider.js'
 import { fetchLastPrice } from './lastPrice.service.js'
 import { logger } from './logger.service.js'
@@ -139,9 +140,16 @@ const _median = (xs) => {
  * broken / expired, and the hit rate over the settled; live: the median move since set and against SPY, and the share
  * beating SPY — each over the rows that have the numbers (`priced`).
  */
-export function bookRecord(rows) {
+export function bookRecord(rows, calls = null) {
     const count = (s) => rows.filter(r => r.state === s).length
-    const hit = count('hit'), broken = count('broken'), expired = count('expired')
+    // HITS AND EXPIRIES FROM THE FROZEN CALLS when given (2026-10-28): a target reached re-models the coverage on its own
+    // (coverage.remodel), and the re-model sets a new target and the status back to active — so a live row is never
+    // `hit`, and the record read "no target has come due" for ever. Prometheus's scorecard keeps every call as made, and
+    // `target_reached` on the one that got there (prometheusCalls). `broken` is still the coverage's own.
+    const settledCalls = calls ? callsSettled(calls) : null
+    const hit = settledCalls ? settledCalls.hit : count('hit')
+    const expired = settledCalls ? settledCalls.expired : count('expired')
+    const broken = count('broken')
     const settled = hit + broken + expired
     const priced = rows.filter(r => r.vs_spy != null)
     return {
@@ -151,6 +159,36 @@ export function bookRecord(rows) {
         median_since: _r2(_median(rows.map(r => r.since_set_pct))),
         median_vs_spy: _r2(_median(priced.map(r => r.vs_spy))),
         beat_spy: priced.length ? _r2((priced.filter(r => r.vs_spy > 0).length / priced.length) * 100) : null,
+    }
+}
+
+/** Prometheus's frozen calls (prometheusCalls.service COLLECTION — a static import is a cycle: it reads this module). */
+export const CALLS = 'prometheus_calls'
+
+/**
+ * Of a list's frozen calls, the settled → `{ hit, expired }`. Pure. Hit: its target was reached (`target_reached`), on
+ * time or late; expired: its horizon ran out (`made_at` + the horizon) with the target never reached. A call still
+ * running is neither.
+ */
+export function callsSettled(calls, today = new Date().toISOString()) {
+    let hit = 0, expired = 0
+    for (const c of calls ?? []) {
+        if (c?.target_reached) { hit++; continue }
+        const months = Number(String(c?.horizon ?? '').replace('m', ''))
+        if (c?.made_at && months > 0 && addMonths(c.made_at, months) < today) expired++
+    }
+    return { hit, expired }
+}
+
+/** The frozen calls on these names, on this book's horizons. Null on a failed read (the record falls back to the rows). */
+async function _calls(db, symbols, horizons) {
+    if (!symbols.length) return []
+    try {
+        return await db.collection(CALLS).find({ symbol: { $in: symbols }, horizon: { $in: horizons } },
+            { projection: { _id: 0, symbol: 1, horizon: 1, made_at: 1, target_reached: 1 } }).toArray()
+    } catch (err) {
+        logger.warn(LOG, 'the frozen calls were not read — the record counts the rows', { error: err.message })
+        return null
     }
 }
 
@@ -339,7 +377,8 @@ export async function houseBook({ deps = _deps } = {}) {
         for (const r of out[b]) r.list = listOf(r, picks?.[b] ?? [])
         // The record is the LIST's — the names on it, not the whole horizon's book (2026-10-28: it counted the names
         // that had left, and the desk's).
-        out.record[b] = bookRecord(out[b].filter(r => r.list === 'on'))
+        const onList = out[b].filter(r => r.list === 'on')
+        out.record[b] = bookRecord(onList, await _calls(db, onList.map(r => r.symbol), BOOKS[b]))
     }
     return out
 }

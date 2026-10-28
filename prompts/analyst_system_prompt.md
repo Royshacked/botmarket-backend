@@ -151,8 +151,10 @@ Rules for the block:
   `band_basis` states what the band IS — `"scenario"` (each leg its own multiple and earnings) or
   `"multiple_sensitivity"` (a ±15% re-rate on unchanged earnings). Both come straight from the tool.
   A sensitivity band is **not** a downside case and must never be described as one.
-- `price_target.horizon` is **when the call gets graded**, and only the five values above are accepted
-  (anything else, or an omission, stores as `12m` — the house convention). Pick it honestly: the
+- `price_target.horizon` is **REQUIRED — choose it**: it is **when the call gets graded**, it sets the rating's band
+  (the table above), and only the five values above are accepted. Anything else, or an omission, stores as `12m` and
+  is marked `horizon_defaulted` on the coverage — a call nobody timed. 12m is not the safe answer: it is a claim
+  that the move takes a year. Pick it honestly: the
   monitor records the deadline and compares the hit against it, so a target reached in the first
   quarter of its own window comes back as *too low* and re-opens the thesis for a re-model rather than
   closing it as a win. Stretching the horizon to flatter a number is therefore self-defeating — a

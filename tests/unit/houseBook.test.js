@@ -172,6 +172,36 @@ test('the book marks each chain name and pick with her verdict now; the name sta
     assert.equal(book.record.swing.n, 1, 'the record is the list\'s: the name that left is not in it')
 })
 
+// 2026-10-28: a target reached re-models the coverage, and the re-model sets a new target and the status back to
+// active — the record read "no target has come due" for ever. The frozen calls keep the hit.
+test('the record\'s hits and expiries come from the frozen calls: a hit the re-model moved past still counts', async () => {
+    const { callsSettled, CALLS } = await import('../../services/houseBook.service.js')
+    const { COLLECTION } = await import('../../services/prometheusCalls.service.js')
+    assert.equal(CALLS, COLLECTION, 'the book reads the scorecard\'s own collection')
+    const today = '2026-10-28T12:00:00.000Z'
+    const calls = [
+        { horizon: '3m', made_at: '2026-07-01T14:00:00.000Z', target_reached: { day: '2026-08-12' } },   // hit, then re-modelled
+        { horizon: '3m', made_at: '2026-07-01T14:00:00.000Z', target_reached: null },                     // ran out
+        { horizon: '6m', made_at: '2026-07-01T14:00:00.000Z', target_reached: null },                     // still running
+    ]
+    assert.deepEqual(callsSettled(calls, today), { hit: 1, expired: 1 })
+    const rows = [{ state: 'live', vs_spy: 2, since_set_pct: 3 }, { state: 'broken', vs_spy: -4, since_set_pct: -6 }]
+    const rec = bookRecord(rows, calls)
+    assert.deepEqual([rec.hit, rec.expired, rec.broken], [1, 1, 1])
+    assert.deepEqual([bookRecord(rows).hit, bookRecord(rows, null).expired], [0, 0], 'no calls read: the rows, as before')
+})
+
+test('the book\'s record reads the list\'s frozen calls on its horizons', async () => {
+    const { db, rows } = memDb()
+    rows('coverage').push(cov('HIT', '6m'))
+    rows('research_queue').push({ symbol: 'HIT', source: 'pythia', status: 'done', created_at: `${TODAY}T10:00:00.000Z`, updated_at: '2026-10-20', context: { subject: 'Rails', verdict: 'swing' } })
+    rows('prometheus_calls').push({ symbol: 'HIT', horizon: '6m', made_at: '2026-05-01T14:00:00.000Z', target_reached: { day: '2026-06-01' } },
+        { symbol: 'HIT', horizon: '12m', made_at: '2026-05-01T14:00:00.000Z', target_reached: { day: '2026-06-01' } },   // another book's horizon
+        { symbol: 'OFF', horizon: '6m', made_at: '2026-05-01T14:00:00.000Z', target_reached: { day: '2026-06-01' } })    // not on the list
+    const book = await houseBook({ deps: { db: async () => db, now: () => Date.parse(`${TODAY}T15:00:00Z`), price: async () => null, bars: async () => null } })
+    assert.equal(book.record.swing.hit, 1)
+})
+
 test('on the list: the chain\'s names and the picks it covered, while Pythia still calls them; the desk\'s never', async () => {
     const { listOf } = await import('../../services/houseBook.service.js')
     const picks = [{ symbol: 'PRE', state: 'already_covered', still: true }, { symbol: 'GON', state: 'already_covered', still: false },
