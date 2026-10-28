@@ -306,7 +306,10 @@ the revision says so ("Rated buy by the house bands: the target is +20% against 
 price → his rating stands. It replaced the direction check (`ratingCoherence`, kept for its tests), which a band never
 fails — so a save is never refused for the rating, and a research run never strands a name on it. The target stays his
 judgment; the rating is its label. The numbers are a starting point: the scorecard shows whether they separate anything.
-Live coverage keeps its old rating until its next save.
+Live coverage was re-rated once by `scripts/rerate-coverage-bands.mjs` (dry by default, `--write` to apply;
+`coverage.service.rerateCoverage`): its own target, the price then, its horizon → the band, with a `house_rerate`
+revision. Not a call — the scorecard neither logs it nor rebuilds one from the trail (`prometheusCalls.backfill` undoes
+it but makes no step of it). axl_dev 2026-10-28: 106 of 167 relabelled, the scorecard's 233 calls untouched.
 
 **The horizon, marked when it was not chosen (same day).** 84% of the book sat on `12m`, and a missing horizon stored as
 `12m` silently. It still does — a refused save would strand an automatic run's name — but the target now carries

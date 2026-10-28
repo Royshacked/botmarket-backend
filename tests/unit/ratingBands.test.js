@@ -2,7 +2,7 @@ import { test, after } from 'node:test'
 import assert from 'node:assert/strict'
 import { memDb } from '../helpers/memDb.js'
 import { _setClientFactory, closeDb } from '../../providers/mongodb.provider.js'
-import { ratingBand, bandsText, MARKET_PA, MARGIN_PA } from '../../services/ratingBands.js'
+import { ratingBand, bandsText, MARKET_PA, MARGIN_PA, RERATE_KIND } from '../../services/ratingBands.js'
 import { coverageService, _setCoverageIO, houseRatingNote } from '../../api/analyst/coverage.service.js'
 
 // The house's rating bands (Roy, 2026-10-28: "relative to SPY, build it"): a rating is the band of the target's implied
@@ -96,6 +96,37 @@ test('a target with no horizon stores as 12m and SAYS so; a horizon given later 
     const given = await coverageService.initiateCoverage(draft('HAS', 'buy', 130, '6m'))
     assert.equal(given.ok, true)
     assert.equal(rows('coverage').find(d => d.symbol === 'HAS').price_target.horizon_defaulted, undefined)
+})
+
+// Roy, 2026-10-28: the bands apply on a save, so live coverage kept its old rating until its next re-model.
+test('re-rating live coverage relabels it by its own target — the target untouched, the trail says why, a dry run writes nothing', async () => {
+    _setCoverageIO({ getPrice: async () => 100 })
+    const id = 'cov_OLD_1'
+    rows('coverage').push({ id, symbol: 'OLD', status: 'active', rating: 'hold', price_target: { value: 130, horizon: '12m', set_at: '2026-09-01T00:00:00.000Z' }, revisions: [] })
+    await new Promise(r => setTimeout(r, 50))   // the tests before log calls fire-and-forget: let theirs land first
+    const callsBefore = rows('prometheus_calls').length
+    const dry = await coverageService.rerateCoverage(id, { dry: true })
+    assert.deepEqual([dry.outcome, dry.from, dry.to], ['rerated', 'hold', 'strong_buy'])
+    assert.equal(rows('coverage').find(d => d.id === id).rating, 'hold', 'dry: nothing written')
+    const done = await coverageService.rerateCoverage(id)
+    assert.equal(done.outcome, 'rerated')
+    const doc = rows('coverage').find(d => d.id === id)
+    assert.equal(doc.rating, 'strong_buy')
+    assert.equal(doc.price_target.value, 130, 'his target stands')
+    assert.equal(doc.revisions[0].kind, RERATE_KIND)
+    assert.deepEqual(doc.revisions[0].changed, { rating: { from: 'hold', to: 'strong_buy' } })
+    assert.equal((await coverageService.rerateCoverage(id)).outcome, 'same', 'twice is once')
+    await new Promise(r => setTimeout(r, 50))   // a logged call is fire-and-forget: give one the time to land
+    assert.equal(rows('prometheus_calls').length, callsBefore, 'a relabel is not a call')
+})
+
+test('the scorecard\'s seed undoes a relabel but never makes a call of it', async () => {
+    const { callsFromTrail } = await import('../../services/prometheusCalls.backfill.js')
+    const cov = { id: 'c', symbol: 'X', created_at: '2026-08-01T00:00:00.000Z', rating: 'strong_buy',
+        price_target: { value: 130, horizon: '12m', set_at: '2026-08-01T00:00:00.000Z' },
+        revisions: [{ at: '2026-10-28T00:00:00.000Z', kind: RERATE_KIND, changed: { rating: { from: 'hold', to: 'strong_buy' } } }] }
+    const calls = callsFromTrail(cov)
+    assert.deepEqual(calls.map(c => c.state.rating), ['hold'], 'his one call, as he made it')
 })
 
 test('no price → his rating stands, unchanged', async () => {

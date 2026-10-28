@@ -19,7 +19,7 @@ import { logger }          from '../../services/logger.service.js'
 import { cleanConviction } from '../../services/conviction.util.js'
 import { toNum }           from '../../services/format.util.js'
 import { HORIZONS, DEFAULT_HORIZON, openWindow, normalizeHorizon } from '../../services/forecastClock.js'
-import { ratingBand } from '../../services/ratingBands.js'
+import { ratingBand, RERATE_KIND } from '../../services/ratingBands.js'
 import { normalizeSector, normalizeIndustry }  from '../../services/entity/vocabulary.js'
 import { newRevision, diffFields } from '../../services/revisionTrail.js'
 
@@ -60,6 +60,36 @@ export const coverageService = {
     captureResearchBasis,
     recordMonitorState,
     claimRemodel,
+    rerateCoverage,
+}
+
+/**
+ * RE-RATE live coverage by the house's bands (Roy, 2026-10-28: the bands apply on a save, so a name kept its old
+ * rating until its next re-model — a +30% "hold" beside a +5% one). Its own target, price and horizon → the band's
+ * rating, written with a `RERATE_KIND` revision that says why. The target and the thesis are untouched, and it is NOT a
+ * call: the scorecard neither logs it (no _logCall) nor rebuilds one from the trail (prometheusCalls.backfill). →
+ * `{ ok, outcome: 'rerated' | 'same' | 'no_price' | 'no_target', from?, to?, band? }`; `dry` reads and writes nothing.
+ */
+async function rerateCoverage(id, { dry = false, io = _io } = {}) {
+    const found = await getCoverageById(id)
+    if (!found.ok) return found
+    const cur = found.doc
+    if (_num(cur?.price_target?.value) === null) return { ok: true, outcome: 'no_target', symbol: cur.symbol }
+    const house = await _houseRating(cur, io)
+    if (!house) return { ok: true, outcome: 'no_price', symbol: cur.symbol }
+    if (house.from === undefined) return { ok: true, outcome: 'same', symbol: cur.symbol, rating: cur.rating }
+    const out = { ok: true, outcome: 'rerated', symbol: cur.symbol, from: cur.rating ?? null, to: house.band.rating, band: house.band }
+    if (dry) return out
+    const revision = newRevision({ kind: RERATE_KIND, note: houseRatingNote(house), changed: { rating: { from: cur.rating ?? null, to: house.band.rating } } })
+    try {
+        const res = await _repo.revise(id, { rating: house.band.rating, updated_at: new Date().toISOString() }, revision)
+        if (!res.ok) return { ok: false, reason: 'not_found' }
+        logger.info(LOG, 'coverage re-rated by the house bands', { id, symbol: cur.symbol, from: out.from, to: out.to })
+        return out
+    } catch (err) {
+        logger.error(LOG, 'coverage re-rate failed', err)
+        return { ok: false, error: err }
+    }
 }
 
 // ─── monitor.* namespace ─────────────────────────────────────────────────────

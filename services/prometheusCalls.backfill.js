@@ -6,6 +6,7 @@
 // Pure: a coverage document in, its calls out.
 
 import { isNewCall } from './prometheusCalls.service.js'
+import { RERATE_KIND } from './ratingBands.js'
 
 /**
  * A coverage document → its calls, oldest first: `[{ state, prev, at }]`, `state` the call (a coverage-shaped object:
@@ -21,7 +22,9 @@ export function callsFromTrail(cov) {
         const ch = rev?.changed ?? {}
         if (!ch.rating && !ch.price_target) continue
         const before = { ...state, ...(ch.rating ? { rating: ch.rating.from ?? null } : {}), ...(ch.price_target ? { price_target: ch.price_target.from ?? null } : {}) }
-        steps.unshift({ state, at: rev.at })
+        // A RELABEL (the house's rating bands, RERATE_KIND) is undone like any change — the states before it are his —
+        // but it is not a call: no step for it.
+        if (rev.kind !== RERATE_KIND) steps.unshift({ state, at: rev.at })
         state = before
     }
     const out = []

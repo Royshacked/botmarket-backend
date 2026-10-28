@@ -14,6 +14,12 @@
 
 import { normalizeHorizon } from './forecastClock.js'
 
+/**
+ * The revision kind of a RELABEL — live coverage re-rated by the bands from its own target (coverage.service
+ * rerateCoverage, 2026-10-28). Not a call of Prometheus's: the scorecard neither logs it nor rebuilds one from it.
+ */
+export const RERATE_KIND = 'house_rerate'
+
 /** SPY's expected return a year, %. */
 export const MARKET_PA = 8
 /** The excess over the market a buy needs (and a sell under it), a year, %. */
