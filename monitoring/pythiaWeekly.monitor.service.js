@@ -5,7 +5,13 @@
 // than a second clock that must stay in step with that one, this loop watches for the RESULT: every
 // CHECK_INTERVAL_MS it asks whether the latest complete run has a finished week, and when it does not, runs
 // (or resumes) one. A run the engine marked PARTIAL is never scanned (latestRun reads complete runs only).
-// Opt-in (PYTHIA_WEEKLY): off, nothing is scanned or spent.
+// Opt-in (PYTHIA_WEEKLY): off, no week is scanned or assessed.
+//
+// THE PICK-UP RUNS EITHER WAY (2026-10-28). A finished week's names are researched whether or not the switch is on: on
+// prod a week run by hand (2026-10-20, PYTHIA_WEEKLY unset) handed its 30 names on once, found a run going, left them
+// "to the monitor's next tick" — and the tick, off, never came: eight days queued, never claimed. The switch gates
+// starting Pythia's weeks (her assessments' spend); the names of a week someone already ran are inside the research
+// budget (HOUSE_RESEARCH_MAX_USD) like any other.
 
 import { createPollLoop } from './pollLoop.js'
 import { runWeekly, resumeResearch } from '../services/pythiaWeekly.service.js'
@@ -18,12 +24,12 @@ const _deps = { enabled: () => config.pythiaWeekly, run: () => runWeekly(), resu
 export function _setDeps(d) { Object.assign(_deps, d) }
 
 /**
- * One check. → the run's result (with the research pick-up's as `research`), or `{ outcome: 'off' }`. Never throws
- * (neither callee does). After the week, the latest done week's research is picked up (house-research-chain.md
- * step 6): names a dead run left, or a budget that waited on a busy run.
+ * One check. → the run's result (with the research pick-up's as `research`), or `{ outcome: 'off', research }`. Never
+ * throws (neither callee does). After the week, the recent done weeks' research is picked up (house-research-chain.md
+ * step 6): names a dead run left, or a budget that waited on a busy run — the switch off too (above).
  */
 export async function _tick(deps = _deps) {
-    if (!deps.enabled()) return { outcome: 'off' }
+    if (!deps.enabled()) return { outcome: 'off', research: await deps.resume() }
     const week = await deps.run()
     const research = await deps.resume()
     return { ...week, research }

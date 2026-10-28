@@ -193,10 +193,12 @@ test('scanWeek reads the same shapes an assessment freezes', async () => {
 
 // ── around it ────────────────────────────────────────────────────────────────
 
-test('the monitor spends nothing while PYTHIA_WEEKLY is off', async () => {
-    let ran = false
-    assert.deepEqual(await _tick({ enabled: () => false, run: async () => { ran = true } }), { outcome: 'off' })
+test('PYTHIA_WEEKLY off: no week is run — but a finished week\'s names are still picked up (prod, 2026-10-28)', async () => {
+    let ran = false, resumed = 0
+    assert.deepEqual(await _tick({ enabled: () => false, run: async () => { ran = true }, resume: async () => { resumed++; return { outcome: 'started' } } }),
+        { outcome: 'off', research: { outcome: 'started' } })
     assert.equal(ran, false)
+    assert.equal(resumed, 1, 'a week run by hand handed its names on once, found a run going — the tick is the retry')
 })
 
 test('a trader sees what moved and what was assessed, not the spend', () => {
