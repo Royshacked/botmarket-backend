@@ -38,7 +38,7 @@ function rig(over = {}) {
         liveSymbols: async () => new Set(),
         enqueue: async (row) => { rows.push({ id: `rq_${row.symbol}`, status: 'queued', created_at: new Date(NOW).toISOString(), ...row }); return { ok: true } },
         reject: async (id, reason) => { rejects.push([id, reason]); const r = rows.find(x => x.id === id); if (r) r.status = 'rejected' },
-        listQueue: async (q) => rows.filter(r => (!q.source || r.source === q.source) && (!q.status || r.status === q.status)
+        listQueue: async (q) => rows.filter(r => (!q.source || r.source === q.source) && (!q.status || [q.status].flat().includes(r.status))
             && (!q.symbols || q.symbols.includes(r.symbol))),
         requeueStale: async () => ({ ok: true }),
         startRun: async (o) => { starts.push(o); return { ok: true, run: { id: 'run' } } },
@@ -55,6 +55,18 @@ test('#2 earlier days\' waiting names are expired by the next pick-up — they n
     rows.push(hotRow('OLD', '2026-10-22'), hotRow('LEGACY', '2026-10-22', { context: { hotlist: true } }))
     await resume(DAY, deps)
     assert.deepEqual(rejects.map(r => r[1]), ['expired', 'expired'])
+})
+
+// 2026-10-28: an empty OpenRouter balance left every refused run's name claimed — `in_research` with a reason — and the
+// expiry read `queued` only: 60 names blocked on prod, for good.
+test('earlier days\' claimed names are expired too — except the one a run is on now', async () => {
+    const { rows, rejects, deps } = rig({ board: async () => ({ ...BOARD, research_queued_at: 'x' }),
+        getRun: () => ({ status: 'running', current: 'LIVE' }) })
+    rows.push(hotRow('STUCK', '2026-10-22', { status: 'in_research', reason: 'failed' }), hotRow('LIVE', '2026-10-22', { status: 'in_research' }),
+        hotRow('WAIT', '2026-10-22'), hotRow('TODAY', DAY, { status: 'in_research', reason: 'failed' }), hotRow('DONE', '2026-10-22', { status: 'done' }))
+    await resume(DAY, deps)
+    assert.deepEqual(rejects.map(r => r[0]).sort(), ['rq_STUCK_2026-10-22', 'rq_WAIT_2026-10-22'])
+    assert.ok(rejects.every(r => r[1] === 'expired'))
 })
 
 test('#4 a catalyst row and a coverage row for the same name are both kept; a second of the same kind is the duplicate', async () => {

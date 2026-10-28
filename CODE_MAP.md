@@ -844,7 +844,9 @@ services/
                             the coverage. ONE run per process; onRunSettled(fn) is how sleeveSource
                             learns a run ended (and chains the next when its names were queued after
                             the run listed the queue). The abort controller is cleared only if still
-                            ours — a run chained from a listener must stay stoppable
+                            ours — a run chained from a listener must stay stoppable. An ACCOUNT refusal
+                            (isRunFatal: no credit, bad key) aborts the run and puts the name back in line
+                            (2026-10-28; scripts/requeue-refused-claims.mjs freed the ones stranded before)
   houseArtifact.repo.js     The write pipe under the two HOUSE ARTIFACTS (coverage, industry_view) — a standing
                             view with no owner, kept as a publication log. revise(id, $set, revision)
                             prepends the revision and sets the patched fields atomically; a $set carrying

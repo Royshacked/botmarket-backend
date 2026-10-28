@@ -11,7 +11,7 @@ import { startRun, stopRun, getRun, researchOpening, requeueStalled, isRunFatal 
 // status leaves `running`. The stubs resolve on the microtask queue, so a handful of ticks is plenty.
 
 function makeDeps({ queued = [], covered = [], answers = {}, initiate } = {}) {
-    const calls = { started: [], done: [], rejected: [], researched: [], initiated: [], requeued: [] }
+    const calls = { started: [], done: [], rejected: [], researched: [], initiated: [], requeued: [], backInLine: [] }
     return {
         calls,
         listQueue:      async () => queued,
@@ -21,6 +21,7 @@ function makeDeps({ queued = [], covered = [], answers = {}, initiate } = {}) {
         startResearch:  async (id) => { calls.started.push(id); return { ok: true } },
         markDone:       async (id) => { calls.done.push(id); return { ok: true } },
         reject:         async (id, reason) => { calls.rejected.push([id, reason]); return { ok: true } },
+        requeue:        async (id) => { calls.backInLine.push(id); return { ok: true } },
         research:       async ({ symbol, opening }) => {
             calls.researched.push({ symbol, opening })
             const a = answers[symbol]
@@ -161,7 +162,16 @@ test('researchRun: an account-level refusal aborts the run on the first name, no
     assert.match(run.error, /credit balance/)
     assert.deepEqual(d.calls.researched.map(r => r.symbol), ['AZN'])   // TMO and AMGN never asked
     assert.equal(run.failed, 1); assert.equal(run.position, 1)
-    assert.deepEqual(d.calls.rejected, [])                              // AZN stays in_research
+    assert.deepEqual(d.calls.rejected, [])
+    // The account, not AZN: back in line for the run after the top-up — left claimed, no pick-up ever read it (2026-10-28).
+    assert.deepEqual(d.calls.backInLine, ['rq_AZN'])
+})
+
+test('researchRun: a name-level failure is not put back in line — it keeps its reason for the admin', async () => {
+    const d = makeDeps({ queued: [q('X')], answers: { X: new Error('provider down') } })
+    await startRun({ userId: 'u1' }, d)
+    await settled()
+    assert.deepEqual(d.calls.backInLine, [])
 })
 
 test('researchRun: isRunFatal — billing, auth and permission are; a name-level 400 and a rate limit are not', () => {
@@ -171,6 +181,8 @@ test('researchRun: isRunFatal — billing, auth and permission are; a name-level
     assert.equal(isRunFatal(Object.assign(new Error('x'), { status: 429, error: { error: { type: 'rate_limit_error', message: 'slow down' } } })), false)
     assert.equal(isRunFatal(Object.assign(new Error('400 bad request'), { status: 400, error: { error: { type: 'invalid_request_error', message: 'messages: too long' } } })), false)
     assert.equal(isRunFatal(new Error('provider down')), false)
+    // OpenRouter's no-balance refusal, by its words alone (2026-10-28).
+    assert.equal(isRunFatal(new Error('This request requires more credits, or fewer max_tokens. You requested up to 16000 tokens, but can only afford 12285.')), true)
 })
 
 test('researchRun: requeueStalled works off the queue, not the run — it needs no run at all', async () => {

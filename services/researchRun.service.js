@@ -286,14 +286,19 @@ async function _loop(run, queued, covered, { userId, audience, model, signal, li
             }
         } catch (err) {
             if (run.stop) { await leave({ reason: 'stopped' }); _settle(run, { symbol, outcome: 'stopped', cost_usd: priced() }); break }
-            await leave({ reason: 'failed', detail: _reason(err) })
+            const fatal = isRunFatal(err)
+            // A refusal about the ACCOUNT says nothing about the name: back in line, so the run after the top-up reads
+            // it. Left claimed with a reason, the pick-up never would — every refused run stranded one name, for good
+            // (2026-10-28: an empty OpenRouter balance, 60 names stuck on prod).
+            if (fatal) { await leave(); await Promise.resolve(deps.requeue?.(item.id)).catch(() => null) }
+            else await leave({ reason: 'failed', detail: _reason(err) })
             _settle(run, { symbol, outcome: 'failed', reason: _reason(err), cost_usd: priced() })
             run.failed++
             // A refusal that is about the ACCOUNT, not the name — no credit, a bad key, no
             // permission — fails every name after it the same way. The first run hit this at
             // AZN and burned through 22 names in thirty seconds, each "failed" with the same
             // sentence. Stop on the first, and say why on the run.
-            if (isRunFatal(err)) {
+            if (fatal) {
                 run.error = _reason(err)
                 logger.error(LOG, `run aborted at ${symbol}: the API refused the account, not the name`, run.error)
                 break
@@ -323,7 +328,8 @@ export function isRunFatal(err) {
     if (status === 401 || status === 402 || status === 403) return true
     const type = err?.error?.error?.type ?? err?.error?.type
     if (type === 'authentication_error' || type === 'permission_error') return true
-    return /credit balance|billing|api key|authentication/i.test(_reason(err))
+    // "requires more credits": OpenRouter's no-balance sentence (a 402 too, but a streamed error may carry only the text).
+    return /credit balance|requires more credits|billing|api key|authentication/i.test(_reason(err))
 }
 
 /** One line for the row and the log. The SDK's message can be the whole JSON body — keep it short. */
@@ -422,6 +428,7 @@ const _io = {
     markDone:      (id, extra) => researchQueueService.markDone(id, extra),
     reject:        (id, reason, extra) => researchQueueService.reject(id, reason, extra),
     annotate:      (id, o) => researchQueueService.annotate(id, o),
+    requeue:       (id) => researchQueueService.requeue(id),
 
     // The spend of one name (house-research-chain.md step 1). A house run books to the first admin's ledger, like
     // Pythia's week, under its own key and as monitor spend: inside the admin's total, outside their chat ceiling.

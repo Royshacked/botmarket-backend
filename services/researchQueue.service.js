@@ -138,7 +138,7 @@ async function reject(id, reason = null, extra = {}) {
 
 /**
  * Back to the line — in_research → queued. For a claim that produced nothing: a research turn
- * that failed on the account (researchRun.requeueFailed), or one lost to a refresh. Not a
+ * that failed on the account (researchRun, on an isRunFatal refusal), or one lost to a refresh. Not a
  * lifecycle step, a correction; it clears any reason the row carried.
  */
 async function requeue(id) {

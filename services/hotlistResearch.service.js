@@ -187,10 +187,16 @@ export async function afterCheckpoint(result, deps = _deps) {
     }
 }
 
-/** Earlier days' rows still `queued` → rejected as `expired` (their board is old; a waiting row blocks the name). */
-async function _expireOld(day, deps) {
-    const rows = await deps.listQueue({ source: SOURCE, status: 'queued', limit: 500 })
-    const old = (rows ?? []).filter(r => (r.context?.day ?? '') < day)
+/**
+ * Earlier days' rows still waiting — `queued`, or `in_research` that no run is on — → rejected as `expired` (their board
+ * is old; a waiting row blocks the name). The claimed ones too since 2026-10-28: a claim a refused or dead run left
+ * behind was never cleared, and blocked its name for good (60 on prod). The name the run is on now is left to it.
+ */
+export async function _expireOld(day, deps) {
+    const rows = await deps.listQueue({ source: SOURCE, status: WAITING, limit: 500 })
+    const run = await Promise.resolve(deps.getRun?.()).catch(() => null)
+    const busy = run?.status === 'running' ? run.current : null
+    const old = (rows ?? []).filter(r => (r.context?.day ?? '') < day && !(r.status === 'in_research' && r.symbol === busy))
     for (const r of old) await Promise.resolve(deps.reject(r.id, 'expired')).catch(() => null)
     if (old.length) logger.info(LOG, 'earlier days\' names expired', { expired: old.length })
     return old.length
