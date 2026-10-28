@@ -267,6 +267,10 @@ leaves out `still === false` (a desk-covered pick by its pick's mark); `chainLef
 Unknown — no id on an old row, the assessment gone, the read failed — is `still: null` and stays: a name is never
 dropped on a missing read. Nothing is retired: the coverage stays live, in Covered companies ("· no longer called").
 First read on axl_dev: PGR (Swing) and TRV (Long term) off — Property & Casualty Insurance is now `watch`.
+The same day the membership moved to the server: `houseBook.listOf` marks each row `list: 'on' | 'left' | null` (null =
+the desk's own name), the FE follows the mark (its own rule only for an older server), and the Swing / Long term
+TRACK RECORD is over the `on` rows — it had counted the whole horizon's book, the names that left and the desk's
+(axl_dev: Swing 18 → 8, Long term 149 → 15). A list every name has left says so, not "he covered none".
 
 On prod the chain has not run (2026-10-24: 30 old `queued` rows, no chain coverage). It needs `PYTHIA_WEEKLY=true`
 and the engine crons on Render (house-research-chain.md, "As built").

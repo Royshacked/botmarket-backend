@@ -334,8 +334,27 @@ export async function houseBook({ deps = _deps } = {}) {
     }
     const order = (a, b) => (a.origin.source === 'pythia' ? 0 : 1) - (b.origin.source === 'pythia' ? 0 : 1)
         || (b.upside_pct ?? -1e9) - (a.upside_pct ?? -1e9) || a.symbol.localeCompare(b.symbol)
-    for (const b of Object.keys(BOOKS)) { out[b].sort(order); out.record[b] = bookRecord(out[b]) }
+    for (const b of Object.keys(BOOKS)) {
+        out[b].sort(order)
+        for (const r of out[b]) r.list = listOf(r, picks?.[b] ?? [])
+        // The record is the LIST's — the names on it, not the whole horizon's book (2026-10-28: it counted the names
+        // that had left, and the desk's).
+        out.record[b] = bookRecord(out[b].filter(r => r.list === 'on'))
+    }
     return out
+}
+
+/**
+ * Is a book row on its list — Swing / Long term — and if not, did it leave? Pure. ON: the chain sent it (its origin) or
+ * Argus picked it and it was covered (at the desk too), and Pythia still calls it (`still` not false; unknown stays).
+ * LEFT: the same, but she no longer calls it. null: the desk's own name, never on the list. Off the list either way,
+ * the row is still in the book — Covered companies (Roy, 2026-10-28).
+ */
+export function listOf(row, picks = []) {
+    const pick = picks.find(p => p.symbol === row.symbol && ['covered', 'already_covered'].includes(p.state))
+    if (row.origin?.source !== 'pythia' && !pick) return null
+    const still = row.origin?.source === 'pythia' ? row.origin.still : pick.still
+    return still === false ? 'left' : 'on'
 }
 
 // ─── The hand-off to Mentor (Roy, 2026-10-24: "hand off to Mentor — tell Mentor the horizon") ───

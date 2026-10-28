@@ -61,7 +61,9 @@ try {
     await page.waitForSelector('.floor-lists', { timeout: 15000 })
     await page.waitForTimeout(1500)
     await page.locator('.floor-desk__head', { has: page.locator('.floor-desk__label', { hasText: /^Hotlist$/ }) }).click()
-    await page.waitForTimeout(2500)
+    // Wait for the tabs, not a fixed time: on a slow link the in-process reads take seconds (2026-10-28, 4–7 s a read).
+    await page.waitForSelector('.hot-horizons', { timeout: 45000 })
+    await page.waitForTimeout(1000)
 
     // Four tabs (Roy, 2026-10-28): This week · Swing · Long term · Covered companies — no All; opens on This week.
     const tabs = await page.locator('.hot-horizons button').allTextContents()

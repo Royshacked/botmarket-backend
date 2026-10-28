@@ -168,4 +168,19 @@ test('the book marks each chain name and pick with her verdict now; the name sta
     assert.deepEqual([by.KEEP.still, by.DROP.still, by.DROP.verdict_now], [true, false, 'watch'])
     assert.deepEqual(book.picks.swing.map(p => [p.symbol, p.still]).sort(), [['DROP', false], ['KEEP', true]])
     assert.equal(book.picks.swing[0].assessment_id, undefined, 'the id is not sent')
+    assert.deepEqual(book.swing.map(r => [r.symbol, r.list]).sort(), [['DROP', 'left'], ['KEEP', 'on']])
+    assert.equal(book.record.swing.n, 1, 'the record is the list\'s: the name that left is not in it')
+})
+
+test('on the list: the chain\'s names and the picks it covered, while Pythia still calls them; the desk\'s never', async () => {
+    const { listOf } = await import('../../services/houseBook.service.js')
+    const picks = [{ symbol: 'PRE', state: 'already_covered', still: true }, { symbol: 'GON', state: 'already_covered', still: false },
+        { symbol: 'PSS', state: 'passed', still: true }]
+    assert.equal(listOf({ symbol: 'CHN', origin: { source: 'pythia', still: true } }, picks), 'on')
+    assert.equal(listOf({ symbol: 'UNK', origin: { source: 'pythia', still: null } }, picks), 'on', 'unknown stays')
+    assert.equal(listOf({ symbol: 'LFT', origin: { source: 'pythia', still: false } }, picks), 'left')
+    assert.equal(listOf({ symbol: 'PRE', origin: { source: 'desk' } }, picks), 'on', 'picked, covered at the desk')
+    assert.equal(listOf({ symbol: 'GON', origin: { source: 'desk' } }, picks), 'left')
+    assert.equal(listOf({ symbol: 'PSS', origin: { source: 'desk' } }, picks), null, 'a pass is not a survivor')
+    assert.equal(listOf({ symbol: 'DSK', origin: { source: 'desk' } }, picks), null)
 })
