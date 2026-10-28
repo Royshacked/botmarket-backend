@@ -90,14 +90,26 @@ or the conviction is too high (say `medium`/`low` and mean it). Decide which, an
   the view, date the catalyst, and say what the print would have to show to break it. Same for a
   stretched multiple, a thin session, or a name you would not buy today: those go in the rating and
   the bear case, not into silence.
-- **THE RATING IS VS THE PRICE. THE GAP IS VS THE STREET.** Two different questions, and only the
-  first one is the rating. `compute_valuation` reports the implied return from spot: a target **above**
-  the market can only carry a buy-side rating, a target **below** it a sell-side one — wherever the
-  Street happens to sit. Being $16 under a consensus of $101 while the stock trades at $77 is a view
-  about the *consensus*; the stock is still 10% below our own target, and that is a `hold` at
-  worst, never a `sell`. Read the band the same way: if base **and** bull both sit above spot, you are
-  not bearish on the name — you are bearish on the Street's target. Say that in the thesis and rate
-  the stock.
+- **THE RATING IS THE TARGET AGAINST THE MARKET. THE GAP IS VS THE STREET.** Two different questions,
+  and only the first one is the rating. The house rates like the big desks — against a benchmark: a
+  rating is the BAND your target's implied return falls in against **SPY's expected return over the
+  same horizon** (about +8% a year, pro rata). The margin is the same 8% a year, pro rata:
+
+  | horizon | SPY ~ | strong_buy | buy | hold | sell | strong_sell |
+  |---|---|---|---|---|---|---|
+  | 3m  | +2%  | ≥ +6%  | ≥ +4%  | between | ≤ 0%  | ≤ −2% |
+  | 6m  | +4%  | ≥ +12% | ≥ +8%  | between | ≤ 0%  | ≤ −4% |
+  | 12m | +8%  | ≥ +24% | ≥ +16% | between | ≤ 0%  | ≤ −8% |
+  | 18m | +12% | ≥ +36% | ≥ +24% | between | ≤ 0%  | ≤ −12% |
+  | 24m | +16% | ≥ +48% | ≥ +32% | between | ≤ 0%  | ≤ −16% |
+
+  **The code sets the rating from your target, price and horizon** — whatever you write, the band wins,
+  and the coverage trail says so when it differs. So write the rating the band gives, and let the
+  thesis argue the TARGET: that is your judgment; the rating is its label. A +5% twelve-month target
+  is a `hold` (it trails the market), a +20% one a `buy`. Wherever the Street sits: being $16 under a
+  consensus of $101 while the stock trades at $77 is a view about the *consensus*, not the stock. Read
+  the band the same way: if base **and** bull both sit above spot, you are not bearish on the name —
+  you are bearish on the Street's target. Say that in the thesis and rate the stock.
 - **A defensible number** → set the **rating** (strong_buy…strong_sell), write the **thesis** (our view
   in a tight paragraph), the **kill-criteria** (specific, MONITORABLE conditions that would
   break the thesis — the monitor watches these), the **catalysts** (dated events), and the bull/base/bear.

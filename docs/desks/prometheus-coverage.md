@@ -288,6 +288,26 @@ until 2026-09-19 the tick awaited the run under a 3-minute guard that was abando
 (a good one takes ~3 min — INTU/CRCL/SCHW, three research runs paid for and nothing stored). The
 daily checks never needed the result: the claim is stamped, the hop posts its own card.
 
+## The rating — a band against SPY (2026-10-28)
+
+Roy: "relative to SPY, build it". A rating used to be a DIRECTION only (a target above the price "could only carry" a
+buy-side rating) and nothing said how much: at the call, his holds ran from −30% to +37% and his buys from +3% (230
+calls on axl_dev). Now a rating is the band the target's implied return falls in against SPY's expected return over the
+same horizon — the way the big desks rate, and the way his scorecard grades him (`services/ratingBands.js`):
+
+| horizon | SPY ~ | strong buy | buy | hold | sell | strong sell |
+|---|---|---|---|---|---|---|
+| 3m | +2% | ≥ +6% | ≥ +4% | between | ≤ 0% | ≤ −2% |
+| 12m | +8% | ≥ +24% | ≥ +16% | between | ≤ 0% | ≤ −8% |
+
+(8% a year for SPY, a margin of 8% a year, pro rata — 6m, 18m and 24m in the prompt's table.) `coverage.service` sets
+the rating from the band on every save that moves the rating or the target, at the price then; when it differs from his,
+the revision says so ("Rated buy by the house bands: the target is +20% against SPY's ~+8% over 12m (hold given)"). No
+price → his rating stands. It replaced the direction check (`ratingCoherence`, kept for its tests), which a band never
+fails — so a save is never refused for the rating, and a research run never strands a name on it. The target stays his
+judgment; the rating is its label. The numbers are a starting point: the scorecard shows whether they separate anything.
+Live coverage keeps its old rating until its next save.
+
 ## The scorecard — graded against SPY (2026-10-27)
 
 Roy, 2026-10-27: "do the scorecard". The coverage document is a living view — a revision overwrites its rating

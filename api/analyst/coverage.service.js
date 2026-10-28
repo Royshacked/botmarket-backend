@@ -19,6 +19,7 @@ import { logger }          from '../../services/logger.service.js'
 import { cleanConviction } from '../../services/conviction.util.js'
 import { toNum }           from '../../services/format.util.js'
 import { HORIZONS, DEFAULT_HORIZON, openWindow, normalizeHorizon } from '../../services/forecastClock.js'
+import { ratingBand } from '../../services/ratingBands.js'
 import { normalizeSector, normalizeIndustry }  from '../../services/entity/vocabulary.js'
 import { newRevision, diffFields } from '../../services/revisionTrail.js'
 
@@ -168,11 +169,23 @@ const _io = {
 }
 export function _setCoverageIO(io) { Object.assign(_io, io) }
 
-async function _checkCoherence(doc, io = _io) {
-    const rating = doc?.rating
-    if (!BULLISH_RATINGS.has(rating) && !BEARISH_RATINGS.has(rating)) return { ok: true }
-    if (_num(doc?.price_target?.value) === null) return { ok: true }
-    return ratingCoherence({ rating, price_target: doc.price_target, price: await io.getPrice(doc.symbol) })
+/**
+ * THE HOUSE'S RATING (2026-10-28, services/ratingBands): the band the price target falls in against SPY over its
+ * horizon → `{ band, from }` (`from` — the rating Prometheus wrote, when the band differs), or null when there is no
+ * target or no price (his rating stands then). The rating is the BAND, not a direction he picks: before it his holds
+ * ran from −30% to +37% at the call. It replaces the old direction check (ratingCoherence), which a band never fails.
+ */
+async function _houseRating(doc, io = _io) {
+    if (_num(doc?.price_target?.value) === null) return null
+    const band = ratingBand({ target: doc.price_target.value, price: await io.getPrice(doc.symbol), horizon: doc.price_target.horizon })
+    if (!band) return null
+    return { band, from: band.rating !== doc.rating ? (doc.rating ?? null) : undefined }
+}
+
+/** What a re-rating says on the revision. Pure. */
+export function houseRatingNote({ band, from } = {}) {
+    if (!band || from === undefined) return null
+    return `Rated ${band.rating.replace('_', ' ')} by the house bands: the target is ${band.implied_pct > 0 ? '+' : ''}${band.implied_pct}% against SPY's ~+${band.market_pct}% over ${band.horizon} (${from ? `${from.replace('_', ' ')} given` : 'no rating given'})`
 }
 
 export async function _plausibilityFlags(doc, io = _io) {
@@ -357,14 +370,14 @@ async function initiateCoverage(raw) {
         if (existing) return { ok: false, reason: 'already_covered', id: existing.id }
 
         const doc = await _withTaxonomy(normalizeCoverage(raw), symbol)
-        const coherent = await _checkCoherence(doc)
-        if (!coherent.ok) {
-            logger.warn(LOG, 'coverage REJECTED — rating contradicts target', { symbol, rating: doc.rating, pt: doc.price_target?.value, detail: coherent.detail })
-            return coherent
-        }
+        const house = await _houseRating(doc)
+        if (house) doc.rating = house.band.rating
+        const rerated = houseRatingNote(house ?? {})
+        if (rerated) logger.info(LOG, 'coverage RE-RATED by the house bands', { symbol, from: house.from, to: house.band.rating, implied: house.band.implied_pct })
         doc.flags = await _plausibilityFlags(doc)
         if (doc.flags.length) logger.warn(LOG, 'coverage FLAGGED — implausible, stored anyway', { symbol, codes: doc.flags.map(f => f.code) })
-        doc.revisions = [newRevision({ kind: 'initiate', note: _str(raw?.init_note) ?? `Initiated coverage on ${symbol}` })]
+        const initNote = _str(raw?.init_note) ?? `Initiated coverage on ${symbol}`
+        doc.revisions = [newRevision({ kind: 'initiate', note: rerated ? `${initNote}. ${rerated}` : initNote })]
         await db.collection(COLLECTION).insertOne({ ...doc })
         logger.info(LOG, 'coverage initiated', { id: doc.id, symbol, sector: doc.sector, industry: doc.industry })
         _logCall(doc, null)
@@ -524,11 +537,14 @@ async function updateCoverage(id, patch = {}) {
     if ('price_target' in p) p.price_target = keepClock(cur.price_target, p.price_target)
     const merged = normalizeCoverage({ ...cur, ...p, id: cur.id, symbol: cur.symbol, created_at: cur.created_at, revisions: cur.revisions })
 
+    // The house's rating, whenever the rating or the target moves — written into the patch so the update saves it.
+    let rerated = null
     if ('rating' in p || 'price_target' in p) {
-        const coherent = await _checkCoherence(merged)
-        if (!coherent.ok) {
-            logger.warn(LOG, 'coverage update REJECTED — rating contradicts target', { id, symbol: merged.symbol, rating: merged.rating, pt: merged.price_target?.value, detail: coherent.detail })
-            return coherent
+        const house = await _houseRating(merged)
+        if (house) {
+            merged.rating = p.rating = house.band.rating
+            rerated = houseRatingNote(house)
+            if (rerated) logger.info(LOG, 'coverage update RE-RATED by the house bands', { id, symbol: merged.symbol, from: house.from, to: house.band.rating, implied: house.band.implied_pct })
         }
     }
 
@@ -538,7 +554,8 @@ async function updateCoverage(id, patch = {}) {
         if (merged.flags.length) logger.warn(LOG, 'coverage FLAGGED — implausible, stored anyway', { id, symbol: merged.symbol, codes: merged.flags.map(f => f.code) })
     }
 
-    const revision = newRevision({ kind: _str(p.revision_kind) ?? 'update', note: _str(p.revision_note), changed: _diffPlan(cur, merged) })
+    const note = [_str(p.revision_note), rerated].filter(Boolean).join('. ') || null
+    const revision = newRevision({ kind: _str(p.revision_kind) ?? 'update', note, changed: _diffPlan(cur, merged) })
 
     try {
         const res = await _repo.revise(id, _updateSet(p, merged, { flagsRecomputed }), revision)

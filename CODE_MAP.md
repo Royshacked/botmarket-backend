@@ -966,6 +966,9 @@ services/
                             liveRead (a symbol's active read) + readFacts (it as one line) feed Mentor's week
                             hand-off. GET /api/hotlist/reads. markWindows (2026-10-27): every settled read AND pass
                             held to its window's last close vs SPY → `window_mark` — the scorecard's yardstick
+  ratingBands.js            THE HOUSE'S RATING BANDS (2026-10-28): a rating is the band of the target's implied return
+                            against SPY's over its horizon (8% a year, the margin 8% a year, pro rata). coverage.service
+                            sets the rating from it on every save (houseRatingNote on the trail when it differs)
   prometheusCalls.service.js PROMETHEUS'S SCORECARD (2026-10-27): every coverage call (a new rating, target or
                             horizon) FROZEN in `prometheus_calls` when made — coverage.service logs it on initiate /
                             update (loaded lazily: a static import is a cycle via houseBook) — graded vs SPY at
