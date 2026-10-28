@@ -63,10 +63,23 @@ try {
     await page.locator('.floor-desk__head', { has: page.locator('.floor-desk__label', { hasText: /^Hotlist$/ }) }).click()
     await page.waitForTimeout(2500)
 
+    // Four tabs (Roy, 2026-10-28): This week · Swing · Long term · Covered companies — no All; opens on This week.
+    const tabs = await page.locator('.hot-horizons button').allTextContents()
+    check('four tabs, This week first and pressed', tabs.length === 4 && /^This week/.test(tabs[0]) && /^Swing/.test(tabs[1]) && /^Long term/.test(tabs[2]) && /^Covered companies \d+/.test(tabs[3])
+        && await page.locator('.hot-horizons button').first().getAttribute('aria-pressed') === 'true', tabs.join(' | '))
+    await shot(page, '0-this-week')
     await page.getByRole('button', { name: /^Long term \d+/ }).click()
     await page.waitForTimeout(1500)
+    check('Long term is the chain’s lists only — no whole book, no scorecard', await page.getByRole('button', { name: /^All coverage/ }).count() === 0
+        && await page.getByRole('button', { name: 'Prometheus’s scorecard' }).count() === 0)
+    await page.getByRole('button', { name: /^Covered companies \d+/ }).click()
+    await page.waitForTimeout(1500)
+    const covered = await page.locator('.hot-panel tr.hot-row').count()
+    const coveredTab = Number((tabs[3].match(/(\d+)$/) ?? [])[1])
+    check('Covered companies opens on the whole book, both horizons', covered === coveredTab && covered > 0, `${covered} rows, tab says ${coveredTab}`)
+    await shot(page, '0b-covered')
     const btn = page.getByRole('button', { name: 'Prometheus’s scorecard' })
-    check('the Book has a Prometheus’s scorecard view', await btn.count() === 1)
+    check('Covered companies has the scorecard view', await btn.count() === 1)
     await btn.click()
     await page.waitForSelector('.hot-score', { timeout: 10000 })
     await page.waitForTimeout(500)
@@ -82,17 +95,16 @@ try {
     const dim = await page.locator('.hot-score .hot-result--dim').count()
     check('a number under the bar is dim', dim > 0, `${dim} dim cells`)
 
-    // The other book shows the same scorecard — and Back to the list is one click.
-    await page.getByRole('button', { name: /^Swing \d+/ }).click()
-    await page.waitForTimeout(800)
-    await page.getByRole('button', { name: 'Prometheus’s scorecard' }).click()
-    await page.waitForSelector('.hot-score', { timeout: 10000 })
-    await shot(page, '2-swing')
+    // Back to the book is one click; the scorecard asked again on its next opening.
     await page.getByRole('button', { name: /^All coverage \d+/ }).click()
     await page.waitForTimeout(500)
     check('All coverage brings the book back', await page.locator('.hot-score').count() === 0 && await page.locator('.hot-panel tr.hot-row').count() > 0)
+    await page.getByRole('button', { name: 'Prometheus’s scorecard' }).click()
+    await page.waitForSelector('.hot-score', { timeout: 10000 })
     check('the scorecard was asked of the server once per opening', asked === 2, `${asked} requests`)
     // Argus's names read the book's `picks` — the FE service once dropped them, so the list always said "could not be loaded".
+    await page.getByRole('button', { name: /^Swing \d+/ }).click()
+    await page.waitForTimeout(800)
     await page.getByRole('button', { name: /^Argus’s names/ }).click()
     await page.waitForTimeout(500)
     await shot(page, '3-argus-names')

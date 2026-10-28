@@ -297,7 +297,7 @@ horizon, signed by the rating (a sell that fell scores like a buy that rose; hol
 target was reached inside the horizon. A later call supersedes the one before; both keep being graded. Calls from
 before the scorecard are seeded from each document's revision trail (`source: backfill`) and shown apart.
 The catalyst reads he backed are set against the ones he passed on, both held to the window's end (`window_mark`).
-Shown in the Hotlist's Book ("Prometheus's scorecard"); `GET /api/hotlist/scorecard`; graded every 6 h
+Shown in the Hotlist under Covered companies ("Prometheus's scorecard", since 2026-10-28); `GET /api/hotlist/scorecard`; graded every 6 h
 (prometheusScorecard.monitor). Under 20 graded calls a number is shown dim.
 
 **The clock rule now holds** (same day): forecastClock's "reaffirming a call keeps its clock" only worked when

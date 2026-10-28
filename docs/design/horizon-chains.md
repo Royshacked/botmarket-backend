@@ -248,9 +248,16 @@ the whole book. Now:
   scan's `REJECTED_DAYS`), the newest per name, by its verdict's book: `covered` (his rating and target from the book
   row), `passed` (`no_edge` / `horizon_off_book` / `no_read`, in words), `already_covered` (at the desk), `waiting`.
   `picks: null` means the read failed, not that the chain sent nothing.
-- **All coverage**: the live book on that horizon, the desk's names, holds and sells too.
+- ~~**All coverage**: the live book on that horizon~~ — moved to Covered companies (below, 2026-10-28).
 - When the survivors list is empty, it says why: the chain sent nothing yet, names are still waiting for research, or
   he covered none.
+
+**Four tabs (2026-10-28).** Roy: "in hotlist ui = 4 tabs — week / swing / long term / covered companies". The "All"
+tab is gone; the panel opens on **This week**. Swing and Long term keep the chain's two views (Prometheus confirmed ·
+Argus's names). **Covered companies** is the fourth tab: **All coverage** — the whole live book, both horizons, the
+desk's names, holds and sells too (`coveredRows`; a row hands off to Mentor/Argus as the book it sits in) — and
+**Prometheus's scorecard** (prometheus-coverage.md, "The scorecard"). An archived day horizon (Open, Mid-day…) still
+shows as a tab on a past day that has its names; when it empties, the panel falls back to This week.
 
 On prod the chain has not run (2026-10-24: 30 old `queued` rows, no chain coverage). It needs `PYTHIA_WEEKLY=true`
 and the engine crons on Render (house-research-chain.md, "As built").
