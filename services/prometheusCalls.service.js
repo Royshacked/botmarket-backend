@@ -18,6 +18,7 @@ import { randomUUID } from 'crypto'
 import { getDb, stripId } from '../providers/mongodb.provider.js'
 import { getTickerAggregates } from '../providers/candles.provider.js'
 import { addMonths } from './forecastClock.js'
+import { ratingBand } from './ratingBands.js'
 import { closeOn } from './houseBook.service.js'
 import { COLLECTION as READS } from './catalystRead.service.js'
 import { logger } from './logger.service.js'
@@ -145,6 +146,35 @@ export function summarise(xs) {
 }
 
 /**
+ * The band a call fell in THE DAY IT WAS MADE (services/ratingBands — Roy, 2026-10-28: "if I want to see how the
+ * coverages did with the new rating, I need to see it in the scorecard") — its target against its entry price over its
+ * horizon. Call-day facts only: not the relabel the live coverage got later, which is not a call. Null without an entry
+ * price or a target. Pure.
+ */
+export function callBand(call) {
+    return ratingBand({ target: call?.pt, price: call?.entry?.price, horizon: call?.horizon })?.rating ?? null
+}
+
+/**
+ * The calls by their band at the call → `{ band: { '1m': summary, … } }`, each mark signed by the BAND's direction (a
+ * hold's raw vs SPY). How his calls did under the house's ratings, the bands' order. Pure.
+ */
+export function byBand(rows) {
+    const out = {}
+    for (const band of Object.keys(DIRECTION)) {
+        const rs = rows.filter(c => callBand(c) === band)
+        if (!rs.length) continue
+        const dir = DIRECTION[band]
+        const marks = Object.fromEntries(MARKS.map(x => `${x}m`).map(m => [m, summarise(rs.map(c => {
+            const v = c.marks?.[m]?.vs_spy
+            return Number.isFinite(v) ? (dir ? _r2(v * dir) : v) : null
+        }).filter(Number.isFinite))]).filter(([, s]) => s.n))
+        out[band] = marks
+    }
+    return out
+}
+
+/**
  * The coverage calls' record → per `source` (forward / backfill): every mark's summary of `signed` over the directional
  * calls, the holds' raw `vs_spy` apart, by rating, and the targets reached among calls past their horizon. Pure.
  */
@@ -162,6 +192,7 @@ export function coverageRecord(calls) {
             target: { settled: past.length, reached: past.filter(c => c.target_reached).length },
             by_rating: Object.fromEntries(Object.keys(DIRECTION).map(r => [r, rows.filter(c => c.rating === r)]).filter(([, rs]) => rs.length)
                 .map(([r, rs]) => [r, Object.fromEntries(MARKS.map(x => `${x}m`).map(m => [m, summarise(rs.map(c => c.marks?.[m]?.[DIRECTION[r] ? 'signed' : 'vs_spy']).filter(Number.isFinite))]).filter(([, s]) => s.n))])),
+            by_band: byBand(rows),
         }
     }
     return { forward: group(calls.filter(c => c.source === 'forward')), backfill: group(calls.filter(c => c.source === 'backfill')) }
@@ -258,7 +289,7 @@ async function gradeDue(deps = _deps) {
 async function scorecard(deps = _deps) {
     const db = await deps.db()
     const [calls, reads] = await Promise.all([
-        db.collection(COLLECTION).find({}, { projection: { _id: 0, symbol: 1, source: 1, rating: 1, direction: 1, marks: 1, done: 1, target_reached: 1 } }).toArray(),
+        db.collection(COLLECTION).find({}, { projection: { _id: 0, symbol: 1, source: 1, rating: 1, direction: 1, marks: 1, done: 1, target_reached: 1, pt: 1, entry: 1, horizon: 1 } }).toArray(),
         db.collection(READS).find({}, { projection: { _id: 0, status: 1, pass_reason: 1, window_mark: 1 } }).toArray(),
     ])
     return { coverage: coverageRecord(calls), catalyst: catalystRecord(reads), as_of: new Date(deps.now()).toISOString(), min_judge: MIN_JUDGE }

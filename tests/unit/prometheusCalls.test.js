@@ -117,3 +117,18 @@ test('the grader runs both passes', async () => {
     const r = await _tick({ calls: async () => ({ graded: 1 }), windows: async () => ({ marked: 2 }) })
     assert.deepEqual(r, { calls: { graded: 1 }, windows: { marked: 2 } })
 })
+
+// Roy, 2026-10-28: "if I want to see how the coverages did with the new rating, I need to see it in the scorecard".
+test('by the house bands: each call in the band its target fell in THE DAY IT WAS MADE, signed by the band', async () => {
+    const { callBand, byBand } = await import('../../services/prometheusCalls.service.js')
+    const call = (pt, price, vs, horizon = '12m', rating = 'hold') => ({ pt, entry: { price }, horizon, rating, marks: { '1m': { vs_spy: vs } } })
+    assert.equal(callBand(call(130, 100, 0)), 'strong_buy', 'a +30% "hold" was a strong buy by the bands')
+    assert.equal(callBand(call(104.5, 100, 0, '3m')), 'buy')
+    assert.equal(callBand({ pt: 130, horizon: '12m' }), null, 'no entry price yet: no band')
+    const b = byBand([call(130, 100, 3), call(130, 100, -1), call(105, 100, -2), call(90, 100, -4)])
+    assert.deepEqual(Object.keys(b), ['strong_buy', 'hold', 'strong_sell'])
+    assert.deepEqual([b.strong_buy['1m'].n, b.strong_buy['1m'].mean], [2, 1])
+    assert.equal(b.hold['1m'].mean, -2, 'a hold unsigned')
+    assert.equal(b.strong_sell['1m'].mean, 4, 'a sell that lagged scores +')
+    assert.deepEqual(coverageRecord([{ ...call(130, 100, 3), source: 'forward', direction: 0 }]).forward.by_band.strong_buy['1m'].n, 1)
+})
