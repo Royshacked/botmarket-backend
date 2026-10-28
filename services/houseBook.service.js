@@ -20,6 +20,7 @@ import { getDb } from '../providers/mongodb.provider.js'
 import { COLLECTION as COVERAGE } from '../api/analyst/coverage.service.js'
 import { COLLECTION as QUEUE } from './researchQueue.service.js'
 import { COLLECTION as STATS } from './dailyScreener.service.js'
+import { COLLECTION as ASSESSMENTS } from '../api/strategy/industryAssessment.service.js'
 import { getTickerAggregates } from '../providers/candles.provider.js'
 import { fetchLastPrice } from './lastPrice.service.js'
 import { logger } from './logger.service.js'
@@ -100,6 +101,32 @@ export function bookRow(cov, { close = null, name = null, closeDay = null, mark 
     }
 }
 
+/**
+ * STILL CALLED? (Roy, 2026-10-28: "if a name is not relevant anymore to swing or long term — leave it only in covered
+ * companies"). A chain name was sent by Pythia's verdict on its industry or theme; that assessment is one living
+ * document she re-rates. → `{ verdict_now, still }` for a name in `book`: still = her verdict NOW is that book's. Pure.
+ * Unknown — no assessment id on the row, the assessment not found, or the read failed (`verdicts` null) — is
+ * `still: null`, and a name is never dropped on a missing read.
+ */
+export function stillCalled(context, book, verdicts) {
+    const id = context?.assessment_id
+    if (!id || !verdicts?.has(id)) return { verdict_now: null, still: null }
+    const now = verdicts.get(id) ?? null
+    return { verdict_now: now, still: now === book }
+}
+
+/** Pythia's verdict now, per assessment id → Map, or null when the read failed. */
+async function _verdictsNow(db, ids) {
+    if (!ids.length) return new Map()
+    try {
+        const rows = await db.collection(ASSESSMENTS).find({ id: { $in: ids } }, { projection: { _id: 0, id: 1, verdict: 1 } }).toArray()
+        return new Map(rows.map(r => [r.id, r.verdict ?? null]))
+    } catch (err) {
+        logger.warn(LOG, 'Pythia\'s verdicts not read — every chain name stays on its list', { error: err.message })
+        return null
+    }
+}
+
 const _median = (xs) => {
     const s = xs.filter(Number.isFinite).sort((a, b) => a - b)
     if (!s.length) return null
@@ -171,6 +198,7 @@ async function _picks(db, nowMs) {
             subject: r.context?.subject ?? null, kind: r.context?.kind ?? null,
             why: r.context?.argus?.why ?? null, caution: r.context?.argus?.caution ?? null,
             at: r.created_at ?? null,
+            assessment_id: r.context?.assessment_id ?? null,
         })
     }
     return out
@@ -286,13 +314,23 @@ export async function houseBook({ deps = _deps } = {}) {
     // In the background: this read answers with what is kept; the next has the rest.
     const filled = _fill(db, covs, marks, stale, deps)
     if (deps.awaitFill) { await filled; lasts = await _lasts(db, noClose) }
+    // Pythia's verdict now on what sent each chain name (stillCalled): a name she no longer calls for its book leaves
+    // that book's list — it stays in the book itself, Covered companies (Roy, 2026-10-28).
+    const ids = [...new Set([...origins.values(), ...Object.values(picks ?? {}).flat()].map(x => x?.assessment_id).filter(Boolean))]
+    const verdicts = await _verdictsNow(db, ids)
+    for (const [b, list] of Object.entries(picks ?? {})) {
+        for (const p of list) { Object.assign(p, stillCalled(p, b, verdicts)); delete p.assessment_id }
+    }
     // `picks` null = could not be read (the list says so), not "the chain sent nothing".
     const out = { asof: closes.day, today, swing: [], long_term: [], record: {}, picks }
     for (const c of covs) {
         const s = closes.by.get(c.symbol)
         const l = s?.close ? null : lasts.get(c.symbol)
-        out[bookOf(c)].push(bookRow(c, { close: s?.close ?? l?.close ?? null, name: s?.name ?? null, closeDay: s?.close ? closes.day : l?.day ?? null,
-            mark: marks.get(`${c.symbol}|${c.price_target?.set_at ?? ''}`) ?? null, spyNow, origin: origins.get(c.symbol) ?? null, today }))
+        const b = bookOf(c), origin = origins.get(c.symbol) ?? null
+        const row = bookRow(c, { close: s?.close ?? l?.close ?? null, name: s?.name ?? null, closeDay: s?.close ? closes.day : l?.day ?? null,
+            mark: marks.get(`${c.symbol}|${c.price_target?.set_at ?? ''}`) ?? null, spyNow, origin, today })
+        if (origin) Object.assign(row.origin, stillCalled(origin, b, verdicts))
+        out[b].push(row)
     }
     const order = (a, b) => (a.origin.source === 'pythia' ? 0 : 1) - (b.origin.source === 'pythia' ? 0 : 1)
         || (b.upside_pct ?? -1e9) - (a.upside_pct ?? -1e9) || a.symbol.localeCompare(b.symbol)

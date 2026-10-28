@@ -259,6 +259,15 @@ desk's names, holds and sells too (`coveredRows`; a row hands off to Mentor/Argu
 **Prometheus's scorecard** (prometheus-coverage.md, "The scorecard"). An archived day horizon (Open, Mid-day…) still
 shows as a tab on a past day that has its names; when it empties, the panel falls back to This week.
 
+**Off the list when Pythia stops calling it (2026-10-28).** Roy: "if a name is not relevant anymore to swing or long
+term — leave it only in covered companies". Each chain name's research_queue context carries the `assessment_id` that
+sent it; the assessment is one living document she re-rates. `houseBook` reads her verdict now and marks every chain
+row and pick `{ verdict_now, still }` (`stillCalled`: still = her verdict now is that book's). The FE's `chainSurvivors`
+leaves out `still === false` (a desk-covered pick by its pick's mark); `chainLeft` names them in a line on the list.
+Unknown — no id on an old row, the assessment gone, the read failed — is `still: null` and stays: a name is never
+dropped on a missing read. Nothing is retired: the coverage stays live, in Covered companies ("· no longer called").
+First read on axl_dev: PGR (Swing) and TRV (Long term) off — Property & Casualty Insurance is now `watch`.
+
 On prod the chain has not run (2026-10-24: 30 old `queued` rows, no chain coverage). It needs `PYTHIA_WEEKLY=true`
 and the engine crons on Render (house-research-chain.md, "As built").
 

@@ -143,3 +143,29 @@ test("the chain's picks per book: covered, passed (and why), waiting — newest 
     assert.equal(book.picks.swing[0].why, 'the leader')
     assert.equal(book.picks.swing[0].subject, 'Rails')
 })
+
+// Roy, 2026-10-28: "if a name is not relevant anymore to swing or long term — leave it only in covered companies".
+test("still called: Pythia's verdict now on what sent the name — unknown is never 'no'", async () => {
+    const { stillCalled } = await import('../../services/houseBook.service.js')
+    const verdicts = new Map([['ia_rails', 'swing'], ['ia_pc', 'watch'], ['ia_blank', null]])
+    assert.deepEqual(stillCalled({ assessment_id: 'ia_rails' }, 'swing', verdicts), { verdict_now: 'swing', still: true })
+    assert.deepEqual(stillCalled({ assessment_id: 'ia_pc' }, 'swing', verdicts), { verdict_now: 'watch', still: false })
+    assert.deepEqual(stillCalled({ assessment_id: 'ia_rails' }, 'long_term', verdicts), { verdict_now: 'swing', still: false }, 'called, but for the other book')
+    assert.deepEqual(stillCalled({ assessment_id: 'ia_gone' }, 'swing', verdicts), { verdict_now: null, still: null }, 'not found')
+    assert.deepEqual(stillCalled({}, 'swing', verdicts), { verdict_now: null, still: null }, 'an old row with no id')
+    assert.deepEqual(stillCalled({ assessment_id: 'ia_pc' }, 'swing', null), { verdict_now: null, still: null }, 'the read failed')
+})
+
+test('the book marks each chain name and pick with her verdict now; the name stays in the book', async () => {
+    const { db, rows } = memDb()
+    rows('coverage').push(cov('KEEP', '6m'), cov('DROP', '6m'))
+    rows('research_queue').push(
+        { symbol: 'KEEP', source: 'pythia', status: 'done', created_at: `${TODAY}T10:00:00.000Z`, updated_at: '2026-10-20', context: { subject: 'Rails', verdict: 'swing', assessment_id: 'ia_rails' } },
+        { symbol: 'DROP', source: 'pythia', status: 'done', created_at: `${TODAY}T10:00:00.000Z`, updated_at: '2026-10-20', context: { subject: 'P&C', verdict: 'swing', assessment_id: 'ia_pc' } })
+    rows('industry_assessment').push({ id: 'ia_rails', verdict: 'swing' }, { id: 'ia_pc', verdict: 'watch' })
+    const book = await houseBook({ deps: { db: async () => db, now: () => Date.parse(`${TODAY}T15:00:00Z`), price: async () => null, bars: async () => null } })
+    const by = Object.fromEntries(book.swing.map(r => [r.symbol, r.origin]))
+    assert.deepEqual([by.KEEP.still, by.DROP.still, by.DROP.verdict_now], [true, false, 'watch'])
+    assert.deepEqual(book.picks.swing.map(p => [p.symbol, p.still]).sort(), [['DROP', false], ['KEEP', true]])
+    assert.equal(book.picks.swing[0].assessment_id, undefined, 'the id is not sent')
+})

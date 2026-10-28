@@ -110,6 +110,14 @@ try {
     // Argus's names read the book's `picks` — the FE service once dropped them, so the list always said "could not be loaded".
     await page.getByRole('button', { name: /^Swing \d+/ }).click()
     await page.waitForTimeout(800)
+    // A name Pythia no longer calls swing is off the list, named in the note — and still in Covered companies (2026-10-28).
+    const book = await houseBook()
+    const gone = book.swing.filter(r => r.origin?.source === 'pythia' && r.origin.still === false).map(r => r.symbol)
+    const swingRows = await page.locator('.hot-panel tr.hot-row').evaluateAll(trs => trs.map(t => t.dataset.symbol))
+    const note = await page.locator('.hot-note', { hasText: 'Off this list' }).textContent().catch(() => '')
+    check('names Pythia no longer calls are off Swing and named in its note', gone.every(s => !swingRows.includes(s) && note.includes(s)) && (gone.length === 0 || note !== ''),
+        `${gone.join(', ') || 'none'} — ${note.slice(0, 120)}`)
+    await shot(page, '2b-swing-left')
     await page.getByRole('button', { name: /^Argus’s names/ }).click()
     await page.waitForTimeout(500)
     await shot(page, '3-argus-names')
