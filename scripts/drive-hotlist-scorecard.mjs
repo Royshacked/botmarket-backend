@@ -46,6 +46,13 @@ try {
                 : await svc.todayHotlist({ day: url.searchParams.get('day') })
         return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) })
     })
+    // THE OWNED MARK (2026-10-28): the QA user owns nothing, so its setups list answers with one setup on the book's first
+    // swing name — one per workspace, so whichever the user stands in, the name is "in your setups".
+    const book0 = await houseBook()
+    const ownedSym = book0.swing.find(r => r.list === 'on')?.symbol ?? book0.swing[0]?.symbol
+    await page.route(/\/api\/setups(\?.*)?$/, route => (route.request().method() !== 'GET' ? route.fallback()
+        : route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(['live', 'paper', 'manual'].map(mode =>
+            ({ id: `drive-owned-${mode}`, asset: ownedSym, status: 'looking', direction: 'long', mode }))) })))
     await page.goto(BASE, { waitUntil: 'domcontentloaded' })
     await page.waitForTimeout(2000)
     if (await page.locator('input[type="password"]').count()) {
@@ -85,6 +92,10 @@ try {
     const coveredTab = Number((tabs[3].match(/(\d+)$/) ?? [])[1])
     check('Covered companies opens on the whole book, both horizons', covered === coveredTab && covered > 0, `${covered} rows, tab says ${coveredTab}`)
     await shot(page, '0b-covered')
+    const markOf = (sym) => page.locator(`.hot-panel tr.hot-row[data-symbol="${sym}"] .owned-badge`).textContent().catch(() => '')
+    const marked = await page.locator('.hot-panel .owned-badge').count()
+    check('a name already in the user\'s setups is marked on Covered companies — and only it', /setup/.test(await markOf(ownedSym)) && marked === 1,
+        `${ownedSym}: "${await markOf(ownedSym)}", ${marked} marked`)
     const btn = page.getByRole('button', { name: 'Prometheus’s scorecard' })
     check('Covered companies has the scorecard view', await btn.count() === 1)
     await btn.click()
