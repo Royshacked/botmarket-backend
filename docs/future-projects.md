@@ -56,3 +56,32 @@ To decide when designed:
   and the changed one are both kept (trust-gaps-todo §1 — the thesis must not be rewritten in place).
 - The user's say: a proposal card to confirm, or applied and reported, per workspace (live vs
   paper/manual).
+
+## 5. Test a pattern on one ticker's history — with the lab we built
+
+Roy (2026-10-29): "the ML we have built — can we use it to check a certain pattern in one ticker,
+historically?" E.g. "NVDA after a 3-day pullback into earnings", "XOM when oil gaps up".
+
+What exists (`docs/design/screener-lab.md`):
+- **The trade and its cost** — `screenerLab` `trade`: a pattern's entry and exit, net vs SPY after
+  cost; the 5-session block ranges; the luck check (shuffle the outcomes, the real result must
+  clear the 95th percentile).
+- **The facts per trade** — `services/runupModel.service.js` (40 facts known before the entry:
+  the tape, the report, short interest, dark pool, insiders, the sector's season, the regime).
+- **The model** — `scripts/lab-runup-ml.py` (LightGBM + logistic, walk-forward, a held-out year).
+- **The price history** — the lab's caches and the engine's daily prices (Parquet, 2018 →).
+
+The catch, to design around: **one ticker has too few events for the model.** Eight years of
+one stock is ~30 earnings reports, or a few dozen pullbacks — the model needs hundreds (≥ 200 a
+leaf). So for one ticker the right tool is the lab's TEST, not its model:
+- An event study: find every time the pattern happened, the move after it vs SPY (and vs the
+  stock's own ordinary days), the block range, the luck check — "it happened 23 times, up 15,
+  median +2.1% vs SPY over 5 days, range −0.4 … +4.0, not distinguishable from luck".
+- Where the model fits: train it across ALL names on the pattern, then read its score for this
+  ticker — "does the pattern work in general, and does this name look like the ones it worked on".
+
+Shape when built: a desk tool (Mentor's or Argus's — "has this worked on this name before?")
+that runs the event study on demand and answers in words with the numbers; the pattern described in
+plain language and turned into the lab's entry/exit rules. Open: who writes the pattern into rules
+(the agent, checked by the user), and the guard against testing ten patterns and keeping the one
+that looked good (the luck check per pattern, and say how many were tried).
