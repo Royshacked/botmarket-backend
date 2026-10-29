@@ -80,8 +80,54 @@ leaf). So for one ticker the right tool is the lab's TEST, not its model:
 - Where the model fits: train it across ALL names on the pattern, then read its score for this
   ticker — "does the pattern work in general, and does this name look like the ones it worked on".
 
-Shape when built: a desk tool (Mentor's or Argus's — "has this worked on this name before?")
-that runs the event study on demand and answers in words with the numbers; the pattern described in
-plain language and turned into the lab's entry/exit rules. Open: who writes the pattern into rules
-(the agent, checked by the user), and the guard against testing ten patterns and keeping the one
-that looked good (the luck check per pattern, and say how many were tried).
+### How it works with Mentor (Roy, 2026-10-29)
+
+**Mentor calls it as a TOOL** — `test_signal`, like `get_earnings`. The rule: the agent turns words
+into a signal; CODE computes the answer — the model never estimates a number.
+
+Three ways in:
+1. **His own plan, checked.** User: "I want to swing TSLA." Mentor builds the plan (say: buy the
+   pullback to the 50-day, target the last high, ~3 weeks), then tests that entry on TSLA's history
+   before handing it back — "19 times since 2018, 12 up, median +3.4% vs SPY over 15 sessions,
+   range −1.0 … +7.5; all names +0.6%; passes the luck check; your −8% stop would have cut 4 of 19
+   winners, −12% kept 18." The verdict changes the plan (keep it / a different entry / size down /
+   a wider stop), and the numbers go on the setup card.
+2. **The user's idea, tested.** "Do false breaks work as an entry on TSLA?" "What about the
+   50-day?" Mentor pins the definition down first ("a close over the 20-day high, back under within
+   2 sessions — right?"), runs it, and answers: "31 since 2018; 5 days later lower 55% of the time;
+   median −0.8% vs TSLA's ordinary 5 days, range −2.9 … +1.1 — no different from an ordinary day."
+3. **Mentor offers his own.** "Want me to see what has worked on TSLA?" He runs a FIXED MENU — every
+   entry signal in the set, with its standard settings, the same menu for every name — and shows
+   the few that stood out, each with its range and the luck check made for the whole menu
+   ("12 tried; the best, the 50-day touch, +1.9% vs ordinary days — one that good turns up by luck
+   1 time in 4 among 12"). A fixed menu is MORE honest than trying entries one by one: the number
+   of tries is known in advance, not grown until something looks good. He can also offer the
+   CONDITIONS that made a signal work on this name ("it worked when SPY was over its 200-day, not
+   under") — the same luck check, the conditions counted as tries.
+
+**The baseline is the stock's ORDINARY day**, not zero and not only SPY: TSLA mostly rose, so "it
+went up after the signal" proves nothing. Every result is against TSLA's other days, against SPY
+over the same days, and against the same signal on all names (a TSLA thing or a general one?).
+
+**The tool's contract:**
+- In: `{ symbol, signal: { kind, ...settings }, direction, horizons: [1, 5, 10, 20], since }`.
+  `kind` from a fixed set — false break, moving-average touch / cross, gap, pullback, new high,
+  the earnings run-up; a few settings each. Not in the set → Mentor says it cannot test that yet.
+- Out: `{ events, dates, by_horizon: { median_vs_ordinary, up_share, range }, all_names, luck,
+  tries_this_session, path (the typical move after — how far against, how far for), worst }`.
+- Under ~15 events → "too few to judge", not a verdict.
+- The tool counts the session's tries itself, and Mentor must say the count.
+
+**Where each part runs:**
+- One ticker's test: the backend, on demand — one FMP call for its full adjusted history, then
+  the event study (seconds).
+- The all-names number per signal: an engine job, weekly — it needs every name's history (the
+  Parquet on the laptop; Render has only a recent window).
+- The ML score ("does TSLA look like the names it worked on?"): an engine job — the model is
+  Python (LightGBM); the tool reads the stored score, or says there is none.
+
+**Later:** Talos uses the tested path as his yardstick ("day 10 — behind this pattern's usual
+path") — project 4.
+
+**Limits Mentor states:** few events → wide ranges; TSLA of 2019 is not TSLA today; adjusted
+prices and costs assumed; past is not a promise.
