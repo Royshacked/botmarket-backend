@@ -45,9 +45,7 @@ const widths = (page) => page.evaluate(() => ({
 
 async function pass(admin) {
     const who = admin ? 'admin' : 'user'
-    // The phone's menu has no way to the lists (2026-10-29) — only an "Open the hotlist" card in the chat, when Axl offers
-    // one: the Hotlist is opened from the lists column at a desktop width, and the window narrowed to the phone's.
-    const ctx = await browser.newContext({ viewport: { width: 1600, height: 900 }, deviceScaleFactor: 2,
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2,
         ...(existsSync(sessionFile) ? { storageState: sessionFile } : {}) })
     const page = lastPage = await ctx.newPage()
     page.on('pageerror', e => errors.push(`${who}: ${e.message}`))
@@ -81,12 +79,24 @@ async function pass(admin) {
     }
     await page.evaluate(() => localStorage.setItem('design', 'floor'))
     await page.reload({ waitUntil: 'domcontentloaded' })
-    // A phone hides the lists column: the Hotlist opens from its own button.
-    await page.waitForSelector('.floor-lists', { timeout: 15000 })
-    await page.locator('.floor-desk__head', { has: page.locator('.floor-desk__label', { hasText: /^Hotlist$/ }) }).click()
+    // INFO while chatting (Roy, 2026-10-29): the chat header's Info opens over the chat — who you are talking to, the desks.
+    await page.getByRole('button', { name: 'Info', exact: true }).click({ timeout: 20000 })
+    const info = page.getByRole('dialog', { name: 'Info' })
+    await info.waitFor({ timeout: 5000 })
+    const infoText = await info.textContent()
+    await page.screenshot({ path: `${OUT}/hotlist-phone-${who}-info.png` })
+    check(`${who}: the chat's Info — who you are talking to, and the desks`, /Talking with/.test(infoText) && /Trading Desk/.test(infoText)
+        && /Strategy Desk/.test(infoText) === admin, infoText.slice(0, 80))
+    await info.getByRole('button', { name: 'Close' }).click()
+    // THE LISTS in the menu (Roy, 2026-10-29): a phone hides the lists column — the hamburger lists them.
+    await page.getByRole('button', { name: 'Open menu' }).click()
+    const lists = page.getByRole('navigation', { name: 'Lists' })
+    await lists.waitFor({ timeout: 5000 })
+    const names = await lists.locator('button').allTextContents()
+    await page.screenshot({ path: `${OUT}/hotlist-phone-${who}-menu.png` })
+    check(`${who}: the menu lists the lists`, names.includes('Positions') && names.includes('Hotlist') && names.includes('Research queue') === admin, names.join(' | '))
+    await lists.getByRole('button', { name: 'Hotlist' }).click()
     await page.waitForSelector('.hot-horizons', { timeout: 150000 })
-    await page.setViewportSize({ width: 390, height: 844 })
-    await page.waitForSelector('.hot-horizons', { timeout: 15000 })
     await page.waitForTimeout(1000)
 
     const tabs = page.locator('.hot-horizons button')
