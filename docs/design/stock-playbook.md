@@ -78,6 +78,46 @@ To be TESTED, a factor needs its history stamped with the date it became KNOWN, 
 - **A tool for Mentor**, not a new desk.
 - New work branches from main.
 
+## The trade rules — no setups, price areas (Roy, 2026-10-30)
+
+Roy's approach: the daily chart, fundamentals and news say buy / sell / none; the STOP says when the stock becomes a sell;
+the risk limit, the stop and the target then give the entry prices. No setup menu — a price area, and strength.
+Described for longs; shorts are the mirror.
+
+**The stop — below the professionals' stops.** When a sell phase ends the professionals buy first, then a gradient of
+less informed money higher up, each with stops under it. The stop goes under the deepest layer that still means "the
+turn is alive": below the BASE that followed the last sell phase (its low, and any spring — a brief break below the range
+that closes back inside), plus a buffer learned per stock (how far this stock usually pokes through a level before it
+reverses). A price not visited for a while; price there means the professionals stopped defending — the stock is "too
+cheap", a sell. Prior art: Wyckoff accumulation (selling climax → base → spring), change of character, supply/demand
+zones, Weinstein's stage base, Minervini's base low.
+- **One stop** to start, and test it (Roy). No separate hard stop yet.
+- Measured on: the low of the last sell phase (heavy volume); the base after it and its low; the professionals' cost
+  (the base's volume profile / an anchored VWAP from the low); signs the buying was real (heavy-volume days that hold,
+  dark-pool volume rising, funds adding, shorts covering).
+
+**The target.**
+- Selling overhead: the mirror — just under where the professionals' last DISTRIBUTION began (the base before the last
+  fall), before the crowd's sell orders.
+- At its highs (nothing overhead): a MEASURED MOVE — the current range's height added to the range's high (Roy; the
+  classic range projection).
+
+**The entry — all three:**
+- A. Entry → stop within the risk limit.
+- B. The verdict is buy and the chart shows strength (after a pullback, strength first — no falling knives; already in
+  the area → enter now).
+- C. Reward to risk ≥ 1.5 (an example value).
+
+What C does with a measured-move target: base low L, high H, height h, buffer b — target H + h, stop L − b. R:R ≥ 1.5
+holds only for an entry ≤ (H + h + 1.5(L − b)) / 2.5 — with b = 0.1h, the lower ~74% of the range. Buying the top of the
+range or the breakout fails C (risk ≈ h + b, reward ≈ h): the rules buy in the range, near the professionals' cost.
+
+**Exit:** the stop; the target; or the verdict turns to sell while the trade is not working ("not working" to define).
+**Management:** a tool to cut risk or raise R:R — averaging only inside a fixed total risk to the stop, planned ahead.
+
+**Learned per stock:** the buffer; how often price broke the base low and still rallied (the stop was wrong) vs broke
+down for real; how often the target came before the stop (at 1.5, a hit rate above 40% just breaks even).
+
 ## Pieces to build
 
 1. **Calculation engine** — the profile per timeframe; the playbook tester (a fixed menu of setups, long and short, per
