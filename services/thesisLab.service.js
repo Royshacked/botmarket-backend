@@ -130,7 +130,7 @@ export function play(rows, i, { S, T, E }, o = DEFAULTS, structure = null) {
     return exitDaily(rows, m, entry, from, { S, T }, o)
 }
 
-/** The fixed-level exit on daily bars from session `from` (a gap fills at the open; both levels in one bar → the stop). */
+/** The fixed-level exit on daily bars from session `from` (a gap fills at the open; both levels in one bar → the stop). Still open at the data's end → `mark`, the last close. */
 function exitDaily(rows, m, entry, from, { S, T }, o) {
     for (let x = from; x < rows.length && x <= m + o.maxHold; x++) {
         const b = rows[x], gap = x > m
@@ -140,13 +140,13 @@ function exitDaily(rows, m, entry, from, { S, T }, o) {
         if (b.high >= T) return { m, entry, k: x, exit: T, reason: 'target' }
         if (x === m + o.maxHold) return { m, entry, k: x, exit: b.close, reason: 'time' }
     }
-    return { m, entry, k: null, exit: null, reason: 'open' }
+    return { m, entry, k: null, exit: null, reason: 'open', mark: rows.at(-1).close }
 }
 
 /**
  * TEST 2's exits (Roy, 2026-10-30: half for now · the daily trail · D also). `o.exit`: `'half'` — `o.partial` out at the
  * target, the stop at S until then, the rest's stop the trail after; `'trail'` — no target, the whole position's stop the
- * trail from the entry. `o.timeStop` — the target not reached within that many sessions of the entry → all out at that
+ * trail from the entry; `'two'` (test 2b) — `o.partial` out at the target, the rest at `o.T2`, the stop S throughout. `o.timeStop` — the target not reached within that many sessions of the entry → all out at that
  * close. THE TRAIL: just under each swing low confirmed at or after the entry's session (its low − `buffer` × ATR at its
  * confirming bar), never down, in force from the session after the confirmation. Gaps, both-levels-in-a-bar and
  * `maxHold` as `exitDaily`. `pivots` / `atrs` — the swings and ATR of the same `rows`. → as `exitDaily`, `exit` the
@@ -167,6 +167,12 @@ export function exitManaged(rows, pivots, atrs, m, entry, from, { S, T }, o = DE
             else if (b.high >= T) { hit = true; out = share; got = share * T }
             if (hit && out >= 1) return done(x, T, 'target')
             if (hit) continue
+        } else if (o.exit === 'two') {
+            // Test 2b: the rest out at the second target `o.T2`, the stop still S.
+            if (gap && b.open <= S) return done(x, b.open, 'stop')
+            if (gap && b.open >= o.T2) return done(x, b.open, 'target2')
+            if (b.low <= S) return done(x, S, 'stop')
+            if (b.high >= o.T2) return done(x, o.T2, 'target2')
         } else {
             const why = hit ? 'trail' : trail > S ? 'trail' : 'stop'
             if (gap && b.open <= trail) return done(x, b.open, why)
@@ -175,7 +181,19 @@ export function exitManaged(rows, pivots, atrs, m, entry, from, { S, T }, o = DE
         if (!hit && o.timeStop && x - m >= o.timeStop) return done(x, b.close, 'time')
         if (x === m + o.maxHold) return done(x, b.close, 'time')
     }
-    return { m, entry, k: null, exit: null, reason: 'open', tp: hit }
+    return { m, entry, k: null, exit: null, reason: 'open', tp: hit, mark: got + (1 - out) * rows.at(-1).close }
+}
+
+/**
+ * TEST 2b's second target for a plan signalled at bar `i`. `'swing'` — the lowest swing high confirmed by `i`, within the
+ * `back` sessions before it, over T (the next place sellers took over); none → the measured move T + (T − S). `'r'` — T
+ * plus `mult` × the planned risk (E − S). Pure.
+ */
+export function secondTarget(pivots, i, { S, T, E }, { kind = 'swing', mult = 1, back = 250 } = {}) {
+    if (kind === 'r') return T + mult * (E - S)
+    let best = Infinity
+    for (const p of pivots) if (p.type === 'H' && p.at <= i && p.j >= i - back && p.price > T && p.price < best) best = p.price
+    return Number.isFinite(best) ? best : T + (T - S)
 }
 
 /** Hourly bars → 4-hour: each session's first four hourly bars, then its rest. `bars` — `[{ day, open, high, low, close }]`. Pure. */

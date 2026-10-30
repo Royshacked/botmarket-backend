@@ -8,6 +8,8 @@
 //   node scripts/lab-thesis.mjs --exits    → test 2: the exit — fixed · half and trail · trail only · half, trail and a
 //                                            time stop, on test 1's signals (→ data/lab/thesis-exits.out.txt); with
 //                                            --control too, on test 1b's (its reversal context shown)
+//   node scripts/lab-thesis.mjs --exits2   → test 2b: half at the target, half at a second target, the stop unchanged
+//                                            (→ data/lab/thesis-exits2.out.txt; --control as above)
 //
 // The variants beside the primary are shown, not for the bar — each is another try.
 
@@ -23,7 +25,8 @@ const { costFor, MIN_ADV, MIN_PRICE } = await import('../services/screenerLab.se
 const { memberOn } = await import('../services/sp500History.service.js')
 
 const CONTROL = process.argv.includes('--control')
-const EXITS = process.argv.includes('--exits')
+const EXITS2 = process.argv.includes('--exits2')
+const EXITS = EXITS2 || process.argv.includes('--exits')
 const TO = '2026-10-26', HELD_OUT = '2025-10-23', WARMUP = 260
 // The members' share of their sessions in the index that have a bar — under it, the ticker is not the company (reused)
 // or FMP lacks it (the same rule as lab-rotation.mjs).
@@ -44,7 +47,7 @@ for (const sym of Object.keys(u.spans)) {
 
 const out = []
 const say = (line = '') => { console.log(line); out.push(line) }
-say(`Thesis test ${EXITS ? `2 (the exit) on test ${CONTROL ? '1b' : '1'}'s signals` : CONTROL ? '1b (buyers in control, any context)' : '1 (the reversal)'} — the S&P 500 point-in-time, ${days[0]} → ${days.at(-1)}, ${covered.length} names covered · held out from ${HELD_OUT}`)
+say(`Thesis test ${EXITS ? `${EXITS2 ? '2b (a second target, the stop unchanged)' : '2 (the exit)'} on test ${CONTROL ? '1b' : '1'}'s signals` : CONTROL ? '1b (buyers in control, any context)' : '1 (the reversal)'} — the S&P 500 point-in-time, ${days[0]} → ${days.at(-1)}, ${covered.length} names covered · held out from ${HELD_OUT}`)
 
 const P = L.DEFAULTS
 const VARIANTS = [
@@ -76,7 +79,14 @@ const EXIT_VARIANTS = [
     { id: 'C trail only', o: { ...P, exit: 'trail' } },
     { id: 'D B + time 20', o: { ...P, exit: 'half', partial: 0.5, timeStop: 20 } },
 ]
-const RUN = EXITS ? EXIT_VARIANTS : VARIANTS
+// TEST 2b (Roy, 2026-10-30: "a second exit without changing the stop") — half at T, half at T2, the stop S throughout.
+const EXIT2_VARIANTS = [
+    { id: 'A fixed', o: P },
+    { id: 'E T2 next sellers', o: { ...P, exit: 'two', partial: 0.5 }, t2: { kind: 'swing' } },
+    { id: 'F T2 = T + 1R', o: { ...P, exit: 'two', partial: 0.5 }, t2: { kind: 'r', mult: 1 } },
+    { id: 'G T2 = T + 2R', o: { ...P, exit: 'two', partial: 0.5 }, t2: { kind: 'r', mult: 2 } },
+]
+const RUN = EXITS2 ? EXIT2_VARIANTS : EXITS ? EXIT_VARIANTS : VARIANTS
 
 /**
  * Every trade of every variant on one side → `Map(variant id → { v, trades, open })`. One NAME at a time — its mirrored
@@ -84,7 +94,7 @@ const RUN = EXITS ? EXIT_VARIANTS : VARIANTS
  * laptop out of memory, 2026-10-30).
  */
 function runSide(side) {
-    const res = new Map(RUN.filter(v => side === 'long' || ['PRIMARY', 'BASELINE', 'R:R 1'].includes(v.id)).map(v => [v.id, { v, trades: [], open: 0 }]))
+    const res = new Map(RUN.filter(v => side === 'long' || ['PRIMARY', 'BASELINE', 'R:R 1'].includes(v.id)).map(v => [v.id, { v, trades: [], open: 0, marked: [] }]))
     for (const sym of covered) {
         const s = data.names.get(sym), rows0 = s.rows, date = s.ind.date, adv = s.ind.adv20
         const rows = side === 'short' ? L.mirror(rows0) : rows0
@@ -101,9 +111,16 @@ function runSide(side) {
                 if (v.regime && !regime.startsWith(v.regime)) continue
                 const p = L.plan(sig, a, v.o)
                 if (!p) continue
-                const t = L.play(rows, i, p, v.o, { pivots: pv, atrs: a })
+                const o = v.t2 ? { ...v.o, T2: L.secondTarget(pv, i, p, v.t2) } : v.o
+                const t = L.play(rows, i, p, o, { pivots: pv, atrs: a })
                 if (!t) continue
-                if (t.reason === 'open') { r.open++; continue }
+                // Still open at the data's end: left out of the first read; valued at the last close in the second.
+                if (t.reason === 'open') {
+                    r.open++
+                    r.marked.push({ sym, day, r: L.inR({ entry: t.entry, exit: t.mark }, p.S, costFor(adv[i]), p.E), win: !!t.tp, reason: 'open',
+                        days: rows.length - 1 - t.m, month: date[t.m].slice(0, 7), regime, held: day >= HELD_OUT, context: sig.context ?? null })
+                    continue
+                }
                 // R on the PLANNED risk (the size is set at the level and kept — Roy, 2026-10-30).
                 r.trades.push({ sym, day, r: L.inR(t, p.S, costFor(adv[i]), p.E), win: t.tp ?? t.reason === 'target', reason: t.reason,
                     days: t.k - t.m, month: date[t.m].slice(0, 7), regime, held: day >= HELD_OUT, context: sig.context ?? null })
@@ -123,7 +140,9 @@ if (EXITS) {
     // Long only: the shorts lost in tests 1 and 1b. The mean days held beside the median — a trail can hold far longer.
     const meanDays = (xs) => (xs.length ? (xs.reduce((s, t) => s + t.days, 0) / xs.length).toFixed(0) : '—')
     say(`\n=== LONG — before ${HELD_OUT} | held out ("hit" = reached the target; mean days held in brackets)`)
-    for (const { v, trades, open } of runSide('long').values()) {
+    const marks = {}
+    for (const { v, trades, open, marked } of runSide('long').values()) {
+        marks[v.id] = [...trades, ...marked]
         const sets = CONTROL ? [['', trades], [' · reversal', trades.filter(t => t.context === 'reversal')]] : [['', trades]]
         for (const [tag, xs] of sets) {
             const pre = xs.filter(t => !t.held), post = xs.filter(t => t.held)
@@ -132,18 +151,26 @@ if (EXITS) {
             say(line(`${v.id}${tag} · held out`, results[`${v.id}${tag}`].post) + ` (${meanDays(post)})` + (open && !tag ? `  (${open} still open, left out)` : ''))
         }
         const by = (k) => trades.filter(t => t.reason === k).length
-        say(`  exits: target ${by('target')} · stop ${by('stop')} · trail ${by('trail')} · time ${by('time')}`)
+        say(`  exits: target ${by('target')} · target2 ${by('target2')} · stop ${by('stop')} · trail ${by('trail')} · time ${by('time')}`)
     }
     const tag = CONTROL ? ' · reversal' : ''
     const A = results[`A fixed${tag}`]
     say(`\n=== THE BAR (per variant${tag}): mean R over A's before AND held out; its 5% end before over A's mean before`)
-    for (const id of ['B half + trail', 'C trail only', 'D B + time 20']) {
+    const IDS = (EXITS2 ? EXIT2_VARIANTS : EXIT_VARIANTS).slice(1).map(v => v.id)
+    for (const id of IDS) {
         const x = results[`${id}${tag}`]
         const checks = [['before: over A', x.pre.meanR > A.pre.meanR], ['held out: over A', x.post.meanR > A.post.meanR], ["the 5% end over A's mean", x.pre.lo > A.pre.meanR]]
         say(`  ${id}: ${checks.map(([k, ok]) => `${ok ? '✓' : '✗'} ${k}`).join(' · ')} → ${checks.every(c => c[1]) ? 'PASS' : 'FAIL'}`)
     }
-    fs.writeFileSync(`data/lab/thesis-exits${CONTROL ? '-control' : ''}.out.txt`, out.join('\n') + '\n')
-    console.log(`→ data/lab/thesis-exits${CONTROL ? '-control' : ''}.out.txt`)
+    say(`\n=== THE SECOND READ: the trades still open at the data's end valued at the last close${tag}`)
+    for (const [id, all] of Object.entries(marks)) {
+        const xs = CONTROL ? all.filter(t => t.context === 'reversal') : all
+        say(line(`${id} · before`, L.summarize(xs.filter(t => !t.held))))
+        say(line(`${id} · held out`, L.summarize(xs.filter(t => t.held))))
+    }
+    const file = `data/lab/thesis-exits${EXITS2 ? '2' : ''}${CONTROL ? '-control' : ''}.out.txt`
+    fs.writeFileSync(file, out.join('\n') + '\n')
+    console.log(`→ ${file}`)
     process.exit(0)
 }
 for (const side of ['long', 'short']) {

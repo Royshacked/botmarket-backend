@@ -392,6 +392,41 @@ On test 1b's reversal context the same: A +0.12 / +0.15, B +0.12 / +0.08, C +0.1
 - **D:** half of the targets are reached after 20 sessions (hit 38% → 19%); cutting them early costs what it saves.
 - **Verdict:** the fixed stop and target stay. The edge is in the entry (the reversal), not in the exit.
 
+## Test 2b — a second target, the stop unchanged (declared 2026-10-30, before the run)
+
+Roy: "do a second exit without changing the stop" — his MTG plan had two (TP1 31.6, TP2 31.9). Half out at the target T
+(test 1's), the other half at a second target T2; the stop stays at S for the whole trade, never moved. Gaps, both
+levels in a bar (→ the stop), 250 sessions → the close: as test 1. Same signals, plans, entries, cost, R on the planned
+risk. `exit: 'two'` in `exitManaged`; `--exits2` in `scripts/lab-thesis.mjs`. Three T2s — three tries:
+
+- **E — the next sellers' level:** the lowest confirmed swing high of the 250 sessions before the signal that is over T
+  (the next place sellers took over); none (T at the highs) → the measured move T + (T − S).
+- **F — T + 1R**, **G — T + 2R** (R = the planned risk E − S): the plain distances, for comparison.
+- **Read and PASS** as test 2 (over A before AND held out; the 5% end before over A's mean), and a second read with the
+  trades still open at the end of the data valued at the last close, all variants (test 2's open-trade bias).
+
+### Test 2b — result (2026-10-30): FAIL by the bar — a small gain per trade, none per day held
+
+On test 1's signals (long, the reversal), mean R per trade (5–95%), mean days held (closed trades):
+
+| Exit | Before | Held out (open left out) | Held out (open at the last close) |
+|---|---|---|---|
+| **A fixed** | **+0.12R** (+0.04 … +0.21) · 23d | +0.14R | **+0.17R** (+0.04 … +0.29) |
+| E T2 the next sellers' level | +0.15R (+0.06 … +0.25) · 32d | +0.07R | +0.19R (+0.08 … +0.30) |
+| F T2 = T + 1R | +0.15R (+0.06 … +0.25) · 35d | +0.09R | +0.19R (+0.08 … +0.30) |
+| G T2 = T + 2R | +0.15R (+0.05 … +0.27) · 46d | −0.01R | +0.21R (+0.10 … +0.31) |
+
+Test 1b's reversal context the same (before A +0.12, E/F/G +0.13 … +0.14; held out at the last close A +0.17, E/F/G
++0.17 … +0.19).
+
+- **The bar fails:** held out with the open trades left out, every T2 is under A — but that read is biased (the trades
+  still riding their second half are left out: A 81 open, E 110, G 136). With them valued at the last close, every T2
+  is a little over A in both periods (+0.02 … +0.04R). No variant's 5% end clears A's mean: the gain is inside the noise.
+- **Per day held, nothing:** A earns +0.12R in 23 days, E +0.15R in 32, G +0.15R in 46 — the extra R is bought with
+  extra time in the trade, about at the same rate.
+- **Verdict:** a second target with the stop unchanged does not hurt and may add a little per trade; it is not an edge.
+  One fixed target stays the rule; a second one (the next sellers' level, E) is a user's choice, not the lens's default.
+
 ## Built (2026-10-30)
 
 - The `thesis` lens (`services/analysisModes.js` MODES) — Mentor's prompt § The thesis lens: the six steps, the setup

@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mirror, atr, swings, reversalSignals, controlSignals, baselineSignals, toFourHour, playIntraday, plan, play, inR, summarize, DEFAULTS } from '../../services/thesisLab.service.js'
+import { mirror, atr, swings, reversalSignals, controlSignals, baselineSignals, toFourHour, playIntraday, plan, play, inR, summarize, secondTarget, DEFAULTS } from '../../services/thesisLab.service.js'
 
 // The THESIS lens's test 1 (Roy, 2026-10-30) — the reversal thesis as fixed rules (docs/design/stock-playbook.md §Test 1).
 
@@ -164,6 +164,30 @@ test('exit B with the whole position at the target is test 1’s fixed exit', ()
         const a = play(rows, 0, P), b = play(rows, 0, P, { ...DEFAULTS, exit: 'half', partial: 1 }, { pivots: [], atrs: ONE })
         assert.deepEqual([b.k, b.exit, b.reason], [a.k, a.exit, a.reason])
     }
+})
+
+// ─── Test 2b: a second target, the stop unchanged ─────────────────────────────────────────────────────────────────────
+
+test('exit two: half at the target, half at the second target, the stop S throughout', () => {
+    const rows = [bar(99), bar(105), bar(112, { h: 115.5 }), bar(100, { l: 95 }), bar(118, { h: 120.5 })]
+    const t = play(rows, 0, P, { ...DEFAULTS, exit: 'two', partial: 0.5, T2: 120 }, { pivots: RUN_PV, atrs: ONE })
+    assert.deepEqual([t.k, t.reason, t.tp, t.exit], [4, 'target2', true, 0.5 * 115 + 0.5 * 120])
+    const back = [bar(99), bar(105), bar(112, { h: 115.5 }), bar(100, { l: 95 }), bar(91, { l: 89 })]
+    const s = play(back, 0, P, { ...DEFAULTS, exit: 'two', partial: 0.5, T2: 120 }, { pivots: RUN_PV, atrs: ONE })
+    assert.deepEqual([s.reason, s.exit], ['stop', 0.5 * 115 + 0.5 * 90], 'the rest’s stop is still S — no trail, no breakeven')
+})
+
+test('secondTarget: the nearest swing high over T known by the signal; none → the measured move; or T + n R', () => {
+    const pv = [{ type: 'H', j: 5, price: 130, at: 7 }, { type: 'H', j: 8, price: 121, at: 9 }, { type: 'H', j: 9, price: 119, at: 30 }, { type: 'H', j: 3, price: 110, at: 4 }]
+    assert.equal(secondTarget(pv, 20, P), 121, 'not 119 — confirmed after the signal; not 110 — under T')
+    assert.equal(secondTarget([], 20, P), 115 + 25)
+    assert.equal(secondTarget(pv, 20, P, { kind: 'r', mult: 2 }), 115 + 20)
+})
+
+test('a trade still open at the data’s end is marked at the last close, the half already out counted', () => {
+    const t = play([bar(99), bar(105), bar(112, { h: 115.5 }), bar(110)], 0, P, { ...DEFAULTS, exit: 'two', partial: 0.5, T2: 130 }, { pivots: [], atrs: ONE })
+    assert.deepEqual([t.reason, t.mark], ['open', 0.5 * 115 + 0.5 * 110])
+    assert.equal(play([bar(99), bar(105)], 0, P).mark, 105)
 })
 
 test('toFourHour: a session’s first four hourly bars, then its rest', () => {
