@@ -140,6 +140,26 @@ begins (a two-year high).
 **Learned per stock:** the buffer; how often price broke the base low and still rallied (the stop was wrong) vs broke
 down for real; how often the target came before the stop (at 1.5, a hit rate above 40% just breaks even).
 
+## The flow — a Mentor LENS, judged not hard-coded (Roy, 2026-10-30)
+
+1. The company is a long — the house research (Prometheus / Pythia). Exists.
+2. The timeframe — short swing / swing / long term (the Hotlist tabs). Exists.
+3. **Mentor judges the stop** — from a visual read of the chart and the candle data. A JUDGE, not hard-coded rules
+   (Roy's preference). The rules above are what he judges BY, not a formula that replaces him.
+4. **Mentor judges the targets.**
+5. **Mentor asks the user** for the risk and the minimum reward to risk.
+6. **Mentor decides the entry prices and the size.** The highest entry and the share count are arithmetic once 3–5 are
+   fixed — CODE computes them; Mentor's call is within them (enter now, or wait for the pullback and strength).
+
+**A new Mentor lens** beside `discretionary` / `smc` / `institutional` (`services/analysisModes.js`, saved as the setup's
+`trade_mode`). A click from the Hotlist picks it automatically (which click, and the name: open).
+
+**Judgement stays testable:** code hands Mentor the facts (swing highs/lows, volume spikes, the normal move, the range) —
+he picks levels, he never invents the numbers under them. Tested by REPLAY (the chart cut at a past date, nothing after;
+he places the levels; code plays them forward, fixed — the Talos replay harness's idea), a CONSISTENCY check (the same
+chart twice), and FORWARD grading of every real call. The record goes back to him per stock ("on MTG your swing-low
+stops were swept 4 of 10 times") — his judgement, corrected by his own record: that is the learning.
+
 ## Pieces to build
 
 1. **Calculation engine** — the profile per timeframe; the playbook tester (a fixed menu of setups, long and short, per
