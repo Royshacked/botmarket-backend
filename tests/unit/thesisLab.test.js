@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mirror, atr, swings, reversalSignals, baselineSignals, plan, play, inR, summarize, DEFAULTS } from '../../services/thesisLab.service.js'
+import { mirror, atr, swings, reversalSignals, controlSignals, baselineSignals, plan, play, inR, summarize, DEFAULTS } from '../../services/thesisLab.service.js'
 
 // The THESIS lens's test 1 (Roy, 2026-10-30) — the reversal thesis as fixed rules (docs/design/stock-playbook.md §Test 1).
 
@@ -133,6 +133,33 @@ test('summarize: hit rate, mean R, and a bootstrap range over months that holds 
     assert.equal(s.meanR, 0.5)
     assert.ok(s.lo <= s.meanR && s.meanR <= s.hi)
     assert.equal(summarize([]).n, 0)
+})
+
+test('controlSignals: a break up after sellers had control is a reversal; the next break up, a continuation', () => {
+    // An earlier dip (a swing low the fall closes under — sellers take over), the V's rally and break (reversal), a
+    // pullback that holds, a new break up.
+    const dip = [...flat(60), ...[98, 96, 95, 96, 98, 100].map(c => bar(c)), ...flat(39)]
+    const rows = [...dip, ...vShape().slice(105), ...[89, 90].map(c => bar(c)), ...[88.5, 87.5, 87.6].map(c => bar(c)), ...[89, 90.5, 92, 93].map(c => bar(c))]
+    const a = atr(rows), sigs = controlSignals(rows, a, swings(rows, a, 1.5))
+    const ctx = sigs.map(s => s.context)
+    assert.ok(ctx.includes('reversal'), 'the V')
+    assert.ok(ctx.includes('continuation'), 'the break after the pullback')
+    for (const s of sigs) {
+        assert.ok(s.stopBase < rows[s.i].close, 'the stop under the close')
+        assert.ok(s.h0 > s.stopBase)
+    }
+    const rev = sigs.find(s => s.context === 'reversal')
+    assert.equal(rev.h0, 100.5, 'the top of the fall')
+})
+
+test('controlSignals: a close over the 120-session high is a breakout, its target the measured move', () => {
+    const rows = [...flat(125), ...[101, 102, 103, 102, 101.2, 100.6, 101, 102, 103.5, 105].map(c => bar(c))]
+    const a = atr(rows), sigs = controlSignals(rows, a, swings(rows, a, 1.5))
+    const b = sigs.find(s => s.context === 'breakout')
+    assert.ok(b, 'a breakout')
+    let top = -Infinity
+    for (let j = b.i - 40; j < b.i; j++) top = Math.max(top, rows[j].high)
+    assert.equal(b.h0, top + (top - b.stopBase))
 })
 
 test('baselineSignals: every 10th session with the close between the last swing low and the 40-session high', () => {

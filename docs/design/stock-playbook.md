@@ -261,6 +261,26 @@ filters, R:R 1.5 entry level, strength, fixed exits, R on the planned risk, cost
 - **PASS (long) only if:** before — mean R > 0 with the 5% end > 0; held out — mean R > 0; above the baseline in both.
   Shown by context (reversal / continuation / breakout), and the short mirror.
 
+### Test 1b — result (2026-10-30): FAIL overall — the edge is the REVERSAL context only
+
+| Long, mean R after cost (5–95%) | before 2025-10-23 | held out |
+|---|---|---|
+| **All contexts (PRIMARY)** | 10,027 trades, hit 37.6%, **+0.07R** (+0.00 … +0.14) | 1,383, **+0.07R** (−0.09 … +0.20) |
+| Baseline (geometry, every 10th session) | +0.07R | +0.03R |
+| **Reversal** | 4,952, hit 39.2%, **+0.12R** (+0.04 … +0.20) | 669, **+0.15R** (−0.00 … +0.26) |
+| Continuation | 2,717, +0.03R (−0.08 … +0.12) | 369, +0.04R |
+| Breakout (at 120-session highs) | 2,358, +0.02R (−0.07 … +0.11) | 345, **−0.07R** |
+| Short, all contexts | −0.15R | −0.14R |
+
+- **The bar: FAIL** — not above the baseline before the held-out day (+0.07 = +0.07). Without the best 1%: +0.04R.
+- **The reversal is test 1 again** (+0.12 / +0.15) on a broader definition — the edge is there and only there.
+  Continuation and breakout trades add count (median 21 trades a name instead of 7) but no edge: their means are the
+  market's drift that every long earned.
+- 2022 −0.18R again; shorts lose in every context.
+- **Read:** "buyers in control" alone is not a buy. On fixed daily rules, the reversal after a fast fall is the only
+  context with an edge; continuation and breakout need something the chart alone does not give (the fundamentals step,
+  or a different stop/target), or are not this approach's trade.
+
 ## Pieces to build
 
 1. **Calculation engine** — the profile per timeframe; the playbook tester (a fixed menu of setups, long and short, per

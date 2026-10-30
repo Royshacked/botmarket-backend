@@ -4,6 +4,7 @@
 // are services/thesisLab.service.js. Reads the lab's cached bars only (no fetch).
 //
 //   node scripts/lab-thesis.mjs            → the table, also written to data/lab/thesis.out.txt
+//   node scripts/lab-thesis.mjs --control  → test 1b: buyers in control, any context (→ data/lab/thesis-control.out.txt)
 //
 // The variants beside the primary are shown, not for the bar — each is another try.
 
@@ -18,6 +19,7 @@ const { loadLabData } = await import('../services/screenerLab.data.js')
 const { costFor, MIN_ADV, MIN_PRICE } = await import('../services/screenerLab.service.js')
 const { memberOn } = await import('../services/sp500History.service.js')
 
+const CONTROL = process.argv.includes('--control')
 const TO = '2026-10-26', HELD_OUT = '2025-10-23', WARMUP = 260
 // The members' share of their sessions in the index that have a bar — under it, the ticker is not the company (reused)
 // or FMP lacks it (the same rule as lab-rotation.mjs).
@@ -38,7 +40,7 @@ for (const sym of Object.keys(u.spans)) {
 
 const out = []
 const say = (line = '') => { console.log(line); out.push(line) }
-say(`Thesis test 1 — the S&P 500 point-in-time, ${days[0]} → ${days.at(-1)}, ${covered.length} names covered · held out from ${HELD_OUT}`)
+say(`Thesis test ${CONTROL ? '1b (buyers in control, any context)' : '1 (the reversal)'} — the S&P 500 point-in-time, ${days[0]} → ${days.at(-1)}, ${covered.length} names covered · held out from ${HELD_OUT}`)
 
 const P = L.DEFAULTS
 const VARIANTS = [
@@ -68,7 +70,7 @@ function runSide(side) {
             const { v } = r
             if (!pvByK.has(v.o.k)) pvByK.set(v.o.k, L.swings(rows, a, v.o.k))
             const pv = pvByK.get(v.o.k)
-            const sigs = v.baseline ? L.baselineSignals(rows, a, pv, v.o) : L.reversalSignals(rows, a, pv, v.o)
+            const sigs = v.baseline ? L.baselineSignals(rows, a, pv, v.o) : CONTROL ? L.controlSignals(rows, a, pv, v.o) : L.reversalSignals(rows, a, pv, v.o)
             for (const sig of sigs) {
                 const i = sig.i, day = date[i]
                 if (i < WARMUP || !member(sym, day) || rows0[i].close < MIN_PRICE || !((adv[i] ?? 0) >= MIN_ADV)) continue
@@ -81,7 +83,7 @@ function runSide(side) {
                 if (t.reason === 'open') { r.open++; continue }
                 // R on the PLANNED risk (the size is set at the level and kept — Roy, 2026-10-30).
                 r.trades.push({ sym, day, r: L.inR(t, p.S, costFor(adv[i]), p.E), win: t.reason === 'target', reason: t.reason,
-                    days: t.k - t.m, month: date[t.m].slice(0, 7), regime, held: day >= HELD_OUT })
+                    days: t.k - t.m, month: date[t.m].slice(0, 7), regime, held: day >= HELD_OUT, context: sig.context ?? null })
             }
         }
     }
@@ -112,6 +114,13 @@ for (const side of ['long', 'short']) {
         const xs = prim.filter(t => t.held === held).sort((a, b) => a.r - b.r)
         say(line(`${side} PRIMARY ${held ? 'held out' : 'before'} − top 1%`, L.summarize(xs.slice(0, Math.floor(xs.length * 0.99)))))
     }
+    if (CONTROL) {
+        say(`${side} PRIMARY by context — before | held out:`)
+        for (const c of ['reversal', 'continuation', 'breakout']) {
+            say(line(`  ${c} · before`, L.summarize(prim.filter(t => t.context === c && !t.held), { draws: 1000 })))
+            say(line(`  ${c} · held out`, L.summarize(prim.filter(t => t.context === c && t.held), { draws: 1000 })))
+        }
+    }
     const by = (k) => prim.filter(t => t.reason === k).length
     say(`${side} PRIMARY exits: target ${by('target')} · stop ${by('stop')} · time ${by('time')}`)
     const perName = new Map()
@@ -132,6 +141,6 @@ const checks = [
 for (const [k, ok] of checks) say(`  ${ok ? '✓' : '✗'} ${k}`)
 say(`  → ${checks.every(c => c[1]) ? 'PASS' : 'FAIL'}`)
 
-fs.writeFileSync('data/lab/thesis.out.txt', out.join('\n') + '\n')
-console.log('→ data/lab/thesis.out.txt')
+fs.writeFileSync(`data/lab/thesis${CONTROL ? '-control' : ''}.out.txt`, out.join('\n') + '\n')
+console.log(`→ data/lab/thesis${CONTROL ? '-control' : ''}.out.txt`)
 process.exit(0)

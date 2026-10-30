@@ -90,6 +90,36 @@ export function reversalSignals(rows, atrs, pivots, o = DEFAULTS) {
 }
 
 /**
+ * BUYERS IN CONTROL, any context (test 1b — Roy, 2026-10-30: "I don't want only a bounce"). Buyers are in control from
+ * a close over the last confirmed swing high until a close under the last confirmed swing low. Each swing high signals
+ * once, on the first close over it. The context: `breakout` — the close is over the highest high of the `atHighs`
+ * sessions before; else `reversal` — sellers were in control before; else `continuation`. The stop's base is the last
+ * swing low; the target the highest high of the `lookFall` sessions before, when over the close — at its highs the
+ * measured move (that high + its height over the last swing low). → `[{ i, stopBase, h0, context }]`. Pure.
+ */
+export function controlSignals(rows, atrs, pivots, o = DEFAULTS, atHighs = 120) {
+    const out = [], used = new Set()
+    let p = 0, lastH = null, lastL = null, state = null
+    for (let i = 0; i < rows.length; i++) {
+        while (p < pivots.length && pivots[p].at <= i) { if (pivots[p].type === 'H') lastH = pivots[p]; else lastL = pivots[p]; p++ }
+        const c = rows[i].close
+        if (lastL && c < lastL.price) { state = 'sellers'; continue }
+        if (!lastH || !lastL || used.has(lastH.j) || !(c > lastH.price)) continue
+        used.add(lastH.j)
+        const before = state
+        state = 'buyers'
+        if (i < Math.max(atHighs, o.lookFall) || atrs[i] == null || !(lastL.price < c)) continue
+        let top = -Infinity, prior = -Infinity
+        for (let j = i - o.lookFall; j < i; j++) top = Math.max(top, rows[j].high)
+        for (let j = i - atHighs; j < i; j++) prior = Math.max(prior, rows[j].high)
+        const context = c > prior ? 'breakout' : before === 'sellers' ? 'reversal' : 'continuation'
+        const h0 = top > c ? top : top + (top - lastL.price)
+        out.push({ i, stopBase: lastL.price, h0, context })
+    }
+    return out
+}
+
+/**
  * THE BASELINE — the same geometry without the thesis: every `every`-th session, the last confirmed swing low for the
  * stop and the highest high of the last `lookFall` sessions for the target, when the close is between them. Pure.
  */
