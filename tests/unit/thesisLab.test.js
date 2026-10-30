@@ -75,6 +75,16 @@ test('plan: the stop under the base by the buffer, the target, the entry level a
     assert.equal(plan({ i: 0, stopBase: 60, h0: 110 }, atrs), null, 'a 15%+ risk is past rule A')
 })
 
+test('plan by the risk limit: the entry level is the price the limit above the stop; the R:R only a check', () => {
+    const o = { ...DEFAULTS, buffer: 0, entryBy: 'risk', riskPct: 5, minRR: 1.5 }
+    const p = plan({ i: 0, stopBase: 95, h0: 120 }, [1], o)
+    assert.equal(p.E, 100, '95 / 0.95 — the stop 5% under the entry')
+    assert.equal(plan({ i: 0, stopBase: 95, h0: 106 }, [1], o), null, 'R:R 1.2 at the level — under the check')
+    assert.ok(plan({ i: 0, stopBase: 95, h0: 106 }, [1], { ...o, minRR: 0 }), 'no check → a plan')
+    const short = plan({ i: 0, stopBase: -105, h0: -80 }, [1], o)
+    assert.ok(Math.abs((short.E - short.S) / Math.abs(short.E) - 0.05) < 1e-12, 'the mirrored short: the same 5% of its entry')
+})
+
 const P = { S: 90, T: 115, E: 100 }
 
 test('play: already under the level at the signal — in at its close; out at the target', () => {

@@ -137,11 +137,19 @@ export function baselineSignals(rows, atrs, pivots, o = DEFAULTS, every = 10) {
     return out
 }
 
-/** The plan at the signal's close: stop, target, the entry level at the R:R, and rule A (the risk limit). Null past A. Pure. */
+/**
+ * The plan at the signal's close: stop, target, the entry level, and rule A (the risk limit). The entry level is set
+ * either by the R:R (`rr` at E — the default) or, with `entryBy: 'risk'` (Roy, 2026-10-30: "where the user goes in is
+ * set by his risk limit, not R:R"), by the risk limit: the price `riskPct` % above the stop, the R:R then only a check
+ * (`minRR`, none when 0). Null past A or the check. Pure.
+ */
 export function plan(sig, atrs, o = DEFAULTS) {
     const S = sig.stopBase - o.buffer * atrs[sig.i], T = sig.h0
-    const E = (T + o.rr * S) / (1 + o.rr)
+    // (E − S) = r·|E|: on the mirrored (negative) prices of a short the same distance is E = S / (1 + r).
+    const r = (o.riskPct ?? 0) / 100
+    const E = o.entryBy === 'risk' ? (S > 0 ? S / (1 - r) : S / (1 + r)) : (T + o.rr * S) / (1 + o.rr)
     if (!(E > S) || !(T > E)) return null
+    if (o.entryBy === 'risk' && (T - E) / (E - S) < (o.minRR ?? 0)) return null
     if (((E - S) / Math.abs(E)) * 100 > o.maxRiskPct) return null
     return { S, T, E }
 }

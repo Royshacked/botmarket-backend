@@ -52,6 +52,11 @@ const VARIANTS = [
     { id: 'R:R 1', o: { ...P, rr: 1 } },
     { id: 'R:R 2', o: { ...P, rr: 2 } },
     { id: 'R:R 3', o: { ...P, rr: 3 } },
+    // The entry set by the RISK LIMIT (Roy, 2026-10-30), the R:R ≥ 1.5 only a check — and once without it.
+    { id: 'risk 3%', o: { ...P, entryBy: 'risk', riskPct: 3, minRR: 1.5 } },
+    { id: 'risk 5%', o: { ...P, entryBy: 'risk', riskPct: 5, minRR: 1.5 } },
+    { id: 'risk 8%', o: { ...P, entryBy: 'risk', riskPct: 8, minRR: 1.5 } },
+    { id: 'risk 5% no check', o: { ...P, entryBy: 'risk', riskPct: 5, minRR: 0 } },
     { id: 'no strength', o: { ...P, strength: false } },
     { id: 'SPY over 200d', o: P, regime: 'SPY over 200d' },
     { id: 'BASELINE', o: P, baseline: true },
@@ -117,7 +122,7 @@ for (const side of ['long', 'short']) {
         say(line(`${side} PRIMARY ${held ? 'held out' : 'before'} − top 1%`, L.summarize(xs.slice(0, Math.floor(xs.length * 0.99)))))
     }
     // By context, the primary and the R:R 1 and 3 variants (Roy, 2026-10-30: "and if lowering to R:R 1" · "so R:R 3").
-    for (const id of CONTROL ? ['PRIMARY', 'R:R 1', 'R:R 3'] : []) {
+    for (const id of CONTROL ? ['PRIMARY', 'risk 3%', 'risk 5%', 'risk 8%', 'risk 5% no check'] : []) {
         const xs = results[`${side}|${id}`]?.trades ?? []
         say(`${side} ${id} by context — before | held out:`)
         for (const c of ['reversal', 'continuation', 'breakout']) {

@@ -286,6 +286,16 @@ filters, R:R 1.5 entry level, strength, fixed exits, R on the planned risk, cost
   +0.08R / +0.04R. Reversal +0.11 / +0.09; continuation +0.01 / −0.08; breakout +0.07 / +0.02. **The ratio does not move
   the edge** (R:R 1, 1.5, 2, 3 all ≈ +0.07R overall, ≈ +0.1R on the reversal) — it only trades the number of fills
   against the size of a win. The edge sits in the CONTEXT, not in the ratio.
+- **The entry set by the RISK LIMIT, not the R:R (Roy: "where the user goes in is set by his risk limit")** — the entry
+  level = the price the limit above the stop (S / (1 − r)), the R:R ≥ 1.5 only a check (`plan`, `entryBy: 'risk'`).
+  Long, before / held out: 3% +0.02 / +0.08R (2,846 trades); **5% +0.10 / −0.00R** (3,157); 8% +0.10 / +0.16R (1,789);
+  5% without the check +0.05 / −0.01R (14,175, hit 50%). The REVERSAL: 3% +0.09 / +0.08, 5% +0.10 / +0.08, 8% +0.08 /
+  +0.22, 5% no check +0.09 / +0.07 — every range crossing zero but the last's before. Continuation and breakout: around
+  zero, sign flipping. **The way in does not move the edge either** — R:R-set or risk-set, the reversal earns ~+0.1R
+  and the rest ~0. With the check, fewer trades: a far stop now needs a deep pullback before the level is reached.
+- **Tries so far on this question:** test 1's 9 variants, test 1b's 9, R:R 1 and 3, four risk limits — ~25. The
+  reversal's +0.1R appears in nearly all of them, which is what a real (small) effect looks like; any single best cell
+  among them is not to be trusted.
 - **Read:** "buyers in control" alone is not a buy. On fixed daily rules, the reversal after a fast fall is the only
   context with an edge; continuation and breakout need something the chart alone does not give (the fundamentals step,
   or a different stop/target), or are not this approach's trade.
