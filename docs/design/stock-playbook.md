@@ -242,6 +242,25 @@ run (declared measure, with the bug) also passed: +0.12R before (+0.01 … +0.24
 judgement must beat, not a reason by itself. Next: test 2 (Mentor's and Talos's judgement on a replay sample) against
 this +0.12R; the short side needs its own thesis, not the mirror.
 
+## Test 1b — "buyers in control", any context (declared 2026-10-30, before the run)
+
+Roy: "I don't want only a bounce." The verdict "daily buy" is any context in which BUYERS ARE IN CONTROL, not only a
+reversal. One definition (agreed): buyers are in control from a close ABOVE the last confirmed swing high until a close
+BELOW the last confirmed swing low (sellers then, until the next close above a swing high). `--control` in
+`scripts/lab-thesis.mjs`; `controlSignals` in the service. Everything else as test 1 (universe, swings k 1.5, ATR,
+filters, R:R 1.5 entry level, strength, fixed exits, R on the planned risk, cost, bootstrap, held out from 2025-10-23).
+
+- **Signal:** the first close above a confirmed swing high (each swing high signals once) — a break upward.
+- **Context, from what came before:** **breakout** — the close is over the highest high of the 120 sessions before
+  (at its highs); else **reversal** — sellers were in control before this break; else **continuation** — buyers were
+  already in control (a pullback held above the last swing low, then a new break up).
+- **Stop:** the last confirmed swing low − 0.2 ATR (the sellers' last swing).
+- **Target:** the highest high of the 40 sessions before the signal, when above the close (the top of the fall, or of
+  the trend before the pullback); otherwise (at its highs) the MEASURED MOVE: that high + (that high − the last swing low).
+- **Baseline:** test 1's (the same geometry every 10th session).
+- **PASS (long) only if:** before — mean R > 0 with the 5% end > 0; held out — mean R > 0; above the baseline in both.
+  Shown by context (reversal / continuation / breakout), and the short mirror.
+
 ## Pieces to build
 
 1. **Calculation engine** — the profile per timeframe; the playbook tester (a fixed menu of setups, long and short, per
