@@ -17,6 +17,8 @@
 //
 // String-only and lean on purpose: this is untrusted request-body input on the way into a prompt.
 
+import { isMode } from './analysisModes.js'
+
 /**
  * Coerce a hand-off seed. Returns null when there is no usable ticker — a seed without one names
  * nothing and is worse than absent, because a desk would open on a blank.
@@ -46,7 +48,8 @@ export function sanitizeScanSeed(raw) {
         sector:           s('sector'),
         thesis:           s('thesis'),
         analysis:         s('analysis'),
-        recommended_mode: s('recommended_mode'),
+        // A lens the desks know, or nothing — a free string here would reach the prompt as a lens nobody has.
+        recommended_mode: isMode(s('recommended_mode')) ? s('recommended_mode') : null,
         window:           (from || to) ? { from, to } : null,
         hotlist:          _hotlistRef(raw.hotlist, ticker.toUpperCase()),
         book:             _bookRef(raw.book, ticker.toUpperCase()),

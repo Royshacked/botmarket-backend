@@ -370,7 +370,8 @@ test('Mentor’s own additions are declared after the kit, with the sidecar last
     // last at every desk (agentToolsRegistry.test.js), and everything here is past the tools cache
     // breakpoint inside TRADING_TOOLS, so the cached prefix is untouched either way.
     // `size_position` joins it there for the same reason (the sizing answer as a call, 2026-10-01).
-    assert.deepEqual(names.slice(kitEnd + 1), ['get_news', 'get_analyst_actions', 'flip_test', 'size_position', 'consult'])
+    // The thesis lens's two (2026-10-30) join after the sizing call, before the sidecar.
+    assert.deepEqual(names.slice(kitEnd + 1), ['get_news', 'get_analyst_actions', 'flip_test', 'size_position', 'get_price_structure', 'get_entry_level', 'consult'])
 })
 
 test('the two tools are WIRED — a declared tool with no handler is a call that silently fails', async () => {

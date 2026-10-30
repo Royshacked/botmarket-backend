@@ -1,6 +1,6 @@
 # Stock playbook — how to trade THIS stock
 
-**STATUS: DESIGN ONLY (2026-10-30).** Nothing built. Branch `feat/stock-playbook` (from main). Supersedes the
+**STATUS: BUILDING (2026-10-30).** The lens is built (below, § Built); the learning loop (the file per stock, grading, replay) is not. Tests 1 / 1b / 1c ran. Branch `feat/stock-playbook` (from main). Supersedes the
 one-ticker pattern test in [future-projects.md §5](../future-projects.md#5-test-a-pattern-on-one-tickers-history--with-the-lab-we-built)
 — Roy restarted the question from scratch ("forget what we discussed until now").
 
@@ -345,6 +345,17 @@ rest (seed 11, `--sample 1200`); 5,890 with hourly bars. Long, reversal, the sam
   with the 1h check, 32% with the 4h) — it skips trades that would have done as well as the ones it takes.
 - The stand-in is mechanical (a close over the high of the bar that made the low); Talos's read may see more — but on
   this evidence, waiting for strength buys fewer trades, not better ones.
+
+## Built (2026-10-30)
+
+- The `thesis` lens (`services/analysisModes.js` MODES) — Mentor's prompt § The thesis lens: the six steps, the setup
+  Talos gets, what was tested and how to say it.
+- Mentor's tools `get_price_structure` (day / week, long / short) and `get_entry_level`
+  (`services/tools/thesisStructure.tools.js`) over `services/swingStructure.service.js` — the swing code the lab also
+  uses (one mechanism). Sizing reuses `size_position`.
+- Talos's lens line for it (`monitoring/assess.shared.js` lensLine): the level and below, strength on the 1h / 4h.
+- The Hotlist's Build with Mentor sends `recommended_mode: 'thesis'` (frontend `hotlist.utils.hotlistHandoff`); the
+  seed text says it is the Hotlist's lens, not Argus's; a hand-off lens is validated against MODES.
 
 ## Pieces to build
 

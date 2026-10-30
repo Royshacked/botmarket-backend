@@ -420,6 +420,9 @@ services/
   valuation.tools.js        get_consensus + compute_valuation + compute_event_delta agent tools over
                             valuation.engine + FMP consensus feeds; pure LLM-ready formatters (edge classified
                             above/below/thin vs Street; the delta read ends on the JSON line the model copies). (P2)
+  thesisStructure.tools.js  get_price_structure + get_entry_level — Mentor's THESIS lens (docs/design/stock-playbook.md):
+                            the chart facts a stop and target are judged from (day or week; a short read mirrored),
+                            and the entry level from the user's risk limit / minimum R:R. Over swingStructure.service.
   runup.tools.js            get_runup_history — the RUN-UP yardstick for a catalyst read (horizon-chains.md §3):
                             the stock's move into each of its last reports over the sessions left, vs SPY;
                             median / quartiles / up share, and THIS CYCLE (the usual full 10-session run-up and
@@ -995,6 +998,13 @@ services/
                             the live outcome log does. The catalyst path is replayed by proxy (`earningsBeat`:
                             an EPS beat of 5%+ reported the session before, from the calendar's actuals). The
                             summary rides GET /api/hotlist/outcomes as `backtest`
+  swingStructure.service.js WHO IS IN CONTROL of a chart, from its swings (2026-10-30) — the shared mechanism of the
+                            THESIS lens: atr, swings (zigzag k × ATR, known only once confirmed), mirror, toWeekly,
+                            structureFacts (control, last break's context, the fall, candidate stop/target, heavy
+                            days), entryLevel (the lower of the risk-limit and R:R ceilings). PURE.
+  thesisLab.service.js      the THESIS lens's tests 1 / 1b / 1c (docs/design/stock-playbook.md): the approach as fixed
+                            rules — reversalSignals, controlSignals, baselineSignals, plan, play, playIntraday,
+                            summarize (month bootstrap) — scripts/lab-thesis.mjs, lab-thesis-hourly.mjs. PURE.
   screenerLab.service.js    THE SCREENER LAB (docs/design/screener-lab.md): candidate screener rules tested one by
                             one on one yardstick — net of a cost by dollar volume, against SPY over the same
                             sessions, each session once, a block range for multi-day holds, two halves. HYPOTHESES

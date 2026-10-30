@@ -8,6 +8,7 @@ import { buildTagCaptures } from '../llmStream.util.js'
 import { DESKS } from '../desks/registry.js'
 import { makeRouteCapture, buildRouteRule } from '../routing.util.js'
 import { TRADING_TOOLS, buildTradingToolHandlers } from '../tools/trading.tools.js'
+import { THESIS_STRUCTURE_HANDLERS } from '../tools/thesisStructure.tools.js'
 import { toolsFor } from '../agentTools.registry.js'
 import { consultDescription } from '../deepThink.service.js'
 import { FLIP_TOOL, FLIP_DESCRIPTION, makeFlipHandler } from '../flipTest.service.js'
@@ -86,6 +87,12 @@ export const MENTOR_TOOLS = [
     ...toolsFor({
         [SIZE_TOOL]: `Record the USER's sizing answer and get the server's figures back in the same turn. Call it the moment they give a size — "risk $1,000", "1%", "$20k position", "300 shares" — with their unit and their number, never yours ("never choose it for them"). It returns, per scenario, the quantity, the cash at risk, the position value and whether that fits the cash the account can deploy (with the largest size that does, when it does not); the money the trade pays and costs; and whether the Generate button is now lit. Read those out — do not recompute any of them. The answer is recorded as theirs and settles sizing by itself as soon as the stages before it are settled, so never ask for the size again after calling this. Call it again only when they CHANGE the size.`,
     }),
+    // THE THESIS LENS (docs/design/stock-playbook.md). Same slot rules as the sizing call: past the breakpoint, before
+    // consult. The facts and the arithmetic are code; the stop and the targets stay Mentor's judgement.
+    ...toolsFor({
+        get_price_structure: `The \`thesis\` lens's chart facts, on the day (swing) or week (long-term) chart: the confirmed swings with their dates, the normal daily move (ATR), WHO IS IN CONTROL (buyers since a close over the last swing high, sellers since a close under the last swing low) and the context of the last break (reversal · continuation · breakout), the last fall (its start and its low), the heavy-volume days of the last 60 sessions, and CANDIDATE levels from the tested rule — the stop under the sellers' last swing, a deeper one under the whole fall, the target at the start of the fall (or a measured move at the highs). The candidates are a starting point: judge the stop and the targets yourself against the chart and the candles, and say where you differ and why.`,
+        get_entry_level: `The \`thesis\` lens's entry arithmetic. After you judged the stop and the target and the USER gave their risk limit (the stop at most X% from the entry) and/or their minimum reward to risk: the highest entry worth paying (the lowest, on a short) — the entry leg's price, valid "at the level and below". Never compute it yourself; read it out.`,
+    }),
     ...toolsFor({
         // The sidecar is contractually last at every desk that declares it
         // (agentToolsRegistry.test.js), and it sits past the tools cache breakpoint — which is
@@ -138,6 +145,7 @@ async function chatStream({
             onVerdict: (v) => { flipVerdict = v },
         }),
         ..._newsHandlers(),
+        ...THESIS_STRUCTURE_HANDLERS,
         get_analyst_actions: makeToolHandler('get_analyst_actions',
             ({ symbols, limit }) => _analystActions(Array.isArray(symbols) ? symbols : [], limit),
             (err) => `Could not fetch analyst actions: ${err.message}`, LOG),
@@ -591,6 +599,9 @@ Active asset: ${asset}${_buildAccountsSection(accounts, mainAccountId)}${_buildS
 export function _buildSeedSection(seed) {
     if (!seed?.ticker) return ''
     const lens = String(seed.recommended_mode ?? '').trim()
+    // The Hotlist's "Build with Mentor" opens in the THESIS lens (Roy, 2026-10-30) — the user's own pick of the button,
+    // not Argus's: still said out loud, still theirs to change.
+    const fromList = Boolean(seed.hotlist_facts || seed.book_facts)
     return `
 
 ${seed.book_facts ? "FROM THE HOUSE'S BOOK" : 'ARGUS HANDED YOU THIS NAME'}: ${seed.ticker}${seed.direction ? ` (${seed.direction})` : ''}`
@@ -598,8 +609,9 @@ ${seed.book_facts ? "FROM THE HOUSE'S BOOK" : 'ARGUS HANDED YOU THIS NAME'}: ${s
   thesis: ${seed.thesis}` : ''}`
         + `${seed.analysis ? `
   Argus's read: ${seed.analysis}` : ''}`
-        + (lens ? `
-  Argus recommends the ${lens} lens.` : '')
+        + (lens ? (fromList ? `
+  The user opened this from the Hotlist's Build with Mentor, which builds in the ${lens} lens.` : `
+  Argus recommends the ${lens} lens.`) : '')
         // From today's HOTLIST (daily-names.md): read back from the stored board by code, not from the
         // request. The board measures ROOM — free range to the next overhead level — and sets no
         // entry, stop or target; those are built here, with the user.
@@ -622,7 +634,9 @@ ${seed.book_facts ? "FROM THE HOUSE'S BOOK" : 'ARGUS HANDED YOU THIS NAME'}: ${s
         + `
 
 Open on it: say the name, relay Argus's read in a sentence rather than restating it wholesale, and`
-        + (lens
+        + (lens && fromList
+            ? ` SAY you are building it through the ${lens} lens (the Hotlist's) and what that means in one line; it is the default here, not a decision — if the user wants another lens, use theirs.`
+            : lens
             ? ` NAME THE RECOMMENDED LENS AND WHY IT FITS. It is Argus's recommendation, not a decision: if the user wants a different lens, or the chart disagrees with it, say so and use theirs. A lens adopted without the user hearing it is one they never chose.`
             : ` say that you will ask which lens they want to build it through when the ladder reaches it.`)
         + ` Then run the OPENING TURN as for any name: read it cheapest-first, and come back with direction, horizon and lens together. The ticker is settled unless they change it; everything Argus sent is a CLAIM you validate against your own read, never a settled value — its direction is a lean you test, its lens a recommendation the user still has to agree to. Everything else is theirs to shape.`

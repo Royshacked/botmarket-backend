@@ -8,52 +8,9 @@
 //
 // Pure: bars come in (`{ open, high, low, close }`, oldest first); no IO here.
 
-/** The bars upside down: a short's chart read as a long's. Pure. */
-export const mirror = (rows) => rows.map(b => ({ ...b, open: -b.open, high: -b.low, low: -b.high, close: -b.close }))
-
-/** The mean true range of the last `n` sessions, by bar, known at that close; null until there are `n`. Pure. */
-export function atr(rows, n = 20) {
-    const out = new Array(rows.length).fill(null)
-    let sum = 0
-    const tr = rows.map((b, i) => (i ? Math.max(b.high, rows[i - 1].close) - Math.min(b.low, rows[i - 1].close) : b.high - b.low))
-    for (let i = 0; i < rows.length; i++) {
-        sum += tr[i]
-        if (i >= n) sum -= tr[i - n]
-        if (i + 1 >= n) out[i] = sum / n
-    }
-    return out
-}
-
-/**
- * THE SWINGS — a zigzag on highs and lows with a threshold of `k` × ATR. A swing low at bar j is CONFIRMED on the first
- * later bar whose high is k × ATR (that bar's) above it; a swing high, mirrored. → `[{ type: 'L'|'H', j, price, at }]` in
- * the order they were confirmed (`at` the confirming bar — the swing is known from that close on, never before). Pure.
- */
-export function swings(rows, atrs, k = 1.5) {
-    const out = []
-    let mode = 0, hiJ = -1, loJ = -1
-    // After a swing is confirmed, the next one starts from the extreme of the bars AFTER it — the swing bar itself is
-    // left out, or its other end becomes the next swing and the two flip on the same bar forever.
-    const lowest = (a, b) => { let j = a; for (let x = a + 1; x <= b; x++) if (rows[x].low <= rows[j].low) j = x; return j }
-    const highest = (a, b) => { let j = a; for (let x = a + 1; x <= b; x++) if (rows[x].high >= rows[j].high) j = x; return j }
-    const top = (i) => { out.push({ type: 'H', j: hiJ, price: rows[hiJ].high, at: i }); mode = -1; loJ = lowest(hiJ + 1, i) }
-    const bottom = (i) => { out.push({ type: 'L', j: loJ, price: rows[loJ].low, at: i }); mode = 1; hiJ = highest(loJ + 1, i) }
-    for (let i = 0; i < rows.length; i++) {
-        const a = atrs[i]
-        if (a == null) continue
-        if (hiJ < 0) { hiJ = loJ = i; continue }
-        const b = rows[i]
-        if (mode >= 0 && b.high >= rows[hiJ].high) hiJ = i
-        if (mode <= 0 && b.low <= rows[loJ].low) loJ = i
-        // A bar never confirms a swing at itself: which of its high and low came first is unknown.
-        if (mode === 1 || (mode === 0 && hiJ > loJ)) {
-            if (hiJ < i && rows[hiJ].high - b.low >= k * a) top(i)
-            else if (mode === 0 && loJ < i && b.high - rows[loJ].low >= k * a) bottom(i)
-        } else if (loJ < i && b.high - rows[loJ].low >= k * a) bottom(i)
-        else if (mode === 0 && hiJ < i && rows[hiJ].high - b.low >= k * a) top(i)
-    }
-    return out
-}
+// The swings, the ATR and the mirror are the shared price-structure mechanism (Mentor's thesis lens reads the same).
+import { mirror, atr, swings } from './swingStructure.service.js'
+export { mirror, atr, swings }
 
 export const DEFAULTS = Object.freeze({ k: 1.5, lookLow: 60, lookFall: 40, minFallAtr: 5, sosWithin: 60, buffer: 0.2, rr: 1.5, maxRiskPct: 10,
     wait: 20, drift: 0.1, maxHold: 250, strength: true })

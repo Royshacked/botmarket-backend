@@ -133,6 +133,10 @@ export function lensLine(tradeMode) {
             return 'this setup was built on Smart-Money structure — verify the structural trigger with get_structure / get_fvg / get_liquidity rather than trusting the build-time map.'
         case 'institutional':
             return 'this setup was built on an institutional read — flows, relative strength and positioning lead here, so verify with get_correlations against the peers the plan names, get_short_interest / get_options_context for crowding, and fundamentals where the thesis rests on the business. Price structure CONFIRMS; it does not decide.'
+        // The THESIS lens (docs/design/stock-playbook.md): the entry is a LEVEL, "the level and below", and the gate is
+        // STRENGTH at it — judged by Talos, no hint how (Roy, 2026-10-30).
+        case 'thesis':
+            return 'this setup was built on the thesis lens — the entry leg is a LEVEL, valid at that price and below (above, on a short); over it is `wait`. Enter only when price at the level shows STRENGTH on the 1h / 4h, by your own read of it. The stop is where the thesis breaks — under the sellers\' last swing — so price there means the thesis is wrong, not noise.'
         default:
             return 'this setup was built on classical price action — verify with the chart, order blocks and false breaks.'
     }

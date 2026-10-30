@@ -3110,6 +3110,75 @@
             }
         },
         {
+            "name": "get_price_structure",
+            "description": "The `thesis` lens's chart facts, on the day (swing) or week (long-term) chart: the confirmed swings with their dates, the normal daily move (ATR), WHO IS IN CONTROL (buyers since a close over the last swing high, sellers since a close under the last swing low) and the context of the last break (reversal · continuation · breakout), the last fall (its start and its low), the heavy-volume days of the last 60 sessions, and CANDIDATE levels from the tested rule — the stop under the sellers' last swing, a deeper one under the whole fall, the target at the start of the fall (or a measured move at the highs). The candidates are a starting point: judge the stop and the targets yourself against the chart and the candles, and say where you differ and why.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "ticker": {
+                        "type": "string",
+                        "description": "The symbol, e.g. MTG."
+                    },
+                    "timeframe": {
+                        "type": "string",
+                        "enum": [
+                            "day",
+                            "week"
+                        ],
+                        "description": "The chart the trade is drawn on: `day` for a swing, `week` for a long-term trade (bigger swings, a bigger stop and target)."
+                    },
+                    "side": {
+                        "type": "string",
+                        "enum": [
+                            "long",
+                            "short"
+                        ],
+                        "description": "Read for a long (default) or a short — a short reads the chart upside down: its stop over the buyers' last swing up."
+                    }
+                },
+                "required": [
+                    "ticker",
+                    "timeframe"
+                ]
+            }
+        },
+        {
+            "name": "get_entry_level",
+            "description": "The `thesis` lens's entry arithmetic. After you judged the stop and the target and the USER gave their risk limit (the stop at most X% from the entry) and/or their minimum reward to risk: the highest entry worth paying (the lowest, on a short) — the entry leg's price, valid \"at the level and below\". Never compute it yourself; read it out.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "stop": {
+                        "type": "number",
+                        "description": "The stop YOU judged — where the thesis breaks."
+                    },
+                    "target": {
+                        "type": "number",
+                        "description": "The target you judged (TP1)."
+                    },
+                    "risk_limit_pct": {
+                        "type": "number",
+                        "description": "The USER's risk limit: the stop at most this % from the entry, e.g. 5."
+                    },
+                    "min_rr": {
+                        "type": "number",
+                        "description": "The USER's minimum reward to risk at the entry, e.g. 1.5."
+                    },
+                    "side": {
+                        "type": "string",
+                        "enum": [
+                            "long",
+                            "short"
+                        ]
+                    }
+                },
+                "required": [
+                    "stop",
+                    "target"
+                ]
+            }
+        },
+        {
             "name": "consult",
             "description": "Put ONE decision to a more capable desk head and get a straight answer back. It cannot see this conversation and cannot fetch anything — you hand it the question and every number it needs, and it thinks harder than you can in-line.\n\nReach for it in exactly three situations: **final sizing on real money** (live or manual — the account is at risk and the arithmetic has to be right); **two readings that genuinely disagree** and you cannot settle which one governs — most often the direction call at rung 2 of the guided build, when the structure leans one way and momentum or positioning the other and the user is waiting on your lean; and **placing a level where the structure is ambiguous** — a price that is both a prior high and a supply shelf, say. The wider-target check at rung 7 is NOT a consult: it is a tool question, answered by the levels.\n\nDo NOT reach for it to look something up, to double-check work you are already confident in, to summarize, or because a question feels big. A consult costs a full model call and adds seconds to the turn: if you already know the answer, or a tool call would settle it, that is the cheaper and better move. Most turns should end without it.",
             "input_schema": {
