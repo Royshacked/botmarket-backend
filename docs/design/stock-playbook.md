@@ -115,6 +115,28 @@ range or the breakout fails C (risk ≈ h + b, reward ≈ h): the rules buy in t
 **Exit:** the stop; the target; or the verdict turns to sell while the trade is not working ("not working" to define).
 **Management:** a tool to cut risk or raise R:R — averaging only inside a fixed total risk to the stop, planned ahead.
 
+**The stop belongs to the THESIS, not the stock (Roy, 2026-10-30, on MTG).** A REVERSAL thesis (a fast fall —
+accumulation happened on a lower timeframe, too fast for a daily base) puts the stop below the low of the LAST SWING DOWN —
+the last sellers' swing. Below it the sellers won a swing again: the stock is probably accumulating on the daily and the
+reversal thesis is broken — the verdict becomes NONE (still accumulating), not sell; a new trade may come later, lower in
+the range, with its own wider stop below the base. A DAILY-ACCUMULATION thesis puts it below the base's low.
+"A swing down" needs a mechanical definition (e.g. a fall of ≥ ~2× the normal daily move from a swing high to a swing low).
+
+**The same rules on every timeframe.** A longer-term trade runs the rules on the weekly chart: a bigger stop (below the
+last weekly swing down) and a bigger target. The timeframe verdict (layer 1) = which timeframe's rules worked better on
+this stock's history.
+
+**Testing: the stop and the target stay FIXED from entry to exit (Roy).** Trailing is a later, separate variant.
+
+**Worked example — MTG, 2026-10-29 close 28.85 (Roy's levels):** distribution 30.5–31.6 (Jul 30 – Sep 11, high 31.89),
+the fall on heavy volume, a selling climax Sep 30 (25.68, 2.8× volume), the automatic rally to 27.87, tests at 26.96 /
+26.83 / 26.73 on light volume, a shakeout Oct 21 (27.01, bought back the next day), the sign of strength Oct 23 (close
+28.80 over the range top), a quiet pullback. Daily reversal: stop 26.9 (under the Oct 21 swing low), TP1 31.6 (the
+distribution top), TP2 31.9 (the high) → risk 1.95 (6.8%), R:R 1.41 / 1.56; the highest entry passing 1.5 to TP1 is 28.78.
+Weekly: the last weekly swing down 31.62 → 25.68, stop ~25.4, a measured move 31.89 + 6.2 ≈ 38.1 → risk 3.45 (12%),
+R:R ~2.7, ~57% of the daily size for the same dollar risk. The daily trade's target is where the weekly trade's test
+begins (a two-year high).
+
 **Learned per stock:** the buffer; how often price broke the base low and still rallied (the stop was wrong) vs broke
 down for real; how often the target came before the stop (at 1.5, a hit rate above 40% just breaks even).
 
