@@ -346,6 +346,52 @@ rest (seed 11, `--sample 1200`); 5,890 with hourly bars. Long, reversal, the sam
 - The stand-in is mechanical (a close over the high of the bar that made the low); Talos's read may see more — but on
   this evidence, waiting for strength buys fewer trades, not better ones.
 
+## Test 2 — the exit: a half at the target, the rest trailed under the swing lows (declared 2026-10-30, before the run)
+
+Roy: "yes, let's talk exits" → half for now · the daily trail · D also. Why: the fixed exit earns ~+0.1R, and the winners
+ran a median +1.6R past the target within 60 sessions (68% ≥ +1R, 41% ≥ +2R) — the best price reached, which no exit
+catches; the question is how much of it a trail keeps. `--exits` in `scripts/lab-thesis.mjs`; `exitManaged` in the
+service. The SAME signals, plans and entries as test 1's PRIMARY (the reversal, long); only the exit changes.
+
+- **The trail (Roy's stop rule carried upward):** the stop rises to just under each swing low confirmed AFTER the entry
+  (its low − 0.2 × ATR at the bar that confirmed it; k 1.5, the daily chart), never down; in force from the session
+  after it was confirmed. Touched → out at it; a gap under it → out at the open. The same mechanics as the first stop.
+- **A — fixed** (test 1): all out at the stop or the target.
+- **B — half and trail:** half out at the target (a gap over it → the open); until then the stop stays at S; after it the
+  other half's stop is the trail (as high as the swing lows since the entry have raised it, never under S).
+- **C — trail only:** no target; the whole position's stop is the trail from the entry.
+- **D — B + a time stop:** the target not reached within 20 sessions of the entry → all out at that session's close.
+- **Both levels in one session** → the stop (as test 1). 250 sessions held → out at the close. R on the PLANNED risk,
+  the average exit price of the two halves, less the round-trip cost.
+- **Read:** trades, the share that reached the target, mean R (5–95% month bootstrap) before / held out, the median and
+  mean days held (a trail that pays more but holds far longer ties up money) — plus test 1b's reversal context, shown.
+- **PASS (per variant) only if all hold:** its mean R beats A's before AND held out, and its range's 5% end before is
+  above A's mean before. The three are three tries: a pass by one is read with that in mind.
+- **Known limits:** the trail is a rule, not Talos's eye; daily bars only (an intraday touch order is unknown — both in a
+  bar → the stop); today's adjusted bars.
+
+### Test 2 — result (2026-10-30): FAIL — no exit beats the fixed target
+
+On test 1's signals (long, the reversal), mean R per trade (5–95% month bootstrap), mean days held:
+
+| Exit | Before 2025-10-23 | Held out |
+|---|---|---|
+| **A fixed** | 3,568 · **+0.12R** (+0.04 … +0.21) · 23d | 476 · +0.14R (−0.03 … +0.28) · 19d |
+| B half + trail | 3,567 · +0.13R (+0.04 … +0.23) · 33d | 461 · +0.06R (−0.12 … +0.19) · 27d |
+| C trail only | 3,569 · +0.12R (+0.04 … +0.22) · 21d | 477 · −0.01R (−0.16 … +0.10) · 19d |
+| D B + time 20 | 3,570 · +0.11R (+0.03 … +0.19) · 18d | 475 · +0.05R (−0.12 … +0.18) · 17d |
+
+On test 1b's reversal context the same: A +0.12 / +0.15, B +0.12 / +0.08, C +0.12 / +0.02, D +0.11 / +0.04.
+
+- **Before the held-out day all four are the same trade** (+0.11 … +0.13R) — the trail keeps about what it gives back.
+  The winners' "+1.6R past the target" was the best price reached; a stop under the daily swing lows is hit on the way
+  back from it. B holds ~40% longer for nothing.
+- **Held out, every managed exit is below A.** Read with care: a trade still trailing at the end of the data is left out
+  (B 97 open vs A 81) — those are mostly winners riding their second half, so B's and C's held-out numbers are biased
+  down. The before period (almost all closed) says the same thing without that bias: no gain.
+- **D:** half of the targets are reached after 20 sessions (hit 38% → 19%); cutting them early costs what it saves.
+- **Verdict:** the fixed stop and target stay. The edge is in the entry (the reversal), not in the exit.
+
 ## Built (2026-10-30)
 
 - The `thesis` lens (`services/analysisModes.js` MODES) — Mentor's prompt § The thesis lens: the six steps, the setup

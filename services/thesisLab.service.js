@@ -105,9 +105,10 @@ export function plan(sig, atrs, o = DEFAULTS) {
  * upper half of its range (the daily stand-in for strength) → in at its close, if within `drift` × risk over E. Without
  * the strength check (`strength: false`) → in at E (or the open, under it) on the first touch. Exit from the next
  * session (the touch-entry: that same session too): a gap through a level fills at the open; a session touching both →
- * the stop. `maxHold` sessions with neither → out at the close. → `{ m, entry, k, exit, reason }` or null (no entry). Pure.
+ * the stop. `maxHold` sessions with neither → out at the close — or, with `o.exit` (test 2), `exitManaged`'s exit on
+ * `structure`. → `{ m, entry, k, exit, reason }` or null (no entry). Pure.
  */
-export function play(rows, i, { S, T, E }, o = DEFAULTS) {
+export function play(rows, i, { S, T, E }, o = DEFAULTS, structure = null) {
     let m = null, entry = null, from = null
     // At or under the stop already (the last sellers' low broke before the signal) — the thesis is gone, no trade.
     if (rows[i].close <= S) return null
@@ -124,6 +125,8 @@ export function play(rows, i, { S, T, E }, o = DEFAULTS) {
         if (b.low <= E && b.close > b.open && b.close >= (b.high + b.low) / 2 && b.close <= E + o.drift * (E - S)) { m = x; entry = b.close; from = x + 1 }
     }
     if (m == null) return null
+    // Test 2's managed exits need the swings and ATR the trail rides on (`structure: { pivots, atrs }`).
+    if (o.exit && o.exit !== 'fixed') return exitManaged(rows, structure.pivots, structure.atrs, m, entry, from, { S, T }, o)
     return exitDaily(rows, m, entry, from, { S, T }, o)
 }
 
@@ -138,6 +141,41 @@ function exitDaily(rows, m, entry, from, { S, T }, o) {
         if (x === m + o.maxHold) return { m, entry, k: x, exit: b.close, reason: 'time' }
     }
     return { m, entry, k: null, exit: null, reason: 'open' }
+}
+
+/**
+ * TEST 2's exits (Roy, 2026-10-30: half for now · the daily trail · D also). `o.exit`: `'half'` — `o.partial` out at the
+ * target, the stop at S until then, the rest's stop the trail after; `'trail'` — no target, the whole position's stop the
+ * trail from the entry. `o.timeStop` — the target not reached within that many sessions of the entry → all out at that
+ * close. THE TRAIL: just under each swing low confirmed at or after the entry's session (its low − `buffer` × ATR at its
+ * confirming bar), never down, in force from the session after the confirmation. Gaps, both-levels-in-a-bar and
+ * `maxHold` as `exitDaily`. `pivots` / `atrs` — the swings and ATR of the same `rows`. → as `exitDaily`, `exit` the
+ * position's AVERAGE exit price, plus `tp` (the target was reached). Pure.
+ */
+export function exitManaged(rows, pivots, atrs, m, entry, from, { S, T }, o = DEFAULTS) {
+    const lows = pivots.filter(p => p.type === 'L' && p.at >= m)
+    const share = o.exit === 'trail' ? 0 : (o.partial ?? 0.5)
+    let q = 0, trail = S, hit = false, out = 0, got = 0
+    const done = (k, px, reason) => ({ m, entry, k, exit: got + (1 - out) * px, reason, tp: hit })
+    for (let x = from; x < rows.length && x <= m + o.maxHold; x++) {
+        while (q < lows.length && lows[q].at < x) { trail = Math.max(trail, lows[q].price - o.buffer * atrs[lows[q].at]); q++ }
+        const b = rows[x], gap = x > m
+        if (!hit && share > 0) {
+            if (gap && b.open <= S) return done(x, b.open, 'stop')
+            if (gap && b.open >= T) { hit = true; out = share; got = share * b.open }
+            else if (b.low <= S) return done(x, S, 'stop')
+            else if (b.high >= T) { hit = true; out = share; got = share * T }
+            if (hit && out >= 1) return done(x, T, 'target')
+            if (hit) continue
+        } else {
+            const why = hit ? 'trail' : trail > S ? 'trail' : 'stop'
+            if (gap && b.open <= trail) return done(x, b.open, why)
+            if (b.low <= trail) return done(x, trail, why)
+        }
+        if (!hit && o.timeStop && x - m >= o.timeStop) return done(x, b.close, 'time')
+        if (x === m + o.maxHold) return done(x, b.close, 'time')
+    }
+    return { m, entry, k: null, exit: null, reason: 'open', tp: hit }
 }
 
 /** Hourly bars → 4-hour: each session's first four hourly bars, then its rest. `bars` — `[{ day, open, high, low, close }]`. Pure. */

@@ -128,6 +128,44 @@ test('play: without the strength check — in at the level on the first touch, t
     assert.deepEqual(play(rows, 0, P, { ...DEFAULTS, strength: false }), { m: 1, entry: 100, k: 1, exit: 90, reason: 'stop' })
 })
 
+// ─── Test 2: the exit — a half at the target, the rest trailed under the swing lows ───────────────────────────────────
+
+const ONE = Array(40).fill(1)
+/** Signal at 0 (in at 99), the target hit on bar 2, a swing low at 108 (bar 3) confirmed on bar 4, a drop on bar 6. */
+const RUN = [bar(99), bar(105), bar(112, { h: 115.5 }), bar(108.5, { l: 108 }), bar(118), bar(120), bar(107, { o: 109, l: 106 })]
+const RUN_PV = [{ type: 'L', j: 3, price: 108, at: 4 }]
+
+test('exit B: half out at the target; the other half trailed to under the swing low confirmed since', () => {
+    const t = play(RUN, 0, P, { ...DEFAULTS, exit: 'half' }, { pivots: RUN_PV, atrs: ONE })
+    assert.deepEqual([t.k, t.reason, t.tp], [6, 'trail', true])
+    assert.equal(t.exit, 0.5 * 115 + 0.5 * 107.8, 'the average of the two halves; the trail 108 − 0.2 ATR')
+})
+
+test('exit B: before the target the stop stays at S — a swing low confirmed meanwhile does not move it', () => {
+    const rows = [bar(99), bar(104, { l: 103 }), bar(106), bar(101, { l: 95 }), bar(92, { l: 89 })]
+    const t = play(rows, 0, P, { ...DEFAULTS, exit: 'half' }, { pivots: [{ type: 'L', j: 1, price: 103, at: 2 }], atrs: ONE })
+    assert.deepEqual([t.exit, t.reason, t.tp], [90, 'stop', false])
+})
+
+test('exit C: no target — the whole position rides the trail from the entry', () => {
+    const t = play(RUN, 0, P, { ...DEFAULTS, exit: 'trail' }, { pivots: RUN_PV, atrs: ONE })
+    assert.deepEqual([t.k, t.exit, t.reason, t.tp], [6, 107.8, 'trail', false])
+})
+
+test('exit D: the target not reached within the time stop — all out at that close', () => {
+    const rows = [bar(99), ...Array.from({ length: 25 }, () => bar(101))]
+    const t = play(rows, 0, P, { ...DEFAULTS, exit: 'half', timeStop: 20 }, { pivots: [], atrs: ONE })
+    assert.deepEqual([t.k, t.exit, t.reason], [20, 101, 'time'])
+})
+
+test('exit B with the whole position at the target is test 1’s fixed exit', () => {
+    const cases = [[bar(99), bar(105), bar(112, { h: 115.5 })], [bar(99), bar(85, { o: 86, h: 87, l: 84 })], [bar(99), bar(100, { h: 116, l: 89 })], [bar(99), bar(120, { o: 118, h: 121 })]]
+    for (const rows of cases) {
+        const a = play(rows, 0, P), b = play(rows, 0, P, { ...DEFAULTS, exit: 'half', partial: 1 }, { pivots: [], atrs: ONE })
+        assert.deepEqual([b.k, b.exit, b.reason], [a.k, a.exit, a.reason])
+    }
+})
+
 test('toFourHour: a session’s first four hourly bars, then its rest', () => {
     const h = (day, o, hi, lo, c) => ({ day, open: o, high: hi, low: lo, close: c })
     const bars = [h('d1', 10, 11, 9, 10.5), h('d1', 10.5, 12, 10, 11), h('d1', 11, 11.5, 10.8, 11.2), h('d1', 11.2, 11.4, 8, 9),
