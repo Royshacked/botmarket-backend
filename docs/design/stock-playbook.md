@@ -170,6 +170,44 @@ he places the levels; code plays them forward, fixed — the Talos replay harnes
 chart twice), and FORWARD grading of every real call. The record goes back to him per stock ("on MTG your swing-low
 stops were swept 4 of 10 times") — his judgement, corrected by his own record: that is the learning.
 
+## Test 1 — the approach as fixed rules, on history (declared 2026-10-30, before the run)
+
+Roy: "do we have a way to test this approach?" → "Run". A MECHANICAL stand-in for the judgement: does the STRUCTURE (the
+reversal thesis, the stop below the last sellers' swing, the target at the start of the fall, the entry level from R:R,
+strength before entry) have an edge at all? `services/thesisLab.service.js` (pure), `scripts/lab-thesis.mjs`.
+
+- **Universe:** the point-in-time S&P 500 (§30 of screener-lab.md; member on the signal day; the ≥ 90% bar coverage
+  rule), daily bars 2019-01-02 → 2026-10-26 (`sp500-2019-01-02_2026-10-26.json`). Signals from the 261st session on.
+  Price ≥ $5, 20-day dollar volume ≥ $5M. **Held out:** signals from 2025-10-23 (the lab's held-out day).
+- **ATR** — the mean true range of the last 20 sessions, known at the close.
+- **Swings** — a zigzag on highs/lows with a threshold k × ATR: a swing low is CONFIRMED on the first bar whose high is
+  k × ATR above it (a swing high, mirrored); known from that close on, never before. **k = 1.5** (1.0 and 2.0 shown).
+- **The reversal thesis, signalled at the close of session i (long):**
+  1. L\* — the lowest low of the last 60 sessions, a confirmed swing low (bar j\*).
+  2. The fall — H0 = the highest high in the 40 sessions before j\*; H0 − L\* ≥ 5 × ATR(j\*).
+  3. AR (the automatic rally) — the first confirmed swing high after j\*.
+  4. The sign of strength — close[i] > AR, the first such close, within 60 sessions of j\*; close[i] < H0.
+- **The plan at that close:** stop S = the LAST confirmed swing low at or after j\* − 0.2 × ATR (the last sellers'
+  swing); target T = H0; entry level E = (T + 1.5 S) / 2.5 (R:R 1.5 at E). Rule A: (E − S) / E ≤ 10%, else no trade.
+- **Entry, within 20 sessions (Roy: the user sets the wait; 20 for the test):** close[i] ≤ E → in at close[i] (already in
+  the area; the sign of strength is the strength). Otherwise, on a later session m: a low ≤ S first → cancelled; a
+  session with low ≤ E that closes up on its open and in the upper half of its range (DAILY stand-in for Talos's
+  1h/4h strength) → in at close[m] if close[m] ≤ E + 0.1 (E − S) (the confirm's drift tolerance).
+- **Exit, fixed levels:** from the next session — open ≤ S → out at the open; low ≤ S → out at S; open ≥ T → out at the
+  open; high ≥ T → out at T; both in one session → the STOP (conservative). 250 sessions with neither → out at the close
+  (counted). Planned size: the result in R = (exit − entry) / (entry − S), less the round-trip cost (`costFor`) in R.
+- **Shorts:** the mirror (a rise to H\*, the fall to the first swing low, a close under it; stop over the last swing
+  high; target the low before the rise), shown.
+- **Baseline (geometry without the thesis):** every 10th session per name, the same plan from the last confirmed swing
+  low and the highest high of the last 40 sessions (above the close), the same entry and exit rules.
+- **Read:** trades, hit rate (target before stop) against the 40% that breaks even at 1.5R, mean R after cost, median
+  days held; the 5–95% range of the mean R from a bootstrap over calendar MONTHS (2,000 draws); by year, by SPY regime.
+- **PASS only if all hold:** before the held-out day the mean R > 0 with the range's 5% end > 0; held out mean R > 0;
+  above the baseline's mean R in both periods. Variants (k, the buffer 0 / 0.5 ATR, R:R 2, no strength check, SPY over
+  its 200-day only) are shown, not for the bar — each is another try.
+- **Known limits:** a rough stand-in for Mentor's and Talos's eye; no "the company is a long" (Prometheus did not exist
+  then); daily strength, not 1h/4h; today's adjusted bars; the stop-first rule on a two-sided day understates.
+
 ## Pieces to build
 
 1. **Calculation engine** — the profile per timeframe; the playbook tester (a fixed menu of setups, long and short, per
