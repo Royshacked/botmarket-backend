@@ -182,6 +182,11 @@ export function play(rows, i, { S, T, E }, o = DEFAULTS) {
         if (b.low <= E && b.close > b.open && b.close >= (b.high + b.low) / 2 && b.close <= E + o.drift * (E - S)) { m = x; entry = b.close; from = x + 1 }
     }
     if (m == null) return null
+    return exitDaily(rows, m, entry, from, { S, T }, o)
+}
+
+/** The fixed-level exit on daily bars from session `from` (a gap fills at the open; both levels in one bar → the stop). */
+function exitDaily(rows, m, entry, from, { S, T }, o) {
     for (let x = from; x < rows.length && x <= m + o.maxHold; x++) {
         const b = rows[x], gap = x > m
         if (gap && b.open <= S) return { m, entry, k: x, exit: b.open, reason: 'stop' }
@@ -191,6 +196,52 @@ export function play(rows, i, { S, T, E }, o = DEFAULTS) {
         if (x === m + o.maxHold) return { m, entry, k: x, exit: b.close, reason: 'time' }
     }
     return { m, entry, k: null, exit: null, reason: 'open' }
+}
+
+/** Hourly bars → 4-hour: each session's first four hourly bars, then its rest. `bars` — `[{ day, open, high, low, close }]`. Pure. */
+export function toFourHour(bars) {
+    const out = []
+    let k = 0
+    for (let q = 0; q < bars.length; q++) {
+        const b = bars[q]
+        k = q > 0 && bars[q - 1].day === b.day ? k + 1 : 0
+        const last = out.at(-1)
+        if (last && last.day === b.day && (k < 4) === last.first) {
+            last.high = Math.max(last.high, b.high); last.low = Math.min(last.low, b.low); last.close = b.close
+        } else out.push({ day: b.day, open: b.open, high: b.high, low: b.low, close: b.close, first: k < 4 })
+    }
+    return out.map(({ first, ...b }) => b)
+}
+
+/**
+ * TEST 1c — the entry gated by STRENGTH ON AN INTRADAY CHART (Roy, 2026-10-30: "and if Talos would go in only when price
+ * is strong?"), a mechanical stand-in for Talos's read. `bars` — the 1h (or 4h) bars of the sessions after the signal,
+ * oldest first, each `{ day, open, high, low, close }`, `day` matching `dayOf[x]` of the daily `rows`. Watching starts
+ * once price is at or under E (at once when the signal closed there); strength = a bar closing over the HIGH of the bar
+ * that made the lowest low since — the sellers' last push failed — in at its close if within `drift` × risk over E. A low
+ * at or under the stop first cancels; past `wait` sessions, no trade. The exit: the entry session's later intraday bars,
+ * then the daily rule. → as `play`, or null. Pure.
+ */
+export function playIntraday(rows, dayOf, i, bars, { S, T, E }, o = DEFAULTS) {
+    if (rows[i].close <= S) return null
+    const lastDay = dayOf[Math.min(rows.length - 1, i + o.wait)]
+    let touched = rows[i].close <= E, low = null
+    for (let q = 0; q < bars.length; q++) {
+        const b = bars[q]
+        if (b.day > lastDay) break
+        if (b.low <= S) return null
+        if (!touched) { if (b.low <= E) { touched = true; low = b } continue }
+        if (!low || b.low < low.low) { low = b; continue }
+        if (b.close > low.high && b.close <= E + o.drift * (E - S)) {
+            const m = dayOf.indexOf(b.day, i)
+            for (let r = q + 1; r < bars.length && bars[r].day === b.day; r++) {
+                if (bars[r].low <= S) return { m, entry: b.close, k: m, exit: S, reason: 'stop' }
+                if (bars[r].high >= T) return { m, entry: b.close, k: m, exit: T, reason: 'target' }
+            }
+            return exitDaily(rows, m, b.close, m + 1, { S, T }, o)
+        }
+    }
+    return null
 }
 
 /**

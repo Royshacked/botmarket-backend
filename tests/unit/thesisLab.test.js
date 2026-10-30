@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mirror, atr, swings, reversalSignals, controlSignals, baselineSignals, plan, play, inR, summarize, DEFAULTS } from '../../services/thesisLab.service.js'
+import { mirror, atr, swings, reversalSignals, controlSignals, baselineSignals, toFourHour, playIntraday, plan, play, inR, summarize, DEFAULTS } from '../../services/thesisLab.service.js'
 
 // The THESIS lens's test 1 (Roy, 2026-10-30) — the reversal thesis as fixed rules (docs/design/stock-playbook.md §Test 1).
 
@@ -126,6 +126,40 @@ test('play: a gap through the stop fills at the open; a session touching both is
 test('play: without the strength check — in at the level on the first touch, the stop on that same session counts', () => {
     const rows = [bar(104), bar(95, { o: 101, h: 101, l: 89 })]
     assert.deepEqual(play(rows, 0, P, { ...DEFAULTS, strength: false }), { m: 1, entry: 100, k: 1, exit: 90, reason: 'stop' })
+})
+
+test('toFourHour: a session’s first four hourly bars, then its rest', () => {
+    const h = (day, o, hi, lo, c) => ({ day, open: o, high: hi, low: lo, close: c })
+    const bars = [h('d1', 10, 11, 9, 10.5), h('d1', 10.5, 12, 10, 11), h('d1', 11, 11.5, 10.8, 11.2), h('d1', 11.2, 11.4, 8, 9),
+        h('d1', 9, 9.5, 8.5, 9.2), h('d1', 9.2, 10, 9, 9.9), h('d2', 10, 10.5, 9.8, 10.1)]
+    assert.deepEqual(toFourHour(bars), [h('d1', 10, 12, 8, 9), h('d1', 9, 10, 8.5, 9.9), h('d2', 10, 10.5, 9.8, 10.1)])
+})
+
+const days = ['d0', 'd1', 'd2', 'd3']
+const hb = (day, c, { o = c, h = c + 0.3, l = c - 0.3 } = {}) => ({ day, open: o, high: h, low: l, close: c })
+
+test('playIntraday: waits for the touch, then a close over the high of the low bar — in there', () => {
+    const rows = [bar(104), bar(101), bar(103), bar(114, { h: 116 })]
+    const bars = [hb('d1', 103), hb('d1', 100.5, { l: 99.5 }), hb('d1', 99, { h: 99.6, l: 98 }), hb('d1', 98.8, { l: 98.4 }), hb('d1', 99.9),
+        hb('d2', 101), hb('d2', 103)]
+    const t = playIntraday(rows, days, 0, bars, P)
+    assert.equal(t.entry, 99.9, 'over 99.6 — the high of the bar that made the low (98)')
+    assert.equal(t.m, 1)
+    assert.deepEqual([t.k, t.exit, t.reason], [3, 115, 'target'])
+})
+
+test('playIntraday: the stop zone first cancels; strength too far over the level is not taken', () => {
+    const rows = [bar(104), bar(95), bar(95)]
+    assert.equal(playIntraday(rows, days, 0, [hb('d1', 99, { l: 98 }), hb('d1', 93, { l: 89.5 }), hb('d1', 100)], P), null)
+    const far = [hb('d1', 99, { h: 99.5, l: 98 }), hb('d1', 102, { l: 101 })]
+    assert.equal(playIntraday(rows, days, 0, far, P), null, '102 > E + 0.1 × 10')
+})
+
+test('playIntraday: a stop later in the entry session is taken on that session', () => {
+    const rows = [bar(99), bar(95), bar(95)]
+    const bars = [hb('d1', 98.5, { l: 98 }), hb('d1', 99, { h: 99.2 }), hb('d1', 94, { l: 89 })]
+    const t = playIntraday(rows, days, 0, bars, P)
+    assert.deepEqual([t.entry, t.k, t.exit, t.reason], [99, 1, 90, 'stop'])
 })
 
 test('play: past the wait with no entry → null; held to maxHold → out at the close', () => {

@@ -328,6 +328,24 @@ see what Talos reads on the 1h / 4h. Test 1c puts a mechanical 1h / 4h stand-in 
 - **Read:** does the hourly check raise the mean R (better entries, fewer losers) or only cut the count? Count, hit,
   mean R, and the share of signals that never enter.
 
+### Test 1c — result (2026-10-30): strength before entry does not move the edge
+
+On a SAMPLE (Roy chose it — the full ~14k hourly reads take ~2 hours at FMP's ~80 a minute, and the laptop ran out of
+memory twice): the 4,800 signals already fetched (a block of whole names, every year) + 1,200 drawn at random from the
+rest (seed 11, `--sample 1200`); 5,890 with hourly bars. Long, reversal, the same signals entered four ways:
+
+| Entry | Before 2025-10-23 | Held out |
+|---|---|---|
+| Daily strength (test 1b) | 2,066 (42% of signals), hit 38.4%, **+0.10R** (+0.02 … +0.19) | 334, +0.12R |
+| No strength | 3,619 (73%), hit 42.3%, **+0.10R** (+0.02 … +0.18) | 579, +0.09R |
+| **1h strength** | 2,593 (52%), hit 38.6%, **+0.10R** (+0.01 … +0.18) | 419, +0.09R |
+| **4h strength** | 1,616 (32%), hit 38.4%, **+0.08R** (−0.01 … +0.16) | 259, +0.10R |
+
+- **No effect on the edge:** every entry ≈ +0.1R. Strength only CUTS the count (73% of signals enter without it, 52%
+  with the 1h check, 32% with the 4h) — it skips trades that would have done as well as the ones it takes.
+- The stand-in is mechanical (a close over the high of the bar that made the low); Talos's read may see more — but on
+  this evidence, waiting for strength buys fewer trades, not better ones.
+
 ## Pieces to build
 
 1. **Calculation engine** — the profile per timeframe; the playbook tester (a fixed menu of setups, long and short, per
