@@ -155,6 +155,14 @@ down for real; how often the target came before the stop (at 1.5, a hit rate abo
 `trade_mode`). The Hotlist's **"Build with Mentor"** picks it automatically (Roy, 2026-10-30). Working name `thesis` (stop = where
 the thesis breaks) — Roy did not pick a name; changeable.
 
+**The setup Talos gets (Roy, 2026-10-30):** an entry LEVEL — the highest entry passing the minimum R:R — valid "at the
+level and below"; and STRENGTH at the level on the 1hr or 4hr, which TALOS judges. Built on what exists
+(docs/desks/mentor-talos.md): the entry leg's `price` = the level; a conditional entry (not `limit`); `pace_rungs:
+["1hr","4hr"]`; a `judgment` condition for the strength (primary). Above the level → `wait` (the prompt) and a confirm
+more than 0.1R worse is refused once (`priceMovedRefusal`); past the stop never fires. `enter` → the confirm card →
+market. No new Talos machinery. Open: size on an entry below the level (keep the planned size, or resize to the full
+risk); a hint to Talos on what strength means in this thesis, or none; how long an unfilled setup waits.
+
 **Judgement stays testable:** code hands Mentor the facts (swing highs/lows, volume spikes, the normal move, the range) —
 he picks levels, he never invents the numbers under them. Tested by REPLAY (the chart cut at a past date, nothing after;
 he places the levels; code plays them forward, fixed — the Talos replay harness's idea), a CONSISTENCY check (the same
