@@ -152,7 +152,8 @@ down for real; how often the target came before the stop (at 1.5, a hit rate abo
    fixed — CODE computes them; Mentor's call is within them (enter now, or wait for the pullback and strength).
 
 **A new Mentor lens** beside `discretionary` / `smc` / `institutional` (`services/analysisModes.js`, saved as the setup's
-`trade_mode`). A click from the Hotlist picks it automatically (which click, and the name: open).
+`trade_mode`). The Hotlist's **"Build with Mentor"** picks it automatically (Roy, 2026-10-30). Working name `thesis` (stop = where
+the thesis breaks) — Roy did not pick a name; changeable.
 
 **Judgement stays testable:** code hands Mentor the facts (swing highs/lows, volume spikes, the normal move, the range) —
 he picks levels, he never invents the numbers under them. Tested by REPLAY (the chart cut at a past date, nothing after;
