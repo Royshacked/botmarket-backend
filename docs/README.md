@@ -62,6 +62,7 @@ the plan and what the build settled differently (the rule at the bottom of this 
 
 | Doc | Status |
 |---|---|
+| [stock-playbook.md](./design/stock-playbook.md) | **Design only (2026-10-30)** — how to trade THIS stock: an agent → a calculation system → a verdict, with a memory per stock and grading; two layers (playbook, current read); a tool for Mentor; laptop first, options left out |
 | [mentor-challenge.md](./design/mentor-challenge.md) | **BUILD RECORD — phases 0–4 shipped 2026-09-26**; the contract is mentor-talos.md §The paths not taken. The three mechanisms (closed taxonomy + rejects pool, blinded flip test, runaway handoff), the 10 principles, and the two options rejected with the argument that killed them |
 | [talos-per-candle.md](./design/talos-per-candle.md) | **BUILD RECORD** — shipped 2026-09-17; the contract is mentor-talos.md. The plan, the decisions, what the build settled differently |
 | [triggered-setups.md](./design/triggered-setups.md) | Design only — a guard's price term becomes an array over prices and indicators; the level need not exist at authoring time |

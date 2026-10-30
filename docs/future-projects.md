@@ -59,6 +59,9 @@ To decide when designed:
 
 ## 5. Test a pattern on one ticker's history — with the lab we built
 
+> **SUPERSEDED 2026-10-30** by [design/stock-playbook.md](design/stock-playbook.md) — Roy restarted the question
+> from scratch: a system that gets to know a stock and says how to trade it. Kept below as the earlier thinking.
+
 Roy (2026-10-29): "the ML we have built — can we use it to check a certain pattern in one ticker,
 historically?" E.g. "NVDA after a 3-day pullback into earnings", "XOM when oil gaps up".
 
