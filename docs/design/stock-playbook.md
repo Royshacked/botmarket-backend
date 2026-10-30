@@ -160,8 +160,9 @@ level and below"; and STRENGTH at the level on the 1hr or 4hr, which TALOS judge
 (docs/desks/mentor-talos.md): the entry leg's `price` = the level; a conditional entry (not `limit`); `pace_rungs:
 ["1hr","4hr"]`; a `judgment` condition for the strength (primary). Above the level → `wait` (the prompt) and a confirm
 more than 0.1R worse is refused once (`priceMovedRefusal`); past the stop never fires. `enter` → the confirm card →
-market. No new Talos machinery. Open: size on an entry below the level (keep the planned size, or resize to the full
-risk); a hint to Talos on what strength means in this thesis, or none; how long an unfilled setup waits.
+market. No new Talos machinery. Decided (Roy, 2026-10-30): an entry below the level keeps the PLANNED size (the risk
+is smaller than planned, never resized up); NO hint on strength — Talos judges it on his own; how long an unfilled
+setup waits is not decided — for now (dev) the USER sets it (Mentor asks).
 
 **Judgement stays testable:** code hands Mentor the facts (swing highs/lows, volume spikes, the normal move, the range) —
 he picks levels, he never invents the numbers under them. Tested by REPLAY (the chart cut at a past date, nothing after;
