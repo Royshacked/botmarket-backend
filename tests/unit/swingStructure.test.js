@@ -59,6 +59,9 @@ test('entryLevel: a short mirrors it; nonsense is a problem, not a number', () =
     assert.deepEqual([s.level, s.rr_at_level], [100, 1])
     assert.match(entryLevel({ stop: 30, target: 29, minRR: 1.5 }).problem, /over the stop/)
     assert.match(entryLevel({ stop: 26.9, target: 31.6 }).problem, /risk limit/)
+    assert.match(entryLevel({ stop: 26.9, target: 31.6, riskPct: 100 }).problem, /between 0 and 100/)
+    assert.match(entryLevel({ stop: 26.9, target: 31.6, riskPct: 0 }).problem, /between 0 and 100/)
+    assert.match(entryLevel({ stop: 26.9, target: 31.6, minRR: 0 }).problem, /over 0/)
 })
 
 test('toWeekly: Monday-keyed weeks, the high, low, last close and summed volume', () => {

@@ -601,7 +601,7 @@ export function _buildSeedSection(seed) {
     const lens = String(seed.recommended_mode ?? '').trim()
     // The Hotlist's "Build with Mentor" opens in the THESIS lens (Roy, 2026-10-30) — the user's own pick of the button,
     // not Argus's: still said out loud, still theirs to change.
-    const fromList = Boolean(seed.hotlist_facts || seed.book_facts)
+    const fromList = Boolean(seed.hotlist || seed.book || seed.hotlist_facts || seed.book_facts)
     return `
 
 ${seed.book_facts ? "FROM THE HOUSE'S BOOK" : 'ARGUS HANDED YOU THIS NAME'}: ${seed.ticker}${seed.direction ? ` (${seed.direction})` : ''}`

@@ -5,7 +5,7 @@ import { sanitizeScanSeed } from '../../services/scanSeed.util.js'
 import { normalizeSetup } from '../../services/setup.schema.js'
 import { _buildSeedSection } from '../../services/agents/mentor.agent.service.js'
 import { lensLine } from '../../monitoring/assess.shared.js'
-import { priceStructureText, entryLevelText, unmirrorFacts } from '../../services/tools/thesisStructure.tools.js'
+import { priceStructureText, entryLevelText, unmirrorFacts, targetWords } from '../../services/tools/thesisStructure.tools.js'
 
 // THE THESIS LENS (Roy, 2026-10-30; docs/design/stock-playbook.md) — the stop where the thesis breaks, the entry from
 // the user's risk, the Hotlist's Build with Mentor opening in it, and Talos told what the setup is.
@@ -27,6 +27,8 @@ test('the seed section: a Hotlist hand-off opens in the lens as the Hotlist’s,
     assert.doesNotMatch(fromList, /Argus recommends/)
     const book = _buildSeedSection({ ticker: 'MTG', recommended_mode: 'thesis', book_facts: 'Prometheus: buy', book_name: 'swing' })
     assert.match(book, /Build with Mentor, which builds in the thesis lens/)
+    const unread = _buildSeedSection({ ticker: 'MTG', recommended_mode: 'thesis', hotlist: { board: 'hb_2026-10-29_week', column: 'week' } })
+    assert.match(unread, /Hotlist's Build with Mentor/, 'a board that could not be read back is still the Hotlist’s')
     const argus = _buildSeedSection({ ticker: 'MTG', recommended_mode: 'smc' })
     assert.match(argus, /Argus recommends the smc lens/, 'an Argus hand-off is unchanged')
 })
@@ -67,12 +69,22 @@ test('get_price_structure: the facts as JSON for the chart asked, two years of d
 test('get_price_structure for a short: the mirrored read turned back the right way up', () => {
     const f = unmirrorFacts({ close: -50, swings: [{ type: 'low', price: -55 }], last_swing_low: { type: 'low', price: -55 },
         last_swing_high: { type: 'high', price: -45 }, control: 'buyers', fall: { from: { price: -40 }, low: { price: -60 }, atrs: 6 },
-        candidates: { stop: -56, deep_stop: -61, target: -40, target_kind: 'the 40-session high (the start of the fall…)' }, heavy_days: [{ close: -50, change_pct: 3 }] })
+        candidates: { stop: -56, deep_stop: -61, target: -40, target_kind: 'range_top', lookback_bars: 40 }, heavy_days: [{ close: -50, change_pct: 3 }] })
     assert.equal(f.close, 50)
     assert.equal(f.control, 'sellers', 'buyers of the mirror are the sellers of the chart')
     assert.equal(f.last_swing_high.price, 55, 'the stop side: the buyers’ last swing up')
     assert.deepEqual([f.candidates.stop, f.candidates.target], [56, 40])
     assert.equal(f.heavy_days[0].change_pct, -3)
+})
+
+test('the target candidate is worded for its chart and side — weeks on the weekly, the low on a short', () => {
+    const c = { target_kind: 'range_top', lookback_bars: 40 }
+    assert.match(targetWords(c, 'day'), /highest high of the last 40 sessions — the start of the fall/)
+    assert.match(targetWords(c, 'week'), /last 40 weeks/)
+    const short = targetWords(c, 'day', 'short')
+    assert.match(short, /lowest low .* start of the rise, or the trend's low/)
+    assert.doesNotMatch(short, /high/)
+    assert.match(targetWords({ target_kind: 'measured_move', lookback_bars: 40 }), /measured move — at its highs/)
 })
 
 test('get_entry_level: the level read out, or why there is none', () => {

@@ -73,7 +73,7 @@ const _r = (n, d = 2) => (Number.isFinite(n) ? Math.round(n * 10 ** d) / 10 ** d
  * THE FACTS a thesis read is judged from, as of the last bar (long side — a short reads `mirror`ed bars). `k` — the
  * swing threshold in ATRs. → `{ as_of, close, atr, atr_pct, swings (the last `keep`), last_swing_low, last_swing_high,
  * control ('buyers'|'sellers'|null) and since, last_break { date, context }, fall { from, low }, candidates { stop,
- * deep_stop, target, target_kind }, heavy_days }`, or null under 60 bars. Candidates are the lab's rules (test 1b) —
+ * deep_stop, target, target_kind (range_top | measured_move), lookback_bars }, heavy_days }`, or null under 60 bars. Candidates are the lab's rules (test 1b) —
  * a starting point Mentor judges, never the answer. Pure.
  */
 export function structureFacts(rows, { k = 1.5, buffer = 0.2, keep = 8, lookLow = 60, lookFall = 40, atHighs = 120 } = {}) {
@@ -122,7 +122,8 @@ export function structureFacts(rows, { k = 1.5, buffer = 0.2, keep = 8, lookLow 
         fall: fromJ != null && from > low60 ? { from: { date: day(fromJ), price: _r(from) }, low: { date: day(lowJ), price: _r(low60) }, atrs: _r((from - low60) / (a[lowJ] ?? a[i])) } : null,
         candidates: {
             stop: _r(stop), deep_stop: _r(low60 - buffer * a[i]),
-            target: _r(target), target_kind: top > close ? 'the 40-session high (the start of the fall, or the trend high before the pullback)' : 'measured move (at its highs)',
+            // `range_top` — the highest high of the last `lookFall` bars; `measured_move` — at the highs, that high + its height.
+            target: _r(target), target_kind: top > close ? 'range_top' : 'measured_move', lookback_bars: lookFall,
         },
         heavy_days: heavy,
     }
@@ -139,6 +140,8 @@ export function entryLevel({ stop, target, riskPct = null, minRR = null, side = 
     const none = (problem) => ({ level: null, rr_at_level: null, risk_pct_at_level: null, by: null, problem })
     if (!Number.isFinite(S) || !Number.isFinite(T) || !(sg * (T - S) > 0)) return none(`the target must be ${side === 'short' ? 'under' : 'over'} the stop`)
     if (riskPct == null && minRR == null) return none('needs a risk limit, a minimum reward to risk, or both')
+    if (riskPct != null && !(Number(riskPct) > 0 && Number(riskPct) < 100)) return none('the risk limit is a percent between 0 and 100')
+    if (minRR != null && !(Number(minRR) > 0)) return none('the minimum reward to risk must be over 0')
     const caps = []
     // R:R at E = (T − E) / (E − S) ≥ minRR  →  E ≤ (T + minRR·S) / (1 + minRR)   (the same, mirrored, for a short)
     if (minRR != null) caps.push({ by: 'reward_to_risk', at: (T + Number(minRR) * S) / (1 + Number(minRR)) })

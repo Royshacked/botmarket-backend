@@ -21,9 +21,18 @@ export function unmirrorFacts(f) {
         swings: f.swings.map(pt), last_swing_low: pt(f.last_swing_high), last_swing_high: pt(f.last_swing_low),
         control: f.control === 'buyers' ? 'sellers' : f.control === 'sellers' ? 'buyers' : f.control,
         fall: f.fall ? { rise_from: { ...f.fall.from, price: p(f.fall.from.price) }, high: { ...f.fall.low, price: p(f.fall.low.price) }, atrs: f.fall.atrs } : null,
-        candidates: { stop: p(f.candidates.stop), deep_stop: p(f.candidates.deep_stop), target: p(f.candidates.target), target_kind: f.candidates.target_kind.replace('high', 'low').replace('fall', 'rise') },
+        candidates: { ...f.candidates, stop: p(f.candidates.stop), deep_stop: p(f.candidates.deep_stop), target: p(f.candidates.target) },
         heavy_days: f.heavy_days.map(d => ({ ...d, close: p(d.close), change_pct: -d.change_pct })),
     }
+}
+
+/** The target candidate in words, for the chart and the side it was read on. Pure. */
+export function targetWords({ target_kind, lookback_bars }, timeframe = 'day', side = 'long') {
+    const bars = `${lookback_bars} ${timeframe === 'week' ? 'weeks' : 'sessions'}`
+    if (target_kind === 'measured_move') return `a measured move — at its ${side === 'short' ? 'lows' : 'highs'}, the range's height added ${side === 'short' ? 'under its low' : 'to its high'}`
+    return side === 'short'
+        ? `the lowest low of the last ${bars} — the start of the rise, or the trend's low before the bounce`
+        : `the highest high of the last ${bars} — the start of the fall, or the trend's high before the pullback`
 }
 
 /** The facts for `ticker` on the day or week chart, as the JSON text Mentor reads. `get` — the bar source (a seam). */
@@ -38,6 +47,7 @@ export async function priceStructureText({ ticker, timeframe = 'day', side = 'lo
     const rows = timeframe === 'week' ? toWeekly(days) : days
     const facts = side === 'short' ? unmirrorFacts(structureFacts(mirror(rows))) : structureFacts(rows)
     if (!facts) return `Not enough ${timeframe} history for ${sym} (${rows.length} bars; 60 needed).`
+    facts.candidates = { ...facts.candidates, target_kind: targetWords(facts.candidates, timeframe, side), lookback_bars: undefined }
     return `${sym} ${timeframe} structure, ${side} side (swings of ≥ ${facts.swing_threshold_atr}× ATR; the candidates are the tested rule's — a starting point you judge, never the answer):\n${JSON.stringify({ ...facts, swing_threshold_atr: undefined })}`
 }
 
