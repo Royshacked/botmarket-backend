@@ -51,6 +51,7 @@ const VARIANTS = [
     { id: 'buffer 0.5', o: { ...P, buffer: 0.5 } },
     { id: 'R:R 1', o: { ...P, rr: 1 } },
     { id: 'R:R 2', o: { ...P, rr: 2 } },
+    { id: 'R:R 3', o: { ...P, rr: 3 } },
     { id: 'no strength', o: { ...P, strength: false } },
     { id: 'SPY over 200d', o: P, regime: 'SPY over 200d' },
     { id: 'BASELINE', o: P, baseline: true },
@@ -98,7 +99,7 @@ const line = (label, s) => (s.n
 
 const results = {}
 for (const side of ['long', 'short']) {
-    say(`\n=== ${side.toUpperCase()} — before ${HELD_OUT} | held out (breakeven hit at R:R 1 = 50%, 1.5 = 40%, 2 = 33%)`)
+    say(`\n=== ${side.toUpperCase()} — before ${HELD_OUT} | held out (breakeven hit at R:R 1 = 50%, 1.5 = 40%, 2 = 33%, 3 = 25%)`)
     for (const { v, trades, open } of runSide(side).values()) {
         const pre = L.summarize(trades.filter(t => !t.held)), post = L.summarize(trades.filter(t => t.held))
         results[`${side}|${v.id}`] = { pre, post, trades }
@@ -115,8 +116,8 @@ for (const side of ['long', 'short']) {
         const xs = prim.filter(t => t.held === held).sort((a, b) => a.r - b.r)
         say(line(`${side} PRIMARY ${held ? 'held out' : 'before'} − top 1%`, L.summarize(xs.slice(0, Math.floor(xs.length * 0.99)))))
     }
-    // By context, the primary and the R:R 1 variant (Roy, 2026-10-30: "and if lowering to R:R 1 as a condition").
-    for (const id of CONTROL ? ['PRIMARY', 'R:R 1'] : []) {
+    // By context, the primary and the R:R 1 and 3 variants (Roy, 2026-10-30: "and if lowering to R:R 1" · "so R:R 3").
+    for (const id of CONTROL ? ['PRIMARY', 'R:R 1', 'R:R 3'] : []) {
         const xs = results[`${side}|${id}`]?.trades ?? []
         say(`${side} ${id} by context — before | held out:`)
         for (const c of ['reversal', 'continuation', 'breakout']) {

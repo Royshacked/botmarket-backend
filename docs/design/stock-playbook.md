@@ -282,6 +282,10 @@ filters, R:R 1.5 entry level, strength, fixed exits, R on the planned risk, cost
   contexts: +0.07R before / +0.02R held out (13,728 / 1,729 trades) — no better. Reversal +0.11 / +0.08R (vs +0.12 /
   +0.15 at 1.5); continuation +0.04 / +0.02; breakout +0.03 / −0.09. Short −0.11 / −0.12. More trades, no more edge — and
   less on the held-out year.
+- **R:R 3 (Roy, another try):** the entry level deep in the range — 3,992 / 620 trades, hit 24.1% (break-even 25%),
+  +0.08R / +0.04R. Reversal +0.11 / +0.09; continuation +0.01 / −0.08; breakout +0.07 / +0.02. **The ratio does not move
+  the edge** (R:R 1, 1.5, 2, 3 all ≈ +0.07R overall, ≈ +0.1R on the reversal) — it only trades the number of fills
+  against the size of a win. The edge sits in the CONTEXT, not in the ratio.
 - **Read:** "buyers in control" alone is not a buy. On fixed daily rules, the reversal after a fast fall is the only
   context with an edge; continuation and breakout need something the chart alone does not give (the fundamentals step,
   or a different stop/target), or are not this approach's trade.
