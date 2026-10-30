@@ -52,6 +52,8 @@ const COVERAGE_DIMENSIONS = ['markets', 'company', 'technicals']
 
 /** The sizing call. An ACTION, not a read — so it is kept out of the "already read" record. */
 export const SIZE_TOOL = 'size_position'
+/** Calls that compute on the user's numbers rather than read the market — never recorded as "already read". */
+const ACTION_TOOLS = new Set([SIZE_TOOL, 'get_entry_level'])
 
 // Kairos's kit plus the reasoning sidecar, APPENDED so the shared array is the exact prefix of
 // this one — the tools cache breakpoint sits inside TRADING_TOOLS, and inserting anywhere before it
@@ -164,9 +166,10 @@ async function chatStream({
     // caller: the record has to be the server's own, because it is what the NEXT turn is told it
     // already has (see recordReads — "fetch once" is unenforceable without it). The sizing call is
     // an action, not a read: recorded as read, a CHANGED size would be declined as already fetched.
+    // The thesis lens's entry arithmetic is an action too: a CHANGED risk limit must be computed again, never "cited".
     const readThisTurn = []
     for (const [name, fn] of Object.entries(toolHandlers)) {
-        toolHandlers[name] = async (...args) => { if (name !== SIZE_TOOL) readThisTurn.push(name); return fn(...args) }
+        toolHandlers[name] = async (...args) => { if (!ACTION_TOOLS.has(name)) readThisTurn.push(name); return fn(...args) }
     }
 
     // THE USER'S PRESSES, APPLIED FIRST. A button is not an inference: the client knows what was

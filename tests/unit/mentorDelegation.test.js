@@ -243,6 +243,16 @@ test('INTC: the sizing turn reads its figures in that turn, and the build finish
     assert.equal(out.build.reads?.[SIZE_TOOL], undefined, 'an action, not a read — a changed size is never declined as "already fetched"')
 })
 
+test('the thesis lens: the entry arithmetic is an action, never recorded as already read', async () => {
+    const out = await turn('', { active_asset: 'MTG', draft: draftAt(atEntries()), coverage: [] }, {
+        run: async ({ toolHandlers }) => {
+            await toolHandlers.get_entry_level({ stop: 26.9, target: 31.6, min_rr: 1.5 })
+            return ''
+        },
+    })
+    assert.equal(out.build.reads?.get_entry_level, undefined, 'a changed risk limit is computed again, never "already read"')
+})
+
 test('the sizing tool refuses a size that is not the user\'s shape, and records nothing', async () => {
     let report = null
     const out = await turn('', { active_asset: 'PACB', draft: draftAt(atEntries()), coverage: [] }, {
