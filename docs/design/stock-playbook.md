@@ -208,6 +208,40 @@ strength before entry) have an edge at all? `services/thesisLab.service.js` (pur
 - **Known limits:** a rough stand-in for Mentor's and Talos's eye; no "the company is a long" (Prometheus did not exist
   then); daily strength, not 1h/4h; today's adjusted bars; the stop-first rule on a two-sided day understates.
 
+### Test 1 — result (2026-10-30): long PASSES, modestly; short FAILS
+
+Two changes after the first run, both reported: (1) a BUG — a signal whose close was already at or under the stop (the
+last sellers' low broke before the signal) was "entered"; now no trade (and a touch-entry gapping under the stop). (2) R
+measured on the PLANNED risk (E − S), not the declared entry − S — Roy's "keep the planned size" makes a fill near the
+stop risk less money, not more R; the declared measure blew up near the stop (a 58R trade, NaN at buffer 0). The first
+run (declared measure, with the bug) also passed: +0.12R before (+0.01 … +0.24), +0.19R held out.
+
+638 names, 2019-12 → 2026-10. Mean R after cost, 5–95% month-bootstrap range:
+
+| | before 2025-10-23 | held out |
+|---|---|---|
+| **Long PRIMARY** | 3,568 trades, hit 37.9%, **+0.12R** (+0.04 … +0.21) | 476, hit 38.2%, **+0.14R** (−0.03 … +0.28) |
+| Long BASELINE (geometry, no thesis) | 33,538, hit 31.9%, +0.07R (+0.01 … +0.13) | 4,790, +0.03R (−0.06 … +0.13) |
+| **Short PRIMARY** | 4,730, hit 27.1%, **−0.12R** (−0.19 … −0.06) | 556, **−0.24R** (−0.32 … −0.16) |
+| Short BASELINE | −0.09R | −0.10R |
+
+- **The bar (long): PASS** — every check. But the held-out range crosses zero, and the edge over the baseline is
+  ~+0.05R before / ~+0.11R held out: part of the long result is the rising market every long earned.
+- **Robust across the variants:** every long variant +0.09 … +0.18R (k 1.0 / 2.0, buffer 0 / 0.5, R:R 2, SPY over its
+  200-day). Not a lucky setting.
+- **Hit 38% under the 40% break-even, yet positive:** most entries are UNDER the level (2/3 already there at the
+  signal), so a winner averages ~1.7R on the planned risk and a loser ~−0.8R. The median trade LOSES (−0.64R).
+- **By year:** 2019 +0.20, 2020 +0.39, 2021 +0.26, **2022 −0.13** (the bear year), 2023 +0.12, 2024 +0.08, 2025 +0.01,
+  2026 +0.20. **By regime:** stormy markets better (+0.17 over the 200-day, +0.21 under) than calm (+0.08).
+- **Strength (daily stand-in) adds little:** without it +0.11R / +0.14R on more trades. Talos's 1h/4h eye is untested.
+- **Without the best 1% of trades:** +0.09R (+0.01 … +0.18) / +0.11R — not carried by a few gaps.
+- **Shorts: no.** The mirrored reversal loses in every year but 2022–23 and in every regime, and worse than its baseline
+  held out — topping reversals in the S&P 500 of 2019–2026 are not this structure's mirror.
+
+**Read:** the long structure has a small, steady, real-looking edge (~+0.1R a trade) on fixed rules — a base the
+judgement must beat, not a reason by itself. Next: test 2 (Mentor's and Talos's judgement on a replay sample) against
+this +0.12R; the short side needs its own thesis, not the mirror.
+
 ## Pieces to build
 
 1. **Calculation engine** — the profile per timeframe; the playbook tester (a fixed menu of setups, long and short, per
