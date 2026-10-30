@@ -307,6 +307,27 @@ filters, R:R 1.5 entry level, strength, fixed exits, R on the planned risk, cost
   context with an edge; continuation and breakout need something the chart alone does not give (the fundamentals step,
   or a different stop/target), or are not this approach's trade.
 
+## Test 1c — strength on the 1h / 4h before entry (declared 2026-10-30, before the run)
+
+Roy: "and if Talos would go in only when price is strong — would it affect?" The daily stand-in for strength changed
+nothing (with +0.12 / without +0.11R) — but 2/3 of the trades entered on the signal's own close, and a daily bar cannot
+see what Talos reads on the 1h / 4h. Test 1c puts a mechanical 1h / 4h stand-in in front of EVERY entry.
+`scripts/lab-thesis-hourly.mjs`, `playIntraday` in the service.
+
+- **Signals:** test 1b's REVERSAL context (where the edge is), primary settings (k 1.5, buffer 0.2, R:R 1.5 entry
+  level, rule A). Long. FMP 1-hour bars from the session after the signal through the 20-session wait (cached in
+  `data/lab/thesis-h1.json`); 4-hour = each session's first four hourly bars and its rest.
+- **Strength (the stand-in):** watching starts once price is at or under the entry level E (at once, if the signal
+  closed under it). Track the lowest bar since; strength = a bar CLOSING ABOVE THE HIGH OF THE BAR THAT MADE THAT LOW —
+  sellers' last push failed, buyers took it back — in at that bar's close, if ≤ E + 0.1 (E − S). A low at or under the
+  stop first cancels. No entry within the wait → no trade.
+- **Exit:** the entry session's remaining hourly bars, then daily as before (gaps fill at the open; both levels in one
+  bar → the stop). R on the planned risk, less the cost.
+- **Compared on the SAME signals:** the daily stand-in (test 1b), no strength (in at the signal's close or the first
+  touch of E), 1h strength, 4h strength. Before / held out, the month bootstrap.
+- **Read:** does the hourly check raise the mean R (better entries, fewer losers) or only cut the count? Count, hit,
+  mean R, and the share of signals that never enter.
+
 ## Pieces to build
 
 1. **Calculation engine** — the profile per timeframe; the playbook tester (a fixed menu of setups, long and short, per
