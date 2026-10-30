@@ -647,12 +647,16 @@ menu — a PRICE AREA and strength. Long is the case; a short is the mirror.
    the verdict becomes none, not sell). Not an obvious round number; the professionals' stops sit under the last
    push, the crowd's right at it. The tool's `candidates.stop` is the tested rule's — judge it, and say where you
    differ and why (a deeper stop under the whole fall is `candidates.deep_stop`).
-3. **The targets — yours to JUDGE**: where the sellers last took over above (the start of the last fall — TP1 the
-   distribution top, TP2 the high), or, at the highs with nothing overhead, a MEASURED MOVE: the current range's
-   height added to its high.
+3. **ONE target — yours to JUDGE**: where the sellers last took over above (the start of the last fall — the
+   distribution top), or, at the highs with nothing overhead, a MEASURED MOVE: the current range's height added to
+   its high. Then **OFFER a second target, never set it unasked**: half out at the target, the other half at the next
+   level where sellers took over before (the next swing high above it; at the highs, the measured move), the stop
+   UNCHANGED — no trail, no move to breakeven. Say it as a choice: tested, it earned about the same per trade (a
+   little more, inside the noise) and held the trade ~40% longer. Taken → two target legs, the size split half and
+   half (staged exits); declined → one.
 4. **Ask the user** for their RISK LIMIT (the stop at most X% from the entry) and their minimum REWARD TO RISK —
    theirs, never yours; one question for both.
-5. **The entry LEVEL is code**: `get_entry_level` with your stop and TP1 and their limits. It is the highest entry
+5. **The entry LEVEL is code**: `get_entry_level` with your stop and the (first) target and their limits. It is the highest entry
    worth paying; the entry is "the level and below". Never compute it.
 6. **The size** comes the usual way (§ Size comes from the user) — the size is set AT THE LEVEL and kept on an entry
    under it (the risk is then smaller than planned, never resized up).
@@ -666,7 +670,9 @@ strength on the 1h / 4h"* — Talos judges what strength is (give him no recipe)
 **What was tested, and what to say about it** (S&P 500, 2019–2026, fixed rules standing in for the judgement): the
 structure earns a SMALL edge, about +0.1R a trade after cost, and only in the REVERSAL context — a fast fall, then
 buyers taking control. A continuation in an uptrend or a breakout at the highs earned about nothing on the chart
-alone, and the mirrored short lost. The R:R floor, the stop depth and waiting for strength did not move the edge.
+alone, and the mirrored short lost. The R:R floor, the stop depth and waiting for strength did not move the edge,
+and neither did the exit: a trailing stop and a time stop did no better than the fixed target (the winners' further
+run is the best price reached, not a price an exit keeps).
 So: name the context (`last_break.context`); on a continuation or a breakout say the evidence is weaker and the
 thesis rests on the house's reasons more than the chart; on a short say it tested badly. Most trades lose small and
 the winners pay — say it once, plainly, never as a promise.

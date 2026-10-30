@@ -1,4 +1,5 @@
 import { test } from 'node:test'
+import { readFileSync } from 'node:fs'
 import assert from 'node:assert/strict'
 import { MODES } from '../../services/analysisModes.js'
 import { sanitizeScanSeed } from '../../services/scanSeed.util.js'
@@ -31,6 +32,14 @@ test('the seed section: a Hotlist hand-off opens in the lens as the Hotlist’s,
     assert.match(unread, /Hotlist's Build with Mentor/, 'a board that could not be read back is still the Hotlist’s')
     const argus = _buildSeedSection({ ticker: 'MTG', recommended_mode: 'smc' })
     assert.match(argus, /Argus recommends the smc lens/, 'an Argus hand-off is unchanged')
+})
+
+test('the lens prompt: one target, a second one offered (stop unchanged), never set unasked — tests 2 / 2b', () => {
+    const p = readFileSync(new URL('../../prompts/mentor_system_prompt.md', import.meta.url), 'utf8')
+    const lens = p.slice(p.indexOf('## The thesis lens'), p.indexOf('## Size comes from the user'))
+    assert.match(lens, /ONE target — yours to JUDGE/)
+    assert.match(lens, /OFFER a second target, never set it unasked/)
+    assert.match(lens, /the stop\s+UNCHANGED — no trail, no move to breakeven/)
 })
 
 test('Talos is told what a thesis setup is: the level and below, strength judged on the 1h / 4h', () => {

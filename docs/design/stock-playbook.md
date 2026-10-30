@@ -434,6 +434,8 @@ Test 1b's reversal context the same (before A +0.12, E/F/G +0.13 … +0.14; held
 - Mentor's tools `get_price_structure` (day / week, long / short) and `get_entry_level`
   (`services/tools/thesisStructure.tools.js`) over `services/swingStructure.service.js` — the swing code the lab also
   uses (one mechanism). Sizing reuses `size_position`.
+- One target by default; Mentor OFFERS a second (the next sellers' level, half the size, the stop unchanged) and
+  never sets it unasked — tests 2 / 2b (Roy, 2026-10-30: "keep one target, Mentor offers another").
 - Talos's lens line for it (`monitoring/assess.shared.js` lensLine): the level and below, strength on the 1h / 4h.
 - The Hotlist's Build with Mentor sends `recommended_mode: 'thesis'` (frontend `hotlist.utils.hotlistHandoff`); the
   seed text says it is the Hotlist's lens, not Argus's; a hand-off lens is validated against MODES.
