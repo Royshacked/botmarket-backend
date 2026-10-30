@@ -277,6 +277,11 @@ filters, R:R 1.5 entry level, strength, fixed exits, R on the planned risk, cost
   Continuation and breakout trades add count (median 21 trades a name instead of 7) but no edge: their means are the
   market's drift that every long earned.
 - 2022 −0.18R again; shorts lose in every context.
+- **R:R 1 as the condition (Roy, a variant — another try):** the entry level moves to halfway between stop and target,
+  more setups fill, the hit rate rises to ~46% (break-even 50% at the level; entries under it pay more). Long, all
+  contexts: +0.07R before / +0.02R held out (13,728 / 1,729 trades) — no better. Reversal +0.11 / +0.08R (vs +0.12 /
+  +0.15 at 1.5); continuation +0.04 / +0.02; breakout +0.03 / −0.09. Short −0.11 / −0.12. More trades, no more edge — and
+  less on the held-out year.
 - **Read:** "buyers in control" alone is not a buy. On fixed daily rules, the reversal after a fast fall is the only
   context with an edge; continuation and breakout need something the chart alone does not give (the fundamentals step,
   or a different stop/target), or are not this approach's trade.

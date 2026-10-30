@@ -49,6 +49,7 @@ const VARIANTS = [
     { id: 'k 2.0', o: { ...P, k: 2.0 } },
     { id: 'buffer 0', o: { ...P, buffer: 0 } },
     { id: 'buffer 0.5', o: { ...P, buffer: 0.5 } },
+    { id: 'R:R 1', o: { ...P, rr: 1 } },
     { id: 'R:R 2', o: { ...P, rr: 2 } },
     { id: 'no strength', o: { ...P, strength: false } },
     { id: 'SPY over 200d', o: P, regime: 'SPY over 200d' },
@@ -61,7 +62,7 @@ const VARIANTS = [
  * laptop out of memory, 2026-10-30).
  */
 function runSide(side) {
-    const res = new Map(VARIANTS.filter(v => side === 'long' || ['PRIMARY', 'BASELINE'].includes(v.id)).map(v => [v.id, { v, trades: [], open: 0 }]))
+    const res = new Map(VARIANTS.filter(v => side === 'long' || ['PRIMARY', 'BASELINE', 'R:R 1'].includes(v.id)).map(v => [v.id, { v, trades: [], open: 0 }]))
     for (const sym of covered) {
         const s = data.names.get(sym), rows0 = s.rows, date = s.ind.date, adv = s.ind.adv20
         const rows = side === 'short' ? L.mirror(rows0) : rows0
@@ -97,7 +98,7 @@ const line = (label, s) => (s.n
 
 const results = {}
 for (const side of ['long', 'short']) {
-    say(`\n=== ${side.toUpperCase()} — before ${HELD_OUT} | held out (breakeven hit at R:R 1.5 = 40.0%, at 2 = 33.3%)`)
+    say(`\n=== ${side.toUpperCase()} — before ${HELD_OUT} | held out (breakeven hit at R:R 1 = 50%, 1.5 = 40%, 2 = 33%)`)
     for (const { v, trades, open } of runSide(side).values()) {
         const pre = L.summarize(trades.filter(t => !t.held)), post = L.summarize(trades.filter(t => t.held))
         results[`${side}|${v.id}`] = { pre, post, trades }
@@ -114,11 +115,13 @@ for (const side of ['long', 'short']) {
         const xs = prim.filter(t => t.held === held).sort((a, b) => a.r - b.r)
         say(line(`${side} PRIMARY ${held ? 'held out' : 'before'} − top 1%`, L.summarize(xs.slice(0, Math.floor(xs.length * 0.99)))))
     }
-    if (CONTROL) {
-        say(`${side} PRIMARY by context — before | held out:`)
+    // By context, the primary and the R:R 1 variant (Roy, 2026-10-30: "and if lowering to R:R 1 as a condition").
+    for (const id of CONTROL ? ['PRIMARY', 'R:R 1'] : []) {
+        const xs = results[`${side}|${id}`]?.trades ?? []
+        say(`${side} ${id} by context — before | held out:`)
         for (const c of ['reversal', 'continuation', 'breakout']) {
-            say(line(`  ${c} · before`, L.summarize(prim.filter(t => t.context === c && !t.held), { draws: 1000 })))
-            say(line(`  ${c} · held out`, L.summarize(prim.filter(t => t.context === c && t.held), { draws: 1000 })))
+            say(line(`  ${c} · before`, L.summarize(xs.filter(t => t.context === c && !t.held), { draws: 1000 })))
+            say(line(`  ${c} · held out`, L.summarize(xs.filter(t => t.context === c && t.held), { draws: 1000 })))
         }
     }
     const by = (k) => prim.filter(t => t.reason === k).length
