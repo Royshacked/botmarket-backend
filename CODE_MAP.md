@@ -999,7 +999,9 @@ services/
                             an EPS beat of 5%+ reported the session before, from the calendar's actuals). The
                             summary rides GET /api/hotlist/outcomes as `backtest`
   swingStructure.service.js WHO IS IN CONTROL of a chart, from its swings (2026-10-30) — the shared mechanism of the
-                            THESIS lens: atr, swings (zigzag k × ATR, known only once confirmed), mirror, toWeekly,
+                            THESIS lens: STRUCTURE (the rule's settings, one home), atr, swings (zigzag k × ATR, known
+                            only once confirmed), mirror, toWeekly, controlReplay (who is in control + each break's
+                            context — the lab's controlSignals and Mentor's facts both run it), rangeTarget, lowestLow,
                             structureFacts (control, last break's context, the fall, candidate stop/target, heavy
                             days), entryLevel (the lower of the risk-limit and R:R ceilings). PURE.
   thesisLab.service.js      the THESIS lens's tests 1 / 1b / 1c (docs/design/stock-playbook.md): the approach as fixed

@@ -6,6 +6,13 @@
 //
 // Pure: bars come in (`{ date?, open, high, low, close, volume? }`, oldest first); no IO here.
 
+/**
+ * The rule's settings, one home — the lab tested these, Mentor's candidates are read with them: `k` the swing threshold
+ * in ATRs, `buffer` the stop's ATRs under the swing, `lookLow` the down move's low window, `lookFall` the target's
+ * window, `atHighs` the window a breakout clears.
+ */
+export const STRUCTURE = Object.freeze({ k: 1.5, buffer: 0.2, lookLow: 60, lookFall: 40, atHighs: 120 })
+
 /** The bars upside down: a short's chart read as a long's. Pure. */
 export const mirror = (rows) => rows.map(b => ({ ...b, open: -b.open, high: -b.low, low: -b.high, close: -b.close }))
 
@@ -67,6 +74,51 @@ export function toWeekly(rows) {
     return out.map(({ week, ...b }) => ({ ...b, date: week }))
 }
 
+/**
+ * WHO IS IN CONTROL, replayed close by close against the swings known at each bar (test 1b's rule): sellers from a close
+ * under the last confirmed swing low; buyers from the first close over the last confirmed swing high (each swing high
+ * breaks once, and only once a swing low is known). A break's context: `breakout` — the close clears the highest high
+ * of the `atHighs` bars before (as many as there are); else `reversal` — sellers were in control; else `continuation`.
+ * `onBreak({ i, lastH, lastL, before, context })` is called at each break. → the state at the last bar: `{ control,
+ * since (bar index), lastH, lastL, lastBreak { i, context } }`. Pure.
+ */
+export function controlReplay(rows, pivots, { atHighs = STRUCTURE.atHighs, onBreak = null } = {}) {
+    let p = 0, lastH = null, lastL = null, control = null, since = null, lastBreak = null
+    const used = new Set()
+    for (let i = 0; i < rows.length; i++) {
+        while (p < pivots.length && pivots[p].at <= i) { if (pivots[p].type === 'H') lastH = pivots[p]; else lastL = pivots[p]; p++ }
+        const c = rows[i].close
+        if (lastL && c < lastL.price) { if (control !== 'sellers') { control = 'sellers'; since = i } continue }
+        if (!lastH || !lastL || used.has(lastH.j) || !(c > lastH.price)) continue
+        used.add(lastH.j)
+        let prior = -Infinity
+        for (let j = Math.max(0, i - atHighs); j < i; j++) prior = Math.max(prior, rows[j].high)
+        const before = control
+        lastBreak = { i, context: c > prior ? 'breakout' : before === 'sellers' ? 'reversal' : 'continuation' }
+        if (control !== 'buyers') { control = 'buyers'; since = i }
+        onBreak?.({ i, lastH, lastL, before, context: lastBreak.context })
+    }
+    return { control, since, lastH, lastL, lastBreak }
+}
+
+/**
+ * The target candidate at bar `i`: the highest high of the `lookFall` bars before it when over the close (`range_top` —
+ * the start of the fall); at the highs, that high plus its height over `swingLow` (`measured_move`). Pure.
+ */
+export function rangeTarget(rows, i, swingLow, lookFall = STRUCTURE.lookFall) {
+    let top = -Infinity
+    for (let j = Math.max(0, i - lookFall); j < i; j++) top = Math.max(top, rows[j].high)
+    if (top > rows[i].close) return { target: top, kind: 'range_top' }
+    return { target: swingLow == null ? null : top + (top - swingLow), kind: 'measured_move' }
+}
+
+/** The lowest low of the `n` bars ending at `i` (the latest on a tie) → `{ price, j }`. Pure. */
+export function lowestLow(rows, i, n = STRUCTURE.lookLow) {
+    let price = Infinity, j = i
+    for (let x = Math.max(0, i - n + 1); x <= i; x++) if (rows[x].low <= price) { price = rows[x].low; j = x }
+    return { price, j }
+}
+
 const _r = (n, d = 2) => (Number.isFinite(n) ? Math.round(n * 10 ** d) / 10 ** d : null)
 
 /**
@@ -76,33 +128,18 @@ const _r = (n, d = 2) => (Number.isFinite(n) ? Math.round(n * 10 ** d) / 10 ** d
  * deep_stop, target, target_kind (range_top | measured_move), lookback_bars }, heavy_days }`, or null under 60 bars. Candidates are the lab's rules (test 1b) —
  * a starting point Mentor judges, never the answer. Pure.
  */
-export function structureFacts(rows, { k = 1.5, buffer = 0.2, keep = 8, lookLow = 60, lookFall = 40, atHighs = 120 } = {}) {
+export function structureFacts(rows, { k = STRUCTURE.k, buffer = STRUCTURE.buffer, keep = 8, lookLow = STRUCTURE.lookLow, lookFall = STRUCTURE.lookFall, atHighs = STRUCTURE.atHighs } = {}) {
     if (!rows?.length || rows.length < 60) return null
     const a = atr(rows), pv = swings(rows, a, k), n = rows.length, i = n - 1
     const day = (j) => rows[j].date ?? null
     const pt = (p) => ({ type: p.type === 'H' ? 'high' : 'low', date: day(p.j), price: _r(p.price), confirmed: day(p.at) })
-    // Who is in control: replay the closes against the swings known at each bar.
-    let lastH = null, lastL = null, control = null, since = null, lastBreak = null, q = 0
-    for (let x = 0; x < n; x++) {
-        while (q < pv.length && pv[q].at <= x) { if (pv[q].type === 'H') lastH = pv[q]; else lastL = pv[q]; q++ }
-        const c = rows[x].close
-        if (lastL && c < lastL.price && control !== 'sellers') { control = 'sellers'; since = day(x) }
-        else if (lastH && c > lastH.price && lastBreak?.swing !== lastH.j) {
-            let prior = -Infinity
-            for (let j = Math.max(0, x - atHighs); j < x; j++) prior = Math.max(prior, rows[j].high)
-            lastBreak = { swing: lastH.j, date: day(x), context: c > prior ? 'breakout' : control === 'sellers' ? 'reversal' : 'continuation' }
-            if (control !== 'buyers') { control = 'buyers'; since = day(x) }
-        }
-    }
-    let low60 = Infinity, lowJ = i
-    for (let j = Math.max(0, i - lookLow + 1); j <= i; j++) if (rows[j].low <= low60) { low60 = rows[j].low; lowJ = j }
+    const { control, since, lastH, lastL, lastBreak } = controlReplay(rows, pv, { atHighs })
+    const { price: low60, j: lowJ } = lowestLow(rows, i, lookLow)
     let from = -Infinity, fromJ = null
     for (let j = Math.max(0, lowJ - lookFall); j < lowJ; j++) if (rows[j].high >= from) { from = rows[j].high; fromJ = j }
-    let top = -Infinity
-    for (let j = Math.max(0, i - lookFall); j < i; j++) top = Math.max(top, rows[j].high)
     const close = rows[i].close
     const stop = lastL ? lastL.price - buffer * a[i] : null
-    const target = top > close ? top : lastL ? top + (top - lastL.price) : null
+    const { target, kind } = rangeTarget(rows, i, lastL?.price ?? null, lookFall)
     // The heavy days of the last 60: volume ≥ 2× its 20-day mean — climaxes, shakeouts, the sign of strength.
     const heavy = []
     for (let j = Math.max(20, n - 60); j < n; j++) {
@@ -112,18 +149,19 @@ export function structureFacts(rows, { k = 1.5, buffer = 0.2, keep = 8, lookLow 
         if (mult >= 2) heavy.push({ date: day(j), volume_x: _r(mult, 1), change_pct: _r((rows[j].close / rows[j - 1].close - 1) * 100), close: _r(rows[j].close) })
     }
     return {
-        as_of: day(i), close: _r(close), atr: _r(a[i]), atr_pct: _r((a[i] / close) * 100),
+        // abs — a short reads mirrored (negative) closes, and the normal move is a size either way.
+        as_of: day(i), close: _r(close), atr: _r(a[i]), atr_pct: _r(Math.abs(a[i] / close) * 100),
         swing_threshold_atr: k,
         swings: pv.slice(-keep).map(pt),
         last_swing_low: lastL ? pt(lastL) : null,
         last_swing_high: lastH ? pt(lastH) : null,
-        control, since,
-        last_break: lastBreak ? { date: lastBreak.date, context: lastBreak.context } : null,
+        control, since: since == null ? null : day(since),
+        last_break: lastBreak ? { date: day(lastBreak.i), context: lastBreak.context } : null,
         fall: fromJ != null && from > low60 ? { from: { date: day(fromJ), price: _r(from) }, low: { date: day(lowJ), price: _r(low60) }, atrs: _r((from - low60) / (a[lowJ] ?? a[i])) } : null,
         candidates: {
             stop: _r(stop), deep_stop: _r(low60 - buffer * a[i]),
             // `range_top` — the highest high of the last `lookFall` bars; `measured_move` — at the highs, that high + its height.
-            target: _r(target), target_kind: top > close ? 'range_top' : 'measured_move', lookback_bars: lookFall,
+            target: _r(target), target_kind: kind, lookback_bars: lookFall,
         },
         heavy_days: heavy,
     }

@@ -982,6 +982,14 @@ export function _sizingReport(plan, size, { balance = null, hasAccount = false, 
     lines.push(readiness.ready
         ? 'GENERATE: the button is now LIT for this plan. Tell the user it is ready to press — never ask them to confirm anything else first.'
         : `GENERATE: still dark — it needs ${[...readiness.missing, ...readiness.problems].join(', ')}. Say exactly that.`)
+    // The plan read here is the one on the table BEFORE this reply. When the same reply sets the levels (the user gave
+    // them and the size in one message), a problem above is about the OLD levels — seen live as a false "entry/stop
+    // mismatch" read out over a plan that came out sized right.
+    if (problems.length || !readiness.ready) {
+        lines.push('THESE FIGURES ARE FOR THE PLAN AS IT STOOD BEFORE THIS REPLY. If your reply sets or changes the entry or the stop, '
+            + 'ignore the problems and the Generate line above — they are about the old levels: the size is applied to the <setup> you emit, '
+            + 'and the user sees its quantity there. Do not tell the user about a mismatch the new levels resolve.')
+    }
     return lines.join('\n')
 }
 

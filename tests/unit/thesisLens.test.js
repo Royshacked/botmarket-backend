@@ -5,7 +5,7 @@ import { sanitizeScanSeed } from '../../services/scanSeed.util.js'
 import { normalizeSetup } from '../../services/setup.schema.js'
 import { _buildSeedSection } from '../../services/agents/mentor.agent.service.js'
 import { lensLine } from '../../monitoring/assess.shared.js'
-import { priceStructureText, entryLevelText, unmirrorFacts, targetWords } from '../../services/tools/thesisStructure.tools.js'
+import { priceStructureText, entryLevelText, unmirrorFacts, targetWords, unfinishedWeek } from '../../services/tools/thesisStructure.tools.js'
 
 // THE THESIS LENS (Roy, 2026-10-30; docs/design/stock-playbook.md) — the stop where the thesis breaks, the entry from
 // the user's risk, the Hotlist's Build with Mentor opening in it, and Talos told what the setup is.
@@ -64,6 +64,27 @@ test('get_price_structure: the facts as JSON for the chart asked, two years of d
     assert.equal(facts.control, 'buyers')
     assert.ok(facts.candidates.stop < facts.close && facts.candidates.target > facts.close)
     assert.match(await priceStructureText({ ticker: 'X', timeframe: 'day' }, { get: provider([1, 2, 3]) }), /Not enough day history/)
+})
+
+test('the week still trading is no week: Monday to Friday (ET) it is open, from Saturday closed', () => {
+    assert.equal(unfinishedWeek('2026-10-26', Date.parse('2026-10-28T15:00:00Z')), true)
+    assert.equal(unfinishedWeek('2026-10-26', Date.parse('2026-10-30T19:00:00Z')), true, 'Friday, still trading')
+    assert.equal(unfinishedWeek('2026-10-26', Date.parse('2026-10-31T15:00:00Z')), false)
+    assert.equal(unfinishedWeek('2026-10-19', Date.parse('2026-10-28T15:00:00Z')), false, 'a past week')
+})
+
+test('get_price_structure on the weekly: the unfinished week is left out of the swings and shown apart', async () => {
+    // 80 weeks of days, the last one a Monday–Wednesday; asked on that Wednesday.
+    const closes = Array.from({ length: 80 * 5 + 3 }, (_, i) => 100 + 10 * Math.sin(i / 25))
+    const get = provider(closes)
+    const days = await get()
+    const now = days.at(-1).timestamp * 1000 + 6 * 3_600_000
+    const text = await priceStructureText({ ticker: 'mtg', timeframe: 'week' }, { get, now })
+    const facts = JSON.parse(text.slice(text.indexOf('{')))
+    assert.ok(facts.this_week, 'the open week is shown apart')
+    assert.ok(facts.as_of < facts.this_week.from, 'the facts end at the last closed week')
+    const closed = await priceStructureText({ ticker: 'mtg', timeframe: 'week' }, { get, now: now + 4 * 86_400_000 })
+    assert.equal(JSON.parse(closed.slice(closed.indexOf('{'))).this_week, undefined, 'on the weekend the week is closed')
 })
 
 test('get_price_structure for a short: the mirrored read turned back the right way up', () => {

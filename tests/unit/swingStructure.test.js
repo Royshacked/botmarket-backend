@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { structureFacts, entryLevel, toWeekly } from '../../services/swingStructure.service.js'
+import { structureFacts, entryLevel, toWeekly, mirror, atr, swings, STRUCTURE, controlReplay, rangeTarget, lowestLow } from '../../services/swingStructure.service.js'
 
 // The THESIS lens's shared mechanism (docs/design/stock-playbook.md): the facts Mentor judges the stop and targets from,
 // and the entry arithmetic. The swings and ATR themselves are covered by thesisLab.test.js (the lab re-exports them).
@@ -41,6 +41,31 @@ test('structureFacts: a reversal — buyers in control after sellers, the stop u
     assert.equal(f.candidates.target, 100.5)
     assert.ok(f.heavy_days.some(d => d.volume_x >= 3.9), 'the climax day')
     for (const s of f.swings) assert.ok(s.confirmed > s.date, 'a swing is dated, and confirmed after it')
+})
+
+test('structureFacts on a short’s mirrored bars: the normal move is still a positive percent', () => {
+    const f = structureFacts(mirror(reversal()))
+    assert.ok(f.close < 0, 'the mirror')
+    assert.ok(f.atr_pct > 0)
+})
+
+test('controlReplay: the one rule the lab tested and Mentor reads — sellers, then a break up that is a reversal', () => {
+    const rows = reversal(), a = atr(rows), pv = swings(rows, a, STRUCTURE.k), breaks = []
+    const s = controlReplay(rows, pv, { onBreak: (b) => breaks.push(b) })
+    assert.equal(s.control, 'buyers')
+    assert.equal(s.lastBreak.context, 'reversal')
+    assert.equal(breaks.at(-1).before, 'sellers')
+    assert.equal(breaks.at(-1).i, s.lastBreak.i)
+    assert.equal(rows[s.since].date, structureFacts(rows).since, 'the facts report the same replay')
+})
+
+test('rangeTarget and lowestLow: the start of the fall, or the measured move at the highs', () => {
+    const rows = bars([10, 12, 11, 9, 10])
+    assert.deepEqual(rangeTarget(rows, 4, 8.5, 40), { target: 12.5, kind: 'range_top' })
+    const highs = bars([10, 11, 12, 13])
+    assert.deepEqual(rangeTarget(highs, 3, 9.5, 40), { target: 12.5 + 3, kind: 'measured_move' })
+    assert.equal(rangeTarget(highs, 3, null, 40).target, null)
+    assert.deepEqual(lowestLow(rows, 4, 3), { price: 8.5, j: 3 })
 })
 
 test('entryLevel: the lower of the two ceilings — the risk limit and the reward to risk', () => {

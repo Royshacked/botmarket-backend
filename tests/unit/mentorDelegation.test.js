@@ -284,6 +284,21 @@ test('a position that fits says nothing about fitting', () => {
     assert.equal(cashFit({ notional: 20000 }, { entry: 2.2, stop: 2.14, balance: null }), null, 'no balance → no judgment, not a guess')
 })
 
+test('a sizing report over the OLD levels says so — the levels and the size given in one message are no "mismatch"', () => {
+    // The thesis drive (NXST, 2026-10-30): the user gave his limits and his size together; the tool read the pre-turn
+    // plan and Mentor read out an entry/stop mismatch over a plan that came out sized right.
+    const old = normalizeSetup({ ...PLAN, scenarios: [{ ...PLAN.scenarios[0], stop_legs: [{ price: 2.3 }] }] })
+    const report = _sizingReport(old, { unit: 'risk_cash', value: 200 }, { balance: 22624.59, hasAccount: true })
+    assert.match(report, /AS IT STOOD BEFORE THIS REPLY/)
+    assert.match(report, /Do not tell the user about a mismatch the new levels resolve/)
+})
+
+test('a sizing report over a plan that is ready carries no such caveat', () => {
+    const report = _sizingReport(normalizeSetup(PLAN), { unit: 'risk_cash', value: 100 }, { balance: 22624.59, hasAccount: true })
+    assert.match(report, /GENERATE: the button is now LIT/)
+    assert.doesNotMatch(report, /BEFORE THIS REPLY/)
+})
+
 test('the sizing tool with no plan on the table records the answer and says there is nothing to size yet', () => {
     const report = _sizingReport(null, { unit: 'risk_pct', value: 1 }, { balance: 50000, hasAccount: true })
     assert.match(report, /Recorded as the USER's size/)

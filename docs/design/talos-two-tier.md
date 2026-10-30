@@ -306,7 +306,8 @@ the magnitude is untested there.
   only case left worth a tool call, and the measured rate was 1 in 71 even before this.
 
 **4.2 — the kit is per lens.** `buildToolsFor(setup)` stops returning the unfiltered kit and returns
-the setup's lens kit. `discretionary` · `smc` · `institutional`. Frozen at Generate.
+the setup's lens kit. `discretionary` · `smc` · `institutional`. Frozen at Generate. (A fourth lens,
+`thesis`, came 2026-10-30 — docs/design/stock-playbook.md; it would need a kit of its own if this is built.)
 
 **4.3 — two new output fields**, validated and rewritten whole exactly as guards are:
 ```json

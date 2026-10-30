@@ -8,11 +8,12 @@
 //
 // Pure: bars come in (`{ open, high, low, close }`, oldest first); no IO here.
 
-// The swings, the ATR and the mirror are the shared price-structure mechanism (Mentor's thesis lens reads the same).
-import { mirror, atr, swings } from './swingStructure.service.js'
+// The swings, the ATR, the mirror, who is in control and the target are the shared price-structure mechanism, with its
+// settings (STRUCTURE) — Mentor's thesis lens reads the same, so its candidates are the rule tested here.
+import { mirror, atr, swings, STRUCTURE, controlReplay, rangeTarget, lowestLow } from './swingStructure.service.js'
 export { mirror, atr, swings }
 
-export const DEFAULTS = Object.freeze({ k: 1.5, lookLow: 60, lookFall: 40, minFallAtr: 5, sosWithin: 60, buffer: 0.2, rr: 1.5, maxRiskPct: 10,
+export const DEFAULTS = Object.freeze({ ...STRUCTURE, minFallAtr: 5, sosWithin: 60, rr: 1.5, maxRiskPct: 10,
     wait: 20, drift: 0.1, maxHold: 250, strength: true })
 
 /**
@@ -47,35 +48,19 @@ export function reversalSignals(rows, atrs, pivots, o = DEFAULTS) {
 }
 
 /**
- * BUYERS IN CONTROL, any context (test 1b — Roy, 2026-10-30: "I don't want only a bounce"). Buyers are in control from
- * a close over the last confirmed swing high until a close under the last confirmed swing low. Each swing high signals
- * once, on the first close over it. The context: `breakout` — the close is over the highest high of the `atHighs`
- * sessions before; else `reversal` — sellers were in control before; else `continuation`. The stop's base is the last
- * swing low; the target the highest high of the `lookFall` sessions before, when over the close — at its highs the
- * measured move (that high + its height over the last swing low). → `[{ i, stopBase, h0, context }]`. Pure.
+ * BUYERS IN CONTROL, any context (test 1b — Roy, 2026-10-30: "I don't want only a bounce"): a signal at each break up of
+ * the shared replay (`controlReplay` — who is in control, each swing high once, its context), once the `atHighs` and
+ * `lookFall` windows are full. The stop's base is the last swing low; the target `rangeTarget`'s — the highest high of
+ * the `lookFall` sessions before, at its highs the measured move. → `[{ i, stopBase, low60, h0, context }]`. Pure.
  */
-export function controlSignals(rows, atrs, pivots, o = DEFAULTS, atHighs = 120) {
-    const out = [], used = new Set()
-    let p = 0, lastH = null, lastL = null, state = null
-    for (let i = 0; i < rows.length; i++) {
-        while (p < pivots.length && pivots[p].at <= i) { if (pivots[p].type === 'H') lastH = pivots[p]; else lastL = pivots[p]; p++ }
+export function controlSignals(rows, atrs, pivots, o = DEFAULTS, atHighs = o.atHighs ?? STRUCTURE.atHighs) {
+    const out = []
+    controlReplay(rows, pivots, { atHighs, onBreak: ({ i, lastL, context }) => {
         const c = rows[i].close
-        if (lastL && c < lastL.price) { state = 'sellers'; continue }
-        if (!lastH || !lastL || used.has(lastH.j) || !(c > lastH.price)) continue
-        used.add(lastH.j)
-        const before = state
-        state = 'buyers'
-        if (i < Math.max(atHighs, o.lookFall) || atrs[i] == null || !(lastL.price < c)) continue
-        let top = -Infinity, prior = -Infinity
-        for (let j = i - o.lookFall; j < i; j++) top = Math.max(top, rows[j].high)
-        for (let j = i - atHighs; j < i; j++) prior = Math.max(prior, rows[j].high)
-        const context = c > prior ? 'breakout' : before === 'sellers' ? 'reversal' : 'continuation'
-        const h0 = top > c ? top : top + (top - lastL.price)
-        // `low60` — the lowest low of the last 60 sessions: the whole down move's low, for the deeper stop (`stopAt`).
-        let low60 = Infinity
-        for (let j = Math.max(0, i - 59); j <= i; j++) low60 = Math.min(low60, rows[j].low)
-        out.push({ i, stopBase: lastL.price, low60, h0, context })
-    }
+        if (i < Math.max(atHighs, o.lookFall) || atrs[i] == null || !(lastL.price < c)) return
+        // `low60` — the lowest low of the last `lookLow` sessions: the whole down move's low, for the deeper stop (`stopAt`).
+        out.push({ i, stopBase: lastL.price, low60: lowestLow(rows, i, o.lookLow).price, h0: rangeTarget(rows, i, lastL.price, o.lookFall).target, context })
+    } })
     return out
 }
 

@@ -357,6 +357,14 @@ rest (seed 11, `--sample 1200`); 5,890 with hourly bars. Long, reversal, the sam
 - The Hotlist's Build with Mentor sends `recommended_mode: 'thesis'` (frontend `hotlist.utils.hotlistHandoff`); the
   seed text says it is the Hotlist's lens, not Argus's; a hand-off lens is validated against MODES.
 
+QA cycle (2026-10-30, Roy: "All"): who-is-in-control and the target now run ONE replay
+(`controlReplay`, `rangeTarget`, `lowestLow`, settings in `STRUCTURE`) for both the lab and Mentor's facts — checked
+identical to the old two copies on 600 random series (5,422 signals), so every result above stands. The weekly read
+leaves out the week still trading (shown apart as `this_week`); a short's `atr_pct` is positive; the sizing tool's
+report says when its figures are for the levels before this reply (the false "entry/stop mismatch" seen in the drive).
+Left as they are: the prompt section's cost (~1.2k tokens, cached — a fraction of a cent a turn) and the frontend's
+lens tooltip copy (an unknown lens shows its name).
+
 ## Pieces to build
 
 1. **Calculation engine** — the profile per timeframe; the playbook tester (a fixed menu of setups, long and short, per

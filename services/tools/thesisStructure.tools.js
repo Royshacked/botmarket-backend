@@ -35,6 +35,13 @@ export function targetWords({ target_kind, lookback_bars }, timeframe = 'day', s
         : `the highest high of the last ${bars} — the start of the fall, or the trend's high before the pullback`
 }
 
+/** Whether the week starting Monday `monday` (YYYY-MM-DD) is still trading at `now`: today (ET) is its Monday–Friday. Pure. */
+export function unfinishedWeek(monday, now = Date.now()) {
+    const today = new Date(now).toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
+    const friday = new Date(Date.parse(`${monday}T12:00:00Z`) + 4 * 86_400_000).toISOString().slice(0, 10)
+    return today >= monday && today <= friday
+}
+
 /** The facts for `ticker` on the day or week chart, as the JSON text Mentor reads. `get` — the bar source (a seam). */
 export async function priceStructureText({ ticker, timeframe = 'day', side = 'long' }, { get = getTickerAggregates, now = Date.now() } = {}) {
     const sym = String(ticker ?? '').toUpperCase().trim()
@@ -44,10 +51,14 @@ export async function priceStructureText({ ticker, timeframe = 'day', side = 'lo
     const raw = await get(sym, { timeSpan: 'day', multiplier: 1, from: now - years * YEAR_MS, to: now })
     const days = (Array.isArray(raw) ? raw : []).filter(b => b?.close > 0)
         .map(b => ({ date: _etDay(b.timestamp), open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume ?? 0 }))
-    const rows = timeframe === 'week' ? toWeekly(days) : days
+    const weeks = timeframe === 'week' ? toWeekly(days) : null
+    // The week still trading is left out: a swing "confirmed" by a week that has not closed can be gone by Friday.
+    const open = weeks?.length && unfinishedWeek(weeks.at(-1).date, now) ? weeks.at(-1) : null
+    const rows = weeks ? (open ? weeks.slice(0, -1) : weeks) : days
     const facts = side === 'short' ? unmirrorFacts(structureFacts(mirror(rows))) : structureFacts(rows)
     if (!facts) return `Not enough ${timeframe} history for ${sym} (${rows.length} bars; 60 needed).`
     facts.candidates = { ...facts.candidates, target_kind: targetWords(facts.candidates, timeframe, side), lookback_bars: undefined }
+    if (open) facts.this_week = { note: 'still trading — not in the swings above', from: open.date, high: open.high, low: open.low, close: open.close }
     return `${sym} ${timeframe} structure, ${side} side (swings of ≥ ${facts.swing_threshold_atr}× ATR; the candidates are the tested rule's — a starting point you judge, never the answer):\n${JSON.stringify({ ...facts, swing_threshold_atr: undefined })}`
 }
 

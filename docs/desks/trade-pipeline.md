@@ -72,9 +72,14 @@ turn, against Mentor's ~2. Pricing it as premium aligns cost with revenue instea
 
 ---
 
-## The three lenses
+## The lenses
 
-`discretionary` · `smc` · `institutional`
+`discretionary` · `smc` · `institutional` · `thesis`
+
+`thesis` joined 2026-10-30 (docs/design/stock-playbook.md): the stop where the thesis breaks (under the sellers' last
+swing), the targets where sellers last took over, the entry a LEVEL from the user's risk limit / minimum R:R ("the level
+and below"), entered on strength Talos judges on the 1h / 4h. Its own tools are `get_price_structure` and
+`get_entry_level`; the Hotlist's Build with Mentor opens in it.
 
 - Mentor **recommends** one and names it. It never blends two — that rule already exists for the
   current pair and extends unchanged.
