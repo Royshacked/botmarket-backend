@@ -85,6 +85,13 @@ test('plan by the risk limit: the entry level is the price the limit above the s
     assert.ok(Math.abs((short.E - short.S) / Math.abs(short.E) - 0.05) < 1e-12, 'the mirrored short: the same 5% of its entry')
 })
 
+test('plan with stopAt low60: the stop under the whole down move’s low, never above the last swing low', () => {
+    const o = { ...DEFAULTS, buffer: 0, stopAt: 'low60' }
+    assert.equal(plan({ i: 0, stopBase: 95, low60: 90, h0: 110 }, [1], o).S, 90)
+    assert.equal(plan({ i: 0, stopBase: 95, low60: 97, h0: 110 }, [1], o).S, 95, 'the lower of the two')
+    assert.equal(plan({ i: 0, stopBase: 95, low60: 90, h0: 110 }, [1], { ...o, stopAt: undefined }).S, 95)
+})
+
 const P = { S: 90, T: 115, E: 100 }
 
 test('play: already under the level at the signal — in at its close; out at the target', () => {

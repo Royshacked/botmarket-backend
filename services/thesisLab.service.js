@@ -114,7 +114,10 @@ export function controlSignals(rows, atrs, pivots, o = DEFAULTS, atHighs = 120) 
         for (let j = i - atHighs; j < i; j++) prior = Math.max(prior, rows[j].high)
         const context = c > prior ? 'breakout' : before === 'sellers' ? 'reversal' : 'continuation'
         const h0 = top > c ? top : top + (top - lastL.price)
-        out.push({ i, stopBase: lastL.price, h0, context })
+        // `low60` — the lowest low of the last 60 sessions: the whole down move's low, for the deeper stop (`stopAt`).
+        let low60 = Infinity
+        for (let j = Math.max(0, i - 59); j <= i; j++) low60 = Math.min(low60, rows[j].low)
+        out.push({ i, stopBase: lastL.price, low60, h0, context })
     }
     return out
 }
@@ -144,7 +147,7 @@ export function baselineSignals(rows, atrs, pivots, o = DEFAULTS, every = 10) {
  * (`minRR`, none when 0). Null past A or the check. Pure.
  */
 export function plan(sig, atrs, o = DEFAULTS) {
-    const S = sig.stopBase - o.buffer * atrs[sig.i], T = sig.h0
+    const S = (o.stopAt === 'low60' && sig.low60 != null ? Math.min(sig.low60, sig.stopBase) : sig.stopBase) - o.buffer * atrs[sig.i], T = sig.h0
     // (E − S) = r·|E|: on the mirrored (negative) prices of a short the same distance is E = S / (1 + r).
     const r = (o.riskPct ?? 0) / 100
     const E = o.entryBy === 'risk' ? (S > 0 ? S / (1 - r) : S / (1 + r)) : (T + o.rr * S) / (1 + o.rr)

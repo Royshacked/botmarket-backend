@@ -293,6 +293,13 @@ filters, R:R 1.5 entry level, strength, fixed exits, R on the planned risk, cost
   +0.22, 5% no check +0.09 / +0.07 — every range crossing zero but the last's before. Continuation and breakout: around
   zero, sign flipping. **The way in does not move the edge either** — R:R-set or risk-set, the reversal earns ~+0.1R
   and the rest ~0. With the check, fewer trades: a far stop now needs a deep pullback before the level is reached.
+- **A LOWER stop (Roy: "maybe the stop needs to be lower?")** — the buffer at 1 and 2 × ATR, and the stop under the
+  whole down move (the lowest low of 60 sessions, `stopAt: 'low60'`). Long, all contexts: +0.07 / +0.06, +0.08 / +0.08,
+  +0.08 / +0.22R. The REVERSAL, before / held out: buffer 1.0 +0.11 / +0.12; **buffer 2.0 +0.12 / +0.22** (2,780 / 333);
+  **60-day low +0.13 / +0.27** (3,416 / 446, held-out range +0.09 … +0.42, hit 45%). Before the held-out day the depth
+  changes nothing (+0.11 … +0.13 at every depth); only the held-out year improves — one year, ~450 trades, and the
+  held-out year has now been looked at ~30 times, so it no longer counts as unseen. Fewer trades (rule A cuts the deep
+  stops) and longer holds (17 days). Read: a lower stop does not hurt and may help; not proven.
 - **Tries so far on this question:** test 1's 9 variants, test 1b's 9, R:R 1 and 3, four risk limits — ~25. The
   reversal's +0.1R appears in nearly all of them, which is what a real (small) effect looks like; any single best cell
   among them is not to be trusted.

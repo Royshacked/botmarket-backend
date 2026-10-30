@@ -57,6 +57,10 @@ const VARIANTS = [
     { id: 'risk 5%', o: { ...P, entryBy: 'risk', riskPct: 5, minRR: 1.5 } },
     { id: 'risk 8%', o: { ...P, entryBy: 'risk', riskPct: 8, minRR: 1.5 } },
     { id: 'risk 5% no check', o: { ...P, entryBy: 'risk', riskPct: 5, minRR: 0 } },
+    // A LOWER stop (Roy, 2026-10-30: "so maybe the stop needs to be lower?") — wider buffers, and under the whole down move.
+    { id: 'buffer 1.0', o: { ...P, buffer: 1.0 } },
+    { id: 'buffer 2.0', o: { ...P, buffer: 2.0 } },
+    { id: 'stop at 60-day low', o: { ...P, stopAt: 'low60' } },
     { id: 'no strength', o: { ...P, strength: false } },
     { id: 'SPY over 200d', o: P, regime: 'SPY over 200d' },
     { id: 'BASELINE', o: P, baseline: true },
@@ -122,7 +126,7 @@ for (const side of ['long', 'short']) {
         say(line(`${side} PRIMARY ${held ? 'held out' : 'before'} − top 1%`, L.summarize(xs.slice(0, Math.floor(xs.length * 0.99)))))
     }
     // By context, the primary and the R:R 1 and 3 variants (Roy, 2026-10-30: "and if lowering to R:R 1" · "so R:R 3").
-    for (const id of CONTROL ? ['PRIMARY', 'risk 3%', 'risk 5%', 'risk 8%', 'risk 5% no check'] : []) {
+    for (const id of CONTROL ? ['PRIMARY', 'buffer 1.0', 'buffer 2.0', 'stop at 60-day low'] : []) {
         const xs = results[`${side}|${id}`]?.trades ?? []
         say(`${side} ${id} by context — before | held out:`)
         for (const c of ['reversal', 'continuation', 'breakout']) {
