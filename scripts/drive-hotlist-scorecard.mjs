@@ -1,4 +1,4 @@
-/* global document -- page.evaluate bodies run in the browser */
+/* global document, Node -- page.evaluate bodies run in the browser */
 // Drive PROMETHEUS'S SCORECARD in the Hotlist's Book (Roy, 2026-10-27; services/prometheusCalls.service.js) on LIVE data.
 //
 //   node scripts/drive-hotlist-scorecard.mjs [baseUrl] [outDir]   (default http://localhost:5173 — the Vite dev server)
@@ -13,7 +13,8 @@ import { chromium } from 'playwright'
 
 dns.setServers(['8.8.8.8', '1.1.1.1'])
 const [BASE = 'http://localhost:5173', OUT = '.'] = process.argv.slice(2)
-const USER = { username: 'ui-smoke-panel', fullname: 'UI Smoke', password: 'Sm0ke!Drive#29' }
+// The scorecard is the ADMIN's (Roy, 2026-10-29) — ui-smoke is an admin on axl_dev; ui-smoke-panel is a trader.
+const USER = { username: 'ui-smoke', fullname: 'UI Smoke', password: 'Sm0ke!Drive#29' }
 const { userService } = await import('../api/user/user.service.js')
 const svc = await import('../services/hotlist.service.js')
 const { houseBook } = await import('../services/houseBook.service.js')
@@ -84,8 +85,9 @@ try {
     await shot(page, '0-this-week')
     await page.getByRole('button', { name: /^Long term \d+/ }).click()
     await page.waitForTimeout(1500)
-    check('Long term is the chain’s lists only — no whole book, no scorecard', await page.getByRole('button', { name: /^All coverage/ }).count() === 0
-        && await page.getByRole('button', { name: 'Prometheus’s scorecard' }).count() === 0)
+    // No view switch on any tab (Roy, 2026-10-31: "the same for swing / long term / coverages").
+    check('Long term is the chain’s list only — no switch, no scorecard', await page.locator('.hot-status-filter').count() === 0
+        && await page.locator('.hot-score').count() === 0)
     await page.getByRole('button', { name: /^Covered companies \d+/ }).click()
     await page.waitForTimeout(1500)
     const covered = await page.locator('.hot-panel tr.hot-row').count()
@@ -96,10 +98,13 @@ try {
     const marked = await page.locator('.hot-panel .owned-badge').count()
     check('a name already in the user\'s setups is marked on Covered companies — and only it', /setup/.test(await markOf(ownedSym)) && marked === 1,
         `${ownedSym}: "${await markOf(ownedSym)}", ${marked} marked`)
-    const btn = page.getByRole('button', { name: 'Prometheus’s scorecard' })
-    check('Covered companies has the scorecard view', await btn.count() === 1)
-    await btn.click()
+    check('Covered companies has no view switch', await page.locator('.hot-status-filter').count() === 0)
+    // The scorecard sits under the book's table (2026-10-31).
     await page.waitForSelector('.hot-score', { timeout: 10000 })
+    check('the scorecard is under the book', await page.evaluate(() => {
+        const t = document.querySelector('.hot-panel .hot-table--book'), sc = document.querySelector('.hot-score')
+        return Boolean(t && sc && (t.compareDocumentPosition(sc) & Node.DOCUMENT_POSITION_FOLLOWING))
+    }))
     await page.waitForTimeout(500)
     await shot(page, '1-long-term')
     const rowText = await page.evaluate(() => [...document.querySelectorAll('.hot-score tr.hot-row')].map(r => r.textContent.replace(/\s+/g, ' ').trim()))
@@ -113,14 +118,7 @@ try {
     const dim = await page.locator('.hot-score .hot-result--dim').count()
     check('a number under the bar is dim', dim > 0, `${dim} dim cells`)
 
-    // Back to the book is one click; the scorecard asked again on its next opening.
-    await page.getByRole('button', { name: /^All coverage \d+/ }).click()
-    await page.waitForTimeout(500)
-    check('All coverage brings the book back', await page.locator('.hot-score').count() === 0 && await page.locator('.hot-panel tr.hot-row').count() > 0)
-    await page.getByRole('button', { name: 'Prometheus’s scorecard' }).click()
-    await page.waitForSelector('.hot-score', { timeout: 10000 })
-    check('the scorecard was asked of the server once per opening', asked === 2, `${asked} requests`)
-    // Argus's names read the book's `picks` — the FE service once dropped them, so the list always said "could not be loaded".
+    check('the scorecard was asked of the server once', asked === 1, `${asked} requests`)
     await page.getByRole('button', { name: /^Swing \d+/ }).click()
     await page.waitForTimeout(800)
     // A name Pythia no longer calls swing is off the list, named in the note — and still in Covered companies (2026-10-28).
@@ -131,11 +129,6 @@ try {
     check('names Pythia no longer calls are off Swing and named in its note', gone.every(s => !swingRows.includes(s) && note.includes(s)) && (gone.length === 0 || note !== ''),
         `${gone.join(', ') || 'none'} — ${note.slice(0, 120)}`)
     await shot(page, '2b-swing-left')
-    await page.getByRole('button', { name: /^Argus’s names/ }).click()
-    await page.waitForTimeout(500)
-    await shot(page, '3-argus-names')
-    const argus = await page.locator('.hot-panel').textContent()
-    check('Argus’s names load (the book’s picks reach the list)', !/could not be loaded/.test(argus), argus.slice(0, 160))
     check('no page errors', errors.length === 0, errors.join(' | '))
 } catch (err) {
     results.push(`FAIL  the drive stopped — ${err.message}`)
