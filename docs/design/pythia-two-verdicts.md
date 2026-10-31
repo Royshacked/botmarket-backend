@@ -106,7 +106,10 @@ assessment; every other industry gets `long_term` from the first sweep. `LEGACY_
 - **The monthly review rides the weekly run.** A long-term call never made or past its 30 days flags the subject
   `long_term_due` in the change scan; the week assesses it with the rest, one turn answering both. While the engine is
   stale the monitor runs a **due pass** once a day (`runWeekly({ dueOnly })`: only `long_term_due`, `expired`,
-  `decider_due`), inside the same week's $3 ceiling. No separate sweep job.
+  `decider_due`), inside the same week's $3 ceiling. No separate sweep job. A due pass runs only on a week already
+  **done**; a week the regular run left failed or paused answers `week_open`, and the regular run finishes it first.
+- **Stale is counted from the run's `finished_at`**, not its price date (a Sunday run prices Friday — by asof every
+  Sunday morning before the new run would read 9 days). Over 8 days since the finish is stale.
 - **A long-term yes speaks for the house for 60 days** (`LONG_TERM_STALE_DAYS`), its review due at 30 — a stalled week
   does not empty the long-term book.
 - **Graded at 3 and 12 months**, the horizons every call already has — not the 12 / 24 the design named; a 24-month

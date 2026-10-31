@@ -75,10 +75,16 @@ export const DUE_KEYS = Object.freeze(['long_term_due', 'expired', 'decider_due'
 /** A due pass skips a subject this week's results already tried within this many days (a refusal is not bought daily). */
 export const DUE_RETRY_DAYS = 7
 
-/** How old the latest complete price run is → `{ stale, days, asof }`, or null without one. Pure. */
+/**
+ * How old the latest complete price run is → `{ stale, days, asof }`, or null without one. Pure. Counted from when the
+ * run FINISHED, not its price date: a Sunday run prices Friday, so by its price date every Sunday morning before the new
+ * run lands reads 9 days and would cry stale weekly (bug hunt 2026-10-31). A run without `finished_at` counts its asof.
+ */
 export function engineAge(latest, nowIso) {
     if (!latest?.asof) return null
-    const days = Math.floor((Date.parse(nowIso) - Date.parse(`${latest.asof}T00:00:00Z`)) / 86_400_000)
+    const finished = new Date(latest.run?.finished_at ?? NaN).getTime()
+    const from = Number.isFinite(finished) ? finished : Date.parse(`${latest.asof}T00:00:00Z`)
+    const days = Math.floor((Date.parse(nowIso) - from) / 86_400_000)
     return { stale: days > ENGINE_STALE_DAYS, days, asof: latest.asof }
 }
 
@@ -87,7 +93,7 @@ export function engineStaleCard(age, userId) {
     if (!userId || !age?.stale) return null
     return {
         userId, botId: 'strategy', type: 'pythia_engine_stale',
-        content: `Pythia is waiting on the engine — the last industry price run is ${age.asof}, ${age.days} days ago. `
+        content: `Pythia is waiting on the engine — the last industry price run is ${age.asof}, finished ${age.days} days ago. `
             + 'Her weekly reassessments start from a new run (aether-engine\'s Sunday job, engine-weekly); until one comes, '
             + 'only what is due by the clock — long-term reviews, expired assessments — is assessed, on the old prices.',
         payload: { kind: 'pythia_engine', asof: age.asof, days: age.days },
@@ -251,7 +257,8 @@ async function _claim(coll, { id, asof, week, token, now, by, userId }) {
  * resumed; one still running in another process is left alone. `limit` assesses at most that many this run and
  * PAUSES the week if more wait. The spend ceiling is per WEEK — a resume and a forced rerun both count what the
  * week already spent. → `{ ok, outcome, asof?, assessed?, waiting?, held_back?, cost_usd?, stopped? }`, outcome
- * one of done | paused | exists | no_run | already_running | no_ledger | bad_limit | error.
+ * one of done | paused | exists | week_open (a due pass on a week not yet done) | no_run | already_running | no_ledger |
+ * bad_limit | error.
  */
 export async function runWeekly({ force = false, dueOnly = false, by = null, limit = Infinity, deps = _deps } = {}) {
     const max = validLimit(limit)
@@ -272,6 +279,10 @@ export async function runWeekly({ force = false, dueOnly = false, by = null, lim
         const week = await coll.findOne({ id })
         // A DUE pass (§3.3) re-opens a done week for what is due by the clock — the monitor's, while the engine is stale.
         if (week?.status === 'done' && !force && !dueOnly) return { ok: true, outcome: 'exists', asof }
+        // ...and ONLY a done week: on a week the regular run left failed or paused it would mark the week done with the due
+        // subjects alone, and the rest of the week's flags would never be assessed (bug hunt 2026-10-31). The regular run
+        // finishes that week first.
+        if (dueOnly && week?.status !== 'done') return { ok: true, outcome: 'week_open', asof }
         if (weekStatus(week, { now: Date.parse(deps.now()) }) === 'running') return { ok: false, outcome: 'already_running', asof }
         const started = deps.now()
         if (!await _claim(coll, { id, asof, week, token: _token(), now: started, by, userId })) return { ok: false, outcome: 'already_running', asof }

@@ -151,7 +151,11 @@ test('the stale engine: one card per stale run to every admin, never twice', asy
     assert.deepEqual(engineAge({ asof: '2026-10-27' }, NOW), { stale: false, days: 4, asof: '2026-10-27' })
     assert.deepEqual(engineAge({ asof: '2026-10-07' }, NOW), { stale: true, days: 24, asof: '2026-10-07' })
     assert.equal(engineAge({ asof: '2026-10-22' }, NOW).stale, ENGINE_STALE_DAYS < 9, 'nine days is stale')
-    assert.match(engineStaleCard(engineAge({ asof: '2026-10-07' }, NOW), 'u1').content, /last industry price run is 2026-10-07, 24 days ago/)
+    assert.match(engineStaleCard(engineAge({ asof: '2026-10-07' }, NOW), 'u1').content, /last industry price run is 2026-10-07, finished 24 days ago/)
+    // Counted from the finish: a Sunday run prices Friday, so the next Sunday morning is 9 days by asof — not stale.
+    const sunday = { asof: '2026-10-23', run: { finished_at: '2026-10-25T05:00:00Z' } }
+    assert.deepEqual(engineAge(sunday, '2026-11-01T03:00:00Z'), { stale: false, days: 6, asof: '2026-10-23' })
+    assert.equal(engineAge({ ...sunday, run: { finished_at: new Date('2026-10-25T05:00:00Z') } }, '2026-11-03T06:00:00Z').stale, true, 'a Date reads too')
     const m = memDb()
     await m.db.collection('pythia_weekly').insertOne({ id: 'pw_2026-10-07', asof: '2026-10-07', status: 'done' })
     const posted = []
@@ -204,6 +208,15 @@ test('a due pass re-opens a done week for what is due by the clock only, and han
     assert.deepEqual(handed, [['DUE']])
     const week = await m.db.collection('pythia_weekly').findOne({ id: 'pw_2026-10-07' })
     assert.deepEqual(week.results.map(x => [x.code, x.long_term, x.long_term_new]), [['DUE', 'yes', true]])
+
+    // A week the regular run left open (failed, paused) is not the due pass's to close: the regular run finishes it.
+    _resetActive()
+    for (const status of ['failed', 'paused']) {
+        await m.db.collection('pythia_weekly').updateOne({ id: 'pw_2026-10-07' }, { $set: { status } })
+        assert.equal((await runWeekly({ dueOnly: true })).outcome, 'week_open', status)
+        assert.equal((await m.db.collection('pythia_weekly').findOne({ id: 'pw_2026-10-07' })).status, status)
+    }
+    assert.equal(assessed.length, 1)
 })
 
 test('the tools say the long term beside the near term', () => {
