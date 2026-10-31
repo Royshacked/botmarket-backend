@@ -43,7 +43,7 @@ async function seed({ themeStatus = 'approved' } = {}) {
 
 test('a closed row carries what the row shows and the cache key — nothing heavy', () => {
     const r = assessmentRow(FULL())
-    assert.deepEqual(Object.keys(r).sort(), ['assessed_at', 'cause', 'decides_by', 'expires_at', 'horizon', 'id', 'moved', 'subject', 'thesis', 'verdict'])
+    assert.deepEqual(Object.keys(r).sort(), ['assessed_at', 'cause', 'decides_by', 'expires_at', 'horizon', 'id', 'long_term', 'moved', 'subject', 'thesis', 'verdict'])
     assert.deepEqual(r.cause, { kind: 'money' }, 'the chip reads the kind only')
     assert.deepEqual(r.moved, { hype: true }, 'the chip reads the flag only')
     for (const k of HEAVY) assert.equal(k in r, false, k)

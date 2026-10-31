@@ -137,7 +137,7 @@ test('QA 2026-10-12: revisions near 25% do not re-fire, and a fall below $1B cou
 
 test('no frozen flows → no flow legs: an assessment made before step 8 is not flagged for crowding every week', () => {
     assert.deepEqual(flowChanges(F(), null), [])
-    const a = { verdict: 'swing', moved: null, money: null, flows: null, expires_at: '2027-01-01T00:00:00Z' }
+    const a = { verdict: 'swing', moved: null, money: null, flows: null, expires_at: '2027-01-01T00:00:00Z', long_term: { call: 'no', reviewed_at: '2027-01-01T00:00:00Z', expires_at: '2027-01-01T00:00:00Z' } }
     assert.equal(scanIndustry({ code: CODE, name: 'Regional Banks', now: { moved: null, money: null, flows: F() }, assessment: a, at: NOW }), null)
     const frozen = { ...a, flows: F({ cluster: false }) }
     const flag = scanIndustry({ code: CODE, name: 'Regional Banks', now: { moved: null, money: null, flows: F({ cluster: true }) }, assessment: frozen, at: NOW })
@@ -146,7 +146,7 @@ test('no frozen flows → no flow legs: an assessment made before step 8 is not 
 
 test('a theme is never flagged by its links\' flows (its links freeze companies\' money only)', () => {
     const theme = { id: 'th_x', name: 'X', status: 'approved', links: [{ code: CODE, name: 'Regional Banks', order: 1 }] }
-    const assessment = { verdict: 'swing', moved: { links: [{ code: CODE }] }, money: { links: [{ code: CODE }] }, expires_at: '2027-01-01T00:00:00Z' }
+    const assessment = { verdict: 'swing', moved: { links: [{ code: CODE }] }, money: { links: [{ code: CODE }] }, expires_at: '2027-01-01T00:00:00Z', long_term: { call: 'no', reviewed_at: '2027-01-01T00:00:00Z', expires_at: '2027-01-01T00:00:00Z' } }
     const now = new Map([[CODE, { moved: null, money: null, flows: F({ cluster: true }, { percentile: 1 }) }]])
     assert.equal(scanTheme({ theme, nowByCode: now, assessment, at: NOW }), null)
 })
@@ -168,7 +168,7 @@ test('a published industry assessment freezes the flows it was given; a theme do
 test('the weekly scan reads today\'s flows beside the price and the money', async () => {
     const row = { asof: '2026-10-09', code: CODE, name: 'Regional Banks', raw: {} }
     const assessment = { subject: { kind: 'industry', code: CODE }, verdict: 'swing', moved: { asof: '2026-10-09' }, money: null,
-        flows: F({ cluster: false }), expires_at: '2027-01-01T00:00:00Z' }
+        flows: F({ cluster: false }), expires_at: '2027-01-01T00:00:00Z', long_term: { call: 'no', reviewed_at: '2027-01-01T00:00:00Z', expires_at: '2027-01-01T00:00:00Z' } }
     const { flags } = await scanWeek('2026-10-09', {
         readRun: async () => ({ rows: [row], regime: null }), readMoney: async () => new Map(),
         readFlows: async () => new Map([[CODE, F({ cluster: true })]]),

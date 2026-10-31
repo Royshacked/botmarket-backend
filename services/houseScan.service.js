@@ -16,7 +16,7 @@
 
 import { coveredSymbols, readSubIndustry } from '../api/strategy/industryData.service.js'
 import { themeService } from '../api/strategy/theme.service.js'
-import { industryAssessmentService, BOOKS } from '../api/strategy/industryAssessment.service.js'
+import { industryAssessmentService, longTermOf, longTermYes } from '../api/strategy/industryAssessment.service.js'
 import { pythiaCallsService } from '../api/strategy/pythiaCalls.service.js'
 import { researchQueueService } from './researchQueue.service.js'
 import { industryCandidates } from './houseScan.candidates.js'
@@ -71,6 +71,33 @@ export function pythiaContext(a, { link = null, why = null, argus = null } = {})
 }
 
 /**
+ * What the week's results SEND (pythia-two-verdicts.md §2.2): a near-term `swing` to the swing book; a long-term YES made
+ * NEW this week (`long_term_new` — no / none → yes) to the long-term book — a monthly review that re-confirms a yes sends
+ * nothing again. A row from a week before the split whose verdict was `long_term` still sends it. Pure → `[{ r, book }]`.
+ */
+export function bookSends(results) {
+    const out = []
+    for (const r of results ?? []) {
+        if (r.outcome !== 'published') continue
+        if (r.verdict === 'swing') out.push({ r, book: 'swing' })
+        if (r.long_term_new || r.verdict === 'long_term') out.push({ r, book: 'long_term' })
+    }
+    return out
+}
+
+/**
+ * The assessment as the BOOK reads it, or null when it no longer speaks for that book. Pure. The long-term view carries
+ * the long-term call's thesis and `verdict: 'long_term'`, `horizon: 'years'` — what the candidates, Argus and the queue
+ * context (Prometheus's target horizon) read.
+ */
+export function asBook(a, book) {
+    if (!a) return null
+    if (book === 'swing') return a.verdict === 'swing' ? a : null
+    if (book !== 'long_term' || !longTermYes(a)) return null
+    return { ...a, verdict: 'long_term', horizon: 'years', thesis: longTermOf(a)?.thesis ?? a.thesis }
+}
+
+/**
  * Queue names for this week's FOR SWING / FOR LONG TERM verdicts. `results` are the week's result rows (pythiaWeekly)
  * in the week's order; `bookTo` the ledger Argus's calls book to. →
  * `{ queued: [{ symbol, subject }], considered, skipped_full, picks: [per list], cost_usd }`.
@@ -79,7 +106,7 @@ export async function runHouseScan(results, deps = _deps, { alreadyQueued = 0, b
     const per = Math.max(0, Number(deps.perIndustry()) || 0)
     // The week's ceiling counts what an earlier finish of the same week already queued (a forced rerun).
     const max = Math.max(0, (Number(deps.weeklyMax()) || 0) - (Number(alreadyQueued) || 0))
-    const verdicts = (results ?? []).filter(r => r.outcome === 'published' && BOOKS.includes(r.verdict))
+    const verdicts = bookSends(results)
     const queued = [], lists = []
     let skippedFull = 0, cost = 0
     if (!verdicts.length || !per || !max) return { queued, considered: verdicts.length, skipped_full: 0, picks: lists, cost_usd: 0 }
@@ -94,10 +121,11 @@ export async function runHouseScan(results, deps = _deps, { alreadyQueued = 0, b
         const rejected = new Set(((await deps.rejected?.().catch(() => [])) ?? [])
             .filter(r => Date.parse(r.updated_at ?? r.created_at ?? '') >= cutoff).map(r => String(r.symbol).toUpperCase()))
         const taken = new Set(((await deps.inLine?.().catch(() => [])) ?? []).map(r => String(r.symbol).toUpperCase()))
-        for (const r of verdicts) {
+        for (const { r, book } of verdicts) {
             if (queued.length >= max) { skippedFull++; continue }
-            const a = await deps.assessment(r)
-            if (!a || !BOOKS.includes(a.verdict)) continue      // re-assessed since: the verdict that would send it is gone
+            // Re-read: re-assessed since, the verdict that would send it may be gone. Downstream reads the BOOK's view.
+            const a = asBook(await deps.assessment(r), book)
+            if (!a) continue
             const named = new Map((a.names ?? []).map(x => [String(x.symbol).toUpperCase(), x.why ?? null]))
             // Industries: their own list. Themes: supplier links (order 2) first — the less obvious names — then direct.
             let sources = r.kind === 'theme'
@@ -148,7 +176,7 @@ export async function runHouseScan(results, deps = _deps, { alreadyQueued = 0, b
             }
             if (chosen.length) {
                 const source = sourcesUsed.size === 1 ? [...sourcesUsed][0] : 'mixed'
-                await Promise.resolve(deps.attachPicks?.(a.subject, { symbols: chosen, source, covered }))
+                await Promise.resolve(deps.attachPicks?.(a.subject, { symbols: chosen, source, covered, book }))
                     .catch(err => logger.warn(LOG, 'picks not attached to the call', { subject: a.subject?.name, error: err.message }))
             }
         }

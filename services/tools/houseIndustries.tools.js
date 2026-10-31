@@ -114,9 +114,10 @@ export function formatHouseIndustries(book, entries, { sector = null, words = SC
  */
 export function formatIndustryCompanies(sub, rows, covered, verdict = null, named = []) {
     const rolled = (rows ?? []).some(r => r.sub_industry && r.sub_industry !== sub.name)
-    const v = verdict?.verdict ? (VERDICTS[verdict.verdict] ?? verdict.verdict) : 'not assessed'
+    const v = verdict?.verdict ? (VERDICTS[verdict.verdict] ?? verdict.verdict) : verdict?.long_term ? 'no near-term verdict' : 'not assessed'
+    const lt = verdict?.long_term?.call === 'yes' ? ' · LONG TERM: yes' : ''
     return [
-        `${sub.name} (${sub.code}) [${sub.sector ?? 'sector n/a'}] — the house's verdict: ${v}${verdict?.hype ? ' · HYPE' : ''}`,
+        `${sub.name} (${sub.code}) [${sub.sector ?? 'sector n/a'}] — the house's verdict: ${v}${verdict?.hype ? ' · HYPE' : ''}${lt}`,
         ...(rolled ? [`  Too few ${sub.name} companies of its own: these are the largest of the level that answers it — check each one's own business fits.`] : []),
         ...(named.length ? [
             '  The companies the house\'s assessment names — what its evidence pointed at (first and second order equal):',

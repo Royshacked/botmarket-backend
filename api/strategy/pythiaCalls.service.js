@@ -119,11 +119,13 @@ export const PICKS_MAX_AGE_DAYS = 3
  * gets are the ones it grades. `largest` is the old way's choice — the first `symbols.length` uncovered names of
  * the call's basket (largest first) — priced beside them. Throws on a db failure; the caller logs it.
  */
-async function attachPicks(subject, { symbols, source, covered = new Set(), now = new Date().toISOString() } = {}) {
+async function attachPicks(subject, { symbols, source, covered = new Set(), now = new Date().toISOString(), book = null } = {}) {
     if (!symbols?.length) return { attached: false, reason: 'no picks' }
     const db = await _io.db()
     const field = subject?.code ? 'subject.code' : 'subject.id'
-    const call = await db.collection(COLLECTION).find({ [field]: subject?.code ?? subject?.id }).sort({ called_at: -1 }).limit(1).next()
+    // The book's own call: a long-term send's picks go on the long-term call, a swing's on the near-term one — a subject
+    // can carry both (pythia-two-verdicts.md §2.2).
+    const call = await db.collection(COLLECTION).find({ [field]: subject?.code ?? subject?.id, ..._bookQuery(book) }).sort({ called_at: -1 }).limit(1).next()
     if (!call) return { attached: false, reason: 'no call' }
     if (call.picks) return { attached: false, reason: 'already has picks' }
     if (_days(call.called_at, now) > PICKS_MAX_AGE_DAYS) return { attached: false, reason: 'call too old' }
@@ -165,8 +167,13 @@ async function recordCall(doc, { now = new Date().toISOString(), basket: given =
     // caller (its own names, or its linked industries' largest), an industry's from its own companies.
     const key = doc.subject.code ?? doc.subject.id
     const field = doc.subject.code ? 'subject.code' : 'subject.id'
-    const prev = await db.collection(COLLECTION).find({ [field]: key }).sort({ called_at: -1 }).limit(1).next()
-    if (!shouldLog(prev, doc.verdict, now)) return { logged: false, reason: 'same verdict, reaffirmed within the window' }
+    // TWO CALLS per subject (pythia-two-verdicts.md §2.2): the near-term verdict, and a long-term YES made in THIS
+    // publish — each against its own last call, so one never reads as the other changing.
+    const last = (book) => db.collection(COLLECTION).find({ [field]: key, ..._bookQuery(book) }).sort({ called_at: -1 }).limit(1).next()
+    const lt = doc.long_term?.call === 'yes' && doc.long_term.reviewed_at === doc.assessed_at ? doc.long_term : null
+    const logNear = shouldLog(await last('near'), doc.verdict, now)
+    const logLong = Boolean(lt) && shouldLog(await last('long_term'), 'long_term', now)
+    if (!logNear && !logLong) return { logged: false, reason: 'same verdict, reaffirmed within the window' }
     const symbols = Array.isArray(given) && given.length
         ? [...new Set(given.map(s => String(s).toUpperCase()))].slice(0, BASKET_MAX)
         : (await _io.companies('sub_industry', key, { limit: BASKET_MAX })).map(c => c.symbol).filter(Boolean)
@@ -176,18 +183,29 @@ async function recordCall(doc, { now = new Date().toISOString(), basket: given =
     if (basket.length < BASKET_MIN || BENCHMARKS.some(s => !prices[s])) {
         throw new Error(`could not price the basket (${basket.length} of ${symbols.length}) or a benchmark`)
     }
-    const call = {
+    const make = (verdict, horizon, thesis, suffix = '') => ({
         // The minute in the id: two published verdicts on one day are two calls (a same-day flip used to
         // overwrite the first — code review 2026-10-11).
-        id: `pc_${code}_${now.replace(/[-:]/g, '').slice(0, 13)}`, subject: doc.subject, verdict: doc.verdict, horizon: doc.horizon,
-        confidence: doc.confidence, thesis: doc.thesis, called_at: now, assessed_at: doc.assessed_at,
+        id: `pc_${code}_${now.replace(/[-:]/g, '').slice(0, 13)}${suffix}`, subject: doc.subject, verdict, horizon,
+        confidence: doc.confidence, thesis, called_at: now, assessed_at: doc.assessed_at,
         basket, entry: Object.fromEntries(basket.map(s => [s, prices[s]])),
         bench_entry: Object.fromEntries(BENCHMARKS.map(s => [s, prices[s]])),
         grades: {}, status: 'open',
+    })
+    const call = logNear ? make(doc.verdict, doc.horizon, doc.thesis) : null
+    const longCall = logLong ? make('long_term', 'years', lt.thesis ?? doc.thesis, '_lt') : null
+    for (const c of [call, longCall].filter(Boolean)) {
+        await db.collection(COLLECTION).insertOne(c)
+        logger.info(LOG, 'call logged', { code, verdict: c.verdict, basket: basket.length })
     }
-    await db.collection(COLLECTION).insertOne(call)
-    logger.info(LOG, 'call logged', { code, verdict: call.verdict, basket: basket.length })
-    return { logged: true, call }
+    return { logged: true, call: call ?? longCall, ...(longCall ? { long_term_call: longCall } : {}) }
+}
+
+/** The calls of one book: the long term's (verdict `long_term`), or every other (the near term). Null: any. */
+function _bookQuery(book) {
+    if (book === 'long_term') return { verdict: 'long_term' }
+    if (book === 'near' || book === 'swing') return { verdict: { $ne: 'long_term' } }
+    return {}
 }
 
 /**

@@ -24,7 +24,8 @@ import { scanIndustry, scanTheme, pickForWeek } from '../api/strategy/changeScan
 import { assessIndustry, assessTheme } from './industryAssessmentRun.service.js'
 import { runHouseScan } from './houseScan.service.js'
 import { houseResearchService, RESUME_WEEKS } from './houseResearch.service.js'
-import { houseLedgerUserId } from '../api/user/user.model.js'
+import { houseLedgerUserId, listAdminUserIds } from '../api/user/user.model.js'
+import { postCard } from './notifyCard.js'
 import { getDb } from '../providers/mongodb.provider.js'
 import { config } from './config.js'
 import { logger } from './logger.service.js'
@@ -58,8 +59,62 @@ const _deps = {
     resumeResearch: (weeks) => houseResearchService.resumeWeeks(weeks),
     db: () => getDb(),
     now: () => new Date().toISOString(),
+    // The stale-engine card (pythia-two-verdicts.md §3.2): every admin, through the one card transport.
+    adminUserIds: () => listAdminUserIds(),
+    post: (card, ctx) => postCard(card, ctx),
 }
 export function _setDeps(d) { Object.assign(_deps, d) }
+
+/**
+ * The engine's price run is STALE past this many days (pythia-two-verdicts.md §3; 2026-10: it stood at 10-07 for three
+ * weeks, the Sunday cron never scheduled, and nothing said so). Weekly, so a week and a day of slack.
+ */
+export const ENGINE_STALE_DAYS = 8
+/** What a DUE pass assesses while the engine is stale (§3.3): what is due by the clock, never what "moved" on old prices. */
+export const DUE_KEYS = Object.freeze(['long_term_due', 'expired', 'decider_due'])
+/** A due pass skips a subject this week's results already tried within this many days (a refusal is not bought daily). */
+export const DUE_RETRY_DAYS = 7
+
+/** How old the latest complete price run is → `{ stale, days, asof }`, or null without one. Pure. */
+export function engineAge(latest, nowIso) {
+    if (!latest?.asof) return null
+    const days = Math.floor((Date.parse(nowIso) - Date.parse(`${latest.asof}T00:00:00Z`)) / 86_400_000)
+    return { stale: days > ENGINE_STALE_DAYS, days, asof: latest.asof }
+}
+
+/** The stale-engine card for one admin. Pure. */
+export function engineStaleCard(age, userId) {
+    if (!userId || !age?.stale) return null
+    return {
+        userId, botId: 'strategy', type: 'pythia_engine_stale',
+        content: `Pythia is waiting on the engine — the last industry price run is ${age.asof}, ${age.days} days ago. `
+            + 'Her weekly reassessments start from a new run (aether-engine\'s Sunday job, engine-weekly); until one comes, '
+            + 'only what is due by the clock — long-term reviews, expired assessments — is assessed, on the old prices.',
+        payload: { kind: 'pythia_engine', asof: age.asof, days: age.days },
+    }
+}
+
+/**
+ * Is the engine stale? → `{ stale, days, asof, carded }`, or null without a run. The FIRST check that finds a run stale
+ * posts one card to every admin — once per stale run, claimed on that run's week document (`stale_card_at`), so a
+ * restart or a second process does not post it again. Never throws.
+ */
+export async function checkEngine(deps = _deps) {
+    try {
+        const age = engineAge(await deps.latestRun(), deps.now())
+        if (!age?.stale) return age
+        const db = await deps.db()
+        const r = await db.collection(COLLECTION).updateOne({ id: _weekId(age.asof), stale_card_at: { $exists: false } }, { $set: { stale_card_at: deps.now() } })
+        // The filter itself requires no card yet, so a match IS the claim.
+        if (!(r?.matchedCount > 0)) return { ...age, carded: false }
+        logger.warn(LOG, 'the engine is stale — Pythia is waiting on a new price run', { asof: age.asof, days: age.days })
+        for (const userId of await deps.adminUserIds()) await deps.post(engineStaleCard(age, userId), { tag: 'Pythia engine-stale card', log: LOG })
+        return { ...age, carded: true }
+    } catch (err) {
+        logger.warn(LOG, 'engine check failed', { error: err.message })
+        return null
+    }
+}
 
 const _weekId = (asof) => `pw_${asof}`
 
@@ -97,6 +152,16 @@ export async function scanWeek(asof, deps = _deps) {
         if (f) flags.push({ ...f, previous_verdict: byTheme.get(t.id)?.verdict ?? null })
     }
     return { flags, regime: regime?.regime ?? null, scanned: { industries: rows?.length ?? 0, themes: (themes ?? []).filter(t => t.status === 'approved').length } }
+}
+
+/**
+ * A published document's long-term call, as the week's result row records it → `{ long_term, long_term_new }`, or {}
+ * when this run made no long-term call (the stored one stands). NEW = a yes whose previous call was not. Pure.
+ */
+export function longTermResult(doc) {
+    const lt = doc?.long_term
+    if (!lt?.call || lt.reviewed_at !== doc.assessed_at) return {}
+    return { long_term: lt.call, long_term_new: lt.call === 'yes' && lt.previous !== 'yes' }
 }
 
 const _subject = (f) => (f.kind === 'theme' ? { kind: 'theme', id: f.id, name: f.name } : { kind: 'industry', code: f.code, name: f.name })
@@ -188,7 +253,7 @@ async function _claim(coll, { id, asof, week, token, now, by, userId }) {
  * week already spent. → `{ ok, outcome, asof?, assessed?, waiting?, held_back?, cost_usd?, stopped? }`, outcome
  * one of done | paused | exists | no_run | already_running | no_ledger | bad_limit | error.
  */
-export async function runWeekly({ force = false, by = null, limit = Infinity, deps = _deps } = {}) {
+export async function runWeekly({ force = false, dueOnly = false, by = null, limit = Infinity, deps = _deps } = {}) {
     const max = validLimit(limit)
     if (max == null) return { ok: false, outcome: 'bad_limit', detail: `limit must be a positive whole number, not ${limit}` }
     if (_active) return { ok: false, outcome: 'already_running' }
@@ -205,7 +270,8 @@ export async function runWeekly({ force = false, by = null, limit = Infinity, de
         const coll = db.collection(COLLECTION)
         const id = _weekId(asof)
         const week = await coll.findOne({ id })
-        if (week?.status === 'done' && !force) return { ok: true, outcome: 'exists', asof }
+        // A DUE pass (§3.3) re-opens a done week for what is due by the clock — the monitor's, while the engine is stale.
+        if (week?.status === 'done' && !force && !dueOnly) return { ok: true, outcome: 'exists', asof }
         if (weekStatus(week, { now: Date.parse(deps.now()) }) === 'running') return { ok: false, outcome: 'already_running', asof }
         const started = deps.now()
         if (!await _claim(coll, { id, asof, week, token: _token(), now: started, by, userId })) return { ok: false, outcome: 'already_running', asof }
@@ -216,9 +282,12 @@ export async function runWeekly({ force = false, by = null, limit = Infinity, de
         const prior = week?.results ?? []
         // A resume does not pay again for what this week already tried: a refused or failed subject is still flagged,
         // and would be bought twice in one week (code review 2026-10-11). A forced rerun tries them again on purpose.
-        const tried = force ? new Set() : new Set(prior.map(_key))
+        // A due pass skips only what this week tried RECENTLY: a stalled week can outlive a monthly review.
+        const recent = dueOnly ? prior.filter(r => Date.parse(deps.now()) - Date.parse(r.at ?? 0) < DUE_RETRY_DAYS * 86_400_000) : prior
+        const tried = force ? new Set() : new Set(recent.map(_key))
+        const due = (f) => !dueOnly || f.reasons.some(r => DUE_KEYS.includes(r.key))
         const held = scanned_flags.filter(f => hold.has(_key(f)))
-        const flags = scanned_flags.filter(f => !hold.has(_key(f)) && !tried.has(_key(f)))
+        const flags = scanned_flags.filter(f => due(f) && !hold.has(_key(f)) && !tried.has(_key(f)))
         const capSet = Number(deps.cap())
         const capAll = Number.isNaN(capSet) ? 0 : Math.max(0, capSet)          // Infinity = no count cap
         const cap = Math.max(0, capAll - (force ? 0 : prior.length))
@@ -229,7 +298,7 @@ export async function runWeekly({ force = false, by = null, limit = Infinity, de
             scanned, regime, flagged: mergeFlagged(week?.flagged, flags.map(_flagRow)), held_back: held.map(_flagRow),
             cap: Number.isFinite(capAll) ? capAll : null, max_usd: Number(deps.maxUsd()) || 0, updated_at: deps.now(),
         } })
-        logger.info(LOG, 'week started', { asof, flagged: flags.length, picked: picked.length, waiting: waiting.length, held_back: held.length, resumed: Boolean(week && !force) })
+        logger.info(LOG, dueOnly ? 'due pass started' : 'week started', { asof, flagged: flags.length, picked: picked.length, waiting: waiting.length, held_back: held.length, resumed: Boolean(week && !force) })
 
         let spent = 0, stopped = null
         const results = []
@@ -241,6 +310,8 @@ export async function runWeekly({ force = false, by = null, limit = Infinity, de
             spent += cost
             const row = { ..._subject(f), reasons: f.reasons.map(x => x.key), outcome: r?.outcome ?? 'error',
                 verdict: r?.doc?.verdict ?? null, previous_verdict: f.previous_verdict ?? null,
+                // The long-term call this run made, and whether it is a NEW yes — what sends names to the long-term book.
+                ...longTermResult(r?.doc),
                 cost_usd: cost, detail: r?.ok ? null : String(r?.detail ?? '').slice(0, 300) || null, at: deps.now() }
             results.push(row)
             await coll.updateOne({ id }, { $push: { results: row }, $set: { updated_at: row.at } })
@@ -255,11 +326,12 @@ export async function runWeekly({ force = false, by = null, limit = Infinity, de
             waiting_count: left.length, waiting: left.slice(0, WAITING_SHOWN).map(_flagRow),
             cost_usd: spentBefore + spent,
         } })
-        if (!paused) {
-            // The hand-off (step 7): the whole week's results, a resumed week's earlier chunks included. Never fatal —
-            // the week is done whether or not the queue took its names.
+        if (!paused && (!dueOnly || results.length)) {
+            // The hand-off (step 7): the whole week's results, a resumed week's earlier chunks included — a due pass hands
+            // on only its own (the week's earlier ones were handed on when it finished). Never fatal — the week is done
+            // whether or not the queue took its names.
             const before = week?.house_scan?.queued ?? []
-            const house = await Promise.resolve(deps.houseScan?.([...prior, ...results], { alreadyQueued: before.length, bookTo: userId })).catch(err => ({ error: err.message }))
+            const house = await Promise.resolve(deps.houseScan?.(dueOnly ? results : [...prior, ...results], { alreadyQueued: before.length, bookTo: userId })).catch(err => ({ error: err.message }))
             if (house) {
                 const house_scan = { queued: [...before, ...(house.queued ?? [])], considered: house.considered ?? 0, skipped_full: house.skipped_full ?? 0,
                     // Argus's lists — what he saw, chose and passed (house-research-chain.md step 4) — and their spend.

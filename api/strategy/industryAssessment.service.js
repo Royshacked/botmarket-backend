@@ -47,6 +47,20 @@ export const WATCH_MAX_DAYS = 42
 export const NO_CASE_EXPIRY_DAYS = 28
 /** The words before 2026-10-11, read as today's — a block from an old thread, a document not yet migrated. */
 export const LEGACY_VERDICTS = Object.freeze({ interesting_trade: 'swing', interesting_invest: 'long_term' })
+/**
+ * TWO VERDICTS (docs/design/pythia-two-verdicts.md; Roy, 2026-10-31: "Industry can hold two verdicts"). `verdict` is the
+ * NEAR TERM — one of these — and the long term is its own call (`long_term`, below). A block still saying
+ * `long_term` as its verdict (an old thread) is read as a long-term yes with the near term `no_case`.
+ */
+export const NEAR_TERM = Object.freeze(['swing', 'watch', 'avoid', 'no_case'])
+/** The long-term call is reviewed monthly (D2: every industry) — due again this many days after it is made. */
+export const LONG_TERM_REVIEW_DAYS = 30
+/**
+ * A long-term YES still speaks for the house this long after it was made, though its review is overdue — a stalled
+ * week (the engine down, 2026-10) must not empty the long-term book overnight. Past it, it is left out.
+ */
+export const LONG_TERM_STALE_DAYS = 60
+export const LONG_TERM_CALLS = Object.freeze(['yes', 'no'])
 export const HORIZONS = Object.freeze(['weeks', 'months', 'years'])
 /** The horizons each book allows: a swing is weeks to months, a long-term holding is years. Others take any. */
 const VERDICT_HORIZONS = Object.freeze({ swing: ['weeks', 'months'], long_term: ['years'] })
@@ -143,6 +157,52 @@ export function resolveNames(names, known, inside) {
 }
 
 /**
+ * The block's LONG-TERM call (pythia-two-verdicts.md §2), checked → `{ call, thesis, why, override_reason, downgraded? }`,
+ * or null when the block has none (the stored call then stands; the change scan flags it when due). Pure.
+ *
+ * A `yes` needs its thesis; a `no` its reason (`why`). The measured structure — demand growing, economics good — is her
+ * starting point, not a gate (D2): a yes outside it needs her ARGUMENT (`override_reason`), as a structural answer that
+ * departs from its code grade does. A yes without its thesis, or outside the structure without an argument, is kept as
+ * a `no` and says why (`downgraded`) — never a refusal: the research was paid for. `structure` is the industry's
+ * (structureOf); a theme has none, and none is needed.
+ */
+export function checkLongTerm(raw, { structure = null } = {}) {
+    if (!raw || typeof raw !== 'object') return null
+    const said = _str(raw.call, 10)?.toLowerCase()
+    const call = said === 'yes' || raw.call === true ? 'yes' : said === 'no' || raw.call === false ? 'no' : null
+    if (!call) return null
+    const thesis = _str(raw.thesis, 700), why = _str(raw.why, 500), override = _str(raw.override_reason, 500)
+    const outside = structure && !(structure.demand === 'growing' && structure.economics === 'good')
+    let downgraded = null
+    if (call === 'yes' && !thesis) downgraded = 'no thesis for the long-term case'
+    else if (call === 'yes' && outside && !override) downgraded = `outside the measured structure (demand ${structure.demand ?? 'n/a'}, economics ${structure.economics ?? 'n/a'}) with no argument`
+    return {
+        call: downgraded ? 'no' : call, thesis: thesis ?? null,
+        why: downgraded ? (why ?? downgraded) : call === 'no' ? (why ?? 'no reason given') : null,
+        override_reason: call === 'yes' && outside && !downgraded ? override : null,
+        ...(downgraded ? { downgraded } : {}),
+    }
+}
+
+/**
+ * A stored document's long-term call, read the same way everywhere → `{ call, thesis, hype, reviewed_at, expires_at }`
+ * or null. A document from before the split whose VERDICT was long term (or interesting_invest) reads as a yes. Pure.
+ */
+export function longTermOf(doc) {
+    if (doc?.long_term?.call) return doc.long_term
+    if ((LEGACY_VERDICTS[doc?.verdict] ?? doc?.verdict) !== 'long_term') return null
+    return { call: 'yes', thesis: doc.thesis ?? null, hype: doc.moved?.hype === true, reviewed_at: doc.assessed_at ?? null, expires_at: doc.expires_at ?? null, legacy: true }
+}
+
+/** A long-term YES that still speaks for the house at `now`: made within LONG_TERM_STALE_DAYS. Pure. */
+export function longTermYes(doc, now = new Date().toISOString()) {
+    const lt = longTermOf(doc)
+    if (lt?.call !== 'yes') return null
+    const at = Date.parse(lt.reviewed_at ?? '')
+    return !Number.isFinite(at) || Date.parse(now) - at <= LONG_TERM_STALE_DAYS * 86_400_000 ? lt : null
+}
+
+/**
  * One <industry_assessment> block, checked → `{ ok, assessment, gaps }` or `{ ok:false, detail }`. Pure.
  *
  * Refused when it lacks what makes it a judgment rather than a story: a verdict, a horizon, a thesis, the
@@ -151,7 +211,7 @@ export function resolveNames(names, known, inside) {
  * stored as a gap, so the board shows what the verdict was NOT based on (only regime has no measured input yet). Facts the agent sends (moves, flags) are
  * ignored: the code attaches them.
  */
-export function checkAssessment(block, { expect = null, now = new Date().toISOString() } = {}) {
+export function checkAssessment(block, { expect = null, now = new Date().toISOString(), structure = null } = {}) {
     if (!block || typeof block !== 'object') return { ok: false, detail: 'no block' }
     // The subject: an industry (8-digit GICS code) or a theme (its th_ id, theme.service) — step 3. When the
     // caller knows which it asked for (`expect`), that field is read and the other ignored: on a theme turn the
@@ -165,8 +225,10 @@ export function checkAssessment(block, { expect = null, now = new Date().toISOSt
     const code = industry ?? theme
     const problems = []
     const said = _str(block.verdict, 40)
-    const verdict = LEGACY_VERDICTS[said] ?? said
-    if (!verdict || !VERDICTS[verdict]) problems.push(`verdict must be one of ${Object.keys(VERDICTS).join('/')}`)
+    // An old-shaped block (verdict `long_term`): the long term was its answer, the near term had none.
+    const oldLongTerm = (LEGACY_VERDICTS[said] ?? said) === 'long_term'
+    const verdict = oldLongTerm ? 'no_case' : LEGACY_VERDICTS[said] ?? said
+    if (!verdict || !NEAR_TERM.includes(verdict)) problems.push(`verdict must be one of ${NEAR_TERM.join('/')} — the long term is its own call, long_term`)
     let horizon = _str(block.horizon, 20)
     if (!horizon || !HORIZONS.includes(horizon)) problems.push(`horizon must be one of ${HORIZONS.join('/')}`)
     // The verdict names the book, so it decides the horizon where they disagree — a "swing" over years is a
@@ -226,10 +288,11 @@ export function checkAssessment(block, { expect = null, now = new Date().toISOSt
         }
     }
     const named = checkNames(block.names)
+    const longTerm = checkLongTerm(block.long_term ?? (oldLongTerm ? { call: 'yes', thesis } : null), { structure })
     return {
         ok: true, gaps, names_dropped: named.dropped,
         assessment: {
-            names: named.names,
+            names: named.names, long_term: longTerm,
             code: industry, theme, verdict: finalVerdict, horizon, thesis, evidence, cause: { kind: causeKind, text: causeText },
             second_order: secondOrder, risks, change_view_if: changeIf, confidence,
             confidence_reason: _str(block.confidence_reason, 300),
@@ -351,7 +414,7 @@ const _themeDocId = (themeId) => `ia_${themeId}`
  */
 async function publishAssessment(block, { sub = null, row = null, money = null, flows = null, geopolitics = null, theme = null, facts: given = null, basket = null,
     structure = null, recordCall = null, now = new Date().toISOString(), source = 'chat', trigger = null } = {}) {
-    const checked = checkAssessment(block, { expect: theme ? 'theme' : sub ? 'industry' : null, now })
+    const checked = checkAssessment(block, { expect: theme ? 'theme' : sub ? 'industry' : null, now, structure: theme ? null : structure })
     if (!checked.ok) return { ok: false, reason: 'bad_assessment', detail: checked.detail }
     const a = checked.assessment
     let id, subject
@@ -400,10 +463,19 @@ async function publishAssessment(block, { sub = null, row = null, money = null, 
         // Why this run happened, when the weekly change scan asked for it (changeScan reasons); null otherwise.
         trigger: Array.isArray(trigger) && trigger.length ? trigger.map(r => ({ key: r.key, text: r.text ?? r.key, detail: r.detail ?? null })) : null,
     }
+    // The LONG-TERM call (pythia-two-verdicts.md §2): its own review clock; the hype flag is the code's (D1: it flags a
+    // yes, never denies it); `previous` is the call it replaced, so the chain can tell a NEW yes. A block without one
+    // leaves the stored call standing.
+    const prevLongTerm = longTermOf(cur)?.call ?? null
+    if (a.long_term) {
+        set.long_term = { ...a.long_term, hype: facts.moved?.hype === true, reviewed_at: now,
+            expires_at: _plusDays(now, LONG_TERM_REVIEW_DAYS), previous: prevLongTerm }
+    }
     const fields = ['verdict', 'horizon', 'confidence']
     // The stored verdict read in today's words: a document still saying interesting_trade is not a "change" to swing.
     const was = { ...cur, verdict: LEGACY_VERDICTS[cur?.verdict] ?? cur?.verdict }
-    const changed = diffFields(Object.fromEntries(fields.map(f => [f, was?.[f] ?? null])), a, fields)
+    const changed = diffFields({ ...Object.fromEntries(fields.map(f => [f, was?.[f] ?? null])), long_term: prevLongTerm },
+        { ...a, long_term: set.long_term?.call ?? prevLongTerm }, [...fields, 'long_term'])
     await _repo.revise(id, set, newRevision({ kind: cur?.verdict ? 'reassessment' : 'assessment', note: a.thesis, changed, at: now }))
     const doc = await db.collection(COLLECTION).findOne({ id }, { projection: { _id: 0 } })
     let call = null
@@ -435,11 +507,22 @@ async function verdictsForCodes(codes, { now = new Date().toISOString() } = {}) 
     if (!list.length) return new Map()
     const db = await _io.db()
     const rows = await db.collection(COLLECTION).find({ 'subject.kind': 'industry', 'subject.code': { $in: list } },
-        { projection: { _id: 0, 'subject.code': 1, verdict: 1, horizon: 1, 'moved.hype': 1, decides_by: 1, question: 1, expires_at: 1 } }).toArray()
-    return new Map(rows.filter(r => !r.expires_at || r.expires_at > now).map(r => [r.subject.code, {
-        verdict: LEGACY_VERDICTS[r.verdict] ?? r.verdict, horizon: r.horizon ?? null, hype: r.moved?.hype === true,
-        decides_by: r.decides_by ?? null, question: r.question ?? null,
-    }]))
+        { projection: { _id: 0, 'subject.code': 1, verdict: 1, horizon: 1, thesis: 1, assessed_at: 1, 'moved.hype': 1, decides_by: 1, question: 1, expires_at: 1, long_term: 1 } }).toArray()
+    // The near term drops out when expired; the long-term call keeps its own clock (longTermYes) — an industry can hold one
+    // without the other (pythia-two-verdicts.md §2).
+    const out = new Map()
+    for (const r of rows) {
+        const near = !r.expires_at || r.expires_at > now
+        const lt = longTermYes(r, now)
+        if (!near && !lt) continue
+        const v = LEGACY_VERDICTS[r.verdict] ?? r.verdict
+        out.set(r.subject.code, {
+            verdict: near && v !== 'long_term' ? v : null, horizon: near ? (r.horizon ?? null) : null, hype: r.moved?.hype === true,
+            decides_by: near ? (r.decides_by ?? null) : null, question: near ? (r.question ?? null) : null,
+            long_term: lt ? { call: 'yes', hype: lt.hype === true } : null,
+        })
+    }
+    return out
 }
 
 async function listAssessments() {
@@ -457,10 +540,16 @@ async function listAssessments() {
 export const ROW_PROJECTION = Object.freeze({
     _id: 0, id: 1, subject: 1, verdict: 1, horizon: 1, decides_by: 1, thesis: 1,
     'cause.kind': 1, 'moved.hype': 1, expires_at: 1, assessed_at: 1,
+    'long_term.call': 1, 'long_term.hype': 1, 'long_term.reviewed_at': 1, 'long_term.expires_at': 1,
 })
 export function assessmentRow(a) {
+    // The long term beside the near term (pythia-two-verdicts.md §2): the row's second chip. A document from before the
+    // split whose verdict WAS long term reads as a yes (longTermOf).
+    const lt = longTermOf(a)
     return {
-        id: a.id ?? null, subject: a.subject ?? null, verdict: a.verdict ?? null, horizon: a.horizon ?? null,
+        long_term: lt ? { call: lt.call, hype: lt.hype === true, reviewed_at: lt.reviewed_at ?? null, expires_at: lt.expires_at ?? null } : null,
+        // An unmigrated long-term VERDICT is the long-term call above; its near term had none.
+        id: a.id ?? null, subject: a.subject ?? null, verdict: lt?.legacy ? 'no_case' : a.verdict ?? null, horizon: a.horizon ?? null,
         decides_by: a.decides_by ?? null, thesis: a.thesis ?? null,
         cause: a.cause?.kind ? { kind: a.cause.kind } : null,
         moved: { hype: a.moved?.hype ?? null },
@@ -493,8 +582,12 @@ const BOOK_LINK_ORDER = 2
  */
 export function houseIndustriesFor(rows, themes, { book, sector = null, now = new Date().toISOString() } = {}) {
     if (!BOOKS.includes(book)) return []
-    const live = (rows ?? []).filter(r => !r.expires_at || r.expires_at > now)
+    const nearLive = (r) => !r.expires_at || r.expires_at > now
     const verdictOf = (r) => LEGACY_VERDICTS[r.verdict] ?? r.verdict
+    // TWO VERDICTS (pythia-two-verdicts.md §2.2): the LONG-TERM book reads the long-term call, on its own clock
+    // (longTermYes); the swing book reads the near-term verdict, unexpired. `avoid` stays the near term's.
+    const inBook = (r) => (book === 'long_term' ? Boolean(longTermYes(r, now)) : nearLive(r) && verdictOf(r) === book)
+    const live = (rows ?? []).filter(r => nearLive(r) || longTermYes(r, now))
     const own = new Map(live.filter(r => r.subject?.kind === 'industry' && r.subject.code).map(r => [r.subject.code, r]))
     // Either spelling — GICS ("Information Technology") or the screener's ("Technology"): a sleeve's sector is model text.
     const _sec = (s) => normalizeSector(s) ?? String(s ?? '').trim().toLowerCase()
@@ -503,12 +596,15 @@ export function houseIndustriesFor(rows, themes, { book, sector = null, now = ne
     const entry = (code, name, sec) => {
         if (!out.has(code)) {
             const r = own.get(code)
-            const mine = r && verdictOf(r) === book
+            const mine = r && inBook(r)
+            const lt = book === 'long_term' && mine ? longTermOf(r) : null
             out.set(code, {
                 code, name: r?.subject?.name ?? name, sector: r?.subject?.sector ?? sec ?? null,
-                rated: Boolean(mine), horizon: mine ? (r.horizon ?? null) : null,
-                hype: r?.moved?.hype === true, thesis: mine ? (r.thesis ?? null) : null,
-                top_risk: mine ? (r.risks?.[0] ?? null) : null, avoid: r ? verdictOf(r) === 'avoid' : false,
+                rated: Boolean(mine), horizon: mine ? (lt ? 'years' : r.horizon ?? null) : null,
+                hype: r?.moved?.hype === true, thesis: mine ? (lt?.thesis ?? r.thesis ?? null) : null,
+                top_risk: mine ? (r.risks?.[0] ?? null) : null, avoid: r && nearLive(r) ? verdictOf(r) === 'avoid' : false,
+                // On the long-term book, the near term beside it — a swing, or an avoid that is only timing (D1).
+                ...(lt ? { near_term: nearLive(r) ? verdictOf(r) : null } : {}),
                 // Who else it reaches — Pythia's second-order read, required on every assessment (Roy, 2026-10-13: shown
                 // beside the first order, neither preferred).
                 second_order: mine ? (r.second_order ?? null) : null,
@@ -520,11 +616,11 @@ export function houseIndustriesFor(rows, themes, { book, sector = null, now = ne
         return out.get(code)
     }
     for (const r of own.values()) {
-        if (verdictOf(r) === book && inSector(r.subject.sector)) entry(r.subject.code, r.subject.name, r.subject.sector)
+        if (inBook(r) && inSector(r.subject.sector)) entry(r.subject.code, r.subject.name, r.subject.sector)
     }
     const approved = new Map((themes ?? []).filter(t => t?.status === 'approved').map(t => [t.id, t]))
     for (const r of live) {
-        if (r.subject?.kind !== 'theme' || verdictOf(r) !== book) continue
+        if (r.subject?.kind !== 'theme' || !inBook(r)) continue
         const t = approved.get(r.subject.id)
         if (!t) continue                          // retired since it was rated: its verdict no longer speaks for the house
         const moves = new Map((r.moved?.links ?? []).map(l => [l.code, l]))
@@ -532,7 +628,8 @@ export function houseIndustriesFor(rows, themes, { book, sector = null, now = ne
             const e = entry(l.code, l.name, l.sector)
             if (e.excess_12m == null) e.excess_12m = _num(moves.get(l.code)?.excess_12m)
             if (moves.get(l.code)?.hype === true) e.hype = true
-            e.themes.push({ id: t.id, name: t.name, order: l.order, horizon: r.horizon ?? null, thesis: r.thesis ?? null, second_order: r.second_order ?? null, names: r.names ?? [] })
+            const tlt = book === 'long_term' ? longTermOf(r) : null
+            e.themes.push({ id: t.id, name: t.name, order: l.order, horizon: tlt ? 'years' : r.horizon ?? null, thesis: tlt?.thesis ?? r.thesis ?? null, second_order: r.second_order ?? null, names: r.names ?? [] })
         }
     }
     return [...out.values()].sort((a, b) => (b.excess_12m ?? -Infinity) - (a.excess_12m ?? -Infinity) || String(a.name).localeCompare(String(b.name)))
@@ -550,7 +647,7 @@ async function listForBooks(books, { sector = null, now = new Date().toISOString
     const [rows, approved] = await Promise.all([
         db.collection(COLLECTION).find({}, { projection: {
             _id: 0, subject: 1, verdict: 1, horizon: 1, thesis: 1, risks: 1, second_order: 1, names: 1, expires_at: 1,
-            'moved.hype': 1, 'moved.excess_12m': 1, 'moved.links': 1,
+            assessed_at: 1, long_term: 1, 'moved.hype': 1, 'moved.excess_12m': 1, 'moved.links': 1,
         } }).toArray(),
         themes(),
     ])

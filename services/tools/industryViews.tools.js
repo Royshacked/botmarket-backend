@@ -28,9 +28,12 @@ const VERDICT_WORDS = { swing: 'FOR SWING', long_term: 'FOR LONG TERM', watch: '
 
 /** Pythia's verdict on the industry, as a line suffix ('' without one). Pure — exported for testing. */
 export function verdictLine(a) {
-    if (!a?.verdict) return ''
+    if (!a?.verdict && a?.long_term?.call !== 'yes') return ''
     const watch = a.verdict === 'watch' && a.decides_by ? ` — decides by ${a.decides_by}${a.question ? `: ${a.question}` : ''}` : ''
-    return `\n         Pythia's verdict: ${VERDICT_WORDS[a.verdict] ?? a.verdict}${a.hype ? ' · HYPE' : ''}${watch}`
+    // The long term is its own call (pythia-two-verdicts.md §2): an industry can hold it beside any near-term verdict.
+    const near = a.verdict ? `${VERDICT_WORDS[a.verdict] ?? a.verdict}${watch}` : 'no near-term verdict'
+    const lt = a.long_term?.call === 'yes' ? ` · LONG TERM: yes${a.long_term.hype ? ' (stretched — a timing flag)' : ''}` : ''
+    return `\n         Pythia's verdict: ${near}${a.hype ? ' · HYPE' : ''}${lt}`
 }
 
 /** Per-symbol answers → LLM-ready text. Pure — exported for testing. */

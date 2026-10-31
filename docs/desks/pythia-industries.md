@@ -106,6 +106,13 @@ Q11) was RETIRED when the assessment board replaced it (Roy, 2026-10-10). In its
 
 ## The assessment — `industry_assessment` (build step 1, 2026-10-10)
 
+> **Since 2026-10-31 — two verdicts** ([pythia-two-verdicts.md](../design/pythia-two-verdicts.md)): `verdict` is the
+> NEAR TERM (swing · watch · avoid · no_case) and `long_term` is its own call (yes / no, with its thesis or reason),
+> reviewed monthly for every industry and theme — a yes outside the measured structure carries her argument; a hype
+> run flags a yes, never denies it. The long-term book (Argus, house labels, Atlas's sleeves) reads the long-term
+> call; a NEW yes sends names down the chain. When the engine's price run is over eight days old, every admin gets
+> one card and a daily due pass keeps the long-term reviews going on the old prices.
+
 Contract: `docs/design/pythia-assessment.md`. Pythia judges whether an industry is **interesting to
 trade, to invest in, to watch, or to avoid**, from five inputs (news and events, price action, money,
 regime, geopolitics). It is a judgment, not a forecast, and the code holds it to guardrails:

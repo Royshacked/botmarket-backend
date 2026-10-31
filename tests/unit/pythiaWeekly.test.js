@@ -17,7 +17,9 @@ import { memDb } from '../helpers/memDb.js'
 const AT = '2026-10-11T12:00:00.000Z'
 const moved = (o = {}) => ({ asof: '2026-10-09', ret_24m: 0.3, spy_24m: 0.4, excess_12m: 0.05, rel_1m: 0.01, ext_percentile: 0.5, hype: false, ...o })
 const money = (o = {}) => ({ capex_change: 0.2, buybacks_change: 0.1, ...o })
-const assessment = (o = {}) => ({ verdict: 'watch', moved: moved({ asof: '2026-10-02' }), money: money(), expires_at: '2026-12-01T00:00:00.000Z', ...o })
+// A long-term call reviewed recently — not due (pythia-two-verdicts.md: a missing or expired one flags `long_term_due`).
+const LT = { call: 'no', why: 'demand in line', reviewed_at: '2026-10-10T00:00:00.000Z', expires_at: '2026-11-09T00:00:00.000Z' }
+const assessment = (o = {}) => ({ verdict: 'watch', moved: moved({ asof: '2026-10-02' }), money: money(), expires_at: '2026-12-01T00:00:00.000Z', long_term: LT, ...o })
 
 // ── the scan (pure) ──────────────────────────────────────────────────────────
 
@@ -61,7 +63,7 @@ test('an industry never assessed, or past its expiry, is flagged; reasons carry 
 
 test('a theme flags when a direct or supplier link moved against what ITS assessment froze — not on order 3', () => {
     const theme = { id: 'th_x', name: 'X', links: [{ code: 'A', name: 'Chips', order: 1 }, { code: 'B', name: 'Copper', order: 3 }] }
-    const a = { expires_at: '2026-12-01T00:00:00Z',
+    const a = { expires_at: '2026-12-01T00:00:00Z', long_term: LT,
         moved: { kind: 'theme', links: [{ code: 'A', asof: '2026-10-02', hype: false, ext_percentile: 0.5 }, { code: 'B', asof: '2026-10-02', hype: false }] },
         money: { kind: 'theme', links: [{ code: 'A', capex_change: 0.2 }] } }
     const now = new Map([['A', { moved: moved({ hype: true }), money: money() }], ['B', { moved: moved({ hype: true }) }]])
@@ -101,7 +103,7 @@ function deps(over = {}) {
         readMoney: async () => new Map(),
         // Banks was assessed on this very run: nothing new to see.
         listAssessments: async () => [{ subject: { kind: 'industry', code: '33333333' }, verdict: 'avoid',
-            moved: { asof: '2026-10-09', hype: false, ext_percentile: 0.5, excess_12m: 0.03, rel_1m: 0.01 }, money: null, expires_at: '2027-01-01T00:00:00Z' }],
+            moved: { asof: '2026-10-09', hype: false, ext_percentile: 0.5, excess_12m: 0.03, rel_1m: 0.01 }, money: null, expires_at: '2027-01-01T00:00:00Z', long_term: LT }],
         listThemes: async () => [{ id: 'th_ai', name: 'AI', status: 'approved', links: [{ code: '11111111', name: 'Semis', order: 1 }] }],
         assessIndustry: async (code, opts) => { calls.push({ code, opts }); return { ok: true, outcome: 'published', doc: { verdict: 'watch' }, cost_usd: 0.005 } },
         assessTheme: async (id, opts) => { calls.push({ id, opts }); return { ok: true, outcome: 'published', doc: { verdict: 'swing' }, cost_usd: 0.006 } },
@@ -307,7 +309,7 @@ test('the move by size rides beside the equal-weight one, and is what the hype f
 })
 
 test('a watch is reassessed once the date it named has passed — not at its expiry', () => {
-    const watch = (decides_by) => ({ verdict: 'watch', decides_by, moved: moved({ asof: '2026-10-09' }), money: money(), expires_at: '2026-12-01T00:00:00Z' })
+    const watch = (decides_by) => ({ verdict: 'watch', decides_by, moved: moved({ asof: '2026-10-09' }), money: money(), expires_at: '2026-12-01T00:00:00Z', long_term: LT })
     const now = { moved: moved({ asof: '2026-10-09' }), money: money() }
     const f = scanIndustry({ code: '1', name: 'Telecom Towers', now, assessment: watch('2026-10-10'), at: AT })
     assert.deepEqual(f.reasons.map(r => [r.key, r.detail]), [['decider_due', 'decides by 2026-10-10']])

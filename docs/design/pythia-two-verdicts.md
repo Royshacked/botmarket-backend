@@ -1,6 +1,8 @@
 # Pythia — two verdicts per industry, and the weeks she never saw
 
-**Status: DESIGN 2026-10-31, decisions D1–D3 taken the same day (§4), branch `feat/pythia-two-verdicts` (cut from main). Not built.** Roy: "pythia - how come
+**Status: BUILT 2026-10-31 on main (Roy: "pythia session can now continue on main"), decisions D1–D3 (§4); unit-tested
+both repos; axl_dev migrated (4 split) and one live assessment (Semiconductors: near term watch, long term yes, both
+calls logged, $0.004); the first monthly review sweep run on axl_dev (§7). Not pushed.** Roy: "pythia - how come
 there are so little industries for long term" → "Industry can hold two verdicts and also - what about pythia didn't
 assess for 3 weeks".
 
@@ -98,3 +100,18 @@ assessment; every other industry gets `long_term` from the first sweep. `LEGACY_
 4. The readers: houseIndustriesFor, houseScan, pythiaCalls, the tools.
 5. FE: two chips, the Long term filter.
 6. Live: one sweep on axl_dev; the chain on one long-term yes; a browser drive of the board.
+
+## 6. As built (2026-10-31)
+
+- **The monthly review rides the weekly run.** A long-term call never made or past its 30 days flags the subject
+  `long_term_due` in the change scan; the week assesses it with the rest, one turn answering both. While the engine is
+  stale the monitor runs a **due pass** once a day (`runWeekly({ dueOnly })`: only `long_term_due`, `expired`,
+  `decider_due`), inside the same week's $3 ceiling. No separate sweep job.
+- **A long-term yes speaks for the house for 60 days** (`LONG_TERM_STALE_DAYS`), its review due at 30 — a stalled week
+  does not empty the long-term book.
+- **Graded at 3 and 12 months**, the horizons every call already has — not the 12 / 24 the design named; a 24-month
+  mark is a later change to `HORIZON_DAYS` for all calls.
+- **The chain sends a NEW yes only** (`long_term_new`: the previous call was not yes). A monthly re-confirmation sends
+  nothing; the four migrated industries were sent under their old verdict and are not sent again.
+- **The card** is `pythia_engine_stale` (botId `strategy`), plain text — the FE draws it with its fallback bubble.
+- **Migration**: `scripts/migrate-pythia-long-term.mjs` — run on axl_dev 2026-10-31 (4 split); prod after the deploy.

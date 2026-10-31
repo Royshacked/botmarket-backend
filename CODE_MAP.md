@@ -138,9 +138,16 @@ api/
                               /assessments?view=rows; an opened row reads /assessments/:code or /assessments/theme/:id.
                               NAMES (pythia-names.md): checkNames (shape) + resolveNames (the universe; first order
                               inside the subject, second elsewhere) → `names` / `names_dropped` on the assessment
+                              TWO VERDICTS (pythia-two-verdicts.md, 2026-10-31): `verdict` is the NEAR TERM (NEAR_TERM:
+                              swing / watch / avoid / no_case); `long_term` is its own call {call yes|no, thesis, why,
+                              override_reason, hype (code's), reviewed_at, expires_at (+LONG_TERM_REVIEW_DAYS 30),
+                              previous} — checkLongTerm (a yes outside the measured structure needs her argument, else
+                              a no); longTermOf reads an old long-term verdict as a yes; longTermYes = a yes within
+                              LONG_TERM_STALE_DAYS (60). houseIndustriesFor's long_term book reads the long-term call
     pythiaCalls.service.js    `pythia_calls` = the FORWARD LOG: each verdict freezes its basket's and SPY /
                               QQQ / RSP's prices; gradeDue scores it at 3 and 12 months (gradeCall, summarise).
-                              Logged on a new verdict or a reaffirmation after 28 days (shouldLog); an
+                              Logged on a new verdict or a reaffirmation after 28 days (shouldLog) — the near term and a
+                              long-term yes as TWO calls (`_lt` id suffix, verdict `long_term`), each against its own last; an
                               industry keyed by its GICS code, a theme by its id and graded on the basket given
     theme.service.js          `theme` = Pythia's THEMES (step 3): proposed / approved / retired; a value chain
                               of measured sub-industries by order (1 direct, 2 suppliers, 3 suppliers'
@@ -158,6 +165,7 @@ api/
                               either year (outside a gap from the frozen change), and funds'
                               crowding behind CROWDED_SCANNED (off: 66 of 163 at the top of a 7-quarter range),
                               only against FROZEN flows (none on a theme or a pre-step-8 assessment);
+                              longTermDue — the long-term call never made or past its monthly review (`long_term_due`);
                               geoChanges (step 4) — a mapped risk touching the industry turning elevated (only
                               risks the frozen reading measured, frozen below GEO_REARM_Z 1.5);
                               scanIndustry / scanTheme add never-assessed and expired; pickForWeek orders by
@@ -1051,7 +1059,12 @@ services/
                             flagged subject, biggest change first, until PYTHIA_WEEKLY_MAX_USD ($3) →
                             `pythia_weekly` (one doc per run date: flagged, results, waiting, held_back, cost,
                             regime). weekStatus: quiet 30 min = interrupted → resumed; refused two weeks
-                            running → held back one (refusedTwice)
+                            running → held back one (refusedTwice). THE ENGINE CAN STALL (pythia-two-verdicts.md §3):
+                            checkEngine — the latest run older than ENGINE_STALE_DAYS (8) → one `pythia_engine_stale`
+                            card per stale run to every admin; runWeekly({ dueOnly }) re-opens a done week for
+                            DUE_KEYS only (long-term reviews, expired, a watch's date) — the monitor's, once a day
+                            while stale. Results carry `long_term` / `long_term_new` (houseScan bookSends: a NEW yes
+                            sends to the long-term book)
   engineDb.js               THE rule for which database aether-engine writes (AETHER_DB, else Node's own) —
                             shared by the engine's scheduler and every desk that reads what it wrote
   manualNotify.service.js   broker-less entry/exit FillCards → social chat (embedded price/qty confirm)

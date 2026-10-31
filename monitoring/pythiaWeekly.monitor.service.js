@@ -14,13 +14,23 @@
 // budget (HOUSE_RESEARCH_MAX_USD) like any other.
 
 import { createPollLoop } from './pollLoop.js'
-import { runWeekly, resumeResearch } from '../services/pythiaWeekly.service.js'
+import { runWeekly, resumeResearch, checkEngine } from '../services/pythiaWeekly.service.js'
 import { config } from '../services/config.js'
 
 const LOG = '[pythiaWeeklyMonitor]'
 export const CHECK_INTERVAL_MS = 3 * 60 * 60 * 1000
 
-const _deps = { enabled: () => config.pythiaWeekly, run: () => runWeekly(), resume: () => resumeResearch() }
+// THE ENGINE CAN STALL (docs/design/pythia-two-verdicts.md §3; 2026-10: three weeks on the 10-07 run, nobody told). Each
+// tick also asks how old the latest run is: stale, every admin gets one card (checkEngine), and — at most once a day —
+// a DUE pass assesses what is due by the clock (long-term reviews, expired assessments) on the old prices, so the
+// long-term book is never left unreviewed while the engine is down.
+export const DUE_PASS_EVERY_MS = 24 * 60 * 60 * 1000
+let _duePassAt = 0
+/** Test seam. */
+export function _resetDuePass() { _duePassAt = 0 }
+
+const _deps = { enabled: () => config.pythiaWeekly, run: () => runWeekly(), resume: () => resumeResearch(),
+    engine: () => checkEngine(), runDue: () => runWeekly({ dueOnly: true }), now: () => Date.now() }
 export function _setDeps(d) { Object.assign(_deps, d) }
 
 /**
@@ -31,8 +41,14 @@ export function _setDeps(d) { Object.assign(_deps, d) }
 export async function _tick(deps = _deps) {
     if (!deps.enabled()) return { outcome: 'off', research: await deps.resume() }
     const week = await deps.run()
+    const engine = await (deps.engine?.() ?? null)
+    let due = null
+    if (engine?.stale && deps.runDue && deps.now() - _duePassAt >= DUE_PASS_EVERY_MS) {
+        _duePassAt = deps.now()
+        due = await deps.runDue()
+    }
     const research = await deps.resume()
-    return { ...week, research }
+    return { ...week, research, ...(engine ? { engine } : {}), ...(due ? { due } : {}) }
 }
 
 const _loop = createPollLoop({ intervalMs: CHECK_INTERVAL_MS, tick: () => _tick(), eager: false, log: LOG, name: 'pythia weekly' })

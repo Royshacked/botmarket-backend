@@ -58,6 +58,8 @@ export const REASONS = Object.freeze({
     geo_elevated:  { weight: 2, text: 'a geopolitical risk the map says touches it turned elevated' },
     link_moved:    { weight: 0, text: 'a link in its chain moved' },   // weighs as its links' biggest reason
     unassessed:    { weight: 1, text: 'never assessed' },
+    // The long-term call's own monthly review (pythia-two-verdicts.md §2.1, D2): every subject, whatever moved.
+    long_term_due: { weight: 1, text: 'its long-term call is due for review' },
 })
 
 const _n = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null)
@@ -160,6 +162,16 @@ export function flowChanges(now, then, scan = SCAN) {
 const _expired = (a, now) => Boolean(a?.expires_at) && Date.parse(a.expires_at) <= Date.parse(now)
 
 /**
+ * The long-term call is due (pythia-two-verdicts.md §2.1): never made — a document from before the split, its old
+ * long-term verdict included — or past its monthly review. → the reason, or null. Pure.
+ */
+export function longTermDue(a, now) {
+    const lt = a?.long_term
+    if (!lt?.call) return { key: 'long_term_due', detail: 'never made' }
+    return _expired(lt, now) ? { key: 'long_term_due', detail: `reviewed ${String(lt.reviewed_at ?? '').slice(0, 10)}` } : null
+}
+
+/**
  * A WATCH names the date that decides it (`decides_by`, at most WATCH_MAX_DAYS out). Once that date has passed —
  * the day after it, so the report it waited for is out — the watch is due: reassessed now, not at its expiry.
  */
@@ -185,6 +197,8 @@ export function scanIndustry({ code, name, now, assessment = null, at }) {
         const due = deciderDue(assessment, at)
         if (due) reasons.push(due)
         if (_expired(assessment, at)) reasons.push({ key: 'expired', detail: `on ${String(assessment.expires_at).slice(0, 10)}` })
+        const ltDue = longTermDue(assessment, at)
+        if (ltDue) reasons.push(ltDue)
     }
     if (!reasons.length) return null
     const words = reasons.map(_words)
@@ -220,6 +234,8 @@ export function scanTheme({ theme, nowByCode, assessment = null, at }) {
         const due = deciderDue(assessment, at)
         if (due) reasons.push(due)
         if (_expired(assessment, at)) reasons.push({ key: 'expired', detail: `on ${String(assessment.expires_at).slice(0, 10)}` })
+        const ltDue = longTermDue(assessment, at)
+        if (ltDue) reasons.push(ltDue)
     }
     if (!reasons.length) return null
     const words = reasons.map(_words)

@@ -72,7 +72,7 @@ test('a touching risk turning elevated is a change; already elevated, or no froz
     assert.match(geoChanges(now, calm)[0].detail, /Gulf .*helps it/)
     assert.deepEqual(geoChanges(now, now), [])
     assert.deepEqual(geoChanges(now, null), [], 'an assessment made before step 4')
-    const a = { verdict: 'swing', moved: null, money: null, flows: null, geopolitics: null, expires_at: '2027-01-01T00:00:00Z' }
+    const a = { verdict: 'swing', moved: null, money: null, flows: null, geopolitics: null, expires_at: '2027-01-01T00:00:00Z', long_term: { call: 'no', reviewed_at: '2027-01-01T00:00:00Z', expires_at: '2027-01-01T00:00:00Z' } }
     assert.equal(scanIndustry({ code: AD, name: 'A&D', now: { geopolitics: now }, assessment: a, at: NOW }), null)
 })
 
@@ -84,7 +84,7 @@ test('the weekly scan reads today\'s geopolitics beside the rest', async () => {
         readRun: async () => ({ rows: [{ asof: '2026-10-09', code: AD, name: 'Aerospace & Defense', raw: {} }], regime: null }),
         readMoney: async () => new Map(), readFlows: async () => new Map(), readGeo: async () => geo,
         listAssessments: async () => [{ subject: { kind: 'industry', code: AD }, verdict: 'swing', moved: { asof: '2026-10-09' },
-            money: null, flows: null, geopolitics: calm, expires_at: '2027-01-01T00:00:00Z' }],
+            money: null, flows: null, geopolitics: calm, expires_at: '2027-01-01T00:00:00Z', long_term: { call: 'no', reviewed_at: '2027-01-01T00:00:00Z', expires_at: '2027-01-01T00:00:00Z' } }],
         listThemes: async () => [], now: () => NOW,
     })
     assert.deepEqual(flags.map(f => f.reasons.map(r => r.key)), [['geo_elevated']])
