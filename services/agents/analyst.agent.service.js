@@ -194,6 +194,19 @@ export function _cleanOwnTarget(t) {
     return { price, low: band ? low : null, high: band ? high : null, why: _txt(t.why, 400) }
 }
 
+// (a) Were the reports good enough to go into the run-up — a boolean, else unanswered (null).
+export function _cleanRunUpCall(r) {
+    if (!r || typeof r !== 'object' || typeof r.worth !== 'boolean') return null
+    return { worth: r.worth, why: _txt(r.why, 400) }
+}
+
+// (b) Hold through the report or exit before it — `hold` / `exit`, else unanswered (null).
+const THROUGH_CALLS = new Set(['hold', 'exit'])
+export function _cleanThrough(t) {
+    if (!t || typeof t !== 'object' || !THROUGH_CALLS.has(t.call)) return null
+    return { call: t.call, why: _txt(t.why, 400) }
+}
+
 // How the company stands under the trade — sound / weak / broken, else unchecked (null).
 export function _cleanCompany(c) {
     if (!c || typeof c !== 'object' || !COMPANY_VERDICTS.has(c.verdict)) return null
@@ -227,6 +240,9 @@ export function _parseCatalystRead(raw) {
         delta:       _cleanRunup(q.runup) ? null : _cleanDelta(q.delta),
         runup:       _cleanRunup(q.runup),
         delta_basis: _txt(q.delta_basis, 400),
+        // The run-up rule's two questions (docs/design/runup-reads.md §2): worth the run-up, and hold or exit the report.
+        run_up:      _cleanRunUpCall(q.run_up),
+        through_report: _cleanThrough(q.through_report),
         implied_move_pct: _numOr(q.implied_move_pct),
         history:     _txt(q.history, 300),
         positioning: _txt(q.positioning, 300),
@@ -257,7 +273,8 @@ export function _cleanDelta(d) {
 // The `runup` line copied off get_runup_history (runup.tools.js): its numbers, the report date and the basis, nothing
 // else — and null without a median or a report date to end the window on.
 // The cycle's three (2026-10-24): the usual FULL run-up and how much of it this cycle has already moved.
-const RUNUP_FIELDS = ['lead_days', 'n', 'median_pct', 'p25_pct', 'p75_pct', 'up_share', 'median_excess_pct', 'full_lead', 'full_median_pct', 'so_far_pct']
+const RUNUP_FIELDS = ['lead_days', 'n', 'median_pct', 'p25_pct', 'p75_pct', 'up_share', 'median_excess_pct', 'full_lead', 'full_median_pct', 'so_far_pct',
+                      'through_n', 'through_median_pct', 'through_p25_pct', 'through_p75_pct', 'through_up_share', 'through_beat_median_pct']
 export function _cleanRunup(u) {
     if (!u || typeof u !== 'object' || Array.isArray(u)) return null
     const out = { basis: 'run_up', report: /^\d{4}-\d{2}-\d{2}$/.test(u.report ?? '') ? u.report : null }

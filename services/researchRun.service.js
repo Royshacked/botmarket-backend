@@ -234,7 +234,7 @@ async function _loop(run, queued, covered, { userId, audience, model, signal, li
                     await deps.markDone(item.id)
                     liveReads.add(symbol)
                     const live = saved.doc?.status === 'active'
-                    _settle(run, { symbol, outcome: live ? 'read' : 'passed', reason: live ? null : saved.doc?.verdict ?? 'pass', readId: saved.doc?.id ?? null, cost_usd: priced() })
+                    _settle(run, { symbol, outcome: live ? 'read' : 'passed', reason: live ? null : saved.doc?.pass_reason ?? saved.doc?.verdict ?? 'pass', readId: saved.doc?.id ?? null, cost_usd: priced() })
                     if (live) run.read++
                     else run.passed++
                 } else if (saved?.reason === 'live_read') {
@@ -388,6 +388,9 @@ export function researchOpening(item) {
         const argus = c.why ? ` Argus picked it: ${c.why}${c.caution ? ` What would make it wrong: ${c.caution}` : ''}`
             : c.rule ? ` The run-up rule listed it — a report about six sessions out, the last three beat; no one picked it.${c.requested ? ' A user asked for this read now.' : ''}`
                 : c.requested ? ' Argus did not pick it; a user asked for this read.' : ''
+        // A rule name asks the rule's two questions (docs/design/runup-reads.md §2), and when the trade opens — the board's
+        // day, often the session after the read (a Saturday read for Monday's board).
+        if (c.rule) return `Catalyst read on ${symbol} — the Hotlist's run-up rule listed it THIS WEEK, bought at the ${c.day ?? 'next'} open.${facts}${argus} Two questions: (a) were its last reports good enough to go into the run-up, and (b) is the report itself worth holding through, or out before it?`
         return `Catalyst read on ${symbol} — the Hotlist graded it THIS WEEK (2–10 days) on ${c.day ?? 'today'}.${facts}${argus} Is the catalyst real, what is it worth, how much is still open, and what can break it inside the window?`
     }
     // From the HOUSE SCAN (step 7): Pythia's verdict on the industry or theme sent it — the thesis and risks travel,

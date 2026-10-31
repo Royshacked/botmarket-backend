@@ -96,8 +96,35 @@ export function runUpStats({ reports = [], bars = [], spyBars = [], lead }) {
     }
 }
 
+/**
+ * THROUGH THE REPORT (docs/design/runup-reads.md §3): over each past report, the close of the last session BEFORE it to
+ * the close of the first session AFTER it — the reaction whether the report came before the open or after the close.
+ * Pure. `beats` — the report dates that beat (actual over estimate). → `{ n, median_pct, p25_pct, p75_pct, up_share,
+ * beat_n, beat_median_pct }`, the stats null when n is 0.
+ */
+export function throughStats({ reports = [], bars = [], beats = [] }) {
+    const days = bars.map(b => _etDay(b.timestamp))
+    const beat = new Set(beats)
+    const rows = []
+    for (const report of [...new Set(reports)].sort().reverse()) {
+        let before = -1
+        for (let i = days.length - 1; i >= 0; i--) if (days[i] < report) { before = i; break }
+        const after = days.findIndex(d => d > report)
+        if (before < 0 || after < 0 || !(bars[before].close > 0)) continue
+        rows.push({ report, pct: _r2((bars[after].close / bars[before].close - 1) * 100), beat: beat.has(report) })
+    }
+    const stat = (rs) => {
+        const sorted = rs.map(r => r.pct).sort((a, b) => a - b)
+        return { median: _r2(_quantile(sorted, 0.5)), p25: _r2(_quantile(sorted, 0.25)), p75: _r2(_quantile(sorted, 0.75)),
+            up: rs.length ? _r2(rs.filter(r => r.pct > 0).length / rs.length) : null }
+    }
+    const all = stat(rows), beaten = rows.filter(r => r.beat)
+    return { n: rows.length, rows, median_pct: all.median, p25_pct: all.p25, p75_pct: all.p75, up_share: all.up,
+        beat_n: beaten.length, beat_median_pct: stat(beaten).median }
+}
+
 /** The tool's reply: the record per report, the summary, and the one line to copy. Pure. */
-export function runUpReadText(sym, { report, lead, stats, cycle = null }) {
+export function runUpReadText(sym, { report, lead, stats, cycle = null, through = null }) {
     const head = `${sym} — run-up into its reports, the last ${lead} session${lead === 1 ? '' : 's'} before each (close before the report):`
     if (stats.n < MIN_REPORTS) return `${head}\nOnly ${stats.n} past report${stats.n === 1 ? '' : 's'} with prices — too few to size a run-up. Say so; no runup line.`
     const lines = [head, ...stats.rows.map(r => `  ${r.report}: ${r.pct > 0 ? '+' : ''}${r.pct}% (${r.from} → ${r.to})${r.excess_pct != null ? `, ${r.excess_pct > 0 ? '+' : ''}${r.excess_pct}% vs SPY` : ''}`)]
@@ -108,11 +135,21 @@ export function runUpReadText(sym, { report, lead, stats, cycle = null }) {
         const spent = runupSpent(cycle)
         lines.push(`This cycle: its usual run-up over the full ${cycle.full_lead} sessions before a report is a median ${cycle.full_median_pct}%; `
             + `over the ${cycle.full_lead - lead} sessions of it already gone it has moved ${cycle.so_far_pct ?? 'n/a'}%.`
-            + (spent ? ' It has ALREADY RUN its usual run-up — the typical move is spent: verdict priced_in, and say so.' : ''))
+            // Context, not a veto (runup-reads.md §1: a median under 1% made an ordinary up week "spent"; the rule never filtered on it).
+            + (spent ? ' It has already moved as much as its usual full run-up — context: say whether that changes your call, and why.' : ''))
+    }
+    // Through the report (runup-reads.md §3): what holding the report itself has done — the question a `hold` answers.
+    const hasThrough = through?.n >= MIN_REPORTS
+    if (hasThrough) {
+        lines.push(`Through the report (the close before each report to the close the session after it): median ${through.median_pct}% `
+            + `(quartiles ${through.p25_pct}% to ${through.p75_pct}%), up ${Math.round(through.up_share * 100)}% of the time over ${through.n} reports`
+            + `${through.beat_n ? `; after the ${through.beat_n} that beat, median ${through.beat_median_pct}%` : ''}.`)
     }
     const line = { basis: 'run_up', report, lead_days: lead, n: stats.n, median_pct: stats.median_pct, p25_pct: stats.p25_pct, p75_pct: stats.p75_pct,
         up_share: stats.up_share, median_excess_pct: stats.median_excess_pct,
-        ...(cycle?.full_median_pct != null && cycle.full_lead > lead ? { full_lead: cycle.full_lead, full_median_pct: cycle.full_median_pct, so_far_pct: cycle.so_far_pct ?? null } : {}) }
+        ...(cycle?.full_median_pct != null && cycle.full_lead > lead ? { full_lead: cycle.full_lead, full_median_pct: cycle.full_median_pct, so_far_pct: cycle.so_far_pct ?? null } : {}),
+        ...(hasThrough ? { through_n: through.n, through_median_pct: through.median_pct, through_p25_pct: through.p25_pct, through_p75_pct: through.p75_pct,
+            through_up_share: through.up_share, through_beat_median_pct: through.beat_median_pct } : {}) }
     lines.push(`Copy this line, unchanged, as "runup" in your block: ${JSON.stringify(line)}`)
     return lines.join('\n')
 }
@@ -151,12 +188,14 @@ async function _getRunupHistory({ ticker, lead_days } = {}) {
     const cycle = full > lead
         ? { full_lead: full, full_median_pct: runUpStats({ reports: past, bars, spyBars: [], lead: full }).median_pct, so_far_pct: soFarPct(bars, full - lead, today) }
         : null
-    return runUpReadText(sym, { report: next, lead, stats, cycle })
+    const beats = rows.filter(r => r.date && r.date <= today && r.epsActual != null && r.epsEstimated != null && Number(r.epsActual) > Number(r.epsEstimated)).map(r => r.date)
+    const through = throughStats({ reports: past, bars, beats })
+    return runUpReadText(sym, { report: next, lead, stats, cycle, through })
 }
 
 export const RUNUP_TOOLS = [{
     name: 'get_runup_history',
-    description: 'The run-up yardstick for a name with a report AHEAD: over each of its last reports (up to 12), the move from `lead_days` sessions before the report to the close before it, and the same against SPY — the median, the quartiles, how often it rose. The target for a run-up trade (in now, out the day before the report) comes from this line, not from compute_event_delta, which needs an event that has happened. lead_days defaults to the sessions left until the report, today included.',
+    description: 'The run-up yardstick for a name with a report AHEAD: over each of its last reports (up to 12), the move from `lead_days` sessions before the report to the close before it, and the same against SPY — the median, the quartiles, how often it rose; and the move THROUGH each report (the close before it to the close the session after), all and after beats — what holding the report has done. The target for a run-up trade (in now, out the day before the report) comes from this line, not from compute_event_delta, which needs an event that has happened. lead_days defaults to the sessions left until the report, today included.',
     input_schema: {
         type: 'object',
         properties: {

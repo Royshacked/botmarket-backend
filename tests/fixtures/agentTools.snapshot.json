@@ -1681,7 +1681,7 @@
         },
         {
             "name": "get_runup_history",
-            "description": "The run-up yardstick for a name with a report AHEAD: over each of its last reports (up to 12), the move from `lead_days` sessions before the report to the close before it, and the same against SPY — the median, the quartiles, how often it rose. The target for a run-up trade (in now, out the day before the report) comes from this line, not from compute_event_delta, which needs an event that has happened. lead_days defaults to the sessions left until the report, today included.",
+            "description": "The run-up yardstick for a name with a report AHEAD: over each of its last reports (up to 12), the move from `lead_days` sessions before the report to the close before it, and the same against SPY — the median, the quartiles, how often it rose; and the move THROUGH each report (the close before it to the close the session after), all and after beats — what holding the report has done. The target for a run-up trade (in now, out the day before the report) comes from this line, not from compute_event_delta, which needs an event that has happened. lead_days defaults to the sessions left until the report, today included.",
             "input_schema": {
                 "type": "object",
                 "properties": {

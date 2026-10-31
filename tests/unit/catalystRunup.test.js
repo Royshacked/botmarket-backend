@@ -79,7 +79,8 @@ test('the analyst offers the run-up tool, and consult stays last', () => {
 
 test('the runup line is checked: numbers only, and no median or report date is no line', () => {
     assert.deepEqual(_cleanRunup({ report: '2026-10-27', median_pct: '2.5', n: 6, junk: 1 }),
-        { basis: 'run_up', report: '2026-10-27', lead_days: null, n: 6, median_pct: 2.5, p25_pct: null, p75_pct: null, up_share: null, median_excess_pct: null, full_lead: null, full_median_pct: null, so_far_pct: null })
+        { basis: 'run_up', report: '2026-10-27', lead_days: null, n: 6, median_pct: 2.5, p25_pct: null, p75_pct: null, up_share: null, median_excess_pct: null, full_lead: null, full_median_pct: null, so_far_pct: null,
+          through_n: null, through_median_pct: null, through_p25_pct: null, through_p75_pct: null, through_up_share: null, through_beat_median_pct: null })
     assert.equal(_cleanRunup({ report: '2026-10-27' }), null)
     assert.equal(_cleanRunup({ median_pct: 2 }), null)
     const raw = '<catalyst_read>{"ticker":"RCL","verdict":"credible","runup":{"report":"2026-10-27","median_pct":3.1,"p25_pct":1.2,"p75_pct":4.4,"n":8,"up_share":0.75}}</catalyst_read>'
@@ -167,7 +168,7 @@ const NOW = Date.parse('2026-10-23T13:40:00Z')
 test('this cycle on its usual path: the usual last-sessions move is still ahead — the target stands', async () => {
     const { text, line } = await cycleLine(1.01)
     assert.match(text, /This cycle: its usual run-up over the full 10 sessions before a report is a median 10\.46%; over the 8 sessions of it already gone it has moved 8\.29%\./)
-    assert.doesNotMatch(text, /ALREADY RUN/)
+    assert.doesNotMatch(text, /already moved as much as its usual full run-up/)
     // The yardstick's arithmetic (his target is set beside it).
     const y = runupTarget(line, 120)
     assert.equal(y.open_pct, 2.01, 'the usual 2.01% left — no cut')
@@ -193,7 +194,8 @@ test('a cycle that ran AHEAD of its path has less left: the target is the full r
 
 test('a cycle that already moved its whole usual run-up: the tool says so, and the read is a pass — already ran', async () => {
     const { text, line } = await cycleLine(1.015)
-    assert.match(text, /ALREADY RUN/)
+    assert.match(text, /already moved as much as its usual full run-up — context/)
+    assert.doesNotMatch(text, /verdict priced_in/, "the move is context, never an instructed verdict (runup-reads.md §1)")
     const r = buildCatalystRead({ verdict: 'credible', window_days: 5, runup: line }, { symbol: 'RCL', spot: 120, nowMs: NOW })
     assert.deepEqual([r.status, r.pass_reason], ['pass', 'already_ran'], 'whatever verdict the model wrote')
 })

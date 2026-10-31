@@ -162,6 +162,7 @@ export function minOpenPct(atrPct) {
 export function buildCatalystRead(parsed, { symbol, spot = null, spy = null, nowMs, source = 'hotlist', context = null } = {}) {
     const sym = String(symbol ?? parsed?.ticker ?? '').toUpperCase().trim()
     const at = new Date(nowMs).toISOString()
+    if (context?.rule === true) return _ruleRead(parsed, { sym, at, spot, spy, nowMs, source, context })
     const sized = ['credible', 'priced_in'].includes(parsed?.verdict)
     const yard = !sized ? null
         : parsed?.runup ? runupTarget(parsed.runup, spot ?? parsed?.delta?.spot)
@@ -187,11 +188,62 @@ export function buildCatalystRead(parsed, { symbol, spot = null, spy = null, now
     const passReason = target ? null : !sized ? (parsed?.verdict ?? 'unclear') : broken ? 'company' : !validUntil ? 'report_too_close'
         : spent ? 'already_ran' : !raw ? (parsed?.target ? 'unsized' : 'no_target')
             : yard?.cycle_cut_pct > 0 && raw.open_pct > 0 ? 'already_ran' : raw.open_pct > 0 ? 'too_small' : 'nothing_open'
+    return _readDoc(parsed, { sym, at, spot, spy, source, context, windowDays, validUntil, exitBefore, target, status: target ? 'active' : 'pass', passReason })
+}
+
+/** The first weekday after `day` (YYYY-MM-DD). Pure. A holiday is not known here. */
+const _nextWeekday = (day) => {
+    let t = Date.parse(`${day}T12:00:00Z`)
+    do { t += DAY_MS } while ([0, 6].includes(new Date(t).getUTCDay()))
+    return new Date(t).toISOString().slice(0, 10)
+}
+
+/**
+ * A HOLD's window (runup-reads.md §4): through the close of the first session AFTER the report — the reaction whether
+ * it came before the open or after the close. 21:00Z, as readValidUntil. Null when that close has passed. Pure.
+ */
+export function holdValidUntil({ nowMs, report }) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(report ?? '')) return null
+    const end = Date.parse(`${_nextWeekday(report)}T21:00:00.000Z`)
+    return end > nowMs ? new Date(end).toISOString() : null
+}
+
+/**
+ * A read on a RUN-UP RULE name (`context.rule`; docs/design/runup-reads.md §2) — the rule's two questions, not the
+ * event read's. Pure. CONFIRMED (`active`) = (a) `run_up.worth` (an old-shaped answer: verdict `credible`), a company
+ * not `broken`, and a window left before the report; the stock's own run-up record and this cycle's move are his
+ * context, never a veto here. The target is OPTIONAL on an exit (Roy, 2026-10-31) — dropped, not a pass, when it is too
+ * close to trade. (b) A HOLD runs through the report and needs a target; one without (or too close) is kept as an exit
+ * and says so (`dropped: 'no_target'`).
+ */
+function _ruleRead(parsed, { sym, at, spot, spy, nowMs, source, context }) {
+    const report = [context?.exit_before, parsed?.runup?.report].filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d ?? '')).sort()[0] ?? null
+    const worth = parsed?.run_up ? parsed.run_up.worth : parsed?.verdict === 'credible'
+    const broken = parsed?.company?.verdict === 'broken'
+    const px = spot ?? parsed?.delta?.spot
+    const yard = parsed?.runup ? runupTarget(parsed.runup, px) : null
+    const own = ownTarget(parsed?.target, px, yard, { impliedMovePct: parsed?.implied_move_pct })
+    const sized = own && own.open_pct >= minOpenPct(context?.atr_pct) ? own : null
+    // The exit's window — the close before the report — is the trade's window either way: none left, nothing to confirm.
+    const exitUntil = readValidUntil({ nowMs, windowDays: 30, exitBefore: report })
+    const confirmed = worth && !broken && Boolean(exitUntil)
+    const wantHold = parsed?.through_report?.call === 'hold'
+    const holdUntil = confirmed && wantHold && sized ? holdValidUntil({ nowMs, report }) : null
+    const hold = Boolean(holdUntil)
+    const through = { call: hold ? 'hold' : 'exit', why: parsed?.through_report?.why ?? null, report,
+        ...(wantHold && !hold && confirmed ? { dropped: 'no_target' } : {}) }
+    const passReason = confirmed ? null : !worth ? 'not_worth' : broken ? 'company' : 'report_too_close'
+    return _readDoc(parsed, { sym, at, spot, spy, source, context, windowDays: parsed?.window_days ?? 14,
+        validUntil: hold ? holdUntil : exitUntil, exitBefore: hold ? null : report, target: confirmed ? sized : null,
+        status: confirmed ? 'active' : 'pass', passReason, extra: { run_up: parsed?.run_up ?? { worth, why: null }, through_report: through } })
+}
+
+function _readDoc(parsed, { sym, at, spot, spy, source, context, windowDays, validUntil, exitBefore, target, status, passReason, extra = {} }) {
     return {
         id: `cr_${sym}_${randomUUID().slice(0, 8)}`,
         symbol: sym,
         source,
-        status: target ? 'active' : 'pass',
+        status,
         pass_reason: passReason,
         verdict: parsed?.verdict ?? 'unclear',
         catalyst: parsed?.catalyst ?? null,
@@ -217,6 +269,7 @@ export function buildCatalystRead(parsed, { symbol, spot = null, spy = null, now
         kill: parsed?.kill ?? [],
         evidence: parsed?.evidence ?? [],
         context: context && typeof context === 'object' ? context : null,
+        ...extra,
         outcome: null,
         created_at: at,
         updated_at: at,
@@ -236,8 +289,20 @@ export const GRADE_GIVE_UP_MS = 3 * DAY_MS
  * when they are not in yet: then nothing changes, until GRADE_GIVE_UP_MS past the window closes it unpriced.
  */
 export function gradeCatalystRead(read, { price, spy, nowMs, window = null }) {
-    if (read?.status !== 'active' || !read.target) return null
+    if (read?.status !== 'active') return null
     const ret = (a, b) => (_ok(a) && _ok(b) ? _r2((b / a - 1) * 100) : null)
+    // CONFIRMED WITHOUT A TARGET (a run-up exit, runup-reads.md §4): nothing to hit — at its window's end it is `closed`
+    // on the window's last close against SPY (`hit: null`).
+    if (!read.target) {
+        const end = Date.parse(read.valid_until)
+        if (!(nowMs >= end)) return null
+        const at = new Date(nowMs).toISOString()
+        if (window && _ok(window.close)) {
+            const r = ret(read.price_at_read, window.close), s = ret(read.spy_at_read, window.spy_close)
+            return { status: 'closed', outcome: { price: _r2(window.close), at, return_pct: r, spy_return_pct: s, vs_spy: r != null && s != null ? _r2(r - s) : null, hit: null, basis: 'window' } }
+        }
+        return nowMs >= end + GRADE_GIVE_UP_MS ? { status: 'closed', outcome: { price: null, at, return_pct: null, spy_return_pct: null, vs_spy: null, hit: null, basis: 'unpriced' } } : null
+    }
     const outcome = (px, spyPx, hit) => {
         const o = { price: _ok(px) ? _r2(px) : null, at: new Date(nowMs).toISOString(), return_pct: ret(read.price_at_read, px), spy_return_pct: ret(read.spy_at_read, spyPx) }
         o.vs_spy = o.return_pct != null && o.spy_return_pct != null ? _r2(o.return_pct - o.spy_return_pct) : null
@@ -293,7 +358,7 @@ async function markWindows(deps = _deps) {
     try {
         const coll = await _coll(deps)
         const nowMs = deps.now()
-        const due = await coll.find({ status: { $in: ['hit', 'expired', 'pass'] }, window_mark: { $exists: false }, valid_until: { $lte: new Date(nowMs).toISOString() } }).toArray()
+        const due = await coll.find({ status: { $in: ['hit', 'expired', 'closed', 'pass'] }, window_mark: { $exists: false }, valid_until: { $lte: new Date(nowMs).toISOString() } }).toArray()
         for (const read of due) {
             try {
                 const hasWindow = Date.parse(read.valid_until) > Date.parse(read.set_at)
@@ -347,7 +412,7 @@ async function _gradeOne(coll, read, { spy, nowMs, deps, force = false }) {
     const window = past ? await _window(read, deps) : null
     let g = gradeCatalystRead(read, { price: past ? null : await deps.price(read.symbol), spy, nowMs, window })
     // Making room for a new read on the name: an ungradable old one is closed unpriced rather than left in the way.
-    if (!g && force && past) g = { status: 'expired', outcome: { price: null, at: new Date(nowMs).toISOString(), return_pct: null, spy_return_pct: null, vs_spy: null, hit: false, basis: 'unpriced' } }
+    if (!g && force && past) g = { status: read.target ? 'expired' : 'closed', outcome: { price: null, at: new Date(nowMs).toISOString(), return_pct: null, spy_return_pct: null, vs_spy: null, hit: read.target ? false : null, basis: 'unpriced' } }
     if (!g) return null
     await coll.updateOne({ id: read.id, status: 'active' }, { $set: { status: g.status, outcome: g.outcome, updated_at: new Date(nowMs).toISOString() } })
     return g.status
@@ -413,13 +478,31 @@ async function liveRead(symbol, deps = _deps) {
  */
 export function readFacts(read) {
     const t = read?.target
-    if (!t || !_ok(t.value)) return null
+    const through = read?.through_report
+    // A run-up read (runup-reads.md §5): confirmed with no target of his is still handed on — the rule's trade, out before
+    // the report; a HOLD says so, the decision Mentor's prompt asks for arriving made.
+    if ((!t || !_ok(t.value)) && !(read?.status === 'active' && read?.run_up?.worth)) return null
     const pct = (v) => `${v > 0 ? '+' : ''}${v.toFixed(1)}%`
-    const parts = [`Prometheus (${read.verdict}${Number.isFinite(read.confidence) ? `, ${read.confidence}` : ''}): target ${t.value.toFixed(2)}`
+    const who = `Prometheus (${read.verdict}${Number.isFinite(read.confidence) ? `, ${read.confidence}` : ''})`
+    const runUp = read.run_up?.worth ? `worth the run-up${read.run_up.why ? ` — ${read.run_up.why}` : ''}` : null
+    const report = through?.report ?? read?.exit_before
+    const on = report ? ` ${report}` : ''
+    const call = through?.call === 'hold'
+        ? `HOLD THROUGH the report${on}${through.why ? ` — ${through.why}` : ''}`
+        : through ? `out before the report${on}${through.dropped ? ' (he leaned to holding but set no target to hold to)' : ''}${through.why ? ` — ${through.why}` : ''}` : null
+    if (!t || !_ok(t.value)) {
+        const parts = [`${who}: confirmed for the run-up, no target of his`, runUp, call]
+        if (read.company?.verdict) parts.push(`company ${read.company.verdict}${read.company.why ? ` — ${read.company.why}` : ''}`)
+        if (read.kill?.length) parts.push(`kill: ${read.kill.slice(0, 2).join('; ')}`)
+        return parts.filter(Boolean).join('; ')
+    }
+    const parts = [`${who}: target ${t.value.toFixed(2)}`
         + `${_ok(t.low) && _ok(t.high) ? ` (band ${t.low.toFixed(2)}–${t.high.toFixed(2)})` : ''}`
         + `${Number.isFinite(t.open_pct) && _ok(t.spot) ? `, ${pct(t.open_pct)} from ${t.spot.toFixed(2)}` : ''}`
         // The window's end as its ET session date — a UTC date reads a day late on an evening read (code review 2026-10-24).
-        + `${Number.isFinite(Date.parse(read.valid_until)) ? ` by ${_etDay(Date.parse(read.valid_until))}` : ''}${read.exit_before ? ` — out before the report ${read.exit_before}` : ''}`]
+        + `${Number.isFinite(Date.parse(read.valid_until)) ? ` by ${_etDay(Date.parse(read.valid_until))}` : ''}${read.exit_before && !through ? ` — out before the report ${read.exit_before}` : ''}`]
+    if (runUp) parts.push(runUp)
+    if (call) parts.push(call)
     if (t.basis === 'prometheus') {
         const y = t.yardstick
         parts.push(`his own number${y && Number.isFinite(y.open_pct) ? `, the ${y.basis === 'run_up' ? 'run-up' : 'event'} yardstick ${pct(y.open_pct)}` : ''}${t.why ? `: ${t.why}` : ''}`)
@@ -432,7 +515,7 @@ export function readFacts(read) {
 
 /** Grade every active read → `{ graded, hit, expired, failed }`. Never throws: one bad quote or write does not stop the rest. */
 async function gradeDue(deps = _deps) {
-    const out = { graded: 0, hit: 0, expired: 0, failed: 0 }
+    const out = { graded: 0, hit: 0, expired: 0, closed: 0, failed: 0 }
     try {
         const coll = await _coll(deps)
         const live = await coll.find({ status: 'active' }).toArray()
