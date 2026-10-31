@@ -626,7 +626,7 @@ ${seed.book_facts ? "FROM THE HOUSE'S BOOK" : 'ARGUS HANDED YOU THIS NAME'}: ${s
   Argus's caution: ${seed.caution}` : ''}
   Free range is room, not a target: the board has no entry, stop${seed.catalyst_facts ? '' : ' or target'}, and you build ${seed.catalyst_facts ? 'them' : 'those'} with the user.${seed.catalyst_facts ? `
   Prometheus's catalyst read on it: ${seed.catalyst_facts}.
-  His target is the desk's price for this swing — build the take-profit at it (the user may move it), and the trade is out by the read's date.` : ''}` : '')
+  His target, when he set one, is the desk's price for this swing — build the take-profit at it (the user may move it); with none, the take-profit is yours to build with the user. The trade is out by the read's date: before the report, unless he says HOLD THROUGH it — then the report is part of the trade, and say so.` : ''}` : '')
         // From the house's SWING / LONG TERM book (the Hotlist's longer lists, 2026-10-24): read back from the name's
         // coverage by code. Its horizon is the price target's; the target is Prometheus's valuation, not a take-profit.
         + (seed.book_facts ? `

@@ -348,7 +348,9 @@ Argus → his names, then Build with Mentor on the row. The user never has to go
 
 THIS WEEK went the same way the same day: no grade shown there either. Argus picks; Prometheus's catalyst read confirms
 — he reads the catalyst and the company and sets his OWN short-swing target; the tools' number (event delta or run-up
-record) is only his yardstick, and no target of his is a pass (`no_target`). The week list opens on **Prometheus
+record) is only his yardstick, and no target of his is a pass (`no_target`) — *on a run-up rule name, superseded
+2026-10-31: he confirms on "worth the run-up", target optional, and calls hold or exit on the report
+([runup-reads.md](runup-reads.md))*. The week list opens on **Prometheus
 confirmed**, then **Argus's names**, then **All screened** (docs/design/horizon-chains.md, "This week: Prometheus
 confirms and sets the target"). So NO grade letter reaches any surface — table, Boards, track record, the backtest
 line, Argus's board text, `get_hotlist`, the Mentor seed (`unverified` is always false). The screener still computes the

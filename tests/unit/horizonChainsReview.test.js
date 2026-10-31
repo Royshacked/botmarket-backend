@@ -243,7 +243,7 @@ test('#19 one failed write does not stop the grading pass', async () => {
         updateOne: async () => { if (n++ === 0) throw new Error('mongo') },
     }
     setReadDeps({ db: async () => ({ collection: () => coll }), now: () => NOW, price: async () => 11 })
-    assert.deepEqual(await catalystReadService.gradeDue(), { graded: 1, hit: 1, expired: 0, failed: 1 })
+    assert.deepEqual(await catalystReadService.gradeDue(), { graded: 1, hit: 1, expired: 0, closed: 0, failed: 1 })
 })
 
 test("a user's read on a week name Argus did not pick: today's board only, a week grade, no live or waiting read, a daily count", async () => {

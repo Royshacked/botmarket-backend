@@ -202,13 +202,21 @@ export function coverageRecord(calls) {
  * The catalyst reads' record → the BACKED reads (a target: hit / expired) against the PASSES (the control), each on its
  * window's close vs SPY (`window_mark`, catalystRead.service) — the same yardstick both ways — plus the backed hit rate and
  * the passes by reason. Pure.
+ *
+ * Run-up reads (docs/design/runup-reads.md §4): a confirmed read with no target settles `closed` — backed, but with no
+ * target to hit, so the hit rate is over `targeted`; and the run-up reads split by his call on the report (`by_call`:
+ * `hold` through it, `exit` before it — event reads and reads from before the call are in neither), so his holds can be
+ * judged against the exit.
  */
 export function catalystRecord(reads) {
     const marked = (rs) => rs.map(r => r.window_mark?.vs_spy).filter(Number.isFinite)
-    const backed = reads.filter(r => ['hit', 'expired'].includes(r.status)), passes = reads.filter(r => r.status === 'pass')
+    const backed = reads.filter(r => ['hit', 'expired', 'closed'].includes(r.status)), passes = reads.filter(r => r.status === 'pass')
     const reasons = [...new Set(passes.map(r => r.pass_reason ?? 'unknown'))]
+    // Only run-up reads made the call — an event read never went into a report (code review 2026-10-31).
+    const runUp = backed.filter(r => r.through_report?.call)
     return {
-        backed: { reads: backed.length, hit: backed.filter(r => r.status === 'hit').length, window: summarise(marked(backed)) },
+        backed: { reads: backed.length, targeted: backed.filter(r => r.status !== 'closed').length, hit: backed.filter(r => r.status === 'hit').length, window: summarise(marked(backed)),
+            by_call: Object.fromEntries(['hold', 'exit'].map(k => [k, summarise(marked(runUp.filter(r => r.through_report.call === k)))])) },
         passes: { reads: passes.length, window: summarise(marked(passes)), by_reason: Object.fromEntries(reasons.map(k => [k, summarise(marked(passes.filter(r => (r.pass_reason ?? 'unknown') === k)))])) },
         open: reads.filter(r => r.status === 'active').length,
     }
@@ -290,7 +298,7 @@ async function scorecard(deps = _deps) {
     const db = await deps.db()
     const [calls, reads] = await Promise.all([
         db.collection(COLLECTION).find({}, { projection: { _id: 0, symbol: 1, source: 1, rating: 1, direction: 1, marks: 1, done: 1, target_reached: 1, pt: 1, entry: 1, horizon: 1 } }).toArray(),
-        db.collection(READS).find({}, { projection: { _id: 0, status: 1, pass_reason: 1, window_mark: 1 } }).toArray(),
+        db.collection(READS).find({}, { projection: { _id: 0, status: 1, pass_reason: 1, window_mark: 1, 'through_report.call': 1 } }).toArray(),
     ])
     return { coverage: coverageRecord(calls), catalyst: catalystRecord(reads), as_of: new Date(deps.now()).toISOString(), min_judge: MIN_JUDGE }
 }

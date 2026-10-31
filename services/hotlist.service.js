@@ -30,7 +30,7 @@ const _f = (n, d = 2) => (Number.isFinite(n) ? n.toFixed(d) : null)
  * e.g. "mid-session B — +10.14% gap, 3.39× volume; free range 2.09% (0.45× ATR) to 166.18;
  *       catalyst: drift, positive — 'SpaceX swings to profit…'; Argus: <why> Caution: <caution>"
  */
-export function seedFacts(row, column) {
+export function seedFacts(row, column, { hold = false } = {}) {
     const c = row?.cells?.[column]
     if (!c?.grade) return null
     // No column has a grade to hand on (Roy, 2026-10-24: the day trades, then the week) — Argus's pick, and on the week
@@ -43,7 +43,9 @@ export function seedFacts(row, column) {
     else if (c.why?.length) parts.push(`run-up rule: ${c.why.join('; ')}`)
     if (row.catalyst?.material) parts.push(`catalyst: ${row.catalyst.type}, ${row.catalyst.surprise}${row.catalyst.headline ? ` — "${row.catalyst.headline}"` : ''}`)
     // A report inside the window makes this a run-up trade (§2.7): Mentor's exit has to come before it.
-    if (c.exit_before) parts.push(`earnings ${c.exit_before} — a run-up into the report: the setup must be out before it`)
+    // Prometheus's HOLD (runup-reads.md §5) replaces the board's "out before it": the report is part of the trade.
+    if (c.exit_before && hold) parts.push(`earnings ${c.exit_before} — the board's run-up exits before it, but Prometheus says hold through it`)
+    else if (c.exit_before) parts.push(`earnings ${c.exit_before} — a run-up into the report: the setup must be out before it`)
     else if (row.next_earnings) parts.push(`earnings ${row.next_earnings}`)
     if (row.fade_check) parts.push('flagged: a minor story under a big gap')
     return parts.join('; ')
@@ -59,17 +61,19 @@ export async function hotlistSeed(ref, deps = _deps) {
     const db = await deps.db()
     const board = await db.collection(BOARDS).findOne({ id: ref.board })
     const row = board?.rows?.find(r => r.symbol === ref.symbol)
-    const facts = seedFacts(row, ref.column)
+    if (!row?.cells?.[ref.column]?.grade) return null
+    // THIS WEEK: Prometheus's live catalyst read on the name — his target, the company, the window (Roy, 2026-10-24); his
+    // call on the report (runup-reads.md §5). A failed read leaves the hand-off as it was, without it.
+    const read = ref.column === 'week' && deps.liveRead
+        ? await Promise.resolve().then(() => deps.liveRead(ref.symbol)).catch(() => null) : null
+    const facts = seedFacts(row, ref.column, { hold: read?.through_report?.call === 'hold' })
     if (!facts) return null
     return {
         horizon:       COLUMN_HORIZON[ref.column] ?? null,
         hotlist_facts: facts,
         board_day:     board.day,
         checkpoint:    board.checkpoint,
-        // THIS WEEK: Prometheus's live catalyst read on the name — his target, the company, the window (Roy, 2026-10-24).
-        // A failed read leaves the hand-off as it was, without it.
-        catalyst_facts: ref.column === 'week' && deps.liveRead
-            ? readFacts(await Promise.resolve().then(() => deps.liveRead(ref.symbol)).catch(() => null)) : null,
+        catalyst_facts: read ? readFacts(read) : null,
         // His pick for THIS column (horizon-chains.md §2); a board from before per-column picks has only `pick`.
         ...(() => {
             const p = row.picks?.[ref.column] ?? (row.picks ? null : row.pick)

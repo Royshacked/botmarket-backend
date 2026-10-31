@@ -121,6 +121,14 @@ not blocked. One live read per symbol, a window ending the session before a repo
 end** (`hit` / `expired` vs SPY; a pass is on record, not a trade). A covered name still gets one; a read never touches
 its coverage.
 
+**On a run-up rule name (2026-10-31, [runup-reads.md](../design/runup-reads.md))** the read answers two questions instead:
+**(a)** `run_up.worth` — were the last reports good (real beats, revenue and guidance with them, estimates rising) and can
+the company carry it; **(b)** `through_report.call` — `hold` through the report or `exit` before it, off the tool's new
+record through past reports. Confirmed = worth it, a company not broken, a window left; the target is optional on an
+exit; a hold needs one and runs (and is graded) to the close of the session after the report. The stock's own run-up
+record and this cycle's move are context — `already_ran` and `no_target` no longer pass a rule name; `not_worth` does. A
+confirmed read with no target settles `closed` on its window vs SPY.
+
 ## The gates — what the write refuses, and what it merely flags
 
 `coverage.service.js` holds two kinds of check, and the distinction is the point:

@@ -159,12 +159,12 @@ test('a name with a LIVE read is skipped; a read with no target is a pass', asyn
         startResearch: async () => ({ ok: true }), markDone: async () => ({ ok: true }),
         reject: async (id, reason) => { rejected.push([id, reason]); return { ok: true } }, annotate: async () => ({ ok: true }),
         research: async () => ({ catalyst: _parseCatalystRead(BLOCK({ verdict: 'unclear', delta: null })) }),
-        saveCatalyst: async () => ({ ok: true, doc: { id: 'cr', status: 'pass', verdict: 'unclear' } }),
+        saveCatalyst: async () => ({ ok: true, doc: { id: 'cr', status: 'pass', verdict: 'credible', pass_reason: 'not_worth' } }),
         costOf: () => 0, houseLedger: async () => null, book: async () => {},
     })
     const run = await settled()
     assert.deepEqual(rejected, [['rq_LIVE', 'live_read']])
-    assert.deepEqual(run.results.map(r => [r.symbol, r.outcome, r.reason]), [['LIVE', 'skipped', 'live_read'], ['THIN', 'passed', 'unclear']])
+    assert.deepEqual(run.results.map(r => [r.symbol, r.outcome, r.reason]), [['LIVE', 'skipped', 'live_read'], ['THIN', 'passed', 'not_worth']], 'the pass reason, not the verdict (TDS read "passed: credible", 2026-10-30)')
     assert.equal(isCatalystItem({ context: { pythia: true } }), false)
     assert.doesNotMatch(researchOpening({ symbol: 'X', context: { sector: 'Tech' } }), /Catalyst/)
     // The overnight board's names were listed by the run-up rule — the opening says so, never "Argus picked it".
