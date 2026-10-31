@@ -264,7 +264,7 @@ avoids, unmarked, spots — is scored by the outcome log (`argusRecord`).
 | **Prometheus** | out | an investing list's top N by the app's button, one name by click — the research queue, house-owned; or by asking ("send NVDA to Prometheus") through the shared `<route>` hand-off |
 | **Hotlist** | in (house) | every checkpoint board, read automatically with its headlines (`hotlist.argus.js`); his day picks are the Hotlist's day lists |
 | **Prometheus** | out (house) | his Hotlist This week picks → the research queue (source `hotlist`) → catalyst reads, by code (`hotlistResearch.service`, 2026-10-23) |
-| **Pythia** | in (house) | the house scan: her weekly FOR SWING / FOR LONG TERM verdicts → the research queue, by code (step 7, 2026-10-11); and, since 2026-10-13, every swing / long-term scan looks in her industries first (`get_house_industries`) |
+| **Pythia** | in (house) | the house scan: her weekly FOR SWING verdicts and NEW long-term yeses (her long-term call, its own answer since 2026-10-31 — pythia-two-verdicts.md) → the research queue, by code (step 7, 2026-10-11); and, since 2026-10-13, every swing / long-term scan looks in her industries first (`get_house_industries`) |
 | **Atlas** | in | the sleeve hop — the same screener under the school; never Argus's chat |
 | **Axl** | in / out | the user is routed here with a name; Argus can route the user on by their ask |
 

@@ -147,10 +147,20 @@ test("the chain's picks per book: covered, passed (and why), waiting — newest 
 // Roy, 2026-10-28: "if a name is not relevant anymore to swing or long term — leave it only in covered companies".
 test("still called: Pythia's verdict now on what sent the name — unknown is never 'no'", async () => {
     const { stillCalled } = await import('../../services/houseBook.service.js')
-    const verdicts = new Map([['ia_rails', 'swing'], ['ia_pc', 'watch'], ['ia_blank', null]])
-    assert.deepEqual(stillCalled({ assessment_id: 'ia_rails' }, 'swing', verdicts), { verdict_now: 'swing', still: true })
-    assert.deepEqual(stillCalled({ assessment_id: 'ia_pc' }, 'swing', verdicts), { verdict_now: 'watch', still: false })
-    assert.deepEqual(stillCalled({ assessment_id: 'ia_rails' }, 'long_term', verdicts), { verdict_now: 'swing', still: false }, 'called, but for the other book')
+    const NOW = '2026-10-31T12:00:00Z'
+    const verdicts = new Map([['ia_rails', { verdict: 'swing' }], ['ia_pc', { verdict: 'watch' }], ['ia_blank', null],
+        ['ia_semis', { verdict: 'swing', long_term: { call: 'yes', reviewed_at: '2026-10-20T00:00:00Z' } }],
+        ['ia_old', { verdict: 'no_case', long_term: { call: 'yes', reviewed_at: '2026-08-01T00:00:00Z' } }],
+        ['ia_legacy', { verdict: 'long_term', thesis: 't', assessed_at: '2026-10-20T00:00:00Z' }]])
+    assert.deepEqual(stillCalled({ assessment_id: 'ia_rails' }, 'swing', verdicts, NOW), { verdict_now: 'swing', still: true })
+    assert.deepEqual(stillCalled({ assessment_id: 'ia_pc' }, 'swing', verdicts, NOW), { verdict_now: 'watch', still: false })
+    assert.deepEqual(stillCalled({ assessment_id: 'ia_rails' }, 'long_term', verdicts, NOW), { verdict_now: 'not_long_term', still: false }, 'called, but for the other book')
+    // Two verdicts (2026-10-31): the long-term book reads the long-term call, the swing book the near term — one industry can be both.
+    assert.deepEqual(stillCalled({ assessment_id: 'ia_semis' }, 'long_term', verdicts, NOW), { verdict_now: 'long_term', still: true })
+    assert.deepEqual(stillCalled({ assessment_id: 'ia_semis' }, 'swing', verdicts, NOW), { verdict_now: 'swing', still: true })
+    assert.equal(stillCalled({ assessment_id: 'ia_old' }, 'long_term', verdicts, NOW).still, false, 'a yes past its 60 days')
+    assert.equal(stillCalled({ assessment_id: 'ia_legacy' }, 'long_term', verdicts, NOW).still, true, 'an unmigrated long-term verdict')
+    assert.deepEqual(stillCalled({ assessment_id: 'ia_legacy' }, 'swing', verdicts, NOW), { verdict_now: 'no_case', still: false })
     assert.deepEqual(stillCalled({ assessment_id: 'ia_gone' }, 'swing', verdicts), { verdict_now: null, still: null }, 'not found')
     assert.deepEqual(stillCalled({}, 'swing', verdicts), { verdict_now: null, still: null }, 'an old row with no id')
     assert.deepEqual(stillCalled({ assessment_id: 'ia_pc' }, 'swing', null), { verdict_now: null, still: null }, 'the read failed')

@@ -501,11 +501,13 @@ const _io = {
         return readCompanies('sub_industry', code, { limit })
     },
     // First-order names of a STANDING assessment only — a second-order name sits in another industry, and an expired
-    // assessment is due for reassessment.
+    // assessment is due for reassessment. A sleeve is the long-term book: a standing long-term yes keeps its names after
+    // the near term expires (pythia-two-verdicts.md; code review 2026-10-31).
     async industryNamed(code) {
-        const { industryAssessmentService } = await import('../api/strategy/industryAssessment.service.js')
+        const { industryAssessmentService, longTermYes } = await import('../api/strategy/industryAssessment.service.js')
         const a = await industryAssessmentService.getAssessment(code)
-        if (!a || (a.expires_at && a.expires_at <= new Date().toISOString())) return new Set()
+        const now = new Date().toISOString()
+        if (!a || (a.expires_at && a.expires_at <= now && !longTermYes(a, now))) return new Set()
         return new Set((a.names ?? []).filter(n => n?.order !== 'second').map(n => _sym(n.symbol)).filter(Boolean))
     },
     async coveredSymbols() {

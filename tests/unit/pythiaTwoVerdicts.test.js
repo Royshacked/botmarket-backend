@@ -68,6 +68,14 @@ test('publishing stores the long-term call on its own clock, the hype flag the c
     assert.equal(second.changed.long_term, undefined)
     const third = await industryAssessmentService.publishAssessment(BLOCK({ long_term: { call: 'no', why: 'capex peaking' } }), { sub, row, structure: GOOD, now: plus(NOW, 4) })
     assert.deepEqual([third.doc.long_term.call, third.doc.long_term.previous], ['no', 'yes'])
+
+    // An UNMIGRATED long-term verdict: a publish without a long-term call writes the yes down before overwriting
+    // `verdict`, or it would vanish (code review 2026-10-31).
+    const OLD = '99999999'
+    await m.db.collection('industry_assessment').insertOne({ id: `ia_ind_${OLD}`, subject: { kind: 'industry', code: OLD }, verdict: 'long_term', thesis: 'old thesis', assessed_at: '2026-10-10T00:00:00.000Z' })
+    const legacy = await industryAssessmentService.publishAssessment(BLOCK({ industry: OLD }), { sub: { ...sub, code: OLD }, row: { ...row, code: OLD }, structure: GOOD, now: NOW })
+    assert.deepEqual([legacy.doc.verdict, legacy.doc.long_term.call, legacy.doc.long_term.thesis, legacy.doc.long_term.reviewed_at, legacy.doc.long_term.legacy],
+        ['swing', 'yes', 'old thesis', '2026-10-10T00:00:00.000Z', undefined])
 })
 
 test('reading a document: the old long-term verdict is a yes; a yes speaks for the house for 60 days', () => {
@@ -78,8 +86,9 @@ test('reading a document: the old long-term verdict is a yes; a yes speaks for t
     assert.ok(longTermYes(yes, plus(NOW, LONG_TERM_STALE_DAYS - 1)))
     assert.equal(longTermYes(yes, plus(NOW, LONG_TERM_STALE_DAYS + 1)), null)
     assert.equal(longTermYes({ long_term: { call: 'no', reviewed_at: NOW } }, NOW), null)
-    const row = assessmentRow({ id: 'x', verdict: 'swing', long_term: { call: 'yes', hype: true, reviewed_at: NOW, expires_at: plus(NOW, 30), thesis: 'heavy' } })
-    assert.deepEqual(row.long_term, { call: 'yes', hype: true, reviewed_at: NOW, expires_at: plus(NOW, 30) })
+    const row = assessmentRow({ id: 'x', verdict: 'swing', long_term: { call: 'yes', hype: true, reviewed_at: NOW, expires_at: plus(NOW, 30), thesis: 'heavy' } }, NOW)
+    assert.deepEqual(row.long_term, { call: 'yes', hype: true, reviewed_at: NOW, expires_at: plus(NOW, 30), live: true })
+    assert.equal(assessmentRow({ id: 'y', long_term: { call: 'yes', reviewed_at: '2026-08-01T00:00:00Z' } }, NOW).long_term.live, false, 'past its 60 days: shown, not counted')
 })
 
 test('the long-term book reads the long-term call — beside a swing or an avoid — and the swing book the near term', () => {
@@ -111,12 +120,25 @@ test('the call log: a long-term yes made in this publish is its own call, agains
     assert.match(r.long_term_call.id, /_lt$/)
     // A week later the near term flips; the long-term yes is the same call, reaffirmed within the window: not logged again.
     const later = plus(NOW, 7)
-    const r2 = await pythiaCallsService.recordCall({ ...doc, verdict: 'avoid', assessed_at: later, long_term: { ...doc.long_term, reviewed_at: later } }, { now: later })
+    const r2 = await pythiaCallsService.recordCall({ ...doc, verdict: 'avoid', assessed_at: later, long_term: { ...doc.long_term, previous: 'yes', reviewed_at: later } }, { now: later })
     assert.equal(r2.call.verdict, 'avoid')
     assert.equal(r2.long_term_call, undefined)
     // A publish that made no long-term call (the stored one is older): only the near term is considered.
     const r3 = await pythiaCallsService.recordCall({ ...doc, verdict: 'watch', assessed_at: plus(NOW, 8) }, { now: plus(NOW, 8) })
     assert.equal(r3.long_term_call, undefined)
+    // Logged on a CHANGE only (code review 2026-10-31): the monthly re-confirmation past the reaffirm window is not a new call...
+    const month = plus(NOW, 40)
+    const r4 = await pythiaCallsService.recordCall({ ...doc, verdict: 'watch', assessed_at: month, long_term: { ...doc.long_term, previous: 'yes', reviewed_at: month } }, { now: month })
+    assert.equal(r4.long_term_call, undefined)
+    // ...a yes → no marks the open call withdrawn (still graded)...
+    const off = plus(NOW, 45)
+    await pythiaCallsService.recordCall({ ...doc, verdict: 'avoid', assessed_at: off, long_term: { call: 'no', why: 'capex peaking', previous: 'yes', reviewed_at: off } }, { now: off })
+    const ltCalls = await m.db.collection('pythia_calls').find({ verdict: 'long_term' }).toArray()
+    assert.deepEqual(ltCalls.map(c => [c.id, c.withdrawn_at]), [[r.long_term_call.id, off]])
+    // ...and a yes again, days later, is a new call.
+    const back = plus(NOW, 48)
+    const r6 = await pythiaCallsService.recordCall({ ...doc, verdict: 'avoid', assessed_at: back, long_term: { ...doc.long_term, previous: 'no', reviewed_at: back } }, { now: back })
+    assert.match(r6.long_term_call?.id ?? '', /_lt$/)
 })
 
 test('the change scan: a long-term call never made, or past its review, is due', () => {
@@ -157,7 +179,7 @@ test('the stale engine: one card per stale run to every admin, never twice', asy
     assert.deepEqual(engineAge(sunday, '2026-11-01T03:00:00Z'), { stale: false, days: 6, asof: '2026-10-23' })
     assert.equal(engineAge({ ...sunday, run: { finished_at: new Date('2026-10-25T05:00:00Z') } }, '2026-11-03T06:00:00Z').stale, true, 'a Date reads too')
     const m = memDb()
-    await m.db.collection('pythia_weekly').insertOne({ id: 'pw_2026-10-07', asof: '2026-10-07', status: 'done' })
+    // No week document needed: the claim is its own row (code review 2026-10-31).
     const posted = []
     const deps = { latestRun: async () => ({ asof: '2026-10-07' }), db: async () => m.db, now: () => NOW,
         adminUserIds: async () => ['roy', 'marce'], post: async (card) => { posted.push(card.userId); return card } }

@@ -235,6 +235,7 @@ while only one started a revise turn was the same failure by another route. (202
 | `queue_ready` | The venue opened and something is waiting (`marketOpen.monitor`) | Open the queue → the Floor's **Queued** desk. ONE card per USER, from Axl (see §5). The one card **completed by opening** (`resolvesOn: 'open'`): it points at a batch, so it carries no `subject` a write could resolve it through, and the list itself is the live record of what is still owed |
 | `market_brief_offer` | Daily broadcast offer, one per user per weekday (`marketBrief.notify.js`) | Get the brief → routes to **Axl**, who writes it in his thread · Dismiss |
 | `industry_view` | RETIRED 2026-10-24 (Roy: "Pythia — stop posting cards"): Pythia posts no cards; her answers are read on the Forecasts board. Cards already posted still render. Was: a Pythia review CHANGED the house answer on a GICS sub-industry | Open industry → the Forecasts board — a READ. Every admin. Carries `industryViewId`, so it is superseded and completed like a coverage card |
+| `pythia_engine_stale` | The engine's latest industry price run finished more than 8 days ago (`pythiaWeekly.checkEngine`, 2026-10-31, `docs/design/pythia-two-verdicts.md` §3) — ONE card per stale run, claimed on that run's week document | None — plain text (the chat's fallback bubble). Every admin |
 | `coverage_event` | The coverage monitor's material verdict on a name — since 2026-10-25 only `validating` (`coverage.assess.classifyGapState`), a READ card (Open thesis, done on open). `target_hit` · `target_hit_early` · `diverging` post NO card: Prometheus re-models the name on his own and the `coverage_refreshed` card is the message (Roy: "only send a msg when it's done") | **Revise thesis** — the primary runs the revise doorway, which is what distinguishes it from the refresh card's "Open coverage". Every admin — the card asks for a revision only an admin can make |
 | `coverage_refreshed` | A headless Prometheus run rewrote a name's coverage — Atlas's `<coverage_refresh>` hop mid-review, or the monitor's re-model (scheduled, or a verdict's — it says why and what moved) | Resume review (→ Atlas, when a portfolioId rides along); **Open thesis** on a house re-model that stored something or kept the target — a READ, done on open (2026-10-25); Revise thesis on a user's hop; **Dismiss only** when it stored nothing — a refresh that wrote nothing has no read behind a button, and its "Open coverage" merely switched to a desk still showing the last name worked on there. The hop's card goes to the ONE user who asked; the scheduled re-model has no user and goes to every admin |
 | `sleeve_sourced` | The research run finished the names a `<screen_request>` queued for a book's sleeve (`sleeveSource.service`) | Resume → Atlas, for the requester |
@@ -267,6 +268,13 @@ its 20-year test and is shown as a fact only, and crowding is untested. GEOPOLIT
 against its own ten years, and a reviewed map of which industries each risk hurts and helps — shown to Pythia, frozen
 on the assessment, a board row and a weekly-scan trigger; the map's directions failed their history test and are shown
 as hypotheses.
+
+Since 2026-10-31 an industry assessment carries TWO answers (`docs/design/pythia-two-verdicts.md`): `verdict` is the
+near term (swing · watch · avoid · no case) and `long_term` is its own yes / no call, reviewed monthly (due at 30 days,
+a yes stands for 60). The long-term book — Argus's first look, house labels, Atlas's sleeves — reads the long-term call;
+a hype run flags a yes ("stretched"), never denies it. While the engine's price run is stale the weekly monitor posts
+the `pythia_engine_stale` card and runs a daily due pass on the old prices (long-term reviews, expired assessments,
+watch dates only).
 
 Confirming does not answer in the social chat: it resolves the card as read, routes to Axl, and
 asks Axl for it as a turn in the user's chat session (`POST /api/sessions/:id/turn` with `brief: true`). A page of market prose does not

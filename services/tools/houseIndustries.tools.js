@@ -12,7 +12,7 @@
  */
 
 import { makeToolHandler } from '../agentUtils.js'
-import { industryAssessmentService, BOOKS, VERDICTS } from '../../api/strategy/industryAssessment.service.js'
+import { industryAssessmentService, BOOKS, VERDICTS, longTermYes } from '../../api/strategy/industryAssessment.service.js'
 import { readSubIndustry, largestCompanies, coveredSymbols, formatCompanies } from '../../api/strategy/industryData.service.js'
 
 const LOG = '[houseIndustries]'
@@ -151,8 +151,9 @@ export function makeHouseIndustriesHandlers(deps = {}) {
                 const limit = Math.min(Math.max(parseInt(input?.limit, 10) || DEFAULT_COMPANIES, 1), MAX_COMPANIES)
                 const [rows, cov, vs, a] = await Promise.all([largest(b.sub, limit), covered(), verdicts([b.sub.code]),
                     assessment(b.sub.code).catch(() => null)])
-                // The names of a STANDING assessment only: an expired one is due for reassessment.
-                const named = a && (!a.expires_at || a.expires_at > now()) ? (a.names ?? []) : []
+                // The names of a STANDING assessment only: an expired one is due for reassessment — unless its long-term yes
+                // still stands (pythia-two-verdicts.md; code review 2026-10-31).
+                const named = a && (!a.expires_at || a.expires_at > now() || longTermYes(a, now())) ? (a.names ?? []) : []
                 return formatIndustryCompanies(b.sub, rows, cov ?? new Set(), vs?.get?.(b.sub.code) ?? null, named)
             }
             if (input?.book == null || input.book === '') return 'Pass `book` ("swing" or "long_term") for the house\'s industries, or `industry` for one industry\'s companies.'

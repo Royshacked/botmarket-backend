@@ -135,3 +135,32 @@ turns had no news tool (they ran without it).
 - **Near term after the pass**: 24 swing, 33 watch, 32 avoid, 74 no_case.
 - **The chain**: the house scan ran on 25 verdicts (swing and new long-term yeses) and queued 87 names to Argus and
   Prometheus (two lists were full), $0.02. That brings the week to 100.
+
+## 8. Code review (2026-10-31)
+
+A fresh read of the build (backend `5a5e058..` and frontend `6de0ee4`). Applied:
+
+1. **High: the Hotlist's long-term list dropped every chain name.** `houseBook.stillCalled` compared the name's book
+   with the near-term `verdict`, which never says `long_term` any more, so every long-term name read "left". It now
+   reads the long-term call for the long-term book (`longTermYes`, inside its 60 days) and the near term for swing;
+   a long-term name's `verdict_now` is `long_term` or `not_long_term`.
+2. **Medium: one board row opened two panels.** A long-term yes is listed twice, and both copies used one panel id.
+   The For long term copy now has its own id, and it no longer shows the near term's "stale" chip.
+3. **Medium: an unmigrated long-term verdict vanished on its next publish** when the block had no long-term call. The
+   publish now writes it down as the long-term call before overwriting `verdict`.
+4. **Low-medium: Atlas's hype brake read an expired assessment's facts.** `verdictsForCodes` takes `hype` from the
+   long-term call when the near term has expired.
+5. **Low: the long-term call log** is now logged on a change only, as §2.2 says. A yes after a no is a new call however
+   soon. A monthly re-confirmation is not (before, about 12 overlapping calls a year per durable yes). A withdrawn yes
+   is marked `withdrawn_at` on its call, which is still graded.
+6. **Low: the stale-engine claim needed the week document.** It now inserts its own row in `pythia_engine_cards`
+   (unique id), so a week that never started cannot leave the card unposted.
+7. **Low: the board and map counted a yes past 60 days.** `assessmentRow` sends `long_term.live`, and the FE
+   (`isLongTermYes`) shows and filters only a live yes.
+8. **Low: the sleeves and `get_house_industries` lost Pythia's named companies** once the near term expired. A standing
+   long-term yes keeps them.
+
+Simplified: one `LongTermChip` for the board and the map, and `asBook` reads the long-term call once.
+
+Not applied: a block that keeps omitting `long_term` is re-flagged every week. The prompt requires the field, and the
+first sweep answered it on every one of its 129 publishes; watch it, don't build for it.

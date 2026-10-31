@@ -13,7 +13,7 @@ unified adapter layer. Each desk owns a kind; each kind is watched by its own mo
 | **Atlas** — portfolio construction + review | `/api/portfolio` | `portfolio_item` holdings | Themis |
 | **Argus** — the systematic scanner | `/api/scanner` | `scan` | — |
 | **Prometheus** — buy-side research | `/api/analyst` | `coverage` | coverage monitor |
-| **Pythia** — the industry desk | `/api/strategy` | `industry_view` — three structural answers per GICS sub-industry; `industry_assessment` — a verdict per industry and theme (for swing · for long term · watch · avoid · no case), graded forward; `theme` value chains (all **broadcasts**, not per-user) | industry-view monitor · Pythia's weekly change scan · the calls grader |
+| **Pythia** — the industry desk | `/api/strategy` | `industry_view` — three structural answers per GICS sub-industry; `industry_assessment` — per industry and theme a near-term verdict (for swing · watch · avoid · no case) and, since 2026-10-31, its own long-term call (yes / no, reviewed monthly), graded forward; `theme` value chains (all **broadcasts**, not per-user) | industry-view monitor · Pythia's weekly change scan · the calls grader |
 
 One desk and its kind are **archived**: frozen whole under [`archive/`](archive/README.md),
 imported by nothing, started by nothing, and deliberately not described here or in APP_SPEC — that
@@ -580,8 +580,9 @@ PYTHIA (the industry desk)            POST /api/strategy/stream
      (FMP first), price (the engine's moves; the hype flag on the size-weighted line), companies'
      money and, since step 8, insiders, funds' 13F ownership and federal contract money
      (docs/design/pythia-money-flows.md), regime, and geopolitics — since step 4 the GPR index and a
-     reviewed risk map (docs/design/pythia-geopolitics.md) → for swing · for long term · watch (a live question with a dated
-     decider ≤6 weeks) · avoid · no case; every verdict logged in pythia_calls and graded vs SPY at
+     reviewed risk map (docs/design/pythia-geopolitics.md) → for swing · watch (a live question with a dated
+     decider ≤6 weeks) · avoid · no case, plus a separate long-term yes / no reviewed monthly
+     (docs/design/pythia-two-verdicts.md); every verdict logged in pythia_calls and graded vs SPY at
      3 and 12 months. Industries and approved THEMES (value chains Pythia proposes, an admin approves)
         └─► the weekly change scan (pythiaWeekly, opt-in PYTHIA_WEEKLY): after each engine price run,
             assess what MOVED since its last assessment, what expired, what was never assessed —

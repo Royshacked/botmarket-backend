@@ -20,7 +20,7 @@ import { getDb } from '../providers/mongodb.provider.js'
 import { COLLECTION as COVERAGE } from '../api/analyst/coverage.service.js'
 import { COLLECTION as QUEUE } from './researchQueue.service.js'
 import { COLLECTION as STATS } from './dailyScreener.service.js'
-import { COLLECTION as ASSESSMENTS } from '../api/strategy/industryAssessment.service.js'
+import { COLLECTION as ASSESSMENTS, longTermYes } from '../api/strategy/industryAssessment.service.js'
 import { addMonths } from './forecastClock.js'
 import { getTickerAggregates } from '../providers/candles.provider.js'
 import { fetchLastPrice } from './lastPrice.service.js'
@@ -105,23 +105,31 @@ export function bookRow(cov, { close = null, name = null, closeDay = null, mark 
 /**
  * STILL CALLED? (Roy, 2026-10-28: "if a name is not relevant anymore to swing or long term — leave it only in covered
  * companies"). A chain name was sent by Pythia's verdict on its industry or theme; that assessment is one living
- * document she re-rates. → `{ verdict_now, still }` for a name in `book`: still = her verdict NOW is that book's. Pure.
+ * document she re-rates. → `{ verdict_now, still }` for a name in `book`: still = her call NOW is that book's. Pure.
+ * The swing book reads her near-term verdict; the long-term book her LONG-TERM call (pythia-two-verdicts.md, 2026-10-31
+ * — a yes inside its 60 days, `longTermYes`), so a long-term name's `verdict_now` is `long_term` or `not_long_term`.
  * Unknown — no assessment id on the row, the assessment not found, or the read failed (`verdicts` null) — is
- * `still: null`, and a name is never dropped on a missing read.
+ * `still: null`, and a name is never dropped on a missing read. `verdicts` maps id → the assessment document.
  */
-export function stillCalled(context, book, verdicts) {
+export function stillCalled(context, book, verdicts, nowIso = new Date().toISOString()) {
     const id = context?.assessment_id
     if (!id || !verdicts?.has(id)) return { verdict_now: null, still: null }
-    const now = verdicts.get(id) ?? null
+    const doc = verdicts.get(id) ?? null
+    if (book === 'long_term') {
+        const yes = Boolean(doc && longTermYes(doc, nowIso))
+        return { verdict_now: yes ? 'long_term' : 'not_long_term', still: yes }
+    }
+    // The near term: a legacy long-term verdict is not a near-term call.
+    const now = doc?.verdict === 'long_term' || doc?.verdict === 'interesting_invest' ? 'no_case' : doc?.verdict ?? null
     return { verdict_now: now, still: now === book }
 }
 
-/** Pythia's verdict now, per assessment id → Map, or null when the read failed. */
+/** Pythia's assessments now, per assessment id → Map of documents (verdict + long-term call), or null when the read failed. */
 async function _verdictsNow(db, ids) {
     if (!ids.length) return new Map()
     try {
-        const rows = await db.collection(ASSESSMENTS).find({ id: { $in: ids } }, { projection: { _id: 0, id: 1, verdict: 1 } }).toArray()
-        return new Map(rows.map(r => [r.id, r.verdict ?? null]))
+        const rows = await db.collection(ASSESSMENTS).find({ id: { $in: ids } }, { projection: { _id: 0, id: 1, verdict: 1, thesis: 1, assessed_at: 1, long_term: 1 } }).toArray()
+        return new Map(rows.map(r => [r.id, r]))
     } catch (err) {
         logger.warn(LOG, 'Pythia\'s verdicts not read — every chain name stays on its list', { error: err.message })
         return null
@@ -356,8 +364,9 @@ export async function houseBook({ deps = _deps } = {}) {
     // that book's list — it stays in the book itself, Covered companies (Roy, 2026-10-28).
     const ids = [...new Set([...origins.values(), ...Object.values(picks ?? {}).flat()].map(x => x?.assessment_id).filter(Boolean))]
     const verdicts = await _verdictsNow(db, ids)
+    const nowIso = new Date(deps.now()).toISOString()
     for (const [b, list] of Object.entries(picks ?? {})) {
-        for (const p of list) { Object.assign(p, stillCalled(p, b, verdicts)); delete p.assessment_id }
+        for (const p of list) { Object.assign(p, stillCalled(p, b, verdicts, nowIso)); delete p.assessment_id }
     }
     // `picks` null = could not be read (the list says so), not "the chain sent nothing".
     const out = { asof: closes.day, today, swing: [], long_term: [], record: {}, picks }
@@ -367,7 +376,7 @@ export async function houseBook({ deps = _deps } = {}) {
         const b = bookOf(c), origin = origins.get(c.symbol) ?? null
         const row = bookRow(c, { close: s?.close ?? l?.close ?? null, name: s?.name ?? null, closeDay: s?.close ? closes.day : l?.day ?? null,
             mark: marks.get(`${c.symbol}|${c.price_target?.set_at ?? ''}`) ?? null, spyNow, origin, today })
-        if (origin) Object.assign(row.origin, stillCalled(origin, b, verdicts))
+        if (origin) Object.assign(row.origin, stillCalled(origin, b, verdicts, nowIso))
         out[b].push(row)
     }
     const order = (a, b) => (a.origin.source === 'pythia' ? 0 : 1) - (b.origin.source === 'pythia' ? 0 : 1)

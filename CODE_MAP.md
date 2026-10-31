@@ -1060,8 +1060,9 @@ services/
                             `pythia_weekly` (one doc per run date: flagged, results, waiting, held_back, cost,
                             regime). weekStatus: quiet 30 min = interrupted → resumed; refused two weeks
                             running → held back one (refusedTwice). THE ENGINE CAN STALL (pythia-two-verdicts.md §3):
-                            checkEngine — the latest run older than ENGINE_STALE_DAYS (8) → one `pythia_engine_stale`
-                            card per stale run to every admin; runWeekly({ dueOnly }) re-opens a done week for
+                            checkEngine — the latest run FINISHED more than ENGINE_STALE_DAYS (8) ago → one
+                            `pythia_engine_stale` card per stale run to every admin, claimed by a row in
+                            `pythia_engine_cards`; runWeekly({ dueOnly }) re-opens a DONE week (else `week_open`) for
                             DUE_KEYS only (long-term reviews, expired, a watch's date) — the monitor's, once a day
                             while stale. Results carry `long_term` / `long_term_new` (houseScan bookSends: a NEW yes
                             sends to the long-term book)

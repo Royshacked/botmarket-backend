@@ -102,17 +102,18 @@ export function engineStaleCard(age, userId) {
 
 /**
  * Is the engine stale? → `{ stale, days, asof, carded }`, or null without a run. The FIRST check that finds a run stale
- * posts one card to every admin — once per stale run, claimed on that run's week document (`stale_card_at`), so a
- * restart or a second process does not post it again. Never throws.
+ * posts one card to every admin — once per stale run, claimed by inserting that run's row in ENGINE_CARDS (unique id),
+ * so a restart or a second process does not post it again — and the claim does not depend on the week document
+ * existing (code review 2026-10-31: a week never started left the card unposted, silently). Never throws.
  */
 export async function checkEngine(deps = _deps) {
     try {
         const age = engineAge(await deps.latestRun(), deps.now())
         if (!age?.stale) return age
         const db = await deps.db()
-        const r = await db.collection(COLLECTION).updateOne({ id: _weekId(age.asof), stale_card_at: { $exists: false } }, { $set: { stale_card_at: deps.now() } })
-        // The filter itself requires no card yet, so a match IS the claim.
-        if (!(r?.matchedCount > 0)) return { ...age, carded: false }
+        const r = await db.collection(ENGINE_CARDS).updateOne({ id: _weekId(age.asof) }, { $setOnInsert: { asof: age.asof, carded_at: deps.now() } }, { upsert: true })
+        // Only the insert is the claim; a row already there is a card already posted.
+        if (!(r?.upsertedCount > 0)) return { ...age, carded: false }
         logger.warn(LOG, 'the engine is stale — Pythia is waiting on a new price run', { asof: age.asof, days: age.days })
         for (const userId of await deps.adminUserIds()) await deps.post(engineStaleCard(age, userId), { tag: 'Pythia engine-stale card', log: LOG })
         return { ...age, carded: true }
@@ -123,11 +124,14 @@ export async function checkEngine(deps = _deps) {
 }
 
 const _weekId = (asof) => `pw_${asof}`
+/** One row per stale engine run whose card was posted (checkEngine's claim). */
+export const ENGINE_CARDS = 'pythia_engine_cards'
 
 export async function ensurePythiaWeeklyIndexes() {
     const db = await _deps.db()
     await db.collection(COLLECTION).createIndex({ id: 1 }, { unique: true })
     await db.collection(COLLECTION).createIndex({ asof: -1 })
+    await db.collection(ENGINE_CARDS).createIndex({ id: 1 }, { unique: true })
 }
 
 /**

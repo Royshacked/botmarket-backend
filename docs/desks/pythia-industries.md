@@ -192,7 +192,8 @@ Two loops, because they cost different things:
   holdings, unlike the ungated `sector_view` it replaced: 163 industries reviewed through the year would
   otherwise ring on most reviews.
 - **Argus, then Prometheus, by themselves** ([house-research-chain.md](../design/house-research-chain.md), 2026-10-23).
-  After each completed week, every FOR SWING / FOR LONG TERM industry's companies are measured (code) and Argus picks
+  After each completed week, every FOR SWING industry, and every NEW long-term yes (since 2026-10-31 a monthly
+  re-confirmation sends nothing — [pythia-two-verdicts.md](../design/pythia-two-verdicts.md) §6), has its companies measured (code) and Argus picks
   the best 5 for her thesis; they go to Prometheus's queue (source `pythia`) and are researched automatically,
   inside a weekly $ budget, on a price-target horizon bound to her book. Replaced "the largest uncovered names"
   (open item 3 of [pythia-assessment.md](../design/pythia-assessment.md)).

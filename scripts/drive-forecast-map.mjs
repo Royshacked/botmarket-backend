@@ -112,6 +112,21 @@ try {
     s = await panelState(page)
     check('a verdict filter dims the rest', s.dimmed > 0 && s.dimmed < s.tiles, `${s.dimmed}/${s.tiles} dimmed`)
     await shot(page, '3-filter-swing')
+    // Two verdicts (pythia-two-verdicts.md, 2026-10-31): the long-term call is its own "L" beside the near-term letter,
+    // and the For long term filter reads that call, not the near-term verdict.
+    const lt = await page.evaluate(() => {
+        const ts = [...document.querySelectorAll('.fm-tile')]
+        return { lt: ts.filter(t => t.querySelector('.fm-tile__badge--long_term')).length, two: ts.filter(t => t.classList.contains('fm-tile--two')).length }
+    })
+    check('long-term yeses carry their own L badge, some beside a near-term letter', lt.lt > 0 && lt.two > 0, JSON.stringify(lt))
+    await page.getByRole('button', { name: 'For long term', exact: true }).click()
+    await page.waitForTimeout(300)
+    s = await panelState(page)
+    check('the For long term filter lights exactly the L tiles', s.tiles - s.dimmed === lt.lt, `${s.tiles - s.dimmed} lit, ${lt.lt} L`)
+    await shot(page, '3b-filter-long-term')
+    const two = page.locator('.fm-tile--two').first()
+    await two.scrollIntoViewIfNeeded()
+    await two.screenshot({ path: `${OUT}/forecast-3c-two-badges.png`, scale: 'device' })
     await page.getByRole('button', { name: 'All', exact: true }).click()
 
     // ── an industry: the assessed tile with the most covered names, so the company step has a door ──
@@ -154,6 +169,11 @@ try {
     const board = await page.$('.floor-panel--board .industry-view')
     check('Board opens Pythia’s board in its window and closes the map', !!board && !(await page.$('.fm-map')))
     await shot(page, '6-board')
+    const ltGroup = await page.evaluate(() => {
+        const sec = document.querySelector('.assessment-view__group--long_term')?.closest('section')
+        return sec ? sec.querySelectorAll('.industry-view__line').length : null
+    })
+    check('the board has a For long term group listing the long-term yeses', ltGroup > 0, `${ltGroup} rows (the map has ${lt.lt} L)`)
     await page.locator('.floor-panel--board .industry-view__line').first().click()
     await page.waitForTimeout(1200)
     s = await panelState(page)

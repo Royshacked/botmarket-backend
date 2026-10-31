@@ -470,6 +470,12 @@ async function publishAssessment(block, { sub = null, row = null, money = null, 
     if (a.long_term) {
         set.long_term = { ...a.long_term, hype: facts.moved?.hype === true, reviewed_at: now,
             expires_at: _plusDays(now, LONG_TERM_REVIEW_DAYS), previous: prevLongTerm }
+    } else if (longTermOf(cur)?.legacy) {
+        // An unmigrated long-term VERDICT lives only in `verdict`, which this publish overwrites — written down as the
+        // long-term call it reads as, or the yes would vanish (code review 2026-10-31).
+        const lt = { ...longTermOf(cur) }
+        delete lt.legacy
+        set.long_term = { ...lt, expires_at: _plusDays(lt.reviewed_at ?? now, LONG_TERM_REVIEW_DAYS), previous: null }
     }
     const fields = ['verdict', 'horizon', 'confidence']
     // The stored verdict read in today's words: a document still saying interesting_trade is not a "change" to swing.
@@ -517,7 +523,9 @@ async function verdictsForCodes(codes, { now = new Date().toISOString() } = {}) 
         if (!near && !lt) continue
         const v = LEGACY_VERDICTS[r.verdict] ?? r.verdict
         out.set(r.subject.code, {
-            verdict: near && v !== 'long_term' ? v : null, horizon: near ? (r.horizon ?? null) : null, hype: r.moved?.hype === true,
+            verdict: near && v !== 'long_term' ? v : null, horizon: near ? (r.horizon ?? null) : null,
+            // An expired near term's facts are stale: the hype brake reads the long-term call's own flag then.
+            hype: near ? r.moved?.hype === true : lt.hype === true,
             decides_by: near ? (r.decides_by ?? null) : null, question: near ? (r.question ?? null) : null,
             long_term: lt ? { call: 'yes', hype: lt.hype === true } : null,
         })
@@ -542,12 +550,14 @@ export const ROW_PROJECTION = Object.freeze({
     'cause.kind': 1, 'moved.hype': 1, expires_at: 1, assessed_at: 1,
     'long_term.call': 1, 'long_term.hype': 1, 'long_term.reviewed_at': 1, 'long_term.expires_at': 1,
 })
-export function assessmentRow(a) {
+export function assessmentRow(a, now = new Date().toISOString()) {
     // The long term beside the near term (pythia-two-verdicts.md §2): the row's second chip. A document from before the
-    // split whose verdict WAS long term reads as a yes (longTermOf).
+    // split whose verdict WAS long term reads as a yes (longTermOf). `live`: a yes the house books still count — inside
+    // its 60 days (longTermYes), so the board shows and filters what Argus and Atlas read (code review 2026-10-31).
     const lt = longTermOf(a)
     return {
-        long_term: lt ? { call: lt.call, hype: lt.hype === true, reviewed_at: lt.reviewed_at ?? null, expires_at: lt.expires_at ?? null } : null,
+        long_term: lt ? { call: lt.call, hype: lt.hype === true, reviewed_at: lt.reviewed_at ?? null, expires_at: lt.expires_at ?? null,
+            live: Boolean(longTermYes(a, now)) } : null,
         // An unmigrated long-term VERDICT is the long-term call above; its near term had none.
         id: a.id ?? null, subject: a.subject ?? null, verdict: lt?.legacy ? 'no_case' : a.verdict ?? null, horizon: a.horizon ?? null,
         decides_by: a.decides_by ?? null, thesis: a.thesis ?? null,
@@ -561,7 +571,7 @@ export function assessmentRow(a) {
 async function listAssessmentRows() {
     const db = await _io.db()
     const docs = await db.collection(COLLECTION).find({}, { projection: ROW_PROJECTION }).sort({ 'subject.sector': 1, 'subject.name': 1 }).toArray()
-    return docs.map(assessmentRow)
+    return docs.map(d => assessmentRow(d))
 }
 
 /** The books a scan can ask for — the verdicts that say "worth this book's attention now". Watch is left out (Roy, 2026-10-13). */

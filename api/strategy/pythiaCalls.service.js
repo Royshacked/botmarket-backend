@@ -172,7 +172,16 @@ async function recordCall(doc, { now = new Date().toISOString(), basket: given =
     const last = (book) => db.collection(COLLECTION).find({ [field]: key, ..._bookQuery(book) }).sort({ called_at: -1 }).limit(1).next()
     const lt = doc.long_term?.call === 'yes' && doc.long_term.reviewed_at === doc.assessed_at ? doc.long_term : null
     const logNear = shouldLog(await last('near'), doc.verdict, now)
-    const logLong = Boolean(lt) && shouldLog(await last('long_term'), 'long_term', now)
+    // The long term is logged when it CHANGES (§2.2), never on a monthly re-confirmation: a yes held for a year is one
+    // call graded at its horizons, not twelve overlapping ones (code review 2026-10-31). A yes after a no is a new call
+    // however soon; a withdrawn yes (yes → no) is marked on its call, which is still graded — the record stays honest.
+    const prevLt = lt || doc.long_term?.reviewed_at === doc.assessed_at ? await last('long_term') : null
+    const logLong = Boolean(lt) && (lt.previous !== 'yes' || !prevLt)
+    if (!lt && doc.long_term?.call === 'no' && doc.long_term.previous === 'yes' && prevLt && !prevLt.withdrawn_at
+        && doc.long_term.reviewed_at === doc.assessed_at) {
+        await db.collection(COLLECTION).updateOne({ id: prevLt.id }, { $set: { withdrawn_at: now } })
+        logger.info(LOG, 'long-term call withdrawn', { code: key, call: prevLt.id })
+    }
     if (!logNear && !logLong) return { logged: false, reason: 'same verdict, reaffirmed within the window' }
     const symbols = Array.isArray(given) && given.length
         ? [...new Set(given.map(s => String(s).toUpperCase()))].slice(0, BASKET_MAX)

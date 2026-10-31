@@ -16,7 +16,7 @@
 
 import { coveredSymbols, readSubIndustry } from '../api/strategy/industryData.service.js'
 import { themeService } from '../api/strategy/theme.service.js'
-import { industryAssessmentService, longTermOf, longTermYes } from '../api/strategy/industryAssessment.service.js'
+import { industryAssessmentService, longTermYes } from '../api/strategy/industryAssessment.service.js'
 import { pythiaCallsService } from '../api/strategy/pythiaCalls.service.js'
 import { researchQueueService } from './researchQueue.service.js'
 import { industryCandidates } from './houseScan.candidates.js'
@@ -93,8 +93,8 @@ export function bookSends(results) {
 export function asBook(a, book) {
     if (!a) return null
     if (book === 'swing') return a.verdict === 'swing' ? a : null
-    if (book !== 'long_term' || !longTermYes(a)) return null
-    return { ...a, verdict: 'long_term', horizon: 'years', thesis: longTermOf(a)?.thesis ?? a.thesis }
+    const lt = book === 'long_term' ? longTermYes(a) : null
+    return lt ? { ...a, verdict: 'long_term', horizon: 'years', thesis: lt.thesis ?? a.thesis } : null
 }
 
 /**
