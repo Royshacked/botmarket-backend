@@ -167,9 +167,11 @@ async function chatStream({
     // already has (see recordReads — "fetch once" is unenforceable without it). The sizing call is
     // an action, not a read: recorded as read, a CHANGED size would be declined as already fetched.
     // The thesis lens's entry arithmetic is an action too: a CHANGED risk limit must be computed again, never "cited".
-    const readThisTurn = []
+    // Every call, actions too, in order: logged with the turn, so a build that skipped a read can be told from one that
+    // read and ignored it (NXST, 2026-10-31 — the log could not say whether get_price_structure ran).
+    const readThisTurn = [], calledThisTurn = []
     for (const [name, fn] of Object.entries(toolHandlers)) {
-        toolHandlers[name] = async (...args) => { if (!ACTION_TOOLS.has(name)) readThisTurn.push(name); return fn(...args) }
+        toolHandlers[name] = async (...args) => { calledThisTurn.push(name); if (!ACTION_TOOLS.has(name)) readThisTurn.push(name); return fn(...args) }
     }
 
     // THE USER'S PRESSES, APPLIED FIRST. A button is not an inference: the client knows what was
@@ -430,6 +432,7 @@ async function chatStream({
         settled: Object.keys(activeName(build)?.settled ?? {}),
         refused: refused.map(r => r.field),
         ...(cleared.length ? { cleared } : {}),
+        tools: calledThisTurn,
     })
 
     return {

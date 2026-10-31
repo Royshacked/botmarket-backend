@@ -42,6 +42,21 @@ test('the lens prompt: one target, a second one offered (stop unchanged), never 
     assert.match(lens, /the stop\s+UNCHANGED — no trail, no move to breakeven/)
 })
 
+test('the lens prompt: building straight through keeps the lens; the house valuation is never the take-profit (NXST)', () => {
+    const p = readFileSync(new URL('../../prompts/mentor_system_prompt.md', import.meta.url), 'utf8')
+    const lens = p.slice(p.indexOf('## The thesis lens'), p.indexOf('## Size comes from the user'))
+    assert.match(lens, /Building straight through does not skip the lens/)
+    assert.match(lens, /read `get_price_structure`/)
+    assert.match(lens, /Prometheus's price target is never the take-profit here/)
+})
+
+test('a thesis setup naming no rungs is read on the 1h / 4h, not the horizon’s ladder; named rungs still win', () => {
+    assert.deepEqual(normalizeSetup({ trade_mode: 'thesis', type: 'swing', timeframe: 'day' }).pace_rungs, ['4hr', '1hr'])
+    assert.deepEqual(normalizeSetup({ trade_mode: 'thesis', type: 'swing', pace_rungs: ['15min'] }).pace_rungs, ['15min'])
+    assert.notDeepEqual(normalizeSetup({ trade_mode: 'discretionary', type: 'swing', timeframe: 'day', market_cap: 'mid' }).pace_rungs, ['4hr', '1hr'],
+        'another lens keeps the ladder')
+})
+
 test('Talos is told what a thesis setup is: the level and below, strength judged on the 1h / 4h', () => {
     const line = lensLine('thesis')
     assert.match(line, /LEVEL, valid at that price and below/)

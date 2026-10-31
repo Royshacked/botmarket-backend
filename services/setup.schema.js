@@ -141,6 +141,9 @@ const MAX_CHALLENGES = 3
 // pace, which is what makes "drawn on the daily, triggered on the 15min" expressible at last:
 // { timeframe: 'day', pace_rungs: ['15min'] }. Under ±2 that setup could not exist.
 
+/** The thesis lens's pace when none is named — Talos judges strength at the level on the 1h / 4h closes. */
+export const THESIS_PACE = Object.freeze(['4hr', '1hr'])
+
 /**
  * The authored pace set: normalised, fetchable-only, deduped, coarse→fine. Empty in, empty out —
  * `normalizeSetup` is what falls back to the ladder, because only it knows the horizon and the cap.
@@ -844,7 +847,11 @@ export function normalizeSetup(raw) {
     // THE TWO SOURCES, resolved here because this is the only place that holds both the named rungs
     // and the horizon+cap the ladder needs. Named wins outright and is never added to.
     const named     = normalizePaceRungs(raw.pace_rungs)
-    const paced     = named.length ? named : ladderFor(type, marketCap, timeframe)
+    const tradeMode = TRADE_MODES.includes(raw.trade_mode) ? raw.trade_mode : 'discretionary'
+    // The THESIS lens's own read is the 1h / 4h — its entry is strength at the level on those closes (stock-playbook.md),
+    // so a thesis setup that names no rungs falls to them, not to the horizon's ladder (NXST, 2026-10-31: a swing's
+    // day / 4h / 2h ladder). Still only a fallback: named rungs win outright.
+    const paced     = named.length ? named : tradeMode === 'thesis' ? normalizePaceRungs(THESIS_PACE) : ladderFor(type, marketCap, timeframe)
 
     // ONE id space for the whole document — the root tier first, then each scenario, so the single
     // resolved-condition ledger can never have two conditions answering to the same key.
@@ -860,7 +867,7 @@ export function normalizeSetup(raw) {
         asset_class: normalizeAssetClass(raw.asset_class),
         direction,
         type,
-        trade_mode:  TRADE_MODES.includes(raw.trade_mode) ? raw.trade_mode : 'discretionary',
+        trade_mode:  tradeMode,
         // The PREMISE rung — the chart the plan was drawn on. Context for every read, and the
         // default for a validity range that names none. It does NOT set the pace.
         timeframe,
