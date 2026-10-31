@@ -390,8 +390,9 @@ rotation) — `docs/design/atlas-industry-sleeves.md`.
   `<screen_request>` per empty sleeve and ends the turn; the server (`sleeveSource.service`) screens
   the sector under the school, queues the hits, runs headless Prometheus **as the house** (no user:
   full model, house spend), and posts the requester an Atlas card `sleeve_sourced` — "Resume build" —
-  when every name is decided. Any role. `<coverage_request>` is the narrower hop: one user-named
-  ticker, queued, no card. `<coverage_refresh>` (re-research a HELD name mid-review) is **admin-only**
+  when every name is decided. Any role. (`<coverage_request>`, one user-named ticker queued for an admin's run, went
+  with the research queue's manual side on 2026-10-31: an uncovered ticker is Prometheus's to cover at his desk.)
+  `<coverage_refresh>` (re-research a HELD name mid-review) is **admin-only**
   because it rewrites house coverage.
 - **Review** runs in two modes on the same `reviewMode` stream: **in-position** (live P&L/drift →
   scoreboard + rebalance memo) and **pre-activation** (all-pending book, `~$0` notional — a pre-flight

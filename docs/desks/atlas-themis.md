@@ -108,8 +108,9 @@ the coverage back to Atlas (a `sleeve_sourced` card when there is no session). L
 research runs **as the house** (`userId: null`): a thesis every book builds from must not be written on
 the cheap model a trader past their ceiling is degraded to, and an hour of Prometheus is the house's
 spend, not the price of asking Atlas a question. Before 2026-09-14 this hop was a button and the user
-walked three desks by hand; a trader could not finish the walk at all. `<coverage_request>` is the
-narrower form — one user-named ticker, queued, no card. Nobody at a desk in between is the point.
+walked three desks by hand; a trader could not finish the walk at all. Nobody at a desk in between is the point.
+(`<coverage_request>` — one user-named ticker, queued for an admin's run — went on 2026-10-31 with the research queue's
+manual side: Atlas says an uncovered ticker is uncovered, and the user can ask Prometheus at his desk.)
 
 ## Atlas — review
 
@@ -183,7 +184,7 @@ exists for any kind.
 | With | Direction | Mechanism |
 |---|---|---|
 | **Pythia** | reads | `get_industry_views` in the build (advisory — the mandate wins); `industryViewService.viewsForSymbols` into the review snapshot and the fingerprint; a held industry's changed answer is a Themis trigger (`industry_view`) |
-| **Prometheus** | reads; asks | `get_coverage` (the only source of names, filtered by sub-industry + school); `<screen_request>` / `<coverage_request>` to fill a sleeve; `<coverage_refresh>` mid-review |
+| **Prometheus** | reads; asks | `get_coverage` (the only source of names, filtered by sub-industry + school); `<screen_request>` to fill a sleeve; `<coverage_refresh>` mid-review |
 | **Argus** | via the sleeve | never directly — the screen inside `sleeveSource` is the same mechanism as Argus's house scan (paused since the tilt was deleted), and Atlas has no screener of its own |
 | **Axl** | hand-off in | `<edit>portfolio` opens the book through the same edit-vs-review gate as the pencils |
 | **Mentor** | none | a single-name conviction trade is Mentor's; Atlas does not build a one-asset book for it *(the vision lists one — see Open)* |

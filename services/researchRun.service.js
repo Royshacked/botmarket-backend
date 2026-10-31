@@ -144,24 +144,6 @@ export function stopRun() {
     return { ok: true, run: getRun() }
 }
 
-/**
- * Every claimed name back to `queued`, so the next Start all takes them. Reads the QUEUE, not this
- * run's memory: the names a dead run left `in_research` outlive the process (the first batch run
- * lost its tally to the restart that fixed the account), and a claim with no coverage behind it
- * is the same thing however it got that way — a run that failed, a hand-opened turn lost to a
- * refresh. Skips and passes are decisions and are not touched: they are `rejected`, not claimed.
- *
- * While a run is going, the one name it is mid-turn on is left alone; everything else claimed is
- * fair game (the run only ever holds one).
- */
-export async function requeueStalled(deps = _io) {
-    const r = state.run
-    const except = r?.status === 'running' && r.current ? [r.current] : []
-    const res = await deps.requeueInResearch({ except })
-    if (!res.ok) return { ok: false, reason: 'queue_unavailable' }
-    return { ok: true, requeued: res.requeued }
-}
-
 async function _loop(run, queued, covered, { userId, audience, model, signal, liveReads = new Set() }, deps) {
     for (const item of queued) {
         if (run.stop) break
@@ -444,7 +426,6 @@ const _io = {
         const { recordUsage } = await import('./tokenUsage.service.js')
         return recordUsage(userId, model, usage, 'researchRun', { monitor: true })
     },
-    requeueInResearch: (o) => researchQueueService.requeueInResearch(o),
 
     // `throw`, not the service's default empty list: a book that could not be read would look like
     // an empty book, and the run would spend a four-minute turn on every covered name before the
@@ -484,4 +465,4 @@ const _io = {
     },
 }
 
-export const researchRunService = { startRun, stopRun, getRun, requeueStalled }
+export const researchRunService = { startRun, stopRun, getRun }

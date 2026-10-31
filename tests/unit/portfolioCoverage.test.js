@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { _formatCoverage, _parseCoverageRequest, _cleanScreenRequest, makeCoverageHandler } from '../../services/agents/portfolio.agent.service.js'
+import { _formatCoverage, _cleanScreenRequest, makeCoverageHandler } from '../../services/agents/portfolio.agent.service.js'
 
 // Atlas P4d — get_coverage read (Analyst→Atlas pull): render coverage for construction (pure).
 
@@ -90,7 +90,9 @@ test('a PARTIAL read still says what to do about a sleeve with no heading — an
     // (It listed the uncovered SECTORS until 2026-10-19; a sleeve is an industry now, and 163 of them are no list.)
     const out = _formatCoverage([{ symbol: 'NVDA', rating: 'buy', status: 'active' }], { subs: SUBS })
     assert.match(out, /no heading here has nothing researched behind it yet: emit a <screen_request> for it \(its industry_code \+ lens\)/)
-    assert.match(out, /<coverage_request>/)
+    // No research queue for one name (2026-10-31): an uncovered ticker is said to be uncovered, Prometheus's to cover.
+    assert.doesNotMatch(out, /<coverage_request>/)
+    assert.match(out, /not covered — Prometheus covers names at his own desk/)
     // The failure worth naming outright: bending the architecture to fit what happens to be researched.
     assert.match(out, /shrink the sleeve to fit what happens to be covered/)
     assert.match(out, /neighbouring industry's names/)
@@ -137,30 +139,6 @@ test('schools are shown on the per-name line when tagged', () => {
     assert.match(out, /NVDA.*schools: quality-value, growth-durability/)
     assert.doesNotMatch(out, /XOM.*schools/)        // empty array → no schools label
     assert.doesNotMatch(out, /JNJ.*schools/)        // undefined → no schools label
-})
-
-// ── <coverage_request> parsing ────────────────────────────────────────────────
-test('parseCoverageRequest: parses symbol and optional reason', () => {
-    const raw = `I cannot find AAPL in coverage.\n<coverage_request>{"symbol": "AAPL", "reason": "user wants to add this"}</coverage_request>`
-    const r = _parseCoverageRequest(raw)
-    assert.equal(r.symbol, 'AAPL')
-    assert.equal(r.reason, 'user wants to add this')
-})
-
-test('parseCoverageRequest: uppercases symbol', () => {
-    const r = _parseCoverageRequest('<coverage_request>{"symbol": "msft"}</coverage_request>')
-    assert.equal(r?.symbol, 'MSFT')
-})
-
-test('parseCoverageRequest: missing symbol → null', () => {
-    assert.equal(_parseCoverageRequest('<coverage_request>{"reason": "no symbol"}</coverage_request>'), null)
-    assert.equal(_parseCoverageRequest('<coverage_request>{}</coverage_request>'), null)
-})
-
-test('parseCoverageRequest: no block → null; malformed JSON → null', () => {
-    assert.equal(_parseCoverageRequest('no coverage request here'), null)
-    assert.equal(_parseCoverageRequest(null), null)
-    assert.equal(_parseCoverageRequest('<coverage_request>{ bad json )</coverage_request>'), null)
 })
 
 test('every sector covered → no gap line at all', async () => {

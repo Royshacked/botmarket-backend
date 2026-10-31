@@ -49,7 +49,7 @@ export const TOOLS = toolsFor({
         description: `Upcoming earnings dates (with EPS/revenue estimates) between two dates (YYYY-MM-DD, window up to ~3 months). Optionally filter to specific symbols. Use it for entry timing — a candidate reporting in a few days carries gap risk, so you may size in after the print rather than before it. Pass symbols when you have them: a market-wide ask returns only the soonest rows, and says so.`,
         cache: true,
     },
-    get_coverage: `The house coverage pool — every name Prometheus has researched (variant-perception thesis, OUR price target vs the Street = the gap/edge, a rating, the selection schools it fits, and the status), GROUPED BY GICS SUB-INDUSTRY. This is the ONLY source for mandate build: fetch filtered by \`industry\` (the sleeve being filled — its GICS code or exact name) and the mandate's selection \`school\`. \`sector\` is for a broad look only. For an uncovered name the user explicitly asks for, emit a <coverage_request> instead of using this tool. Read-only.`,
+    get_coverage: `The house coverage pool — every name Prometheus has researched (variant-perception thesis, OUR price target vs the Street = the gap/edge, a rating, the selection schools it fits, and the status), GROUPED BY GICS SUB-INDUSTRY. This is the ONLY source for mandate build: fetch filtered by \`industry\` (the sleeve being filled — its GICS code or exact name) and the mandate's selection \`school\`. \`sector\` is for a broad look only. An uncovered name the user explicitly asks for is not in it — say so; Prometheus covers names at his own desk. Read-only.`,
     get_chart: `Render a candlestick chart IMAGE for ONE name and look at it directly. Your job is allocation, not entry timing, so use this for the questions a picture answers better than a number: where a candidate sits in its multi-year range, whether a holding's trend is intact or broken, how ugly a drawdown was, what a long base looks like. Prefer weekly/monthly for a multi-month or multi-year hold; a daily view is for judging whether to phase into a position now or wait. Numbers (valuation, risk metrics, correlations) still decide the WEIGHT — this only informs the read. Set show_to_user true when the picture is part of the case you're making to the user, so they see what you saw.`,
     // APPENDED, never inserted — the snapshot compares by index and prompt caching keys off the
     // array prefix.
@@ -123,7 +123,7 @@ export function _formatCoverage(rows, { subs = null, industry = null } = {}) {
     if (!list.length) {
         const which = industry ? ` in ${industry.name} (${industry.code})` : ''
         const code  = industry ? `"industry_code": "${industry.code}"` : '"industry_code" = the sleeve\'s GICS sub-industry code'
-        return `No house coverage yet${which} for these filters — nothing researched to build from. Emit a <screen_request> for this sleeve (${code}, lens = the mandate's selection school): its companies are screened and Prometheus researches them on the server, and the user gets a card to resume the build when the sleeve is decided. Say that, then end the turn. For a specific uncovered name the user asked for by ticker, emit a <coverage_request> instead.`
+        return `No house coverage yet${which} for these filters — nothing researched to build from. Emit a <screen_request> for this sleeve (${code}, lens = the mandate's selection school): its companies are screened and Prometheus researches them on the server, and the user gets a card to resume the build when the sleeve is decided. Say that, then end the turn. A specific uncovered name the user asked for by ticker: say it is not covered — they can ask Prometheus at his desk.`
     }
     const line = (c) => {
         const pt      = c.price_target?.value
@@ -155,7 +155,7 @@ export function _formatCoverage(rows, { subs = null, industry = null } = {}) {
 
     return [
         'House coverage pool (Prometheus-researched theses — build from these; our target vs the Street is the edge).',
-        'Grouped by GICS sub-industry — a sleeve is one sub-industry. A sleeve from your architecture with no heading here has nothing researched behind it yet: emit a <screen_request> for it (its industry_code + lens) — the companies are screened and Prometheus researches them on the server, and the user is carded to resume when it is done. Do NOT shrink the sleeve to fit what happens to be covered, do not fill it from a neighbouring industry\'s names, and do not pick names from get_fundamentals or memory: what is already researched is a fact about our past work, not a view about this mandate. A specific uncovered name the user asked for → <coverage_request>.',
+        'Grouped by GICS sub-industry — a sleeve is one sub-industry. A sleeve from your architecture with no heading here has nothing researched behind it yet: emit a <screen_request> for it (its industry_code + lens) — the companies are screened and Prometheus researches them on the server, and the user is carded to resume when it is done. Do NOT shrink the sleeve to fit what happens to be covered, do not fill it from a neighbouring industry\'s names, and do not pick names from get_fundamentals or memory: what is already researched is a fact about our past work, not a view about this mandate. A specific uncovered name the user asked for: say it is not covered — Prometheus covers names at his own desk.',
         ...blocks.flatMap(b => ['', b]),
     ].join('\n')
 }
@@ -297,16 +297,14 @@ async function chatStream({ messages = [], ideaAccounts = [], mainAccountId = nu
     const screenRequests = _parseScreenRequests(raw)
     // G1: Atlas hands a HELD name back to Prometheus for an async re-research when its coverage is stale.
     const coverageRefresh = _parseCoverageRefresh(raw)
-    // 4th flow: user asked for a name not in house coverage → route to Prometheus via research queue.
-    const coverageRequest = _parseCoverageRequest(raw)
 
     const reply = cleanReply(raw)
 
     if (capturedPlan) capturedPlan = await _sizePlan(capturedPlan, { mandate: capturedMandate ?? mandate })
     if (capturedUpdate) capturedUpdate = await _markAvoidAdds(capturedUpdate)
 
-    logger.info(LOG, 'chatStream done', { replyLength: reply.length, hasPlan: !!capturedPlan, hasUpdate: !!capturedUpdate, hasMandate: !!capturedMandate, hasThesis: !!capturedThesis, screenRequests: screenRequests.length, coverageRefresh: !!coverageRefresh, coverageRequest: !!coverageRequest, phase: phase.get() })
-    return { reply, plan: capturedPlan, update: capturedUpdate, mandate: capturedMandate, thesis: capturedThesis, phase: phase.get(), ...(screenRequests.length ? { screenRequests } : {}), ...(coverageRefresh ? { coverageRefresh } : {}), ...(coverageRequest ? { coverageRequest } : {}), ...route.result() }
+    logger.info(LOG, 'chatStream done', { replyLength: reply.length, hasPlan: !!capturedPlan, hasUpdate: !!capturedUpdate, hasMandate: !!capturedMandate, hasThesis: !!capturedThesis, screenRequests: screenRequests.length, coverageRefresh: !!coverageRefresh, phase: phase.get() })
+    return { reply, plan: capturedPlan, update: capturedUpdate, mandate: capturedMandate, thesis: capturedThesis, phase: phase.get(), ...(screenRequests.length ? { screenRequests } : {}), ...(coverageRefresh ? { coverageRefresh } : {}), ...route.result() }
 }
 
 // ─── Coverage-refresh extraction (pure) ─────────────────────────────────────────
@@ -321,20 +319,6 @@ export function _parseCoverageRefresh(raw) {
     if (!ticker) return null
     const question = typeof o?.question === 'string' && o.question.trim() ? o.question.trim() : null
     return { ticker, question }
-}
-
-// ─── Coverage-request extraction (pure) ─────────────────────────────────────────
-// 4th Atlas flow — uncovered name on-demand. When the user asks to add a name that is NOT in the
-// house coverage pool, Atlas emits <coverage_request> to route it to Prometheus via the research
-// queue. The controller picks this up and enqueues the symbol. Atlas then ends the turn and waits
-// for Prometheus to research and return. Exported for tests.
-export function _parseCoverageRequest(raw) {
-    const o = parseEmitBlock(raw, 'coverage_request', LOG)
-    if (!o) return null
-    const symbol = String(o?.symbol ?? '').toUpperCase().trim()
-    if (!symbol) return null
-    const reason = typeof o?.reason === 'string' && o.reason.trim() ? o.reason.trim() : null
-    return { symbol, reason }
 }
 
 // ─── Screen-request extraction (pure) ───────────────────────────────────────────

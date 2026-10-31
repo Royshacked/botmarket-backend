@@ -20,7 +20,6 @@ const cov = (over = {}) => ({ id: 'cov1', symbol: 'AVGO', status: 'active', upda
 const scan = (over = {}) => ({ id: 'sc1', thesis: 'laggards', period: { label: 'Aug' }, savedAt: 1, candidates: [], ...over })
 const queued = (over = {}) => ({ id: 'q1', asset: 'TSLA', direction: 'long', ready: false, action: { type: 'entry' }, origin: { kind: 'setup', entityId: 's9' }, decidedAt: 5, nextOpenMs: NOW + 3_600_000, queuedReason: 'market shut', ...over })
 const run = (over = {}) => ({ run_id: 'r1', event: 'China restricts rare earth exports', event_date: '2026-09-10', event_category: 'trade', created_at: '2026-09-11T06:00:00Z', candidates: [{ ticker: 'MP', side: 'helped' }, { ticker: 'TSLA', side: 'hurt' }], ...over })
-const rq = (over = {}) => ({ id: 'rq1', symbol: 'AVGO', status: 'queued', source: 'argus', context: { sector: 'Technology', stance: 'over' }, created_at: '2026-09-12T00:00:00Z', ...over })
 
 const deps = (over = {}) => ({
     now: NOW,
@@ -30,7 +29,6 @@ const deps = (over = {}) => ({
     scans: async () => [scan()],
     queued: async () => [queued()],
     aether: async () => [run()],
-    researchQueue: async () => [rq()],
     ...over,
 })
 
@@ -41,13 +39,12 @@ test('one read answers across every list the Floor shows', async () => {
     assert.equal(res.asOf, NOW)
 })
 
-test('the research queue exists for an admin and not for a trader — even asked for by name', async () => {
+// Roy, 2026-10-31: "we dont need anymore the research queue mechanism and list" — not a list for anyone.
+test('the research queue is no list, for an admin either — asked for by name, it is not read', async () => {
     const admin = await listWatchedItems('u1', { isAdmin: true }, deps())
-    assert.equal(admin.counts.research_queue, 1)
-    const trader = await listWatchedItems('u1', {}, deps())
-    assert.equal(trader.counts.research_queue, undefined)
-    const askedAnyway = await listWatchedItems('u1', { kinds: ['research_queue', 'setup'] }, deps())
-    assert.deepEqual(Object.keys(askedAnyway.counts), ['setup'], 'the kind is dropped before the read, not refused after it')
+    assert.equal(admin.counts.research_queue, undefined)
+    const askedAnyway = await listWatchedItems('u1', { isAdmin: true, kinds: ['research_queue', 'setup'] }, deps())
+    assert.deepEqual(Object.keys(askedAnyway.counts), ['setup'])
 })
 
 test('a queued row says whether it is released, and an Aether row is one EVENT with its names', async () => {
@@ -62,11 +59,6 @@ test('a queued row says whether it is released, and an Aether row is one EVENT w
     assert.deepEqual(a.detail.top, ['MP (helped)', 'TSLA (hurt)'])
     const released = await listWatchedItems('u1', { kinds: ['queued'] }, deps({ queued: async () => [queued({ ready: true })] }))
     assert.equal(released.items[0].status, 'released')
-})
-
-test('an unreadable research queue is NAMED, not reported as empty', async () => {
-    const res = await listWatchedItems('u1', { isAdmin: true }, deps({ researchQueue: async () => { throw new Error('research queue unreadable') } }))
-    assert.deepEqual(res.unavailable, ['research_queue'])
 })
 
 test('the default kinds exclude the retired Idea agent’s leftovers', async () => {

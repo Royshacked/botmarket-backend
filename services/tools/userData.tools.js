@@ -96,12 +96,6 @@ function _watchLine(row) {
         case 'aether':
             return `- ${_tag(row, 'event')} ${row.title}${d.eventDate ? ` (${d.eventDate})` : ''} · ${d.candidates ?? 0} name${d.candidates === 1 ? '' : 's'}${
                 Array.isArray(d.top) && d.top.length ? `: ${d.top.join(', ')}` : ''}${d.category ? ` — ${d.category}` : ''}`
-        case 'research_queue':
-            return `- ${_tag(row, 'research')} ${row.symbol ?? '?'} · ${row.status ?? '?'}${_tail([
-                d.source ? `from ${d.source}` : null,
-                d.sector ? d.sector : null,
-                d.stance ? d.stance : null,
-            ])}${row.title ? ` — ${row.title}` : ''}`
         default:
             return `- ${_tag(row)} ${row.symbol ?? row.title ?? row.id}`
     }

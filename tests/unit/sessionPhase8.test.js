@@ -247,8 +247,8 @@ test('Atlas: a review card opens it in review mode; Axl\'s adopt opens the adopt
     assert.equal(landed.adopt, true)
     assert.deepEqual(landed.pendingPlan, { ideas: [1] }, 'a second route does not throw away the plan')
     assert.equal(portfolioDesk.onRouted(null, undefined).adopt, false)
-    const next = portfolioNextState({ adopt: true }, { screenRequests: [{ sector: 'Energy' }], coverageRequest: { symbol: 'XOM' } })
-    assert.deepEqual(next.notices, { screenRequests: [{ sector: 'Energy' }], coverageRequest: { symbol: 'XOM' } })
+    const next = portfolioNextState({ adopt: true }, { screenRequests: [{ sector: 'Energy' }] })
+    assert.deepEqual(next.notices, { screenRequests: [{ sector: 'Energy' }] })
     assert.equal(next.adopt, true)
 })
 

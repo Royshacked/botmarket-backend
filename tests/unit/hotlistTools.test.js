@@ -13,7 +13,7 @@ import { isToolError, toolErrorText } from '../../services/toolResult.util.js'
 
 test('each list is a screen Axl can show — no ref, like the calendar', () => {
     // Every list (Roy, 2026-10-22: "the user should be able to see all lists through Axl").
-    assert.deepEqual([...SHOW_LISTS], ['positions', 'orders', 'trades', 'portfolios', 'watchlists', 'hotlist', 'board', 'research'])
+    assert.deepEqual([...SHOW_LISTS], ['positions', 'orders', 'trades', 'portfolios', 'watchlists', 'hotlist', 'board'])
     for (const kind of SHOW_LISTS) {
         assert.deepEqual(splitShow(kind), { kind, ref: null }, kind)
         assert.deepEqual(validateShow({ kind, ref: 'ignored junk' }), { kind, ref: null }, `${kind}: a list takes no ref`)
@@ -25,10 +25,11 @@ test('each list is a screen Axl can show — no ref, like the calendar', () => {
     assert.equal(validateShow({ kind: 'setup' }), null, 'a setup still needs its handle')
 })
 
-test("the research queue is an admin's list — a trader's show of it is dropped; every other list is anyone's", () => {
-    assert.deepEqual(showFor('admin', { kind: 'research' }), { kind: 'research', ref: null })
+// The research queue is no list since 2026-10-31 (Roy: "we dont need anymore the research queue mechanism and list").
+test("the research queue is no list for anyone — its show opens nothing; every list is anyone's", () => {
+    assert.equal(showFor('admin', { kind: 'research' }), null)
     assert.equal(showFor('user', { kind: 'research' }), null)
-    assert.equal(routeFields({ show: { kind: 'research' } }, 'user').show, null, 'through the controller too')
+    assert.equal(routeFields({ show: { kind: 'research' } }, 'admin').show, null, 'through the controller too')
     assert.deepEqual(showFor('user', { kind: 'board' }), { kind: 'board', ref: null })
     assert.deepEqual(showFor('user', { kind: 'positions' }), { kind: 'positions', ref: null })
 })

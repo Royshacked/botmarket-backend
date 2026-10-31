@@ -6,13 +6,10 @@ import { coverageService } from './coverage.service.js'
 import { coverageCommit } from './coverageCommit.service.js'
 import { COVERAGE_REASONS } from './coverageReasons.js'
 import { resolveCardsFor }        from '../chat/chat.service.js'
-import { researchQueueService }   from '../../services/researchQueue.service.js'
-import { researchRunService }     from '../../services/researchRun.service.js'
 import { sendReason }             from '../_shared/reason.util.js'
 import { makeHandle }             from '../_shared/handle.util.js'
 import { httpError }              from '../../services/httpError.util.js'
 import { logger }                 from '../../services/logger.service.js'
-import { getExperienceLevel }     from '../../services/experience.service.js'
 
 const LOG = '[analystCtrl]'
 // Every handler here rides makeHandle. The queue and run handlers moved first (§6): they had no
@@ -90,73 +87,3 @@ export const deleteCoverage = _handle('deleteCoverage', async (req, res) => {
     res.send({ ok: true })
 })
 
-// ─── Research queue (Argus→Prometheus admin pipeline) ─────────────────────────
-
-export const listResearchQueue = _handle('listResearchQueue', async (req, res) => {
-    const { status } = req.query
-    const docs = await researchQueueService.listQueue({ status: status ?? undefined })
-    // null is a FAILED READ, not an empty queue — see the service. Reporting it as 503 rather than
-    // as `[]` is what keeps "Argus queued nothing" distinguishable from "Mongo was unreachable".
-    if (docs === null) return res.status(503).send({ error: 'Research queue unavailable' })
-    res.json(docs)
-})
-
-export const enqueueResearch = _handle('enqueueResearch', async (req, res) => {
-    const { symbol, source } = req.body ?? {}
-    if (!symbol) return res.status(400).json({ error: 'symbol is required' })
-    const result = await researchQueueService.enqueue({
-        symbol,
-        source:      source ?? 'manual',
-        requestedBy: req.user._id,
-    })
-    if (!result.ok) return res.status(500).json({ error: 'Failed to enqueue', reason: result.reason })
-    res.status(result.duplicate ? 200 : 201).json(result)
-})
-
-// The three transitions answer the same way: the guarded update matched nothing → 404, else 500.
-const _transitionHandler = (label, move) => _handle(label, async (req, res) => {
-    const result = await move(req.params.id)
-    if (!result.ok) return res.status(result.reason === 'not_found_or_wrong_status' ? 404 : 500).json(result)
-    res.json(result.doc)
-})
-export const startResearch    = _transitionHandler('startResearch',    (id) => researchQueueService.startResearch(id))
-export const completeResearch = _transitionHandler('completeResearch', (id) => researchQueueService.markDone(id))
-export const rejectResearch   = _transitionHandler('rejectResearch',   (id) => researchQueueService.reject(id))
-
-// ─── Research run — the queue, researched headlessly ─────────────────────────
-// See researchRun.service.js. One run at a time; the client polls the run (and the queue) for
-// progress. The admin's venue and level are what the agent researches with, as at the desk.
-
-const RUN_REASONS = {
-    already_running:      [409, 'A research run is already going — stop it first'],
-    nothing_queued:       [409, 'Nothing is queued'],
-    queue_unavailable:    [503, 'Research queue unavailable'],
-    coverage_unavailable: [503, 'Could not read the coverage book'],
-    not_running:          [409, 'No research run is going'],
-}
-
-export const startResearchRun = _handle('startResearchRun', async (req, res) => {
-    const result = await researchRunService.startRun({
-        userId:   req.user._id,
-        audience: await getExperienceLevel(req.user._id),
-        model:    typeof req.body?.model === 'string' ? req.body.model : null,
-    })
-    if (!result.ok) return sendReason(res, result.reason, { overrides: RUN_REASONS, fallback: 500, fallbackMessage: 'Could not start the research run', extra: result.run ? { run: result.run } : {} })
-    res.status(202).json(result.run)
-})
-
-export const getResearchRun = _handle('getResearchRun', (_req, res) => {
-    res.json(researchRunService.getRun())   // null when no run has happened this process
-})
-
-export const stopResearchRun = _handle('stopResearchRun', (_req, res) => {
-    const result = researchRunService.stopRun()
-    if (!result.ok) return sendReason(res, result.reason, { overrides: RUN_REASONS, fallback: 500, fallbackMessage: 'Could not stop the research run' })
-    res.json(result.run)
-})
-
-export const requeueStalledResearch = _handle('requeueStalledResearch', async (_req, res) => {
-    const result = await researchRunService.requeueStalled()
-    if (!result.ok) return sendReason(res, result.reason, { overrides: RUN_REASONS, fallback: 500, fallbackMessage: 'Could not requeue the claimed names' })
-    res.json({ requeued: result.requeued })
-})

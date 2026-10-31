@@ -25,7 +25,6 @@ import { listPortfolios } from './portfolioState.service.js'
 import { resolveMode } from './venue.resolve.service.js'
 import { listWaiting } from './pendingAction/pendingWork.service.js'
 import { getEventCandidates } from '../api/aether/aether.service.js'
-import { researchQueueService } from './researchQueue.service.js'
 
 const LOG = '[watchlist]'
 
@@ -43,12 +42,11 @@ const LOG = '[watchlist]'
 export const DEFAULT_KINDS = ['setup', 'portfolio', 'coverage', 'scan', 'queued', 'aether']
 
 /**
- * The lists only an admin has. The research queue is the admin pipeline's artifact and its desk
- * (Prometheus in batch) is admin-only, so a trader's read simply never has the kind — the same
- * rule the desks apply: for a trader the list does not exist, rather than exists and is refused.
- * Asked for by name, it is dropped before the read, so the answer names no list the user cannot see.
+ * The lists only an admin has — for a trader the list does not exist, rather than exists and is refused; asked for by
+ * name, it is dropped before the read. None today: the research queue, the one there was, stopped being a list
+ * (Roy, 2026-10-31: "we dont need anymore the research queue mechanism and list") — the house's pipe, not anyone's.
  */
-export const ADMIN_KINDS = ['research_queue']
+export const ADMIN_KINDS = Object.freeze([])
 
 /**
  * The kinds that BELONG to a workspace, and therefore get scoped to it.
@@ -86,13 +84,6 @@ export async function listWatchedItems(userId, { kinds = null, includeFinished =
         queued = (uid) => listWaiting(uid, { onError: 'throw' }),
         // House artifacts, shared like coverage. One row per RUN (see aetherRunToWatchRow).
         aether = () => getEventCandidates({ days: 30 }),
-        // `null` is listQueue's failure answer (it logs and swallows); rethrown so it lands in
-        // `unavailable` rather than reading as an empty queue.
-        researchQueue = async () => {
-            const rows = await researchQueueService.listQueue({ status: ['queued', 'in_research'] })
-            if (rows === null) throw new Error('research queue unreadable')
-            return rows
-        },
     } = deps
 
     const asOf = deps.now ?? Date.now()
@@ -109,7 +100,7 @@ export async function listWatchedItems(userId, { kinds = null, includeFinished =
     const sources = [
         ['setup', setups], ['portfolio', portfolios],
         ['coverage', coverage], ['scan', scans],
-        ['queued', queued], ['aether', aether], ['research_queue', researchQueue],
+        ['queued', queued], ['aether', aether],
     ].filter(([kind]) => want.has(kind))
 
     // Each source is settled independently: one desk's read failing must not cost the user the

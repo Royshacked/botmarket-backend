@@ -31,7 +31,7 @@ The server owns every gate; the client hides what the server refuses, as a court
 | Social chat | `ADMIN_BOT_IDS = ['strategy', 'analyst']` (`api/chat/chat.service.js`, mirrored in the frontend `agentMeta.jsx`). The notifiers narrow delivery to `listAdminUserIds` and stamp `visibility: 'admin'`; `visibleConversationsFor(convs, role)` hides the threads from a non-admin on list AND on read-by-id, so a demoted admin cannot read the house desk through a thread they still own |
 | Axl | `buildRoleSection(isAdmin)` in the prompt tail tells Axl who it has; `routeFor(role, route)` (`routing.util.js`, the shared routing tier every desk's controller applies) drops an admin desk for a non-admin whatever the model emitted. The desks' own route rule (`buildRouteRule`) never lists Pythia or Aether at all |
 | Atlas | `<coverage_refresh>` runs only for `req.user.role === 'admin'` (`portfolio.controller.js`); a trader's ask is logged and Atlas reads the standing coverage |
-| Client | `DESKS[].adminOnly` (hub cards), the `FloorLists` `Research queue` desk, `CoverageActions`, the "Initiate coverage" button, the StrategyPanel's Publish. The Forecasts board (`IndustryView`) is no longer gated — every user sees it |
+| Client | `DESKS[].adminOnly` (hub cards), `CoverageActions`, the "Initiate coverage" button, the StrategyPanel's Publish. The Forecasts board (`IndustryView`) is no longer gated — every user sees it |
 
 ## The autonomous sleeve hop — Atlas → (the house's GICS table) → Prometheus → Atlas
 
@@ -72,9 +72,9 @@ Atlas a question. The coverage monitor's scheduled re-model goes one step furthe
 NO user at all (`userId: null`): no venue, no audience level, no ceiling, and — a known gap — no
 spend booked to anyone, because usage is recorded per user and there is no house row yet.
 
-**What a trader's `<coverage_request>` still does:** queues the one named ticker (`source: manual`)
-for the next run — no card. Sourcing a whole sleeve is `<screen_request>`; the prompt says which is
-which.
+**`<coverage_request>` is gone** (2026-10-31, with the research queue's list and routes): it queued one named ticker
+(`source: manual`) for an admin's Start all, which no longer exists. Sourcing a whole sleeve is `<screen_request>`; an
+uncovered ticker is Prometheus's to cover at his desk.
 
 **Known limits.** Pending sleeves live in process memory like the run itself: a restart loses the
 *card*, not the work (the rows stay queued; the next run researches them). The house scan

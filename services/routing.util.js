@@ -132,10 +132,10 @@ export function splitEdit(raw) {
 // The Floor's LISTS (Roy, 2026-10-22: "I want Axl to be able to present them all" … "the user should be able to see
 // all lists through Axl") — each opens its window over the chat, the same one its header in the list column opens.
 // Named in the user's words; the client maps them to its desks. `positions` opens the book in a window too (the left
-// column is hidden on a narrower screen); `board` is Pythia's Forecast board; `research` the house research queue —
-// an ADMIN's list, so a trader's show of it is dropped (`routeFields`).
-export const SHOW_LISTS = new Set(['positions', 'orders', 'trades', 'portfolios', 'watchlists', 'hotlist', 'board', 'research'])
-const ADMIN_SHOWS = new Set(['research'])
+// column is hidden on a narrower screen); `board` is Pythia's Forecast board. An ADMIN's list would go in ADMIN_SHOWS
+// (a trader's show of it is dropped, `routeFields`) — none since the research queue stopped being a list (2026-10-31).
+export const SHOW_LISTS = new Set(['positions', 'orders', 'trades', 'portfolios', 'watchlists', 'hotlist', 'board'])
+const ADMIN_SHOWS = new Set()
 export const SHOW_KINDS = new Set(['setup', 'ticket', 'heatmap', 'calendar', ...SHOW_LISTS])
 // The screens — a show whose ref is optional, because what it opens exists without one.
 const SHOW_SCREENS = new Set(['ticket', 'heatmap', 'calendar', ...SHOW_LISTS])

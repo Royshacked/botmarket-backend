@@ -290,25 +290,6 @@ export function aetherRunToWatchRow(run) {
     }
 }
 
-/** A research-queue row (Argus → Prometheus, admin pipeline) → a row. */
-export function researchQueueToWatchRow(doc) {
-    if (!doc?.id && !doc?.symbol) return null
-    return {
-        kind: 'research_queue',
-        id: doc.id ?? doc.symbol,
-        symbol: doc.symbol ?? null,
-        title: _title(doc.context?.reason ?? doc.context?.sector ?? '', doc.source ?? 'queued'),
-        direction: null,
-        status: doc.status ?? null,
-        updatedAt: _ms(doc.updated_at) ?? _ms(doc.created_at),
-        detail: {
-            source: doc.source ?? null,
-            sector: doc.context?.sector ?? null,
-            stance: doc.context?.stance ?? null,
-        },
-    }
-}
-
 /** Kind → projector, for callers that map a mixed set. */
 export const WATCH_ROW_PROJECTORS = {
     call: callToWatchRow,
@@ -318,5 +299,4 @@ export const WATCH_ROW_PROJECTORS = {
     coverage: coverageToWatchRow,
     queued: queuedToWatchRow,
     aether: aetherRunToWatchRow,
-    research_queue: researchQueueToWatchRow,
 }

@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert   from 'node:assert/strict'
 
-import { startRun, stopRun, getRun, researchOpening, requeueStalled, isRunFatal } from '../../services/researchRun.service.js'
+import { startRun, stopRun, getRun, researchOpening, isRunFatal } from '../../services/researchRun.service.js'
 
 // ─── researchRun ──────────────────────────────────────────────────────────────
 // Injected deps — no DB, no agent. `research` is a stub that answers per symbol; `covered` is the
@@ -16,7 +16,6 @@ function makeDeps({ queued = [], covered = [], answers = {}, initiate } = {}) {
         calls,
         listQueue:      async () => queued,
         // The queue's own bulk move; records what it was asked to leave alone.
-        requeueInResearch: async ({ except } = {}) => { calls.requeued.push(except); return { ok: true, requeued: 22 } },
         coveredSymbols: async () => new Set(covered),
         startResearch:  async (id) => { calls.started.push(id); return { ok: true } },
         markDone:       async (id) => { calls.done.push(id); return { ok: true } },
@@ -183,30 +182,6 @@ test('researchRun: isRunFatal — billing, auth and permission are; a name-level
     assert.equal(isRunFatal(new Error('provider down')), false)
     // OpenRouter's no-balance refusal, by its words alone (2026-10-28).
     assert.equal(isRunFatal(new Error('This request requires more credits, or fewer max_tokens. You requested up to 16000 tokens, but can only afford 12285.')), true)
-})
-
-test('researchRun: requeueStalled works off the queue, not the run — it needs no run at all', async () => {
-    const d = makeDeps()
-    // No run has happened in this process (or the one that had was lost to a restart).
-    const res = await requeueStalled(d)
-    assert.deepEqual(res, { ok: true, requeued: 22 })
-    assert.deepEqual(d.calls.requeued, [[]])   // nothing to spare
-})
-
-test('researchRun: requeueStalled spares the name a running batch is mid-turn on', async () => {
-    let release
-    const d = makeDeps({ queued: [q('R')], answers: { R: () => new Promise(r => { release = r }) } })
-    await startRun({ userId: 'u1' }, d)
-    await new Promise(r => setImmediate(r))
-    assert.equal(getRun().current, 'R')
-    await requeueStalled(d)
-    assert.deepEqual(d.calls.requeued, [['R']])
-    release(draft('R')); await settled()
-})
-
-test('researchRun: requeueStalled reports an unreadable queue', async () => {
-    const d = { ...makeDeps(), requeueInResearch: async () => ({ ok: false, error: new Error('dns') }) }
-    assert.equal((await requeueStalled(d)).reason, 'queue_unavailable')
 })
 
 test('researchRun: getRun is a snapshot, not the live object', async () => {

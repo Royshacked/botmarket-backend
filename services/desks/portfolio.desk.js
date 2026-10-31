@@ -8,7 +8,6 @@ import { portfolioAgentService } from '../agents/portfolio.agent.service.js'
 import { portfolioChatService } from '../../api/portfolio/portfolioChat.service.js'
 import { adoptBookService } from '../../api/portfolio/adoptBook.service.js'
 import { refreshCoverage } from '../coverageRefresh.service.js'
-import { researchQueueService } from '../researchQueue.service.js'
 import { sourceSleeve } from '../sleeveSource.service.js'
 import { logger } from '../logger.service.js'
 import { portfolioActions, makePortfolioApplyEdit, PORTFOLIO_REASONS } from './actions/portfolio.actions.js'
@@ -55,8 +54,7 @@ export function portfolioNextState(prev, result) {
         // a fold keeps the last turn's.
         notices: result ? {
             screenRequests:  result.screenRequests ?? null,
-            coverageRequest: result.coverageRequest ?? null,
-        } : (prev?.notices ?? { screenRequests: null, coverageRequest: null }),
+        } : (prev?.notices ?? { screenRequests: null }),
     }
 }
 
@@ -144,8 +142,7 @@ export const portfolioDesk = {
         // ADMIN-ONLY (2026-09-14). The hop REWRITES house coverage — a revision, which the routes
         // reserve for admins — and its ping lands in Prometheus's feed, which traders cannot see. A
         // trader's Atlas keeps reading the standing coverage; the ask is logged so the desk can see it
-        // was made. (The <coverage_request> path below is the trader's route to new research: it queues
-        // for an admin instead of writing.)
+        // was made.
         if (result.coverageRefresh?.ticker && user.role !== 'admin') {
             logger.info(LOG, 'coverage refresh skipped — not an admin', { userId: user._id, ticker: result.coverageRefresh.ticker })
         } else if (result.coverageRefresh?.ticker) {
@@ -182,15 +179,6 @@ export const portfolioDesk = {
               .catch(err => logger.warn(LOG, 'sleeve sourcing failed', err.message))
         }
 
-        // 4th flow: uncovered name the user asked to add. Enqueue for Prometheus — fire-and-forget.
-        if (result.coverageRequest?.symbol) {
-            researchQueueService.enqueue({
-                symbol:      result.coverageRequest.symbol,
-                source:      'manual',
-                requestedBy: user._id,
-            }).catch(err => logger.warn(LOG, 'coverage request enqueue failed', err.message))
-        }
-
         return result
     },
     // What a discard keeps (act.js): the mandate the user set — the plan built under it goes (phase 8e CR).
@@ -199,11 +187,10 @@ export const portfolioDesk = {
     actions: portfolioActions,
     applyEdit: makePortfolioApplyEdit({ clean: () => portfolioNextState(null, null) }),
     reasons: PORTFOLIO_REASONS,
-    stateFields: ['plan', 'update', 'mandate', 'thesis', 'screen_requests', 'coverage_request'],
+    stateFields: ['plan', 'update', 'mandate', 'thesis', 'screen_requests'],
     done: (result) => ({
         reply: result.reply, plan: result.plan ?? null, update: result.update ?? null, mandate: result.mandate ?? null, thesis: result.thesis ?? null, phase: result.phase ?? null,
         ...(result.screenRequests ? { screen_requests: result.screenRequests } : {}),
         ...(result.coverageRefresh ? { coverage_refresh: result.coverageRefresh } : {}),
-        ...(result.coverageRequest ? { coverage_request: result.coverageRequest } : {}),
     }),
 }

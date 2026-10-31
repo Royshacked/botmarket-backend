@@ -492,7 +492,7 @@
         },
         {
             "name": "get_coverage",
-            "description": "The house coverage pool — every name Prometheus has researched (variant-perception thesis, OUR price target vs the Street = the gap/edge, a rating, the selection schools it fits, and the status), GROUPED BY GICS SUB-INDUSTRY. This is the ONLY source for mandate build: fetch filtered by `industry` (the sleeve being filled — its GICS code or exact name) and the mandate's selection `school`. `sector` is for a broad look only. For an uncovered name the user explicitly asks for, emit a <coverage_request> instead of using this tool. Read-only.",
+            "description": "The house coverage pool — every name Prometheus has researched (variant-perception thesis, OUR price target vs the Street = the gap/edge, a rating, the selection schools it fits, and the status), GROUPED BY GICS SUB-INDUSTRY. This is the ONLY source for mandate build: fetch filtered by `industry` (the sleeve being filled — its GICS code or exact name) and the mandate's selection `school`. `sector` is for a broad look only. An uncovered name the user explicitly asks for is not in it — say so; Prometheus covers names at his own desk. Read-only.",
             "input_schema": {
                 "type": "object",
                 "properties": {
@@ -3241,8 +3241,7 @@
                                 "coverage",
                                 "scan",
                                 "queued",
-                                "aether",
-                                "research_queue"
+                                "aether"
                             ]
                         },
                         "description": "optional — narrow to these kinds. Omit for everything, which is the usual case."

@@ -146,28 +146,6 @@ async function requeue(id) {
 }
 
 /**
- * Every claimed name back to the line at once — the whole `in_research` set, minus `except`.
- *
- * Reads the QUEUE, not a run's memory: the first batch run died on the account with 22 names
- * claimed, and the tally that knew which 22 died with the process on the restart that fixed it.
- * The rows themselves never forgot. `except` is the one name a running batch is mid-turn on.
- */
-async function requeueInResearch({ except = [] } = {}) {
-    try {
-        const db  = await getDb()
-        const now = new Date().toISOString()
-        const q   = { status: 'in_research' }
-        if (except.length) q.symbol = { $nin: except.map(s => String(s).toUpperCase()) }
-        const res = await db.collection(COLLECTION).updateMany(q, { $set: { status: 'queued', updated_at: now, reason: null } })
-        logger.info(LOG, 'requeued in_research', { requeued: res.modifiedCount, except })
-        return { ok: true, requeued: res.modifiedCount }
-    } catch (err) {
-        logger.error(LOG, 'requeueInResearch failed', err)
-        return { ok: false, error: err }
-    }
-}
-
-/**
  * These symbols' claims back to the line when untouched for `olderThanMs` — a research run that died with its
  * process (a deploy) left them `in_research` (house-research-chain.md step 6). Scoped to the symbols and to an
  * age a live turn never reaches, so a name open at the desk by hand is left alone.
@@ -227,4 +205,4 @@ async function _transition(id, to, from, extra = {}) {
     }
 }
 
-export const researchQueueService = { enqueue, listQueue, startResearch, markDone, reject, requeue, requeueInResearch, requeueStale, annotate }
+export const researchQueueService = { enqueue, listQueue, startResearch, markDone, reject, requeue, requeueStale, annotate }
