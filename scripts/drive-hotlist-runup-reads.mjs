@@ -22,10 +22,12 @@ const { catalystReadService } = await import('../services/catalystRead.service.j
 try { await userService.createUser(USER); console.log('qa user created') } catch (e) { console.log('qa user exists —', e.message) }
 
 const today = await svc.todayHotlist({})
-const reads = (await catalystReadService.listReads()).filter(r => r.context?.day === today.day)
-const latest = new Map()
-for (const r of reads) if (!latest.has(r.symbol) || r.status === 'active' || String(r.set_at) > String(latest.get(r.symbol).set_at)) latest.set(r.symbol, r)
-const confirmed = [...latest.values()].filter(r => r.status !== 'pass' && (r.target || r.run_up?.worth === true)).map(r => r.symbol).sort()
+// The FE's own pick (hotlist.utils readsBySymbol / isConfirmedRead — code review 2026-10-31: a copy that differed failed a
+// correct page): an active read from any day, a settled one only from this list's day; the active one, else the newest.
+const { readsBySymbol, isConfirmedRead } = await import('../../botmarket-frontend/src/cmps/Floor/hotlist.utils.js')
+const byRead = readsBySymbol(await catalystReadService.listReads(), today.day)
+const week = (today.day_list ?? []).filter(r => r.cells?.week?.grade).map(r => r.symbol)
+const confirmed = week.filter(s => isConfirmedRead(byRead.get(s))).sort()
 console.log('the hotlist:', today.day, `${today.day_list?.length ?? 0} names; Prometheus confirmed ${confirmed.length}: ${confirmed.join(' ')}`)
 
 const browser = await chromium.launch({ channel: 'msedge' })
@@ -71,7 +73,7 @@ try {
     check('the tab count is the list it opens on', new RegExp(`\\b${confirmed.length}\\b`).test(tab ?? ''), tab)
     const cells = await page.evaluate(() => document.querySelector('.hot-panel .hot-table-wrap')?.textContent ?? '')
     check('a confirmed row with no target reads "run-up"', /run-up/.test(cells))
-    check('no row says hold through (every read is an exit)', !/hold through/.test(cells))
+    check('no row says hold (every read is an exit)', !/\d{2}-\d{2} hold/.test(cells))
 
     const row = page.locator('.hot-panel tr.hot-row').first()
     if (await row.count()) {

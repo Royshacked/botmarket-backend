@@ -102,7 +102,9 @@ export function runUpStats({ reports = [], bars = [], spyBars = [], lead }) {
  * Pure. `beats` — the report dates that beat (actual over estimate). → `{ n, median_pct, p25_pct, p75_pct, up_share,
  * beat_n, beat_median_pct }`, the stats null when n is 0.
  */
-export function throughStats({ reports = [], bars = [], beats = [] }) {
+export function throughStats({ reports = [], bars = [], beats = [], today = null }) {
+    // A session in progress has no close yet — left out, as soFarPct does (code review 2026-10-31).
+    if (today) bars = bars.filter(b => _etDay(b.timestamp) < today)
     const days = bars.map(b => _etDay(b.timestamp))
     const beat = new Set(beats)
     const rows = []
@@ -189,7 +191,7 @@ async function _getRunupHistory({ ticker, lead_days } = {}) {
         ? { full_lead: full, full_median_pct: runUpStats({ reports: past, bars, spyBars: [], lead: full }).median_pct, so_far_pct: soFarPct(bars, full - lead, today) }
         : null
     const beats = rows.filter(r => r.date && r.date <= today && r.epsActual != null && r.epsEstimated != null && Number(r.epsActual) > Number(r.epsEstimated)).map(r => r.date)
-    const through = throughStats({ reports: past, bars, beats })
+    const through = throughStats({ reports: past, bars, beats, today })
     return runUpReadText(sym, { report: next, lead, stats, cycle, through })
 }
 

@@ -955,7 +955,10 @@ REFERENCE the server resolves (`scanSeed.util`), never request text. A `hotlist`
 `hotlist.service hotlistSeed`) carries the board's facts line (free range is room, not a target), the column's horizon
 (the user's to confirm), Argus's why and caution — no grade (`unverified` is always false) — and, on **This week**,
 `catalyst_facts`: Prometheus's live catalyst read (`catalystRead readFacts`). Mentor is told his target is the desk's
-price for the swing: build the take-profit at it (the user may move it), out by the read's date. A `book` ref (Swing /
+price for the swing: build the take-profit at it (the user may move it), out by the read's date. Since 2026-10-31
+([runup-reads.md](../design/runup-reads.md)) a run-up read may carry no target ("confirmed for the run-up, no target of
+his" — the take-profit is Mentor's to build with the user) and a call on the report: a HOLD THROUGH it replaces the
+board's "the setup must be out before it". A `book` ref (Swing /
 Long term → `houseBook bookSeed`) carries the coverage's facts — rating, target and date, upside, origin, what would
 break it — and its horizon from the target's own book; the target is a valuation, not a take-profit. Both land in
 `_buildSeedSection` ("ARGUS HANDED YOU THIS NAME" / "FROM THE HOUSE'S BOOK").

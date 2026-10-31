@@ -426,7 +426,8 @@ services/
   runup.tools.js            get_runup_history — the RUN-UP yardstick for a catalyst read (horizon-chains.md §3):
                             the stock's move into each of its last reports over the sessions left, vs SPY;
                             median / quartiles / up share, and THIS CYCLE (the usual full 10-session run-up and
-                            how much is already moved — runupSpent), ending on the JSON line copied as `runup`
+                            how much is already moved — runupSpent), the move THROUGH each report (throughStats,
+                            all and after beats — runup-reads.md §3), ending on the JSON line copied as `runup`
   agentUtils.js           shared tool handlers, makePromptLoader, makeToolHandler,
                           formatMoney/buildAccountLines, stripEmitTags, runtime glue.
                           cleanReply (every desk's reply, stripped from the shared ALL_EMIT_TAGS,
@@ -966,6 +967,10 @@ services/
                             5–30 day window ending the session before a report inside it; graded hit by the live
                             price inside the window, and past it by the window's own daily bars (hit / expired vs
                             SPY). One active read per symbol — the `one_active_read` partial unique index.
+                            A RUN-UP RULE name (`context.rule`; _ruleRead, runup-reads.md): confirmed on
+                            `run_up.worth`, target optional on an exit, pass `not_worth`; `through_report` hold
+                            (needs a target; window to the session after the report — holdValidUntil) or exit; a
+                            confirmed read with no target settles `closed` on its window vs SPY.
                             liveRead (a symbol's active read) + readFacts (it as one line) feed Mentor's week
                             hand-off. GET /api/hotlist/reads. markWindows (2026-10-27): every settled read AND pass
                             held to its window's last close vs SPY → `window_mark` — the scorecard's yardstick

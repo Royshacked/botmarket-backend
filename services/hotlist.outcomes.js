@@ -96,6 +96,13 @@ export function sessionsAfter(date, n) {
     return d
 }
 
+/** The last session (weekday) BEFORE `date` — a Monday report's is the Friday before. Pure; holidays are not known. */
+export function lastSessionBefore(date) {
+    let d = _addDays(date, -1)
+    while (!_isWeekday(d)) d = _addDays(d, -1)
+    return d
+}
+
 /** The last session a column's window covers, for a board of `day`. Pure. */
 export function windowEnd(day, column) {
     if (column === 'tomorrow') return sessionsAfter(day, 1)

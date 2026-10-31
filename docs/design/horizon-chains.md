@@ -51,6 +51,10 @@ merges cells: the latest board that graded the column.
 
 ### 3. The catalyst read — Prometheus's short-swing mode (backend)
 
+*(2026-10-31: on a run-up rule name the read now answers the rule's two questions — worth the run-up, hold or exit the
+report — with the target optional on an exit and no `already_ran` veto: [runup-reads.md](runup-reads.md). What
+follows still holds for an event read.)*
+
 A mode of the research desk (like the quick read: `prompts/analyst_mode_catalyst.md`), not coverage:
 
 - **Its own collection, `catalyst_reads`, NOT coverage.** Coverage is ONE document per symbol (a unique index): a 1-month

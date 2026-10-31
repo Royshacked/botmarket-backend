@@ -76,7 +76,7 @@ test('(a) worth it, no target: CONFIRMED — active, out before the report, no v
     assert.equal(r.pass_reason, null)
     assert.equal(r.target, null)
     assert.equal(r.exit_before, REPORT)
-    assert.equal(r.valid_until, '2026-11-08T21:00:00.000Z', 'the day before the report at 21:00Z — readValidUntil, as every exit')
+    assert.equal(r.valid_until, '2026-11-06T21:00:00.000Z', 'the close of the last SESSION before the Monday report — Friday, not Sunday')
     assert.deepEqual(r.through_report, { call: 'exit', why: null, report: REPORT })
     assert.deepEqual(r.run_up, { worth: true, why: 'beats with guidance raised' })
 })
@@ -120,7 +120,7 @@ test('(b) a HOLD with no target, or one too close, is kept as an exit and says s
         const r = read({ verdict: 'credible', run_up: { worth: true }, through_report: { call: 'hold' }, runup: LINE, ...(target ? { target } : {}) })
         assert.equal(r.status, 'active')
         assert.equal(r.exit_before, REPORT)
-        assert.equal(r.valid_until, '2026-11-08T21:00:00.000Z')
+        assert.equal(r.valid_until, '2026-11-06T21:00:00.000Z')
         assert.deepEqual(r.through_report, { call: 'exit', why: null, report: REPORT, dropped: 'no_target' })
     }
     // A pass never carries a dropped hold — nothing was confirmed to hold.
@@ -157,7 +157,7 @@ test('the record: closed reads are backed, the hit rate is over the targeted, ho
     assert.equal(rec.backed.targeted, 2)
     assert.equal(rec.backed.hit, 1)
     assert.equal(rec.backed.by_call.hold.n, 1)
-    assert.equal(rec.backed.by_call.exit.n, 2, 'a read from before the call is an exit')
+    assert.equal(rec.backed.by_call.exit.n, 1, 'an event read (no call) is in neither')
     assert.equal(rec.passes.by_reason.not_worth.n, 1)
     assert.equal(rec.open, 1)
 })
@@ -186,4 +186,22 @@ test('the opening asks a rule name the two questions, and when the trade opens',
     assert.match(o, /run-up rule listed it THIS WEEK, bought at the 2026-11-02 open/)
     assert.match(o, /\(a\) were its last reports good enough to go into the run-up, and \(b\) is the report itself worth holding through/)
     assert.match(o, /The run-up rule listed it/)
+})
+
+test('code review 2026-10-31: a weekend read, a verdict at odds with (a), no report date, a session in progress', async () => {
+    // Saturday 11-07 for a Monday 11-09 report: Friday's close has passed — no session left, nothing to confirm.
+    const sat = buildCatalystRead({ verdict: 'credible', run_up: { worth: true } }, { symbol: 'CEG', spot: 100, nowMs: Date.parse('2026-11-07T15:00:00Z'), context: CTX })
+    assert.deepEqual([sat.status, sat.pass_reason], ['pass', 'report_too_close'])
+    // worth:true beside a contradicted / priced-in verdict is not confirmed, and is stored as not worth it.
+    for (const verdict of ['contradicted', 'priced_in', 'unclear']) {
+        const r = read({ verdict, run_up: { worth: true, why: 'x' } })
+        assert.deepEqual([r.status, r.pass_reason, r.run_up], ['pass', 'not_worth', { why: 'x', worth: false }], verdict)
+    }
+    // No report date anywhere: not a run-up — a pass, never a 30-day confirmation.
+    const none = read({ verdict: 'credible', run_up: { worth: true } }, { ...CTX, exit_before: null })
+    assert.deepEqual([none.status, none.pass_reason], ['pass', 'no_report'])
+    // Today's bar (a session in progress) is no "after" close.
+    const b = bars('2026-10-01', 20, (i, d) => (d === '2026-10-15' ? 120 : 100))
+    assert.equal(throughStats({ reports: ['2026-10-14'], bars: b, today: '2026-10-15' }).n, 0)
+    assert.equal(throughStats({ reports: ['2026-10-14'], bars: b, today: '2026-10-16' }).median_pct, 20)
 })
