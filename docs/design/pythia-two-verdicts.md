@@ -118,3 +118,20 @@ assessment; every other industry gets `long_term` from the first sweep. `LEGACY_
   nothing; the four migrated industries were sent under their old verdict and are not sent again.
 - **The card** is `pythia_engine_stale` (botId `strategy`), plain text — the FE draws it with its fallback bubble.
 - **Migration**: `scripts/migrate-pythia-long-term.mjs` — run on axl_dev 2026-10-31 (4 split); prod after the deploy.
+
+## 7. The first monthly review (axl_dev, 2026-10-31)
+
+One due pass on week `pw_2026-10-27` (`runWeekly({ dueOnly: true })`): **133 assessed, 129 published, $1.65** (the
+week's total inside its $3 ceiling). Three refused and one returned no block. GNews hit its daily limit midway, so later
+turns had no news tool (they ran without it).
+
+- **Long term: 10 yes, 120 no, 33 not yet asked** (was 4 of 163). The yeses: Semiconductors, Interactive Media &
+  Services, Health Care Distributors, Financial Exchanges & Data, Broadline Retail, Distributors, Transaction & Payment
+  Processing, Managed Health Care, Systems Software, Regional Banks. Five are new this pass (Health Care Distributors,
+  Managed Health Care, Regional Banks, Broadline Retail, Distributors).
+- **The 33 not yet asked**: 29 the week assessed on 10-28, before the build. The due pass skips anything this week tried
+  within 7 days (`DUE_RETRY_DAYS`), so they come up in the next week's scan as `long_term_due`. The other 4 are this
+  pass's refusals.
+- **Near term after the pass**: 24 swing, 33 watch, 32 avoid, 74 no_case.
+- **The chain**: the house scan ran on 25 verdicts (swing and new long-term yeses) and queued 100 names to Argus and
+  Prometheus (two lists full), $0.02.
