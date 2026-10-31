@@ -71,6 +71,8 @@ try {
     const tab = await page.locator('.hot-horizons button').nth(0).textContent()
     check('This week lists the names Prometheus confirmed — no longer empty', shown.length > 0 && shown.join(' ') === confirmed.join(' '), `shown ${shown.join(' ')}`)
     check('the tab count is the list it opens on', new RegExp(`\\b${confirmed.length}\\b`).test(tab ?? ''), tab)
+    // Roy, 2026-10-31: "dont need run up names. and dont need the promotheus confirmed chip" — no view switch on This week.
+    check('no view switch on This week', await page.locator('.hot-status-filter[aria-label="Names"]').count() === 0)
     const cells = await page.evaluate(() => document.querySelector('.hot-panel .hot-table-wrap')?.textContent ?? '')
     check('a confirmed row with no target reads "run-up"', /run-up/.test(cells))
     check('no row says hold (every read is an exit)', !/\d{2}-\d{2} hold/.test(cells))
