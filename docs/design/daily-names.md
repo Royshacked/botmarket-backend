@@ -384,9 +384,10 @@ grades: they gate which names reach a column and order the board, and the outcom
 - **Simple for everyone** (Roy, 2026-10-31: "the user should see simple things"). Four tabs — This week · Swing ·
   Long term · Covered companies — and the table right under them; no explanation above the table for anyone, admins
   included. How each list is made, what the prices are and what the Target means are in the **Info column** only
-  (`HotlistInfo.jsx`). An admin keeps the view switch (Prometheus confirmed / Argus's names) as one row on Swing and
-  Long term (and on an Argus-era week); since 2026-10-31 the run-up week has NO switch (Roy: "dont need run up names. and
-  dont need the promotheus confirmed chip") — its list is what Prometheus confirmed;
+  (`HotlistInfo.jsx`). Since 2026-10-31 NO tab has a view switch, admins included (Roy: "dont need run up names. and
+  dont need the promotheus confirmed chip", then "the same for swing / long term / coverages"): This week is what
+  Prometheus confirmed, Swing and Long term the chain's survivors, Covered companies the whole book with the admin's
+  scorecard under it (only an Argus-era week, on a past day, keeps its Argus / screened views);
   the track records and Argus's read sit UNDER the table. The warnings (market gate shut, SPY's 200-day unchecked,
   targets not loaded) stay above it — they say why a list is thin today. (The 2026-10-29 cut hid the notes from users
   only.)
