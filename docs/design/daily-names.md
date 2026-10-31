@@ -379,6 +379,23 @@ grades: they gate which names reach a column and order the board, and the outcom
   until a header is clicked); filterable by status. Prices are as of each name's last checkpoint, **never live** — live quotes would cost
   the shared FMP key requests it lacks in session. **Boards** keeps the one-checkpoint view.
   Driven by `scripts/drive-hotlist-list.mjs` (21/21).
+- **Simple for everyone** (Roy, 2026-10-31: "the user should see simple things"). Four tabs — This week · Swing ·
+  Long term · Covered companies — and the table right under them; no explanation above the table for anyone, admins
+  included. How each list is made, what the prices are and what the Target means are in the **Info column** only
+  (`HotlistInfo.jsx`). An admin keeps the view switch (Prometheus confirmed / Argus's names / Run-up names) as one row;
+  the track records and Argus's read sit UNDER the table. The warnings (market gate shut, SPY's 200-day unchecked,
+  targets not loaded) stay above it — they say why a list is thin today. (The 2026-10-29 cut hid the notes from users
+  only.)
+- **A row's page** (Roy, 2026-10-31: "when clicking a row — cover the whole chatbox like the detail window"). A click
+  on a row replaces the tabs and the table with that name's page (`HotlistRowPage.jsx`): the row's numbers as tiles,
+  the daily chart, the read or thesis, and the hand-offs; the window is titled by the ticker and its header has
+  "‹ Back to the list" (same tab, same sort). The chart's Close hides the chart only. The ticker itself still opens
+  the chart alone. No more rows opening in place. Driven by `scripts/drive-hotlist-row-page.mjs` (desktop + phone).
+  Its code review (2026-10-31, all eight applied): a page opens at its top and Back returns to the list's scroll with
+  the keyboard on the row's ›; a phone's back gesture leaves the page, not the Hotlist (`useBackGesture`, shared with
+  DrawerShell — entries nest); a hand-off from a page leaves the way back TO the page (`returnTo.resume` →
+  `openPanel(id, resume)` / `takeResume`); the warnings show to users too; the book's Last says which close; the tiles
+  and the table's cells are one formatter (`listCells`, `bookCells`).
 - The user's preset (§4) filters it on open.
 - Lifetime: session/day names expire at the close, days names after ~3 sessions, week names after
   ~5–10.
