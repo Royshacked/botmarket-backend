@@ -1,6 +1,6 @@
 # Pythia — two verdicts per industry, and the weeks she never saw
 
-**Status: DESIGN 2026-10-31, branch `feat/pythia-two-verdicts` (cut from main). Not built.** Roy: "pythia - how come
+**Status: DESIGN 2026-10-31, decisions D1–D3 taken the same day (§4), branch `feat/pythia-two-verdicts` (cut from main). Not built.** Roy: "pythia - how come
 there are so little industries for long term" → "Industry can hold two verdicts and also - what about pythia didn't
 assess for 3 weeks".
 
@@ -45,12 +45,12 @@ nothing behind it) AND long term yes — the long-term book holds it, and the sw
 
 ### 2.1 Who gets a long-term call, and when
 
-- **Eligible**: an industry whose published structure is demand `growing` and economics `good` (15 today). The others
-  are `no` by code, with the reason ("demand in line with the universe") — no model call. Her structural answers can
-  already depart from the code grade with an argument (`industry_view`), so a case she makes there flows here.
-- **Reviewed**: monthly (`expires_at` = 30 days), and on every assessment of the industry the weekly scan makes anyway —
-  one turn answers both. A monthly sweep of the eligible ~15 costs about $0.20.
-- **Hype**: see decision D1.
+- **Every industry, monthly** (D2): all 163 get a long-term call from Pythia each month (`expires_at` = 30 days, about
+  $2 a month), and on every assessment the weekly scan makes anyway — one turn answers both. The measured structure
+  (demand growing, economics good) is her starting point, not a gate: she may argue a case outside it, and the argument
+  is stored beside the call (`override_reason`), as a structural answer that departs from its code grade is.
+- **Hype** (D1): a hype run does not deny the call. A yes carries `hype: true`, shown as "long term, but stretched", and
+  Argus / Atlas read it as a timing flag.
 
 ### 2.2 What reads it
 
@@ -83,20 +83,18 @@ assessment; every other industry gets `long_term` from the first sweep. `LEGACY_
 3. **The long-term sweep (§2.1) does not wait on the price run** — it reads the structure and the money, which have
    their own jobs — so the long-term book cannot go three weeks unreviewed again.
 
-## 4. Decisions for Roy
+## 4. Decisions (Roy, 2026-10-31)
 
-- **D1 — a hype run and long term.** Today a hype run denies `long_term`. Recommended: it no longer does — the call
-  stands and carries `hype: true`, shown as "long term, but stretched", and Argus / Atlas see it as a timing flag. The
-  alternative keeps the four conditions as they are.
-- **D2 — eligibility by code.** Recommended: only demand-growing + good-economics industries get a model call (15
-  today). The alternative asks Pythia about all 163 monthly (~$2/month) and lets her argue a case outside the structure.
-- **D3 — the stale-engine card** (§3.2): yes / no.
+- **D1 — a hype run and long term: flag it, do not deny it.** The call stands with `hype: true`.
+- **D2 — every industry, monthly.** All 163, not only the measured growing + good ones; she may argue a case outside
+  the structure, with the argument stored.
+- **D3 — the stale-engine card: yes** (§3.2).
 
 ## 5. Build order
 
 1. The artifact: `long_term` on the assessment, the parser and publish checks, the migration — tests.
 2. The prompt: the two answers in one turn; the eligibility gate.
-3. The monthly sweep + the stale-engine card (pythiaWeekly monitor).
+3. The monthly sweep of all 163 + the stale-engine card (pythiaWeekly monitor).
 4. The readers: houseIndustriesFor, houseScan, pythiaCalls, the tools.
 5. FE: two chips, the Long term filter.
 6. Live: one sweep on axl_dev; the chain on one long-term yes; a browser drive of the board.
