@@ -133,5 +133,5 @@ turns had no news tool (they ran without it).
   within 7 days (`DUE_RETRY_DAYS`), so they come up in the next week's scan as `long_term_due`. The other 4 are this
   pass's refusals.
 - **Near term after the pass**: 24 swing, 33 watch, 32 avoid, 74 no_case.
-- **The chain**: the house scan ran on 25 verdicts (swing and new long-term yeses) and queued 100 names to Argus and
-  Prometheus (two lists full), $0.02.
+- **The chain**: the house scan ran on 25 verdicts (swing and new long-term yeses) and queued 87 names to Argus and
+  Prometheus (two lists were full), $0.02. That brings the week to 100.
