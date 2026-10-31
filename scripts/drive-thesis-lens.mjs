@@ -6,6 +6,9 @@
 // the setup Talos would get has the thesis shape — the lens, a conditional entry at a level, the 1h / 4h rungs and a
 // strength condition Talos judges.
 //
+// And the trade chart (2026-10-31): once Generate lights, the trade is drawn on a chart in the thread, a turn tall — not
+// the chat's whole height — and it stays when the pane is hidden.
+//
 //   node scripts/drive-thesis-lens.mjs [baseUrl] [outDir]
 //
 // Against the Vite dev server (:5173) as the throwaway `ui-smoke` user, on a FRESH session. Real model spend: a few Mentor
@@ -17,7 +20,7 @@ import { chromium } from 'playwright'
 const BASE = process.argv[2] ?? 'http://localhost:5173'
 const OUT  = process.argv[3] ?? '.'
 const USER = { username: 'ui-smoke', fullname: 'UI Smoke', password: 'Sm0ke!Drive#29' }
-const MAX_TURNS = 5
+const MAX_TURNS = 6
 
 dns.setServers(['8.8.8.8', '1.1.1.1'])
 
@@ -96,7 +99,9 @@ try {
     await page.locator('.hot-panel').getByRole('button', { name: /^Swing/ }).click()
     await page.waitForSelector('.hot-panel tr.hot-row', { timeout: 60000 })
     const sym = await page.locator('.hot-panel tr.hot-row').first().getAttribute('data-symbol')
-    await page.getByRole('button', { name: `Show ${sym} details` }).click()
+    // A cell that is not the symbol opens the row's page (2026-10-31, drive-hotlist-row-page.mjs); Build with Mentor is on it.
+    await page.locator('.hot-panel tr.hot-row').first().locator('td').nth(3).click()
+    await page.waitForSelector('.hot-page', { timeout: 10000 })
     await shot(page, '01-row')
     await page.locator('.hot-panel').getByRole('button', { name: 'Build with Mentor' }).first().click()
     const opened = await waitIdle(page, 300000)
@@ -111,7 +116,7 @@ try {
     let n = 1
     await say(page, ANSWER)
     let state = (await sessionService.get({ sessionId: sid, userId }))?.agentState?.mentor
-    while (n < MAX_TURNS && !state?.draft?.scenarios?.[0]?.entry_legs?.[0]?.price) {
+    while (n < MAX_TURNS && !(state?.draft?.scenarios?.[0]?.entry_legs?.[0]?.price && state?.view?.readiness?.ready)) {
         await say(page, NUDGE)
         n++
         state = (await sessionService.get({ sessionId: sid, userId }))?.agentState?.mentor
@@ -132,6 +137,29 @@ try {
     const conds = [...(d.conditions ?? []), ...(sc.conditions ?? [])]
     check('a strength condition Talos judges', conds.some(c => c.mode === 'judgment' && /strength|strong/i.test(c.text ?? '')), JSON.stringify(conds.map(c => [c.mode, c.weight, c.text])))
     check('the wait the user gave is written as valid_until', !!d.valid_until, d.valid_until)
+
+    // ── 3. Generate lit → the trade on a chart in the thread, a turn tall ──
+    check('Generate is lit', !!state?.view?.readiness?.ready, JSON.stringify(state?.view?.readiness?.missing ?? null))
+    const chart = page.locator('.chat-timeline__thread .mentor-trade-chart')
+    await chart.waitFor({ timeout: 20000 }).catch(() => {})
+    check('the trade chart is in the chat thread', (await chart.count()) === 1)
+    if (await chart.count()) {
+        await page.waitForTimeout(3000)
+        await chart.scrollIntoViewIfNeeded()
+        const [box, body] = [await chart.boundingBox(), await page.locator('.chat-timeline__body').boundingBox()]
+        check('it is a turn tall, not the chat’s whole height (< 45%)', box && body && box.height < body.height * 0.45, `${Math.round(box?.height)} of ${Math.round(body?.height)}px`)
+        check('candles are drawn in it', (await chart.locator('canvas').count()) > 0)
+        await shot(page, '05-trade-chart')
+        await chart.getByRole('button', { name: 'Full chart' }).click()
+        await page.waitForSelector('.chat-chart-dock', { timeout: 10000 }).catch(() => {})
+        check('"Full chart" docks the chart', (await page.locator('.chat-chart-dock').count()) === 1)
+        await shot(page, '06-full-chart')
+        // The chart belongs to the conversation: hiding Mentor's work leaves it in the thread.
+        await page.getByRole('button', { name: /^Hide .*work/ }).click()
+        await page.waitForTimeout(1500)
+        check('hiding the pane leaves the chart in the thread', (await page.locator('.chat-timeline__thread .mentor-trade-chart').count()) === 1)
+        await shot(page, '07-pane-hidden')
+    }
 } catch (err) {
     console.error('DRIVE ERROR', err)
     check('the drive ran to the end', false, err.message)
