@@ -21,6 +21,13 @@
 export const TOOL_BUDGET_LANDING = 'The tool budget for this turn is spent — this is your last round, and no further tool call will be honoured. Answer now with what you already have: emit whatever structured block you were building as far as it is built, say plainly what you did not get to check, and say you will continue next turn.'
 
 /**
+ * An EMPTY REPLY after tools ran — the model read, then ended its round with no text and no call. On Luna (the
+ * OpenAI-compat loop) that was ~1 Mentor turn in 5 with tools from 2026-10-18 to 2026-11-01: the user saw their message
+ * and nothing under it. The loop answers it once with this, tools off, rather than handing the user a blank.
+ */
+export const EMPTY_REPLY_NUDGE = 'You ended that round without writing anything to the user. Write your reply to them now, from what you already read — no more tool calls.'
+
+/**
  * How many tool calls in ONE round actually run at once.
  *
  * A round used to be `Promise.all(uses.map(...))` in both providers: every call the model asked for,
