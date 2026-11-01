@@ -1,6 +1,6 @@
 # Mentor's two modes — risk-based, or the user's setup
 
-**STATUS: BUILT (2026-11-01), not live-driven.** Branch `feat/mentor-modes` (from main) in both repos. § Built at the end. Builds on the thesis lens
+**STATUS: BUILT + DRIVEN (2026-11-01), not pushed.** Branch `feat/mentor-modes` (from main) in both repos. § Built at the end. Builds on the thesis lens
 ([stock-playbook.md](stock-playbook.md)) and the build ledger ([mentor-flow-intent.md](mentor-flow-intent.md)); the desk
 contract is [../desks/mentor-talos.md](../desks/mentor-talos.md).
 
@@ -103,5 +103,10 @@ for on every turn. The cost: each mode keeps its own prompt cache (MENTOR_TOOLS 
 - **The Hotlist's This week catalyst read** still tells Mentor to build the take-profit at Prometheus's swing target
   (`_buildSeedSection`), while § The thesis lens takes the target from the chart. Older than this change, but every
   Hotlist build is now risk-based, so the two meet on every This week row. Roy's call.
-- **Not live-driven.** Needs the dev backend restarted, then a Hotlist build, a typed bare name, a typed setup, and a
-  switch each way.
+- **Driven 2026-11-01 — `scripts/drive-mentor-modes.mjs` 15/16** (Luna, axl_dev). The Hotlist hand-off carried no lens
+  and ran risk-based from the seed with no pattern tool; the user's own idea switched it to `discretionary` and the next
+  turn had the whole kit; a typed bare name was read as no setup (risk-based, no pattern tool); a typed setup was read
+  as the user's, Mentor recommended `discretionary`; "your way" switched it to `thesis` and the next turn ran on the
+  risk-based kit. The one FAIL: the bare-name turn came back EMPTY (`replyLength 0`) after eight tool calls, so no
+  worksheet and no lens claim — the mode itself was right. Not from this change: the same empty reply after a tool loop
+  is in the log on 2026-10-31 and through October. Open as its own defect.
