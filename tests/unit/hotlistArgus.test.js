@@ -125,11 +125,12 @@ test('Mentor is told the board\'s facts, the horizon, and that free range is not
     assert.match(text, /Argus's caution: Capex worries\./)
     assert.doesNotMatch(text, /UNVERIFIED/, 'no grade is handed on, so nothing is unverified (2026-10-24)')
     assert.match(text, /no entry, stop or target/)
-    // On a week name his target IS the target: no "no target" line beside it (code review 2026-10-24).
+    // On a week name Mentor finds the target on the chart; Prometheus's is context (Roy, 2026-11-01).
     const week = _buildSeedSection({ ticker: 'X', hotlist_facts: 'this week (2–10 days)', catalyst_facts: 'Prometheus (credible): target 54.20' })
-    assert.doesNotMatch(week, /stop or target/)
-    assert.match(week, /no entry, stop, and you build them with the user/)
-    assert.match(week, /His target, when he set one, is the desk's price for this swing/)
+    assert.match(week, /no entry, stop or target, and you build those with the user/)
+    assert.match(week, /His target, when he set one, is CONTEXT/)
+    assert.match(week, /never the take-profit: YOU find the target on the chart/)
+    assert.doesNotMatch(week, /build the take-profit at it/)
     assert.match(week, /unless he says HOLD THROUGH it/)
     assert.doesNotMatch(_buildSeedSection({ ticker: 'SPCX' }), /HOTLIST/, 'an ordinary hand-off is unchanged')
 })

@@ -121,9 +121,9 @@ Claude, which has barely run since Luna became the house model). DONE 2026-11-01
 - **A setup brought mid-build on the risk-based kit.** The read runs only while there is no lens, so a user who brings a
   setup in turn 4 is heard by Mentor (the prompt says switch) on the risk-based kit for that one turn; the next turn
   has the whole kit. Running the read on every risk-based turn would close it for a fraction of a cent a turn — not done.
-- **The Hotlist's This week catalyst read** still tells Mentor to build the take-profit at Prometheus's swing target
-  (`_buildSeedSection`), while § The thesis lens takes the target from the chart. Older than this change, but every
-  Hotlist build is now risk-based, so the two meet on every This week row. Roy's call.
+- ~~**The Hotlist's This week catalyst read** told Mentor to build the take-profit at Prometheus's swing target.~~
+  DECIDED 2026-11-01 (Roy: "when building with Mentor in this week — Mentor will find the target"): his target is
+  context, the take-profit is Mentor's from the chart (`_buildSeedSection`).
 - **Driven 2026-11-01 — `scripts/drive-mentor-modes.mjs` 15/16** (Luna, axl_dev). The Hotlist hand-off carried no lens
   and ran risk-based from the seed with no pattern tool; the user's own idea switched it to `discretionary` and the next
   turn had the whole kit; a typed bare name was read as no setup (risk-based, no pattern tool); a typed setup was read
