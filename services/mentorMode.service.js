@@ -80,16 +80,24 @@ export function _userText(messages, last = 3) {
         .join('\n---\n')
 }
 
-export function makeSetupReader({ once = callAnthropicOnce, record = recordUsage, model = CHEAP_MODEL } = {}) {
-    /** SETUP → 'user', NONE → 'thesis'; null when the read failed or said neither. */
-    return async function readSetup({ messages, userId = null }) {
+/** The read must not hold the turn: past this it is undecided, and the turn goes on with the whole kit. */
+export const READ_TIMEOUT_MS = 8000
+
+export function makeSetupReader({ once = callAnthropicOnce, record = recordUsage, model = CHEAP_MODEL, timeoutMs = READ_TIMEOUT_MS } = {}) {
+    /** SETUP → 'user', NONE → 'thesis'; null when the read failed, timed out, was aborted or said neither. */
+    return async function readSetup({ messages, userId = null, signal = null }) {
         const user = _userText(messages)
-        if (!user) return null
+        if (!user || signal?.aborted) return null
+        let timer
         try {
-            const out = await once({
+            const call = once({
                 model, systemPrompt: SYSTEM, user, maxTokens: 8,
                 onUsage: userId ? (usage, m) => { record(userId, m, usage, 'mentor').catch(() => {}) } : undefined,
             })
+            const late = new Promise(resolve => { timer = setTimeout(() => resolve(TIMED_OUT), timeoutMs) })
+            const out = await Promise.race([call, late])
+            if (out === TIMED_OUT) { logger.warn(LOG, `setup read timed out after ${timeoutMs}ms (the desk decides from the prompt)`); return null }
+            if (signal?.aborted) return null
             const word = String(out ?? '').trim().toUpperCase()
             if (word.startsWith('SETUP')) return MODE_USER
             if (word.startsWith('NONE'))  return MODE_THESIS
@@ -98,9 +106,13 @@ export function makeSetupReader({ once = callAnthropicOnce, record = recordUsage
         } catch (err) {
             logger.warn(LOG, 'setup read failed (the desk decides from the prompt)', err.message)
             return null
+        } finally {
+            clearTimeout(timer)
         }
     }
 }
+
+const TIMED_OUT = Symbol('timed out')
 
 export const readSetup = makeSetupReader()
 
@@ -111,9 +123,18 @@ export const readSetup = makeSetupReader()
  *   seed   — a hand-off (the Hotlist, Argus) carries no setup of the user's: risk-based.
  *   read   — a typed build with no lens yet: the cheap read on the user's words.
  */
-export async function resolveMode({ name = null, seed = null, messages = [], userId = null, read = readSetup } = {}) {
+export async function resolveMode({ name = null, seed = null, messages = [], userId = null, signal = null, read = readSetup } = {}) {
     const lens = lensOf(name)
     if (lens) return { mode: modeOfLens(lens), source: 'ledger' }
     if (seed?.ticker) return { mode: MODE_THESIS, source: 'seed' }
-    return { mode: await read({ messages, userId }), source: 'read' }
+    return { mode: await read({ messages, userId, signal }), source: 'read' }
+}
+
+/**
+ * The handlers the kit allows. Off the LIST is not enough on its own: a model that calls an undeclared tool would still
+ * have it run by the handler map, so the risk-based kit drops the handlers too — the call comes back "no handler". PURE.
+ */
+export function handlersFor(mode, handlers) {
+    if (mode !== MODE_THESIS) return handlers
+    return Object.fromEntries(Object.entries(handlers).filter(([name]) => !THESIS_DROPPED.has(name)))
 }

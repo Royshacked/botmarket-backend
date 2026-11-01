@@ -256,8 +256,11 @@ export function unsettle(name, stageKey) {
  * the reverse — except the user's own SIZE, which was their risk answer, not a level, and is held again rather than
  * asked twice.
  *
- * The lens lands where it stood: settled → settled (and claimed, so a later re-settle is a no-op, not a refusal),
- * only claimed → claimed. The same lens again is a no-op. PURE.
+ * WHO AGREED decides where the lens lands. A switch to `thesis` is the user asking for Mentor's way — their words ARE
+ * the agreement, so a settled lens stays settled (and is claimed too, so a later re-settle is a no-op, not a refusal). A
+ * switch to a lens of the user's setup is one Mentor RECOMMENDS from their words: it is claimed and the settlement is
+ * taken back, so the opening waits on their yes to it — never settled on their behalf. The same lens again is a no-op.
+ * PURE.
  */
 export function switchLens(name, lens, source = 'user') {
     const from = name?.settled?.lens ?? name?.claimed?.lens?.value ?? null
@@ -268,10 +271,11 @@ export function switchLens(name, lens, source = 'user') {
     let next = r.name
     if (size && typeof size === 'object') next = claim(next, { size }, 'user').name
     const src = CLAIM_SOURCES.includes(source) ? source : 'user'
+    const { lens: _was, ...withoutLens } = next.settled
     next = {
         ...next,
-        claimed: { ...next.claimed, lens: { value: lens, source: src } },
-        settled: 'lens' in next.settled ? { ...next.settled, lens } : next.settled,
+        claimed: { ...next.claimed, lens: { value: lens, source: lens === 'thesis' ? src : 'mentor' } },
+        settled: lens === 'thesis' && 'lens' in next.settled ? { ...next.settled, lens } : withoutLens,
     }
     return { name: next, cleared: r.cleared, switched: true }
 }

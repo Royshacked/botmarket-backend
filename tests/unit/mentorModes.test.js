@@ -1,14 +1,14 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-    mentorAgentService, MENTOR_TOOLS, _buildModeSection, _withoutLevels,
+    mentorAgentService, MENTOR_TOOLS, _buildModeSection, _forNewLens,
 } from '../../services/agents/mentor.agent.service.js'
 import { TRADING_TOOLS } from '../../services/tools/trading.tools.js'
 import {
-    kitFor, lensOf, resolveMode, makeSetupReader, _userText, THESIS_DROPPED, MODE_THESIS, MODE_USER,
+    kitFor, handlersFor, lensOf, resolveMode, makeSetupReader, _userText, THESIS_DROPPED, MODE_THESIS, MODE_USER,
 } from '../../services/mentorMode.service.js'
 import {
-    emptyBuild, upsertName, activeName, putName, switchLens, applyBuildOps, sanitizeBuildOps,
+    emptyBuild, upsertName, activeName, nameFor, putName, switchLens, applyBuildOps, sanitizeBuildOps,
 } from '../../services/mentorBuild.util.js'
 import { normalizeSetup } from '../../services/setup.schema.js'
 
@@ -38,6 +38,12 @@ test('the risk-based kit keeps ONE tools-cache breakpoint, on the last shared to
     assert.deepEqual(stamped, ['get_market_hours'])
     assert.ok(MENTOR_TOOLS.find(t => t.name === 'get_derivatives_context').cache_control, 'the full kit keeps its breakpoint')
     assert.equal(MENTOR_TOOLS.filter(t => t.cache_control).length, 1)
+})
+
+test('the risk-based kit drops the HANDLERS too — a call to an undeclared tool cannot run (CR #8)', () => {
+    const handlers = { get_quote: () => 'q', get_orderblocks: () => 'ob', get_key_levels: () => 'kl' }
+    assert.deepEqual(Object.keys(handlersFor(MODE_THESIS, handlers)), ['get_quote'])
+    assert.equal(handlersFor(MODE_USER, handlers), handlers)
 })
 
 test("the user's-setup kit is the whole kit, untouched", () => {
@@ -78,6 +84,16 @@ test('the setup read: SETUP → the user\'s, NONE → risk-based, anything else 
     assert.equal(called, false, 'no user words, no call')
 })
 
+test('the read never holds the turn: a slow read times out undecided, an aborted turn reads nothing (CR #7)', async () => {
+    const messages = [{ role: 'user', content: 'build NVDA' }]
+    const slow = makeSetupReader({ once: () => new Promise(r => setTimeout(() => r('NONE'), 200)), timeoutMs: 20 })
+    assert.equal(await slow({ messages }), null)
+    let called = false
+    const ac = new AbortController(); ac.abort()
+    assert.equal(await makeSetupReader({ once: async () => { called = true; return 'NONE' } })({ messages, signal: ac.signal }), null)
+    assert.equal(called, false)
+})
+
 test('the read sees the last three user messages, text blocks included', () => {
     const messages = [
         { role: 'user', content: 'one' }, { role: 'assistant', content: 'x' }, { role: 'user', content: 'two' },
@@ -89,6 +105,7 @@ test('the read sees the last three user messages, text blocks included', () => {
 test('the turn context says the mode, and how to switch out of it', () => {
     assert.match(_buildModeSection(MODE_THESIS), /RISK-BASED/)
     assert.match(_buildModeSection(MODE_THESIS), /"switch_lens"/)
+    assert.match(_buildModeSection(MODE_THESIS), /Do NOT draw the new levels this turn/, 'the switch turn still runs on the risk-based kit (CR #2)')
     assert.match(_buildModeSection(MODE_USER), /THE USER'S SETUP/)
     assert.match(_buildModeSection(MODE_USER), /"switch_lens":"thesis"/)
     assert.match(_buildModeSection(null), /UNDECIDED/)
@@ -112,14 +129,22 @@ const settledBuild = () => {
     })
 }
 
-test('a switch keeps the direction and the horizon, swaps the lens, reopens the trades and holds the size', () => {
+test('a switch to their setup keeps the direction and the horizon, RECOMMENDS the lens, reopens the trades and holds the size', () => {
     const { name, cleared, switched } = switchLens(activeName(settledBuild()), 'smc')
     assert.equal(switched, true)
-    assert.deepEqual(name.settled, { direction: 'long', horizon: 'swing', lens: 'smc' })
-    assert.equal(name.claimed.lens.value, 'smc', 'claimed too, so a later re-settle is a no-op, not a refusal')
+    assert.deepEqual(name.settled, { direction: 'long', horizon: 'swing' }, 'the lens waits on their yes (CR #1)')
+    assert.deepEqual(name.claimed.lens, { value: 'smc', source: 'mentor' }, 'Mentor recommended it — the user did not choose it')
     assert.deepEqual(name.claimed.size, { value: { unit: 'risk_cash', value: 500 }, source: 'user' })
     assert.ok(!('spans' in name.claimed) && !('entries' in name.claimed))
     assert.deepEqual(cleared.sort(), ['entries', 'size', 'spans'])
+})
+
+test('a switch to thesis is their yes — the lens stays settled', () => {
+    const b = settledBuild()
+    const smc = putName(b, { ...activeName(b), settled: { ...activeName(b).settled, lens: 'smc' }, claimed: { ...activeName(b).claimed, lens: { value: 'smc', source: 'user' } } })
+    const { name } = switchLens(activeName(smc), 'thesis')
+    assert.equal(name.settled.lens, 'thesis')
+    assert.deepEqual(name.claimed.lens, { value: 'thesis', source: 'user' })
 })
 
 test('the same lens again is no switch', () => {
@@ -146,9 +171,22 @@ const PLAN = {
     scenarios: [{ id: 's1', entry_legs: [{ price: 238 }], stop_legs: [{ price: 230 }], target_legs: [{ price: 260 }] }],
 }
 
+test('a switch takes the old mode\'s pace, conditions and rejects with it, and the new lens gets its own pace (CR #3 #4)', () => {
+    const plan = normalizeSetup({ ...PLAN, trade_mode: 'discretionary', pace_rungs: ['1day', '2hr'],
+        conditions: [{ text: 'holds VWAP on the 15m', mode: 'judgment' }], alternatives: [{ archetype: 'pullback', why_not: 'the old reject' }] })
+    assert.ok(plan.conditions.length && plan.alternatives.length, 'the fixture carries them')
+    const out = _forNewLens(plan, 'thesis')
+    assert.deepEqual(out.pace_rungs.slice().sort(), ['1hr', '4hr'], 'thesis reads on 1h / 4h, not the old ladder')
+    assert.deepEqual(out.conditions, [])
+    assert.deepEqual(out.alternatives, [])
+    const kept = _forNewLens(plan, 'thesis', { scenarios: plan.scenarios, conditions: plan.conditions })
+    assert.equal(kept.scenarios.length, 1, 'what this turn drew again is kept')
+    assert.equal(kept.conditions.length, 1)
+})
+
 test('the levels go with the old mode, and do not come back from the flat projection', () => {
     const plan = normalizeSetup(PLAN)
-    const out = _withoutLevels(plan, 'smc')
+    const out = _forNewLens(plan, 'smc')
     assert.equal(out.trade_mode, 'smc')
     assert.deepEqual(out.scenarios, [])
     // A plan with no scenarios round-trips to one EMPTY implicit scenario (setup.schema's flat shape) — no level in it.
@@ -183,7 +221,8 @@ test('a switch turn with no worksheet: the plan carries the new lens and no old 
     assert.ok(!tools.includes('get_orderblocks'), 'the switch turn itself ran on the old mode\'s kit')
     assert.equal(out.setup.trade_mode, 'smc')
     assert.deepEqual(out.setup.scenarios, [])
-    assert.equal(activeName(out.build).settled.lens, 'smc')
+    assert.equal(activeName(out.build).claimed.lens.value, 'smc')
+    assert.ok(!('lens' in activeName(out.build).settled), 'their setup\'s lens waits on their yes')
     assert.ok(!('spans' in activeName(out.build).settled))
     assert.ok(!out.build.refused.some(r => r.field === 'lens'), 'the switch is not reported as a conflict')
 })
@@ -197,4 +236,33 @@ test('a switch turn that draws new levels keeps them', async () => {
     })
     assert.equal(out.setup.trade_mode, 'smc')
     assert.equal(out.setup.scenarios[0].entry_legs[0].price, 241)
+})
+
+test('a hand-off claims thesis on the ledger on turn one, even when the turn drew no worksheet (CR #6)', async () => {
+    const { out } = await turn({ seed: { ticker: 'MTG' }, read: never, raw: 'Reading MTG.' })
+    assert.equal(activeName(out.build).asset, 'MTG')
+    assert.equal(lensOf(activeName(out.build)), 'thesis')
+    assert.equal(out.setup.trade_mode, 'thesis', 'the stub worksheet carries the ledger\'s lens, not the schema default')
+})
+
+test('a risk-based turn runs with the pattern handlers gone (CR #8)', async () => {
+    let handlers = null
+    await mentorAgentService.chatStream({
+        messages: [{ role: 'user', content: 'hi' }], seed: { ticker: 'MTG' },
+        _run: async (args) => { handlers = args.toolHandlers; return '' }, _readSetup: never, _venueSection: async () => '',
+    })
+    assert.ok(!('get_orderblocks' in handlers) && 'get_price_structure' in handlers)
+})
+
+test('a switch is judged against the name it writes to, not the one active before the turn (CR #9)', async () => {
+    // NVDA is on smc; the turn moves to AMD (no lens yet) and switches it to smc — a real switch for AMD.
+    const b = putName(upsertName(settledBuild(), 'AMD'), { asset: 'AMD', settled: {}, claimed: {} })
+    const withNvdaSmc = putName({ ...b, active: 'NVDA' }, { ...nameFor(b, 'NVDA'), settled: { ...nameFor(b, 'NVDA').settled, lens: 'smc' } })
+    const draft = { ...normalizeSetup(PLAN), build: withNvdaSmc }
+    const amd = { ...PLAN, asset: 'AMD' }
+    const { out } = await turn({
+        raw: `On AMD.\n<build>{"switch_lens":"smc","source":"user","asset":"AMD"}</build>\n<setup>${JSON.stringify(amd)}</setup>`,
+        chatState: { active_asset: 'NVDA', draft, coverage: [] },
+    })
+    assert.equal(nameFor(out.build, 'AMD').claimed.lens.value, 'smc')
 })

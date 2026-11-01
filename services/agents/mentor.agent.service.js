@@ -20,9 +20,9 @@ import {
     normalizeBuild, sanitizeBuildOps, applyBuildOps, claimsFromDraft, settledConflicts,
     normalizeSpans, spanIds, normalizeEntries, resolveEntryTrades, entryIds, entryProblems, fieldsClearedBy, alternativesFromSpans,
     recordReads, ALWAYS_REFETCH, sanitizeUserOps, applyUserOps, gateView, delegationPicks, heldAnswers,
-    activeName, stageOf, firstUnsettled, isWaived, STAGES,
+    activeName, nameFor, stageOf, firstUnsettled, isWaived, STAGES,
 } from '../mentorBuild.util.js'
-import { resolveMode, readSetup, kitFor, lensOf as lensOfName, MODE_THESIS, MODE_USER } from '../mentorMode.service.js'
+import { resolveMode, readSetup, kitFor, handlersFor, lensOf as lensOfName, MODE_THESIS, MODE_USER } from '../mentorMode.service.js'
 import { logger } from '../logger.service.js'
 
 // Mentor — the trade ASSISTANT (Pipeline F). A conversation → a draft `setup` entity.
@@ -195,8 +195,15 @@ async function chatStream({
     // THE MODE, BEFORE THE TURN (docs/design/mentor-modes.md): the kit is picked before the model reads a word, so the
     // mode comes from the ledger's lens, a seed (no setup of the user's — risk-based), or one cheap read of a typed
     // first message. Undecided (the read failed) = the whole kit, and the prompt's rule decides.
-    const { mode, source: modeSource } = await resolveMode({ name: activeName(incoming.build), seed, messages, userId, read: _readSetup })
+    // The read and the venue are independent I/O, so they run together: the read must not delay the first token by
+    // a round trip of its own.
+    const [{ mode, source: modeSource }, venue] = await Promise.all([
+        resolveMode({ name: activeName(incoming.build), seed, messages, userId, signal, read: _readSetup }),
+        _venueSection(userId),
+    ])
     const tools = kitFor(mode, MENTOR_TOOLS, TRADING_TOOLS.length)
+    // The kit is enforced on the HANDLERS too: a call to an undeclared tool comes back "no handler" instead of running.
+    const kitHandlers = handlersFor(mode, toolHandlers)
 
     const systemPrompt  = _buildSystemPrompt(turnState, accounts, mainAccountId, audience, seed)
     // The venue (mode / broker / accounts / free cash) rides the last USER message rather than
@@ -204,7 +211,7 @@ async function chatStream({
     // would sit ahead of the whole conversation in the cache prefix. See buildVenueSection.
     const builtMessages = attachTurnContext(
         attachTurnContext(normalizeMessages(messages, MAX_MESSAGES), _buildTurnContext(turnState, clientTime, incoming.settled, { delegated: incoming.delegated, hasAccount, mode })),
-        await _venueSection(userId))
+        venue)
 
     // Coverage is CUMULATIVE across the conversation: the model re-states everything it has read,
     // but a turn that forgets a dimension must not un-read it. Union with the prior state.
@@ -227,7 +234,7 @@ async function chatStream({
     })
 
     const raw = await _run({
-        log: LOG, requestedModel, userId, messages: builtMessages, systemPrompt, tools, toolHandlers,
+        log: LOG, requestedModel, userId, messages: builtMessages, systemPrompt, tools, toolHandlers: kitHandlers,
         reasoningEffort, signal, onToken, tagCaptures, onToolStart, onReasoning, onChart,
         meta: { asset: chatState?.active_asset || '', accounts: accounts?.length ?? 0 },
     })
@@ -273,8 +280,12 @@ async function chatStream({
     // Answered from the OPS, before they are applied, because the content it drops is also what the
     // claims below are derived from.
     const ops      = sanitizeBuildOps(buildOps) ?? {}
+    // THE NAME THIS TURN WRITES TO — the tag's, else the worksheet's, else the one on the table, else a hand-off's
+    // ticker (so the seed's lens has somewhere to land on a turn that drew no worksheet). applyBuildOps applies the
+    // ops to this name, so the switch is judged against THIS name's lens, not whichever was active before the turn.
+    const asset = ops.asset || normalized?.asset || chatState?.active_asset || (modeSource === 'seed' ? seed.ticker : '')
     // A MODE SWITCH reopens the trades the same way (mentorBuild.switchLens) — only when it changes the lens.
-    const switching = Boolean(ops.switchLens) && ops.switchLens !== lensOfName(activeName(incoming.build))
+    const switching = Boolean(ops.switchLens) && ops.switchLens !== lensOfName(nameFor(incoming.build, asset))
     const reopened = new Set([...fieldsClearedBy(ops.unsettle), ...(switching ? fieldsClearedBy('spans') : [])])
 
     // The gates' content belongs to ONE name, so it only carries forward while the build is still
@@ -303,11 +314,14 @@ async function chatStream({
     // The size, whichever way it came: the tag or the tool. One op either way, applied once.
     if (toolSize && !ops.size) ops.size = toolSize
 
-    const asset      = normalized?.asset || chatState?.active_asset || ''
     const priorBuild = recordReads(incoming.build, readThisTurn)
     const first = applyBuildOps(priorBuild, {
         asset,
         derived: {
+            // A HAND-OFF IS RISK-BASED BY DEFINITION, and the seed rides the first request only: claimed here, the lens
+            // is on the ledger from turn one, so turn two never asks the cheap read about Argus's words as if they were
+            // the user's setup. A lens the worksheet STATES (below) replaces it in this same object.
+            ...(modeSource === 'seed' ? { lens: MODE_THESIS } : {}),
             // `lensStated` guards the one field with a non-null schema default: normalizeSetup
             // fills `trade_mode` with 'discretionary', and claiming that would put a lens nobody
             // proposed into the opening turn's settlement.
@@ -327,11 +341,7 @@ async function chatStream({
     // THE SWITCH REDRAWS THE WORKSHEET. The new lens goes onto the plan (or settledConflicts would "restore" it and
     // report a refusal for the switch itself), and the old mode's levels go unless this turn drew new ones — a thesis
     // stop left standing under a breakout idea is the screen and the ledger disagreeing.
-    if (first.switched && normalized) {
-        Object.assign(normalized, Array.isArray(setup?.scenarios)
-            ? { trade_mode: ops.switchLens }
-            : _withoutLevels(normalized, ops.switchLens))
-    }
+    if (first.switched && normalized) Object.assign(normalized, _forNewLens(normalized, ops.switchLens, setup))
 
     // An entry the server could not key to any trade on the table is DROPPED — so the model is told,
     // by name, rather than left to wonder why the gate it just drew is empty on the user's screen.
@@ -366,11 +376,13 @@ async function chatStream({
     const hasLedger  = Boolean(ledgerName && (Object.keys(ledgerName.claimed).length || Object.keys(ledgerName.settled).length))
     const carrier = normalized
         ?? (chatState?.draft ? normalizeSetup(chatState.draft) : null)
-        ?? (hasLedger ? normalizeSetup({ asset: ledgerName.asset }) : null)
+        // The stub carries the ledger's lens: left out, the schema's `discretionary` default would sit on a hand-off's
+        // worksheet whose ledger says thesis.
+        ?? (hasLedger ? normalizeSetup({ asset: ledgerName.asset, ...(lensOfName(ledgerName) ? { trade_mode: lensOfName(ledgerName) } : {}) }) : null)
     if (carrier) {
         carrier.build = build
         // A switch on a turn that emitted no worksheet: the carried plan still holds the old mode's lens and levels.
-        if (first.switched && !normalized) Object.assign(carrier, _withoutLevels(carrier, ops.switchLens))
+        if (first.switched && !normalized) Object.assign(carrier, _forNewLens(carrier, ops.switchLens))
         if (spans) {
             carrier.spans = spans
             // THE REJECTS ARE AUTHORED ONCE, at the gate. `alternatives[]` used to be a second
@@ -695,7 +707,8 @@ export function _buildModeSection(mode) {
     if (mode === MODE_THESIS) {
         return '\n\nMODE: RISK-BASED (the `thesis` lens) — the user brought no setup of their own. The lens is `thesis`; claim it on your worksheet.'
             + ' The pattern and indicator tools are NOT in your kit (§ Two modes). If the user brings a setup of their own — a condition, a level, a pattern —'
-            + ' switch: <build>{"switch_lens":"<the lens you recommend>","source":"user"}</build>, and say in one line that the trades are rebuilt under it.'
+            + ' switch: <build>{"switch_lens":"<the lens you recommend>","source":"user"}</build>, name that lens and ask them to agree to it.'
+            + ' Do NOT draw the new levels this turn — your kit cannot read their setup yet; the next turn has the whole kit.'
     }
     if (mode === MODE_USER) {
         return '\n\nMODE: THE USER\'S SETUP — they brought their own. Build it in their terms (§ Two modes); the lens is yours to recommend from their words'
@@ -1025,13 +1038,26 @@ export function _sizingReport(plan, size, { balance = null, hasAccount = false, 
 }
 
 /**
- * The plan under a NEW lens with the old mode's levels gone — the scenarios AND the flat execution projection, or
- * normalizeSetup would rebuild an implicit scenario from the projection on the next round trip. What is not a level
- * (the asset, the direction, the horizon, the challenge record) is kept. PURE.
+ * The plan under a NEW lens, with everything the OLD mode authored gone unless this turn's worksheet (`emitted`) drew it
+ * again:
+ *  - the levels — the scenarios AND the flat execution projection, or normalizeSetup would rebuild an implicit scenario
+ *    from the projection on the next round trip;
+ *  - the pace — the old lens's rungs would keep Talos reading a thesis setup on a discretionary ladder (the NXST defect
+ *    THESIS_PACE exists for); emptied, normalizeSetup gives the new lens its own;
+ *  - the setup-wide conditions and their read mode — the discarded idea's "holds VWAP on the 15m" must not gate the
+ *    new trades;
+ *  - the rejects — the old gate's "ways not taken", which would also block the new gate's from being written.
+ * What is not the mode's (the asset, the direction, the horizon, the challenge record) is kept. PURE.
  */
-export function _withoutLevels(plan, lens) {
-    const fresh = normalizeSetup({ ...plan, trade_mode: lens, scenarios: [], entry_legs: null, stop_legs: null, target_legs: null, validity: null })
-    return fresh ? { ...plan, ...fresh, challenges: plan.challenges } : { ...plan, trade_mode: lens }
+export function _forNewLens(plan, lens, emitted = null) {
+    const said  = (k) => Boolean(emitted) && Object.prototype.hasOwnProperty.call(emitted, k)
+    const reset = { trade_mode: lens }
+    if (!said('scenarios')) Object.assign(reset, { scenarios: [], entry_legs: null, stop_legs: null, target_legs: null, validity: null })
+    for (const [key, empty] of [['pace_rungs', []], ['conditions', []], ['read_mode', null], ['alternatives', []]]) {
+        if (!said(key)) reset[key] = empty
+    }
+    const fresh = normalizeSetup({ ...plan, ...reset })
+    return fresh ? { ...plan, ...fresh, challenges: plan.challenges } : { ...plan, ...reset }
 }
 
 /** Ledger values are short by construction; a list is summarised rather than spelled out. */

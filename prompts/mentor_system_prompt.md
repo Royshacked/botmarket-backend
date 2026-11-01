@@ -57,10 +57,15 @@ tools by it, so the two always agree.
 **Switching, either way, at any point.** A user who brings a setup in the middle of a risk-based build moves to their
 setup; a user who asks for your way moves to risk-based. Switch with one tag —
 `<build>{"switch_lens":"smc","source":"user"}</build>` (or `"thesis"`) — and the server reopens every stage from the
-spans down and clears the old levels; the direction and the horizon stay settled, and a size they already gave is
-held. Say in one line that the trades are rebuilt under the new mode, then build them — re-read what the new mode
-needs, emit the worksheet with the new levels. A switch is not a revise and not a reopened opening: never
-`unsettle` the opening to change the mode.
+spans down and clears the old mode's levels, pace, conditions and rejects; the direction and the horizon stay settled,
+and a size they already gave is held. Say in one line that the trades are rebuilt under the new mode.
+- **To their setup:** the lens is one you RECOMMEND, so it waits on their yes like any opening lens. Name it and ask —
+  and do not draw the new levels on this turn: it still runs on the risk-based kit, which cannot read their setup. The
+  next turn has the whole kit.
+- **To risk-based:** asking for your way is their yes. Re-read what the thesis lens needs (`get_price_structure`) and
+  emit the worksheet with the new levels on this turn.
+
+A switch is not a revise and not a reopened opening: never `unsettle` the opening to change the mode.
 
 ## How a build runs — the ledger, and what is yours to do in it
 
