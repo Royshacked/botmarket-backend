@@ -689,6 +689,12 @@ services/
                               sizePlan lays the size onto every leg (ONE implementation for the
                               size_position tool and the post-turn re-derivation); cashFit says
                               whether the position fits the deployable cash (a remark, never a cap).
+    mentorMode.service.js     MENTOR'S TWO MODES (2026-11-01, docs/design/mentor-modes.md): risk-based
+                              (`thesis`) when the user brought no setup, the user's setup when they
+                              did. The mode IS the ledger's lens; resolveMode = lens → seed (risk-based)
+                              → one Haiku read of a typed first message (makeSetupReader, SETUP/NONE;
+                              a failure = undecided → the whole kit). kitFor drops THESIS_DROPPED (the
+                              pattern + indicator tools) and moves the tools-cache breakpoint.
     mentorBuild.util.js       THE BUILD LEDGER — Mentor's flow as server state (2026-09-28,
                               docs/design/mentor-flow-intent.md). PURE: no clock, no I/O, nothing
                               mutated. STAGES opening(direction·horizon·lens) → spans → entries →
@@ -1624,7 +1630,7 @@ docs/                       docs/README.md is THE index. architecture/ (how it i
 | New env var | one getter in `services/config.js`, reading through `_raw` / `_str` / `_num` / `_bool` — the known-key set is derived from the readers (`knownKeys()`), and `config.test` fails on a getter that reads `process.env` directly |
 | New Axl tool | APPEND to `TOOLS` in `axl.agent.service.js` (never insert — the snapshot compares by index and the prompt cache keys off the array prefix) + append the built entry to the `axl` array in `tests/fixtures/agentTools.snapshot.json` in the same commit |
 | New field Mentor's surface reads | put it on Mentor's working state in the session (`services/desks/mentor.desk.js` — `nextState`, or `done` for what a turn hands the client) — the side pane reads `agentState.mentor`, never a reply. Then drive it: `node scripts/drive-mentor-surface.mjs` |
-| New Mentor tool | its own `toolsFor({...})` block in `MENTOR_TOOLS` (`mentor.agent.service.js`) AFTER the spread `TRADING_TOOLS` kit and BEFORE `consult` (contractually last) + its handler in `chatStream`'s `toolHandlers` with an injectable seam + rebuild the `mentor` row of the snapshot in live order; `promptToolDrift.test` then checks the prompt only names tools the kit has |
+| New Mentor tool | its own `toolsFor({...})` block in `MENTOR_TOOLS` (`mentor.agent.service.js`) AFTER the spread `TRADING_TOOLS` kit and BEFORE `consult` (contractually last) + its handler in `chatStream`'s `toolHandlers` with an injectable seam + rebuild the `mentor` row of the snapshot in live order + decide whether the RISK-BASED kit keeps it (`THESIS_DROPPED`, `mentorMode.service.js`); `promptToolDrift.test` then checks the prompt only names tools the kit has |
 | New agent tool that is a FACT about the venue/instrument | ride it on `get_quote` (`makeQuoteHandler`) as well as giving it a tool — a desk cannot then be unaware of it |
 | New notification card | build it through `postCard` (notifyCard.js), give it `actions` only if it's actionable, add a bubble + a `msg.type` branch in the FE `ChatWindow.jsx`; a recurring fan-out dedupes via `listCardRecipientsSince`. It reaches the user's devices as a push on its own — nothing to add |
 | New admin-only desk (or route) | `requireAdmin` on the router (router-wide when the whole desk is admin's), `adminOnly: true` on its `DESKS` entry + any Floor/Radar surface (frontend `agentMeta.jsx`, `FloorLists.jsx`), its bot id in `ADMIN_BOT_IDS` on BOTH sides if it has a feed, its notifier narrowed to `listAdminUserIds` + `visibility: 'admin'`, the desk in Axl's `ADMIN_DESKS` + a line in `buildRoleSection`, and a row in `docs/desks/roles-and-sourcing.md`. `adminGate.test.js` pins the router |

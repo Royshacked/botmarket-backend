@@ -95,18 +95,19 @@ test('the spine no longer carries the hand-off section', () => {
     assert.doesNotMatch(SPINE, /BUILD HAND-OFF MODE/)
     assert.doesNotMatch(SPINE, /VALIDATE-A-NAME/)
     assert.doesNotMatch(SPINE, /kairos_pick/)
-    // …but it keeps what BOTH modes use: the screening spine and the shared lens vocabulary.
+    // …but it keeps what BOTH modes use: the screening spine. No build lens — Argus stopped recommending one
+    // (2026-11-01, docs/design/mentor-modes.md).
     assert.match(SPINE, /HOW YOU SCAN — the professional spine/)
-    assert.match(SPINE, /Set `recommended_mode`/)
+    assert.doesNotMatch(SPINE, /recommended_mode/)
 })
 
 test('the module states what it overrides rather than silently contradicting the spine', () => {
     assert.match(HANDOFF, /REPLACES the list-building shape/)
     assert.match(HANDOFF, /never\s+`?<scan_list>`?/)
     assert.match(HANDOFF, /VALIDATE-A-NAME/)
-    // recommended_mode is DEFINED once, in the spine's Phase 3 — the module points at it instead of
-    // carrying a second copy that can drift.
-    assert.match(HANDOFF, /the same build lens the spine defines in Phase 3/)
+    // The lens is the build desk's, with the user — the pick carries none (mentor-modes.md).
+    assert.doesNotMatch(HANDOFF, /recommended_mode/)
+    assert.match(HANDOFF, /You do not recommend a build lens/)
 })
 
 // ── the two branches ─────────────────────────────────────────────────────────

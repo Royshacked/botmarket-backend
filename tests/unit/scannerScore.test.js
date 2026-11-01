@@ -115,48 +115,21 @@ test('normalizeScan: a missing style defaults to null', () => {
     assert.equal(_normalizeScan(scan).style, null)
 })
 
-// ── recommended_mode on watchlist candidates + feasibility guard (#4) ───
-function recMode(mode, liquidity) {
-    const c = {
-        ticker: 'X', direction: 'long', thesis: 't', analysis: 'a', recommended_mode: mode,
-        score: { catalyst: 80, technical: 80, relativeStrength: 80, ...(liquidity === undefined ? {} : { liquidity }) },
-    }
-    return _normalizeScan({ thesis: 's', direction: 'long', candidates: [c] }).candidates[0].recommended_mode
-}
-
-test('recommended_mode: isMode-validated (unknown/absent → null)', () => {
-    assert.equal(recMode('smc', 80), 'smc')
-    assert.equal(recMode('discretionary', 80), 'discretionary')
-    assert.equal(recMode('bogus', 80), null)
-    assert.equal(recMode(undefined, 80), null)
-})
-
-test('recommended_mode: smc/institutional on a thin name downgrade to discretionary (floor 60)', () => {
-    assert.equal(recMode('smc', 40), 'discretionary')            // below floor → downgraded
-    assert.equal(recMode('institutional', 59), 'discretionary')  // 59 < 60
-    assert.equal(recMode('smc', 60), 'smc')                      // exactly at floor → feasible
-    assert.equal(recMode('smc', 80), 'smc')                      // liquid → kept
-})
-
-test('recommended_mode: absent liquidity axis never triggers a downgrade (no guessing)', () => {
-    assert.equal(recMode('smc'), 'smc')            // liquidity not scored → keep the rec
-    assert.equal(recMode('institutional'), 'institutional')
-})
-
-test('recommended_mode: discretionary is never downgraded regardless of liquidity', () => {
-    assert.equal(recMode('discretionary', 10), 'discretionary')
+// ── no build lens on a candidate or a pick: Argus stopped recommending one (2026-11-01, docs/design/mentor-modes.md) ──
+test('a candidate carries no recommended_mode, whatever the model wrote', () => {
+    const c = { ticker: 'X', direction: 'long', thesis: 't', analysis: 'a', recommended_mode: 'smc', score: { catalyst: 80, technical: 80, relativeStrength: 80, liquidity: 80 } }
+    assert.equal('recommended_mode' in _normalizeScan({ thesis: 's', direction: 'long', candidates: [c] }).candidates[0], false)
 })
 
 // ── _normalizeKairosPick (hand-off single pick) ─────────────────────────
-test('kairosPick: clean pick uppercases ticker, keeps direction + text + recommended_mode', () => {
+test('kairosPick: clean pick uppercases ticker, keeps direction + text, drops a lens', () => {
     const p = _normalizeKairosPick({ ticker: 'nvda', direction: 'long', thesis: 't', analysis: 'a', recommended_mode: 'smc' })
-    assert.deepEqual(p, { ticker: 'NVDA', direction: 'long', thesis: 't', analysis: 'a', recommended_mode: 'smc' })
+    assert.deepEqual(p, { ticker: 'NVDA', direction: 'long', thesis: 't', analysis: 'a' })
 })
 
-test('kairosPick: direction defaults long; missing text → empty; unknown/absent mode → null', () => {
-    assert.deepEqual(_normalizeKairosPick({ ticker: 'AAPL' }), { ticker: 'AAPL', direction: 'long', thesis: '', analysis: '', recommended_mode: null })
+test('kairosPick: direction defaults long; missing text → empty', () => {
+    assert.deepEqual(_normalizeKairosPick({ ticker: 'AAPL' }), { ticker: 'AAPL', direction: 'long', thesis: '', analysis: '' })
     assert.equal(_normalizeKairosPick({ ticker: 'TSLA', direction: 'short' }).direction, 'short')
-    assert.equal(_normalizeKairosPick({ ticker: 'TSLA', recommended_mode: 'bogus' }).recommended_mode, null)
 })
 
 test('kairosPick: no/empty ticker → null', () => {

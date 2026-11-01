@@ -37,7 +37,7 @@ test('_normalizeScan investing: investing axes, profile=investing, destination=a
     assert.equal(out.profile, 'investing')
     assert.equal(out.destination, 'analyst')
     const c = out.candidates[0]
-    assert.equal(c.recommended_mode, null)                 // investing → to the Analyst, not Kairos
+    assert.equal('recommended_mode' in c, false)                 // investing → to the Analyst, not Kairos
     assert.equal(c.score.total, 78)                        // 90*.3+60*.3+75*.25+95*.15 = 78
     assert.ok('quality' in c.score)
 })

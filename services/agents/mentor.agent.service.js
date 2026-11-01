@@ -22,6 +22,7 @@ import {
     recordReads, ALWAYS_REFETCH, sanitizeUserOps, applyUserOps, gateView, delegationPicks, heldAnswers,
     activeName, stageOf, firstUnsettled, isWaived, STAGES,
 } from '../mentorBuild.util.js'
+import { resolveMode, readSetup, kitFor, lensOf as lensOfName, MODE_THESIS, MODE_USER } from '../mentorMode.service.js'
 import { logger } from '../logger.service.js'
 
 // Mentor — the trade ASSISTANT (Pipeline F). A conversation → a draft `setup` entity.
@@ -35,10 +36,10 @@ import { logger } from '../logger.service.js'
 // where the conversation was (docs/desks/mentor-talos.md). The user always brings the ticker.
 //
 // The tool kit is Mentor's own — services/tools/trading.tools.js, which carried Kairos's name until
-// that desk was archived (2026-08-18) and is now named for its only live consumer. Taken WHOLE and
-// deliberately un-subsetted: subsetting by lens suits a desk that picks one lens per build, but
-// Mentor's lens is per-SETUP and it must weigh a classical candidate against an SMC one in a
-// single conversation.
+// that desk was archived (2026-08-18) and is now named for its only live consumer. Taken WHOLE in the
+// user's-setup mode, where Mentor must weigh a classical candidate against an SMC one in a single
+// conversation; the RISK-BASED mode drops the pattern and indicator tools (mentorMode.kitFor,
+// docs/design/mentor-modes.md).
 
 const __dirname   = dirname(fileURLToPath(import.meta.url))
 const PROMPT_PATH = join(__dirname, '../../prompts/mentor_system_prompt.md')
@@ -120,9 +121,9 @@ async function chatStream({
     _newsHandlers = makeNewsHandlers,
     _analystActions = getAnalystActions,
     _flipHandler = makeFlipHandler,   // the blinded red-team, injectable so the stamp below is testable without a model call
+    _readSetup = readSetup,           // the cheap "did they bring a setup?" read on a typed first turn (mentorMode.service)
 }) {
 
-    const tools        = MENTOR_TOOLS
     // `consult` is deliberately absent: runAgentStream builds it from the tool declaration, which is
     // also the only place that holds `onReasoning` — wiring it here would swallow the sidecar's
     // thinking silently. See the MENTOR_TOOLS note above.
@@ -191,12 +192,18 @@ async function chatStream({
     if (incoming.refused.length) logger.warn(LOG, 'a press was refused — the client offered something the ledger will not take', { refused: incoming.refused })
     const turnState = { ...chatState, build: incoming.build }
 
+    // THE MODE, BEFORE THE TURN (docs/design/mentor-modes.md): the kit is picked before the model reads a word, so the
+    // mode comes from the ledger's lens, a seed (no setup of the user's — risk-based), or one cheap read of a typed
+    // first message. Undecided (the read failed) = the whole kit, and the prompt's rule decides.
+    const { mode, source: modeSource } = await resolveMode({ name: activeName(incoming.build), seed, messages, userId, read: _readSetup })
+    const tools = kitFor(mode, MENTOR_TOOLS, TRADING_TOOLS.length)
+
     const systemPrompt  = _buildSystemPrompt(turnState, accounts, mainAccountId, audience, seed)
     // The venue (mode / broker / accounts / free cash) rides the last USER message rather than
     // the system prompt: free cash moves whenever anything fills, so a volatile system block
     // would sit ahead of the whole conversation in the cache prefix. See buildVenueSection.
     const builtMessages = attachTurnContext(
-        attachTurnContext(normalizeMessages(messages, MAX_MESSAGES), _buildTurnContext(turnState, clientTime, incoming.settled, { delegated: incoming.delegated, hasAccount })),
+        attachTurnContext(normalizeMessages(messages, MAX_MESSAGES), _buildTurnContext(turnState, clientTime, incoming.settled, { delegated: incoming.delegated, hasAccount, mode })),
         await _venueSection(userId))
 
     // Coverage is CUMULATIVE across the conversation: the model re-states everything it has read,
@@ -266,7 +273,9 @@ async function chatStream({
     // Answered from the OPS, before they are applied, because the content it drops is also what the
     // claims below are derived from.
     const ops      = sanitizeBuildOps(buildOps) ?? {}
-    const reopened = new Set(fieldsClearedBy(ops.unsettle))
+    // A MODE SWITCH reopens the trades the same way (mentorBuild.switchLens) — only when it changes the lens.
+    const switching = Boolean(ops.switchLens) && ops.switchLens !== lensOfName(activeName(incoming.build))
+    const reopened = new Set([...fieldsClearedBy(ops.unsettle), ...(switching ? fieldsClearedBy('spans') : [])])
 
     // The gates' content belongs to ONE name, so it only carries forward while the build is still
     // on that name: handing AMD the candidate trades drawn for NVDA would claim NVDA's ids onto
@@ -315,6 +324,15 @@ async function chatStream({
     let build = first.build
     const { refused, cleared } = first
 
+    // THE SWITCH REDRAWS THE WORKSHEET. The new lens goes onto the plan (or settledConflicts would "restore" it and
+    // report a refusal for the switch itself), and the old mode's levels go unless this turn drew new ones — a thesis
+    // stop left standing under a breakout idea is the screen and the ledger disagreeing.
+    if (first.switched && normalized) {
+        Object.assign(normalized, Array.isArray(setup?.scenarios)
+            ? { trade_mode: ops.switchLens }
+            : _withoutLevels(normalized, ops.switchLens))
+    }
+
     // An entry the server could not key to any trade on the table is DROPPED — so the model is told,
     // by name, rather than left to wonder why the gate it just drew is empty on the user's screen.
     if (keyed.unresolved.length) {
@@ -351,6 +369,8 @@ async function chatStream({
         ?? (hasLedger ? normalizeSetup({ asset: ledgerName.asset }) : null)
     if (carrier) {
         carrier.build = build
+        // A switch on a turn that emitted no worksheet: the carried plan still holds the old mode's lens and levels.
+        if (first.switched && !normalized) Object.assign(carrier, _withoutLevels(carrier, ops.switchLens))
         if (spans) {
             carrier.spans = spans
             // THE REJECTS ARE AUTHORED ONCE, at the gate. `alternatives[]` used to be a second
@@ -432,6 +452,8 @@ async function chatStream({
         settled: Object.keys(activeName(build)?.settled ?? {}),
         refused: refused.map(r => r.field),
         ...(cleared.length ? { cleared } : {}),
+        mode: mode ?? 'undecided', modeSource,
+        ...(first.switched ? { switchedTo: ops.switchLens } : {}),
         tools: calledThisTurn,
     })
 
@@ -591,23 +613,16 @@ Active asset: ${asset}${_buildAccountsSection(accounts, mainAccountId)}${_buildS
 }
 
 /**
- * The name Argus handed over, and the lens it recommends. PURE; empty string when the user arrived
- * on their own, which is the ordinary case.
+ * The name handed over — by Argus, the Hotlist or the house's book. PURE; empty string when the user arrived on
+ * their own, which is the ordinary case.
  *
- * The LENS IS A RECOMMENDATION, not a decision, and the prompt says so out loud because the two
- * read identically to a model handed a field called `recommended_mode`. Mentor's whole contract is
- * that it works on what the user brought and hands the decision back — silently adopting a scanner's
- * lens would be the desk quietly authoring for them, which is the one thing it must not do.
- *
- * It also has to be SAID. A recommendation the user never hears is indistinguishable from Mentor
- * having decided.
+ * A HAND-OFF CARRIES NO SETUP OF THE USER'S, so it opens RISK-BASED (docs/design/mentor-modes.md, Roy 2026-11-01).
+ * Argus no longer recommends a lens — the lens is Mentor's to recommend and the user's to agree — so a
+ * `recommended_mode` still arriving from an old client is ignored here. The mode is SAID, because a mode the user
+ * never hears is one they never chose.
  */
 export function _buildSeedSection(seed) {
     if (!seed?.ticker) return ''
-    const lens = String(seed.recommended_mode ?? '').trim()
-    // The Hotlist's "Build with Mentor" opens in the THESIS lens (Roy, 2026-10-30) — the user's own pick of the button,
-    // not Argus's: still said out loud, still theirs to change.
-    const fromList = Boolean(seed.hotlist || seed.book || seed.hotlist_facts || seed.book_facts)
     return `
 
 ${seed.book_facts ? "FROM THE HOUSE'S BOOK" : 'ARGUS HANDED YOU THIS NAME'}: ${seed.ticker}${seed.direction ? ` (${seed.direction})` : ''}`
@@ -615,9 +630,6 @@ ${seed.book_facts ? "FROM THE HOUSE'S BOOK" : 'ARGUS HANDED YOU THIS NAME'}: ${s
   thesis: ${seed.thesis}` : ''}`
         + `${seed.analysis ? `
   Argus's read: ${seed.analysis}` : ''}`
-        + (lens ? (fromList ? `
-  The user opened this from the Hotlist's Build with Mentor, which builds in the ${lens} lens.` : `
-  Argus recommends the ${lens} lens.`) : '')
         // From today's HOTLIST (daily-names.md): read back from the stored board by code, not from the
         // request. The board measures ROOM — free range to the next overhead level — and sets no
         // entry, stop or target; those are built here, with the user.
@@ -639,13 +651,8 @@ ${seed.book_facts ? "FROM THE HOUSE'S BOOK" : 'ARGUS HANDED YOU THIS NAME'}: ${s
   The house: ${seed.house}. Say it in one line as the house's view of the INDUSTRY, not of this stock; it settles nothing about the trade.` : '')
         + `
 
-Open on it: say the name, relay Argus's read in a sentence rather than restating it wholesale, and`
-        + (lens && fromList
-            ? ` SAY you are building it through the ${lens} lens (the Hotlist's) and what that means in one line; it is the default here, not a decision — if the user wants another lens, use theirs.`
-            : lens
-            ? ` NAME THE RECOMMENDED LENS AND WHY IT FITS. It is Argus's recommendation, not a decision: if the user wants a different lens, or the chart disagrees with it, say so and use theirs. A lens adopted without the user hearing it is one they never chose.`
-            : ` say that you will ask which lens they want to build it through when the ladder reaches it.`)
-        + ` Then run the OPENING TURN as for any name: read it cheapest-first, and come back with direction, horizon and lens together. The ticker is settled unless they change it; everything Argus sent is a CLAIM you validate against your own read, never a settled value — its direction is a lean you test, its lens a recommendation the user still has to agree to. Everything else is theirs to shape.`
+Open on it: say the name, relay the read in a sentence rather than restating it wholesale, and SAY you are building it RISK-BASED (the \`thesis\` lens) and what that means in one line — a hand-off brings no setup of the user's, so this is the default, not a decision: if they bring their own setup, switch (§ Two modes).`
+        + ` Then run the OPENING TURN as for any name. The ticker is settled unless they change it; everything handed over is a CLAIM you validate against your own read, never a settled value — its direction is a lean you test. Everything else is theirs to shape.`
 }
 
 /**
@@ -655,7 +662,7 @@ Open on it: say the name, relay Argus's read in a sentence rather than restating
  * carry-forward rule and the problems block: an instruction separated from the data it governs is
  * how a prompt quietly stops meaning what it says.
  */
-export function _buildTurnContext(chatState, clientTime = null, justSettled = [], { delegated = [], hasAccount = null } = {}) {
+export function _buildTurnContext(chatState, clientTime = null, justSettled = [], { delegated = [], hasAccount = null, mode = undefined } = {}) {
     // THE WORKSHEET, WITHOUT WHAT IS ALREADY WRITTEN OUT ABOVE IT. `build`, `spans`, `entries` and
     // `summary` each have their own section in prose; dumping them again as JSON paid for them
     // twice and buried the instructions under a wall of fields.
@@ -674,7 +681,28 @@ export function _buildTurnContext(chatState, clientTime = null, justSettled = []
     // had already answered.
     return `---
 ${buildTimeSection(clientTime, 'active_from / valid_until')}
-COVERAGE SO FAR: ${covered}. Re-state these in every <coverage> tag plus anything new you read this turn.${draft}${_buildMoneySection(chatState?.draft)}${_buildGenerateSection(chatState, hasAccount)}${_buildLedgerSection(chatState)}${_buildPressSection(justSettled, chatState, delegated)}`
+COVERAGE SO FAR: ${covered}. Re-state these in every <coverage> tag plus anything new you read this turn.${draft}${_buildMoneySection(chatState?.draft)}${_buildGenerateSection(chatState, hasAccount)}${_buildModeSection(mode)}${_buildLedgerSection(chatState)}${_buildPressSection(justSettled, chatState, delegated)}`
+}
+
+/**
+ * WHICH MODE THIS TURN IS IN — the server's answer, matching the kit it handed over (docs/design/mentor-modes.md).
+ * Said every turn, because the kit changes with it: a model told nothing would go looking for a pattern tool the
+ * risk-based kit does not carry. `undefined` = the caller did not say (tests, old callers) → nothing; `null` =
+ * undecided (the read failed) → the prompt's rule decides. PURE.
+ */
+export function _buildModeSection(mode) {
+    if (mode === undefined) return ''
+    if (mode === MODE_THESIS) {
+        return '\n\nMODE: RISK-BASED (the `thesis` lens) — the user brought no setup of their own. The lens is `thesis`; claim it on your worksheet.'
+            + ' The pattern and indicator tools are NOT in your kit (§ Two modes). If the user brings a setup of their own — a condition, a level, a pattern —'
+            + ' switch: <build>{"switch_lens":"<the lens you recommend>","source":"user"}</build>, and say in one line that the trades are rebuilt under it.'
+    }
+    if (mode === MODE_USER) {
+        return '\n\nMODE: THE USER\'S SETUP — they brought their own. Build it in their terms (§ Two modes); the lens is yours to recommend from their words'
+            + ' — `discretionary`, `smc` or `institutional` — and theirs to agree. If they ask for your way instead, switch:'
+            + ' <build>{"switch_lens":"thesis","source":"user"}</build>, and say in one line that the trades are rebuilt under it.'
+    }
+    return '\n\nMODE: UNDECIDED — the server could not tell whether the user brought a setup of their own. Decide by § Two modes, and claim the lens on your worksheet.'
 }
 
 /**
@@ -994,6 +1022,16 @@ export function _sizingReport(plan, size, { balance = null, hasAccount = false, 
             + 'and the user sees its quantity there. Do not tell the user about a mismatch the new levels resolve.')
     }
     return lines.join('\n')
+}
+
+/**
+ * The plan under a NEW lens with the old mode's levels gone — the scenarios AND the flat execution projection, or
+ * normalizeSetup would rebuild an implicit scenario from the projection on the next round trip. What is not a level
+ * (the asset, the direction, the horizon, the challenge record) is kept. PURE.
+ */
+export function _withoutLevels(plan, lens) {
+    const fresh = normalizeSetup({ ...plan, trade_mode: lens, scenarios: [], entry_legs: null, stop_legs: null, target_legs: null, validity: null })
+    return fresh ? { ...plan, ...fresh, challenges: plan.challenges } : { ...plan, trade_mode: lens }
 }
 
 /** Ledger values are short by construction; a list is summarised rather than spelled out. */

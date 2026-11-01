@@ -18,7 +18,7 @@ function briefMentor(artifact) {
         text:  read
             ? `I want to work on a ${pick.ticker} trade — the read on it is: ${read}. Let's build the setup together.`
             : `I want to work on a ${pick.ticker} trade. Let's build the setup together.`,
-        input: { seed: { ticker: pick.ticker, direction: pick.direction ?? null, thesis: pick.thesis ?? null, analysis: pick.analysis ?? null, recommended_mode: pick.recommended_mode ?? null } },
+        input: { seed: { ticker: pick.ticker, direction: pick.direction ?? null, thesis: pick.thesis ?? null, analysis: pick.analysis ?? null } },
     }
 }
 

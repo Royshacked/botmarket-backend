@@ -28,6 +28,7 @@
 import { ENTRY_ARCHETYPES, normalizeTaxon } from './setup.taxonomy.js'
 import { VALID_TIMEFRAMES, normalizeTimeframe } from './timeframe.service.js'
 import { SIZE_UNITS } from './positionSize.util.js'
+import { MODES } from './analysisModes.js'
 
 // The stages, in the order they settle. `fields` are what a stage owes; a stage is settled when all
 // of its fields are. `waivable` is the user's answer to the opening turn's second ask — the two
@@ -246,6 +247,33 @@ export function unsettle(name, stageKey) {
         if (!doomed.has(field)) claimed[field] = value
     }
     return { name: { ...name, settled, claimed }, cleared }
+}
+
+/**
+ * SWITCH THE MODE — a new lens, the trades below it reopened (docs/design/mentor-modes.md). Not a revise and not a
+ * reopened opening: the direction and the horizon stay settled, because the user changed HOW the trade is built, not
+ * which way or for how long. Everything from the spans down goes — a thesis stop is wrong under a breakout idea, and
+ * the reverse — except the user's own SIZE, which was their risk answer, not a level, and is held again rather than
+ * asked twice.
+ *
+ * The lens lands where it stood: settled → settled (and claimed, so a later re-settle is a no-op, not a refusal),
+ * only claimed → claimed. The same lens again is a no-op. PURE.
+ */
+export function switchLens(name, lens, source = 'user') {
+    const from = name?.settled?.lens ?? name?.claimed?.lens?.value ?? null
+    if (!lens || lens === from) return { name, cleared: [], switched: false }
+
+    const size = name.settled.size ?? (name.claimed.size?.source === 'user' ? name.claimed.size.value : null)
+    const r = unsettle(name, 'spans')
+    let next = r.name
+    if (size && typeof size === 'object') next = claim(next, { size }, 'user').name
+    const src = CLAIM_SOURCES.includes(source) ? source : 'user'
+    next = {
+        ...next,
+        claimed: { ...next.claimed, lens: { value: lens, source: src } },
+        settled: 'lens' in next.settled ? { ...next.settled, lens } : next.settled,
+    }
+    return { name: next, cleared: r.cleared, switched: true }
 }
 
 // ─── Where are we? ────────────────────────────────────────────────────────────
@@ -534,10 +562,19 @@ export function applyBuildOps(build, ops = {}) {
     if (!name) return { build: { ...next, refused: [] }, refused: [], cleared: [], accepted: [] }
 
     let cleared = []
+    // The mode switch FIRST: it reopens the trades, and an unsettle in the same turn cascades from wherever it says.
+    let switched = false
+    if (ops.switchLens) {
+        const s = switchLens(name, ops.switchLens, ops.source)
+        name = s.name
+        cleared = s.cleared
+        switched = s.switched
+        if (switched) next = { ...next, delegated: (next.delegated ?? []).filter(k => !['spans', 'entries'].includes(k)) }
+    }
     if (ops.unsettle) {
         const r = unsettle(name, ops.unsettle)
         name = r.name
-        cleared = r.cleared
+        cleared = [...new Set([...cleared, ...r.cleared])]
         // A REOPENED GATE IS THE USER'S AGAIN. Handing a gate to Mentor answered it once; reopening
         // it is asking to see it, and a delegation left standing would settle it again unseen. The
         // build-wide waiver stays — that was an answer about the whole build, given once (#14).
@@ -590,7 +627,7 @@ export function applyBuildOps(build, ops = {}) {
     name = r.name
 
     next = putName(next, name)
-    return { build: { ...next, refused: r.refused }, refused: r.refused, cleared, accepted: r.accepted }
+    return { build: { ...next, refused: r.refused }, refused: r.refused, cleared, accepted: r.accepted, switched }
 }
 
 /** The claims that mirror content on the table, and so follow it as Mentor revises it. */
@@ -632,6 +669,8 @@ export function sanitizeBuildOps(raw) {
     }
 
     if (typeof raw.unsettle === 'string' && STAGE_KEYS.includes(raw.unsettle)) ops.unsettle = raw.unsettle
+    // The mode switch: a lens from the shared vocabulary, nothing else (docs/design/mentor-modes.md).
+    if (MODES.includes(raw.switch_lens)) ops.switchLens = raw.switch_lens
     if (typeof raw.waiver === 'boolean') ops.waiver = raw.waiver
     // "You pick" at a gate. Only the gates can be handed back; anything else is dropped, not coerced.
     // `picks` are deliberately NOT read off the wire: what a delegation settles on is derived by the

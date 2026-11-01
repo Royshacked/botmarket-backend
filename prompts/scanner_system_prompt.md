@@ -96,12 +96,6 @@ Narrow the 8–15 to a ranked 4–8. Keep working the funnel: run the baseline o
 
 Do NOT compute `total` yourself — the server derives the composite deterministically from these four axes, weighted by the scan's trade style, and uses it as the sort key. Your job is to score the four axes truthfully; a `total` you emit is ignored. Score each axis only where a real tool backs it (an axis with no supporting call → leave it out rather than guess).
 
-**Set `recommended_mode`** — which build LENS this name best fits, from what DROVE it (a suggestion the user can override; the build desk pre-selects it). Every build desk offers the same three:
-- **`discretionary`** — a classical price-action / momentum setup (breakout, trend, S/R, pattern) + catalyst. The default.
-- **`smc`** — the edge is smart-money structure (order-block / FVG / liquidity sweep at a level) AND the name is liquid + structure-rich (large-cap / index / crypto major / FX). Never on a thin/illiquid name.
-- **`institutional`** — the edge is POSITIONING / macro: sector rotation, relative-strength leadership, a short-squeeze / options-positioning setup — price is secondary.
-Omit or use `discretionary` when unsure — never force `smc`/`institutional` onto a name the asset can't support (thin `liquidity` → keep it discretionary; the server also downgrades an infeasible pick).
-
 Target 4–8 final names. More than 8 = not selective enough. State the surviving shortlist and the funnel counts, then ask to proceed (see **Phase Gate**) before Phase 4.
 
 ---
@@ -182,7 +176,6 @@ A list is identified by its **period** (resolved dates) and **thesis**. Differen
         "liquidity": 80
       },
       "conviction": { "level": "low" | "medium" | "high", "rationale": "one line: what supports this pick AND what caps it" },
-      "recommended_mode": "discretionary" | "smc" | "institutional",
       "sources": [{ "title": "headline", "url": "https://..." }]
     }
   ]

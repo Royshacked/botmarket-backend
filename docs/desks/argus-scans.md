@@ -212,12 +212,10 @@ Three things are taken out of the model's hands on purpose:
   card scores from the axes it has, renormalised; a bare total with no axes is never trusted. The list
   is then sorted by total regardless of emission order — so honest axis scores matter more than where
   the model put a name.
-- **The build lens** (`recommended_mode`, trading only). Argus suggests which lens the pick fits —
-  `discretionary` (price action + catalyst, the default), `smc` (order-block / sweep structure, needs a
-  liquid, structure-rich name), `institutional` (positioning and macro). The server validates it and
-  **downgrades an infeasible suggestion**: `smc` or `institutional` on a name whose `liquidity` axis is
-  under the floor becomes `discretionary`. Warn-never-block — it sanitises the pre-fill, and the user can
-  still pick any mode. Mentor authors `trade_mode` from it.
+- **No build lens (since 2026-11-01).** Argus used to suggest one (`recommended_mode`, with a liquidity
+  downgrade). Roy: "Argus doesn't decide about trade mode anymore. Only Mentor." A hand-off carries no setup
+  of the user's, so Mentor opens it risk-based ([mentor-modes.md](../design/mentor-modes.md)); the field is
+  gone from the prompts, `_normalizeKairosPick`, `_cleanCandidate`, `scanSeed.util` and the chain.
 
 The reasoning sidecar (`deepThink`) has its tightest clause on this desk, stated explicitly: a scan is
 dozens of names, and a desk that consults per candidate turns a cost saving into a per-scan multiplier;
@@ -260,7 +258,7 @@ avoids, unmarked, spots — is scored by the outcome log (`argusRecord`).
 
 | With | Direction | Mechanism |
 |---|---|---|
-| **Mentor** | out | the single pick — `<kairos_pick>` → `{ ticker, direction, thesis, analysis, recommended_mode }` seeds Mentor's first turn (`scanSeed.util`); or a clicked candidate on a saved trading list |
+| **Mentor** | out | the single pick — `<kairos_pick>` → `{ ticker, direction, thesis, analysis }` seeds Mentor's first turn (`scanSeed.util`); or a clicked candidate on a saved trading list |
 | **Prometheus** | out | an investing list's top N by the app's button, one name by click — the research queue, house-owned; or by asking ("send NVDA to Prometheus") through the shared `<route>` hand-off |
 | **Hotlist** | in (house) | every checkpoint board, read automatically with its headlines (`hotlist.argus.js`); his day picks are the Hotlist's day lists |
 | **Prometheus** | out (house) | his Hotlist This week picks → the research queue (source `hotlist`) → catalyst reads, by code (`hotlistResearch.service`, 2026-10-23) |
