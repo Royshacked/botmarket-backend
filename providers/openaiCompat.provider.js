@@ -21,7 +21,7 @@
 import OpenAI from 'openai'
 import { config } from '../services/config.js'
 import { logger } from '../services/logger.service.js'
-import { createTagSuppressor, TOOL_BUDGET_LANDING, MAX_PARALLEL_TOOLS, makeVisionBudget } from '../services/llmStream.util.js'
+import { createTagSuppressor, TOOL_BUDGET_LANDING, EMPTY_REPLY_NUDGE, MAX_PARALLEL_TOOLS, makeVisionBudget } from '../services/llmStream.util.js'
 import { mapLimit } from '../services/concurrency.util.js'
 import { _runTool } from './anthropic.provider.js'
 import { WEB_SEARCH_COMPAT, makeWebSearchCompatHandler } from '../services/tools/webSearchCompat.tools.js'
@@ -359,11 +359,14 @@ export async function streamOpenAICompatWithTools({
     // One ctx for the whole turn — see the Anthropic loop; the vision budget counts across rounds.
     const toolCtx = { onUsage, visionBudget: makeVisionBudget(config.visionMaxUsesPerTurn) }
 
-    for (let i = 0; i < maxContinuations; i++) {
+    // ONE extra round, tools off, when a round after tools lands EMPTY (EMPTY_REPLY_NUDGE) — the bound grows by one then.
+    let nudged = false
+    for (let i = 0; i < maxContinuations + (nudged ? 1 : 0); i++) {
         if (signal?.aborted) { suppressor.flush(); return '' }
 
         // The landing round — same rule as the Anthropic loop: tools off, land as text. TOOL_BUDGET_LANDING.
-        const landing = i === maxContinuations - 1
+        // The nudged round is a landing too: the model already has what it read, and only has to write.
+        const landing = i >= maxContinuations - 1 || nudged
 
         // The server search is offered on the first SEARCH_ROUNDS rounds only — each search is billed.
         const roundTools = serverSearch && i >= SEARCH_ROUNDS ? oaTools.filter(t => t.type !== OPENROUTER_WEB_SEARCH.type) : oaTools
@@ -373,6 +376,7 @@ export async function streamOpenAICompatWithTools({
         let finish = null
         let usage  = null
         let served = null
+        let reasoned = 0
         const acc  = {}
         const announced = new Set()
         try {
@@ -393,7 +397,7 @@ export async function streamOpenAICompatWithTools({
                 if (typeof d.content === 'string' && d.content) { text += d.content; suppressor.push(d.content) }
                 // OpenRouter normalises reasoning onto `reasoning`; some vendors spell it reasoning_content.
                 const r = d.reasoning ?? d.reasoning_content
-                if (typeof r === 'string' && r) onReasoning?.(r)
+                if (typeof r === 'string' && r) { reasoned += r.length; onReasoning?.(r) }
                 if (d.tool_calls?.length) {
                     foldToolCallDeltas(acc, d.tool_calls)
                     for (const c of d.tool_calls) {
@@ -421,6 +425,14 @@ export async function streamOpenAICompatWithTools({
 
         if (stopReason !== 'tool_use') {
             if (stopReason === 'max_tokens') logger.warn(LOG, `reply cut by max_tokens on ${wire} after ${text.length} chars`)
+            // AN EMPTY LANDING IS A SILENT FAILURE: the user sees their message and nothing under it.
+            if (!text.trim()) logger.warn(LOG, `empty reply on ${wire}`, { round: i, finish, reasoningChars: reasoned, landing, nudged })
+            // Asked once, and only after tools ran: a first round with nothing to say is a model question, not this.
+            if (!text.trim() && i > 0 && !nudged && stopReason !== 'max_tokens') {
+                nudged = true
+                messages.push({ role: 'user', content: EMPTY_REPLY_NUDGE })
+                continue
+            }
             suppressor.flush()
             return text
         }
