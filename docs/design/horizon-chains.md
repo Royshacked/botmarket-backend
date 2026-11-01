@@ -230,8 +230,9 @@ Roy: "hotlist ⇒ Argus automatically ⇒ names ⇒ Prometheus confirms catalyst
   names** (every pick, each with his answer; a pass says why) and **All screened**. When the confirmed list is empty it
   says where the reads stand: still to come, all passes, or not loaded.
 - **To Mentor.** A week hand-off carries the live read (`catalystRead.readFacts`, via `hotlistSeed`'s
-  `catalyst_facts`): his target and band, the date to be out by, the yardstick, the company and the kill. Mentor is
-  told his target is the desk's price for the swing: build the take-profit at it, and the user may move it.
+  `catalyst_facts`): his target and band, the date to be out by, the yardstick, the company and the kill. Since
+  2026-11-01 his target is context and Mentor finds the take-profit on the chart (Roy) — it used to be built at his
+  target.
 - **The week grade is hidden too** (Roy: "hidden"). No horizon shows a grade anywhere: not in the table (the All tab
   keeps a Horizon column, no letter), the track record (the board against its cut and the pool), the replay line (the
   screener's names against the pool), Argus's board and prompt, Axl's `get_hotlist`, or Mentor's hand-off (never
