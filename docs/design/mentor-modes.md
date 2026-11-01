@@ -114,6 +114,8 @@ for on every turn. The cost: each mode keeps its own prompt cache (MENTOR_TOOLS 
 Held: **#10** — the empty-reply retry is in the OpenAI-compat loop only; the Anthropic loop has none (no empty seen on
 Claude, which has barely run since Luna became the house model). Its own change.
 
+**Re-driven after the fixes, 2026-11-01 19:10 — 16/16** (drive-mentor-modes.mjs).
+
 ## Open
 
 - **A setup brought mid-build on the risk-based kit.** The read runs only while there is no lens, so a user who brings a
