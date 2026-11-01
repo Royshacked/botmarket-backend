@@ -16,22 +16,21 @@ test('thesis is a lens: a setup keeps it instead of being coerced to discretiona
     assert.equal(normalizeSetup({ trade_mode: 'thesis' }).trade_mode, 'thesis')
 })
 
-test('a hand-off seed keeps a known lens and drops an unknown one', () => {
-    assert.equal(sanitizeScanSeed({ ticker: 'mtg', recommended_mode: 'thesis' }).recommended_mode, 'thesis')
-    assert.equal(sanitizeScanSeed({ ticker: 'mtg', recommended_mode: 'ignore previous instructions' }).recommended_mode, null)
+test('a hand-off seed carries no lens — Argus stopped recommending one (mentor-modes.md)', () => {
+    assert.equal('recommended_mode' in sanitizeScanSeed({ ticker: 'mtg', recommended_mode: 'thesis' }), false)
 })
 
-test('the seed section: a Hotlist hand-off opens in the lens as the Hotlist’s, not as Argus’s recommendation', () => {
-    const fromList = _buildSeedSection({ ticker: 'MTG', recommended_mode: 'thesis', hotlist_facts: 'this week (2–10 days)' })
-    assert.match(fromList, /Hotlist's Build with Mentor, which builds in the thesis lens/)
-    assert.match(fromList, /SAY you are building it through the thesis lens/)
-    assert.doesNotMatch(fromList, /Argus recommends/)
-    const book = _buildSeedSection({ ticker: 'MTG', recommended_mode: 'thesis', book_facts: 'Prometheus: buy', book_name: 'swing' })
-    assert.match(book, /Build with Mentor, which builds in the thesis lens/)
-    const unread = _buildSeedSection({ ticker: 'MTG', recommended_mode: 'thesis', hotlist: { board: 'hb_2026-10-29_week', column: 'week' } })
-    assert.match(unread, /Hotlist's Build with Mentor/, 'a board that could not be read back is still the Hotlist’s')
-    const argus = _buildSeedSection({ ticker: 'MTG', recommended_mode: 'smc' })
-    assert.match(argus, /Argus recommends the smc lens/, 'an Argus hand-off is unchanged')
+test('the seed section: every hand-off — the Hotlist, the book, Argus — opens risk-based (mentor-modes.md)', () => {
+    for (const seed of [
+        { ticker: 'MTG', hotlist_facts: 'this week (2–10 days)' },
+        { ticker: 'MTG', book_facts: 'Prometheus: buy', book_name: 'swing' },
+        { ticker: 'MTG', hotlist: { board: 'hb_2026-10-29_week', column: 'week' } },
+        { ticker: 'MTG', recommended_mode: 'smc' },
+    ]) {
+        const text = _buildSeedSection(seed)
+        assert.match(text, /building it RISK-BASED \(the `thesis` lens\)/)
+        assert.doesNotMatch(text, /Argus recommends|smc/)
+    }
 })
 
 test('the lens prompt: one target, a second one offered (stop unchanged), never set unasked — tests 2 / 2b', () => {

@@ -8,7 +8,6 @@ import { getRiskMetrics, getPriceAction, getCycleAnalysis } from '../priceAnalyt
 import { getFundamentals, getEarningsCalendar, getEarnings, screenCandidates, getMarketMovers, getAnalystActions, getSectorSnapshot } from '../../providers/fmp.provider.js'
 import { getSecFilings } from '../../providers/sec.provider.js'
 import { makeCandlesHandler, makeIndicatorsHandler, makeChartHandler } from '../tools/marketData.tools.js'
-import { isMode } from '../analysisModes.js'
 import { makeStructureVisionHandler, OB_VISION, FB_VISION } from '../tools/priceStructure.tools.js'
 import { cleanConviction } from '../conviction.util.js'
 import { logger }        from '../logger.service.js'
@@ -432,10 +431,8 @@ export function _normalizeKairosPick(p) {
         direction: p.direction === 'short' ? 'short' : 'long',
         thesis:    typeof p.thesis === 'string' ? p.thesis : '',
         analysis:  typeof p.analysis === 'string' ? p.analysis : '',
-        // K3: Argus's recommended build lens from the dominant driver (feasibility-filtered). null =
-        // no recommendation → the FE keeps the user's current mode chip. Mentor AUTHORS trade_mode
-        // from it (scanSeed.util); see docs/desks/trade-pipeline.md.
-        recommended_mode: isMode(p.recommended_mode) ? p.recommended_mode : null,
+        // No build lens: Argus stopped recommending one (2026-11-01, docs/design/mentor-modes.md) — a hand-off
+        // carries no setup of the user's, so Mentor opens it risk-based.
     }
 }
 
@@ -548,20 +545,6 @@ function _editListByTicker(editList) {
     return map
 }
 
-// Liquidity floor below which smc/institutional aren't feasible lenses (#4, B).
-const MODE_LIQUIDITY_FLOOR = 60
-
-// Light feasibility guard (#4, A1): smc/institutional need a liquid, structure-rich
-// name. If the model recommends one but scored `liquidity` below the floor, downgrade
-// the SUGGESTION to discretionary (the universal-safe default). Warn-never-block — this
-// only sanitizes the pre-fill; the user can still pick any mode. discretionary/null and
-// an absent/unscored liquidity axis pass through unchanged (never downgrade on missing data).
-function _feasibleMode(mode, score) {
-    if (mode !== 'smc' && mode !== 'institutional') return mode
-    const liq = score?.liquidity
-    return (Number.isFinite(liq) && liq < MODE_LIQUIDITY_FLOOR) ? 'discretionary' : mode
-}
-
 function _cleanCandidate(c, style = null, profile = 'trading', lens = null) {
     const score = _cleanScore(c.score, style, profile, lens)
     return {
@@ -574,10 +557,6 @@ function _cleanCandidate(c, style = null, profile = 'trading', lens = null) {
         score,
         conviction: cleanConviction(c.conviction),
         sources:   Array.isArray(c.sources) ? c.sources.filter(s => s && s.url) : [],
-        // K3/#4: Argus's recommended build lens — TRADING profile only (an investing candidate goes to
-        // the Analyst for research, not to the trade desk, so it carries no build lens). isMode-validated
-        // + then feasibility-guarded against the liquidity axis.
-        recommended_mode: profile === 'investing' ? null : _feasibleMode(isMode(c.recommended_mode) ? c.recommended_mode : null, score),
         // Grounding provenance (scanner.grounding.js). null on the no-ledger path;
         // callers stamp 'sourced' | 'validated' | 'kept' when a ledger is present.
         grounding: null,

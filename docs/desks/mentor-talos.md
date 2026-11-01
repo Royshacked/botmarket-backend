@@ -944,6 +944,20 @@ restored — the same destination whether reached from the list pencil or from A
 > the design still unbuilt is **batch intake from social chat** — several finished plans arriving
 > in one DM — which needs a sender, not a receiver.
 
+**Two modes (2026-11-01, [design/mentor-modes.md](../design/mentor-modes.md)).** A build with no setup of the user's
+own — a bare name, the Hotlist, Argus's hand-off — is **risk-based**: the `thesis` lens, Mentor judging the stop and the
+target and the user's risk setting the entry. A build where the user brought a setup (any condition, level or pattern
+of theirs; a direction or horizon alone is not one) is **the user's setup**: built in their terms, the lens Mentor's to
+recommend (`discretionary` · `smc` · `institutional`) and theirs to agree. The mode IS the lens on the ledger; before
+there is one, a seed means risk-based and a typed first message is read by one Haiku call (`mentorMode.service
+resolveMode`). The kit follows the mode — risk-based drops the pattern and indicator tools (`kitFor`, `THESIS_DROPPED`;
+the cache breakpoint moves to `get_market_hours`) — and the turn context says it (`MODE:`). A switch, either way, is
+`<build>{"switch_lens":…}</build>` (`mentorBuild switchLens`): direction and horizon stay, the spans down reopen, the
+user's size is held, and the old mode's levels, pace, conditions and rejects leave the worksheet (`_forNewLens`). A switch
+to their setup only RECOMMENDS the lens — the opening waits on their yes, and the new levels come next turn, on the
+whole kit; a switch to thesis is their yes. A hand-off claims `thesis` on turn one; the risk-based kit drops the
+handlers too (`handlersFor`). Argus no longer recommends a lens.
+
 A setup arrives one of three ways — a bare name, a name Argus handed over, or a plan the user
 already made — and there is **one machine, not three paths**. Whatever arrived is written into the
 ledger as a CLAIM; the opening turn validates the claims and proposes the blanks; the build resumes
@@ -1067,8 +1081,8 @@ value the settled value is restored and the override is reported (`settledConfli
 owns the flow, the draft owns the content.
 
 **The opening turn** reads cheapest-first and stops as soon as the question is answered: quote,
-candles, structure and one chart always; `get_news` + `get_earnings_calendar` for what sits inside
-the horizon; one cheap probe per candidate lens (`get_orderblocks`/`get_fvg`, `get_indicators`,
+candles, structure (risk-based: `get_price_structure`) and one chart always; `get_news` + `get_earnings_calendar` for what sits inside
+the horizon; in the user's-setup mode, one cheap probe per candidate lens (`get_orderblocks`/`get_fvg`, `get_indicators`,
 `get_analyst_actions`/`get_short_interest`); and `web_search` / `flip_test` / `consult` only on a
 real conflict. Nothing is fetched twice in one build — a later stage needs what was CONCLUDED, not
 another call. It comes back with direction, horizon and lens together, validating what was claimed

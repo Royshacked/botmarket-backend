@@ -1,7 +1,7 @@
 // The Argus hand-off seed — ONE parser for every desk a scanned name can be handed to.
 //
 // A hand-off arrives as a typed object rather than free text: Argus validated the name, wrote a
-// one-line thesis and a short read, and recommended the lens to build it through. Three desks now
+// one-line thesis and a short read. Three desks now
 // receive that: Kairos (`call`), Analyst (`coverage`) and Mentor (`setup`).
 //
 // It was two hand-written copies before this — Kairos's, and Analyst's carrying the comment
@@ -10,14 +10,10 @@
 // and a third copy for Mentor would have made the divergence permanent.
 //
 // SHARE THE PIPE, NOT THE JUDGMENT. This coerces every field a hand-off can carry and each desk
-// decides what to DO with it — which is not a formality here: `recommended_mode` is deliberately
-// dropped from Kairos's prompt (its lens is chosen by the caller, and the field only pre-fills a UI
-// chip) and is load-bearing for Mentor, which AUTHORS `trade_mode` and must put the recommendation
-// in front of the user. Same field, opposite handling, one parser.
+// decides what to DO with it. (`recommended_mode` — Argus's build lens — is gone since 2026-11-01: the lens is
+// Mentor's to recommend, and a hand-off opens risk-based; docs/design/mentor-modes.md.)
 //
 // String-only and lean on purpose: this is untrusted request-body input on the way into a prompt.
-
-import { isMode } from './analysisModes.js'
 
 /**
  * Coerce a hand-off seed. Returns null when there is no usable ticker — a seed without one names
@@ -27,7 +23,7 @@ import { isMode } from './analysisModes.js'
  * the rest; nothing here decides anything.
  *
  * @param {unknown} raw
- * @returns {{ticker, direction, sector, thesis, analysis, recommended_mode, window}|null}
+ * @returns {{ticker, direction, sector, thesis, analysis, window}|null}
  */
 export function sanitizeScanSeed(raw) {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
@@ -48,8 +44,6 @@ export function sanitizeScanSeed(raw) {
         sector:           s('sector'),
         thesis:           s('thesis'),
         analysis:         s('analysis'),
-        // A lens the desks know, or nothing — a free string here would reach the prompt as a lens nobody has.
-        recommended_mode: isMode(s('recommended_mode')) ? s('recommended_mode') : null,
         window:           (from || to) ? { from, to } : null,
         hotlist:          _hotlistRef(raw.hotlist, ticker.toUpperCase()),
         book:             _bookRef(raw.book, ticker.toUpperCase()),

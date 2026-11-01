@@ -166,7 +166,7 @@ test('resolveCoverage: spreads original chatState fields through', async () => {
 test('seed: uppercases ticker, keeps sector/thesis/analysis, requires a ticker', () => {
     // One shared parser now serves Kairos, Analyst and Mentor, so it returns the UNION of what a
     // hand-off can carry and each desk reads the fields it has a use for. Analyst reads `sector`
-    // and ignores `direction`/`recommended_mode`/`window` — they arrive as nulls, never as absent
+    // and ignores `direction`/`window` — they arrive as nulls, never as absent
     // keys, so a desk cannot tell "not sent" from "not parsed".
     const s = sanitizeScanSeed({ ticker: 'msft', sector: 'Technology', thesis: 'quality compounder', analysis: 'ROIC 28%, net cash' })
     assert.equal(s.ticker, 'MSFT')
@@ -174,7 +174,7 @@ test('seed: uppercases ticker, keeps sector/thesis/analysis, requires a ticker',
     assert.equal(s.thesis, 'quality compounder')
     assert.equal(s.analysis, 'ROIC 28%, net cash')
     assert.deepEqual(sanitizeScanSeed({ ticker: 'aapl' }),
-        { ticker: 'AAPL', direction: null, sector: null, thesis: null, analysis: null, recommended_mode: null, window: null, hotlist: null, book: null })
+        { ticker: 'AAPL', direction: null, sector: null, thesis: null, analysis: null, window: null, hotlist: null, book: null })
     assert.equal(sanitizeScanSeed({ thesis: 'no ticker' }), null)
     assert.equal(sanitizeScanSeed({ ticker: '  ' }), null)
     assert.equal(sanitizeScanSeed(null), null)

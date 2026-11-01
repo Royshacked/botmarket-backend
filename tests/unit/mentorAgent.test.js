@@ -207,20 +207,15 @@ test('a handed-over name reaches the prompt with Argus\'s read', async () => {
     assert.match(text, /clean base/)
 })
 
-test('the recommended lens is named AND framed as a recommendation', async () => {
-    // The failure this guards is silent: a model handed a field called `recommended_mode` reads it
-    // as an instruction, adopts the lens, and the user never learns a choice was made. Mentor's
-    // whole contract is that it works on what the user brought and hands the decision back.
-    const text = await seedOf({ ticker: 'NVDA', recommended_mode: 'institutional' })
-    assert.match(text, /institutional/)
-    assert.match(text, /recommendation, not a decision/i)
-    assert.match(text, /use theirs/i, 'the user can override it')
+test("a hand-off opens RISK-BASED and says so — no setup of the user's (mentor-modes.md)", async () => {
+    const text = await seedOf({ ticker: 'NVDA', thesis: 'momentum' })
+    assert.match(text, /RISK-BASED \(the `thesis` lens\)/)
+    assert.match(text, /if they bring their own setup, switch/i, 'the user can still bring theirs')
 })
 
-test('a hand-off with no lens asks instead of assuming one', async () => {
-    const text = await seedOf({ ticker: 'NVDA', thesis: 'momentum' })
-    assert.match(text, /ask which lens/i)
-    assert.doesNotMatch(text, /recommends the/i)
+test('a lens still arriving on a hand-off from an old client is ignored — Argus recommends none (mentor-modes.md)', async () => {
+    const text = await seedOf({ ticker: 'NVDA', recommended_mode: 'institutional' })
+    assert.doesNotMatch(text, /recommends the|the institutional lens/i)
 })
 
 test("the house's label on a handed-over name is said as a view of the industry (argus-on-pythia.md §3.4)", async () => {

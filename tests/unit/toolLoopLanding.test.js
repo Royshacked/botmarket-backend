@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { streamAnthropicWithTools } from '../../providers/anthropic.provider.js'
 import { streamOpenAICompatWithTools } from '../../providers/openaiCompat.provider.js'
-import { TOOL_BUDGET_LANDING, MAX_PARALLEL_TOOLS } from '../../services/llmStream.util.js'
+import { TOOL_BUDGET_LANDING, EMPTY_REPLY_NUDGE, MAX_PARALLEL_TOOLS } from '../../services/llmStream.util.js'
 
 // The tool loop's LANDING ROUND, on both providers. A turn that is still calling tools when the
 // continuation cap arrives used to throw — and Mentor's "go all the way" build, which climbs eight
@@ -126,6 +126,43 @@ test('openai-compat: same landing — tool_choice none on the last round, the no
     assert.deepEqual(last, { role: 'user', content: TOOL_BUDGET_LANDING })
     assert.equal(r3.messages[r3.messages.length - 2].role, 'tool', 'the note follows the final tool results')
     assert.ok(!r2.messages.some(m => m.content === TOOL_BUDGET_LANDING), 'not before the last round')
+})
+
+// ─── AN EMPTY REPLY AFTER TOOLS IS ASKED FOR ONCE (openai-compat) ─────────────
+// Luna read its tools and ended the next round with no text and no call — the user saw nothing. The loop now asks once,
+// tools off; a second blank is returned as it is, and a first round with nothing to say is not this case.
+
+const oaEmpty = () => [chunk({}, 'stop')]
+const oaRun = (client, maxContinuations = 5) => streamOpenAICompatWithTools({
+    wire: 'openai/gpt-6-luna', model: 'gpt-6-luna', client, promptOrMessages: 'Build me a trade on AAPL.', systemPrompt: 'S',
+    tools: [TOOL], toolHandlers: { get_quote: async () => 'AAPL 230' }, maxContinuations,
+})
+
+test('openai-compat: an empty round after tools is asked once, tools off — and the reply comes back', async () => {
+    const client = fakeOpenAI([oaToolRound('c1'), oaEmpty(), [chunk({ content: 'AAPL reads long.' }, 'stop')]])
+    assert.equal(await oaRun(client), 'AAPL reads long.')
+    const r3 = client.requests[2]
+    assert.equal(r3.tool_choice, 'none', 'the nudged round may only write')
+    assert.deepEqual(r3.messages.at(-1), { role: 'user', content: EMPTY_REPLY_NUDGE })
+    assert.equal(r3.messages.at(-2).role, 'tool', 'the empty round itself is not replayed as a turn')
+})
+
+test('openai-compat: asked ONCE — a second blank is returned as it is', async () => {
+    const client = fakeOpenAI([oaToolRound('c1'), oaEmpty(), oaEmpty()])
+    assert.equal(await oaRun(client), '')
+    assert.equal(client.requests.length, 3)
+})
+
+test('openai-compat: a first round with nothing to say is not nudged (no tools ran)', async () => {
+    const client = fakeOpenAI([oaEmpty()])
+    assert.equal(await oaRun(client), '')
+    assert.equal(client.requests.length, 1)
+})
+
+test('openai-compat: an empty LANDING round still gets its one ask — the bound grows by one', async () => {
+    const client = fakeOpenAI([oaToolRound('c1'), oaEmpty(), [chunk({ content: 'landed' }, 'stop')]])
+    assert.equal(await oaRun(client, 2), 'landed')
+    assert.equal(client.requests.length, 3)
 })
 
 // ─── A WIDE ROUND IS PACED ────────────────────────────────────────────────────

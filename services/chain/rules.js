@@ -25,7 +25,6 @@ export function emitted(agent, payload, state) {
                 direction:        pick.direction === 'short' ? 'short' : 'long',
                 thesis:           pick.thesis ?? null,
                 analysis:         pick.analysis ?? pick.thesis ?? null,
-                recommended_mode: pick.recommended_mode ?? null,
             }],
             from: { agent: 'scanner', label: 'Scan' },
         })
