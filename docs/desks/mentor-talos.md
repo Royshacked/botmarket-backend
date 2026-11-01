@@ -953,7 +953,10 @@ there is one, a seed means risk-based and a typed first message is read by one H
 resolveMode`). The kit follows the mode — risk-based drops the pattern and indicator tools (`kitFor`, `THESIS_DROPPED`;
 the cache breakpoint moves to `get_market_hours`) — and the turn context says it (`MODE:`). A switch, either way, is
 `<build>{"switch_lens":…}</build>` (`mentorBuild switchLens`): direction and horizon stay, the spans down reopen, the
-user's size is held, and the old levels leave the worksheet (`_withoutLevels`). Argus no longer recommends a lens.
+user's size is held, and the old mode's levels, pace, conditions and rejects leave the worksheet (`_forNewLens`). A switch
+to their setup only RECOMMENDS the lens — the opening waits on their yes, and the new levels come next turn, on the
+whole kit; a switch to thesis is their yes. A hand-off claims `thesis` on turn one; the risk-based kit drops the
+handlers too (`handlersFor`). Argus no longer recommends a lens.
 
 A setup arrives one of three ways — a bare name, a name Argus handed over, or a plan the user
 already made — and there is **one machine, not three paths**. Whatever arrived is written into the

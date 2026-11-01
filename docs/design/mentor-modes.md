@@ -83,8 +83,7 @@ for on every turn. The cost: each mode keeps its own prompt cache (MENTOR_TOOLS 
   `applyBuildOps`, which returns `switched`). The size is re-claimed as the user's (held); a handed-back spans/entries
   gate is the user's again.
 - `mentor.agent.service.js` — the kit per turn; `_buildModeSection` (`MODE:` in the turn context, before the ledger);
-  `_withoutLevels` on a switch that draws no new levels (the scenarios AND the flat projection, or the round trip would
-  rebuild them); `_buildSeedSection` says risk-based for every hand-off and ignores a lens from an old client;
+  `_forNewLens` on a switch (renamed from `_withoutLevels` in the CR below); `_buildSeedSection` says risk-based for every hand-off and ignores a lens from an old client;
   `mode` / `modeSource` / `switchedTo` on the turn log.
 - Prompt — § Two modes (new), the opening's lens line and reading ladder per mode, § When the plan is already theirs
   widened to a half-made idea with the lens among three, § The thesis lens step 1 (a bare name or Argus: direction
@@ -94,6 +93,26 @@ for on every turn. The cost: each mode keeps its own prompt cache (MENTOR_TOOLS 
   `chain/rules.js`. Frontend: `hotlistHandoff`, `handoffTurn`, MainPage's saved-list hand-off.
 - Tests — `tests/unit/mentorModes.test.js` (16); the lens tests in mentorAgent, thesisLens, scannerScore,
   scannerProfiles, scannerHandoffMode, analystAgent rewritten to the new rule. Suite 4775/0 (talosRecorder excluded).
+
+## Code review (2026-11-01)
+
+`/code-review high main...feat/mentor-modes` — 10 candidates, 9 real; 8 fixed in eacf2be, one held:
+
+1. **A switch settled a lens nobody agreed to.** A switch to the user's setup now only RECOMMENDS the lens (claimed by
+   Mentor, the settlement taken back — the opening waits on their yes); a switch to thesis is their yes and stays settled.
+2. **The switch turn into their setup has the risk-based kit.** Mentor names the lens and draws the new levels NEXT
+   turn, on the whole kit (MODE line + § Two modes, per direction) — rather than guessing pattern levels without the tools.
+3. **The old pace survived** — Talos would read a thesis setup on a discretionary ladder. 4. **The old conditions,
+   read mode and rejects survived**, and the old rejects blocked the new gate's. `_forNewLens` clears all of them unless
+   this turn drew them again; thesis gets its own 1h / 4h.
+6. **A hand-off could flip on turn two** — the seed rides the first request only, and the cheap read then saw Argus's
+   words as the user's setup. The hand-off claims `thesis` on the ledger on turn one, on a stub that carries the lens.
+7. **The read held the first token** — now beside the venue fetch, with the turn's abort signal and an 8s timeout.
+8. **Off the list was not off the map** — `handlersFor` drops the dropped tools' handlers ("no handler" if called).
+9. **The switch was judged against the name active BEFORE the turn** — now against the name the turn writes to.
+
+Held: **#10** — the empty-reply retry is in the OpenAI-compat loop only; the Anthropic loop has none (no empty seen on
+Claude, which has barely run since Luna became the house model). Its own change.
 
 ## Open
 
