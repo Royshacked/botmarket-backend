@@ -112,7 +112,7 @@ for on every turn. The cost: each mode keeps its own prompt cache (MENTOR_TOOLS 
 9. **The switch was judged against the name active BEFORE the turn** — now against the name the turn writes to.
 
 Held: **#10** — the empty-reply retry is in the OpenAI-compat loop only; the Anthropic loop has none (no empty seen on
-Claude, which has barely run since Luna became the house model). Its own change.
+Claude, which has barely run since Luna became the house model). DONE 2026-11-01 on fix/anthropic-empty-reply: the same one ask, tools off, riding the tool results (the API takes no empty assistant turn).
 
 **Re-driven after the fixes, 2026-11-01 19:10 — 16/16** (drive-mentor-modes.mjs).
 

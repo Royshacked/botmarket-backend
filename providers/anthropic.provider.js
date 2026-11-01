@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk'
-import { createTagSuppressor, TOOL_BUDGET_LANDING, MAX_PARALLEL_TOOLS, makeVisionBudget } from '../services/llmStream.util.js'
+import { createTagSuppressor, TOOL_BUDGET_LANDING, EMPTY_REPLY_NUDGE, MAX_PARALLEL_TOOLS, makeVisionBudget } from '../services/llmStream.util.js'
 import { mapLimit } from '../services/concurrency.util.js'
 import { isToolError, toolErrorText } from '../services/toolResult.util.js'
 import { logger } from '../services/logger.service.js'
@@ -122,7 +122,9 @@ export async function streamAnthropicWithTools({
     // the turn, which is the only span on which "never across the pool" means anything.
     const toolCtx = { onUsage, visionBudget: makeVisionBudget(config.visionMaxUsesPerTurn) }
 
-    for (let i = 0; i < maxContinuations; i++) {
+    // ONE extra round, tools off, when a round after tools lands EMPTY (EMPTY_REPLY_NUDGE) — the bound grows by one then.
+    let nudged = false
+    for (let i = 0; i < maxContinuations + (nudged ? 1 : 0); i++) {
         // Client disconnected (user hit Stop) — end the loop instead of burning
         // another model call / tool round.
         if (signal?.aborted) { suppressor.flush(); return '' }
@@ -133,7 +135,8 @@ export async function streamAnthropicWithTools({
 
         // The landing round: tools off, so the turn ends as text instead of at the throw below.
         // `none` is the one tool_choice extended thinking accepts besides `auto`. See TOOL_BUDGET_LANDING.
-        const landing = i === maxContinuations - 1 && finalTools.length > 0
+        // The nudged round is a landing too: the model already has what it read, and only has to write.
+        const landing = (i >= maxContinuations - 1 || nudged) && finalTools.length > 0
 
         // Cut a round that stops sending (streamStall) — the stream rides the guard's signal.
         const guard = stall({ signal })
@@ -218,6 +221,18 @@ export async function streamAnthropicWithTools({
         const fullText    = validBlocks.filter(b => b.type === 'text').map(b => b.text || '').join('')
 
         if (stopReason === 'end_turn') {
+            // AN EMPTY LANDING AFTER TOOLS — the user would see their message and nothing under it. Asked once, tools
+            // off. The API takes no empty assistant turn and roles must alternate, so the ask rides the tool results the
+            // model just read (as TOOL_BUDGET_LANDING does) and the empty round is not replayed.
+            const last = messages[messages.length - 1]
+            if (!fullText.trim()) {
+                logger.warn(LOG, `empty reply on ${model}`, { round: i, landing, nudged })
+                if (!nudged && i > 0 && last?.role === 'user' && Array.isArray(last.content)) {
+                    nudged = true
+                    last.content = [...last.content, { type: 'text', text: EMPTY_REPLY_NUDGE }]
+                    continue
+                }
+            }
             suppressor.flush()
             return fullText
         }
