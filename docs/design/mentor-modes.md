@@ -109,4 +109,6 @@ for on every turn. The cost: each mode keeps its own prompt cache (MENTOR_TOOLS 
   as the user's, Mentor recommended `discretionary`; "your way" switched it to `thesis` and the next turn ran on the
   risk-based kit. The one FAIL: the bare-name turn came back EMPTY (`replyLength 0`) after eight tool calls, so no
   worksheet and no lens claim — the mode itself was right. Not from this change: the same empty reply after a tool loop
-  is in the log on 2026-10-31 and through October. Open as its own defect.
+  is in the log on 2026-10-31 and through October. Fixed on its own branch (fix/compat-empty-reply 0c5d637, merged here):
+  one extra round, tools off, when a round after tools lands empty. **Re-driven 2026-11-01 18:45 — 16/16**; no empty
+  reply came up, so the retry itself is proven by unit tests only.
