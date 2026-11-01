@@ -165,6 +165,44 @@ test('openai-compat: an empty LANDING round still gets its one ask — the bound
     assert.equal(client.requests.length, 3)
 })
 
+// ─── AND THE SAME ON THE ANTHROPIC LOOP ──────────────────────────────────────
+// The API takes no empty assistant turn and roles must alternate, so the ask rides the tool results the model just read.
+
+const anRun = (client, maxContinuations = 5) => streamAnthropicWithTools({
+    model: 'claude-sonnet-5', promptOrMessages: 'Build me a trade on AAPL.', systemPrompt: 'S',
+    tools: [TOOL], toolHandlers: { get_quote: async () => 'AAPL 230' }, maxContinuations, client,
+})
+
+test('anthropic: an empty round after tools is asked once, tools off — on the tool results, not as a new turn', async () => {
+    const client = fakeAnthropic([toolRound('t1'), textRound(''), textRound('AAPL reads long.')])
+    assert.equal(await anRun(client), 'AAPL reads long.')
+    const r3 = client.requests[2]
+    assert.deepEqual(r3.tool_choice, { type: 'none' }, 'the nudged round may only write')
+    const last = r3.messages.at(-1)
+    assert.equal(last.role, 'user')
+    assert.equal(last.content[0].type, 'tool_result')
+    assert.deepEqual(last.content.at(-1), { type: 'text', text: EMPTY_REPLY_NUDGE })
+    assert.equal(r3.messages.at(-2).role, 'assistant', 'roles still alternate — the empty round is not replayed')
+})
+
+test('anthropic: asked ONCE — a second blank is returned as it is', async () => {
+    const client = fakeAnthropic([toolRound('t1'), textRound(''), textRound('')])
+    assert.equal(await anRun(client), '')
+    assert.equal(client.requests.length, 3)
+})
+
+test('anthropic: a first round with nothing to say is not nudged (no tools ran)', async () => {
+    const client = fakeAnthropic([textRound('')])
+    assert.equal(await anRun(client), '')
+    assert.equal(client.requests.length, 1)
+})
+
+test('anthropic: an empty LANDING round still gets its one ask — the bound grows by one', async () => {
+    const client = fakeAnthropic([toolRound('t1'), textRound(''), textRound('landed')])
+    assert.equal(await anRun(client, 2), 'landed')
+    assert.equal(client.requests.length, 3)
+})
+
 // ─── A WIDE ROUND IS PACED ────────────────────────────────────────────────────
 // The other half of the loop's discipline, and the half that was missing. A round used to be
 // `Promise.all(uses.map(...))` on both providers: every call the model asked for, fired together.

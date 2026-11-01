@@ -23,7 +23,8 @@ export const TOOL_BUDGET_LANDING = 'The tool budget for this turn is spent — t
 /**
  * An EMPTY REPLY after tools ran — the model read, then ended its round with no text and no call. On Luna (the
  * OpenAI-compat loop) that was ~1 Mentor turn in 5 with tools from 2026-10-18 to 2026-11-01: the user saw their message
- * and nothing under it. The loop answers it once with this, tools off, rather than handing the user a blank.
+ * and nothing under it. Both tool loops (OpenAI-compat and Anthropic) answer it once with this, tools off, rather than
+ * handing the user a blank.
  */
 export const EMPTY_REPLY_NUDGE = 'You ended that round without writing anything to the user. Write your reply to them now, from what you already read — no more tool calls.'
 
