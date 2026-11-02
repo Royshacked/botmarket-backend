@@ -150,7 +150,7 @@ test('the lens prompt: the deeper stop is OFFERED with its cost and its date, ne
     const lens = _lens()
     assert.match(lens, /OFFER the deeper stop, never set it unasked/)
     assert.match(lens, /deep_stop_last_traded/)
-    assert.match(lens, /never guess a date/)
+    assert.match(lens, /never guess one/)
     assert.match(lens, /may never fill/)
     assert.match(lens, /stop's depth did not move the edge/)
 })
@@ -224,4 +224,30 @@ test('thesisGate: a short is the mirror; another lens and a dead scenario are no
     const dead = { ...THESIS([A, B]), monitor_state: { scenarios: { B: { invalidation_status: 'fired' } } } }
     assert.equal(thesisGate(dead, 172), null, 'B broke; A\'s level is not reached at 172')
     assert.equal(thesisGate(THESIS([A, B]), NaN), null)
+})
+
+test('the lens prompt after the GNRC drive: the date said from the tool, the deep stop on only when taken, B reopened', () => {
+    const lens = _lens()
+    assert.match(lens, /SAY that\s+date, from the tool on this turn/)
+    assert.match(lens, /the deep one goes on only when the user takes it/)
+    assert.match(lens, /When the user then TAKES the deep stop, the answer has changed: reopen the ways in and offer B then/)
+    assert.match(lens, /never quote an R:R or a level of your own either/)
+})
+
+test('the lens prompt: Mentor reads what risk fits from the chart — judgment, no menu; the limit stays the user\'s (Roy)', () => {
+    const lens = _lens()
+    assert.match(lens, /Your read of what risk fits — then ask the user/)
+    assert.match(lens, /in this stock's normal\s+moves \(`atr_pct`/)
+    assert.match(lens, /Judgment, not a table — no fixed menu of percents/)
+    assert.match(lens, /Any\s+LEVEL you name in that read comes from `get_entry_level`/)
+    assert.match(lens, /no limit better for the edge/)
+    assert.match(lens, /theirs, never yours/)
+})
+
+test('the lens prompt: an offer carries its numbers in one bullet — the brevity cap cuts words, not the offer (GNRC drive)', () => {
+    const lens = _lens()
+    assert.match(lens, /An offer carries its numbers, or it was not made/)
+    assert.match(lens, /never "a wider stop remains an option"/)
+    assert.match(lens, /not traded under since Feb 5/)
+    assert.match(lens, /about 2\.5 of this stock's normal days/)
 })
