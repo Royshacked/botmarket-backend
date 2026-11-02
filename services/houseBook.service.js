@@ -24,6 +24,7 @@ import { COLLECTION as ASSESSMENTS, longTermYes } from '../api/strategy/industry
 import { addMonths } from './forecastClock.js'
 import { getTickerAggregates } from '../providers/candles.provider.js'
 import { fetchLastPrice } from './lastPrice.service.js'
+import { readsFor as timingReads } from './bookTiming.service.js'
 import { logger } from './logger.service.js'
 
 const LOG = '[houseBook]'
@@ -46,6 +47,8 @@ const _deps = {
     bars:  (s, from, to) => getTickerAggregates(s, { timeSpan: 'day', multiplier: 1, from, to }).catch(() => null),
     price: (s) => fetchLastPrice(s).catch(() => null),
     now:   () => Date.now(),
+    // Argus's timing reads (bookTiming); a failed read leaves the rows without one.
+    timing: (symbols) => timingReads(symbols),
 }
 /** Test seam. */
 export function _setDeps(d) { Object.assign(_deps, d) }
@@ -368,6 +371,8 @@ export async function houseBook({ deps = _deps } = {}) {
     for (const [b, list] of Object.entries(picks ?? {})) {
         for (const p of list) { Object.assign(p, stillCalled(p, b, verdicts, nowIso)); delete p.assessment_id }
     }
+    // Argus's timing reads (bookTiming) — the rows go out without them when the read fails.
+    const timing = await Promise.resolve(deps.timing?.(symbols)).catch(err => { logger.warn(LOG, 'timing reads not read', { error: err.message }); return null }) ?? new Map()
     // `picks` null = could not be read (the list says so), not "the chain sent nothing".
     const out = { asof: closes.day, today, swing: [], long_term: [], record: {}, picks }
     for (const c of covs) {
@@ -377,6 +382,7 @@ export async function houseBook({ deps = _deps } = {}) {
         const row = bookRow(c, { close: s?.close ?? l?.close ?? null, name: s?.name ?? null, closeDay: s?.close ? closes.day : l?.day ?? null,
             mark: marks.get(`${c.symbol}|${c.price_target?.set_at ?? ''}`) ?? null, spyNow, origin, today })
         if (origin) Object.assign(row.origin, stillCalled(origin, b, verdicts, nowIso))
+        row.timing = timingOf(row, timing.get(c.symbol))
         out[b].push(row)
     }
     const order = (a, b) => (a.origin.source === 'pythia' ? 0 : 1) - (b.origin.source === 'pythia' ? 0 : 1)
@@ -390,6 +396,16 @@ export async function houseBook({ deps = _deps } = {}) {
         out.record[b] = bookRecord(onList, await _calls(db, onList.map(r => r.symbol), BOOKS[b]))
     }
     return out
+}
+
+/**
+ * Argus's timing read for a book row, as the row shows it, or null. Pure. A read made against an earlier target (Prometheus
+ * re-set it since — a new `set_at`) times a thesis that is gone: not shown; the next run reads the new one.
+ */
+export function timingOf(row, read) {
+    if (!read?.verdict || (read.set_at ?? null) !== (row?.set_at ?? null)) return null
+    return { verdict: read.verdict, wait_for: read.wait_for ?? null, wrong_if: read.wrong_if ?? null, why: read.why ?? null,
+        week: read.week ?? null, read_at: read.read_at ?? null, price: read.price ?? null }
 }
 
 /**

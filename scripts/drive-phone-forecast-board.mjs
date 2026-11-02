@@ -6,6 +6,7 @@
 //   node scripts/drive-phone-forecast-board.mjs [baseUrl] [outDir]
 //
 // Against the Vite dev server (:5173) as `ui-smoke`. One sign-in, no model spend.
+/* global document, window, getComputedStyle -- page.evaluate bodies run in the browser */
 import dns from 'dns'
 import 'dotenv/config'
 import { chromium } from 'playwright'

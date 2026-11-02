@@ -1,4 +1,4 @@
-/* global document, window -- page.evaluate bodies run in the browser */
+/* global document, window, getComputedStyle  -- page.evaluate bodies run in the browser */
 // Drive the HOTLIST ON A PHONE, as a user and as the admin (Roy, 2026-10-29: "full table for admin only; for regular users
 // only the table with the four tabs above — no explanations; in mobile — tables too wide").
 //

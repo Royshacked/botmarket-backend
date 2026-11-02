@@ -366,7 +366,7 @@ grades: they gate which names reach a column and order the board, and the outcom
   one click away; This week opens on **Prometheus confirmed** (a target of his), then **Argus's names**, then **All
   screened**; Swing / Long term are the weekly chain's survivors — **Prometheus confirmed** · **Argus's names** · **All
   coverage** (docs/design/horizon-chains.md).
-- A row: ticker · gap · relative volume · catalyst label · free range (% and × ATR) · **Ask Argus** / **Build with
+- A row: ticker · gap · relative volume · catalyst label · free range (% and × ATR) · **Ask Argus** (removed 2026-11-02, Roy) / **Build with
   Mentor**. No grade letter (§7.6).
 - The board **updates at each checkpoint** (§5); a name can rise, fall or leave during the day.
 - **Today's list** (Roy, 2026-10-22) — the panel's default view, a classic watchlist: every name any

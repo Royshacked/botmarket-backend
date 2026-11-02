@@ -12,6 +12,7 @@ import { runOutcomes } from '../services/hotlist.outcomes.js'
 import { runWeekBoard } from '../services/hotlist.week.js'
 import { hotlistResearchService } from '../services/hotlistResearch.service.js'
 import { catalystReadService } from '../services/catalystRead.service.js'
+import { bookTimingService } from '../services/bookTiming.service.js'
 import { config } from '../services/config.js'
 
 const LOG = '[dailyScreenerMonitor]'
@@ -27,6 +28,9 @@ const _deps = {
     afterCheckpoint: (r) => hotlistResearchService.afterCheckpoint(r),
     resume: (day) => hotlistResearchService.resume(day),
     gradeReads: () => catalystReadService.gradeDue(),
+    // Argus's weekly timing read on the Swing / Long term lists (bookTiming — it keeps its own pace: every 30 minutes at
+    // most, a few batches a run, each name once a week).
+    timing: () => bookTimingService.runTiming(),
     now: () => Date.now(),
 }
 export function _setDeps(d) { Object.assign(_deps, d) }
@@ -53,7 +57,8 @@ export async function _tick(deps = _deps) {
     let graded = null
     const nowMs = deps.now?.() ?? Date.now()
     if (deps.gradeReads && nowMs - _gradedAt >= GRADE_EVERY_MS) { _gradedAt = nowMs; graded = await deps.gradeReads() }
-    return { nightly, week, outcomes, research, resumed, graded }
+    const timing = await (deps.timing?.() ?? null)
+    return { nightly, week, outcomes, research, resumed, graded, timing }
 }
 
 const _loop = createPollLoop({ intervalMs: CHECK_INTERVAL_MS, tick: () => _tick(), eager: false, log: LOG, name: 'daily screener' })

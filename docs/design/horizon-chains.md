@@ -201,7 +201,8 @@ buttons after This week (services/houseBook.service.js, GET /api/hotlist/book; H
   BACKGROUND (12 per open) and kept in `house_book_marks` — the coverage documents are not touched; a re-set target has
   a new set_at and is read again; a miss is retried after a day.
 - **The opened row** is the thesis itself (CoverageDetail, from the coverage list the Floor already holds), with Build
-  with Mentor and Ask Argus (is now the time to buy it). Build with Mentor rides as a REFERENCE — which list
+  with Mentor and Ask Argus (is now the time to buy it — removed 2026-11-02: Argus's weekly timing read answers it, see
+  below). Build with Mentor rides as a REFERENCE — which list
   (scanSeed \`book: { column }\`) — and the server reads the name's coverage back (houseBook \`bookSeed\`): the horizon
   is the coverage's own book (swing / long term, from the target's horizon, whatever the request said), and Mentor's
   seed section, headed "FROM THE HOUSE'S BOOK", carries the rating, target and date, the upside, where it came from
@@ -279,6 +280,30 @@ TRACK RECORD is over the `on` rows — it had counted the whole horizon's book, 
 
 On prod the chain has not run (2026-10-24: 30 old `queued` rows, no chain coverage). It needs `PYTHIA_WEEKLY=true`
 and the engine crons on Render (house-research-chain.md, "As built").
+
+## Argus's timing read on Swing and Long term (2026-11-02)
+
+Roy: the rows' "Ask Argus" asked "is now a good time to buy it, and what would make it wrong?" by hand — "can it be
+automatic — part of the run?"; re-read weekly; "the table — all users see the same"; and the button removed from every
+list (This week included: Argus's caution and Prometheus's read already answer it there).
+
+`services/bookTiming.service.js`. Prometheus's thesis says what a name is worth, not when to buy it. Argus reads each
+**Buy** (buy / strong buy) **on** a list (`listOf` = on), live, against last night's chart — the screener's stats, the
+same `techLine` the board used, plus its levels in dollars and its next report — and answers **now**, or **wait** for a
+price he names or a dated event, with what would make the call wrong. He does not re-judge the thesis or set a target.
+
+- **Weekly.** A read belongs to its ET week (Monday). Due when the name has none this week, or Prometheus re-set the
+  target since (`set_at`). It rides the screener's 5-minute monitor at most every 30 minutes, 2 batches of 15 a run, so
+  a week's ~100 Buys land over a few ticks; a failed batch or a name left out waits 6 hours. `BOOK_TIMING=false` stops it.
+- **The house's.** One read per symbol in `book_timing_reads`, the same for every user, booked to the house ledger as
+  monitor spend (`bookTiming`). houseBook attaches it to the row as `timing` — only against the target it was made for.
+- **Shown** as a Timing column on Swing and Long term (Now green, Wait amber, everything he said on hover; a Hold or a
+  Sell says "Argus times the Buys only") and a line on the row's page. Not on Covered companies.
+- **Found live (axl_dev, 2026-11-02).** The first prompt said wait on 29 of 30 — a column that says nothing. The prompt
+  now makes NOW the default and wait a named level within reach or a report inside two weeks: the same 22 names read
+  11 / 11. A name with no chart was told "wait for a usable chart" — chartless names are no longer read. A past report
+  date from lagging stats was offered as the thing to wait for — reports before today are dropped. Cost: $0.004 for
+  22–30 names (Luna).
 
 ## Build order
 

@@ -279,6 +279,9 @@ export const config = {
     // A catalyst read a USER asked for from the Hotlist ("Catalyst read" on a This week row): outside the house's daily $,
     // capped by count instead — this many a day, everyone's together (~$0.015–0.03 each).
     get hotlistManualReads()      { return _num('HOTLIST_MANUAL_READS', 20) },
+    // Argus's TIMING READ on the Swing / Long term lists (bookTiming.service; Roy, 2026-11-02: "Ask Argus" made automatic,
+    // re-read weekly) — on with the screener's monitor it rides; BOOK_TIMING=false is the kill switch.
+    get bookTiming()              { return _bool('BOOK_TIMING', 'false-0') },
     get dailyScreenerRpm() { return _num('DAILY_SCREENER_RPM', 60) },
     // (ARCHIVED with the checkpoints 2026-10-25 — archive/services/hotlist.news.js; read by nothing live.)
     // The model that labels the checkpoint pool's headlines (services/hotlist.news.js) — once per

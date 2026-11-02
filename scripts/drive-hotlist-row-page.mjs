@@ -1,4 +1,4 @@
-/* global document, window -- page.evaluate bodies run in the browser */
+/* global document, window, Node  -- page.evaluate bodies run in the browser */
 // Drive the HOTLIST, SIMPLE — and a row's PAGE over the window (Roy, 2026-10-31: "the user should see simple things … when
 // clicking a row I want it to cover the whole chatbox like the detail window").
 //

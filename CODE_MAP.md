@@ -1008,6 +1008,12 @@ services/
                             list is the chain's COVERED names whatever the rating, plus chain picks already
                             covered at the desk. GET /api/hotlist/book. bookSeed — a Mentor hand-off off the lists
                             (scanSeed `book` ref) resolved from the coverage: horizon + the thesis in numbers
+  bookTiming.service.js     ARGUS'S TIMING READ on Swing / Long term (horizon-chains.md, 2026-11-02 — replaced the
+                            rows' "Ask Argus"): each Buy on a list read weekly against last night's chart → now / wait
+                            (for a level or a dated report) + wrong_if, in `book_timing_reads` (one per symbol, the
+                            same for every user, booked to the house ledger). Due: no read this ET week, or the target
+                            re-set (`set_at`). Rides the daily-screener monitor (every 30 min at most, 2×15 names a
+                            run); BOOK_TIMING=false stops it. houseBook attaches `timing` (timingOf) to the rows
   hotlist.argus.js (pool)   Argus also reads the board's POOL — quoted names graded on no column (40, poolForArgus) —
                             and SPOTS up to 10 the rules missed (daily-names.md §7.4); scored and in his record
   hotlistBacktest.service.js THE WEEK REPLAY (daily-names.md §7.5): the live This week rules over past sessions —

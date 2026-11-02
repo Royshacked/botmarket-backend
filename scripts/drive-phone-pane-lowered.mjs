@@ -10,6 +10,7 @@
 //
 // Against the Vite dev server (:5173) as `ui-smoke`. The Mentor TURN is answered by the drive (no model spend): what is
 // driven is the pane, which opens client-side whatever the turn does. One sign-in.
+/* global document, window, getComputedStyle -- page.evaluate bodies run in the browser */
 import dns from 'dns'
 import 'dotenv/config'
 import { chromium } from 'playwright'
