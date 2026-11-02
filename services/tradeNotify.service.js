@@ -185,7 +185,10 @@ export function buildSetupInvalidation(setup, info = null) {
             actions: cardActions('Re-draw with Mentor'),
         },
         ran_away_fyi: {
-            content: `${subject} didn't get filled — price ran past ${info?.price ?? 'the level'} without you. The read wasn't wrong; the entry just never came, and you said to let that one go.`,
+            // A runaway leaves its scenario LIVE (drifting — price can come back), so `remaining` counts it; the others
+            // are one fewer. On a thesis setup the other is the break scenario, the reason this one was `pass`.
+            content: `${subject} didn't get filled — price ran past ${info?.price ?? 'the level'} without you. The read wasn't wrong; the entry just never came, and you said to let that one go.`
+                + (remaining > 1 ? ` Your other ${remaining === 2 ? 'scenario is' : `${remaining - 1} scenarios are`} still armed.` : ''),
             // `actions: null`, matching `invalidated_fyi`: the user pre-answered this exact question at
             // build time, so re-asking it is the thing `pass` exists to prevent.
             actions: null,

@@ -200,4 +200,8 @@ in control → A with an away edge), and a `ran_away` card reopening the plan.
   talosMonitor (a wake under B's level reads B and fires B's leg; over every level, no hit). Suite 4811/0 (without
   talosRecorder.test.js); lint clean.
 
+**Bug-hunt fixes (same day):** a `pass` runaway card names the other scenario still armed (the ran-away one stays
+live, so it is not counted); Talos's ARMED LEVEL line on a thesis setup says "at or under it — the level and below",
+not "standing on it". Suite 4813/0.
+
 **Not done:** the browser drive (needs the dev backend restarted — Roy); redrawing the live NXST setup (§ Decided 3).

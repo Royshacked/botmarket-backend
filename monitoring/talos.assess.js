@@ -331,7 +331,12 @@ export function _armedLevelLine(setup, zone) {
     // No trailing gloss: the label already means "price is standing here", and a leg that carries a
     // note ends in one em-dash clause already — two in a row read as a sentence nobody wrote.
     const text = legText(zone)
-    return `ARMED LEVEL (price is standing on it): ${text ?? `[${zone.id ?? '?'}]`}`
+    // A thesis level is reached from there on (`thesisGate`), so price can be well past it — "standing on it" would
+    // misstate where price is.
+    const where = setup?.trade_mode === 'thesis'
+        ? `price is at or ${setup.direction === 'short' ? 'over' : 'under'} it — the level and ${setup.direction === 'short' ? 'above' : 'below'}`
+        : 'price is standing on it'
+    return `ARMED LEVEL (${where}): ${text ?? `[${zone.id ?? '?'}]`}`
 }
 
 /**

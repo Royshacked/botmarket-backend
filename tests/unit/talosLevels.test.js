@@ -112,6 +112,13 @@ test('an armed level reads as a price, like every other leg', () => {
     assert.doesNotMatch(line, STORAGE)
 })
 
+test('a thesis armed level says price is at or past it — the level and below (above, on a short)', () => {
+    const leg = SCENARIO.entry_legs[0]
+    assert.match(_armedLevelLine({ ...SETUP, trade_mode: 'thesis', direction: 'long' }, leg),
+        /ARMED LEVEL \(price is at or under it — the level and below\): \[ez1\] at 238\.2/)
+    assert.match(_armedLevelLine({ ...SETUP, trade_mode: 'thesis', direction: 'short' }, leg), /at or over it — the level and above/)
+})
+
 // ─── the cheap tier ───────────────────────────────────────────────────────────
 
 test('the cheap tier reads the same vocabulary as the tier it escalates to', () => {

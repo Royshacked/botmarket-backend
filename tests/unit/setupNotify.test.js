@@ -130,6 +130,15 @@ test('`pass` is honoured: the user is told and asked nothing', () => {
     assert.match(card.content, /you said to let that one go/)
     assert.equal(card.actions, undefined, 'no primary, and nothing to clear')
     assert.doesNotMatch(card.content, /continuation to look at/, 'a pass does not get a suggestion')
+    assert.doesNotMatch(card.content, /still armed/, 'remaining 0/1: nothing else to name')
+})
+
+test('a `pass` runaway names the other way in still armed — the ran-away one is still counted live (thesis A + B)', () => {
+    const one = buildSetupInvalidation(SETUP, { card: 'ran_away_fyi', price: 170.1, scenario: 'thesis pullback', remaining: 2 })
+    assert.match(one.content, /Your other scenario is still armed\./)
+    const two = buildSetupInvalidation(SETUP, { card: 'ran_away_fyi', price: 170.1, scenario: 'thesis pullback', remaining: 3 })
+    assert.match(two.content, /Your other 2 scenarios are still armed\./)
+    assert.doesNotMatch(buildSetupInvalidation(SETUP, { card: 'ran_away_fyi', price: 170.1, remaining: 1 }).content, /still armed/)
 })
 
 test('an invalidation offers the re-draw, and quotes the close', () => {
