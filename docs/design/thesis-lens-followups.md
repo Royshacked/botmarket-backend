@@ -1,6 +1,6 @@
 # The thesis lens — the deeper stop, the break scenario, and the trade that leaves
 
-**STATUS: DESIGN ONLY (2026-11-02), nothing built.** From a walk-through of the risk-based mode with Roy on two live
+**STATUS: DESIGN ONLY (2026-11-02), nothing built; open questions decided the same day (§ Decided).** From a walk-through of the risk-based mode with Roy on two live
 names, GNRC and NXST. Builds on the thesis lens ([stock-playbook.md](stock-playbook.md); Mentor's prompt § The thesis
 lens) and the two modes ([mentor-modes.md](mentor-modes.md)); the validity contract is
 [../desks/mentor-talos.md](../desks/mentor-talos.md) § Validity.
@@ -134,7 +134,7 @@ Every thesis scenario gets a `validity` range, and so — through the existing g
 
 - **`approach`** (the away pivot) = the next structural high above the price at build: the last swing high when sellers
   are in control (A's away edge is B's arming line — consistent: if B exists, A running away is B arming); the recent
-  high when buyers already are.
+  high when buyers already are — always that high, however close (§ Decided 2).
 - **`lower`** = at or above the stop (the existing rule: never under it); `upper` between the entry and `approach`.
   The ordering check (`stop ≤ lower < entry < upper ≤ approach`) and Generate's refusals apply unchanged.
 - **`timeframe`: `day`** — a swing is killed by a day close, never an intraday wick (§ validity).
@@ -174,11 +174,10 @@ low; validity + `on_away` on a thesis setup); readiness on a thesis setup now as
 **Drive:** a Hotlist build on a name in each shape (sellers in control with a higher low → A + B offered; buyers already
 in control → A with an away edge), and a `ran_away` card reopening the plan.
 
-## Open
+## Decided (Roy, 2026-11-02)
 
-1. **How close is "close enough"** for the break line in change 2 — in ATRs from the price, or any confirmed swing high
-   over a confirmed higher low? Proposed: any, and Mentor judges whether to offer.
-2. **The away pivot when buyers already control** (change 3) — the recent high, or a fixed distance in ATRs over the
-   level? The recent high can sit a few cents over the price and ping at once.
-3. **Fix the live NXST setup** — redraw it now (stop ~161.6, level ~173.8 at 7%) or leave it as the example. Its earnings
-   are on 2026-11-05 and the plan holds through them.
+1. **"Close enough" for the break line (change 2): any** confirmed swing high over a confirmed higher low; Mentor judges
+   whether to offer B. No ATR distance.
+2. **The away pivot when buyers already control (change 3): the recent high, always** — no minimum distance, even when
+   it sits just over the price and pings soon after Generate (Roy chose this over a 1-ATR floor).
+3. **The live NXST setup: redrawn at the END**, after the build — as the build's first real case, not before it.
