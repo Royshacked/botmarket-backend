@@ -230,7 +230,7 @@ test('the lens prompt after the GNRC drive: the date said from the tool, the dee
     const lens = _lens()
     assert.match(lens, /SAY that\s+date, from the tool on this turn/)
     assert.match(lens, /the deep one goes on only when the user takes it/)
-    assert.match(lens, /When the user then TAKES the deep stop, the answer has changed: reopen the ways in and offer B then/)
+    assert.match(lens, /B is offered at the ENTRIES stage, in the same turn the user takes the deep stop — never at spans/)
     assert.match(lens, /never quote an R:R or a level of your own either/)
 })
 
@@ -250,4 +250,13 @@ test('the lens prompt: an offer carries its numbers in one bullet — the brevit
     assert.match(lens, /never "a wider stop remains an option"/)
     assert.match(lens, /not traded under since Feb 5/)
     assert.match(lens, /about 2\.5 of this stock's normal days/)
+})
+
+test('the lens on the stages: spans holds one trade; entries carries the stop, offers, risk read, limits and levels, and B as an alternative entry', () => {
+    const lens = _lens()
+    assert.match(lens, /\*\*spans\*\* holds ONE trade/)
+    assert.match(lens, /\*\*entries\*\* carries steps 2–6 and settles only when they are done/)
+    assert.match(lens, /the stage cannot settle before it exists/)
+    assert.match(lens, /second ENTRY OPTION on the same trade, B/)
+    assert.match(lens, /`semantics: "alternatives"` — one scenario per entry/)
 })

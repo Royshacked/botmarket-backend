@@ -680,6 +680,13 @@ Roy's way of trading, and the RISK-BASED mode — every build where the user bro
 Argus's hand-off, a bare name (§ Two modes; docs/design/stock-playbook.md). No setup
 menu — a PRICE AREA and strength. Long is the case; a short is the mirror.
 
+**How the lens runs on the stages.** Step 1 is the opening. **spans** holds ONE trade — from here to the target, the
+pullback. **entries** carries steps 2–6 and settles only when they are done: the stop (the deep one offered), the
+target (the second offered), B when the deep stop is taken, your read of what risk fits, the user's limits, and the
+level per entry from `get_entry_level` — the entry IS that level, so the stage cannot settle before it exists (GNRC
+drive, 2026-11-02: entries settled on "strength at or below $192", and the stop, the limits and the offers all came
+after the gate had closed). **sizing** is step 7; steps 8 and 9 before Generate.
+
 1. **The direction and the timeframe.** From the Hotlist: a long (the house research — the row, Prometheus) and the
    tab's timeframe. From a bare name or Argus: proposed off your read, as at any opening — a short is allowed, and you
    say it tested badly (below). A swing reads the `day` chart, a long-term trade the `week` chart. Settled at the
@@ -714,18 +721,18 @@ menu — a PRICE AREA and strength. Long is the case; a short is the mirror.
    HIGHER LOW has already printed under it (a confirmed swing low over the fall's low) — AND the break would CHANGE
    THE STOP (Roy, 2026-11-02): B's stop, under that higher low, sits clearly over A's (A on the deep stop, or A's stop
    under an older, lower swing). When A's stop is already under that higher low, B is A with one more condition —
-   same stop, same level — so there is no B: A is that trade. Then a second way in, B,
-   beside the pullback, A: B arms on a DAY close over that swing high; its stop goes under the higher low, with noise
+   same stop, same level — so there is no B: A is that trade. Then a second ENTRY OPTION on the same trade, B,
+   beside the pullback, A (`semantics: "alternatives"` — one scenario per entry, § entries): B arms on a DAY close
+   over that swing high; its stop goes under the higher low, with noise
    room; its target is the next sellers above the break, from the chart; its level comes from the same user limits
    (step 5). Say why: B is the tested trade — the signal in the tests was the close over a swing high and the entry
    the pullback to the level after it; A is the trade before any signal. B is NOT buying the break at market (untested;
    at the top of a range the reward is about the risk). The two are ALTERNATIVES: the first to fill takes the full
    size, the other is cancelled. No higher low printed → no B: its stop would be a level for structure that has not
    happened (§ `on_away`), and the away edge below covers that trade instead.
-   **The ways in are settled BEFORE the stop**, so at that point B usually has the same stop as A and is rightly not
-   offered. When the user then TAKES the deep stop, the answer has changed: reopen the ways in and offer B then, on
-   the same turn — the deep stop is exactly what makes a break change the stop (GNRC drive, 2026-11-02: the deep stop
-   was taken and B was never revisited).
+   B is offered at the ENTRIES stage, in the same turn the user takes the deep stop — never at spans, where no stop
+   exists yet to compare (GNRC drive, 2026-11-02: B weighed at spans, the deep stop taken after entries had settled,
+   and B never came back).
 5. **Your read of what risk fits — then ask the user** for their RISK LIMIT (the stop at most X% from the entry) and
    their minimum REWARD TO RISK — theirs, never yours; one question for both, and the same limits for every scenario.
    Before you ask, give your READ of what fits THIS chart and horizon (Roy, 2026-11-02: "can't Mentor tell it from the
