@@ -1,0 +1,184 @@
+# The thesis lens — the deeper stop, the break scenario, and the trade that leaves
+
+**STATUS: DESIGN ONLY (2026-11-02), nothing built.** From a walk-through of the risk-based mode with Roy on two live
+names, GNRC and NXST. Builds on the thesis lens ([stock-playbook.md](stock-playbook.md); Mentor's prompt § The thesis
+lens) and the two modes ([mentor-modes.md](mentor-modes.md)); the validity contract is
+[../desks/mentor-talos.md](../desks/mentor-talos.md) § Validity.
+
+Three changes, one parked:
+
+1. **Offer the deeper stop** — under the low of the whole fall, a price the stock has not traded under in a while.
+2. **Offer the break scenario** — a second, ready way in for when price breaks up instead of pulling back.
+3. **The away edge on every thesis setup** — so a trade that leaves without the user says so, and Mentor redraws it.
+4. *Parked:* the split stop.
+
+## The lens today, in one paragraph
+
+A name with no setup of the user's → Mentor settles the direction and the timeframe, JUDGES the stop (under the sellers'
+last swing down) and ONE target (where sellers last took over above) from `get_price_structure`, OFFERS a second target,
+asks the user for their RISK LIMIT (the stop at most X% from the entry) and their minimum REWARD TO RISK, and
+`get_entry_level` computes the highest entry worth paying — the entry leg is "that level and below". Then the size (at
+the level), then how long it waits (`valid_until`). Talos reads the 1h / 4h closes and proposes the entry when price at
+or under the level shows strength. One scenario. No validity range.
+
+## The two examples
+
+### GNRC (day chart, 2026-11-02, close 206.20, ATR 10.94 = 5.3%)
+
+Swings: lows 173.25 (Sep 16) → 193.96 → 186.08 → **181 (Oct 28)**; highs 231.89 (Sep 17) → 228.78 → 204.28 → 212.81.
+Sellers in control since Oct 16; the last break (Sep 17, +18% on 8× volume) was a reversal.
+
+- **The structure stop:** under the 181 low with noise room and under the round 180 → **~177** (the rule's
+  `candidates.stop` 178.81).
+- **Roy: "I want the stop at a price it hasn't visited for a while."** On this chart that means under the low of the
+  whole fall — 173.25 — and under the February 5 low 169.85: GNRC last traded under 169.85 on 2026-02-05, nine months
+  ago. → **~169** (the rule's `candidates.deep_stop` 171.06; deeper, to clear February too).
+- What it costs, at an illustrative 8% risk limit and 1.5 minimum R:R to a 228.78 target: the entry level falls from
+  **192.39** (stop 177) to **183.70** (stop 169) — a deeper pullback before the trade exists, and fewer shares for the
+  same dollars at risk.
+
+Mentor's prompt NAMES `candidates.deep_stop` and never offers it. Roy got the deeper stop only by asking. → change 1.
+
+### NXST (setup `setup_NXST_051350ab` on axl_dev, paper)
+
+The setup: entry **164.70 and below**, stop **153.17**, target **221.25**, R:R 4.9, 17 shares on a $200 risk budget,
+`validity: null`, `valid_until` 2027-04-23. 164.70 is exactly a **7% risk limit** on the 153.17 stop — the user's limit.
+
+The timeline, from the day bars:
+
+| Date | Close | What happened |
+|---|---|---|
+| Oct 5 | 156.66 | the low of the fall from 197.60 (Aug 7): **153.17** |
+| Oct 16 | 164.59 | a swing high: **169.66** |
+| Oct 19 | 165.80 | a HIGHER low: **162.52** (confirmed Oct 21) |
+| Oct 29 | **170.10** | the close over 169.66 — buyers take control (a reversal) |
+| Oct 30 | 171.44 | **the setup is built** (saved 2026-10-31 04:14 UTC) |
+| Nov 2 | 173.31 | 5.2% over the entry, moving away |
+
+**What went wrong, in order:**
+
+1. **The stop was the wrong one for the chart as it stood.** On Oct 30 the break had already happened; the sellers' last
+   failed push was the 162.52 higher low, not the 153.17 low of the whole fall. This is the NXST case the prompt already
+   cites (2026-10-31: "took the house's six-month valuation for the target and the whole fall's low for the stop"), fixed
+   in the prompt since. With the right stop (161.61) and the same 7% limit the level is **173.77** — over the 171.44 close
+   the day it was built. Talos would have been waiting for strength, not for a 4% fall. The trade was not missed because
+   the lens is strict; it was missed because the stop was deep and nobody said what that would cost.
+2. **Nothing told the user it left.** With no validity range there is no away edge, Generate never asks "and if it just
+   goes?" (`missing_runaway_answer` is gated on a range existing — `setup.schema.js` readiness), and Talos never posts
+   `ran_away`. The setup sits "looking" in silence until April. → change 3.
+3. **Had it been built before Oct 29**, everything a second way in needed had already printed — the 169.66 break line
+   and the 162.52 higher low — and the lens writes one scenario only. → change 2.
+
+## Change 1 — offer the deeper stop
+
+**The rule (prompt § The thesis lens, step 2), worded like the second target's:** after judging the structure stop, OFFER
+the deeper one, never set it unasked — under the low of the whole fall (`candidates.deep_stop`, with room for noise), a
+price the stock has not traded under since <date>. Say it as a choice with its cost, in numbers:
+
+- the stop X% from the entry instead of Y%;
+- the entry level lower (both levels, from `get_entry_level` — two calls, never computed by hand) — and if the deeper
+  level sits well under today's price, say plainly that the trade may never fill (NXST);
+- fewer shares for the same risk.
+
+And what was tested: the stop's depth did not move the edge (stock-playbook.md Test 1b, `stopAt: 'low60'`). The deeper
+stop buys room against a shakeout — a retest of the low — not a better trade. Taken → the stop is the deep one; declined →
+the structure stop. The go-all-the-way paragraph names it as on offer, like the second target; it is never taken on the
+user's behalf.
+
+**One new fact for the tool, so Mentor never guesses a date.** `structureFacts` (`services/swingStructure.service.js`)
+adds `deep_stop_last_traded`: the last date BEFORE the fall's low on which the low was under `candidates.deep_stop`
+(null when the history has none — "not in the two years read"). `unmirrorFacts` carries it through on a short (where the
+question is the last time price traded OVER the deep stop).
+
+## Change 2 — offer the break scenario
+
+**When it applies (all three, read off `get_price_structure`):**
+
+- sellers are still in control (`control: 'sellers'`) — the break up has not happened;
+- the last swing high is close enough to matter — the break line;
+- a HIGHER LOW has already printed under it (a confirmed swing low above the fall's low).
+
+**Then OFFER scenario B beside A, never set it unasked:**
+
+| | A — the pullback (today's lens) | B — after the break |
+|---|---|---|
+| Arms | now | a DAY close over the last swing high (a scenario condition, judged by Talos on the close) |
+| Stop | the structure stop as today (or the deep one, change 1) | under the higher low, with noise room |
+| Entry | `get_entry_level` on A's stop | `get_entry_level` on B's stop — the SAME user limits, one question for both |
+| Target | from the chart | from the chart — the next sellers above the break |
+| Then | strength at or under the level on the 1h / 4h | the same |
+
+Both are **alternatives** — the existing default: the first to fill takes the full size, the other is cancelled. Each is
+sized on its own stop (`size_position` per premise already does this).
+
+**B is not "buy the breakout".** It enters on the pullback to its level after the break, which is exactly the tested
+trade: in Test 1b the SIGNAL is the first close over a confirmed swing high and the entry is the level within 20
+sessions. Buying the break itself at market is untested and the playbook argues against it (at the top of a range the
+reward is about the risk). A is the trade taken BEFORE the signal — the less-tested one of the two. Mentor says the
+context of the break as the lens does today (`last_break.context`; reversal is the one with the edge).
+
+**Where B must NOT be offered:** when no higher low has printed. B's stop would then be a level for structure that does
+not exist — the prompt's own rule ("you do not author levels for structure that has not printed", § `on_away`). Change 3
+covers that case.
+
+The prompt's "Both ways armed is a different request" paragraph already allows a second scenario when the USER asks for
+both; this makes the lens OFFER it in the one shape where both levels exist today.
+
+**The NXST numbers, had it been built on Oct 28** (close 164.50): B arms on a day close over 169.66, stop 161.61 (the
+rule's candidate under 162.52), target 190.49 (the Aug 14 high) → at the user's 7% limit the level is 173.77 (R:R 1.37 at
+the level); with a 1.5 minimum R:R it is 173.16. The Oct 29 close of 170.10 arms it, already under the level.
+
+## Change 3 — the away edge on every thesis setup
+
+Every thesis scenario gets a `validity` range, and so — through the existing gate — the runaway question.
+
+- **`approach`** (the away pivot) = the next structural high above the price at build: the last swing high when sellers
+  are in control (A's away edge is B's arming line — consistent: if B exists, A running away is B arming); the recent
+  high when buyers already are.
+- **`lower`** = at or above the stop (the existing rule: never under it); `upper` between the entry and `approach`.
+  The ordering check (`stop ≤ lower < entry < upper ≤ approach`) and Generate's refusals apply unchanged.
+- **`timeframe`: `day`** — a swing is killed by a day close, never an intraday wick (§ validity).
+- **`on_away`**: asked once, as the prompt already words it — *"this needs price to come back to 164.70. If it just goes
+  instead, want a ping to redraw it, or do you let it go?"*. `revise` → `ran_away` card → the plan reopens in Mentor;
+  `pass` → `ran_away_fyi`.
+- **`on_break`**: `revise` (the default) — the premise broke.
+
+**The redraw is the lens again, on the new chart — never a chase.** The stop under the NEW higher low, the target from the
+chart, the SAME user limits through `get_entry_level`. If the new level sits over today's price, Talos waits for
+strength there; if the redraw fails the user's limits, Mentor says so and the honest answer is to let it go. Nothing is
+pre-authored for the runaway (mentor-talos.md § Validity — unchanged).
+
+With B in the setup, A's away edge needs no ping of its own (B is the continuation, already drawn) — `on_away: pass` for
+A, and B carries its own range.
+
+## Parked — the split stop
+
+Roy (2026-11-02): "we will leave split stop." Half at the structure stop, half at the deep one, the same risk budget.
+Recorded because the schema cannot hold it: stop legs carry no `share` (entries and targets do), and `stopEdge`
+(`setup.schema.js`) sizes the whole position off the FURTHEST stop. Today it is two setups, each half the risk — with the
+quirk that each gets its own entry level. Natively it needs `share` on stop legs through the schema, sizing, the summary,
+the broker's stop orders and Talos's exits.
+
+## The build, when Roy says go
+
+| Piece | Where |
+|---|---|
+| Lens steps 2 and 3, the go-all-the-way paragraph, § The setup you write for Talos (validity + both scenarios) | `prompts/mentor_system_prompt.md` § The thesis lens |
+| `deep_stop_last_traded` (+ the short's mirror) | `services/swingStructure.service.js` `structureFacts`, `services/tools/thesisStructure.tools.js` `unmirrorFacts` |
+| B's arming condition: a day-close condition on the scenario | the scenario's `conditions` — check Talos reads a scenario condition as the gate before its level is live (`talos.assess.js`, a wake judges root ∪ the armed scenario's) |
+| No new schema | `validity`, `on_away`, alternatives and per-premise sizing all exist |
+
+**Tests:** the facts field (a fixture where the deep stop was last traded under months ago, and one where never);
+prompt assertions in `tests/unit/thesisLens.test.js` (deep stop offered not set; B offered only with a printed higher
+low; validity + `on_away` on a thesis setup); readiness on a thesis setup now asks the runaway question.
+**Drive:** a Hotlist build on a name in each shape (sellers in control with a higher low → A + B offered; buyers already
+in control → A with an away edge), and a `ran_away` card reopening the plan.
+
+## Open
+
+1. **How close is "close enough"** for the break line in change 2 — in ATRs from the price, or any confirmed swing high
+   over a confirmed higher low? Proposed: any, and Mentor judges whether to offer.
+2. **The away pivot when buyers already control** (change 3) — the recent high, or a fixed distance in ATRs over the
+   level? The recent high can sit a few cents over the price and ping at once.
+3. **Fix the live NXST setup** — redraw it now (stop ~161.6, level ~173.8 at 7%) or leave it as the example. Its earnings
+   are on 2026-11-05 and the plan holds through them.
