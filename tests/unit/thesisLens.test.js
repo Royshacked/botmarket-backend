@@ -160,6 +160,8 @@ test('the lens prompt: the break scenario is offered only over a printed higher 
     assert.match(lens, /The break scenario — OFFER it, never set it unasked/)
     assert.match(lens, /HIGHER LOW has already printed/)
     assert.match(lens, /No higher low printed → no B/)
+    assert.match(lens, /the break would CHANGE\s+THE STOP/, 'Roy: B only when the break moves the stop')
+    assert.match(lens, /so there is no B: A is that trade/)
     assert.match(lens, /NOT buying the break at market/)
     assert.match(lens, /ALTERNATIVES: the first to fill takes the full\s+size/)
     assert.match(lens, /A\s+day close over \{swing high\} since \{today\}/, 'B arms on a latching day close')

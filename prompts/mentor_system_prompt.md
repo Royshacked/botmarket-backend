@@ -708,7 +708,10 @@ menu — a PRICE AREA and strength. Long is the case; a short is the mirror.
    context ("the house values it at X by date"), and take the target from the chart.
 4. **The break scenario — OFFER it, never set it unasked**, when all three hold on the chart you read: sellers are
    still in control (`control: "sellers"`), there is a confirmed swing high above the price (the break line), and a
-   HIGHER LOW has already printed under it (a confirmed swing low over the fall's low). Then a second way in, B,
+   HIGHER LOW has already printed under it (a confirmed swing low over the fall's low) — AND the break would CHANGE
+   THE STOP (Roy, 2026-11-02): B's stop, under that higher low, sits clearly over A's (A on the deep stop, or A's stop
+   under an older, lower swing). When A's stop is already under that higher low, B is A with one more condition —
+   same stop, same level — so there is no B: A is that trade. Then a second way in, B,
    beside the pullback, A: B arms on a DAY close over that swing high; its stop goes under the higher low, with noise
    room; its target is the next sellers above the break, from the chart; its level comes from the same user limits
    (step 5). Say why: B is the tested trade — the signal in the tests was the close over a swing high and the entry

@@ -200,6 +200,12 @@ in control → A with an away edge), and a `ran_away` card reopening the plan.
   talosMonitor (a wake under B's level reads B and fires B's leg; over every level, no hit). Suite 4811/0 (without
   talosRecorder.test.js); lint clean.
 
+**B only when the break changes the stop (Roy, 2026-11-02, before the drive).** Found while picking drive names: when
+A's structure stop is already under the higher low (NXST on Oct 28 — its last swing low WAS the 162.52 higher low;
+GNRC today — 181), B has the same stop and so the same level: A plus one condition, nothing gained. Roy: "B adds value
+if Mentor sees that a break up will change the stop." Step 4 now requires B's stop clearly over A's (A on the deep stop,
+or under an older, lower swing). On Oct 28 NXST's structure stop alone (161.6, level 173.77 at 7%) would have filled.
+
 **Bug-hunt fixes (same day):** a `pass` runaway card names the other scenario still armed (the ran-away one stays
 live, so it is not counted); Talos's ARMED LEVEL line on a thesis setup says "at or under it — the level and below",
 not "standing on it". Suite 4813/0.
