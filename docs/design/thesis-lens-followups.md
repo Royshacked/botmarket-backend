@@ -1,6 +1,6 @@
 # The thesis lens — the deeper stop, the break scenario, and the trade that leaves
 
-**STATUS: DESIGN ONLY (2026-11-02), nothing built; open questions decided the same day (§ Decided).** From a walk-through of the risk-based mode with Roy on two live
+**STATUS: BUILT (2026-11-02), not pushed, not live-driven; open questions decided the same day (§ Decided). § Built at the end.** From a walk-through of the risk-based mode with Roy on two live
 names, GNRC and NXST. Builds on the thesis lens ([stock-playbook.md](stock-playbook.md); Mentor's prompt § The thesis
 lens) and the two modes ([mentor-modes.md](mentor-modes.md)); the validity contract is
 [../desks/mentor-talos.md](../desks/mentor-talos.md) § Validity.
@@ -181,3 +181,23 @@ in control → A with an away edge), and a `ran_away` card reopening the plan.
 2. **The away pivot when buyers already control (change 3): the recent high, always** — no minimum distance, even when
    it sits just over the price and pings soon after Generate (Roy chose this over a 1-ATR floor).
 3. **The live NXST setup: redrawn at the END**, after the build — as the build's first real case, not before it.
+
+## Built (2026-11-02)
+
+- **Prompt** (§ The thesis lens): step 2 offers the deeper stop with its cost and date; new step 4 offers the break
+  scenario B; steps 5–8 per scenario (one limits question, one level per stop, one size question); new step 9 — every
+  scenario's `validity` and the runaway question; the go-all-the-way paragraph names all three offers; § The setup you
+  write for Talos — conditions per scenario (B's arming one `measured` + `latching`), A first.
+- **`structureFacts`** — `candidates.deep_stop_last_traded` (the short's mirror reads the same field); the
+  `get_price_structure` description says so (snapshot fixture updated).
+- **Readiness** — a thesis premise without `validity` is missing `validity range` (`setup.schema.js`). Existing thesis
+  setups without one (NXST, PENG on axl_dev) now REFUSE a re-arm (`cannot_arm_missing_validity_range`) until redrawn.
+- **Found while building — `thesisGate`** (`monitoring/talos.gates.js`, wired in `_checkSetup`): the pre-entry read
+  judges ONE premise — the one at an exact level or a fired guard, else `scenarios[0]`. B would never have been read.
+  A thesis setup's premise on the table is now the live scenario whose level price is at or past, the nearest one when
+  past several. Only `trade_mode: 'thesis'`; other lenses unchanged.
+- **Tests:** swingStructure (the date, the short), thesisLens (prompt assertions, readiness, the gate both sides),
+  talosMonitor (a wake under B's level reads B and fires B's leg; over every level, no hit). Suite 4811/0 (without
+  talosRecorder.test.js); lint clean.
+
+**Not done:** the browser drive (needs the dev backend restarted — Roy); redrawing the live NXST setup (§ Decided 3).

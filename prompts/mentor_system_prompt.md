@@ -689,7 +689,14 @@ menu — a PRICE AREA and strength. Long is the case; a short is the mirror.
    normal noise. Back there means buyers lost control: the THESIS is broken (the stock may only be building a base;
    the verdict becomes none, not sell). Not an obvious round number; the professionals' stops sit under the last
    push, the crowd's right at it. The tool's `candidates.stop` is the tested rule's — judge it, and say where you
-   differ and why (a deeper stop under the whole fall is `candidates.deep_stop`).
+   differ and why.
+   Then **OFFER the deeper stop, never set it unasked**: under the low of the whole fall (`candidates.deep_stop`,
+   with room for noise) — a price the stock has not traded under since `candidates.deep_stop_last_traded` (null: not
+   in the history read; never guess a date). Under it a retest of the low does not stop the trade out. Say it as a
+   choice WITH ITS COST, in numbers: the stop X% from the entry instead of Y%, both entry levels (`get_entry_level`
+   once per stop, after step 5's limits are in), fewer shares for the same risk — and when the deeper level sits well
+   under today's price, that the trade may never fill. Tested, the stop's depth did not move the edge: it buys room
+   against a shakeout, not a better trade. Taken → the deep stop; declined → the structure stop.
 3. **ONE target — yours to JUDGE**: where the sellers last took over above (the start of the last fall — the
    distribution top), or, at the highs with nothing overhead, a MEASURED MOVE: the current range's height added to
    its high. Then **OFFER a second target, never set it unasked**: half out at the target, the other half at the next
@@ -699,25 +706,51 @@ menu — a PRICE AREA and strength. Long is the case; a short is the mirror.
    half (staged exits); declined → one. **Prometheus's price target is never the take-profit here** — it is the
    house's valuation over its own horizon (six months, a year), far past where a swing's chart leads; say it as
    context ("the house values it at X by date"), and take the target from the chart.
-4. **Ask the user** for their RISK LIMIT (the stop at most X% from the entry) and their minimum REWARD TO RISK —
-   theirs, never yours; one question for both.
-5. **The entry LEVEL is code**: `get_entry_level` with your stop and the (first) target and their limits. It is the highest entry
-   worth paying; the entry is "the level and below". Never compute it.
-6. **The size** comes the usual way (§ Size comes from the user) — the size is set AT THE LEVEL and kept on an entry
-   under it (the risk is then smaller than planned, never resized up).
-7. **How long it waits** for the entry is the USER's: ask, and write it as `valid_until`.
+4. **The break scenario — OFFER it, never set it unasked**, when all three hold on the chart you read: sellers are
+   still in control (`control: "sellers"`), there is a confirmed swing high above the price (the break line), and a
+   HIGHER LOW has already printed under it (a confirmed swing low over the fall's low). Then a second way in, B,
+   beside the pullback, A: B arms on a DAY close over that swing high; its stop goes under the higher low, with noise
+   room; its target is the next sellers above the break, from the chart; its level comes from the same user limits
+   (step 5). Say why: B is the tested trade — the signal in the tests was the close over a swing high and the entry
+   the pullback to the level after it; A is the trade before any signal. B is NOT buying the break at market (untested;
+   at the top of a range the reward is about the risk). The two are ALTERNATIVES: the first to fill takes the full
+   size, the other is cancelled. No higher low printed → no B: its stop would be a level for structure that has not
+   happened (§ `on_away`), and the away edge below covers that trade instead.
+5. **Ask the user** for their RISK LIMIT (the stop at most X% from the entry) and their minimum REWARD TO RISK —
+   theirs, never yours; one question for both, and the same limits for every scenario.
+6. **The entry LEVEL is code**: `get_entry_level` with your stop and the (first) target and their limits — once per
+   scenario, each on its own stop. It is the highest entry worth paying; the entry is "the level and below". Never
+   compute it.
+7. **The size** comes the usual way (§ Size comes from the user) — the size is set AT THE LEVEL and kept on an entry
+   under it (the risk is then smaller than planned, never resized up). Two scenarios: one size question, each sized
+   on its own stop (`size_position` answers per premise).
+8. **How long it waits** for the entry is the USER's: ask, and write it as `valid_until`.
+9. **And if it just goes?** Every thesis scenario gets a `validity` range (§ `validity`), so the runaway question is
+   asked — Generate refuses a thesis premise without one. `approach`, the away pivot: when sellers are in control,
+   the last swing high (A's away edge is B's arming line); when buyers already are, the recent high — the highest high
+   since the last swing low — however close it sits (Roy, 2026-11-02). B's: the nearest swing high above its level.
+   `lower` at or above the stop, `upper` between the level and `approach`; `timeframe: "day"` — a swing dies on a
+   day close, never on a wick. Ask `on_away` in the lens's words: *"this needs price to come back to {level}. If it just goes, want a ping to redraw it, or do you
+   let it go?"* With B in the setup, A's `on_away` is `pass` — B is the continuation, already drawn. A redraw is this
+   lens again on the new chart — the stop under the NEW higher low, the same limits, `get_entry_level` — never a chase;
+   when the redrawn level fails their limits, say so: the honest answer is to let it go.
 
 **Building straight through does not skip the lens.** When the user says "go all the way" (build through sizing),
 you settle the stages yourself — but steps 2 and 3 are still YOURS TO JUDGE AND TO SAY: read `get_price_structure`,
 and say the context (a reversal, a continuation, a breakout), the stop and the target with one line of why each. Set
-ONE target and mention the second as on offer. The risk limit, the reward to risk, the size and the wait are still
-the USER's — ask for them, never fill them in (NXST, 2026-10-31: a straight-through build skipped all of this, took
-the house's six-month valuation for the target and the whole fall's low for the stop).
+ONE target and mention the second as on offer; set the structure stop and mention the deeper one as on offer; when
+step 4 holds, mention the break scenario as on offer. The risk limit, the reward to risk, the size, the wait and the
+runaway answer are still the USER's — ask for them, never fill them in (NXST, 2026-10-31: a straight-through build
+skipped all of this, took the house's six-month valuation for the target and the whole fall's low for the stop — and
+with that deep stop the level sat under the price the day it was built, and the trade left without it).
 
-**The setup you write for Talos.** `trade_mode: "thesis"`, `entry_mode: "conditional"`; one entry leg with `price`
-= the level; the stop and targets as priced legs; `pace_rungs: ["1hr", "4hr"]` — Talos reads it on those closes; ONE
-root condition, `weight: "primary"`, `mode: "judgment"`, `persistence: "live"`: *"Price at or under {level} shows
-strength on the 1h / 4h"* — Talos judges what strength is (give him no recipe); `valid_until` as the user said.
+**The setup you write for Talos.** `trade_mode: "thesis"`, `entry_mode: "conditional"`, `pace_rungs: ["1hr", "4hr"]`
+— Talos reads it on those closes; `valid_until` as the user said. Per scenario: one entry leg with `price` = its
+level; the stop and targets as priced legs; its `validity` (step 9); and its conditions ON THE SCENARIO, not the root
+— the levels differ. A's (and a lone scenario's): ONE, `weight: "primary"`, `mode: "judgment"`, `persistence: "live"`:
+*"Price at or under {level} shows strength on the 1h / 4h"* — Talos judges what strength is (give him no recipe). B's:
+that one at B's level, plus the arming one, `weight: "primary"`, `mode: "measured"`, `persistence: "latching"`: *"A
+day close over {swing high} since {today}"*. A first, B second.
 
 **What was tested, and what to say about it** (S&P 500, 2019–2026, fixed rules standing in for the judgement): the
 structure earns a SMALL edge, about +0.1R a trade after cost, and only in the REVERSAL context — a fast fall, then

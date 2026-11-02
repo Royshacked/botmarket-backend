@@ -125,7 +125,7 @@ const _r = (n, d = 2) => (Number.isFinite(n) ? Math.round(n * 10 ** d) / 10 ** d
  * THE FACTS a thesis read is judged from, as of the last bar (long side — a short reads `mirror`ed bars). `k` — the
  * swing threshold in ATRs. → `{ as_of, close, atr, atr_pct, swings (the last `keep`), last_swing_low, last_swing_high,
  * control ('buyers'|'sellers'|null) and since, last_break { date, context }, fall { from, low }, candidates { stop,
- * deep_stop, target, target_kind (range_top | measured_move), lookback_bars }, heavy_days }`, or null under 60 bars. Candidates are the lab's rules (test 1b) —
+ * deep_stop, deep_stop_last_traded (the last date under it, or null), target, target_kind (range_top | measured_move), lookback_bars }, heavy_days }`, or null under 60 bars. Candidates are the lab's rules (test 1b) —
  * a starting point Mentor judges, never the answer. Pure.
  */
 export function structureFacts(rows, { k = STRUCTURE.k, buffer = STRUCTURE.buffer, keep = 8, lookLow = STRUCTURE.lookLow, lookFall = STRUCTURE.lookFall, atHighs = STRUCTURE.atHighs } = {}) {
@@ -139,6 +139,11 @@ export function structureFacts(rows, { k = STRUCTURE.k, buffer = STRUCTURE.buffe
     for (let j = Math.max(0, lowJ - lookFall); j < lowJ; j++) if (rows[j].high >= from) { from = rows[j].high; fromJ = j }
     const close = rows[i].close
     const stop = lastL ? lastL.price - buffer * a[i] : null
+    const deepStop = low60 - buffer * a[i]
+    // When price last traded under the deep stop — "a price it has not visited since" is a date Mentor reads, never
+    // guesses (docs/design/thesis-lens-followups.md). Null when the history read has none.
+    let deepJ = null
+    for (let j = i; j >= 0 && deepJ == null; j--) if (rows[j].low < deepStop) deepJ = j
     const { target, kind } = rangeTarget(rows, i, lastL?.price ?? null, lookFall)
     // The heavy days of the last 60: volume ≥ 2× its 20-day mean — climaxes, shakeouts, the sign of strength.
     const heavy = []
@@ -159,7 +164,7 @@ export function structureFacts(rows, { k = STRUCTURE.k, buffer = STRUCTURE.buffe
         last_break: lastBreak ? { date: day(lastBreak.i), context: lastBreak.context } : null,
         fall: fromJ != null && from > low60 ? { from: { date: day(fromJ), price: _r(from) }, low: { date: day(lowJ), price: _r(low60) }, atrs: _r((from - low60) / (a[lowJ] ?? a[i])) } : null,
         candidates: {
-            stop: _r(stop), deep_stop: _r(low60 - buffer * a[i]),
+            stop: _r(stop), deep_stop: _r(deepStop), deep_stop_last_traded: deepJ == null ? null : day(deepJ),
             // `range_top` — the highest high of the last `lookFall` bars; `measured_move` — at the highs, that high + its height.
             target: _r(target), target_kind: kind, lookback_bars: lookFall,
         },

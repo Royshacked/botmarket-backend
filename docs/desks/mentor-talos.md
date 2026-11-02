@@ -865,6 +865,9 @@ apply verdict       → next candle close + lag, guards, journal row
 Which premise is on the table (`hit`) keeps both resolutions — `scenarioGate` on the spot price
 and `_hitFromGuard` on the fired guard — because `enter` is only honoured against a zone, and the
 crossing that paid for a guard wake must not be thrown away by a spot check a minute later.
+A THESIS setup adds a third, `thesisGate`: its level is valid at that price and below (above, on a short), so price
+past a level is at it, and with several the nearest one reached is on the table — without it a thesis setup's second
+way in (the break scenario) was never the one read (2026-11-02, [design/thesis-lens-followups.md](../design/thesis-lens-followups.md)).
 
 - **The card fires ONLY on `enter`** (and on `edit` with a proposal, which used to change a setup
   silently). Every other verdict is journalled, not notified. A monitor that announces every look
@@ -957,6 +960,12 @@ user's size is held, and the old mode's levels, pace, conditions and rejects lea
 to their setup only RECOMMENDS the lens — the opening waits on their yes, and the new levels come next turn, on the
 whole kit; a switch to thesis is their yes. A hand-off claims `thesis` on turn one; the risk-based kit drops the
 handlers too (`handlersFor`). Argus no longer recommends a lens.
+
+**The thesis lens's follow-ups (2026-11-02, [design/thesis-lens-followups.md](../design/thesis-lens-followups.md)).**
+Mentor OFFERS the deeper stop (`candidates.deep_stop` + `deep_stop_last_traded`) with its cost, and — over a higher
+low already printed — the break scenario B (arms on a day close over the swing high; an alternative to A). Every
+thesis premise draws a `validity` range: readiness refuses one without (`validity range`), so the runaway question is
+always asked, and an armed thesis setup without one cannot be re-armed.
 
 A setup arrives one of three ways — a bare name, a name Argus handed over, or a plan the user
 already made — and there is **one machine, not three paths**. Whatever arrived is written into the

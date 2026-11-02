@@ -43,6 +43,23 @@ test('structureFacts: a reversal — buyers in control after sellers, the stop u
     for (const s of f.swings) assert.ok(s.confirmed > s.date, 'a swing is dated, and confirmed after it')
 })
 
+test('structureFacts: the deep stop carries the last date price traded under it — null when the history has none', () => {
+    const rows = reversal()
+    assert.equal(structureFacts(rows).candidates.deep_stop_last_traded, null, 'flat at 100 before the fall: never under it')
+    rows[10] = { ...rows[10], low: 70 }
+    rows[12] = { ...rows[12], low: 71 }
+    const f = structureFacts(rows)
+    assert.equal(f.candidates.deep_stop_last_traded, rows[12].date, 'the LAST visit under it, not the first')
+    assert.ok(f.candidates.deep_stop > 71, 'the visits were under the deep stop')
+})
+
+test('structureFacts on a short’s mirrored bars: the last time over the deep stop is the same field', () => {
+    const rows = reversal().map(b => ({ ...b }))
+    rows[10] = { ...rows[10], low: 70 }
+    const f = structureFacts(mirror(rows.map(b => ({ ...b, open: 200 - b.open, high: 200 - b.low, low: 200 - b.high, close: 200 - b.close }))))
+    assert.equal(f.candidates.deep_stop_last_traded, rows[10].date, 'a short\'s chart turned the right way up reads the same visit')
+})
+
 test('structureFacts on a short’s mirrored bars: the normal move is still a positive percent', () => {
     const f = structureFacts(mirror(reversal()))
     assert.ok(f.close < 0, 'the mirror')

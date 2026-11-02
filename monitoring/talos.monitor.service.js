@@ -20,7 +20,7 @@ import { isSelfExecuted } from '../services/venue.resolve.service.js'
 import { brokerService } from '../api/broker/broker.service.js'
 import { brokerEntryPrice } from '../services/positionManage.service.js'
 import { config } from '../services/config.js'
-import { legGate, scenarioGate, liveScenarios, _hitFromGuard, computeMetrics, metricsSet, validityBreach, breachPatch, rollUpBreaches, normalizeConditionResults, latchPatch, costPatch, ripeStepDown } from './talos.gates.js'
+import { legGate, scenarioGate, thesisGate, liveScenarios, _hitFromGuard, computeMetrics, metricsSet, validityBreach, breachPatch, rollUpBreaches, normalizeConditionResults, latchPatch, costPatch, ripeStepDown } from './talos.gates.js'
 
 // Talos — the guardian of the `setup` kind (docs/design/talos-per-candle.md).
 //
@@ -149,7 +149,8 @@ export async function _checkSetup(setup, nowMs, deps = _deps) {
     // table (the ARMED LEVEL block) and stamps the leg when one is reached; whether the setup fires
     // is the verdict's call alone (`_applyVerdict`, `firingLeg`). Against a zero-width price this
     // check matches a live quote only by coincidence, which is exactly why it stopped deciding.
-    const hit   = scenarioGate(setup, price) ?? _hitFromGuard(setup, woke)
+    // A THESIS level is valid at that price and below, so there price past it is at it (`thesisGate`).
+    const hit  = scenarioGate(setup, price) ?? _hitFromGuard(setup, woke) ?? thesisGate(setup, price)
 
     // Validity is a hard safety check — code, free, and always first. A breached premise fires
     // its card whether or not a read would have followed.

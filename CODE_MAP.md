@@ -1027,7 +1027,8 @@ services/
                             THESIS lens: STRUCTURE (the rule's settings, one home), atr, swings (zigzag k × ATR, known
                             only once confirmed), mirror, toWeekly, controlReplay (who is in control + each break's
                             context — the lab's controlSignals and Mentor's facts both run it), rangeTarget, lowestLow,
-                            structureFacts (control, last break's context, the fall, candidate stop/target, heavy
+                            structureFacts (control, last break's context, the fall, candidate stop/target, the deep
+                            stop and the last date price traded under it, heavy
                             days), entryLevel (the lower of the risk-limit and R:R ceilings). PURE.
   thesisLab.service.js      the THESIS lens's tests 1 / 1b / 1c (docs/design/stock-playbook.md): the approach as fixed
                             rules — reversalSignals, controlSignals, baselineSignals, plan, play, playIntraday,
@@ -1324,7 +1325,8 @@ monitoring/
                             OFF by default since 2026-10-21 (talos.tiers). cheapWatch reads the rung the
                             expensive read declared from monitor_state.watch (it read a top-level field
                             nothing writes until that date)
-  talos.gates.js            its PURE tier, split out 2026-09-15: the zone/scenario gates, guard
+  talos.gates.js            its PURE tier, split out 2026-09-15: the zone/scenario gates (thesisGate — a thesis
+                            level is at it from there on, the nearest of several, 2026-11-02), guard
                             resolution (_hitFromGuard), the in-position arithmetic (rMultiple /
                             computeMetrics — R, MAE, MFE for the read and the UI), the validity + breach
                             machinery, and the condition/cost ledger (normalizeConditionResults,

@@ -95,6 +95,27 @@ export function scenarioGate(setup, price) {
     return null
 }
 
+/**
+ * The THESIS lens's gate: its entry is a LEVEL, valid "at that price and below" (above, on a short), so price past a
+ * level is AT it — the premise on the table is the live scenario whose level price is at or past, the NEAREST one when
+ * it is past several. Without it a thesis setup with a second way in (the break scenario, docs/design/
+ * thesis-lens-followups.md) only ever had its first scenario read: an exact match is a coincidence, and the fallback
+ * is `scenarios[0]`. Null for any other lens, and when price is short of every level. Pure.
+ */
+export function thesisGate(setup, price) {
+    if (setup?.trade_mode !== 'thesis' || !Number.isFinite(price)) return null
+    const sg = setup.direction === 'short' ? -1 : 1
+    let best = null
+    for (const scenario of liveScenarios(setup)) {
+        for (const leg of scenario.entry_legs ?? []) {
+            const lvl = legPrice(leg)
+            if (!Number.isFinite(lvl) || sg * (price - lvl) > 0) continue
+            if (!best || sg * (lvl - best.lvl) < 0) best = { scenario, leg, lvl }
+        }
+    }
+    return best ? { scenario: best.scenario, leg: best.leg } : null
+}
+
 // ─── In-position arithmetic ────────────────────────────────────────────────────
 //
 // Where a LIVE position stands, recomputed every wake and never authored. There is no gate here any

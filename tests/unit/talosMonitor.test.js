@@ -1772,3 +1772,33 @@ test('a cheap row carries what it looked at, and `unknown` is NOT recorded as `n
     await _checkSetup(MID(), T, unsure)
     assert.equal(unsure.entries[0].conditions[0].met, 'unchecked', 'never `no`')
 })
+
+// ── The thesis lens: the level and below (docs/design/thesis-lens-followups.md) ──
+// A thesis entry is valid at its level AND UNDER IT, so a wake under one of two levels must read THAT premise —
+// before thesisGate the read always got scenarios[0], and the break scenario was never judged.
+const THESIS_AB = mk({
+    trade_mode: 'thesis', validity: undefined, entry_legs: undefined, stop_legs: undefined, conditions: [],
+    scenarios: [
+        { id: 'A', name: 'thesis pullback', entry_legs: [{ price: 164.7, quantity: 17 }], stop_legs: [{ price: 152.3 }],
+          target_legs: [{ price: 190.49 }], validity: { lower: 152.3, upper: 169, approach: 169.66, timeframe: 'day', on_away: 'pass' } },
+        { id: 'B', name: 'after the break', entry_legs: [{ price: 173.77, quantity: 16 }], stop_legs: [{ price: 161.61 }],
+          target_legs: [{ price: 190.49 }], validity: { lower: 161.61, upper: 180, approach: 190.49, timeframe: 'day', on_away: 'revise' } },
+    ],
+}, VENUE)
+
+test('a thesis wake under the break scenario\'s level reads the break scenario, and an enter fires ITS leg and size', async () => {
+    let read = null
+    const deps = stubDeps({ getPrice: async () => 171.2, assess: async (_s, hit) => { read = hit; return { verdict: 'enter', read: 'Strength on the 4h.' } } })
+    const out = await _checkSetup(THESIS_AB, T, deps)
+    assert.equal(read?.scenario?.id, 'B')
+    assert.equal(out.fired, true)
+    assert.equal(deps.writes[0].armed_scenario_id, 'B')
+    assert.equal(deps.writes[0].entry_legs[0].price, 173.77, 'the projection is B\'s')
+})
+
+test('a thesis wake over every level still reads the first premise — nothing is reached', async () => {
+    let read = null
+    const deps = stubDeps({ getPrice: async () => 175, assess: async (_s, hit) => { read = hit; return { verdict: 'wait', read: 'Over the level.' } } })
+    await _checkSetup(THESIS_AB, T, deps)
+    assert.equal(read, null, 'no hit — the read falls back to the first scenario as before')
+})

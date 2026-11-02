@@ -1033,6 +1033,12 @@ export function setupReadiness(setup, hasAccount = false) {
         // (`validateSetup` → `missing_runaway_answer`), exactly as 'stop price' does. Punctuation and
         // parentheses in a `missing` entry travel into a refusal code that a client has to match on.
         if (sc.validity && !sc.validity.on_away) missing.push(at('runaway answer'))
+
+        // A THESIS entry waits for price to come back to a level, so the one way it fails without being wrong is
+        // price leaving without it — and without a range nothing ever says so (NXST, 2026-10-30: "looking" in silence
+        // for six months). Every thesis premise draws one, which puts the runaway question above in front of the user
+        // (docs/design/thesis-lens-followups.md). Two plain words, for the slug.
+        if (setup.trade_mode === 'thesis' && !sc.validity) missing.push(at('validity range'))
     }
     if (!list.length && !root.length) missing.push('condition')
 

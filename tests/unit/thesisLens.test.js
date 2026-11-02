@@ -3,7 +3,8 @@ import { readFileSync } from 'node:fs'
 import assert from 'node:assert/strict'
 import { MODES } from '../../services/analysisModes.js'
 import { sanitizeScanSeed } from '../../services/scanSeed.util.js'
-import { normalizeSetup } from '../../services/setup.schema.js'
+import { normalizeSetup, setupReadiness } from '../../services/setup.schema.js'
+import { thesisGate, scenarioGate } from '../../monitoring/talos.gates.js'
 import { _buildSeedSection } from '../../services/agents/mentor.agent.service.js'
 import { lensLine } from '../../monitoring/assess.shared.js'
 import { priceStructureText, entryLevelText, unmirrorFacts, targetWords, unfinishedWeek } from '../../services/tools/thesisStructure.tools.js'
@@ -136,4 +137,89 @@ test('get_entry_level: the level read out, or why there is none', () => {
     assert.match(entryLevelText({ stop: 26.9, target: 31.6, risk_limit_pct: 5 }), /set by the risk limit/)
     assert.match(entryLevelText({ stop: 110, target: 90, min_rr: 1, side: 'short' }), /Entry level 100 \(and above\)/)
     assert.match(entryLevelText({ stop: 26.9, target: 31.6 }), /^No entry level/)
+})
+
+// ─── The follow-ups (docs/design/thesis-lens-followups.md, 2026-11-02) ─────────
+
+const _lens = () => {
+    const p = readFileSync(new URL('../../prompts/mentor_system_prompt.md', import.meta.url), 'utf8')
+    return p.slice(p.indexOf('## The thesis lens'), p.indexOf('## Size comes from the user'))
+}
+
+test('the lens prompt: the deeper stop is OFFERED with its cost and its date, never set unasked (GNRC)', () => {
+    const lens = _lens()
+    assert.match(lens, /OFFER the deeper stop, never set it unasked/)
+    assert.match(lens, /deep_stop_last_traded/)
+    assert.match(lens, /never guess a date/)
+    assert.match(lens, /may never fill/)
+    assert.match(lens, /stop's depth did not move the edge/)
+})
+
+test('the lens prompt: the break scenario is offered only over a printed higher low, as an alternative, never the break at market', () => {
+    const lens = _lens()
+    assert.match(lens, /The break scenario — OFFER it, never set it unasked/)
+    assert.match(lens, /HIGHER LOW has already printed/)
+    assert.match(lens, /No higher low printed → no B/)
+    assert.match(lens, /NOT buying the break at market/)
+    assert.match(lens, /ALTERNATIVES: the first to fill takes the full\s+size/)
+    assert.match(lens, /A\s+day close over \{swing high\} since \{today\}/, 'B arms on a latching day close')
+})
+
+test('the lens prompt: every thesis scenario draws a validity range and asks the runaway question (NXST)', () => {
+    const lens = _lens()
+    assert.match(lens, /And if it just goes\?/)
+    assert.match(lens, /the recent high — the highest high\s+since the last swing low — however close it sits/)
+    assert.match(lens, /A's `on_away` is `pass`/)
+    assert.match(lens, /never a chase/)
+    assert.match(lens, /conditions ON THE SCENARIO, not the root/)
+})
+
+const THESIS = (scenarios) => normalizeSetup({
+    asset: 'NXST', direction: 'long', type: 'swing', trade_mode: 'thesis', timeframe: 'day', valid_until: '2027-01-04T21:00:00Z',
+    scenarios,
+})
+const leg = (price) => [{ price }]
+const A = { id: 'A', entry_legs: leg(164.7), stop_legs: leg(152.3), target_legs: leg(190.49), quantity: 17,
+    conditions: [{ text: 'Price at or under 164.70 shows strength on the 1h / 4h', weight: 'primary', mode: 'judgment' }] }
+const B = { id: 'B', entry_legs: leg(173.77), stop_legs: leg(161.61), target_legs: leg(190.49), quantity: 16,
+    conditions: [{ text: 'A day close over 169.66 since 2026-10-28', weight: 'primary', mode: 'measured', persistence: 'latching' }] }
+const RANGE = (lower, upper, approach, on_away) => ({ lower, upper, approach, timeframe: 'day', on_away })
+
+test('readiness: a thesis premise with no validity range is not finished — the runaway question must be asked', () => {
+    const bare = setupReadiness(THESIS([A]), true)
+    assert.ok(bare.missing.includes('validity range'), bare.missing.join(', '))
+    const drawn = setupReadiness(THESIS([{ ...A, validity: RANGE(152.3, 169, 169.66, 'revise') }]), true)
+    assert.equal(drawn.missing.includes('validity range'), false)
+    const unanswered = setupReadiness(THESIS([{ ...A, validity: RANGE(152.3, 169, 169.66) }]), true)
+    assert.ok(unanswered.missing.includes('runaway answer'), 'the range puts the away question in front of the user')
+    const other = setupReadiness(normalizeSetup({ ...THESIS([A]), trade_mode: 'discretionary' }), true)
+    assert.equal(other.missing.includes('validity range'), false, 'another lens is unchanged')
+})
+
+test('readiness: with two scenarios, the one missing its range is named', () => {
+    const r = setupReadiness(THESIS([{ ...A, validity: RANGE(152.3, 169, 169.66, 'pass') }, B]), true)
+    assert.equal(r.missing.filter(m => m.startsWith('validity range')).length, 1)
+    assert.match(r.missing.find(m => m.startsWith('validity range')), /on /)
+})
+
+test('thesisGate: the level and below — the nearest level price is at or under is the premise on the table', () => {
+    const s = THESIS([A, B])
+    assert.equal(thesisGate(s, 175), null, 'over every level: nothing reached')
+    assert.equal(thesisGate(s, 172).scenario.id, 'B', 'under B\'s level only')
+    assert.equal(thesisGate(s, 173.77).scenario.id, 'B', 'at the level is at it')
+    assert.equal(thesisGate(s, 160).scenario.id, 'A', 'under both: the nearest, A')
+    assert.equal(thesisGate(s, 172).leg.id, s.scenarios[1].entry_legs[0].id, 'the leg comes with it')
+    assert.equal(scenarioGate(s, 172), null, 'the exact-match gate never saw it')
+})
+
+test('thesisGate: a short is the mirror; another lens and a dead scenario are not gated', () => {
+    const short = normalizeSetup({ ...THESIS([{ ...A, entry_legs: leg(100), stop_legs: leg(110), target_legs: leg(80) },
+        { ...B, entry_legs: leg(95), stop_legs: leg(104), target_legs: leg(80) }]), direction: 'short' })
+    assert.equal(thesisGate(short, 97).scenario.id, 'B', 'at or over B\'s level only')
+    assert.equal(thesisGate(short, 101).scenario.id, 'A', 'over both: the nearest, A')
+    assert.equal(thesisGate(short, 94), null, 'under every level: nothing reached')
+    assert.equal(thesisGate(normalizeSetup({ ...THESIS([A, B]), trade_mode: 'smc' }), 172), null)
+    const dead = { ...THESIS([A, B]), monitor_state: { scenarios: { B: { invalidation_status: 'fired' } } } }
+    assert.equal(thesisGate(dead, 172), null, 'B broke; A\'s level is not reached at 172')
+    assert.equal(thesisGate(THESIS([A, B]), NaN), null)
 })
