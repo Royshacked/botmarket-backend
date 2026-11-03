@@ -445,3 +445,13 @@ test('CR: the facts read before a turn — the week for a long-term trade, bound
 test('the risk read asks for the NUMBERS in the user\'s words, never the line\'s name (drive 12)', () => {
     assert.match(_buildRiskReadSection(FACTS, null), /with these numbers \(each stop's % and its normal days\) — never call it "the risk read"/)
 })
+
+test('the break edge is asked in the user\'s words, with the away edge, never as "revise / close / notify only" (Roy, 2026-11-03)', () => {
+    const p = readFileSync(new URL('../../prompts/mentor_system_prompt.md', import.meta.url), 'utf8')
+    const v = p.slice(p.indexOf('## `validity`'), p.indexOf('### `on_away`'))
+    assert.match(v, /Ask it in their words, never the field names/)
+    assert.match(v, /want a ping to redraw it, close it, or just a heads-up\?/)
+    assert.match(v, /Nothing redraws by itself/)
+    assert.match(v, /One question for both edges/)
+    assert.match(_lens(), /and the break edge in the SAME question/)
+})

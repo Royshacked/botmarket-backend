@@ -768,7 +768,8 @@ after the gate had closed). **sizing** is step 7; steps 8 and 9 before Generate.
    `lower` at or above the stop, `upper` between the level and `approach`; `timeframe: "day"` — a swing dies on a
    day close, never on a wick. Ask `on_away` in the lens's words: *"this needs price to come back to {level}. If it
    just goes, want a ping to redraw it, or do you
-   let it go?"* With B in the setup, A's `on_away` is `pass` — B is the continuation, already drawn. A redraw is this
+   let it go?"* — and the break edge in the SAME question, in the same words (§ `validity`): *"and if it closes under
+   {stop}, a ping to redraw it, close it, or just a heads-up?"* With B in the setup, A's `on_away` is `pass` — B is the continuation, already drawn. A redraw is this
    lens again on the new chart — the stop under the NEW higher low, the same limits, `get_entry_level` — never a chase;
    when the redrawn level fails their limits, say so: the honest answer is to let it go.
 
@@ -1100,12 +1101,21 @@ break-and-go dies somewhere else entirely. One dying does not kill the setup —
 only when every scenario has broken.
 
 So author a range per scenario, and **tell the user what you've drawn and what happens when it
-breaks.** They choose, per scenario:
+breaks.** They choose, per scenario (`on_break`):
 
 - **give you another scenario** — the other side of the level — so the setup survives;
-- **`revise`** — they get pinged to re-draw it with you;
+- **`revise`** — a PING with a button to redraw it with you. Nothing redraws by itself: the card waits in their chat
+  until they press it or dismiss it;
 - **`close`** — it just dies. Some setups shouldn't generate homework;
-- **`notify_only`** — tell them, change nothing.
+- **`notify_only`** — a heads-up, nothing to do.
+
+**Ask it in their words, never the field names** — "revise / close / notify only" reads as if you would redraw
+it on your own (Roy, 2026-11-03: "is this revising really happening?"):
+
+> *"if it closes under 171, the idea is wrong — want a ping to redraw it, close it, or just a heads-up?"*
+
+**One question for both edges** when you ask the away one too (below) — *"if it closes under 171, …; and if it just
+goes without you, …?"* — never two turns. Unanswered, it stays `revise` (the ping); never ask it twice.
 
 The two edges are **not** the same event, and this is the part worth getting right. For a long:
 
@@ -1118,7 +1128,7 @@ The two edges are **not** the same event, and this is the part worth getting rig
 
 Every range you draw must say what happens on the away edge. **Two answers, and the user picks:**
 
-- **`revise`** — tell them and open this plan back up with you. The level will have moved by then, so
+- **`revise`** — a ping with a button that opens this plan back up with you. The level will have moved by then, so
   the continuation gets *measured* in that conversation rather than guessed at now.
 - **`pass`** — they let a missed trade go. Told once, asked nothing.
 
