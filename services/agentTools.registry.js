@@ -358,13 +358,14 @@ export const TOOL_SCHEMAS = {
     get_entry_level: {
         "type": "object",
         "properties": {
+            "ticker":         { "type": "string", "description": "The symbol — the reply also says when price last traded past the stop." },
             "stop":           { "type": "number", "description": "The stop YOU judged — where the thesis breaks." },
             "target":         { "type": "number", "description": "The target you judged (TP1)." },
             "risk_limit_pct": { "type": "number", "description": "The USER's risk limit: the stop at most this % from the entry, e.g. 5." },
             "min_rr":         { "type": "number", "description": "The USER's minimum reward to risk at the entry, e.g. 1.5." },
             "side":           { "type": "string", "enum": ["long", "short"] }
         },
-        "required": ["stop", "target"]
+        "required": ["ticker", "stop", "target"]
     },
     get_market_hours: {
         "type": "object",

@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { structureFacts, entryLevel, toWeekly, mirror, atr, swings, STRUCTURE, controlReplay, rangeTarget, lowestLow } from '../../services/swingStructure.service.js'
+import { structureFacts, entryLevel, toWeekly, mirror, atr, swings, STRUCTURE, controlReplay, rangeTarget, lowestLow, lastTradedUnder } from '../../services/swingStructure.service.js'
 
 // The THESIS lens's shared mechanism (docs/design/stock-playbook.md): the facts Mentor judges the stop and targets from,
 // and the entry arithmetic. The swings and ATR themselves are covered by thesisLab.test.js (the lab re-exports them).
@@ -58,6 +58,24 @@ test('structureFacts on a short’s mirrored bars: the last time over the deep s
     rows[10] = { ...rows[10], low: 70 }
     const f = structureFacts(mirror(rows.map(b => ({ ...b, open: 200 - b.open, high: 200 - b.low, low: 200 - b.high, close: 200 - b.close }))))
     assert.equal(f.candidates.deep_stop_last_traded, rows[10].date, 'a short\'s chart turned the right way up reads the same visit')
+})
+
+test('lastTradedUnder: the LAST bar whose low went under the level, at or before the bar asked — null when none', () => {
+    const rows = bars([100, 90, 100, 95, 100])
+    assert.equal(lastTradedUnder(rows, 96), 3)
+    assert.equal(lastTradedUnder(rows, 96, 2), 1, 'from an earlier bar back')
+    assert.equal(lastTradedUnder(rows, 80), null)
+})
+
+test('structureFacts: the break candidate — sellers in control over a confirmed higher low, the swing high a close over arms B', () => {
+    const rows = reversal()
+    const f = structureFacts(rows.slice(0, -1))   // the day before the close over the swing high
+    assert.equal(f.control, 'sellers')
+    assert.deepEqual([f.break_candidate.swing_to_break.price, f.break_candidate.higher_swing.price, f.break_candidate.fall_low.price], [86.6, 83, 80])
+    assert.equal(f.break_candidate.stop, f.candidates.stop, 'B\'s stop is the structure stop — it changes only a deep-stop trade')
+    assert.ok(f.break_candidate.stop > f.candidates.deep_stop)
+    assert.equal(structureFacts(rows.slice(0, -2)).break_candidate, null, 'the higher low not yet confirmed: no B')
+    assert.equal(structureFacts(rows).break_candidate, null, 'broken: buyers in control, B is spent')
 })
 
 test('structureFacts on a short’s mirrored bars: the normal move is still a positive percent', () => {

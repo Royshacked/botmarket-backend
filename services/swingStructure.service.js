@@ -119,13 +119,23 @@ export function lowestLow(rows, i, n = STRUCTURE.lookLow) {
     return { price, j }
 }
 
+/**
+ * The last bar at or before `i` whose low traded under `level` — "a price it has not visited since" is that bar's date
+ * (docs/design/thesis-lens-followups.md). A short passes mirrored bars and a mirrored level. → its index, or null. Pure.
+ */
+export function lastTradedUnder(rows, level, i = rows.length - 1) {
+    for (let j = i; j >= 0; j--) if (rows[j].low < level) return j
+    return null
+}
+
 const _r = (n, d = 2) => (Number.isFinite(n) ? Math.round(n * 10 ** d) / 10 ** d : null)
 
 /**
  * THE FACTS a thesis read is judged from, as of the last bar (long side — a short reads `mirror`ed bars). `k` — the
  * swing threshold in ATRs. → `{ as_of, close, atr, atr_pct, swings (the last `keep`), last_swing_low, last_swing_high,
  * control ('buyers'|'sellers'|null) and since, last_break { date, context }, fall { from, low }, candidates { stop,
- * deep_stop, deep_stop_last_traded (the last date under it, or null), target, target_kind (range_top | measured_move), lookback_bars }, heavy_days }`, or null under 60 bars. Candidates are the lab's rules (test 1b) —
+ * deep_stop, deep_stop_last_traded (the last date under it, or null), target, target_kind (range_top | measured_move), lookback_bars }, heavy_days,
+ * break_candidate { swing_to_break, higher_swing, fall_low, stop } or null }`, or null under 60 bars. Candidates are the lab's rules (test 1b) —
  * a starting point Mentor judges, never the answer. Pure.
  */
 export function structureFacts(rows, { k = STRUCTURE.k, buffer = STRUCTURE.buffer, keep = 8, lookLow = STRUCTURE.lookLow, lookFall = STRUCTURE.lookFall, atHighs = STRUCTURE.atHighs } = {}) {
@@ -142,8 +152,15 @@ export function structureFacts(rows, { k = STRUCTURE.k, buffer = STRUCTURE.buffe
     const deepStop = low60 - buffer * a[i]
     // When price last traded under the deep stop — "a price it has not visited since" is a date Mentor reads, never
     // guesses (docs/design/thesis-lens-followups.md). Null when the history read has none.
-    let deepJ = null
-    for (let j = i; j >= 0 && deepJ == null; j--) if (rows[j].low < deepStop) deepJ = j
+    const deepJ = lastTradedUnder(rows, deepStop, i)
+    // THE BREAK CANDIDATE — scenario B's facts, for Mentor to judge (thesis-lens-followups § B): sellers still in
+    // control, a higher low printed after the fall's low and still holding, and the swing high over the price that a
+    // close over arms B. Its stop is under the higher low — the structure stop — so B changes the stop only for a trade
+    // on a deeper one. GNRC, 2026-11-02: lows 194 → 186 → 181 step down, yet 181 is the higher low over the fall's 173.
+    const breakCandidate = control === 'sellers' && lastH && lastL && lastL.j > lowJ
+        && close > lastL.price && lastH.price > close
+        ? { swing_to_break: pt(lastH), higher_swing: pt(lastL), fall_low: { date: day(lowJ), price: _r(low60) }, stop: _r(stop) }
+        : null
     const { target, kind } = rangeTarget(rows, i, lastL?.price ?? null, lookFall)
     // The heavy days of the last 60: volume ≥ 2× its 20-day mean — climaxes, shakeouts, the sign of strength.
     const heavy = []
@@ -169,6 +186,7 @@ export function structureFacts(rows, { k = STRUCTURE.k, buffer = STRUCTURE.buffe
             target: _r(target), target_kind: kind, lookback_bars: lookFall,
         },
         heavy_days: heavy,
+        break_candidate: breakCandidate,
     }
 }
 

@@ -392,7 +392,8 @@ Stop as soon as the question is answered. Escalate only on a conflict or a blank
 - **Always** — `get_quote`, `get_candles` (the daily and one intraday rung), `get_key_levels` or
   `get_structure`, one `get_chart`. This alone usually settles direction. **Risk-based:** `get_price_structure`
   (`day` for a swing, `week` for long term) in place of the key levels and the structure — it is the read the stop
-  and the target are judged on.
+  and the target are judged on, and the deep stop's date and the break scenario come only from it: never skip it for
+  the candles.
 - **The window** — `get_news` (`companies`, the ticker as `subject`) for the catalyst check, and
   **`get_earnings` for the date**: one ticker's next report, which is what you need here.
   `get_earnings_calendar` answers a different question — who reports between two dates — and asking
@@ -700,6 +701,9 @@ after the gate had closed). **sizing** is step 7; steps 8 and 9 before Generate.
    Then **OFFER the deeper stop, never set it unasked**: under the low of the whole fall (`candidates.deep_stop`,
    with room for noise) — a price the stock has not traded under since `candidates.deep_stop_last_traded`: SAY that
    date, from the tool on this turn (null: not in the history read; never guess one — the fall's own low is not it).
+   A stop of your own, or the user's, gets its date from `get_entry_level`, which reads it off the bars for the stop
+   you pass ("last traded under {stop} on {date}") — the candles you read are too short to date it (GNRC drive,
+   2026-11-02: "not traded under since September 8", read off 40 candles; the bars said Feb 5).
    The structure stop is the one you put on the worksheet; you may say which of the two you would pick and why, but
    the deep one goes on only when the user takes it (GNRC drive, 2026-11-02: "I recommend the deeper stop" put it
    on unasked). Under it a retest of the low does not stop the trade out. Say it as a
@@ -721,7 +725,9 @@ after the gate had closed). **sizing** is step 7; steps 8 and 9 before Generate.
    HIGHER LOW has already printed under it (a confirmed swing low over the fall's low) — AND the break would CHANGE
    THE STOP (Roy, 2026-11-02): B's stop, under that higher low, sits clearly over A's (A on the deep stop, or A's stop
    under an older, lower swing). When A's stop is already under that higher low, B is A with one more condition —
-   same stop, same level — so there is no B: A is that trade. Then a second ENTRY OPTION on the same trade, B,
+   same stop, same level — so there is no B: A is that trade. `get_price_structure`'s `break_candidate` carries the
+   three facts when the first two hold (the swing high to break, the higher low, B's stop) — judge it like any
+   candidate, and when it is there and the user took the deep stop, B is on offer that turn. Then a second ENTRY OPTION on the same trade, B,
    beside the pullback, A (`semantics: "alternatives"` — one scenario per entry, § entries): B arms on a DAY close
    over that swing high; its stop goes under the higher low, with noise
    room; its target is the next sellers above the break, from the chart; its level comes from the same user limits

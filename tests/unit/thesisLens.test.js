@@ -7,7 +7,7 @@ import { normalizeSetup, setupReadiness } from '../../services/setup.schema.js'
 import { thesisGate, scenarioGate } from '../../monitoring/talos.gates.js'
 import { _buildSeedSection } from '../../services/agents/mentor.agent.service.js'
 import { lensLine } from '../../monitoring/assess.shared.js'
-import { priceStructureText, entryLevelText, unmirrorFacts, targetWords, unfinishedWeek } from '../../services/tools/thesisStructure.tools.js'
+import { priceStructureText, entryLevelText, entryLevelReply, breakWords, unmirrorFacts, targetWords, unfinishedWeek } from '../../services/tools/thesisStructure.tools.js'
 
 // THE THESIS LENS (Roy, 2026-10-30; docs/design/stock-playbook.md) — the stop where the thesis breaks, the entry from
 // the user's risk, the Hotlist's Build with Mentor opening in it, and Talos told what the setup is.
@@ -137,6 +137,47 @@ test('get_entry_level: the level read out, or why there is none', () => {
     assert.match(entryLevelText({ stop: 26.9, target: 31.6, risk_limit_pct: 5 }), /set by the risk limit/)
     assert.match(entryLevelText({ stop: 110, target: 90, min_rr: 1, side: 'short' }), /Entry level 100 \(and above\)/)
     assert.match(entryLevelText({ stop: 26.9, target: 31.6 }), /^No entry level/)
+})
+
+test('get_entry_level with the ticker: the last date price traded past the stop, read off two years of days (GNRC drive 5)', async () => {
+    const closes = [...Array(30).fill(30), 26, ...Array(30).fill(30)]   // one dip under 26.9, then flat
+    let asked = null
+    const get = async (sym, o) => { asked = { sym, ...o }; return provider(closes)() }
+    const days = await provider(closes)()
+    const dip = new Date(days[30].timestamp * 1000).toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
+    const text = await entryLevelReply({ ticker: 'mtg', stop: 26.9, target: 31.6, min_rr: 1.5 }, { get })
+    assert.match(text, /^Entry level 28\.78/)
+    assert.ok(text.endsWith(`MTG last traded under 26.9 on ${dip}.`), text)
+    assert.equal(Math.round((asked.to - asked.from) / (365 * 86_400_000)), 2)
+    assert.match(await entryLevelReply({ ticker: 'mtg', stop: 20, target: 31.6, min_rr: 1.5 }, { get }), /under 20 on no day in the last two years \(61 sessions read\)/)
+    assert.match(await entryLevelReply({ ticker: 'mtg', stop: 34, target: 25, min_rr: 1, side: 'short' }, { get }), /over 34 on no day/, 'a short: over the stop')
+    assert.match(await entryLevelReply({ ticker: 'mtg', stop: 30.2, target: 25, min_rr: 1, side: 'short' }, { get }), /MTG last traded over 30\.2 on \d{4}-\d\d-\d\d\./)
+})
+
+test('get_entry_level: no ticker or no level → no fetch; a failed fetch still answers the level', async () => {
+    let calls = 0
+    const get = async () => { calls++; throw new Error('feed down') }
+    assert.equal(await entryLevelReply({ stop: 26.9, target: 31.6, min_rr: 1.5 }, { get }), entryLevelText({ stop: 26.9, target: 31.6, min_rr: 1.5 }))
+    assert.match(await entryLevelReply({ ticker: 'X', stop: 26.9, target: 31.6 }, { get }), /^No entry level/)
+    assert.equal(calls, 0)
+    assert.match(await entryLevelReply({ ticker: 'X', stop: 26.9, target: 31.6, min_rr: 1.5 }, { get }), /^Entry level 28\.78.*\(When X last traded under 26\.9 could not be read\.\)$/)
+})
+
+test('get_price_structure: the break candidate worded for its side, and a short\'s turned the right way up', () => {
+    assert.match(breakWords('long'), /HIGHER LOW .* day close over arms B/)
+    assert.match(breakWords('short'), /LOWER HIGH .* day close under arms B/)
+    const f = unmirrorFacts({ close: -50, swings: [], last_swing_low: null, last_swing_high: null, control: 'buyers', fall: null,
+        candidates: { stop: -56, deep_stop: -61, target: -40 }, heavy_days: [],
+        break_candidate: { swing_to_break: { type: 'high', price: -45 }, higher_swing: { type: 'low', price: -55 }, fall_low: { date: 'd', price: -60 }, stop: -56 } })
+    assert.deepEqual(f.break_candidate, { swing_to_break: { type: 'low', price: 45 }, lower_swing: { type: 'high', price: 55 }, rise_high: { date: 'd', price: 60 }, stop: 56 })
+    assert.equal(unmirrorFacts({ ...f, close: -50, swings: [], heavy_days: [], candidates: {}, break_candidate: null }).break_candidate, null)
+})
+
+test('the lens prompt: the dates and B come from the tools, never the candles (GNRC drive 5)', () => {
+    const lens = _lens()
+    assert.match(lens, /gets its date from `get_entry_level`/)
+    assert.match(lens, /`break_candidate`/)
+    assert.match(readFileSync(new URL('../../prompts/mentor_system_prompt.md', import.meta.url), 'utf8'), /never skip it for\s+the candles/)
 })
 
 // ─── The follow-ups (docs/design/thesis-lens-followups.md, 2026-11-02) ─────────
