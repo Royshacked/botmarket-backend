@@ -696,7 +696,28 @@ export function _buildTurnContext(chatState, clientTime = null, justSettled = []
     // had already answered.
     return `---
 ${buildTimeSection(clientTime, 'active_from / valid_until')}
-COVERAGE SO FAR: ${covered}. Re-state these in every <coverage> tag plus anything new you read this turn.${draft}${_buildMoneySection(chatState?.draft)}${_buildGenerateSection(chatState, hasAccount)}${_buildModeSection(mode)}${_buildRiskReadSection(thesisFacts, chatState?.draft)}${_buildBreakSection(thesisFacts, chatState?.draft)}${_buildLedgerSection(chatState)}${_buildPressSection(justSettled, chatState, delegated)}`
+COVERAGE SO FAR: ${covered}. Re-state these in every <coverage> tag plus anything new you read this turn.${draft}${_buildMoneySection(chatState?.draft)}${_buildGenerateSection(chatState, hasAccount)}${_buildModeSection(mode)}${_buildRedrawSection(chatState?.redraw, chatState?.draft)}${_buildRiskReadSection(thesisFacts, chatState?.draft)}${_buildBreakSection(thesisFacts, chatState?.draft)}${_buildLedgerSection(chatState)}${_buildPressSection(justSettled, chatState, delegated)}`
+}
+
+/**
+ * THE RE-DRAW, AS A FACT (Roy, 2026-11-03: "is the revising really happening?"). The card's button reopened the setup
+ * with every stage settled, and Mentor asked whether the direction still stood — no read, no new level (redraw drive).
+ * The desk now reopens the entries (mentorStateFromEntity → reopenForRedraw) and marks the turn with what Talos saw;
+ * this says what the turn is for. One turn's: the marker is not carried past it. PURE.
+ */
+export function _buildRedrawSection(redraw, draft) {
+    if (!redraw?.event) return ''
+    const which = redraw.scenarios?.length ? ` (${redraw.scenarios.join(', ')})` : ''
+    const saw = redraw.event === 'ran_away'
+        ? `it RAN AWAY without filling${which}${redraw.reason ? ` — ${redraw.reason}` : ''}. The read was not wrong; the entry never came.`
+        : `its premise BROKE${which}${redraw.reason ? ` — ${redraw.reason}` : ''}.`
+    const how = draft?.trade_mode === 'thesis'
+        ? 'Redraw it on TODAY\'s chart with the lens (§ The thesis lens, step 9): read get_price_structure, the stop under the NEW higher low, the user\'s same risk limit and minimum reward to risk (from the conversation — ask once if they are not in it), the new level from get_entry_level, a new validity range.'
+        : 'Redraw its levels on TODAY\'s chart, in its own lens — read the structure again, never the old levels.'
+    const verdict = redraw.event === 'ran_away'
+        ? 'If the redrawn level fails their limits, say plainly there is no trade here and they let it go — never a chase.'
+        : 'First say whether the trade still stands at all; if the structure went the other way, say plainly there is no trade.'
+    return `\n\nTHE RE-DRAW — the user opened this setup from Talos's card: ${saw} The entries stage is reopened for it; the direction, the horizon, the span and their size stand. ${how} ${verdict}`
 }
 
 /**

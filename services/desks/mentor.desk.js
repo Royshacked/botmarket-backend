@@ -13,6 +13,7 @@ import { bookSeed } from '../houseBook.service.js'
 import { houseLabels, formatHouseLabel } from '../houseLabel.service.js'
 import { mentorActions, mentorApplyEdit } from './actions/mentor.actions.js'
 import { setupReason } from '../../api/setups/setupReasons.js'
+import { normalizeBuild, activeName, putName, reopenForRedraw } from '../mentorBuild.util.js'
 
 /**
  * WHAT REACHES THE PANEL. Pure and tested — because everything the desk computes for the user has to
@@ -100,7 +101,11 @@ export function mentorNextState(prev, result, input = {}) {
  * built for setups saved before the draft was stored (MainPage.handleEditSetup), moved here.
  */
 export function mentorStateFromEntity(setup) {
-    const draft = setup?.chat_state?.draft ?? {
+    const stored = setup?.chat_state?.draft ?? null
+    const redraw = redrawOf(setup)
+    // A setup Talos says ran away or broke reopens with its LEVELS open (reopenForRedraw) — a finished ledger told
+    // Mentor nothing was outstanding, and the re-draw never happened (redraw drive, 2026-11-03).
+    const draft = stored && redraw && stored.build ? { ...stored, build: _reopenActive(stored.build) } : stored ?? {
         asset:       setup?.asset,
         asset_class: setup?.asset_class ?? null,
         direction:   setup?.direction   ?? null,
@@ -125,7 +130,43 @@ export function mentorStateFromEntity(setup) {
         coverage:     setup?.chat_state?.coverage ?? [],
         drafts:       {},
         view:         { gate: null, readiness: null, setups: null },
+        // ONE TURN's: mentorNextState keeps no unknown key, so the marker is read by the re-draw turn and gone after —
+        // the reopened ledger is what carries on.
+        ...(redraw ? { redraw } : {}),
     }
+}
+
+/**
+ * WHAT TALOS SAID about a saved setup, when it is a reason to re-draw: a scenario that RAN AWAY unfilled (drifting) or
+ * BROKE (fired), read off the per-scenario latches and the document's roll-up. → `{ event: 'ran_away' | 'broken',
+ * reason, scenarios: [names] }`, or null — nothing latched, or only Talos's stale-map read (edge 'time', which already
+ * carries its own proposal). A broken premise outranks a missed one. Pure.
+ */
+export function redrawOf(setup) {
+    if (!setup) return null
+    if (setup.invalidation_edge === 'time') return null
+    const states = setup.monitor_state?.scenarios ?? {}
+    const byId = new Map((setup.scenarios ?? []).map(sc => [sc.id, sc.name ?? sc.id]))
+    const hit = (status) => Object.entries(states).filter(([, s]) => s?.invalidation_status === status)
+    const fired = hit('fired'), drifting = hit('drifting')
+    const pick = fired.length ? { event: 'broken', rows: fired } : drifting.length ? { event: 'ran_away', rows: drifting } : null
+    if (!pick) {
+        if (setup.invalidation_status === 'fired') return { event: 'broken', reason: setup.invalidation_reason ?? null, scenarios: [] }
+        if (setup.invalidation_status === 'drifting') return { event: 'ran_away', reason: setup.invalidation_reason ?? null, scenarios: [] }
+        return null
+    }
+    return {
+        event:     pick.event,
+        reason:    pick.rows[0][1]?.invalidation_reason ?? setup.invalidation_reason ?? null,
+        scenarios: pick.rows.map(([id]) => byId.get(id) ?? id),
+    }
+}
+
+/** The build with its ACTIVE name reopened for a re-draw. */
+function _reopenActive(rawBuild) {
+    const build = normalizeBuild(rawBuild)
+    const name = activeName(build)
+    return name ? putName(build, reopenForRedraw(name).name) : build
 }
 
 export const mentorDesk = {

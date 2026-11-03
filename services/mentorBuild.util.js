@@ -280,6 +280,19 @@ export function switchLens(name, lens, source = 'user') {
     return { name: next, cleared: r.cleared, switched: true }
 }
 
+/**
+ * REOPEN FOR A RE-DRAW (Roy, 2026-11-03: "is the revising really happening?" — it was not: a setup reopened from
+ * Talos's missed/broken card came back with every stage settled, and Mentor asked whether the direction still stood).
+ * The levels are what moved, so the entries stage goes and everything under it; the opening and the span stay, and
+ * the user's SIZE is held again as switchLens does — their risk answer, not a level. PURE.
+ */
+export function reopenForRedraw(name) {
+    if (!name) return { name, cleared: [] }
+    const size = name.settled.size ?? (name.claimed.size?.source === 'user' ? name.claimed.size.value : null)
+    const r = unsettle(name, 'entries')
+    return { name: size && typeof size === 'object' ? claim(r.name, { size }, 'user').name : r.name, cleared: r.cleared }
+}
+
 // ─── Where are we? ────────────────────────────────────────────────────────────
 
 export function isSettled(name, field) {
