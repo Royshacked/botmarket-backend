@@ -8,7 +8,8 @@ import { buildTagCaptures } from '../llmStream.util.js'
 import { DESKS } from '../desks/registry.js'
 import { makeRouteCapture, buildRouteRule } from '../routing.util.js'
 import { TRADING_TOOLS, buildTradingToolHandlers } from '../tools/trading.tools.js'
-import { THESIS_STRUCTURE_HANDLERS } from '../tools/thesisStructure.tools.js'
+import { THESIS_STRUCTURE_HANDLERS, thesisTurnFacts } from '../tools/thesisStructure.tools.js'
+import { STRUCTURE } from '../swingStructure.service.js'
 import { toolsFor } from '../agentTools.registry.js'
 import { consultDescription } from '../deepThink.service.js'
 import { FLIP_TOOL, FLIP_DESCRIPTION, makeFlipHandler } from '../flipTest.service.js'
@@ -122,6 +123,7 @@ async function chatStream({
     _analystActions = getAnalystActions,
     _flipHandler = makeFlipHandler,   // the blinded red-team, injectable so the stamp below is testable without a model call
     _readSetup = readSetup,           // the cheap "did they bring a setup?" read on a typed first turn (mentorMode.service)
+    _thesisFacts = thesisTurnFacts,   // the chart's stops, normal move and break scenario, read for a thesis trade at entries
 }) {
 
     // `consult` is deliberately absent: runAgentStream builds it from the tool declaration, which is
@@ -197,9 +199,10 @@ async function chatStream({
     // first message. Undecided (the read failed) = the whole kit, and the prompt's rule decides.
     // The read and the venue are independent I/O, so they run together: the read must not delay the first token by
     // a round trip of its own.
-    const [{ mode, source: modeSource }, venue] = await Promise.all([
+    const [{ mode, source: modeSource }, venue, thesisFacts] = await Promise.all([
         resolveMode({ name: activeName(incoming.build), seed, messages, userId, signal, read: _readSetup }),
         _venueSection(userId),
+        _readThesisFacts(turnState, _thesisFacts),
     ])
     const tools = kitFor(mode, MENTOR_TOOLS, TRADING_TOOLS.length)
     // The kit is enforced on the HANDLERS too: a call to an undeclared tool comes back "no handler" instead of running.
@@ -210,7 +213,7 @@ async function chatStream({
     // the system prompt: free cash moves whenever anything fills, so a volatile system block
     // would sit ahead of the whole conversation in the cache prefix. See buildVenueSection.
     const builtMessages = attachTurnContext(
-        attachTurnContext(normalizeMessages(messages, MAX_MESSAGES), _buildTurnContext(turnState, clientTime, incoming.settled, { delegated: incoming.delegated, hasAccount, mode })),
+        attachTurnContext(normalizeMessages(messages, MAX_MESSAGES), _buildTurnContext(turnState, clientTime, incoming.settled, { delegated: incoming.delegated, hasAccount, mode, thesisFacts })),
         venue)
 
     // Coverage is CUMULATIVE across the conversation: the model re-states everything it has read,
@@ -674,7 +677,7 @@ Open on it: say the name, relay the read in a sentence rather than restating it 
  * carry-forward rule and the problems block: an instruction separated from the data it governs is
  * how a prompt quietly stops meaning what it says.
  */
-export function _buildTurnContext(chatState, clientTime = null, justSettled = [], { delegated = [], hasAccount = null, mode = undefined } = {}) {
+export function _buildTurnContext(chatState, clientTime = null, justSettled = [], { delegated = [], hasAccount = null, mode = undefined, thesisFacts = null } = {}) {
     // THE WORKSHEET, WITHOUT WHAT IS ALREADY WRITTEN OUT ABOVE IT. `build`, `spans`, `entries` and
     // `summary` each have their own section in prose; dumping them again as JSON paid for them
     // twice and buried the instructions under a wall of fields.
@@ -693,7 +696,84 @@ export function _buildTurnContext(chatState, clientTime = null, justSettled = []
     // had already answered.
     return `---
 ${buildTimeSection(clientTime, 'active_from / valid_until')}
-COVERAGE SO FAR: ${covered}. Re-state these in every <coverage> tag plus anything new you read this turn.${draft}${_buildMoneySection(chatState?.draft)}${_buildGenerateSection(chatState, hasAccount)}${_buildModeSection(mode)}${_buildLedgerSection(chatState)}${_buildPressSection(justSettled, chatState, delegated)}`
+COVERAGE SO FAR: ${covered}. Re-state these in every <coverage> tag plus anything new you read this turn.${draft}${_buildMoneySection(chatState?.draft)}${_buildGenerateSection(chatState, hasAccount)}${_buildModeSection(mode)}${_buildRiskReadSection(thesisFacts, chatState?.draft)}${_buildBreakSection(thesisFacts, chatState?.draft)}${_buildLedgerSection(chatState)}${_buildPressSection(justSettled, chatState, delegated)}`
+}
+
+/**
+ * The chart's facts, read before a thesis trade's SPANS or ENTRIES turn — the stops, the risk read and B live at
+ * entries, and the limits are asked in the very turn spans settles (drive 9: that turn started at spans, read nothing,
+ * and asked for the limits bare). `stage` rides along — B is offered at entries only. Anything else, or a read that
+ * fails, → null: the turn goes on without them, never stalls.
+ */
+async function _readThesisFacts(chatState, read) {
+    const d = chatState?.draft
+    const stage = stageOf(activeName(chatState?.build))
+    if (d?.trade_mode !== 'thesis' || !d.asset || (stage !== 'spans' && stage !== 'entries')) return null
+    try {
+        const facts = await read({ ticker: d.asset, timeframe: /week/i.test(d.timeframe ?? '') ? 'week' : 'day', side: d.direction === 'short' ? 'short' : 'long' })
+        return facts ? { ...facts, stage } : null
+    } catch (err) {
+        logger.warn(LOG, 'thesis facts read failed — the turn goes on without them', { asset: d.asset, err: err.message })
+        return null
+    }
+}
+
+const _pctFrom = (from, to) => Math.round(Math.abs(from - to) / Math.abs(from) * 1000) / 10
+const _atrs = (from, to, atr) => (atr > 0 ? Math.round(Math.abs(from - to) / atr * 10) / 10 : null)
+
+/**
+ * THE RISK READ, AS FACTS (Roy, 2026-11-02: "can't Mentor tell it from the chart?" — and 2026-11-03: "give Mentor the
+ * read of risk before the user is asked for his limit"). Three drives asked for the limits first; the read the prompt
+ * asks for came after, or never. Each stop's distance from today's close in % and in this chart's normal moves — the
+ * judgment of what limit fits stays the model's. PURE.
+ */
+export function _buildRiskReadSection(facts, draft) {
+    if (!Number.isFinite(facts?.close) || !(facts.close !== 0)) return ''
+    const unit = facts.timeframe === 'week' ? 'weeks' : 'days'
+    const aStop = Number(draft?.scenarios?.[0]?.stop_legs?.[0]?.price)
+    // The deep stop's date rides here too: the prompt's "from the tool on this turn" met the ledger's "already read —
+    // do not call again", and Mentor withheld the offer (drive 9: "can't responsibly quote it without its date").
+    const past = facts.side === 'short' ? 'over' : 'under'
+    const deepName = `the deep stop${facts.deep_stop_last_traded !== undefined ? ` (not traded ${past} since ${facts.deep_stop_last_traded ?? 'any day in the history read'})` : ''}`
+    const stops = [['the structure stop', facts.stop], [deepName, facts.deep_stop]]
+    if (Number.isFinite(aStop) && !stops.some(([, p]) => p === aStop)) stops.unshift(['the worksheet\'s stop', aStop])
+    const said = stops.filter(([, p]) => Number.isFinite(p))
+        .map(([name, p]) => `${name} ${p} is ${_pctFrom(facts.close, p)}% from today's ${facts.close}${_atrs(facts.close, p, facts.atr) != null ? ` — ${_atrs(facts.close, p, facts.atr)} normal ${unit} (ATR ${facts.atr})` : ''}`)
+    if (!said.length) return ''
+    return `\n\nTHE RISK READ (step 5) — SAY IT BEFORE you ask for their risk limit and minimum reward to risk, in the same turn as the ask: ${said.join('; ')}. From that, your read of what kind of limit gets in near today's price and what kind waits for a deep pullback toward the stop — judgment, no fixed menu; any level you name comes from get_entry_level. Once they gave their limits, do not repeat it.`
+}
+
+/**
+ * THE BREAK SCENARIO, AS A FACT (Roy, 2026-11-02: "B adds value if Mentor sees that a break up will change the stop").
+ * Two drives had the chart's B in the tool's answer and the rule in the prompt, and B was never offered — so the
+ * server says, from the worksheet's own stop, whether B is on offer THIS turn. "Clearly over" is the stop's own noise
+ * buffer (STRUCTURE.buffer × ATR), not a new number. Already two scenarios → B is drawn, nothing to say.
+ * B's ENTRY (Roy, 2026-11-03): its level from get_entry_level on B's stop — at or over the arming line, the break price
+ * itself fits the limits and the break is the entry; under it, B waits for a pullback to the level after the break.
+ * Either is B; drive 8 refused it for a level under the line, pricing B at the break with its own R:R. PURE.
+ */
+export function _buildBreakSection(facts, draft) {
+    const b = facts?.break
+    if (!b?.swing_to_break || !b.stop || (facts.stage && facts.stage !== 'entries')) return ''
+    const scenarios = Array.isArray(draft?.scenarios) ? draft.scenarios : []
+    if (scenarios.length > 1) return ''
+    const short = facts.side === 'short', sg = short ? -1 : 1
+    const held = b.higher_swing ?? b.lower_swing
+    const aStop = Number(scenarios[0]?.stop_legs?.[0]?.price)
+    const aTarget = Number(scenarios[0]?.target_legs?.[0]?.price)
+    const arm = b.swing_to_break.price
+    const lines = [`\n\nTHE BREAK SCENARIO (B) — on this chart (get_price_structure's break_candidate): a DAY close ${short ? 'under' : 'over'} ${arm} arms it; its stop ${b.stop}, ${short ? 'over the lower high' : 'under the higher low'} at ${held?.price}${held?.date ? ` (${held.date})` : ''} — ${_pctFrom(arm, b.stop)}% from the break.`]
+    const changes = Number.isFinite(aStop) && sg * (b.stop - aStop) > STRUCTURE.buffer * (facts.atr ?? 0)
+    if (changes) {
+        lines.push(`  The worksheet's stop ${aStop} is ${short ? 'over' : 'under'} B's: the break CHANGES THE STOP, so B is ON OFFER THIS TURN — one bullet: its arming line, its stop, and that its stop is ${short ? 'lower' : 'higher'} than A's. Theirs to take or decline; never add it unasked, and once they declined, leave it.`)
+        lines.push(`  B's ENTRY is get_entry_level on B's stop ${b.stop}, B's target and their limits — never an R:R of your own. Level ${short ? 'at or under' : 'at or over'} ${arm}: the break price fits their limits, so the break IS the entry (the level and ${short ? 'above' : 'below'}, armed by the close). Level ${short ? 'over' : 'under'} ${arm}: B waits for a pullback to the level after the break. Both are B — say which, never "does not fit" for a level ${short ? 'over' : 'under'} the line.`)
+    } else {
+        lines.push(`  ${Number.isFinite(aStop) ? `The worksheet's stop ${aStop} is` : 'A structure stop would be'} at B's: B would be A with one more condition — no B.${facts.deep_stop != null ? ` If the user takes the deep stop (${facts.deep_stop}), B is on offer in THAT same turn.` : ''}`)
+    }
+    if (Number.isFinite(aTarget) && sg * (aTarget - arm) <= 0) {
+        lines.push(`  A's target ${aTarget} is at or ${short ? 'over' : 'under'} B's arming line: B arms where A takes profit, so B's target is the next sellers ${short ? 'under' : 'above'} ${arm}, from the chart — say so in B's bullet.`)
+    }
+    return lines.join('\n')
 }
 
 /**

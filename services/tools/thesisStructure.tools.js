@@ -60,10 +60,11 @@ export function unfinishedWeek(monday, now = Date.now()) {
     return today >= monday && today <= friday
 }
 
-/** The facts for `ticker` on the day or week chart, as the JSON text Mentor reads. `get` — the bar source (a seam). */
-export async function priceStructureText({ ticker, timeframe = 'day', side = 'long' }, { get = getTickerAggregates, now = Date.now() } = {}) {
-    const sym = String(ticker ?? '').toUpperCase().trim()
-    if (!sym) return 'Give a ticker.'
+/**
+ * The facts for `sym` on the day or week chart, the right way up for `side` → `{ facts (null under 60 bars), rows,
+ * open (the week still trading, or null) }`. One read for the tool and for the turn's break-scenario line.
+ */
+async function structureRead(sym, timeframe, side, get, now) {
     // Two years of days for a swing read; six for the weekly one (60+ weeks before the first fact).
     const years = timeframe === 'week' ? 6 : 2
     const days = await dayRows(sym, years, get, now)
@@ -72,6 +73,32 @@ export async function priceStructureText({ ticker, timeframe = 'day', side = 'lo
     const open = weeks?.length && unfinishedWeek(weeks.at(-1).date, now) ? weeks.at(-1) : null
     const rows = weeks ? (open ? weeks.slice(0, -1) : weeks) : days
     const facts = side === 'short' ? unmirrorFacts(structureFacts(mirror(rows))) : structureFacts(rows)
+    return { facts, rows, open }
+}
+
+/**
+ * The facts a thesis ENTRIES turn is told before the model writes (thesis-lens-followups): today's close and normal
+ * move, the two candidate stops — what the risk read is made from — and the break candidate (scenario B) or null.
+ * → null for a blank ticker or too little history. `get` — the bar source.
+ */
+export async function thesisTurnFacts({ ticker, timeframe = 'day', side = 'long' }, { get = getTickerAggregates, now = Date.now() } = {}) {
+    const sym = String(ticker ?? '').toUpperCase().trim()
+    if (!sym) return null
+    const tf = timeframe === 'week' ? 'week' : 'day'
+    const { facts } = await structureRead(sym, tf, side, get, now)
+    if (!facts) return null
+    return {
+        timeframe: tf, side, close: facts.close, atr: facts.atr,
+        stop: facts.candidates.stop, deep_stop: facts.candidates.deep_stop, deep_stop_last_traded: facts.candidates.deep_stop_last_traded,
+        break: facts.break_candidate ?? null,
+    }
+}
+
+/** The facts for `ticker` on the day or week chart, as the JSON text Mentor reads. `get` — the bar source (a seam). */
+export async function priceStructureText({ ticker, timeframe = 'day', side = 'long' }, { get = getTickerAggregates, now = Date.now() } = {}) {
+    const sym = String(ticker ?? '').toUpperCase().trim()
+    if (!sym) return 'Give a ticker.'
+    const { facts, rows, open } = await structureRead(sym, timeframe, side, get, now)
     if (!facts) return `Not enough ${timeframe} history for ${sym} (${rows.length} bars; 60 needed).`
     facts.candidates = { ...facts.candidates, target_kind: targetWords(facts.candidates, timeframe, side), lookback_bars: undefined }
     if (facts.break_candidate) facts.break_candidate = { what: breakWords(side), ...facts.break_candidate }

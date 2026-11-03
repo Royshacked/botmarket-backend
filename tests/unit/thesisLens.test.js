@@ -5,9 +5,10 @@ import { MODES } from '../../services/analysisModes.js'
 import { sanitizeScanSeed } from '../../services/scanSeed.util.js'
 import { normalizeSetup, setupReadiness } from '../../services/setup.schema.js'
 import { thesisGate, scenarioGate } from '../../monitoring/talos.gates.js'
-import { _buildSeedSection } from '../../services/agents/mentor.agent.service.js'
+import { _buildSeedSection, _buildBreakSection, _buildRiskReadSection, mentorAgentService } from '../../services/agents/mentor.agent.service.js'
+import { emptyBuild, upsertName, putName, activeName } from '../../services/mentorBuild.util.js'
 import { lensLine } from '../../monitoring/assess.shared.js'
-import { priceStructureText, entryLevelText, entryLevelReply, breakWords, unmirrorFacts, targetWords, unfinishedWeek } from '../../services/tools/thesisStructure.tools.js'
+import { priceStructureText, entryLevelText, entryLevelReply, breakWords, thesisTurnFacts, unmirrorFacts, targetWords, unfinishedWeek } from '../../services/tools/thesisStructure.tools.js'
 
 // THE THESIS LENS (Roy, 2026-10-30; docs/design/stock-playbook.md) — the stop where the thesis breaks, the entry from
 // the user's risk, the Hotlist's Build with Mentor opening in it, and Talos told what the setup is.
@@ -191,7 +192,7 @@ test('the lens prompt: the deeper stop is OFFERED with its cost and its date, ne
     const lens = _lens()
     assert.match(lens, /OFFER the deeper stop, never set it unasked/)
     assert.match(lens, /deep_stop_last_traded/)
-    assert.match(lens, /never guess one/)
+    assert.match(lens, /never guess\s+one/)
     assert.match(lens, /may never fill/)
     assert.match(lens, /stop's depth did not move the edge/)
 })
@@ -203,7 +204,8 @@ test('the lens prompt: the break scenario is offered only over a printed higher 
     assert.match(lens, /No higher low printed → no B/)
     assert.match(lens, /the break would CHANGE\s+THE STOP/, 'Roy: B only when the break moves the stop')
     assert.match(lens, /so there is no B: A is that trade/)
-    assert.match(lens, /NOT buying the break at market/)
+    assert.match(lens, /so the\s+break IS the entry; under it, the break arms B and the entry is the pullback/, 'Roy 2026-11-03: the break is the entry when the limits allow')
+    assert.match(lens, /never "B does not fit"/)
     assert.match(lens, /ALTERNATIVES: the first to fill takes the full\s+size/)
     assert.match(lens, /A\s+day close over \{swing high\} since \{today\}/, 'B arms on a latching day close')
 })
@@ -269,7 +271,8 @@ test('thesisGate: a short is the mirror; another lens and a dead scenario are no
 
 test('the lens prompt after the GNRC drive: the date said from the tool, the deep stop on only when taken, B reopened', () => {
     const lens = _lens()
-    assert.match(lens, /SAY that\s+date, from the tool on this turn/)
+    assert.match(lens, /SAY that\s+date, from the tool or the turn's RISK READ line, which carries it/)
+    assert.match(lens, /never a reason to withhold the offer/, 'drive 9: "can\'t responsibly quote it without its date"')
     assert.match(lens, /the deep one goes on only when the user takes it/)
     assert.match(lens, /B is offered at the ENTRIES stage, in the same turn the user takes the deep stop — never at spans/)
     assert.match(lens, /never quote an R:R or a level of your own either/)
@@ -300,4 +303,114 @@ test('the lens on the stages: spans holds one trade; entries carries the stop, o
     assert.match(lens, /the stage cannot settle before it exists/)
     assert.match(lens, /second ENTRY OPTION on the same trade, B/)
     assert.match(lens, /`semantics: "alternatives"` — one scenario per entry/)
+})
+
+// ─── The chart's facts on the turn (Roy, 2026-11-02/03: drive 6 had B in the tool and never offered it; drive 8 refused
+// B for a level under the break; three drives asked the limits before the risk read) ───
+
+const B_FACTS = { swing_to_break: { type: 'high', date: '2026-10-29', price: 212.81 }, higher_swing: { type: 'low', date: '2026-10-28', price: 181 },
+    fall_low: { date: '2026-09-16', price: 173.25 }, stop: 178.81 }
+const FACTS = { timeframe: 'day', side: 'long', close: 202.04, atr: 9.1, stop: 178.81, deep_stop: 171.06, break: B_FACTS }
+const ON = (stop, target = 231.89) => ({ scenarios: [{ id: 's1', stop_legs: [{ price: stop }], target_legs: [{ price: target }] }] })
+
+test('the break section: on the deep stop B is ON OFFER this turn; on the structure stop no B, and the deep stop named as its trigger', () => {
+    const deep = _buildBreakSection(FACTS, ON(171.06))
+    assert.match(deep, /a DAY close over 212\.81 arms it; its stop 178\.81, under the higher low at 181 \(2026-10-28\) — 16% from the break/)
+    assert.match(deep, /the break CHANGES THE STOP, so B is ON OFFER THIS TURN/)
+    assert.match(deep, /once they declined, leave it/)
+    const structure = _buildBreakSection(FACTS, ON(178.81))
+    assert.match(structure, /no B\. If the user takes the deep stop \(171\.06\), B is on offer in THAT same turn/)
+    assert.doesNotMatch(structure, /ON OFFER THIS TURN/)
+    assert.match(_buildBreakSection(FACTS, ON(177.5)), /no B/, 'within the stop\'s own noise buffer (0.2 ATR) is the same stop')
+    assert.match(_buildBreakSection(FACTS, { scenarios: [] }), /A structure stop would be at B's/)
+})
+
+test('the break section: B\'s entry is the tool\'s level — the break itself when it fits, a pullback after it when under (Roy, 2026-11-03)', () => {
+    const deep = _buildBreakSection(FACTS, ON(171.06))
+    assert.match(deep, /B's ENTRY is get_entry_level on B's stop 178\.81, B's target and their limits — never an R:R of your own/)
+    assert.match(deep, /Level at or over 212\.81: the break price fits their limits, so the break IS the entry/)
+    assert.match(deep, /Level under 212\.81: B waits for a pullback to the level after the break\. Both are B/)
+    assert.match(deep, /never "does not fit" for a level under the line/)
+    assert.doesNotMatch(_buildBreakSection(FACTS, ON(178.81)), /B's ENTRY/, 'no B, no entry to explain')
+})
+
+test('the break section: A\'s target at B\'s arming line is said; two scenarios or no candidate → nothing', () => {
+    assert.match(_buildBreakSection(FACTS, ON(171.06, 212.81)), /B arms where A takes profit, so B's target is the next sellers above 212\.81/)
+    assert.doesNotMatch(_buildBreakSection(FACTS, ON(171.06)), /takes profit/)
+    assert.equal(_buildBreakSection(FACTS, { scenarios: [ON(171.06).scenarios[0], { id: 's2' }] }), '')
+    assert.equal(_buildBreakSection({ ...FACTS, break: null }, ON(171.06)), '')
+    assert.equal(_buildBreakSection(null, ON(171.06)), '')
+})
+
+test('the break section on a short: mirrored words, the stop compared the other way', () => {
+    const s = { side: 'short', atr: 2, deep_stop: 61, break: { swing_to_break: { type: 'low', price: 45 }, lower_swing: { type: 'high', price: 55 }, stop: 56 } }
+    const text = _buildBreakSection(s, ON(61, 40))
+    assert.match(text, /a DAY close under 45 arms it; its stop 56, over the lower high at 55/)
+    assert.match(text, /stop 61 is over B's: the break CHANGES THE STOP.* its stop is lower than A's/)
+    assert.match(text, /Level at or under 45: the break price fits/)
+})
+
+test('the risk read: each stop\'s distance in % and in normal moves, said BEFORE the limits are asked', () => {
+    const text = _buildRiskReadSection(FACTS, ON(178.81))
+    assert.match(text, /SAY IT BEFORE you ask for their risk limit and minimum reward to risk/)
+    assert.match(text, /the structure stop 178\.81 is 11\.5% from today's 202\.04 — 2\.6 normal days \(ATR 9\.1\)/)
+    assert.match(text, /the deep stop 171\.06 is 15\.3% from today's 202\.04 — 3\.4 normal days/)
+    assert.match(text, /judgment, no fixed menu; any level you name comes from get_entry_level/)
+    assert.doesNotMatch(text, /worksheet's stop/, 'the worksheet on a candidate stop is not said twice')
+    assert.match(_buildRiskReadSection(FACTS, ON(175)), /the worksheet's stop 175 is 13\.4%/)
+    assert.match(_buildRiskReadSection({ ...FACTS, timeframe: 'week' }, null), /normal weeks/)
+    assert.equal(_buildRiskReadSection(null, ON(175)), '')
+})
+
+test('the risk read carries the deep stop\'s date; B waits for the entries stage (drive 9)', () => {
+    assert.match(_buildRiskReadSection({ ...FACTS, deep_stop_last_traded: '2026-02-05' }, null), /the deep stop \(not traded under since 2026-02-05\) 171\.06 is 15\.3%/)
+    assert.match(_buildRiskReadSection({ ...FACTS, deep_stop_last_traded: null }, null), /not traded under since any day in the history read/)
+    assert.match(_buildRiskReadSection({ ...FACTS, side: 'short', deep_stop_last_traded: '2026-01-02' }, null), /not traded over since 2026-01-02/)
+    assert.equal(_buildBreakSection({ ...FACTS, stage: 'spans' }, ON(171.06)), '', 'never offered at spans')
+    assert.match(_buildBreakSection({ ...FACTS, stage: 'entries' }, ON(171.06)), /ON OFFER THIS TURN/)
+})
+
+test('thesisTurnFacts: the close, the normal move, both stops and the chart\'s B — or null', async () => {
+    const closes = [...Array(60).fill(100), 98, 96, 97, 99, 100, ...Array(30).fill(100), 98, 95, 92, 89, 86, 83, 81, 80.5, 82, 84, 86, 87, 85, 84, 83.6, 83.5, 84.5, 86]
+    const f = await thesisTurnFacts({ ticker: 'gnrc', timeframe: 'day' }, { get: provider(closes) })
+    assert.ok(f.break && f.break.swing_to_break.price > f.break.higher_swing.price && f.break.stop < f.break.higher_swing.price, JSON.stringify(f))
+    assert.ok(f.atr > 0 && f.deep_stop < f.stop && f.close === 86)
+    assert.deepEqual([f.side, f.timeframe], ['long', 'day'])
+    assert.equal((await thesisTurnFacts({ ticker: 'x', timeframe: 'day' }, { get: provider(Array(80).fill(10)) })).break, null, 'no B, the risk facts still there')
+    assert.equal(await thesisTurnFacts({ ticker: 'x' }, { get: provider([1, 2, 3]) }), null)
+    assert.equal(await thesisTurnFacts({ ticker: '' }, { get: provider(closes) }), null)
+})
+
+test('the turn: a thesis trade at ENTRIES reads the chart and is told the risk read and B; any other stage never reads', async () => {
+    const asked = []
+    const facts = async (args) => { asked.push(args); return FACTS }
+    const at = (settled) => { const b = upsertName(emptyBuild(), 'GNRC'); return putName(b, { ...activeName(b), settled }) }
+    const run = async (build, draft) => {
+        let ctx = ''
+        await mentorAgentService.chatStream({
+            messages: [{ role: 'user', content: 'I\'ll take the deeper stop.' }],
+            chatState: { active_asset: 'GNRC', draft: { asset: 'GNRC', direction: 'long', type: 'swing', trade_mode: 'thesis', timeframe: 'day', ...ON(171.06), ...draft, build }, build, coverage: [] },
+            _run: async ({ messages }) => { ctx = JSON.stringify(messages.at(-1)); return '' },
+            _readSetup: async () => null, _venueSection: async () => '', _thesisFacts: facts,
+        })
+        return ctx
+    }
+    const ctx = await run(at({ direction: 'long', horizon: 'swing', lens: 'thesis', spans: ['t1'] }))
+    assert.deepEqual(asked, [{ ticker: 'GNRC', timeframe: 'day', side: 'long' }])
+    assert.match(ctx, /THE RISK READ/)
+    assert.match(ctx, /B is ON OFFER THIS TURN/)
+    assert.ok(ctx.indexOf('THE RISK READ') < ctx.indexOf('THE BREAK SCENARIO'))
+    const atSpans = await run(at({ direction: 'long', horizon: 'swing', lens: 'thesis' }))
+    assert.equal(asked.length, 2, 'the turn that settles spans asks the limits — it reads too (drive 9)')
+    assert.match(atSpans, /THE RISK READ/)
+    assert.doesNotMatch(atSpans, /THE BREAK SCENARIO/, 'B waits for entries')
+    await run(at({ direction: 'long', horizon: 'swing' }))
+    await run(at({ direction: 'long', horizon: 'swing', lens: 'thesis', spans: ['t1'] }), { trade_mode: 'smc' })
+    assert.equal(asked.length, 2, 'the opening, or another lens: no read')
+    const failed = await mentorAgentService.chatStream({
+        messages: [{ role: 'user', content: 'go' }],
+        chatState: { active_asset: 'GNRC', draft: { asset: 'GNRC', trade_mode: 'thesis', timeframe: 'day' }, build: at({ direction: 'long', horizon: 'swing', lens: 'thesis', spans: ['t1'] }), coverage: [] },
+        _run: async () => 'ok', _readSetup: async () => null, _venueSection: async () => '', _thesisFacts: async () => { throw new Error('feed down') },
+    })
+    assert.ok(failed, 'a failed read never stalls the turn')
 })

@@ -30,6 +30,8 @@ const { userService } = await import('../api/user/user.service.js')
 const { getDb, closeDb } = await import('../providers/mongodb.provider.js')
 const { sessionService } = await import('../services/session.service.js')
 const { setupReadiness } = await import('../services/setup.schema.js')
+const { priceStructureText } = await import('../services/tools/thesisStructure.tools.js')
+const { getTickerAggregates } = await import('../providers/candles.provider.js')
 
 const shot = async (page, name) => { await page.screenshot({ path: `${OUT}/thesis-${name}.png`, fullPage: false }); console.log('  shot:', name) }
 const results = []
@@ -143,7 +145,7 @@ try {
         levelsCalled += r.tools.filter(n => n === 'get_entry_level').length
         const text = r.reply, t = text.toLowerCase()
         if (deepOffered == null && /(deep(er)?|wider)\b[^.]{0,30}\bstop|whole fall|under the fall/i.test(text)) deepOffered = text
-        if (bOffered == null && deepTaken && /break(out)? (scenario|route)|second way in|after the break|scenario b\b|breakout/i.test(text)
+        if (bOffered == null && deepTaken && /break(out)? (scenario|route)|break, then|second way in|after the break|scenario b\b|\bb [—-] break|breakout/i.test(text)
             && !/not offering|no (separate|distinct) break/i.test(text)) bOffered = text
         const parts = []
         const once = (key, test, words) => { if (!given.has(key) && test) { given.add(key); parts.push(words) } }
@@ -159,10 +161,12 @@ try {
         r = await say(page, parts.length ? parts.join(' ') : 'Agreed — go on.')
     }
     check('G: the deeper stop is OFFERED', deepOffered != null)
-    check('G: …with the date price last traded under it (Feb 5, 2026)', deepOffered && /feb(ruary)?\s*5|2026-02-05|feb(ruary)? 2026|since feb/i.test(deepOffered), (deepOffered ?? '').slice(0, 300))
+    // Any reply that names the deep stop's price — the first "deeper stop" match can be an earlier reply's echo (drive 8).
+    const dated = all.find(x => /171\.0?6/.test(x.reply) && /feb(ruary)?\s*5|2026-02-05/i.test(x.reply))
+    check('G: …with the date price last traded under it (Feb 5, 2026)', dated, (all.find(x => /171\.0?6/.test(x.reply))?.reply ?? '').slice(0, 300))
     check('G: with the deep stop taken, the break scenario is offered', bOffered != null)
     const readTurn = all.find(x => /risk limit|reward[- ]to[- ]risk|stop distance/i.test(x.reply))
-    check('G: before asking the limits, a read of what fits the chart (the normal move)', readTurn && /atr|normal (daily )?move|moves? about|a day\b|daily move/i.test(readTurn.reply), (readTurn?.reply ?? '').slice(0, 400))
+    check('G: before asking the limits, a read of what fits the chart (the normal move)', readTurn && /atr|normal (daily )?moves?|normal (days|weeks)|moves? about|a day\b|daily move/i.test(readTurn.reply), (readTurn?.reply ?? '').slice(0, 400))
     check('G: an entry level per scenario (each on its own stop)', levelsCalled >= 2, `get_entry_level × ${levelsCalled}`)
     await shot(page, 'G1-built')
     let d = await draftOf(sidG)
@@ -182,19 +186,28 @@ try {
     console.log('\nN. NXST — session', sidN)
     await reload()
     r = await say(page, 'Build me a swing trade on NXST. My risk limit is 7% and I want at least 1.5 reward to risk. Risk $200, let it wait 30 days. Go all the way.')
-    check('N: risk-based', r.turn?.mode === 'thesis', JSON.stringify({ mode: r.turn?.mode, src: r.turn?.modeSource }))
+    // The turn's log line can land after the reply is read (drive 8: `{}`) — any of N's turns says the mode.
+    const nTurns = [r.turn]
     let asked = false
     for (let i = 0; i < 4 && !asked; i++) {
         r = await say(page, i === 0 ? 'Yes — long, swing, thesis. Go all the way.' : 'Agreed — go on.')
+        nTurns.push(r.turn)
         asked = /just goes|runs? away|ran away|without you|let it go|ping/i.test(r.reply)
     }
+    check('N: risk-based', nTurns.some(t => t?.mode === 'thesis'), JSON.stringify(nTurns.map(t => t?.mode ?? null)))
     check('N: the runaway question is ASKED, not filled in', asked)
     if (asked) r = await say(page, 'If it just goes, ping me to redraw it.')
     d = await draftOf(sidN)
     console.log('N worksheet:', describe(d))
     check('N: one scenario — buyers already control, no break to wait for', scenariosOf(d).length === 1, `${scenariosOf(d).length}`)
     const v = scenariosOf(d)[0]?.validity
-    check('N: its away edge sits at the recent high (175.93), over the price', v?.approach != null && v.approach >= 175 && v.approach <= 177, JSON.stringify(v))
+    // The recent high moves with the stock (175.93 → 177.03 → 177.66 across drives): read it live — the highest high
+    // since the last swing low, off the same bars the tool reads.
+    const nf = await priceStructureText({ ticker: 'NXST', timeframe: 'day' }).then(t => JSON.parse(t.slice(t.indexOf('{'))))
+    const nBars = await getTickerAggregates('NXST', { timeSpan: 'day', multiplier: 1, from: Date.now() - 120 * 86_400_000, to: Date.now() })
+    const since = Date.parse(`${nf.last_swing_low?.date}T00:00:00Z`)
+    const recentHigh = Math.max(...nBars.filter(b => b.timestamp * 1000 >= since).map(b => b.high))
+    check(`N: its away edge sits at the recent high (${recentHigh}), over the price`, v?.approach != null && Math.abs(v.approach - recentHigh) <= 0.6, JSON.stringify(v))
     check('N: the stop is under the higher low (≈161.6), not the fall low', (() => { const s = scenariosOf(d)[0]?.stop_legs?.[0]?.price; return s > 158 && s < 162.52 })(), JSON.stringify(scenariosOf(d)[0]?.stop_legs))
     await shot(page, 'N1-straight-through')
 } catch (err) {

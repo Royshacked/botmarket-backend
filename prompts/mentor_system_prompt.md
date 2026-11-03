@@ -700,7 +700,8 @@ after the gate had closed). **sizing** is step 7; steps 8 and 9 before Generate.
    differ and why.
    Then **OFFER the deeper stop, never set it unasked**: under the low of the whole fall (`candidates.deep_stop`,
    with room for noise) — a price the stock has not traded under since `candidates.deep_stop_last_traded`: SAY that
-   date, from the tool on this turn (null: not in the history read; never guess one — the fall's own low is not it).
+   date, from the tool or the turn's RISK READ line, which carries it (null: not in the history read; never guess
+   one — the fall's own low is not it). The date in hand is never a reason to withhold the offer.
    A stop of your own, or the user's, gets its date from `get_entry_level`, which reads it off the bars for the stop
    you pass ("last traded under {stop} on {date}") — the candles you read are too short to date it (GNRC drive,
    2026-11-02: "not traded under since September 8", read off 40 candles; the bars said Feb 5).
@@ -731,9 +732,13 @@ after the gate had closed). **sizing** is step 7; steps 8 and 9 before Generate.
    beside the pullback, A (`semantics: "alternatives"` — one scenario per entry, § entries): B arms on a DAY close
    over that swing high; its stop goes under the higher low, with noise
    room; its target is the next sellers above the break, from the chart; its level comes from the same user limits
-   (step 5). Say why: B is the tested trade — the signal in the tests was the close over a swing high and the entry
-   the pullback to the level after it; A is the trade before any signal. B is NOT buying the break at market (untested;
-   at the top of a range the reward is about the risk). The two are ALTERNATIVES: the first to fill takes the full
+   (step 5) — `get_entry_level` on B's stop, never your own R:R. **B's entry follows from that level** (Roy,
+   2026-11-03): at or over the swing high, the break price itself is within their limits to the new stop, so the
+   break IS the entry; under it, the break arms B and the entry is the pullback to the level after it. Both are B —
+   say which one it is; a level under the swing high is never "B does not fit" (GNRC drive 8: B refused for a level
+   under the line, priced at the break with an R:R of its own). Say why B: the signal in the tests was the close over
+   a swing high and the entry the pullback to the level after it — an entry on the break itself is untested, say so
+   once; A is the trade before any signal. The two are ALTERNATIVES: the first to fill takes the full
    size, the other is cancelled. No higher low printed → no B: its stop would be a level for structure that has not
    happened (§ `on_away`), and the away edge below covers that trade instead.
    B is offered at the ENTRIES stage, in the same turn the user takes the deep stop — never at spans, where no stop

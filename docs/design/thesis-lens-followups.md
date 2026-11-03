@@ -211,3 +211,46 @@ live, so it is not counted); Talos's ARMED LEVEL line on a thesis setup says "at
 not "standing on it". Suite 4813/0.
 
 **Not done:** the browser drive (needs the dev backend restarted — Roy); redrawing the live NXST setup (§ Decided 3).
+
+## The drives, and the facts moved into code (2026-11-02/03)
+
+Drives 1–5 tuned the prompt; Mentor still guessed the deep stop's date ("since September 8", read off 40 candles —
+the bars say Feb 5) and never offered B. Prose stopped there, so the facts moved into code:
+
+- **`get_entry_level` takes the ticker** and says when price last traded past the stop it was given (two years of
+  days; `lastTradedUnder` in swingStructure.service, shared with the deep stop's own date). Commit 9ca914d.
+- **`get_price_structure` carries `break_candidate`**: sellers in control, a swing low printed after the fall's low
+  and still holding, a swing high over the price. "Higher low" is measured against the FALL's low, not the swing low
+  before it — GNRC's lows step down 194 → 186 → 181, yet 181 is the higher low over 173.25. Commit 9ca914d.
+- **The turn is told** (mentor.agent.service `_readThesisFacts`, at the ENTRIES stage of a thesis trade only): THE
+  RISK READ — each stop's distance from today's close in % and in normal moves, said before the limits are asked
+  (Roy, 2026-11-03: "give Mentor the read of risk before the user is asked for his limit") — and THE BREAK SCENARIO,
+  whether the worksheet's stop makes B on offer this turn ("clearly over" = the stop's own noise buffer,
+  STRUCTURE.buffer × ATR). Drive 8: B offered the turn the deep stop was taken.
+
+**B's entry (Roy, 2026-11-03)** — this replaces "B is not buying the break at market" above. B arms on the day close
+over the swing high; its level is `get_entry_level` on B's stop with the user's limits. At or over the swing high, the
+break price is inside the limits to the new stop, so the break IS the entry; under it, B waits for a pullback to the
+level after the break. Both are B. Drive 8 refused B for a level under the line, pricing it at the break with an R:R
+of its own (GNRC, 8% / 1.5: level 194.36 under the 212.81 line → B = the break, then the pullback to 194.36). The
+entry on the break itself is untested; Mentor says so once.
+
+## Noted for later — more facts for the stop and the targets (Roy, 2026-11-03)
+
+Roy asked whether Mentor reads short interest, options, dark pools or the prices institutions bought at when it judges
+the stop and targets. It does not: the lens reads the chart alone (`get_price_structure`, candles, chart). Noted, to
+build AFTER the B / risk-read drive, as facts Mentor judges (none was tested for edge):
+
+1. **The implied move** — ATM implied vol from `get_options_context`, over the trade's horizon: is the target
+   reachable inside the wait, is the stop inside the noise. Data already in the kit.
+2. **Short interest for B** — a crowded short makes a close over the swing high likelier to run (break entry vs
+   pullback). Data already in the kit (`get_short_interest`); the prompt never ties it to levels.
+3. **Where big money traded** — an anchored VWAP from each heavy-volume day `get_price_structure` already lists (the
+   standard proxy for big buyers' cost basis: over it they defend, under it they are trapped), and maybe a volume
+   profile (the bands most volume traded at). Computed from the same day bars — no new data. Recommended first.
+4. **Options walls** — open interest by strike near the target or stop. New data (the options tool has only the P/C
+   ratio and ATM IV).
+5. **Institutions' 13F** — `fund_holdings` (aether) holds quarter-end positions, never a purchase price; an add's cost
+   is only estimable as that quarter's average price, 45 days late. Long-term (weekly) context at best, and the 13F
+   CUSIP bug (project_13f_data_quality) comes first.
+6. **Dark pools** — no data source (Aether mission 5, B3, deferred).
