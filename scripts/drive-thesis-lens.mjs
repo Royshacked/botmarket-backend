@@ -150,10 +150,21 @@ try {
         check('it is a turn tall, not the chat’s whole height (< 45%)', box && body && box.height < body.height * 0.45, `${Math.round(box?.height)} of ${Math.round(body?.height)}px`)
         check('candles are drawn in it', (await chart.locator('canvas').count()) > 0)
         await shot(page, '05-trade-chart')
+        // Small in every measure (2026-11-03): a compact box with small text, "Full chart" its one control; the docked
+        // chart's Close reads "Shrink" and takes the user back to the small one.
+        check('it opens small (≤ 380px wide, compact text)', box && box.width <= 381 && (await chart.locator('.price-chart--compact').count()) === 1, `${Math.round(box?.width)}×${Math.round(box?.height)}px`)
+        check('"Full chart" is its only button', (await chart.getByRole('button').allTextContents()).join('|') === 'Full chart')
         await chart.getByRole('button', { name: 'Full chart' }).click()
         await page.waitForSelector('.chat-chart-dock', { timeout: 10000 }).catch(() => {})
         check('"Full chart" docks the chart', (await page.locator('.chat-chart-dock').count()) === 1)
+        await page.waitForTimeout(2500)
         await shot(page, '06-full-chart')
+        await page.getByLabel('Shrink the chart').click()
+        await page.waitForTimeout(800)
+        check('"Shrink" closes the dock, back to the small chart in the thread',
+            (await page.locator('.chat-chart-dock').count()) === 0 && (await chart.count()) === 1)
+        await chart.getByRole('button', { name: 'Full chart' }).click()
+        await page.waitForSelector('.chat-chart-dock', { timeout: 10000 }).catch(() => {})
         // The chart belongs to the conversation: hiding Mentor's work leaves it in the thread.
         await page.getByRole('button', { name: /^Hide .*work/ }).click()
         await page.waitForTimeout(1500)
