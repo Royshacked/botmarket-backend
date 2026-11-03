@@ -210,7 +210,7 @@ or under an older, lower swing). On Oct 28 NXST's structure stop alone (161.6, l
 live, so it is not counted); Talos's ARMED LEVEL line on a thesis setup says "at or under it — the level and below",
 not "standing on it". Suite 4813/0.
 
-**Not done:** the browser drive (needs the dev backend restarted — Roy); redrawing the live NXST setup (§ Decided 3).
+**Not done (updated 2026-11-03):** ~~the browser drive~~ — driven, see § The drives below; redrawing the live NXST setup (§ Decided 3).
 
 ## The drives, and the facts moved into code (2026-11-02/03)
 
@@ -254,3 +254,13 @@ build AFTER the B / risk-read drive, as facts Mentor judges (none was tested for
    is only estimable as that quarter's average price, 45 days late. Long-term (weekly) context at best, and the 13F
    CUSIP bug (project_13f_data_quality) comes first.
 6. **Dark pools** — no data source (Aether mission 5, B3, deferred).
+
+## Revise, end to end (2026-11-03)
+
+Roy: "when Mentor asks 'should I revise?' and the user says yes — is the revising really happening?" Not until
+today. The card, the push and the button worked, but the button reopened the setup on a finished ledger and Mentor
+asked whether the direction still stood; and the turn it opened on said "no longer valid" for a miss. Fixed: the
+reopen of a setup Talos latched reopens its entries stage (`reopenForRedraw`) and the turn is told THE RE-DRAW; a
+miss opens on "ran without filling". `scripts/drive-redraw-card.mjs` drives it: 14/15 on a live GNRC chart (the new
+higher low read, the stop moved 178.81 → 189.82, the risk read and B said, the limits asked). Open: a setup saved
+without `chat_state` reopens with no scenarios and its mode read as the user's (low).

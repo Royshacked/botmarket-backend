@@ -252,6 +252,27 @@ the two edges are not the same event (2026-09-26, docs/design/mentor-challenge.m
   nothing. Generate refuses a range with neither (`missing_runaway_answer`), because it is the one
   question about a plan that can only be asked while the plan is still being built.
 
+**What `revise` does, end to end (driven 2026-11-03, `scripts/drive-redraw-card.mjs`).** Nothing redraws on its own.
+Talos posts the card into the user's Mentor chat (`postCard` → `postBotCard`): pending until pressed or dismissed, one
+per setup (a newer one supersedes it), pushed over the socket and as a Web Push. The button opens the setup in Mentor
+with `redrawAsk`'s turn — a miss reads "ran without filling … the read wasn't wrong", a break "no longer valid". The
+reopen is a real re-draw: `mentor.desk redrawOf` reads what Talos latched and `mentorStateFromEntity` reopens the
+ENTRIES stage (`mentorBuild reopenForRedraw` — the opening, the span and the user's size stand), and the turn is told
+THE RE-DRAW (`_buildRedrawSection`, one turn only): on a thesis setup the lens again on today's chart — the new higher
+low, the same limits, `get_entry_level`, a new range — or plainly no trade. Until then a re-draw opened on a finished
+ledger and Mentor asked whether the direction still stood. Generate over the setup closes the card
+(`setupCommit.commitSetup` → `resolveCardsFor`). The same reopen happens on a pencil edit of a latched setup. Talos's
+own stale-map read (edge `time`) keeps its proposal path and reopens nothing. After the code review (2026-11-03): only
+BEFORE entry (`PRE_ENTRY` — a filled position is never told it ran away), never for a miss the user said to let go
+(`on_away: pass`), the turn told "the entries are reopened" only when there was a ledger to reopen, and every scenario
+on the worksheet — B too — judged again on today's chart.
+
+**An `enter` before its arming event is held (2026-11-03).** B's level can sit over its arming line (the break itself
+is the entry), so price is "at the level and below" before the break and `thesisGate` puts B on the table. Talos's
+verdict path (`_applyVerdict`, `talos.gates unmetArming`) holds an `enter` on a scenario whose primary `latching`
+condition has neither latched on an earlier wake nor been met in this read — it becomes a `wait` that says so. B stays
+readable, which is how its arming close gets latched at all.
+
 Neither answer ever authors a level for the runaway. The continuation is MEASURED in the redraw, off
 structure that has actually printed — a retest price for a break that has not happened is a level from
 imagination, and nothing fires without the user's confirm anyway, so pre-authoring it would buy a
@@ -966,6 +987,15 @@ Mentor OFFERS the deeper stop (`candidates.deep_stop` + `deep_stop_last_traded`)
 low already printed — the break scenario B (arms on a day close over the swing high; an alternative to A). Every
 thesis premise draws a `validity` range: readiness refuses one without (`validity range`), so the runaway question is
 always asked, and an armed thesis setup without one cannot be re-armed.
+
+Prose alone did not hold (drives 1–6), so the facts moved into code (2026-11-02/03, drive 11: 16/17):
+`get_entry_level` takes the ticker and says when price last traded past the stop it was given; `get_price_structure`
+carries `break_candidate` (sellers in control, a swing low printed after the fall's low and holding, a swing high over
+the price). Before a thesis SPANS or ENTRIES turn the server reads the chart (`thesisTurnFacts`) and tells the turn THE
+RISK READ — each stop's distance in % and normal moves, with the deep stop's date, said before the limits are asked —
+and, at entries only, THE BREAK SCENARIO: whether the worksheet's stop makes B on offer this turn. **B's entry** (Roy,
+2026-11-03): its level from `get_entry_level` on B's stop — at or over the swing high the break itself is the entry,
+under it a pullback to the level after the break; both are B.
 
 A setup arrives one of three ways — a bare name, a name Argus handed over, or a plan the user
 already made — and there is **one machine, not three paths**. Whatever arrived is written into the

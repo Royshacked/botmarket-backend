@@ -20,7 +20,7 @@ import { isSelfExecuted } from '../services/venue.resolve.service.js'
 import { brokerService } from '../api/broker/broker.service.js'
 import { brokerEntryPrice } from '../services/positionManage.service.js'
 import { config } from '../services/config.js'
-import { legGate, scenarioGate, thesisGate, liveScenarios, _hitFromGuard, computeMetrics, metricsSet, validityBreach, breachPatch, rollUpBreaches, normalizeConditionResults, latchPatch, costPatch, ripeStepDown } from './talos.gates.js'
+import { legGate, scenarioGate, thesisGate, liveScenarios, _hitFromGuard, computeMetrics, metricsSet, validityBreach, breachPatch, rollUpBreaches, normalizeConditionResults, latchPatch, costPatch, ripeStepDown, unmetArming, scenarioState } from './talos.gates.js'
 
 // Talos — the guardian of the `setup` kind (docs/design/talos-per-candle.md).
 //
@@ -566,6 +566,9 @@ async function _checkValidity(setup, price, nowMs, deps) {
 
     const survivors = liveScenarios(setup).filter(sc => next[sc.id] !== INVALIDATION.FIRED)
     const remaining = survivors.length
+    // Still WAITING at a reachable level: alive and not run away too (CR 2026-11-03 — a sibling that drifted on this wake
+    // or an earlier one is not "still armed" in a card's words).
+    const waiting = survivors.filter(sc => (next[sc.id] ?? scenarioState(setup, sc.id)?.invalidation_status) !== INVALIDATION.DRIFTING).length
 
     const projected = setup.armed_scenario_id ?? pickScenario(setup)?.id ?? null
     if (remaining && next[projected] === INVALIDATION.FIRED) {
@@ -579,7 +582,7 @@ async function _checkValidity(setup, price, nowMs, deps) {
     }))
 
     for (const ev of events) {
-        try { await deps.onInvalidation(setup, { ...ev, scenario: scenarioLabel(ev.scenario), remaining }) }
+        try { await deps.onInvalidation(setup, { ...ev, scenario: scenarioLabel(ev.scenario), remaining, waiting }) }
         catch (err) { logger.warn(LOG, `invalidation card failed for ${setup.id}:`, err.message) }
     }
 
@@ -630,6 +633,17 @@ async function _applyVerdict(setup, hit, raw, nowMs, reason, price, deps) {
         if (drift?.pastStop) {
             logger.info(LOG, `[${setup.id}] enter at ${price} is through the stop — held as a wait`)
             raw = { ...raw, verdict: 'wait', ripe: false, warning: `Price ${price} is already through the stop — not entering; the trade is gone at this price, and the close decides whether the premise is.` }
+        }
+    }
+    // AN ENTER BEFORE ITS ARMING EVENT IS NOT FIRED (CR 2026-11-03). A thesis B arms on a latching day close over the
+    // swing high, and its level can sit over the line (the break itself is the entry) — so price is "at the level and
+    // below" long before the break, thesisGate puts B on the table, and only the prompt said "primary is the trigger".
+    // B must stay readable (its condition latches only when a read finds it met), so the guard is here, on the verdict.
+    if (raw.verdict === 'enter') {
+        const unarmed = unmetArming(setup, scenario, normalizeConditionResults(raw.conditions, declared))
+        if (unarmed.length) {
+            logger.info(LOG, `[${setup.id}] enter on ${scenarioLabel(scenario)} before its arming event (${unarmed.map(c => c.id).join(', ')}) — held as a wait`)
+            raw = { ...raw, verdict: 'wait', ripe: false, warning: `Not entering: ${unarmed.map(c => `"${c.text}"`).join(', ')} has not happened yet — it arms this way in.` }
         }
     }
     // Resolved for an `enter` whether or not price is standing on a level right now.

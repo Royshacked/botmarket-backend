@@ -5,7 +5,7 @@ import { MODES } from '../../services/analysisModes.js'
 import { sanitizeScanSeed } from '../../services/scanSeed.util.js'
 import { normalizeSetup, setupReadiness } from '../../services/setup.schema.js'
 import { thesisGate, scenarioGate } from '../../monitoring/talos.gates.js'
-import { _buildSeedSection, _buildBreakSection, _buildRiskReadSection, mentorAgentService } from '../../services/agents/mentor.agent.service.js'
+import { _buildSeedSection, _buildBreakSection, _buildRiskReadSection, _readThesisFacts, mentorAgentService } from '../../services/agents/mentor.agent.service.js'
 import { emptyBuild, upsertName, putName, activeName } from '../../services/mentorBuild.util.js'
 import { lensLine } from '../../monitoring/assess.shared.js'
 import { priceStructureText, entryLevelText, entryLevelReply, breakWords, thesisTurnFacts, unmirrorFacts, targetWords, unfinishedWeek } from '../../services/tools/thesisStructure.tools.js'
@@ -413,4 +413,35 @@ test('the turn: a thesis trade at ENTRIES reads the chart and is told the risk r
         _run: async () => 'ok', _readSetup: async () => null, _venueSection: async () => '', _thesisFacts: async () => { throw new Error('feed down') },
     })
     assert.ok(failed, 'a failed read never stalls the turn')
+})
+
+// ─── The code review (2026-11-03) ─────────────────────────────────────────────
+
+test('CR: an empty bar feed is "could not be read", never "not traded in two years"', async () => {
+    const text = await entryLevelReply({ ticker: 'gnrc', stop: 26.9, target: 31.6, min_rr: 1.5 }, { get: async () => [] })
+    assert.match(text, /\(When GNRC last traded under 26\.9 could not be read\.\)$/)
+    assert.doesNotMatch(text, /no day/)
+})
+
+test('CR: the facts read before a turn — the week for a long-term trade, bounded, dropped on Stop', async () => {
+    const at = (settled) => { const b = upsertName(emptyBuild(), 'GNRC'); return putName(b, { ...activeName(b), settled }) }
+    const build = at({ direction: 'long', horizon: 'long_term', lens: 'thesis', spans: ['t1'] })
+    const asked = []
+    const read = async (a) => { asked.push(a); return FACTS }
+    await _readThesisFacts({ draft: { asset: 'GNRC', trade_mode: 'thesis', type: 'long_term', timeframe: 'day' }, build }, read)
+    assert.equal(asked[0].timeframe, 'week', 'the horizon decides, not an unset or day timeframe')
+    await _readThesisFacts({ draft: { asset: 'GNRC', trade_mode: 'thesis', type: 'swing' }, build }, read)
+    assert.equal(asked[1].timeframe, 'day')
+    const never = () => new Promise(() => {})
+    const t0 = Date.now()
+    assert.equal(await _readThesisFacts({ draft: { asset: 'GNRC', trade_mode: 'thesis' }, build }, never, { timeoutMs: 50 }), null)
+    assert.ok(Date.now() - t0 < 2000, 'a slow feed costs the facts, never the turn')
+    const ac = new AbortController()
+    const p = _readThesisFacts({ draft: { asset: 'GNRC', trade_mode: 'thesis' }, build }, never, { signal: ac.signal, timeoutMs: 60000 })
+    ac.abort()
+    assert.equal(await p, null, 'the user\'s Stop drops it')
+})
+
+test('the risk read asks for the NUMBERS in the user\'s words, never the line\'s name (drive 12)', () => {
+    assert.match(_buildRiskReadSection(FACTS, null), /with these numbers \(each stop's % and its normal days\) — never call it "the risk read"/)
 })

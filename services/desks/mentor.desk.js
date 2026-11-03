@@ -14,6 +14,7 @@ import { houseLabels, formatHouseLabel } from '../houseLabel.service.js'
 import { mentorActions, mentorApplyEdit } from './actions/mentor.actions.js'
 import { setupReason } from '../../api/setups/setupReasons.js'
 import { normalizeBuild, activeName, putName, reopenForRedraw } from '../mentorBuild.util.js'
+import { PRE_ENTRY } from '../entity/vocabulary.js'
 
 /**
  * WHAT REACHES THE PANEL. Pure and tested — because everything the desk computes for the user has to
@@ -105,7 +106,8 @@ export function mentorStateFromEntity(setup) {
     const redraw = redrawOf(setup)
     // A setup Talos says ran away or broke reopens with its LEVELS open (reopenForRedraw) — a finished ledger told
     // Mentor nothing was outstanding, and the re-draw never happened (redraw drive, 2026-11-03).
-    const draft = stored && redraw && stored.build ? { ...stored, build: _reopenActive(stored.build) } : stored ?? {
+    const reopened = !!(stored && redraw && stored.build)
+    const draft = reopened ? { ...stored, build: _reopenActive(stored.build) } : stored ?? {
         asset:       setup?.asset,
         asset_class: setup?.asset_class ?? null,
         direction:   setup?.direction   ?? null,
@@ -131,8 +133,9 @@ export function mentorStateFromEntity(setup) {
         drafts:       {},
         view:         { gate: null, readiness: null, setups: null },
         // ONE TURN's: mentorNextState keeps no unknown key, so the marker is read by the re-draw turn and gone after —
-        // the reopened ledger is what carries on.
-        ...(redraw ? { redraw } : {}),
+        // the reopened ledger is what carries on. `reopened` — whether there WAS a ledger to reopen (CR: an older setup has
+        // none, and the turn must not be told the entries stage is open when it is not).
+        ...(redraw ? { redraw: { ...redraw, reopened } } : {}),
     }
 }
 
@@ -140,16 +143,24 @@ export function mentorStateFromEntity(setup) {
  * WHAT TALOS SAID about a saved setup, when it is a reason to re-draw: a scenario that RAN AWAY unfilled (drifting) or
  * BROKE (fired), read off the per-scenario latches and the document's roll-up. → `{ event: 'ran_away' | 'broken',
  * reason, scenarios: [names] }`, or null — nothing latched, or only Talos's stale-map read (edge 'time', which already
- * carries its own proposal). A broken premise outranks a missed one. Pure.
+ * carries its own proposal). A broken premise outranks a missed one.
+ *
+ * Only BEFORE ENTRY (CR 2026-11-03): a filled setup keeps its other scenario's latch, and a live position must never be
+ * told it "ran away without filling" and have its levels reopened. A miss the user said to let go (`on_away: pass`) is
+ * no reason either — they answered that edge at build time. Pure.
  */
 export function redrawOf(setup) {
-    if (!setup) return null
+    if (!setup || !PRE_ENTRY.includes(setup.status)) return null
     if (setup.invalidation_edge === 'time') return null
     const states = setup.monitor_state?.scenarios ?? {}
-    const byId = new Map((setup.scenarios ?? []).map(sc => [sc.id, sc.name ?? sc.id]))
-    const hit = (status) => Object.entries(states).filter(([, s]) => s?.invalidation_status === status)
+    const byId = new Map((setup.scenarios ?? []).map(sc => [sc.id, sc]))
+    const hit = (status) => Object.entries(states).filter(([id, s]) => s?.invalidation_status === status
+        && !(status === 'drifting' && byId.get(id)?.validity?.on_away === 'pass'))
     const fired = hit('fired'), drifting = hit('drifting')
     const pick = fired.length ? { event: 'broken', rows: fired } : drifting.length ? { event: 'ran_away', rows: drifting } : null
+    // The document's roll-up alone speaks only for an older doc with no per-scenario latches — otherwise a roll-up of
+    // let-go misses would come back as a re-draw.
+    if (!pick && Object.keys(states).length) return null
     if (!pick) {
         if (setup.invalidation_status === 'fired') return { event: 'broken', reason: setup.invalidation_reason ?? null, scenarios: [] }
         if (setup.invalidation_status === 'drifting') return { event: 'ran_away', reason: setup.invalidation_reason ?? null, scenarios: [] }
@@ -158,7 +169,7 @@ export function redrawOf(setup) {
     return {
         event:     pick.event,
         reason:    pick.rows[0][1]?.invalidation_reason ?? setup.invalidation_reason ?? null,
-        scenarios: pick.rows.map(([id]) => byId.get(id) ?? id),
+        scenarios: pick.rows.map(([id]) => byId.get(id)?.name ?? id),
     }
 }
 

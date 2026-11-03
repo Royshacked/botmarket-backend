@@ -193,7 +193,10 @@ stop-owned and invalidation never executes.**
   drifted from where structure now sits). **Each edge has its own authored answer** — `on_break` for
   the adverse side, `on_away` for the favourable one, which has no default and which Generate refuses
   a range without (`missing_runaway_answer`). Scenarios are RIVALS, so the
-  card says how many are still armed.
+  card says how many are still armed. **`revise` never redraws by itself**: the card waits in the user's Mentor chat
+  (pending, pushed) until pressed or dismissed; the press reopens the setup in Mentor with its entries stage open and
+  the turn told to redraw on today's chart (or say plainly there is no trade), and the regenerate closes the card
+  (2026-11-03, docs/desks/mentor-talos.md).
 - **The `idea` price ENVELOPE is gone.** ~~`monitoring/invalidation.monitor.js`~~ watched
   `idea.invalidation.range` and was deleted on 2026-08-18: the band was only ever authored by the
   Idea agent (deleted in July) and by an archived desk, Atlas never stamps one on a holding, and

@@ -202,7 +202,7 @@ async function chatStream({
     const [{ mode, source: modeSource }, venue, thesisFacts] = await Promise.all([
         resolveMode({ name: activeName(incoming.build), seed, messages, userId, signal, read: _readSetup }),
         _venueSection(userId),
-        _readThesisFacts(turnState, _thesisFacts),
+        _readThesisFacts(turnState, _thesisFacts, { signal }),
     ])
     const tools = kitFor(mode, MENTOR_TOOLS, TRADING_TOOLS.length)
     // The kit is enforced on the HANDLERS too: a call to an undeclared tool comes back "no handler" instead of running.
@@ -714,10 +714,17 @@ export function _buildRedrawSection(redraw, draft) {
     const how = draft?.trade_mode === 'thesis'
         ? 'Redraw it on TODAY\'s chart with the lens (§ The thesis lens, step 9): read get_price_structure, the stop under the NEW higher low, the user\'s same risk limit and minimum reward to risk (from the conversation — ask once if they are not in it), the new level from get_entry_level, a new validity range.'
         : 'Redraw its levels on TODAY\'s chart, in its own lens — read the structure again, never the old levels.'
+    // EVERY scenario on the worksheet is from the old chart (CR: the old B rode into the regenerate unexamined — with
+    // two scenarios the break section stays silent).
+    const all = (draft?.scenarios?.length ?? 0) > 1
+        ? ' Every scenario on the worksheet was drawn on the old chart — the break scenario too: judge each again, and drop B if the break no longer changes the stop.'
+        : ''
     const verdict = redraw.event === 'ran_away'
         ? 'If the redrawn level fails their limits, say plainly there is no trade here and they let it go — never a chase.'
         : 'First say whether the trade still stands at all; if the structure went the other way, say plainly there is no trade.'
-    return `\n\nTHE RE-DRAW — the user opened this setup from Talos's card: ${saw} The entries stage is reopened for it; the direction, the horizon, the span and their size stand. ${how} ${verdict}`
+    // Said only when it happened (CR): an older setup has no ledger to reopen.
+    const where = redraw.reopened === false ? '' : ' The entries stage is reopened for it; the direction, the horizon, the span and their size stand.'
+    return `\n\nTHE RE-DRAW — the user opened this setup from Talos's card: ${saw}${where} ${how}${all} ${verdict}`
 }
 
 /**
@@ -726,18 +733,35 @@ export function _buildRedrawSection(redraw, draft) {
  * and asked for the limits bare). `stage` rides along — B is offered at entries only. Anything else, or a read that
  * fails, → null: the turn goes on without them, never stalls.
  */
-async function _readThesisFacts(chatState, read) {
+export async function _readThesisFacts(chatState, read, { signal = null, timeoutMs = THESIS_FACTS_MS } = {}) {
     const d = chatState?.draft
     const stage = stageOf(activeName(chatState?.build))
     if (d?.trade_mode !== 'thesis' || !d.asset || (stage !== 'spans' && stage !== 'entries')) return null
+    // The chart the lens reads (§ The thesis lens, step 1): a long-term trade the week, a swing the day — the horizon
+    // decides, as the prompt says; the timeframe field only when it names the week (CR: it is not always set).
+    const timeframe = d.type === 'long_term' || /week/i.test(d.timeframe ?? '') ? 'week' : 'day'
+    // It runs BEFORE the first token: bounded, and dropped on the user's Stop (CR) — a slow feed costs these facts,
+    // never the turn.
+    let timer = null
+    const giveUp = new Promise(resolve => {
+        timer = setTimeout(() => resolve('timeout'), timeoutMs)
+        signal?.addEventListener?.('abort', () => resolve('aborted'), { once: true })
+    })
     try {
-        const facts = await read({ ticker: d.asset, timeframe: /week/i.test(d.timeframe ?? '') ? 'week' : 'day', side: d.direction === 'short' ? 'short' : 'long' })
+        const facts = await Promise.race([read({ ticker: d.asset, timeframe, side: d.direction === 'short' ? 'short' : 'long' }), giveUp])
+        if (facts === 'timeout' || facts === 'aborted') {
+            logger.warn(LOG, `thesis facts ${facts} — the turn goes on without them`, { asset: d.asset })
+            return null
+        }
         return facts ? { ...facts, stage } : null
     } catch (err) {
         logger.warn(LOG, 'thesis facts read failed — the turn goes on without them', { asset: d.asset, err: err.message })
         return null
+    } finally {
+        clearTimeout(timer)
     }
 }
+const THESIS_FACTS_MS = 6000
 
 const _pctFrom = (from, to) => Math.round(Math.abs(from - to) / Math.abs(from) * 1000) / 10
 const _atrs = (from, to, atr) => (atr > 0 ? Math.round(Math.abs(from - to) / atr * 10) / 10 : null)
@@ -761,7 +785,8 @@ export function _buildRiskReadSection(facts, draft) {
     const said = stops.filter(([, p]) => Number.isFinite(p))
         .map(([name, p]) => `${name} ${p} is ${_pctFrom(facts.close, p)}% from today's ${facts.close}${_atrs(facts.close, p, facts.atr) != null ? ` — ${_atrs(facts.close, p, facts.atr)} normal ${unit} (ATR ${facts.atr})` : ''}`)
     if (!said.length) return ''
-    return `\n\nTHE RISK READ (step 5) — SAY IT BEFORE you ask for their risk limit and minimum reward to risk, in the same turn as the ask: ${said.join('; ')}. From that, your read of what kind of limit gets in near today's price and what kind waits for a deep pullback toward the stop — judgment, no fixed menu; any level you name comes from get_entry_level. Once they gave their limits, do not repeat it.`
+    // THE NUMBERS, never this line's name (drive 12: "the risk read measured these stops from $210.88", and no % at all).
+    return `\n\nTHE RISK READ (step 5) — SAY IT BEFORE you ask for their risk limit and minimum reward to risk, in the same turn as the ask, in the user's words with these numbers (each stop's % and its normal ${unit}) — never call it "the risk read": ${said.join('; ')}. From that, your read of what kind of limit gets in near today's price and what kind waits for a deep pullback toward the stop — judgment, no fixed menu; any level you name comes from get_entry_level. Once they gave their limits, do not repeat it.`
 }
 
 /**

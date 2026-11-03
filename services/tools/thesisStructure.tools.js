@@ -4,6 +4,7 @@
 // the approach; this file is only the tool boundary: fetch, call, word the answer.
 
 import { makeToolHandler } from '../agentUtils.js'
+import { logger } from '../logger.service.js'
 import { getTickerAggregates } from '../../providers/candles.provider.js'
 import { structureFacts, entryLevel, toWeekly, mirror, lastTradedUnder } from '../swingStructure.service.js'
 
@@ -126,10 +127,14 @@ export async function entryLevelReply(args, { get = getTickerAggregates, now = D
     if (!sym || text.startsWith('No entry level')) return text
     const short = args.side === 'short', past = short ? 'over' : 'under'
     let rows
+    const unread = `${text} (When ${sym} last traded ${past} ${stop} could not be read.)`
     try { rows = await dayRows(sym, 2, get, now) } catch (err) {
-        console.warn(LOG, `last visit ${past} the stop for ${sym}: ${err.message}`)
-        return `${text} (When ${sym} last traded ${past} ${stop} could not be read.)`
+        logger.warn(LOG, `last visit ${past} the stop for ${sym} — not read`, err.message)
+        return unread
     }
+    // No bars is "not read", never "not traded" (CR 2026-11-03): an empty feed would otherwise hand Mentor the very
+    // invented "not since" this line exists to stop.
+    if (!rows.length) return unread
     const j = short ? lastTradedUnder(mirror(rows), -stop) : lastTradedUnder(rows, stop)
     return `${text} ${sym} last traded ${past} ${stop} on ${j == null ? `no day in the last two years (${rows.length} sessions read)` : rows[j].date}.`
 }

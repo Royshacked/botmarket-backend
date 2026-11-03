@@ -224,3 +224,10 @@ test('past the stop the card says the plan cannot be placed — no "confirm anyw
     assert.match(card.content, /cannot be placed/)
     assert.doesNotMatch(card.content, /Confirming (buys|sells)/)
 })
+
+test('CR: a `pass` runaway counts only what still WAITS — a sibling that ran away too is not "still armed"', () => {
+    const bothRan = buildSetupInvalidation(SETUP, { card: 'ran_away_fyi', price: 170.1, scenario: 'thesis pullback', remaining: 2, waiting: 0 })
+    assert.doesNotMatch(bothRan.content, /still armed/)
+    const oneWaits = buildSetupInvalidation(SETUP, { card: 'ran_away_fyi', price: 170.1, scenario: 'thesis pullback', remaining: 3, waiting: 1 })
+    assert.match(oneWaits.content, /Your other scenario is still armed\./)
+})

@@ -17,7 +17,7 @@ const finished = () => {
     return putName(b, { ...activeName(b), settled: VALS, claimed })
 }
 const SETUP = (over = {}) => ({
-    id: 'setup_GNRC_1', asset: 'GNRC', direction: 'long', trade_mode: 'thesis',
+    id: 'setup_GNRC_1', asset: 'GNRC', direction: 'long', trade_mode: 'thesis', status: 'looking',
     scenarios: [{ id: 's1', name: 'Pullback to the level' }, { id: 's2', name: 'Break, then pullback' }],
     chat_state: { draft: { asset: 'GNRC', trade_mode: 'thesis', build: finished() }, coverage: ['structure'] },
     ...over,
@@ -39,7 +39,7 @@ test('redrawOf: what Talos latched — a miss, a break (which outranks it), or n
     assert.deepEqual(redrawOf(both), { event: 'broken', reason: 'closed at 170', scenarios: ['Break, then pullback'] })
     assert.equal(redrawOf(SETUP()), null, 'nothing latched: an ordinary edit')
     assert.equal(redrawOf(SETUP({ ...ran, invalidation_edge: 'time' })), null, 'Talos\'s stale-map read carries its own proposal')
-    assert.deepEqual(redrawOf({ id: 'x', invalidation_status: 'fired', invalidation_reason: 'gone' }), { event: 'broken', reason: 'gone', scenarios: [] }, 'an older doc: the roll-up alone')
+    assert.deepEqual(redrawOf({ id: 'x', status: 'looking', invalidation_status: 'fired', invalidation_reason: 'gone' }), { event: 'broken', reason: 'gone', scenarios: [] }, 'an older doc: the roll-up alone')
     assert.equal(redrawOf(null), null)
 })
 
@@ -50,7 +50,7 @@ test('the reopened state: a missed setup comes back at ENTRIES with the marker; 
     const plain = mentorStateFromEntity(SETUP())
     assert.equal(stageOf(activeName(normalizeBuild(plain.draft.build))), null, 'every stage still settled')
     assert.equal('redraw' in plain, false)
-    const flat = mentorStateFromEntity({ id: 'x', asset: 'GNRC', ...ran, scenarios: [{ id: 's1' }] })
+    const flat = mentorStateFromEntity({ id: 'x', asset: 'GNRC', status: 'looking', ...ran, scenarios: [{ id: 's1' }] })
     assert.equal(flat.redraw.event, 'ran_away', 'no stored draft: the marker still tells the turn')
 })
 
@@ -73,4 +73,34 @@ test('the turn carries the re-draw section from the reopened state', () => {
     const ctx = _buildTurnContext({ ...state, build: normalizeBuild(state.draft.build) })
     assert.match(ctx, /THE RE-DRAW — the user opened this setup from Talos's card/)
     assert.doesNotMatch(_buildTurnContext(mentorStateFromEntity(SETUP())), /THE RE-DRAW/)
+})
+
+// ─── The code review (2026-11-03) ─────────────────────────────────────────────
+
+test('CR: only BEFORE entry — a live position, a hit or a closed setup is never told it ran away', () => {
+    for (const status of ['long', 'short', 'hit', 'closed']) assert.equal(redrawOf(SETUP({ ...ran, status })), null, status)
+    for (const status of ['waiting', 'looking', 'resting']) assert.equal(redrawOf(SETUP({ ...ran, status }))?.event, 'ran_away', status)
+    const live = mentorStateFromEntity(SETUP({ ...ran, status: 'long' }))
+    assert.equal(stageOf(activeName(normalizeBuild(live.draft.build))), null, 'its ledger untouched')
+    assert.equal('redraw' in live, false)
+})
+
+test('CR: a miss the user said to let go is no re-draw — nor is its roll-up', () => {
+    const passed = SETUP({ ...ran, invalidation_status: 'drifting', scenarios: [{ id: 's1', name: 'A', validity: { on_away: 'pass' } }, { id: 's2', name: 'B' }] })
+    assert.equal(redrawOf(passed), null)
+    const other = SETUP({ invalidation_status: 'drifting', scenarios: [{ id: 's1', name: 'A', validity: { on_away: 'pass' } }, { id: 's2', name: 'B', validity: { on_away: 'revise' } }],
+        monitor_state: { scenarios: { s1: { invalidation_status: 'drifting' }, s2: { invalidation_status: 'drifting', invalidation_reason: 'B ran' } } } })
+    assert.deepEqual(redrawOf(other), { event: 'ran_away', reason: 'B ran', scenarios: ['B'] })
+})
+
+test('CR: the turn is told the entries reopened only when they were; every old scenario is judged again', () => {
+    assert.equal(mentorStateFromEntity(SETUP(ran)).redraw.reopened, true)
+    const old = mentorStateFromEntity({ id: 'x', asset: 'GNRC', status: 'looking', ...ran, scenarios: [{ id: 's1' }] })
+    assert.equal(old.redraw.reopened, false)
+    assert.doesNotMatch(_buildRedrawSection(old.redraw, old.draft), /entries stage is reopened/)
+    assert.match(_buildRedrawSection({ event: 'ran_away', reopened: true }, { trade_mode: 'thesis' }), /entries stage is reopened/)
+    const two = _buildRedrawSection({ event: 'ran_away', reopened: true }, { trade_mode: 'thesis', scenarios: [{ id: 's1' }, { id: 's2' }] })
+    assert.match(two, /Every scenario on the worksheet was drawn on the old chart — the break scenario too/)
+    assert.match(two, /drop B if the break no longer changes the stop/)
+    assert.doesNotMatch(_buildRedrawSection({ event: 'ran_away' }, { trade_mode: 'thesis', scenarios: [{ id: 's1' }] }), /Every scenario/)
 })

@@ -157,6 +157,7 @@ export function buildSetupInvalidation(setup, info = null) {
     const subject   = info?.scenario ? what.charAt(0).toUpperCase() + what.slice(1) : what
     const remaining = Number(info?.remaining) || 0
     const survives  = remaining > 0 ? ` Your other ${remaining === 1 ? 'scenario is' : `${remaining} scenarios are`} still armed.` : ''
+    const others    = Number.isFinite(info?.waiting) ? info.waiting : Math.max(0, remaining - 1)
 
     // WHERE A RE-DRAW WOULD START, from the way in that did not fill. A question to open the
     // conversation with, never an answer: `siblingOf` names an ARCHETYPE, and the price for it is
@@ -185,10 +186,12 @@ export function buildSetupInvalidation(setup, info = null) {
             actions: cardActions('Re-draw with Mentor'),
         },
         ran_away_fyi: {
-            // A runaway leaves its scenario LIVE (drifting — price can come back), so `remaining` counts it; the others
-            // are one fewer. On a thesis setup the other is the break scenario, the reason this one was `pass`.
+            // A runaway leaves its scenario LIVE (drifting — price can come back), so `remaining` counts it. `waiting` is
+            // what is still standing at a reachable level — not this one, and not a sibling that ran away too (CR
+            // 2026-11-03); without it (an older caller), the others are `remaining` less this one. On a thesis setup the
+            // other is the break scenario, the reason this one was `pass`.
             content: `${subject} didn't get filled — price ran past ${info?.price ?? 'the level'} without you. The read wasn't wrong; the entry just never came, and you said to let that one go.`
-                + (remaining > 1 ? ` Your other ${remaining === 2 ? 'scenario is' : `${remaining - 1} scenarios are`} still armed.` : ''),
+                + (others > 0 ? ` Your other ${others === 1 ? 'scenario is' : `${others} scenarios are`} still armed.` : ''),
             // `actions: null`, matching `invalidated_fyi`: the user pre-answered this exact question at
             // build time, so re-asking it is the thing `pass` exists to prevent.
             actions: null,

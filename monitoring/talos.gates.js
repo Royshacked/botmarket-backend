@@ -116,6 +116,18 @@ export function thesisGate(setup, price) {
     return best ? { scenario: best.scenario, leg: best.leg } : null
 }
 
+/**
+ * The scenario's ARMING events not yet seen: its primary `latching` conditions, neither latched on an earlier wake
+ * (`monitor_state.conditions`) nor met in this read (`results`, normalised). An `enter` with any left is held
+ * (talos.monitor _applyVerdict). Pure.
+ */
+export function unmetArming(setup, scenario, results = []) {
+    const latched = setup?.monitor_state?.conditions ?? {}
+    const metNow = new Set((results ?? []).filter(r => r?.met === 'yes').map(r => r.id))
+    return (scenario?.conditions ?? []).filter(c => c?.persistence === 'latching' && c.weight === 'primary'
+        && latched[c.id]?.met !== true && !metNow.has(c.id))
+}
+
 // ─── In-position arithmetic ────────────────────────────────────────────────────
 //
 // Where a LIVE position stands, recomputed every wake and never authored. There is no gate here any

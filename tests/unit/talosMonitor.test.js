@@ -12,7 +12,7 @@ import {
     legGate, normalizeConditionResults, latchPatch, costPatch,
     validityBreach, breachPatch, awayEdge, adverseEdge,
     scenarioGate, liveScenarios, rollUpBreaches, scenarioState,
-    computeMetrics, rMultiple,
+    computeMetrics, rMultiple, unmetArming,
 } from '../../monitoring/talos.gates.js'
 import { normalizeSetup, isFetchableRung, resolveRung, paceRungs } from '../../services/setup.schema.js'
 import { rungMinutes } from '../../services/setup.ladder.js'
@@ -1801,4 +1801,33 @@ test('a thesis wake over every level still reads the first premise — nothing i
     const deps = stubDeps({ getPrice: async () => 175, assess: async (_s, hit) => { read = hit; return { verdict: 'wait', read: 'Over the level.' } } })
     await _checkSetup(THESIS_AB, T, deps)
     assert.equal(read, null, 'no hit — the read falls back to the first scenario as before')
+})
+
+// CR 2026-11-03: B's level can sit OVER its arming line (the break itself is the entry, Roy 2026-11-03), so price is
+// "at the level and below" before the break — an `enter` on it is held until its latching primary event happened.
+const ARM = { id: 'arm', text: 'A day close over 169.66 since 2026-10-28', weight: 'primary', mode: 'measured', persistence: 'latching' }
+const THESIS_AB_ARMED = { ...THESIS_AB, scenarios: [THESIS_AB.scenarios[0], { ...THESIS_AB.scenarios[1], conditions: [ARM] }] }
+
+test('an enter on the break scenario BEFORE its arming close is held as a wait — never fired', async () => {
+    const deps = stubDeps({ getPrice: async () => 171.2, assess: async () => ({ verdict: 'enter', read: 'Strength on the 4h.', conditions: [{ id: 'arm', met: false }] }) })
+    const out = await _checkSetup(THESIS_AB_ARMED, T, deps)
+    assert.notEqual(out.fired, true)
+    assert.equal(deps.writes[0].status ?? 'looking', 'looking')
+    assert.match(JSON.stringify(deps.writes[0]), /has not happened yet/)
+})
+
+test('…and fires once the arming close is met this read, or latched on an earlier one', async () => {
+    const now = stubDeps({ getPrice: async () => 171.2, assess: async () => ({ verdict: 'enter', read: 'Closed over 169.66.', conditions: [{ id: 'arm', met: true }] }) })
+    assert.equal((await _checkSetup(THESIS_AB_ARMED, T, now)).fired, true)
+    const earlier = { ...THESIS_AB_ARMED, monitor_state: { ...(THESIS_AB_ARMED.monitor_state ?? {}), conditions: { arm: { met: true, at: '2026-10-29T20:00:00Z' } } } }
+    const deps = stubDeps({ getPrice: async () => 171.2, assess: async () => ({ verdict: 'enter', read: 'Strength.' }) })
+    assert.equal((await _checkSetup(earlier, T, deps)).fired, true)
+})
+
+test('unmetArming: only primary latching events not yet seen', () => {
+    const sc = { conditions: [ARM, { id: 'live', weight: 'primary', persistence: 'live' }, { id: 'conf', weight: 'confirming', persistence: 'latching' }] }
+    assert.deepEqual(unmetArming({}, sc).map(c => c.id), ['arm'])
+    assert.deepEqual(unmetArming({}, sc, [{ id: 'arm', met: 'yes' }]), [])
+    assert.deepEqual(unmetArming({ monitor_state: { conditions: { arm: { met: true } } } }, sc), [])
+    assert.deepEqual(unmetArming({}, null), [])
 })

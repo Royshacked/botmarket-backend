@@ -431,6 +431,10 @@ services/
   thesisStructure.tools.js  get_price_structure + get_entry_level — Mentor's THESIS lens (docs/design/stock-playbook.md):
                             the chart facts a stop and target are judged from (day or week; a short read mirrored),
                             and the entry level from the user's risk limit / minimum R:R. Over swingStructure.service.
+                            get_entry_level takes the ticker and says when price last traded past the stop
+                            (entryLevelReply); the structure carries break_candidate (scenario B). thesisTurnFacts —
+                            the close, ATR, both stops (with the deep date) and B, read before a thesis spans/entries
+                            turn for mentor.agent's RISK READ and BREAK SCENARIO sections (2026-11-03).
   runup.tools.js            get_runup_history — the RUN-UP yardstick for a catalyst read (horizon-chains.md §3):
                             the stock's move into each of its last reports over the sessions left, vs SPY;
                             median / quartiles / up share, and THIS CYCLE (the usual full 10-session run-up and
@@ -712,6 +716,9 @@ services/
                               answer (sizing: the user's number, HELD until its turn — heldAnswers),
                               shown (summary: settles when the figures exist). resolveEntryTrades
                               re-keys entries the model filed under a scenario id (s1 → t1).
+                              reopenForRedraw (2026-11-03): a setup Talos says ran away or broke
+                              reopens at entries, the user's size held again — mentor.desk
+                              redrawOf / mentorStateFromEntity call it on the reopen.
     NB: setup.ladder.js owns the RUNG VOCABULARY (TF_RUNGS, isFetchableRung, rungMinutes) and the
         DEFAULT pace — ladderFor(horizon, marketCap, premise) → the rungs a setup is read on when
         nobody named any, as a contiguous band that always widens to reach the premise. Coarser as
@@ -1029,7 +1036,9 @@ services/
                             context — the lab's controlSignals and Mentor's facts both run it), rangeTarget, lowestLow,
                             structureFacts (control, last break's context, the fall, candidate stop/target, the deep
                             stop and the last date price traded under it, heavy
-                            days), entryLevel (the lower of the risk-limit and R:R ceilings). PURE.
+                            days, break_candidate — sellers in control over a swing low printed after the fall's
+                            low, the swing high a close over arms B), lastTradedUnder (the last bar under a level),
+                            entryLevel (the lower of the risk-limit and R:R ceilings). PURE.
   thesisLab.service.js      the THESIS lens's tests 1 / 1b / 1c (docs/design/stock-playbook.md): the approach as fixed
                             rules — reversalSignals, controlSignals, baselineSignals, plan, play, playIntraday,
                             summarize (month bootstrap) — scripts/lab-thesis.mjs, lab-thesis-hourly.mjs. PURE.
@@ -1539,6 +1548,15 @@ scripts/                    ops one-offs — none run by `npm test`. Kinds: migr
                             overnight week board as /api/hotlist serves it, one stubbed Prometheus read — no day tabs,
                             no Boards view, the confirmed / Run-up names views, no tape or room columns, the Info text.
                             `node scripts/drive-hotlist-week.mjs [baseUrl] [outDir]`
+  drive-thesis-followups.mjs Drives the THESIS lens (2026-11-02/03, thesis-lens-followups.md): GNRC as a bare name — the
+                            deep stop offered with its date, B offered when it is taken, the risk read before the
+                            limits, two scenarios with validity; NXST straight through — the away edge at the live
+                            recent high. Real Mentor turns (~9). `node scripts/drive-thesis-followups.mjs [baseUrl] [outDir]`
+  drive-redraw-card.mjs     Drives "revise" END TO END (2026-11-03): Talos's real wake (price stubbed) past a thesis
+                            setup's away edge → the ran_away card in Mentor's chat (pending, push built) → the button
+                            in the browser → the re-draw turn (entries reopened, the chart read) → a regenerate closes
+                            the card. axl_dev only. `node scripts/drive-redraw-card.mjs [baseUrl] [outDir]`
+  drive-saved-line.mjs      The "saved — back with Axl" line shows only on the visit it was saved in (2026-11-02).
   scan-week.mjs             Pythia's change scan, DRY: what this week would assess and why — no model, no
                             writes. `node scripts/scan-week.mjs [cap]`
   assess-industry.mjs       One Pythia "Assess now" from the command line, as an admin; prints the cost
