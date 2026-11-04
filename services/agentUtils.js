@@ -551,10 +551,53 @@ export function stripEmitTags(raw, tagNames) {
         // or the raw JSON of a block that WAS parsed leaks into the reply.
         if (text.includes(`<${name}>`) && name.length > 3) {
             const prefixes = Array.from({ length: name.length - 3 }, (_, i) => name.slice(0, 3 + i)).join('|')
-            text = text.replace(new RegExp(`<${name}>[\\s\\S]*?</(?:${prefixes})>`), '')
+            text = text.replace(new RegExp(`<${name}>[\\s\\S]*?</(?:${prefixes})>`, 'g'), '')
         }
+        text = _stripBrokenBlocks(text, name)
     }
     return text
+}
+
+/**
+ * Anything still opening with this tag and a JSON body is a block whose close came out wrong, or never
+ * came: `</setup}` (INGM, 2026-11-04), `</setups>`, a second `<setup>`, or a reply cut off mid-block. Raw
+ * JSON is never for the user, whether or not the block could be parsed, so it goes: through the end of
+ * the JSON and any broken closer after it, or to the end of the reply when the JSON never ends. A body
+ * that is not JSON stays, because "we will emit a <setup> next" is a sentence.
+ */
+function _stripBrokenBlocks(text, name) {
+    const opener = new RegExp(`<${name}\\s*>(?=\\s*[{[])`, 'i')
+    const closer = new RegExp(`^\\s*(?:</[a-z_]*\\s*[>}\\])]?|<${name}\\s*>)`, 'i')
+    let m
+    while ((m = text.match(opener))) {
+        const bodyAt = m.index + m[0].length
+        const end    = _jsonEnd(text, bodyAt)
+        if (end < 0) {
+            logger.warn('[reply]', `stripped an unfinished <${name}> block from the reply`)
+            return text.slice(0, m.index)
+        }
+        const rest = text.slice(end)
+        logger.warn('[reply]', `stripped a <${name}> block with a broken closing tag from the reply`)
+        text = text.slice(0, m.index) + rest.replace(closer, '')
+    }
+    return text
+}
+
+/** Where the JSON value opening at or after `from` ends, or -1 if it never does. Braces inside strings don't count. */
+function _jsonEnd(text, from) {
+    let depth = 0, inString = false
+    for (let i = from; i < text.length; i++) {
+        const c = text[i]
+        if (inString) {
+            if (c === '\\') i++
+            else if (c === '"') inString = false
+        } else if (c === '"') inString = true
+        else if (c === '{' || c === '[') depth++
+        else if (c === '}' || c === ']') {
+            if (--depth === 0) return i + 1
+        }
+    }
+    return -1
 }
 
 /**

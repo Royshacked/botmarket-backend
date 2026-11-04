@@ -31,6 +31,10 @@ export function parseEmitBlock(raw, tag, log = '[agentIO]') {
     try {
         return JSON.parse(m[1].trim())
     } catch (err) {
+        // A broken close on the first block makes the strict match run on to a later block's close. The
+        // first block is still whole, so it gets the same second look as a block with no good close at all.
+        const rescued = _parseMalformedBlock(text, tag, log)
+        if (rescued) return rescued
         logger.warn(log, `${tag} JSON parse failed:`, err.message)
         return null
     }
@@ -38,6 +42,10 @@ export function parseEmitBlock(raw, tag, log = '[agentIO]') {
 
 /**
  * A block whose CLOSING tag came out wrong → its JSON, or null.
+ *
+ * Measured 2026-11-04: Mentor on INGM closed a complete worksheet with `</setup}` — right name, wrong
+ * last character. The turn's worksheet was dropped and the JSON was shown to the user, with nothing
+ * logged. So the last character may also be `}`, `]` or `)`; the name rule below is unchanged.
  *
  * Measured 2026-10-01: Pythia on gpt-6-luna closed a complete, valid table with `</til>` instead of
  * `</tilt>` — twice in about eight runs, both times at the end of a long block, not cut by
@@ -51,8 +59,13 @@ function _parseMalformedBlock(text, tag, log) {
     const open = text.indexOf(`<${tag}>`)
     if (open < 0) return null
     const body = text.slice(open + tag.length + 2)
-    const close = body.match(/<\/([a-z_]*)>/i)
-    if (!close || !(close[1].length >= 3 && tag.startsWith(close[1]))) return null
+    const close = body.match(/<\/([a-z_]*)\s*[>}\])]/i)
+    if (!close || !(close[1].length >= 3 && tag.startsWith(close[1]))) {
+        // A block that opened with JSON and never closed properly is news: the turn's artifact is gone.
+        // A sentence that merely names the tag is not.
+        if (/^\s*[{[]/.test(body)) logger.warn(log, `${tag} block has no usable closing tag — dropped (${close?.[0] ?? 'none, reply may have been cut'})`)
+        return null
+    }
     const inner = body.slice(0, close.index)
     const a = inner.indexOf('{'), b = inner.lastIndexOf('}')
     if (a < 0 || b <= a) return null

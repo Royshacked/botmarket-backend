@@ -246,6 +246,55 @@ test('the stripper removes the malformed block too, so its JSON never leaks into
     assert.equal(stripEmitTags('Here.\n<tilt>{"a":1}</tilt> after', ['tilt']).trim(), 'Here.\n after'.trim())
 })
 
+// ── a broken close never shows JSON to the user ──────────────────────────────
+// Prod, 2026-11-04, INGM: Mentor closed a whole worksheet with `</setup}`. The worksheet was dropped and
+// the JSON landed in the chat, with nothing logged.
+
+const WORKSHEET = '{"asset":"INGM","thesis":"a } and a <b> inside a string","scenarios":[{"id":"s1"}]}'
+
+test('a close with the right name and the wrong last character is parsed and stripped', () => {
+    const raw = `Here is the plan.\n\n<setup>\n${WORKSHEET}\n</setup}`
+    assert.deepEqual(parseEmitBlock(raw, 'setup'), JSON.parse(WORKSHEET))
+    assert.equal(stripEmitTags(raw, ['setup']).trim(), 'Here is the plan.')
+})
+
+test('a broken close on the first block does not lose it to a later good block', () => {
+    const raw = `<setup>${WORKSHEET}</setup}\nprose\n<setup>{"asset":"LATER"}</setup>`
+    assert.equal(parseEmitBlock(raw, 'setup').asset, 'INGM')
+})
+
+test('every broken shape is stripped, and the prose after a finished block stays', () => {
+    const shapes = {
+        'wrong tag close':  `<setup>${WORKSHEET}</setups>`,
+        'unrelated close':  `<setup>${WORKSHEET}</phase>`,
+        'second opener':    `<setup>${WORKSHEET}<setup>`,
+        'space in opener':  `<setup >${WORKSHEET}</setup>`,
+        'upper case':       `<SETUP>${WORKSHEET}</SETUP>`,
+    }
+    for (const [label, block] of Object.entries(shapes)) {
+        assert.equal(stripEmitTags(`Before.\n${block}\nAfter.`, ['setup']), 'Before.\n\nAfter.', label)
+    }
+})
+
+test('a reply cut off inside a block is stripped to the end, and still does not parse', () => {
+    for (const raw of [`Before.\n<setup>${WORKSHEET}`, 'Before.\n<setup>{"asset":"INGM","thesis":"cut mid']) {
+        assert.equal(stripEmitTags(raw, ['setup']).trim(), 'Before.')
+    }
+    assert.equal(parseEmitBlock('Before.\n<setup>{"asset":"INGM"', 'setup'), null)
+})
+
+test('several broken blocks all go, and a neighbouring block is left for its own pass', () => {
+    const raw = `A\n<setup>{"n":1}</set>\nB\n<setup>{"n":2}</set>\nC\n<setup>{"n":3}</setup}\nD`
+    assert.equal(stripEmitTags(raw, ['setup']), 'A\n\nB\n\nC\n\nD')
+    assert.equal(stripEmitTags('<setup>{"n":1}<build>{"settle":[]}</build>', ['setup', 'build']), '')
+})
+
+test('a sentence that names the tag, or a non-JSON body, is left alone', () => {
+    const prose = 'We will emit a <setup> block next turn, not { before it.'
+    assert.equal(stripEmitTags(prose, ['setup']), prose)
+    assert.equal(parseEmitBlock(prose, 'setup'), null)
+})
+
 // ─── The names a tool runs on (2026-10-19) ────────────────────────────────────
 
 test('toolTargets reads every schema spelling, upper-cases and de-duplicates', () => {
