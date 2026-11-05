@@ -164,10 +164,14 @@ export function makePersist({ collection, kind = null, log }) {
     // through its call sites and have its tests inject a fake one there (the archived Hermes did, and
     // 131 DB-less tests exercised the write path that way). Resolving getDb() unconditionally here
     // would quietly take that seam away.
-    return async function persist(id, $set, logEntry = null, db = null) {
+    //
+    // `ifStatus`: write only if the document is still in that status, for a read that took a model call to reach its answer
+    // while the user may have acted. → `{ matched: false }` when it was not, and nothing is written or journalled.
+    return async function persist(id, $set, logEntry = null, db = null, { ifStatus = null } = {}) {
         try {
             const conn = db ?? await getDb()
-            await conn.collection(collection).updateOne(match(id), { $set })
+            const wrote = await conn.collection(collection).updateOne({ ...match(id), ...(ifStatus ? { status: ifStatus } : {}) }, { $set })
+            if (ifStatus && wrote?.matchedCount === 0) return { matched: false }
         } catch (err) {
             logger.error(log, `persist failed for ${id}:`, err.message)
             throw err

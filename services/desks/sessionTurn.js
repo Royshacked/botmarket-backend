@@ -160,9 +160,35 @@ export function makeSessionTurn({
             model, user, audience: await experience(user._id).catch(() => null), signal, emit,
         })
 
-        const result = await desk.run({ user, state, input: prepared, signal, emit, common, sessionId })
-        // Stopped: the user's message stays (it is theirs), and nothing the turn produced is kept.
-        if (!result || signal?.aborted) return { stopped: true }
+        // A TURN THAT FINISHED THE ITEM IT WAS EDITING (a setup closed in the chat): its conversation goes onto the item,
+        // and the desk's next work starts clean. A failure never undoes what the turn did.
+        const sealFinished = async (finished) => {
+            await sealing.sealFromSession({ userId: user._id, sessionId, agent, ...finished, keepTimeline: true })
+                .then(() => sealing.putAside({ userId: user._id, sessionId, agent }))
+                .catch(err => logger.warn(LOG, 'seal after a finishing turn failed', err.message))
+        }
+        // The item is finished the moment the tool says so, even if Stop or a failed model round ends the turn after it:
+        // left as it was, the desk goes on editing a setup that is already closed (code review).
+        let finishedEarly = null
+        const finishAnyway = async () => {
+            const finished = finishedEarly && desk.sealAfterTurn?.(finishedEarly)
+            if (!finished) return
+            const next = desk.nextState ? desk.nextState(state, finishedEarly, prepared) : state
+            await sessions.setAgentState({ sessionId, userId: user._id, agent, state: keepMarkers(next, state) })
+            await sealFinished(finished)
+        }
+        let result
+        try {
+            result = await desk.run({ user, state, input: prepared, signal, emit, common: { ...common, onFinished: (r) => { finishedEarly = r } }, sessionId })
+        } catch (err) {
+            await finishAnyway().catch(e => logger.warn(LOG, 'finishing after a failed turn failed', e.message))
+            throw err
+        }
+        // Stopped: the user's message stays (it is theirs), and nothing else the turn produced is kept.
+        if (!result || signal?.aborted) {
+            await finishAnyway().catch(e => logger.warn(LOG, 'finishing after a stopped turn failed', e.message))
+            return { stopped: true }
+        }
 
         const routing = ownWords(routeFields(result, user.role), agent, text)
         const payload = { ...desk.done(result, { routing }), ...routing }
@@ -181,14 +207,9 @@ export function makeSessionTurn({
         const kept = keepMarkers(next, state)
         await sessions.setAgentState({ sessionId, userId: user._id, agent, state: kept })
 
-        // A TURN THAT FINISHED THE ITEM IT WAS EDITING (a setup closed in the chat): its conversation goes onto the item,
-        // the reply stays on screen, and the desk's next work starts clean. A failure never undoes what the turn did.
+        // The reply stays on screen; the rest as sealFinished says.
         const finished = desk.sealAfterTurn?.(result)
-        if (finished) {
-            await sealing.sealFromSession({ userId: user._id, sessionId, agent, ...finished, keepTimeline: true })
-                .then(() => sealing.putAside({ userId: user._id, sessionId, agent }))
-                .catch(err => logger.warn(LOG, 'seal after a finishing turn failed', err.message))
-        }
+        if (finished) await sealFinished(finished)
 
         // The floor follows the reply: a route lands on its desk's entry agent; otherwise the agent that
         // answered keeps it. (Hand-offs and "@agent" join in phase 5.)

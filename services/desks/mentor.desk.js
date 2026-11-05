@@ -13,7 +13,7 @@ import { bookSeed } from '../houseBook.service.js'
 import { houseLabels, formatHouseLabel } from '../houseLabel.service.js'
 import { mentorActions, mentorApplyEdit } from './actions/mentor.actions.js'
 import { setupReason } from '../../api/setups/setupReasons.js'
-import { normalizeBuild, activeName, putName, reopenForRedraw } from '../mentorBuild.util.js'
+import { normalizeBuild, activeName, putName, reopenForRedraw, stageOf } from '../mentorBuild.util.js'
 import { PRE_ENTRY } from '../entity/vocabulary.js'
 
 /**
@@ -87,7 +87,10 @@ export function mentorNextState(prev, result, input = {}) {
     // The setup it was editing is closed: nothing is left on the table, and no Update to press.
     if (result.closedSetup) return null
     const draft = result.setup ?? prev?.draft ?? null
+    // The pencil's offer stands until they take it (the ledger reopens): the turn that takes it needs what it says.
+    const offer = prev?.redraw?.offer && draft?.build && stageOf(activeName(normalizeBuild(draft.build))) === null ? { redraw: prev.redraw } : {}
     return {
+        ...offer,
         active_asset: draft?.asset || input.seed?.ticker || prev?.active_asset || '',
         draft,
         coverage:     result.coverage ?? prev?.coverage ?? [],
@@ -105,12 +108,14 @@ export function mentorNextState(prev, result, input = {}) {
  * (the ledger rides on it), else a draft rebuilt from the setup's own fields — the fallback the client
  * built for setups saved before the draft was stored (MainPage.handleEditSetup), moved here.
  */
-export function mentorStateFromEntity(setup) {
+export function mentorStateFromEntity(setup, opts = {}) {
     const stored = setup?.chat_state?.draft ?? null
     const redraw = redrawOf(setup)
-    // A setup Talos says ran away or broke reopens with its LEVELS open (reopenForRedraw) — a finished ledger told
-    // Mentor nothing was outstanding, and the re-draw never happened (redraw drive, 2026-11-03).
-    const reopened = !!(stored && redraw && stored.build)
+    // Talos's card (`opts.redraw`) reopens a setup that ran away or broke with its LEVELS open (reopenForRedraw) — a
+    // finished ledger told Mentor nothing was outstanding, and the re-draw never happened (redraw drive, 2026-11-03).
+    // The pencil on the same setup opens it as it is, and Mentor offers the redraw (Roy, 2026-11-05).
+    const fromCard = opts?.redraw === true
+    const reopened = !!(fromCard && stored && redraw && stored.build)
     const draft = reopened ? _reopenedDraft(stored) : stored ?? {
         asset:       setup?.asset,
         asset_class: setup?.asset_class ?? null,
@@ -139,7 +144,7 @@ export function mentorStateFromEntity(setup) {
         // ONE TURN's: mentorNextState keeps no unknown key, so the marker is read by the re-draw turn and gone after —
         // the reopened ledger is what carries on. `reopened` — whether there WAS a ledger to reopen (CR: an older setup has
         // none, and the turn must not be told the entries stage is open when it is not).
-        ...(redraw ? { redraw: { ...redraw, reopened } } : {}),
+        ...(redraw ? { redraw: { ...redraw, reopened, ...(fromCard ? {} : { offer: true }) } } : {}),
     }
 }
 
@@ -155,12 +160,13 @@ export function mentorStateFromEntity(setup) {
  */
 export function redrawOf(setup) {
     if (!setup || !PRE_ENTRY.includes(setup.status)) return null
-    if (setup.invalidation_edge === 'time') return { event: 'stale', reason: setup.invalidation_reason ?? null, scenarios: [] }
     const states = setup.monitor_state?.scenarios ?? {}
     const byId = new Map((setup.scenarios ?? []).map(sc => [sc.id, sc]))
     const hit = (status) => Object.entries(states).filter(([id, s]) => s?.invalidation_status === status
         && !(status === 'drifting' && byId.get(id)?.validity?.on_away === 'pass'))
     const fired = hit('fired'), drifting = hit('drifting')
+    // Talos's stale-map stamp, unless a scenario has already broken: that is the thing to say (code review).
+    if (setup.invalidation_edge === 'time' && !fired.length) return { event: 'stale', reason: setup.invalidation_reason ?? null, scenarios: [] }
     const pick = fired.length ? { event: 'broken', rows: fired } : drifting.length ? { event: 'ran_away', rows: drifting } : null
     // The document's roll-up alone speaks only for an older doc with no per-scenario latches — otherwise a roll-up of
     // let-go misses would come back as a re-draw.

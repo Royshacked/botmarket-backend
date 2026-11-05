@@ -107,7 +107,7 @@ test('openForEdit puts the desk’s state back from the entity, marks it editing
     assert.equal(out.agent, 'mentor')
     assert.equal(out.hasContext, true)
     const header = await sessions.get({ sessionId: s.sessionId, userId: 'u1' })
-    assert.deepEqual(header.agentState.mentor.editing, { kind: 'setup', entityId: 'st1' })
+    assert.deepEqual(header.agentState.mentor.editing, { kind: 'setup', entityId: 'st1', asset: 'AMD' })
     assert.deepEqual(header.agentState.mentor.draft, { asset: 'AMD', build: { names: [] } })
     assert.equal(header.floor, 'mentor')
     assert.match(out.line.content, /^Mentor · AMD setup\nkeep size under 2%\nYou: long AMD$/)

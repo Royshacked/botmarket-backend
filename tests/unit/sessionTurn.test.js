@@ -6,6 +6,7 @@ import { makeAgentContextService } from '../../services/agentContext.service.js'
 import { makeSessionTurn, ownWords } from '../../services/desks/sessionTurn.js'
 import { foldPlan, makeSummarizer } from '../../services/desks/summarize.js'
 import { DESK_DEFS } from '../../services/desks/index.js'
+import { makeSealing } from '../../services/desks/seal.js'
 
 // A desk turn run against the session (services/desks/sessionTurn.js) — on memDb with a STUB desk, so
 // what is tested is the mechanism: what is appended, what the desk is handed, what state is kept, where
@@ -218,3 +219,77 @@ test('the summarizer books its usage to the user, and answers null on a failed c
     const bad = makeSummarizer({ once: async () => { throw new Error('down') }, record: async () => {} })
     assert.equal(await bad({ userId: 'u1', agent: 'mentor', turns: [] }), null)
 })
+
+// ─── A turn that finished what it was editing (a setup closed in the chat, 2026-11-05) ─────────────────────
+
+function finishingRig({ sealing } = {}) {
+    const { db } = memDb()
+    const getDb = async () => db
+    const sessions = makeSessionService({ getDb })
+    const contexts = makeAgentContextService({ getDb })
+    const mentor = {
+        agent: 'mentor',
+        run: async () => ({ reply: 'Closed.', closedSetup: { id: 'st1', asset: 'AMD' } }),
+        done: (r) => ({ reply: r.reply }),
+        nextState: () => null,
+        sealAfterTurn: DESK_DEFS.mentor.sealAfterTurn,
+    }
+    const turn = makeSessionTurn({ sessions, contexts, desks: { mentor }, experience: async () => 'novice', summarize: async () => 'S',
+        sealing: sealing ?? makeSealing({ sessions, contexts, desks: DESK_DEFS }) })
+    return { turn, sessions, contexts }
+}
+const editingTurn = async ({ turn, sessions }, extra = {}) => {
+    const s = await sessions.getActive({ userId: 'u1' })
+    await sessions.setAgentState({ sessionId: s.sessionId, userId: 'u1', agent: 'mentor', state: { editing: { kind: 'setup', entityId: 'st1' }, draft: { asset: 'AMD' } } })
+    const out = await turn({ user, sessionId: s.sessionId, agent: 'mentor', text: 'close it', ...extra })
+    return { s, out }
+}
+
+test('closing it in the chat: the conversation goes onto the setup, the reply stays on screen, and the desk starts clean', async () => {
+    const rig = finishingRig()
+    const { s } = await editingTurn(rig)
+    const sealed = await rig.contexts.load({ userId: 'u1', kind: 'setup', entityId: 'st1', agent: 'mentor' })
+    assert.deepEqual(sealed.messages.map(m => m.content), ['close it', 'Closed.'])
+    const all = await rig.sessions.messagesSince({ sessionId: s.sessionId, userId: 'u1' })
+    assert.deepEqual(all.map(m => m.content), ['close it', 'Closed.'], 'the timeline is left as the user saw it')
+    const after = await rig.sessions.get({ sessionId: s.sessionId, userId: 'u1' })
+    assert.equal(after.agentState?.mentor?.editing ?? null, null, 'it is not still editing a closed setup')
+    assert.equal(after.agentState?.mentor?.draft ?? null, null)
+    assert.equal(after.seals.mentor, after.seq, 'the next seal starts after this work')
+})
+
+test('a seal that fails does not fail the turn: the setup is already closed', async () => {
+    const rig = finishingRig({ sealing: { sealFromSession: async () => { throw new Error('mongo down') }, putAside: async () => { throw new Error('never') } } })
+    const { out } = await editingTurn(rig)
+    assert.equal(out.stopped, undefined)
+})
+
+test('a close followed by Stop still finishes: the desk is not left editing a closed setup', async () => {
+    const { db } = memDb()
+    const sessions = makeSessionService({ getDb: async () => db })
+    const contexts = makeAgentContextService({ getDb: async () => db })
+    const ctl = new AbortController()
+    const mentor = {
+        agent: 'mentor',
+        run: async ({ common }) => { common.onFinished({ closedSetup: { id: 'st1', asset: 'AMD' } }); ctl.abort(); return null },
+        done: (r) => ({ reply: r.reply }), nextState: () => null, sealAfterTurn: DESK_DEFS.mentor.sealAfterTurn,
+    }
+    const turn = makeSessionTurn({ sessions, contexts, desks: { mentor }, experience: async () => 'novice', summarize: async () => 'S', sealing: makeSealing({ sessions, contexts, desks: DESK_DEFS }) })
+    const { s, out } = await editingTurn({ turn, sessions }, { signal: ctl.signal })
+    assert.equal(out.stopped, true)
+    const after = await sessions.get({ sessionId: s.sessionId, userId: 'u1' })
+    assert.equal(after.agentState?.mentor?.editing ?? null, null)
+    assert.ok(await contexts.load({ userId: 'u1', kind: 'setup', entityId: 'st1', agent: 'mentor' }))
+})
+
+test('a Stop with nothing finished keeps the state, as it always did', async () => {
+    const { db } = memDb()
+    const sessions = makeSessionService({ getDb: async () => db })
+    const contexts = makeAgentContextService({ getDb: async () => db })
+    const mentor = { agent: 'mentor', run: async () => null, done: (r) => r, nextState: () => null, sealAfterTurn: DESK_DEFS.mentor.sealAfterTurn }
+    const turn = makeSessionTurn({ sessions, contexts, desks: { mentor }, experience: async () => 'novice', summarize: async () => 'S', sealing: makeSealing({ sessions, contexts, desks: DESK_DEFS }) })
+    const { s } = await editingTurn({ turn, sessions })
+    const after = await sessions.get({ sessionId: s.sessionId, userId: 'u1' })
+    assert.equal(after.agentState.mentor.editing.entityId, 'st1')
+})
+

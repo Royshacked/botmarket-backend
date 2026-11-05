@@ -130,7 +130,7 @@ export function makeSealing({ sessions = sessionService, contexts = agentContext
         // `opts` is how the item opens (a book in review mode) — the desk reads what it knows.
         const state   = desk.stateFromEntity(entity, opts)
         const context = await contexts.load({ userId, kind, entityId, agent })
-        await sessions.setAgentState({ sessionId, userId, agent, state: { ...state, editing: { kind, entityId } } })
+        await sessions.setAgentState({ sessionId, userId, agent, state: { ...state, editing: { kind, entityId, ...(entity.asset ? { asset: entity.asset } : {}) } } })
         // A DIFFERENT item: what the agent was doing (dropped work, or talk about something else) is not this item's
         // conversation — set aside, so this item's next seal carries only what is said about it (phase 8e). After the
         // reopen it belongs to, so a reopen that failed leaves those turns where they were.

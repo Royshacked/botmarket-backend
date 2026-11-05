@@ -196,8 +196,13 @@ export async function disarmSetup(id, userId, deps = _deps) {
 export async function closeSetup(id, userId, deps = _deps) {
     const { setup, err } = await _loadOwned(deps, id, userId)
     if (err) return { ok: false, reason: err }
-    if (setup.status !== STATUS.WAITING && setup.status !== STATUS.LOOKING) return { ok: false, reason: 'not_closable' }
-    await repo(deps).patch(id, { status: STATUS.CLOSED, closedReason: 'invalidated', closedAt: Date.now() })
+    // Asked twice (a Stop after the first): it is closed, and that is the answer (code review).
+    if (setup.status === STATUS.CLOSED) return { ok: true, closed: true, already: true }
+    const closable = [STATUS.WAITING, STATUS.LOOKING]
+    if (!closable.includes(setup.status)) return { ok: false, reason: 'not_closable' }
+    // Only from those: a Talos read can move it to `hit` since the line above (code review).
+    const wrote = await repo(deps).patch(id, { status: STATUS.CLOSED, closedReason: 'invalidated', closedAt: Date.now() }, { status: { $in: closable } })
+    if (wrote?.matchedCount === 0) return { ok: false, reason: 'not_closable' }
     logger.info(LOG, `setup ${id} closed by the user`)
     return { ok: true, closed: true }
 }

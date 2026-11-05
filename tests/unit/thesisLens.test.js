@@ -5,7 +5,7 @@ import { MODES } from '../../services/analysisModes.js'
 import { sanitizeScanSeed } from '../../services/scanSeed.util.js'
 import { normalizeSetup, setupReadiness, computeRR } from '../../services/setup.schema.js'
 import { thesisGate, scenarioGate } from '../../monitoring/talos.gates.js'
-import { _buildModeSection, _buildSeedSection, _buildBreakSection, _buildRedrawSection, _buildRiskReadSection, _buildTargetSection, _snapMeasuredTarget, _readThesisFacts, mentorAgentService } from '../../services/agents/mentor.agent.service.js'
+import { _waitingSetups, _buildModeSection, _buildSeedSection, _buildBreakSection, _buildRedrawSection, _buildRiskReadSection, _buildTargetSection, _snapMeasuredTarget, _readThesisFacts, mentorAgentService } from '../../services/agents/mentor.agent.service.js'
 import { emptyBuild, upsertName, putName, activeName } from '../../services/mentorBuild.util.js'
 import { lensLine } from '../../monitoring/assess.shared.js'
 import { priceStructureText, entryLevelText, entryLevelReply, breakWords, thesisTurnFacts, unmirrorFacts, targetWords, unfinishedWeek } from '../../services/tools/thesisStructure.tools.js'
@@ -30,7 +30,7 @@ test('the seed section: every hand-off — the Hotlist, the book, Argus — open
         { ticker: 'MTG', recommended_mode: 'smc' },
     ]) {
         const text = _buildSeedSection(seed)
-        assert.match(text, /building it RISK-BASED \(the `thesis` lens\)/)
+        assert.match(text, /start with the rules \(§ The thesis lens, the opening\), because you are building it RISK-BASED \(the `thesis` lens\)/)
         assert.doesNotMatch(text, /Argus recommends|smc/)
     }
 })
@@ -39,7 +39,7 @@ test('the lens prompt: a risk-based build opens with the rules, once, and only t
     const p = readFileSync(new URL('../../prompts/mentor_system_prompt.md', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
     const lens = p.slice(p.indexOf('## The thesis lens'), p.indexOf('## Size comes from the user'))
     assert.match(lens, /the\nreply STARTS with these lines/)
-    for (const rule of ['Stop:', 'Target:', 'Your limits:', 'Entry:', 'If it leaves:']) assert.ok(lens.includes(`- **${rule}**`), rule)
+    for (const rule of ['Stop:', 'Target:', 'Your limits:', 'Entry:', 'If it leaves before filling:']) assert.ok(lens.includes(`- **${rule}**`), rule)
     assert.match(lens, /Never on a later\nturn, on a redraw or an edit of a saved setup, or on the user's own setup/)
     assert.doesNotMatch(p, /Say in one line that you are building it risk-based/)
     assert.match(_buildModeSection('user'), /with the rules of the lens if this build has not said them/)
@@ -662,4 +662,40 @@ test('the prompt: a distance is dollars and percent, a measured move at the high
     assert.match(p, /A distance is always said in dollars AND percent/)
     assert.match(p, /At the highs, with no price over them worth selling at, the target is a measured move/)
     assert.match(p, /with the stop and the target on the worksheet by that turn/)
+})
+
+// ─── The code review of 2026-11-05 ────────────────────────────────────────────
+
+test('a short\'s measured move under zero is no candidate, and no price reaches the plan', async () => {
+    const { structureFacts, mirror } = await import('../../services/swingStructure.service.js')
+    const rows = []; let p = 100
+    const push = (to, n) => { const st = (to - p) / n; for (let k = 0; k < n; k++) { p += st; rows.push({ time: 1700000000 + rows.length * 86400, date: `d${rows.length}`, open: p - st / 2, high: p + 0.4, low: p - 0.4, close: p, volume: 1e6 }) } }
+    push(100, 60); push(60, 30); push(70, 10); push(25, 35)
+    const f = unmirrorFacts(structureFacts(mirror(rows)))
+    assert.equal(f.candidates.target, null)
+    const facts = { target_kind: 'measured_move', target: -21.2, asset: 'X', side: 'short', timeframe: 'day' }
+    const plan = { trade_mode: 'thesis', asset: 'X', direction: 'short', type: 'swing', scenarios: [{ id: 's1', entry_legs: [{ price: 26 }], stop_legs: [{ price: 30 }], target_legs: [{ price: 15, anchor: 'measured_move' }] }] }
+    assert.equal(_snapMeasuredTarget(plan, facts), null)
+    assert.equal(plan.scenarios[0].target_legs[0].price, 15)
+    assert.equal(_buildTargetSection(facts, {}), '')
+})
+
+test('a price the user typed stays, however they wrote it: 354.50 is 354.5', () => {
+    const facts = { target_kind: 'measured_move', target: 357.28, asset: 'AAPL', side: 'long', timeframe: 'day' }
+    const plan = (price) => ({ trade_mode: 'thesis', asset: 'AAPL', direction: 'long', type: 'swing', scenarios: [{ id: 's1', entry_legs: [{ price: 340 }], stop_legs: [{ price: 330 }], target_legs: [{ price, anchor: 'measured_move' }] }] })
+    for (const [price, text] of [[354.5, 'make the target 354.50'], [354.5, 'target $354.5.'], [355, 'target 355.00'], [1200, 'target 1,200']]) {
+        const p = plan(price)
+        assert.equal(_snapMeasuredTarget(p, facts, text), null, text)
+        assert.equal(p.scenarios[0].target_legs[0].price, price)
+    }
+    for (const [price, text] of [[400, 'somewhere near 4000'], [354.5, 'the 354.55 area']]) assert.ok(_snapMeasuredTarget(plan(price), facts, text), text)
+})
+
+test('the waiting remark sizes each setup on its own name\'s multiplier', () => {
+    const name = (asset, multiplier) => ({ asset, claimed: {}, settled: { size: { unit: 'risk_cash', value: 100, multiplier } } })
+    const build = { names: [name('SPY', 1), name('ES', 50)], active: 'SPY' }
+    const leg = { entry_legs: [{ price: 100, quantity: 1 }], stop_legs: [{ price: 90 }], target_legs: [{ price: 120, quantity: 1 }], quantity: 1 }
+    const doc = (asset) => ({ id: asset, asset, mainAccountId: 'a', direction: 'long', type: 'swing', ...leg, scenarios: [{ id: 's1', ...leg }], chat_state: { draft: { build } } })
+    assert.equal(_waitingSetups([doc('ES')], { accountId: 'a' }).notional, 5000)
+    assert.equal(_waitingSetups([doc('SPY')], { accountId: 'a' }).notional, 100)
 })

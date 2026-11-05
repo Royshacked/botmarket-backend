@@ -14,6 +14,9 @@ const _etDay = (sec) => new Date(sec * 1000).toLocaleDateString('en-CA', { timeZ
 const _fixedCents = (x) => Math.round(x * 100) / 100
 
 /** What a short's mirrored facts mean upside down: every price back to positive, high ↔ low. Pure. */
+// A measured move down can land under zero (a stock that fell by more than half): no price, so no candidate (code review).
+const _priced = (price) => (price > 0 ? price : null)
+
 export function unmirrorFacts(f) {
     if (!f) return f
     const p = (x) => (x == null ? x : -x)
@@ -23,12 +26,12 @@ export function unmirrorFacts(f) {
         swings: f.swings.map(pt), last_swing_low: pt(f.last_swing_high), last_swing_high: pt(f.last_swing_low),
         control: f.control === 'buyers' ? 'sellers' : f.control === 'sellers' ? 'buyers' : f.control,
         fall: f.fall ? { rise_from: { ...f.fall.from, price: p(f.fall.from.price) }, high: { ...f.fall.low, price: p(f.fall.low.price) }, atrs: f.fall.atrs } : null,
-        candidates: { ...f.candidates, stop: p(f.candidates.stop), deep_stop: p(f.candidates.deep_stop), target: p(f.candidates.target), range_high: p(f.candidates.range_high) },
+        candidates: { ...f.candidates, stop: p(f.candidates.stop), deep_stop: p(f.candidates.deep_stop), target: _priced(p(f.candidates.target)), range_high: p(f.candidates.range_high) },
         heavy_days: f.heavy_days.map(d => ({ ...d, close: p(d.close), change_pct: -d.change_pct })),
         break_candidate: f.break_candidate ? {
             swing_to_break: pt(f.break_candidate.swing_to_break), lower_swing: pt(f.break_candidate.higher_swing),
             rise_high: { ...f.break_candidate.fall_low, price: p(f.break_candidate.fall_low.price) }, stop: p(f.break_candidate.stop),
-            stop_is: f.break_candidate.stop_is, floor: p(f.break_candidate.floor), target: p(f.break_candidate.target), context: f.break_candidate.context,
+            stop_is: f.break_candidate.stop_is, floor: p(f.break_candidate.floor), target: _priced(p(f.break_candidate.target)), context: f.break_candidate.context,
         } : f.break_candidate,
     }
 }

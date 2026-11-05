@@ -11,6 +11,7 @@ import { emptyBuild, upsertName, activeName, putName, reopenForRedraw, stageOf, 
 // asked whether the direction still stood. A setup Talos says ran away or broke now reopens with its levels open, and
 // the turn is told what it is for.
 
+const CARD = { redraw: true }
 const SIZE = { unit: 'risk_cash', value: 200 }
 const VALS = { direction: 'long', horizon: 'swing', lens: 'thesis', spans: ['t1'], entries: ['t1:o1'], size: SIZE, summary: true }
 const finished = () => {
@@ -46,7 +47,7 @@ test('redrawOf: what Talos latched — a miss, a break (which outranks it), or n
 })
 
 test('the reopened state: a missed setup comes back at SPANS with the marker; an ordinary edit is untouched', () => {
-    const state = mentorStateFromEntity(SETUP(ran))
+    const state = mentorStateFromEntity(SETUP(ran), CARD)
     assert.equal(stageOf(activeName(normalizeBuild(state.draft.build))), 'spans')
     assert.equal(state.redraw.event, 'ran_away')
     const plain = mentorStateFromEntity(SETUP())
@@ -61,6 +62,7 @@ test('the re-draw section: a miss redrawn with the lens on today\'s chart, a bre
     assert.match(miss, /it RAN AWAY without filling \(Pullback to the level\) — price ran to 214\.6\. The read was not wrong/)
     assert.match(miss, /The span and the entries are reopened for it; the direction, the horizon and their size stand/)
     assert.match(miss, /CHECK THE WHOLE TRADE AGAIN/)
+    assert.match(miss, /Do not ask them whether the direction and the horizon still stand/)
     assert.match(miss, /the entry, the stop, every target, the reward to risk and the validity range, in every scenario/)
     assert.match(miss, /the target read again/)
     assert.match(miss, /call close_setup when they say yes/)
@@ -76,7 +78,7 @@ test('the re-draw section: a miss redrawn with the lens on today\'s chart, a bre
 })
 
 test('the turn carries the re-draw section from the reopened state', () => {
-    const state = mentorStateFromEntity(SETUP(ran))
+    const state = mentorStateFromEntity(SETUP(ran), CARD)
     const ctx = _buildTurnContext({ ...state, build: normalizeBuild(state.draft.build) })
     assert.match(ctx, /THE RE-DRAW — the user opened this setup from Talos's card/)
     assert.doesNotMatch(_buildTurnContext(mentorStateFromEntity(SETUP())), /THE RE-DRAW/)
@@ -87,7 +89,7 @@ test('the turn carries the re-draw section from the reopened state', () => {
 test('CR: only BEFORE entry — a live position, a hit or a closed setup is never told it ran away', () => {
     for (const status of ['long', 'short', 'hit', 'closed']) assert.equal(redrawOf(SETUP({ ...ran, status })), null, status)
     for (const status of ['waiting', 'looking', 'resting']) assert.equal(redrawOf(SETUP({ ...ran, status }))?.event, 'ran_away', status)
-    const live = mentorStateFromEntity(SETUP({ ...ran, status: 'long' }))
+    const live = mentorStateFromEntity(SETUP({ ...ran, status: 'long' }), CARD)
     assert.equal(stageOf(activeName(normalizeBuild(live.draft.build))), null, 'its ledger untouched')
     assert.equal('redraw' in live, false)
 })
@@ -101,7 +103,7 @@ test('CR: a miss the user said to let go is no re-draw — nor is its roll-up', 
 })
 
 test('CR: the turn is told the entries reopened only when they were; every old scenario is judged again', () => {
-    assert.equal(mentorStateFromEntity(SETUP(ran)).redraw.reopened, true)
+    assert.equal(mentorStateFromEntity(SETUP(ran), CARD).redraw.reopened, true)
     const old = mentorStateFromEntity({ id: 'x', asset: 'GNRC', status: 'looking', ...ran, scenarios: [{ id: 's1' }] })
     assert.equal(old.redraw.reopened, false)
     assert.doesNotMatch(_buildRedrawSection(old.redraw, old.draft), /are reopened for it/)
@@ -174,7 +176,7 @@ const redrawTurn = (state, reply) => mentorAgentService.chatStream({
 })
 
 test('the reopened draft has no old gates and no "go all the way"; the plan and the user\'s size stay', () => {
-    const { draft } = mentorStateFromEntity(WAIVED())
+    const { draft } = mentorStateFromEntity(WAIVED(), CARD)
     assert.equal('spans' in draft, false)
     assert.equal('entries' in draft, false)
     const build = normalizeBuild(draft.build)
@@ -187,7 +189,7 @@ test('the reopened draft has no old gates and no "go all the way"; the plan and 
 })
 
 test('a redraw turn that draws nothing leaves the build open, on a build that once said "go all the way"', async () => {
-    const state = mentorStateFromEntity(WAIVED())
+    const state = mentorStateFromEntity(WAIVED(), CARD)
     const out = await redrawTurn(state, 'Do the direction and the horizon still stand?')
     const name = activeName(normalizeBuild(mentorNextState(state, out).draft.build))
     assert.equal(stageOf(name), 'spans')
@@ -195,10 +197,72 @@ test('a redraw turn that draws nothing leaves the build open, on a build that on
 })
 
 test('new gates on a redraw wait for an answer: they are claimed, not settled by the old "go all the way"', async () => {
-    const state = mentorStateFromEntity(WAIVED())
+    const state = mentorStateFromEntity(WAIVED(), CARD)
     const out = await redrawTurn(state, 'Here is the new span.\n<spans>{"candidates":[{"id":"t2","label":"the new pullback","from":"here","to":"the new high"}]}</spans>')
     const name = activeName(normalizeBuild(mentorNextState(state, out).draft.build))
     assert.equal(stageOf(name), 'spans')
     assert.deepEqual(name.claimed.spans?.value, ['t2'])
+})
+
+// ─── The pencil is not the card (Roy, 2026-11-05) ─────────────────────────────
+
+test('the pencil on a flagged setup opens it as it is, with the redraw offered', () => {
+    const state = mentorStateFromEntity(WAIVED())
+    const build = normalizeBuild(state.draft.build)
+    assert.equal(stageOf(activeName(build)), null, 'nothing reopened')
+    assert.equal(build.waiver, true)
+    assert.ok(state.draft.spans)
+    assert.equal(state.redraw.offer, true)
+    const text = _buildRedrawSection(state.redraw, state.draft)
+    assert.match(text, /TALOS FLAGGED THIS SETUP/)
+    assert.match(text, /nothing is reopened/)
+    assert.match(text, /"unsettle":"spans","waiver":false/)
+    assert.doesNotMatch(text, /THE RE-DRAW/)
+})
+
+test('the offer stands until they take it; taking it reopens the trade and it stays open', async () => {
+    const state = mentorStateFromEntity(WAIVED())
+    const stay = await redrawTurn(state, 'Talos flagged it. Want a redraw?')
+    const kept = mentorNextState(state, stay)
+    assert.equal(kept.redraw?.offer, true)
+    const took = await redrawTurn(kept, 'Redrawing.<build>{"unsettle":"spans","waiver":false}</build>')
+    const open = mentorNextState(kept, took)
+    assert.equal(open.redraw, undefined)
+    assert.equal(stageOf(activeName(normalizeBuild(open.draft.build))), 'spans')
+    const after = await redrawTurn(open, 'What limit do you want?')
+    assert.equal(stageOf(activeName(normalizeBuild(mentorNextState(open, after).draft.build))), 'spans', 'the old gates do not settle it again')
+})
+
+test('close on the pencil\'s first turn is the user\'s own answer; the card\'s opening turn still closes nothing', async () => {
+    let calls = 0
+    const closeSetup = async () => { calls++; return { ok: true } }
+    const say = {}
+    const pencil = { ...mentorStateFromEntity(SETUP(ran)), editing: { kind: 'setup', entityId: 'setup_GNRC_1' } }
+    await closeTurn(pencil, say, closeSetup)
+    assert.match(say.report, /^Closed GNRC/)
+    assert.equal(calls, 1)
+    const card = {}
+    await closeTurn({ ...mentorStateFromEntity(SETUP(ran), CARD), editing: { kind: 'setup', entityId: 'setup_GNRC_1' } }, card, closeSetup)
+    assert.match(card.report, /has not answered yet/)
+    assert.equal(calls, 1)
+})
+
+test('close refuses a saved setup the talk has left, and names what it closed', async () => {
+    let calls = 0
+    const closeSetup = async () => { calls++; return { ok: true } }
+    const say = {}
+    await closeTurn({ draft: { asset: 'AMD' }, coverage: [], editing: { kind: 'setup', entityId: 's', asset: 'GNRC' } }, say, closeSetup)
+    assert.match(say.report, /the saved setup open here is GNRC, and the talk has moved to AMD/)
+    assert.equal(calls, 0)
+    const out = await closeTurn({ draft: { asset: 'gnrc' }, coverage: [], editing: { kind: 'setup', entityId: 's', asset: 'GNRC' } }, say, closeSetup)
+    assert.equal(out.closedSetup.asset, 'GNRC')
+})
+
+test('a scenario that broke outranks Talos\'s stale map; stale still reads without one', () => {
+    const fired = { monitor_state: { scenarios: { s1: { invalidation_status: 'fired', invalidation_reason: 'closed under the stop' } } } }
+    const out = redrawOf(SETUP({ ...fired, invalidation_edge: 'time', invalidation_reason: 'the map moved' }))
+    assert.equal(out.event, 'broken')
+    assert.deepEqual(out.scenarios, ['Pullback to the level'])
+    assert.equal(redrawOf(SETUP({ invalidation_edge: 'time', invalidation_reason: 'the map moved' })).event, 'stale')
 })
 

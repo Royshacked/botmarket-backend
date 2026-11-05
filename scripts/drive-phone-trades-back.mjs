@@ -1,3 +1,4 @@
+/* global document, window -- page.evaluate bodies run in the browser */
 // BACK FROM A SETUP GOES TO THE LIST (Roy, 2026-11-05: on a phone, back from a setup opened in Your trades went to the chat). A phone
 // viewport in a browser: the menu, Your trades, a row, its page, then back, by the gesture and by the page's own button.
 // No model turn, one sign-in. The setup is removed. Against the Vite dev server (:5173); axl_dev only.

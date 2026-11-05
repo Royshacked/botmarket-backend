@@ -184,9 +184,9 @@ export function makeEntityRepo({ coll = _defaultColl, journal = appendJournal } 
         },
 
         /** Unconditional $set patch by id. */
-        async patch(id, fields) {
+        async patch(id, fields, guard = {}) {
             const c = await coll()
-            return c.updateOne({ id }, { $set: fields })
+            return c.updateOne({ id, ...guard }, { $set: fields })
         },
 
         /**

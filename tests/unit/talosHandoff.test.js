@@ -366,11 +366,14 @@ test('close: a setup with nothing at the broker closes; a resting or filled one,
     assert.equal(res.ok, true)
     assert.equal(waiting.updates[0].$set.status, 'closed')
     assert.equal(waiting.updates[0].$set.closedReason, 'invalidated')
-    for (const status of ['hit', 'long', 'closed']) {
+    for (const status of ['hit', 'long']) {
         const db = fakeDb(hitLimitSetup({ status }))
         assert.equal((await closeSetup('setup_NVDA_1', 'u1', deps(db))).reason, 'not_closable', status)
         assert.equal(db.updates.length, 0)
     }
+    const twice = fakeDb(hitLimitSetup({ status: 'closed' }))
+    assert.deepEqual(await closeSetup('setup_NVDA_1', 'u1', deps(twice)), { ok: true, closed: true, already: true })
+    assert.equal(twice.updates.length, 0)
     const other = fakeDb(hitLimitSetup({ status: 'looking' }))
     assert.equal((await closeSetup('setup_NVDA_1', 'u2', deps(other))).ok, false)
     assert.equal(other.updates.length, 0)

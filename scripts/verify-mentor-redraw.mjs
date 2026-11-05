@@ -24,7 +24,7 @@ if (!doc) { console.log('no saved setup with a stored build in this database'); 
 console.log('setup', doc.id, doc.asset, JSON.stringify(doc.scenarios?.map(s => [s.entry_legs?.[0]?.price, s.stop_legs?.[0]?.price, s.target_legs?.map(l => l.price)])))
 
 const latched = { ...doc, invalidation_status: 'drifting', invalidation_edge: 'away', invalidation_reason: 'price ran past the away edge without filling', monitor_state: { ...doc.monitor_state, scenarios: {} } }
-let state = { ...mentorStateFromEntity(latched), editing: { kind: 'setup', entityId: doc.id } }
+let state = { ...mentorStateFromEntity(latched, { redraw: true }), editing: { kind: 'setup', entityId: doc.id } }
 console.log('redraw', JSON.stringify(state.redraw))
 
 const ACCOUNTS = [{ id: doc.mainAccountId, broker: 'paper', isLive: false, currency: 'USD', balance: 100000, equity: 100000, freeMargin: 100000 }]
@@ -59,6 +59,19 @@ const second = await turn('No, I do not want this one any more. Close the setup.
 check('"close it" reached the close', closes.length === 1 && closes[0].id === doc.id, JSON.stringify(closes))
 check('the turn reports it closed', second.res.closedSetup?.id === doc.id)
 check('nothing is left on the table', mentorNextState({}, second.res) === null)
+// The pencil on the same setup: it opens as it is, and Mentor offers the redraw (Roy, 2026-11-05).
+state = { ...mentorStateFromEntity(latched), editing: { kind: 'setup', entityId: doc.id } }
+history.length = 0
+check('the pencil reopens nothing', state.redraw?.offer === true && stageOf(activeName(normalizeBuild(state.draft.build))) === null)
+const pencil = await turn('How long does this setup still wait for an entry?')
+check('Mentor offers the redraw', /re-?draw/i.test(pencil.res.reply))
+const stayed = activeName(normalizeBuild(state.draft?.build))
+check('the question did not reopen the trade', stageOf(stayed) === null, `stage ${stageOf(stayed)}`)
+const taken = await turn('Yes, redraw it.')
+const reopened = activeName(normalizeBuild(state.draft?.build))
+check('taking the offer reopens it', 'entries' in (reopened?.settled ?? {}) === false, `stage ${stageOf(reopened)}, tools ${taken.tools.join(', ')}`)
+check('a redraw reads the chart', taken.tools.some(t => /get_price_structure|get_candles|get_chart/.test(String(t))))
+check('it redraws on that turn: the stop and the target answered', /stop/i.test(taken.res.reply) && /target/i.test(taken.res.reply), taken.res.reply.slice(0, 120))
 const failed = results.filter(x => !x).length
 console.log(`\n${results.length - failed}/${results.length}`)
 process.exit(failed ? 1 : 0)

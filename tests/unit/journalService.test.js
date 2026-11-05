@@ -91,3 +91,11 @@ test('makePersist: $set on the entity, then the journal row — and no row when 
     await persist('s1', { 'monitor_state.memo': 'm' }, null, db)
     assert.equal(db.calls.length, 1, 'a quiet write is one write')
 })
+
+test('makePersist ifStatus: a document that moved on is left alone, and nothing is journalled', async () => {
+    const calls = []
+    const db = { collection: (name) => ({ updateOne: async (...a) => { calls.push(['updateOne', name, ...a]); return { matchedCount: 0 } }, insertOne: async () => { calls.push(['insertOne']) } }) }
+    const persist = makePersist({ collection: 'entities', kind: 'setup', log: '[t]' })
+    assert.deepEqual(await persist('s1', { status: 'hit' }, { at: 't' }, db, { ifStatus: 'looking' }), { matched: false })
+    assert.deepEqual(calls, [['updateOne', 'entities', { id: 's1', kind: 'setup', status: 'looking' }, { $set: { status: 'hit' } }]])
+})

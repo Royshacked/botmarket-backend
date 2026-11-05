@@ -28,6 +28,8 @@ test('a citation marker goes, whole or bare, and the sentence around it closes u
     assert.equal(dropDebris(`It fell ${MARK} on the news.`), 'It fell on the news.')
     assert.equal(dropDebris('It fell citeturn0news1turn2search3.'), 'It fell.')
     assert.equal(dropDebris('It fell \ue202 hard.'), 'It fell hard.')
+    assert.equal(dropDebris('closed at $349.51citeturn0finance0 today'), 'closed at $349.51 today')
+    assert.equal(dropDebris(`Price (${MARK}) rose`), 'Price rose')
     for (const keep of ['Cite the filing.', 'They cite turn 0 of the plan.', 'Excite turn1a.'])
         assert.equal(dropDebris(keep), keep)
 })

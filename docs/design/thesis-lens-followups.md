@@ -351,3 +351,18 @@ judged on free cash (`_mainAvailable`). Setups not yet filled (waiting, looking,
 any figure, because nothing is committed until a fill. `_waitingSetups` adds them up, each at its largest scenario because
 scenarios are rivals, leaving out the setup being revised, and `_waitingLine` hands the model one remark in `size_position`'s
 report and THE MONEY section. A remark, never a block. `scripts/verify-mentor-waiting.mjs` runs it with a real model.
+
+## Review of the 2026-11-05 work
+
+QA passed: `scripts/verify-mentor-close.mjs` writes a real close through a real session turn on axl_dev, and
+`sessionTurn.test.js` covers the seal after a finishing turn. The review's findings were fixed the same day: a negative
+measured move is no candidate, and Generate refuses a stop or target at or under zero; closed is terminal on an Update, a
+second close answers closed, and a close followed by Stop or a failed round still finishes the desk; the close only writes
+from waiting or looking, and Talos's entry writes only land on the status they read (`persist`'s `ifStatus`), so a read in
+flight posts no card over a close; the pencil opens a flagged setup as it is and Mentor offers the redraw (`redraw.offer`),
+while the card alone reopens it (`opts.redraw`).
+
+Still open, on the phone's history: Esc on a setup page closes the list under it, and browser Forward closes the list
+(`useBackGesture` reads any entry without its key as its own being popped). Re-draw from a page over a list shows the list
+during the wait, with a small race if a row is tapped then. A row panel over a list still drops the list, not reachable today.
+Closing an edited setup drops any other unsaved name in the same build.

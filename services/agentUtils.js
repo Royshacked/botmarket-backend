@@ -626,7 +626,7 @@ const DEBRIS_LINE = /^[ \t]*\((?:no )?final(?: answer)?\)[ \t]*$/gim
 // spaces go with it, so a reply that opened with one starts on its first word.
 // And a web citation in the model's own markup (2026-11-05): "\ue200cite\ue202turn0finance0\ue201", which reads on screen as
 // "citeturn0finance0". The whole marker, a bare one that lost its private-use characters, or one of those left alone.
-const DEBRIS_TOKEN = /[ \t]*(?:<[\u0080-￿]{1,4}>|<\|[a-z_]{1,32}\|>|\ue200[^\ue201\n]{0,200}\ue201|\bcite(?:turn\d+[a-z]+\d+)+|[\ue200-\ue206])[ \t]*/g
+const DEBRIS_TOKEN = /[ \t]*(?:<[\u0080-￿]{1,4}>|<\|[a-z_]{1,32}\|>|\(\s*(?:\ue200[^\ue201\n]{0,200}\ue201|cite(?:turn\d+[a-z]+\d+)+)\s*\)|\ue200[^\ue201\n]{0,200}\ue201|(?<![A-Za-z])cite(?:turn\d+[a-z]+\d+)+|[\ue200-\ue206])[ \t]*/g
 
 /** The stray tokens and marker lines out, then a paragraph identical to the one before it dropped. Prose is otherwise untouched. */
 export function dropDebris(text) {

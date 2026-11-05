@@ -341,3 +341,21 @@ test('disarming from `looking` touches no broker — nothing was ever placed', a
         assert.equal(cancelled.length, 0)
     } finally { restore() }
 })
+
+test('a stop or a target at or under zero is refused: no such order exists', () => {
+    for (const price of [0, -21.2]) {
+        const s = normalizeSetup(DRAFT)
+        s.scenarios[0].target_legs[0].price = price
+        assert.equal(validateSetup(s, 'ctrader', ACCTS).reason, 'invalid_leg', `target ${price}`)
+    }
+})
+
+test('Update on a closed setup is refused: closed stays closed', async () => {
+    const f = fakeColl({ ...HIT_LIMIT, status: 'closed' })
+    const restore = _setDeps({ coll: f.coll })
+    try {
+        const res = await setupService.generateSetup(DRAFT, { userId: 'u1', accounts: ACCTS, mainAccountId: 'a1', updateId: HIT_LIMIT.id })
+        assert.equal(res.reason, 'closed_is_terminal')
+        assert.equal(f.calls.some(c => c[0] === 'updateOne'), false)
+    } finally { restore() }
+})

@@ -1991,3 +1991,15 @@ test('another lens keeps what was authored', () => {
     assert.equal(breakView(s, sc).validity.lower, 145)
     assert.equal(breachPatch(s, sc, 'adverse', 144, T).card, 'invalidated_fyi')
 })
+
+test('a read that finds the setup closed under it writes no status and posts no card (code review, 2026-11-05)', async () => {
+    let carded = false, opts = null
+    const res = await _checkSetup(LIVE, T, stubDeps({
+        assess: async () => ({ verdict: 'enter', read: 'Now.', leg_id: LIVE.entry_legs?.[0]?.id ?? LIVE.scenarios?.[0]?.entry_legs?.[0]?.id }),
+        persist: async (_id, $set, _row, _db, o) => { if ($set.status) { opts = o; return { matched: false } } },
+        onCard: async () => { carded = true },
+    }))
+    assert.equal(res.superseded, true)
+    assert.equal(carded, false)
+    assert.deepEqual(opts, { ifStatus: LIVE.status })
+})

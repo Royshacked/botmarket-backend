@@ -161,7 +161,7 @@ export function validateSetup(setup, broker, accounts) {
             if (!Number.isFinite(legPrice(z)) && !(typeof z?.trigger === 'string' && z.trigger.trim())) return { ok: false, reason: 'invalid_leg' }
         }
         for (const z of [...(sc.stop_legs ?? []), ...(sc.target_legs ?? [])]) {
-            if (!Number.isFinite(legPrice(z))) return { ok: false, reason: 'invalid_leg' }
+            if (!(legPrice(z) > 0)) return { ok: false, reason: 'invalid_leg' }
         }
     }
     return { ok: true }
@@ -320,6 +320,8 @@ async function _update(id, bound, userId) {
     const found = await crud.getOwned(id, userId)
     if (!found.ok) return found
     const cur = found.doc
+    // Closed stays closed, as in patchSetup: this would have put it back to 'waiting' (code review).
+    if (cur.status === 'closed') return { ok: false, reason: 'closed_is_terminal' }
 
     const inPosition = POSITION_STATUSES.has(cur.status)
     const $set = {}

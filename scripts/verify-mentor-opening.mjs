@@ -17,9 +17,9 @@ const { getDb } = await import('../providers/mongodb.provider.js')
 const results = []
 const check = (name, ok, detail = '') => { results.push(!!ok); console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? ` — ${detail}` : ''}`) }
 
-const RULES = [/\*\*Stop:?\*\*/, /\*\*Target:?\*\*/, /\*\*Your limits:?\*\*/, /\*\*Entry:?\*\*/, /\*\*If it leaves:?\*\*/]
+const RULES = [/\*\*Stop:?\*\*/, /\*\*Target:?\*\*/, /\*\*Your limits:?\*\*/, /\*\*Entry:?\*\*/, /\*\*If it leaves before filling:?\*\*/]
 const told = (reply) => RULES.every(r => r.test(reply))
-const anyRule = (reply) => /I'm building this risk-based/i.test(reply) || /\*\*If it leaves:?\*\*/.test(reply)
+const anyRule = (reply) => /I'm building this risk-based/i.test(reply) || /\*\*If it leaves before filling:?\*\*/.test(reply)
 
 const db = await getDb()
 const saved = await db.collection('entities').findOne({ kind: 'setup', status: { $in: ['waiting', 'looking'] }, 'chat_state.draft.build': { $exists: true } }, { projection: { _id: 0 } })
@@ -61,7 +61,7 @@ check("the user's own setup does not get them", !anyRule(theirs.reply))
 
 if (saved) {
     const latched = { ...saved, invalidation_status: 'drifting', invalidation_edge: 'away', invalidation_reason: 'price ran past the away edge without filling', monitor_state: { ...saved.monitor_state, scenarios: {} } }
-    const redraw = conversation({ ...mentorStateFromEntity(latched), editing: { kind: 'setup', entityId: saved.id } })
+    const redraw = conversation({ ...mentorStateFromEntity(latched, { redraw: true }), editing: { kind: 'setup', entityId: saved.id } })
     const again = await redraw(`Talos says my ${saved.asset} setup ran without filling. The read wasn't wrong; the entry never came. Re-draw it on today's chart if there is still a trade, and say so plainly if there is not.`)
     check('a redraw does not get them', !anyRule(again.reply))
 } else console.log('SKIP  a redraw: no saved setup with a stored build')

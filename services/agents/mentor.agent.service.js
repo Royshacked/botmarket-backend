@@ -134,6 +134,7 @@ async function chatStream({
     _thesisFacts = thesisTurnFacts,   // the chart's stops, normal move and break scenario, read for a thesis trade at entries
     _listSetups = setupService.listSetups,   // the setups on this account that have not filled yet
     _closeSetup = setupCommit.closeSetup,    // a saved setup the user decided to close
+    onFinished = null,                       // the item is finished, whatever becomes of the rest of this turn
 }) {
 
     // `consult` is deliberately absent: runAgentStream builds it from the tool declaration, which is
@@ -173,16 +174,22 @@ async function chatStream({
         [CLOSE_TOOL]: async () => {
             const editing = chatState?.editing?.kind === 'setup' ? chatState.editing.entityId : null
             if (!editing) return 'Not closed: no saved setup is open here, so there is nothing to close.'
-            // The turn a card opens on is the card's words, not an answer from the user (redrawAsk).
-            if (chatState?.redraw?.event) return 'Not closed: the user has not answered yet. Give your read and ask whether to close it; it closes on their yes.'
+            // The turn a card opens on is the card's words, not an answer from the user (redrawAsk). A pencil's first turn is theirs.
+            if (chatState?.redraw?.event && !chatState.redraw.offer) return 'Not closed: the user has not answered yet. Give your read and ask whether to close it; it closes on their yes.'
+            // The tool takes no name, so it must not close one the talk has left (code review).
+            const saved = chatState.editing.asset ?? null, talking = chatState?.draft?.asset ?? null
+            if (saved && talking && String(saved).toUpperCase() !== String(talking).toUpperCase()) {
+                return `Not closed: the saved setup open here is ${saved}, and the talk has moved to ${talking}. Ask them which one they mean.`
+            }
             const out = await _closeSetup(editing, userId)
             if (!out?.ok) {
                 return out?.reason === 'not_closable'
                     ? 'Not closed: an order is working or the position is filled, and those have their own way out. Tell the user the setup stays open.'
                     : `Not closed (${out?.reason ?? 'failed'}). Tell the user the setup stays open.`
             }
-            closedSetup = { id: String(editing), asset: chatState?.draft?.asset ?? null }
-            return 'Closed: the status is now closed and Talos has stopped watching it. Say so in one line, and write no worksheet.'
+            closedSetup = { id: String(editing), asset: saved ?? talking }
+            onFinished?.({ closedSetup })
+            return `Closed${closedSetup.asset ? ` ${closedSetup.asset}` : ''}: the status is now closed and Talos has stopped watching it. Say so in one line, and write no worksheet.`
         },
         [SIZE_TOOL]: async (args = {}) => {
             const size = sanitizeBuildOps({ size: args })?.size
@@ -235,7 +242,7 @@ async function chatStream({
         _readThesisFacts(turnState, _thesisFacts, { signal }),
         turnState?.draft?.summary?.lossCash != null ? readWaiting() : null,
     ])
-    const waitingLine = waiting ? _waitingLine(waiting, _setupCommitment(turnState.draft, _sizeMultiplier(turnState.draft.build)), available) : ''
+    const waitingLine = waiting ? _waitingLine(waiting, _setupCommitment(turnState.draft, _sizeMultiplier(turnState.draft.build, turnState.draft.asset)), available) : ''
     const tools = kitFor(mode, MENTOR_TOOLS, TRADING_TOOLS.length)
     // The kit is enforced on the HANDLERS too: a call to an undeclared tool comes back "no handler" instead of running.
     const kitHandlers = handlersFor(mode, toolHandlers)
@@ -432,7 +439,10 @@ async function chatStream({
         const measured = _snapMeasuredTarget(carrier, thesisFacts, messages?.findLast?.(m => m?.role === 'user')?.content)
         if (measured) {
             carrier.rr = computeRR(carrier) ?? carrier.rr
-            build.refused = [...build.refused, { field: 'target', reason: `the measured move is ${measured.to}, the server's number, not ${measured.from}. The worksheet holds ${measured.to}: use it from here. A different price takes another anchor.` }]
+            const entered = (carrier.scenarios ?? []).some(sc => sc?.arm_close == null && sc?.entry_legs?.length)
+            // The entry level comes from the target and their minimum reward to risk, so it may no longer clear it (code review).
+            const redo = entered ? ' Any entry drawn on the old target is stale, and may no longer clear their minimum reward to risk: call get_entry_level with this target and redraw the entry leg before you quote a level or an R:R.' : ''
+            build.refused = [...build.refused, { field: 'target', reason: `the measured move is ${measured.to}, the server's number, not ${measured.from}. The worksheet holds ${measured.to}: use it from here. A different price takes another anchor.${redo}` }]
             logger.info(LOG, 'measured move set to the calculated target', measured)
         }
         // THE MONEY IS COMPUTED, NEVER NARRATED FROM THE MODEL'S OWN ARITHMETIC. The summary rides
@@ -706,7 +716,7 @@ ${seed.book_facts ? "FROM THE HOUSE'S BOOK" : 'ARGUS HANDED YOU THIS NAME'}: ${s
   The house: ${seed.house}. Say it in one line as the house's view of the INDUSTRY, not of this stock; it settles nothing about the trade.` : '')
         + `
 
-Open on it: say the name, relay the read in a sentence rather than restating it wholesale, and SAY you are building it RISK-BASED (the \`thesis\` lens) and what that means in one line — a hand-off brings no setup of the user's, so this is the default, not a decision: if they bring their own setup, switch (§ Two modes).`
+Open on it: start with the rules (§ The thesis lens, the opening), because you are building it RISK-BASED (the \`thesis\` lens); then say the name and relay the read in a sentence rather than restating it wholesale — a hand-off brings no setup of the user's, so this is the default, not a decision: if they bring their own setup, switch (§ Two modes).`
         + ` Then run the OPENING TURN as for any name. The ticker is settled unless they change it; everything handed over is a CLAIM you validate against your own read, never a settled value — its direction is a lean you test. Everything else is theirs to shape.`
 }
 
@@ -736,7 +746,7 @@ export function _buildTurnContext(chatState, clientTime = null, justSettled = []
     // had already answered.
     return `---
 ${buildTimeSection(clientTime, 'active_from / valid_until')}
-COVERAGE SO FAR: ${covered}. Re-state these in every <coverage> tag plus anything new you read this turn.${draft}${_buildMoneySection(chatState?.draft, waitingLine)}${_buildGenerateSection(chatState, hasAccount)}${_buildModeSection(mode)}${_buildRedrawSection(chatState?.redraw, chatState?.draft)}${_buildTargetSection(thesisFacts, chatState?.draft)}${_buildRiskReadSection(thesisFacts, chatState?.draft, { redraw: !!chatState?.redraw?.event })}${_buildBreakSection(thesisFacts, chatState?.draft, { redraw: !!chatState?.redraw?.event })}${_buildLedgerSection(chatState)}${_buildPressSection(justSettled, chatState, delegated)}`
+COVERAGE SO FAR: ${covered}. Re-state these in every <coverage> tag plus anything new you read this turn.${draft}${_buildMoneySection(chatState?.draft, waitingLine)}${_buildGenerateSection(chatState, hasAccount)}${_buildModeSection(mode)}${_buildRedrawSection(chatState?.redraw, chatState?.draft)}${_buildTargetSection(thesisFacts, chatState?.draft)}${_buildRiskReadSection(thesisFacts, chatState?.draft, { redraw: !!chatState?.redraw?.event && !chatState.redraw.offer })}${_buildBreakSection(thesisFacts, chatState?.draft, { redraw: !!chatState?.redraw?.event && !chatState.redraw.offer })}${_buildLedgerSection(chatState)}${_buildPressSection(justSettled, chatState, delegated)}`
 }
 
 /**
@@ -748,6 +758,11 @@ COVERAGE SO FAR: ${covered}. Re-state these in every <coverage> tag plus anythin
 export function _buildRedrawSection(redraw, draft) {
     if (!redraw?.event) return ''
     const which = redraw.scenarios?.length ? ` (${redraw.scenarios.join(', ')})` : ''
+    // THE PENCIL IS NOT THE CARD (Roy, 2026-11-05): they may have come to change one thing, so nothing is reopened until they say.
+    if (redraw.offer) {
+        const flagged = redraw.event === 'ran_away' ? `it ran away without filling${which}` : redraw.event === 'stale' ? 'the map has drifted' : `its premise broke${which}`
+        return `\n\nTALOS FLAGGED THIS SETUP — ${flagged}${redraw.reason ? `: ${redraw.reason}` : ''}. The user opened it themselves, so do what they asked; nothing is reopened. Say once, in one line, what Talos saw and offer to redraw it. If they take the offer, that is their yes to the direction and the horizon, so do not ask § Coming back's question: put <build>{"unsettle":"spans","waiver":false}</build> on that turn and, on that same turn, check the whole trade again on today's chart: the entry, the stop, every target, the reward to risk and the validity range, old against new. If they say to close it, call ${CLOSE_TOOL}.`
+    }
     const saw = redraw.event === 'ran_away'
         ? `it RAN AWAY without filling${which}${redraw.reason ? ` — ${redraw.reason}` : ''}. The read was not wrong; the entry never came.`
         : redraw.event === 'stale'
@@ -769,7 +784,7 @@ export function _buildRedrawSection(redraw, draft) {
     // THE WHOLE TRADE (Roy, 2026-11-05). The worksheet's "carry every settled field forward" must not read as "keep the old numbers".
     const whole = 'CHECK THE WHOLE TRADE AGAIN, nothing on trust: the numbers on the worksheet above are the OLD plan. Go through the entry, the stop, every target, the reward to risk and the validity range, in every scenario, and say for each what it was and what it is now, in one short table: "stop: was $X, now $Y, because…" or "still $X, the low held". A level that did not change is an answer too.'
     const close = `If the answer is no trade, ask whether to close the setup, and call ${CLOSE_TOOL} when they say yes. Telling them it is gone does not close it.`
-    return `\n\nTHE RE-DRAW — the user opened this setup from Talos's card: ${saw}${where} ${how}${all} ${whole} ${verdict} ${close}`
+    return `\n\nTHE RE-DRAW — the user opened this setup from Talos's card: ${saw}${where} Do not ask them whether the direction and the horizon still stand: answer that yourself from the chart, in one line, and redraw on this turn. ${how}${all} ${whole} ${verdict} ${close}`
 }
 
 /**
@@ -822,7 +837,7 @@ const _lensTimeframe = (d) => (d?.type === 'long_term' || /week/i.test(d?.timefr
  * the tool's answer is not on every turn. The price stays Mentor's to judge. PURE.
  */
 export function _buildTargetSection(facts, draft) {
-    if (facts?.target_kind !== 'measured_move' || !Number.isFinite(facts.target)) return ''
+    if (facts?.target_kind !== 'measured_move' || !(facts.target > 0)) return ''
     // Said until the worksheet has this number, or another price of its own: a measured move of Mentor's own arithmetic
     // is still waiting for this one.
     // The regular scenario's: a lone B has its target from the break candidate, and the server never rewrites that (CR).
@@ -848,7 +863,7 @@ export function _buildTargetSection(facts, draft) {
  * old price → `{ from, to }` of the first change, or null.
  */
 export function _snapMeasuredTarget(plan, facts, userText = '') {
-    if (plan?.trade_mode !== 'thesis' || facts?.target_kind !== 'measured_move' || !Number.isFinite(facts.target)) return null
+    if (plan?.trade_mode !== 'thesis' || facts?.target_kind !== 'measured_move' || !(facts.target > 0)) return null
     if (String(plan.asset ?? '').toUpperCase() !== String(facts.asset ?? '').toUpperCase()) return null
     if ((plan.direction === 'short' ? 'short' : 'long') !== facts.side || _lensTimeframe(plan) !== facts.timeframe) return null
     let changed = null
@@ -875,7 +890,8 @@ export function _snapMeasuredTarget(plan, facts, userText = '') {
 /** Does this text name exactly this price? 400 is not in 4000, and 400.00 is 400. PURE. */
 function _namesPrice(text, price) {
     if (!text || !Number.isFinite(Number(price))) return false
-    return new RegExp(`(?<![\\d.])${String(price).replace('.', '\\.')}(?:\\.0+)?(?![\\d])`).test(text.replace(/,/g, ''))
+    // Compared as numbers: 354.50 is 354.5 (code review).
+    return (String(text).replace(/,/g, '').match(/\d+(?:\.\d+)?/g) ?? []).some(n => Number(n) === Number(price))
 }
 
 /**
@@ -1374,8 +1390,10 @@ export function _mainAvailable(accounts, mainAccountId = null) {
 }
 
 /** The contract multiplier a stored build was sized with; shares have none. */
-const _sizeMultiplier = (build) => {
-    const name = build ? activeName(normalizeBuild(build)) : null
+const _sizeMultiplier = (build, asset) => {
+    // By the setup's own name: Generate all stores one build, with one of its names active, on every setup (code review).
+    const normal = build ? normalizeBuild(build) : null
+    const name = normal ? (asset && nameFor(normal, asset)) || activeName(normal) : null
     const size = name?.settled?.size ?? name?.claimed?.size?.value
     return Number(size?.multiplier) || 1
 }
@@ -1412,7 +1430,7 @@ export function _waitingSetups(docs, { accountId = null, editingId = null } = {}
     const out = { names: [], unpriced: [], notional: 0, risk: 0 }
     for (const doc of rows) {
         out.names.push(doc.asset)
-        const c = _setupCommitment(doc, _sizeMultiplier(doc.chat_state?.draft?.build))
+        const c = _setupCommitment(doc, _sizeMultiplier(doc.chat_state?.draft?.build, doc.asset))
         if (!c.priced) { out.unpriced.push(doc.asset); continue }
         out.notional += c.notional
         out.risk     += c.risk ?? 0

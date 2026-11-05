@@ -786,7 +786,8 @@ async function _applyVerdict(setup, hit, raw, nowMs, reason, price, deps) {
 
         if (isSelfExecuted(setup.broker)) {
             patch.orderState = 'awaiting_manual_fill'
-            await deps.persist(setup.id, patch, row())
+            const wrote = await deps.persist(setup.id, patch, row(), null, { ifStatus: setup.status })
+            if (wrote?.matched === false) return { reason, verdict: raw.verdict, superseded: true }
             try { await deps.onManualCard(executable) }
             catch (err) { logger.warn(LOG, `manual entry card failed for ${setup.id}:`, err.message) }
             return { reason, verdict: raw.verdict, fired: true, manual: true }
@@ -803,7 +804,9 @@ async function _applyVerdict(setup, hit, raw, nowMs, reason, price, deps) {
             logger.info(LOG, `[${setup.id}] level reached with no placeable accounts — alert only`)
         }
 
-        await deps.persist(setup.id, patch, row())
+        // The user may have closed it during this read: then no status and no card (code review).
+        const wrote = await deps.persist(setup.id, patch, row(), null, { ifStatus: setup.status })
+        if (wrote?.matched === false) return { reason, verdict: raw.verdict, superseded: true }
 
         if (patch.orderState !== 'awaiting_market') {
             try { await deps.onCard(executable, assessment) }
@@ -823,7 +826,8 @@ async function _applyVerdict(setup, hit, raw, nowMs, reason, price, deps) {
     // Not an entry. Arm the premise price reached, when it reached one, so the fill stamps against
     // the right leg if a later read does say enter.
     if (armed) {
-        await deps.persist(setup.id, { ...base, status: _nextStatus(raw.verdict), armed_leg_id: armed.id, armed_scenario_id: scenario?.id ?? null }, row())
+        const wrote = await deps.persist(setup.id, { ...base, status: _nextStatus(raw.verdict), armed_leg_id: armed.id, armed_scenario_id: scenario?.id ?? null }, row(), null, { ifStatus: setup.status })
+        if (wrote?.matched === false) return { reason, verdict: raw.verdict, superseded: true }
         return { reason, verdict: raw.verdict, watching: true }
     }
 

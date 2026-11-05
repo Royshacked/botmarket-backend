@@ -1,3 +1,4 @@
+/* global document, window, getComputedStyle -- page.evaluate bodies run in the browser */
 // HOW RISK-BASED WORKS, IN INFO (Roy, 2026-11-05). The pencil on a saved setup puts Mentor in the chat; then the Info column on a
 // desktop, and the Info sheet on a phone in the same session. No model turn, two sign-ins. The setup and the session are
 // removed. Against the Vite dev server (:5173); axl_dev only.

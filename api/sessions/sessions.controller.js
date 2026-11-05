@@ -82,11 +82,11 @@ export const postSessionTurn = handle('postSessionTurn', async (req, res) => {
 // context, a card line, the floor. `busy` (the agent holds other unsealed work) answers 409 with the
 // agent, so the client can ask the user and repeat with `force`.
 export const editInSession = handle('editInSession', async (req, res) => {
-    const { kind, id, name = null, force = false, reviewMode = false } = req.body ?? {}
+    const { kind, id, name = null, force = false, reviewMode = false, redraw = false } = req.body ?? {}
     const found = await lookupForEdit({ kind, id, user: req.user })
     if (!found.ok) return sendReason(res, found.reason, { overrides: EDIT_REASONS, fallback: 404 })
     // Under the session lock, like every turn: it writes the agent's state, a card line and the floor.
-    const out = await withSessionLock(req.params.id, () => sealing.openForEdit({ userId: req.user._id, sessionId: req.params.id, kind, entity: found.doc, name, force: force === true, opts: { reviewMode: reviewMode === true } }))
+    const out = await withSessionLock(req.params.id, () => sealing.openForEdit({ userId: req.user._id, sessionId: req.params.id, kind, entity: found.doc, name, force: force === true, opts: { reviewMode: reviewMode === true, redraw: redraw === true } }))
     if (out.reason) return sendReason(res, out.reason, { overrides: EDIT_REASONS, fallback: 404, extra: out.agent ? { agent: out.agent } : null })
     res.json(out)
 })
