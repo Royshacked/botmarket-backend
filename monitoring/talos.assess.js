@@ -9,6 +9,7 @@ import { assessRouting, candleRows as _candleRows, formatCandles, indicatorsText
 import { _allText, _formatEventRisk } from './assess.shared.js'
 import { _thinkingConfig, advanceToolLoopCache, _finalizeServerTools } from '../providers/anthropic.provider.js'
 import { buildAssessTools, makeAssessToolRunner } from './assessTools.js'
+import { notStarted, unmetArming } from './talos.gates.js'
 import { declaredConditions, pickScenario, scenarioLabel, paceRungs, resolveRung, allowedVerdicts, legPrice } from '../services/setup.schema.js'
 import { config } from '../services/config.js'
 import { isRecording, recordRead } from './talos.recorder.js'
@@ -313,6 +314,9 @@ export function _scenarioBlock(setup, scenario) {
         `SCENARIO ON THE TABLE${scenario?.name ? ` — "${scenario.name}"` : ''}:`,
         legs || '- (no priced legs)',
         tail ? `THIS PREMISE: ${tail}` : null,
+        notStarted(setup, scenario)
+            ? `NOT STARTED: it arms on ${unmetArming(setup, scenario).map(c => `"${c.text}"`).join(', ')}, which has not happened. Its stop is assumed for after that break, so price being past it says nothing: the premise is intact and the answer is wait.`
+            : null,
     ].filter(Boolean).join('\n')
 }
 

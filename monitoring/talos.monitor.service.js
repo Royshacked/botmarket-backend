@@ -11,7 +11,7 @@ import { isPreActive, isExpiring, isPastExpiry, effectiveVerdict, nextStatus, ha
 import { buildOrderPlanForIdea } from '../services/orderPlan.service.js'
 import { notifyManualEntry, entryLegFromIdea } from '../services/manualNotify.service.js'
 import { assessSetup, assessPosition, READINESS_VERDICTS, openingRung } from './talos.assess.js'
-import { scenarioView, scenarioLabel, declaredConditions, projectScenario, pickScenario, stopEdge, entryDrift, targetLevels, addEntryLeg, legQuantity, legPrice, firingLeg, resolveRung, clampGuards, normalizeWatch, normalizePremise, disarmedSetupPatch, watchedLegs, hasWatchedLegs, allowedVerdicts } from '../services/setup.schema.js'
+import { scenarioLabel, declaredConditions, projectScenario, pickScenario, stopEdge, entryDrift, targetLevels, addEntryLeg, legQuantity, legPrice, firingLeg, resolveRung, clampGuards, normalizeWatch, normalizePremise, disarmedSetupPatch, watchedLegs, hasWatchedLegs, allowedVerdicts } from '../services/setup.schema.js'
 import { tierFor, clampExpensiveGap, tickExpensiveDue } from './talos.tiers.js'
 import { cheapRead as _cheapRead } from './talos.cheap.js'
 import { cancelRestingEntryOrders } from '../services/restingOrders.service.js'
@@ -20,7 +20,7 @@ import { isSelfExecuted } from '../services/venue.resolve.service.js'
 import { brokerService } from '../api/broker/broker.service.js'
 import { brokerEntryPrice } from '../services/positionManage.service.js'
 import { config } from '../services/config.js'
-import { legGate, scenarioGate, thesisGate, liveScenarios, _hitFromGuard, computeMetrics, metricsSet, validityBreach, breachPatch, rollUpBreaches, normalizeConditionResults, latchPatch, costPatch, ripeStepDown, unmetArming, scenarioState } from './talos.gates.js'
+import { legGate, scenarioGate, thesisGate, liveScenarios, _hitFromGuard, computeMetrics, metricsSet, validityBreach, breakView, breachPatch, rollUpBreaches, normalizeConditionResults, latchPatch, costPatch, ripeStepDown, unmetArming, notStarted, scenarioState } from './talos.gates.js'
 
 // Talos — the guardian of the `setup` kind (docs/design/talos-per-candle.md).
 //
@@ -135,6 +135,7 @@ export async function _checkSetup(setup, nowMs, deps = _deps) {
     // the open. The expiry review is exempt: a setup may need to roll or die at the close.
     if (!expiring && !_isReadable(setup, nowMs, deps)) return _sleepShut(setup, nowMs, deps)
 
+    setup = await _latchArming(setup, nowMs, deps)
     const price = await deps.getPrice(setup)
     // WHY THIS WAKE HAPPENED, as recorded by the sweep that caused it (guardSweep.service.js).
     // One-shot: cleared by every write below, so it describes this wake and no later one.
@@ -510,6 +511,45 @@ function _legById(setup, id) {
     return (setup?.scenarios ?? []).flatMap(sc => sc.entry_legs ?? []).find(z => z.id === id) ?? null
 }
 
+/**
+ * THE ARMING EVENT, READ BY CODE (code review, 2026-11-04). "A day close over the line" is arithmetic, and a read could
+ * only latch it when B was the premise on the table: a close over the line with A on the table left B unarmed for good.
+ * The last COMPLETED day bar (getClose) against `arm_close`. Unknown close → no change; a later wake reads it again.
+ * → the setup, with what latched folded in.
+ */
+async function _latchArming(setup, nowMs, deps) {
+    if (setup.trade_mode !== 'thesis') return setup
+    const waiting = liveScenarios(setup).filter(sc => Number.isFinite(sc.arm_close) && notStarted(setup, sc))
+    if (!waiting.length) return setup
+    const close = await deps.getClose(setup, 'day')
+    if (!Number.isFinite(close)) return setup
+    const sg = setup.direction === 'short' ? -1 : 1
+    const at = new Date(nowMs).toISOString()
+    const set = {}, conditions = { ...(setup.monitor_state?.conditions ?? {}) }
+    const reads = [], cleared = []
+    for (const sc of waiting) {
+        // Once a close has been at or over the assumed stop, a close back under it is a fall through it (breakView).
+        const stop = legPrice(sc.stop_legs?.[0])
+        if (Number.isFinite(stop) && sg * (close - stop) >= 0 && scenarioState(setup, sc.id)?.over_stop !== true) {
+            set[`monitor_state.scenarios.${sc.id}.over_stop`] = true
+            cleared.push(sc.id)
+        }
+        if (!(sg * (close - sc.arm_close) > 0)) continue
+        const note = `Day close ${close} past ${sc.arm_close}`
+        for (const c of unmetArming(setup, sc)) {
+            conditions[c.id] = { met: true, at, note }
+            set[`monitor_state.conditions.${c.id}`] = conditions[c.id]
+        }
+        reads.push(`${scenarioLabel(sc)} armed: ${note}`)
+    }
+    if (!reads.length && !cleared.length) return setup
+    await deps.persist(setup.id, set, reads.length ? _entry('arming', { setup, nowMs, price: close, nextAt: setup.monitor_state?.next_check_at ?? null, read: reads.join(' · ') }) : null)
+    if (reads.length) logger.info(LOG, `[${setup.id}] ${reads.join(' · ')}`)
+    const scenarios = { ...setup.monitor_state?.scenarios }
+    for (const id of cleared) scenarios[id] = { ...scenarios[id], over_stop: true }
+    return { ...setup, monitor_state: { ...setup.monitor_state, conditions, scenarios } }
+}
+
 // ─── The validity gate ─────────────────────────────────────────────────────────
 
 /**
@@ -532,7 +572,9 @@ async function _checkValidity(setup, price, nowMs, deps) {
     let last     = null
 
     for (const sc of watched) {
-        const view      = scenarioView(setup, sc)
+        // A THESIS B THAT HAS NOT ARMED HAS NOT STARTED (Roy, 2026-11-04): it cannot run away, and the close that arms it
+        // must never read as doing so. But it can fall: breakView says through what, and the user hears about it.
+        const view      = breakView(setup, sc)
         const suspected = validityBreach(view, price)
         if (!suspected) continue
 
@@ -645,6 +687,12 @@ async function _applyVerdict(setup, hit, raw, nowMs, reason, price, deps) {
             logger.info(LOG, `[${setup.id}] enter on ${scenarioLabel(scenario)} before its arming event (${unarmed.map(c => c.id).join(', ')}) — held as a wait`)
             raw = { ...raw, verdict: 'wait', ripe: false, warning: `Not entering: ${unarmed.map(c => `"${c.text}"`).join(', ')} has not happened yet — it arms this way in.` }
         }
+    }
+    // A PREMISE THAT HAS NOT STARTED CANNOT BE STALE (code review, 2026-11-04). A lone B is read while it waits, with a stop
+    // past the price by design: an `edit` would kill it, and a non-intact premise would pay for a full read every close.
+    if (notStarted(setup, scenario, normalizeConditionResults(raw.conditions, declared)) && (raw.verdict === 'edit' || (raw.premise != null && normalizePremise(raw.premise) !== 'intact'))) {
+        logger.info(LOG, `[${setup.id}] ${raw.verdict} / premise ${raw.premise} on ${scenarioLabel(scenario)} before its arming event — held as an intact wait`)
+        raw = { ...raw, verdict: raw.verdict === 'edit' ? 'wait' : raw.verdict, premise: 'intact', edit_proposal: null }
     }
     // Resolved for an `enter` whether or not price is standing on a level right now.
     const leg      = raw.verdict === 'enter' ? firingLeg(scenario, armed) : null

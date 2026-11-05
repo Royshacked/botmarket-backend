@@ -231,3 +231,12 @@ test('CR: a `pass` runaway counts only what still WAITS — a sibling that ran a
     const oneWaits = buildSetupInvalidation(SETUP, { card: 'ran_away_fyi', price: 170.1, scenario: 'thesis pullback', remaining: 3, waiting: 1 })
     assert.match(oneWaits.content, /Your other scenario is still armed\./)
 })
+
+test('a thesis break: the card says why, and offers redraw or close (Roy, 2026-11-04)', () => {
+    const card = buildSetupInvalidation({ ...SETUP, trade_mode: 'thesis' }, { card: 'invalidated', price: 139, reason: 'closed at 139, under the stop — A is broken', scenario: 'A', remaining: 1 })
+    assert.match(card.content, /under the stop/)
+    assert.match(card.content, /still live\. Re-draw it, or close the setup\./)
+    assert.equal(card.actions.primary.label, 'Re-draw it')
+    assert.equal(card.actions.close.label, 'Close setup')
+    assert.equal(buildSetupInvalidation(SETUP, { card: 'invalidated', price: 139 }).actions.close, undefined, 'another lens keeps its card')
+})

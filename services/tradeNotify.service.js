@@ -168,6 +168,8 @@ export function buildSetupInvalidation(setup, info = null) {
     const sibling = siblingOf(info?.archetype)
     const nextUp  = sibling ? { from: _words(info.archetype), to: _words(sibling) } : null
 
+    const thesisBreak = kind === 'invalidated' && setup?.trade_mode === 'thesis'
+    const stillLive = remaining > 0 ? ` Your other ${remaining === 1 ? 'scenario is' : `${remaining} scenarios are`} still live.` : ''
     const copy = {
         // THE ONE CARD THAT USED TO ASK FOR NOTHING, and the reasoning it was built on has been
         // overturned deliberately (docs/design/mentor-challenge.md §3). It read: "not a problem to
@@ -196,7 +198,11 @@ export function buildSetupInvalidation(setup, info = null) {
             // build time, so re-asking it is the thing `pass` exists to prevent.
             actions: null,
         },
-        invalidated: {
+        invalidated: thesisBreak ? {
+            // Roy, 2026-11-04: on any scenario, the user redraws it or closes the setup.
+            content: `${subject} is no longer valid — ${why ?? `price closed at ${info?.price ?? '?'}`}.${stillLive} Re-draw it, or close the setup.`,
+            actions: { ...cardActions('Re-draw it'), close: { label: 'Close setup' } },
+        } : {
             content: `${subject} is no longer valid — price closed at ${info?.price ?? '?'}, past the ${info?.edge ?? 'edge'} of where this trade works.${survives || ' Want to re-draw it?'}`,
             actions: cardActions('Re-draw it'),
         },

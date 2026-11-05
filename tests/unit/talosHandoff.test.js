@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { manageSetup, dismissSetupCard, disarmSetup, toExecutionProposal } from '../../services/talos.handoff.service.js'
+import { manageSetup, dismissSetupCard, disarmSetup, closeSetup, toExecutionProposal } from '../../services/talos.handoff.service.js'
 
 // The setup half of in-position management. Talos has written `position_state.pending_action` since
 // Phase 5; until this service there was nowhere to say yes, so a proposal died on the card.
@@ -358,4 +358,20 @@ test('disarm on a non-limit or non-hit setup is refused', async () => {
 test('another user cannot disarm a limit setup', async () => {
     const res = await disarmSetup('setup_NVDA_1', 'u2', deps(fakeDb(hitLimitSetup()), { notifyDisarm: async () => {} }))
     assert.equal(res.reason, 'forbidden')
+})
+
+test('close: a setup with nothing at the broker closes; a resting or filled one, or someone else\'s, does not', async () => {
+    const waiting = fakeDb(hitLimitSetup({ status: 'looking', orderState: null, brokerOrders: [] }))
+    const res = await closeSetup('setup_NVDA_1', 'u1', deps(waiting))
+    assert.equal(res.ok, true)
+    assert.equal(waiting.updates[0].$set.status, 'closed')
+    assert.equal(waiting.updates[0].$set.closedReason, 'invalidated')
+    for (const status of ['hit', 'long', 'closed']) {
+        const db = fakeDb(hitLimitSetup({ status }))
+        assert.equal((await closeSetup('setup_NVDA_1', 'u1', deps(db))).reason, 'not_closable', status)
+        assert.equal(db.updates.length, 0)
+    }
+    const other = fakeDb(hitLimitSetup({ status: 'looking' }))
+    assert.equal((await closeSetup('setup_NVDA_1', 'u2', deps(other))).ok, false)
+    assert.equal(other.updates.length, 0)
 })

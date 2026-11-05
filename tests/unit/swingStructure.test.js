@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { structureFacts, entryLevel, toWeekly, mirror, atr, swings, STRUCTURE, controlReplay, rangeTarget, lowestLow, lastTradedUnder } from '../../services/swingStructure.service.js'
+import { unmirrorFacts } from '../../services/tools/thesisStructure.tools.js'
 
 // The THESIS lens's shared mechanism (docs/design/stock-playbook.md): the facts Mentor judges the stop and targets from,
 // and the entry arithmetic. The swings and ATR themselves are covered by thesisLab.test.js (the lab re-exports them).
@@ -67,15 +68,41 @@ test('lastTradedUnder: the LAST bar whose low went under the level, at or before
     assert.equal(lastTradedUnder(rows, 80), null)
 })
 
-test('structureFacts: the break candidate — sellers in control over a confirmed higher low, the swing high a close over arms B', () => {
+test('structureFacts: the break candidate — the nearest high over the price, an assumed stop one swing under it, the next high as target', () => {
     const rows = reversal()
     const f = structureFacts(rows.slice(0, -1))   // the day before the close over the swing high
     assert.equal(f.control, 'sellers')
-    assert.deepEqual([f.break_candidate.swing_to_break.price, f.break_candidate.higher_swing.price, f.break_candidate.fall_low.price], [86.6, 83, 80])
-    assert.equal(f.break_candidate.stop, f.candidates.stop, 'B\'s stop is the structure stop — it changes only a deep-stop trade')
-    assert.ok(f.break_candidate.stop > f.candidates.deep_stop)
-    assert.equal(structureFacts(rows.slice(0, -2)).break_candidate, null, 'the higher low not yet confirmed: no B')
-    assert.equal(structureFacts(rows).break_candidate, null, 'broken: buyers in control, B is spent')
+    const b = f.break_candidate
+    assert.deepEqual([b.swing_to_break.price, b.higher_swing.price, b.fall_low.price], [86.6, 83, 80])
+    assert.equal(b.stop_is, 'assumed')
+    assert.ok(Math.abs(b.stop - (86.6 - (STRUCTURE.k + STRUCTURE.buffer) * f.atr)) < 0.02, 'one swing of the normal move under the line, then the noise buffer')
+    assert.ok(b.target >= b.swing_to_break.price + (b.swing_to_break.price - b.stop) - 0.02, 'at least a stop\'s distance over the line, or no level could pass the limits')
+    assert.equal(b.context, 'reversal', 'sellers in control, inside the range')
+})
+
+test('structureFacts: the break candidate needs no printed higher low', () => {
+    const f = structureFacts(reversal().slice(0, -2))
+    assert.ok(f.break_candidate.swing_to_break.price > f.close, 'the higher low not yet confirmed: the line and the assumed stop still stand')
+})
+
+test('structureFacts: today\'s own wick is no line', () => {
+    const rising = bars(Array.from({ length: 80 }, (_, i) => 100 + i)).map(b => ({ ...b, high: b.close }))
+    rising[79] = { ...rising[79], high: rising[79].close + 0.4 }
+    assert.equal(structureFacts(rising).break_candidate, null)
+})
+
+test('structureFacts: a break that would not flip control is not called a reversal', () => {
+    const rows = reversal()
+    assert.equal(structureFacts(rows.slice(0, -1)).break_candidate.context, 'reversal')
+    // Each swing high breaks once, and the facts have to know it has: a close over it again flips nothing.
+    const replay = (r) => controlReplay(r, swings(r, atr(r), STRUCTURE.k))
+    assert.equal(replay(rows.slice(0, -1)).lastHBroken, false)
+    assert.equal(replay(rows).lastHBroken, true)
+})
+
+test('structureFacts: with no high over the price there is no line, so no break candidate', () => {
+    const rising = bars(Array.from({ length: 80 }, (_, i) => 100 + i)).map(b => ({ ...b, high: b.close }))
+    assert.equal(structureFacts(rising).break_candidate, null)
 })
 
 test('structureFacts on a short’s mirrored bars: the normal move is still a positive percent', () => {
@@ -129,4 +156,15 @@ test('toWeekly: Monday-keyed weeks, the high, low, last close and summed volume'
     assert.equal(w.length, 2)
     assert.deepEqual([w[0].date, w[0].open, w[0].high, w[0].low, w[0].close, w[0].volume], ['2026-10-19', 10, 13.5, 9.5, 13, 5e6])
     assert.deepEqual([w[1].date, w[1].close], ['2026-10-26', 12])
+})
+
+test('the break floor: its stop when price is over it, else the low of the fall; mirrored on a short', () => {
+    const f = structureFacts(reversal().slice(0, -1)).break_candidate
+    assert.ok(Number.isFinite(f.floor))
+    assert.ok(f.floor === f.stop || f.floor === f.fall_low.price)
+    const close = structureFacts(reversal().slice(0, -1)).close
+    assert.ok(f.floor < close, 'always under the close it was read at')
+    const u = unmirrorFacts({ close: -100, swings: [], last_swing_low: null, last_swing_high: null, control: 'buyers', fall: null, candidates: {}, heavy_days: [],
+        break_candidate: { swing_to_break: { type: 'high', price: -90 }, higher_swing: null, fall_low: { date: 'd', price: -120 }, stop: -95, stop_is: 'assumed', floor: -120, target: -80, context: 'reversal' } })
+    assert.equal(u.break_candidate.floor, 120)
 })

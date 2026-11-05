@@ -98,7 +98,7 @@ export function controlReplay(rows, pivots, { atHighs = STRUCTURE.atHighs, onBre
         if (control !== 'buyers') { control = 'buyers'; since = i }
         onBreak?.({ i, lastH, lastL, before, context: lastBreak.context })
     }
-    return { control, since, lastH, lastL, lastBreak }
+    return { control, since, lastH, lastL, lastBreak, lastHBroken: lastH ? used.has(lastH.j) : false }
 }
 
 /**
@@ -135,7 +135,7 @@ const _r = (n, d = 2) => (Number.isFinite(n) ? Math.round(n * 10 ** d) / 10 ** d
  * swing threshold in ATRs. → `{ as_of, close, atr, atr_pct, swings (the last `keep`), last_swing_low, last_swing_high,
  * control ('buyers'|'sellers'|null) and since, last_break { date, context }, fall { from, low }, candidates { stop,
  * deep_stop, deep_stop_last_traded (the last date under it, or null), target, target_kind (range_top | measured_move), lookback_bars }, heavy_days,
- * break_candidate { swing_to_break, higher_swing, fall_low, stop } or null }`, or null under 60 bars. Candidates are the lab's rules (test 1b) —
+ * break_candidate { swing_to_break, higher_swing (the last printed, or null), fall_low, stop (assumed), stop_is, target, context } or null }`, or null under 60 bars. Candidates are the lab's rules (test 1b) —
  * a starting point Mentor judges, never the answer. Pure.
  */
 export function structureFacts(rows, { k = STRUCTURE.k, buffer = STRUCTURE.buffer, keep = 8, lookLow = STRUCTURE.lookLow, lookFall = STRUCTURE.lookFall, atHighs = STRUCTURE.atHighs } = {}) {
@@ -143,7 +143,7 @@ export function structureFacts(rows, { k = STRUCTURE.k, buffer = STRUCTURE.buffe
     const a = atr(rows), pv = swings(rows, a, k), n = rows.length, i = n - 1
     const day = (j) => rows[j].date ?? null
     const pt = (p) => ({ type: p.type === 'H' ? 'high' : 'low', date: day(p.j), price: _r(p.price), confirmed: day(p.at) })
-    const { control, since, lastH, lastL, lastBreak } = controlReplay(rows, pv, { atHighs })
+    const { control, since, lastH, lastL, lastBreak, lastHBroken } = controlReplay(rows, pv, { atHighs })
     const { price: low60, j: lowJ } = lowestLow(rows, i, lookLow)
     let from = -Infinity, fromJ = null
     for (let j = Math.max(0, lowJ - lookFall); j < lowJ; j++) if (rows[j].high >= from) { from = rows[j].high; fromJ = j }
@@ -153,14 +153,42 @@ export function structureFacts(rows, { k = STRUCTURE.k, buffer = STRUCTURE.buffe
     // When price last traded under the deep stop — "a price it has not visited since" is a date Mentor reads, never
     // guesses (docs/design/thesis-lens-followups.md). Null when the history read has none.
     const deepJ = lastTradedUnder(rows, deepStop, i)
-    // THE BREAK CANDIDATE — scenario B's facts, for Mentor to judge (thesis-lens-followups § B): sellers still in
-    // control, a higher low printed after the fall's low and still holding, and the swing high over the price that a
-    // close over arms B. Its stop is under the higher low — the structure stop — so B changes the stop only for a trade
-    // on a deeper one. GNRC, 2026-11-02: lows 194 → 186 → 181 step down, yet 181 is the higher low over the fall's 173.
-    const breakCandidate = control === 'sellers' && lastH && lastL && lastL.j > lowJ
-        && close > lastL.price && lastH.price > close
-        ? { swing_to_break: pt(lastH), higher_swing: pt(lastL), fall_low: { date: day(lowJ), price: _r(low60) }, stop: _r(stop) }
-        : null
+    // THE BREAK CANDIDATE — scenario B's facts, for Mentor to judge (thesis-lens-followups § Every build, 2026-11-04). The
+    // line: with sellers in control, the last swing high, whose close over it flips control; otherwise the nearest high
+    // over the price, a confirmed swing high or the recent high since the last swing low (the same pivots as the away
+    // edge). The stop is ASSUMED, because the higher low the break would leave has not printed: a swing here needs a
+    // pullback of k ATR, so the first one the break could confirm sits k ATR under the line, and the stop goes the noise
+    // buffer under that (Roy: Mentor assumes what the stop will be, and offers it). Null with no line over the price.
+    let line = null
+    if (control === 'sellers' && lastH?.price > close) line = pt(lastH)
+    else {
+        for (const p of pv) if (p.type === 'H' && p.price > close && (!line || p.price < line.price)) line = pt(p)
+        let recentJ = null
+        // Before today: today's own wick is a few cents over any close under the session high, and moves until the close.
+        if (lastL) for (let j = lastL.j + 1; j < i; j++) if (rows[j].high > close && (recentJ == null || rows[j].high > rows[recentJ].high)) recentJ = j
+        if (recentJ != null && (!line || rows[recentJ].high < line.price)) line = { type: 'high', date: day(recentJ), price: _r(rows[recentJ].high), confirmed: null }
+    }
+    let breakCandidate = null
+    if (line) {
+        const assumed = line.price - (k + buffer) * a[i]
+        // The next swing high worth the risk: one a stop's distance over the line at least. A high just over the line
+        // (COST, 2026-11-04: line 1053.75, the next high 1058.89, the stop 31 under) would fail every limit at the level.
+        let next = null
+        for (const p of pv) if (p.type === 'H' && p.price >= line.price + (line.price - assumed) && (next == null || p.price < next)) next = p.price
+        let prior = -Infinity
+        for (let j = Math.max(0, i - atHighs + 1); j <= i; j++) prior = Math.max(prior, rows[j].high)
+        breakCandidate = {
+            swing_to_break: line, higher_swing: lastL ? pt(lastL) : null, fall_low: { date: day(lowJ), price: _r(low60) },
+            stop: _r(assumed), stop_is: 'assumed',
+            // What a B that has not armed can still fall through (Roy, 2026-11-04). Its stop, when price is over it; with
+            // the stop over today's price that says nothing yet, so the low of the fall stands in.
+            floor: _r(assumed < close ? assumed : low60),
+            target: _r(next ?? line.price + Math.max(line.price - (lastL?.price ?? low60), line.price - assumed)),
+            // The same three words as a break the replay has seen (controlReplay), read for a break that has not happened.
+            // A reversal is only a close that would flip control: over the last swing high, not yet broken.
+            context: line.price >= prior ? 'breakout' : control === 'sellers' && line.price === _r(lastH?.price) && !lastHBroken ? 'reversal' : 'continuation',
+        }
+    }
     const { target, kind } = rangeTarget(rows, i, lastL?.price ?? null, lookFall)
     // The heavy days of the last 60: volume ≥ 2× its 20-day mean — climaxes, shakeouts, the sign of strength.
     const heavy = []

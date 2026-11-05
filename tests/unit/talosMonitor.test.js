@@ -1,3 +1,5 @@
+import { _scenarioBlock } from '../../monitoring/talos.assess.js'
+import { thesisGate, breakView } from '../../monitoring/talos.gates.js'
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
@@ -1796,6 +1798,104 @@ test('a thesis wake under the break scenario\'s level reads the break scenario, 
     assert.equal(deps.writes[0].entry_legs[0].price, 173.77, 'the projection is B\'s')
 })
 
+// B's stop is assumed for after the break, so it can sit over today's price (Roy, 2026-11-04).
+const ARMING = { id: 'arm', text: 'A day close over 169.66 since 2026-11-04', weight: 'primary', mode: 'measured', persistence: 'latching' }
+const ASSUMED_B = (over = {}, doc = {}) => mk({
+    trade_mode: 'thesis', validity: undefined, entry_legs: undefined, stop_legs: undefined, conditions: [],
+    scenarios: [
+        { id: 'A', name: 'thesis pullback', entry_legs: [{ price: 150, quantity: 17 }], stop_legs: [{ price: 140 }],
+          target_legs: [{ price: 190.49 }], validity: { lower: 140, upper: 168, approach: 169.66, timeframe: 'day', on_away: 'pass' } },
+        { id: 'B', name: 'after the break', arm_close: 169.66, entry_legs: [{ price: 173.77, quantity: 16 }], stop_legs: [{ price: 162 }], conditions: [ARMING],
+          target_legs: [{ price: 190.49 }], validity: { lower: 162, upper: 180, approach: 190.49, timeframe: 'day', on_away: 'revise' } },
+    ],
+    ...over,
+}, { ...VENUE, ...doc })
+
+test('a thesis B with its assumed stop over the price is not broken before it arms, and A is untouched', async () => {
+    const deps = stubDeps({ getPrice: async () => 155, getClose: async () => 155, assess: async () => ({ verdict: 'wait', read: 'Waiting.' }) })
+    const seen = []
+    deps.onInvalidation = async (_s, ev) => { seen.push(ev) }
+    await _checkSetup(ASSUMED_B(), T, deps)
+    assert.deepEqual(seen, [], 'no card on the first look')
+    assert.ok(!deps.writes.some(w => w['monitor_state.scenarios.B.invalidation_status'] === 'fired'), 'the terminal latch is not written')
+})
+
+test('once B has armed, a close under its stop breaks it', async () => {
+    const deps = stubDeps({ getPrice: async () => 155, getClose: async () => 155, assess: async () => ({ verdict: 'wait', read: 'Waiting.' }) })
+    const seen = []
+    deps.onInvalidation = async (_s, ev) => { seen.push(ev) }
+    await _checkSetup(ASSUMED_B({}, { monitor_state: { next_check_at: null, check_count: 0, memo: null, timeline: [], scenarios: {}, conditions: { arm: { met: true } } } }), T, deps)
+    assert.deepEqual(seen.map(e => [e.scenario, e.side]), [['after the break', 'adverse']])
+})
+
+test('code arms B off the last day close: the latch is written, and B is then the premise on the table', async () => {
+    const deps = stubDeps({ getPrice: async () => 171, getClose: async () => 170.1, assess: async () => ({ verdict: 'wait', read: 'Waiting.' }) })
+    await _checkSetup(ASSUMED_B(), T, deps)
+    const latch = deps.writes.find(w => w['monitor_state.conditions.arm'])
+    assert.equal(latch?.['monitor_state.conditions.arm']?.met, true)
+    assert.match(latch['monitor_state.conditions.arm'].note, /Day close 170\.1 past 169\.66/)
+    assert.equal(thesisGate(ASSUMED_B(), 171), null, 'not armed: off the table')
+    const armed = ASSUMED_B({}, { monitor_state: { next_check_at: null, check_count: 0, memo: null, timeline: [], scenarios: {}, conditions: { arm: { met: true } } } })
+    assert.equal(thesisGate(armed, 171)?.scenario?.id, 'B', 'armed, and price at or under its level')
+})
+
+test('a close under the line arms nothing; an unknown close arms nothing', async () => {
+    for (const close of [169.66, 160, null]) {
+        const deps = stubDeps({ getPrice: async () => 165, getClose: async () => close, assess: async () => ({ verdict: 'wait', read: 'Waiting.' }) })
+        await _checkSetup(ASSUMED_B(), T, deps)
+        assert.ok(!deps.writes.some(w => w['monitor_state.conditions.arm']), String(close))
+    }
+})
+
+test('an unarmed B stays off the table: price under its level and A\'s reads the regular scenario', async () => {
+    let read = null
+    const deps = stubDeps({ getPrice: async () => 149, getClose: async () => 149, assess: async (_s, hit) => { read = hit; return { verdict: 'wait', read: 'Waiting.' } } })
+    await _checkSetup(ASSUMED_B(), T, deps)
+    assert.equal(read?.scenario?.id, 'A')
+    const between = stubDeps({ getPrice: async () => 160, getClose: async () => 160, assess: async (_s, hit) => { read = hit; return { verdict: 'wait', read: 'Waiting.' } } })
+    await _checkSetup(ASSUMED_B(), T, between)
+    assert.notEqual(read?.scenario?.leg, 173.77)
+    assert.equal(read, null, 'over A\'s level and B is not armed: nothing is reached')
+})
+
+test('the close that arms B is never read as running away, and no edge counts before it', async () => {
+    const deps = stubDeps({ getPrice: async () => 200, getClose: async () => null, assess: async () => ({ verdict: 'wait', read: 'Waiting.' }) })
+    const seen = []
+    deps.onInvalidation = async (_s, ev) => { seen.push(ev) }
+    await _checkSetup(ASSUMED_B(), T, deps)
+    assert.ok(!seen.some(e => e.scenario === 'after the break'), JSON.stringify(seen))
+})
+
+test('a lone unarmed B: an edit or a stale premise from the read cannot kill it', async () => {
+    const lone = mk({
+        trade_mode: 'thesis', validity: undefined, entry_legs: undefined, stop_legs: undefined, conditions: [],
+        scenarios: [{ id: 'B', name: 'after the break', arm_close: 169.66, entry_legs: [{ price: 173.77, quantity: 16 }], stop_legs: [{ price: 162 }], conditions: [ARMING],
+            target_legs: [{ price: 190.49 }], validity: { lower: 162, upper: 180, approach: 190.49, timeframe: 'day', on_away: 'revise' } }],
+    }, VENUE)
+    const edits = []
+    const deps = stubDeps({ getPrice: async () => 155, getClose: async () => 155, onEditCard: async (...a) => { edits.push(a) },
+        assess: async () => ({ verdict: 'edit', premise: 'stale', read: 'Price is under the stop.', edit_proposal: { why: 'stop already passed' } }) })
+    await _checkSetup(lone, T, deps)
+    assert.equal(edits.length, 0)
+    assert.ok(!deps.writes.some(w => w.invalidation_status === 'fired'))
+})
+
+test('the read is told a scenario has not started; an armed one or another lens is not', () => {
+    const s = ASSUMED_B()
+    assert.match(_scenarioBlock(s, s.scenarios[1]), /NOT STARTED: it arms on "A day close over 169\.66 since 2026-11-04".*the answer is wait/)
+    assert.doesNotMatch(_scenarioBlock(s, s.scenarios[0]), /NOT STARTED/)
+    const armed = { ...s, monitor_state: { ...s.monitor_state, conditions: { arm: { met: true } } } }
+    assert.doesNotMatch(_scenarioBlock(armed, armed.scenarios[1]), /NOT STARTED/)
+})
+
+test('another lens keeps its break edge before a latching condition has resolved', async () => {
+    const deps = stubDeps({ getPrice: async () => 155, getClose: async () => 155, assess: async () => ({ verdict: 'wait', read: 'Waiting.' }) })
+    const seen = []
+    deps.onInvalidation = async (_s, ev) => { seen.push(ev) }
+    await _checkSetup(ASSUMED_B({ trade_mode: 'smc' }), T, deps)
+    assert.deepEqual(seen.map(e => [e.scenario, e.side]), [['after the break', 'adverse']])
+})
+
 test('a thesis wake over every level still reads the first premise — nothing is reached', async () => {
     let read = null
     const deps = stubDeps({ getPrice: async () => 175, assess: async (_s, hit) => { read = hit; return { verdict: 'wait', read: 'Over the level.' } } })
@@ -1830,4 +1930,64 @@ test('unmetArming: only primary latching events not yet seen', () => {
     assert.deepEqual(unmetArming({}, sc, [{ id: 'arm', met: 'yes' }]), [])
     assert.deepEqual(unmetArming({ monitor_state: { conditions: { arm: { met: true } } } }, sc), [])
     assert.deepEqual(unmetArming({}, null), [])
+})
+
+// ─── Any scenario: a close under the stop is a card to redraw or close (Roy, 2026-11-04) ───
+const _floored = (state = {}) => {
+    const s = ASSUMED_B({}, { monitor_state: { next_check_at: null, check_count: 0, memo: null, timeline: [], scenarios: state, conditions: {} } })
+    s.scenarios[1].arm_floor = 148
+    return s
+}
+const _cards = (close, assess = async () => ({ verdict: 'wait', read: 'Waiting.' })) => {
+    const seen = []
+    const deps = stubDeps({ getPrice: async () => close, getClose: async () => close, assess })
+    deps.onInvalidation = async (_s, ev) => { seen.push(ev) }
+    return { deps, seen }
+}
+
+test('an unarmed B under its assumed stop from the start: no card over the floor, a card under it', async () => {
+    const over = _cards(155)
+    await _checkSetup(_floored(), T, over.deps)
+    assert.deepEqual(over.seen, [])
+    const under = _cards(147)
+    await _checkSetup(_floored(), T, under.deps)
+    const b = under.seen.find(e => e.scenario === 'after the break')
+    assert.equal(b?.card, 'invalidated')
+    assert.match(b.reason, /under the low of the move/)
+})
+
+test('an unarmed B that closed over its stop: a close back under the stop is the card, floor or no floor', async () => {
+    const up = _cards(165)
+    await _checkSetup(_floored(), T, up.deps)
+    assert.ok(up.deps.writes.some(w => w['monitor_state.scenarios.B.over_stop'] === true))
+    assert.deepEqual(up.seen, [])
+    const back = _cards(160)
+    await _checkSetup(_floored({ B: { over_stop: true } }), T, back.deps)
+    const b = back.seen.find(e => e.scenario === 'after the break')
+    assert.equal(b?.card, 'invalidated')
+    assert.match(b.reason, /under the stop/)
+})
+
+test('thesis: the stop decides whatever lower says, and on_break neither silences nor closes it', async () => {
+    const s = ASSUMED_B()
+    s.scenarios = [{ ...s.scenarios[0], validity: { ...s.scenarios[0].validity, lower: 145, on_break: 'close' } }]
+    const inside = _cards(142)
+    await _checkSetup(s, T, inside.deps)
+    assert.deepEqual(inside.seen, [], 'under the authored lower, over the stop')
+    const under = _cards(139)
+    await _checkSetup(s, T, under.deps)
+    assert.equal(under.seen[0]?.card, 'invalidated')
+    assert.ok(!under.deps.writes.some(w => w.status === 'closed'), 'nothing closes by itself')
+    const fyi = ASSUMED_B()
+    fyi.scenarios = [{ ...fyi.scenarios[0], validity: { ...fyi.scenarios[0].validity, on_break: 'notify_only' } }]
+    const asked = _cards(139)
+    await _checkSetup(fyi, T, asked.deps)
+    assert.equal(asked.seen[0]?.card, 'invalidated')
+})
+
+test('another lens keeps what was authored', () => {
+    const sc = { id: 's1', validity: { lower: 145, upper: 160, on_break: 'notify_only' }, stop_legs: [{ price: 140 }] }
+    const s = { direction: 'long', trade_mode: 'discretionary', scenarios: [sc] }
+    assert.equal(breakView(s, sc).validity.lower, 145)
+    assert.equal(breachPatch(s, sc, 'adverse', 144, T).card, 'invalidated_fyi')
 })

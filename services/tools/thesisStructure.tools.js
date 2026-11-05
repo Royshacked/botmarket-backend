@@ -27,6 +27,7 @@ export function unmirrorFacts(f) {
         break_candidate: f.break_candidate ? {
             swing_to_break: pt(f.break_candidate.swing_to_break), lower_swing: pt(f.break_candidate.higher_swing),
             rise_high: { ...f.break_candidate.fall_low, price: p(f.break_candidate.fall_low.price) }, stop: p(f.break_candidate.stop),
+            stop_is: f.break_candidate.stop_is, floor: p(f.break_candidate.floor), target: p(f.break_candidate.target), context: f.break_candidate.context,
         } : f.break_candidate,
     }
 }
@@ -34,8 +35,8 @@ export function unmirrorFacts(f) {
 /** What the break candidate is, in words for its side. Pure. */
 export function breakWords(side = 'long') {
     return side === 'short'
-        ? "scenario B's facts: buyers still in control, a LOWER HIGH printed under the rise's high, and the swing low a day close under arms B; its stop over the lower high — the structure stop, so B changes the stop only for a trade on a higher one (the deep stop). A starting point you judge."
-        : "scenario B's facts: sellers still in control, a HIGHER LOW printed over the fall's low, and the swing high a day close over arms B; its stop under the higher low — the structure stop, so B changes the stop only for a trade on a lower one (the deep stop). A starting point you judge."
+        ? "scenario B's facts: the nearest low under the price (swing_to_break), which a day close under arms B. The stop is ASSUMED: the lower high that break would leave has not printed, so `stop` is the first one the break could confirm plus the noise buffer. `target` is the next swing low under the line, or a measured move; `lower_swing` is the last lower high printed. A starting point you judge."
+        : "scenario B's facts: the nearest high over the price (swing_to_break), which a day close over arms B. The stop is ASSUMED: the higher low that break would leave has not printed, so `stop` is the first one the break could confirm minus the noise buffer. `target` is the next swing high over the line, or a measured move; `higher_swing` is the last higher low printed. A starting point you judge."
 }
 
 /** `years` of day bars for `sym`, oldest first, dated in ET. `get` — the bar source (a seam). */

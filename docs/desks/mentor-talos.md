@@ -997,6 +997,15 @@ and, at entries only, THE BREAK SCENARIO: whether the worksheet's stop makes B o
 2026-11-03): its level from `get_entry_level` on B's stop — at or over the swing high the break itself is the entry,
 under it a pullback to the level after the break; both are B.
 
+**On this lens a day close under a scenario's stop always sends the card to redraw or close** (armed or not; an unarmed B watches `arm_floor` until price has been over its stop; docs/design/thesis-lens-followups.md).
+
+**Since 2026-11-04 B is offered on every build where a break would move the stop**, and the user takes A, B or both
+(both: the first to fill takes the full size). B's stop is ASSUMED, because the higher low has not printed:
+`break_candidate` is now the line over the price, a stop (k + buffer) ATR under it, and a target and context. So B's stop
+can sit over today's price, and Talos skips a thesis scenario's adverse edge until its primary latching condition has
+happened. Where this overrides the paragraphs above, and its known costs:
+[design/thesis-lens-followups.md § Every build](../design/thesis-lens-followups.md).
+
 A setup arrives one of three ways — a bare name, a name Argus handed over, or a plan the user
 already made — and there is **one machine, not three paths**. Whatever arrived is written into the
 ledger as a CLAIM; the opening turn validates the claims and proposes the blanks; the build resumes

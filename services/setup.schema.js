@@ -659,6 +659,9 @@ export function normalizeScenario(raw, i, { direction = null, used, ids } = {}) 
         validity:   normalizeValidity(raw.validity),
         quantity:   scenarioQuantity(entry_legs),
         rr:         null,
+        // A thesis B's arming event as a number: code reads it off the day close (talos.monitor _latchArming).
+        ...(Number.isFinite(num(raw.arm_close)) ? { arm_close: num(raw.arm_close) } : {}),
+        ...(Number.isFinite(num(raw.arm_floor)) ? { arm_floor: num(raw.arm_floor) } : {}),
     }
     // Derived per scenario, from ITS OWN legs. A setup-wide r:r would price the false break's entry
     // against the breakout's target and mean neither.
@@ -1039,6 +1042,11 @@ export function setupReadiness(setup, hasAccount = false) {
         // for six months). Every thesis premise draws one, which puts the runaway question above in front of the user
         // (docs/design/thesis-lens-followups.md). Two plain words, for the slug.
         if (setup.trade_mode === 'thesis' && !sc.validity) missing.push(at('validity range'))
+        // A scenario that waits on a break needs the price of that break, or nothing but a read of it could ever arm it.
+        if (setup.trade_mode === 'thesis' && !Number.isFinite(sc.arm_close)
+            && (sc.conditions ?? []).some(c => c.persistence === 'latching' && c.weight === 'primary')) missing.push(at('arming price'))
+        // ...and what it can fall through before then, or a B whose stop sits over the price is never told about at all.
+        if (setup.trade_mode === 'thesis' && Number.isFinite(sc.arm_close) && !Number.isFinite(sc.arm_floor)) missing.push(at('arming floor'))
     }
     if (!list.length && !root.length) missing.push('condition')
 

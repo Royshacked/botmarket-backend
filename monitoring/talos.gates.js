@@ -1,6 +1,6 @@
 import { INVALIDATION } from '../services/entity/vocabulary.js'
 import { toNum } from '../services/format.util.js'
-import { scenarioLabel, legPrice, paceRungs, firingLeg, clampGuards, normalizePremise } from '../services/setup.schema.js'
+import { scenarioLabel, scenarioView, legPrice, paceRungs, firingLeg, clampGuards, normalizePremise } from '../services/setup.schema.js'
 
 // Talos's PURE TIER — every decision the monitor makes without touching the network.
 //
@@ -107,6 +107,8 @@ export function thesisGate(setup, price) {
     const sg = setup.direction === 'short' ? -1 : 1
     let best = null
     for (const scenario of liveScenarios(setup)) {
+        // Code arms this one off the day close (_latchArming), so until then it is not the premise on the table.
+        if (Number.isFinite(scenario.arm_close) && unmetArming(setup, scenario).length) continue
         for (const leg of scenario.entry_legs ?? []) {
             const lvl = legPrice(leg)
             if (!Number.isFinite(lvl) || sg * (price - lvl) > 0) continue
@@ -126,6 +128,33 @@ export function unmetArming(setup, scenario, results = []) {
     const metNow = new Set((results ?? []).filter(r => r?.met === 'yes').map(r => r.id))
     return (scenario?.conditions ?? []).filter(c => c?.persistence === 'latching' && c.weight === 'primary'
         && latched[c.id]?.met !== true && !metNow.has(c.id))
+}
+
+/**
+ * A thesis scenario whose arming event has not happened has not started (Roy, 2026-11-04). Its stop is assumed for after
+ * the break and can sit past today's price, and price being over or under anything says nothing about it yet. Pure.
+ */
+export function notStarted(setup, scenario, results = []) {
+    return setup?.trade_mode === 'thesis' && unmetArming(setup, scenario, results).length > 0
+}
+
+/**
+ * THE PLAN THE VALIDITY GATE READS FOR ONE SCENARIO. ON THE THESIS LENS THE BREAK EDGE IS THE STOP (Roy, 2026-11-04: "any
+ * scenario, if price went below the stop, the user is notified to redraw or close"), whatever `lower` was authored as.
+ * A scenario that has not armed has no away edge, and its stop only counts once price has been over it: an assumed stop
+ * can sit over today's price, and that close is not a fall. Until then it is `arm_floor`, and an older B with no floor
+ * has no break edge at all. Any other lens reads what was authored. Pure.
+ */
+export function breakView(setup, sc) {
+    const view = scenarioView(setup, sc)
+    if (setup?.trade_mode !== 'thesis' || !sc?.validity) return view
+    const key = setup.direction === 'short' ? 'upper' : 'lower'
+    const stop = legPrice(sc.stop_legs?.[0])
+    if (notStarted(setup, sc)) {
+        const edge = scenarioState(setup, sc.id)?.over_stop === true ? stop : sc.arm_floor
+        return { ...view, validity: Number.isFinite(edge) ? { [key]: edge } : null }
+    }
+    return Number.isFinite(stop) ? { ...view, validity: { ...view.validity, [key]: stop } } : view
 }
 
 // ─── In-position arithmetic ────────────────────────────────────────────────────
@@ -291,11 +320,17 @@ export function breachPatch(setup, sc, side, price, nowMs) {
 
     if (prior === INVALIDATION.FIRED) return { set: {}, card: null, status: null }
 
-    const reason = `closed at ${price}, past the ${edge} edge — ${many ? label : 'the premise'} is broken`
+    const thesis = setup?.trade_mode === 'thesis'
+    const short  = setup?.direction === 'short'
+    const onFloor = thesis && notStarted(setup, sc) && scenarioState(setup, sc?.id)?.over_stop !== true
+    const reason = thesis
+        ? `closed at ${price}, ${short ? 'over' : 'under'} ${onFloor ? `the ${short ? 'high' : 'low'} of the move` : 'the stop'} — ${many ? label : 'the premise'} is broken`
+        : `closed at ${price}, past the ${edge} edge — ${many ? label : 'the premise'} is broken`
     return {
         set:    { [key]: { invalidation_status: INVALIDATION.FIRED, invalidation_edge: edge, invalidation_reason: reason, at } },
         // `notify_only` is the authored "let it die quietly" — still its own card, never silence.
-        card:   sc?.validity?.on_break === 'notify_only' ? 'invalidated_fyi' : 'invalidated',
+        // The thesis lens does not ask: it always asks them to redraw or close (Roy, 2026-11-04).
+        card:   !thesis && sc?.validity?.on_break === 'notify_only' ? 'invalidated_fyi' : 'invalidated',
         status: INVALIDATION.FIRED,
         edge, reason,
     }
@@ -328,7 +363,7 @@ export function rollUpBreaches(setup, next, last, nowMs) {
         }
         // The ONE branch that ends the setup, and only because the user asked for it at build time —
         // on the LAST premise standing, never on the first one to go.
-        if (last?.scenario?.validity?.on_break === 'close') {
+        if (setup?.trade_mode !== 'thesis' && last?.scenario?.validity?.on_break === 'close') {
             Object.assign(set, { status: 'closed', closedReason: 'invalidated', closedAt: nowMs })
         }
         return set

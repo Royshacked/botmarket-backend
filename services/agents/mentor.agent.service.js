@@ -94,7 +94,7 @@ export const MENTOR_TOOLS = [
     // THE THESIS LENS (docs/design/stock-playbook.md). Same slot rules as the sizing call: past the breakpoint, before
     // consult. The facts and the arithmetic are code; the stop and the targets stay Mentor's judgement.
     ...toolsFor({
-        get_price_structure: `The \`thesis\` lens's chart facts, on the day (swing) or week (long-term) chart: the confirmed swings with their dates, the normal daily move (ATR), WHO IS IN CONTROL (buyers since a close over the last swing high, sellers since a close under the last swing low) and the context of the last break (reversal · continuation · breakout), the last fall (its start and its low), the heavy-volume days of the last 60 sessions, and CANDIDATE levels from the tested rule — the stop under the sellers' last swing, a deeper one under the whole fall (with the last date price traded under it), the target at the start of the fall (or a measured move at the highs) — and, when sellers still hold control over a printed higher low, the BREAK CANDIDATE (the swing high a day close over arms scenario B, the higher low, B's stop). The candidates are a starting point: judge the stop and the targets yourself against the chart and the candles, and say where you differ and why.`,
+        get_price_structure: `The \`thesis\` lens's chart facts, on the day (swing) or week (long-term) chart: the confirmed swings with their dates, the normal daily move (ATR), WHO IS IN CONTROL (buyers since a close over the last swing high, sellers since a close under the last swing low) and the context of the last break (reversal · continuation · breakout), the last fall (its start and its low), the heavy-volume days of the last 60 sessions, and CANDIDATE levels from the tested rule — the stop under the sellers' last swing, a deeper one under the whole fall (with the last date price traded under it), the target at the start of the fall (or a measured move at the highs) — and the BREAK CANDIDATE (the nearest high over the price, which a day close over arms scenario B; B's ASSUMED stop, target and context). The candidates are a starting point: judge the stop and the targets yourself against the chart and the candles, and say where you differ and why.`,
         get_entry_level: `The \`thesis\` lens's entry arithmetic. After you judged the stop and the target and the USER gave their risk limit (the stop at most X% from the entry) and/or their minimum reward to risk: the highest entry worth paying (the lowest, on a short) — the entry leg's price, valid "at the level and below". Never compute it yourself; read it out. It also says the last date price traded past the stop you gave — the date for "not traded under since", never a guess.`,
     }),
     ...toolsFor({
@@ -696,7 +696,7 @@ export function _buildTurnContext(chatState, clientTime = null, justSettled = []
     // had already answered.
     return `---
 ${buildTimeSection(clientTime, 'active_from / valid_until')}
-COVERAGE SO FAR: ${covered}. Re-state these in every <coverage> tag plus anything new you read this turn.${draft}${_buildMoneySection(chatState?.draft)}${_buildGenerateSection(chatState, hasAccount)}${_buildModeSection(mode)}${_buildRedrawSection(chatState?.redraw, chatState?.draft)}${_buildRiskReadSection(thesisFacts, chatState?.draft)}${_buildBreakSection(thesisFacts, chatState?.draft)}${_buildLedgerSection(chatState)}${_buildPressSection(justSettled, chatState, delegated)}`
+COVERAGE SO FAR: ${covered}. Re-state these in every <coverage> tag plus anything new you read this turn.${draft}${_buildMoneySection(chatState?.draft)}${_buildGenerateSection(chatState, hasAccount)}${_buildModeSection(mode)}${_buildRedrawSection(chatState?.redraw, chatState?.draft)}${_buildRiskReadSection(thesisFacts, chatState?.draft)}${_buildBreakSection(thesisFacts, chatState?.draft, { redraw: !!chatState?.redraw?.event })}${_buildLedgerSection(chatState)}${_buildPressSection(justSettled, chatState, delegated)}`
 }
 
 /**
@@ -712,7 +712,7 @@ export function _buildRedrawSection(redraw, draft) {
         ? `it RAN AWAY without filling${which}${redraw.reason ? ` — ${redraw.reason}` : ''}. The read was not wrong; the entry never came.`
         : `its premise BROKE${which}${redraw.reason ? ` — ${redraw.reason}` : ''}.`
     const how = draft?.trade_mode === 'thesis'
-        ? 'Redraw it on TODAY\'s chart with the lens (§ The thesis lens, step 9): read get_price_structure, the stop under the NEW higher low, the user\'s same risk limit and minimum reward to risk (from the conversation — ask once if they are not in it), the new level from get_entry_level, a new validity range.'
+        ? 'Redraw it on TODAY\'s chart with the lens (§ The thesis lens, step 9): read get_price_structure, the stop under the NEW higher low, the user\'s same risk limit and minimum reward to risk (from the conversation — ask once if they are not in it), the new level from get_entry_level, a new validity range. A scenario that waits on a break takes its line and its assumed stop from THE BREAK SCENARIO below instead, and a new arm_close.'
         : 'Redraw its levels on TODAY\'s chart, in its own lens — read the structure again, never the old levels.'
     // EVERY scenario on the worksheet is from the old chart (CR: the old B rode into the regenerate unexamined — with
     // two scenarios the break section stays silent).
@@ -782,41 +782,64 @@ export function _buildRiskReadSection(facts, draft) {
     const deepName = `the deep stop${facts.deep_stop_last_traded !== undefined ? ` (not traded ${past} since ${facts.deep_stop_last_traded ?? 'any day in the history read'})` : ''}`
     const stops = [['the structure stop', facts.stop], [deepName, facts.deep_stop]]
     if (Number.isFinite(aStop) && !stops.some(([, p]) => p === aStop)) stops.unshift(['the worksheet\'s stop', aStop])
+    const sg = facts.side === 'short' ? -1 : 1
     const said = stops.filter(([, p]) => Number.isFinite(p))
-        .map(([name, p]) => `${name} ${p} is ${_pctFrom(facts.close, p)}% from today's ${facts.close}${_atrs(facts.close, p, facts.atr) != null ? ` — ${_atrs(facts.close, p, facts.atr)} normal ${unit} (ATR ${facts.atr})` : ''}`)
+        // A stop price has crossed is no distance to size from: "2.2% away" read as a tight stop on a dead one (code review).
+        .map(([name, p]) => sg * (p - facts.close) >= 0 ? `${name} ${p} is already crossed at today's ${facts.close}, so give no distance for it` : `${name} ${p} is ${_pctFrom(facts.close, p)}% from today's ${facts.close}${_atrs(facts.close, p, facts.atr) != null ? ` — ${_atrs(facts.close, p, facts.atr)} normal ${unit} (ATR ${facts.atr})` : ''}`)
     if (!said.length) return ''
     // THE NUMBERS, never this line's name (drive 12: "the risk read measured these stops from $210.88", and no % at all).
     return `\n\nTHE RISK READ (step 5) — SAY IT BEFORE you ask for their risk limit and minimum reward to risk, in the same turn as the ask, in the user's words with these numbers (each stop's % and its normal ${unit}) — never call it "the risk read": ${said.join('; ')}. From that, your read of what kind of limit gets in near today's price and what kind waits for a deep pullback toward the stop — judgment, no fixed menu; any level you name comes from get_entry_level. Once they gave their limits, do not repeat it.`
 }
 
 /**
- * THE BREAK SCENARIO, AS A FACT (Roy, 2026-11-02: "B adds value if Mentor sees that a break up will change the stop").
- * Two drives had the chart's B in the tool's answer and the rule in the prompt, and B was never offered — so the
- * server says, from the worksheet's own stop, whether B is on offer THIS turn. "Clearly over" is the stop's own noise
- * buffer (STRUCTURE.buffer × ATR), not a new number. Already two scenarios → B is drawn, nothing to say.
+ * THE BREAK SCENARIO, AS A FACT (Roy, 2026-11-04: every build offers the regular scenario and, if a price move would
+ * move the stop, that as a second; the user takes the first, the second or both). Prose alone never got B offered, so
+ * the server says whether B is on offer THIS turn, from the worksheet's stop, or the structure stop before there is one.
+ * "Clearly over" is the stop's own noise buffer (STRUCTURE.buffer × ATR), not a new number. Two scenarios, or a lone one
+ * that waits on an arming event (they took B alone) → B is settled, nothing to say. A regular stop price has already gone
+ * through (5 of 20 charts, 2026-11-04: the last swing low is over the close) leaves no regular trade: Roy, the same day,
+ * says the regular scenario is off and B is the offer, whether or not B's stop clears that dead one. The deep stop stays on
+ * offer while it is on the right side of the price (Roy, the same day), offered and never recommended: GNRC's drive had
+ * Mentor recommend it, then read a bare "agreed" as taking it.
  * B's ENTRY (Roy, 2026-11-03): its level from get_entry_level on B's stop — at or over the arming line, the break price
  * itself fits the limits and the break is the entry; under it, B waits for a pullback to the level after the break.
  * Either is B; drive 8 refused it for a level under the line, pricing B at the break with its own R:R. PURE.
  */
-export function _buildBreakSection(facts, draft) {
+export function _buildBreakSection(facts, draft, { redraw = false } = {}) {
     const b = facts?.break
-    if (!b?.swing_to_break || !b.stop || (facts.stage && facts.stage !== 'entries')) return ''
+    if (!b?.swing_to_break || !b.stop || (facts.stage && facts.stage !== 'entries' && facts.stage !== 'spans')) return ''
     const scenarios = Array.isArray(draft?.scenarios) ? draft.scenarios : []
-    if (scenarios.length > 1) return ''
+    const loneB = scenarios.length === 1 && (scenarios[0]?.conditions ?? []).some(c => c?.persistence === 'latching' && c?.weight === 'primary')
+    // Settled, unless the turn is a redraw: the chart moved and the old B needs fresh numbers (code review).
+    if (!redraw && (scenarios.length > 1 || loneB)) return ''
     const short = facts.side === 'short', sg = short ? -1 : 1
-    const held = b.higher_swing ?? b.lower_swing
-    const aStop = Number(scenarios[0]?.stop_legs?.[0]?.price)
+    const onSheet = loneB ? NaN : Number(scenarios[0]?.stop_legs?.[0]?.price)
+    // Null is no stop: Number(null) is 0, which told a turn "the structure stop 0" (code review).
+    const aStop = Number.isFinite(onSheet) ? onSheet : facts.stop != null ? Number(facts.stop) : NaN
     const aTarget = Number(scenarios[0]?.target_legs?.[0]?.price)
     const arm = b.swing_to_break.price
-    const lines = [`\n\nTHE BREAK SCENARIO (B) — on this chart (get_price_structure's break_candidate): a DAY close ${short ? 'under' : 'over'} ${arm} arms it; its stop ${b.stop}, ${short ? 'over the lower high' : 'under the higher low'} at ${held?.price}${held?.date ? ` (${held.date})` : ''} — ${_pctFrom(arm, b.stop)}% from the break.`]
+    const tested = b.context === 'reversal' ? 'a reversal, the one context that held an edge in the tests' : `a ${b.context ?? 'continuation'}, a context that tested around zero: say so`
+    const lines = [`\n\nTHE BREAK SCENARIO (B) — on this chart (get_price_structure's break_candidate): a DAY close ${short ? 'under' : 'over'} ${arm} arms it; the stop you ASSUME for then is ${b.stop} — ${_pctFrom(arm, b.stop)}% from the break; the ${short ? 'lower high' : 'higher low'} it stands for has not printed, so judge it and say it is assumed. Target ${b.target}, from the chart. This break would be ${tested}.`]
+    // THE TURN THAT SETTLES THE SPAN STARTS AT SPANS and goes on to the entries (AMD drive, 2026-11-04): with nothing said
+    // here Mentor offered B on a line of its own, $497.40, and built it on $579.18 after the user had said "both". So it
+    // gets the whole of what it would be told at the entries, and only the timing differs.
+    const atSpans = facts.stage === 'spans'
+    const onOffer = atSpans ? 'ON OFFER ONCE THE SPAN SETTLES' : 'ON OFFER THIS TURN'
+    if (atSpans) lines.push(`  Not an offer yet: B waits for the entries. If this turn settles the span and goes on to the entries, offer B with these numbers, not a line of your own.`)
     const changes = Number.isFinite(aStop) && sg * (b.stop - aStop) > STRUCTURE.buffer * (facts.atr ?? 0)
-    if (changes) {
-        lines.push(`  The worksheet's stop ${aStop} is ${short ? 'over' : 'under'} B's: the break CHANGES THE STOP, so B is ON OFFER THIS TURN — one bullet: its arming line, its stop, and that its stop is ${short ? 'lower' : 'higher'} than A's. Theirs to take or decline; never add it unasked, and once they declined, leave it.`)
+    const regularOff = Number.isFinite(aStop) && Number.isFinite(Number(facts.close)) && sg * (aStop - Number(facts.close)) >= 0
+    if (regularOff) {
+        lines.push(`  The regular stop ${aStop} is already ${short ? 'under' : 'over'} today's ${facts.close}: price has gone through it, so the regular scenario is OFF — say so in one line, and draw nothing on that stop. B is ${onOffer}: one bullet with its arming line and its assumed stop, and ask whether they take it. Never add it unasked, and once they declined, leave it.${facts.deep_stop != null && sg * (Number(facts.close) - facts.deep_stop) > 0 ? ` The deep stop (${facts.deep_stop}) is still on the right side of the price: offer it too, with its cost, and do not recommend it over B. If they take it, there is a regular scenario again, and both can stand. It goes on only when they name it: a bare "agreed" is not a choice, so ask which.` : ''}`)
+    } else if (changes) {
+        lines.push(`  ${Number.isFinite(onSheet) ? "The worksheet's stop" : 'The structure stop'} ${aStop} is ${short ? 'over' : 'under'} B's: the break CHANGES THE STOP, so B is ${onOffer} — one bullet: its arming line, its assumed stop, and that its stop is ${short ? 'lower' : 'higher'} than A's. Ask which they take: A, B or both. Both: the first to fill takes the whole size and the other is cancelled. Never add it unasked, and once they declined, leave it.`)
+    }
+    if (regularOff || changes) {
+        if (b.floor != null) lines.push(`  When B goes on, it carries \`arm_close\` ${arm} and \`arm_floor\` ${b.floor}.`)
         lines.push(`  B's ENTRY is get_entry_level on B's stop ${b.stop}, B's target and their limits — never an R:R of your own. Level ${short ? 'at or under' : 'at or over'} ${arm}: the break price fits their limits, so the break IS the entry (the level and ${short ? 'above' : 'below'}, armed by the close). Level ${short ? 'over' : 'under'} ${arm}: B waits for a pullback to the level after the break. Both are B — say which, never "does not fit" for a level ${short ? 'over' : 'under'} the line.`)
     } else {
-        lines.push(`  ${Number.isFinite(aStop) ? `The worksheet's stop ${aStop} is` : 'A structure stop would be'} at B's: B would be A with one more condition — no B.${facts.deep_stop != null ? ` If the user takes the deep stop (${facts.deep_stop}), B is on offer in THAT same turn.` : ''}`)
+        lines.push(`  ${Number.isFinite(aStop) ? `The stop ${aStop} is` : 'A structure stop would be'} ${short ? 'under' : 'over'} or at B's: the break would not move the stop, so B would be A with one more condition — no B. Say so in one line.${facts.deep_stop != null ? ` If the user takes the deep stop (${facts.deep_stop}), B is on offer in THAT same turn.` : ''}`)
     }
-    if (Number.isFinite(aTarget) && sg * (aTarget - arm) <= 0) {
+    if (changes && Number.isFinite(aTarget) && sg * (aTarget - arm) <= 0) {
         lines.push(`  A's target ${aTarget} is at or ${short ? 'over' : 'under'} B's arming line: B arms where A takes profit, so B's target is the next sellers ${short ? 'under' : 'above'} ${arm}, from the chart — say so in B's bullet.`)
     }
     return lines.join('\n')

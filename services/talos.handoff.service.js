@@ -4,7 +4,7 @@ import { notifySetupManage, notifySetupLimitDisarm } from './tradeNotify.service
 import { ownsEntity } from './entity/entityCrud.service.js'
 import { makeEntityRepo } from './entity/entityRepo.service.js'
 import { appendJournal } from './journal.service.js'
-import { isLivePosition } from './entity/vocabulary.js'
+import { isLivePosition, STATUS } from './entity/vocabulary.js'
 import { disarmedSetupPatch } from './setup.schema.js'
 import { cancelRestingEntryOrders } from './restingOrders.service.js'
 import * as manage from './positionManage.service.js'
@@ -189,4 +189,17 @@ export async function disarmSetup(id, userId, deps = _deps) {
     return { ok: true }
 }
 
-export const talosHandoffService = { manageSetup, dismissSetupCard, disarmSetup, toExecutionProposal, SETUP_MANAGE_VERBS }
+/**
+ * The user closes a setup that has not been entered, from the card that says a stop broke (Roy, 2026-11-04). Nothing to
+ * cancel: only a setup with no order at the broker closes here. A resting or filled one has its own way out.
+ */
+export async function closeSetup(id, userId, deps = _deps) {
+    const { setup, err } = await _loadOwned(deps, id, userId)
+    if (err) return { ok: false, reason: err }
+    if (setup.status !== STATUS.WAITING && setup.status !== STATUS.LOOKING) return { ok: false, reason: 'not_closable' }
+    await repo(deps).patch(id, { status: STATUS.CLOSED, closedReason: 'invalidated', closedAt: Date.now() })
+    logger.info(LOG, `setup ${id} closed by the user`)
+    return { ok: true, closed: true }
+}
+
+export const talosHandoffService = { manageSetup, dismissSetupCard, disarmSetup, closeSetup, toExecutionProposal, SETUP_MANAGE_VERBS }

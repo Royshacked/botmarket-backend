@@ -235,6 +235,70 @@ level after the break. Both are B. Drive 8 refused B for a level under the line,
 of its own (GNRC, 8% / 1.5: level 194.36 under the 212.81 line → B = the break, then the pullback to 194.36). The
 entry on the break itself is untested; Mentor says so once.
 
+## Every build offers the second scenario (Roy, 2026-11-04)
+
+Roy: *"Every time I want Mentor to offer two scenarios: the regular one and, if there will be a price move that will
+cause a stop move, offer it as a second scenario. The user can accept the first, the second or both."* Asked how to set a
+stop that does not exist yet: *"Mentor assumes live what the stop will be if break up and offer it as a second scenario
+for entry."* Both means the first to fill takes the full size, as alternatives always have.
+
+**Why the old B almost never appeared.** It needed a printed higher low, and A's stop already sits under that same low, so
+the break moved nothing unless the user took the deep stop. Sampled on 20 charts (2026-11-04): one candidate, no stop
+that moved. With the rule below: a candidate on 20 of 20, and the stop moves on 18.
+
+**This reverses two earlier rules for B only:** "no higher low printed → no B" (Change 2) and the `on_away` rule against
+authoring levels for structure that has not printed. Roy chose it knowing the level may turn out wrong. The redraw path and
+the `on_away` rule stand for everything else.
+
+| | Rule (`structureFacts` → `break_candidate`) |
+|---|---|
+| The line | Sellers in control: the last swing high, whose close over it flips control. Otherwise the nearest high over the price, a confirmed swing high or the recent high since the last swing low. None → no B. |
+| The assumed stop | The line − (k + buffer) × ATR: a swing here needs a pullback of k ATR, so that is the first higher low the break could confirm, and the buffer goes under it. Mentor judges it and says it is assumed. |
+| The target | The next swing high at least a stop's distance over the line, else a measured move. A high just over the line would fail every limit at the level (COST: line 1053.75, next high 1058.89, stop 31 under). |
+| The context | Read with the replay's three words: `breakout`, `reversal`, `continuation`. Only reversal held an edge in the tests, and Mentor says which this one is. |
+| No B | B's stop not clearly over A's (the buffer × ATR): the break moves nothing. Mentor says so in one line. |
+
+**The user's answer decides the worksheet:** A alone, B alone (keeping its arming condition), or A then B as alternatives.
+
+**When price has already gone through the regular stop** (5 of the 20 charts: the last swing low is over the close), there is
+no regular trade. Mentor says the regular scenario is off and offers B (Roy, 2026-11-04). The deep stop is offered beside it
+while it is on the right side of the price (Roy, the same day), never recommended over B, and it goes on only when the user
+names it. Taking it makes a regular scenario again.
+
+**Talos, from the code review the same day.** B's stop can sit over today's price, so anything that reads it before the
+break would call it broken. Four things follow from "a thesis scenario whose arming event has not happened has not started"
+(`notStarted`):
+
+- **Code arms B.** The scenario carries `arm_close`, and `_latchArming` reads the last completed day bar against it on every
+  wake. A read could only latch it when B was the premise on the table, so a close over the line with A on the table left B
+  unarmed for good. Generate refuses a B without it.
+- **B is off the table until then.** `thesisGate` skips it, so A is what gets read.
+- **It cannot run away before then,** so the close that arms it is never read as doing so. It can still fall (below).
+- **A lone B can still be read while it waits,** so the read is told it has not started, and an `edit` or a stale premise on it
+  is held as an intact wait.
+
+Other lenses are unchanged. Once armed every edge counts, and an enter through the stop is held either way (`entryDrift`
+`pastStop`).
+
+**A close under the stop, on any scenario: redraw or close (Roy, 2026-11-04).** On this lens the break edge is the stop
+itself, whatever `lower` was authored as (`breakView`), and it is not a question at the build: `on_break` neither
+silences it nor closes the setup. A day close under it sends the `invalidated` card, with Re-draw it and Close setup; only
+that scenario dies, and nothing closes by itself. Close setup (`POST /setups/:id/action` `close`) works only while nothing
+is at the broker (`waiting`, `looking`).
+
+An unarmed B's assumed stop can sit over today's price, where a close under it means nothing: "went below" needs price to
+have been over it. So until a day close has been at or over the stop (`monitor_state.scenarios.<id>.over_stop`), B watches
+`arm_floor`, the candidate's `floor`: the stop when price is over it at the build, else the low of the fall. Generate
+refuses a B without it. A pullback under an unarmed B's stop, or a stop already crossed at the build and a further low, both
+now end in the card. A B built before this has no floor and no break edge until it arms.
+
+**Known costs, not fixed here:**
+
+- **The assumed stop does not move at the break.** Once written it stays until a redraw, even if the real higher low prints
+  elsewhere. Roy's choice; the arming event could trigger a redraw later.
+- **Nothing tested.** The assumed stop is not in any lab test. The tests' B entered at a level after the first close over
+  a swing high, with a stop under a printed low.
+
 ## Noted for later — more facts for the stop and the targets (Roy, 2026-11-03)
 
 Roy asked whether Mentor reads short interest, options, dark pools or the prices institutions bought at when it judges

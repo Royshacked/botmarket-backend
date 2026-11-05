@@ -1,16 +1,18 @@
 // DRIVE THE THESIS LENS'S FOLLOW-UPS (Roy, 2026-11-02; docs/design/thesis-lens-followups.md).
 //
-//   G. GNRC, typed bare name → risk-based. The structure stop under the last swing low, and the DEEPER stop OFFERED
-//      with the date price last traded under it. Taking it → the break scenario B is offered (the break changes the
-//      stop). Limits, size, wait, the runaway answer → the worksheet: every scenario has a validity range + on_away,
-//      B carries a latching arming condition.
-//   N. NXST, buyers already in control, built straight through → one scenario, its away edge at the recent high, the
-//      runaway question asked (never filled in).
+//   G. AMD, typed bare name → risk-based. The structure stop under the last swing low, and the DEEPER stop OFFERED
+//      with the date price last traded under it, and declined. The break scenario B is offered on the regular stop with
+//      an ASSUMED stop (Roy, 2026-11-04), and the user takes both. Limits, size, wait, the runaway answer → the worksheet:
+//      every scenario has a validity range + on_away, B carries a latching arming condition, A first, B second.
+//   R. A name price has already taken through its regular stop (the first of the list that is, read live) → the regular
+//      scenario is said to be off and B is the only offer. Stops at the offer.
+//   N. NXST, buyers already in control, built straight through → one scenario with B mentioned as on offer, never set
+//      unasked; its away edge at the recent high, the runaway question asked (never filled in).
 //
 // What a turn ran is read from logs/backend.log (`[mentorAgent] chatStream done`), what it built from the session.
 // Each Mentor reply is printed in full so the judgment calls can be read, not only counted.
 //
-//   node scripts/drive-thesis-followups.mjs [baseUrl] [outDir]
+//   node scripts/drive-thesis-followups.mjs [baseUrl] [outDir]     ONLY_G=1 runs G alone (about five turns), SKIP_G=1 the rest
 //
 // Against the Vite dev server (:5173) as `ui-smoke`, on FRESH sessions (deleted after). Nothing is generated.
 // Real model spend: about nine Mentor turns. One sign-in.
@@ -124,12 +126,14 @@ const reload = async () => {
 }
 
 try {
-    // ── G. GNRC: the deeper stop offered; taken → B offered ──
-    const sidG = await fresh()
-    console.log('\nG. GNRC — session', sidG)
     await signIn(page)
+    let r, d
+    if (!process.env.SKIP_G) {
+    // ── G. AMD: the deeper stop offered and declined; B offered on the regular stop; both taken ──
+    const sidG = await fresh()
+    console.log('\nG. AMD — session', sidG)
     await reload()
-    let r = await say(page, 'Build me a swing trade on GNRC.')
+    r = await say(page, 'Build me a swing trade on AMD.')
     check('G: risk-based', r.turn?.mode === 'thesis', JSON.stringify({ mode: r.turn?.mode, src: r.turn?.modeSource }))
     check('G: the structure is read', r.tools.includes('get_price_structure'))
     // The opening is a gate: direction, horizon, lens, and how far to build. Checkpoints, so every offer is said.
@@ -137,7 +141,7 @@ try {
 
     // Walk the stages, answering EVERY question a reply asks (Mentor often asks several in one), each fact given once,
     // until the worksheet is ready or 12 more turns pass.
-    let deepOffered = null, deepTaken = false, bOffered = null, bTaken = false, levelsCalled = 0
+    let deepOffered = null, deepAnswered = false, bOffered = null, bTaken = false, levelsCalled = 0
     const given = new Set()
     const all = []
     for (let i = 0; i < 12; i++) {
@@ -145,12 +149,12 @@ try {
         levelsCalled += r.tools.filter(n => n === 'get_entry_level').length
         const text = r.reply, t = text.toLowerCase()
         if (deepOffered == null && /(deep(er)?|wider)\b[^.]{0,30}\bstop|whole fall|under the fall/i.test(text)) deepOffered = text
-        if (bOffered == null && deepTaken && /break(out)? (scenario|route)|break, then|second way in|after the break|scenario b\b|\bb [—-] break|\bB (uses|arms|—|:)|breakout/i.test(text)
-            && !/not offering|no (separate|distinct) break/i.test(text)) bOffered = text
+        // The offer, not the word: "breakout" in a span's rejects answered "both" before anything was offered (drive 12).
+        if (bOffered == null && /assum/i.test(text) && /\bboth\b/i.test(text)) bOffered = text
         const parts = []
         const once = (key, test, words) => { if (!given.has(key) && test) { given.add(key); parts.push(words) } }
-        if (!deepTaken && deepOffered) { deepTaken = true; parts.push('I\'ll take the deeper stop — a price it hasn\'t visited for a while.') }
-        if (deepTaken && bOffered && !bTaken) { bTaken = true; parts.push('Yes, add the break scenario too.') }
+        if (!deepAnswered && deepOffered) { deepAnswered = true; parts.push('Stay on the regular stop, not the deeper one.') }
+        if (bOffered && !bTaken) { bTaken = true; parts.push('I take both scenarios, the regular one and the break.') }
         once('limits', /risk limit|reward[- ]to[- ]risk|r:r|stop distance/.test(t), 'My risk limit is 8% and my minimum reward to risk is 1.5.')
         once('target', /second target|half out|stage half/.test(t), 'One target is fine.')
         once('size', /\bsize\b|how much|risk \$|shares|which unit/.test(t) && /\?/.test(text), 'Risk $200 on it.')
@@ -162,24 +166,73 @@ try {
     }
     check('G: the deeper stop is OFFERED', deepOffered != null)
     // Any reply that names the deep stop's price — the first "deeper stop" match can be an earlier reply's echo (drive 8).
-    const dated = all.find(x => /17[01]\.\d\d/.test(x.reply) && /feb(ruary)?\s*5|2026-02-05/i.test(x.reply))
-    check('G: …with the date price last traded under it (Feb 5, 2026)', dated, (all.find(x => /17[01]\.\d\d/.test(x.reply))?.reply ?? '').slice(0, 300))
-    check('G: with the deep stop taken, the break scenario is offered', bOffered != null)
+    const dated = all.find(x => /(deep(er)?|whole fall)[\s\S]{0,200}(since|last traded)\b/i.test(x.reply))
+    check('G: …with the date price last traded under it', dated, (dated?.reply ?? '').slice(0, 300))
+    check('G: on the regular stop, the break scenario is offered', bOffered != null)
+    check('G: …its stop said to be assumed', bOffered && /assum/i.test(bOffered), (bOffered ?? '').slice(0, 400))
+    check('G: …and the choice put: the first, the second or both', all.some(x => /\bboth\b/i.test(x.reply)), (bOffered ?? '').slice(0, 200))
     const readTurn = all.find(x => /risk limit|reward[- ]to[- ]risk|stop distance/i.test(x.reply))
     check('G: before asking the limits, a read of what fits the chart (the normal move)', readTurn && /atr|normal (daily )?moves?|normal (days|weeks)|moves? about|a day\b|daily move/i.test(readTurn.reply), (readTurn?.reply ?? '').slice(0, 400))
     check('G: an entry level per scenario (each on its own stop)', levelsCalled >= 2, `get_entry_level × ${levelsCalled}`)
     await shot(page, 'G1-built')
-    let d = await draftOf(sidG)
+    d = await draftOf(sidG)
     console.log('G worksheet:', describe(d))
     const sc = scenariosOf(d)
     check('G: two scenarios on the worksheet', sc.length === 2, `${sc.length}`)
     check('G: every scenario has a validity range with an away answer', sc.length && sc.every(s => s.validity && s.validity.on_away), describe(d).slice(0, 300))
     check('G: B carries a latching arming condition', sc.some(s => (s.conditions ?? []).some(c => c.persistence === 'latching')))
+    // AMD drive, 2026-11-04: offered on $497.40 and built on $579.18.
+    const armText = sc.flatMap(s => s.conditions ?? []).find(c => c.persistence === 'latching')?.text ?? ''
+    const armPrice = armText.match(/\d+(?:\.\d+)?/)?.[0] ?? null
+    check('G: the line offered is the line built', armPrice && bOffered?.includes(armPrice), `built ${armText}`)
+    const armed = sc.find(s => (s.conditions ?? []).some(c => c.persistence === 'latching'))
+    check('G: B carries its arming price, for code to read', Number.isFinite(armed?.arm_close) && String(armed.arm_close) === armPrice, String(armed?.arm_close))
+    check('G: B carries its floor', Number.isFinite(armed?.arm_floor), String(armed?.arm_floor))
+    const asked = sc.every(s => s.validity?.lower === s.stop_legs?.[0]?.price)
+    check('G: the break edge is the stop', asked, JSON.stringify(sc.map(s => [s.validity?.lower, s.stop_legs?.[0]?.price])))
     const stops = sc.map(s => s.stop_legs?.[0]?.price).filter(Number.isFinite)
     check('G: the break changes the stop — B\'s is over A\'s', stops.length === 2 && stops[1] > stops[0], JSON.stringify(stops))
     const ready = d ? setupReadiness(d, true) : null
     check('G: no validity range missing', ready && !ready.missing.some(m => m.startsWith('validity range')), JSON.stringify(ready?.missing))
     await shot(page, 'G3-worksheet')
+
+    }
+
+    if (!process.env.ONLY_G) {
+    // ── R. Price through the regular stop: the regular scenario off, B alone ──
+    const { thesisTurnFacts } = await import('../services/tools/thesisStructure.tools.js')
+    let offName = null
+    for (const t of ['GNRC', 'NVDA', 'CSCO', 'CAT', 'INTC']) {
+        const f = await thesisTurnFacts({ ticker: t, timeframe: 'day', side: 'long' })
+        if (f?.break && f.stop > f.close) { offName = t; break }
+    }
+    if (offName) {
+        const sidR = await fresh()
+        console.log('\nR.', offName, '— session', sidR)
+        await reload()
+        r = await say(page, `Build me a swing trade on ${offName}.`)
+        r = await say(page, 'Yes — long, swing, thesis. Stop at the checkpoints.')
+        let said = null, limitsGiven = false
+        for (let i = 0; i < 4 && !said; i++) {
+            if (/\boff\b|gone through|already (under|below|through|crossed)|above (the )?(price|market)/i.test(r.reply) && /assum/i.test(r.reply)) { said = r.reply; break }
+            // "Agreed" is no answer to a question about limits: Mentor asked again until the turns ran out (drive 13).
+            const asksLimits = !limitsGiven && /stop distance|risk limit|reward[- ]to[- ]risk/i.test(r.reply)
+            if (asksLimits) limitsGiven = true
+            r = await say(page, asksLimits ? 'My risk limit is 8% and my minimum reward to risk is 1.5.' : 'Agreed — go on.')
+        }
+        check(`R: ${offName}: the regular scenario is said to be off, and B is offered`, said, (said ?? r.reply).slice(0, 400))
+        const facts = await thesisTurnFacts({ ticker: offName, timeframe: 'day', side: 'long' })
+        // A bare "agreed" is not a choice (GNRC, 2026-11-04: it was read as taking the deep stop). The off line can come at
+        // spans, and the offers at the entries, a turn later (NVDA drive).
+        const afterAgreed = await say(page, 'Agreed — go on.')
+        const offers = `${said ?? ''}\n${afterAgreed.reply}`
+        check(`R: ${offName}: the deep stop is offered beside B`, /deep(er)?\b/i.test(offers), afterAgreed.reply.slice(0, 300))
+        check(`R: ${offName}: …and not recommended over B`, !/deep[^.]{0,60}recommend|recommend[^.]{0,60}deep/i.test(offers))
+        const onSheet = scenariosOf(await draftOf(sidR)).map(s => s.stop_legs?.[0]?.price)
+        check(`R: ${offName}: a bare "agreed" takes neither`, !onSheet.some(x => Math.abs(x - facts.deep_stop) <= facts.atr * 0.5), `stops ${JSON.stringify(onSheet)}, deep ${facts.deep_stop}`)
+        check(`R: ${offName}: …and Mentor asks which`, /\?/.test(afterAgreed.reply) && /\bwhich\b|\bB\b|deep/i.test(afterAgreed.reply), afterAgreed.reply.slice(0, 300))
+        check(`R: ${offName}: nothing drawn on the dead stop`, !scenariosOf(await draftOf(sidR)).some(s => s.stop_legs?.[0]?.price > (s.entry_legs?.[0]?.price ?? Infinity)), describe(await draftOf(sidR)).slice(0, 300))
+    } else console.log('R: no name on the list is through its regular stop today — skipped')
 
     // ── N. NXST: buyers in control, straight through → an away edge at the recent high, the runaway asked ──
     const sidN = await fresh()
@@ -192,14 +245,15 @@ try {
     for (let i = 0; i < 4 && !asked; i++) {
         r = await say(page, i === 0 ? 'Yes — long, swing, thesis. Go all the way.' : 'Agreed — go on.')
         nTurns.push(r.turn)
-        asked = /just goes|runs? away|ran away|without you|let it go|ping/i.test(r.reply)
+        asked = /just goes|runs? away|ran away|without you|let it go|ping|\bredraw\b/i.test(r.reply)
     }
     check('N: risk-based', nTurns.some(t => t?.mode === 'thesis'), JSON.stringify(nTurns.map(t => t?.mode ?? null)))
     check('N: the runaway question is ASKED, not filled in', asked)
+    check('N: no default of Mentor\'s own for that answer', !/if (it goes )?unanswered|default(s)? to (a )?(redraw|revise|ping)/i.test(r.reply), r.reply.slice(0, 300))
     if (asked) r = await say(page, 'If it just goes, ping me to redraw it.')
     d = await draftOf(sidN)
     console.log('N worksheet:', describe(d))
-    check('N: one scenario — buyers already control, no break to wait for', scenariosOf(d).length === 1, `${scenariosOf(d).length}`)
+    check('N: one scenario — B is on offer, never set unasked', scenariosOf(d).length === 1, `${scenariosOf(d).length}`)
     const v = scenariosOf(d)[0]?.validity
     // The recent high moves with the stock (175.93 → 177.03 → 177.66 → 180.96 across drives; live in an open session, so 1%): read it live — the highest high
     // since the last swing low, off the same bars the tool reads.
@@ -210,6 +264,7 @@ try {
     check(`N: its away edge sits at the recent high (${recentHigh}), over the price`, v?.approach != null && Math.abs(v.approach - recentHigh) <= recentHigh * 0.01, JSON.stringify(v))
     check('N: the stop is under the higher low (≈161.6), not the fall low', (() => { const s = scenariosOf(d)[0]?.stop_legs?.[0]?.price; return s > 158 && s < 162.52 })(), JSON.stringify(scenariosOf(d)[0]?.stop_legs))
     await shot(page, 'N1-straight-through')
+    }
 } catch (err) {
     console.error('DRIVE ERROR', err)
     check('the drive ran to the end', false, err.message)

@@ -5,7 +5,7 @@ import { MODES } from '../../services/analysisModes.js'
 import { sanitizeScanSeed } from '../../services/scanSeed.util.js'
 import { normalizeSetup, setupReadiness } from '../../services/setup.schema.js'
 import { thesisGate, scenarioGate } from '../../monitoring/talos.gates.js'
-import { _buildSeedSection, _buildBreakSection, _buildRiskReadSection, _readThesisFacts, mentorAgentService } from '../../services/agents/mentor.agent.service.js'
+import { _buildSeedSection, _buildBreakSection, _buildRedrawSection, _buildRiskReadSection, _readThesisFacts, mentorAgentService } from '../../services/agents/mentor.agent.service.js'
 import { emptyBuild, upsertName, putName, activeName } from '../../services/mentorBuild.util.js'
 import { lensLine } from '../../monitoring/assess.shared.js'
 import { priceStructureText, entryLevelText, entryLevelReply, breakWords, thesisTurnFacts, unmirrorFacts, targetWords, unfinishedWeek } from '../../services/tools/thesisStructure.tools.js'
@@ -165,12 +165,12 @@ test('get_entry_level: no ticker or no level → no fetch; a failed fetch still 
 })
 
 test('get_price_structure: the break candidate worded for its side, and a short\'s turned the right way up', () => {
-    assert.match(breakWords('long'), /HIGHER LOW .* day close over arms B/)
-    assert.match(breakWords('short'), /LOWER HIGH .* day close under arms B/)
+    assert.match(breakWords('long'), /day close over arms B\. The stop is ASSUMED: the higher low/)
+    assert.match(breakWords('short'), /day close under arms B\. The stop is ASSUMED: the lower high/)
     const f = unmirrorFacts({ close: -50, swings: [], last_swing_low: null, last_swing_high: null, control: 'buyers', fall: null,
         candidates: { stop: -56, deep_stop: -61, target: -40 }, heavy_days: [],
-        break_candidate: { swing_to_break: { type: 'high', price: -45 }, higher_swing: { type: 'low', price: -55 }, fall_low: { date: 'd', price: -60 }, stop: -56 } })
-    assert.deepEqual(f.break_candidate, { swing_to_break: { type: 'low', price: 45 }, lower_swing: { type: 'high', price: 55 }, rise_high: { date: 'd', price: 60 }, stop: 56 })
+        break_candidate: { swing_to_break: { type: 'high', price: -45 }, higher_swing: { type: 'low', price: -55 }, fall_low: { date: 'd', price: -60 }, stop: -56, stop_is: 'assumed', floor: -60, target: -40, context: 'reversal' } })
+    assert.deepEqual(f.break_candidate, { swing_to_break: { type: 'low', price: 45 }, lower_swing: { type: 'high', price: 55 }, rise_high: { date: 'd', price: 60 }, stop: 56, stop_is: 'assumed', floor: 60, target: 40, context: 'reversal' })
     assert.equal(unmirrorFacts({ ...f, close: -50, swings: [], heavy_days: [], candidates: {}, break_candidate: null }).break_candidate, null)
 })
 
@@ -197,16 +197,21 @@ test('the lens prompt: the deeper stop is OFFERED with its cost and its date, ne
     assert.match(lens, /stop's depth did not move the edge/)
 })
 
-test('the lens prompt: the break scenario is offered only over a printed higher low, as an alternative, never the break at market', () => {
+test('the lens prompt: the break scenario is offered on every build with an assumed stop; the user takes A, B or both (Roy, 2026-11-04)', () => {
     const lens = _lens()
-    assert.match(lens, /The break scenario — OFFER it, never set it unasked/)
-    assert.match(lens, /HIGHER LOW has already printed/)
-    assert.match(lens, /No higher low printed → no B/)
-    assert.match(lens, /the break would CHANGE\s+THE STOP/, 'Roy: B only when the break moves the stop')
-    assert.match(lens, /so there is no B: A is that trade/)
+    assert.match(lens, /The break scenario — OFFER it on every build, never set it unasked/)
+    assert.match(lens, /The user takes \*\*A, B or both\*\*/)
+    assert.match(lens, /\*\*B's stop is ASSUMED\*\*/)
+    assert.doesNotMatch(lens, /No higher low printed → no B/, 'the higher low has not printed by design')
+    assert.match(lens, /The break would CHANGE THE STOP when B's\s+stop sits clearly over A's/, 'Roy: B only when the break moves the stop')
+    assert.match(lens, /so there is\s+no B, and you say so in one line/)
+    assert.match(lens, /A → A alone\. B → B alone, the only scenario\. Both → A first, B second/)
+    assert.match(lens, /a continuation or a breakout tested around zero/)
+    assert.match(lens, /B alone keeps its arming condition/)
+    assert.match(lens, /B's: the nearest swing high above both its level\s+and the arming line/, 'the break that arms B is never a runaway')
     assert.match(lens, /so the\s+break IS the entry; under it, the break arms B and the entry is the pullback/, 'Roy 2026-11-03: the break is the entry when the limits allow')
     assert.match(lens, /never "B does not fit"/)
-    assert.match(lens, /ALTERNATIVES: the first to fill takes the full\s+size/)
+    assert.match(lens, /alternatives: the first to fill takes the full size/)
     assert.match(lens, /A\s+day close over \{swing high\} since \{today\}/, 'B arms on a latching day close')
 })
 
@@ -274,7 +279,7 @@ test('the lens prompt after the GNRC drive: the date said from the tool, the dee
     assert.match(lens, /SAY that\s+date, from the tool or the turn's RISK READ line, which carries it/)
     assert.match(lens, /never a reason to withhold the offer/, 'drive 9: "can\'t responsibly quote it without its date"')
     assert.match(lens, /the deep one goes on only when the user takes it/)
-    assert.match(lens, /B is offered at the ENTRIES stage, in the same turn the user takes the deep stop — never at spans/)
+    assert.match(lens, /B is offered at the ENTRIES stage, with the stop — never at spans/)
     assert.match(lens, /never quote an R:R or a level of your own either/)
 })
 
@@ -301,7 +306,7 @@ test('the lens on the stages: spans holds one trade; entries carries the stop, o
     assert.match(lens, /\*\*spans\*\* holds ONE trade/)
     assert.match(lens, /\*\*entries\*\* carries steps 2–6 and settles only when they are done/)
     assert.match(lens, /the stage cannot settle before it exists/)
-    assert.match(lens, /second ENTRY OPTION on the same trade, B/)
+    assert.match(lens, /B is a second ENTRY OPTION on the same trade/)
     assert.match(lens, /`semantics: "alternatives"` — one scenario per entry/)
 })
 
@@ -309,29 +314,121 @@ test('the lens on the stages: spans holds one trade; entries carries the stop, o
 // B for a level under the break; three drives asked the limits before the risk read) ───
 
 const B_FACTS = { swing_to_break: { type: 'high', date: '2026-10-29', price: 212.81 }, higher_swing: { type: 'low', date: '2026-10-28', price: 181 },
-    fall_low: { date: '2026-09-16', price: 173.25 }, stop: 178.81 }
+    fall_low: { date: '2026-09-16', price: 173.25 }, stop: 197.34, stop_is: 'assumed', target: 231.89, context: 'reversal' }
 const FACTS = { timeframe: 'day', side: 'long', close: 202.04, atr: 9.1, stop: 178.81, deep_stop: 171.06, break: B_FACTS }
 const ON = (stop, target = 231.89) => ({ scenarios: [{ id: 's1', stop_legs: [{ price: stop }], target_legs: [{ price: target }] }] })
 
-test('the break section: on the deep stop B is ON OFFER this turn; on the structure stop no B, and the deep stop named as its trigger', () => {
-    const deep = _buildBreakSection(FACTS, ON(171.06))
-    assert.match(deep, /a DAY close over 212\.81 arms it; its stop 178\.81, under the higher low at 181 \(2026-10-28\) — 16% from the break/)
-    assert.match(deep, /the break CHANGES THE STOP, so B is ON OFFER THIS TURN/)
-    assert.match(deep, /once they declined, leave it/)
+test('the break section: B is ON OFFER on the regular stop as well as the deep one — the user takes A, B or both (Roy, 2026-11-04)', () => {
     const structure = _buildBreakSection(FACTS, ON(178.81))
-    assert.match(structure, /no B\. If the user takes the deep stop \(171\.06\), B is on offer in THAT same turn/)
-    assert.doesNotMatch(structure, /ON OFFER THIS TURN/)
-    assert.match(_buildBreakSection(FACTS, ON(177.5)), /no B/, 'within the stop\'s own noise buffer (0.2 ATR) is the same stop')
-    assert.match(_buildBreakSection(FACTS, { scenarios: [] }), /A structure stop would be at B's/)
+    assert.match(structure, /a DAY close over 212\.81 arms it; the stop you ASSUME for then is 197\.34 — 7\.3% from the break/)
+    assert.match(structure, /has not printed, so judge it and say it is assumed/)
+    assert.match(structure, /The worksheet's stop 178\.81 is under B's: the break CHANGES THE STOP, so B is ON OFFER THIS TURN/)
+    assert.match(structure, /Ask which they take: A, B or both\. Both: the first to fill takes the whole size and the other is cancelled/)
+    assert.match(structure, /once they declined, leave it/)
+    assert.match(_buildBreakSection(FACTS, ON(171.06)), /ON OFFER THIS TURN/, 'the deep stop too')
+    assert.match(_buildBreakSection(FACTS, { scenarios: [] }), /The structure stop 178\.81 is under B's: the break CHANGES THE STOP/, 'nothing drawn yet: compared with the structure stop')
+})
+
+test('the break section: a break that would not move the stop is no B, said in one line', () => {
+    const none = _buildBreakSection(FACTS, ON(196))
+    assert.match(none, /the break would not move the stop, so B would be A with one more condition — no B\. Say so in one line/)
+    assert.match(none, /If the user takes the deep stop \(171\.06\), B is on offer in THAT same turn/)
+    assert.doesNotMatch(none, /ON OFFER THIS TURN/)
+})
+
+test('the break section: a regular stop price has gone through leaves B as the only offer (Roy, 2026-11-04)', () => {
+    const off = _buildBreakSection({ ...FACTS, close: 175 }, { scenarios: [] })
+    assert.match(off, /The regular stop 178\.81 is already over today's 175: price has gone through it, so the regular scenario is OFF/)
+    assert.match(off, /B is ON OFFER THIS TURN/)
+    assert.match(off, /The deep stop \(171\.06\) is still on the right side of the price: offer it too, with its cost, and do not recommend it over B/)
+    assert.match(off, /If they take it, there is a regular scenario again, and both can stand/)
+    assert.match(off, /a bare "agreed" is not a choice, so ask which/)
+    assert.match(off, /B's ENTRY is get_entry_level/)
+    assert.doesNotMatch(off, /Ask which they take/, 'no choice to put: A is gone')
+    assert.doesNotMatch(_buildBreakSection({ ...FACTS, close: 165 }, { scenarios: [] }), /deep stop \(171\.06\) is still/, 'price under the deep stop too: it is not offered')
+    assert.match(_buildBreakSection({ ...FACTS, close: 175, break: { ...B_FACTS, stop: 178.9 } }, { scenarios: [] }), /ON OFFER THIS TURN/, 'offered even when B\'s stop barely clears the dead one')
+    const short = { side: 'short', close: 60, atr: 2, stop: 58, deep_stop: 66, break: { swing_to_break: { type: 'low', price: 45 }, stop: 50, target: 38, context: 'reversal' } }
+    assert.match(_buildBreakSection(short, { scenarios: [] }), /The regular stop 58 is already under today's 60/)
+    assert.doesNotMatch(_buildBreakSection(FACTS, ON(178.81)), /regular scenario is OFF/, 'the price over the stop: the regular scenario stands')
+})
+
+test('the lens prompt: the numbers offered are the numbers built; no default of Mentor\'s own for the runaway answer', () => {
+    assert.match(_lens(), /The\s+numbers you offer are the ones you build/)
+    assert.match(readFileSync(new URL('../../prompts/mentor_system_prompt.md', import.meta.url), 'utf8'), /Never announce a default of your own/)
+})
+
+test('the break section: no structure stop is not a stop of 0 (code review)', () => {
+    const none = _buildBreakSection({ ...FACTS, stop: null }, { scenarios: [] })
+    assert.doesNotMatch(none, /stop 0\b/)
+    assert.match(none, /A structure stop would be/)
+    assert.doesNotMatch(_buildBreakSection({ side: 'short', close: 60, atr: 2, stop: null, deep_stop: 66, break: { swing_to_break: { type: 'low', price: 45 }, stop: 50, target: 38, context: 'reversal' } }, { scenarios: [] }), /regular scenario is OFF/)
+})
+
+test('the break section at spans carries what it would at the entries, only the timing differs (code review)', () => {
+    const spans = _buildBreakSection({ ...FACTS, stage: 'spans' }, ON(178.81))
+    assert.match(spans, /ON OFFER ONCE THE SPAN SETTLES/)
+    assert.match(spans, /Ask which they take: A, B or both/)
+    assert.match(spans, /B's ENTRY is get_entry_level/)
+    assert.match(_buildBreakSection({ ...FACTS, close: 175, stage: 'spans' }, { scenarios: [] }), /regular scenario is OFF/)
+    assert.match(_buildBreakSection({ ...FACTS, stage: 'spans' }, ON(196)), /no B/)
+})
+
+test('a redraw gets fresh numbers for a lone B, and two scenarios (code review)', () => {
+    const loneB = { scenarios: [{ id: 's1', stop_legs: [{ price: 197.34 }], conditions: [{ id: 'c', weight: 'primary', persistence: 'latching', text: 'A day close over 212.81' }] }] }
+    assert.equal(_buildBreakSection(FACTS, loneB), '')
+    assert.match(_buildBreakSection(FACTS, loneB, { redraw: true }), /the stop you ASSUME for then is 197\.34.*\n.*The structure stop 178\.81 is under B's/)
+    assert.match(_buildRedrawSection({ event: 'ran_away' }, { trade_mode: 'thesis' }), /takes its line and its assumed stop from THE BREAK SCENARIO below instead, and a new arm_close/)
+})
+
+test('the risk read gives no distance for a stop price has already crossed (code review)', () => {
+    const text = _buildRiskReadSection({ ...FACTS, close: 175 }, null)
+    assert.match(text, /the structure stop 178\.81 is already crossed at today's 175, so give no distance for it/)
+    assert.doesNotMatch(text, /178\.81 is 2\.2%/)
+    assert.match(text, /the deep stop 171\.06 is 2\.3% from today's 175/)
+})
+
+test('thesis: B needs its arming price, and the worksheet keeps it', () => {
+    const b = { direction: 'long', trade_mode: 'thesis', asset: 'AMD', type: 'swing', entry_mode: 'conditional', valid_until: '2027-01-01T00:00:00.000Z',
+        scenarios: [{ id: 's1', entry_legs: [{ price: 570, quantity: 5 }], stop_legs: [{ price: 524 }], target_legs: [{ price: 639 }],
+            validity: { lower: 524, upper: 630, approach: 639, timeframe: 'day', on_away: 'revise', on_break: 'revise' },
+            conditions: [{ id: 'c', text: 'A day close over 579', weight: 'primary', mode: 'measured', persistence: 'latching' }] }] }
+    assert.ok(setupReadiness(normalizeSetup(b), true).missing.some(m => /arming price/.test(m)))
+    const armed = normalizeSetup({ ...b, scenarios: [{ ...b.scenarios[0], arm_close: 579.18 }] })
+    assert.equal(armed.scenarios[0].arm_close, 579.18)
+    assert.ok(!setupReadiness(armed, true).missing.some(m => /arming price/.test(m)))
+})
+
+test('the lens prompt: B carries arm_close, and its pivot has a rule at the highs', () => {
+    assert.match(_lens(), /`arm_close`: that line's price/)
+    assert.match(_lens(), /or its target when there is none \(at the highs\)/)
+})
+
+test('the lens prompt: price through the regular stop leaves B alone', () => {
+    assert.match(_lens(), /there is no regular\s+trade: say the regular scenario is off, draw nothing on that stop, and offer B alone/)
+    assert.match(_lens(), /never recommended over it/)
+    assert.match(_lens(), /a bare "agreed" is not a choice/)
+})
+
+test('the break section: says what the tests found for this break', () => {
+    assert.match(_buildBreakSection(FACTS, ON(178.81)), /a reversal, the one context that held an edge/)
+    assert.match(_buildBreakSection({ ...FACTS, break: { ...B_FACTS, context: 'continuation' } }, ON(178.81)), /a continuation, a context that tested around zero: say so/)
+    assert.match(_buildBreakSection({ ...FACTS, break: { ...B_FACTS, context: 'breakout' } }, ON(178.81)), /a breakout, a context that tested around zero/)
+})
+
+test('the break section: B taken alone is settled, nothing more to offer; A alone stays on offer until declined', () => {
+    const loneB = { scenarios: [{ id: 's1', stop_legs: [{ price: 197.34 }], conditions: [{ id: 'c', weight: 'primary', persistence: 'latching', text: 'A day close over 212.81' }] }] }
+    assert.equal(_buildBreakSection(FACTS, loneB), '')
+    const loneA = { scenarios: [{ id: 's1', stop_legs: [{ price: 178.81 }], conditions: [{ id: 'c', weight: 'primary', persistence: 'live', text: 'strength' }] }] }
+    assert.match(_buildBreakSection(FACTS, loneA), /ON OFFER THIS TURN/)
 })
 
 test('the break section: B\'s entry is the tool\'s level — the break itself when it fits, a pullback after it when under (Roy, 2026-11-03)', () => {
     const deep = _buildBreakSection(FACTS, ON(171.06))
-    assert.match(deep, /B's ENTRY is get_entry_level on B's stop 178\.81, B's target and their limits — never an R:R of your own/)
+    assert.match(deep, /B's ENTRY is get_entry_level on B's stop 197\.34, B's target and their limits — never an R:R of your own/)
     assert.match(deep, /Level at or over 212\.81: the break price fits their limits, so the break IS the entry/)
     assert.match(deep, /Level under 212\.81: B waits for a pullback to the level after the break\. Both are B/)
     assert.match(deep, /never "does not fit" for a level under the line/)
-    assert.doesNotMatch(_buildBreakSection(FACTS, ON(178.81)), /B's ENTRY/, 'no B, no entry to explain')
+    assert.doesNotMatch(_buildBreakSection(FACTS, ON(196)), /B's ENTRY/, 'no B, no entry to explain')
 })
 
 test('the break section: A\'s target at B\'s arming line is said; two scenarios or no candidate → nothing', () => {
@@ -343,9 +440,10 @@ test('the break section: A\'s target at B\'s arming line is said; two scenarios 
 })
 
 test('the break section on a short: mirrored words, the stop compared the other way', () => {
-    const s = { side: 'short', atr: 2, deep_stop: 61, break: { swing_to_break: { type: 'low', price: 45 }, lower_swing: { type: 'high', price: 55 }, stop: 56 } }
+    const s = { side: 'short', atr: 2, deep_stop: 61, break: { swing_to_break: { type: 'low', price: 45 }, lower_swing: { type: 'high', price: 55 }, stop: 56, target: 38, context: 'reversal' } }
     const text = _buildBreakSection(s, ON(61, 40))
-    assert.match(text, /a DAY close under 45 arms it; its stop 56, over the lower high at 55/)
+    assert.match(text, /a DAY close under 45 arms it; the stop you ASSUME for then is 56/)
+    assert.match(text, /the lower high it stands for has not printed/)
     assert.match(text, /stop 61 is over B's: the break CHANGES THE STOP.* its stop is lower than A's/)
     assert.match(text, /Level at or under 45: the break price fits/)
 })
@@ -366,14 +464,18 @@ test('the risk read carries the deep stop\'s date; B waits for the entries stage
     assert.match(_buildRiskReadSection({ ...FACTS, deep_stop_last_traded: '2026-02-05' }, null), /the deep stop \(not traded under since 2026-02-05\) 171\.06 is 15\.3%/)
     assert.match(_buildRiskReadSection({ ...FACTS, deep_stop_last_traded: null }, null), /not traded under since any day in the history read/)
     assert.match(_buildRiskReadSection({ ...FACTS, side: 'short', deep_stop_last_traded: '2026-01-02' }, null), /not traded over since 2026-01-02/)
-    assert.equal(_buildBreakSection({ ...FACTS, stage: 'spans' }, ON(171.06)), '', 'never offered at spans')
+    const spans = _buildBreakSection({ ...FACTS, stage: 'spans' }, ON(171.06))
+    assert.match(spans, /a DAY close over 212\.81 arms it/, 'the numbers are there for the turn that settles the span (AMD drive: it made up its own)')
+    assert.match(spans, /Not an offer yet: B waits for the entries\. If this turn settles the span and goes on to the entries, offer B with these numbers/)
+    assert.doesNotMatch(spans, /ON OFFER THIS TURN/, 'never offered at spans')
+    assert.equal(_buildBreakSection({ ...FACTS, stage: 'sizing' }, ON(171.06)), '')
     assert.match(_buildBreakSection({ ...FACTS, stage: 'entries' }, ON(171.06)), /ON OFFER THIS TURN/)
 })
 
 test('thesisTurnFacts: the close, the normal move, both stops and the chart\'s B — or null', async () => {
     const closes = [...Array(60).fill(100), 98, 96, 97, 99, 100, ...Array(30).fill(100), 98, 95, 92, 89, 86, 83, 81, 80.5, 82, 84, 86, 87, 85, 84, 83.6, 83.5, 84.5, 86]
     const f = await thesisTurnFacts({ ticker: 'gnrc', timeframe: 'day' }, { get: provider(closes) })
-    assert.ok(f.break && f.break.swing_to_break.price > f.break.higher_swing.price && f.break.stop < f.break.higher_swing.price, JSON.stringify(f))
+    assert.ok(f.break && f.break.swing_to_break.price > f.close && f.break.stop_is === 'assumed' && f.break.stop < f.break.swing_to_break.price, JSON.stringify(f))
     assert.ok(f.atr > 0 && f.deep_stop < f.stop && f.close === 86)
     assert.deepEqual([f.side, f.timeframe], ['long', 'day'])
     assert.equal((await thesisTurnFacts({ ticker: 'x', timeframe: 'day' }, { get: provider(Array(80).fill(10)) })).break, null, 'no B, the risk facts still there')
@@ -403,7 +505,8 @@ test('the turn: a thesis trade at ENTRIES reads the chart and is told the risk r
     const atSpans = await run(at({ direction: 'long', horizon: 'swing', lens: 'thesis' }))
     assert.equal(asked.length, 2, 'the turn that settles spans asks the limits — it reads too (drive 9)')
     assert.match(atSpans, /THE RISK READ/)
-    assert.doesNotMatch(atSpans, /THE BREAK SCENARIO/, 'B waits for entries')
+    assert.match(atSpans, /Not an offer yet: B waits for the entries/, 'the numbers ride along; the offer waits for entries')
+    assert.doesNotMatch(atSpans, /ON OFFER THIS TURN/)
     await run(at({ direction: 'long', horizon: 'swing' }))
     await run(at({ direction: 'long', horizon: 'swing', lens: 'thesis', spans: ['t1'] }), { trade_mode: 'smc' })
     assert.equal(asked.length, 2, 'the opening, or another lens: no read')
@@ -453,5 +556,21 @@ test('the break edge is asked in the user\'s words, with the away edge, never as
     assert.match(v, /want a ping to redraw it, close it, or just a heads-up\?/)
     assert.match(v, /Nothing redraws by itself/)
     assert.match(v, /One question for both edges/)
-    assert.match(_lens(), /and the break edge in the SAME question/)
+    assert.match(_lens(), /The break edge is not a question here/)
+})
+
+test('B needs its floor as well as its line, or Generate refuses it (Roy, 2026-11-04)', () => {
+    const b = normalizeSetup({ trade_mode: 'thesis', direction: 'long', asset: 'X', scenarios: [{ id: 'B', name: 'B', arm_close: 100, arm_floor: 90,
+        conditions: [{ id: 'c', text: 'A day close over 100', weight: 'primary', persistence: 'latching' }], validity: { lower: 95, upper: 110, approach: 120, on_away: 'pass' } }] })
+    assert.equal(b.scenarios[0].arm_floor, 90)
+    assert.ok(!setupReadiness(b).missing.some(m => /arming floor/.test(m)))
+    const none = { ...b, scenarios: [{ ...b.scenarios[0] }] }
+    delete none.scenarios[0].arm_floor
+    assert.ok(setupReadiness(none).missing.some(m => /arming floor/.test(m)))
+})
+
+test('the lens prompt: a broken stop is not asked about', () => {
+    assert.match(_lens(), /The break edge is not a question here/)
+    assert.match(_lens(), /`arm_floor`: the candidate's `floor`/)
+    assert.match(_lens(), /`lower` at the stop/)
 })

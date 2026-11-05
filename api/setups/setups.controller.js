@@ -48,7 +48,9 @@ export const actOnSetup = _handle('actOnSetup', async (req, res) => {
 
     const result = action === 'dismiss'
         ? await talosHandoffService.dismissSetupCard(id, userId)
-        : await talosHandoffService.manageSetup(id, userId, action)
+        : action === 'close'
+            ? await talosHandoffService.closeSetup(id, userId)
+            : await talosHandoffService.manageSetup(id, userId, action)
 
     if (!result.ok) return sendReason(res, result.reason, { overrides: setupReason, fallbackMessage: 'action_failed' })
     res.send(result)
