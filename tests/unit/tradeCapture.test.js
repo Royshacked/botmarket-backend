@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { buildOrigin, pickCallReasoning, pickPortfolioThesis, computeTradeStats } from '../../services/tradeCapture.service.js'
+import { buildOrigin, pickCallReasoning, pickPortfolioThesis, computeTradeStats, tradeCaptureService } from '../../services/tradeCapture.service.js'
 
 // buildOrigin freezes "what spawned this trade" onto the trade doc. Four cases:
 // idea / call / portfolio / idealess — with `type` derived (call > portfolio > idea).
@@ -220,4 +220,52 @@ test('a scaled winner and a plain loser aggregate together', () => {
     assert.equal(s.grossProfit, 1150)
     assert.equal(s.grossLoss, 150)
     assert.equal(s.count, 2)
+})
+
+// Every open row is born with `exit: null`, and Mongo refuses a dotted write inside a null. That failed
+// every close and partial from 2026-08-09: the setup closed, the row stayed open. The fake keeps Mongo's rule.
+function ledgerWith(row) {
+    const matches = (filter) => Object.entries(filter).every(([k, v]) => {
+        if (k === 'exits.orderId') return !(row.exits ?? []).some(e => e.orderId === v.$ne)
+        return v === null ? row[k] == null : row[k] === v
+    })
+    const intoExit = (field) => {
+        if (field.startsWith('exit.') && row.exit === null) throw new Error(`Cannot create field '${field.slice(5)}' in element {exit: null}`)
+    }
+    const updateOne = async (filter, update) => {
+        if (!matches(filter)) return { matchedCount: 0 }
+        for (const field of [...Object.keys(update.$set ?? {}), ...Object.keys(update.$inc ?? {})]) intoExit(field)
+        for (const [field, value] of Object.entries(update.$set ?? {})) {
+            if (field.startsWith('exit.')) row.exit[field.slice(5)] = value
+            else row[field] = value
+        }
+        for (const [field, value] of Object.entries(update.$inc ?? {})) {
+            if (field.startsWith('exit.')) row.exit[field.slice(5)] = (row.exit[field.slice(5)] ?? 0) + value
+            else row[field] = (row[field] ?? 0) + value
+        }
+        for (const [field, value] of Object.entries(update.$push ?? {})) row[field] = [...(row[field] ?? []), value]
+        return { matchedCount: 1 }
+    }
+    return { getDb: async () => ({ collection: () => ({ updateOne }) }) }
+}
+const openRow = () => ({ accountId: 'a', positionId: 'p', status: 'open', exit: null, commission: 0, spread: 0 })
+
+test('captureClose closes a row born with exit: null', async () => {
+    const row = openRow()
+    await tradeCaptureService.captureClose({ accountId: 'a', positionId: 'p', orderId: 'o', price: 207.14, quantity: 16, reason: 'tp', pnl: 132.95, at: 5 }, ledgerWith(row))
+    assert.equal(row.status, 'closed')
+    assert.deepEqual(row.exit, { price: 207.14, ts: 5, reason: 'tp', realizedPnl: 132.95 })
+    assert.equal(row.exits.length, 1)
+})
+
+test('a partial on a row born with exit: null records, and the close adds to its total', async () => {
+    const row = openRow()
+    const deps = ledgerWith(row)
+    await tradeCaptureService.capturePartial({ accountId: 'a', positionId: 'p', orderId: 'o1', price: 105, quantity: 4, reason: 'tp', pnl: 20, at: 2 }, deps)
+    assert.equal(row.status, 'open')
+    assert.equal(row.exit.realizedPnl, 20)
+    await tradeCaptureService.captureClose({ accountId: 'a', positionId: 'p', orderId: 'o2', price: 110, quantity: 6, reason: 'tp', pnl: 60, at: 3 }, deps)
+    assert.equal(row.status, 'closed')
+    assert.equal(row.exit.realizedPnl, 80)
+    assert.equal(row.exits.length, 2)
 })

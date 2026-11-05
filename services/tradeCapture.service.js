@@ -312,6 +312,16 @@ async function captureOpenBare(exec) {
 }
 
 /**
+ * An open row is born with `exit: null`, and Mongo refuses to write `exit.price` inside a null: the
+ * whole update fails. Since partials were added (97f70dd, 2026-08-09) that failed every close and
+ * partial, leaving the row open forever while the position and the setup closed. The row becomes an
+ * empty object first, which every reader already takes the same as null (`t.exit?.price`).
+ */
+async function _prepareExit(db, filter) {
+    await db.collection(COLLECTION).updateOne({ ...filter, exit: null }, { $set: { exit: {} } })
+}
+
+/**
  * One exit SLICE on a position that survived it — a scale-out, a partial stop, one leg of a
  * multi-level exit. Appends to `exits[]` and accrues the running total on `exit.realizedPnl`.
  *
@@ -327,12 +337,13 @@ async function captureOpenBare(exec) {
  * dragged through the panel, placed straight at the broker) has no id and cannot be sized from our
  * records at all, which is why the caller does not record those.
  */
-async function capturePartial({ accountId, positionId, orderId, price, quantity, reason, pnl, commission, spread, at }) {
+async function capturePartial({ accountId, positionId, orderId, price, quantity, reason, pnl, commission, spread, at }, deps = { getDb }) {
     try {
         if (positionId == null || accountId == null) return
-        const db  = await getDb()
+        const db  = await deps.getDb()
         const now = at ?? Date.now()
         const filter = { accountId: String(accountId), positionId: String(positionId), status: 'open' }
+        await _prepareExit(db, filter)
         if (orderId != null) filter['exits.orderId'] = { $ne: String(orderId) }
 
         const res = await db.collection(COLLECTION).updateOne(filter, {
@@ -367,13 +378,15 @@ async function capturePartial({ accountId, positionId, orderId, price, quantity,
  * `commission`/`spread` become the round-trip total.
  * @param {{ accountId, positionId, orderId?, price?, quantity?, reason?, pnl?, commission?, spread?, at? }} opts
  */
-async function captureClose({ accountId, positionId, orderId, price, quantity, reason, pnl, commission, spread, at }) {
+async function captureClose({ accountId, positionId, orderId, price, quantity, reason, pnl, commission, spread, at }, deps = { getDb }) {
     try {
         if (positionId == null || accountId == null) return
-        const db  = await getDb()
+        const db  = await deps.getDb()
         const now = at ?? Date.now()
+        const filter = { accountId: String(accountId), positionId: String(positionId), status: 'open' }
+        await _prepareExit(db, filter)
         const res = await db.collection(COLLECTION).updateOne(
-            { accountId: String(accountId), positionId: String(positionId), status: 'open' },
+            filter,
             {
                 $set: {
                     status:      'closed',
