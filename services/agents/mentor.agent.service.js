@@ -974,7 +974,7 @@ export function _buildModeSection(mode) {
     if (mode === MODE_USER) {
         return '\n\nMODE: THE USER\'S SETUP — they brought their own. Build it in their terms (§ Two modes); the lens is yours to recommend from their words'
             + ' — `discretionary`, `smc` or `institutional` — and theirs to agree. If they ask for your way instead, switch:'
-            + ' <build>{"switch_lens":"thesis","source":"user"}</build>, and say in one line that the trades are rebuilt under it.'
+            + ' <build>{"switch_lens":"thesis","source":"user"}</build>, and say in one line that the trades are rebuilt under it, with the rules of the lens if this build has not said them (§ The thesis lens, the opening).'
     }
     return '\n\nMODE: UNDECIDED — the server could not tell whether the user brought a setup of their own. Decide by § Two modes, and claim the lens on your worksheet.'
 }

@@ -124,6 +124,9 @@ Claude, which has barely run since Luna became the house model). DONE 2026-11-01
 - ~~**The Hotlist's This week catalyst read** told Mentor to build the take-profit at Prometheus's swing target.~~
   DECIDED 2026-11-01 (Roy: "when building with Mentor in this week — Mentor will find the target"): his target is
   context, the take-profit is Mentor's from the chart (`_buildSeedSection`).
+- **The rules are told (Roy, 2026-11-05).** A risk-based build opens with the lens's rules, in fixed words from the prompt,
+  once per build; never on a redraw, an edit or the user's own setup. The longer version is static text in Mentor's Info
+  (`RiskBasedInfo`, the column on a desktop and the sheet on a phone). `scripts/verify-mentor-opening.mjs` runs it on a real model.
 - **Driven 2026-11-01 — `scripts/drive-mentor-modes.mjs` 15/16** (Luna, axl_dev). The Hotlist hand-off carried no lens
   and ran risk-based from the seed with no pattern tool; the user's own idea switched it to `discretionary` and the next
   turn had the whole kit; a typed bare name was read as no setup (risk-based, no pattern tool); a typed setup was read

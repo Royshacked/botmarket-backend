@@ -5,7 +5,7 @@ import { MODES } from '../../services/analysisModes.js'
 import { sanitizeScanSeed } from '../../services/scanSeed.util.js'
 import { normalizeSetup, setupReadiness, computeRR } from '../../services/setup.schema.js'
 import { thesisGate, scenarioGate } from '../../monitoring/talos.gates.js'
-import { _buildSeedSection, _buildBreakSection, _buildRedrawSection, _buildRiskReadSection, _buildTargetSection, _snapMeasuredTarget, _readThesisFacts, mentorAgentService } from '../../services/agents/mentor.agent.service.js'
+import { _buildModeSection, _buildSeedSection, _buildBreakSection, _buildRedrawSection, _buildRiskReadSection, _buildTargetSection, _snapMeasuredTarget, _readThesisFacts, mentorAgentService } from '../../services/agents/mentor.agent.service.js'
 import { emptyBuild, upsertName, putName, activeName } from '../../services/mentorBuild.util.js'
 import { lensLine } from '../../monitoring/assess.shared.js'
 import { priceStructureText, entryLevelText, entryLevelReply, breakWords, thesisTurnFacts, unmirrorFacts, targetWords, unfinishedWeek } from '../../services/tools/thesisStructure.tools.js'
@@ -33,6 +33,16 @@ test('the seed section: every hand-off — the Hotlist, the book, Argus — open
         assert.match(text, /building it RISK-BASED \(the `thesis` lens\)/)
         assert.doesNotMatch(text, /Argus recommends|smc/)
     }
+})
+
+test('the lens prompt: a risk-based build opens with the rules, once, and only there (Roy, 2026-11-05)', () => {
+    const p = readFileSync(new URL('../../prompts/mentor_system_prompt.md', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
+    const lens = p.slice(p.indexOf('## The thesis lens'), p.indexOf('## Size comes from the user'))
+    assert.match(lens, /the\nreply STARTS with these lines/)
+    for (const rule of ['Stop:', 'Target:', 'Your limits:', 'Entry:', 'If it leaves:']) assert.ok(lens.includes(`- **${rule}**`), rule)
+    assert.match(lens, /Never on a later\nturn, on a redraw or an edit of a saved setup, or on the user's own setup/)
+    assert.doesNotMatch(p, /Say in one line that you are building it risk-based/)
+    assert.match(_buildModeSection('user'), /with the rules of the lens if this build has not said them/)
 })
 
 test('the lens prompt: one target, a second one offered (stop unchanged), never set unasked — tests 2 / 2b', () => {
