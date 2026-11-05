@@ -283,13 +283,14 @@ export function switchLens(name, lens, source = 'user') {
 /**
  * REOPEN FOR A RE-DRAW (Roy, 2026-11-03: "is the revising really happening?" — it was not: a setup reopened from
  * Talos's missed/broken card came back with every stage settled, and Mentor asked whether the direction still stood).
- * The levels are what moved, so the entries stage goes and everything under it; the opening and the span stay, and
- * the user's SIZE is held again as switchLens does — their risk answer, not a level. PURE.
+ * The whole trade is read again (Roy, 2026-11-05: the stop, the targets and so on), so the span goes with the entries:
+ * a span carries the target, and left settled it kept the old one. The opening stays, and the user's SIZE is held again
+ * as switchLens does — their risk answer, not a level. PURE.
  */
 export function reopenForRedraw(name) {
     if (!name) return { name, cleared: [] }
     const size = name.settled.size ?? (name.claimed.size?.source === 'user' ? name.claimed.size.value : null)
-    const r = unsettle(name, 'entries')
+    const r = unsettle(name, 'spans')
     return { name: size && typeof size === 'object' ? claim(r.name, { size }, 'user').name : r.name, cleared: r.cleared }
 }
 

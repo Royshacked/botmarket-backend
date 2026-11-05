@@ -26,6 +26,7 @@ import {
 import { resolveMode, readSetup, kitFor, handlersFor, lensOf as lensOfName, MODE_THESIS, MODE_USER } from '../mentorMode.service.js'
 import { logger } from '../logger.service.js'
 import { setupService } from '../../api/setups/setups.service.js'
+import { setupCommit } from '../../api/setups/setupCommit.service.js'
 import { STATUS } from '../entity/vocabulary.js'
 
 // Mentor — the trade ASSISTANT (Pipeline F). A conversation → a draft `setup` entity.
@@ -56,8 +57,10 @@ const COVERAGE_DIMENSIONS = ['markets', 'company', 'technicals']
 
 /** The sizing call. An ACTION, not a read — so it is kept out of the "already read" record. */
 export const SIZE_TOOL = 'size_position'
+/** Closing the saved setup being edited, once the user said so. */
+export const CLOSE_TOOL = 'close_setup'
 /** Calls that compute on the user's numbers rather than read the market — never recorded as "already read". */
-const ACTION_TOOLS = new Set([SIZE_TOOL, 'get_entry_level'])
+const ACTION_TOOLS = new Set([SIZE_TOOL, CLOSE_TOOL, 'get_entry_level'])
 
 // Kairos's kit plus the reasoning sidecar, APPENDED so the shared array is the exact prefix of
 // this one — the tools cache breakpoint sits inside TRADING_TOOLS, and inserting anywhere before it
@@ -100,6 +103,9 @@ export const MENTOR_TOOLS = [
         get_entry_level: `The \`thesis\` lens's entry arithmetic. After you judged the stop and the target and the USER gave their risk limit (the stop at most X% from the entry) and/or their minimum reward to risk: the highest entry worth paying (the lowest, on a short) — the entry leg's price, valid "at the level and below". Never compute it yourself; read it out. It also says the last date price traded past the stop you gave — the date for "not traded under since", never a guess.`,
     }),
     ...toolsFor({
+        [CLOSE_TOOL]: `Close the saved setup being edited here: its status turns to closed and Talos stops watching it. It cannot be reopened. Call it only when the USER has said to close it or let it go, never on your own read that the trade is gone: say that, and ask. Saying a setup is closed without this call leaves it open.`,
+    }),
+    ...toolsFor({
         // The sidecar is contractually last at every desk that declares it
         // (agentToolsRegistry.test.js), and it sits past the tools cache breakpoint — which is
         // inside TRADING_TOOLS, on get_derivatives_context — so declaring it here touches no
@@ -127,6 +133,7 @@ async function chatStream({
     _readSetup = readSetup,           // the cheap "did they bring a setup?" read on a typed first turn (mentorMode.service)
     _thesisFacts = thesisTurnFacts,   // the chart's stops, normal move and break scenario, read for a thesis trade at entries
     _listSetups = setupService.listSetups,   // the setups on this account that have not filled yet
+    _closeSetup = setupCommit.closeSetup,    // a saved setup the user decided to close
 }) {
 
     // `consult` is deliberately absent: runAgentStream builds it from the tool declaration, which is
@@ -150,6 +157,8 @@ async function chatStream({
     // The size the user gave THIS turn, as reported through the tool. Applied after the turn exactly
     // like a `size` in the tag: one op, whichever way it arrived.
     let toolSize = null
+    // The setup this turn closed, for the desk's fold. Only the tool below writes it.
+    let closedSetup = null
     const toolHandlers = {
         ...buildTradingToolHandlers(onChart, userId),
         [FLIP_TOOL]: _flipHandler({
@@ -161,6 +170,20 @@ async function chatStream({
         get_analyst_actions: makeToolHandler('get_analyst_actions',
             ({ symbols, limit }) => _analystActions(Array.isArray(symbols) ? symbols : [], limit),
             (err) => `Could not fetch analyst actions: ${err.message}`, LOG),
+        [CLOSE_TOOL]: async () => {
+            const editing = chatState?.editing?.kind === 'setup' ? chatState.editing.entityId : null
+            if (!editing) return 'Not closed: no saved setup is open here, so there is nothing to close.'
+            // The turn a card opens on is the card's words, not an answer from the user (redrawAsk).
+            if (chatState?.redraw?.event) return 'Not closed: the user has not answered yet. Give your read and ask whether to close it; it closes on their yes.'
+            const out = await _closeSetup(editing, userId)
+            if (!out?.ok) {
+                return out?.reason === 'not_closable'
+                    ? 'Not closed: an order is working or the position is filled, and those have their own way out. Tell the user the setup stays open.'
+                    : `Not closed (${out?.reason ?? 'failed'}). Tell the user the setup stays open.`
+            }
+            closedSetup = { id: String(editing), asset: chatState?.draft?.asset ?? null }
+            return 'Closed: the status is now closed and Talos has stopped watching it. Say so in one line, and write no worksheet.'
+        },
         [SIZE_TOOL]: async (args = {}) => {
             const size = sanitizeBuildOps({ size: args })?.size
             if (!size) return `Not recorded: \`unit\` must be one of ${SIZE_UNITS.join(', ')} and \`value\` a positive number. Ask the user for their size in one of those.`
@@ -500,6 +523,7 @@ async function chatStream({
         // Absent until there is a second name, so an ordinary one-name build sends nothing new.
         ...(Object.keys(drafts).length > 1 ? { drafts } : {}),
         ...(setups && !normalized ? { setups } : {}),
+        ...(closedSetup ? { closedSetup } : {}),
         ...route.result(),   // { route, routeSymbol, opening, edit } — the controller validates
     }
 }
@@ -726,9 +750,11 @@ export function _buildRedrawSection(redraw, draft) {
     const which = redraw.scenarios?.length ? ` (${redraw.scenarios.join(', ')})` : ''
     const saw = redraw.event === 'ran_away'
         ? `it RAN AWAY without filling${which}${redraw.reason ? ` — ${redraw.reason}` : ''}. The read was not wrong; the entry never came.`
-        : `its premise BROKE${which}${redraw.reason ? ` — ${redraw.reason}` : ''}.`
+        : redraw.event === 'stale'
+            ? `the map has DRIFTED${redraw.reason ? ` — ${redraw.reason}` : ''}. The trade may still be there, on levels that are no longer the chart's.`
+            : `its premise BROKE${which}${redraw.reason ? ` — ${redraw.reason}` : ''}.`
     const how = draft?.trade_mode === 'thesis'
-        ? 'Redraw it on TODAY\'s chart with the lens (§ The thesis lens, step 9): read get_price_structure, the stop under the NEW higher low, the user\'s same risk limit and minimum reward to risk (from the conversation — ask once if they are not in it), the new level from get_entry_level, a new validity range. A scenario that waits on a break takes its line and its assumed stop from THE BREAK SCENARIO below instead, and a new arm_close.'
+        ? 'Redraw it on TODAY\'s chart with the lens (§ The thesis lens, step 9): read get_price_structure, the stop under the NEW higher low, the target read again, the user\'s same risk limit and minimum reward to risk (from the conversation — ask once if they are not in it), the new level from get_entry_level, a new validity range. A scenario that waits on a break takes its line and its assumed stop from THE BREAK SCENARIO below instead, and a new arm_close.'
         : 'Redraw its levels on TODAY\'s chart, in its own lens — read the structure again, never the old levels.'
     // EVERY scenario on the worksheet is from the old chart (CR: the old B rode into the regenerate unexamined — with
     // two scenarios the break section stays silent).
@@ -739,8 +765,11 @@ export function _buildRedrawSection(redraw, draft) {
         ? 'If the redrawn level fails their limits, say plainly there is no trade here and they let it go — never a chase.'
         : 'First say whether the trade still stands at all; if the structure went the other way, say plainly there is no trade.'
     // Said only when it happened (CR): an older setup has no ledger to reopen.
-    const where = redraw.reopened === false ? '' : ' The entries stage is reopened for it; the direction, the horizon, the span and their size stand.'
-    return `\n\nTHE RE-DRAW — the user opened this setup from Talos's card: ${saw}${where} ${how}${all} ${verdict}`
+    const where = redraw.reopened === false ? '' : ' The span and the entries are reopened for it; the direction, the horizon and their size stand.'
+    // THE WHOLE TRADE (Roy, 2026-11-05). The worksheet's "carry every settled field forward" must not read as "keep the old numbers".
+    const whole = 'CHECK THE WHOLE TRADE AGAIN, nothing on trust: the numbers on the worksheet above are the OLD plan. Go through the entry, the stop, every target, the reward to risk and the validity range, in every scenario, and say for each what it was and what it is now, in one short table: "stop: was $X, now $Y, because…" or "still $X, the low held". A level that did not change is an answer too.'
+    const close = `If the answer is no trade, ask whether to close the setup, and call ${CLOSE_TOOL} when they say yes. Telling them it is gone does not close it.`
+    return `\n\nTHE RE-DRAW — the user opened this setup from Talos's card: ${saw}${where} ${how}${all} ${whole} ${verdict} ${close}`
 }
 
 /**

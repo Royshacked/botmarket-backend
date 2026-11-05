@@ -37,6 +37,8 @@ export function _mentorResponse(result) {
         ...(result.gate ? { gate: result.gate } : {}),
         ...(result.setup  ? { setup: result.setup, readiness: result.readiness } : {}),
         ...(result.setups ? { setups: result.setups } : {}),
+        // The setup this turn closed: the page's list re-reads.
+        ...(result.closedSetup ? { closedSetup: result.closedSetup } : {}),
         // route / routeSymbol / opening are appended by the caller (routing.util).
     }
 }
@@ -82,6 +84,8 @@ async function _labelSeed(seed) {
  * readiness, the candidate offer), kept so a reload can redraw them. `ops` is never stored: one-shot.
  */
 export function mentorNextState(prev, result, input = {}) {
+    // The setup it was editing is closed: nothing is left on the table, and no Update to press.
+    if (result.closedSetup) return null
     const draft = result.setup ?? prev?.draft ?? null
     return {
         active_asset: draft?.asset || input.seed?.ticker || prev?.active_asset || '',
@@ -141,9 +145,9 @@ export function mentorStateFromEntity(setup) {
 
 /**
  * WHAT TALOS SAID about a saved setup, when it is a reason to re-draw: a scenario that RAN AWAY unfilled (drifting) or
- * BROKE (fired), read off the per-scenario latches and the document's roll-up. → `{ event: 'ran_away' | 'broken',
- * reason, scenarios: [names] }`, or null — nothing latched, or only Talos's stale-map read (edge 'time', which already
- * carries its own proposal). A broken premise outranks a missed one.
+ * BROKE (fired), read off the per-scenario latches and the document's roll-up, or the map going STALE (edge 'time', whose
+ * card asks for a re-draw too). → `{ event: 'ran_away' | 'broken' | 'stale', reason, scenarios: [names] }`, or null when
+ * nothing is latched. A broken premise outranks a missed one.
  *
  * Only BEFORE ENTRY (CR 2026-11-03): a filled setup keeps its other scenario's latch, and a live position must never be
  * told it "ran away without filling" and have its levels reopened. A miss the user said to let go (`on_away: pass`) is
@@ -151,7 +155,7 @@ export function mentorStateFromEntity(setup) {
  */
 export function redrawOf(setup) {
     if (!setup || !PRE_ENTRY.includes(setup.status)) return null
-    if (setup.invalidation_edge === 'time') return null
+    if (setup.invalidation_edge === 'time') return { event: 'stale', reason: setup.invalidation_reason ?? null, scenarios: [] }
     const states = setup.monitor_state?.scenarios ?? {}
     const byId = new Map((setup.scenarios ?? []).map(sc => [sc.id, sc]))
     const hit = (status) => Object.entries(states).filter(([id, s]) => s?.invalidation_status === status
@@ -202,6 +206,10 @@ export const mentorDesk = {
     // A session turn hands its input in already parsed; the seed still needs its house label.
     prepareInput: async (input = {}) => ({ ...input, seed: await _labelSeed(sanitizeScanSeed(input.seed)) }),
     nextState: mentorNextState,
+    // A setup closed in the chat keeps the conversation that closed it (sessionTurn).
+    sealAfterTurn: (result) => (result.closedSetup
+        ? { kind: 'setup', entityIds: [result.closedSetup.id], name: result.closedSetup.asset ? `${result.closedSetup.asset} setup` : null }
+        : null),
     run: ({ state, input, emit, common }) => mentorAgentService.chatStream({
         ...common,
         // `ops` — what a card press decided — is ONE-SHOT: it rides this turn only. The HTTP client puts

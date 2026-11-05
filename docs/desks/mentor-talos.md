@@ -256,10 +256,10 @@ the two edges are not the same event (2026-09-26, docs/design/mentor-challenge.m
 Talos posts the card into the user's Mentor chat (`postCard` → `postBotCard`): pending until pressed or dismissed, one
 per setup (a newer one supersedes it), pushed over the socket and as a Web Push. The button opens the setup in Mentor
 with `redrawAsk`'s turn — a miss reads "ran without filling … the read wasn't wrong", a break "no longer valid". The
-reopen is a real re-draw: `mentor.desk redrawOf` reads what Talos latched and `mentorStateFromEntity` reopens the
-ENTRIES stage (`mentorBuild reopenForRedraw` — the opening, the span and the user's size stand), and the turn is told
+reopen is a real re-draw: `mentor.desk redrawOf` reads what Talos latched (a miss, a break, or the map gone stale) and `mentorStateFromEntity` reopens the
+SPAN stage and everything under it (`mentorBuild reopenForRedraw`, since 2026-11-05, so the target is read again too — the opening and the user's size stand), and the turn is told
 THE RE-DRAW (`_buildRedrawSection`, one turn only): on a thesis setup the lens again on today's chart — the new higher
-low, the same limits, `get_entry_level`, a new range — or plainly no trade. Until then a re-draw opened on a finished
+low, the same limits, `get_entry_level`, a new range — or plainly no trade. Every turn of it checks the whole trade, old against new: entry, stop, every target, reward to risk, validity. When the user says to close it, `close_setup` (`setupCommit.closeSetup`) turns the status to closed and resolves the cards; the conversation seals onto the setup and the table clears (`sealAfterTurn`). It refuses on the card's own opening turn, and on a setup with an order working or a position filled. Until then a re-draw opened on a finished
 ledger and Mentor asked whether the direction still stood. Generate over the setup closes the card
 (`setupCommit.commitSetup` → `resolveCardsFor`). The same reopen happens on a pencil edit of a latched setup. Talos's
 own stale-map read (edge `time`) keeps its proposal path and reopens nothing. After the code review (2026-11-03): only

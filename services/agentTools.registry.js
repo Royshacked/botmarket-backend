@@ -325,6 +325,7 @@ export const TOOL_SCHEMAS = {
     // Mentor's sizing answer (services/agents/mentor.agent.service.js). The UNIT and the NUMBER are
     // the user's; the quantity is never a parameter — it is the server's to compute. The enum mirrors
     // SIZE_UNITS in services/positionSize.util.js.
+    close_setup: { "type": "object", "properties": {} },
     size_position: {
         "type": "object",
         "properties": {

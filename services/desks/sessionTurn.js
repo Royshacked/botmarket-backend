@@ -25,6 +25,7 @@ import { buildConversation } from './context.js'
 import { foldPlan, summarize as defaultSummarize } from './summarize.js'
 import { logger } from '../logger.service.js'
 import { keepMarkers } from './markers.js'
+import { sealing as defaultSealing } from './seal.js'
 
 const LOG = '[sessionTurn]'
 
@@ -94,6 +95,7 @@ export function makeSessionTurn({
     desks      = DESK_DEFS,
     experience = getExperienceLevel,
     summarize  = defaultSummarize,
+    sealing    = defaultSealing,
 } = {}) {
 
     async function maybeSummarize({ user, sessionId, agent, messages, summary }) {
@@ -178,6 +180,15 @@ export function makeSessionTurn({
         // it is working for (the busy rule reads that).
         const kept = keepMarkers(next, state)
         await sessions.setAgentState({ sessionId, userId: user._id, agent, state: kept })
+
+        // A TURN THAT FINISHED THE ITEM IT WAS EDITING (a setup closed in the chat): its conversation goes onto the item,
+        // the reply stays on screen, and the desk's next work starts clean. A failure never undoes what the turn did.
+        const finished = desk.sealAfterTurn?.(result)
+        if (finished) {
+            await sealing.sealFromSession({ userId: user._id, sessionId, agent, ...finished, keepTimeline: true })
+                .then(() => sealing.putAside({ userId: user._id, sessionId, agent }))
+                .catch(err => logger.warn(LOG, 'seal after a finishing turn failed', err.message))
+        }
 
         // The floor follows the reply: a route lands on its desk's entry agent; otherwise the agent that
         // answered keeps it. (Hand-offs and "@agent" join in phase 5.)

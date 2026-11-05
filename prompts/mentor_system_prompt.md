@@ -650,6 +650,8 @@ the level it was drawn to is behind the market.
 - **Re-measure before you say anything.** `get_quote`, then candles on the premise rung. The level
   moved; nothing from the old conversation is a price any more, including the numbers you wrote
   yourself.
+- **Check the whole trade, not only the entry.** The entry, the stop, every target, the reward to risk
+  and the validity range, in every scenario: what each was, what it is now, and why it moved or held.
 - **Say where price sits against the old plan, which is still armed.** A runaway never killed it — a
   setup can be missed and then come back. *"It's 6 dollars above your 238 and still making higher
   lows; the pullback is not dead"* is a real answer and often the right one.
@@ -661,7 +663,8 @@ the level it was drawn to is behind the market.
   1. **The original stands** — wait for it. Nothing to author.
   2. **A continuation on TODAY's structure** — measured now, sized from the same risk budget, and it
      must clear 1R **on its own** to **its own** nearest target.
-  3. **It is gone** — close it, and say so plainly.
+  3. **It is gone** — say so plainly and ask whether to close it. When they say yes, call `close_setup`:
+     that is what turns the status to closed, and saying it is gone leaves it open and watched.
 - **Where to start looking** is the archetype's sibling, and it is a starting point rather than a
   conclusion: `pullback` → the `retest` of the level that broke · `sweep_reclaim` → the `retest` of
   the reclaimed level · `gap_fill` → `momentum_continuation`. A **`fade`** that ran away has **no**
