@@ -20,6 +20,18 @@ test('prose is otherwise untouched — a marker inside a sentence, or a repeat t
     assert.equal(dropDebris('- one\n- two\n\nNext.'), '- one\n- two\n\nNext.')
 })
 
+// A web citation in the model's markup (gpt-6-luna, 2026-11-05): Mentor's reply read "tentative. citeturn0finance0".
+test('a citation marker goes, whole or bare, and the sentence around it closes up', () => {
+    const MARK = '\ue200cite\ue202turn0finance0\ue201'
+    assert.equal(cleanReply(`The long case is tentative. ${MARK}\n\nApple beat.`), 'The long case is tentative.\n\nApple beat.')
+    assert.equal(dropDebris(`It fell ${MARK}.`), 'It fell.')
+    assert.equal(dropDebris(`It fell ${MARK} on the news.`), 'It fell on the news.')
+    assert.equal(dropDebris('It fell citeturn0news1turn2search3.'), 'It fell.')
+    assert.equal(dropDebris('It fell \ue202 hard.'), 'It fell hard.')
+    for (const keep of ['Cite the filing.', 'They cite turn 0 of the plan.', 'Excite turn1a.'])
+        assert.equal(dropDebris(keep), keep)
+})
+
 // A stray token (gpt-6-luna, 2026-10-19): Argus's reply opened "<չ>\nThe best fit for a swing long is MSI…".
 test('a stray bracketed token goes — at the start, on its own line, or between words — and only that shape', () => {
     const MSI = 'The best fit for a swing long is MSI.'
