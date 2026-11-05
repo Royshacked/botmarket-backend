@@ -257,7 +257,7 @@ Talos posts the card into the user's Mentor chat (`postCard` → `postBotCard`):
 per setup (a newer one supersedes it), pushed over the socket and as a Web Push. The button opens the setup in Mentor
 with `redrawAsk`'s turn — a miss reads "ran without filling … the read wasn't wrong", a break "no longer valid". The
 reopen is a real re-draw: `mentor.desk redrawOf` reads what Talos latched (a miss, a break, or the map gone stale) and `mentorStateFromEntity` reopens the
-SPAN stage and everything under it (`mentorBuild reopenForRedraw`, since 2026-11-05, so the target is read again too — the opening and the user's size stand), and the turn is told
+SPAN stage and everything under it (`mentorBuild reopenForRedraw`, since 2026-11-05, so the target is read again too — the opening and the user's size stand; since the same day the old spans and entries come off the draft and an old "go all the way" is dropped, or that turn settled them all again), and the turn is told
 THE RE-DRAW (`_buildRedrawSection`, one turn only): on a thesis setup the lens again on today's chart — the new higher
 low, the same limits, `get_entry_level`, a new range — or plainly no trade. Every turn of it checks the whole trade, old against new: entry, stop, every target, reward to risk, validity. When the user says to close it, `close_setup` (`setupCommit.closeSetup`) turns the status to closed and resolves the cards; the conversation seals onto the setup and the table clears (`sealAfterTurn`). It refuses on the card's own opening turn, and on a setup with an order working or a position filled. Until then a re-draw opened on a finished
 ledger and Mentor asked whether the direction still stood. Generate over the setup closes the card

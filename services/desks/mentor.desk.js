@@ -111,7 +111,7 @@ export function mentorStateFromEntity(setup) {
     // A setup Talos says ran away or broke reopens with its LEVELS open (reopenForRedraw) — a finished ledger told
     // Mentor nothing was outstanding, and the re-draw never happened (redraw drive, 2026-11-03).
     const reopened = !!(stored && redraw && stored.build)
-    const draft = reopened ? { ...stored, build: _reopenActive(stored.build) } : stored ?? {
+    const draft = reopened ? _reopenedDraft(stored) : stored ?? {
         asset:       setup?.asset,
         asset_class: setup?.asset_class ?? null,
         direction:   setup?.direction   ?? null,
@@ -178,10 +178,15 @@ export function redrawOf(setup) {
 }
 
 /** The build with its ACTIVE name reopened for a re-draw. */
-function _reopenActive(rawBuild) {
-    const build = normalizeBuild(rawBuild)
+// THE REOPEN HAS TO LAST THE TURN (2026-11-05, NXST). The old spans and entries left on the draft were claimed again on the
+// redraw turn, and a build the user once told to "go all the way" settled them by itself: the ledger was finished again
+// before Mentor had drawn anything. So the reopened stages lose their content, as an `unsettle` does, and "go all the way"
+// goes with them. It answered the old build; this one comes back to the user.
+function _reopenedDraft(stored) {
+    const { spans: _spans, entries: _entries, ...rest } = stored
+    const build = normalizeBuild(stored.build)
     const name = activeName(build)
-    return name ? putName(build, reopenForRedraw(name).name) : build
+    return { ...rest, build: name ? putName({ ...build, waiver: false, delegated: [] }, reopenForRedraw(name).name) : build }
 }
 
 export const mentorDesk = {

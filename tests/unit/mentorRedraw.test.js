@@ -162,3 +162,43 @@ test('setupCommit.closeSetup resolves the cards only when it closed', async () =
     assert.equal(resolved.length, 1)
 })
 
+// ─── The reopen lasts the turn (NXST, 2026-11-05) ─────────────────────────────
+
+const WAIVED = () => SETUP({ ...ran, chat_state: { coverage: [], draft: {
+    asset: 'GNRC', trade_mode: 'thesis', build: { ...finished(), waiver: true, delegated: ['spans', 'entries'] },
+    spans: [{ id: 't1', from: 'here', to: 'there' }], entries: [{ trade: 't1', options: [{ id: 'o1', label: 'old way in' }] }],
+} } })
+const redrawTurn = (state, reply) => mentorAgentService.chatStream({
+    messages: [{ role: 'user', content: 'redraw it' }], chatState: state, userId: 'u1', accounts: [{ id: 'a', balance: 1000 }], mainAccountId: 'a',
+    _listSetups: async () => [], _thesisFacts: async () => null, _run: async () => reply,
+})
+
+test('the reopened draft has no old gates and no "go all the way"; the plan and the user\'s size stay', () => {
+    const { draft } = mentorStateFromEntity(WAIVED())
+    assert.equal('spans' in draft, false)
+    assert.equal('entries' in draft, false)
+    const build = normalizeBuild(draft.build)
+    assert.equal(build.waiver, false)
+    assert.deepEqual(build.delegated, [])
+    assert.equal(activeName(build).claimed.size.source, 'user')
+    assert.equal(draft.trade_mode, 'thesis')
+    const ordinary = mentorStateFromEntity({ ...SETUP(), chat_state: { coverage: [], draft: { asset: 'GNRC', build: { ...finished(), waiver: true } } } })
+    assert.equal(normalizeBuild(ordinary.draft.build).waiver, true, 'an ordinary edit keeps it')
+})
+
+test('a redraw turn that draws nothing leaves the build open, on a build that once said "go all the way"', async () => {
+    const state = mentorStateFromEntity(WAIVED())
+    const out = await redrawTurn(state, 'Do the direction and the horizon still stand?')
+    const name = activeName(normalizeBuild(mentorNextState(state, out).draft.build))
+    assert.equal(stageOf(name), 'spans')
+    assert.deepEqual(Object.keys(name.settled).sort(), ['direction', 'horizon', 'lens'])
+})
+
+test('new gates on a redraw wait for an answer: they are claimed, not settled by the old "go all the way"', async () => {
+    const state = mentorStateFromEntity(WAIVED())
+    const out = await redrawTurn(state, 'Here is the new span.\n<spans>{"candidates":[{"id":"t2","label":"the new pullback","from":"here","to":"the new high"}]}</spans>')
+    const name = activeName(normalizeBuild(mentorNextState(state, out).draft.build))
+    assert.equal(stageOf(name), 'spans')
+    assert.deepEqual(name.claimed.spans?.value, ['t2'])
+})
+

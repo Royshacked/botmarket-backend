@@ -12,6 +12,7 @@ dns.setServers(['8.8.8.8', '1.1.1.1'])
 const { mentorAgentService, emptyMentorState } = await import('../services/agents/mentor.agent.service.js')
 const { mentorStateFromEntity, mentorNextState } = await import('../services/desks/mentor.desk.js')
 const { getDb } = await import('../providers/mongodb.provider.js')
+const { normalizeBuild, activeName, stageOf } = await import('../services/mentorBuild.util.js')
 
 const results = []
 const check = (name, ok, detail = '') => { results.push(!!ok); console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? ` — ${detail}` : ''}`) }
@@ -51,6 +52,8 @@ check('it read the chart again', first.tools.some(t => /get_price_structure|get_
 check('the stop is answered', /stop/i.test(first.res.reply))
 check('the target is answered', /target/i.test(first.res.reply))
 check('the card\'s opening closed nothing', closes.length === 0)
+const open = activeName(normalizeBuild(state.draft?.build))
+check('the turn did not finish the build again', !('entries' in (open?.settled ?? {})), `stage ${stageOf(open)}, settled ${Object.keys(open?.settled ?? {}).join(', ')}`)
 
 const second = await turn('No, I do not want this one any more. Close the setup.')
 check('"close it" reached the close', closes.length === 1 && closes[0].id === doc.id, JSON.stringify(closes))
