@@ -344,3 +344,10 @@ included (AAPL: 354.50 + 29.17 = 383.67). `_snapMeasuredTarget` writes that numb
 break candidate's target. `scripts/verify-mentor-levels.mjs` runs a real model against the code on disk: a drive through
 a dev backend that has not restarted proves nothing about it (the first drives here did exactly that).
 The chart's axis now takes in its levels (`PriceChart` with `fitBars`, `chartRange.js`), or a measured move draws off the top.
+
+**The money (Roy, 2026-11-05).** A percent size comes off what the account is worth (`_mainBalance`: equity, then balance,
+then free cash), so "risk 1%" does not shrink because money is in another position; whether the position fits is still
+judged on free cash (`_mainAvailable`). Setups not yet filled (waiting, looking, hit) on the same main account do not reduce
+any figure, because nothing is committed until a fill. `_waitingSetups` adds them up, each at its largest scenario because
+scenarios are rivals, leaving out the setup being revised, and `_waitingLine` hands the model one remark in `size_position`'s
+report and THE MONEY section. A remark, never a block. `scripts/verify-mentor-waiting.mjs` runs it with a real model.

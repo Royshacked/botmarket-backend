@@ -920,7 +920,8 @@ sizes for the same risk budget.
 
 **Wired:** `<build>{"size":{"unit":"risk_pct","value":1}}</build>` is now an op. The server sizes
 every premise, writes the quantity onto the worksheet, and returns a refusal (not a guess) when it
-cannot. `_mainBalance` picks the marked account's deployable cash and returns null when several
+cannot. `_mainBalance` picks what the marked account is worth (since 2026-11-05: a percent is of the
+account; the fit is judged on `_mainAvailable`, the free cash) and returns null when several
 accounts are marked with no main — ambiguous is not a number. `_buildMoneySection` hands the model
 the figures to READ OUT, under a line telling it never to recompute them.
 
@@ -1354,7 +1355,7 @@ two-letter code), with a vocabulary hint.
 - **History window.** Mentor keeps 8 messages and trims at 24 (`MAX_RECENT_MESSAGES`). A long build
   loses its opening — "mind the balance, leave money free" — past that; the ledger keeps the settled
   facts but not stated constraints. Not hit in Marce's threads (14–19 messages); worth a decision.
-- **Two "available cash" sources.** Sizing uses the client-sent account's `freeMargin`; the venue
+- **Two "available cash" sources.** The fit check uses the client-sent account's `freeMargin`; the venue
   section reads it fresh per turn. They agreed in every real thread, but they are two reads of one fact.
 - **The money line covers the first scenario only** (`carrier.summary`); the sizing tool reports per
   scenario, the panel does not yet.

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { resolveSize, riskPerUnit, SIZE_UNITS } from '../../services/positionSize.util.js'
 import { summarizeTrade, summarizeBatch, expectedGain, summaryEntry } from '../../services/mentorSummary.util.js'
 import { normalizeSetup } from '../../services/setup.schema.js'
-import { _mainBalance, _buildMoneySection } from '../../services/agents/mentor.agent.service.js'
+import { _mainBalance, _mainAvailable, _buildMoneySection } from '../../services/agents/mentor.agent.service.js'
 
 // Money arithmetic on a real account. Every test here is a number a user would act on, which is
 // exactly why none of it is left to the model.
@@ -135,7 +135,12 @@ test('the batch line is what is at risk across the whole build', () => {
 
 test('the balance is the MAIN account\'s, and several unmarked accounts resolve to none', () => {
     assert.equal(_mainBalance([{ id: 1, balance: 50000 }]), 50000)
-    assert.equal(_mainBalance([{ id: 1, balance: 50000, freeMargin: 30000 }]), 30000, 'deployable cash wins')
+    assert.equal(_mainBalance([{ id: 1, balance: 50000, freeMargin: 30000 }]), 50000, 'a percent is of the account, not of its free cash')
+    assert.equal(_mainBalance([{ id: 1, balance: 50000, equity: 54000, freeMargin: 30000 }]), 54000, 'what the account is worth wins')
+    assert.equal(_mainBalance([{ id: 1, balance: null, equity: null, freeMargin: 30000 }]), 30000, 'the only figure reported')
+    assert.equal(_mainAvailable([{ id: 1, balance: 50000, equity: 54000, freeMargin: 30000 }]), 30000, 'the fit is judged on free cash')
+    assert.equal(_mainAvailable([{ id: 1, balance: 50000 }]), 50000)
+    assert.equal(_mainAvailable([{ id: 1, freeMargin: -200 }]), 0, 'overdrawn: nothing is free')
     assert.equal(_mainBalance([{ id: 1, balance: 10 }, { id: 2, balance: 99999 }], 2), 99999)
     assert.equal(_mainBalance([{ id: 1, balance: 10 }, { id: 2, balance: 99999 }]), null, 'ambiguous is not a number')
     assert.equal(_mainBalance([]), null)
@@ -273,6 +278,9 @@ test('_mainBalance reports zero as zero, not as absent', () => {
     assert.equal(_mainBalance([{ id: 1, balance: 0 }]), 0)
     assert.equal(_mainBalance([{ id: 1, balance: 0, freeMargin: 0 }]), 0)
     assert.equal(_mainBalance([{ id: 1 }]), null, 'and a truly unreported balance is still null')
+    assert.equal(_mainBalance([{ id: 1, balance: null, equity: null, freeMargin: null }]), null, 'null is not zero')
+    assert.equal(_mainAvailable([{ id: 1, balance: null, freeMargin: null }]), null)
+    assert.equal(_mainBalance([{ id: 1, equity: 0, balance: 900 }]), 0, 'a reported zero is the answer')
 })
 
 // ─── Every leg gets a size, or nothing can ever be generated ──────────────────

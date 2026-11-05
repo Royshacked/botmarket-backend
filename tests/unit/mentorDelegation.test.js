@@ -7,6 +7,7 @@ import {
 } from '../../services/mentorBuild.util.js'
 import {
     mentorAgentService, emptyMentorState, SIZE_TOOL, _sizingReport, _buildGenerateSection,
+    _setupCommitment, _waitingSetups, _waitingLine, _readWaitingSetups, _buildMoneySection,
     _buildLedgerSection, _buildPressSection,
 } from '../../services/agents/mentor.agent.service.js'
 import { normalizeSetup } from '../../services/setup.schema.js'
@@ -260,6 +261,114 @@ test('the sizing tool refuses a size that is not the user\'s shape, and records 
     })
     assert.match(report, /Not recorded/)
     assert.equal(activeName(out.build).claimed.size, undefined)
+})
+
+// ─── The money: what is already waiting (Roy, 2026-11-05) ─────────────────────
+
+const WAITING_DOC = (asset, entry, stop, qty, over = {}) => ({
+    id: `setup_${asset}`, asset, status: 'waiting', mainAccountId: 'acc1', accounts: ['acc1'], direction: 'long', type: 'swing',
+    scenarios: [{ id: 's1', entry_legs: [{ price: entry, quantity: qty }], stop_legs: [{ price: stop }], target_legs: [{ price: entry * 2 }] }],
+    ...over,
+})
+
+test('a setup takes its largest rival, not the sum: the first to fill takes the trade', () => {
+    const c = _setupCommitment({ asset: 'X', direction: 'long', type: 'swing', scenarios: [
+        { id: 'a', entry_legs: [{ price: 100, quantity: 10 }], stop_legs: [{ price: 90 }], target_legs: [{ price: 130 }] },
+        { id: 'b', entry_legs: [{ price: 110, quantity: 20 }], stop_legs: [{ price: 105 }], target_legs: [{ price: 130 }] },
+    ] })
+    assert.deepEqual(c, { priced: true, notional: 2200, risk: 100 })
+})
+
+test('a contract multiplier counts, and a setup with no sized price says so instead of counting as zero', () => {
+    assert.equal(_setupCommitment(WAITING_DOC('ES', 100, 90, 2), 50).notional, 10000)
+    assert.equal(_setupCommitment(WAITING_DOC('ES', 100, 90, 2), 50).risk, 1000)
+    const unsized = WAITING_DOC('X', 100, 90, 1)
+    delete unsized.scenarios[0].entry_legs[0].quantity
+    assert.equal(_setupCommitment(unsized).priced, false)
+})
+
+test('only this account counts, and the setup being revised is the plan on the table', () => {
+    const w = _waitingSetups([
+        WAITING_DOC('AAA', 100, 90, 10),
+        WAITING_DOC('BBB', 50, 45, 100),
+        WAITING_DOC('OTHER', 100, 90, 10, { mainAccountId: 'acc2', accounts: ['acc2'] }),
+        WAITING_DOC('MINE', 100, 90, 10),
+    ], { accountId: 'acc1', editingId: 'setup_MINE' })
+    assert.deepEqual(w, { names: ['AAA', 'BBB'], unpriced: [], notional: 6000, risk: 600 })
+    assert.equal(_waitingSetups([WAITING_DOC('MINE', 100, 90, 10)], { accountId: 'acc1', editingId: 'setup_MINE' }), null, 'nothing else waiting, no remark')
+})
+
+test('the remark says what they use, and when the money runs out, without touching the figures', () => {
+    const waiting = { names: ['AAA', 'BBB'], unpriced: ['BBB'], notional: 80000, risk: 2500 }
+    const over = _waitingLine(waiting, { priced: true, notional: 30000 }, 100000)
+    assert.match(over, /2 not filled yet \(AAA, BBB\)/)
+    assert.match(over, /use \$80,000 and risk \$2,500/)
+    assert.match(over, /BBB has no sized entry price yet and is not in those figures/)
+    assert.match(over, /With this one that is \$110,000, \$10,000 more than the \$100,000 free to deploy/)
+    assert.match(over, /not reduced/)
+    assert.match(_waitingLine({ ...waiting, unpriced: [] }, { priced: true, notional: 1000 }, 100000), /\$81,000, inside the \$100,000 free/)
+    assert.equal(_waitingLine(null), '')
+})
+
+test('the percent is on the account and the fit on the free cash, and the report says which is which', () => {
+    // Worth $100k, $20k free: 1% risk is $1,000, not $200; at a $0.06 stop that is ~$36.7k, more than is free.
+    const report = _sizingReport(normalizeSetup(PLAN), { unit: 'risk_pct', value: 1 }, { balance: 100000, available: 20000, hasAccount: true })
+    assert.match(report, /16666 unit\(s\)/)
+    assert.match(report, /DOES NOT FIT: the position is \$[\d.]+ and the account has \$20000 to deploy/)
+    assert.match(report, /Every percent here is of the account's value, \$100000\. \$20000 of it is free to deploy/)
+})
+
+test('the sizing report carries the remark; with nothing waiting it stays out', () => {
+    const waiting = { names: ['AAA'], unpriced: [], notional: 5000, risk: 500 }
+    assert.match(_sizingReport(normalizeSetup(PLAN), { unit: 'risk_cash', value: 100 }, { balance: 100000, hasAccount: true, waiting }), /WAITING SETUPS on this account: 1 not filled yet/)
+    assert.doesNotMatch(_sizingReport(normalizeSetup(PLAN), { unit: 'risk_cash', value: 100 }, { balance: 100000, hasAccount: true }), /WAITING SETUPS/)
+})
+
+test('the money section carries the remark when there is one', () => {
+    const draft = { summary: { gainCash: 100, lossCash: 50 } }
+    assert.match(_buildMoneySection(draft, 'WAITING SETUPS on this account'), /WAITING SETUPS/)
+    assert.doesNotMatch(_buildMoneySection(draft), /WAITING SETUPS/)
+})
+
+test('a failed read costs the remark, never the sizing; no user or account, no read', async () => {
+    assert.equal(await _readWaitingSetups(async () => { throw new Error('mongo') }, { userId: 'u', accountId: 'acc1' }), null)
+    let read = 0
+    const list = async () => { read++; return [] }
+    assert.equal(await _readWaitingSetups(list, { userId: null, accountId: 'acc1' }), null)
+    assert.equal(await _readWaitingSetups(list, { userId: 'u', accountId: null }), null)
+    assert.equal(read, 0)
+})
+
+const WAITING_TURN = (chatState, run, listed) => mentorAgentService.chatStream({
+    messages: [{ role: 'user', content: 'hi' }], chatState, userId: 'u1', mainAccountId: 'acc1',
+    accounts: [{ id: 'acc1', balance: 100000, equity: 100000, freeMargin: 100000 }],
+    _listSetups: listed, _run: run,
+})
+
+test('the sizing tool reads the setups waiting on the main account, leaving out the one being revised', async () => {
+    let report = null, asked = null
+    await WAITING_TURN({ active_asset: 'PACB', draft: draftAt(atEntries()), coverage: [], editing: { kind: 'setup', entityId: 'setup_BBB' } },
+        async ({ toolHandlers }) => { report = await toolHandlers[SIZE_TOOL]({ unit: 'risk_cash', value: 300 }); return '' },
+        async (userId, opts) => { asked = { userId, opts }; return [WAITING_DOC('AAA', 100, 90, 10), WAITING_DOC('BBB', 50, 45, 100)] })
+    assert.equal(asked.userId, 'u1')
+    assert.deepEqual(asked.opts.status.$in, ['waiting', 'looking', 'hit'])
+    assert.match(report, /1 not filled yet \(AAA\)/)
+    assert.doesNotMatch(report, /BBB/)
+})
+
+test('a plan with no money yet costs no read; a plan with money gets the remark in the turn, read once', async () => {
+    let reads = 0, sent = null
+    const listed = async () => { reads++; return [WAITING_DOC('AAA', 100, 90, 10)] }
+    await WAITING_TURN({ active_asset: 'PACB', draft: draftAt(atEntries()), coverage: [] }, async () => '', listed)
+    assert.equal(reads, 0)
+    const sized = { ...draftAt(atEntries()), summary: { gainCash: 100, lossCash: 50, quantity: 10 } }
+    await WAITING_TURN({ active_asset: 'PACB', draft: sized, coverage: [] }, async ({ messages, toolHandlers }) => {
+        sent = JSON.stringify(messages)
+        await toolHandlers[SIZE_TOOL]({ unit: 'risk_cash', value: 300 })
+        return ''
+    }, listed)
+    assert.equal(reads, 1)
+    assert.match(sent, /WAITING SETUPS on this account: 1 not filled yet \(AAA\)/)
 })
 
 // ─── The money: does it fit ───────────────────────────────────────────────────

@@ -25,6 +25,8 @@ import {
 } from '../mentorBuild.util.js'
 import { resolveMode, readSetup, kitFor, handlersFor, lensOf as lensOfName, MODE_THESIS, MODE_USER } from '../mentorMode.service.js'
 import { logger } from '../logger.service.js'
+import { setupService } from '../../api/setups/setups.service.js'
+import { STATUS } from '../entity/vocabulary.js'
 
 // Mentor — the trade ASSISTANT (Pipeline F). A conversation → a draft `setup` entity.
 //
@@ -124,6 +126,7 @@ async function chatStream({
     _flipHandler = makeFlipHandler,   // the blinded red-team, injectable so the stamp below is testable without a model call
     _readSetup = readSetup,           // the cheap "did they bring a setup?" read on a typed first turn (mentorMode.service)
     _thesisFacts = thesisTurnFacts,   // the chart's stops, normal move and break scenario, read for a thesis trade at entries
+    _listSetups = setupService.listSetups,   // the setups on this account that have not filled yet
 }) {
 
     // `consult` is deliberately absent: runAgentStream builds it from the tool declaration, which is
@@ -136,7 +139,11 @@ async function chatStream({
     // The account the plan binds to, read once: the sizing tool needs it mid-turn and the
     // re-derivation after the turn needs the same figure, or the two would disagree about the money.
     const balance    = _mainBalance(accounts, mainAccountId)
+    const available  = _mainAvailable(accounts, mainAccountId)
     const hasAccount = (accounts?.length ?? 0) > 0
+    // Read at most once a turn, and only once there is money to set it beside.
+    let waitingRead = null
+    const readWaiting = () => (waitingRead ??= _readWaitingSetups(_listSetups, { userId, accountId: _mainAccount(accounts, mainAccountId)?.id, editingId: chatState?.editing?.entityId }))
     // The gates' content as the user last SAW it (normalised — it has been to the client). What a
     // "you pick" press settles on, and what the sizing tool splits a scale-in by.
     const shown = _gateContent(chatState?.draft)
@@ -161,7 +168,7 @@ async function chatStream({
             const plan = chatState?.draft ? normalizeSetup(chatState.draft) : null
             // The NORMALISED gate content: the draft has been to the client, and the scale-in shares
             // are read off it.
-            return _sizingReport(plan, size, { balance, hasAccount, entries: shown.entries })
+            return _sizingReport(plan, size, { balance, available, hasAccount, entries: shown.entries, waiting: plan?.scenarios?.length ? await readWaiting() : null })
         },
     }
 
@@ -199,11 +206,13 @@ async function chatStream({
     // first message. Undecided (the read failed) = the whole kit, and the prompt's rule decides.
     // The read and the venue are independent I/O, so they run together: the read must not delay the first token by
     // a round trip of its own.
-    const [{ mode, source: modeSource }, venue, thesisFacts] = await Promise.all([
+    const [{ mode, source: modeSource }, venue, thesisFacts, waiting] = await Promise.all([
         resolveMode({ name: activeName(incoming.build), seed, messages, userId, signal, read: _readSetup }),
         _venueSection(userId),
         _readThesisFacts(turnState, _thesisFacts, { signal }),
+        turnState?.draft?.summary?.lossCash != null ? readWaiting() : null,
     ])
+    const waitingLine = waiting ? _waitingLine(waiting, _setupCommitment(turnState.draft, _sizeMultiplier(turnState.draft.build)), available) : ''
     const tools = kitFor(mode, MENTOR_TOOLS, TRADING_TOOLS.length)
     // The kit is enforced on the HANDLERS too: a call to an undeclared tool comes back "no handler" instead of running.
     const kitHandlers = handlersFor(mode, toolHandlers)
@@ -213,7 +222,7 @@ async function chatStream({
     // the system prompt: free cash moves whenever anything fills, so a volatile system block
     // would sit ahead of the whole conversation in the cache prefix. See buildVenueSection.
     const builtMessages = attachTurnContext(
-        attachTurnContext(normalizeMessages(messages, MAX_MESSAGES), _buildTurnContext(turnState, clientTime, incoming.settled, { delegated: incoming.delegated, hasAccount, mode, thesisFacts })),
+        attachTurnContext(normalizeMessages(messages, MAX_MESSAGES), _buildTurnContext(turnState, clientTime, incoming.settled, { delegated: incoming.delegated, hasAccount, mode, thesisFacts, waitingLine })),
         venue)
 
     // Coverage is CUMULATIVE across the conversation: the model re-states everything it has read,
@@ -684,7 +693,7 @@ Open on it: say the name, relay the read in a sentence rather than restating it 
  * carry-forward rule and the problems block: an instruction separated from the data it governs is
  * how a prompt quietly stops meaning what it says.
  */
-export function _buildTurnContext(chatState, clientTime = null, justSettled = [], { delegated = [], hasAccount = null, mode = undefined, thesisFacts = null } = {}) {
+export function _buildTurnContext(chatState, clientTime = null, justSettled = [], { delegated = [], hasAccount = null, mode = undefined, thesisFacts = null, waitingLine = '' } = {}) {
     // THE WORKSHEET, WITHOUT WHAT IS ALREADY WRITTEN OUT ABOVE IT. `build`, `spans`, `entries` and
     // `summary` each have their own section in prose; dumping them again as JSON paid for them
     // twice and buried the instructions under a wall of fields.
@@ -703,7 +712,7 @@ export function _buildTurnContext(chatState, clientTime = null, justSettled = []
     // had already answered.
     return `---
 ${buildTimeSection(clientTime, 'active_from / valid_until')}
-COVERAGE SO FAR: ${covered}. Re-state these in every <coverage> tag plus anything new you read this turn.${draft}${_buildMoneySection(chatState?.draft)}${_buildGenerateSection(chatState, hasAccount)}${_buildModeSection(mode)}${_buildRedrawSection(chatState?.redraw, chatState?.draft)}${_buildTargetSection(thesisFacts, chatState?.draft)}${_buildRiskReadSection(thesisFacts, chatState?.draft, { redraw: !!chatState?.redraw?.event })}${_buildBreakSection(thesisFacts, chatState?.draft, { redraw: !!chatState?.redraw?.event })}${_buildLedgerSection(chatState)}${_buildPressSection(justSettled, chatState, delegated)}`
+COVERAGE SO FAR: ${covered}. Re-state these in every <coverage> tag plus anything new you read this turn.${draft}${_buildMoneySection(chatState?.draft, waitingLine)}${_buildGenerateSection(chatState, hasAccount)}${_buildModeSection(mode)}${_buildRedrawSection(chatState?.redraw, chatState?.draft)}${_buildTargetSection(thesisFacts, chatState?.draft)}${_buildRiskReadSection(thesisFacts, chatState?.draft, { redraw: !!chatState?.redraw?.event })}${_buildBreakSection(thesisFacts, chatState?.draft, { redraw: !!chatState?.redraw?.event })}${_buildLedgerSection(chatState)}${_buildPressSection(justSettled, chatState, delegated)}`
 }
 
 /**
@@ -1018,7 +1027,7 @@ export function _buildPressSection(justSettled = [], chatState = null, delegated
  * numbers come from `mentorSummary.util` — the same ones the panel renders, so the screen and the
  * sentence cannot disagree.
  */
-export function _buildMoneySection(draft) {
+export function _buildMoneySection(draft, waitingLine = '') {
     const s = draft?.summary
     if (!s || (s.gainCash == null && s.lossCash == null)) return ''
 
@@ -1030,6 +1039,7 @@ export function _buildMoneySection(draft) {
     if (s.estimated) {
         lines.push('  ESTIMATED: this entry has no authored price, so the figures are measured off the live price. Say so when you quote them — the real ones are computed at the fill.')
     }
+    if (waitingLine) lines.push(`  ${waitingLine}`)
     return lines.join('\n')
 }
 
@@ -1218,7 +1228,7 @@ export function _gateContent(draft) {
  * risk — and the panel's money line covers only the first, which left Mentor saying "the dollar
  * figures are for the pullback only" in Marce's INTC build.
  */
-export function _sizingReport(plan, size, { balance = null, hasAccount = false, entries = null } = {}) {
+export function _sizingReport(plan, size, { balance = null, available = balance, hasAccount = false, entries = null, waiting = null } = {}) {
     const said = `${size.value} ${size.unit}${size.multiplier ? ` (multiplier ${size.multiplier})` : ''}`
     const recorded = `Recorded as the USER's size: ${said}. It settles sizing by itself once the stages before sizing are settled — never ask for the size again.`
     if (!plan?.scenarios?.length) {
@@ -1238,7 +1248,7 @@ export function _sizingReport(plan, size, { balance = null, hasAccount = false, 
         // Priced on both ends, or no distance to state: an estimated entry has no authored level.
         const away = entry != null && stop != null && Number.isFinite(Number(entry)) && Number(entry) !== 0 && Number.isFinite(Number(stop)) ? ` · the stop ${_distance(Number(entry), Number(stop))} from the entry` : ''
         lines.push(`- ${scenarioLabel(sc)}: ${sc.quantity} unit(s)${away} · position ${money(pos.notional, pos.notionalPct)} · pays ${money(s.gainCash, s.gainPct)} · costs ${money(s.lossCash, s.lossPct)}${s.rr != null ? ` · ${s.rr}R` : ''}${s.estimated ? ' · ESTIMATED (no authored entry price — say so)' : ''}`)
-        const fit = cashFit(pos, { entry, stop, balance, multiplier: size.multiplier ?? 1 })
+        const fit = cashFit(pos, { entry, stop, balance: available, multiplier: size.multiplier ?? 1 })
         if (fit) {
             lines.push(`  DOES NOT FIT: the position is $${fit.notional} and the account has $${fit.available} to deploy.${fit.maxQuantity
                 ? ` The most that fits is ${fit.maxQuantity} unit(s), risking $${fit.maxRiskCash}.`
@@ -1246,6 +1256,10 @@ export function _sizingReport(plan, size, { balance = null, hasAccount = false, 
         }
     }
     for (const p of problems) lines.push(`- PROBLEM: ${p}`)
+    if (balance != null && available != null && balance !== available) {
+        lines.push(`Every percent here is of the account's value, $${balance}. $${available} of it is free to deploy.`)
+    }
+    if (waiting) lines.push(_waitingLine(waiting, _setupCommitment(sized, size.multiplier ?? 1), available))
 
     const readiness = setupReadiness(sized, hasAccount)
     lines.push(readiness.ready
@@ -1289,26 +1303,123 @@ export function _forNewLens(plan, lens, emitted = null) {
 const _short = (v) => (Array.isArray(v) ? `${v.length} item(s)` : String(v))
 
 /**
- * The balance every percentage is measured against: the MAIN account's, or the only one marked.
+ * The account a plan binds to: the MAIN one, or the only one marked.
  *
  * Deliberately narrow. With several accounts marked and no main, a percentage would silently pick
  * one of several different answers, so it picks none and the sizing stage says it cannot see a
  * balance — which is true, and is a sentence the user can act on.
  */
-export function _mainBalance(accounts, mainAccountId = null) {
+export function _mainAccount(accounts, mainAccountId = null) {
     const valid = Array.isArray(accounts) ? accounts.filter(a => a && a.id != null) : []
     if (!valid.length) return null
-    const main = valid.length === 1
+    return valid.length === 1
         ? valid[0]
-        : valid.find(a => String(a.id) === String(mainAccountId))
-    // freeMargin is what can actually be deployed; balance counts capital already in positions.
-    //
-    // ZERO IS A NUMBER, and a different fact from "no balance reported". Collapsing both to null
-    // made an empty account come back as "a percentage of a balance I cannot see", which is not
-    // what happened and not something the user can act on — seen live: the account had nothing in
-    // it and the desk never said so.
-    const n = Number(main?.freeMargin ?? main?.balance)
-    return Number.isFinite(n) && n >= 0 ? n : null
+        : valid.find(a => String(a.id) === String(mainAccountId)) ?? null
+}
+
+// ZERO IS A NUMBER, and a different fact from "no balance reported". Collapsing both to null made an
+// empty account come back as "a percentage of a balance I cannot see", which is not what happened and
+// not something the user can act on — seen live: the account had nothing in it and the desk never said so.
+const _reported = (...figures) => {
+    const v = figures.find(x => x != null && x !== '')
+    const n = v == null ? NaN : Number(v)
+    return Number.isFinite(n) ? n : null
+}
+
+/**
+ * The figure every percentage is measured against: what the account is WORTH (Roy, 2026-11-05). "Risk 1%" is 1% of
+ * the account, and must not shrink because money is sitting in another position. Whether a position fits is the other
+ * question: `_mainAvailable`.
+ */
+export function _mainBalance(accounts, mainAccountId = null) {
+    const main = _mainAccount(accounts, mainAccountId)
+    const n = _reported(main?.equity, main?.balance, main?.freeMargin)
+    return n != null && n >= 0 ? n : null
+}
+
+/** The money free to deploy: balance counts capital already in positions. Overdrawn means nothing is free. */
+export function _mainAvailable(accounts, mainAccountId = null) {
+    const main = _mainAccount(accounts, mainAccountId)
+    const n = _reported(main?.freeMargin, main?.balance)
+    return n == null ? null : Math.max(n, 0)
+}
+
+/** The contract multiplier a stored build was sized with; shares have none. */
+const _sizeMultiplier = (build) => {
+    const name = build ? activeName(normalizeBuild(build)) : null
+    const size = name?.settled?.size ?? name?.claimed?.size?.value
+    return Number(size?.multiplier) || 1
+}
+
+/**
+ * What one setup takes if it fills: its LARGEST scenario, because scenarios are rivals and the first to fill takes the
+ * whole trade. `priced: false` when no scenario has both a size and a price to multiply. Pure.
+ */
+export function _setupCommitment(setup, multiplier = 1) {
+    const plan = normalizeSetup(setup)
+    let best = null
+    for (const sc of plan?.scenarios ?? []) {
+        const stop = stopEdge(scenarioView(plan, sc))
+        let notional = 0, risk = stop == null ? null : 0, complete = (sc.entry_legs?.length ?? 0) > 0
+        for (const leg of sc.entry_legs ?? []) {
+            const price = Number(legReference(leg)), qty = Number(leg?.quantity)
+            if (!(price > 0) || !(qty > 0)) { complete = false; break }
+            notional += price * qty * multiplier
+            if (risk != null) risk += Math.abs(price - Number(stop)) * qty * multiplier
+        }
+        if (complete && (!best || notional > best.notional)) best = { notional, risk }
+    }
+    return best ? { priced: true, ...best } : { priced: false, notional: null, risk: null }
+}
+
+/**
+ * Generated setups on one account that have not filled, and what they take if they all do (Roy, 2026-11-05: a $100k
+ * paper account with four setups waiting still read $100k). A filled one is a position, already in the free cash; the
+ * one being revised is the plan on the table. Pure.
+ */
+export function _waitingSetups(docs, { accountId = null, editingId = null } = {}) {
+    const rows = (docs ?? []).filter(d => String(d?.mainAccountId ?? d?.accounts?.[0]) === String(accountId) && String(d?.id) !== String(editingId))
+    if (!rows.length) return null
+    const out = { names: [], unpriced: [], notional: 0, risk: 0 }
+    for (const doc of rows) {
+        out.names.push(doc.asset)
+        const c = _setupCommitment(doc, _sizeMultiplier(doc.chat_state?.draft?.build))
+        if (!c.priced) { out.unpriced.push(doc.asset); continue }
+        out.notional += c.notional
+        out.risk     += c.risk ?? 0
+    }
+    return out
+}
+
+const WAITING_STATUSES = [STATUS.WAITING, STATUS.LOOKING, STATUS.HIT]
+
+/** The read behind `_waitingSetups`. A failure costs the remark, never the sizing. */
+export async function _readWaitingSetups(list, { userId, accountId, editingId = null }) {
+    if (!userId || accountId == null) return null
+    try {
+        return _waitingSetups(await list(userId, { status: { $in: WAITING_STATUSES } }), { accountId, editingId })
+    } catch (err) {
+        logger.warn(LOG, 'waiting setups read failed', err.message)
+        return null
+    }
+}
+
+/**
+ * The remark: what the waiting setups would take, beside this one and the free money. The account's figures are left
+ * as they are, because nothing is committed until a fill. Pure.
+ */
+export function _waitingLine(waiting, current = null, available = null) {
+    if (!waiting?.names?.length) return ''
+    const usd = (n) => `$${Math.round(n).toLocaleString('en-US')}`
+    const count = waiting.names.length
+    const lines = [`WAITING SETUPS on this account: ${count} not filled yet (${waiting.names.join(', ')}). If they all fill they use ${usd(waiting.notional)} and risk ${usd(waiting.risk)}.`]
+    if (waiting.unpriced.length) lines.push(`${waiting.unpriced.join(', ')} ${waiting.unpriced.length === 1 ? 'has' : 'have'} no sized entry price yet and ${waiting.unpriced.length === 1 ? 'is' : 'are'} not in those figures.`)
+    if (current?.priced) {
+        const total = waiting.notional + current.notional
+        lines.push(`With this one that is ${usd(total)}${available == null ? '' : total > available ? `, ${usd(total - available)} more than the ${usd(available)} free to deploy` : `, inside the ${usd(available)} free to deploy`}.`)
+    }
+    lines.push('The account\'s figures are not reduced for them: nothing is committed until a fill. Tell the user this in one sentence when you read out the money. It is a remark: their size stands unless they change it, and Generate is not affected.')
+    return lines.join(' ')
 }
 
 function _buildAccountsSection(accounts, mainAccountId = null) {
