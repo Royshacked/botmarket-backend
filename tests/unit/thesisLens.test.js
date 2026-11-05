@@ -3,9 +3,9 @@ import { readFileSync } from 'node:fs'
 import assert from 'node:assert/strict'
 import { MODES } from '../../services/analysisModes.js'
 import { sanitizeScanSeed } from '../../services/scanSeed.util.js'
-import { normalizeSetup, setupReadiness } from '../../services/setup.schema.js'
+import { normalizeSetup, setupReadiness, computeRR } from '../../services/setup.schema.js'
 import { thesisGate, scenarioGate } from '../../monitoring/talos.gates.js'
-import { _buildSeedSection, _buildBreakSection, _buildRedrawSection, _buildRiskReadSection, _readThesisFacts, mentorAgentService } from '../../services/agents/mentor.agent.service.js'
+import { _buildSeedSection, _buildBreakSection, _buildRedrawSection, _buildRiskReadSection, _buildTargetSection, _snapMeasuredTarget, _readThesisFacts, mentorAgentService } from '../../services/agents/mentor.agent.service.js'
 import { emptyBuild, upsertName, putName, activeName } from '../../services/mentorBuild.util.js'
 import { lensLine } from '../../monitoring/assess.shared.js'
 import { priceStructureText, entryLevelText, entryLevelReply, breakWords, thesisTurnFacts, unmirrorFacts, targetWords, unfinishedWeek } from '../../services/tools/thesisStructure.tools.js'
@@ -136,6 +136,7 @@ test('the target candidate is worded for its chart and side — weeks on the wee
 test('get_entry_level: the level read out, or why there is none', () => {
     assert.match(entryLevelText({ stop: 26.9, target: 31.6, min_rr: 1.5 }), /Entry level 28\.78 \(and below\).*reward to risk 1\.5/)
     assert.match(entryLevelText({ stop: 26.9, target: 31.6, risk_limit_pct: 5 }), /set by the risk limit/)
+    assert.match(entryLevelText({ stop: 26.9, target: 31.6, min_rr: 1.5 }), /the stop \$1\.88 \(6\.53%\) away/, 'dollars and percent (Roy, 2026-11-05)')
     assert.match(entryLevelText({ stop: 110, target: 90, min_rr: 1, side: 'short' }), /Entry level 100 \(and above\)/)
     assert.match(entryLevelText({ stop: 26.9, target: 31.6 }), /^No entry level/)
 })
@@ -320,7 +321,7 @@ const ON = (stop, target = 231.89) => ({ scenarios: [{ id: 's1', stop_legs: [{ p
 
 test('the break section: B is ON OFFER on the regular stop as well as the deep one — the user takes A, B or both (Roy, 2026-11-04)', () => {
     const structure = _buildBreakSection(FACTS, ON(178.81))
-    assert.match(structure, /a DAY close over 212\.81 arms it; the stop you ASSUME for then is 197\.34 — 7\.3% from the break/)
+    assert.match(structure, /a DAY close over 212\.81 arms it; the stop you ASSUME for then is 197\.34 — \$15\.47 \(7\.3%\) from the break/)
     assert.match(structure, /has not printed, so judge it and say it is assumed/)
     assert.match(structure, /The worksheet's stop 178\.81 is under B's: the break CHANGES THE STOP, so B is ON OFFER THIS TURN/)
     assert.match(structure, /Ask which they take: A, B or both\. Both: the first to fill takes the whole size and the other is cancelled/)
@@ -384,7 +385,7 @@ test('the risk read gives no distance for a stop price has already crossed (code
     const text = _buildRiskReadSection({ ...FACTS, close: 175 }, null)
     assert.match(text, /the structure stop 178\.81 is already crossed at today's 175, so give no distance for it/)
     assert.doesNotMatch(text, /178\.81 is 2\.2%/)
-    assert.match(text, /the deep stop 171\.06 is 2\.3% from today's 175/)
+    assert.match(text, /the deep stop 171\.06 is \$3\.94 \(2\.3%\) from today's 175/)
 })
 
 test('thesis: B needs its arming price, and the worksheet keeps it', () => {
@@ -451,17 +452,17 @@ test('the break section on a short: mirrored words, the stop compared the other 
 test('the risk read: each stop\'s distance in % and in normal moves, said BEFORE the limits are asked', () => {
     const text = _buildRiskReadSection(FACTS, ON(178.81))
     assert.match(text, /SAY IT BEFORE you ask for their risk limit and minimum reward to risk/)
-    assert.match(text, /the structure stop 178\.81 is 11\.5% from today's 202\.04 — 2\.6 normal days \(ATR 9\.1\)/)
-    assert.match(text, /the deep stop 171\.06 is 15\.3% from today's 202\.04 — 3\.4 normal days/)
+    assert.match(text, /the structure stop 178\.81 is \$23\.23 \(11\.5%\) from today's 202\.04 — 2\.6 normal days \(ATR 9\.1\)/)
+    assert.match(text, /the deep stop 171\.06 is \$30\.98 \(15\.3%\) from today's 202\.04 — 3\.4 normal days/)
     assert.match(text, /judgment, no fixed menu; any level you name comes from get_entry_level/)
     assert.doesNotMatch(text, /worksheet's stop/, 'the worksheet on a candidate stop is not said twice')
-    assert.match(_buildRiskReadSection(FACTS, ON(175)), /the worksheet's stop 175 is 13\.4%/)
+    assert.match(_buildRiskReadSection(FACTS, ON(175)), /the worksheet's stop 175 is \$27\.04 \(13\.4%\)/)
     assert.match(_buildRiskReadSection({ ...FACTS, timeframe: 'week' }, null), /normal weeks/)
     assert.equal(_buildRiskReadSection(null, ON(175)), '')
 })
 
 test('the risk read carries the deep stop\'s date; B waits for the entries stage (drive 9)', () => {
-    assert.match(_buildRiskReadSection({ ...FACTS, deep_stop_last_traded: '2026-02-05' }, null), /the deep stop \(not traded under since 2026-02-05\) 171\.06 is 15\.3%/)
+    assert.match(_buildRiskReadSection({ ...FACTS, deep_stop_last_traded: '2026-02-05' }, null), /the deep stop \(not traded under since 2026-02-05\) 171\.06 is \$30\.98 \(15\.3%\)/)
     assert.match(_buildRiskReadSection({ ...FACTS, deep_stop_last_traded: null }, null), /not traded under since any day in the history read/)
     assert.match(_buildRiskReadSection({ ...FACTS, side: 'short', deep_stop_last_traded: '2026-01-02' }, null), /not traded over since 2026-01-02/)
     const spans = _buildBreakSection({ ...FACTS, stage: 'spans' }, ON(171.06))
@@ -546,7 +547,7 @@ test('CR: the facts read before a turn — the week for a long-term trade, bound
 })
 
 test('the risk read asks for the NUMBERS in the user\'s words, never the line\'s name (drive 12)', () => {
-    assert.match(_buildRiskReadSection(FACTS, null), /with these numbers \(each stop's % and its normal days\) — never call it "the risk read"/)
+    assert.match(_buildRiskReadSection(FACTS, null), /with these numbers \(each stop's dollars, its % and its normal days\) — never call it "the risk read"/)
 })
 
 test('the break edge is asked in the user\'s words, with the away edge, never as "revise / close / notify only" (Roy, 2026-11-03)', () => {
@@ -573,4 +574,82 @@ test('the lens prompt: a broken stop is not asked about', () => {
     assert.match(_lens(), /The break edge is not a question here/)
     assert.match(_lens(), /`arm_floor`: the candidate's `floor`/)
     assert.match(_lens(), /`lower` at the stop/)
+})
+
+// ── Roy, 2026-11-05: target at the highs · dollars and percent · the chart before the limits ─────────────────────────
+
+test('the target section: the measured move at the highs, until the worksheet has a target', () => {
+    const facts = { ...FACTS, target: 368.5, target_kind: 'measured_move', range_high: 351.73 }
+    assert.match(_buildTargetSection(facts, null), /at the highs.* 351\.73 is the high price is already at, so it is NOT the target.*the measured move, exactly 368\.5: the current range's height added to its high.*anchor: "measured_move"/)
+    assert.match(_buildTargetSection({ ...facts, side: 'short' }, null), /at the lows.*added under its low/)
+    assert.equal(_buildTargetSection({ ...facts, target_kind: 'range_top' }, null), '', 'a real level overhead needs no nudge')
+    assert.equal(_buildTargetSection({ ...facts, target: null }, null), '', 'no number, nothing to say')
+    assert.doesNotMatch(_buildTargetSection({ ...facts, range_high: null }, null), /NOT the target/, 'no high read, none named')
+    assert.equal(_buildTargetSection(null, null), '')
+    assert.equal(_buildTargetSection(facts, { scenarios: [{ arm_close: 351, target_legs: [{ price: 377.53, anchor: 'measured_move' }] }] }), '', 'a lone B keeps its own')
+    assert.equal(_buildTargetSection(facts, { scenarios: [{ target_legs: [{ price: 360 }] }] }), '', 'the plan has its target')
+    assert.equal(_buildTargetSection(facts, { scenarios: [{ target_legs: [{ price: 360, anchor: 'structure' }] }] }), '', 'a level of its own stands')
+    assert.equal(_buildTargetSection(facts, { scenarios: [{ target_legs: [{ price: 368.5, anchor: 'measured_move' }] }] }), '', 'the number is on the sheet')
+    assert.match(_buildTargetSection(facts, { scenarios: [{ target_legs: [{ price: 383.67, anchor: 'measured_move' }] }] }), /exactly 368\.5/, 'its own arithmetic is corrected')
+})
+
+test('the measured move on the worksheet is the calculated one, whatever the model wrote', () => {
+    const facts = { target: 378.13, target_kind: 'measured_move', asset: 'AAPL', side: 'long', timeframe: 'day' }
+    const plan = (scenarios, over = {}) => normalizeSetup({ asset: 'AAPL', direction: 'long', trade_mode: 'thesis', scenarios, ...over })
+    const regular = (price, anchor = 'measured_move') => ({ id: 's1', entry_legs: [{ price: 335 }], stop_legs: [{ price: 323.73 }], target_legs: [{ price, anchor }] })
+
+    const p = plan([regular(383.67)])
+    assert.deepEqual(_snapMeasuredTarget(p, facts), { from: 383.67, to: 378.13 })
+    assert.equal(p.scenarios[0].target_legs[0].price, 378.13)
+    assert.equal(p.target_legs[0].price, 378.13, 'the flat projection the rest of the app reads')
+    assert.equal(p.scenarios[0].rr, computeRR({ direction: 'long', ...p.scenarios[0] }), 'the scenario\'s R follows the target')
+    assert.equal(_snapMeasuredTarget(p, facts), null, 'already there: nothing to report')
+
+    const spanned = plan([regular(383.67)])
+    spanned.spans = { candidates: [{ id: 't1', to: 'the measured move, 383.67', to_price: 383.67 }, { id: 't2', to: 'the shelf', to_price: 360 }] }
+    _snapMeasuredTarget(spanned, facts)
+    assert.deepEqual(spanned.spans.candidates.map(c => [c.to, c.to_price]), [['the measured move, 378.13', 378.13], ['the shelf', 360]], 'the span on the table follows')
+
+    const theirs = plan([regular(400)])
+    assert.equal(_snapMeasuredTarget(theirs, facts, 'Sell it at $400 please'), null)
+    assert.equal(theirs.scenarios[0].target_legs[0].price, 400, 'a price the user just named stays')
+    assert.equal(theirs.scenarios[0].target_legs[0].anchor, 'structure', 'and no later turn takes it back')
+    const near = plan([regular(400)])
+    _snapMeasuredTarget(near, facts, 'the account is 4000, stop at 1,400')
+    assert.equal(near.scenarios[0].target_legs[0].price, 378.13, 'digits inside another number are not that price')
+
+    const own = plan([regular(390, 'structure')])
+    assert.equal(_snapMeasuredTarget(own, facts), null)
+    assert.equal(own.scenarios[0].target_legs[0].price, 390, 'a price with another anchor is left alone')
+
+    const two = plan([{ ...regular(300), target_legs: [{ price: 360, anchor: 'structure' }, { price: 383.67, anchor: 'measured_move' }] }])
+    _snapMeasuredTarget(two, facts)
+    assert.deepEqual(two.scenarios[0].target_legs.map(l => l.price), [360, 378.13], 'only the measured leg')
+
+    const b = plan([regular(383.67), { ...regular(377.53), id: 's2', arm_close: 351.43, arm_floor: 337.87 }])
+    _snapMeasuredTarget(b, facts)
+    assert.deepEqual(b.scenarios.map(s => s.target_legs[0].price), [378.13, 377.53], 'B keeps the break candidate\'s target')
+
+    const untouched = plan([regular(383.67)])
+    assert.equal(_snapMeasuredTarget(untouched, null), null, 'no facts this turn')
+    assert.equal(_snapMeasuredTarget(untouched, { ...facts, target: 400, target_kind: 'range_top' }), null, 'the chart has a real level')
+    assert.equal(_snapMeasuredTarget(untouched, { ...facts, asset: 'AMD' }), null, 'the turn moved to another name: not its facts')
+    assert.equal(_snapMeasuredTarget(untouched, { ...facts, side: 'short' }), null, 'nor the other side')
+    assert.equal(_snapMeasuredTarget(untouched, { ...facts, timeframe: 'week' }), null, 'nor the other chart')
+    assert.equal(_snapMeasuredTarget(plan([regular(383.67)], { trade_mode: 'discretionary' }), facts), null, 'the user\'s setup mode is theirs')
+    assert.equal(untouched.scenarios[0].target_legs[0].price, 383.67)
+})
+
+test('the risk read puts the stop and the target on the worksheet on the turn it asks for the limits: the chat charts them', () => {
+    const text = _buildRiskReadSection(FACTS, null)
+    assert.match(text, /On the turn you ask for their limits, the stop and the target you propose must be on the worksheet's scenario/)
+    assert.match(text, /Say "the chart below"; get_chart does not put a picture in the chat/)
+    assert.doesNotMatch(_buildRiskReadSection(FACTS, null, { redraw: true }), /the chart below/, 'editing a saved setup hides the chart')
+})
+
+test('the prompt: a distance is dollars and percent, a measured move at the highs in any mode, the chart before the ask', () => {
+    const p = readFileSync(new URL('../../prompts/mentor_system_prompt.md', import.meta.url), 'utf8')
+    assert.match(p, /A distance is always said in dollars AND percent/)
+    assert.match(p, /At the highs, with no price over them worth selling at, the target is a measured move/)
+    assert.match(p, /with the stop and the target on the worksheet by that turn/)
 })

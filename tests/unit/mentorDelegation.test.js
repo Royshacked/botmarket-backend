@@ -269,6 +269,12 @@ test('the $1,000 risk on PACB is a position the account cannot pay for — and t
     const report = _sizingReport(normalizeSetup(PLAN), { unit: 'risk_cash', value: 1000 }, { balance: 22624.59, hasAccount: true })
     assert.match(report, /DOES NOT FIT/)
     assert.match(report, /The most that fits is 10283 unit\(s\)/)
+    assert.match(report, /the stop \$0\.06 \(2\.7%\) from the entry/, 'the distance in dollars and percent (Roy, 2026-11-05)')
+})
+
+test('sizing with no stop on the plan states no distance: a null stop is not a stop at 0 (CR)', () => {
+    const plan = normalizeSetup({ ...PLAN, scenarios: [{ ...PLAN.scenarios[0], stop_legs: [] }] })
+    assert.doesNotMatch(_sizingReport(plan, { unit: 'shares', value: 100 }, { balance: 22624.59, hasAccount: true }), /from the entry/)
 })
 
 test('an account with NOTHING free fits nothing — zero is a balance, not an unknown', () => {

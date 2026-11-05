@@ -9,9 +9,10 @@
 /**
  * The rule's settings, one home — the lab tested these, Mentor's candidates are read with them: `k` the swing threshold
  * in ATRs, `buffer` the stop's ATRs under the swing, `lookLow` the down move's low window, `lookFall` the target's
- * window, `atHighs` the window a breakout clears.
+ * window, `atHighs` the window a breakout clears. `nearHigh` — NOT tested and not the lab's: Mentor's candidate only. A
+ * high within this many ATRs over the close is the high price is already at, not a level to sell into (Roy, 2026-11-05).
  */
-export const STRUCTURE = Object.freeze({ k: 1.5, buffer: 0.2, lookLow: 60, lookFall: 40, atHighs: 120 })
+export const STRUCTURE = Object.freeze({ k: 1.5, buffer: 0.2, lookLow: 60, lookFall: 40, atHighs: 120, nearHigh: 1 })
 
 /** The bars upside down: a short's chart read as a long's. Pure. */
 export const mirror = (rows) => rows.map(b => ({ ...b, open: -b.open, high: -b.low, low: -b.high, close: -b.close }))
@@ -103,13 +104,18 @@ export function controlReplay(rows, pivots, { atHighs = STRUCTURE.atHighs, onBre
 
 /**
  * The target candidate at bar `i`: the highest high of the `lookFall` bars before it when over the close (`range_top` —
- * the start of the fall); at the highs, that high plus its height over `swingLow` (`measured_move`). Pure.
+ * the start of the fall); at the highs, that high plus its height over `swingLow` (`measured_move`). `room` is how far
+ * over the close the high must sit to count as a target: 0 for the lab, whose tested rule this is; a normal move for
+ * Mentor's candidate (AAPL, 2026-11-05: 349.51 under a 351.73 high read "target 351.73", 0.09R at today's price). With
+ * room, the measured move starts from the true high, the latest bar's included (AAPL: 354.50, not 351.73); the lab's
+ * rule looks only at the bars before. Pure.
  */
-export function rangeTarget(rows, i, swingLow, lookFall = STRUCTURE.lookFall) {
+export function rangeTarget(rows, i, swingLow, lookFall = STRUCTURE.lookFall, room = 0) {
     let top = -Infinity
     for (let j = Math.max(0, i - lookFall); j < i; j++) top = Math.max(top, rows[j].high)
-    if (top > rows[i].close) return { target: top, kind: 'range_top' }
-    return { target: swingLow == null ? null : top + (top - swingLow), kind: 'measured_move' }
+    if (top > rows[i].close + room) return { target: top, kind: 'range_top' }
+    const high = room > 0 ? Math.max(top, rows[i].high) : top
+    return { target: swingLow == null ? null : high + (high - swingLow), kind: 'measured_move', high }
 }
 
 /** The lowest low of the `n` bars ending at `i` (the latest on a tie) → `{ price, j }`. Pure. */
@@ -189,7 +195,10 @@ export function structureFacts(rows, { k = STRUCTURE.k, buffer = STRUCTURE.buffe
             context: line.price >= prior ? 'breakout' : control === 'sellers' && line.price === _r(lastH?.price) && !lastHBroken ? 'reversal' : 'continuation',
         }
     }
-    const { target, kind } = rangeTarget(rows, i, lastL?.price ?? null, lookFall)
+    // No swing low yet: the low of the fall is the range's floor, as it is for the break candidate's target above.
+    const { target, kind, high: rangeHigh = null } = rangeTarget(rows, i, lastL?.price ?? low60, lookFall, STRUCTURE.nearHigh * a[i])
+    // Never a target under the close, whatever the bars did: no candidate instead (CR).
+    const candidateTarget = kind === 'measured_move' && !(target > close) ? null : target
     // The heavy days of the last 60: volume ≥ 2× its 20-day mean — climaxes, shakeouts, the sign of strength.
     const heavy = []
     for (let j = Math.max(20, n - 60); j < n; j++) {
@@ -211,7 +220,7 @@ export function structureFacts(rows, { k = STRUCTURE.k, buffer = STRUCTURE.buffe
         candidates: {
             stop: _r(stop), deep_stop: _r(deepStop), deep_stop_last_traded: deepJ == null ? null : day(deepJ),
             // `range_top` — the highest high of the last `lookFall` bars; `measured_move` — at the highs, that high + its height.
-            target: _r(target), target_kind: kind, lookback_bars: lookFall,
+            target: _r(candidateTarget), target_kind: kind, range_high: rangeHigh == null ? null : _r(rangeHigh), lookback_bars: lookFall,
         },
         heavy_days: heavy,
         break_candidate: breakCandidate,

@@ -328,3 +328,19 @@ reopen of a setup Talos latched reopens its entries stage (`reopenForRedraw`) an
 miss opens on "ran without filling". `scripts/drive-redraw-card.mjs` drives it: 14/15 on a live GNRC chart (the new
 higher low read, the stop moved 178.81 → 189.82, the risk read and B said, the limits asked). Open: a setup saved
 without `chat_state` reopens with no scenarios and its mode read as the user's (low).
+
+## Target at the highs, dollars, the chart before the limits (2026-11-05)
+
+Roy, three asks. **Target:** at the highs with no other price, the current range's height added to its high. The rule
+was there, but only when the close cleared the 40-bar high: 7 of 50 large caps that day sat within one ATR under it
+(AAPL 349.51 under 351.73) and read "target 351.73". `STRUCTURE.nearHigh` (1 ATR) now makes those a measured move in
+Mentor's candidate; the lab's tested rule passes no room and is unchanged. `_buildTargetSection` says it on the turn
+while the worksheet has no target. **Distances:** dollars and percent in the risk read, B's line, `get_entry_level` and
+the prompt. **Chart:** the end-of-chat trade chart (`tradeChartSetup`) now draws from the moment a way in has a stop
+and a target, not only once Generate lights; the risk read section has them on the worksheet by the turn that asks for
+the limits. `scripts/drive-mentor-levels.mjs` drives it. The measured move starts from the true high, the latest bar's
+included (AAPL: 354.50 + 29.17 = 383.67). `_snapMeasuredTarget` writes that number on a regular thesis target leg anchored
+`measured_move` and tells the next turn; another price takes another anchor, and a price the user named stays. B keeps the
+break candidate's target. `scripts/verify-mentor-levels.mjs` runs a real model against the code on disk: a drive through
+a dev backend that has not restarted proves nothing about it (the first drives here did exactly that).
+The chart's axis now takes in its levels (`PriceChart` with `fitBars`, `chartRange.js`), or a measured move draws off the top.

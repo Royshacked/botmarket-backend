@@ -997,6 +997,12 @@ and, at entries only, THE BREAK SCENARIO: whether the worksheet's stop makes B o
 2026-11-03): its level from `get_entry_level` on B's stop — at or over the swing high the break itself is the entry,
 under it a pullback to the level after the break; both are B.
 
+**Levels before the limits (Roy, 2026-11-05).** A high within one ATR over the close counts as the highs, so the
+candidate target is the measured move (`STRUCTURE.nearHigh`), and a regular thesis target leg anchored `measured_move`
+carries the calculated number (`_snapMeasuredTarget`). Every stop distance is in dollars and percent. The end-of-chat
+trade chart draws from the moment a way in has a stop and a target, with its axis taking in the lines; a `get_chart`
+picture does not reach the chat.
+
 **On this lens a day close under a scenario's stop always sends the card to redraw or close** (armed or not; an unarmed B watches `arm_floor` until price has been over its stop; docs/design/thesis-lens-followups.md).
 
 **Since 2026-11-04 B is offered on every build where a break would move the stop**, and the user takes A, B or both

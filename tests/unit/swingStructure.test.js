@@ -125,9 +125,18 @@ test('rangeTarget and lowestLow: the start of the fall, or the measured move at 
     const rows = bars([10, 12, 11, 9, 10])
     assert.deepEqual(rangeTarget(rows, 4, 8.5, 40), { target: 12.5, kind: 'range_top' })
     const highs = bars([10, 11, 12, 13])
-    assert.deepEqual(rangeTarget(highs, 3, 9.5, 40), { target: 12.5 + 3, kind: 'measured_move' })
+    assert.deepEqual(rangeTarget(highs, 3, 9.5, 40), { target: 12.5 + 3, kind: 'measured_move', high: 12.5 })
     assert.equal(rangeTarget(highs, 3, null, 40).target, null)
     assert.deepEqual(lowestLow(rows, 4, 3), { price: 8.5, j: 3 })
+    // A high within `room` of the close is the high price is at, not a target (Roy, 2026-11-05). The lab passes no room.
+    const under = bars([10, 12, 11.9])
+    assert.equal(rangeTarget(under, 2, 9.5, 40).kind, 'range_top', 'the tested rule is unchanged')
+    assert.deepEqual(rangeTarget(under, 2, 9.5, 40, 1), { target: 12.5 + 3, kind: 'measured_move', high: 12.5 })
+    assert.equal(rangeTarget(under, 2, 9.5, 40, 0.1).kind, 'range_top', 'far enough over the close, it stays a level')
+    // The latest bar made the high (AAPL 2026-11-05: H 354.50 over a 351.73 high, low 325.33 → 383.67). Mentor's starts there; the lab's does not.
+    const madeToday = [...bars([10, 12]), { open: 11.5, high: 14, low: 11, close: 12.2, volume: 1 }]
+    assert.deepEqual(rangeTarget(madeToday, 2, 9.5, 40, 1), { target: 14 + 4.5, kind: 'measured_move', high: 14 })
+    assert.equal(rangeTarget(madeToday, 2, 9.5, 40).high, undefined, 'the tested rule still reads the level before the bar')
 })
 
 test('entryLevel: the lower of the two ceilings — the risk limit and the reward to risk', () => {
@@ -167,4 +176,27 @@ test('the break floor: its stop when price is over it, else the low of the fall;
     const u = unmirrorFacts({ close: -100, swings: [], last_swing_low: null, last_swing_high: null, control: 'buyers', fall: null, candidates: {}, heavy_days: [],
         break_candidate: { swing_to_break: { type: 'high', price: -90 }, higher_swing: null, fall_low: { date: 'd', price: -120 }, stop: -95, stop_is: 'assumed', floor: -120, target: -80, context: 'reversal' } })
     assert.equal(u.break_candidate.floor, 120)
+})
+
+test('structureFacts: a high within a normal move over the close reads as the highs — long and mirrored', () => {
+    // A rising drift, then a high just over the last close: 0.3 of a normal move away.
+    const closes = Array.from({ length: 80 }, (_, i) => 100 + i * 0.5 + (i % 6 === 5 ? -2.5 : 0))
+    const rows = closes.map((c, i) => ({ date: `d${i}`, open: c, high: c + 1, low: c - 1, close: c, volume: 1000 }))
+    const top = Math.max(...rows.slice(39, 79).map(r => r.high))
+    rows[79] = { ...rows[79], close: top - 0.3, high: top - 0.1, low: top - 1.3, open: top - 0.8 }
+    const f = structureFacts(rows)
+    assert.equal(f.candidates.target_kind, 'measured_move')
+    assert.ok(f.candidates.target > top, 'over the high it is at')
+    assert.equal(f.candidates.range_high, Math.round(top * 100) / 100)
+    // The same chart upside down: a short at the lows reads the same way.
+    const fall = rows.map(r => ({ ...r, open: 400 - r.open, high: 400 - r.low, low: 400 - r.high, close: 400 - r.close }))
+    assert.equal(structureFacts(mirror(fall)).candidates.target_kind, 'measured_move')
+    // A gap past the whole range: measured from the true high, the target is still over the price.
+    const gapped = rows.map((r, i) => (i === 79 ? { ...r, open: top + 60, high: top + 61, low: top + 59, close: top + 60 } : r))
+    const { candidates, close } = structureFacts(gapped)
+    assert.ok(candidates.target > close, `${candidates.target} over ${close}`)
+    // Far under the same high: still the range's top.
+    const lower = rows.map((r, i) => (i === 79 ? { ...r, close: top - 15, high: top - 14, low: top - 16, open: top - 15 } : r))
+    assert.equal(structureFacts(lower).candidates.target_kind, 'range_top')
+    assert.equal(structureFacts(lower).candidates.target, Math.round(top * 100) / 100)
 })

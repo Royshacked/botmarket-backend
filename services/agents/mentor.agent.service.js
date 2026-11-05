@@ -396,6 +396,13 @@ async function chatStream({
             if (fromGate.length && !carrier.alternatives?.length) carrier.alternatives = fromGate
         }
         if (entries) carrier.entries = entries
+        // THE MEASURED MOVE IS ARITHMETIC (Roy, 2026-11-05). Before the money below, which is priced off the target.
+        const measured = _snapMeasuredTarget(carrier, thesisFacts, messages?.findLast?.(m => m?.role === 'user')?.content)
+        if (measured) {
+            carrier.rr = computeRR(carrier) ?? carrier.rr
+            build.refused = [...build.refused, { field: 'target', reason: `the measured move is ${measured.to}, the server's number, not ${measured.from}. The worksheet holds ${measured.to}: use it from here. A different price takes another anchor.` }]
+            logger.info(LOG, 'measured move set to the calculated target', measured)
+        }
         // THE MONEY IS COMPUTED, NEVER NARRATED FROM THE MODEL'S OWN ARITHMETIC. The summary rides
         // on the draft so the panel shows the same figures the model was handed, and both come from
         // one place (mentorSummary.util). A model that is roughly right about R:R is wrong about
@@ -696,7 +703,7 @@ export function _buildTurnContext(chatState, clientTime = null, justSettled = []
     // had already answered.
     return `---
 ${buildTimeSection(clientTime, 'active_from / valid_until')}
-COVERAGE SO FAR: ${covered}. Re-state these in every <coverage> tag plus anything new you read this turn.${draft}${_buildMoneySection(chatState?.draft)}${_buildGenerateSection(chatState, hasAccount)}${_buildModeSection(mode)}${_buildRedrawSection(chatState?.redraw, chatState?.draft)}${_buildRiskReadSection(thesisFacts, chatState?.draft)}${_buildBreakSection(thesisFacts, chatState?.draft, { redraw: !!chatState?.redraw?.event })}${_buildLedgerSection(chatState)}${_buildPressSection(justSettled, chatState, delegated)}`
+COVERAGE SO FAR: ${covered}. Re-state these in every <coverage> tag plus anything new you read this turn.${draft}${_buildMoneySection(chatState?.draft)}${_buildGenerateSection(chatState, hasAccount)}${_buildModeSection(mode)}${_buildRedrawSection(chatState?.redraw, chatState?.draft)}${_buildTargetSection(thesisFacts, chatState?.draft)}${_buildRiskReadSection(thesisFacts, chatState?.draft, { redraw: !!chatState?.redraw?.event })}${_buildBreakSection(thesisFacts, chatState?.draft, { redraw: !!chatState?.redraw?.event })}${_buildLedgerSection(chatState)}${_buildPressSection(justSettled, chatState, delegated)}`
 }
 
 /**
@@ -739,7 +746,7 @@ export async function _readThesisFacts(chatState, read, { signal = null, timeout
     if (d?.trade_mode !== 'thesis' || !d.asset || (stage !== 'spans' && stage !== 'entries')) return null
     // The chart the lens reads (§ The thesis lens, step 1): a long-term trade the week, a swing the day — the horizon
     // decides, as the prompt says; the timeframe field only when it names the week (CR: it is not always set).
-    const timeframe = d.type === 'long_term' || /week/i.test(d.timeframe ?? '') ? 'week' : 'day'
+    const timeframe = _lensTimeframe(d)
     // It runs BEFORE the first token: bounded, and dropped on the user's Stop (CR) — a slow feed costs these facts,
     // never the turn.
     let timer = null
@@ -753,7 +760,7 @@ export async function _readThesisFacts(chatState, read, { signal = null, timeout
             logger.warn(LOG, `thesis facts ${facts} — the turn goes on without them`, { asset: d.asset })
             return null
         }
-        return facts ? { ...facts, stage } : null
+        return facts ? { ...facts, stage, asset: d.asset } : null
     } catch (err) {
         logger.warn(LOG, 'thesis facts read failed — the turn goes on without them', { asset: d.asset, err: err.message })
         return null
@@ -765,6 +772,73 @@ const THESIS_FACTS_MS = 6000
 
 const _pctFrom = (from, to) => Math.round(Math.abs(from - to) / Math.abs(from) * 1000) / 10
 const _atrs = (from, to, atr) => (atr > 0 ? Math.round(Math.abs(from - to) / atr * 10) / 10 : null)
+/** A distance the way the user reads it: dollars AND percent (Roy, 2026-11-05). */
+const _distance = (from, to) => `$${Math.round(Math.abs(from - to) * 100) / 100} (${_pctFrom(from, to)}%)`
+
+/** The chart a thesis plan reads: a long-term trade the week, a swing the day. */
+const _lensTimeframe = (d) => (d?.type === 'long_term' || /week/i.test(d?.timeframe ?? '') ? 'week' : 'day')
+
+/**
+ * THE TARGET AT THE HIGHS, AS A FACT (Roy, 2026-11-05): price at the highs with no other price to sell at takes the
+ * current range's height added to its high. Said only while the worksheet has no target and the candidate is that move:
+ * the tool's answer is not on every turn. The price stays Mentor's to judge. PURE.
+ */
+export function _buildTargetSection(facts, draft) {
+    if (facts?.target_kind !== 'measured_move' || !Number.isFinite(facts.target)) return ''
+    // Said until the worksheet has this number, or another price of its own: a measured move of Mentor's own arithmetic
+    // is still waiting for this one.
+    // The regular scenario's: a lone B has its target from the break candidate, and the server never rewrites that (CR).
+    const scenarios = draft?.scenarios ?? []
+    const regular = scenarios.find(s => s?.arm_close == null)
+    if (scenarios.length && !regular) return ''
+    const leg = regular?.target_legs?.[0]
+    if (Number.isFinite(Number(leg?.price ?? NaN)) && (leg.anchor !== 'measured_move' || Number(leg.price) === facts.target)) return ''
+    const short = facts.side === 'short'
+    const side = short ? 'under' : 'over'
+    const high = Number.isFinite(facts.range_high) ? ` ${facts.range_high} is the ${short ? 'low' : 'high'} price is already at, so it is NOT the target, on a span or a leg, even from a pullback entry.` : ''
+    return `\n\nTHE TARGET — price is ${short ? 'at the lows' : 'at the highs'}, with no price worth taking ${side} them.${high} The target is the measured move, exactly ${facts.target}: the current range's height added ${short ? 'under its low' : 'to its high'}. Use it as the span's \`to\` and the target leg, \`anchor: "measured_move"\`, and say how it is measured. Never work out a measured move of your own: the server writes this number on any regular target leg with that anchor. Only the user, or a level you can name ${side} ${facts.range_high ?? 'it'} on the chart, changes it, and that price takes another anchor (\`structure\`, \`liquidity\`).`
+}
+
+/**
+ * THE MEASURED MOVE ON THE WORKSHEET IS THE CALCULATED ONE (Roy, 2026-11-05): it is arithmetic, nothing to judge, and it
+ * came out differently from one run to the next when Mentor did it. `anchor: "measured_move" on a thesis target means this arithmetic; a price the user or
+ * the chart gives carries another anchor and is left alone. The first such leg of each regular scenario; B (`arm_close`)
+ * has its own target from the break candidate. Only when the facts call for a measured move, and are of THIS plan: they
+ * are read from the turn's starting draft, and the turn can change the name, the side or the horizon (CR). A price the
+ * user named this turn is theirs, whatever anchor it was left with: it stays, under `structure`, so no later turn takes it
+ * back. MUTATES `plan`: the leg, its scenario's R, the flat projection of the first scenario, and the span drawn to the
+ * old price → `{ from, to }` of the first change, or null.
+ */
+export function _snapMeasuredTarget(plan, facts, userText = '') {
+    if (plan?.trade_mode !== 'thesis' || facts?.target_kind !== 'measured_move' || !Number.isFinite(facts.target)) return null
+    if (String(plan.asset ?? '').toUpperCase() !== String(facts.asset ?? '').toUpperCase()) return null
+    if ((plan.direction === 'short' ? 'short' : 'long') !== facts.side || _lensTimeframe(plan) !== facts.timeframe) return null
+    let changed = null
+    const replaced = new Set()
+    for (const sc of plan.scenarios ?? []) {
+        if (sc?.arm_close != null) continue
+        const leg = (sc?.target_legs ?? []).find(l => l?.anchor === 'measured_move')
+        if (!leg || Number(leg.price) === facts.target) continue
+        if (_namesPrice(userText, leg.price)) { leg.anchor = 'structure'; continue }
+        changed ??= { from: leg.price, to: facts.target }
+        replaced.add(leg.price)
+        leg.price = facts.target
+        sc.rr = computeRR({ direction: plan.direction, ...sc }) ?? sc.rr
+    }
+    if (changed && plan.scenarios[0]?.target_legs) plan.target_legs = plan.scenarios[0].target_legs
+    for (const c of plan.spans?.candidates ?? []) {
+        if (!replaced.has(c.to_price)) continue
+        c.to = String(c.to ?? '').replaceAll(String(c.to_price), String(facts.target))
+        c.to_price = facts.target
+    }
+    return changed
+}
+
+/** Does this text name exactly this price? 400 is not in 4000, and 400.00 is 400. PURE. */
+function _namesPrice(text, price) {
+    if (!text || !Number.isFinite(Number(price))) return false
+    return new RegExp(`(?<![\\d.])${String(price).replace('.', '\\.')}(?:\\.0+)?(?![\\d])`).test(text.replace(/,/g, ''))
+}
 
 /**
  * THE RISK READ, AS FACTS (Roy, 2026-11-02: "can't Mentor tell it from the chart?" — and 2026-11-03: "give Mentor the
@@ -772,7 +846,7 @@ const _atrs = (from, to, atr) => (atr > 0 ? Math.round(Math.abs(from - to) / atr
  * asks for came after, or never. Each stop's distance from today's close in % and in this chart's normal moves — the
  * judgment of what limit fits stays the model's. PURE.
  */
-export function _buildRiskReadSection(facts, draft) {
+export function _buildRiskReadSection(facts, draft, { redraw = false } = {}) {
     if (!Number.isFinite(facts?.close) || !(facts.close !== 0)) return ''
     const unit = facts.timeframe === 'week' ? 'weeks' : 'days'
     const aStop = Number(draft?.scenarios?.[0]?.stop_legs?.[0]?.price)
@@ -785,10 +859,10 @@ export function _buildRiskReadSection(facts, draft) {
     const sg = facts.side === 'short' ? -1 : 1
     const said = stops.filter(([, p]) => Number.isFinite(p))
         // A stop price has crossed is no distance to size from: "2.2% away" read as a tight stop on a dead one (code review).
-        .map(([name, p]) => sg * (p - facts.close) >= 0 ? `${name} ${p} is already crossed at today's ${facts.close}, so give no distance for it` : `${name} ${p} is ${_pctFrom(facts.close, p)}% from today's ${facts.close}${_atrs(facts.close, p, facts.atr) != null ? ` — ${_atrs(facts.close, p, facts.atr)} normal ${unit} (ATR ${facts.atr})` : ''}`)
+        .map(([name, p]) => sg * (p - facts.close) >= 0 ? `${name} ${p} is already crossed at today's ${facts.close}, so give no distance for it` : `${name} ${p} is ${_distance(facts.close, p)} from today's ${facts.close}${_atrs(facts.close, p, facts.atr) != null ? ` — ${_atrs(facts.close, p, facts.atr)} normal ${unit} (ATR ${facts.atr})` : ''}`)
     if (!said.length) return ''
     // THE NUMBERS, never this line's name (drive 12: "the risk read measured these stops from $210.88", and no % at all).
-    return `\n\nTHE RISK READ (step 5) — SAY IT BEFORE you ask for their risk limit and minimum reward to risk, in the same turn as the ask, in the user's words with these numbers (each stop's % and its normal ${unit}) — never call it "the risk read": ${said.join('; ')}. From that, your read of what kind of limit gets in near today's price and what kind waits for a deep pullback toward the stop — judgment, no fixed menu; any level you name comes from get_entry_level. Once they gave their limits, do not repeat it.`
+    return `\n\nTHE RISK READ (step 5) — SAY IT BEFORE you ask for their risk limit and minimum reward to risk, in the same turn as the ask, in the user's words with these numbers (each stop's dollars, its % and its normal ${unit}) — never call it "the risk read": ${said.join('; ')}. From that, your read of what kind of limit gets in near today's price and what kind waits for a deep pullback toward the stop — judgment, no fixed menu; any level you name comes from get_entry_level.${redraw ? '' : ' On the turn you ask for their limits, the stop and the target you propose must be on the worksheet\'s scenario (Roy, 2026-11-05): the chat draws them on a chart under your reply, from the worksheet, so they choose their limits looking at the levels. Say "the chart below"; get_chart does not put a picture in the chat.'} Once they gave their limits, do not repeat any of this.`
 }
 
 /**
@@ -819,7 +893,7 @@ export function _buildBreakSection(facts, draft, { redraw = false } = {}) {
     const aTarget = Number(scenarios[0]?.target_legs?.[0]?.price)
     const arm = b.swing_to_break.price
     const tested = b.context === 'reversal' ? 'a reversal, the one context that held an edge in the tests' : `a ${b.context ?? 'continuation'}, a context that tested around zero: say so`
-    const lines = [`\n\nTHE BREAK SCENARIO (B) — on this chart (get_price_structure's break_candidate): a DAY close ${short ? 'under' : 'over'} ${arm} arms it; the stop you ASSUME for then is ${b.stop} — ${_pctFrom(arm, b.stop)}% from the break; the ${short ? 'lower high' : 'higher low'} it stands for has not printed, so judge it and say it is assumed. Target ${b.target}, from the chart. This break would be ${tested}.`]
+    const lines = [`\n\nTHE BREAK SCENARIO (B) — on this chart (get_price_structure's break_candidate): a DAY close ${short ? 'under' : 'over'} ${arm} arms it; the stop you ASSUME for then is ${b.stop} — ${_distance(arm, b.stop)} from the break; the ${short ? 'lower high' : 'higher low'} it stands for has not printed, so judge it and say it is assumed. Target ${b.target}, from the chart. This break would be ${tested}.`]
     // THE TURN THAT SETTLES THE SPAN STARTS AT SPANS and goes on to the entries (AMD drive, 2026-11-04): with nothing said
     // here Mentor offered B on a line of its own, $497.40, and built it on $579.18 after the user had said "both". So it
     // gets the whole of what it would be told at the entries, and only the timing differs.
@@ -1161,7 +1235,9 @@ export function _sizingReport(plan, size, { balance = null, hasAccount = false, 
         const stop  = stopEdge(view)
         const pos   = resolveSize({ unit: 'shares', value: sc.quantity, entry, stop, balance, multiplier: size.multiplier ?? 1 })
         const s     = summarizeTrade(view, { quantity: sc.quantity, balance, multiplier: size.multiplier })
-        lines.push(`- ${scenarioLabel(sc)}: ${sc.quantity} unit(s) · position ${money(pos.notional, pos.notionalPct)} · pays ${money(s.gainCash, s.gainPct)} · costs ${money(s.lossCash, s.lossPct)}${s.rr != null ? ` · ${s.rr}R` : ''}${s.estimated ? ' · ESTIMATED (no authored entry price — say so)' : ''}`)
+        // Priced on both ends, or no distance to state: an estimated entry has no authored level.
+        const away = entry != null && stop != null && Number.isFinite(Number(entry)) && Number(entry) !== 0 && Number.isFinite(Number(stop)) ? ` · the stop ${_distance(Number(entry), Number(stop))} from the entry` : ''
+        lines.push(`- ${scenarioLabel(sc)}: ${sc.quantity} unit(s)${away} · position ${money(pos.notional, pos.notionalPct)} · pays ${money(s.gainCash, s.gainPct)} · costs ${money(s.lossCash, s.lossPct)}${s.rr != null ? ` · ${s.rr}R` : ''}${s.estimated ? ' · ESTIMATED (no authored entry price — say so)' : ''}`)
         const fit = cashFit(pos, { entry, stop, balance, multiplier: size.multiplier ?? 1 })
         if (fit) {
             lines.push(`  DOES NOT FIT: the position is $${fit.notional} and the account has $${fit.available} to deploy.${fit.maxQuantity

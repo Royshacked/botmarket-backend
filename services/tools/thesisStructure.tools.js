@@ -11,6 +11,7 @@ import { structureFacts, entryLevel, toWeekly, mirror, lastTradedUnder } from '.
 const LOG = '[thesisStructure.tools]'
 const YEAR_MS = 365 * 86_400_000
 const _etDay = (sec) => new Date(sec * 1000).toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
+const _fixedCents = (x) => Math.round(x * 100) / 100
 
 /** What a short's mirrored facts mean upside down: every price back to positive, high ↔ low. Pure. */
 export function unmirrorFacts(f) {
@@ -22,7 +23,7 @@ export function unmirrorFacts(f) {
         swings: f.swings.map(pt), last_swing_low: pt(f.last_swing_high), last_swing_high: pt(f.last_swing_low),
         control: f.control === 'buyers' ? 'sellers' : f.control === 'sellers' ? 'buyers' : f.control,
         fall: f.fall ? { rise_from: { ...f.fall.from, price: p(f.fall.from.price) }, high: { ...f.fall.low, price: p(f.fall.low.price) }, atrs: f.fall.atrs } : null,
-        candidates: { ...f.candidates, stop: p(f.candidates.stop), deep_stop: p(f.candidates.deep_stop), target: p(f.candidates.target) },
+        candidates: { ...f.candidates, stop: p(f.candidates.stop), deep_stop: p(f.candidates.deep_stop), target: p(f.candidates.target), range_high: p(f.candidates.range_high) },
         heavy_days: f.heavy_days.map(d => ({ ...d, close: p(d.close), change_pct: -d.change_pct })),
         break_candidate: f.break_candidate ? {
             swing_to_break: pt(f.break_candidate.swing_to_break), lower_swing: pt(f.break_candidate.higher_swing),
@@ -92,6 +93,7 @@ export async function thesisTurnFacts({ ticker, timeframe = 'day', side = 'long'
     return {
         timeframe: tf, side, close: facts.close, atr: facts.atr,
         stop: facts.candidates.stop, deep_stop: facts.candidates.deep_stop, deep_stop_last_traded: facts.candidates.deep_stop_last_traded,
+        target: facts.candidates.target, target_kind: facts.candidates.target_kind, range_high: facts.candidates.range_high,
         break: facts.break_candidate ?? null,
     }
 }
@@ -113,7 +115,7 @@ export function entryLevelText({ stop, target, risk_limit_pct, min_rr, side = 'l
     const r = entryLevel({ stop, target, riskPct: risk_limit_pct ?? null, minRR: min_rr ?? null, side })
     if (r.problem) return `No entry level: ${r.problem}.`
     const under = side === 'short' ? 'and above' : 'and below'
-    return `Entry level ${r.level} (${under}) — set by the ${r.by === 'risk_limit' ? 'risk limit' : 'reward to risk'}. At the level: reward to risk ${r.rr_at_level}, the stop ${r.risk_pct_at_level}% away. This is the entry leg's price; an entry past it is no trade.`
+    return `Entry level ${r.level} (${under}) — set by the ${r.by === 'risk_limit' ? 'risk limit' : 'reward to risk'}. At the level: reward to risk ${r.rr_at_level}, the stop $${_fixedCents(Math.abs(r.level - Number(stop)))} (${r.risk_pct_at_level}%) away. This is the entry leg's price; an entry past it is no trade.`
 }
 
 /**

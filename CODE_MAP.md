@@ -435,6 +435,8 @@ services/
                             (entryLevelReply); the structure carries break_candidate (scenario B). thesisTurnFacts —
                             the close, ATR, both stops (with the deep date) and B, read before a thesis spans/entries
                             turn for mentor.agent's RISK READ and BREAK SCENARIO sections (2026-11-03).
+                            Also the target candidate: at the highs (within 1 ATR) a measured move, which
+                            mentor.agent's _snapMeasuredTarget writes on the worksheet (2026-11-05).
   runup.tools.js            get_runup_history — the RUN-UP yardstick for a catalyst read (horizon-chains.md §3):
                             the stock's move into each of its last reports over the sessions left, vs SPY;
                             median / quartiles / up share, and THIS CYCLE (the usual full 10-session run-up and
