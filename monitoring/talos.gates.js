@@ -147,7 +147,9 @@ export function notStarted(setup, scenario, results = []) {
  */
 export function breakView(setup, sc) {
     const view = scenarioView(setup, sc)
-    if (setup?.trade_mode !== 'thesis' || !sc?.validity) return view
+    // No `sc.validity` test: the stop is the break edge with no range at all. A setup armed before ranges were required
+    // has none (PENG, NXST: armed 2026-11-02), and PENG closed at 37.22 under its 44.38 stop with no card (2026-11-06).
+    if (setup?.trade_mode !== 'thesis') return view
     const key = setup.direction === 'short' ? 'upper' : 'lower'
     const stop = legPrice(sc.stop_legs?.[0])
     if (notStarted(setup, sc)) {

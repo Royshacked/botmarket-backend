@@ -20,7 +20,7 @@ import { isSelfExecuted } from '../services/venue.resolve.service.js'
 import { brokerService } from '../api/broker/broker.service.js'
 import { brokerEntryPrice } from '../services/positionManage.service.js'
 import { config } from '../services/config.js'
-import { legGate, scenarioGate, thesisGate, liveScenarios, _hitFromGuard, computeMetrics, metricsSet, validityBreach, breakView, breachPatch, rollUpBreaches, normalizeConditionResults, latchPatch, costPatch, ripeStepDown, unmetArming, notStarted, scenarioState } from './talos.gates.js'
+import { legGate, scenarioGate, thesisGate, liveScenarios, _hitFromGuard, computeMetrics, metricsSet, validityBreach, adverseEdge, breakView, breachPatch, rollUpBreaches, normalizeConditionResults, latchPatch, costPatch, ripeStepDown, unmetArming, notStarted, scenarioState } from './talos.gates.js'
 
 // Talos — the guardian of the `setup` kind (docs/design/talos-per-candle.md).
 //
@@ -118,7 +118,7 @@ export async function _checkSetup(setup, nowMs, deps = _deps) {
         if (sc && !leg) logger.warn(LOG, `[${setup.id}] limit setup has scenario but no entry_legs — falling through to normal path`)
         if (sc && leg) {
             if (!deps.isAssetOpen(setup.asset, setup.asset_class, new Date(nowMs))) return _sleepShut(setup, nowMs, deps)
-            if (liveScenarios(setup).some(s => s.validity)) {
+            if (liveScenarios(setup).some(s => breakView(setup, s).validity)) {
                 const price    = await deps.getPrice(setup)
                 const breached = await _checkValidity(setup, price, nowMs, deps)
                 if (breached) return breached
@@ -157,6 +157,14 @@ export async function _checkSetup(setup, nowMs, deps = _deps) {
     // its card whether or not a read would have followed.
     const breached = await _checkValidity(setup, price, nowMs, deps)
     if (breached) return breached
+
+    // EVERY PREMISE BROKE: nothing is left to read or to enter (liveScenarios: price back at a dead level is not an entry).
+    // The setup stays `looking` until the user redraws, which clears the latch, or closes it. Only the expiry review
+    // still runs, because the window can end while they decide, and its `enter` is held in _applyVerdict.
+    if (!expiring && !liveScenarios(setup).length) {
+        await deps.persist(setup.id, _wakePatch(setup, _nextReadAt(setup, nowMs, openingRung(setup), deps)), null)
+        return { reason: 'premise_broken' }
+    }
 
     const reason = expiring ? 'expiry_review'
         : woke ? 'guard'
@@ -276,7 +284,7 @@ async function _checkPosition(setup, nowMs, deps) {
     if (!inPos) {
         if (setup.entry_mode === 'limit') {
             if (_isPastExpiry(setup, nowMs)) return _disarmLimit(setup, 'expired', nowMs, deps)
-            if (liveScenarios(setup).some(s => s.validity)) {
+            if (liveScenarios(setup).some(s => breakView(setup, s).validity)) {
                 const price    = await deps.getPrice(setup)
                 const breached = await _checkValidity(setup, price, nowMs, deps)
                 if (breached)               return _disarmLimit(setup, 'validity_breach', nowMs, deps)
@@ -562,7 +570,7 @@ async function _latchArming(setup, nowMs, deps) {
  * — did a bar CLOSE out there? A candle fetch that fails returns null: unknown is not "broken".
  */
 async function _checkValidity(setup, price, nowMs, deps) {
-    const watched = liveScenarios(setup).filter(sc => sc.validity)
+    const watched = liveScenarios(setup).filter(sc => breakView(setup, sc).validity)
     if (!watched.length) return null
 
     const closes = new Map()   // timeframe → close. Rival premises usually share a rung; pay once.
@@ -576,21 +584,28 @@ async function _checkValidity(setup, price, nowMs, deps) {
         // must never read as doing so. But it can fall: breakView says through what, and the user hears about it.
         const view      = breakView(setup, sc)
         const suspected = validityBreach(view, price)
-        if (!suspected) continue
+        // ON THE THESIS LENS A CLOSE UNDER THE STOP COUNTS WITH THE TICK BACK OVER IT: price reclaiming the stop before this
+        // wake must not hide the close, or the setup reads on and can enter on a broken premise (PENG, 2026-11-06). So the
+        // tick filters nothing here, and that costs one candle read a wake. Any other lens keeps the free filter.
+        // Armed less than a bar ago, the last close can predate the plan (armed after a gap up, the stop over yesterday's close).
+        const barMs = /week/i.test(sc.validity?.timeframe || setup.timeframe || '') ? 7 * 86_400_000 : 86_400_000
+        const stopCounts = setup.trade_mode === 'thesis' && Number.isFinite(adverseEdge(view)) && nowMs - (setup.activatedAt ?? setup.savedAt ?? 0) >= barMs
+        if (!suspected && !stopCounts) continue
 
         // Which close decides the breach: the range's own rung, else the PREMISE. It used to fall
         // to `ladder[0]` — the coarsest of the derived ±2 window — which on a setup drawn at the
         // bottom of the rung list was a chart two rungs above anything the plan spoke about.
-        const tf = sc.validity.timeframe || setup.timeframe
+        const tf = sc.validity?.timeframe || setup.timeframe
         if (!closes.has(tf)) closes.set(tf, await deps.getClose(setup, tf))
         const close = closes.get(tf)
         if (!Number.isFinite(close)) {
-            logger.info(LOG, `[${setup.id}] tick ${price} looks past ${scenarioLabel(sc)}'s ${suspected} edge but no ${tf} close available — leaving it alone`)
+            if (suspected) logger.info(LOG, `[${setup.id}] tick ${price} looks past ${scenarioLabel(sc)}'s ${suspected} edge but no ${tf} close available — leaving it alone`)
             continue
         }
 
         const side = validityBreach(view, close)
-        if (!side) continue
+        // Only the stop skips the tick: a runaway still needs the tick out there as well as the close.
+        if (!side || (!suspected && side !== 'adverse')) continue
 
         const res = breachPatch(setup, sc, side, close, nowMs)
         if (!res.card) continue   // already latched — stay quiet, don't re-announce every wake
@@ -665,6 +680,11 @@ async function _applyVerdict(setup, hit, raw, nowMs, reason, price, deps) {
     const scenario = hit?.scenario ?? pickScenario(setup)
     const declared = declaredConditions(setup, scenario)
     const rung     = openingRung(setup)
+    // AN ENTER WITH EVERY PREMISE BROKEN IS NOT FIRED: reached only through the expiry review (_checkSetup).
+    if (raw.verdict === 'enter' && !liveScenarios(setup).length) {
+        logger.info(LOG, `[${setup.id}] enter with every premise broken — held as a wait`)
+        raw = { ...raw, verdict: 'wait', ripe: false, warning: 'Not entering: every premise on this setup has broken. Redraw it or close it.' }
+    }
     // AN ENTER PAST THE STOP IS NOT FIRED. The confirm refuses it (ideaExecution priceMovedRefusal →
     // past_stop), so firing would park the setup in `hit` behind a card nobody can act on. Whether the
     // premise is BROKEN is not this tick's to say — a wick is not a close, and the validity gate is

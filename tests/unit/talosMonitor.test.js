@@ -2003,3 +2003,131 @@ test('a read that finds the setup closed under it writes no status and posts no 
     assert.equal(carded, false)
     assert.deepEqual(opts, { ifStatus: LIVE.status })
 })
+
+// A thesis setup armed before ranges were required has validity: null (PENG, NXST). The stop still decides (2026-11-06).
+const NO_RANGE = (doc = {}) => mk({
+    trade_mode: 'thesis', validity: undefined, entry_legs: undefined, stop_legs: undefined, conditions: [],
+    timeframe: 'day',
+    scenarios: [{ id: 's1', name: 'thesis long', entry_legs: [{ price: 46.72, quantity: 42 }], stop_legs: [{ price: 44.38 }], target_legs: [{ price: 80.47 }], validity: null }],
+}, { ...VENUE, ...doc })
+const _noRange = (price, close = price) => {
+    const seen = [], asked = []
+    const deps = stubDeps({ getPrice: async () => price, getClose: async (_s, tf) => { asked.push(tf); return close }, assess: async () => ({ verdict: 'wait', read: 'Waiting.' }) })
+    deps.onInvalidation = async (_s, ev) => { seen.push(ev) }
+    return { deps, seen, asked }
+}
+
+test('breakView: a thesis scenario with no range still breaks at its stop, and has no away edge', () => {
+    const s = NO_RANGE(), sc = s.scenarios[0]
+    assert.deepEqual(breakView(s, sc).validity, { lower: 44.38 })
+    const short = { ...s, direction: 'short' }
+    assert.deepEqual(breakView(short, sc).validity, { upper: 44.38 })
+})
+
+test('no range: a close under the stop posts the redraw card, on the premise chart, and closes nothing', async () => {
+    const t = _noRange(42, 37.22)
+    const res = await _checkSetup(NO_RANGE(), T, t.deps)
+    assert.equal(res.reason, 'invalidation')
+    assert.equal(t.seen[0]?.card, 'invalidated')
+    assert.deepEqual(t.asked, ['day'])
+    assert.ok(t.deps.writes.some(w => w['monitor_state.scenarios.s1']?.invalidation_status === 'fired'), 'latched')
+    assert.ok(!t.deps.writes.some(w => w.status === 'closed'), 'the user decides')
+})
+
+test('no range: a wick under the stop that closes over it is not a break', async () => {
+    const t = _noRange(44, 45)
+    await _checkSetup(NO_RANGE(), T, t.deps)
+    assert.deepEqual(t.seen, [])
+})
+
+test('no range: price over the level never reads as a runaway', async () => {
+    const t = _noRange(70)
+    await _checkSetup(NO_RANGE(), T, t.deps)
+    assert.deepEqual(t.seen, [])
+})
+
+test('no range: once broken, price back over the stop is not read and cannot enter', async () => {
+    let assessed = false
+    const t = _noRange(44.5)
+    t.deps.assess = async () => { assessed = true; return { verdict: 'enter', read: 'Strong.' } }
+    const res = await _checkSetup(NO_RANGE({ invalidation_status: 'fired', monitor_state: { next_check_at: null, check_count: 0, memo: null, timeline: [], conditions: {}, scenarios: { s1: { invalidation_status: 'fired' } } } }), T, t.deps)
+    assert.equal(assessed, false, JSON.stringify(res))
+    assert.ok(!t.deps.writes.some(w => w.status === 'triggered' || w.status === 'hit' || w.status === 'long'), 'nothing fired')
+})
+
+test('another lens with no range stays ungated', async () => {
+    const t = _noRange(42, 37.22)
+    const s = NO_RANGE({ trade_mode: 'discretionary' })
+    await _checkSetup(s, T, t.deps)
+    assert.deepEqual(t.seen, [])
+})
+
+test('every premise broken, in the expiry review: an enter is held as a wait', async () => {
+    const t = _noRange(44.5)
+    t.deps.assess = async () => ({ verdict: 'enter', read: 'Strong.' })
+    const broken = NO_RANGE({ valid_until: new Date(T + 60_000).toISOString(), invalidation_status: 'fired', monitor_state: { next_check_at: null, check_count: 0, memo: null, timeline: [], conditions: {}, scenarios: { s1: { invalidation_status: 'fired' } } } })
+    const res = await _checkSetup(broken, T, t.deps)
+    assert.notEqual(res.fired, true, JSON.stringify(res))
+    assert.ok(!t.deps.writes.some(w => w.status === 'hit'), 'never reaches a confirm')
+})
+
+test('one premise broken, one alive: the live one is still read', async () => {
+    let assessed = false
+    const t = _noRange(155)
+    t.deps.assess = async () => { assessed = true; return { verdict: 'wait', read: 'Waiting.' } }
+    await _checkSetup(ASSUMED_B({}, { monitor_state: { next_check_at: null, check_count: 0, memo: null, timeline: [], conditions: {}, scenarios: { B: { invalidation_status: 'fired' } } } }), T, t.deps)
+    assert.equal(assessed, true)
+})
+
+test('thesis: a close under the stop fires with the tick already back over it, and no read follows', async () => {
+    let assessed = false
+    const t = _noRange(44.5, 37.22)
+    t.deps.assess = async () => { assessed = true; return { verdict: 'enter', read: 'Strong.' } }
+    const res = await _checkSetup(NO_RANGE(), T, t.deps)
+    assert.equal(res.reason, 'invalidation')
+    assert.equal(t.seen[0]?.card, 'invalidated')
+    assert.equal(t.seen[0]?.price, 37.22, 'the card names the close, not the tick')
+    assert.equal(assessed, false)
+})
+
+test('thesis: tick and close both over the stop is no break, and the setup is read', async () => {
+    let assessed = false
+    const t = _noRange(46, 45)
+    t.deps.assess = async () => { assessed = true; return { verdict: 'wait', read: 'Waiting.' } }
+    await _checkSetup(NO_RANGE(), T, t.deps)
+    assert.deepEqual(t.seen, [])
+    assert.equal(assessed, true)
+})
+
+test('thesis: an unknown close is not a break', async () => {
+    const t = _noRange(46, null)
+    await _checkSetup(NO_RANGE(), T, t.deps)
+    assert.deepEqual(t.seen, [])
+})
+
+test('thesis: a close over the away edge with the tick back inside is not a runaway', async () => {
+    const s = ASSUMED_B()
+    const t = _noRange(155, 170)
+    await _checkSetup(s, T, t.deps)
+    assert.deepEqual(t.seen.filter(e => e.side === 'away'), [])
+})
+
+test('another lens: a tick inside the range pays for no candle, whatever the close was', async () => {
+    const t = _noRange(238, 100)
+    const s = mk({ validity: { lower: 234, upper: 244, approach: 246, timeframe: '1hr', on_break: 'revise', on_away: 'revise' } }, { ...VENUE })
+    await _checkSetup(s, T, t.deps)
+    assert.deepEqual(t.asked, [])
+    assert.deepEqual(t.seen, [])
+})
+
+test('thesis: armed less than a bar ago, a close from before the plan does not break it', async () => {
+    const fresh = _noRange(46, 37.22)
+    await _checkSetup(NO_RANGE({ activatedAt: T - 3_600_000 }), T, fresh.deps)
+    assert.deepEqual(fresh.seen, [], 'the tick is over the stop and the close may predate the arming')
+    const under = _noRange(42, 37.22)
+    await _checkSetup(NO_RANGE({ activatedAt: T - 3_600_000 }), T, under.deps)
+    assert.equal(under.seen[0]?.card, 'invalidated', 'with the tick under the stop too, it still breaks')
+    const old = _noRange(46, 37.22)
+    await _checkSetup(NO_RANGE({ activatedAt: T - 2 * 86_400_000 }), T, old.deps)
+    assert.equal(old.seen[0]?.card, 'invalidated', 'armed over a bar ago, the close counts alone')
+})
