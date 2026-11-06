@@ -427,6 +427,73 @@ Test 1b's reversal context the same (before A +0.12, E/F/G +0.13 … +0.14; held
 - **Verdict:** a second target with the stop unchanged does not hurt and may add a little per trade; it is not an edge.
   One fixed target stays the rule; a second one (the next sellers' level, E) is a user's choice, not the lens's default.
 
+## Test 3 — the short term swing's stop: 4-hour or daily (declared 2026-11-06, before the run)
+
+Roy: "in which timeframe is it best to find the stop" for a short term swing (2–10 days). Today it reads the daily, like
+a swing; the tested daily trade runs ~13 sessions (median) and the 4-hour was never tried. `scripts/lab-thesis-stop.mjs`,
+`intradayStop` and `runupExit` in the service. The stand-in is mechanical, as in every test here: Mentor judges the stop.
+
+**The 4-hour stop:** FMP 1-hour bars of the 30 sessions up to the last close known, as 4-hour bars (`toFourHour`). The last
+swing low confirmed by then (k 1.5 on the 4-hour ATR, same settings) less 0.2 of that ATR. No confirmed low under the
+close → the signal is left out of EVERY arm, so all arms run the same signals.
+
+**Part A — the thesis trade, cut to the horizon.** Test 1b's reversal signals with a plan, long, a random sample (seed 11).
+Same target T; the entry level recomputed from each stop (R:R 1.5, rule A 10%), so a tighter stop means a higher level.
+Fixed levels, daily bars, both levels in one bar → the stop.
+- A0 reference: daily stop, wait 20, hold 250 (the tested trade).
+- **A1: daily stop, wait 5, hold 10 sessions** (today's short term swing).
+- **A2: 4-hour stop, wait 5, hold 10 sessions.**
+- Shown, not for the bar: both at wait 20.
+- Measured on PLANNED risk, less the cost: R per trade, hit, days, the share of signals filled, the stop's distance in
+  daily ATRs — and **R per SIGNAL** (no fill = 0), since the arms fill different trades. Before / held out from 2025-10-23.
+- **PASS (A2 over A1):** the paired difference in R per signal > 0 with its month-bootstrap 5% end > 0 before, and > 0 held out.
+
+**Part B — what Hotlist's This week actually is:** the live run-up rule (`runup_5`, 3 of 3 beat, SPY over its 200-day), the
+screener universe's three years, bought at the open 5 sessions before the report, out at the close before it. The stop
+is set from the evening before the entry.
+- B0 no stop (the live rule) · B1 the daily swing-low stop · B2 the 4-hour swing-low stop. A gap under the stop fills at the open.
+- Measured: net % per trade against SPY after cost (equal dollars), R (equal risk, B1 and B2), the share stopped, the stop's
+  distance in daily ATRs, and **how often 1.5R was reachable** (the high reached entry + 1.5 × risk before the stop or the exit).
+  Before / held out from 2025-11-08 (the lab's split).
+- **PASS (B2 over B1):** the paired net % per trade > 0 with its 5% end > 0 before, and > 0 held out. **A stop at all
+  earns its place** only if B1 or B2 does not lose net % to B0 beyond the noise — this rule's return is the run-up, which a stop can only cut.
+
+Either part passing does not ship anything by itself; a pass means Roy decides whether `get_price_structure` reads the 4-hour.
+
+### Test 3 — result (2026-11-06): FAIL on both parts — the short term swing's stop stays on the daily
+
+**Part A** (2,000 signals sampled, seed 11; 1,924 with a 4-hour low; 1,668 before, 256 held out):
+
+| Arm | Before: filled, target / stop / time, mean R, per signal | Held out: same |
+|---|---|---|
+| A0 daily, wait 20, hold 250 | 43%, 39 / 61 / 0%, +0.11R, +0.048 | 38%, 43 / 57 / 0%, +0.20R, +0.076 |
+| A1 daily, wait 5, hold 10 | 28%, 8 / 27 / 66%, +0.09R, +0.025 | 25%, 8 / 22 / 70%, +0.08R, +0.019 |
+| **A2 4-hour, wait 5, hold 10** | 35%, 12 / 33 / 55%, +0.10R, +0.036 | 32%, 6 / 35 / 59%, −0.05R, −0.014 |
+
+The bar, R per signal A2 − A1: before +0.012 (−0.006 … +0.028), held out −0.034 (−0.084 … +0.011). FAIL. The 4-hour stop is
+only a little tighter here (2.42 daily ATRs from the close against 2.85), and fills more. Cut to 10 sessions, most trades of
+either arm end on the clock, not at a level. Held-out trades are few (63 and 81).
+
+**Part B** (the live rule, 4,639 trades, 3,704 with both stops; 2,422 before, 1,282 held out). Net per trade, then per session:
+
+| Arm | Before | Held out | Stopped | Stop distance | Reached 1.5R |
+|---|---|---|---|---|---|
+| B0 no stop | −0.10%, +0.29% | +0.23%, +0.59% | — | — | — |
+| B1 daily stop | −0.15%, +0.28% | +0.21%, +0.51% | 23 / 20% | 5.8 / 7.0%, ~2.2 ATR | 9 / 11% |
+| **B2 4-hour stop** | −0.16%, +0.29% | +0.01%, +0.22% | 36 / 33% | 3.9 / 5.0%, 1.5 ATR | 15 / 15% |
+
+The bar, net per trade B2 − B1: before −0.007 (−0.056 … +0.047), held out −0.199 (−0.325 … −0.089). FAIL: a tie, then clearly
+worse in the held-out year. The daily stop costs the rule little against no stop (−0.05% before, −0.02% held out, both inside
+noise), so it is a cheap limit on the loss. The script's all-4,639 line reproduces the lab per session (+0.37% before, +0.45%
+held out, screener-lab §6). The per-trade means are lower because the rule is a daily budget: each session counts once.
+
+- **The 4-hour stop is not adopted;** `get_price_structure` keeps day and week.
+- **Seen, not tested for:** on This week the 1.5R level is rarely reached from a daily stop (9–11%). The run-up's return comes
+  from holding to the close before the report, so the time exit does the work there, not the target.
+- **Seen, not tested for:** the 935 trades with no usable stop (nearly all with no daily swing low under the close, or 4-hour
+  bars missing) did worse per session (+0.13% before, +0.18% held out). Found after the run, so it is a question, not a rule.
+- The weekly stop for long term is still untested.
+
 ## Built (2026-10-30)
 
 - The `thesis` lens (`services/analysisModes.js` MODES) — Mentor's prompt § The thesis lens: the six steps, the setup

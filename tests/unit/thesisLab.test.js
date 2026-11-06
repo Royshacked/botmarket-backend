@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mirror, atr, swings, reversalSignals, controlSignals, baselineSignals, toFourHour, playIntraday, plan, play, inR, summarize, secondTarget, DEFAULTS } from '../../services/thesisLab.service.js'
+import { mirror, atr, swings, reversalSignals, controlSignals, baselineSignals, toFourHour, playIntraday, plan, play, inR, summarize, secondTarget, intradayStop, runupExit, DEFAULTS } from '../../services/thesisLab.service.js'
 
 // The THESIS lens's test 1 (Roy, 2026-10-30) — the reversal thesis as fixed rules (docs/design/stock-playbook.md §Test 1).
 
@@ -280,4 +280,36 @@ test('baselineSignals: every 10th session with the close between the last swing 
     const sigs = baselineSignals(rows, a, swings(rows, a, 1.5))
     assert.ok(sigs.length > 0)
     for (const s of sigs) { assert.equal(s.i % 10, 0); assert.ok(s.stopBase < rows[s.i].close && s.h0 > rows[s.i].close) }
+})
+
+// Test 3 (2026-11-06) — the short term swing's stop.
+const swung = () => [...flat(20), bar(98), bar(96), bar(95.5, { l: 95 }), bar(96, { h: 96.4 }), bar(97, { h: 97.6 }), bar(99)]
+
+test('intradayStop: under the last confirmed low by the buffer of that chart\'s ATR', () => {
+    const rows = swung()
+    const r = intradayStop(rows, 99)
+    assert.equal(r.base, 95)
+    assert.ok(Math.abs(r.stop - (95 - DEFAULTS.buffer * atr(rows).at(-1))) < 1e-9)
+})
+
+test('intradayStop: null with no ATR yet, no confirmed low, or a low not under the close', () => {
+    assert.equal(intradayStop(flat(5), 100), null, 'too few bars for an ATR')
+    assert.equal(intradayStop(flat(30), 100), null, 'nothing swung')
+    assert.equal(intradayStop(swung(), 94), null, 'the close is under the low: the thesis is already gone')
+})
+
+test('runupExit: no stop holds to the last close and reports the high reached', () => {
+    const rows = [bar(100), bar(102, { o: 101, h: 104 }), bar(103)]
+    assert.deepEqual(runupExit(rows, 0, 2), { entry: 100, exit: 103, k: 2, reason: 'close', reach: 104 })
+})
+
+test('runupExit: a touch fills at the stop, a gap under it at the open', () => {
+    const rows = [bar(100), bar(99, { o: 100, l: 97 }), bar(90, { o: 91 })]
+    assert.deepEqual(runupExit(rows, 0, 2, 98), { entry: 100, exit: 98, k: 1, reason: 'stop', reach: 100.5 })
+    assert.equal(runupExit(rows, 0, 2, 95).exit, 91, 'the gap fills at the open, worse than the stop')
+})
+
+test('runupExit: the stop\'s own bar never counts toward what was reachable', () => {
+    const rows = [bar(100), bar(100, { h: 120, l: 90 })]
+    assert.equal(runupExit(rows, 0, 1, 95).reach, 100.5, 'which came first in the bar is unknown')
 })

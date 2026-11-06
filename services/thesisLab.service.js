@@ -196,6 +196,37 @@ export function secondTarget(pivots, i, { S, T, E }, { kind = 'swing', mult = 1,
     return Number.isFinite(best) ? best : T + (T - S)
 }
 
+/**
+ * TEST 3 — the stop off a chart's last swing low: the last low confirmed in `bars` that is under `close`, less `buffer` ×
+ * that chart's ATR at its last bar. Any timeframe; the caller hands only bars already known. → `{ stop, base, atr }`, or
+ * null (no ATR yet, no confirmed low, or the last one is not under the close). Pure.
+ */
+export function intradayStop(bars, close, o = DEFAULTS) {
+    const a = atr(bars), last = a.at(-1)
+    if (last == null) return null
+    const low = swings(bars, a, o.k).findLast(p => p.type === 'L')
+    if (!low || !(low.price < close)) return null
+    return { stop: low.price - o.buffer * last, base: low.price, atr: last }
+}
+
+/**
+ * TEST 3 — one run-up trade held from the open of bar `i` to the close of bar `j`, with an optional stop `S` (null = none).
+ * A gap under the stop fills at the open, a touch at the stop. `reach` — the highest high before the stop or the exit,
+ * the stop's own bar left out (which came first in it is unknown, so it never counts for the trade).
+ * → `{ entry, exit, k, reason: 'stop'|'close', reach }`. Pure.
+ */
+export function runupExit(rows, i, j, S = null) {
+    const entry = rows[i].open
+    let reach = entry
+    for (let k = i; k <= j; k++) {
+        const b = rows[k]
+        if (S != null && b.open <= S) return { entry, exit: b.open, k, reason: 'stop', reach }
+        if (S != null && b.low <= S) return { entry, exit: S, k, reason: 'stop', reach }
+        reach = Math.max(reach, b.high)
+    }
+    return { entry, exit: rows[j].close, k: j, reason: 'close', reach }
+}
+
 /** Hourly bars → 4-hour: each session's first four hourly bars, then its rest. `bars` — `[{ day, open, high, low, close }]`. Pure. */
 export function toFourHour(bars) {
     const out = []
