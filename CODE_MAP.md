@@ -759,7 +759,9 @@ services/
                             (MARKET_BRIEF_TTL_MS) + single-flight: the morning fan-out costs one run,
                             not one per user. Two consumers: Axl's tool and Axl's brief turn (axl.desk briefTurn)
   marketBrief.tools.js      get_market_brief — UNBOUND (no userId, so the brief cannot be made
-                            personal). Axl RELAYS the brief; it does not write market commentary
+                            personal). Axl RELAYS the brief; it does not write market commentary.
+                            Axl also carries web_search (2026-11-06) for global markets and geopolitics
+                            the brief and get_news do not cover; same rules: not joined to the book, no advice
   news.tools.js             get_news — UNBOUND; `companies` (a ticker), `headlines` (the front page) or `topic`
                             (free text; anything unrecognised falls back to it). Every fetch through
                             news.service (one news pipe); formatNewsDigest — ≤12 dated, sourced headlines,

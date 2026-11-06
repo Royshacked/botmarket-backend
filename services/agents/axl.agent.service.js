@@ -74,6 +74,11 @@ export const TOOLS = toolsFor({
     // Appended last, per the rule above. Today's hotlist, so a `<show>hotlist` comes with a line on
     // what is in it (Roy, 2026-10-22). A broadcast, like the brief: the handler is unbound.
     get_hotlist: HOTLIST_TOOL_SPEC.get_hotlist,
+    // Appended last, per the rule above. What the brief and the headlines do not cover: a question
+    // about global markets or a geopolitical event is Axl's to answer, not a desk's (Roy, 2026-11-06).
+    // Unbound like them, since it runs server-side and never sees the user. The two broadcast rules
+    // (not joined to their book, no advice) hold here too; they live in the prompt's own section.
+    web_search: '',
 })
 
 // NO `consult` HERE, deliberately — the reasoning sidecar reached the other five desks on

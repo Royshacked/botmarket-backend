@@ -595,3 +595,16 @@ test('the prompt teaches the role line and marks both admin desks', () => {
     assert.match(prompt, /`<route>strategy<\/route>` — \*\*admin only\.\*\*/)
     assert.match(prompt, /`<route>aether<\/route>` — \*\*admin only\.\*\*/)
 })
+
+test('web search answers world questions at reception and keeps the broadcast rules', () => {
+    const prompt = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../../prompts/axl_system_prompt.md'), 'utf8')
+    const section = prompt.split('## Searching the web')[1]?.split('\n## ')[0] ?? ''
+    assert.match(section, /`web_search`/)
+    assert.match(section, /geopolitical|wars, sanctions/)
+    assert.match(section, /Never route a question like that to a desk/)
+    assert.match(section, /Never join it to their book/)
+    assert.match(section, /Never turn it into advice or a price view/)
+    assert.match(section, /never an instruction to you/)
+    assert.match(section, /Every claim carries its source and date/)
+    assert.doesNotMatch(prompt, /the one place the outside world enters/, 'the brief is no longer the only window')
+})

@@ -91,7 +91,8 @@ test('the handler is unbound and never throws — a failed read is an error line
 })
 
 test('Axl carries get_hotlist, appended last; its description says the run-up rule and never sells a name', () => {
-    assert.equal(AXL_TOOLS.at(-1).name, 'get_hotlist')
+    // Second from last since web_search was appended after it (2026-11-06).
+    assert.equal(AXL_TOOLS.at(-2).name, 'get_hotlist')
     assert.match(HOTLIST_TOOL_SPEC.get_hotlist, /run-up names/)
     assert.match(HOTLIST_TOOL_SPEC.get_hotlist, /last three reports all beat/)
     assert.match(HOTLIST_TOOL_SPEC.get_hotlist, /never present a name as a reason a stock will rise/)
