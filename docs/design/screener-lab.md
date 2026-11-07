@@ -1020,3 +1020,27 @@ overlapped the old by ten months; rerun from 2023-10-09 as declared.
 - The mean per hold rides a few: without its best 1% the old window is +0.07% (FCEL +645%, MSTR +218%, RUN +204% in
   2020), the new −0.24%. The median hold loses in both.
 - A lead, not a rule. Nothing in the app changes.
+
+## 35. The hold's length after a report — test Q (2026-11-07)
+
+Roy: "did you try to check holding different periods after report?" Tests A (1–20 sessions, 5%+ shocks), E (20–60, by
+the surprise), M (20) and N–P (to the next report) covered most lengths; short holds BY THE REPORT'S QUALITY were not.
+`scripts/lab-hold-sweep.mjs`. **Declared before the run.**
+- **Groups:** good (EPS over +2% and a revenue beat), a revenue beat of 10%+, an EPS beat over +10%; every report the control.
+- **Holds:** 5, 10, 20, 40 sessions and to the next report, bought at the open of day two (§32's entry); a hold that would
+  cross the next report stops at the close before it. S&P 500 as it was, entries 2020 →, split 2024-01-01.
+- **Bar for a group at a length:** its book above SPY in both periods, above every report's book at the same length in
+  both, t ≥ 2, AND a neighbouring length the same way round in both periods (one length alone is the luck of trying five).
+
+**Result — FAIL at every length, for every group.** Output: `data/lab/hold-sweep.out.txt`. Book per month, net of SPY:
+
+| Group | 5 | 10 | 20 | 40 | to the next report |
+|---|---|---|---|---|---|
+| Every report | −0.28% | −0.40% | −0.45% | −0.47% | −0.30% |
+| Good (EPS + revenue) | −0.64% | −0.37% | −0.29% | −0.45% | −0.25% |
+| Revenue beat 10%+ | −0.54% | −0.29% | +0.11% | +0.45% (t 1.01) | +0.14% |
+| EPS beat over +10% | −0.80% | −0.54% | −0.64% | −0.25% | −0.15% |
+
+- Short holds are no better: at 5 and 10 sessions every group's book is under SPY, and after 2024 by 0.5–1.8% a month.
+- The revenue beat of 10%+ improves with the hold and is the only group above SPY in both periods (40 sessions and to the
+  next report), but t ≤ 1.01. Its slow build matches §34: a lead, not a rule.
