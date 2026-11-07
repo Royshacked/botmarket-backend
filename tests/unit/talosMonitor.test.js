@@ -2,9 +2,10 @@ import { _scenarioBlock } from '../../monitoring/talos.assess.js'
 import { thesisGate, breakView } from '../../monitoring/talos.gates.js'
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { priceService } from '../../services/price.service.js'
 import {
     _isPreActive, _isExpiring, _nextReadAt, _checkSetup,
-    _nextStatus, _isPastExpiry, _effectiveVerdict, READ_LAG_MS, CLOSE_GRACE_MS, FILL_PRICE_WAIT_MS,
+    _nextStatus, _isPastExpiry, _effectiveVerdict, READ_LAG_MS, CLOSE_GRACE_MS, FILL_PRICE_WAIT_MS, _testDeps,
 } from '../../monitoring/talos.monitor.service.js'
 import { isAssetOpen } from '../../services/market.service.js'
 import { tierFor } from '../../monitoring/talos.tiers.js'
@@ -2130,4 +2131,10 @@ test('thesis: armed less than a bar ago, a close from before the plan does not b
     const old = _noRange(46, 37.22)
     await _checkSetup(NO_RANGE({ activatedAt: T - 2 * 86_400_000 }), T, old.deps)
     assert.equal(old.seen[0]?.card, 'invalidated', 'armed over a bar ago, the close counts alone')
+})
+
+test('getClose: the real close read returns the last completed bar, not null', async (t) => {
+    const candles = Array.from({ length: 30 }, (_, i) => ({ timestamp: 1_000_000 + i * 86_400, open: 50, high: 51, low: 49, close: 50 + i, volume: 1 }))
+    t.mock.method(priceService, 'getCandles', async () => ({ candles, meta: { cached: true } }))
+    assert.equal(await _testDeps.getClose({ id: 'setup_X', asset: 'X' }, 'day'), 78, 'the bar before the one still forming')
 })

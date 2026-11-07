@@ -9,6 +9,7 @@ import { roundOrZero }         from '../services/number.util.js'
 
 const LOG        = '[monitorUtils]'
 const CANDLE_COUNT = 300
+export const MIN_CANDLES = 5   // fewer reads as no data, so a caller after a single bar still has to ask for this many
 
 // ─── Candle fetching ──────────────────────────────────────────────────────────
 
@@ -20,7 +21,7 @@ export async function fetchCandles(id, asset, tf, count = CANDLE_COUNT, ctx = nu
         logger.error(LOG, `Candle fetch error for ${asset}/${tf}:`, err.message)
         return null
     }
-    if (!candles || candles.length < 5) {
+    if (!candles || candles.length < MIN_CANDLES) {
         logger.warn(LOG, `Skipping idea ${id} — insufficient candles for ${asset}/${tf}`)
         return null
     }

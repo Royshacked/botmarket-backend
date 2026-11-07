@@ -3,7 +3,7 @@ import { INVALIDATION, isInvalidated, PAST_ENTRY, LIVE_POSITION } from '../servi
 import { isAssetOpen, nextCandleCloseMs } from '../services/market.service.js'
 import { logger } from '../services/logger.service.js'
 import { toNum } from '../services/format.util.js'
-import { fetchCandles } from './monitorUtils.js'
+import { fetchCandles, MIN_CANDLES } from './monitorUtils.js'
 import { fetchLastPrice } from '../services/lastPrice.service.js'
 import { createDueLoop, makePersist } from './dueLoop.js'
 import { journalEntry } from './monitorJournal.js'
@@ -1032,7 +1032,8 @@ const _deps = {
     // opposed to `getPrice`'s live tick which is only its trigger. The SECOND-TO-LAST row: the last
     // one is the bar still forming. Null on any failure, read as "don't know".
     getClose: async (setup, tf) => {
-        const rows = await fetchCandles(setup.id, setup.asset, tf, 3)
+        // Asking for fewer than fetchCandles accepts made this null on every call: no close judged a stop, a range or an arming line (PENG, 2026-11-06).
+        const rows = await fetchCandles(setup.id, setup.asset, tf, MIN_CANDLES)
         const closed = rows?.at(-2)
         return Number.isFinite(closed?.c) ? closed.c : null
     },
