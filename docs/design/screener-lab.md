@@ -1291,3 +1291,44 @@ read backwards. Forwards: `scripts/lab-quarter-checkpoints.mjs`. **Declared befo
   only (+0.47% → +0.60%, t 1.85).
 - **Reading:** the quarter's winner is visible only as it is made; the part still to come is a fresh draw at every
   checkpoint. Within-quarter momentum — own or industry — is not there at the S&P scale, after the cost.
+
+## 43. Technicals at session 20 — to 60% winners — test U (2026-11-07)
+
+Roy: "AUC of 20 sessions is 0.82 — that's a place to start — let's concentrate on technicals — I want to raise it to at
+least 60% winners". The 0.82 is the quarter so far counted inside the quarter (§42); the target has to be what is still
+to come. `scripts/lab-quarter-technicals.mjs`. **Declared before the run.**
+- **Picks:** at the close of session 20 (15 and 25 the neighbours), S&P 500 members as they were, 2020-Q1 → 2026-Q3;
+  bought at the next open, held to the quarter's last close, net of SPY and `costFor`.
+- **A WINNER (the target):** a pick whose rest of the quarter beats SPY after the cost. Also shown, never the verdict:
+  beats the median member over the rest (the market's narrowness out), and ends the WHOLE quarter 5%+ over SPY (Roy's
+  framing — inflated by the 20 sessions already in it).
+- **Technicals only, as of that close:** the movers study's price facts (`featuresAt`, its earnings facts left out); the
+  quarter so far — own net, its industry's (name left out), own less industry, the share of up days, its worst dip, its
+  smoothness (net over the daily spread), the best day's share; the close against the high of the 63 sessions before
+  the quarter (a breakout); the quarter's volume against the 60 sessions before; RSI(14); beta (252).
+- **Model:** each fact's AUC for a winner in both periods; then every fact at once, `fitAndScore` FITTED ON 2020–2023
+  ONLY and scored unchanged on 2024 → (no refit, no choosing among models on the held-out years).
+- **Bar:** the held-out TOP FIFTH by the model (session 20): 60%+ winners, its mean net above SPY and above every
+  member, t ≥ 2 over the held-out quarters (11, so t is weak), and sessions 15 and 25 the same way round.
+
+**Result — FAIL: 45.6% winners, not 60%.** Output: `data/lab/quarter-technicals.out.txt`. The base at session 20: 46.7%
+of members beat SPY over the rest of the quarter before 2024, 41.1% after.
+- **Single technicals do not hold:** most flip between periods (RSI, the 20-day average, the last month all ~0.47 before
+  2024 and ~0.55 after). Held the same side: beta (0.526 → 0.543), size (0.520 → 0.522), and the sector's and SPY's last
+  week (0.47–0.48, a short reversal) — all within 0.05 of chance.
+- **The model, held out (2024 →, its own top fifth each quarter):**
+
+| Checkpoint | Winners (rest beats SPY) | Base | Top fifth net / quarter | Every member | top − all t |
+|---|---|---|---|---|---|
+| Session 15 | 46.0% | 40.5% | +0.49% | −1.87% | 1.34 |
+| **Session 20** | **45.6%** | 41.1% | **+0.95%** | −1.38% | 1.58 |
+| Session 25 | 46.5% | 41.5% | +0.23% | −1.01% | 1.18 |
+
+- **60% is out of reach** on technicals: in-sample the top fifth was 51–58%, and it drops 5–12 points held out. A quarter's
+  rest is about a coin toss for any S&P name, and the best mix moves it ~5 points.
+- **But the money is the strongest stock-picking lead the lab has had:** above SPY and ~2.3% a quarter above every member,
+  at all three checkpoints, held out with no refit. t 1.58 on 11 quarters — under the bar. The weights read as one rule:
+  **above the 200-day, below the 50-day — a pullback in a long uptrend** (vs_sma200 +0.24, vs_sma50 −0.20), less so when
+  SPY itself is stretched over its 200-day (−0.21), with a shallow dip so far this quarter (+0.11). It wins by size
+  (winners bigger than losers), not by hit rate.
+- A lead for a declared test of that rule on its own (simpler than the model, so more of the data can check it).
