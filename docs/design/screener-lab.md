@@ -1223,3 +1223,42 @@ Roy: "so what happened to the stocks during the quarter?" §36's rows, read day 
 - **Reading:** winning is a slow, persistent re-rating that runs through the whole quarter, mostly on quiet days, often
   shared by a theme's names — not one event. It is visible as it happens (ahead of SPY at halfway 85%) but not at the
   start (§39), and §36/§37 showed it does not carry into the next quarter.
+
+## 41. Who the winners are (2026-11-07)
+
+Roy: "let's characterise the winners". A portrait of the quarters that beat SPY by 5%+ (§36's rows), hindsight allowed.
+`scripts/lab-quarter-winners-profile.mjs` (`--industries` fetches FMP's industry per name once → `data/lab/sp500-industries.json`).
+**Declared before the run — a description.**
+- **A club or a draw?** Each name's winning quarters against what chance gives at the same rate (binomial, the name's
+  quarters as a member); the names that win most; and how a name's win rate in 2020–2023 carries to 2024 →.
+- **Beta and the market:** beta (252 sessions to the quarter's start) of winners in quarters SPY rose against quarters it
+  fell — does a winner just carry more market?
+- **Themes:** the industries (FMP's 140-odd) over-represented among each quarter's winners (share of winners against
+  share of members), how much of a quarter's winners sit in its top three industries against the members' share there,
+  and whether a quarter's hot industries stay hot the next quarter.
+- **Size of the win:** winners by +5–10 / 10–20 / 20–50 / 50%+, and the 50%+ names.
+- **The portrait:** medians of winners against all members on size, beta, volatility, growth, margin, price/sales, and
+  what happened inside (the report beat, the analysts' raises) — the profile in one table.
+
+**Result.** Output: `data/lab/quarter-winners-profile.out.txt`. Industries for 647 of 670 names.
+- **Mostly a draw, with a small club.** Across the 513 names with 12+ quarters, win rates spread 9.8 points against 9.2
+  from chance alone; 33 names win more often than chance allows (26 expected by chance) — chip equipment and AI
+  hardware (FTNT, LRCX 16/27, ANET, KLAC, NVDA 15/27, AMAT, AVGO, MU), oil and refining (MRO, MPC, TRGP), LLY, MCK. The
+  least: PEP, CDW, ARE, DOC 3/27. **It does not carry:** the third that won least in 2020–2023 won 28% of 2024 →
+  quarters, the third that won most 29%.
+- **Beta is the market, amplified.** In quarters SPY rose 5%+, the highest-beta fifth won 49%, the lowest 18%; in
+  quarters SPY fell, 23% against 55%. A winner's beta is 1.09 when SPY is up and 0.75 when it is down — which way
+  depends on the market, which the lab cannot call (`project_industry_forecasting_verdict`).
+- **Winners come in industries, one quarter at a time.** Each quarter's top three industries hold 5–27% of its
+  winners against 2–8% of its members — whole industries win together (semiconductors 18/19 in 2023-Q1 and 17/19 in
+  2026-Q2, regulated electric 23/23 in 2026-Q1, regional banks 14/14 in 2020-Q4 and 2021-Q1, E&P 10/10 in 2021-Q1 and
+  2022-Q1). **It does not carry either:** the industries in a quarter's top fifth win 31% of the next quarter, the
+  bottom fifth 30%, the base 30%.
+- **How big:** 77% of winners are +5–20%; 2% are +50%+, and those are booms — memory and AI hardware in 2026-Q2
+  (SNDK +243%, MU +227%, INTC, AMD, DELL, STX, WDC), oil in 2020-Q2 and 2022-Q1 (APA +203%, OXY +101%).
+- **Otherwise an ordinary company:** the median winner is the median member on market cap ($30B), revenue growth (6%),
+  margin (12%), price/sales and earnings yield. It has a little more beta (0.99 vs 0.93) and volatility, came in a little
+  weaker (−0.3% under its 20-day average against +0.2%), and beat its report more often (revenue 76% vs 70%). By sector:
+  energy 1.28× its share and technology 1.14×; staples, real estate and utilities about 0.78×.
+- **Portrait in one line:** a winner is an ordinary S&P company in the right industry at the right time, with the right
+  beta for the quarter's market — and none of the three is known in advance or carries to the next quarter.
