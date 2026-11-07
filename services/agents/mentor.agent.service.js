@@ -281,7 +281,7 @@ async function chatStream({
         meta: { asset: chatState?.active_asset || '', accounts: accounts?.length ?? 0 },
     })
 
-    const { reply, setup, setups, buildOps, spanBlock, entryBlock } = _parseMentorResponse(raw)
+    const { reply, setup, setups, buildOps, spanBlock, entryBlock, scenarioOffer } = _parseMentorResponse(raw)
 
     // A candidate-offer turn and a worksheet turn are mutually exclusive by contract; if the model
     // emits both, the picked worksheet wins (it's the more committed artifact).
@@ -519,6 +519,14 @@ async function chatStream({
         mode: mode ?? 'undecided', modeSource,
         ...(first.switched ? { switchedTo: ops.switchLens } : {}),
         tools: calledThisTurn,
+        // What the chat's chart can draw this turn, price by price (Roy, 2026-11-07: B on the chart before he answered).
+        worksheet: (carrier?.scenarios ?? []).map(s => ({
+            name: s?.name ?? null, arm: s?.arm_close ?? null,
+            entry: (s?.entry_legs ?? []).map(l => l?.price ?? null),
+            stop: (s?.stop_legs ?? []).map(l => l?.price ?? null),
+            target: (s?.target_legs ?? []).map(l => l?.price ?? null),
+        })),
+        offered: scenarioOffer?.options?.map(o => o.id) ?? [],
     })
 
     return {
@@ -533,6 +541,7 @@ async function chatStream({
         // Absent until there is a second name, so an ordinary one-name build sends nothing new.
         ...(Object.keys(drafts).length > 1 ? { drafts } : {}),
         ...(setups && !normalized ? { setups } : {}),
+        ...(scenarioOffer ? { scenarioOffer } : {}),
         ...(closedSetup ? { closedSetup } : {}),
         ...route.result(),   // { route, routeSymbol, opening, edit } — the controller validates
     }
@@ -594,12 +603,35 @@ export function _parseMentorResponse(raw) {
         spanBlock: _parseBlock(text, 'spans'),
         // The ways INTO each candidate trade, at the second gate.
         entryBlock: _parseBlock(text, 'entries'),
+        scenarioOffer: _parseScenarioOffer(text),
     }
 }
 
 // The shared extractor already matches the tag EXACTLY, which is what keeps <setups> from being
 // read as a <setup> whose body happens to start with an "s".
 const _parseBlock = (text, tag) => parseEmitBlock(text, tag, LOG)
+
+const _offerPrice = (v) => (v != null && Number(v) > 0 ? Number(v) : null)
+
+/**
+ * THE SCENARIOS MENTOR IS ASKING ABOUT, for his pane (Roy, 2026-11-07: "show them when mentor asks — it showed after I
+ * already chose"). The worksheet holds only what the user took, so an offer has no place there: it lives on the turn that
+ * makes it (mentorNextState's view) and goes when the next turn does not repeat it. An option with no id or no stop is
+ * dropped; none left → null.
+ */
+export function _parseScenarioOffer(text) {
+    const parsed = _parseBlock(text, 'scenario_offer')
+    const options = (Array.isArray(parsed?.options) ? parsed.options : [])
+        .filter(o => typeof o?.id === 'string' && o.id.trim() && _offerPrice(o.stop))
+        .map(o => ({
+            id:     o.id.trim(),
+            label:  typeof o.label === 'string' ? o.label.trim() : '',
+            arm:    _offerPrice(o.arm),
+            stop:   _offerPrice(o.stop),
+            target: _offerPrice(o.target),
+        }))
+    return options.length ? { options } : null
+}
 
 /**
  * The candidate offer. Each entry is a full setup plus a label and a pitch; the setups are
@@ -962,6 +994,7 @@ export function _buildBreakSection(facts, draft, { redraw = false } = {}) {
         lines.push(`  ${Number.isFinite(onSheet) ? "The worksheet's stop" : 'The structure stop'} ${aStop} is ${short ? 'over' : 'under'} B's: the break CHANGES THE STOP, so B is ${onOffer} — one bullet: its arming line, its assumed stop, and that its stop is ${short ? 'lower' : 'higher'} than A's. Ask which they take: A, B or both. Both: the first to fill takes the whole size and the other is cancelled. Never add it unasked, and once they declined, leave it.`)
     }
     if (regularOff || changes) {
+        lines.push('  The turn you ask A, B or both, emit <scenario_offer> with the numbers you offer, so their pane shows the choice when you ask it.')
         if (b.floor != null) lines.push(`  When B goes on, it carries \`arm_close\` ${arm} and \`arm_floor\` ${b.floor}.`)
         lines.push(`  B's ENTRY is get_entry_level on B's stop ${b.stop}, B's target and their limits — never an R:R of your own. Level ${short ? 'at or under' : 'at or over'} ${arm}: the break price fits their limits, so the break IS the entry (the level and ${short ? 'above' : 'below'}, armed by the close). Level ${short ? 'over' : 'under'} ${arm}: B waits for a pullback to the level after the break. Both are B — say which, never "does not fit" for a level ${short ? 'over' : 'under'} the line.`)
     } else {

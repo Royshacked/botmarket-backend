@@ -132,6 +132,8 @@ export const ALL_EMIT_TAGS = [
     'spans',
     // And the ways INTO those trades, at the second gate. Same deal: suppressed here, drawn there.
     'entries',
+    // The scenarios Mentor is asking the user to choose between. Same deal: drawn in his pane, on the turn he asks.
+    'scenario_offer',
 ]
 
 // Build the tag-capture descriptor array for a streaming agent. `overrides` maps a

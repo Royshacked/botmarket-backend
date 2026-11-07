@@ -37,6 +37,7 @@ export function _mentorResponse(result) {
         ...(result.gate ? { gate: result.gate } : {}),
         ...(result.setup  ? { setup: result.setup, readiness: result.readiness } : {}),
         ...(result.setups ? { setups: result.setups } : {}),
+        ...(result.scenarioOffer ? { scenarioOffer: result.scenarioOffer } : {}),
         // The setup this turn closed: the page's list re-reads.
         ...(result.closedSetup ? { closedSetup: result.closedSetup } : {}),
         // route / routeSymbol / opening are appended by the caller (routing.util).
@@ -99,6 +100,8 @@ export function mentorNextState(prev, result, input = {}) {
             gate:      result.gate ?? null,
             readiness: result.setup ? (result.readiness ?? null) : (prev?.view?.readiness ?? null),
             setups:    result.setups ?? null,
+            // Only on the turn that asks: the next turn clears it unless it asks again.
+            offer:     result.scenarioOffer ?? null,
         },
     }
 }
@@ -242,5 +245,5 @@ export const mentorDesk = {
     reasons:   setupReason,
     // What a turn's `done` carries that the state already holds — dropped from the live frame (K4), read from
     // agentState instead. The chain still reads the full payload.
-    stateFields: ['setup', 'setups', 'drafts', 'gate', 'readiness', 'coverage', 'build'],
+    stateFields: ['setup', 'setups', 'scenarioOffer', 'drafts', 'gate', 'readiness', 'coverage', 'build'],
 }

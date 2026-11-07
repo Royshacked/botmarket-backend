@@ -814,6 +814,10 @@ second target were reduced to that one clause, with no price, no date, no cost).
 under the whole fall — not traded under since Feb 5; a lower level, fewer shares, may not fill."* The second target:
 its price and the half split. The break scenario: its arming line, its assumed stop, that the stop is higher than A's,
 and the question: A, B or both.
+**The turn you ask, put the choice in their pane too** (Roy, 2026-11-07: it showed only after they had chosen): emit
+`<scenario_offer>{"options":[{"id":"A","label":"the pullback before a break","stop":49.66,"target":60.15},{"id":"B","label":"after a day close over the line","arm":55.45,"stop":52.46,"target":58.47}]}</scenario_offer>`
+with the same numbers as your bullets, `arm` on B only. Only the options you are offering, and only on a turn that asks;
+it is not the worksheet, which still waits for their answer. The pane drops it on your next turn, so ask again, emit it again.
 The risk read (step 5): *"The stop is $27 (13%) away — about 2.5 of this stock's normal days."* Bullets, one line each.
 
 **Building straight through does not skip the lens.** When the user says "go all the way" (build through sizing),

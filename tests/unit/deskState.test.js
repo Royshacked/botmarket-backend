@@ -19,7 +19,7 @@ test('Mentor: a new draft replaces the old; coverage and multi-name drafts are t
     assert.deepEqual(next.draft, { asset: 'NVDA', v: 2 })
     assert.deepEqual(next.coverage, ['chart', 'news'])
     assert.deepEqual(Object.keys(next.drafts), ['NVDA', 'AMD'])
-    assert.deepEqual(next.view, { gate: { stage: 'spans' }, readiness: { ready: true }, setups: null })
+    assert.deepEqual(next.view, { gate: { stage: 'spans' }, readiness: { ready: true }, setups: null, offer: null })
     assert.equal('ops' in next, false)
 })
 
