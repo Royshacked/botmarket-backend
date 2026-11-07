@@ -1108,3 +1108,34 @@ outcome, not the report. `scripts/lab-quarter-winners.mjs`. **Declared before th
 - The order IS monotone, fifth 1 → 5, and the side that holds is the OTHER one: names stretched up at the quarter's start
   trail SPY by 0.7%/mo, t −2.24, in both periods. An avoid lead — undeclared, the same kind as §33's maintained guidance.
 - §36's lead was the right way round (AUC ~0.43) but too small to trade on a long book against SPY.
+
+## 38. Bought the reaction up on the report — test S (2026-11-07)
+
+Roy: "we should have tested to buy the reaction up on report" (§36: winners reacted up 70%, losers 31%). Tests A and E
+read it on the screener's names only (today's survivors), A to 20 sessions, E by the EPS band; never on the S&P 500 as
+it was with the daily book. `scripts/lab-hold-sweep.mjs --groups=reaction`. **Declared before the run.**
+- **The reaction:** the close before the report to the close of the session after, against SPY's (`reactionAt`), so
+  before or after the bell it is complete; bought at the open of the session after that (§32's day two).
+- **Groups:** reacted up (any), up 5%+, up 10%+; every report the control. Reacted down and down 5%+ described beside.
+- **Holds, universe, bar:** test Q's exactly — 5, 10, 20, 40 sessions and to the next report, never past it; S&P 500 as
+  it was, entries 2020 →, split 2024-01-01; a group passes at a length with its book above SPY in both periods, above
+  every report's in both, t ≥ 2, and a neighbouring length above SPY in both.
+
+**Result — FAIL at every length, for every group.** Output: `data/lab/hold-sweep-reaction.out.txt`. Book per month, net
+of SPY (13,033 reports):
+
+| Group | n | 5 | 10 | 20 | 40 | to the next report |
+|---|---|---|---|---|---|---|
+| Every report | 13,033 | −0.28% | −0.40% | −0.45% | −0.47% | −0.30% |
+| Reacted up | 6,456 | −0.90% | −0.47% | −0.50% | −0.44% | −0.31% |
+| Up 5%+ | 2,205 | −0.47% | −0.20% | −0.30% | −0.23% | −0.22% |
+| Up 10%+ | 629 | +0.07% | −0.06% | −0.14% | +0.14% (t 0.35) | +0.13% (t 0.40) |
+| Reacted down (described) | 6,577 | −0.40% | −0.40% | −0.34% | −0.48% | −0.27% |
+| Down 5%+ (described) | 2,296 | +0.04% | −0.80% | −0.50% | −0.43% | −0.18% |
+
+- Up and down end in the same place: once the reaction is known, its sign says nothing about the weeks after.
+- Up 10%+ is above the control at most lengths and is positive before 2024 (+0.5 … +1.0%/mo), but under SPY after 2024
+  at every length (−0.02 … −1.61%), t ≤ 0.40.
+- Why §36's winners "reacted up 70%": the reaction is INSIDE their quarter, part of what made them winners. Bought the
+  day after, it is already paid for. The rest of their quarter (+10.7% median without the report's days) is the run-up
+  before the report (§6, the Hotlist's trade) and drift the reaction does not predict.

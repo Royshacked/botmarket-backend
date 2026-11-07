@@ -1,7 +1,8 @@
 // THE HOLD'S LENGTH AFTER A REPORT — test Q (declared in screener-lab.md §35, before the run). §32's entries (day two),
 // held 5 / 10 / 20 / 40 sessions or to the next report, by the report's quality.
 //
-//   node --max-old-space-size=6000 scripts/lab-hold-sweep.mjs
+//   node --max-old-space-size=6000 scripts/lab-hold-sweep.mjs                     (test Q: by the report's quality)
+//   node --max-old-space-size=6000 scripts/lab-hold-sweep.mjs --groups=reaction   (test S, §38: by the day-one reaction)
 //
 // Offline: data/lab caches.
 import dns from 'dns'
@@ -11,6 +12,7 @@ import 'dotenv/config'
 dns.setServers(['8.8.8.8', '1.1.1.1'])
 const { holdTrades, holdBook, bookBlocks } = await import('../services/holdToNext.service.js')
 const { loadLabData } = await import('../services/screenerLab.data.js')
+const { reactionAt } = await import('../services/reportReaction.service.js')
 const { memberOn } = await import('../services/sp500History.service.js')
 const { closeDb } = await import('../providers/mongodb.provider.js')
 
@@ -24,6 +26,7 @@ for (const t of base) {
     const s = data.names.get(t.symbol), rep = s.reports.get(s.ind.date[t.i - 2])
     const a = Number(rep?.revenueActual), e = Number(rep?.revenueEstimated)
     t.rev = a > 0 && e > 0 ? (a / e - 1) * 100 : null
+    t.reaction = reactionAt(s, t.i - 2, data)
 }
 const days = data.spyDays.filter(d => d >= FROM)
 const pct = (a, b) => (a > 0 && b > 0 ? (a / b - 1) * 100 : null)
@@ -37,7 +40,15 @@ function heldFor(t, h) {
     if (ret == null || spy == null) return null
     return { ...t, x, held: x - t.i + 1, ret, spy, net: ret - spy - t.cost }
 }
-const GROUPS = {
+const BY_REACTION = process.argv.includes('--groups=reaction')
+const GROUPS = BY_REACTION ? {
+    'every report': () => true,
+    'reacted up': (t) => t.reaction > 0,
+    'reacted up 5%+': (t) => t.reaction >= 5,
+    'reacted up 10%+': (t) => t.reaction >= 10,
+    'reacted down (described)': (t) => t.reaction < 0,
+    'reacted down 5%+ (described)': (t) => t.reaction <= -5,
+} : {
     'every report': () => true,
     'good (EPS + revenue)': (t) => t.good,
     'revenue beat 10%+': (t) => t.rev != null && t.rev >= 10,
@@ -68,7 +79,7 @@ for (const [g, byH] of Object.entries(res)) {
 // THE DECLARED BAR.
 console.log('\nDECLARED BAR (per group and length: above SPY both periods · above every report both · t ≥ 2 · a neighbour the same way)')
 const ok = (g, h) => res[g][h].before?.mean > 0 && res[g][h].after?.mean > 0
-for (const g of Object.keys(GROUPS).filter(g => g !== 'every report')) {
+for (const g of Object.keys(GROUPS).filter(g => g !== 'every report' && !g.includes('described'))) {
     const marks = HOLDS.map((h, n) => {
         const r = res[g][h], all = res['every report'][h]
         const spy = ok(g, h)
