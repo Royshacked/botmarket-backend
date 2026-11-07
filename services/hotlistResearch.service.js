@@ -206,14 +206,22 @@ export async function _expireOld(day, deps) {
  * Every tick: earlier days' waiting names expired; today's week board handed off if a dead process never did (no
  * stamp); then today's names a busy or dead run left — put back in line and researched (the shared pick-up). With the
  * house's reads off, a user's waiting read is still picked up. And the NEXT session's board (built this evening): handed
- * off and researched if the evening's hand-off failed — not left until midnight ET, or Monday (code review 2026-10-25).
+ * off and researched if the evening's hand-off failed — not left until midnight ET, or Monday (code review 2026-10-25) —
+ * and its names a dead run left, picked up the same way as today's.
  */
 export async function resume(day, deps = _deps) {
     const res = await _resumeDay(day, deps)
     try {
         if (!day || !deps.enabled() || !deps.latestBoard) return res
         const next = await Promise.resolve(deps.latestBoard()).catch(() => null)
-        if (!next || !(next.day > day) || next.checkpoint !== OVERNIGHT || next.research_queued_at) return res
+        if (!next || !(next.day > day) || next.checkpoint !== OVERNIGHT) return res
+        // Already handed off: its names a dead run left (a restart, 2026-11-07) are not today's, so nothing above sees them.
+        if (next.research_queued_at) {
+            const waiting = ((await _today(next.day, deps)) ?? []).filter(r => WAITING.includes(r.status))
+            if (!waiting.length) return res
+            const research = await resumeQueued([...new Set(waiting.map(r => r.symbol))], () => researchDay(next.day, deps), deps, { now: deps.now(), source: SOURCE })
+            return { ...res, next: { day: next.day, queued: [], research } }
+        }
         const q = await _handOff(next, deps)
         const research = q.error ? null : await researchDay(next.day, deps)
         return { ...res, next: { day: next.day, queued: q.queued ?? [], research } }

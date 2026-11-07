@@ -318,12 +318,34 @@ test('#25-1 the overnight board\'s names, queued the evening before, are researc
 
 test('#25-9 the pick-up hands off the NEXT session\'s board when the evening hand-off failed', async () => {
     const NEXT = { id: 'hb_2026-10-26_week', day: '2026-10-26', checkpoint: 'overnight', rows: [{ symbol: 'NX', cells: { week: { grade: 'R' } } }] }
-    const { marks, starts, deps } = rig({ board: async () => ({ ...BOARD, research_queued_at: 'x' }), latestBoard: async () => NEXT })
+    const { rows, marks, starts, deps } = rig({ board: async () => ({ ...BOARD, research_queued_at: 'x' }), latestBoard: async () => NEXT })
     const r = await resume(DAY, deps)
     assert.deepEqual(marks, [NEXT.id])
     assert.deepEqual(r.next.queued, ['NX'])
     assert.ok(starts.some(s => s.symbols.includes('NX')))
-    // Stamped: not again.
+    // Stamped, its names read: not again.
+    rows.forEach(x => { x.status = 'done' })
     const again = await resume(DAY, { ...deps, latestBoard: async () => ({ ...NEXT, research_queued_at: 'y' }) })
     assert.equal(again.next, undefined)
+    assert.deepEqual(marks, [NEXT.id])
+})
+
+// 2026-11-07: a restart killed ARMK's read on Monday's board on a Saturday. The board was stamped and the row is not
+// today's, so nothing looked at it until Monday 00:00 ET.
+test('the pick-up finds a dead read on the NEXT session\'s stamped board, and leaves a live run alone', async () => {
+    const NEXT = { id: 'hb_2026-10-26_week', day: '2026-10-26', checkpoint: 'overnight', research_queued_at: 'y', rows: [{ symbol: 'NX', cells: { week: { grade: 'R' } } }] }
+    const stale = []
+    const { rows, marks, starts, deps } = rig({ board: async () => ({ ...BOARD, research_queued_at: 'x' }), latestBoard: async () => NEXT,
+        requeueStale: async (o) => { stale.push(o.symbols); rows.forEach(r => { if (o.symbols.includes(r.symbol) && r.status === 'in_research') r.status = 'queued' }); return { ok: true } } })
+    rows.push(hotRow('NX', NEXT.day, { status: 'in_research' }))
+
+    const busy = await resume(DAY, { ...deps, getRun: () => ({ status: 'running', current: 'NX' }) })
+    assert.deepEqual([stale, starts], [[], []], 'a run is going: not touched')
+    assert.equal(busy.next.research.outcome, 'busy')
+
+    const r = await resume(DAY, deps)
+    assert.deepEqual(stale, [['NX']])
+    assert.deepEqual(starts.map(s => s.symbols), [['NX']], 'read again, not left until that day')
+    assert.equal(r.next.day, NEXT.day)
+    assert.deepEqual(marks, [], 'no second hand-off')
 })
