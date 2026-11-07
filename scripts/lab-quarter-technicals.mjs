@@ -173,4 +173,36 @@ for (const c of CHECKS) {
 }
 const v = verdict[MAIN], same = (c) => verdict[c].net > 0 && verdict[c].net > verdict[c].all
 console.log(`\nDECLARED BAR (session ${MAIN}, held out): 60%+ winners ${v.hit >= 0.6} (${(v.hit * 100).toFixed(1)}%) · above SPY ${v.net > 0} · above every member ${v.net > v.all} · t ≥ 2 ${v.t >= 2} · sessions 15 and 25 the same way ${same(15) && same(25)} → ${v.hit >= 0.6 && v.net > 0 && v.net > v.all && v.t >= 2 && same(15) && same(25) ? 'PASS' : 'FAIL'}`)
+
+// STRETCHED DOWN (Roy, after the run: "what about stretched down?") — a description, not part of test U's bar. Each
+// quarter's members cut by the distance from the 20-day average at the checkpoint; the deepest tenth split by the 200-day.
+console.log('\n── STRETCHED DOWN (added after the run — a description): by distance from the 20-day average, each quarter cut on its own')
+const cutBy = (ts, key, lo, hi) => {
+    const out = []
+    for (const x of Q) {
+        const qs = ts.filter(o => o.q === x.q && Number.isFinite(o.f[key])).sort((p, z) => p.f[key] - z.f[key])
+        if (qs.length < 50) continue
+        out.push({ day: x.first, picks: qs.slice(Math.floor(lo * qs.length), Math.floor(hi * qs.length)), all: mean(qs.map(o => o.rest)) })
+    }
+    return out
+}
+const line = (label, rows) => {
+    const per = (p) => { const r = rows.filter(p); return { hit: share(r.flatMap(z => z.picks), o => o.win), net: mean(r.map(z => mean(z.picks.map(o => o.rest)))), all: mean(r.map(z => z.all)), n: r.reduce((a, z) => a + z.picks.length, 0) } }
+    const b = per(z => z.day < SPLIT), a = per(z => z.day >= SPLIT)
+    const t = tOf(rows.map(z => mean(z.picks.map(o => o.rest)) - z.all))
+    console.log(`    ${label.padEnd(30)} ${String(b.n).padStart(4)} winners ${b.hit} net ${f2(b.net)} (all ${f2(b.all)}) → ${String(a.n).padStart(4)} winners ${a.hit} net ${f2(a.net)} (all ${f2(a.all)}) · vs all t ${t?.toFixed(2)}`)
+}
+for (const c of CHECKS) {
+    const ts = obs.filter(o => o.c === c)
+    console.log(`  session ${c}`)
+    line('deepest tenth under the 20d', cutBy(ts, 'vs_sma20', 0, 0.1))
+    line('bottom fifth', cutBy(ts, 'vs_sma20', 0, 0.2))
+    line('fifth 2', cutBy(ts, 'vs_sma20', 0.2, 0.4))
+    line('fifth 3', cutBy(ts, 'vs_sma20', 0.4, 0.6))
+    line('fifth 4', cutBy(ts, 'vs_sma20', 0.6, 0.8))
+    line('top fifth (stretched up)', cutBy(ts, 'vs_sma20', 0.8, 1))
+    const deep = cutBy(ts, 'vs_sma20', 0, 0.2)
+    line('bottom fifth, ABOVE the 200d', deep.map(z => ({ ...z, picks: z.picks.filter(o => o.f.vs_sma200 > 0) })))
+    line('bottom fifth, BELOW the 200d', deep.map(z => ({ ...z, picks: z.picks.filter(o => o.f.vs_sma200 <= 0) })))
+}
 process.exit(0)

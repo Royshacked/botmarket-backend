@@ -1332,3 +1332,21 @@ of members beat SPY over the rest of the quarter before 2024, 41.1% after.
   SPY itself is stretched over its 200-day (−0.21), with a shallow dip so far this quarter (+0.11). It wins by size
   (winners bigger than losers), not by hit rate.
 - A lead for a declared test of that rule on its own (simpler than the model, so more of the data can check it).
+
+**Stretched down** (Roy, after the run: "what about stretched down?" — a description added to the same script, not part of
+the bar). Each quarter's members by distance from the 20-day average at the checkpoint, rest of the quarter net of SPY:
+
+| Session 20 | 2020–2023 winners / net | 2024 → winners / net |
+|---|---|---|
+| Deepest tenth under the 20-day | 47.2% / +0.91% | 35.2% / **−2.00%** |
+| Bottom fifth | 48.8% / +0.91% | 34.8% / −2.41% |
+| Top fifth (stretched up) | 45.6% / −0.86% | 48.4% / **+0.99%** |
+| Every member | — / −0.32% | — / −1.38% |
+
+- **It flips with the market.** Before 2024 the stretched-down names bounced (deepest tenth +1.85% at session 15, 53%
+  winners); since 2024 they kept falling (35% winners at session 20) and the stretched-UP names led — a reversal market
+  became a momentum one. The same flip as RSI and the 20-day's AUC (0.47 → 0.55).
+- Under or over its 200-day changes little; the one cell above every member in both periods is the bottom fifth above the
+  200-day at session 15 (+0.13% → +0.22%, t 1.18) — the model's "pullback in an uptrend", weakly, and not at 20 or 25.
+- So "stretched down" alone is not a rule: which side wins depends on whether the market is reverting or trending, and
+  that is the regime the rotation tests (§29–31) could not call ahead.
