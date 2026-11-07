@@ -916,3 +916,66 @@ Monthly, after the month's first sessions: `node scripts/lab-sp500-universe.mjs`
 `node --max-old-space-size=6000 scripts/lab-rotation.mjs --universe=sp500 --library=m --to=<today> --refresh`, then
 `node scripts/lab-rotation-log.mjs`. The bar to go live (decided 2026-10-27): 6–12 logged months above SPY, and 3+ rules
 that beat SPY on their own.
+
+## 32. Good earnings, held to the next earnings — test N (2026-11-07)
+
+Roy, 2026-11-07: "good earnings - hold until next earnings". `services/holdToNext.service.js`, `scripts/lab-hold-to-next.mjs`.
+
+**Declared before the run.**
+- **Good earnings (primary):** EPS over +2% of its estimate AND revenue over its estimate. The cut was fixed after checking only that revenue is on the calendar, not any result.
+- **The trade:** bought at the open of the second session after the report, sold at the close of the session before the next report, 40–110 sessions later. Net of SPY and the cost. A name whose bars end first is sold at its last close and stays counted.
+- **The read:** holds overlap, so a daily book (each open trade equal weight, each session once), in non-overlapping 21-session blocks.
+- **Universe:** the S&P 500 as it was (§30), entries 2020 →, split 2024-01-01. Also the screener's names, 3 years, split 2025-10-23 (today's names, so survivors flatter it).
+- **Bar:** the good reports' book above SPY in both periods, above the book of every report in both, and t ≥ 2 on the whole.
+
+**Result — FAIL on both.** Outputs: `data/lab/hold-to-next-sp500.out.txt`, `hold-to-next-screener.out.txt`.
+
+| S&P 500 as it was | Trades | Stock | SPY | Net per trade | Median | Beat SPY | Book per month (t) | Before / after 2024 |
+|---|---|---|---|---|---|---|---|---|
+| Good | 6,884 | +3.19% | +3.48% | −0.35% | −0.91% | 47% | −0.25% (−1.17) | −0.08 / −0.56 |
+| Every report | 13,033 | +2.66% | +3.35% | −0.74% | −1.37% | 45% | −0.30% (−1.23) | −0.09 / −0.69 |
+| Not good | 6,149 | +2.08% | +3.20% | −1.18% | −1.88% | 44% | −0.35% (−1.20) | −0.09 / −0.84 |
+| Big beat + revenue + bought | 2,175 | +3.99% | +3.53% | +0.40% | −0.22% | 49% | −0.07% (−0.28) | −0.13 / −0.04 |
+
+- On the screener's names: good +0.08% net per trade, every report +0.07%, a miss +0.53%; book −0.34% a month (t −0.86). The report's quality separates nothing there.
+- Good minus not good, a look added after the first run and not part of the bar: +0.10% a month, t 0.74, on the S&P 500; +0.09%, t 0.34, on the screener's names. A lean at most.
+- The hold's parts on the S&P 500: up to the run-up window −0.51%, the last window +0.20%. What little the hold makes is the run-up's window.
+- Known limits: EPS and revenue only, no guidance; equal weight against a cap-weighted SPY, a headwind the "every report" row shows.
+
+## 33. Good earnings and a raised guidance, held to the next earnings — test O (2026-11-07)
+
+Roy agreed (2026-11-07) that guidance, not a narrower cut of §32, was the next thing to test. `services/guidance8k.service.js`,
+`scripts/lab-guidance-fetch.mjs` (the download), `scripts/lab-guidance-hold.mjs` (the test, and `--check=N` for the hand check).
+
+**The source.** No feed we pay for has historical guidance: FMP transcripts 402, FMP quarterly estimates 402, Massive's
+Benzinga guidance 403, Finnhub transcripts 403. Alpha Vantage has transcripts at 25 calls a day. The earnings release is on
+SEC EDGAR: the 8-K with item 2.02 filed from the day before the report to 3 days after, its exhibit 99.1. 12,251 of
+§32's 13,033 releases read (94%); 644 have no CIK in SEC's ticker file (delisted, bought, renamed), 138 no 8-K near the day.
+`data/lab/guidance-8k.jsonl` keeps the guidance sentences, so the classifier can change without another download.
+
+**The classifier** reads a direction only where the release states one: a raise or cut verb beside a guidance word, or an
+old → new range ("from $23.5–25.0B to $21.8–22.6B"). The headline decides when it states one. Costs (capex, expenses),
+dividends and a rating agency's outlook are not the forecast. Numbers with no stated direction stay `numbers`: judging
+them needs the estimate of the day, which we do not have. Two hand checks of 40 random releases each, before any return
+was read: the first found 4 misses (fixed), the second 2 false raises of 14 (fixed). Then frozen.
+
+**Declared before the run.** §32's trades. Primary: good earnings (EPS over +2% and a revenue beat) AND a raised guidance.
+Same bar as §32: the book above SPY before and after 2024-01-01, above every report's book in both, t ≥ 2.
+
+**Result — FAIL.** Output: `data/lab/guidance-hold-sp500.out.txt`. Net vs SPY after cost:
+
+| Group | Trades | Stock | SPY | Net per trade | Median | Beat SPY | Book per month (t) |
+|---|---|---|---|---|---|---|---|
+| Good + raised | 1,519 | +2.95% | +3.85% | −0.95% | −1.44% | 45% | −0.39% (−1.70) |
+| Every report | 13,033 | +2.66% | +3.35% | −0.74% | −1.37% | 45% | −0.30% (−1.23) |
+| Raised, any report | 2,378 | +2.71% | +3.69% | −1.03% | −1.71% | 44% | −0.40% (−1.78) |
+| Good + numbers only | 2,776 | +3.59% | +3.09% | +0.44% | −0.22% | 49% | −0.03% (−0.11) |
+| Maintained, any report | 1,441 | +1.19% | +3.90% | −2.76% | −3.04% | 40% | −0.94% (−2.73) |
+
+- A raise does WORSE than the average report, in both periods: the market prices it on the day, and what follows is a little
+  worse than average.
+- Maintained guidance is the weakest group (t −2.73, both periods negative). Not declared, and one of about ten groups
+  shown, so a lead for an AVOID at most; who maintains (utilities and other steady guiders?) is not yet checked.
+- Cuts are rare in releases (500 of 12,251), and a good report with a cut is 234 trades: too few to read.
+- Known limits: stated directions only; the CIK file misses companies that left, so this universe is less free of
+  survivors than §30's; guidance said only on the call is not in a release.
