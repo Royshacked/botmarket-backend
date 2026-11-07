@@ -1077,3 +1077,34 @@ outcome, not the report. `scripts/lab-quarter-winners.mjs`. **Declared before th
   day, makes the quarter — and §32–35 showed buying after a good report does not catch it.
 - **No repeat.** A winning quarter is followed by a winning one 34% of the time before 2024 (the base 30%) and 25% after,
   when 51% of winners LOST the next quarter (mean −2.77% vs SPY). The same reversal as the lead.
+
+## 37. Bought weak at the quarter's start, held the quarter — test R (2026-11-07)
+
+§36's one lead, as a trade (Roy: "go"). `scripts/lab-quarter-reversal.mjs`. **Declared before the run.**
+- **Signal (the primary, one fact):** at the last close before each calendar quarter, the S&P 500 members (as they were
+  on the quarter's first session) in the BOTTOM FIFTH by distance from the 20-day average (§36's strongest, AUC 0.442 →
+  0.427). Quarters 2020-Q1 → 2026-Q3, split 2024-01-01.
+- **Trade:** bought at the open of the quarter's first session, sold at its last close (a name whose bars stop is sold at
+  its last close), equal weight, net of SPY and the lab's cost (`costFor`).
+- **Control:** every member, bought and held the same way (the equal-weight S&P against SPY).
+- **Bar:** the signal's book (§32's daily book, 21-session blocks) above SPY before AND after 2024, above the control in
+  both, t ≥ 2 on the whole.
+- **Descriptions only (not the verdict):** the other four fifths of the same fact; the bottom fifth by the last month's
+  and the last week's return; the book without its best 1% of trades.
+
+**Result — FAIL.** Output: `data/lab/quarter-reversal.out.txt`. Book per month, net of SPY and the cost:
+
+| | book/mo | t | 2020–2023 | 2024 → |
+|---|---|---|---|---|
+| **Bottom fifth by vs 20-day avg (primary)** | +0.13% | 0.31 | +0.51% | **−0.51%** |
+| Every member (control) | −0.27% | −1.12 | −0.13% | −0.52% |
+| Fifth 2 / 3 / 4 | −0.07% / −0.27% / −0.45% | | | |
+| **Top fifth (stretched up)** | **−0.71%** | **−2.24** | −0.79% | −0.61% |
+| Bottom fifth by last month / last week | +0.12% / +0.11% | 0.28 / 0.31 | +0.34% / +0.09% | −0.32% / +0.17% |
+
+- Above the control in both periods, but under SPY after 2024 and t 0.31. Without its best 1% (MU, DDOG, CRWD in 2026-Q2,
+  OXY 2022-Q1…) it is −0.05%/mo. Before 2024 the gain came from four quarters (2020-Q2, 2020-Q4, 2021-Q1, 2023-Q1, the
+  rebounds); after 2024 the bottom fifth is the control (−0.51% vs −0.52%).
+- The order IS monotone, fifth 1 → 5, and the side that holds is the OTHER one: names stretched up at the quarter's start
+  trail SPY by 0.7%/mo, t −2.24, in both periods. An avoid lead — undeclared, the same kind as §33's maintained guidance.
+- §36's lead was the right way round (AUC ~0.43) but too small to trade on a long book against SPY.
