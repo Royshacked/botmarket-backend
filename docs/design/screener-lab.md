@@ -979,3 +979,44 @@ Same bar as §32: the book above SPY before and after 2024-01-01, above every re
 - Cuts are rare in releases (500 of 12,251), and a good report with a cut is 234 trades: too few to read.
 - Known limits: stated directions only; the CIK file misses companies that left, so this universe is less free of
   survivors than §30's; guidance said only on the call is not in a release.
+
+## 34. What the holds that beat SPY had in common, and a revenue beat of 10%+ — test P (2026-11-07)
+
+Roy: "from our trades try to find how we beat the spy and then check what is common between those stocks".
+`scripts/lab-hold-winners.mjs` (the description), `scripts/lab-guidance-groups.mjs` (§33's two side groups).
+
+**The description** (§32's 13,033 holds, facts known at the entry open, read on 2020–2023 and checked on 2024 →).
+Four facts separated winners the same way in both periods by 0.02+ of AUC: volatility (0.535 → 0.526), the revenue
+surprise (0.524 → 0.521), the 60-day return (0.472 → 0.472, losers did better) and the hold's length (mechanical: the
+average hold trails SPY). Volatility is the market's beta, not a skill: in 2022, the falling year, the calmest fifth beat
+the most volatile; the calmest fifth's book trails SPY by −0.88% a month (t −2.70), the most volatile is +0.12% (t 0.27).
+A revenue surprise of 10.8%+ (the top fifth) beat the bottom fifth in all seven years; its book +0.16% / +0.12% a month,
+t 0.54. Every fact together, fitted on 2020–2023: AUC 0.531 on 2024 →, its top decile +0.79% a hold, 49% beat SPY.
+§33's side groups: without their best 1% of holds both go negative; the 10 best carry the whole sum (memory and storage
+2025–26, energy November 2020). Output: `data/lab/hold-winners.out.txt`, `guidance-groups.out.txt`.
+
+**Test P, declared before the run.** `scripts/lab-revenue-beat.mjs`.
+- **Signal:** a revenue surprise of +10% or more (actual over estimate), any EPS. The cut is rounded from the description's
+  10.8%, not tuned.
+- **The trade:** §32's (bought day two, sold the close before the next report, net of SPY and the cost).
+- **Universe, unseen by the description:** the screener's names (today's) that were never in the S&P 500, any day
+  (sp500-universe spans). Two windows, each its own process: 2019-01 → 2023-10 (entries from 2019-06) and 2023-10 →
+  2026-10. They are the two periods. Today's names flatter both groups alike; the "every report" control carries it.
+- **Bar:** the signal's book above SPY in both windows, above the book of every report in both, and t ≥ 2 on the two
+  windows' 21-session blocks together.
+
+**Result — FAIL** (two of the three: above SPY and above every report in both windows, t 0.61). Outputs:
+`data/lab/revenue-beat-old.out.txt`, `revenue-beat-new.out.txt`. A first run started the new window at 2022-12 and
+overlapped the old by ten months; rerun from 2023-10-09 as declared.
+
+| Window | Signal holds | Net per hold | Median | Beat SPY | Book per month | Every report's book |
+|---|---|---|---|---|---|---|
+| 2019-06 → 2023-10 (626 names) | 1,792 | +1.66% | −1.07% | 47% | +0.14% | +0.10% |
+| 2023-10 → 2026-10 (730 names) | 685 | +0.66% | −2.12% | 45% | +0.43% | −0.17% |
+| Both | | | | | +0.26% (t 0.61, 88 blocks) | −0.01% |
+
+- The right way round in both windows, on names the description never saw, but small against the noise: proving +0.26%
+  a month needs t ≥ 2, about three times the effect or ten times the data.
+- The mean per hold rides a few: without its best 1% the old window is +0.07% (FCEL +645%, MSTR +218%, RUN +204% in
+  2020), the new −0.24%. The median hold loses in both.
+- A lead, not a rule. Nothing in the app changes.
