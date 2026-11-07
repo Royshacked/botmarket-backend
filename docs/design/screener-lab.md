@@ -1350,3 +1350,36 @@ the bar). Each quarter's members by distance from the 20-day average at the chec
   200-day at session 15 (+0.13% → +0.22%, t 1.18) — the model's "pullback in an uptrend", weakly, and not at 20 or 25.
 - So "stretched down" alone is not a rule: which side wins depends on whether the market is reverting or trending, and
   that is the regime the rotation tests (§29–31) could not call ahead.
+
+## 44. In a market trending up, the trending industries — test V (2026-11-07)
+
+Roy: "so if the market trends up, so trending industries". §43's flip read as a regime: trend-following when the market
+trends. `scripts/lab-quarter-trend-industry.mjs`. **Declared before the run.**
+- **The regime, known at the checkpoint's close:** SPY above its 200-day AND its 50-day AND up over the last 63 sessions
+  = TRENDING UP; anything else = not.
+- **The pick (primary):** at the close of session 20 (15 and 25 the neighbours), the members whose INDUSTRY's median
+  quarter-to-date net vs SPY (the name left out, 4+ members) is in that quarter's top fifth; bought at the next open,
+  held to the quarter's last close, net of SPY and `costFor`. Equal weight, each quarter one observation.
+- **Described beside, not the verdict:** the industry's median 60-session net vs SPY (a longer trend) instead of the
+  quarter so far; the name's own quarter-to-date; and the same picks in the NOT-trending quarters (the mirror).
+- **Bar:** in trending-up quarters, the top fifth above SPY AND above every member in both periods (split 2024-01-01),
+  t ≥ 2 on top less every member over those quarters, AND sessions 15 and 25 the same way in both periods.
+
+**Result — FAIL.** Output: `data/lab/quarter-trend-industry.out.txt`. SPY trended up at session 20 in 17 of 27 quarters.
+
+| Trending up, rest of the quarter vs SPY | 2020–2023 top / every member | 2024 → top / every member | t |
+|---|---|---|---|
+| Session 15, industry so far | −0.94% / −1.27% | +0.83% / −0.75% | 0.90 |
+| **Session 20, industry so far (primary)** | **−1.80% / −1.68%** | **+2.17% / +0.26%** | **0.90** |
+| Session 25, industry so far | −0.49% / −0.62% | +1.35% / +0.09% | 1.01 |
+| Session 15, industry over 60 sessions | +0.22% / −1.27% | +1.62% / −0.75% | 1.92 |
+
+- **Only after 2024.** In 2020–2023's up-trending quarters the leading industries did no better than the rest; since 2024
+  they beat every member by ~2%, but two quarters carry it (2026-Q1 +7.0%, 2026-Q2 +11.1% — memory and AI hardware).
+  Of the 17 quarters, 9 went against the pick.
+- **The mirror holds, weakly:** when SPY is NOT trending up, the leading industries trail every member (t −1.80 at
+  session 15, −0.99 at 20, −1.50 at 25) — a leading industry is a bet that the trend continues.
+- The industry's 60-session trend at session 15 is the closest cell (above SPY and every member in both periods, t 1.92)
+  — not the declared primary, and its neighbours at 20 / 25 fail before 2024: one of nine described cells.
+- **Reading:** "trend market → trending industries" is what 2024–2026 looked like (the narrow AI-led market), not a rule
+  the earlier up-trends followed. It cannot yet be told from that one boom.
