@@ -1262,3 +1262,32 @@ Roy: "let's characterise the winners". A portrait of the quarters that beat SPY 
   energy 1.28× its share and technology 1.14×; staples, real estate and utilities about 0.78×.
 - **Portrait in one line:** a winner is an ordinary S&P company in the right industry at the right time, with the right
   beta for the quarter's market — and none of the three is known in advance or carries to the next quarter.
+
+## 42. When in the quarter the leaders can be told — test T (2026-11-07)
+
+Roy: "let's check when in the quarter we can predict who leads". §40: winners are ahead at halfway 85% of the time —
+read backwards. Forwards: `scripts/lab-quarter-checkpoints.mjs`. **Declared before the run.**
+- **Checkpoints:** the close of session 5, 10, 15 … 50 of each calendar quarter (a quarter is ~63). S&P 500 members as
+  they were on the quarter's first session, 2020-Q1 → 2026-Q3, split 2024-01-01.
+- **Three rankings at a checkpoint:** the name's quarter-to-date net vs SPY (OWN); its industry's median QTD net, the
+  name left out, 4+ members (INDUSTRY); own less industry (LAGGARD — negative = behind a moving industry).
+- **Visible (description):** the share of the quarter's final winners already in the top fifth by OWN; AUC of OWN for
+  the final winners against the final losers.
+- **Predict the rest (the test):** bought at the NEXT session's open, held to the quarter's last close, net of SPY and
+  `costFor`. Per checkpoint and ranking: each fifth's mean net per quarter (equal weight), top less bottom, and the
+  top fifth against every member. Each quarter is one observation (27; t over quarters).
+- **Bar for a ranking at a checkpoint:** its top fifth above SPY AND above every member in both periods, t ≥ 2 on top
+  less every member, AND a neighbouring checkpoint the same way in both periods (ten checkpoints × three rankings: one
+  alone is the luck of thirty tries).
+
+**Result — FAIL at every checkpoint, for every ranking.** Output: `data/lab/quarter-checkpoints.out.txt`.
+- **Visible, yes:** the AUC of the quarter-to-date for the final winners against losers climbs 0.65 (session 5) → 0.82
+  (20) → 0.91 (30) → 0.99 (50); the final winners in the top fifth 29% → 40% → 48% → 58%. But that is the quarter
+  so far being part of the quarter: by session 30 half of it is already counted.
+- **Predict the rest, no.** Bought at the next open, the leaders so far do not beat the rest of the quarter: OWN's top
+  fifth, top less every member, t between −0.84 and +1.33 at the ten checkpoints; the BOTTOM fifth does as well or
+  better at most of them before 2024 (+0.5 … +1.1% at sessions 15–30). Industry: one cell (session 35, top +0.02% →
+  +0.89%, t 2.17) with no neighbour — one of thirty tries. Laggard behind a moving industry: above both at session 30
+  only (+0.47% → +0.60%, t 1.85).
+- **Reading:** the quarter's winner is visible only as it is made; the part still to come is a fresh draw at every
+  checkpoint. Within-quarter momentum — own or industry — is not there at the S&P scale, after the cost.
