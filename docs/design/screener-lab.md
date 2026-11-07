@@ -1139,3 +1139,50 @@ of SPY (13,033 reports):
 - Why §36's winners "reacted up 70%": the reaction is INSIDE their quarter, part of what made them winners. Bought the
   day after, it is already paid for. The rest of their quarter (+10.7% median without the report's days) is the run-up
   before the report (§6, the Hotlist's trade) and drift the reaction does not predict.
+
+## 39. The quarters a stock beat SPY by 5%+, from every side (2026-11-07)
+
+Roy: "stocks beating the S&P by 5% per quarter — from all aspects, not just reports, what is common in those stocks".
+§36's rows and groups, with every kind of fact the lab can date. `scripts/lab-quarter-winners-all.mjs`. **Declared before
+the run — a description, not a test.**
+- **New data — fundamentals as filed:** SEC XBRL companyfacts (`services/secFundamentals.service.js`, fetched by
+  `scripts/lab-fundamentals-fetch.mjs`; FMP's quarterly statements are a premium tier). Each period at its FIRST filing
+  and only from the day it was filed; Q4 = the year less its quarters. Names that left EDGAR's ticker list (bought out,
+  renamed) have no CIK and are missing — a known gap, counted.
+- **Known at the start, by family:**
+  price (§36's facts) · size and value (market cap, price/sales, earnings yield, book/market) · growth and quality
+  (revenue growth a year on, net margin and its change a year on, share count change — buybacks against dilution) ·
+  earnings (the last surprises, the beats of the last three, the estimate for the coming report against the same quarter
+  a year before — the growth the Street expects) · insiders (purchases filed in the 90 days before) · the index (joined
+  the S&P 500 in the year before) · seasonality (the name's net in the same calendar quarter a year before) · the sector
+  (its net over the quarter before) · analysts and shorts (price-target upside and the raises less cuts over 90 days,
+  upgrades less downgrades, days to cover and its change) — on the 447 members the screener also covers, from 2023-06,
+  so 2024 → only and today's names: described, never a lead.
+- **Read:** AUC winners against LOSERS per fact in both periods; a lead = the same side in both by 0.03+ off 0.5 (§36's
+  bar). Plus every fact at once: `fitAndScore` fitted on 2020–2023, scored on 2024 → (winners against losers).
+- **Inside the quarter (hindsight):** how much of a winner's quarter is its SECTOR's (the sector's median member net)
+  and how much its own; analyst actions and insider buys during the quarter; the report (§36).
+- A lead becomes its own declared test, only on Roy's go-ahead.
+
+**Result.** Output: `data/lab/quarter-winners-all.out.txt`. 13,606 name-quarters; SEC facts for 584 of the 670 names
+(86 without a CIK — mostly bought out or renamed). Two fixes found on the sample before the run: revenue filed under a
+second concept (GOOGL 2024) takes the first FILING across concepts, and share counts are split-adjusted (NVDA) to match
+the split-adjusted bars; tested in `tests/unit/secFundamentals.test.js`.
+- **Leads: only §36's — the stock came in WEAK.** The same six price facts, nothing else. Test R already traded it
+  (FAIL); its top fifths are the clear side (stretched up: 23% winners / 52% losers after 2024, vs 34% / 40% at the bottom).
+- **No difference between winners and losers at the start (AUC 0.47–0.54 in both periods):** size, price/sales,
+  earnings yield, book/market, revenue growth, margin, margin change, buybacks or dilution, the last surprises, the
+  beats of the last three, the growth the Street expects in the coming report, insider buying, joining the S&P 500.
+  The medians of all three groups are almost the same on every one.
+- **Flip between periods (no lead):** the sector's last quarter (0.536 → 0.407: sector momentum before 2024, reversal
+  after), the name's same quarter a year before (0.447 → 0.576).
+- **Analysts and shorts, 2024 → only (today's names, a third of rows):** the analysts' target upside 0.552, more notes
+  0.525, days to cover 0.472. One period, survivors: not a lead.
+- **Every fact together:** fitted on 2020–2023, AUC 0.53 on 2024 → — near chance.
+- **Inside the quarter (hindsight):** a winner's quarter is its OWN, not its sector's — median +12.7% = sector +1.9% and
+  own +11.2%; 78% of winners beat their sector by 5%+, only 33% sat in a sector that did. Analysts raised targets on 61%
+  of winners in the quarter (losers 30%) — after the price, not before (target net at the start: AUC 0.532, one period).
+  Insiders bought into MORE losers (18%) than winners (11%) — buying the fall.
+- **Verdict:** besides "came in weak", nothing that was known at the quarter's start separates the quarter's winners
+  from its losers — not the price, the value, the growth, the report, the insiders, the index or the sector. What makes
+  a winner happens inside the quarter, to that company.
