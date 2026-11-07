@@ -1044,3 +1044,36 @@ the surprise), M (20) and N–P (to the next report) covered most lengths; short
 - Short holds are no better: at 5 and 10 sessions every group's book is under SPY, and after 2024 by 0.5–1.8% a month.
 - The revenue beat of 10%+ improves with the hold and is the only group above SPY in both periods (40 sessions and to the
   next report), but t ≤ 1.01. Its slow build matches §34: a lead, not a rule.
+
+## 36. The quarters a stock beat SPY by 5%+, read backwards (2026-11-07)
+
+Roy: "let's check the opposite way — all the stocks that beat the SPY in a quarter with at least 5%". Start from the
+outcome, not the report. `scripts/lab-quarter-winners.mjs`. **Declared before the run — a description, not a test.**
+- **Rows:** every S&P 500 member (as it was, on the quarter's first session) in every calendar quarter 2020-Q1 → 2026-Q3.
+  The quarter's return is the last close of the quarter over the last close of the quarter before, net of SPY's; a name
+  whose bars stop inside the quarter is taken at its last close.
+- **Groups:** winners (beat SPY by 5%+), losers (trailed by 5%+), the middle.
+- **Known at the start** (the close before the quarter): the movers study's facts (`featuresAt`, without the Monday-gap
+  and report-in-week ones), the last report's revenue surprise, the sector. Each compared by AUC **winners against
+  losers**, not against everyone — a volatile name lands in both tails, and a trait that only says "it will move a lot"
+  is size, not direction (§ movers). Read on 2020–2023 and checked on 2024 →.
+- **What happened inside** (hindsight, to say WHY they won, not to trade): the report in the quarter — its EPS and revenue
+  surprise, the day-one reaction, the guidance (§33's reads) — and how much of the quarter's gain came on the report's
+  two days. Plus: does a winning quarter repeat in the next one?
+- **What counts as a lead:** a start-of-quarter fact that splits winners from losers the same way in both periods by
+  AUC 0.03+ off 0.5. A lead becomes its own declared test, only on Roy's go-ahead.
+
+**Result.** Output: `data/lab/quarter-winners.out.txt`. 13,606 name-quarters over 27 quarters: 30% winners, 40% losers
+(2024 →: 29% / 44%, the narrow market — in 8 of the 11 quarters since 2024 the median name trailed SPY).
+- **Known at the start, one lead (six facts, one idea): winners came into the quarter WEAK.** Under the 20-day average
+  (AUC 0.442 → 0.427), a down last week (ret5 0.467 → 0.409), low in the 60-day range, fewer up days, a weak last close,
+  a down last month. Losers came in stretched up. Short-term reversal at the quarter's scale, stronger after 2024.
+- **Not leads:** volatility (winners 35% vs 27% in the top fifth, but losers flat at ~40% in every fifth — it adds
+  winners without adding losers, AUC 0.537 → 0.505, under the bar after 2024), the last report's EPS or revenue surprise,
+  size, the 200-day, momentum over 60 days (if anything, the wrong way), sector (no sector held its side).
+- **Inside the quarter (hindsight):** winners beat EPS 83% (losers 72%), revenue 76% (65%), revenue 10%+ 20% (12%),
+  raised guidance 21% (17%), maintained 9% (14%). The day-one reaction is up 70% (31%). But the report's two days are a
+  small part of the quarter: without them the winners' median is still +10.7% and the losers' −10.4%. The drift, not the
+  day, makes the quarter — and §32–35 showed buying after a good report does not catch it.
+- **No repeat.** A winning quarter is followed by a winning one 34% of the time before 2024 (the base 30%) and 25% after,
+  when 51% of winners LOST the next quarter (mean −2.77% vs SPY). The same reversal as the lead.
