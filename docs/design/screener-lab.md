@@ -1186,3 +1186,40 @@ the split-adjusted bars; tested in `tests/unit/secFundamentals.test.js`.
 - **Verdict:** besides "came in weak", nothing that was known at the quarter's start separates the quarter's winners
   from its losers — not the price, the value, the growth, the report, the insiders, the index or the sector. What makes
   a winner happens inside the quarter, to that company.
+
+## 40. What happened inside a winning quarter (2026-11-07)
+
+Roy: "so what happened to the stocks during the quarter?" §36's rows, read day by day. `scripts/lab-quarter-path.mjs`.
+**Declared before the run — a description (hindsight by design).**
+- **The quarter in parts**, each session's return less SPY's, summed: the RUN-UP (the 5 sessions before the report), the
+  REPORT (its two sessions, §36's reaction), SHOCK days away from the report (5%+ against SPY on twice the 20-day
+  volume, test A's line), and the QUIET rest. Per group: the median and mean of each part, and the share of winners
+  whose quarter is mostly one part.
+- **The shape:** the best single day and the best three days as a share of the quarter; month 1 / 2 / 3; behind SPY at
+  the halfway mark; the worst dip on the way.
+- **What the shock days were:** the 8-K filed from the day before to two days after (SEC submissions, every year,
+  `scripts/lab-8k-items-fetch.mjs` → `data/lab/sec-8k.jsonl`): its items — 1.01 an agreement, 2.01 a deal closed,
+  5.02 people, 7.01/8.01 other news, 2.02 results — or none filed. And for 2025-11 → (FMP's news reaches a year on this
+  plan) the headlines' type (test A's keywords).
+
+**Result.** Output: `data/lab/quarter-path.out.txt`. 8-K lists for 584 of 670 names; 495 shock days' headlines.
+
+| Winners' quarter vs SPY (mean) | Run-up (5 sessions) | Report (2 sessions) | Shock days | The quiet rest | Total |
+|---|---|---|---|---|---|
+| Winners | +1.1% | +2.9% | +1.5% | **+10.0%** | +15.5% |
+| Losers | −0.6% | −2.8% | −1.5% | **−9.4%** | −14.3% |
+
+- **A winning quarter is made on ordinary days.** The quiet rest — no report, no shock — is two thirds of it, and the
+  biggest part for 64% of winners (the report 22%, a shock 9%, the run-up 5%). Losers are the mirror. Both periods alike.
+- **Steady, all three months:** winners +4.7% / +5.2% / +3.2% by month (medians), ahead of SPY at the halfway mark 85% of
+  the time, a worst dip of only −2.5%. Losers −4.6% / −5.0% / −3.0%, behind at halfway 85%.
+- **But concentrated in a few ordinary days:** the best three days are +12.8% (median) — without them the median winner
+  is flat against SPY. Only 24% of winners had a shock day at all: the big days are 3–6% moves on normal volume.
+- **The shock days say little:** two thirds came with no 8-K from the company (day before → two after); 9% "other news"
+  (7.01/8.01), 5% results, 4% an agreement — the same mix on winners' up days and losers' down days. The last year's
+  headlines (127 winner up-shocks): no headline or nothing typed 47%, a deal headline 21% (keywords; many are not the
+  company's own deal), analysts 9%. Read by eye, the up days cluster in a few names riding a THEME — memory (SNDK),
+  crypto (HOOD five times, COIN four), AI power — the news being the industry's, not a filing.
+- **Reading:** winning is a slow, persistent re-rating that runs through the whole quarter, mostly on quiet days, often
+  shared by a theme's names — not one event. It is visible as it happens (ahead of SPY at halfway 85%) but not at the
+  start (§39), and §36/§37 showed it does not carry into the next quarter.
