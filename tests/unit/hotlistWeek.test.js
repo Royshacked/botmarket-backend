@@ -86,6 +86,26 @@ test('the run: from the latest run, one history read per window name, once; agai
     assert.equal((await runWeekBoard({ deps })).outcome, 'no_run')
 })
 
+// 2026-11-07: hb_2026-11-09_week was built from a first attempt with nothing saved (window 0). The second attempt saved
+// 1,197 names but stopped rate-limited — partial for good, out of attempts — so "again when done" never came.
+test('a partial run that saved more since the board was built: built again once, though it never reaches done', async () => {
+    const NOW = Date.parse('2026-11-07T04:00:00Z'), BUILT = Date.parse('2026-11-06T23:00:00Z')
+    let have = { stats_status: 'partial', finished_at: BUILT, counts: { failed: 0 } }
+    const coll = (name) => ({
+        find: () => ({ toArray: async () => STATS }),
+        findOne: async () => (name === 'hotlist_boards' ? have : null),
+        updateOne: async (f, u) => { have = u.$set },
+        deleteMany: async () => {},
+    })
+    const deps = { db: async () => ({ collection: coll }), earnings: async () => [], perMinute: () => 6000, now: () => NOW, sleep: async () => {},
+        run: async () => ({ day: '2026-10-23', status: 'partial', finished_at: BUILT - 1, spy: { over_sma200: true } }) }
+    assert.equal((await runWeekBoard({ deps })).outcome, 'exists', 'the attempt it was built from')
+    deps.run = async () => ({ day: '2026-10-23', status: 'partial', finished_at: BUILT + 3600_000, spy: { over_sma200: true } })
+    assert.equal((await runWeekBoard({ deps })).outcome, 'done', 'a later attempt — built again')
+    assert.equal(have.finished_at, NOW)
+    assert.equal((await runWeekBoard({ deps })).outcome, 'exists', 'once')
+})
+
 test('scoring the overnight board: the window from the board day, cut before the report; entry at the open', () => {
     const bar = (d, o, c) => ({ timestamp: Date.parse(`${d}T14:30:00Z`) / 1000, open: o, high: Math.max(o, c), low: Math.min(o, c), close: c })
     const daily = [bar('2026-10-26', 100, 101), bar('2026-10-27', 101, 102), bar('2026-10-28', 102, 103), bar('2026-10-29', 103, 104), bar('2026-10-30', 104, 105), bar('2026-11-02', 105, 90)]

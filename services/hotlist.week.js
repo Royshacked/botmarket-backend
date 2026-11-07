@@ -119,7 +119,7 @@ let _active = false
 
 /**
  * Build the next session's week board from the latest nightly run, once — again when it was built from a partial run
- * that is now done, or (at most hourly) when a name's earnings read failed (`force` always). A board with a failed read
+ * that is now done or has saved more, or (at most hourly) when a name's earnings read failed (`force` always). A board with a failed read
  * is `partial`; boards past KEEP_DAYS are deleted.
  * → `{ ok, outcome, id?, listed?, failed? }`; outcome `no_run` · `exists` · `already_running` · `rate_limited` · `done` ·
  * `error`. Never throws.
@@ -133,12 +133,14 @@ export async function runWeekBoard({ force = false, deps = _deps } = {}) {
         const boardDay = sessionsAfter(run.day, 1)
         const db = await deps.db()
         const boards = db.collection(BOARDS)
-        // A board built from a PARTIAL run (rate-limited, names missing) is built again once the run is done; one whose
+        // A board built from a PARTIAL run (rate-limited, names missing) is built again when the run is done, or when a later
+        // attempt has saved more since (2026-11-07: a run can stay partial for good, and its board stayed empty); one whose
         // earnings reads failed, again at most hourly (code review 2026-10-25: a failed read had dropped the name for good).
         const have = force ? null : await boards.findOne({ id: boardId(boardDay) }, { projection: { _id: 0, stats_status: 1, counts: 1, finished_at: 1 } })
         if (have) {
             const failed = have.counts?.failed ?? 0
-            const settled = have.stats_status === 'done' || run.status !== 'done'
+            const savedMore = (run.finished_at ?? 0) > (have.finished_at ?? 0)
+            const settled = have.stats_status === 'done' || (run.status !== 'done' && !savedMore)
             if (settled && (!failed || deps.now() - (have.finished_at ?? 0) < RETRY_FAILED_MS)) return { ok: true, outcome: 'exists', id: boardId(boardDay) }
         }
 
