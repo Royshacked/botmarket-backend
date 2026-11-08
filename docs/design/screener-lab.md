@@ -1670,3 +1670,48 @@ The lab's 3-year screener cache (1,177 names, §6), the live rule split the same
   counts as much as a crowded one. The live board spends a fixed daily budget split across the day's names — that is the
   per-session measure, so it is the right one for the product; but it says the gain sits on the quiet days.
 - With the gone names and the wider list (AA, 2024-11 →) the per-session range crosses zero (+0.20% [−0.30 … +0.69]).
+
+## 51. The open variants — the run-up's quiet days, and the long-hold beat against mid-caps — test AB (2026-11-08)
+
+Roy: "let's continue with all variants." The three left open by §50. **Declared before the run.**
+- **1. The run-up's quiet days** (the live rule, §50's split): each entry session by how many names it had — 1, 2–3,
+  4–9, 10+ — the per-session mean in each, on §6's cache (2023-10 → 2026-10) and §48's names (2024-11 →). And a
+  **capped book**: each session's sum of nets over max(names, 5) — no session puts more than a fifth of the day's budget
+  in one name. **Bar (on §6's cache, where the rule was found):** the sessions of 4+ names positive in both halves (split
+  2025-11-08), and the capped book's 5-session block range above zero. Fails → the run-up's number is the quiet days.
+- **2. The long-hold beat against a mid-cap index, older years** (§50's lead: a revenue beat of 5%+, held to the next
+  report): on P's names (today's screener names never in the S&P, 2019-06 → 2023-10, §34's old window — today's names,
+  so the control carries the survivorship), netted against **IJH** (the S&P 400 mid-caps; a fund, no survivorship in
+  the yardstick) and, described, IWM and SPY. **Bar:** the book above IJH in both halves (split 2021-08-01), above every
+  report in both, t ≥ 2.
+- **3. The same, hedged, outside the S&P now** (§48's names, 2024-11 → 2026-10, the gone names in): the beat of 5%+ to
+  the next report against IJH (described: IWM; 10% and 15% beats). A pass here is a book that beats SPY by holding the
+  picks and shorting IJH. **Bar:** above IJH in both years, above every report in both, t ≥ 2.
+- **AB's lead (the long-hold beat) passes** only if parts 2 and 3 both pass; part 1 is its own verdict.
+**Results (2026-11-08, `scripts/lab-ab.mjs` → `data/lab/ab-{cache,old,broad}.out.txt`).**
+
+**1. The run-up's quiet days — FAIL: the number is the quiet days.** Per session by how many names it had:
+
+| names that session | §6's cache: sessions · per session (before / after) | §48's names: sessions · per session (year 1 / 2) |
+|---|---|---|
+| 1 | 102 · **+1.05%** (+1.18 / +0.69) | 75 · +0.51% (+0.12 / +0.92) |
+| 2–3 | 112 · +0.02% (+0.08 / −0.10) | 61 · −0.15% (−0.53 / +0.17) |
+| 4–9 | 134 · +0.61% (+0.37 / +1.07) | 89 · −0.06% (−0.34 / +0.18) |
+| 10+ (3/4 of the trades) | 146 · +0.03% (−0.03 / +0.14) | 90 · −0.22% (−0.80 / +0.25) |
+| per session, the live budget | +0.31% [−0.10 … +0.72] | +0.20% [−0.30 … +0.69] |
+| **capped, ≤ a fifth a name** | **+0.20% [−0.04 … +0.44]** | −0.00% [−0.25 … +0.25] |
+
+The 4+ sessions are positive in both halves on §6's cache (✓), but the capped range crosses zero (✗). The single-name
+sessions carry it; the crowded report-season sessions, where three quarters of the trades are, earn ~0.
+
+**2. The long-hold beat vs IJH, P's names 2019-06 → 2023-10 — FAIL.** The beat of 5%+ to the next report +0.16%/mo
+(t 0.50; +0.64 / −0.32) — BELOW every report (+0.31%, +0.82 / −0.20). 10% and 15% the same story. Against IWM and SPY
+no better than the control. In the older years the beat does not pick.
+
+**3. The same, hedged, outside the S&P now (2024-11 → 2026-10) — PASS.** Against IJH: the beat of 5%+ +1.04%/mo
+(t 2.17; +1.24 / +0.85), every report +0.39% (+0.61 / +0.21); 10%+ +1.32% (t 2.17), 15%+ +1.81% (t 1.98). Against IWM
+5%+ +0.72% (t 2.02). Long the picks, short IJH, beat SPY on these two years.
+
+**Test AB verdict:** part 1 FAILS (the run-up's number is its quiet days); the long-hold lead FAILS (part 3 passes, part
+2 does not). The revenue beat picks in 2024 → 2026 — inside the S&P (§45, mostly after 2024) and outside it, hedged — and
+not in 2019 → 2023. A recent regime, not a constant edge on this evidence.

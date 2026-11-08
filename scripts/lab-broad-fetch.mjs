@@ -5,6 +5,7 @@
 //   node scripts/lab-broad-fetch.mjs --prune     the names that ever pass the size floor → data/lab/broad-eligible.json
 //   node scripts/lab-broad-fetch.mjs --history   FMP's earnings history for those → data/lab/broad-history.jsonl
 //   node scripts/lab-broad-fetch.mjs --spy       SPY from 2023-06 (test Z, its 200-day) → data/lab/broad-spy.json
+//   node scripts/lab-broad-fetch.mjs --etf       IJH + IWM from 2019 (test AB) → data/lab/broad-etf.json
 //
 // One JSON line a name; a name already in a file is skipped on a rerun. Paced at DAILY_SCREENER_RPM (60 a minute).
 import dns from 'dns'
@@ -85,5 +86,15 @@ if (arg === '--bars') {
     const bars = await getFmpCandles('SPY', { timeSpan: 'day', multiplier: 1, from: Date.parse('2023-06-01'), to: Date.parse(`${TO}T23:59:59Z`) })
     fs.writeFileSync('data/lab/broad-spy.json', JSON.stringify(bars.map(r => [r.timestamp, r.open, r.high, r.low, r.close, r.volume])))
     console.log(`SPY: ${bars.length} bars → data/lab/broad-spy.json`)
-} else console.log('--bars | --prune | --history | --spy')
+} else if (arg === '--etf') {
+    // The mid- and small-cap yardsticks (test AB, §51), from 2019 → data/lab/broad-etf.json { IJH: [...], IWM: [...] }.
+    const out = {}
+    for (const s of ['IJH', 'IWM']) {
+        const bars = await getFmpCandles(s, { timeSpan: 'day', multiplier: 1, from: Date.parse('2019-01-02'), to: Date.parse(`${TO}T23:59:59Z`) })
+        out[s] = bars.map(r => [r.timestamp, r.open, r.high, r.low, r.close, r.volume])
+        console.log(`${s}: ${bars.length} bars`)
+        await sleep(gap)
+    }
+    fs.writeFileSync('data/lab/broad-etf.json', JSON.stringify(out))
+} else console.log('--bars | --prune | --history | --spy | --etf')
 process.exit(0)
