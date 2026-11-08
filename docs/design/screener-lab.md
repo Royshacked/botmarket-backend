@@ -1508,3 +1508,57 @@ top third (✗).
 
 **Test X verdict:** neither §45 pass is robust. The revenue beat is a consistent small tilt (every cell the right way,
 t ~1.4); the industry leaders are a timing pocket at sessions 35–40 that the cells around it do not share.
+
+## 48. The revenue beat OUTSIDE the S&P 500, against SPY — test Y (2026-11-08)
+
+Roy: "I want to check also companies not in the SPY against the SPY ETF — if we check the companies of SPY overall we
+end up with close to no gain … let's start with the 2 last years." Picking inside the S&P is picking against SPY's own
+holdings; outside it a winning pick is a real gain over SPY. **Declared before the run.**
+- **Universe (`scripts/lab-broad-universe.mjs` → `data/lab/broad-universe.json`, 4,891 names):** US-listed (NYSE /
+  NASDAQ / AMEX) stocks NOT in the S&P 500 on the entry day (§30's spans): today's actively trading ones of $300M+
+  (FMP's screener, 2,713), PLUS the ones gone since — every symbol in FMP's earnings calendar from 2025-11-10 on (read
+  week by week; one long read caps at 4,000 rows) that is no longer on FMP's actively-trading list (2,146; FMP's stock
+  list still carries delisted symbols), and FMP's recent delisted list (+32; its first page is all the plan gives).
+  **Known gap:** names delisted between 2024-11 and 2025-11 are missing (FMP's calendar beyond a year and its delisted
+  pages are premium) — measured, below.
+- **Data (`scripts/lab-broad-fetch.mjs`, three resumable steps):** daily bars 2024-07-15 → 2026-10-26 (holdTrades skips a name's first 61 bars); the names that ever
+  pass the floor; FMP's earnings history for those.
+- **Size, as it was:** at entry, the prior close ≥ $5 and the 20-day dollar volume ≥ $10M (≈ $1B+ companies; known that
+  day). Below that, too thin to trade.
+- **Picks:** test Q's — a revenue beat of 10%+, bought at the open of day two, held 40 sessions (primary) or to the next
+  report; net of SPY and `costFor`. Entries 2024-11-01 → 2026-10-26, the two years split at 2025-11-01.
+- **Control:** every report in the same universe, held the same way.
+- **Bar:** the 40-session book above SPY in BOTH years, above the control in both, t ≥ 2; and to-the-next-report above
+  SPY in both years.
+- **The survivorship check:** year two (where the calendar recovers the gone names) with and without them — how much
+  today's-names-only flatters it, to read year one by.
+- **Described beside:** an EPS beat of 10%+, a good report (§32), the picks split by size (dollar volume $10–50M / $50M+).
+
+**Results (2026-11-08, `scripts/lab-broad-revenue.mjs` → `data/lab/broad-revenue.out.txt`).** 4,892 names fetched; 216 had
+no bars (213 of them gone names); 2,672 ever passed the floor (2,309 active, 362 gone, 1 delisted-list). 10,608 reports
+outside the S&P from 2024-11-01, 9,180 over the floor at entry (700 from names gone since); revenue known on 96%.
+
+| against SPY, net of cost | n | per hold | beat SPY | book/mo (t) | year 1 | year 2 |
+|---|---|---|---|---|---|---|
+| **revenue beat 10%+, 40 sessions** | 994 | +1.97% | 49% | **+0.55% (0.60)** | +0.26% | +1.33% |
+| every report, 40 sessions (control) | 9,180 | +0.70% | 46% | −0.55% (−0.69) | −0.41% | −0.44% |
+| EPS beat over 10%, 40 | 3,809 | +1.39% | 48% | +0.02% (0.04) | −0.08% | +0.50% |
+| good (EPS + revenue), 40 | 3,930 | +0.59% | 47% | −0.27% (−0.47) | −0.55% | +0.41% |
+| revenue 10%+, $10–50M a day, 40 | 542 | +2.52% | 50% | −0.62% (−0.57) | −0.58% | −0.18% |
+| revenue 10%+, $50M+ a day, 40 | 452 | +1.31% | 48% | +1.45% (1.15) | +1.93% | +1.56% |
+| **revenue beat 10%+, to the next report** | 994 | +0.60% | 46% | +0.64% (1.03) | +0.57% | +1.10% |
+| every report, to the next report | 9,180 | +0.14% | 44% | −0.30% (−0.46) | −0.44% | +0.21% |
+
+- **Declared bar: FAIL** — above SPY in both years ✓, above the control in both ✓, to the next report above SPY in both
+  ✓, **t ≥ 2 ✗ (0.60)**. The right sign everywhere, but far too noisy over two years to tell from luck.
+- **Fewer than half the picks beat SPY** (49%); the mean is carried by a few large winners.
+- **The control loses to SPY** (−0.55%/mo): the typical stock outside the S&P lagged SPY in 2024-11 → 2026-10. The beat
+  lifts it ~1.1%/mo over that, about what it did inside the S&P against equal weight (§45).
+- **Survivorship ran the other way:** year two's 40-session book is +1.21%/mo with the gone names and −0.62% with today's
+  names only — 28 gone picks (most likely taken over at a premium) carry it. Year one, which is missing its gone names,
+  is if anything understated; but a book that 28 names swing by ~1.8%/mo is fragile.
+- **By size:** the $50M+ picks are the steadier half at 40 sessions (both years ~+1.5–1.9%, t 1.15); the $10–50M half
+  loses at 40 sessions and wins to the next report — no consistent size story.
+
+**Test Y verdict:** fails on significance. Outside the S&P the revenue beat points the right way against SPY in both
+years, but at t 0.6 it is not distinguishable from noise, and part of it is takeovers.
