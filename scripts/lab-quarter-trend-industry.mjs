@@ -35,12 +35,14 @@ for (const d of data.spyDays) {
 }
 const Q = quarters.filter(x => x.base && x.q >= FIRST_Q && x.q <= LAST_Q)
 const spyC = (d) => data.spyByDay.get(d)?.close, spyO = (d) => data.spyByDay.get(d)?.open
+// The regime is the MARKET's trend, SPY's own even when an equal-weight benchmark nets the picks (§45).
+const realC = (d) => (data.spyRealByDay ?? data.spyByDay).get(d)?.close
 const spyIdx = new Map(data.spyDays.map((d, n) => [d, n]))
 /** SPY trending up at the close of `day`: over its 200- and 50-day averages and up over 63 sessions. Pure over the bars. */
 function trendingUp(day) {
     const n = spyIdx.get(day)
     if (n == null || n < 200) return null
-    const c = (k) => spyC(data.spyDays[k]), avg = (len) => mean(Array.from({ length: len }, (_, k) => c(n - k)))
+    const c = (k) => realC(data.spyDays[k]), avg = (len) => mean(Array.from({ length: len }, (_, k) => c(n - k)))
     return c(n) > avg(200) && c(n) > avg(50) && c(n) > c(n - 63)
 }
 

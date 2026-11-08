@@ -1383,3 +1383,49 @@ trends. `scripts/lab-quarter-trend-industry.mjs`. **Declared before the run.**
   — not the declared primary, and its neighbours at 20 / 25 fail before 2024: one of nine described cells.
 - **Reading:** "trend market → trending industries" is what 2024–2026 looked like (the narrow AI-led market), not a rule
   the earlier up-trends followed. It cannot yet be told from that one boom.
+
+## 45. Tests N–V re-scored against the equal-weight market (2026-11-08)
+
+Roy: "maybe we shouldn't look at SPY?" SPY is cap-weighted; every lab book is equal-weight, so since 2024 each starts
+~1.4% a quarter behind (the mega-caps). A NEW question, not a softer bar: does a signal pick better stocks than the
+average stock? SPY stays the bar for "worth doing at all" (§1–44 stand). **Declared before the run.**
+- **The yardstick:** an equal-weight index of the universe's members as they were each day (`equalWeightBars`,
+  screenerLab.data): each session the mean close-to-close (and prior-close-to-open) return of every member with both
+  bars, chained. On the S&P 500 as it was it is the RSP-like market; on test P's non-S&P names, their own average.
+- **How:** `LAB_BENCH=ew` swaps it in for SPY wherever a script reads the benchmark — the net, the control's net, the
+  relative-strength facts of test U's model (refit on the new numbers, still 2020–2023 only). Test V's REGIME stays
+  SPY's trend (the question was the market's trend). Nothing else changes: same entries, exits, costs, split.
+- **Bar for each test:** its own declared bar with "SPY" read as the equal-weight market — above it in both periods,
+  above the test's control in both, t ≥ 2, and the test's neighbour rule where it had one.
+- **Tests:** N (good reports to the next), O (good + raised guidance), P (revenue 10%+, non-S&P names), Q (hold lengths
+  by quality), S (the reaction up), R (weak at the quarter's start), T (leaders at the checkpoints), U (the technical
+  model at session 20), V (trending industries in an up-trend).
+
+**Result.** Outputs: `data/lab/*.ew.out.txt` (beside each test's SPY output). Under the equal-weight market a test's
+"every member / every report" control nets ~0, so the bar is mostly "positive in both periods, t ≥ 2".
+
+| Test | vs SPY | vs equal-weight |
+|---|---|---|
+| N good reports → next report | FAIL | FAIL (+0.01%/mo, t 0.13) |
+| O good + raised guidance | FAIL | FAIL (−0.12%/mo) |
+| P revenue 10%+, non-S&P names | FAIL | FAIL (−0.35%/mo; their own average is today's survivors, a harsh yardstick) |
+| **Q revenue 10%+, held 40 sessions** | FAIL | **PASS — +0.73%/mo, t 2.04 (+0.21 / +1.47)** |
+| **Q revenue 10%+, to the next report** | FAIL | **PASS — +0.40%/mo, t 2.09 (+0.20 / +0.68)** |
+| Q good / EPS 10%+, every length | FAIL | FAIL |
+| S the reaction up (any / 5%+ / 10%+) | FAIL | FAIL (best: up 10%+ to the next report, t 1.22) |
+| R weak at the quarter's start | FAIL | FAIL (+0.38%/mo, t 1.35; +0.61 / −0.01) |
+| T own / laggard leaders | FAIL | FAIL |
+| **T industry leaders at session 35** | FAIL | **PASS — +0.29% / +1.54% a quarter, t 2.17, session 40 above both** |
+| U technical model, session 20 | FAIL | FAIL (held out +1.83%/qtr vs −0.11%, t 1.56) |
+| V trending industries in an up-trend | FAIL | FAIL (t 0.90) |
+
+- **Two cells pass.** The revenue beat of 10%+ held 40 sessions or to the next report — the trait that pointed the right
+  way in §34, §35 and P, now over the bar with both neighbouring lengths — but mostly 2024 → (+0.2%/mo before) and just
+  over t 2; and the industry leaders at session 35, one checkpoint of thirty tries (t is the same as against SPY: the
+  yardstick moved both sides). **Neither beats SPY**: they pick better than the average stock, not better than the
+  mega-caps.
+- Not tests, but over t 2 here: big EPS beat + revenue beat + the market bought, to the next report (+0.26%/mo, t 2.13);
+  and maintained guidance stays the avoid (−0.67%/mo, t −2.84).
+- **Reading:** against the average stock, the lab's one stock-picking signal is a big revenue beat, held for months.
+  To be worth trading it must also close the gap to SPY — a separate question (SPY plus the picks, or weighting them by
+  size), and the next declared test if Roy wants it.

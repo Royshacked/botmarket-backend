@@ -230,7 +230,7 @@ async function fetchRaw({ name, file, list, years, window = null, deps, pace, on
  * earnings history merged in when read; `insiders` its purchases, oldest first; `sectorDay` (sectorStats) the sectors'
  * five-session returns per session. Pure.
  */
-export function prepare(raw, extras = {}, { member = null } = {}) {
+export function prepare(raw, extras = {}, { member = null, bench = 'spy' } = {}) {
     const byName = new Map()
     const add = (e) => {
         const s = String(e?.symbol ?? '').toUpperCase()
@@ -272,10 +272,48 @@ export function prepare(raw, extras = {}, { member = null } = {}) {
             months: new Map(extras.months?.[s] ?? []), si: si.get(s) ?? [], sv: sv.get(s) ?? new Map(), dp: dp.get(s) ?? [],
             grades: extras.grades?.[s] ?? [], targets: extras.targets?.[s] ?? [] })
     }
-    const spyByDay = new Map((raw.spy ?? []).map(b => [_etDay(b.timestamp), b]))
-    const spyDays = [...spyByDay.keys()].sort()
-    return { names, spyByDay, spyDays, calendarFrom: raw.calendar_from, barsFrom: raw.bars_from ?? null, years: raw.years ?? 1, window: raw.window ?? null, builtAt: raw.built_at, universe: raw.universe, sectorDay: sectorStats(names, member),
-        regimes: spyRegimes(spyDays.map(d => ({ day: d, close: spyByDay.get(d).close }))), spyMonths: new Map(extras.months?.SPY ?? []) }
+    const spyRealByDay = new Map((raw.spy ?? []).map(b => [_etDay(b.timestamp), b]))
+    const spyDays = [...spyRealByDay.keys()].sort()
+    // The benchmark every test nets against (§45): SPY, or the members' equal-weight market in its place. `spyRealByDay`
+    // is always SPY, for what must stay the market's own (a regime, the rotation's regimes).
+    const spyByDay = bench === 'ew' ? equalWeightBars(names, spyDays, spyRealByDay, member) : spyRealByDay
+    return { names, spyByDay, spyRealByDay, bench, spyDays, calendarFrom: raw.calendar_from, barsFrom: raw.bars_from ?? null, years: raw.years ?? 1, window: raw.window ?? null, builtAt: raw.built_at, universe: raw.universe, sectorDay: sectorStats(names, member),
+        regimes: spyRegimes(spyDays.map(d => ({ day: d, close: spyRealByDay.get(d).close }))), spyMonths: new Map(extras.months?.SPY ?? []) }
+}
+
+/** A day's return is clipped to this before it enters the average: one bad print must not move the market. */
+const EW_CLIP = [-0.5, 1]
+
+/**
+ * The equal-weight market of `names` (screener-lab.md §45): each session the mean close-to-close return, and the mean
+ * prior-close-to-open, of every member (`member(sym, day)`, or every name when absent) with a bar that session and the
+ * one before, chained from 100 → `Map(day → { open, close })`, the shape SPY's bars have. A session with no member
+ * takes SPY's move. Pure.
+ */
+export function equalWeightBars(names, days, spyByDay, member = null) {
+    const idx = new Map([...names].map(([s, n]) => [s, new Map(n.ind.date.map((d, k) => [d, k]))]))
+    const clip = (x) => Math.max(EW_CLIP[0], Math.min(EW_CLIP[1], x))
+    const out = new Map()
+    let close = 100
+    days.forEach((d, n) => {
+        if (n === 0) { out.set(d, { open: close, close }); return }
+        const prev = days[n - 1]
+        let cc = 0, co = 0, m = 0
+        for (const [s, rec] of names) {
+            if (member && !member(s, d)) continue
+            const at = idx.get(s), k = at.get(d), kp = at.get(prev)
+            if (k == null || kp == null) continue
+            const c0 = rec.rows[kp].close, r = rec.rows[k]
+            if (!(c0 > 0) || !(r.close > 0) || !(r.open > 0)) continue
+            cc += clip(r.close / c0 - 1); co += clip(r.open / c0 - 1); m++
+        }
+        const sp = spyByDay.get(d), sp0 = spyByDay.get(prev)
+        const rc = m ? cc / m : (sp?.close / sp0?.close - 1) || 0, ro = m ? co / m : (sp?.open / sp0?.close - 1) || 0
+        const open = close * (1 + ro)
+        close *= 1 + rc
+        out.set(d, { open, close })
+    })
+    return out
 }
 
 /**
@@ -315,8 +353,9 @@ export function sectorStats(names, member = null) {
  * a span of the past instead (`<name>-<from>_<to>.json`, no calendar). `extras` —
  * `['history', 'insiders', 'months', 'grades', 'targets', 'shortInterest', 'shortVolume', 'darkPool']`, any (the FINRA three read in BULK, per date) — read once per universe into `<name>.extras.json` (shared by every span), cached too.
  * `member(sym, day)` — a point-in-time universe (§30): the sectors' stats count only the names in it that day (prepare).
+ * `bench` — 'spy' (the default, or LAB_BENCH) or 'ew': the equal-weight market of the members nets every test instead (§45).
  */
-export async function loadLabData({ name = 'screener', years = 1, window = null, refresh = false, extras = [], member = null, deps = _deps, onProgress } = {}) {
+export async function loadLabData({ name = 'screener', years = 1, window = null, refresh = false, extras = [], member = null, bench = process.env.LAB_BENCH || 'spy', deps = _deps, onProgress } = {}) {
     const file = path.join(DIR, window ? `${name}-${window.from}_${window.to}.json` : years > 1 ? `${name}-${years}y.json` : `${name}.json`)
     const pace = createPacer({ perMinute: deps.perMinute(), now: deps.now, sleep: deps.sleep })
     let raw
@@ -353,5 +392,5 @@ export async function loadLabData({ name = 'screener', years = 1, window = null,
         fs.writeFileSync(xfile, JSON.stringify(have))
         done()
     }
-    return prepare(raw, have, { member })
+    return prepare(raw, have, { member, bench })
 }

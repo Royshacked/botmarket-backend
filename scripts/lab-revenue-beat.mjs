@@ -14,7 +14,9 @@ import 'dotenv/config'
 dns.setServers(['8.8.8.8', '1.1.1.1'])
 const MIN = 10
 const f2 = (x, w = 7) => (x == null ? '—'.padStart(w) : `${x >= 0 ? '+' : ''}${x.toFixed(2)}%`.padStart(w))
-const out = (w) => `data/lab/revenue-beat-${w}.json`
+// LAB_BENCH=ew (§45): the names' own equal-weight market nets it, and its files carry the suffix.
+const BENCH = process.env.LAB_BENCH || 'spy'
+const out = (w) => `data/lab/revenue-beat-${w}${BENCH === 'ew' ? '.ew' : ''}.json`
 
 if (process.argv.includes('--verdict')) {
     const [a, b] = ['old', 'new'].map(w => JSON.parse(fs.readFileSync(out(w), 'utf8')))
@@ -44,7 +46,7 @@ const file = w === 'old' ? 'data/lab/screener-2019-01-02_2023-10-06.json' : 'dat
 let raw = JSON.parse(fs.readFileSync(file, 'utf8'))
 for (const sym of Object.keys(raw.names)) if (everSp.has(sym)) delete raw.names[sym]
 const { history, insiders } = JSON.parse(fs.readFileSync('data/lab/screener.extras.json', 'utf8'))
-const data = prepare(raw, { history, insiders })
+const data = prepare(raw, { history, insiders }, { bench: BENCH })
 raw = null
 // The windows do not overlap: the 3-year cache starts in 2022, so its entries start where the old window ends (§34).
 const from = w === 'old' ? '2019-06-01' : '2023-10-09'
