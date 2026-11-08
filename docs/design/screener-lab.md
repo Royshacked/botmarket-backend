@@ -1562,3 +1562,49 @@ outside the S&P from 2024-11-01, 9,180 over the floor at entry (700 from names g
 
 **Test Y verdict:** fails on significance. Outside the S&P the revenue beat points the right way against SPY in both
 years, but at t 0.6 it is not distinguishable from noise, and part of it is takeovers.
+
+## 49. Combined variants, chosen inside the S&P, tested outside it — test Z (2026-11-08)
+
+Roy: "maybe combine variants?" Searching combinations on test Y's two years would find one by luck, so the choice and
+the test are kept apart: **chosen on the S&P 500 (2020 → 2026, §47's base), tested once on §48's names outside it
+(2024-11 → 2026-10, against SPY).** Different stocks and, for most of it, different years. **Declared before the run.**
+- **The pieces** (each from a test that pointed the right way on its own), every combination of:
+  - the revenue beat: 10%+ / 20%+;
+  - the EPS: any / a beat (surprise > 0);
+  - the reaction (two days, against SPY, §38): any / up;
+  - the market: any / SPY's close the day before the report above its 200-day average;
+  - the price the day before the report: any / not stretched (close vs the 20-day average under the S&P trades'
+    top-fifth cut, §43's avoid) / a pullback in an uptrend (above the 50-day, below the 20-day — the 50-day because
+    §48's bars start 2024-07, too short for a 200-day);
+  - the size: any / $50M+ a day.
+  That is 96 combinations, held 40 sessions (Q's and Y's primary), net of the cost.
+- **Choosing (S&P, `--choose`):** against the members' equal-weight market (the picking skill; §45). Of the combinations
+  with 200+ trades and the book positive both before and after 2024-01-01, the **two with the highest t**. Written to
+  `data/lab/combo-z.json` before the outside data is read.
+- **Testing (outside the S&P, `--test`):** the two, against SPY, net of the cost, on §48's names and floor, with SPY's
+  history fetched back to 2023-06 for its 200-day. Each against test Y's bar: the 40-session book above SPY in both
+  years, above every report in both, to the next report above SPY in both — and, for two tries, **t ≥ 2.25**.
+- **Z passes** if either chosen combination passes. The other combinations' outside numbers are printed after the
+  verdict, as a description only.
+**Results (2026-11-08, `scripts/lab-combo-z.mjs` → `data/lab/combo-z.choose.out.txt`, `combo-z.test.out.txt`).**
+- **Choosing (S&P 2020 →, vs equal weight):** 66 of 96 combinations had 200+ trades, 40 were positive in both periods.
+  The pieces add little to the revenue beat alone (+0.73%/mo, t 2.04): the best is **revenue 10%+ · EPS beat · SPY over
+  its 200-day** (+0.79%, t 2.14; +0.27 / +1.59), and second the same with $50M+ a day (t 2.10 — the size filter hardly
+  binds inside the S&P). The reaction up, not stretched and the pullback never reach the top eight. Stretched cut 4.1%.
+- **Testing (outside the S&P, 2024-11 → 2026-10, vs SPY):**
+
+| | n | beat SPY | 40 sessions book/mo (t) | year 1 | year 2 | to the next report (t) |
+|---|---|---|---|---|---|---|
+| every report (control) | 9,180 | 46% | −0.55% (−0.69) | −0.41% | −0.44% | −0.30% (−0.46) |
+| **1. rev 10%+ · EPS beat · SPY > 200d** | 648 | 49% | **+0.59% (0.57)** | +0.27% | +1.27% | +1.25% (1.56) |
+| **2. the same, $50M+ a day** | 304 | 45% | +0.27% (0.19) | −0.16% | +1.12% | +0.99% (0.95) |
+
+- **Declared verdict: FAIL.** Chosen 1 clears every part of the bar but t (0.57 vs 2.25); chosen 2 also misses year 1.
+- **Described:** of 65 combinations with enough trades both sides, the inside t and the outside t correlate 0.37 — the
+  ranking carries over somewhat, but no combination outside reaches t 1.2 at 40 sessions.
+- **Why two years outside cannot settle it:** against SPY, a book of mid-caps swings about 5% a month on its own; at
+  +0.6%/mo the error over 24 months is ~1%/mo, so t ≈ 0.6 is what a real +0.6%/mo edge would show. Proving that size
+  against SPY would take decades. The noise is mostly the mid-caps-vs-SPY market move, not the picks.
+
+**Test Z verdict:** combining adds little inside the S&P and does not pass outside it. The revenue beat is still the
+one piece that keeps pointing the right way; against SPY, two years outside the S&P are too short to tell.

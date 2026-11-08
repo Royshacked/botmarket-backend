@@ -4,6 +4,7 @@
 //   node scripts/lab-broad-fetch.mjs --bars      daily bars FROM → TO for every name → data/lab/broad-bars.jsonl
 //   node scripts/lab-broad-fetch.mjs --prune     the names that ever pass the size floor → data/lab/broad-eligible.json
 //   node scripts/lab-broad-fetch.mjs --history   FMP's earnings history for those → data/lab/broad-history.jsonl
+//   node scripts/lab-broad-fetch.mjs --spy       SPY from 2023-06 (test Z, its 200-day) → data/lab/broad-spy.json
 //
 // One JSON line a name; a name already in a file is skipped on a rerun. Paced at DAILY_SCREENER_RPM (60 a minute).
 import dns from 'dns'
@@ -79,5 +80,10 @@ if (arg === '--bars') {
         const rows = (await fmpGet(`/earnings?symbol=${encodeURIComponent(s)}&limit=40`, { label: `FMP earnings ${s}` })) ?? []
         return { h: rows.map(e => ({ symbol: s, date: e.date, epsActual: e.epsActual, epsEstimated: e.epsEstimated, revenueActual: e.revenueActual, revenueEstimated: e.revenueEstimated })) }
     }, 'history')
-} else console.log('--bars | --prune | --history')
+} else if (arg === '--spy') {
+    // SPY back to 2023-06 (test Z, §49): its 200-day average from the first entry on.
+    const bars = await getFmpCandles('SPY', { timeSpan: 'day', multiplier: 1, from: Date.parse('2023-06-01'), to: Date.parse(`${TO}T23:59:59Z`) })
+    fs.writeFileSync('data/lab/broad-spy.json', JSON.stringify(bars.map(r => [r.timestamp, r.open, r.high, r.low, r.close, r.volume])))
+    console.log(`SPY: ${bars.length} bars → data/lab/broad-spy.json`)
+} else console.log('--bars | --prune | --history | --spy')
 process.exit(0)
