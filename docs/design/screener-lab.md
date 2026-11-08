@@ -1496,5 +1496,15 @@ it; a lucky cell holds only at its own. **Declared before the run — the verdic
 - **Reading:** a revenue beat leans the right way over months at every threshold and length — a real but small tilt
   (~+0.3%/mo over the average stock), not a 2-t signal you can lean on alone.
 
-**T grid — not run yet.** The first run was stopped for memory (the machine low, the bars held through 90 cells); the
-script now indexes once and frees the bars before the cells.
+**T grid — NOT ROBUST.** Output: `data/lab/variants-t.out.txt`. (The first run was stopped partway; the script now
+indexes once and frees the bars before the cells.) Against the equal-weight market: 24% of the 45 cells positive in
+both periods (bar 67% ✗), median t 0.36 (bar 1.5 ✗), and the declared cell's neighbours fail at session 30 and with the
+top third (✗).
+- **A pocket, not an effect:** sessions 35–40, the top tenth or fifth, any industry size, are positive in both periods
+  (+0.3 … +0.9% a quarter, t 1.2–2.3); sessions 25–30 and 45 are negative, and the top third dilutes to ~0. Against SPY
+  only the 6+-member tenth at 25–35 is above in both, t ≤ 1.4.
+- An after-the-fact guess at the pocket, not tested: the last four weeks of a quarter are when funds dress their books
+  with its winners. It would be its own declared test, on another universe or years, before anything is built on it.
+
+**Test X verdict:** neither §45 pass is robust. The revenue beat is a consistent small tilt (every cell the right way,
+t ~1.4); the industry leaders are a timing pocket at sessions 35–40 that the cells around it do not share.
