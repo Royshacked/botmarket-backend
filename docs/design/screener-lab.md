@@ -1469,3 +1469,32 @@ of the cost, book per month:
 - **Reading:** a long-only account cannot beat SPY with this signal — weighted equally it pays the mega-cap gap, weighted
   by size it loses the signal. The only form that beats SPY is SPY plus a market-neutral sleeve (long the beats, short
   RSP). That is a product decision for Roy (shorts, margin), not another lab number.
+
+## 47. Do §45's two passes survive their neighbours? — test X (2026-11-08)
+
+Roy: "what about Q and T variants tests?" §45 passed two cells against the equal-weight market: Q's revenue beat 10%+
+(40 sessions / to the next report) and T's industry leaders at session 35. A real effect holds at the settings next to
+it; a lucky cell holds only at its own. **Declared before the run — the verdict is the GRID, never its best cell.**
+- **Q grid** (`scripts/lab-variants-q.mjs`; test Q's entries, S&P 500 as it was, 2020 →, split 2024-01-01, daily book):
+  revenue beat ≥ 5 / 7.5 / 10 / 15 / 20% × held 20 / 30 / 40 / 50 / 60 sessions / to the next report (30 cells); plus,
+  at 10% and 40 / next, the beat AND an EPS beat, AND the market bought (day-one reaction up), AND both.
+- **T grid** (`scripts/lab-variants-t.mjs`; test T's picks): industry leaders at sessions 25 / 30 / 35 / 40 / 45 × the top
+  tenth / fifth / third × industries of 3+ / 4+ / 6+ members (45 cells); bought at the next open, to the quarter's end.
+- **Both yardsticks per cell:** the equal-weight market (where they passed) and SPY.
+- **Robust if, against the equal-weight market:** at least two thirds of the grid's cells are positive in BOTH periods,
+  AND the median cell's t ≥ 1.5, AND the declared cell's immediate neighbours (one step in each dimension) are positive
+  in both periods. Otherwise the pass was the cell, not the effect.
+
+**Q grid — NOT ROBUST by the bar, but a consistent direction.** Output: `data/lab/variants-q.out.txt`.
+- Against the equal-weight market all 30 cells are positive on the whole, 80% positive in both periods (bar 67% ✓), and
+  every neighbour of the declared cells holds (✓) — but the median cell's t is 1.38 (bar 1.5 ✗). The declared 10% is
+  the peak (t 2.0–2.2 at 40 / 50 / next); 7.5% runs +0.23 … +0.34%/mo at t 0.6–1.8, 15–20% +0.2 … +0.8% at t 0.5–1.7.
+  The sign is the effect; the size that passed was partly the cell.
+- Against SPY: 10% and 15% at 30–40 sessions are above in both periods (+0.3 … +0.45%/mo, t ≤ 1.0); the rest is ~0.
+- Adding conditions does not help: + an EPS beat is the same (t 1.84 / 1.96); + the market bought it is WORSE (+0.37%,
+  t 1.02, negative before 2024) — the reaction already paid (§38).
+- **Reading:** a revenue beat leans the right way over months at every threshold and length — a real but small tilt
+  (~+0.3%/mo over the average stock), not a 2-t signal you can lean on alone.
+
+**T grid — not run yet.** The first run was stopped for memory (the machine low, the bars held through 90 cells); the
+script now indexes once and frees the bars before the cells.
