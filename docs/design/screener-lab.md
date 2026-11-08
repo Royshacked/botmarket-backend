@@ -1608,3 +1608,48 @@ the test are kept apart: **chosen on the S&P 500 (2020 → 2026, §47's base), t
 
 **Test Z verdict:** combining adds little inside the S&P and does not pass outside it. The revenue beat is still the
 one piece that keeps pointing the right way; against SPY, two years outside the S&P are too short to tell.
+
+## 50. Other variants outside the S&P — test AA (2026-11-08)
+
+Roy: "check other variants." On §48's names (outside the S&P 500, 2024-11 → 2026-10, the gone names in, the $5 / $10M
+floor at entry), two families §48–49 did not try. **Declared before the run.**
+- **A. The live run-up rule** (Hotlist This week; §6, §15): bought 5 sessions before the next report, out at the close
+  before it; the last three reports beat; SPY over its 200-day the evening before. It was found and tested on TODAY's
+  names (survivors); here the gone names are in. Against SPY, net of the cost, per trade. **Bar:** the mean net positive
+  in both years (split 2025-11-01) and the 5-session block range over the whole span above zero. Described beside: the
+  same with today's names only, and every report's run-up without the streak and regime gates.
+- **B. The revenue-beat grid against these names' own market** (§47's Q grid, outside the S&P): the beat ≥ 5 / 7.5 / 10
+  / 15 / 20% × held 20 / 30 / 40 / 60 sessions / to the next report — 25 cells. The yardstick is the equal-weight market
+  of these names (`equalWeightBars`), each name counted on a day only if it is outside the S&P and was over the floor at
+  the prior close (no look-ahead). This takes out the mid-caps-vs-SPY swing that made §48–49 unreadable. **Bar (§47's):**
+  ≥ 67% of cells positive in both years and the median t ≥ 1.5. The same grid against SPY is printed beside, as a
+  description.
+**Results (2026-11-08, `scripts/lab-broad-variants.mjs` → `data/lab/broad-variants.out.txt`).**
+
+**A. The live run-up rule — FAIL.** 3,265 trades: −0.34% a trade against SPY (year 1 −0.90%, year 2 +0.11%), 45% beat
+SPY; block range +0.20% [−0.30 … +0.69]. Today's names only: the same (−0.35%) — survivorship is not why. Neither gate
+helps: every run-up −0.15%, the streak alone −0.18%, SPY's trend alone −0.26%. Outside the S&P, in these two years, the
+run-up does not run up. (§6 found it on today's screener names, which carry the large caps; this says the rule's edge,
+if real, lives in those — worth checking which names the live Hotlist serves.)
+
+**B. The revenue-beat grid against these names' own market — NOT ROBUST** (76% of cells positive in both years ✓,
+median t 1.06 ✗). Book %/mo (t):
+
+| beat ≥ | 20 | 30 | 40 | 60 | to the next report |
+|---|---|---|---|---|---|
+| every report | +0.77 (0.9) | −1.82 (−0.9) | −0.14 (−0.4) | +0.04 (0.3) | +0.10 (1.0) |
+| 5% | +0.65 (0.7) | +0.55 (0.7) | +0.44 (0.9) | **+0.69 (2.9)** | **+0.74 (3.1)** |
+| 7.5% | +1.00 (0.7) | +0.88 (0.8) | +0.56 (0.9) | **+0.74 (2.3)** | **+0.80 (2.4)** |
+| 10% | +1.92 (1.2) | +1.25 (1.0) | +0.85 (1.1) | **+0.90 (2.0)** | **+1.03 (2.3)** |
+| 15% | +2.18 (1.1) | +1.60 (0.9) | +1.73 (1.6) | +1.23 (1.7) | **+1.51 (2.0)** |
+| 20% | +2.23 (1.0) | +2.29 (1.1) | +1.96 (1.3) | +0.90 (0.8) | +1.17 (0.9) |
+
+- The short holds are noise (books of 20–40 sessions sit in report seasons and swing ±2%/mo; even the control does). The
+  bar's median t is pulled down by them.
+- **The long holds are the pattern:** held 60 sessions or to the next report, every beat from 5% to 15% is positive in
+  both years with t 1.7–3.1 — and inside the S&P (§45, §47) the same held: to the next report, t 2.09. Two universes,
+  the same shape. Not a pass (the bar was set on the whole grid), but the clearest lead the lab has.
+- Against SPY the same cells are +0.3 … +1.1%/mo at t ≤ 1.3 (§49's noise).
+
+**Test AA verdict:** the live run-up fails outside the S&P; the revenue grid is not robust by the declared bar, but its
+long-hold half — a beat of 5%+, held to the next report — is the one shape that keeps showing in both universes.
