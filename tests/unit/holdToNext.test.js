@@ -87,6 +87,19 @@ test('the book counts each session once, takes the cost on the first session, an
     assert.equal(book.get(dates[72]).sum, -t.cost, 'bought at the open, close = open in this fixture')
 })
 
+test('a weighted book: each session the weighted mean, and a trade with no weight is left out (test W)', () => {
+    const data = dataOf({ close: (n) => 100 + n, reports: { 70: GOOD, 130: GOOD } })
+    const t = holdTrades(data).trades.find(x => x.i === 72)
+    const a = { ...t, x: 80 }, b = { ...t, x: 80, cost: 0 }
+    const book = holdBook(data, [a, b], { weight: (tr) => (tr === a ? 3 : 1) })
+    const d = book.get(dates[75])
+    assert.equal(d.n, 4)
+    assert.ok(Math.abs(d.sum / d.n - holdBook(data, [a]).get(dates[75]).sum) < 1e-9, 'the same returns, so the same mean')
+    const first = book.get(dates[72])
+    assert.ok(Math.abs(first.sum / first.n - (-a.cost * 3 / 4)) < 1e-9, 'the cost carries its trade\'s weight')
+    assert.equal(holdBook(data, [a], { weight: () => null }).size, 0)
+})
+
 test('bookBlocks: non-overlapping blocks, a flat session counts, too few blocks is no answer', () => {
     const days = dates.slice(0, 42)
     const book = new Map(days.map((d, n) => [d, { sum: n < 21 ? 1 : 3, n: 1 }]))

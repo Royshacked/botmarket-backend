@@ -1429,3 +1429,43 @@ average stock? SPY stays the bar for "worth doing at all" (§1–44 stand). **De
 - **Reading:** against the average stock, the lab's one stock-picking signal is a big revenue beat, held for months.
   To be worth trading it must also close the gap to SPY — a separate question (SPY plus the picks, or weighting them by
   size), and the next declared test if Roy wants it.
+
+## 46. The revenue beat, weighted by size, against SPY — test W (2026-11-08)
+
+Roy: "yes declare test W". §45's one signal beats the average stock but not SPY, which is weighted by size. Weight the
+same picks the way SPY is. `scripts/lab-revenue-beat-capweight.mjs`. **Declared before the run.**
+- **Picks:** test Q's exactly — S&P 500 members as they were, entries 2020 →, a report whose revenue beat its estimate by
+  10%+, bought at the open of day two, held 40 sessions (primary) or to the next report (the neighbour), never past it;
+  net of SPY and `costFor`. Split 2024-01-01.
+- **Weight (primary):** each open pick by its market cap at the prior close (SEC shares as filed by the entry, §39, ×
+  the price) — a daily book like §32's, each session once, 21-session blocks. Picks with no SEC shares (~13% of names)
+  are left out; the equal-weight book on the SAME picks is shown beside, so the weighting alone is what changes.
+- **Control:** every report, cap-weighted the same way.
+- **Bar:** the cap-weighted 40-session book above SPY in both periods, above the cap-weighted control in both, t ≥ 2; AND
+  the to-the-next-report book above SPY in both periods.
+- **Described, not the verdict:** the signal on the 100 largest members only (equal and cap weight); and the arithmetic
+  of SPY + an overlay (long the picks, short the equal-weight market — it needs a short, e.g. RSP) at 25 / 50 / 100% of
+  the account, from §45's equal-weight books.
+
+**Result — FAIL.** Output: `data/lab/revenue-beat-capweight.out.txt`. 2,016 picks, 1,806 with SEC shares. Against SPY, net
+of the cost, book per month:
+
+| Held 40 sessions | book/mo | t | 2020–2023 | 2024 → |
+|---|---|---|---|---|
+| **Picks, cap-weighted (primary)** | +0.50% | 0.93 | **−0.34%** | +1.66% |
+| Picks, equal weight (same picks) | +0.46% | 1.11 | +0.15% | +0.85% |
+| Every report, cap-weighted (control) | +0.08% | 0.23 | +0.00% | +0.18% |
+| Picks in the 100 largest, cap-weighted | +0.00% | 0.00 | −0.77% | +1.06% |
+| To the next report, picks cap-weighted | +0.57% | 1.40 | +0.10% | +1.17% |
+
+- **Weighting by size does not fix it.** It moves the gain into 2024 → (+1.66%/mo: the mega-cap beats of the AI years)
+  and takes 2020–2023 below SPY (−0.34%). In the 100 largest the signal is nothing (+0.00%, t 0). The revenue beat
+  works in the BREADTH of the S&P, not among the giants that make up SPY.
+- **The overlay is the one route that beats SPY** (described, not the bar): hold SPY and add long the picks / short the
+  equal-weight market (RSP). Its excess over SPY is the §45 signal, +0.74%/mo t 2.25 (40 sessions) and +0.39%/mo t 2.00
+  (to the next report) on these picks, less the short's borrow (0.5% a year assumed). At 25% of the account that is
+  ≈ +2.1% a year over SPY; at 50%, ≈ +4.2%. Mostly after 2024 (+1.47%/mo vs +0.24% before). It needs a short leg and
+  carries that leg's risk (the overlay's own swings), which a long-only account cannot do.
+- **Reading:** a long-only account cannot beat SPY with this signal — weighted equally it pays the mega-cap gap, weighted
+  by size it loses the signal. The only form that beats SPY is SPY plus a market-neutral sleeve (long the beats, short
+  RSP). That is a product decision for Roy (shorts, margin), not another lab number.

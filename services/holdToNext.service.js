@@ -91,9 +91,11 @@ export function holdTrades(data, { from, to, member = null, gap = NEXT_GAP } = {
 
 /**
  * The trades as a book → Map(day → { sum, n }): each open trade's return that session against SPY's, the first from the
- * open it was bought at, the round-trip cost off that first session. Pure.
+ * open it was bought at, the round-trip cost off that first session. Equal weight by default; `weight(t, j)` gives each
+ * open trade its weight that session instead (test W, screener-lab.md §46: its market cap at the prior close) — a
+ * weight that is not a positive number leaves the trade out that session. `n` is then the sum of the weights. Pure.
  */
-export function holdBook(data, trades) {
+export function holdBook(data, trades, { weight = null } = {}) {
     const book = new Map()
     for (const t of trades) {
         const s = data.names.get(t.symbol)
@@ -102,10 +104,12 @@ export function holdBook(data, trades) {
             const stock = j === t.i ? _pct(s.rows[j].close, s.rows[j].open) : _pct(s.rows[j].close, s.rows[j - 1].close)
             const spy = j === t.i ? _pct(sp?.close, sp?.open) : _pct(sp?.close, prev?.close)
             if (stock == null || spy == null) continue
+            const w = weight ? weight(t, j) : 1
+            if (!(w > 0)) continue
             if (!book.has(d)) book.set(d, { sum: 0, n: 0 })
             const b = book.get(d)
-            b.sum += stock - spy - (j === t.i ? t.cost : 0)
-            b.n += 1
+            b.sum += w * (stock - spy - (j === t.i ? t.cost : 0))
+            b.n += w
         }
     }
     return book
