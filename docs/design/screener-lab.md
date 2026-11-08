@@ -1629,8 +1629,7 @@ floor at entry), two families §48–49 did not try. **Declared before the run.*
 **A. The live run-up rule — FAIL.** 3,265 trades: −0.34% a trade against SPY (year 1 −0.90%, year 2 +0.11%), 45% beat
 SPY; block range +0.20% [−0.30 … +0.69]. Today's names only: the same (−0.35%) — survivorship is not why. Neither gate
 helps: every run-up −0.15%, the streak alone −0.18%, SPY's trend alone −0.26%. Outside the S&P, in these two years, the
-run-up does not run up. (§6 found it on today's screener names, which carry the large caps; this says the rule's edge,
-if real, lives in those — worth checking which names the live Hotlist serves.)
+run-up does not run up.
 
 **B. The revenue-beat grid against these names' own market — NOT ROBUST** (76% of cells positive in both years ✓,
 median t 1.06 ✗). Book %/mo (t):
@@ -1653,3 +1652,21 @@ median t 1.06 ✗). Book %/mo (t):
 
 **Test AA verdict:** the live run-up fails outside the S&P; the revenue grid is not robust by the declared bar, but its
 long-hold half — a beat of 5%+, held to the next report — is the one shape that keeps showing in both universes.
+
+**Which names the live Hotlist serves, and where the run-up's number came from (described after AA, not a test;
+`scripts/lab-runup-split.mjs`).** The live This week boards (2026-10-26 → 11-09, 199 rows, `test` and `axl_dev` alike)
+are **69% names outside the S&P** — the nightly screener has no size floor (price $5+, 1M+ shares, $5M+ a day).
+The lab's 3-year screener cache (1,177 names, §6), the live rule split the same way:
+
+| live rule, §6's cache, 2023-10 → 2026-10 | trades | net/trade | before / held out | since 2024-11 | per session (blocks) |
+|---|---|---|---|---|---|
+| all | 4,639 | +0.08% | −0.05% / +0.34% | −0.02% | +0.31% [−0.10 … +0.72] |
+| in the S&P that day | 2,197 | +0.12% | +0.10% / +0.16% | +0.02% | +0.16% [−0.22 … +0.54] |
+| outside the S&P | 2,442 | +0.04% | −0.20% / +0.50% | −0.05% | +0.60% [+0.03 … +1.17] |
+
+- **The edge does not live in the large caps** (the guess above, withdrawn): inside and outside are alike per trade, and
+  per session outside is the better half.
+- **Per trade the rule is ~0 everywhere;** §6's +0.39% is the PER-SESSION mean, where a light day (one or two names)
+  counts as much as a crowded one. The live board spends a fixed daily budget split across the day's names — that is the
+  per-session measure, so it is the right one for the product; but it says the gain sits on the quiet days.
+- With the gone names and the wider list (AA, 2024-11 →) the per-session range crosses zero (+0.20% [−0.30 … +0.69]).
