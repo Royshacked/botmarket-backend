@@ -55,9 +55,9 @@ The hand-off used to sit *inside* the trading prompt, where a list-building turn
 machinery it had to override. It is now its own module (`scanner_mode_handoff.md`), injected as its
 own cached block only on a hand-off turn, with the destination named in the volatile tail rather than
 the module — interpolating a desk name into a cached block would give every destination its own
-cache entry. The tag is literally `<argus_pick>`: it kept the name of the desk it was written for,
-and renaming a tag both repos parse is a migration, not a docs fix. Read it as "the single pick"; it
-goes to Mentor ([trade-pipeline.md](trade-pipeline.md)).
+cache entry. The tag is `<argus_pick>`: it was `<kairos_pick>`, named for the desk it was first
+written for, until Kairos was deleted on 2026-11-10 and both repos renamed it together. It goes to
+Mentor ([trade-pipeline.md](trade-pipeline.md)).
 
 ## Radar cut mode — the board Aether hands over
 

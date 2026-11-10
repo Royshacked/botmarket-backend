@@ -70,6 +70,13 @@ function loadCorpus() {
             files.push({ rel: 'frontend/' + toPosix(relative(FRONTEND, full)), tier: 'frontend', text: readText(full) })
         }
     }
+    // The frontend's own archive/ — frozen code, so a symbol that lives only there is `archived`,
+    // the same verdict as this repo's archive/ (a doc naming an archived panel was reported missing).
+    if (existsSync(join(FRONTEND, 'archive'))) {
+        for (const full of walk(join(FRONTEND, 'archive'))) {
+            files.push({ rel: 'frontend/' + toPosix(relative(FRONTEND, full)), tier: 'archive', text: readText(full) })
+        }
+    }
     // The Python engine is a path target only (a doc may name one of its scripts); its symbols
     // are never searched.
     if (existsSync(AETHER)) {

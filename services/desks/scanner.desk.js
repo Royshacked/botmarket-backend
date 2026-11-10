@@ -26,6 +26,6 @@ export const scannerDesk = {
         onTicker: (symbol) => emit('ticker', { symbol }),
         onPhase:  (phase)  => emit('phase',  { phase }),
     }),
-    // `argus_pick` → the single ticker Argus recommends back to Mentor. The client and the chain (services/chain/rules.js) read it by this name.
+    // `argus_pick` → the single ticker Argus recommends back to Mentor. The chain (services/chain/rules.js) reads it by this name; the client reads neither name.
     done: (result) => ({ reply: result.reply, phase: result.phase ?? null, ...(result.pick ? { argus_pick: result.pick } : {}) }),
 }

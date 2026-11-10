@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { IDEA_CRUD_KINDS } from '../../api/trade-ideas/tradeIdeas.service.js'
+import { IDEA_CRUD_KINDS, _ideaCrudKind } from '../../api/trade-ideas/tradeIdeas.service.js'
 
 // /api/trade-ideas list / get / delete reach ideas and portfolio legs, never a setup (2026-11-10).
 // Before, the crud had no kind filter, so GET returned a setup as an idea and DELETE removed one
@@ -25,6 +25,12 @@ test('a setup is NOT reachable — Mentor owns its read and delete', () => {
 
 test('a deleted kind (call) is not reachable either', () => {
     assert.equal(matches({ kind: 'call' }), false)
+})
+
+// The cases above test the constant; this one tests the WIRING. Without it, deleting the crud's `kind` line left every
+// test green while setups came back through GET/DELETE (code review 2026-11-10).
+test('the trade-ideas crud is built with exactly this scope', () => {
+    assert.deepEqual(_ideaCrudKind, { $in: IDEA_CRUD_KINDS })
 })
 
 test('the list is frozen', () => {

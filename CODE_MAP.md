@@ -615,7 +615,7 @@ services/
   concurrency.util.js     mapLimit(items, fn, { concurrency }) — THE one worker pool for bounding ONE
                           batch: results in INPUT order, a shared cursor so a slow item parks nobody,
                           rejections raised (no swallow mode — that judgment is the caller's). Used by
-                          companyProfile.util (Finnhub fan-out) and aetherBatchRead (3 reads at once).
+                          companyProfile.util (Finnhub fan-out); aetherBatchRead was its other user until it was archived 2026-11-09.
                           createPacer({ perMinute }) (2026-10-21) bounds STARTS per minute rather than
                           calls at once — what a provider rate limit counts. First user: dailyScreener
                           NOT klineRender's semaphore, which caps a process-wide resource across
@@ -1504,6 +1504,10 @@ scripts/                    ops one-offs — none run by `npm test`. Kinds: migr
                             has lived exactly there, with green tests behind it. Rebuild the
                             bundle into public/ first, and LOOK at the screenshots. A resumed
                             thread starts past the opening stage; that is state, not a defect.
+  drive-argus-handoff.mjs   Argus's only remaining job, real models, NOTHING stubbed (2026-11-10): Mentor on the floor,
+                            a user with no name → Mentor routes `scan` → Argus picks (on his opening turn, or after
+                            ONE answer — he often asks the angle first) → `argus_pick` → the chain hands it back
+                            and Mentor's chain turn names it. axl_dev only; a few cents.
   drive-assessment-ui.mjs   Drives Pythia's board (Forecasts → Assessed with the week, Themes) as a throwaway
                             trader and admin against the LIVE routes; never presses Assess now / Run the week /
                             Propose / Approve. Names every failed API read. OPEN_ROW=<industry> opens that

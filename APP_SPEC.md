@@ -449,11 +449,10 @@ rotation) — `docs/design/atlas-industry-sleeves.md`.
 The **Scanner Agent** ("Argus", a session turn with Argus on the floor) emits a `<scan_list>` (normalized:
 uppercased tickers, guaranteed period/thesis/direction/signals). A scan is a watchlist of
 candidates (`{ ticker, direction, thesis, analysis, signals, conviction, sources }`), not ideas.
-CRUD at `/api/scanner/scans` (`PUT` to update). A user promotes a candidate into **Mentor**, where
+CRUD was at ~~`/api/scanner/scans`~~ (`PUT` to update; archived). A user promotes a candidate into **Mentor**, where
 the same funnel converges to a single pick and becomes a monitored `setup`. The wire tag for that
-hand-off is literally `<argus_pick>` — it carries the name of the desk that first received it, and
-renaming a tag both repos parse is a migration, not a docs fix. Read it as "the single-pick
-hand-off"; it goes to Mentor.
+hand-off is `<argus_pick>` — it was `<kairos_pick>`, named for the desk that first received it,
+until Kairos was deleted on 2026-11-10 and both repos renamed it together.
 
 The other way out of Argus is **Prometheus**: an investing list goes there by the app's own button
 (top N to research), a single name by clicking it on a saved list — or by **asking in the chat**
@@ -716,7 +715,7 @@ the Nasdaq-100 as the **US100 cash CFD**, but levels are read off the **NQ futur
   `scripts/set-admin-role.mjs <username> --apply`). `requireAdmin` (403) is on `/api/strategy`'s writes (the
   stream and publishing — the industry reads are open to every user since 2026-10-05), on the
   coverage writes + the research queue under `/api/analyst`, and on Aether's chat + discovery.
-  Scanner, mentor, setups and trade-ideas routes are never role-gated (`tests/unit/adminGate.test.js`
+  Mentor, setups and trade-ideas routes are never role-gated (`tests/unit/adminGate.test.js`
   pins both facts). Social-chat feeds of the admin desks (`ADMIN_BOT_IDS`: `strategy`, `analyst`)
   are delivered to admins only and hidden from a non-admin on list and on read-by-id. Axl is told the
   role in its prompt tail and the controller drops an admin desk from a trader's route. The full

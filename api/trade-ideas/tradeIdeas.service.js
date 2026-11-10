@@ -44,6 +44,8 @@ const crud = makeEntityCrud({
     deleteLock: LIVE_POSITION,
     log:        LOG,
 })
+/** The scope the crud was actually built with — a test pins it, so dropping the line above fails loudly. */
+export const _ideaCrudKind = crud.kind
 
 // A pending idea can be flipped to an immediate market entry ("go in now") from the
 // edit/build flow. Guard it tightly: only an explicit immediate flag on a still-pending

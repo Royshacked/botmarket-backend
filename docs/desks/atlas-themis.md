@@ -214,7 +214,7 @@ exists for any kind.
   hop. The prompt still forces the phase sequence on free chat, and the conviction-trade mode is
   unbuilt — this rework is deferred, deliberately, until the other desks are done.
 - **A Themis *assess* step** between gate and notify (the header's own next step).
-- **A "max_names" mandate field** — proposed, never built; parked (adopted-book §10). (`RESEARCH_TOP_N`, the hardcoded research count on an Argus investing list, went to archive/ with Argus's lists on 2026-11-09.)
+- **A "max_names" mandate field** — proposed, never built; parked (adopted-book §10). (~~`RESEARCH_TOP_N`~~, the hardcoded research count on an Argus investing list, was removed from the chain with Argus's lists on 2026-11-09.)
 - **The cash floor is honoured by shrinking `positionSize`**, which works but means a book's stated
   capital and its deployed capital are two numbers a reader must reconcile. *(Observation, not a
   recorded decision.)*

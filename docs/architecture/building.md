@@ -251,9 +251,9 @@ ideas: `POST /api/trade-ideas/batch` → `saveBatchIdeas`, one `saveIdea` per id
 `{ period:{label,start,end}, thesis, direction, candidates:[{ ticker, name, direction,
 thesis, analysis, signals, conviction, sources }] }`. Edit mode can pass untouched
 candidates as bare `{ ticker, keep:true }` references, rehydrated from the prior list. Scans
-are saved via their own CRUD (`POST /api/scanner/scans`) and later **hand off to Mentor** when a
-user selects a candidate — the same funnel converges to a single pick (the wire tag is still
-literally `<argus_pick>`, named for the desk that first received it) and becomes a monitored
+were saved via their own CRUD (~~`POST /api/scanner/scans`~~, archived) and later **handed off to Mentor** when a
+user selected a candidate — the same funnel converges to a single pick (the wire tag is `<argus_pick>`;
+it was `<kairos_pick>` until Kairos was deleted on 2026-11-10) and becomes a monitored
 `setup`. Both Portfolio and Scanner are single-shot generators with server-side
 finalization: the model proposes, the server computes the numbers that matter.
 
