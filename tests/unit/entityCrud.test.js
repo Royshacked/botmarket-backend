@@ -80,8 +80,8 @@ test('list scopes by kind + owner, newest first, and strips _id', async () => {
 
 test('list is ALWAYS owner-scoped — no option widens it past the caller', async () => {
     const coll = spyColl()
-    await make(coll, { kind: { $ne: 'call' } }).list('u1', { isAdmin: true })
-    assert.deepEqual(coll.calls[0], ['find', { kind: { $ne: 'call' }, userId: 'u1' }])
+    await make(coll, { kind: { $in: ['idea', 'portfolio_item'] } }).list('u1', { isAdmin: true })
+    assert.deepEqual(coll.calls[0], ['find', { kind: { $in: ['idea', 'portfolio_item'] }, userId: 'u1' }])
 })
 
 test('list: caller filter composes on top of the scope', async () => {

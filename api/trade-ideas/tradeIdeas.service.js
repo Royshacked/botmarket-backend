@@ -19,7 +19,7 @@ import { entityRepo }         from '../../services/entity/entityRepo.service.js'
 import { invalidatePortfolioStateFor } from '../../services/portfolioState.service.js'
 import { cancelRestingEntryOrders } from '../../services/restingOrders.service.js'
 import { makeEntityCrud, ownsEntity } from '../../services/entity/entityCrud.service.js'
-import { kindForDoc }         from '../../services/entity/envelope.js'
+import { kindForDoc, KINDS }  from '../../services/entity/envelope.js'
 import { placedStamp }        from './entryStamp.util.js'
 import { ENTITIES }           from '../../services/entity/entityCollection.js'
 
@@ -28,14 +28,19 @@ const COLLECTION = ENTITIES
 
 const VALID_STATUSES = new Set(statusesFor('idea'))
 
-// Owner-scoped CRUD (the shared mechanism). This list is ideas AND portfolio legs
-// (kind:'portfolio_item'). It has NO kind filter: until 2026-11-10 it excluded the `call` kind, and
-// with that kind deleted (data included) dropping the exclusion leaves the result unchanged. An
-// orphaned doc holding a broker position still SHOWS here — the safer failure: it must be
-// manageable, not invisible.
+// Owner-scoped CRUD (the shared mechanism) for list / get / delete: ideas AND portfolio legs
+// (kind:'portfolio_item'), plus a legacy doc written before `kind` existed (`null` matches a missing
+// field — such a doc is an idea, the same reading kindForDoc and the exit monitor give it).
+//
+// NEVER A SETUP (2026-11-10). With no filter here a setup came through: GET returned it as an idea,
+// and DELETE removed it past Mentor's own guards (setups.service owns that). A setup still reaches
+// this ROUTE on purpose — its confirm, resting arm and level edits go through placeOrdersForIdea /
+// updateIdea, which are the shared execution path and stay kind-blind.
 //
 // Only a LIVE position is delete-locked; 'hit' stays deletable (confirm-gated).
+export const IDEA_CRUD_KINDS = Object.freeze([KINDS.IDEA, KINDS.PORTFOLIO_ITEM, null])
 const crud = makeEntityCrud({
+    kind:       { $in: IDEA_CRUD_KINDS },
     deleteLock: LIVE_POSITION,
     log:        LOG,
 })
