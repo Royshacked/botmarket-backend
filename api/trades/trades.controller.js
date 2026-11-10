@@ -25,7 +25,6 @@ export function _filter(q = {}) {
     if (q.symbol)      f.symbol      = q.symbol
     if (q.origin)      f.originType  = q.origin
     if (q.portfolioId) f.portfolioId = q.portfolioId
-    if (q.callId)      f.callId      = q.callId
     if (q.accountId)   f.accountId   = q.accountId
     if (q.fromMs != null) f.fromMs = Number(q.fromMs)
     if (q.toMs   != null) f.toMs   = Number(q.toMs)

@@ -1049,7 +1049,7 @@ test('the lens vocabulary and the condition vocabulary no longer share a word', 
 })
 
 // ─── The three lenses ─────────────────────────────────────────────────────────
-// Mentor now offers the same three Kairos does, so a user hears one vocabulary across both desks.
+// Mentor offers the shared lenses (analysisModes), so a user hears one vocabulary everywhere.
 
 test('a setup built before the rename keeps its lens, under the new name', () => {
     // `classical` meant exactly what `discretionary` means. It is no longer in the set, so it falls
@@ -1062,7 +1062,7 @@ test('institutional is a real lens, not coerced away', () => {
     assert.equal(normalizeSetup({ ...DRAFT, trade_mode: 'smc' }).trade_mode, 'smc')
 })
 
-test('Mentor and Kairos offer the SAME three lenses', () => {
+test('a setup offers the SAME three lenses as the shared vocabulary', () => {
     // The point of the change. Two desks describing one concept with different words is how a user
     // ends up thinking they are different concepts.
     assert.deepEqual([...TRADE_MODES].sort(), [...MODES].sort())

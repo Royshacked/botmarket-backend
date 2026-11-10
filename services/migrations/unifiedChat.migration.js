@@ -3,7 +3,7 @@
 //
 //   threads linked to a setup / coverage / scan / book → that entity's agent_context (importLegacy), row deleted
 //   threads linked to an entity that is GONE           → deleted (nothing to attach to), counted
-//   threads of the retired desks (Kairos `call`, the Idea agent, Pythia's old `tilt`) → deleted (Roy: delete them)
+//   threads of the retired desks (the `call` desk, the Idea agent, Pythia's old `tilt`) → deleted (Roy: delete them)
 //   draft threads of the chat desks (no entity)         → one ARCHIVED session each (importArchived), row deleted
 //   Pythia's and Aether's own threads                   → UNTOUCHED: their panels still keep their chats there
 //   setups' chat_state.messages                         → the setup's Mentor context; only `messages` is unset —
@@ -14,14 +14,15 @@
 //
 import { ENTITIES, LEGACY_IDEAS } from '../entity/entityCollection.js'
 import { COLLECTION as COVERAGE } from '../../api/analyst/coverage.service.js'
-import { COLLECTION as SCANS } from '../../api/scanner/scan.service.js'
+// The scans collection's name, inlined when scan.service moved to archive/ (2026-11-09) — this migration has run.
+const SCANS = 'scans'
 import { COLLECTION as BOOKS } from '../../api/portfolio/portfolioChat.service.js'
 import { COLLECTION as THREADS } from '../thread.service.js'
 import { COLLECTION as CONTEXTS } from '../agentContext.service.js'
 import { SESSIONS, MESSAGES } from '../session.service.js'
 
 // Idempotent: every import records its source and is skipped on a re-run; sources are removed only after their
-// import is written. Dry run unless `apply`. The `call` kind keeps its chat_state (CLAUDE.md — kept data).
+// import is written. Dry run unless `apply`. (The `call` kind and its data were deleted 2026-11-10.)
 
 // A linked thread's subject → the context it becomes. The retired kinds are absent on purpose: they are deleted.
 export const SUBJECTS = Object.freeze({

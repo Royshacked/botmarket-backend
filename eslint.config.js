@@ -9,7 +9,7 @@ import globals from 'globals'
 // and therefore stays useful as a gate.
 export default [
     {
-        // archive/ is FROZEN code kept for revival (Kairos + Hermes, 2026-08-18). Nothing imports
+        // archive/ is FROZEN code kept for revival (archive/README.md). Nothing imports
         // it, so lint has nothing to protect there — and linting it would turn every future rule
         // change into edits to code nobody is maintaining.
         //

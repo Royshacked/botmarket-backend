@@ -1721,7 +1721,7 @@
             }
         }
     ],
-    "kairos": [
+    "trading": [
         {
             "type": "web_search_20260209",
             "name": "web_search"
@@ -3240,7 +3240,7 @@
         },
         {
             "name": "get_watched_items",
-            "description": "Every list the user sees in the app: Mentor setups, portfolios (as books), Prometheus coverage, Argus scans, the QUEUED actions waiting for a venue to open, and the Aether events with the names each reached — plus, for an admin, the research queue. With status, levels and how fresh each is. This is the PLANS AND BOOKS they have made, NOT their open broker positions, balances or live P&L, which are get_trading_context. Calls, setups and books come back scoped to the workspace the user is standing in (paper / live / manual) — those bind to an account, and merging two books into one list is not an answer. Scans and coverage are research, bind to no account, and are shared across every workspace. Call it for \"what am I watching / what have I got going / what's still open\", and before saying the user has nothing. Finished items are excluded unless asked for.",
+            "description": "Every list the user sees in the app: Mentor setups, portfolios (as books), Prometheus coverage, the QUEUED actions waiting for a venue to open, and the Aether events with the names each reached — plus, for an admin, the research queue. With status, levels and how fresh each is. This is the PLANS AND BOOKS they have made, NOT their open broker positions, balances or live P&L, which are get_trading_context. Calls, setups and books come back scoped to the workspace the user is standing in (paper / live / manual) — those bind to an account, and merging two books into one list is not an answer. Coverage is research, binds to no account, and is shared across every workspace. Call it for \"what am I watching / what have I got going / what's still open\", and before saying the user has nothing. Finished items are excluded unless asked for.",
             "input_schema": {
                 "type": "object",
                 "properties": {
@@ -3252,7 +3252,6 @@
                                 "setup",
                                 "portfolio",
                                 "coverage",
-                                "scan",
                                 "queued",
                                 "aether"
                             ]
@@ -3272,7 +3271,7 @@
         },
         {
             "name": "get_performance",
-            "description": "The user's CLOSED-trade record: how many, win rate, net P&L, profit factor and expectancy, split by mode (paper/live/manual), by origin and by symbol — plus Kairos's own R-multiple record for closed calls. Optionally narrowed to a mode, a symbol or a date window. Win rates come back as PERCENTAGES already — never multiply them again. Use it for \"how have I done\", \"is paper working\", \"what's my win rate\". It reports history only; open positions and unrealized P&L are get_trading_context.",
+            "description": "The user's CLOSED-trade record: how many, win rate, net P&L, profit factor and expectancy, split by mode (paper/live/manual), by origin and by symbol. Optionally narrowed to a mode, a symbol or a date window. Win rates come back as PERCENTAGES already — never multiply them again. Use it for \"how have I done\", \"is paper working\", \"what's my win rate\". It reports history only; open positions and unrealized P&L are get_trading_context.",
             "input_schema": {
                 "type": "object",
                 "properties": {
@@ -3302,7 +3301,7 @@
         },
         {
             "name": "get_upcoming_events",
-            "description": "Dated events in a window (default the next 30 days): company earnings, Fed and macro releases, and this week's IPOs. By default scoped to the USER'S OWN names — the calls, setups, coverage and holdings they have in the app — so the answer is about their book, not the whole market; pass scope 'market' for everything. Use it for \"anything coming up\", \"what's the risk this week\", or before discussing timing around a name they hold.",
+            "description": "Dated events in a window (default the next 30 days): company earnings, Fed and macro releases, and this week's IPOs. By default scoped to the USER'S OWN names — the setups, coverage and holdings they have in the app — so the answer is about their book, not the whole market; pass scope 'market' for everything. Use it for \"anything coming up\", \"what's the risk this week\", or before discussing timing around a name they hold.",
             "input_schema": {
                 "type": "object",
                 "properties": {

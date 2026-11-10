@@ -18,7 +18,7 @@ const LOG = '[manualNotify]'
 
 /**
  * WHO the card comes from. These two cards are the shared PIPE for every desk's manual fills —
- * Talos's setups, Kairos's calls, Atlas's baskets, a lone legacy idea — so the sender cannot be
+ * Talos's setups, Atlas's baskets, a lone legacy idea — so the sender cannot be
  * hardcoded here. Callers pass their own `botId` (or the `kind` to derive it from); a basket is
  * Atlas's by construction, and anything with no living desk lands on Axl.
  */

@@ -7,7 +7,7 @@ import { config } from './config.js'
 
 // Short-lived chart-image cache, keyed by symbol + timeframe + studies. Chart rendering is the
 // same view is often requested more than once in a short window — an agent's internal check then
-// again to show it, get_orderblocks + get_false_breaks on the same plain chart, or a Hermes
+// again to show it, get_orderblocks + get_false_breaks on the same plain chart, or a monitor
 // assessment's primary chart plus a tool-loop get_chart on the same rung. One cache shared across
 // every caller (agents + the monitor).
 //

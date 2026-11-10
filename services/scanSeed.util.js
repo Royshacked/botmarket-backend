@@ -1,11 +1,11 @@
 // The Argus hand-off seed — ONE parser for every desk a scanned name can be handed to.
 //
 // A hand-off arrives as a typed object rather than free text: Argus validated the name, wrote a
-// one-line thesis and a short read. Three desks now
-// receive that: Kairos (`call`), Analyst (`coverage`) and Mentor (`setup`).
+// one-line thesis and a short read. Analyst (`coverage`) and Mentor (`setup`)
+// receive that.
 //
-// It was two hand-written copies before this — Kairos's, and Analyst's carrying the comment
-// "Mirrors Kairos's _sanitizeSeed", which is the shape duplication takes just before it drifts. They
+// It was two hand-written copies before this — one carrying the comment "Mirrors … _sanitizeSeed",
+// which is the shape duplication takes just before it drifts. They
 // had ALREADY diverged in what they carried (a forward-dated window on one, a sector on the other),
 // and a third copy for Mentor would have made the divergence permanent.
 //

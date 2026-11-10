@@ -8,7 +8,7 @@
  * It COMPOSES the owning services rather than querying Mongo itself. Standing up a second
  * makeEntityCrud for kind:'setup' when setups.service.js already owns one is the duplicate the
  * shared-mechanism rule forbids — and it would skip each kind's own judgment on the way out
- * (scan staleness is derived in scan.service, not stored).
+ * (a setup's status is the setup service's, not re-derived here).
  *
  * Returns structured rows and NEVER formatted text. The tool adapter formats for the model; a
  * future card or route renders the same fields. `asOf` is a ms epoch at the top level only, so a
@@ -19,7 +19,6 @@ import { logger } from './logger.service.js'
 import { isTerminal } from './entity/vocabulary.js'
 import { WATCH_ROW_PROJECTORS } from './entity/toWatchRow.js'
 import { setupService } from '../api/setups/setups.service.js'
-import { scanService } from '../api/scanner/scan.service.js'
 import { coverageService } from '../api/analyst/coverage.service.js'
 import { listPortfolios } from './portfolioState.service.js'
 import { resolveMode } from './venue.resolve.service.js'
@@ -34,12 +33,10 @@ const LOG = '[watchlist]'
  * `idea` is absent on purpose. ideaService.getIdeas returns portfolio holdings AND loose legacy
  * ideas from the retired Idea agent — and its chat no longer exists, so reporting one invites an
  * offer to open a desk that isn't there. Holdings are reported as their BOOK instead.
- *
- * `call` left for the same reason on 2026-08-18: Kairos is archived, so a call has no desk to be
- * opened in. Listing one would offer the user a door that is not there — the exact failure the
- * paragraph above describes, which is why it goes rather than being quietly kept for old rows.
  */
-export const DEFAULT_KINDS = ['setup', 'portfolio', 'coverage', 'scan', 'queued', 'aether']
+// `scan` left on 2026-11-09 with Argus's lists (archive/README.md): the list is gone from the app, so reporting
+// one would offer the user a door that is not there.
+export const DEFAULT_KINDS = ['setup', 'portfolio', 'coverage', 'queued', 'aether']
 
 /**
  * The lists only an admin has — for a trader the list does not exist, rather than exists and is refused; asked for by
@@ -51,7 +48,7 @@ export const ADMIN_KINDS = Object.freeze([])
 /**
  * The kinds that BELONG to a workspace, and therefore get scoped to it.
  *
- * A call, a setup and a book each bind to an account, so each is real money or simulated money and
+ * A setup and a book each bind to an account, so each is real money or simulated money and
  * never both — listing them together is listing two different books as one. Scans, coverage and the
  * house forecast are deliberately absent: they are research, they bind to no account, and they are
  * SHARED across all three workspaces by decision. There is nothing to scope them by and nothing
@@ -63,7 +60,7 @@ export const WORKSPACE_SCOPED_KINDS = ['setup', 'portfolio', 'queued']
  * @param {string} userId
  * @param {object} [opts]
  * @param {string[]} [opts.kinds]   subset of DEFAULT_KINDS
- * @param {boolean}  [opts.includeFinished]  include terminal items (closed calls/setups)
+ * @param {boolean}  [opts.includeFinished]  include terminal items (closed setups)
  * @param {string}   [opts.symbol]  narrow to one name
  * @param {string}   [opts.workspace]  'live'|'paper'|'manual' — scope the account-bound kinds to the
  *                                     book the user is standing in. Omitted = every workspace, which
@@ -74,7 +71,6 @@ export const WORKSPACE_SCOPED_KINDS = ['setup', 'portfolio', 'queued']
 export async function listWatchedItems(userId, { kinds = null, includeFinished = false, symbol = null, workspace = null, isAdmin = false } = {}, deps = {}) {
     const {
         setups = (uid) => setupService.listSetups(uid, { onError: 'throw' }),
-        scans = (uid) => scanService.getScans(uid, { onError: 'throw' }),
         coverage = () => coverageService.getCoverage({ onError: 'throw' }),
         portfolios = listPortfolios,
         // The off-hours queue plus every entity awaiting a confirm — what the Floor's Queued list
@@ -99,7 +95,7 @@ export async function listWatchedItems(userId, { kinds = null, includeFinished =
     const wantSymbol = symbol ? String(symbol).toUpperCase() : null
     const sources = [
         ['setup', setups], ['portfolio', portfolios],
-        ['coverage', coverage], ['scan', scans],
+        ['coverage', coverage],
         ['queued', queued], ['aether', aether],
     ].filter(([kind]) => want.has(kind))
 
@@ -128,7 +124,7 @@ export async function listWatchedItems(userId, { kinds = null, includeFinished =
                 || (Array.isArray(d?.modes) ? d.modes.includes(workspace) : resolveMode(d) === workspace))
             .map(project)
             .filter(Boolean)
-            // A finished call is history, not something being watched. `isTerminal` is the shared
+            // A finished setup is history, not something being watched. `isTerminal` is the shared
             // vocabulary — never a hand-rolled status list. Kinds with no status (books, scans)
             // have nothing to be terminal about and always pass.
             .filter(r => includeFinished || r.status == null || !isTerminal(r.status))

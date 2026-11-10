@@ -33,9 +33,7 @@ test('the leaf is typed `touch` — the single source of truth for resting at th
     assert.equal(leaf.timeframe, null, 'a price level is intra-candle; a timeframe would imply a close')
 })
 
-// The Kairos half of this pairing — that buildIdeaFromCall emits the SAME leaf as the ticket,
-// rather than the private _touch copy it once carried — went to archive/tests with the desk on
-// 2026-08-18. `touchLeaf` below is still the one builder; there is simply one caller fewer.
+// `touchLeaf` below is the one builder for this leaf.
 
 // ── applyPriceLevels: the numeric API the client actually uses ────────────────
 

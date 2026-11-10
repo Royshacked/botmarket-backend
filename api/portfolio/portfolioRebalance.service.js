@@ -576,7 +576,7 @@ function _sameHolding(held, spec) {
  * per-account calculation already reads from.
  *
  * Called from the two review paths that move real size. The reconciler deliberately does NOT do
- * this: it runs for every kind, and `quantity` on a call or a setup is the desk's number, not
+ * this: it runs for every kind, and `quantity` on a setup is the desk's number, not
  * something a fill should quietly rewrite.
  */
 async function _syncItemQuantity(db, itemId) {

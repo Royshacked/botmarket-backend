@@ -110,10 +110,8 @@ position + rel volume), `get_cycle_analysis` (price-cycle / seasonal modes), `ge
 `get_risk_metrics`, `get_fundamentals`, `get_earnings` (single-ticker + history),
 `get_earnings_calendar` (plus shared sentiment tools).
 
-> An eighth desk is **archived** and intentionally absent from this document. Its build — prompt,
-> tools, phases, emit tag — is described in `archive/README.md`. The 14-tool analysis kit it carried
-> was not archived with it: it lives on in `services/tools/trading.tools.js` (renamed from
-> ~~`kairos.tools.js`~~) and is what Mentor uses.
+> An eighth desk (Kairos, `call`) was archived 2026-08-18 and **deleted 2026-11-10**. The analysis
+> kit it carried lives on in `services/tools/trading.tools.js` and is what Mentor uses.
 
 ---
 
@@ -249,13 +247,13 @@ ideas: `POST /api/trade-ideas/batch` → `saveBatchIdeas`, one `saveIdea` per id
 `portfolioId`. Review mode adds a live `portfolioState` snapshot + a rebalance-apply path.
 (The review lifecycle — two modes, the fingerprint, the non-LLM pre-check — is APP_SPEC §3.)
 
-**Scanner** emits `<scan_list>` — **candidates for one period × thesis**, not a trade:
+**Scanner** *(lists ARCHIVED 2026-11-09 — archive/README.md; live, Argus only finds ONE name for Mentor via `<argus_pick>`)* emits `<scan_list>` — **candidates for one period × thesis**, not a trade:
 `{ period:{label,start,end}, thesis, direction, candidates:[{ ticker, name, direction,
 thesis, analysis, signals, conviction, sources }] }`. Edit mode can pass untouched
 candidates as bare `{ ticker, keep:true }` references, rehydrated from the prior list. Scans
 are saved via their own CRUD (`POST /api/scanner/scans`) and later **hand off to Mentor** when a
 user selects a candidate — the same funnel converges to a single pick (the wire tag is still
-literally `<kairos_pick>`, named for the desk that first received it) and becomes a monitored
+literally `<argus_pick>`, named for the desk that first received it) and becomes a monitored
 `setup`. Both Portfolio and Scanner are single-shot generators with server-side
 finalization: the model proposes, the server computes the numbers that matter.
 

@@ -15,7 +15,7 @@
 // job is deciding WHERE — so Axl keeps its spine and shares only the mechanism.)
 //
 // Before 2026-09-18 every hop had its own tag, its own parser, its own controller field and its own
-// button (`kairos_pick`, Argus's `coverage_request`, …). The conveyor hops — the ones a pipeline
+// button (`argus_pick`, Argus's `coverage_request`, …). The conveyor hops — the ones a pipeline
 // performs on its own, carrying fields the receiver's UI needs (a mode chip, a queue) — keep their
 // artifact kinds. A hop the USER asks for is a sentence, and goes through here.
 //
@@ -51,8 +51,17 @@ export const ADMIN_DESKS = ADMIN_PIPELINE_KEYS
  * the sender's prompt shows.
  */
 export const ROUTABLE_DESKS = Object.freeze(Object.fromEntries(
-    Object.values(DESKS).filter(d => d.routable).map(d => [d.desk, { agent: d.agent, brand: d.brand, does: d.does }]),
+    Object.values(DESKS).filter(d => d.routable).map(d => [d.desk, { agent: d.agent, brand: d.brand, does: d.does, routedFrom: d.routedFrom ?? null }]),
 ))
+
+// A desk with `routedFrom` takes the user only from the agents it names (registry) — since 2026-11-09 Argus, whom only
+// Mentor sends anyone to. `from` is the sending agent's key; Axl passes none, so a restricted desk is never his to name.
+// Gated in the capture AND left off the sender's prompt, like the self-route.
+export function mayRoute(from, desk) {
+    const d = ROUTABLE_DESKS[desk]
+    if (!d?.routedFrom) return true
+    return !!from && d.routedFrom.includes(from)
+}
 
 // The desk each agent stands at, so its own door is left off its list. Argus is also the trade
 // desk's entry and Mentor its build step; neither is listed here because `trade` is Axl's composite
@@ -84,8 +93,8 @@ export function splitRoute(raw) {
 // `<edit>coverage <id></edit>` reopens the thesis that exists, in the chat that wrote it.
 //
 // kind → desk lives here beside the parse because it IS part of the grammar: the client is told
-// which desk so the pipeline crumb reads the same as any other arrival. `call` left on 2026-08-18
-// with Kairos: an <edit> is a door into the desk that OWNS the item, and that desk is archived.
+// which desk so the pipeline crumb reads the same as any other arrival. An <edit> is a door into
+// the desk that OWNS the item.
 export const EDIT_KIND_DESKS = Object.freeze(Object.fromEntries(
     Object.values(DESKS).filter(d => d.editable && d.entityKind).map(d => [d.entityKind, d.desk]),
 ))
@@ -115,7 +124,7 @@ export function splitEdit(raw) {
 //
 // No desk here, deliberately: a detail view belongs to no desk — it is the entity's own page, and
 // the client opens it the same way the card click does (the pop-out on a desktop, the full-screen
-// page on a phone). `call` is absent with Kairos; the archived page is not rendered by anything.
+// page on a phone).
 //
 // ONE KIND, because a tag is only as good as the handle that reaches it. `idea` was here for a day
 // and came out: the kind is alive — it is the execution tier every order rides and a portfolio
@@ -134,7 +143,8 @@ export function splitEdit(raw) {
 // Named in the user's words; the client maps them to its desks. `positions` opens the book in a window too (the left
 // column is hidden on a narrower screen); `board` is Pythia's Forecast board. An ADMIN's list would go in ADMIN_SHOWS
 // (a trader's show of it is dropped, `routeFields`) — none since the research queue stopped being a list (2026-10-31).
-export const SHOW_LISTS = new Set(['positions', 'orders', 'trades', 'portfolios', 'watchlists', 'hotlist', 'board'])
+// `watchlists` (Argus's scans) left on 2026-11-09 with the list itself (archive/README.md).
+export const SHOW_LISTS = new Set(['positions', 'orders', 'trades', 'portfolios', 'hotlist', 'board'])
 const ADMIN_SHOWS = new Set()
 export const SHOW_KINDS = new Set(['setup', 'ticket', 'heatmap', 'calendar', ...SHOW_LISTS])
 // The screens — a show whose ref is optional, because what it opens exists without one.
@@ -273,7 +283,7 @@ export function makeRouteCapture(agentKey = null) {
         },
         result() {
             const split = splitRoute(routeText)
-            const desk = (own && split.desk === own) ? null : split.desk
+            const desk = ((own && split.desk === own) || !mayRoute(agentKey, split.desk)) ? null : split.desk
             const symbol = desk ? split.symbol : null
             const edit = splitEdit(editText)
             const opening = (desk && !edit) ? cleanOpening(openText) : null
@@ -297,7 +307,7 @@ export function makeRouteCapture(agentKey = null) {
  */
 export function buildRouteRule(agentKey) {
     const own = AGENT_DESK[agentKey] ?? null
-    const desks = Object.entries(ROUTABLE_DESKS).filter(([key]) => key !== own)
+    const desks = Object.entries(ROUTABLE_DESKS).filter(([key]) => key !== own && mayRoute(agentKey, key))
     const lines = desks.map(([key, d]) => `- **${d.brand}** (\`${key}\`) — ${d.does}.`).join('\n')
     const [exKey, ex] = desks[0]
     return `
@@ -322,4 +332,4 @@ Emit, each on its own line, at the end of your reply:
 - Say in one line where they are going and why. Do not describe a queue or a wait, and do not ask them to confirm — the block IS the hand-off; the app shows a button carrying it.`
 }
 
-export const routingUtil = { splitRoute, splitEdit, splitShow, cleanOpening, routeFor, sanitizeRouteSymbol, sanitizeEditRef, validateEdit, validateShow, routeFields, makeRouteCapture, buildRouteRule }
+export const routingUtil = { splitRoute, splitEdit, splitShow, cleanOpening, routeFor, mayRoute, sanitizeRouteSymbol, sanitizeEditRef, validateEdit, validateShow, routeFields, makeRouteCapture, buildRouteRule }

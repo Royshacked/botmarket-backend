@@ -59,15 +59,13 @@ const EDIT_REASONS = {
 // A turn: accepted at once (202), run queued, streamed on the session channel (plan phase 5b, G2).
 // `input` is the desk's per-turn extras (a card press's ops, a seed, the marked accounts, the clock).
 export const postSessionTurn = handle('postSessionTurn', async (req, res) => {
-    const { text, agent = null, turnId = null, ops, seed, accounts, mainAccountId, clientTime, brief, radarBoard } = req.body ?? {}
+    const { text, agent = null, turnId = null, ops, seed, accounts, mainAccountId, clientTime, brief } = req.body ?? {}
     if (agent != null && !AGENT_KEYS.includes(agent)) throw httpError(400, 'invalid agent')
     const input = {
         ...(Array.isArray(ops) ? { ops } : {}),
         ...(seed && typeof seed === 'object' ? { seed } : {}),
         // Today's market brief, asked of Axl (plan phase 7, J4) — only Axl's desk reads it.
         ...(brief === true ? { brief: true } : {}),
-        // The Floor's radar board for Argus's cut — shape-checked and capped by the scanner desk (prepareInput).
-        ...(radarBoard && typeof radarBoard === 'object' ? { radarBoard } : {}),
         accounts: parseIdeaAccounts(accounts),
         mainAccountId: mainAccountId != null ? String(mainAccountId) : null,
         clientTime: parseClientTime({ clientNow: clientTime?.clientNow, clientTz: clientTime?.clientTz }),

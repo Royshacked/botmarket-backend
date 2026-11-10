@@ -288,12 +288,11 @@ test('the proposal is IN the card, not hidden behind a button', () => {
     assert.match(partial.content, /condition on your target/)
 })
 
-test('the card is Mentor speaking about a setup, never Kairos about a call', () => {
+test('the card is Mentor speaking about a setup', () => {
     const c = buildSetupManage(INPOS(), { verdict: 'exit_now', read: 'Thesis broke.' })
     assert.equal(c.botId, 'mentor')
     assert.equal(c.type, 'setup_manage')
     assert.equal(c.payload.setupId, 'setup_NVDA_1')
-    assert.doesNotMatch(c.content, /Kairos/)
 })
 
 test('an unknown verdict still produces a readable card rather than an empty bubble', () => {

@@ -284,7 +284,7 @@ function _breachEdge(direction, side) {
  *
  * FIRE-ONCE, both sides, PER SCENARIO. Price oscillating around an edge would otherwise notify on
  * every wake — the single most likely way for this feature to become something the user mutes.
- * `fired` is terminal for that premise (only a re-map clears it, exactly as the call path does);
+ * `fired` is terminal for that premise (only a re-map clears it);
  * `drifting` is announced once and then stays quiet, and can still escalate to `fired` if price
  * later breaks the other way.
  *

@@ -78,7 +78,7 @@ export async function resolveUserAccounts(userId, wantedIds) {
 
 /**
  * Kind-BLIND order-plan builder. Reads only the shared Envelope's execution binding +
- * sizing + identity — so an idea, a call, or a portfolio_item plan the same way (see
+ * sizing + identity — so an idea or a portfolio_item plan the same way (see
  * docs/architecture/entity-model.md P1). The main account (execution.mainAccountId) trades the raw quantity;
  * every other account scales by its balance ratio to the main account.
  *

@@ -7,9 +7,8 @@ import { resolveWorkspace } from '../api/workspace/workspace.model.js'
 
 // The venue/symbol gate, shared by every entity that binds to a broker at Generate.
 //
-// Extracted from kairos.agent.service.js (which still re-exports it as `_resolveVenue` for its
-// existing importers) so the `setup` kind resolves symbols through the SAME path as calls rather
-// than growing a second copy of the cTrader basis logic. See docs/desks/mentor-talos.md
+// Extracted from an earlier desk's agent so the `setup` kind resolves symbols through ONE path
+// rather than growing a second copy of the cTrader basis logic. See docs/desks/mentor-talos.md
 
 const LOG = '[venue]'
 
@@ -60,7 +59,7 @@ export async function resolveVenue(broker, userId, accountId, asset, deps = {}) 
 // WORKSPACE it belongs to, which BROKER runs it when that workspace is live, and which ACCOUNTS
 // it touches in any workspace. This module is the single authority for all three.
 //
-// It replaces five divergent copies (kairos.handoff, tradeCapture, portfolioMode, this module's
+// It replaces five divergent copies (an earlier desk's hand-off, tradeCapture, portfolioMode, this module's
 // own former modeForBroker, and the frontend's isPaperIdea). They did NOT agree: only some
 // implemented the account-prefix fallback, so a legacy doc with no `broker` field resolved as
 // paper in the UI and LIVE in the canonical trades ledger.

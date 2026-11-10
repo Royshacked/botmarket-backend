@@ -28,19 +28,14 @@ const COLLECTION = ENTITIES
 
 const VALID_STATUSES = new Set(statusesFor('idea'))
 
-// Owner-scoped CRUD (the shared mechanism). The kind filter is a NEGATION, not a literal: this
-// list is ideas AND portfolio legs (kind:'portfolio_item') but never calls — a call is surfaced on
-// the Calls tab, never as a standalone idea.
-//
-// There is no `ownedBy:'hermes'` filter: that hid pre-P3b IDEA SHADOWS, the separate execution doc
-// a confirmed call used to mint. Calls have self-executed since P3b (kairos.handoff merges the
-// execution shape onto the call itself and sets no flag), and the legacy documents are gone. If a
-// stray shadow ever turns up it now SHOWS in the list — which is the safer failure: an orphaned
-// doc holding a broker position must be manageable, not invisible.
+// Owner-scoped CRUD (the shared mechanism). This list is ideas AND portfolio legs
+// (kind:'portfolio_item'). It has NO kind filter: until 2026-11-10 it excluded the `call` kind, and
+// with that kind deleted (data included) dropping the exclusion leaves the result unchanged. An
+// orphaned doc holding a broker position still SHOWS here — the safer failure: it must be
+// manageable, not invisible.
 //
 // Only a LIVE position is delete-locked; 'hit' stays deletable (confirm-gated).
 const crud = makeEntityCrud({
-    kind:       { $ne: 'call' },
     deleteLock: LIVE_POSITION,
     log:        LOG,
 })
@@ -204,8 +199,7 @@ function _levelLeaves(level) {
 /**
  * Enrich + broker-partition an idea input into its child doc(s) — WITHOUT inserting. This is the
  * idea-creation engine (condition trees, brokerSymbol resolution, basisOffset, immediate plan)
- * shared by saveIdea (which inserts) and the Kairos handoff (P3b: merges the single child's
- * execution fields onto the call entity instead of minting a shadow). Returns
+ * used by saveIdea (which inserts). Returns
  * { ok, children, forked } or { ok:false, reason?, error }.
  */
 async function buildIdeaChildren(rawIdea, userId, { born = 'proposed' } = {}) {
@@ -286,7 +280,6 @@ async function buildIdeaChildren(rawIdea, userId, { born = 'proposed' } = {}) {
         portfolioId:     tradeIdea.portfolioId     ?? undefined,
         portfolioName:   tradeIdea.portfolioName   ?? undefined,
         allocationRatio: tradeIdea.allocationRatio ?? undefined,
-        callId:          tradeIdea.callId           ?? undefined,   // set ⟺ spawned from a Kairos call; flows to the trade's origin block
         conviction:      cleanConviction(tradeIdea.conviction),
         // We RECORDED this position but never DECIDED it — the entry was made at a bank before we saw
         // the name. Orthogonal to `born` (a future broker-read import is born live and NOT adopted),
@@ -427,70 +420,36 @@ async function getAssetClassMap(userId) {
 }
 
 /**
- * Map of `broker:accountId:positionId` → callId for call-originated open positions. A confirmed
- * Kairos call carries its own execution (kind:'call', self-origin callId) whose brokerOrders link
- * the live broker position (P3b). The Positions tab resolves a row's owner through the visible ideas
- * list, so a call's position has no resolvable owner and clicking it is a dead no-op. This lets the
- * /positions route stamp the owning callId onto the position → the client opens the Call pop-out.
- */
-async function getCallPositionMap(userId) {
-    try {
-        const db = await getDb()
-        const rows = await db.collection(COLLECTION)
-            .find({ userId, callId: { $ne: null }, kind: 'call' },
-                  { projection: { callId: 1, brokerOrders: 1 } })
-            .toArray()
-        const map = {}
-        for (const r of rows) {
-            for (const bo of r.brokerOrders ?? []) {
-                if (bo?.positionId == null) continue
-                map[`${bo.broker}:${bo.accountId}:${bo.positionId}`] = r.callId
-            }
-        }
-        return map
-    } catch (err) {
-        logger.warn(LOG, 'getCallPositionMap failed', err.message)
-        return {}
-    }
-}
-
-/**
  * WHAT THE TRADE TIER KNOWS ABOUT A BROKER'S POSITIONS.
  *
  * A broker hands back positions; it does not know which of them the app authored, what asset class
- * the author declared, or which desk owns them. Two things the client needs are answers only this
+ * the author declared, or which desk owns them. One thing the client needs is an answer only this
  * tier can give:
  *
  *   • `assetClass` — the AUTHORED one, so the client's market-hours gate is exact rather than
  *     guessing from the symbol, which cannot tell a forex pair from a stock. Null when no idea
  *     matches, which is the signal to fall back to the heuristic.
- *   • `callId` — a call's execution is hidden from the ideas list, so the Positions tab could not
- *     resolve the owner of a call-originated row and clicking it was a dead no-op.
  *
  * This lived in broker.controller, which §1 flagged as a cross-feature enrichment with no home and
  * handed to a later section to place. It is NOT the portfolio's: computePortfolioState does its own
- * position→holding join off brokerOrders and wants neither field. It is the trade tier's, because
- * both maps are reads of this tier's own documents — so the join belongs beside them, where it can
+ * position→holding join off brokerOrders and does not want it. It is the trade tier's, because
+ * the map is a read of this tier's own documents — so the join belongs beside them, where it can
  * be tested without a controller and where a second caller (a mobile client, a report) can reach it.
  *
- * `broker` is the venue whose positions these are; the call map is keyed by broker:account:position.
- * Pure apart from the two reads, which are injectable (and exported under `_enrichPositions`) so the
- * join can be asserted without a database. Never throws — each map degrades to {}, and the positions
- * are the answer here: the enrichment is a bonus that must not fail the call.
+ * `broker` is the venue whose positions these are (kept in the signature for the route's sake).
+ * Pure apart from the read, which is injectable (and exported under `_enrichPositions`) so the join
+ * can be asserted without a database. Never throws — the map degrades to {}, and the positions are
+ * the answer here: the enrichment is a bonus that must not fail the request.
  */
-export async function _enrichPositions(userId, broker, positions, deps = {}) {
-    const { assetClasses = getAssetClassMap, callPositions = getCallPositionMap } = deps
+export async function _enrichPositions(userId, _broker, positions, deps = {}) {
+    const { assetClasses = getAssetClassMap } = deps
     const rows = Array.isArray(positions) ? positions : []
     // An empty list costs no reads: there is nothing to join to.
     if (!rows.length) return []
-    const [classMap, callMap] = await Promise.all([
-        assetClasses(userId),
-        callPositions(userId),
-    ])
+    const classMap = await assetClasses(userId)
     return rows.map(p => ({
         ...p,
         assetClass: p.assetClass ?? (p.symbol ? classMap[normSymbol(p.symbol)] ?? null : null),
-        callId:     callMap[`${broker}:${p.accountId}:${p.id}`] ?? null,
     }))
 }
 

@@ -18,7 +18,7 @@ test('a valid message is normalized: agent, role, kind, text, ref, to, timestamp
 })
 
 test('an unknown agent, role or kind is refused', () => {
-    assert.match(toTimelineMessage(msg('kairos', 'user', 'x')).error, /invalid agent/)
+    assert.match(toTimelineMessage(msg('zeus', 'user', 'x')).error, /invalid agent/)
     assert.match(toTimelineMessage(msg('axl', 'system', 'x')).error, /role/)
     assert.match(toTimelineMessage({ ...msg('axl', 'user', 'x'), kind: 'nope' }).error, /invalid kind/)
     assert.match(toTimelineMessage(null).error, /object/)

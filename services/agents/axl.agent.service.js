@@ -34,7 +34,7 @@ const MAX_MESSAGES = DESKS.axl.maxMessages
 // (later) the account-report / trade-analysis concierge. It is READ-ONLY by
 // design — it never emits a <trade_idea>, order, or any authoring artifact. That
 // discipline is what keeps it from becoming a superset of the three specialists;
-// anything about forming or changing a trade/portfolio/scan routes to that
+// anything about forming or changing a trade/portfolio routes to that
 // specialist's own chat. Roles beyond #1 (social bot) + #5 (app help) need
 // account/trade data + tools and are added one by one — the VENUE reads are the
 // first, since "which account am I on / what am I holding / can I trade this

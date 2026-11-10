@@ -8,9 +8,9 @@ import { makeConsultHandler, CONSULT_TOOL } from './deepThink.service.js'
 // live ones, then pull a JSON block out of the raw reply and merge it onto the draft so far. Only
 // the TAGS and the SHAPE differ, and those are the agent's own business.
 //
-// Before this module the mechanics were copied per agent: `_parseKairosResponse`,
-// `_parseMentorResponse` and `_parseAnalystResponse` were the same eight lines with a different
-// tag; `_mergeCallDraft` and `_mergeSetupDraft` were character-for-character identical; and the
+// Before this module the mechanics were copied per agent: `_parseMentorResponse`,
+// `_parseAnalystResponse` and a third were the same eight lines with a different tag; two
+// draft-merge helpers were character-for-character identical; and the
 // bounded phase-capture closure appeared five times with only its upper bound changed.
 
 /**

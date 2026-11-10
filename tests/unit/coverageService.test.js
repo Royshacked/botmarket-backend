@@ -3,8 +3,7 @@ import assert from 'node:assert/strict'
 
 import { normalizeCoverage, newRevision, revisionSummary, RATINGS, STATUSES, HORIZONS, DEFAULT_HORIZON, coverageService, keepClock } from '../../api/analyst/coverage.service.js'
 
-// Analyst P1 — coverage schema normalizer (pure). The CRUD methods are DB-bound (not unit-tested,
-// mirroring normalizeCall vs saveKairosCall).
+// Analyst P1 — coverage schema normalizer (pure). The CRUD methods are DB-bound (not unit-tested).
 
 // ── normalizeCoverage: identity + defaults ──────────────────────────────────
 test('normalize: uppercases symbol, defaults status=active, stamps id + timestamps', () => {

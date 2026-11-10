@@ -38,16 +38,16 @@ test('exitLegFromIdea: missing brokerOrders → positionId null (no throw)', () 
 // ── Attribution ─────────────────────────────────────────────────────────────
 // These two cards are the shared PIPE for every desk's manual fills, so the sender is the
 // caller's, never this module's. It used to be hardcoded `portfolioId ? 'portfolio' : 'idea'` —
-// which meant a Talos setup and a Kairos call both announced their own fills as "Idea".
+// which meant a Talos setup announced its own fills as "Idea".
 
 test('the caller\'s own botId wins outright', () => {
     assert.equal(_sender({ botId: 'mentor' }), 'mentor')
-    assert.equal(_sender({ botId: 'kairos', kind: 'setup', portfolioId: 'p1' }), 'kairos')
+    assert.equal(_sender({ botId: 'analyst', kind: 'setup', portfolioId: 'p1' }), 'analyst')
 })
 
-test('a kind picks its desk — the regression: setups and calls are not Idea\'s', () => {
+test('a kind picks its desk — the regression: setups are not Idea\'s', () => {
     assert.equal(_sender({ kind: 'setup' }), 'mentor')
-    assert.equal(_sender({ kind: 'call' }),  'kairos')
+    assert.equal(_sender({ kind: 'call' }),  'axl', 'the call kind was deleted 2026-11-10')
     assert.equal(_sender({ kind: 'portfolio_item' }), 'portfolio')
 })
 

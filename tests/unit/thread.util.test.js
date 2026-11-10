@@ -29,10 +29,10 @@ test('isSubstantive: past nucleus (phase >= 2) is saved', () => {
     assert.equal(isSubstantive({ agent: 'scanner', phase: 3 }), true)
 })
 
-test('isSubstantive: kairos rides the generic phase floor (>= 2 saved, phase 1 not)', () => {
-    assert.equal(isSubstantive({ agent: 'kairos', phase: 1 }), false)   // Classify step — not yet
-    assert.equal(isSubstantive({ agent: 'kairos', phase: 2 }), true)    // past nucleus (mapping zones)
-    assert.equal(isSubstantive({ agent: 'kairos', hasArtifact: true }), true)
+test('isSubstantive: an unlisted agent rides the generic phase floor (>= 2 saved, phase 1 not)', () => {
+    assert.equal(isSubstantive({ agent: 'zeus', phase: 1 }), false)
+    assert.equal(isSubstantive({ agent: 'zeus', phase: 2 }), true)
+    assert.equal(isSubstantive({ agent: 'zeus', hasArtifact: true }), true)
 })
 
 test('isSubstantive: mentor is always substantive — it is a worksheet, not a phased build', () => {

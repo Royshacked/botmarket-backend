@@ -18,7 +18,7 @@ import { dirname, join } from 'path'
 import { TOOLS as PORTFOLIO_TOOLS } from '../../services/agents/portfolio.agent.service.js'
 import { TOOLS as ANALYST_TOOLS }   from '../../services/agents/analyst.agent.service.js'
 import { TOOLS as AXL_TOOLS }       from '../../services/agents/axl.agent.service.js'
-import { TOOLS as SCANNER_TOOLS, scannerToolsForProfile } from '../../services/agents/scanner.agent.service.js'
+import { TOOLS as SCANNER_TOOLS } from '../../services/agents/scanner.agent.service.js'
 import { MENTOR_TOOLS }             from '../../services/agents/mentor.agent.service.js'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '../../prompts/')
@@ -34,9 +34,9 @@ const DESKS = [
     // Mentor's guided build names a tool at nearly every rung, so it is the prompt most likely to
     // outrun its kit — it was missing from this list until the ladder was written.
     { prompt: 'mentor_system_prompt.md',          tools: MENTOR_TOOLS },
-    // The investing profile runs a SUBSET — checking it against the full kit would wave through a
-    // tool Argus loses the moment it screens for a portfolio.
-    { prompt: 'scanner_profile_investing.md',     tools: scannerToolsForProfile('investing') },
+    // Argus's hand-off module rides every one of his turns since 2026-11-09 (the investing profile, which ran a
+    // subset of the kit, was archived with his lists).
+    { prompt: 'scanner_mode_handoff.md',          tools: SCANNER_TOOLS },
 ]
 
 for (const { prompt, tools } of DESKS) {
@@ -50,13 +50,6 @@ for (const { prompt, tools } of DESKS) {
         }
     })
 }
-
-test('the investing profile is a real subset — the check above is not tautological', () => {
-    const full = new Set(SCANNER_TOOLS.map(t => t.name))
-    const inv  = scannerToolsForProfile('investing').map(t => t.name)
-    assert.ok(inv.length < full.size, 'investing should drop the technical kit')
-    assert.ok(!inv.includes('get_candles'), 'investing screens fundamentals, not charts')
-})
 
 // ── the cost rung ─────────────────────────────────────────────────────────────
 // A funnel is only cheap-first if the prompt says which tools are expensive, and the spine named ONLY

@@ -2,7 +2,7 @@
  * Trades analytics routes — the route table only; handlers live in trades.controller.js.
  *
  * Route map (all requireAuth):
- *   GET /api/trades        ?mode=&status=&symbol=&origin=&portfolioId=&callId=&accountId=
+ *   GET /api/trades        ?mode=&status=&symbol=&origin=&portfolioId=&accountId=
  *                          &fromMs=&toMs=&limit=   → { trades } (newest first; omit mode = all modes)
  *   GET /api/trades/stats  (same filters, minus status — always closed trades)
  *                          → { stats: { overall, byMode, byOrigin, bySymbol } }

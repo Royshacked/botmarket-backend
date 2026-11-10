@@ -80,8 +80,7 @@ test('block-array content gets a block, string content gets a string', () => {
     assert.deepEqual(asBlocks[0].content[1], { type: 'text', text: 'CTX' })
 })
 
-// Kairos was the third desk checked here and was archived on 2026-08-18; its three cases went to
-// archive/tests. The placement RULE is what this file pins, and it is desk-agnostic — the two
+// The placement RULE is what this file pins, and it is desk-agnostic — the two
 // desks below exercise every branch of it.
 
 // ─── the two live desks ───────────────────────────────────────────────────────

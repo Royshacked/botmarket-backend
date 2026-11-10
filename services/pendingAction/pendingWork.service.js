@@ -88,7 +88,7 @@ function _fromEntity(doc) {
         origin: {
             kind,
             entityId: doc.id,
-            ref:      doc.portfolioId ?? doc.callId ?? null,
+            ref:      doc.portfolioId ?? null,
             // No stamped label: unlike a queued action, the entity is still here to be read from,
             // so the row names it live rather than from a snapshot taken hours ago.
             label:    doc.portfolioName ? `${doc.portfolioName}` : null,

@@ -83,7 +83,7 @@ test('knownVenue refuses to guess — that is what makes it different from resol
     assert.equal(knownVenue('ctrader'), 'live')
     assert.equal(knownVenue('paper'), 'paper')
     assert.equal(knownVenue('manual'), 'manual')
-    // Kairos gates execution binding on this null; resolveMode would have said 'live'.
+    // A caller can gate execution binding on this null; resolveMode would have said 'live'.
     assert.equal(knownVenue('nope'), null)
     assert.equal(knownVenue(undefined), null)
     assert.equal(knownVenue(null), null)

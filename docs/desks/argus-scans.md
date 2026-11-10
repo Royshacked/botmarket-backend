@@ -1,5 +1,20 @@
 # Argus — the `scan`
 
+> **ARCHIVED 2026-11-09 — read this first.** Roy archived Argus's chat for building scan lists, and the list itself
+> (the Floor's Watchlists). The trading and investing profiles, the radar cut, saved lists and their edits, the
+> `/api/scanner` routes and the "Research the top N" hand-off are all in `archive/` — see `archive/README.md` for the
+> file list and how to revive them. Old `scan` documents stay in Mongo, unread.
+>
+> **What is LIVE:** only **hand-off mode** — Mentor sends a user with no name here, Argus finds ONE and emits
+> `<argus_pick>`, and the chain carries it back to Mentor (§ The hops, first row). It is now the desk's only mode
+> (`services/desks/scannerMode.js`), and only Mentor can route here (`registry.js` `routedFrom`, `routing.util.js`
+> `mayRoute`). Argus the house agent — the house scan, the Hotlist reads, Book timing, the sleeve screen — is a
+> different code path and unaffected.
+>
+> Everything below is the desk as it was, kept for the reasoning. The sections on the funnel, grounding and the
+> hand-off still describe what the single pick runs on; the list shape, scoring, editing, the investing profile and
+> the radar cut are archived.
+
 The discovery desk: **Argus** turns "what should I be looking at this week" into a ranked, grounded
 list of candidates — and hands the one the user picks to the desk that builds on it. Written
 2026-09-19 from the code, the three prompts and APP_SPEC §4 (which holds the contract — the list
@@ -32,7 +47,7 @@ the target and the emit differ (`services/agents/scanner.agent.service.js`, P4a)
 |---|---|---|---|
 | **Trading profile** (default) | a ranked list of 4–8 tradeable setups for a period | `<scan_list>` | the user; a picked name → Mentor |
 | **Investing profile** | a shortlist of businesses worth researching under a mandate — fundamental/quality lens, no technical kit | `<scan_list>` with a `lens` (the selection school) | Prometheus, top N by the app's button or one by click |
-| **Hand-off mode** (trading) | ONE ticker to build a single trade on | `<kairos_pick>` | Mentor |
+| **Hand-off mode** (trading) | ONE ticker to build a single trade on | `<argus_pick>` | Mentor |
 | **Radar cut mode** (trading) | a given universe — Aether's event board — cut to 8–12 | `<scan_list>` with `source: 'aether'` | Prometheus's batch read, then the user's Scans |
 
 The hand-off used to sit *inside* the trading prompt, where a list-building turn read fifty lines of
@@ -40,7 +55,7 @@ The hand-off used to sit *inside* the trading prompt, where a list-building turn
 machinery it had to override. It is now its own module (`scanner_mode_handoff.md`), injected as its
 own cached block only on a hand-off turn, with the destination named in the volatile tail rather than
 the module — interpolating a desk name into a cached block would give every destination its own
-cache entry. The tag is literally `<kairos_pick>`: it kept the name of the desk it was written for,
+cache entry. The tag is literally `<argus_pick>`: it kept the name of the desk it was written for,
 and renaming a tag both repos parse is a migration, not a docs fix. Read it as "the single pick"; it
 goes to Mentor ([trade-pipeline.md](trade-pipeline.md)).
 
@@ -215,7 +230,7 @@ Three things are taken out of the model's hands on purpose:
 - **No build lens (since 2026-11-01).** Argus used to suggest one (`recommended_mode`, with a liquidity
   downgrade). Roy: "Argus doesn't decide about trade mode anymore. Only Mentor." A hand-off carries no setup
   of the user's, so Mentor opens it risk-based ([mentor-modes.md](../design/mentor-modes.md)); the field is
-  gone from the prompts, `_normalizeKairosPick`, `_cleanCandidate`, `scanSeed.util` and the chain.
+  gone from the prompts, `_normalizeArgusPick`, `_cleanCandidate`, `scanSeed.util` and the chain.
 
 The reasoning sidecar (`deepThink`) has its tightest clause on this desk, stated explicitly: a scan is
 dozens of names, and a desk that consults per candidate turns a cost saving into a per-scan multiplier;
@@ -258,7 +273,7 @@ avoids, unmarked, spots — is scored by the outcome log (`argusRecord`).
 
 | With | Direction | Mechanism |
 |---|---|---|
-| **Mentor** | out | the single pick — `<kairos_pick>` → `{ ticker, direction, thesis, analysis }` seeds Mentor's first turn (`scanSeed.util`); or a clicked candidate on a saved trading list |
+| **Mentor** | out | the single pick — `<argus_pick>` → `{ ticker, direction, thesis, analysis }` seeds Mentor's first turn (`scanSeed.util`); or a clicked candidate on a saved trading list |
 | **Prometheus** | out | an investing list's top N by the app's button, one name by click — the research queue, house-owned; or by asking ("send NVDA to Prometheus") through the shared `<route>` hand-off |
 | **Hotlist** | in (house) | every checkpoint board, read automatically with its headlines (`hotlist.argus.js`); his day picks are the Hotlist's day lists |
 | **Prometheus** | out (house) | his Hotlist This week picks → the research queue (source `hotlist`) → catalyst reads, by code (`hotlistResearch.service`, 2026-10-23) |
@@ -267,7 +282,7 @@ avoids, unmarked, spots — is scored by the outcome log (`argusRecord`).
 | **Axl** | in / out | the user is routed here with a name; Argus can route the user on by their ask |
 
 Nothing structured crosses on a user's ask — the `<open>` is prose written by the sender. The
-automatic conveyor hops (`kairos_pick`, the sleeve) keep their artifact kinds because they carry
+automatic conveyor hops (`argus_pick`, the sleeve) keep their artifact kinds because they carry
 fields the receiver's UI needs.
 
 ## Why it is shaped this way

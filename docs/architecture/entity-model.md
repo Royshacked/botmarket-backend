@@ -62,7 +62,6 @@ journal (the monitor's record, one row per READ — `services/journal.service.js
 
 ```
 idea            → null    (its condition-tree loop was DELETED 2026-08-18; nothing replaced it)
-call            → null    (Hermes archived 2026-08-18)
 setup           → Talos   (guard sweep on price, a read on every candle close where a condition was written)
 portfolio_item  → Themis  (item drift gate)  ⟶  book → Themis (book assess)
 
@@ -123,8 +122,8 @@ what follows is the outcome per phase.
 | P1 | execution blind — every money-path read off the envelope | the field audit became `tests/unit/reconcilerHarness.test.js` (2026-07-21): the real reconciler over a Mongo double, the ordered op log as the executable spec |
 | P1b | `entityRepo` — one kind-blind persistence facade for every execution write | **built**; matches on broker linkage, never on kind; `entityCrud` beside it is the owner-scoped CRUD (`_scope(userId)` is the guarantee a list is only ever the caller's own) |
 | P2 | cutover `ideas` → `entities`, flat + `kind` + `parentId` | **done** (`scripts/migrate-ideas-to-entities.mjs`); `kind` is DERIVED (`kindForDoc`: a `portfolioId` makes a `portfolio_item`, else `idea`) and stamped at insert; the envelope stayed a logical view, not a storage format |
-| P3a | calls into `entities` as `kind:'call'`, keeping the idea shadow | **done** (`scripts/migrate-calls-to-entities.mjs`); `kairos_calls` retired |
-| P3b | drop the call's idea shadow; converge status vocab in position | **moot** — Kairos and Hermes were archived 2026-08-18 (`archive/README.md`); a `call` document still exists and `KINDS.CALL` names it |
+| P3a | calls into `entities` as `kind:'call'`, keeping the idea shadow | **done**, then moot: the `call` kind and `kairos_calls` were deleted 2026-11-10 (`scripts/delete-kairos.mjs`) |
+| P3b | drop the call's idea shadow; converge status vocab in position | **moot** — Kairos and Hermes were archived 2026-08-18 and deleted with their data 2026-11-10; `KINDS.CALL` is gone |
 | P4 | `portfolio_item` flat, book in a `portfolios` collection | **half**: holdings are flat sibling docs (never an embedded array) and Themis reads them; the book's own record stayed `portfolio_chats` — a separate `portfolios` collection was never needed |
 | P5 | remove `ownedBy` / `portfolioId` special-cases | `ownedBy` is gone; `portfolioId` is the join key a holding legitimately carries |
 | — | `setup` (Mentor + Talos, 2026-08-08) | the fourth kind, and the one that proved the model: payload + evaluator + prompt + card, no plumbing ([desks/mentor-talos.md](../desks/mentor-talos.md)) |
@@ -142,9 +141,9 @@ The plan's §7 open decisions, numbered as the code still cites them, as settled
 6. **Migration** — per-phase backfill scripts, idempotent, each leaving the old collection as backup.
 
 And one rule that outranks them: **envelope fields carry ONE name across every kind.** `userId` was
-the violator (calls stored `user_id`, which silently broke the kind-blind owner filters; converged by
-`scripts/migrate-call-userid.mjs` and, for coverage, `migrate-coverage-userid.mjs`). Payload casing
-may differ per kind (a call is snake_case) and is absorbed only through `toEnvelope`.
+the violator (the since-deleted calls stored `user_id`, which silently broke the kind-blind owner
+filters; coverage converged through `migrate-coverage-userid.mjs`). Payload casing may differ per
+kind and is absorbed only through `toEnvelope`.
 
 
 ## 8. Invariants (hold across all phases)

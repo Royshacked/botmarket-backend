@@ -5,11 +5,6 @@
 // which is the point: a monitor reads an SMC setup through the same exact-level lens it was built
 // on. Today that means Mentor (via trading.tools) and Argus on the build side, and Talos (via
 // monitoring/assessTools) on the monitor side.
-//
-// This header used to name Kairos and Hermes as the two consumers. Both were archived on 2026-08-18
-// and the arrangement outlived them unchanged — which is the trap: a reader chasing "who shares
-// this" was sent to dead code for the reason live code is shaped this way. smcReadText's only
-// remaining archive caller is hermes.assess, which is why check:archive covers it.
 
 import { makeToolHandler } from '../agentUtils.js'
 import { _fetchCandleRows } from './marketData.tools.js'

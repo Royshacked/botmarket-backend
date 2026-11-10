@@ -1,7 +1,7 @@
 // The wake-up chore: find what's due, claim it so nothing checks it twice, check it, don't wedge.
 //
 // This is the other half of the duplication readinessGates.js names (and the larger half by line
-// count). Hermes and Talos each carried a private copy of the same forty lines, differing only in
+// count). Two monitors each carried a private copy of the same forty lines, differing only in
 // which kind and statuses they select.
 //
 // THE CLAIM IS THE SUBTLE PART, and the reason this is worth having in one place. `withTimeout`
@@ -155,14 +155,12 @@ export function createDueLoop({
  * The journal append never throws: a lost line must not fail a wake whose state already landed.
  */
 export function makePersist({ collection, kind = null, log }) {
-    // `kind` is OPTIONAL and only Talos passes it. It was left optional for the archived Hermes,
-    // whose pre-P3b call documents predate the field and would have stopped matching — and it stays
-    // optional for the same reason coverage and tilt omit it: a collection that holds one thing
-    // carries no `kind`.
+    // `kind` is OPTIONAL and only Talos passes it. It stays optional for the reason coverage and tilt
+    // omit it: a collection that holds one thing carries no `kind`.
     const match = kind ? (id) => ({ id, kind }) : (id) => ({ id })
     // `db` is an OPTIONAL last argument, not a hidden dependency: a monitor may thread a connection
-    // through its call sites and have its tests inject a fake one there (the archived Hermes did, and
-    // 131 DB-less tests exercised the write path that way). Resolving getDb() unconditionally here
+    // through its call sites and have its tests inject a fake one there (DB-less tests exercise the
+    // write path that way). Resolving getDb() unconditionally here
     // would quietly take that seam away.
     //
     // `ifStatus`: write only if the document is still in that status, for a read that took a model call to reach its answer

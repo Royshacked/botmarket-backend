@@ -6,14 +6,13 @@ import { scannerAgentService } from '../../services/agents/scanner.agent.service
 
 // Argus's build hand-off is a MODE of the trading profile, not a profile of its own: it shares the
 // whole screening spine and differs only in what it converges on (one name) and what it emits
-// (<kairos_pick>). It used to live INSIDE the trading prompt, so a list-building turn read fifty
+// (<argus_pick>). It used to live INSIDE the trading prompt, so a list-building turn read fifty
 // lines telling it to find ONE ticker and not emit a scan_list, and a hand-off turn read the list
 // machinery and phase gate it then had to override. It is now its own injected module.
 //
 // The DESTINATION is the other thing this file guards. The module is a cached block and the desk
 // name is per-request, so the name lives in the volatile tail — and the module must not name a desk
-// itself. It did, for two months after the trade desk moved its build step from Kairos to Mentor,
-// which is how Argus came to tell users their pick was going somewhere it wasn't.
+// itself. It did, for two months after the trade desk moved its build step to Mentor, which is how Argus came to tell users their pick was going somewhere it wasn't.
 
 const SPINE   = readFileSync(new URL('../../prompts/scanner_system_prompt.md', import.meta.url), 'utf8')
 const HANDOFF = readFileSync(new URL('../../prompts/scanner_mode_handoff.md', import.meta.url), 'utf8')
@@ -27,20 +26,24 @@ const call = (opts) => {
     }).then(() => got)
 }
 
-test('a list turn never sees the hand-off module', async () => {
-    const got = await call({})
-    assert.equal(got.systemPrompt.length, 2, 'spine + dynamic tail only')
-    const all = got.systemPrompt.map(b => b.text).join('\n')
-    assert.doesNotMatch(all, /BUILD HAND-OFF/)
-    assert.doesNotMatch(all, /kairos_pick/)
-    assert.doesNotMatch(all, /find ONE ticker/)
+// Since 2026-11-09 there is no list turn: Argus's list-building chat is archived and the single pick for Mentor
+// is the one mode left. A call that names no mode — an old session, a stale client — still gets the module.
+test('every turn carries the hand-off module and names Mentor, even when no mode is passed', async () => {
+    for (const opts of [{}, { handoff: false }, { profile: 'investing' }, { radar: true, radarBoard: { candidates: [{ ticker: 'X' }] } }]) {
+        const got = await call(opts)
+        assert.equal(got.systemPrompt.length, 3, `spine + module + tail for ${JSON.stringify(opts)}`)
+        assert.match(got.systemPrompt[1].text, /BUILD HAND-OFF MODE — find ONE ticker/)
+        assert.match(got.systemPrompt[2].text, /ACTIVE MODE: BUILD HAND-OFF — the user was sent here by Mentor/)
+        const all = got.systemPrompt.map(b => b.text).join('\n')
+        assert.doesNotMatch(all, /RADAR CUT|EDIT MODE/, 'no archived mode leaks in')
+    }
 })
 
 test('a hand-off turn gets the module as its own cached block, after the spine', async () => {
     const got = await call({ handoff: true })
     assert.equal(got.systemPrompt.length, 3, 'spine + mode module + dynamic tail')
     assert.match(got.systemPrompt[1].text, /BUILD HAND-OFF MODE — find ONE ticker/)
-    assert.match(got.systemPrompt[1].text, /<kairos_pick>/)
+    assert.match(got.systemPrompt[1].text, /<argus_pick>/)
     assert.equal(got.systemPrompt[1].cache_control?.type, 'ephemeral')
     // The marker declares the live mode in the volatile tail; the module carries what it means.
     assert.match(got.systemPrompt[2].text, /ACTIVE MODE: BUILD HAND-OFF/)
@@ -64,13 +67,13 @@ test('a named and a generic destination produce DIFFERENT tails and an IDENTICAL
     assert.equal(toMentor.systemPrompt[1].text, toGeneric.systemPrompt[1].text)
 })
 
-test('an unknown or absent destination degrades to generic — never a guessed desk', async () => {
-    // 'kairos' included: the desk is archived, so its name is just another unknown value now.
-    for (const handoffTo of [null, undefined, 'atlas', 'kairos', 'DROP TABLE']) {
+test('an unknown destination degrades to generic — never a guessed desk', async () => {
+    // An unknown desk name is just another unknown value. An ABSENT one is
+    // Mentor since 2026-11-09 (the only desk that sends anyone here) — the test above.
+    for (const handoffTo of [null, 'atlas', 'zeus', 'DROP TABLE']) {
         const tail = (await call({ handoff: true, handoffTo })).systemPrompt[2].text
         assert.match(tail, /the build desk that sent them/)
         assert.doesNotMatch(tail, /\bMentor\b/)
-        assert.doesNotMatch(tail, /\bKairos\b/)
     }
 })
 
@@ -84,17 +87,42 @@ test('at most two cache breakpoints in the system prompt, in either mode', async
     }
 })
 
-test('the hand-off is a TRADING path — the investing profile never gets the module', async () => {
-    const got = await call({ handoff: true, profile: 'investing' })
-    assert.equal(got.systemPrompt.length, 2)
-    assert.doesNotMatch(got.systemPrompt.map(b => b.text).join('\n'), /kairos_pick/)
+// ── what comes back (2026-11-09) ─────────────────────────────────────────────
+// Play the captured tags the way the provider would, hand back the raw.
+const playing = (reply) => async (bag) => {
+    for (const name of ['argus_pick', 'scan_list', 'phase']) {
+        const m = reply.match(new RegExp(`<${name}>([\\s\\S]*?)</${name}>`))
+        const cap = bag.tagCaptures?.find(t => t.open === `<${name}>`)
+        if (m && cap?.onCapture) cap.onCapture(m[1])
+    }
+    return reply
+}
+
+test('a stray <scan_list> is swallowed — no `scan` comes back, and the tag never reaches the reply', async () => {
+    const reply = 'Here are some names.\n<scan_list>{"thesis":"semis","candidates":[{"ticker":"NVDA"}]}</scan_list>'
+    const out = await scannerAgentService.chatStream({ messages: [{ role: 'user', content: 'list me semis' }], _run: playing(reply) })
+    assert.equal('scan' in out, false)
+    assert.equal('pick' in out, false)
+    assert.doesNotMatch(out.reply, /scan_list|candidates/)
+})
+
+test('a <argus_pick> comes back normalized, its grounding stamped', async () => {
+    const reply = 'NVDA it is.\n<argus_pick>{"ticker":" nvda ","direction":"long","thesis":"Reclaiming the 50-day.","analysis":"a","recommended_mode":"smc"}</argus_pick>'
+    const out = await scannerAgentService.chatStream({ messages: [{ role: 'user', content: 'find me one' }], _run: playing(reply) })
+    assert.equal(out.pick.ticker, 'NVDA')
+    assert.equal(out.pick.direction, 'long')
+    assert.equal(out.pick.thesis, 'Reclaiming the 50-day.')
+    assert.equal('recommended_mode' in out.pick, false)
+    // No tool ran in this seam, so nothing engaged the name — the ledger says so rather than staying silent.
+    assert.equal(out.pick.grounding, 'ungrounded')
+    assert.equal('scan' in out, false)
 })
 
 // ── the two files, as text ───────────────────────────────────────────────────
 test('the spine no longer carries the hand-off section', () => {
     assert.doesNotMatch(SPINE, /BUILD HAND-OFF MODE/)
     assert.doesNotMatch(SPINE, /VALIDATE-A-NAME/)
-    assert.doesNotMatch(SPINE, /kairos_pick/)
+    assert.doesNotMatch(SPINE, /argus_pick/)
     // …but it keeps what BOTH modes use: the screening spine. No build lens — Argus stopped recommending one
     // (2026-11-01, docs/design/mentor-modes.md).
     assert.match(SPINE, /HOW YOU SCAN — the professional spine/)
@@ -164,17 +192,14 @@ test('the overrides list points at the per-branch phase rule', () => {
 })
 
 // The spine is read on EVERY trading turn, hand-off or not, so a desk name in it reaches users the
-// mode module never touches. It named Kairos in four places while the trade desk built with Mentor.
+// mode module never touches — it once named a retired desk in four places.
 test('the spine never names a build desk — it does not know which one is listening', () => {
-    assert.doesNotMatch(SPINE, /\bKairos\b/)
     assert.doesNotMatch(SPINE, /\bMentor\b/)
 })
 
-// Kairos is archived (2026-08-18): Mentor is the only build desk, so the module may describe it, but
-// an archived desk named in a block every hand-off reads would send the user looking for a desk that
-// is gone. The wire tag keeps its spelling (`kairos_pick`) — that is not a desk name.
-test('the module never names the archived Kairos desk', () => {
-    assert.doesNotMatch(HANDOFF, /\bKairos\b/)
+// The wire tag the chain reads (services/chain/rules.js).
+test('the module teaches the argus_pick tag', () => {
+    assert.match(HANDOFF, /<argus_pick>/)
 })
 
 // The module is ONE cached block every hand-off reads — a named sender and a generic one alike. A

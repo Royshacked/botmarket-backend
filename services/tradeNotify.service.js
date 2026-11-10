@@ -6,8 +6,7 @@
  * card is the alert + a clickable preview; the existing action UI is where the user actually
  * acts (a paper/live entry → OrderConfirmDialog; a setup → its own card actions).
  *
- * Manual-mode fills keep their own inline FillCard (manualNotify). The Kairos `call` cards that
- * used to live here moved to archive/services/kairosNotify.service.js with the desk.
+ * Manual-mode fills keep their own inline FillCard (manualNotify).
  *
  * Shape is split into pure builders (unit-tested — the { userId, content, type, payload, botId,
  * actions } a card sends) and thin async wrappers that hand the builder's output to postBotCard.
@@ -286,9 +285,8 @@ export function buildQueueReady({ userId, count, assets = [], staleHours = null 
 }
 
 /**
- * Talos wants to change something about a LIVE setup position. Its own copy rather than the
- * archived buildCallManage's: that one was branded Kairos, keyed on `callId`, and spoke about a call. Share
- * the pipe (`_post`), not the judgment.
+ * Talos wants to change something about a LIVE setup position. Share the pipe (`_post`), not the
+ * judgment.
  *
  * The proposal is spelled out in the content, not hidden behind "open it to see" — a partial or a
  * stop move is a number the user can accept or reject at a glance, and burying it costs a round

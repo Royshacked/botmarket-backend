@@ -7,9 +7,8 @@
 // LIVE_STATUSES, LOCKED_DELETE_STATUSES), and no canonical asset-class list at all.
 //
 // The pattern is the same one the tool registry uses: the VOCABULARY is mechanism and lives here;
-// which subset a kind or an agent uses is judgment and stays with them. A Kairos call genuinely
-// cannot be `long term` — that's a decision about what a call IS, not drift — so it declares its
-// subset rather than re-typing the words.
+// which subset a kind or an agent uses is judgment and stays with them, declared as a subset
+// rather than re-typed words.
 
 // ─── Lifecycle statuses ───────────────────────────────────────────────────────
 //
@@ -77,12 +76,11 @@ export const TERMINAL = [STATUS.CLOSED]
 // ─── Invalidation — the SECOND axis ───────────────────────────────────────────
 //
 // Orthogonal to the lifecycle: a plan can go stale while it is still perfectly well `looking`.
-// Ideas have always had this (a price envelope watched by invalidation.monitor); calls used to
-// spend three lifecycle statuses on the same idea — `expiring` / `expired` / `dismissed` — which
-// is what made a call's language diverge from every other kind's.
+// Ideas have always had this (a price envelope watched by invalidation.monitor). It is an axis, not
+// extra lifecycle statuses like `expiring` / `expired` / `dismissed`, so every kind speaks one language.
 //
 // Fire-once latch: set it and the monitor stops re-firing until the user acts. The TRIGGER differs
-// by kind (an idea's price envelope, a call's or setup's `valid_until`); the state does not.
+// by kind (an idea's price envelope, a setup's `valid_until`); the state does not.
 export const INVALIDATION = {
     DRIFTING: 'drifting',   // soft — running the wrong way, still alive
     FIRED:    'fired',      // latched — awaiting the user (re-map it, or let it go)
@@ -98,12 +96,10 @@ export const isInvalidated = (status) => status === INVALIDATION.FIRED
  *     broker, which is materially different from being watched.
  *   • setup — no `resting` (a zone cannot rest as a broker order). Price sitting inside a zone is
  *     `armed_leg_id` on a `looking` setup, not a status of its own.
- *   • call  — same as setup. A thesis going stale pre-entry is the INVALIDATION axis, not a status.
  */
 export const STATUSES_BY_KIND = {
     idea:  [STATUS.WAITING, STATUS.LOOKING, STATUS.RESTING, STATUS.HIT, STATUS.LONG, STATUS.SHORT, STATUS.CLOSED],
     setup: [STATUS.WAITING, STATUS.LOOKING, STATUS.HIT, STATUS.LONG, STATUS.SHORT, STATUS.CLOSED],
-    call:  [STATUS.WAITING, STATUS.LOOKING, STATUS.HIT, STATUS.LONG, STATUS.SHORT, STATUS.CLOSED],
 }
 
 export const statusesFor = (kind) => STATUSES_BY_KIND[kind] ?? []
@@ -150,13 +146,6 @@ export const isRestingEntry = (type) => RESTING_ENTRY_TYPES.has(type)
 
 export const TRADE_HORIZONS = ['intraday', 'day', 'short term swing', 'swing', 'long term']
 
-/**
- * Kairos builds day/swing CALLS — a call is a moment to act on, not a multi-month hold, and its
- * prompt says so ("intraday / day / swing; never scalping"). The narrowing is deliberate, so it
- * is declared as a subset of the shared ladder instead of a second literal that merely looks
- * like the first minus one entry.
- */
-export const CALL_HORIZONS = TRADE_HORIZONS.filter(h => h !== 'long term')
 
 export const isHorizon = (h) => TRADE_HORIZONS.includes(h)
 

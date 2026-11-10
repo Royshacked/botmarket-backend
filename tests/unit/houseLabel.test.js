@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
 import { labelsFrom, houseLabels, booksForStyle, wireLabel, formatHouseLabel } from '../../services/houseLabel.service.js'
-import { _attachHouseLabels } from '../../services/agents/scanner.agent.service.js'
+import { _attachPickLabel } from '../../services/agents/scanner.agent.service.js'
 
 // The house label on a name (docs/design/argus-on-pythia.md §3.4, step 5): worked out by code from the name's
 // industry and the house's list for the book — never taken from the model or a request body.
@@ -59,21 +59,21 @@ test('the wire carries the facts, not the thesis; the prompt line carries the fl
     assert.equal(formatHouseLabel(null), '')
 })
 
-test("Argus's scan and pick are labelled by code: the scan's style picks the book, the pick asks both", async () => {
+// The scan half of this test went to archive/tests/houseLabel.test.js on 2026-11-09 with Argus's lists.
+test("Argus's pick is labelled by code, asking both books, the swing list first", async () => {
     const calls = []
     const labels = async (symbols, { books }) => { calls.push(books); return labelsFrom(symbols, IND, LISTS, books) }
-    const scan = { style: 'swing', candidates: [{ ticker: 'LITE' }, { ticker: 'MSFT' }] }
     const pick = { ticker: 'MSFT' }
-    await _attachHouseLabels(scan, pick, { labels })
-    assert.equal(scan.candidates[0].house.book, 'swing')
-    assert.equal(scan.candidates[1].house, null, 'Systems Software is long-term, not swing')
+    await _attachPickLabel(pick, { labels })
     assert.equal(pick.house.book, 'long_term')
-    assert.deepEqual(calls, [['swing'], ['swing', 'long_term']])
-    const day = { style: 'day', candidates: [{ ticker: 'LITE' }] }
-    await _attachHouseLabels(day, null, { labels })
-    assert.equal(day.candidates[0].house, null, 'a day scan has no house list')
-    const inv = { style: null, candidates: [{ ticker: 'MSFT' }] }
-    await _attachHouseLabels(inv, null, { profile: 'investing', labels })
-    assert.equal(inv.candidates[0].house.book, 'long_term', 'an investing list with no style asks long term')
-    await _attachHouseLabels(null, null, { labels })
+    const lite = { ticker: 'LITE' }
+    await _attachPickLabel(lite, { labels })
+    assert.equal(lite.house.book, 'swing', 'on both lists — swing is asked first')
+    const xom = { ticker: 'XOM' }
+    await _attachPickLabel(xom, { labels })
+    assert.equal(xom.house, null, 'on no list')
+    assert.deepEqual(calls, [['swing', 'long_term'], ['swing', 'long_term'], ['swing', 'long_term']])
+    await _attachPickLabel(null, { labels })
+    await _attachPickLabel({ ticker: '' }, { labels })
+    assert.equal(calls.length, 3, 'no pick, no read')
 })

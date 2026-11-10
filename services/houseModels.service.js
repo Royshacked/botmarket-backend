@@ -1,7 +1,7 @@
 // THE HOUSE MODELS — the one place the model everyone else runs on is chosen (2026-09-21).
 //
 // Until now the chat model was the user's own pick, sent by the client on every turn off
-// localStorage, and the Talos model their own `hermesModel` preference. Roy is the developer and
+// localStorage, and the Talos model their own preference. Roy is the developer and
 // the only one weighing models against the ledger, so the pick is his for EVERY account, his own
 // included: there is one selector, the admin's, and nobody has a per-user one any more — whatever
 // a client still sends is not consulted. (The first cut kept the admin's own selectors next to

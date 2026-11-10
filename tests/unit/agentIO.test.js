@@ -122,7 +122,7 @@ test('a non-numeric phase is ignored', () => {
 })
 
 test('the LAST valid phase wins across a multi-phase turn', () => {
-    // Kairos threads several phases through one reply.
+    // A desk may thread several phases through one reply.
     const p = makePhaseCapture(7, () => {})
     p.capture('2'); p.capture('4'); p.capture('99')
     assert.equal(p.get(), 4, 'an invalid trailing value must not clear a good one')

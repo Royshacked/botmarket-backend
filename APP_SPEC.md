@@ -5,7 +5,7 @@ flow diagrams see [README.md](README.md); for file layout see [CODE_MAP.md](CODE
 
 The app turns natural-language chat into **monitored trade ideas** that route to a
 broker. Six desks produce work — Axl (reception) · Mentor (`setup`, the trader) ·
-Atlas (portfolio) · Argus (scan) · Prometheus (`coverage`) · Pythia (`industry_view`, `industry_assessment`) — and each
+Atlas (portfolio) · Argus (one name for Mentor; his scan lists archived 2026-11-09) · Prometheus (`coverage`) · Pythia (`industry_view`, `industry_assessment`) — and each
 authored kind is watched by its desk's own background monitor. The `idea` execution tier
 has no desk, so it is watched by two kind-blind loops instead (§2). One reconciler keeps
 entity state honest against the broker. Nothing reaches a broker while its venue is shut
@@ -87,11 +87,10 @@ waiting ──► looking ──► hit ──► long / short ──► closed
   position survived (`findOpenPosition`) before mutating idea state — it never closes an idea on a
   transient/unknown result.
 - **Delete lock (every kind).** An entity holding a LIVE position (`long`/`short`) cannot be
-  deleted — idea, call, setup and portfolio holding alike (`makeEntityCrud({ deleteLock:
+  deleted — idea, setup and portfolio holding alike (`makeEntityCrud({ deleteLock:
   LIVE_POSITION })` → 409 `reason:'in_position'`). Deleting one would leave the position open at
   the broker with nothing describing it, so no monitor runs its stop. `hit` IS deletable (nothing
-  is at the broker yet — only a parked order plan), and the client confirms intent first. The call
-  route was the last kind without the lock; it has it as of 2026-07-29.
+  is at the broker yet — only a parked order plan), and the client confirms intent first.
 - **One reason → one answer.** Services refuse with a slug (`{ok:false, reason}`) and
   `api/_shared/reason.util.js` owns the slug→HTTP map, so no two kinds answer the same refusal
   differently. Refusal bodies are always `{ error, reason }` — branch on `reason`, never on prose.
@@ -308,7 +307,7 @@ a **document**, a show names a **page to read**.
   timeline (the unified chat — one chat, every desk). **Every single trade starts at Mentor** (2026-10-19):
   `assist`, and the legacy `trade` key lands there too; Mentor asks whether the user has a name or a setup
   and routes to Argus only when they have none — a route FROM Mentor TO Argus presets Argus to find ONE
-  name and hand it back (`handBackOf`).
+  name and hand it back (`handBackOf`). Since 2026-11-09 that is the ONLY way in: Argus takes routes from Mentor alone.
 - `<open>…</open>` — the desk's FIRST TURN, in the user's own words, run as soon as the floor moves.
   Rides with a route (never with an edit, which resumes a conversation that already exists). A route
   from Axl with no `<open>` carries the user's own message instead (`ownWords`), so the desk always
@@ -355,7 +354,6 @@ a **document**, a show names a **page to read**.
 |---|---|---|
 | `setup` | assist | Mentor — chat + worksheet restored |
 | `coverage` | research | Prometheus, in revise mode |
-| `scan` | scan | Argus, list primed for refining |
 | `portfolio` | portfolio | Atlas — **edit or review, decided by the book** (§3) |
 
 `kind → desk` resolves server-side (`EDIT_KIND_DESKS`). The controller drops an unknown kind or a
@@ -442,12 +440,18 @@ rotation) — `docs/design/atlas-industry-sleeves.md`.
 
 ## 4. Scans
 
+> **Archived 2026-11-09** (Roy): Argus's list-building chat and the scan list — the `<scan_list>`, `/api/scanner`,
+> the investing profile, the radar cut and the *Research the top N* hand-off below are in `archive/`
+> (`archive/README.md`). **Live:** the single-pick hand-off only — Mentor routes a user with no name to Argus
+> (Mentor alone may: `registry.js` `routedFrom`), Argus emits `<argus_pick>`, the chain hands it back to Mentor.
+> Old `scan` documents stay in Mongo, unread. The rest of this section is the contract as it was.
+
 The **Scanner Agent** ("Argus", a session turn with Argus on the floor) emits a `<scan_list>` (normalized:
 uppercased tickers, guaranteed period/thesis/direction/signals). A scan is a watchlist of
 candidates (`{ ticker, direction, thesis, analysis, signals, conviction, sources }`), not ideas.
 CRUD at `/api/scanner/scans` (`PUT` to update). A user promotes a candidate into **Mentor**, where
 the same funnel converges to a single pick and becomes a monitored `setup`. The wire tag for that
-hand-off is literally `<kairos_pick>` — it carries the name of the desk that first received it, and
+hand-off is literally `<argus_pick>` — it carries the name of the desk that first received it, and
 renaming a tag both repos parse is a migration, not a docs fix. Read it as "the single-pick
 hand-off"; it goes to Mentor.
 
@@ -467,8 +471,8 @@ structured crosses.** The `<open>` is the receiving desk's first turn, in prose,
 SENDER: the user's ask plus what it found on the name — because the desk cannot see the sender's
 chat, and a sentence needs no schema and cannot be mistaken for a settled parameter. Each desk's
 spine carries one shared rule (`buildRouteRule`): the routable desks minus its own, never Pythia or
-Aether, and **only when the user asked** — one hand-off per turn, say where they are going, the
-block is the hand-off. The automatic conveyor hops (`kairos_pick`, sleeve sourcing) keep their
+Aether, and Argus only on Mentor's (since 2026-11-09 a desk may name the only senders it takes — `routedFrom`), and **only when the user asked** — one hand-off per turn, say where they are going, the
+block is the hand-off. The automatic conveyor hops (`argus_pick`, sleeve sourcing) keep their
 artifact kinds: they carry fields the receiver's UI needs; a user's ask is a sentence.
 
 Argus runs a **systematic-discovery funnel** — candidates come from grounded sources, never
@@ -541,7 +545,7 @@ moment they act, and they execute it from a list at the open. Full design:
   ENTRY plan") and cannot hold two intents for one holding. `enqueue` is idempotent per
   `(user, entity, verb)` while the row is open.
 - **Cancelling reaches back into the desk that decided.** `originRegistry` holds one `execute` +
-  `cancel` per origin (`portfolio_item · call · setup · idea`), keyed not switched; the gate
+  `cancel` per origin (`portfolio_item · setup · idea`), keyed not switched; the gate
   **refuses to queue an unregistered origin**, so nobody can ship a queued item whose desk could
   never be told it was cancelled (an Atlas holding records the refusal in `rebalance_history`, or the
   next review re-proposes the identical trim).

@@ -58,9 +58,9 @@ test('no cap given → never trims (unchanged behaviour)', () => {
     assert.equal(trimHistory(turns(50), undefined).length, 50)
 })
 
-// The user-first rule is an invariant of the HISTORY, not a side effect of having trimmed. Kairos
-// and Mentor used to slice(-8) in the controller, which both defeated the high-water mark above AND
-// skipped trimHistory's guard — an even-count slice of a phased Kairos reply (one turn = several
+// The user-first rule is an invariant of the HISTORY, not a side effect of having trimmed. Desks
+// used to slice(-8) in the controller, which both defeated the high-water mark above AND
+// skipped trimHistory's guard — an even-count slice of a phased reply (one turn = several
 // assistant bubbles) genuinely lands on an assistant. The slice is gone; this holds the rule at the
 // one place every agent's history passes through.
 test('normalizeMessages opens on a user turn even when nothing is trimmed', () => {
@@ -221,7 +221,7 @@ test('the history stamp is cleared when the loop takes over', () => {
 })
 
 // ── the monitors: same mechanism, no compaction ───────────────────────────────
-// Hermes and Talos run their own tool loop and never rewrite a result, so nothing is in flux and
+// Talos runs its own tool loop and never rewrite a result, so nothing is in flux and
 // the breakpoint can sit on the NEWEST turn instead of lagging one behind. Same function, one knob.
 
 test('with nothing mutable the breakpoint reaches the newest turn', () => {

@@ -18,15 +18,15 @@ import { appendJournal } from './journal.service.js'
  * A monitor proposes a change to a live position (tighten the stop, bank a third, get flat) and the
  * user accepts it. What happens next is pure mechanism: find the broker position on every account
  * the entity is placed on, amend or close, keep our tracked exit order in step, then write the
- * result down. NOTHING in here knows which desk asked. Hermes proposes for a Kairos `call`, Talos
- * for a Mentor `setup`, and both arrive at the same three broker calls.
+ * result down. NOTHING in here knows which desk asked. Talos proposes for a Mentor `setup`, and any
+ * future monitor arrives at the same three broker calls.
  *
- * This lived inside kairos.handoff.service until a setup needed it too. It moved rather than being
+ * It lived inside an earlier desk's hand-off until a setup needed it too. It moved rather than being
  * copied — a second copy is how a partial ends up capped on one desk and uncapped on the other.
  *
  * WHAT STAYS WITH THE DESK (see the data-vs-judgment rule in CLAUDE.md):
- *   • the verdict vocabulary its monitor emits, and its own proposal shape. Hermes says
- *     `{ new_stop }`, Talos says `{ stop, why }` — each desk translates its own into the execution
+ *   • the verdict vocabulary its monitor emits, and its own proposal shape. Talos says
+ *     `{ stop, why }` — each desk translates its own into the execution
  *     contract below before calling in. Translating them HERE would make this the place that knows
  *     every desk's dialect, which is precisely what it must not know.
  *   • ownership, status guards, the instruction card a self-executed venue gets, and what it says.
@@ -39,15 +39,15 @@ import { appendJournal } from './journal.service.js'
  *   exit_now      {}                                       — full close
  *
  * `let_run` was here until 2026-09-29. Talos dropped it on 2026-09-17 — a bare "letting it run" is
- * a `hold`, and moving a target OUT is an edit of the plan, not a monitor act — and Hermes, the
- * only other caller that ever sent it, is archived. It stayed in this set for twelve days as a
+ * a `hold`, and moving a target OUT is an edit of the plan, not a monitor act — and the only
+ * other caller that ever sent it is gone. It stayed in this set for twelve days as a
  * verb nothing could produce but anything could still execute, which is the wrong direction for a
  * dead path to fail in: it amends a resting TP or cancels one outright.
  *
  * ENTITY vs HOLDER. `entity` is the doc that owns `position_state` and declares the accounts; it is
  * also what gets the write. `holder` is the doc carrying `brokerOrders` / `exitOrders` — the broker
- * linkage. For a setup they are the SAME doc (execution writes onto the setup). For a call they are
- * not: the call materializes an idea at confirm, and the position hangs off that idea.
+ * linkage. For a setup they are the SAME doc (execution writes onto the setup); the split exists so a
+ * desk whose position hangs off a separate doc can still pass both.
  */
 
 const LOG = '[positionManage]'
@@ -300,7 +300,7 @@ export async function applyManage({ entity, holder, verb, proposal, userId, orig
 
     // THE HOURS GATE, and it lives here rather than in each desk's handoff for the reason the gate
     // itself was built: five call sites deciding hours policy privately is how they came to disagree.
-    // Hermes and Talos both arrive at this function, so gating it once covers both and neither can
+    // Every monitor arrives at this function, so gating it once covers all of them and none can
     // ship a new verb that forgets to ask.
     //
     // The paper venue is NOT exempt. `exitMarkPrice` degrades to the day close on purpose, so a

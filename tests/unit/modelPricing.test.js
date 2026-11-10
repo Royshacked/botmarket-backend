@@ -97,7 +97,7 @@ test('sonnet 5 is floored even though sonnet 4.6 is not', () => {
 })
 
 test('the model argument is load-bearing — omitting it skips the floor', () => {
-    // Pinned because the one-arg form is what a drifted copy looked like: hermes.assess.js carried
+    // Pinned because the one-arg form is what a drifted copy looked like: an earlier monitor carried
     // its own `_thinkingConfig(effort)` that "mirrored" this one, never learned about the floor,
     // and so ran the monitors thinking-off on a model that must not be. The monitors import THIS
     // function now; this keeps the no-model call visibly wrong rather than quietly plausible.
@@ -109,9 +109,8 @@ test('the monitors use the provider’s thinking config, not a copy of it', () =
     // The duplicate is the actual bug here — two implementations of one mechanism drift, and this
     // one drifted silently in the direction that costs money and breaks tool calls.
     //
-    // This used to assert the identity `hermesThinkingConfig === _thinkingConfig`, i.e. that the
-    // monitor re-exported the provider's function rather than growing its own. Hermes was archived
-    // on 2026-08-18 and talos.assess imports `_thinkingConfig` straight from the provider, so there
+    // This used to assert that a monitor re-exported the provider's function rather than growing its
+    // own. talos.assess imports `_thinkingConfig` straight from the provider, so there
     // is no re-export left to be wrong. What still matters is the VALUE the monitors get.
     assert.deepEqual(
         _thinkingConfig(undefined, OPUS),

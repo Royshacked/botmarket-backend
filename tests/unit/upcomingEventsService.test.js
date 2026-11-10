@@ -11,7 +11,7 @@ const NOW = Date.parse('2026-07-30T12:00:00Z')
 const TODAY = '2026-07-30'
 
 const watchedItems = [
-    { kind: 'call', symbol: 'NVDA', detail: {} },
+    { kind: 'setup', symbol: 'NVDA', detail: {} },
     { kind: 'coverage', symbol: 'AVGO', detail: {} },
     { kind: 'portfolio', symbol: null, detail: { symbols: ['MSFT', 'NVDA'] } },
     { kind: 'scan', symbol: null, detail: {} },

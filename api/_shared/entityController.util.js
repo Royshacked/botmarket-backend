@@ -47,7 +47,7 @@ export function isScaffoldOnlyPatch(body) {
 /**
  * @param {Object} cfg
  * @param {string} cfg.log                     log tag, so a failure still reads as the caller's
- * @param {string} cfg.noun                    'setup' | 'call' | 'idea' | 'coverage' — fallback
+ * @param {string} cfg.noun                    'setup' | 'idea' | 'coverage' — fallback
  *                                             message wording, and the card SUBJECT KIND a patch
  *                                             resolves (chat.service cardSubject uses the same
  *                                             vocabulary, deliberately: one word per kind).

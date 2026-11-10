@@ -238,8 +238,7 @@ async function _insert(bound, userId) {
         userId,
         parentId: null,
         // 'waiting' = persisted but NOT monitored. Talos polls from 'looking'; arming is the
-        // user's separate action. This extra state is the only place a setup's ladder differs
-        // from a call's — a call is live the moment it is saved.
+        // user's separate action.
         status:  'waiting',
         savedAt: now,
         ...bound,
@@ -367,8 +366,7 @@ async function _update(id, bound, userId) {
         $set['monitor_state.scenarios'] = {}
     }
 
-    // Re-drawing is what CLEARS the invalidation latch — the same rule the call path applies
-    // (kairos.handoff acceptEdit). The latch is fire-once by design, so without this a setup that
+    // Re-drawing is what CLEARS the invalidation latch. The latch is fire-once by design, so without this a setup that
     // was invalidated (or whose map Talos read as stale) stays latched after the user fixes it and
     // can never raise a hand again. Applies in-position too: an in-position edit is the user
     // acknowledging the warning just as much as a full re-map is.

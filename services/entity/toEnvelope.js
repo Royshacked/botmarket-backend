@@ -1,15 +1,13 @@
 // Read a stored `entities` doc and present it as the canonical Envelope, so the execution path can
 // be envelope-blind. The reverse (envelope → write) is intentionally NOT here yet — it lands
-// per-kind at P4. Both collections were folded into `entities` (P2 ideas, P3a calls), so this is no
-// longer a strangler bridge over legacy storage; it is the read adapter for the shape difference
-// that remains between an idea's payload and a call's.
+// per-kind at P4. Ideas were folded into `entities` at P2, so this is no longer a strangler bridge
+// over legacy storage; it is the read adapter for an idea's payload.
 //
-// Casing note: idea docs are camelCase (userId, mainAccountId, brokerSymbol); a call's PAYLOAD is
-// snake_case (main_account_id, broker_symbol) and the adapters absorb that, so no service ever
-// branches on kind to read a field. ENVELOPE fields do not diverge: `userId` is stored under that
-// one name by every kind (see scripts/migrate-call-userid.mjs) — do not reintroduce a per-kind alias.
+// Casing note: idea docs are camelCase (userId, mainAccountId, brokerSymbol). ENVELOPE fields do
+// not diverge: `userId` is stored under that one name by every kind — do not reintroduce a
+// per-kind alias.
 
-import { KINDS, ownerForKind, blankMonitorState, kindForDoc } from './envelope.js'
+import { ownerForKind, blankMonitorState, kindForDoc } from './envelope.js'
 
 /**
  * A legacy idea doc → Envelope. A portfolio holding is, TODAY, an idea carrying `portfolioId`;
@@ -44,8 +42,8 @@ export function ideaToEnvelope(doc) {
         // Ideas DO have a persisted monitor_state as of 2026-08-18: the entry and exit loops both
         // schedule on `monitor_state.next_check_at`. This used to hard-blank it and say "no loop
         // polls the kind", which was true for exactly one day and is the shape of statement that
-        // caused a stop to go unwatched for weeks — so it reads the document, like the call branch
-        // below, rather than asserting an absence.
+        // caused a stop to go unwatched for weeks — so it reads the document rather than asserting
+        // an absence.
         //
         // `checkCount` and `memo` stay empty on purpose: those are a JOURNALLING monitor's, and
         // neither of these two journals. Blank there is still the faithful answer.
@@ -69,64 +67,12 @@ export function ideaToEnvelope(doc) {
 }
 
 /**
- * A call doc → Envelope. The call IS the entity, execution included: since P3b a confirmed call
- * carries its own orderState / brokerOrders (kairos.handoff merges the execution shape onto the
- * call rather than minting an idea shadow), so this reads them straight off the doc.
- *
- * @param {Object} doc  raw `entities` document, kind:'call' (post-normalizeCall shape)
- * @returns {import('./envelope.js').Envelope}
- */
-export function callToEnvelope(doc) {
-    if (!doc) return null
-    const ms = doc.monitor_state ?? {}
-    return {
-        id:         doc.id,
-        kind:       KINDS.CALL,
-        userId:     doc.userId ?? null,           // envelope field — camelCase on the doc too
-        parentId:   null,
-        status:     doc.status ?? null,
-        owner:      ownerForKind(KINDS.CALL),
-        asset:      doc.asset ?? '',
-        assetClass: doc.asset_class ?? null,
-        direction:  doc.bias ?? null,             // call expresses side as `bias`
-        createdAt:  doc.savedAt ?? null,
-        monitorState: {
-            nextCheckAt: ms.next_check_at ?? null,
-            checkCount:  ms.check_count ?? 0,
-            memo:        ms.memo ?? null,
-        },
-        execution: {
-            broker:        doc.broker ?? null,
-            accounts:      Array.isArray(doc.accounts) ? doc.accounts : [],
-            mainAccountId: doc.main_account_id ?? null,   // snake → camel
-            brokerSymbol:  doc.broker_symbol ?? null,     // snake → camel
-            basisOffset:   Number(doc.basis_offset) || 0, // snake → camel
-            // P3b: a confirmed call carries its OWN execution — kairos.handoff merges the shape
-            // onto the call doc rather than minting an idea shadow. These read the call directly;
-            // hard-coding null/[] here (as this did pre-P3b) reports a live, linked call as
-            // unlinked, which is how a position silently loses its owner.
-            orderState:    doc.orderState ?? null,
-            brokerOrders:  Array.isArray(doc.brokerOrders) ? doc.brokerOrders : []
-        },
-        sizing: {
-            unit:        doc.sizing?.unit ?? null,
-            requested:   doc.sizing?.max_size ?? null,
-            resolvedQty: null,
-        },
-        payload: doc,
-    }
-}
-
-/**
  * Dispatch by source collection tag. Extend with portfolioItemToEnvelope at P4.
  *
- * NO PRODUCTION CALLER TODAY, and neither has `callToEnvelope`: the one live consumer of this module
- * is orderPlan.service, which calls `ideaToEnvelope` directly. Recorded rather than removed — the
- * envelope is documented architecture (docs/architecture/entity-model.md) with a stated P4 cutover,
- * and the call branch is untravelled because Kairos is archived, not because it was wrong. Both are
- * covered by entityEnvelope.test, so a revival finds them working rather than rotted.
+ * NO PRODUCTION CALLER TODAY: the one live consumer of this module is orderPlan.service, which calls
+ * `ideaToEnvelope` directly. Recorded rather than removed — the envelope is documented architecture
+ * (docs/architecture/entity-model.md) with a stated P4 cutover. Covered by entityEnvelope.test.
  */
-export function toEnvelope(doc, source) {
-    if (source === 'call') return callToEnvelope(doc)
+export function toEnvelope(doc, _source) {
     return ideaToEnvelope(doc)
 }

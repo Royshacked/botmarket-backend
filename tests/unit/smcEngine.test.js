@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import { swings, detectFVG, detectLiquidity, detectStructure, premiumDiscount, detectOrderBlocks, priorLevels } from '../../services/smc.engine.js'
 import { smcReadText } from '../../services/tools/smc.tools.js'
 
-// K2: the deterministic SMC engine (docs/desks/kairos-hermes.md). Pure OHLCV → exact monitorable levels.
+// K2: the deterministic SMC engine. Pure OHLCV → exact monitorable levels.
 const mk = (o, h, l, c, t = 0) => ({ open: o, high: h, low: l, close: c, volume: 100, timestamp: t })
 
 // A clean uptrend zig-zag (lookback 1): swing highs at i1(12) i3(14), swing lows at i2(6) i4(8),
@@ -104,9 +104,7 @@ test('smcReadText: pure formatter renders each SMC read from bars (the wiring)',
     assert.match(smcReadText('get_key_levels', 'AAPL', '5min', UPTREND), /key levels:[\s\S]*prior-day:/)
 })
 
-// Hermes's dispatch OF this engine (_smcTools + _handleAssessToolUses) was covered here too; it
-// went to archive/tests with the monitor on 2026-08-18. The engine below is untouched and live —
-// Mentor's tool kit and Talos both still read it.
+// Mentor's tool kit and Talos both read the engine below.
 
 test('detectLiquidity: two near-equal swing highs → a buy-side pool', () => {
     const bars = [mk(9, 10, 8, 9, 1), mk(9, 13, 9, 11, 2), mk(10, 9, 6, 7, 3), mk(10, 13, 7, 11, 4), mk(11, 8, 5, 6, 5)]

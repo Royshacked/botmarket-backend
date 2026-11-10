@@ -94,14 +94,14 @@ test('every queueable origin has a cancel handler', () => {
     }
 })
 
-test('all four execution-bearing origins are wired', () => {
-    // Phase 4 added call / setup / idea, whose queued work is the monitor's own exits. Until an
+test('all three execution-bearing origins are wired', () => {
+    // Phase 4 added setup / idea (and the since-deleted call), whose queued work is the monitor's own exits. Until an
     // origin can be both run and cancelled the gate refuses to queue it — that guard is what stops
     // a producer half-shipping, and it is why these arrived together with their handlers.
-    for (const kind of ['portfolio_item', 'call', 'setup', 'idea']) {
+    for (const kind of ['portfolio_item', 'setup', 'idea']) {
         assert.equal(hasOriginHandler(kind), true, `'${kind}' produces queued work and must be registered`)
     }
-    for (const kind of ['weather_desk', '', undefined, null]) {
+    for (const kind of ['weather_desk', 'call', '', undefined, null]) {
         assert.equal(hasOriginHandler(kind), false)
     }
 })

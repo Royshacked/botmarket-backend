@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mentorNextState } from '../../services/desks/mentor.desk.js'
 import { analystNextState } from '../../services/desks/analyst.desk.js'
-import { scannerNextState } from '../../services/desks/scanner.desk.js'
+import { scannerNextState, scannerDesk } from '../../services/desks/scanner.desk.js'
 import { portfolioNextState } from '../../services/desks/portfolio.desk.js'
 import { strategyDesk } from '../../services/desks/strategy.desk.js'
 import { buildConversation } from '../../services/desks/context.js'
@@ -36,13 +36,23 @@ test('Prometheus: the newest coverage draft and its symbol; the seed names it be
     assert.deepEqual(analystNextState(null, {}, { seed: { ticker: 'CVX' } }), { active_symbol: 'CVX', draft: null, standing: false })
 })
 
-test('Argus: the mode carries over; the newest list is pending; while editing it is what the next turn refines', () => {
-    const prev = { profile: 'investing', handoff: false, editingScanId: 'sc1', pendingScan: { candidates: [1] } }
-    const next = scannerNextState(prev, { scan: { candidates: [1, 2] } })
-    assert.equal(next.profile, 'investing')
-    assert.deepEqual(next.pendingScan, { candidates: [1, 2] })
-    assert.deepEqual(next.editList, { candidates: [1, 2] })
-    assert.equal(scannerNextState({ profile: 'trading' }, { scan: { candidates: [9] } }).editList, null)
+test('Argus: single pick for Mentor, always — an old list, lens or radar board in the state is not carried (2026-11-09)', () => {
+    const prev = { profile: 'investing', handoff: false, editingScanId: 'sc1', pendingScan: { candidates: [1] }, radar: true, radarBoard: { candidates: [{}] } }
+    assert.deepEqual(scannerNextState(prev, { scan: { candidates: [1, 2] } }), { handoff: true, handoffTo: 'mentor' })
+    assert.deepEqual(scannerNextState(null, {}), { handoff: true, handoffTo: 'mentor' })
+})
+
+test('Argus’s desk: lands in the single pick, hands back only the pick, and owns no list (2026-11-09)', () => {
+    const MODE = { handoff: true, handoffTo: 'mentor' }
+    assert.deepEqual(scannerDesk.onRouted({ profile: 'investing', pendingScan: { candidates: [1] } }, { handoff: false }), MODE)
+    assert.deepEqual(scannerDesk.onRouted(null, null), MODE)
+    const pick = { ticker: 'NVDA', direction: 'long', thesis: 't', analysis: 'a' }
+    assert.deepEqual(scannerDesk.done({ reply: 'NVDA', phase: 4, pick, scan: { candidates: [] } }), { reply: 'NVDA', phase: 4, argus_pick: pick })
+    assert.deepEqual(scannerDesk.done({ reply: 'thinking' }), { reply: 'thinking', phase: null })
+    // No commits, no edits, nothing to reopen, nothing to prepare: the list machinery is archived.
+    for (const k of ['actions', 'applyEdit', 'reasons', 'stateFromEntity', 'prepareInput', 'hasWork', 'cleanTable', 'stateFields']) {
+        assert.equal(scannerDesk[k], undefined, k)
+    }
 })
 
 test('Atlas: the book and mode carry over; the stated mandate, thesis and plan are the latest', () => {

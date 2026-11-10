@@ -1,10 +1,10 @@
 // WHO a queued action belongs to, and what has to happen to them when the user cancels it.
 //
-// A queued item is a decision taken somewhere else — an Atlas review, a Kairos call arming, a
-// Talos setup filling in, a ticket. Cancelling it from the list is therefore never just a delete:
+// A queued item is a decision taken somewhere else — an Atlas review, a Talos setup filling in,
+// a ticket. Cancelling it from the list is therefore never just a delete:
 // the surface that decided still believes the thing is happening. Atlas would re-propose the same
-// trim at the next review, having no idea you turned it down; a call would sit armed for an entry
-// that will never be confirmed.
+// trim at the next review, having no idea you turned it down; a setup would sit armed for an
+// entry that will never be confirmed.
 //
 // REGISTRY, not a switch. The queue itself stays blind to origin kind — same invariant the entity
 // envelope holds (docs/architecture/entity-model.md): adding a sixth origin is one entry here, with no change to the
@@ -106,9 +106,9 @@ async function _executePortfolioItem(record) {
 }
 
 /**
- * The three EXECUTION kinds — a legacy idea, a Kairos call, a Talos setup. What queues for them is
+ * The two EXECUTION kinds — a legacy idea and a Talos setup. What queues for them is
  * not a discretionary decision but a monitor's: a stop or target that tripped while the venue was
- * shut. There is exactly one verb (`exit`), so these three share both handlers.
+ * shut. There is exactly one verb (`exit`), so they share both handlers.
  *
  * Replayed through positionMonitor's own closer, so an overnight stop and an in-hours stop place
  * identical orders — including a partial (a scaled TP closes a slice, not the position).
@@ -146,7 +146,7 @@ async function _cancelMonitorExit(record) {
 
 // ── In-position management, accepted while the venue was shut ────────────────
 //
-// The OTHER thing that can queue against a call / setup / idea: the user accepting a monitor's
+// The OTHER thing that can queue against a setup / idea: the user accepting a monitor's
 // management proposal (tighten the stop, bank a third, get flat) after hours. Nothing about it is
 // discretionary once accepted — but nothing about it can reach a broker either, so it waits.
 
@@ -175,8 +175,8 @@ async function _executeManage(record) {
     const entity = await db.collection(ENTITIES).findOne({ id: record.origin.entityId, userId: record.userId })
     if (!entity) return { ok: false, reason: 'not_found' }
 
-    // A setup holds its own broker linkage, so entity and holder are one document; a call's position
-    // hangs off the idea it materialized. The id was captured at accept time rather than re-derived,
+    // A setup holds its own broker linkage, so entity and holder are one document; another desk's
+    // position may hang off a separate holder. The id was captured at accept time rather than re-derived,
     // because which doc holds the linkage is the DESK's knowledge and this file has none.
     const holderId = a.holderId ?? entity.id
     const holder   = holderId === entity.id
@@ -267,7 +267,6 @@ const ORIGINS = Object.freeze({
     // The execution kinds. TWO things queue for these: a monitor's exit (a stop or target that
     // tripped while the venue was shut) and a user's accepted management action. `_byWork` tells
     // them apart by verb — see the note on it.
-    call:  { desk: 'kairos', cancel: _byWork(_cancelManage, _cancelMonitorExit), execute: _byWork(_executeManage, _executeMonitorExit) },
     setup: { desk: 'mentor', cancel: _byWork(_cancelManage, _cancelMonitorExit), execute: _byWork(_executeManage, _executeMonitorExit) },
     // The Idea desk is archived, so its rows speak as Axl — the same fallback its cards take.
     idea:  { desk: 'axl',    cancel: _byWork(_cancelManage, _cancelMonitorExit), execute: _byWork(_executeManage, _executeMonitorExit) },

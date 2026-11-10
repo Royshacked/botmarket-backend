@@ -38,9 +38,8 @@ Written by `services/tradeCapture.service.js` (the only writer). One document pe
 
   // ── origin: what spawned this trade ─────────────────────────
   "origin": {                         // ✅ (gap 1 — replaces the loose top-level ids)
-    "type":        "idea|call|portfolio|null", // ✅  null = idealess/manual
+    "type":        "idea|portfolio|null", // ✅  null = idealess/manual
     "ideaId":      "idea_…|null",     // ✅  execution vehicle (null only if idealess)
-    "callId":      "call_…|null",     // ✅  set ⟺ an ARCHIVED-kind origin (see below)
     "groupId":     "…|null",          // ✅  fork group
     "portfolioId": "…|null",          // ✅
     "portfolioName":  "…|null",       // ✅
@@ -95,14 +94,13 @@ Written by `services/tradeCapture.service.js` (the only writer). One document pe
 
 ## Origin model
 
-A trade always records **what spawned it** via `origin`. The three cases:
+A trade always records **what spawned it** via `origin`. The cases:
 
-| Origin        | `type`        | `ideaId` | `callId` | frozen reasoning in `snapshot`     |
-|---------------|---------------|----------|----------|------------------------------------|
-| Idea chat     | `'idea'`      | set      | `null`   | condition trees + conviction       |
-| Archived kind | `'call'`      | set      | **set**  | condition trees **+ thesis/bias/zones/patterns** |
-| Portfolio     | `'portfolio'` | set      | `null`   | condition trees **+ portfolioThesis** |
-| Idealess/manual | `null`      | `null`   | `null`   | none                               |
+| Origin        | `type`        | `ideaId` | frozen reasoning in `snapshot`     |
+|---------------|---------------|----------|------------------------------------|
+| Idea chat     | `'idea'`      | set      | condition trees + conviction       |
+| Portfolio     | `'portfolio'` | set      | condition trees **+ portfolioThesis** |
+| Idealess/manual | `null`      | `null`   | none                               |
 
 Key facts:
 
@@ -110,12 +108,10 @@ Key facts:
   the idea → monitor → reconciler → broker pipeline, so an idea exists whatever authored
   it. `ideaId` is `null` only for idealess capture (a broker fill with no matching idea).
 - The `origin.type` values (`portfolio` vs `idea`) are distinguished by whether a
-  `portfolioId` is present; `call` by whether a `callId` is present.
-- **`callId` is a frozen historical marker, not a live path.** The kind that stamped it is
-  archived, so nothing writes a new one — but the field, its index (`origin.callId`), its
-  `listTrades` filter and the frozen reasoning in `snapshot` all stay, because the trades
-  already carrying it are real closed history and must keep reading back correctly. Do not
-  remove the field to tidy up; see `archive/README.md` for what wrote it.
+  `portfolioId` is present.
+- **`callId` / type `'call'` are gone (2026-11-10)** with the `call` kind. Neither database held a
+  trade carrying them when it went, so the field, the `listTrades` filter and the call reasoning in
+  `snapshot` were removed; the existing `origin.callId` index is left in Mongo, unused.
 
 ---
 
@@ -148,7 +144,7 @@ performance layer will hit over MCP.
 
 | Route | Returns |
 |---|---|
-| `GET /api/trades` | `{ trades }` — newest first. Filters (all optional): `mode`, `status`, `symbol`, `origin` (=`origin.type`), `portfolioId`, `callId`, `accountId`, `fromMs`/`toMs` (openedAt range), `limit`. Omit `mode` → all modes. |
+| `GET /api/trades` | `{ trades }` — newest first. Filters (all optional): `mode`, `status`, `symbol`, `origin` (=`origin.type`), `portfolioId`, `accountId`, `fromMs`/`toMs` (openedAt range), `limit`. Omit `mode` → all modes. |
 | `GET /api/trades/stats` | `{ stats }` — realized-performance fold over **closed** trades matching the same filters. |
 
 `stats` shape — `{ overall, byMode, byOrigin, bySymbol }`, where each group is the same
@@ -176,8 +172,8 @@ trade. Service layer: `tradeCaptureService.listTrades` / `tradeStats`; the pure
 ## Lifecycle & capture path
 
 ```
-call ─confirm→ idea{callId} ─fill→ ┐
-order ticket ─────→ idea ─fill→    ├─ execution.reconciler ─→ captureOpen  → trade{status:'open'}
+order ticket ─────→ idea ─fill→    ┐
+                                   ├─ execution.reconciler ─→ captureOpen  → trade{status:'open'}
 portfolio ────────→ idea ─fill→    ┘                          captureClose → trade{status:'closed'}
 broker fill (no idea) ─────────────→ captureOpenBare (idealess)
 ```
@@ -193,7 +189,7 @@ broker fill (no idea) ─────────────→ captureOpenBare
 ## Capture gaps to reach canonical (deltas from today)
 
 **All six gaps are DONE (2026-07-11).** The ledger is now the canonical self-contained
-analytics asset: captures paper + live + manual, with origin context, frozen call/portfolio
+analytics asset: captures paper + live + manual, with origin context, frozen portfolio
 reasoning, round-trip costs, and indexes. History below for provenance.
 
 1. ~~**`origin` block + `callId`**~~ — **DONE.** `callId` stamped on the idea at the
@@ -204,12 +200,9 @@ reasoning, round-trip costs, and indexes. History below for provenance.
    *Migration note:* trade docs written before this change keep the old flat shape (no
    `origin`); readers of historical docs must tolerate a missing `origin`, or run a
    one-time backfill.
-2. ~~**Freeze call reasoning**~~ — **DONE.** `captureOpen` best-effort reads the authoring
-   doc when `idea.callId` is set (direct collection read, no service import) and freezes
-   `thesis`/`bias`/`entry_zones`/`patterns` into `snapshot` via the pure
-   `pickCallReasoning(call)` helper (null for idea/portfolio trades). The idea schema
-   stays clean — those concepts never leaked into the entity. Live-verified end-to-end.
-   Dormant since the authoring kind was archived; the frozen data on existing trades stands.
+2. ~~**Freeze call reasoning**~~ — built, then **REMOVED 2026-11-10** with the `call` kind:
+   `captureOpen` no longer reads a call or writes `thesis`/`bias`/`entry_zones`/`patterns`
+   into `snapshot`, and `origin` no longer carries `callId`. Rows written before keep theirs.
 3. ~~**Freeze portfolio thesis**~~ — **DONE.** `captureOpen` best-effort reads
    `portfolio_chats.thesis` (by `{portfolioId, userId}`, direct collection read) for
    portfolio-linked ideas and freezes `{strategy, targetExposures}` into

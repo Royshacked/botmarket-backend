@@ -155,7 +155,7 @@ export function normalizeMessages(messages, maxCount) {
     const cleaned = messages
         .filter(m => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string' && m.content.trim())
         .map(({ role, content }) => ({ role, content: content.trim() }))
-    // Coalesce consecutive same-role turns into one. Kairos threads a single reply across several
+    // Coalesce consecutive same-role turns into one. A desk may thread a single reply across several
     // display bubbles (one per phase) → several assistant messages in a row; the model API needs
     // strict user/assistant alternation. A no-op for the agents that already alternate.
     const merged = []
@@ -281,8 +281,8 @@ export function formatMoney(v) {
     return `$${n.toLocaleString('en-US', { maximumFractionDigits: 2, useGrouping: false })}`
 }
 
-// Which marked account a call / portfolio binds to as MAIN — the venue + monitoring anchor.
-// Mirrors _finalizeCall's rule so the prompt an agent sees matches what save actually does:
+// Which marked account an entity / portfolio binds to as MAIN — the venue + monitoring anchor.
+// The same rule save applies, so the prompt an agent sees matches what save actually does:
 // the explicitly-marked main if it's still in the list, else the first marked account. Ids are
 // compared as strings (a marked-account id may arrive as a number or string). Returns null for
 // an empty / id-less list.
@@ -326,10 +326,10 @@ export function positionPnlPct(p) {
     return ((cur - entry) / entry) * 100 * (p.direction === 'short' ? -1 : 1)
 }
 
-// Canonical trade-horizon vocabulary, shared across every agent (Idea/Kairos/Atlas holdings/
-// Scanner). The fault line between intraday and day is OVERNIGHT: intraday is flat by the session
-// close, day carries 1–few days. Kairos trades a subset (no long term), but all agents validate
-// against this same list so a horizon round-trips between them (e.g. a Kairos↔Argus scan) unchanged.
+// Canonical trade-horizon vocabulary, shared across every agent (Mentor/Atlas holdings/Scanner).
+// The fault line between intraday and day is OVERNIGHT: intraday is flat by the session close, day
+// carries 1–few days. All agents validate against this same list so a horizon round-trips between
+// them (e.g. an Argus→Mentor hand-off) unchanged.
 // Moved to services/entity/vocabulary.js — one home for the words entities and agents share.
 // Re-exported here (imported into a local const, since a bare re-export creates no local binding)
 // so the agents that already import it from agentUtils resolve unchanged.

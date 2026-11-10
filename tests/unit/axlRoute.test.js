@@ -73,10 +73,10 @@ test('sanitize: junk the model may have attached → null (the desk opens empty)
 test('split edit: kind + handle, and the desk that owns the kind', () => {
     assert.deepEqual(_splitEdit('coverage 3f9c1a2b'), { kind: 'coverage', ref: '3f9c1a2b', desk: 'research' })
     assert.deepEqual(_splitEdit('setup s1'), { kind: 'setup', ref: 's1', desk: 'assist' })
-    // `call` was here too until Kairos was archived (2026-08-18). A kind with no desk now
-    // splits to null, which is the same guard as any other unroutable kind two tests below.
-    assert.equal(_splitEdit('call c1'), null, 'an archived desk owns nothing')
-    assert.deepEqual(_splitEdit('scan sc1'), { kind: 'scan',  ref: 'sc1', desk: 'scan' })
+    // A kind with no desk (`call` was deleted 2026-11-10) splits to null, which is the same guard as any other unroutable kind two tests below.
+    assert.equal(_splitEdit('call c1'), null, 'a deleted kind has no desk')
+    // `scan` left the same way on 2026-11-09 with Argus's lists (archive/README.md): Argus owns no entity now.
+    assert.equal(_splitEdit('scan sc1'), null, 'an archived list has no desk to reopen it')
     assert.deepEqual(_splitEdit('portfolio p1'), { kind: 'portfolio', ref: 'p1', desk: 'portfolio' })
 })
 
@@ -147,7 +147,7 @@ test('split show: tolerant separators, and a UUID survives its dashes', () => {
 test('split show: a kind with no window, or half a tag, opens nothing', () => {
     assert.equal(_splitShow('coverage c1'), null, 'coverage is read in its desk, not in a window')
     assert.equal(_splitShow('portfolio p1'), null, 'a book is a list of holdings, not one document')
-    assert.equal(_splitShow('call c1'), null, 'the call page went with Kairos')
+    assert.equal(_splitShow('call c1'), null, 'the call kind is gone')
     // The idea KIND is alive — it is the execution tier, and a holding is an idea document — but no
     // read an agent makes ever names one, so a tag that could only be guessed at is not offered.
     assert.equal(_splitShow('idea i1'), null, 'nothing hands Axl an idea id to quote')
@@ -253,35 +253,31 @@ test('every edit kind the prompt teaches is one the app can actually open', () =
     const prompt = readFileSync(promptPath, 'utf8')
     const taught = [...prompt.matchAll(/<edit>([a-z]+)[^<]*<\/edit>/g)].map(m => m[1])
 
-    assert.ok(taught.length >= 5, 'the prompt still teaches the edit tags')
+    // Three kinds since 2026-11-09 (setup, coverage, portfolio — `scan` left with Argus's lists).
+    assert.ok(taught.length >= 3, 'the prompt still teaches the edit tags')
+    assert.ok(!taught.includes('scan'), 'the prompt no longer teaches reopening an Argus list')
     for (const kind of new Set(taught)) {
         assert.ok(EDIT_KINDS.has(kind), `the prompt teaches <edit>${kind}</edit> but the controller drops it`)
         assert.ok(EDIT_KIND_DESKS[kind], `the prompt teaches <edit>${kind}</edit> but no desk owns it`)
     }
 })
 
-// Kairos is ARCHIVED as of 2026-08-18 (archive/README.md) — it was asleep-but-editable before
-// that, and the edit door is now shut too. The failure this catches is the one the user actually
-// hit: Axl still introducing Kairos as a desk you can go to, so someone asks for a call and lands
-// nowhere. Now there is no landing at all, so the prompt must not offer the door either.
-test('the prompt archives Kairos outright and names Mentor as the trader', () => {
+// The failure this catches is one a user actually hit: Axl introducing a retired desk as somewhere
+// you can go, so someone asks for it and lands nowhere.
+test('the prompt names Mentor as the trader and no longer knows the deleted call desk', () => {
     const promptPath = join(dirname(fileURLToPath(import.meta.url)), '../../prompts/axl_system_prompt.md')
     const prompt = readFileSync(promptPath, 'utf8')
 
-    assert.match(prompt, /Kairos\*\*[^.]*is\s+\*\*archived\*\*/, 'the state is stated outright')
-    assert.match(prompt, /premium/i, 'and why it is archived rather than deleted')
-    assert.match(prompt, /[Nn]ever\s+route\s+anyone\s+there/, 'the rule, not just the fact')
-    assert.match(prompt, /A\s+new\s+trade\s+is\s+Mentor's,\s+always/, 'and who took it over')
+    assert.match(prompt, /A\s+new\s+trade\s+is\s+Mentor's,\s+always/, 'who owns a new trade')
+    // Kairos (the `call` desk) was deleted 2026-11-10, data included: the prompt must not offer it.
+    assert.doesNotMatch(prompt, /Kairos/, 'a deleted desk is not named')
 
-    // The roster is what Axl describes when asked "who works here" — Kairos must not be a bullet in
-    // it, or the sleep rule argues with the list three lines above it.
     const roster = prompt.slice(prompt.indexOf('## Who you are'), prompt.indexOf('Nothing they produce'))
-    assert.doesNotMatch(roster, /- \*\*Kairos\*\*/, 'a sleeping desk is not a bullet on the roster')
-    assert.match(roster, /- \*\*Mentor\*\* — the trader/, 'Mentor leads it instead')
+    assert.match(roster, /- \*\*Mentor\*\* — the trader/, 'Mentor leads the roster')
 
-    // ...and the edit door is shut with it. Offering `<edit>call` now emits a tag the gate drops
-    // (EDIT_KINDS), so Axl would promise to open something and then silently do nothing.
-    assert.doesNotMatch(prompt, /<edit>call ID<\/edit>/, 'the edit door closed with the desk')
+    // Offering `<edit>call` would emit a tag the gate drops (EDIT_KINDS), so Axl would promise to
+    // open something and then silently do nothing.
+    assert.doesNotMatch(prompt, /<edit>call ID<\/edit>/, 'no edit door to a deleted kind')
 })
 
 // Reception's whole job is WHERE, and the sentence that travels with them. The rules this replaces
@@ -480,7 +476,7 @@ test('turn: an EDIT never carries an opening — it resumes a conversation that 
 test('turn: routing with no opening at all is fine — the desk simply asks', async () => {
     const result = await axlAgentService.chatStream({
         messages: [{ role: 'user', content: 'find me a trade on tsla' }],
-        _run: runWith('Off to Kairos. <route>trade TSLA</route>'),
+        _run: runWith('Off to Mentor. <route>trade TSLA</route>'),
     })
     assert.equal(result.route, 'trade')
     assert.equal(result.opening, null)
@@ -584,7 +580,7 @@ test('gate: a trader is never handed to an admin desk, whatever the model emitte
 test('gate: an admin is handed to every desk, and junk is still junk', () => {
     assert.equal(_routeFor('admin', 'strategy'), 'strategy')
     assert.equal(_routeFor('admin', 'aether'), 'aether')
-    assert.equal(_routeFor('admin', 'kairos'), null)
+    assert.equal(_routeFor('admin', 'zeus'), null)
     assert.equal(_routeFor('admin', null), null)
 })
 

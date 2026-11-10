@@ -18,6 +18,7 @@
  * @property {string|null} entityKind   what its work produces and an edit reopens — null if nothing
  * @property {boolean}     editable     whether <edit>kind id</edit> may reopen that entity at this desk
  * @property {boolean}     routable     whether ANOTHER desk may send the user here with a name
+ * @property {string[]}    [routedFrom] when set, ONLY these agents may route here — Axl and every other desk cannot
  * @property {string|null} does         the one line a sender's prompt shows (routable desks only)
  * @property {'main'|'strategy'|'aether'} scope  the session it talks in
  * @property {boolean}     admin        admin-only (the route gate and the prompts both hold it)
@@ -48,9 +49,12 @@ export const DESKS = Object.freeze({
         does: 'builds and reviews a portfolio book against a mandate',
         scope: 'main', admin: false, maxMessages: 10,
     }),
+    // Since 2026-11-09 Argus only finds ONE name for Mentor (his list-building chat and the scan list are archived —
+    // archive/README.md). So only Mentor sends anyone here, and his work produces no entity: the pick rides the chain
+    // back to Mentor. Old `scan` documents stay in Mongo, unreachable (KINDS.SCAN still describes the data).
     scanner: Object.freeze({
-        agent: 'scanner', desk: 'scan', brand: 'Argus', entityKind: 'scan', editable: true, routable: true,
-        does: 'scans the market for a ranked watchlist, or validates a single name for a trade',
+        agent: 'scanner', desk: 'scan', brand: 'Argus', entityKind: null, editable: false, routable: true, routedFrom: Object.freeze(['mentor']),
+        does: 'finds ONE tradeable name when the user has none, and hands it back here to build',
         scope: 'main', admin: false, maxMessages: 10,
     }),
     // The admin desks: Pythia sets the house view and Aether reads event exposure. Neither is somewhere a

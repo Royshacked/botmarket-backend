@@ -55,7 +55,7 @@ test('every kind routes to a REGISTERED bot', () => {
     for (const kind of ['idea', 'call', 'setup', 'portfolio_item', 'nonsense', null, undefined]) {
         assert.ok(isBot(botForKind(kind)), `kind '${kind}' → '${botForKind(kind)}' is not a registered bot`)
     }
-    assert.equal(botForKind('call'),           'kairos')
+    assert.equal(botForKind('call'),           'axl')   // the call kind was deleted 2026-11-10
     assert.equal(botForKind('setup'),          'mentor')
     assert.equal(botForKind('portfolio_item'), 'portfolio')
 })
@@ -63,8 +63,10 @@ test('every kind routes to a REGISTERED bot', () => {
 test('a RETIRED bot is not a bot — and its kind falls back to Axl', () => {
     // Removing 'idea' from BOT_IDS is what empties the sidebar feed; the fallback is what stops
     // that from also swallowing the cards a legacy idea still produces.
-    assert.deepEqual(RETIRED_BOT_IDS, ['idea'])
+    assert.deepEqual(RETIRED_BOT_IDS, ['idea', 'kairos'])
     assert.equal(isRetiredBot('idea'), true)
+    assert.equal(isRetiredBot('kairos'), true)
+    assert.equal(isBot('kairos'), false, 'the call desk was deleted 2026-11-10 — its id stays retired')
     assert.equal(isBot('idea'), false, 'a retired desk must not be re-registered — its feed is gone')
     assert.equal(botForKind('idea'), 'axl')
 })

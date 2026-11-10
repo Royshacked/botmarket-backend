@@ -60,7 +60,7 @@ export function replyExtras(payload) {
 // The Floor's lists, as a `<show>` opens them (routing.util SHOW_LISTS; Roy, 2026-10-22).
 const LIST_LINES = Object.freeze({
     orders: "Here's what's awaiting orders.", trades: "Here are your trades.",
-    portfolios: "Here are your portfolios.", watchlists: "Here are your watchlists.", hotlist: "Here's today's hotlist.",
+    portfolios: "Here are your portfolios.", hotlist: "Here's today's hotlist.",
     positions: "Here are your positions.", board: "Here's Pythia's forecast board.", research: "Here's the research queue.",
 })
 
@@ -109,7 +109,7 @@ export function makeSessionTurn({
     /**
      * A route landed: the agent its desk enters at takes the floor, starting in that route's mode. The
      * landing desk RESETS its mode to the route's (a desk's `onRouted`; without one, the preset is merged)
-     * — so a `trade` preset never outlives the trade, and a later plain `scan` finds Argus listing again.
+     * — so a `trade` preset never outlives the trade.
      * A route to a desk in another scope (an admin desk asked for from the main chat) moves nothing here:
      * that desk keeps its own panel.
      */

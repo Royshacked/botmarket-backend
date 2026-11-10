@@ -79,7 +79,7 @@ export async function getUpcomingEvents(userId, { scope = 'mine', from = null, t
     const unavailable = []
     if (mine && userId) {
         try {
-            const { items } = await watched(userId, { kinds: ['call', 'setup', 'coverage', 'portfolio'] })
+            const { items } = await watched(userId, { kinds: ['setup', 'coverage', 'portfolio'] })
             symbols = symbolsFromWatched(items)
         } catch (err) {
             logger.warn(LOG, 'could not resolve watched symbols', err.message)

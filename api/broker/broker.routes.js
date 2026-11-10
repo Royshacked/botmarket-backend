@@ -17,7 +17,7 @@
  *   GET    /api/broker/:type/trading-accounts   the broker's trading accounts + which is selected
  *   GET    /api/broker/:type/capabilities       what the broker can do (trading, native SL/TP, …)
  *   GET    /api/broker/:type/account            account summary
- *   GET    /api/broker/:type/positions          open positions (asset-class + callId enriched)
+ *   GET    /api/broker/:type/positions          open positions (asset-class enriched)
  *   DEL    /api/broker/:type/positions/:id      close an open position (full close)
  *   GET    /api/broker/:type/orders             working (pending) orders
  *   POST   /api/broker/:type/orders             place a working order

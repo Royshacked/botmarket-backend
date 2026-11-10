@@ -29,7 +29,7 @@ test('cardActions: resolution defaults to `work`, and only `open` opts out', () 
 test('cardSubject: derives the entity from the payload the card already carries', () => {
     assert.deepEqual(cardSubject({ coverageId: 'cov_1' }), { kind: 'coverage', id: 'cov_1' })
     assert.deepEqual(cardSubject({ setupId: 'stp_1' }),    { kind: 'setup',    id: 'stp_1' })
-    assert.deepEqual(cardSubject({ callId: 'cal_1' }),     { kind: 'call',     id: 'cal_1' })
+    assert.equal(cardSubject({ callId: 'cal_1' }), null, 'the call kind was deleted 2026-11-10')
     assert.deepEqual(cardSubject({ ideaId: 'idea_1' }),    { kind: 'idea',     id: 'idea_1' })
 })
 

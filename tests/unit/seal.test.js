@@ -4,7 +4,7 @@ import { memDb } from '../helpers/memDb.js'
 import { makeSessionService } from '../../services/session.service.js'
 import { makeAgentContextService, forgetIfDeleted } from '../../services/agentContext.service.js'
 import { makeSealing } from '../../services/desks/seal.js'
-import { DESK_DEFS } from '../../services/desks/index.js'
+import { DESK_DEFS, hasWork } from '../../services/desks/index.js'
 import { mentorStateFromEntity } from '../../services/desks/mentor.desk.js'
 
 // Sealing and editing (services/desks/seal.js, unified-chat.md §6.2): work that ends in an entity leaves
@@ -185,11 +185,9 @@ test('Mentor rebuilds its draft from a setup with no stored draft — the fallba
     assert.equal(st.active_asset, 'TSLA')
 })
 
-test('Argus reopens a saved list in edit mode; Prometheus reopens a thesis as its draft; Atlas needs only the book id', () => {
-    const scan = DESK_DEFS.scanner.stateFromEntity({ id: 'sc1', thesis: 'semis', candidates: [{ ticker: 'NVDA' }], profile: 'investing' })
-    assert.equal(scan.editingScanId, 'sc1')
-    assert.deepEqual(scan.editList.candidates, [{ ticker: 'NVDA' }])
-    assert.equal(scan.profile, 'investing')
+test('Prometheus reopens a thesis as its draft; Atlas needs only the book id; Argus reopens nothing (2026-11-09)', () => {
+    // Argus's saved lists are archived — his desk has no entity, so nothing reopens into it.
+    assert.equal(DESK_DEFS.scanner.stateFromEntity, undefined)
     assert.deepEqual(DESK_DEFS.analyst.stateFromEntity({ id: 'c', symbol: 'CVX' }), { active_symbol: 'CVX', draft: { id: 'c', symbol: 'CVX' }, standing: false, editingSymbol: 'CVX' })
     assert.equal(DESK_DEFS.portfolio.stateFromEntity({ portfolioId: 'p1' }).portfolioId, 'p1')
 })
@@ -211,10 +209,21 @@ test('forgetIfDeleted clears the contexts only when the delete succeeded, and ha
 test('a state that is only mode or markers does not block reopening — only real unsealed work does', async () => {
     const { sessions, seal } = rig()
     const s = await sessions.getActive({ userId: 'u1' })
-    // Argus's landing mode after a route: no list in progress.
-    await sessions.setAgentState({ sessionId: s.sessionId, userId: 'u1', agent: 'scanner', state: { handoff: false, profile: 'trading', pendingScan: null, editingScanId: null } })
+    // Mentor holding only its view markers, no draft. (This used to be Argus's landing mode; his lists are archived.)
+    await sessions.setAgentState({ sessionId: s.sessionId, userId: 'u1', agent: 'mentor', state: { view: { gate: null } } })
+    const out = await seal.openForEdit({ userId: 'u1', sessionId: s.sessionId, kind: 'setup', entity: { id: 'st1', asset: 'NVDA' } })
+    assert.equal(out.agent, 'mentor')
+})
+
+// An old session still holding Argus's list state from before 2026-11-09 must not read as work in progress — the
+// busy rule would otherwise ask the user to set aside a list that no screen can show them.
+test('an old Argus list in a session is not unsealed work, and a scan cannot be reopened', async () => {
+    assert.equal(hasWork('scanner', { profile: 'investing', pendingScan: { candidates: [{ ticker: 'NVDA' }] }, editingScanId: 'sc1' }), false)
+    assert.equal(hasWork('scanner', { handoff: true, handoffTo: 'mentor' }), false)
+    const { sessions, seal } = rig()
+    const s = await sessions.getActive({ userId: 'u1' })
     const out = await seal.openForEdit({ userId: 'u1', sessionId: s.sessionId, kind: 'scan', entity: { id: 'sc1', candidates: [] } })
-    assert.equal(out.agent, 'scanner')
+    assert.ok(out.reason, 'a scan has no desk to reopen in')
 })
 
 test('8e: a reopen over other work SETS IT ASIDE — the dropped turns never seal onto the item; the same item keeps them', async () => {

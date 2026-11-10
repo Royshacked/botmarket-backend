@@ -58,7 +58,7 @@ resting at level **0**) lived here and was found by accident, via an unrelated i
       - [ ] duplicate/replayed execution event (idempotency)
       - [ ] restart mid-flight → `_resumeFeeds` re-derives rather than double-acts
 - [x] **Promote to `npm test` — it lives there** (`tests/unit/`), so every reconciler change runs it.
-- [ ] **Schema validation at the write boundary.** `normalizeCall` / `normalizeCoverage` /
+- [ ] **Schema validation at the write boundary.** `normalizeCoverage` /
       `setup.schema` do schema work in application code — which is how `horizon` came to be
       "documented-validated, actually free text, unread by anything."
 

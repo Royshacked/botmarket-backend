@@ -21,8 +21,8 @@ const handle = makeHandle(LOG)
 // new desk needs both. Neither half fails loudly on its own: a missing name is a silent 400, and a
 // panel that never saves simply has nothing to reject.
 //
-// Live desks only. `idea` (deleted 2026-08-07) and `kairos` (archived 2026-08-18) were still here a
-// month on; the one client path that saved under `idea` is MainPage's own dead `/api/idea` flow.
+// Live desks only. `idea` (deleted 2026-08-07) was still here a month on; the one client path that
+// saved under it is MainPage's own dead `/api/idea` flow.
 //
 // Since the unified chat (phase 9, 2026-10-20) that is Pythia and Aether alone: every other desk talks in the
 // session, its old threads were migrated off this store, and a draft saved under one of them would be legacy data

@@ -24,8 +24,7 @@ const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..', '..')
 
 // Entity-status surfaces only. Broker ORDER statuses ('working', 'open', 'filled') and the chat
 // CARD lifecycle ('pending', 'done', 'dismissed') are separate vocabularies with their own words.
-// Kairos (api/kairos, kairos.handoff) and Hermes moved to archive/ and Minos was deleted on
-// 2026-08-18. Archived code is deliberately NOT scanned: it is frozen, so drift in it cannot
+// Archived code is deliberately NOT scanned: it is frozen, so drift in it cannot
 // reach production, and scanning it would make reviving the desk a test failure rather than a
 // decision.
 const SCAN = [
@@ -91,8 +90,6 @@ const VERDICTS = ['enter', 'wait', 'stand_aside', 'edit', 'let_expire', 'garbled
 const REASONS  = ['zone_trip', 'expiry_review', 'scheduled']
 
 test('_nextStatus can only ever produce a status its kind declares', () => {
-    // `call`/Hermes was the second producer and was archived on 2026-08-18. Its copy of this test
-    // went to archive/tests with it, so reviving the desk revives its guard too.
     for (const [kind, nextStatus] of [['setup', talosNextStatus]]) {
         const allowed = statusesFor(kind)
         for (const v of VERDICTS) {

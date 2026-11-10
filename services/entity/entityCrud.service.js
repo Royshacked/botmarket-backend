@@ -2,13 +2,13 @@
 // collection, scoped to a kind and guarded by the owner.
 //
 // Same split as vocabulary.js and the tool registry: the MECHANISM lives here, the JUDGMENT stays
-// with the kind. Reading your own setups and reading your own calls is the same mechanism; whether
+// with the kind. Reading your own setups and reading your own ideas is the same mechanism; whether
 // a plan rewrite re-arms the monitor, which statuses a patch may set, and what a Generate gate
-// requires are decisions that belong to setups.service / kairos.service and never move here.
+// requires are decisions that belong to setups.service / tradeIdeas.service and never move here.
 //
-// It replaced four hand-rolled copies of the same five operations (tradeIdeas, kairos, setups,
-// coverage — each with its own getDb() → findOne → guard → stripId), which had already drifted:
-//   • setups returned `not_found` when a doc existed but wasn't yours; ideas and calls returned
+// It replaced four hand-rolled copies of the same five operations (tradeIdeas, setups, coverage
+// and a since-deleted desk — each with its own getDb() → findOne → guard → stripId), which had already drifted:
+//   • setups returned `not_found` when a doc existed but wasn't yours; ideas returned
 //     `forbidden`. Now every kind reports the two cases apart.
 //   • the guard was re-typed at 9 sites as `doc.x && doc.x !== userId`.
 //
@@ -44,7 +44,7 @@ export function ownsEntity(doc, userId) {
 /**
  * @param {Object}   cfg
  * @param {string|Object} [cfg.kind]   value matched against the `kind` field — a literal
- *   ('setup'), a mongo expression ({ $ne: 'call' }), or omitted (coverage has no kind).
+ *   ('setup'), a mongo expression ({ $ne: 'setup' }), or omitted (coverage has no kind).
  * @param {string}   [cfg.collection]  physical collection. Defaults to `entities`.
  * @param {Object}   [cfg.sortBy]      list order. Defaults to newest-first by `savedAt`;
  *   coverage orders by `updated_at` because a thesis's recency is when it was last revised.

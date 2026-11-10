@@ -23,8 +23,8 @@ import { LANGUAGE_RULE, VENUE_RULE } from '../../services/agentUtils.js'
 const ROOT     = join(dirname(fileURLToPath(import.meta.url)), '../../')
 const SERVICES = join(ROOT, 'services')
 
-// Every desk that mounts a BASE system prompt. Mode/profile FRAGMENTS (kairos_mode_*.md,
-// scanner_mode_handoff.md) are deliberately absent: they are concatenated onto a base that already
+// Every desk that mounts a BASE system prompt. Mode/profile FRAGMENTS
+// (scanner_mode_handoff.md) are deliberately absent: they are concatenated onto a base that already
 // carries the rule, and appending it again would repeat the same paragraph twice in one request.
 const DESKS = [
     'aether.agent.service.js',

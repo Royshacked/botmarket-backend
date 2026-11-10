@@ -175,7 +175,7 @@ async function _exitNow(idea, { leg, reason, quantity, tag }, onClose, exitCtx =
         idea.orderState     = 'awaiting_manual_close'   // keep the in-memory doc consistent with the DB write
         await deps.patch(idea.id, { orderState: 'awaiting_manual_close', pendingCloseReason: reason })
         // Kind-blind loop, so the SENDER has to come from the entity: this same path closes a
-        // setup, a call and a holding, and each one's exit card belongs to its own desk. `kind`
+        // setup and a holding, and each one's exit card belongs to its own desk. `kind`
         // only picks the bot — `portfolioId` stays unset, since that field is the card's BASKET
         // (an N-leg portfolio exit), and this is always one leg.
         await deps.notifyManualExit(idea.userId, { legs: [exitLegFromIdea(idea)], reason, kind: idea.kind ?? kindForDoc(idea) })
@@ -227,7 +227,7 @@ async function _exitNow(idea, { leg, reason, quantity, tag }, onClose, exitCtx =
         origin: {
             kind:     idea.kind ?? kindForDoc(idea),
             entityId: idea.id,
-            ref:      idea.portfolioId ?? idea.callId ?? null,
+            ref:      idea.portfolioId ?? null,
             label:    _exitLabel(reason),
         },
         // Everything needed to replay this exact close at the open — the leg it belongs to, the

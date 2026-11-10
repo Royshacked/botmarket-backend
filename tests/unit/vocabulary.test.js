@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import {
     STATUS, LIVE_POSITION, PAST_ENTRY, PRE_ENTRY, TERMINAL,
     STATUSES_BY_KIND, statusesFor, isValidStatus, isLivePosition, isPastEntry, isTerminal,
-    TRADE_HORIZONS, CALL_HORIZONS, isHorizon,
+    TRADE_HORIZONS, isHorizon,
     ASSET_CLASSES, normalizeAssetClass, isEquityClass,
     SECTORS, normalizeSector,
 } from '../../services/entity/vocabulary.js'
@@ -29,13 +29,12 @@ test('past-entry includes hit — an order exists even before the fill', () => {
     assert.ok(!isPastEntry('looking'))
 })
 
-test('the pre-P3b call statuses are gone from the language entirely', () => {
-    // They described a call that executed through an idea shadow. Nothing writes them, no document
+test('the retired execution statuses are gone from the language entirely', () => {
+    // They described an execution through an idea shadow. Nothing writes them, no document
     // carries them, and while they lingered the gates that tested them silently matched nothing.
     for (const dead of ['in_position', 'confirmed']) {
         assert.ok(!PAST_ENTRY.includes(dead))
         assert.ok(!isPastEntry(dead), `${dead} must not be a status any more`)
-        assert.ok(!statusesFor('call').includes(dead), `${dead} must not be in the call vocabulary`)
     }
 })
 
@@ -82,10 +81,10 @@ test('every kind speaks the SAME ladder — subsets, never synonyms', () => {
 test('the kinds differ exactly where their mechanics differ', () => {
     // `resting` is the ONE kind-specific rung, and it earns that: an idea's stop-market entry
     // actually sits AT the broker, which is materially different from being watched. A zone
-    // cannot rest as a broker order, so no setup or call has it.
+    // cannot rest as a broker order, so no setup has it.
     assert.ok(statusesFor('idea').includes('resting'))
     assert.ok(!statusesFor('setup').includes('resting'))
-    assert.ok(!statusesFor('call').includes('resting'))
+    assert.equal(statusesFor('call').length, 0, 'the call kind was deleted 2026-11-10')
 
     // Everything else is shared, including the word for "armed".
     for (const kind of Object.keys(STATUSES_BY_KIND)) {
@@ -119,13 +118,6 @@ test('an unknown kind or status is rejected rather than defaulted', () => {
 test('one horizon ladder, ordered by holding period', () => {
     // `short term swing` (2026-10-21) sits below `swing`; `swing` keeps its weeks-to-months meaning.
     assert.deepEqual(TRADE_HORIZONS, ['intraday', 'day', 'short term swing', 'swing', 'long term'])
-})
-
-test('a call cannot be long term — the narrowing is a SUBSET, not a second list', () => {
-    // Kairos builds a moment to act on, not a multi-month hold.
-    assert.deepEqual(CALL_HORIZONS, ['intraday', 'day', 'short term swing', 'swing'])
-    for (const h of CALL_HORIZONS) assert.ok(TRADE_HORIZONS.includes(h), `${h} drifted off the ladder`)
-    assert.ok(!CALL_HORIZONS.includes('long term'))
 })
 
 test('isHorizon rejects near-misses', () => {
@@ -188,7 +180,7 @@ test('the reconciler and every kind agree on what a live position is called', as
 
 test('asset_class is canonicalised at the setup boundary, not absorbed downstream', async () => {
     const { normalizeSetup } = await import('../../services/setup.schema.js')
-    // Kairos's schema says "equity"; the prompts say "stock". Both must land on one stored word.
+    // A schema may say "equity"; the prompts say "stock". Both must land on one stored word.
     assert.equal(normalizeSetup({ asset: 'NVDA', asset_class: 'equity' }).asset_class, 'stock')
     assert.equal(normalizeSetup({ asset: 'BTC', asset_class: ' CRYPTO ' }).asset_class, 'crypto')
     assert.equal(normalizeSetup({ asset: 'X', asset_class: 'bond' }).asset_class, null)

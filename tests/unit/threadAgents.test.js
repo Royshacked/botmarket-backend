@@ -26,7 +26,7 @@ test('the panels that still keep their own chats are whitelisted: Pythia and Aet
 // store. A draft saved under one of them would be legacy data written fresh, so the gate refuses it.
 test('the whitelist is exactly that set — the session desks, archived and unknown agents are refused', () => {
     assert.equal(AGENTS.size, 2)
-    for (const agent of ['portfolio', 'scanner', 'mentor', 'axl', 'analyst', 'prometheus', 'pythia', '', 'ANALYST', 'idea', 'kairos'])
+    for (const agent of ['portfolio', 'scanner', 'mentor', 'axl', 'analyst', 'prometheus', 'pythia', '', 'ANALYST', 'idea', 'zeus'])
         assert.equal(AGENTS.has(agent), false, `${agent} should not be accepted`)
 })
 

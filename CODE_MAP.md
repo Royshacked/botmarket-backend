@@ -32,9 +32,9 @@ api/
                               brokerSymbol + fork-time basisOffset per child; venue gate
                               (no broker + no paper → reject, reason:'no_venue').
                               enrichPositions = what THIS tier knows about a broker's positions:
-                              the authored assetClass (null → the client's symbol heuristic) and
-                              the owning callId. §1 flagged it homeless inside broker.controller;
-                              §4 placed it here, beside the two maps it reads
+                              the authored assetClass (null → the client's symbol heuristic).
+                              §1 flagged it homeless inside broker.controller; §4 placed it here,
+                              beside the map it reads
     ideaExecution.service.js  placeOrdersForIdea / placeRestingEntryForIdea / triggerEntryNow ("Buy now").
                               A setup is re-priced at confirm (priceMovedRefusal → 409 price_moved
                               with setup.schema.entryDrift) unless the press carries acceptPrice
@@ -80,10 +80,6 @@ api/
                               live — moved off MainPage), rebindAccounts, closeReview, acceptRebalance
                               ({ closeReview }: only a review's Accept advances the clock)
     portfolioReasons.js       REBALANCE_REASONS + BOOK_REASONS — the routes' and Atlas's refusal tables
-  scanner/                Scanner Agent + saved scans /api/scanner/*
-                          GET /scans/:id is crud.get over scanService.getScanById — written
-                          long before, wired 2026-08-14 when the frontend needed to open a
-                          scan by id rather than find it in a list
   analyst/                Analyst coverage (research/valuation)  /api/analyst/*
     coverage.service.js       `coverage` collection = living per-name thesis, HOUSE-OWNED (one doc per
                               symbol, no userId — since 5c12b8c): variant-perception + our PT vs Street (the
@@ -323,7 +319,8 @@ services/
       registry.js             every agent once — desk key, brand, entity kind, editable, routable, scope,
                               admin, maxMessages; routing.util / session.util / each agent's MAX_MESSAGES
                               derive from it. entryOf(desk): where a route lands (composite `trade` →
-                              Argus preset to pick one name for Mentor)
+                              Argus preset to pick one name for Mentor). routedFrom: the only senders a desk takes
+                              (Argus: Mentor alone, since 2026-11-09 — routing.util mayRoute gates the capture + rule)
       <agent>.desk.js         parse(body, turn, user) → { state, input } · run · done · nextState (the fold
                               the client did on every `done`) · stateFromEntity(entity, opts) (rebuild to edit) ·
                               prepareInput · onRouted (a route landing) · hasWork · stateFields (what `done`
@@ -338,11 +335,10 @@ services/
                               own (8e): unsaved work only (refused over an edit or a table with no work), the desk's
                               settings kept (`cleanTable`), its chain ended, its turns set aside (putAside)
       actions/                <agent>.actions.js — each desk's commits from its agentState (never the client's
-                              copy) through the shared commit service, and its hand edits (Mentor's draft, Argus's
-                              lens / read / fresh table, Atlas's adopt mode — staged under the lock); the contract (verbs generate / update /
+                              copy) through the shared commit service, and its hand edits (Mentor's draft, Atlas's adopt mode — staged under the lock); the contract (verbs generate / update /
                               later + the desk's own, results { <kind>: doc }) is in mentor.actions.js
       markers.js · scannerMode.js   keepMarkers (editing / chainId survive a fold, an edit, Atlas's onRouted) ·
-                              Argus's mode and radar-board validation (shared by the desk and its actions)
+                              Argus's mode — fixed since 2026-11-09: the single pick for Mentor, whatever is passed
       context.js              buildConversation — what ONE agent reads: sealed context when editing, its
                               summary, its own segment (a hand-off to it reads as the user)
       sessionTurn.js          a desk turn against the session: append → context → run → reply → nextState →
@@ -359,8 +355,8 @@ services/
                           coverage_set) · contracts.js (receiverOf + each receiver's opening brief) · rules.js (the
                           declared tables: what a reply emits, what makes a turn the user's call) · runner.js (after
                           every turn: decision → stop, emit → hand-off + the receiver's turn queued; busy rule, step
-                          cap, pause, boot sweep, sleeveSettled; "research the top N" saves Argus's list through its
-                          own action before the run, 8d). Wired with the turns in desks/turns.js
+                          cap, pause, boot sweep, sleeveSettled; the `research` choice on an Argus list went to archive/
+                          2026-11-09, so the `next` queue walk is dormant). Wired with the turns in desks/turns.js
   agents/                 the 6 LLM desks (analyst · axl · mentor · portfolio · scanner ·
                           strategy). A seventh is archived and lives under archive/, imported by
                           nothing — see archive/README.md, and `npm run check:archive`, which
@@ -392,7 +388,9 @@ services/
                           source, and an empty client list left Atlas inventing ids that came back
                           not_found on every accepted change. Deleted §4; a desk reads its subject from
                           the database
-                          Argus (scanner) systematic-discovery funnel: Phase-2 grounded sources
+                          Argus (scanner) — since 2026-11-09 the single pick for Mentor ONLY (hand-off
+                          module on every turn; lists/investing/radar/scoring archived, snapshot in archive/):
+                          the systematic-discovery funnel: Phase-2 grounded sources
                           screen_candidates + get_market_movers + get_sector_snapshot + get_analyst_actions
                           (no memory-recall); Phase-3 get_candles/get_indicators baseline + get_chart/
                           get_orderblocks/get_false_breaks vision (KLineCharts, onChart:null = model-only)
@@ -776,7 +774,7 @@ services/
                             industries for it (first 20 in full), `industry` → its largest companies. Says PREFERENCE in
                             every answer. A grounding source, but only its company rows (scanner.grounding SOURCED_EXTRACT)
   watchlist.service.js      listWatchedItems — "what am I watching?" across EVERY list the Floor
-                            shows, in ONE read (setups · books · coverage · scans · the off-hours
+                            shows, in ONE read (setups · books · coverage · the off-hours
                             QUEUE · Aether runs, one row per event · and, for an admin, the research
                             queue — ADMIN_KINDS, dropped before the read for a trader so the list is
                             absent, not refused). SCOPED to the workspace the user is standing in:
@@ -834,33 +832,6 @@ services/
                             model (quickReadModel: the same house rule as resolveAgentStream — an admin's
                             own registered choice, anyone else the house chat model, else Sonnet 5; the doc
                             names what ran) and books under its own ledger row `analystAgent-quickread`
-  aetherScanUniverse.service.js  The board Argus is handed: every name 30 days of events reached, folded
-                            to ONE row per ticker, minus the names a previous radar list took — keyed on
-                            run_id, never on a timestamp. Per user (the events are broadcast; which you
-                            have worked is not) and read-only. Held-back names come back with the reason.
-                            EVERY ROW ARRIVES DATED — next print (one cached earningsWindow call,
-                            _attachEarnings), the claim's grading deadline (`expires`), the engine's last
-                            price, the move vs SPY. Those were Argus's first two tool calls, 116 wide and
-                            mid-stream, and losing them once cut a 116-name board to one name. A missing
-                            `earnings` key is "calendar unreadable", null is "nothing scheduled" — the
-                            pair survives the JSON round trip to the browser and back, a sentinel would not.
-                            + repricingOf: how far through its move the market already is, SIGNED INTO the
-                            claim's direction (a HURT name is meant to FALL, so -8% is the move being
-                            TAKEN — excess_pct alone cannot say which). taken/not_yet/against/unknown at
-                            REPRICED_PCT 3%, off the best-ranked claim that HAS a measured move; the board
-                            SORTS on it (not_yet, unknown, against, taken, then rank). Computed here
-                            because the prompt could not get it derived — three cuts kept the most extended
-                            names and the read refused them all as priced_in, with 51 unmoved names on the
-                            same board. `unknown` is 32 of 116 and must never read as not_yet
-  aetherBatchRead.service.js  The quick read over a WHOLE radar list, and the cut that follows it:
-                            contradicted and priced_in are out, unclear and unread ship FLAGGED, then
-                            the longs cut on the read's `net` where it has one and Aether's `side`
-                            where it does not. Sequential (model calls on the user's budget) and one
-                            name failing never costs the batch. BATCH_MAX 12 — the wall clock, not the
-                            money; the overflow comes back unread + flagged rather than 400-ing, because
-                            the read FIRES BY ITSELF on every radar cut (ScannerPanel `_settleScan`).
-                            READ_CONCURRENCY 3 (was serial): a refusal never stopped the batch, so the
-                            serialisation only cost wall clock — 12 names go from ~8min to under 3
   lastPrice.service.js      fetchLastPrice(symbol): THE last-price read — quote first, a 1-minute-candle
                             fallback second, null only when both fail; a non-positive price is NO price.
                             The input to every zone gate, baseline stamp and coherence check. Lived in
@@ -1128,9 +1099,8 @@ services/
                             documentation and each desk's own copy was the only check; an
                             unrecognised verb reaching executeManage fell past every branch onto the
                             unconditional full close. let_run went the same day (Talos dropped it
-                            2026-09-17 — moving a target is an edit of the plan, not a monitor act —
-                            and Hermes, the only other caller, is archived; neither database held a
-                            row). Each desk translates its own dialect in
+                            2026-09-17 — moving a target is an edit of the plan, not a monitor act;
+                            neither database held a row). Each desk translates its own dialect in
   talos.handoff.service.js  Mentor's half: POST /api/setups/:id/action → accept (move_stop|take_partial|
                             exit_now) or dismiss. Translates Talos's {stop,why}/{leg,quantity,size_pct}
                             into the contract above — the partial's size is the WATCHED TARGET's own,
@@ -1154,8 +1124,8 @@ services/
                             pendingAction.repo.js  `pending_actions`: the record (an intent with no
                                               entity of its own). enqueue is idempotent per
                                               (user, entity, verb); transitionFilter is the guard
-                            originRegistry.js  execute + cancel per origin (portfolio_item, call,
-                                              setup, idea). Keyed, not a switch; the gate REFUSES
+                            originRegistry.js  execute + cancel per origin (portfolio_item, setup,
+                                              idea). Keyed, not a switch; the gate REFUSES
                                               to queue an unregistered origin. `_byDecider` splits
                                               a review's exit from a MONITOR's — both spell `exit`,
                                               but a monitor's can be a slice, and running that
@@ -1370,7 +1340,7 @@ monitoring/
                             _formatIndicator get_indicators uses, so the two can never disagree) —
                             0 of 71 recorded reads had declined to pull a tool. Model default Sonnet, thinking off
                             (assessRouting) — the saving was the image, not the model. A stored
-                            `hermesReasoning: high` is capped to `low` (ASSESS_MAX_EFFORT, capEffort
+                            `talosReasoning: high` is capped to `low` (ASSESS_MAX_EFFORT, capEffort
                             in assess.shared); the system block carries the 1-HOUR cache marker
                             (assessSystem / ASSESS_PREFIX_CACHE — tools+system are identical for
                             every setup and the candle pacing outlives the 5-minute default); the
@@ -1380,9 +1350,8 @@ monitoring/
                             WHICH MODEL: assessRouting (assess.shared) — since 2026-09-21 EVERY setup,
                             the admin's included, reads on the HOUSE Talos model (houseModels.service
                             `talosModel`) resolved against TALOS_MODELS, the monitors' OWN registry
-                            (not llmModels' chat MODELS), else Sonnet 4.6. Nobody's
-                            `preferences.hermesModel` is read (a client-owned snapshot anyone can
-                            PUT); the user document is still read once, for the effort cap. Sonnet 5,
+                            (not llmModels' chat MODELS), else Sonnet 4.6. There is no per-user model
+                            key; the user document is still read once, for the effort cap. Sonnet 5,
                             GPT-5.6 Luna, Mistral Medium 3.5, Qwen3.7-Plus, Qwen3.7 Flash, DeepSeek V4.1
                             Flash, Gemini 3.8 Flash are the CANDIDATES the admin's one Models card offers. _readLoop branches once on `provider`: anthropic
                             → the loop here; openai-compat → providers/openaiCompat.provider.js. The
@@ -1518,7 +1487,9 @@ tests/
 scripts/                    ops one-offs — none run by `npm test`. Kinds: migrations
                             (migrate-*, one-shot idempotent collection/field moves — migrate-journal
                             moved monitor_state.timeline[] into the journal collection, mapping the
-                            legacy reasons and dropping quiet-wake lines; run once after deploy), repairs
+                            legacy reasons and dropping quiet-wake lines; run once after deploy;
+                            delete-kairos removed the `call` kind's data, the kairos bot's chat and
+                            renamed hermesReasoning → talosReasoning, 2026-11-10), repairs
                             (repair-*, drop-ghost-*, dry-run-by-default data fixes), diagnostics
                             (check-*, verify-*, fmp-candle-parity — read-only), admin (set-admin-role,
                             create-admin-user — the latter rides userService.createUser), and dev
@@ -1636,7 +1607,7 @@ docs/                       docs/README.md is THE index. architecture/ (how it i
     same refusal differently; reasons a single route owns (`missing_*`, manual-mode fills) are passed
     as `overrides`. A guard test fails the build if a controller branches on a shared reason itself.
   - **Plain CRUD on an owner-scoped kind:** don't write the handler at all — `makeEntityController()`
-    gives you list/get/patch/delete. Every kind rides it (call · setup · idea/portfolio_item ·
+    gives you list/get/patch/delete. Every kind rides it (setup · idea/portfolio_item ·
     coverage · scan); only the kind's own moves (Generate, act, place orders, initiate, retire) stay
     hand-written. Portfolio has no entity CRUD at all — a portfolio is the SET of ideas sharing a
     `portfolioId`, not a document — so its controller is stream + reviews + rebalance only.

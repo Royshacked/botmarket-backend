@@ -8,18 +8,18 @@ import { legPrice, legReference } from "../setup.schema.js"
 // the reason entityCrud.service.js already states about itself: being owner-scoped is what
 // qualifies a list here, not which collection it sits in.
 //
-// TRIMMED, HARD, and not only for token cost. A call doc carries `chat_state` — an entire past
+// TRIMMED, HARD, and not only for token cost. A setup doc carries `chat_state` — an entire past
 // conversation — plus entry_legs, reference_levels, patterns and monitor_state.timeline; a scan
 // carries candidates[] AND chat[]. Feeding that to an agent puts a stale transcript in its context
 // where it can be read back as current fact, which is a correctness bug rather than a bill. Every
-// row keeps `id` + `kind`, so "tell me about the NVDA call" is a targeted read, not a re-list.
+// row keeps `id` + `kind`, so "tell me about the NVDA setup" is a targeted read, not a re-list.
 //
 // WHAT IS DELIBERATELY NOT NORMALIZED:
-//   • `status` is the kind's own word, verbatim. Calls, setups and holdings share the ladder in
+//   • `status` is the kind's own word, verbatim. Setups and holdings share the ladder in
 //     vocabulary.js; coverage has its own (active | thesis_broken | target_hit | retired |
 //     watchlist); scans and books have no status at all and report null. Flattening five
 //     vocabularies onto one enum would mean maintaining a translation table that lies.
-//   • `detail` is per kind. Share the pipe, not the judgment: what matters about a call (levels,
+//   • `detail` is per kind. Share the pipe, not the judgment: what matters about a setup (levels,
 //     R:R) and what matters about a scan (how many names, is it stale) are different questions.
 //
 // These projectors are PURE and exported individually so the tool adapter, a future REST route and
@@ -74,40 +74,6 @@ function _entryCell(legs) {
 }
 
 /**
- * A Kairos call → a row. `bias` is the call's word for direction.
- *
- * IT KEEPS THE ZONE SHAPE, and that is not drift. Kairos is archived (2026-08-18) and its documents
- * are frozen: nothing authors a call any more, so the ones in Mongo will carry `entry_zones` with
- * `{lower, upper}` for as long as they exist. Migrating the `setup` kind off zones does not rewrite
- * history, and reading the live shape here would blank the entry level on every archived call.
- */
-export function callToWatchRow(doc) {
-    if (!doc?.id) return null
-    const entries = Array.isArray(doc.entry_zones) ? doc.entry_zones : []
-    // A call's band, read at its near edge — the only place `lower`/`upper` are still spoken.
-    const first   = entries.find(Boolean)
-    const nearest = typeof first?.lower === 'number' ? first.lower
-        : (typeof first?.upper === 'number' ? first.upper : null)
-    return {
-        kind: 'call',
-        id: doc.id,
-        symbol: doc.asset ?? null,
-        title: _title(doc.thesis, `${doc.bias ?? ''} ${doc.asset ?? ''}`.trim()),
-        direction: doc.bias ?? null,
-        status: doc.status ?? null,
-        updatedAt: _ms(doc.savedAt) ?? _ms(doc.created_at),
-        detail: {
-            entryLegs: entries.length,
-            nearestEntry: nearest,
-            rr: doc.rr ?? null,
-            conviction: doc.conviction ?? null,
-            validUntil: doc.valid_until ?? null,
-            mode: doc.mode ?? null,
-        },
-    }
-}
-
-/**
  * One scenario, as a row reads it. A setup can hold rival premises — a false break at one level and
  * a break-and-go at another — and a single set of levels would hide the second one entirely, which
  * is the whole reason this array exists.
@@ -129,7 +95,7 @@ function _scenarioRow(sc, doc) {
 }
 
 /**
- * A Mentor setup → a row. Setups carry their own stop/target legs, which a call leaves to its tree.
+ * A Mentor setup → a row. Setups carry their own stop/target legs.
  *
  * The flat `nearestEntry`/`stop`/`firstTp`/`rr` are the ARMED scenario's (else the first authored) —
  * they read the document's execution projection, which is exactly that. They are not redundant with
@@ -292,7 +258,6 @@ export function aetherRunToWatchRow(run) {
 
 /** Kind → projector, for callers that map a mixed set. */
 export const WATCH_ROW_PROJECTORS = {
-    call: callToWatchRow,
     setup: setupToWatchRow,
     portfolio: portfolioToWatchRow,
     scan: scanToWatchRow,

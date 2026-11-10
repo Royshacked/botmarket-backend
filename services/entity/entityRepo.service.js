@@ -3,8 +3,7 @@
 // site follows a single definition.
 //
 // KIND-BLIND: it targets `entities` and matches on broker linkage, never on kind. Every kind
-// carries its own execution — an idea, a portfolio holding, a setup Talos triggered, and (since
-// P3b) a call, which merges the execution shape onto itself instead of minting an idea shadow.
+// carries its own execution — an idea, a portfolio holding, a setup Talos triggered.
 // That is why ACTIVE_STATUSES is sourced from the shared vocabulary rather than idea literals.
 //
 // BEHAVIOR-PRESERVING: every method reproduces the EXACT filter/update/options its caller used
@@ -290,7 +289,7 @@ export function makeEntityRepo({ coll = _defaultColl, journal = appendJournal } 
          * is what makes it exactly-once — a losing concurrent close matches nothing, gets null back
          * and writes no line. Written here rather than in a monitor because a closed entity drops
          * out of every polled status before its monitor sees it, which is why the exit was never
-         * journalled; and because this is kind-blind, one implementation covers calls and setups.
+         * journalled; and because this is kind-blind, one implementation covers every kind.
          */
         async finalizeClose(id, patch, entry = null) {
             const c = await coll()

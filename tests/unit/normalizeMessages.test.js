@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { normalizeMessages, openingTurn, cleanReply, cachedBlock } from '../../services/agentUtils.js'
 
-// ── coalescing (Kairos threads one reply across several assistant bubbles) ──
+// ── coalescing (a desk may thread one reply across several assistant bubbles) ──
 test('normalize: coalesces consecutive assistant turns into one (phase-threaded reply)', () => {
     const out = normalizeMessages([
         { role: 'user', content: 'build AXON' },

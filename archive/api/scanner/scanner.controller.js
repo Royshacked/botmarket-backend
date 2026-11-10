@@ -1,0 +1,49 @@
+import { sealing } from '../../../services/desks/seal.js'
+import { forgetIfDeleted } from '../../../services/agentContext.service.js'
+import { scanService }         from './scan.service.js'
+import { sendReason }          from '../../../api/_shared/reason.util.js'
+import { makeEntityController } from '../../../api/_shared/entityController.util.js'
+import { makeHandle }          from '../../../api/_shared/handle.util.js'
+import { httpError }           from '../../../services/httpError.util.js'
+
+const LOG    = '[scanner:controller]'
+const handle = makeHandle(LOG)
+
+// ─── Scan CRUD ────────────────────────────────────────────────────────────────
+export const createScan = handle('createScan', async (req, res) => {
+    const { scan } = req.body ?? {}
+    if (!scan || !Array.isArray(scan.candidates) || scan.candidates.length === 0) {
+        throw httpError(400, 'scan with candidates is required')
+    }
+    const result = await scanService.saveScan(scan, req.user._id)
+    if (!result.ok) return res.status(500).json({ error: 'Failed to save scan' })
+    // With a sessionId, Argus's turns move onto the scan they produced (unified-chat §6.2). Never fails the save.
+    sealing.sealAfterGenerate(req, { kind: 'scan', entityIds: [result.doc?.id], name: result.doc?.thesis ?? null })
+    res.json({ scan: result.doc })
+})
+
+// A scan is an owner-scoped kind like any other (it moved onto makeEntityCrud in b863a03), so
+// list, get and delete are the shared HTTP tier. The `{scans}` / `{scan}` envelope is this route's
+// own body shape, configured rather than re-implemented.
+const crud = makeEntityController({
+    log: LOG, noun: 'scan', envelope: { one: 'scan', many: 'scans' },
+    service: {
+        list:   (userId)     => scanService.getScans(userId),
+        get:    (id, userId) => scanService.getScanById(id, userId),
+        remove: async (id, userId) => forgetIfDeleted('scan', id, await scanService.deleteScan(id, userId)),
+    },
+})
+
+export const listScans  = crud.list
+export const getScan    = crud.get
+export const removeScan = crud.remove
+
+export const updateScan = handle('updateScan', async (req, res) => {
+    const { id }   = req.params
+    const { scan } = req.body ?? {}
+    if (!scan || typeof scan !== 'object') throw httpError(400, 'scan patch is required')
+    const result = await scanService.updateScan(id, scan, req.user._id)
+    if (!result.ok) return sendReason(res, result.reason, { fallback: 500, fallbackMessage: 'Failed to update scan' })
+    sealing.sealAfterGenerate(req, { kind: 'scan', entityIds: [id], name: result.doc?.thesis ?? null, onlyIfEditing: true })
+    res.json({ scan: result.doc })
+})

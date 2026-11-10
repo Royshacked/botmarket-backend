@@ -22,12 +22,10 @@ import { getDb }        from '../providers/mongodb.provider.js'
 import { brokerService } from '../api/broker/broker.service.js'
 import { resolveMode } from './venue.resolve.service.js'
 import { logger }       from './logger.service.js'
-import { ENTITIES }     from './entity/entityCollection.js'
 import { COLLECTION as PORTFOLIO_CHATS } from '../api/portfolio/portfolioChat.service.js'
 import { roundOrZero }                   from './number.util.js'
 
-// Exported: Hermes reads the ledger directly to source a broker-authoritative fill/exit price,
-// and was naming 'trades' inline to do it.
+// Exported so a reader that needs the ledger directly names it from here rather than inline.
 export const COLLECTION = 'trades'
 const LOG        = '[tradeCapture]'
 
@@ -39,7 +37,7 @@ export const tradeCaptureService = { captureOpen, captureOpenBare, capturePartia
  *   • (accountId, positionId) UNIQUE — the identity/idempotency key every capture upserts
  *     on; also enforces the one-doc-per-position invariant.
  *   • (userId, openedAt desc)  — the listTrades read + newest-first sort.
- *   • (userId, origin.portfolioId) / (userId, origin.callId) — the analytics slice dims.
+ *   • (userId, origin.portfolioId) — the analytics slice dim.
  */
 export async function ensureTradeIndexes() {
     try {
@@ -47,7 +45,6 @@ export async function ensureTradeIndexes() {
         const col = db.collection(COLLECTION)
         await col.createIndex({ userId: 1, openedAt: -1 })
         await col.createIndex({ userId: 1, 'origin.portfolioId': 1 })
-        await col.createIndex({ userId: 1, 'origin.callId': 1 })
         // Unique identity key — created last so a legacy duplicate can't block the read
         // indexes above; a collision surfaces as the warning below (capture upserts on this
         // pair, so duplicates shouldn't exist in the first place).
@@ -65,9 +62,10 @@ const modeOf = (broker, accountId) => resolveMode({ broker, accountId })
 
 /**
  * The origin block — what spawned this trade, frozen at fill. `ideaId` is the execution
- * vehicle (almost always set; null only for idealess capture). `callId != null` is the
- * canonical "this is a Kairos call" flag. `type` is derived, call taking precedence over
- * portfolio over plain idea. Pure — no `idea` (idealess) yields the all-null origin.
+ * vehicle (almost always set; null only for idealess capture). `type` is derived, portfolio
+ * taking precedence over plain idea. Rows written before 2026-11-10 may also carry
+ * `callId` / type 'call' (a desk deleted that day); nothing reads them.
+ * Pure — no `idea` (idealess) yields the all-null origin.
  *
  * `adopted` is the one fact that cannot be derived from the others: an adopted holding
  * (docs/design/adopted-book.md) is a real position the app RECORDED but never decided — the entry
@@ -80,16 +78,13 @@ const modeOf = (broker, accountId) => resolveMode({ broker, accountId })
  */
 export function buildOrigin(idea = {}) {
     const ideaId      = idea.id ?? null
-    const callId      = idea.callId ?? null
     const portfolioId = idea.portfolioId ?? null
     const type = ideaId == null    ? null
-        : callId != null      ? 'call'
         : portfolioId != null ? 'portfolio'
         : 'idea'
     return {
         type,
         ideaId,
-        callId,
         groupId:         idea.groupId ?? null,
         portfolioId,
         portfolioName:   idea.portfolioName ?? null,
@@ -99,29 +94,10 @@ export function buildOrigin(idea = {}) {
 }
 
 /**
- * The originating Kairos call's reasoning, frozen onto a call-origin trade's snapshot —
- * the `notes` string alone loses the thesis/bias/zones/patterns the call was built on.
- * Always returns the four keys (null when absent) so analytics can read them uniformly.
- * Pure — a null/absent call (idea trade, or a deleted call) yields the all-null shape.
- * @param {object|null} [call] the kairos_calls doc (thesis/bias/entry_zones/patterns)
- */
-export function pickCallReasoning(call = null) {
-    return {
-        thesis:      call?.thesis      ?? null,
-        bias:        call?.bias        ?? null,
-        // A CALL, not a setup: `kairos_calls` documents are frozen and keep the band shape the
-        // setup kind left on 2026-09-24. Reading `entry_legs` here would freeze null onto every
-        // trade captured from a call.
-        entry_zones: call?.entry_zones ?? null,
-        patterns:    call?.patterns    ?? null,
-    }
-}
-
-/**
  * The portfolio's thesis (strategy + target exposures), frozen onto a portfolio-origin
  * trade's snapshot — the trade stores portfolio *pointers* (id/name), but the thesis text
  * lives only in `portfolio_books` and gets rewritten over the book's life. Pure — a
- * null/absent thesis (idea/call trade, or a book with no thesis) yields null.
+ * null/absent thesis (idea trade, or a book with no thesis) yields null.
  * @param {object|null} [thesis] the `portfolio_books.thesis` sub-doc
  */
 export function pickPortfolioThesis(thesis = null) {
@@ -157,18 +133,6 @@ async function captureOpen(idea, exec) {
             const acct = broker ? await brokerService.getAccount(broker, idea.userId, accountId) : null
             if (acct) accountSnapshot = { equity: acct.equity, cashBalance: acct.balance, currency: acct.currency }
         } catch { /* non-fatal */ }
-
-        // Best-effort: freeze the originating Kairos call's reasoning for call-origin trades.
-        // Read straight from the collection (no service import) to keep capture decoupled.
-        let call = null
-        if (idea.callId) {
-            try {
-                call = await db.collection(ENTITIES).findOne(
-                    { id: idea.callId },
-                    { projection: { thesis: 1, bias: 1, entry_zones: 1, patterns: 1, _id: 0 } },
-                )
-            } catch { /* non-fatal */ }
-        }
 
         // Best-effort: freeze the book's thesis for portfolio-origin trades — the trade holds
         // portfolio pointers, but the thesis text lives in portfolio_books and gets rewritten.
@@ -214,9 +178,7 @@ async function captureOpen(idea, exec) {
                         invalidation:         idea.invalidation ?? null,
                         notes:                idea.notes ?? null,
                         conviction:           idea.conviction ?? null,
-                        // Call-origin reasoning (null for idea/portfolio trades). See pickCallReasoning.
-                        ...pickCallReasoning(call),
-                        // Portfolio-origin thesis (null for idea/call trades). See pickPortfolioThesis.
+                        // Portfolio-origin thesis (null for idea trades). See pickPortfolioThesis.
                         portfolioThesis,
                     },
                     accountSnapshot,
@@ -418,7 +380,7 @@ async function captureClose({ accountId, positionId, orderId, price, quantity, r
  * Read trades for a user, newest first. All filters optional; omitting `mode` returns
  * every mode (paper + live + manual) — the unified analytics read.
  * @param {{ mode?: 'paper'|'live'|'manual', status?: 'open'|'closed', symbol?: string,
- *   originType?: 'idea'|'call'|'portfolio', portfolioId?: string, callId?: string,
+ *   originType?: 'idea'|'portfolio', portfolioId?: string,
  *   accountId?: string, fromMs?: number, toMs?: number, limit?: number }} [filter]
  */
 async function listTrades(userId, filter = {}) {
@@ -429,7 +391,6 @@ async function listTrades(userId, filter = {}) {
     if (filter.symbol)      q.symbol      = filter.symbol
     if (filter.originType)  q['origin.type']        = filter.originType
     if (filter.portfolioId) q['origin.portfolioId'] = filter.portfolioId
-    if (filter.callId)      q['origin.callId']      = filter.callId
     if (filter.accountId)   q.accountId   = String(filter.accountId)
     if (filter.fromMs != null || filter.toMs != null) {
         q.openedAt = {}

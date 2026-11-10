@@ -9,7 +9,7 @@
 // And what a ROUTE carries (plan phase 7, J4): the user's words for the desk it lands on (`opening`) run as
 // that desk's first turn; an `edit` reopens the item it names, asking first when its desk holds other work.
 // Answering a decision by typing is just the next turn. Only taps need an explicit continue: a paused or
-// interrupted chain, the step cap, a real choice (research a list; a busy agent; the next name in a queue).
+// interrupted chain, the step cap, a real choice (a busy agent; the next name in a queue).
 //
 // The chain's state lives on the session (`session.chain`), written BEFORE each step — a restart finds it,
 // and the boot sweep pauses it and asks (G4: never an automatic re-run). A chain step that is refused or
@@ -26,7 +26,7 @@ import { isAdminUserCached } from '../../api/user/user.model.js'
 import { coverageService } from '../../api/analyst/coverage.service.js'
 import { KIND, makeArtifact } from './artifact.js'
 import { receiverOf, briefFor } from './contracts.js'
-import { emitted, decisionFor, researchQueueFrom, endedChain } from './rules.js'
+import { emitted, decisionFor, endedChain } from './rules.js'
 import { logger } from '../logger.service.js'
 
 const LOG = '[chain]'
@@ -60,16 +60,8 @@ const _covered = async (ticker) => !!(await coverageService.getCoverageBySymbol(
 export function makeChainRunner({
     sessions = sessionService, desks = DESK_DEFS, maxSteps = MAX_STEPS,
     loadUser = _loadUser, isCovered = _covered, lock = withSessionLock,
-    findEdit = findForEdit, lookupEdit = lookupForEdit, sealing = defaultSealing, saveList = null,
+    findEdit = findForEdit, lookupEdit = lookupForEdit, sealing = defaultSealing,
 } = {}) {
-    // Argus's list, saved through ITS OWN action (Generate, or Update while a saved list is being refined) — the commit
-    // a press on its surface makes. Injectable for the chain's suite, which has no database.
-    const _saveList = saveList ?? (({ user, state }) => {
-        const action = state?.editingScanId ? 'update' : 'generate'
-        const run = desks.scanner?.actions?.[action]
-        return run ? run({ user, state, args: {} }) : { reason: 'no_such_action' }
-    })
-
     // The queued-turn runner (startTurn's runQueued) — bound after construction, because it needs this
     // runner's afterTurn in return (services/desks/turns.js wires the pair).
     let runQueued = null
@@ -265,23 +257,8 @@ export function makeChainRunner({
             const out = await sealing.openForEdit({ userId: user._id, sessionId, kind: edit.kind, entity: found.doc, name: nameOf(found.doc), force: true })
             return out.reason ? { reason: out.reason } : { ok: true }
         }
-        if (choice === 'research') {
-            const argus = session.agentState?.scanner ?? null
-            const art = researchQueueFrom(argus?.pendingScan)
-            if (!art) return { reason: 'nothing_to_research' }
-            // SAVED FIRST, then researched (Roy 2026-10-17, phase 8d CR decision (a)) — the old one press: the list
-            // reaches the Scans tab carrying the names that were NOT queued, which "also do KLAC" reads from later.
-            // A list that did not save is not researched: the user would lose it to a hop they cannot see behind.
-            const saved = await _saveList({ user, state: argus })
-            if (!saved || saved.reason) return { reason: saved?.reason ?? 'save_failed' }
-            if (saved.seal) {
-                await sealing.sealFromSession({ userId: user._id, sessionId, agent: 'scanner', ...saved.seal })
-                    .catch(err => logger.warn(LOG, 'seal after the research save failed (the list is saved)', err.message))
-            }
-            if (saved.after !== undefined) await sessions.setAgentState({ sessionId, userId: user._id, agent: 'scanner', state: saved.after })
-            await hop({ user, session, chain: { ...chain, status: 'running' }, art, from: 'scanner', index: 0 })
-            return { ok: true }
-        }
+        // 'research' (an investing list's top N → Prometheus) left on 2026-11-09 with Argus's lists (archive/README.md).
+        // Nothing builds a research queue any more, so the 'next' branch below is dormant; it is the generic queue walk.
         if (choice === 'next') {
             const q = chain.queue
             if (q && q.index + 1 < q.artifact.items.length) {

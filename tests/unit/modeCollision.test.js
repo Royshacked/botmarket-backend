@@ -7,33 +7,32 @@ import { WORKSPACE_MODES, resolveMode } from '../../services/venue.resolve.servi
 // `mode` MEANS TWO DIFFERENT THINGS DEPENDING ON THE KIND, and only luck keeps them apart.
 //
 // On an idea and a setup, `mode` is the WORKSPACE — live | paper | manual, which book the trade
-// lives in. On a CALL it is the analytical LENS the trade was built through — discretionary | smc |
-// institutional. Kairos is archived, but `call` documents still exist in Mongo and KINDS.CALL is
-// still in the vocabulary, so the overload is dormant rather than gone.
+// lives in. The deleted `call` kind (2026-11-10) stored the analytical LENS there instead —
+// discretionary | smc | institutional — and any future kind that does the same reopens the overload.
 //
 // resolveMode reads `source.mode` FIRST and returns it when it looks like a workspace. It works
-// today only because the two vocabularies happen not to overlap: a call's lens falls through to its
-// `broker` field and resolves correctly. Name a future lens `live` and every call built through it
+// today only because the two vocabularies happen not to overlap: a lens falls through to the
+// `broker` field and resolves correctly. Name a future lens `live` and every entity built through it
 // silently changes workspace — a real-money trade reported as paper, or the reverse.
 //
-// Nothing enforced that. This does. It is the cheap half of the fix; the thorough half is renaming
-// the call's field, which touches stored documents.
+// Nothing enforced that. This does. It is the cheap half of the fix; the thorough half is never storing
+// a lens in `mode`.
 
 test('a lens can never be mistaken for a workspace', () => {
     const collision = MODES.filter(m => WORKSPACE_MODES.includes(m))
     assert.deepEqual(collision, [],
         `these lens names would be read as a WORKSPACE by resolveMode: ${collision.join(', ')}. ` +
-        'Rename the lens, or stop overloading `mode` on the call kind.')
+        'Rename the lens, or stop overloading `mode`.')
 })
 
-test('the default lens especially — it is the one every unstamped call gets', () => {
+test('the default lens especially — it is the one every unstamped entity gets', () => {
     assert.ok(!WORKSPACE_MODES.includes(DEFAULT_MODE),
-        `DEFAULT_MODE '${DEFAULT_MODE}' reads as a workspace; every call without an explicit lens would move book`)
+        `DEFAULT_MODE '${DEFAULT_MODE}' reads as a workspace; every entity without an explicit lens would move book`)
 })
 
 test('and the collision is not theoretical — this is what resolveMode would do', () => {
     // Pin the mechanism, not just the word lists, so the test still means something if resolveMode's
-    // precedence is ever rewritten. A call carrying a lens must resolve on its BROKER.
+    // precedence is ever rewritten. An entity carrying a lens must resolve on its BROKER.
     for (const lens of MODES) {
         assert.equal(resolveMode({ mode: lens, broker: 'ctrader' }), 'live', lens)
         assert.equal(resolveMode({ mode: lens, broker: 'paper' }), 'paper', lens)

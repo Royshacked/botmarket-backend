@@ -86,14 +86,14 @@ async function run() {
         const b = await startTurn({ user, sessionId: sid, text: aDone.data.payload.opening || 'Validate NVDA for a long swing and hand it to Mentor.', turnId: `drive_argus_${Date.now()}` })
         const bDone = await turnDone(b.turnId)
         expect(bDone?.data.status === 'done', 'Argus\'s turn done')
-        if (!bDone?.data.payload?.kairos_pick) {
+        if (!bDone?.data.payload?.argus_pick) {
             console.log(`${C.dim}  Argus did not pick (its call) — handing the chain a pick to exercise Mentor's chain turn${C.off}`)
-            await chain.afterTurn({ user, sessionId: sid, agent: 'scanner', origin: 'user', out: { payload: { reply: 'NVDA', kairos_pick: { ticker: 'NVDA', direction: 'long', thesis: 'Testing support near its 50-day.' } } } })
+            await chain.afterTurn({ user, sessionId: sid, agent: 'scanner', origin: 'user', out: { payload: { reply: 'NVDA', argus_pick: { ticker: 'NVDA', direction: 'long', thesis: 'Testing support near its 50-day.' } } } })
         }
     } else {
         console.log(`${C.dim}  Axl went straight to Mentor — handing the chain a pick from Argus to exercise the hop${C.off}`)
         await sessionService.setAgentState({ sessionId: sid, userId: user._id, agent: 'scanner', state: { handoff: true, handoffTo: 'mentor' } })
-        await chain.afterTurn({ user, sessionId: sid, agent: 'scanner', origin: 'user', out: { payload: { reply: 'NVDA', kairos_pick: { ticker: 'NVDA', direction: 'long', thesis: 'Testing support near its 50-day.' } } } })
+        await chain.afterTurn({ user, sessionId: sid, agent: 'scanner', origin: 'user', out: { payload: { reply: 'NVDA', argus_pick: { ticker: 'NVDA', direction: 'long', thesis: 'Testing support near its 50-day.' } } } })
     }
     const hand = await waitFor(f => f.event === 'session_message' && f.data.message.kind === 'handoff' && f.data.message.to === 'mentor', 'the hand-off to Mentor')
     expect(!!hand, `hand-off message: "${hand?.data.message.content.slice(0, 90)}…"`)

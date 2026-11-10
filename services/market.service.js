@@ -348,7 +348,7 @@ export function getMarketStatus(symbol, assetClass, date = new Date()) {
 }
 
 /**
- * Coarse SESSION-OF-DAY phase, for weighting an intraday entry/management decision (Hermes P3).
+ * Coarse SESSION-OF-DAY phase, for weighting an intraday entry/management decision.
  * Asset-class-aware: crypto/forex are ~24h → '24h' (session texture immaterial); index futures use the
  * equity cash-session texture during RTH and 'overnight' outside it; equities get the RTH phase plus
  * pre/after-market and weekend. ET-based (DST-correct via _etWall). This is a LABEL the assessment

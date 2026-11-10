@@ -105,7 +105,7 @@ test('every entity route still mounts — no handler binds undefined', async () 
         '../../api/setups/setups.routes.js',
         '../../api/trade-ideas/tradeIdeas.routes.js',
         '../../api/analyst/analyst.routes.js',
-        '../../api/scanner/scanner.routes.js',
+        // '../../api/scanner/scanner.routes.js' left on 2026-11-09 with Argus's lists (archive/api/scanner/).
     ]) {
         const mod = await import(path)
         const router = Object.values(mod)[0]

@@ -8,19 +8,18 @@ import { getHouseModels } from '../services/houseModels.service.js'
 import { legPrice } from '../services/setup.schema.js'
 
 // The mechanical parts every monitor assessment shares — model routing, token budgets, and the
-// numeric candle block. Extracted because Hermes and Talos had byte-identical copies of both the
+// numeric candle block. Extracted because two monitors once had byte-identical copies of both the
 // routing helper and the candles formatter (docs/desks/mentor-talos.md: share the pipe).
 //
 // What is deliberately NOT here: the system prompts, the gather strategy, and the verdict menus.
-// Those ARE the judgment, and they differ by design — Hermes always scores four fixed axes, while
-// Talos fetches only the base and reaches for the rest with tools.
+// Those ARE the judgment: Talos fetches only the base and reaches for the rest with tools.
 
 export const ASSESS_MODEL    = 'claude-sonnet-4-6'
 
 /**
  * The models a MONITOR read may run on — its own registry, deliberately apart from the chat desks'
  * `MODELS` (services/llmModels.js): that one feeds the chat menu, and nothing here should be
- * offered to a desk. Keyed by the id stored in `hermesModel`.
+ * offered to a desk. Keyed by model id (the house `talosModel`).
  *
  *   provider   'anthropic' → the read loop in talos.assess.js; 'openai-compat' → the one
  *              OpenAI-format loop in providers/openaiCompat.provider.js, for every non-Anthropic
@@ -176,16 +175,11 @@ export function bookAssessUsage(userId, model, usage, agent, _record = recordUsa
  *
  * ONE KNOB FOR EVERY MONITOR — "how hard should my monitors think", not one setting per monitor.
  *
- * THE KEY IS STILL CALLED `hermesModel`, and that is a decision rather than an oversight. It is a
- * PERSISTED user-preference field: every existing user document carries it, and the client writes
- * it. Renaming would mean a migration of live preferences for a cosmetic gain — the same trade the
- * setup schema refuses over `lower`/`upper`, and the same category as the Kairos names CLAUDE.md
- * keeps on purpose (a wire field is not a desk). Talos is the only monitor reading it today; Hermes
- * was archived on 2026-08-18.
+ * The user's effort preference is `talosReasoning` (renamed from `hermesReasoning` 2026-11-10,
+ * scripts/delete-kairos.mjs); the per-user model key was dropped then too.
  *
  * WHOSE KNOB (2026-09-21, houseModels.service): EVERY setup reads on the HOUSE Talos model — the
- * admin's own included; the one selector is the admin's and it chooses for the house. The stored
- * `hermesModel` is not consulted for anyone (the field is a client-owned snapshot anyone can PUT).
+ * admin's own included; the one selector is the admin's and it chooses for the house.
  * The effort cap is still the user's own, capped as before. No house document → ASSESS_MODEL.
  */
 export async function assessRouting(userId, _getUser = userService.getUserById, _house = getHouseModels) {
@@ -200,7 +194,7 @@ export async function assessRouting(userId, _getUser = userService.getUserById, 
             ...talosModel(model),
             // Capped, not rejected: a stored `high` reads as `low` — the user asked for thinking and
             // gets the affordable kind. See ASSESS_MAX_EFFORT.
-            reasoningEffort: capEffort(prefs?.hermesReasoning),
+            reasoningEffort: capEffort(prefs?.talosReasoning),
         }
     } catch {
         return fallback
@@ -334,10 +328,7 @@ export function legsText(legs, label) {
 
 // ─── Reply / block formatting ─────────────────────────────────────────────────
 //
-// Moved out of hermes.assess.js on 2026-08-18. Talos already imported both from there, so
-// archiving Hermes would have left the live monitor importing an archived file — the same trap
-// `kairos.tools.js` had. They were never Hermes-specific: one parses an Anthropic reply, the other
-// formats a calendar.
+// Shared by the monitor reads: one parses an Anthropic reply, the other formats a calendar.
 
 // The browse-confirm reply interleaves server_tool_use / web_search_tool_result blocks with the model's
 // own text (search narration, then the JSON). Join ALL text blocks so extractFirstJSON can find the
@@ -346,8 +337,8 @@ export function _allText(msg) {
     return (msg?.content ?? []).filter(b => b?.type === 'text').map(b => b.text).join('\n')
 }
 
-// Format the call's frozen scheduled catalysts (earnings / FOMC / macro, stamped at build time) into
-// the EVENT RISK block Hermes weighs before entering. Pure: '' when there are none, so the caller can
+// Format an entity's frozen scheduled catalysts (earnings / FOMC / macro, stamped at build time) into
+// the EVENT RISK block a monitor weighs before entering. Pure: '' when there are none, so the caller can
 // stamp an explicit "(none)" line. Each row carries the date + when (pre_market/after_hours/timed) so
 // the model can judge whether it lands inside this trade's expected hold.
 export function _formatEventRisk(events) {

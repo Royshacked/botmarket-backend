@@ -1,43 +1,41 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-    callToWatchRow, setupToWatchRow, portfolioToWatchRow, scanToWatchRow, coverageToWatchRow,
+    setupToWatchRow, portfolioToWatchRow, scanToWatchRow, coverageToWatchRow,
 } from '../../services/entity/toWatchRow.js'
 import { normalizeLeg } from '../../services/setup.schema.js'
 
 // The reporting-tier projection: any owner-scoped artifact → one watch-list row.
 //
-// Two properties earn this file. TRIMMING is a correctness guard, not a cost saving — a call doc
+// Two properties earn this file. TRIMMING is a correctness guard, not a cost saving — a setup doc
 // carries `chat_state`, an entire past conversation, and putting that in an agent's context lets a
 // stale transcript be quoted back as current fact. And STATUS STAYS THE KIND'S OWN WORD, because
 // flattening five vocabularies onto one enum means maintaining a translation table that lies.
 
-const call = {
-    id: 'c1', asset: 'NVDA', bias: 'long', status: 'looking', savedAt: 1000,
-    thesis: 'reclaim of the range high', rr: 2.4, conviction: 'high', valid_until: '2026-08-30', mode: 'discretionary',
-    // A call is a FROZEN Kairos document and still carries the band shape — nothing authors one,
-    // so `callToWatchRow` is the last reader of `lower`/`upper` in the app.
-    entry_zones: [{ id: 'z1', lower: 170, upper: 172 }, { id: 'z2', lower: 166, upper: 168 }],
+const setup = {
+    id: 's1', asset: 'NVDA', direction: 'long', status: 'looking', savedAt: 1000,
+    thesis: 'reclaim of the range high', rr: 2.4, conviction: 'high', valid_until: '2026-08-30',
+    entry_legs: [{ id: 'e1', price: 170 }, { id: 'e2', price: 166 }],
     // Everything below must NOT survive the projection.
     chat_state: { messages: [{ role: 'user', content: 'a whole past conversation' }] },
     reference_levels: [{ px: 180 }], patterns: ['bull flag'],
     monitor_state: { timeline: [{ at: 1, memo: 'checked' }], check_count: 9 },
 }
 
-test('a call keeps what a reader needs and drops the bulk', () => {
-    const row = callToWatchRow(call)
-    assert.equal(row.kind, 'call')
+test('a setup keeps what a reader needs and drops the bulk', () => {
+    const row = setupToWatchRow(setup)
+    assert.equal(row.kind, 'setup')
     assert.equal(row.symbol, 'NVDA')
-    assert.equal(row.direction, 'long', "bias is the call's word for direction")
+    assert.equal(row.direction, 'long')
     assert.equal(row.status, 'looking')
     assert.equal(row.detail.rr, 2.4)
-    assert.equal(row.detail.nearestEntry, 170, "an archived band, read at the edge price reaches")
+    assert.equal(row.detail.nearestEntry, 170)
     assert.equal(row.detail.entryLegs, 2, 'the count, not the levels themselves')
 })
 
 test('a stale transcript never rides along — this is the correctness one', () => {
     // If chat_state reached an agent it could be read back as something the user said just now.
-    const serialized = JSON.stringify(callToWatchRow(call))
+    const serialized = JSON.stringify(setupToWatchRow(setup))
     assert.doesNotMatch(serialized, /a whole past conversation/)
     assert.doesNotMatch(serialized, /chat_state/)
     assert.doesNotMatch(serialized, /timeline/)
@@ -45,22 +43,22 @@ test('a stale transcript never rides along — this is the correctness one', () 
 })
 
 test('every row carries id + kind, so detail is a targeted read rather than a re-list', () => {
-    const row = callToWatchRow(call)
-    assert.equal(row.id, 'c1')
+    const row = setupToWatchRow(setup)
+    assert.equal(row.id, 's1')
     assert.ok(row.kind)
 })
 
 test('a title is one capped line, never a whole thesis', () => {
-    const long = callToWatchRow({ ...call, thesis: 'x'.repeat(400) })
+    const long = setupToWatchRow({ ...setup, thesis: 'x'.repeat(400) })
     assert.ok(long.title.length <= 120)
     assert.match(long.title, /…$/)
 })
 
 test('no thesis falls back to something readable rather than empty', () => {
-    assert.equal(callToWatchRow({ ...call, thesis: null }).title, 'long NVDA')
+    assert.equal(setupToWatchRow({ ...setup, thesis: null }).title, 'long NVDA')
 })
 
-test('a setup carries its own stop and target, which a call leaves to its tree', () => {
+test('a setup carries its own stop and target', () => {
     const row = setupToWatchRow({
         id: 's1', asset: 'SPY', direction: 'long', status: 'waiting', savedAt: 2000,
         entry_legs: [{ price: 502 }], stop_legs: [{ price: 495 }], target_legs: [{ price: 522 }],
@@ -150,13 +148,13 @@ test('an ISO timestamp becomes ms, so kinds sort against each other correctly', 
 })
 
 test('a doc with no id is dropped rather than becoming an unaddressable row', () => {
-    assert.equal(callToWatchRow({ asset: 'NVDA' }), null)
-    assert.equal(callToWatchRow(null), null)
+    assert.equal(setupToWatchRow({ asset: 'NVDA' }), null)
+    assert.equal(setupToWatchRow(null), null)
     assert.equal(portfolioToWatchRow({ name: 'no id' }), null)
 })
 
 // REGRESSION, and it is the reason this test reads the NORMALIZER rather than a literal. `_firstZone`
-// read `low`/`high` while a zone's edges were `lower`/`upper`, so every level on every setup and call
+// read `low`/`high` while a zone's edges were `lower`/`upper`, so every level on every setup
 // row was null — including the agent-facing watch list, where they went missing rather than reading
 // wrong. The fixtures said low/high too, so the test agreed with the bug and only production data
 // disagreed. Same guard, new shape: if the normaliser ever renames `price`, this fails first.
@@ -169,9 +167,8 @@ test('a level is read from the shape the normaliser actually emits', () => {
 })
 
 test('missing levels degrade to null, not to a half-built object', () => {
-    const row = callToWatchRow({ id: 'c', asset: 'X', entry_zones: [] })
+    const row = setupToWatchRow({ id: 's', asset: 'X', entry_legs: [] })
     assert.equal(row.detail.nearestEntry, null)
     assert.equal(row.detail.entryLegs, 0)
-    assert.equal(callToWatchRow({ id: 'c', asset: 'X', entry_zones: [{ id: 'z' }] }).detail.nearestEntry, null)
     assert.equal(setupToWatchRow({ id: 's', asset: 'X', entry_legs: [{ id: 'z' }] }).detail.nearestEntry, null)
 })

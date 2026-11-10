@@ -62,7 +62,7 @@ test('each user’s context is theirs — even on a HOUSE entity both can see', 
 test('a bad kind, agent or missing key is refused, and load answers null for it', async () => {
     const { svc } = fresh()
     assert.equal((await svc.seal({ ...key, kind: 'call', messages: turns('x') })).reason, 'invalid_context')
-    assert.equal((await svc.seal({ ...key, agent: 'kairos', messages: turns('x') })).reason, 'invalid_context')
+    assert.equal((await svc.seal({ ...key, agent: 'zeus', messages: turns('x') })).reason, 'invalid_context')
     assert.equal((await svc.seal({ ...key, entityId: null, messages: turns('x') })).reason, 'invalid_context')
     assert.equal(await svc.load({ ...key, kind: 'call' }), null)
 })

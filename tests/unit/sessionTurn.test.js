@@ -94,25 +94,24 @@ test('Mentor sending the user to Argus presets Argus to find ONE name and hand i
         ? { reply: 'Argus will find you a name', route: 'scan', opening: 'A swing long in semis' }
         : { reply: 'ok' }) })
     const s = await sessions.getActive({ userId: 'u1' })
-    await sessions.setAgentState({ sessionId: s.sessionId, userId: 'u1', agent: 'scanner', state: { profile: 'trading' } })
+    // An old session's list state (before 2026-11-09) does not survive the landing.
+    await sessions.setAgentState({ sessionId: s.sessionId, userId: 'u1', agent: 'scanner', state: { profile: 'investing', pendingScan: { candidates: [1] } } })
     await turn({ user, sessionId: s.sessionId, agent: 'mentor', text: 'yes, find me one' })
     const h = await sessions.get({ sessionId: s.sessionId, userId: 'u1' })
     assert.equal(h.floor, 'scanner')
-    assert.equal(h.agentState.scanner.handoff, true)
-    assert.equal(h.agentState.scanner.handoffTo, 'mentor')
-    assert.equal(h.agentState.scanner.profile, 'trading')
+    assert.deepEqual(h.agentState.scanner, { handoff: true, handoffTo: 'mentor' })
 })
 
-test('the hand-back preset never outlives it — a later plain scan route from Axl finds Argus listing again', async () => {
-    let from = 'mentor'
+// Since 2026-11-09 there is no list mode for a later route to find: whatever lands on Argus lands in the single pick
+// for Mentor. (A real Axl route to `scan` is dropped in the capture — routing.test.js; this rig hands the route in
+// directly, past the capture, so it shows the landing is safe even if one got through.)
+test('every landing on Argus is the single pick for Mentor — there is no list mode to fall back to', async () => {
     const { turn, sessions } = rig({ run: () => ({ reply: 'routing', route: 'scan' }) })
     const s = await sessions.getActive({ userId: 'u1' })
-    await turn({ user, sessionId: s.sessionId, agent: from, text: 'find me a name' })
-    from = 'axl'
-    await turn({ user, sessionId: s.sessionId, agent: from, text: 'now a watchlist' })
+    await turn({ user, sessionId: s.sessionId, agent: 'mentor', text: 'find me a name' })
+    await turn({ user, sessionId: s.sessionId, agent: 'axl', text: 'now a watchlist' })
     const st = (await sessions.get({ sessionId: s.sessionId, userId: 'u1' })).agentState.scanner
-    assert.equal(st.handoff, false)
-    assert.equal(st.handoffTo, null)
+    assert.deepEqual(st, { handoff: true, handoffTo: 'mentor' })
 })
 
 test('a route to an admin desk from the main chat moves no floor — that desk keeps its own panel', async () => {
@@ -167,7 +166,7 @@ test('a stopped turn keeps the user’s message and stores nothing it produced',
 test('an unknown agent, another user’s session, or an archived one is refused before anything is written', async () => {
     const { turn, sessions, rows } = rig()
     const s = await sessions.getActive({ userId: 'u1' })
-    assert.equal((await turn({ user, sessionId: s.sessionId, agent: 'kairos', text: 'x' })).reason, 'invalid_agent')
+    assert.equal((await turn({ user, sessionId: s.sessionId, agent: 'zeus', text: 'x' })).reason, 'invalid_agent')
     assert.equal((await turn({ user: { _id: 'u2' }, sessionId: s.sessionId, agent: 'axl', text: 'x' })).reason, 'not_found')
     assert.equal(rows('session_messages').length, 0)
 })

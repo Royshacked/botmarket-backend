@@ -48,7 +48,7 @@ function _unavailableLine(unavailable = []) {
 /**
  * A level as one number. This used to collapse a `{low, high}` pair and print a range when the two
  * disagreed; `toWatchRow` now hands over the price itself, because there are no bands left to
- * disagree (2026-09-24). An archived call's band arrives already read at its near edge.
+ * disagree (2026-09-24).
  */
 function _level(v) {
     return Number.isFinite(Number(v)) ? `${v}` : null
@@ -68,7 +68,6 @@ const _tag = (row, label = row.kind) => `[${label}${row.id ? `:${row.id}` : ''}]
 function _watchLine(row) {
     const d = row.detail ?? {}
     switch (row.kind) {
-        case 'call':
         case 'setup':
             return `- ${_tag(row)} ${row.symbol ?? '?'} ${row.direction ?? ''} · ${row.status ?? '?'}${_tail([
                 d.nearestEntry != null ? `entry ${_level(d.nearestEntry)}` : null,
@@ -104,17 +103,17 @@ function _watchLine(row) {
 export function formatWatchedItems({ items = [], counts = {}, unavailable = [], workspace = null } = {}) {
     // The workspace has to be SAID, and it matters most on the empty answer. "You have nothing" and
     // "you have nothing in paper" are different sentences, and a user with three live setups who
-    // hears the first one has been told something false about their own book. Calls, setups and
-    // books are scoped; scans and coverage are research, bind to no account, and are shared across
+    // hears the first one has been told something false about their own book. Setups and books
+    // are scoped; scans and coverage are research, bind to no account, and are shared across
     // all three workspaces by decision — so the line says that rather than leaving it inferred.
     const scope = workspace
-        ? ` in the ${workspace.toUpperCase()} workspace (setups, books and queued actions are scoped to it; scans, coverage and Aether are shared across all workspaces)`
+        ? ` in the ${workspace.toUpperCase()} workspace (setups, books and queued actions are scoped to it; coverage and Aether are shared across all workspaces)`
         : ''
 
     if (!items.length) {
         return unavailable.length
             ? `Could not read: ${unavailable.join(', ')}. Tell the user you couldn't check rather than saying they have nothing.`
-            : `Nothing${scope || ' in the app yet'} — no setups, books, coverage, scans, queued actions or Aether events.`
+            : `Nothing${scope || ' in the app yet'} — no setups, books, coverage, queued actions or Aether events.`
     }
     const summary = Object.entries(counts).filter(([, n]) => n > 0).map(([k, n]) => `${n} ${k}${n === 1 ? '' : 's'}`).join(', ')
     return [
@@ -129,7 +128,7 @@ function _summaryLine(label, s) {
     return `${label}: ${s.count} closed · ${s.winRatePct ?? '?'}% win · net ${s.netPnl ?? '?'}${s.profitFactor != null ? ` · PF ${s.profitFactor}` : ''}${s.expectancy != null ? ` · expectancy ${s.expectancy}` : ''}`
 }
 
-export function formatPerformance({ realized, calls, filter = {}, unavailable = [] } = {}) {
+export function formatPerformance({ realized, filter = {}, unavailable = [] } = {}) {
     const scope = _join([
         filter.mode ? `mode ${filter.mode}` : null,
         filter.symbol ? `symbol ${filter.symbol}` : null,
@@ -152,13 +151,9 @@ export function formatPerformance({ realized, calls, filter = {}, unavailable = 
         lines.push('No closed trades on record yet.')
     }
 
-    if (calls?.closed) {
-        lines.push(`Kairos calls: ${calls.closed} closed · ${calls.winRatePct ?? '?'}% win · avg ${calls.avgR ?? '?'}R${calls.totalPnl != null ? ` · P&L ${calls.totalPnl}` : ''}`)
-    }
-
     // The units are already percentages — say so, so the model never re-scales them. Only when
     // there IS a rate above it: on an empty answer the note is noise the model may echo.
-    const hasRate = Boolean(overall?.count || calls?.closed)
+    const hasRate = Boolean(overall?.count)
     return [
         scope ? `Performance (${scope}):` : 'Performance:',
         ...lines,
@@ -213,7 +208,7 @@ export function makeUserDataHandlers(userId = null, deps = {}) {
         // Scoped to the workspace the user is standing in, and NOT an argument the model may set:
         // "what am I watching" means the book in front of them, and every desk is already told which
         // that is by the venue block. Left to the model it would be forgotten exactly as
-        // get_trading_context was — and the failure is quiet, because a list mixing paper calls with
+        // get_trading_context was — and the failure is quiet, because a list mixing paper setups with
         // real-money ones looks like a complete answer.
         get_watched_items: makeToolHandler('get_watched_items',
             async ({ kinds, symbol, include_finished } = {}) => formatWatchedItems(await watched(userId, {
@@ -253,9 +248,9 @@ export function makeUserDataHandlers(userId = null, deps = {}) {
  * here, on the newcomer.
  */
 export const USER_DATA_TOOL_SPEC = {
-    get_watched_items: `Every list the user sees in the app: Mentor setups, portfolios (as books), Prometheus coverage, Argus scans, the QUEUED actions waiting for a venue to open, and the Aether events with the names each reached — plus, for an admin, the research queue. With status, levels and how fresh each is. This is the PLANS AND BOOKS they have made, NOT their open broker positions, balances or live P&L, which are get_trading_context. Calls, setups and books come back scoped to the workspace the user is standing in (paper / live / manual) — those bind to an account, and merging two books into one list is not an answer. Scans and coverage are research, bind to no account, and are shared across every workspace. Call it for "what am I watching / what have I got going / what's still open", and before saying the user has nothing. Finished items are excluded unless asked for.`,
+    get_watched_items: `Every list the user sees in the app: Mentor setups, portfolios (as books), Prometheus coverage, the QUEUED actions waiting for a venue to open, and the Aether events with the names each reached — plus, for an admin, the research queue. With status, levels and how fresh each is. This is the PLANS AND BOOKS they have made, NOT their open broker positions, balances or live P&L, which are get_trading_context. Calls, setups and books come back scoped to the workspace the user is standing in (paper / live / manual) — those bind to an account, and merging two books into one list is not an answer. Coverage is research, binds to no account, and is shared across every workspace. Call it for "what am I watching / what have I got going / what's still open", and before saying the user has nothing. Finished items are excluded unless asked for.`,
 
-    get_performance: `The user's CLOSED-trade record: how many, win rate, net P&L, profit factor and expectancy, split by mode (paper/live/manual), by origin and by symbol — plus Kairos's own R-multiple record for closed calls. Optionally narrowed to a mode, a symbol or a date window. Win rates come back as PERCENTAGES already — never multiply them again. Use it for "how have I done", "is paper working", "what's my win rate". It reports history only; open positions and unrealized P&L are get_trading_context.`,
+    get_performance: `The user's CLOSED-trade record: how many, win rate, net P&L, profit factor and expectancy, split by mode (paper/live/manual), by origin and by symbol. Optionally narrowed to a mode, a symbol or a date window. Win rates come back as PERCENTAGES already — never multiply them again. Use it for "how have I done", "is paper working", "what's my win rate". It reports history only; open positions and unrealized P&L are get_trading_context.`,
 
-    get_upcoming_events: `Dated events in a window (default the next 30 days): company earnings, Fed and macro releases, and this week's IPOs. By default scoped to the USER'S OWN names — the calls, setups, coverage and holdings they have in the app — so the answer is about their book, not the whole market; pass scope 'market' for everything. Use it for "anything coming up", "what's the risk this week", or before discussing timing around a name they hold.`,
+    get_upcoming_events: `Dated events in a window (default the next 30 days): company earnings, Fed and macro releases, and this week's IPOs. By default scoped to the USER'S OWN names — the setups, coverage and holdings they have in the app — so the answer is about their book, not the whole market; pass scope 'market' for everything. Use it for "anything coming up", "what's the risk this week", or before discussing timing around a name they hold.`,
 }

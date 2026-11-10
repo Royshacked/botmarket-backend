@@ -14,20 +14,17 @@ import { formatWatchedItems } from '../../services/tools/userData.tools.js'
 // never both. Scans and coverage are research — they bind to no account, there is nothing to scope
 // them by, and they are shared across all three workspaces by decision.
 //
-// `call` was the third account-bound kind and the paper half of every contrast below. Kairos was
-// archived on 2026-08-18, so the contrast is now paper-setup vs live-setup — the scoping rule is
+// The contrast is paper-setup vs live-setup — the scoping rule is
 // per-kind data, not per-kind code, so the same paths are exercised.
 
 const setup   = (over = {}) => ({ id: 's1', asset: 'TSLA', status: 'waiting', mode: 'live', savedAt: 4, ...over })
 const paperSetup = (over = {}) => setup({ id: 's2', asset: 'NVDA', mode: 'paper', savedAt: 5, ...over })
 const book    = (over = {}) => ({ portfolioId: 'p1', name: 'Core', holdings: 3, savedAt: 3, statuses: {}, symbols: ['AAPL'], modes: ['paper'], ...over })
-const scanDoc = (over = {}) => ({ id: 'sc1', createdAt: 2, candidates: [], ...over })
 const covDoc  = (over = {}) => ({ id: 'cov1', symbol: 'MU', status: 'active', updated_at: '2026-08-01T00:00:00Z', ...over })
 
 const deps = (over = {}) => ({
     setups:     async () => [setup(), paperSetup()],
     portfolios: async () => [book()],
-    scans:      async () => [scanDoc()],
     coverage:   async () => [covDoc()],
     now: 1000,
     ...over,
@@ -49,10 +46,10 @@ test('in live: the live setup stays, the paper setup and paper book go', async (
     assert.equal(counts.portfolio, 0)
 })
 
-test('scans and coverage survive EVERY workspace — they are shared by decision', async () => {
+// Scans were shared too, until they were archived with Argus's lists on 2026-11-09.
+test('coverage survives EVERY workspace — it is shared by decision', async () => {
     for (const workspace of ['live', 'paper', 'manual']) {
         const { counts } = await listWatchedItems('u1', { workspace }, deps())
-        assert.equal(counts.scan, 1, `scan in ${workspace}`)
         assert.equal(counts.coverage, 1, `coverage in ${workspace}`)
     }
 })
@@ -89,7 +86,8 @@ test('the empty answer NAMES the workspace — "nothing" and "nothing in paper" 
     // told something false about their own book.
     const out = formatWatchedItems({ items: [], counts: {}, workspace: 'paper' })
     assert.match(out, /Nothing in the PAPER workspace/)
-    assert.match(out, /scans, coverage and Aether are shared across all workspaces/)
+    assert.match(out, /coverage and Aether are shared across all workspaces/)
+    assert.doesNotMatch(out, /scans/)
 })
 
 test('a populated answer says which book it is counting', () => {

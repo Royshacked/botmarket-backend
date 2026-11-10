@@ -443,7 +443,7 @@ function _normalizeMessages(promptOrMessages) {
  * read its own earlier rounds instead of re-paying for them.
  *
  * BUDGET: the API allows FOUR breakpoints per request and the agents already spend up to three (one
- * on the tool list, one or two on the system prompt — Atlas and Kairos use two). This is the fourth.
+ * on the tool list, one or two on the system prompt — Atlas uses two). This is the fourth.
  * A new system-prompt breakpoint anywhere would push a request over the limit and it would be
  * rejected, so add one only by taking one away.
  *
@@ -479,7 +479,7 @@ export function _stampHistoryCache(messages) {
  *     on the newest result is invalidated by that rewrite a round later, so we would pay a write
  *     every round and never read it back. Compaction is idempotent, so the turn BEFORE the newest
  *     is frozen — that is as far as the breakpoint can safely reach.
- *   • 0 — the monitors (hermes/talos), which never rewrite a result. Nothing is mutable, so the
+ *   • 0 — the monitors (talos), which never rewrite a result. Nothing is mutable, so the
  *     newest turn is already frozen and the breakpoint can sit on it: one extra round of coverage.
  *
  * Set it wrong and the failure is silent and expensive — a breakpoint on bytes that keep changing

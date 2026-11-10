@@ -31,7 +31,7 @@ const LOG = '[protectionPlan]'
  * A bare price level → the single `touch` leaf that expresses it. The WRITER paired with
  * `_leafBareLevel` below (the reader): both live here so the phrasing the parser must
  * understand and the phrasing we emit can never drift apart. Callers that already hold a
- * number — a confirmed Kairos call, a discretionary ticket — use this instead of hand-
+ * number — a discretionary ticket — use this instead of hand-
  * rolling the sentence, which is how a leaf came to be typed `structured` by accident and
  * silently routed to the software monitor rather than resting at the broker.
  *

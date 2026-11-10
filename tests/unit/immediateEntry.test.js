@@ -62,7 +62,7 @@ test('resolveImmediate: any gating entry leaf neutralizes immediate', () => {
 })
 
 test('resolveImmediate: naked immediate (no entry conditions) stays immediate', () => {
-    // Protects the legit immediate paths — Kairos handoff + portfolio ideas are naked
+    // Protects the legit immediate paths — portfolio ideas are naked
     // market entries with no entry_condition_tree.
     assert.equal(resolveImmediate(true, null), true)
 })

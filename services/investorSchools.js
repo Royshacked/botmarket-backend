@@ -8,7 +8,7 @@
 //
 // A school selects vocabulary and a rule. It NEVER touches the output schema — <portfolio_plan>,
 // <portfolio_mandate> and the order layer are unchanged, so Themis and execution never learn schools
-// exist. Same contract as Kairos's modes (kairos.modes.js).
+// exist. Same contract as the analysis lenses (analysisModes.js).
 //
 // OWNERSHIP. Atlas sets both, on the mandate. Argus inherits the SELECTION half on the sleeve
 // hand-off and nothing else — a screener has no business knowing how risk is spread. The allocation
@@ -135,7 +135,7 @@ export function incoherentCombo(allocation, selection) {
 }
 
 // ─── The injected block ─────────────────────────────────────────────────────────
-// Atlas CHOOSES its school mid-conversation (unlike a Kairos mode, which arrives with the request),
+// Atlas CHOOSES its school mid-conversation (unlike an analysis lens, which arrives with the request),
 // so the block has to serve both moments: the menu while nothing is chosen, the governing rule once
 // it is. Keeping both here — rather than a menu in the prompt and rules in a module — is what stops
 // the two copies from drifting.

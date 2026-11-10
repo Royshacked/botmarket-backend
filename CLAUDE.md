@@ -1,25 +1,18 @@
 # Project Context
 AI-powered trading assistant backend (ar2trade / TRADVICE) — Express + MongoDB +
 LLM agents on Anthropic Claude (OpenAI for transcription only). SIX conversational desks — Axl
-(reception) · Mentor (`setup`, the trader) · Atlas (portfolio) · Argus (scan) ·
+(reception) · Mentor (`setup`, the trader) · Atlas (portfolio) · Argus (finds ONE name for Mentor; his scan lists were archived 2026-11-09) ·
 Prometheus (`coverage`) · Pythia (`industry_view`) — turn natural-language chat into monitored
 work, which each kind's own background monitor evaluates against condition trees before
 routing to a broker (cTrader live, a paper/simulation venue, manual, or IBKR in progress)
 through one unified capability-flag adapter layer. Nothing reaches a broker while its
 venue is shut — a confirmed decision is queued, never fired and never lost. Real-time via
 SSE (agent streams) and WebSocket (social chat). Their work lands on one execution tier: the
-`idea` kind (`/api/trade-ideas`, which portfolio holdings ride) plus the per-desk kinds
-`call` and `setup`. See README.md for the full architecture and app-flow diagrams.
+`idea` kind (`/api/trade-ideas`, which portfolio holdings ride) plus the per-desk kind
+`setup`. See README.md for the full architecture and app-flow diagrams.
 
-**Kairos (`call`) and its monitor Hermes are ARCHIVED (2026-08-18).** Mentor took the trading
-over (`docs/desks/trade-pipeline.md`); the autonomous call builder returns later as a PREMIUM
-Mentor mode. They live under `archive/` in both repos, imported by nothing and started by
-nothing — read `archive/README.md` before reviving either. A new trade is always Mentor's.
-
-The NAME still appears in three places on purpose, and none of them is drift: agent branding
-for a user's old threads and cards (`AGENTS.kairos`, the badges), the `kairos_pick` wire field
-and emit tag that Argus's hand-off still uses, and `KINDS.CALL` in the entity vocabulary —
-which describes the DATA, and a `call` document still exists in Mongo.
+**Kairos (the `call` kind) and its monitor Hermes were DELETED on 2026-11-10**, code and data
+(`scripts/delete-kairos.mjs`); `git log` before that date has them. A new trade is always Mentor's.
 
 **Minos (the legacy `idea` monitor) was DELETED**, not archived. The `idea` KIND stays and must:
 it is the execution tier every order goes through, and a portfolio holding IS an idea document
@@ -29,7 +22,7 @@ carrying a `portfolioId` (`kindForDoc`). Deleting the kind deletes Atlas and all
 and every one is real to them. Live is real money at a connected broker; paper is
 simulated; manual is real money at an institution the app cannot reach (built and monitored
 exactly like paper, but the user places the order at their bank and confirms the fill).
-Entities that bind to an ACCOUNT — `call`, `setup`, `portfolio` — belong to exactly one
+Entities that bind to an ACCOUNT — `setup`, `portfolio` — belong to exactly one
 workspace and must be scoped to it everywhere they are shown or reported. Research binds to
 no account: scans, coverage and the house forecast are SHARED across all three. The
 workspace is a UI/authoring scope and NEVER an engine filter — the monitors and the

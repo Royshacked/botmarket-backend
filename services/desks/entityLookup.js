@@ -3,7 +3,6 @@
 // an admin's job, the same gate the coverage routes keep.
 
 import { setupService } from '../../api/setups/setups.service.js'
-import { scanService } from '../../api/scanner/scan.service.js'
 import { coverageService } from '../../api/analyst/coverage.service.js'
 import { portfolioChatService } from '../../api/portfolio/portfolioChat.service.js'
 import { listPortfolios } from '../portfolioState.service.js'
@@ -11,7 +10,6 @@ import { isTerminal } from '../entity/vocabulary.js'
 
 const LOOKUPS = {
     setup:     ({ id, user }) => setupService.getSetup(id, user._id),
-    scan:      ({ id, user }) => scanService.getScanById(id, user._id),
     coverage:  async ({ id, user }) => (user.role === 'admin' ? coverageService.getCoverageById(id) : { ok: false, reason: 'forbidden' }),
     // A book is its portfolio_books document — present only for its owner.
     portfolio: async ({ id, user }) => {
@@ -32,7 +30,7 @@ export async function lookupForEdit({ kind, id, user }, lookups = LOOKUPS) {
 // Axl's <edit> names an item the way a person does — "the NVDA setup", "my Growth book" — so its ref is an id
 // OR a name. The server's version of the client's resolveForEdit, with the same rule: a NAME answers only
 // when it matches exactly one item; on two live NVDA setups a bare ticker is a coin flip, so ambiguity finds
-// nothing. A scan is a list, not a name — id or nothing. A closed setup never counts: next to a live NVDA it
+// nothing. A closed setup never counts: next to a live NVDA it
 // would make "NVDA" ambiguous, and alone it is not something to reopen. (Workspace is not filtered: an Axl ask
 // names an item, and the reopened card says which.)
 const BY_NAME = {

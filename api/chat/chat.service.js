@@ -33,7 +33,7 @@ export const BOT_USER_ID = 'axl'   // the default + the one conversational bot
 //
 // A NEW BOT IS TWO ENTRIES, and an admin-only one is four: here, agentMeta BOT_IDS, and — when the
 // desk is admin-only — both ADMIN_BOT_IDS.
-export const BOT_IDS = ['axl', 'portfolio', 'scanner', 'kairos', 'mentor', 'analyst', 'strategy']
+export const BOT_IDS = ['axl', 'portfolio', 'scanner', 'mentor', 'analyst', 'strategy']
 export const isBot = (id) => BOT_IDS.includes(String(id))
 
 // RETIRED bots. `idea` was dropped when the Idea desk was archived (its agent is gone and its
@@ -41,7 +41,9 @@ export const isBot = (id) => BOT_IDS.includes(String(id))
 // NOT deleted — the cards in them are real history — they are simply hidden from the sidebar by
 // getConversations. Keep an id here rather than dropping it silently: a reader who finds an old
 // `idea` sender in chat_messages needs to see WHY nothing renders it.
-export const RETIRED_BOT_IDS = ['idea']
+// `kairos` joined on 2026-11-10 when the call desk was deleted; its threads were deleted with it, and this
+// keeps any stray one hidden rather than rendered as a human DM (mirrors the client's RETIRED_BOT_IDS).
+export const RETIRED_BOT_IDS = ['idea', 'kairos']
 export const isRetiredBot = (id) => RETIRED_BOT_IDS.includes(String(id))
 
 // ADMIN-ONLY feeds. Prometheus posts only to admins (coverageNotify narrows to `listAdminUserIds`; Pythia's
@@ -57,14 +59,13 @@ export const isAdminBot = (id) => ADMIN_BOT_IDS.includes(String(id))
 /**
  * Which bot speaks for an entity KIND. One home for the attribution rule, because the callers that
  * need it (the market-open sweep, the manual fill/exit cards, the position monitor) are all
- * kind-blind services posting on a desk's behalf — each re-deriving it is how a Kairos call ended
+ * kind-blind services posting on a desk's behalf — each re-deriving it is how a desk's entity ended
  * up announcing its own fill as "Idea".
  *
  * A kind with no living desk (the archived `idea`) falls back to Axl, which is the general
  * notification bot — never a wrong brand, and never a lost card.
  */
 const BOT_BY_KIND = Object.freeze({
-    call:           'kairos',
     setup:          'mentor',
     portfolio_item: 'portfolio',
     idea:           BOT_USER_ID,
@@ -203,7 +204,6 @@ export const dismissOnly = () => ({ dismiss: true })
 const SUBJECT_KEYS = [
     ['portfolioId', 'portfolio'],
     ['setupId',     'setup'],
-    ['callId',      'call'],
     ['ideaId',      'idea'],
     ['coverageId',  'coverage'],
     ['industryViewId', 'industry_view'],

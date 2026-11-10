@@ -10,8 +10,6 @@
 // WHAT IS NOT TOUCHED, and it is most of the book:
 //   • `idea` and `portfolio_item` — a holding IS an idea document, and the `lower`/`upper` on one is
 //     `invalidation.range`, a genuine range with anchors. Nothing to migrate and nothing to delete.
-//   • `call` — Kairos is archived and its documents are frozen. They keep the band shape on purpose;
-//     `callToWatchRow` and `deriveCallOverlay` are its last readers.
 //   • `journal` rows and `talos_reads` bundles belonging to a deleted setup. They are an append-only
 //     record of what happened, and a record of a trade that existed is not invalidated by the
 //     document being gone.

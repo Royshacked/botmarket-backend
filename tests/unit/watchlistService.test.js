@@ -8,8 +8,7 @@ import { listWatchedItems, DEFAULT_KINDS } from '../../services/watchlist.servic
 // being watched, a retired agent's leftovers aren't either, one desk failing must not silently
 // shrink the answer, and enumerating books must not quietly fire a broker round-trip per book.
 //
-// `call` was the fifth and was the exemplar throughout this file; Kairos was archived on
-// 2026-08-18 and the kind went with it. The exemplar is now `setup`, which exercises exactly the
+// The exemplar is `setup`, which exercises exactly the
 // same paths — every behaviour above is kind-blind, which is the point of listWatchedItems.
 
 const NOW = 1_700_000_000_000
@@ -17,7 +16,6 @@ const NOW = 1_700_000_000_000
 const setup = (over = {}) => ({ id: 's1', asset: 'NVDA', direction: 'long', status: 'looking', savedAt: 4, ...over })
 const book = (over = {}) => ({ portfolioId: 'p1', name: 'Growth', holdings: 2, savedAt: 3, statuses: { long: 2 }, symbols: ['MSFT'], ...over })
 const cov = (over = {}) => ({ id: 'cov1', symbol: 'AVGO', status: 'active', updated_at: '2026-07-20T00:00:00Z', ...over })
-const scan = (over = {}) => ({ id: 'sc1', thesis: 'laggards', period: { label: 'Aug' }, savedAt: 1, candidates: [], ...over })
 const queued = (over = {}) => ({ id: 'q1', asset: 'TSLA', direction: 'long', ready: false, action: { type: 'entry' }, origin: { kind: 'setup', entityId: 's9' }, decidedAt: 5, nextOpenMs: NOW + 3_600_000, queuedReason: 'market shut', ...over })
 const run = (over = {}) => ({ run_id: 'r1', event: 'China restricts rare earth exports', event_date: '2026-09-10', event_category: 'trade', created_at: '2026-09-11T06:00:00Z', candidates: [{ ticker: 'MP', side: 'helped' }, { ticker: 'TSLA', side: 'hurt' }], ...over })
 
@@ -26,7 +24,6 @@ const deps = (over = {}) => ({
     setups: async () => [setup()],
     portfolios: async () => [book()],
     coverage: async () => [cov()],
-    scans: async () => [scan()],
     queued: async () => [queued()],
     aether: async () => [run()],
     ...over,
@@ -34,8 +31,8 @@ const deps = (over = {}) => ({
 
 test('one read answers across every list the Floor shows', async () => {
     const res = await listWatchedItems('u1', {}, deps())
-    assert.deepEqual(res.counts, { setup: 1, portfolio: 1, coverage: 1, scan: 1, queued: 1, aether: 1 })
-    assert.equal(res.items.length, 6)
+    assert.deepEqual(res.counts, { setup: 1, portfolio: 1, coverage: 1, queued: 1, aether: 1 })
+    assert.equal(res.items.length, 5)
     assert.equal(res.asOf, NOW)
 })
 
@@ -65,10 +62,18 @@ test('the default kinds exclude the retired Idea agent’s leftovers', async () 
     // getIdeas returns holdings AND loose legacy ideas. Reporting one would have Axl offer to route
     // the user to a chat that no longer exists.
     assert.ok(!DEFAULT_KINDS.includes('idea'))
-    // And `call` left for the same reason on 2026-08-18: Kairos is archived, so a listed call
-    // would offer the user a door into a desk that is not there.
+    // `call` is gone (deleted 2026-11-10, data included).
     assert.ok(!DEFAULT_KINDS.includes('call'))
-    assert.deepEqual(DEFAULT_KINDS, ['setup', 'portfolio', 'coverage', 'scan', 'queued', 'aether'])
+    // `scan` left on 2026-11-09 with Argus's lists — the list is gone from the app.
+    assert.ok(!DEFAULT_KINDS.includes('scan'))
+    assert.deepEqual(DEFAULT_KINDS, ['setup', 'portfolio', 'coverage', 'queued', 'aether'])
+})
+
+test('asking for scans by name reads nothing — there is no source for the archived list', async () => {
+    const res = await listWatchedItems('u1', { kinds: ['scan'] }, deps())
+    assert.deepEqual(res.items, [])
+    assert.deepEqual(res.counts, {})
+    assert.deepEqual(res.unavailable, [])
 })
 
 test('finished items are history, not something being watched', async () => {
@@ -84,8 +89,8 @@ test('...unless the user actually asked for them', async () => {
 })
 
 test('kinds with no status of their own are never filtered out as terminal', async () => {
-    // A book and a scan report status:null. A naive isTerminal check would drop them both.
-    const res = await listWatchedItems('u1', { kinds: ['portfolio', 'scan'] }, deps())
+    // A book reports status:null. A naive isTerminal check would drop it.
+    const res = await listWatchedItems('u1', { kinds: ['portfolio'] }, deps({ portfolios: async () => [book(), book({ portfolioId: 'p2', name: 'Income' })] }))
     assert.equal(res.items.length, 2)
 })
 
@@ -95,13 +100,13 @@ test('a failed source is NAMED, never reported as nothing', async () => {
     const res = await listWatchedItems('u1', {}, deps({ setups: async () => { throw new Error('mongo down') } }))
     assert.deepEqual(res.unavailable, ['setup'])
     assert.equal(res.counts.setup, undefined)
-    assert.equal(res.items.length, 5, 'the other lists still answer')
+    assert.equal(res.items.length, 4, 'the other lists still answer')
 })
 
 test('narrowing by kind reads only those sources', async () => {
     let touched = 0
     const res = await listWatchedItems('u1', { kinds: ['setup'] },
-        deps({ scans: async () => { touched++; return [] } }))
+        deps({ coverage: async () => { touched++; return [] } }))
     assert.equal(touched, 0)
     assert.deepEqual(Object.keys(res.counts), ['setup'])
 })

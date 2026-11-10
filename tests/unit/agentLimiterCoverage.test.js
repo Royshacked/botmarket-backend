@@ -119,8 +119,7 @@ test('the limiter is mounted BEFORE the desk routers it protects', () => {
 test('a limited path that no route serves is dead weight, and says so', () => {
     // The other direction: a desk archived without tidying leaves a limiter pointing at nothing.
     // Harmless, but it is how the list stops describing the app — and this list is only useful for
-    // as long as it does. Kairos was archived in 2026-08 and its entry went with it, which is the
-    // behaviour being pinned.
+    // as long as it does. A retired desk's entry goes with it, which is the behaviour being pinned.
     const served = new Set(streamEndpoints().map(s => s.path))
     const stale  = [...limitedPaths()].filter(p => !served.has(p))
     assert.deepEqual(stale, [], 'these paths are rate-limited but no router serves them')

@@ -12,7 +12,8 @@ import {
     ALLOCATION_SCHOOLS, SELECTION_SCHOOLS, ALLOCATION_RULES, SELECTION_RULES, SELECTION_WEIGHTS,
     normalizeAllocation, normalizeSelection, selectionWeights, incoherentCombo, buildSchoolSection,
 } from '../../services/investorSchools.js'
-import { _cleanScore, _normalizeScan } from '../../services/agents/scanner.agent.service.js'
+// The lens-on-the-ranking tests (Argus's _cleanScore / _normalizeScan) went to archive/tests/investorSchools.test.js
+// on 2026-11-09 with Argus's lists; the schools themselves still steer Atlas.
 import { _parseScreenRequests } from '../../services/agents/portfolio.agent.service.js'
 
 // One block's worth of the plural parser — see portfolioScreenRequest.test.
@@ -61,40 +62,6 @@ test('no lens, an unknown lens, and passive all fall back to the neutral blend',
     for (const lens of [null, undefined, 'nonsense', 'passive']) {
         assert.deepEqual(selectionWeights(lens), SELECTION_WEIGHTS.default, `lens=${lens}`)
     }
-})
-
-// ── the lens reaches the ranking ──────────────────────────────────────────────
-
-test('the same scores rank differently under different schools', () => {
-    // THE test: a cheap, low-growth compounder vs an expensive fast grower. If the school didn't
-    // reach the composite these two totals would be identical under both lenses.
-    const compounder = { quality: 90, valuation: 85, growth: 30, balance_sheet: 90 }
-    const grower     = { quality: 70, valuation: 30, growth: 95, balance_sheet: 60 }
-
-    const qv = t => _cleanScore(t, 'long term', 'investing', 'quality-value').total
-    const gd = t => _cleanScore(t, 'long term', 'investing', 'growth-durability').total
-
-    assert.ok(qv(compounder) > qv(grower), 'quality-value must prefer the cheap compounder')
-    assert.ok(gd(grower) > gd(compounder), 'growth-durability must prefer the grower')
-})
-
-test('a list with no lens scores exactly as it did before schools existed', () => {
-    // The pre-schools blend, byte-identical: quality .30 / valuation .30 / growth .25 / bs .15.
-    const s = _cleanScore({ quality: 88, valuation: 62, growth: 80, balance_sheet: 90 }, 'long term', 'investing')
-    assert.equal(s.total, Math.round(88 * 0.30 + 62 * 0.30 + 80 * 0.25 + 90 * 0.15))
-})
-
-test('_normalizeScan carries the lens onto the list, and only for investing', () => {
-    const scan = {
-        thesis: 'core growth sleeve', direction: 'long', style: 'long term', lens: 'income',
-        candidates: [{ ticker: 'ABC', direction: 'long', thesis: 't', analysis: 'a',
-            score: { quality: 70, valuation: 60, growth: 50, balance_sheet: 80 } }],
-    }
-    assert.equal(_normalizeScan(scan, null, null, 'investing').lens, 'income')
-    // A trading list has no selection school — the concept belongs to the book, not the trade.
-    assert.equal(_normalizeScan({ ...scan, lens: 'income' }, null, null, 'trading').lens, null)
-    // A hallucinated school lands as "no lens", never as a word nothing downstream understands.
-    assert.equal(_normalizeScan({ ...scan, lens: 'dalio' }, null, null, 'investing').lens, null)
 })
 
 test('the screen_request carries the selection school across the hop, validated', () => {
@@ -159,16 +126,6 @@ test('review mode: a school that IS set still governs the re-read', () => {
     const s = buildSchoolSection({ selection: 'quality-value' }, { menu: false })
     assert.match(s, /has the moat eroded\?/)
     assert.ok(!s.includes('is not set yet'), 'review must never offer the menu')
-})
-
-// ── an edit turn must not silently re-rank ────────────────────────────────────
-test('an edit that forgets the lens inherits it from the list being edited', () => {
-    const prior = { thesis: 's', lens: 'income', candidates: [
-        { ticker: 'KEEP', direction: 'long', thesis: 't', analysis: 'a', grounding: 'sourced',
-            score: { quality: 70, valuation: 60, growth: 50, balance_sheet: 80 } },
-    ] }
-    const edited = { thesis: 's', direction: 'long', style: 'long term', candidates: [{ ticker: 'KEEP', keep: true }] }
-    assert.equal(_normalizeScan(edited, prior, null, 'investing').lens, 'income')
 })
 
 // ── the industry hop ──────────────────────────────────────────────────────────

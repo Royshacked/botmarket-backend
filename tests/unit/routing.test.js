@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { buildRouteRule, makeRouteCapture, routeFields, ROUTABLE_DESKS, ROUTE_TAGS } from '../../services/routing.util.js'
+import { buildRouteRule, makeRouteCapture, mayRoute, routeFields, ROUTABLE_DESKS, ROUTE_TAGS } from '../../services/routing.util.js'
 import { analystAgentService }   from '../../services/agents/analyst.agent.service.js'
 import { aetherAgentService }    from '../../services/agents/aether.agent.service.js'
 import { mentorAgentService }    from '../../services/agents/mentor.agent.service.js'
@@ -26,7 +26,9 @@ test('the rule lists every routable desk but the sender\'s own', () => {
 
     const prometheus = buildRouteRule('analyst')
     assert.doesNotMatch(prometheus, /\*\*Prometheus\*\* \(`research`\)/)
-    assert.match(prometheus, /\*\*Argus\*\* \(`scan`\)/)
+    // Argus takes the user only from Mentor since 2026-11-09 — see the routedFrom tests below.
+    assert.doesNotMatch(prometheus, /\*\*Argus\*\* \(`scan`\)/)
+    assert.match(buildRouteRule('mentor'), /\*\*Argus\*\* \(`scan`\)/)
 })
 
 test('the rule never offers an admin desk, and teaches the grammar and the ask-gate', () => {
@@ -67,8 +69,54 @@ test('capture: a desk routing to ITSELF is dropped, opening and all', () => {
     const cap = makeRouteCapture('scanner')
     cap.captures.route('scan NVDA'); cap.captures.open('back to where you are')
     assert.deepEqual(cap.result(), { route: null, routeSymbol: null, opening: null, edit: null, show: null })
-    // …and Axl, which stands at no desk, may route anywhere.
-    assert.equal(drive('scan NVDA').route, 'scan')
+    // …and Axl, which stands at no desk, may route anywhere a desk is open to him (not Argus — Mentor's only).
+    assert.equal(drive('research NVDA').route, 'research')
+})
+
+// ── Argus is Mentor's (2026-11-09) ───────────────────────────────────────────
+// His list-building chat is archived; what is left is the single pick Mentor asks for. A desk with `routedFrom`
+// takes the user only from the agents it names — gated in the capture, and left off every other sender's prompt.
+
+test('mayRoute: only Mentor may send the user to Argus; every open desk stays open to everyone', () => {
+    assert.equal(mayRoute('mentor', 'scan'), true)
+    for (const from of [null, undefined, 'axl', 'analyst', 'portfolio', 'strategy', 'aether', 'scanner']) {
+        assert.equal(mayRoute(from, 'scan'), false, `${from} must not route to Argus`)
+    }
+    for (const desk of ['research', 'assist', 'portfolio']) {
+        assert.equal(mayRoute(null, desk), true, `Axl → ${desk}`)
+        assert.equal(mayRoute('analyst', desk), true, `Prometheus → ${desk}`)
+    }
+    // A desk that does not exist is not this gate's business — routeFor drops it.
+    assert.equal(mayRoute(null, 'nowhere'), true)
+})
+
+test('capture: Axl naming Argus is dropped, opening and all; Mentor naming Argus lands', () => {
+    assert.deepEqual(drive('scan NVDA', { open: 'find me a swing long in semis' }), { route: null, routeSymbol: null, opening: null, edit: null, show: null })
+    for (const agent of ['analyst', 'portfolio']) {
+        const cap = makeRouteCapture(agent)
+        cap.captures.route('scan'); cap.captures.open('find one')
+        assert.equal(cap.result().route, null, `${agent} → Argus is dropped`)
+    }
+    const mentor = makeRouteCapture('mentor')
+    mentor.captures.route('scan'); mentor.captures.open('A swing long in semis — they have no name.')
+    assert.deepEqual(mentor.result(), { route: 'scan', routeSymbol: null, opening: 'A swing long in semis — they have no name.', edit: null, show: null })
+    // Axl still routes everywhere else.
+    for (const desk of ['assist', 'research', 'portfolio']) assert.equal(drive(`${desk} NVDA`).route, desk)
+})
+
+test('the rule offers Argus to Mentor alone', () => {
+    assert.match(buildRouteRule('mentor'), /\*\*Argus\*\* \(`scan`\)/)
+    for (const agent of ['analyst', 'portfolio', 'scanner', 'strategy', 'aether']) {
+        assert.doesNotMatch(buildRouteRule(agent), /`scan`/, `${agent}'s rule offers Argus`)
+    }
+})
+
+test("Axl's prompt teaches no route to Argus and no Argus list", async () => {
+    const { readFileSync } = await import('node:fs')
+    const axl = readFileSync(new URL('../../prompts/axl_system_prompt.md', import.meta.url), 'utf8')
+    assert.doesNotMatch(axl, /<route>scan/)
+    assert.doesNotMatch(axl, /<edit>scan/)
+    assert.doesNotMatch(axl, /<show>watchlists/)
 })
 
 test('capture: no route → no opening; an edit → no opening either', () => {
@@ -83,7 +131,7 @@ test('routeFields: validates the desk for the role, sanitizes the symbol, gates 
     const ok = routeFields({ route: 'research', routeSymbol: 'nvda', opening: 'Look at it.', edit: null }, 'trader')
     assert.deepEqual(ok, { route: 'research', routeSymbol: 'NVDA', edit: null, show: null, opening: 'Look at it.' })
 
-    const junk = routeFields({ route: 'kairos', routeSymbol: 'NVDA', opening: 'Look at it.' }, 'admin')
+    const junk = routeFields({ route: 'zeus', routeSymbol: 'NVDA', opening: 'Look at it.' }, 'admin')
     assert.deepEqual(junk, { route: null, routeSymbol: null, edit: null, show: null, opening: null })
 
     assert.equal(routeFields({ route: 'strategy' }, 'trader').route, null, 'a trader is never sent to Pythia')

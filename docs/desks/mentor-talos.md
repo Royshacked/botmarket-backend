@@ -9,9 +9,8 @@ The user's own trade, built with **Mentor** and watched by **Talos**.
 > storage outlived that by a month because renaming it meant migrating live documents. **The
 > migration was a deletion**: all 24 setups in both databases were wiped rather than converted (the
 > user's call), so nothing reads the old shape and a document still carrying edges has no legs at
-> all. [Legs](#legs--a-price-and-nothing-else) is the contract. The `call` kind keeps its bands —
-> it is archived, its documents are frozen, and `callToWatchRow` / `deriveCallOverlay` are their
-> last readers.
+> all. [Legs](#legs--a-price-and-nothing-else) is the contract. (The `call` kind, which kept its bands, was deleted
+> 2026-11-10.)
 >
 > **A WAKE IS CHEAP BY DEFAULT (2026-09-23).** Talos still wakes on every candle close, but what a
 > wake COSTS is now one of three: the full read, a CHEAP numbers-only read that decides whether the
@@ -818,9 +817,8 @@ model.
 **Which model reads (2026-09-20; the house rule 2026-09-21).** Every setup reads on the **house
 Talos model** — the admin's own included: `assessRouting` resolves `houseModels.service.js`
 `talosModel` against `TALOS_MODELS` (`assess.shared.js`, the monitors' own registry, apart from
-the chat desks'), and Sonnet 4.6 when none is set. Nobody's `preferences.hermesModel` is
-consulted any more (it is a client-owned snapshot anyone can PUT); the effort cap is still the
-user's own. Seven **candidates** carry `adminOnly`: Sonnet 5, GPT-5.6 Luna, Mistral Medium 3.5,
+the chat desks'), and Sonnet 4.6 when none is set. There is no per-user model key (`hermesModel` was dropped
+2026-11-10); the effort cap is still the user's own. Seven **candidates** carry `adminOnly`: Sonnet 5, GPT-5.6 Luna, Mistral Medium 3.5,
 Qwen3.7-Plus, and since 2026-09-21 Qwen3.7 Flash, DeepSeek V4.1 Flash and Gemini 3.8 Flash — the
 flag gates nothing at run time now; the *Models* card on the admin's profile (the one selector,
 admin-only) offers them all, and the pick is every account's from its next wake, with every
@@ -839,8 +837,8 @@ says executes on its own: `enter` parks `awaiting_confirm` and posts a card, as 
 output (46%) and cache writes (43%); tools were the rest. Two things followed, both in
 `assess.shared.js`:
 
-- **Thinking is capped at `low`** (`ASSESS_MAX_EFFORT`, `capEffort`). A stored `hermesReasoning:
-  high` reads as `low` — the user asked for reasoning and gets the affordable kind; the preference
+- **Thinking is capped at `low`** (`ASSESS_MAX_EFFORT`, `capEffort`). A stored `talosReasoning:
+  high` reads as `low` (the key was `hermesReasoning` until 2026-11-10) — the user asked for reasoning and gets the affordable kind; the preference
   itself is never rewritten, so a tier that lifts the cap restores the user's own choice. `high` was
   the whole difference between the two heavy users' cost per read ($0.047 vs $0.035) for a verdict
   that is a small JSON object.

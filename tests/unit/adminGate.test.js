@@ -16,7 +16,6 @@ import { visibleConversationsFor, ADMIN_BOT_IDS, RETIRED_BOT_IDS } from '../../a
 
 const here = dirname(fileURLToPath(import.meta.url))
 const routesSrc = readFileSync(join(here, '../../api/strategy/strategy.routes.js'), 'utf8')
-const scannerSrc = readFileSync(join(here, '../../api/scanner/scanner.routes.js'), 'utf8')
 const setupsSrc  = readFileSync(join(here, '../../api/setups/setups.routes.js'), 'utf8')
 const usersSrc   = readFileSync(join(here, '../../api/user/user.routes.js'), 'utf8')
 
@@ -57,14 +56,13 @@ test('strategy routes: every WRITE is admin-gated, the industry reads are open t
     for (const l of routesSrc.split('\n').filter(l => /^router\.get\(/.test(l))) assert.doesNotMatch(l, /requireAdmin/, l)
 })
 
-// ── Argus and Mentor are the same desks for everyone ─────────────────────────
+// ── Mentor is the same desk for everyone ─────────────────────────────────────
 
-// Decided 2026-09-14 with the other desks: the scan desk and the trade desk have no admin side.
-// Scans and setups are owner-scoped (each user sees their own, admins included), the streams are
-// open, Talos watches every user's setups alike, and a trader reaches Argus through Atlas's sleeve
-// hop as well. Pinned so a gate cannot slip into a router unnoticed.
-test('scanner and setups routes: authenticated, never admin-gated', () => {
-    for (const src of [scannerSrc, setupsSrc]) {
+// Decided 2026-09-14 with the other desks: the trade desk has no admin side. Setups are owner-scoped
+// (each user sees their own, admins included) and Talos watches every user's setups alike. Pinned so a
+// gate cannot slip into the router unnoticed. (The scan routes left on 2026-11-09 with Argus's lists.)
+test('setups routes: authenticated, never admin-gated', () => {
+    for (const src of [setupsSrc]) {
         assert.match(src, /router\.use\(requireAuth\)/)
         assert.doesNotMatch(src, /requireAdmin/)
     }
@@ -115,7 +113,7 @@ const human    = { id: 'c4', participants: ['u1', 'u2'] }
 
 test('the strategy and analyst feeds are the admin-only ones; idea stays the retired one', () => {
     assert.deepEqual(ADMIN_BOT_IDS, ['strategy', 'analyst'])
-    assert.deepEqual(RETIRED_BOT_IDS, ['idea'])
+    assert.deepEqual(RETIRED_BOT_IDS, ['idea', 'kairos'])
 })
 
 test('visibleConversationsFor: an admin sees every live thread, still never a retired one', () => {

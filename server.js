@@ -65,7 +65,6 @@ import { workspaceRoutes }   from './api/workspace/workspace.routes.js'
 import { tradesRoutes }      from './api/trades/trades.routes.js'
 import { transcribeRoutes }  from './api/transcribe/transcribe.routes.js'
 import { portfolioRoutes }   from './api/portfolio/portfolio.routes.js'
-import { scannerRoutes }     from './api/scanner/scanner.routes.js'
 import { analystRoutes }     from './api/analyst/analyst.routes.js'
 import { strategyRoutes }    from './api/strategy/strategy.routes.js'
 import { aetherRoutes }      from './api/aether/aether.routes.js'
@@ -174,9 +173,8 @@ if (config.isProduction) {
     app.use(express.static(path.resolve('public')))
 }
 
-// ARCHIVED DESKS. The Idea agent (legacy `idea` kind) went on 2026-07-29 and was deleted
-// 2026-08-07; Kairos (`call`) and its monitor Hermes followed on 2026-08-18 and now live under
-// `archive/`, imported by nothing. Both return later — Kairos as a premium Mentor mode.
+// RETIRED DESKS. The Idea agent (legacy `idea` kind) went on 2026-07-29 and was deleted
+// 2026-08-07; the `call` desk and its monitor were deleted on 2026-11-10, data included.
 //
 // NB the `idea` KIND is not gone and must not be: /api/trade-ideas still serves it, and every
 // portfolio holding IS one of those documents (kindForDoc — an idea WITH a portfolioId). It is
@@ -214,7 +212,6 @@ app.use('/api/portfolio',   portfolioRoutes)
 // The queued list — what is waiting on the user, from both the off-hours queue and the entities
 // the market-open sweep just unparked. See docs/architecture/off-hours-queue.md.
 app.use('/api/pending-actions', pendingActionRoutes)
-app.use('/api/scanner',     scannerRoutes)
 app.use('/api/analyst',     analystRoutes)
 app.use('/api/strategy',    strategyRoutes)
 app.use('/api/aether',      aetherRoutes)

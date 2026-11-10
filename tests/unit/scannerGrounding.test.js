@@ -8,7 +8,10 @@ import { dirname, join } from 'path'
 import {
     makeGroundingLedger, recordSourced, recordTouched, groundingTier, normTicker, DISCOVERY_TOOLS,
 } from '../../services/scanner.grounding.js'
-import { _normalizeScan, _wrapForGrounding } from '../../services/agents/scanner.agent.service.js'
+import { _wrapForGrounding } from '../../services/agents/scanner.agent.service.js'
+
+// The list enforcement tests (_normalizeScan dropping ungrounded names) went to archive/tests/scannerGrounding.test.js
+// on 2026-11-09 with Argus's lists; the ledger now stamps the single pick's provenance.
 
 // Argus grounding — "names come from the tape, never from memory" (slice 1, A1+B1).
 
@@ -55,54 +58,12 @@ test('recordTouched ignores blanks/non-strings; recordSourced ignores empty', ()
     assert.equal(led.sourcedText, '')
 })
 
-// ── _normalizeScan enforcement (A1: drop ungrounded; B1: accept validated) ────
-function cand(ticker, total = 80, extra = {}) {
-    return { ticker, direction: 'long', thesis: 't', analysis: 'a',
-        score: { total, catalyst: 80, technical: 70, relativeStrength: 60, liquidity: 90 }, ...extra }
-}
-
-test('with ledger: ungrounded candidate is dropped; survivors carry their tier', () => {
-    const led = makeGroundingLedger()
-    recordSourced(led, '  AAPL   Apple Inc')
-    recordTouched(led, ['TSLA'])
-    const scan = { thesis: 's', direction: 'long', candidates: [cand('AAPL', 80), cand('TSLA', 70), cand('FAKE', 95)] }
-    const out = _normalizeScan(scan, null, led)
-    assert.deepEqual(out.candidates.map(c => c.ticker), ['AAPL', 'TSLA'])   // FAKE dropped despite top score
-    assert.equal(out.candidates.find(c => c.ticker === 'AAPL').grounding, 'sourced')
-    assert.equal(out.candidates.find(c => c.ticker === 'TSLA').grounding, 'validated')
-})
-
-test('with ledger: an all-ungrounded scan collapses to null (no fabricated list)', () => {
-    const led = makeGroundingLedger()
-    const scan = { thesis: 's', direction: 'long', candidates: [cand('FAKE', 90), cand('ALSO', 80)] }
-    assert.equal(_normalizeScan(scan, null, led), null)
-})
-
-test('rehydrated keep:true candidate is exempt from the drop; grounding carries over', () => {
-    const led = makeGroundingLedger()   // empty tape — nothing sourced/touched this session
-    const editList = { thesis: 's', candidates: [
-        { ticker: 'GRND', direction: 'long', thesis: 'kept', analysis: 'prior', grounding: 'sourced' },
-    ] }
-    const scan = { thesis: 's', direction: 'long', candidates: [{ ticker: 'GRND', keep: true }] }
-    const out = _normalizeScan(scan, editList, led)
-    assert.deepEqual(out.candidates.map(c => c.ticker), ['GRND'])           // not dropped
-    assert.equal(out.candidates[0].grounding, 'sourced')                    // carried from prior save
-    assert.equal(out.candidates[0].analysis, 'prior')                      // rehydrated verbatim
-})
-
-test('no-ledger path (back-compat): nothing dropped, grounding stays null', () => {
-    const scan = { thesis: 's', direction: 'long', candidates: [cand('FAKE', 90)] }
-    const out = _normalizeScan(scan)   // no ledger
-    assert.deepEqual(out.candidates.map(c => c.ticker), ['FAKE'])
-    assert.equal(out.candidates[0].grounding, null)
-})
-
 // ── the prompts and the ledger agree ─────────────────────────────────────────
 // The failure this catches is silent and total: a prompt that presents a tool as a grounded SOURCE
 // while the ledger doesn't count it teaches Argus to source names that are then dropped at
 // normalize. The user just gets a shorter list — no error, no explanation. That is exactly what
 // `web_search` did ("This is grounding, not memory") until the theme step was written.
-const PROMPTS = ['scanner_system_prompt.md', 'scanner_profile_investing.md']
+const PROMPTS = ['scanner_system_prompt.md']   // the investing profile was archived 2026-11-09
 function readPrompt(name) {
     return readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../../prompts/', name), 'utf8')
 }
@@ -142,9 +103,7 @@ for (const name of PROMPTS) {
 test('a web-search lead ships once a per-name tool has run on it', () => {
     const led = makeGroundingLedger()               // never on the tape — search found it
     recordTouched(led, ['LEAD'])                    // …then get_fundamentals ran
-    const scan = { thesis: 's', direction: 'long', candidates: [cand('LEAD', 75)] }
-    const out = _normalizeScan(scan, null, led)
-    assert.equal(out.candidates[0].grounding, 'validated')
+    assert.equal(groundingTier('LEAD', led), 'validated')
 })
 
 // ─── the wrapper keeps the loop's context ─────────────────────────────────────

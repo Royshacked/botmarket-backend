@@ -24,8 +24,7 @@ const LOG = '[marketData]'
 // CODE_MAP: "reuse mechanisms, not schemas".
 //
 // The consumers today are Mentor (through trading.tools), Atlas, Argus, and the SMC tools that reuse
-// _fetchCandleRows. This header named Idea and Kairos, both archived on 2026-08-18 — a reader
-// chasing who shares this was sent to dead code.
+// _fetchCandleRows.
 
 // Per timeframe: Yahoo bar spec + how many candles to return + lookback window.
 // `aggregate` (2hr/4hr) means fetch native 1hr bars and combine N→1 server-side,

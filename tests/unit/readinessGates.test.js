@@ -67,10 +67,8 @@ test('only entry moves the lifecycle', () => {
 // Where the two monitors genuinely disagree the difference is a PARAMETER, not a second copy.
 // These assert it stays a deliberate choice rather than being "tidied" into a single answer.
 
-// Each test below used to PAIR its assertion with Hermes's opposite one — that contrast was the
-// point of the section. Hermes was archived on 2026-08-18 and took its half with it (the paired
-// versions are in archive/tests/hermesMonitor.test.js). What is kept is the live monitor's
-// behaviour, which is what a regression would actually break.
+// Each test below used to PAIR its assertion with another monitor's opposite one. That monitor is
+// gone; what is kept is the live monitor's behaviour, which is what a regression would break.
 test('the next read is the next candle close of the rung, plus the provider lag', () => {
     // There is no cadence band any more: the rung IS the pace (docs/design/talos-per-candle.md).
     const setup = { asset: 'BTCUSD', status: 'looking', valid_until: null }

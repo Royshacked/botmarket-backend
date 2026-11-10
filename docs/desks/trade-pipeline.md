@@ -7,6 +7,10 @@
 > pick rides the chain back to Mentor, who builds; Generate ends the session. All of it is one chat (the unified
 > chat): the floor moves, the user never changes screen. Live-run end to end on 2026-10-19 (SCCO).
 
+> **KAIROS AND HERMES WERE DELETED 2026-11-10** — code in both repos and their data (`scripts/delete-kairos.mjs`).
+> Everything below that describes them, the `call` kind or the "silent, not gone" strangler is history; `git log`
+> before that date has the code.
+
 How a single asset becomes a monitored trade. One path, three desks, one entity kind (`setup`), one
 monitor (Talos).
 
@@ -28,16 +32,14 @@ Design record, 2026-08-09. Nothing here is built yet except where marked **BUILT
 | | state |
 |---|---|
 | Mentor (→ Argus → Mentor) → Talos | the live path — every trade starts at Mentor (2026-10-19) |
-| Kairos + Hermes | **ARCHIVED 2026-08-18** — under `archive/`, imported by nothing |
+| Kairos + Hermes | **DELETED 2026-11-10** (archived 2026-08-18) — code and data |
 | Argus → Mentor handoff | **BUILT 2026-08-10** — backend seed + lens recommendation, FE wired end to end |
 | Trading Desk steps | **REWIRED 2026-08-10** — build step is Mentor, not Kairos (`agentMeta.jsx`) |
 | Axl's prompt | **REWIRED 2026-08-13** — Kairos is no longer offered as a desk; a new trade routes to Mentor, and `<edit>call ID</edit>` is the only thing that still opens Kairos |
-| `call` kind | frozen. Calls in flight run to natural close under Hermes |
+| `call` kind | **DELETED 2026-11-10** with its documents |
 
-**Silent, not gone.** Hermes must keep running until the last live `call` closes — the same strangler
-used for legacy tree-`idea`s. Nothing in flight migrates. See
-[kairos-hermes.md](../../archive/docs/kairos-hermes.md), which moved to `archive/` with the desk on
-2026-08-18, for what that path was.
+**Silent, then gone.** Hermes was to keep running until the last live `call` closed. It was archived on
+2026-08-18 with one expired call in Mongo, and deleted with it on 2026-11-10.
 
 **One capability was dropped, then came back as a route.** Kairos emitted ~~`<scan_request>`~~ — "let's look for
 another name" — which walked the desk BACKWARDS to Argus. Mentor emitted nothing for a while; since 2026-10-19 it

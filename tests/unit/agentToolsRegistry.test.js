@@ -44,7 +44,7 @@ const SNAPSHOT  = JSON.parse(fs.readFileSync(join(__dirname, '../fixtures/agentT
 // reading as an orphan schema below.
 // Mentor had the same gap Axl did, for the same reason: it borrowed TRADING_TOOLS wholesale, so it
 // was covered only transitively and its own list was never change-detected. It has its own array
-// now (Kairos's kit + the `consult` sidecar), which is also what stops `consult` reading as an
+// now (the trading kit + the `consult` sidecar), which is also what stops `consult` reading as an
 // orphan schema below.
 const LIVE = {
     aether:    AETHER_TOOLS,
@@ -52,7 +52,7 @@ const LIVE = {
     portfolio: PORTFOLIO_TOOLS,
     scanner:   SCANNER_TOOLS,
     analyst:   ANALYST_TOOLS,
-    kairos:    TRADING_TOOLS,
+    trading:   TRADING_TOOLS,
     mentor:    MENTOR_TOOLS,
     axl:       AXL_TOOLS,
 }
@@ -128,8 +128,7 @@ test('the registry has no orphans — every schema is used by some agent', () =>
 
 // The five AUTHORING desks carry `consult` (services/deepThink.service.js). The two exclusions are
 // deliberate and each has its own reason, which is why they are listed rather than omitted:
-//   • kairos — the call builder is asleep (CLAUDE.md). In-flight calls still run there, but nothing
-//     new is built at that desk, so it does not gain a tool. If it wakes, this row is the reminder.
+//   • trading — the shared kit itself, not a desk: Mentor's own array appends `consult` to it.
 //   • axl    — reception authors nothing, and its clause would have ruled out routing/explaining,
 //     i.e. nearly everything it does. A declaration read on every turn and reached for almost never
 //     loses money. See the note at the foot of axl.agent.service.js's TOOLS.

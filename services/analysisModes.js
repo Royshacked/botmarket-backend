@@ -1,9 +1,7 @@
 // The analytical LENSES a trade can be built through — the shared vocabulary, not one desk's.
 //
-// Renamed from kairos.modes.js on 2026-08-18. Kairos defined these and is now archived, but the
-// words outlived it: Mentor recommends one per build (the risk-based mode is `thesis`; docs/design/mentor-modes.md),
-// Talos and the flip test read it, and setup.schema normalizes it. A lens is a way of reading a chart, which was never
-// Kairos-specific — only the tool SUBSETTING was, and that stayed behind with the desk.
+// Mentor recommends one per build (the risk-based mode is `thesis`; docs/design/mentor-modes.md), Talos and the flip
+// test read it, and setup.schema normalizes it. A lens is a way of reading a chart.
 //
 // discretionary : classical price action — structure, momentum, false-breaks. (default)
 // smc           : strict smart-money — order-blocks, FVG, liquidity, BOS/CHoCH, premium/discount.

@@ -2,8 +2,8 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { buildStudies } from '../../monitoring/evaluators/chart.evaluator.js'
 
-// buildStudies drives what indicators get drawn on a rendered chart. The Kairos/Idea
-// get_chart tools and the Hermes monitor now pass { fillDefaults: false } so a chart is
+// buildStudies drives what indicators get drawn on a rendered chart. The trading desk's
+// get_chart tool and the monitor now pass { fillDefaults: false } so a chart is
 // PLAIN unless the caller explicitly names overlays — this keeps a price-action read from
 // being primed toward moving averages / VWAP. Lock that contract.
 

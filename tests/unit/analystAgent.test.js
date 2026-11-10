@@ -164,7 +164,7 @@ test('resolveCoverage: spreads original chatState fields through', async () => {
 
 // ── sanitizeScanSeed, as the Analyst reads it (Argus investing candidate → research hand-off, P4b) ──
 test('seed: uppercases ticker, keeps sector/thesis/analysis, requires a ticker', () => {
-    // One shared parser now serves Kairos, Analyst and Mentor, so it returns the UNION of what a
+    // One shared parser now serves Analyst and Mentor, so it returns the UNION of what a
     // hand-off can carry and each desk reads the fields it has a use for. Analyst reads `sector`
     // and ignores `direction`/`window` — they arrive as nulls, never as absent
     // keys, so a desk cannot tell "not sent" from "not parsed".

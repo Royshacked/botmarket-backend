@@ -47,7 +47,7 @@ import { journalEntry }  from './monitorJournal.js'
 const LOG        = '[execution.reconciler]'
 const EPS        = 1e-6   // quantity comparison slack
 
-// Injection seam (matches the Hermes monitor's `_deps` pattern). Defaults ARE the real
+// Injection seam (the monitors' `_deps` pattern). Defaults ARE the real
 // singletons, so production behavior is byte-identical — the seam is inert unless a test
 // overrides it. Enables the regression harness to drive the reconciler against fakes without
 // real IO. See docs/architecture/entity-model.md P1b.
@@ -256,7 +256,7 @@ async function _onReduced(exec) {
  * Stamp the broker's live volume onto the leg that holds this position.
  *
  * Deliberately narrow: it touches ONE leg's quantity and nothing else. The entity's own `quantity`
- * is left alone here because this runs for every kind — a legacy idea, a call, a setup, a holding —
+ * is left alone here because this runs for every kind — a legacy idea, a setup, a holding —
  * and on a multi-account entity `quantity` means idea units, not any single account's size. The
  * portfolio paths that DO own that number keep it in step themselves (see `_syncItemQuantity`).
  *
@@ -522,7 +522,7 @@ async function _finalizeClose(idea, { reason, pnl, at, accountId, positionId, pr
 
     // The exit line. It rides the same guarded write as the status flip, so the close that wins is
     // the close that journals — and a closed entity is out of every polled status before its monitor
-    // wakes, which is why this cannot be left to Hermes or Talos.
+    // wakes, which is why this cannot be left to Talos.
     const entry = journalEntry('exit', { nowMs: closedAt, entity: idea, price, closedReason: reason, pnl })
 
     const result = await _deps.entityRepo.finalizeClose(idea.id, patch, entry)

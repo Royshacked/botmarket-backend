@@ -5,7 +5,7 @@ import { makeEntityCrud, ownsEntity } from '../../services/entity/entityCrud.ser
 import { LIVE_POSITION } from '../../services/entity/vocabulary.js'
 
 // entityCrud is the ONE owner-scoped list/read/patch/delete over `entities`, replacing four
-// hand-rolled copies (tradeIdeas, kairos, setups). These lock the two things a shared CRUD must
+// hand-rolled copies (tradeIdeas, setups, ...). These lock the two things a shared CRUD must
 // never get wrong — the owner guard and the kind scope — plus the drift the copies had already
 // accumulated (not_found vs forbidden, missing admin paths).
 

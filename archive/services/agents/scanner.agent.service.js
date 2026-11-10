@@ -1,0 +1,645 @@
+import { fileURLToPath }  from 'url'
+import { makePhaseCapture, runAgentStream } from '../../../services/agentIO.js'
+import { toolsFor } from '../../../services/agentTools.registry.js'
+import { consultDescription } from '../../../services/deepThink.service.js'
+import { dirname, join }  from 'path'
+import { getQuotes } from '../../../providers/yahoofinance.provider.js'
+import { getRiskMetrics, getPriceAction, getCycleAnalysis } from '../../../services/priceAnalytics.service.js'
+import { getFundamentals, getEarningsCalendar, getEarnings, screenCandidates, getMarketMovers, getAnalystActions, getSectorSnapshot } from '../../../providers/fmp.provider.js'
+import { getSecFilings } from '../../../providers/sec.provider.js'
+import { makeCandlesHandler, makeIndicatorsHandler, makeChartHandler } from '../../../services/tools/marketData.tools.js'
+import { makeStructureVisionHandler, OB_VISION, FB_VISION } from '../../../services/tools/priceStructure.tools.js'
+import { cleanConviction } from '../../../services/conviction.util.js'
+import { logger }        from '../../../services/logger.service.js'
+import { makeNewsHandlers } from '../../../services/tools/news.tools.js'
+import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, cleanReply, makeToolHandler, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, BREVITY_RULE, VENUE_RULE, TRADE_HORIZONS, cachedBlock } from '../../../services/agentUtils.js'
+import { makeTradingContextHandlers, buildVenueSection } from '../../../services/tools/tradingContext.tools.js'
+import { makeMarketHoursHandlers, MARKET_HOURS_TOOL_SPEC } from '../../../services/tools/marketHours.tools.js'
+import { makeHouseIndustriesHandlers, HOUSE_INDUSTRIES_TOOL_SPEC } from '../../../services/tools/houseIndustries.tools.js'
+import { houseLabels, booksForStyle, wireLabel } from '../../../services/houseLabel.service.js'
+import { buildTagCaptures } from '../../../services/llmStream.util.js'
+import { DESKS } from '../../../services/desks/registry.js'
+import { makeRouteCapture, buildRouteRule } from '../../../services/routing.util.js'
+import { isToolError } from '../../../services/toolResult.util.js'
+import { makeGroundingLedger, recordSourced, recordTouched, groundingTier, DISCOVERY_TOOLS, PER_NAME_TICKER_ARGS, SOURCED_EXTRACT } from '../../../services/scanner.grounding.js'
+import { normalizeSelection, selectionWeights } from '../../../services/investorSchools.js'
+
+const __dirname     = dirname(fileURLToPath(import.meta.url))
+const LOG   = '[scannerAgent]'
+// One prompt per Argus PROFILE (P4a): trading = the technical/catalyst trade scanner (unchanged);
+// investing = the fundamental/quality screen for portfolio candidates (→ Analyst). Hot-reloaded.
+const _profilePrompt = {
+    trading:   makePromptLoader(join(__dirname, '../../prompts/scanner_system_prompt.md'), LOG),
+    investing: makePromptLoader(join(__dirname, '../../prompts/scanner_profile_investing.md'), LOG),
+}
+// The Kairos hand-off is a MODE of the trading profile, not a profile of its own: it shares the whole
+// screening spine and differs only in what it converges on (one name, not a list) and what it emits
+// (<kairos_pick>, not <scan_list>). So it lives in its own module, injected as its own cached block
+// on a hand-off turn — the same shape as kairos_mode_*.md. It used to sit INSIDE the trading prompt,
+// where a list-building turn read fifty lines of "find ONE ticker, do not emit a scan_list" that did
+// not apply to it, and a hand-off turn read the list machinery and phase gate it had to override.
+const _handoffMode = makePromptLoader(join(__dirname, '../../prompts/scanner_mode_handoff.md'), LOG)
+
+// RADAR CUT is the second mode, and the same shape: the Events radar hands Argus a universe it did
+// not screen for, and the module replaces the DISCOVERY half of the spine where hand-off replaces
+// the list half. The two are mutually exclusive — one ends in a pick, the other in a list — which
+// is what keeps the system prompt at two cached blocks and inside the breakpoint budget below.
+const _radarMode = makePromptLoader(join(__dirname, '../../prompts/scanner_mode_radar.md'), LOG)
+const MAX_MESSAGES = DESKS.scanner.maxMessages
+
+export const TOOLS = toolsFor({
+    web_search: '',
+    get_trading_context: `The user's trading venue + accounts: which modes are available (paper / live / manual), which live brokers are connected, and every account with its balance, capabilities and open positions. Use it to keep a list ACTIONABLE — the account size a name has to be sizeable in, and what the user already holds. No arguments.`,
+    check_broker_symbol: `Check whether a candidate is actually TRADABLE at the user's connected live broker, and what the broker calls it. A name that screens beautifully but the broker does not list is a dead candidate — check before you commit it to the list, and drop or flag it if it is unavailable. tradable null means the broker could not be reached: UNKNOWN, never treat as unavailable.`,
+    screen_candidates: `Screen the US universe for names that fit the scan's shape — the grounded discovery leg (Phase 2). Filter by sector, market cap, price, beta, dividend, and a liquidity floor (volume). NOTE: this is a FUNDAMENTAL & liquidity screen — it CANNOT filter for chart setups (52-week-high, base, RSI). For a technical angle, use it to define a liquid, in-sector universe, then confirm the setup per-name with get_candles/get_indicators. Returns a compact list; qualify each hit before listing it.`,
+    get_market_movers: `Today's biggest movers — the momentum / gap / "what's moving" starting pool for Phase-2 discovery. kind="gainers" (biggest % up), "losers" (biggest % down — short pool), or "active" (highest volume). Grounded discovery, not a watchlist: qualify every name (relative strength, tradability, a real catalyst) before it makes the list. US-listed.`,
+    get_sector_snapshot: `Today's sector rotation — every sector ranked leaders→laggards by average move. Use it in Phase 2 for a sector-rotation angle (find the leading/lagging groups, then screen_candidates INSIDE them), and in Phase 3 as the sector leg of the relative-strength check (is the name's sector leading?). No arguments.`,
+    get_analyst_actions: `Recent analyst rating changes — a catalyst pool beyond earnings. With NO symbols: the market-wide latest upgrades/downgrades feed (Phase-2 discovery of ratings-driven names). With symbols: each name's recent rating actions (Phase-3 validation of a shortlist — is a fresh upgrade/downgrade backing the move?). US-listed equities.`,
+    get_price_action: `Recent price-action summary for a ticker: 1d/5d/1m/3m moves, position within the 1y range, and relative volume. Use it to confirm a name is actually moving the way your thesis claims.`,
+    get_quotes: `Get current prices for several tickers at once.`,
+    get_risk_metrics: `Annualized volatility and ATR (from 1y of daily prices) for a ticker. Use it to gauge how violent a name is before putting it on the list.`,
+    get_candles: `Fetch recent OHLCV candles for a ticker + timeframe — the exact price structure to name the setup and run the structure-respect check (swing highs/lows, prior-day levels, breakout shelves, base/range). Baseline Phase-3 tool: read the structure from the candles before you score \`technical\`. Always call it before committing to a named setup or a level.`,
+    get_indicators: `Compute exact indicator VALUES from recent candles — the SAME math the monitor uses (EMA, SMA, RSI, MACD, ATR, VWAP). Use it to CONFIRM the technical read with hard numbers: price vs EMA/VWAP for location, RSI for momentum/divergence, MACD for trend, ATR for how violent the name is. Price action / structure (get_candles) leads; indicators only confirm — a name clean on price with soft indicators is a lower \`technical\` score, not a reject.`,
+    get_chart: {
+        description: `Render an actual candlestick chart IMAGE (KLineCharts, optional indicator overlays) and look at it directly for VISUAL / structural analysis — chart patterns, trend, where price sits vs moving averages / VWAP, base/breakout geometry. Use it to CONFIRM the named setup on the strongest names. EXPENSIVE (image render + vision) — reserve it for the top shortlist and the hand-off single-pick, NOT every candidate. For exact numeric levels prefer get_candles.`,
+        omit: ["show_to_user"],
+    },
+    get_orderblocks: {
+        description: `Detect ORDER BLOCKS on a plain candlestick chart (one ticker + timeframe): the last opposing candle/cluster before an impulsive structure break, whether it is fresh/untested or mitigated, and its zone vs current price. Angle-triggered — reach for it when the scan angle is structure / supply-demand / entry-zone hunting. Levels are approximate; confirm exact prices with get_candles.`,
+        omit: ["show_to_user"],
+    },
+    get_false_breaks: {
+        description: `Detect FALSE BREAKS / liquidity sweeps on a plain candlestick chart (one ticker + timeframe): where price pushed beyond a clear prior high/low, failed, and closed back inside the range (a stop run / trap), whether the level was reclaimed, and how recent. Angle-triggered — reach for it for a failed-breakout / reversal / squeeze angle. Levels are approximate; confirm exact prices with get_candles.`,
+        omit: ["show_to_user"],
+    },
+    get_fundamentals: `Company fundamentals for a single ticker: sector/industry, market cap, valuation, margins, ROE, growth. Use it to qualify a longer-horizon pick. ETFs return exposure/profile only.`,
+    get_earnings: `For a SINGLE ticker: its next earnings date + EPS estimate, plus the last 4 quarterly EPS actuals vs estimates (with surprise %). Use it to qualify one scan candidate — is a print imminent (gap risk), and does the name have a track record of beating or missing. For the forward "who reports when" across a period, use get_earnings_calendar. US equities only.`,
+    get_earnings_calendar: `Upcoming earnings dates (with EPS/revenue estimates) between two dates (YYYY-MM-DD, window up to ~3 months). Optionally filter to specific symbols. Use it for the forward-looking "who reports when" — especially for week/multi-day scans. Pass symbols when you have them: a market-wide ask returns only the soonest rows, and says so.`,
+    get_sec_filings: `What a company has actually filed with the SEC: latest 8-K (item 2.02 = the real earnings release), 10-Q, 10-K, with dates and links. Use it to confirm an earnings event truly dropped. US filers only; most ETFs and foreign tickers aren't in EDGAR.`,
+    get_cycle_analysis: {
+        description: `Detect recurring cycles in a stock's price history. Two modes: "price" finds the dominant peak-to-peak / trough-to-trough interval, tells you the current phase, and estimates the next turning point. "calendar" shows how the stock behaved in a specific calendar window (e.g. late June) over the past 3–5 years — average return, hit rate, and whether this year is tracking with the historical pattern. Use "price" for recurring-interval / cyclic-window theses ("cycles every ~6 weeks"); use "calendar" for seasonal / calendar-pattern theses ("June is always weak"). The angle makes the mode clear — pick it directly rather than asking which they mean.`,
+        omit: ["timeframe"],
+    },
+    get_short_interest: `Short interest for a US-listed single stock/ADR: short % of float, days-to-cover (short ratio), and month-over-month change. FINRA data, reported bi-monthly with a ~2-week lag — use it for squeeze potential and crowded-bearish-positioning context on a scan candidate, not as a live read. No data for ETFs, crypto, FX or futures.`,
+    get_options_context: `Options positioning for a US equity/ETF: put/call ratio (by open interest and by volume) and at-the-money implied volatility for the nearest expiry. Use it to gauge directional skew and how big a move the market is pricing (elevated IV = expensive options / large expected move, often around a catalyst). Quotes ~15-min delayed. No data for crypto, FX or futures.`,
+    get_derivatives_context: {
+        description: `Crypto-perp positioning from Binance: funding rate (who pays to hold the trade — a crowding signal), open interest (committed leverage), and the global long/short account ratio (retail skew). This is the crypto analog to short-interest/options sentiment. Crypto perps only (BTC, ETH, SOL…) — not equities, FX or traditional futures.`,
+        cache: true,
+    },
+    // APPENDED, never inserted — the snapshot compares by index and prompt caching keys off the
+    // array prefix.
+    get_market_hours: MARKET_HOURS_TOOL_SPEC.get_market_hours,
+    // Pythia's industries for the scan's book — where a swing / long-term scan looks FIRST (argus-on-pythia.md §3.2).
+    // Inserted before `consult`, which stays last.
+    get_house_industries: HOUSE_INDUSTRIES_TOOL_SPEC.get_house_industries,
+    // Argus had web search and no news feed (Roy, 2026-10-24: "Argus needs a news tool") — inserted before `consult`.
+    get_news: `Recent NEWS on a name — dated, attributed headlines with the publisher's own summary, newest first. \`companies\` with the TICKER as \`subject\` is the one you reach for: is there a real, DATED story under this move, or a stale or recycled one? It is the first place to look before web_search — cached and dated where a search is neither. \`topic\` for a theme with no ticker; \`headlines\` for the market's front page. A headline is a fact to weigh — what was WRITTEN — never a level or a call.`,
+    // Appended last — contractually. The reasoning sidecar (services/deepThink.service.js): one
+    // bounded decision put to a stronger model and handed back as a tool result. The mechanism half
+    // of this description is shared with every other desk; the clause below is Argus's own judgment
+    // about WHEN.
+    //
+    // Argus needs the TIGHTEST clause of any desk, and this one says so explicitly: a scan is
+    // dozens of names, and a desk that consults per candidate turns a cost saving into a per-scan
+    // multiplier. The two cases below are both once-per-scan by construction.
+    consult: consultDescription(`This desk screens in BULK, so the bar is higher here than anywhere else: a consult per candidate would cost more than the scan is worth. Reach for it in exactly two situations, both of which happen at most once per scan: **the final cut**, when two or three finalists are genuinely close and the ranking is the thing the user will act on; and **an angle that resists screening** — a thesis the tools cannot express, where you have to decide what to screen FOR before you can screen at all. Never per candidate, and never to qualify a name a tool call would qualify.`),
+})
+
+const TOOL_HANDLERS = {
+    screen_candidates: makeToolHandler('screen_candidates',
+        (filters) => screenCandidates(filters || {}),
+        (err) => `Could not run screen: ${err.message}`, LOG),
+    get_market_movers: makeToolHandler('get_market_movers',
+        ({ kind, limit }) => getMarketMovers(kind, limit),
+        (err) => `Could not fetch market movers: ${err.message}`, LOG),
+    get_sector_snapshot: makeToolHandler('get_sector_snapshot',
+        () => getSectorSnapshot(),
+        (err) => `Could not fetch sector snapshot: ${err.message}`, LOG),
+    get_analyst_actions: makeToolHandler('get_analyst_actions',
+        ({ symbols, limit }) => getAnalystActions(Array.isArray(symbols) ? symbols : [], limit),
+        (err) => `Could not fetch analyst actions: ${err.message}`, LOG),
+    get_candles:    makeCandlesHandler(LOG),
+    get_indicators: makeIndicatorsHandler(LOG),
+    // Vision tools (KLineCharts render + visual read). onChart: null → the image goes to
+    // the LLM only, not the scan UI. This is DELIBERATE: the scanner does not surface charts
+    // to the user (decided 2026-07-22) — the render is an internal vision read, not a deliverable.
+    get_chart:        makeChartHandler({ log: LOG, onChart: null, readText: 'Read the price STRUCTURE visually — trend, base/breakout geometry, S/R, where price sits vs any overlays. Confirm the named setup; indicators only confirm, never lead.' }),
+    get_orderblocks:  makeStructureVisionHandler({ log: LOG, kind: 'orderblocks',  vision: OB_VISION, onChart: null }),
+    get_false_breaks: makeStructureVisionHandler({ log: LOG, kind: 'false_breaks', vision: FB_VISION, onChart: null }),
+
+    get_price_action: makeToolHandler('get_price_action',
+        ({ ticker }) => getPriceAction(ticker),
+        (err, { ticker }) => `Could not fetch price action for ${ticker}: ${err.message}`, LOG),
+    get_quotes: makeToolHandler('get_quotes',
+        ({ tickers }) => getQuotes(tickers),
+        (err) => `Could not fetch quotes: ${err.message}`, LOG),
+    get_risk_metrics: makeToolHandler('get_risk_metrics',
+        ({ ticker }) => getRiskMetrics(ticker),
+        (err, { ticker }) => `Could not fetch risk metrics for ${ticker}: ${err.message}`, LOG),
+    get_fundamentals: makeToolHandler('get_fundamentals',
+        ({ ticker }) => getFundamentals(ticker),
+        (err, { ticker }) => `Could not fetch fundamentals for ${ticker}: ${err.message}`, LOG),
+    get_earnings: makeToolHandler('get_earnings',
+        ({ ticker }) => getEarnings(ticker),
+        (err, { ticker }) => `Could not fetch earnings for ${ticker}: ${err.message}`, LOG),
+    get_earnings_calendar: makeToolHandler('get_earnings_calendar',
+        ({ from, to, symbols }) => getEarningsCalendar(from, to, Array.isArray(symbols) ? symbols : []),
+        (err) => `Could not fetch earnings calendar: ${err.message}`, LOG),
+    get_sec_filings: makeToolHandler('get_sec_filings',
+        ({ ticker }) => getSecFilings(ticker),
+        (err, { ticker }) => `Could not fetch SEC filings for ${ticker}: ${err.message}`, LOG),
+    get_cycle_analysis: makeToolHandler('get_cycle_analysis',
+        ({ ticker, mode, calendar_window, lookback_years }) => getCycleAnalysis(ticker, mode, calendar_window ?? null, lookback_years ?? 4),
+        (err, { ticker }) => `Could not compute cycle analysis for ${ticker}: ${err.message}`, LOG),
+    ...COMMON_TOOL_HANDLERS,
+    ...makeNewsHandlers(),
+    // Unbound (market hours belong to the instrument, not the user) — so it lives in the
+    // static map, unlike the venue handlers that are rebuilt per request around a userId.
+    ...makeMarketHoursHandlers(),
+    ...makeHouseIndustriesHandlers(),
+}
+
+// Wrap the module-level handlers with a per-session grounding recorder. A
+// successful discovery call feeds its output text to the tape (`sourced`); a
+// successful per-name call records the ticker it ran on (`touched`). A failed
+// call (toolError — e.g. a bogus symbol that errored) confers nothing, so a
+// fabricated ticker the model merely *attempted* never gets credited.
+function _wrapForGrounding(handlers, ledger) {
+    const wrapped = {}
+    for (const [name, fn] of Object.entries(handlers)) {
+        const reader = PER_NAME_TICKER_ARGS[name]
+        const isDiscovery = DISCOVERY_TOOLS.has(name)
+        // `ctx` rides through untouched: it is the loop's booking hook, and get_orderblocks /
+        // get_false_breaks (both per-name tools, so both wrapped here) spend a model call of
+        // their own that must reach it.
+        wrapped[name] = (reader || isDiscovery)
+            ? async (args, ctx) => {
+                const ret = await fn(args, ctx)
+                if (!isToolError(ret)) {
+                    if (isDiscovery && typeof ret === 'string') recordSourced(ledger, SOURCED_EXTRACT[name] ? SOURCED_EXTRACT[name](ret) : ret)
+                    if (reader) recordTouched(ledger, reader(args))
+                }
+                return ret
+            }
+            : fn
+    }
+    return wrapped
+}
+
+export const scannerAgentService = { chatStream }
+
+// Exported for unit tests (scanner scorecard normalization + ranking).
+export { _normalizeScan, _cleanScore, scannerToolsForProfile, _wrapForGrounding }
+
+// Tool subset per profile (P4a). Investing drops the technical/momentum/vision kit (candles, indicators,
+// chart, orderblocks, movers, positioning, cycles) and keeps the fundamental screen. Trading = full kit.
+const INVESTING_TOOL_NAMES = new Set([
+    'web_search', 'screen_candidates', 'get_fundamentals', 'get_sector_snapshot',
+    'get_earnings', 'get_earnings_calendar', 'get_analyst_actions', 'get_sec_filings',
+    'get_quotes', 'get_price_action', 'get_house_industries',
+])
+function scannerToolsForProfile(profile) {
+    return profile === 'investing' ? TOOLS.filter(t => INVESTING_TOOL_NAMES.has(t.name)) : TOOLS
+}
+
+// Injected into the volatile context when Argus is invoked as a discovery hand-off: it flips Argus
+// from "build a watchlist" to "find ONE ticker + emit <kairos_pick>" (see the prompt's BUILD
+// HAND-OFF MODE section). The bias/horizon ride in the seeded opening message.
+// The mode MARKER only — what the mode means is the module (scanner_mode_handoff.md), injected as
+// its own cached block. Mirrors Kairos's "ACTIVE MODE: x" line: the volatile block declares which
+// lens is live, the cached module carries it.
+//
+// The DESTINATION belongs here and not in the module for a mechanical reason: the module is a cached
+// block, so interpolating a per-request desk name into it would give every destination its own cache
+// entry and defeat the breakpoint. The volatile tail is already rebuilt per turn, so naming the desk
+// here is free.
+const HANDOFF_DESKS = {
+    mentor: 'Mentor, which builds a `setup` the user shapes level by level',
+}
+// Unknown/absent destination degrades to the generic phrasing rather than guessing a desk: the
+// module already tells Argus to name only what this line names, so "the build desk" is honest where
+// a wrong brand name would be a lie the user reads.
+// The universe itself rides in the seeded OPENING MESSAGE, not here and not through editList: it is
+// tens of kilobytes that never change within a session, so history caching carries it for free,
+// where a volatile system block would re-send it every turn. editList was the other candidate and is
+// wrong on meaning — it tells Argus it is REFINING a list and to keep untouched names, which is the
+// opposite of a cut.
+const RADAR_CONTEXT = 'ACTIVE MODE: RADAR CUT — the Events radar handed you the board below. The '
+    + 'RADAR CUT MODE module is in force: it replaces the discovery half of the spine. Phases 1-2 are '
+    + 'already done, you start at Phase 3, and you cut to the few names worth watching in the coming week.'
+
+// What each repricing state is called in front of the model. Written as verdicts rather than as data,
+// because the row is read once and skimmed: "TAKEN" says leave it in a way "+8.4%" never did.
+const REPRICING_LABEL = {
+    not_yet: 'NOT YET — the move is still ahead',
+    taken:   'TAKEN — the market has already made this move',
+    against: 'AGAINST — the market moved the other way from the claim',
+    unknown: 'NOT MEASURED — no move on record, which is not the same as "not yet"',
+}
+
+/**
+ * The dated facts on one row, as the cut needs to read them.
+ *
+ * THESE USED TO BE TOOL CALLS — a market-wide earnings calendar and a hundred-wide quote fan-out, both
+ * fired mid-stream before the model could judge anything, and both able to fail. They are on the row
+ * now (aetherScanUniverse), so the first pass over the board costs nothing and cannot come back empty.
+ *
+ * "NO PRINT" AND "NOT KNOWN" ARE DIFFERENT ANSWERS and must not render the same. `null` is the
+ * calendar answering that nothing is scheduled in its window; a MISSING key is the calendar not
+ * having been readable at all (and missing rather than a sentinel because the board round-trips
+ * through JSON — see _attachEarnings). A model shown "no earnings" for both would leave names off for
+ * a fact nobody established, which is the exact failure this whole change exists to undo.
+ */
+function _radarFacts(c) {
+    const out = []
+    if (c.earnings === undefined)  out.push('earnings date UNKNOWN (calendar unavailable — do not read this as "no catalyst")')
+    else if (c.earnings === null)  out.push('no print in the next 30 days')
+    else out.push(`earnings ${c.earnings.date}`)
+    // The claim's own deadline, which is a dated window whether or not the company reports. Per-claim
+    // dates are in the thesis; this is when the board stops carrying the name at all.
+    if (c.expires) out.push(`board window to ${c.expires}`)
+    if (c.price != null) out.push(`$${c.price}${c.priceAsOf ? ` (${c.priceAsOf})` : ''}`)
+    // HOW FAR THROUGH THE REPRICING, computed server-side and signed into the claim's own direction
+    // (aetherScanUniverse.repricingOf), because this is the judgment the prompt could not get made:
+    // three cuts in a row kept the most extended names on the board and the read refused them all as
+    // `priced_in`. It is a label now, not a derivation. NOT MEASURED is deliberately not "not yet" —
+    // nobody has looked, which is a maybe, not a green light.
+    out.push(`REPRICING: ${REPRICING_LABEL[c.repricing?.state] ?? 'NOT MEASURED'}`
+        + (c.repricing?.pct != null ? ` (${c.repricing.pct >= 0 ? '+' : ''}${c.repricing.pct.toFixed(1)}% the claim's way)` : ''))
+    return out.join(' · ')
+}
+
+/**
+ * The board itself, rendered for the volatile tail.
+ *
+ * SAME MECHANISM AS THE EDIT LIST, different meaning. It cannot ride in the seeded opening message
+ * the way the hand-off's bias and horizon do: that seed is SENT as the user's own turn and rendered
+ * as their bubble, and a hundred-name board in a chat bubble buries the conversation it starts. So
+ * the user says one sentence and the board arrives as context, which is what it is.
+ *
+ * Not a cached block either, though it is the biggest thing here (~10k tokens on a full board):
+ * the breakpoint budget is spent — tools, history, the spine and the mode module — and a cut is a
+ * short conversation, so re-sending it per turn costs less than the block it would displace.
+ */
+function _buildRadarSection(board) {
+    const rows = Array.isArray(board?.candidates) ? board.candidates : []
+    if (!rows.length) return null
+    const lines = rows.map(c => `  - ${c.ticker}${c.company ? ` (${c.company})` : ''}`
+        + `${c.returning ? ' [BACK — a new event named it since your last list]' : ''}`
+        + ` — ${_radarFacts(c)} — ${c.thesis ?? ''}`)
+    return [
+        `THE BOARD — ${rows.length} name${rows.length === 1 ? '' : 's'} Aether's events reached`
+        + `${board.runs ? ` across ${board.runs} event${board.runs === 1 ? '' : 's'}` : ''}`
+        + `${board.held ? `, with ${board.held} more held back because a previous list already took them` : ''}.`,
+        'Each row carries its own dated facts: the next scheduled print, the date the claim is graded'
+        + ' (the board window), the last price, and what the name has done since its event vs SPY.'
+        + ' You do not need a batch call to get any of them.',
+        'HELPED / HURT is what Aether claimed about ONE event and is context only — not a filter, not a rank.',
+        ...lines,
+    ].join('\n')
+}
+
+function _handoffContext(handoffTo) {
+    const desk = HANDOFF_DESKS[handoffTo] ?? 'the build desk that sent them'
+    return `ACTIVE MODE: BUILD HAND-OFF — the user was sent here by ${desk}, to find ONE ticker to build a single trade on. Refer to that desk by that name. The BUILD HAND-OFF MODE module is in force: it replaces the list-building shape of the spine.`
+}
+
+async function chatStream({ messages = [], model: requestedModel, editList = null, handoff = false, handoffTo = null, radar = false, radarBoard = null, profile = 'trading', audience = null, reasoningEffort, userId, onToken, onTicker, onPhase, onToolStart, onReasoning, onChart, signal,
+    _run = runAgentStream,   // the shared contract-test seam — see runAgentStream in agentIO.js
+    _venueSection = buildVenueSection,
+}) {
+    const prof = profile === 'investing' ? 'investing' : 'trading'
+    // The venue (mode / broker / accounts / free cash) rides the last USER message rather than the
+    // system tail: free cash moves whenever anything fills, so a volatile system block would sit
+    // ahead of the whole conversation in the cache prefix. See buildVenueSection.
+    const normalized = attachTurnContext(normalizeMessages(messages, MAX_MESSAGES), await _venueSection(userId))
+
+    // Per-session grounding ledger — records which tickers a real, successful tool
+    // engaged, so a fabricated candidate that no tool touched is dropped at normalize.
+    const ledger = makeGroundingLedger()
+    const toolHandlers = _wrapForGrounding({ ...TOOL_HANDLERS, ...makeTradingContextHandlers(userId) }, ledger)
+
+    // Stable cached base + volatile tail: today's date (so "next week" resolves)
+    // and, when editing an existing list, that list's current contents so the
+    // agent can add / remove / change names against it.
+    const today = new Date().toISOString().slice(0, 10)
+    const dynamic = [`CURRENT DATE: ${today}. Resolve all relative timeframes (today, next week, this month) against this date.`]
+    const audienceSection = buildAudienceSection(audience)
+    if (audienceSection) dynamic.push(audienceSection)
+    const editSection = _buildEditSection(editList)
+    if (editSection) dynamic.push(editSection)
+    const inHandoff = handoff && prof === 'trading'   // hand-off is a trading-only path
+    // HAND-OFF WINS when both arrive. They cannot both be meant — one ends in a single pick and the
+    // other in a list — and a caller that sets both has a bug, so the mode that the user was
+    // physically routed into is the one honoured. Silently running neither would be worse: the
+    // spine would ask a hundred-name universe what angle to screen for.
+    const inRadar   = radar && !inHandoff && prof === 'trading'
+    if (inHandoff) dynamic.push(_handoffContext(handoffTo))
+    if (inRadar) {
+        dynamic.push(RADAR_CONTEXT)
+        const boardSection = _buildRadarSection(radarBoard)
+        // EVERY turn of a cut carries the board, not just the first. This is the volatile tail, not
+        // the history: it is rebuilt per turn, so a board sent once is gone by the follow-up — and
+        // "why did you drop MOS" is unanswerable without the row that named MOS. ~10k tokens a turn
+        // at the input rate, against a cut that runs a handful of turns.
+        if (boardSection) dynamic.push(boardSection)
+    }
+
+    const promptLoader = _profilePrompt[prof] ?? _profilePrompt.trading
+    // Spine (cached) + the mode module on a hand-off turn (its own cached block, so the list-mode
+    // prefix stays byte-identical and keeps its own cache entry) + the volatile tail.
+    // BREAKPOINT BUDGET: four per request. Tools take one, the history takes one
+    // (_stampHistoryCache in the Anthropic provider), and this leaves the system prompt at one
+    // normally, two in hand-off — the ceiling Atlas and Kairos already run at. Do not add a third.
+    const systemPrompt = [
+        cachedBlock(promptLoader() + buildRouteRule('scanner') + LANGUAGE_RULE + VENUE_RULE + BREVITY_RULE),
+        ...(inHandoff ? [cachedBlock(_handoffMode())] : []),
+        ...(inRadar   ? [cachedBlock(_radarMode())]   : []),
+        { type: 'text', text: dynamic.join('\n\n') },
+    ]
+
+
+    let capturedScan = null
+    let capturedPick = null
+    // <route>/<open>: the user asked to be sent to another desk with a name (routing.util).
+    const route = makeRouteCapture('scanner')
+
+    const onScan = (json) => { try { capturedScan = JSON.parse(json) } catch { /* malformed — ignore */ } }
+    const onPick = (json) => { try { capturedPick = JSON.parse(json) } catch { /* malformed — ignore */ } }
+    const phase = makePhaseCapture(4, onPhase)
+
+    // All known emit tags suppressed by default; this agent captures phase, ticker (which keeps its
+    // inner text in the UI), scan_list, kairos_pick (hand-off mode) and the shared routing tags.
+    const tagCaptures = buildTagCaptures({
+        phase:       phase.capture,
+        ticker:      { onCapture: onTicker, keepText: true },
+        scan_list:   onScan,
+        kairos_pick: onPick,
+        ...route.captures,
+    })
+
+    const raw = await _run({
+        log: LOG, requestedModel, userId,
+        messages: normalized, systemPrompt,
+        tools: scannerToolsForProfile(prof),
+        toolHandlers,
+        // onChart here is the <chart> TAG only — the user asking to see a chart. The scanner's
+        // vision TOOLS stay wired to onChart:null (see TOOL_HANDLERS): its own renders remain
+        // model-only. Same pipe, different judgment.
+        reasoningEffort, signal, onToken, tagCaptures, onToolStart, onReasoning, onChart,
+        meta: { profile: prof },
+    })
+
+    const reply = cleanReply(raw)
+
+    const scan = _normalizeScan(capturedScan, editList, ledger, prof)
+    const pick = _normalizeKairosPick(capturedPick)
+    await _attachHouseLabels(scan, pick, { profile: prof })
+    const routing = route.result()   // { route, routeSymbol, opening, edit } — the controller validates
+
+    logger.info(LOG, 'chatStream done', { replyLength: reply.length, profile: prof, hasScan: !!scan, candidates: scan?.candidates?.length ?? 0, hasPick: !!pick, route: routing.route, phase: phase.get() })
+    return { reply, scan, phase: phase.get(), ...(pick ? { pick } : {}), ...routing }
+}
+
+/**
+ * The house label on each name (houseLabel.service; argus-on-pythia.md §3.4) — worked out by CODE from the name's
+ * industry and the house's list for the book, never taken from the model. A scan asks its own style's book (an
+ * investing list with no style, long term); a hand-off pick asks both, the swing list first — Mentor builds either.
+ * Mutates the normalized scan / pick in place; a failed read leaves them unlabelled. Exported for tests.
+ */
+export async function _attachHouseLabels(scan, pick, { profile = 'trading', labels = houseLabels } = {}) {
+    if (scan?.candidates?.length) {
+        const books = booksForStyle(scan.style)
+        const want = books.length ? books : profile === 'investing' ? ['long_term'] : []
+        const m = await labels(scan.candidates.map(c => c.ticker), { books: want })
+        for (const c of scan.candidates) c.house = wireLabel(m.get(c.ticker))
+    }
+    if (pick?.ticker) {
+        const m = await labels([pick.ticker], { books: ['swing', 'long_term'] })
+        pick.house = wireLabel(m.get(pick.ticker))
+    }
+}
+
+// Normalize a captured <kairos_pick> (hand-off mode) — the single ticker Argus recommends back to
+// the build desk (Mentor; the tag kept the name of the desk it was written for). Pure: null when
+// there's no usable ticker, else a clean {ticker, direction, thesis, analysis} (direction defaults
+// long; the analysis seeds the build desk's read). Exported for tests.
+export function _normalizeKairosPick(p) {
+    if (!p || typeof p !== 'object' || typeof p.ticker !== 'string' || !p.ticker.trim()) return null
+    return {
+        ticker:    p.ticker.toUpperCase().trim(),
+        direction: p.direction === 'short' ? 'short' : 'long',
+        thesis:    typeof p.thesis === 'string' ? p.thesis : '',
+        analysis:  typeof p.analysis === 'string' ? p.analysis : '',
+        // No build lens: Argus stopped recommending one (2026-11-01, docs/design/mentor-modes.md) — a hand-off
+        // carries no setup of the user's, so Mentor opens it risk-based.
+    }
+}
+
+/**
+ * Defensively normalize a captured scan so a malformed/partial block from the
+ * model never reaches persistence or the UI. Drops candidates without a ticker,
+ * uppercases symbols, and guarantees the period/thesis shape.
+ *
+ * In edit mode the model emits untouched candidates as a bare
+ * `{ ticker, keep: true }` reference instead of re-typing their full
+ * analysis/signals/sources (saves premium output and avoids regeneration drift).
+ * We rehydrate those from editList — the full prior record we already hold.
+ */
+// Trade-horizon vocabulary — the shared cross-agent constant (Idea/Kairos/Atlas holdings).
+const SCAN_STYLES = TRADE_HORIZONS
+
+function _normalizeScan(scan, editList = null, ledger = null, profile = 'trading') {
+    if (!scan || typeof scan !== 'object') return null
+    const priorByTicker = _editListByTicker(editList)
+    // Trade style drives the deterministic composite-total weighting (Argus #2),
+    // so resolve it up front and thread it into every candidate's score.
+    const style = SCAN_STYLES.includes(scan.style) ? scan.style : null
+    const prof  = profile === 'investing' ? 'investing' : 'trading'
+    // The SELECTION school this list was screened under — Atlas's half of the mandate, inherited
+    // across the sleeve hand-off and restated by Argus. It re-weights the investing composite (which
+    // axis leads IS the school), so an unstated or unknown lens falls back to the neutral blend and
+    // ranks exactly as lists did before schools existed. Trading lists have no lens.
+    // Falls back to the list being EDITED: an edit turn that forgets to restate the school would
+    // otherwise re-rank every kept name under the neutral blend — the order silently changing while
+    // the user watches, for a school they never dropped.
+    const lens  = prof === 'investing'
+        ? (normalizeSelection(scan.lens) ?? normalizeSelection(editList?.lens))
+        : null
+    const candidates = Array.isArray(scan.candidates) ? scan.candidates : []
+    const counts = { sourced: 0, validated: 0, kept: 0, dropped: 0 }
+    const clean = []
+    for (const c of candidates) {
+        if (!c || typeof c.ticker !== 'string' || !c.ticker.trim()) continue
+        const key = c.ticker.toUpperCase().trim()
+
+        // A `keep:true` / bare reference rehydrates from the prior list — its
+        // grounding was checked when the name was first added, so it is exempt
+        // from re-checking (a saved name isn't a fresh fabrication).
+        const isBareReference = !c.analysis && !c.signals && !c.thesis
+        if ((c.keep === true || isBareReference) && priorByTicker.has(key)) {
+            const prior = priorByTicker.get(key)
+            const cand = _cleanCandidate(prior, style, prof, lens)
+            cand.grounding = prior.grounding ?? 'kept'
+            clean.push(cand)
+            counts.kept++
+            continue
+        }
+
+        // Fresh candidate — check it against the tape. Enforcement (drop the
+        // ungrounded) only when a ledger is present; no-ledger callers (tests,
+        // non-scan paths) keep every candidate untouched.
+        const tier = groundingTier(key, ledger)
+        if (ledger) {
+            if (tier === 'ungrounded') { counts.dropped++; continue }   // A1: drop pure fabrications
+            counts[tier]++
+        }
+        const cand = _cleanCandidate(c, style, prof, lens)
+        if (ledger) cand.grounding = tier
+        clean.push(cand)
+    }
+    if (ledger && (counts.dropped || counts.sourced || counts.validated)) {
+        logger.info(LOG, 'grounding', counts)
+    }
+    if (!clean.length) return null
+
+    // Deterministic ranking: highest composite score first, regardless of the
+    // order the model emitted. Stable, so equal scores keep their emitted order.
+    clean.sort((a, b) => _scoreTotal(b) - _scoreTotal(a))
+
+    const period = (scan.period && typeof scan.period === 'object') ? scan.period : {}
+    return {
+        period: {
+            label: typeof period.label === 'string' ? period.label : '',
+            start: typeof period.start === 'string' ? period.start : null,
+            end:   typeof period.end   === 'string' ? period.end   : null,
+        },
+        thesis:     typeof scan.thesis === 'string' ? scan.thesis : 'Scan',
+        direction:  ['long', 'short', 'mixed'].includes(scan.direction) ? scan.direction : 'mixed',
+        // Shared trade-horizon vocabulary (matches Idea/Kairos/Atlas holdings) — travels
+        // with the list so a handed-off candidate carries its horizon. null when unstated.
+        style,
+        // P4a: which Argus lens produced this list + where a candidate is built. investing → the Analyst
+        // (research), trading → the trade desk's build step (Mentor).
+        profile:     prof,
+        // The selection school it was screened under (investing only). Persisted with the list because
+        // it is what the ranking MEANS — the same names under a different school are a different list,
+        // and a saved list re-read months later has to say which bar it was held to.
+        lens,
+        // A WIRE VALUE, like the kairos_pick tag: the client reads only `=== 'analyst'` and the pipeline
+        // decides the trade desk's receiver itself (findReceiver), so this names the tier, not the desk.
+        destination: prof === 'investing' ? 'analyst' : 'kairos',
+        candidates: clean,
+    }
+}
+
+function _editListByTicker(editList) {
+    const map = new Map()
+    if (editList && Array.isArray(editList.candidates)) {
+        for (const c of editList.candidates) {
+            if (c && typeof c.ticker === 'string' && c.ticker.trim()) {
+                map.set(c.ticker.toUpperCase().trim(), c)
+            }
+        }
+    }
+    return map
+}
+
+function _cleanCandidate(c, style = null, profile = 'trading', lens = null) {
+    const score = _cleanScore(c.score, style, profile, lens)
+    return {
+        ticker:    c.ticker.toUpperCase().trim(),
+        name:      typeof c.name === 'string' ? c.name : null,
+        direction: c.direction === 'short' ? 'short' : 'long',
+        thesis:    typeof c.thesis === 'string' ? c.thesis : '',
+        analysis:  typeof c.analysis === 'string' ? c.analysis : '',
+        signals:   (c.signals && typeof c.signals === 'object') ? c.signals : {},
+        score,
+        conviction: cleanConviction(c.conviction),
+        sources:   Array.isArray(c.sources) ? c.sources.filter(s => s && s.url) : [],
+        // Grounding provenance (scanner.grounding.js). null on the no-ledger path;
+        // callers stamp 'sourced' | 'validated' | 'kept' when a ledger is present.
+        grounding: null,
+    }
+}
+
+// TRADING profile axes + style-weights (the default). Short horizons lead with technical + relative
+// strength; long horizons lead with the catalyst. Liquidity is a light contributor. Each row sums to 1.
+const TRADING_COMPONENTS = ['catalyst', 'technical', 'relativeStrength', 'liquidity']
+const TRADING_WEIGHTS = {
+    intraday:    { catalyst: 0.20, technical: 0.40, relativeStrength: 0.30, liquidity: 0.10 },
+    day:         { catalyst: 0.25, technical: 0.35, relativeStrength: 0.30, liquidity: 0.10 },
+    // 2–10 days: the catalyst's life sets the horizon (docs/design/daily-names.md §2.3), structure confirms it.
+    'short term swing': { catalyst: 0.30, technical: 0.35, relativeStrength: 0.25, liquidity: 0.10 },
+    swing:       { catalyst: 0.30, technical: 0.30, relativeStrength: 0.25, liquidity: 0.15 },
+    'long term': { catalyst: 0.35, technical: 0.20, relativeStrength: 0.25, liquidity: 0.20 },
+}
+// INVESTING profile axes (P4a) — a fundamental/quality lens for portfolio candidates. The horizon
+// doesn't re-weight these (investing is long-horizon by definition); the SELECTION SCHOOL does, and
+// that is the whole point of it: which axis leads IS the school (investorSchools.js). No lens → the
+// neutral blend, identical to the pre-schools single set.
+const INVESTING_COMPONENTS = ['quality', 'valuation', 'growth', 'balance_sheet']
+
+// Resolve the scored axes + their weights for a (profile, style, lens). Trading is style-weighted;
+// investing is lens-weighted (null/unknown trading style → swing, null/unknown lens → neutral).
+function _scoreSpec(profile, style, lens = null) {
+    if (profile === 'investing') return { components: INVESTING_COMPONENTS, weights: selectionWeights(lens) }
+    return { components: TRADING_COMPONENTS, weights: TRADING_WEIGHTS[style] || TRADING_WEIGHTS.swing }
+}
+
+// Deterministic composite: a weighted mean over the PRESENT axes, renormalized by their weights so a
+// partial card still scores from what it has. Overwrites any model-emitted total (Argus #2). Callers
+// only reach here when ≥1 axis is finite, so wsum is always > 0.
+function _composeTotal(out, components, weights) {
+    let sum = 0, wsum = 0
+    for (const k of components) {
+        const v = out[k]
+        if (Number.isFinite(v)) { sum += v * weights[k]; wsum += weights[k] }
+    }
+    return wsum > 0 ? Math.round(sum / wsum) : null
+}
+
+// Coerce the transparent scorecard the agent emits into a 0–100 shape, or null when no axis is present.
+// The axis SET depends on the profile (trading: catalyst/technical/relStrength/liquidity; investing:
+// quality/valuation/growth/balance_sheet). Each axis clamped to 0–100; a non-numeric axis → null so a
+// partial card still renders. `total` is RECOMPUTED from the present axes (Argus #2) — the model's total
+// is discarded. A bare total with no axes is never trusted.
+function _cleanScore(raw, style = null, profile = 'trading', lens = null) {
+    if (!raw || typeof raw !== 'object') return null
+    const { components, weights } = _scoreSpec(profile, style, lens)
+    const out = {}
+    let any = false
+    for (const k of components) {
+        const v = raw[k]
+        // Reject null/''/undefined explicitly — Number(null) and Number('') are 0, fabricating a score.
+        const n = (v === null || v === undefined || v === '') ? NaN : Number(v)
+        if (Number.isFinite(n)) { out[k] = Math.min(100, Math.max(0, Math.round(n))); any = true }
+        else out[k] = null
+    }
+    if (!any) return null
+    return { total: _composeTotal(out, components, weights), ...out }
+}
+
+// Sort key for ranking: composite total, highest first. Names without a usable
+// total sort last (−1) so a partial/missing score never jumps the queue.
+function _scoreTotal(c) {
+    const t = c?.score?.total
+    return Number.isFinite(t) ? t : -1
+}
+
+// When the user reopens a saved list to edit it, tell the agent exactly what's
+// currently on the list so it edits against it (add/remove/replace names) and
+// re-emits the FULL updated <scan_list> rather than starting a new one.
+function _buildEditSection(editList) {
+    if (!editList || !Array.isArray(editList.candidates) || editList.candidates.length === 0) return null
+    const p     = editList.period || {}
+    const when  = [p.label, (p.start && p.end) ? `(${p.start} → ${p.end})` : (p.start || p.end || '')].filter(Boolean).join(' ')
+    const lines = editList.candidates.map(c => `  - ${c.ticker} (${c.direction || '?'}) — ${c.thesis || ''}`.trimEnd())
+    return [
+        `EDIT MODE — the user is refining an existing list: "${editList.thesis || 'Scan'}"${when ? ` — ${when}` : ''}.`,
+        `Current candidates:`,
+        ...lines,
+        `When they ask to add, remove, or change names, re-emit the FULL <scan_list> (same period unless they change it) — but do NOT rewrite untouched names. Emit each unchanged candidate as a bare reference: { "ticker": "NVDA", "keep": true } — its saved analysis, signals and sources are preserved automatically. Write full rich fields ONLY for candidates you are adding or actually changing. To remove a name, just omit it.`,
+    ].join('\n')
+}
+

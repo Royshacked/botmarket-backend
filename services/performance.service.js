@@ -4,12 +4,6 @@
  *   • realized — the `trades` collection, the canonical analytics store (frozen at fill,
  *     pnl = exit.realizedPnl). Covers every mode and origin.
  *
- * A second source used to sit beside it: Kairos's own R-multiple record, which `trades` cannot
- * reproduce because R is a property of the CALL's plan rather than of the fill. Kairos was
- * archived on 2026-08-18 and authors nothing, so that section is gone rather than permanently
- * empty — an always-zero panel reads as "you have no record", which is a different and wronger
- * statement than "that desk is asleep". It comes back with the desk.
- *
  * ── THE UNIT TRAP, killed here ────────────────────────────────────────────────
  * computeTradeStats returns win rate as a FRACTION 0–1 (`wins / count`). Handed to a model
  * unchanged, 0.62 is reported to the user as "0.62%". The conversion happens once, here at the
@@ -84,11 +78,6 @@ export async function getPerformance(userId, { mode = null, symbol = null, from 
     } else {
         unavailable.push('realized')
     }
-
-    // The Kairos call record used to be reported alongside `realized` here. Kairos was archived
-    // on 2026-08-18 and the desk authors nothing, so the second source is gone — `trades` is now
-    // the whole answer. Revive it with the desk, not before: a section that is always empty
-    // reads as "you have no record" rather than "this desk is asleep".
 
     // `filter` rides along so a caller (and the model) can state what the numbers cover — a win
     // rate with an unstated window is a number nobody can check.

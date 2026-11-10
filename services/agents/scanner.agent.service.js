@@ -9,42 +9,27 @@ import { getFundamentals, getEarningsCalendar, getEarnings, screenCandidates, ge
 import { getSecFilings } from '../../providers/sec.provider.js'
 import { makeCandlesHandler, makeIndicatorsHandler, makeChartHandler } from '../tools/marketData.tools.js'
 import { makeStructureVisionHandler, OB_VISION, FB_VISION } from '../tools/priceStructure.tools.js'
-import { cleanConviction } from '../conviction.util.js'
 import { logger }        from '../logger.service.js'
 import { makeNewsHandlers } from '../tools/news.tools.js'
-import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, cleanReply, makeToolHandler, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, BREVITY_RULE, VENUE_RULE, TRADE_HORIZONS, cachedBlock } from '../agentUtils.js'
+import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, cleanReply, makeToolHandler, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, BREVITY_RULE, VENUE_RULE, cachedBlock } from '../agentUtils.js'
 import { makeTradingContextHandlers, buildVenueSection } from '../tools/tradingContext.tools.js'
 import { makeMarketHoursHandlers, MARKET_HOURS_TOOL_SPEC } from '../tools/marketHours.tools.js'
 import { makeHouseIndustriesHandlers, HOUSE_INDUSTRIES_TOOL_SPEC } from '../tools/houseIndustries.tools.js'
-import { houseLabels, booksForStyle, wireLabel } from '../houseLabel.service.js'
+import { houseLabels, wireLabel } from '../houseLabel.service.js'
 import { buildTagCaptures } from '../llmStream.util.js'
 import { DESKS } from '../desks/registry.js'
 import { makeRouteCapture, buildRouteRule } from '../routing.util.js'
 import { isToolError } from '../toolResult.util.js'
 import { makeGroundingLedger, recordSourced, recordTouched, groundingTier, DISCOVERY_TOOLS, PER_NAME_TICKER_ARGS, SOURCED_EXTRACT } from '../scanner.grounding.js'
-import { normalizeSelection, selectionWeights } from '../investorSchools.js'
 
 const __dirname     = dirname(fileURLToPath(import.meta.url))
 const LOG   = '[scannerAgent]'
-// One prompt per Argus PROFILE (P4a): trading = the technical/catalyst trade scanner (unchanged);
-// investing = the fundamental/quality screen for portfolio candidates (→ Analyst). Hot-reloaded.
-const _profilePrompt = {
-    trading:   makePromptLoader(join(__dirname, '../../prompts/scanner_system_prompt.md'), LOG),
-    investing: makePromptLoader(join(__dirname, '../../prompts/scanner_profile_investing.md'), LOG),
-}
-// The Kairos hand-off is a MODE of the trading profile, not a profile of its own: it shares the whole
-// screening spine and differs only in what it converges on (one name, not a list) and what it emits
-// (<kairos_pick>, not <scan_list>). So it lives in its own module, injected as its own cached block
-// on a hand-off turn — the same shape as kairos_mode_*.md. It used to sit INSIDE the trading prompt,
-// where a list-building turn read fifty lines of "find ONE ticker, do not emit a scan_list" that did
-// not apply to it, and a hand-off turn read the list machinery and phase gate it had to override.
+// The spine (scanner_system_prompt.md) is still the trading screen it always was, and the hand-off module rides
+// on it — since 2026-11-09 on EVERY turn: Argus's list-building chat (the investing profile, the radar cut, the
+// saved lists) is archived, and the single pick for Mentor is the one mode left (archive/README.md). The full
+// service as it was is archive/services/agents/scanner.agent.service.js. Hot-reloaded.
+const _spinePrompt = makePromptLoader(join(__dirname, '../../prompts/scanner_system_prompt.md'), LOG)
 const _handoffMode = makePromptLoader(join(__dirname, '../../prompts/scanner_mode_handoff.md'), LOG)
-
-// RADAR CUT is the second mode, and the same shape: the Events radar hands Argus a universe it did
-// not screen for, and the module replaces the DISCOVERY half of the spine where hand-off replaces
-// the list half. The two are mutually exclusive — one ends in a pick, the other in a list — which
-// is what keeps the system prompt at two cached blocks and inside the breakpoint budget below.
-const _radarMode = makePromptLoader(join(__dirname, '../../prompts/scanner_mode_radar.md'), LOG)
 const MAX_MESSAGES = DESKS.scanner.maxMessages
 
 export const TOOLS = toolsFor({
@@ -188,27 +173,9 @@ function _wrapForGrounding(handlers, ledger) {
 
 export const scannerAgentService = { chatStream }
 
-// Exported for unit tests (scanner scorecard normalization + ranking).
-export { _normalizeScan, _cleanScore, scannerToolsForProfile, _wrapForGrounding }
+// Exported for unit tests.
+export { _wrapForGrounding }
 
-// Tool subset per profile (P4a). Investing drops the technical/momentum/vision kit (candles, indicators,
-// chart, orderblocks, movers, positioning, cycles) and keeps the fundamental screen. Trading = full kit.
-const INVESTING_TOOL_NAMES = new Set([
-    'web_search', 'screen_candidates', 'get_fundamentals', 'get_sector_snapshot',
-    'get_earnings', 'get_earnings_calendar', 'get_analyst_actions', 'get_sec_filings',
-    'get_quotes', 'get_price_action', 'get_house_industries',
-])
-function scannerToolsForProfile(profile) {
-    return profile === 'investing' ? TOOLS.filter(t => INVESTING_TOOL_NAMES.has(t.name)) : TOOLS
-}
-
-// Injected into the volatile context when Argus is invoked as a discovery hand-off: it flips Argus
-// from "build a watchlist" to "find ONE ticker + emit <kairos_pick>" (see the prompt's BUILD
-// HAND-OFF MODE section). The bias/horizon ride in the seeded opening message.
-// The mode MARKER only — what the mode means is the module (scanner_mode_handoff.md), injected as
-// its own cached block. Mirrors Kairos's "ACTIVE MODE: x" line: the volatile block declares which
-// lens is live, the cached module carries it.
-//
 // The DESTINATION belongs here and not in the module for a mechanical reason: the module is a cached
 // block, so interpolating a per-request desk name into it would give every destination its own cache
 // entry and defeat the breakpoint. The volatile tail is already rebuilt per turn, so naming the desk
@@ -216,215 +183,96 @@ function scannerToolsForProfile(profile) {
 const HANDOFF_DESKS = {
     mentor: 'Mentor, which builds a `setup` the user shapes level by level',
 }
-// Unknown/absent destination degrades to the generic phrasing rather than guessing a desk: the
-// module already tells Argus to name only what this line names, so "the build desk" is honest where
-// a wrong brand name would be a lie the user reads.
-// The universe itself rides in the seeded OPENING MESSAGE, not here and not through editList: it is
-// tens of kilobytes that never change within a session, so history caching carries it for free,
-// where a volatile system block would re-send it every turn. editList was the other candidate and is
-// wrong on meaning — it tells Argus it is REFINING a list and to keep untouched names, which is the
-// opposite of a cut.
-const RADAR_CONTEXT = 'ACTIVE MODE: RADAR CUT — the Events radar handed you the board below. The '
-    + 'RADAR CUT MODE module is in force: it replaces the discovery half of the spine. Phases 1-2 are '
-    + 'already done, you start at Phase 3, and you cut to the few names worth watching in the coming week.'
-
-// What each repricing state is called in front of the model. Written as verdicts rather than as data,
-// because the row is read once and skimmed: "TAKEN" says leave it in a way "+8.4%" never did.
-const REPRICING_LABEL = {
-    not_yet: 'NOT YET — the move is still ahead',
-    taken:   'TAKEN — the market has already made this move',
-    against: 'AGAINST — the market moved the other way from the claim',
-    unknown: 'NOT MEASURED — no move on record, which is not the same as "not yet"',
-}
-
-/**
- * The dated facts on one row, as the cut needs to read them.
- *
- * THESE USED TO BE TOOL CALLS — a market-wide earnings calendar and a hundred-wide quote fan-out, both
- * fired mid-stream before the model could judge anything, and both able to fail. They are on the row
- * now (aetherScanUniverse), so the first pass over the board costs nothing and cannot come back empty.
- *
- * "NO PRINT" AND "NOT KNOWN" ARE DIFFERENT ANSWERS and must not render the same. `null` is the
- * calendar answering that nothing is scheduled in its window; a MISSING key is the calendar not
- * having been readable at all (and missing rather than a sentinel because the board round-trips
- * through JSON — see _attachEarnings). A model shown "no earnings" for both would leave names off for
- * a fact nobody established, which is the exact failure this whole change exists to undo.
- */
-function _radarFacts(c) {
-    const out = []
-    if (c.earnings === undefined)  out.push('earnings date UNKNOWN (calendar unavailable — do not read this as "no catalyst")')
-    else if (c.earnings === null)  out.push('no print in the next 30 days')
-    else out.push(`earnings ${c.earnings.date}`)
-    // The claim's own deadline, which is a dated window whether or not the company reports. Per-claim
-    // dates are in the thesis; this is when the board stops carrying the name at all.
-    if (c.expires) out.push(`board window to ${c.expires}`)
-    if (c.price != null) out.push(`$${c.price}${c.priceAsOf ? ` (${c.priceAsOf})` : ''}`)
-    // HOW FAR THROUGH THE REPRICING, computed server-side and signed into the claim's own direction
-    // (aetherScanUniverse.repricingOf), because this is the judgment the prompt could not get made:
-    // three cuts in a row kept the most extended names on the board and the read refused them all as
-    // `priced_in`. It is a label now, not a derivation. NOT MEASURED is deliberately not "not yet" —
-    // nobody has looked, which is a maybe, not a green light.
-    out.push(`REPRICING: ${REPRICING_LABEL[c.repricing?.state] ?? 'NOT MEASURED'}`
-        + (c.repricing?.pct != null ? ` (${c.repricing.pct >= 0 ? '+' : ''}${c.repricing.pct.toFixed(1)}% the claim's way)` : ''))
-    return out.join(' · ')
-}
-
-/**
- * The board itself, rendered for the volatile tail.
- *
- * SAME MECHANISM AS THE EDIT LIST, different meaning. It cannot ride in the seeded opening message
- * the way the hand-off's bias and horizon do: that seed is SENT as the user's own turn and rendered
- * as their bubble, and a hundred-name board in a chat bubble buries the conversation it starts. So
- * the user says one sentence and the board arrives as context, which is what it is.
- *
- * Not a cached block either, though it is the biggest thing here (~10k tokens on a full board):
- * the breakpoint budget is spent — tools, history, the spine and the mode module — and a cut is a
- * short conversation, so re-sending it per turn costs less than the block it would displace.
- */
-function _buildRadarSection(board) {
-    const rows = Array.isArray(board?.candidates) ? board.candidates : []
-    if (!rows.length) return null
-    const lines = rows.map(c => `  - ${c.ticker}${c.company ? ` (${c.company})` : ''}`
-        + `${c.returning ? ' [BACK — a new event named it since your last list]' : ''}`
-        + ` — ${_radarFacts(c)} — ${c.thesis ?? ''}`)
-    return [
-        `THE BOARD — ${rows.length} name${rows.length === 1 ? '' : 's'} Aether's events reached`
-        + `${board.runs ? ` across ${board.runs} event${board.runs === 1 ? '' : 's'}` : ''}`
-        + `${board.held ? `, with ${board.held} more held back because a previous list already took them` : ''}.`,
-        'Each row carries its own dated facts: the next scheduled print, the date the claim is graded'
-        + ' (the board window), the last price, and what the name has done since its event vs SPY.'
-        + ' You do not need a batch call to get any of them.',
-        'HELPED / HURT is what Aether claimed about ONE event and is context only — not a filter, not a rank.',
-        ...lines,
-    ].join('\n')
-}
 
 function _handoffContext(handoffTo) {
     const desk = HANDOFF_DESKS[handoffTo] ?? 'the build desk that sent them'
     return `ACTIVE MODE: BUILD HAND-OFF — the user was sent here by ${desk}, to find ONE ticker to build a single trade on. Refer to that desk by that name. The BUILD HAND-OFF MODE module is in force: it replaces the list-building shape of the spine.`
 }
 
-async function chatStream({ messages = [], model: requestedModel, editList = null, handoff = false, handoffTo = null, radar = false, radarBoard = null, profile = 'trading', audience = null, reasoningEffort, userId, onToken, onTicker, onPhase, onToolStart, onReasoning, onChart, signal,
+async function chatStream({ messages = [], model: requestedModel, handoffTo = 'mentor', audience = null, reasoningEffort, userId, onToken, onTicker, onPhase, onToolStart, onReasoning, onChart, signal,
     _run = runAgentStream,   // the shared contract-test seam — see runAgentStream in agentIO.js
     _venueSection = buildVenueSection,
 }) {
-    const prof = profile === 'investing' ? 'investing' : 'trading'
     // The venue (mode / broker / accounts / free cash) rides the last USER message rather than the
     // system tail: free cash moves whenever anything fills, so a volatile system block would sit
     // ahead of the whole conversation in the cache prefix. See buildVenueSection.
     const normalized = attachTurnContext(normalizeMessages(messages, MAX_MESSAGES), await _venueSection(userId))
 
-    // Per-session grounding ledger — records which tickers a real, successful tool
-    // engaged, so a fabricated candidate that no tool touched is dropped at normalize.
+    // Per-session grounding ledger — records which tickers a real, successful tool engaged. It used to drop
+    // fabricated names from a list; with lists archived it stamps the pick's provenance (`grounding`) for the log.
     const ledger = makeGroundingLedger()
     const toolHandlers = _wrapForGrounding({ ...TOOL_HANDLERS, ...makeTradingContextHandlers(userId) }, ledger)
 
-    // Stable cached base + volatile tail: today's date (so "next week" resolves)
-    // and, when editing an existing list, that list's current contents so the
-    // agent can add / remove / change names against it.
+    // Stable cached base + volatile tail: today's date (so "next week" resolves) and the mode line.
     const today = new Date().toISOString().slice(0, 10)
     const dynamic = [`CURRENT DATE: ${today}. Resolve all relative timeframes (today, next week, this month) against this date.`]
     const audienceSection = buildAudienceSection(audience)
     if (audienceSection) dynamic.push(audienceSection)
-    const editSection = _buildEditSection(editList)
-    if (editSection) dynamic.push(editSection)
-    const inHandoff = handoff && prof === 'trading'   // hand-off is a trading-only path
-    // HAND-OFF WINS when both arrive. They cannot both be meant — one ends in a single pick and the
-    // other in a list — and a caller that sets both has a bug, so the mode that the user was
-    // physically routed into is the one honoured. Silently running neither would be worse: the
-    // spine would ask a hundred-name universe what angle to screen for.
-    const inRadar   = radar && !inHandoff && prof === 'trading'
-    if (inHandoff) dynamic.push(_handoffContext(handoffTo))
-    if (inRadar) {
-        dynamic.push(RADAR_CONTEXT)
-        const boardSection = _buildRadarSection(radarBoard)
-        // EVERY turn of a cut carries the board, not just the first. This is the volatile tail, not
-        // the history: it is rebuilt per turn, so a board sent once is gone by the follow-up — and
-        // "why did you drop MOS" is unanswerable without the row that named MOS. ~10k tokens a turn
-        // at the input rate, against a cut that runs a handful of turns.
-        if (boardSection) dynamic.push(boardSection)
-    }
+    dynamic.push(_handoffContext(handoffTo))
 
-    const promptLoader = _profilePrompt[prof] ?? _profilePrompt.trading
-    // Spine (cached) + the mode module on a hand-off turn (its own cached block, so the list-mode
-    // prefix stays byte-identical and keeps its own cache entry) + the volatile tail.
+    // Spine (cached) + the hand-off module (its own cached block) + the volatile tail.
     // BREAKPOINT BUDGET: four per request. Tools take one, the history takes one
-    // (_stampHistoryCache in the Anthropic provider), and this leaves the system prompt at one
-    // normally, two in hand-off — the ceiling Atlas and Kairos already run at. Do not add a third.
+    // (_stampHistoryCache in the Anthropic provider), and the system prompt two. Do not add a third.
     const systemPrompt = [
-        cachedBlock(promptLoader() + buildRouteRule('scanner') + LANGUAGE_RULE + VENUE_RULE + BREVITY_RULE),
-        ...(inHandoff ? [cachedBlock(_handoffMode())] : []),
-        ...(inRadar   ? [cachedBlock(_radarMode())]   : []),
+        cachedBlock(_spinePrompt() + buildRouteRule('scanner') + LANGUAGE_RULE + VENUE_RULE + BREVITY_RULE),
+        cachedBlock(_handoffMode()),
         { type: 'text', text: dynamic.join('\n\n') },
     ]
 
-
-    let capturedScan = null
     let capturedPick = null
     // <route>/<open>: the user asked to be sent to another desk with a name (routing.util).
     const route = makeRouteCapture('scanner')
 
-    const onScan = (json) => { try { capturedScan = JSON.parse(json) } catch { /* malformed — ignore */ } }
     const onPick = (json) => { try { capturedPick = JSON.parse(json) } catch { /* malformed — ignore */ } }
     const phase = makePhaseCapture(4, onPhase)
 
-    // All known emit tags suppressed by default; this agent captures phase, ticker (which keeps its
-    // inner text in the UI), scan_list, kairos_pick (hand-off mode) and the shared routing tags.
+    // All known emit tags suppressed by default — a stray <scan_list> from the spine is swallowed, never shown.
+    // This agent captures phase, ticker (which keeps its inner text in the UI), argus_pick and the routing tags.
     const tagCaptures = buildTagCaptures({
         phase:       phase.capture,
         ticker:      { onCapture: onTicker, keepText: true },
-        scan_list:   onScan,
-        kairos_pick: onPick,
+        argus_pick: onPick,
         ...route.captures,
     })
 
     const raw = await _run({
         log: LOG, requestedModel, userId,
         messages: normalized, systemPrompt,
-        tools: scannerToolsForProfile(prof),
+        tools: TOOLS,
         toolHandlers,
         // onChart here is the <chart> TAG only — the user asking to see a chart. The scanner's
         // vision TOOLS stay wired to onChart:null (see TOOL_HANDLERS): its own renders remain
         // model-only. Same pipe, different judgment.
         reasoningEffort, signal, onToken, tagCaptures, onToolStart, onReasoning, onChart,
-        meta: { profile: prof },
     })
 
     const reply = cleanReply(raw)
 
-    const scan = _normalizeScan(capturedScan, editList, ledger, prof)
-    const pick = _normalizeKairosPick(capturedPick)
-    await _attachHouseLabels(scan, pick, { profile: prof })
+    const pick = _normalizeArgusPick(capturedPick)
+    if (pick) pick.grounding = groundingTier(pick.ticker, ledger)
+    await _attachPickLabel(pick)
     const routing = route.result()   // { route, routeSymbol, opening, edit } — the controller validates
 
-    logger.info(LOG, 'chatStream done', { replyLength: reply.length, profile: prof, hasScan: !!scan, candidates: scan?.candidates?.length ?? 0, hasPick: !!pick, route: routing.route, phase: phase.get() })
-    return { reply, scan, phase: phase.get(), ...(pick ? { pick } : {}), ...routing }
+    logger.info(LOG, 'chatStream done', { replyLength: reply.length, hasPick: !!pick, grounding: pick?.grounding ?? null, route: routing.route, phase: phase.get() })
+    return { reply, phase: phase.get(), ...(pick ? { pick } : {}), ...routing }
 }
 
 /**
- * The house label on each name (houseLabel.service; argus-on-pythia.md §3.4) — worked out by CODE from the name's
- * industry and the house's list for the book, never taken from the model. A scan asks its own style's book (an
- * investing list with no style, long term); a hand-off pick asks both, the swing list first — Mentor builds either.
- * Mutates the normalized scan / pick in place; a failed read leaves them unlabelled. Exported for tests.
+ * The house label on the pick (houseLabel.service; argus-on-pythia.md §3.4) — worked out by CODE from the name's
+ * industry and the house's lists, never taken from the model. Both books, the swing list first — Mentor builds
+ * either. Mutates the pick in place; a failed read leaves it unlabelled. Exported for tests.
  */
-export async function _attachHouseLabels(scan, pick, { profile = 'trading', labels = houseLabels } = {}) {
-    if (scan?.candidates?.length) {
-        const books = booksForStyle(scan.style)
-        const want = books.length ? books : profile === 'investing' ? ['long_term'] : []
-        const m = await labels(scan.candidates.map(c => c.ticker), { books: want })
-        for (const c of scan.candidates) c.house = wireLabel(m.get(c.ticker))
-    }
-    if (pick?.ticker) {
-        const m = await labels([pick.ticker], { books: ['swing', 'long_term'] })
-        pick.house = wireLabel(m.get(pick.ticker))
-    }
+export async function _attachPickLabel(pick, { labels = houseLabels } = {}) {
+    if (!pick?.ticker) return
+    const m = await labels([pick.ticker], { books: ['swing', 'long_term'] })
+    pick.house = wireLabel(m.get(pick.ticker))
 }
 
-// Normalize a captured <kairos_pick> (hand-off mode) — the single ticker Argus recommends back to
-// the build desk (Mentor; the tag kept the name of the desk it was written for). Pure: null when
-// there's no usable ticker, else a clean {ticker, direction, thesis, analysis} (direction defaults
-// long; the analysis seeds the build desk's read). Exported for tests.
-export function _normalizeKairosPick(p) {
+// Normalize a captured <argus_pick> — the single ticker Argus recommends back to Mentor.
+// Pure: null when there's no usable ticker, else a clean
+// {ticker, direction, thesis, analysis} (direction defaults long; the analysis seeds Mentor's read).
+// Exported for tests.
+export function _normalizeArgusPick(p) {
     if (!p || typeof p !== 'object' || typeof p.ticker !== 'string' || !p.ticker.trim()) return null
     return {
         ticker:    p.ticker.toUpperCase().trim(),
@@ -435,211 +283,3 @@ export function _normalizeKairosPick(p) {
         // carries no setup of the user's, so Mentor opens it risk-based.
     }
 }
-
-/**
- * Defensively normalize a captured scan so a malformed/partial block from the
- * model never reaches persistence or the UI. Drops candidates without a ticker,
- * uppercases symbols, and guarantees the period/thesis shape.
- *
- * In edit mode the model emits untouched candidates as a bare
- * `{ ticker, keep: true }` reference instead of re-typing their full
- * analysis/signals/sources (saves premium output and avoids regeneration drift).
- * We rehydrate those from editList — the full prior record we already hold.
- */
-// Trade-horizon vocabulary — the shared cross-agent constant (Idea/Kairos/Atlas holdings).
-const SCAN_STYLES = TRADE_HORIZONS
-
-function _normalizeScan(scan, editList = null, ledger = null, profile = 'trading') {
-    if (!scan || typeof scan !== 'object') return null
-    const priorByTicker = _editListByTicker(editList)
-    // Trade style drives the deterministic composite-total weighting (Argus #2),
-    // so resolve it up front and thread it into every candidate's score.
-    const style = SCAN_STYLES.includes(scan.style) ? scan.style : null
-    const prof  = profile === 'investing' ? 'investing' : 'trading'
-    // The SELECTION school this list was screened under — Atlas's half of the mandate, inherited
-    // across the sleeve hand-off and restated by Argus. It re-weights the investing composite (which
-    // axis leads IS the school), so an unstated or unknown lens falls back to the neutral blend and
-    // ranks exactly as lists did before schools existed. Trading lists have no lens.
-    // Falls back to the list being EDITED: an edit turn that forgets to restate the school would
-    // otherwise re-rank every kept name under the neutral blend — the order silently changing while
-    // the user watches, for a school they never dropped.
-    const lens  = prof === 'investing'
-        ? (normalizeSelection(scan.lens) ?? normalizeSelection(editList?.lens))
-        : null
-    const candidates = Array.isArray(scan.candidates) ? scan.candidates : []
-    const counts = { sourced: 0, validated: 0, kept: 0, dropped: 0 }
-    const clean = []
-    for (const c of candidates) {
-        if (!c || typeof c.ticker !== 'string' || !c.ticker.trim()) continue
-        const key = c.ticker.toUpperCase().trim()
-
-        // A `keep:true` / bare reference rehydrates from the prior list — its
-        // grounding was checked when the name was first added, so it is exempt
-        // from re-checking (a saved name isn't a fresh fabrication).
-        const isBareReference = !c.analysis && !c.signals && !c.thesis
-        if ((c.keep === true || isBareReference) && priorByTicker.has(key)) {
-            const prior = priorByTicker.get(key)
-            const cand = _cleanCandidate(prior, style, prof, lens)
-            cand.grounding = prior.grounding ?? 'kept'
-            clean.push(cand)
-            counts.kept++
-            continue
-        }
-
-        // Fresh candidate — check it against the tape. Enforcement (drop the
-        // ungrounded) only when a ledger is present; no-ledger callers (tests,
-        // non-scan paths) keep every candidate untouched.
-        const tier = groundingTier(key, ledger)
-        if (ledger) {
-            if (tier === 'ungrounded') { counts.dropped++; continue }   // A1: drop pure fabrications
-            counts[tier]++
-        }
-        const cand = _cleanCandidate(c, style, prof, lens)
-        if (ledger) cand.grounding = tier
-        clean.push(cand)
-    }
-    if (ledger && (counts.dropped || counts.sourced || counts.validated)) {
-        logger.info(LOG, 'grounding', counts)
-    }
-    if (!clean.length) return null
-
-    // Deterministic ranking: highest composite score first, regardless of the
-    // order the model emitted. Stable, so equal scores keep their emitted order.
-    clean.sort((a, b) => _scoreTotal(b) - _scoreTotal(a))
-
-    const period = (scan.period && typeof scan.period === 'object') ? scan.period : {}
-    return {
-        period: {
-            label: typeof period.label === 'string' ? period.label : '',
-            start: typeof period.start === 'string' ? period.start : null,
-            end:   typeof period.end   === 'string' ? period.end   : null,
-        },
-        thesis:     typeof scan.thesis === 'string' ? scan.thesis : 'Scan',
-        direction:  ['long', 'short', 'mixed'].includes(scan.direction) ? scan.direction : 'mixed',
-        // Shared trade-horizon vocabulary (matches Idea/Kairos/Atlas holdings) — travels
-        // with the list so a handed-off candidate carries its horizon. null when unstated.
-        style,
-        // P4a: which Argus lens produced this list + where a candidate is built. investing → the Analyst
-        // (research), trading → the trade desk's build step (Mentor).
-        profile:     prof,
-        // The selection school it was screened under (investing only). Persisted with the list because
-        // it is what the ranking MEANS — the same names under a different school are a different list,
-        // and a saved list re-read months later has to say which bar it was held to.
-        lens,
-        // A WIRE VALUE, like the kairos_pick tag: the client reads only `=== 'analyst'` and the pipeline
-        // decides the trade desk's receiver itself (findReceiver), so this names the tier, not the desk.
-        destination: prof === 'investing' ? 'analyst' : 'kairos',
-        candidates: clean,
-    }
-}
-
-function _editListByTicker(editList) {
-    const map = new Map()
-    if (editList && Array.isArray(editList.candidates)) {
-        for (const c of editList.candidates) {
-            if (c && typeof c.ticker === 'string' && c.ticker.trim()) {
-                map.set(c.ticker.toUpperCase().trim(), c)
-            }
-        }
-    }
-    return map
-}
-
-function _cleanCandidate(c, style = null, profile = 'trading', lens = null) {
-    const score = _cleanScore(c.score, style, profile, lens)
-    return {
-        ticker:    c.ticker.toUpperCase().trim(),
-        name:      typeof c.name === 'string' ? c.name : null,
-        direction: c.direction === 'short' ? 'short' : 'long',
-        thesis:    typeof c.thesis === 'string' ? c.thesis : '',
-        analysis:  typeof c.analysis === 'string' ? c.analysis : '',
-        signals:   (c.signals && typeof c.signals === 'object') ? c.signals : {},
-        score,
-        conviction: cleanConviction(c.conviction),
-        sources:   Array.isArray(c.sources) ? c.sources.filter(s => s && s.url) : [],
-        // Grounding provenance (scanner.grounding.js). null on the no-ledger path;
-        // callers stamp 'sourced' | 'validated' | 'kept' when a ledger is present.
-        grounding: null,
-    }
-}
-
-// TRADING profile axes + style-weights (the default). Short horizons lead with technical + relative
-// strength; long horizons lead with the catalyst. Liquidity is a light contributor. Each row sums to 1.
-const TRADING_COMPONENTS = ['catalyst', 'technical', 'relativeStrength', 'liquidity']
-const TRADING_WEIGHTS = {
-    intraday:    { catalyst: 0.20, technical: 0.40, relativeStrength: 0.30, liquidity: 0.10 },
-    day:         { catalyst: 0.25, technical: 0.35, relativeStrength: 0.30, liquidity: 0.10 },
-    // 2–10 days: the catalyst's life sets the horizon (docs/design/daily-names.md §2.3), structure confirms it.
-    'short term swing': { catalyst: 0.30, technical: 0.35, relativeStrength: 0.25, liquidity: 0.10 },
-    swing:       { catalyst: 0.30, technical: 0.30, relativeStrength: 0.25, liquidity: 0.15 },
-    'long term': { catalyst: 0.35, technical: 0.20, relativeStrength: 0.25, liquidity: 0.20 },
-}
-// INVESTING profile axes (P4a) — a fundamental/quality lens for portfolio candidates. The horizon
-// doesn't re-weight these (investing is long-horizon by definition); the SELECTION SCHOOL does, and
-// that is the whole point of it: which axis leads IS the school (investorSchools.js). No lens → the
-// neutral blend, identical to the pre-schools single set.
-const INVESTING_COMPONENTS = ['quality', 'valuation', 'growth', 'balance_sheet']
-
-// Resolve the scored axes + their weights for a (profile, style, lens). Trading is style-weighted;
-// investing is lens-weighted (null/unknown trading style → swing, null/unknown lens → neutral).
-function _scoreSpec(profile, style, lens = null) {
-    if (profile === 'investing') return { components: INVESTING_COMPONENTS, weights: selectionWeights(lens) }
-    return { components: TRADING_COMPONENTS, weights: TRADING_WEIGHTS[style] || TRADING_WEIGHTS.swing }
-}
-
-// Deterministic composite: a weighted mean over the PRESENT axes, renormalized by their weights so a
-// partial card still scores from what it has. Overwrites any model-emitted total (Argus #2). Callers
-// only reach here when ≥1 axis is finite, so wsum is always > 0.
-function _composeTotal(out, components, weights) {
-    let sum = 0, wsum = 0
-    for (const k of components) {
-        const v = out[k]
-        if (Number.isFinite(v)) { sum += v * weights[k]; wsum += weights[k] }
-    }
-    return wsum > 0 ? Math.round(sum / wsum) : null
-}
-
-// Coerce the transparent scorecard the agent emits into a 0–100 shape, or null when no axis is present.
-// The axis SET depends on the profile (trading: catalyst/technical/relStrength/liquidity; investing:
-// quality/valuation/growth/balance_sheet). Each axis clamped to 0–100; a non-numeric axis → null so a
-// partial card still renders. `total` is RECOMPUTED from the present axes (Argus #2) — the model's total
-// is discarded. A bare total with no axes is never trusted.
-function _cleanScore(raw, style = null, profile = 'trading', lens = null) {
-    if (!raw || typeof raw !== 'object') return null
-    const { components, weights } = _scoreSpec(profile, style, lens)
-    const out = {}
-    let any = false
-    for (const k of components) {
-        const v = raw[k]
-        // Reject null/''/undefined explicitly — Number(null) and Number('') are 0, fabricating a score.
-        const n = (v === null || v === undefined || v === '') ? NaN : Number(v)
-        if (Number.isFinite(n)) { out[k] = Math.min(100, Math.max(0, Math.round(n))); any = true }
-        else out[k] = null
-    }
-    if (!any) return null
-    return { total: _composeTotal(out, components, weights), ...out }
-}
-
-// Sort key for ranking: composite total, highest first. Names without a usable
-// total sort last (−1) so a partial/missing score never jumps the queue.
-function _scoreTotal(c) {
-    const t = c?.score?.total
-    return Number.isFinite(t) ? t : -1
-}
-
-// When the user reopens a saved list to edit it, tell the agent exactly what's
-// currently on the list so it edits against it (add/remove/replace names) and
-// re-emits the FULL updated <scan_list> rather than starting a new one.
-function _buildEditSection(editList) {
-    if (!editList || !Array.isArray(editList.candidates) || editList.candidates.length === 0) return null
-    const p     = editList.period || {}
-    const when  = [p.label, (p.start && p.end) ? `(${p.start} → ${p.end})` : (p.start || p.end || '')].filter(Boolean).join(' ')
-    const lines = editList.candidates.map(c => `  - ${c.ticker} (${c.direction || '?'}) — ${c.thesis || ''}`.trimEnd())
-    return [
-        `EDIT MODE — the user is refining an existing list: "${editList.thesis || 'Scan'}"${when ? ` — ${when}` : ''}.`,
-        `Current candidates:`,
-        ...lines,
-        `When they ask to add, remove, or change names, re-emit the FULL <scan_list> (same period unless they change it) — but do NOT rewrite untouched names. Emit each unchanged candidate as a bare reference: { "ticker": "NVDA", "keep": true } — its saved analysis, signals and sources are preserved automatically. Write full rich fields ONLY for candidates you are adding or actually changing. To remove a name, just omit it.`,
-    ].join('\n')
-}
-

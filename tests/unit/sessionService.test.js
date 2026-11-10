@@ -47,7 +47,7 @@ test('append claims increasing seqs and stores the normalized message', async ()
 test('append refuses a bad message, another user’s session, and an archived one', async () => {
     const { svc } = fresh()
     const s = await svc.getActive({ userId: 'u1' })
-    assert.equal((await svc.append({ sessionId: s.sessionId, userId: 'u1', message: say('kairos', 'user', 'x') })).reason, 'invalid_message')
+    assert.equal((await svc.append({ sessionId: s.sessionId, userId: 'u1', message: say('zeus', 'user', 'x') })).reason, 'invalid_message')
     assert.equal((await svc.append({ sessionId: s.sessionId, userId: 'u2', message: say('axl', 'user', 'x') })).reason, 'not_found')
     await svc.append({ sessionId: s.sessionId, userId: 'u1', message: say('axl', 'user', 'first') })
     await svc.startNew({ userId: 'u1' })

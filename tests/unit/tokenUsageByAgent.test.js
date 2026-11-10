@@ -33,7 +33,7 @@ test('an ordinary agent tag becomes its bare name', () => {
     assert.equal(agentKeyFromLog('[analystAgent]'), 'analystAgent')
     // A quick read books under its own row, apart from coverage — the hyphen survives, so the key reads.
     assert.equal(agentKeyFromLog('[analystAgent-quickread]'), 'analystAgent-quickread')
-    assert.equal(agentKeyFromLog('[kairos]'), 'kairos')
+    assert.equal(agentKeyFromLog('[tradingTools]'), 'tradingTools')
     assert.equal(agentKeyFromLog('[marketBrief]'), 'marketBrief')
 })
 
@@ -188,7 +188,7 @@ test('an over-ceiling user is moved to the cheap model, not cut off', () => {
 test('past the ceiling the turn runs on the cheap model instead of failing', () => {
     // End to end through the seam: the same call that books the turn reads the month's spend back,
     // so the check costs no extra round trip.
-    return resolveAgentStream('claude-opus-5-5', 'u1', 'kairosAgent',
+    return resolveAgentStream('claude-opus-5-5', 'u1', 'mentorAgent',
         async () => ({ totalCost: 25 }), async () => 20, undefined, OPUS,
     ).then(out => {
         assert.equal(out.degraded, true)
@@ -198,14 +198,14 @@ test('past the ceiling the turn runs on the cheap model instead of failing', () 
 })
 
 test('under the ceiling the house model is honoured untouched', async () => {
-    const out = await resolveAgentStream('claude-opus-5-5', 'u1', 'kairosAgent',
+    const out = await resolveAgentStream('claude-opus-5-5', 'u1', 'mentorAgent',
         async () => ({ totalCost: 4 }), async () => 20, undefined, OPUS)
     assert.equal(out.degraded, false)
     assert.equal(out.model, 'claude-opus-5-5')
 })
 
 test('an exempt account keeps its model however much it has spent', async () => {
-    const out = await resolveAgentStream('claude-opus-5-5', 'u1', 'kairosAgent',
+    const out = await resolveAgentStream('claude-opus-5-5', 'u1', 'mentorAgent',
         async () => ({ totalCost: 9999 }), async () => null, undefined, OPUS)   // null ceiling = exempt/unset
     assert.equal(out.degraded, false)
     assert.equal(out.model, 'claude-opus-5-5')

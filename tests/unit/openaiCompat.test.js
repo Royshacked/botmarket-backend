@@ -166,15 +166,15 @@ test('talos models: a candidate is honoured for an admin and routed to the defau
 })
 
 test('assessRouting: reads the document once, applies the gate, caps the effort, and never throws', async () => {
-    const admin  = async () => ({ id: 'u1', role: 'admin', preferences: { hermesModel: 'mistral-medium-3.5', hermesReasoning: 'high' } })
-    const trader = async () => ({ id: 'u2', role: 'user',  preferences: { hermesModel: 'mistral-medium-3.5' } })
-    const legacy = async () => ({ id: 'u3', isAdmin: true, preferences: { hermesModel: 'qwen3.7-plus' } })
+    const admin  = async () => ({ id: 'u1', role: 'admin', preferences: { talosReasoning: 'high' } })
+    const trader = async () => ({ id: 'u2', role: 'user',  preferences: {} })
+    const legacy = async () => ({ id: 'u3', isAdmin: true, preferences: { hermesReasoning: 'high' } })   // the pre-2026-11-10 key is not read
     const broken = async () => { throw new Error('db down') }
 
     const noHouse = async () => ({ talosModel: null })
 
-    // Nobody's own `hermesModel` is consulted, the admin's included: the house Talos model, else
-    // the default. The effort is still the user's own, capped.
+    // Nobody has an own model: the house Talos model, else the default. The effort is still the
+    // user's own (`talosReasoning`), capped.
     const a = await assessRouting('u1', admin, async () => ({ talosModel: 'mistral-medium-3.5' }))
     assert.equal(a.model, 'mistral-medium-3.5'); assert.equal(a.provider, 'openai-compat'); assert.equal(a.endpoint, 'openrouter'); assert.equal(a.wire, 'mistralai/mistral-medium-3-5'); assert.equal(a.reasoningEffort, 'low')
     assert.equal((await assessRouting('u1', admin, noHouse)).model, ASSESS_MODEL)
@@ -184,7 +184,8 @@ test('assessRouting: reads the document once, applies the gate, caps the effort,
     assert.equal(h.model, 'gpt-6-luna'); assert.equal(h.provider, 'openai-compat'); assert.equal(h.wire, 'openai/gpt-6-luna')
     assert.equal((await assessRouting('u2', trader, async () => ({ talosModel: 'gone' }))).model, ASSESS_MODEL)
     assert.equal((await assessRouting('u2', trader, async () => { throw new Error('db') })).model, ASSESS_MODEL)
-    assert.equal((await assessRouting('u3', legacy, noHouse)).model, ASSESS_MODEL)
+    const l = await assessRouting('u3', legacy, noHouse)
+    assert.equal(l.model, ASSESS_MODEL); assert.equal(l.reasoningEffort, 'off')
     const b = await assessRouting('u4', broken, noHouse)
     assert.equal(b.model, ASSESS_MODEL); assert.equal(b.provider, 'anthropic'); assert.equal(b.reasoningEffort, 'off')
     assert.equal((await assessRouting(null)).provider, 'anthropic')

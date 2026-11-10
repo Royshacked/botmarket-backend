@@ -29,7 +29,7 @@ const ICON     = '/img/pwa-192.png'
 // The desk each bot id is branded as. Human senders carry their name on the message itself.
 const BOT_BRAND = Object.freeze({
     axl: 'Axl', mentor: 'Mentor', portfolio: 'Atlas', scanner: 'Argus',
-    analyst: 'Prometheus', strategy: 'Pythia', kairos: 'Kairos',
+    analyst: 'Prometheus', strategy: 'Pythia',
 })
 
 // Injectable for tests: the send itself and the db.

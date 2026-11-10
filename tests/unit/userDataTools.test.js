@@ -10,7 +10,7 @@ import { isToolError } from '../../services/toolResult.util.js'
 // never turn a failed read into a confident "you have nothing" — that sentence, said wrongly, is
 // worse than no answer at all.
 
-const row = (over = {}) => ({ kind: 'call', id: 'c1', symbol: 'NVDA', title: 'reclaim', direction: 'long', status: 'looking', updatedAt: 5, detail: { rr: 2.4, nearestEntry: 170, entryLegs: 1 }, ...over })
+const row = (over = {}) => ({ kind: 'setup', id: 'c1', symbol: 'NVDA', title: 'reclaim', direction: 'long', status: 'looking', updatedAt: 5, detail: { rr: 2.4, nearestEntry: 170, entryLegs: 1 }, ...over })
 
 // ─── formatting ───────────────────────────────────────────────────────────────
 
@@ -20,14 +20,14 @@ test('an empty book reads as "nothing yet"', () => {
 })
 
 test('a FAILED read never reads as "nothing" — the distinction the whole chain exists for', () => {
-    const out = formatWatchedItems({ items: [], counts: {}, unavailable: ['call', 'setup'] })
+    const out = formatWatchedItems({ items: [], counts: {}, unavailable: ['setup', 'coverage'] })
     assert.doesNotMatch(out, /Nothing in the app yet/)
-    assert.match(out, /Could not read: call, setup/)
+    assert.match(out, /Could not read: setup, coverage/)
     assert.match(out, /rather than saying they have nothing/)
 })
 
 test('a partial failure is flagged even when other kinds answered', () => {
-    const out = formatWatchedItems({ items: [row()], counts: { call: 1 }, unavailable: ['scan'] })
+    const out = formatWatchedItems({ items: [row()], counts: { setup: 1 }, unavailable: ['scan'] })
     assert.match(out, /NVDA/)
     assert.match(out, /Could not read: scan/)
 })
@@ -36,10 +36,10 @@ test('detail is separated from status, and vanishes cleanly when there is none',
     // The first cut ran them together — "· lookingentry 170–172" — because the leading separator
     // was a '' that filter(Boolean) then dropped. Both halves matter: a separator when there IS
     // detail, and no dangling one when there isn't.
-    const withDetail = formatWatchedItems({ items: [row()], counts: { call: 1 } })
+    const withDetail = formatWatchedItems({ items: [row()], counts: { setup: 1 } })
     assert.match(withDetail, /· looking · entry 170/)
 
-    const bare = formatWatchedItems({ items: [row({ detail: {} })], counts: { call: 1 } })
+    const bare = formatWatchedItems({ items: [row({ detail: {} })], counts: { setup: 1 } })
     assert.match(bare, /NVDA long · looking — reclaim$/m)
     assert.doesNotMatch(bare, /· *$/m, 'no separator left hanging at the end of a line')
 })
@@ -50,25 +50,25 @@ test('detail is separated from status, and vanishes cleanly when there is none',
 test('every row leads with its id — the handle the edit hand-off is built on', () => {
     const out = formatWatchedItems({
         items: [
-            row({ kind: 'call', id: 'c1' }),
+            row({ kind: 'setup', id: 'c1' }),
             row({ kind: 'coverage', id: 'cov_9', symbol: 'ZTS', status: 'active', detail: { rating: 'buy', ourPT: 210 } }),
             row({ kind: 'scan', id: 'sc3', symbol: null, title: 'laggards', status: null, detail: { candidates: 4 } }),
         ],
-        counts: { call: 1, coverage: 1, scan: 1 },
+        counts: { setup: 1, coverage: 1, scan: 1 },
     })
-    assert.match(out, /\[call:c1\] NVDA/)
+    assert.match(out, /\[setup:c1\] NVDA/)
     assert.match(out, /\[coverage:cov_9\] ZTS/)
     assert.match(out, /\[scan:sc3\] laggards/)
 })
 
 test('a row with no id still renders — a missing handle costs the edit, not the answer', () => {
-    const out = formatWatchedItems({ items: [row({ id: null })], counts: { call: 1 } })
-    assert.match(out, /\[call\] NVDA/)
+    const out = formatWatchedItems({ items: [row({ id: null })], counts: { setup: 1 } })
+    assert.match(out, /\[setup\] NVDA/)
 })
 
 test('the summary line counts what was found', () => {
-    const out = formatWatchedItems({ items: [row()], counts: { call: 1, setup: 2 }, unavailable: [] })
-    assert.match(out, /1 call, 2 setups/)
+    const out = formatWatchedItems({ items: [row()], counts: { setup: 1, coverage: 2 }, unavailable: [] })
+    assert.match(out, /1 setup, 2 coverages/)
 })
 
 test('a book renders as a book — holdings and names, not a ticker', () => {
@@ -94,21 +94,21 @@ test('performance states outright that the rates are already percentages', () =>
     // The model is one careless multiply away from reporting 62% as 6200%.
     const out = formatPerformance({
         realized: { overall: { count: 10, winRatePct: 62, netPnl: 100 }, byMode: {}, byOrigin: {}, bySymbol: {} },
-        calls: null, filter: {},
+        filter: {},
     })
     assert.match(out, /62% win/)
     assert.match(out, /PERCENTAGES already/)
 })
 
 test('no closed trades reads as no record, not as a zero win rate', () => {
-    const out = formatPerformance({ realized: { overall: { count: 0 }, byMode: {}, byOrigin: {}, bySymbol: {} }, calls: null })
+    const out = formatPerformance({ realized: { overall: { count: 0 }, byMode: {}, byOrigin: {}, bySymbol: {} } })
     assert.match(out, /No closed trades on record/)
     assert.doesNotMatch(out, /0% win/)
 })
 
 test('only the busiest symbols reach the answer — the full table stays in the data', () => {
     const bySymbol = Object.fromEntries('ABCDEFGH'.split('').map((s, i) => [s, { count: i + 1, winRatePct: 50 }]))
-    const out = formatPerformance({ realized: { overall: { count: 36, winRatePct: 50, netPnl: 1 }, byMode: {}, byOrigin: {}, bySymbol }, calls: null })
+    const out = formatPerformance({ realized: { overall: { count: 36, winRatePct: 50, netPnl: 1 }, byMode: {}, byOrigin: {}, bySymbol } })
     assert.match(out, /by symbol:/)
     assert.equal((out.match(/\d+×\//g) ?? []).length, 5)
 })
@@ -126,8 +126,8 @@ test('the calendar names which symbols it actually covered', () => {
 // ─── handlers ─────────────────────────────────────────────────────────────────
 
 const handlers = (over = {}) => makeUserDataHandlers('u1', {
-    watched: async () => ({ items: [row()], counts: { call: 1 }, unavailable: [] }),
-    performance: async () => ({ realized: { overall: { count: 1, winRatePct: 100, netPnl: 5 }, byMode: {}, byOrigin: {}, bySymbol: {} }, calls: null, filter: {}, unavailable: [] }),
+    watched: async () => ({ items: [row()], counts: { setup: 1 }, unavailable: [] }),
+    performance: async () => ({ realized: { overall: { count: 1, winRatePct: 100, netPnl: 5 }, byMode: {}, byOrigin: {}, bySymbol: {} }, filter: {}, unavailable: [] }),
     events: async () => ({ from: 'a', to: 'b', scope: 'mine', symbols: [], earnings: [], fed: [], unavailable: [] }),
     ...over,
 })

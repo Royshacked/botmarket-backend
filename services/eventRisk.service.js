@@ -1,8 +1,8 @@
-// Scheduled-catalyst lookup, stamped onto a Kairos call ONCE at build time (not re-fetched by the
+// Scheduled-catalyst lookup, stamped onto a setup ONCE at build time (not re-fetched by the
 // monitor). Merges the symbol's upcoming earnings (Finnhub, equities only) with market-wide Fed/macro
-// releases (FRED + static FOMC) inside a day/swing horizon. Hermes reads the frozen `event_risk` list
-// and, like a discretionary trader, strongly prefers to wait rather than enter into an unresolved
-// binary. Freezing at build is intentional: cheap (one fetch), and fine over a few-days call life.
+// releases (FRED + static FOMC) inside a day/swing horizon. The monitor reads the frozen `event_risk`
+// list and, like a discretionary trader, strongly prefers to wait rather than enter into an
+// unresolved binary. Freezing at build is intentional: cheap (one fetch), and fine over a few days.
 
 import { fetchEarningsCalendarByDate } from '../providers/finnhub.provider.js'
 import { isEquityClass } from './entity/vocabulary.js'
@@ -11,8 +11,8 @@ import { logger }                      from './logger.service.js'
 
 const LOG = '[eventRisk]'
 
-// How far forward to flag catalysts. Covers the day/swing horizon; Hermes still judges per-call
-// relevance against trade_type + valid_until (a 9-days-out event is noise for an intraday call).
+// How far forward to flag catalysts. Covers the day/swing horizon; the monitor still judges
+// relevance against trade_type + valid_until (a 9-days-out event is noise for an intraday trade).
 const HORIZON_DAYS = 10
 
 // Asset classes that report earnings. Crypto/fx/futures have none, so the earnings fetch is skipped.
@@ -27,7 +27,7 @@ function _earningsWhen(hour) {
 }
 
 /**
- * Build the frozen scheduled-catalyst list for a call. Never throws — both providers swallow their
+ * Build the frozen scheduled-catalyst list for a setup. Never throws — both providers swallow their
  * own errors and return safe empties, and each lookup is independently guarded, so a failure just
  * yields fewer (or zero) events. Low-impact macro (weekly claims, housing) is dropped as noise.
  *

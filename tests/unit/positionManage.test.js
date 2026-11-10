@@ -136,7 +136,7 @@ test('move_stop amends at the SHIFTED level and records the AUTHORED one', async
 })
 
 // `let_run` was a verb here until 2026-09-29 and it amended the TP the same way. It left Talos's
-// menu on 2026-09-17 and Hermes, the only other caller, is archived — but it stayed executable for
+// menu on 2026-09-17 and the only other caller is gone — but it stayed executable for
 // twelve days, and this is the direction that matters: an accepted row could still move or CANCEL
 // a resting take-profit with nothing alive to have proposed it.
 test('a verb the executor no longer has is refused, and touches no broker', async () => {

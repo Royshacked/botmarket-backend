@@ -1,24 +1,23 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { buildOrigin, pickCallReasoning, pickPortfolioThesis, computeTradeStats, tradeCaptureService } from '../../services/tradeCapture.service.js'
+import { buildOrigin, pickPortfolioThesis, computeTradeStats, tradeCaptureService } from '../../services/tradeCapture.service.js'
 
-// buildOrigin freezes "what spawned this trade" onto the trade doc. Four cases:
-// idea / call / portfolio / idealess — with `type` derived (call > portfolio > idea).
+// buildOrigin freezes "what spawned this trade" onto the trade doc. Three cases:
+// idea / portfolio / idealess — with `type` derived (portfolio > idea).
 
-test('buildOrigin: plain idea → type "idea", callId + portfolio null', () => {
+test('buildOrigin: plain idea → type "idea", portfolio null', () => {
     const o = buildOrigin({ id: 'idea1', groupId: null, userId: 'u1' })
     assert.deepEqual(o, {
-        type: 'idea', ideaId: 'idea1', callId: null,
+        type: 'idea', ideaId: 'idea1',
         groupId: null, portfolioId: null, portfolioName: null, allocationRatio: null,
         adopted: false,
     })
 })
 
-test('buildOrigin: Kairos call → type "call", carries callId (the is-a-call flag)', () => {
+test('buildOrigin: a stray callId (the deleted call kind) no longer types or rides the origin', () => {
     const o = buildOrigin({ id: 'idea9', callId: 'call_TSLA_x' })
-    assert.equal(o.type, 'call')
-    assert.equal(o.ideaId, 'idea9')      // the idea is still the execution vehicle
-    assert.equal(o.callId, 'call_TSLA_x')
+    assert.equal(o.type, 'idea')
+    assert.equal('callId' in o, false)
 })
 
 test('buildOrigin: portfolio-linked idea → type "portfolio", carries portfolio fields', () => {
@@ -27,18 +26,11 @@ test('buildOrigin: portfolio-linked idea → type "portfolio", carries portfolio
     assert.equal(o.portfolioId, 'pf1')
     assert.equal(o.portfolioName, 'Macro')
     assert.equal(o.allocationRatio, 0.25)
-    assert.equal(o.callId, null)
-})
-
-test('buildOrigin: call precedence — a call inside a portfolio is still typed "call"', () => {
-    const o = buildOrigin({ id: 'idea3', callId: 'call_x', portfolioId: 'pf1' })
-    assert.equal(o.type, 'call')
-    assert.equal(o.portfolioId, 'pf1')   // portfolio linkage still preserved, just not the type
 })
 
 test('buildOrigin: idealess (no idea) → all-null origin, type null', () => {
     assert.deepEqual(buildOrigin(), {
-        type: null, ideaId: null, callId: null,
+        type: null, ideaId: null,
         groupId: null, portfolioId: null, portfolioName: null, allocationRatio: null,
         adopted: false,
     })
@@ -63,30 +55,6 @@ test('buildOrigin: adopted defaults to false, never undefined', () => {
     assert.equal(buildOrigin({ id: 'i1', adopted: 'yes' }).adopted, false, 'only a real boolean counts')
 })
 
-// ── pickCallReasoning: freeze the originating call's thesis onto the trade ──────
-test('pickCallReasoning: a call → freezes thesis/bias/entry_zones/patterns (an ARCHIVED doc: it keeps its bands)', () => {
-    const call = {
-        thesis: 'reclaim of the 200MA', bias: 'long',
-        entry_zones: [{ id: 'ez1', side: 'long', lower: 248, upper: 250 }],
-        patterns: [{ id: 'p1', name: 'bull flag', confidence: 0.7 }],
-        // fields not part of the reasoning snapshot are ignored
-        asset: 'TSLA', monitor_state: { foo: 1 },
-    }
-    assert.deepEqual(pickCallReasoning(call), {
-        thesis: 'reclaim of the 200MA', bias: 'long',
-        entry_zones: [{ id: 'ez1', side: 'long', lower: 248, upper: 250 }],
-        patterns: [{ id: 'p1', name: 'bull flag', confidence: 0.7 }],
-    })
-})
-
-test('pickCallReasoning: no call (idea/portfolio trade, or deleted call) → all-null shape', () => {
-    const empty = { thesis: null, bias: null, entry_zones: null, patterns: null }
-    assert.deepEqual(pickCallReasoning(), empty)
-    assert.deepEqual(pickCallReasoning(null), empty)
-    // a call missing some reasoning fields still yields the full shape (nulls for gaps)
-    assert.deepEqual(pickCallReasoning({ thesis: 'x' }), { thesis: 'x', bias: null, entry_zones: null, patterns: null })
-})
-
 // ── pickPortfolioThesis: freeze the book's thesis onto the trade ────────────────
 test('pickPortfolioThesis: a thesis → freezes strategy + targetExposures (drops version/meta)', () => {
     const thesis = {
@@ -98,7 +66,7 @@ test('pickPortfolioThesis: a thesis → freezes strategy + targetExposures (drop
     })
 })
 
-test('pickPortfolioThesis: no thesis (idea/call trade, or book with none) → null', () => {
+test('pickPortfolioThesis: no thesis (idea trade, or book with none) → null', () => {
     assert.equal(pickPortfolioThesis(), null)
     assert.equal(pickPortfolioThesis(null), null)
     // a thesis missing a field still yields the full shape (null for the gap)

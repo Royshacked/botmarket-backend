@@ -1,0 +1,18 @@
+import express         from 'express'
+import { log }         from '../../../middleware/logger.middleware.js'
+import { requireAuth } from '../../../middleware/auth.middleware.js'
+import {
+    createScan, listScans, getScan, updateScan, removeScan,
+} from './scanner.controller.js'
+
+const router = express.Router()
+
+router.use(requireAuth)
+
+router.get('/scans',        log, listScans)
+router.get('/scans/:id',    log, getScan)
+router.post('/scans',       log, createScan)
+router.put('/scans/:id',    log, updateScan)
+router.delete('/scans/:id', log, removeScan)
+
+export const scannerRoutes = router

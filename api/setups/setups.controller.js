@@ -34,8 +34,8 @@ export const getSetup    = crud.get
 
 /**
  * Act on a setup's in-position management card: accept the pending proposal, or dismiss the card
- * and keep the position. The Mentor twin of `POST /api/kairos/:id/action` — same verb names, same
- * refusal vocabulary, so a client that can drive one can drive the other.
+ * and keep the position. Same verb names and
+ * refusal vocabulary as every other action route.
  *
  * `add_leg` is deliberately NOT here: Talos parks that leg as a pending ORDER, so it is taken by
  * confirming the order. Asking for it returns `confirm_order` rather than a flat 400 — the client

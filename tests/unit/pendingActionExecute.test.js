@@ -111,7 +111,7 @@ test('the default decider is the USER — a row with no flag is a discretionary 
 
 test('the execution kinds carry a monitor exit or a management action, and nothing else', async () => {
     const { executeOrigin } = await import('../../services/pendingAction/originRegistry.js')
-    for (const kind of ['call', 'setup', 'idea']) {
+    for (const kind of ['setup', 'idea']) {
         const res = await executeOrigin({
             id: 'q1', userId: 'u1', origin: { kind, entityId: 'e1' }, action: { type: 'trim' },
         })
@@ -120,7 +120,7 @@ test('the execution kinds carry a monitor exit or a management action, and nothi
 })
 
 // ── Accepted management, queued off-hours ────────────────────────────────────
-// The second thing that queues against a call / setup / idea: the user accepting a monitor's
+// The second thing that queues against a setup / idea: the user accepting a monitor's
 // proposal after the close. Unlike a monitor exit it IS theirs to drop, and unlike a portfolio row
 // the two never share a verb — which is why this dispatch reads the verb, not the decider.
 
@@ -144,27 +144,27 @@ test('a management verb routes to the manage path, an exit to the monitor path',
 })
 
 test('the manage dispatch reads the VERB, not queuedBy — a legacy row must not misroute', async () => {
-    // Rows written before `queuedBy` existed read back as 'user'. If these three kinds dispatched by
+    // Rows written before `queuedBy` existed read back as 'user'. If these kinds dispatched by
     // decider like portfolio_item does, every one of those legacy overnight stops would be handed to
     // the manage executor. They can dispatch by verb precisely because they never collide: a monitor
     // exit is `exit`, a management action is never called that.
     const { executeOrigin } = await import('../../services/pendingAction/originRegistry.js')
     const res = await executeOrigin({
-        id: 'q1', userId: 'u1', origin: { kind: 'call', entityId: 'e1' },
+        id: 'q1', userId: 'u1', origin: { kind: 'setup', entityId: 'e1' },
         action: { type: 'exit', reason: 'stop' },      // no queuedBy at all
     })
     assert.notEqual(res.reason, 'unknown_action', 'still the monitor exit path')
 })
 
-test('every registered origin can run AND cancel — including the three added in phase 4', async () => {
+test('every registered origin can run AND cancel — including the ones added in phase 4', async () => {
     const { ORIGIN_KINDS, hasOriginHandler, deskForOrigin } = await import('../../services/pendingAction/originRegistry.js')
-    assert.deepEqual([...ORIGIN_KINDS].sort(), ['call', 'idea', 'portfolio_item', 'setup'])
+    assert.deepEqual([...ORIGIN_KINDS].sort(), ['idea', 'portfolio_item', 'setup'])
     for (const kind of ORIGIN_KINDS) {
         assert.ok(hasOriginHandler(kind))
         assert.ok(deskForOrigin(kind), `${kind} has no desk — its row would carry no tag`)
     }
     // The archived Idea desk speaks as Axl, the same fallback its cards take.
     assert.equal(deskForOrigin('idea'),  'axl')
-    assert.equal(deskForOrigin('call'),  'kairos')
+    assert.equal(deskForOrigin('call'),  null, 'the call kind was deleted 2026-11-10')
     assert.equal(deskForOrigin('setup'), 'mentor')
 })

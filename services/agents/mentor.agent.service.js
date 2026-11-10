@@ -31,7 +31,7 @@ import { STATUS } from '../entity/vocabulary.js'
 
 // Mentor — the trade ASSISTANT (Pipeline F). A conversation → a draft `setup` entity.
 //
-// Forked from the Kairos scaffold, which is the right shape for this: the emitted worksheet IS
+// The shape: the emitted worksheet IS
 // the state (no separate <state> block to carry), the client owns chat history, and nothing
 // persists until the user presses Generate. What differs is the CONVERSATION contract — Mentor
 // has no phase capture. The guided build (a name and no plan) climbs a ladder of rungs in the
@@ -39,8 +39,7 @@ import { STATUS } from '../entity/vocabulary.js'
 // the server tracks: the first blank field IS the next rung, so nothing here has to remember
 // where the conversation was (docs/desks/mentor-talos.md). The user always brings the ticker.
 //
-// The tool kit is Mentor's own — services/tools/trading.tools.js, which carried Kairos's name until
-// that desk was archived (2026-08-18) and is now named for its only live consumer. Taken WHOLE in the
+// The tool kit is Mentor's own — services/tools/trading.tools.js. Taken WHOLE in the
 // user's-setup mode, where Mentor must weigh a classical candidate against an SMC one in a single
 // conversation; the RISK-BASED mode drops the pattern and indicator tools (mentorMode.kitFor,
 // docs/design/mentor-modes.md).
@@ -62,7 +61,7 @@ export const CLOSE_TOOL = 'close_setup'
 /** Calls that compute on the user's numbers rather than read the market — never recorded as "already read". */
 const ACTION_TOOLS = new Set([SIZE_TOOL, CLOSE_TOOL, 'get_entry_level'])
 
-// Kairos's kit plus the reasoning sidecar, APPENDED so the shared array is the exact prefix of
+// The trading kit plus the reasoning sidecar, APPENDED so the shared array is the exact prefix of
 // this one — the tools cache breakpoint sits inside TRADING_TOOLS, and inserting anywhere before it
 // would re-write that cache on every Mentor turn.
 //
@@ -573,7 +572,7 @@ export function mergeCoverage(prior, raw) {
  * narrates "everything else stands" and emits only the changed field. The client replaces its
  * draft wholesale, so that thin block would wipe settled legs.
  *
- * Shallow BY DESIGN (same rule as Kairos's `_mergeCallDraft`): a re-emitted array or object
+ * Shallow BY DESIGN: a re-emitted array or object
  * replaces its prior value outright, so the model can still DROP a leg or clear a field with an
  * explicit null — only omission is protected. Returns null when there's no new setup this turn.
  */

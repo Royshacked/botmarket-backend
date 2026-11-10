@@ -1,12 +1,12 @@
 // The tools a MONITOR reaches for when it wakes to judge a plan against live price.
 //
-// WHY THIS EXISTS. hermes.assess.js hand-rolls its own `_chartTool` / `_structureTools` /
+// WHY THIS EXISTS. An earlier monitor hand-rolled its own `_chartTool` / `_structureTools` /
 // `_smcTools` / `_institutionalTools`: copies of tools that already live in
 // services/agentTools.registry.js, with the TICKER REMOVED (hardcoded to the entity's own asset)
 // and the timeframe clamped to an enum of the entity's ladder rungs. Talos imported those copies,
 // which is why a setup could say "NVDA is weak intraday" or "SMH is leading" and the monitor had
 // no way to look — not for want of a tool, but because the fork one layer down had narrowed tools
-// that were already general. Same story for the handlers: `buildKairosToolHandlers` already returns
+// that were already general. Same story for the handlers: the shared tool-handler factory already returns
 // a name→fn map, and the monitor re-implemented dispatch as a switch.
 //
 // So: schemas from the registry (mechanism), descriptions written here (judgment — a monitor
@@ -20,8 +20,7 @@
 //
 // Shared deliberately — Talos is its one caller today, and a second monitor with a plan to check
 // would import it rather than fork it. Adding a second copy is what created the problem this module
-// fixes. (It was written for Talos AND the archived Hermes; the merge that would have brought Hermes
-// onto it never came — Kairos/Hermes are archived, 2026-08-18.)
+// fixes.
 
 import { toolsFor } from '../services/agentTools.registry.js'
 import { COMMON_TOOL_HANDLERS, makeToolHandler } from '../services/agentUtils.js'

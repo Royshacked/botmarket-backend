@@ -19,12 +19,12 @@ test('planThread: a linked thread goes onto its entity, as that kind\'s agent', 
     assert.deepEqual(planThread(t({ agent: 'portfolio', subjectType: 'portfolio', subjectId: 'p1' }), all).agent, 'portfolio')
 })
 
-test('planThread: an entity that is gone, and the retired desks (Kairos, Idea, Pythia\'s old tilts), are deleted', () => {
+test('planThread: an entity that is gone, and the retired desks (call, Idea, Pythia\'s old tilts), are deleted', () => {
     assert.deepEqual(planThread(t({ agent: 'mentor', subjectType: 'setup', subjectId: 's9' }), none), { action: 'delete', why: 'entity_gone' })
-    assert.deepEqual(planThread(t({ agent: 'kairos', subjectType: 'call', subjectId: 'k1' }), all), { action: 'delete', why: 'retired:call' })
+    assert.deepEqual(planThread(t({ agent: 'zeus', subjectType: 'call', subjectId: 'k1' }), all), { action: 'delete', why: 'retired:call' })
     assert.deepEqual(planThread(t({ agent: 'idea', subjectType: 'idea', subjectId: 'i1' }), all), { action: 'delete', why: 'retired:idea' })
     assert.deepEqual(planThread(t({ agent: 'strategy', subjectType: 'tilt', subjectId: 't1' }), all), { action: 'delete', why: 'retired:tilt' })
-    assert.deepEqual(planThread(t({ agent: 'kairos', tier: 'draft', subjectId: null }), all), { action: 'delete', why: 'retired:kairos' })
+    assert.deepEqual(planThread(t({ agent: 'zeus', tier: 'draft', subjectId: null }), all), { action: 'delete', why: 'retired:zeus' })
 })
 
 test('planThread: a chat desk\'s draft becomes an archived session; Pythia\'s and Aether\'s own threads are left alone', () => {
@@ -107,15 +107,16 @@ test('mergeSources: only WHOLE messages match — "yes" alone is not a copy of "
     assert.equal(r.dropped, 0)
 })
 
+// On a setup since 2026-11-09: `scan` is no context kind any more (Argus's lists are archived).
 test('importLegacy counts what it put in FRONT — after the cap drops the oldest', async () => {
     const { db } = memDb()
     const ctx = makeAgentContextService({ getDb: async () => db })
-    await ctx.seal({ userId: 'u1', kind: 'scan', entityId: 'sc1', agent: 'scanner', messages: [{ role: 'user', content: 'sealed' }] })
-    await ctx.importLegacy({ userId: 'u1', kind: 'scan', entityId: 'sc1', agent: 'scanner', sources: ['x'], messages: Array.from({ length: 3 }, (_, i) => ({ role: 'user', content: `old ${i}` })) })
-    assert.equal((await ctx.load({ userId: 'u1', kind: 'scan', entityId: 'sc1', agent: 'scanner' })).legacyAdded, 3)
+    await ctx.seal({ userId: 'u1', kind: 'setup', entityId: 'st1', agent: 'mentor', messages: [{ role: 'user', content: 'sealed' }] })
+    await ctx.importLegacy({ userId: 'u1', kind: 'setup', entityId: 'st1', agent: 'mentor', sources: ['x'], messages: Array.from({ length: 3 }, (_, i) => ({ role: 'user', content: `old ${i}` })) })
+    assert.equal((await ctx.load({ userId: 'u1', kind: 'setup', entityId: 'st1', agent: 'mentor' })).legacyAdded, 3)
     // 250 more in front: the cap keeps 200, all but the one sealed message are legacy.
-    await ctx.importLegacy({ userId: 'u1', kind: 'scan', entityId: 'sc1', agent: 'scanner', sources: ['y'], messages: Array.from({ length: 250 }, (_, i) => ({ role: 'user', content: `older ${i}` })) })
-    const doc = await ctx.load({ userId: 'u1', kind: 'scan', entityId: 'sc1', agent: 'scanner' })
+    await ctx.importLegacy({ userId: 'u1', kind: 'setup', entityId: 'st1', agent: 'mentor', sources: ['y'], messages: Array.from({ length: 250 }, (_, i) => ({ role: 'user', content: `older ${i}` })) })
+    const doc = await ctx.load({ userId: 'u1', kind: 'setup', entityId: 'st1', agent: 'mentor' })
     assert.equal(doc.messages.length, 200)
     assert.equal(doc.legacyAdded, 199)
     assert.equal(doc.messages.at(-1).content, 'sealed')

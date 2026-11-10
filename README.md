@@ -11,7 +11,7 @@ unified adapter layer. Each desk owns a kind; each kind is watched by its own mo
 | **Axl** — reception / concierge / critic | `/api/sessions` (the session turn) | nothing (read-only); hands over to a desk | — |
 | **Mentor** — the trading desk | `/api/mentor`, `/api/setups` | `setup` | Talos |
 | **Atlas** — portfolio construction + review | `/api/portfolio` | `portfolio_item` holdings | Themis |
-| **Argus** — the systematic scanner | `/api/scanner` | `scan` | — |
+| **Argus** — finds ONE name for Mentor (scan lists archived 2026-11-09) | — (a session turn) | — | — |
 | **Prometheus** — buy-side research | `/api/analyst` | `coverage` | coverage monitor |
 | **Pythia** — the industry desk | `/api/strategy` | `industry_view` — three structural answers per GICS sub-industry; `industry_assessment` — per industry and theme a near-term verdict (for swing · watch · avoid · no case) and, since 2026-10-31, its own long-term call (yes / no, reviewed monthly), graded forward; `theme` value chains (all **broadcasts**, not per-user) | industry-view monitor · Pythia's weekly change scan · the calls grader |
 
@@ -155,7 +155,6 @@ api/                   HTTP surface — one folder per feature (routes + control
   trade-ideas/         the EXECUTION tier — entity CRUD + order placement over the `idea` kind,
                        which is what `portfolio_item` holdings ride
   portfolio/           Atlas chat + portfolio review/rebalance lifecycle
-  scanner/             Argus chat + saved scans
   hotlist/             the Floor's HOTLIST (/api/hotlist): This week's run-up names (built overnight; the day
                        columns archived 2026-10-25), Prometheus's catalyst reads on them, the weekly chain's coverage on
                        Swing / Long term; no grade letter shown. Shared, read-only bar POST /reads
@@ -253,12 +252,13 @@ AXL  —  POST /api/sessions/:id/turn (the session's first voice)
   <suggest>…</suggest>         up to 3 follow-up chips — never on a routing turn
         │
         ▼
-  setup → Mentor · coverage → Prometheus · scan → Argus · portfolio → Atlas
+  setup → Mentor · coverage → Prometheus · portfolio → Atlas
   (a book opens in edit or review — the BOOK decides, never the caller)
 
   The same tags are EVERY desk's, not only Axl's (services/routing.util.js): Argus
   saying "send NVDA to Prometheus" hands the floor on with what it found. Mentor
-  sending the user to Argus presets Argus to find ONE name and hand it back.
+  sending the user to Argus presets Argus to find ONE name and hand it back —
+  and since 2026-11-09 Mentor is the only one who can send anyone to Argus.
 ```
 
 A desk's work-in-progress is drawn in the **side pane** beside the timeline (the worksheet, the plan, the
@@ -499,6 +499,9 @@ Edit mode (modifying an existing portfolio):
 ---
 
 ### 3. Scans
+
+> **Archived 2026-11-09** — Argus's list-building chat and the scan list are in `archive/` (see
+> `archive/README.md`). Live, Argus only finds ONE name for Mentor. The flow below is how it was.
 
 The scanner agent produces a watchlist of trade candidates for a given timeframe/theme.
 

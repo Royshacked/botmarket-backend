@@ -22,15 +22,20 @@ test('the routable desks, IN PROMPT ORDER — research, assist, portfolio, scan'
     assert.deepEqual(Object.keys(ROUTABLE_DESKS), ['research', 'assist', 'portfolio', 'scan'])
     assert.deepEqual(Object.values(ROUTABLE_DESKS).map(d => d.agent), ['analyst', 'mentor', 'portfolio', 'scanner'])
     for (const d of Object.values(ROUTABLE_DESKS)) assert.ok(d.brand && d.does, d.agent)
+    // Since 2026-11-09 Argus takes the user only from Mentor (his list-building chat is archived); the rest are open.
+    assert.deepEqual(Object.fromEntries(Object.entries(ROUTABLE_DESKS).map(([k, d]) => [k, d.routedFrom])),
+        { research: null, assist: null, portfolio: null, scan: ['mentor'] })
 })
 
-test('an <edit> reopens the four editable kinds at the desk that owns each', () => {
-    assert.deepEqual({ ...EDIT_KIND_DESKS }, { coverage: 'research', setup: 'assist', portfolio: 'portfolio', scan: 'scan' })
+test('an <edit> reopens the three editable kinds at the desk that owns each — `scan` left with Argus’s lists (2026-11-09)', () => {
+    assert.deepEqual({ ...EDIT_KIND_DESKS }, { coverage: 'research', setup: 'assist', portfolio: 'portfolio' })
 })
 
 test('the session store speaks for every agent and seals onto every kind a desk produces', () => {
     assert.deepEqual([...SESSION_AGENTS].sort(), ['aether', 'analyst', 'axl', 'mentor', 'portfolio', 'scanner', 'strategy'])
-    assert.deepEqual([...CONTEXT_KINDS].sort(), ['coverage', 'industry_view', 'portfolio', 'scan', 'setup'])
+    // `scan` left on 2026-11-09: Argus's single pick rides the chain to Mentor and produces no entity of its own.
+    assert.deepEqual([...CONTEXT_KINDS].sort(), ['coverage', 'industry_view', 'portfolio', 'setup'])
+    assert.equal(agentForKind('scan'), null)
     assert.deepEqual([...SESSION_AGENTS], [...AGENT_KEYS])
     assert.deepEqual([...CONTEXT_KINDS], [...ENTITY_KINDS])
 })
@@ -65,7 +70,7 @@ test('lookups: agent at a desk, agent for a kind, entry for an agent', () => {
     assert.equal(agentAtDesk('assist'), 'mentor')
     assert.equal(agentAtDesk('trade'), null)          // a composite names no one agent
     assert.equal(agentForKind('coverage'), 'analyst')
-    assert.equal(agentForKind('call'), null)          // archived with Kairos
+    assert.equal(agentForKind('call'), null)          // deleted 2026-11-10
     assert.equal(deskOf('axl').desk, null)
-    assert.equal(deskOf('kairos'), null)
+    assert.equal(deskOf('zeus'), null)
 })

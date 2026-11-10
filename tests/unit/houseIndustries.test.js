@@ -141,7 +141,7 @@ test('listForBook reads the stored assessments and the approved themes', async (
 // ── the tool Argus reads (argus-on-pythia.md §3.2) ───────────────────────────
 
 import { makeHouseIndustriesHandlers, normalizeBook, formatHouseIndustries, formatIndustryCompanies, ATLAS_WORDS } from '../../services/tools/houseIndustries.tools.js'
-import { TOOLS as SCANNER_TOOLS, scannerToolsForProfile, _wrapForGrounding } from '../../services/agents/scanner.agent.service.js'
+import { TOOLS as SCANNER_TOOLS, _wrapForGrounding } from '../../services/agents/scanner.agent.service.js'
 import { DISCOVERY_TOOLS, makeGroundingLedger, groundingTier } from '../../services/scanner.grounding.js'
 
 const ENTRY = (over = {}) => ({
@@ -215,11 +215,11 @@ test('a failed read answers in text and tells Argus to scan normally', async () 
     assert.match(typeof out === 'string' ? out : JSON.stringify(out), /db down.*scan the market as you normally would/)
 })
 
-test('Argus has the tool in both profiles, before consult; it is a discovery source', () => {
+// One profile since 2026-11-09 — the investing profile left with Argus's lists.
+test('Argus has the tool, before consult; it is a discovery source', () => {
     const names = SCANNER_TOOLS.map(t => t.name)
     assert.ok(names.includes('get_house_industries'))
     assert.equal(names.at(-1), 'consult')
-    assert.ok(scannerToolsForProfile('investing').some(t => t.name === 'get_house_industries'))
     assert.ok(DISCOVERY_TOOLS.has('get_house_industries'))
 })
 

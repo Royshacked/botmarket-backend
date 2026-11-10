@@ -51,8 +51,7 @@ test('server.js registers the full fleet', () => {
     // A loop dropped from the boot sequence is invisible at runtime — nothing fails, the work just
     // stops happening. Pinning the roster makes a removal a deliberate edit to this list.
     assert.deepEqual(registeredLoops().map(l => l.name).sort(), [
-        // hermes left on 2026-08-18 with Kairos — see archive/README.md. 'exits' and 'entries'
-        // arrived the same day: the two halves of what Minos used to do, deliberately split so
+        // 'exits' and 'entries' arrived on 2026-08-18: the two halves of what Minos used to do, deliberately split so
         // neither can be switched off with the other.
         // 'guardSweep' is Talos's tier-0 (docs/desks/mentor-talos.md) and belongs on this list for
         // the reason the list exists: it is the only thing watching price between Talos's own reads,

@@ -8,7 +8,7 @@
 /**
  * The execution-tier kinds. Each is one flat doc in the `entities` collection.
  *
- * `setup` belongs here as much as the other three — it lives in `entities`, carries brokerOrders
+ * `setup` belongs here as much as the other two — it lives in `entities`, carries brokerOrders
  * and exitOrders, and goes through positionManage like any of them. It was missing, which made
  * `isKind('setup')` answer false about a kind that plainly exists.
  *
@@ -19,7 +19,6 @@
  */
 export const KINDS = Object.freeze({
     IDEA:           'idea',
-    CALL:           'call',
     SETUP:          'setup',
     PORTFOLIO_ITEM: 'portfolio_item',
 })
@@ -44,7 +43,6 @@ export const KINDS = Object.freeze({
  */
 const OWNER_BY_KIND = Object.freeze({
     [KINDS.IDEA]:           null,     // entry + exit loops, kind-blind
-    [KINDS.CALL]:           null,     // Hermes archived with Kairos; nothing authors one
     [KINDS.SETUP]:          'talos',
     [KINDS.PORTFOLIO_ITEM]: 'themis',
 })
@@ -81,14 +79,14 @@ export function blankMonitorState() {
  *
  * @typedef {Object} Envelope
  * @property {string}  id
- * @property {'idea'|'call'|'portfolio_item'} kind
+ * @property {'idea'|'setup'|'portfolio_item'} kind
  * @property {string|null}  userId
  * @property {string|null}  parentId      book id for portfolio_item, else null
  * @property {string|null}  status
  * @property {string|null}  owner         derived via ownerForKind
  * @property {string}       asset
  * @property {string|null}  assetClass
- * @property {string|null}  direction     long|short (idea/portfolio_item) | long|short|both (call)
+ * @property {string|null}  direction     long|short
  * @property {number|null}  createdAt
  * @property {Object}       monitorState  { nextCheckAt, checkCount, memo } — the journal is its own collection (journal.service)
  * @property {Object}       execution     { broker, accounts[], mainAccountId, brokerSymbol,

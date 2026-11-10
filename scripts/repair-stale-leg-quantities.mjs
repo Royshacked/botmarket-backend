@@ -40,7 +40,7 @@ const LIVE  = new Set(LIVE_POSITION)
 
 const db = await getDb()
 
-// Every live entity carrying broker linkage — holdings, calls and setups alike. The drift is not a
+// Every live entity carrying broker linkage — holdings and setups alike. The drift is not a
 // portfolio-only fact: any entity whose position was partly closed outside a tracked exit order has it.
 const rows = await db.collection(ENTITIES)
     .find({ status: { $in: [...LIVE] }, brokerOrders: { $exists: true, $ne: [] } })

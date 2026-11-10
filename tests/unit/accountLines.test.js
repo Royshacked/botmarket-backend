@@ -2,8 +2,8 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { buildAccountLines, resolveMainAccountId } from '../../services/agentUtils.js'
 
-// buildAccountLines renders the marked trading accounts (shared by the Idea, Kairos + Atlas
-// agents). `mainAccountId` tags which account the trade binds to as MAIN — mirroring
+// buildAccountLines renders the marked trading accounts (shared by the trading desks
+// and Atlas). `mainAccountId` tags which account the trade binds to as MAIN — mirroring
 // resolveMainAccountId (explicit main, else first) so the prompt matches what save resolves.
 
 const A = { id: 'a', broker: 'ctrader', isLive: true,  login: '111', currency: 'USD', balance: 10000, equity: 10500 }

@@ -13,8 +13,8 @@ import { logger } from './logger.service.js'
 /**
  * Mentor/Talos's in-position handoff — the user acting on a `setup_manage` card.
  *
- * Talos has been writing `position_state.pending_action` since Phase 5, in the same shape Hermes
- * writes for a call, but there was nowhere to say yes: the card arrived and the proposal died there.
+ * Talos has been writing `position_state.pending_action` since Phase 5, but there was nowhere
+ * to say yes: the card arrived and the proposal died there.
  * This is that endpoint's service half. The EXECUTION is the shared one (positionManage); what lives
  * here is what belongs to this desk.
  *
@@ -22,7 +22,7 @@ import { logger } from './logger.service.js'
  *
  * 1. THE DIALECT. Talos proposes in the vocabulary of its own prompt — `{ stop, why }` for a stop
  *    move, `{ leg, quantity, size_pct }` for a partial (the watched target's own size, resolved by
- *    the monitor). Hermes said `{ new_stop }` / `{ size_pct }`. The translation happens HERE, on
+ *    the monitor). The translation happens HERE, on
  *    the way in, so the shared executor never has to know which desk is calling. Note the NOTIFY
  *    path deliberately gets the RAW proposal: the manual-mode card is Talos's copy.
  *

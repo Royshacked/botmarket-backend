@@ -65,10 +65,9 @@ test('money and R multiples are NOT rescaled', async () => {
     assert.equal(res.realized.overall.profitFactor, 1.8)
 })
 
-test('the Kairos call record is GONE, not empty', async () => {
-    // Kairos was archived 2026-08-18. `trades` is the whole answer now. The distinction this pins
-    // is that the key is absent rather than permanently null: a rendered section reading 0 says
-    // "you have no record", which is a different and wronger claim than "that desk is asleep".
+test('there is no second record beside `trades` — the key is absent, not empty', async () => {
+    // `trades` is the whole answer. A rendered section reading 0 says "you have no record", which is
+    // a different and wronger claim than "that source does not exist".
     const res = await getPerformance('u1', {}, deps())
     assert.equal('calls' in res, false)
 })

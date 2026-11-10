@@ -2,7 +2,7 @@
  * KLineCharts headless renderer — draws OUR OWN chart (self-hosted FMP candles) to a
  * base64 PNG on the server, so the model can visually analyse the same data the monitor
  * evaluates against. Same base64-PNG output shape + call signature as chart-img's
- * fetchChartImage(symbol, timeframe, studies), so it drops into the existing agent / Hermes /
+ * fetchChartImage(symbol, timeframe, studies), so it drops into the existing agent /
  * monitor / chat-bubble pipeline unchanged.
  *
  * Rendering runs in a headless Chromium (Playwright): a minimal page loads the klinecharts UMD

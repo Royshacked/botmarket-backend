@@ -22,8 +22,8 @@ import { ENTRY_ARCHETYPES, STOP_ANCHORS, TARGET_ANCHORS, normalizeTaxon } from '
 // which is a cycle waiting to bite whoever adds the next import.
 export { TF_RUNGS, isFetchableRung }
 
-// The LENS a setup was built through — the same three Kairos offers (kairos.modes MODES), so a
-// user hears one vocabulary across both desks. `classical` was the old name for the first one and
+// The LENS a setup was built through — the shared lenses (analysisModes MODES), so a user hears
+// one vocabulary everywhere. `classical` was the old name for the first one and
 // meant exactly what `discretionary` means: classical price action, indicators confirming rather
 // than leading.
 //
@@ -55,7 +55,7 @@ export const TRADE_MODES  = MODES
 //                model out of a settled fact). live = a state that can flip; re-check every wake.
 export const CONDITION_WEIGHTS     = ['primary', 'confirming']
 // `judgment`, not `discretionary`. The lens set is about to become discretionary|smc|institutional
-// (kairos.modes already spells it that way), and a document carrying `mode` for the LENS and `mode`
+// (analysisModes already spells it that way), and a document carrying `mode` for the LENS and `mode`
 // for a CONDITION with the same value meaning two unrelated things is a trap laid for whoever reads
 // it next. The lens names are user-facing and win; this one moves.
 //

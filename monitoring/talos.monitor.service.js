@@ -61,7 +61,7 @@ export const READ_LAG_MS  = 30_000
 // cover the poll and a restart; far short of the 2am frozen-price reads the gate exists to stop.
 export const CLOSE_GRACE_MS = 15 * 60_000
 
-// The statuses the loop polls — the readiness ladder a setup shares with a call:
+// The statuses the loop polls — the setup's readiness ladder:
 //   'waiting'  persisted but NOT monitored (Arm is the user's separate act) — never polled
 //   'looking'  armed — polled.
 const ACTIVE_STATUSES = ['looking']

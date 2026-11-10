@@ -15,7 +15,7 @@ const _handle = makeHandle(LOG)
 
 // Every table below holds ONLY reasons this route owns. The cross-kind ones — not_found,
 // forbidden, in_position, already_placed, already_closed, invalid_status, nothing_to_patch — come
-// from the shared map (reason.util.js), which is what stops this route and the call/setup routes
+// from the shared map (reason.util.js), which is what stops this route and the setup route
 // from answering the same refusal with different statuses.
 //
 // ERROR SHAPE. Every handler is wrapped in `_handle` (api/_shared/handle.util): a throw is logged
@@ -78,7 +78,7 @@ export const activateManualPortfolioOrders    = _manualPortfolioAction('activate
 export const requestManualPortfolioExitOrders = _manualPortfolioAction('requestManualPortfolioExitOrders', requestManualPortfolioExit)
 
 // list / get / delete are the shared HTTP tier. What this route keeps that the newer ones don't is
-// its BODY SHAPE: it answers `{ idea }` / `{ ideas }` where /api/setups and /api/kairos answer the
+// its BODY SHAPE: it answers `{ idea }` / `{ ideas }` where /api/setups answers the
 // bare document. That's a transport difference the clients already depend on (the frontend's
 // makeEntityApi carries the mirror of it as `listKey`), so it is configured, not re-implemented.
 const crud = makeEntityController({

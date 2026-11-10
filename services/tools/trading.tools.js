@@ -1,15 +1,6 @@
-// The trading desk's tool kit.
-//
-// RENAMED from kairos.tools.js on 2026-08-18, when Kairos was archived. The name was always
-// misleading and became actively wrong: this kit is MENTOR'S — Mentor imports it whole
-// (services/agents/mentor.agent.service.js) and is the only live consumer. It was named after the
-// desk that happened to define it first, so archiving that desk would have meant archiving the
-// live trading desk's tools along with it.
-//
-// `TRADING_TOOLS_FOR_MODE` has no live caller: subsetting by lens was Kairos's judgment, and
-// Mentor deliberately takes the kit un-subsetted because its lens is per-SETUP rather than
-// per-build. Kept because the archived desk imports it and reviving that desk should be a
-// decision, not a repair job.
+// The trading desk's tool kit — MENTOR'S: Mentor imports it whole
+// (services/agents/mentor.agent.service.js) and is the only consumer. It is not subset by lens:
+// Mentor's lens is per-SETUP rather than per-build.
 import { getPriceAction, getCycleAnalysis, getCorrelations } from '../priceAnalytics.service.js'
 import { toolsFor } from '../agentTools.registry.js'
 import { getEarningsCalendar, getFundamentals, getStockPeers, getMacroSnapshot, getSectorSnapshot } from '../../providers/fmp.provider.js'
@@ -22,17 +13,12 @@ import {
 } from './marketData.tools.js'
 import { makeStructureVisionHandler, OB_VISION, FB_VISION } from './priceStructure.tools.js'
 import { SMC_TOOLS, SMC_TOOL_HANDLERS } from './smc.tools.js'
-import { DEFAULT_MODE } from '../analysisModes.js'
 
-// Kairos's market-data toolset. Deliberately its OWN schemas (not imported from the
-// Idea agent) so Kairos is a self-contained trial — but the heavy lifting reuses the
-// same PURE providers and shared handler factories (Yahoo candles/quote/price-action,
-// chart-img render, the shared indicator math, the sentiment handlers). See
-// docs/desks/kairos-hermes.md "reuse mechanisms, not schemas".
+// The market-data toolset. The heavy lifting reuses the same PURE providers and shared handler
+// factories (Yahoo candles/quote/price-action, chart-img render, the shared indicator math, the
+// sentiment handlers) — reuse mechanisms, not schemas.
 
-// The file was renamed from kairos.tools.js when Kairos was archived; this tag was not, so every
-// warning Mentor's tools logged arrived under the name of a desk that no longer exists. Safe to
-// change: makeToolHandler uses it for the warn line only — spend attribution reads the AGENT's tag
+// makeToolHandler uses this tag for the warn line only — spend attribution reads the AGENT's tag
 // (agentKeyFromLog), never this one.
 const LOG = '[tradingTools]'
 
@@ -70,11 +56,8 @@ export const TRADING_TOOLS = [
     ...SMC_TOOLS,   // K2 numeric SMC: get_fvg, get_structure, get_liquidity, get_key_levels
 ]
 
-// Candle aggregation + the get_quote·candles·earnings·chart·indicators handlers and
-// the indicator-format helpers are shared with the Idea agent — see
-// services/marketData.tools.js. Re-exported here so existing importers/tests
-// (kairosIndicators.test.js) resolve the historical names unchanged.
-export { aggregateCandles as _aggregateCandles, _parseIndicatorSpecs, _formatIndicator } from './marketData.tools.js'
+// Candle aggregation + the get_quote·candles·earnings·chart·indicators handlers and the
+// indicator-format helpers live in services/tools/marketData.tools.js.
 
 const _STATIC_HANDLERS = {
     get_quote:        makeQuoteHandler(LOG),
@@ -139,33 +122,6 @@ Nothing for ${list.join(', ')} BETWEEN ${from} AND ${to}. That is all this says 
     // Unbound (market hours belong to the instrument, not the user) → static, unlike the venue
     // handlers below which have to be rebuilt per request around a userId.
     ...makeMarketHoursHandlers(),
-}
-
-// ── Per-mode tool subsets (docs/desks/kairos-hermes.md tool allocation) ────────────────────
-// The model only sees the tool LIST, so subsetting the list is what gates a mode's toolset;
-// the handler map can stay full (extra handlers are never reached). UNIVERSAL tools are shared
-// by all modes (DRY). NEW numeric SMC tools (K2) + get_sector_snapshot/get_rs_chart join later.
-// get_market_hours is UNIVERSAL: every mode places entries, and "the market is shut" is not a
-// discretionary-vs-SMC question.
-const UNIVERSAL = ['web_search', 'get_quote', 'get_candles', 'get_chart', 'get_trading_context', 'check_broker_symbol', 'get_market_hours']
-// SMC-lens numeric tools (smc only). get_key_levels is SHARED (classical prior-day levels + SMC session liquidity).
-const SMC_ONLY = ['get_orderblocks', 'get_fvg', 'get_structure', 'get_liquidity']
-const MODE_TOOLS = {
-    // classical PA + false-breaks + correlation/positioning + prior-day key levels; NOT the SMC-lens tools.
-    discretionary: TRADING_TOOLS.map(t => t.name).filter(n => !SMC_ONLY.includes(n)),
-    // strict smart-money, chart-core: vision OB/sweeps + K2 numeric FVG/structure/liquidity (exact levels).
-    smc: [...UNIVERSAL, 'get_price_action', 'get_orderblocks', 'get_false_breaks', 'get_indicators',
-        'get_fvg', 'get_structure', 'get_liquidity', 'get_key_levels'],
-    // macro/regime + relative-strength + positioning, chart-light; no order-blocks/false-breaks.
-    institutional: [...UNIVERSAL, 'get_macro_snapshot', 'get_sector_snapshot', 'get_correlations', 'get_peers',
-        'get_short_interest', 'get_options_context', 'get_derivatives_context', 'get_fundamentals',
-        'get_sec_filings', 'get_earnings', 'get_earnings_calendar', 'get_cycle_analysis', 'get_price_action'],
-}
-
-/** The tool LIST for a mode (subset of TRADING_TOOLS by name). Unknown mode → discretionary. */
-export function TRADING_TOOLS_FOR_MODE(mode) {
-    const allowed = MODE_TOOLS[mode] ?? MODE_TOOLS[DEFAULT_MODE]
-    return TRADING_TOOLS.filter(t => allowed.includes(t.name))
 }
 
 // Build the per-request handler map. get_chart closes over onChart so it can surface the

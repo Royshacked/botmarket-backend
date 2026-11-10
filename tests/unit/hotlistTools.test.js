@@ -13,7 +13,9 @@ import { isToolError, toolErrorText } from '../../services/toolResult.util.js'
 
 test('each list is a screen Axl can show — no ref, like the calendar', () => {
     // Every list (Roy, 2026-10-22: "the user should be able to see all lists through Axl").
-    assert.deepEqual([...SHOW_LISTS], ['positions', 'orders', 'trades', 'portfolios', 'watchlists', 'hotlist', 'board'])
+    // `watchlists` left on 2026-11-09 with Argus's scan list (archive/README.md).
+    assert.deepEqual([...SHOW_LISTS], ['positions', 'orders', 'trades', 'portfolios', 'hotlist', 'board'])
+    assert.equal(splitShow('watchlists'), null, 'the archived list opens nothing')
     for (const kind of SHOW_LISTS) {
         assert.deepEqual(splitShow(kind), { kind, ref: null }, kind)
         assert.deepEqual(validateShow({ kind, ref: 'ignored junk' }), { kind, ref: null }, `${kind}: a list takes no ref`)
