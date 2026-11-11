@@ -304,12 +304,85 @@ test('#2 a failed read is remembered: not asked again, and Generate opens — th
     const d = deps({ enqueue: async () => ({ ok: true }) })
     await requestRead({ symbol: 'TSLA', horizon: 'swing', sessionId: 's1', userId: 'u1' }, d)
     await settlePending(d)   // the run left nothing: failed
-    assert.equal((await readFor('TSLA', 'swing', d)).state, 'failed')
+    assert.equal((await readFor('TSLA', 'swing', d, { sessionId: 's1' })).state, 'failed')
     const again = await requestRead({ symbol: 'TSLA', horizon: 'swing', sessionId: 's1', userId: 'u1' }, { ...d, enqueue: async () => { throw new Error('must not queue') } })
     assert.equal(again.state, 'failed')
-    assert.equal(await readPending(ledger('TSLA', { horizon: 'swing' }), d), false)
+    assert.equal(await readPending(ledger('TSLA', { horizon: 'swing' }), d, { sessionId: 's1' }), false)
     // A day later it may be asked again.
-    assert.equal((await readFor('TSLA', 'swing', { ...d, now: () => NOW + DAY + 1 })).state, 'missing')
+    assert.equal((await readFor('TSLA', 'swing', { ...d, now: () => NOW + DAY + 1 }, { sessionId: 's1' })).state, 'missing')
+    // CR #4: another session's build on the same name is not touched by it.
+    assert.equal((await readFor('TSLA', 'swing', d, { sessionId: 's2' })).state, 'missing')
+})
+
+// ─── The second round, after the code review (2026-11-11) ────────────────────
+
+const claimRow = (over = {}) => ({ id: 'rq_NVDA_1', symbol: 'NVDA', status: 'in_research', created_at: '2026-11-11T14:00:00Z',
+    updated_at: new Date(NOW - 5 * 60_000).toISOString(), context: { mentor: true }, ...over })
+
+test('CR #1: a claim the run decided against (a failed turn or save, a Stop) or a dead one is FAILED, not "still reading"', async () => {
+    assert.equal((await readFor('NVDA', 'swing', deps({ listQueue: async (q) => (q.symbols ? [claimRow()] : []) }))).state, 'waiting', 'a live claim is waiting')
+    for (const reason of ['failed', 'save_failed', 'stopped']) {
+        const r = await readFor('NVDA', 'swing', deps({ listQueue: async () => [claimRow({ reason })] }))
+        assert.equal(r.state, 'failed', reason)
+        assert.equal(r.rowId, 'rq_NVDA_1')
+    }
+    const stale = await readFor('NVDA', 'swing', deps({ listQueue: async () => [claimRow({ updated_at: new Date(NOW - 2 * 60 * 60_000).toISOString() })] }))
+    assert.equal(stale.state, 'failed', 'a claim untouched for two hours is a dead process\'s')
+    // …so Generate is not held by it.
+    assert.equal(await readPending(ledger('NVDA', { horizon: 'swing' }), deps({ listQueue: async () => [claimRow({ reason: 'failed' })] })), false)
+})
+
+test('CR #1: a dead claim settles as FAILED to the waiting session; after a day the same row is put back in line', async () => {
+    const handed = []
+    onReadSettled(async (p, r) => { handed.push([p.symbol, r.state]); return true })
+    let rows = [claimRow({ status: 'queued', updated_at: new Date(NOW).toISOString() })]
+    const d = deps({ listQueue: async () => rows })
+    await requestRead({ symbol: 'NVDA', horizon: 'swing', sessionId: 's1', userId: 'u1' }, d)
+    rows = [claimRow({ reason: 'save_failed', updated_at: new Date(NOW).toISOString() })]
+    await settlePending(d)
+    assert.deepEqual(handed, [['NVDA', 'failed']])
+    const requeued = []
+    const later = deps({ now: () => NOW + DAY + 60_000, listQueue: async () => rows, requeue: async (id) => { requeued.push(id); rows = [claimRow({ status: 'queued' })]; return { ok: true } } })
+    const r = await requestRead({ symbol: 'NVDA', horizon: 'swing', sessionId: 's1', userId: 'u1' }, later)
+    assert.deepEqual(requeued, ['rq_NVDA_1'])
+    assert.equal(r.asked, true, 'the chat is told it is being read again')
+    assert.equal(later.calls.enqueue.length, 0, 'the old row, not a new one')
+})
+
+test('CR #2: only a run that finished cleanly starts the next — an account failure or a Stop does not loop', async () => {
+    onReadSettled(async () => true)
+    const queued = [{ symbol: 'AMD', status: 'queued', created_at: 'x', context: { mentor: true } }]
+    const d = deps({ listQueue: async () => queued })
+    await requestRead({ symbol: 'AMD', horizon: 'swing', sessionId: 's1', userId: 'u1' }, d)
+    d.calls.startRun.length = 0
+    await settlePending(d, { status: 'failed', error: 'requires more credits' })
+    await settlePending(d, { status: 'stopped' })
+    assert.equal(d.calls.startRun.length, 0)
+    await settlePending(d, { status: 'done' })
+    assert.equal(d.calls.startRun.length, 1)
+})
+
+test('CR #8: two settles at once hand one read on ONCE — the passes run in turn', async () => {
+    const handed = []
+    onReadSettled(async (p) => { handed.push(p.symbol); await new Promise(r => setTimeout(r, 5)); return true })
+    let landed = false
+    const d = deps({ coverage: async () => (landed ? COV : null), enqueue: async () => ({ ok: true }) })
+    await requestRead({ symbol: 'NVDA', horizon: 'swing', sessionId: 's1', userId: 'u1' }, d)
+    landed = true
+    await Promise.all([settlePending(d), settlePending(d)])
+    assert.deepEqual(handed, ['NVDA'])
+})
+
+test('CR #5: only a PASS stands as the catalyst answer — a spent read (hit, expired, graded) gets a fresh one', async () => {
+    for (const status of ['hit', 'expired', 'graded', 'active']) {
+        const r = await readFor('SMCI', 'short term swing', deps({ latestCatalyst: async () => ({ status, verdict: 'credible', read: 'x' }) }))
+        assert.equal(r.state, 'missing', status)
+    }
+})
+
+test('CR #4: Mentor is told a read failed — never left building without a word', () => {
+    assert.match(_buildReadSection({ symbol: 'NVDA', horizon: 'swing', kind: 'coverage', state: 'failed' }),
+        /PROMETHEUS COULD NOT MAKE A READ on NVDA for the swing trade \(his coverage\).*ask the user whether to build without it/)
 })
 
 test('#3 the run is started on the SYMBOL, not the source — a row another chain queued is the user\'s answer too', async () => {

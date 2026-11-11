@@ -113,7 +113,7 @@ export function makeAct({ sessions = sessionService, desks = DESK_DEFS, sealing 
             }
             if (typeof handler !== 'function') return { reason: 'no_such_action' }
 
-            const out = await handler({ user, state: opened.state, args: args && typeof args === 'object' ? args : {} })
+            const out = await handler({ user, sessionId, state: opened.state, args: args && typeof args === 'object' ? args : {} })
             if (!out || out.reason) {
                 // A refusal can still narrow what is on the table (Atlas: the changes refused for AVOID, marked to ask).
                 if (out?.after !== undefined) await sessions.setAgentState({ sessionId, userId: user._id, agent, state: out.after })

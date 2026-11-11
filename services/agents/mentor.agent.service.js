@@ -23,6 +23,7 @@ import {
     recordReads, ALWAYS_REFETCH, sanitizeUserOps, applyUserOps, gateView, delegationPicks, heldAnswers,
     activeName, nameFor, stageOf, firstUnsettled, isWaived, STAGES,
 } from '../mentorBuild.util.js'
+import { readTarget } from '../mentorReads.service.js'
 import { resolveMode, readSetup, kitFor, handlersFor, lensOf as lensOfName, MODE_THESIS, MODE_USER } from '../mentorMode.service.js'
 import { logger } from '../logger.service.js'
 import { setupService } from '../../api/setups/setups.service.js'
@@ -123,6 +124,7 @@ async function chatStream({
     messages, chatState = emptyMentorState(), accounts = [], mainAccountId = null,
     clientTime = null, audience = null, seed = null,
     prometheusRead = null,   // Prometheus's read on the build's name for its horizon (mentorReads.readFor; argus-rework.md step 3)
+    readNow = null,          // (target) → its read now — the post-turn re-check when this turn confirmed the horizon
     model: requestedModel, reasoningEffort, userId,
     onToken, onAsset, onInterval, onChart, onToolStart, onReasoning, onCoverage, signal,
     _run = runAgentStream,   // the shared contract-test seam — see runAgentStream in agentIO.js
@@ -505,7 +507,14 @@ async function chatStream({
     let readiness = carrier ? setupReadiness(carrier, (accounts?.length ?? 0) > 0) : null
     // THE READ HOLDS GENERATE (argus-rework.md step 3): while Prometheus's read on the name is still running, the setup is
     // not ready, whatever the draft says — the button stays dark, and the press is refused too (mentor.actions).
-    if (readiness && ['waiting', 'missing'].includes(prometheusRead?.state)) {
+    // The turn may have CONFIRMED the horizon (or moved the name): the read the turn started with is then the wrong one,
+    // and Generate would light now only to refuse the press (CR 2026-11-11). Re-checked for the build as it now stands.
+    const after = readTarget({ draft: { build }, active_asset: asset })
+    let heldBy = prometheusRead
+    if (after && readNow && (after.symbol !== prometheusRead?.symbol || after.horizon !== prometheusRead?.horizon)) {
+        heldBy = { ...after, ...(await Promise.resolve(readNow(after)).catch(() => ({ state: 'unknown' }))) }
+    }
+    if (readiness && ['waiting', 'missing'].includes(heldBy?.state)) {
         readiness = { ...readiness, ready: false, problems: [...(readiness.problems ?? []), "Prometheus's read is still running"] }
     }
 
@@ -741,6 +750,11 @@ PROMETHEUS'S READ on ${on} (${what}): ${read.facts}
         return `
 
 PROMETHEUS IS READING ${on} (${what}${ahead}) — or is about to: the platform asks him, and brings you his read when it lands. Do not finish the trade before then: no setup put up to generate. Meanwhile answer the user, and work the chart if they want to.`
+    }
+    if (read.state === 'failed') {
+        return `
+
+PROMETHEUS COULD NOT MAKE A READ on ${on} (${what}) — his research on it failed; it is asked again tomorrow. If you have not said so yet, say it once and ask the user whether to build without it. Their call: build if they say so.`
     }
     if (read.state === 'unknown') {
         return `

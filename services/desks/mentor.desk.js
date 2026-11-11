@@ -49,10 +49,10 @@ export function _mentorResponse(result) {
  * Where Prometheus's read stands for the name and confirmed horizon on Mentor's ledger (mentorReads; argus-rework.md
  * step 3) → readFor's answer with `{ symbol, horizon }`, or null (no name, no confirmed horizon, or one that needs none).
  */
-async function _prometheusRead(state) {
+async function _prometheusRead(state, sessionId = null) {
     const t = readTarget(state)
     if (!t) return null
-    return { ...t, ...(await readFor(t.symbol, t.horizon)) }
+    return { ...t, ...(await readFor(t.symbol, t.horizon, undefined, { sessionId })) }
 }
 
 /**
@@ -235,10 +235,12 @@ export const mentorDesk = {
     sealAfterTurn: (result) => (result.closedSetup
         ? { kind: 'setup', entityIds: [result.closedSetup.id], name: result.closedSetup.asset ? `${result.closedSetup.asset} setup` : null }
         : null),
-    run: async ({ state, input, emit, common }) => mentorAgentService.chatStream({
+    run: async ({ state, input, emit, common, sessionId }) => mentorAgentService.chatStream({
         ...common,
         // Prometheus's read on the build's name for its confirmed horizon — checked by code every turn (step 3).
-        prometheusRead: await _prometheusRead(state),
+        prometheusRead: await _prometheusRead(state, sessionId),
+        // …and again after the turn, when the turn itself confirmed the horizon (CR 2026-11-11: Generate lit, then refused).
+        readNow: (target) => readFor(target.symbol, target.horizon, undefined, { sessionId }),
         // `ops` — what a card press decided — is ONE-SHOT: it rides this turn only. The HTTP client puts
         // it inside its chatState; a session turn hands it in as input.
         chatState:     input.ops ? { ...(state ?? emptyMentorState()), ops: input.ops } : (state ?? emptyMentorState()),

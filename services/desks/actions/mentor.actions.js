@@ -30,12 +30,12 @@ const setupName   = (doc) => (doc?.asset ? `${doc.asset} setup` : null)
 export function makeMentorActions({ commit = defaultCommit, readPending = defaultReadPending } = {}) {
     return {
         /** Save the draft as a new setup — it then waits on Arm. */
-        async generate({ user, state, args }) {
+        async generate({ user, sessionId, state, args }) {
             const draft = state?.draft
             if (!draft) return { reason: 'nothing_to_commit' }
             if (editingId(state)) return { reason: 'not_new' }
             // Prometheus's read on the name is still running (argus-rework.md step 3): no new setup before it lands.
-            if (await readPending(state)) return { reason: 'read_pending' }
+            if (await readPending(state, undefined, { sessionId })) return { reason: 'read_pending' }
             const { accounts, mainAccountId } = parseCommitArgs(args)
             if (!accounts.length) return { reason: 'no_venue' }
             const out = await commit.commitSetup(draft, { userId: user._id, accounts, mainAccountId, updateId: null, chatState: chatStateOf(state) })
@@ -63,12 +63,12 @@ export function makeMentorActions({ commit = defaultCommit, readPending = defaul
         },
 
         /** Save every plan of a multi-name build. Partial success is the contract: refused plans stay on the table. */
-        async generateAll({ user, state, args }) {
+        async generateAll({ user, sessionId, state, args }) {
             const byAsset = { ...(state?.drafts ?? {}), ...(state?.draft?.asset ? { [state.draft.asset]: state.draft } : {}) }
             const all = Object.values(byAsset)
             if (all.length < 2) return { reason: 'nothing_to_commit' }
             // The active name's read still running holds the whole batch (argus-rework.md step 3).
-            if (await readPending(state)) return { reason: 'read_pending' }
+            if (await readPending(state, undefined, { sessionId })) return { reason: 'read_pending' }
             const { accounts, mainAccountId } = parseCommitArgs(args)
             if (!accounts.length) return { reason: 'no_venue' }
             const out = await commit.generateSetups(all, { userId: user._id, accounts, mainAccountId, chatState: chatStateOf(state) })

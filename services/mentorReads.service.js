@@ -47,6 +47,7 @@ const _deps = {
     latestCatalyst: (s, o) => catalystReadService.latestRead(s, o),
     listQueue:    (q) => researchQueueService.listQueue(q),
     enqueue:      (row) => researchQueueService.enqueue(row),
+    requeue:      (id) => researchQueueService.requeue(id),
     startRun:     (args) => researchRunService.startRun(args),
     getRun:       () => getRun(),
     now:          () => Date.now(),
@@ -97,9 +98,12 @@ export function catalystRead(read) {
  * told the read could not be checked, and nothing is queued on a guess).
  * → `{ kind: null }` (the horizon needs none) · `{ kind, state: 'ready' | 'passed', facts, against }` ·
  *   `{ kind, state: 'waiting', ahead, running }` · `{ kind, state: 'missing' }` · `{ kind, state: 'unknown' }` ·
- *   `{ kind, state: 'failed' }` (a run took it and made nothing, within FAILED_HOLD_MS — not asked again meanwhile)
+ *   `{ kind, state: 'failed', at, rowId? }` — the run claimed it and made nothing (a failed turn or save, a Stop, a
+ *   claim a dead process left — CR 2026-11-11), or it vanished from this session's pending reads; not asked again
+ *   until FAILED_HOLD_MS has passed. `opts.sessionId` scopes the second kind to the session it happened to (CR: one
+ *   user's failure must not silently change another's build).
  */
-export async function readFor(symbol, horizon, deps = _deps) {
+export async function readFor(symbol, horizon, deps = _deps, { sessionId = null } = {}) {
     const kind = readKindFor(horizon)
     const sym = _sym(symbol)
     if (!kind || !sym) return { kind: null }
@@ -111,12 +115,18 @@ export async function readFor(symbol, horizon, deps = _deps) {
         } else {
             const live = await deps.liveCatalyst(sym)
             if (live) return { kind, state: 'ready', ...catalystRead(live) }
+            // Only a PASS is an answer that stands (CR 2026-11-11): a read that hit its target, expired or was graded is
+            // spent, and the name gets a fresh one.
             const last = await deps.latestCatalyst(sym, { sinceMs: since })
-            if (last) return { kind, state: 'passed', ...catalystRead(last) }
+            if (last?.status === 'pass') return { kind, state: 'passed', ...catalystRead(last) }
         }
         const rows = await deps.listQueue({ symbols: [sym], status: ['queued', 'in_research', 'rejected'], limit: 50 })
         if (rows === null) return { kind, state: 'unknown' }
         const mine = rows.filter(r => _isCatalystRow(r) === (kind === 'catalyst'))
+        // A claim that carries a reason was decided against (researchRun leaves a failed turn, a failed save or a Stop
+        // `in_research` with its reason), and one untouched past STALE_CLAIM_MS is a dead process's: neither is coming.
+        const dead = mine.find(r => r.status === 'in_research' && (r.reason || deps.now() - Date.parse(r.updated_at ?? r.created_at) > STALE_CLAIM_MS))
+        if (dead) return { kind, state: 'failed', at: Date.parse(dead.updated_at ?? dead.created_at), rowId: dead.id }
         const waiting = mine.find(r => r.status === 'queued' || r.status === 'in_research')
         if (waiting) return { kind, state: 'waiting', ...(await _ahead(waiting, deps)) }
         const passed = mine.filter(r => r.status === 'rejected' && PASS_REASONS.has(r.reason) && Date.parse(r.updated_at ?? r.created_at) >= since).pop()
@@ -124,8 +134,8 @@ export async function readFor(symbol, horizon, deps = _deps) {
             return { kind, state: 'passed', against: true,
                 facts: `Prometheus researched ${sym} on ${String(passed.updated_at ?? passed.created_at).slice(0, 10)} and passed — ${String(passed.reason).replace(/_/g, ' ')}; no ${kind === 'coverage' ? 'coverage' : 'catalyst target'}` }
         }
-        const failedAt = _failed.get(`${sym}|${kind}`)
-        if (failedAt && deps.now() - failedAt < FAILED_HOLD_MS) return { kind, state: 'failed' }
+        const failedAt = sessionId ? _failed.get(`${sessionId}|${sym}|${kind}`) : null
+        if (failedAt && deps.now() - failedAt < FAILED_HOLD_MS) return { kind, state: 'failed', at: failedAt }
         return { kind, state: 'missing' }
     } catch (err) {
         logger.warn(LOG, 'read check failed', { symbol: sym, horizon, error: err.message })
@@ -147,18 +157,20 @@ async function _ahead(row, deps) {
 // ─── Asking for a read ────────────────────────────────────────────────────────
 
 const _pending = new Map()   // `${sessionId}|${symbol}|${kind}` → { sessionId, userId, symbol, horizon, kind, at }
-// A read a run took and made nothing of: `${symbol}|${kind}` → when. Held a day, so the user who was told "no read — build
+// A read a run took and made nothing of, for ONE session: `${sessionId}|${symbol}|${kind}` → when. Held a day, so the user who was told "no read — build
 // without it?" is not put back in line on the next turn, and the Generate gate (readPending) opens for them. In memory: a
 // restart forgets it, and the next turn simply asks again.
 const _failed = new Map()
 export const FAILED_HOLD_MS = DAY_MS
+/** A research claim untouched this long is a dead process's (a name takes ~4 minutes; requeueStale's own limit is longer). */
+export const STALE_CLAIM_MS = 45 * 60 * 1000
 let _subscribed = false
 let _settledHook = null
 /** The chain runner's hook: `(pending, read) → Promise<boolean>`. */
 export function onReadSettled(fn) { _settledHook = fn }
 /** Test seams. */
 export function pendingReads() { return [..._pending.values()] }
-export function _resetPending() { _pending.clear(); _failed.clear(); _subscribed = false; _settledHook = null }
+export function _resetPending() { _pending.clear(); _failed.clear(); _subscribed = false; _settledHook = null; _settleChain = Promise.resolve() }
 
 /**
  * Ask for the read a Mentor build on `symbol` / `horizon` needs, for this session: queue it unless it is already waiting,
@@ -169,10 +181,16 @@ export async function requestRead({ symbol, horizon, sessionId, userId }, deps =
     const kind = readKindFor(horizon)
     const sym = _sym(symbol)
     if (!kind || !sym) return { kind: null }
-    const before = await readFor(sym, horizon, deps)
-    if (['ready', 'passed', 'unknown', 'failed'].includes(before.state)) return before
+    const before = await readFor(sym, horizon, deps, { sessionId })
+    // A failure is held a day; after it, the name is asked again — its dead claim put back in line, or a new row.
+    const retry = before.state === 'failed' && deps.now() - (before.at ?? 0) >= FAILED_HOLD_MS
+    if (['ready', 'passed', 'unknown'].includes(before.state) || (before.state === 'failed' && !retry)) return before
     try {
-        if (before.state === 'missing') {
+        if (retry && before.rowId) {
+            const back = await deps.requeue(before.rowId)
+            if (back?.ok === false) { logger.warn(LOG, 'failed read not requeued', { symbol: sym, kind }); return before }
+        }
+        if (before.state === 'missing' || (retry && !before.rowId)) {
             // The session rides on the row, so a restart can find who was waiting (resumePending).
             const base = { mentor: true, horizon, ...(sessionId ? { sessionId: String(sessionId) } : {}) }
             const context = kind === 'catalyst' ? { hotlist: true, requested: true, ...base } : base
@@ -192,25 +210,38 @@ export async function requestRead({ symbol, horizon, sessionId, userId }, deps =
         return { kind, state: 'unknown' }
     }
     // `asked`: this call queued it — the one time the chat is told the read is running (not on every turn after).
-    return { ...(await readFor(sym, horizon, deps)), asked: before.state === 'missing' }
+    if (sessionId) _failed.delete(`${sessionId}|${sym}|${kind}`)
+    return { ...(await readFor(sym, horizon, deps, { sessionId })), asked: before.state === 'missing' || retry }
 }
 
 function _subscribe(deps) {
     if (_subscribed) return
     _subscribed = true
-    onRunSettled(() => { settlePending(deps).catch(err => logger.warn(LOG, 'settle pass failed', { error: err.message })) })
+    // The settled run rides in (CR 2026-11-11): only a run that finished cleanly may start the next — a run that failed
+    // on the ACCOUNT (no credit, a bad key) requeues its row, and restarting on it was an endless loop of paid calls;
+    // a Stop is the admin's. Passes run ONE AT A TIME (the chain below), or two quick settles hand one read on twice.
+    onRunSettled((run) => { settlePending(deps, run).catch(err => logger.warn(LOG, 'settle pass failed', { error: err.message })) })
 }
+
+let _settleChain = Promise.resolve()
 
 /**
  * After a run settles: every pending read that landed (ready or passed) goes to the hook and is forgotten, and so does
  * one the run left with nothing (`failed`); if any still wait and no run is going, the next run is started for them.
  * An `unknown` (a failed lookup) is kept for the next settle. Exported for tests.
  */
-export async function settlePending(deps = _deps) {
+export function settlePending(deps = _deps, run = { status: 'done' }) {
+    const next = _settleChain.then(() => _settleOnce(deps, run))
+    _settleChain = next.catch(() => {})
+    return next
+}
+
+async function _settleOnce(deps, run) {
     const waiting = []
     for (const [key, p] of [..._pending]) {
-        const r = await readFor(p.symbol, p.horizon, deps)
-        if (r.state === 'ready' || r.state === 'passed') {
+        const r = await readFor(p.symbol, p.horizon, deps, { sessionId: p.sessionId })
+        // A dead claim (a failed turn or save) is told as failed — like a row that vanished, below.
+        if (r.state === 'ready' || r.state === 'passed' || r.state === 'failed') {
             _pending.delete(key)
             const taken = await Promise.resolve(_settledHook?.(p, r)).catch(err => { logger.warn(LOG, 'read hand-off failed', { symbol: p.symbol, error: err.message }); return false })
             if (!taken) logger.info(LOG, 'read landed with no session to take it', { symbol: p.symbol, sessionId: p.sessionId })
@@ -220,11 +251,11 @@ export async function settlePending(deps = _deps) {
             // Neither answered nor waiting after a run: the run took the row and made nothing of it (it failed to save,
             // or was stopped and cleared). Mentor is told, once, instead of the read waiting forever.
             _pending.delete(key)
-            _failed.set(`${p.symbol}|${p.kind}`, deps.now())
+            _failed.set(`${p.sessionId}|${p.symbol}|${p.kind}`, deps.now())
             await Promise.resolve(_settledHook?.(p, { kind: r.kind, state: 'failed' })).catch(() => false)
         }
     }
-    if (waiting.length && deps.getRun()?.status !== 'running') {
+    if (waiting.length && run?.status === 'done' && deps.getRun()?.status !== 'running') {
         await deps.startRun({ userId: null, symbols: [...new Set(waiting)] }).catch(() => null)
     }
 }
@@ -234,10 +265,10 @@ export async function settlePending(deps = _deps) {
  * the prompt alone did not hold it): Mentor's readiness goes dark and a Generate press is refused while it is. A read
  * that is in, passed, failed or could not be checked does not hold anything — then it is the user's call. Never throws.
  */
-export async function readPending(state, deps = _deps) {
+export async function readPending(state, deps = _deps, { sessionId = null } = {}) {
     const t = readTarget(state)
     if (!t) return false
-    const r = await readFor(t.symbol, t.horizon, deps)
+    const r = await readFor(t.symbol, t.horizon, deps, { sessionId })
     return r.state === 'waiting' || r.state === 'missing'
 }
 

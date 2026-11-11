@@ -51,7 +51,9 @@ export function _resetGrade() { _gradedAt = 0 }
 export async function _tick(deps = _deps) {
     if (!deps.enabled()) return { outcome: 'off' }
     const nightly    = await deps.nightly()
-    const dayBoard   = await (deps.dayBoard?.() ?? null)
+    // NOT awaited (CR 2026-11-11): a board is minutes of paced quotes, and the research pick-up and the reads' grading below
+    // must not wait on it. runDayBoard guards its own overlap (_active) and never throws.
+    const dayBoard   = deps.dayBoard ? (Promise.resolve(deps.dayBoard()).catch(() => null), 'started') : null
     const week       = await (deps.week?.() ?? null)
     const outcomes   = await (deps.outcomes?.() ?? { outcome: 'not_due' })
     // Then the short-swing chain: the week board just built hands its names on (hotlistResearch afterCheckpoint — every

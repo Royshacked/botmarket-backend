@@ -53,6 +53,8 @@ const KEEP_DAYS = 10
 const NEWS_CHUNK = 50
 /** A `running` board older than this is a dead process's. */
 export const STALE_MS = 60 * 60 * 1000
+/** An errored board is tried this many times in its window, then left. */
+export const MAX_ATTEMPTS = 3
 const OPEN_MIN = 9 * 60 + 30, SESSION_MIN = 390
 const STRUCTURE_MAX = 60
 
@@ -187,26 +189,32 @@ let _active = false
 
 /**
  * Run the board that is due, unless it exists. → `{ ok, outcome, id?, rows?, counts? }`; outcome one of `not_due` ·
- * `exists` · `already_running` · `no_stats` · `done` · `partial` · `error`. Never throws.
+ * `exists` · `already_running` · `no_stats` · `done` · `partial` · `error` · `gave_up` (errored MAX_ATTEMPTS times). Never
+ * throws.
  */
 export async function runDayBoard({ deps = _deps } = {}) {
     if (_active) return { ok: false, outcome: 'already_running' }
     const due = dueCheckpoint(deps.now())
     if (!due) return { ok: false, outcome: 'not_due' }
     _active = true
+    let claimed = null
     try {
         const { checkpoint: cp, day, etMin } = due
         const id = boardId(day, cp.id)
         const db = await deps.db()
         const boards = db.collection(DAY_BOARDS)
         const prior = await boards.findOne({ id })
-        if (prior && prior.status !== 'running') return { ok: true, outcome: 'exists', id }
+        // A board that ERRORED is retried in its window (CR 2026-11-11: left `running`, it blocked the window past its end)
+        // — up to MAX_ATTEMPTS, so a build that keeps failing does not spend the key every tick.
+        if (prior?.status === 'error' && (prior.attempts ?? 0) >= MAX_ATTEMPTS) return { ok: false, outcome: 'gave_up', id }
+        if (prior && !['running', 'error'].includes(prior.status)) return { ok: true, outcome: 'exists', id }
         if (prior?.status === 'running' && deps.now() - (prior.started_at ?? 0) < STALE_MS) return { ok: false, outcome: 'already_running', id }
 
         const run = await deps.latestRun()
         if (!run?.day) return { ok: false, outcome: 'no_stats', id }
         // Claimed atomically (the overnight pass's claim): two servers on one window build one board.
         if (!(await claimRun(boards, id, { day, checkpoint: cp.id }, prior, deps.now()))) return { ok: false, outcome: 'already_running', id }
+        claimed = { boards, id }
 
         const board = await _build(db, cp, day, etMin, run, deps)
         await boards.updateOne({ id }, { $set: { ...board, finished_at: deps.now() } })
@@ -215,6 +223,8 @@ export async function runDayBoard({ deps = _deps } = {}) {
         return { ok: board.status === 'done', outcome: board.status, id, rows: board.rows.length, counts: board.counts }
     } catch (err) {
         logger.error(LOG, 'day board failed:', err.message)
+        // A claimed board is marked `error`, not left `running`, so the next tick in the window can take it again.
+        if (claimed) await claimed.boards.updateOne({ id: claimed.id }, { $set: { status: 'error', error: err.message, finished_at: deps.now() } }).catch(() => null)
         return { ok: false, outcome: 'error', detail: err.message }
     } finally {
         _active = false

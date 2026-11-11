@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { memDb } from '../helpers/memDb.js'
 import {
     runDayBoard, dueCheckpoint, nextCheckpoint, buildPool, structureNames, eligibleNames, catalystOf, boardRow, orderRows,
-    dayBoards, todayBoards, CHECKPOINTS, DAY_BOARDS, BOARD_MAX, RETRY_429, NEWS_PER_NAME,
+    dayBoards, todayBoards, CHECKPOINTS, DAY_BOARDS, BOARD_MAX, RETRY_429, NEWS_PER_NAME, MAX_ATTEMPTS,
 } from '../../services/hotlist.day.js'
 import { BOARDS } from '../../services/hotlist.boards.js'
 import { COLLECTION as STATS } from '../../services/dailyScreener.service.js'
@@ -221,6 +221,32 @@ test('run: the board is CLAIMED — a second server that loses the claim reads n
     assert.equal(calls.length, 0)
 })
 
+test('run: a board that ERRORS is marked so and retried in its window — at most MAX_ATTEMPTS (CR 2026-11-11)', async () => {
+    let fail = true
+    const { deps, rows } = rig({ latestRun: async () => { if (fail) throw new Error('stats down'); return { day: '2026-10-20', spy: null } } })
+    // latestRun throws BEFORE the claim: nothing written, the next tick simply tries.
+    assert.equal((await runDayBoard({ deps })).outcome, 'error')
+    assert.equal(rows(DAY_BOARDS).length, 0)
+    // A throw AFTER the claim: the board is marked error, not left running.
+    fail = false
+    const after = rig({ grades: async () => [], extQuote: async () => { throw Object.assign(new Error('boom'), { status: 500 }) } })
+    const db = await after.deps.db()
+    const real = db.collection.bind(db)
+    let breakOnce = true
+    db.collection = (name) => {
+        const c = real(name)
+        if (name !== DAY_BOARDS) return c
+        return { ...c, updateOne: async (q, u, o) => { if (!o?.upsert && breakOnce && u.$set?.rows) { breakOnce = false; throw new Error('write failed') } return c.updateOne(q, u, o) } }
+    }
+    assert.equal((await runDayBoard({ deps: after.deps })).outcome, 'error')
+    assert.equal(after.rows(DAY_BOARDS)[0].status, 'error')
+    assert.equal((await runDayBoard({ deps: after.deps })).outcome, 'done', 'the next tick takes it again')
+    // Three errors and it is left.
+    const stuck = rig()
+    stuck.rows(DAY_BOARDS).push({ id: 'hd_2026-10-21_open', day: '2026-10-21', status: 'error', attempts: MAX_ATTEMPTS })
+    assert.equal((await runDayBoard({ deps: stuck.deps })).outcome, 'gave_up')
+})
+
 test('run: a board shows at most BOARD_MAX names', async () => {
     const many = Array.from({ length: BOARD_MAX + 5 }, (_, i) => ({ ...S, symbol: `N${i}`, day: '2026-10-20' }))
     // Every name has news, so the pool holds them all (structures alone are capped at 60).
@@ -263,7 +289,7 @@ test('monitor: the overnight pass, then the day board, then the week board — a
     const step = (k) => async () => { order.push(k); return { outcome: 'not_due' } }
     const on = await _tick({ enabled: () => true, nightly: step('n'), dayBoard: async () => { order.push('d'); return { outcome: 'done' } }, week: step('w') })
     assert.deepEqual(order, ['n', 'd', 'w'])
-    assert.equal(on.dayBoard.outcome, 'done')
+    assert.equal(on.dayBoard, 'started', 'started, not awaited — the tick does not wait minutes on a board (CR 2026-11-11)')
     assert.deepEqual(await _tick({ enabled: () => false, nightly: step('x'), dayBoard: step('x') }), { outcome: 'off' })
     assert.deepEqual(order, ['n', 'd', 'w'])
 })
