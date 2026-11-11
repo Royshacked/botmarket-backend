@@ -732,7 +732,8 @@ Active asset: ${asset}${_buildAccountsSection(accounts, mainAccountId)}${_buildS
 export function _buildReadSection(read) {
     if (!read?.kind || !read.symbol) return ''
     const on = `${read.symbol} for the ${read.horizon} trade`
-    const what = read.kind === 'coverage' ? 'his coverage' : 'his catalyst read'
+    const what = read.kind !== 'coverage' ? 'his catalyst read'
+        : read.view || read.need === 'view' ? `his ${read.horizon} view` : 'his coverage'
     if ((read.state === 'ready' || read.state === 'passed') && read.against) {
         return `
 

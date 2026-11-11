@@ -19,7 +19,7 @@
 // ONE PROCESS, IN MEMORY, like the sleeves — but a restart does not lose the hand-off: the session rides on the queue row,
 // and `resumePending` (at boot) finds the waiting reads again.
 
-import { coverageService } from '../api/analyst/coverage.service.js'
+import { coverageService, VIEW_HORIZONS } from '../api/analyst/coverage.service.js'
 import { catalystReadService, readFacts } from './catalystRead.service.js'
 import { researchQueueService } from './researchQueue.service.js'
 import { researchRunService, onRunSettled, getRun } from './researchRun.service.js'
@@ -32,8 +32,13 @@ export const SOURCE = 'mentor'
 
 /** The read each horizon needs; a horizon not here needs none. */
 export const READ_OF = Object.freeze({ swing: 'coverage', 'long term': 'coverage', 'short term swing': 'catalyst' })
-/** Coverage that is the read: everything but retired. */
-const COVERAGE_LIVE = ['active', 'target_hit', 'thesis_broken', 'watchlist']
+/** Coverage that is the read. Retired and `watchlist` (watched, never rated) are not: they are re-researched (`reinit`). */
+const COVERAGE_LIVE = ['active', 'target_hit', 'thesis_broken']
+const COVERAGE_STALE = ['retired', 'watchlist']
+/** The book a build's horizon reads; and the target horizons each book takes (coverage.service VIEW_HORIZONS). */
+const BOOK_OF_HORIZON = Object.freeze({ swing: 'swing', 'long term': 'long_term' })
+/** A second-horizon view stands this long; then the name is asked again (two targets, stage 1). */
+export const VIEW_FRESH_DAYS = 30
 const BUY = new Set(['buy', 'strong_buy'])
 /** How long a PASS stands as the answer before it may be asked again. A catalyst read's window is about a week. */
 export const PASS_FRESH_DAYS = Object.freeze({ catalyst: 5, coverage: 30 })
@@ -76,6 +81,26 @@ export function readTarget(state) {
     return symbol && readKindFor(horizon) ? { symbol, horizon } : null
 }
 
+/** The book a coverage's MAIN target sits in, by its horizon — or null. Pure. */
+export function mainBookOf(cov) {
+    return Object.keys(VIEW_HORIZONS).find(b => VIEW_HORIZONS[b].includes(cov?.price_target?.horizon)) ?? null
+}
+
+/**
+ * A second-horizon view as the read → `{ facts, against }`: the view for the build's book first, the main coverage after
+ * it as context. Against: the view is not a Buy, or the coverage's thesis is broken. Pure.
+ */
+export function viewRead(cov, view) {
+    const t = view.target ?? {}
+    const which = view.book === 'long_term' ? 'long-term' : 'swing'
+    const head = `Prometheus's ${which} view: ${String(view.rating ?? 'unrated').replace('_', ' ')}, target ${Number(t.value).toFixed(2)} by ${t.target_date ?? '?'} (a ${t.horizon ?? '?'} target)`
+    return {
+        facts: [head, view.why ? `why: ${_first(view.why, 300)}` : null, view.kill?.length ? `what breaks it: ${view.kill.slice(0, 2).join('; ')}` : null,
+            `his coverage (the main target): ${coverageRead(cov).facts}`].filter(Boolean).join('; '),
+        against: !BUY.has(view.rating) || cov.status === 'thesis_broken',
+    }
+}
+
 /** Coverage → `{ facts, against }`. Against: not a Buy, or its thesis broken / target already hit. Pure. */
 export function coverageRead(cov) {
     const status = cov.status === 'thesis_broken' ? 'his thesis is BROKEN' : cov.status === 'target_hit' ? 'the target is already HIT' : null
@@ -109,9 +134,18 @@ export async function readFor(symbol, horizon, deps = _deps, { sessionId = null 
     if (!kind || !sym) return { kind: null }
     try {
         const since = deps.now() - PASS_FRESH_DAYS[kind] * DAY_MS
+        // What a coverage read NEEDS when it is not ready: `new` (no coverage), `view` (the coverage's target is on the
+        // other book — two targets, stage 1) or `reinit` (retired / watchlist). It picks the queue rows that answer it.
+        let need = null
         if (kind === 'coverage') {
+            const book = BOOK_OF_HORIZON[String(horizon).toLowerCase()]
             const cov = await deps.coverage(sym)
-            if (cov && COVERAGE_LIVE.includes(cov.status)) return { kind, state: 'ready', ...coverageRead(cov) }
+            if (cov && COVERAGE_LIVE.includes(cov.status)) {
+                if (mainBookOf(cov) === book) return { kind, state: 'ready', ...coverageRead(cov) }
+                const v = cov.horizon_views?.[book]
+                if (v && deps.now() - Date.parse(v.set_at) < VIEW_FRESH_DAYS * DAY_MS) return { kind, state: 'ready', view: true, ...viewRead(cov, v) }
+                need = 'view'
+            } else need = cov && COVERAGE_STALE.includes(cov.status) ? 'reinit' : 'new'
         } else {
             const live = await deps.liveCatalyst(sym)
             if (live) return { kind, state: 'ready', ...catalystRead(live) }
@@ -122,21 +156,23 @@ export async function readFor(symbol, horizon, deps = _deps, { sessionId = null 
         }
         const rows = await deps.listQueue({ symbols: [sym], status: ['queued', 'in_research', 'rejected'], limit: 50 })
         if (rows === null) return { kind, state: 'unknown' }
-        const mine = rows.filter(r => _isCatalystRow(r) === (kind === 'catalyst'))
+        const book = BOOK_OF_HORIZON[String(horizon).toLowerCase()]
+        const answers = (r) => (need === 'view' ? r.context?.view === book : need === 'reinit' ? r.context?.reinit === true : need === 'new' ? !r.context?.view && !r.context?.reinit : true)
+        const mine = rows.filter(r => _isCatalystRow(r) === (kind === 'catalyst') && answers(r))
         // A claim that carries a reason was decided against (researchRun leaves a failed turn, a failed save or a Stop
         // `in_research` with its reason), and one untouched past STALE_CLAIM_MS is a dead process's: neither is coming.
         const dead = mine.find(r => r.status === 'in_research' && (r.reason || deps.now() - Date.parse(r.updated_at ?? r.created_at) > STALE_CLAIM_MS))
         if (dead) return { kind, state: 'failed', at: Date.parse(dead.updated_at ?? dead.created_at), rowId: dead.id }
         const waiting = mine.find(r => r.status === 'queued' || r.status === 'in_research')
-        if (waiting) return { kind, state: 'waiting', ...(await _ahead(waiting, deps)) }
+        if (waiting) return { kind, state: 'waiting', ...(need ? { need } : {}), ...(await _ahead(waiting, deps)) }
         const passed = mine.filter(r => r.status === 'rejected' && PASS_REASONS.has(r.reason) && Date.parse(r.updated_at ?? r.created_at) >= since).pop()
         if (passed) {
             return { kind, state: 'passed', against: true,
                 facts: `Prometheus researched ${sym} on ${String(passed.updated_at ?? passed.created_at).slice(0, 10)} and passed — ${String(passed.reason).replace(/_/g, ' ')}; no ${kind === 'coverage' ? 'coverage' : 'catalyst target'}` }
         }
         const failedAt = sessionId ? _failed.get(`${sessionId}|${sym}|${kind}`) : null
-        if (failedAt && deps.now() - failedAt < FAILED_HOLD_MS) return { kind, state: 'failed', at: failedAt }
-        return { kind, state: 'missing' }
+        if (failedAt && deps.now() - failedAt < FAILED_HOLD_MS) return { kind, state: 'failed', at: failedAt, ...(need ? { need } : {}) }
+        return { kind, state: 'missing', ...(need ? { need } : {}) }
     } catch (err) {
         logger.warn(LOG, 'read check failed', { symbol: sym, horizon, error: err.message })
         return { kind, state: 'unknown' }
@@ -192,7 +228,9 @@ export async function requestRead({ symbol, horizon, sessionId, userId }, deps =
         }
         if (before.state === 'missing' || (retry && !before.rowId)) {
             // The session rides on the row, so a restart can find who was waiting (resumePending).
-            const base = { mentor: true, horizon, ...(sessionId ? { sessionId: String(sessionId) } : {}) }
+            const base = { mentor: true, horizon, ...(sessionId ? { sessionId: String(sessionId) } : {}),
+                // A covered name's OTHER horizon (a <horizon_view>), or a retired / watchlist coverage re-researched.
+                ...(before.need === 'view' ? { view: BOOK_OF_HORIZON[String(horizon).toLowerCase()] } : before.need === 'reinit' ? { reinit: true } : {}) }
             const context = kind === 'catalyst' ? { hotlist: true, requested: true, ...base } : base
             const res = await deps.enqueue({ symbol: sym, source: SOURCE, requestedBy: userId ? String(userId) : 'house', context })
             if (!res?.ok) { logger.warn(LOG, 'read not queued', { symbol: sym, kind, reason: res?.reason ?? null }); return { kind, state: 'unknown' } }

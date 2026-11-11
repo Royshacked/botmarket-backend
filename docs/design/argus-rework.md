@@ -210,7 +210,13 @@ wrong. He adds no chart or fundamental judgment of his own: that is what keeps t
      (`{ rating, target, by, why }`). Mentor reads the view matching his build's horizon. **Written lazily:** only
      when a build needs it — a swing build on a name with only a long-term target is the read the chain asks
      Prometheus for (the same wait-in-line flow), and he adds the view to the existing coverage rather than
-     re-researching it. **Stage 2 (later, only if stage 1's second targets prove good):** the view gets its own life —
+     re-researching it. **STAGE 1 BUILT 2026-11-11:** `coverage.horizon_views.<book>` (`setHorizonView` — one field and a
+     `horizon_view` revision; the rating is the house's band over the view's horizon; the horizon forced to the book's,
+     3m/6m or 12m–24m). Prometheus's `horizon` mode (`prompts/analyst_mode_horizon.md`, `<horizon_view>`, its own ledger
+     key) runs from a `mentor` queue row with `context.view`, against his coverage read as EXISTING COVERAGE; no block is
+     his pass. `mentorReads.readFor`: the main target when its book is the build's, else a view under 30 days, else ask
+     (`need: 'view'`). Retired / `watchlist` coverage is no longer a read: it is re-researched (`need: 'reinit'`, saved by
+     `updateCoverage` live again — the CR's #3). **Stage 2 (later, only if stage 1's second targets prove good):** the view gets its own life —
      both lists, graded on the scorecard, watched by the monitor.
 3. The chain flow (§2): Mentor opens → missing reads → Mentor validates and builds. Prometheus first,
    Proteus later.

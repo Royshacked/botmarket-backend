@@ -115,6 +115,8 @@ export const ALL_EMIT_TAGS = [
     'quickread',
     // Prometheus's catalyst read on a Hotlist "this week" name (analyst_mode_catalyst.md, horizon-chains.md §3).
     'catalyst_read',
+    // Prometheus's view for a covered name's other horizon (analyst_mode_horizon.md, argus-rework.md step 3).
+    'horizon_view',
     // Atlas's research hop (portfolio_system_prompt.md). Unregistered until 2026-09-18, so the block streamed raw
     // into the Atlas bubble until the settled reply replaced it. `coverage_request` (Atlas queuing one uncovered
     // name) was removed with the research queue's manual side, 2026-10-31 — still suppressed, should an old habit emit it.

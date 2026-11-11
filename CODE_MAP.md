@@ -860,6 +860,8 @@ services/
                             the row) and starts the house run BY SYMBOL; it waits in line on the one run. On
                             onRunSettled, settlePending hands a landed read to the runner's readSettled (onReadSettled).
                             readPending = the Generate gate; resumePending at boot
+                            A covered name's OTHER horizon (two targets, stage 1): the main target answers its own
+                            book; else a <horizon_view> under 30 days; else need 'view'. Retired / watchlist → 'reinit'
   researchRun.service.js    headless Prometheus over the research queue, one name at a time, writes
                             the coverage. ONE run per process; onRunSettled(fn) is how sleeveSource (and mentorReads)
                             learns a run ended (and chains the next when its names were queued after

@@ -63,7 +63,9 @@ const _covered = async (ticker) => !!(await coverageService.getCoverageBySymbol(
  * research run (Roy, 2026-11-11: it waits in line — say so). Pure. `t` — { symbol, horizon }; `r` — readFor's answer.
  */
 export function readWaitLine(t, r) {
-    const what = r.kind === 'coverage' ? 'his full coverage' : 'a catalyst read'
+    const what = r.kind !== 'coverage' ? 'a catalyst read'
+        : r.need === 'view' ? `his ${t.horizon} view (he covers it on the other horizon)`
+            : r.need === 'reinit' ? 'his coverage again (it was not live)' : 'his full coverage'
     const ahead = r.ahead > 0 ? ` It waits in line behind ${r.ahead} name${r.ahead === 1 ? '' : 's'} in the house's research (about four minutes each).` : ''
     return `Before I build the ${t.horizon} trade on ${t.symbol}, Prometheus is reading it — ${what}.${ahead} I'll carry on as soon as it lands.`
 }

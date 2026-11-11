@@ -103,7 +103,7 @@ test('readFor: a waiting row says how many are ahead — the running run\'s rest
     const mine = { symbol: 'NVDA', status: 'queued', created_at: '2026-11-11T14:00:00Z', context: { mentor: true } }
     const listQueue = async (q) => (q.symbols ? [mine] : [{ created_at: '2026-11-11T13:00:00Z' }, { created_at: '2026-11-11T13:30:00Z' }, mine, { created_at: '2026-11-11T14:30:00Z' }])
     const r = await readFor('NVDA', 'swing', deps({ listQueue, getRun: () => ({ status: 'running', total: 10, position: 4 }) }))
-    assert.deepEqual(r, { kind: 'coverage', state: 'waiting', ahead: 8, running: true })
+    assert.deepEqual(r, { kind: 'coverage', state: 'waiting', need: 'new', ahead: 8, running: true })
     // A catalyst row does not answer a coverage question.
     const other = await readFor('NVDA', 'swing', deps({ listQueue: async () => [{ ...mine, context: { hotlist: true } }] }))
     assert.equal(other.state, 'missing')

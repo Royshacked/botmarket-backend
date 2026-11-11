@@ -40,7 +40,11 @@ const _quickreadMode = makePromptLoader(join(__dirname, '../../prompts/analyst_m
 // catalyst target (what the catalyst is worth, what is still open) instead of coverage. Same shape as the quick read.
 const _catalystMode = makePromptLoader(join(__dirname, '../../prompts/analyst_mode_catalyst.md'), LOG)
 const CATALYST_LOG = '[analystAgent-catalyst]'   // its own ledger row
-export const MODES = Object.freeze({ COVERAGE: null, QUICKREAD: 'quickread', CATALYST: 'catalyst' })
+// HORIZON VIEW — a covered name's OTHER horizon (docs/design/argus-rework.md step 3, two targets, stage 1): a Mentor build
+// on a horizon the coverage's one target does not answer. A `<horizon_view>` beside the coverage, never a rewrite of it.
+const _horizonMode = makePromptLoader(join(__dirname, '../../prompts/analyst_mode_horizon.md'), LOG)
+const HORIZON_LOG = '[analystAgent-horizon]'   // its own ledger row
+export const MODES = Object.freeze({ COVERAGE: null, QUICKREAD: 'quickread', CATALYST: 'catalyst', HORIZON: 'horizon' })
 
 export const TOOLS = [
     // web_search leads, then the SHARED valuation module (its own single home), then the
@@ -121,7 +125,7 @@ async function chatStream({
     // `analystAgent` with full coverage turns, which is how "what does a read cost" could only be
     // estimated (2026-09-20). The log tag is the key, so the tag is what differs.
     const raw = await _run({
-        log: mode === MODES.QUICKREAD ? QUICKREAD_LOG : mode === MODES.CATALYST ? CATALYST_LOG : LOG, requestedModel, userId, messages: builtMessages, systemPrompt,
+        log: mode === MODES.QUICKREAD ? QUICKREAD_LOG : mode === MODES.CATALYST ? CATALYST_LOG : mode === MODES.HORIZON ? HORIZON_LOG : LOG, requestedModel, userId, messages: builtMessages, systemPrompt,
         tools: TOOLS, toolHandlers: { ...TOOL_HANDLERS, ...makeTradingContextHandlers(userId) },
         reasoningEffort, signal, onToken, tagCaptures, onToolStart, onReasoning, onChart, onSpend,
     })
@@ -135,6 +139,8 @@ async function chatStream({
     if (mode === MODES.QUICKREAD) return { reply, phase: phase.get(), quickread, ...routing }
     // A catalyst read never enters the book either: its <catalyst_read> is what comes back, any <coverage> dropped.
     if (mode === MODES.CATALYST) return { reply, phase: phase.get(), catalyst: _parseCatalystRead(raw), ...routing }
+    // A horizon view never rewrites the coverage: its <horizon_view> is what comes back, any <coverage> dropped.
+    if (mode === MODES.HORIZON) return { reply, phase: phase.get(), horizonView: _parseHorizonView(raw), ...routing }
     // The coverage is a DRAFT — returned for preview, NOT saved. Initiating persists it (P1).
     return { reply, phase: phase.get(), ...(coverage ? { coverage } : {}), ...routing }
 }
@@ -211,6 +217,26 @@ export function _cleanThrough(t) {
 export function _cleanCompany(c) {
     if (!c || typeof c !== 'object' || !COMPANY_VERDICTS.has(c.verdict)) return null
     return { verdict: c.verdict, why: _txt(c.why, 400) }
+}
+
+/**
+ * The <horizon_view> block, checked: a known book, a numeric target. The horizon and the rating are settled at the save
+ * (coverage.service normalizeHorizonView — the book's horizons, the house's bands). Null with no usable block — a pass.
+ */
+export function _parseHorizonView(raw) {
+    const q = parseEmitBlock(raw ?? '', 'horizon_view', LOG)
+    if (!q || typeof q !== 'object' || Array.isArray(q)) return null
+    const book = q.book === 'long_term' || q.book === 'long term' ? 'long_term' : q.book === 'swing' ? 'swing' : null
+    const t = q.target && typeof q.target === 'object' ? q.target : { value: q.target }
+    const value = Number(t.value)
+    if (!book || !(value > 0)) return null
+    return {
+        book,
+        rating: _txt(q.rating, 20),
+        target: { value, horizon: _txt(t.horizon, 4), low: Number.isFinite(Number(t.low)) ? Number(t.low) : null, high: Number.isFinite(Number(t.high)) ? Number(t.high) : null },
+        why: _txt(q.why, 800),
+        kill: (Array.isArray(q.kill) ? q.kill : []).map(k => _txt(k, 200)).filter(Boolean).slice(0, 4),
+    }
 }
 
 /**
@@ -366,6 +392,7 @@ ${audienceBlock}
         // coverage turns keep their prefix untouched, and quick-read turns share one across names.
         ...(mode === MODES.QUICKREAD ? [cachedBlock(_quickreadMode())] : []),
         ...(mode === MODES.CATALYST ? [cachedBlock(_catalystMode())] : []),
+        ...(mode === MODES.HORIZON ? [cachedBlock(_horizonMode())] : []),
         { type: 'text', text: dynamic },
     ]
 }
