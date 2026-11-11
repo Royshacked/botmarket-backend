@@ -4,7 +4,7 @@ import { readFileSync } from 'fs'
 
 import { scannerAgentService, TOOLS, droppedPickNote } from '../../services/agents/scanner.agent.service.js'
 import {
-    makeHorizonListHandlers, houseListNames, formatDayList, quotedSpan, normalizeHorizon, pickableRows, bookLine, formatBookList, formatWeekList, MAX_NAMES,
+    makeHorizonListHandlers, houseListNames, formatDayList, quotedSpan, headlineWhen, normalizeHorizon, pickableRows, bookLine, formatBookList, formatWeekList, MAX_NAMES,
 } from '../../services/tools/horizonList.tools.js'
 
 // Argus is the PICKER since 2026-11-11 (docs/design/argus-rework.md): Mentor sends a user with no name, Argus reads the
@@ -102,6 +102,15 @@ test('the quote span: first to last quote in ET, one time when they match, null 
     assert.equal(quotedSpan([at('09:20'), at('09:24'), at('09:21')]), '09:20–09:24')
     assert.equal(quotedSpan([at('10:31')]), '10:31')
     assert.equal(quotedSpan([{ quoted_at: null }]), null)
+})
+
+test('a headline from before the board\'s day says when — "yesterday 18:29 ET", not a bare time (live drive 2026-11-11)', () => {
+    assert.equal(headlineWhen('2026-11-11 14:23:48', '2026-11-11'), '14:23 ET')
+    assert.equal(headlineWhen('2026-11-10 18:29:00', '2026-11-11'), 'yesterday 18:29 ET')
+    assert.equal(headlineWhen('2026-11-06 18:29:00', '2026-11-09'), '2026-11-06 18:29 ET', 'over a weekend: the date')
+    assert.equal(headlineWhen('2026-11-10 18:29:00'), '18:29 ET')
+    const row = { ...DAY_BOARD.rows[0], catalyst: { news: [{ title: 'Investigation notice', at: '2026-11-10 18:29:00' }], earnings: false, rating: false } }
+    assert.match(formatDayList([{ ...DAY_BOARD, rows: [row] }], null).text, /news yesterday 18:29 ET: "Investigation notice"/)
 })
 
 test('a day board with no names, or a partial one, says so', () => {

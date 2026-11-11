@@ -84,8 +84,22 @@ const CHECKPOINT_WORDS = Object.freeze({ open: '09:20 ET board (the open)', mid:
 const _hhmmEt = (ms) => (Number.isFinite(ms)
     ? new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(ms)) : null)
 
+/**
+ * A headline's time for Argus: "14:23 ET" on the board's day, "yesterday 18:29 ET" or the date before it — fresh means
+ * since the LAST CLOSE, so last evening's story sits on today's board (the live drive, 2026-11-11). Pure.
+ */
+export function headlineWhen(at, boardDay = null) {
+    const s = String(at ?? '')
+    const time = s.slice(11, 16)
+    const day = s.slice(0, 10)
+    if (!time) return ''
+    if (!boardDay || day === boardDay) return `${time} ET`
+    const gap = Math.round((Date.parse(boardDay) - Date.parse(day)) / 86_400_000)
+    return gap === 1 ? `yesterday ${time} ET` : `${day} ${time} ET`
+}
+
 /** One day-board row → one line: the move, the volume, why it is in play, its freshest headline with the time. Pure. */
-export function dayLine(r) {
+export function dayLine(r, boardDay = null) {
     const n = r.catalyst?.news?.[0]
     return [
         `${r.symbol}${r.name ? ` (${r.name})` : ''}`,
@@ -95,7 +109,7 @@ export function dayLine(r) {
         r.catalyst?.earnings ? 'reported earnings' : null,
         r.catalyst?.rating ? 'rating change' : null,
         // FMP's times are ET wall-clock (fmp.price.provider fmpDateToEpochSec reads them so).
-        n ? `news ${String(n.at ?? '').slice(11, 16)} ET: "${n.title}"` : null,
+        n ? `news ${headlineWhen(n.at, boardDay)}: "${n.title}"` : null,
     ].filter(Boolean).join(' · ')
 }
 
@@ -122,7 +136,7 @@ export function formatDayList(boards, next) {
     if (!rows.length) return { text: `The ${when} has no names in play${b.status === 'partial' ? ' (it stopped early, rate-limited)' : ''} — nothing to pick for intraday. Say so; no pick.`, names: [] }
     return {
         text: [`The ${when} — ${rows.length} name${rows.length === 1 ? '' : 's'} in play, quoted ${quotedSpan(rows) ?? _hhmmEt(b.finished_at) ?? 'at the board'} ET (not live)${b.status === 'partial' ? ', a partial board' : ''}. In play means moving UP so far (a gap up, above the open, near the day's high); the board has no grade and does not predict where a name goes next.`,
-            ...rows.map(r => `  ${dayLine(r)}`)].join('\n'),
+            ...rows.map(r => `  ${dayLine(r, b.day ?? null)}`)].join('\n'),
         names: rows.map(r => r.symbol),
     }
 }
