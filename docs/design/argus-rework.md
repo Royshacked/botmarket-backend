@@ -1,6 +1,6 @@
 # Argus rework — the desk architecture of 2026-11
 
-Status: **DESIGN, for Roy's check — nothing built.** Branch `feat/desk-architecture` (backend + frontend),
+Status: **Step 1 BUILT (2026-11-11, `b74ac3c7` + `c3367bfd`); step 2 in progress; the rest is design.** Branch `feat/desk-architecture` (backend + frontend),
 one branch for the whole rework (Argus first, then Proteus and Daedalus, then Mentor without lenses).
 
 ## 0. Why
@@ -147,7 +147,19 @@ wrong. He adds no chart or fundamental judgment of his own: that is what keeps t
 
 ## 6. Build order (after Roy's check)
 
-1. Argus's prompt + tools cut (§4), picking from the Hotlist by horizon (§3.1). Tests.
+1. Argus's prompt + tools cut (§4), picking from the Hotlist by horizon (§3.1). Tests. **BUILT 2026-11-11:**
+   - `get_horizon_list` (`services/tools/horizonList.tools.js`) is his only source: This week for short term swing,
+     the house's Swing / Long term Buys (Prometheus's target + the timing read) for swing / long term; intraday and
+     day say the boards are not running yet (step 2) and list nothing.
+   - **The pick gate is code:** a pick not shown this turn gets a second look at the house's lists today
+     (`houseListNames` — a chat's history keeps no tool results, so "another one" on a later turn would otherwise
+     lose its button); still off them → dropped, with a line under the reply saying to give Mentor the name. The
+     second look takes ANY house list, not only the horizon's (the horizon is not kept in the session) — tighten if
+     it ever matters.
+   - Cut: the list-building spine and `scanner_mode_handoff.md` (one short prompt), the market-wide discovery tools,
+     the grounding ledger (`archive/services/scanner.grounding.js`) and Argus's house-industries words (Atlas keeps
+     the tool). The chart tools stay (§4). Mentor's hand-off `<open>` names the horizon.
+   - FE: the status label "Reading the house list…" — the `public/` bundle is NOT rebuilt (feature branch).
 2. The day boards (§3.3) back in the monitor's tick, three checkpoints, no grades; the FE's day views.
 3. The chain flow (§2): Mentor opens → missing reads → Mentor validates and builds. Prometheus first,
    Proteus later.
