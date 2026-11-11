@@ -82,7 +82,7 @@ const COMPOSITES = Object.freeze({
 // user to Argus is "find me ONE name to build on", so Argus starts in single-pick mode and the chain carries
 // the pick back to Mentor (unified-chat plan phase 5). sender → landing agent → preset.
 const HAND_BACK = Object.freeze({
-    mentor: Object.freeze({ scanner: Object.freeze({ handoff: true, handoffTo: 'mentor' }) }),
+    mentor: Object.freeze({ scanner: Object.freeze({ handoff: true }) }),
 })
 const COMPOSITE_PIPELINES = Object.freeze(Object.keys(COMPOSITES))
 

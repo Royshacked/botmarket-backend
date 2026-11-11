@@ -99,7 +99,7 @@ test('Mentor sending the user to Argus presets Argus to find ONE name and hand i
     await turn({ user, sessionId: s.sessionId, agent: 'mentor', text: 'yes, find me one' })
     const h = await sessions.get({ sessionId: s.sessionId, userId: 'u1' })
     assert.equal(h.floor, 'scanner')
-    assert.deepEqual(h.agentState.scanner, { handoff: true, handoffTo: 'mentor' })
+    assert.deepEqual(h.agentState.scanner, { handoff: true })
 })
 
 // Since 2026-11-09 there is no list mode for a later route to find: whatever lands on Argus lands in the single pick
@@ -111,7 +111,7 @@ test('every landing on Argus is the single pick for Mentor — there is no list 
     await turn({ user, sessionId: s.sessionId, agent: 'mentor', text: 'find me a name' })
     await turn({ user, sessionId: s.sessionId, agent: 'axl', text: 'now a watchlist' })
     const st = (await sessions.get({ sessionId: s.sessionId, userId: 'u1' })).agentState.scanner
-    assert.deepEqual(st, { handoff: true, handoffTo: 'mentor' })
+    assert.deepEqual(st, { handoff: true })
 })
 
 test('a route to an admin desk from the main chat moves no floor — that desk keeps its own panel', async () => {

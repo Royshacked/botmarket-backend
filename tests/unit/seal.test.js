@@ -219,7 +219,7 @@ test('a state that is only mode or markers does not block reopening — only rea
 // busy rule would otherwise ask the user to set aside a list that no screen can show them.
 test('an old Argus list in a session is not unsealed work, and a scan cannot be reopened', async () => {
     assert.equal(hasWork('scanner', { profile: 'investing', pendingScan: { candidates: [{ ticker: 'NVDA' }] }, editingScanId: 'sc1' }), false)
-    assert.equal(hasWork('scanner', { handoff: true, handoffTo: 'mentor' }), false)
+    assert.equal(hasWork('scanner', { handoff: true }), false)
     const { sessions, seal } = rig()
     const s = await sessions.getActive({ userId: 'u1' })
     const out = await seal.openForEdit({ userId: 'u1', sessionId: s.sessionId, kind: 'scan', entity: { id: 'sc1', candidates: [] } })

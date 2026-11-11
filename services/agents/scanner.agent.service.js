@@ -14,7 +14,7 @@ import { makeNewsHandlers } from '../tools/news.tools.js'
 import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, cleanReply, makeToolHandler, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, BREVITY_RULE, VENUE_RULE, cachedBlock } from '../agentUtils.js'
 import { makeTradingContextHandlers, buildVenueSection } from '../tools/tradingContext.tools.js'
 import { makeMarketHoursHandlers, MARKET_HOURS_TOOL_SPEC } from '../tools/marketHours.tools.js'
-import { makeHorizonListHandlers, HORIZON_LIST_TOOL_SPEC } from '../tools/horizonList.tools.js'
+import { makeHorizonListHandlers, houseListNames, HORIZON_LIST_TOOL_SPEC } from '../tools/horizonList.tools.js'
 import { houseLabels, wireLabel } from '../houseLabel.service.js'
 import { buildTagCaptures } from '../llmStream.util.js'
 import { DESKS } from '../desks/registry.js'
@@ -134,8 +134,9 @@ async function chatStream({ messages = [], model: requestedModel, audience = nul
     // ahead of the whole conversation in the cache prefix. See buildVenueSection.
     const normalized = attachTurnContext(normalizeMessages(messages, MAX_MESSAGES), await _venueSection(userId))
 
-    // THE PICK GATE: every name a list call showed him this turn. A pick that is not among them is dropped — code holds
-    // him to the list (argus-rework.md §3.1); the prompt only asks.
+    // THE PICK GATE: every name a list call showed him this turn. A pick that is not among them gets a second look at
+    // the house's lists (below), and is dropped if it is not there either — code holds him to the list
+    // (argus-rework.md §3.1); the prompt only asks.
     const listed = new Set()
     const toolHandlers = {
         ...TOOL_HANDLERS,
@@ -183,12 +184,26 @@ async function chatStream({ messages = [], model: requestedModel, audience = nul
         reasoningEffort, signal, onToken, tagCaptures, onToolStart, onReasoning, onChart,
     })
 
-    const reply = cleanReply(raw)
+    let reply = cleanReply(raw)
 
     let pick = _normalizeArgusPick(capturedPick)
     if (pick && !listed.has(pick.ticker)) {
-        logger.warn(LOG, 'pick dropped — not on a list he was shown', { ticker: pick.ticker, listed: listed.size })
-        pick = null
+        // Not shown THIS turn — but the history keeps text only, so "another one" on a later turn picks from a list
+        // read earlier. Second look: is it on the house's lists today? A failed read keeps the gate shut.
+        const onLists = await houseListNames(_listDeps).catch(err => {
+            logger.warn(LOG, 'the house lists were not read for the pick gate', { error: err.message })
+            return new Set()
+        })
+        if (onLists.has(pick.ticker)) {
+            logger.info(LOG, 'pick passed on the second look — on the house lists, not read this turn', { ticker: pick.ticker })
+        } else {
+            logger.warn(LOG, 'pick dropped — not on the house lists', { ticker: pick.ticker, listed: listed.size })
+            // His prose already named it: say why no button follows, in the stream and in the saved reply.
+            const note = droppedPickNote(pick.ticker)
+            onToken?.(note)
+            reply += note
+            pick = null
+        }
     }
     await _attachPickLabel(pick)
     const routing = route.result()   // { route, routeSymbol, opening, edit } — the controller validates
@@ -212,6 +227,11 @@ export async function _attachPickLabel(pick, { labels = houseLabels } = {}) {
 // Pure: null when there's no usable ticker, else a clean
 // {ticker, direction, thesis, analysis} (direction defaults long; the analysis seeds Mentor's read).
 // Exported for tests.
+/** The line under a reply whose pick the gate dropped — the user read a name and gets no button. Pure. */
+export function droppedPickNote(ticker) {
+    return `\n\n_${ticker} is not on the house's lists today, so it can't go to Mentor from here. To trade it anyway, give Mentor the name yourself._`
+}
+
 export function _normalizeArgusPick(p) {
     if (!p || typeof p !== 'object' || typeof p.ticker !== 'string' || !p.ticker.trim()) return null
     return {

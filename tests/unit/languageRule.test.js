@@ -24,7 +24,7 @@ const ROOT     = join(dirname(fileURLToPath(import.meta.url)), '../../')
 const SERVICES = join(ROOT, 'services')
 
 // Every desk that mounts a BASE system prompt. Mode/profile FRAGMENTS
-// (scanner_mode_handoff.md) are deliberately absent: they are concatenated onto a base that already
+// (e.g. analyst_mode_quickread.md) are deliberately absent: they are concatenated onto a base that already
 // carries the rule, and appending it again would repeat the same paragraph twice in one request.
 const DESKS = [
     'aether.agent.service.js',
@@ -171,8 +171,8 @@ test('a NEW desk cannot be added without carrying the rule', () => {
     // is mounting a base prompt and must be on the list.
     //
     // The path must be QUOTED to count — a file that merely NAMES a prompt in a comment is not
-    // mounting it (scanner.grounding.js cites `scanner_system_prompt.md L11` to explain which
-    // doctrine it backs), and a prose mention is not a reason to demand the rule.
+    // mounting it (e.g. a comment that cites `scanner_system_prompt.md` to explain which doctrine
+    // it backs), and a prose mention is not a reason to demand the rule.
     const MOUNTS_BASE_PROMPT = /['"][^'"]*(_system_prompt|market_brief_prompt)\.md['"]/
     // Both directories: the desks moved to services/agents/ (2026-08-07) but marketBrief.service
     // mounts a base prompt from services/ and is a desk for this rule's purposes. Scanning only one

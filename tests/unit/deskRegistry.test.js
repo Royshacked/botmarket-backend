@@ -57,7 +57,7 @@ test('a route lands on the agent its desk enters at — every trade starts at Me
 })
 
 test('a hand-back: Mentor sending the user to Argus presets single-pick mode for Mentor; nobody else does', () => {
-    assert.deepEqual(handBackOf('mentor', 'scanner'), { handoff: true, handoffTo: 'mentor' })
+    assert.deepEqual(handBackOf('mentor', 'scanner'), { handoff: true })
     assert.equal(handBackOf('axl', 'scanner'), null)
     assert.equal(handBackOf('portfolio', 'scanner'), null)
     assert.equal(handBackOf('mentor', 'analyst'), null)

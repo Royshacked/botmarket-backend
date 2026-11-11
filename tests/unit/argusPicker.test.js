@@ -2,9 +2,9 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'fs'
 
-import { scannerAgentService, TOOLS } from '../../services/agents/scanner.agent.service.js'
+import { scannerAgentService, TOOLS, droppedPickNote } from '../../services/agents/scanner.agent.service.js'
 import {
-    makeHorizonListHandlers, normalizeHorizon, pickableRows, bookLine, formatBookList, formatWeekList, MAX_NAMES,
+    makeHorizonListHandlers, houseListNames, normalizeHorizon, pickableRows, bookLine, formatBookList, formatWeekList, MAX_NAMES,
 } from '../../services/tools/horizonList.tools.js'
 
 // Argus is the PICKER since 2026-11-11 (docs/design/argus-rework.md): Mentor sends a user with no name, Argus reads the
@@ -143,19 +143,59 @@ test('a pick from the list he was shown comes back normalized', async () => {
     assert.equal('grounding' in out.pick, false, 'the grounding ledger is gone — the list gate replaced it')
 })
 
-test('THE GATE: a pick that was not on a list he was shown is dropped', async () => {
-    // Off the list he read.
+test('THE GATE: a pick on none of the house lists is dropped', async () => {
+    // Off the list he read, and off every other list.
     const off = await scannerAgentService.chatStream({ messages: [{ role: 'user', content: 'swing' }], _venueSection: async () => null,
         _listDeps: DEPS, _run: playing(PICK('TSLA'), 'swing') })
     assert.equal('pick' in off, false)
-    // No list read at all.
+    // No list read at all, and not on any list.
     const none = await scannerAgentService.chatStream({ messages: [{ role: 'user', content: 'swing' }], _venueSection: async () => null,
-        _run: playing(PICK('NVDA')) })
+        _listDeps: DEPS, _run: playing(PICK('TSLA')) })
     assert.equal('pick' in none, false)
     // A name on a DIFFERENT horizon's list he also read is still a name he was shown.
     const other = await scannerAgentService.chatStream({ messages: [{ role: 'user', content: 'swing' }], _venueSection: async () => null,
         _listDeps: DEPS, _run: async (bag) => { await bag.toolHandlers.get_horizon_list({ horizon: 'short term swing' }); return playing(PICK('ORCL'), 'swing')(bag) } })
     assert.equal(other.pick.ticker, 'ORCL')
+})
+
+test('THE GATE, a later turn: "another one" from a list read on an earlier turn passes on the second look', async () => {
+    // The history keeps text only — no list call this turn, yet AMD is on the swing list.
+    const again = await scannerAgentService.chatStream({
+        messages: [{ role: 'user', content: 'swing' }, { role: 'assistant', content: 'NVDA, timing now.' }, { role: 'user', content: 'another one' }],
+        _venueSection: async () => null, _listDeps: DEPS, _run: playing(PICK('AMD')) })
+    assert.equal(again.pick.ticker, 'AMD')
+    // A This week name passes the same way.
+    const week = await scannerAgentService.chatStream({ messages: [{ role: 'user', content: 'another' }], _venueSection: async () => null,
+        _listDeps: DEPS, _run: playing(PICK('ORCL')) })
+    assert.equal(week.pick.ticker, 'ORCL')
+})
+
+test('THE GATE: a failed second look keeps it shut — no pick, never a throw', async () => {
+    const out = await scannerAgentService.chatStream({ messages: [{ role: 'user', content: 'another' }], _venueSection: async () => null,
+        _listDeps: { book: async () => { throw new Error('db down') }, week: async () => WEEK }, _run: playing(PICK('NVDA')) })
+    assert.equal('pick' in out, false)
+})
+
+test('a dropped pick says why under the reply — in the stream and in the saved reply', async () => {
+    const streamed = []
+    const out = await scannerAgentService.chatStream({ messages: [{ role: 'user', content: 'swing' }], _venueSection: async () => null,
+        _listDeps: DEPS, onToken: (t) => streamed.push(t), _run: playing(PICK('TSLA'), 'swing') })
+    assert.equal('pick' in out, false)
+    assert.ok(out.reply.endsWith(droppedPickNote('TSLA')))
+    assert.deepEqual(streamed, [droppedPickNote('TSLA')])
+    assert.match(droppedPickNote('TSLA'), /TSLA is not on the house's lists today.*give Mentor the name yourself/)
+    // A pick that stands adds nothing.
+    const kept = await scannerAgentService.chatStream({ messages: [{ role: 'user', content: 'swing' }], _venueSection: async () => null,
+        _listDeps: DEPS, onToken: (t) => streamed.push(t), _run: playing(PICK('NVDA'), 'swing') })
+    assert.equal(kept.pick.ticker, 'NVDA')
+    assert.equal(kept.reply.includes('house\'s lists today'), false)
+    assert.equal(streamed.length, 1)
+})
+
+test('houseListNames: every horizon\'s names, the same cut as the tool, upper-cased', async () => {
+    const names = await houseListNames({ ...DEPS, book: async () => ({ swing: [ROW({ symbol: 'nvda' }), ROW({ symbol: 'HOLD1', rating: 'hold' })], long_term: [ROW({ symbol: 'MSFT' })] }) })
+    assert.deepEqual([...names].sort(), ['MSFT', 'NVDA', 'ORCL'])
+    await assert.rejects(houseListNames({ ...DEPS, week: async () => { throw new Error('x') } }))
 })
 
 test('a stray <scan_list> is swallowed — no `scan` comes back, and the tag never reaches the reply', async () => {

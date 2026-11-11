@@ -9,5 +9,5 @@
 
 /** The mode fields — fixed. Any argument a caller still passes is ignored. */
 export function scannerMode() {
-    return { handoff: true, handoffTo: 'mentor' }
+    return { handoff: true }
 }

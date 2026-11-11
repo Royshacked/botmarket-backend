@@ -9,7 +9,8 @@
  *                        with Prometheus's target and Argus's timing read (bookTiming, through houseBook's own deps)
  *
  * The handler hands every name it listed to `onNames`, so the agent can refuse a pick that was not on a list it was
- * shown (scanner.agent.service — code holds him to the list, the prompt only asks).
+ * shown (scanner.agent.service — code holds him to the list, the prompt only asks). A pick on a later turn is checked
+ * against `houseListNames` instead (the history keeps no tool results).
  *
  * UNBOUND — no userId: the lists are the house's, the same for everyone. READ-ONLY.
  */
@@ -91,11 +92,7 @@ async function _list(horizon, deps) {
  * The handler. `onNames(names)` gets every name a call listed (the agent's pick gate). `deps` — test seams.
  */
 export function makeHorizonListHandlers({ onNames = () => {}, deps = {} } = {}) {
-    const d = {
-        week: () => todayHotlist(),
-        book: () => houseBook(),
-        ...deps,
-    }
+    const d = _withDeps(deps)
     return {
         get_horizon_list: makeToolHandler('get_horizon_list', async ({ horizon } = {}) => {
             const h = normalizeHorizon(horizon)
@@ -105,4 +102,26 @@ export function makeHorizonListHandlers({ onNames = () => {}, deps = {} } = {}) 
             return text
         }, (err, args) => `Could not read the ${normalizeHorizon(args?.horizon) ?? ''} list: ${err.message} — say so; no pick.`, LOG),
     }
+}
+
+/**
+ * Every name on the house's lists today, all horizons, upper-cased — the pick gate's second look. A chat's history
+ * keeps text only, so a pick made on a later turn ("another one") from a list read on an earlier turn was never
+ * "shown this turn"; the agent checks it here before dropping it. The same reads and the same caps as the tool, so a
+ * name passes only if the tool would list it. The day boards list nothing yet. Throws when a read fails (the caller
+ * decides).
+ */
+export async function houseListNames(deps = {}) {
+    const d = _withDeps(deps)
+    const [week, book] = await Promise.all([d.week(), d.book()])
+    return new Set([
+        ...formatWeekList(week).names,
+        ...formatBookList('swing', book?.swing).names,
+        ...formatBookList('long term', book?.long_term).names,
+    ].map(n => String(n).toUpperCase()))
+}
+
+/** The list reads, with test seams. */
+function _withDeps(deps = {}) {
+    return { week: () => todayHotlist(), book: () => houseBook(), ...deps }
 }
