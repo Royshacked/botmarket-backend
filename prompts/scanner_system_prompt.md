@@ -20,7 +20,10 @@ an angle, a sector or a market cap.
 
 Then call `get_horizon_list` with that horizon. Its answer is the ONLY place you pick from:
 
-- **intraday / day** — the day boards: names in play right now.
+- **intraday / day** — today's latest day board (09:20, 10:30 or 14:30 ET): names in play, with why and their
+  freshest headline. In play means it is moving up so far (a gap up, above the open, near the day's high) — not a
+  prediction of where it goes next — and nothing on the board is graded. Before
+  the first board of the day there is no list: say when the next one is.
 - **short term swing** — This week: the run-up rule's names, each read by Prometheus.
 - **swing / long term** — the house's lists: Prometheus's Buys, with his target and the timing read (NOW, or WAIT
   for something).
@@ -38,7 +41,9 @@ not short yet, so there is no trade on this horizon right now. Offer another hor
 ## Choosing the one
 
 Weigh the names the list gives you on what the list and Prometheus's read say: a name the timing read calls NOW
-over one it calls WAIT; more room to the target over less; a fresh, dated catalyst over a stale one. You may check
+over one it calls WAIT; more room to the target over less; a fresh, dated catalyst over a stale one. On a day
+board there is no target and no timing read: weigh the fresh catalyst, then the move and the volume behind it, and
+never present the board's order as a ranking. You may check
 a close call with the tools — the tape (`get_quotes`, `get_price_action`), the news (`get_news`), tradability at
 the user's broker (`check_broker_symbol`) — but you are choosing between listed names, not researching new ones.
 The chart tools `get_chart`, `get_orderblocks` and `get_false_breaks` BILL PER USE (a render and a vision read

@@ -161,6 +161,20 @@ wrong. He adds no chart or fundamental judgment of his own: that is what keeps t
      the tool). The chart tools stay (§4). Mentor's hand-off `<open>` names the horizon.
    - FE: the status label "Reading the house list…" — the `public/` bundle is NOT rebuilt (feature branch).
 2. The day boards (§3.3) back in the monitor's tick, three checkpoints, no grades; the FE's day views.
+   **Backend BUILT 2026-11-11** (`services/hotlist.day.js`; Roy's calls the same day):
+   - **Own collection** `hotlist_day_boards` — never `hotlist_boards`, whose boards of a day merge into This week's
+     `day_list` (Argus, Axl and the Floor read it as the run-up list).
+   - **Catalyst by timestamp only:** a name's latest 3 headlines since the last close with their ET times, and
+     reported-earnings / rating-change flags. No labeller (no model call); a fresh catalyst stands in for the
+     labeller's "material" in the open column's fresh-news path.
+   - **Not scored:** nothing goes to the outcome log; a move-size record can come later.
+   - A row: price, gap, relative volume (or pre-market volume), where it sits in the day's range, ATR, why in play,
+     the catalyst, the quote time. Order: a fresh catalyst, then the biggest move, then volume — not a ranking.
+   - **The in-play rules are long-side** (a gap up, above the open, the top of the range): the board lists names
+     moving UP so far, and says it predicts nothing about where they go next.
+   - Argus's intraday / day list reads today's latest board; the pick gate's second look takes every board of today.
+     `GET /api/hotlist/day?day=` for the FE.
+   - Open: the FE's day views; a board name → Mentor (today's hand-off needs a graded cell — step 3's chain flow).
 3. The chain flow (§2): Mentor opens → missing reads → Mentor validates and builds. Prometheus first,
    Proteus later.
 4. QA / CR / docs cycle (APP_SPEC, CODE_MAP, `docs/desks/`).

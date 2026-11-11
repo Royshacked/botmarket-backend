@@ -1207,7 +1207,7 @@
         },
         {
             "name": "get_horizon_list",
-            "description": "The house's list for a HORIZON — the ONLY names you may pick from. `horizon`: \"intraday\" or \"day\" (the day boards), \"short term swing\" (This week: the run-up rule's names, each read by Prometheus), \"swing\" or \"long term\" (the house's Swing / Long term lists: Prometheus's Buys with his target, and the timing read — now, or wait for what). A name that is not in the answer is not a pick. An empty list says why; say that to the user and give no pick.",
+            "description": "The house's list for a HORIZON — the ONLY names you may pick from. `horizon`: \"intraday\" or \"day\" (today's latest day board — the names in play at 09:20, 10:30 or 14:30 ET, with why and their freshest headline; in play means moving up so far, not a prediction of where it goes next),\"short term swing\" (This week: the run-up rule's names, each read by Prometheus), \"swing\" or \"long term\" (the house's Swing / Long term lists: Prometheus's Buys with his target, and the timing read — now, or wait for what). A name that is not in the answer is not a pick. An empty list says why; say that to the user and give no pick.",
             "input_schema": {
                 "type": "object",
                 "properties": {

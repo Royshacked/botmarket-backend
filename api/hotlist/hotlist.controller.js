@@ -2,6 +2,7 @@ import { todayHotlist, boardWithResults, hotlistOutcomes } from '../../services/
 import { catalystReadService } from '../../services/catalystRead.service.js'
 import { hotlistResearchService } from '../../services/hotlistResearch.service.js'
 import { houseBook } from '../../services/houseBook.service.js'
+import { dayBoards } from '../../services/hotlist.day.js'
 import { prometheusCallsService } from '../../services/prometheusCalls.service.js'
 import { makeHandle } from '../_shared/handle.util.js'
 import { httpError } from '../../services/httpError.util.js'
@@ -20,6 +21,16 @@ export const getToday = handle('getToday', async (req, res) => {
     const day = req.query.day
     if (day != null && !DAY.test(String(day))) throw httpError(400, 'day must be YYYY-MM-DD')
     res.json(await todayHotlist({ day: day ?? null }))
+})
+
+/**
+ * GET /api/hotlist/day?day=YYYY-MM-DD — a day's DAY BOARDS (hotlist.day: 09:20 · 10:30 · 14:30 ET), oldest first, and the
+ * days there are boards for. `day` defaults to the latest. No grades and no results: the boards say what is in play.
+ */
+export const getDayBoards = handle('getDayBoards', async (req, res) => {
+    const day = req.query.day
+    if (day != null && !DAY.test(String(day))) throw httpError(400, 'day must be YYYY-MM-DD')
+    res.json(await dayBoards({ day: day ?? null }))
 })
 
 /** GET /api/hotlist/boards/:id — one board, each row with its results once scored. */

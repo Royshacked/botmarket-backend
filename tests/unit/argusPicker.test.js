@@ -4,7 +4,7 @@ import { readFileSync } from 'fs'
 
 import { scannerAgentService, TOOLS, droppedPickNote } from '../../services/agents/scanner.agent.service.js'
 import {
-    makeHorizonListHandlers, houseListNames, normalizeHorizon, pickableRows, bookLine, formatBookList, formatWeekList, MAX_NAMES,
+    makeHorizonListHandlers, houseListNames, formatDayList, quotedSpan, normalizeHorizon, pickableRows, bookLine, formatBookList, formatWeekList, MAX_NAMES,
 } from '../../services/tools/horizonList.tools.js'
 
 // Argus is the PICKER since 2026-11-11 (docs/design/argus-rework.md): Mentor sends a user with no name, Argus reads the
@@ -19,7 +19,15 @@ const ROW = (over = {}) => ({
 })
 const BOOK = { swing: [ROW(), ROW({ symbol: 'AMD', name: 'AMD', timing: { verdict: 'wait', wait_for: 'a pullback to 150' } })], long_term: [] }
 const WEEK = { day: '2026-11-11', latest: { checkpoint: 'overnight' }, day_list: [{ symbol: 'ORCL', status: 'setting_up', cells: {} }] }
-const DEPS = { book: async () => BOOK, week: async () => WEEK }
+// A Wednesday, 08:00 ET (EST, UTC-5): before the first day board.
+const BEFORE_OPEN = Date.parse('2026-11-11T13:00:00Z')
+const DEPS = { book: async () => BOOK, week: async () => WEEK, dayBoards: async () => [], now: () => BEFORE_OPEN }
+const DAY_BOARD = {
+    id: 'hd_2026-11-11_mid', day: '2026-11-11', checkpoint: 'mid', status: 'done', finished_at: Date.parse('2026-11-11T15:34:00Z'),
+    rows: [{ symbol: 'SMCI', name: 'Super Micro', price: 41, gap_pct: 6.2, rvol: 2.4, why: ['2.4× normal volume, above the open'],
+        quoted_at: Date.parse('2026-11-11T15:31:00Z'),
+        catalyst: { news: [{ title: 'Super Micro beats', at: '2026-11-11 07:05:00' }], earnings: true, rating: false } }],
+}
 
 // ── the list tool ────────────────────────────────────────────────────────────
 
@@ -74,11 +82,32 @@ test('the handler: each horizon reads its own list and hands every name it showe
     assert.deepEqual(seen, ['NVDA', 'AMD', 'ORCL'])
 })
 
-test('the day boards are not running yet: intraday and day say so and list nothing', async () => {
+test('intraday and day read today\'s latest day board — before the first, they say when the next is and list nothing', async () => {
     const seen = []
     const h = makeHorizonListHandlers({ onNames: (n) => seen.push(...n), deps: DEPS }).get_horizon_list
-    for (const horizon of ['intraday', 'day']) assert.match(await h({ horizon }), /day boards are not running yet/)
+    for (const horizon of ['intraday', 'day']) assert.match(await h({ horizon }), /No day board yet today — the next is at 09:20 ET.*no pick/)
     assert.deepEqual(seen, [])
+    // A board out: its names are the list, newest board first.
+    const withBoard = makeHorizonListHandlers({ onNames: (n) => seen.push(...n), deps: { ...DEPS, dayBoards: async () => [DAY_BOARD] } }).get_horizon_list
+    const out = await withBoard({ horizon: 'intraday' })
+    assert.match(out, /The 10:30 ET board \(mid-session\) — 1 name in play/)
+    assert.match(out, /moving UP so far .*does not predict where a name goes next/)
+    assert.match(out, /quoted 10:31 ET/, 'the quote time, not the board\'s finish (10:34)')
+    assert.match(out, /SMCI \(Super Micro\) · \$41\.00 \(\+6\.2%\) · 2\.4× volume · 2\.4× normal volume, above the open · reported earnings · news 07:05 ET: "Super Micro beats"/)
+    assert.deepEqual(seen, ['SMCI'])
+})
+
+test('the quote span: first to last quote in ET, one time when they match, null with none', () => {
+    const at = (hhmm) => ({ quoted_at: Date.parse(`2026-11-11T${hhmm}:00-05:00`) })
+    assert.equal(quotedSpan([at('09:20'), at('09:24'), at('09:21')]), '09:20–09:24')
+    assert.equal(quotedSpan([at('10:31')]), '10:31')
+    assert.equal(quotedSpan([{ quoted_at: null }]), null)
+})
+
+test('a day board with no names, or a partial one, says so', () => {
+    assert.match(formatDayList([{ ...DAY_BOARD, rows: [] }], null).text, /has no names in play — nothing to pick/)
+    assert.match(formatDayList([{ ...DAY_BOARD, status: 'partial' }], null).text, /a partial board/)
+    assert.match(formatDayList([], null).text, /the boards run 09:20, 10:30 and 14:30 ET/)
 })
 
 test('a wrong horizon is answered, and a failed read says so in text — never a throw', async () => {
@@ -196,6 +225,10 @@ test('houseListNames: every horizon\'s names, the same cut as the tool, upper-ca
     const names = await houseListNames({ ...DEPS, book: async () => ({ swing: [ROW({ symbol: 'nvda' }), ROW({ symbol: 'HOLD1', rating: 'hold' })], long_term: [ROW({ symbol: 'MSFT' })] }) })
     assert.deepEqual([...names].sort(), ['MSFT', 'NVDA', 'ORCL'])
     await assert.rejects(houseListNames({ ...DEPS, week: async () => { throw new Error('x') } }))
+    // Every board of today, not just the latest — "another one" from the 09:20 list after 10:30 is out.
+    const open = { ...DAY_BOARD, id: 'hd_2026-11-11_open', checkpoint: 'open', rows: [{ symbol: 'PLTR' }] }
+    const withDays = await houseListNames({ ...DEPS, dayBoards: async () => [DAY_BOARD, open] })
+    assert.ok(withDays.has('SMCI') && withDays.has('PLTR'))
 })
 
 test('a stray <scan_list> is swallowed — no `scan` comes back, and the tag never reaches the reply', async () => {

@@ -83,6 +83,7 @@ import { ensurePythiaWeeklyIndexes } from './services/pythiaWeekly.service.js'
 import { dailyScreenerMonitorService } from './monitoring/dailyScreener.monitor.service.js'
 import { ensureDailyScreenerIndexes } from './services/dailyScreener.service.js'
 import { ensureHotlistBoardIndexes } from './services/hotlist.boards.js'
+import { ensureDayBoardIndexes } from './services/hotlist.day.js'
 import { ensureHotlistOutcomeIndexes } from './services/hotlist.outcomes.js'
 import { ensureIndustryAssessmentIndexes } from './api/strategy/industryAssessment.service.js'
 import { ensurePythiaCallsIndexes } from './api/strategy/pythiaCalls.service.js'
@@ -239,6 +240,7 @@ ensureAetherIndexes()
 ensureIndustryViewIndexes().catch(() => {})   // Pythia's industry_view (api/strategy/industryView.service.js)
 ensureDailyScreenerIndexes().catch(() => {})       // the hotlist's overnight pass (services/dailyScreener.service.js)
 ensureHotlistBoardIndexes().catch(() => {})        // the hotlist's boards (services/hotlist.boards.js)
+ensureDayBoardIndexes().catch(() => {})            // the day boards, their own collection (services/hotlist.day.js)
 ensureHotlistOutcomeIndexes().catch(() => {})      // the hotlist's outcome log (services/hotlist.outcomes.js)
 ensurePythiaWeeklyIndexes().catch(() => {})      // Pythia's week: the change scan and its assessments (services/pythiaWeekly.service.js)
 ensureIndustryAssessmentIndexes().catch(() => {}) // Pythia's industry_assessment (api/strategy/industryAssessment.service.js)

@@ -2,7 +2,8 @@
  * ARGUS'S LIST — the Hotlist's names for one horizon, the only place he picks from (docs/design/argus-rework.md §3.1;
  * Roy, 2026-11-11: "Argus is the picker for different horizons"). He no longer screens the market:
  *
- *   intraday / day     → the day boards (§3.3) — not running yet: says so, lists nothing
+ *   intraday / day     → today's latest day board (§3.3, hotlist.day — 09:20 / 10:30 / 14:30 ET): the names in play,
+ *                        no grade, no direction; before the first board, says when the next is and lists nothing
  *   short term swing   → This week (the run-up rule, hotlist.week; read through todayHotlist + formatHotlist, Axl's
  *                        hotlist text — one formatter)
  *   swing / long term  → the house's Swing / Long term lists (houseBook: on the list, live, rated buy or strong buy),
@@ -19,6 +20,7 @@ import { makeToolHandler } from '../agentUtils.js'
 import { todayHotlist } from '../hotlist.service.js'
 import { houseBook } from '../houseBook.service.js'
 import { formatHotlist } from './hotlist.tools.js'
+import { todayBoards, nextCheckpoint } from '../hotlist.day.js'
 import { TRADE_HORIZONS } from '../entity/vocabulary.js'
 
 const LOG = '[horizonList.tools]'
@@ -28,7 +30,7 @@ const BUY = new Set(['buy', 'strong_buy'])
 const BOOK_OF = Object.freeze({ swing: 'swing', 'long term': 'long_term' })
 
 export const HORIZON_LIST_TOOL_SPEC = {
-    get_horizon_list: `The house's list for a HORIZON — the ONLY names you may pick from. \`horizon\`: "intraday" or "day" (the day boards), "short term swing" (This week: the run-up rule's names, each read by Prometheus), "swing" or "long term" (the house's Swing / Long term lists: Prometheus's Buys with his target, and the timing read — now, or wait for what). A name that is not in the answer is not a pick. An empty list says why; say that to the user and give no pick.`,
+    get_horizon_list: `The house's list for a HORIZON — the ONLY names you may pick from. \`horizon\`: "intraday" or "day" (today's latest day board — the names in play at 09:20, 10:30 or 14:30 ET, with why and their freshest headline; in play means moving up so far, not a prediction of where it goes next),"short term swing" (This week: the run-up rule's names, each read by Prometheus), "swing" or "long term" (the house's Swing / Long term lists: Prometheus's Buys with his target, and the timing read — now, or wait for what). A name that is not in the answer is not a pick. An empty list says why; say that to the user and give no pick.`,
 }
 
 const _f = (n, d = 2) => (Number.isFinite(n) ? n.toFixed(d) : null)
@@ -78,11 +80,56 @@ export function formatWeekList(today) {
     return { text: formatHotlist(today, MAX_NAMES), names: rows.map(r => r.symbol).filter(Boolean) }
 }
 
+const CHECKPOINT_WORDS = Object.freeze({ open: '09:20 ET board (the open)', mid: '10:30 ET board (mid-session)', eod: '14:30 ET board (into the close)' })
+const _hhmmEt = (ms) => (Number.isFinite(ms)
+    ? new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(ms)) : null)
+
+/** One day-board row → one line: the move, the volume, why it is in play, its freshest headline with the time. Pure. */
+export function dayLine(r) {
+    const n = r.catalyst?.news?.[0]
+    return [
+        `${r.symbol}${r.name ? ` (${r.name})` : ''}`,
+        Number.isFinite(r.price) ? `$${_f(r.price)}${Number.isFinite(r.gap_pct) ? ` (${r.gap_pct > 0 ? '+' : ''}${_f(r.gap_pct, 1)}%)` : ''}` : null,
+        Number.isFinite(r.rvol) ? `${r.rvol}× volume` : Number.isFinite(r.pm_vol_pct) ? `${_f(r.pm_vol_pct, 1)}% of a day's volume pre-market` : null,
+        r.why?.length ? r.why.join('; ') : null,
+        r.catalyst?.earnings ? 'reported earnings' : null,
+        r.catalyst?.rating ? 'rating change' : null,
+        // FMP's times are ET wall-clock (fmp.price.provider fmpDateToEpochSec reads them so).
+        n ? `news ${String(n.at ?? '').slice(11, 16)} ET: "${n.title}"` : null,
+    ].filter(Boolean).join(' · ')
+}
+
+/** When a board's quotes were taken, "09:20" or "09:20–09:25" (ET). Pure. A board takes minutes, so one time would lie. */
+export function quotedSpan(rows) {
+    const at = (rows ?? []).map(r => r.quoted_at).filter(Number.isFinite)
+    if (!at.length) return null
+    const [a, b] = [_hhmmEt(Math.min(...at)), _hhmmEt(Math.max(...at))]
+    return a === b ? a : `${a}–${b}`
+}
+
+/**
+ * Today's latest day board → `{ text, names }`. Pure. `boards` newest first (todayBoards); `next` the next board's time
+ * (nextCheckpoint) or null. The in-play rules are LONG-SIDE (a gap up, above the open, the top of the day's range), so the
+ * board lists names moving UP so far — and predicts nothing about where they go next; the text says both.
+ */
+export function formatDayList(boards, next) {
+    const b = boards?.[0]
+    if (!b) {
+        return { text: `No day board yet today${next ? ` — the next is at ${next} ET` : ' — the boards run 09:20, 10:30 and 14:30 ET on trading days'}. There is no intraday list to pick from right now: say so; no pick.`, names: [] }
+    }
+    const rows = (b.rows ?? []).slice(0, MAX_NAMES)
+    const when = CHECKPOINT_WORDS[b.checkpoint] ?? `${b.checkpoint} board`
+    if (!rows.length) return { text: `The ${when} has no names in play${b.status === 'partial' ? ' (it stopped early, rate-limited)' : ''} — nothing to pick for intraday. Say so; no pick.`, names: [] }
+    return {
+        text: [`The ${when} — ${rows.length} name${rows.length === 1 ? '' : 's'} in play, quoted ${quotedSpan(rows) ?? _hhmmEt(b.finished_at) ?? 'at the board'} ET (not live)${b.status === 'partial' ? ', a partial board' : ''}. In play means moving UP so far (a gap up, above the open, near the day's high); the board has no grade and does not predict where a name goes next.`,
+            ...rows.map(r => `  ${dayLine(r)}`)].join('\n'),
+        names: rows.map(r => r.symbol),
+    }
+}
+
 /** The horizon's list → `{ text, names }`. Exported for tests through the handler's deps. */
 async function _list(horizon, deps) {
-    if (horizon === 'intraday' || horizon === 'day') {
-        return { text: `The day boards are not running yet — there is no ${horizon} list to pick from. Say so; no pick.`, names: [] }
-    }
+    if (horizon === 'intraday' || horizon === 'day') return formatDayList(await deps.dayBoards(), nextCheckpoint(deps.now()))
     if (horizon === 'short term swing') return formatWeekList(await deps.week())
     const book = BOOK_OF[horizon]
     return formatBookList(horizon, (await deps.book())?.[book])
@@ -113,8 +160,10 @@ export function makeHorizonListHandlers({ onNames = () => {}, deps = {} } = {}) 
  */
 export async function houseListNames(deps = {}) {
     const d = _withDeps(deps)
-    const [week, book] = await Promise.all([d.week(), d.book()])
+    const [week, book, days] = await Promise.all([d.week(), d.book(), d.dayBoards()])
     return new Set([
+        // Every board of today, not just the latest: "another one" may come from the 09:20 list after 10:30 is out.
+        ...(days ?? []).flatMap(b => (b.rows ?? []).slice(0, MAX_NAMES).map(r => r.symbol)),
         ...formatWeekList(week).names,
         ...formatBookList('swing', book?.swing).names,
         ...formatBookList('long term', book?.long_term).names,
@@ -123,5 +172,5 @@ export async function houseListNames(deps = {}) {
 
 /** The list reads, with test seams. */
 function _withDeps(deps = {}) {
-    return { week: () => todayHotlist(), book: () => houseBook(), ...deps }
+    return { week: () => todayHotlist(), book: () => houseBook(), dayBoards: () => todayBoards(), now: () => Date.now(), ...deps }
 }
