@@ -27,6 +27,7 @@ import { coverageService } from '../../api/analyst/coverage.service.js'
 import { KIND, makeArtifact } from './artifact.js'
 import { receiverOf, briefFor } from './contracts.js'
 import { emitted, decisionFor, endedChain } from './rules.js'
+import { requestRead as _requestRead, readTarget as _readTarget } from '../mentorReads.service.js'
 import { logger } from '../logger.service.js'
 
 const LOG = '[chain]'
@@ -57,10 +58,21 @@ const _loadUser = async (userId) => ({ _id: String(userId), role: (await isAdmin
 // Whether a name came into house coverage — what a finished research run reports to Atlas.
 const _covered = async (ticker) => !!(await coverageService.getCoverageBySymbol(ticker))
 
+/**
+ * Mentor's line on the turn a read is asked for: which read, and how many names are ahead of it on the house's one
+ * research run (Roy, 2026-11-11: it waits in line — say so). Pure. `t` — { symbol, horizon }; `r` — readFor's answer.
+ */
+export function readWaitLine(t, r) {
+    const what = r.kind === 'coverage' ? 'his full coverage' : 'a catalyst read'
+    const ahead = r.ahead > 0 ? ` It waits in line behind ${r.ahead} name${r.ahead === 1 ? '' : 's'} in the house's research (about four minutes each).` : ''
+    return `Before I build the ${t.horizon} trade on ${t.symbol}, Prometheus is reading it — ${what}.${ahead} I'll carry on as soon as it lands.`
+}
+
 export function makeChainRunner({
     sessions = sessionService, desks = DESK_DEFS, maxSteps = MAX_STEPS,
     loadUser = _loadUser, isCovered = _covered, lock = withSessionLock,
     findEdit = findForEdit, lookupEdit = lookupForEdit, sealing = defaultSealing,
+    reads = { request: _requestRead, target: _readTarget },
 } = {}) {
     // The queued-turn runner (startTurn's runQueued) — bound after construction, because it needs this
     // runner's afterTurn in return (services/desks/turns.js wires the pair).
@@ -183,6 +195,10 @@ export function makeChainRunner({
         }
         if (out.stopped) { if (chain) await save(user, sessionId, { ...chain, status: 'paused', current: null }); return }
 
+        // MENTOR'S READ (argus-rework.md step 3): once the build has a name and a confirmed horizon, Prometheus's read for
+        // it must exist — code checks, and asks for a missing one. Said once in the chat, on the turn it is asked for.
+        if (agent === 'mentor') await askRead({ user, sessionId, state: session.agentState?.mentor ?? null })
+
         const payload  = out.payload
         const state    = session.agentState?.[agent] ?? null
         const decision = decisionFor(agent, payload, state, chain)
@@ -209,6 +225,19 @@ export function makeChainRunner({
             return
         }
         return hop({ user, session, chain: chain ?? newChain(agent), art, from: agent })
+    }
+
+    /** Ask for the read Mentor's build needs, if it is missing; never fails the turn. */
+    async function askRead({ user, sessionId, state }) {
+        try {
+            const t = reads.target(state)
+            if (!t) return
+            const r = await reads.request({ ...t, sessionId, userId: user._id })
+            if (!r?.asked) return
+            await sessions.append({ sessionId, userId: user._id, message: { agent: 'mentor', role: 'assistant', content: readWaitLine(t, r) } })
+        } catch (err) {
+            logger.warn(LOG, 'read not asked for', { error: err.message })
+        }
     }
 
     /** A user turn arrived while a chain runs: pause after the turn in flight (G4). */
@@ -319,6 +348,38 @@ export function makeChainRunner({
         return true
     }
 
+    /**
+     * Prometheus's read for a Mentor build has landed (mentorReads → onReadSettled; argus-rework.md step 3). His line goes
+     * into his own segment; then, if Mentor is still on that name and horizon, the read is handed to Mentor and his turn
+     * runs — the build carries on with the read in front of him. A user who moved on keeps the line, and nothing is
+     * pushed into a different trade, nor another desk's running chain taken over. False when the session is gone. Under the
+ * session lock, like a turn.
+     */
+    function readSettled(pending, read) { return lock(pending.sessionId, () => _readSettled(pending, read)) }
+
+    async function _readSettled(pending, read) {
+        const user    = await loadUser(pending.userId)
+        const session = await sessions.get({ sessionId: pending.sessionId, userId: user._id })
+        if (!session || session.status !== 'active') return false
+        const line = read.state === 'failed'
+            ? `I could not make a read on ${pending.symbol} for the ${pending.horizon}.`
+            : `${pending.symbol}, ${pending.horizon}: ${read.facts}`
+        await sessions.append({ sessionId: pending.sessionId, userId: user._id, message: { agent: 'analyst', role: 'assistant', content: line } })
+
+        const now = reads.target(session.agentState?.mentor ?? null)
+        if (now?.symbol !== pending.symbol || now?.horizon !== pending.horizon) return true
+        // Another desk's chain is running (an Atlas sleeve, say): it is not taken over. The line is in the timeline, and
+        // Mentor reads the read in his context on his next turn (mentor.desk _prometheusRead).
+        const running = session.chain && session.chain.status !== 'done' ? session.chain : null
+        if (running && running.origin !== 'mentor') return true
+        const art = makeArtifact({
+            kind: KIND.PROMETHEUS_READ, from: { agent: 'analyst', label: 'Prometheus' },
+            items: [{ ticker: pending.symbol, horizon: pending.horizon, kind: read.kind ?? null, state: read.state, facts: read.facts ?? null, against: Boolean(read.against) }],
+        })
+        await hop({ user, session, chain: running ?? newChain('mentor'), art, from: 'analyst' })
+        return true
+    }
+
     /** At boot: every chain a restart cut off is PAUSED and its floor-holder asks (G4). */
     async function sweep() {
         const cut = await sessions.findRunningChains()
@@ -334,5 +395,5 @@ export function makeChainRunner({
         return cut.length
     }
 
-    return { afterTurn, requestPause, resume, sweep, sleeveSettled, bindRunQueued }
+    return { afterTurn, requestPause, resume, sweep, sleeveSettled, readSettled, bindRunQueued }
 }

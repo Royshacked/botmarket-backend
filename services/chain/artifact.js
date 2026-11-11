@@ -8,6 +8,7 @@
 export const KIND = Object.freeze({
     CANDIDATE_LIST: 'candidate_list',   // Argus → Mentor (one pick) | Argus → Prometheus (a research queue)
     COVERAGE_SET:   'coverage_set',     // Prometheus → Atlas: what came back with a thesis
+    PROMETHEUS_READ: 'prometheus_read', // Prometheus → Mentor: the read a build waited for (mentorReads, argus-rework.md step 3)
 })
 
 // An EMPTY artifact is a result, not an absence — a sleeve that screened to nothing is a decision for the

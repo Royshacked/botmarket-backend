@@ -364,6 +364,8 @@ export function researchOpening(item) {
     // From the HOTLIST (horizon-chains.md §4): Argus's "this week" pick — a CATALYST READ, not coverage. The board's facts
     // and his reason travel; the mode block (analyst_mode_catalyst.md) says what to do with them.
     if (isCatalystItem(item)) {
+        // From MENTOR (argus-rework.md step 3): a user is building a short-term swing on the name — no board, no pick.
+        if (c.mentor) return `Catalyst read on ${symbol} — a user is building a SHORT-TERM SWING (2–10 days) on it with Mentor, who needs your read before he builds. Is there a real catalyst, what is it worth, how much is still open, and what can break it inside the window?`
         const facts = c.facts ? ` The board: ${c.facts}.` : ''
         // A read a user asked for (`requested`) on a name Argus did not pick says so, rather than nothing. The overnight
         // board's names (`rule`, 2026-10-25) were listed by the run-up rule — no one picked them, and it says so.
@@ -393,6 +395,11 @@ export function researchOpening(item) {
             return `Research ${symbol} for coverage — Pythia's ${book} assessment of ${of}${c.horizon ? ` (${c.horizon})` : ''} names it: ${c.named_why}. Her case${thesis}${risks} Judge whether ${symbol} is already priced for it.${tail}`
         }
         return `Research ${symbol} for coverage — Pythia rates ${where} ${book}${c.horizon ? ` (${c.horizon})` : ''}${thesis}${risks} Judge whether ${symbol} is already priced for it.${tail}`
+    }
+    // From MENTOR (argus-rework.md step 3): a user is building a swing / long-term trade on the name and needs the read.
+    if (c?.mentor) {
+        const pts = BOOK_PT_HORIZONS[c.horizon === 'long term' ? 'long_term' : 'swing']
+        return `Research ${symbol} for coverage — a user is building a ${String(c.horizon ?? 'swing').toUpperCase()} trade on it with Mentor, who needs your read before he builds. Set the price target on a ${pts.join(' or ')} horizon.`
     }
     if (!c?.sector) return `Research ${symbol} for coverage.`
     // A SLEEVE candidate (sleeveSource): the mandate that surfaced it is a user's book, not the house

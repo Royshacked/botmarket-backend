@@ -174,7 +174,35 @@ wrong. He adds no chart or fundamental judgment of his own: that is what keeps t
      moving UP so far, and says it predicts nothing about where they go next.
    - Argus's intraday / day list reads today's latest board; the pick gate's second look takes every board of today.
      `GET /api/hotlist/day?day=` for the FE.
-   - Open: the FE's day views; a board name → Mentor (today's hand-off needs a graded cell — step 3's chain flow).
+   - Open: a board name → Mentor (today's hand-off needs a graded cell — step 3's chain flow).
+   **Frontend BUILT 2026-11-11** (FE `691b5be`): the Hotlist's Intraday tab (first in the horizon row), one board at a
+   time on the latest, the in-play numbers, why and the freshest headline; no grade, room or result.
+3. **Step 3 decisions (Roy, 2026-11-11):**
+   - **Which read, by horizon:** swing / long term → Prometheus's FULL COVERAGE (it is the 3–6 / 12–24 month target);
+     short term swing → his CATALYST read (the one This week already runs); intraday → NO Prometheus read (a 10:30 move
+     has nothing for him to judge; the day board's catalyst is the read).
+   - **Waiting:** Mentor says Prometheus is reading the name, the chat shows it, and Mentor builds when the read lands —
+     one flow, no extra click.
+   - **A read against the trade** (a sell / hold, or priced in): Mentor states the verdict plainly and asks ONCE whether
+     to build anyway — the user's call. He does not refuse.
+   - **Scheduling:** a user's read waits in line on the ONE shared research run (no priority, no second lane) — and
+     Mentor says so, with how many names are ahead. Slow at busy hours (a house batch is ~4 min a name); revisit if
+     it bites.
+   - **Mechanism:** the sleeve pattern — the read is queued on the research queue and the house's run started (as
+     the house, not the user); `onRunSettled` → the runner posts Prometheus's line and hands Mentor the read, whose
+     turn then builds. Code decides whether a read exists and runs the missing one; Mentor never asks for it.
+   **Prometheus's half BUILT 2026-11-11** (`services/mentorReads.service.js`, the runner's `askRead` / `readSettled`,
+   Mentor's `_buildReadSection`). The trigger is the active name's SETTLED horizon on Mentor's ledger (a claimed one is a
+   guess). A pass is an answer (not asked again: 5 days for a catalyst read, 30 for coverage); a read the run made
+   nothing of is told as failed and held a day. After the bug hunt (Roy's calls):
+   - **Accepted:** every swing / long-term name a user opens becomes house coverage (Covered companies, auto-revised).
+   - **Generate is held in CODE** while the read runs: readiness goes dark and the press is refused (`read_pending`).
+     A read that is in — for or against — failed, or could not be checked holds nothing: the user decides.
+   - Runs are started BY SYMBOL, so a name another chain already queued is run for the user too.
+   - A landed read never takes over another desk's running chain (the line is posted; Mentor reads it next turn).
+   - The session rides on the queue row; `resumePending` at boot hands a read on after a restart.
+   - Known: a user-asked catalyst read lands in `catalyst_reads`, so it shows in the Hotlist's reads and counts in
+     Prometheus's scorecard. Proteus plugs in beside it when it exists.
 3. The chain flow (§2): Mentor opens → missing reads → Mentor validates and builds. Prometheus first,
    Proteus later.
 4. QA / CR / docs cycle (APP_SPEC, CODE_MAP, `docs/desks/`).

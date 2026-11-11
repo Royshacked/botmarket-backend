@@ -122,6 +122,7 @@ export const mentorAgentService = { chatStream }
 async function chatStream({
     messages, chatState = emptyMentorState(), accounts = [], mainAccountId = null,
     clientTime = null, audience = null, seed = null,
+    prometheusRead = null,   // Prometheus's read on the build's name for its horizon (mentorReads.readFor; argus-rework.md step 3)
     model: requestedModel, reasoningEffort, userId,
     onToken, onAsset, onInterval, onChart, onToolStart, onReasoning, onCoverage, signal,
     _run = runAgentStream,   // the shared contract-test seam — see runAgentStream in agentIO.js
@@ -246,7 +247,7 @@ async function chatStream({
     // The kit is enforced on the HANDLERS too: a call to an undeclared tool comes back "no handler" instead of running.
     const kitHandlers = handlersFor(mode, toolHandlers)
 
-    const systemPrompt  = _buildSystemPrompt(turnState, accounts, mainAccountId, audience, seed)
+    const systemPrompt  = _buildSystemPrompt(turnState, accounts, mainAccountId, audience, seed, prometheusRead)
     // The venue (mode / broker / accounts / free cash) rides the last USER message rather than
     // the system prompt: free cash moves whenever anything fills, so a volatile system block
     // would sit ahead of the whole conversation in the cache prefix. See buildVenueSection.
@@ -501,7 +502,12 @@ async function chatStream({
     // several records of one truth, which is how they start disagreeing.
     const drafts = _mergeDrafts(chatState?.drafts, carrier, chatState?.draft)
 
-    const readiness = carrier ? setupReadiness(carrier, (accounts?.length ?? 0) > 0) : null
+    let readiness = carrier ? setupReadiness(carrier, (accounts?.length ?? 0) > 0) : null
+    // THE READ HOLDS GENERATE (argus-rework.md step 3): while Prometheus's read on the name is still running, the setup is
+    // not ready, whatever the draft says — the button stays dark, and the press is refused too (mentor.actions).
+    if (readiness && ['waiting', 'missing'].includes(prometheusRead?.state)) {
+        readiness = { ...readiness, ready: false, problems: [...(readiness.problems ?? []), "Prometheus's read is still running"] }
+    }
 
     logger.info(LOG, 'chatStream done', {
         replyLength: reply.length,
@@ -689,7 +695,7 @@ export function _buildProblemsSection(draft) {
  * would have been enough to keep the history breakpoint from hitting — the cache prefix does not
  * care how small the volatile block is, only that it sits ahead of the conversation.
  */
-function _buildSystemPrompt(chatState, accounts, mainAccountId, audience = null, seed = null) {
+function _buildSystemPrompt(chatState, accounts, mainAccountId, audience = null, seed = null, prometheusRead = null) {
     const asset = chatState?.active_asset || 'none'
     const today = new Date().toISOString().slice(0, 10)
     const audienceBlock = buildAudienceSection(audience)
@@ -700,12 +706,48 @@ ${audienceBlock}
 
 ` : ''}
 CONVERSATION CONTEXT:
-Active asset: ${asset}${_buildAccountsSection(accounts, mainAccountId)}${_buildSeedSection(seed)}`
+Active asset: ${asset}${_buildAccountsSection(accounts, mainAccountId)}${_buildSeedSection(seed)}${_buildReadSection(prometheusRead)}`
 
     return [
         cachedBlock(_baseSystemPrompt() + buildRouteRule('mentor') + LANGUAGE_RULE + VENUE_RULE + BREVITY_RULE),
         { type: 'text', text: dynamicContext },
     ]
+}
+
+/**
+ * PROMETHEUS'S READ on the build's name for its confirmed horizon (argus-rework.md step 3; Roy, 2026-11-11) — checked by
+ * CODE every turn (mentorReads.readFor), never asked of the model. Mentor validates with it; a read AGAINST the trade is
+ * said plainly and the user asked once (their call — he does not refuse); a read still running holds the finish. PURE;
+ * empty when the horizon needs no read (intraday) or no horizon is confirmed yet.
+ */
+export function _buildReadSection(read) {
+    if (!read?.kind || !read.symbol) return ''
+    const on = `${read.symbol} for the ${read.horizon} trade`
+    const what = read.kind === 'coverage' ? 'his coverage' : 'his catalyst read'
+    if ((read.state === 'ready' || read.state === 'passed') && read.against) {
+        return `
+
+PROMETHEUS'S READ on ${on} is AGAINST it (${what}): ${read.facts}
+  If you have not said so yet, say it plainly in one line and ask the user ONCE whether to build anyway. It is their call: build if they say so, and do not ask again.`
+    }
+    if (read.state === 'ready') {
+        return `
+
+PROMETHEUS'S READ on ${on} (${what}): ${read.facts}
+  Validate the trade with it — the direction and the levels you set sit with this read, not against it. Name it in one line when you open the levels.`
+    }
+    if (read.state === 'waiting' || read.state === 'missing') {
+        const ahead = read.state === 'waiting' && read.ahead > 0 ? `, ${read.ahead} name${read.ahead === 1 ? '' : 's'} ahead of it in the house's research` : ''
+        return `
+
+PROMETHEUS IS READING ${on} (${what}${ahead}) — or is about to: the platform asks him, and brings you his read when it lands. Do not finish the trade before then: no setup put up to generate. Meanwhile answer the user, and work the chart if they want to.`
+    }
+    if (read.state === 'unknown') {
+        return `
+
+PROMETHEUS'S READ on ${on} could not be checked just now. If it matters to the user, say so in one line; build on the chart and their word.`
+    }
+    return ''
 }
 
 /**

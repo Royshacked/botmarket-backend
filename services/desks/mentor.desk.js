@@ -15,6 +15,7 @@ import { mentorActions, mentorApplyEdit } from './actions/mentor.actions.js'
 import { setupReason } from '../../api/setups/setupReasons.js'
 import { normalizeBuild, activeName, putName, reopenForRedraw, stageOf } from '../mentorBuild.util.js'
 import { PRE_ENTRY } from '../entity/vocabulary.js'
+import { readFor, readTarget } from '../mentorReads.service.js'
 
 /**
  * WHAT REACHES THE PANEL. Pure and tested — because everything the desk computes for the user has to
@@ -42,6 +43,16 @@ export function _mentorResponse(result) {
         ...(result.closedSetup ? { closedSetup: result.closedSetup } : {}),
         // route / routeSymbol / opening are appended by the caller (routing.util).
     }
+}
+
+/**
+ * Where Prometheus's read stands for the name and confirmed horizon on Mentor's ledger (mentorReads; argus-rework.md
+ * step 3) → readFor's answer with `{ symbol, horizon }`, or null (no name, no confirmed horizon, or one that needs none).
+ */
+async function _prometheusRead(state) {
+    const t = readTarget(state)
+    if (!t) return null
+    return { ...t, ...(await readFor(t.symbol, t.horizon)) }
 }
 
 /**
@@ -224,8 +235,10 @@ export const mentorDesk = {
     sealAfterTurn: (result) => (result.closedSetup
         ? { kind: 'setup', entityIds: [result.closedSetup.id], name: result.closedSetup.asset ? `${result.closedSetup.asset} setup` : null }
         : null),
-    run: ({ state, input, emit, common }) => mentorAgentService.chatStream({
+    run: async ({ state, input, emit, common }) => mentorAgentService.chatStream({
         ...common,
+        // Prometheus's read on the build's name for its confirmed horizon — checked by code every turn (step 3).
+        prometheusRead: await _prometheusRead(state),
         // `ops` — what a card press decided — is ONE-SHOT: it rides this turn only. The HTTP client puts
         // it inside its chatState; a session turn hands it in as input.
         chatState:     input.ops ? { ...(state ?? emptyMentorState()), ops: input.ops } : (state ?? emptyMentorState()),

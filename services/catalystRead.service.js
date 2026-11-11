@@ -540,4 +540,15 @@ async function gradeDue(deps = _deps) {
     return out
 }
 
-export const catalystReadService = { saveRead, listReads, liveSymbols, liveRead, gradeDue, markWindows }
+/**
+ * The name's newest read set at or after `sinceMs`, live or a pass, or null — what Mentor's read check asks (mentorReads:
+ * a pass is an answer too, and must not be asked for again the next turn). (argus-rework.md step 3, 2026-11-11)
+ */
+async function latestRead(symbol, { sinceMs } = {}, deps = _deps) {
+    const coll = await _coll(deps)
+    const since = new Date(Number.isFinite(sinceMs) ? sinceMs : 0).toISOString()
+    const row = await coll.find({ symbol: String(symbol ?? '').toUpperCase(), set_at: { $gte: since } }).sort({ set_at: -1 }).limit(1).next()
+    return row ? stripId(row) : null
+}
+
+export const catalystReadService = { saveRead, listReads, liveSymbols, liveRead, latestRead, gradeDue, markWindows }

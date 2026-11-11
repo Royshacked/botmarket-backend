@@ -7,6 +7,7 @@
 import { makeStartTurn } from './startTurn.js'
 import { makeChainRunner } from '../chain/runner.js'
 import { onSleeveSettled } from '../sleeveSource.service.js'
+import { onReadSettled } from '../mentorReads.service.js'
 
 export const chain = makeChainRunner()
 
@@ -14,5 +15,7 @@ const turns = makeStartTurn({ afterTurn: chain.afterTurn, onUserTurn: chain.requ
 chain.bindRunQueued(turns.runQueued)
 // A sleeve Atlas sent to be sourced from a session settles into that session's chain (plan phase 5d).
 onSleeveSettled(chain.sleeveSettled)
+// Prometheus's read for a Mentor build lands into that session's chain, and Mentor's turn runs (argus-rework.md step 3).
+onReadSettled(chain.readSettled)
 
 export const { startTurn, runQueued } = turns

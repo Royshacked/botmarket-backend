@@ -22,6 +22,23 @@ function briefMentor(artifact) {
     }
 }
 
+/**
+ * Prometheus's read on the name Mentor is building, landed (mentorReads.service; argus-rework.md step 3). Written as the
+ * user's turn, like every brief. A read AGAINST the trade is said plainly and the user asked once (Roy, 2026-11-11: the
+ * user decides; Mentor does not refuse). No seed: the build is already on the table, and a seed would reset its lens.
+ */
+function briefMentorRead(artifact) {
+    const r = artifact.items[0] ?? {}
+    const on = `${r.ticker}${r.horizon ? ` for the ${r.horizon} trade` : ''}`
+    if (r.state === 'failed') {
+        return { text: `Prometheus could not make a read on ${on}. Tell me in one line, and ask me once whether to build without it.`, input: {} }
+    }
+    if (r.against) {
+        return { text: `Prometheus's read on ${on} is in, and it is against the trade: ${trimDot(r.facts)}. Say so plainly in one line and ask me once whether to build anyway.`, input: {} }
+    }
+    return { text: `Prometheus's read on ${on} is in: ${trimDot(r.facts)}. Check the trade against it and carry on building.`, input: {} }
+}
+
 /** A research queue → Prometheus researches ONE name per turn, told what follows and what else is on the list. */
 function briefAnalyst(artifact, index = 0) {
     const names  = artifact.items.map(c => c.ticker).filter(Boolean)
@@ -60,6 +77,7 @@ function briefPortfolio(artifact) {
 /** The agent that receives an artifact: a kind has exactly one, a candidate list's depends on its use. */
 export function receiverOf(artifact) {
     if (artifact?.kind === KIND.COVERAGE_SET) return 'portfolio'
+    if (artifact?.kind === KIND.PROMETHEUS_READ) return 'mentor'
     if (artifact?.kind === KIND.CANDIDATE_LIST) return artifact.context?.queued ? 'analyst' : 'mentor'
     return null
 }
@@ -67,7 +85,7 @@ export function receiverOf(artifact) {
 /** The receiver's opening for this artifact (and, for a queue, this position in it). */
 export function briefFor(artifact, { index = 0 } = {}) {
     const to = receiverOf(artifact)
-    if (to === 'mentor')    return briefMentor(artifact)
+    if (to === 'mentor')    return artifact.kind === KIND.PROMETHEUS_READ ? briefMentorRead(artifact) : briefMentor(artifact)
     if (to === 'analyst')   return briefAnalyst(artifact, index)
     if (to === 'portfolio') return briefPortfolio(artifact)
     return null

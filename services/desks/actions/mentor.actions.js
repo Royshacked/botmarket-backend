@@ -20,19 +20,22 @@ import { setupCommit as defaultCommit } from '../../../api/setups/setupCommit.se
 import { parseCommitArgs, parseIdeaAccounts } from '../../../api/_shared/parse.util.js'
 import { draftVerdict } from '../../setupVerdict.js'
 import { emptyMentorState } from '../../agents/mentor.agent.service.js'
+import { readPending as defaultReadPending } from '../../mentorReads.service.js'
 
 const generatedOf = (doc) => ({ id: doc.id, asset: doc.asset ?? null, status: doc.status ?? null })
 const editingId   = (state) => (state?.editing?.kind === 'setup' ? String(state.editing.entityId) : null)
 const chatStateOf = (state) => ({ draft: state?.draft ?? null, coverage: state?.coverage ?? [] })
 const setupName   = (doc) => (doc?.asset ? `${doc.asset} setup` : null)
 
-export function makeMentorActions({ commit = defaultCommit } = {}) {
+export function makeMentorActions({ commit = defaultCommit, readPending = defaultReadPending } = {}) {
     return {
         /** Save the draft as a new setup — it then waits on Arm. */
         async generate({ user, state, args }) {
             const draft = state?.draft
             if (!draft) return { reason: 'nothing_to_commit' }
             if (editingId(state)) return { reason: 'not_new' }
+            // Prometheus's read on the name is still running (argus-rework.md step 3): no new setup before it lands.
+            if (await readPending(state)) return { reason: 'read_pending' }
             const { accounts, mainAccountId } = parseCommitArgs(args)
             if (!accounts.length) return { reason: 'no_venue' }
             const out = await commit.commitSetup(draft, { userId: user._id, accounts, mainAccountId, updateId: null, chatState: chatStateOf(state) })
@@ -64,6 +67,8 @@ export function makeMentorActions({ commit = defaultCommit } = {}) {
             const byAsset = { ...(state?.drafts ?? {}), ...(state?.draft?.asset ? { [state.draft.asset]: state.draft } : {}) }
             const all = Object.values(byAsset)
             if (all.length < 2) return { reason: 'nothing_to_commit' }
+            // The active name's read still running holds the whole batch (argus-rework.md step 3).
+            if (await readPending(state)) return { reason: 'read_pending' }
             const { accounts, mainAccountId } = parseCommitArgs(args)
             if (!accounts.length) return { reason: 'no_venue' }
             const out = await commit.generateSetups(all, { userId: user._id, accounts, mainAccountId, chatState: chatStateOf(state) })
