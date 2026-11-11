@@ -717,120 +717,6 @@
             }
         },
         {
-            "name": "screen_candidates",
-            "description": "Screen the US universe for names that fit the scan's shape — the grounded discovery leg (Phase 2). Filter by sector, market cap, price, beta, dividend, and a liquidity floor (volume). NOTE: this is a FUNDAMENTAL & liquidity screen — it CANNOT filter for chart setups (52-week-high, base, RSI). For a technical angle, use it to define a liquid, in-sector universe, then confirm the setup per-name with get_candles/get_indicators. Returns a compact list; qualify each hit before listing it.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "sector": {
-                        "type": "string",
-                        "description": "e.g. Technology, Healthcare, Energy, Financial Services, Utilities"
-                    },
-                    "industry": {
-                        "type": "string",
-                        "description": "optional finer bucket, e.g. Semiconductors"
-                    },
-                    "marketCapMoreThan": {
-                        "type": "number",
-                        "description": "min market cap in USD, e.g. 10000000000 for $10B+"
-                    },
-                    "marketCapLowerThan": {
-                        "type": "number",
-                        "description": "max market cap in USD, e.g. 2000000000 for small-cap"
-                    },
-                    "priceMoreThan": {
-                        "type": "number",
-                        "description": "min share price (a tradability floor — e.g. 5 to drop penny names)"
-                    },
-                    "priceLowerThan": {
-                        "type": "number",
-                        "description": "max share price"
-                    },
-                    "betaMoreThan": {
-                        "type": "number",
-                        "description": "min beta (higher = more cyclical/volatile)"
-                    },
-                    "betaLowerThan": {
-                        "type": "number",
-                        "description": "max beta (lower = more defensive)"
-                    },
-                    "dividendMoreThan": {
-                        "type": "number",
-                        "description": "min annual dividend per share in USD"
-                    },
-                    "volumeMoreThan": {
-                        "type": "number",
-                        "description": "min average volume — the liquidity floor; set it for tradability"
-                    },
-                    "country": {
-                        "type": "string",
-                        "description": "e.g. US (default universe is US)"
-                    },
-                    "isEtf": {
-                        "type": "boolean",
-                        "description": "true to screen ETFs instead of single stocks"
-                    },
-                    "limit": {
-                        "type": "number",
-                        "description": "max results 1–50 (default 25)"
-                    }
-                }
-            }
-        },
-        {
-            "name": "get_market_movers",
-            "description": "Today's biggest movers — the momentum / gap / \"what's moving\" starting pool for Phase-2 discovery. kind=\"gainers\" (biggest % up), \"losers\" (biggest % down — short pool), or \"active\" (highest volume). Grounded discovery, not a watchlist: qualify every name (relative strength, tradability, a real catalyst) before it makes the list. US-listed.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "kind": {
-                        "type": "string",
-                        "enum": [
-                            "gainers",
-                            "losers",
-                            "active"
-                        ],
-                        "description": "gainers = biggest % up, losers = biggest % down, active = most traded by volume"
-                    },
-                    "limit": {
-                        "type": "number",
-                        "description": "how many to return, 1–50 (default 20)"
-                    }
-                },
-                "required": [
-                    "kind"
-                ]
-            }
-        },
-        {
-            "name": "get_sector_snapshot",
-            "description": "Today's sector rotation — every sector ranked leaders→laggards by average move. Use it in Phase 2 for a sector-rotation angle (find the leading/lagging groups, then screen_candidates INSIDE them), and in Phase 3 as the sector leg of the relative-strength check (is the name's sector leading?). No arguments.",
-            "input_schema": {
-                "type": "object",
-                "properties": {}
-            }
-        },
-        {
-            "name": "get_analyst_actions",
-            "description": "Recent analyst rating changes — a catalyst pool beyond earnings. With NO symbols: the market-wide latest upgrades/downgrades feed (Phase-2 discovery of ratings-driven names). With symbols: each name's recent rating actions (Phase-3 validation of a shortlist — is a fresh upgrade/downgrade backing the move?). US-listed equities.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "symbols": {
-                        "type": "array",
-                        "items": {
-                            "type": "string"
-                        },
-                        "description": "optional — narrow to these tickers for a per-name read; omit for the market-wide discovery feed"
-                    },
-                    "limit": {
-                        "type": "number",
-                        "description": "max rows for the market-wide feed, 1–50 (default 25)"
-                    }
-                }
-            }
-        },
-        {
             "name": "get_price_action",
             "description": "Recent price-action summary for a ticker: 1d/5d/1m/3m moves, position within the 1y range, and relative volume. Use it to confirm a name is actually moving the way your thesis claims.",
             "input_schema": {
@@ -1295,35 +1181,6 @@
             }
         },
         {
-            "name": "get_house_industries",
-            "description": "The HOUSE'S INDUSTRIES for a book — the GICS sub-industries Pythia (the house's industry desk) currently rates FOR SWING or FOR LONG TERM, plus the industries inside the themes it rates so, each with its thesis, its top risk and how far it has moved. Pass `book` (\"swing\" or \"long_term\", and optionally `sector`) on a swing or long-term scan, BEFORE you screen: these are the first place to look. Then pass `industry` (a code or name from that list) for its largest companies, our coverage marked. A PREFERENCE, never a filter: screen the rest of the market as you always do, rank by the tape as you always do — being on the house's list adds nothing to a score — and keep a stronger name from outside these industries. Label every name you take from here as on the house's swing / long-term list. Intraday and day scans have no house list: Pythia's verdicts run weeks to years.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "book": {
-                        "type": "string",
-                        "enum": [
-                            "swing",
-                            "long_term"
-                        ],
-                        "description": "The scan's book: the industries Pythia rates for it."
-                    },
-                    "sector": {
-                        "type": "string",
-                        "description": "A GICS sector (e.g. Information Technology) to narrow the book's list."
-                    },
-                    "industry": {
-                        "type": "string",
-                        "description": "A GICS sub-industry (8-digit code or exact name) from the list — its largest companies instead of the list."
-                    },
-                    "limit": {
-                        "type": "number",
-                        "description": "How many of the industry's companies, 1–40 (default 15)."
-                    }
-                }
-            }
-        },
-        {
             "name": "get_news",
             "description": "Recent NEWS on a name — dated, attributed headlines with the publisher's own summary, newest first. `companies` with the TICKER as `subject` is the one you reach for: is there a real, DATED story under this move, or a stale or recycled one? It is the first place to look before web_search — cached and dated where a search is neither. `topic` for a theme with no ticker; `headlines` for the market's front page. A headline is a fact to weigh — what was WRITTEN — never a level or a call.",
             "input_schema": {
@@ -1349,8 +1206,31 @@
             }
         },
         {
+            "name": "get_horizon_list",
+            "description": "The house's list for a HORIZON — the ONLY names you may pick from. `horizon`: \"intraday\" or \"day\" (the day boards), \"short term swing\" (This week: the run-up rule's names, each read by Prometheus), \"swing\" or \"long term\" (the house's Swing / Long term lists: Prometheus's Buys with his target, and the timing read — now, or wait for what). A name that is not in the answer is not a pick. An empty list says why; say that to the user and give no pick.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "horizon": {
+                        "type": "string",
+                        "enum": [
+                            "intraday",
+                            "day",
+                            "short term swing",
+                            "swing",
+                            "long term"
+                        ],
+                        "description": "The trade's horizon — which list to read."
+                    }
+                },
+                "required": [
+                    "horizon"
+                ]
+            }
+        },
+        {
             "name": "consult",
-            "description": "Put ONE decision to a more capable desk head and get a straight answer back. It cannot see this conversation and cannot fetch anything — you hand it the question and every number it needs, and it thinks harder than you can in-line.\n\nThis desk screens in BULK, so the bar is higher here than anywhere else: a consult per candidate would cost more than the scan is worth. Reach for it in exactly two situations, both of which happen at most once per scan: **the final cut**, when two or three finalists are genuinely close and the ranking is the thing the user will act on; and **an angle that resists screening** — a thesis the tools cannot express, where you have to decide what to screen FOR before you can screen at all. Never per candidate, and never to qualify a name a tool call would qualify.\n\nDo NOT reach for it to look something up, to double-check work you are already confident in, to summarize, or because a question feels big. A consult costs a full model call and adds seconds to the turn: if you already know the answer, or a tool call would settle it, that is the cheaper and better move. Most turns should end without it.",
+            "description": "Put ONE decision to a more capable desk head and get a straight answer back. It cannot see this conversation and cannot fetch anything — you hand it the question and every number it needs, and it thinks harder than you can in-line.\n\nReach for it in one situation only: **the final pick**, when two or three names on the list are genuinely close and the choice is the thing the user will build on. Never per name, and never to judge a name a tool call would qualify.\n\nDo NOT reach for it to look something up, to double-check work you are already confident in, to summarize, or because a question feels big. A consult costs a full model call and adds seconds to the turn: if you already know the answer, or a tool call would settle it, that is the cheaper and better move. Most turns should end without it.",
             "input_schema": {
                 "type": "object",
                 "properties": {

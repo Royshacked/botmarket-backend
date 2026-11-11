@@ -5,7 +5,7 @@ import { consultDescription } from '../deepThink.service.js'
 import { dirname, join }  from 'path'
 import { getQuotes } from '../../providers/yahoofinance.provider.js'
 import { getRiskMetrics, getPriceAction, getCycleAnalysis } from '../priceAnalytics.service.js'
-import { getFundamentals, getEarningsCalendar, getEarnings, screenCandidates, getMarketMovers, getAnalystActions, getSectorSnapshot } from '../../providers/fmp.provider.js'
+import { getFundamentals, getEarningsCalendar, getEarnings } from '../../providers/fmp.provider.js'
 import { getSecFilings } from '../../providers/sec.provider.js'
 import { makeCandlesHandler, makeIndicatorsHandler, makeChartHandler } from '../tools/marketData.tools.js'
 import { makeStructureVisionHandler, OB_VISION, FB_VISION } from '../tools/priceStructure.tools.js'
@@ -14,32 +14,25 @@ import { makeNewsHandlers } from '../tools/news.tools.js'
 import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, cleanReply, makeToolHandler, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, BREVITY_RULE, VENUE_RULE, cachedBlock } from '../agentUtils.js'
 import { makeTradingContextHandlers, buildVenueSection } from '../tools/tradingContext.tools.js'
 import { makeMarketHoursHandlers, MARKET_HOURS_TOOL_SPEC } from '../tools/marketHours.tools.js'
-import { makeHouseIndustriesHandlers, HOUSE_INDUSTRIES_TOOL_SPEC } from '../tools/houseIndustries.tools.js'
+import { makeHorizonListHandlers, HORIZON_LIST_TOOL_SPEC } from '../tools/horizonList.tools.js'
 import { houseLabels, wireLabel } from '../houseLabel.service.js'
 import { buildTagCaptures } from '../llmStream.util.js'
 import { DESKS } from '../desks/registry.js'
 import { makeRouteCapture, buildRouteRule } from '../routing.util.js'
-import { isToolError } from '../toolResult.util.js'
-import { makeGroundingLedger, recordSourced, recordTouched, groundingTier, DISCOVERY_TOOLS, PER_NAME_TICKER_ARGS, SOURCED_EXTRACT } from '../scanner.grounding.js'
 
 const __dirname     = dirname(fileURLToPath(import.meta.url))
 const LOG   = '[scannerAgent]'
-// The spine (scanner_system_prompt.md) is still the trading screen it always was, and the hand-off module rides
-// on it — since 2026-11-09 on EVERY turn: Argus's list-building chat (the investing profile, the radar cut, the
-// saved lists) is archived, and the single pick for Mentor is the one mode left (archive/README.md). The full
-// service as it was is archive/services/agents/scanner.agent.service.js. Hot-reloaded.
-const _spinePrompt = makePromptLoader(join(__dirname, '../../prompts/scanner_system_prompt.md'), LOG)
-const _handoffMode = makePromptLoader(join(__dirname, '../../prompts/scanner_mode_handoff.md'), LOG)
+// Argus is the PICKER (docs/design/argus-rework.md, Roy 2026-11-11): Mentor sends a user with no name, Argus reads the
+// house's list for the trade's horizon (get_horizon_list) and picks ONE name from it — never from the whole market. One
+// prompt (scanner_system_prompt.md); the list-building spine and the hand-off module that overrode it are gone. The
+// list-building desk as it was is archive/services/agents/scanner.agent.service.js. Hot-reloaded.
+const _prompt = makePromptLoader(join(__dirname, '../../prompts/scanner_system_prompt.md'), LOG)
 const MAX_MESSAGES = DESKS.scanner.maxMessages
 
 export const TOOLS = toolsFor({
     web_search: '',
     get_trading_context: `The user's trading venue + accounts: which modes are available (paper / live / manual), which live brokers are connected, and every account with its balance, capabilities and open positions. Use it to keep a list ACTIONABLE — the account size a name has to be sizeable in, and what the user already holds. No arguments.`,
     check_broker_symbol: `Check whether a candidate is actually TRADABLE at the user's connected live broker, and what the broker calls it. A name that screens beautifully but the broker does not list is a dead candidate — check before you commit it to the list, and drop or flag it if it is unavailable. tradable null means the broker could not be reached: UNKNOWN, never treat as unavailable.`,
-    screen_candidates: `Screen the US universe for names that fit the scan's shape — the grounded discovery leg (Phase 2). Filter by sector, market cap, price, beta, dividend, and a liquidity floor (volume). NOTE: this is a FUNDAMENTAL & liquidity screen — it CANNOT filter for chart setups (52-week-high, base, RSI). For a technical angle, use it to define a liquid, in-sector universe, then confirm the setup per-name with get_candles/get_indicators. Returns a compact list; qualify each hit before listing it.`,
-    get_market_movers: `Today's biggest movers — the momentum / gap / "what's moving" starting pool for Phase-2 discovery. kind="gainers" (biggest % up), "losers" (biggest % down — short pool), or "active" (highest volume). Grounded discovery, not a watchlist: qualify every name (relative strength, tradability, a real catalyst) before it makes the list. US-listed.`,
-    get_sector_snapshot: `Today's sector rotation — every sector ranked leaders→laggards by average move. Use it in Phase 2 for a sector-rotation angle (find the leading/lagging groups, then screen_candidates INSIDE them), and in Phase 3 as the sector leg of the relative-strength check (is the name's sector leading?). No arguments.`,
-    get_analyst_actions: `Recent analyst rating changes — a catalyst pool beyond earnings. With NO symbols: the market-wide latest upgrades/downgrades feed (Phase-2 discovery of ratings-driven names). With symbols: each name's recent rating actions (Phase-3 validation of a shortlist — is a fresh upgrade/downgrade backing the move?). US-listed equities.`,
     get_price_action: `Recent price-action summary for a ticker: 1d/5d/1m/3m moves, position within the 1y range, and relative volume. Use it to confirm a name is actually moving the way your thesis claims.`,
     get_quotes: `Get current prices for several tickers at once.`,
     get_risk_metrics: `Annualized volatility and ATR (from 1y of daily prices) for a ticker. Use it to gauge how violent a name is before putting it on the list.`,
@@ -74,35 +67,21 @@ export const TOOLS = toolsFor({
     // APPENDED, never inserted — the snapshot compares by index and prompt caching keys off the
     // array prefix.
     get_market_hours: MARKET_HOURS_TOOL_SPEC.get_market_hours,
-    // Pythia's industries for the scan's book — where a swing / long-term scan looks FIRST (argus-on-pythia.md §3.2).
-    // Inserted before `consult`, which stays last.
-    get_house_industries: HOUSE_INDUSTRIES_TOOL_SPEC.get_house_industries,
     // Argus had web search and no news feed (Roy, 2026-10-24: "Argus needs a news tool") — inserted before `consult`.
     get_news: `Recent NEWS on a name — dated, attributed headlines with the publisher's own summary, newest first. \`companies\` with the TICKER as \`subject\` is the one you reach for: is there a real, DATED story under this move, or a stale or recycled one? It is the first place to look before web_search — cached and dated where a search is neither. \`topic\` for a theme with no ticker; \`headlines\` for the market's front page. A headline is a fact to weigh — what was WRITTEN — never a level or a call.`,
+    // The house's list for the trade's horizon — the only names Argus picks from (argus-rework.md §3.1). Before `consult`.
+    get_horizon_list: HORIZON_LIST_TOOL_SPEC.get_horizon_list,
     // Appended last — contractually. The reasoning sidecar (services/deepThink.service.js): one
     // bounded decision put to a stronger model and handed back as a tool result. The mechanism half
     // of this description is shared with every other desk; the clause below is Argus's own judgment
     // about WHEN.
     //
-    // Argus needs the TIGHTEST clause of any desk, and this one says so explicitly: a scan is
-    // dozens of names, and a desk that consults per candidate turns a cost saving into a per-scan
-    // multiplier. The two cases below are both once-per-scan by construction.
-    consult: consultDescription(`This desk screens in BULK, so the bar is higher here than anywhere else: a consult per candidate would cost more than the scan is worth. Reach for it in exactly two situations, both of which happen at most once per scan: **the final cut**, when two or three finalists are genuinely close and the ranking is the thing the user will act on; and **an angle that resists screening** — a thesis the tools cannot express, where you have to decide what to screen FOR before you can screen at all. Never per candidate, and never to qualify a name a tool call would qualify.`),
+    // Argus picks from a list he is handed, so the one decision worth a stronger model is the final choice between close
+    // names — once per pick by construction.
+    consult: consultDescription(`Reach for it in one situation only: **the final pick**, when two or three names on the list are genuinely close and the choice is the thing the user will build on. Never per name, and never to judge a name a tool call would qualify.`),
 })
 
 const TOOL_HANDLERS = {
-    screen_candidates: makeToolHandler('screen_candidates',
-        (filters) => screenCandidates(filters || {}),
-        (err) => `Could not run screen: ${err.message}`, LOG),
-    get_market_movers: makeToolHandler('get_market_movers',
-        ({ kind, limit }) => getMarketMovers(kind, limit),
-        (err) => `Could not fetch market movers: ${err.message}`, LOG),
-    get_sector_snapshot: makeToolHandler('get_sector_snapshot',
-        () => getSectorSnapshot(),
-        (err) => `Could not fetch sector snapshot: ${err.message}`, LOG),
-    get_analyst_actions: makeToolHandler('get_analyst_actions',
-        ({ symbols, limit }) => getAnalystActions(Array.isArray(symbols) ? symbols : [], limit),
-        (err) => `Could not fetch analyst actions: ${err.message}`, LOG),
     get_candles:    makeCandlesHandler(LOG),
     get_indicators: makeIndicatorsHandler(LOG),
     // Vision tools (KLineCharts render + visual read). onChart: null → the image goes to
@@ -141,81 +120,39 @@ const TOOL_HANDLERS = {
     // Unbound (market hours belong to the instrument, not the user) — so it lives in the
     // static map, unlike the venue handlers that are rebuilt per request around a userId.
     ...makeMarketHoursHandlers(),
-    ...makeHouseIndustriesHandlers(),
-}
-
-// Wrap the module-level handlers with a per-session grounding recorder. A
-// successful discovery call feeds its output text to the tape (`sourced`); a
-// successful per-name call records the ticker it ran on (`touched`). A failed
-// call (toolError — e.g. a bogus symbol that errored) confers nothing, so a
-// fabricated ticker the model merely *attempted* never gets credited.
-function _wrapForGrounding(handlers, ledger) {
-    const wrapped = {}
-    for (const [name, fn] of Object.entries(handlers)) {
-        const reader = PER_NAME_TICKER_ARGS[name]
-        const isDiscovery = DISCOVERY_TOOLS.has(name)
-        // `ctx` rides through untouched: it is the loop's booking hook, and get_orderblocks /
-        // get_false_breaks (both per-name tools, so both wrapped here) spend a model call of
-        // their own that must reach it.
-        wrapped[name] = (reader || isDiscovery)
-            ? async (args, ctx) => {
-                const ret = await fn(args, ctx)
-                if (!isToolError(ret)) {
-                    if (isDiscovery && typeof ret === 'string') recordSourced(ledger, SOURCED_EXTRACT[name] ? SOURCED_EXTRACT[name](ret) : ret)
-                    if (reader) recordTouched(ledger, reader(args))
-                }
-                return ret
-            }
-            : fn
-    }
-    return wrapped
 }
 
 export const scannerAgentService = { chatStream }
 
-// Exported for unit tests.
-export { _wrapForGrounding }
-
-// The DESTINATION belongs here and not in the module for a mechanical reason: the module is a cached
-// block, so interpolating a per-request desk name into it would give every destination its own cache
-// entry and defeat the breakpoint. The volatile tail is already rebuilt per turn, so naming the desk
-// here is free.
-const HANDOFF_DESKS = {
-    mentor: 'Mentor, which builds a `setup` the user shapes level by level',
-}
-
-function _handoffContext(handoffTo) {
-    const desk = HANDOFF_DESKS[handoffTo] ?? 'the build desk that sent them'
-    return `ACTIVE MODE: BUILD HAND-OFF — the user was sent here by ${desk}, to find ONE ticker to build a single trade on. Refer to that desk by that name. The BUILD HAND-OFF MODE module is in force: it replaces the list-building shape of the spine.`
-}
-
-async function chatStream({ messages = [], model: requestedModel, handoffTo = 'mentor', audience = null, reasoningEffort, userId, onToken, onTicker, onPhase, onToolStart, onReasoning, onChart, signal,
+async function chatStream({ messages = [], model: requestedModel, audience = null, reasoningEffort, userId, onToken, onTicker, onPhase, onToolStart, onReasoning, onChart, signal,
     _run = runAgentStream,   // the shared contract-test seam — see runAgentStream in agentIO.js
     _venueSection = buildVenueSection,
+    _listDeps = undefined,   // test seam: the list reads (horizonList.tools deps)
 }) {
     // The venue (mode / broker / accounts / free cash) rides the last USER message rather than the
     // system tail: free cash moves whenever anything fills, so a volatile system block would sit
     // ahead of the whole conversation in the cache prefix. See buildVenueSection.
     const normalized = attachTurnContext(normalizeMessages(messages, MAX_MESSAGES), await _venueSection(userId))
 
-    // Per-session grounding ledger — records which tickers a real, successful tool engaged. It used to drop
-    // fabricated names from a list; with lists archived it stamps the pick's provenance (`grounding`) for the log.
-    const ledger = makeGroundingLedger()
-    const toolHandlers = _wrapForGrounding({ ...TOOL_HANDLERS, ...makeTradingContextHandlers(userId) }, ledger)
+    // THE PICK GATE: every name a list call showed him this turn. A pick that is not among them is dropped — code holds
+    // him to the list (argus-rework.md §3.1); the prompt only asks.
+    const listed = new Set()
+    const toolHandlers = {
+        ...TOOL_HANDLERS,
+        ...makeTradingContextHandlers(userId),
+        ...makeHorizonListHandlers({ onNames: (names) => names.forEach(n => listed.add(String(n).toUpperCase())), deps: _listDeps }),
+    }
 
-    // Stable cached base + volatile tail: today's date (so "next week" resolves) and the mode line.
+    // Stable cached base + volatile tail: today's date (so "this week" resolves).
     const today = new Date().toISOString().slice(0, 10)
     const dynamic = [`CURRENT DATE: ${today}. Resolve all relative timeframes (today, next week, this month) against this date.`]
     const audienceSection = buildAudienceSection(audience)
     if (audienceSection) dynamic.push(audienceSection)
-    dynamic.push(_handoffContext(handoffTo))
 
-    // Spine (cached) + the hand-off module (its own cached block) + the volatile tail.
-    // BREAKPOINT BUDGET: four per request. Tools take one, the history takes one
-    // (_stampHistoryCache in the Anthropic provider), and the system prompt two. Do not add a third.
+    // The prompt (cached) + the volatile tail. BREAKPOINT BUDGET: four per request — tools one, the history one
+    // (_stampHistoryCache in the Anthropic provider), the system prompt one.
     const systemPrompt = [
-        cachedBlock(_spinePrompt() + buildRouteRule('scanner') + LANGUAGE_RULE + VENUE_RULE + BREVITY_RULE),
-        cachedBlock(_handoffMode()),
+        cachedBlock(_prompt() + buildRouteRule('scanner') + LANGUAGE_RULE + VENUE_RULE + BREVITY_RULE),
         { type: 'text', text: dynamic.join('\n\n') },
     ]
 
@@ -248,12 +185,15 @@ async function chatStream({ messages = [], model: requestedModel, handoffTo = 'm
 
     const reply = cleanReply(raw)
 
-    const pick = _normalizeArgusPick(capturedPick)
-    if (pick) pick.grounding = groundingTier(pick.ticker, ledger)
+    let pick = _normalizeArgusPick(capturedPick)
+    if (pick && !listed.has(pick.ticker)) {
+        logger.warn(LOG, 'pick dropped — not on a list he was shown', { ticker: pick.ticker, listed: listed.size })
+        pick = null
+    }
     await _attachPickLabel(pick)
     const routing = route.result()   // { route, routeSymbol, opening, edit } — the controller validates
 
-    logger.info(LOG, 'chatStream done', { replyLength: reply.length, hasPick: !!pick, grounding: pick?.grounding ?? null, route: routing.route, phase: phase.get() })
+    logger.info(LOG, 'chatStream done', { replyLength: reply.length, hasPick: !!pick, listed: listed.size, route: routing.route, phase: phase.get() })
     return { reply, phase: phase.get(), ...(pick ? { pick } : {}), ...routing }
 }
 

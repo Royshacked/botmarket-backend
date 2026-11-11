@@ -31,8 +31,8 @@ const PROMPT_PATH = join(__dirname, '../../prompts/analyst_system_prompt.md')
 const _systemPrompt = makePromptLoader(PROMPT_PATH, LOG)
 const MAX_MESSAGES = DESKS.analyst.maxMessages
 
-// QUICK READ is a MODE of Prometheus, not a desk of its own — the same shape as Argus's hand-off
-// module (scanner_mode_handoff.md): the spine stays, and on a quick-read turn one more cached block
+// QUICK READ is a MODE of Prometheus, not a desk of its own (the shape Argus's hand-off module had until
+// 2026-11-11): the spine stays, and on a quick-read turn one more cached block
 // narrows it to phases 1–2 and a <quickread> verdict instead of a <coverage> draft. Injected as its
 // own block so the coverage-mode prefix stays byte-identical and keeps its cache.
 const _quickreadMode = makePromptLoader(join(__dirname, '../../prompts/analyst_mode_quickread.md'), LOG)

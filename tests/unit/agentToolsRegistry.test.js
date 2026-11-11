@@ -118,10 +118,16 @@ test('no tool is declared in BOTH the registry and a shared module', () => {
     }
 })
 
+// Argus's market-wide screen left his kit on 2026-11-11 (docs/design/argus-rework.md): he picks from the house's lists
+// now. No live agent carries these two, but the archived list-building Argus does, and `npm run check:archive` imports
+// it — toolsFor throws on an unknown name. Kept for the archive, listed here so it is a decision, not a hole.
+const ARCHIVE_ONLY = new Set(['screen_candidates', 'get_market_movers'])
+
 test('the registry has no orphans — every schema is used by some agent', () => {
     // An unused schema is dead weight that will drift out of sync with reality unnoticed.
     const used = new Set(Object.values(LIVE).flat().map(t => t.name))
-    for (const name of TOOL_NAMES) assert.ok(used.has(name), `orphan schema: ${name}`)
+    for (const name of TOOL_NAMES) assert.ok(used.has(name) || ARCHIVE_ONLY.has(name), `orphan schema: ${name}`)
+    for (const name of ARCHIVE_ONLY) assert.ok(!used.has(name), `${name} is live again — take it off ARCHIVE_ONLY`)
 })
 
 // ─── The reasoning sidecar, across desks ──────────────────────────────────────

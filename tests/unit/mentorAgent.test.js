@@ -504,8 +504,11 @@ test('the document has one H1, and the beats are subsections of the opening turn
 test('a user with no name is asked first, then sent to ARGUS, which hands the name back (2026-10-19)', () => {
     // Roy corrected this in the first minute of the design conversation; the prompt still said Axl.
     assert.match(PROMPT, /your first question is whether they have a name — or a setup — in mind/)
-    assert.match(PROMPT, /offer \*\*Argus\*\*, the scanning desk/)
+    // Argus is the picker since 2026-11-11 (argus-rework.md): he picks from the house's list for the HORIZON, so the
+    // hand-over must name it.
+    assert.match(PROMPT, /offer \*\*Argus\*\*, the picker/)
     assert.match(PROMPT, /`<route>scan<\/route>`/)
+    assert.match(PROMPT, /`<open>` that names the HORIZON/)
     assert.doesNotMatch(PROMPT, /point them back to Axl/)
 })
 

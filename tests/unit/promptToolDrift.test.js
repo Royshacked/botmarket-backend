@@ -34,9 +34,6 @@ const DESKS = [
     // Mentor's guided build names a tool at nearly every rung, so it is the prompt most likely to
     // outrun its kit — it was missing from this list until the ladder was written.
     { prompt: 'mentor_system_prompt.md',          tools: MENTOR_TOOLS },
-    // Argus's hand-off module rides every one of his turns since 2026-11-09 (the investing profile, which ran a
-    // subset of the kit, was archived with his lists).
-    { prompt: 'scanner_mode_handoff.md',          tools: SCANNER_TOOLS },
 ]
 
 for (const { prompt, tools } of DESKS) {
@@ -57,20 +54,17 @@ for (const { prompt, tools } of DESKS) {
 // read each — and were introduced one line earlier as "reach for these when the angle is structure",
 // with no cost warning at all. So a structure-angle scan was invited to spend the two most expensive
 // tools in the kit across a whole pool.
-test('the scanner spine marks all THREE vision tools as the per-use spend, not just get_chart', () => {
+// Argus's one prompt since 2026-11-11 (argus-rework.md) still carries the three vision tools until Proteus takes the
+// chart: so it still has to say which of them bill per use, and point at the cheap numbers instead.
+test('the scanner prompt marks all THREE vision tools as the per-use spend, not just get_chart', () => {
     const spine = readFileSync(join(ROOT, 'scanner_system_prompt.md'), 'utf8')
-    const claim = spine.slice(spine.indexOf('BILL PER USE'))
-    assert.ok(claim, 'the spine must say which tools bill per use')
+    const at = spine.indexOf('BILL PER USE')
+    assert.ok(at > 0, 'the prompt must say which tools bill per use')
+    const claim = spine.slice(Math.max(0, at - 200), at + 300)
     for (const t of ['get_chart', 'get_orderblocks', 'get_false_breaks']) {
         assert.match(claim, new RegExp(t), `${t} must be named as a per-use spend`)
     }
-    assert.match(claim, /never across a pool/)
-    // …and it points at the cheap numeric alternative rather than only forbidding.
+    assert.match(claim, /never across a list/)
     assert.match(claim, /get_candles/)
     assert.match(claim, /get_indicators/)
-    // The structure tools' own line carries the shortlist rule too, since that is where the angle
-    // sends a model looking for them.
-    const structure = spine.split('\n').find(l => l.includes('get_orderblocks') && l.includes('supply/demand'))
-    assert.match(structure, /top shortlist only/)
-    assert.match(structure, /never the pool/)
 })
