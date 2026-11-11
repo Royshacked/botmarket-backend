@@ -352,11 +352,15 @@ services/
                               putAside (dropped work's turns: the seal point and summary move past them, 8e) ·
                               openForEdit (a DIFFERENT item sets the agent's turns aside) · sealAfterGenerate
   chain/                  THE CHAIN the server runs (unified-chat plan phase 5): artifact.js (candidate_list,
-                          coverage_set) · contracts.js (receiverOf + each receiver's opening brief) · rules.js (the
+                          coverage_set, prometheus_read) · contracts.js (receiverOf + each receiver's opening brief —
+                          a landed read: for the trade / against it, ask once / none could be made) · rules.js (the
                           declared tables: what a reply emits, what makes a turn the user's call) · runner.js (after
                           every turn: decision → stop, emit → hand-off + the receiver's turn queued; busy rule, step
-                          cap, pause, boot sweep, sleeveSettled; the `research` choice on an Argus list went to archive/
-                          2026-11-09, so the `next` queue walk is dormant). Wired with the turns in desks/turns.js
+                          cap, pause, boot sweep, sleeveSettled; after a MENTOR turn askRead (mentorReads — the read
+                          the build needs, said once with readWaitLine) and readSettled (the read handed to Mentor,
+                          same name + horizon only, never over another desk's running chain); the `research` choice
+                          on an Argus list went to archive/ 2026-11-09, so the `next` queue walk is dormant). Wired
+                          with the turns in desks/turns.js (onSleeveSettled, onReadSettled)
   agents/                 the 6 LLM desks (analyst · axl · mentor · portfolio · scanner ·
                           strategy). A seventh is archived and lives under archive/, imported by
                           nothing — see archive/README.md, and `npm run check:archive`, which
@@ -388,12 +392,14 @@ services/
                           source, and an empty client list left Atlas inventing ids that came back
                           not_found on every accepted change. Deleted §4; a desk reads its subject from
                           the database
-                          Argus (scanner) — since 2026-11-09 the single pick for Mentor ONLY (hand-off
-                          module on every turn; lists/investing/radar/scoring archived, snapshot in archive/):
-                          the systematic-discovery funnel: Phase-2 grounded sources
-                          screen_candidates + get_market_movers + get_sector_snapshot + get_analyst_actions
-                          (no memory-recall); Phase-3 get_candles/get_indicators baseline + get_chart/
-                          get_orderblocks/get_false_breaks vision (KLineCharts, onChart:null = model-only)
+                          Argus (scanner) — THE PICKER since 2026-11-11 (argus-rework.md): Mentor sends a user
+                          with no name; Argus reads the house's list for the horizon (get_horizon_list — the day
+                          board, This week, the Swing / Long term Buys) and picks ONE, emitted as <argus_pick>.
+                          One short prompt (the list-building spine and the hand-off module are gone). THE PICK
+                          GATE is code: a pick not shown this turn gets a second look at every house list today
+                          (houseListNames — the history keeps no tool results), else it is dropped with a line
+                          under the reply. No market screen (screen_candidates etc. archived); the chart tools
+                          stay for close calls (get_chart/get_orderblocks/get_false_breaks, onChart:null)
   portfolioState.service.js listPortfolioItems = THE query for a book's rows and the one place
                             ownership is enforced on them; every caller comes through it (the
                             rebalance's sibling + conviction reads included), with its own projection
@@ -513,8 +519,8 @@ services/
                           loop and carried on the tool ctx (per turn is a span only the loop knows);
                           the monitor path gets its own per-wake one in makeAssessToolRunner. Refuses
                           as a toolError, never a string: a plain refusal would read as a finding AND
-                          would ground the ticker (scanner.grounding credits a successful per-name
-                          call). Ceiling: config.visionMaxUsesPerTurn, default 8
+                          read as a read of the name that never happened. Ceiling: config.visionMaxUsesPerTurn,
+                          default 8
   routing.util.js         desk-to-desk ROUTING — the shared mechanism (2026-09-18). The grammar Axl
                           always spoke (`<route>desk SYMBOL</route>` + `<open>…</open>`, or
                           `<edit>kind id</edit>`), its parsers, the controller-tier validation
@@ -770,9 +776,15 @@ services/
                             the caller passes `symbols` (the industry each is in + the house's three
                             answers, through industryView.viewsForSymbols) or a GICS `sector`. Reads say
                             DESCRIPTIONS, not forecasts; a pending industry has no house answer
-  houseIndustries.tools.js  get_house_industries (Argus, both profiles; argus-on-pythia.md §3.2) — `book` → the house's
-                            industries for it (first 20 in full), `industry` → its largest companies. Says PREFERENCE in
-                            every answer. A grounding source, but only its company rows (scanner.grounding SOURCED_EXTRACT)
+  houseIndustries.tools.js  get_house_industries (ATLAS; Argus's until 2026-11-11 — his words archived in
+                            archive/services/tools/houseIndustries.argus.js) — `book` → the house's industries for it
+                            (first 20 in full), `industry` → its largest companies: the candidate sleeves of a book
+  horizonList.tools.js      get_horizon_list (ARGUS, 2026-11-11, argus-rework.md §3.1) — UNBOUND, read-only: the house's
+                            list for a horizon, the only names he may pick from. intraday / day → today's latest DAY
+                            BOARD (hotlist.day, todayBoards; before the first, when the next runs); short term swing →
+                            This week (formatHotlist — Axl's text, one formatter); swing / long term → houseBook's
+                            Buys on the list (Prometheus's target + the timing read). onNames(names) feeds the pick
+                            gate; houseListNames = every list's names today (the gate's second look)
   watchlist.service.js      listWatchedItems — "what am I watching?" across EVERY list the Floor
                             shows, in ONE read (setups · books · coverage · the off-hours
                             QUEUE · Aether runs, one row per event · and, for an admin, the research
@@ -840,8 +852,16 @@ services/
   exitOrders.util.js        buildExitOrder (applies +basisOffset → broker price space) / exitOrderRecord /
                             closeSide / orderSymbol — the closing-order shape three api services and two
                             monitors share. Was monitoring/, importing api/broker to serve api/
+  mentorReads.service.js    MENTOR'S READS (argus-rework.md step 3, 2026-11-11) — before Mentor builds, Prometheus's read
+                            for the name and the CONFIRMED horizon (readTarget: the ledger's settled horizon): coverage
+                            for swing / long term, a catalyst read for short term swing, none intraday. readFor →
+                            ready · passed (a pass is an answer) · waiting (with names ahead) · missing · failed
+                            (held a day) · unknown. requestRead queues a missing one (source `mentor`, the session on
+                            the row) and starts the house run BY SYMBOL; it waits in line on the one run. On
+                            onRunSettled, settlePending hands a landed read to the runner's readSettled (onReadSettled).
+                            readPending = the Generate gate; resumePending at boot
   researchRun.service.js    headless Prometheus over the research queue, one name at a time, writes
-                            the coverage. ONE run per process; onRunSettled(fn) is how sleeveSource
+                            the coverage. ONE run per process; onRunSettled(fn) is how sleeveSource (and mentorReads)
                             learns a run ended (and chains the next when its names were queued after
                             the run listed the queue). The abort controller is cleared only if still
                             ours — a run chained from a listener must stay stoppable. An ACCOUNT refusal
@@ -909,9 +929,20 @@ services/
                             written EMPTY with `closed`). Every name equal, grade 'R', `hb_<day>_week`, checkpoint
                             'overnight'; rebuilt once a partial run is done. Its outcomes enter at the board day's OPEN;
                             hotlistResearch hands EVERY name to Prometheus. runWeekBoard, in the screener's monitor tick
-  hotlist.boards.js         the boards, shared: indexes, latestBoard, etDate, BOARD_STALE_MS, withNews — lifted out of
-                            the archived checkpoint pass (2026-10-25)
-  (the day CHECKPOINT pass and the day replay were ARCHIVED 2026-10-25 — see archive/README.md)
+  hotlist.boards.js         the boards, shared: indexes, latestBoard, etDate, etNow, BOARD_STALE_MS, withNews — lifted out
+                            of the archived checkpoint pass (2026-10-25)
+  hotlist.day.js            THE DAY BOARDS, revived 2026-11-11 WITHOUT GRADES (argus-rework.md §3.3): 09:20 (`open`,
+                            the extended book) · 10:30 (`mid`) · 14:30 (`eod`) ET, a 30-minute window each, weekdays.
+                            The archived pass's pool (earnings reported, rating changes, fresh news, movers in
+                            session, the overnight structures), the column's hard gates and in-play rule
+                            (hotlist.columns failedGate / inPlay — LONG-SIDE: names moving UP so far), the in-play
+                            numbers and a catalyst BY TIMESTAMP (catalystOf: 3 newest headlines + report / rating
+                            flags; a fresh one stands in for the old labeller's "material"). OWN COLLECTION
+                            `hotlist_day_boards` (`hd_<day>_<checkpoint>`, 10 days kept) — never hotlist_boards, whose
+                            boards merge into This week's day_list. No grade, free range, labeller, Argus read, wide
+                            set or outcome log. Claimed (claimRun), paced (DAILY_SCREENER_RPM), a 429 retried then
+                            partial. runDayBoard in the screener's tick; dayBoards / todayBoards / nextCheckpoint read
+  (the day CHECKPOINT pass with grades and the day replay stay ARCHIVED — see archive/README.md)
   hotlist.columns.js        the hotlist's columns, PURE: the §2.1 gates per column, in play per column (§2.2,
                             §5), the overhead levels each counts, FREE RANGE to the nearest (% and × ATR;
                             nothing above = open sky), the §5.1 A/B/C cut-offs. Long side only — the week's

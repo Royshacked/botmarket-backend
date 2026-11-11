@@ -203,6 +203,15 @@ wrong. He adds no chart or fundamental judgment of his own: that is what keeps t
    - The session rides on the queue row; `resumePending` at boot hands a read on after a restart.
    - Known: a user-asked catalyst read lands in `catalyst_reads`, so it shows in the Hotlist's reads and counts in
      Prometheus's scorecard. Proteus plugs in beside it when it exists.
+   - **TWO TARGETS, ONE PER HORIZON (Roy, 2026-11-11, after the CR found a swing build validated against a 12-month
+     target).** A company has a swing answer and a long-term answer; each needs its own rating and target. **Stage 1
+     (decided):** coverage keeps its `price_target` as the MAIN one — the book, the monitor, the scorecard and a
+     trade's `research_basis` are untouched — and gains an optional view for the OTHER horizon
+     (`{ rating, target, by, why }`). Mentor reads the view matching his build's horizon. **Written lazily:** only
+     when a build needs it — a swing build on a name with only a long-term target is the read the chain asks
+     Prometheus for (the same wait-in-line flow), and he adds the view to the existing coverage rather than
+     re-researching it. **Stage 2 (later, only if stage 1's second targets prove good):** the view gets its own life —
+     both lists, graded on the scorecard, watched by the monitor.
 3. The chain flow (§2): Mentor opens → missing reads → Mentor validates and builds. Prometheus first,
    Proteus later.
 4. QA / CR / docs cycle (APP_SPEC, CODE_MAP, `docs/desks/`).

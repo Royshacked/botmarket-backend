@@ -444,7 +444,8 @@ rotation) — `docs/design/atlas-industry-sleeves.md`.
 > the investing profile, the radar cut and the *Research the top N* hand-off below are in `archive/`
 > (`archive/README.md`). **Live:** the single-pick hand-off only — Mentor routes a user with no name to Argus
 > (Mentor alone may: `registry.js` `routedFrom`), Argus emits `<argus_pick>`, the chain hands it back to Mentor.
-> Old `scan` documents stay in Mongo, unread. The rest of this section is the contract as it was.
+> Old `scan` documents stay in Mongo, unread. **Since 2026-11-11 Argus is the PICKER** (§ Argus the picker, below);
+> the rest of this section, from "The Scanner Agent" to the funnel, is the contract as it was.
 
 The **Scanner Agent** ("Argus", a session turn with Argus on the floor) emits a `<scan_list>` (normalized:
 uppercased tickers, guaranteed period/thesis/direction/signals). A scan is a watchlist of
@@ -480,7 +481,31 @@ model memory. Phase 2 casts a wide net (`screen_candidates`, `get_market_movers`
 `get_price_action`; Phase 3 narrows survivors with a `get_candles`/`get_indicators` baseline plus
 angle-triggered tools (fundamentals, positioning, cycle, `get_orderblocks`/`get_false_breaks`) and
 `get_chart` (KLineChart image, model-only) reserved for the top shortlist; Phase 4 emits the ranked
-list. Via the single-pick hand-off (see above) the same funnel converges to one name.
+list. Via the single-pick hand-off (see above) the same funnel converges to one name. *(Archived: see below.)*
+
+### Argus the picker, the day boards, and Prometheus's read before a build (2026-11-11)
+
+[docs/design/argus-rework.md](docs/design/argus-rework.md) — one job per desk: Argus PICKS, Prometheus reads the
+fundamentals, Mentor trades.
+
+- **Argus picks from a list, never the market.** `get_horizon_list` (`services/tools/horizonList.tools.js`) gives
+  him the house's list for the horizon: intraday / day → today's latest **day board**; short term swing → **This
+  week**; swing / long term → the house's **Swing / Long term** Buys with Prometheus's target and the timing read.
+  The pick gate is code (`scanner.agent.service`): an `<argus_pick>` not shown this turn gets a second look at every
+  house list today, and is otherwise dropped with a line under the reply ("give Mentor the name yourself"). An empty
+  list says why (SPY under its 200-day: the house does not short yet) and no pick is made.
+- **The day boards** (`services/hotlist.day.js`, `GET /api/hotlist/day?day=` → `{ day, boards, days }`): 09:20 ·
+  10:30 · 14:30 ET on weekdays, in their OWN collection `hotlist_day_boards` (never `hotlist_boards`, whose boards
+  merge into This week). A row is a name IN PLAY — moving up so far, by the column's long-side rule — with price,
+  gap, relative volume, range position, ATR, why, and its catalyst by timestamp (headlines + report / rating flags).
+  **No grade, no free range, no result.** The Floor shows them on the Hotlist's Intraday tab.
+- **Prometheus's read before Mentor builds** (`services/mentorReads.service.js`). Once the build has a name and a
+  CONFIRMED horizon: coverage for swing / long term, a catalyst read for short term swing, none intraday. A missing
+  read is queued on the research queue (source `mentor`) and the house's one run started; it **waits in line** and
+  Mentor says how many names are ahead. When it lands the chain hands it to Mentor and his turn runs. Mentor
+  validates with it; a read **against** the trade is said plainly and the user asked once — their call. While the read
+  runs, **Generate is held**: readiness is dark and the press answers `read_pending` (409). A name read this way
+  enters house coverage like any other.
 
 ---
 

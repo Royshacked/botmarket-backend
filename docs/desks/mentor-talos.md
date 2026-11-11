@@ -966,6 +966,17 @@ restored — the same destination whether reached from the list pencil or from A
 > the design still unbuilt is **batch intake from social chat** — several finished plans arriving
 > in one DM — which needs a sender, not a receiver.
 
+**Prometheus's read first (2026-11-11, [design/argus-rework.md](../design/argus-rework.md) step 3).** Mentor is the
+trader: he validates a name with Prometheus's read before he builds it. Once the ledger has a name and a CONFIRMED
+horizon, code checks the read (`mentorReads.service`): coverage for swing / long term, a catalyst read for short term
+swing, none intraday. A missing one is queued and waits in line on the house's one research run; Mentor says so once,
+with the names ahead (`runner.readWaitLine`), and every turn's context carries where it stands
+(`_buildReadSection`). When it lands the chain hands it to him (`KIND.PROMETHEUS_READ`) and his turn runs. For the
+trade: he validates with it. **Against** it (not a Buy, a broken thesis, a pass, priced in): he says so plainly and asks
+ONCE whether to build anyway — the user's call; he does not refuse. While it runs, **Generate is held in code**:
+readiness goes dark and the press is refused (`read_pending`). A read that failed or could not be checked holds
+nothing. Proteus's technical read joins it when Proteus exists.
+
 **Two modes (2026-11-01, [design/mentor-modes.md](../design/mentor-modes.md)).** A build with no setup of the user's
 own — a bare name, the Hotlist, Argus's hand-off — is **risk-based**: the `thesis` lens, Mentor judging the stop and the
 target and the user's risk setting the entry. A build where the user brought a setup (any condition, level or pattern
