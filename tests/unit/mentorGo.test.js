@@ -23,13 +23,16 @@ test('<go>: the three numbers, all positive, or no go at all', () => {
     assert.equal(_parseGo('no tag here'), null)
 })
 
-test("the numbers are KEPT on Mentor's state — a later turn without a go keeps them; a held go's accounts survive a turn", () => {
-    const s1 = mentorNextState(null, { reply: 'x', go: { position_size: 5000, risk: 100, rr: 2 } })
+test("the numbers are KEPT on Mentor's state — a later turn without a go keeps them; a held go's accounts survive a turn ON ITS NAME", () => {
+    const s1 = mentorNextState({ active_asset: 'TSLA' }, { reply: 'x', go: { position_size: 5000, risk: 100, rr: 2 } })
     assert.deepEqual(s1.risk_plan, { position_size: 5000, risk: 100, rr: 2 })
-    const s2 = mentorNextState({ ...s1, go_pending: { accounts: [{ id: 'a1' }], mainAccountId: 'a1' } }, { reply: 'y' })
+    const held = { accounts: [{ id: 'a1' }], mainAccountId: 'a1', symbol: 'TSLA' }
+    const s2 = mentorNextState({ ...s1, go_pending: held }, { reply: 'y' })
     assert.deepEqual(s2.risk_plan, s1.risk_plan)
-    assert.deepEqual(s2.go_pending, { accounts: [{ id: 'a1' }], mainAccountId: 'a1' })
+    assert.deepEqual(s2.go_pending, held)
     assert.equal(mentorNextState(null, { reply: 'z' }).risk_plan, undefined)
+    // CR 2026-11-12: the user moved to NVDA — TSLA's accounts are not NVDA's.
+    assert.equal(mentorNextState({ ...s1, go_pending: held }, { reply: 'n', taggedAsset: 'NVDA' }).go_pending, undefined)
 })
 
 // ─── the action: save, then arm ──────────────────────────────────────────────
@@ -87,10 +90,10 @@ function rig({ act } = {}) {
     const sessions = makeSessionService({ getDb: async () => db })
     const reads = { target: () => null, request: async () => ({ asked: false }) }
     const runner = makeChainRunner({ sessions, loadUser: async (id) => ({ _id: id, role: 'trader' }), reads, desks: { mentor: { reasons: setupReason } } })
-    const pressed = []
-    runner.bindRunQueued(async () => ({}))
+    const pressed = [], queued = []
+    runner.bindRunQueued(async (a) => { queued.push(a); return {} })
     runner.bindAct(async (p) => { pressed.push(p); return act ? act(p) : { result: { armed: true, nextSessionId: 'n1' } } })
-    return { sessions, runner, pressed }
+    return { sessions, runner, pressed, queued }
 }
 const go = { position_size: 5000, risk: 100, rr: 2 }
 const accounts = [{ id: 'a1' }]
@@ -123,10 +126,28 @@ test("a go held by Prometheus's read keeps the accounts; the chain turn after th
     await r.sessions.setAgentState({ sessionId: s.sessionId, userId: 'u1', agent: 'mentor', state: draftState })
     await r.runner.afterTurn({ user, sessionId: s.sessionId, agent: 'mentor', origin: 'user', out: { payload: { reply: 'Done.', go } }, input: { accounts, mainAccountId: 'a1' } })
     const kept = (await r.sessions.get({ sessionId: s.sessionId, userId: 'u1' })).agentState.mentor
-    assert.deepEqual(kept.go_pending, { accounts, mainAccountId: 'a1' })
+    assert.deepEqual(kept.go_pending, { accounts, mainAccountId: 'a1', symbol: 'NVDA' })
     // The read landed: Mentor's chain turn (no accounts of its own) says go again.
     await r.runner.afterTurn({ user, sessionId: s.sessionId, agent: 'mentor', origin: 'chain', out: { payload: { reply: 'Read is for it. Done.', go } }, input: {} })
     assert.deepEqual(r.pressed[1].args, { accounts, mainAccountId: 'a1' })
+})
+
+test("a held go never generates ANOTHER name on its accounts (CR 2026-11-12)", async () => {
+    const r = rig({ act: async () => ({ result: { armed: true } }) })
+    const s = await r.sessions.getActive({ userId: 'u1' })
+    await r.sessions.setAgentState({ sessionId: s.sessionId, userId: 'u1', agent: 'mentor',
+        state: { ...draftState, active_asset: 'AMD', draft: { asset: 'AMD' }, go_pending: { accounts, mainAccountId: 'a1', symbol: 'NVDA' } } })
+    await r.runner.afterTurn({ user, sessionId: s.sessionId, agent: 'mentor', origin: 'chain', out: { payload: { reply: 'Done.', go } }, input: {} })
+    assert.equal(r.pressed.length, 0)
+    assert.match((await rows(r.sessions, s)).at(-1).content, /mark one in the account picker/)
+})
+
+test('a go that throws says so in the chat; nothing is reported as generated', async () => {
+    const r = rig({ act: async () => { throw new Error('db down') } })
+    const s = await r.sessions.getActive({ userId: 'u1' })
+    await r.sessions.setAgentState({ sessionId: s.sessionId, userId: 'u1', agent: 'mentor', state: draftState })
+    await r.runner.afterTurn({ user, sessionId: s.sessionId, agent: 'mentor', origin: 'user', out: { payload: { reply: 'Done.', go } }, input: { accounts } })
+    assert.match((await rows(r.sessions, s)).at(-1).content, /Something went wrong generating it — nothing was saved/)
 })
 
 test('any other refusal: one line in the setup routes\' own words, nothing saved', async () => {
@@ -134,8 +155,12 @@ test('any other refusal: one line in the setup routes\' own words, nothing saved
     const s = await r.sessions.getActive({ userId: 'u1' })
     await r.sessions.setAgentState({ sessionId: s.sessionId, userId: 'u1', agent: 'mentor', state: draftState })
     await r.runner.afterTurn({ user, sessionId: s.sessionId, agent: 'mentor', origin: 'user', out: { payload: { reply: 'Done.', go } }, input: { accounts } })
-    const [line] = await rows(r.sessions, s)
+    const [line, hand] = await rows(r.sessions, s)
     assert.equal(line.content, 'Not generated yet — missing_stop.')
+    // …and the build goes back to Mentor to fix it and say go again (the TSLA drive, 2026-11-12) — nobody else will.
+    assert.equal(hand.kind, 'handoff')
+    assert.equal(r.queued.length, 1)
+    assert.equal(r.queued[0].agent, 'mentor')
 })
 
 // ─── Atlas's go: the book generated, no accounts needed, activation stays the user's ─────────────────────────────

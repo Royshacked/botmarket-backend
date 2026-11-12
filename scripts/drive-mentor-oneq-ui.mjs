@@ -47,13 +47,18 @@ try {
     await box.fill(`Let's trade ${TICKER}.`)
     await box.press('Enter')
     // Prometheus may read it first (~4 minutes when his coverage is missing or old): wait for the verdict's question.
-    const asked = await waitText(page, /position size/, 420_000)
+    // Mentor's reply AFTER Prometheus's hand-off — the opening rules already say "your position size", so matching the
+    // words alone read the verdict while Mentor was still thinking (drives 3 and 4, 2026-11-12).
+    const asked = await waitText(page, /→ MENTOR[\s\S]+Trade agent[\s\S]+position size[\s\S]+R:R/, 420_000)
     await page.waitForTimeout(3000)
     expect(asked, 'Mentor asked for position size, risk and R:R')
     const ask = (await timeline(page)).replace(/\s+/g, ' ')
     console.log('  the read and the verdict:', ask.slice(-1500))
     expect(/PROTEUS/i.test(ask), "Proteus's line is in the chat")
-    expect(/long/i.test(ask) && /(intraday|short term swing|swing|long term|day trade)/i.test(ask), 'a direction and a horizon from the experts')
+    // A verdict either way: a long on a horizon, or "not a long now" (a read against it) with the override offered —
+    // both are answers (Roy, 2026-11-12: a read against the trade is a warning the user may override).
+    expect(/long/i.test(ask) && (/(intraday|short term swing|swing|long term|day trade)/i.test(ask) || /override|anyway|against/i.test(ask)),
+        'a verdict from the experts — a long on a horizon, or not a long now with the override offered')
     expect(!/\blens\b|risk-based|\bthesis lens\b/i.test(ask), 'no lens / risk-based words')
     await shot(page, '02-the-verdict')
     const panel = await page.locator('.mentor-surface').innerText().catch(() => '')

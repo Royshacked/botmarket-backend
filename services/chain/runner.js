@@ -19,7 +19,7 @@ import { sessionService } from '../session.service.js'
 import { deskOf, entryOf } from '../desks/registry.js'
 import { DESK_DEFS, hasWork } from '../desks/index.js'
 import { canSpeak } from '../desks/sessionTurn.js'
-import { withSessionLock } from '../desks/turnLock.js'
+import { withSessionLock, sessionDepth } from '../desks/turnLock.js'
 import { findForEdit, lookupForEdit } from '../desks/entityLookup.js'
 import { sealing as defaultSealing } from '../desks/seal.js'
 import { isAdminUserCached } from '../../api/user/user.model.js'
@@ -29,6 +29,7 @@ import { receiverOf, briefFor } from './contracts.js'
 import { emitted, decisionFor, endedChain } from './rules.js'
 import { requestRead as _requestRead, readTarget as _readTarget } from '../mentorReads.service.js'
 import { logger } from '../logger.service.js'
+import { keepBounded } from '../bounded.util.js'
 
 const LOG = '[chain]'
 export const MAX_STEPS = 12
@@ -79,6 +80,9 @@ export function readWaitLine(t, r) {
 /** A build cut short by the tool budget is carried on at most this many turns in a row (Roy, 2026-11-12: auto-continue). */
 const MAX_CARRY = 3
 
+// Why an armed go came back unarmed, in words (setups.service patchSetup: `cannot_arm_<gate reason>`, …).
+const armWhy = (reason) => String(reason ?? 'arm_failed').replace(/^cannot_arm_/, '').replace(/_/g, ' ')
+
 /**
  * The desks that can say <go> (argus-rework.md §2.2, Roy 2026-11-12) — what it presses, and whether it needs the marked
  * accounts. Mentor: generate AND arm. Atlas: generate the book — activating it stays the user's press. BOTH take the marked
@@ -94,7 +98,7 @@ export function makeChainRunner({
     sessions = sessionService, desks = DESK_DEFS, maxSteps = MAX_STEPS,
     loadUser = _loadUser, isCovered = _covered, lock = withSessionLock,
     findEdit = findForEdit, lookupEdit = lookupForEdit, sealing = defaultSealing,
-    reads = { request: _requestRead, target: _readTarget },
+    reads = { request: _requestRead, target: _readTarget }, depth = sessionDepth,
 } = {}) {
     // The queued-turn runner (startTurn's runQueued) — bound after construction, because it needs this
     // runner's afterTurn in return (services/desks/turns.js wires the pair).
@@ -106,7 +110,8 @@ export function makeChainRunner({
     // How many turns in a row a build has been carried on, by session and desk (carryOn). In memory: one instance runs
     // the turns, and a restart forgetting a count only allows a few more carries.
     const carryCount = new Map()
-    // The fresh deciding reads already handed to Mentor, by `${sessionId}|${symbol}` (askRead) — each once.
+    // The deciding reads already handed to Mentor, by `${sessionId}|${symbol}` — each once, whether it was fresh (askRead)
+    // or landed later (readSettled). Both are BOUNDED (keepBounded): in memory, never pruned by a session ending.
     const handedDecide = new Set()
 
     const save = (user, sessionId, chain) => sessions.setChain({ sessionId, userId: user._id, chain })
@@ -227,14 +232,19 @@ export function makeChainRunner({
 
         // MENTOR'S READ (argus-rework.md step 3): once the build has a name and a confirmed horizon, Prometheus's read for
         // it must exist — code checks, and asks for a missing one. Said once in the chat, on the turn it is asked for.
-        if (agent === 'mentor') await askRead({ user, sessionId, state: session.agentState?.mentor ?? null })
+        // A read handed over here queued Mentor's next turn on a NEW chain (hop): this turn's chain and session are stale
+        // now, and nothing below may end, decide or carry on over it (CR 2026-11-12).
+        if (agent === 'mentor' && await askRead({ user, sessionId, state: session.agentState?.mentor ?? null })) return
         // A DESK'S GO (argus-rework.md §2.2): Mentor or Atlas said done — generate it (Mentor's armed too), if code lets
         // them. A go that went through ended the session; nothing else runs after it.
         if (out.payload?.go && GO[agent] && await deskGo({ user, sessionId, session, input, agent })) return
         // A one-answer build cut short by the turn's tool budget: carried on into another turn, at most MAX_CARRY in a row
         // (the count resets when the user speaks).
         if (origin === 'user') carryCount.delete(`${sessionId}:${agent}`)
-        if (out.payload?.cut_short && GO[agent] && !out.payload?.route && await carryOn({ user, sessionId, agent, input })) return
+        // Not when the user spoke meanwhile (their turn is queued behind this one, or a chain was asked to pause): their
+        // message is the next thing that happens, never a stale "carry on".
+        if (out.payload?.cut_short && GO[agent] && !out.payload?.route && !chain?.pauseRequested && depth(sessionId) <= 1
+            && await carryOn({ user, sessionId, agent, input })) return
 
         const payload  = out.payload
         const state    = session.agentState?.[agent] ?? null
@@ -286,11 +296,15 @@ export function makeChainRunner({
         const rule = GO[agent]
         const state = session.agentState?.[agent] ?? null
         const say = (content) => sessions.append({ sessionId, userId: user._id, message: { agent, role: 'assistant', content } })
+        // The name this go is for: a held go's accounts are kept for THAT name only (CR 2026-11-12 — a TSLA go held for its
+        // read must never generate NVDA on TSLA's accounts).
+        const symbol = String(state?.active_asset || state?.draft?.asset || '').toUpperCase().trim() || null
         try {
             let args = {}
             if (rule.accounts) {
                 const marked = input?.accounts?.length ? { accounts: input.accounts, mainAccountId: input.mainAccountId ?? null } : null
-                args = marked ?? state?.go_pending ?? null
+                const held = state?.go_pending && (state.go_pending.symbol ?? null) === symbol ? state.go_pending : null
+                args = marked ?? (held ? { accounts: held.accounts, mainAccountId: held.mainAccountId ?? null } : null)
                 if (!args?.accounts?.length) {
                     await say(`It's ready, but no account is marked to put ${agent === 'portfolio' ? 'the book' : 'the trade'} in — mark one in the account picker and say go.`)
                     return false
@@ -305,19 +319,32 @@ export function makeChainRunner({
             if (!actHeld) { logger.warn(LOG, 'go not bound — nothing generated'); return false }
             const r = await actHeld({ user, sessionId, agent, action: rule.action, args })
             if (r.reason === 'read_pending' && rule.accounts) {
-                await sessions.setAgentState({ sessionId, userId: user._id, agent, state: { ...state, go_pending: args } })
+                // The state as it is NOW (this turn's snapshot predates the turn's own writes — its chain id among them).
+                const now = (await sessions.get({ sessionId, userId: user._id }))?.agentState?.[agent] ?? state
+                await sessions.setAgentState({ sessionId, userId: user._id, agent, state: { ...now, go_pending: { ...args, symbol } } })
                 return false
             }
             if (r.reason) {
                 const reason = desks[agent]?.reasons
                 const why = (typeof reason === 'function' ? reason(r.reason) : reason?.[r.reason])?.[1] ?? r.reason
                 await say(`Not generated yet — ${why}.`)
+                // A one-answer build stalls on a refusal nobody is there to answer (the TSLA drive, 2026-11-12): the desk
+                // gets the build back to fix what the refusal names and say go again — within the carry limit.
+                if (depth(sessionId) <= 1) await carryOn({ user, sessionId, agent, input })
                 return false
             }
-            if (r.result?.armed === false) logger.warn(LOG, 'go: generated, not armed', { reason: r.result.armReason })
+            if (r.result?.armed === false) {
+                // Saved, not armed: the session ended with "saved" — the new one says why it is not watching.
+                logger.warn(LOG, 'go: generated, not armed', { reason: r.result.armReason })
+                if (r.result.nextSessionId) {
+                    await sessions.append({ sessionId: r.result.nextSessionId, userId: user._id, message: { agent, role: 'assistant',
+                        content: `Saved, but not armed — ${armWhy(r.result.armReason)}. Open it from your Setups and arm it when that is fixed.` } }).catch(() => {})
+                }
+            }
             return true
         } catch (err) {
             logger.warn(LOG, 'go failed — nothing generated', { agent, error: err.message })
+            await say("Something went wrong generating it — nothing was saved. Say go again, or press Generate.").catch(() => {})
             return false
         }
     }
@@ -331,13 +358,16 @@ export function makeChainRunner({
     async function carryOn({ user, sessionId, agent, input }) {
         const key = `${sessionId}:${agent}`
         const n = carryCount.get(key) ?? 0
+        // Past the limit it stays past it until the USER speaks (afterTurn) — a system-queued turn never resets it. Said once.
         if (n >= MAX_CARRY) {
-            carryCount.delete(key)
-            await sessions.append({ sessionId, userId: user._id, message: { agent, role: 'assistant',
-                content: 'This build is taking longer than usual — say "continue" and I will carry on from here.' } })
+            if (n === MAX_CARRY) {
+                keepBounded(carryCount, key, n + 1)
+                await sessions.append({ sessionId, userId: user._id, message: { agent, role: 'assistant',
+                    content: 'This build is taking longer than usual — say "continue" and I will carry on from here.' } })
+            }
             return false
         }
-        carryCount.set(key, n + 1)
+        keepBounded(carryCount, key, n + 1)
         await sessions.append({ sessionId, userId: user._id, message: {
             agent, role: 'assistant', kind: 'handoff', to: agent, content: 'Carry on the build from where the last turn stopped.',
         } })
@@ -346,25 +376,28 @@ export function makeChainRunner({
         return true
     }
 
-    /** Ask for the read Mentor's build needs, if it is missing; never fails the turn. */
+    /**
+     * Ask for the read Mentor's build needs, if it is missing; never fails the turn.
+     * @returns {Promise<boolean>} true when a fresh deciding read was HANDED to Mentor (his next turn is queued on a new chain)
+     */
     async function askRead({ user, sessionId, state }) {
         try {
             const t = reads.target(state)
-            if (!t) return
+            if (!t) return false
+            // A deciding read already handed (fresh here, or landed later through readSettled): never again.
+            if (t.horizon == null && handedDecide.has(`${sessionId}|${t.symbol}`)) return false
             const r = await reads.request({ ...t, sessionId, userId: user._id })
             // A DECIDING read already fresh (argus-rework.md §2.3): handed to Mentor at once, the way a landed one is — his
             // first reply had no reads to judge on, so his verdict is the turn this hand-off runs. Once per session and name.
             if (t.horizon == null && r?.state === 'ready' && r.decide) {
-                const key = `${sessionId}|${t.symbol}`
-                if (handedDecide.has(key)) return
-                handedDecide.add(key)
-                await _readSettled({ userId: user._id, sessionId, symbol: t.symbol, horizon: null }, r)
-                return
+                return await _readSettled({ userId: user._id, sessionId, symbol: t.symbol, horizon: null }, r) === 'handed'
             }
-            if (!r?.asked) return
+            if (!r?.asked) return false
             await sessions.append({ sessionId, userId: user._id, message: { agent: 'mentor', role: 'assistant', content: readWaitLine(t, r) } })
+            return false
         } catch (err) {
             logger.warn(LOG, 'read not asked for', { error: err.message })
+            return false
         }
     }
 
@@ -483,7 +516,8 @@ export function makeChainRunner({
      * pushed into a different trade, nor another desk's running chain taken over. False when the session is gone. Under the
  * session lock, like a turn.
      */
-    function readSettled(pending, read) { return lock(pending.sessionId, () => _readSettled(pending, read)) }
+    // Public: whether the read was taken (said or handed); askRead alone needs to know it was HANDED.
+    function readSettled(pending, read) { return lock(pending.sessionId, () => _readSettled(pending, read)).then(r => r !== false) }
 
     async function _readSettled(pending, read) {
         const user    = await loadUser(pending.userId)
@@ -504,8 +538,11 @@ export function makeChainRunner({
             kind: KIND.PROMETHEUS_READ, from: { agent: 'analyst', label: 'Prometheus' },
             items: [{ ticker: pending.symbol, horizon: pending.horizon, kind: read.kind ?? null, state: read.state, facts: read.facts ?? null, against: Boolean(read.against) }],
         })
+        // A deciding read is handed ONCE per session and name, however it came (CR 2026-11-12: a landed one was handed again
+        // by the next turn's askRead, which found it fresh — a second line and a second paid turn).
+        if (pending.horizon == null) keepBounded(handedDecide, `${pending.sessionId}|${pending.symbol}`)
         await hop({ user, session, chain: running ?? newChain('mentor'), art, from: 'analyst' })
-        return true
+        return 'handed'
     }
 
     /** At boot: every chain a restart cut off is PAUSED and its floor-holder asks (G4). */

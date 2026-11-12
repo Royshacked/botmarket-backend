@@ -334,20 +334,29 @@ services/
                               meaning is the desk's (actions/); an edit answering dropMarkers (Mentor's fresh
                               plan, 8b) clears editing / chainId instead of keeping them. `discard` is the pipe's
                               own (8e): unsaved work only (refused over an edit or a table with no work), the desk's
-                              settings kept (`cleanTable`), its chain ended, its turns set aside (putAside)
+                              settings kept (`cleanTable`), its chain ended, its turns set aside (putAside).
+                              `actHeld` (2026-11-12): the same press from a caller that ALREADY HOLDS the session lock
+                              (the chain runner's go after a turn) — no revision to name. A commit carrying
+                              `result.armed` ends the session "saved and armed … watching"
       actions/                <agent>.actions.js — each desk's commits from its agentState (never the client's
                               copy) through the shared commit service, and its hand edits (Mentor's draft, Atlas's adopt mode — staged under the lock); the contract (verbs generate / update /
-                              later + the desk's own, results { <kind>: doc }) is in mentor.actions.js
+                              later + the desk's own, results { <kind>: doc }) is in mentor.actions.js. Mentor's
+                              `generateArmed` (2026-11-12): generate, then arm — an arm refused leaves it saved
       markers.js · scannerMode.js   keepMarkers (editing / chainId survive a fold, an edit, Atlas's onRouted) ·
                               Argus's mode — fixed since 2026-11-09: the single pick for Mentor, whatever is passed
       context.js              buildConversation — what ONE agent reads: sealed context when editing, its
                               summary, its own segment (a hand-off to it reads as the user)
       sessionTurn.js          a desk turn against the session: append → context → run → reply → nextState →
-                              floor (entryOf on a route) → background summary fold. No HTTP until phase 5
+                              floor (entryOf on a route) → background summary fold. No HTTP until phase 5.
+                              A reply with NO words still gets its row: a `<show>` → showLine, a chart the turn drew
+                              (every desk's onChart, recorded here) → chartLine "Here's the NVDA daily chart." with the
+                              chart on the row (2026-11-12 — a chart-only reply was never saved, so the next ask
+                              "and SPY" got NVDA again)
       summarize.js            the rolling per-agent summary past the trimHistory high-water mark (Haiku 4.5,
                               booked to the user; failure changes nothing)
       turnLock.js · startTurn.js · turns.js   one turn at a time per session · accept a turn (202) and run it
-                              queued, stoppable, streamed · the turns + chain wired as one pair
+                              queued, stoppable, streamed · the turns + chain wired as one pair. sessionDepth
+                              (2026-11-12): turns queued or running — a carry never runs behind the user's newer turn
       entityLookup.js         the entity an edit reopens, owner-checked through its own service
       seal.js                 sealFromSession (Generate: turns move onto the entity, one sealed line) ·
                               putAside (dropped work's turns: the seal point and summary move past them, 8e) ·
@@ -361,7 +370,12 @@ services/
                           the build needs, said once with readWaitLine) and readSettled (the read handed to Mentor,
                           same name + horizon only, never over another desk's running chain); the `research` choice
                           on an Argus list went to archive/ 2026-11-09, so the `next` queue walk is dormant). Wired
-                          with the turns in desks/turns.js (onSleeveSettled, onReadSettled)
+                          with the turns in desks/turns.js (onSleeveSettled, onReadSettled, bindAct). 2026-11-12
+                          (argus-rework.md §2.2–2.3): `deskGo` — a desk's <go> (GO table: Mentor generateArmed, Atlas
+                          generate; the marked accounts or `go_pending`; Atlas needs the plan's capital) through
+                          act.actHeld; `carryOn` — a turn cut short by the tool budget queued again (MAX_CARRY 3, reset
+                          on a user turn); a FRESH deciding read handed to Mentor at once (askRead → _readSettled); a
+                          chain Mentor started on his own reads ends with no pause / decision cards
   agents/                 the 7 LLM desks (analyst · axl · mentor · portfolio · proteus · scanner ·
                           strategy). proteus (2026-11-12, docs/design/proteus.md): the technical analysis desk —
                           get_behaviour_profile first, the chart tools (vision ones model-only), SMC, consult last;
@@ -452,7 +466,8 @@ services/
   agentUtils.js           shared tool handlers, makePromptLoader, makeToolHandler,
                           formatMoney/buildAccountLines, stripEmitTags, runtime glue.
                           cleanReply (every desk's reply, stripped from the shared ALL_EMIT_TAGS,
-                          <ticker> unwrapped); normalizeMessages (the one history helper, depth per
+                          <ticker> unwrapped; dropDebris also drops a made-up capitals LABEL tag leading a line
+                          or as a <X>…</X> pair — Proteus's "<MEASURED>", 2026-11-12); normalizeMessages (the one history helper, depth per
                           desk via MAX_MESSAGES); openingTurn(text) — how a headless run opens a desk.
                           resolveAgentStream: the model for a turn. SINCE 2026-09-21 EVERY turn — any
                           user, the admin included, and a turn with no user (market brief, coverage
@@ -504,9 +519,13 @@ services/
   entryTimeGate.util.js  PURE entryTimeGate(entity) — is entry clock-gated, wholly or partly?
                           Lifted out of minos.monitor once marketOpen.monitor needed the same read.
                           Drives the market-closed exemption + the `off_hours` card note
+  bounded.util.js         keepBounded(coll, key, value?) — in-memory per-session keys (the runner's carry counts and
+                          handed reads, Mentor's experts' lines said) kept bounded, oldest out (2026-11-12)
   llmStream.util.js       createTagSuppressor({ onToken, captures }) + ALL_EMIT_TAGS — the ONE list
                           of tags suppressed from every agent's token stream. A new emit tag goes
-                          here first, or it leaks raw into the chat AND is never captured.
+                          here first, or it leaks raw into the chat AND is never captured. endsAsking(reply)
+                          (2026-11-12): a turn cut short by the budget is carried on only when it did NOT end on a
+                          question to the user.
                           Also the two cross-provider tool-loop constants: TOOL_BUDGET_LANDING (the
                           last round's note) and MAX_PARALLEL_TOOLS = 4 — how much of ONE round
                           actually runs at once. A round was Promise.all over every call the model
@@ -702,11 +721,11 @@ services/
                               sizePlan lays the size onto every leg (ONE implementation for the
                               size_position tool and the post-turn re-derivation); cashFit says
                               whether the position fits the deployable cash (a remark, never a cap).
-    mentorMode.service.js     MENTOR'S TWO MODES (2026-11-01, docs/design/mentor-modes.md): risk-based
-                              (`thesis`) when the user brought no setup, the user's setup when they
-                              did. The mode IS the ledger's lens; resolveMode = lens → seed (risk-based)
-                              → one Haiku read of a typed first message (makeSetupReader, SETUP/NONE;
-                              a failure = undecided → the whole kit). kitFor drops THESIS_DROPPED (the
+    mentorMode.service.js     MENTOR'S MODE — ONE WAY since 2026-11-12 (argus-rework.md §2.3): resolveMode gives
+                              `thesis` (source ledger / seed / one) — except a SAVED setup on its own older lens opened
+                              for an edit (`editing`), which keeps it (`user`, the whole kit; no restore loop). The Haiku
+                              setup read is DELETED; `switch_lens` is no longer read. History: two modes 2026-11-01
+                              (docs/design/mentor-modes.md). kitFor drops THESIS_DROPPED (the
                               pattern + indicator tools) and moves the tools-cache breakpoint.
     mentorBuild.util.js       THE BUILD LEDGER — Mentor's flow as server state (2026-09-28,
                               docs/design/mentor-flow-intent.md). PURE: no clock, no I/O, nothing
@@ -823,7 +842,8 @@ services/
                             memory, like the run. See docs/desks/roles-and-sourcing.md. HOUSE FIRST (houseFirst):
                             Pythia's long-term industries in the sector lead, found inside a 50-wide screen, up to
                             SLEEVE_HOUSE_MAX (6) of SLEEVE_HITS; the card counts them (argus-on-pythia.md §3.5)
-  aetherScheduler.service.js  The Node side of the Python aether-engine: spawns scripts/scheduler.py as a
+  aetherScheduler.service.js  AETHER_SCHEDULER=off (the laptop, Roy 2026-11-12) keeps the scheduler off on this host;
+                            discovery presses still run. The Node side of the Python aether-engine: spawns scripts/scheduler.py as a
                             child process when AETHER_ENGINE_PATH points at a checkout with a built venv
                             (a quiet no-op everywhere else — every deploy), bridging the Mongo connection
                             Node is ACTUALLY on into MONGO_URI/MONGO_DB and refusing to spawn when the db
@@ -868,7 +888,11 @@ services/
                             onRunSettled, settlePending hands a landed read to the runner's readSettled (onReadSettled).
                             readPending = the Generate gate; resumePending at boot
                             A covered name's OTHER horizon (two targets, stage 1): the main target answers its own
-                            book; else a <horizon_view> under 30 days; else need 'view'. Retired / watchlist → 'reinit'
+                            book; else a <horizon_view> under 30 days; else need 'view'. Retired / watchlist → 'reinit'.
+                            THE DECIDING READ (horizon null, 2026-11-12, argus-rework.md §2.3): no horizon settled →
+                            coverage on any book, fresh (freshness: researchedAt within FRESH_RESEARCH_DAYS 30 and no
+                            report since — lastReport) or re-researched ('reinit'); decisionRead adds the views and the
+                            research date. A day board's hand-off (claimed intraday / day) needs none.
   researchRun.service.js    headless Prometheus over the research queue, one name at a time, writes
                             the coverage. ONE run per process; onRunSettled(fn) is how sleeveSource (and mentorReads)
                             learns a run ended (and chains the next when its names were queued after
@@ -951,6 +975,9 @@ services/
                             boards merge into This week's day_list. No grade, free range, labeller, Argus read, wide
                             set or outcome log. Claimed (claimRun), paced (DAILY_SCREENER_RPM), a 429 retried then
                             partial. runDayBoard in the screener's tick; dayBoards / todayBoards / nextCheckpoint read
+                            2026-11-12: NO SPREAD GATE at 09:20 (the pre-market book is thin odd lots; the spread stays on
+                            the row). `dayFacts` / `dayLine` live here — Argus's list and hotlistSeed's `hd_` hand-off
+                            (a row builds with Mentor) read a name's line the same way
   (the day CHECKPOINT pass with grades and the day replay stay ARCHIVED — see archive/README.md)
   hotlist.columns.js        the hotlist's columns, PURE: the §2.1 gates per column, in play per column (§2.2,
                             §5), the overhead levels each counts, FREE RANGE to the nearest (% and × ATR;
@@ -1221,6 +1248,8 @@ providers/
                                 runs with tool_choice none and TOOL_BUDGET_LANDING (llmStream.util) on
                                 the final tool results, so a turn still reading at the cap lands as text
                                 instead of throwing the whole turn away. `client` is the test seam.
+                                `onBudgetSpent` (2026-11-12, both loops): called when the landing round runs — the desk
+                                marks the turn `cutShort` and the chain runner carries it on (argus-rework.md §2.2)
   openaiCompat.provider.js      THE ONE OpenAI-format read loop (2026-09-20) — how a non-Anthropic Talos
                                 CANDIDATE is read (assess.shared TALOS_MODELS, provider 'openai-compat').
                                 Same prompts, same tool kit and runner (makeAssessToolRunner), same

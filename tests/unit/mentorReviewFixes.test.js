@@ -280,8 +280,6 @@ test('the model is TOLD what was pressed, so it does not ask again', async () =>
     assert.match(text, /ALREADY RECORDS IT/)
     assert.match(text, /direction, horizon, lens are SETTLED/)
     assert.match(text, /NOTHING about a settled stage is outstanding/)
-    // The press answers the pacing question too — that is what the button means.
-    assert.match(text, /stop at the checkpoints/)
     assert.equal(_buildPressSection([]), '', 'and nothing is said when nothing was pressed')
     assert.ok(proposed.gate, 'the card has something to draw')
 })

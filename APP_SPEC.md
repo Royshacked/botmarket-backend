@@ -506,6 +506,55 @@ fundamentals, Mentor trades.
   validates with it; a read **against** the trade is said plainly and the user asked once — their call. While the read
   runs, **Generate is held**: readiness is dark and the press answers `read_pending` (409). A name read this way
   enters house coverage like any other.
+- **The 09:20 board has no spread gate** (2026-11-12): FMP's pre-market book is thin odd lots, and 0.05% failed every
+  name on its first live run. The spread stays on the row; price, dollar volume and ATR still gate.
+- **A day-board row builds with Mentor** (2026-11-12): the Intraday tab's row page hands the name on as an `hd_`
+  reference (board id + its checkpoint); `hotlistSeed` reads the board's line about the name back (`hotlist.day
+  dayFacts` — the same `dayLine` Argus's list uses) as an intraday hand-off.
+
+### Mentor, one way — the experts decide the trade, the user decides how much (2026-11-12)
+
+[docs/design/argus-rework.md](docs/design/argus-rework.md) §2.2–§2.3.
+
+- **One way to build, never named.** `mentorMode.resolveMode` always gives the one build (`trade_mode: "thesis"`,
+  internal); no lens, mode or "risk-based" in anything the user sees; no setup read of the user's words. Their own
+  LEVELS are talked through inside it; their own METHOD is Daedalus's (coming — Mentor says so).
+- **"Let's trade TSLA."** No direction or horizon is asked. The DECIDING read (`mentorReads`, horizon `null`):
+  Prometheus's coverage, re-researched first (the run's `reinit`) when its last full research is over 30 days old or a
+  report came out since; Proteus's measured profile (`behaviourProfile.service`, ≤ a week). The name comes from the
+  worksheet, the seed, or Mentor's own `<asset>` tag (a first reply has no worksheet). A fresh read is handed to Mentor
+  at once (`askRead` → `readSettled`); a missing one waits in line as before. Each expert posts one dated line. Mentor
+  says whether it is a LONG now (long only, for now) and on which horizon — which must fit the trade that can be built
+  (a day trade only when the entry can fill today). A read AGAINST the trade is a warning the user may override —
+  said in one line, never a question of its own (their three numbers are their yes).
+- **Three numbers, then their choice.** Position size, risk, R:R → `size_position` (does the account carry it) →
+  "all the way, or step by step?". The numbers settle the opening (the horizon checked against where their numbers put
+  the entry first); "all the way" alone hands Mentor the gates (`waiver`) — step by step keeps them the user's. Their numbers are the limits (risk ÷ size, the R:R) and the size. Defaults: A + B,
+  Mentor's `valid_until`, `on_away: revise`. Price over the max entry → built anyway, waiting at it; no price meets the
+  R:R → no setup.
+- **The go.** Mentor ends with `<go>{position_size, risk, rr}</go>`; the chain runner's `deskGo` presses
+  `generateArmed` through the commit pipe's HELD entry (`act.actHeld` — the turn already holds the session lock) with
+  the turn's marked accounts (or the ones kept while a read held it, `go_pending` — for THAT name only). Saved AND
+  armed; the session ends "saved and armed … watching" (`ref.armed` on the line). Saved but not armed → the new session
+  says why; a go that fails says so. Nothing reaches a broker: an armed setup's entry is still a card to confirm.
+  The go is said on the turn that completes the worksheet — CODE checks it; refused (something missing) → the reason
+  under the reply and the build carried back to Mentor to fix and go again (within the carry limit).
+- **Atlas** asks the mandate once (capital required — the go refuses without `positionSize`), builds straight through
+  (no sign-off, AVOID left out) and `<go>` generates the book (`generate`, the marked accounts); activating it stays the
+  user's press. A book they already hold: Atlas's `<adopt>` opens the adopt grid (as Axl's adopt hint does).
+- **Auto-continue.** A turn cut short by the tool budget (the provider's `onBudgetSpent`) is carried on by the runner
+  (`carryOn`): the same desk's next turn, queued, at most 3 in a row — reset only when the user speaks. Not when the
+  reply ended asking the user something (`endsAsking`), nor when the user's own turn is already queued.
+- **Each deciding read is handed to Mentor once** per session and name, fresh or landed; a hand-off ends the turn's
+  after-work (the new chain is not overwritten).
+- **No cards inside Mentor's own read chain** — no "paused" / "needs your call"; the chain just ends.
+- **The chat shows each thing once** (Roy, 2026-11-12: "hide all duplicates in all agents"): a hand-off row shows only
+  who passed the work to whom ("Prometheus → Mentor", "Mentor carries on") — its brief is the receiving desk's and stays
+  on the row for it and History. A reply that was only a chart gets one line naming it, so it survives a reload and the
+  desk knows what it already showed.
+- **Work panes show the entity being built**, with only the commit actions (Mentor: the setup + Generate / Discard,
+  Arm / Leave, Update / Later; Atlas: the book, thesis shown; Prometheus: the draft, always open). No chips, gate cards
+  or tables — Mentor asks in words.
 
 ### Proteus — how a stock trades (2026-11-12)
 

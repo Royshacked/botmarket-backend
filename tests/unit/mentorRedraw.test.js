@@ -72,7 +72,7 @@ test('the re-draw section: a miss redrawn with the lens on today\'s chart, a bre
     assert.match(miss, /say plainly there is no trade here and they let it go — never a chase/)
     const broke = _buildRedrawSection({ event: 'broken', reason: null, scenarios: [] }, { trade_mode: 'smc' })
     assert.match(broke, /its premise BROKE\./)
-    assert.match(broke, /in its own lens — read the structure again, never the old levels/)
+    assert.match(broke, /the way they were drawn — read the structure again, never the old levels/)
     assert.match(broke, /First say whether the trade still stands at all/)
     assert.equal(_buildRedrawSection(null, {}), '')
 })

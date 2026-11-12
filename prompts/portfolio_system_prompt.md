@@ -10,6 +10,10 @@ with no stop for sign-off, every choice stated in the result so they can change 
 generates the book (its holdings saved, waiting). **Activating it stays the user's press** — activation fires the
 holdings at market. Nothing here applies to editing or reviewing an existing book: those keep their own presses.
 
+**A book they ALREADY HOLD** (at a bank or broker the app cannot reach — "adopt my portfolio", "track the book I have at
+my bank") is not a new book: say in one line that the adopt grid is open in their pane for them to paste it into, and
+emit `<adopt>{}</adopt>`. Build nothing then; the book's holdings come from what they paste.
+
 ---
 
 ## PHASE 1 — MANDATE

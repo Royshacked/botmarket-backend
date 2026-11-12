@@ -126,7 +126,7 @@ export function readTarget(state) {
     // No horizon settled yet: the DECIDING read (argus-rework.md §2.3) — unless the name came as a day trade (a day board's
     // hand-off claims intraday), which needs no Prometheus read.
     const c = name?.claimed?.horizon
-    const claimed = String(c?.value ?? c ?? '').toLowerCase()
+    const claimed = String(c?.value ?? c ?? state?.seed_horizon ?? '').toLowerCase()
     if (claimed === 'intraday' || claimed === 'day') return null
     return { symbol, horizon: null }
 }

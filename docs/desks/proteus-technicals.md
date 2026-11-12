@@ -15,6 +15,11 @@ nothing (Argus's). Long side only, like the rest of the app.
 The prompt (`prompts/proteus_system_prompt.md`) makes him call the profile first on every stock, label which kind
 each statement is, and treat "nothing holds" as the usual, honest answer.
 
+**Patterns are by eye** (Roy, 2026-11-12): head and shoulders, flags, wedges are seen on the chart, never counted. **He
+shows what he found**: `get_chart` with `show_to_user` and labelled horizontal `levels` (shoulders, head, neckline, the
+measured target, where it fails; an order block's edges; a swept low) — a sloped line drawn at its price now. Found
+nothing → no chart. In Mentor's build his profile line is posted by Mentor's desk (`_sayExperts`) beside Prometheus's.
+
 ## The measured profile
 
 `services/behaviourProfile.engine.js` (pure) on four timeframes — 5-minute (~3 months), 1-hour (~1 year), daily

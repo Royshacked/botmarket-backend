@@ -280,7 +280,8 @@ test('the later stages keep the decisions that are theirs and not the model\'s',
     // The spans stage is about WHERE, and says so; the mechanics are the next stage's.
     assert.match(section, /a stage about WHERE, not how/)
     assert.match(section, /<spans>/, 'the candidates have an emit contract')
-    assert.match(section, /`get_chart` with `show_to_user: true`[\s\S]{0,60}`levels`/, 'and are drawn')
+    // The pane draws no table any more (CR 2026-11-12): the tag is the ledger's, the user hears it in words.
+    assert.match(section, /Record the trade in the tag — the ledger reads it, the user never sees it — and say it in words/)
     // The field that changes what the broker does, and the default that cannot add risk.
     assert.match(section, /`alternatives` \(the default\) means the first trigger to fire takes the WHOLE\s+position/)
     assert.match(section, /Never let a list of entries imply scaling/)
@@ -299,7 +300,7 @@ test('the later stages keep the decisions that are theirs and not the model\'s',
 
     // And the five sizing units live where sizing does.
     const sizing = PROMPT.slice(PROMPT.indexOf('## Size comes from the user'))
-    assert.match(sizing, /Ask which unit they think in, and take any of the five/)
+    assert.match(sizing, /goes in as `size_cash`\*\*[\s\S]{0,80}Never\s+ask which unit/)
     assert.match(sizing, /record it and let the server size it/)
     assert.match(sizing, /size_position\(\{"unit":"risk_pct","value":1\}\)/, 'the call has a shape the model can copy')
     // The figures come back in the SAME turn, and the fit check is the server's, not the model's.
@@ -337,8 +338,8 @@ test('their own LEVELS are talked through with Mentor; their own METHOD is Daeda
 })
 
 test('candidates are an explicit ask now — a walked build ends in one setup', () => {
-    assert.match(PROMPT, /## Offering candidates — only when they ask for options/)
-    assert.match(PROMPT, /A walked build does not reach for it on its own/)
+    assert.match(PROMPT, /## When they ask for options/)
+    assert.match(PROMPT, /say the options in words, ranked honestly, and build the one they pick: ONE `<setup>`/)
     assert.doesNotMatch(PROMPT, /When the user has no setup, offer a few/, 'the old default-to-candidates invariant is gone')
 })
 
@@ -490,8 +491,8 @@ test('the earnings DATE comes from get_earnings, not from a window that may excl
 })
 
 test('the model is told that some answers arrive already settled, by a press', () => {
-    assert.match(PROMPT, /Some answers arrive as a PRESS, already recorded/)
-    assert.match(PROMPT, /The `<build>` tag is for the answers that arrive as WORDS/)
+    assert.match(PROMPT, /Every answer arrives as WORDS/)
+    assert.match(PROMPT, /no press settles a stage/)
 })
 
 test('the document has one H1, and the beats are subsections of the opening turn', () => {
@@ -511,7 +512,7 @@ test('a user with no name is asked first, then sent to ARGUS, which hands the na
     // hand-over must name it.
     assert.match(PROMPT, /offer \*\*Argus\*\*, the picker/)
     assert.match(PROMPT, /`<route>scan<\/route>`/)
-    assert.match(PROMPT, /`<open>` that names the HORIZON/)
+    assert.match(PROMPT, /`<open>` carrying whatever they said \(a horizon only if they gave/)
     assert.doesNotMatch(PROMPT, /point them back to Axl/)
 })
 
@@ -541,7 +542,7 @@ test('the Generate gate knows about trigger entries and server-side sizing', () 
 
 test('"the tag is the move" is scoped to answers that arrive as words', () => {
     assert.match(PROMPT, /When the answer comes in WORDS, the tag is the move/)
-    assert.match(PROMPT, /Some answers arrive as a PRESS, already recorded/)
+    assert.match(PROMPT, /Every answer arrives as WORDS/)
 })
 
 test('the ledger section counts its own rules correctly', () => {

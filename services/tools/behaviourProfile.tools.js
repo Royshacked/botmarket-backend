@@ -57,13 +57,18 @@ export function timeframeLines(tf, t) {
     ]
 }
 
+/** What HOLDS across the timeframes, labelled — the one list formatProfile and profileBrief both say. Missing parts skip. Pure. */
+export function holdsOf(timeframes) {
+    return Object.entries(timeframes ?? {}).flatMap(([tf, t]) => (t ? [
+        ...Object.entries(t.indicators ?? {}).filter(([, s]) => s?.verdict === 'respects').map(([k]) => `${LABEL[k] ?? k} (${TF[tf].toLowerCase()})`),
+        ...(t.false_breaks?.after_sweep?.verdict === 'respects' ? [`sweeps of lows (${TF[tf].toLowerCase()})`] : []),
+        ...(t.order_blocks?.verdict === 'respects' ? [`order blocks (${TF[tf].toLowerCase()})`] : []),
+    ] : []))
+}
+
 /** The whole profile → the tool's text. Pure. */
 export function formatProfile(p) {
-    const holds = Object.entries(p.timeframes).flatMap(([tf, t]) => (t ? [
-        ...Object.entries(t.indicators).filter(([, s]) => s.verdict === 'respects').map(([k]) => `${LABEL[k] ?? k} (${TF[tf].toLowerCase()})`),
-        ...(t.false_breaks.after_sweep.verdict === 'respects' ? [`sweeps of lows (${TF[tf].toLowerCase()})`] : []),
-        ...(t.order_blocks.verdict === 'respects' ? [`order blocks (${TF[tf].toLowerCase()})`] : []),
-    ] : []))
+    const holds = holdsOf(p.timeframes)
     const fit = (v) => `${v.fits ? 'yes' : 'no'} — ${v.why}${v.edges.length ? ` (${v.edges.join(', ')})` : ''}`
     return [
         `${p.symbol} — measured behaviour profile, long side, computed ${String(p.computed_at ?? '').slice(0, 10)}.`,
@@ -82,11 +87,7 @@ export function formatProfile(p) {
  */
 export function profileBrief(p) {
     const tfs = p?.timeframes ?? {}
-    const holds = Object.entries(tfs).flatMap(([tf, t]) => (t ? [
-        ...Object.entries(t.indicators).filter(([, s]) => s.verdict === 'respects').map(([k]) => `${LABEL[k] ?? k} (${TF[tf].toLowerCase()})`),
-        ...(t.false_breaks.after_sweep.verdict === 'respects' ? [`sweeps of lows (${TF[tf].toLowerCase()})`] : []),
-        ...(t.order_blocks.verdict === 'respects' ? [`order blocks (${TF[tf].toLowerCase()})`] : []),
-    ] : []))
+    const holds = holdsOf(tfs)
     const d = tfs.day
     const fb = d?.false_breaks
     const fit = p?.suitability ? `day trade ${p.suitability.day_trade.fits ? 'yes' : 'no'}, swing ${p.suitability.swing.fits ? 'yes' : 'no'}` : null

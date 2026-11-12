@@ -5,6 +5,7 @@
 // Streams tokens / chart / status / coverage; the agent returns a DRAFT setup in `done`. Nothing
 // persists until the user presses Generate.
 
+import { keepBounded } from '../bounded.util.js'
 import { mentorAgentService, emptyMentorState } from '../agents/mentor.agent.service.js'
 import { parseClientTime } from '../../api/_shared/parse.util.js'
 import { sanitizeScanSeed } from '../scanSeed.util.js'
@@ -74,7 +75,7 @@ async function _proteusRead(state) {
     return p ? { symbol, at: p.computed_at ?? null, brief: profileBrief(p) } : null
 }
 
-// The experts' lines already in a session's chat, by `${sessionId}|${symbol}` — each says its read ONCE per name.
+// The experts' lines already in a session's chat, by `${sessionId}|${symbol}` — each says its read ONCE per name. Bounded.
 const _saidExperts = new Set()
 
 /**
@@ -90,7 +91,7 @@ async function _sayExperts({ sessionId, userId, read, proteus }) {
     const lines = []
     if (proteus?.brief) lines.push({ agent: 'proteus', content: `${symbol}, measured ${String(proteus.at ?? '').slice(0, 10)}: ${proteus.brief}` })
     if (!lines.length) return
-    _saidExperts.add(key)
+    keepBounded(_saidExperts, key)
     for (const l of lines) await sessionService.append({ sessionId, userId, message: { ...l, role: 'assistant' } }).catch(() => {})
 }
 
@@ -140,18 +141,26 @@ export function mentorNextState(prev, result, input = {}) {
     const draft = result.setup ?? prev?.draft ?? null
     // The pencil's offer stands until they take it (the ledger reopens): the turn that takes it needs what it says.
     const offer = prev?.redraw?.offer && draft?.build && stageOf(activeName(normalizeBuild(draft.build))) === null ? { redraw: prev.redraw } : {}
+    // The worksheet's name, else the seed's, else the one his reply was ON (its <asset> tag — a first reply on "let's
+    // trade TSLA" has no worksheet yet, and the experts' reads need the name: the TSLA drive, 2026-11-12).
+    const asset = String(draft?.asset || input.seed?.ticker || result.taggedAsset || prev?.active_asset || '')
+    const sameName = (a, b) => String(a ?? '').toUpperCase().trim() === String(b ?? '').toUpperCase().trim()
+    const seedHorizon = input.seed?.horizon && sameName(input.seed.ticker, asset) ? input.seed.horizon
+        : prev?.seed_horizon && sameName(prev.active_asset, asset) ? prev.seed_horizon : null
     return {
         ...offer,
-        // The worksheet's name, else the seed's, else the one his reply was ON (its <asset> tag — a first reply on "let's
-        // trade TSLA" has no worksheet yet, and the experts' reads need the name: the TSLA drive, 2026-11-12).
-        active_asset: draft?.asset || input.seed?.ticker || result.taggedAsset || prev?.active_asset || '',
+        active_asset: asset,
+        // A seed's horizon (a day board's name is an intraday trade), kept with ITS name: the read target needs no deciding
+        // read for a day trade even before Mentor writes the claim (mentorReads readTarget).
+        ...(seedHorizon ? { seed_horizon: seedHorizon } : {}),
         draft,
         coverage:     result.coverage ?? prev?.coverage ?? [],
         drafts:       result.drafts ?? {},
         // The user's position size, risk and R:R (argus-rework.md §2.2), KEPT — a redraw or a later turn reads them
         // here, never from the chat. A go held for a read keeps the accounts it was asked with (`go_pending`, runner).
         ...(result.go ?? prev?.risk_plan ? { risk_plan: result.go ?? prev.risk_plan } : {}),
-        ...(prev?.go_pending ? { go_pending: prev.go_pending } : {}),
+        // …for THAT name only: a go held for TSLA never generates another name on its accounts (CR 2026-11-12).
+        ...(prev?.go_pending && (prev.go_pending.symbol ?? null) === (asset.toUpperCase().trim() || null) ? { go_pending: prev.go_pending } : {}),
         view: {
             gate:      result.gate ?? null,
             readiness: result.setup ? (result.readiness ?? null) : (prev?.view?.readiness ?? null),
@@ -286,6 +295,13 @@ export const mentorDesk = {
         const read = await _prometheusRead(state, sessionId)
         const proteus = await _proteusRead(state)
         await _sayExperts({ sessionId, userId: common.userId, read, proteus })
+        // A go HELD for a read (runner deskGo, `go_pending`) kept the accounts it was asked with. The chain turn the read's
+        // landing runs carries none of its own — so this turn's readiness counts THOSE, for that name only, or it reads
+        // "no trading account" and the held go never comes back (the TSLA drive, 2026-11-12).
+        const held = state?.go_pending
+        const heldOn = held?.accounts?.length && String(held.symbol ?? '') === String(state?.active_asset ?? '').toUpperCase().trim()
+        const accounts = input.accounts?.length ? input.accounts : (heldOn ? held.accounts : [])
+        const mainAccountId = input.accounts?.length ? (input.mainAccountId ?? null) : (heldOn ? held.mainAccountId ?? null : input.mainAccountId ?? null)
         return mentorAgentService.chatStream({
         ...common,
         prometheusRead: read,
@@ -295,8 +311,8 @@ export const mentorDesk = {
         // `ops` — what a card press decided — is ONE-SHOT: it rides this turn only. The HTTP client puts
         // it inside its chatState; a session turn hands it in as input.
         chatState:     input.ops ? { ...(state ?? emptyMentorState()), ops: input.ops } : (state ?? emptyMentorState()),
-        accounts:      input.accounts ?? [],
-        mainAccountId: input.mainAccountId ?? null,
+        accounts,
+        mainAccountId,
         clientTime:    input.clientTime ?? null,
         seed:          input.seed ?? null,
         onAsset:     (symbol)   => emit('asset',     { symbol }),

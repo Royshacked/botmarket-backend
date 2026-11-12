@@ -47,3 +47,10 @@ test('a stray bracketed token goes — at the start, on its own line, or between
     for (const keep of ['RSI <30 and > 70 is the band.', 'Rotation: XLE <-> XLK.', 'Use <b>bold</b> sparingly.', 'Long <NVDA> into earnings.'])
         assert.equal(dropDebris(keep), keep)
 })
+
+test('a made-up capital LABEL TAG never reaches the UI (Proteus, 2026-11-12: "<MEASURED> NVDA has…")', () => {
+    assert.equal(cleanReply('<MEASURED> NVDA has no proven level.\n\n<TODAY> It closed at $163.88.'), 'NVDA has no proven level.\n\nIt closed at $163.88.')
+    assert.equal(dropDebris('Seen <TODAY>now</TODAY>.'), 'Seen now.')
+    // Not a label tag: lowercase, numbers, arrows and a ticker in prose stay as written.
+    assert.equal(dropDebris('Risk <5% and a <-> b, <ticker>NVDA</ticker>'), 'Risk <5% and a <-> b, <ticker>NVDA</ticker>')
+})

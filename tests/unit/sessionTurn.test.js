@@ -292,3 +292,31 @@ test('a Stop with nothing finished keeps the state, as it always did', async () 
     assert.equal(after.agentState.mentor.editing.entityId, 'st1')
 })
 
+
+test('a reply that was ONLY a chart gets its row — the chart on it and one line naming it — so the next turn knows (2026-11-12)', async () => {
+    const asks = []
+    const { turn, sessions, seen } = rig({ run: (ctx) => {
+        asks.push(ctx.common.messages.map(m => `${m.role}:${m.content}`))
+        const want = ctx.common.messages.at(-1).content.includes('SPY') ? 'SPY' : 'NVDA'
+        ctx.common.onChart?.({ symbol: want, timeframe: 'day', live: true })
+        return { reply: '' }   // the chart tag was the whole reply
+    } })
+    const s = await sessions.getActive({ userId: 'u1' })
+    await turn({ user, sessionId: s.sessionId, agent: 'mentor', text: 'show NVDA daily' })
+    await turn({ user, sessionId: s.sessionId, agent: 'mentor', text: 'and SPY daily' })
+    const all = await sessions.messagesSince({ sessionId: s.sessionId, userId: 'u1' })
+    assert.deepEqual(all.map(m => m.content), ['show NVDA daily', "Here's the NVDA daily chart.", 'and SPY daily', "Here's the SPY daily chart."])
+    assert.deepEqual(all[1].ref, { chart: { ticker: 'NVDA', timeframe: 'day' } })
+    // The second turn SAW that NVDA was already shown — not two asks in a row.
+    assert.deepEqual(asks[1], ['user:show NVDA daily', "assistant:Here's the NVDA daily chart.", 'user:and SPY daily'])
+    assert.equal(seen.length, 2)
+})
+
+test('a reply WITH words keeps exactly what it had — no chart added to its row from what the turn drew', async () => {
+    const { turn, sessions } = rig({ run: (ctx) => { ctx.common.onChart?.({ symbol: 'TSLA', timeframe: 'day' }); return { reply: 'The plan, with its chart below.' } } })
+    const s = await sessions.getActive({ userId: 'u1' })
+    await turn({ user, sessionId: s.sessionId, agent: 'mentor', text: 'build it' })
+    const [, reply] = await sessions.messagesSince({ sessionId: s.sessionId, userId: 'u1' })
+    assert.equal(reply.content, 'The plan, with its chart below.')
+    assert.equal(reply.ref ?? null, null)
+})

@@ -75,7 +75,7 @@ export function makeAct({ sessions = sessionService, desks = DESK_DEFS, sealing 
         await sessions.append({ sessionId: next.sessionId, userId: user._id, message: {
             agent: 'axl', role: 'assistant', kind: 'sealed',
             content: `✓ ${sealLabel({ agent, kind: seal.kind, ids, name: seal.name ?? null })} — saved${armed ? ' and armed' : ''}${WHERE[seal.kind] ?? ''}${armed ? ', watching' : ''}. You're back with Axl.`,
-            ref: { kind: seal.kind, ids, ended: true },
+            ref: { kind: seal.kind, ids, ended: true, ...(armed ? { armed: true } : {}) },
         } })
         return next.sessionId
     }
@@ -163,6 +163,12 @@ export function makeAct({ sessions = sessionService, desks = DESK_DEFS, sealing 
             ? await endAfterCommit({ user, session: opened.session, agent: sealAgent, seal: out.seal, armed: out.result?.armed === true })
                 .catch(err => { logger.warn(LOG, 'ending the session after a commit failed (the entity is saved)', err.message); return null })
             : null
+        // The session did NOT end after all: the state the desk left must stand, or the saved draft stays on the table and
+        // the next press saves it twice (CR 2026-11-12).
+        if (ending && !next && out.after !== undefined) {
+            await sessions.setAgentState({ sessionId, userId: user._id, agent, state: out.after })
+                .catch(err => logger.error(LOG, 'state write after a commit failed (the entity is saved)', { agent, action, error: err.message }))
+        }
         return { result: { ...(out.result ?? {}), ...(next ? { nextSessionId: next } : {}) }, rev: revNow }
     }
 

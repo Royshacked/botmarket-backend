@@ -4,7 +4,7 @@ import { dirname, join } from 'path'
 import { makePromptLoader, cleanReply, buildAccountLines, buildTimeSection, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, BREVITY_RULE, VENUE_RULE, cachedBlock, normalizeMessages, makeToolHandler } from '../agentUtils.js'
 import { makeNewsHandlers } from '../tools/news.tools.js'
 import { getAnalystActions } from '../../providers/fmp.provider.js'
-import { buildTagCaptures } from '../llmStream.util.js'
+import { buildTagCaptures, endsAsking } from '../llmStream.util.js'
 import { DESKS } from '../desks/registry.js'
 import { makeRouteCapture, buildRouteRule } from '../routing.util.js'
 import { TRADING_TOOLS, buildTradingToolHandlers } from '../tools/trading.tools.js'
@@ -24,7 +24,7 @@ import {
     activeName, nameFor, stageOf, firstUnsettled, isWaived, STAGES,
 } from '../mentorBuild.util.js'
 import { readTarget } from '../mentorReads.service.js'
-import { resolveMode, readSetup, kitFor, handlersFor, lensOf as lensOfName, MODE_THESIS, MODE_USER } from '../mentorMode.service.js'
+import { resolveMode, kitFor, handlersFor, lensOf as lensOfName, MODE_THESIS, MODE_USER } from '../mentorMode.service.js'
 import { logger } from '../logger.service.js'
 import { setupService } from '../../api/setups/setups.service.js'
 import { setupCommit } from '../../api/setups/setupCommit.service.js'
@@ -133,7 +133,6 @@ async function chatStream({
     _newsHandlers = makeNewsHandlers,
     _analystActions = getAnalystActions,
     _flipHandler = makeFlipHandler,   // the blinded red-team, injectable so the stamp below is testable without a model call
-    _readSetup = readSetup,           // the cheap "did they bring a setup?" read on a typed first turn (mentorMode.service)
     _thesisFacts = thesisTurnFacts,   // the chart's stops, normal move and break scenario, read for a thesis trade at entries
     _listSetups = setupService.listSetups,   // the setups on this account that have not filled yet
     _closeSetup = setupCommit.closeSetup,    // a saved setup the user decided to close
@@ -234,13 +233,10 @@ async function chatStream({
     if (incoming.refused.length) logger.warn(LOG, 'a press was refused — the client offered something the ledger will not take', { refused: incoming.refused })
     const turnState = { ...chatState, build: incoming.build }
 
-    // THE MODE, BEFORE THE TURN (docs/design/mentor-modes.md): the kit is picked before the model reads a word, so the
-    // mode comes from the ledger's lens, a seed (no setup of the user's — risk-based), or one cheap read of a typed
-    // first message. Undecided (the read failed) = the whole kit, and the prompt's rule decides.
-    // The read and the venue are independent I/O, so they run together: the read must not delay the first token by
-    // a round trip of its own.
+    // THE MODE, BEFORE THE TURN (mentorMode.service): the kit is picked before the model reads a word. The one way for
+    // every new build; a saved setup being edited keeps its own lens (and the whole kit). Independent I/O runs together.
     const [{ mode, source: modeSource }, venue, thesisFacts, waiting] = await Promise.all([
-        resolveMode({ name: activeName(incoming.build), seed, messages, userId, signal, read: _readSetup }),
+        resolveMode({ name: activeName(incoming.build), seed, editing: chatState?.editing?.kind === 'setup' }),
         _venueSection(userId),
         _readThesisFacts(turnState, _thesisFacts, { signal }),
         turnState?.draft?.summary?.lossCash != null ? readWaiting() : null,
@@ -568,7 +564,8 @@ async function chatStream({
         // Done — generate and arm it (argus-rework.md §2.2). CODE decides whether it may (the chain runner's go step).
         ...(go ? { go } : {}),
         // Stopped because the tool budget ran out, not because it was done — the runner carries it on.
-        ...(cutShort && !go ? { cutShort: true } : {}),
+        // …and not when its landing round asked the user something (endsAsking): then it waits on them, not on a carry.
+        ...(cutShort && !go && !endsAsking(reply) ? { cutShort: true } : {}),
         ...(taggedAsset ? { taggedAsset } : {}),
         ...route.result(),   // { route, routeSymbol, opening, edit } — the controller validates
     }
@@ -776,7 +773,7 @@ PROMETHEUS'S READ on ${read.symbol} (his coverage — to DECIDE the trade): ${re
         return `
 
 PROMETHEUS'S READ on ${on} is AGAINST it (${what}): ${read.facts}
-  If you have not said so yet, say it plainly in one line and ask the user ONCE whether to build anyway. It is their call: build if they say so, and do not ask again.`
+  If you have not said so yet, say it plainly in one line, as a WARNING they may override (Roy, 2026-11-12) — never a question of its own: the trade's one question stands (their three numbers). Their numbers are their yes; do not ask again.`
     }
     if (read.state === 'ready') {
         return `
@@ -810,11 +807,15 @@ PROMETHEUS'S READ on ${on} could not be checked just now. If it matters to the u
  */
 export function _buildProteusSection(p) {
     if (!p?.brief || !p.symbol) return ''
+    // The sweep-depth rule only when his line carries one (profileBrief: "sweeps … median … p80"): a brief with no false
+    // breaks measured has no depth to keep the stop under (CR 2026-11-12).
+    const sweep = /sweeps ~/.test(p.brief)
+        ? ' a stop just under a swing low sits inside the sweep depth he measured — use it for the stop\'s room.'
+        : ' he measured no sweep depth on this name, so the stop\'s room comes from the structure and the ATR.'
     return `
 
 PROTEUS'S READ on ${p.symbol} (measured ${String(p.at ?? '').slice(0, 10) || 'this week'}): ${p.brief}
-  His numbers, not yours: a stop just under a swing low sits inside the sweep depth he measured — use it for the stop's
-  room. Name him in one line when you say the horizon or set the stop.`
+  His numbers, not yours:${sweep} Name him in one line when you say the horizon or set the stop.`
 }
 
 /**
@@ -886,7 +887,7 @@ export function _buildTurnContext(chatState, clientTime = null, justSettled = []
     // had already answered.
     return `---
 ${buildTimeSection(clientTime, 'active_from / valid_until')}
-COVERAGE SO FAR: ${covered}. Re-state these in every <coverage> tag plus anything new you read this turn.${draft}${_buildMoneySection(chatState?.draft, waitingLine)}${_buildGenerateSection(chatState, hasAccount)}${_buildModeSection(mode)}${_buildRedrawSection(chatState?.redraw, chatState?.draft)}${_buildTargetSection(thesisFacts, chatState?.draft)}${_buildRiskReadSection(thesisFacts, chatState?.draft, { redraw: !!chatState?.redraw?.event && !chatState.redraw.offer })}${_buildBreakSection(thesisFacts, chatState?.draft, { redraw: !!chatState?.redraw?.event && !chatState.redraw.offer })}${_buildLedgerSection(chatState)}${_buildPressSection(justSettled, chatState, delegated)}`
+COVERAGE SO FAR: ${covered}. Re-state these in every <coverage> tag plus anything new you read this turn.${draft}${_buildMoneySection(chatState?.draft, waitingLine)}${_buildGenerateSection(chatState, hasAccount)}${_buildModeSection(mode, lensOfName(activeName(normalizeBuild(chatState?.build ?? chatState?.draft?.build))))}${_buildRedrawSection(chatState?.redraw, chatState?.draft)}${_buildTargetSection(thesisFacts, chatState?.draft)}${_buildRiskReadSection(thesisFacts, chatState?.draft, { redraw: !!chatState?.redraw?.event && !chatState.redraw.offer })}${_buildBreakSection(thesisFacts, chatState?.draft, { redraw: !!chatState?.redraw?.event && !chatState.redraw.offer })}${_buildLedgerSection(chatState)}${_buildPressSection(justSettled, chatState, delegated)}`
 }
 
 /**
@@ -910,7 +911,7 @@ export function _buildRedrawSection(redraw, draft) {
             : `its premise BROKE${which}${redraw.reason ? ` — ${redraw.reason}` : ''}.`
     const how = draft?.trade_mode === 'thesis'
         ? 'Redraw it on TODAY\'s chart the one way (§ How you build every trade, step 9): read get_price_structure, the stop under the NEW higher low, the target read again, the user\'s same risk limit and minimum reward to risk (from the conversation — ask once if they are not in it), the new level from get_entry_level, a new validity range. A scenario that waits on a break takes its line and its assumed stop from THE BREAK SCENARIO below instead, and a new arm_close.'
-        : 'Redraw its levels on TODAY\'s chart, in its own lens — read the structure again, never the old levels.'
+        : 'Redraw its levels on TODAY\'s chart, the way they were drawn — read the structure again, never the old levels.'
     // EVERY scenario on the worksheet is from the old chart (CR: the old B rode into the regenerate unexamined — with
     // two scenarios the break section stays silent).
     const all = (draft?.scenarios?.length ?? 0) > 1
@@ -1056,7 +1057,7 @@ export function _buildRiskReadSection(facts, draft, { redraw = false } = {}) {
         .map(([name, p]) => sg * (p - facts.close) >= 0 ? `${name} ${p} is already crossed at today's ${facts.close}, so give no distance for it` : `${name} ${p} is ${_distance(facts.close, p)} from today's ${facts.close}${_atrs(facts.close, p, facts.atr) != null ? ` — ${_atrs(facts.close, p, facts.atr)} normal ${unit} (ATR ${facts.atr})` : ''}`)
     if (!said.length) return ''
     // THE NUMBERS, never this line's name (drive 12: "the risk read measured these stops from $210.88", and no % at all).
-    return `\n\nTHE RISK READ (step 5) — SAY IT with the result (their limits come from the ONE question: risk ÷ position size, and their R:R — never ask for limits), in the user's words with these numbers (each stop's dollars, its % and its normal ${unit}) — never call it "the risk read": ${said.join('; ')}. From that, your read of what kind of limit gets in near today's price and what kind waits for a deep pullback toward the stop — judgment, no fixed menu; any level you name comes from get_entry_level.${redraw ? '' : ' The stop and the target must be on the worksheet\'s scenario on the turn you give the result: the chat draws them on a chart under your reply. Say "the chart below"; get_chart does not put a picture in the chat.'} Say it once.`
+    return `\n\nTHE RISK READ (step 5) — SAY IT with the result (their limits come from the ONE question: risk ÷ position size, and their R:R — never ask for limits), in the user's words with these numbers (each stop's dollars, its % and its normal ${unit}) — never call it "the risk read": ${said.join('; ')}. From that, say where THEIR limits put the entry — near today's price, or waiting on a deep pullback toward the stop; the level itself comes from get_entry_level.${redraw ? '' : ' The stop and the target must be on the worksheet\'s scenario on the turn you give the result: the chat draws them on a chart under your reply. Say "the chart below"; get_chart does not put a picture in the chat.'} Say it once.`
 }
 
 /**
@@ -1102,7 +1103,7 @@ export function _buildBreakSection(facts, draft, { redraw = false } = {}) {
         lines.push(`  ${Number.isFinite(onSheet) ? "The worksheet's stop" : 'The structure stop'} ${aStop} is ${short ? 'over' : 'under'} B's: the break CHANGES THE STOP, so B is ${onOffer} — one bullet: its arming line, its assumed stop, and that its stop is ${short ? 'lower' : 'higher'} than A's. Take BOTH — the default (§ How a trade goes), no question: the first to fill takes the whole size and the other is cancelled; say so once, and that one word from them drops either. Once they dropped one, leave it.`)
     }
     if (regularOff || changes) {
-        lines.push('  On a redraw where they choose again, the turn you ask A, B or both emits <scenario_offer> with the numbers you offer, so their pane shows the choice. A new risk-based build asks nothing: no <scenario_offer>.')
+        lines.push('  A new build asks nothing about A and B: the default stands, said in words. On a redraw where they choose again, ask in words.')
         if (b.floor != null) lines.push(`  When B goes on, it carries \`arm_close\` ${arm} and \`arm_floor\` ${b.floor}.`)
         lines.push(`  B's ENTRY is get_entry_level on B's stop ${b.stop}, B's target and their limits — never an R:R of your own. Level ${short ? 'at or under' : 'at or over'} ${arm}: the break price fits their limits, so the break IS the entry (the level and ${short ? 'above' : 'below'}, armed by the close). Level ${short ? 'over' : 'under'} ${arm}: B waits for a pullback to the level after the break. Both are B — say which, never "does not fit" for a level ${short ? 'over' : 'under'} the line.`)
     } else {
@@ -1120,18 +1121,17 @@ export function _buildBreakSection(facts, draft, { redraw = false } = {}) {
  * risk-based kit does not carry. `undefined` = the caller did not say (tests, old callers) → nothing; `null` =
  * undecided (the read failed) → the prompt's rule decides. PURE.
  */
-export function _buildModeSection(mode) {
+export function _buildModeSection(mode, lens = null) {
     if (mode === undefined) return ''
-    if (mode === MODE_THESIS) {
-        // ONE WAY (argus-rework.md §2.3): no mode to name, no switch to offer.
-        return '\n\nBUILD: the one way (§ How you build every trade) — `trade_mode: "thesis"` on your worksheet, an internal field: never say it,'
-            + ' nor "lens", "risk-based" or "mode". Their own LEVELS are talked through inside it; their own METHOD is Daedalus\'s, coming (§ How a trade goes).'
+    if (mode === MODE_USER && lens && lens !== MODE_THESIS) {
+        // A SAVED setup built before the one way, on its own lens (mentorMode.resolveMode): revised on the terms it was drawn on.
+        return `\n\nBUILD: this saved setup was built on its own terms — keep \`trade_mode: "${lens}"\` on your worksheet, never change it,`
+            + ' and revise its levels the way they were drawn (its pattern and indicator tools are in your kit). An internal field: never say it,'
+            + ' nor "lens" or "mode". A NEW trade is the one way (§ How you build every trade).'
     }
-    if (mode === MODE_USER) {
-        // Unreachable since the one way (resolveMode always gives MODE_THESIS) — the same line, should an old caller pass it.
-        return _buildModeSection(MODE_THESIS)
-    }
-    return _buildModeSection(MODE_THESIS)
+    // ONE WAY (argus-rework.md §2.3): no mode to name, no switch to offer.
+    return '\n\nBUILD: the one way (§ How you build every trade) — `trade_mode: "thesis"` on your worksheet, an internal field: never say it,'
+        + ' nor "lens", "risk-based" or "mode". Their own LEVELS are talked through inside it; their own METHOD is Daedalus\'s, coming (§ How a trade goes).'
 }
 
 /**
@@ -1155,9 +1155,9 @@ export function _buildGenerateSection(chatState, hasAccount = null) {
     if (!plan) return ''
     const r = setupReadiness(plan, hasAccount)
     if (r.ready) {
-        return '\n\nGENERATE: the button is LIT. The plan can be saved by pressing it, now. If the user asks to generate,'
-            + ' tell them to press it — never say it is not ready, and never ask them to confirm anything first.'
-            + ' A NEW build: once their three numbers are in and they chose all the way (or said a step-by-step build is right), end with <go> instead (§ How a trade goes) — the app generates and arms it.'
+        return '\n\nGENERATE: the plan is READY to save — never say it is not, and never ask them to confirm anything first.'
+            + ' A NEW build: once their three numbers are in and they chose all the way (or said a step-by-step build is right), end with <go> (§ How a trade goes) — the app generates and arms it; never tell them to press anything.'
+            + ' An EDIT or a redraw of a saved setup: their Update press saves it — tell them to press it when they ask.'
             + ' Anything you still want to raise is a remark, not a condition.'
     }
     const build = normalizeBuild(chatState?.build ?? draft.build)
@@ -1183,12 +1183,6 @@ export function _buildPressSection(justSettled = [], chatState = null, delegated
 
     const confirmed = justSettled.filter(f => !delegated.some(stage => STAGES.find(s => s.key === stage)?.fields.includes(f)))
     if (confirmed.length) lines.push(`  ${confirmed.join(', ')} are SETTLED, as they confirmed.`)
-    // The pacing answer rides the opening confirm only — said after any other press it was noise.
-    if (['direction', 'horizon', 'lens'].some(f => confirmed.includes(f))) {
-        lines.push(`  They answered the pacing question by pressing it too: ${build.waiver
-            ? 'run all the way to sizing, so do not stop at the two gates.'
-            : 'stop at the checkpoints, so show them each gate as you reach it.'}`)
-    }
     for (const stage of delegated) {
         const fields = STAGES.find(s => s.key === stage)?.fields ?? []
         const picked = fields.map(f => name?.settled?.[f]).filter(v => v != null)
@@ -1285,6 +1279,7 @@ export function _buildLedgerSection(chatState) {
         // front of it. Nothing here is left to work out — the next move is theirs, then yours.
         lines.push(`  YOU ARE AT: ${at.stage} — ALREADY PROPOSED, AWAITING THEIR ANSWER: ${at.fields.join(', ')}.`)
         lines.push('  You put these to the user last turn. Their message IS the answer:')
+        if (at.stage === 'opening') lines.push('    - they gave their three numbers → that IS their yes: settle (no waiver yet), size it, and ask all the way or step by step (§ Beat two).')
         lines.push(`    - they agreed → settle it now: <build>{"settle":[${at.fields.map(f => `"${f}"`).join(',')}],"source":"user"}</build>`)
         lines.push('    - they changed one → claim the new value in the same tag, then settle.')
         if (handBack) lines.push(handBack)

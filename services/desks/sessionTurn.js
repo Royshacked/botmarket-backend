@@ -64,6 +64,21 @@ const LIST_LINES = Object.freeze({
     positions: "Here are your positions.", board: "Here's Pythia's forecast board.", research: "Here's the research queue.",
 })
 
+const TIMEFRAME_WORD = Object.freeze({ day: 'daily', week: 'weekly', month: 'monthly', '1day': 'daily', '1week': 'weekly' })
+
+/**
+ * A reply that was ONLY a chart still gets a row: one plain line naming it ("Here's the NVDA daily chart."), so the chart
+ * comes back on a reload and the agent's memory knows which chart it already showed. Null when there is no chart. Exported
+ * for tests.
+ */
+export function chartLine(chart) {
+    const ticker = String(chart?.ticker ?? '').trim()
+    if (!ticker) return null
+    const tf = String(chart.timeframe ?? '').trim()
+    const word = TIMEFRAME_WORD[tf] ?? (tf ? tf : '')
+    return `Here's the ${ticker}${word ? ` ${word}` : ''} chart.`
+}
+
 /**
  * A reply that was ONLY a `<show>` still offers its button, so it gets a row — one plain line saying what it
  * offers (the agent's memory then knows it offered it, too). Null when there is no show. Exported for tests.
@@ -159,6 +174,14 @@ export function makeSessionTurn({
             messages: buildConversation({ messages: messages ?? [], agent, summary, sealed }),
             model, user, audience: await experience(user._id).catch(() => null), signal, emit,
         })
+        // The chart this turn put in the chat, whichever desk drew it (the one onChart every desk is handed) — so a reply
+        // that was ONLY a chart still gets its row (chartLine below) and the desk remembers it showed it.
+        let shownChart = null
+        const deskOnChart = common.onChart
+        common.onChart = (row) => {
+            if (row?.symbol) shownChart = { ticker: row.symbol, timeframe: row.timeframe ?? null }
+            return deskOnChart?.(row)
+        }
 
         // A TURN THAT FINISHED THE ITEM IT WAS EDITING (a setup closed in the chat): its conversation goes onto the item,
         // and the desk's next work starts clean. A failure never undoes what the turn did.
@@ -195,8 +218,12 @@ export function makeSessionTurn({
 
         // A reply that was only tags (a card, a route) has no prose to keep — the state still moves. One with
         // prose keeps what it offered beside it (its tap options, chart, "show me"), so a reload still has them.
-        const extras  = replyExtras(payload)
-        const prose   = result.reply?.trim() ? result.reply : showLine(extras?.show)
+        // A reply with NO words that showed a chart keeps the chart on its row and one line naming it (Roy, 2026-11-12:
+        // "show NVDA daily", then "and SPY daily" got NVDA again — the chart-only reply was never saved, so the desk's next
+        // turn saw two asks in a row and answered the first). A reply with prose is unchanged.
+        const wordless = !result.reply?.trim()
+        const extras  = replyExtras(wordless && !payload.chart && shownChart ? { ...payload, chart: shownChart } : payload)
+        const prose   = result.reply?.trim() ? result.reply : (showLine(extras?.show) ?? chartLine(extras?.chart))
         const replied = prose
             ? await sessions.append({ sessionId, userId: user._id, message: { agent, role: 'assistant', content: prose, ref: extras } })
             : null

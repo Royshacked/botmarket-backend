@@ -212,8 +212,8 @@ test('the lens prompt: the deeper stop is OFFERED with its cost and its date, ne
 
 test('the lens prompt: the break scenario is offered on every build with an assumed stop; the user takes A, B or both (Roy, 2026-11-04)', () => {
     const lens = _lens()
-    assert.match(lens, /The break scenario — OFFER it on every build, never set it unasked/)
-    assert.match(lens, /The user takes \*\*A, B or both\*\*/)
+    assert.match(lens, /The break scenario — on every build where there is one/)
+    assert.match(lens, /Both go on; the\s+user may drop either, in words/)
     assert.match(lens, /\*\*B's stop is ASSUMED\*\*/)
     assert.doesNotMatch(lens, /No higher low printed → no B/, 'the higher low has not printed by design')
     assert.match(lens, /The break would CHANGE THE STOP when B's\s+stop sits clearly over A's/, 'Roy: B only when the break moves the stop')
@@ -367,9 +367,11 @@ test('the break section: a regular stop price has gone through leaves B as the o
     assert.doesNotMatch(_buildBreakSection(FACTS, ON(178.81)), /regular scenario is OFF/, 'the price over the stop: the regular scenario stands')
 })
 
-test('the lens prompt: the numbers offered are the numbers built; no default of Mentor\'s own for the runaway answer', () => {
+test('the lens prompt: the numbers offered are the numbers built; the runaway answer is revise on a new build, never asked (2026-11-12)', () => {
     assert.match(_lens(), /The\s+numbers you offer are the ones you build/)
-    assert.match(readFileSync(new URL('../../prompts/mentor_system_prompt.md', import.meta.url), 'utf8'), /Never announce a default of your own/)
+    const p = readFileSync(new URL('../../prompts/mentor_system_prompt.md', import.meta.url), 'utf8')
+    assert.match(p, /On a new build it is always `revise`/)
+    assert.doesNotMatch(p, /Never announce a default of your own/)
 })
 
 test('the break section: no structure stop is not a stop of 0 (code review)', () => {
@@ -468,7 +470,7 @@ test('the risk read: each stop\'s distance in % and in normal moves, said with t
     assert.match(text, /SAY IT with the result \(their limits come from the ONE question: risk ÷ position size, and their R:R — never ask for limits\)/)
     assert.match(text, /the structure stop 178\.81 is \$23\.23 \(11\.5%\) from today's 202\.04 — 2\.6 normal days \(ATR 9\.1\)/)
     assert.match(text, /the deep stop 171\.06 is \$30\.98 \(15\.3%\) from today's 202\.04 — 3\.4 normal days/)
-    assert.match(text, /judgment, no fixed menu; any level you name comes from get_entry_level/)
+    assert.match(text, /say where THEIR limits put the entry[\s\S]*the level itself comes from get_entry_level/)
     assert.doesNotMatch(text, /worksheet's stop/, 'the worksheet on a candidate stop is not said twice')
     assert.match(_buildRiskReadSection(FACTS, ON(175)), /the worksheet's stop 175 is \$27\.04 \(13\.4%\)/)
     assert.match(_buildRiskReadSection({ ...FACTS, timeframe: 'week' }, null), /normal weeks/)
@@ -570,7 +572,6 @@ test('the break edge is asked in the user\'s words, with the away edge, never as
     assert.match(v, /Ask it in their words, never the field names/)
     assert.match(v, /want a ping to redraw it, close it, or just a heads-up\?/)
     assert.match(v, /Nothing redraws by itself/)
-    assert.match(v, /One question for both edges/)
     assert.match(_lens(), /The break edge is not a question here/)
 })
 

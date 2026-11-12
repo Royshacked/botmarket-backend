@@ -102,7 +102,10 @@ export function makeMentorActions({ commit = defaultCommit, readPending = defaul
             const made = await makeMentorActions({ commit, readPending }).generate(ctx)
             if (made.reason) return made
             const id = made.result.setup.id
+            // The setup is SAVED by now: an arm that throws is an arm refused, never a failed go (CR 2026-11-12 — a throw
+            // here left a saved setup with its draft still on the table, and the next go saved it twice).
             const armed = await commit.armSetup(id, ctx.user._id)
+                .catch(err => ({ ok: false, reason: 'arm_failed', error: err.message }))
             return {
                 ...made,
                 result: { setup: armed.ok ? armed.doc : made.result.setup, armed: !!armed.ok, ...(armed.ok ? {} : { armReason: armed.reason ?? 'arm_failed' }) },

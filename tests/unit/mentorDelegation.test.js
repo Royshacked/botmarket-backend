@@ -450,7 +450,8 @@ test('when the button is lit the model is TOLD it is lit, so it cannot say other
     sized.scenarios[0].quantity = 5000
     sized.scenarios[0].entry_legs[0].quantity = 5000
     const text = _buildGenerateSection({ draft: sized }, true)
-    assert.match(text, /GENERATE: the button is LIT/)
+    assert.match(text, /GENERATE: the plan is READY to save/)
+    assert.match(text, /A NEW build[\s\S]*end with <go>[\s\S]*never tell them to press anything/)
     assert.match(text, /never ask them to confirm anything first/)
 })
 
@@ -541,10 +542,10 @@ test('a size given in the opening turn is not reported as refused before there i
     assert.deepEqual(activeName(out.build).claimed.size, { value: { unit: 'risk_cash', value: 1000 }, source: 'user' })
 })
 
-test('the pacing line rides the opening confirm only', () => {
+test('no pacing line any more: the opening confirm card left with the one way (CR 2026-11-12)', () => {
     const b = atEntries()
     assert.doesNotMatch(_buildPressSection(['entries'], { draft: draftAt(b) }), /pacing question/)
-    assert.match(_buildPressSection(['direction', 'horizon', 'lens'], { draft: draftAt(b) }), /pacing question/)
+    assert.doesNotMatch(_buildPressSection(['direction', 'horizon', 'lens'], { draft: draftAt(b) }), /pacing question/)
 })
 
 test('"decide and let me generate" at the spans gate hands back BOTH gates — and the later one settles when it arrives', () => {

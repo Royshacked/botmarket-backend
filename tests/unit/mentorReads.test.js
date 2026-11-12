@@ -287,16 +287,17 @@ test('the read\'s brief: for the trade, AGAINST it (say so, ask once), or none c
     assert.equal(receiverOf(art({})), 'mentor')
     assert.match(briefFor(art({ state: 'ready', facts: 'buy.', against: false })).text, /is in: buy\. Check the trade against it/)
     assert.equal(briefFor(art({ state: 'passed', facts: 'Prometheus (priced_in): no trade.', against: true })).text,
-        'Prometheus\'s read on NVDA for the swing trade is in, and it is against the trade: Prometheus (priced_in): no trade. Say so plainly in one line and ask me once whether to build anyway.')
+        'Prometheus\'s read on NVDA for the swing trade is in, and it is against the trade: Prometheus (priced_in): no trade. Say so plainly in one line, as a warning the user may override — not a question of its own; the trade\'s one question stands.')
+    assert.doesNotMatch(briefFor(art({ state: 'passed', facts: 'x', against: true })).text, /Roy|20\d\d-\d\d-\d\d/, 'the hand-off row is on screen: no citations in it')
     assert.match(briefFor(art({ state: 'failed' })).text, /could not make a read on NVDA for the swing trade\. Tell me in one line, and ask me once whether to build without it/)
 })
 
 // ─── Mentor's turn context, and Prometheus's opening ─────────────────────────
 
-test('Mentor\'s context each turn: the read to validate with; against → say it and ask once; running → no finish yet; none intraday', () => {
+test('Mentor\'s context each turn: the read to validate with; against → a warning, no question of its own; running → no finish yet; none intraday', () => {
     const base = { symbol: 'NVDA', horizon: 'swing', kind: 'coverage' }
     assert.match(_buildReadSection({ ...base, state: 'ready', facts: 'buy, target 230', against: false }), /PROMETHEUS'S READ on NVDA for the swing trade \(his coverage\): buy, target 230\n {2}Validate the trade with it/)
-    assert.match(_buildReadSection({ ...base, state: 'passed', facts: 'passed', against: true }), /is AGAINST it .*\n {2}If you have not said so yet, say it plainly in one line and ask the user ONCE whether to build anyway\. It is their call/)
+    assert.match(_buildReadSection({ ...base, state: 'passed', facts: 'passed', against: true }), /is AGAINST it .*\n {2}If you have not said so yet, say it plainly in one line, as a WARNING they may override[\s\S]*never a question of its own/)
     assert.match(_buildReadSection({ ...base, state: 'waiting', ahead: 2 }), /PROMETHEUS IS READING NVDA for the swing trade \(his coverage, 2 names ahead of it in the house's research\).*Do not finish the trade before then: no setup put up to generate/)
     assert.match(_buildReadSection({ ...base, state: 'missing' }), /PROMETHEUS IS READING/)
     assert.match(_buildReadSection({ ...base, state: 'unknown' }), /could not be checked just now/)
@@ -479,7 +480,8 @@ test('a FRESH deciding read is handed to Mentor at once (his verdict is the turn
 
 // ─── The TSLA drive (2026-11-12): no "paused" / "needs your call" cards inside Mentor's own read chain ─────────────
 test("inside a chain MENTOR started on his own read: no pause card and no 'needs your call' card — the chain just ends", async () => {
-    const r = rig({ target: { symbol: 'TSLA', horizon: null }, request: async () => ({ kind: 'coverage', state: 'ready', decide: true, facts: 'f', against: false }) })
+    // The read was already handed (no new hand-off this turn — a hand-off takes the chain over, the test below).
+    const r = rig({ target: null })
     const s = await r.sessions.getActive({ userId: 'u1' })
     await r.sessions.setChain({ sessionId: s.sessionId, userId: 'u1', chain: { id: 'c1', status: 'running', origin: 'mentor', steps: 1, pauseRequested: true } })
     await r.runner.afterTurn({ user, sessionId: s.sessionId, agent: 'mentor', origin: 'chain', out: { payload: { reply: 'Long, swing.', setup: { asset: 'TSLA' }, readiness: { ready: true } } } })
@@ -501,4 +503,33 @@ test('the horizon must fit the trade that can be built — a day trade only when
     const p = readFileSync(new URL('../../prompts/mentor_system_prompt.md', import.meta.url), 'utf8')
     assert.match(p, /\*\*The horizon must fit the trade you can\s+build\*\*/)
     assert.match(p, /within about one daily ATR of the price, so it can fill today, and nothing waits on a\s+day close/)
+})
+
+test('a deciding read that LANDED is handed once: the next turn finding it fresh does not hand it again (CR 2026-11-12)', async () => {
+    const ready = { kind: 'coverage', state: 'ready', decide: true, facts: 'f', against: false }
+    const r = rig({ target: { symbol: 'TSLA', horizon: null }, request: async () => ready })
+    const s = await r.sessions.getActive({ userId: 'u1' })
+    await r.runner.readSettled({ userId: 'u1', sessionId: s.sessionId, symbol: 'TSLA', horizon: null }, ready)
+    const before = (await rows(r.sessions, s)).length
+    await r.runner.afterTurn({ user, sessionId: s.sessionId, agent: 'mentor', origin: 'chain', out: { payload: { reply: 'Long, swing.' } } })
+    assert.equal((await rows(r.sessions, s)).length, before, 'no second Prometheus line, no second hand-off')
+    assert.equal(r.queued.length, 1, 'one Mentor turn queued, by the landing only')
+})
+
+test('a FRESH deciding read handed after a turn ends that turn: no decision card, no carry on top of the hand-off', async () => {
+    const r = rig({ target: { symbol: 'TSLA', horizon: null }, request: async () => ({ kind: 'coverage', state: 'ready', decide: true, facts: 'f', against: false }) })
+    const s = await r.sessions.getActive({ userId: 'u1' })
+    await r.runner.afterTurn({ user, sessionId: s.sessionId, agent: 'mentor', origin: 'user', out: { payload: { reply: 'Asking them.', cut_short: true } } })
+    assert.equal(r.queued.length, 1, 'only the hand-off turn')
+    assert.equal(r.queued[0].agent, 'mentor')
+    assert.equal((await r.sessions.get({ sessionId: s.sessionId, userId: 'u1' })).chain.status, 'running')
+})
+
+test('"not a long now" is a warning, not a refusal: their numbers are the override, and nothing is asked after them (the TSLA drive, 2026-11-12)', async () => {
+    const { readFileSync } = await import('node:fs')
+    const p = readFileSync(new URL('../../prompts/mentor_system_prompt.md', import.meta.url), 'utf8')
+    assert.match(p, /\*\*"Not a long now" is a WARNING, not a refusal\*\*/)
+    assert.match(p, /Their numbers after a "not a long now" are their override: build it\.\*\* Never\s+refuse once they gave them/)
+    assert.match(p, /"all the way" is never answered with a question/)
+    assert.doesNotMatch(p, /"Not a long now" is an answer: say why, and\s+stop there/)
 })

@@ -34,7 +34,7 @@ function briefMentorRead(artifact) {
         return { text: `Prometheus could not make a read on ${on}. Tell me in one line, and ask me once whether to build without it.`, input: {} }
     }
     if (r.against) {
-        return { text: `Prometheus's read on ${on} is in, and it is against the trade: ${trimDot(r.facts)}. Say so plainly in one line and ask me once whether to build anyway.`, input: {} }
+        return { text: `Prometheus's read on ${on} is in, and it is against the trade: ${trimDot(r.facts)}. Say so plainly in one line, as a warning the user may override — not a question of its own; the trade's one question stands.`, input: {} }
     }
     return { text: `Prometheus's read on ${on} is in: ${trimDot(r.facts)}. Check the trade against it and carry on building.`, input: {} }
 }
