@@ -364,3 +364,47 @@ export function nextCheckpoint(nowMs) {
     if (!['Mon', 'Tue', 'Wed', 'Thu', 'Fri'].includes(now.weekday)) return null
     return CHECKPOINTS.find(c => now.min < c.etMin + WINDOW_MIN)?.label ?? null
 }
+
+// ─── One name on a board, as a line — Argus's list (horizonList.tools) and Mentor's hand-off (hotlistSeed) ────────
+
+export const CHECKPOINT_WORDS = Object.freeze({ open: '09:20 ET board (the open)', mid: '10:30 ET board (mid-session)', eod: '14:30 ET board (into the close)' })
+const _fx = (n, d = 2) => (Number.isFinite(n) ? n.toFixed(d) : null)
+
+/**
+ * A headline's time for Argus: "14:23 ET" on the board's day, "yesterday 18:29 ET" or the date before it — fresh means
+ * since the LAST CLOSE, so last evening's story sits on today's board (the live drive, 2026-11-11). Pure.
+ */
+export function headlineWhen(at, boardDay = null) {
+    const s = String(at ?? '')
+    const time = s.slice(11, 16)
+    const day = s.slice(0, 10)
+    if (!time) return ''
+    if (!boardDay || day === boardDay) return `${time} ET`
+    const gap = Math.round((Date.parse(boardDay) - Date.parse(day)) / 86_400_000)
+    return gap === 1 ? `yesterday ${time} ET` : `${day} ${time} ET`
+}
+
+/** One day-board row → one line: the move, the volume, why it is in play, its freshest headline with the time. Pure. */
+export function dayLine(r, boardDay = null) {
+    const n = r.catalyst?.news?.[0]
+    return [
+        `${r.symbol}${r.name ? ` (${r.name})` : ''}`,
+        Number.isFinite(r.price) ? `$${_fx(r.price)}${Number.isFinite(r.gap_pct) ? ` (${r.gap_pct > 0 ? '+' : ''}${_fx(r.gap_pct, 1)}%)` : ''}` : null,
+        Number.isFinite(r.rvol) ? `${r.rvol}× volume` : Number.isFinite(r.pm_vol_pct) ? `${_fx(r.pm_vol_pct, 1)}% of a day's volume pre-market` : null,
+        r.why?.length ? r.why.join('; ') : null,
+        r.catalyst?.earnings ? 'reported earnings' : null,
+        r.catalyst?.rating ? 'rating change' : null,
+        // FMP's times are ET wall-clock (fmp.price.provider fmpDateToEpochSec reads them so).
+        n ? `news ${headlineWhen(n.at, boardDay)}: "${n.title}"` : null,
+    ].filter(Boolean).join(' · ')
+}
+
+/**
+ * A day-board row handed to Mentor (hotlistSeed): which board it is on, then its line. → a string, or null when the
+ * name is not on the board. Pure.
+ */
+export function dayFacts(board, symbol) {
+    const r = (board?.rows ?? []).find(x => x.symbol === symbol)
+    if (!r) return null
+    return `in play on the ${CHECKPOINT_WORDS[board.checkpoint] ?? `${board.checkpoint} board`} — ${dayLine(r, board.day ?? null)}`
+}

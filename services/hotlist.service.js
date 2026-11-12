@@ -13,6 +13,7 @@ import { backtestSummary } from './hotlistBacktest.service.js'
 import { BOARD_STALE_MS } from './hotlist.boards.js'
 import { rowStatus, STATUSES } from './hotlist.columns.js'
 import { catalystReadService, readFacts } from './catalystRead.service.js'
+import { DAY_BOARDS, dayFacts } from './hotlist.day.js'
 
 /** The trade horizon each column hands Mentor (entity/vocabulary TRADE_HORIZONS). */
 export const COLUMN_HORIZON = Object.freeze({
@@ -59,6 +60,13 @@ export function seedFacts(row, column, { hold = false } = {}) {
 export async function hotlistSeed(ref, deps = _deps) {
     if (!ref?.board || !ref?.column || !ref?.symbol) return null
     const db = await deps.db()
+    // A DAY BOARD row (hotlist.day — `hd_<day>_<checkpoint>`, its column the checkpoint; Roy 2026-11-12: build it with
+    // Mentor from the Intraday tab): no grade, no pick, no read — the board's line about the name, and the intraday horizon.
+    if (ref.board.startsWith('hd_')) {
+        const board = await db.collection(DAY_BOARDS).findOne({ id: ref.board })
+        const facts = board?.checkpoint === ref.column ? dayFacts(board, ref.symbol) : null
+        return facts ? { horizon: COLUMN_HORIZON[ref.column] ?? 'intraday', hotlist_facts: facts, board_day: board.day, checkpoint: board.checkpoint, catalyst_facts: null } : null
+    }
     const board = await db.collection(BOARDS).findOne({ id: ref.board })
     const row = board?.rows?.find(r => r.symbol === ref.symbol)
     if (!row?.cells?.[ref.column]?.grade) return null

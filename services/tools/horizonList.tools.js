@@ -20,7 +20,9 @@ import { makeToolHandler } from '../agentUtils.js'
 import { todayHotlist } from '../hotlist.service.js'
 import { houseBook } from '../houseBook.service.js'
 import { formatHotlist } from './hotlist.tools.js'
-import { todayBoards, nextCheckpoint } from '../hotlist.day.js'
+import { todayBoards, nextCheckpoint, dayLine, headlineWhen, CHECKPOINT_WORDS } from '../hotlist.day.js'
+// The day-board line is hotlist.day's (one formatter: Argus's list here, Mentor's hand-off in hotlist.service).
+export { dayLine, headlineWhen }
 import { TRADE_HORIZONS } from '../entity/vocabulary.js'
 
 const LOG = '[horizonList.tools]'
@@ -80,38 +82,8 @@ export function formatWeekList(today) {
     return { text: formatHotlist(today, MAX_NAMES), names: rows.map(r => r.symbol).filter(Boolean) }
 }
 
-const CHECKPOINT_WORDS = Object.freeze({ open: '09:20 ET board (the open)', mid: '10:30 ET board (mid-session)', eod: '14:30 ET board (into the close)' })
 const _hhmmEt = (ms) => (Number.isFinite(ms)
     ? new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(ms)) : null)
-
-/**
- * A headline's time for Argus: "14:23 ET" on the board's day, "yesterday 18:29 ET" or the date before it — fresh means
- * since the LAST CLOSE, so last evening's story sits on today's board (the live drive, 2026-11-11). Pure.
- */
-export function headlineWhen(at, boardDay = null) {
-    const s = String(at ?? '')
-    const time = s.slice(11, 16)
-    const day = s.slice(0, 10)
-    if (!time) return ''
-    if (!boardDay || day === boardDay) return `${time} ET`
-    const gap = Math.round((Date.parse(boardDay) - Date.parse(day)) / 86_400_000)
-    return gap === 1 ? `yesterday ${time} ET` : `${day} ${time} ET`
-}
-
-/** One day-board row → one line: the move, the volume, why it is in play, its freshest headline with the time. Pure. */
-export function dayLine(r, boardDay = null) {
-    const n = r.catalyst?.news?.[0]
-    return [
-        `${r.symbol}${r.name ? ` (${r.name})` : ''}`,
-        Number.isFinite(r.price) ? `$${_f(r.price)}${Number.isFinite(r.gap_pct) ? ` (${r.gap_pct > 0 ? '+' : ''}${_f(r.gap_pct, 1)}%)` : ''}` : null,
-        Number.isFinite(r.rvol) ? `${r.rvol}× volume` : Number.isFinite(r.pm_vol_pct) ? `${_f(r.pm_vol_pct, 1)}% of a day's volume pre-market` : null,
-        r.why?.length ? r.why.join('; ') : null,
-        r.catalyst?.earnings ? 'reported earnings' : null,
-        r.catalyst?.rating ? 'rating change' : null,
-        // FMP's times are ET wall-clock (fmp.price.provider fmpDateToEpochSec reads them so).
-        n ? `news ${headlineWhen(n.at, boardDay)}: "${n.title}"` : null,
-    ].filter(Boolean).join(' · ')
-}
 
 /** When a board's quotes were taken, "09:20" or "09:20–09:25" (ET). Pure. A board takes minutes, so one time would lie. */
 export function quotedSpan(rows) {
