@@ -126,6 +126,50 @@ prompt: the mandate once with capital, one gate, AVOID left out, `<go>`. Live dr
 oneq`): EQPT swing — one question, A+B built, saved and armed after Prometheus's read (184 s), on_away revise.
 Not yet driven: Atlas's go. Open: a redraw still asks the limits from the chat — it can read `risk_plan`.
 
+### 2.3 Mentor, one way — the experts decide the trade, the user decides how much (Roy, 2026-11-12)
+
+Builds on §2.2. Three changes:
+
+**1. No lens, no modes.** There is one way Mentor builds, so the word "lens" and the modes go — from his words, his
+prompt, the code that switches them, and the pane (no "Thesis" tag, no "Direction · Horizon · Lens — right?" card, no
+span / entry tables with "You choose", no starter chips about shorting or "my own setup"). Mentor never says
+"risk-based" or "thesis".
+- The user's own LEVELS ("long at 238, stop 234") are discussed with Mentor: he uses them where the chart supports them
+  and says where he differs.
+- The user's own SETUP / METHOD ("SMC: buy the sweep of the Asian low on 15m") is Daedalus's. Until Daedalus is built,
+  Mentor says that is Daedalus's job, coming soon, and offers to build it his own way meanwhile.
+
+**2. "Let's trade TSLA" — the experts decide direction and horizon.** No direction or horizon asked of the user:
+- CODE reads both experts before Mentor answers, and each posts one dated line in the chat:
+  - **Prometheus** — his coverage (rating, target and date, his swing and long-term views, thesis). Researched first when
+    there is none; **re-read first when his research is older than 30 days or a report has come out since** (Roy). Mentor
+    says it is being read and waits, as today.
+  - **Proteus** — the measured profile (what holds, if anything; false breaks and sweep depth; ATR; day trade / swing
+    fit). At most a week old by construction; computed in seconds when missing.
+- Mentor then says whether the name is worth trading, **long only for now** (shorts later), and on **which horizon**,
+  from the two reads: Prometheus's book and target horizon (long term / swing), a dated catalyst (short term swing),
+  Proteus's fit (day trade / swing) and the chart. "Not a long now" is an answer, with why.
+- The user may overrule the direction or horizon; Mentor takes it.
+
+**3. Then the three numbers, then their choice.** Mentor asks position size, risk and R:R (as §2.2). With the answer he
+checks the account carries it (`size_position` — fits, or the largest that does) and asks ONE thing: **"Want me to take
+it all the way, or go through it step by step?"**
+- **All the way** — §2.2: built, generated and armed, every choice stated.
+- **Step by step** — the levels in plain words (stop, target(s), A + B, the entry from their numbers, the wait, runaway =
+  redraw), the user adjusting any of them; then generated and armed on their OK. No tables, no gate buttons.
+
+**4. The work pane shows the entity being built — on every desk (Roy, 2026-11-12).** Mentor's setup, Atlas's book,
+Prometheus's coverage, Pythia's view: the pane is the thing itself, filling in live as the conversation builds it. No
+chips, no gate cards, no choice buttons — only the commit actions: **Generate · Dismiss · I'll do it later · Update**
+(whichever apply). Everything else is said in the chat.
+
+**Later (Roy):** Mentor recommends from the experts' data how much the trade is worth — the size and the risk — instead of
+only asking.
+
+**Build order:** (a) the reads before the first answer (point 2), (b) the flow after the numbers (point 3), (c) the lens /
+mode removal across prompt, code and pane (point 1) — done with (a)/(b) where they touch the same prompt sections,
+(d) every desk's work pane down to the entity and its commit actions (point 4).
+
 ## 3. Argus — the picker
 
 ### 3.1 Where he picks from, per horizon

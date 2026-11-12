@@ -38,7 +38,7 @@ holding. A hit rate on 6 touches is said to be 6 touches.
 
 **The visual read — the model.** Proteus looks at the chart now (`get_chart`, `get_orderblocks`,
 `get_false_breaks`): **B (patterns)** forming or just completed, and the current picture of C/D. It claims no hit
-rate for a pattern — that would need a coded pattern detector (later, if wanted).
+rate for a pattern. **Patterns stay by eye (Roy, 2026-11-12)** — no coded pattern detector is planned.
 
 Proteus writes the read: the profile's numbers interpreted in plain words, with the visual read beside them, and
 which is which said out loud.

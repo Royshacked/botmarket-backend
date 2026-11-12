@@ -75,6 +75,29 @@ export function formatProfile(p) {
     ].join('\n')
 }
 
+/**
+ * The profile as ONE line — what Mentor reads beside Prometheus's coverage to decide a trade, and the line Proteus posts in
+ * the chat (argus-rework.md §2.3): what holds (or nothing), the daily false breaks and their depth, the daily ATR, the fit.
+ * Pure.
+ */
+export function profileBrief(p) {
+    const tfs = p?.timeframes ?? {}
+    const holds = Object.entries(tfs).flatMap(([tf, t]) => (t ? [
+        ...Object.entries(t.indicators).filter(([, s]) => s.verdict === 'respects').map(([k]) => `${LABEL[k] ?? k} (${TF[tf].toLowerCase()})`),
+        ...(t.false_breaks.after_sweep.verdict === 'respects' ? [`sweeps of lows (${TF[tf].toLowerCase()})`] : []),
+        ...(t.order_blocks.verdict === 'respects' ? [`order blocks (${TF[tf].toLowerCase()})`] : []),
+    ] : []))
+    const d = tfs.day
+    const fb = d?.false_breaks
+    const fit = p?.suitability ? `day trade ${p.suitability.day_trade.fits ? 'yes' : 'no'}, swing ${p.suitability.swing.fits ? 'yes' : 'no'}` : null
+    return [
+        holds.length ? `holds: ${holds.join(', ')}` : 'nothing technical holds',
+        fb?.breaks ? `breaks of a daily swing low are false ${_pct(fb.false_rate)}${fb.sweep_depth_atr?.median != null ? `, sweeps ~${fb.sweep_depth_atr.median} ATR deep (80% within ${fb.sweep_depth_atr.p80})` : ''}` : null,
+        Number.isFinite(d?.atr_pct) ? `daily ATR ${d.atr_pct}%` : null,
+        fit,
+    ].filter(Boolean).join('; ')
+}
+
 /** The handler. `deps` — test seams passed to profileFor. */
 export function makeBehaviourProfileHandlers({ deps = {} } = {}) {
     return {

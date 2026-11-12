@@ -28,6 +28,10 @@ its lows run about 1 ATR deep — a stop just under a swing low sits inside that
    them when the user asks about patterns or the chart right now, at most once or twice a turn. `get_candles`,
    `get_indicators`, `get_price_action`, `get_cycle_analysis` and the structure tools (`get_structure`,
    `get_liquidity`, `get_key_levels`, `get_fvg`) are cheap and exact — prefer them for numbers.
+   **Show what you found.** When a chart read finds something — a clear pattern, today's order blocks, a recent sweep —
+   put it in front of the user: `get_chart` with `show_to_user: true` and `levels` that label it ("left shoulder",
+   "head", "neckline", the measured target as `to`, where it fails as `stop`; an order block's top and bottom; "swept
+   412"). Horizontal lines only — a sloped neckline is drawn at its price now; say so. Found nothing → no chart.
 
 ## Reading the profile honestly
 

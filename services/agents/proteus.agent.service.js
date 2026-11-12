@@ -41,10 +41,8 @@ const REGISTRY_TOOLS = toolsFor({
     get_indicators: `Exact indicator VALUES now (EMA, SMA, RSI, MACD, ATR, VWAP — the monitor's math), for where price sits today against the lines the profile tested. A value now is not a rule: whether the stock RESPECTS a line is the profile's answer, never this one.`,
     get_price_action: `Momentum snapshot: 1d/5d/1m/3m moves, position in the 1-year range, relative volume — the stock's state today.`,
     get_cycle_analysis: `Recurring cycles in the price history: "price" mode finds the dominant peak-to-peak interval and the current phase; "calendar" mode shows how the stock behaved in a calendar window (e.g. late June) over past years. Only when the user asks about cycles or seasonality.`,
-    get_chart: {
-        description: `Render a candlestick chart IMAGE (with optional overlays) and LOOK at it — for what is SEEN NOW: a pattern forming or just completed (flag, cup and handle, head and shoulders, range, wedge), trend, where price sits vs the lines. A reading of one chart, never a hit rate. BILLS PER USE (render + vision): only when the user asks about patterns or the chart now; once or twice a turn at most.`,
-        omit: ['show_to_user'],
-    },
+    get_chart: `Render a candlestick chart IMAGE (with optional overlays) and LOOK at it — for what is SEEN NOW: a pattern forming or just completed (flag, cup and handle, head and shoulders, range, wedge), trend, where price sits vs the lines. A reading of one chart, never a hit rate. BILLS PER USE (render + vision): only when the user asks about patterns or the chart now; once or twice a turn at most.
+SHOW IT when you FOUND something (Roy, 2026-11-12): call it with \`show_to_user: true\` and \`levels\` labelling what you found, so the user sees it on the chart — a head and shoulders as "left shoulder", "head", "right shoulder", "neckline" (kind \`level\`), its measured target (\`to\`) and where it fails (\`stop\`); an order block as its top and bottom; a swept low as "swept 412". Horizontal lines only, at most 8: a sloped neckline or trendline is drawn at its price NOW — say so. Found nothing → do not show a chart.`,
     get_orderblocks: {
         description: `ORDER BLOCKS on a plain candlestick chart now (one ticker + timeframe): where the zones sit today, fresh or mitigated, vs current price. Whether its order blocks HOLD is the profile's answer; this is where they are. BILLS PER USE (render + vision).`,
         omit: ['show_to_user'],
@@ -75,9 +73,8 @@ const TOOL_HANDLERS = {
     get_cycle_analysis: makeToolHandler('get_cycle_analysis',
         ({ ticker, mode, calendar_window, lookback_years, timeframe }) => getCycleAnalysis(ticker, mode, calendar_window ?? null, lookback_years ?? 4, timeframe ?? 'day'),
         (err, { ticker }) => `Could not compute cycle analysis for ${ticker}: ${err.message}`, LOG),
-    // The vision tools read the chart for the MODEL (onChart: null), like Argus's: the user sees a chart when Proteus
-    // puts one in the reply with the <chart> tag (onChart below), not every render he looks at.
-    get_chart: makeChartHandler({ log: LOG, onChart: null, readText: 'Read what is VISIBLE now: the pattern if there is one (name it only if it is clear), trend, where price sits vs the overlays. A reading of this chart, not a statistic.' }),
+    // get_chart is built PER TURN (below): it shows the user what Proteus found (Roy, 2026-11-12). The two structure reads
+    // stay the MODEL's (onChart: null): their image is a plain chart — what they find is shown through get_chart's levels.
     get_orderblocks: makeStructureVisionHandler({ log: LOG, kind: 'orderblocks', vision: OB_VISION, onChart: null }),
     get_false_breaks: makeStructureVisionHandler({ log: LOG, kind: 'false_breaks', vision: FB_VISION, onChart: null }),
     ...SMC_TOOL_HANDLERS,
@@ -106,7 +103,12 @@ async function chatStream({
     const route = makeRouteCapture('proteus')
     const raw = await _run({
         log: LOG, requestedModel, userId, messages: normalized, systemPrompt,
-        tools: TOOLS, toolHandlers: TOOL_HANDLERS,
+        tools: TOOLS,
+        toolHandlers: {
+            ...TOOL_HANDLERS,
+            // This turn's chart pipe: a chart he FOUND something on reaches this chat, with the levels he labels.
+            get_chart: makeChartHandler({ log: LOG, onChart, readText: 'Read what is VISIBLE now: the pattern if there is one (name it only if it is clear), trend, where price sits vs the overlays. A reading of this chart, not a statistic.' }),
+        },
         reasoningEffort, signal, onToken, onToolStart, onReasoning, onChart,
         tagCaptures: buildTagCaptures({ ...route.captures }),
     })

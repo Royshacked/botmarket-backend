@@ -63,6 +63,12 @@ const _covered = async (ticker) => !!(await coverageService.getCoverageBySymbol(
  * research run (Roy, 2026-11-11: it waits in line — say so). Pure. `t` — { symbol, horizon }; `r` — readFor's answer.
  */
 export function readWaitLine(t, r) {
+    // The DECIDING read (no horizon yet — argus-rework.md §2.3): what the trade is worth, and on which horizon.
+    if (t.horizon == null) {
+        const again = r.need === 'reinit' ? 'his coverage again (it is over 30 days old, or a report has come out since)' : 'his coverage'
+        const ahead = r.ahead > 0 ? ` It waits in line behind ${r.ahead} name${r.ahead === 1 ? '' : 's'} in the house's research (about four minutes each).` : ''
+        return `Before I say whether ${t.symbol} is worth trading, and on which horizon, Prometheus is reading it — ${again}.${ahead} I'll carry on as soon as it lands.`
+    }
     const what = r.kind !== 'coverage' ? 'a catalyst read'
         : r.need === 'view' ? `his ${t.horizon} view (he covers it on the other horizon)`
             : r.need === 'reinit' ? 'his coverage again (it was not live)' : 'his full coverage'
@@ -100,6 +106,8 @@ export function makeChainRunner({
     // How many turns in a row a build has been carried on, by session and desk (carryOn). In memory: one instance runs
     // the turns, and a restart forgetting a count only allows a few more carries.
     const carryCount = new Map()
+    // The fresh deciding reads already handed to Mentor, by `${sessionId}|${symbol}` (askRead) — each once.
+    const handedDecide = new Set()
 
     const save = (user, sessionId, chain) => sessions.setChain({ sessionId, userId: user._id, chain })
     const end  = (user, sessionId, chain) => save(user, sessionId, endedChain(chain))
@@ -336,6 +344,15 @@ export function makeChainRunner({
             const t = reads.target(state)
             if (!t) return
             const r = await reads.request({ ...t, sessionId, userId: user._id })
+            // A DECIDING read already fresh (argus-rework.md §2.3): handed to Mentor at once, the way a landed one is — his
+            // first reply had no reads to judge on, so his verdict is the turn this hand-off runs. Once per session and name.
+            if (t.horizon == null && r?.state === 'ready' && r.decide) {
+                const key = `${sessionId}|${t.symbol}`
+                if (handedDecide.has(key)) return
+                handedDecide.add(key)
+                await _readSettled({ userId: user._id, sessionId, symbol: t.symbol, horizon: null }, r)
+                return
+            }
             if (!r?.asked) return
             await sessions.append({ sessionId, userId: user._id, message: { agent: 'mentor', role: 'assistant', content: readWaitLine(t, r) } })
         } catch (err) {
@@ -465,8 +482,8 @@ export function makeChainRunner({
         const session = await sessions.get({ sessionId: pending.sessionId, userId: user._id })
         if (!session || session.status !== 'active') return false
         const line = read.state === 'failed'
-            ? `I could not make a read on ${pending.symbol} for the ${pending.horizon}.`
-            : `${pending.symbol}, ${pending.horizon}: ${read.facts}`
+            ? `I could not make a read on ${pending.symbol}${pending.horizon ? ` for the ${pending.horizon}` : ''}.`
+            : `${pending.symbol}${pending.horizon ? `, ${pending.horizon}` : ''}: ${read.facts}`
         await sessions.append({ sessionId: pending.sessionId, userId: user._id, message: { agent: 'analyst', role: 'assistant', content: line } })
 
         const now = reads.target(session.agentState?.mentor ?? null)

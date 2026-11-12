@@ -58,8 +58,6 @@ export function lensOf(name) {
     return name?.settled?.lens ?? name?.claimed?.lens?.value ?? null
 }
 
-const modeOfLens = (lens) => (lens === MODE_THESIS ? MODE_THESIS : MODE_USER)
-
 const SYSTEM = [
     'You read ONE message a trader sent to a trade-building desk and answer one question: did they bring a SETUP of',
     'their own? A setup is ANY condition, price level or chart pattern / indicator of theirs — an entry, a stop, a',
@@ -117,17 +115,19 @@ const TIMED_OUT = Symbol('timed out')
 export const readSetup = makeSetupReader()
 
 /**
- * This turn's mode, and where it came from. `null` mode = undecided: the full kit, and the prompt's rule decides.
+ * This turn's mode, and where it came from. ONE WAY since 2026-11-12 (argus-rework.md §2.3, Roy: "no need to use the
+ * term lens anymore because there is only one lens"): every build is the `thesis` build — the user's own METHOD is
+ * Daedalus's, coming; their own LEVELS are talked through inside the one way. No cheap read of the user's words any more
+ * (`read` and `messages` are kept in the signature for the callers and tests that pass them).
  *
- *   ledger — a lens is claimed or settled: it IS the mode.
- *   seed   — a hand-off (the Hotlist, Argus) carries no setup of the user's: risk-based.
- *   read   — a typed build with no lens yet: the cheap read on the user's words.
+ *   ledger — the build already carries its lens (a saved setup being edited): kept as the source.
+ *   seed   — a hand-off (the Hotlist, Argus).
+ *   one    — a typed build: the one way.
  */
-export async function resolveMode({ name = null, seed = null, messages = [], userId = null, signal = null, read = readSetup } = {}) {
-    const lens = lensOf(name)
-    if (lens) return { mode: modeOfLens(lens), source: 'ledger' }
+export async function resolveMode({ name = null, seed = null } = {}) {
+    if (lensOf(name)) return { mode: MODE_THESIS, source: 'ledger' }
     if (seed?.ticker) return { mode: MODE_THESIS, source: 'seed' }
-    return { mode: await read({ messages, userId, signal }), source: 'read' }
+    return { mode: MODE_THESIS, source: 'one' }
 }
 
 /**

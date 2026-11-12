@@ -6,6 +6,10 @@
 //   swing / long term   → Prometheus's COVERAGE (it is the 3–6 / 12–24 month target)
 //   short term swing    → his CATALYST read (the one This week already runs)
 //   intraday / day      → none (a 10:30 move has nothing for him to judge; the day board's catalyst is the read)
+//   NO HORIZON YET      → his COVERAGE, to DECIDE the trade (argus-rework.md §2.3, Roy 2026-11-12: "let's trade TSLA" —
+//                         Mentor says the direction and the horizon from Prometheus's and Proteus's reads). Fresh means
+//                         researched within FRESH_RESEARCH_DAYS and no report since; older, it is re-researched first
+//                         (the run's `reinit` path, in place).
 //
 // A missing read is QUEUED on the research queue (source `mentor`) and the house's run is started — as the HOUSE, not the
 // user, the sleeve rule (sleeveSource.service): coverage is a house artifact. It WAITS IN LINE (Roy, 2026-11-11): one
@@ -24,6 +28,7 @@ import { catalystReadService, readFacts } from './catalystRead.service.js'
 import { researchQueueService } from './researchQueue.service.js'
 import { researchRunService, onRunSettled, getRun } from './researchRun.service.js'
 import { bookFacts } from './houseBook.service.js'
+import { getEarningsRowsRaw } from '../providers/fmp.provider.js'
 import { normalizeBuild, activeName } from './mentorBuild.util.js'
 import { logger } from './logger.service.js'
 
@@ -43,6 +48,10 @@ const BUY = new Set(['buy', 'strong_buy'])
 /** How long a PASS stands as the answer before it may be asked again. A catalyst read's window is about a week. */
 export const PASS_FRESH_DAYS = Object.freeze({ catalyst: 5, coverage: 30 })
 const DAY_MS = 86_400_000
+/** A coverage that DECIDES a trade must have been researched this recently, with no report since (Roy, 2026-11-12). */
+export const FRESH_RESEARCH_DAYS = 30
+/** The revisions that are a full research (coverage.service / researchRun / coverageRefresh revision kinds). */
+const RESEARCH_KINDS = new Set(['remodel', 'remodel_pass', 'reinitiate'])
 /** The queue's reasons that mean "researched, and passed" — an answer. */
 const PASS_REASONS = new Set(['no_edge', 'no_read', 'horizon_off_book'])
 
@@ -56,12 +65,47 @@ const _deps = {
     startRun:     (args) => researchRunService.startRun(args),
     getRun:       () => getRun(),
     now:          () => Date.now(),
+    // The last REPORTED quarter's date (YYYY-MM-DD) or null — a report since the research makes it stale.
+    lastReport:   async (s) => {
+        const rows = await getEarningsRowsRaw(s, 8)
+        return (Array.isArray(rows) ? rows : []).filter(r => r?.date && r.epsActual != null).map(r => r.date).sort().pop() ?? null
+    },
 }
 /** Test seam. */
 export function _setDeps(d) { Object.assign(_deps, d) }
 
-/** The read a horizon needs: 'coverage' · 'catalyst' · null. Pure. */
-export const readKindFor = (horizon) => READ_OF[String(horizon ?? '').toLowerCase()] ?? null
+/** The read a horizon needs: 'coverage' · 'catalyst' · null. No horizon yet (null) is the DECIDING read: coverage. Pure. */
+export const readKindFor = (horizon) => (horizon == null ? 'coverage' : READ_OF[String(horizon).toLowerCase()] ?? null)
+
+/** When a coverage was last RESEARCHED in full (its initiation, a re-model, a re-initiation) — ISO, or null. Pure. */
+export function researchedAt(cov) {
+    const at = [cov?.created_at, cov?.monitor?.last_remodel_at,
+        ...(cov?.revisions ?? []).filter(r => RESEARCH_KINDS.has(r?.kind)).map(r => r.at)].filter(Boolean).map(String).sort()
+    return at.pop() ?? null
+}
+
+/**
+ * Is a coverage fresh enough to DECIDE a trade on (Roy, 2026-11-12)? Researched within FRESH_RESEARCH_DAYS, and no
+ * report (`lastReport`, YYYY-MM-DD) after the research. → `{ fresh, researched, stale? }`. Pure.
+ */
+export function freshness(cov, lastReport, nowMs) {
+    const researched = researchedAt(cov)
+    if (!researched) return { fresh: false, researched: null, stale: 'never researched' }
+    if (nowMs - Date.parse(researched) > FRESH_RESEARCH_DAYS * DAY_MS) return { fresh: false, researched, stale: `researched ${researched.slice(0, 10)}, over ${FRESH_RESEARCH_DAYS} days ago` }
+    if (lastReport && lastReport > researched.slice(0, 10)) return { fresh: false, researched, stale: `a report on ${lastReport}, after the research on ${researched.slice(0, 10)}` }
+    return { fresh: true, researched }
+}
+
+/**
+ * The DECIDING read → `{ facts, against }`: his coverage (rating, target and its date, thesis), his OTHER horizon's view
+ * when he has one, and when it was researched. Pure.
+ */
+export function decisionRead(cov, researched) {
+    const views = Object.values(cov.horizon_views ?? {}).filter(Boolean)
+        .map(v => `his ${v.book === 'long_term' ? 'long-term' : 'swing'} view: ${String(v.rating ?? 'unrated').replace('_', ' ')}, target ${Number(v.target?.value).toFixed(2)} by ${v.target?.target_date ?? '?'}`)
+    const base = coverageRead(cov)
+    return { facts: [base.facts, ...views, researched ? `researched ${String(researched).slice(0, 10)}` : null].filter(Boolean).join('; '), against: base.against }
+}
 
 const _sym = (s) => String(s ?? '').toUpperCase().trim()
 const _first = (t, n = 240) => { const s = String(t ?? '').trim(); const m = s.match(/^.{20,400}?[.!?](\s|$)/); return (m ? m[0] : s.slice(0, n)).trim() || null }
@@ -74,11 +118,17 @@ const _isCatalystRow = (r) => Boolean(r?.context?.hotlist)
  */
 export function readTarget(state) {
     const build = state?.draft?.build
-    if (!build) return null
-    const name = activeName(normalizeBuild(build))
+    const name = build ? activeName(normalizeBuild(build)) : null
     const symbol = _sym(name?.asset || state?.active_asset)
+    if (!symbol) return null
     const horizon = name?.settled?.horizon ?? null
-    return symbol && readKindFor(horizon) ? { symbol, horizon } : null
+    if (horizon) return readKindFor(horizon) ? { symbol, horizon } : null
+    // No horizon settled yet: the DECIDING read (argus-rework.md §2.3) — unless the name came as a day trade (a day board's
+    // hand-off claims intraday), which needs no Prometheus read.
+    const c = name?.claimed?.horizon
+    const claimed = String(c?.value ?? c ?? '').toLowerCase()
+    if (claimed === 'intraday' || claimed === 'day') return null
+    return { symbol, horizon: null }
 }
 
 /** The book a coverage's MAIN target sits in, by its horizon — or null. Pure. */
@@ -132,12 +182,21 @@ export async function readFor(symbol, horizon, deps = _deps, { sessionId = null 
     const kind = readKindFor(horizon)
     const sym = _sym(symbol)
     if (!kind || !sym) return { kind: null }
+    const decide = horizon == null
     try {
         const since = deps.now() - PASS_FRESH_DAYS[kind] * DAY_MS
         // What a coverage read NEEDS when it is not ready: `new` (no coverage), `view` (the coverage's target is on the
         // other book — two targets, stage 1) or `reinit` (retired / watchlist). It picks the queue rows that answer it.
         let need = null
-        if (kind === 'coverage') {
+        if (decide) {
+            // The DECIDING read: any live coverage, if it is fresh; older, or a report since, it is re-researched first.
+            const cov = await deps.coverage(sym)
+            if (cov && COVERAGE_LIVE.includes(cov.status)) {
+                const f = freshness(cov, await deps.lastReport(sym).catch(() => null), deps.now())
+                if (f.fresh) return { kind, state: 'ready', decide: true, researched: f.researched, ...decisionRead(cov, f.researched) }
+                need = 'reinit'
+            } else need = cov && COVERAGE_STALE.includes(cov.status) ? 'reinit' : 'new'
+        } else if (kind === 'coverage') {
             const book = BOOK_OF_HORIZON[String(horizon).toLowerCase()]
             const cov = await deps.coverage(sym)
             if (cov && COVERAGE_LIVE.includes(cov.status)) {
@@ -156,7 +215,7 @@ export async function readFor(symbol, horizon, deps = _deps, { sessionId = null 
         }
         const rows = await deps.listQueue({ symbols: [sym], status: ['queued', 'in_research', 'rejected'], limit: 50 })
         if (rows === null) return { kind, state: 'unknown' }
-        const book = BOOK_OF_HORIZON[String(horizon).toLowerCase()]
+        const book = decide ? null : BOOK_OF_HORIZON[String(horizon).toLowerCase()]
         const answers = (r) => (need === 'view' ? r.context?.view === book : need === 'reinit' ? r.context?.reinit === true : need === 'new' ? !r.context?.view && !r.context?.reinit : true)
         const mine = rows.filter(r => _isCatalystRow(r) === (kind === 'catalyst') && answers(r))
         // A claim that carries a reason was decided against (researchRun leaves a failed turn, a failed save or a Stop
@@ -164,7 +223,7 @@ export async function readFor(symbol, horizon, deps = _deps, { sessionId = null 
         const dead = mine.find(r => r.status === 'in_research' && (r.reason || deps.now() - Date.parse(r.updated_at ?? r.created_at) > STALE_CLAIM_MS))
         if (dead) return { kind, state: 'failed', at: Date.parse(dead.updated_at ?? dead.created_at), rowId: dead.id }
         const waiting = mine.find(r => r.status === 'queued' || r.status === 'in_research')
-        if (waiting) return { kind, state: 'waiting', ...(need ? { need } : {}), ...(await _ahead(waiting, deps)) }
+        if (waiting) return { kind, state: 'waiting', ...(decide ? { decide: true } : {}), ...(need ? { need } : {}), ...(await _ahead(waiting, deps)) }
         const passed = mine.filter(r => r.status === 'rejected' && PASS_REASONS.has(r.reason) && Date.parse(r.updated_at ?? r.created_at) >= since).pop()
         if (passed) {
             return { kind, state: 'passed', against: true,
@@ -172,7 +231,7 @@ export async function readFor(symbol, horizon, deps = _deps, { sessionId = null 
         }
         const failedAt = sessionId ? _failed.get(`${sessionId}|${sym}|${kind}`) : null
         if (failedAt && deps.now() - failedAt < FAILED_HOLD_MS) return { kind, state: 'failed', at: failedAt, ...(need ? { need } : {}) }
-        return { kind, state: 'missing', ...(need ? { need } : {}) }
+        return { kind, state: 'missing', ...(decide ? { decide: true } : {}), ...(need ? { need } : {}) }
     } catch (err) {
         logger.warn(LOG, 'read check failed', { symbol: sym, horizon, error: err.message })
         return { kind, state: 'unknown' }
@@ -228,9 +287,9 @@ export async function requestRead({ symbol, horizon, sessionId, userId }, deps =
         }
         if (before.state === 'missing' || (retry && !before.rowId)) {
             // The session rides on the row, so a restart can find who was waiting (resumePending).
-            const base = { mentor: true, horizon, ...(sessionId ? { sessionId: String(sessionId) } : {}),
+            const base = { mentor: true, horizon, ...(horizon == null ? { decide: true } : {}), ...(sessionId ? { sessionId: String(sessionId) } : {}),
                 // A covered name's OTHER horizon (a <horizon_view>), or a retired / watchlist coverage re-researched.
-                ...(before.need === 'view' ? { view: BOOK_OF_HORIZON[String(horizon).toLowerCase()] } : before.need === 'reinit' ? { reinit: true } : {}) }
+                ...(before.need === 'view' ? { view: BOOK_OF_HORIZON[String(horizon ?? '').toLowerCase()] } : before.need === 'reinit' ? { reinit: true } : {}) }
             const context = kind === 'catalyst' ? { hotlist: true, requested: true, ...base } : base
             const res = await deps.enqueue({ symbol: sym, source: SOURCE, requestedBy: userId ? String(userId) : 'house', context })
             if (!res?.ok) { logger.warn(LOG, 'read not queued', { symbol: sym, kind, reason: res?.reason ?? null }); return { kind, state: 'unknown' } }
@@ -323,7 +382,7 @@ export async function resumePending(deps = _deps) {
             if (!sessionId) continue
             const kind = _isCatalystRow(r) ? 'catalyst' : 'coverage'
             _pending.set(`${sessionId}|${r.symbol}|${kind}`, { sessionId, userId: r.requestedBy === 'house' ? null : r.requestedBy ?? null,
-                symbol: r.symbol, horizon: r.context?.horizon ?? (kind === 'catalyst' ? 'short term swing' : 'swing'), kind, at: deps.now() })
+                symbol: r.symbol, horizon: r.context?.decide ? null : r.context?.horizon ?? (kind === 'catalyst' ? 'short term swing' : 'swing'), kind, at: deps.now() })
             n++
         }
         if (!n) return { resumed: 0 }
@@ -337,4 +396,4 @@ export async function resumePending(deps = _deps) {
     }
 }
 
-export const mentorReadsService = { readFor, requestRead, readKindFor, readTarget, readPending, resumePending, onReadSettled }
+export const mentorReadsService = { readFor, requestRead, readKindFor, readTarget, readPending, resumePending, onReadSettled, freshness, researchedAt }

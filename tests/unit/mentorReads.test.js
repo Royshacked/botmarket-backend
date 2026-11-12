@@ -3,8 +3,7 @@ import assert from 'node:assert/strict'
 import { memDb } from '../helpers/memDb.js'
 import {
     readKindFor, readTarget, coverageRead, catalystRead, readFor, requestRead, settlePending, pendingReads, onReadSettled,
-    readPending, resumePending, _resetPending, SOURCE, PASS_FRESH_DAYS,
-} from '../../services/mentorReads.service.js'
+    readPending, resumePending, _resetPending, SOURCE, PASS_FRESH_DAYS, freshness, researchedAt, } from '../../services/mentorReads.service.js'
 import { makeMentorActions } from '../../services/desks/actions/mentor.actions.js'
 import { setupReason } from '../../api/setups/setupReasons.js'
 import { makeSessionService } from '../../services/session.service.js'
@@ -32,15 +31,51 @@ test('the read by horizon: coverage for swing and long term, a catalyst read for
     assert.equal(readKindFor('short term swing'), 'catalyst')
     assert.equal(readKindFor('intraday'), null)
     assert.equal(readKindFor('day'), null)
-    assert.equal(readKindFor(null), null)
+    assert.equal(readKindFor(null), 'coverage', 'no horizon yet: the DECIDING read (argus-rework.md §2.3)')
 })
 
-test('the target is the active name and its SETTLED horizon — a claimed one is a guess, and intraday needs none', () => {
+test('the target: the SETTLED horizon\'s read; none settled yet → the DECIDING read; a day trade needs none (Roy, 2026-11-12)', () => {
     assert.deepEqual(readTarget(ledger('nvda', { horizon: 'swing' })), { symbol: 'NVDA', horizon: 'swing' })
-    assert.equal(readTarget(ledger('NVDA', {}, { horizon: { value: 'swing', source: 'mentor' } })), null, 'claimed only')
+    assert.deepEqual(readTarget(ledger('NVDA', {}, { horizon: { value: 'swing', source: 'mentor' } })), { symbol: 'NVDA', horizon: null }, 'a claim is not settled: the experts decide')
+    assert.equal(readTarget(ledger('NVDA', {}, { horizon: { value: 'intraday', source: 'hotlist' } })), null, 'a day board hand-off: no read')
     assert.equal(readTarget(ledger('NVDA', { horizon: 'intraday' })), null)
-    assert.equal(readTarget({ active_asset: 'NVDA', draft: null }), null)
+    assert.deepEqual(readTarget({ active_asset: 'NVDA', draft: null }), { symbol: 'NVDA', horizon: null }, '"let\'s trade NVDA" — a name and nothing else')
     assert.equal(readTarget(null), null)
+})
+
+// ─── The DECIDING read (argus-rework.md §2.3): fresh coverage, or re-researched first ─────────────────────────────
+const DNOW = Date.parse('2026-11-12T15:00:00Z')
+const DAYS = (n) => new Date(DNOW - n * 86_400_000).toISOString()
+
+test('freshness: researched within 30 days and no report since; the research is the latest initiation, re-model or re-initiation', () => {
+    assert.equal(researchedAt({ created_at: DAYS(90), monitor: { last_remodel_at: DAYS(20) }, revisions: [{ kind: 'update', at: DAYS(1) }] }), DAYS(20), 'a plain update is not research')
+    assert.equal(researchedAt({ created_at: DAYS(90), revisions: [{ kind: 'reinitiate', at: DAYS(3) }] }), DAYS(3))
+    assert.equal(freshness({ created_at: DAYS(10) }, null, DNOW).fresh, true)
+    assert.match(freshness({ created_at: DAYS(40) }, null, DNOW).stale, /over 30 days ago/)
+    assert.match(freshness({ created_at: DAYS(10) }, DAYS(5).slice(0, 10), DNOW).stale, /a report on .* after the research/)
+    assert.equal(freshness({ created_at: DAYS(10) }, DAYS(15).slice(0, 10), DNOW).fresh, true, 'a report BEFORE the research is in it')
+})
+
+test('the deciding read: fresh live coverage is READY with its views and date; stale is re-researched (reinit); none is new', async () => {
+    const base = { now: () => DNOW, lastReport: async () => null, listQueue: async () => [], getRun: () => null,
+        liveCatalyst: async () => null, latestCatalyst: async () => null }
+    const fresh = { ...COV, created_at: DAYS(5), horizon_views: { long_term: { book: 'long_term', rating: 'buy', target: { value: 300, target_date: '2027-11-01' } } } }
+    const ready = await readFor('NVDA', null, { ...base, coverage: async () => fresh })
+    assert.equal(ready.state, 'ready')
+    assert.equal(ready.decide, true)
+    assert.match(ready.facts, /his long-term view: buy, target 300\.00 by 2027-11-01/)
+    assert.match(ready.facts, /researched 2026-11-07/)
+    const stale = await readFor('NVDA', null, { ...base, coverage: async () => ({ ...COV, created_at: DAYS(45) }) })
+    assert.deepEqual([stale.state, stale.need, stale.decide], ['missing', 'reinit', true])
+    const reported = await readFor('NVDA', null, { ...base, coverage: async () => ({ ...COV, created_at: DAYS(10) }), lastReport: async () => DAYS(2).slice(0, 10) })
+    assert.equal(reported.need, 'reinit', 'a report since the research')
+    const none = await readFor('NVDA', null, { ...base, coverage: async () => null })
+    assert.deepEqual([none.state, none.need], ['missing', 'new'])
+})
+
+test("the wait line for a deciding read says what it decides, and why it is read again", () => {
+    assert.equal(readWaitLine({ symbol: 'TSLA', horizon: null }, { kind: 'coverage', need: 'reinit', ahead: 0 }),
+        "Before I say whether TSLA is worth trading, and on which horizon, Prometheus is reading it — his coverage again (it is over 30 days old, or a report has come out since). I'll carry on as soon as it lands.")
 })
 
 // ─── Reading a read ──────────────────────────────────────────────────────────
@@ -419,4 +454,25 @@ test('#5 after a restart the waiting reads are found again from their rows — t
     assert.deepEqual(pendingReads().map(p => [p.sessionId, p.symbol, p.kind, p.userId]), [['s9', 'NVDA', 'coverage', 'u1'], ['s8', 'SMCI', 'catalyst', 'u2']])
     assert.deepEqual(back.calls.startRun, [{ userId: null, symbols: ['NVDA', 'SMCI'] }])
     assert.deepEqual(await resumePending(deps({ listQueue: async () => null })), { resumed: 0 })
+})
+
+// ─── The TSLA drive (2026-11-12): "let's trade TSLA" — a first reply with no worksheet still gets the experts asked ─
+test("the name his reply was on (its <asset> tag) reaches the state, so the reads are asked after a first reply with no worksheet", async () => {
+    const { mentorNextState } = await import('../../services/desks/mentor.desk.js')
+    assert.equal(mentorNextState(null, { reply: 'Asking Prometheus and Proteus.', taggedAsset: 'TSLA' }).active_asset, 'TSLA')
+    assert.deepEqual(readTarget(mentorNextState(null, { reply: 'x', taggedAsset: 'TSLA' })), { symbol: 'TSLA', horizon: null })
+})
+
+test('a FRESH deciding read is handed to Mentor at once (his verdict is the turn it runs), and only once per session and name', async () => {
+    const r = rig({ target: { symbol: 'TSLA', horizon: null }, request: async () => ({ kind: 'coverage', state: 'ready', decide: true, facts: 'Prometheus buy, target 480.00', against: false }) })
+    const s = await r.sessions.getActive({ userId: 'u1' })
+    await r.sessions.setAgentState({ sessionId: s.sessionId, userId: 'u1', agent: 'mentor', state: { active_asset: 'TSLA', draft: null } })
+    await r.runner.afterTurn({ user, sessionId: s.sessionId, agent: 'mentor', origin: 'user', out: { payload: { reply: 'Asking them.' } } })
+    const [line, hand] = await rows(r.sessions, s)
+    assert.equal(line.agent, 'analyst')
+    assert.equal(line.content, 'TSLA: Prometheus buy, target 480.00', 'no "null" horizon in the line')
+    assert.equal(hand.kind, 'handoff')
+    assert.equal(r.queued[0].agent, 'mentor')
+    await r.runner.afterTurn({ user, sessionId: s.sessionId, agent: 'mentor', origin: 'chain', out: { payload: { reply: 'Long, swing.' } } })
+    assert.equal(r.queued.length, 1, 'handed once')
 })

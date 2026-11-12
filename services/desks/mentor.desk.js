@@ -16,6 +16,9 @@ import { setupReason } from '../../api/setups/setupReasons.js'
 import { normalizeBuild, activeName, putName, reopenForRedraw, stageOf } from '../mentorBuild.util.js'
 import { PRE_ENTRY } from '../entity/vocabulary.js'
 import { readFor, readTarget } from '../mentorReads.service.js'
+import { profileFor } from '../behaviourProfile.service.js'
+import { profileBrief } from '../tools/behaviourProfile.tools.js'
+import { sessionService } from '../session.service.js'
 
 /**
  * WHAT REACHES THE PANEL. Pure and tested — because everything the desk computes for the user has to
@@ -57,6 +60,38 @@ async function _prometheusRead(state, sessionId = null) {
     const t = readTarget(state)
     if (!t) return null
     return { ...t, ...(await readFor(t.symbol, t.horizon, undefined, { sessionId })) }
+}
+
+/**
+ * PROTEUS'S READ on the build's name (argus-rework.md §2.3) — his measured profile as one line, with its date. The house's,
+ * kept a week (behaviourProfile.service); the first ask for a name computes it in seconds. Null when there is no name or
+ * the profile could not be read (Mentor then goes on the chart and Prometheus).
+ */
+async function _proteusRead(state) {
+    const symbol = String(state?.active_asset || state?.draft?.asset || '').toUpperCase().trim()
+    if (!symbol) return null
+    const p = await profileFor(symbol).catch(() => null)
+    return p ? { symbol, at: p.computed_at ?? null, brief: profileBrief(p) } : null
+}
+
+// The experts' lines already in a session's chat, by `${sessionId}|${symbol}` — each says its read ONCE per name.
+const _saidExperts = new Set()
+
+/**
+ * Each expert's DATED line in the chat, once per session and name, before Mentor answers (argus-rework.md §2.3): Prometheus's
+ * deciding read when it is in (one landing later says itself — runner readSettled), and Proteus's profile. Never throws.
+ */
+async function _sayExperts({ sessionId, userId, read, proteus }) {
+    if (!sessionId || !userId) return
+    const symbol = read?.symbol ?? proteus?.symbol
+    const key = `${sessionId}|${symbol}`
+    if (!symbol || _saidExperts.has(key)) return
+    // Prometheus's line is the hand-off's (runner readSettled — a fresh read is handed on the same way as a landed one).
+    const lines = []
+    if (proteus?.brief) lines.push({ agent: 'proteus', content: `${symbol}, measured ${String(proteus.at ?? '').slice(0, 10)}: ${proteus.brief}` })
+    if (!lines.length) return
+    _saidExperts.add(key)
+    for (const l of lines) await sessionService.append({ sessionId, userId, message: { ...l, role: 'assistant' } }).catch(() => {})
 }
 
 /**
@@ -107,7 +142,9 @@ export function mentorNextState(prev, result, input = {}) {
     const offer = prev?.redraw?.offer && draft?.build && stageOf(activeName(normalizeBuild(draft.build))) === null ? { redraw: prev.redraw } : {}
     return {
         ...offer,
-        active_asset: draft?.asset || input.seed?.ticker || prev?.active_asset || '',
+        // The worksheet's name, else the seed's, else the one his reply was ON (its <asset> tag — a first reply on "let's
+        // trade TSLA" has no worksheet yet, and the experts' reads need the name: the TSLA drive, 2026-11-12).
+        active_asset: draft?.asset || input.seed?.ticker || result.taggedAsset || prev?.active_asset || '',
         draft,
         coverage:     result.coverage ?? prev?.coverage ?? [],
         drafts:       result.drafts ?? {},
@@ -243,10 +280,16 @@ export const mentorDesk = {
     sealAfterTurn: (result) => (result.closedSetup
         ? { kind: 'setup', entityIds: [result.closedSetup.id], name: result.closedSetup.asset ? `${result.closedSetup.asset} setup` : null }
         : null),
-    run: async ({ state, input, emit, common, sessionId }) => mentorAgentService.chatStream({
+    run: async ({ state, input, emit, common, sessionId }) => {
+        // Prometheus's read on the build's name — for its confirmed horizon, or, before there is one, the DECIDING read
+        // (argus-rework.md §2.3) — and Proteus's measured profile beside it. Checked by code every turn.
+        const read = await _prometheusRead(state, sessionId)
+        const proteus = await _proteusRead(state)
+        await _sayExperts({ sessionId, userId: common.userId, read, proteus })
+        return mentorAgentService.chatStream({
         ...common,
-        // Prometheus's read on the build's name for its confirmed horizon — checked by code every turn (step 3).
-        prometheusRead: await _prometheusRead(state, sessionId),
+        prometheusRead: read,
+        proteusRead: proteus,
         // …and again after the turn, when the turn itself confirmed the horizon (CR 2026-11-11: Generate lit, then refused).
         readNow: (target) => readFor(target.symbol, target.horizon, undefined, { sessionId }),
         // `ops` — what a card press decided — is ONE-SHOT: it rides this turn only. The HTTP client puts
@@ -259,7 +302,8 @@ export const mentorDesk = {
         onAsset:     (symbol)   => emit('asset',     { symbol }),
         onInterval:  (interval) => emit('interval',  { interval }),
         onCoverage:  (coverage) => emit('coverage',  { coverage }),
-    }),
+        })
+    },
     done: (result) => _mentorResponse(result),
     // The session's commits and direct edits (plan phase 8, K2/K3) — services/desks/act.js runs them.
     actions:   mentorActions,

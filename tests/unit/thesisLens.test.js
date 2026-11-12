@@ -30,25 +30,26 @@ test('the seed section: every hand-off — the Hotlist, the book, Argus — open
         { ticker: 'MTG', recommended_mode: 'smc' },
     ]) {
         const text = _buildSeedSection(seed)
-        assert.match(text, /start with the rules \(§ The thesis lens, the opening\), because you are building it RISK-BASED \(the `thesis` lens\)/)
+        assert.match(text, /start with the rules \(§ How you build every trade, the opening\)/)
+        assert.doesNotMatch(text, /RISK-BASED|the `thesis` lens/, 'never named (2026-11-12)')
         assert.doesNotMatch(text, /Argus recommends|smc/)
     }
 })
 
 test('the lens prompt: a risk-based build opens with the rules, once, and only there (Roy, 2026-11-05)', () => {
     const p = readFileSync(new URL('../../prompts/mentor_system_prompt.md', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
-    const lens = p.slice(p.indexOf('## The thesis lens'), p.indexOf('## Size comes from the user'))
+    const lens = p.slice(p.indexOf('## How you build every trade'), p.indexOf('## Size comes from the user'))
     assert.match(lens, /the\nreply STARTS with these lines/)
     // 'Your numbers:' — position size, risk and R:R, the ONE question (Roy, 2026-11-12; was 'Your limits:').
     for (const rule of ['Stop:', 'Target:', 'Your numbers:', 'Entry:', 'If it leaves before filling:']) assert.ok(lens.includes(`- **${rule}**`), rule)
-    assert.match(lens, /Never on a later\nturn, on a redraw or an edit of a saved setup, or on the user's own setup/)
-    assert.doesNotMatch(p, /Say in one line that you are building it risk-based/)
-    assert.match(_buildModeSection('user'), /with the rules of the lens if this build has not said them/)
+    assert.match(lens, /Once per build\. Never on a later turn, or on a redraw or an edit of a saved setup\./)
+    assert.match(lens, /> How I'll build it:/, 'the rules open without naming a lens (2026-11-12)')
+    assert.doesNotMatch(p, /I'm building this risk-based/)
 })
 
 test('the lens prompt: one target, a second one offered (stop unchanged), never set unasked — tests 2 / 2b', () => {
     const p = readFileSync(new URL('../../prompts/mentor_system_prompt.md', import.meta.url), 'utf8')
-    const lens = p.slice(p.indexOf('## The thesis lens'), p.indexOf('## Size comes from the user'))
+    const lens = p.slice(p.indexOf('## How you build every trade'), p.indexOf('## Size comes from the user'))
     assert.match(lens, /ONE target — yours to JUDGE/)
     assert.match(lens, /OFFER a second target, never set it unasked/)
     assert.match(lens, /the stop\s+UNCHANGED — no trail, no move to breakeven/)
@@ -56,8 +57,8 @@ test('the lens prompt: one target, a second one offered (stop unchanged), never 
 
 test('the lens prompt: building straight through keeps the lens; the house valuation is never the take-profit (NXST)', () => {
     const p = readFileSync(new URL('../../prompts/mentor_system_prompt.md', import.meta.url), 'utf8')
-    const lens = p.slice(p.indexOf('## The thesis lens'), p.indexOf('## Size comes from the user'))
-    assert.match(lens, /Building straight through does not skip the lens/)
+    const lens = p.slice(p.indexOf('## How you build every trade'), p.indexOf('## Size comes from the user'))
+    assert.match(lens, /Building straight through does not skip the judging/)
     assert.match(lens, /read `get_price_structure`/)
     assert.match(lens, /Prometheus's price target is never the take-profit here/)
 })
@@ -197,7 +198,7 @@ test('the lens prompt: the dates and B come from the tools, never the candles (G
 
 const _lens = () => {
     const p = readFileSync(new URL('../../prompts/mentor_system_prompt.md', import.meta.url), 'utf8')
-    return p.slice(p.indexOf('## The thesis lens'), p.indexOf('## Size comes from the user'))
+    return p.slice(p.indexOf('## How you build every trade'), p.indexOf('## Size comes from the user'))
 }
 
 test('the lens prompt: the deeper stop is OFFERED with its cost and its date, never set unasked (GNRC)', () => {
@@ -217,9 +218,9 @@ test('the lens prompt: the break scenario is offered on every build with an assu
     assert.doesNotMatch(lens, /No higher low printed → no B/, 'the higher low has not printed by design')
     assert.match(lens, /The break would CHANGE THE STOP when B's\s+stop sits clearly over A's/, 'Roy: B only when the break moves the stop')
     assert.match(lens, /so there is\s+no B, and you say so in one line/)
-    // Risk-based: both by default, no question (Roy, 2026-11-12); the user's setup still answers it.
-    assert.match(lens, /Risk-based \(§ ONE QUESTION\): both is the default — no question/)
-    assert.match(lens, /A → A alone, B → B alone, both → both/)
+    // Both by default, no question (Roy, 2026-11-12); a step-by-step build may drop one.
+    assert.match(lens, /\*\*Both is the default — no question\*\* \(§ How a trade goes\)/)
+    assert.match(lens, /On a step-by-step build they may drop one: A → A alone, B → B alone/)
     assert.match(lens, /a continuation or a breakout tested around zero/)
     assert.match(lens, /B alone keeps its arming condition/)
     assert.match(lens, /B's: the nearest swing high above both its level\s+and the arming line/, 'the break that arms B is never a runaway')
@@ -337,7 +338,7 @@ test('the break section: B is ON OFFER on the regular stop as well as the deep o
     assert.match(structure, /a DAY close over 212\.81 arms it; the stop you ASSUME for then is 197\.34 — \$15\.47 \(7\.3%\) from the break/)
     assert.match(structure, /has not printed, so judge it and say it is assumed/)
     assert.match(structure, /The worksheet's stop 178\.81 is under B's: the break CHANGES THE STOP, so B is ON OFFER THIS TURN/)
-    assert.match(structure, /Take BOTH — the risk-based default \(§ ONE QUESTION\), no question: the first to fill takes the whole size and the other is cancelled/)
+    assert.match(structure, /Take BOTH — the default \(§ How a trade goes\), no question: the first to fill takes the whole size and the other is cancelled/)
     assert.match(structure, /Once they dropped one, leave it/)
     assert.match(_buildBreakSection(FACTS, ON(171.06)), /ON OFFER THIS TURN/, 'the deep stop too')
     assert.match(_buildBreakSection(FACTS, { scenarios: [] }), /The structure stop 178\.81 is under B's: the break CHANGES THE STOP/, 'nothing drawn yet: compared with the structure stop')
@@ -381,7 +382,7 @@ test('the break section: no structure stop is not a stop of 0 (code review)', ()
 test('the break section at spans carries what it would at the entries, only the timing differs (code review)', () => {
     const spans = _buildBreakSection({ ...FACTS, stage: 'spans' }, ON(178.81))
     assert.match(spans, /ON OFFER ONCE THE SPAN SETTLES/)
-    assert.match(spans, /Take BOTH — the risk-based default/)
+    assert.match(spans, /Take BOTH — the default/)
     assert.match(spans, /B's ENTRY is get_entry_level/)
     assert.match(_buildBreakSection({ ...FACTS, close: 175, stage: 'spans' }, { scenarios: [] }), /regular scenario is OFF/)
     assert.match(_buildBreakSection({ ...FACTS, stage: 'spans' }, ON(196)), /no B/)

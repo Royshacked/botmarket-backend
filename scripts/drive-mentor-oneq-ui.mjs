@@ -1,6 +1,6 @@
-// DRIVE THE SCREEN — Mentor's ONE QUESTION (docs/design/argus-rework.md §2.2): in the real chat, ask for a swing trade,
-// answer Mentor's one question (position size, risk, R:R), and watch the build end "saved and armed" — then the setup in
-// the trades list. Screenshots at each step; the user's own marked account is what the turn carries (the screen's).
+// DRIVE THE SCREEN — Mentor, one way (docs/design/argus-rework.md §2.2 + §2.3): in the real chat say "let's trade X" —
+// no direction, no horizon — see Prometheus's and Proteus's lines and Mentor's verdict (long or not, which horizon), answer
+// the three numbers, take "all the way", and watch the build end "saved and armed" — then the setup in the trades list. Screenshots at each step; the user's own marked account is what the turn carries (the screen's).
 //
 //   node scripts/drive-mentor-oneq-ui.mjs [baseUrl] [outDir] [TICKER]      (default http://localhost:5173 · . · EQPT)
 //
@@ -13,7 +13,7 @@ import { chromium } from 'playwright'
 
 const BASE = process.argv[2] ?? 'http://localhost:5173'
 const OUT = process.argv[3] ?? '.'
-const TICKER = (process.argv[4] ?? 'EQPT').toUpperCase()
+const TICKER = (process.argv[4] ?? 'TSLA').toUpperCase()
 const USER = { username: 'ui-smoke', password: 'Sm0ke!Drive#29' }
 dns.setServers(['8.8.8.8', '1.1.1.1'])
 
@@ -44,36 +44,48 @@ try {
     await shot(page, '01-start')
 
     const box = page.locator('.chat-timeline textarea')
-    await box.fill(`Let's swing on ${TICKER}.`)
+    await box.fill(`Let's trade ${TICKER}.`)
     await box.press('Enter')
-    const asked = await waitText(page, /position size/, 240_000)
+    // Prometheus may read it first (~4 minutes when his coverage is missing or old): wait for the verdict's question.
+    const asked = await waitText(page, /position size/, 420_000)
     await page.waitForTimeout(3000)
     expect(asked, 'Mentor asked for position size, risk and R:R')
     const ask = (await timeline(page)).replace(/\s+/g, ' ')
-    console.log('  ask:', ask.slice(-600))
-    expect(!/all the way|checkpoints|A, B or both|how long should|let it go\?/i.test(ask.slice(-1200)), '…and nothing else')
-    await shot(page, '02-the-question')
+    console.log('  the read and the verdict:', ask.slice(-1500))
+    expect(/PROTEUS/i.test(ask), "Proteus's line is in the chat")
+    expect(/long/i.test(ask) && /(intraday|short term swing|swing|long term|day trade)/i.test(ask), 'a direction and a horizon from the experts')
+    expect(!/\blens\b|risk-based|\bthesis lens\b/i.test(ask), 'no lens / risk-based words')
+    await shot(page, '02-the-verdict')
+    const panel = await page.locator('.mentor-surface').innerText().catch(() => '')
+    expect(!/You choose|Yes — carry on|A, B or both|I want to buy NVDA/i.test(panel), 'the pane shows no chips or gate cards')
 
     await box.fill('Position size $5,000, risk $100, R:R 2.')
+    await box.press('Enter')
+    const choice = await waitText(page, /all the way/, 240_000)
+    await page.waitForTimeout(2000)
+    expect(choice, 'Mentor checked the account and asked: all the way, or step by step?')
+    console.log('  the choice:', (await timeline(page)).replace(/\s+/g, ' ').slice(-700))
+    await shot(page, '03-the-choice')
+    await box.fill('All the way.')
     await box.press('Enter')
     // Built, maybe held for Prometheus's read, then generated and armed: the session closes and Axl's line says so.
     const done = await waitText(page, /saved and armed/, 480_000)
     await page.waitForTimeout(2000)
     const after = (await timeline(page)).replace(/\s+/g, ' ')
     expect(done, `"saved and armed" on screen${done ? '' : ` — last: ${after.slice(-500)}`}`)
-    await shot(page, '03-saved-and-armed')
+    await shot(page, '04-saved-and-armed')
 
     // The setup in the trades list.
     await page.locator('text=Your trades >> visible=true').first().click().catch(() => {})
     await page.waitForTimeout(2500)
     const list = await page.locator('body').innerText()
     expect(new RegExp(TICKER).test(list), `${TICKER} in Your trades`)
-    await shot(page, '04-your-trades')
+    await shot(page, '05-your-trades')
 
     await page.setViewportSize({ width: 390, height: 844 })
     await page.waitForTimeout(1500)
     expect(!(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1)), 'no sideways scroll at 390px')
-    await shot(page, '05-phone')
+    await shot(page, '06-phone')
 } catch (err) {
     console.error('drive error:', err.message.split('\n')[0])
     failed = true

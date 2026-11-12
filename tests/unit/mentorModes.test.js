@@ -56,9 +56,9 @@ test("the user's-setup kit is the whole kit, untouched", () => {
 const nameWith = (settled = {}, claimed = {}) => ({ asset: 'NVDA', settled, claimed })
 const never = async () => { throw new Error('the read must not run') }
 
-test('the mode is the lens: thesis is risk-based, any other lens is the user\'s setup', async () => {
+test('ONE WAY (argus-rework.md §2.3, 2026-11-12): every build is the thesis build — even one that carries another lens', async () => {
     assert.deepEqual(await resolveMode({ name: nameWith({ lens: 'thesis' }), read: never }), { mode: MODE_THESIS, source: 'ledger' })
-    assert.deepEqual(await resolveMode({ name: nameWith({}, { lens: { value: 'smc', source: 'mentor' } }), read: never }), { mode: MODE_USER, source: 'ledger' })
+    assert.deepEqual(await resolveMode({ name: nameWith({}, { lens: { value: 'smc', source: 'mentor' } }), read: never }), { mode: MODE_THESIS, source: 'ledger' })
     assert.equal(lensOf(nameWith({ lens: 'smc' }, { lens: { value: 'thesis', source: 'mentor' } })), 'smc', 'settled wins over the claim')
 })
 
@@ -66,10 +66,9 @@ test('a hand-off (no lens yet) is risk-based without a read', async () => {
     assert.deepEqual(await resolveMode({ seed: { ticker: 'MTG' }, read: never }), { mode: MODE_THESIS, source: 'seed' })
 })
 
-test('a typed build with no lens is read; a failed read leaves it undecided', async () => {
+test('a typed build is the one way — no read of the user\'s words, no model call (2026-11-12)', async () => {
     const messages = [{ role: 'user', content: 'long NVDA on a pullback to the 50-day' }]
-    assert.deepEqual(await resolveMode({ messages, read: async () => MODE_USER }), { mode: MODE_USER, source: 'read' })
-    assert.deepEqual(await resolveMode({ messages, read: async () => null }), { mode: null, source: 'read' })
+    assert.deepEqual(await resolveMode({ messages, read: never }), { mode: MODE_THESIS, source: 'one' })
 })
 
 test('the setup read: SETUP → the user\'s, NONE → risk-based, anything else or a failure → undecided', async () => {
@@ -102,13 +101,12 @@ test('the read sees the last three user messages, text blocks included', () => {
     assert.equal(_userText(messages), 'two\n---\nthree\n---\nfour')
 })
 
-test('the turn context says the mode, and how to switch out of it', () => {
-    assert.match(_buildModeSection(MODE_THESIS), /RISK-BASED/)
-    assert.match(_buildModeSection(MODE_THESIS), /"switch_lens"/)
-    assert.match(_buildModeSection(MODE_THESIS), /Do NOT draw the new levels this turn/, 'the switch turn still runs on the risk-based kit (CR #2)')
-    assert.match(_buildModeSection(MODE_USER), /THE USER'S SETUP/)
-    assert.match(_buildModeSection(MODE_USER), /"switch_lens":"thesis"/)
-    assert.match(_buildModeSection(null), /UNDECIDED/)
+test('the turn context: the one way, never named — no mode, no switch (2026-11-12)', () => {
+    assert.match(_buildModeSection(MODE_THESIS), /BUILD: the one way/)
+    assert.match(_buildModeSection(MODE_THESIS), /never say it,\s+nor "lens", "risk-based" or "mode"/)
+    assert.doesNotMatch(_buildModeSection(MODE_THESIS), /switch_lens/)
+    assert.equal(_buildModeSection(MODE_USER), _buildModeSection(MODE_THESIS), 'an old caller passing the user mode gets the one way')
+    assert.equal(_buildModeSection(null), _buildModeSection(MODE_THESIS))
     assert.equal(_buildModeSection(undefined), '', 'a caller that did not say gets nothing')
 })
 
@@ -205,11 +203,11 @@ const turn = ({ raw = '', chatState = { active_asset: '', draft: null, coverage:
     }).then(out => ({ out, tools: names(tools) }))
 }
 
-test('a hand-off turn runs on the risk-based kit; a typed setup on the whole kit', async () => {
+test('every turn runs on the one way\'s kit — a hand-off and a typed build alike (2026-11-12)', async () => {
     const seeded = await turn({ seed: { ticker: 'MTG' }, read: never })
     assert.ok(!seeded.tools.includes('get_orderblocks') && seeded.tools.includes('get_price_structure'))
-    const typed = await turn({ read: async () => MODE_USER })
-    assert.ok(typed.tools.includes('get_orderblocks'))
+    const typed = await turn({ read: never })
+    assert.ok(!typed.tools.includes('get_orderblocks') && typed.tools.includes('get_price_structure'))
 })
 
 test('a switch turn with no worksheet: the plan carries the new lens and no old levels', async () => {

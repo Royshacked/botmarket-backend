@@ -3531,7 +3531,7 @@
         },
         {
             "name": "get_chart",
-            "description": "Render a candlestick chart IMAGE (with optional overlays) and LOOK at it — for what is SEEN NOW: a pattern forming or just completed (flag, cup and handle, head and shoulders, range, wedge), trend, where price sits vs the lines. A reading of one chart, never a hit rate. BILLS PER USE (render + vision): only when the user asks about patterns or the chart now; once or twice a turn at most.",
+            "description": "Render a candlestick chart IMAGE (with optional overlays) and LOOK at it — for what is SEEN NOW: a pattern forming or just completed (flag, cup and handle, head and shoulders, range, wedge), trend, where price sits vs the lines. A reading of one chart, never a hit rate. BILLS PER USE (render + vision): only when the user asks about patterns or the chart now; once or twice a turn at most.\nSHOW IT when you FOUND something (Roy, 2026-11-12): call it with `show_to_user: true` and `levels` labelling what you found, so the user sees it on the chart — a head and shoulders as \"left shoulder\", \"head\", \"right shoulder\", \"neckline\" (kind `level`), its measured target (`to`) and where it fails (`stop`); an order block as its top and bottom; a swept low as \"swept 412\". Horizontal lines only, at most 8: a sloped neckline or trendline is drawn at its price NOW — say so. Found nothing → do not show a chart.",
             "input_schema": {
                 "type": "object",
                 "properties": {
@@ -3558,6 +3558,10 @@
                     "indicators": {
                         "type": "string",
                         "description": "Optional free-text indicators to overlay, e.g. \"rsi(14), ema(50), volume, vwap\". Leave EMPTY for a PLAIN price-only chart (the default) — best for reading structure, orderblocks and S/R without moving-average clutter. Add an overlay ONLY to confirm a read against it."
+                    },
+                    "show_to_user": {
+                        "type": "boolean",
+                        "description": "Set true whenever this chart relates to the user's ACTUAL setup — you are defining, validating, or refining their entry / stop / take-profit or reading the market structure behind it, or they asked to see it. In those cases the user wants to see what you are looking at, so show it. Leave false / omit ONLY for a quick throwaway internal peek that does not inform the setup under discussion; such a check must NOT appear in the chat."
                     },
                     "levels": {
                         "type": "array",
