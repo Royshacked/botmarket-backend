@@ -262,6 +262,7 @@ async function chatStream({ messages = [], ideaAccounts = [], mainAccountId = nu
     // (which keeps its inner text in the UI), the plan/update/mandate blocks, and the shared
     // routing tags (the user asked to be sent to another desk with a name).
     const route = makeRouteCapture('portfolio')
+    let cutShort = false
     const tagCaptures = buildTagCaptures({
         phase:             phase.capture,
         ticker:            { onCapture: onTicker, keepText: true },
@@ -285,6 +286,8 @@ async function chatStream({ messages = [], ideaAccounts = [], mainAccountId = nu
             get_chart:    makeChartHandler({ log: LOG, onChart, readText: 'Read it as a POSITIONING question — where in the range, trend intact or broken, base or breakdown. Weights still come from the numbers.' }),
         },
         reasoningEffort, signal, onToken, tagCaptures, onToolStart, onReasoning, onChart,
+        // The turn's tool budget ran out: the chain runner carries the build on (argus-rework.md §2.2).
+        onBudgetSpent: () => { cutShort = true },
         meta: { accountCount: ideaAccounts.length, editMode: !!portfolioId },
     })
 
@@ -307,7 +310,7 @@ async function chatStream({ messages = [], ideaAccounts = [], mainAccountId = nu
     if (capturedUpdate) capturedUpdate = await _markAvoidAdds(capturedUpdate)
 
     logger.info(LOG, 'chatStream done', { go, replyLength: reply.length, hasPlan: !!capturedPlan, hasUpdate: !!capturedUpdate, hasMandate: !!capturedMandate, hasThesis: !!capturedThesis, screenRequests: screenRequests.length, coverageRefresh: !!coverageRefresh, phase: phase.get() })
-    return { reply, plan: capturedPlan, update: capturedUpdate, mandate: capturedMandate, thesis: capturedThesis, phase: phase.get(), ...(go ? { go: true } : {}), ...(screenRequests.length ? { screenRequests } : {}), ...(coverageRefresh ? { coverageRefresh } : {}), ...route.result() }
+    return { reply, plan: capturedPlan, update: capturedUpdate, mandate: capturedMandate, thesis: capturedThesis, phase: phase.get(), ...(go ? { go: true } : {}), ...(cutShort && !go ? { cutShort: true } : {}), ...(screenRequests.length ? { screenRequests } : {}), ...(coverageRefresh ? { coverageRefresh } : {}), ...route.result() }
 }
 
 // ─── Coverage-refresh extraction (pure) ─────────────────────────────────────────

@@ -43,6 +43,8 @@ export function _mentorResponse(result) {
         ...(result.closedSetup ? { closedSetup: result.closedSetup } : {}),
         // Done — the chain runner's go step generates and arms it (argus-rework.md §2.2).
         ...(result.go ? { go: result.go } : {}),
+        // Cut short by the tool budget — the runner carries the build on (argus-rework.md §2.2).
+        ...(result.cutShort ? { cut_short: true } : {}),
         // route / routeSymbol / opening are appended by the caller (routing.util).
     }
 }

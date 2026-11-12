@@ -106,6 +106,9 @@ export async function streamAnthropicWithTools({
     onToolStart,
     onReasoning,
     onUsage,
+    // Called once when this turn's tool budget runs out (the landing round) — the chain runner carries a one-answer
+    // build on into another turn instead of leaving it at "I'll continue next turn" (argus-rework.md §2.2).
+    onBudgetSpent,
     reasoningEffort,
     signal,
     client = _defaultClient,   // the test seam — a scripted client drives the loop without a network
@@ -253,7 +256,7 @@ export async function streamAnthropicWithTools({
             const results = await mapLimit(toolUseBlocks, b => _runTool(toolHandlers, b, toolCtx),
                 { concurrency: MAX_PARALLEL_TOOLS })
             // The next round is the landing round: tell the model so, next to the results it lands on.
-            if (i === maxContinuations - 2) results.push({ type: 'text', text: TOOL_BUDGET_LANDING })
+            if (i === maxContinuations - 2) { results.push({ type: 'text', text: TOOL_BUDGET_LANDING }); onBudgetSpent?.() }
             messages.push({ role: 'user', content: results })
             continue
         }

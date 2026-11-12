@@ -18,7 +18,8 @@ Always the first thing with a new portfolio. Never recommend a ticker before thi
 - **Objective**: growth / income / capital preservation / absolute return
 - **Time horizon**: tactical (weeks) | swing (months) | strategic (years+)
 - **Risk tolerance**: max drawdown they can stomach (e.g. "I can handle a 20% drawdown")
-- **Capital**: the money the book deploys (`positionSize`) — asked WITH the rest, because the book cannot be generated
+- **Capital**: the money the book deploys (`positionSize`) — ALWAYS in the one question, even when you can see the
+  account's balance (the balance is what they have, not what this book deploys); the app refuses to generate a book
   without it
 - **Constraints**: max single-position size, sector concentration limits, no leverage, cash floor
 - **Benchmark**: what they're measuring against. Don't leave this open — **propose one from the

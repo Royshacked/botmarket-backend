@@ -420,6 +420,8 @@ export async function runAgentStream({
     // its consults — whoever the ledger is, and with no user too. The ledger write is unchanged; this is for
     // a caller that has to know what ONE turn cost (the research run's per-name cost, house-research-chain.md).
     onSpend,
+    // The turn's tool budget ran out (the provider's landing round) — see anthropic.provider onBudgetSpent.
+    onBudgetSpent,
     meta = {},
     // Injectable so the argument-bag contract can be tested without a provider or a real model id.
     _resolve = resolveAgentStream,
@@ -471,6 +473,7 @@ export async function runAgentStream({
         reasoningEffort, signal, onToken,
         tagCaptures: chart ? _withChartCapture(tagCaptures, chart.capture) : tagCaptures,
         onToolStart, onReasoning: tagReasoning(REASONING_DESK), onUsage,
+        ...(onBudgetSpent ? { onBudgetSpent } : {}),
     })
 
     return chart ? stripChartBlock(raw) : raw

@@ -139,6 +139,7 @@ test('any other refusal: one line in the setup routes\' own words, nothing saved
 })
 
 // ─── Atlas's go: the book generated, no accounts needed, activation stays the user's ─────────────────────────────
+const SIZED = { pendingPlan: { ideas: [{ asset: 'MA', quantity: 10 }], positionSize: 50000 } }
 function atlasRig(act) {
     const { db } = memDb()
     const sessions = makeSessionService({ getDb: async () => db })
@@ -150,17 +151,25 @@ function atlasRig(act) {
     return { sessions, runner, pressed }
 }
 
-test("Atlas's go presses generate — no accounts, no arm (activating the book stays the user's press)", async () => {
+test("Atlas's go presses generate with the marked accounts — no arm (activating the book stays the user's press)", async () => {
     const r = atlasRig()
     const s = await r.sessions.getActive({ userId: 'u1' })
-    await r.runner.afterTurn({ user, sessionId: s.sessionId, agent: 'portfolio', origin: 'user', out: { payload: { reply: 'Built.', go: true } }, input: { accounts: [] } })
-    assert.deepEqual(r.pressed, [{ user, sessionId: s.sessionId, agent: 'portfolio', action: 'generate', args: {} }])
+    await r.sessions.setAgentState({ sessionId: s.sessionId, userId: 'u1', agent: 'portfolio', state: SIZED })
+    await r.runner.afterTurn({ user, sessionId: s.sessionId, agent: 'portfolio', origin: 'user', out: { payload: { reply: 'Built.', go: true } }, input: { accounts, mainAccountId: 'a1' } })
+    assert.deepEqual(r.pressed, [{ user, sessionId: s.sessionId, agent: 'portfolio', action: 'generate', args: { accounts, mainAccountId: 'a1' } }])
+    // None marked: one line, nothing pressed — a book with no venue saves nothing (the Atlas drive, 2026-11-12: nothing_saved).
+    const r2 = atlasRig()
+    const s2 = await r2.sessions.getActive({ userId: 'u1' })
+    await r2.runner.afterTurn({ user, sessionId: s2.sessionId, agent: 'portfolio', origin: 'user', out: { payload: { reply: 'Built.', go: true } }, input: {} })
+    assert.equal(r2.pressed.length, 0)
+    assert.match((await rows(r2.sessions, s2))[0].content, /no account is marked to put the book in/)
 })
 
 test("Atlas's refused go says why in the book routes' own words (a reasons TABLE, not a function)", async () => {
     const r = atlasRig(async () => ({ reason: 'plan_not_ready' }))
     const s = await r.sessions.getActive({ userId: 'u1' })
-    await r.runner.afterTurn({ user, sessionId: s.sessionId, agent: 'portfolio', origin: 'user', out: { payload: { reply: 'Built.', go: true } }, input: {} })
+    await r.sessions.setAgentState({ sessionId: s.sessionId, userId: 'u1', agent: 'portfolio', state: SIZED })
+    await r.runner.afterTurn({ user, sessionId: s.sessionId, agent: 'portfolio', origin: 'user', out: { payload: { reply: 'Built.', go: true } }, input: { accounts } })
     const [line] = await rows(r.sessions, s)
     assert.equal(line.agent, 'portfolio')
     assert.equal(line.content, 'Not generated yet — The plan is not sized yet — every holding needs a share count.')
@@ -171,4 +180,54 @@ test('a desk without a go (Argus, Prometheus) never presses anything', async () 
     const s = await r.sessions.getActive({ userId: 'u1' })
     await r.runner.afterTurn({ user, sessionId: s.sessionId, agent: 'analyst', origin: 'user', out: { payload: { reply: 'x', go: true } }, input: {} })
     assert.equal(r.pressed.length, 0)
+})
+
+// ─── a build cut short by the tool budget is carried on (Roy, 2026-11-12: auto-continue) ─────────────────────────
+test('a cut-short turn is carried on: a hand-off line to the same desk, its turn queued with the marked accounts — at most 3 in a row', async () => {
+    const { db } = memDb()
+    const sessions = makeSessionService({ getDb: async () => db })
+    const runner = makeChainRunner({ sessions, loadUser: async (id) => ({ _id: id, role: 'trader' }), reads: { target: () => null, request: async () => ({}) } })
+    const queued = []
+    runner.bindRunQueued(async (a) => { queued.push(a); return {} })
+    const s = await sessions.getActive({ userId: 'u1' })
+    const turn = (origin) => runner.afterTurn({ user, sessionId: s.sessionId, agent: 'portfolio', origin, out: { payload: { reply: 'More next turn.', cut_short: true } }, input: { accounts, mainAccountId: 'a1', ops: ['x'] } })
+    await turn('user')
+    assert.equal(queued.length, 1)
+    assert.equal(queued[0].agent, 'portfolio')
+    assert.equal(queued[0].origin, 'chain')
+    assert.equal(queued[0].text, null)
+    assert.deepEqual(queued[0].input, { accounts, mainAccountId: 'a1' }, 'the per-turn extras only — never a card press')
+    const [hand] = await rows(sessions, s)
+    assert.equal(hand.kind, 'handoff')
+    assert.equal(hand.to, 'portfolio')
+    await turn('chain'); await turn('chain')
+    assert.equal(queued.length, 3)
+    await turn('chain')
+    assert.equal(queued.length, 3, 'the fourth in a row is not carried')
+    assert.match((await rows(sessions, s)).at(-1).content, /say "continue"/)
+    await turn('user')
+    assert.equal(queued.length, 4, 'the user spoke: the count starts again')
+})
+
+test('a cut-short turn of a desk without a go (Prometheus) is not carried on', async () => {
+    const { db } = memDb()
+    const sessions = makeSessionService({ getDb: async () => db })
+    const runner = makeChainRunner({ sessions, loadUser: async (id) => ({ _id: id, role: 'trader' }), reads: { target: () => null, request: async () => ({}) } })
+    const queued = []
+    runner.bindRunQueued(async (a) => { queued.push(a); return {} })
+    const s = await sessions.getActive({ userId: 'u1' })
+    await runner.afterTurn({ user, sessionId: s.sessionId, agent: 'analyst', origin: 'user', out: { payload: { reply: 'x', cut_short: true } }, input: {} })
+    assert.equal(queued.length, 0)
+})
+
+test("Atlas's go REFUSES without the book's capital — one line asking for it, nothing pressed (Roy, 2026-11-12)", async () => {
+    const r = atlasRig()
+    const s = await r.sessions.getActive({ userId: 'u1' })
+    await r.sessions.setAgentState({ sessionId: s.sessionId, userId: 'u1', agent: 'portfolio', state: { pendingPlan: { ideas: [{ asset: 'MA', quantity: null }], positionSize: null } } })
+    await r.runner.afterTurn({ user, sessionId: s.sessionId, agent: 'portfolio', origin: 'user', out: { payload: { reply: 'Built.', go: true } }, input: { accounts } })
+    assert.equal(r.pressed.length, 0)
+    assert.equal((await rows(r.sessions, s))[0].content, 'The book is built, but I need its capital before I generate it — how much should it deploy?')
+    await r.sessions.setAgentState({ sessionId: s.sessionId, userId: 'u1', agent: 'portfolio', state: { pendingPlan: { ideas: [{ asset: 'MA', quantity: 10 }], positionSize: 50000 } } })
+    await r.runner.afterTurn({ user, sessionId: s.sessionId, agent: 'portfolio', origin: 'user', out: { payload: { reply: 'Built.', go: true } }, input: { accounts } })
+    assert.equal(r.pressed.length, 1, 'with the capital, it goes')
 })

@@ -70,13 +70,18 @@ export function readWaitLine(t, r) {
     return `Before I build the ${t.horizon} trade on ${t.symbol}, Prometheus is reading it — ${what}.${ahead} I'll carry on as soon as it lands.`
 }
 
+/** A build cut short by the tool budget is carried on at most this many turns in a row (Roy, 2026-11-12: auto-continue). */
+const MAX_CARRY = 3
+
 /**
  * The desks that can say <go> (argus-rework.md §2.2, Roy 2026-11-12) — what it presses, and whether it needs the marked
- * accounts. Mentor: generate AND arm (accounts). Atlas: generate the book (none — activating it stays the user's press).
+ * accounts. Mentor: generate AND arm. Atlas: generate the book — activating it stays the user's press. BOTH take the marked
+ * accounts, as their Generate press does: a book's holdings with no venue are refused one by one (`no_venue`, so the book
+ * was `nothing_saved` — the Atlas drive, 2026-11-12). Atlas's also needs the plan's capital (`positionSize`) — Roy, 2026-11-12.
  */
 const GO = Object.freeze({
     mentor:    Object.freeze({ action: 'generateArmed', accounts: true }),
-    portfolio: Object.freeze({ action: 'generate', accounts: false }),
+    portfolio: Object.freeze({ action: 'generate', accounts: true, capital: true }),
 })
 
 export function makeChainRunner({
@@ -92,6 +97,9 @@ export function makeChainRunner({
     // The commit pipe's held entry (act.actHeld) — bound after construction, like runQueued (services/desks/turns.js).
     let actHeld = null
     const bindAct = (fn) => { actHeld = fn }
+    // How many turns in a row a build has been carried on, by session and desk (carryOn). In memory: one instance runs
+    // the turns, and a restart forgetting a count only allows a few more carries.
+    const carryCount = new Map()
 
     const save = (user, sessionId, chain) => sessions.setChain({ sessionId, userId: user._id, chain })
     const end  = (user, sessionId, chain) => save(user, sessionId, endedChain(chain))
@@ -215,6 +223,10 @@ export function makeChainRunner({
         // A DESK'S GO (argus-rework.md §2.2): Mentor or Atlas said done — generate it (Mentor's armed too), if code lets
         // them. A go that went through ended the session; nothing else runs after it.
         if (out.payload?.go && GO[agent] && await deskGo({ user, sessionId, session, input, agent })) return
+        // A one-answer build cut short by the turn's tool budget: carried on into another turn, at most MAX_CARRY in a row
+        // (the count resets when the user speaks).
+        if (origin === 'user') carryCount.delete(`${sessionId}:${agent}`)
+        if (out.payload?.cut_short && GO[agent] && !out.payload?.route && await carryOn({ user, sessionId, agent, input })) return
 
         const payload  = out.payload
         const state    = session.agentState?.[agent] ?? null
@@ -264,9 +276,15 @@ export function makeChainRunner({
                 const marked = input?.accounts?.length ? { accounts: input.accounts, mainAccountId: input.mainAccountId ?? null } : null
                 args = marked ?? state?.go_pending ?? null
                 if (!args?.accounts?.length) {
-                    await say('I have the trade ready, but no account is marked to put it in — mark one in the account picker and say go.')
+                    await say(`It's ready, but no account is marked to put ${agent === 'portfolio' ? 'the book' : 'the trade'} in — mark one in the account picker and say go.`)
                     return false
                 }
+            }
+            // Atlas's go needs the book's CAPITAL (Roy, 2026-11-12): without it nothing is sized, and a book is never built
+            // on money the user did not name. Refused before the press, in words that ask for it.
+            if (rule.capital && !(Number(state?.pendingPlan?.positionSize) > 0)) {
+                await say('The book is built, but I need its capital before I generate it — how much should it deploy?')
+                return false
             }
             if (!actHeld) { logger.warn(LOG, 'go not bound — nothing generated'); return false }
             const r = await actHeld({ user, sessionId, agent, action: rule.action, args })
@@ -286,6 +304,30 @@ export function makeChainRunner({
             logger.warn(LOG, 'go failed — nothing generated', { agent, error: err.message })
             return false
         }
+    }
+
+    /**
+     * Carry a build on that the turn's tool budget cut short (argus-rework.md §2.2: one answer, then the desk finishes —
+     * nobody is there to say "continue"). A hand-off line to the same desk, then its turn queued, like a chain hop; the
+     * turn's input (the marked accounts) rides along. After MAX_CARRY in a row it stops and says so.
+     * @returns {Promise<boolean>} true when another turn was queued
+     */
+    async function carryOn({ user, sessionId, agent, input }) {
+        const key = `${sessionId}:${agent}`
+        const n = carryCount.get(key) ?? 0
+        if (n >= MAX_CARRY) {
+            carryCount.delete(key)
+            await sessions.append({ sessionId, userId: user._id, message: { agent, role: 'assistant',
+                content: 'This build is taking longer than usual — say "continue" and I will carry on from here.' } })
+            return false
+        }
+        carryCount.set(key, n + 1)
+        await sessions.append({ sessionId, userId: user._id, message: {
+            agent, role: 'assistant', kind: 'handoff', to: agent, content: 'Carry on the build from where the last turn stopped.',
+        } })
+        runQueued?.({ user, sessionId, agent, text: null, input: carried(input), turnId: `carry_${agent}_${Date.now()}`, origin: 'chain' })
+            ?.catch?.(err => logger.warn(LOG, 'carry-on turn failed', err.message))
+        return true
     }
 
     /** Ask for the read Mentor's build needs, if it is missing; never fails the turn. */

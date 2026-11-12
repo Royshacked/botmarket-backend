@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Live drive of the desk rework (docs/design/argus-rework.md steps 1–3 + two targets stage 1), real models, real database.
 //
-//   node scripts/drive-desk-architecture.mjs [part ...]      parts: pick · view · intraday · proteus · oneq (default: pick view)
+//   node scripts/drive-desk-architecture.mjs [part ...]      parts: pick · view · intraday · proteus · oneq · atlas (default: pick view)
 //                                            [--user ui-smoke]
 //
 // On THIS process's database (axl_dev on the laptop; it refuses `test`), as a throwaway QA user (default `ui-smoke`), so
@@ -19,6 +19,9 @@
 //   oneq      argus-rework.md §2.2: Axl, "let's swing on EQPT" → Mentor asks ONE question (size, risk, R:R) → the
 //             answer with the paper account marked → Mentor builds, says <go>, and the setup is SAVED AND ARMED (it
 //             waits for Prometheus's read if one runs). Leaves a real armed setup on the QA user's paper account.
+//   atlas     argus-rework.md §2.2: Axl, "build me a portfolio" → Atlas asks the MANDATE once → the answer → Atlas
+//             builds straight through, says <go>, and the book is GENERATED (holdings saved, waiting — not activated).
+//             May source a sleeve first (minutes). Leaves a real, unactivated book on the QA user's paper account.
 //
 // A few cents of model spend; `view` adds one Prometheus horizon read (~4 minutes). Exits 1 on a broken expectation.
 
@@ -257,6 +260,38 @@ async function partOneQuestion(user) {
     expect(/saved and armed/.test(line?.content ?? ''), `back at Axl: "${short(line?.content, 160)}"`)
 }
 
+async function partAtlas(user) {
+    step('ATLAS — the mandate once, then the book built and generated (not activated)')
+    const db = await getDb()
+    const { getTradingContext } = await import('../services/tradingContext.service.js')
+    const paper = (await getTradingContext(user._id)).accounts.find(a => a.mode === 'paper')
+    const input = paper ? { accounts: [paper], mainAccountId: paper.id } : undefined
+    const t0 = new Date()
+    const sid = await freshSession(user, 'axl')
+    const a = await say(user, sid, 'axl', 'Build me a portfolio.', input)
+    if (!expect(a?.data.payload?.route === 'portfolio', `Axl routed to Atlas (${a?.data.payload?.route})`)) return
+    const o = await doneFor('portfolio', 'opening')
+    const ask = o?.data.payload?.reply ?? ''
+    note(`  Atlas's ask: ${short(ask, 600)}`)
+    expect(/capital|how much|amount|\$/i.test(ask) && /horizon|time/i.test(ask) && /risk|drawdown/i.test(ask), 'Atlas asks the mandate — capital, horizon, risk — in one message')
+    const ans = await say(user, sid, 'portfolio', 'Growth, swing horizon (months), I can handle a 20% drawdown, $50,000 to deploy, no other constraints.', input)
+    note(`  Atlas's build: ${short(ans?.data.payload?.reply, 700)}`)
+    // Generated — at once, or after a sleeve was sourced and Atlas's chain turn said go.
+    let book = null
+    for (let i = 0; i < 300 && !book; i++) {   // up to 15 minutes: a carried-on build is several long turns
+        book = await db.collection('entities').findOne({ userId: user._id, portfolioId: { $exists: true, $ne: null }, savedAt: { $gte: t0.getTime() } })
+        if (!book) await new Promise(r => setTimeout(r, 3000))
+    }
+    if (!expect(!!book, `a book was generated (${Math.round((Date.now() - t0) / 1000)}s)`)) {
+        const rows = await sessionService.messagesSince({ sessionId: sid, userId: user._id }).catch(() => [])
+        note(`  last lines: ${(rows ?? []).slice(-3).map(r => `${r.agent}: ${short(r.content, 240)}`).join(' | ')}`)
+        return
+    }
+    const holdings = await db.collection('entities').find({ userId: user._id, portfolioId: book.portfolioId }).toArray()
+    note(`  book ${book.portfolioId}: ${holdings.map(h => `${h.asset} ${h.status}`).join(', ')}`)
+    expect(holdings.every(h => !['long', 'short', 'hit'].includes(h.status)), 'nothing activated — no holding is live or firing')
+}
+
 async function run() {
     const args = process.argv.slice(2)
     const ui = args.indexOf('--user')
@@ -277,6 +312,7 @@ async function run() {
         else if (p === 'intraday') await partIntraday(user)
         else if (p === 'proteus') await partProteus(user)
         else if (p === 'oneq') await partOneQuestion(user)
+        else if (p === 'atlas') await partAtlas(user)
         else expect(false, `unknown part ${p}`)
     }
     step('clean up')

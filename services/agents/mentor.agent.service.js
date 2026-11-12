@@ -277,9 +277,12 @@ async function chatStream({
         ...route.captures,
     })
 
+    // The turn's tool budget ran out: the chain runner carries the build on into another turn (argus-rework.md §2.2).
+    let cutShort = false
     const raw = await _run({
         log: LOG, requestedModel, userId, messages: builtMessages, systemPrompt, tools, toolHandlers: kitHandlers,
         reasoningEffort, signal, onToken, tagCaptures, onToolStart, onReasoning, onChart,
+        onBudgetSpent: () => { cutShort = true },
         meta: { asset: chatState?.active_asset || '', accounts: accounts?.length ?? 0 },
     })
 
@@ -559,6 +562,8 @@ async function chatStream({
         ...(closedSetup ? { closedSetup } : {}),
         // Done — generate and arm it (argus-rework.md §2.2). CODE decides whether it may (the chain runner's go step).
         ...(go ? { go } : {}),
+        // Stopped because the tool budget ran out, not because it was done — the runner carries it on.
+        ...(cutShort && !go ? { cutShort: true } : {}),
         ...route.result(),   // { route, routeSymbol, opening, edit } — the controller validates
     }
 }

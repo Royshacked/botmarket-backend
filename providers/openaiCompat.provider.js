@@ -337,7 +337,7 @@ const STREAM_MAX_TOKENS = 16_000
  */
 export async function streamOpenAICompatWithTools({
     endpoint = 'openrouter', wire, model,
-    promptOrMessages, systemPrompt, tools = [], toolHandlers = {}, maxContinuations = 10,
+    promptOrMessages, systemPrompt, tools = [], toolHandlers = {}, maxContinuations = 10, onBudgetSpent,
     onToken, tagCaptures = [], onToolStart, onReasoning, onUsage, signal, client = null,
     stall = stallGuard,   // the stall guard (streamStall) — a seam for tests
 }) {
@@ -443,7 +443,7 @@ export async function streamOpenAICompatWithTools({
         const results = await mapLimit(uses, u => _runTool(handlers, u, toolCtx),
             { concurrency: MAX_PARALLEL_TOOLS })
         messages.push(...toToolMessages(results))
-        if (i === maxContinuations - 2) messages.push({ role: 'user', content: TOOL_BUDGET_LANDING })
+        if (i === maxContinuations - 2) { messages.push({ role: 'user', content: TOOL_BUDGET_LANDING }); onBudgetSpent?.() }
     }
 
     throw new Error(`OpenAI-compat stream tool loop exceeded maxContinuations (${maxContinuations})`)

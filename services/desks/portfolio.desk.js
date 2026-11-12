@@ -194,5 +194,7 @@ export const portfolioDesk = {
         ...(result.coverageRefresh ? { coverage_refresh: result.coverageRefresh } : {}),
         // Done — the chain runner's go step generates the book (argus-rework.md §2.2).
         ...(result.go ? { go: true } : {}),
+        // Cut short by the tool budget — the runner carries the build on.
+        ...(result.cutShort ? { cut_short: true } : {}),
     }),
 }

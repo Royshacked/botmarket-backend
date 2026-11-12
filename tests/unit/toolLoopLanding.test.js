@@ -308,3 +308,18 @@ test('the tool ctx is built once per turn, so a budget on it survives across rou
     assert.equal(seen.size, 1, 'the SAME budget object across rounds — a per-round one would never run out')
     assert.equal([...seen][0].used, 2, 'and it counted both rounds')
 })
+
+test('anthropic: onBudgetSpent fires once on the landing round, and never on a turn inside its budget (argus-rework.md §2.2)', async () => {
+    let spent = 0
+    await streamAnthropicWithTools({
+        model: 'claude-sonnet-5', promptOrMessages: 'build it', systemPrompt: 'S', tools: [TOOL], toolHandlers: { get_quote: async () => 'q' },
+        maxContinuations: 3, client: fakeAnthropic([toolRound('t1'), toolRound('t2'), textRound('continuing next turn')]), onBudgetSpent: () => { spent++ },
+    })
+    assert.equal(spent, 1)
+    let quiet = 0
+    await streamAnthropicWithTools({
+        model: 'claude-sonnet-5', promptOrMessages: 'hi', systemPrompt: 'S', tools: [TOOL], toolHandlers: { get_quote: async () => 'q' },
+        maxContinuations: 10, client: fakeAnthropic([toolRound('t1'), textRound('done')]), onBudgetSpent: () => { quiet++ },
+    })
+    assert.equal(quiet, 0)
+})
