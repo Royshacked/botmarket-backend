@@ -1038,6 +1038,15 @@ services/
                             the live outcome log does. The catalyst path is replayed by proxy (`earningsBeat`:
                             an EPS beat of 5%+ reported the session before, from the calendar's actuals). The
                             summary rides GET /api/hotlist/outcomes as `backtest`
+  behaviourProfile.engine.js PROTEUS'S MEASURED PROFILE (docs/design/proteus.md §2, 2026-11-12) — how a stock's price
+                            behaves, COUNTED from candles, long side: touches of EMA20 / SMA50 / SMA200 (+ session VWAP
+                            intraday), RSI under 30, MACD cross up, high-volume up bars, false breaks of swing lows and
+                            what followed, bullish order-block retests (smc.engine); ATR %, gap, dollar volume; F
+                            (suitability: day trade / swing). ONE outcome everywhere (bracket: +1 ATR before a close
+                            −0.5 ATR, 10 bars); every rate against a BASELINE (a level shifted ±2/3 ATR, or the drift
+                            from every bar), two-proportion z ≥ 3, and the recent third must still beat its own
+                            baseline (judge → respects / faded / unconfirmed / no / thin). PURE; not yet fetched or
+                            stored (Proteus build steps 2-4).
   swingStructure.service.js WHO IS IN CONTROL of a chart, from its swings (2026-10-30) — the shared mechanism of the
                             THESIS lens: STRUCTURE (the rule's settings, one home), atr, swings (zigzag k × ATR, known
                             only once confirmed), mirror, toWeekly, controlReplay (who is in control + each break's
