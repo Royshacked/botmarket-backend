@@ -28,7 +28,6 @@
 import { ENTRY_ARCHETYPES, normalizeTaxon } from './setup.taxonomy.js'
 import { VALID_TIMEFRAMES, normalizeTimeframe } from './timeframe.service.js'
 import { SIZE_UNITS } from './positionSize.util.js'
-import { MODES } from './analysisModes.js'
 
 // The stages, in the order they settle. `fields` are what a stage owes; a stage is settled when all
 // of its fields are. `waivable` is the user's answer to the opening turn's second ask — the two
@@ -687,8 +686,8 @@ export function sanitizeBuildOps(raw) {
     }
 
     if (typeof raw.unsettle === 'string' && STAGE_KEYS.includes(raw.unsettle)) ops.unsettle = raw.unsettle
-    // The mode switch: a lens from the shared vocabulary, nothing else (docs/design/mentor-modes.md).
-    if (MODES.includes(raw.switch_lens)) ops.switchLens = raw.switch_lens
+    // `switch_lens` is no longer read (ONE WAY, 2026-11-12): there is no lens to switch to. applyBuildOps' switch below
+    // is reached by nothing on the wire (kept with its ledger tests).
     if (typeof raw.waiver === 'boolean') ops.waiver = raw.waiver
     // "You pick" at a gate. Only the gates can be handed back; anything else is dropped, not coerced.
     // `picks` are deliberately NOT read off the wire: what a delegation settles on is derived by the

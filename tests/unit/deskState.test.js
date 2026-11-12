@@ -38,12 +38,12 @@ test('Prometheus: the newest coverage draft and its symbol; the seed names it be
 
 test('Argus: single pick for Mentor, always — an old list, lens or radar board in the state is not carried (2026-11-09)', () => {
     const prev = { profile: 'investing', handoff: false, editingScanId: 'sc1', pendingScan: { candidates: [1] }, radar: true, radarBoard: { candidates: [{}] } }
-    assert.deepEqual(scannerNextState(prev, { scan: { candidates: [1, 2] } }), { handoff: true, handoffTo: 'mentor' })
-    assert.deepEqual(scannerNextState(null, {}), { handoff: true, handoffTo: 'mentor' })
+    assert.deepEqual(scannerNextState(prev, { scan: { candidates: [1, 2] } }), { handoff: true })
+    assert.deepEqual(scannerNextState(null, {}), { handoff: true })
 })
 
 test('Argus’s desk: lands in the single pick, hands back only the pick, and owns no list (2026-11-09)', () => {
-    const MODE = { handoff: true, handoffTo: 'mentor' }
+    const MODE = { handoff: true }
     assert.deepEqual(scannerDesk.onRouted({ profile: 'investing', pendingScan: { candidates: [1] } }, { handoff: false }), MODE)
     assert.deepEqual(scannerDesk.onRouted(null, null), MODE)
     const pick = { ticker: 'NVDA', direction: 'long', thesis: 't', analysis: 'a' }

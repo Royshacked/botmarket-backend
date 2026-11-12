@@ -35,6 +35,11 @@ Three ways a book comes to exist, and they are not the same desk turn:
 
 ## Atlas — construction
 
+> **One answer (2026-11-12, [design/argus-rework.md](../design/argus-rework.md) §2.2).** Atlas asks the mandate once —
+> capital required — and builds straight through: no gate sign-offs, AVOID industries left out, and his `<go>` generates
+> the book on the turn's marked accounts (the chain runner's `deskGo`; refused without capital). Activating it stays the
+> user's press. The pane shows the book and its thesis with the commit buttons only. The gates below are the history.
+
 `prompts/portfolio_system_prompt.md`. A seasoned PM: top-down, sequential, opinionated. Five
 phases and exactly **two gates** — "gate only where the user's input changes the outcome; a PM
 presents in flow, they don't ask permission to think":

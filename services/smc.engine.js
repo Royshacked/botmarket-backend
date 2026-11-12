@@ -103,21 +103,26 @@ export function detectStructure(bars, { lookback = 2 } = {}) {
 /**
  * Order blocks: the last OPPOSITE-color candle before an impulsive move that left an FVG — the origin
  * of the displacement (bullish OB = last bearish candle before a bullish FVG; bearish = last bullish
- * before a bearish FVG). Zone = that candle's [low, high]. `mitigated` inherits the FVG's. Newest first.
- * @returns {Array<{type:'bullish'|'bearish', top:number, bottom:number, at:number, mitigated:boolean}>}
+ * before a bearish FVG). Zone = that candle's [low, high]. `mitigated` inherits the FVG's (the newest one's).
+ * `impulseAt`: the middle (impulse) candle of the EARLIEST FVG that made this block — the block is KNOWN once the bar
+ * after it closes (Proteus's order-block test counts no retest before that). Newest first.
+ * @returns {Array<{type:'bullish'|'bearish', top:number, bottom:number, at:number, impulseAt:number, mitigated:boolean}>}
  */
 export function detectOrderBlocks(bars) {
     const obs = []
-    const seen = new Set()
+    const seen = new Map()   // origin candle → its block
     for (const g of detectFVG(bars)) {          // most-recent-first
         const i = bars.findIndex(b => b.timestamp === g.at)   // FVG middle (impulse) candle
         if (i < 1) continue
         const isBull = g.type === 'bullish'
         let k = i - 1
         while (k >= 0 && (isBull ? bars[k].close >= bars[k].open : bars[k].close <= bars[k].open)) k--
-        if (k < 0 || seen.has(bars[k].timestamp)) continue
-        seen.add(bars[k].timestamp)
-        obs.push({ type: g.type, top: bars[k].high, bottom: bars[k].low, at: bars[k].timestamp, mitigated: g.mitigated })
+        if (k < 0) continue
+        // An older FVG from the same origin: the block was known that much earlier (newest-first, so each repeat is older).
+        if (seen.has(bars[k].timestamp)) { seen.get(bars[k].timestamp).impulseAt = g.at; continue }
+        const ob = { type: g.type, top: bars[k].high, bottom: bars[k].low, at: bars[k].timestamp, impulseAt: g.at, mitigated: g.mitigated }
+        seen.set(bars[k].timestamp, ob)
+        obs.push(ob)
     }
     return obs
 }

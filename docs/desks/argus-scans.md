@@ -5,15 +5,20 @@
 > `/api/scanner` routes and the "Research the top N" hand-off are all in `archive/` — see `archive/README.md` for the
 > file list and how to revive them. Old `scan` documents stay in Mongo, unread.
 >
-> **What is LIVE:** only **hand-off mode** — Mentor sends a user with no name here, Argus finds ONE and emits
-> `<argus_pick>`, and the chain carries it back to Mentor (§ The hops, first row). It is now the desk's only mode
-> (`services/desks/scannerMode.js`), and only Mentor can route here (`registry.js` `routedFrom`, `routing.util.js`
-> `mayRoute`). Argus the house agent — the house scan, the Hotlist reads, Book timing, the sleeve screen — is a
-> different code path and unaffected.
+> **What is LIVE — Argus the PICKER (2026-11-11, [design/argus-rework.md](../design/argus-rework.md)).** Mentor sends a
+> user with no name here (only Mentor can: `registry.js` `routedFrom`, `routing.util.js` `mayRoute`). Argus reads the
+> house's list for the trade's horizon with `get_horizon_list` (`services/tools/horizonList.tools.js`) — today's latest
+> DAY BOARD for intraday / day (`services/hotlist.day.js`, no grades), This week for short term swing, the house's
+> Swing / Long term Buys for swing / long term — picks ONE, and emits `<argus_pick>`; the chain carries it back to
+> Mentor. He picks from the list, never the market: the market-wide screen (`screen_candidates`, `get_market_movers`,
+> `get_sector_snapshot`, `get_analyst_actions`), the house-industries first look, the hand-off module and the grounding
+> ledger are gone (archived). THE PICK GATE is code: a pick not shown this turn gets a second look at every house list
+> today, and is dropped otherwise, with a line under the reply. One short prompt (`scanner_system_prompt.md`). His chart
+> tools stay for close calls until Proteus takes them. Argus the house agent — the house scan, Book timing, the sleeve
+> screen — is a different code path and unaffected.
 >
-> Everything below is the desk as it was, kept for the reasoning. The sections on the funnel, grounding and the
-> hand-off still describe what the single pick runs on; the list shape, scoring, editing, the investing profile and
-> the radar cut are archived.
+> Everything below is the desk as it was, kept for the reasoning: the list shape, scoring, editing, the funnel,
+> grounding, the investing profile and the radar cut are all archived.
 
 The discovery desk: **Argus** turns "what should I be looking at this week" into a ranked, grounded
 list of candidates — and hands the one the user picks to the desk that builds on it. Written

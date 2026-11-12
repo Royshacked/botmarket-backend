@@ -12,6 +12,7 @@ import { TOOLS as AETHER_TOOLS }   from '../../services/agents/aether.agent.serv
 import { TOOLS as STRATEGY_TOOLS } from '../../services/agents/strategy.agent.service.js'
 import { TRADING_TOOLS }             from '../../services/tools/trading.tools.js'
 import { MENTOR_TOOLS }             from '../../services/agents/mentor.agent.service.js'
+import { TOOLS as PROTEUS_TOOLS }  from '../../services/agents/proteus.agent.service.js'
 import { SMC_TOOLS }                from '../../services/tools/smc.tools.js'
 import { VALUATION_TOOLS }          from '../../services/tools/valuation.tools.js'
 import { RUNUP_TOOLS }              from '../../services/tools/runup.tools.js'
@@ -55,6 +56,7 @@ const LIVE = {
     trading:   TRADING_TOOLS,
     mentor:    MENTOR_TOOLS,
     axl:       AXL_TOOLS,
+    proteus:   PROTEUS_TOOLS,
 }
 
 /** Structure only — everything a model can ACT on, with human prose stripped out. */
@@ -118,10 +120,16 @@ test('no tool is declared in BOTH the registry and a shared module', () => {
     }
 })
 
+// Argus's market-wide screen left his kit on 2026-11-11 (docs/design/argus-rework.md): he picks from the house's lists
+// now. No live agent carries these two, but the archived list-building Argus does, and `npm run check:archive` imports
+// it — toolsFor throws on an unknown name. Kept for the archive, listed here so it is a decision, not a hole.
+const ARCHIVE_ONLY = new Set(['screen_candidates', 'get_market_movers'])
+
 test('the registry has no orphans — every schema is used by some agent', () => {
     // An unused schema is dead weight that will drift out of sync with reality unnoticed.
     const used = new Set(Object.values(LIVE).flat().map(t => t.name))
-    for (const name of TOOL_NAMES) assert.ok(used.has(name), `orphan schema: ${name}`)
+    for (const name of TOOL_NAMES) assert.ok(used.has(name) || ARCHIVE_ONLY.has(name), `orphan schema: ${name}`)
+    for (const name of ARCHIVE_ONLY) assert.ok(!used.has(name), `${name} is live again — take it off ARCHIVE_ONLY`)
 })
 
 // ─── The reasoning sidecar, across desks ──────────────────────────────────────
@@ -132,7 +140,7 @@ test('the registry has no orphans — every schema is used by some agent', () =>
 //   • axl    — reception authors nothing, and its clause would have ruled out routing/explaining,
 //     i.e. nearly everything it does. A declaration read on every turn and reached for almost never
 //     loses money. See the note at the foot of axl.agent.service.js's TOOLS.
-const CONSULTS = new Set(['strategy', 'portfolio', 'scanner', 'analyst', 'mentor'])
+const CONSULTS = new Set(['strategy', 'portfolio', 'scanner', 'analyst', 'mentor', 'proteus'])
 
 for (const [agent, live] of Object.entries(LIVE)) {
     test(`${agent}: ${CONSULTS.has(agent) ? 'declares' : 'does not declare'} the reasoning sidecar`, () => {

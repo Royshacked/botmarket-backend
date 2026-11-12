@@ -5,6 +5,7 @@
 // Streams tokens / chart / status / coverage; the agent returns a DRAFT setup in `done`. Nothing
 // persists until the user presses Generate.
 
+import { keepBounded } from '../bounded.util.js'
 import { mentorAgentService, emptyMentorState } from '../agents/mentor.agent.service.js'
 import { parseClientTime } from '../../api/_shared/parse.util.js'
 import { sanitizeScanSeed } from '../scanSeed.util.js'
@@ -15,6 +16,10 @@ import { mentorActions, mentorApplyEdit } from './actions/mentor.actions.js'
 import { setupReason } from '../../api/setups/setupReasons.js'
 import { normalizeBuild, activeName, putName, reopenForRedraw, stageOf } from '../mentorBuild.util.js'
 import { PRE_ENTRY } from '../entity/vocabulary.js'
+import { readFor, readTarget } from '../mentorReads.service.js'
+import { profileFor } from '../behaviourProfile.service.js'
+import { profileBrief } from '../tools/behaviourProfile.tools.js'
+import { sessionService } from '../session.service.js'
 
 /**
  * WHAT REACHES THE PANEL. Pure and tested — because everything the desk computes for the user has to
@@ -40,8 +45,54 @@ export function _mentorResponse(result) {
         ...(result.scenarioOffer ? { scenarioOffer: result.scenarioOffer } : {}),
         // The setup this turn closed: the page's list re-reads.
         ...(result.closedSetup ? { closedSetup: result.closedSetup } : {}),
+        // Done — the chain runner's go step generates and arms it (argus-rework.md §2.2).
+        ...(result.go ? { go: result.go } : {}),
+        // Cut short by the tool budget — the runner carries the build on (argus-rework.md §2.2).
+        ...(result.cutShort ? { cut_short: true } : {}),
         // route / routeSymbol / opening are appended by the caller (routing.util).
     }
+}
+
+/**
+ * Where Prometheus's read stands for the name and confirmed horizon on Mentor's ledger (mentorReads; argus-rework.md
+ * step 3) → readFor's answer with `{ symbol, horizon }`, or null (no name, no confirmed horizon, or one that needs none).
+ */
+async function _prometheusRead(state, sessionId = null) {
+    const t = readTarget(state)
+    if (!t) return null
+    return { ...t, ...(await readFor(t.symbol, t.horizon, undefined, { sessionId })) }
+}
+
+/**
+ * PROTEUS'S READ on the build's name (argus-rework.md §2.3) — his measured profile as one line, with its date. The house's,
+ * kept a week (behaviourProfile.service); the first ask for a name computes it in seconds. Null when there is no name or
+ * the profile could not be read (Mentor then goes on the chart and Prometheus).
+ */
+async function _proteusRead(state) {
+    const symbol = String(state?.active_asset || state?.draft?.asset || '').toUpperCase().trim()
+    if (!symbol) return null
+    const p = await profileFor(symbol).catch(() => null)
+    return p ? { symbol, at: p.computed_at ?? null, brief: profileBrief(p) } : null
+}
+
+// The experts' lines already in a session's chat, by `${sessionId}|${symbol}` — each says its read ONCE per name. Bounded.
+const _saidExperts = new Set()
+
+/**
+ * Each expert's DATED line in the chat, once per session and name, before Mentor answers (argus-rework.md §2.3): Prometheus's
+ * deciding read when it is in (one landing later says itself — runner readSettled), and Proteus's profile. Never throws.
+ */
+async function _sayExperts({ sessionId, userId, read, proteus }) {
+    if (!sessionId || !userId) return
+    const symbol = read?.symbol ?? proteus?.symbol
+    const key = `${sessionId}|${symbol}`
+    if (!symbol || _saidExperts.has(key)) return
+    // Prometheus's line is the hand-off's (runner readSettled — a fresh read is handed on the same way as a landed one).
+    const lines = []
+    if (proteus?.brief) lines.push({ agent: 'proteus', content: `${symbol}, measured ${String(proteus.at ?? '').slice(0, 10)}: ${proteus.brief}` })
+    if (!lines.length) return
+    keepBounded(_saidExperts, key)
+    for (const l of lines) await sessionService.append({ sessionId, userId, message: { ...l, role: 'assistant' } }).catch(() => {})
 }
 
 /**
@@ -90,12 +141,26 @@ export function mentorNextState(prev, result, input = {}) {
     const draft = result.setup ?? prev?.draft ?? null
     // The pencil's offer stands until they take it (the ledger reopens): the turn that takes it needs what it says.
     const offer = prev?.redraw?.offer && draft?.build && stageOf(activeName(normalizeBuild(draft.build))) === null ? { redraw: prev.redraw } : {}
+    // The worksheet's name, else the seed's, else the one his reply was ON (its <asset> tag — a first reply on "let's
+    // trade TSLA" has no worksheet yet, and the experts' reads need the name: the TSLA drive, 2026-11-12).
+    const asset = String(draft?.asset || input.seed?.ticker || result.taggedAsset || prev?.active_asset || '')
+    const sameName = (a, b) => String(a ?? '').toUpperCase().trim() === String(b ?? '').toUpperCase().trim()
+    const seedHorizon = input.seed?.horizon && sameName(input.seed.ticker, asset) ? input.seed.horizon
+        : prev?.seed_horizon && sameName(prev.active_asset, asset) ? prev.seed_horizon : null
     return {
         ...offer,
-        active_asset: draft?.asset || input.seed?.ticker || prev?.active_asset || '',
+        active_asset: asset,
+        // A seed's horizon (a day board's name is an intraday trade), kept with ITS name: the read target needs no deciding
+        // read for a day trade even before Mentor writes the claim (mentorReads readTarget).
+        ...(seedHorizon ? { seed_horizon: seedHorizon } : {}),
         draft,
         coverage:     result.coverage ?? prev?.coverage ?? [],
         drafts:       result.drafts ?? {},
+        // The user's position size, risk and R:R (argus-rework.md §2.2), KEPT — a redraw or a later turn reads them
+        // here, never from the chat. A go held for a read keeps the accounts it was asked with (`go_pending`, runner).
+        ...(result.go ?? prev?.risk_plan ? { risk_plan: result.go ?? prev.risk_plan } : {}),
+        // …for THAT name only: a go held for TSLA never generates another name on its accounts (CR 2026-11-12).
+        ...(prev?.go_pending && (prev.go_pending.symbol ?? null) === (asset.toUpperCase().trim() || null) ? { go_pending: prev.go_pending } : {}),
         view: {
             gate:      result.gate ?? null,
             readiness: result.setup ? (result.readiness ?? null) : (prev?.view?.readiness ?? null),
@@ -224,19 +289,37 @@ export const mentorDesk = {
     sealAfterTurn: (result) => (result.closedSetup
         ? { kind: 'setup', entityIds: [result.closedSetup.id], name: result.closedSetup.asset ? `${result.closedSetup.asset} setup` : null }
         : null),
-    run: ({ state, input, emit, common }) => mentorAgentService.chatStream({
+    run: async ({ state, input, emit, common, sessionId }) => {
+        // Prometheus's read on the build's name — for its confirmed horizon, or, before there is one, the DECIDING read
+        // (argus-rework.md §2.3) — and Proteus's measured profile beside it. Checked by code every turn.
+        const read = await _prometheusRead(state, sessionId)
+        const proteus = await _proteusRead(state)
+        await _sayExperts({ sessionId, userId: common.userId, read, proteus })
+        // A go HELD for a read (runner deskGo, `go_pending`) kept the accounts it was asked with. The chain turn the read's
+        // landing runs carries none of its own — so this turn's readiness counts THOSE, for that name only, or it reads
+        // "no trading account" and the held go never comes back (the TSLA drive, 2026-11-12).
+        const held = state?.go_pending
+        const heldOn = held?.accounts?.length && String(held.symbol ?? '') === String(state?.active_asset ?? '').toUpperCase().trim()
+        const accounts = input.accounts?.length ? input.accounts : (heldOn ? held.accounts : [])
+        const mainAccountId = input.accounts?.length ? (input.mainAccountId ?? null) : (heldOn ? held.mainAccountId ?? null : input.mainAccountId ?? null)
+        return mentorAgentService.chatStream({
         ...common,
+        prometheusRead: read,
+        proteusRead: proteus,
+        // …and again after the turn, when the turn itself confirmed the horizon (CR 2026-11-11: Generate lit, then refused).
+        readNow: (target) => readFor(target.symbol, target.horizon, undefined, { sessionId }),
         // `ops` — what a card press decided — is ONE-SHOT: it rides this turn only. The HTTP client puts
         // it inside its chatState; a session turn hands it in as input.
         chatState:     input.ops ? { ...(state ?? emptyMentorState()), ops: input.ops } : (state ?? emptyMentorState()),
-        accounts:      input.accounts ?? [],
-        mainAccountId: input.mainAccountId ?? null,
+        accounts,
+        mainAccountId,
         clientTime:    input.clientTime ?? null,
         seed:          input.seed ?? null,
         onAsset:     (symbol)   => emit('asset',     { symbol }),
         onInterval:  (interval) => emit('interval',  { interval }),
         onCoverage:  (coverage) => emit('coverage',  { coverage }),
-    }),
+        })
+    },
     done: (result) => _mentorResponse(result),
     // The session's commits and direct edits (plan phase 8, K2/K3) — services/desks/act.js runs them.
     actions:   mentorActions,

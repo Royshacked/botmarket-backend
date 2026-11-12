@@ -5,10 +5,10 @@ import {
 } from '../../services/agents/mentor.agent.service.js'
 import { TRADING_TOOLS } from '../../services/tools/trading.tools.js'
 import {
-    kitFor, handlersFor, lensOf, resolveMode, makeSetupReader, _userText, THESIS_DROPPED, MODE_THESIS, MODE_USER,
+    kitFor, handlersFor, lensOf, resolveMode, THESIS_DROPPED, MODE_THESIS, MODE_USER,
 } from '../../services/mentorMode.service.js'
 import {
-    emptyBuild, upsertName, activeName, nameFor, putName, switchLens, applyBuildOps, sanitizeBuildOps,
+    emptyBuild, upsertName, activeName, putName, switchLens, applyBuildOps, sanitizeBuildOps,
 } from '../../services/mentorBuild.util.js'
 import { normalizeSetup } from '../../services/setup.schema.js'
 
@@ -56,59 +56,38 @@ test("the user's-setup kit is the whole kit, untouched", () => {
 const nameWith = (settled = {}, claimed = {}) => ({ asset: 'NVDA', settled, claimed })
 const never = async () => { throw new Error('the read must not run') }
 
-test('the mode is the lens: thesis is risk-based, any other lens is the user\'s setup', async () => {
+test('ONE WAY (argus-rework.md §2.3, 2026-11-12): every build is the thesis build — even one that carries another lens', async () => {
     assert.deepEqual(await resolveMode({ name: nameWith({ lens: 'thesis' }), read: never }), { mode: MODE_THESIS, source: 'ledger' })
-    assert.deepEqual(await resolveMode({ name: nameWith({}, { lens: { value: 'smc', source: 'mentor' } }), read: never }), { mode: MODE_USER, source: 'ledger' })
+    assert.deepEqual(await resolveMode({ name: nameWith({}, { lens: { value: 'smc', source: 'mentor' } }), read: never }), { mode: MODE_THESIS, source: 'ledger' })
     assert.equal(lensOf(nameWith({ lens: 'smc' }, { lens: { value: 'thesis', source: 'mentor' } })), 'smc', 'settled wins over the claim')
+})
+
+test('a SAVED setup on its own lens, opened for an edit, keeps it — and the whole kit (CR 2026-11-12: no restore loop)', async () => {
+    const smc = nameWith({ lens: 'smc' })
+    assert.deepEqual(await resolveMode({ name: smc, editing: true }), { mode: MODE_USER, source: 'ledger', lens: 'smc' })
+    assert.deepEqual(await resolveMode({ name: smc }), { mode: MODE_THESIS, source: 'ledger' }, 'not editing: the one way')
+    assert.deepEqual(await resolveMode({ name: nameWith({ lens: 'thesis' }), editing: true }), { mode: MODE_THESIS, source: 'ledger' })
+    const section = _buildModeSection(MODE_USER, 'smc')
+    assert.match(section, /keep `trade_mode: "smc"`/)
+    assert.doesNotMatch(section, /trade_mode: "thesis"/)
+    assert.ok(names(kitFor(MODE_USER, MENTOR_TOOLS)).includes('get_orderblocks'))
 })
 
 test('a hand-off (no lens yet) is risk-based without a read', async () => {
     assert.deepEqual(await resolveMode({ seed: { ticker: 'MTG' }, read: never }), { mode: MODE_THESIS, source: 'seed' })
 })
 
-test('a typed build with no lens is read; a failed read leaves it undecided', async () => {
+test('a typed build is the one way — no read of the user\'s words, no model call (2026-11-12)', async () => {
     const messages = [{ role: 'user', content: 'long NVDA on a pullback to the 50-day' }]
-    assert.deepEqual(await resolveMode({ messages, read: async () => MODE_USER }), { mode: MODE_USER, source: 'read' })
-    assert.deepEqual(await resolveMode({ messages, read: async () => null }), { mode: null, source: 'read' })
+    assert.deepEqual(await resolveMode({ messages, read: never }), { mode: MODE_THESIS, source: 'one' })
 })
 
-test('the setup read: SETUP → the user\'s, NONE → risk-based, anything else or a failure → undecided', async () => {
-    const messages = [{ role: 'user', content: 'build NVDA' }]
-    const reader = (reply) => makeSetupReader({ once: async () => reply, record: async () => {} })
-    assert.equal(await reader('SETUP')({ messages }), MODE_USER)
-    assert.equal(await reader(' none.')({ messages }), MODE_THESIS)
-    assert.equal(await reader('maybe')({ messages }), null)
-    assert.equal(await makeSetupReader({ once: async () => { throw new Error('down') } })({ messages }), null)
-    let called = false
-    assert.equal(await makeSetupReader({ once: async () => { called = true; return 'SETUP' } })({ messages: [] }), null)
-    assert.equal(called, false, 'no user words, no call')
-})
-
-test('the read never holds the turn: a slow read times out undecided, an aborted turn reads nothing (CR #7)', async () => {
-    const messages = [{ role: 'user', content: 'build NVDA' }]
-    const slow = makeSetupReader({ once: () => new Promise(r => setTimeout(() => r('NONE'), 200)), timeoutMs: 20 })
-    assert.equal(await slow({ messages }), null)
-    let called = false
-    const ac = new AbortController(); ac.abort()
-    assert.equal(await makeSetupReader({ once: async () => { called = true; return 'NONE' } })({ messages, signal: ac.signal }), null)
-    assert.equal(called, false)
-})
-
-test('the read sees the last three user messages, text blocks included', () => {
-    const messages = [
-        { role: 'user', content: 'one' }, { role: 'assistant', content: 'x' }, { role: 'user', content: 'two' },
-        { role: 'user', content: [{ type: 'text', text: 'three' }, { type: 'image' }] }, { role: 'user', content: 'four' },
-    ]
-    assert.equal(_userText(messages), 'two\n---\nthree\n---\nfour')
-})
-
-test('the turn context says the mode, and how to switch out of it', () => {
-    assert.match(_buildModeSection(MODE_THESIS), /RISK-BASED/)
-    assert.match(_buildModeSection(MODE_THESIS), /"switch_lens"/)
-    assert.match(_buildModeSection(MODE_THESIS), /Do NOT draw the new levels this turn/, 'the switch turn still runs on the risk-based kit (CR #2)')
-    assert.match(_buildModeSection(MODE_USER), /THE USER'S SETUP/)
-    assert.match(_buildModeSection(MODE_USER), /"switch_lens":"thesis"/)
-    assert.match(_buildModeSection(null), /UNDECIDED/)
+test('the turn context: the one way, never named — no mode, no switch (2026-11-12)', () => {
+    assert.match(_buildModeSection(MODE_THESIS), /BUILD: the one way/)
+    assert.match(_buildModeSection(MODE_THESIS), /never say it,\s+nor "lens", "risk-based" or "mode"/)
+    assert.doesNotMatch(_buildModeSection(MODE_THESIS), /switch_lens/)
+    assert.equal(_buildModeSection(MODE_USER), _buildModeSection(MODE_THESIS), 'an old caller passing the user mode gets the one way')
+    assert.equal(_buildModeSection(null), _buildModeSection(MODE_THESIS))
     assert.equal(_buildModeSection(undefined), '', 'a caller that did not say gets nothing')
 })
 
@@ -154,10 +133,10 @@ test('the same lens again is no switch', () => {
     assert.equal(r.name, before)
 })
 
-test('the tag: switch_lens takes a known lens only, and the ledger applies it with the gates handed back cleared', () => {
-    assert.deepEqual(sanitizeBuildOps({ switch_lens: 'smc', source: 'user' }), { switchLens: 'smc', source: 'user' })
+test('the tag: switch_lens is no longer read (one way, 2026-11-12); the ledger\'s switch itself still clears the gates handed back', () => {
+    assert.equal(sanitizeBuildOps({ switch_lens: 'smc', source: 'user' })?.switchLens, undefined)
     assert.equal(sanitizeBuildOps({ switch_lens: 'yolo' }), null)
-    const r = applyBuildOps(settledBuild(), { ...sanitizeBuildOps({ switch_lens: 'smc', settle: ['lens'], source: 'user' }), asset: 'NVDA' })
+    const r = applyBuildOps(settledBuild(), { switchLens: 'smc', settle: ['lens'], source: 'user', asset: 'NVDA' })
     assert.equal(r.switched, true)
     assert.deepEqual(r.refused, [], 're-settling the new lens in the same tag is not refused')
     assert.equal(activeName(r.build).settled.lens, 'smc')
@@ -205,37 +184,21 @@ const turn = ({ raw = '', chatState = { active_asset: '', draft: null, coverage:
     }).then(out => ({ out, tools: names(tools) }))
 }
 
-test('a hand-off turn runs on the risk-based kit; a typed setup on the whole kit', async () => {
+test('every turn runs on the one way\'s kit — a hand-off and a typed build alike (2026-11-12)', async () => {
     const seeded = await turn({ seed: { ticker: 'MTG' }, read: never })
     assert.ok(!seeded.tools.includes('get_orderblocks') && seeded.tools.includes('get_price_structure'))
-    const typed = await turn({ read: async () => MODE_USER })
-    assert.ok(typed.tools.includes('get_orderblocks'))
+    const typed = await turn({ read: never })
+    assert.ok(!typed.tools.includes('get_orderblocks') && typed.tools.includes('get_price_structure'))
 })
 
-test('a switch turn with no worksheet: the plan carries the new lens and no old levels', async () => {
+test('a turn carrying the old switch_lens tag switches nothing (2026-11-12)', async () => {
     const draft = { ...normalizeSetup(PLAN), build: settledBuild() }
-    const { out, tools } = await turn({
-        raw: 'Rebuilding it on your order block.\n<build>{"switch_lens":"smc","source":"user"}</build>',
-        chatState: { active_asset: 'NVDA', draft, coverage: [] },
-    })
-    assert.ok(!tools.includes('get_orderblocks'), 'the switch turn itself ran on the old mode\'s kit')
-    assert.equal(out.setup.trade_mode, 'smc')
-    assert.deepEqual(out.setup.scenarios, [])
-    assert.equal(activeName(out.build).claimed.lens.value, 'smc')
-    assert.ok(!('lens' in activeName(out.build).settled), 'their setup\'s lens waits on their yes')
-    assert.ok(!('spans' in activeName(out.build).settled))
-    assert.ok(!out.build.refused.some(r => r.field === 'lens'), 'the switch is not reported as a conflict')
-})
-
-test('a switch turn that draws new levels keeps them', async () => {
-    const draft = { ...normalizeSetup(PLAN), build: settledBuild() }
-    const next = { ...PLAN, trade_mode: 'smc', scenarios: [{ id: 's1', entry_legs: [{ price: 241 }], stop_legs: [{ price: 236 }], target_legs: [{ price: 255 }] }] }
     const { out } = await turn({
-        raw: `New levels.\n<build>{"switch_lens":"smc","source":"user"}</build>\n<setup>${JSON.stringify(next)}</setup>`,
+        raw: 'Rebuilding it.\n<build>{"switch_lens":"smc","source":"user"}</build>',
         chatState: { active_asset: 'NVDA', draft, coverage: [] },
     })
-    assert.equal(out.setup.trade_mode, 'smc')
-    assert.equal(out.setup.scenarios[0].entry_legs[0].price, 241)
+    assert.equal(out.setup.trade_mode, 'thesis')
+    assert.notEqual(lensOf(activeName(out.build)), 'smc')
 })
 
 test('a hand-off claims thesis on the ledger on turn one, even when the turn drew no worksheet (CR #6)', async () => {
@@ -254,15 +217,3 @@ test('a risk-based turn runs with the pattern handlers gone (CR #8)', async () =
     assert.ok(!('get_orderblocks' in handlers) && 'get_price_structure' in handlers)
 })
 
-test('a switch is judged against the name it writes to, not the one active before the turn (CR #9)', async () => {
-    // NVDA is on smc; the turn moves to AMD (no lens yet) and switches it to smc — a real switch for AMD.
-    const b = putName(upsertName(settledBuild(), 'AMD'), { asset: 'AMD', settled: {}, claimed: {} })
-    const withNvdaSmc = putName({ ...b, active: 'NVDA' }, { ...nameFor(b, 'NVDA'), settled: { ...nameFor(b, 'NVDA').settled, lens: 'smc' } })
-    const draft = { ...normalizeSetup(PLAN), build: withNvdaSmc }
-    const amd = { ...PLAN, asset: 'AMD' }
-    const { out } = await turn({
-        raw: `On AMD.\n<build>{"switch_lens":"smc","source":"user","asset":"AMD"}</build>\n<setup>${JSON.stringify(amd)}</setup>`,
-        chatState: { active_asset: 'NVDA', draft, coverage: [] },
-    })
-    assert.equal(nameFor(out.build, 'AMD').claimed.lens.value, 'smc')
-})

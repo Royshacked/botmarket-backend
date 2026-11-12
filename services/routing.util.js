@@ -55,7 +55,8 @@ export const ROUTABLE_DESKS = Object.freeze(Object.fromEntries(
 ))
 
 // A desk with `routedFrom` takes the user only from the agents it names (registry) — since 2026-11-09 Argus, whom only
-// Mentor sends anyone to. `from` is the sending agent's key; Axl passes none, so a restricted desk is never his to name.
+// Mentor sends anyone to — and Proteus, whom Axl and Mentor send users to. `from` is the sending agent's key (Axl's is
+// 'axl'); a capture with no key may not name a restricted desk.
 // Gated in the capture AND left off the sender's prompt, like the self-route.
 export function mayRoute(from, desk) {
     const d = ROUTABLE_DESKS[desk]
@@ -269,7 +270,8 @@ export function routeFields(result, role) {
  *
  * `agentKey` names the sender so a desk routing to ITSELF is dropped here: the rule says never, and
  * this is the gate that holds when a model forgets — a "Go to Argus" button under Argus's own reply
- * would reopen the desk the user is sitting at on a blank page. Axl passes none (it stands nowhere).
+ * would reopen the desk the user is sitting at on a blank page. Axl passes 'axl' (it stands at no desk, so nothing is
+ * dropped as his own) — the key a desk restricted to named senders (registry routedFrom) checks.
  */
 export function makeRouteCapture(agentKey = null) {
     let routeText = null, openText = null, editText = null, showText = null

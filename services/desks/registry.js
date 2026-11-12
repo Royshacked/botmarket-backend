@@ -18,7 +18,8 @@
  * @property {string|null} entityKind   what its work produces and an edit reopens — null if nothing
  * @property {boolean}     editable     whether <edit>kind id</edit> may reopen that entity at this desk
  * @property {boolean}     routable     whether ANOTHER desk may send the user here with a name
- * @property {string[]}    [routedFrom] when set, ONLY these agents may route here — Axl and every other desk cannot
+ * @property {string[]}    [routedFrom] when set, ONLY these agents may route here (Axl's key is 'axl') — every other
+ *                                     sender cannot
  * @property {string|null} does         the one line a sender's prompt shows (routable desks only)
  * @property {'main'|'strategy'|'aether'} scope  the session it talks in
  * @property {boolean}     admin        admin-only (the route gate and the prompts both hold it)
@@ -32,7 +33,7 @@ export const DESKS = Object.freeze({
         // Reception remembers deeper than a desk: its trim lands three times less often (see agentUtils.trimHistory).
         scope: 'main', admin: false, maxMessages: 20,
     }),
-    // ORDER IS LOAD-BEARING for the routable four: buildRouteRule lists them in this order inside every
+    // ORDER IS LOAD-BEARING for the routable desks: buildRouteRule lists them in this order inside every
     // desk's prompt, and a reorder changes every prompt (and its cache).
     analyst: Object.freeze({
         agent: 'analyst', desk: 'research', brand: 'Prometheus', entityKind: 'coverage', editable: true, routable: true,
@@ -55,6 +56,15 @@ export const DESKS = Object.freeze({
     scanner: Object.freeze({
         agent: 'scanner', desk: 'scan', brand: 'Argus', entityKind: null, editable: false, routable: true, routedFrom: Object.freeze(['mentor']),
         does: 'finds ONE tradeable name when the user has none, and hands it back here to build',
+        scope: 'main', admin: false, maxMessages: 10,
+    }),
+    // Proteus, the technical analysis expert (docs/design/proteus.md, 2026-11-12): how a stock's price behaves —
+    // measured from its candles, and what its chart shows now. APPENDED after Argus so the routable desks' order in
+    // every prompt stays as it was. Axl ("how does TSLA behave?") and Mentor send users here; the other desks do not,
+    // so only Mentor's route rule — not every desk's cached prompt — changes. Opened directly from the desks list too.
+    proteus: Object.freeze({
+        agent: 'proteus', desk: 'technicals', brand: 'Proteus', entityKind: null, editable: false, routable: true, routedFrom: Object.freeze(['axl', 'mentor']),
+        does: "reads how a stock's price behaves — what it respects technically, if anything, its ATR and false breaks, day trade or swing",
         scope: 'main', admin: false, maxMessages: 10,
     }),
     // The admin desks: Pythia sets the house view and Aether reads event exposure. Neither is somewhere a
@@ -82,7 +92,7 @@ const COMPOSITES = Object.freeze({
 // user to Argus is "find me ONE name to build on", so Argus starts in single-pick mode and the chain carries
 // the pick back to Mentor (unified-chat plan phase 5). sender → landing agent → preset.
 const HAND_BACK = Object.freeze({
-    mentor: Object.freeze({ scanner: Object.freeze({ handoff: true, handoffTo: 'mentor' }) }),
+    mentor: Object.freeze({ scanner: Object.freeze({ handoff: true }) }),
 })
 const COMPOSITE_PIPELINES = Object.freeze(Object.keys(COMPOSITES))
 

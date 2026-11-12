@@ -68,9 +68,9 @@ test('past the budget nothing is rendered and no vision call is spent', async ()
     assert.match(toolErrorText(out), /get_candles/)
 })
 
-// A toolError matters for more than tone: services/scanner.grounding credits a ticker as `validated`
-// when a per-name tool SUCCEEDS on it. A refusal returned as a plain string would ground a name
-// against a read that never happened.
+// A toolError matters for more than tone: a refusal returned as a plain string reads as a finding — a
+// read of the name that never happened. (Argus's grounding ledger, which credited a ticker on a
+// successful per-name call, was archived 2026-11-11: archive/services/scanner.grounding.js.)
 test('the refusal is a toolError, so it cannot ground a name it never read', async () => {
     const budget = makeVisionBudget(1)
     const h = handler({ renders: 0, visions: 0 })

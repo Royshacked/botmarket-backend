@@ -202,6 +202,29 @@ test('PACB in WORDS: "decide and let me generate" closes the gate, the held size
     assert.deepEqual(out.build.refused, [])
 })
 
+test('THE READ HOLDS GENERATE, re-checked after the turn (CR 2026-11-11): the horizon confirmed on THIS turn still holds it', async () => {
+    // The same finished build on a SWING horizon: a read is needed. The turn started with none in hand (prometheusRead null —
+    // the horizon was not settled when it began); the re-check after the turn finds it still running.
+    let held = upsertName(emptyBuild(), 'PACB')
+    held = applyBuildOps(held, { claim: { direction: 'long', horizon: 'swing', lens: 'discretionary' }, settle: ['direction', 'horizon', 'lens'], source: 'user' }).build
+    held = applyBuildOps(held, { claim: { spans: ['t1'] }, settle: ['spans'], source: 'user' }).build
+    held = applyBuildOps(held, { derived: { entries: ['t1:t1e1', 't1:t1e2'] } }).build
+    held = applyBuildOps(held, { size: { unit: 'size_cash', value: 20000 } }).build
+    const asked = []
+    const go = (state) => mentorAgentService.chatStream({
+        messages: [{ role: 'user', content: 'hi' }], accounts: ACCOUNTS,
+        chatState: { active_asset: 'PACB', draft: draftAt(held), coverage: [] },
+        readNow: async (t) => { asked.push(t); return { kind: 'coverage', state } },
+        _run: async () => 'I\'ve chosen the resting limit pullback.\n<build>{"delegate":"entries"}</build>',
+    })
+    const waiting = await go('waiting')
+    assert.deepEqual(asked[0], { symbol: 'PACB', horizon: 'swing' })
+    assert.equal(waiting.readiness.ready, false, 'Generate stays dark while Prometheus reads')
+    assert.ok(waiting.readiness.problems.includes("Prometheus's read is still running"))
+    const ready = await go('ready')
+    assert.equal(ready.readiness.ready, true, 'the read in: Generate lights')
+})
+
 test('PACB by PRESS: "you pick" settles before the model reads a word, and it is told what it picked', async () => {
     let seen = null
     const out = await turn('', {
@@ -427,7 +450,8 @@ test('when the button is lit the model is TOLD it is lit, so it cannot say other
     sized.scenarios[0].quantity = 5000
     sized.scenarios[0].entry_legs[0].quantity = 5000
     const text = _buildGenerateSection({ draft: sized }, true)
-    assert.match(text, /GENERATE: the button is LIT/)
+    assert.match(text, /GENERATE: the plan is READY to save/)
+    assert.match(text, /A NEW build[\s\S]*end with <go>[\s\S]*never tell them to press anything/)
     assert.match(text, /never ask them to confirm anything first/)
 })
 
@@ -518,10 +542,10 @@ test('a size given in the opening turn is not reported as refused before there i
     assert.deepEqual(activeName(out.build).claimed.size, { value: { unit: 'risk_cash', value: 1000 }, source: 'user' })
 })
 
-test('the pacing line rides the opening confirm only', () => {
+test('no pacing line any more: the opening confirm card left with the one way (CR 2026-11-12)', () => {
     const b = atEntries()
     assert.doesNotMatch(_buildPressSection(['entries'], { draft: draftAt(b) }), /pacing question/)
-    assert.match(_buildPressSection(['direction', 'horizon', 'lens'], { draft: draftAt(b) }), /pacing question/)
+    assert.doesNotMatch(_buildPressSection(['direction', 'horizon', 'lens'], { draft: draftAt(b) }), /pacing question/)
 })
 
 test('"decide and let me generate" at the spans gate hands back BOTH gates — and the later one settles when it arrives', () => {

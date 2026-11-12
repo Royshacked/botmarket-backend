@@ -15,13 +15,14 @@ import { makeNewsHandlers } from '../../../services/tools/news.tools.js'
 import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, cleanReply, makeToolHandler, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, BREVITY_RULE, VENUE_RULE, TRADE_HORIZONS, cachedBlock } from '../../../services/agentUtils.js'
 import { makeTradingContextHandlers, buildVenueSection } from '../../../services/tools/tradingContext.tools.js'
 import { makeMarketHoursHandlers, MARKET_HOURS_TOOL_SPEC } from '../../../services/tools/marketHours.tools.js'
-import { makeHouseIndustriesHandlers, HOUSE_INDUSTRIES_TOOL_SPEC } from '../../../services/tools/houseIndustries.tools.js'
+import { makeHouseIndustriesHandlers } from '../../../services/tools/houseIndustries.tools.js'
+import { HOUSE_INDUSTRIES_TOOL_SPEC, SCAN_WORDS } from '../tools/houseIndustries.argus.js'
 import { houseLabels, booksForStyle, wireLabel } from '../../../services/houseLabel.service.js'
 import { buildTagCaptures } from '../../../services/llmStream.util.js'
 import { DESKS } from '../../../services/desks/registry.js'
 import { makeRouteCapture, buildRouteRule } from '../../../services/routing.util.js'
 import { isToolError } from '../../../services/toolResult.util.js'
-import { makeGroundingLedger, recordSourced, recordTouched, groundingTier, DISCOVERY_TOOLS, PER_NAME_TICKER_ARGS, SOURCED_EXTRACT } from '../../../services/scanner.grounding.js'
+import { makeGroundingLedger, recordSourced, recordTouched, groundingTier, DISCOVERY_TOOLS, PER_NAME_TICKER_ARGS, SOURCED_EXTRACT } from '../scanner.grounding.js'
 import { normalizeSelection, selectionWeights } from '../../../services/investorSchools.js'
 
 const __dirname     = dirname(fileURLToPath(import.meta.url))
@@ -156,7 +157,7 @@ const TOOL_HANDLERS = {
     // Unbound (market hours belong to the instrument, not the user) — so it lives in the
     // static map, unlike the venue handlers that are rebuilt per request around a userId.
     ...makeMarketHoursHandlers(),
-    ...makeHouseIndustriesHandlers(),
+    ...makeHouseIndustriesHandlers({ words: SCAN_WORDS }),
 }
 
 // Wrap the module-level handlers with a per-session grounding recorder. A

@@ -966,7 +966,29 @@ restored — the same destination whether reached from the list pencil or from A
 > the design still unbuilt is **batch intake from social chat** — several finished plans arriving
 > in one DM — which needs a sender, not a receiver.
 
-**Two modes (2026-11-01, [design/mentor-modes.md](../design/mentor-modes.md)).** A build with no setup of the user's
+**Prometheus's read first (2026-11-11, [design/argus-rework.md](../design/argus-rework.md) step 3).** Mentor is the
+trader: he validates a name with Prometheus's read before he builds it. Once the ledger has a name and a CONFIRMED
+horizon, code checks the read (`mentorReads.service`): coverage for swing / long term, a catalyst read for short term
+swing, none intraday. A missing one is queued and waits in line on the house's one research run; Mentor says so once,
+with the names ahead (`runner.readWaitLine`), and every turn's context carries where it stands
+(`_buildReadSection`). When it lands the chain hands it to him (`KIND.PROMETHEUS_READ`) and his turn runs. For the
+trade: he validates with it. **Against** it (not a Buy, a broken thesis, a pass, priced in): he says so plainly and asks
+ONCE whether to build anyway — the user's call; he does not refuse. While it runs, **Generate is held in code**:
+readiness goes dark and the press is refused (`read_pending`). A read that failed or could not be checked holds
+nothing. Proteus's technical read joins it when Proteus exists.
+
+**ONE WAY since 2026-11-12 — the two modes below are history ([design/argus-rework.md](../design/argus-rework.md)
+§2.2–§2.3).** `resolveMode` always gives the one build (`thesis`, internal); no lens, mode or "risk-based" is ever said.
+"Let's trade X" asks no direction or horizon: the DECIDING read (`mentorReads`, horizon `null`) brings Prometheus's
+coverage — re-researched first when over 30 days old or a report came out since — and Proteus's measured profile, each
+posted as one line; Mentor says whether it is a LONG now and on which horizon (one that fits the trade that can be
+built). A read against it is a warning the user may override. Then the three numbers (position size, risk, R:R) →
+`size_position` → "all the way, or step by step?"; all the way ends in `<go>`, which the chain runner presses as
+`generateArmed` (saved and armed; the entry is still a card to confirm). A turn cut short by the tool budget is carried
+on (at most 3). The user's own levels are talked through; their own method is Daedalus's (coming). The work pane shows
+the setup and the commit buttons only.
+
+**Two modes (2026-11-01, [design/mentor-modes.md](../design/mentor-modes.md)) — SUPERSEDED.** A build with no setup of the user's
 own — a bare name, the Hotlist, Argus's hand-off — is **risk-based**: the `thesis` lens, Mentor judging the stop and the
 target and the user's risk setting the entry. A build where the user brought a setup (any condition, level or pattern
 of theirs; a direction or horizon alone is not one) is **the user's setup**: built in their terms, the lens Mentor's to

@@ -604,3 +604,24 @@ test('web search answers world questions at reception and keeps the broadcast ru
     assert.match(section, /Every claim carries its source and date/)
     assert.doesNotMatch(prompt, /the one place the outside world enters/, 'the brief is no longer the only window')
 })
+
+test('Proteus only on an ask about technicals or behaviour — "how is NVDA today?" is Axl\'s own, and an unclear one is asked (Roy, 2026-11-12)', () => {
+    const prompt = readFileSync(new URL('../../prompts/axl_system_prompt.md', import.meta.url), 'utf8')
+    assert.match(prompt, /`<route>technicals<\/route>` — ONLY when the user asks about a stock's TECHNICALS or how it TRADES/)
+    assert.match(prompt, /"How is NVDA today\?"[^\n]*NOT this: that is the price and the news, and it is YOURS to answer — no route/)
+    assert.match(prompt, /Not sure which they mean\? Ask in one line/)
+})
+
+test('Proteus labels the two kinds of answer in plain words, never as tags', () => {
+    const p = readFileSync(new URL('../../prompts/proteus_system_prompt.md', import.meta.url), 'utf8')
+    assert.match(p, /Say it in PLAIN WORDS inside the sentence/)
+    assert.match(p, /Never a tag, a\s+bracket or a capitalised label of your own/)
+})
+
+test('chartLine names the chart a wordless reply showed; nothing without a ticker', async () => {
+    const { chartLine } = await import('../../services/desks/sessionTurn.js')
+    assert.equal(chartLine({ ticker: 'NVDA', timeframe: 'day' }), "Here's the NVDA daily chart.")
+    assert.equal(chartLine({ ticker: 'SPY', timeframe: '4hr' }), "Here's the SPY 4hr chart.")
+    assert.equal(chartLine({ ticker: 'SPY' }), "Here's the SPY chart.")
+    assert.equal(chartLine(null), null)
+})

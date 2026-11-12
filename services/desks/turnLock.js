@@ -34,3 +34,8 @@ export function withSessionLock(sessionId, fn) {
 export function sessionBusy(sessionId) {
     return (depth.get(String(sessionId)) ?? 0) > 0
 }
+
+/** How many turns are queued or running on this session (the one running counts) — 0 when idle. */
+export function sessionDepth(sessionId) {
+    return depth.get(String(sessionId)) ?? 0
+}

@@ -1,26 +1,14 @@
-// Mentor's two MODES (docs/design/mentor-modes.md, Roy 2026-11-01).
+// Mentor's MODE — ONE WAY since 2026-11-12 (docs/design/argus-rework.md §2.3; history: docs/design/mentor-modes.md).
 //
-//   thesis — RISK-BASED, the default: the user brought no setup of their own. Mentor judges the stop and the target
-//            off the structure and the user's risk sets the entry (prompt § The thesis lens).
-//   user   — THE USER'S SETUP: they brought an idea or a plan, finished or half-made, and Mentor builds it in their
-//            terms under the lens it recommends (discretionary · smc · institutional).
+//   thesis — every NEW build: Mentor judges the stop and the target off the structure, the user's numbers set the entry
+//            (prompt § How you build every trade). Never named to the user.
+//   user   — only a SAVED setup built before 2026-11-12 on its own lens (discretionary · smc · institutional), opened
+//            for an edit or a redraw: it keeps that lens and the whole kit, so its levels are revised on the terms they
+//            were drawn on (CR 2026-11-12 — forced to thesis, the ledger "restored" its lens every turn).
 //
-// THE MODE IS THE LENS. No field of its own: `thesis` on the ledger is risk-based, any other lens is the user's
-// setup. Only before a lens exists is there anything to work out — a seeded build (the Hotlist, Argus) carries no
-// setup by definition, and a TYPED first message is read by one cheap call, because the tool kit has to be picked
-// before the desk's model reads a word of it.
-//
-// The risk-based KIT is the whole kit minus the pattern and indicator tools (Roy: "leave the news, the fundamentals,
-// the chart and the candles"; then keep analyst actions, short interest, options, the price-action snapshot and the
-// flip test — "they might help Mentor choose stops and targets"). Off the LIST, not just off the prompt: a "don't
-// call it" line is ignored now and then, and every declared tool is paid for on every turn.
-
-import { callAnthropicOnce } from '../providers/anthropic.provider.js'
-import { CHEAP_MODEL } from './llmModels.js'
-import { recordUsage } from './tokenUsage.service.js'
-import { logger } from './logger.service.js'
-
-const LOG = '[mentorMode]'
+// The one-way KIT is the whole kit minus the pattern and indicator tools (Roy: "leave the news, the fundamentals, the
+// chart and the candles"; how a stock behaves is Proteus's). Off the LIST, not just off the prompt: a "don't call it"
+// line is ignored now and then, and every declared tool is paid for on every turn.
 
 export const MODE_THESIS = 'thesis'
 export const MODE_USER   = 'user'
@@ -58,76 +46,21 @@ export function lensOf(name) {
     return name?.settled?.lens ?? name?.claimed?.lens?.value ?? null
 }
 
-const modeOfLens = (lens) => (lens === MODE_THESIS ? MODE_THESIS : MODE_USER)
-
-const SYSTEM = [
-    'You read ONE message a trader sent to a trade-building desk and answer one question: did they bring a SETUP of',
-    'their own? A setup is ANY condition, price level or chart pattern / indicator of theirs — an entry, a stop, a',
-    'target, "on a pullback to the 50-day", "the breakout over 50", "if it reclaims VWAP", "the order block at 212".',
-    'A ticker alone, a direction alone (long / short / buy), a horizon alone (day trade, swing, long term), or a',
-    'request to build / look at / plan a trade is NOT a setup. Answer with one word: SETUP or NONE.',
-].join(' ')
-
-/** The text of the user's last few messages, newest last — what the read is about. PURE. */
-export function _userText(messages, last = 3) {
-    const text = (c) => (typeof c === 'string' ? c
-        : Array.isArray(c) ? c.filter(b => b?.type === 'text').map(b => b.text).join(' ') : '')
-    return (Array.isArray(messages) ? messages : [])
-        .filter(m => m?.role === 'user')
-        .slice(-last)
-        .map(m => text(m.content).trim())
-        .filter(Boolean)
-        .join('\n---\n')
-}
-
-/** The read must not hold the turn: past this it is undecided, and the turn goes on with the whole kit. */
-export const READ_TIMEOUT_MS = 8000
-
-export function makeSetupReader({ once = callAnthropicOnce, record = recordUsage, model = CHEAP_MODEL, timeoutMs = READ_TIMEOUT_MS } = {}) {
-    /** SETUP → 'user', NONE → 'thesis'; null when the read failed, timed out, was aborted or said neither. */
-    return async function readSetup({ messages, userId = null, signal = null }) {
-        const user = _userText(messages)
-        if (!user || signal?.aborted) return null
-        let timer
-        try {
-            const call = once({
-                model, systemPrompt: SYSTEM, user, maxTokens: 8,
-                onUsage: userId ? (usage, m) => { record(userId, m, usage, 'mentor').catch(() => {}) } : undefined,
-            })
-            const late = new Promise(resolve => { timer = setTimeout(() => resolve(TIMED_OUT), timeoutMs) })
-            const out = await Promise.race([call, late])
-            if (out === TIMED_OUT) { logger.warn(LOG, `setup read timed out after ${timeoutMs}ms (the desk decides from the prompt)`); return null }
-            if (signal?.aborted) return null
-            const word = String(out ?? '').trim().toUpperCase()
-            if (word.startsWith('SETUP')) return MODE_USER
-            if (word.startsWith('NONE'))  return MODE_THESIS
-            logger.warn(LOG, 'setup read answered neither', { out: String(out ?? '').slice(0, 40) })
-            return null
-        } catch (err) {
-            logger.warn(LOG, 'setup read failed (the desk decides from the prompt)', err.message)
-            return null
-        } finally {
-            clearTimeout(timer)
-        }
-    }
-}
-
-const TIMED_OUT = Symbol('timed out')
-
-export const readSetup = makeSetupReader()
-
 /**
- * This turn's mode, and where it came from. `null` mode = undecided: the full kit, and the prompt's rule decides.
- *
- *   ledger — a lens is claimed or settled: it IS the mode.
- *   seed   — a hand-off (the Hotlist, Argus) carries no setup of the user's: risk-based.
- *   read   — a typed build with no lens yet: the cheap read on the user's words.
+ * This turn's mode, and where it came from (argus-rework.md §2.3, Roy: "there is only one lens"):
+ *   ledger — a SAVED setup being edited keeps the lens it was built on: its own (`user`, the whole kit) when that is not
+ *            the one way's, else the one way;
+ *   seed   — a hand-off (the Hotlist, Argus): the one way;
+ *   one    — a typed build: the one way.
+ * Their own LEVELS are talked through inside the one way; their own METHOD is Daedalus's, coming. PURE (async for the
+ * callers that await it).
  */
-export async function resolveMode({ name = null, seed = null, messages = [], userId = null, signal = null, read = readSetup } = {}) {
+export async function resolveMode({ name = null, seed = null, editing = false } = {}) {
     const lens = lensOf(name)
-    if (lens) return { mode: modeOfLens(lens), source: 'ledger' }
+    if (lens && editing && lens !== MODE_THESIS) return { mode: MODE_USER, source: 'ledger', lens }
+    if (lens) return { mode: MODE_THESIS, source: 'ledger' }
     if (seed?.ticker) return { mode: MODE_THESIS, source: 'seed' }
-    return { mode: await read({ messages, userId, signal }), source: 'read' }
+    return { mode: MODE_THESIS, source: 'one' }
 }
 
 /**

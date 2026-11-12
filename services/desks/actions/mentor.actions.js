@@ -20,19 +20,22 @@ import { setupCommit as defaultCommit } from '../../../api/setups/setupCommit.se
 import { parseCommitArgs, parseIdeaAccounts } from '../../../api/_shared/parse.util.js'
 import { draftVerdict } from '../../setupVerdict.js'
 import { emptyMentorState } from '../../agents/mentor.agent.service.js'
+import { readPending as defaultReadPending } from '../../mentorReads.service.js'
 
 const generatedOf = (doc) => ({ id: doc.id, asset: doc.asset ?? null, status: doc.status ?? null })
 const editingId   = (state) => (state?.editing?.kind === 'setup' ? String(state.editing.entityId) : null)
 const chatStateOf = (state) => ({ draft: state?.draft ?? null, coverage: state?.coverage ?? [] })
 const setupName   = (doc) => (doc?.asset ? `${doc.asset} setup` : null)
 
-export function makeMentorActions({ commit = defaultCommit } = {}) {
+export function makeMentorActions({ commit = defaultCommit, readPending = defaultReadPending } = {}) {
     return {
         /** Save the draft as a new setup — it then waits on Arm. */
-        async generate({ user, state, args }) {
+        async generate({ user, sessionId, state, args }) {
             const draft = state?.draft
             if (!draft) return { reason: 'nothing_to_commit' }
             if (editingId(state)) return { reason: 'not_new' }
+            // Prometheus's read on the name is still running (argus-rework.md step 3): no new setup before it lands.
+            if (await readPending(state, undefined, { sessionId })) return { reason: 'read_pending' }
             const { accounts, mainAccountId } = parseCommitArgs(args)
             if (!accounts.length) return { reason: 'no_venue' }
             const out = await commit.commitSetup(draft, { userId: user._id, accounts, mainAccountId, updateId: null, chatState: chatStateOf(state) })
@@ -60,10 +63,12 @@ export function makeMentorActions({ commit = defaultCommit } = {}) {
         },
 
         /** Save every plan of a multi-name build. Partial success is the contract: refused plans stay on the table. */
-        async generateAll({ user, state, args }) {
+        async generateAll({ user, sessionId, state, args }) {
             const byAsset = { ...(state?.drafts ?? {}), ...(state?.draft?.asset ? { [state.draft.asset]: state.draft } : {}) }
             const all = Object.values(byAsset)
             if (all.length < 2) return { reason: 'nothing_to_commit' }
+            // The active name's read still running holds the whole batch (argus-rework.md step 3).
+            if (await readPending(state, undefined, { sessionId })) return { reason: 'read_pending' }
             const { accounts, mainAccountId } = parseCommitArgs(args)
             if (!accounts.length) return { reason: 'no_venue' }
             const out = await commit.generateSetups(all, { userId: user._id, accounts, mainAccountId, chatState: chatStateOf(state) })
@@ -83,6 +88,27 @@ export function makeMentorActions({ commit = defaultCommit } = {}) {
                     drafts:       left.length > 1 ? refused : {},
                     generated:    generatedOf(saved[saved.length - 1]),
                 },
+            }
+        },
+
+        /**
+         * Save the draft AND arm it — Mentor's go (argus-rework.md §2.2: one answer, then built, generated and armed). The
+         * same gates as a press: generate's (the read, the accounts, the setup's own validation), then arm's. An arm the
+         * gate refuses leaves the setup SAVED and says why (`armed: false, armReason`) — never undone, never a failure.
+         * Nothing reaches a broker: an armed setup's entry still comes to the user as a card to confirm.
+         */
+        async generateArmed(ctx) {
+            // Not `this.generate`: the pipe calls an action detached from this object (act.js `handler(...)`).
+            const made = await makeMentorActions({ commit, readPending }).generate(ctx)
+            if (made.reason) return made
+            const id = made.result.setup.id
+            // The setup is SAVED by now: an arm that throws is an arm refused, never a failed go (CR 2026-11-12 — a throw
+            // here left a saved setup with its draft still on the table, and the next go saved it twice).
+            const armed = await commit.armSetup(id, ctx.user._id)
+                .catch(err => ({ ok: false, reason: 'arm_failed', error: err.message }))
+            return {
+                ...made,
+                result: { setup: armed.ok ? armed.doc : made.result.setup, armed: !!armed.ok, ...(armed.ok ? {} : { armReason: armed.reason ?? 'arm_failed' }) },
             }
         },
 

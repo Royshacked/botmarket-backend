@@ -628,9 +628,16 @@ const DEBRIS_LINE = /^[ \t]*\((?:no )?final(?: answer)?\)[ \t]*$/gim
 // "citeturn0finance0". The whole marker, a bare one that lost its private-use characters, or one of those left alone.
 const DEBRIS_TOKEN = /[ \t]*(?:<[\u0080-￿]{1,4}>|<\|[a-z_]{1,32}\|>|\(\s*(?:\ue200[^\ue201\n]{0,200}\ue201|cite(?:turn\d+[a-z]+\d+)+)\s*\)|\ue200[^\ue201\n]{0,200}\ue201|(?<![A-Za-z])cite(?:turn\d+[a-z]+\d+)+|[\ue200-\ue206])[ \t]*/g
 
+// A made-up LABEL TAG in capitals (2026-11-12): Proteus answered "<MEASURED> NVDA has…" / "<TODAY> It closed…". Only where
+// a label sits — leading a line, or a matched <X>…</X> pair (its words kept) — so a ticker in brackets mid-sentence
+// ("Long <NVDA> into earnings") stays. Lowercase emit tags, "<5%" and "a <-> b" are never this shape.
+const DEBRIS_CAPS_LEAD = /(^|\n)[ \t]*<[A-Z][A-Z0-9_]{1,23}>[ \t]*/g
+const DEBRIS_CAPS_PAIR = /<([A-Z][A-Z0-9_]{1,23})>([\s\S]*?)<\/\1>/g
+const _dropCapsLabels = (t) => t.replace(DEBRIS_CAPS_PAIR, '$2').replace(DEBRIS_CAPS_LEAD, '$1')
+
 /** The stray tokens and marker lines out, then a paragraph identical to the one before it dropped. Prose is otherwise untouched. */
 export function dropDebris(text) {
-    const paras = String(text ?? '').replace(DEBRIS_TOKEN, (m, offset, all) => {
+    const paras = _dropCapsLabels(String(text ?? '')).replace(DEBRIS_TOKEN, (m, offset, all) => {
         // Between two words, the spaces collapse to one; at a line's edge, nothing is left.
         const before = all[offset - 1], after = all[offset + m.length]
         return before && after && !/\s/.test(before) && !/[\s.,;:!?)]/.test(after) ? ' ' : ''

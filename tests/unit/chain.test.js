@@ -30,7 +30,7 @@ const header = (sessions, s) => sessions.get({ sessionId: s.sessionId, userId: '
 const pick = { ticker: 'NVDA', direction: 'long', thesis: 'Reclaiming the 50-day.', recommended_mode: 'swing' }
 
 async function argusPicked({ sessions, runner }, s) {
-    await sessions.setAgentState({ sessionId: s.sessionId, userId: 'u1', agent: 'scanner', state: { handoff: true, handoffTo: 'mentor' } })
+    await sessions.setAgentState({ sessionId: s.sessionId, userId: 'u1', agent: 'scanner', state: { handoff: true } })
     await runner.afterTurn({ user, sessionId: s.sessionId, agent: 'scanner', origin: 'user', out: { payload: { reply: 'NVDA it is', argus_pick: pick } } })
 }
 

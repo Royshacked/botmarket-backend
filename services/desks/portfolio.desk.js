@@ -43,8 +43,9 @@ export function portfolioNextState(prev, result) {
         // (accepting a hold nobody looked at would close the review on nothing). Any Atlas turn in review mode is
         // that pass: the review instruction rides every one (portfolio.agent, isReviewMode).
         reviewed:     prev?.reviewMode === true && (!!result || prev?.reviewed === true),
-        // The user already owns this book (Axl's adopt): the surface opens the adopt grid until a draft is staged.
-        adopt:        prev?.adopt === true,
+        // The user already owns this book (Axl's adopt, or Atlas's own <adopt> tag): the surface opens the adopt grid until
+        // a draft is staged — and asks first when a plan is on the table (overWork).
+        adopt:        turn.adopt === true || prev?.adopt === true,
         adoptDraftId: prev?.adoptDraftId ?? null,
         mandate:      turn.mandate ?? prev?.mandate ?? null,
         thesis:       turn.thesis ?? prev?.thesis ?? null,
@@ -192,5 +193,10 @@ export const portfolioDesk = {
         reply: result.reply, plan: result.plan ?? null, update: result.update ?? null, mandate: result.mandate ?? null, thesis: result.thesis ?? null, phase: result.phase ?? null,
         ...(result.screenRequests ? { screen_requests: result.screenRequests } : {}),
         ...(result.coverageRefresh ? { coverage_refresh: result.coverageRefresh } : {}),
+        // Done — the chain runner's go step generates the book (argus-rework.md §2.2).
+        ...(result.go ? { go: true } : {}),
+        ...(result.adopt ? { adopt: true } : {}),
+        // Cut short by the tool budget — the runner carries the build on.
+        ...(result.cutShort ? { cut_short: true } : {}),
     }),
 }

@@ -403,6 +403,12 @@ export const config = {
      */
     get aetherEnginePath() { return _str('AETHER_ENGINE_PATH', '') },
     /**
+     * Whether THIS host runs the engine's background SCHEDULER (Roy, 2026-11-12: off on the laptop unless he asks). The
+     * engine path also serves an admin's discovery press, so it stays set; `AETHER_SCHEDULER=off` keeps only the
+     * scheduled jobs from starting — a laptop's scheduler writes to the house database beside Render's. Default on.
+     */
+    get aetherSchedulerOn() { return _bool('AETHER_SCHEDULER', 'off-switch') },
+    /**
      * The HOUSE database the engine reads and writes — the one the deployed instance is on
      * (`test`), where the daily news queue lands and where every admin's Aether list reads from.
      * Unset = the database this process is connected to, which is right everywhere except a

@@ -539,3 +539,10 @@ solved.
 - The profile's exact measures.
 - What the file looks like and how a version changes.
 - How Mentor uses it inside a trade plan.
+- **Price-action habits as part of the stock's story (Roy, 2026-11-09).** After every one-rule-for-all
+  scan test failed (industry timing, lead-lag, momentum, pullbacks, gaps), Roy's conclusion: each stock
+  has its own story — the company, its events AND its price behaviour ("false-breaks the weekly",
+  "respects the 20MA"). The habits sit in the stock's story beside its fundamentals and events; Roy
+  does not see them as backtestable, so no declared test for now. If one is ever run, its traps are:
+  luck across ~2,800 names, a placebo line (20MA vs 17/23MA), volatility explaining the habit, and
+  the habit changing when the story changes.

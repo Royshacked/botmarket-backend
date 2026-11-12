@@ -21,6 +21,16 @@
 export const TOOL_BUDGET_LANDING = 'The tool budget for this turn is spent — this is your last round, and no further tool call will be honoured. Answer now with what you already have: emit whatever structured block you were building as far as it is built, say plainly what you did not get to check, and say you will continue next turn.'
 
 /**
+ * Whether a reply ENDS ON A QUESTION to the user (its last sentence, tags and trailing quotes/markup stripped). A turn the
+ * tool budget cut short is carried on into another turn (the chain runner's carryOn) only when it did NOT end asking —
+ * a landing round that asked the user something is waiting on them, not unfinished (CR 2026-11-12). Pure.
+ */
+export function endsAsking(reply) {
+    const text = String(reply ?? '').replace(/<[a-z_]+>[\s\S]*?<\/[a-z_]+>/gi, '').replace(/[\s*_"'”’)\]]+$/u, '')
+    return text.endsWith('?')
+}
+
+/**
  * An EMPTY REPLY after tools ran — the model read, then ended its round with no text and no call. On Luna (the
  * OpenAI-compat loop) that was ~1 Mentor turn in 5 with tools from 2026-10-18 to 2026-11-01: the user saw their message
  * and nothing under it. Both tool loops (OpenAI-compat and Anthropic) answer it once with this, tools off, rather than
@@ -115,6 +125,8 @@ export const ALL_EMIT_TAGS = [
     'quickread',
     // Prometheus's catalyst read on a Hotlist "this week" name (analyst_mode_catalyst.md, horizon-chains.md §3).
     'catalyst_read',
+    // Prometheus's view for a covered name's other horizon (analyst_mode_horizon.md, argus-rework.md step 3).
+    'horizon_view',
     // Atlas's research hop (portfolio_system_prompt.md). Unregistered until 2026-09-18, so the block streamed raw
     // into the Atlas bubble until the settled reply replaced it. `coverage_request` (Atlas queuing one uncovered
     // name) was removed with the research queue's manual side, 2026-10-31 — still suppressed, should an old habit emit it.
@@ -134,6 +146,11 @@ export const ALL_EMIT_TAGS = [
     'entries',
     // The scenarios Mentor is asking the user to choose between. Same deal: drawn in his pane, on the turn he asks.
     'scenario_offer',
+    // Mentor's / Atlas's "done — generate it" (argus-rework.md §2.2): the numbers it carries, never shown.
+    'go',
+    // Atlas: "they already hold this book" — the pane opens the adopt grid (CR 2026-11-12: the pane's adopt button left
+    // with the chips, and an Atlas turn could not reach adopt mode on its own).
+    'adopt',
 ]
 
 // Build the tag-capture descriptor array for a streaming agent. `overrides` maps a

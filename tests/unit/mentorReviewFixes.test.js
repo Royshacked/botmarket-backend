@@ -82,11 +82,11 @@ test('the schema default lens is NOT claimed — only a lens someone actually st
     assert.equal(claimsFromDraft(noLens, { lensStated: true }).lens, 'discretionary')
 })
 
-test('a worksheet with no trade_mode leaves the lens blank in the ledger', async () => {
+test('a new build claims the ONE way internally — never a lens the user is asked about (argus-rework.md §2.3, 2026-11-12)', async () => {
     const out = await turn(`<setup>${JSON.stringify({ asset: 'NVDA', direction: 'long', type: 'swing' })}</setup>`)
     const name = activeName(out.build)
-    assert.equal('lens' in name.claimed, false, 'the opening turn would otherwise settle a lens nobody heard')
-    assert.deepEqual(Object.keys(name.claimed).sort(), ['direction', 'horizon'])
+    assert.equal(name.claimed.lens?.value, 'thesis', 'the one way, claimed by code')
+    assert.deepEqual(Object.keys(name.claimed).sort(), ['direction', 'horizon', 'lens'])
 })
 
 // ─── 3 & 8. A multi-name build lost the first name ────────────────────────────
@@ -280,8 +280,6 @@ test('the model is TOLD what was pressed, so it does not ask again', async () =>
     assert.match(text, /ALREADY RECORDS IT/)
     assert.match(text, /direction, horizon, lens are SETTLED/)
     assert.match(text, /NOTHING about a settled stage is outstanding/)
-    // The press answers the pacing question too — that is what the button means.
-    assert.match(text, /stop at the checkpoints/)
     assert.equal(_buildPressSection([]), '', 'and nothing is said when nothing was pressed')
     assert.ok(proposed.gate, 'the card has something to draw')
 })

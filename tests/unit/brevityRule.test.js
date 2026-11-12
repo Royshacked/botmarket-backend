@@ -32,6 +32,7 @@ const DESKS = [
     'axl.agent.service.js',
     'mentor.agent.service.js',
     'portfolio.agent.service.js',
+    'proteus.agent.service.js',
     'scanner.agent.service.js',
     'strategy.agent.service.js',
 ]
@@ -146,7 +147,7 @@ test('a NEW desk cannot be added without carrying the rule', () => {
     // *_system_prompt.md is a conversational desk and belongs on the list.
     //
     // The path must be QUOTED to count — a file that merely NAMES a prompt in a comment is not
-    // mounting it (scanner.grounding.js cites `scanner_system_prompt.md L11` in prose).
+    // mounting it (e.g. a comment that cites `scanner_system_prompt.md` in prose).
     const MOUNTS_BASE_PROMPT = /['"][^'"]*_system_prompt\.md['"]/
     const dirs = [SERVICES, join(SERVICES, 'agents')]
     const mounts = dirs

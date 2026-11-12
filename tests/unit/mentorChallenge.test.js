@@ -107,10 +107,9 @@ test('the flip section teaches all three verdicts, and the asymmetry between the
     assert.match(section, /macro, news, catalysts/)
 })
 
-test('the rejects pool is taught as empty on the path that brought its own plan', () => {
+test('the rejects pool: every reject carries its reason (the brought-plan path left with the one way, 2026-11-12)', () => {
     const section = PROMPT.split('### `alternatives[]`')[1]?.split('\n## ')[0] ?? ''
     assert.ok(section.length > 600, 'the alternatives section is missing')
-    assert.match(section, /EMPTY/,                 'the brought-plan carve-out is the rule most likely to be lost')
     assert.match(section, /reason|why_not/,        'a reject without a reason is dropped — the prompt must say so')
     // Authored ONCE now means authored at the GATE: the setup field is derived from the spans it
     // discarded, so the same judgment is not written twice in two vocabularies.

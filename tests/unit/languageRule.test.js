@@ -24,7 +24,7 @@ const ROOT     = join(dirname(fileURLToPath(import.meta.url)), '../../')
 const SERVICES = join(ROOT, 'services')
 
 // Every desk that mounts a BASE system prompt. Mode/profile FRAGMENTS
-// (scanner_mode_handoff.md) are deliberately absent: they are concatenated onto a base that already
+// (e.g. analyst_mode_quickread.md) are deliberately absent: they are concatenated onto a base that already
 // carries the rule, and appending it again would repeat the same paragraph twice in one request.
 const DESKS = [
     'aether.agent.service.js',
@@ -33,6 +33,7 @@ const DESKS = [
     'marketBrief.service.js',
     'mentor.agent.service.js',
     'portfolio.agent.service.js',
+    'proteus.agent.service.js',
     'scanner.agent.service.js',
     'strategy.agent.service.js',
 ]
@@ -123,8 +124,11 @@ test('the rule rides on the CACHED prefix, not the volatile tail', () => {
 //
 // TWO desks are deliberately absent, and the list below is the record of why — both write for
 // EVERYBODY at once, so they have no user whose venue could be read: marketBrief and strategy
-// (Pythia) are broadcasts, and neither carries the venue TOOLS either, for the same reason.
-const VENUE_DESKS = DESKS.filter(f => !['aether.agent.service.js', 'marketBrief.service.js', 'strategy.agent.service.js'].includes(f))
+// (Pythia) are broadcasts, and neither carries the venue TOOLS either, for the same reason. Proteus (2026-11-12) has a
+// user but no use for the venue: he reads a stock's price behaviour — the house's profile, the same for everyone — and
+// never sizes, places or holds anything, so he carries neither the block nor the tools.
+const NO_VENUE = ['aether.agent.service.js', 'marketBrief.service.js', 'strategy.agent.service.js', 'proteus.agent.service.js']
+const VENUE_DESKS = DESKS.filter(f => !NO_VENUE.includes(f))
 
 test('every desk that has a user carries the venue rule, exactly once', () => {
     for (const f of VENUE_DESKS) {
@@ -135,8 +139,8 @@ test('every desk that has a user carries the venue rule, exactly once', () => {
     }
 })
 
-test('a broadcast desk carries NO venue rule — it has no user to read one for', () => {
-    for (const f of ['aether.agent.service.js', 'marketBrief.service.js', 'strategy.agent.service.js']) {
+test('a broadcast desk carries NO venue rule — it has no user to read one for (nor Proteus, who trades nothing)', () => {
+    for (const f of NO_VENUE) {
         assert.doesNotMatch(src(f), /VENUE_RULE/,
             `${f} writes for every user at once; a venue block there would be one user's book leaking into a broadcast`)
     }
@@ -171,8 +175,8 @@ test('a NEW desk cannot be added without carrying the rule', () => {
     // is mounting a base prompt and must be on the list.
     //
     // The path must be QUOTED to count — a file that merely NAMES a prompt in a comment is not
-    // mounting it (scanner.grounding.js cites `scanner_system_prompt.md L11` to explain which
-    // doctrine it backs), and a prose mention is not a reason to demand the rule.
+    // mounting it (e.g. a comment that cites `scanner_system_prompt.md` to explain which doctrine
+    // it backs), and a prose mention is not a reason to demand the rule.
     const MOUNTS_BASE_PROMPT = /['"][^'"]*(_system_prompt|market_brief_prompt)\.md['"]/
     // Both directories: the desks moved to services/agents/ (2026-08-07) but marketBrief.service
     // mounts a base prompt from services/ and is a desk for this rule's purposes. Scanning only one

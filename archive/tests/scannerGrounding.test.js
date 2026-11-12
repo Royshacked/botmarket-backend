@@ -7,7 +7,7 @@ import { dirname, join } from 'path'
 
 import {
     makeGroundingLedger, recordSourced, recordTouched, groundingTier, normTicker, DISCOVERY_TOOLS,
-} from '../../services/scanner.grounding.js'
+} from '../services/scanner.grounding.js'
 import { _normalizeScan, _wrapForGrounding } from '../services/agents/scanner.agent.service.js'
 
 // Argus grounding — "names come from the tape, never from memory" (slice 1, A1+B1).

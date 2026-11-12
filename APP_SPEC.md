@@ -4,12 +4,12 @@ Behavioral contracts for the core domain. For the architecture overview + ASCII
 flow diagrams see [README.md](README.md); for file layout see [CODE_MAP.md](CODE_MAP.md).
 
 The app turns natural-language chat into **monitored trade ideas** that route to a
-broker. Six desks produce work — Axl (reception) · Mentor (`setup`, the trader) ·
-Atlas (portfolio) · Argus (one name for Mentor; his scan lists archived 2026-11-09) · Prometheus (`coverage`) · Pythia (`industry_view`, `industry_assessment`) — and each
+broker. Seven desks produce work — Axl (reception) · Mentor (`setup`, the trader) ·
+Atlas (portfolio) · Argus (one name for Mentor; his scan lists archived 2026-11-09) · Prometheus (`coverage`) · Pythia (`industry_view`, `industry_assessment`) · Proteus (how a stock trades — a shared profile, no kind) — and each
 authored kind is watched by its desk's own background monitor. The `idea` execution tier
 has no desk, so it is watched by two kind-blind loops instead (§2). One reconciler keeps
 entity state honest against the broker. Nothing reaches a broker while its venue is shut
-(§5). Every desk is handed the user's venue on every turn, and every account-bound
+(§5). Every desk that can act on an account is handed the user's venue on every turn, and every account-bound
 artifact belongs to one workspace (§8); three shared rules govern how they all speak
 (§9), and all of it runs on exactly one instance (§10).
 
@@ -444,7 +444,8 @@ rotation) — `docs/design/atlas-industry-sleeves.md`.
 > the investing profile, the radar cut and the *Research the top N* hand-off below are in `archive/`
 > (`archive/README.md`). **Live:** the single-pick hand-off only — Mentor routes a user with no name to Argus
 > (Mentor alone may: `registry.js` `routedFrom`), Argus emits `<argus_pick>`, the chain hands it back to Mentor.
-> Old `scan` documents stay in Mongo, unread. The rest of this section is the contract as it was.
+> Old `scan` documents stay in Mongo, unread. **Since 2026-11-11 Argus is the PICKER** (§ Argus the picker, below);
+> the rest of this section, from "The Scanner Agent" to the funnel, is the contract as it was.
 
 The **Scanner Agent** ("Argus", a session turn with Argus on the floor) emits a `<scan_list>` (normalized:
 uppercased tickers, guaranteed period/thesis/direction/signals). A scan is a watchlist of
@@ -480,7 +481,103 @@ model memory. Phase 2 casts a wide net (`screen_candidates`, `get_market_movers`
 `get_price_action`; Phase 3 narrows survivors with a `get_candles`/`get_indicators` baseline plus
 angle-triggered tools (fundamentals, positioning, cycle, `get_orderblocks`/`get_false_breaks`) and
 `get_chart` (KLineChart image, model-only) reserved for the top shortlist; Phase 4 emits the ranked
-list. Via the single-pick hand-off (see above) the same funnel converges to one name.
+list. Via the single-pick hand-off (see above) the same funnel converges to one name. *(Archived: see below.)*
+
+### Argus the picker, the day boards, and Prometheus's read before a build (2026-11-11)
+
+[docs/design/argus-rework.md](docs/design/argus-rework.md) — one job per desk: Argus PICKS, Prometheus reads the
+fundamentals, Mentor trades.
+
+- **Argus picks from a list, never the market.** `get_horizon_list` (`services/tools/horizonList.tools.js`) gives
+  him the house's list for the horizon: intraday / day → today's latest **day board**; short term swing → **This
+  week**; swing / long term → the house's **Swing / Long term** Buys with Prometheus's target and the timing read.
+  The pick gate is code (`scanner.agent.service`): an `<argus_pick>` not shown this turn gets a second look at every
+  house list today, and is otherwise dropped with a line under the reply ("give Mentor the name yourself"). An empty
+  list says why (SPY under its 200-day: the house does not short yet) and no pick is made.
+- **The day boards** (`services/hotlist.day.js`, `GET /api/hotlist/day?day=` → `{ day, boards, days }`): 09:20 ·
+  10:30 · 14:30 ET on weekdays, in their OWN collection `hotlist_day_boards` (never `hotlist_boards`, whose boards
+  merge into This week). A row is a name IN PLAY — moving up so far, by the column's long-side rule — with price,
+  gap, relative volume, range position, ATR, why, and its catalyst by timestamp (headlines + report / rating flags).
+  **No grade, no free range, no result.** The Floor shows them on the Hotlist's Intraday tab.
+- **Prometheus's read before Mentor builds** (`services/mentorReads.service.js`). Once the build has a name and a
+  CONFIRMED horizon: coverage for swing / long term, a catalyst read for short term swing, none intraday. A missing
+  read is queued on the research queue (source `mentor`) and the house's one run started; it **waits in line** and
+  Mentor says how many names are ahead. When it lands the chain hands it to Mentor and his turn runs. Mentor
+  validates with it; a read **against** the trade is said plainly and the user asked once — their call. While the read
+  runs, **Generate is held**: readiness is dark and the press answers `read_pending` (409). A name read this way
+  enters house coverage like any other.
+- **The 09:20 board has no spread gate** (2026-11-12): FMP's pre-market book is thin odd lots, and 0.05% failed every
+  name on its first live run. The spread stays on the row; price, dollar volume and ATR still gate.
+- **A day-board row builds with Mentor** (2026-11-12): the Intraday tab's row page hands the name on as an `hd_`
+  reference (board id + its checkpoint); `hotlistSeed` reads the board's line about the name back (`hotlist.day
+  dayFacts` — the same `dayLine` Argus's list uses) as an intraday hand-off.
+
+### Mentor, one way — the experts decide the trade, the user decides how much (2026-11-12)
+
+[docs/design/argus-rework.md](docs/design/argus-rework.md) §2.2–§2.3.
+
+- **One way to build, never named.** `mentorMode.resolveMode` always gives the one build (`trade_mode: "thesis"`,
+  internal); no lens, mode or "risk-based" in anything the user sees; no setup read of the user's words. Their own
+  LEVELS are talked through inside it; their own METHOD is Daedalus's (coming — Mentor says so).
+- **"Let's trade TSLA."** No direction or horizon is asked. The DECIDING read (`mentorReads`, horizon `null`):
+  Prometheus's coverage, re-researched first (the run's `reinit`) when its last full research is over 30 days old or a
+  report came out since; Proteus's measured profile (`behaviourProfile.service`, ≤ a week). The name comes from the
+  worksheet, the seed, or Mentor's own `<asset>` tag (a first reply has no worksheet). A fresh read is handed to Mentor
+  at once (`askRead` → `readSettled`); a missing one waits in line as before. Each expert posts one dated line. Mentor
+  says whether it is a LONG now (long only, for now) and on which horizon — which must fit the trade that can be built
+  (a day trade only when the entry can fill today). A read AGAINST the trade is a warning the user may override —
+  said in one line, never a question of its own (their three numbers are their yes).
+- **Three numbers, then their choice.** Position size, risk, R:R → `size_position` (does the account carry it) →
+  "all the way, or step by step?". The numbers settle the opening (the horizon checked against where their numbers put
+  the entry first); "all the way" alone hands Mentor the gates (`waiver`) — step by step keeps them the user's. Their numbers are the limits (risk ÷ size, the R:R) and the size. Defaults: A + B,
+  Mentor's `valid_until`, `on_away: revise`. Price over the max entry → built anyway, waiting at it; no price meets the
+  R:R → no setup.
+- **The go.** Mentor ends with `<go>{position_size, risk, rr}</go>`; the chain runner's `deskGo` presses
+  `generateArmed` through the commit pipe's HELD entry (`act.actHeld` — the turn already holds the session lock) with
+  the turn's marked accounts (or the ones kept while a read held it, `go_pending` — for THAT name only). Saved AND
+  armed; the session ends "saved and armed … watching" (`ref.armed` on the line). Saved but not armed → the new session
+  says why; a go that fails says so. Nothing reaches a broker: an armed setup's entry is still a card to confirm.
+  The go is said on the turn that completes the worksheet — CODE checks it; refused (something missing) → the reason
+  under the reply and the build carried back to Mentor to fix and go again (within the carry limit).
+- **Atlas** asks the mandate once (capital required — the go refuses without `positionSize`), builds straight through
+  (no sign-off, AVOID left out) and `<go>` generates the book (`generate`, the marked accounts); activating it stays the
+  user's press. A book they already hold: Atlas's `<adopt>` opens the adopt grid (as Axl's adopt hint does).
+- **Auto-continue.** A turn cut short by the tool budget (the provider's `onBudgetSpent`) is carried on by the runner
+  (`carryOn`): the same desk's next turn, queued, at most 3 in a row — reset only when the user speaks. Not when the
+  reply ended asking the user something (`endsAsking`), nor when the user's own turn is already queued.
+- **Each deciding read is handed to Mentor once** per session and name, fresh or landed; a hand-off ends the turn's
+  after-work (the new chain is not overwritten).
+- **No cards inside Mentor's own read chain** — no "paused" / "needs your call"; the chain just ends.
+- **The chat shows each thing once** (Roy, 2026-11-12: "hide all duplicates in all agents"): a hand-off row shows only
+  who passed the work to whom ("Prometheus → Mentor", "Mentor carries on") — its brief is the receiving desk's and stays
+  on the row for it and History. A reply that was only a chart gets one line naming it, so it survives a reload and the
+  desk knows what it already showed.
+- **Work panes show the entity being built**, with only the commit actions (Mentor: the setup + Generate / Discard,
+  Arm / Leave, Update / Later; Atlas: the book, thesis shown; Prometheus: the draft, always open). No chips, gate cards
+  or tables — Mentor asks in words.
+
+### Proteus — how a stock trades (2026-11-12)
+
+[docs/design/proteus.md](docs/design/proteus.md) — the technical analysis desk (agent `proteus`, pipeline
+`technicals`): what ONE stock's price respects technically, if anything. He sets no levels (Mentor's), judges no
+business (Prometheus's), picks nothing (Argus's). Long side only, for now.
+
+- **Measured, then seen.** `get_behaviour_profile` is his evidence: counted in code from the stock's own candles
+  (`services/behaviourProfile.engine.js`) on 5-minute (~3 months), 1-hour (~1 year), daily (~10 years) and weekly
+  (~10 years) bars — holds at the 20 EMA / 50 / 200 SMA / VWAP, what follows RSI under 30, a MACD cross up or a
+  high-volume up bar, false breaks of swing lows (how often, how deep in ATRs, how fast a direction), bullish
+  order-block retests, ATR, gap, dollar volume, and whether it fits a day trade / a swing. Every rate is against a
+  **baseline** (the level shifted, or the stock's drift); a test **holds** only at 10+ points over it, z ≥ 3, on the
+  OLDER two-thirds of the history, AND still beating it in the recent third it never saw. "Nothing holds" is the usual
+  answer (sample of 11 names: 0 of 396 tests). What is SEEN on the chart now (patterns, today's order blocks and sweeps) comes from the vision tools and
+  never carries a hit rate.
+- **One profile per stock, the house's** (`services/behaviourProfile.service.js`): binds to no account, kept a week
+  in `proteus_profiles`; a name already profiled costs nothing whoever asks. Only the profile is kept, never the bars.
+- **Who sends users to him:** Axl ("how does TSLA behave?" → `<route>technicals TSLA</route>`) and Mentor (registry
+  `routedFrom`); no other desk lists him. Opened directly from the desks list too. Mentor's pre-trade read, the day
+  boards and the nightly Pythia names are build step 4 (not built).
+- **No venue block.** He trades nothing, so he is the one desk with a user that carries neither `VENUE_RULE` nor the
+  venue tools (`tests/unit/languageRule.test.js`).
 
 ---
 
@@ -668,6 +765,8 @@ the Nasdaq-100 as the **US100 cash CFD**, but levels are read off the **NQ futur
   - The legacy `ideas` collection still exists in Mongo holding abandoned pre-cutover documents.
     Nothing reads it. It is queued to be archived and dropped.
 - `trades` — append-only point-in-time capture of each opened/closed idea (paper + live).
+- `proteus_profiles` — Proteus's measured profile per symbol (`{ symbol, version, profile, computed_at, fetchedAt }`),
+  the house's, kept a week (`services/behaviourProfile.service.js`; a version bump recomputes).
 - `journal` — the monitor's record for a `setup`, one row per READ plus the code-written events
   (`entry`, `exit`, `invalidation`, `pre_active`): `{ entityId, at, reason, price, rung, verdict,
   note, conditions[{id, met, note}], tools[], fired?, armed[], proposal?, next_check_at }`.

@@ -107,15 +107,13 @@ const viaCode = (largest) => ({
 
 import { researchOpening } from '../../services/researchRun.service.js'
 import { formatHouseIndustries, formatIndustryCompanies, namesLine, makeHouseIndustriesHandlers } from '../../services/tools/houseIndustries.tools.js'
-import { _wrapForGrounding } from '../../services/agents/scanner.agent.service.js'
-import { makeGroundingLedger, groundingTier } from '../../services/scanner.grounding.js'
 
 const NAMED = [
     { symbol: 'CIEN', why: 'record backlog (Sep 3)', order: 'first', industry: 'Communications Equipment' },
     { symbol: 'VRT', why: 'power and cooling next', order: 'second', industry: 'Electrical Components & Equipment' },
 ]
 
-test('Argus sees the names on the book list, and an industry call lists them first, as grounded rows', async () => {
+test('the book list carries the names, and an industry call lists them first', async () => {
     assert.equal(namesLine(NAMED), 'CIEN (first), VRT (second — Electrical Components & Equipment)')
     const list = formatHouseIndustries('swing', [{ code: CODE, name: 'Communications Equipment', sector: 'IT', rated: true, horizon: 'months', thesis: 't', names: NAMED, themes: [] }])
     assert.match(list, /the house names: CIEN \(first\), VRT \(second — Electrical Components & Equipment\)/)
@@ -124,9 +122,6 @@ test('Argus sees the names on the book list, and an industry call lists them fir
     assert.ok(text.indexOf('CIEN') < text.indexOf('CSCO'), 'the names come before the largest')
     assert.match(text, /CIEN {3}first order — record backlog \(Sep 3\) {2}\[OUR COVERAGE\]/)
     assert.match(text, /VRT {4}second order \(Electrical Components & Equipment\) — power and cooling next/)
-    const ledger = makeGroundingLedger()
-    await _wrapForGrounding({ get_house_industries: async () => text }, ledger).get_house_industries({ industry: CODE })
-    for (const t of ['CIEN', 'VRT', 'CSCO']) assert.equal(groundingTier(t, ledger), 'sourced', t)
 })
 
 test("the tool shows a standing assessment's names only — an expired one shows none", async () => {

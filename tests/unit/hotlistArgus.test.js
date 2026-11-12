@@ -183,3 +183,20 @@ test('the hand-off facts say no grade, on a session column or this week', () => 
     assert.match(seedFacts(row, 'open'), /^the session open — \+2\.00% gap/)
     assert.match(seedFacts(row, 'week'), /^this week \(2–10 days\) — /)
 })
+
+// ─── A DAY BOARD row to Mentor (Roy, 2026-11-12: "no build with Mentor" on the Intraday tab) ──────────────────────
+test('hotlistSeed reads a DAY board row: the intraday horizon and the board\'s line about the name (Argus\'s formatter)', async () => {
+    const { db, rows } = memDb()
+    rows('hotlist_day_boards').push({ id: 'hd_2026-11-11_eod', day: '2026-11-11', checkpoint: 'eod', status: 'done', rows: [
+        { symbol: 'CRWV', name: 'CoreWeave', price: 60.53, gap_pct: 24.22, rvol: 2.25, why: ["in the top quarter of the day's range on 2.25× volume"],
+            catalyst: { news: [{ title: 'CoreWeave downgraded', at: '2026-11-11 14:23:00' }], earnings: false, rating: true } },
+    ] })
+    const seed = await hotlistSeed({ board: 'hd_2026-11-11_eod', column: 'eod', symbol: 'CRWV' }, { db: async () => db })
+    assert.equal(seed.horizon, 'intraday')
+    assert.equal(seed.hotlist_facts, 'in play on the 14:30 ET board (into the close) — CRWV (CoreWeave) · $60.53 (+24.2%) · 2.25× volume · in the top quarter of the day\'s range on 2.25× volume · rating change · news 14:23 ET: "CoreWeave downgraded"')
+    assert.equal(await hotlistSeed({ board: 'hd_2026-11-11_eod', column: 'eod', symbol: 'NOPE' }, { db: async () => db }), null, 'not on the board')
+    assert.equal(await hotlistSeed({ board: 'hd_2026-11-11_eod', column: 'mid', symbol: 'CRWV' }, { db: async () => db }), null, 'the column must be the board\'s own checkpoint')
+    assert.equal(await hotlistSeed({ board: 'hd_2026-11-10_eod', column: 'eod', symbol: 'CRWV' }, { db: async () => db }), null, 'a pruned board')
+    // The reference passes the seed's own check, as an hb_ one does.
+    assert.deepEqual(sanitizeScanSeed({ ticker: 'crwv', hotlist: { board: 'hd_2026-11-11_eod', column: 'eod' } }).hotlist, { board: 'hd_2026-11-11_eod', column: 'eod', symbol: 'CRWV' })
+})

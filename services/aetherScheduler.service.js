@@ -81,6 +81,11 @@ function start() {
         logger.info(LOG, 'AETHER_ENGINE_PATH not set — no engine on this host, scheduler not started')
         return
     }
+    // Off on this host by choice (AETHER_SCHEDULER=off — the laptop, 2026-11-12): discovery presses still run.
+    if (!config.aetherSchedulerOn) {
+        logger.info(LOG, 'AETHER_SCHEDULER=off — scheduler not started on this host')
+        return
+    }
 
     // The host check comes BEFORE the database check on purpose. A deploy with no engine
     // should say so once, calmly, and not go on to complain about a database name it was

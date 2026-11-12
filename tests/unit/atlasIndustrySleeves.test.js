@@ -39,7 +39,9 @@ test('a sleeve is one GICS sub-industry with its code; sectors are a check, not 
 
 test('verdicts: FOR is the candidate; AVOID only on the user\'s ask; HYPE halved; an unlisted industry on an ask OR a stated reason', () => {
     assert.match(PHASE3, /\*\*Industries the house rates FOR this book\*\* are the candidates/)
-    assert.match(PHASE3, /\*\*AVOID\*\* — only when the user asks for it/)
+    // A new book leaves AVOID out, no question (Roy, 2026-11-12); only the user naming one puts it in.
+    assert.match(PHASE3, /\*\*AVOID\*\* — LEFT OUT of a new book \(Roy, 2026-11-12\)/)
+    assert.match(PHASE3, /Only when the user names one themselves does it go in/)
     assert.match(PHASE3, /the platform halves the weight/)
     assert.match(PHASE3, /fine when the user asks for it, and fine when you state\s+the reason for it/)
 })

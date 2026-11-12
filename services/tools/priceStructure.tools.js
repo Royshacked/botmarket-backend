@@ -86,8 +86,7 @@ export function makeStructureVisionHandler({ log, kind, vision, onChart, deps = 
             // THE TURN'S VISION BUDGET, claimed before the render — a chart plus a vision call is the
             // only per-use spend in the kit, and "top two or three, never the pool" was a prompt line
             // with nothing behind it. A toolError and not a string: a refusal must not read as a
-            // finding, and must not credit the ticker with a read that never happened (the grounding
-            // ledger counts a successful per-name call as proof a real tool saw the name).
+            // finding, and must not credit the ticker with a read that never happened.
             if (ctx?.visionBudget && !ctx.visionBudget.take()) {
                 logger.info(log, `get_${kind} refused — the turn's vision budget (${ctx.visionBudget.max}) is spent`)
                 return toolError(VISION_BUDGET_SPENT(`get_${kind}`, ctx.visionBudget.max))

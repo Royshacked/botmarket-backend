@@ -207,10 +207,10 @@ test('a handed-over name reaches the prompt with Argus\'s read', async () => {
     assert.match(text, /clean base/)
 })
 
-test("a hand-off opens RISK-BASED and says so — no setup of the user's (mentor-modes.md)", async () => {
+test("a hand-off is built the one way, and never names a lens or a mode (2026-11-12)", async () => {
     const text = await seedOf({ ticker: 'NVDA', thesis: 'momentum' })
-    assert.match(text, /RISK-BASED \(the `thesis` lens\)/)
-    assert.match(text, /if they bring their own setup, switch/i, 'the user can still bring theirs')
+    assert.match(text, /built the one way, like every trade \(§ How a trade goes\): never name a lens or a mode/)
+    assert.doesNotMatch(text, /RISK-BASED/)
 })
 
 test('a lens still arriving on a hand-off from an old client is ignored — Argus recommends none (mentor-modes.md)', async () => {
@@ -258,15 +258,16 @@ test('three stops belong to the user and two gates can be waived', () => {
     assert.match(PROMPT, /A call the user never heard is one they\s+never made/)
 })
 
-test('the opening turn answers all three at once, cheapest tools first, and asks the waiver ONCE', () => {
+test('the opening turn: the experts\' verdict, cheapest tools first, then the ONE question (2026-11-12)', () => {
     const section = PROMPT.slice(PROMPT.indexOf('## The opening turn'), PROMPT.indexOf('## The stages after the opening'))
     assert.ok(section.length > 0, 'the opening turn sits before the later stages')
     assert.match(section, /Whatever arrived is\s+a CLAIM/)
-    assert.match(section, /direction, horizon and lens/)
+    assert.match(section, /\*\*2\. The verdict\*\* \(§ How a trade goes, 1\): worth a LONG now, or not — and on which horizon/)
     assert.match(section, /Read it, cheapest first/)
     assert.match(section, /Only on a real conflict[\s\S]{0,120}`consult`/)
     assert.match(section, /Never fetch twice in one build/)
-    assert.match(section, /asked \*\*once, here\*\* — never later/)
+    assert.match(section, /\*\*3\. The ONE question\*\* \(§ How a trade goes, 2\) — position size, risk in dollars, R:R — and nothing else/)
+    assert.match(section, /Want me to take it all the way, or go through it\s+step by step\?/)
     // The worksheet is what carries the ledger between turns (mentor.agent.service.js).
     assert.match(section, /Emit the worksheet on this turn/)
 })
@@ -279,7 +280,8 @@ test('the later stages keep the decisions that are theirs and not the model\'s',
     // The spans stage is about WHERE, and says so; the mechanics are the next stage's.
     assert.match(section, /a stage about WHERE, not how/)
     assert.match(section, /<spans>/, 'the candidates have an emit contract')
-    assert.match(section, /`get_chart` with `show_to_user: true`[\s\S]{0,60}`levels`/, 'and are drawn')
+    // The pane draws no table any more (CR 2026-11-12): the tag is the ledger's, the user hears it in words.
+    assert.match(section, /Record the trade in the tag — the ledger reads it, the user never sees it — and say it in words/)
     // The field that changes what the broker does, and the default that cannot add risk.
     assert.match(section, /`alternatives` \(the default\) means the first trigger to fire takes the WHOLE\s+position/)
     assert.match(section, /Never let a list of entries imply scaling/)
@@ -298,7 +300,7 @@ test('the later stages keep the decisions that are theirs and not the model\'s',
 
     // And the five sizing units live where sizing does.
     const sizing = PROMPT.slice(PROMPT.indexOf('## Size comes from the user'))
-    assert.match(sizing, /Ask which unit they think in, and take any of the five/)
+    assert.match(sizing, /goes in as `size_cash`\*\*[\s\S]{0,80}Never\s+ask which unit/)
     assert.match(sizing, /record it and let the server size it/)
     assert.match(sizing, /size_position\(\{"unit":"risk_pct","value":1\}\)/, 'the call has a shape the model can copy')
     // The figures come back in the SAME turn, and the fit check is the server's, not the model's.
@@ -328,16 +330,16 @@ test('the grounding rules survived the flow moving into the server', () => {
     }
 })
 
-test('a brought plan asks only for what is missing, and is never offered the waiver', () => {
-    const section = PROMPT.slice(PROMPT.indexOf('### When the plan is already theirs'), PROMPT.indexOf('## `scenarios[]`'))
-    assert.match(section, /you ask only for what is genuinely missing/)
-    assert.match(section, /almost always the SIZE/)
-    assert.match(section, /You do not offer the waiver/)
+test('their own LEVELS are talked through with Mentor; their own METHOD is Daedalus\'s, coming (Roy, 2026-11-12)', () => {
+    const section = PROMPT.slice(PROMPT.indexOf('### When they bring their own levels'), PROMPT.indexOf('## How a build runs'))
+    assert.match(section, /talk them through with the user/)
+    assert.match(section, /\*\*Daedalus's\*\* job — a desk that is coming soon/)
+    assert.match(section, /Do not build their method/)
 })
 
 test('candidates are an explicit ask now — a walked build ends in one setup', () => {
-    assert.match(PROMPT, /## Offering candidates — only when they ask for options/)
-    assert.match(PROMPT, /A walked build does not reach for it on its own/)
+    assert.match(PROMPT, /## When they ask for options/)
+    assert.match(PROMPT, /say the options in words, ranked honestly, and build the one they pick: ONE `<setup>`/)
     assert.doesNotMatch(PROMPT, /When the user has no setup, offer a few/, 'the old default-to-candidates invariant is gone')
 })
 
@@ -371,15 +373,17 @@ test('Mentor’s own additions are declared after the kit, with the sidecar last
 })
 
 test('the two tools are WIRED — a declared tool with no handler is a call that silently fails', async () => {
-    let handlers = null
+    let handlers = null, offered = null
     const seen = []
     await mentorAgentService.chatStream({
         messages: [{ role: 'user', content: 'hi' }],
-        _run: async ({ toolHandlers }) => { handlers = toolHandlers; return '' },
+        _run: async ({ toolHandlers, tools }) => { handlers = toolHandlers; offered = tools; return '' },
         _newsHandlers: () => ({ get_news: async (args) => { seen.push(['news', args]); return 'headlines' } }),
         _analystActions: async (symbols, limit) => { seen.push(['analyst', symbols, limit]); return [{ symbol: 'NVDA' }] },
     })
-    for (const t of MENTOR_TOOLS) {
+    // Every tool OFFERED this turn (the one way's kit since 2026-11-12 — argus-rework.md §2.3) has its handler.
+    assert.ok(offered.length > 0 && offered.length <= MENTOR_TOOLS.length)
+    for (const t of offered) {
         if (t.name === 'consult' || t.name === 'web_search') continue   // built by runAgentStream / server-side
         assert.equal(typeof handlers[t.name], 'function', `${t.name} is declared but has no handler`)
     }
@@ -487,8 +491,8 @@ test('the earnings DATE comes from get_earnings, not from a window that may excl
 })
 
 test('the model is told that some answers arrive already settled, by a press', () => {
-    assert.match(PROMPT, /Some answers arrive as a PRESS, already recorded/)
-    assert.match(PROMPT, /The `<build>` tag is for the answers that arrive as WORDS/)
+    assert.match(PROMPT, /Every answer arrives as WORDS/)
+    assert.match(PROMPT, /no press settles a stage/)
 })
 
 test('the document has one H1, and the beats are subsections of the opening turn', () => {
@@ -503,9 +507,12 @@ test('the document has one H1, and the beats are subsections of the opening turn
 
 test('a user with no name is asked first, then sent to ARGUS, which hands the name back (2026-10-19)', () => {
     // Roy corrected this in the first minute of the design conversation; the prompt still said Axl.
-    assert.match(PROMPT, /your first question is whether they have a name — or a setup — in mind/)
-    assert.match(PROMPT, /offer \*\*Argus\*\*, the scanning desk/)
+    assert.match(PROMPT, /your first question is whether they have a name in mind \(no direction or horizon asked: the experts decide those/)
+    // Argus is the picker since 2026-11-11 (argus-rework.md): he picks from the house's list for the HORIZON, so the
+    // hand-over must name it.
+    assert.match(PROMPT, /offer \*\*Argus\*\*, the picker/)
     assert.match(PROMPT, /`<route>scan<\/route>`/)
+    assert.match(PROMPT, /`<open>` carrying whatever they said \(a horizon only if they gave/)
     assert.doesNotMatch(PROMPT, /point them back to Axl/)
 })
 
@@ -535,7 +542,7 @@ test('the Generate gate knows about trigger entries and server-side sizing', () 
 
 test('"the tag is the move" is scoped to answers that arrive as words', () => {
     assert.match(PROMPT, /When the answer comes in WORDS, the tag is the move/)
-    assert.match(PROMPT, /When they PRESSED instead, it is already recorded/)
+    assert.match(PROMPT, /Every answer arrives as WORDS/)
 })
 
 test('the ledger section counts its own rules correctly', () => {

@@ -150,3 +150,18 @@ test('an empty AETHER_DB is unset, not a database named ""', () => {
         assert.equal(_engineDbName(), 'axl_dev')
     }))
 })
+
+test('AETHER_SCHEDULER=off keeps the scheduler from starting on this host — the engine path stays for discovery (Roy, 2026-11-12)', async () => {
+    const { config } = await import('../../services/config.js')
+    const before = process.env.AETHER_SCHEDULER
+    try {
+        process.env.AETHER_SCHEDULER = 'off'
+        assert.equal(config.aetherSchedulerOn, false)
+        process.env.AETHER_SCHEDULER = 'on'
+        assert.equal(config.aetherSchedulerOn, true)
+        delete process.env.AETHER_SCHEDULER
+        assert.equal(config.aetherSchedulerOn, true, 'unset = on (Render)')
+    } finally {
+        if (before === undefined) delete process.env.AETHER_SCHEDULER; else process.env.AETHER_SCHEDULER = before
+    }
+})

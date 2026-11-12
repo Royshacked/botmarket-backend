@@ -152,10 +152,15 @@ async function _loop(run, queued, covered, { userId, audience, model, signal, li
         if (run.max_usd != null && run.cost_usd >= run.max_usd) { run.budget_hit = true; break }
         const symbol = _sym(item.symbol)
         const catalyst = isCatalystItem(item)
+        // A Mentor build's read on a name ALREADY covered (argus-rework.md step 3): its OTHER horizon (`view` — a
+        // <horizon_view> beside the coverage), or a retired / watchlist coverage re-researched (`reinit`). Both are FOR a
+        // covered name, so the covered skip below is not theirs.
+        const view = !catalyst && isViewItem(item) ? item.context.view : null
+        const reinit = !catalyst && !view && item?.context?.reinit === true
 
         // Coverage skips a covered name; a catalyst read skips a name with a LIVE read — a covered name still gets one
         // (a catalyst read never blocks or replaces coverage).
-        if (catalyst ? liveReads.has(symbol) : covered.has(symbol)) {
+        if (catalyst ? liveReads.has(symbol) : covered.has(symbol) && !view && !reinit) {
             const reason = catalyst ? 'live_read' : 'already_covered'
             await deps.reject(item.id, reason)
             _settle(run, { symbol, outcome: 'skipped', reason })
@@ -195,11 +200,43 @@ async function _loop(run, queued, covered, { userId, audience, model, signal, li
             return Promise.resolve(deps.annotate?.(item.id, { addCost, ...extra })).catch(() => null)
         }
         try {
+            // The coverage a view or a reinit is FOR — Prometheus reads it as EXISTING COVERAGE. Gone since it was queued:
+            // the row is decided, not researched blind.
+            const existing = view || reinit ? await deps.coverageOf(symbol) : null
+            if ((view || reinit) && !existing) {
+                await leave({ reason: 'no_coverage' })
+                _settle(run, { symbol, outcome: 'failed', reason: 'no_coverage', cost_usd: priced() })
+                run.failed++
+                continue
+            }
             const result = await deps.research({ item, symbol, opening: researchOpening(item), covered, userId, audience, model, signal, onSpend,
-                mode: catalyst ? 'catalyst' : null })
+                mode: catalyst ? 'catalyst' : view ? 'horizon' : null, existing })
             const { coverage } = result ?? {}
             if (run.stop) { await leave({ reason: 'stopped' }); _settle(run, { symbol, outcome: 'stopped', cost_usd: priced() }); break }   // aborted mid-turn: row stays in_research
             await leave()
+
+            if (view) {
+                // His view for the other book, saved beside the coverage (coverage.service setHorizonView). No block is his
+                // pass — recorded like a catalyst read's, so Mentor is told and it is not asked again at once.
+                const parsed = result?.horizonView ?? null
+                if (!parsed) {
+                    await deps.reject(item.id, 'no_read')
+                    _settle(run, { symbol, outcome: 'passed', reason: 'no_read', cost_usd: priced() })
+                    run.passed++
+                    continue
+                }
+                const saved = await deps.setView(existing.id, view, parsed)
+                if (saved?.ok) {
+                    await deps.markDone(item.id)
+                    _settle(run, { symbol, outcome: 'read', reason: null, cost_usd: priced() })
+                    run.read++
+                } else {
+                    await leave({ reason: saved?.reason ?? 'save_failed', detail: saved?.detail ?? null })
+                    _settle(run, { symbol, outcome: 'failed', reason: saved?.reason ?? 'save_failed', cost_usd: priced() })
+                    run.failed++
+                }
+                continue
+            }
 
             if (catalyst) {
                 // The catalyst read (horizon-chains.md §3) goes to its own collection; a read with no target (contradicted,
@@ -248,7 +285,11 @@ async function _loop(run, queued, covered, { userId, audience, model, signal, li
                 continue
             }
 
-            const saved = await deps.initiate(coverage)
+            // A REINIT revises the coverage it was for (retired / watchlist → live again); everything else initiates.
+            const saved = reinit
+                ? await deps.update(existing.id, { ..._withoutKeys(coverage, ['id', 'symbol']), status: 'active', revision_kind: 'reinitiate',
+                    revision_note: 'Re-researched for a Mentor build (argus-rework.md step 3)' })
+                : await deps.initiate(coverage)
             if (saved.ok) {
                 await deps.markDone(item.id)
                 covered.add(symbol)   // a later duplicate row (there should be none) is now a skip
@@ -329,8 +370,14 @@ function _settle(run, result) {
 }
 
 const _cost = usd => Number((Number(usd) || 0).toFixed(4))
+const _withoutKeys = (o, keys) => Object.fromEntries(Object.entries(o ?? {}).filter(([k]) => !keys.includes(k)))
 
 const _sym = s => String(s ?? '').toUpperCase().trim()
+
+/** A Mentor row asking for a covered name's OTHER horizon (`context.view`: 'swing' | 'long_term'). Pure. */
+export function isViewItem(item) {
+    return item?.context?.mentor === true && ['swing', 'long_term'].includes(item?.context?.view)
+}
 
 /** A queue row the Hotlist sent — researched as a catalyst read, saved beside coverage (horizon-chains.md §3-§4). Pure. */
 export function isCatalystItem(item) {
@@ -364,6 +411,8 @@ export function researchOpening(item) {
     // From the HOTLIST (horizon-chains.md §4): Argus's "this week" pick — a CATALYST READ, not coverage. The board's facts
     // and his reason travel; the mode block (analyst_mode_catalyst.md) says what to do with them.
     if (isCatalystItem(item)) {
+        // From MENTOR (argus-rework.md step 3): a user is building a short-term swing on the name — no board, no pick.
+        if (c.mentor) return `Catalyst read on ${symbol} — a user is building a SHORT-TERM SWING (2–10 days) on it with Mentor, who needs your read before he builds. Is there a real catalyst, what is it worth, how much is still open, and what can break it inside the window?`
         const facts = c.facts ? ` The board: ${c.facts}.` : ''
         // A read a user asked for (`requested`) on a name Argus did not pick says so, rather than nothing. The overnight
         // board's names (`rule`, 2026-10-25) were listed by the run-up rule — no one picked them, and it says so.
@@ -393,6 +442,21 @@ export function researchOpening(item) {
             return `Research ${symbol} for coverage — Pythia's ${book} assessment of ${of}${c.horizon ? ` (${c.horizon})` : ''} names it: ${c.named_why}. Her case${thesis}${risks} Judge whether ${symbol} is already priced for it.${tail}`
         }
         return `Research ${symbol} for coverage — Pythia rates ${where} ${book}${c.horizon ? ` (${c.horizon})` : ''}${thesis}${risks} Judge whether ${symbol} is already priced for it.${tail}`
+    }
+    // From MENTOR (argus-rework.md step 3): a user is building a swing / long-term trade on the name and needs the read.
+    // A covered name's OTHER horizon (two targets, stage 1): the view only, the coverage stands.
+    if (c?.mentor && isViewItem(item)) {
+        const book = c.view === 'long_term' ? 'LONG TERM' : 'SWING'
+        const pts = BOOK_PT_HORIZONS[c.view]
+        return `Your ${book} view on ${symbol} — a user is building a ${String(c.horizon ?? '').toUpperCase() || book} trade on it with Mentor, and your coverage's target is on the other horizon. Give your ${book} view (book "${c.view}", a ${pts.join(' or ')} target). Do not rewrite the coverage.`
+    }
+    if (c?.mentor && c.reinit) {
+        const pts = BOOK_PT_HORIZONS[c.horizon === 'long term' ? 'long_term' : 'swing']
+        return `Re-research ${symbol} — your coverage on it is not live (retired or only watched), and a user is building a ${String(c.horizon ?? 'swing').toUpperCase()} trade on it with Mentor. Bring the thesis up to date and set the price target on a ${pts.join(' or ')} horizon.`
+    }
+    if (c?.mentor) {
+        const pts = BOOK_PT_HORIZONS[c.horizon === 'long term' ? 'long_term' : 'swing']
+        return `Research ${symbol} for coverage — a user is building a ${String(c.horizon ?? 'swing').toUpperCase()} trade on it with Mentor, who needs your read before he builds. Set the price target on a ${pts.join(' or ')} horizon.`
     }
     if (!c?.sector) return `Research ${symbol} for coverage.`
     // A SLEEVE candidate (sleeveSource): the mandate that surfaced it is a user's book, not the house
@@ -439,12 +503,13 @@ const _io = {
     // rides in chatState as it does at the desk — Prometheus is told which names are taken so it
     // never starts a second thesis by mistake. `existing_coverage` is not set: the run never
     // researches a covered name.
-    async research({ opening, covered, userId, audience, model, signal, onSpend, mode = null }) {
+    async research({ opening, covered, userId, audience, model, signal, onSpend, mode = null, existing = null }) {
         const { analystAgentService } = await import('./agents/analyst.agent.service.js')
         return analystAgentService.chatStream({
             messages: openingTurn(opening),
-            // A catalyst read is not coverage: the book's names are not its business (horizon-chains.md §3).
-            chatState: mode ? {} : { coverage_symbols: [...covered] },
+            // A catalyst read is not coverage: the book's names are not its business (horizon-chains.md §3). A view or a
+            // reinit is FOR a covered name: Prometheus reads it as EXISTING COVERAGE (update mode).
+            chatState: existing ? { existing_coverage: existing } : mode ? {} : { coverage_symbols: [...covered] },
             userId, audience, model: model ?? undefined, signal, onSpend, ...(mode ? { mode } : {}),
         })
     },
@@ -457,6 +522,21 @@ const _io = {
     async liveCatalystSymbols() {
         const { catalystReadService } = await import('./catalystRead.service.js')
         return catalystReadService.liveSymbols()
+    },
+
+    // A Mentor build's read on a covered name (argus-rework.md step 3): the coverage it is for, its other horizon's view,
+    // and a reinit's revision.
+    async coverageOf(symbol) {
+        const { coverageService } = await import('../api/analyst/coverage.service.js')
+        return coverageService.getCoverageBySymbol(symbol)
+    },
+    async setView(id, book, view) {
+        const { coverageService } = await import('../api/analyst/coverage.service.js')
+        return coverageService.setHorizonView(id, book, view)
+    },
+    async update(id, patch) {
+        const { coverageService } = await import('../api/analyst/coverage.service.js')
+        return coverageService.updateCoverage(id, patch)
     },
 
     async initiate(coverage) {

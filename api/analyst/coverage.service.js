@@ -55,6 +55,7 @@ export const coverageService = {
     listSymbols,
     listActiveBySector,
     updateCoverage,
+    setHorizonView,
     retireCoverage,
     deleteCoverage,
     captureResearchBasis,
@@ -635,6 +636,68 @@ async function captureResearchBasis({ symbol } = {}, deps = { getBySymbol: getCo
 
 async function retireCoverage(id) {
     return updateCoverage(id, { status: 'retired', revision_kind: 'retire', revision_note: 'Coverage retired' })
+}
+
+// ─── The second horizon (docs/design/argus-rework.md step 3, "two targets", stage 1 — Roy, 2026-11-11) ──────────────
+//
+// A company has a swing answer and a long-term answer. The coverage's `price_target` stays the MAIN one — the book, the
+// monitor, the scorecard and a trade's research_basis read it, untouched. `horizon_views.<book>` is Prometheus's view for
+// the OTHER book: its own rating (the house's band over its horizon), target, why and what breaks it. Written only when a
+// Mentor build needs it (mentorReads); stage 2 (its own place on the lists, the scorecard, the monitor) is not built.
+
+/** The target horizons each book takes — the house book's (houseBook.BOOKS), repeated here: houseBook reads this module. */
+export const VIEW_HORIZONS = Object.freeze({ swing: ['3m', '6m'], long_term: ['12m', '18m', '24m'] })
+
+/**
+ * A `<horizon_view>` → the stored view, or null when it has no usable target. The horizon must be the book's (a swing view
+ * with a 12-month target answers the wrong question); a missing or foreign one takes the book's first. Pure.
+ */
+export function normalizeHorizonView(raw, book, { now = new Date().toISOString() } = {}) {
+    const allowed = VIEW_HORIZONS[book]
+    const r = raw && typeof raw === 'object' ? raw : {}
+    const t = r.target && typeof r.target === 'object' ? r.target : { value: r.target }
+    const value = _num(t.value)
+    if (!allowed || !(value > 0)) return null
+    const horizon = allowed.includes(t.horizon) ? t.horizon : allowed[0]
+    const low = _num(t.low), high = _num(t.high)
+    const { ends_at } = openWindow({ set_at: now, horizon }, now)
+    return {
+        book,
+        rating: _str(r.rating),
+        target: { value, horizon, target_date: String(ends_at).slice(0, 10), ...(low > 0 && high > 0 && low <= value && value <= high ? { low, high } : {}) },
+        why: _str(r.why),
+        kill: _arr(r.kill).map(_str).filter(Boolean).slice(0, 4),
+        set_at: now,
+    }
+}
+
+/**
+ * Save Prometheus's view for `book` on this coverage — one field and a revision, the main target and thesis untouched. The
+ * rating is the HOUSE's band for the view's target over its horizon, as a main target's is. Refused on the coverage's own
+ * book (that is its main target's job). → `{ ok, view }` | `{ ok: false, reason }`.
+ */
+async function setHorizonView(id, book, raw, io = _io) {
+    const found = await getCoverageById(id)
+    if (!found.ok) return found
+    const cur = found.doc
+    const main = Object.keys(VIEW_HORIZONS).find(b => VIEW_HORIZONS[b].includes(cur.price_target?.horizon)) ?? null
+    if (book === main) return { ok: false, reason: 'main_book' }
+    const view = normalizeHorizonView(raw, book)
+    if (!view) return { ok: false, reason: 'no_target' }
+    const price = _num(await Promise.resolve(io.getPrice(cur.symbol)).catch(() => null))
+    view.price_at_set = price > 0 ? Math.round(price * 100) / 100 : null
+    const band = ratingBand({ target: view.target.value, price, horizon: view.target.horizon })
+    if (band) view.rating = band.rating
+    const revision = newRevision({ kind: 'horizon_view', note: `${book === 'swing' ? 'Swing' : 'Long-term'} view: ${String(view.rating ?? 'unrated').replace('_', ' ')}, target ${view.target.value} by ${view.target.target_date}` })
+    try {
+        const res = await _repo.revise(id, { [`horizon_views.${book}`]: view, updated_at: new Date().toISOString() }, revision)
+        if (!res.ok) return { ok: false, reason: 'not_found' }
+        logger.info(LOG, 'horizon view saved', { id, symbol: cur.symbol, book, rating: view.rating, target: view.target.value })
+        return { ok: true, view }
+    } catch (err) {
+        logger.error(LOG, 'horizon view not saved', err)
+        return { ok: false, reason: 'save_failed', detail: err.message }
+    }
 }
 
 async function deleteCoverage(id) {

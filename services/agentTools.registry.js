@@ -702,6 +702,23 @@ export const TOOL_SCHEMAS = {
             "limit": { "type": "number", "description": "How many names to list, 1–30 (default 10). Picks and in-play names come first." }
         }
     },
+    // Argus's list for a horizon — the only names he picks from (services/tools/horizonList.tools.js; argus-rework.md §3.1).
+    get_horizon_list: {
+        "type": "object",
+        "properties": {
+            "horizon": { "type": "string", "enum": ["intraday", "day", "short term swing", "swing", "long term"], "description": "The trade's horizon — which list to read." }
+        },
+        "required": ["horizon"]
+    },
+    // Proteus's measured profile of one stock (services/tools/behaviourProfile.tools.js; docs/design/proteus.md §2).
+    get_behaviour_profile: {
+        "type": "object",
+        "properties": {
+            "ticker": { "type": "string", "description": "The stock's ticker, e.g. TSLA." },
+            "fresh": { "type": "boolean", "description": "true recomputes now instead of using this week's profile — only when the user asks for it." }
+        },
+        "required": ["ticker"]
+    },
     // Argus's read of the house's industries for a book (docs/design/argus-on-pythia.md §3.2).
     get_house_industries: {
         "type": "object",

@@ -18,7 +18,7 @@ import { makeHouseIndustriesHandlers, ATLAS_HOUSE_INDUSTRIES_TOOL_SPEC, ATLAS_WO
 import { makeChartHandler } from '../tools/marketData.tools.js'
 import { coverageService } from '../../api/analyst/coverage.service.js'
 import { readCompaniesBySymbol, readSubIndustry } from '../../api/strategy/industryData.service.js'
-import { buildTagCaptures } from '../llmStream.util.js'
+import { buildTagCaptures, endsAsking } from '../llmStream.util.js'
 import { DESKS } from '../desks/registry.js'
 import { makeRouteCapture, buildRouteRule } from '../routing.util.js'
 import { buildSchoolSection, normalizeAllocation, normalizeSelection } from '../investorSchools.js'
@@ -262,6 +262,7 @@ async function chatStream({ messages = [], ideaAccounts = [], mainAccountId = nu
     // (which keeps its inner text in the UI), the plan/update/mandate blocks, and the shared
     // routing tags (the user asked to be sent to another desk with a name).
     const route = makeRouteCapture('portfolio')
+    let cutShort = false
     const tagCaptures = buildTagCaptures({
         phase:             phase.capture,
         ticker:            { onCapture: onTicker, keepText: true },
@@ -285,6 +286,8 @@ async function chatStream({ messages = [], ideaAccounts = [], mainAccountId = nu
             get_chart:    makeChartHandler({ log: LOG, onChart, readText: 'Read it as a POSITIONING question — where in the range, trend intact or broken, base or breakdown. Weights still come from the numbers.' }),
         },
         reasoningEffort, signal, onToken, tagCaptures, onToolStart, onReasoning, onChart,
+        // The turn's tool budget ran out: the chain runner carries the build on (argus-rework.md §2.2).
+        onBudgetSpent: () => { cutShort = true },
         meta: { accountCount: ideaAccounts.length, editMode: !!portfolioId },
     })
 
@@ -299,12 +302,17 @@ async function chatStream({ messages = [], ideaAccounts = [], mainAccountId = nu
     const coverageRefresh = _parseCoverageRefresh(raw)
 
     const reply = cleanReply(raw)
+    // Done — generate the book (argus-rework.md §2.2). A NEW book only: an edit or a review keeps its own press. CODE
+    // decides whether it may (the chain runner's go step: the plan sized, the AVOID check).
+    const go = !portfolioId && /<go>[\s\S]*?<\/go>/.test(raw)
+    // A book they ALREADY HOLD: the pane opens the adopt grid (portfolio.desk nextState). Not while a saved book is open.
+    const adopt = !portfolioId && /<adopt>[\s\S]*?<\/adopt>/.test(raw)
 
     if (capturedPlan) capturedPlan = await _sizePlan(capturedPlan, { mandate: capturedMandate ?? mandate })
     if (capturedUpdate) capturedUpdate = await _markAvoidAdds(capturedUpdate)
 
-    logger.info(LOG, 'chatStream done', { replyLength: reply.length, hasPlan: !!capturedPlan, hasUpdate: !!capturedUpdate, hasMandate: !!capturedMandate, hasThesis: !!capturedThesis, screenRequests: screenRequests.length, coverageRefresh: !!coverageRefresh, phase: phase.get() })
-    return { reply, plan: capturedPlan, update: capturedUpdate, mandate: capturedMandate, thesis: capturedThesis, phase: phase.get(), ...(screenRequests.length ? { screenRequests } : {}), ...(coverageRefresh ? { coverageRefresh } : {}), ...route.result() }
+    logger.info(LOG, 'chatStream done', { go, replyLength: reply.length, hasPlan: !!capturedPlan, hasUpdate: !!capturedUpdate, hasMandate: !!capturedMandate, hasThesis: !!capturedThesis, screenRequests: screenRequests.length, coverageRefresh: !!coverageRefresh, phase: phase.get() })
+    return { reply, plan: capturedPlan, update: capturedUpdate, mandate: capturedMandate, thesis: capturedThesis, phase: phase.get(), ...(go ? { go: true } : {}), ...(adopt ? { adopt: true } : {}), ...(cutShort && !go && !endsAsking(reply) ? { cutShort: true } : {}), ...(screenRequests.length ? { screenRequests } : {}), ...(coverageRefresh ? { coverageRefresh } : {}), ...route.result() }
 }
 
 // ─── Coverage-refresh extraction (pure) ─────────────────────────────────────────

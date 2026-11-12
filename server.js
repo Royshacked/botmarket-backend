@@ -40,6 +40,7 @@ import { chatRoutes }         from './api/chat/chat.routes.js'
 import { attach as attachChatWs } from './api/chat/chatWs.js'
 import { registerSessionChannel } from './services/sessionChannel.js'
 import { chain } from './services/desks/turns.js'
+import { resumePending as resumeMentorReads } from './services/mentorReads.service.js'
 import { ensureIndexes as ensureChatIndexes } from './api/chat/chat.service.js'
 import { ensureUserIndexes } from './api/user/user.model.js'
 import { ensureIdeaIndexes } from './api/trade-ideas/tradeIdeas.service.js'
@@ -83,6 +84,7 @@ import { ensurePythiaWeeklyIndexes } from './services/pythiaWeekly.service.js'
 import { dailyScreenerMonitorService } from './monitoring/dailyScreener.monitor.service.js'
 import { ensureDailyScreenerIndexes } from './services/dailyScreener.service.js'
 import { ensureHotlistBoardIndexes } from './services/hotlist.boards.js'
+import { ensureDayBoardIndexes } from './services/hotlist.day.js'
 import { ensureHotlistOutcomeIndexes } from './services/hotlist.outcomes.js'
 import { ensureIndustryAssessmentIndexes } from './api/strategy/industryAssessment.service.js'
 import { ensurePythiaCallsIndexes } from './api/strategy/pythiaCalls.service.js'
@@ -239,6 +241,7 @@ ensureAetherIndexes()
 ensureIndustryViewIndexes().catch(() => {})   // Pythia's industry_view (api/strategy/industryView.service.js)
 ensureDailyScreenerIndexes().catch(() => {})       // the hotlist's overnight pass (services/dailyScreener.service.js)
 ensureHotlistBoardIndexes().catch(() => {})        // the hotlist's boards (services/hotlist.boards.js)
+ensureDayBoardIndexes().catch(() => {})            // the day boards, their own collection (services/hotlist.day.js)
 ensureHotlistOutcomeIndexes().catch(() => {})      // the hotlist's outcome log (services/hotlist.outcomes.js)
 ensurePythiaWeeklyIndexes().catch(() => {})      // Pythia's week: the change scan and its assessments (services/pythiaWeekly.service.js)
 ensureIndustryAssessmentIndexes().catch(() => {}) // Pythia's industry_assessment (api/strategy/industryAssessment.service.js)
@@ -248,6 +251,8 @@ threadService.ensureThreadIndexes()
 sessionService.ensureIndexes()        // the unified chat's sessions + session_messages (services/session.service.js)
 // A restart cut off every chain that was running: pause each and let its floor-holder ask (plan phase 5, G4).
 chain.sweep().catch(err => logger.warn('[server]', 'chain sweep failed', err.message))
+// The reads Mentor builds were waiting on: found again from their queue rows, handed on when they land (argus-rework.md step 3).
+resumeMentorReads().catch(() => {})
 agentContextService.ensureIndexes()   // sealed agent contexts (services/agentContext.service.js)
 ensurePortfolioBookIndexes()
 

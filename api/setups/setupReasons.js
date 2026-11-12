@@ -12,6 +12,8 @@ const SETUP_REASONS = {
     invalid_setup: [400, 'The draft is not a usable setup'],
     invalid_leg:   [400, 'A level is missing its price'],
     no_venue:      [400, 'Mark a trading account before generating'],
+    // Prometheus's read on the name is still running (services/mentorReads.service.js, argus-rework.md step 3).
+    read_pending:  [409, 'Prometheus is still reading this name — Generate opens when his read lands'],
     // Management refusals. `confirm_order` is not an error the user caused: a printing second leg is
     // placed by confirming its order, so the client is being told WHERE the action lives.
     confirm_order:        [409, 'That leg is placed by confirming its order, not from here'],

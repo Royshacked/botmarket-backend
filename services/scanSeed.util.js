@@ -50,7 +50,8 @@ export function sanitizeScanSeed(raw) {
     }
 }
 
-const HOTLIST_BOARD_ID = /^hb_\d{4}-\d{2}-\d{2}_[a-z]+$/
+// `hb_` — the This week boards (hotlist.boards); `hd_` — the day boards (hotlist.day, 2026-11-12: built with Mentor).
+const HOTLIST_BOARD_ID = /^h[bd]_\d{4}-\d{2}-\d{2}_[a-z]+$/
 const HOTLIST_COLUMNS  = new Set(['open', 'mid', 'eod', 'tomorrow', 'week'])
 
 /**
