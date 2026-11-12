@@ -8,6 +8,7 @@ import { mentorAgentService }    from '../../services/agents/mentor.agent.servic
 import { portfolioAgentService } from '../../services/agents/portfolio.agent.service.js'
 import { scannerAgentService }   from '../../services/agents/scanner.agent.service.js'
 import { strategyAgentService }  from '../../services/agents/strategy.agent.service.js'
+import { proteusAgentService }   from '../../services/agents/proteus.agent.service.js'
 
 // Desk-to-desk routing — ONE mechanism for every agent. A user at any desk says "send NVDA to
 // Prometheus" and the desk emits the grammar Axl has always spoken (`<route>` + `<open>`); the
@@ -32,7 +33,7 @@ test('the rule lists every routable desk but the sender\'s own', () => {
 })
 
 test('the rule never offers an admin desk, and teaches the grammar and the ask-gate', () => {
-    for (const agent of ['scanner', 'mentor', 'analyst', 'portfolio', 'strategy', 'aether']) {
+    for (const agent of ['scanner', 'mentor', 'analyst', 'portfolio', 'strategy', 'aether', 'proteus']) {
         const rule = buildRouteRule(agent)
         assert.doesNotMatch(rule, /`strategy`|`aether`|Pythia/, `${agent}'s rule offers an admin desk`)
         assert.match(rule, /<route>\w+ NVDA<\/route>/)
@@ -43,7 +44,7 @@ test('the rule never offers an admin desk, and teaches the grammar and the ask-g
         assert.match(rule, /Only when the user asked/)
         assert.match(rule, /never your own desk/)
     }
-    assert.deepEqual(Object.keys(ROUTABLE_DESKS).sort(), ['assist', 'portfolio', 'research', 'scan'])
+    assert.deepEqual(Object.keys(ROUTABLE_DESKS).sort(), ['assist', 'portfolio', 'research', 'scan', 'technicals'])
 })
 
 test('the rule is constant per agent — the cached spine stays byte-identical across turns', () => {
@@ -104,9 +105,44 @@ test('capture: Axl naming Argus is dropped, opening and all; Mentor naming Argus
     for (const desk of ['assist', 'research', 'portfolio']) assert.equal(drive(`${desk} NVDA`).route, desk)
 })
 
+// ── Proteus takes Axl's and Mentor's (2026-11-12) ────────────────────────────
+// docs/design/proteus.md §4: "how does TSLA behave?" goes from Axl to Proteus; Mentor offers him too. No other desk
+// lists him, so their cached prompts did not change.
+
+test('mayRoute: Axl and Mentor may send the user to Proteus; nobody else, and no keyless capture', () => {
+    for (const from of ['axl', 'mentor']) assert.equal(mayRoute(from, 'technicals'), true, from)
+    for (const from of [null, undefined, 'analyst', 'portfolio', 'scanner', 'strategy', 'aether', 'proteus']) {
+        assert.equal(mayRoute(from, 'technicals'), false, `${from} must not route to Proteus`)
+    }
+    const axl = makeRouteCapture('axl')
+    axl.captures.route('technicals TSLA'); axl.captures.open('How does TSLA behave?')
+    assert.deepEqual(axl.result(), { route: 'technicals', routeSymbol: 'TSLA', opening: 'How does TSLA behave?', edit: null, show: null })
+    // Axl under his own key routes to every open desk as before, and still never to Argus.
+    for (const desk of ['assist', 'research', 'portfolio']) {
+        const c = makeRouteCapture('axl'); c.captures.route(`${desk} NVDA`)
+        assert.equal(c.result().route, desk)
+    }
+    const c = makeRouteCapture('axl'); c.captures.route('scan')
+    assert.equal(c.result().route, null)
+})
+
+test('the rule offers Proteus to Mentor alone among the desks, and Proteus never his own door', () => {
+    assert.match(buildRouteRule('mentor'), /\*\*Proteus\*\* \(`technicals`\)/)
+    for (const agent of ['analyst', 'portfolio', 'scanner', 'strategy', 'aether', 'proteus']) {
+        assert.doesNotMatch(buildRouteRule(agent), /`technicals`/, `${agent}'s rule offers Proteus`)
+    }
+})
+
+test("Axl's prompt routes how-a-stock-trades questions to Proteus", async () => {
+    const { readFileSync } = await import('node:fs')
+    const axl = readFileSync(new URL('../../prompts/axl_system_prompt.md', import.meta.url), 'utf8')
+    assert.match(axl, /<route>technicals<\/route>/)
+    assert.match(axl, /`<route>technicals TSLA<\/route>` \+ `<open>How does TSLA behave\?<\/open>`/)
+})
+
 test('the rule offers Argus to Mentor alone', () => {
     assert.match(buildRouteRule('mentor'), /\*\*Argus\*\* \(`scan`\)/)
-    for (const agent of ['analyst', 'portfolio', 'scanner', 'strategy', 'aether']) {
+    for (const agent of ['analyst', 'portfolio', 'scanner', 'strategy', 'aether', 'proteus']) {
         assert.doesNotMatch(buildRouteRule(agent), /`scan`/, `${agent}'s rule offers Argus`)
     }
 })
@@ -159,6 +195,7 @@ const DESKS = [
     { key: 'portfolio', own: 'portfolio', chatStream: portfolioAgentService.chatStream, args: { messages: [{ role: 'user', content: 'send nvda to prometheus' }] } },
     { key: 'strategy',  own: null,        chatStream: strategyAgentService.chatStream,  args: { messages: [{ role: 'user', content: 'send nvda to prometheus' }] } },
     { key: 'aether',    own: null,        chatStream: aetherAgentService.chatStream,    args: { messages: [{ role: 'user', content: 'send nvda to prometheus' }] } },
+    { key: 'proteus',   own: 'technicals', chatStream: proteusAgentService.chatStream,  args: { messages: [{ role: 'user', content: 'send nvda to prometheus' }] } },
 ]
 
 // Prometheus is the destination for everyone but Prometheus, who sends to Mentor — a desk's own

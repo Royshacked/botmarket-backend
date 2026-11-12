@@ -188,7 +188,8 @@ ${audienceBlock}` : ''}` },
     // because this return value is a second consumer that would otherwise hand the client "…to the
     // trading desk. <route>trade</route>", parsed after the turn.
     let chartRow = null
-    const route = makeRouteCapture()
+    // Axl's own key: a desk restricted to named senders (registry routedFrom — Proteus takes Axl's) checks it.
+    const route = makeRouteCapture('axl')
     // <adopt> is a THIRD sibling of <route>, for the same reason <edit> is a second one: "the user
     // already owns this book" is not a destination, it is what the portfolio desk must do on arrival.
     // Squeezing it into the route tag would collide with the symbol slot (`portfolio adopt` vs

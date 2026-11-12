@@ -7,8 +7,8 @@ import { SESSION_AGENTS, CONTEXT_KINDS } from '../../services/session.util.js'
 // The one desk registry (services/desks/registry.js). Five hand-kept lists derive from it now; these pin
 // that each derived list is EXACTLY what it replaced, so the move changed no route, no gate and no prompt.
 
-test('the pipelines a route may name are the seven it always was', () => {
-    assert.deepEqual([...VALID_PIPELINES].sort(), ['aether', 'assist', 'portfolio', 'research', 'scan', 'strategy', 'trade'])
+test("the pipelines a route may name: the seven it always was, and Proteus's `technicals` (2026-11-12)", () => {
+    assert.deepEqual([...VALID_PIPELINES].sort(), ['aether', 'assist', 'portfolio', 'research', 'scan', 'strategy', 'technicals', 'trade'])
     assert.deepEqual([...PIPELINE_KEYS].sort(), [...VALID_PIPELINES].sort())
 })
 
@@ -17,14 +17,14 @@ test('admin-only desks are Pythia and Aether', () => {
     assert.deepEqual([...ADMIN_PIPELINE_KEYS], ['strategy', 'aether'])
 })
 
-test('the routable desks, IN PROMPT ORDER — research, assist, portfolio, scan', () => {
+test('the routable desks, IN PROMPT ORDER — research, assist, portfolio, scan, technicals (appended)', () => {
     // buildRouteRule lists them in this order inside every desk's prompt; a reorder is a prompt change.
-    assert.deepEqual(Object.keys(ROUTABLE_DESKS), ['research', 'assist', 'portfolio', 'scan'])
-    assert.deepEqual(Object.values(ROUTABLE_DESKS).map(d => d.agent), ['analyst', 'mentor', 'portfolio', 'scanner'])
+    assert.deepEqual(Object.keys(ROUTABLE_DESKS), ['research', 'assist', 'portfolio', 'scan', 'technicals'])
+    assert.deepEqual(Object.values(ROUTABLE_DESKS).map(d => d.agent), ['analyst', 'mentor', 'portfolio', 'scanner', 'proteus'])
     for (const d of Object.values(ROUTABLE_DESKS)) assert.ok(d.brand && d.does, d.agent)
     // Since 2026-11-09 Argus takes the user only from Mentor (his list-building chat is archived); the rest are open.
     assert.deepEqual(Object.fromEntries(Object.entries(ROUTABLE_DESKS).map(([k, d]) => [k, d.routedFrom])),
-        { research: null, assist: null, portfolio: null, scan: ['mentor'] })
+        { research: null, assist: null, portfolio: null, scan: ['mentor'], technicals: ['axl', 'mentor'] })
 })
 
 test('an <edit> reopens the three editable kinds at the desk that owns each — `scan` left with Argus’s lists (2026-11-09)', () => {
@@ -32,7 +32,7 @@ test('an <edit> reopens the three editable kinds at the desk that owns each — 
 })
 
 test('the session store speaks for every agent and seals onto every kind a desk produces', () => {
-    assert.deepEqual([...SESSION_AGENTS].sort(), ['aether', 'analyst', 'axl', 'mentor', 'portfolio', 'scanner', 'strategy'])
+    assert.deepEqual([...SESSION_AGENTS].sort(), ['aether', 'analyst', 'axl', 'mentor', 'portfolio', 'proteus', 'scanner', 'strategy'])
     // `scan` left on 2026-11-09: Argus's single pick rides the chain to Mentor and produces no entity of its own.
     assert.deepEqual([...CONTEXT_KINDS].sort(), ['coverage', 'industry_view', 'portfolio', 'setup'])
     assert.equal(agentForKind('scan'), null)
@@ -42,7 +42,7 @@ test('the session store speaks for every agent and seals onto every kind a desk 
 
 test('history depth per desk is what each agent carried before the move', () => {
     const depth = Object.fromEntries(Object.values(DESKS).map(d => [d.agent, d.maxMessages]))
-    assert.deepEqual(depth, { axl: 20, analyst: 8, mentor: 8, portfolio: 10, scanner: 10, strategy: 8, aether: 12 })
+    assert.deepEqual(depth, { axl: 20, analyst: 8, mentor: 8, portfolio: 10, scanner: 10, strategy: 8, aether: 12, proteus: 10 })
 })
 
 test('the admin desks talk in their own scope; everyone else in the one chat', () => {

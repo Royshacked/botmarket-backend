@@ -57,6 +57,15 @@ export const DESKS = Object.freeze({
         does: 'finds ONE tradeable name when the user has none, and hands it back here to build',
         scope: 'main', admin: false, maxMessages: 10,
     }),
+    // Proteus, the technical analysis expert (docs/design/proteus.md, 2026-11-12): how a stock's price behaves —
+    // measured from its candles, and what its chart shows now. APPENDED after Argus so the routable desks' order in
+    // every prompt stays as it was. Axl ("how does TSLA behave?") and Mentor send users here; the other desks do not,
+    // so only Mentor's route rule — not every desk's cached prompt — changes. Opened directly from the desks list too.
+    proteus: Object.freeze({
+        agent: 'proteus', desk: 'technicals', brand: 'Proteus', entityKind: null, editable: false, routable: true, routedFrom: Object.freeze(['axl', 'mentor']),
+        does: "reads how a stock's price behaves — what it respects technically, if anything, its ATR and false breaks, day trade or swing",
+        scope: 'main', admin: false, maxMessages: 10,
+    }),
     // The admin desks: Pythia sets the house view and Aether reads event exposure. Neither is somewhere a
     // desk sends a user with a name (not routable — no desk agent has to know the user's role to write a
     // correct offer); Axl still routes admins to both. Each keeps its own panel and session (decision 16).

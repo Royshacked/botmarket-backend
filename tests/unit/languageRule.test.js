@@ -33,6 +33,7 @@ const DESKS = [
     'marketBrief.service.js',
     'mentor.agent.service.js',
     'portfolio.agent.service.js',
+    'proteus.agent.service.js',
     'scanner.agent.service.js',
     'strategy.agent.service.js',
 ]
@@ -123,8 +124,11 @@ test('the rule rides on the CACHED prefix, not the volatile tail', () => {
 //
 // TWO desks are deliberately absent, and the list below is the record of why — both write for
 // EVERYBODY at once, so they have no user whose venue could be read: marketBrief and strategy
-// (Pythia) are broadcasts, and neither carries the venue TOOLS either, for the same reason.
-const VENUE_DESKS = DESKS.filter(f => !['aether.agent.service.js', 'marketBrief.service.js', 'strategy.agent.service.js'].includes(f))
+// (Pythia) are broadcasts, and neither carries the venue TOOLS either, for the same reason. Proteus (2026-11-12) has a
+// user but no use for the venue: he reads a stock's price behaviour — the house's profile, the same for everyone — and
+// never sizes, places or holds anything, so he carries neither the block nor the tools.
+const NO_VENUE = ['aether.agent.service.js', 'marketBrief.service.js', 'strategy.agent.service.js', 'proteus.agent.service.js']
+const VENUE_DESKS = DESKS.filter(f => !NO_VENUE.includes(f))
 
 test('every desk that has a user carries the venue rule, exactly once', () => {
     for (const f of VENUE_DESKS) {
@@ -135,8 +139,8 @@ test('every desk that has a user carries the venue rule, exactly once', () => {
     }
 })
 
-test('a broadcast desk carries NO venue rule — it has no user to read one for', () => {
-    for (const f of ['aether.agent.service.js', 'marketBrief.service.js', 'strategy.agent.service.js']) {
+test('a broadcast desk carries NO venue rule — it has no user to read one for (nor Proteus, who trades nothing)', () => {
+    for (const f of NO_VENUE) {
         assert.doesNotMatch(src(f), /VENUE_RULE/,
             `${f} writes for every user at once; a venue block there would be one user's book leaking into a broadcast`)
     }

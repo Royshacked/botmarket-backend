@@ -45,6 +45,11 @@ const _median = (xs) => {
     const m = v.length >> 1
     return v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2
 }
+/** The q-quantile (nearest rank) of the finite values, or null. Pure. */
+const _quantile = (xs, q) => {
+    const v = xs.filter(Number.isFinite).sort((a, b) => a - b)
+    return v.length ? v[Math.min(v.length - 1, Math.ceil(q * v.length) - 1)] : null
+}
 const _round = (x, d = 3) => (Number.isFinite(x) ? Math.round(x * 10 ** d) / 10 ** d : null)
 
 /**
@@ -160,7 +165,8 @@ export function eventOutcomes(bars, atrs, isEvent, opts = PROFILE) {
  * CONFIRMED swing low (confirmed `swingLookback` bars after it) that nothing broke before. False: a close back above
  * it within `sweepBack` bars. For each false break, the outcome from the reclaim (entry = that bar's close) — does the
  * sweep turn into a move up — judged against the drift. `bars_to_direction`: median bars from the break until a close
- * 1 ATR away from the level, either side. Pure.
+ * 1 ATR away from the level, either side. `sweep_depth_atr`: how far under the low the false breaks went (median and
+ * 80th percentile, in ATRs) — the room a stop under a swing low needs. Pure.
  */
 export function falseBreaks(bars, atrs, cut, drift, opts = PROFILE) {
     const lows = swings(bars, opts.swingLookback).filter(s => s.type === 'low')
@@ -185,7 +191,10 @@ export function falseBreaks(bars, atrs, cut, drift, opts = PROFILE) {
         const ra = reclaim != null ? atrs[reclaim] : null
         const out = reclaim != null && Number.isFinite(ra) && ra > 0
             ? bracket(bars, reclaim, bars[reclaim].close + opts.up * ra, bars[reclaim].close - opts.down * ra, opts.horizon) : undefined
-        breaks.push({ i: reclaim ?? j, false: reclaim != null, out, toDir })
+        // How far under the low a FALSE break went before it came back, in ATRs — what a stop under a swing low
+        // has to clear to survive the sweep.
+        const depth = reclaim != null ? (s.price - Math.min(...bars.slice(j, reclaim + 1).map(b => b.low))) / a : null
+        breaks.push({ i: reclaim ?? j, false: reclaim != null, out, toDir, depth })
     }
     // One sweep per outcome window, like every other test: two sweeps a few bars apart share the move that follows.
     const sweeps = []
@@ -203,6 +212,7 @@ export function falseBreaks(bars, atrs, cut, drift, opts = PROFILE) {
         false_rate: _round(n ? nFalse / n : null),
         recent: { breaks: rec.length, false_rate: _round(rec.length ? rec.filter(b => b.false).length / rec.length : null) },
         bars_to_direction: _median(breaks.map(b => b.toDir)),
+        sweep_depth_atr: { median: _round(_median(breaks.map(b => b.depth)), 2), p80: _round(_quantile(breaks.map(b => b.depth), 0.8), 2) },
         after_sweep: after,
     }
 }

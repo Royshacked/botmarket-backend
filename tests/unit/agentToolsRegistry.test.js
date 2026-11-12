@@ -12,6 +12,7 @@ import { TOOLS as AETHER_TOOLS }   from '../../services/agents/aether.agent.serv
 import { TOOLS as STRATEGY_TOOLS } from '../../services/agents/strategy.agent.service.js'
 import { TRADING_TOOLS }             from '../../services/tools/trading.tools.js'
 import { MENTOR_TOOLS }             from '../../services/agents/mentor.agent.service.js'
+import { TOOLS as PROTEUS_TOOLS }  from '../../services/agents/proteus.agent.service.js'
 import { SMC_TOOLS }                from '../../services/tools/smc.tools.js'
 import { VALUATION_TOOLS }          from '../../services/tools/valuation.tools.js'
 import { RUNUP_TOOLS }              from '../../services/tools/runup.tools.js'
@@ -55,6 +56,7 @@ const LIVE = {
     trading:   TRADING_TOOLS,
     mentor:    MENTOR_TOOLS,
     axl:       AXL_TOOLS,
+    proteus:   PROTEUS_TOOLS,
 }
 
 /** Structure only — everything a model can ACT on, with human prose stripped out. */
@@ -138,7 +140,7 @@ test('the registry has no orphans — every schema is used by some agent', () =>
 //   • axl    — reception authors nothing, and its clause would have ruled out routing/explaining,
 //     i.e. nearly everything it does. A declaration read on every turn and reached for almost never
 //     loses money. See the note at the foot of axl.agent.service.js's TOOLS.
-const CONSULTS = new Set(['strategy', 'portfolio', 'scanner', 'analyst', 'mentor'])
+const CONSULTS = new Set(['strategy', 'portfolio', 'scanner', 'analyst', 'mentor', 'proteus'])
 
 for (const [agent, live] of Object.entries(LIVE)) {
     test(`${agent}: ${CONSULTS.has(agent) ? 'declares' : 'does not declare'} the reasoning sidecar`, () => {

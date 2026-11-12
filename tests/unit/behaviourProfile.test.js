@@ -98,6 +98,7 @@ test('false breaks: a dip under a swing low closed back above within three bars,
     assert.ok(r.bars_to_direction >= 1)
     assert.equal(r.after_sweep.n, 1)
     assert.equal(r.after_sweep.rate, 1)
+    assert.deepEqual(r.sweep_depth_atr, { median: 1, p80: 1 }, 'the sweep went 1 ATR under the 100 low (to 99)')
 })
 
 test('events are counted once: the bars an outcome covers are skipped', () => {
