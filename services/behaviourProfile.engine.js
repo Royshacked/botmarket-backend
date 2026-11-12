@@ -106,7 +106,9 @@ export function levelTouches(bars, level, atrs, opts = PROFILE) {
     for (let i = 1; i < bars.length; i++) {
         const L = level[i], Lp = level[i - 1], a = atrs[i]
         if (!Number.isFinite(L) || !Number.isFinite(Lp) || !Number.isFinite(a) || a <= 0) continue
-        if (!(bars[i - 1].close > Lp && bars[i].low <= L + opts.touchTol * a)) continue
+        // From above: the previous close AND this bar's open sit over the level (a bar that opens under it is not
+        // testing it from above — VWAP's first bars of a session were "touches" that way, CR 2026-11-12).
+        if (!(bars[i - 1].close > Lp && bars[i].open >= L && bars[i].low <= L + opts.touchTol * a)) continue
         if (bars[i].close < L - opts.down * a) continue   // sliced through on the touch bar: a break, not a test
         const o = bracket(bars, i, L + opts.up * a, L - opts.down * a, opts.horizon)
         if (o == null) break
@@ -244,7 +246,11 @@ function _onePerBar(list) {
 /** ET session day of a bar ("2026-11-11"), for VWAP's daily reset. */
 const _etDay = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' })
 
-/** Session-anchored VWAP over many sessions: calcVWAPSeries (the monitor's math) per ET day. Pure. */
+/**
+ * Session-anchored VWAP over many sessions: calcVWAPSeries (the monitor's math) per ET day. A session's FIRST bar reads
+ * null — its VWAP is that bar's own price, so it is no level to test against (and the jump from yesterday's VWAP to
+ * today's is not a touch). Pure.
+ */
 export function sessionVwap(bars) {
     const mon = _mon(bars)
     const out = new Array(bars.length).fill(null)
@@ -252,7 +258,7 @@ export function sessionVwap(bars) {
     for (let i = 1; i <= bars.length; i++) {
         if (i < bars.length && _etDay.format(new Date(mon[i].t)) === _etDay.format(new Date(mon[start].t))) continue
         const slice = mon.slice(start, i)
-        calcVWAPSeries(slice, slice[0].t).forEach((v, k) => { out[start + k] = v })
+        calcVWAPSeries(slice, slice[0].t).forEach((v, k) => { out[start + k] = k ? v : null })
         start = i
     }
     return out

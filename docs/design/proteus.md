@@ -103,3 +103,22 @@ So the depth is there; the cost is calls. The intraday bars are **kept and toppe
 back ~3 months, each weekly re-read fetches only the new week) — otherwise ~25 board names × 10 calls would run
 into the provider's rate limit every week. Where they are kept (a collection, its size against the 512 MB Atlas
 quota) is a build decision.
+
+## 10. The sample run (build step 2, 2026-11-12)
+
+`scripts/proteus-sample.mjs` on 11 names (TSLA NVDA AAPL AMD PLTR SMCI JPM XOM KO IONQ SPY), 4 timeframes each,
+9 tests per timeframe — **396 verdicts, 2 'respects'**: TSLA daily SMA50 (78% vs 49% shifted, n 37) and XOM
+5-minute VWAP (71% vs 56%, n 167). At z ≥ 3 about 1 of 396 is expected by chance, so these two are not proof either.
+Weekly is mostly 'thin' (two touches a year).
+
+What DOES hold on every name and timeframe: **60–90% of breaks of a swing low close back above within 3 bars**.
+What follows the sweep is no better than the drift — so it is a fact for STOPS (a stop just under a swing low is swept
+about two times in three), not an entry signal.
+
+Decided (Roy, 2026-11-12): **keep the bar strict.** Proteus's usual answer is "nothing technical holds on this name",
+with the facts that do: ATR, the false-break rate and how far sweeps go, the gap, day vs swing. A rule that clears the
+bar is reported with its numbers and the caveat that one in a few hundred tests passes by chance.
+
+Seen, not fixed: the 1-hour VWAP baseline runs high on fast names (AMD 92%) — the shifted-down copies sit several
+hourly ATRs away (the hourly ATR carries overnight gaps), so they are touched only in sharp drops, which bounce. It
+makes the 1-hour VWAP test conservative, not generous.

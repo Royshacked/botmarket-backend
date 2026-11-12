@@ -114,7 +114,7 @@ test('VWAP resets each New York session', () => {
         { open: 20, high: 20, low: 20, close: 20, volume: 100, timestamp: day1 + 300 },
         { open: 50, high: 50, low: 50, close: 50, volume: 100, timestamp: day2 },
     ]
-    assert.deepEqual(sessionVwap(b), [10, 15, 50])
+    assert.deepEqual(sessionVwap(b), [null, 15, null], "each session's first bar has no VWAP to test against")
 })
 
 test('too few bars for the 200 MA: no profile', () => {
@@ -173,4 +173,9 @@ test('the whole profile: the symbol, long side, each timeframe, and F', () => {
     assert.ok(p.timeframes.day)
     assert.equal(p.timeframes.week, null, '100 weekly bars: too few')
     assert.ok('day_trade' in p.suitability && 'swing' in p.suitability)
+})
+
+test('a bar that opens under the level is not a touch from above (the VWAP session-open case)', () => {
+    const b = [bar(105), bar(96, { open: 95, high: 99, low: 94 }), ...series([97, 98, 99, 100, 101, 102, 103, 104])]
+    assert.deepEqual(levelTouches(b, b.map(() => 100), b.map(() => 1), { ...PROFILE, horizon: 5 }), [])
 })
