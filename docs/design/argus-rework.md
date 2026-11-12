@@ -142,7 +142,7 @@ wrong. He adds no chart or fundamental judgment of his own: that is what keeps t
    today, `hotlist.week.js`); **Prometheus AND Proteus** read every one (today only Prometheus's catalyst
    read, `hotlistResearch.service.js`; Argus's old picks there are archived-board only). Argus's when
    (§3.4) on top, like every horizon.
-2. **Proteus's design** — the full talk; §2 step 3 reads whatever it settles on. Caution: "obeys the 20 MA"
+2. ~~**Proteus's design**~~ — talked 2026-11-12: `docs/design/proteus.md`; §2 step 3 reads it. Caution: "obeys the 20 MA"
    found in one ticker's history needs a check that it held in a later period, or it is luck.
 
 ## 6. Build order (after Roy's check)
