@@ -138,6 +138,8 @@ test("Axl's prompt routes how-a-stock-trades questions to Proteus", async () => 
     const axl = readFileSync(new URL('../../prompts/axl_system_prompt.md', import.meta.url), 'utf8')
     assert.match(axl, /<route>technicals<\/route>/)
     assert.match(axl, /`<route>technicals TSLA<\/route>` \+ `<open>How does TSLA behave\?<\/open>`/)
+    // It is a QUESTION, and Axl answers questions himself — so the exception is spelled out where that rule is.
+    assert.match(axl, /The one question you route instead of answering: how a stock TRADES/)
 })
 
 test('the rule offers Argus to Mentor alone', () => {

@@ -320,7 +320,8 @@ services/
                               admin, maxMessages; routing.util / session.util / each agent's MAX_MESSAGES
                               derive from it. entryOf(desk): where a route lands (composite `trade` →
                               Argus preset to pick one name for Mentor). routedFrom: the only senders a desk takes
-                              (Argus: Mentor alone, since 2026-11-09 — routing.util mayRoute gates the capture + rule)
+                              (Argus: Mentor alone, since 2026-11-09; Proteus: Axl and Mentor, 2026-11-12 — Axl's
+                              capture carries the key 'axl' — routing.util mayRoute gates the capture + rule)
       <agent>.desk.js         parse(body, turn, user) → { state, input } · run · done · nextState (the fold
                               the client did on every `done`) · stateFromEntity(entity, opts) (rebuild to edit) ·
                               prepareInput · onRouted (a route landing) · hasWork · stateFields (what `done`
@@ -361,8 +362,10 @@ services/
                           same name + horizon only, never over another desk's running chain); the `research` choice
                           on an Argus list went to archive/ 2026-11-09, so the `next` queue walk is dormant). Wired
                           with the turns in desks/turns.js (onSleeveSettled, onReadSettled)
-  agents/                 the 6 LLM desks (analyst · axl · mentor · portfolio · scanner ·
-                          strategy). A seventh is archived and lives under archive/, imported by
+  agents/                 the 7 LLM desks (analyst · axl · mentor · portfolio · proteus · scanner ·
+                          strategy). proteus (2026-11-12, docs/design/proteus.md): the technical analysis desk —
+                          get_behaviour_profile first, the chart tools (vision ones model-only), SMC, consult last;
+                          no working state, no entity; LANGUAGE + BREVITY only (he trades nothing: no venue). A seventh is archived and lives under archive/, imported by
                           nothing — see archive/README.md, and `npm run check:archive`, which
                           is what keeps "imported by nothing" from meaning "loads no more".
                           Five of the six append LANGUAGE_RULE + VENUE_RULE + BREVITY_RULE to their
@@ -779,6 +782,10 @@ services/
   houseIndustries.tools.js  get_house_industries (ATLAS; Argus's until 2026-11-11 — his words archived in
                             archive/services/tools/houseIndustries.argus.js) — `book` → the house's industries for it
                             (first 20 in full), `industry` → its largest companies: the candidate sleeves of a book
+  behaviourProfile.tools.js get_behaviour_profile (PROTEUS, 2026-11-12) — UNBOUND: profileFor → formatProfile (how
+                            to read it, WHAT HOLDS, each timeframe's tests with rate vs baseline / n / recent third,
+                            the false breaks + sweep depth, the fit). A failure tells him not to describe the stock
+                            from memory
   horizonList.tools.js      get_horizon_list (ARGUS, 2026-11-11, argus-rework.md §3.1) — UNBOUND, read-only: the house's
                             list for a horizon, the only names he may pick from. intraday / day → today's latest DAY
                             BOARD (hotlist.day, todayBoards; before the first, when the next runs); short term swing →
@@ -1045,8 +1052,13 @@ services/
                             (suitability: day trade / swing). ONE outcome everywhere (bracket: +1 ATR before a close
                             −0.5 ATR, 10 bars); every rate against a BASELINE (a level shifted ±2/3 ATR, or the drift
                             from every bar), two-proportion z ≥ 3, and the recent third must still beat its own
-                            baseline (judge → respects / faded / unconfirmed / no / thin). PURE; not yet fetched or
-                            stored (Proteus build steps 2-4).
+                            baseline (judge → respects / faded / unconfirmed / no / thin); false breaks carry
+                            sweep_depth_atr (median, p80). PURE.
+  behaviourProfile.service.js profileFor(symbol, { fresh }) — the profile FETCHED and KEPT: fetchProfileBars (5-minute
+                            paged by week ~3 months, 1-hour by ~2 months a year, daily 10 years, weekly built from it
+                            — weeklyFromDaily), the engine, makeMongoBackedCache `proteus_profiles` (a week;
+                            PROFILE_VERSION bump recomputes); one compute per symbol at a time. Keeps the profile,
+                            never the bars (the Atlas quota). scripts/proteus-sample.mjs runs it fresh on a sample.
   swingStructure.service.js WHO IS IN CONTROL of a chart, from its swings (2026-10-30) — the shared mechanism of the
                             THESIS lens: STRUCTURE (the rule's settings, one home), atr, swings (zigzag k × ATR, known
                             only once confirmed), mirror, toWeekly, controlReplay (who is in control + each break's
@@ -1602,7 +1614,7 @@ scripts/                    ops one-offs — none run by `npm test`. Kinds: migr
                             one in a sibling repo. Mechanical only — it says which sentences to distrust, not whether
                             the prose is still true. Its verdict rules are pinned by
                             tests/unit/docsDrift.test.js (the cases a code review found it passing).
-prompts/                    every prompt loaded at RUNTIME (6 desks + Argus's
+prompts/                    every prompt loaded at RUNTIME (7 desks — proteus_system_prompt.md 2026-11-12 — + Argus's
                             profile/handoff + market brief + concepts). Hot-reloaded, lazily —
                             so a bad path is an ENOENT on a live turn, not an import error.
                             tests/unit/promptPaths.test.js guards both directions (a path that

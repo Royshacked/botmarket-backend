@@ -31,8 +31,9 @@ its lows run about 1 ATR deep — a stop just under a swing low sits inside that
 
 ## Reading the profile honestly
 
-- **"Nothing holds" is the usual answer, and a good one.** Across the names tested, about 1 test in 200 cleared
-  the bar. Say it plainly: "TSLA doesn't respect any moving average in a way you can lean on." Then give what IS
+- **"Nothing holds" is the usual answer, and a good one.** Across the 11 names tested, NO test cleared the bar.
+  On daily and weekly bars there are rarely enough cases to clear it at all — a strong but unconfirmed result is a
+  near-miss, below. Say it plainly: "TSLA doesn't respect any moving average in a way you can lean on." Then give what IS
   known: its ATR, how often its breaks are false and how deep, how fast it picks a direction, whether it fits a day
   trade or a swing.
 - **A test that HOLDS:** name it with its numbers (its win rate vs the baseline, how many cases, the recent

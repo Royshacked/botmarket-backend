@@ -99,7 +99,7 @@ tools move here once Argus is fully defined (argus-rework §4).
 - **1-hour:** one call returns ~3 months (~440 bars); a year = ~4 calls.
 - **Daily / weekly:** years, one call.
 
-So the depth is there; the cost is calls. The intraday bars are **kept and topped up** (the first profile pages
+So the depth is there; the cost is calls. ~~The intraday bars are **kept and topped up**~~ — SUPERSEDED at build (step 3): only the PROFILE is kept, the bars are re-fetched weekly (~22 calls; see §11). Originally: the intraday bars are **kept and topped up** (the first profile pages
 back ~3 months, each weekly re-read fetches only the new week) — otherwise ~25 board names × 10 calls would run
 into the provider's rate limit every week. Where they are kept (a collection, its size against the 512 MB Atlas
 quota) is a build decision.
@@ -122,3 +122,35 @@ bar is reported with its numbers and the caveat that one in a few hundred tests 
 Seen, not fixed: the 1-hour VWAP baseline runs high on fast names (AMD 92%) — the shifted-down copies sit several
 hourly ATRs away (the hourly ATR carries overnight gaps), so they are touched only in sharp drops, which bounce. It
 makes the 1-hour VWAP test conservative, not generous.
+
+**Re-run after the code review (2026-11-12, same 11 names):** the rule is now FOUND on the older two-thirds alone and
+checked on the recent third (it had been tested on the whole history — a recent-only edge could confirm itself);
+order blocks counted only once known, shifted in % and spaced; the drift baseline sampled a window apart; every
+unbroken swing low tested for a false break. **0 of 396 tests hold.** TSLA's daily 50 SMA is the clearest near-miss:
+80% vs 45% on 20 older touches (z 2.72) and 77% vs 58% on 17 recent ones — strong, but 5 years of daily bars give too
+few touches to reach z 3 on two-thirds of them. JPM's daily 50 SMA (87% vs 59%, z 2.39) is the other. False breaks:
+69–79% of breaks of a swing low close back above within 3 bars, on every name; sweeps go a median ~0.25 ATR under the
+low, 80% within ~0.5 ATR (SPY 0.37 / 0.84).
+
+**Decided (Roy, 2026-11-12): the daily view reads all ~10 years** it already fetches (PROFILE_VERSION 3). Re-run: still
+**0 of 396**, and the TSLA near-miss is GONE — on the older two-thirds of 10 years (2016–2022) its 50 SMA is 66% vs
+66%: the edge seen above lives only in recent years. More history adds touches, but also older regimes the stock no
+longer trades like — the daily test now asks "did it hold for most of a decade AND lately". A rule that appears
+recently shows as no edge, not as faded. If that proves too slow to catch a change, the alternative is a separate
+recent-only read (e.g. the last 3 years, reported as "lately", never as a rule) — not built.
+
+## 11. Build order and status
+
+1. **The measured profile engine** — BUILT 2026-11-12 (`services/behaviourProfile.engine.js`, 68080cdf): one
+   outcome, a baseline for every rate, z ≥ 3 (raised from 2 after a random walk passed ~2% of tests), the recent
+   third; sweep depth added in step 3.
+2. **The sample run** — DONE 2026-11-12 (§10; `scripts/proteus-sample.mjs`, cf6f547f, with the VWAP touch fix).
+3. **The desk** — BUILT 2026-11-12 (c1240bc0, FE c81e392): `services/behaviourProfile.service.js` (fetched, kept a
+   week in `proteus_profiles` — the PROFILE only, not the bars: 5-minute history per name would eat the Atlas
+   quota, §9 superseded), `get_behaviour_profile`, the agent + prompt + desk, registry `technicals` routed from Axl
+   and Mentor (Axl's capture now carries the key `'axl'`), Axl's and Mentor's prompts, the FE agent + Technicals
+   Desk + wave badge. Live-driven 2026-11-12 (908640ee): Axl → Proteus on TSLA (the daily 50 SMA held: 78% vs 49%,
+   n 37 — reported with the chance caveat) and NVDA in the browser (nothing holds), desktop + 390px.
+4. **The triggers** — not built: Mentor's pre-trade read through the chain (§4.1), the measured profile on board
+   names (one name at a time — a profile is ~0.5 s of CPU on the leader), the nightly Pythia names.
+5. **The Hotlist badge**, then Mentor weighing the read for his levels — not built.

@@ -17,7 +17,7 @@ import { DESKS } from '../desks/registry.js'
 import { makeRouteCapture, buildRouteRule } from '../routing.util.js'
 import { toolsFor } from '../agentTools.registry.js'
 import { consultDescription } from '../deepThink.service.js'
-import { makePromptLoader, LANGUAGE_RULE, BREVITY_RULE, cachedBlock, normalizeMessages, cleanReply, makeToolHandler, buildAudienceSection, COMMON_TOOL_HANDLERS } from '../agentUtils.js'
+import { makePromptLoader, LANGUAGE_RULE, BREVITY_RULE, cachedBlock, normalizeMessages, cleanReply, makeToolHandler, buildAudienceSection } from '../agentUtils.js'
 import { getPriceAction, getCycleAnalysis } from '../priceAnalytics.service.js'
 import { makeCandlesHandler, makeIndicatorsHandler, makeChartHandler } from '../tools/marketData.tools.js'
 import { makeStructureVisionHandler, OB_VISION, FB_VISION } from '../tools/priceStructure.tools.js'
@@ -81,7 +81,6 @@ const TOOL_HANDLERS = {
     get_orderblocks: makeStructureVisionHandler({ log: LOG, kind: 'orderblocks', vision: OB_VISION, onChart: null }),
     get_false_breaks: makeStructureVisionHandler({ log: LOG, kind: 'false_breaks', vision: FB_VISION, onChart: null }),
     ...SMC_TOOL_HANDLERS,
-    ...COMMON_TOOL_HANDLERS,
     ...makeNewsHandlers(),
     ...makeMarketHoursHandlers(),
 }

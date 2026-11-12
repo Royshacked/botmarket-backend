@@ -18,7 +18,8 @@
  * @property {string|null} entityKind   what its work produces and an edit reopens — null if nothing
  * @property {boolean}     editable     whether <edit>kind id</edit> may reopen that entity at this desk
  * @property {boolean}     routable     whether ANOTHER desk may send the user here with a name
- * @property {string[]}    [routedFrom] when set, ONLY these agents may route here — Axl and every other desk cannot
+ * @property {string[]}    [routedFrom] when set, ONLY these agents may route here (Axl's key is 'axl') — every other
+ *                                     sender cannot
  * @property {string|null} does         the one line a sender's prompt shows (routable desks only)
  * @property {'main'|'strategy'|'aether'} scope  the session it talks in
  * @property {boolean}     admin        admin-only (the route gate and the prompts both hold it)
@@ -32,7 +33,7 @@ export const DESKS = Object.freeze({
         // Reception remembers deeper than a desk: its trim lands three times less often (see agentUtils.trimHistory).
         scope: 'main', admin: false, maxMessages: 20,
     }),
-    // ORDER IS LOAD-BEARING for the routable four: buildRouteRule lists them in this order inside every
+    // ORDER IS LOAD-BEARING for the routable desks: buildRouteRule lists them in this order inside every
     // desk's prompt, and a reorder changes every prompt (and its cache).
     analyst: Object.freeze({
         agent: 'analyst', desk: 'research', brand: 'Prometheus', entityKind: 'coverage', editable: true, routable: true,

@@ -4,12 +4,12 @@ Behavioral contracts for the core domain. For the architecture overview + ASCII
 flow diagrams see [README.md](README.md); for file layout see [CODE_MAP.md](CODE_MAP.md).
 
 The app turns natural-language chat into **monitored trade ideas** that route to a
-broker. Six desks produce work — Axl (reception) · Mentor (`setup`, the trader) ·
-Atlas (portfolio) · Argus (one name for Mentor; his scan lists archived 2026-11-09) · Prometheus (`coverage`) · Pythia (`industry_view`, `industry_assessment`) — and each
+broker. Seven desks produce work — Axl (reception) · Mentor (`setup`, the trader) ·
+Atlas (portfolio) · Argus (one name for Mentor; his scan lists archived 2026-11-09) · Prometheus (`coverage`) · Pythia (`industry_view`, `industry_assessment`) · Proteus (how a stock trades — a shared profile, no kind) — and each
 authored kind is watched by its desk's own background monitor. The `idea` execution tier
 has no desk, so it is watched by two kind-blind loops instead (§2). One reconciler keeps
 entity state honest against the broker. Nothing reaches a broker while its venue is shut
-(§5). Every desk is handed the user's venue on every turn, and every account-bound
+(§5). Every desk that can act on an account is handed the user's venue on every turn, and every account-bound
 artifact belongs to one workspace (§8); three shared rules govern how they all speak
 (§9), and all of it runs on exactly one instance (§10).
 
@@ -507,6 +507,29 @@ fundamentals, Mentor trades.
   runs, **Generate is held**: readiness is dark and the press answers `read_pending` (409). A name read this way
   enters house coverage like any other.
 
+### Proteus — how a stock trades (2026-11-12)
+
+[docs/design/proteus.md](docs/design/proteus.md) — the technical analysis desk (agent `proteus`, pipeline
+`technicals`): what ONE stock's price respects technically, if anything. He sets no levels (Mentor's), judges no
+business (Prometheus's), picks nothing (Argus's). Long side only, for now.
+
+- **Measured, then seen.** `get_behaviour_profile` is his evidence: counted in code from the stock's own candles
+  (`services/behaviourProfile.engine.js`) on 5-minute (~3 months), 1-hour (~1 year), daily (~10 years) and weekly
+  (~10 years) bars — holds at the 20 EMA / 50 / 200 SMA / VWAP, what follows RSI under 30, a MACD cross up or a
+  high-volume up bar, false breaks of swing lows (how often, how deep in ATRs, how fast a direction), bullish
+  order-block retests, ATR, gap, dollar volume, and whether it fits a day trade / a swing. Every rate is against a
+  **baseline** (the level shifted, or the stock's drift); a test **holds** only at 10+ points over it, z ≥ 3, on the
+  OLDER two-thirds of the history, AND still beating it in the recent third it never saw. "Nothing holds" is the usual
+  answer (sample of 11 names: 0 of 396 tests). What is SEEN on the chart now (patterns, today's order blocks and sweeps) comes from the vision tools and
+  never carries a hit rate.
+- **One profile per stock, the house's** (`services/behaviourProfile.service.js`): binds to no account, kept a week
+  in `proteus_profiles`; a name already profiled costs nothing whoever asks. Only the profile is kept, never the bars.
+- **Who sends users to him:** Axl ("how does TSLA behave?" → `<route>technicals TSLA</route>`) and Mentor (registry
+  `routedFrom`); no other desk lists him. Opened directly from the desks list too. Mentor's pre-trade read, the day
+  boards and the nightly Pythia names are build step 4 (not built).
+- **No venue block.** He trades nothing, so he is the one desk with a user that carries neither `VENUE_RULE` nor the
+  venue tools (`tests/unit/languageRule.test.js`).
+
 ---
 
 ## 5. Broker & paper routing
@@ -693,6 +716,8 @@ the Nasdaq-100 as the **US100 cash CFD**, but levels are read off the **NQ futur
   - The legacy `ideas` collection still exists in Mongo holding abandoned pre-cutover documents.
     Nothing reads it. It is queued to be archived and dropped.
 - `trades` — append-only point-in-time capture of each opened/closed idea (paper + live).
+- `proteus_profiles` — Proteus's measured profile per symbol (`{ symbol, version, profile, computed_at, fetchedAt }`),
+  the house's, kept a week (`services/behaviourProfile.service.js`; a version bump recomputes).
 - `journal` — the monitor's record for a `setup`, one row per READ plus the code-written events
   (`entry`, `exit`, `invalidation`, `pre_active`): `{ entityId, at, reason, price, rung, verdict,
   note, conditions[{id, met, note}], tools[], fired?, armed[], proposal?, next_check_at }`.

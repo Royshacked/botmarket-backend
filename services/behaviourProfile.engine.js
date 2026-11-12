@@ -11,8 +11,9 @@
 //   - a LEVEL (an MA, VWAP, an order block) → the same level SHIFTED up and down by a few typical ranges, the
 //     identical touch rule run on each: same trend, same volatility, not the level;
 //   - an EVENT (RSI under 30, a MACD cross, a high-volume up bar) → the same outcome from every bar (the drift).
-// AND A RECENT CHECK (argus-rework §5.2): the history is split by time — the older 2/3 finds the rule, the recent 1/3
-// must still beat its own baseline, or the verdict says it faded. Small samples say so ('thin').
+// AND OUT OF SAMPLE (argus-rework §5.2): the history is split by time — the rule is FOUND on the older 2/3 alone (edge
+// and z there), and the recent 1/3, which the finding never saw, must still beat its own baseline, or the verdict says
+// it faded. Small samples say so ('thin').
 
 import { calcSMASeries, calcEMASeries, calcRSISeries, calcMACDSeries, calcATRSeries, calcVWAPSeries } from '../monitoring/evaluators/structured.evaluator.js'
 import { swings, detectOrderBlocks } from './smc.engine.js'
@@ -74,16 +75,18 @@ const _rate = (outs) => {
 
 /**
  * A rate against its baseline → the stats and the verdict. `events`/`base` are `{ i, out }` lists; `cut` the bar index
- * where the recent third starts. Pure.
- *   respects — beats the baseline by `edge` with z ≥ `z` on the whole history AND still beats it in the recent third
- *   faded    — beat it overall, but not in the recent third
- *   unconfirmed — beat it overall, too few recent events to tell
- *   no       — does not beat it
- *   thin     — too few events to say anything
+ * where the recent third starts. The rule is FOUND on the older part (i < cut) only — edge and z there — and CHECKED on
+ * the recent part, which the finding never saw (CR 2026-11-12: testing on the whole history let a recent-only edge
+ * confirm itself). `n` / `rate` / `base` / `z` are the older part's; `recent` the check's. Pure.
+ *   respects    — beat the baseline by `edge` at z ≥ `z` in the older part AND by `recentEdge` in the recent part
+ *   faded       — beat it in the older part, not in the recent part
+ *   unconfirmed — beat it in the older part, too few recent events to tell
+ *   no          — did not beat it in the older part
+ *   thin        — too few older events to say anything
  */
 export function judge(events, base, cut, opts = PROFILE) {
-    const all = _rate(events.map(e => e.out))
-    const b = _rate(base.map(e => e.out))
+    const all = _rate(events.filter(e => e.i < cut).map(e => e.out))
+    const b = _rate(base.filter(e => e.i < cut).map(e => e.out))
     const rec = _rate(events.filter(e => e.i >= cut).map(e => e.out))
     const recBase = _rate(base.filter(e => e.i >= cut).map(e => e.out))
     const edge = all.rate != null && b.rate != null ? all.rate - b.rate : null
@@ -133,7 +136,11 @@ export function levelTest(bars, level, atrs, atrPct, cut, opts = PROFILE) {
     return judge(events, base, cut, opts)
 }
 
-/** The same outcome from EVERY bar (entry = its close) — the drift an event has to beat. Pure. */
+/**
+ * The same outcome from bars spread `horizon` apart (entry = the close) — the drift an event has to beat. Every bar
+ * would overlap its neighbours' windows and count one move ten times, overstating the baseline's sample (CR 2026-11-12).
+ * Pure.
+ */
 export function driftOutcomes(bars, atrs, opts = PROFILE) {
     const out = []
     for (let i = 0; i < bars.length; i++) {
@@ -142,6 +149,7 @@ export function driftOutcomes(bars, atrs, opts = PROFILE) {
         const o = bracket(bars, i, bars[i].close + opts.up * a, bars[i].close - opts.down * a, opts.horizon)
         if (o == null) break
         out.push({ i, out: o })
+        i += opts.horizon - 1
     }
     return out
 }
@@ -161,8 +169,9 @@ export function eventOutcomes(bars, atrs, isEvent, opts = PROFILE) {
 }
 
 /**
- * C. FALSE BREAKS of swing lows (a sweep of the stops under a low). A break: a bar's low goes under the latest
- * CONFIRMED swing low (confirmed `swingLookback` bars after it) that nothing broke before. False: a close back above
+ * C. FALSE BREAKS of swing lows (a sweep of the stops under a low). A break: a bar's low goes under a CONFIRMED swing
+ * low (confirmed `swingLookback` bars after it) that nothing broke before — any of them, not only the latest (an older,
+ * deeper low swept later is a sweep too, CR 2026-11-12); a bar under several is one break, of the lowest. False: a close back above
  * it within `sweepBack` bars. For each false break, the outcome from the reclaim (entry = that bar's close) — does the
  * sweep turn into a move up — judged against the drift. `bars_to_direction`: median bars from the break until a close
  * 1 ATR away from the level, either side. `sweep_depth_atr`: how far under the low the false breaks went (median and
@@ -171,15 +180,14 @@ export function eventOutcomes(bars, atrs, isEvent, opts = PROFILE) {
 export function falseBreaks(bars, atrs, cut, drift, opts = PROFILE) {
     const lows = swings(bars, opts.swingLookback).filter(s => s.type === 'low')
     const breaks = []
-    const used = new Set()
+    let active = []      // confirmed swing lows not broken yet
+    let next = 0         // the next low to confirm
     for (let j = 1; j < bars.length; j++) {
-        // The latest swing low confirmed before bar j, not yet broken.
-        let s = null
-        for (let x = lows.length - 1; x >= 0; x--) {
-            if (lows[x].i + opts.swingLookback < j) { s = lows[x]; break }
-        }
-        if (!s || used.has(s.i) || !(bars[j].low < s.price)) continue
-        used.add(s.i)
+        while (next < lows.length && lows[next].i + opts.swingLookback < j) active.push(lows[next++])
+        const broken = active.filter(l => bars[j].low < l.price)
+        if (!broken.length) continue
+        active = active.filter(l => !(bars[j].low < l.price))
+        const s = broken.reduce((m, l) => (l.price < m.price ? l : m))
         const a = atrs[j]
         if (!Number.isFinite(a) || a <= 0) continue
         let reclaim = null
@@ -219,16 +227,21 @@ export function falseBreaks(bars, atrs, cut, drift, opts = PROFILE) {
 
 /**
  * D. BULLISH ORDER BLOCKS (smc.engine) — of those price came back to, how many held. A retest: the first bar after
- * the block's impulse whose low reaches the block's top, coming from above (no retest when price never left it). Win = `up` ATRs above the top; loss = a close `down` ATRs
- * under the block's bottom. Baseline: the same zone shifted by the median ATR multiples, the same retest rule. Pure.
+ * the block is KNOWN — two bars after its impulse candle (the FVG closes on the bar after it; counting earlier dips
+ * would score the move that made the block as its first hold, CR 2026-11-12) — whose low reaches the block's top,
+ * coming from above (no retest when price never left it). Win = `up` ATRs above the top; loss = a close `down` ATRs
+ * under the block's bottom. Baseline: the same zone shifted by the median ATR multiples IN % OF PRICE (like the levels'
+ * — a dollar shift means different things as a stock goes from $20 to $200), the same retest rule. Retests closer than
+ * `horizon` bars share a move and count once. Pure.
  */
-export function orderBlockTest(bars, atrs, medAtr, cut, opts = PROFILE) {
+export function orderBlockTest(bars, atrs, atrPct, cut, opts = PROFILE) {
     const at = new Map(bars.map((b, i) => [b.timestamp, i]))
-    const blocks = detectOrderBlocks(bars).filter(o => o.type === 'bullish').map(o => ({ ...o, i: at.get(o.at) })).filter(o => o.i != null)
-    const retest = (k, top, bottom) => {
+    const blocks = detectOrderBlocks(bars).filter(o => o.type === 'bullish')
+        .map(o => ({ ...o, i: at.get(o.at), known: at.get(o.impulseAt) + 2 })).filter(o => o.i != null && Number.isFinite(o.known))
+    const retest = (from, top, bottom) => {
         // From ABOVE, like an MA touch: a zone price is already under is not being retested (a shifted-up baseline
         // zone would otherwise "retest" at once, from below, and lose — flattering every real block).
-        for (let r = k + 3; r < bars.length; r++) {
+        for (let r = from; r < bars.length; r++) {
             if (bars[r].low > top) continue
             if (!(bars[r - 1].low > top)) return null
             const a = atrs[r]
@@ -239,18 +252,25 @@ export function orderBlockTest(bars, atrs, medAtr, cut, opts = PROFILE) {
         }
         return null
     }
-    const events = _onePerBar(blocks.map(o => retest(o.i, o.top, o.bottom)))
-    const base = opts.shifts.flatMap(s => _onePerBar(blocks.map(o => retest(o.i, o.top + s * medAtr, o.bottom + s * medAtr))))
+    const from = (o) => Math.max(o.i + 3, o.known)
+    const shift = (v, s) => v * (1 + s * atrPct / 100)
+    const events = _spaced(blocks.map(o => retest(from(o), o.top, o.bottom)), opts.horizon)
+    const base = opts.shifts.flatMap(s => _spaced(blocks.map(o => retest(from(o), shift(o.top, s), shift(o.bottom, s))), opts.horizon))
     return { blocks: blocks.length, ...judge(events, base, cut, opts) }
 }
 
 /**
- * One event per retest bar: stacked blocks that price reaches on the same bar are one test of the area, not several —
- * counted apart they would inflate the sample and z. Pure.
+ * One event per outcome window: stacked blocks retested on the same bar, or a few bars apart, share the move that
+ * follows — counted apart they would inflate the sample and z. In bar order, an event within `horizon` bars of the
+ * last one kept is dropped (CR 2026-11-12). Pure.
  */
-function _onePerBar(list) {
-    const seen = new Set()
-    return list.filter(e => e && !seen.has(e.i) && seen.add(e.i))
+function _spaced(list, horizon) {
+    const out = []
+    for (const e of list.filter(Boolean).sort((a, b) => a.i - b.i)) {
+        if (out.length && e.i <= out.at(-1).i + horizon) continue
+        out.push(e)
+    }
+    return out
 }
 
 /** ET session day of a bar ("2026-11-11"), for VWAP's daily reset. */
@@ -290,7 +310,6 @@ export function timeframeProfile(bars, timeframe, opts = PROFILE) {
     const atrPctSeries = atrs.map((a, i) => (Number.isFinite(a) ? (a / closes[i]) * 100 : null))
     const atrPct = _median(atrPctSeries.slice(-20))
     const medAtrPct = _median(atrPctSeries)
-    const medAtr = _median(atrs)
     const cut = Math.floor(bars.length * (1 - opts.recentShare))
     const drift = driftOutcomes(bars, atrs, opts)
     const driftAll = _rate(drift.map(d => d.out))
@@ -322,7 +341,7 @@ export function timeframeProfile(bars, timeframe, opts = PROFILE) {
         drift: { n: driftAll.n, rate: _round(driftAll.rate) },
         indicators,
         false_breaks: falseBreaks(bars, atrs, cut, drift, opts),
-        order_blocks: orderBlockTest(bars, atrs, medAtr, cut, opts),
+        order_blocks: orderBlockTest(bars, atrs, medAtrPct, cut, opts),
     }
 }
 
@@ -347,7 +366,7 @@ export function suitability(tfs, s = SUITABILITY) {
     const swingEdges = [..._respects(tfs.day), ..._respects(tfs.week)]
     const view = (moves, liquid, edges) => ({
         fits: Boolean(moves && liquid), edges,
-        why: !day ? 'no daily bars' : !liquid ? 'too thin to trade' : !moves ? 'does not move enough' : edges.length ? 'moves, liquid, and something holds' : 'moves and liquid, but nothing technical holds',
+        why: !day ? 'too little daily history (about a year is needed)' : !liquid ? 'too thin to trade' : !moves ? 'does not move enough' : edges.length ? 'moves, liquid, and something holds' : 'moves and liquid, but nothing technical holds',
     })
     return {
         day_trade: view(atrPct >= s.dayAtrPct, dv >= s.dayDollarVol, dayEdges),

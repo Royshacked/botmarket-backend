@@ -39,18 +39,20 @@ test('the bars: 5-minute paged by week over ~3 months, 1-hour by ~2 months over 
     assert.equal(calls.filter(c => c.timeSpan === 'hour').length, 7)
     assert.equal(calls.filter(c => c.timeSpan === 'day').length, 1)
     assert.ok(calls.every(c => c.sym === 'TSLA'))
-    assert.ok(b.day.length <= 1260)
+    assert.ok(b.day.length > 2500, 'the daily view reads all ~10 years')
     assert.ok(b.week.length > 500, 'ten years of weeks')
     const ts = b['5min'].map(x => x.timestamp)
     assert.deepEqual(ts, [...new Set(ts)].sort((x, y) => x - y), 'pages de-duplicated and in order')
 })
 
-test('weekly bars: one per Monday, high/low/volume over the week', () => {
+test('weekly bars: one per Monday, high/low/volume over the week; the week in progress is left out', () => {
     const d = (date, o, h, l, c) => ({ open: o, high: h, low: l, close: c, volume: 10, timestamp: Date.parse(`${date}T14:30:00Z`) / 1000 })
-    const w = weeklyFromDaily([d('2026-11-09', 10, 12, 9, 11), d('2026-11-10', 11, 15, 10, 14), d('2026-11-16', 14, 14, 13, 13)])
+    const w = weeklyFromDaily([d('2026-11-09', 10, 12, 9, 11), d('2026-11-10', 11, 15, 10, 14), d('2026-11-16', 14, 14, 13, 13)], Date.parse('2026-11-30T00:00:00Z'))
     assert.equal(w.length, 2)
     assert.deepEqual({ open: w[0].open, high: w[0].high, low: w[0].low, close: w[0].close, volume: w[0].volume }, { open: 10, high: 15, low: 9, close: 14, volume: 20 })
     assert.equal(w[0].date, '2026-11-09')
+    const thisWeek = weeklyFromDaily([d('2026-11-09', 10, 12, 9, 11), d('2026-11-16', 14, 14, 13, 13)], Date.parse('2026-11-18T20:00:00Z'))
+    assert.deepEqual(thisWeek.map(x => x.date), ['2026-11-09'], 'the week of the 16th is not over on the 18th')
 })
 
 test('profiled once a week: the second ask is the stored one, no fetch; fresh recomputes; a stale version recomputes', async () => {
@@ -72,6 +74,23 @@ test('profiled once a week: the second ask is the stored one, no fetch; fresh re
     assert.ok(calls.length > m, 'an older engine version is not served')
 })
 
+test("a stored profile older than a week is recomputed, whatever the cache's own clock says", async () => {
+    const { get, calls } = fakeGet()
+    const cache = fakeCache()
+    cache.store.set('KO', { version: PROFILE_VERSION, profile: { symbol: 'KO', timeframes: {}, suitability: {} }, computed_at: new Date(NOW - 8 * DAY).toISOString() })
+    const p = await profileFor('KO', { deps: { get, now: NOW, cache } })
+    assert.ok(calls.length > 0, 'recomputed')
+    assert.equal(p.computed_at, new Date(NOW).toISOString())
+})
+
+test('a page that fails is skipped, not the profile', async () => {
+    const { get } = fakeGet()
+    let n = 0
+    const flaky = async (sym, o) => { if (o.timeSpan === 'minute' && n++ === 3) throw new Error('429'); return get(sym, o) }
+    const b = await fetchProfileBars('AMD', { get: flaky, now: NOW })
+    assert.ok(b['5min'].length > 0 && b.day.length > 0)
+})
+
 test('two asks at once compute once', async () => {
     const { get, calls } = fakeGet()
     const deps = { get, now: NOW, cache: fakeCache() }
@@ -89,7 +108,7 @@ test('no daily history: an error, nothing stored', async () => {
 
 test('a test line: verdict in words, rate vs baseline, the sample, the recent third', () => {
     const s = { verdict: 'respects', n: 37, rate: 0.78, base: 0.49, z: 3.1, recent: { n: 12, rate: 0.75, base: 0.5 } }
-    assert.equal(testLine('50 SMA', s, 'touches'), '50 SMA: HOLDS — 78% vs 49% baseline (37 touches; recent third 75% vs 50%, 12, z 3.1)')
+    assert.equal(testLine('50 SMA', s, 'touches'), '50 SMA: HOLDS — 78% vs 49% baseline (37 touches in the older two-thirds, z 3.1; recent third 75% vs 50%, 12)')
     assert.equal(testLine('VWAP', { verdict: 'thin', n: 0 }), 'VWAP: none in this history')
     assert.match(testLine('x', { ...s, verdict: 'faded' }), /held in the older history, NOT lately/)
 })
