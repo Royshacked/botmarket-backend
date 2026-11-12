@@ -255,8 +255,13 @@ async function partOneQuestion(user) {
     const sc = made.scenarios ?? []
     note(`  scenarios: ${sc.map(s => `${s.name ?? s.id}: entry ${s.entry_legs?.map(l => l.price).join('/')} stop ${s.stop_legs?.map(l => l.price).join('/')} target ${s.target_legs?.map(l => l.price).join('/')} on_away ${s.validity?.on_away}`).join(' · ')}; valid_until ${made.valid_until}`)
     expect(sc.every(s => !s.validity || s.validity.on_away === 'revise'), 'runaway = redraw on every scenario')
-    const active = await sessionService.getActive({ userId: user._id })
-    const [line] = await sessionService.messagesSince({ sessionId: active.sessionId, userId: user._id })
+    // The session ends a moment AFTER the save (seal, state, then endAfterCommit) — wait for Axl's line, don't race it.
+    let line = null
+    for (let i = 0; i < 20 && !/saved and armed/.test(line?.content ?? ''); i++) {
+        const active = await sessionService.getActive({ userId: user._id })
+        ;[line] = await sessionService.messagesSince({ sessionId: active.sessionId, userId: user._id })
+        if (!/saved and armed/.test(line?.content ?? '')) await new Promise(r => setTimeout(r, 1000))
+    }
     expect(/saved and armed/.test(line?.content ?? ''), `back at Axl: "${short(line?.content, 160)}"`)
 }
 

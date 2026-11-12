@@ -93,6 +93,13 @@ test('09:20 row: gap on pre-market volume → in play, with the numbers and why 
     for (const gone of ['grade', 'cells', 'range', 'pick', 'avoid', 'status']) assert.equal(gone in row, false, gone)
 })
 
+test('09:20: NO spread gate on the pre-market book — a wide odd-lot spread still lists the name, its spread on the row (Roy, 2026-11-12)', () => {
+    const row = boardRow(S, { mid: 104, spreadPct: 0.4, volume: 30_000 }, 'open', OPEN)
+    assert.ok(row, 'the 0.05% gate failed all 189 names on the first live 09:20 board')
+    assert.equal(row.spread_pct, 0.4)
+    assert.equal(boardRow({ ...S, adv20_usd: 10e6 }, { mid: 104, spreadPct: 0.4, volume: 30_000 }, 'open', OPEN), null, 'dollar volume still gates')
+})
+
 test('09:20: a fresh catalyst by timestamp lets a smaller gap in (the archived "fresh news" path); none, and it is not in play', () => {
     const q = { mid: 102, spreadPct: 0.02, volume: 0 }
     const cat = { news: [{ title: 'ABC wins a contract', at: '2026-10-21 06:30:00' }], earnings: false, rating: false }
@@ -100,8 +107,8 @@ test('09:20: a fresh catalyst by timestamp lets a smaller gap in (the archived "
     assert.equal(boardRow(S, q, 'open', OPEN), null)
 })
 
-test('a failed gate is no row — the spread at 09:20, the dollar volume in session', () => {
-    assert.equal(boardRow(S, { mid: 104, spreadPct: 0.2, volume: 30_000 }, 'open', OPEN), null)
+test('a failed gate is no row — the dollar volume in session (the 09:20 spread gate is gone, Roy 2026-11-12)', () => {
+    assert.ok(boardRow(S, { mid: 104, spreadPct: 0.2, volume: 30_000 }, 'open', OPEN), 'a wide pre-market spread no longer gates')
     const thin = { ...S, adv20_usd: 10e6 }
     assert.equal(boardRow(thin, { price: 103, open: 101, previousClose: 100, dayHigh: 104, dayLow: 100, volume: 900_000 }, 'mid', { book: 'session', etMin: 630, day: '2026-10-21' }), null)
 })

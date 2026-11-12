@@ -169,6 +169,12 @@ expansion, fresh catalyst by timestamp). These say a name WILL MOVE.
 From a board, the user clicks a name → Mentor (§2), or asks Mentor for "something intraday" → Mentor asks
 Argus, who picks ONE from the latest board.
 
+**The 09:20 board has no spread gate (Roy, 2026-11-12).** Its first live run quoted 189 names and listed none: the
+open column's 0.05% spread gate, applied to FMP's pre-market book (thin odd-lot quotes — TSLA 0.064%, CRWV 50.44/59.05),
+rejected almost everything. The pre-market spread is not what a trade after the open pays; the gate is off on the
+extended book only (`hotlist.day boardRow`), the spread still stored on the row. Price, dollar volume and ATR gate as
+before; 10:30 and 14:30 never had one (the session quote carries no bid/ask).
+
 ## 4. What is cut from Argus
 
 - **The prompt.** `scanner_system_prompt.md` (223 lines) is still the archived list-builder: five-field

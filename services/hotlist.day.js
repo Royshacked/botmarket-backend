@@ -155,7 +155,10 @@ export function boardRow(stats, q, column, { book, etMin, day, catalyst = null, 
         ? { price: q.mid, prevClose, spreadPct: q.spreadPct, pmVolPct: stats.avg_vol20 > 0 && q.volume != null ? (q.volume / stats.avg_vol20) * 100 : null }
         : { price: q.price, prevClose, open: q.open, dayHigh: q.dayHigh, dayLow: q.dayLow,
             rvol: relativeVolume(q.volume, stats.avg_vol20, (etMin - OPEN_MIN) / SESSION_MIN) }
-    if (failedGate(column, stats, ctx)) return null
+    // NO SPREAD GATE on the pre-market book (Roy, 2026-11-12): FMP's extended-hours quote is thin odd lots — 0.05% failed
+    // all 189 names on the first live 09:20 board (TSLA 0.064%) — and it is not the spread a trade after the open pays.
+    // The spread stays on the row (`spread_pct`); price, dollar volume and ATR still gate. The session book has no spread.
+    if (failedGate(column, stats, extended ? { ...ctx, spreadPct: null } : ctx)) return null
     const play = inPlay(column, stats, { ...ctx, catalyst: catalyst ? { material: true } : null, today: day })
     if (!play.in) return null
     const gap = ctx.price > 0 && prevClose > 0 ? ((ctx.price - prevClose) / prevClose) * 100 : null
