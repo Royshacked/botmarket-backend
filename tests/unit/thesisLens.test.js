@@ -39,7 +39,8 @@ test('the lens prompt: a risk-based build opens with the rules, once, and only t
     const p = readFileSync(new URL('../../prompts/mentor_system_prompt.md', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
     const lens = p.slice(p.indexOf('## The thesis lens'), p.indexOf('## Size comes from the user'))
     assert.match(lens, /the\nreply STARTS with these lines/)
-    for (const rule of ['Stop:', 'Target:', 'Your limits:', 'Entry:', 'If it leaves before filling:']) assert.ok(lens.includes(`- **${rule}**`), rule)
+    // 'Your numbers:' — position size, risk and R:R, the ONE question (Roy, 2026-11-12; was 'Your limits:').
+    for (const rule of ['Stop:', 'Target:', 'Your numbers:', 'Entry:', 'If it leaves before filling:']) assert.ok(lens.includes(`- **${rule}**`), rule)
     assert.match(lens, /Never on a later\nturn, on a redraw or an edit of a saved setup, or on the user's own setup/)
     assert.doesNotMatch(p, /Say in one line that you are building it risk-based/)
     assert.match(_buildModeSection('user'), /with the rules of the lens if this build has not said them/)
@@ -216,21 +217,23 @@ test('the lens prompt: the break scenario is offered on every build with an assu
     assert.doesNotMatch(lens, /No higher low printed → no B/, 'the higher low has not printed by design')
     assert.match(lens, /The break would CHANGE THE STOP when B's\s+stop sits clearly over A's/, 'Roy: B only when the break moves the stop')
     assert.match(lens, /so there is\s+no B, and you say so in one line/)
-    assert.match(lens, /A → A alone\. B → B alone, the only scenario\. Both → A first, B second/)
+    // Risk-based: both by default, no question (Roy, 2026-11-12); the user's setup still answers it.
+    assert.match(lens, /Risk-based \(§ ONE QUESTION\): both is the default — no question/)
+    assert.match(lens, /A → A alone, B → B alone, both → both/)
     assert.match(lens, /a continuation or a breakout tested around zero/)
     assert.match(lens, /B alone keeps its arming condition/)
     assert.match(lens, /B's: the nearest swing high above both its level\s+and the arming line/, 'the break that arms B is never a runaway')
     assert.match(lens, /so the\s+break IS the entry; under it, the break arms B and the entry is the pullback/, 'Roy 2026-11-03: the break is the entry when the limits allow')
     assert.match(lens, /never "B does not fit"/)
-    assert.match(lens, /alternatives: the first to fill takes the full size/)
+    assert.match(lens, /alternatives: the first to\s+fill takes the full size/)
     assert.match(lens, /A\s+day close over \{swing high\} since \{today\}/, 'B arms on a latching day close')
 })
 
-test('the lens prompt: every thesis scenario draws a validity range and asks the runaway question (NXST)', () => {
+test('the lens prompt: every thesis scenario draws a validity range; the runaway answer is redraw by default (NXST; Roy 2026-11-12)', () => {
     const lens = _lens()
     assert.match(lens, /And if it just goes\?/)
     assert.match(lens, /the recent high — the highest high\s+since the last swing low — however close it sits/)
-    assert.match(lens, /A's `on_away` is `pass`/)
+    assert.match(lens, /`on_away` is \*\*`revise` on every scenario — the default, no question\*\*/)
     assert.match(lens, /never a chase/)
     assert.match(lens, /conditions ON THE SCENARIO, not the root/)
 })
@@ -294,13 +297,13 @@ test('the lens prompt after the GNRC drive: the date said from the tool, the dee
     assert.match(lens, /never quote an R:R or a level of your own either/)
 })
 
-test('the lens prompt: Mentor reads what risk fits from the chart — judgment, no menu; the limit stays the user\'s (Roy)', () => {
+test('the lens prompt: the limits come from the ONE question; Mentor reads what fits from the chart — judgment, no menu (Roy)', () => {
     const lens = _lens()
-    assert.match(lens, /Your read of what risk fits — then ask the user/)
+    assert.match(lens, /Their limits — from the ONE question/)
+    assert.match(lens, /the RISK LIMIT is their risk ÷ their position size/)
     assert.match(lens, /in this stock's normal\s+moves \(`atr_pct`/)
-    assert.match(lens, /Judgment, not a table — no fixed menu of percents/)
-    assert.match(lens, /Any\s+LEVEL you name in that read comes from `get_entry_level`/)
-    assert.match(lens, /no limit better for the edge/)
+    assert.match(lens, /Judgment, not a table\./)
+    assert.match(lens, /Any\s+LEVEL you name comes from `get_entry_level`/)
     assert.match(lens, /theirs, never yours/)
 })
 
@@ -334,8 +337,8 @@ test('the break section: B is ON OFFER on the regular stop as well as the deep o
     assert.match(structure, /a DAY close over 212\.81 arms it; the stop you ASSUME for then is 197\.34 — \$15\.47 \(7\.3%\) from the break/)
     assert.match(structure, /has not printed, so judge it and say it is assumed/)
     assert.match(structure, /The worksheet's stop 178\.81 is under B's: the break CHANGES THE STOP, so B is ON OFFER THIS TURN/)
-    assert.match(structure, /Ask which they take: A, B or both\. Both: the first to fill takes the whole size and the other is cancelled/)
-    assert.match(structure, /once they declined, leave it/)
+    assert.match(structure, /Take BOTH — the risk-based default \(§ ONE QUESTION\), no question: the first to fill takes the whole size and the other is cancelled/)
+    assert.match(structure, /Once they dropped one, leave it/)
     assert.match(_buildBreakSection(FACTS, ON(171.06)), /ON OFFER THIS TURN/, 'the deep stop too')
     assert.match(_buildBreakSection(FACTS, { scenarios: [] }), /The structure stop 178\.81 is under B's: the break CHANGES THE STOP/, 'nothing drawn yet: compared with the structure stop')
 })
@@ -378,7 +381,7 @@ test('the break section: no structure stop is not a stop of 0 (code review)', ()
 test('the break section at spans carries what it would at the entries, only the timing differs (code review)', () => {
     const spans = _buildBreakSection({ ...FACTS, stage: 'spans' }, ON(178.81))
     assert.match(spans, /ON OFFER ONCE THE SPAN SETTLES/)
-    assert.match(spans, /Ask which they take: A, B or both/)
+    assert.match(spans, /Take BOTH — the risk-based default/)
     assert.match(spans, /B's ENTRY is get_entry_level/)
     assert.match(_buildBreakSection({ ...FACTS, close: 175, stage: 'spans' }, { scenarios: [] }), /regular scenario is OFF/)
     assert.match(_buildBreakSection({ ...FACTS, stage: 'spans' }, ON(196)), /no B/)
@@ -459,9 +462,9 @@ test('the break section on a short: mirrored words, the stop compared the other 
     assert.match(text, /Level at or under 45: the break price fits/)
 })
 
-test('the risk read: each stop\'s distance in % and in normal moves, said BEFORE the limits are asked', () => {
+test('the risk read: each stop\'s distance in % and in normal moves, said with the result — the limits are never asked (Roy 2026-11-12)', () => {
     const text = _buildRiskReadSection(FACTS, ON(178.81))
-    assert.match(text, /SAY IT BEFORE you ask for their risk limit and minimum reward to risk/)
+    assert.match(text, /SAY IT with the result \(their limits come from the ONE question: risk ÷ position size, and their R:R — never ask for limits\)/)
     assert.match(text, /the structure stop 178\.81 is \$23\.23 \(11\.5%\) from today's 202\.04 — 2\.6 normal days \(ATR 9\.1\)/)
     assert.match(text, /the deep stop 171\.06 is \$30\.98 \(15\.3%\) from today's 202\.04 — 3\.4 normal days/)
     assert.match(text, /judgment, no fixed menu; any level you name comes from get_entry_level/)
@@ -650,9 +653,9 @@ test('the measured move on the worksheet is the calculated one, whatever the mod
     assert.equal(untouched.scenarios[0].target_legs[0].price, 383.67)
 })
 
-test('the risk read puts the stop and the target on the worksheet on the turn it asks for the limits: the chat charts them', () => {
+test('the risk read puts the stop and the target on the worksheet on the turn of the result: the chat charts them', () => {
     const text = _buildRiskReadSection(FACTS, null)
-    assert.match(text, /On the turn you ask for their limits, the stop and the target you propose must be on the worksheet's scenario/)
+    assert.match(text, /The stop and the target must be on the worksheet's scenario on the turn you give the result/)
     assert.match(text, /Say "the chart below"; get_chart does not put a picture in the chat/)
     assert.doesNotMatch(_buildRiskReadSection(FACTS, null, { redraw: true }), /the chart below/, 'editing a saved setup hides the chart')
 })
@@ -661,7 +664,7 @@ test('the prompt: a distance is dollars and percent, a measured move at the high
     const p = readFileSync(new URL('../../prompts/mentor_system_prompt.md', import.meta.url), 'utf8')
     assert.match(p, /A distance is always said in dollars AND percent/)
     assert.match(p, /At the highs, with no price over them worth selling at, the target is a measured move/)
-    assert.match(p, /with the stop and the target on the worksheet by that turn/)
+    assert.match(p, /with the stop and the target on the\s+worksheet by that turn/)
 })
 
 // ─── The code review of 2026-11-05 ────────────────────────────────────────────

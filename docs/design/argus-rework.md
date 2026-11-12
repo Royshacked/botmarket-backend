@@ -67,6 +67,65 @@ and the broker path keeps its own rules (a shut venue queues, never fires).
 Questions only for what the user alone can say; everything else from the reads and the user's settings,
 stated in the result so the user can change it.
 
+### 2.2 One answer, then built, generated (and armed) — the design (Roy, 2026-11-12)
+
+Built BEFORE Proteus step 4 (Roy). Today nothing generates without the user's press, and Mentor needs ~six answers
+after the name (opening confirm, spans/entries, A/B, size, how long it waits, the runaway answer).
+
+**Mentor asks ONE question**, once the name and horizon are settled: *position size, risk, and R:R.* Asked every time
+— nothing is saved as a default (Roy). Everything else is his, stated in the result so the user can change it:
+
+| Gap | Mentor's default (Roy, 2026-11-12) |
+|---|---|
+| Scenarios | **A + B** (both) |
+| How long the entry waits (`valid_until`) | **Mentor decides** — from the horizon and the structure, said in the result |
+| Price runs away unfilled (`on_away`) | **redraw** (`revise`) |
+| The spans / entries gates | Mentor places them himself (the delegated path) |
+
+**He answers "worth it?" with the MAX ENTRY PRICE.** From the three numbers and his stop and target: the highest
+entry where the risk fits the size and the R:R is met (`get_entry_level` / `entryLevel` — position size and risk
+give the risk %, R:R the minimum reward to risk; the lower ceiling wins).
+- Price at or under the max entry → worth it now; the setup's entry is there.
+- Price above it → **generated anyway, with its entry at the max entry and below**: it waits for price to come to it.
+- No price can meet the R:R (the target too close to the stop) → **no setup**; he says why.
+The three numbers are KEPT on Mentor's working state (not left in the chat), so a redraw or a later turn reads them.
+
+**Then he generates AND ARMS it himself** (Roy: "also arm it automatically"). Arming starts the monitoring only:
+nothing reaches a broker from a generate or an arm — an entry that fires still comes to the user as a card to
+confirm (the existing entry path), and a shut venue queues, never fires. The session ends as any commit does (Roy,
+2026-10-18): back at Axl, *"✓ TSLA setup — saved and armed, watching."*
+
+**Atlas asks for his MANDATE** — objective, horizon, risk tolerance, and the book's capital (Generate needs it) —
+once, then builds straight through: no architecture sign-off stop, names the house rates AVOID left out (no ask),
+the architecture and every choice stated in the result. He generates the book (legs saved waiting); **activating it
+stays the user's press** (activation fires the legs at market).
+
+**Mechanism (code, not the prompt, holds it):**
+- The model says it is done with a tag (Mentor `<go/>`, Atlas `<go/>`); CODE decides whether it may: Mentor — the
+  draft's readiness lit, the three numbers on the state, no read pending (Prometheus's; Proteus's later); Atlas — the
+  plan sized, the mandate complete. A `<go/>` that fails a gate is dropped and the reason said under the reply.
+- A read still pending holds the go: when it lands (readSettled → Mentor's turn) Mentor builds on it and says go
+  again — or, if the read is AGAINST the trade, asks the user once (unchanged, step 3).
+- The go runs in the chain runner's `afterTurn`, which already holds the session lock — so it calls the desk's
+  action through a lock-free entry of the act pipe (`act` split into the locked press and the held body), never
+  `act` itself (the lock is not re-entrant). New desk actions: Mentor `generateArmed` (commit, then arm; an arm the
+  gate refuses leaves the setup generated and says why), Atlas `generate` as today.
+- Accounts: the ones the user's screen marked for the turn (already sent per turn) ride on the state for the go;
+  none marked → no go, Mentor asks which account in one line (paper needs none).
+- The user can still press Generate / Arm by hand at any point — the go is a shortcut, not the only way.
+
+**Not changed:** Arm's gate, the fill confirmation, the venue rules, Prometheus's read before a build.
+
+**BUILT 2026-11-12 (not committed at writing):** `<go>` (Mentor: `_parseGo`, the three numbers kept as `risk_plan`;
+Atlas: a bare `<go>{}</go>` on a new book), the runner's `deskGo` (`GO` table: Mentor `generateArmed` with the marked
+accounts or the held `go_pending`, Atlas `generate`), `act.actHeld` (the held entry; the lock is the turn's), Mentor's
+`generateArmed` (save, then arm; an arm refused leaves it saved), the session's closing line "saved and armed …
+watching". Mentor's prompt: § ONE QUESTION (risk-based builds; the user's own setup keeps its flow until Daedalus) and
+the lens steps 4/5/7/8/9 rewired; the per-turn facts no longer ask for limits, A/B or the runaway answer. Atlas's
+prompt: the mandate once with capital, one gate, AVOID left out, `<go>`. Live drive (`drive-desk-architecture.mjs
+oneq`): EQPT swing — one question, A+B built, saved and armed after Prometheus's read (184 s), on_away revise.
+Not yet driven: Atlas's go. Open: a redraw still asks the limits from the chat — it can read `risk_plan`.
+
 ## 3. Argus — the picker
 
 ### 3.1 Where he picks from, per horizon

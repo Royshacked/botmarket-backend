@@ -70,6 +70,15 @@ export function readWaitLine(t, r) {
     return `Before I build the ${t.horizon} trade on ${t.symbol}, Prometheus is reading it — ${what}.${ahead} I'll carry on as soon as it lands.`
 }
 
+/**
+ * The desks that can say <go> (argus-rework.md §2.2, Roy 2026-11-12) — what it presses, and whether it needs the marked
+ * accounts. Mentor: generate AND arm (accounts). Atlas: generate the book (none — activating it stays the user's press).
+ */
+const GO = Object.freeze({
+    mentor:    Object.freeze({ action: 'generateArmed', accounts: true }),
+    portfolio: Object.freeze({ action: 'generate', accounts: false }),
+})
+
 export function makeChainRunner({
     sessions = sessionService, desks = DESK_DEFS, maxSteps = MAX_STEPS,
     loadUser = _loadUser, isCovered = _covered, lock = withSessionLock,
@@ -80,6 +89,9 @@ export function makeChainRunner({
     // runner's afterTurn in return (services/desks/turns.js wires the pair).
     let runQueued = null
     const bindRunQueued = (fn) => { runQueued = fn }
+    // The commit pipe's held entry (act.actHeld) — bound after construction, like runQueued (services/desks/turns.js).
+    let actHeld = null
+    const bindAct = (fn) => { actHeld = fn }
 
     const save = (user, sessionId, chain) => sessions.setChain({ sessionId, userId: user._id, chain })
     const end  = (user, sessionId, chain) => save(user, sessionId, endedChain(chain))
@@ -200,6 +212,9 @@ export function makeChainRunner({
         // MENTOR'S READ (argus-rework.md step 3): once the build has a name and a confirmed horizon, Prometheus's read for
         // it must exist — code checks, and asks for a missing one. Said once in the chat, on the turn it is asked for.
         if (agent === 'mentor') await askRead({ user, sessionId, state: session.agentState?.mentor ?? null })
+        // A DESK'S GO (argus-rework.md §2.2): Mentor or Atlas said done — generate it (Mentor's armed too), if code lets
+        // them. A go that went through ended the session; nothing else runs after it.
+        if (out.payload?.go && GO[agent] && await deskGo({ user, sessionId, session, input, agent })) return
 
         const payload  = out.payload
         const state    = session.agentState?.[agent] ?? null
@@ -227,6 +242,50 @@ export function makeChainRunner({
             return
         }
         return hop({ user, session, chain: chain ?? newChain(agent), art, from: agent })
+    }
+
+    /**
+     * A desk's go (GO below): Mentor saves AND arms the draft, Atlas saves the book — through the commit pipe's held
+     * entry (this runs inside the turn's lock). Mentor's takes the accounts the user's screen marked for this turn — or,
+     * on the chain turn after a read landed, the ones kept when the go was first held. Refused:
+     *   read_pending → the go is held (`go_pending` on Mentor's state): the read's landing runs Mentor's turn, and his
+     *                 next go uses the kept accounts. His read-wait line was already said (askRead).
+     *   no accounts  → one line: mark the account, then say go.
+     *   anything else → one line saying why (the setup routes' own words), nothing saved.
+     * @returns {Promise<boolean>} true when it went through (the session has ended)
+     */
+    async function deskGo({ user, sessionId, session, input, agent }) {
+        const rule = GO[agent]
+        const state = session.agentState?.[agent] ?? null
+        const say = (content) => sessions.append({ sessionId, userId: user._id, message: { agent, role: 'assistant', content } })
+        try {
+            let args = {}
+            if (rule.accounts) {
+                const marked = input?.accounts?.length ? { accounts: input.accounts, mainAccountId: input.mainAccountId ?? null } : null
+                args = marked ?? state?.go_pending ?? null
+                if (!args?.accounts?.length) {
+                    await say('I have the trade ready, but no account is marked to put it in — mark one in the account picker and say go.')
+                    return false
+                }
+            }
+            if (!actHeld) { logger.warn(LOG, 'go not bound — nothing generated'); return false }
+            const r = await actHeld({ user, sessionId, agent, action: rule.action, args })
+            if (r.reason === 'read_pending' && rule.accounts) {
+                await sessions.setAgentState({ sessionId, userId: user._id, agent, state: { ...state, go_pending: args } })
+                return false
+            }
+            if (r.reason) {
+                const reason = desks[agent]?.reasons
+                const why = (typeof reason === 'function' ? reason(r.reason) : reason?.[r.reason])?.[1] ?? r.reason
+                await say(`Not generated yet — ${why}.`)
+                return false
+            }
+            if (r.result?.armed === false) logger.warn(LOG, 'go: generated, not armed', { reason: r.result.armReason })
+            return true
+        } catch (err) {
+            logger.warn(LOG, 'go failed — nothing generated', { agent, error: err.message })
+            return false
+        }
     }
 
     /** Ask for the read Mentor's build needs, if it is missing; never fails the turn. */
@@ -397,5 +456,5 @@ export function makeChainRunner({
         return cut.length
     }
 
-    return { afterTurn, requestPause, resume, sweep, sleeveSettled, readSettled, bindRunQueued }
+    return { afterTurn, requestPause, resume, sweep, sleeveSettled, readSettled, bindRunQueued, bindAct }
 }

@@ -299,12 +299,15 @@ async function chatStream({ messages = [], ideaAccounts = [], mainAccountId = nu
     const coverageRefresh = _parseCoverageRefresh(raw)
 
     const reply = cleanReply(raw)
+    // Done — generate the book (argus-rework.md §2.2). A NEW book only: an edit or a review keeps its own press. CODE
+    // decides whether it may (the chain runner's go step: the plan sized, the AVOID check).
+    const go = !portfolioId && /<go>[\s\S]*?<\/go>/.test(raw)
 
     if (capturedPlan) capturedPlan = await _sizePlan(capturedPlan, { mandate: capturedMandate ?? mandate })
     if (capturedUpdate) capturedUpdate = await _markAvoidAdds(capturedUpdate)
 
-    logger.info(LOG, 'chatStream done', { replyLength: reply.length, hasPlan: !!capturedPlan, hasUpdate: !!capturedUpdate, hasMandate: !!capturedMandate, hasThesis: !!capturedThesis, screenRequests: screenRequests.length, coverageRefresh: !!coverageRefresh, phase: phase.get() })
-    return { reply, plan: capturedPlan, update: capturedUpdate, mandate: capturedMandate, thesis: capturedThesis, phase: phase.get(), ...(screenRequests.length ? { screenRequests } : {}), ...(coverageRefresh ? { coverageRefresh } : {}), ...route.result() }
+    logger.info(LOG, 'chatStream done', { go, replyLength: reply.length, hasPlan: !!capturedPlan, hasUpdate: !!capturedUpdate, hasMandate: !!capturedMandate, hasThesis: !!capturedThesis, screenRequests: screenRequests.length, coverageRefresh: !!coverageRefresh, phase: phase.get() })
+    return { reply, plan: capturedPlan, update: capturedUpdate, mandate: capturedMandate, thesis: capturedThesis, phase: phase.get(), ...(go ? { go: true } : {}), ...(screenRequests.length ? { screenRequests } : {}), ...(coverageRefresh ? { coverageRefresh } : {}), ...route.result() }
 }
 
 // ─── Coverage-refresh extraction (pure) ─────────────────────────────────────────

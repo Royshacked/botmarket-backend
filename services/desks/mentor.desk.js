@@ -41,6 +41,8 @@ export function _mentorResponse(result) {
         ...(result.scenarioOffer ? { scenarioOffer: result.scenarioOffer } : {}),
         // The setup this turn closed: the page's list re-reads.
         ...(result.closedSetup ? { closedSetup: result.closedSetup } : {}),
+        // Done — the chain runner's go step generates and arms it (argus-rework.md §2.2).
+        ...(result.go ? { go: result.go } : {}),
         // route / routeSymbol / opening are appended by the caller (routing.util).
     }
 }
@@ -107,6 +109,10 @@ export function mentorNextState(prev, result, input = {}) {
         draft,
         coverage:     result.coverage ?? prev?.coverage ?? [],
         drafts:       result.drafts ?? {},
+        // The user's position size, risk and R:R (argus-rework.md §2.2), KEPT — a redraw or a later turn reads them
+        // here, never from the chat. A go held for a read keeps the accounts it was asked with (`go_pending`, runner).
+        ...(result.go ?? prev?.risk_plan ? { risk_plan: result.go ?? prev.risk_plan } : {}),
+        ...(prev?.go_pending ? { go_pending: prev.go_pending } : {}),
         view: {
             gate:      result.gate ?? null,
             readiness: result.setup ? (result.readiness ?? null) : (prev?.view?.readiness ?? null),

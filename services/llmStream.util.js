@@ -136,6 +136,8 @@ export const ALL_EMIT_TAGS = [
     'entries',
     // The scenarios Mentor is asking the user to choose between. Same deal: drawn in his pane, on the turn he asks.
     'scenario_offer',
+    // Mentor's / Atlas's "done — generate it" (argus-rework.md §2.2): the numbers it carries, never shown.
+    'go',
 ]
 
 // Build the tag-capture descriptor array for a streaming agent. `overrides` maps a

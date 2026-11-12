@@ -91,6 +91,24 @@ export function makeMentorActions({ commit = defaultCommit, readPending = defaul
             }
         },
 
+        /**
+         * Save the draft AND arm it — Mentor's go (argus-rework.md §2.2: one answer, then built, generated and armed). The
+         * same gates as a press: generate's (the read, the accounts, the setup's own validation), then arm's. An arm the
+         * gate refuses leaves the setup SAVED and says why (`armed: false, armReason`) — never undone, never a failure.
+         * Nothing reaches a broker: an armed setup's entry still comes to the user as a card to confirm.
+         */
+        async generateArmed(ctx) {
+            // Not `this.generate`: the pipe calls an action detached from this object (act.js `handler(...)`).
+            const made = await makeMentorActions({ commit, readPending }).generate(ctx)
+            if (made.reason) return made
+            const id = made.result.setup.id
+            const armed = await commit.armSetup(id, ctx.user._id)
+            return {
+                ...made,
+                result: { setup: armed.ok ? armed.doc : made.result.setup, armed: !!armed.ok, ...(armed.ok ? {} : { armReason: armed.reason ?? 'arm_failed' }) },
+            }
+        },
+
         /** Arm the setup just generated — the gate re-runs in the service. */
         async arm({ user, state }) {
             const id = state?.generated?.id

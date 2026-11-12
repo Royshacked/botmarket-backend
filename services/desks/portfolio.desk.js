@@ -192,5 +192,7 @@ export const portfolioDesk = {
         reply: result.reply, plan: result.plan ?? null, update: result.update ?? null, mandate: result.mandate ?? null, thesis: result.thesis ?? null, phase: result.phase ?? null,
         ...(result.screenRequests ? { screen_requests: result.screenRequests } : {}),
         ...(result.coverageRefresh ? { coverage_refresh: result.coverageRefresh } : {}),
+        // Done — the chain runner's go step generates the book (argus-rework.md §2.2).
+        ...(result.go ? { go: true } : {}),
     }),
 }

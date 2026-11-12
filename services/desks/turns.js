@@ -8,11 +8,14 @@ import { makeStartTurn } from './startTurn.js'
 import { makeChainRunner } from '../chain/runner.js'
 import { onSleeveSettled } from '../sleeveSource.service.js'
 import { onReadSettled } from '../mentorReads.service.js'
+import { deskAct } from './act.js'
 
 export const chain = makeChainRunner()
 
 const turns = makeStartTurn({ afterTurn: chain.afterTurn, onUserTurn: chain.requestPause })
 chain.bindRunQueued(turns.runQueued)
+// A desk's go (argus-rework.md §2.2) commits through the same pipe as a press — its held entry, from inside the turn.
+chain.bindAct(deskAct.actHeld)
 // A sleeve Atlas sent to be sourced from a session settles into that session's chain (plan phase 5d).
 onSleeveSettled(chain.sleeveSettled)
 // Prometheus's read for a Mentor build lands into that session's chain, and Mentor's turn runs (argus-rework.md step 3).

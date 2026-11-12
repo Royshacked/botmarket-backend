@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Live drive of the desk rework (docs/design/argus-rework.md steps 1–3 + two targets stage 1), real models, real database.
 //
-//   node scripts/drive-desk-architecture.mjs [part ...]      parts: pick · view · intraday · proteus (default: pick view)
+//   node scripts/drive-desk-architecture.mjs [part ...]      parts: pick · view · intraday · proteus · oneq (default: pick view)
 //                                            [--user ui-smoke]
 //
 // On THIS process's database (axl_dev on the laptop; it refuses `test`), as a throwaway QA user (default `ui-smoke`), so
@@ -16,6 +16,9 @@
 //   intraday  Mentor, no name, an INTRADAY trade → Argus picks from today's latest DAY BOARD (needs a board today).
 //   proteus   Axl, "how does TSLA behave?" → routes to Proteus (technicals) → Proteus reads the MEASURED profile
 //             (get_behaviour_profile; computed and kept in proteus_profiles) and answers; a follow-up on the daily 50 SMA.
+//   oneq      argus-rework.md §2.2: Axl, "let's swing on EQPT" → Mentor asks ONE question (size, risk, R:R) → the
+//             answer with the paper account marked → Mentor builds, says <go>, and the setup is SAVED AND ARMED (it
+//             waits for Prometheus's read if one runs). Leaves a real armed setup on the QA user's paper account.
 //
 // A few cents of model spend; `view` adds one Prometheus horizon read (~4 minutes). Exits 1 on a broken expectation.
 
@@ -66,8 +69,8 @@ const doneFor = async (agent, origin, ms) => {
     if (started) used.add(started.data.turnId)
     return started ? turnDone(started.data.turnId, ms) : null
 }
-const say = async (user, sid, agent, text) => {
-    const t = await startTurn({ user, sessionId: sid, agent, text, turnId: `drive_${agent}_${Date.now()}` })
+const say = async (user, sid, agent, text, input = undefined) => {
+    const t = await startTurn({ user, sessionId: sid, agent, text, ...(input ? { input } : {}), turnId: `drive_${agent}_${Date.now()}` })
     const d = await turnDone(t.turnId)
     expect(d?.data.status === 'done', `${agent}'s turn ${d?.data.status}`)
     note(`  ${agent}: ${(d?.data.payload?.reply ?? '').replace(/\s+/g, ' ').slice(0, 260)}`)
@@ -214,6 +217,46 @@ async function partProteus(user) {
     void sid
 }
 
+async function partOneQuestion(user) {
+    step('ONE QUESTION — Mentor asks size, risk and R:R once, then builds, generates and arms')
+    const db = await getDb()
+    const { getTradingContext } = await import('../services/tradingContext.service.js')
+    const paper = (await getTradingContext(user._id)).accounts.find(a => a.mode === 'paper')
+    if (!expect(!!paper, `a paper account to mark (${paper?.id ?? 'none'})`)) return
+    const input = { accounts: [paper], mainAccountId: paper.id }
+    const before = new Set((await db.collection('entities').find({ kind: 'setup', userId: user._id }, { projection: { id: 1 } }).toArray()).map(d => d.id))
+    const sid = await freshSession(user, 'axl')
+    const a = await say(user, sid, 'axl', "Let's swing on EQPT.", input)
+    if (!expect(a?.data.payload?.route === 'assist', `Axl routed to Mentor (${a?.data.payload?.route})`)) return
+    const m = await doneFor('mentor', 'opening')
+    const ask = m?.data.payload?.reply ?? ''
+    note(`  Mentor's ask: ${short(ask, 700)}`)
+    expect(/position size/i.test(ask) && /risk/i.test(ask) && /R:R|reward to risk/i.test(ask), 'Mentor asks position size, risk and R:R')
+    expect(!/all the way|checkpoints|A, B or both|how long|let it go/i.test(ask), 'and nothing else (no waiver, no A/B, no wait, no runaway question)')
+    const t0 = Date.now()
+    const ans = await say(user, sid, 'mentor', 'Position size $5,000, risk $100, R:R 2.', input)
+    note(`  Mentor's build: ${short(ans?.data.payload?.reply, 900)}`)
+    expect(!!ans?.data.payload?.go, `Mentor said go (${JSON.stringify(ans?.data.payload?.go ?? null)})`)
+    // Saved and armed — at once, or once Prometheus's read lands and Mentor's chain turn says go again.
+    let made = null
+    for (let i = 0; i < 160 && !made; i++) {
+        made = await db.collection('entities').findOne({ kind: 'setup', userId: user._id, asset: 'EQPT', id: { $nin: [...before] } })
+        if (!made) await new Promise(r => setTimeout(r, 3000))
+    }
+    if (!expect(!!made, `an EQPT setup was saved (${Math.round((Date.now() - t0) / 1000)}s)`)) {
+        const rows = await sessionService.messagesSince({ sessionId: sid, userId: user._id }).catch(() => [])
+        note(`  last lines: ${(rows ?? []).slice(-3).map(r => `${r.agent}: ${short(r.content, 200)}`).join(' | ')}`)
+        return
+    }
+    expect(made.status === 'looking', `…and ARMED (status ${made.status})`)
+    const sc = made.scenarios ?? []
+    note(`  scenarios: ${sc.map(s => `${s.name ?? s.id}: entry ${s.entry_legs?.map(l => l.price).join('/')} stop ${s.stop_legs?.map(l => l.price).join('/')} target ${s.target_legs?.map(l => l.price).join('/')} on_away ${s.validity?.on_away}`).join(' · ')}; valid_until ${made.valid_until}`)
+    expect(sc.every(s => !s.validity || s.validity.on_away === 'revise'), 'runaway = redraw on every scenario')
+    const active = await sessionService.getActive({ userId: user._id })
+    const [line] = await sessionService.messagesSince({ sessionId: active.sessionId, userId: user._id })
+    expect(/saved and armed/.test(line?.content ?? ''), `back at Axl: "${short(line?.content, 160)}"`)
+}
+
 async function run() {
     const args = process.argv.slice(2)
     const ui = args.indexOf('--user')
@@ -233,6 +276,7 @@ async function run() {
         else if (p === 'view') await partView(user)
         else if (p === 'intraday') await partIntraday(user)
         else if (p === 'proteus') await partProteus(user)
+        else if (p === 'oneq') await partOneQuestion(user)
         else expect(false, `unknown part ${p}`)
     }
     step('clean up')

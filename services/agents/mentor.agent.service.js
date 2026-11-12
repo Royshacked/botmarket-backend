@@ -283,7 +283,7 @@ async function chatStream({
         meta: { asset: chatState?.active_asset || '', accounts: accounts?.length ?? 0 },
     })
 
-    const { reply, setup, setups, buildOps, spanBlock, entryBlock, scenarioOffer } = _parseMentorResponse(raw)
+    const { reply, setup, setups, buildOps, spanBlock, entryBlock, scenarioOffer, go } = _parseMentorResponse(raw)
 
     // A candidate-offer turn and a worksheet turn are mutually exclusive by contract; if the model
     // emits both, the picked worksheet wins (it's the more committed artifact).
@@ -557,6 +557,8 @@ async function chatStream({
         ...(setups && !normalized ? { setups } : {}),
         ...(scenarioOffer ? { scenarioOffer } : {}),
         ...(closedSetup ? { closedSetup } : {}),
+        // Done — generate and arm it (argus-rework.md §2.2). CODE decides whether it may (the chain runner's go step).
+        ...(go ? { go } : {}),
         ...route.result(),   // { route, routeSymbol, opening, edit } — the controller validates
     }
 }
@@ -618,7 +620,21 @@ export function _parseMentorResponse(raw) {
         // The ways INTO each candidate trade, at the second gate.
         entryBlock: _parseBlock(text, 'entries'),
         scenarioOffer: _parseScenarioOffer(text),
+        go: _parseGo(text),
     }
+}
+
+/**
+ * `<go>{ "position_size": 5000, "risk": 100, "rr": 2 }</go>` — Mentor is done: the user's three numbers (argus-rework.md
+ * §2.2 — the position's money, the money at risk, the minimum reward to risk) and "generate and arm it". All three must
+ * be positive numbers, or there is no go (the runner never acts on a guess). → `{ position_size, risk, rr }` or null. Pure.
+ */
+export function _parseGo(text) {
+    const g = _parseBlock(text, 'go')
+    if (!g || typeof g !== 'object') return null
+    const n = (v) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : null)
+    const out = { position_size: n(g.position_size), risk: n(g.risk), rr: n(g.rr) }
+    return out.position_size && out.risk && out.rr ? out : null
 }
 
 // The shared extractor already matches the tag EXACTLY, which is what keeps <setups> from being
@@ -1004,7 +1020,7 @@ export function _buildRiskReadSection(facts, draft, { redraw = false } = {}) {
         .map(([name, p]) => sg * (p - facts.close) >= 0 ? `${name} ${p} is already crossed at today's ${facts.close}, so give no distance for it` : `${name} ${p} is ${_distance(facts.close, p)} from today's ${facts.close}${_atrs(facts.close, p, facts.atr) != null ? ` — ${_atrs(facts.close, p, facts.atr)} normal ${unit} (ATR ${facts.atr})` : ''}`)
     if (!said.length) return ''
     // THE NUMBERS, never this line's name (drive 12: "the risk read measured these stops from $210.88", and no % at all).
-    return `\n\nTHE RISK READ (step 5) — SAY IT BEFORE you ask for their risk limit and minimum reward to risk, in the same turn as the ask, in the user's words with these numbers (each stop's dollars, its % and its normal ${unit}) — never call it "the risk read": ${said.join('; ')}. From that, your read of what kind of limit gets in near today's price and what kind waits for a deep pullback toward the stop — judgment, no fixed menu; any level you name comes from get_entry_level.${redraw ? '' : ' On the turn you ask for their limits, the stop and the target you propose must be on the worksheet\'s scenario (Roy, 2026-11-05): the chat draws them on a chart under your reply, from the worksheet, so they choose their limits looking at the levels. Say "the chart below"; get_chart does not put a picture in the chat.'} Once they gave their limits, do not repeat any of this.`
+    return `\n\nTHE RISK READ (step 5) — SAY IT with the result (their limits come from the ONE question: risk ÷ position size, and their R:R — never ask for limits), in the user's words with these numbers (each stop's dollars, its % and its normal ${unit}) — never call it "the risk read": ${said.join('; ')}. From that, your read of what kind of limit gets in near today's price and what kind waits for a deep pullback toward the stop — judgment, no fixed menu; any level you name comes from get_entry_level.${redraw ? '' : ' The stop and the target must be on the worksheet\'s scenario on the turn you give the result: the chat draws them on a chart under your reply. Say "the chart below"; get_chart does not put a picture in the chat.'} Say it once.`
 }
 
 /**
@@ -1045,12 +1061,12 @@ export function _buildBreakSection(facts, draft, { redraw = false } = {}) {
     const changes = Number.isFinite(aStop) && sg * (b.stop - aStop) > STRUCTURE.buffer * (facts.atr ?? 0)
     const regularOff = Number.isFinite(aStop) && Number.isFinite(Number(facts.close)) && sg * (aStop - Number(facts.close)) >= 0
     if (regularOff) {
-        lines.push(`  The regular stop ${aStop} is already ${short ? 'under' : 'over'} today's ${facts.close}: price has gone through it, so the regular scenario is OFF — say so in one line, and draw nothing on that stop. B is ${onOffer}: one bullet with its arming line and its assumed stop, and ask whether they take it. Never add it unasked, and once they declined, leave it.${facts.deep_stop != null && sg * (Number(facts.close) - facts.deep_stop) > 0 ? ` The deep stop (${facts.deep_stop}) is still on the right side of the price: offer it too, with its cost, and do not recommend it over B. If they take it, there is a regular scenario again, and both can stand. It goes on only when they name it: a bare "agreed" is not a choice, so ask which.` : ''}`)
+        lines.push(`  The regular stop ${aStop} is already ${short ? 'under' : 'over'} today's ${facts.close}: price has gone through it, so the regular scenario is OFF — say so in one line, and draw nothing on that stop. B is ${onOffer}: one bullet with its arming line and its assumed stop — it is the trade now; take it (the risk-based default, § ONE QUESTION) and say so. Once they declined it, leave it.${facts.deep_stop != null && sg * (Number(facts.close) - facts.deep_stop) > 0 ? ` The deep stop (${facts.deep_stop}) is still on the right side of the price: offer it too, with its cost, and do not recommend it over B. If they take it, there is a regular scenario again, and both can stand. It goes on only when they name it: a bare "agreed" is not a choice, so ask which.` : ''}`)
     } else if (changes) {
-        lines.push(`  ${Number.isFinite(onSheet) ? "The worksheet's stop" : 'The structure stop'} ${aStop} is ${short ? 'over' : 'under'} B's: the break CHANGES THE STOP, so B is ${onOffer} — one bullet: its arming line, its assumed stop, and that its stop is ${short ? 'lower' : 'higher'} than A's. Ask which they take: A, B or both. Both: the first to fill takes the whole size and the other is cancelled. Never add it unasked, and once they declined, leave it.`)
+        lines.push(`  ${Number.isFinite(onSheet) ? "The worksheet's stop" : 'The structure stop'} ${aStop} is ${short ? 'over' : 'under'} B's: the break CHANGES THE STOP, so B is ${onOffer} — one bullet: its arming line, its assumed stop, and that its stop is ${short ? 'lower' : 'higher'} than A's. Take BOTH — the risk-based default (§ ONE QUESTION), no question: the first to fill takes the whole size and the other is cancelled; say so once, and that one word from them drops either. Once they dropped one, leave it.`)
     }
     if (regularOff || changes) {
-        lines.push('  The turn you ask A, B or both, emit <scenario_offer> with the numbers you offer, so their pane shows the choice when you ask it.')
+        lines.push('  On a redraw where they choose again, the turn you ask A, B or both emits <scenario_offer> with the numbers you offer, so their pane shows the choice. A new risk-based build asks nothing: no <scenario_offer>.')
         if (b.floor != null) lines.push(`  When B goes on, it carries \`arm_close\` ${arm} and \`arm_floor\` ${b.floor}.`)
         lines.push(`  B's ENTRY is get_entry_level on B's stop ${b.stop}, B's target and their limits — never an R:R of your own. Level ${short ? 'at or under' : 'at or over'} ${arm}: the break price fits their limits, so the break IS the entry (the level and ${short ? 'above' : 'below'}, armed by the close). Level ${short ? 'over' : 'under'} ${arm}: B waits for a pullback to the level after the break. Both are B — say which, never "does not fit" for a level ${short ? 'over' : 'under'} the line.`)
     } else {
@@ -1107,6 +1123,7 @@ export function _buildGenerateSection(chatState, hasAccount = null) {
     if (r.ready) {
         return '\n\nGENERATE: the button is LIT. The plan can be saved by pressing it, now. If the user asks to generate,'
             + ' tell them to press it — never say it is not ready, and never ask them to confirm anything first.'
+            + ' A NEW RISK-BASED build: once their three numbers are in, end with <go> instead (§ ONE QUESTION) — the app generates and arms it.'
             + ' Anything you still want to raise is a remark, not a condition.'
     }
     const build = normalizeBuild(chatState?.build ?? draft.build)
@@ -1288,10 +1305,10 @@ function _stageInstruction(build, at, handBack) {
         return '  The user handed this gate to you: make the call, mark your pick "recommended": true on what you put on the table, and the server settles it. Say in one line what you chose and why, so they can overturn it, then keep going.'
     }
     if (at.stage === 'sizing') {
-        return `  Ask which unit and number — theirs, never yours. When they give it, call ${SIZE_TOOL} with it and read out what it returns; it records the answer and settles the stage by itself.`
+        return `  Risk-based: their POSITION SIZE from the ONE question — call ${SIZE_TOOL} with unit size_cash and that number. The user's setup: ask which unit and number — theirs, never yours. Either way, read out what it returns; it records the answer and settles the stage by itself.`
     }
     if (at.stage === 'summary') {
-        return '  The server settles this stage once the money figures exist — there is no "yes" to ask for. Read the trade and the money out; pressing Generate is their answer to it.'
+        return '  The server settles this stage once the money figures exist — there is no "yes" to ask for. Read the trade and the money out; risk-based, your <go> is the answer (§ ONE QUESTION); the user\'s setup, pressing Generate is theirs.'
     }
     return '  This stage ends in something the user says yes to. Settle it with <build>{"settle":["…"]}</build> only once they have.'
         + (handBack ? `\n${handBack}` : '')
@@ -1397,7 +1414,7 @@ export function _sizingReport(plan, size, { balance = null, available = balance,
 
     const readiness = setupReadiness(sized, hasAccount)
     lines.push(readiness.ready
-        ? 'GENERATE: the button is now LIT for this plan. Tell the user it is ready to press — never ask them to confirm anything else first.'
+        ? 'GENERATE: the button is now LIT for this plan. A new risk-based build: end with <go> (§ ONE QUESTION). Otherwise tell the user it is ready to press — never ask them to confirm anything else first.'
         : `GENERATE: still dark — it needs ${[...readiness.missing, ...readiness.problems].join(', ')}. Say exactly that.`)
     // The plan read here is the one on the table BEFORE this reply. When the same reply sets the levels (the user gave
     // them and the size in one message), a problem above is about the OLD levels — seen live as a false "entry/stop

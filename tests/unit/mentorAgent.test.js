@@ -266,7 +266,9 @@ test('the opening turn answers all three at once, cheapest tools first, and asks
     assert.match(section, /Read it, cheapest first/)
     assert.match(section, /Only on a real conflict[\s\S]{0,120}`consult`/)
     assert.match(section, /Never fetch twice in one build/)
-    assert.match(section, /asked \*\*once, here\*\* — never later/)
+    assert.match(section, /asked\s+\*\*once, here\*\* — never later/)
+    // Risk-based: the ONE question closes beat one instead (Roy, 2026-11-12).
+    assert.match(section, /\*\*Risk-based: the ONE question\*\* \(§ ONE QUESTION\) — position size, risk and R:R — and nothing else/)
     // The worksheet is what carries the ledger between turns (mentor.agent.service.js).
     assert.match(section, /Emit the worksheet on this turn/)
 })
