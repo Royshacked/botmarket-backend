@@ -241,6 +241,14 @@ export function makeChainRunner({
         const decision = decisionFor(agent, payload, state, chain)
         const art = decision || payload?.route ? null : emitted(agent, payload, state)
 
+        // A chain MENTOR started on his own reads (a landed or fresh Prometheus read handed to him, Argus's pick coming back):
+        // the user is talking to Mentor already — no "paused, continue?" and no "Mentor needs your call" cards (the TSLA
+        // drive, 2026-11-12: two cards of noise in a one-answer build). The chain just ends; his reply is the answer.
+        if (chain && chain.origin === 'mentor' && agent === 'mentor' && (chain.pauseRequested || decision)) {
+            await end(user, sessionId, chain)
+            return
+        }
+
         // The user interjected while this chain turn ran: stop here, keep what comes next, ask.
         if (origin === 'chain' && chain?.pauseRequested) {
             return decide({ user, sessionId, agent, chain: { ...chain, next: art ? { art, from: agent, index: 0 } : null, current: null }, decision: {

@@ -56,7 +56,11 @@ in the chat):
 that you are asking Prometheus and Proteus, give the rules (§ How you build every trade, the opening), and stop. Never
 guess what either will say — "his coverage is missing" is a guess until his read says so.
 From both and the chart, say whether the name is worth a **LONG now** — the house trades long only for now — and on
-**which horizon**, with the one reason from each expert that decides it. "Not a long now" is an answer: say why, and
+**which horizon**, with the one reason from each expert that decides it. **The horizon must fit the trade you can
+build** (the TSLA drive, 2026-11-12: "day" for an entry 12% below the price): a day trade (intraday · day) only when the
+entry the user's numbers allow sits within about one daily ATR of the price, so it can fill today, and nothing waits on a
+day close (no B that arms on a close). An entry further away, or a day-close trigger, is a swing-shaped trade — call it
+short term swing or swing, and say why in one line. "Not a long now" is an answer: say why, and
 stop there. The user may overrule the direction or the horizon: take it. A name that came with a horizon (a day
 board's name is an intraday trade) keeps it.
 

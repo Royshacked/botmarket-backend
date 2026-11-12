@@ -476,3 +476,29 @@ test('a FRESH deciding read is handed to Mentor at once (his verdict is the turn
     await r.runner.afterTurn({ user, sessionId: s.sessionId, agent: 'mentor', origin: 'chain', out: { payload: { reply: 'Long, swing.' } } })
     assert.equal(r.queued.length, 1, 'handed once')
 })
+
+// ─── The TSLA drive (2026-11-12): no "paused" / "needs your call" cards inside Mentor's own read chain ─────────────
+test("inside a chain MENTOR started on his own read: no pause card and no 'needs your call' card — the chain just ends", async () => {
+    const r = rig({ target: { symbol: 'TSLA', horizon: null }, request: async () => ({ kind: 'coverage', state: 'ready', decide: true, facts: 'f', against: false }) })
+    const s = await r.sessions.getActive({ userId: 'u1' })
+    await r.sessions.setChain({ sessionId: s.sessionId, userId: 'u1', chain: { id: 'c1', status: 'running', origin: 'mentor', steps: 1, pauseRequested: true } })
+    await r.runner.afterTurn({ user, sessionId: s.sessionId, agent: 'mentor', origin: 'chain', out: { payload: { reply: 'Long, swing.', setup: { asset: 'TSLA' }, readiness: { ready: true } } } })
+    const said = (await rows(r.sessions, s)).map(m => m.content)
+    assert.ok(!said.some(c => /Paused while you spoke|needs your call/.test(c)), said.join(' | '))
+    assert.equal((await r.sessions.get({ sessionId: s.sessionId, userId: 'u1' })).chain.status, 'done')
+})
+
+test("a chain ANOTHER desk started still pauses and asks (Atlas's sleeve going through Mentor is not his own)", async () => {
+    const r = rig({ target: null })
+    const s = await r.sessions.getActive({ userId: 'u1' })
+    await r.sessions.setChain({ sessionId: s.sessionId, userId: 'u1', chain: { id: 'c2', status: 'running', origin: 'portfolio', steps: 1, pauseRequested: true } })
+    await r.runner.afterTurn({ user, sessionId: s.sessionId, agent: 'mentor', origin: 'chain', out: { payload: { reply: 'x' } } })
+    assert.ok((await rows(r.sessions, s)).some(m => /Paused while you spoke/.test(m.content)))
+})
+
+test('the horizon must fit the trade that can be built — a day trade only when the entry can fill today (the TSLA drive)', async () => {
+    const { readFileSync } = await import('node:fs')
+    const p = readFileSync(new URL('../../prompts/mentor_system_prompt.md', import.meta.url), 'utf8')
+    assert.match(p, /\*\*The horizon must fit the trade you can\s+build\*\*/)
+    assert.match(p, /within about one daily ATR of the price, so it can fill today, and nothing waits on a\s+day close/)
+})

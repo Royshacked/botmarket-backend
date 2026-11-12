@@ -150,6 +150,11 @@ span / entry tables with "You choose", no starter chips about shorting or "my ow
   from the two reads: Prometheus's book and target horizon (long term / swing), a dated catalyst (short term swing),
   Proteus's fit (day trade / swing) and the chart. "Not a long now" is an answer, with why.
 - The user may overrule the direction or horizon; Mentor takes it.
+- **A read AGAINST the trade (e.g. Prometheus's strong sell) stays a WARNING the user can override** (Roy, 2026-11-12):
+  Mentor says it plainly and asks once; the user's go builds it anyway.
+- **The horizon must fit the trade that can be built** (the TSLA drive): a day trade only when the entry can fill today
+  (within about a daily ATR, no day-close trigger); otherwise a swing.
+- Inside a chain Mentor started on his own reads, no "paused" / "needs your call" cards — the chain just ends.
 
 **3. Then the three numbers, then their choice.** Mentor asks position size, risk and R:R (as §2.2). With the answer he
 checks the account carries it (`size_position` — fits, or the largest that does) and asks ONE thing: **"Want me to take
