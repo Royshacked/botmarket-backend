@@ -164,4 +164,11 @@ recent-only read (e.g. the last 3 years, reported as "lately", never as a rule) 
    (context.toolNote). And each answer now shows ONE example chart: the engine keeps each timeframe's latest false
    break (`false_breaks.latest`, PROFILE_VERSION 4), the tool text names its prices and get_chart timeframe. Replayed
    live: NVDA daily, Nov 12 swept the 151.49 low to 148.80 and closed back above; the follow-ups named the profile.
-5. **The Hotlist badge**, then Mentor weighing the read for his levels — not built.
+5. **The Hotlist badge** — BUILT 2026-11-13. Every Hotlist row carries what the name obeys on its horizon's timeframes
+   (intraday: 5-minute + 1-hour; This week: 1-hour + daily; Swing: daily + weekly; Long term: weekly + daily) — "50 MA +1",
+   "sweeps lows", "nothing" — from the STORED profile only (`behaviourBadge`, `storedProfile`; one request per tab,
+   `GET /api/hotlist/behaviour`); the tooltip says what was measured, a click asks the technical analyst "How does X
+   trade?" in the chat (handed off like Build). Profiling (Roy, option b): the covered book (Swing + Long term, ~340 names)
+   is queued after the weekly run (`profileHouseBook`), never from a look; Intraday / This week names still queue on a look.
+   Driven (scripts/drive-proteus-badge.mjs): Intraday's 9 names, one request, all "nothing"; MBGL's badge → his read.
+   Mentor weighing the read for his levels — not built.

@@ -72,6 +72,49 @@ export function timeframeLines(tf, t) {
     ]
 }
 
+// ─── The Hotlist badge (proteus.md §8.2, build step 5, 2026-11-13) ─────────────
+// "What the name obeys, in a word or two (e.g. '20 MA', 'sweeps lows', 'nothing')" — on the timeframes the ROW's horizon
+// trades on: a day trade reads the 5-minute and 1-hour bars, a swing the daily and weekly.
+
+/** The timeframes each Hotlist horizon reads. The day boards' columns are day trades. */
+export const BADGE_TIMEFRAMES = Object.freeze({
+    intraday: ['5min', '1hour'], open: ['5min', '1hour'], mid: ['5min', '1hour'], close: ['5min', '1hour'], day: ['5min', '1hour'],
+    week: ['1hour', 'day'], swing: ['day', 'week'], long_term: ['week', 'day'], covered: ['day', 'week'],
+})
+const BADGE_WORDS = Object.freeze({
+    ema20: '20 EMA', sma50: '50 MA', sma200: '200 MA', vwap: 'VWAP', rsi_oversold: 'RSI under 30',
+    macd_cross_up: 'MACD cross', volume_up_bar: 'volume', sweeps: 'sweeps lows', order_blocks: 'order blocks',
+})
+
+/**
+ * The badge for one row: `{ badge, holds, tip }` — the first thing that holds (and how many more), "nothing" when nothing
+ * does — or null when the profile has none of the horizon's timeframes (too little history to say). Pure.
+ */
+export function behaviourBadge(profile, horizon = null) {
+    const tfs = BADGE_TIMEFRAMES[horizon] ?? BADGE_TIMEFRAMES.swing
+    const present = tfs.filter(tf => profile?.timeframes?.[tf])
+    if (!present.length) return null
+    const holds = []
+    for (const tf of present) {
+        const t = profile.timeframes[tf]
+        const keys = [
+            ...Object.entries(t.indicators ?? {}).filter(([, s]) => s?.verdict === 'respects').map(([k]) => k),
+            ...(t.false_breaks?.after_sweep?.verdict === 'respects' ? ['sweeps'] : []),
+            ...(t.order_blocks?.verdict === 'respects' ? ['order_blocks'] : []),
+        ]
+        for (const k of keys) holds.push({ key: k, tf, label: `${BADGE_WORDS[k] ?? k} (${TF[tf].toLowerCase()})` })
+    }
+    const words = [...new Set(holds.map(h => BADGE_WORDS[h.key] ?? h.key))]
+    const on = present.map(tf => TF[tf].toLowerCase()).join(' and ')
+    return {
+        badge: words.length ? `${words[0]}${words.length > 1 ? ` +${words.length - 1}` : ''}` : 'nothing',
+        holds: holds.map(h => h.label),
+        tip: words.length
+            ? `Measured on the ${on} bars, it holds at: ${holds.map(h => h.label).join(', ')}. Click for the read.`
+            : `Measured on the ${on} bars, nothing technical holds — no line or pattern to lean on. Click for the read.`,
+    }
+}
+
 /** What HOLDS across the timeframes, labelled — the one list formatProfile and profileBrief both say. Missing parts skip. Pure. */
 export function holdsOf(timeframes) {
     return Object.entries(timeframes ?? {}).flatMap(([tf, t]) => (t ? [

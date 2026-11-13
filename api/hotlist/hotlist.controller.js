@@ -4,6 +4,7 @@ import { hotlistResearchService } from '../../services/hotlistResearch.service.j
 import { houseBook } from '../../services/houseBook.service.js'
 import { dayBoards } from '../../services/hotlist.day.js'
 import { prometheusCallsService } from '../../services/prometheusCalls.service.js'
+import { badgesFor } from '../../services/hotlistBehaviour.service.js'
 import { makeHandle } from '../_shared/handle.util.js'
 import { httpError } from '../../services/httpError.util.js'
 
@@ -81,6 +82,15 @@ export const requestRead = handle('requestRead', async (req, res) => {
  * target's horizon, each with where it came from and how it is doing since the target was set, and each book's record.
  */
 export const getBook = handle('getBook', async (req, res) => { res.json(await houseBook()) })
+
+/**
+ * GET /api/hotlist/behaviour?symbols=A,B&horizon=swing — the technical analyst's badge for each name on a list: what it
+ * obeys on that horizon's timeframes, from the stored measured profile (proteus.md step 5). Names with none yet are queued.
+ */
+export const getBehaviour = handle('getBehaviour', async (req, res) => {
+    const symbols = String(req.query.symbols ?? '').split(',').filter(Boolean)
+    res.json(await badgesFor(symbols, req.query.horizon ? String(req.query.horizon) : null))
+})
 
 /**
  * GET /api/hotlist/scorecard — Prometheus's record (services/prometheusCalls.service.js): his coverage calls, frozen when made

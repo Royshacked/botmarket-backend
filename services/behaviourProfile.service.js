@@ -78,6 +78,20 @@ export async function fetchProfileBars(symbol, { get = getTickerAggregates, now 
 }
 
 /**
+ * This week's STORED profile, or null — never computes. What a list reads for many names at once (the Hotlist badge,
+ * proteus.md step 5): a name not profiled yet shows nothing rather than holding up the list for seconds of FMP calls.
+ */
+export async function storedProfile(symbol, { deps = {} } = {}) {
+    const sym = String(symbol ?? '').trim().toUpperCase()
+    if (!sym) return null
+    const hit = await (deps.cache ?? _cache).read(sym)
+    // The profile's OWN age decides, not the cache's: a stored profile read back into memory restarts the memory
+    // layer's clock, which would serve a 6-day-old profile for another week (CR 2026-11-12).
+    const age = (deps.now ?? Date.now()) - Date.parse(hit?.computed_at ?? '')
+    return hit?.version === PROFILE_VERSION && hit.profile && age < PROFILE_TTL_MS ? { ...hit.profile, computed_at: hit.computed_at } : null
+}
+
+/**
  * The symbol's profile: this week's stored one, or a new one computed now and stored. `{ fresh: true }` recomputes
  * regardless. → `{ ...profile, computed_at }`; throws when the bars cannot be fetched (the caller says so).
  */
@@ -86,11 +100,8 @@ export async function profileFor(symbol, { fresh = false, deps = {} } = {}) {
     if (!sym) throw new Error('a symbol is required')
     const cache = deps.cache ?? _cache
     if (!fresh) {
-        const hit = await cache.read(sym)
-        // The profile's OWN age decides, not the cache's: a stored profile read back into memory restarts the memory
-        // layer's clock, which would serve a 6-day-old profile for another week (CR 2026-11-12).
-        const age = (deps.now ?? Date.now()) - Date.parse(hit?.computed_at ?? '')
-        if (hit?.version === PROFILE_VERSION && hit.profile && age < PROFILE_TTL_MS) return { ...hit.profile, computed_at: hit.computed_at }
+        const stored = await storedProfile(sym, { deps })
+        if (stored) return stored
     }
     if (_inflight.has(sym)) return _inflight.get(sym)
     const run = (async () => {

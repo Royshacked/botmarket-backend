@@ -397,3 +397,13 @@ test('the scan: a sharp month the assessment already saw does not re-fire; hype 
     const nod = changes({ moved: moved({ hype: true, hype_basis: 'size_weighted', ret_24m: null, spy_24m: null }) }, then({ hype: false, hype_basis: 'size_weighted' }))[0]
     assert.equal(nod.detail, null, 'never "+0%" for a missing number')
 })
+
+test('a finished week queues the covered book for its measured profiles — the Hotlist badges, ready before anyone looks (proteus.md step 5)', async () => {
+    let profiled = 0
+    const r = await runWeekly({ deps: deps({ profileBook: async () => { profiled++ } }) })
+    assert.equal(r.outcome, 'done')
+    await new Promise(res => setImmediate(res))
+    assert.equal(profiled, 1)
+    const boom = await runWeekly({ force: true, deps: deps({ profileBook: async () => { throw new Error('queue down') } }) })
+    assert.equal(boom.ok, true, 'a failed book profile never fails the week')
+})
