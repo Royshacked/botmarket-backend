@@ -56,7 +56,7 @@ const READ_REFUSED = {
     no_board: [404, 'That board is gone — reload the Hotlist.'],
     stale_board: [409, 'Reads are asked for on the latest list only — that board has been replaced.'],
     not_on_week: [409, 'That name is not graded for this week.'],
-    live_read: [409, 'Prometheus already has a live read on that name.'],
+    live_read: [409, 'There is already a live read on that name.'],
     already_queued: [409, 'That name is already waiting for a read.'],
     daily_cap: [429, 'Today\'s catalyst reads are used up — try again tomorrow.'],
     queue_unavailable: [503, 'The research queue could not be reached.'],

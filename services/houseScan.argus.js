@@ -26,7 +26,7 @@ const TEXT_CHARS = 300
 
 const BOOK_WORDS = { swing: 'FOR SWING (a trade over weeks to months)', long_term: 'FOR LONG TERM (a holding over years)' }
 
-export const SYSTEM = `You are Argus, the scanning desk. Pythia, the industry desk, has rated an industry for a book and written her case. Your job: from the industry's companies, choose the names that best carry HER thesis — the ones Prometheus, the research desk, should research next. He will judge each one and set a price target; you choose who gets researched.
+export const SYSTEM = `You are the house's stock picker. The industry strategist has rated an industry for a book and written her case. Your job: from the industry's companies, choose the names that best carry HER thesis — the ones the analyst, the research desk, should research next. He will judge each one and set a price target; you choose who gets researched.
 
 Read her case first: the verdict and horizon, the thesis, what caused the move, the second-order view, the risks, and the companies she named. Then the list — every company measured the same way: its 3, 6 and 12-month returns and their gap to the industry's, its beta to the industry (how much it moves when the industry moves), the trend, how much trades a day; for the long-term book its return on capital, revenue growth and margin; the Street's EPS growth for next year; insiders buying; the next report.
 
@@ -42,7 +42,7 @@ How to choose:
 
 Answer ONLY a JSON object, no prose:
 {"picks":[{"symbol":"ABC","why":"one sentence: how this company carries the thesis","caution":"one sentence: what would make it wrong"}],"passed":[{"symbol":"XYZ","why":"one sentence"}],"note":"one sentence on the list as a whole"}
-"picks" best first, at most the number you are told. "passed": only names Pythia named that you did not pick.`
+"picks" best first, at most the number you are told. "passed": only names the industry strategist named that you did not pick.`
 
 const _txt = (v) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, TEXT_CHARS) : null)
 
@@ -51,7 +51,7 @@ export function pickText({ assessment: a, subject, link = null, rows, max }) {
     const book = BOOK_WORDS[a?.verdict] ?? String(a?.verdict ?? '')
     const named = (a?.names ?? []).map(n => `${n.symbol}${n.why ? ` — ${n.why}` : ''}`)
     return [
-        `INDUSTRY: ${subject}${link ? ` (the ${link} link of the theme)` : ''} — Pythia rates it ${book}${a?.horizon ? `, horizon ${a.horizon}` : ''}.`,
+        `INDUSTRY: ${subject}${link ? ` (the ${link} link of the theme)` : ''} — the industry strategist rates it ${book}${a?.horizon ? `, horizon ${a.horizon}` : ''}.`,
         `THESIS: ${a?.thesis ?? 'n/a'}`,
         `WHAT MOVED IT: ${a?.cause?.text ?? 'n/a'}${a?.cause?.kind ? ` (${a.cause.kind})` : ''}`,
         `SECOND ORDER: ${a?.second_order ?? 'n/a'}`,
@@ -86,7 +86,7 @@ export function normalizePicks(raw, rows, max) {
 
 /** The code order's first `max` uncovered names — the fallback. Pure. */
 export function codePicks(rows, max) {
-    return rows.filter(r => !r.covered).slice(0, max).map(r => ({ symbol: r.symbol, why: r.named ? 'named by Pythia' : null, caution: null }))
+    return rows.filter(r => !r.covered).slice(0, max).map(r => ({ symbol: r.symbol, why: r.named ? 'named by the industry strategist' : null, caution: null }))
 }
 
 async function _houseModel() {

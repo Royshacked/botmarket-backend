@@ -14,7 +14,7 @@ import { dirname, join } from 'path'
 
 import { getFundamentals, getEarnings, getStockPeers, getSectorSnapshot, getMacroSnapshot } from '../../providers/fmp.provider.js'
 import { getSecFilings } from '../../providers/sec.provider.js'
-import { makePromptLoader, cleanReply, makeToolHandler, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, BREVITY_RULE, VENUE_RULE, buildStandingProposalRule, COMMON_TOOL_HANDLERS, cachedBlock, normalizeMessages } from '../agentUtils.js'
+import { makePromptLoader, cleanReply, makeToolHandler, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, VOICE_RULE, BREVITY_RULE, VENUE_RULE, buildStandingProposalRule, COMMON_TOOL_HANDLERS, cachedBlock, normalizeMessages } from '../agentUtils.js'
 import { makeTradingContextHandlers, buildVenueSection, TRADING_CONTEXT_TOOL_SPEC } from '../tools/tradingContext.tools.js'
 import { makeMarketHoursHandlers, MARKET_HOURS_TOOL_SPEC } from '../tools/marketHours.tools.js'
 import { buildTagCaptures } from '../llmStream.util.js'
@@ -376,8 +376,8 @@ export function _buildSystemPrompt(chatState, seed = null, audience = null, mode
     // Argus's screen read as a provisional input — VERIFY it, don't take it on faith, and form your OWN view.
     const seedBlock = seed?.ticker
         ? `\nARGUS SEED (research this candidate): ticker=${seed.ticker}${seed.sector ? `, sector=${seed.sector}` : ''}`
-            + `${seed.thesis ? `\n  Argus's screen rationale: ${seed.thesis}` : ''}${seed.analysis ? `\n  Argus's fundamental read: ${seed.analysis}` : ''}`
-            + `\n  → Start here, verify Argus's read against the tools, then form your own variant view.`
+            + `${seed.thesis ? `\n  the stock picker's screen rationale: ${seed.thesis}` : ''}${seed.analysis ? `\n  the stock picker's fundamental read: ${seed.analysis}` : ''}`
+            + `\n  → Start here, verify the stock picker's read against the tools, then form your own variant view.`
         : ''
     const audienceBlock = buildAudienceSection(audience)
     const dynamic = `---
@@ -387,7 +387,7 @@ ${audienceBlock}
 
 ` : ''}Active name: ${active}${seedBlock}${coverageListBlock}${existingBlock}`
     return [
-        cachedBlock(_systemPrompt() + buildRouteRule('analyst') + LANGUAGE_RULE + VENUE_RULE + buildStandingProposalRule('coverage', 'Initiate / Revise') + BREVITY_RULE),
+        cachedBlock(_systemPrompt() + buildRouteRule('analyst') + LANGUAGE_RULE + VOICE_RULE + VENUE_RULE + buildStandingProposalRule('coverage', 'Initiate / Revise') + BREVITY_RULE),
         // The mode module AFTER the spine and BEFORE the dynamic block, as its own cached block:
         // coverage turns keep their prefix untouched, and quick-read turns share one across names.
         ...(mode === MODES.QUICKREAD ? [cachedBlock(_quickreadMode())] : []),

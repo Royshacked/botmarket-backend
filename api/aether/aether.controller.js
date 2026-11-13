@@ -47,7 +47,7 @@ export const getCandidatesByTicker = handle('getCandidatesByTicker', async (req,
         days,
         includeDropped: req.query.includeDropped !== 'false',
     })
-    if (!row) throw httpError(404, 'No Aether candidate for that ticker')
+    if (!row) throw httpError(404, 'No event candidate for that ticker')
     res.json(row)
 })
 

@@ -80,7 +80,7 @@ test('what a hand-back settles on is never taken off the wire', () => {
     assert.equal(sanitizeUserOps([{ delegate: 'entries', picks: { entries: ['t1:t1e2'] } }])[0].picks, undefined)
 })
 
-test('Mentor\'s pick is the option it marked — one per trade — and every span it would build', () => {
+test('The trader\'s pick is the option it marked — one per trade — and every span it would build', () => {
     const spans = normalizeSpans({ candidates: [
         { id: 't1', label: 'a', from: 'x', to: 'y', recommended: true },
         { id: 't2', label: 'b', from: 'x', to: 'y' },
@@ -96,7 +96,7 @@ test('Mentor\'s pick is the option it marked — one per trade — and every spa
     assert.deepEqual(delegationPicks({}), {}, 'nothing on the table → no pick, and the gate stays open')
 })
 
-test('"you decide" at the entries gate settles it on Mentor\'s pick — the PACB loop, closed', () => {
+test('"you decide" at the entries gate settles it on the trader\'s pick — the PACB loop, closed', () => {
     const { build, refused } = applyBuildOps(atEntries(), {
         delegate: ['entries'],
         picks: delegationPicks({ entries: normalizeEntries(ENTRIES, ['t1']) }),
@@ -124,7 +124,7 @@ test('a REOPENED gate is the user\'s again — the delegation does not survive i
     assert.equal(stageOf(activeName(build)), 'entries')
 })
 
-test('the build-wide waiver settles a gate on Mentor\'s pick in the same turn it is shown', () => {
+test('the build-wide waiver settles a gate on the trader\'s pick in the same turn it is shown', () => {
     let b = upsertName(emptyBuild(), 'PACB')
     b = applyBuildOps(b, { claim: { direction: 'long', horizon: 'day', lens: 'discretionary' }, settle: ['direction', 'horizon', 'lens'], source: 'user', waiver: true }).build
     // "Go all the way": the spans go up and settle without a stop — it used to need a `settle` the
@@ -133,10 +133,10 @@ test('the build-wide waiver settles a gate on Mentor\'s pick in the same turn it
     assert.deepEqual(activeName(build).settled.spans, ['t1'])
 })
 
-test('Mentor narrowing its own menu replaces the menu; a user\'s claim is never displaced by it', () => {
+test('The trader narrowing its own menu replaces the menu; a user\'s claim is never displaced by it', () => {
     let b = atEntries()
     b = applyBuildOps(b, { derived: { entries: ['t1:t1e2'] } }).build
-    assert.deepEqual(activeName(b).claimed.entries.value, ['t1:t1e2'], 'the newer content wins over Mentor\'s older one')
+    assert.deepEqual(activeName(b).claimed.entries.value, ['t1:t1e2'], 'the newer content wins over the trader\'s older one')
 
     b = applyBuildOps(b, { claim: { entries: ['t1:t1e1'] }, source: 'user' }).build
     b = applyBuildOps(b, { derived: { entries: ['t1:t1e2'] } }).build
@@ -149,7 +149,7 @@ test('a size given while a gate is open is HELD — no refusal, and nothing to a
     const { build, refused } = applyBuildOps(atEntries(), {
         size: { unit: 'size_cash', value: 20000 }, settle: ['size'],
     })
-    assert.deepEqual(refused, [], 'refused is what made Mentor ask for the size a second time')
+    assert.deepEqual(refused, [], 'refused is what made the trader ask for the size a second time')
     assert.deepEqual(heldAnswers(build, activeName(build)), ['size'])
     assert.equal(activeName(build).settled.size, undefined, 'still out of order — it waits its turn')
 })
@@ -219,8 +219,8 @@ test('THE READ HOLDS GENERATE, re-checked after the turn (CR 2026-11-11): the ho
     })
     const waiting = await go('waiting')
     assert.deepEqual(asked[0], { symbol: 'PACB', horizon: 'swing' })
-    assert.equal(waiting.readiness.ready, false, 'Generate stays dark while Prometheus reads')
-    assert.ok(waiting.readiness.problems.includes("Prometheus's read is still running"))
+    assert.equal(waiting.readiness.ready, false, 'Generate stays dark while the analyst reads')
+    assert.ok(waiting.readiness.problems.includes("The analyst's read is still running"))
     const ready = await go('ready')
     assert.equal(ready.readiness.ready, true, 'the read in: Generate lights')
 })

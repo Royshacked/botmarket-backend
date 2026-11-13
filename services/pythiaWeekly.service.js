@@ -106,7 +106,7 @@ export function engineStaleCard(age, userId) {
     if (!userId || !age?.stale) return null
     return {
         userId, botId: 'strategy', type: 'pythia_engine_stale',
-        content: `Pythia is waiting on the engine — the last industry price run is ${age.asof}, finished ${age.days} days ago. `
+        content: `The industry strategist is waiting on the engine — the last industry price run is ${age.asof}, finished ${age.days} days ago. `
             + 'Her weekly reassessments start from a new run (aether-engine\'s Sunday job, engine-weekly); until one comes, '
             + 'only what is due by the clock — long-term reviews, expired assessments — is assessed, on the old prices.',
         payload: { kind: 'pythia_engine', asof: age.asof, days: age.days },

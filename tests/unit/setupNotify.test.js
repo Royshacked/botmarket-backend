@@ -56,7 +56,7 @@ test('the card carries NO warning channel — a hedged confirm is what the gate 
     const card = buildSetupEntryConfirm(SETUP, {
         verdict: 'enter', warning: 'SMH is red while NVDA taps the zone.', read: 'Semis diverging.',
     })
-    assert.doesNotMatch(card.content, /Talos flags/)
+    assert.doesNotMatch(card.content, /the trade monitor flags/)
     assert.equal(card.payload.warning, undefined)
 })
 
@@ -97,7 +97,7 @@ test('a runaway opens the plan back up, and says why now', () => {
     assert.match(card.content, /ran past 247/)
     assert.match(card.content, /read wasn't wrong/)
     assert.match(card.content, /while the move is live/)
-    assert.equal(card.actions?.primary?.label, 'Re-draw with Mentor')
+    assert.equal(card.actions?.primary?.label, 'Re-draw the trade')
     assert.equal(card.payload.event, 'ran_away')
 })
 
@@ -202,7 +202,7 @@ test('with nothing left standing the copy is about the setup again', () => {
     assert.match(card.content, /Want to re-draw it\?/)
 })
 
-test('every invalidation card is owner-scoped and routes to Mentor', () => {
+test('every invalidation card is owner-scoped and routes to the trader', () => {
     for (const kind of ['ran_away', 'ran_away_fyi', 'invalidated', 'invalidated_fyi', 'stale_map']) {
         const card = buildSetupInvalidation(SETUP, { card: kind })
         assert.equal(card.userId, SETUP.userId, kind)

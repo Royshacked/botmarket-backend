@@ -11,7 +11,7 @@ import { makeCandlesHandler, makeIndicatorsHandler, makeChartHandler } from '../
 import { makeStructureVisionHandler, OB_VISION, FB_VISION } from '../tools/priceStructure.tools.js'
 import { logger }        from '../logger.service.js'
 import { makeNewsHandlers } from '../tools/news.tools.js'
-import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, cleanReply, makeToolHandler, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, BREVITY_RULE, VENUE_RULE, cachedBlock } from '../agentUtils.js'
+import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, cleanReply, makeToolHandler, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, VOICE_RULE, BREVITY_RULE, VENUE_RULE, cachedBlock } from '../agentUtils.js'
 import { makeTradingContextHandlers, buildVenueSection } from '../tools/tradingContext.tools.js'
 import { makeMarketHoursHandlers, MARKET_HOURS_TOOL_SPEC } from '../tools/marketHours.tools.js'
 import { makeHorizonListHandlers, houseListNames, HORIZON_LIST_TOOL_SPEC } from '../tools/horizonList.tools.js'
@@ -153,7 +153,7 @@ async function chatStream({ messages = [], model: requestedModel, audience = nul
     // The prompt (cached) + the volatile tail. BREAKPOINT BUDGET: four per request — tools one, the history one
     // (_stampHistoryCache in the Anthropic provider), the system prompt one.
     const systemPrompt = [
-        cachedBlock(_prompt() + buildRouteRule('scanner') + LANGUAGE_RULE + VENUE_RULE + BREVITY_RULE),
+        cachedBlock(_prompt() + buildRouteRule('scanner') + LANGUAGE_RULE + VOICE_RULE + VENUE_RULE + BREVITY_RULE),
         { type: 'text', text: dynamic.join('\n\n') },
     ]
 
@@ -229,7 +229,7 @@ export async function _attachPickLabel(pick, { labels = houseLabels } = {}) {
 // Exported for tests.
 /** The line under a reply whose pick the gate dropped — the user read a name and gets no button. Pure. */
 export function droppedPickNote(ticker) {
-    return `\n\n_${ticker} is not on the house's lists today, so it can't go to Mentor from here. To trade it anyway, give Mentor the name yourself._`
+    return `\n\n_${ticker} is not on the house's lists today, so it can't go to the trader from here. To trade it anyway, give the trader the name yourself._`
 }
 
 export function _normalizeArgusPick(p) {

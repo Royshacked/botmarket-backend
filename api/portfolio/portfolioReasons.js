@@ -13,7 +13,7 @@ export const REBALANCE_REASONS = {
 
 // Saving a book (portfolioCommit.createBook / replacePlan).
 export const BOOK_REASONS = {
-    avoid_needs_ok: [409, 'Pythia rates an industry in this AVOID — say yes to keep it'],
+    avoid_needs_ok: [409, 'The industry strategist rates an industry in this AVOID — say yes to keep it'],
     book_live:      [409, 'A position in this book is live on the broker — close it before re-planning'],
     no_ideas:       [400, 'The plan has no holdings'],
     save_failed:    [500, 'Could not save the book — nothing was saved'],

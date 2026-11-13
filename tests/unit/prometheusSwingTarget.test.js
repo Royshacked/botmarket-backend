@@ -44,7 +44,7 @@ test('his number is the target, measured from the read\'s price; the tools\' lin
 test('no number of his is a pass — never the yardstick in his place (code review 2026-10-24)', () => {
     const r = buildCatalystRead(_parseCatalystRead(BLOCK({ target: null })), { symbol: 'ABC', spot: 100, nowMs: NOW })
     assert.deepEqual([r.status, r.pass_reason, r.target], ['pass', 'no_target', null])
-    assert.equal(readFacts(r), null, 'and Mentor is handed nothing to build on')
+    assert.equal(readFacts(r), null, 'and the trader is handed nothing to build on')
 })
 
 test("a target far past the options' implied move and the yardstick is flagged a stretch — shown, never blocked", async () => {
@@ -95,10 +95,10 @@ test('his target is priced off a fresh quote, even when the read also carries a 
     assert.equal((await catalystReadService.liveRead('abc')).id, saved.doc.id, 'the live read, by symbol')
 })
 
-test('the read as Mentor hears it: his target, the window, the yardstick, the company, the kill', () => {
+test('the read as the trader hears it: his target, the window, the yardstick, the company, the kill', () => {
     const r = buildCatalystRead(_parseCatalystRead(BLOCK()), { symbol: 'ABC', spot: 100, nowMs: NOW, context: { exit_before: '2026-10-30' } })
     const line = readFacts(r)
-    assert.match(line, /^Prometheus \(credible, 0\.7\): target 104\.50 \(band 103\.00–106\.00\), \+4\.5% from 100\.00 by 2026-10-29 — out before the report 2026-10-30/)
+    assert.match(line, /^the analyst \(credible, 0\.7\): target 104\.50 \(band 103\.00–106\.00\), \+4\.5% from 100\.00 by 2026-10-29 — out before the report 2026-10-30/)
     assert.match(line, /his own number, the run-up yardstick \+3\.0%: the run-up yardstick is \+3%/)
     assert.match(line, /company sound — revenue \+12%, net cash; kill: guidance cut$/)
     assert.equal(readFacts({ status: 'pass', target: null }), null)
@@ -111,7 +111,7 @@ test('a week hand-off carries his live read; a day column, or a failed read, goe
     const read = buildCatalystRead(_parseCatalystRead(BLOCK()), { symbol: 'ABC', spot: 100, nowMs: NOW })
     const ref = (column) => ({ board: 'hb_2026-10-23_preopen', column, symbol: 'ABC' })
     const week = await hotlistSeed(ref('week'), { db: async () => db, liveRead: async () => read })
-    assert.match(week.catalyst_facts, /^Prometheus \(credible/)
+    assert.match(week.catalyst_facts, /^the analyst \(credible/)
     assert.equal((await hotlistSeed(ref('open'), { db: async () => db, liveRead: async () => read })).catalyst_facts, null)
     assert.equal((await hotlistSeed(ref('week'), { db: async () => db, liveRead: async () => { throw new Error('down') } })).catalyst_facts, null)
     assert.equal((await hotlistSeed(ref('week'), { db: async () => db, liveRead: () => { throw new Error('sync') } })).catalyst_facts, null)

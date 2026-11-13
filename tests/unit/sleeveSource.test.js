@@ -113,7 +113,7 @@ test('the queue opening names the sleeve and the school, not the house view', ()
 
 // ── the run settles ───────────────────────────────────────────────────────────
 
-test('when the run has decided every name, the user gets one Atlas card and the sleeve is gone', async () => {
+test('when the run has decided every name, the user gets one the portfolio manager card and the sleeve is gone', async () => {
     const h = harness({ screened: ['AAA', 'BBB', 'CCC'] })
     await sourceSleeve(req(), h.deps)
     await h.settled(run([
@@ -130,7 +130,7 @@ test('when the run has decided every name, the user gets one Atlas card and the 
     assert.equal(card.visibility, 'own')
     assert.equal(card.forUserId, 'u1')
     assert.equal(card.actions.primary.label, 'Resume build')
-    assert.equal(card.content, 'Technology sleeve sourced (quality-value): 2 of 3 screened names now in coverage — AAA, CCC; 1 passed on (no edge). Resume the build and Atlas allocates from coverage.')
+    assert.equal(card.content, 'Technology sleeve sourced (quality-value): 2 of 3 screened names now in coverage — AAA, CCC; 1 passed on (no edge). Resume the build and the portfolio manager allocates from coverage.')
     assert.deepEqual(card.payload.covered, ['AAA', 'CCC'])
     assert.deepEqual(card.payload.passed, ['BBB'])
     assert.equal(card.payload.threadId, 't1')
@@ -211,7 +211,7 @@ test('houseFirst: the house names lead, up to the cap; the screen fills the rest
     assert.deepEqual(houseFirst(POOL, IND_OF, new Set(['H1']), { hits: 12, max: 0 }).house, [])
 })
 
-test('a sector Pythia rates long term: the screen widens, the house names lead, the card counts them', async () => {
+test('a sector the industry strategist rates long term: the screen widens, the house names lead, the card counts them', async () => {
     const h = harness({ screened: POOL, covered: ['S05'] })
     const filters = []
     h.deps.screen = async (f) => { filters.push(f); return POOL }

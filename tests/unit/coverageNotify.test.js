@@ -12,7 +12,7 @@ const cov = (over = {}) => ({ id: 'cov_1', symbol: 'NVDA', price_target: { value
 
 // ── the card ─────────────────────────────────────────────────────────────────
 
-test('target hit → a plain card from Prometheus, admin-visible', () => {
+test('target hit → a plain card from the analyst, admin-visible', () => {
     const c = buildCoverageEvent(cov(), { state: 'target_hit', reason: 'x' }, 'a1')
     assert.equal(c.userId, 'a1')
     assert.equal(c.botId, 'analyst')
@@ -133,7 +133,7 @@ test('a house refresh (no user) → every admin, admin-visible, and the copy sto
         assert.equal(c.forUserId, undefined)
         assert.equal(c.payload.house, true)
         assert.equal(c.type, 'coverage_refreshed')
-        assert.match(c.content, /Prometheus revised NVDA — AI capex intact\./)
+        assert.match(c.content, /I revised NVDA — AI capex intact\./)
         assert.doesNotMatch(c.content, /review/i)
     }
 })
@@ -180,8 +180,8 @@ test('a SUCCESSFUL house refresh says what was revised and why, and opens the th
     await notifyCoverageRefreshed({ userId: null, ticker: 'NVDA', coverageId: 'cov_1', ok: true, trigger: 'the price reached our target', note: 'Re-modelled — PT 200 → 240' }, d)
     assert.equal(d.posted[0].actions.primary.label, 'Open thesis')
     assert.equal(d.posted[0].actions.primary.resolvesOn, 'open')
-    assert.equal(d.posted[0].content, 'Prometheus revised NVDA — the price reached our target: Re-modelled — PT 200 → 240.')
-    assert.doesNotMatch(d.posted[0].content, /Take it to Prometheus/)
+    assert.equal(d.posted[0].content, 'I revised NVDA — the price reached our target: Re-modelled — PT 200 → 240.')
+    assert.doesNotMatch(d.posted[0].content, /Take it to the analyst/)
 })
 
 test('a FAILED house refresh carries a Dismiss and NO primary — it stored nothing to open', async () => {

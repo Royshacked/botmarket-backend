@@ -86,7 +86,7 @@ test('the empty answer NAMES the workspace — "nothing" and "nothing in paper" 
     // told something false about their own book.
     const out = formatWatchedItems({ items: [], counts: {}, workspace: 'paper' })
     assert.match(out, /Nothing in the PAPER workspace/)
-    assert.match(out, /coverage and Aether are shared across all workspaces/)
+    assert.match(out, /coverage and the event analyst are shared across all workspaces/)
     assert.doesNotMatch(out, /scans/)
 })
 

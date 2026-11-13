@@ -17,7 +17,7 @@ import { DESKS } from '../desks/registry.js'
 import { makeRouteCapture, buildRouteRule } from '../routing.util.js'
 import { toolsFor } from '../agentTools.registry.js'
 import { consultDescription } from '../deepThink.service.js'
-import { makePromptLoader, LANGUAGE_RULE, BREVITY_RULE, cachedBlock, normalizeMessages, cleanReply, makeToolHandler, buildAudienceSection } from '../agentUtils.js'
+import { makePromptLoader, LANGUAGE_RULE, VOICE_RULE, BREVITY_RULE, cachedBlock, normalizeMessages, cleanReply, makeToolHandler, buildAudienceSection } from '../agentUtils.js'
 import { getPriceAction, getCycleAnalysis } from '../priceAnalytics.service.js'
 import { makeCandlesHandler, makeIndicatorsHandler, makeChartHandler } from '../tools/marketData.tools.js'
 import { makeStructureVisionHandler, OB_VISION, FB_VISION } from '../tools/priceStructure.tools.js'
@@ -53,7 +53,7 @@ THE EXAMPLE (Roy, 2026-11-13): every behaviour answer shows ONE chart — the pr
         omit: ['show_to_user'],
     },
     get_market_hours: MARKET_HOURS_TOOL_SPEC.get_market_hours,
-    get_news: { description: `Recent dated NEWS on a name, newest first (\`companies\` with the ticker as \`subject\`). Only to explain a move on the chart the user asks about — the news is Prometheus's field, not yours.`, cache: true },
+    get_news: { description: `Recent dated NEWS on a name, newest first (\`companies\` with the ticker as \`subject\`). Only to explain a move on the chart the user asks about — the news is the analyst's field, not yours.`, cache: true },
 })
 
 export const TOOLS = [
@@ -96,7 +96,7 @@ async function chatStream({
     const audienceSection = buildAudienceSection(audience)
     if (audienceSection) dynamic.push(audienceSection)
     const systemPrompt = [
-        cachedBlock(_prompt() + buildRouteRule('proteus') + LANGUAGE_RULE + BREVITY_RULE),
+        cachedBlock(_prompt() + buildRouteRule('proteus') + LANGUAGE_RULE + VOICE_RULE + BREVITY_RULE),
         { type: 'text', text: dynamic.join('\n\n') },
     ]
 

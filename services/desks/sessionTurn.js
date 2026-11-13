@@ -61,7 +61,7 @@ export function replyExtras(payload) {
 const LIST_LINES = Object.freeze({
     orders: "Here's what's awaiting orders.", trades: "Here are your trades.",
     portfolios: "Here are your portfolios.", hotlist: "Here's today's hotlist.",
-    positions: "Here are your positions.", board: "Here's Pythia's forecast board.", research: "Here's the research queue.",
+    positions: "Here are your positions.", board: "Here's the forecast board.", research: "Here's the research queue.",
 })
 
 const TIMEFRAME_WORD = Object.freeze({ day: 'daily', week: 'weekly', month: 'monthly', '1day': 'daily', '1week': 'weekly' })

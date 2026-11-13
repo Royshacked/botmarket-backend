@@ -105,7 +105,7 @@ export const SELECTION_RULES = {
         rule: [
             'Take the exposure through broad, cheap instruments and put the work into the allocation',
             'instead. NEVER emit a <screen_request> under this school — there is nothing to screen, and',
-            'handing a sleeve to Argus here is itself the error. If a mandate needs single names, it is',
+            'handing a sleeve to the stock picker here is itself the error. If a mandate needs single names, it is',
             'not passive; say so and change the school with the user rather than quietly picking stocks.',
         ].join(' '),
         review: 'is the exposure still the one the mandate wants?',

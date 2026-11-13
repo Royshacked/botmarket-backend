@@ -14,7 +14,8 @@
  * @typedef {object} DeskEntry
  * @property {string}      agent        the AGENTS key the client knows the agent by
  * @property {string|null} desk         the pipeline key a <route> names — null for Axl (reception has no desk)
- * @property {string}      brand        the name the user sees
+ * @property {string}      brand        the internal name (logs, docs, code) — the user sees only Axl since one-axl.md
+ * @property {string|null} role         the job the user sees under Axl's name, lower case ("trader"); null for Axl
  * @property {string|null} entityKind   what its work produces and an edit reopens — null if nothing
  * @property {boolean}     editable     whether <edit>kind id</edit> may reopen that entity at this desk
  * @property {boolean}     routable     whether ANOTHER desk may send the user here with a name
@@ -29,24 +30,24 @@
 /** @type {Readonly<Record<string, DeskEntry>>} */
 export const DESKS = Object.freeze({
     axl: Object.freeze({
-        agent: 'axl', desk: null, brand: 'Axl', entityKind: null, editable: false, routable: false, does: null,
+        agent: 'axl', desk: null, brand: 'Axl', role: null, entityKind: null, editable: false, routable: false, does: null,
         // Reception remembers deeper than a desk: its trim lands three times less often (see agentUtils.trimHistory).
         scope: 'main', admin: false, maxMessages: 20,
     }),
     // ORDER IS LOAD-BEARING for the routable desks: buildRouteRule lists them in this order inside every
     // desk's prompt, and a reorder changes every prompt (and its cache).
     analyst: Object.freeze({
-        agent: 'analyst', desk: 'research', brand: 'Prometheus', entityKind: 'coverage', editable: true, routable: true,
+        agent: 'analyst', desk: 'research', brand: 'Prometheus', role: 'analyst', entityKind: 'coverage', editable: true, routable: true,
         does: 'researches a company into house coverage — a thesis and a price target vs the Street',
         scope: 'main', admin: false, maxMessages: 8,
     }),
     mentor: Object.freeze({
-        agent: 'mentor', desk: 'assist', brand: 'Mentor', entityKind: 'setup', editable: true, routable: true,
+        agent: 'mentor', desk: 'assist', brand: 'Mentor', role: 'trader', entityKind: 'setup', editable: true, routable: true,
         does: 'builds ONE trade setup with the user, level by level, and arms it for monitoring',
         scope: 'main', admin: false, maxMessages: 8,
     }),
     portfolio: Object.freeze({
-        agent: 'portfolio', desk: 'portfolio', brand: 'Atlas', entityKind: 'portfolio', editable: true, routable: true,
+        agent: 'portfolio', desk: 'portfolio', brand: 'Atlas', role: 'portfolio manager', entityKind: 'portfolio', editable: true, routable: true,
         does: 'builds and reviews a portfolio book against a mandate',
         scope: 'main', admin: false, maxMessages: 10,
     }),
@@ -54,7 +55,7 @@ export const DESKS = Object.freeze({
     // archive/README.md). So only Mentor sends anyone here, and his work produces no entity: the pick rides the chain
     // back to Mentor. Old `scan` documents stay in Mongo, unreachable (KINDS.SCAN still describes the data).
     scanner: Object.freeze({
-        agent: 'scanner', desk: 'scan', brand: 'Argus', entityKind: null, editable: false, routable: true, routedFrom: Object.freeze(['mentor']),
+        agent: 'scanner', desk: 'scan', brand: 'Argus', role: 'stock picker', entityKind: null, editable: false, routable: true, routedFrom: Object.freeze(['mentor']),
         does: 'finds ONE tradeable name when the user has none, and hands it back here to build',
         scope: 'main', admin: false, maxMessages: 10,
     }),
@@ -63,7 +64,7 @@ export const DESKS = Object.freeze({
     // every prompt stays as it was. Axl ("how does TSLA behave?") and Mentor send users here; the other desks do not,
     // so only Mentor's route rule — not every desk's cached prompt — changes. Opened directly from the desks list too.
     proteus: Object.freeze({
-        agent: 'proteus', desk: 'technicals', brand: 'Proteus', entityKind: null, editable: false, routable: true, routedFrom: Object.freeze(['axl', 'mentor']),
+        agent: 'proteus', desk: 'technicals', brand: 'Proteus', role: 'technical analyst', entityKind: null, editable: false, routable: true, routedFrom: Object.freeze(['axl', 'mentor']),
         does: "reads how a stock's price behaves — what it respects technically, if anything, its ATR and false breaks, day trade or swing",
         scope: 'main', admin: false, maxMessages: 10,
     }),
@@ -71,11 +72,11 @@ export const DESKS = Object.freeze({
     // desk sends a user with a name (not routable — no desk agent has to know the user's role to write a
     // correct offer); Axl still routes admins to both. Each keeps its own panel and session (decision 16).
     strategy: Object.freeze({
-        agent: 'strategy', desk: 'strategy', brand: 'Pythia', entityKind: 'industry_view', editable: false, routable: false, does: null,
+        agent: 'strategy', desk: 'strategy', brand: 'Pythia', role: 'industry strategist', entityKind: 'industry_view', editable: false, routable: false, does: null,
         scope: 'strategy', admin: true, maxMessages: 8,
     }),
     aether: Object.freeze({
-        agent: 'aether', desk: 'aether', brand: 'Aether', entityKind: null, editable: false, routable: false, does: null,
+        agent: 'aether', desk: 'aether', brand: 'Aether', role: 'event analyst', entityKind: null, editable: false, routable: false, does: null,
         scope: 'aether', admin: true, maxMessages: 12,
     }),
 })

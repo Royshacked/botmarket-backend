@@ -428,18 +428,18 @@ export function buildSleeveSourced(sleeve) {
 
     let content
     if (!sleeve.symbols.length) {
-        content = `${label} sleeve${school}: every name the screen found is already in coverage (${sleeve.alreadyCovered}). Resume the build — Atlas allocates from what is there.`
+        content = `${label} sleeve${school}: every name the screen found is already in coverage (${sleeve.alreadyCovered}). Resume the build — the portfolio manager allocates from what is there.`
     } else if (covered.length) {
         const tail = [
             passed.length     ? `${passed.length} passed on (no edge)` : null,
             failed.length     ? `${failed.length} failed to save`       : null,
             unresolved.length ? `${unresolved.length} left the queue unresearched` : null,
         ].filter(Boolean).join(', ')
-        content = `${label} sleeve sourced${school}: ${covered.length} of ${sleeve.symbols.length} screened names now in coverage — ${covered.join(', ')}${tail ? `; ${tail}` : ''}. Resume the build and Atlas allocates from coverage.${houseLine}`
+        content = `${label} sleeve sourced${school}: ${covered.length} of ${sleeve.symbols.length} screened names now in coverage — ${covered.join(', ')}${tail ? `; ${tail}` : ''}. Resume the build and the portfolio manager allocates from coverage.${houseLine}`
     } else {
-        content = `${label} sleeve${school}: Prometheus researched ${sleeve.symbols.length} screened names and put none into coverage`
+        content = `${label} sleeve${school}: the analyst researched ${sleeve.symbols.length} screened names and put none into coverage`
             + (passed.length ? ` (${passed.length} no edge${failed.length ? `, ${failed.length} failed to save` : ''})` : '')
-            + `. Resume the build — Atlas will say what the pool holds, or broaden the filter.${houseLine}`
+            + `. Resume the build — the portfolio manager will say what the pool holds, or broaden the filter.${houseLine}`
     }
 
     return {

@@ -102,7 +102,7 @@ export function buildSetupEntryConfirm(setup, assessment = null) {
     const short = setup?.direction === 'short'
     const where = drift?.adverse
         ? drift.pastStop
-            ? ` Price is ${fmtNum(drift.live)} — already past your stop, so this plan is broken and cannot be placed. Re-draw it with Mentor.`
+            ? ` Price is ${fmtNum(drift.live)} — already past your stop, so this plan is broken and cannot be placed. Re-draw it.`
             : ` Price is ${fmtNum(drift.live)}, ${fmtNum(Math.abs(drift.slippage))} ${short ? 'below' : 'above'} your ${fmtNum(drift.planned)} plan${drift.liveRr != null ? ` — R:R now ${drift.liveRr} (planned ${drift.plannedRr})` : ''}. Confirming ${short ? 'sells' : 'buys'} at market.`
         : ' Confirm to place your order at market.'
 
@@ -184,7 +184,7 @@ export function buildSetupInvalidation(setup, info = null) {
         ran_away: {
             content: `${subject} didn't get filled — price ran past ${info?.price ?? 'the level'} without you. The read wasn't wrong; the entry just never came.`
                 + ` Re-draw it with me while the move is live${nextUp ? ` — off a ${nextUp.from}, the continuation to look at is the ${nextUp.to}, and its level only exists now` : ' — the level has moved, so anything past here has to be measured rather than remembered'}.`,
-            actions: cardActions('Re-draw with Mentor'),
+            actions: cardActions('Re-draw the trade'),
         },
         ran_away_fyi: {
             // A runaway leaves its scenario LIVE (drifting — price can come back), so `remaining` counts it. `waiting` is

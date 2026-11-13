@@ -51,7 +51,7 @@ export const ADMIN_DESKS = ADMIN_PIPELINE_KEYS
  * the sender's prompt shows.
  */
 export const ROUTABLE_DESKS = Object.freeze(Object.fromEntries(
-    Object.values(DESKS).filter(d => d.routable).map(d => [d.desk, { agent: d.agent, brand: d.brand, does: d.does, routedFrom: d.routedFrom ?? null }]),
+    Object.values(DESKS).filter(d => d.routable).map(d => [d.desk, { agent: d.agent, brand: d.brand, role: d.role, does: d.does, routedFrom: d.routedFrom ?? null }]),
 ))
 
 // A desk with `routedFrom` takes the user only from the agents it names (registry) — since 2026-11-09 Argus, whom only
@@ -322,15 +322,16 @@ export function makeRouteCapture(agentKey = null) {
 export function buildRouteRule(agentKey) {
     const own = AGENT_DESK[agentKey] ?? null
     const desks = Object.entries(ROUTABLE_DESKS).filter(([key]) => key !== own && mayRoute(agentKey, key))
-    const lines = desks.map(([key, d]) => `- **${d.brand}** (\`${key}\`) — ${d.does}.`).join('\n')
+    // Listed by ROLE, never by internal name (one-axl.md): the user sees one Axl, and a name in the prompt is a name in a reply.
+    const lines = desks.map(([key, d]) => `- **the ${d.role}** (\`${key}\`) — ${d.does}.`).join('\n')
     const [exKey, ex] = desks[0]
     return `
 
 ---
 
-## Sending the user to another desk
+## Sending the user to another role
 
-The app has other desks, each run by its own agent. When the user asks to go to one, or to send a name there — "send NVDA to ${ex.brand}", "take this to ${desks[1]?.[1].brand ?? ex.brand}", "let ${desks[desks.length - 1][1].brand} look at it" — hand them over on that turn:
+The app has other roles, each with its own work. When the user asks for one, or to send a name there — "send NVDA to the ${ex.role}", "take this to the ${desks[1]?.[1].role ?? ex.role}", "let the ${desks[desks.length - 1][1].role} look at it" — hand them over on that turn:
 
 ${lines}
 
@@ -343,23 +344,23 @@ Emit, each on its own line, at the end of your reply:
 - \`<open>\` is the desk's FIRST TURN — it is sent as the user's message on arrival. The desk cannot see this conversation, so the opening is where what you learned travels: the user's ask, plus what you found on the name in this session. Facts and your read, not a summary of the chat and not the desk's conclusion — it forms its own.
 - **Always emit it.** Naming the desk is how the user said WHERE; the verb and what it acts on are WHAT they want done, and that is the opening. Route bare and the desk opens on a blank page and asks for what they just told you.
 - **Only when the user asked.** Never route to be helpful, and never to close a question you could answer here. One hand-off per turn; several names → ask which one first.
-- Say in one line where they are going and why. Do not describe a queue or a wait, and do not ask them to confirm — the block IS the hand-off; the app shows a button carrying it.${backToReception(agentKey) ? RECEPTION_RULE : ''}`
+- At most one short line, in your own voice and naming no one ("Let me look at the business side."). Do not describe a queue or a wait, and do not ask them to confirm — the block IS the hand-off; the app shows the role that takes over.${backToReception(agentKey) ? RECEPTION_RULE : ''}`
 }
 
 // The hand-back half of the rule (Roy, 2026-11-13: "if I ask an agent a question that doesn't belong to him, he turns it
 // to Axl"). Constant, so every desk that carries it keeps one cached prompt. Exported for tests.
 export const RECEPTION_RULE = `
 
-## A question that is not yours — back to Axl
+## A question that is not yours — back to reception
 
-When the user asks you something that belongs to another desk — not a request to go there, just a question outside your own work ("is it a good business?" at a technicals desk, "how does it trade?" at a research desk, a portfolio question while building one trade, the news, their account) — do not answer it, and do not just name the desk and stop. Hand it back to **Axl**, the app's reception, who sends it on to the right desk at once:
+When the user asks you something that belongs to another role — not a request to go there, just a question outside your own work ("is it a good business?" to the technical analyst, "how does it trade?" to the analyst, a portfolio question while building one trade, the news, their account) — do not answer it, and do not just name the role and stop. Hand it back to reception, which sends it on to the right role at once:
 
 <route>${RECEPTION}</route>
 <open>is NVDA a good business at this price?</open>
 
-- \`<open>\` is the user's question as they asked it, with the ticker — Axl reads it as their message.
-- One short line before it: "That's not mine to answer — passing it to Axl." Nothing else on that turn.
+- \`<open>\` is the user's question as they asked it, with the ticker — reception reads it as their message.
+- Write NO words on that turn — only the two tags. To the user it is one assistant changing hats; the app shows the role that answers.
 - Only when it is plainly not yours. A question you can answer, even in part, is yours; a follow-up on what you just said is yours.
-- When the user asks to go to a named desk, route there directly (above), not through Axl.`
+- When the user asks for a role by its job ("let the trader build it"), route there directly (above), not through reception.`
 
 export const routingUtil = { splitRoute, splitEdit, splitShow, cleanOpening, routeFor, mayRoute, sanitizeRouteSymbol, sanitizeEditRef, validateEdit, validateShow, routeFields, makeRouteCapture, buildRouteRule }

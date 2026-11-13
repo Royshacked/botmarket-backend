@@ -140,7 +140,7 @@ export function computeReviewTriggers({ state = null, fingerprint = null, delta 
     // house expects it to go wrong), or its basket newly flagged HYPE (a crash-risk flag — the sizing brake).
     for (const t of verdictTurns(fingerprint?.industries, industries)) {
         const label = t.kind === 'avoid'
-            ? `Pythia now rates ${t.name} AVOID (${t.symbols.join(', ')})`
+            ? `The industry strategist now rates ${t.name} AVOID (${t.symbols.join(', ')})`
             : `${t.name} now carries the hype flag (${t.symbols.join(', ')}) — up 100%+ in two years and 100%+ over the market`
         triggers.push({ kind: 'industry_verdict', severity: t.kind === 'avoid' ? 'high' : 'medium', label })
     }

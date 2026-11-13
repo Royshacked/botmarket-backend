@@ -15,7 +15,7 @@ import { _tick, _resetGrade } from '../../monitoring/dailyScreener.monitor.servi
 
 const row = (symbol, cols) => ({ symbol, cells: Object.fromEntries(cols.map(c => [c, { grade: 'B', range: { atr_mult: 1 } }])) })
 
-test('Argus picks per column: each column capped on its own, a name can be a pick on two columns', () => {
+test('The stock picker picks per column: each column capped on its own, a name can be a pick on two columns', () => {
     const rows = [...Array.from({ length: 12 }, (_, i) => row(`O${i}`, ['open'])), ...Array.from({ length: 12 }, (_, i) => row(`W${i}`, ['week'])), row('BOTH', ['open', 'week'])]
     const raw = { picks: [
         { symbol: 'BOTH', column: 'open', why: 'gap' }, { symbol: 'BOTH', column: 'week', why: 'drift' }, { symbol: 'BOTH', column: 'week', why: 'repeat' },
@@ -44,7 +44,7 @@ test('the day\'s list: a column\'s pick comes from the latest board that graded 
     assert.equal(x.picks.open.why, 'open trade')
 })
 
-test('the Mentor hand-off carries Argus\'s reason for THAT column', async () => {
+test('the the trader hand-off carries the stock picker\'s reason for THAT column', async () => {
     const { db, rows } = memDb()
     rows(BOARDS).push({ id: 'hb_2026-10-21_preopen', day: '2026-10-21', checkpoint: 'preopen', status: 'done', unverified_columns: [],
         rows: [{ symbol: 'X', cells: { open: { grade: 'A', range: { open_sky: true } }, week: { grade: 'B', range: { pct: 4, atr_mult: 1, level: 50 } } },
@@ -145,7 +145,7 @@ test('a Hotlist row is read in CATALYST mode, saved as a read, never as coverage
     })
     const run = await settled()
     assert.deepEqual(asked.map(a => [a[0], a[1]]), [['COV', 'catalyst'], ['NEW', 'catalyst']])
-    assert.match(asked[0][2], /^Catalyst read on COV — the Hotlist graded it THIS WEEK.*Argus picked it: drift after the beat/)
+    assert.match(asked[0][2], /^Catalyst read on COV — the Hotlist graded it THIS WEEK.*the stock picker picked it: drift after the beat/)
     assert.deepEqual(saved, ['COV', 'NEW'])
     assert.deepEqual(done, ['rq_COV', 'rq_NEW'])
     assert.equal(run.read, 2)
@@ -170,7 +170,7 @@ test('a name with a LIVE read is skipped; a read with no target is a pass', asyn
     // The overnight board's names were listed by the run-up rule — the opening says so, never "Argus picked it".
     const rule = researchOpening({ symbol: 'R', context: { hotlist: true, day: '2026-10-26', rule: true, facts: 'run-up rule: reports 2026-11-02' } })
     assert.match(rule, /The run-up rule listed it/)
-    assert.doesNotMatch(rule, /Argus picked it/)
+    assert.doesNotMatch(rule, /the stock picker picked it/)
     assert.match(researchOpening({ symbol: 'R', context: { hotlist: true, rule: true, requested: true } }), /A user asked for this read now/)
 })
 

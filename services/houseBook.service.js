@@ -438,12 +438,12 @@ export function bookFacts(cov, { close = null, origin = null } = {}) {
     const pt = cov?.price_target ?? {}
     const target = Number(pt.value)
     const parts = [
-        `Prometheus ${String(cov?.rating ?? 'unrated').replace('_', ' ')}${cov?.conviction?.level ? ` (${cov.conviction.level} conviction)` : ''}`,
+        `the analyst ${String(cov?.rating ?? 'unrated').replace('_', ' ')}${cov?.conviction?.level ? ` (${cov.conviction.level} conviction)` : ''}`,
         _ok(target) ? `target ${target.toFixed(2)}${pt.target_date ? ` by ${String(pt.target_date).slice(0, 10)}` : ''}${pt.horizon ? ` (a ${pt.horizon} target)` : ''}` : null,
         _ok(target) && _ok(close) ? `${(target / close - 1) * 100 > 0 ? '+' : ''}${((target / close - 1) * 100).toFixed(1)}% from ${close.toFixed(2)}` : null,
     ].filter(Boolean)
     const line = parts.join(', ')
-    const from = origin ? `from the weekly chain: Pythia's ${origin.verdict === 'long_term' ? 'long-term' : origin.verdict ?? ''} call on ${origin.subject ?? 'an industry'}` : 'researched at the desk'
+    const from = origin ? `from the weekly chain: the industry strategist's ${origin.verdict === 'long_term' ? 'long-term' : origin.verdict ?? ''} call on ${origin.subject ?? 'an industry'}` : 'researched at the desk'
     return `${line}; ${from}`
 }
 

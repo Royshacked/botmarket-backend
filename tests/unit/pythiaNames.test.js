@@ -146,7 +146,7 @@ test('the weekly house scan queues the named companies first, inside the same co
     assert.deepEqual(queued.map(q => q.symbol), ['CIEN', 'VRT', 'CSCO'], 'two names, then the largest fill the three')
     assert.equal(queued[0].context.named_why, 'record backlog (Sep 3)')
     assert.equal(queued[2].context.named_why, undefined)
-    assert.match(researchOpening(queued[1]), /Pythia's FOR SWING assessment of Comms \(months\) names it: power and cooling next/)
+    assert.match(researchOpening(queued[1]), /the industry strategist's FOR SWING assessment of Comms \(months\) names it: power and cooling next/)
     assert.doesNotMatch(researchOpening(queued[1]), /its industry/, 'a second-order name is not in "its industry"')
 })
 

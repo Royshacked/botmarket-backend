@@ -235,6 +235,6 @@ export function makePortfolioApplyEdit({ adopt = adoptBookService, clean = () =>
 export const PORTFOLIO_REASONS = {
     ...REBALANCE_REASONS, ...BOOK_REASONS,
     adopt_failed: [500, 'Could not open the adoption — try again'],
-    adopt_over_work: [409, 'Atlas has unsaved work on the table — put it aside first'],
+    adopt_over_work: [409, 'There is unsaved portfolio work on the table — put it aside first'],
     plan_not_ready:  [409, 'The plan is not sized yet — every holding needs a share count'],
 }

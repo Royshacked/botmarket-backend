@@ -95,25 +95,25 @@ test('a book hand-off is a reference — which list — and the server reads the
     // The request said long term; the coverage's 6m target makes it a SWING name.
     const s = await bookSeed({ column: 'long_term', symbol: 'CHN' }, { db: async () => db })
     assert.deepEqual([s.book, s.horizon], ['swing', 'swing'])
-    assert.equal(s.book_facts, "Prometheus buy (medium conviction), target 130.00 by 2027-03-01 (a 6m target), +30.0% from 100.00; from the weekly chain: Pythia's swing call on Railroads")
+    assert.equal(s.book_facts, "the analyst buy (medium conviction), target 130.00 by 2027-03-01 (a 6m target), +30.0% from 100.00; from the weekly chain: the industry strategist's swing call on Railroads")
     assert.equal(s.thesis, 'the leader')
     assert.equal(s.caution, 'volumes fall two quarters running')
     assert.equal(await bookSeed({ column: 'swing', symbol: 'NONE' }, { db: async () => db }), null)
-    assert.match(bookFacts({ rating: 'hold', price_target: { value: 50, horizon: '12m' } }), /^Prometheus hold, target 50\.00 \(a 12m target\); researched at the desk$/)
+    assert.match(bookFacts({ rating: 'hold', price_target: { value: 50, horizon: '12m' } }), /^the analyst hold, target 50\.00 \(a 12m target\); researched at the desk$/)
 })
 
-test("Mentor's seed section says the book, the horizon (the user's to confirm), and what breaks it", async () => {
+test("The trader's seed section says the book, the horizon (the user's to confirm), and what breaks it", async () => {
     const { _buildSeedSection } = await import('../../services/agents/mentor.agent.service.js')
     const text = _buildSeedSection({ ticker: 'CHN', direction: 'long', thesis: 'the leader', horizon: 'swing', book_name: 'swing',
-        book_facts: 'Prometheus buy, target 130.00 by 2027-03-01 (a 6m target)', caution: 'volumes fall' })
-    assert.match(text, /From the house's SWING book: Prometheus buy, target 130\.00 by 2027-03-01 \(a 6m target\)\. The horizon is swing — the user's to confirm\./)
+        book_facts: 'the analyst buy, target 130.00 by 2027-03-01 (a 6m target)', caution: 'volumes fall' })
+    assert.match(text, /From the house's SWING book: the analyst buy, target 130\.00 by 2027-03-01 \(a 6m target\)\. The horizon is swing — the user's to confirm\./)
     assert.match(text, /What would break the thesis: volumes fall/)
     assert.match(text, /not a take-profit/)
 })
 
-test("a book name's seed section is headed as the house's book, not as Argus's hand-off", async () => {
+test("a book name's seed section is headed as the house's book, not as the stock picker's hand-off", async () => {
     const { _buildSeedSection } = await import('../../services/agents/mentor.agent.service.js')
-    assert.match(_buildSeedSection({ ticker: 'CHN', book_name: 'swing', book_facts: 'Prometheus buy' }), /FROM THE HOUSE'S BOOK: CHN/)
+    assert.match(_buildSeedSection({ ticker: 'CHN', book_name: 'swing', book_facts: 'the analyst buy' }), /FROM THE HOUSE'S BOOK: CHN/)
     assert.match(_buildSeedSection({ ticker: 'SPCX' }), /ARGUS HANDED YOU THIS NAME: SPCX/)
 })
 
@@ -145,7 +145,7 @@ test("the chain's picks per book: covered, passed (and why), waiting — newest 
 })
 
 // Roy, 2026-10-28: "if a name is not relevant anymore to swing or long term — leave it only in covered companies".
-test("still called: Pythia's verdict now on what sent the name — unknown is never 'no'", async () => {
+test("still called: the industry strategist's verdict now on what sent the name — unknown is never 'no'", async () => {
     const { stillCalled } = await import('../../services/houseBook.service.js')
     const NOW = '2026-10-31T12:00:00Z'
     const verdicts = new Map([['ia_rails', { verdict: 'swing' }], ['ia_pc', { verdict: 'watch' }], ['ia_blank', null],
@@ -212,7 +212,7 @@ test('the book\'s record reads the list\'s frozen calls on its horizons', async 
     assert.equal(book.record.swing.hit, 1)
 })
 
-test('on the list: the chain\'s names and the picks it covered, while Pythia still calls them; the desk\'s never', async () => {
+test('on the list: the chain\'s names and the picks it covered, while the industry strategist still calls them; the desk\'s never', async () => {
     const { listOf } = await import('../../services/houseBook.service.js')
     const picks = [{ symbol: 'PRE', state: 'already_covered', still: true }, { symbol: 'GON', state: 'already_covered', still: false },
         { symbol: 'PSS', state: 'passed', still: true }]

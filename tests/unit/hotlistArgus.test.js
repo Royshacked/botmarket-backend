@@ -27,7 +27,7 @@ const BOARD = {
 
 // ─── Argus's read ─────────────────────────────────────────────────────────────
 
-test('the board text carries the numbers Argus judges — and flags, catalysts, free range', () => {
+test('the board text carries the numbers the stock picker judges — and flags, catalysts, free range', () => {
     const t = boardText(BOARD)
     assert.match(t, /CHECKPOINT: mid on 2026-10-21/)
     assert.match(t, /breadth 58\.0%/)
@@ -84,7 +84,7 @@ test('the seed carries a REFERENCE to the board, never its facts — and only a 
     assert.equal(sanitizeScanSeed({ ticker: 'X', hotlist: { board: 'hb_2026-10-21_mid', column: 'lunch' } }).hotlist, null)
 })
 
-test('each column hands Mentor its horizon', () => {
+test('each column hands the trader its horizon', () => {
     assert.deepEqual(COLUMN_HORIZON, { open: 'intraday', mid: 'intraday', eod: 'intraday', tomorrow: 'day', week: 'short term swing' })
 })
 
@@ -95,14 +95,14 @@ test('the facts line: grade, tape, free range, catalyst — or open sky', () => 
     assert.equal(seedFacts(BOARD.rows[2], 'mid'), null, 'an ungraded cell is not a hand-off')
 })
 
-test('a run-up week cell tells Mentor AND Argus to be out before the report (Roy, 2026-10-22)', () => {
+test('a run-up week cell tells the trader AND the stock picker to be out before the report (Roy, 2026-10-22)', () => {
     const row = ROW('RUN', { week: { grade: 'B', range: { level: 110, pct: 4, atr_mult: 1.6 }, exit_before: '2026-10-28' } }, { next_earnings: '2026-10-28' })
     assert.match(seedFacts(row, 'week'), /earnings 2026-10-28 — a run-up into the report: the setup must be out before it$/)
     assert.match(seedFacts({ ...row, cells: { week: { ...row.cells.week, exit_before: undefined } } }, 'week'), /; earnings 2026-10-28$/)
     assert.match(boardText({ ...BOARD, columns: ['week'], rows: [row] }), /week \(4\.00% \/ 1\.60× ATR to 110\.00\), RUN-UP: out before earnings 2026-10-28/)
 })
 
-test('hotlistSeed reads the STORED board: the horizon, the facts, Argus\'s note, the unverified flag', async () => {
+test('hotlistSeed reads the STORED board: the horizon, the facts, the stock picker\'s note, the unverified flag', async () => {
     const { db, rows } = memDb()
     rows(BOARDS).push(structuredClone(BOARD))
     const seed = await hotlistSeed({ board: 'hb_2026-10-21_mid', column: 'mid', symbol: 'SPCX' }, { db: async () => db })
@@ -115,18 +115,18 @@ test('hotlistSeed reads the STORED board: the horizon, the facts, Argus\'s note,
     assert.equal(await hotlistSeed({ board: 'hb_2026-10-21_mid', column: 'mid', symbol: 'NOPE' }, { db: async () => db }), null, 'not graded')
 })
 
-test('Mentor is told the board\'s facts, the horizon, and that free range is not a target', () => {
+test('The trader is told the board\'s facts, the horizon, and that free range is not a target', () => {
     const text = _buildSeedSection({
         ticker: 'SPCX', direction: 'long', thesis: 'A real profit swing.', horizon: 'intraday',
         hotlist_facts: seedFacts(BOARD.rows[0], 'mid'), caution: 'Capex worries.',
     })
     assert.match(text, /From today's HOTLIST: mid-session — /)
     assert.match(text, /That column's horizon is intraday/)
-    assert.match(text, /Argus's caution: Capex worries\./)
+    assert.match(text, /the stock picker's caution: Capex worries\./)
     assert.doesNotMatch(text, /UNVERIFIED/, 'no grade is handed on, so nothing is unverified (2026-10-24)')
     assert.match(text, /no entry, stop or target/)
     // On a week name Mentor finds the target on the chart; Prometheus's is context (Roy, 2026-11-01).
-    const week = _buildSeedSection({ ticker: 'X', hotlist_facts: 'this week (2–10 days)', catalyst_facts: 'Prometheus (credible): target 54.20' })
+    const week = _buildSeedSection({ ticker: 'X', hotlist_facts: 'this week (2–10 days)', catalyst_facts: 'The analyst (credible): target 54.20' })
     assert.match(week, /no entry, stop or target, and you build those with the user/)
     assert.match(week, /His target, when he set one, is CONTEXT/)
     assert.match(week, /never the take-profit: YOU find the target on the chart/)
@@ -152,7 +152,7 @@ test('today: the latest board in full, the day\'s checkpoints as one-liners', as
     assert.equal(t.checkpoints[0].argus, true)
 })
 
-test('Argus\'s read reports its spend under the house model id', async () => {
+test('The stock picker\'s read reports its spend under the house model id', async () => {
     const booked = []
     await argusRead(BOARD, {
         model: async () => 'gpt-6-luna',
@@ -163,7 +163,7 @@ test('Argus\'s read reports its spend under the house model id', async () => {
 })
 
 // Day trades (Roy, 2026-10-24): no grade on the session columns; Argus reads the latest headlines in full.
-test("Argus reads each name's latest headlines with their times, and no cell carries a grade", async () => {
+test("The stock picker reads each name's latest headlines with their times, and no cell carries a grade", async () => {
     const { withNews } = await import('../../services/hotlist.boards.js')
     const headlines = new Map([['SPCX', [{ title: 'old', at: '2026-10-21 06:00:00' }, { title: 'new', at: '2026-10-21 09:15:00' },
         { title: 'mid', at: '2026-10-21 08:00:00' }, { title: 'oldest', at: '2026-10-20 19:00:00' }]]])
@@ -185,7 +185,7 @@ test('the hand-off facts say no grade, on a session column or this week', () => 
 })
 
 // ─── A DAY BOARD row to Mentor (Roy, 2026-11-12: "no build with Mentor" on the Intraday tab) ──────────────────────
-test('hotlistSeed reads a DAY board row: the intraday horizon and the board\'s line about the name (Argus\'s formatter)', async () => {
+test('hotlistSeed reads a DAY board row: the intraday horizon and the board\'s line about the name (the stock picker\'s formatter)', async () => {
     const { db, rows } = memDb()
     rows('hotlist_day_boards').push({ id: 'hd_2026-11-11_eod', day: '2026-11-11', checkpoint: 'eod', status: 'done', rows: [
         { symbol: 'CRWV', name: 'CoreWeave', price: 60.53, gap_pct: 24.22, rvol: 2.25, why: ["in the top quarter of the day's range on 2.25× volume"],

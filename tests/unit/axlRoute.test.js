@@ -194,26 +194,26 @@ test('show is registered as an emit tag, or the first turn prints the id at the 
 test('turn: a show tag becomes the item to open, with no desk and no opening', async () => {
     const result = await axlAgentService.chatStream({
         messages: [{ role: 'user', content: "what's going on with my NVDA setup?" }],
-        _run: runWith('It armed on Tuesday and Talos is watching 182. <show>setup s1</show>'),
+        _run: runWith('It armed on Tuesday and the trade monitor is watching 182. <show>setup s1</show>'),
     })
     assert.deepEqual(result.show, { kind: 'setup', ref: 's1' })
     assert.equal(result.route, null, 'a look is not a hand-off')
     assert.equal(result.edit, null, 'and it is not an edit — nothing is being changed')
-    assert.equal(result.reply, 'It armed on Tuesday and Talos is watching 182.')
+    assert.equal(result.reply, 'It armed on Tuesday and the trade monitor is watching 182.')
 })
 
 test('turn: a hand-off outranks a look — one destination per turn', async () => {
     // Both tags on one turn would open a desk and a detail window at the same moment.
     const routed = await axlAgentService.chatStream({
         messages: [{ role: 'user', content: 'change it' }],
-        _run: runWith('Opening it in Mentor. <edit>setup s1</edit><show>setup s1</show>'),
+        _run: runWith('Opening it in the trader. <edit>setup s1</edit><show>setup s1</show>'),
     })
     assert.equal(routed.show, null)
     assert.deepEqual(routed.edit, { kind: 'setup', ref: 's1', desk: 'assist' })
 
     const toDesk = await axlAgentService.chatStream({
         messages: [{ role: 'user', content: 'find me a trade' }],
-        _run: runWith('Off to Argus. <route>trade NVDA</route><show>setup s1</show>'),
+        _run: runWith('Off to the stock picker. <route>trade NVDA</route><show>setup s1</show>'),
     })
     assert.equal(toDesk.show, null)
     assert.equal(toDesk.route, 'trade')
@@ -255,7 +255,7 @@ test('every edit kind the prompt teaches is one the app can actually open', () =
 
     // Three kinds since 2026-11-09 (setup, coverage, portfolio — `scan` left with Argus's lists).
     assert.ok(taught.length >= 3, 'the prompt still teaches the edit tags')
-    assert.ok(!taught.includes('scan'), 'the prompt no longer teaches reopening an Argus list')
+    assert.ok(!taught.includes('scan'), 'the prompt no longer teaches reopening an the stock picker list')
     for (const kind of new Set(taught)) {
         assert.ok(EDIT_KINDS.has(kind), `the prompt teaches <edit>${kind}</edit> but the controller drops it`)
         assert.ok(EDIT_KIND_DESKS[kind], `the prompt teaches <edit>${kind}</edit> but no desk owns it`)
@@ -264,16 +264,16 @@ test('every edit kind the prompt teaches is one the app can actually open', () =
 
 // The failure this catches is one a user actually hit: Axl introducing a retired desk as somewhere
 // you can go, so someone asks for it and lands nowhere.
-test('the prompt names Mentor as the trader and no longer knows the deleted call desk', () => {
+test('the prompt names the trader as the trader and no longer knows the deleted call desk', () => {
     const promptPath = join(dirname(fileURLToPath(import.meta.url)), '../../prompts/axl_system_prompt.md')
     const prompt = readFileSync(promptPath, 'utf8')
 
-    assert.match(prompt, /A\s+new\s+trade\s+is\s+Mentor's,\s+always/, 'who owns a new trade')
+    assert.match(prompt, /A\s+new\s+trade\s+is\s+the trader's,\s+always/, 'who owns a new trade')
     // Kairos (the `call` desk) was deleted 2026-11-10, data included: the prompt must not offer it.
     assert.doesNotMatch(prompt, /Kairos/, 'a deleted desk is not named')
 
     const roster = prompt.slice(prompt.indexOf('## Who you are'), prompt.indexOf('Nothing they produce'))
-    assert.match(roster, /- \*\*Mentor\*\* — the trader/, 'Mentor leads the roster')
+    assert.match(roster, /- \*\*The trader\*\* — every new trade/, 'The trader leads the roster')
 
     // Offering `<edit>call` would emit a tag the gate drops (EDIT_KINDS), so Axl would promise to
     // open something and then silently do nothing.
@@ -335,7 +335,7 @@ test('the prompt teaches the return turn, and forbids routing on it', () => {
     // The note's shape, as the client composes it (AxlHub `_sendReturn` + `_lastWordAt`). If one
     // side's wording moves the other has to move with it — the model recognises this turn by nothing
     // else, and it branches on who the quote is attributed to.
-    assert.match(section, /\[The user has come back to reception from the Research Desk\. Last said there — Prometheus: "/,
+    assert.match(section, /\[The user has come back to reception from the Research Desk\. Last said there — the analyst: "/,
         'the app note is shown verbatim, quote and all, in the shape the client sends')
     assert.match(section, /is\s+the\s+APP\s+speaking,\s+not\s+the\s+user/,
         'a bracketed note is not something the user said')
@@ -369,7 +369,7 @@ test('the prompt teaches the book edit as one tag with two outcomes, decided by 
     assert.match(prompt, /<edit>portfolio/, 'the book edit tag is taught')
     // Whitespace-tolerant throughout: the prompt is hard-wrapped, so these sentences carry newlines.
     assert.match(prompt, /the\s+BOOK\s+decides\s+which/, 'the mode is the book\'s call, not the model\'s')
-    assert.match(prompt, /in\s+a\s+position\s+→\s+Atlas\s+opens\s+a\s+REVIEW/,
+    assert.match(prompt, /in\s+a\s+position\s+→\s+the portfolio manager\s+opens\s+a\s+REVIEW/,
         'a book in positions must be described as opening a review, never a re-plan')
 })
 
@@ -391,29 +391,29 @@ function runWith(reply) {
 test('turn: the tag becomes route + routeSymbol and never shows up in the reply', async () => {
     const result = await axlAgentService.chatStream({
         messages: [{ role: 'user', content: "let's research nvda" }],
-        _run: runWith('Taking you to Prometheus. <route>research NVDA</route>'),
+        _run: runWith('Taking you to the analyst. <route>research NVDA</route>'),
     })
     assert.equal(result.route, 'research')
     assert.equal(result.routeSymbol, 'NVDA')
-    assert.equal(result.reply, 'Taking you to Prometheus.')
+    assert.equal(result.reply, 'Taking you to the analyst.')
 })
 
 test('turn: an edit tag becomes the item hand-off, and never shows up in the reply', async () => {
     const result = await axlAgentService.chatStream({
         messages: [{ role: 'user', content: 'edit that NVDA coverage' }],
-        _run: runWith('Reopening it in Prometheus. <edit>coverage cov_9</edit>'),
+        _run: runWith('Reopening it in the analyst. <edit>coverage cov_9</edit>'),
     })
     assert.deepEqual(result.edit, { kind: 'coverage', ref: 'cov_9', desk: 'research' })
     assert.equal(result.route, null, 'an edit is not a route — it carries its own desk')
-    assert.equal(result.reply, 'Reopening it in Prometheus.')
+    assert.equal(result.reply, 'Reopening it in the analyst.')
 })
 
-test('turn: a book edit reaches Atlas as an item, not as a fresh mandate', async () => {
+test('turn: a book edit reaches the portfolio manager as an item, not as a fresh mandate', async () => {
     // The failure it replaces: `<route>portfolio</route>` opens Atlas at Phase 1 and asks for the
     // mandate again — for a book that already has one, and whose plan is what they wanted to change.
     const result = await axlAgentService.chatStream({
         messages: [{ role: 'user', content: 're-work my Core book' }],
-        _run: runWith('That takes it off monitoring until you re-activate — opening it in Atlas. <edit>portfolio p1</edit>'),
+        _run: runWith('That takes it off monitoring until you re-activate — opening it in the portfolio manager. <edit>portfolio p1</edit>'),
     })
     assert.deepEqual(result.edit, { kind: 'portfolio', ref: 'p1', desk: 'portfolio' })
     assert.equal(result.route, null)
@@ -438,11 +438,11 @@ test('turn: a clarifying question (no tag) keeps the user with Axl', async () =>
 test('turn: the opening rides out beside the route, and never shows up in the reply', async () => {
     const result = await axlAgentService.chatStream({
         messages: [{ role: 'user', content: 'several positions' }],
-        _run: runWith('Taking you to Atlas. <route>portfolio</route><open>I want 5% profit.</open>'),
+        _run: runWith('Taking you to the portfolio manager. <route>portfolio</route><open>I want 5% profit.</open>'),
     })
     assert.equal(result.route, 'portfolio')
     assert.equal(result.opening, 'I want 5% profit.')
-    assert.equal(result.reply, 'Taking you to Atlas.', 'the user sees the sentence, never the tags')
+    assert.equal(result.reply, 'Taking you to the portfolio manager.', 'the user sees the sentence, never the tags')
 })
 
 test('turn: a hard-wrapped opening arrives as one line — it becomes a chat message', async () => {
@@ -467,7 +467,7 @@ test('turn: an EDIT never carries an opening — it resumes a conversation that 
     // Reopening a setup restores the chat that built it. An opening turn there talks over the page.
     const result = await axlAgentService.chatStream({
         messages: [{ role: 'user', content: 'change the entry on my TSLA setup' }],
-        _run: runWith('Opening it in Mentor. <edit>setup s1</edit><open>I want to move the entry.</open>'),
+        _run: runWith('Opening it in the trader. <edit>setup s1</edit><open>I want to move the entry.</open>'),
     })
     assert.equal(result.edit?.kind, 'setup')
     assert.equal(result.opening, null)
@@ -476,7 +476,7 @@ test('turn: an EDIT never carries an opening — it resumes a conversation that 
 test('turn: routing with no opening at all is fine — the desk simply asks', async () => {
     const result = await axlAgentService.chatStream({
         messages: [{ role: 'user', content: 'find me a trade on tsla' }],
-        _run: runWith('Off to Mentor. <route>trade TSLA</route>'),
+        _run: runWith('Off to the trader. <route>trade TSLA</route>'),
     })
     assert.equal(result.route, 'trade')
     assert.equal(result.opening, null)
@@ -534,7 +534,7 @@ test('every desk adopt can arrive at is a real desk', () => {
 import { buildRoleSection, ADMIN_DESKS } from '../../services/agents/axl.agent.service.js'
 import { routeFor as _routeFor } from '../../services/routing.util.js'
 
-test('role: the admin desks are Pythia and Aether', () => {
+test('role: the admin desks are the industry strategist and the event analyst', () => {
     assert.deepEqual([...ADMIN_DESKS], ['strategy', 'aether'])
     for (const d of ADMIN_DESKS) assert.ok(VALID_PIPELINES.has(d), `${d} is a real desk`)
 })
@@ -605,14 +605,14 @@ test('web search answers world questions at reception and keeps the broadcast ru
     assert.doesNotMatch(prompt, /the one place the outside world enters/, 'the brief is no longer the only window')
 })
 
-test('Proteus only on an ask about technicals or behaviour — "how is NVDA today?" is Axl\'s own, and an unclear one is asked (Roy, 2026-11-12)', () => {
+test('The technical analyst only on an ask about technicals or behaviour — "how is NVDA today?" is Axl\'s own, and an unclear one is asked (Roy, 2026-11-12)', () => {
     const prompt = readFileSync(new URL('../../prompts/axl_system_prompt.md', import.meta.url), 'utf8')
     assert.match(prompt, /`<route>technicals<\/route>` — ONLY when the user asks about a stock's TECHNICALS or how it TRADES/)
     assert.match(prompt, /"How is NVDA today\?"[^\n]*NOT this: that is the price and the news, and it is YOURS to answer — no route/)
     assert.match(prompt, /Not sure which they mean\? Ask in one line/)
 })
 
-test('Proteus labels the two kinds of answer in plain words, never as tags', () => {
+test('The technical analyst labels the two kinds of answer in plain words, never as tags', () => {
     const p = readFileSync(new URL('../../prompts/proteus_system_prompt.md', import.meta.url), 'utf8')
     assert.match(p, /Say it in PLAIN WORDS inside the sentence/)
     assert.match(p, /Never a tag, a\s+bracket or a capitalised label of your own/)

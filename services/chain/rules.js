@@ -40,15 +40,15 @@ export const endedChain = (chain) => ({ ...chain, status: 'done', awaiting: null
 export function decisionFor(agent, payload, state, chain = null) {
     if (!payload) return null
     if (agent === 'mentor' && (payload.gate || payload.setups || (payload.setup && payload.readiness?.ready))) {
-        return { question: 'Mentor needs your call', choices: [] }
+        return { question: 'Your call on the trade', choices: [] }
     }
     if (agent === 'portfolio' && (payload.plan || payload.update || payload.mandate)) {
-        return { question: 'Atlas has a proposal for you', choices: [] }
+        return { question: 'A portfolio proposal for you', choices: [] }
     }
     if (agent === 'analyst' && payload.coverage) {
         const q = chain?.queue
         const more = q && q.index + 1 < q.artifact.items.length
-        return { question: 'Prometheus has a draft', choices: q ? [{ id: 'next', label: more ? 'Next name' : 'Finish the run' }] : [] }
+        return { question: 'A coverage draft is ready', choices: q ? [{ id: 'next', label: more ? 'Next name' : 'Finish the run' }] : [] }
     }
     return null
 }

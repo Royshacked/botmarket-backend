@@ -142,7 +142,7 @@ export function buildCoverageRefreshed({ userId, ticker, portfolioId = null, por
         return {
             userId,
             content: house
-                ? `Prometheus re-modelled ${sym}${_why(trigger)} and kept the target: ${passWhy}`
+                ? `I re-modelled ${sym}${_why(trigger)} and kept the target: ${passWhy}`
                 : `Re-researched ${sym}${portfolioName ? ` for "${portfolioName}"` : ''}: no new target — ${passWhy}${portfolioId ? ' You can resume the review.' : ''}`,
             type:       'coverage_refreshed',
             payload:    { kind: 'coverage', symbol: sym, coverageId, portfolioId, ok: false, house, pass: true },
@@ -167,8 +167,8 @@ export function buildCoverageRefreshed({ userId, ticker, portfolioId = null, por
     const done = typeof note === 'string' && note.trim() ? `: ${note.trim()}` : ''
     const content = house
         ? (ok
-            ? `Prometheus revised ${sym}${_why(trigger)}${done}${gist}.`
-            : `Prometheus tried to re-model ${sym}${_why(trigger)} but produced nothing to store — the existing coverage stands.`)
+            ? `I revised ${sym}${_why(trigger)}${done}${gist}.`
+            : `I tried to re-model ${sym}${_why(trigger)} but produced nothing to store — the existing coverage stands.`)
         : (ok
             ? `Fresh research on ${sym} is ready${forBook}${gist}.${portfolioId ? ' Resume the review to fold it in.' : ''}`
             : `Couldn't refresh research on ${sym} right now — leaving the existing coverage in place.${resume}`)

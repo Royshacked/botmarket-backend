@@ -22,7 +22,7 @@ export const FULL_ENTRIES = 20
 // What the list is FOR is the reader's judgment, so the description and the closing note are the reader's (`words`
 // below) — Atlas's since Argus stopped reading it (2026-11-11).
 export const ATLAS_HOUSE_INDUSTRIES_TOOL_SPEC = {
-    get_house_industries: `The HOUSE'S INDUSTRIES for this book — the GICS sub-industries Pythia (the house's industry desk) rates FOR SWING or FOR LONG TERM, plus the industries inside the themes it rates so, each with its thesis, top risk, how far it has moved and the companies it names. Pass \`book\` (the mandate's: "swing" for under about a year, "long_term" for longer — use judgment in between) at the start of a build: THESE ARE THE CANDIDATE SLEEVES, one sub-industry per sleeve. Pass \`industry\` (a code or name) for one industry's largest companies, our coverage marked. The house judges industries, never stocks, and the mandate and the user still outrank it.`,
+    get_house_industries: `The HOUSE'S INDUSTRIES for this book — the GICS sub-industries the industry strategist (the house's industry desk) rates FOR SWING or FOR LONG TERM, plus the industries inside the themes it rates so, each with its thesis, top risk, how far it has moved and the companies it names. Pass \`book\` (the mandate's: "swing" for under about a year, "long_term" for longer — use judgment in between) at the start of a build: THESE ARE THE CANDIDATE SLEEVES, one sub-industry per sleeve. Pass \`industry\` (a code or name) for one industry's largest companies, our coverage marked. The house judges industries, never stocks, and the mandate and the user still outrank it.`,
 }
 
 const BOOK_WORDS = { swing: 'SWING', long_term: 'LONG-TERM' }
@@ -52,7 +52,7 @@ const _pct = (v) => (typeof v === 'number' ? `${v >= 0 ? '+' : ''}${Math.round(v
 export const ATLAS_WORDS = Object.freeze({
     empty:  (book, where) => `The house has no industries rated for ${BOOK_WORDS[book].toLowerCase()}${where} right now (none rated, or every verdict is due for reassessment). Say so in one line, and build the sleeves from the mandate and the user's asks — each one GICS sub-industry, with the reason for it stated.`,
     footer: () => 'These are the CANDIDATE SLEEVES — one GICS sub-industry each; carry its code on the sleeve. `get_coverage` with `industry` gives the researched names to place in one; `get_house_industries` with `industry` its largest companies. FOR this book: build from them. AVOID: only when the user asks for it (the platform asks them before it saves). HYPE: allowed — the platform halves the weight; say so. An industry NOT on this list is fine when the user asks for it, or when you state the reason for it. "Who else it reaches" is the house\'s second-order read — a candidate sleeve too. The house judges industries, not stocks; the mandate and the user outrank it.',
-    noBook: (v) => `The house has no list for "${v}". Pythia's verdicts are for swing (weeks to months) and long term (years) — pick the nearer one for this mandate's horizon.`,
+    noBook: (v) => `The house has no list for "${v}". The industry strategist's verdicts are for swing (weeks to months) and long term (years) — pick the nearer one for this mandate's horizon.`,
     failed: (err) => `Could not read the house's industries: ${err.message} — say so, and build the sleeves from the mandate with the reason for each stated.`,
 })
 
@@ -86,7 +86,7 @@ export function formatHouseIndustries(book, entries, { sector = null, words = AT
         lines.push(`  ${rest.length} more, names only (smaller moves — pass \`industry\` for any): ${names}`)
     }
     return [
-        `THE HOUSE'S ${BOOK_WORDS[book]} INDUSTRIES${where} (Pythia's standing verdicts, biggest 12-month move first):`,
+        `THE HOUSE'S ${BOOK_WORDS[book]} INDUSTRIES${where} (the industry strategist's standing verdicts, biggest 12-month move first):`,
         ...lines,
         '',
         words.footer(book),

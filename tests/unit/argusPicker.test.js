@@ -48,12 +48,12 @@ test('a book list is the Buys on the list that are still live — nothing off th
     assert.deepEqual(pickableRows(null), [])
 })
 
-test("a book line carries Prometheus's rating, the target and the timing read", () => {
+test("a book line carries the analyst's rating, the target and the timing read", () => {
     const line = bookLine(ROW({ timing: { verdict: 'now' } }))
-    assert.match(line, /NVDA \(NVIDIA\) · Semiconductors · Prometheus buy, high conviction · \$180\.00 → \$230\.00 \(\+27\.8%\) by 2027-03-01 · timing: NOW/)
+    assert.match(line, /NVDA \(NVIDIA\) · Semiconductors · the analyst buy, high conviction · \$180\.00 → \$230\.00 \(\+27\.8%\) by 2027-03-01 · timing: NOW/)
     assert.match(bookLine(ROW({ timing: { verdict: 'wait', wait_for: 'the report on 11-20' } })), /timing: WAIT for the report on 11-20/)
     assert.match(bookLine(ROW()), /timing: no read yet/)
-    assert.match(bookLine(ROW({ rating: 'strong_buy', price: null })), /Prometheus strong buy/)
+    assert.match(bookLine(ROW({ rating: 'strong_buy', price: null })), /the analyst strong buy/)
 })
 
 test('an empty book says so; a long one is capped', () => {
@@ -128,7 +128,7 @@ test('a wrong horizon is answered, and a failed read says so in text — never a
 
 // ── the desk ─────────────────────────────────────────────────────────────────
 
-test("Argus's kit: the list tool in, the market screen out, consult last", () => {
+test("The stock picker's kit: the list tool in, the market screen out, consult last", () => {
     const names = TOOLS.map(t => t.name)
     assert.ok(names.includes('get_horizon_list'))
     for (const gone of ['screen_candidates', 'get_market_movers', 'get_sector_snapshot', 'get_analyst_actions', 'get_house_industries']) {
@@ -221,7 +221,7 @@ test('a dropped pick says why under the reply — in the stream and in the saved
     assert.equal('pick' in out, false)
     assert.ok(out.reply.endsWith(droppedPickNote('TSLA')))
     assert.deepEqual(streamed, [droppedPickNote('TSLA')])
-    assert.match(droppedPickNote('TSLA'), /TSLA is not on the house's lists today.*give Mentor the name yourself/)
+    assert.match(droppedPickNote('TSLA'), /TSLA is not on the house's lists today.*give the trader the name yourself/)
     // A pick that stands adds nothing.
     const kept = await scannerAgentService.chatStream({ messages: [{ role: 'user', content: 'swing' }], _venueSection: async () => null,
         _listDeps: DEPS, onToken: (t) => streamed.push(t), _run: playing(PICK('NVDA'), 'swing') })
@@ -251,7 +251,7 @@ test('a stray <scan_list> is swallowed — no `scan` comes back, and the tag nev
 // ── the prompt, as text ──────────────────────────────────────────────────────
 
 test('the prompt: the picker from the list — no market screen, no angle question, no build lens, no levels', () => {
-    assert.match(PROMPT, /You are Argus, the picker/)
+    assert.match(PROMPT, /You are Axl, working here as the stock picker/)
     assert.match(PROMPT, /ONLY place you pick from/)
     assert.match(PROMPT, /<argus_pick>/)
     assert.doesNotMatch(PROMPT, /screen_candidates|get_market_movers|get_house_industries|<scan_list>|<phase>/)
@@ -265,7 +265,7 @@ test('the prompt: an empty list in a short regime is said plainly, with no pick 
     assert.match(PROMPT, /give no pick/)
 })
 
-test("the prompt: a user's own name is Mentor's, not a pick", () => {
-    assert.match(PROMPT, /trade a name of their own, that is Mentor's/)
+test("the prompt: a user's own name is the trader's, not a pick", () => {
+    assert.match(PROMPT, /trade a name of their own, that is the trader's/)
     assert.doesNotMatch(PROMPT, /VALIDATE-A-NAME/)
 })

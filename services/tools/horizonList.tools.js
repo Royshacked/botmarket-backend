@@ -32,7 +32,7 @@ const BUY = new Set(['buy', 'strong_buy'])
 const BOOK_OF = Object.freeze({ swing: 'swing', 'long term': 'long_term' })
 
 export const HORIZON_LIST_TOOL_SPEC = {
-    get_horizon_list: `The house's list for a HORIZON — the ONLY names you may pick from. \`horizon\`: "intraday" or "day" (today's latest day board — the names in play at 09:20, 10:30 or 14:30 ET, with why and their freshest headline; in play means moving up so far, not a prediction of where it goes next),"short term swing" (This week: the run-up rule's names, each read by Prometheus), "swing" or "long term" (the house's Swing / Long term lists: Prometheus's Buys with his target, and the timing read — now, or wait for what). A name that is not in the answer is not a pick. An empty list says why; say that to the user and give no pick.`,
+    get_horizon_list: `The house's list for a HORIZON — the ONLY names you may pick from. \`horizon\`: "intraday" or "day" (today's latest day board — the names in play at 09:20, 10:30 or 14:30 ET, with why and their freshest headline; in play means moving up so far, not a prediction of where it goes next),"short term swing" (This week: the run-up rule's names, each read by the analyst), "swing" or "long term" (the house's Swing / Long term lists: the analyst's Buys with his target, and the timing read — now, or wait for what). A name that is not in the answer is not a pick. An empty list says why; say that to the user and give no pick.`,
 }
 
 const _f = (n, d = 2) => (Number.isFinite(n) ? n.toFixed(d) : null)
@@ -52,7 +52,7 @@ export function bookLine(r) {
     return [
         `${r.symbol}${r.name ? ` (${r.name})` : ''}`,
         r.industry ?? null,
-        `Prometheus ${_words(r.rating)}${r.conviction?.level ? `, ${r.conviction.level} conviction` : ''}`,
+        `the analyst ${_words(r.rating)}${r.conviction?.level ? `, ${r.conviction.level} conviction` : ''}`,
         Number.isFinite(r.price) && Number.isFinite(r.target)
             ? `$${_f(r.price)} → $${_f(r.target)}${Number.isFinite(r.upside_pct) ? ` (${r.upside_pct > 0 ? '+' : ''}${_f(r.upside_pct, 1)}%)` : ''}${r.target_date ? ` by ${r.target_date}` : ''}`
             : null,

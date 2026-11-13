@@ -127,7 +127,7 @@ test('it rides the CACHED prefix, and rides it LAST', () => {
             src(f),
             // (buildStandingProposalRule rides on the one-shot-proposal desks, ahead of this — see
             // reviewWithdrawnProposal.test.js.)
-            /cachedBlock\(\w+\(\)(?: \+ buildRouteRule\('\w+'\))? \+ LANGUAGE_RULE(?: \+ VENUE_RULE)?(?: \+ buildStandingProposalRule\([^)]*\))? \+ BREVITY_RULE\)/,
+            /cachedBlock\(\w+\(\)(?: \+ buildRouteRule\('\w+'\))? \+ LANGUAGE_RULE \+ VOICE_RULE(?: \+ VENUE_RULE)?(?: \+ buildStandingProposalRule\([^)]*\))? \+ BREVITY_RULE\)/,
             `${f} appends BREVITY_RULE somewhere other than the end of the cached system-prompt entry`,
         )
     }

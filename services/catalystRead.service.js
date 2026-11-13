@@ -483,7 +483,7 @@ export function readFacts(read) {
     // the report; a HOLD says so, the decision Mentor's prompt asks for arriving made.
     if ((!t || !_ok(t.value)) && !(read?.status === 'active' && read?.run_up?.worth)) return null
     const pct = (v) => `${v > 0 ? '+' : ''}${v.toFixed(1)}%`
-    const who = `Prometheus (${read.verdict}${Number.isFinite(read.confidence) ? `, ${read.confidence}` : ''})`
+    const who = `the analyst (${read.verdict}${Number.isFinite(read.confidence) ? `, ${read.confidence}` : ''})`
     const runUp = read.run_up?.worth ? `worth the run-up${read.run_up.why ? ` — ${read.run_up.why}` : ''}` : null
     const report = through?.report ?? read?.exit_before
     const on = report ? ` ${report}` : ''

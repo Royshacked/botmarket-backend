@@ -1,7 +1,7 @@
 import { fileURLToPath }  from 'url'
 import { dirname, join }  from 'path'
 import { logger }         from '../logger.service.js'
-import { normalizeMessages, makePromptLoader, cleanReply, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, BREVITY_RULE, VENUE_RULE, cachedBlock } from '../agentUtils.js'
+import { normalizeMessages, makePromptLoader, cleanReply, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, VOICE_RULE, BREVITY_RULE, VENUE_RULE, cachedBlock } from '../agentUtils.js'
 import { buildTagCaptures } from '../llmStream.util.js'
 import { makeSuggestionCapture } from '../suggestions.service.js'
 import { DESKS } from '../desks/registry.js'
@@ -120,11 +120,11 @@ export { ADMIN_DESKS }
 /** The role paragraph for the prompt tail. Pure; exported for tests. */
 export function buildRoleSection(isAdmin) {
     if (isAdmin) {
-        return 'USER ROLE: ADMIN. Every desk is open to them, including Pythia (`<route>strategy</route>`, to review or change the house industry views) and Aether (`<route>aether</route>`, event exposure).'
+        return 'USER ROLE: ADMIN. Every desk is open to them, including the industry strategist (`<route>strategy</route>`, to review or change the house industry views) and the event analyst (`<route>aether</route>`, event exposure).'
     }
     return [
-        'USER ROLE: TRADER. Two desks DO NOT EXIST for this user — Pythia (the strategy desk) and Aether (event exposure).',
-        "Never route to `strategy` or `aether`, never offer them, never name Pythia or Aether as somewhere they can go, and leave them out of any list of the app's desks.",
+        'USER ROLE: TRADER. Two desks DO NOT EXIST for this user — the industry strategist (the strategy desk) and the event analyst (event exposure).',
+        "Never route to `strategy` or `aether`, never offer them, never name the industry strategist or the event analyst as somewhere they can go, and leave them out of any list of the app's desks.",
         "The HOUSE INDUSTRY VIEWS are still theirs to read: on \"what does the house think of semis / my names' industries\", call `get_industry_views` and report it as \"the house view\" — the report is the whole answer.",
         'If they ask to SET or CHANGE a view, say the industry views are set centrally by the strategy desk and are not something they author here, offer to show the current one, and end the turn with NO route.',
     ].join(' ')
@@ -171,7 +171,7 @@ async function chatStream({ messages = [], audience = null, isAdmin = false, sur
     const roleBlock     = buildRoleSection(isAdmin === true)
     const surfaceBlock  = buildSurfaceSection(surface)
     const systemPrompt = [
-        cachedBlock(_systemPrompt() + LANGUAGE_RULE + VENUE_RULE + BREVITY_RULE),
+        cachedBlock(_systemPrompt() + LANGUAGE_RULE + VOICE_RULE + VENUE_RULE + BREVITY_RULE),
         { type: 'text', text: `CURRENT DATE: ${today}. Resolve relative timeframes (today, this week, this month) against this date.
 
 ${roleBlock}${surfaceBlock ? `

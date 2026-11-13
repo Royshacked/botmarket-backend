@@ -9,7 +9,7 @@ import { makeCoverageCommit } from '../../api/analyst/coverageCommit.service.js'
 // coverage routes use (coverageCommit), and only by an admin — the routes' requireAdmin, held by the action.
 
 const DRAFT  = { symbol: 'NVDA', rating: 'buy', price_target: 260, thesis: 'AI capex runs longer than the Street thinks' }
-const REMODEL = { revision_kind: 'remodel', revision_note: 'Coverage updated via Prometheus' }
+const REMODEL = { revision_kind: 'remodel', revision_note: 'Coverage updated via the analyst' }
 
 // ─── the commit service ───────────────────────────────────────────────────────
 
@@ -119,7 +119,7 @@ test('update refuses a draft about ANOTHER company than the thesis being revised
     assert.equal(r.calls.revise.length, 0)
 })
 
-test('later leaves a thesis without saving; Prometheus answers in the coverage routes\' words', async () => {
+test('later leaves a thesis without saving; the analyst answers in the coverage routes\' words', async () => {
     const r = rig({ state: { draft: DRAFT, standing: true, ...EDITING } })
     const { press, stateOf } = await r.start(ADMIN)
     assert.deepEqual(shapeOf(await press('later')), { result: {} })

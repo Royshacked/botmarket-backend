@@ -27,7 +27,7 @@ const CAND = {
 
 test('the opening names the ticker, the side, the event and asks the one question', () => {
     const o = quickReadOpening(CAND, CAND)
-    assert.match(o, /^Quick read on FRO \(Frontline plc\)\. Aether named it HELPED by an event — Strait of Hormuz \(2026-09-13\): "Saudi Arabia shut/)
+    assert.match(o, /^Quick read on FRO \(Frontline plc\)\. The event analyst named it HELPED by an event — Strait of Hormuz \(2026-09-13\): "Saudi Arabia shut/)
     assert.match(o, /Is this exposure credible, already priced in, or contradicted by what FRO has said or filed since 2026-09-13\?$/)
 })
 
@@ -57,7 +57,7 @@ const OTHER = { run_id: 'Iran:2026-09-10', subject: 'Iran', side: 'hurt', event_
 
 test('with other events, the opening lists them and widens the question to the net', () => {
     const o = quickReadOpening(CAND, CAND, [OTHER])
-    assert.match(o, /Aether has ALSO named FRO by 1 other live event — and they pull it in OPPOSITE directions:/)
+    assert.match(o, /The event analyst has ALSO named FRO by 1 other live event — and they pull it in OPPOSITE directions:/)
     assert.match(o, /^- Iran \(2026-09-10\), HURT: War-risk premiums on its Gulf routings\. Move since: -2\.1% vs SPY\.$/m)
     assert.match(o, /Judge FRO against ALL of them\. Is THIS event's claim \(HELPED\) credible/)
     assert.match(o, /which way does the name go\?$/)
@@ -77,7 +77,7 @@ test('with no other events the question is the narrow one', () => {
 
 test('survives a bare row', () => {
     const o = quickReadOpening({ ticker: 'X', side: 'hurt' })
-    assert.match(o, /Aether named it HURT by an event — an event\./)
+    assert.match(o, /The event analyst named it HURT by an event — an event\./)
     assert.doesNotMatch(o, /undefined|null/)
 })
 

@@ -88,7 +88,7 @@ export async function shareSetup(id, userId, { conversationId, note = null } = {
         },
         // Resolves on OPEN: the ask is "look at this", and looking is the recipient's whole
         // obligation — sizing and generating are their own decision, not this card's job.
-        actions: cardActions('Open in Mentor', { resolvesOn: 'open' }),
+        actions: cardActions('Open the setup', { resolvesOn: 'open' }),
     })
     if (!res.ok) return res
     logger.info(LOG, `shared setup ${setup.id} into ${conversationId}`)

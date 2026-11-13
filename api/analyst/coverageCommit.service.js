@@ -11,7 +11,7 @@ import { coverageService as defaultCoverage, revisionSummary } from './coverage.
 import { resolveCardsFor as defaultResolveCards } from '../chat/chat.service.js'
 
 // How a revision from a Prometheus conversation is recorded in the trail.
-export const REMODEL = { revision_kind: 'remodel', revision_note: 'Coverage updated via Prometheus' }
+export const REMODEL = { revision_kind: 'remodel', revision_note: 'Coverage updated via the analyst' }
 
 export function makeCoverageCommit({ coverage = defaultCoverage, resolveCards = defaultResolveCards } = {}) {
 

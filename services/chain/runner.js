@@ -66,15 +66,15 @@ const _covered = async (ticker) => !!(await coverageService.getCoverageBySymbol(
 export function readWaitLine(t, r) {
     // The DECIDING read (no horizon yet — argus-rework.md §2.3): what the trade is worth, and on which horizon.
     if (t.horizon == null) {
-        const again = r.need === 'reinit' ? 'his coverage again (it is over 30 days old, or a report has come out since)' : 'his coverage'
+        const again = r.need === 'reinit' ? 'the coverage again (it is over 30 days old, or a report has come out since)' : 'the coverage'
         const ahead = r.ahead > 0 ? ` It waits in line behind ${r.ahead} name${r.ahead === 1 ? '' : 's'} in the house's research (about four minutes each).` : ''
-        return `Before I say whether ${t.symbol} is worth trading, and on which horizon, Prometheus is reading it — ${again}.${ahead} I'll carry on as soon as it lands.`
+        return `Before I say whether ${t.symbol} is worth trading, and on which horizon, I'm reading the business first — ${again}.${ahead} I'll carry on as soon as it lands.`
     }
     const what = r.kind !== 'coverage' ? 'a catalyst read'
-        : r.need === 'view' ? `his ${t.horizon} view (he covers it on the other horizon)`
-            : r.need === 'reinit' ? 'his coverage again (it was not live)' : 'his full coverage'
+        : r.need === 'view' ? `the ${t.horizon} view (the coverage is on the other horizon)`
+            : r.need === 'reinit' ? 'the coverage again (it was not live)' : 'the full coverage'
     const ahead = r.ahead > 0 ? ` It waits in line behind ${r.ahead} name${r.ahead === 1 ? '' : 's'} in the house's research (about four minutes each).` : ''
-    return `Before I build the ${t.horizon} trade on ${t.symbol}, Prometheus is reading it — ${what}.${ahead} I'll carry on as soon as it lands.`
+    return `Before I build the ${t.horizon} trade on ${t.symbol}, I'm reading the business first — ${what}.${ahead} I'll carry on as soon as it lands.`
 }
 
 /** A build cut short by the tool budget is carried on at most this many turns in a row (Roy, 2026-11-12: auto-continue). */

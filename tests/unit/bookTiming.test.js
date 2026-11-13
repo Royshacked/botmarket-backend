@@ -36,10 +36,10 @@ test('due: no read, last week\'s, or a target re-set since — not this week\'s 
     assert.deepEqual(dueRows(['A', 'B', 'C', 'D'].map(s => row(s)), stored, '2026-11-02').map(r => r.symbol), ['A', 'B', 'C'])
 })
 
-test('a name as Argus reads it: the thesis, what breaks it, the chart and its levels in dollars, the report', () => {
+test('a name as the stock picker reads it: the thesis, what breaks it, the chart and its levels in dollars, the report', () => {
     const t = nameText({ ...row('ABC', { name: 'Alpha' }), book: 'swing' }, { kill_criteria: ['margins fall below 20%'] },
         { close: 50, sma20: 48, sma50: 45, low20: 46, high20: 51, low52w: 30, high52w: 52, atr_pct: 2.5, ret5: 3, ret20: 8, rs5: 1, rs20: 4, vol5_vs_50: 1.4, next_earnings: '2026-11-06' })
-    for (const bit of ['ABC (Alpha) — SWING', 'Prometheus buy', 'target 120.00 by 2027-04-20', '+20.0% from here', 'thesis: the leader',
+    for (const bit of ['ABC (Alpha) — SWING', 'the analyst buy', 'target 120.00 by 2027-04-20', '+20.0% from here', 'thesis: the leader',
         'wrong if: margins fall below 20%', 'trend over 20d · over 50d', '50d avg 45.00', '20d range 46.00–51.00', 'ATR 2.5%', 'next report 2026-11-06']) {
         assert.ok(t.includes(bit), `missing "${bit}" in ${t}`)
     }
@@ -132,7 +132,7 @@ test('a name with no chart tonight is not read — no "wait for a chart" — and
     const h = harness({ rows: [row('AAA'), row('NOC')], reply: answerAll, chartless: ['NOC'] })
     const r = await runTiming({ deps: h.deps })
     assert.equal(r.read, 1)
-    assert.ok(!h.sent[0].userText.includes('NOC'), 'not sent to Argus')
+    assert.ok(!h.sent[0].userText.includes('NOC'), 'not sent to the stock picker')
     assert.deepEqual(h.rows(COLLECTION).map(d => d.symbol), ['AAA'])
     _reset()
     const alone = harness({ rows: [row('NOC')], reply: answerAll, chartless: ['NOC'] })
@@ -153,6 +153,6 @@ test('the row shows the read only against the target it was made for', async () 
     assert.deepEqual([...reads.keys()], ['AAA'])
     const read = reads.get('AAA')
     assert.deepEqual(timingOf(row('AAA'), read), { verdict: 'now', wait_for: null, wrong_if: 'w', why: 'y', week: '2026-11-02', read_at: read.read_at, price: 100 })
-    assert.equal(timingOf(row('AAA', { set_at: '2026-11-01T00:00:00Z' }), read), null, 'Prometheus re-set the target since')
+    assert.equal(timingOf(row('AAA', { set_at: '2026-11-01T00:00:00Z' }), read), null, 'The analyst re-set the target since')
     assert.equal(timingOf(row('AAA'), null), null)
 })

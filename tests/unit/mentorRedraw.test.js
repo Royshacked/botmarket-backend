@@ -36,7 +36,7 @@ test('reopenForRedraw: the span and below reopen, its target with it; the openin
     assert.deepEqual(reopenForRedraw(null), { name: null, cleared: [] })
 })
 
-test('redrawOf: what Talos latched — a miss, a break (which outranks it), or nothing', () => {
+test('redrawOf: what the trade monitor latched — a miss, a break (which outranks it), or nothing', () => {
     assert.deepEqual(redrawOf(SETUP(ran)), { event: 'ran_away', reason: 'price ran to 214.6 — past the upper edge', scenarios: ['Pullback to the level'] })
     const both = SETUP({ monitor_state: { scenarios: { s1: { invalidation_status: 'drifting' }, s2: { invalidation_status: 'fired', invalidation_reason: 'closed at 170' } } } })
     assert.deepEqual(redrawOf(both), { event: 'broken', reason: 'closed at 170', scenarios: ['Break, then pullback'] })
@@ -80,7 +80,7 @@ test('the re-draw section: a miss redrawn with the lens on today\'s chart, a bre
 test('the turn carries the re-draw section from the reopened state', () => {
     const state = mentorStateFromEntity(SETUP(ran), CARD)
     const ctx = _buildTurnContext({ ...state, build: normalizeBuild(state.draft.build) })
-    assert.match(ctx, /THE RE-DRAW — the user opened this setup from Talos's card/)
+    assert.match(ctx, /THE RE-DRAW — the user opened this setup from the trade monitor's card/)
     assert.doesNotMatch(_buildTurnContext(mentorStateFromEntity(SETUP())), /THE RE-DRAW/)
 })
 
@@ -222,7 +222,7 @@ test('the pencil on a flagged setup opens it as it is, with the redraw offered',
 
 test('the offer stands until they take it; taking it reopens the trade and it stays open', async () => {
     const state = mentorStateFromEntity(WAIVED())
-    const stay = await redrawTurn(state, 'Talos flagged it. Want a redraw?')
+    const stay = await redrawTurn(state, 'The trade monitor flagged it. Want a redraw?')
     const kept = mentorNextState(state, stay)
     assert.equal(kept.redraw?.offer, true)
     const took = await redrawTurn(kept, 'Redrawing.<build>{"unsettle":"spans","waiver":false}</build>')
@@ -258,7 +258,7 @@ test('close refuses a saved setup the talk has left, and names what it closed', 
     assert.equal(out.closedSetup.asset, 'GNRC')
 })
 
-test('a scenario that broke outranks Talos\'s stale map; stale still reads without one', () => {
+test('a scenario that broke outranks the trade monitor\'s stale map; stale still reads without one', () => {
     const fired = { monitor_state: { scenarios: { s1: { invalidation_status: 'fired', invalidation_reason: 'closed under the stop' } } } }
     const out = redrawOf(SETUP({ ...fired, invalidation_edge: 'time', invalidation_reason: 'the map moved' }))
     assert.equal(out.event, 'broken')

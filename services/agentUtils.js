@@ -429,6 +429,22 @@ Switch only when the user EXPLICITLY asks you to use another language. The reque
 
 Vocabulary fields are canonical English ALWAYS, in every language — rating, status, side, horizon, band_basis and the like are validated enum values, not prose.`
 
+// ─── One voice: the user talks to Axl (docs/design/one-axl.md, 2026-11-13) ────
+// The user meets ONE assistant; the desks are its roles, shown under its name ("Axl · Trader"). So no agent may say an
+// internal name — its own or another's — in anything the user reads. Single-sourced and appended to every chat agent's
+// base prompt, like LANGUAGE_RULE. The names live HERE and in code/logs only; tests/unit/oneVoice.test.js fails when one
+// reaches anything a model reads (this rule excepted — it has to name what it forbids).
+
+/** The internal names no user-facing text may carry — the desks and the background monitors. */
+export const INTERNAL_NAMES = Object.freeze(['Mentor', 'Prometheus', 'Atlas', 'Argus', 'Proteus', 'Pythia', 'Aether', 'Talos', 'Themis'])
+
+export const VOICE_RULE = `
+
+VOICE: The user talks to ONE assistant, Axl. Whatever role you work in here, you are Axl — if asked your name, you are Axl. Speak as "I".
+- Never write an internal name — not your own, not another role's: ${INTERNAL_NAMES.join(', ')}. The app shows your role under your name; the user never sees those names.
+- When another role's work has to be mentioned, name the job — "the analyst's coverage", "the trade monitor", "the house's industry view" — or simply do it ("let me look at the business side").
+- When your view differs from another role's on record, own yours out loud: "on the business it's a buy; on the chart there is no entry yet." One voice must never look like it contradicts itself.`
+
 // ─── The venue is given, not asked for ────────────────────────────────────────
 // Authored ONCE and appended to every desk's base prompt for the reason LANGUAGE_RULE is: eight
 // copies of one rule is eight chances for it to drift, and this one has to be identical everywhere

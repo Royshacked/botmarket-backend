@@ -107,13 +107,13 @@ export function formatWatchedItems({ items = [], counts = {}, unavailable = [], 
     // are scoped; scans and coverage are research, bind to no account, and are shared across
     // all three workspaces by decision — so the line says that rather than leaving it inferred.
     const scope = workspace
-        ? ` in the ${workspace.toUpperCase()} workspace (setups, books and queued actions are scoped to it; coverage and Aether are shared across all workspaces)`
+        ? ` in the ${workspace.toUpperCase()} workspace (setups, books and queued actions are scoped to it; coverage and the event analyst are shared across all workspaces)`
         : ''
 
     if (!items.length) {
         return unavailable.length
             ? `Could not read: ${unavailable.join(', ')}. Tell the user you couldn't check rather than saying they have nothing.`
-            : `Nothing${scope || ' in the app yet'} — no setups, books, coverage, queued actions or Aether events.`
+            : `Nothing${scope || ' in the app yet'} — no setups, books, coverage, queued actions or the event analyst events.`
     }
     const summary = Object.entries(counts).filter(([, n]) => n > 0).map(([k, n]) => `${n} ${k}${n === 1 ? '' : 's'}`).join(', ')
     return [
@@ -248,7 +248,7 @@ export function makeUserDataHandlers(userId = null, deps = {}) {
  * here, on the newcomer.
  */
 export const USER_DATA_TOOL_SPEC = {
-    get_watched_items: `Every list the user sees in the app: Mentor setups, portfolios (as books), Prometheus coverage, the QUEUED actions waiting for a venue to open, and the Aether events with the names each reached — plus, for an admin, the research queue. With status, levels and how fresh each is. This is the PLANS AND BOOKS they have made, NOT their open broker positions, balances or live P&L, which are get_trading_context. Setups and books come back scoped to the workspace the user is standing in (paper / live / manual) — those bind to an account, and merging two books into one list is not an answer. Coverage is research, binds to no account, and is shared across every workspace. Call it for "what am I watching / what have I got going / what's still open", and before saying the user has nothing. Finished items are excluded unless asked for.`,
+    get_watched_items: `Every list the user sees in the app: setups, portfolios (as books), coverage, the QUEUED actions waiting for a venue to open, and the the event analyst events with the names each reached — plus, for an admin, the research queue. With status, levels and how fresh each is. This is the PLANS AND BOOKS they have made, NOT their open broker positions, balances or live P&L, which are get_trading_context. Setups and books come back scoped to the workspace the user is standing in (paper / live / manual) — those bind to an account, and merging two books into one list is not an answer. Coverage is research, binds to no account, and is shared across every workspace. Call it for "what am I watching / what have I got going / what's still open", and before saying the user has nothing. Finished items are excluded unless asked for.`,
 
     get_performance: `The user's CLOSED-trade record: how many, win rate, net P&L, profit factor and expectancy, split by mode (paper/live/manual), by origin and by symbol. Optionally narrowed to a mode, a symbol or a date window. Win rates come back as PERCENTAGES already — never multiply them again. Use it for "how have I done", "is paper working", "what's my win rate". It reports history only; open positions and unrealized P&L are get_trading_context.`,
 

@@ -73,14 +73,14 @@ export function quickReadOpening(c, run = {}, others = []) {
     const side = SIDE(c.side)
     const when = (run.event_date || c.event_date || run.created_at || c.created_at || '').slice(0, 10)
     const lines = [
-        `Quick read on ${c.ticker}${c.company ? ` (${c.company})` : ''}. Aether named it ${side} by an event — `
+        `Quick read on ${c.ticker}${c.company ? ` (${c.company})` : ''}. The event analyst named it ${side} by an event — `
         + `${run.subject || c.subject || 'an event'}${when ? ` (${when})` : ''}${run.event || c.event ? `: "${run.event || c.event}"` : '.'}`,
-        c.mechanism ? `Aether's mechanism: ${c.mechanism}` : '',
-        c.press_evidence ? `Press fact Aether cited: ${c.press_evidence}${c.source_url ? ` (${c.source_url})` : ''}` : '',
+        c.mechanism ? `The event analyst's mechanism: ${c.mechanism}` : '',
+        c.press_evidence ? `Press fact the event analyst cited: ${c.press_evidence}${c.source_url ? ` (${c.source_url})` : ''}` : '',
         c.verdict === 'quantified' || c.verdict === 'mentioned'
-            ? `Its filings, per Aether's verification: ${c.verdict}${c.filing_evidence ? ` — "${c.filing_evidence}"` : ''}`
+            ? `Its filings, per the event analyst's verification: ${c.verdict}${c.filing_evidence ? ` — "${c.filing_evidence}"` : ''}`
             : c.verdict === 'silent'
-                ? 'Its filings, per Aether’s verification: silent — nothing it has filed mentions this.'
+                ? 'Its filings, per the event analyst’s verification: silent — nothing it has filed mentions this.'
                 : '',
         // The sized share of revenue, when the filing gave one — the first of the four inputs the
         // sizing step needs, and the one it should take from here rather than re-derive.
@@ -94,7 +94,7 @@ export function quickReadOpening(c, run = {}, others = []) {
     ]
     if (others.length) {
         const sides = new Set([c.side, ...others.map(o => o.side)])
-        lines.push(`Aether has ALSO named ${c.ticker} by ${others.length} other live event${others.length > 1 ? 's' : ''}`
+        lines.push(`The event analyst has ALSO named ${c.ticker} by ${others.length} other live event${others.length > 1 ? 's' : ''}`
             + `${sides.size > 1 ? ' — and they pull it in OPPOSITE directions' : ''}:`)
         for (const o of others) {
             const d = (o.event_date || o.created_at || '').slice(0, 10)

@@ -2,7 +2,7 @@
 
 The Hotlist listed this name for **this week** — a trade of two to ten days. Most names come from its **run-up rule**:
 a report about six sessions out, the last three beat, bought at the board day's open; an older board's names were
-picked by Argus for an event. The opening says which. No full model of the business, no 12-month target, no
+picked by the stock picker for an event. The opening says which. No full model of the business, no 12-month target, no
 `<coverage>` block — a catalyst read never enters the book.
 
 ## A RUN-UP RULE NAME — two questions
@@ -37,7 +37,7 @@ through-the-report record and the implied move. A hold with no target is kept as
 `verdict` on a rule name says the same as (a): `credible` when worth it; otherwise `priced_in` (it took the move already,
 for a reason you name), `contradicted` (the reports or the filings cut against it — quote it) or `unclear`.
 
-## AN EVENT THAT HAS HAPPENED (an older board, Argus's pick)
+## AN EVENT THAT HAS HAPPENED (an older board, the stock picker's pick)
 
 **Is the catalyst real, can this company carry it, how much of it is already in the price, and what can break it inside
 the window?** The answer is YOUR SHORT-SWING PRICE TARGET; `compute_event_delta` and the options' implied move are its
@@ -81,7 +81,7 @@ restated filing. `sound` (it can carry the move), `weak` (it can, but say what h
 dilution likely inside the window, going concern, distress — no trade, whatever else). Two or three facts, not a thesis.
 
 **Do NOT call** `compute_valuation`, `get_stock_peers`, `get_sector_snapshot`, `get_macro_snapshot` or `consult`, and
-no `compute_event_delta` on a run-up. No entries, no stops, no position size — the levels are Mentor's and Talos's.
+no `compute_event_delta` on a run-up. No entries, no stops, no position size — the levels are the trader's and the trade monitor's.
 
 **The window.** `window_days`, 5 to 30 calendar days. On a run-up the code ends it at the close before the report — or,
 on a `hold`, at the close of the session after it — whatever you write.

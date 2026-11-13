@@ -288,7 +288,7 @@ async function _loop(run, queued, covered, { userId, audience, model, signal, li
             // A REINIT revises the coverage it was for (retired / watchlist → live again); everything else initiates.
             const saved = reinit
                 ? await deps.update(existing.id, { ..._withoutKeys(coverage, ['id', 'symbol']), status: 'active', revision_kind: 'reinitiate',
-                    revision_note: 'Re-researched for a Mentor build (argus-rework.md step 3)' })
+                    revision_note: 'Re-researched for a trade build (argus-rework.md step 3)' })
                 : await deps.initiate(coverage)
             if (saved.ok) {
                 await deps.markDone(item.id)
@@ -412,13 +412,13 @@ export function researchOpening(item) {
     // and his reason travel; the mode block (analyst_mode_catalyst.md) says what to do with them.
     if (isCatalystItem(item)) {
         // From MENTOR (argus-rework.md step 3): a user is building a short-term swing on the name — no board, no pick.
-        if (c.mentor) return `Catalyst read on ${symbol} — a user is building a SHORT-TERM SWING (2–10 days) on it with Mentor, who needs your read before he builds. Is there a real catalyst, what is it worth, how much is still open, and what can break it inside the window?`
+        if (c.mentor) return `Catalyst read on ${symbol} — a user is building a SHORT-TERM SWING (2–10 days) on it with the trader, who needs your read before he builds. Is there a real catalyst, what is it worth, how much is still open, and what can break it inside the window?`
         const facts = c.facts ? ` The board: ${c.facts}.` : ''
         // A read a user asked for (`requested`) on a name Argus did not pick says so, rather than nothing. The overnight
         // board's names (`rule`, 2026-10-25) were listed by the run-up rule — no one picked them, and it says so.
-        const argus = c.why ? ` Argus picked it: ${c.why}${c.caution ? ` What would make it wrong: ${c.caution}` : ''}`
+        const argus = c.why ? ` the stock picker picked it: ${c.why}${c.caution ? ` What would make it wrong: ${c.caution}` : ''}`
             : c.rule ? ` The run-up rule listed it — a report about six sessions out, the last three beat; no one picked it.${c.requested ? ' A user asked for this read now.' : ''}`
-                : c.requested ? ' Argus did not pick it; a user asked for this read.' : ''
+                : c.requested ? ' the stock picker did not pick it; a user asked for this read.' : ''
         // A rule name asks the rule's two questions (docs/design/runup-reads.md §2), and when the trade opens — the board's
         // day, often the session after the read (a Saturday read for Monday's board).
         if (c.rule) return `Catalyst read on ${symbol} — the Hotlist's run-up rule listed it THIS WEEK, bought at the ${c.day ?? 'next'} open.${facts}${argus} Two questions: (a) were its last reports good enough to go into the run-up, and (b) is the report itself worth holding through, or out before it?`
@@ -432,31 +432,31 @@ export function researchOpening(item) {
         const risks = c.risks?.length ? ` Risks it named: ${c.risks.join('; ')}.` : ''
         const thesis = c.thesis ? `: ${c.thesis}` : '.'
         // Filter 1's reason, and the horizon the book is graded on (house-research-chain.md steps 4-5).
-        const argus = c.argus?.why ? ` Argus chose it from the industry: ${c.argus.why}${c.argus.caution ? ` What would make it wrong: ${c.argus.caution}` : ''}` : ''
+        const argus = c.argus?.why ? ` the stock picker chose it from the industry: ${c.argus.why}${c.argus.caution ? ` What would make it wrong: ${c.argus.caution}` : ''}` : ''
         const pt = BOOK_PT_HORIZONS[c.verdict] ? ` Set the price target on a ${BOOK_PT_HORIZONS[c.verdict].join(' or ')} horizon — ${book} is graded there.` : ''
         const tail = `${argus}${pt}`
         // NAMED by the assessment (pythia-names.md): it may sit in another industry (second order), so the opening says
         // whose assessment named it and why, not "its industry".
         if (c.named_why) {
             const of = c.kind === 'theme' ? `the theme ${c.subject}` : c.subject
-            return `Research ${symbol} for coverage — Pythia's ${book} assessment of ${of}${c.horizon ? ` (${c.horizon})` : ''} names it: ${c.named_why}. Her case${thesis}${risks} Judge whether ${symbol} is already priced for it.${tail}`
+            return `Research ${symbol} for coverage — the industry strategist's ${book} assessment of ${of}${c.horizon ? ` (${c.horizon})` : ''} names it: ${c.named_why}. Her case${thesis}${risks} Judge whether ${symbol} is already priced for it.${tail}`
         }
-        return `Research ${symbol} for coverage — Pythia rates ${where} ${book}${c.horizon ? ` (${c.horizon})` : ''}${thesis}${risks} Judge whether ${symbol} is already priced for it.${tail}`
+        return `Research ${symbol} for coverage — the industry strategist rates ${where} ${book}${c.horizon ? ` (${c.horizon})` : ''}${thesis}${risks} Judge whether ${symbol} is already priced for it.${tail}`
     }
     // From MENTOR (argus-rework.md step 3): a user is building a swing / long-term trade on the name and needs the read.
     // A covered name's OTHER horizon (two targets, stage 1): the view only, the coverage stands.
     if (c?.mentor && isViewItem(item)) {
         const book = c.view === 'long_term' ? 'LONG TERM' : 'SWING'
         const pts = BOOK_PT_HORIZONS[c.view]
-        return `Your ${book} view on ${symbol} — a user is building a ${String(c.horizon ?? '').toUpperCase() || book} trade on it with Mentor, and your coverage's target is on the other horizon. Give your ${book} view (book "${c.view}", a ${pts.join(' or ')} target). Do not rewrite the coverage.`
+        return `Your ${book} view on ${symbol} — a user is building a ${String(c.horizon ?? '').toUpperCase() || book} trade on it with the trader, and your coverage's target is on the other horizon. Give your ${book} view (book "${c.view}", a ${pts.join(' or ')} target). Do not rewrite the coverage.`
     }
     if (c?.mentor && c.reinit) {
         const pts = BOOK_PT_HORIZONS[c.horizon === 'long term' ? 'long_term' : 'swing']
-        return `Re-research ${symbol} — your coverage on it is not live (retired or only watched), and a user is building a ${String(c.horizon ?? 'swing').toUpperCase()} trade on it with Mentor. Bring the thesis up to date and set the price target on a ${pts.join(' or ')} horizon.`
+        return `Re-research ${symbol} — your coverage on it is not live (retired or only watched), and a user is building a ${String(c.horizon ?? 'swing').toUpperCase()} trade on it with the trader. Bring the thesis up to date and set the price target on a ${pts.join(' or ')} horizon.`
     }
     if (c?.mentor) {
         const pts = BOOK_PT_HORIZONS[c.horizon === 'long term' ? 'long_term' : 'swing']
-        return `Research ${symbol} for coverage — a user is building a ${String(c.horizon ?? 'swing').toUpperCase()} trade on it with Mentor, who needs your read before he builds. Set the price target on a ${pts.join(' or ')} horizon.`
+        return `Research ${symbol} for coverage — a user is building a ${String(c.horizon ?? 'swing').toUpperCase()} trade on it with the trader, who needs your read before he builds. Set the price target on a ${pts.join(' or ')} horizon.`
     }
     if (!c?.sector) return `Research ${symbol} for coverage.`
     // A SLEEVE candidate (sleeveSource): the mandate that surfaced it is a user's book, not the house

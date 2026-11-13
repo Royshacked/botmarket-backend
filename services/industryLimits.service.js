@@ -128,7 +128,7 @@ export function applyIndustryLimits(items, bySymbol = {}, { cap = INDUSTRY_CAP }
     items.forEach((i, k) => {
         if (info[k]?.assessment?.verdict === 'avoid') avoid.push({ asset: i.asset, industry: info[k].name ?? info[k].code })
     })
-    if (avoid.length) notes.push(`Pythia rates ${[...new Set(avoid.map(a => a.industry))].join(', ')} AVOID (${avoid.map(a => a.asset).join(', ')}) — the book is saved only with your OK.`)
+    if (avoid.length) notes.push(`The industry strategist rates ${[...new Set(avoid.map(a => a.industry))].join(', ')} AVOID (${avoid.map(a => a.asset).join(', ')}) — the book is saved only with your OK.`)
 
     return { weights: w, cash, notes, avoid, braked, capped: [...capped] }
 }
@@ -163,7 +163,7 @@ export function limitAddByRatio(spec, siblings, bySymbol = {}, { mandate = null,
     if (!mine?.code) return { ok: true, allocationRatio: ratio, notes }
     if (mine.assessment?.verdict === 'avoid' && !avoidOkCovers([{ asset }], avoidOk)) {
         const industry = mine.name ?? mine.code
-        return { ok: false, reason: 'avoid_industry', detail: `Pythia rates ${industry} AVOID — add ${asset} only with your OK`, avoid: [{ asset, industry }] }
+        return { ok: false, reason: 'avoid_industry', detail: `The industry strategist rates ${industry} AVOID — add ${asset} only with your OK`, avoid: [{ asset, industry }] }
     }
     if (ratio == null) return { ok: true, allocationRatio: null, notes }
     if (mine.assessment?.hype) { ratio *= HYPE_FACTOR; notes.push(`Hype brake: ${asset} at half weight.`) }

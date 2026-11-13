@@ -45,7 +45,7 @@ export function seedFacts(row, column, { hold = false } = {}) {
     if (row.catalyst?.material) parts.push(`catalyst: ${row.catalyst.type}, ${row.catalyst.surprise}${row.catalyst.headline ? ` — "${row.catalyst.headline}"` : ''}`)
     // A report inside the window makes this a run-up trade (§2.7): Mentor's exit has to come before it.
     // Prometheus's HOLD (runup-reads.md §5) replaces the board's "out before it": the report is part of the trade.
-    if (c.exit_before && hold) parts.push(`earnings ${c.exit_before} — the board's run-up exits before it, but Prometheus says hold through it`)
+    if (c.exit_before && hold) parts.push(`earnings ${c.exit_before} — the board's run-up exits before it, but the analyst says hold through it`)
     else if (c.exit_before) parts.push(`earnings ${c.exit_before} — a run-up into the report: the setup must be out before it`)
     else if (row.next_earnings) parts.push(`earnings ${row.next_earnings}`)
     if (row.fade_check) parts.push('flagged: a minor story under a big gap')

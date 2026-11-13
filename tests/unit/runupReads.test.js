@@ -162,10 +162,10 @@ test('the record: closed reads are backed, the hit rate is over the targeted, ho
     assert.equal(rec.open, 1)
 })
 
-test('Mentor hears it: confirmed with no target, a hold, and the board line yields to the hold', () => {
+test('The trader hears it: confirmed with no target, a hold, and the board line yields to the hold', () => {
     const exit = read({ verdict: 'credible', confidence: 0.7, run_up: { worth: true, why: 'three real beats' }, through_report: { call: 'exit', why: 'gaps both ways' }, runup: LINE, company: { verdict: 'sound' } })
     const f = readFacts(exit)
-    assert.match(f, /^Prometheus \(credible, 0\.7\): confirmed for the run-up, no target of his/)
+    assert.match(f, /^the analyst \(credible, 0\.7\): confirmed for the run-up, no target of his/)
     assert.match(f, /worth the run-up — three real beats/)
     assert.match(f, /out before the report 2026-11-09 — gaps both ways/)
     const hold = readFacts(read({ verdict: 'credible', run_up: { worth: true }, through_report: { call: 'hold', why: 'gaps up after beats' }, runup: LINE, target: { price: 108 } }))
@@ -177,7 +177,7 @@ test('Mentor hears it: confirmed with no target, a hold, and the board line yiel
     assert.equal(readFacts(read({ verdict: 'unclear', run_up: { worth: false } })), null, 'a pass is not handed on')
     const row = { symbol: 'CEG', next_earnings: REPORT, cells: { week: { grade: 'R', exit_before: REPORT, why: ['reports 2026-11-09'] } } }
     assert.match(seedFacts(row, 'week'), /the setup must be out before it/)
-    assert.match(seedFacts(row, 'week', { hold: true }), /Prometheus says hold through it/)
+    assert.match(seedFacts(row, 'week', { hold: true }), /the analyst says hold through it/)
     assert.doesNotMatch(seedFacts(row, 'week', { hold: true }), /must be out before/)
 })
 

@@ -200,7 +200,7 @@ const seedOf = async (seed) => {
     return blocks.map(b => b.text).join('\n')
 }
 
-test('a handed-over name reaches the prompt with Argus\'s read', async () => {
+test('a handed-over name reaches the prompt with the stock picker\'s read', async () => {
     const text = await seedOf({ ticker: 'NVDA', direction: 'long', thesis: 'AI leader', analysis: 'clean base' })
     assert.match(text, /NVDA/)
     assert.match(text, /AI leader/)
@@ -213,7 +213,7 @@ test("a hand-off is built the one way, and never names a lens or a mode (2026-11
     assert.doesNotMatch(text, /RISK-BASED/)
 })
 
-test('a lens still arriving on a hand-off from an old client is ignored — Argus recommends none (mentor-modes.md)', async () => {
+test('a lens still arriving on a hand-off from an old client is ignored — the stock picker recommends none (mentor-modes.md)', async () => {
     const text = await seedOf({ ticker: 'NVDA', recommended_mode: 'institutional' })
     assert.doesNotMatch(text, /recommends the|the institutional lens/i)
 })
@@ -330,10 +330,10 @@ test('the grounding rules survived the flow moving into the server', () => {
     }
 })
 
-test('their own LEVELS are talked through with Mentor; their own METHOD is Daedalus\'s, coming (Roy, 2026-11-12)', () => {
+test('their own LEVELS are talked through with the trader; their own METHOD is the method builder\'s, coming (Roy, 2026-11-12)', () => {
     const section = PROMPT.slice(PROMPT.indexOf('### When they bring their own levels'), PROMPT.indexOf('## How a build runs'))
     assert.match(section, /talk them through with the user/)
-    assert.match(section, /\*\*Daedalus's\*\* job — a desk that is coming soon/)
+    assert.match(section, /\*\*the method builder's\*\* job — a desk that is coming soon/)
     assert.match(section, /Do not build their method/)
 })
 
@@ -359,7 +359,7 @@ test('nothing in the prompt still points at the deleted ladder', () => {
     assert.doesNotMatch(PROMPT, /the ladder/i)
 })
 
-test('Mentor’s own additions are declared after the kit, with the sidecar last', () => {
+test('The trader’s own additions are declared after the kit, with the sidecar last', () => {
     const names = MENTOR_TOOLS.map(t => t.name)
     const kitEnd = names.indexOf('get_key_levels')   // SMC_TOOLS closes the shared kit
     assert.ok(kitEnd > 0)
@@ -497,7 +497,7 @@ test('the model is told that some answers arrive already settled, by a press', (
 
 test('the document has one H1, and the beats are subsections of the opening turn', () => {
     const h1s = [...PROMPT.matchAll(/^# (?!#)(.+)$/gm)].map(m => m[1])
-    assert.deepEqual(h1s, ['Mentor — Trade Assistant'], 'a stray H1 reads as a second document')
+    assert.deepEqual(h1s, ['The trader — Trade Assistant'], 'a stray H1 reads as a second document')
     assert.match(PROMPT, /### Beat one/)
     assert.match(PROMPT, /### Beat two/)
 })
@@ -510,7 +510,7 @@ test('a user with no name is asked first, then sent to ARGUS, which hands the na
     assert.match(PROMPT, /your first question is whether they have a name in mind \(no direction or horizon asked: the experts decide those/)
     // Argus is the picker since 2026-11-11 (argus-rework.md): he picks from the house's list for the HORIZON, so the
     // hand-over must name it.
-    assert.match(PROMPT, /offer \*\*Argus\*\*, the picker/)
+    assert.match(PROMPT, /offer \*\*the stock picker\*\* to find one/)
     assert.match(PROMPT, /`<route>scan<\/route>`/)
     assert.match(PROMPT, /`<open>` carrying whatever they said \(a horizon only if they gave/)
     assert.doesNotMatch(PROMPT, /point them back to Axl/)

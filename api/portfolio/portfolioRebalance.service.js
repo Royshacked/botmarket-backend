@@ -632,7 +632,7 @@ export async function _industryLimitsForAdd(spec, siblings, bookValue, { quote, 
         const industry = mine.name ?? mine.code
         // `avoid` rides on the refusal so the card can ask and retry — a verdict that turned after the proposal was
         // never marked, and the add could otherwise be refused forever (code review 2026-10-11).
-        return { ok: false, reason: 'avoid_industry', detail: `Pythia rates ${industry} AVOID — add ${asset} only with the user's explicit OK`, avoid: [{ asset, industry }] }
+        return { ok: false, reason: 'avoid_industry', detail: `The industry strategist rates ${industry} AVOID — add ${asset} only with the user's explicit OK`, avoid: [{ asset, industry }] }
     }
     const explicit = Number(spec.quantity) > 0
     const sized = !explicit && mine.assessment?.hype && Number(spec.allocationRatio) > 0
@@ -676,7 +676,7 @@ export async function _industryLimitsForScaleIn(item, legs, change, { bookValue,
     if (!mine?.code) return { ok: true, addFraction: f }
     if (mine.assessment?.verdict === 'avoid' && change.avoid_ok !== true) {
         const industry = mine.name ?? mine.code
-        return { ok: false, reason: 'avoid_industry', detail: `Pythia rates ${industry} AVOID — add to ${asset} only with the user's explicit OK`, avoid: [{ asset, industry }] }
+        return { ok: false, reason: 'avoid_industry', detail: `The industry strategist rates ${industry} AVOID — add to ${asset} only with the user's explicit OK`, avoid: [{ asset, industry }] }
     }
     let frac = mine.assessment?.hype ? f * HYPE_FACTOR : f
     if (!(bookValue > 0)) return { ok: true, addFraction: frac }

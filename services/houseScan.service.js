@@ -57,7 +57,7 @@ export function pythiaContext(a, { link = null, why = null, argus = null } = {})
     return {
         pythia: true,
         // The queue's title for the row (toWatchRow reads `reason`).
-        reason: `Pythia: ${a.subject?.name ?? 'industry'} ${book}`,
+        reason: `The industry strategist: ${a.subject?.name ?? 'industry'} ${book}`,
         subject: a.subject?.name ?? null, kind: a.subject?.kind ?? 'industry', link,
         verdict: a.verdict, horizon: a.horizon ?? null,
         thesis: String(a.thesis ?? '').slice(0, 500) || null,

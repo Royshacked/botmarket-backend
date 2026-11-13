@@ -10,7 +10,7 @@ import { getSecFilings } from '../../providers/sec.provider.js'
 import { cleanConviction } from '../conviction.util.js'
 import { formatWorkspaceLine } from '../portfolioMode.util.js'
 import { logger }         from '../logger.service.js'
-import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, buildAccountLines, cleanReply, makeToolHandler, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, BREVITY_RULE, VENUE_RULE, buildStandingProposalRule, cachedBlock } from '../agentUtils.js'
+import { COMMON_TOOL_HANDLERS, normalizeMessages, makePromptLoader, buildAccountLines, cleanReply, makeToolHandler, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, VOICE_RULE, BREVITY_RULE, VENUE_RULE, buildStandingProposalRule, cachedBlock } from '../agentUtils.js'
 import { makeTradingContextHandlers, buildVenueSection } from '../tools/tradingContext.tools.js'
 import { makeMarketHoursHandlers, MARKET_HOURS_TOOL_SPEC } from '../tools/marketHours.tools.js'
 import { makeIndustryViewsHandlers, INDUSTRY_VIEWS_TOOL_SPEC } from '../tools/industryViews.tools.js'
@@ -49,7 +49,7 @@ export const TOOLS = toolsFor({
         description: `Upcoming earnings dates (with EPS/revenue estimates) between two dates (YYYY-MM-DD, window up to ~3 months). Optionally filter to specific symbols. Use it for entry timing — a candidate reporting in a few days carries gap risk, so you may size in after the print rather than before it. Pass symbols when you have them: a market-wide ask returns only the soonest rows, and says so.`,
         cache: true,
     },
-    get_coverage: `The house coverage pool — every name Prometheus has researched (variant-perception thesis, OUR price target vs the Street = the gap/edge, a rating, the selection schools it fits, and the status), GROUPED BY GICS SUB-INDUSTRY. This is the ONLY source for mandate build: fetch filtered by \`industry\` (the sleeve being filled — its GICS code or exact name) and the mandate's selection \`school\`. \`sector\` is for a broad look only. An uncovered name the user explicitly asks for is not in it — say so; Prometheus covers names at his own desk. Read-only.`,
+    get_coverage: `The house coverage pool — every name the analyst has researched (variant-perception thesis, OUR price target vs the Street = the gap/edge, a rating, the selection schools it fits, and the status), GROUPED BY GICS SUB-INDUSTRY. This is the ONLY source for mandate build: fetch filtered by \`industry\` (the sleeve being filled — its GICS code or exact name) and the mandate's selection \`school\`. \`sector\` is for a broad look only. An uncovered name the user explicitly asks for is not in it — say so; the analyst covers names at his own desk. Read-only.`,
     get_chart: `Render a candlestick chart IMAGE for ONE name and look at it directly. Your job is allocation, not entry timing, so use this for the questions a picture answers better than a number: where a candidate sits in its multi-year range, whether a holding's trend is intact or broken, how ugly a drawdown was, what a long base looks like. Prefer weekly/monthly for a multi-month or multi-year hold; a daily view is for judging whether to phase into a position now or wait. Numbers (valuation, risk metrics, correlations) still decide the WEIGHT — this only informs the read. Set show_to_user true when the picture is part of the case you're making to the user, so they see what you saw.`,
     // APPENDED, never inserted — the snapshot compares by index and prompt caching keys off the
     // array prefix.
@@ -123,7 +123,7 @@ export function _formatCoverage(rows, { subs = null, industry = null } = {}) {
     if (!list.length) {
         const which = industry ? ` in ${industry.name} (${industry.code})` : ''
         const code  = industry ? `"industry_code": "${industry.code}"` : '"industry_code" = the sleeve\'s GICS sub-industry code'
-        return `No house coverage yet${which} for these filters — nothing researched to build from. Emit a <screen_request> for this sleeve (${code}, lens = the mandate's selection school): its companies are screened and Prometheus researches them on the server, and the user gets a card to resume the build when the sleeve is decided. Say that, then end the turn. A specific uncovered name the user asked for by ticker: say it is not covered — they can ask Prometheus at his desk.`
+        return `No house coverage yet${which} for these filters — nothing researched to build from. Emit a <screen_request> for this sleeve (${code}, lens = the mandate's selection school): its companies are screened and the analyst researches them on the server, and the user gets a card to resume the build when the sleeve is decided. Say that, then end the turn. A specific uncovered name the user asked for by ticker: say it is not covered — they can ask the analyst at his desk.`
     }
     const line = (c) => {
         const pt      = c.price_target?.value
@@ -154,8 +154,8 @@ export function _formatCoverage(rows, { subs = null, industry = null } = {}) {
     const blocks = [...groups.values()].sort((a, b) => a.rank - b.rank).map(g => [g.head, ...g.names.map(line)].join('\n'))
 
     return [
-        'House coverage pool (Prometheus-researched theses — build from these; our target vs the Street is the edge).',
-        'Grouped by GICS sub-industry — a sleeve is one sub-industry. A sleeve from your architecture with no heading here has nothing researched behind it yet: emit a <screen_request> for it (its industry_code + lens) — the companies are screened and Prometheus researches them on the server, and the user is carded to resume when it is done. Do NOT shrink the sleeve to fit what happens to be covered, do not fill it from a neighbouring industry\'s names, and do not pick names from get_fundamentals or memory: what is already researched is a fact about our past work, not a view about this mandate. A specific uncovered name the user asked for: say it is not covered — Prometheus covers names at his own desk.',
+        'House coverage pool (the analyst-researched theses — build from these; our target vs the Street is the edge).',
+        'Grouped by GICS sub-industry — a sleeve is one sub-industry. A sleeve from your architecture with no heading here has nothing researched behind it yet: emit a <screen_request> for it (its industry_code + lens) — the companies are screened and the analyst researches them on the server, and the user is carded to resume when it is done. Do NOT shrink the sleeve to fit what happens to be covered, do not fill it from a neighbouring industry\'s names, and do not pick names from get_fundamentals or memory: what is already researched is a fact about our past work, not a view about this mandate. A specific uncovered name the user asked for: say it is not covered — the analyst covers names at his own desk.',
         ...blocks.flatMap(b => ['', b]),
     ].join('\n')
 }
@@ -238,7 +238,7 @@ async function chatStream({ messages = [], ideaAccounts = [], mainAccountId = nu
     // session, so caching it lets turns 2+ read it at ~0.1× instead of re-paying
     // full price every turn. A turn where it does change just re-writes it once.
     const systemPrompt = [
-        cachedBlock(_systemPrompt() + buildRouteRule('portfolio') + LANGUAGE_RULE + VENUE_RULE + buildStandingProposalRule('portfolio_update', 'Accept changes', 'IN A REVIEW ONLY — outside a review the block is applied the moment you emit it, so there you emit it once and never repeat it') + BREVITY_RULE),
+        cachedBlock(_systemPrompt() + buildRouteRule('portfolio') + LANGUAGE_RULE + VOICE_RULE + VENUE_RULE + buildStandingProposalRule('portfolio_update', 'Accept changes', 'IN A REVIEW ONLY — outside a review the block is applied the moment you emit it, so there you emit it once and never repeat it') + BREVITY_RULE),
         ...(dynamicSections.length
             ? [cachedBlock(dynamicSections.join('\n\n'))]
             : []),
@@ -432,7 +432,7 @@ export async function _sizePlan(plan, { mandate = null } = {}) {
     restIdx.forEach((k, j) => { ideas[k].allocationRatio = Number(lim.weights[j].toFixed(4)) })
     const avoid = applyIndustryLimits(all, views, { cap: Infinity }).avoid      // every name, own-sized ones included
     const notes = [...lim.notes.filter(n => !/AVOID/.test(n))]
-    if (avoid.length) notes.push(`Pythia rates ${[...new Set(avoid.map(x => x.industry))].join(', ')} AVOID (${avoid.map(x => x.asset).join(', ')}) — the book is saved only with your OK.`)
+    if (avoid.length) notes.push(`The industry strategist rates ${[...new Set(avoid.map(x => x.industry))].join(', ')} AVOID (${avoid.map(x => x.asset).join(', ')}) — the book is saved only with your OK.`)
     if (own.some(Boolean)) notes.unshift(`Your own share counts are kept (${ideas.filter((_, k) => own[k]).map(i => i.asset).join(', ')}) — the brake and the cap apply to the sizes the platform computes.`)
     if (capNote) notes.unshift(capNote)
     plan.limits = { notes, avoid, braked: lim.braked, capped: lim.capped, cash: Number(lim.cash.toFixed(4)), single_industry: cap === Infinity }

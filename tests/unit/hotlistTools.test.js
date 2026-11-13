@@ -42,7 +42,7 @@ test('a show-only reply says which list it opened', () => {
     assert.equal(showLine({ kind: 'orders' }), "Here's what's awaiting orders.")
     assert.equal(showLine({ kind: 'calendar' }), "Here's the calendar.")
     assert.equal(showLine({ kind: 'positions' }), 'Here are your positions.')
-    assert.equal(showLine({ kind: 'board' }), "Here's Pythia's forecast board.")
+    assert.equal(showLine({ kind: 'board' }), "Here's the forecast board.")
 })
 
 // ─── The hotlist read ─────────────────────────────────────────────────────────
@@ -60,13 +60,13 @@ const TODAY = {
     ],
 }
 
-test('the hotlist reads as counts, Argus\'s read, then one line per name with its reason', () => {
+test('the hotlist reads as counts, the stock picker\'s read, then one line per name with its reason', () => {
     const t = formatHotlist(TODAY)
     assert.match(t, /^Hotlist for 2026-10-22 — 3 names \(2 in play, 1 setting up\)\. Prices as of each name's checkpoint, not live\./)
-    assert.match(t, /Argus on the mid board: Breadth is fine/)
-    assert.match(t, /EPAM \(EPAM Systems\) · in play · mid-day, 2\.4% room · \$180\.50 \(\+1\.6%\) · ARGUS PICK #1\n {6}1\.56× normal volume, above the open\n {6}Argus: Volume behind a clean open\./)
+    assert.match(t, /The stock picker on the mid board: Breadth is fine/)
+    assert.match(t, /EPAM \(EPAM Systems\) · in play · mid-day, 2\.4% room · \$180\.50 \(\+1\.6%\) · PICK #1\n {6}1\.56× normal volume, above the open\n {6}The stock picker: Volume behind a clean open\./)
     assert.match(t, /DXC · setting up · this week, 7\.3% room · \$20\.50\n {6}NR7 · earnings in 7 days — a run-up: out before the report/)
-    assert.match(t, /TSCO · in play · mid-day, open sky · Argus: avoid\n {6}Argus \(avoid\): Volume with no story\./)
+    assert.match(t, /TSCO · in play · mid-day, open sky · The stock picker: avoid\n {6}The stock picker \(avoid\): Volume with no story\./)
 })
 
 test('the hotlist caps the names it lists, and says how many more', () => {

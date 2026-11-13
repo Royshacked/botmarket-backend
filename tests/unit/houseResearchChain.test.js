@@ -158,7 +158,7 @@ function scanDeps(over = {}) {
     } }
 }
 
-test('Argus\'s picks are queued with his reason, frozen on the call, and his spend booked to the week\'s ledger', async () => {
+test('The stock picker\'s picks are queued with his reason, frozen on the call, and his spend booked to the week\'s ledger', async () => {
     const { queued, attached, booked, deps } = scanDeps()
     const r = await runHouseScan([{ kind: 'industry', code: 'A', name: 'Steel', outcome: 'published', verdict: 'swing' }], deps, { bookTo: 'admin1' })
     assert.deepEqual(queued.map(q => q.symbol), ['A1', 'A2'])
@@ -180,14 +180,14 @@ test('a theme: supplier links first, then direct, order 3 never; one attach for 
 
 // ─── Prometheus, on her book's horizon ───────────────────────────────────────
 
-test('the opening carries Argus\'s reason and the horizon the book is graded on', () => {
+test('the opening carries the stock picker\'s reason and the horizon the book is graded on', () => {
     const o = researchOpening({ symbol: 'nue', context: { pythia: true, verdict: 'swing', kind: 'industry', subject: 'Steel', thesis: 't', argus: { why: 'mini-mill leader', caution: 'imports' } } })
-    assert.match(o, /Argus chose it from the industry: mini-mill leader What would make it wrong: imports/)
+    assert.match(o, /the stock picker chose it from the industry: mini-mill leader What would make it wrong: imports/)
     assert.match(o, /3m or 6m horizon/)
     assert.doesNotMatch(researchOpening({ symbol: 'X', context: { sector: 'Tech' } }), /horizon/)
 })
 
-test('a Pythia name off its book\'s horizon is held; other names never are', () => {
+test('a the industry strategist name off its book\'s horizon is held; other names never are', () => {
     const item = (verdict) => ({ context: { pythia: true, verdict } })
     assert.equal(offBookHorizon(item('swing'), { price_target: { horizon: '6m' } }), null)
     assert.match(offBookHorizon(item('swing'), { price_target: { horizon: '24m' } }), /24m — swing takes 3m\/6m/)
@@ -298,12 +298,12 @@ test('the picks are graded against the basket and against the largest names', ()
     assert.equal(gradePicks({ ...picks, basket_entry: undefined }, exit, ['X', 'Y', 'Z']), null, 'no basket over the same window → no grade, never a mismatched one')
 })
 
-test('a trader sees the queued names, not Argus\'s lists or their spend', () => {
+test('a trader sees the queued names, not the stock picker\'s lists or their spend', () => {
     const t = weekForTraders({ asof: 'x', results: [], house_scan: { queued: [{ symbol: 'NUE' }], cost_usd: 0.01, picks: [{ note: 'n' }] } })
     assert.deepEqual(t.house_scan, { queued: [{ symbol: 'NUE' }] })
 })
 
-test('a name already in line is off the list before Argus picks, so it never costs a slot', async () => {
+test('a name already in line is off the list before the stock picker picks, so it never costs a slot', async () => {
     let seen = null
     const { queued, deps } = scanDeps({
         inLine: async () => [{ symbol: 'A1' }],
@@ -330,7 +330,7 @@ test("the pick-up spans the recent weeks: an older week's name goes first, and t
 
 // ─── the code review of 2026-10-23 ──────────────────────────────────────────
 
-test("the budget counts every Pythia name researched in the last seven days, not only this week's", async () => {
+test("the budget counts every the industry strategist name researched in the last seven days, not only this week's", async () => {
     const rows = [
         { symbol: 'STLD', source: 'pythia', status: 'queued' },
         { symbol: 'OLDER', source: 'pythia', status: 'done', cost_usd: 4.5, updated_at: new Date(NOW_MS - 2 * 86400e3).toISOString() },   // an older week's name, two days ago

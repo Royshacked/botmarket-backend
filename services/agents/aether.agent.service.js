@@ -16,7 +16,7 @@ import { buildTagCaptures } from '../llmStream.util.js'
 import { DESKS } from '../desks/registry.js'
 import { makeRouteCapture, buildRouteRule } from '../routing.util.js'
 import { toolsFor }       from '../agentTools.registry.js'
-import { makePromptLoader, LANGUAGE_RULE, BREVITY_RULE, cachedBlock, normalizeMessages, cleanReply } from '../agentUtils.js'
+import { makePromptLoader, LANGUAGE_RULE, VOICE_RULE, BREVITY_RULE, cachedBlock, normalizeMessages, cleanReply } from '../agentUtils.js'
 import { AETHER_TOOL_SPECS, makeAetherToolHandlers } from '../tools/aether.tools.js'
 import { logger }         from '../logger.service.js'
 
@@ -60,7 +60,7 @@ async function chatStream({
 function _buildSystemPrompt() {
     const today = new Date().toISOString().slice(0, 10)
     return [
-        cachedBlock(_systemPrompt() + buildRouteRule('aether') + LANGUAGE_RULE + BREVITY_RULE),
+        cachedBlock(_systemPrompt() + buildRouteRule('aether') + LANGUAGE_RULE + VOICE_RULE + BREVITY_RULE),
         { type: 'text', text: `---\nCURRENT DATE: ${today}.` },
     ]
 }

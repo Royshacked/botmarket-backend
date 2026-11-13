@@ -27,7 +27,7 @@ import { getEventCandidates } from '../../api/aether/aether.service.js'
 const LOG = '[aetherTools]'
 
 export const AETHER_TOOL_SPECS = {
-    get_event_candidates: `Recent event runs and the companies each named. One run is one named event — a tariff, an export ban, an appropriation — and one candidate is one company it reaches, carrying the mechanism, a citable press fact, whatever its own SEC filings said, how far it has moved against SPY since the event, and when it expires. Call it for "what has Aether found", "why is this name here", "did I miss it", or any question about a specific event or ticker on the list. Takes an optional \`days\` (default 30) and \`includeDropped\` (default false — pass true to see the names a gate rejected and why).`,
+    get_event_candidates: `Recent event runs and the companies each named. One run is one named event — a tariff, an export ban, an appropriation — and one candidate is one company it reaches, carrying the mechanism, a citable press fact, whatever its own SEC filings said, how far it has moved against SPY since the event, and when it expires. Call it for "what has the event analyst found", "why is this name here", "did I miss it", or any question about a specific event or ticker on the list. Takes an optional \`days\` (default 30) and \`includeDropped\` (default false — pass true to see the names a gate rejected and why).`,
 }
 
 /**
@@ -39,7 +39,7 @@ export const AETHER_TOOL_SPECS = {
  */
 export function formatEventCandidates(runs) {
     if (!runs?.length) {
-        return 'No event runs in the window. Aether names companies when a story breaks, and '
+        return 'No event runs in the window. The event analyst names companies when a story breaks, and '
             + 'discovery is started by an admin rather than on a schedule — so an empty list '
             + 'means nothing has been run, not that nothing happened.'
     }

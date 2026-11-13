@@ -107,7 +107,7 @@ test('a review add: avoid refused without avoid_ok, hype halves the weight, the 
 
 // ── what the desks read ──────────────────────────────────────────────────────
 
-test('the industry join carries Pythia\'s verdict per name; a failed verdict read leaves the views standing', async () => {
+test('the industry join carries the industry strategist\'s verdict per name; a failed verdict read leaves the views standing', async () => {
     const m = memDb()
     _setAssessmentIO({ db: async () => m.db })
     await m.db.collection('industry_assessment').insertOne({ id: 'ia_ind_1', subject: { kind: 'industry', code: '1' }, verdict: 'interesting_trade', horizon: 'months', moved: { hype: true }, thesis: 't' })
@@ -126,12 +126,12 @@ test('the industry join carries Pythia\'s verdict per name; a failed verdict rea
     assert.equal(broken.NVDA.status, 'pending')
 })
 
-test('Atlas and Axl read the verdict on each name\'s line', () => {
+test('The portfolio manager and Axl read the verdict on each name\'s line', () => {
     assert.equal(verdictLine(null), '')
-    assert.match(verdictLine({ verdict: 'avoid', hype: true }), /Pythia's verdict: AVOID · HYPE/)
+    assert.match(verdictLine({ verdict: 'avoid', hype: true }), /the industry strategist's verdict: AVOID · HYPE/)
     assert.match(verdictLine({ verdict: 'watch', decides_by: '2026-10-28', question: 'Do hyperscalers hold capex?' }), /WATCH — decides by 2026-10-28: Do hyperscalers hold capex\?/)
     const text = formatSymbolViews({ NVDA: { name: 'Semis', sector: 'IT', status: 'pending', assessment: { verdict: 'swing' } } }, ['NVDA'])
-    assert.match(text, /Pythia's verdict: FOR SWING/)
+    assert.match(text, /the industry strategist's verdict: FOR SWING/)
 })
 
 // ── the house scan ───────────────────────────────────────────────────────────
@@ -179,8 +179,8 @@ test('the house scan queues the largest uncovered names of this week\'s swing an
     assert.deepEqual(queued.map(q => q.symbol), ['STLD', 'CLF', 'X', 'LRCX', 'AMAT', 'KLAC', 'NVDA', 'AVGO', 'AMD'],
         'Steel minus the covered NUE; the theme\'s SUPPLIERS first, then its direct link; never order 3, never Avoid')
     assert.equal(r.queued.length, 9)
-    assert.equal(queued[0].source, 'pythia', "Pythia's verdict picked it, not Argus")
-    assert.equal(queued[0].context.reason, 'Pythia: Steel for swing')
+    assert.equal(queued[0].source, 'pythia', "The industry strategist's verdict picked it, not the stock picker")
+    assert.equal(queued[0].context.reason, 'The industry strategist: Steel for swing')
     assert.equal(queued[0].requestedBy, 'house')
     assert.deepEqual(queued[0].context, pythiaContext({ id: 'ia_ind_11', subject: { kind: 'industry', name: 'Steel' }, verdict: 'swing', horizon: 'months', thesis: 'Tariffs lift prices.', risks: ['demand', 'imports', 'a', 'b'] }))
     assert.equal(queued[0].context.risks.length, 3)
@@ -238,7 +238,7 @@ test('construction: the user\'s own share counts are kept; a single-industry man
     assert.match(single.limits.notes[0], /Industry cap off/)
 })
 
-test('a review update: Atlas cannot write the user\'s OK; adds in an AVOID industry are marked for the card', async () => {
+test('a review update: the portfolio manager cannot write the user\'s OK; adds in an AVOID industry are marked for the card', async () => {
     const { _markAvoidAdds } = await import('../../services/agents/portfolio.agent.service.js')
     const update = { changes: [
         { action: 'add_item', item: { asset: 'XOM', allocationRatio: 0.05, avoid_ok: true } },

@@ -2,7 +2,7 @@
     "aether": [
         {
             "name": "get_event_candidates",
-            "description": "Recent event runs and the companies each named. One run is one named event — a tariff, an export ban, an appropriation — and one candidate is one company it reaches, carrying the mechanism, a citable press fact, whatever its own SEC filings said, how far it has moved against SPY since the event, and when it expires. Call it for \"what has Aether found\", \"why is this name here\", \"did I miss it\", or any question about a specific event or ticker on the list. Takes an optional `days` (default 30) and `includeDropped` (default false — pass true to see the names a gate rejected and why).",
+            "description": "Recent event runs and the companies each named. One run is one named event — a tariff, an export ban, an appropriation — and one candidate is one company it reaches, carrying the mechanism, a citable press fact, whatever its own SEC filings said, how far it has moved against SPY since the event, and when it expires. Call it for \"what has the event analyst found\", \"why is this name here\", \"did I miss it\", or any question about a specific event or ticker on the list. Takes an optional `days` (default 30) and `includeDropped` (default false — pass true to see the names a gate rejected and why).",
             "input_schema": {
                 "type": "object",
                 "properties": {
@@ -492,7 +492,7 @@
         },
         {
             "name": "get_coverage",
-            "description": "The house coverage pool — every name Prometheus has researched (variant-perception thesis, OUR price target vs the Street = the gap/edge, a rating, the selection schools it fits, and the status), GROUPED BY GICS SUB-INDUSTRY. This is the ONLY source for mandate build: fetch filtered by `industry` (the sleeve being filled — its GICS code or exact name) and the mandate's selection `school`. `sector` is for a broad look only. An uncovered name the user explicitly asks for is not in it — say so; Prometheus covers names at his own desk. Read-only.",
+            "description": "The house coverage pool — every name the analyst has researched (variant-perception thesis, OUR price target vs the Street = the gap/edge, a rating, the selection schools it fits, and the status), GROUPED BY GICS SUB-INDUSTRY. This is the ONLY source for mandate build: fetch filtered by `industry` (the sleeve being filled — its GICS code or exact name) and the mandate's selection `school`. `sector` is for a broad look only. An uncovered name the user explicitly asks for is not in it — say so; the analyst covers names at his own desk. Read-only.",
             "input_schema": {
                 "type": "object",
                 "properties": {
@@ -618,7 +618,7 @@
         },
         {
             "name": "get_industry_views",
-            "description": "The house's INDUSTRY VIEWS from Pythia: for each GICS sub-industry, three structural answers — DEMAND (growing / in_line / shrinking against the economy), ECONOMICS (good / average / poor: do its companies earn above their cost of capital), CYCLE (peak / mid / trough, or stable: where current margins sit in the industry's own 10-year range). Pass `symbols` to get the industry each name is in and the house's answer for it; or `sector` (a GICS sector, e.g. Information Technology) for every sub-industry in it. These are DESCRIPTIONS of an industry, never a forecast of a price or a return — report them as such, and never present one as a reason a stock will rise. An industry still `pending` has no house answer yet: say so, do not supply one. Each name's line also carries Pythia's standing VERDICT on its industry where there is one — for swing / for long term (the house finds it worth that book's attention now), watch (a live question, with the date that decides it), avoid (the house expects it to go wrong), no case — and HYPE when its basket has run up 100%+ in two years and 100%+ over the market (a crash-risk flag, not a timing signal). A judgment from evidence, never a price forecast; the user's mandate outranks it. Changing an answer is Pythia's desk, not this tool.",
+            "description": "The house's INDUSTRY VIEWS from the industry strategist: for each GICS sub-industry, three structural answers — DEMAND (growing / in_line / shrinking against the economy), ECONOMICS (good / average / poor: do its companies earn above their cost of capital), CYCLE (peak / mid / trough, or stable: where current margins sit in the industry's own 10-year range). Pass `symbols` to get the industry each name is in and the house's answer for it; or `sector` (a GICS sector, e.g. Information Technology) for every sub-industry in it. These are DESCRIPTIONS of an industry, never a forecast of a price or a return — report them as such, and never present one as a reason a stock will rise. An industry still `pending` has no house answer yet: say so, do not supply one. Each name's line also carries the industry strategist's standing VERDICT on its industry where there is one — for swing / for long term (the house finds it worth that book's attention now), watch (a live question, with the date that decides it), avoid (the house expects it to go wrong), no case — and HYPE when its basket has run up 100%+ in two years and 100%+ over the market (a crash-risk flag, not a timing signal). A judgment from evidence, never a price forecast; the user's mandate outranks it. Changing an answer is the industry strategist's desk, not this tool.",
             "input_schema": {
                 "type": "object",
                 "properties": {
@@ -638,7 +638,7 @@
         },
         {
             "name": "get_house_industries",
-            "description": "The HOUSE'S INDUSTRIES for this book — the GICS sub-industries Pythia (the house's industry desk) rates FOR SWING or FOR LONG TERM, plus the industries inside the themes it rates so, each with its thesis, top risk, how far it has moved and the companies it names. Pass `book` (the mandate's: \"swing\" for under about a year, \"long_term\" for longer — use judgment in between) at the start of a build: THESE ARE THE CANDIDATE SLEEVES, one sub-industry per sleeve. Pass `industry` (a code or name) for one industry's largest companies, our coverage marked. The house judges industries, never stocks, and the mandate and the user still outrank it.",
+            "description": "The HOUSE'S INDUSTRIES for this book — the GICS sub-industries the industry strategist (the house's industry desk) rates FOR SWING or FOR LONG TERM, plus the industries inside the themes it rates so, each with its thesis, top risk, how far it has moved and the companies it names. Pass `book` (the mandate's: \"swing\" for under about a year, \"long_term\" for longer — use judgment in between) at the start of a build: THESE ARE THE CANDIDATE SLEEVES, one sub-industry per sleeve. Pass `industry` (a code or name) for one industry's largest companies, our coverage marked. The house judges industries, never stocks, and the mandate and the user still outrank it.",
             "input_schema": {
                 "type": "object",
                 "properties": {
@@ -1207,7 +1207,7 @@
         },
         {
             "name": "get_horizon_list",
-            "description": "The house's list for a HORIZON — the ONLY names you may pick from. `horizon`: \"intraday\" or \"day\" (today's latest day board — the names in play at 09:20, 10:30 or 14:30 ET, with why and their freshest headline; in play means moving up so far, not a prediction of where it goes next),\"short term swing\" (This week: the run-up rule's names, each read by Prometheus), \"swing\" or \"long term\" (the house's Swing / Long term lists: Prometheus's Buys with his target, and the timing read — now, or wait for what). A name that is not in the answer is not a pick. An empty list says why; say that to the user and give no pick.",
+            "description": "The house's list for a HORIZON — the ONLY names you may pick from. `horizon`: \"intraday\" or \"day\" (today's latest day board — the names in play at 09:20, 10:30 or 14:30 ET, with why and their freshest headline; in play means moving up so far, not a prediction of where it goes next),\"short term swing\" (This week: the run-up rule's names, each read by the analyst), \"swing\" or \"long term\" (the house's Swing / Long term lists: the analyst's Buys with his target, and the timing read — now, or wait for what). A name that is not in the answer is not a pick. An empty list says why; say that to the user and give no pick.",
             "input_schema": {
                 "type": "object",
                 "properties": {
@@ -2874,7 +2874,7 @@
         },
         {
             "name": "get_news",
-            "description": "Recent NEWS on the name — dated, attributed headlines with the publisher's own summary, newest first. `companies` with the TICKER as `subject` is the one you reach for: the catalyst check inside the horizon (rung 3 and rung 5 of the guided build), and the first place to look before web_search, because it is cached and dated where a search is neither. `topic` for a theme with no ticker; `headlines` is the market's front page and is rarely a Mentor question. Read them as what was WRITTEN — a headline is a fact to weigh, never a level.",
+            "description": "Recent NEWS on the name — dated, attributed headlines with the publisher's own summary, newest first. `companies` with the TICKER as `subject` is the one you reach for: the catalyst check inside the horizon (rung 3 and rung 5 of the guided build), and the first place to look before web_search, because it is cached and dated where a search is neither. `topic` for a theme with no ticker; `headlines` is the market's front page and is rarely a trading question. Read them as what was WRITTEN — a headline is a fact to weigh, never a level.",
             "input_schema": {
                 "type": "object",
                 "properties": {
@@ -3065,7 +3065,7 @@
         },
         {
             "name": "close_setup",
-            "description": "Close the saved setup being edited here: its status turns to closed and Talos stops watching it. It cannot be reopened. Call it only when the USER has said to close it or let it go, never on your own read that the trade is gone: say that, and ask. Saying a setup is closed without this call leaves it open.",
+            "description": "Close the saved setup being edited here: its status turns to closed and the trade monitor stops watching it. It cannot be reopened. Call it only when the USER has said to close it or let it go, never on your own read that the trade is gone: say that, and ask. Saying a setup is closed without this call leaves it open.",
             "input_schema": {
                 "type": "object",
                 "properties": {}
@@ -3120,7 +3120,7 @@
         },
         {
             "name": "get_watched_items",
-            "description": "Every list the user sees in the app: Mentor setups, portfolios (as books), Prometheus coverage, the QUEUED actions waiting for a venue to open, and the Aether events with the names each reached — plus, for an admin, the research queue. With status, levels and how fresh each is. This is the PLANS AND BOOKS they have made, NOT their open broker positions, balances or live P&L, which are get_trading_context. Setups and books come back scoped to the workspace the user is standing in (paper / live / manual) — those bind to an account, and merging two books into one list is not an answer. Coverage is research, binds to no account, and is shared across every workspace. Call it for \"what am I watching / what have I got going / what's still open\", and before saying the user has nothing. Finished items are excluded unless asked for.",
+            "description": "Every list the user sees in the app: setups, portfolios (as books), coverage, the QUEUED actions waiting for a venue to open, and the the event analyst events with the names each reached — plus, for an admin, the research queue. With status, levels and how fresh each is. This is the PLANS AND BOOKS they have made, NOT their open broker positions, balances or live P&L, which are get_trading_context. Setups and books come back scoped to the workspace the user is standing in (paper / live / manual) — those bind to an account, and merging two books into one list is not an answer. Coverage is research, binds to no account, and is shared across every workspace. Call it for \"what am I watching / what have I got going / what's still open\", and before saying the user has nothing. Finished items are excluded unless asked for.",
             "input_schema": {
                 "type": "object",
                 "properties": {
@@ -3292,7 +3292,7 @@
         },
         {
             "name": "get_industry_views",
-            "description": "The house's INDUSTRY VIEWS from Pythia: for each GICS sub-industry, three structural answers — DEMAND (growing / in_line / shrinking against the economy), ECONOMICS (good / average / poor: do its companies earn above their cost of capital), CYCLE (peak / mid / trough, or stable: where current margins sit in the industry's own 10-year range). Pass `symbols` to get the industry each name is in and the house's answer for it; or `sector` (a GICS sector, e.g. Information Technology) for every sub-industry in it. These are DESCRIPTIONS of an industry, never a forecast of a price or a return — report them as such, and never present one as a reason a stock will rise. An industry still `pending` has no house answer yet: say so, do not supply one. Each name's line also carries Pythia's standing VERDICT on its industry where there is one — for swing / for long term (the house finds it worth that book's attention now), watch (a live question, with the date that decides it), avoid (the house expects it to go wrong), no case — and HYPE when its basket has run up 100%+ in two years and 100%+ over the market (a crash-risk flag, not a timing signal). A judgment from evidence, never a price forecast; the user's mandate outranks it. Changing an answer is Pythia's desk, not this tool.",
+            "description": "The house's INDUSTRY VIEWS from the industry strategist: for each GICS sub-industry, three structural answers — DEMAND (growing / in_line / shrinking against the economy), ECONOMICS (good / average / poor: do its companies earn above their cost of capital), CYCLE (peak / mid / trough, or stable: where current margins sit in the industry's own 10-year range). Pass `symbols` to get the industry each name is in and the house's answer for it; or `sector` (a GICS sector, e.g. Information Technology) for every sub-industry in it. These are DESCRIPTIONS of an industry, never a forecast of a price or a return — report them as such, and never present one as a reason a stock will rise. An industry still `pending` has no house answer yet: say so, do not supply one. Each name's line also carries the industry strategist's standing VERDICT on its industry where there is one — for swing / for long term (the house finds it worth that book's attention now), watch (a live question, with the date that decides it), avoid (the house expects it to go wrong), no case — and HYPE when its basket has run up 100%+ in two years and 100%+ over the market (a crash-risk flag, not a timing signal). A judgment from evidence, never a price forecast; the user's mandate outranks it. Changing an answer is the industry strategist's desk, not this tool.",
             "input_schema": {
                 "type": "object",
                 "properties": {
@@ -3337,7 +3337,7 @@
         },
         {
             "name": "get_hotlist",
-            "description": "Today's HOTLIST — THIS WEEK's run-up names, built overnight after the close (the day-trade boards were archived 2026-10-25), long side only. The rule: a company reporting in six sessions whose last three reports all beat the estimate, while SPY is over its 200-day — bought at the next open, out at the close before the report; every qualifying name is listed equally (a small, fixed daily budget split across them, not a ranking). For each name: its report date, the rule's reason, and the price at the close before the list (not live). Prometheus reads every name and sets a catalyst target — that read, not the list, is the verdict. When SPY is under its 200-day the list is empty and says so. Older days may still show the archived day boards' names and Argus's picks. Use it to say what is on the hotlist in a line or two; never present a name as a reason a stock will rise.",
+            "description": "Today's HOTLIST — THIS WEEK's run-up names, built overnight after the close (the day-trade boards were archived 2026-10-25), long side only. The rule: a company reporting in six sessions whose last three reports all beat the estimate, while SPY is over its 200-day — bought at the next open, out at the close before the report; every qualifying name is listed equally (a small, fixed daily budget split across them, not a ranking). For each name: its report date, the rule's reason, and the price at the close before the list (not live). The analyst reads every name and sets a catalyst target — that read, not the list, is the verdict. When SPY is under its 200-day the list is empty and says so. Older days may still show the archived day boards' names and the stock picker's picks. Use it to say what is on the hotlist in a line or two; never present a name as a reason a stock will rise.",
             "input_schema": {
                 "type": "object",
                 "properties": {
@@ -3696,7 +3696,7 @@
         },
         {
             "name": "get_news",
-            "description": "Recent dated NEWS on a name, newest first (`companies` with the ticker as `subject`). Only to explain a move on the chart the user asks about — the news is Prometheus's field, not yours.",
+            "description": "Recent dated NEWS on a name, newest first (`companies` with the ticker as `subject`). Only to explain a move on the chart the user asks about — the news is the analyst's field, not yours.",
             "input_schema": {
                 "type": "object",
                 "properties": {

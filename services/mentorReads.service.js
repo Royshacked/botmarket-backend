@@ -143,7 +143,7 @@ export function mainBookOf(cov) {
 export function viewRead(cov, view) {
     const t = view.target ?? {}
     const which = view.book === 'long_term' ? 'long-term' : 'swing'
-    const head = `Prometheus's ${which} view: ${String(view.rating ?? 'unrated').replace('_', ' ')}, target ${Number(t.value).toFixed(2)} by ${t.target_date ?? '?'} (a ${t.horizon ?? '?'} target)`
+    const head = `the analyst's ${which} view: ${String(view.rating ?? 'unrated').replace('_', ' ')}, target ${Number(t.value).toFixed(2)} by ${t.target_date ?? '?'} (a ${t.horizon ?? '?'} target)`
     return {
         facts: [head, view.why ? `why: ${_first(view.why, 300)}` : null, view.kill?.length ? `what breaks it: ${view.kill.slice(0, 2).join('; ')}` : null,
             `his coverage (the main target): ${coverageRead(cov).facts}`].filter(Boolean).join('; '),
@@ -163,9 +163,9 @@ export function coverageRead(cov) {
 
 /** A catalyst read → `{ facts, against }`. A pass (no target) is against: it says why. Pure. */
 export function catalystRead(read) {
-    if (read.status === 'active') return { facts: readFacts(read) ?? `Prometheus (${read.verdict}): ${_first(read.read) ?? 'read on file'}`, against: false }
+    if (read.status === 'active') return { facts: readFacts(read) ?? `the analyst (${read.verdict}): ${_first(read.read) ?? 'read on file'}`, against: false }
     const why = _first(read.read)
-    return { facts: `Prometheus (${read.verdict ?? 'unclear'}): no trade — ${String(read.pass_reason ?? 'pass').replace(/_/g, ' ')}${why ? `; ${why}` : ''}`, against: true }
+    return { facts: `the analyst (${read.verdict ?? 'unclear'}): no trade — ${String(read.pass_reason ?? 'pass').replace(/_/g, ' ')}${why ? `; ${why}` : ''}`, against: true }
 }
 
 /**
@@ -227,7 +227,7 @@ export async function readFor(symbol, horizon, deps = _deps, { sessionId = null 
         const passed = mine.filter(r => r.status === 'rejected' && PASS_REASONS.has(r.reason) && Date.parse(r.updated_at ?? r.created_at) >= since).pop()
         if (passed) {
             return { kind, state: 'passed', against: true,
-                facts: `Prometheus researched ${sym} on ${String(passed.updated_at ?? passed.created_at).slice(0, 10)} and passed — ${String(passed.reason).replace(/_/g, ' ')}; no ${kind === 'coverage' ? 'coverage' : 'catalyst target'}` }
+                facts: `The analyst researched ${sym} on ${String(passed.updated_at ?? passed.created_at).slice(0, 10)} and passed — ${String(passed.reason).replace(/_/g, ' ')}; no ${kind === 'coverage' ? 'coverage' : 'catalyst target'}` }
         }
         const failedAt = sessionId ? _failed.get(`${sessionId}|${sym}|${kind}`) : null
         if (failedAt && deps.now() - failedAt < FAILED_HOLD_MS) return { kind, state: 'failed', at: failedAt, ...(need ? { need } : {}) }

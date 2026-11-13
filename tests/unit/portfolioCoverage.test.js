@@ -92,7 +92,7 @@ test('a PARTIAL read still says what to do about a sleeve with no heading — an
     assert.match(out, /no heading here has nothing researched behind it yet: emit a <screen_request> for it \(its industry_code \+ lens\)/)
     // No research queue for one name (2026-10-31): an uncovered ticker is said to be uncovered, Prometheus's to cover.
     assert.doesNotMatch(out, /<coverage_request>/)
-    assert.match(out, /not covered — Prometheus covers names at his own desk/)
+    assert.match(out, /not covered — the analyst covers names at his own desk/)
     // The failure worth naming outright: bending the architecture to fit what happens to be researched.
     assert.match(out, /shrink the sleeve to fit what happens to be covered/)
     assert.match(out, /neighbouring industry's names/)

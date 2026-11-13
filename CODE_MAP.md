@@ -474,6 +474,11 @@ services/
                           <ticker> unwrapped; dropDebris also drops a made-up capitals LABEL tag leading a line
                           or as a <X>…</X> pair — Proteus's "<MEASURED>", 2026-11-12); normalizeMessages (the one history helper, depth per
                           desk via MAX_MESSAGES); openingTurn(text) — how a headless run opens a desk.
+                          ONE VOICE (one-axl.md, 2026-11-13): VOICE_RULE rides every chat agent's cached spine right
+                          after LANGUAGE_RULE — you are Axl in a role, speak as "I", never an internal name
+                          (INTERNAL_NAMES). tests/unit/oneVoice.test.js fails when a name reaches a prompt file, a
+                          route rule, a tool definition or a house background prompt. The registry's `role`
+                          ("trader", "analyst"…) is what the route rule lists; `brand` is internal only.
                           resolveAgentStream: the model for a turn. SINCE 2026-09-21 EVERY turn — any
                           user, the admin included, and a turn with no user (market brief, coverage
                           re-model) — runs the HOUSE chat model (houseModels.service, one

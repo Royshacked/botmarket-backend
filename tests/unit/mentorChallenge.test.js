@@ -52,7 +52,7 @@ test('the gate the prompt claims matches the gate the code runs', () => {
 })
 
 test('coming back from a card asks REVISE or CANCEL before anything else', () => {
-    const section = PROMPT.split('### Coming back to a setup Talos raised')[1]?.split('\n## ')[0] ?? ''
+    const section = PROMPT.split('### Coming back to a setup the trade monitor raised')[1]?.split('\n## ')[0] ?? ''
     assert.ok(section.length > 800, 'the re-entry section is missing')
 
     // The one question that decides which conversation this is (mentor-flow-intent #17).
@@ -64,7 +64,7 @@ test('coming back from a card asks REVISE or CANCEL before anything else', () =>
 })
 
 test('the re-entry tells the model not to inherit the old numbers', () => {
-    const section = PROMPT.split('### Coming back to a setup Talos raised')[1]?.split('\n## ')[0] ?? ''
+    const section = PROMPT.split('### Coming back to a setup the trade monitor raised')[1]?.split('\n## ')[0] ?? ''
     assert.ok(section.length > 800, 'the re-entry section is missing')
 
     // The four load-bearing instructions. Each one is a specific way a redraw goes wrong: a level
@@ -77,7 +77,7 @@ test('the re-entry tells the model not to inherit the old numbers', () => {
 })
 
 test('the re-entry gets the sibling map right', () => {
-    const section = PROMPT.split('### Coming back to a setup Talos raised')[1]?.split('\n## ')[0] ?? ''
+    const section = PROMPT.split('### Coming back to a setup the trade monitor raised')[1]?.split('\n## ')[0] ?? ''
     // Prose against `SIBLINGS`: a prompt that offered a continuation where the code says there is
     // none would walk the user into a reversal wearing the missed trade's label.
     for (const [from, to] of Object.entries(SIBLINGS)) {

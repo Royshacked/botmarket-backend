@@ -75,7 +75,7 @@ test('the deciding read: fresh live coverage is READY with its views and date; s
 
 test("the wait line for a deciding read says what it decides, and why it is read again", () => {
     assert.equal(readWaitLine({ symbol: 'TSLA', horizon: null }, { kind: 'coverage', need: 'reinit', ahead: 0 }),
-        "Before I say whether TSLA is worth trading, and on which horizon, Prometheus is reading it — his coverage again (it is over 30 days old, or a report has come out since). I'll carry on as soon as it lands.")
+        "Before I say whether TSLA is worth trading, and on which horizon, I'm reading the business first — the coverage again (it is over 30 days old, or a report has come out since). I'll carry on as soon as it lands.")
 })
 
 // ─── Reading a read ──────────────────────────────────────────────────────────
@@ -86,7 +86,7 @@ const COV = { symbol: 'NVDA', status: 'active', rating: 'buy', conviction: { lev
 test('coverage as a read: his rating and target, the thesis\'s first sentence; against when not a Buy, broken or hit', () => {
     const r = coverageRead(COV)
     assert.equal(r.against, false)
-    assert.match(r.facts, /^Prometheus buy \(high conviction\), target 230\.00 by 2027-05-01 \(a 6m target\); thesis: Data-centre demand outruns supply through 2027\.$/)
+    assert.match(r.facts, /^the analyst buy \(high conviction\), target 230\.00 by 2027-05-01 \(a 6m target\); thesis: Data-centre demand outruns supply through 2027\.$/)
     assert.equal(coverageRead({ ...COV, rating: 'hold' }).against, true)
     assert.match(coverageRead({ ...COV, status: 'thesis_broken' }).facts, /his thesis is BROKEN/)
     assert.equal(coverageRead({ ...COV, status: 'target_hit' }).against, true)
@@ -96,7 +96,7 @@ test('a catalyst read: a live one is for the trade; a pass is against it and say
     assert.equal(catalystRead({ status: 'active', verdict: 'credible', read: 'A real beat.', target: null, run_up: { worth: false } }).against, false)
     const pass = catalystRead({ status: 'pass', verdict: 'priced_in', pass_reason: 'too_small', read: 'The move already happened. The rest.' })
     assert.equal(pass.against, true)
-    assert.equal(pass.facts, 'Prometheus (priced_in): no trade — too small; The move already happened.')
+    assert.equal(pass.facts, 'the analyst (priced_in): no trade — too small; The move already happened.')
 })
 
 function deps(over = {}) {
@@ -156,7 +156,7 @@ test('readFor: coverage researched and passed (no edge) recently is the answer; 
 
 // ─── Asking for one ──────────────────────────────────────────────────────────
 
-test('requestRead: a missing read is queued as Mentor\'s, the house run started for it, the session remembered — asked once', async () => {
+test('requestRead: a missing read is queued as the trader\'s, the house run started for it, the session remembered — asked once', async () => {
     let queued = false
     const d = deps({ listQueue: async (q) => (q.symbols && queued ? [{ symbol: 'NVDA', status: 'queued', created_at: 'x', context: { mentor: true } }] : []),
         enqueue: async (row) => { d.calls.enqueue.push(row); queued = true; return { ok: true } } })
@@ -231,14 +231,14 @@ function rig({ target = { symbol: 'NVDA', horizon: 'swing' }, request } = {}) {
 const user = { _id: 'u1', role: 'trader' }
 const rows = (sessions, s) => sessions.messagesSince({ sessionId: s.sessionId, userId: 'u1' })
 
-test('after a Mentor turn with a name and a confirmed horizon, code asks for the read and Mentor says so ONCE, with the line', async () => {
+test('after a the trader turn with a name and a confirmed horizon, code asks for the read and the trader says so ONCE, with the line', async () => {
     const r = rig()
     const s = await r.sessions.getActive({ userId: 'u1' })
     await r.runner.afterTurn({ user, sessionId: s.sessionId, agent: 'mentor', origin: 'user', out: { payload: { reply: 'Swing it is.' } } })
     assert.deepEqual(r.asked, [{ symbol: 'NVDA', horizon: 'swing', sessionId: s.sessionId, userId: 'u1' }])
     const [line] = await rows(r.sessions, s)
     assert.equal(line.agent, 'mentor')
-    assert.equal(line.content, 'Before I build the swing trade on NVDA, Prometheus is reading it — his full coverage. It waits in line behind 3 names in the house\'s research (about four minutes each). I\'ll carry on as soon as it lands.')
+    assert.equal(line.content, 'Before I build the swing trade on NVDA, I\'m reading the business first — the full coverage. It waits in line behind 3 names in the house\'s research (about four minutes each). I\'ll carry on as soon as it lands.')
 })
 
 test('no line when the read was not newly asked for, and a failed ask never breaks the turn', async () => {
@@ -254,22 +254,22 @@ test('no line when the read was not newly asked for, and a failed ask never brea
 
 test('the wait line: no queue named when nothing is ahead; a catalyst read is named as one', () => {
     assert.equal(readWaitLine({ symbol: 'SMCI', horizon: 'short term swing' }, { kind: 'catalyst', ahead: 0 }),
-        'Before I build the short term swing trade on SMCI, Prometheus is reading it — a catalyst read. I\'ll carry on as soon as it lands.')
+        'Before I build the short term swing trade on SMCI, I\'m reading the business first — a catalyst read. I\'ll carry on as soon as it lands.')
     assert.match(readWaitLine({ symbol: 'X', horizon: 'swing' }, { kind: 'coverage', ahead: 1 }), /behind 1 name in/)
 })
 
-test('a landed read: Prometheus\'s line, then the read handed to Mentor and his turn queued — on the same name and horizon only', async () => {
+test('a landed read: the analyst\'s line, then the read handed to the trader and his turn queued — on the same name and horizon only', async () => {
     const r = rig()
     const s = await r.sessions.getActive({ userId: 'u1' })
     const taken = await r.runner.readSettled({ userId: 'u1', sessionId: s.sessionId, symbol: 'NVDA', horizon: 'swing' },
-        { kind: 'coverage', state: 'ready', facts: 'Prometheus buy, target 230.00', against: false })
+        { kind: 'coverage', state: 'ready', facts: 'The analyst buy, target 230.00', against: false })
     assert.equal(taken, true)
     const [line, hand] = await rows(r.sessions, s)
     assert.equal(line.agent, 'analyst')
-    assert.equal(line.content, 'NVDA, swing: Prometheus buy, target 230.00')
+    assert.equal(line.content, 'NVDA, swing: The analyst buy, target 230.00')
     assert.equal(hand.kind, 'handoff')
     assert.equal(hand.to, 'mentor')
-    assert.equal(hand.content, 'Prometheus\'s read on NVDA for the swing trade is in: Prometheus buy, target 230.00. Check the trade against it and carry on building.')
+    assert.equal(hand.content, 'The analyst\'s read on NVDA for the swing trade is in: The analyst buy, target 230.00. Check the trade against it and carry on building.')
     assert.equal(r.queued[0].agent, 'mentor')
     assert.equal(r.queued[0].input.seed, undefined, 'no seed — the build on the table keeps its lens')
 
@@ -286,15 +286,15 @@ test('the read\'s brief: for the trade, AGAINST it (say so, ask once), or none c
     const art = (item) => makeArtifact({ kind: KIND.PROMETHEUS_READ, items: [{ ticker: 'NVDA', horizon: 'swing', ...item }] })
     assert.equal(receiverOf(art({})), 'mentor')
     assert.match(briefFor(art({ state: 'ready', facts: 'buy.', against: false })).text, /is in: buy\. Check the trade against it/)
-    assert.equal(briefFor(art({ state: 'passed', facts: 'Prometheus (priced_in): no trade.', against: true })).text,
-        'Prometheus\'s read on NVDA for the swing trade is in, and it is against the trade: Prometheus (priced_in): no trade. Say so plainly in one line, as a warning the user may override — not a question of its own; the trade\'s one question stands.')
+    assert.equal(briefFor(art({ state: 'passed', facts: 'The analyst (priced_in): no trade.', against: true })).text,
+        'The analyst\'s read on NVDA for the swing trade is in, and it is against the trade: The analyst (priced_in): no trade. Say so plainly in one line, as a warning the user may override — not a question of its own; the trade\'s one question stands.')
     assert.doesNotMatch(briefFor(art({ state: 'passed', facts: 'x', against: true })).text, /Roy|20\d\d-\d\d-\d\d/, 'the hand-off row is on screen: no citations in it')
     assert.match(briefFor(art({ state: 'failed' })).text, /could not make a read on NVDA for the swing trade\. Tell me in one line, and ask me once whether to build without it/)
 })
 
 // ─── Mentor's turn context, and Prometheus's opening ─────────────────────────
 
-test('Mentor\'s context each turn: the read to validate with; against → a warning, no question of its own; running → no finish yet; none intraday', () => {
+test('The trader\'s context each turn: the read to validate with; against → a warning, no question of its own; running → no finish yet; none intraday', () => {
     const base = { symbol: 'NVDA', horizon: 'swing', kind: 'coverage' }
     assert.match(_buildReadSection({ ...base, state: 'ready', facts: 'buy, target 230', against: false }), /PROMETHEUS'S READ on NVDA for the swing trade \(his coverage\): buy, target 230\n {2}Validate the trade with it/)
     assert.match(_buildReadSection({ ...base, state: 'passed', facts: 'passed', against: true }), /is AGAINST it .*\n {2}If you have not said so yet, say it plainly in one line, as a WARNING they may override[\s\S]*never a question of its own/)
@@ -305,12 +305,12 @@ test('Mentor\'s context each turn: the read to validate with; against → a warn
     assert.equal(_buildReadSection(null), '')
 })
 
-test('Prometheus is told a user is building the trade: coverage on the book\'s target horizon, a catalyst read on the short swing', () => {
+test('The analyst is told a user is building the trade: coverage on the book\'s target horizon, a catalyst read on the short swing', () => {
     assert.equal(researchOpening({ symbol: 'NVDA', context: { mentor: true, horizon: 'swing' } }),
-        'Research NVDA for coverage — a user is building a SWING trade on it with Mentor, who needs your read before he builds. Set the price target on a 3m or 6m horizon.')
+        'Research NVDA for coverage — a user is building a SWING trade on it with the trader, who needs your read before he builds. Set the price target on a 3m or 6m horizon.')
     assert.match(researchOpening({ symbol: 'NVDA', context: { mentor: true, horizon: 'long term' } }), /LONG TERM trade .* on a 12m or 18m or 24m horizon/)
     assert.match(researchOpening({ symbol: 'SMCI', context: { hotlist: true, mentor: true, requested: true, horizon: 'short term swing' } }),
-        /^Catalyst read on SMCI — a user is building a SHORT-TERM SWING \(2–10 days\) on it with Mentor/)
+        /^Catalyst read on SMCI — a user is building a SHORT-TERM SWING \(2–10 days\) on it with the trader/)
 })
 
 // ─── The fixes after the step-3 bug hunt (Roy, 2026-11-11: "fix the rest") ───
@@ -332,7 +332,7 @@ test('#2 the press: Generate and Generate all are refused while the read runs, w
     const state = { ...ledger('NVDA', { horizon: 'swing' }), drafts: { AMD: { asset: 'AMD' } } }
     assert.deepEqual(await acts.generate({ user: { _id: 'u1' }, state, args }), { reason: 'read_pending' })
     assert.deepEqual(await acts.generateAll({ user: { _id: 'u1' }, state, args }), { reason: 'read_pending' })
-    assert.deepEqual(setupReason('read_pending'), [409, 'Prometheus is still reading this name — Generate opens when his read lands'])
+    assert.deepEqual(setupReason('read_pending'), [409, 'I am still reading this name — Generate opens when the read lands'])
 })
 
 test('#2 a failed read is remembered: not asked again, and Generate opens — the user decides', async () => {
@@ -416,7 +416,7 @@ test('CR #5: only a PASS stands as the catalyst answer — a spent read (hit, ex
     }
 })
 
-test('CR #4: Mentor is told a read failed — never left building without a word', () => {
+test('CR #4: the trader is told a read failed — never left building without a word', () => {
     assert.match(_buildReadSection({ symbol: 'NVDA', horizon: 'swing', kind: 'coverage', state: 'failed' }),
         /PROMETHEUS COULD NOT MAKE A READ on NVDA for the swing trade \(his coverage\).*ask the user whether to build without it/)
 })
@@ -437,7 +437,7 @@ test('#4 a landed read does not take over another desk\'s running chain — the 
     assert.deepEqual((await rows(r.sessions, s)).map(m => m.agent), ['analyst'])
     assert.equal(r.queued.length, 0)
     const h = await r.sessions.get({ sessionId: s.sessionId, userId: 'u1' })
-    assert.equal(h.chain.origin, 'portfolio', 'Atlas keeps its chain')
+    assert.equal(h.chain.origin, 'portfolio', 'The portfolio manager keeps its chain')
 })
 
 test('#5 after a restart the waiting reads are found again from their rows — the session rides on the row', async () => {
@@ -460,18 +460,18 @@ test('#5 after a restart the waiting reads are found again from their rows — t
 // ─── The TSLA drive (2026-11-12): "let's trade TSLA" — a first reply with no worksheet still gets the experts asked ─
 test("the name his reply was on (its <asset> tag) reaches the state, so the reads are asked after a first reply with no worksheet", async () => {
     const { mentorNextState } = await import('../../services/desks/mentor.desk.js')
-    assert.equal(mentorNextState(null, { reply: 'Asking Prometheus and Proteus.', taggedAsset: 'TSLA' }).active_asset, 'TSLA')
+    assert.equal(mentorNextState(null, { reply: 'Asking the analyst and the technical analyst.', taggedAsset: 'TSLA' }).active_asset, 'TSLA')
     assert.deepEqual(readTarget(mentorNextState(null, { reply: 'x', taggedAsset: 'TSLA' })), { symbol: 'TSLA', horizon: null })
 })
 
-test('a FRESH deciding read is handed to Mentor at once (his verdict is the turn it runs), and only once per session and name', async () => {
-    const r = rig({ target: { symbol: 'TSLA', horizon: null }, request: async () => ({ kind: 'coverage', state: 'ready', decide: true, facts: 'Prometheus buy, target 480.00', against: false }) })
+test('a FRESH deciding read is handed to the trader at once (his verdict is the turn it runs), and only once per session and name', async () => {
+    const r = rig({ target: { symbol: 'TSLA', horizon: null }, request: async () => ({ kind: 'coverage', state: 'ready', decide: true, facts: 'The analyst buy, target 480.00', against: false }) })
     const s = await r.sessions.getActive({ userId: 'u1' })
     await r.sessions.setAgentState({ sessionId: s.sessionId, userId: 'u1', agent: 'mentor', state: { active_asset: 'TSLA', draft: null } })
     await r.runner.afterTurn({ user, sessionId: s.sessionId, agent: 'mentor', origin: 'user', out: { payload: { reply: 'Asking them.' } } })
     const [line, hand] = await rows(r.sessions, s)
     assert.equal(line.agent, 'analyst')
-    assert.equal(line.content, 'TSLA: Prometheus buy, target 480.00', 'no "null" horizon in the line')
+    assert.equal(line.content, 'TSLA: The analyst buy, target 480.00', 'no "null" horizon in the line')
     assert.equal(hand.kind, 'handoff')
     assert.equal(r.queued[0].agent, 'mentor')
     await r.runner.afterTurn({ user, sessionId: s.sessionId, agent: 'mentor', origin: 'chain', out: { payload: { reply: 'Long, swing.' } } })
@@ -490,7 +490,7 @@ test("inside a chain MENTOR started on his own read: no pause card and no 'needs
     assert.equal((await r.sessions.get({ sessionId: s.sessionId, userId: 'u1' })).chain.status, 'done')
 })
 
-test("a chain ANOTHER desk started still pauses and asks (Atlas's sleeve going through Mentor is not his own)", async () => {
+test("a chain ANOTHER desk started still pauses and asks (the portfolio manager's sleeve going through the trader is not his own)", async () => {
     const r = rig({ target: null })
     const s = await r.sessions.getActive({ userId: 'u1' })
     await r.sessions.setChain({ sessionId: s.sessionId, userId: 'u1', chain: { id: 'c2', status: 'running', origin: 'portfolio', steps: 1, pauseRequested: true } })
@@ -512,8 +512,8 @@ test('a deciding read that LANDED is handed once: the next turn finding it fresh
     await r.runner.readSettled({ userId: 'u1', sessionId: s.sessionId, symbol: 'TSLA', horizon: null }, ready)
     const before = (await rows(r.sessions, s)).length
     await r.runner.afterTurn({ user, sessionId: s.sessionId, agent: 'mentor', origin: 'chain', out: { payload: { reply: 'Long, swing.' } } })
-    assert.equal((await rows(r.sessions, s)).length, before, 'no second Prometheus line, no second hand-off')
-    assert.equal(r.queued.length, 1, 'one Mentor turn queued, by the landing only')
+    assert.equal((await rows(r.sessions, s)).length, before, 'no second the analyst line, no second hand-off')
+    assert.equal(r.queued.length, 1, 'one the trader turn queued, by the landing only')
 })
 
 test('a FRESH deciding read handed after a turn ends that turn: no decision card, no carry on top of the hand-off', async () => {

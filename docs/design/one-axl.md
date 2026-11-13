@@ -140,6 +140,13 @@ Steps 1 and 2 ship together — the chat must never say "Prometheus" under an "A
 
 1. **The voice** — the shared rule; names out of every prompt; Axl's routing lines and the hand-back line silent;
    the brand-word test. Live-checked on each desk (the replay harness), incl. the NVDA hand-back.
+   **BUILT 2026-11-13** (backend only — not to be pushed before step 2): `VOICE_RULE` on all eight chat agents; ~240
+   names out of the 12 prompt files and ~130 out of tool descriptions, per-turn notes, chain contracts, card copy and
+   the house's background prompts (bookTiming, hotlist.argus, houseScan.argus); the registry's `role` drives the route
+   rule; the hand-back writes no words; Axl's hand-off line names no one; `oneVoice.test.js` guards it. Kept on
+   purpose: names in code, logs, comments, the push titles and the hand-off artifact's `label` (step 2, FE-bound).
+   Live: 8 desk turns ("who are you?", "who builds the trade?", an off-desk question) — 0 names; each answers as Axl
+   in its role; the Proteus hand-back is silent.
 2. **The chat** — rows as Axl + role subtitle, hand-off divider, `@role` mentions, social chat as one Axl.
 3. **The shared "about you"** — `user_profile`, written by the desks' own work, read by every role.
 4. **The work pane** — item titles; the Floor's desk list as things to do.

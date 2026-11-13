@@ -117,7 +117,7 @@ export const TOOL_SCHEMAS = {
             "school": {
                 "type": "string",
                 "enum": ["quality-value", "growth-durability", "income", "passive"],
-                "description": "optional — narrow to names Prometheus tagged for this selection school; combine with industry for the mandate-build pre-filter"
+                "description": "optional — narrow to names the analyst tagged for this selection school; combine with industry for the mandate-build pre-filter"
             }
         }
     },
@@ -723,7 +723,7 @@ export const TOOL_SCHEMAS = {
     get_house_industries: {
         "type": "object",
         "properties": {
-            "book": { "type": "string", "enum": ["swing", "long_term"], "description": "The scan's book: the industries Pythia rates for it." },
+            "book": { "type": "string", "enum": ["swing", "long_term"], "description": "The scan's book: the industries the industry strategist rates for it." },
             "sector": { "type": "string", "description": "A GICS sector (e.g. Information Technology) to narrow the book's list." },
             "industry": { "type": "string", "description": "A GICS sub-industry (8-digit code or exact name) from the list — its largest companies instead of the list." },
             "limit": { "type": "number", "description": "How many of the industry's companies, 1–40 (default 15)." }

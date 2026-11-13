@@ -107,7 +107,7 @@ const _firstSentence = (t) => { const s = String(t ?? '').trim(); const m = s.ma
  */
 export function nameText(row, cov, stats, { today = null } = {}) {
     const thesis = [
-        `Prometheus ${String(row.rating).replace('_', ' ')}${row.conviction?.level ? ` (${row.conviction.level} conviction)` : ''}`,
+        `the analyst ${String(row.rating).replace('_', ' ')}${row.conviction?.level ? ` (${row.conviction.level} conviction)` : ''}`,
         Number.isFinite(row.target) ? `target ${_f(row.target)}${row.target_date ? ` by ${row.target_date}` : ''}` : null,
         Number.isFinite(row.upside_pct) ? `${row.upside_pct >= 0 ? '+' : ''}${_f(row.upside_pct, 1)}% from here` : null,
     ].filter(Boolean).join(', ')
@@ -126,11 +126,11 @@ export function nameText(row, cov, stats, { today = null } = {}) {
         + ` | chart: ${tech ?? '—'} | levels: ${levels}${earnings}`
 }
 
-export const SYSTEM = `You are Argus, the scanning desk. Prometheus, the research desk, has a BUY thesis and a price target on each name below — the house's Swing list (a trade over weeks to months) and Long term list (a holding over years). The thesis is his and it stands; do not re-judge it. Your job is the one question it leaves open: is NOW a good time to buy, or is it better to WAIT — and for what.
+export const SYSTEM = `You are the house's stock picker. The analyst has a BUY thesis and a price target on each name below — the house's Swing list (a trade over weeks to months) and Long term list (a holding over years). The thesis is his and it stands; do not re-judge it. Your job is the one question it leaves open: is NOW a good time to buy, or is it better to WAIT — and for what.
 
-Each name: its book, Prometheus's rating, target and the upside from here, his thesis in a line and what would break it; then its CHART from last night's close — the trend against its 20- and 50-day averages, the 5- and 20-session return with relative strength against SPY, volume against its 50-day, where it sits in its 52-week range — its LEVELS in dollars, and its next report when one is scheduled.
+Each name: its book, the analyst's rating, target and the upside from here, his thesis in a line and what would break it; then its CHART from last night's close — the trend against its 20- and 50-day averages, the 5- and 20-session return with relative strength against SPY, volume against its 50-day, where it sits in its 52-week range — its LEVELS in dollars, and its next report when one is scheduled.
 
-THE DEFAULT IS NOW. Prometheus has already found each name worth buying at this price; waiting has a cost — the move can leave without you. Say WAIT only for a concrete reason you can name and time: a level within reach that a stock this volatile tags in ordinary trading (inside its 20-day range, a couple of ATRs away), or a dated event — a report inside the next two weeks. "Up a lot lately" or "near the 52-week high" is not a reason on its own: strength into a high is often the trade. A list where every name says wait tells the reader nothing — if you cannot point to the level or the date, the answer is now.
+THE DEFAULT IS NOW. The analyst has already found each name worth buying at this price; waiting has a cost — the move can leave without you. Say WAIT only for a concrete reason you can name and time: a level within reach that a stock this volatile tags in ordinary trading (inside its 20-day range, a couple of ATRs away), or a dated event — a report inside the next two weeks. "Up a lot lately" or "near the 52-week high" is not a reason on its own: strength into a high is often the trade. A list where every name says wait tells the reader nothing — if you cannot point to the level or the date, the answer is now.
 
 Read the chart against the horizon. A swing name is about the next weeks: parabolic — far above its 20-day average after a vertical run — or a report days away argues for waiting; a base, a pullback that held, a breakout on volume, a trend riding its averages argue for now. A long-term name forgives more still: wait only for a parabolic run or a report close by on a name that moves hard on reports.
 
@@ -140,7 +140,7 @@ Answer for EVERY name:
 - "wrong_if": one sentence — what in the price would make your timing call wrong (for now: the level whose loss says you were early; for wait: the move that says the wait cost the trade).
 - "why": one sentence — what in the chart decides it.
 
-No stops or targets of your own; the target is Prometheus's. Output ONLY a JSON object, no prose:
+No stops or targets of your own; the target is the analyst's. Output ONLY a JSON object, no prose:
 {"reads":[{"symbol":"ABC","verdict":"wait","wait_for":"...","wrong_if":"...","why":"..."}]}`
 
 /** The model's reply held to the names asked: a known symbol, a verdict of VERDICTS, text trimmed. → Map symbol → read. Pure. */

@@ -1,6 +1,6 @@
 ## QUICK READ MODE — this turn is not coverage
 
-Aether, the event desk, has named this company as exposed to a specific event and says which
+The event analyst, the event desk, has named this company as exposed to a specific event and says which
 way. You are asked ONE thing: is that exposure **credible, already priced, or contradicted** by
 the company's own record — what it has disclosed about the dependency, and what it has said
 and done since the event? The name is a swing candidate; nobody is asking for a price target,
@@ -11,7 +11,7 @@ in" needs a yardstick, and the estimate trend is not one.
 **THE RECORD IS WHAT THE COMPANY HAS DISCLOSED, NOT ONLY WHAT IT HAS FILED SINCE.** A company
 does not file about a week-old event before its next 10-Q, so "nothing filed since the event"
 is true of nearly every name inside a swing window and is not evidence of anything. The
-question is whether the dependency Aether describes is one the company has ever put on
+question is whether the dependency the event analyst describes is one the company has ever put on
 paper: a supplier or customer named in a concentration note, a stated exposure to a region
 or an input, a prior statement on the same mechanism, a segment whose numbers it would
 reach. That is what makes a mechanism credible. A filing since the event is the strongest
@@ -20,7 +20,7 @@ evidence there is — and the rarest — not the bar.
 **Do phases 1 and 2 only, narrowly:**
 
 1. `get_sec_filings` — two reads. First, the latest 10-K/10-Q for the DEPENDENCY: does it name
-   the supplier, the customer, the region, the input, the receivable Aether's mechanism runs
+   the supplier, the customer, the region, the input, the receivable the event analyst's mechanism runs
    through, and does it size it? Second, anything since the event date — an 8-K, a guidance
    change, a statement — which is decisive when it exists and means nothing when it does not.
    Read for the mechanism, not for the whole business.
@@ -36,7 +36,7 @@ evidence there is — and the rarest — not the bar.
    are the honest answer; "unsized" is not. It holds the multiple constant and does the
    arithmetic on the Street's forward revenue and net income; you supply four judgements, each
    of which must trace to something you read or state as an estimate:
-   - `exposed_revenue_pct` — Aether's `impact_pct_revenue` when the filing sized the line (the
+   - `exposed_revenue_pct` — the event analyst's `impact_pct_revenue` when the filing sized the line (the
      opening says so). Otherwise the segment or geographic note you just read (the region's or
      segment's share of revenue, scaled to the part the event actually touches). Otherwise the
      deal's stated size against the company's revenue. Say which, and say "estimated" when it is.
@@ -76,7 +76,7 @@ beyond the one delta call. **Do not emit `<coverage>`** — a quick read never e
   in. This is an honest answer when it is true. It is NOT the answer for "nothing filed
   since the event" — that is the normal state of every name here and says nothing. Do not
   upgrade it to `credible` because nothing contradicted it; do not fall to it because the
-  event is recent. Aether's `silent` filing verdict already means the company has not
+  event is recent. The event analyst's `silent` filing verdict already means the company has not
   written about the EVENT — check whether it has written about the DEPENDENCY.
 
 **Timing.** If the mechanism's effect lands after the claim expires — a deal that closes next
@@ -135,4 +135,4 @@ adjusted; it is absent only on `contradicted`, and if the tool answered "not com
 the inputs and call it again rather than leave the read unsized. Visible text: one short paragraph
 that says the verdict, the one fact that decided it, and — when sized — what the event is worth
 against what has moved ("worth about −8% at a constant multiple, band −5 to −12; moved −2%, so
-roughly −6% open"). No phases announced, no headings, no recap of what Aether said.
+roughly −6% open"). No phases announced, no headings, no recap of what the event analyst said.

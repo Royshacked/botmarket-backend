@@ -1,7 +1,7 @@
 import { fileURLToPath } from 'url'
 import { parseEmitBlock, mergeDraft, runAgentStream } from '../agentIO.js'
 import { dirname, join } from 'path'
-import { makePromptLoader, cleanReply, buildAccountLines, buildTimeSection, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, BREVITY_RULE, VENUE_RULE, cachedBlock, normalizeMessages, makeToolHandler } from '../agentUtils.js'
+import { makePromptLoader, cleanReply, buildAccountLines, buildTimeSection, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, VOICE_RULE, BREVITY_RULE, VENUE_RULE, cachedBlock, normalizeMessages, makeToolHandler } from '../agentUtils.js'
 import { makeNewsHandlers } from '../tools/news.tools.js'
 import { getAnalystActions } from '../../providers/fmp.provider.js'
 import { buildTagCaptures, endsAsking } from '../llmStream.util.js'
@@ -82,7 +82,7 @@ export const MENTOR_TOOLS = [
     // sidecar. The descriptions are Mentor's — Axl carries get_news too, with the front-page
     // framing reception needs; here it is the catalyst check on ONE name inside the horizon.
     ...toolsFor({
-        get_news: `Recent NEWS on the name — dated, attributed headlines with the publisher's own summary, newest first. \`companies\` with the TICKER as \`subject\` is the one you reach for: the catalyst check inside the horizon (rung 3 and rung 5 of the guided build), and the first place to look before web_search, because it is cached and dated where a search is neither. \`topic\` for a theme with no ticker; \`headlines\` is the market's front page and is rarely a Mentor question. Read them as what was WRITTEN — a headline is a fact to weigh, never a level.`,
+        get_news: `Recent NEWS on the name — dated, attributed headlines with the publisher's own summary, newest first. \`companies\` with the TICKER as \`subject\` is the one you reach for: the catalyst check inside the horizon (rung 3 and rung 5 of the guided build), and the first place to look before web_search, because it is cached and dated where a search is neither. \`topic\` for a theme with no ticker; \`headlines\` is the market's front page and is rarely a trading question. Read them as what was WRITTEN — a headline is a fact to weigh, never a level.`,
         get_analyst_actions: `Recent analyst rating changes on the name — upgrades, downgrades, initiations, with the house and the date. Pass \`symbols\` with the ticker; the market-wide feed (no symbols) is a scanner's tool and not yours. Positioning's slow leg: it belongs to the \`institutional\` read at rung 5 and to a swing or long-term company read, and it is a line of context on an intraday trade at most. US-listed equities.`,
     }),
     // The blinded direction red-team (flipTest.service.js). It sits BEFORE the sidecar, which is
@@ -103,7 +103,7 @@ export const MENTOR_TOOLS = [
         get_entry_level: `The \`thesis\` lens's entry arithmetic. After you judged the stop and the target and the USER gave their risk limit (the stop at most X% from the entry) and/or their minimum reward to risk: the highest entry worth paying (the lowest, on a short) — the entry leg's price, valid "at the level and below". Never compute it yourself; read it out. It also says the last date price traded past the stop you gave — the date for "not traded under since", never a guess.`,
     }),
     ...toolsFor({
-        [CLOSE_TOOL]: `Close the saved setup being edited here: its status turns to closed and Talos stops watching it. It cannot be reopened. Call it only when the USER has said to close it or let it go, never on your own read that the trade is gone: say that, and ask. Saying a setup is closed without this call leaves it open.`,
+        [CLOSE_TOOL]: `Close the saved setup being edited here: its status turns to closed and the trade monitor stops watching it. It cannot be reopened. Call it only when the USER has said to close it or let it go, never on your own read that the trade is gone: say that, and ask. Saying a setup is closed without this call leaves it open.`,
     }),
     ...toolsFor({
         // The sidecar is contractually last at every desk that declares it
@@ -191,7 +191,7 @@ async function chatStream({
             }
             closedSetup = { id: String(editing), asset: saved ?? talking }
             onFinished?.({ closedSetup })
-            return `Closed${closedSetup.asset ? ` ${closedSetup.asset}` : ''}: the status is now closed and Talos has stopped watching it. Say so in one line, and write no worksheet.`
+            return `Closed${closedSetup.asset ? ` ${closedSetup.asset}` : ''}: the status is now closed and the trade monitor has stopped watching it. Say so in one line, and write no worksheet.`
         },
         [SIZE_TOOL]: async (args = {}) => {
             const size = sanitizeBuildOps({ size: args })?.size
@@ -519,7 +519,7 @@ async function chatStream({
         heldBy = { ...after, ...(await Promise.resolve(readNow(after)).catch(() => ({ state: 'unknown' }))) }
     }
     if (readiness && ['waiting', 'missing'].includes(heldBy?.state)) {
-        readiness = { ...readiness, ready: false, problems: [...(readiness.problems ?? []), "Prometheus's read is still running"] }
+        readiness = { ...readiness, ready: false, problems: [...(readiness.problems ?? []), "The analyst's read is still running"] }
     }
 
     logger.info(LOG, 'chatStream done', {
@@ -742,7 +742,7 @@ CONVERSATION CONTEXT:
 Active asset: ${asset}${_buildAccountsSection(accounts, mainAccountId)}${_buildSeedSection(seed)}${_buildReadSection(prometheusRead)}${_buildProteusSection(proteusRead)}`
 
     return [
-        cachedBlock(_baseSystemPrompt() + buildRouteRule('mentor') + LANGUAGE_RULE + VENUE_RULE + BREVITY_RULE),
+        cachedBlock(_baseSystemPrompt() + buildRouteRule('mentor') + LANGUAGE_RULE + VOICE_RULE + VENUE_RULE + BREVITY_RULE),
         { type: 'text', text: dynamicContext },
     ]
 }
@@ -762,8 +762,8 @@ export function _buildReadSection(read) {
 PROMETHEUS'S READ on ${read.symbol} (his coverage — to DECIDE the trade): ${read.facts}
   With PROTEUS'S READ below and the chart, say plainly whether ${read.symbol} is worth a LONG now — the house trades long
   only for now — and on WHICH HORIZON (intraday · day · short term swing · swing · long term), with the one reason from
-  each expert that decides it: Prometheus's book and target date (long term / swing), a dated catalyst (short term swing),
-  Proteus's fit (day trade / swing). "Not a long now" is an answer — say why, and stop there. Then ask the ONE question
+  each expert that decides it: the analyst's book and target date (long term / swing), a dated catalyst (short term swing),
+  the technical analyst's fit (day trade / swing). "Not a long now" is an answer — say why, and stop there. Then ask the ONE question
   (§ How a trade goes). The user may overrule the direction or the horizon: take it.`
     }
     const on = read.horizon ? `${read.symbol} for the ${read.horizon} trade` : `${read.symbol} (to decide the trade)`
@@ -835,22 +835,22 @@ ${seed.book_facts ? "FROM THE HOUSE'S BOOK" : 'ARGUS HANDED YOU THIS NAME'}: ${s
         + `${seed.thesis ? `
   thesis: ${seed.thesis}` : ''}`
         + `${seed.analysis ? `
-  Argus's read: ${seed.analysis}` : ''}`
+  the stock picker's read: ${seed.analysis}` : ''}`
         // From today's HOTLIST (daily-names.md): read back from the stored board by code, not from the
         // request. The board measures ROOM — free range to the next overhead level — and sets no
         // entry, stop or target; those are built here, with the user.
         + (seed.hotlist_facts ? `
   From today's HOTLIST: ${seed.hotlist_facts}.${seed.horizon ? ` That column's horizon is ${seed.horizon} — the user's to confirm.` : ''}${seed.caution ? `
-  Argus's caution: ${seed.caution}` : ''}
+  the stock picker's caution: ${seed.caution}` : ''}
   Free range is room, not a target: the board has no entry, stop or target, and you build those with the user.${seed.catalyst_facts ? `
-  Prometheus's catalyst read on it: ${seed.catalyst_facts}.
+  the analyst's catalyst read on it: ${seed.catalyst_facts}.
   His target, when he set one, is CONTEXT — the house's price for the run-up, said in one line — never the take-profit: YOU find the target on the chart, as § How you build every trade says (Roy, 2026-11-01). The trade is out by the read's date: before the report, unless he says HOLD THROUGH it — then the report is part of the trade, and say so.` : ''}` : '')
         // From the house's SWING / LONG TERM book (the Hotlist's longer lists, 2026-10-24): read back from the name's
         // coverage by code. Its horizon is the price target's; the target is Prometheus's valuation, not a take-profit.
         + (seed.book_facts ? `
   From the house's ${seed.book_name === 'long_term' ? 'LONG TERM' : 'SWING'} book: ${seed.book_facts}.${seed.horizon ? ` The horizon is ${seed.horizon} — the user's to confirm.` : ''}${seed.caution ? `
   What would break the thesis: ${seed.caution}` : ''}
-  The target is Prometheus's valuation over that horizon, not a take-profit: the entry, the stop and any exit are built here, with the user.` : '')
+  The target is the analyst's valuation over that horizon, not a take-profit: the entry, the stop and any exit are built here, with the user.` : '')
         // Worked out by code from the ticker (houseLabel.service), not by Argus: the house's industry desk holds this
         // name's industry on its list. Context the user hears once — never a reason the trade will work.
         + (seed.house ? `
@@ -902,7 +902,7 @@ export function _buildRedrawSection(redraw, draft) {
     // THE PENCIL IS NOT THE CARD (Roy, 2026-11-05): they may have come to change one thing, so nothing is reopened until they say.
     if (redraw.offer) {
         const flagged = redraw.event === 'ran_away' ? `it ran away without filling${which}` : redraw.event === 'stale' ? 'the map has drifted' : `its premise broke${which}`
-        return `\n\nTALOS FLAGGED THIS SETUP — ${flagged}${redraw.reason ? `: ${redraw.reason}` : ''}. The user opened it themselves, so do what they asked; nothing is reopened. Say once, in one line, what Talos saw and offer to redraw it. If they take the offer, that is their yes to the direction and the horizon, so do not ask § Coming back's question: put <build>{"unsettle":"spans","waiver":false}</build> on that turn and, on that same turn, check the whole trade again on today's chart: the entry, the stop, every target, the reward to risk and the validity range, old against new. If they say to close it, call ${CLOSE_TOOL}.`
+        return `\n\nTALOS FLAGGED THIS SETUP — ${flagged}${redraw.reason ? `: ${redraw.reason}` : ''}. The user opened it themselves, so do what they asked; nothing is reopened. Say once, in one line, what the trade monitor saw and offer to redraw it. If they take the offer, that is their yes to the direction and the horizon, so do not ask § Coming back's question: put <build>{"unsettle":"spans","waiver":false}</build> on that turn and, on that same turn, check the whole trade again on today's chart: the entry, the stop, every target, the reward to risk and the validity range, old against new. If they say to close it, call ${CLOSE_TOOL}.`
     }
     const saw = redraw.event === 'ran_away'
         ? `it RAN AWAY without filling${which}${redraw.reason ? ` — ${redraw.reason}` : ''}. The read was not wrong; the entry never came.`
@@ -925,7 +925,7 @@ export function _buildRedrawSection(redraw, draft) {
     // THE WHOLE TRADE (Roy, 2026-11-05). The worksheet's "carry every settled field forward" must not read as "keep the old numbers".
     const whole = 'CHECK THE WHOLE TRADE AGAIN, nothing on trust: the numbers on the worksheet above are the OLD plan. Go through the entry, the stop, every target, the reward to risk and the validity range, in every scenario, and say for each what it was and what it is now, in one short table: "stop: was $X, now $Y, because…" or "still $X, the low held". A level that did not change is an answer too.'
     const close = `If the answer is no trade, ask whether to close the setup, and call ${CLOSE_TOOL} when they say yes. Telling them it is gone does not close it.`
-    return `\n\nTHE RE-DRAW — the user opened this setup from Talos's card: ${saw}${where} Do not ask them whether the direction and the horizon still stand: answer that yourself from the chart, in one line, and redraw on this turn. ${how}${all} ${whole} ${verdict} ${close}`
+    return `\n\nTHE RE-DRAW — the user opened this setup from the trade monitor's card: ${saw}${where} Do not ask them whether the direction and the horizon still stand: answer that yourself from the chart, in one line, and redraw on this turn. ${how}${all} ${whole} ${verdict} ${close}`
 }
 
 /**
@@ -1131,7 +1131,7 @@ export function _buildModeSection(mode, lens = null) {
     }
     // ONE WAY (argus-rework.md §2.3): no mode to name, no switch to offer.
     return '\n\nBUILD: the one way (§ How you build every trade) — `trade_mode: "thesis"` on your worksheet, an internal field: never say it,'
-        + ' nor "lens", "risk-based" or "mode". Their own LEVELS are talked through inside it; their own METHOD is Daedalus\'s, coming (§ How a trade goes).'
+        + ' nor "lens", "risk-based" or "mode". Their own LEVELS are talked through inside it; their own METHOD is the method builder\'s, coming (§ How a trade goes).'
 }
 
 /**

@@ -64,7 +64,7 @@ test('buildCoverageRefreshed: no user or ticker → null', () => {
     assert.equal(buildCoverageRefreshed({ userId: 'u1', ticker: '' }), null)
 })
 
-test('coverage_refreshed is own-only — it is the reply to the specific user who triggered the Atlas review', () => {
+test('coverage_refreshed is own-only — it is the reply to the specific user who triggered the the portfolio manager review', () => {
     const card = buildCoverageRefreshed({ userId: 'u1', ticker: 'NVDA' })
     assert.equal(card.visibility, 'own')
     assert.equal(card.forUserId, 'u1')
@@ -297,7 +297,7 @@ test('a pass on a name we do NOT hold is still a plain no-draft — there is no 
 
 test('the pass card reads as a kept target with its reason, and opens the thesis to read', () => {
     const house = buildCoverageRefreshed({ userId: 'a1', ticker: 'TEM', coverageId: 'cov_TEM_1', ok: false, house: true, pass: 'not like-for-like.' })
-    assert.equal(house.content, 'Prometheus re-modelled TEM and kept the target: not like-for-like.')
+    assert.equal(house.content, 'I re-modelled TEM and kept the target: not like-for-like.')
     assert.doesNotMatch(house.content, /nothing to store/)
     assert.equal(house.payload.pass, true)
     assert.equal(house.actions.primary.label, 'Open thesis')

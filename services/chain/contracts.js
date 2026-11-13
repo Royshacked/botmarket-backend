@@ -31,12 +31,12 @@ function briefMentorRead(artifact) {
     const r = artifact.items[0] ?? {}
     const on = `${r.ticker}${r.horizon ? ` for the ${r.horizon} trade` : ''}`
     if (r.state === 'failed') {
-        return { text: `Prometheus could not make a read on ${on}. Tell me in one line, and ask me once whether to build without it.`, input: {} }
+        return { text: `The analyst could not make a read on ${on}. Tell me in one line, and ask me once whether to build without it.`, input: {} }
     }
     if (r.against) {
-        return { text: `Prometheus's read on ${on} is in, and it is against the trade: ${trimDot(r.facts)}. Say so plainly in one line, as a warning the user may override — not a question of its own; the trade's one question stands.`, input: {} }
+        return { text: `The analyst's read on ${on} is in, and it is against the trade: ${trimDot(r.facts)}. Say so plainly in one line, as a warning the user may override — not a question of its own; the trade's one question stands.`, input: {} }
     }
-    return { text: `Prometheus's read on ${on} is in: ${trimDot(r.facts)}. Check the trade against it and carry on building.`, input: {} }
+    return { text: `The analyst's read on ${on} is in: ${trimDot(r.facts)}. Check the trade against it and carry on building.`, input: {} }
 }
 
 /** A research queue → Prometheus researches ONE name per turn, told what follows and what else is on the list. */

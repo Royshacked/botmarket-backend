@@ -73,7 +73,7 @@ test('the card resolves on OPEN and has no subject, so the sender’s later writ
     try {
         await shareSetup('setup_NVDA_a1b2', 'u_roy', { conversationId: 'conv_1' })
         const card = posted[0]
-        assert.equal(card.actions.primary.label, 'Open in Mentor')
+        assert.equal(card.actions.primary.label, 'Open the setup')
         assert.equal(card.actions.primary.resolvesOn, 'open')
         assert.equal(card.actions.dismiss, true)
         // `setupId` is a cardSubject key; `source_setup_id` deliberately is not.

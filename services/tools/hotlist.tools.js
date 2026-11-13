@@ -23,7 +23,7 @@ const COLUMN_WORDS = { open: 'the open', mid: 'mid-day', eod: 'into the close', 
 const GRADE_RANK = { A: 3, B: 2, C: 1 }
 
 export const HOTLIST_TOOL_SPEC = {
-    get_hotlist: `Today's HOTLIST — THIS WEEK's run-up names, built overnight after the close (the day-trade boards were archived 2026-10-25), long side only. The rule: a company reporting in six sessions whose last three reports all beat the estimate, while SPY is over its 200-day — bought at the next open, out at the close before the report; every qualifying name is listed equally (a small, fixed daily budget split across them, not a ranking). For each name: its report date, the rule's reason, and the price at the close before the list (not live). Prometheus reads every name and sets a catalyst target — that read, not the list, is the verdict. When SPY is under its 200-day the list is empty and says so. Older days may still show the archived day boards' names and Argus's picks. Use it to say what is on the hotlist in a line or two; never present a name as a reason a stock will rise.`,
+    get_hotlist: `Today's HOTLIST — THIS WEEK's run-up names, built overnight after the close (the day-trade boards were archived 2026-10-25), long side only. The rule: a company reporting in six sessions whose last three reports all beat the estimate, while SPY is over its 200-day — bought at the next open, out at the close before the report; every qualifying name is listed equally (a small, fixed daily budget split across them, not a ranking). For each name: its report date, the rule's reason, and the price at the close before the list (not live). The analyst reads every name and sets a catalyst target — that read, not the list, is the verdict. When SPY is under its 200-day the list is empty and says so. Older days may still show the archived day boards' names and the stock picker's picks. Use it to say what is on the hotlist in a line or two; never present a name as a reason a stock will rise.`,
 }
 
 const _f = (n, d = 2) => (Number.isFinite(n) ? n.toFixed(d) : null)
@@ -47,7 +47,7 @@ export function formatHotlist(today, limit = DEFAULT_LIMIT) {
         `Hotlist for ${today.day} — ${list.length} name${list.length === 1 ? '' : 's'} (${counts.map(([s, n]) => `${n} ${STATUS_WORDS[s]}`).join(', ')}). ${today.latest?.checkpoint === 'overnight' ? 'The run-up rule; prices at the close before the list' : "Prices as of each name's checkpoint"}, not live.`,
     ]
     const latest = today.latest
-    if (latest?.argus?.summary) lines.push(`Argus on the ${latest.checkpoint} board: ${latest.argus.summary}`)
+    if (latest?.argus?.summary) lines.push(`The stock picker on the ${latest.checkpoint} board: ${latest.argus.summary}`)
     // SPY's 200-day could not be checked tonight (hotlist.week `market.gate`): listed as if open — say so.
     if (latest?.market?.gate === 'unknown') lines.push("SPY's 200-day could not be checked for this list — it is listed as if the market gate were open.")
     for (const r of list.slice(0, Math.min(MAX_LIMIT, Math.max(1, limit)))) {
@@ -59,10 +59,10 @@ export function formatHotlist(today, limit = DEFAULT_LIMIT) {
             // No horizon carries a grade (2026-10-24) — the horizon and its room.
             best ? `${COLUMN_WORDS[best[0]] ?? best[0]}${room ? `, ${room}` : ''}` : null,
             Number.isFinite(r.price) ? `$${_f(r.price)}${Number.isFinite(r.gap_pct) ? ` (${r.gap_pct > 0 ? '+' : ''}${_f(r.gap_pct, 1)}%)` : ''}` : null,
-            r.pick ? `ARGUS PICK #${r.pick.rank}` : r.avoid ? 'Argus: avoid' : null,
+            r.pick ? `PICK #${r.pick.rank}` : r.avoid ? 'The stock picker: avoid' : null,
         ].filter(Boolean).join(' · ')
         const why = Array.isArray(best?.[1]?.why) && best[1].why.length ? best[1].why.join('; ') : null
-        lines.push(`  ${head}${why ? `\n      ${why}` : ''}${r.pick?.why ? `\n      Argus: ${r.pick.why}` : r.avoid ? `\n      Argus (avoid): ${r.avoid}` : ''}`)
+        lines.push(`  ${head}${why ? `\n      ${why}` : ''}${r.pick?.why ? `\n      The stock picker: ${r.pick.why}` : r.avoid ? `\n      The stock picker (avoid): ${r.avoid}` : ''}`)
     }
     if (list.length > limit) lines.push(`  …and ${list.length - limit} more on the list.`)
     return lines.join('\n')

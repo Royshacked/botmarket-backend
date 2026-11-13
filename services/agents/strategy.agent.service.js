@@ -20,7 +20,7 @@ import { dirname, join } from 'path'
 import { makePhaseCapture, runAgentStream, parseEmitBlocks } from '../agentIO.js'
 import { toolsFor } from '../agentTools.registry.js'
 import { consultDescription } from '../deepThink.service.js'
-import { makePromptLoader, cleanReply, makeToolHandler, attachTurnContext, LANGUAGE_RULE, BREVITY_RULE, buildStandingProposalRule, cachedBlock, normalizeMessages } from '../agentUtils.js'
+import { makePromptLoader, cleanReply, makeToolHandler, attachTurnContext, LANGUAGE_RULE, VOICE_RULE, BREVITY_RULE, buildStandingProposalRule, cachedBlock, normalizeMessages } from '../agentUtils.js'
 import { buildTagCaptures } from '../llmStream.util.js'
 import { DESKS } from '../desks/registry.js'
 import { makeRouteCapture, buildRouteRule } from '../routing.util.js'
@@ -228,7 +228,7 @@ function _buildSystemPrompt() {
     // The STATIC prompt behind the cache breakpoint, and a small dynamic block.
     const today = new Date().toISOString().slice(0, 10)
     return [
-        cachedBlock(_systemPrompt() + buildRouteRule('strategy') + LANGUAGE_RULE + buildStandingProposalRule('industry_view', 'Publish') + BREVITY_RULE),
+        cachedBlock(_systemPrompt() + buildRouteRule('strategy') + LANGUAGE_RULE + VOICE_RULE + buildStandingProposalRule('industry_view', 'Publish') + BREVITY_RULE),
         { type: 'text', text: `---\nCURRENT DATE: ${today}.` },
     ]
 }

@@ -13,11 +13,11 @@ const SETUP_REASONS = {
     invalid_leg:   [400, 'A level is missing its price'],
     no_venue:      [400, 'Mark a trading account before generating'],
     // Prometheus's read on the name is still running (services/mentorReads.service.js, argus-rework.md step 3).
-    read_pending:  [409, 'Prometheus is still reading this name — Generate opens when his read lands'],
+    read_pending:  [409, 'I am still reading this name — Generate opens when the read lands'],
     // Management refusals. `confirm_order` is not an error the user caused: a printing second leg is
     // placed by confirming its order, so the client is being told WHERE the action lives.
     confirm_order:        [409, 'That leg is placed by confirming its order, not from here'],
-    no_pending_action:    [409, 'Talos has not proposed that'],
+    no_pending_action:    [409, 'The trade monitor has not proposed that'],
     bad_verb:             [400, 'That is not an action this desk can execute'],
     bad_proposal:         [422, 'The proposal is missing the level it needs'],
     no_position_link:     [409, 'No broker position is linked to this setup'],

@@ -110,7 +110,7 @@ test('a ticker the engine never named is 404', async () => {
     // not-found path without a database.
     const res = await runHandler(getCandidatesByTicker, { params: { ticker: '!!!' }, query: {} })
     assert.equal(res.statusCode, 404)
-    assert.match(res.body.error, /No Aether candidate/)
+    assert.match(res.body.error, /No event candidate/)
 })
 
 test('“no such candidate” and “the read failed” are different answers', () => {

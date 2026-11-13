@@ -18,21 +18,21 @@ test('thesis is a lens: a setup keeps it instead of being coerced to discretiona
     assert.equal(normalizeSetup({ trade_mode: 'thesis' }).trade_mode, 'thesis')
 })
 
-test('a hand-off seed carries no lens — Argus stopped recommending one (mentor-modes.md)', () => {
+test('a hand-off seed carries no lens — the stock picker stopped recommending one (mentor-modes.md)', () => {
     assert.equal('recommended_mode' in sanitizeScanSeed({ ticker: 'mtg', recommended_mode: 'thesis' }), false)
 })
 
-test('the seed section: every hand-off — the Hotlist, the book, Argus — opens risk-based (mentor-modes.md)', () => {
+test('the seed section: every hand-off — the Hotlist, the book, the stock picker — opens risk-based (mentor-modes.md)', () => {
     for (const seed of [
         { ticker: 'MTG', hotlist_facts: 'this week (2–10 days)' },
-        { ticker: 'MTG', book_facts: 'Prometheus: buy', book_name: 'swing' },
+        { ticker: 'MTG', book_facts: 'The analyst: buy', book_name: 'swing' },
         { ticker: 'MTG', hotlist: { board: 'hb_2026-10-29_week', column: 'week' } },
         { ticker: 'MTG', recommended_mode: 'smc' },
     ]) {
         const text = _buildSeedSection(seed)
         assert.match(text, /start with the rules \(§ How you build every trade, the opening\)/)
         assert.doesNotMatch(text, /RISK-BASED|the `thesis` lens/, 'never named (2026-11-12)')
-        assert.doesNotMatch(text, /Argus recommends|smc/)
+        assert.doesNotMatch(text, /the stock picker recommends|smc/)
     }
 })
 
@@ -60,7 +60,7 @@ test('the lens prompt: building straight through keeps the lens; the house valua
     const lens = p.slice(p.indexOf('## How you build every trade'), p.indexOf('## Size comes from the user'))
     assert.match(lens, /Building straight through does not skip the judging/)
     assert.match(lens, /read `get_price_structure`/)
-    assert.match(lens, /Prometheus's price target is never the take-profit here/)
+    assert.match(lens, /The analyst's price target is never the take-profit here/)
 })
 
 test('a thesis setup naming no rungs is read on the 1h / 4h, not the horizon’s ladder; named rungs still win', () => {
@@ -70,7 +70,7 @@ test('a thesis setup naming no rungs is read on the 1h / 4h, not the horizon’s
         'another lens keeps the ladder')
 })
 
-test('Talos is told what a thesis setup is: the level and below, strength judged on the 1h / 4h', () => {
+test('The trade monitor is told what a thesis setup is: the level and below, strength judged on the 1h / 4h', () => {
     const line = lensLine('thesis')
     assert.match(line, /LEVEL, valid at that price and below/)
     assert.match(line, /STRENGTH on the 1h \/ 4h/)
@@ -298,7 +298,7 @@ test('the lens prompt after the GNRC drive: the date said from the tool, the dee
     assert.match(lens, /never quote an R:R or a level of your own either/)
 })
 
-test('the lens prompt: the limits come from the ONE question; Mentor reads what fits from the chart — judgment, no menu (Roy)', () => {
+test('the lens prompt: the limits come from the ONE question; the trader reads what fits from the chart — judgment, no menu (Roy)', () => {
     const lens = _lens()
     assert.match(lens, /Their limits — from the ONE question/)
     assert.match(lens, /the RISK LIMIT is their risk ÷ their position size/)

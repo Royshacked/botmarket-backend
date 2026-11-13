@@ -17,7 +17,7 @@ const LOG = '[industryViews]'
 const MAX_SYMBOLS = 60
 
 export const INDUSTRY_VIEWS_TOOL_SPEC = {
-    get_industry_views: `The house's INDUSTRY VIEWS from Pythia: for each GICS sub-industry, three structural answers — DEMAND (growing / in_line / shrinking against the economy), ECONOMICS (good / average / poor: do its companies earn above their cost of capital), CYCLE (peak / mid / trough, or stable: where current margins sit in the industry's own 10-year range). Pass \`symbols\` to get the industry each name is in and the house's answer for it; or \`sector\` (a GICS sector, e.g. Information Technology) for every sub-industry in it. These are DESCRIPTIONS of an industry, never a forecast of a price or a return — report them as such, and never present one as a reason a stock will rise. An industry still \`pending\` has no house answer yet: say so, do not supply one. Each name's line also carries Pythia's standing VERDICT on its industry where there is one — for swing / for long term (the house finds it worth that book's attention now), watch (a live question, with the date that decides it), avoid (the house expects it to go wrong), no case — and HYPE when its basket has run up 100%+ in two years and 100%+ over the market (a crash-risk flag, not a timing signal). A judgment from evidence, never a price forecast; the user's mandate outranks it. Changing an answer is Pythia's desk, not this tool.`,
+    get_industry_views: `The house's INDUSTRY VIEWS from the industry strategist: for each GICS sub-industry, three structural answers — DEMAND (growing / in_line / shrinking against the economy), ECONOMICS (good / average / poor: do its companies earn above their cost of capital), CYCLE (peak / mid / trough, or stable: where current margins sit in the industry's own 10-year range). Pass \`symbols\` to get the industry each name is in and the house's answer for it; or \`sector\` (a GICS sector, e.g. Information Technology) for every sub-industry in it. These are DESCRIPTIONS of an industry, never a forecast of a price or a return — report them as such, and never present one as a reason a stock will rise. An industry still \`pending\` has no house answer yet: say so, do not supply one. Each name's line also carries the industry strategist's standing VERDICT on its industry where there is one — for swing / for long term (the house finds it worth that book's attention now), watch (a live question, with the date that decides it), avoid (the house expects it to go wrong), no case — and HYPE when its basket has run up 100%+ in two years and 100%+ over the market (a crash-risk flag, not a timing signal). A judgment from evidence, never a price forecast; the user's mandate outranks it. Changing an answer is the industry strategist's desk, not this tool.`,
 }
 
 const _grades = (v) => (v.status === 'answered'
@@ -33,7 +33,7 @@ export function verdictLine(a) {
     // The long term is its own call (pythia-two-verdicts.md §2): an industry can hold it beside any near-term verdict.
     const near = a.verdict ? `${VERDICT_WORDS[a.verdict] ?? a.verdict}${watch}` : 'no near-term verdict'
     const lt = a.long_term?.call === 'yes' ? ` · LONG TERM: yes${a.long_term.hype ? ' (stretched — a timing flag)' : ''}` : ''
-    return `\n         Pythia's verdict: ${near}${a.hype ? ' · HYPE' : ''}${lt}`
+    return `\n         the industry strategist's verdict: ${near}${a.hype ? ' · HYPE' : ''}${lt}`
 }
 
 /** Per-symbol answers → LLM-ready text. Pure — exported for testing. */

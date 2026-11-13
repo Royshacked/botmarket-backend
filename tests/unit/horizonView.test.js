@@ -30,7 +30,7 @@ test('a view takes its BOOK\'s horizon — a swing view with a 12-month target i
     assert.equal(normalizeHorizonView({ target: 54 }, 'nope'), null)
 })
 
-test('Prometheus\'s <horizon_view> is parsed, checked, and its mode rides as its own cached block', () => {
+test('The analyst\'s <horizon_view> is parsed, checked, and its mode rides as its own cached block', () => {
     const raw = 'My swing view.\n<horizon_view>{ "book": "long term", "rating": "hold", "target": { "value": "260", "horizon": "12m" }, "why": "w", "kill": ["k"] }</horizon_view>'
     assert.deepEqual(_parseHorizonView(raw), { book: 'long_term', rating: 'hold', target: { value: 260, horizon: '12m', low: null, high: null }, why: 'w', kill: ['k'] })
     assert.equal(_parseHorizonView('no block — a pass'), null)
@@ -67,7 +67,7 @@ test('a fresh view is the read — the view first, the main coverage after it as
     assert.equal(r.state, 'ready')
     assert.equal(r.view, true)
     assert.equal(r.against, false)
-    assert.match(r.facts, /^Prometheus's long-term view: buy, target 260\.00 by 2027-11-11 \(a 12m target\); why: The platform keeps compounding\.; what breaks it: capex cut; his coverage \(the main target\): Prometheus buy/)
+    assert.match(r.facts, /^the analyst's long-term view: buy, target 260\.00 by 2027-11-11 \(a 12m target\); why: The platform keeps compounding\.; what breaks it: capex cut; his coverage \(the main target\): the analyst buy/)
     const stale = { ...view, set_at: new Date(NOW - (VIEW_FRESH_DAYS + 1) * DAY).toISOString() }
     assert.equal((await readFor('NVDA', 'long term', deps({ coverage: async () => ({ ...SWING_COV, horizon_views: { long_term: stale } }) }))).need, 'view')
     // A hold view is against the trade, whatever the main target says.
@@ -96,9 +96,9 @@ test('the ask carries what is needed: a view names its book, a reinit says so �
     assert.equal((await readFor('NVDA', 'long term', deps({ listQueue: async () => viewRow }))).state, 'waiting')
 })
 
-test('the words: Mentor and the chat say it is a VIEW, not a full coverage', () => {
-    assert.match(readWaitLine({ symbol: 'NVDA', horizon: 'long term' }, { kind: 'coverage', need: 'view', ahead: 0 }), /Prometheus is reading it — his long term view \(he covers it on the other horizon\)\./)
-    assert.match(readWaitLine({ symbol: 'NVDA', horizon: 'swing' }, { kind: 'coverage', need: 'reinit', ahead: 0 }), /his coverage again \(it was not live\)/)
+test('the words: the trader and the chat say it is a VIEW, not a full coverage', () => {
+    assert.match(readWaitLine({ symbol: 'NVDA', horizon: 'long term' }, { kind: 'coverage', need: 'view', ahead: 0 }), /I'm reading the business first — the long term view \(the coverage is on the other horizon\)\./)
+    assert.match(readWaitLine({ symbol: 'NVDA', horizon: 'swing' }, { kind: 'coverage', need: 'reinit', ahead: 0 }), /the coverage again \(it was not live\)/)
     assert.match(_buildReadSection({ symbol: 'NVDA', horizon: 'long term', kind: 'coverage', state: 'ready', view: true, facts: 'f', against: false }), /\(his long term view\): f/)
 })
 
@@ -181,7 +181,7 @@ test('a plain mentor row on a covered name is still skipped as covered — only 
     assert.equal(researchOpening({ symbol: 'X', context: { mentor: true, view: 'nope' } }).startsWith('Research X for coverage'), true)
 })
 
-test('every tool the horizon mode names is one Prometheus carries (the drift test reads only the base prompts)', async () => {
+test('every tool the horizon mode names is one the analyst carries (the drift test reads only the base prompts)', async () => {
     const { readFileSync } = await import('fs')
     const { TOOLS } = await import('../../services/agents/analyst.agent.service.js')
     const text = readFileSync(new URL('../../prompts/analyst_mode_horizon.md', import.meta.url), 'utf8')
