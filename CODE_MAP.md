@@ -828,10 +828,21 @@ services/
   houseIndustries.tools.js  get_house_industries (ATLAS; Argus's until 2026-11-11 — his words archived in
                             archive/services/tools/houseIndustries.argus.js) — `book` → the house's industries for it
                             (first 20 in full), `industry` → its largest companies: the candidate sleeves of a book
+  elliott.tools.js          check_elliott_count (PROTEUS, 2026-11-13, proteus.md §8.1 item 10) — checkElliottCount (the
+                            three hard rules on the wave-end prices + the price that kills the count, wave 5's cap)
+                            then checkCountOnCandles (each wave end a high/low on the candles, in order, the extreme of
+                            its legs, not already dead) via marketData._fetchCandleRows. IMPOSSIBLE / NOT ON THE
+                            CHART are never shown; a fetch failure is UNCHECKED. Reads years of candles (CHECK_WINDOW_DAYS
+                            → _fetchCandleRows windowDays) and returns each wave end's price as found. The waves must
+                            alternate; price after the last end is checked too. deps.fetchBars is the test seam
   behaviourProfile.tools.js get_behaviour_profile (PROTEUS, 2026-11-12) — UNBOUND: profileFor → formatProfile (how
                             to read it, WHAT HOLDS, each timeframe's tests with rate vs baseline / n / recent third,
                             the false breaks + sweep depth, the fit). A failure tells him not to describe the stock
-                            from memory
+                            from memory. holdKeys — the ONE list of what holds (CR 2026-11-13). Also the profile's other readers, one home: rowProfile (the opened Hotlist
+                            row: what holds or the daily ATR, breaks vs chance, cycle / Wyckoff / Fibonacci words),
+                            behaviourBadge (its headline), profileBrief (the trader's chat line) and mentorRead (the
+                            trader's levels: what holds priced now, "never cite one" otherwise, the range now, the
+                            stop's room — mentor.desk _proteusRead → mentor.agent _buildProteusSection, 5b)
   horizonList.tools.js      get_horizon_list (ARGUS, 2026-11-11, argus-rework.md §3.1) — UNBOUND, read-only: the house's
                             list for a horizon, the only names he may pick from. intraday / day → today's latest DAY
                             BOARD (hotlist.day, todayBoards; before the first, when the next runs); short term swing →
@@ -1109,6 +1120,14 @@ services/
                             baseline (judge → respects / faded / unconfirmed / no / thin); false breaks carry
                             sweep_depth_atr (median, p80) and `latest` (the last false break: at, reclaimed_at,
                             level, swept_to, depth_atr — the example Proteus charts, 2026-11-13). PURE.
+                            2026-11-13 (proteus.md §8.1 items 7–11): cycleTest (trough spacing vs the same returns
+                            reshuffled 100×; the next window only when it holds); falseBreakChance (the false-break
+                            RATE vs the same bars shuffled 30× — more / less / chance; noise scores 75–86%);
+                            wyckoffTest (ranges of 20 bars within 4 ATR; springs vs the drift AND ordinary sweeps,
+                            breakouts + the upthrust share, dry-volume retests, `current` range); fibPullbackTest
+                            (first touches of 38.2/50/61.8% on 4-ATR impulses vs other depths); stopRoom (breaks of
+                            the TRADER'S swing lows — swingStructure — reaching a stop 0.2/0.5/1 ATR under, and how
+                            many came back); `levels_now` (each line's price at the last bar). Seeded shuffles.
   proteusQueue.service.js   PROTEUS'S PROFILE AHEAD OF ANY ASK (proteus.md §4.4–4.5, step 4, 2026-11-12): queueProfiles
                             (symbols, { source }) — the day boards (hotlist.day after a board is saved) and the house
                             scan's picks (pythiaWeekly profileHousePicks) add names; ONE worker profiles them one at a

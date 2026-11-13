@@ -69,10 +69,11 @@ export function aggregateBucket(symbol, cfg) {
 
 // Fetch → (optionally aggregate) → slice to `count` most recent bars for a timeframe.
 // Exported so other OHLCV-compute tools (the SMC engine's tools) reuse ONE candle-fetch path (DRY).
-export async function _fetchCandleRows(ticker, timeframe) {
+export async function _fetchCandleRows(ticker, timeframe, { windowDays = null } = {}) {
     const cfg  = CANDLE_CFG[timeframe] ?? CANDLE_CFG['day']
     const sym  = ticker.toUpperCase()
-    const from = Date.now() - cfg.windowDays * 24 * 60 * 60 * 1000
+    // `windowDays`: a caller that needs more history than get_candles shows (the Elliott check, 2026-11-13).
+    const from = Date.now() - (windowDays ?? cfg.windowDays) * 24 * 60 * 60 * 1000
     // Pass an explicit `to` (now). The Massive provider builds `new Date(to)` and
     // throws "Invalid time value" on undefined; the FMP path only adds `to` when
     // present, so this is a no-op there but makes the Massive fallback (futures /

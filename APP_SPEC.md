@@ -587,6 +587,19 @@ business (Prometheus's), picks nothing (Argus's). Long side only, for now.
 - **One example on a chart** (2026-11-13): every behaviour answer shows one chart — the line that holds as its overlay,
   or (the usual case) the profile's latest false break on the asked timeframe (daily by default), its swing low and
   sweep drawn at the exact prices the count found, and one sentence saying what it shows.
+- **More methods, the same discipline** (2026-11-13, proteus.md §8.1): MEASURED — price cycles (trough spacing vs the
+  same moves reshuffled; a next window only when it holds), the false-break RATE against chance (noise fakes 75–86% of
+  breaks, so the rate alone is no trait), Wyckoff (trading ranges, springs vs an ordinary bar AND an ordinary false
+  break, range breakouts, dry-volume retests, the range now) and Fibonacci pullbacks (38.2/50/61.8% vs other depths of
+  the same pullbacks). SEEN — an Elliott count (checked by `check_elliott_count`: the three hard rules, each wave end on
+  the candles, not already dead, with the price that kills it — an impossible one is never shown) and a Wyckoff phase
+  from the measured range, with the closes that prove it wrong. On the names tested, none of the measured ones holds.
+- **The trader weighs it** (5b, 2026-11-13): Mentor's per-turn read lists what HOLDS priced now (a level he may anchor
+  to), otherwise "nothing is support — never cite one", the range now, and the stop's room on his own swing lows (about
+  two thirds of breaks reach his 0.2-ATR stop and most come back, alike on every name) — context for the deeper stop
+  he offers; the tested stop rule is unchanged.
+- **The opened Hotlist row** shows the profile on its horizon (what holds or the daily ATR, the breaks against chance,
+  cycle / Wyckoff / Fibonacci lines), replacing the badge.
 - **Knows where his numbers came from** (2026-11-13, every desk): a reply keeps the tools it was written from, and the
   next turn is told them — asked "how so fast?", he names the cached profile instead of calling it made up.
 - **Who sends users to him:** Axl ("how does TSLA behave?" → `<route>technicals TSLA</route>`) and Mentor (registry

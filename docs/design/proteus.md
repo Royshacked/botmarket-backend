@@ -173,6 +173,22 @@ tools move here once Argus is fully defined (argus-rework §4).
    - Live Mentor turn (NVDA, "is the 50 MA a good stop? how much room?"): refused the 50 MA (did not hold), kept the
      structure stop, gave the stop's room as a cost; the first replay called it "the analyst's" — the section now says whose.
    Next: the Daedalus design talk.
+12. **QA/CR cycle on items 7–11** (2026-11-13; two reviewers, every finding verified, Roy: "fix all"; PROFILE_VERSION 10).
+   Engine: the cycle window was in CALENDAR time (20 sessions → 20 days, a week early, on a Sunday) — now how long N
+   bars have taken in this history, a weekend moved to Monday; stopRoom followed a break 3 bars only — now `horizon` bars
+   when it does not come back (live: 1 ATR reached 23–32%, barely moved — most deep breaks go deep at once); Wyckoff
+   breakouts one per window and the next range looked for after it (one rally broke out again and again); Fibonacci
+   ONE event per pullback per side, its level drawn at random (seeded — the first touch would always be the shallowest);
+   dry-up retests against the NOT-dry ones; a spring's dip excluded from the sweeps within sweepBack bars; a break in the
+   last bars not counted until it has had its chance; chance's shuffle from the older bars only.
+   Text: ONE list of holds (`holdKeys`) for the badge, holdsOf and the trader's read — his own copy missed order blocks,
+   sweeps, breakouts and chance and told him "nothing holds"; an event test (RSI, MACD, volume) is a SIGNAL, never a
+   priced level; the fit is back in his read; a thin chance verdict says it cannot be told; a cycle near-miss is said as
+   one; sweep depth is "how far noise pokes under a low", never "the room a stop needs" (the stop is the trader's).
+   Elliott: the waves must alternate; price after the last wave end (a wave still running, wave 5 past its cap); a dead
+   count said as dead, alone; the check reads years of candles (`_fetchCandleRows` `windowDays`; get_candles keeps its 40
+   bars) and returns each wave end's price on the candles, which is what gets drawn; a non-list `points` is refused.
+   Live: TSLA daily, candles → check → one chart at the checked prices (twice); before the order rule, two charts.
 
 ## 9. History depth (checked live, FMP, TSLA, 2026-11-12)
 

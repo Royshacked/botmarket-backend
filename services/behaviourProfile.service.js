@@ -35,7 +35,9 @@ export const PROFILE_TTL_MS = 7 * DAY
 // 7 (2026-11-13): Wyckoff, measured — ranges, springs, breakouts, dry-up retests (wyckoffTest).
 // 8 (2026-11-13): Fibonacci pullbacks, measured (fibPullbackTest).
 // 9 (2026-11-13): the stop's room on the trader's own swing lows (stopRoom) and each line's level now (5b).
-export const PROFILE_VERSION = 9
+// 10 (2026-11-13, CR): the cycle window in trading time, the stop room followed past 3 bars, breakouts and Fibonacci
+// one per window, dry-up vs the not-dry retests, unfolding breaks not counted, chance from the older bars.
+export const PROFILE_VERSION = 10
 
 const _cache = makeMongoBackedCache({ collection: PROFILE_COLLECTION, ttlMs: PROFILE_TTL_MS, max: 300, log: LOG })
 const _inflight = new Map()

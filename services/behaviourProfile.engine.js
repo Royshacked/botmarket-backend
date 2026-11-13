@@ -113,19 +113,33 @@ export function cycleTest(bars, cut, opts = PROFILE) {
     // The window: from the WHOLE history's troughs — the period, its spread, and where the last trough sits.
     const all = findExtrema(closes, opts.cycleLookback).troughs
     const whole = cycleStats(all)
-    const step = _median(bars.slice(1).map((b, i) => _ms(b.timestamp) - _ms(bars[i].timestamp)))
+    // In TRADING time (CR 2026-11-13: a 20-session period was added as 20 calendar days — a week early, on a Sunday): N
+    // bars ahead is how long N bars have actually taken in this history (weekends, nights and holidays included).
     const lastAt = _ms(bars[all.at(-1)].timestamp)
+    // A daily or weekly window that lands on a weekend opens on the Monday after it (a median of elapsed times can).
+    const daily = _elapsed(bars, 1) >= 20 * 3_600_000
+    const weekday = (ms) => { const d = new Date(ms).getUTCDay(); return daily && (d === 6 || d === 0) ? ms + (d === 6 ? 2 : 1) * 86_400_000 : ms }
+    const ahead = (n) => { const e = _elapsed(bars, Math.max(1, Math.round(n))); return e == null ? null : weekday(lastAt + e) - lastAt }
+    const near = ahead(whole.mean - whole.std), far = ahead(whole.mean + whole.std)
     out.period_bars = whole.mean
     out.spread_bars = whole.std
-    out.window = step ? {
+    out.window = near != null && far != null ? {
         last_low: new Date(lastAt).toISOString(),
-        from: new Date(lastAt + Math.max(1, whole.mean - whole.std) * step).toISOString(),
-        to: new Date(lastAt + (whole.mean + whole.std) * step).toISOString(),
+        from: new Date(lastAt + near).toISOString(),
+        to: new Date(lastAt + far).toISOString(),
     } : null
     return out
 }
 
 const _ms = (ts) => (ts < 1e12 ? ts * 1000 : ts)
+/** How long `n` bars have taken in this history, in ms — the median over the bars (sampled). Null when too short. Pure. */
+function _elapsed(bars, n) {
+    if (bars.length <= n) return null
+    const step = Math.max(1, Math.floor((bars.length - n) / 400))
+    const xs = []
+    for (let i = 0; i + n < bars.length; i += step) xs.push(_ms(bars[i + n].timestamp) - _ms(bars[i].timestamp))
+    return _median(xs)
+}
 const _mon = (bars) => bars.map(b => ({ t: _ms(b.timestamp), o: b.open, h: b.high, l: b.low, c: b.close, v: b.volume }))
 const _median = (xs) => {
     const v = xs.filter(Number.isFinite).sort((a, b) => a - b)
@@ -279,6 +293,8 @@ export function falseBreaks(bars, atrs, cut, drift, opts = PROFILE) {
         if (!Number.isFinite(a) || a <= 0) continue
         let reclaim = null
         for (let k = j; k < Math.min(bars.length, j + opts.sweepBack); k++) if (bars[k].close > s.price) { reclaim = k; break }
+        // Still unfolding (CR 2026-11-13): no reclaim yet only because the bars ran out — neither false nor true yet.
+        if (reclaim == null && j + opts.sweepBack > bars.length) continue
         let toDir = null
         for (let k = j; k < bars.length; k++) if (Math.abs(bars[k].close - s.price) >= a) { toDir = k - j; break }
         // From the reclaim bar's CLOSE, like the drift: measured from the swept level, the loss would sit further
@@ -336,7 +352,8 @@ export function falseBreaks(bars, atrs, cut, drift, opts = PROFILE) {
  *     AND against an ordinary false break elsewhere (the falseBreaks sweeps): a spring is only Wyckoff's if it beats both;
  *   - BREAKOUTS (sign of strength): a close above the range high, against the drift; the share that closed straight back
  *     inside within `sweepBack` bars is the UPTHRUST rate (said, not tested — the long side's failure);
- *   - DRY-UP RETESTS: a retest of the range low on volume under `dryUp` × the range's average, against all retests.
+ *   - DRY-UP RETESTS: a retest of the range low on volume under `dryUp` × the range's average, against the retests
+ *     that were NOT dry (a baseline holding the event itself pulls the two rates together — CR 2026-11-13).
  * `current`: the range the last bar is inside, if any — where it stands now. The PHASE (A–E) is a chart read, never
  * measured. Pure.
  */
@@ -358,16 +375,22 @@ export function wyckoffTest(bars, atrs, cut, drift, sweeps, opts = PROFILE) {
             if (!Number.isFinite(at) || at <= 0) continue
             if (bar.close > hi) {         // a breakout (sign of strength) — the range ends here
                 const o = bracket(bars, j, bar.close + opts.up * at, bar.close - opts.down * at, opts.horizon)
-                if (o != null) {
+                if (o != null && spaced(breakouts, j)) {
                     breakouts.push({ i: j, out: o })
                     if (bars.slice(j + 1, j + 1 + opts.sweepBack).some(x => x.close < hi)) upthrusts++
                 }
+                // The next range is looked for after this breakout's window: its 20 bars would otherwise still hold the
+                // old range, and one rally would break out again and again (CR 2026-11-13).
+                j += opts.horizon - 1
                 ended = true; break
             }
             if (bar.low < lo) {           // under the range low: a SPRING if a close is back inside soon, else a breakdown
                 let k = -1
                 for (let m = j; m < Math.min(bars.length, j + opts.sweepBack); m++) if (bars[m].close > lo) { k = m; break }
-                if (k < 0) { ended = true; break }
+                if (k < 0) {
+                    if (j + opts.sweepBack > bars.length) break   // the last bars: not a breakdown yet (CR 2026-11-13)
+                    ended = true; break
+                }
                 const ak = atrs[k]
                 const o = Number.isFinite(ak) && ak > 0 ? bracket(bars, k, bars[k].close + opts.up * ak, bars[k].close - opts.down * ak, opts.horizon) : null
                 if (o != null && spaced(springs, k)) springs.push({ i: k, out: o })
@@ -378,8 +401,8 @@ export function wyckoffTest(bars, atrs, cut, drift, sweeps, opts = PROFILE) {
             if (bar.low <= lo + opts.touchTol * at && bars[j - 1].close > lo + opts.touchTol * at && spaced(retests, j)) {
                 const o = bracket(bars, j, bar.close + opts.up * at, bar.close - opts.down * at, opts.horizon)
                 if (o != null) {
-                    retests.push({ i: j, out: o })
                     if (avgVol > 0 && (bar.volume ?? 0) < opts.dryUp * avgVol) dry.push({ i: j, out: o })
+                    else retests.push({ i: j, out: o })   // the baseline: the retests that were NOT dry (CR 2026-11-13)
                 }
             }
         }
@@ -388,8 +411,9 @@ export function wyckoffTest(bars, atrs, cut, drift, sweeps, opts = PROFILE) {
     }
     // The spring's second baseline: ordinary false breaks of swing lows that are NOT themselves springs (a spring is
     // often a swing-low sweep too — counting it on both sides would pull the two rates together).
-    const own = new Set(springs.map(e => e.i))
-    const vsDrift = judge(springs, drift, cut, opts), vsSweeps = judge(springs, (sweeps ?? []).filter(e => !own.has(e.i)), cut, opts)
+    // The same dip reclaims the range low and a swing low on bars a little apart (CR 2026-11-13) — within sweepBack is one.
+    const same = (e) => springs.some(sp => Math.abs(sp.i - e.i) <= opts.sweepBack)
+    const vsDrift = judge(springs, drift, cut, opts), vsSweeps = judge(springs, (sweeps ?? []).filter(e => !same(e)), cut, opts)
     // Wyckoff's only when it beats BOTH an ordinary bar and an ordinary false break: the weaker verdict of the two.
     const vs = [vsDrift.verdict, vsSweeps.verdict]
     const verdict = vs.includes('thin') ? 'thin' : vs.includes('no') ? 'no' : vs.includes('faded') ? 'faded' : vs.includes('unconfirmed') ? 'unconfirmed' : 'respects'
@@ -408,13 +432,14 @@ export function wyckoffTest(bars, atrs, cut, drift, sweeps, opts = PROFILE) {
  * counted at its FIRST touch from above (the last close over it, this bar's low within `touchTol` ATRs), with the one
  * outcome from the level — like a moving average. The Fibonacci levels (`fibRatios`) against levels at ratios that are
  * not Fibonacci (`fibBase`, either side of them) on the SAME pullbacks: same trend, same volatility, not the ratio.
- * Pooled across the three ratios (one test, not three). The Elliott COUNT is never measured — this is the part of
+ * Pooled across the three ratios (one test, not three); one event per pullback on each side, its level drawn at random. The Elliott COUNT is never measured — this is the part of
  * Elliott that can be. Pure.
  */
 export function fibPullbackTest(bars, atrs, cut, opts = PROFILE) {
     const sw = swings(bars, opts.swingLookback)
     const fib = [], base = []
     let impulses = 0, low = null, lastEnd = -1, latest = null
+    const rnd = _rng(bars.length * 7919 + Math.round(bars[0].close * 100))
     for (const s of sw) {
         if (s.type === 'low') { if (!low || s.price < low.price || low.used) low = { ...s, used: false }; continue }
         if (!low || low.used || s.i <= low.i) continue
@@ -425,13 +450,13 @@ export function fibPullbackTest(bars, atrs, cut, opts = PROFILE) {
         impulses++
         const span = s.price - low.price
         const level = (r) => s.price - r * span
-        const touched = new Set()
+        const touched = new Set(), mine = { fib: [], base: [] }
         let end = Math.min(bars.length, start + opts.fibMaxBars)
         for (let j = start; j < end; j++) {
             const b = bars[j], aj = atrs[j]
             if (b.close > s.price || b.close < low.price) { end = j; break }
             if (!Number.isFinite(aj) || aj <= 0) continue
-            for (const [r, list] of [...opts.fibRatios.map(r => [r, fib]), ...opts.fibBase.map(r => [r, base])]) {
+            for (const [r, list] of [...opts.fibRatios.map(r => [r, mine.fib]), ...opts.fibBase.map(r => [r, mine.base])]) {
                 if (touched.has(r)) continue
                 const L = level(r)
                 if (!(bars[j - 1].close > L && b.low <= L + opts.touchTol * aj)) continue
@@ -441,6 +466,10 @@ export function fibPullbackTest(bars, atrs, cut, opts = PROFILE) {
                 if (o != null) list.push({ i: j, out: o })
             }
         }
+        // ONE event per pullback per list (CR 2026-11-13: a falling pullback touched 38.2, 50 and 61.8% a few bars apart —
+        // one move counted three times). The touched level is drawn at random (seeded), so every depth stays tested —
+        // the first touch would always be the shallowest.
+        for (const [own, list] of [[mine.fib, fib], [mine.base, base]]) if (own.length) list.push(own[Math.floor(rnd() * own.length)])
         lastEnd = end
         latest = { low: _round(low.price, 2), high: _round(s.price, 2), at: new Date(_ms(bars[s.i].timestamp)).toISOString() }
     }
@@ -452,7 +481,8 @@ export function fibPullbackTest(bars, atrs, cut, opts = PROFILE) {
  * under the last swing low of HIS swings (swingStructure: a zigzag of `STRUCTURE.k` ATRs, the 20-bar ATR) — not the
  * small swings the false-break count above uses. On those swing lows, from the bar after each is confirmed: every
  * break; for a stop `b` ATR under the low (`stopBuffers`), the share of breaks that reached it, and of those the share
- * that closed back over the swing low within `sweepBack` bars — STOPPED OUT, THEN BACK (a whipsaw). Descriptive: a
+ * that closed back over the swing low within `sweepBack` bars — STOPPED OUT, THEN BACK (a whipsaw). A break that does not
+ * come back is followed for `horizon` bars for its depth. Descriptive: a
  * stop's room is a cost, measured, not a rule to beat a baseline. Pure.
  */
 export function stopRoom(bars, opts = PROFILE) {
@@ -467,13 +497,18 @@ export function stopRoom(bars, opts = PROFILE) {
         const s = broken.reduce((m, l) => (l.price < m.price ? l : m))
         const aj = a[j]
         if (!Number.isFinite(aj) || aj <= 0) continue
-        // The deepest point before price closed back over the low (or within the window, if it never did).
+        // Back: a close over the low within `sweepBack` bars — the depth is the deepest point until then. Not back: the
+        // break is followed for `horizon` bars (CR 2026-11-13: followed for 3 bars only, a low that broke and kept sliding
+        // read as shallow, and the deeper stops looked safer than they are).
         let back = null, deepest = bars[j].low
         for (let k = j; k < Math.min(bars.length, j + opts.sweepBack); k++) {
             deepest = Math.min(deepest, bars[k].low)
             if (bars[k].close > s.price) { back = k; break }
         }
-        if (back == null && j + opts.sweepBack > bars.length) continue   // still unfolding
+        if (back == null) {
+            if (j + opts.horizon > bars.length) continue   // still unfolding
+            for (let k = j; k < j + opts.horizon; k++) deepest = Math.min(deepest, bars[k].low)
+        }
         breaks.push({ depth: (s.price - deepest) / aj, back: back != null })
     }
     const by = Object.fromEntries(opts.stopBuffers.map(b => {
@@ -482,7 +517,7 @@ export function stopRoom(bars, opts = PROFILE) {
     }))
     const backDepths = breaks.filter(x => x.back).map(x => x.depth)
     return {
-        swing_lows: lows.length, breaks: breaks.length, stop_buffer: STRUCTURE.buffer,
+        swing_lows: lows.length, breaks: breaks.length, stop_buffer: STRUCTURE.buffer, followed_bars: opts.horizon,
         back_depth_atr: { median: _round(_median(backDepths), 2), p80: _round(_quantile(backDepths, 0.8), 2) },
         by_buffer: by,
     }
@@ -518,8 +553,9 @@ export function falseBreakChance(bars, cut, fb, opts = PROFILE) {
     const rnd = _rng(bars.length * 104729 + Math.round(bars[0].close * 100))
     const base = []
     for (let k = 0; k < opts.fbShuffles; k++) {
-        const sb = _shuffledBars(bars, rnd)
-        const r = falseBreaks(sb, calcATRSeries(_mon(sb), opts.atrPeriod), cut, [], opts)
+        // The OLDER bars only, shuffled — the rate it is compared with is the older two-thirds' (CR 2026-11-13).
+        const sb = _shuffledBars(bars.slice(0, cut), rnd)
+        const r = falseBreaks(sb, calcATRSeries(_mon(sb), opts.atrPeriod), sb.length, [], opts)
         if (Number.isFinite(r.older?.false_rate)) base.push(r.older.false_rate)
     }
     if (base.length < 5) return { verdict: 'thin', base: null, z: null }

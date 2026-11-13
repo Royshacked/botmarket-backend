@@ -67,6 +67,8 @@ export function cycleWords(c, tf) {
     }
     if (c.verdict === 'faded') return `Its lows used to come in a cycle (${_pct(c.rate)} vs ${_pct(c.base)}), not lately — no window stated.`
     if (c.verdict === 'unconfirmed') return `A cycle in the older history (${_pct(c.rate)} vs ${_pct(c.base)}), too few recent lows to confirm — no window stated.`
+    // A wide gap that did not clear z is a near-miss, not "no more" (the drive, 2026-11-13: QLYS weekly 68% vs 50%).
+    if (c.rate - c.base >= PROFILE.edge) return `Its lows were more evenly spaced than the same moves reshuffled (${_pct(c.rate)} vs ${_pct(c.base)}, z ${c.z}) — a near-miss: not enough to rule out chance; no window stated.`
     return `No regular cycle — its lows are no more evenly spaced than the same moves reshuffled (${_pct(c.rate)} vs ${_pct(c.base)}).`
 }
 
@@ -86,7 +88,9 @@ export function cycleLine(c) {
  */
 export function chanceWords(fb, where = 'row') {
     const c = fb?.chance
-    if (!c || c.base == null || c.verdict === 'thin') return ''
+    if (!c) return ''
+    // Too few breaks to compare (CR 2026-11-13): the bare rate would read as a trait — say it cannot be told.
+    if (c.verdict === 'thin' || c.base == null) return ({ tool: '; too few breaks to compare with chance', brief: ' (too few to compare with chance)' })[where] ?? ' — too few breaks to tell it from chance'
     const base = _pct(c.base)
     if (where === 'tool') return `; vs ${base} for its own bars in random order — ${({ more: 'MORE false than chance (holds)', less: 'LESS false than chance: its breaks follow through (holds)', faded: 'beat chance in the older history, not lately', chance: 'CHANCE: no trait of its own' })[c.verdict] ?? c.verdict} (z ${c.z})`
     if (where === 'brief') return c.verdict === 'chance' ? ` (chance: ${base})` : ` (vs ${base} by chance: ${c.verdict})`
@@ -172,18 +176,35 @@ export function mentorRead(p) {
         const t = tfs[tf]
         if (!t) continue
         const where = TF[tf].toLowerCase()
-        for (const [k, s] of Object.entries(t.indicators ?? {})) {
-            if (s?.verdict !== 'respects') continue
-            const now = t.levels_now?.[k]
-            lines.push(`${LABEL[k] ?? k} (${where}) HOLDS — ${_pct(s.rate)} vs ${_pct(s.base)}${now != null ? `; at ${now} now` : ''}: a level an entry or a stop may sit on`)
+        const vs = (s) => (s?.rate != null ? ` (${_pct(s.rate)} vs ${_pct(s.base)})` : '')
+        for (const k of holdKeys(t)) {
+            const s = t.indicators?.[k]
+            if (LEVEL_KEYS.has(k)) {
+                const now = t.levels_now?.[k]
+                lines.push(`${LABEL[k]} (${where}) HOLDS${vs(s)}${now != null ? `; at ${now} now` : ''}: a LEVEL an entry or a stop may sit on`)
+            } else if (s) {
+                // An EVENT test (RSI under 30, a MACD cross, a high-volume up bar) — a signal, never a price (CR 2026-11-13).
+                lines.push(`${LABEL[k] ?? k} (${where}) HOLDS${vs(s)}: a SIGNAL that has led higher — timing for an entry, not a level`)
+            } else if (k === 'fib' && t.fib.latest_impulse) {
+                const { low, high } = t.fib.latest_impulse
+                const at = (r) => _round2(high - r * (high - low))
+                lines.push(`Fibonacci pullbacks (${where}) HOLD${vs(t.fib)} — the latest impulse ${low} → ${high}: 38.2% ${at(0.382)}, 50% ${at(0.5)}, 61.8% ${at(0.618)}`)
+            } else if (k === 'cycle') {
+                lines.push(`Its ${where} lows come in a cycle${vs(t.cycle)}${t.cycle.window ? ` — the next window ${t.cycle.window.from.slice(0, 10)} → ${t.cycle.window.to.slice(0, 10)}` : ''}: timing for how long an entry waits`)
+            } else if (k === 'order_blocks') {
+                lines.push(`Bullish order blocks (${where}) HOLD on a retest${vs(t.order_blocks)}: a block under the price is a level — where they sit today is on the chart (get_price_structure / the chart)`)
+            } else if (k === 'sweeps') {
+                lines.push(`A sweep of a ${where} low that closes back above has led higher${vs(t.false_breaks.after_sweep)}: a reclaimed low is an entry signal`)
+            } else if (k === 'springs') {
+                lines.push(`Wyckoff springs (${where}) HOLD${vs(t.wyckoff.springs)} — a dip under a range low that closes back inside has led higher, more than an ordinary dip`)
+            } else if (k === 'range_breakouts') {
+                lines.push(`Breakouts above a ${where} trading range HOLD${vs(t.wyckoff.breakouts)}: a close over the range high has followed through`)
+            } else if (k === 'dry_up') {
+                lines.push(`Retests of a ${where} range low on dried-up volume HOLD${vs(t.wyckoff.dry_up)}: a light-volume retest of the range low is an entry signal`)
+            } else if (k === 'fakes' || k === 'follows') {
+                lines.push(`${where.charAt(0).toUpperCase() + where.slice(1)} breaks of its lows ${k === 'fakes' ? 'reverse' : 'follow through'} more than chance (${_pct(t.false_breaks.false_rate)} false vs ${_pct(t.false_breaks.chance.base)})`)
+            }
         }
-        if (t.fib?.verdict === 'respects' && t.fib.latest_impulse) {
-            const { low, high } = t.fib.latest_impulse
-            const at = (r) => _round2(high - r * (high - low))
-            lines.push(`Fibonacci pullbacks (${where}) HOLD — the latest impulse ${low} → ${high}: 38.2% ${at(0.382)}, 50% ${at(0.5)}, 61.8% ${at(0.618)}`)
-        }
-        if (t.cycle?.verdict === 'respects' && t.cycle.window) lines.push(`Its ${where} lows come in a cycle — the next window ${t.cycle.window.from.slice(0, 10)} → ${t.cycle.window.to.slice(0, 10)}: timing for how long an entry waits`)
-        if (t.wyckoff?.springs?.verdict === 'respects') lines.push(`Wyckoff springs (${where}) HOLD — a dip under a range low that closes back inside has led higher, more than an ordinary dip`)
     }
     out.push(...(lines.length ? lines : ['Nothing technical holds on the daily or weekly bars: no moving average, Fibonacci level or pattern is support on this name — never cite one as the reason for a level; the levels come from the structure and the ATR']))
     if (lines.length) out.push('Anything not listed above did not hold — never cite it as support')
@@ -197,8 +218,42 @@ export function mentorRead(p) {
             ` — the cost of the tight stop; most names look alike here`)
     }
     if (Number.isFinite(tfs.day?.atr_pct)) out.push(`Daily ATR ${tfs.day.atr_pct}% — a day's normal move`)
+    // The fit (CR 2026-11-13: the trader's deciding read asks for it, and only the brief carried it).
+    const fit = p?.suitability
+    if (fit) out.push(`Fits: day trade ${fit.day_trade.fits ? 'yes' : 'no'}, swing ${fit.swing.fits ? 'yes' : 'no'} — ${fit.swing.fits ? fit.swing.why : fit.day_trade.why}`)
     return out
 }
+
+/**
+ * WHAT HOLDS on one timeframe, as keys — the ONE list (CR 2026-11-13: the badge, holdsOf and the trader's read each kept
+ * their own copy, and the trader's missed order blocks, sweeps, breakouts and the chance verdict, so it said "nothing
+ * holds" when something did). Pure.
+ */
+export function holdKeys(t) {
+    if (!t) return []
+    return [
+        ...Object.entries(t.indicators ?? {}).filter(([, s]) => s?.verdict === 'respects').map(([k]) => k),
+        ...(t.false_breaks?.after_sweep?.verdict === 'respects' ? ['sweeps'] : []),
+        ...(t.order_blocks?.verdict === 'respects' ? ['order_blocks'] : []),
+        ...(t.cycle?.verdict === 'respects' ? ['cycle'] : []),
+        ...(t.wyckoff?.springs?.verdict === 'respects' ? ['springs'] : []),
+        ...(t.wyckoff?.breakouts?.verdict === 'respects' ? ['range_breakouts'] : []),
+        ...(t.wyckoff?.dry_up?.verdict === 'respects' ? ['dry_up'] : []),
+        ...(t.fib?.verdict === 'respects' ? ['fib'] : []),
+        ...(t.false_breaks?.chance?.verdict === 'more' ? ['fakes'] : t.false_breaks?.chance?.verdict === 'less' ? ['follows'] : []),
+    ]
+}
+
+/** A held key in words, for the lists that name what holds (holdsOf). */
+const HOLD_WORDS = Object.freeze({
+    sweeps: 'sweeps of lows', order_blocks: 'order blocks', cycle: 'a price cycle',
+    springs: 'Wyckoff springs — dips under a range low closed back inside', range_breakouts: 'breakouts above a trading range',
+    dry_up: 'retests of a range low on dried-up volume', fib: 'pullbacks turning at Fibonacci levels',
+    fakes: 'breaks of its lows reverse more than chance', follows: 'breaks of its lows follow through more than chance',
+})
+
+/** The lines a level can be priced on now — the rest of the indicator tests are EVENTS (a signal, never a price). */
+const LEVEL_KEYS = new Set(['ema20', 'sma50', 'sma200', 'vwap'])
 
 /** One timeframe → its lines. Pure. */
 export function timeframeLines(tf, t) {
@@ -253,18 +308,7 @@ export function behaviourBadge(profile, horizon = null) {
     const holds = []
     for (const tf of present) {
         const t = profile.timeframes[tf]
-        const keys = [
-            ...Object.entries(t.indicators ?? {}).filter(([, s]) => s?.verdict === 'respects').map(([k]) => k),
-            ...(t.false_breaks?.after_sweep?.verdict === 'respects' ? ['sweeps'] : []),
-            ...(t.order_blocks?.verdict === 'respects' ? ['order_blocks'] : []),
-            ...(t.cycle?.verdict === 'respects' ? ['cycle'] : []),
-            ...(t.wyckoff?.springs?.verdict === 'respects' ? ['springs'] : []),
-            ...(t.wyckoff?.breakouts?.verdict === 'respects' ? ['range_breakouts'] : []),
-            ...(t.wyckoff?.dry_up?.verdict === 'respects' ? ['dry_up'] : []),
-            ...(t.fib?.verdict === 'respects' ? ['fib'] : []),
-            ...(t.false_breaks?.chance?.verdict === 'more' ? ['fakes'] : t.false_breaks?.chance?.verdict === 'less' ? ['follows'] : []),
-        ]
-        for (const k of keys) holds.push({ key: k, tf, label: `${BADGE_WORDS[k] ?? k} (${TF[tf].toLowerCase()})` })
+        for (const k of holdKeys(t)) holds.push({ key: k, tf, label: `${BADGE_WORDS[k] ?? k} (${TF[tf].toLowerCase()})` })
     }
     const words = [...new Set(holds.map(h => BADGE_WORDS[h.key] ?? h.key))]
     const on = present.map(tf => TF[tf].toLowerCase()).join(' and ')
@@ -311,7 +355,7 @@ export function rowProfile(profile, horizon = null) {
         if (!fb?.breaks) continue
         lines.push([`${tfWord(tf)} breaks of a low`,
             `${_pct(fb.false_rate)} of ${fb.breaks} closed back above within ${PROFILE.sweepBack} bars${chanceWords(fb, 'row')}` +
-            `${fb.sweep_depth_atr?.median != null ? `; sweeps ~${fb.sweep_depth_atr.median} ATR under the low (80% within ${fb.sweep_depth_atr.p80}) — the room a stop under a low needs` : ''}` +
+            `${fb.sweep_depth_atr?.median != null ? `; sweeps ~${fb.sweep_depth_atr.median} ATR under the low (80% within ${fb.sweep_depth_atr.p80}) — how far noise pokes under a low` : ''}` +
             `${fb.bars_to_direction != null ? `; a direction ~${fb.bars_to_direction} bars after` : ''}.`])
     }
     for (const tf of tfs) {
@@ -337,18 +381,8 @@ export function rowProfile(profile, horizon = null) {
 
 /** What HOLDS across the timeframes, labelled — the one list formatProfile and profileBrief both say. Missing parts skip. Pure. */
 export function holdsOf(timeframes) {
-    return Object.entries(timeframes ?? {}).flatMap(([tf, t]) => (t ? [
-        ...Object.entries(t.indicators ?? {}).filter(([, s]) => s?.verdict === 'respects').map(([k]) => `${LABEL[k] ?? k} (${TF[tf].toLowerCase()})`),
-        ...(t.false_breaks?.after_sweep?.verdict === 'respects' ? [`sweeps of lows (${TF[tf].toLowerCase()})`] : []),
-        ...(t.order_blocks?.verdict === 'respects' ? [`order blocks (${TF[tf].toLowerCase()})`] : []),
-        ...(t.cycle?.verdict === 'respects' ? [`a price cycle (${TF[tf].toLowerCase()})`] : []),
-        ...(t.wyckoff?.springs?.verdict === 'respects' ? [`Wyckoff springs — dips under a range low closed back inside (${TF[tf].toLowerCase()})`] : []),
-        ...(t.wyckoff?.breakouts?.verdict === 'respects' ? [`breakouts above a trading range (${TF[tf].toLowerCase()})`] : []),
-        ...(t.wyckoff?.dry_up?.verdict === 'respects' ? [`retests of a range low on dried-up volume (${TF[tf].toLowerCase()})`] : []),
-        ...(t.fib?.verdict === 'respects' ? [`pullbacks turning at Fibonacci levels (${TF[tf].toLowerCase()})`] : []),
-        ...(t.false_breaks?.chance?.verdict === 'more' ? [`breaks of its lows reverse more than chance (${TF[tf].toLowerCase()})`] : []),
-        ...(t.false_breaks?.chance?.verdict === 'less' ? [`breaks of its lows follow through more than chance (${TF[tf].toLowerCase()})`] : []),
-    ] : []))
+    return Object.entries(timeframes ?? {}).flatMap(([tf, t]) =>
+        holdKeys(t).map(k => `${LABEL[k] ?? HOLD_WORDS[k] ?? k} (${TF[tf].toLowerCase()})`))
 }
 
 /** The whole profile → the tool's text. Pure. */

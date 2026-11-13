@@ -349,3 +349,54 @@ test("the stop's room on the trader's own swing lows: how many breaks reach a st
     assert.equal(r.stop_buffer, 0.2, "the trader's own buffer (swingStructure.STRUCTURE)")
     assert.equal(stopRoom(series([100, 101, 102]), PROFILE).breaks, 0)
 })
+
+test('CR 2026-11-13: the cycle window is in TRADING time — 20 sessions ahead is ~4 calendar weeks, never a weekend', async () => {
+    const { cycleTest } = await import('../../services/behaviourProfile.engine.js')
+    // Weekday-only daily bars (Mon–Fri), lows every 20 sessions.
+    const days = []
+    for (let t = Date.UTC(2020, 0, 6); days.length < 900; t += 86_400_000) { const d = new Date(t).getUTCDay(); if (d !== 0 && d !== 6) days.push(t / 1000) }
+    let s = 11
+    const rnd = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 2 ** 32 }
+    const b = days.map((t, i) => { const c = 100 + 6 * Math.sin((2 * Math.PI * i) / 20) + (rnd() - 0.5) * 1.5; return { open: c, high: c + 0.5, low: c - 0.5, close: c, volume: 1, timestamp: t } })
+    const c = cycleTest(b, 600)
+    assert.equal(c.verdict, 'respects')
+    const gapDays = (Date.parse(c.window.from) - Date.parse(c.window.last_low)) / 86_400_000
+    assert.ok(gapDays >= 0.9 * (c.period_bars - c.spread_bars) * 7 / 5, `the window opens in trading time (${gapDays} calendar days for ${c.period_bars - c.spread_bars} sessions)`)
+    for (const at of [c.window.from, c.window.to]) assert.ok(![0, 6].includes(new Date(at).getUTCDay()), `${at} is a weekend`)
+})
+
+test("CR 2026-11-13: the stop's room follows a break that keeps sliding — a 1-ATR stop it went through is counted as reached", async () => {
+    const { stopRoom } = await import('../../services/behaviourProfile.engine.js')
+    // 40 bars of a range 99–101 (ATR ~2), a swing low at 96.5 made and confirmed, then a slow slide: under 96.5 by a little,
+    // and on down over the next bars to ~92 — more than 1 ATR under the low, never back.
+    const closes = [...Array.from({ length: 40 }, (_, i) => 100 + (i % 2 ? 1 : -1)), 99, 98, 97, 97.2, 99, 101, 102, 101.5, 101,
+        100, 99, 98, 97.5, 97, 96.4, 96.3, 95.9, 95.4, 94.8, 94.1, 93.5, 92.9, 92.2, 91.8, 91.5, 91.2, 91, 90.8, 90.5, 90.3]
+    const b = series(closes)
+    const r = stopRoom(b, PROFILE)
+    assert.ok(r.breaks >= 1)
+    assert.equal(r.by_buffer[1].stopped, r.breaks, 'every break here went more than 1 ATR under — the slide is followed, not 3 bars of it')
+    assert.equal(r.by_buffer[1].whipsaw, 0)
+    assert.equal(r.followed_bars, PROFILE.horizon)
+})
+
+test('CR 2026-11-13: a break in the last bars, not yet given its chance to come back, is not counted', async () => {
+    const { falseBreaks: fbOf } = await import('../../services/behaviourProfile.engine.js')
+    const closes = [104, 103, 102, 100.5, 102, 103, 104, 105, 104.5, 99.8]
+    const b = series(closes)
+    b[3].low = 100
+    b[9].low = 99.5   // the last bar breaks the low at 100 and closes under it: two bars short of its 3-bar window
+    const r = fbOf(b, b.map(() => 1), 8, [], { ...PROFILE, horizon: 5 })
+    assert.equal(r.breaks, 0)
+})
+
+test('CR 2026-11-13: Wyckoff breakouts are one per outcome window — a grind of tight ranges does not count one rally again and again', async () => {
+    const { wyckoffTest } = await import('../../services/behaviourProfile.engine.js')
+    // A slow grind: +0.1 a bar with ±0.3 noise, ATR 1 — every 20 bars fit in 4 ATR, and new highs keep closing out of them.
+    const closes = Array.from({ length: 600 }, (_, i) => 100 + 0.1 * i + (i % 3 - 1) * 0.3)
+    const b = series(closes)
+    const opts = { ...PROFILE, minN: 1, minRecent: 1 }
+    const w = wyckoffTest(b, b.map(() => 1), 400, [], [], opts)
+    const counted = w.breakouts.n + w.breakouts.recent.n
+    assert.ok(counted > 5, `breakouts found (${counted})`)
+    assert.ok(counted <= Math.ceil(600 / PROFILE.horizon), `at most one per ${PROFILE.horizon}-bar window (${counted})`)
+})

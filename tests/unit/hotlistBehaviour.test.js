@@ -58,8 +58,8 @@ test('an opened row shows how the name trades on its horizon: what holds, the br
     assert.deepEqual(row.on, ['day', 'week'])
     assert.deepEqual(Object.fromEntries(row.lines), {
         'What it obeys': 'Nothing technical holds on the daily and weekly bars.',
-        'Daily breaks of a low': '77% of 40 closed back above within 3 bars — about what its own moves in random order do (79%): no trait of its own; sweeps ~0.24 ATR under the low (80% within 0.53) — the room a stop under a low needs; a direction ~3 bars after.',
-        'Weekly breaks of a low': '60% of 12 closed back above within 3 bars; sweeps ~0.24 ATR under the low (80% within 0.53) — the room a stop under a low needs; a direction ~3 bars after.',
+        'Daily breaks of a low': '77% of 40 closed back above within 3 bars — about what its own moves in random order do (79%): no trait of its own; sweeps ~0.24 ATR under the low (80% within 0.53) — how far noise pokes under a low; a direction ~3 bars after.',
+        'Weekly breaks of a low': '60% of 12 closed back above within 3 bars — too few breaks to tell it from chance; sweeps ~0.24 ATR under the low (80% within 0.53) — how far noise pokes under a low; a direction ~3 bars after.',
         'Latest example': '2026-11-12 the swing low 151.49 was swept to 148.8 (0.27 ATR under), closed back above 2026-11-12.',
         'ATR': 'Daily 2.99% · Weekly 7.47% · typical gap 1.15%',
         'Fits': 'Day trade yes · swing yes — moves and liquid, but nothing technical holds.',
@@ -143,9 +143,9 @@ test("the trader's read (5b): what holds priced now, what never to lean on, the 
         day: { ...tf({ holds: ['sma50'] }), atr_pct: 3, levels_now: { sma50: 214.59 }, fib: { verdict: 'respects', latest_impulse: { low: 100, high: 150 } },
             cycle: { verdict: 'respects', window: { from: '2026-11-20T00:00:00.000Z', to: '2026-11-28T00:00:00.000Z' } } },
         week: tf() } })
-    assert.match(holding[0], /^50 SMA \(daily\) HOLDS — .*; at 214\.59 now: a level an entry or a stop may sit on$/)
-    assert.equal(holding[1], 'Fibonacci pullbacks (daily) HOLD — the latest impulse 100 → 150: 38.2% 130.9, 50% 125, 61.8% 119.1')
-    assert.match(holding[2], /next window 2026-11-20 → 2026-11-28: timing for how long an entry waits/)
+    assert.match(holding[0], /^50 SMA \(daily\) HOLDS; at 214\.59 now: a LEVEL an entry or a stop may sit on$/)
+    assert.match(holding[1], /next window 2026-11-20 → 2026-11-28: timing for how long an entry waits/)
+    assert.equal(holding[2], 'Fibonacci pullbacks (daily) HOLD — the latest impulse 100 → 150: 38.2% 130.9, 50% 125, 61.8% 119.1')
     assert.equal(holding[3], 'Anything not listed above did not hold — never cite it as support')
     assert.deepEqual(mentorRead({ timeframes: {} }).slice(0, 1).length, 1)
 })
@@ -162,4 +162,35 @@ test("the trader's section: the read as levels to use, the stop rule unchanged, 
     const sections = [s, ...['ready', 'waiting', 'failed', 'unknown'].map(state => _buildReadSection({ symbol: 'NVDA', horizon: 'swing', kind: 'coverage', state, facts: 'f', against: false })),
         _buildReadSection({ symbol: 'NVDA', kind: 'coverage', decide: true, state: 'ready', facts: 'f' })]
     for (const text of sections) for (const name of INTERNAL_NAMES) assert.ok(!new RegExp(`\b${name}\b`, 'i').test(text), `${name} in: ${text.slice(0, 120)}`)
+})
+
+test('CR 2026-11-13: the trader\'s read takes EVERY hold from the one list — order blocks, sweeps, breakouts, chance — and an event is a signal, never a level', async () => {
+    const { mentorRead, holdKeys, holdsOf } = await import('../../services/tools/behaviourProfile.tools.js')
+    const day = { ...tf(), atr_pct: 2, order_blocks: { verdict: 'respects', rate: 0.6, base: 0.4 },
+        indicators: { ema20: { verdict: 'no' }, rsi_oversold: { verdict: 'respects', rate: 0.6, base: 0.4 } },
+        false_breaks: { after_sweep: { verdict: 'respects', rate: 0.55, base: 0.4 }, false_rate: 0.9, chance: { verdict: 'more', base: 0.78 } } }
+    const p = { timeframes: { day }, suitability: { day_trade: { fits: false, why: 'too slow for a day' }, swing: { fits: true, why: 'moves and liquid' } } }
+    const read = mentorRead(p)
+    assert.ok(!read.some(l => /^Nothing technical holds/.test(l)), 'something holds — never "nothing"')
+    assert.match(read.join('\n'), /Bullish order blocks \(daily\) HOLD on a retest/)
+    assert.match(read.join('\n'), /A sweep of a daily low that closes back above has led higher/)
+    assert.match(read.join('\n'), /Daily breaks of its lows reverse more than chance \(90% false vs 78%\)/)
+    const rsi = read.find(l => /RSI/.test(l))
+    assert.match(rsi, /a SIGNAL that has led higher — timing for an entry, not a level$/)
+    assert.ok(!/at .* now/.test(rsi), 'an event has no price')
+    assert.equal(read.at(-1), 'Fits: day trade no, swing yes — moves and liquid')
+    // One list: the badge's holds, holdsOf and the trader's read agree.
+    assert.deepEqual(holdKeys(day), ['rsi_oversold', 'sweeps', 'order_blocks', 'fakes'])
+    assert.equal(holdsOf({ day }).length, 4)
+})
+
+test('CR 2026-11-13: a thin chance verdict says it cannot be told; a cycle near-miss is said as one', async () => {
+    const { chanceWords, cycleWords } = await import('../../services/tools/behaviourProfile.tools.js')
+    const thin = { chance: { verdict: 'thin', base: null, z: null } }
+    assert.equal(chanceWords(thin, 'row'), ' — too few breaks to tell it from chance')
+    assert.equal(chanceWords(thin, 'tool'), '; too few breaks to compare with chance')
+    assert.equal(chanceWords(thin, 'brief'), ' (too few to compare with chance)')
+    assert.equal(chanceWords({}, 'row'), '', 'an older profile with no chance at all says nothing')
+    assert.match(cycleWords({ verdict: 'no', rate: 0.68, base: 0.5, z: 1.4 }, 'week'), /a near-miss: not enough to rule out chance/)
+    assert.match(cycleWords({ verdict: 'no', rate: 0.42, base: 0.51, z: -0.8 }, 'day'), /^No regular cycle/)
 })

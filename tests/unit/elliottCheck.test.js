@@ -65,9 +65,42 @@ test('a misread price, a wave end that is not the extreme of its leg, a count al
 test('the handler: the rules first, then the candles; a fetch failure says UNCHECKED, never passes', async () => {
     const { makeElliottHandlers } = await import('../../services/tools/elliott.tools.js')
     const ok = makeElliottHandlers({ deps: { fetchBars: async () => IMPULSE } }).check_elliott_count
-    assert.match(await ok({ ticker: 'nvda', timeframe: 'day', direction: 'up', points: [100, 120, 110, 150, 130] }), /^POSSIBLE count.*On the candles: the start of wave 1 /)
+    assert.match(await ok({ ticker: 'nvda', timeframe: 'day', direction: 'up', points: [100, 120, 110, 150, 130] }), /^POSSIBLE count.*On the candles \(draw THESE prices\): the start of wave 1 \S+ at 100,/)
     assert.match(await ok({ ticker: 'NVDA', timeframe: 'day', direction: 'up', points: [100, 120, 110, 160] }), /^NOT ON THE CHART/)
     const down = makeElliottHandlers({ deps: { fetchBars: async () => { throw new Error('429') } } }).check_elliott_count
     assert.match(await down({ ticker: 'NVDA', timeframe: 'day', direction: 'up', points: [100, 120, 110] }), /UNCHECKED: the candles could not be read \(429\)/)
     assert.match(await ok({ direction: 'up', points: [100, 120, 110] }), /UNCHECKED against the candles \(no ticker\)/)
+})
+
+test('CR 2026-11-13: the waves must alternate; a non-list of points is refused, never a crash', async () => {
+    const { checkElliottCount } = await import('../../services/tools/elliott.tools.js')
+    assert.deepEqual(checkElliottCount({ direction: 'up', points: [100, 110, 130, 120, 125] }).broken.slice(0, 2), ['wave 2 did not move against wave 1', 'wave 3 did not move with wave 1'])
+    assert.ok(checkElliottCount({ direction: 'down', points: [100, 80, 70] }).broken.includes('wave 2 did not move against wave 1'))
+    assert.equal(checkElliottCount({ direction: 'up', points: '100,120,110' }).error, 'points must be a list of prices')
+    const { makeElliottHandlers } = await import('../../services/tools/elliott.tools.js')
+    assert.match(await makeElliottHandlers().check_elliott_count({ direction: 'up', points: '100,120,110' }), /^Cannot check: points must be a list of prices/)
+})
+
+test('CR 2026-11-13: price after the last wave end — a wave still running is out of date; wave 5 past its cap is dead', async () => {
+    const { checkCountOnCandles } = await import('../../services/tools/elliott.tools.js')
+    // Up from 100: w1 110, w2 103, w3 150 … and then price ran on to 170 — wave 3 is still running.
+    const running = mk([[102, 101], [101, 100], [106, 101], [110, 104], [107, 104], [105, 103], [120, 105], [140, 119], [150, 139], [160, 149], [170, 158]])
+    assert.match(checkCountOnCandles(running, { direction: 'up', points: [100, 110, 103, 150], kills_at: 110 }).problems.join(' '), /price went past the end of wave 3 \(150\) .* still running/)
+    // w3 15 < w1 20 → wave 5 must end under 121 + 15 = 136; a high of 145 after wave 4 kills it.
+    const capped = mk([[102, 101], [101, 100], [112, 101], [120, 111], [116, 112], [113, 110], [118, 112], [125, 117], [123, 121], [122, 121.5], [135, 122], [145, 134]])
+    const c = checkCountOnCandles(capped, { direction: 'up', points: [100, 120, 110, 125, 121], kills_at: 120, wave5_max: 136 })
+    assert.match(c.problems.join(' '), /wave 5 already ran past 136 .* the count is dead/)
+    // A dead count is said as dead, alone — not also "out of date".
+    const dead = mk([[104, 102], [103, 100], [112, 103], [120, 111], [116, 110], [111, 99]])
+    assert.deepEqual(checkCountOnCandles(dead, { direction: 'up', points: [100, 120, 110], kills_at: 100 }).problems.length, 1)
+})
+
+test('CR 2026-11-13: the check reads a long history (not get_candles\' 40 bars), and each wave end comes back at the price it was found', async () => {
+    const { makeElliottHandlers, CHECK_WINDOW_DAYS } = await import('../../services/tools/elliott.tools.js')
+    assert.ok(CHECK_WINDOW_DAYS.day >= 365 * 2 && CHECK_WINDOW_DAYS.week >= 365 * 5)
+    let asked = null
+    const h = makeElliottHandlers({ deps: { fetchBars: async (t, tf) => { asked = [t, tf]; return IMPULSE } } }).check_elliott_count
+    const out = await h({ ticker: 'nvda', timeframe: 'week', direction: 'up', points: [100.3, 120, 110, 150, 130] })
+    assert.deepEqual(asked, ['NVDA', 'week'])
+    assert.match(out, /the start of wave 1 \S+ at 100,/, 'the bar\'s own low, not the 100.3 read off the chart')
 })
