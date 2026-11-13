@@ -111,3 +111,21 @@ test('Wyckoff in the opened row and the tool text: the range now, each verdict a
     const b = behaviourBadge({ timeframes: { day: { ...tf(), atr_pct: 3, wyckoff: { springs: { verdict: 'respects' } } }, week: tf() } }, 'swing')
     assert.deepEqual([b.badge, b.kind], ['Wyckoff springs', 'holds'])
 })
+
+test('Fibonacci in the opened row: measured against other depths, said plainly either way', async () => {
+    const { fibWords, fibLine } = await import('../../services/tools/behaviourProfile.tools.js')
+    const f = (verdict, rate, base) => ({ impulses: 50, verdict, n: 60, rate, base, z: 0.2, recent: { n: 20, rate, base } })
+    assert.equal(fibWords(f('no', 0.52, 0.5)), 'Pullbacks turn at 38.2/50/61.8% no more than at other depths (52% vs 50% at other depths, 60 touches).')
+    assert.match(fibWords(f('respects', 0.7, 0.5)), /^Pullbacks turn at 38\.2\/50\/61\.8% more than at other depths/)
+    assert.equal(fibWords({ ...f('thin', 0.5, 0.5) }), null)
+    assert.equal(fibWords({ impulses: 0 }), null)
+    assert.match(fibLine(f('no', 0.52, 0.5)), /Fibonacci pullbacks \(38\.2\/50\/61\.8% of 50 impulses of 4\+ ATR/)
+    const b = behaviourBadge({ timeframes: { day: { ...tf(), atr_pct: 3, fib: { verdict: 'respects' } }, week: tf() } }, 'swing')
+    assert.equal(b.badge, 'Fibonacci pullbacks')
+})
+
+test('Fibonacci: a wide gap that did not clear z is a near-miss, not "no more" (KO daily, 2026-11-13)', async () => {
+    const { fibWords } = await import('../../services/tools/behaviourProfile.tools.js')
+    assert.equal(fibWords({ impulses: 72, verdict: 'no', n: 64, rate: 0.781, base: 0.628, z: 2.13 }),
+        'Pullbacks turned at 38.2/50/61.8% more often (78% vs 63% at other depths, 64 touches, z 2.13) — a near-miss: not enough to rule out chance.')
+})

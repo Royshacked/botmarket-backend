@@ -3456,7 +3456,7 @@
     "proteus": [
         {
             "name": "get_behaviour_profile",
-            "description": "The MEASURED behaviour profile of one stock — how its price has actually behaved, counted from its candles on 5-minute (~3 months), 1-hour (~1 year), daily (~10 years) and weekly (~10 years) bars, LONG SIDE: does it hold at the 20 EMA / 50 / 200 SMA / VWAP, what follows RSI under 30, a MACD cross up, a high-volume up bar; how often its breaks of a swing low are FALSE (closed back above within 3 bars), how deep those sweeps go in ATRs, how many bars until it picks a direction; whether bullish order blocks hold on a retest; whether its lows come in a regular PRICE CYCLE (against the same returns reshuffled — the next window is stated only when the cycle holds); WYCKOFF, measured: tight trading ranges found in code, whether a SPRING (a dip under the range low closed back inside) beats both an ordinary bar and an ordinary false break, whether a breakout above the range follows through (and how often it fails back inside — the upthrust share), whether a retest of the low on dried-up volume beats any retest, and the range it is in now; its ATR %, gap, dollar volume; and whether it fits a day trade / a swing. Every rate is against a BASELINE (the same line shifted, or the stock's own drift) and must still hold in the most recent third. Kept for a week, shared by everyone; the first ask for a name takes several seconds. `ticker`; `fresh: true` recomputes now (only when the user asks for it).",
+            "description": "The MEASURED behaviour profile of one stock — how its price has actually behaved, counted from its candles on 5-minute (~3 months), 1-hour (~1 year), daily (~10 years) and weekly (~10 years) bars, LONG SIDE: does it hold at the 20 EMA / 50 / 200 SMA / VWAP, what follows RSI under 30, a MACD cross up, a high-volume up bar; how often its breaks of a swing low are FALSE (closed back above within 3 bars), how deep those sweeps go in ATRs, how many bars until it picks a direction; whether bullish order blocks hold on a retest; whether its lows come in a regular PRICE CYCLE (against the same returns reshuffled — the next window is stated only when the cycle holds); WYCKOFF, measured: tight trading ranges found in code, whether a SPRING (a dip under the range low closed back inside) beats both an ordinary bar and an ordinary false break, whether a breakout above the range follows through (and how often it fails back inside — the upthrust share), whether a retest of the low on dried-up volume beats any retest, and the range it is in now; FIBONACCI, measured: whether pullbacks of big impulses turn at 38.2 / 50 / 61.8% more than at other depths of the same pullbacks; its ATR %, gap, dollar volume; and whether it fits a day trade / a swing. Every rate is against a BASELINE (the same line shifted, or the stock's own drift) and must still hold in the most recent third. Kept for a week, shared by everyone; the first ask for a name takes several seconds. `ticker`; `fresh: true` recomputes now (only when the user asks for it).",
             "input_schema": {
                 "type": "object",
                 "properties": {
@@ -3626,6 +3626,34 @@
                 "required": [
                     "ticker",
                     "mode"
+                ]
+            }
+        },
+        {
+            "name": "check_elliott_count",
+            "description": "Check an Elliott impulse count against the three HARD rules before you say or show it: wave 2 never retraces past the start of wave 1; wave 3 is never the shortest of 1, 3 and 5; wave 4 never enters wave 1's price territory. Give the direction and the wave-end PRICES you read off the chart, in order — the start of wave 1, then the end of wave 1, 2, 3, 4, 5 as far as the count has got (at least the end of wave 2). Returns whether the count is POSSIBLE, which rule breaks if not, and the price that kills it from here (and how far wave 5 may run before wave 3 would be the shortest). Free and exact. A possible count is still an interpretation, never a measured rule — an impossible one is never shown.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "direction": {
+                        "type": "string",
+                        "enum": [
+                            "up",
+                            "down"
+                        ],
+                        "description": "The impulse's direction."
+                    },
+                    "points": {
+                        "type": "array",
+                        "items": {
+                            "type": "number"
+                        },
+                        "description": "Prices in order: the start of wave 1, then the end of wave 1, 2, 3, 4, 5 as far as the count has got (3 to 6 prices)."
+                    }
+                },
+                "required": [
+                    "direction",
+                    "points"
                 ]
             }
         },

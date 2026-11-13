@@ -15,7 +15,7 @@ import { PROFILE } from '../behaviourProfile.engine.js'
 const LOG = '[behaviourProfile.tools]'
 
 export const BEHAVIOUR_PROFILE_TOOL_SPEC = {
-    get_behaviour_profile: `The MEASURED behaviour profile of one stock — how its price has actually behaved, counted from its candles on 5-minute (~3 months), 1-hour (~1 year), daily (~10 years) and weekly (~10 years) bars, LONG SIDE: does it hold at the 20 EMA / 50 / 200 SMA / VWAP, what follows RSI under 30, a MACD cross up, a high-volume up bar; how often its breaks of a swing low are FALSE (closed back above within 3 bars), how deep those sweeps go in ATRs, how many bars until it picks a direction; whether bullish order blocks hold on a retest; whether its lows come in a regular PRICE CYCLE (against the same returns reshuffled — the next window is stated only when the cycle holds); WYCKOFF, measured: tight trading ranges found in code, whether a SPRING (a dip under the range low closed back inside) beats both an ordinary bar and an ordinary false break, whether a breakout above the range follows through (and how often it fails back inside — the upthrust share), whether a retest of the low on dried-up volume beats any retest, and the range it is in now; its ATR %, gap, dollar volume; and whether it fits a day trade / a swing. Every rate is against a BASELINE (the same line shifted, or the stock's own drift) and must still hold in the most recent third. Kept for a week, shared by everyone; the first ask for a name takes several seconds. \`ticker\`; \`fresh: true\` recomputes now (only when the user asks for it).`,
+    get_behaviour_profile: `The MEASURED behaviour profile of one stock — how its price has actually behaved, counted from its candles on 5-minute (~3 months), 1-hour (~1 year), daily (~10 years) and weekly (~10 years) bars, LONG SIDE: does it hold at the 20 EMA / 50 / 200 SMA / VWAP, what follows RSI under 30, a MACD cross up, a high-volume up bar; how often its breaks of a swing low are FALSE (closed back above within 3 bars), how deep those sweeps go in ATRs, how many bars until it picks a direction; whether bullish order blocks hold on a retest; whether its lows come in a regular PRICE CYCLE (against the same returns reshuffled — the next window is stated only when the cycle holds); WYCKOFF, measured: tight trading ranges found in code, whether a SPRING (a dip under the range low closed back inside) beats both an ordinary bar and an ordinary false break, whether a breakout above the range follows through (and how often it fails back inside — the upthrust share), whether a retest of the low on dried-up volume beats any retest, and the range it is in now; FIBONACCI, measured: whether pullbacks of big impulses turn at 38.2 / 50 / 61.8% more than at other depths of the same pullbacks; its ATR %, gap, dollar volume; and whether it fits a day trade / a swing. Every rate is against a BASELINE (the same line shifted, or the stock's own drift) and must still hold in the most recent third. Kept for a week, shared by everyone; the first ask for a name takes several seconds. \`ticker\`; \`fresh: true\` recomputes now (only when the user asks for it).`,
 }
 
 const _pct = (x) => (Number.isFinite(x) ? `${Math.round(x * 100)}%` : '—')
@@ -94,6 +94,23 @@ export function chanceWords(fb, where = 'row') {
     })[c.verdict] ?? ''
 }
 
+/** The Fibonacci pullback test as the tool's line. Pure. */
+export function fibLine(f) {
+    if (!f.impulses) return `  Fibonacci pullbacks: no impulse of ${PROFILE.fibImpulseAtr}+ ATR in this history`
+    return `  ${testLine(`Fibonacci pullbacks (38.2/50/61.8% of ${f.impulses} impulses of ${PROFILE.fibImpulseAtr}+ ATR, vs other depths of the same pullbacks)`, f, 'touches')}`
+}
+
+/** The Fibonacci pullback test in words, for the opened row. Null when there is nothing to say. Pure. */
+export function fibWords(f) {
+    if (!f?.impulses || f.verdict === 'thin') return null
+    const nums = `${_pct(f.rate)} vs ${_pct(f.base)} at other depths, ${f.n} touches`
+    if (f.verdict === 'respects') return `Pullbacks turn at 38.2/50/61.8% more than at other depths (${nums}; recent ${_pct(f.recent?.rate)}).`
+    // A wide gap that did not clear z is a near-miss, not 'no more' (KO daily, 78% vs 63%, z 2.1).
+    if (f.verdict === 'no' && f.rate - f.base >= PROFILE.edge) return `Pullbacks turned at 38.2/50/61.8% more often (${nums}, z ${f.z}) — a near-miss: not enough to rule out chance.`
+    if (f.verdict === 'no') return `Pullbacks turn at 38.2/50/61.8% no more than at other depths (${nums}).`
+    return `Fibonacci levels: ${VERDICT[f.verdict]} (${nums}).`
+}
+
 /** Wyckoff as the tool's lines — the measured part only; the phase (A–E) is a chart read. Pure. */
 export function wyckoffLines(w) {
     if (!w.ranges) return ['  Wyckoff: no tight trading range in this history']
@@ -143,6 +160,7 @@ export function timeframeLines(tf, t) {
         `  ${testLine(`Bullish order blocks (${t.order_blocks.blocks} found) on a retest`, t.order_blocks, 'retests')}`,
         ...(t.cycle ? [`  ${cycleLine(t.cycle)}`] : []),
         ...(t.wyckoff ? wyckoffLines(t.wyckoff) : []),
+        ...(t.fib ? [fibLine(t.fib)] : []),
     ]
 }
 
@@ -159,7 +177,7 @@ const BADGE_WORDS = Object.freeze({
     ema20: '20 EMA', sma50: '50 MA', sma200: '200 MA', vwap: 'VWAP', rsi_oversold: 'RSI under 30',
     macd_cross_up: 'MACD cross', volume_up_bar: 'volume', sweeps: 'sweeps lows', order_blocks: 'order blocks', cycle: 'price cycle',
     fakes: 'fakes its lows', follows: 'breaks follow through',
-    springs: 'Wyckoff springs', range_breakouts: 'range breakouts', dry_up: 'dry-volume retests',
+    springs: 'Wyckoff springs', range_breakouts: 'range breakouts', dry_up: 'dry-volume retests', fib: 'Fibonacci pullbacks',
 })
 
 /**
@@ -184,6 +202,7 @@ export function behaviourBadge(profile, horizon = null) {
             ...(t.wyckoff?.springs?.verdict === 'respects' ? ['springs'] : []),
             ...(t.wyckoff?.breakouts?.verdict === 'respects' ? ['range_breakouts'] : []),
             ...(t.wyckoff?.dry_up?.verdict === 'respects' ? ['dry_up'] : []),
+            ...(t.fib?.verdict === 'respects' ? ['fib'] : []),
             ...(t.false_breaks?.chance?.verdict === 'more' ? ['fakes'] : t.false_breaks?.chance?.verdict === 'less' ? ['follows'] : []),
         ]
         for (const k of keys) holds.push({ key: k, tf, label: `${BADGE_WORDS[k] ?? k} (${TF[tf].toLowerCase()})` })
@@ -244,6 +263,10 @@ export function rowProfile(profile, horizon = null) {
         const w = wyckoffWords(profile.timeframes[tf].wyckoff)
         if (w) lines.push([`${tfWord(tf)} Wyckoff`, w])
     }
+    for (const tf of tfs) {
+        const f = fibWords(profile.timeframes[tf].fib)
+        if (f) lines.push([`${tfWord(tf)} Fibonacci`, f])
+    }
     const lead = profile.timeframes[tfs[0]].false_breaks?.latest
     if (lead) lines.push(['Latest example', latestLine(tfs[0], lead).replace(/^Latest false break \(the example to show\): /, '').replace(/ — chart it:.*$/, '.')])
     lines.push(['ATR', tfs.map(tf => `${tfWord(tf)} ${profile.timeframes[tf].atr_pct ?? '—'}%`).join(' · ') +
@@ -263,6 +286,7 @@ export function holdsOf(timeframes) {
         ...(t.wyckoff?.springs?.verdict === 'respects' ? [`Wyckoff springs — dips under a range low closed back inside (${TF[tf].toLowerCase()})`] : []),
         ...(t.wyckoff?.breakouts?.verdict === 'respects' ? [`breakouts above a trading range (${TF[tf].toLowerCase()})`] : []),
         ...(t.wyckoff?.dry_up?.verdict === 'respects' ? [`retests of a range low on dried-up volume (${TF[tf].toLowerCase()})`] : []),
+        ...(t.fib?.verdict === 'respects' ? [`pullbacks turning at Fibonacci levels (${TF[tf].toLowerCase()})`] : []),
         ...(t.false_breaks?.chance?.verdict === 'more' ? [`breaks of its lows reverse more than chance (${TF[tf].toLowerCase()})`] : []),
         ...(t.false_breaks?.chance?.verdict === 'less' ? [`breaks of its lows follow through more than chance (${TF[tf].toLowerCase()})`] : []),
     ] : []))

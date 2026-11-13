@@ -50,6 +50,12 @@ export const PROFILE = Object.freeze({
     rangeBars: 20,
     rangeAtr: 4,
     dryUp: 0.7,
+    // I. Fibonacci pullbacks (2026-11-13): an impulse is a swing low → swing high of at least `fibImpulseAtr` ATRs; its
+    // pullback is watched for up to `fibMaxBars` bars. The Fibonacci ratios against ratios that are not.
+    fibImpulseAtr: 4,
+    fibMaxBars: 60,
+    fibRatios: [0.382, 0.5, 0.618],
+    fibBase: [0.2, 0.3, 0.44, 0.56, 0.7, 0.8],
 })
 
 /** A seeded uniform [0, 1) — the baseline must be the same on every run of the same bars. Pure. */
@@ -392,6 +398,52 @@ export function wyckoffTest(bars, atrs, cut, drift, sweeps, opts = PROFILE) {
     }
 }
 
+/**
+ * I. FIBONACCI PULLBACKS, MEASURED (proteus.md §8.1, 2026-11-13). An IMPULSE: a confirmed swing low to the next confirmed
+ * swing high, at least `fibImpulseAtr` ATRs tall. Its PULLBACK is watched from the high's confirmation until a close above
+ * the high (a new leg), a close under the low (the impulse undone) or `fibMaxBars` bars. Each retracement level is
+ * counted at its FIRST touch from above (the last close over it, this bar's low within `touchTol` ATRs), with the one
+ * outcome from the level — like a moving average. The Fibonacci levels (`fibRatios`) against levels at ratios that are
+ * not Fibonacci (`fibBase`, either side of them) on the SAME pullbacks: same trend, same volatility, not the ratio.
+ * Pooled across the three ratios (one test, not three). The Elliott COUNT is never measured — this is the part of
+ * Elliott that can be. Pure.
+ */
+export function fibPullbackTest(bars, atrs, cut, opts = PROFILE) {
+    const sw = swings(bars, opts.swingLookback)
+    const fib = [], base = []
+    let impulses = 0, low = null, lastEnd = -1, latest = null
+    for (const s of sw) {
+        if (s.type === 'low') { if (!low || s.price < low.price || low.used) low = { ...s, used: false }; continue }
+        if (!low || low.used || s.i <= low.i) continue
+        const a = atrs[s.i]
+        const start = s.i + opts.swingLookback + 1   // the high is known only once confirmed — no look-ahead
+        if (!Number.isFinite(a) || a <= 0 || s.price - low.price < opts.fibImpulseAtr * a || start <= lastEnd) continue
+        low.used = true
+        impulses++
+        const span = s.price - low.price
+        const level = (r) => s.price - r * span
+        const touched = new Set()
+        let end = Math.min(bars.length, start + opts.fibMaxBars)
+        for (let j = start; j < end; j++) {
+            const b = bars[j], aj = atrs[j]
+            if (b.close > s.price || b.close < low.price) { end = j; break }
+            if (!Number.isFinite(aj) || aj <= 0) continue
+            for (const [r, list] of [...opts.fibRatios.map(r => [r, fib]), ...opts.fibBase.map(r => [r, base])]) {
+                if (touched.has(r)) continue
+                const L = level(r)
+                if (!(bars[j - 1].close > L && b.low <= L + opts.touchTol * aj)) continue
+                touched.add(r)
+                if (b.close < L - opts.down * aj) continue   // sliced through on the touch bar: a break, not a test
+                const o = bracket(bars, j, L + opts.up * aj, L - opts.down * aj, opts.horizon)
+                if (o != null) list.push({ i: j, out: o })
+            }
+        }
+        lastEnd = end
+        latest = { low: _round(low.price, 2), high: _round(s.price, 2), at: new Date(_ms(bars[s.i].timestamp)).toISOString() }
+    }
+    return { impulses, ...judge(fib, base, cut, opts), latest_impulse: latest }
+}
+
 /** The bars rebuilt from the same bars in a shuffled order — each bar's move and shape kept, the sequence gone. Pure. */
 function _shuffledBars(bars, rnd) {
     const parts = []
@@ -562,6 +614,7 @@ export function timeframeProfile(bars, timeframe, opts = PROFILE) {
         order_blocks: orderBlockTest(bars, atrs, medAtrPct, cut, opts),
         cycle: cycleTest(bars, cut, opts),
         wyckoff: wyckoffTest(bars, atrs, cut, drift, fb.sweeps, opts),
+        fib: fibPullbackTest(bars, atrs, cut, opts),
     }
 }
 
@@ -573,6 +626,7 @@ const _respects = (tf) => (tf ? [
     ...(tf.wyckoff?.springs?.verdict === 'respects' ? ['springs'] : []),
     ...(tf.wyckoff?.breakouts?.verdict === 'respects' ? ['range_breakouts'] : []),
     ...(tf.wyckoff?.dry_up?.verdict === 'respects' ? ['dry_up'] : []),
+    ...(tf.fib?.verdict === 'respects' ? ['fib'] : []),
     ...(tf.false_breaks?.chance?.verdict === 'more' ? ['fakes'] : tf.false_breaks?.chance?.verdict === 'less' ? ['follows'] : []),
 ] : [])
 

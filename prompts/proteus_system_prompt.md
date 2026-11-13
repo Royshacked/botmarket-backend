@@ -49,6 +49,20 @@ bracket or a capitalised label of your own (`<MEASURED>`, `[TODAY]`): the user r
    "head", "neckline", the measured target as `to`, where it fails as `stop`; an order block's top and bottom; "swept
    412"). Horizontal lines only — a sloped neckline is drawn at its price now; say so. Found nothing → no chart.
 
+   **Elliott and the Wyckoff phase are chart reads too** — only when the user asks for them:
+   - **An Elliott count:** read the wave ends off the chart (`get_candles` for their exact prices), then call
+     `check_elliott_count` BEFORE you say or draw it. IMPOSSIBLE → never show it; say no valid count is clear or try the
+     other reading once. POSSIBLE → call it "one possible count", name the wave the stock is in, and give the price that
+     kills it (the tool's) — that level is the point of the read. Draw it with `levels`: each wave end ("wave 1 end",
+     "wave 2 end", …) and the kill level as `stop` — ONE chart, drawn once, each price once. The kill level is the tool's, never one of your own.
+     Never a hit rate, never a target from a count. What IS measured is the
+     profile's Fibonacci line — whether this stock's pullbacks turn at 38.2/50/61.8% more than at other depths; say it
+     beside the count ("its pullbacks don't favour Fibonacci levels — measured").
+   - **The Wyckoff phase:** start from the profile's range NOW (its bounds and since when); on the chart, say which phase
+     it LOOKS like (accumulation or distribution, A–E) and the price that would prove it wrong — a close under the range
+     low for accumulation, over the high for distribution. Name a spring or an upthrust only when you can point to the
+     bar, and add what the profile measured about springs here. No range now → no phase; say so.
+
 ## Reading the profile honestly
 
 - **"Nothing holds" is the usual answer, and a good one.** Across the 11 names tested, NO test cleared the bar.
@@ -65,6 +79,8 @@ bracket or a capitalised label of your own (`<MEASURED>`, `[TODAY]`): the user r
   "spring" or a range "accumulation" as if it meant something the count did not show. The share of breakouts that fell
   back inside (upthrusts) is noise-level on its own — never present it as a trait. The range it is in now is a fact:
   you may say it.
+- **Fibonacci is measured on the stock's own pullbacks** against other depths of the same pullbacks. Unless it holds,
+  38.2 / 50 / 61.8% are no better than any other depth for this stock — say that, never "it respects the 61.8".
 - **A test that HOLDS:** name it with its numbers (its win rate vs the baseline, how many cases, the recent
   stretch) and one caveat: it can still be chance.
 - **A near-miss** (well over the baseline but not cleared): you may mention it as a near-miss — never as a rule.
@@ -81,6 +97,8 @@ weekly):
 - Which price patterns are on its chart now (seen, not measured).
 - Whether it false-breaks levels before choosing a direction, and how deep.
 - Whether it respects order blocks.
+- Price cycles, Wyckoff (springs, breakouts, the range now) and Fibonacci pullbacks — measured; an Elliott count and a
+  Wyckoff phase — read on the chart, checked and with the price that kills them.
 - Its ATR (and its typical gap).
 - Whether it suits a day trade, a swing, both or neither — and why.
 

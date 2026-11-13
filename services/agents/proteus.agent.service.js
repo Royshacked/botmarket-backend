@@ -24,6 +24,7 @@ import { makeStructureVisionHandler, OB_VISION, FB_VISION } from '../tools/price
 import { SMC_TOOLS, SMC_TOOL_HANDLERS } from '../tools/smc.tools.js'
 import { BEHAVIOUR_PROFILE_TOOL_SPEC, makeBehaviourProfileHandlers } from '../tools/behaviourProfile.tools.js'
 import { makeNewsHandlers } from '../tools/news.tools.js'
+import { ELLIOTT_TOOL_DESCRIPTION, makeElliottHandlers } from '../tools/elliott.tools.js'
 import { makeMarketHoursHandlers, MARKET_HOURS_TOOL_SPEC } from '../tools/marketHours.tools.js'
 import { logger } from '../logger.service.js'
 import { REMEMBER_DESCRIPTION } from '../tools/userProfile.tools.js'
@@ -42,6 +43,7 @@ const REGISTRY_TOOLS = toolsFor({
     get_indicators: `Exact indicator VALUES now (EMA, SMA, RSI, MACD, ATR, VWAP — the monitor's math), for where price sits today against the lines the profile tested. A value now is not a rule: whether the stock RESPECTS a line is the profile's answer, never this one.`,
     get_price_action: `Momentum snapshot: 1d/5d/1m/3m moves, position in the 1-year range, relative volume — the stock's state today.`,
     get_cycle_analysis: `Recurring cycles in the price history: "price" mode finds the dominant peak-to-peak interval and the current phase; "calendar" mode shows how the stock behaved in a calendar window (e.g. late June) over past years. Only when the user asks about cycles or seasonality.`,
+    check_elliott_count: ELLIOTT_TOOL_DESCRIPTION,
     get_chart: `Render a candlestick chart IMAGE (with optional overlays) and LOOK at it — for what is SEEN NOW: a pattern forming or just completed (flag, cup and handle, head and shoulders, range, wedge), trend, where price sits vs the lines. A reading of one chart, never a hit rate. BILLS PER USE (render + vision): only when the user asks about patterns or the chart now; once or twice a turn at most.
 SHOW IT when you FOUND something (Roy, 2026-11-12): call it with \`show_to_user: true\` and \`levels\` labelling what you found, so the user sees it on the chart — a head and shoulders as "left shoulder", "head", "right shoulder", "neckline" (kind \`level\`), its measured target (\`to\`) and where it fails (\`stop\`); an order block as its top and bottom; a swept low as "swept 412". Horizontal lines only, at most 8: a sloped neckline or trendline is drawn at its price NOW — say so. Found nothing → do not show a chart.
 THE EXAMPLE (Roy, 2026-11-13): every behaviour answer shows ONE chart — the profile's latest false break at the prices and timeframe its line names, or the line that holds as the overlay.`,
@@ -69,6 +71,7 @@ export const TOOLS = [
 
 const TOOL_HANDLERS = {
     ...makeBehaviourProfileHandlers(),
+    ...makeElliottHandlers(),
     get_candles: makeCandlesHandler(LOG),
     get_indicators: makeIndicatorsHandler(LOG),
     get_price_action: makeToolHandler('get_price_action',

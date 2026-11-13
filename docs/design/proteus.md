@@ -133,6 +133,20 @@ tools move here once Argus is fully defined (argus-rework §4).
    in the row. Random walks: 0 holds across 12. Live: NVDA, SLS, KO, AMD, HAYW, SPY — nothing holds on any timeframe
    (dry-up retests are thin almost everywhere: few retests on light volume). The PHASE (A–E) stays a chart read — next,
    with the Fibonacci test and the Elliott rule check.
+10. **Fibonacci measured + the Elliott / Wyckoff chart reads** (built 2026-11-13, PROFILE_VERSION 8).
+   - `fibPullbackTest`: impulses = a confirmed swing low → the next confirmed swing high, ≥ 4 ATR; the pullback is
+     watched from the high's confirmation until a close over the high, under the low, or 60 bars. The FIRST touch from
+     above of each retracement level, with the one outcome from the level. 38.2/50/61.8% pooled, against 20/30/44/56/70/80%
+     on the SAME pullbacks. Random walks: 0 of 20 hold; a staircase that turns at 61.8% does. Live (NVDA, SLS, KO, AMD,
+     HAYW, TSLA): nothing holds; KO daily 78 vs 63 (z 2.1) is a near-miss, and the row says so.
+   - `check_elliott_count` (services/tools/elliott.tools.js — pure, free): the three hard rules on the wave-end prices
+     read off the chart, plus the price that kills the count from here (start of wave 1 at wave 2; end of wave 1 at waves
+     3–4; end of wave 5 once complete — past it wave 5 is still running) and wave 5's cap when wave 3 is shorter than wave 1.
+     The prompt: call it before saying or drawing any count; impossible → never shown; one chart, the tool's level only.
+     The first live replay invented a kill level for a complete count — hence the complete-count level.
+   - The Wyckoff phase: from the profile's range NOW, which phase it LOOKS like and the closes that prove it wrong. Live:
+     SPY weekly, "Phase B, reaccumulation more plausible", range 702–779 with both invalidations.
+   Next: 5b — the trader weighs the read (and the sweep depth) for his levels.
 
 ## 9. History depth (checked live, FMP, TSLA, 2026-11-12)
 

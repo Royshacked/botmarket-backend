@@ -33,7 +33,8 @@ export const PROFILE_TTL_MS = 7 * DAY
 // 5 (2026-11-13): the price-cycle test (cycleTest — proteus.md §8.1).
 // 6 (2026-11-13): the false-break rate against chance (falseBreakChance).
 // 7 (2026-11-13): Wyckoff, measured — ranges, springs, breakouts, dry-up retests (wyckoffTest).
-export const PROFILE_VERSION = 7
+// 8 (2026-11-13): Fibonacci pullbacks, measured (fibPullbackTest).
+export const PROFILE_VERSION = 8
 
 const _cache = makeMongoBackedCache({ collection: PROFILE_COLLECTION, ttlMs: PROFILE_TTL_MS, max: 300, log: LOG })
 const _inflight = new Map()

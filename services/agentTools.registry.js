@@ -735,6 +735,15 @@ export const TOOL_SCHEMAS = {
         },
         "required": ["ticker"]
     },
+    // Proteus's Elliott rule check (services/tools/elliott.tools.js; docs/design/proteus.md §8.1).
+    check_elliott_count: {
+        "type": "object",
+        "properties": {
+            "direction": { "type": "string", "enum": ["up", "down"], "description": "The impulse's direction." },
+            "points": { "type": "array", "items": { "type": "number" }, "description": "Prices in order: the start of wave 1, then the end of wave 1, 2, 3, 4, 5 as far as the count has got (3 to 6 prices)." }
+        },
+        "required": ["direction", "points"]
+    },
     // Argus's read of the house's industries for a book (docs/design/argus-on-pythia.md §3.2).
     get_house_industries: {
         "type": "object",

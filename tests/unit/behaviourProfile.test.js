@@ -309,3 +309,31 @@ test('Wyckoff: a tight range, a spring under its low reclaimed, a breakout above
     const down = series([...Array.from({ length: 25 }, (_, i) => 100 + (i % 2 ? 0.4 : -0.4)), 97, 96, 95, 94, 93, 92, 91, 90, 89, 88, 87])
     assert.equal(wyckoffTest(down, down.map(() => 1), 100, [], [], opts).springs.n, 0)
 })
+
+test('Fibonacci pullbacks: random walks do not favour 38.2/50/61.8%; pullbacks that turn at 61.8% do (proteus.md §8.1)', async () => {
+    const { fibPullbackTest } = await import('../../services/behaviourProfile.engine.js')
+    const { calcATRSeries } = await import('../../monitoring/evaluators/structured.evaluator.js')
+    const verdicts = []
+    for (let k = 0; k < 12; k++) {
+        const b = randomWalk(2000, 801 + k)
+        const atrs = calcATRSeries(b.map(x => ({ t: x.timestamp * 1000, o: x.open, h: x.high, l: x.low, c: x.close, v: x.volume })), PROFILE.atrPeriod)
+        const f = fibPullbackTest(b, atrs, Math.floor(b.length * (2 / 3)), PROFILE)
+        assert.ok(f.impulses > 10, `noise has impulses too (${f.impulses})`)
+        verdicts.push(f.verdict)
+    }
+    assert.ok(verdicts.filter(v => v === 'respects').length <= 1, `random walks that "respect" Fibonacci: ${verdicts.join(',')}`)
+    // A staircase: up 10 in ten bars, back down to exactly 61.8% of that leg, up again — every pullback turns at 61.8%.
+    const closes = [100]
+    for (let leg = 0; leg < 40; leg++) {
+        const lo = closes.at(-1)
+        for (let k = 1; k <= 10; k++) closes.push(lo + k)
+        const hi = closes.at(-1), bottom = hi - 0.618 * 10
+        for (let k = 1; k <= 8; k++) closes.push(hi - (hi - bottom) * k / 8)
+    }
+    const b = series(closes)
+    const f = fibPullbackTest(b, b.map(() => 1), Math.floor(b.length * (2 / 3)), { ...PROFILE, horizon: 5, minN: 5, minRecent: 2 })
+    assert.ok(f.impulses >= 30)
+    assert.ok(f.rate > f.base + 0.2, `the 61.8% turn beats the other depths (${f.rate} vs ${f.base})`)
+    assert.equal(f.verdict, 'respects')
+    assert.ok(f.latest_impulse.high > f.latest_impulse.low)
+})
