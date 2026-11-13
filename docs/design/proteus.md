@@ -123,6 +123,16 @@ tools move here once Argus is fully defined (argus-rework §4).
    lows" / "breaks follow through"), else CHANCE — said so in the row, the analyst's text, the trader's line and his
    prompt. Nothing holding → the headline is the DAILY ATR. The sweep depth stays — the room a stop needs, chance or not.
    PROFILE_VERSION 6. Live: NVDA 77 vs 76, SLS, HAYW, SPCX — chance or faded on every timeframe. Next: Wyckoff.
+9. **Wyckoff, measured** (built 2026-11-13, `wyckoffTest`, PROFILE_VERSION 7). A RANGE: 20 bars spanning at most 4× their
+   median ATR (noise spans ~5.6), held until a close outside. Inside it, three long-side tests, older two-thirds / recent
+   third like the rest: SPRINGS (a dip under the range low closed back inside within 3 bars, from the reclaim) must beat
+   BOTH the drift AND an ordinary swing-low false break that is not itself a spring — the weaker verdict counts; BREAKOUTS
+   (a close above the range high) against the drift; DRY-UP RETESTS (a retest of the low on volume under 70% of the
+   range's average) against all retests. Plus the range it is in NOW. The UPTHRUST share (breakouts that close back inside)
+   is in the analyst's text only, marked noise-level: random walks score 50–66% on it, the false-break lesson again — never
+   in the row. Random walks: 0 holds across 12. Live: NVDA, SLS, KO, AMD, HAYW, SPY — nothing holds on any timeframe
+   (dry-up retests are thin almost everywhere: few retests on light volume). The PHASE (A–E) stays a chart read — next,
+   with the Fibonacci test and the Elliott rule check.
 
 ## 9. History depth (checked live, FMP, TSLA, 2026-11-12)
 

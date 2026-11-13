@@ -15,7 +15,7 @@ import { PROFILE } from '../behaviourProfile.engine.js'
 const LOG = '[behaviourProfile.tools]'
 
 export const BEHAVIOUR_PROFILE_TOOL_SPEC = {
-    get_behaviour_profile: `The MEASURED behaviour profile of one stock — how its price has actually behaved, counted from its candles on 5-minute (~3 months), 1-hour (~1 year), daily (~10 years) and weekly (~10 years) bars, LONG SIDE: does it hold at the 20 EMA / 50 / 200 SMA / VWAP, what follows RSI under 30, a MACD cross up, a high-volume up bar; how often its breaks of a swing low are FALSE (closed back above within 3 bars), how deep those sweeps go in ATRs, how many bars until it picks a direction; whether bullish order blocks hold on a retest; whether its lows come in a regular PRICE CYCLE (against the same returns reshuffled — the next window is stated only when the cycle holds); its ATR %, gap, dollar volume; and whether it fits a day trade / a swing. Every rate is against a BASELINE (the same line shifted, or the stock's own drift) and must still hold in the most recent third. Kept for a week, shared by everyone; the first ask for a name takes several seconds. \`ticker\`; \`fresh: true\` recomputes now (only when the user asks for it).`,
+    get_behaviour_profile: `The MEASURED behaviour profile of one stock — how its price has actually behaved, counted from its candles on 5-minute (~3 months), 1-hour (~1 year), daily (~10 years) and weekly (~10 years) bars, LONG SIDE: does it hold at the 20 EMA / 50 / 200 SMA / VWAP, what follows RSI under 30, a MACD cross up, a high-volume up bar; how often its breaks of a swing low are FALSE (closed back above within 3 bars), how deep those sweeps go in ATRs, how many bars until it picks a direction; whether bullish order blocks hold on a retest; whether its lows come in a regular PRICE CYCLE (against the same returns reshuffled — the next window is stated only when the cycle holds); WYCKOFF, measured: tight trading ranges found in code, whether a SPRING (a dip under the range low closed back inside) beats both an ordinary bar and an ordinary false break, whether a breakout above the range follows through (and how often it fails back inside — the upthrust share), whether a retest of the low on dried-up volume beats any retest, and the range it is in now; its ATR %, gap, dollar volume; and whether it fits a day trade / a swing. Every rate is against a BASELINE (the same line shifted, or the stock's own drift) and must still hold in the most recent third. Kept for a week, shared by everyone; the first ask for a name takes several seconds. \`ticker\`; \`fresh: true\` recomputes now (only when the user asks for it).`,
 }
 
 const _pct = (x) => (Number.isFinite(x) ? `${Math.round(x * 100)}%` : '—')
@@ -94,6 +94,37 @@ export function chanceWords(fb, where = 'row') {
     })[c.verdict] ?? ''
 }
 
+/** Wyckoff as the tool's lines — the measured part only; the phase (A–E) is a chart read. Pure. */
+export function wyckoffLines(w) {
+    if (!w.ranges) return ['  Wyckoff: no tight trading range in this history']
+    const s = w.springs, v = s.vs_sweeps
+    return [
+        `  Wyckoff (${w.ranges} trading ranges of ${PROFILE.rangeBars}+ bars within ${PROFILE.rangeAtr} ATR)${w.current ? `; NOW in a range ${w.current.low}–${w.current.high} since ${w.current.since.slice(0, 10)}` : '; not in a range now'}`,
+        `    ${testLine('Springs (a dip under the range low closed back inside, vs any bar)', s, 'springs')}${v?.base != null ? `; vs an ordinary false break ${_pct(v.base)} (${VERDICT[v.verdict] ?? v.verdict}${Number.isFinite(v.z) ? `, z ${v.z}` : ''}) — a spring HOLDS only when it beats both` : ''}`,
+        `    ${testLine('Breakouts above the range (vs any bar)', w.breakouts, 'breakouts')}${w.breakouts.upthrust_rate != null ? `; ${_pct(w.breakouts.upthrust_rate)} closed back inside within ${PROFILE.sweepBack} bars (upthrusts — noise does 50–65% too: not a trait)` : ''}`,
+        `    ${testLine(`Retests of the range low on volume under ${PROFILE.dryUp * 100}% of the range's average (vs all retests)`, w.dry_up, 'retests')}`,
+    ]
+}
+
+/** Wyckoff in words, for the opened row — the range it is in now and each test's verdict. Null when nothing to say. Pure. */
+export function wyckoffWords(w) {
+    if (!w?.ranges) return null
+    const parts = []
+    if (w.current) parts.push(`In a range ${w.current.low}–${w.current.high} since ${w.current.since.slice(0, 10)}.`)
+    const said = (name, s, extra = '') => {
+        if (!s || s.verdict === 'thin') return
+        if (s.verdict === 'respects') parts.push(`${name} hold: ${_pct(s.rate)} vs ${_pct(s.base)}${extra}.`)
+        else if (s.verdict === 'no') parts.push(`${name}: no edge (${_pct(s.rate)} vs ${_pct(s.base)}${extra}).`)
+        else parts.push(`${name}: ${VERDICT[s.verdict]} (${_pct(s.rate)} vs ${_pct(s.base)}).`)
+    }
+    const vs = w.springs?.vs_sweeps
+    said('Springs', w.springs, vs?.base != null ? ` for any bar, ${_pct(vs.base)} for an ordinary false break` : '')
+    // No upthrust share here: random walks fail back inside 50–66% of the time too — a bare share reads as a trait it is not.
+    said('Range breakouts', w.breakouts)
+    said('Dry-volume retests', w.dry_up)
+    return parts.length ? parts.join(' ') : null
+}
+
 /** One timeframe → its lines. Pure. */
 export function timeframeLines(tf, t) {
     if (!t) return [`${TF[tf] ?? tf}: too few bars to measure (the 200 SMA needs ~260)`]
@@ -111,6 +142,7 @@ export function timeframeLines(tf, t) {
         `  ${testLine('After a sweep (from the reclaim)', fb.after_sweep, 'sweeps')}`,
         `  ${testLine(`Bullish order blocks (${t.order_blocks.blocks} found) on a retest`, t.order_blocks, 'retests')}`,
         ...(t.cycle ? [`  ${cycleLine(t.cycle)}`] : []),
+        ...(t.wyckoff ? wyckoffLines(t.wyckoff) : []),
     ]
 }
 
@@ -127,6 +159,7 @@ const BADGE_WORDS = Object.freeze({
     ema20: '20 EMA', sma50: '50 MA', sma200: '200 MA', vwap: 'VWAP', rsi_oversold: 'RSI under 30',
     macd_cross_up: 'MACD cross', volume_up_bar: 'volume', sweeps: 'sweeps lows', order_blocks: 'order blocks', cycle: 'price cycle',
     fakes: 'fakes its lows', follows: 'breaks follow through',
+    springs: 'Wyckoff springs', range_breakouts: 'range breakouts', dry_up: 'dry-volume retests',
 })
 
 /**
@@ -148,6 +181,9 @@ export function behaviourBadge(profile, horizon = null) {
             ...(t.false_breaks?.after_sweep?.verdict === 'respects' ? ['sweeps'] : []),
             ...(t.order_blocks?.verdict === 'respects' ? ['order_blocks'] : []),
             ...(t.cycle?.verdict === 'respects' ? ['cycle'] : []),
+            ...(t.wyckoff?.springs?.verdict === 'respects' ? ['springs'] : []),
+            ...(t.wyckoff?.breakouts?.verdict === 'respects' ? ['range_breakouts'] : []),
+            ...(t.wyckoff?.dry_up?.verdict === 'respects' ? ['dry_up'] : []),
             ...(t.false_breaks?.chance?.verdict === 'more' ? ['fakes'] : t.false_breaks?.chance?.verdict === 'less' ? ['follows'] : []),
         ]
         for (const k of keys) holds.push({ key: k, tf, label: `${BADGE_WORDS[k] ?? k} (${TF[tf].toLowerCase()})` })
@@ -204,6 +240,10 @@ export function rowProfile(profile, horizon = null) {
         const c = profile.timeframes[tf].cycle
         if (c && c.verdict !== 'thin') lines.push([`${tfWord(tf)} cycle`, cycleWords(c, tf)])
     }
+    for (const tf of tfs) {
+        const w = wyckoffWords(profile.timeframes[tf].wyckoff)
+        if (w) lines.push([`${tfWord(tf)} Wyckoff`, w])
+    }
     const lead = profile.timeframes[tfs[0]].false_breaks?.latest
     if (lead) lines.push(['Latest example', latestLine(tfs[0], lead).replace(/^Latest false break \(the example to show\): /, '').replace(/ — chart it:.*$/, '.')])
     lines.push(['ATR', tfs.map(tf => `${tfWord(tf)} ${profile.timeframes[tf].atr_pct ?? '—'}%`).join(' · ') +
@@ -220,6 +260,9 @@ export function holdsOf(timeframes) {
         ...(t.false_breaks?.after_sweep?.verdict === 'respects' ? [`sweeps of lows (${TF[tf].toLowerCase()})`] : []),
         ...(t.order_blocks?.verdict === 'respects' ? [`order blocks (${TF[tf].toLowerCase()})`] : []),
         ...(t.cycle?.verdict === 'respects' ? [`a price cycle (${TF[tf].toLowerCase()})`] : []),
+        ...(t.wyckoff?.springs?.verdict === 'respects' ? [`Wyckoff springs — dips under a range low closed back inside (${TF[tf].toLowerCase()})`] : []),
+        ...(t.wyckoff?.breakouts?.verdict === 'respects' ? [`breakouts above a trading range (${TF[tf].toLowerCase()})`] : []),
+        ...(t.wyckoff?.dry_up?.verdict === 'respects' ? [`retests of a range low on dried-up volume (${TF[tf].toLowerCase()})`] : []),
         ...(t.false_breaks?.chance?.verdict === 'more' ? [`breaks of its lows reverse more than chance (${TF[tf].toLowerCase()})`] : []),
         ...(t.false_breaks?.chance?.verdict === 'less' ? [`breaks of its lows follow through more than chance (${TF[tf].toLowerCase()})`] : []),
     ] : []))

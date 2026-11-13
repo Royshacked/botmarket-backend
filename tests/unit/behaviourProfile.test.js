@@ -264,3 +264,48 @@ test('the false-break rate is chance\'s on a random walk — never a trait of it
     assert.ok(verdicts.filter(v => v === 'more' || v === 'less').length <= 1, `a random walk's rate is chance's: ${verdicts.join(',')}`)
     assert.deepEqual(falseBreakChance(series([100, 101, 102]), 2, { older: { breaks: 3 } }, PROFILE), { verdict: 'thin', base: null, z: null })
 })
+
+test('Wyckoff on random walks: ranges are found, but springs, breakouts and dry-up retests almost never HOLD (proteus.md §8.1)', async () => {
+    const { wyckoffTest, falseBreaks: fbOf } = await import('../../services/behaviourProfile.engine.js')
+    const { calcATRSeries } = await import('../../monitoring/evaluators/structured.evaluator.js')
+    let ranges = 0, holds = 0, tests = 0
+    for (let k = 0; k < 12; k++) {
+        const b = randomWalk(1500, 501 + k)
+        const atrs = calcATRSeries(b.map(x => ({ t: x.timestamp * 1000, o: x.open, h: x.high, l: x.low, c: x.close, v: x.volume })), PROFILE.atrPeriod)
+        const cut = Math.floor(b.length * (2 / 3))
+        const drift = driftOutcomes(b, atrs, PROFILE)
+        const fb = fbOf(b, atrs, cut, drift, PROFILE)
+        const w = wyckoffTest(b, atrs, cut, drift, fb.sweeps, PROFILE)
+        ranges += w.ranges
+        for (const s of [w.springs, w.breakouts, w.dry_up]) {
+            tests++
+            if (s.verdict === 'respects') holds++
+            assert.ok(['respects', 'faded', 'unconfirmed', 'no', 'thin'].includes(s.verdict))
+        }
+        assert.ok(['respects', 'faded', 'unconfirmed', 'no', 'thin'].includes(w.springs.vs_sweeps.verdict))
+    }
+    assert.ok(ranges > 0, 'noise makes tight ranges too')
+    assert.ok(holds <= 1, `${holds}/${tests} Wyckoff tests held on noise`)
+})
+
+test('Wyckoff: a tight range, a spring under its low reclaimed, a breakout above it; the range it is in NOW', async () => {
+    const { wyckoffTest } = await import('../../services/behaviourProfile.engine.js')
+    // 20 bars inside 99–101 (span 2, ATR 1 → within 4 ATR); bar 25 dips to 97.5 and bar 26 closes back inside: a spring;
+    // bar 32 closes above 101: a breakout. Then a climb, then a fresh tight range to the end — where it stands now.
+    const closes = [...Array.from({ length: 25 }, (_, i) => 100 + (i % 2 ? 0.4 : -0.4)), 98.2, 100.2, 100.4, 100.6, 100.3, 100.5, 100.6, 102,
+        ...Array.from({ length: 30 }, (_, i) => 103 + i), ...Array.from({ length: 25 }, (_, i) => 132 + (i % 2 ? 0.4 : -0.4))]
+    const b = series(closes)
+    b[25].low = 97.5
+    const atrs = b.map(() => 1)
+    const opts = { ...PROFILE, horizon: 5, minN: 1, minRecent: 1 }
+    const w = wyckoffTest(b, atrs, 200, driftOutcomes(b, atrs, opts), [], opts)
+    assert.ok(w.ranges >= 2)
+    assert.equal(w.springs.n, 1, 'the dip under 99.1 closed back inside the next bar')
+    assert.equal(w.breakouts.n, 1, 'the close at 102 above the range high')
+    assert.equal(w.breakouts.upthrust_rate, 0, 'it never fell back inside')
+    assert.equal(w.current.high, 132.9)
+    assert.ok(w.current.low <= 131.1 && w.current.low >= 128, `the range found as soon as 20 bars fit in 4 ATR — the climb's last bars included (got ${w.current.low})`)
+    // A dip that does NOT close back inside is a breakdown — the range ends, no spring.
+    const down = series([...Array.from({ length: 25 }, (_, i) => 100 + (i % 2 ? 0.4 : -0.4)), 97, 96, 95, 94, 93, 92, 91, 90, 89, 88, 87])
+    assert.equal(wyckoffTest(down, down.map(() => 1), 100, [], [], opts).springs.n, 0)
+})

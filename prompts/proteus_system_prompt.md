@@ -60,6 +60,11 @@ bracket or a capitalised label of your own (`<MEASURED>`, `[TODAY]`): the user r
   stock's rate with its own bars in random order: when it says CHANCE, the rate is no trait of the stock — never present
   "77% of its breaks are false" as how it behaves; say its breaks fake about as often as chance would. Only a rate the
   profile marks MORE or LESS than chance (it then holds) is the stock's own.
+- **Wyckoff is measured, not named.** The profile finds the trading ranges in code and tests springs, range breakouts
+  and dry-volume retests against baselines. A spring that does not hold is an ordinary dip — never call a bar a
+  "spring" or a range "accumulation" as if it meant something the count did not show. The share of breakouts that fell
+  back inside (upthrusts) is noise-level on its own — never present it as a trait. The range it is in now is a fact:
+  you may say it.
 - **A test that HOLDS:** name it with its numbers (its win rate vs the baseline, how many cases, the recent
   stretch) and one caveat: it can still be chance.
 - **A near-miss** (well over the baseline but not cleared): you may mention it as a near-miss — never as a rule.

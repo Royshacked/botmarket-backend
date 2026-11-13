@@ -88,3 +88,26 @@ test('the covered book is profiled weekly, deduplicated and sorted, never throwi
     assert.deepEqual(queued, [{ syms: ['AMD', 'MSFT', 'NVDA'], opts: { source: 'house_book_weekly' } }])
     assert.equal(await profileHouseBook({ ...deps, book: async () => { throw new Error('mongo down') } }), 0)
 })
+
+test('Wyckoff in the opened row and the tool text: the range now, each verdict against its baseline, a spring HOLDS only when it beats both (proteus.md §8.1)', async () => {
+    const { wyckoffWords, wyckoffLines } = await import('../../services/tools/behaviourProfile.tools.js')
+    const s = (verdict, rate, base, extra = {}) => ({ verdict, n: 30, rate, base, z: 1.2, recent: { n: 10, rate, base }, ...extra })
+    const w = {
+        ranges: 40, current: { low: 140.2, high: 151.8, since: '2026-10-20T00:00:00.000Z' },
+        springs: s('no', 0.5, 0.45, { vs_sweeps: { rate: 0.5, base: 0.48, base_n: 60, z: 0.3, verdict: 'no' } }),
+        breakouts: s('no', 0.52, 0.47, { upthrust_rate: 0.6 }), dry_up: s('thin', 0.6, 0.5),
+    }
+    assert.equal(wyckoffWords(w), 'In a range 140.2–151.8 since 2026-10-20. Springs: no edge (50% vs 45% for any bar, 48% for an ordinary false break). Range breakouts: no edge (52% vs 47%).')
+    assert.ok(!/fell back|upthrust/.test(wyckoffWords(w)), 'the upthrust share is noise-level — never in the row')
+    assert.equal(wyckoffWords({ ranges: 0 }), null)
+    const holding = wyckoffWords({ ...w, current: null, springs: s('respects', 0.7, 0.45, { vs_sweeps: { base: 0.5, verdict: 'respects' } }) })
+    assert.match(holding, /^Springs hold: 70% vs 45% for any bar, 50% for an ordinary false break\./)
+    const lines = wyckoffLines(w)
+    assert.match(lines[0], /40 trading ranges.*NOW in a range 140\.2–151\.8 since 2026-10-20/)
+    assert.match(lines[1], /a spring HOLDS only when it beats both/)
+    assert.match(lines[2], /60% closed back inside.*noise does 50–65% too/)
+    assert.deepEqual(wyckoffLines({ ranges: 0 }), ['  Wyckoff: no tight trading range in this history'])
+    // A spring that holds is a badge word like any other.
+    const b = behaviourBadge({ timeframes: { day: { ...tf(), atr_pct: 3, wyckoff: { springs: { verdict: 'respects' } } }, week: tf() } }, 'swing')
+    assert.deepEqual([b.badge, b.kind], ['Wyckoff springs', 'holds'])
+})

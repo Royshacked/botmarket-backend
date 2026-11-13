@@ -45,6 +45,11 @@ export const PROFILE = Object.freeze({
     cycleMinRecent: 4,  // …and in the recent third, too few to confirm
     // C2. The false-break rate's baseline (2026-11-13): the same bars in a shuffled order, this many times.
     fbShuffles: 30,
+    // H. Wyckoff (2026-11-13): a trading range is `rangeBars` bars spanning at most `rangeAtr` × their median ATR; a
+    // dry-up retest comes on volume under `dryUp` × the range's average.
+    rangeBars: 20,
+    rangeAtr: 4,
+    dryUp: 0.7,
 })
 
 /** A seeded uniform [0, 1) — the baseline must be the same on every run of the same bars. Pure. */
@@ -298,7 +303,7 @@ export function falseBreaks(bars, atrs, cut, drift, opts = PROFILE) {
     const nFalse = breaks.filter(b => b.false).length
     const rec = breaks.filter(b => b.i >= cut)
     const old = breaks.filter(b => b.i < cut)
-    return {
+    const result = {
         breaks: n,
         false_rate: _round(n ? nFalse / n : null),
         older: { breaks: old.length, false_rate: _round(old.length ? old.filter(b => b.false).length / old.length : null) },
@@ -307,6 +312,83 @@ export function falseBreaks(bars, atrs, cut, drift, opts = PROFILE) {
         sweep_depth_atr: { median: _round(_median(breaks.map(b => b.depth)), 2), p80: _round(_quantile(breaks.map(b => b.depth), 0.8), 2) },
         latest,
         after_sweep: after,
+    }
+    // The sweep events themselves — what a Wyckoff spring must beat (an ordinary false break, wyckoffTest). Not
+    // enumerable: the stored profile keeps the numbers, never the events.
+    Object.defineProperty(result, 'sweeps', { value: sweeps, enumerable: false })
+    return result
+}
+
+/**
+ * H. WYCKOFF, MEASURED (proteus.md §8.1, 2026-11-13). TRADING RANGES are found in code: `rangeBars` bars whose high-to-low
+ * span is at most `rangeAtr` × their median ATR — tighter than noise's typical ~5.6 ATR over 20 bars — held until a close
+ * outside them. Inside a range, three long-side tests, each found on the older two-thirds and checked on the recent third:
+ *   - SPRINGS: a dip under the range low closed back inside within `sweepBack` bars, from the reclaim — against the drift
+ *     AND against an ordinary false break elsewhere (the falseBreaks sweeps): a spring is only Wyckoff's if it beats both;
+ *   - BREAKOUTS (sign of strength): a close above the range high, against the drift; the share that closed straight back
+ *     inside within `sweepBack` bars is the UPTHRUST rate (said, not tested — the long side's failure);
+ *   - DRY-UP RETESTS: a retest of the range low on volume under `dryUp` × the range's average, against all retests.
+ * `current`: the range the last bar is inside, if any — where it stands now. The PHASE (A–E) is a chart read, never
+ * measured. Pure.
+ */
+export function wyckoffTest(bars, atrs, cut, drift, sweeps, opts = PROFILE) {
+    const springs = [], breakouts = [], retests = [], dry = []
+    let ranges = 0, upthrusts = 0, current = null
+    const spaced = (list, i) => !list.length || i > list.at(-1).i + opts.horizon   // one event per outcome window
+    let i = opts.rangeBars
+    while (i < bars.length) {
+        const from = i - opts.rangeBars, win = bars.slice(from, i)
+        const hi = Math.max(...win.map(x => x.high)), lo = Math.min(...win.map(x => x.low))
+        const a = _median(atrs.slice(from, i))
+        if (!Number.isFinite(a) || a <= 0 || hi - lo > opts.rangeAtr * a) { i++; continue }
+        ranges++
+        const avgVol = win.reduce((t, x) => t + (x.volume ?? 0), 0) / win.length
+        let j = i, ended = false
+        for (; j < bars.length; j++) {
+            const bar = bars[j], at = atrs[j]
+            if (!Number.isFinite(at) || at <= 0) continue
+            if (bar.close > hi) {         // a breakout (sign of strength) — the range ends here
+                const o = bracket(bars, j, bar.close + opts.up * at, bar.close - opts.down * at, opts.horizon)
+                if (o != null) {
+                    breakouts.push({ i: j, out: o })
+                    if (bars.slice(j + 1, j + 1 + opts.sweepBack).some(x => x.close < hi)) upthrusts++
+                }
+                ended = true; break
+            }
+            if (bar.low < lo) {           // under the range low: a SPRING if a close is back inside soon, else a breakdown
+                let k = -1
+                for (let m = j; m < Math.min(bars.length, j + opts.sweepBack); m++) if (bars[m].close > lo) { k = m; break }
+                if (k < 0) { ended = true; break }
+                const ak = atrs[k]
+                const o = Number.isFinite(ak) && ak > 0 ? bracket(bars, k, bars[k].close + opts.up * ak, bars[k].close - opts.down * ak, opts.horizon) : null
+                if (o != null && spaced(springs, k)) springs.push({ i: k, out: o })
+                j = k
+                continue
+            }
+            // A retest of the low from above: this bar's low comes within touchTol ATRs of it, the last close did not.
+            if (bar.low <= lo + opts.touchTol * at && bars[j - 1].close > lo + opts.touchTol * at && spaced(retests, j)) {
+                const o = bracket(bars, j, bar.close + opts.up * at, bar.close - opts.down * at, opts.horizon)
+                if (o != null) {
+                    retests.push({ i: j, out: o })
+                    if (avgVol > 0 && (bar.volume ?? 0) < opts.dryUp * avgVol) dry.push({ i: j, out: o })
+                }
+            }
+        }
+        if (!ended) current = { low: _round(lo, 2), high: _round(hi, 2), since: new Date(_ms(bars[from].timestamp)).toISOString() }
+        i = j + 1
+    }
+    // The spring's second baseline: ordinary false breaks of swing lows that are NOT themselves springs (a spring is
+    // often a swing-low sweep too — counting it on both sides would pull the two rates together).
+    const own = new Set(springs.map(e => e.i))
+    const vsDrift = judge(springs, drift, cut, opts), vsSweeps = judge(springs, (sweeps ?? []).filter(e => !own.has(e.i)), cut, opts)
+    // Wyckoff's only when it beats BOTH an ordinary bar and an ordinary false break: the weaker verdict of the two.
+    const vs = [vsDrift.verdict, vsSweeps.verdict]
+    const verdict = vs.includes('thin') ? 'thin' : vs.includes('no') ? 'no' : vs.includes('faded') ? 'faded' : vs.includes('unconfirmed') ? 'unconfirmed' : 'respects'
+    return {
+        ranges, current,
+        springs: { ...vsDrift, verdict, vs_sweeps: { rate: vsSweeps.rate, base: vsSweeps.base, base_n: vsSweeps.base_n, z: vsSweeps.z, verdict: vsSweeps.verdict } },
+        breakouts: { ...judge(breakouts, drift, cut, opts), upthrust_rate: _round(breakouts.length ? upthrusts / breakouts.length : null) },
+        dry_up: judge(dry, retests, cut, opts),
     }
 }
 
@@ -448,6 +530,7 @@ export function timeframeProfile(bars, timeframe, opts = PROFILE) {
     const cut = Math.floor(bars.length * (1 - opts.recentShare))
     const drift = driftOutcomes(bars, atrs, opts)
     const driftAll = _rate(drift.map(d => d.out))
+    const fb = falseBreaks(bars, atrs, cut, drift, opts)
 
     const levels = {
         ema20: calcEMASeries(closes, 20),
@@ -475,9 +558,10 @@ export function timeframeProfile(bars, timeframe, opts = PROFILE) {
         atr_pct: _round(atrPct, 2), gap_pct: _round(gapPct, 2), dollar_volume: _round(dollarVol, 0),
         drift: { n: driftAll.n, rate: _round(driftAll.rate) },
         indicators,
-        false_breaks: (() => { const fb = falseBreaks(bars, atrs, cut, drift, opts); return { ...fb, chance: falseBreakChance(bars, cut, fb, opts) } })(),
+        false_breaks: { ...fb, chance: falseBreakChance(bars, cut, fb, opts) },
         order_blocks: orderBlockTest(bars, atrs, medAtrPct, cut, opts),
         cycle: cycleTest(bars, cut, opts),
+        wyckoff: wyckoffTest(bars, atrs, cut, drift, fb.sweeps, opts),
     }
 }
 
@@ -486,6 +570,9 @@ const _respects = (tf) => (tf ? [
     ...(tf.false_breaks.after_sweep.verdict === 'respects' ? ['sweeps'] : []),
     ...(tf.order_blocks.verdict === 'respects' ? ['order_blocks'] : []),
     ...(tf.cycle?.verdict === 'respects' ? ['cycle'] : []),
+    ...(tf.wyckoff?.springs?.verdict === 'respects' ? ['springs'] : []),
+    ...(tf.wyckoff?.breakouts?.verdict === 'respects' ? ['range_breakouts'] : []),
+    ...(tf.wyckoff?.dry_up?.verdict === 'respects' ? ['dry_up'] : []),
     ...(tf.false_breaks?.chance?.verdict === 'more' ? ['fakes'] : tf.false_breaks?.chance?.verdict === 'less' ? ['follows'] : []),
 ] : [])
 
