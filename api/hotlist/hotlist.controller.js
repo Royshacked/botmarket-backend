@@ -4,7 +4,7 @@ import { hotlistResearchService } from '../../services/hotlistResearch.service.j
 import { houseBook } from '../../services/houseBook.service.js'
 import { dayBoards } from '../../services/hotlist.day.js'
 import { prometheusCallsService } from '../../services/prometheusCalls.service.js'
-import { badgesFor } from '../../services/hotlistBehaviour.service.js'
+import { profileRow } from '../../services/hotlistBehaviour.service.js'
 import { makeHandle } from '../_shared/handle.util.js'
 import { httpError } from '../../services/httpError.util.js'
 
@@ -84,12 +84,11 @@ export const requestRead = handle('requestRead', async (req, res) => {
 export const getBook = handle('getBook', async (req, res) => { res.json(await houseBook()) })
 
 /**
- * GET /api/hotlist/behaviour?symbols=A,B&horizon=swing — the technical analyst's badge for each name on a list: what it
- * obeys on that horizon's timeframes, from the stored measured profile (proteus.md step 5). Names with none yet are queued.
+ * GET /api/hotlist/profile/:symbol?horizon=swing — how an OPENED row's name trades on that horizon: the technical analyst's
+ * measured profile, as a few lines (proteus.md §8.1 decision 4 — in the row, not a badge). Computed when not stored yet.
  */
-export const getBehaviour = handle('getBehaviour', async (req, res) => {
-    const symbols = String(req.query.symbols ?? '').split(',').filter(Boolean)
-    res.json(await badgesFor(symbols, req.query.horizon ? String(req.query.horizon) : null))
+export const getRowProfile = handle('getRowProfile', async (req, res) => {
+    res.json(await profileRow(req.params.symbol, req.query.horizon ? String(req.query.horizon) : null))
 })
 
 /**

@@ -92,6 +92,27 @@ tools move here once Argus is fully defined (argus-rework §4).
    VWAP, a bullish order block), sweeps of lows that turn back up, follow-through on up-moves. The short side is a
    later switch, not a redesign.
 
+### 8.1 Decided (Roy, 2026-11-13) — more methods, and the profile in the row
+
+4. **Where it shows — REVISED:** not a badge. Opening a Hotlist row shows the technical profile ("How it trades") on
+   the row's horizon — what holds, or what it does (its false breaks, sweep depth), its ATR, its fit, and the new tests
+   below — with the way to his full read. The badge (step 5) is removed.
+5. **Three more methods**, each split the way the rest is — MEASURED in code against a baseline and the recent third,
+   or SEEN on today's chart with no hit rate:
+   - **Price cycles** — the existing `get_cycle_analysis` only describes a cycle. The profile adds the TEST: are the
+     swing lows spaced more regularly than the same returns reshuffled, found on the older two-thirds and still so on
+     the recent third? Only a cycle that holds gets its next window stated.
+   - **Wyckoff** — MEASURED: trading ranges found in code; springs (a sweep of the range low that closes back inside)
+     and upthrusts, and volume drying up on retests, against the baseline. SEEN: the phase on today's chart
+     (accumulation / markup / distribution, A–E) with its invalidation level.
+   - **Elliott waves** — the COUNT is never measured (most charts admit several counts; a count fitted afterwards
+     always looks right). MEASURED: do pullbacks stop at 38.2 / 50 / 61.8% more often than at random levels. SEEN: the
+     current count by eye, called an interpretation, with the level that kills it — and code checks the three hard
+     rules (wave 2 never retraces all of wave 1, wave 3 never the shortest, wave 4 never overlaps wave 1) so an
+     impossible count is never shown.
+6. **Order:** the profile in the row → cycles → Wyckoff → the Fibonacci test + the Elliott / Wyckoff chart reads → then
+   Mentor weighs the read for his levels (5b).
+
 ## 9. History depth (checked live, FMP, TSLA, 2026-11-12)
 
 - **5-minute:** goes back at least a year (Nov 2025 served), but one call returns ~9 sessions (~550 bars). Three

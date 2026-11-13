@@ -133,6 +133,36 @@ export function behaviourBadge(profile, horizon = null) {
     }
 }
 
+/**
+ * THE PROFILE IN AN OPENED HOTLIST ROW (proteus.md §8.1 decision 4, Roy 2026-11-13 — "shown when opening a row instead
+ * of a badge"): the row's horizon, as a few labelled lines — what holds (or, when nothing does, what it does: its false
+ * breaks and how deep they sweep), its latest example, ATR, and what it fits. Numbers only, from the measured profile;
+ * the written read is the technical analyst's, one click away. → `{ headline: { text, kind }, lines: [[label, text]],
+ * on }` or null when the horizon has no bars. Pure.
+ */
+export function rowProfile(profile, horizon = null) {
+    const head = behaviourBadge(profile, horizon)
+    if (!head) return null
+    const tfs = (BADGE_TIMEFRAMES[horizon] ?? BADGE_TIMEFRAMES.swing).filter(tf => profile.timeframes[tf])
+    const tfWord = (tf) => TF[tf].charAt(0) + TF[tf].slice(1).toLowerCase()
+    const lines = [['What it obeys', head.kind === 'holds' ? head.holds.join(', ') : `Nothing technical holds on the ${tfs.map(tf => TF[tf].toLowerCase()).join(' and ')} bars.`]]
+    for (const tf of tfs) {
+        const fb = profile.timeframes[tf].false_breaks
+        if (!fb?.breaks) continue
+        lines.push([`${tfWord(tf)} breaks of a low`,
+            `${_pct(fb.false_rate)} of ${fb.breaks} closed back above within ${PROFILE.sweepBack} bars (recent ${_pct(fb.recent?.false_rate)})` +
+            `${fb.sweep_depth_atr?.median != null ? `; sweeps ~${fb.sweep_depth_atr.median} ATR under the low (80% within ${fb.sweep_depth_atr.p80})` : ''}` +
+            `${fb.bars_to_direction != null ? `; a direction ~${fb.bars_to_direction} bars after` : ''}.`])
+    }
+    const lead = profile.timeframes[tfs[0]].false_breaks?.latest
+    if (lead) lines.push(['Latest example', latestLine(tfs[0], lead).replace(/^Latest false break \(the example to show\): /, '').replace(/ — chart it:.*$/, '.')])
+    lines.push(['ATR', tfs.map(tf => `${tfWord(tf)} ${profile.timeframes[tf].atr_pct ?? '—'}%`).join(' · ') +
+        (profile.timeframes.day?.gap_pct != null ? ` · typical gap ${profile.timeframes.day.gap_pct}%` : '')])
+    const fit = profile.suitability
+    if (fit) lines.push(['Fits', `Day trade ${fit.day_trade.fits ? 'yes' : 'no'} · swing ${fit.swing.fits ? 'yes' : 'no'} — ${fit.swing.fits ? fit.swing.why : fit.day_trade.why}.`])
+    return { headline: { text: head.badge, kind: head.kind }, lines, on: tfs }
+}
+
 /** What HOLDS across the timeframes, labelled — the one list formatProfile and profileBrief both say. Missing parts skip. Pure. */
 export function holdsOf(timeframes) {
     return Object.entries(timeframes ?? {}).flatMap(([tf, t]) => (t ? [

@@ -1,7 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { behaviourBadge } from '../../services/tools/behaviourProfile.tools.js'
-import { badgesFor, MAX_SYMBOLS } from '../../services/hotlistBehaviour.service.js'
+import { rowProfile } from '../../services/tools/behaviourProfile.tools.js'
+import { profileRow, profileHouseBook } from '../../services/hotlistBehaviour.service.js'
 
 // The Hotlist badge (docs/design/proteus.md §8.2, step 5): what a name obeys, in a word or two, on the timeframes the
 // row's horizon trades on — from the stored profile, never computed on the request.
@@ -32,41 +33,6 @@ test('nothing holding is said plainly; no bars for the horizon → no badge at a
     assert.equal(behaviourBadge({ timeframes: { day: tf({ holds: ['sma50'] }) } }, 'bogus').badge, '50 MA', 'an unknown horizon reads like a swing')
 })
 
-test('a list: stored profiles only; the names without one are queued once, sorted; junk dropped, capped, a failed read is one name', async () => {
-    const queued = []
-    const profiles = { NVDA: { timeframes: { day: tf({ holds: ['sma200'] }), week: tf() } } }
-    const deps = {
-        stored: async (s) => { if (s === 'BOOM') throw new Error('mongo blip'); return profiles[s] ?? null },
-        queue: (syms, opts) => { queued.push({ syms, opts }); return syms.length },
-    }
-    const out = await badgesFor(['nvda', 'NVDA', 'tsla', 'amd', '', 'not a ticker!', 'BOOM'], 'week', deps)
-    assert.equal(out.horizon, 'week')
-    assert.equal(out.badges.NVDA.badge, '200 MA')
-    assert.equal(out.badges.TSLA, null)
-    assert.equal(out.badges.BOOM, null)
-    assert.deepEqual(Object.keys(out.badges).sort(), ['AMD', 'BOOM', 'NVDA', 'TSLA'])
-    assert.deepEqual(queued, [{ syms: ['AMD', 'TSLA'], opts: { source: 'hotlist_week' } }])
-    assert.equal(out.queued, 2)
-    const many = await badgesFor(Array.from({ length: 300 }, (_, i) => `S${i}`), 'nonsense', { stored: async () => null, queue: () => 0 })
-    assert.equal(Object.keys(many.badges).length, MAX_SYMBOLS)
-    assert.equal(many.horizon, 'swing')
-})
-
-test('the covered book is never queued from a look — it is profiled weekly (Roy, 2026-11-13, option b)', async () => {
-    const { profileHouseBook } = await import('../../services/hotlistBehaviour.service.js')
-    const queued = []
-    const deps = { stored: async () => null, queue: (syms, opts) => { queued.push({ syms, opts }); return syms.length }, book: async () => ({
-        swing: [{ symbol: 'nvda' }, { symbol: 'AMD' }], long_term: [{ symbol: 'NVDA' }, { symbol: 'MSFT' }, { symbol: 'bad ticker' }] }) }
-    for (const h of ['swing', 'long_term', 'covered']) await badgesFor(['TSLA'], h, deps)
-    assert.deepEqual(queued, [], 'a first look at Swing must not start ~25 minutes of FMP calls in market hours')
-    await badgesFor(['TSLA'], 'week', deps)
-    assert.deepEqual(queued.map(q => q.syms), [['TSLA']], 'the few names on This week / Intraday still queue on a look')
-    queued.length = 0
-    assert.equal(await profileHouseBook(deps), 3)
-    assert.deepEqual(queued, [{ syms: ['AMD', 'MSFT', 'NVDA'], opts: { source: 'house_book_weekly' } }])
-    assert.equal(await profileHouseBook({ ...deps, book: async () => { throw new Error('mongo down') } }), 0, 'never throws')
-})
-
 test('nothing holds → the trait it DOES have, on the horizon\'s first timeframe: how often its low-breaks fake (Roy, 2026-11-13, option 2)', () => {
     const faking = (rate, breaks = 40) => ({ ...tf(), atr_pct: 0.51, false_breaks: { breaks, false_rate: rate, sweep_depth_atr: { median: 0.24, p80: 0.5 }, after_sweep: { verdict: 'no' } } })
     const b = behaviourBadge({ timeframes: { '5min': faking(0.744), '1hour': faking(0.71) } }, 'intraday')
@@ -76,4 +42,45 @@ test('nothing holds → the trait it DOES have, on the horizon\'s first timefram
     const holding = behaviourBadge({ timeframes: { day: { ...faking(0.77), indicators: { sma50: { verdict: 'respects' } } }, week: faking(0.6) } }, 'swing')
     assert.deepEqual([holding.badge, holding.kind], ['50 MA', 'holds'], 'a line that holds is the badge — the trait is only for when nothing does')
     assert.equal(behaviourBadge({ timeframes: { day: faking(null, 0), week: tf() } }, 'swing').kind, 'nothing', 'no breaks measured → nothing to say but "nothing"')
+})
+
+test('an opened row shows how the name trades on its horizon: what holds or what it does, the latest example, ATR, fit (proteus.md §8.1)', () => {
+    const fb = (rate, breaks = 40) => ({ breaks, false_rate: rate, recent: { false_rate: 0.7 }, bars_to_direction: 3, sweep_depth_atr: { median: 0.24, p80: 0.53 },
+        latest: { at: '2026-11-12T05:00:00.000Z', reclaimed_at: '2026-11-12T05:00:00.000Z', level: 151.49, swept_to: 148.8, depth_atr: 0.27 }, after_sweep: { verdict: 'no' } })
+    const p = { timeframes: { day: { ...tf(), atr_pct: 2.99, gap_pct: 1.15, false_breaks: fb(0.768) }, week: { ...tf(), atr_pct: 7.47, false_breaks: fb(0.6, 12) } },
+        suitability: { day_trade: { fits: true, why: 'moves, liquid, and nothing technical holds' }, swing: { fits: true, why: 'moves and liquid, but nothing technical holds' } } }
+    const row = rowProfile(p, 'swing')
+    assert.deepEqual(row.headline, { text: 'fakes 77%', kind: 'trait' })
+    assert.deepEqual(row.on, ['day', 'week'])
+    assert.deepEqual(Object.fromEntries(row.lines), {
+        'What it obeys': 'Nothing technical holds on the daily and weekly bars.',
+        'Daily breaks of a low': '77% of 40 closed back above within 3 bars (recent 70%); sweeps ~0.24 ATR under the low (80% within 0.53); a direction ~3 bars after.',
+        'Weekly breaks of a low': '60% of 12 closed back above within 3 bars (recent 70%); sweeps ~0.24 ATR under the low (80% within 0.53); a direction ~3 bars after.',
+        'Latest example': '2026-11-12 the swing low 151.49 was swept to 148.8 (0.27 ATR under), closed back above 2026-11-12.',
+        'ATR': 'Daily 2.99% · Weekly 7.47% · typical gap 1.15%',
+        'Fits': 'Day trade yes · swing yes — moves and liquid, but nothing technical holds.',
+    })
+    const holding = rowProfile({ timeframes: { day: { ...tf({ holds: ['sma50'] }), atr_pct: 3 }, week: tf() } }, 'swing')
+    assert.equal(holding.lines[0][1], '50 MA (daily)')
+    assert.equal(rowProfile({ timeframes: { day: tf() } }, 'intraday'), null, 'no bars for the horizon')
+})
+
+test('opening a row: computed when not stored, and every failure is a reason, never a throw', async () => {
+    const ok = await profileRow('nvda', 'swing', { profile: async () => ({ computed_at: '2026-11-13T01:00:00Z', timeframes: { day: { ...tf(), atr_pct: 3 }, week: tf() } }) })
+    assert.equal(ok.symbol, 'NVDA')
+    assert.equal(ok.computed_at, '2026-11-13T01:00:00Z')
+    assert.equal(ok.headline.text, 'nothing')
+    assert.deepEqual(await profileRow('not a ticker!', 'swing', {}), { symbol: 'NOT A TICKER!', horizon: 'swing', reason: 'bad_symbol' })
+    assert.equal((await profileRow('ZZZ', 'swing', { profile: async () => { throw new Error('no price history for ZZZ') } })).reason, 'no_history')
+    assert.equal((await profileRow('ZZZ', 'intraday', { profile: async () => ({ timeframes: { day: tf() } }) })).reason, 'too_short')
+    assert.equal((await profileRow('ZZZ', 'bogus', { profile: async () => ({ timeframes: { day: tf(), week: tf() } }) })).horizon, 'swing')
+})
+
+test('the covered book is profiled weekly, deduplicated and sorted, never throwing (Roy, 2026-11-13, option b)', async () => {
+    const queued = []
+    const deps = { queue: (syms, opts) => { queued.push({ syms, opts }); return syms.length }, book: async () => ({
+        swing: [{ symbol: 'nvda' }, { symbol: 'AMD' }], long_term: [{ symbol: 'NVDA' }, { symbol: 'MSFT' }, { symbol: 'bad ticker' }] }) }
+    assert.equal(await profileHouseBook(deps), 3)
+    assert.deepEqual(queued, [{ syms: ['AMD', 'MSFT', 'NVDA'], opts: { source: 'house_book_weekly' } }])
+    assert.equal(await profileHouseBook({ ...deps, book: async () => { throw new Error('mongo down') } }), 0)
 })

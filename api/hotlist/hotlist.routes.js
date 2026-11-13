@@ -1,7 +1,7 @@
 import express from 'express'
 import { log } from '../../middleware/logger.middleware.js'
 import { requireAuth } from '../../middleware/auth.middleware.js'
-import { getToday, getBoard, getOutcomes, getReads, requestRead, getBook, getScorecard, getDayBoards, getBehaviour } from './hotlist.controller.js'
+import { getToday, getBoard, getOutcomes, getReads, requestRead, getBook, getScorecard, getDayBoards, getRowProfile } from './hotlist.controller.js'
 
 const router = express.Router()
 
@@ -12,7 +12,7 @@ router.get('/day',        log, getDayBoards)   // ?day=YYYY-MM-DD — the day bo
 router.get('/outcomes',   log, getOutcomes)
 router.get('/reads',      log, getReads)       // the catalyst reads — short-swing targets
 router.post('/reads',     log, requestRead)    // a user asks for one on a This week row
-router.get('/behaviour',  log, getBehaviour)   // ?symbols=A,B&horizon= — the technical analyst's badge per name (proteus.md step 5)
+router.get('/profile/:symbol', log, getRowProfile)   // ?horizon= — how an opened row's name trades (proteus.md §8.1)
 router.get('/book',       log, getBook)        // the house's Swing and Long term names (coverage, by target horizon)
 router.get('/scorecard',  log, getScorecard)   // Prometheus's calls vs SPY: coverage marks, catalyst reads vs passes
 
