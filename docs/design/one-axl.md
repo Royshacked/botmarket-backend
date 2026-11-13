@@ -157,7 +157,7 @@ Steps 1 and 2 ship together — the chat must never say "Prometheus" under an "A
    agent SHOWS is now LIVE with its labelled lines (the unified chat never drew the PNG — Proteus's example chart was
    lost). Driven (`scripts/drive-one-axl.mjs`): NVDA behaviour → Axl · Technical analyst + the example chart; the news
    hand-back silent, answered by Axl, the question once; no internal name anywhere, desktop + 390px.
-   Merge APPLIED on axl_dev 2026-11-13 (23 role threads → the Axl threads, 1529 messages, 0 orphaned; backup in backups/). PENDING on prod (`DB_NAME=test`) — with the push.
+   Merge APPLIED on axl_dev 2026-11-13 (23 role threads → the Axl threads, 1529 messages, 0 orphaned; backup in backups/). APPLIED on prod (`test`) 2026-11-13 after the push: 17 role threads, 1005 messages, 0 orphaned; backup in backups/.
 3. **The shared "about you"** — `user_profile`, written by the desks' own work, read by every role.
    **BUILT 2026-11-13.** `services/userProfile.service.js`: `notes` (what the user STATED as a lasting rule — kept by
    any role via `remember_about_user`, declared at six desks, handler built in runAgentStream like `consult`; never by
