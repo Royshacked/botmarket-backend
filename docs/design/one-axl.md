@@ -173,6 +173,13 @@ Steps 1 and 2 ship together — the chat must never say "Prometheus" under an "A
    "Build a trade", "Research a company"… — DESKS labels ARE the to-dos, so no "Trading Desk" can reach a screen. Driven
    (scripts/drive-one-axl-pane.mjs): tab "NVDA · trade", Info to-dos, no agent or desk name on the page.
 5. **Info diagrams** — `{ flow, step }` from each desk, the five diagrams.
+   **BUILT 2026-11-13.** FE `Floor/infoFlow.js` (pure) picks the flow and the step from what the client already holds —
+   the floor, each role's session state, the rows, whether the Hotlist is open — instead of a server `{ flow, step }`
+   (the state is already on the client; a second copy would drift). `Floor/FlowDiagram.jsx` draws it as a vertical
+   stepper (done ✓ · you are here · next) at the top of the desktop Info column and the phone Info sheet; the long copy
+   (the Hotlist's columns, how the trader builds) sits behind "More". Driven (scripts/drive-one-axl-info.mjs): Hotlist
+   open → "From the Hotlist" on "Pick a name"; a trade asked for → "Build the trade". The trade-only diagram and the
+   phone sheet were cut off by the login limiter — unit-tested, not yet driven.
 6. **Drive it** — desktop + 390px, a Hotlist → trade build, a Proteus → hand-back → Analyst, a portfolio review.
 
 ## 9. Open
