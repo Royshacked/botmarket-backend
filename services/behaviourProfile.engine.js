@@ -17,6 +17,7 @@
 
 import { calcSMASeries, calcEMASeries, calcRSISeries, calcMACDSeries, calcATRSeries, calcVWAPSeries } from '../monitoring/evaluators/structured.evaluator.js'
 import { swings, detectOrderBlocks } from './smc.engine.js'
+import { findExtrema, cycleStats } from './cycleAnalysis.service.js'
 
 export const PROFILE = Object.freeze({
     horizon: 10,        // bars an outcome has to happen in
@@ -36,7 +37,77 @@ export const PROFILE = Object.freeze({
     sweepBack: 3,       // a break of a swing low is FALSE when a close is back above it within this many bars
     swingLookback: 2,
     atrPeriod: 14,
+    // G. The price cycle (proteus.md §8.1, 2026-11-13) — the SAME troughs and regularity get_cycle_analysis describes
+    // (cycleAnalysis.findExtrema / cycleStats: the share of trough-to-trough intervals within ±35% of their mean).
+    cycleLookback: 5,   // a trough: the lowest close of 5 bars each side
+    cycleShuffles: 100, // the baseline: the same returns, reshuffled, this many times
+    cycleMinN: 8,       // fewer intervals than this in the older two-thirds is 'thin'
+    cycleMinRecent: 4,  // …and in the recent third, too few to confirm
 })
+
+/** A seeded uniform [0, 1) — the baseline must be the same on every run of the same bars. Pure. */
+function _rng(seed) {
+    let s = seed >>> 0
+    return () => { s = (s + 0x6D2B79F5) >>> 0; let t = s; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 2 ** 32 }
+}
+
+/** The closes rebuilt from the same bar-to-bar returns in a shuffled order — the same moves, any rhythm gone. Pure. */
+function _shuffledPath(closes, rnd) {
+    const r = []
+    for (let i = 1; i < closes.length; i++) r.push(closes[i] / closes[i - 1])
+    for (let i = r.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [r[i], r[j]] = [r[j], r[i]] }
+    const out = [closes[0]]
+    for (const x of r) out.push(out.at(-1) * x)
+    return out
+}
+
+/**
+ * G. A PRICE CYCLE that holds (proteus.md §8.1): are the stock's troughs spaced more regularly than its own moves in a
+ * random order? Found on the older two-thirds — the regularity (cycleStats.consistency) against the same returns
+ * reshuffled `cycleShuffles` times, at z ≥ `z` and `edge` over the baseline — and checked on the recent third, which
+ * must still beat it. A cycle that holds states its period and the NEXT WINDOW (the last trough + the period ± its
+ * spread); one that does not states none — get_cycle_analysis still describes any cycle on request, this says whether
+ * to believe it. Pure (a seeded baseline: the same bars give the same verdict).
+ */
+export function cycleTest(bars, cut, opts = PROFILE) {
+    const closes = bars.map(b => b.close)
+    const stat = (c) => cycleStats(findExtrema(c, opts.cycleLookback).troughs)
+    const older = stat(closes.slice(0, cut))
+    if (!older || older.count < opts.cycleMinN) return { verdict: 'thin', n: older?.count ?? 0 }
+    const rnd = _rng(closes.length * 7919 + Math.round(closes[0] * 100))
+    const base = []
+    for (let k = 0; k < opts.cycleShuffles; k++) {
+        const s = stat(_shuffledPath(closes.slice(0, cut), rnd))
+        if (s) base.push(s.consistency)
+    }
+    const mean = base.reduce((a, b) => a + b, 0) / (base.length || 1)
+    const sd = Math.sqrt(base.reduce((a, b) => a + (b - mean) ** 2, 0) / (base.length || 1))
+    const z = sd > 0 ? (older.consistency - mean) / sd : null
+    const recent = stat(closes.slice(cut))
+    const found = Number.isFinite(z) && z >= opts.z && older.consistency - mean >= opts.edge
+    const verdict = !found ? 'no'
+        : !recent || recent.count < opts.cycleMinRecent ? 'unconfirmed'
+            : recent.consistency - mean >= opts.recentEdge ? 'respects' : 'faded'
+    const out = {
+        verdict, n: older.count, rate: _round(older.consistency), base: _round(mean), z: _round(z, 2),
+        recent: { n: recent?.count ?? 0, rate: _round(recent?.consistency ?? null) },
+        period_bars: null, spread_bars: null, window: null,
+    }
+    if (verdict !== 'respects') return out
+    // The window: from the WHOLE history's troughs — the period, its spread, and where the last trough sits.
+    const all = findExtrema(closes, opts.cycleLookback).troughs
+    const whole = cycleStats(all)
+    const step = _median(bars.slice(1).map((b, i) => _ms(b.timestamp) - _ms(bars[i].timestamp)))
+    const lastAt = _ms(bars[all.at(-1)].timestamp)
+    out.period_bars = whole.mean
+    out.spread_bars = whole.std
+    out.window = step ? {
+        last_low: new Date(lastAt).toISOString(),
+        from: new Date(lastAt + Math.max(1, whole.mean - whole.std) * step).toISOString(),
+        to: new Date(lastAt + (whole.mean + whole.std) * step).toISOString(),
+    } : null
+    return out
+}
 
 const _ms = (ts) => (ts < 1e12 ? ts * 1000 : ts)
 const _mon = (bars) => bars.map(b => ({ t: _ms(b.timestamp), o: b.open, h: b.high, l: b.low, c: b.close, v: b.volume }))
@@ -352,6 +423,7 @@ export function timeframeProfile(bars, timeframe, opts = PROFILE) {
         indicators,
         false_breaks: falseBreaks(bars, atrs, cut, drift, opts),
         order_blocks: orderBlockTest(bars, atrs, medAtrPct, cut, opts),
+        cycle: cycleTest(bars, cut, opts),
     }
 }
 
@@ -359,6 +431,7 @@ const _respects = (tf) => (tf ? [
     ...Object.entries(tf.indicators).filter(([, s]) => s.verdict === 'respects').map(([k]) => k),
     ...(tf.false_breaks.after_sweep.verdict === 'respects' ? ['sweeps'] : []),
     ...(tf.order_blocks.verdict === 'respects' ? ['order_blocks'] : []),
+    ...(tf.cycle?.verdict === 'respects' ? ['cycle'] : []),
 ] : [])
 
 /** The thresholds for F — said in the read, so a reader can argue with them. */

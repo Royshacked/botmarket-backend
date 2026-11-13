@@ -15,7 +15,7 @@ import { PROFILE } from '../behaviourProfile.engine.js'
 const LOG = '[behaviourProfile.tools]'
 
 export const BEHAVIOUR_PROFILE_TOOL_SPEC = {
-    get_behaviour_profile: `The MEASURED behaviour profile of one stock — how its price has actually behaved, counted from its candles on 5-minute (~3 months), 1-hour (~1 year), daily (~10 years) and weekly (~10 years) bars, LONG SIDE: does it hold at the 20 EMA / 50 / 200 SMA / VWAP, what follows RSI under 30, a MACD cross up, a high-volume up bar; how often its breaks of a swing low are FALSE (closed back above within 3 bars), how deep those sweeps go in ATRs, how many bars until it picks a direction; whether bullish order blocks hold on a retest; its ATR %, gap, dollar volume; and whether it fits a day trade / a swing. Every rate is against a BASELINE (the same line shifted, or the stock's own drift) and must still hold in the most recent third. Kept for a week, shared by everyone; the first ask for a name takes several seconds. \`ticker\`; \`fresh: true\` recomputes now (only when the user asks for it).`,
+    get_behaviour_profile: `The MEASURED behaviour profile of one stock — how its price has actually behaved, counted from its candles on 5-minute (~3 months), 1-hour (~1 year), daily (~10 years) and weekly (~10 years) bars, LONG SIDE: does it hold at the 20 EMA / 50 / 200 SMA / VWAP, what follows RSI under 30, a MACD cross up, a high-volume up bar; how often its breaks of a swing low are FALSE (closed back above within 3 bars), how deep those sweeps go in ATRs, how many bars until it picks a direction; whether bullish order blocks hold on a retest; whether its lows come in a regular PRICE CYCLE (against the same returns reshuffled — the next window is stated only when the cycle holds); its ATR %, gap, dollar volume; and whether it fits a day trade / a swing. Every rate is against a BASELINE (the same line shifted, or the stock's own drift) and must still hold in the most recent third. Kept for a week, shared by everyone; the first ask for a name takes several seconds. \`ticker\`; \`fresh: true\` recomputes now (only when the user asks for it).`,
 }
 
 const _pct = (x) => (Number.isFinite(x) ? `${Math.round(x * 100)}%` : '—')
@@ -53,6 +53,28 @@ export function latestLine(tf, l) {
         `chart it: get_chart timeframe "${CHART_TF[tf] ?? tf}", levels ${l.level} "swing low" and ${l.swept_to} "swept to"`
 }
 
+const _bars = (n, tf) => `${n} ${({ '5min': '5-minute bars', '1hour': 'hours', day: 'sessions', week: 'weeks' })[tf] ?? 'bars'}`
+
+/** A cycle verdict in words, for the opened row. Pure. */
+export function cycleWords(c, tf) {
+    if (c.verdict === 'respects') {
+        const w = c.window ? ` Next window ${c.window.from.slice(0, 10)} – ${c.window.to.slice(0, 10)}.` : ''
+        return `Lows every ~${_bars(c.period_bars, tf)} (± ${c.spread_bars}) — more regular than its own moves reshuffled (${_pct(c.rate)} vs ${_pct(c.base)}, z ${c.z}; recent ${_pct(c.recent.rate)}).${w}`
+    }
+    if (c.verdict === 'faded') return `Its lows used to come in a cycle (${_pct(c.rate)} vs ${_pct(c.base)}), not lately — no window stated.`
+    if (c.verdict === 'unconfirmed') return `A cycle in the older history (${_pct(c.rate)} vs ${_pct(c.base)}), too few recent lows to confirm — no window stated.`
+    return `No regular cycle — its lows are no more evenly spaced than the same moves reshuffled (${_pct(c.rate)} vs ${_pct(c.base)}).`
+}
+
+/** A cycle verdict as the tool's line. Pure. */
+export function cycleLine(c) {
+    if (c.verdict === 'thin') return `Price cycle: too few lows to say (${c.n} intervals)`
+    const head = `Price cycle (trough to trough, vs the same returns reshuffled): ${VERDICT[c.verdict] ?? c.verdict} — ${_pct(c.rate)} of intervals within ±35% of the mean vs ${_pct(c.base)} baseline (${c.n} in the older two-thirds, z ${c.z}; recent ${_pct(c.recent?.rate)}, ${c.recent?.n ?? 0})`
+    return c.verdict === 'respects' && c.window
+        ? `${head}; period ~${c.period_bars} bars (± ${c.spread_bars}), next window ${c.window.from.slice(0, 10)} → ${c.window.to.slice(0, 10)}`
+        : head
+}
+
 /** One timeframe → its lines. Pure. */
 export function timeframeLines(tf, t) {
     if (!t) return [`${TF[tf] ?? tf}: too few bars to measure (the 200 SMA needs ~260)`]
@@ -69,6 +91,7 @@ export function timeframeLines(tf, t) {
         ...(fb.latest ? [`  ${latestLine(tf, fb.latest)}`] : []),
         `  ${testLine('After a sweep (from the reclaim)', fb.after_sweep, 'sweeps')}`,
         `  ${testLine(`Bullish order blocks (${t.order_blocks.blocks} found) on a retest`, t.order_blocks, 'retests')}`,
+        ...(t.cycle ? [`  ${cycleLine(t.cycle)}`] : []),
     ]
 }
 
@@ -83,7 +106,7 @@ export const BADGE_TIMEFRAMES = Object.freeze({
 })
 const BADGE_WORDS = Object.freeze({
     ema20: '20 EMA', sma50: '50 MA', sma200: '200 MA', vwap: 'VWAP', rsi_oversold: 'RSI under 30',
-    macd_cross_up: 'MACD cross', volume_up_bar: 'volume', sweeps: 'sweeps lows', order_blocks: 'order blocks',
+    macd_cross_up: 'MACD cross', volume_up_bar: 'volume', sweeps: 'sweeps lows', order_blocks: 'order blocks', cycle: 'price cycle',
 })
 
 /**
@@ -104,6 +127,7 @@ export function behaviourBadge(profile, horizon = null) {
             ...Object.entries(t.indicators ?? {}).filter(([, s]) => s?.verdict === 'respects').map(([k]) => k),
             ...(t.false_breaks?.after_sweep?.verdict === 'respects' ? ['sweeps'] : []),
             ...(t.order_blocks?.verdict === 'respects' ? ['order_blocks'] : []),
+            ...(t.cycle?.verdict === 'respects' ? ['cycle'] : []),
         ]
         for (const k of keys) holds.push({ key: k, tf, label: `${BADGE_WORDS[k] ?? k} (${TF[tf].toLowerCase()})` })
     }
@@ -154,6 +178,10 @@ export function rowProfile(profile, horizon = null) {
             `${fb.sweep_depth_atr?.median != null ? `; sweeps ~${fb.sweep_depth_atr.median} ATR under the low (80% within ${fb.sweep_depth_atr.p80})` : ''}` +
             `${fb.bars_to_direction != null ? `; a direction ~${fb.bars_to_direction} bars after` : ''}.`])
     }
+    for (const tf of tfs) {
+        const c = profile.timeframes[tf].cycle
+        if (c && c.verdict !== 'thin') lines.push([`${tfWord(tf)} cycle`, cycleWords(c, tf)])
+    }
     const lead = profile.timeframes[tfs[0]].false_breaks?.latest
     if (lead) lines.push(['Latest example', latestLine(tfs[0], lead).replace(/^Latest false break \(the example to show\): /, '').replace(/ — chart it:.*$/, '.')])
     lines.push(['ATR', tfs.map(tf => `${tfWord(tf)} ${profile.timeframes[tf].atr_pct ?? '—'}%`).join(' · ') +
@@ -169,6 +197,7 @@ export function holdsOf(timeframes) {
         ...Object.entries(t.indicators ?? {}).filter(([, s]) => s?.verdict === 'respects').map(([k]) => `${LABEL[k] ?? k} (${TF[tf].toLowerCase()})`),
         ...(t.false_breaks?.after_sweep?.verdict === 'respects' ? [`sweeps of lows (${TF[tf].toLowerCase()})`] : []),
         ...(t.order_blocks?.verdict === 'respects' ? [`order blocks (${TF[tf].toLowerCase()})`] : []),
+        ...(t.cycle?.verdict === 'respects' ? [`a price cycle (${TF[tf].toLowerCase()})`] : []),
     ] : []))
 }
 

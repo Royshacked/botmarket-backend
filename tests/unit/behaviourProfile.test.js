@@ -226,3 +226,23 @@ test('false breaks: the LATEST one is kept as it happened — the example the ch
     const flat = series(Array.from({ length: 20 }, (_, i) => 100 + i))
     assert.equal(falseBreaks(flat, flat.map(() => 1), 15, [], PROFILE).latest, null, 'no false break → no example')
 })
+
+test('the price cycle: a random walk almost never "holds" one; a real rhythm does, with its period and next window (proteus.md §8.1)', async () => {
+    const { cycleTest } = await import('../../services/behaviourProfile.engine.js')
+    // Noise: the same test on 20 random walks — at z ≥ 3 a cycle that "holds" should be a rare fluke, not the rule.
+    const verdicts = Array.from({ length: 20 }, (_, k) => {
+        const b = randomWalk(900, 101 + k)
+        return cycleTest(b, Math.floor(b.length * (2 / 3))).verdict
+    })
+    assert.ok(verdicts.filter(v => v === 'respects').length <= 1, `random walks that "hold" a cycle: ${verdicts.join(',')}`)
+    // A rhythm: lows every 20 sessions, a little noise on top.
+    let s = 7
+    const rnd = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 2 ** 32 }
+    const closes = Array.from({ length: 900 }, (_, i) => 100 + 6 * Math.sin((2 * Math.PI * i) / 20) + (rnd() - 0.5) * 1.5)
+    const c = cycleTest(series(closes), 600)
+    assert.equal(c.verdict, 'respects')
+    assert.ok(Math.abs(c.period_bars - 20) <= 2, `period ~20 (got ${c.period_bars})`)
+    assert.ok(c.z >= 3 && c.rate > c.base)
+    assert.ok(c.window && c.window.from < c.window.to && c.window.from > c.window.last_low, 'the next window comes after the last low')
+    assert.equal(cycleTest(series(closes.slice(0, 60)), 40).verdict, 'thin', 'too few lows to say')
+})

@@ -112,6 +112,11 @@ tools move here once Argus is fully defined (argus-rework §4).
      impossible count is never shown.
 6. **Order:** the profile in the row → cycles → Wyckoff → the Fibonacci test + the Elliott / Wyckoff chart reads → then
    Mentor weighs the read for his levels (5b).
+7. **Built 2026-11-13:** the profile in the opened row (`GET /api/hotlist/profile/:symbol`, `rowProfile`; the badge removed)
+   and the cycle test (`cycleTest` — cycleAnalysis's own troughs and consistency vs the same returns reshuffled 100×,
+   z ≥ 3 on the older two-thirds, the recent third must still beat it; PROFILE_VERSION 5). Random walks: ≤1 in 20 hold one;
+   a 20-session sine is found at ~20 with its next window. Live: NVDA, TSLA, KO, AMD — no cycle on any timeframe
+   (z −2.8 … +2.4; AMD 5-minute the nearest). Next: Wyckoff.
 
 ## 9. History depth (checked live, FMP, TSLA, 2026-11-12)
 
