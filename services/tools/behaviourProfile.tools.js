@@ -87,8 +87,11 @@ const BADGE_WORDS = Object.freeze({
 })
 
 /**
- * The badge for one row: `{ badge, holds, tip }` — the first thing that holds (and how many more), "nothing" when nothing
- * does — or null when the profile has none of the horizon's timeframes (too little history to say). Pure.
+ * The badge for one row: `{ badge, kind, holds, tip }` — the first thing that holds (and how many more), `kind: 'holds'`.
+ * When nothing holds — the usual answer — the trait every name DOES have, measured on the horizon's first timeframe: how
+ * often its breaks of a swing low turned out false ("fakes 74%", `kind: 'trait'`; Roy 2026-11-13, option 2: a badge that
+ * reads "nothing" on nearly every row tells the user nothing). "nothing" only when even that was not measured. Null when
+ * the profile has none of the horizon's timeframes (too little history to say). Pure.
  */
 export function behaviourBadge(profile, horizon = null) {
     const tfs = BADGE_TIMEFRAMES[horizon] ?? BADGE_TIMEFRAMES.swing
@@ -106,12 +109,27 @@ export function behaviourBadge(profile, horizon = null) {
     }
     const words = [...new Set(holds.map(h => BADGE_WORDS[h.key] ?? h.key))]
     const on = present.map(tf => TF[tf].toLowerCase()).join(' and ')
+    if (words.length) {
+        return {
+            badge: `${words[0]}${words.length > 1 ? ` +${words.length - 1}` : ''}`, kind: 'holds',
+            holds: holds.map(h => h.label),
+            tip: `Measured on the ${on} bars, it holds at: ${holds.map(h => h.label).join(', ')}. Click for the read.`,
+        }
+    }
+    // Nothing holds: what it DOES do, on the timeframe the horizon trades on first.
+    const lead = present[0], t = profile.timeframes[lead], fb = t.false_breaks
+    const where = TF[lead].toLowerCase()
+    if (Number.isFinite(fb?.false_rate) && fb?.breaks > 0) {
+        const depth = fb.sweep_depth_atr?.median != null ? `, sweeping ~${fb.sweep_depth_atr.median} ATR under the low` : ''
+        const atr = t.atr_pct != null ? ` ${TF[lead].charAt(0)}${TF[lead].slice(1).toLowerCase()} ATR ${t.atr_pct}%.` : ''
+        return {
+            badge: `fakes ${_pct(fb.false_rate)}`, kind: 'trait', holds: [],
+            tip: `Nothing technical holds on the ${on} bars. What it does: ${_pct(fb.false_rate)} of its ${fb.breaks} breaks of a ${where} swing low closed back above within ${PROFILE.sweepBack} bars${depth}.${atr} Click for the read.`,
+        }
+    }
     return {
-        badge: words.length ? `${words[0]}${words.length > 1 ? ` +${words.length - 1}` : ''}` : 'nothing',
-        holds: holds.map(h => h.label),
-        tip: words.length
-            ? `Measured on the ${on} bars, it holds at: ${holds.map(h => h.label).join(', ')}. Click for the read.`
-            : `Measured on the ${on} bars, nothing technical holds — no line or pattern to lean on. Click for the read.`,
+        badge: 'nothing', kind: 'nothing', holds: [],
+        tip: `Measured on the ${on} bars, nothing technical holds — no line or pattern to lean on. Click for the read.`,
     }
 }
 

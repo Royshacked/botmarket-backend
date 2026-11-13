@@ -180,6 +180,8 @@ Steps 1 and 2 ship together — the chat must never say "Prometheus" under an "A
    (the Hotlist's columns, how the trader builds) sits behind "More". Driven (scripts/drive-one-axl-info.mjs): Hotlist
    open → "From the Hotlist" on "Pick a name"; a trade asked for → "Build the trade". The trade-only diagram and the
    phone sheet were cut off by the login limiter — unit-tested, not yet driven.
+   **Info describes what is ON SCREEN** (Roy, 2026-11-13): an open Hotlist shows its own flow from its first step, whatever
+   the chat behind it is building; the trade's flow comes back when the Hotlist closes.
 6. **Drive it** — desktop + 390px, a Hotlist → trade build, a Proteus → hand-back → Analyst, a portfolio review.
 
 ## 9. Open

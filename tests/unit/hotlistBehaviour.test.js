@@ -66,3 +66,14 @@ test('the covered book is never queued from a look — it is profiled weekly (Ro
     assert.deepEqual(queued, [{ syms: ['AMD', 'MSFT', 'NVDA'], opts: { source: 'house_book_weekly' } }])
     assert.equal(await profileHouseBook({ ...deps, book: async () => { throw new Error('mongo down') } }), 0, 'never throws')
 })
+
+test('nothing holds → the trait it DOES have, on the horizon\'s first timeframe: how often its low-breaks fake (Roy, 2026-11-13, option 2)', () => {
+    const faking = (rate, breaks = 40) => ({ ...tf(), atr_pct: 0.51, false_breaks: { breaks, false_rate: rate, sweep_depth_atr: { median: 0.24, p80: 0.5 }, after_sweep: { verdict: 'no' } } })
+    const b = behaviourBadge({ timeframes: { '5min': faking(0.744), '1hour': faking(0.71) } }, 'intraday')
+    assert.deepEqual({ badge: b.badge, kind: b.kind, holds: b.holds }, { badge: 'fakes 74%', kind: 'trait', holds: [] })
+    assert.equal(b.tip, 'Nothing technical holds on the 5-minute and 1-hour bars. What it does: 74% of its 40 breaks of a 5-minute swing low closed back above within 3 bars, sweeping ~0.24 ATR under the low. 5-minute ATR 0.51%. Click for the read.')
+    assert.equal(behaviourBadge({ timeframes: { day: faking(0.77), week: faking(0.6) } }, 'swing').badge, 'fakes 77%', 'a swing reads its daily breaks')
+    const holding = behaviourBadge({ timeframes: { day: { ...faking(0.77), indicators: { sma50: { verdict: 'respects' } } }, week: faking(0.6) } }, 'swing')
+    assert.deepEqual([holding.badge, holding.kind], ['50 MA', 'holds'], 'a line that holds is the badge — the trait is only for when nothing does')
+    assert.equal(behaviourBadge({ timeframes: { day: faking(null, 0), week: tf() } }, 'swing').kind, 'nothing', 'no breaks measured → nothing to say but "nothing"')
+})
