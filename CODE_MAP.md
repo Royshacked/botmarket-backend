@@ -505,6 +505,13 @@ services/
                           deployable, and every desk silently sized against balance instead.
                           withBrokerAvailability rides on get_quote so a live-book desk is TOLD
                           tradability rather than asked to remember to check (TTL-cached per user+ticker)
+  userProfile.service.js  ABOUT THE USER (one-axl.md step 3, 2026-11-13) — `user_profile`, one record per user every
+                          chat role reads: `notes` (lasting facts the user STATED, kept by any role through the
+                          `remember_about_user` tool — tools/userProfile.tools.js, handler wired in runAgentStream like
+                          consult; dedup, cap 12, forget) and `size` (the risk / position size a Mentor build SETTLED —
+                          shares are per name, not kept). workingOnLines reads what is open at the OTHER roles off the
+                          session's agent states (never stored). aboutSection → sessionTurn's audience `{ level, about }`
+                          → buildAudienceSection, so every desk gets it with no desk edit. Cached 5 min, busted on write.
   workspace.service.js    getStoredWorkspace / setStoredWorkspace (the user's own choice, 60s TTL —
                           shorter than experience's 5min: a level changes twice in a life, a
                           workspace several times an hour) + getActiveWorkspace, which joins it with

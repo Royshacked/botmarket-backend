@@ -9,6 +9,7 @@ import { portfolioAgentService } from '../../services/agents/portfolio.agent.ser
 import { scannerAgentService }   from '../../services/agents/scanner.agent.service.js'
 import { proteusAgentService }   from '../../services/agents/proteus.agent.service.js'
 import { CONSULT_TOOL }         from '../../services/deepThink.service.js'
+import { REMEMBER_TOOL }        from '../../services/tools/userProfile.tools.js'
 
 // The agent-stream contract — ONE assertion body for EVERY streaming agent.
 //
@@ -67,6 +68,8 @@ for (const { name, chatStream, args } of AGENTS) {
             // `consult` gets its handler there is asserted in agentIO.test.js; a desk wiring its own
             // here would be the plaster this arrangement exists to prevent.
             if (t.name === CONSULT_TOOL) continue
+            // ABOUT THE USER's write is wired the same way (one-axl.md step 3; asserted in userProfile.test.js).
+            if (t.name === REMEMBER_TOOL) continue
             assert.equal(typeof seen.toolHandlers[t.name], 'function', `${name}: handler for ${t.name}`)
         }
 

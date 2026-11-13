@@ -159,6 +159,13 @@ Steps 1 and 2 ship together — the chat must never say "Prometheus" under an "A
    hand-back silent, answered by Axl, the question once; no internal name anywhere, desktop + 390px.
    Merge APPLIED on axl_dev 2026-11-13 (23 role threads → the Axl threads, 1529 messages, 0 orphaned; backup in backups/). PENDING on prod (`DB_NAME=test`) — with the push.
 3. **The shared "about you"** — `user_profile`, written by the desks' own work, read by every role.
+   **BUILT 2026-11-13.** `services/userProfile.service.js`: `notes` (what the user STATED as a lasting rule — kept by
+   any role via `remember_about_user`, declared at six desks, handler built in runAgentStream like `consult`; never by
+   asking) and `size` (the risk / position size a Mentor build settled — a default to offer, never to assume); what is
+   open at the other roles is read live off the session, never stored. It reaches every chat role as ABOUT THE USER in
+   the audience block (sessionTurn → buildAudienceSection) — no desk edits. Accounts are left out: every desk already
+   reads them from the trading context. Live: told the technical analyst "I never trade low-float names" → kept; the
+   analyst, asked cold, answered "you never trade low-float names"; Axl took it back on "I do now" → removed.
 4. **The work pane** — item titles; the Floor's desk list as things to do.
 5. **Info diagrams** — `{ flow, step }` from each desk, the five diagrams.
 6. **Drive it** — desktop + 390px, a Hotlist → trade build, a Proteus → hand-back → Analyst, a portfolio review.

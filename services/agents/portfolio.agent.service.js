@@ -23,6 +23,7 @@ import { DESKS } from '../desks/registry.js'
 import { makeRouteCapture, buildRouteRule } from '../routing.util.js'
 import { buildSchoolSection, normalizeAllocation, normalizeSelection } from '../investorSchools.js'
 import { applyIndustryLimits, industriesFor, avoidNames, capFor } from '../industryLimits.service.js'
+import { REMEMBER_DESCRIPTION } from '../tools/userProfile.tools.js'
 
 const __dirname    = dirname(fileURLToPath(import.meta.url))
 const LOG   = '[portfolioAgent]'
@@ -60,6 +61,8 @@ export const TOOLS = toolsFor({
     get_industry_views: INDUSTRY_VIEWS_TOOL_SPEC.get_industry_views,
     // The house's industries for the book — the candidate sleeves (atlas-industry-sleeves.md). Argus's tool, Atlas's words.
     get_house_industries: ATLAS_HOUSE_INDUSTRIES_TOOL_SPEC.get_house_industries,
+    // ABOUT THE USER (one-axl.md step 3): a lasting fact the user states — the handler is runAgentStream's.
+    remember_about_user: REMEMBER_DESCRIPTION,
     consult: consultDescription(`Reach for it in exactly three situations: **the final weights on a real-money book** (live or manual — the capital is at risk, and a weight is the one number here that cannot be walked back cheaply); **two names you cannot tell apart as ONE bet or two** — the correlation number is high but not decisive and the concentration call rests on your read of it; and **a rebalance where cutting the winner and adding to the laggard are both defensible** against the mandate, and you have to pick one.`),
 })
 

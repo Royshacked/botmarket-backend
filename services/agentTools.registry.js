@@ -293,6 +293,22 @@ export const TOOL_SCHEMAS = {
         },
         "required": ["question", "context"]
     },
+    // ABOUT THE USER (services/userProfile.service.js, one-axl.md step 3): a lasting fact the user STATED, kept for every
+    // role. The handler is wired in runAgentStream (the consult pattern) — a desk opts in by declaring it.
+    remember_about_user: {
+        "type": "object",
+        "properties": {
+            "note": {
+                "type": "string",
+                "description": "The fact, in a short third-person line, as the user put it: \"never trades low-float names\", \"only trades the open\". To take one back, the words of the note to remove."
+            },
+            "forget": {
+                "type": "boolean",
+                "description": "true when the user takes a fact back (\"I do trade small caps now\") — removes the note matching `note`."
+            }
+        },
+        "required": ["note"]
+    },
     // The blinded direction red-team (services/flipTest.service.js). Every field IDENTIFIES the
     // question; none of them is evidence. That is deliberate and it is the feature: the server
     // assembles the numbers, so the desk cannot hand its own audit a case file that suits the plan it

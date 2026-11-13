@@ -368,8 +368,8 @@ test('The trader’s own additions are declared after the kit, with the sidecar 
     // breakpoint inside TRADING_TOOLS, so the cached prefix is untouched either way.
     // `size_position` joins it there for the same reason (the sizing answer as a call, 2026-10-01).
     // The thesis lens's two (2026-10-30) join after the sizing call, before the sidecar.
-    // Closing the setup being edited (2026-11-05) goes there too.
-    assert.deepEqual(names.slice(kitEnd + 1), ['get_news', 'get_analyst_actions', 'flip_test', 'size_position', 'get_price_structure', 'get_entry_level', 'close_setup', 'consult'])
+    // Closing the setup being edited (2026-11-05) goes there too, and ABOUT THE USER's write (2026-11-13) just before the sidecar.
+    assert.deepEqual(names.slice(kitEnd + 1), ['get_news', 'get_analyst_actions', 'flip_test', 'size_position', 'get_price_structure', 'get_entry_level', 'close_setup', 'remember_about_user', 'consult'])
 })
 
 test('the two tools are WIRED — a declared tool with no handler is a call that silently fails', async () => {
@@ -384,7 +384,7 @@ test('the two tools are WIRED — a declared tool with no handler is a call that
     // Every tool OFFERED this turn (the one way's kit since 2026-11-12 — argus-rework.md §2.3) has its handler.
     assert.ok(offered.length > 0 && offered.length <= MENTOR_TOOLS.length)
     for (const t of offered) {
-        if (t.name === 'consult' || t.name === 'web_search') continue   // built by runAgentStream / server-side
+        if (t.name === 'consult' || t.name === 'remember_about_user' || t.name === 'web_search') continue   // built by runAgentStream / server-side
         assert.equal(typeof handlers[t.name], 'function', `${t.name} is declared but has no handler`)
     }
     assert.equal(await handlers.get_news({ category: 'companies', subject: 'NVDA' }), 'headlines')

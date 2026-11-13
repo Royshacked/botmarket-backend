@@ -19,6 +19,7 @@ import { houseLabels, wireLabel } from '../houseLabel.service.js'
 import { buildTagCaptures } from '../llmStream.util.js'
 import { DESKS } from '../desks/registry.js'
 import { makeRouteCapture, buildRouteRule } from '../routing.util.js'
+import { REMEMBER_DESCRIPTION } from '../tools/userProfile.tools.js'
 
 const __dirname     = dirname(fileURLToPath(import.meta.url))
 const LOG   = '[scannerAgent]'
@@ -78,6 +79,8 @@ export const TOOLS = toolsFor({
     //
     // Argus picks from a list he is handed, so the one decision worth a stronger model is the final choice between close
     // names — once per pick by construction.
+    // ABOUT THE USER (one-axl.md step 3): a lasting fact the user states — the handler is runAgentStream's.
+    remember_about_user: REMEMBER_DESCRIPTION,
     consult: consultDescription(`Reach for it in one situation only: **the final pick**, when two or three names on the list are genuinely close and the choice is the thing the user will build on. Never per name, and never to judge a name a tool call would qualify.`),
 })
 

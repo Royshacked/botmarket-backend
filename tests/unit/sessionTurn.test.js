@@ -12,6 +12,9 @@ import { makeSealing } from '../../services/desks/seal.js'
 // what is tested is the mechanism: what is appended, what the desk is handed, what state is kept, where
 // the floor goes, and when the summary folds.
 
+// The shared ABOUT THE USER record (userProfile.service) — empty unless a test gives one.
+const NO_PROFILE = { read: async () => ({ notes: [], size: null }) }
+
 function rig({ run, nextState = (prev, r) => ({ ...(prev ?? {}), last: r.reply }), summarize = async () => 'S' } = {}) {
     const { db, rows } = memDb()
     const getDb = async () => db
@@ -26,7 +29,7 @@ function rig({ run, nextState = (prev, r) => ({ ...(prev ?? {}), last: r.reply }
     })
     // Argus keeps its real onRouted: the route-lands-and-resets rule is what some tests below pin.
     const desks = { axl: stub('axl'), mentor: stub('mentor'), scanner: { ...stub('scanner'), onRouted: DESK_DEFS.scanner.onRouted }, strategy: stub('strategy') }
-    const turn = makeSessionTurn({ sessions, contexts, desks, experience: async () => 'novice', summarize })
+    const turn = makeSessionTurn({ sessions, contexts, desks, experience: async () => 'novice', profiles: NO_PROFILE, summarize })
     return { turn, sessions, contexts, rows, seen }
 }
 const user = { _id: 'u1', role: 'user' }
@@ -40,7 +43,7 @@ test('a turn appends the user message and the reply, and hands the desk only its
     assert.deepEqual(all.map(m => `${m.agent}:${m.role}`), ['axl:user', 'axl:assistant', 'mentor:user', 'mentor:assistant'])
     // Mentor never saw Axl's turns.
     assert.deepEqual(seen[1].common.messages, [{ role: 'user', content: 'long NVDA' }])
-    assert.equal(seen[1].common.audience, 'novice')
+    assert.deepEqual(seen[1].common.audience, { level: 'novice', about: null }, 'the level, and no ABOUT block when there is nothing to say')
 })
 
 test('the working state is folded by the desk and kept for the next turn', async () => {
@@ -233,7 +236,7 @@ function finishingRig({ sealing } = {}) {
         nextState: () => null,
         sealAfterTurn: DESK_DEFS.mentor.sealAfterTurn,
     }
-    const turn = makeSessionTurn({ sessions, contexts, desks: { mentor }, experience: async () => 'novice', summarize: async () => 'S',
+    const turn = makeSessionTurn({ sessions, contexts, desks: { mentor }, experience: async () => 'novice', profiles: NO_PROFILE, summarize: async () => 'S',
         sealing: sealing ?? makeSealing({ sessions, contexts, desks: DESK_DEFS }) })
     return { turn, sessions, contexts }
 }
@@ -273,7 +276,7 @@ test('a close followed by Stop still finishes: the desk is not left editing a cl
         run: async ({ common }) => { common.onFinished({ closedSetup: { id: 'st1', asset: 'AMD' } }); ctl.abort(); return null },
         done: (r) => ({ reply: r.reply }), nextState: () => null, sealAfterTurn: DESK_DEFS.mentor.sealAfterTurn,
     }
-    const turn = makeSessionTurn({ sessions, contexts, desks: { mentor }, experience: async () => 'novice', summarize: async () => 'S', sealing: makeSealing({ sessions, contexts, desks: DESK_DEFS }) })
+    const turn = makeSessionTurn({ sessions, contexts, desks: { mentor }, experience: async () => 'novice', profiles: NO_PROFILE, summarize: async () => 'S', sealing: makeSealing({ sessions, contexts, desks: DESK_DEFS }) })
     const { s, out } = await editingTurn({ turn, sessions }, { signal: ctl.signal })
     assert.equal(out.stopped, true)
     const after = await sessions.get({ sessionId: s.sessionId, userId: 'u1' })
@@ -286,7 +289,7 @@ test('a Stop with nothing finished keeps the state, as it always did', async () 
     const sessions = makeSessionService({ getDb: async () => db })
     const contexts = makeAgentContextService({ getDb: async () => db })
     const mentor = { agent: 'mentor', run: async () => null, done: (r) => r, nextState: () => null, sealAfterTurn: DESK_DEFS.mentor.sealAfterTurn }
-    const turn = makeSessionTurn({ sessions, contexts, desks: { mentor }, experience: async () => 'novice', summarize: async () => 'S', sealing: makeSealing({ sessions, contexts, desks: DESK_DEFS }) })
+    const turn = makeSessionTurn({ sessions, contexts, desks: { mentor }, experience: async () => 'novice', profiles: NO_PROFILE, summarize: async () => 'S', sealing: makeSealing({ sessions, contexts, desks: DESK_DEFS }) })
     const { s } = await editingTurn({ turn, sessions })
     const after = await sessions.get({ sessionId: s.sessionId, userId: 'u1' })
     assert.equal(after.agentState.mentor.editing.entityId, 'st1')
@@ -358,4 +361,26 @@ test('a route\'s opening and a hand-back are marked as such — the chat draws t
     await turn({ user, sessionId: s.sessionId, agent: 'mentor', text: 'Build NVDA.', origin: 'opening' })
     const asked = (await sessions.messagesSince({ sessionId: s.sessionId, userId: 'u1' })).filter(m => m.role === 'user')
     assert.deepEqual(asked.map(m => m.ref?.opening ?? false), [false, true, true])
+})
+
+
+test('every role reads ABOUT THE USER: what they told any role, the size they last used, and what is open at the OTHER roles (one-axl.md step 3)', async () => {
+    const { memDb } = await import('../helpers/memDb.js')
+    const { db } = memDb()
+    const sessions = makeSessionService({ getDb: async () => db })
+    const contexts = makeAgentContextService({ getDb: async () => db })
+    const seen = []
+    const stub = (agent) => ({ agent, run: async (ctx) => { seen.push(ctx); return { reply: 'ok' } }, done: (r) => ({ reply: r.reply }), nextState: (prev) => prev })
+    const profiles = { read: async () => ({ notes: [{ text: 'no low-float names' }], size: { unit: 'risk_pct', value: 1, asset: 'NVDA' } }) }
+    const turn = makeSessionTurn({ sessions, contexts, desks: { analyst: stub('analyst'), mentor: stub('mentor') }, experience: async () => null, profiles, summarize: async () => 'S' })
+    const s = await sessions.getActive({ userId: 'u1' })
+    await sessions.setAgentState({ sessionId: s.sessionId, userId: 'u1', agent: 'mentor', state: { draft: { asset: 'nvda', direction: 'LONG' } } })
+    await turn({ user, sessionId: s.sessionId, agent: 'analyst', text: 'is it cheap?' })
+    const about = seen[0].common.audience.about
+    assert.match(about, /^ABOUT THE USER/)
+    assert.match(about, /1% of the account at risk \(on NVDA\)/)
+    assert.match(about, /They told us: "no low-float names"/)
+    assert.match(about, /On the table with the trader: building a long trade on NVDA \(not saved yet\)/)
+    await turn({ user, sessionId: s.sessionId, agent: 'mentor', text: 'go on' })
+    assert.doesNotMatch(seen[1].common.audience.about, /On the table with the trader/, 'the role answering has its own work in front of it')
 })

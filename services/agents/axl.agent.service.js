@@ -17,6 +17,7 @@ import { makeMarketBriefHandlers, MARKET_BRIEF_TOOL_SPEC } from '../tools/market
 import { makeIndustryViewsHandlers, INDUSTRY_VIEWS_TOOL_SPEC } from '../tools/industryViews.tools.js'
 import { makeNewsHandlers, NEWS_TOOL_SPEC } from '../tools/news.tools.js'
 import { makeHotlistHandlers, HOTLIST_TOOL_SPEC } from '../tools/hotlist.tools.js'
+import { REMEMBER_DESCRIPTION } from '../tools/userProfile.tools.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const LOG = '[axlAgent]'
@@ -79,6 +80,8 @@ export const TOOLS = toolsFor({
     // Unbound like them, since it runs server-side and never sees the user. The two broadcast rules
     // (not joined to their book, no advice) hold here too; they live in the prompt's own section.
     web_search: '',
+    // ABOUT THE USER (one-axl.md step 3): a lasting fact the user states — the handler is runAgentStream's. Appended LAST.
+    remember_about_user: REMEMBER_DESCRIPTION,
 })
 
 // NO `consult` HERE, deliberately — the reasoning sidecar reached the other five desks on

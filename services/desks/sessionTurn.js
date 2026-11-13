@@ -17,6 +17,7 @@
 import { sessionService } from '../session.service.js'
 import { agentContextService } from '../agentContext.service.js'
 import { getExperienceLevel } from '../experience.service.js'
+import { userProfileService, aboutSection, workingOnLines } from '../userProfile.service.js'
 import { routeFields } from '../routing.util.js'
 import { deskOf, entryOf, handBackOf, RECEPTION } from './registry.js'
 import { DESK_DEFS } from './index.js'
@@ -110,6 +111,7 @@ export function makeSessionTurn({
     contexts   = agentContextService,
     desks      = DESK_DEFS,
     experience = getExperienceLevel,
+    profiles   = userProfileService,
     summarize  = defaultSummarize,
     sealing    = defaultSealing,
 } = {}) {
@@ -176,7 +178,12 @@ export function makeSessionTurn({
         const prepared = desk.prepareInput ? await desk.prepareInput(input) : input
         const common   = deskCommon({
             messages: buildConversation({ messages: messages ?? [], agent, summary, sealed }),
-            model, user, audience: await experience(user._id).catch(() => null), signal, emit,
+            // The level, and ABOUT THE USER — what they told any role, what is open at the others (one-axl.md step 3).
+            model, user, signal, emit,
+            audience: {
+                level: await experience(user._id).catch(() => null),
+                about: aboutSection({ profile: await profiles.read(user._id).catch(() => null), working: workingOnLines(session.agentState, agent) }),
+            },
         })
         // The chart this turn put in the chat, whichever desk drew it (the one onChart every desk is handed) — so a reply
         // that was ONLY a chart still gets its row (chartLine below) and the desk remembers it showed it.

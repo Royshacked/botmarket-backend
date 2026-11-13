@@ -1,6 +1,7 @@
 import { logger } from './logger.service.js'
 import { resolveAgentStream } from './agentUtils.js'
 import { makeConsultHandler, CONSULT_TOOL } from './deepThink.service.js'
+import { makeRememberHandler, REMEMBER_TOOL } from './tools/userProfile.tools.js'
 
 // The agent I/O protocol — the mechanics every streaming agent repeats verbatim.
 //
@@ -428,6 +429,8 @@ export async function runAgentStream({
     // Same seam for the sidecar: lets a test see WHAT the handler was built with (the tagged
     // `onReasoning`) without a second live model call behind it.
     _makeConsult = makeConsultHandler,
+    // Same seam for ABOUT THE USER's write — a test sees what it was built with, and touches no database.
+    _makeRemember = makeRememberHandler,
 }) {
     // WHICH desk is spending. Derived from `log` rather than added as a new argument: every agent
     // already passes its own tag here and nothing else in the bag identifies the caller, so taking
@@ -460,9 +463,14 @@ export async function runAgentStream({
     // Built per call, which is per TURN — which is exactly the scope of the cap it carries.
     // A desk that supplies its own `consult` handler keeps it; the injected one only fills a gap.
     const wantsConsult   = Array.isArray(tools) && tools.some(t => t?.name === CONSULT_TOOL)
-    const resolvedHandlers = announceTargets(wantsConsult
-        ? { [CONSULT_TOOL]: _makeConsult({ userId, agent: agentKey, onReasoning: tagReasoning(REASONING_CONSULT), ...(spend ? { onSpend: spend } : {}) }), ...toolHandlers }
-        : toolHandlers, onToolStart)
+    // ABOUT THE USER (one-axl.md step 3) is wired the same way: a desk DECLARES remember_about_user and the handler — the
+    // same for every desk, bound to this turn's user — is supplied here. A desk's own handler still wins.
+    const wantsRemember  = Array.isArray(tools) && tools.some(t => t?.name === REMEMBER_TOOL)
+    const resolvedHandlers = announceTargets({
+        ...(wantsConsult ? { [CONSULT_TOOL]: _makeConsult({ userId, agent: agentKey, onReasoning: tagReasoning(REASONING_CONSULT), ...(spend ? { onSpend: spend } : {}) }) } : {}),
+        ...(wantsRemember ? { [REMEMBER_TOOL]: _makeRemember({ userId, agent: agentKey }) } : {}),
+        ...toolHandlers,
+    }, onToolStart)
 
     logger.info(log, 'chatStream start', { messageCount: messages?.length ?? 0, model, provider, ...(degraded ? { degraded: true } : {}), ...(wantsConsult ? { consult: true } : {}), ...meta })
 

@@ -390,7 +390,17 @@ export function buildTimeSection(clientTime, what = 'a time condition') {
  *
  * @returns {string|null}
  */
-export function buildAudienceSection(level) {
+export function buildAudienceSection(audience) {
+    // A session turn hands `{ level, about }` — the level, and the shared ABOUT THE USER block every role reads
+    // (userProfile.service, one-axl.md step 3); every other caller hands the bare level, as before.
+    if (audience && typeof audience === 'object') {
+        const parts = [_levelSection(audience.level ?? null), audience.about ?? null].filter(Boolean)
+        return parts.length ? parts.join('\n\n') : null
+    }
+    return _levelSection(audience)
+}
+
+function _levelSection(level) {
     if (level === 'beginner') {
         return [
             'WHO YOU ARE TALKING TO: someone new to trading.',

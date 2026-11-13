@@ -26,6 +26,7 @@ import { BEHAVIOUR_PROFILE_TOOL_SPEC, makeBehaviourProfileHandlers } from '../to
 import { makeNewsHandlers } from '../tools/news.tools.js'
 import { makeMarketHoursHandlers, MARKET_HOURS_TOOL_SPEC } from '../tools/marketHours.tools.js'
 import { logger } from '../logger.service.js'
+import { REMEMBER_DESCRIPTION } from '../tools/userProfile.tools.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 // The spend ledger books this desk as `proteusAgent` (agentIO.agentKeyFromLog reads this tag).
@@ -60,6 +61,8 @@ export const TOOLS = [
     ...REGISTRY_TOOLS,
     ...SMC_TOOLS,
     ...toolsFor({
+        // ABOUT THE USER (one-axl.md step 3): a lasting fact the user states — the handler is runAgentStream's.
+        remember_about_user: REMEMBER_DESCRIPTION,
         consult: consultDescription(`Reach for it in one situation only: the user asks for a judgment the profile does not settle — two readings of the same chart that point opposite ways — and the answer matters to them. Never to read the profile itself.`),
     }),
 ]

@@ -666,6 +666,26 @@
             }
         },
         {
+            "name": "remember_about_user",
+            "description": "Keep a LASTING fact about the user that they STATED, so every role knows it next time — \"I never trade low-float names\", \"I only trade the first hour\", \"I hold through earnings\", \"call me by my first name\". What you keep shows in ABOUT THE USER on every role's turns.\n- Only what THEY said about themselves, as a lasting rule or preference — never your read of them, never this trade's levels or size (the build keeps those), never a mood.\n- Never ask questions to fill it. Keep it the moment they say it, and say in a few words that you will remember.\n- They take one back (\"I do trade small caps now\") → call it with `forget: true` and the words of the old note.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "note": {
+                        "type": "string",
+                        "description": "The fact, in a short third-person line, as the user put it: \"never trades low-float names\", \"only trades the open\". To take one back, the words of the note to remove."
+                    },
+                    "forget": {
+                        "type": "boolean",
+                        "description": "true when the user takes a fact back (\"I do trade small caps now\") — removes the note matching `note`."
+                    }
+                },
+                "required": [
+                    "note"
+                ]
+            }
+        },
+        {
             "name": "consult",
             "description": "Put ONE decision to a more capable desk head and get a straight answer back. It cannot see this conversation and cannot fetch anything — you hand it the question and every number it needs, and it thinks harder than you can in-line.\n\nReach for it in exactly three situations: **the final weights on a real-money book** (live or manual — the capital is at risk, and a weight is the one number here that cannot be walked back cheaply); **two names you cannot tell apart as ONE bet or two** — the correlation number is high but not decisive and the concentration call rests on your read of it; and **a rebalance where cutting the winner and adding to the laggard are both defensible** against the mandate, and you have to pick one.\n\nDo NOT reach for it to look something up, to double-check work you are already confident in, to summarize, or because a question feels big. A consult costs a full model call and adds seconds to the turn: if you already know the answer, or a tool call would settle it, that is the cheaper and better move. Most turns should end without it.",
             "input_schema": {
@@ -1229,6 +1249,26 @@
             }
         },
         {
+            "name": "remember_about_user",
+            "description": "Keep a LASTING fact about the user that they STATED, so every role knows it next time — \"I never trade low-float names\", \"I only trade the first hour\", \"I hold through earnings\", \"call me by my first name\". What you keep shows in ABOUT THE USER on every role's turns.\n- Only what THEY said about themselves, as a lasting rule or preference — never your read of them, never this trade's levels or size (the build keeps those), never a mood.\n- Never ask questions to fill it. Keep it the moment they say it, and say in a few words that you will remember.\n- They take one back (\"I do trade small caps now\") → call it with `forget: true` and the words of the old note.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "note": {
+                        "type": "string",
+                        "description": "The fact, in a short third-person line, as the user put it: \"never trades low-float names\", \"only trades the open\". To take one back, the words of the note to remove."
+                    },
+                    "forget": {
+                        "type": "boolean",
+                        "description": "true when the user takes a fact back (\"I do trade small caps now\") — removes the note matching `note`."
+                    }
+                },
+                "required": [
+                    "note"
+                ]
+            }
+        },
+        {
             "name": "consult",
             "description": "Put ONE decision to a more capable desk head and get a straight answer back. It cannot see this conversation and cannot fetch anything — you hand it the question and every number it needs, and it thinks harder than you can in-line.\n\nReach for it in one situation only: **the final pick**, when two or three names on the list are genuinely close and the choice is the thing the user will build on. Never per name, and never to judge a name a tool call would qualify.\n\nDo NOT reach for it to look something up, to double-check work you are already confident in, to summarize, or because a question feels big. A consult costs a full model call and adds seconds to the turn: if you already know the answer, or a tool call would settle it, that is the cheaper and better move. Most turns should end without it.",
             "input_schema": {
@@ -1576,6 +1616,26 @@
                 },
                 "required": [
                     "ticker"
+                ]
+            }
+        },
+        {
+            "name": "remember_about_user",
+            "description": "Keep a LASTING fact about the user that they STATED, so every role knows it next time — \"I never trade low-float names\", \"I only trade the first hour\", \"I hold through earnings\", \"call me by my first name\". What you keep shows in ABOUT THE USER on every role's turns.\n- Only what THEY said about themselves, as a lasting rule or preference — never your read of them, never this trade's levels or size (the build keeps those), never a mood.\n- Never ask questions to fill it. Keep it the moment they say it, and say in a few words that you will remember.\n- They take one back (\"I do trade small caps now\") → call it with `forget: true` and the words of the old note.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "note": {
+                        "type": "string",
+                        "description": "The fact, in a short third-person line, as the user put it: \"never trades low-float names\", \"only trades the open\". To take one back, the words of the note to remove."
+                    },
+                    "forget": {
+                        "type": "boolean",
+                        "description": "true when the user takes a fact back (\"I do trade small caps now\") — removes the note matching `note`."
+                    }
+                },
+                "required": [
+                    "note"
                 ]
             }
         },
@@ -3072,6 +3132,26 @@
             }
         },
         {
+            "name": "remember_about_user",
+            "description": "Keep a LASTING fact about the user that they STATED, so every role knows it next time — \"I never trade low-float names\", \"I only trade the first hour\", \"I hold through earnings\", \"call me by my first name\". What you keep shows in ABOUT THE USER on every role's turns.\n- Only what THEY said about themselves, as a lasting rule or preference — never your read of them, never this trade's levels or size (the build keeps those), never a mood.\n- Never ask questions to fill it. Keep it the moment they say it, and say in a few words that you will remember.\n- They take one back (\"I do trade small caps now\") → call it with `forget: true` and the words of the old note.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "note": {
+                        "type": "string",
+                        "description": "The fact, in a short third-person line, as the user put it: \"never trades low-float names\", \"only trades the open\". To take one back, the words of the note to remove."
+                    },
+                    "forget": {
+                        "type": "boolean",
+                        "description": "true when the user takes a fact back (\"I do trade small caps now\") — removes the note matching `note`."
+                    }
+                },
+                "required": [
+                    "note"
+                ]
+            }
+        },
+        {
             "name": "consult",
             "description": "Put ONE decision to a more capable desk head and get a straight answer back. It cannot see this conversation and cannot fetch anything — you hand it the question and every number it needs, and it thinks harder than you can in-line.\n\nReach for it in exactly three situations: **final sizing on real money** (live or manual — the account is at risk and the arithmetic has to be right); **two readings that genuinely disagree** and you cannot settle which one governs — most often the direction call at rung 2 of the guided build, when the structure leans one way and momentum or positioning the other and the user is waiting on your lean; and **placing a level where the structure is ambiguous** — a price that is both a prior high and a supply shelf, say. The wider-target check at rung 7 is NOT a consult: it is a tool question, answered by the levels.\n\nDo NOT reach for it to look something up, to double-check work you are already confident in, to summarize, or because a question feels big. A consult costs a full model call and adds seconds to the turn: if you already know the answer, or a tool call would settle it, that is the cheaper and better move. Most turns should end without it.",
             "input_schema": {
@@ -3351,6 +3431,26 @@
         {
             "type": "web_search_20260209",
             "name": "web_search"
+        },
+        {
+            "name": "remember_about_user",
+            "description": "Keep a LASTING fact about the user that they STATED, so every role knows it next time — \"I never trade low-float names\", \"I only trade the first hour\", \"I hold through earnings\", \"call me by my first name\". What you keep shows in ABOUT THE USER on every role's turns.\n- Only what THEY said about themselves, as a lasting rule or preference — never your read of them, never this trade's levels or size (the build keeps those), never a mood.\n- Never ask questions to fill it. Keep it the moment they say it, and say in a few words that you will remember.\n- They take one back (\"I do trade small caps now\") → call it with `forget: true` and the words of the old note.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "note": {
+                        "type": "string",
+                        "description": "The fact, in a short third-person line, as the user put it: \"never trades low-float names\", \"only trades the open\". To take one back, the words of the note to remove."
+                    },
+                    "forget": {
+                        "type": "boolean",
+                        "description": "true when the user takes a fact back (\"I do trade small caps now\") — removes the note matching `note`."
+                    }
+                },
+                "required": [
+                    "note"
+                ]
+            }
         }
     ],
     "proteus": [
@@ -3803,6 +3903,26 @@
                 "required": [
                     "ticker",
                     "timeframe"
+                ]
+            }
+        },
+        {
+            "name": "remember_about_user",
+            "description": "Keep a LASTING fact about the user that they STATED, so every role knows it next time — \"I never trade low-float names\", \"I only trade the first hour\", \"I hold through earnings\", \"call me by my first name\". What you keep shows in ABOUT THE USER on every role's turns.\n- Only what THEY said about themselves, as a lasting rule or preference — never your read of them, never this trade's levels or size (the build keeps those), never a mood.\n- Never ask questions to fill it. Keep it the moment they say it, and say in a few words that you will remember.\n- They take one back (\"I do trade small caps now\") → call it with `forget: true` and the words of the old note.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "note": {
+                        "type": "string",
+                        "description": "The fact, in a short third-person line, as the user put it: \"never trades low-float names\", \"only trades the open\". To take one back, the words of the note to remove."
+                    },
+                    "forget": {
+                        "type": "boolean",
+                        "description": "true when the user takes a fact back (\"I do trade small caps now\") — removes the note matching `note`."
+                    }
+                },
+                "required": [
+                    "note"
                 ]
             }
         },

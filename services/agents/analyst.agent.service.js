@@ -23,6 +23,7 @@ import { makeRouteCapture, buildRouteRule } from '../routing.util.js'
 import { VALUATION_TOOLS, VALUATION_TOOL_HANDLERS } from '../tools/valuation.tools.js'
 import { RUNUP_TOOLS, RUNUP_TOOL_HANDLERS } from '../tools/runup.tools.js'
 import { logger } from '../logger.service.js'
+import { REMEMBER_DESCRIPTION } from '../tools/userProfile.tools.js'
 
 const __dirname   = dirname(fileURLToPath(import.meta.url))
 const LOG         = '[analystAgent]'
@@ -76,6 +77,8 @@ export const TOOLS = [
         // description is shared with every other desk; the clause below is this desk's own judgment
         // about WHEN, and is the only part that does not transfer.
         // consult is contractually last at every desk that declares it.
+        // ABOUT THE USER (one-axl.md step 3): a lasting fact the user states — the handler is runAgentStream's.
+        remember_about_user: REMEMBER_DESCRIPTION,
         consult: consultDescription(`Reach for it in exactly three situations: **the price target you are about to publish** — our number against the Street IS the edge, so the multiple and the arithmetic behind it have to hold up to someone attacking them; **a variant perception you cannot separate from consensus** — the bull and bear cases read as evenly weighted and you must say which way the evidence actually leans rather than splitting the difference; and **two valuation methods that disagree materially** (a DCF against comps, say) where you have to decide which one governs the target and defend that choice.`),
     }),
 ]

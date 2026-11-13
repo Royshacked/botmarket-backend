@@ -29,6 +29,8 @@ import { logger } from '../logger.service.js'
 import { setupService } from '../../api/setups/setups.service.js'
 import { setupCommit } from '../../api/setups/setupCommit.service.js'
 import { STATUS } from '../entity/vocabulary.js'
+import { REMEMBER_DESCRIPTION } from '../tools/userProfile.tools.js'
+import { userProfileService } from '../userProfile.service.js'
 
 // Mentor — the trade ASSISTANT (Pipeline F). A conversation → a draft `setup` entity.
 //
@@ -110,6 +112,8 @@ export const MENTOR_TOOLS = [
         // (agentToolsRegistry.test.js), and it sits past the tools cache breakpoint — which is
         // inside TRADING_TOOLS, on get_derivatives_context — so declaring it here touches no
         // cached prefix.
+        // ABOUT THE USER (one-axl.md step 3): a lasting fact the user states — the handler is runAgentStream's.
+        remember_about_user: REMEMBER_DESCRIPTION,
         consult: consultDescription(`Reach for it in exactly three situations: **final sizing on real money** (live or manual — the account is at risk and the arithmetic has to be right); **two readings that genuinely disagree** and you cannot settle which one governs — most often the direction call at rung 2 of the guided build, when the structure leans one way and momentum or positioning the other and the user is waiting on your lean; and **placing a level where the structure is ambiguous** — a price that is both a prior high and a supply shelf, say. The wider-target check at rung 7 is NOT a consult: it is a tool question, answered by the levels.`),
     }),
 ]
@@ -134,7 +138,8 @@ async function chatStream({
     _analystActions = getAnalystActions,
     _flipHandler = makeFlipHandler,   // the blinded red-team, injectable so the stamp below is testable without a model call
     _thesisFacts = thesisTurnFacts,   // the chart's stops, normal move and break scenario, read for a thesis trade at entries
-    _listSetups = setupService.listSetups,   // the setups on this account that have not filled yet
+    _listSetups = setupService.listSetups,
+    _profiles = userProfileService,   // ABOUT THE USER — the settled size is kept for the next trade (one-axl.md step 3)   // the setups on this account that have not filled yet
     _closeSetup = setupCommit.closeSetup,    // a saved setup the user decided to close
     onFinished = null,                       // the item is finished, whatever becomes of the rest of this turn
 }) {
@@ -483,6 +488,14 @@ async function chatStream({
                 legReference(sc.entry_legs?.[0]) != null && stopEdge(scenarioView(carrier, sc)) != null)
             if (sized.problems.length && drawn) build.refused = [...build.refused, ...sized.problems.map(p => ({ field: 'size', reason: p }))]
             logger.info(LOG, 'sizing resolved', { unit: sizeAsked.unit, value: sizeAsked.value, sized: sized.quantities.length, problems: sized.problems.length })
+        }
+
+        // ABOUT THE USER (one-axl.md step 3): the size the user SETTLED carries to their next trade, as a default any role
+        // may offer and none may assume. Fire and forget — the build never waits on it or fails for it.
+        const settledSize = activeName(build)?.settled?.size
+        if (userId && settledSize && typeof settledSize === 'object' && settledSize.unit) {
+            Promise.resolve(_profiles.noteSize(userId, settledSize, { asset: carrier.asset }))
+                .catch(err => logger.warn(LOG, 'the settled size was not kept for the profile', err.message))
         }
 
         // The multiplier travels with the size the LEDGER holds, not with this turn's op: priced off
