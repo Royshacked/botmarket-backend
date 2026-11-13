@@ -39,6 +39,20 @@ export function testLine(name, s, unit = 'cases') {
     return `${name}: ${VERDICT[s.verdict] ?? s.verdict} — ${_pct(s.rate)} vs ${_pct(s.base)} baseline (${s.n} ${unit} in the older two-thirds${Number.isFinite(s.z) ? `, z ${s.z}` : ''}${recent})`
 }
 
+/** The profile's timeframe → get_chart's spelling of it. */
+export const CHART_TF = Object.freeze({ '5min': '5min', '1hour': '1hr', day: 'day', week: 'week' })
+
+/**
+ * The latest false break, as the example to SHOW (Roy, 2026-11-13) — with the get_chart call that draws it, so the
+ * model draws the event the count found, at its exact prices. Intraday bars carry the time; daily and weekly the date. Pure.
+ */
+export function latestLine(tf, l) {
+    const when = (iso) => (tf === '5min' || tf === '1hour' ? `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC` : iso.slice(0, 10))
+    return `Latest false break (the example to show): ${when(l.at)} the swing low ${l.level} was swept to ${l.swept_to}` +
+        `${l.depth_atr != null ? ` (${l.depth_atr} ATR under)` : ''}, closed back above ${when(l.reclaimed_at)} — ` +
+        `chart it: get_chart timeframe "${CHART_TF[tf] ?? tf}", levels ${l.level} "swing low" and ${l.swept_to} "swept to"`
+}
+
 /** One timeframe → its lines. Pure. */
 export function timeframeLines(tf, t) {
     if (!t) return [`${TF[tf] ?? tf}: too few bars to measure (the 200 SMA needs ~260)`]
@@ -52,6 +66,7 @@ export function timeframeLines(tf, t) {
         `  Breaks of a swing low: ${fb.breaks}, ${_pct(fb.false_rate)} FALSE (closed back above within ${PROFILE.sweepBack} bars; recent ${_pct(fb.recent.false_rate)})` +
             `${fb.sweep_depth_atr?.median != null ? `; sweeps went ${fb.sweep_depth_atr.median} ATR under the low (80% within ${fb.sweep_depth_atr.p80})` : ''}` +
             `${fb.bars_to_direction != null ? `; a direction ~${fb.bars_to_direction} bars after the break` : ''}`,
+        ...(fb.latest ? [`  ${latestLine(tf, fb.latest)}`] : []),
         `  ${testLine('After a sweep (from the reclaim)', fb.after_sweep, 'sweeps')}`,
         `  ${testLine(`Bullish order blocks (${t.order_blocks.blocks} found) on a retest`, t.order_blocks, 'retests')}`,
     ]

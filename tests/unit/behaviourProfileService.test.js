@@ -137,3 +137,14 @@ test('the tool: needs a ticker; a failure says so and forbids describing the sto
     const out = await h.get_behaviour_profile({ ticker: 'tsla' })
     assert.match(JSON.stringify(out), /Could not measure TSLA: provider down — say so; do not describe its behaviour from memory/)
 })
+
+test('the latest false break is laid out as the example to chart, in get_chart\'s spelling of the timeframe (Roy, 2026-11-13)', async () => {
+    const { latestLine } = await import('../../services/tools/behaviourProfile.tools.js')
+    const l = { at: '2026-11-04T05:00:00.000Z', reclaimed_at: '2026-11-05T05:00:00.000Z', level: 412.3, swept_to: 409.8, depth_atr: 0.4 }
+    assert.equal(latestLine('day', l),
+        'Latest false break (the example to show): 2026-11-04 the swing low 412.3 was swept to 409.8 (0.4 ATR under), closed back above 2026-11-05 — ' +
+        'chart it: get_chart timeframe "day", levels 412.3 "swing low" and 409.8 "swept to"')
+    const hourly = latestLine('1hour', { ...l, at: '2026-11-04T14:30:00.000Z', reclaimed_at: '2026-11-04T15:30:00.000Z' })
+    assert.match(hourly, /2026-11-04 14:30 UTC the swing low/)
+    assert.match(hourly, /get_chart timeframe "1hr"/, 'the profile says 1hour; get_chart takes 1hr')
+})

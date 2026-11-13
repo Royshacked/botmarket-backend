@@ -104,3 +104,19 @@ test('when editing, the sealed context comes first — its summary, then its tur
     })
     assert.deepEqual(out.map(m => m.content), ['Earlier, on this item (summary): built Oct 3', 'long AMD', 'two legs', 'move the stop'])
 })
+
+test('the turn after a reply that used tools names them, as the app\'s note — the model knows its figures were measured (Roy, 2026-11-13)', async () => {
+    const { toolNote } = await import('../../services/desks/context.js')
+    const messages = [
+        { seq: 1, agent: 'proteus', role: 'user', kind: 'msg', content: 'How does NVDA behave?' },
+        { seq: 2, agent: 'proteus', role: 'assistant', kind: 'msg', content: '74% of breaks reclaim.', tools: ['get_behaviour_profile NVDA', 'get_chart NVDA'] },
+        { seq: 3, agent: 'proteus', role: 'user', kind: 'msg', content: 'how did you do it so fast?' },
+        { seq: 4, agent: 'proteus', role: 'assistant', kind: 'msg', content: 'From the profile.' },
+        { seq: 5, agent: 'proteus', role: 'user', kind: 'msg', content: 'thanks' },
+    ]
+    const out = buildConversation({ messages, agent: 'proteus' })
+    assert.equal(out[0].content, 'How does NVDA behave?')
+    assert.equal(out[2].content, `${toolNote(['get_behaviour_profile NVDA', 'get_chart NVDA'])}\n\nhow did you do it so fast?`)
+    assert.match(out[2].content, /^\[App note, not the user's words: your previous reply was written from these tool calls — get_behaviour_profile NVDA; get_chart NVDA\./)
+    assert.equal(out[4].content, 'thanks', 'a reply with no tools adds no note, and the earlier trace is not repeated')
+})

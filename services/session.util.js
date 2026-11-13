@@ -53,21 +53,42 @@ export function cutContent(text, max = MAX_CONTENT_CHARS) {
  */
 export function toTimelineMessage(raw, now = Date.now()) {
     if (!raw || typeof raw !== 'object') return { error: 'message must be an object' }
-    const { agent, role, kind = 'msg', content, ref = null, to = null } = raw
+    const { agent, role, kind = 'msg', content, ref = null, to = null, tools = null } = raw
     if (!isAgent(agent)) return { error: 'invalid agent' }
     if (role !== 'user' && role !== 'assistant') return { error: 'role must be user or assistant' }
     if (!MESSAGE_KINDS.includes(kind)) return { error: 'invalid kind' }
     if (kind === 'handoff' && !isAgent(to)) return { error: 'a hand-off needs a receiving agent' }
     const text = cutContent(content)
     if (!text.trim() && kind === 'msg') return { error: 'content must be a non-empty string' }
+    const trace = role === 'assistant' ? toolTrace(tools) : []
     return {
         message: {
             agent, role, kind, content: text,
             ref: ref && typeof ref === 'object' ? ref : null,
             to: kind === 'handoff' ? to : null,
+            ...(trace.length ? { tools: trace } : {}),
             at: now,
         },
     }
+}
+
+/** At most this many tool entries are kept on a reply — a trace, not a log. */
+export const MAX_TOOL_TRACE = 20
+
+/**
+ * The tools a reply was written from ("get_behaviour_profile NVDA") — kept on the assistant message so the agent's NEXT
+ * turn can see where its own figures came from (Roy, 2026-11-13: Proteus disowned a measured NVDA profile as "made up"
+ * because the history held the numbers but not the call). Strings only, trimmed, deduplicated, capped. Pure.
+ */
+export function toolTrace(tools) {
+    if (!Array.isArray(tools)) return []
+    const out = []
+    for (const t of tools) {
+        const s = typeof t === 'string' ? t.trim().slice(0, 80) : ''
+        if (s && !out.includes(s)) out.push(s)
+        if (out.length >= MAX_TOOL_TRACE) break
+    }
+    return out
 }
 
 /**

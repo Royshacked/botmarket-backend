@@ -213,3 +213,16 @@ test('an order block is not retested before it EXISTS — the move that makes it
     assert.equal(r.blocks, 1)
     assert.equal(r.n, 0, 'no retest counted inside the move that made the block')
 })
+
+test('false breaks: the LATEST one is kept as it happened — the example the chart shows (Roy, 2026-11-13)', () => {
+    const closes = [104, 103, 102, 100.5, 102, 103, 102.5, 101.5, 100.6, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112]
+    const b = series(closes)
+    b[3].low = 100
+    b[8].low = 99
+    const atrs = b.map(() => 1)
+    const r = falseBreaks(b, atrs, 15, driftOutcomes(b, atrs, PROFILE), { ...PROFILE, horizon: 5, minN: 1 })
+    const day8 = new Date((1_700_000_000 + 8 * 86_400) * 1000).toISOString()
+    assert.deepEqual(r.latest, { at: day8, reclaimed_at: day8, level: 100, swept_to: 99, depth_atr: 1 })
+    const flat = series(Array.from({ length: 20 }, (_, i) => 100 + i))
+    assert.equal(falseBreaks(flat, flat.map(() => 1), 15, [], PROFILE).latest, null, 'no false break → no example')
+})

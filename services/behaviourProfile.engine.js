@@ -201,9 +201,18 @@ export function falseBreaks(bars, atrs, cut, drift, opts = PROFILE) {
             ? bracket(bars, reclaim, bars[reclaim].close + opts.up * ra, bars[reclaim].close - opts.down * ra, opts.horizon) : undefined
         // How far under the low a FALSE break went before it came back, in ATRs — what a stop under a swing low
         // has to clear to survive the sweep.
-        const depth = reclaim != null ? (s.price - Math.min(...bars.slice(j, reclaim + 1).map(b => b.low))) / a : null
-        breaks.push({ i: reclaim ?? j, false: reclaim != null, out, toDir, depth })
+        const swept = reclaim != null ? Math.min(...bars.slice(j, reclaim + 1).map(b => b.low)) : null
+        const depth = reclaim != null ? (s.price - swept) / a : null
+        breaks.push({ i: reclaim ?? j, false: reclaim != null, out, toDir, depth, at: j, level: s.price, swept })
     }
+    // THE LATEST FALSE BREAK, as it happened — the example the user is shown on a chart (Roy, 2026-11-13: "how does
+    // NVDA behave" needs a chart with an example). One real event from the same count, never a picked one.
+    const last = breaks.findLast(b => b.false)
+    const latest = last ? {
+        at: new Date(_ms(bars[last.at].timestamp)).toISOString(),
+        reclaimed_at: new Date(_ms(bars[last.i].timestamp)).toISOString(),
+        level: _round(last.level, 2), swept_to: _round(last.swept, 2), depth_atr: _round(last.depth, 2),
+    } : null
     // One sweep per outcome window, like every other test: two sweeps a few bars apart share the move that follows.
     const sweeps = []
     for (const b of breaks) {
@@ -221,6 +230,7 @@ export function falseBreaks(bars, atrs, cut, drift, opts = PROFILE) {
         recent: { breaks: rec.length, false_rate: _round(rec.length ? rec.filter(b => b.false).length / rec.length : null) },
         bars_to_direction: _median(breaks.map(b => b.toDir)),
         sweep_depth_atr: { median: _round(_median(breaks.map(b => b.depth)), 2), p80: _round(_quantile(breaks.map(b => b.depth), 0.8), 2) },
+        latest,
         after_sweep: after,
     }
 }

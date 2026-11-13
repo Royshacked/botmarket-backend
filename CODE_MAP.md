@@ -345,9 +345,14 @@ services/
       markers.js · scannerMode.js   keepMarkers (editing / chainId survive a fold, an edit, Atlas's onRouted) ·
                               Argus's mode — fixed since 2026-11-09: the single pick for Mentor, whatever is passed
       context.js              buildConversation — what ONE agent reads: sealed context when editing, its
-                              summary, its own segment (a hand-off to it reads as the user)
+                              summary, its own segment (a hand-off to it reads as the user). The turn after a reply
+                              that carries `tools` opens with toolNote — the app's note naming the calls that reply
+                              was written from (2026-11-13: the history holds text, never the calls, so Proteus
+                              disowned a measured profile as "made up")
       sessionTurn.js          a desk turn against the session: append → context → run → reply → nextState →
                               floor (entryOf on a route) → background summary fold. No HTTP until phase 5.
+                              Every desk's onToolStart is recorded here too: the reply row keeps `tools`
+                              ("get_behaviour_profile NVDA"), logged as "<agent> turn tools".
                               A reply with NO words still gets its row: a `<show>` → showLine, a chart the turn drew
                               (every desk's onChart, recorded here) → chartLine "Here's the NVDA daily chart." with the
                               chart on the row (2026-11-12 — a chart-only reply was never saved, so the next ask
@@ -1080,7 +1085,8 @@ services/
                             −0.5 ATR, 10 bars); every rate against a BASELINE (a level shifted ±2/3 ATR, or the drift
                             from every bar), two-proportion z ≥ 3, and the recent third must still beat its own
                             baseline (judge → respects / faded / unconfirmed / no / thin); false breaks carry
-                            sweep_depth_atr (median, p80). PURE.
+                            sweep_depth_atr (median, p80) and `latest` (the last false break: at, reclaimed_at,
+                            level, swept_to, depth_atr — the example Proteus charts, 2026-11-13). PURE.
   proteusQueue.service.js   PROTEUS'S PROFILE AHEAD OF ANY ASK (proteus.md §4.4–4.5, step 4, 2026-11-12): queueProfiles
                             (symbols, { source }) — the day boards (hotlist.day after a board is saved) and the house
                             scan's picks (pythiaWeekly profileHousePicks) add names; ONE worker profiles them one at a
@@ -1230,7 +1236,8 @@ services/
                           Deleted when those two panels move onto the session (plan D1).
   session.service.js  session.util.js   the unified chat's session store: `sessions` (header — scope,
                           status, floor, agentState, summaries, links, seq) + `session_messages` (one row
-                          per timeline message, per-session seq). ONE active per user per scope; "new"
+                          per timeline message, per-session seq; an assistant row may carry `tools`, the
+                          session.util.toolTrace of the calls behind it). ONE active per user per scope; "new"
                           archives it; no TTL, no cap. session.util.segmentOf = one agent's context line
                           (its own turns + hand-offs addressed to it). Factory over getDb (memDb-tested)
   sessionEvents.js  sessionChannel.js   the unified chat's live channel ON THE EXISTING WebSocket (chatWs): the

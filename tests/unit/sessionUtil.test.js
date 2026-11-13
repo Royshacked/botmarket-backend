@@ -95,3 +95,14 @@ test('the scopes are the one chat and the two admin desks', () => {
     for (const s of ['main', 'strategy', 'aether']) assert.equal(isScope(s), true)
     for (const s of ['', 'mentor', null, undefined]) assert.equal(isScope(s), false)
 })
+
+test('a reply keeps the tools it was written from — strings only, deduplicated, capped; never on a user turn (Roy, 2026-11-13)', async () => {
+    const { toTimelineMessage, toolTrace, MAX_TOOL_TRACE } = await import('../../services/session.util.js')
+    assert.deepEqual(toolTrace(['get_behaviour_profile NVDA', ' get_behaviour_profile NVDA ', '', null, 7, 'get_chart NVDA']), ['get_behaviour_profile NVDA', 'get_chart NVDA'])
+    assert.equal(toolTrace(Array.from({ length: 50 }, (_, i) => `t${i}`)).length, MAX_TOOL_TRACE)
+    assert.deepEqual(toolTrace('get_chart'), [])
+    const reply = toTimelineMessage({ agent: 'proteus', role: 'assistant', content: 'x', tools: ['get_behaviour_profile NVDA'] }, 1)
+    assert.deepEqual(reply.message.tools, ['get_behaviour_profile NVDA'])
+    assert.equal('tools' in toTimelineMessage({ agent: 'proteus', role: 'assistant', content: 'x', tools: [] }, 1).message, false, 'no tools → no field')
+    assert.equal('tools' in toTimelineMessage({ agent: 'proteus', role: 'user', content: 'x', tools: ['a'] }, 1).message, false)
+})

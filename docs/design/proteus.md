@@ -158,4 +158,10 @@ recent-only read (e.g. the last 3 years, reported as "lately", never as a rule) 
    restart forgets the waiting names; the next board or the name's first open profiles it). The Pythia picks come out
    of the WEEKLY run (pythiaWeekly → houseScan), not a nightly one. Live-checked: TSLA from the week cache, MSFT and
    AMD profiled, ~10 s a name.
+   **2026-11-13, after a live ask:** "how does NVDA behave?" answered from the cached profile, then "how did you do it
+   so fast?" got "I made those figures up" — the history held the reply's text, never the call. Fixed for every desk:
+   the reply keeps its `tools` (sessionTurn) and the next turn opens with the app's note naming them
+   (context.toolNote). And each answer now shows ONE example chart: the engine keeps each timeframe's latest false
+   break (`false_breaks.latest`, PROFILE_VERSION 4), the tool text names its prices and get_chart timeframe. Replayed
+   live: NVDA daily, Nov 12 swept the 151.49 low to 148.80 and closed back above; the follow-ups named the profile.
 5. **The Hotlist badge**, then Mentor weighing the read for his levels — not built.

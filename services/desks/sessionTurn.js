@@ -182,6 +182,19 @@ export function makeSessionTurn({
             if (row?.symbol) shownChart = { ticker: row.symbol, timeframe: row.timeframe ?? null }
             return deskOnChart?.(row)
         }
+        // The tools this turn called, whichever desk — kept on its reply so the desk's NEXT turn knows where its own figures
+        // came from (context.toolNote; Roy 2026-11-13). The same callback every desk already forwards: the provider calls it
+        // with the name when a call starts, agentIO.announceTargets again with the names it is about when it runs.
+        const toolsCalled = new Map()   // name → Set of targets, in first-call order
+        const deskOnToolStart = common.onToolStart
+        common.onToolStart = (tool, extra) => {
+            if (typeof tool === 'string' && tool) {
+                const targets = toolsCalled.get(tool) ?? new Set()
+                for (const t of extra?.targets ?? []) targets.add(String(t))
+                toolsCalled.set(tool, targets)
+            }
+            return deskOnToolStart?.(tool, extra)
+        }
 
         // A TURN THAT FINISHED THE ITEM IT WAS EDITING (a setup closed in the chat): its conversation goes onto the item,
         // and the desk's next work starts clean. A failure never undoes what the turn did.
@@ -224,8 +237,10 @@ export function makeSessionTurn({
         const wordless = !result.reply?.trim()
         const extras  = replyExtras(wordless && !payload.chart && shownChart ? { ...payload, chart: shownChart } : payload)
         const prose   = result.reply?.trim() ? result.reply : (showLine(extras?.show) ?? chartLine(extras?.chart))
+        const tools   = [...toolsCalled].map(([name, targets]) => (targets.size ? `${name} ${[...targets].join(', ')}` : name))
+        if (tools.length) logger.info(LOG, `${agent} turn tools`, { tools })
         const replied = prose
-            ? await sessions.append({ sessionId, userId: user._id, message: { agent, role: 'assistant', content: prose, ref: extras } })
+            ? await sessions.append({ sessionId, userId: user._id, message: { agent, role: 'assistant', content: prose, ref: extras, tools } })
             : null
 
         const next = desk.nextState ? desk.nextState(state, result, prepared) : state

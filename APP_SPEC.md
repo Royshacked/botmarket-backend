@@ -577,6 +577,11 @@ business (Prometheus's), picks nothing (Argus's). Long side only, for now.
   the house scan picks is queued for its measured profile (`proteusQueue.service` — code only, one name at a time, a
   pause between names, the loop leader only), so Mentor, the chat and the Hotlist badge find it ready. The WRITTEN read
   stays on open.
+- **One example on a chart** (2026-11-13): every behaviour answer shows one chart — the line that holds as its overlay,
+  or (the usual case) the profile's latest false break on the asked timeframe (daily by default), its swing low and
+  sweep drawn at the exact prices the count found, and one sentence saying what it shows.
+- **Knows where his numbers came from** (2026-11-13, every desk): a reply keeps the tools it was written from, and the
+  next turn is told them — asked "how so fast?", he names the cached profile instead of calling it made up.
 - **Who sends users to him:** Axl ("how does TSLA behave?" → `<route>technicals TSLA</route>`) and Mentor (registry
   `routedFrom`); no other desk lists him. Opened directly from the desks list too. Mentor reads his profile on every
   turn of a build (step 4, built).

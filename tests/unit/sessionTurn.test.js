@@ -320,3 +320,25 @@ test('a reply WITH words keeps exactly what it had — no chart added to its row
     assert.equal(reply.content, 'The plan, with its chart below.')
     assert.equal(reply.ref ?? null, null)
 })
+
+test('the tools a turn called ride on its reply, and the next turn is told about them (Roy, 2026-11-13: Proteus called a measured profile made up)', async () => {
+    const statuses = []
+    const { turn, sessions, seen } = rig({
+        run: ({ common }) => {
+            if (seen.length === 1) {
+                common.onToolStart('get_behaviour_profile')                          // the provider: the call starts
+                common.onToolStart('get_behaviour_profile', { targets: ['NVDA'] })   // agentIO.announceTargets: it runs
+                common.onToolStart('get_chart', { targets: ['NVDA'] })
+            }
+            return { reply: seen.length === 1 ? '74% of NVDA\'s breaks reclaim.' : 'From the measured profile.' }
+        },
+    })
+    const s = await sessions.getActive({ userId: 'u1' })
+    await turn({ user, sessionId: s.sessionId, agent: 'mentor', text: 'how does NVDA behave?', emit: (e, d) => statuses.push([e, d]) })
+    await turn({ user, sessionId: s.sessionId, agent: 'mentor', text: 'how did you do it so fast?' })
+    const all = await sessions.messagesSince({ sessionId: s.sessionId, userId: 'u1' })
+    assert.deepEqual(all[1].tools, ['get_behaviour_profile NVDA', 'get_chart NVDA'])
+    assert.equal('tools' in all[3], false, 'a turn that called nothing keeps no trace')
+    assert.match(seen[1].common.messages[2].content, /^\[App note, not the user's words: .*get_behaviour_profile NVDA; get_chart NVDA.*\]\n\nhow did you do it so fast\?$/s)
+    assert.ok(statuses.some(([e, d]) => e === 'status' && d.tool === 'get_chart'), 'the desk\'s own status events still go out')
+})

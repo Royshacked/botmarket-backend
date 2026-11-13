@@ -31,9 +31,30 @@ export function buildConversation({ messages, agent, summary = null, sealed = nu
     if (summary?.text) out.push({ role: 'user', content: SUMMARY_LEAD + summary.text })
 
     const through = Number.isFinite(summary?.throughSeq) ? summary.throughSeq : 0
+    // The tools behind the agent's last reply(ies), said on the turn that follows them (toolNote).
+    let trace = []
     for (const m of segmentOf(messages, agent)) {
         if (Number.isFinite(m.seq) && m.seq <= through) continue
-        out.push({ role: contextRole(m, agent), content: m.content })
+        const role = contextRole(m, agent)
+        if (role === 'assistant') {
+            for (const t of Array.isArray(m.tools) ? m.tools : []) if (!trace.includes(t)) trace.push(t)
+            out.push({ role, content: m.content })
+            continue
+        }
+        out.push({ role, content: trace.length ? `${toolNote(trace)}\n\n${m.content}` : m.content })
+        trace = []
     }
     return out
+}
+
+/**
+ * The history holds a reply's TEXT, never the tool calls behind it — so on the next turn the model saw its own exact
+ * figures with no source and, asked "how did you do it so fast?", called a measured profile made up (Proteus, NVDA,
+ * 2026-11-13). This note goes on the turn AFTER such a reply — in the user's slot, marked as the app's, so it is not a line
+ * the model learns to write itself. Pure; exported for tests.
+ */
+export function toolNote(trace) {
+    return `[App note, not the user's words: your previous reply was written from these tool calls — ${trace.join('; ')}. ` +
+        `Their results are not repeated here, but the figures in that reply came from them. Asked where a figure came from, ` +
+        `name the tool; never call it made up or unsupported unless you check it again and it is different.]`
 }
