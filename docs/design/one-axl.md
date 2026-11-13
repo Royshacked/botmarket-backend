@@ -167,6 +167,11 @@ Steps 1 and 2 ship together — the chat must never say "Prometheus" under an "A
    reads them from the trading context. Live: told the technical analyst "I never trade low-float names" → kept; the
    analyst, asked cold, answered "you never trade low-float names"; Axl took it back on "I do now" → removed.
 4. **The work pane** — item titles; the Floor's desk list as things to do.
+   **BUILT 2026-11-13.** FE `SidePane/paneTitle.js`: the tab and the show/hide toggle name the item off the role's
+   session state — "NVDA · long swing trade" (as much as is decided: "NVDA · trade" before the direction), "Growth book",
+   "MSFT · coverage" — and fall back to the work label ("Trade work"). The agent-desk list (Info) is now "What I can do":
+   "Build a trade", "Research a company"… — DESKS labels ARE the to-dos, so no "Trading Desk" can reach a screen. Driven
+   (scripts/drive-one-axl-pane.mjs): tab "NVDA · trade", Info to-dos, no agent or desk name on the page.
 5. **Info diagrams** — `{ flow, step }` from each desk, the five diagrams.
 6. **Drive it** — desktop + 390px, a Hotlist → trade build, a Proteus → hand-back → Analyst, a portfolio review.
 

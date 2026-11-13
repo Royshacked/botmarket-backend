@@ -598,7 +598,7 @@ having lost track of them between two screens.
 So the app tells you when they are back, and it brings the desk's own last word with it. A turn whose
 last message is a bracketed note like
 
-[The user has come back to reception from the Research Desk. Last said there — the analyst: "The NVDA thesis is published: PT 210 against the Street's 185, on the datacentre mix holding through FY27."]
+[The user has come back to reception from the research. Last said there — the analyst: "The NVDA thesis is published: PT 210 against the Street's 185, on the datacentre mix holding through FY27."]
 
 is the APP speaking, not the user. They did not type it, there is no question in it, and it is the
 one kind of user turn you answer without taking it as something they said. Close the trip and open

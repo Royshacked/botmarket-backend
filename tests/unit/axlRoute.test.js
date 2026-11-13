@@ -335,7 +335,8 @@ test('the prompt teaches the return turn, and forbids routing on it', () => {
     // The note's shape, as the client composes it (AxlHub `_sendReturn` + `_lastWordAt`). If one
     // side's wording moves the other has to move with it — the model recognises this turn by nothing
     // else, and it branches on who the quote is attributed to.
-    assert.match(section, /\[The user has come back to reception from the Research Desk\. Last said there — the analyst: "/,
+    // "from the research", not a desk's name (one-axl.md §5, 2026-11-13: no desk names reach the user, even via an example).
+    assert.match(section, /\[The user has come back to reception from the research\. Last said there — the analyst: "/,
         'the app note is shown verbatim, quote and all, in the shape the client sends')
     assert.match(section, /is\s+the\s+APP\s+speaking,\s+not\s+the\s+user/,
         'a bracketed note is not something the user said')
