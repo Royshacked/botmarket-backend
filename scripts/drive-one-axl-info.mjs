@@ -66,7 +66,7 @@ try {
     await shot(page, '02-hotlist-building')
 
     // Close the Hotlist: the flow becomes the trade build itself.
-    await page.locator('.floor-panel').getByRole('button', { name: /close/i }).first().click().catch(() => page.keyboard.press('Escape'))
+    await page.locator('.detail-panel__close').first().click()   // the panel's × (DetailPanel)
     await page.waitForTimeout(1500)
     d = await diagram(page)
     console.log('  info:', JSON.stringify(d))
@@ -76,7 +76,10 @@ try {
     // Phone: the chat's Info sheet draws the same diagram.
     await page.setViewportSize({ width: 390, height: 844 })
     await page.waitForTimeout(1500)
-    await page.getByRole('button', { name: 'Info' }).click()
+    // On a phone the work pane is a bottom sheet OVER the app — lower it (Esc closes the top sheet) to reach the chat's Info.
+    await page.keyboard.press('Escape')
+    await page.waitForTimeout(800)
+    await page.getByRole('button', { name: 'Info', exact: true }).click({ timeout: 20000 })
     await page.waitForTimeout(800)
     d = await diagram(page)
     console.log('  phone info:', JSON.stringify(d))
