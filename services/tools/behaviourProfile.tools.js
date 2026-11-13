@@ -11,6 +11,7 @@
 import { makeToolHandler } from '../agentUtils.js'
 import { profileFor } from '../behaviourProfile.service.js'
 import { PROFILE } from '../behaviourProfile.engine.js'
+import { STRUCTURE } from '../swingStructure.service.js'
 
 const LOG = '[behaviourProfile.tools]'
 
@@ -19,6 +20,9 @@ export const BEHAVIOUR_PROFILE_TOOL_SPEC = {
 }
 
 const _pct = (x) => (Number.isFinite(x) ? `${Math.round(x * 100)}%` : '—')
+const _round2 = (x) => Math.round(x * 100) / 100
+/** The trader's stop: this many ATRs under his swing low (swingStructure — the lab's tested rule). */
+const STOP_BUFFER = STRUCTURE.buffer
 const LABEL = Object.freeze({
     ema20: '20 EMA', sma50: '50 SMA', sma200: '200 SMA', vwap: 'VWAP',
     rsi_oversold: 'RSI under 30', macd_cross_up: 'MACD cross up', volume_up_bar: 'high-volume up bar',
@@ -142,6 +146,60 @@ export function wyckoffWords(w) {
     return parts.length ? parts.join(' ') : null
 }
 
+/** The stop's room as the tool's line — measured on the trader's own swing lows (stopRoom). Pure. */
+export function stopRoomLine(r) {
+    if (!r?.breaks) return null
+    const b = Object.entries(r.by_buffer).sort(([x], [y]) => x - y).map(([k, v]) => `${k} ATR: ${_pct(v.stopped_share)} of breaks reached it, ${_pct(v.whipsaw)} of those closed back above within ${PROFILE.sweepBack} bars`).join('; ')
+    return `  The trader's stop room (his swing lows, ${r.breaks} breaks): a stop under the low at ${b}. Most names look alike here — the cost of a tight stop, not a trait`
+}
+
+/**
+ * THE TRADER'S READ (proteus.md 5b, Roy 2026-11-13, option A): the measured profile as the levels he may USE and the
+ * ones he must not lean on — each line from a test's verdict, never from the eye. The daily view (his swing chart), the
+ * weekly where it adds a level. Lines:
+ *   - what HOLDS, priced at the last bar (a line that holds is a level an entry or a stop may sit on);
+ *   - what does NOT — no moving average is "support" on this name unless it holds;
+ *   - the range it is in now (the trading range's bounds — structure, not an edge, unless its springs hold);
+ *   - Fibonacci prices of the latest impulse ONLY when Fibonacci holds; the cycle's next window ONLY when it holds;
+ *   - the stop's room at his 0.2 ATR stop — context for the deeper stop he already offers, never a rule change.
+ * → string[] (empty when the profile has no daily view). Pure.
+ */
+export function mentorRead(p) {
+    const tfs = p?.timeframes ?? {}
+    const out = []
+    const lines = []
+    for (const tf of ['day', 'week']) {
+        const t = tfs[tf]
+        if (!t) continue
+        const where = TF[tf].toLowerCase()
+        for (const [k, s] of Object.entries(t.indicators ?? {})) {
+            if (s?.verdict !== 'respects') continue
+            const now = t.levels_now?.[k]
+            lines.push(`${LABEL[k] ?? k} (${where}) HOLDS — ${_pct(s.rate)} vs ${_pct(s.base)}${now != null ? `; at ${now} now` : ''}: a level an entry or a stop may sit on`)
+        }
+        if (t.fib?.verdict === 'respects' && t.fib.latest_impulse) {
+            const { low, high } = t.fib.latest_impulse
+            const at = (r) => _round2(high - r * (high - low))
+            lines.push(`Fibonacci pullbacks (${where}) HOLD — the latest impulse ${low} → ${high}: 38.2% ${at(0.382)}, 50% ${at(0.5)}, 61.8% ${at(0.618)}`)
+        }
+        if (t.cycle?.verdict === 'respects' && t.cycle.window) lines.push(`Its ${where} lows come in a cycle — the next window ${t.cycle.window.from.slice(0, 10)} → ${t.cycle.window.to.slice(0, 10)}: timing for how long an entry waits`)
+        if (t.wyckoff?.springs?.verdict === 'respects') lines.push(`Wyckoff springs (${where}) HOLD — a dip under a range low that closes back inside has led higher, more than an ordinary dip`)
+    }
+    out.push(...(lines.length ? lines : ['Nothing technical holds on the daily or weekly bars: no moving average, Fibonacci level or pattern is support on this name — never cite one as the reason for a level; the levels come from the structure and the ATR']))
+    if (lines.length) out.push('Anything not listed above did not hold — never cite it as support')
+    const range = tfs.day?.wyckoff?.current
+    if (range) out.push(`In a daily trading range ${range.low}–${range.high} since ${range.since.slice(0, 10)} — structure (its low and high are levels), not a measured edge`)
+    const r = tfs.day?.stop_room, own = r?.by_buffer?.[STOP_BUFFER]
+    if (r?.breaks && own?.whipsaw != null) {
+        const deeper = r.by_buffer[1]
+        out.push(`Your stop's room (your own daily swing lows, ${r.breaks} breaks): ${_pct(own.stopped_share)} of breaks reached a stop ${STOP_BUFFER} ATR under the low and ${_pct(own.whipsaw)} of those closed back above within ${PROFILE.sweepBack} days` +
+            (deeper?.stopped_share != null ? `; 1 ATR under, ${_pct(deeper.stopped_share)} reached it, ${_pct(deeper.whipsaw)} came back` : '') +
+            ` — the cost of the tight stop; most names look alike here`)
+    }
+    if (Number.isFinite(tfs.day?.atr_pct)) out.push(`Daily ATR ${tfs.day.atr_pct}% — a day's normal move`)
+    return out
+}
+
 /** One timeframe → its lines. Pure. */
 export function timeframeLines(tf, t) {
     if (!t) return [`${TF[tf] ?? tf}: too few bars to measure (the 200 SMA needs ~260)`]
@@ -161,6 +219,7 @@ export function timeframeLines(tf, t) {
         ...(t.cycle ? [`  ${cycleLine(t.cycle)}`] : []),
         ...(t.wyckoff ? wyckoffLines(t.wyckoff) : []),
         ...(t.fib ? [fibLine(t.fib)] : []),
+        ...(stopRoomLine(t.stop_room) ? [stopRoomLine(t.stop_room)] : []),
     ]
 }
 

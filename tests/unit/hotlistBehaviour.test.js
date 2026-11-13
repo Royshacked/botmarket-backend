@@ -129,3 +129,37 @@ test('Fibonacci: a wide gap that did not clear z is a near-miss, not "no more" (
     assert.equal(fibWords({ impulses: 72, verdict: 'no', n: 64, rate: 0.781, base: 0.628, z: 2.13 }),
         'Pullbacks turned at 38.2/50/61.8% more often (78% vs 63% at other depths, 64 touches, z 2.13) — a near-miss: not enough to rule out chance.')
 })
+
+test("the trader's read (5b): what holds priced now, what never to lean on, the range, Fibonacci and the cycle only when they hold, the stop's room", async () => {
+    const { mentorRead } = await import('../../services/tools/behaviourProfile.tools.js')
+    const room = { breaks: 135, by_buffer: { 0.2: { stopped_share: 0.741, whipsaw: 0.67 }, 0.5: { stopped_share: 0.42, whipsaw: 0.42 }, 1: { stopped_share: 0.252, whipsaw: 0.176 } } }
+    const nothing = mentorRead({ timeframes: { day: { ...tf(), atr_pct: 2.99, stop_room: room, wyckoff: { current: { low: 140.2, high: 151.8, since: '2026-10-20T00:00:00.000Z' } }, fib: { verdict: 'no', latest_impulse: { low: 100, high: 150 } } }, week: tf() } })
+    assert.match(nothing[0], /^Nothing technical holds .*never cite one as the reason for a level/)
+    assert.equal(nothing[1], 'In a daily trading range 140.2–151.8 since 2026-10-20 — structure (its low and high are levels), not a measured edge')
+    assert.equal(nothing[2], "Your stop's room (your own daily swing lows, 135 breaks): 74% of breaks reached a stop 0.2 ATR under the low and 67% of those closed back above within 3 days; 1 ATR under, 25% reached it, 18% came back — the cost of the tight stop; most names look alike here")
+    assert.equal(nothing[3], "Daily ATR 2.99% — a day's normal move")
+    assert.ok(!nothing.some(l => /Fibonacci pullbacks/.test(l)), 'Fibonacci prices only when it holds')
+    const holding = mentorRead({ timeframes: {
+        day: { ...tf({ holds: ['sma50'] }), atr_pct: 3, levels_now: { sma50: 214.59 }, fib: { verdict: 'respects', latest_impulse: { low: 100, high: 150 } },
+            cycle: { verdict: 'respects', window: { from: '2026-11-20T00:00:00.000Z', to: '2026-11-28T00:00:00.000Z' } } },
+        week: tf() } })
+    assert.match(holding[0], /^50 SMA \(daily\) HOLDS — .*; at 214\.59 now: a level an entry or a stop may sit on$/)
+    assert.equal(holding[1], 'Fibonacci pullbacks (daily) HOLD — the latest impulse 100 → 150: 38.2% 130.9, 50% 125, 61.8% 119.1')
+    assert.match(holding[2], /next window 2026-11-20 → 2026-11-28: timing for how long an entry waits/)
+    assert.equal(holding[3], 'Anything not listed above did not hold — never cite it as support')
+    assert.deepEqual(mentorRead({ timeframes: {} }).slice(0, 1).length, 1)
+})
+
+test("the trader's section: the read as levels to use, the stop rule unchanged, and no internal name anywhere in it (One Axl)", async () => {
+    const { _buildProteusSection, _buildReadSection } = await import('../../services/agents/mentor.agent.service.js')
+    const { INTERNAL_NAMES } = await import('../../services/agentUtils.js')
+    const s = _buildProteusSection({ symbol: 'NVDA', at: '2026-11-13T10:00:00Z', brief: 'nothing technical holds', read: ['Nothing technical holds on the daily or weekly bars', "Daily ATR 3% — a day's normal move"] })
+    assert.match(s, /THE TECHNICAL ANALYST'S READ on NVDA \(measured 2026-11-13\)/)
+    assert.match(s, /\n {2}- Nothing technical holds on the daily or weekly bars\n {2}- Daily ATR 3%/)
+    assert.match(s, /Your stop rule does not change/)
+    assert.ok(!/use it for the stop's room/.test(s), 'the old line moved a tested stop on an untested number')
+    assert.match(_buildProteusSection({ symbol: 'KO', brief: 'only the brief' }), /\n {2}- only the brief\n/, 'an older read without lines still says its brief')
+    const sections = [s, ...['ready', 'waiting', 'failed', 'unknown'].map(state => _buildReadSection({ symbol: 'NVDA', horizon: 'swing', kind: 'coverage', state, facts: 'f', against: false })),
+        _buildReadSection({ symbol: 'NVDA', kind: 'coverage', decide: true, state: 'ready', facts: 'f' })]
+    for (const text of sections) for (const name of INTERNAL_NAMES) assert.ok(!new RegExp(`\b${name}\b`, 'i').test(text), `${name} in: ${text.slice(0, 120)}`)
+})

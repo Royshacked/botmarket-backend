@@ -772,8 +772,8 @@ export function _buildReadSection(read) {
     if (read.decide && read.state === 'ready') {
         return `
 
-PROMETHEUS'S READ on ${read.symbol} (his coverage — to DECIDE the trade): ${read.facts}
-  With PROTEUS'S READ below and the chart, say plainly whether ${read.symbol} is worth a LONG now — the house trades long
+THE ANALYST'S READ on ${read.symbol} (his coverage — to DECIDE the trade): ${read.facts}
+  With THE TECHNICAL ANALYST'S READ below and the chart, say plainly whether ${read.symbol} is worth a LONG now — the house trades long
   only for now — and on WHICH HORIZON (intraday · day · short term swing · swing · long term), with the one reason from
   each expert that decides it: the analyst's book and target date (long term / swing), a dated catalyst (short term swing),
   the technical analyst's fit (day trade / swing). "Not a long now" is an answer — say why, and stop there. Then ask the ONE question
@@ -785,30 +785,30 @@ PROMETHEUS'S READ on ${read.symbol} (his coverage — to DECIDE the trade): ${re
     if ((read.state === 'ready' || read.state === 'passed') && read.against) {
         return `
 
-PROMETHEUS'S READ on ${on} is AGAINST it (${what}): ${read.facts}
+THE ANALYST'S READ on ${on} is AGAINST it (${what}): ${read.facts}
   If you have not said so yet, say it plainly in one line, as a WARNING they may override (Roy, 2026-11-12) — never a question of its own: the trade's one question stands (their three numbers). Their numbers are their yes; do not ask again.`
     }
     if (read.state === 'ready') {
         return `
 
-PROMETHEUS'S READ on ${on} (${what}): ${read.facts}
+THE ANALYST'S READ on ${on} (${what}): ${read.facts}
   Validate the trade with it — the direction and the levels you set sit with this read, not against it. Name it in one line when you open the levels.`
     }
     if (read.state === 'waiting' || read.state === 'missing') {
         const ahead = read.state === 'waiting' && read.ahead > 0 ? `, ${read.ahead} name${read.ahead === 1 ? '' : 's'} ahead of it in the house's research` : ''
         return `
 
-PROMETHEUS IS READING ${on} (${what}${ahead}) — or is about to: the platform asks him, and brings you his read when it lands. Do not finish the trade before then: no setup put up to generate. Meanwhile answer the user, and work the chart if they want to.`
+THE ANALYST IS READING ${on} (${what}${ahead}) — or is about to: the platform asks him, and brings you his read when it lands. Do not finish the trade before then: no setup put up to generate. Meanwhile answer the user, and work the chart if they want to.`
     }
     if (read.state === 'failed') {
         return `
 
-PROMETHEUS COULD NOT MAKE A READ on ${on} (${what}) — his research on it failed; it is asked again tomorrow. If you have not said so yet, say it once and ask the user whether to build without it. Their call: build if they say so.`
+THE ANALYST COULD NOT MAKE A READ on ${on} (${what}) — his research on it failed; it is asked again tomorrow. If you have not said so yet, say it once and ask the user whether to build without it. Their call: build if they say so.`
     }
     if (read.state === 'unknown') {
         return `
 
-PROMETHEUS'S READ on ${on} could not be checked just now. If it matters to the user, say so in one line; build on the chart and their word.`
+THE ANALYST'S READ on ${on} could not be checked just now. If it matters to the user, say so in one line; build on the chart and their word.`
     }
     return ''
 }
@@ -820,15 +820,20 @@ PROMETHEUS'S READ on ${on} could not be checked just now. If it matters to the u
  */
 export function _buildProteusSection(p) {
     if (!p?.brief || !p.symbol) return ''
-    // The sweep-depth rule only when his line carries one (profileBrief: "sweeps … median … p80"): a brief with no false
-    // breaks measured has no depth to keep the stop under (CR 2026-11-12).
-    const sweep = /sweeps ~/.test(p.brief)
-        ? ' a stop just under a swing low sits inside the sweep depth he measured — use it for the stop\'s room.'
-        : ' he measured no sweep depth on this name, so the stop\'s room comes from the structure and the ATR.'
+    // 5b (proteus.md, Roy 2026-11-13, option A): the read as the levels he may USE and the ones he must not lean on. The
+    // stop rule is unchanged — the old line here ("a stop under a swing low sits inside the sweep depth — use it for the
+    // stop's room") moved a tested stop on an untested number; the stop's room is now context for the deeper stop only.
+    const read = Array.isArray(p.read) && p.read.length ? p.read : [p.brief]
     return `
 
-PROTEUS'S READ on ${p.symbol} (measured ${String(p.at ?? '').slice(0, 10) || 'this week'}): ${p.brief}
-  His numbers, not yours:${sweep} Name him in one line when you say the horizon or set the stop.`
+THE TECHNICAL ANALYST'S READ on ${p.symbol} (measured ${String(p.at ?? '').slice(0, 10) || 'this week'}) — counted from its candles, his numbers, not yours:
+${read.map(l => `  - ${l}`).join('\n')}
+  How you weigh it for your levels: a line that HOLDS may anchor an entry or a stop — say which and why, with its numbers.
+  Nothing else in it is support: never put a level "at the 50 MA" or "at the 61.8%" on a name where it did not hold. The
+  trading range's low and high are structure, like any swing. Your stop rule does not change: the stop's room is the
+  cost of the tight stop — say it in one line when you offer the deeper stop, never move the stop on it unasked. Say
+  the technical analyst's read in one line when you say the horizon or set the stop — by the job, never a name: these
+  numbers are "the technical read", never "the analyst's" (the analyst is the business).`
 }
 
 /**

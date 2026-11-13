@@ -296,10 +296,10 @@ test('the read\'s brief: for the trade, AGAINST it (say so, ask once), or none c
 
 test('The trader\'s context each turn: the read to validate with; against → a warning, no question of its own; running → no finish yet; none intraday', () => {
     const base = { symbol: 'NVDA', horizon: 'swing', kind: 'coverage' }
-    assert.match(_buildReadSection({ ...base, state: 'ready', facts: 'buy, target 230', against: false }), /PROMETHEUS'S READ on NVDA for the swing trade \(his coverage\): buy, target 230\n {2}Validate the trade with it/)
+    assert.match(_buildReadSection({ ...base, state: 'ready', facts: 'buy, target 230', against: false }), /THE ANALYST'S READ on NVDA for the swing trade \(his coverage\): buy, target 230\n {2}Validate the trade with it/)
     assert.match(_buildReadSection({ ...base, state: 'passed', facts: 'passed', against: true }), /is AGAINST it .*\n {2}If you have not said so yet, say it plainly in one line, as a WARNING they may override[\s\S]*never a question of its own/)
-    assert.match(_buildReadSection({ ...base, state: 'waiting', ahead: 2 }), /PROMETHEUS IS READING NVDA for the swing trade \(his coverage, 2 names ahead of it in the house's research\).*Do not finish the trade before then: no setup put up to generate/)
-    assert.match(_buildReadSection({ ...base, state: 'missing' }), /PROMETHEUS IS READING/)
+    assert.match(_buildReadSection({ ...base, state: 'waiting', ahead: 2 }), /THE ANALYST IS READING NVDA for the swing trade \(his coverage, 2 names ahead of it in the house's research\).*Do not finish the trade before then: no setup put up to generate/)
+    assert.match(_buildReadSection({ ...base, state: 'missing' }), /THE ANALYST IS READING/)
     assert.match(_buildReadSection({ ...base, state: 'unknown' }), /could not be checked just now/)
     assert.equal(_buildReadSection({ symbol: 'NVDA', horizon: 'intraday', kind: null }), '')
     assert.equal(_buildReadSection(null), '')
@@ -418,7 +418,7 @@ test('CR #5: only a PASS stands as the catalyst answer — a spent read (hit, ex
 
 test('CR #4: the trader is told a read failed — never left building without a word', () => {
     assert.match(_buildReadSection({ symbol: 'NVDA', horizon: 'swing', kind: 'coverage', state: 'failed' }),
-        /PROMETHEUS COULD NOT MAKE A READ on NVDA for the swing trade \(his coverage\).*ask the user whether to build without it/)
+        /THE ANALYST COULD NOT MAKE A READ on NVDA for the swing trade \(his coverage\).*ask the user whether to build without it/)
 })
 
 test('#3 the run is started on the SYMBOL, not the source — a row another chain queued is the user\'s answer too', async () => {

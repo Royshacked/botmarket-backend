@@ -337,3 +337,15 @@ test('Fibonacci pullbacks: random walks do not favour 38.2/50/61.8%; pullbacks t
     assert.equal(f.verdict, 'respects')
     assert.ok(f.latest_impulse.high > f.latest_impulse.low)
 })
+
+test("the stop's room on the trader's own swing lows: how many breaks reach a stop b ATR under the low, and how many of those come back (5b)", async () => {
+    const { stopRoom } = await import('../../services/behaviourProfile.engine.js')
+    const r = stopRoom(randomWalk(1500, 42), PROFILE)
+    assert.ok(r.swing_lows > 20 && r.breaks > 10)
+    assert.deepEqual(Object.keys(r.by_buffer).sort(), ['0.2', '0.5', '1'])
+    const [s02, s05, s1] = ['0.2', '0.5', '1'].map(k => r.by_buffer[k].stopped_share)
+    assert.ok(s02 >= s05 && s05 >= s1, 'a deeper stop is reached by fewer breaks')
+    for (const v of Object.values(r.by_buffer)) assert.ok(v.whipsaw == null || (v.whipsaw >= 0 && v.whipsaw <= 1))
+    assert.equal(r.stop_buffer, 0.2, "the trader's own buffer (swingStructure.STRUCTURE)")
+    assert.equal(stopRoom(series([100, 101, 102]), PROFILE).breaks, 0)
+})

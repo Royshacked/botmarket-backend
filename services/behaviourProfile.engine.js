@@ -18,6 +18,7 @@
 import { calcSMASeries, calcEMASeries, calcRSISeries, calcMACDSeries, calcATRSeries, calcVWAPSeries } from '../monitoring/evaluators/structured.evaluator.js'
 import { swings, detectOrderBlocks } from './smc.engine.js'
 import { findExtrema, cycleStats } from './cycleAnalysis.service.js'
+import { STRUCTURE, atr as structureAtr, swings as structureSwings } from './swingStructure.service.js'
 
 export const PROFILE = Object.freeze({
     horizon: 10,        // bars an outcome has to happen in
@@ -56,6 +57,8 @@ export const PROFILE = Object.freeze({
     fibMaxBars: 60,
     fibRatios: [0.382, 0.5, 0.618],
     fibBase: [0.2, 0.3, 0.44, 0.56, 0.7, 0.8],
+    // J. The stop's room (5b): stops this many ATRs under the trader's swing low — his own (STRUCTURE.buffer) and deeper.
+    stopBuffers: [0.2, 0.5, 1],
 })
 
 /** A seeded uniform [0, 1) — the baseline must be the same on every run of the same bars. Pure. */
@@ -444,6 +447,47 @@ export function fibPullbackTest(bars, atrs, cut, opts = PROFILE) {
     return { impulses, ...judge(fib, base, cut, opts), latest_impulse: latest }
 }
 
+/**
+ * J. THE STOP'S ROOM, in the trader's own terms (proteus.md §8.1, 5b — 2026-11-13). His stop sits `STRUCTURE.buffer` ATR
+ * under the last swing low of HIS swings (swingStructure: a zigzag of `STRUCTURE.k` ATRs, the 20-bar ATR) — not the
+ * small swings the false-break count above uses. On those swing lows, from the bar after each is confirmed: every
+ * break; for a stop `b` ATR under the low (`stopBuffers`), the share of breaks that reached it, and of those the share
+ * that closed back over the swing low within `sweepBack` bars — STOPPED OUT, THEN BACK (a whipsaw). Descriptive: a
+ * stop's room is a cost, measured, not a rule to beat a baseline. Pure.
+ */
+export function stopRoom(bars, opts = PROFILE) {
+    const a = structureAtr(bars), lows = structureSwings(bars, a, STRUCTURE.k).filter(s => s.type === 'L')
+    const breaks = []
+    let active = [], next = 0
+    for (let j = 1; j < bars.length; j++) {
+        while (next < lows.length && lows[next].at < j) active.push(lows[next++])
+        const broken = active.filter(l => bars[j].low < l.price)
+        if (!broken.length) continue
+        active = active.filter(l => !(bars[j].low < l.price))
+        const s = broken.reduce((m, l) => (l.price < m.price ? l : m))
+        const aj = a[j]
+        if (!Number.isFinite(aj) || aj <= 0) continue
+        // The deepest point before price closed back over the low (or within the window, if it never did).
+        let back = null, deepest = bars[j].low
+        for (let k = j; k < Math.min(bars.length, j + opts.sweepBack); k++) {
+            deepest = Math.min(deepest, bars[k].low)
+            if (bars[k].close > s.price) { back = k; break }
+        }
+        if (back == null && j + opts.sweepBack > bars.length) continue   // still unfolding
+        breaks.push({ depth: (s.price - deepest) / aj, back: back != null })
+    }
+    const by = Object.fromEntries(opts.stopBuffers.map(b => {
+        const hit = breaks.filter(x => x.depth > b)
+        return [b, { stopped: hit.length, stopped_share: _round(breaks.length ? hit.length / breaks.length : null), whipsaw: _round(hit.length ? hit.filter(x => x.back).length / hit.length : null) }]
+    }))
+    const backDepths = breaks.filter(x => x.back).map(x => x.depth)
+    return {
+        swing_lows: lows.length, breaks: breaks.length, stop_buffer: STRUCTURE.buffer,
+        back_depth_atr: { median: _round(_median(backDepths), 2), p80: _round(_quantile(backDepths, 0.8), 2) },
+        by_buffer: by,
+    }
+}
+
 /** The bars rebuilt from the same bars in a shuffled order — each bar's move and shape kept, the sequence gone. Pure. */
 function _shuffledBars(bars, rnd) {
     const parts = []
@@ -615,6 +659,9 @@ export function timeframeProfile(bars, timeframe, opts = PROFILE) {
         cycle: cycleTest(bars, cut, opts),
         wyckoff: wyckoffTest(bars, atrs, cut, drift, fb.sweeps, opts),
         fib: fibPullbackTest(bars, atrs, cut, opts),
+        stop_room: stopRoom(bars, opts),
+        // Where the tested lines sit at the last bar — a line that HOLDS is a level the trader may anchor to (5b).
+        levels_now: Object.fromEntries(Object.entries(levels).map(([k, lv]) => [k, _round(lv.at(-1), 2)])),
     }
 }
 

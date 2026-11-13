@@ -154,6 +154,25 @@ tools move here once Argus is fully defined (argus-rework §4).
    - The Wyckoff phase: from the profile's range NOW, which phase it LOOKS like and the closes that prove it wrong. Live:
      SPY weekly, "Phase B, reaccumulation more plausible", range 702–779 with both invalidations.
    Next: 5b — the trader weighs the read (and the sweep depth) for his levels.
+11. **5b — the trader weighs the read** (built 2026-11-13, Roy: option A; PROFILE_VERSION 9).
+   - `stopRoom` measures the stop's room on the TRADER'S OWN swing lows (swingStructure's 1.5-ATR zigzag, the 20-bar ATR —
+     not the small swings of the false-break count): of all breaks, the share reaching a stop 0.2 / 0.5 / 1 ATR under the
+     low, and of those the share closing back above within 3 days. Live, daily: 0.2 ATR (his stop) is reached by 66–75%
+     of breaks and 49–75% of those come back; 1 ATR by 22–31%, 14–39% back. NEARLY THE SAME ON EVERY NAME (NVDA, TSLA, KO,
+     AMD, SLS, HAYW, JPM, SPY) — like the false-break rate, mostly how prices move, so a per-stock buffer
+     (stock-playbook.md "learned per stock") would barely differ. The open question is the ONE buffer, a lab question;
+     Roy chose A: the 0.2 rule stays, the stop's room is context said beside the deeper stop, never a move of the stop.
+   - `levels_now`: each tested line's price at the last bar.
+   - `mentorRead` → the trader's section (mentor.agent `_buildProteusSection`): a line that HOLDS priced now (it may anchor
+     an entry or a stop); otherwise "nothing is support — never cite one"; the daily range now (structure, not an edge);
+     Fibonacci prices of the latest impulse and the cycle's next window ONLY when they hold; the stop's room; the ATR.
+     The old line "a stop under a swing low sits inside the sweep depth — use it for the stop's room" moved a tested stop
+     on an untested number — removed.
+   - One Axl: Mentor's per-turn sections still said PROMETHEUS'S / PROTEUS'S READ and "name him" (the name test only read
+     prompt files) — now by the job, with a test over those sections.
+   - Live Mentor turn (NVDA, "is the 50 MA a good stop? how much room?"): refused the 50 MA (did not hold), kept the
+     structure stop, gave the stop's room as a cost; the first replay called it "the analyst's" — the section now says whose.
+   Next: the Daedalus design talk.
 
 ## 9. History depth (checked live, FMP, TSLA, 2026-11-12)
 

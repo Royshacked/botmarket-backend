@@ -18,7 +18,7 @@ import { normalizeBuild, activeName, putName, reopenForRedraw, stageOf } from '.
 import { PRE_ENTRY } from '../entity/vocabulary.js'
 import { readFor, readTarget } from '../mentorReads.service.js'
 import { profileFor } from '../behaviourProfile.service.js'
-import { profileBrief } from '../tools/behaviourProfile.tools.js'
+import { profileBrief, mentorRead } from '../tools/behaviourProfile.tools.js'
 import { sessionService } from '../session.service.js'
 
 /**
@@ -72,7 +72,8 @@ async function _proteusRead(state) {
     const symbol = String(state?.active_asset || state?.draft?.asset || '').toUpperCase().trim()
     if (!symbol) return null
     const p = await profileFor(symbol).catch(() => null)
-    return p ? { symbol, at: p.computed_at ?? null, brief: profileBrief(p) } : null
+    // brief: the one line said in the chat; read: the levels he weighs (5b — proteus.md).
+    return p ? { symbol, at: p.computed_at ?? null, brief: profileBrief(p), read: mentorRead(p) } : null
 }
 
 // The experts' lines already in a session's chat, by `${sessionId}|${symbol}` — each says its read ONCE per name. Bounded.
