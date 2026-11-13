@@ -300,3 +300,13 @@ test('monitor: the overnight pass, then the day board, then the week board — a
     assert.deepEqual(await _tick({ enabled: () => false, nightly: step('x'), dayBoard: step('x') }), { outcome: 'off' })
     assert.deepEqual(order, ['n', 'd', 'w'])
 })
+
+test('a board queues Proteus\'s profile for every name on it, after it is saved; a failing queue never fails the board (proteus.md §4.4)', async () => {
+    const queued = []
+    const { deps, rows } = rig({ profiles: (symbols, source) => { queued.push({ symbols, source, saved: rows(DAY_BOARDS)[0]?.status }) } })
+    const r = await runDayBoard({ deps })
+    assert.equal(r.outcome, 'done')
+    assert.deepEqual(queued, [{ symbols: ['ABC'], source: 'hd_2026-10-21_open', saved: 'done' }])
+    const boom = rig({ profiles: () => { throw new Error('queue down') } })
+    assert.equal((await runDayBoard({ deps: boom.deps })).outcome, 'done')
+})

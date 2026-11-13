@@ -23,6 +23,7 @@ import { themeService } from '../api/strategy/theme.service.js'
 import { scanIndustry, scanTheme, pickForWeek } from '../api/strategy/changeScan.service.js'
 import { assessIndustry, assessTheme } from './industryAssessmentRun.service.js'
 import { runHouseScan } from './houseScan.service.js'
+import { queueProfiles } from './proteusQueue.service.js'
 import { houseResearchService, RESUME_WEEKS } from './houseResearch.service.js'
 import { houseLedgerUserId, listAdminUserIds } from '../api/user/user.model.js'
 import { postCard } from './notifyCard.js'
@@ -31,6 +32,17 @@ import { config } from './config.js'
 import { logger } from './logger.service.js'
 
 const LOG = '[pythiaWeekly]'
+
+/**
+ * The house scan's picks queued for Proteus's measured profile (proteus.md §4.5). Returns the scan's result untouched; a
+ * queue that throws never fails the week. Exported for tests.
+ */
+export function profileHousePicks(house, queue = queueProfiles) {
+    try { queue((house?.queued ?? []).map(q => q?.symbol).filter(Boolean), { source: 'house_scan' }) } catch (err) {
+        logger.warn(LOG, 'house picks not queued for Proteus', { error: err.message })
+    }
+    return house
+}
 export const COLLECTION = 'pythia_weekly'
 /** Weeks of history kept; older weeks are deleted when a week completes. */
 export const KEEP_WEEKS = 26
@@ -53,7 +65,8 @@ const _deps = {
     cap: () => config.pythiaWeeklyCap,
     maxUsd: () => config.pythiaWeeklyMaxUsd,
     // Step 7: the week's FOR SWING / FOR LONG TERM verdicts send names to Prometheus's research queue.
-    houseScan: (results, opts) => runHouseScan(results, undefined, opts),
+    // Argus's picks also get Proteus's measured profile, in the background (proteus.md §4.5) — never holds up the week.
+    houseScan: (results, opts) => runHouseScan(results, undefined, opts).then(profileHousePicks),
     // ...and Prometheus researches them by himself (house-research-chain.md steps 5-6).
     research: (week) => houseResearchService.researchWeek(week),
     resumeResearch: (weeks) => houseResearchService.resumeWeeks(weeks),

@@ -1081,6 +1081,11 @@ services/
                             from every bar), two-proportion z ≥ 3, and the recent third must still beat its own
                             baseline (judge → respects / faded / unconfirmed / no / thin); false breaks carry
                             sweep_depth_atr (median, p80). PURE.
+  proteusQueue.service.js   PROTEUS'S PROFILE AHEAD OF ANY ASK (proteus.md §4.4–4.5, step 4, 2026-11-12): queueProfiles
+                            (symbols, { source }) — the day boards (hotlist.day after a board is saved) and the house
+                            scan's picks (pythiaWeekly profileHousePicks) add names; ONE worker profiles them one at a
+                            time (profileFor — a name fresh this week costs nothing), GAP_MS between names, a 429 pauses
+                            and retries the same name. In memory on the loop leader; never throws
   behaviourProfile.service.js profileFor(symbol, { fresh }) — the profile FETCHED and KEPT: fetchProfileBars (5-minute
                             paged by week ~3 months, 1-hour by ~2 months a year, daily 10 years, weekly built from it
                             — weeklyFromDaily), the engine, makeMongoBackedCache `proteus_profiles` (a week;

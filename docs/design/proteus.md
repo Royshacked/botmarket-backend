@@ -151,6 +151,11 @@ recent-only read (e.g. the last 3 years, reported as "lately", never as a rule) 
    and Mentor (Axl's capture now carries the key `'axl'`), Axl's and Mentor's prompts, the FE agent + Technicals
    Desk + wave badge. Live-driven 2026-11-12 (908640ee): Axl → Proteus on TSLA (the daily 50 SMA held: 78% vs 49%,
    n 37 — reported with the chance caveat) and NVDA in the browser (nothing holds), desktop + 390px.
-4. **The triggers** — not built: Mentor's pre-trade read through the chain (§4.1), the measured profile on board
-   names (one name at a time — a profile is ~0.5 s of CPU on the leader), the nightly Pythia names.
+4. **The triggers** — BUILT 2026-11-12: Mentor's pre-trade read is his desk's own (`mentor.desk _proteusRead`, every
+   turn on the build's name, with Prometheus's deciding read — argus-rework.md §2.3). The measured profile on every
+   day-board name and on the house scan's picks goes through ONE queue, `services/proteusQueue.service.js` — one name
+   at a time, 2 s between names, a 429 pauses 60 s and retries the same name, the loop leader only, in memory (a
+   restart forgets the waiting names; the next board or the name's first open profiles it). The Pythia picks come out
+   of the WEEKLY run (pythiaWeekly → houseScan), not a nightly one. Live-checked: TSLA from the week cache, MSFT and
+   AMD profiled, ~10 s a name.
 5. **The Hotlist badge**, then Mentor weighing the read for his levels — not built.

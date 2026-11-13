@@ -28,6 +28,7 @@ import { COLLECTION as STATS, latestRun, claimRun } from './dailyScreener.servic
 import { etNow, etDate } from './hotlist.boards.js'
 import { config } from './config.js'
 import { logger } from './logger.service.js'
+import { queueProfiles } from './proteusQueue.service.js'
 
 const LOG = '[hotlist.day]'
 
@@ -72,6 +73,8 @@ const _deps = {
     perMinute: () => config.dailyScreenerRpm,
     now:       () => Date.now(),
     sleep:     (ms) => new Promise(r => setTimeout(r, ms)),
+    // Proteus's profile on the board's names, queued (proteusQueue — one at a time, after the board).
+    profiles:  (symbols, source) => queueProfiles(symbols, { source }),
 }
 /** Test seam. */
 export function _setDeps(d) { Object.assign(_deps, d) }
@@ -223,6 +226,9 @@ export async function runDayBoard({ deps = _deps } = {}) {
         await boards.updateOne({ id }, { $set: { ...board, finished_at: deps.now() } })
         await boards.deleteMany({ day: { $lt: _daysBefore(day, KEEP_DAYS) } })
         logger.info(LOG, `${id}: ${board.status} — ${board.rows.length} in play from a pool of ${board.counts.pool}${board.stopped ? `, stopped: ${board.stopped}` : ''}`)
+        // Proteus's measured profile on every name on the board, in the background (proteus.md §4.4) — a partial board's
+        // names too: they are on screen. Never holds up or fails the board.
+        try { deps.profiles?.(board.rows.map(r => r.symbol), id) } catch (err) { logger.warn(LOG, `${id}: profiles not queued — ${err.message}`) }
         return { ok: board.status === 'done', outcome: board.status, id, rows: board.rows.length, counts: board.counts }
     } catch (err) {
         logger.error(LOG, 'day board failed:', err.message)

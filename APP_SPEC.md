@@ -573,9 +573,13 @@ business (Prometheus's), picks nothing (Argus's). Long side only, for now.
   never carries a hit rate.
 - **One profile per stock, the house's** (`services/behaviourProfile.service.js`): binds to no account, kept a week
   in `proteus_profiles`; a name already profiled costs nothing whoever asks. Only the profile is kept, never the bars.
+- **Profiled before anyone asks** (2026-11-12, step 4): every day-board name (09:20 · 10:30 · 14:30) and every name
+  the house scan picks is queued for its measured profile (`proteusQueue.service` — code only, one name at a time, a
+  pause between names, the loop leader only), so Mentor, the chat and the Hotlist badge find it ready. The WRITTEN read
+  stays on open.
 - **Who sends users to him:** Axl ("how does TSLA behave?" → `<route>technicals TSLA</route>`) and Mentor (registry
-  `routedFrom`); no other desk lists him. Opened directly from the desks list too. Mentor's pre-trade read, the day
-  boards and the nightly Pythia names are build step 4 (not built).
+  `routedFrom`); no other desk lists him. Opened directly from the desks list too. Mentor reads his profile on every
+  turn of a build (step 4, built).
 - **No venue block.** He trades nothing, so he is the one desk with a user that carries neither `VENUE_RULE` nor the
   venue tools (`tests/unit/languageRule.test.js`).
 
