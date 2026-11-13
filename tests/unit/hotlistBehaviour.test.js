@@ -33,29 +33,33 @@ test('nothing holding is said plainly; no bars for the horizon → no badge at a
     assert.equal(behaviourBadge({ timeframes: { day: tf({ holds: ['sma50'] }) } }, 'bogus').badge, '50 MA', 'an unknown horizon reads like a swing')
 })
 
-test('nothing holds → the trait it DOES have, on the horizon\'s first timeframe: how often its low-breaks fake (Roy, 2026-11-13, option 2)', () => {
-    const faking = (rate, breaks = 40) => ({ ...tf(), atr_pct: 0.51, false_breaks: { breaks, false_rate: rate, sweep_depth_atr: { median: 0.24, p80: 0.5 }, after_sweep: { verdict: 'no' } } })
-    const b = behaviourBadge({ timeframes: { '5min': faking(0.744), '1hour': faking(0.71) } }, 'intraday')
-    assert.deepEqual({ badge: b.badge, kind: b.kind, holds: b.holds }, { badge: 'fakes 74%', kind: 'trait', holds: [] })
-    assert.equal(b.tip, 'Nothing technical holds on the 5-minute and 1-hour bars. What it does: 74% of its 40 breaks of a 5-minute swing low closed back above within 3 bars, sweeping ~0.24 ATR under the low. 5-minute ATR 0.51%. Click for the read.')
-    assert.equal(behaviourBadge({ timeframes: { day: faking(0.77), week: faking(0.6) } }, 'swing').badge, 'fakes 77%', 'a swing reads its daily breaks')
-    const holding = behaviourBadge({ timeframes: { day: { ...faking(0.77), indicators: { sma50: { verdict: 'respects' } } }, week: faking(0.6) } }, 'swing')
-    assert.deepEqual([holding.badge, holding.kind], ['50 MA', 'holds'], 'a line that holds is the badge — the trait is only for when nothing does')
-    assert.equal(behaviourBadge({ timeframes: { day: faking(null, 0), week: tf() } }, 'swing').kind, 'nothing', 'no breaks measured → nothing to say but "nothing"')
+test('nothing holds → the headline is its DAILY ATR, never the false-break rate; a rate that beats chance holds (Roy, 2026-11-13)', () => {
+    const fb = (rate, chance) => ({ breaks: 40, false_rate: rate, sweep_depth_atr: { median: 0.24, p80: 0.5 }, after_sweep: { verdict: 'no' }, chance })
+    const p = { timeframes: { '5min': { ...tf(), atr_pct: 0.51, false_breaks: fb(0.744, { verdict: 'chance', base: 0.79, z: -1.1 }) }, '1hour': tf(), day: { ...tf(), atr_pct: 3.02 } } }
+    const b = behaviourBadge(p, 'intraday')
+    assert.deepEqual({ badge: b.badge, kind: b.kind }, { badge: 'ATR 3.02%/day', kind: 'trait' }, 'noise is never a headline')
+    assert.match(b.tip, /^Nothing technical holds on the 5-minute and 1-hour bars\. It moves ~3\.02% a day\./)
+    const noDaily = behaviourBadge({ timeframes: { '5min': { ...tf(), atr_pct: 0.51 }, '1hour': tf() } }, 'intraday')
+    assert.equal(noDaily.badge, 'ATR 0.51% per 5-minute bar')
+    const faking = behaviourBadge({ timeframes: { day: { ...tf(), atr_pct: 3, false_breaks: fb(0.9, { verdict: 'more', base: 0.78, z: 4.1 }) }, week: tf() } }, 'swing')
+    assert.deepEqual([faking.badge, faking.kind], ['fakes its lows', 'holds'], 'a rate that BEATS chance is the stock\'s own — it holds')
+    const running = behaviourBadge({ timeframes: { day: { ...tf(), atr_pct: 3, false_breaks: fb(0.5, { verdict: 'less', base: 0.78, z: -5 }) }, week: tf() } }, 'swing')
+    assert.equal(running.badge, 'breaks follow through')
 })
 
-test('an opened row shows how the name trades on its horizon: what holds or what it does, the latest example, ATR, fit (proteus.md §8.1)', () => {
+test('an opened row shows how the name trades on its horizon: what holds, the breaks against chance, the stop room, the latest example, ATR, fit (proteus.md §8.1)', () => {
     const fb = (rate, breaks = 40) => ({ breaks, false_rate: rate, recent: { false_rate: 0.7 }, bars_to_direction: 3, sweep_depth_atr: { median: 0.24, p80: 0.53 },
-        latest: { at: '2026-11-12T05:00:00.000Z', reclaimed_at: '2026-11-12T05:00:00.000Z', level: 151.49, swept_to: 148.8, depth_atr: 0.27 }, after_sweep: { verdict: 'no' } })
-    const p = { timeframes: { day: { ...tf(), atr_pct: 2.99, gap_pct: 1.15, false_breaks: fb(0.768) }, week: { ...tf(), atr_pct: 7.47, false_breaks: fb(0.6, 12) } },
+        latest: { at: '2026-11-12T05:00:00.000Z', reclaimed_at: '2026-11-12T05:00:00.000Z', level: 151.49, swept_to: 148.8, depth_atr: 0.27 }, after_sweep: { verdict: 'no' },
+        chance: { verdict: 'chance', base: 0.79, z: -0.8 } })
+    const p = { timeframes: { day: { ...tf(), atr_pct: 2.99, gap_pct: 1.15, false_breaks: fb(0.768) }, week: { ...tf(), atr_pct: 7.47, false_breaks: { ...fb(0.6, 12), chance: { verdict: 'thin', base: null, z: null } } } },
         suitability: { day_trade: { fits: true, why: 'moves, liquid, and nothing technical holds' }, swing: { fits: true, why: 'moves and liquid, but nothing technical holds' } } }
     const row = rowProfile(p, 'swing')
-    assert.deepEqual(row.headline, { text: 'fakes 77%', kind: 'trait' })
+    assert.deepEqual(row.headline, { text: 'ATR 2.99%/day', kind: 'trait' })
     assert.deepEqual(row.on, ['day', 'week'])
     assert.deepEqual(Object.fromEntries(row.lines), {
         'What it obeys': 'Nothing technical holds on the daily and weekly bars.',
-        'Daily breaks of a low': '77% of 40 closed back above within 3 bars (recent 70%); sweeps ~0.24 ATR under the low (80% within 0.53); a direction ~3 bars after.',
-        'Weekly breaks of a low': '60% of 12 closed back above within 3 bars (recent 70%); sweeps ~0.24 ATR under the low (80% within 0.53); a direction ~3 bars after.',
+        'Daily breaks of a low': '77% of 40 closed back above within 3 bars — about what its own moves in random order do (79%): no trait of its own; sweeps ~0.24 ATR under the low (80% within 0.53) — the room a stop under a low needs; a direction ~3 bars after.',
+        'Weekly breaks of a low': '60% of 12 closed back above within 3 bars; sweeps ~0.24 ATR under the low (80% within 0.53) — the room a stop under a low needs; a direction ~3 bars after.',
         'Latest example': '2026-11-12 the swing low 151.49 was swept to 148.8 (0.27 ATR under), closed back above 2026-11-12.',
         'ATR': 'Daily 2.99% · Weekly 7.47% · typical gap 1.15%',
         'Fits': 'Day trade yes · swing yes — moves and liquid, but nothing technical holds.',
@@ -69,7 +73,7 @@ test('opening a row: computed when not stored, and every failure is a reason, ne
     const ok = await profileRow('nvda', 'swing', { profile: async () => ({ computed_at: '2026-11-13T01:00:00Z', timeframes: { day: { ...tf(), atr_pct: 3 }, week: tf() } }) })
     assert.equal(ok.symbol, 'NVDA')
     assert.equal(ok.computed_at, '2026-11-13T01:00:00Z')
-    assert.equal(ok.headline.text, 'nothing')
+    assert.equal(ok.headline.text, 'ATR 3%/day')
     assert.deepEqual(await profileRow('not a ticker!', 'swing', {}), { symbol: 'NOT A TICKER!', horizon: 'swing', reason: 'bad_symbol' })
     assert.equal((await profileRow('ZZZ', 'swing', { profile: async () => { throw new Error('no price history for ZZZ') } })).reason, 'no_history')
     assert.equal((await profileRow('ZZZ', 'intraday', { profile: async () => ({ timeframes: { day: tf() } }) })).reason, 'too_short')

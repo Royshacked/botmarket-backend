@@ -43,6 +43,8 @@ export const PROFILE = Object.freeze({
     cycleShuffles: 100, // the baseline: the same returns, reshuffled, this many times
     cycleMinN: 8,       // fewer intervals than this in the older two-thirds is 'thin'
     cycleMinRecent: 4,  // …and in the recent third, too few to confirm
+    // C2. The false-break rate's baseline (2026-11-13): the same bars in a shuffled order, this many times.
+    fbShuffles: 30,
 })
 
 /** A seeded uniform [0, 1) — the baseline must be the same on every run of the same bars. Pure. */
@@ -295,15 +297,67 @@ export function falseBreaks(bars, atrs, cut, drift, opts = PROFILE) {
     const n = breaks.length
     const nFalse = breaks.filter(b => b.false).length
     const rec = breaks.filter(b => b.i >= cut)
+    const old = breaks.filter(b => b.i < cut)
     return {
         breaks: n,
         false_rate: _round(n ? nFalse / n : null),
+        older: { breaks: old.length, false_rate: _round(old.length ? old.filter(b => b.false).length / old.length : null) },
         recent: { breaks: rec.length, false_rate: _round(rec.length ? rec.filter(b => b.false).length / rec.length : null) },
         bars_to_direction: _median(breaks.map(b => b.toDir)),
         sweep_depth_atr: { median: _round(_median(breaks.map(b => b.depth)), 2), p80: _round(_quantile(breaks.map(b => b.depth), 0.8), 2) },
         latest,
         after_sweep: after,
     }
+}
+
+/** The bars rebuilt from the same bars in a shuffled order — each bar's move and shape kept, the sequence gone. Pure. */
+function _shuffledBars(bars, rnd) {
+    const parts = []
+    for (let i = 1; i < bars.length; i++) {
+        const p = bars[i - 1].close, b = bars[i]
+        parts.push([b.close / p, b.open / p, b.high / b.close, b.low / b.close, b.volume])
+    }
+    for (let i = parts.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [parts[i], parts[j]] = [parts[j], parts[i]] }
+    const out = [bars[0]]
+    for (let i = 0; i < parts.length; i++) {
+        const [cr, or, hr, lr, v] = parts[i]
+        const prev = out.at(-1).close, close = prev * cr, open = prev * or
+        out.push({ open, close, high: Math.max(close * hr, open, close), low: Math.min(close * lr, open, close), volume: v, timestamp: bars[i + 1].timestamp })
+    }
+    return out
+}
+
+/**
+ * C2. IS THE FALSE-BREAK RATE THE STOCK'S, OR CHANCE'S? (Roy, 2026-11-13: "how come it's always false breaks") — a dip
+ * under a 2-bar swing low closing back inside 3 bars is what NOISE does most of the time: random walks score 75–86%. So
+ * the rate is compared with the same stock's bars in a shuffled order (`fbShuffles`, seeded): found on the older
+ * two-thirds — `more` (it fakes more than chance: breaks of its lows tend to reverse) or `less` (they tend to follow
+ * through), at z ≥ `z` and `edge` apart — and the recent third must still sit on the same side by `recentEdge`, else
+ * `faded`. Otherwise `chance`: the rate is what its own moves in any order would give, and says nothing about it. Pure.
+ */
+export function falseBreakChance(bars, cut, fb, opts = PROFILE) {
+    if (!fb?.older?.breaks || fb.older.breaks < opts.minN) return { verdict: 'thin', base: null, z: null }
+    const rnd = _rng(bars.length * 104729 + Math.round(bars[0].close * 100))
+    const base = []
+    for (let k = 0; k < opts.fbShuffles; k++) {
+        const sb = _shuffledBars(bars, rnd)
+        const r = falseBreaks(sb, calcATRSeries(_mon(sb), opts.atrPeriod), cut, [], opts)
+        if (Number.isFinite(r.older?.false_rate)) base.push(r.older.false_rate)
+    }
+    if (base.length < 5) return { verdict: 'thin', base: null, z: null }
+    const mean = base.reduce((a, b) => a + b, 0) / base.length
+    const sd = Math.sqrt(base.reduce((a, b) => a + (b - mean) ** 2, 0) / base.length)
+    const diff = fb.older.false_rate - mean
+    const z = sd > 0 ? diff / sd : null
+    const side = Number.isFinite(z) && z >= opts.z && diff >= opts.edge ? 'more'
+        : Number.isFinite(z) && z <= -opts.z && -diff >= opts.edge ? 'less' : null
+    let verdict = 'chance'
+    if (side) {
+        const r = fb.recent?.false_rate
+        const holds = fb.recent?.breaks >= opts.minRecent && Number.isFinite(r) && (side === 'more' ? r - mean >= opts.recentEdge : mean - r >= opts.recentEdge)
+        verdict = holds ? side : 'faded'
+    }
+    return { verdict, base: _round(mean), z: _round(z, 2) }
 }
 
 /**
@@ -421,7 +475,7 @@ export function timeframeProfile(bars, timeframe, opts = PROFILE) {
         atr_pct: _round(atrPct, 2), gap_pct: _round(gapPct, 2), dollar_volume: _round(dollarVol, 0),
         drift: { n: driftAll.n, rate: _round(driftAll.rate) },
         indicators,
-        false_breaks: falseBreaks(bars, atrs, cut, drift, opts),
+        false_breaks: (() => { const fb = falseBreaks(bars, atrs, cut, drift, opts); return { ...fb, chance: falseBreakChance(bars, cut, fb, opts) } })(),
         order_blocks: orderBlockTest(bars, atrs, medAtrPct, cut, opts),
         cycle: cycleTest(bars, cut, opts),
     }
@@ -432,6 +486,7 @@ const _respects = (tf) => (tf ? [
     ...(tf.false_breaks.after_sweep.verdict === 'respects' ? ['sweeps'] : []),
     ...(tf.order_blocks.verdict === 'respects' ? ['order_blocks'] : []),
     ...(tf.cycle?.verdict === 'respects' ? ['cycle'] : []),
+    ...(tf.false_breaks?.chance?.verdict === 'more' ? ['fakes'] : tf.false_breaks?.chance?.verdict === 'less' ? ['follows'] : []),
 ] : [])
 
 /** The thresholds for F — said in the read, so a reader can argue with them. */

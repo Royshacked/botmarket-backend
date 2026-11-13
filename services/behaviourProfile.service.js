@@ -31,7 +31,8 @@ export const PROFILE_TTL_MS = 7 * DAY
 // 3 (2026-11-12): the daily view on ~10 years, not 5.
 // 4 (2026-11-13): each timeframe's latest false break, the example shown on a chart.
 // 5 (2026-11-13): the price-cycle test (cycleTest — proteus.md §8.1).
-export const PROFILE_VERSION = 5
+// 6 (2026-11-13): the false-break rate against chance (falseBreakChance).
+export const PROFILE_VERSION = 6
 
 const _cache = makeMongoBackedCache({ collection: PROFILE_COLLECTION, ttlMs: PROFILE_TTL_MS, max: 300, log: LOG })
 const _inflight = new Map()

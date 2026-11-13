@@ -54,8 +54,12 @@ bracket or a capitalised label of your own (`<MEASURED>`, `[TODAY]`): the user r
 - **"Nothing holds" is the usual answer, and a good one.** Across the 11 names tested, NO test cleared the bar.
   On daily and weekly bars there are rarely enough cases to clear it at all — a strong but unconfirmed result is a
   near-miss, below. Say it plainly: "TSLA doesn't respect any moving average in a way you can lean on." Then give what IS
-  known: its ATR, how often its breaks are false and how deep, how fast it picks a direction, whether it fits a day
-  trade or a swing.
+  known: its ATR, how deep its sweeps under a low go (the room a stop needs), whether it fits a day trade or a swing.
+- **The false-break RATE is chance's unless the profile says otherwise.** A dip under a recent low that closes back
+  inside a few bars is what noise does most of the time (random price paths score ~75–86%). The profile compares the
+  stock's rate with its own bars in random order: when it says CHANCE, the rate is no trait of the stock — never present
+  "77% of its breaks are false" as how it behaves; say its breaks fake about as often as chance would. Only a rate the
+  profile marks MORE or LESS than chance (it then holds) is the stock's own.
 - **A test that HOLDS:** name it with its numbers (its win rate vs the baseline, how many cases, the recent
   stretch) and one caveat: it can still be chance.
 - **A near-miss** (well over the baseline but not cleared): you may mention it as a near-miss — never as a rule.

@@ -246,3 +246,21 @@ test('the price cycle: a random walk almost never "holds" one; a real rhythm doe
     assert.ok(c.window && c.window.from < c.window.to && c.window.from > c.window.last_low, 'the next window comes after the last low')
     assert.equal(cycleTest(series(closes.slice(0, 60)), 40).verdict, 'thin', 'too few lows to say')
 })
+
+test('the false-break rate is chance\'s on a random walk — never a trait of its own (Roy, 2026-11-13: "how come it\'s always false breaks")', async () => {
+    const { falseBreakChance, falseBreaks: fbOf } = await import('../../services/behaviourProfile.engine.js')
+    const { calcATRSeries } = await import('../../monitoring/evaluators/structured.evaluator.js')
+    const verdicts = []
+    for (let k = 0; k < 12; k++) {
+        const b = randomWalk(1200, 301 + k)
+        const atrs = calcATRSeries(b.map(x => ({ t: x.timestamp * 1000, o: x.open, h: x.high, l: x.low, c: x.close, v: x.volume })), PROFILE.atrPeriod)
+        const cut = Math.floor(b.length * (2 / 3))
+        const fb = fbOf(b, atrs, cut, driftOutcomes(b, atrs, PROFILE), PROFILE)
+        assert.ok(fb.false_rate > 0.6, `noise fakes most breaks (${fb.false_rate}) — which is why the rate alone means nothing`)
+        const c = falseBreakChance(b, cut, fb, PROFILE)
+        assert.ok(c.base > 0.6 && Number.isFinite(c.z), 'the baseline is the same bars in random order')
+        verdicts.push(c.verdict)
+    }
+    assert.ok(verdicts.filter(v => v === 'more' || v === 'less').length <= 1, `a random walk's rate is chance's: ${verdicts.join(',')}`)
+    assert.deepEqual(falseBreakChance(series([100, 101, 102]), 2, { older: { breaks: 3 } }, PROFILE), { verdict: 'thin', base: null, z: null })
+})

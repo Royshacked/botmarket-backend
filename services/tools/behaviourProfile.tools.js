@@ -75,6 +75,25 @@ export function cycleLine(c) {
         : head
 }
 
+/**
+ * The false-break rate against chance, in words — the same bars in a shuffled order (falseBreakChance). A rate that does
+ * not beat it is said to be chance's, so no reader takes it for a trait. `where`: 'row' (the opened Hotlist row), 'tool'
+ * (the technical analyst's text), 'brief' (the trader's one line). Pure.
+ */
+export function chanceWords(fb, where = 'row') {
+    const c = fb?.chance
+    if (!c || c.base == null || c.verdict === 'thin') return ''
+    const base = _pct(c.base)
+    if (where === 'tool') return `; vs ${base} for its own bars in random order — ${({ more: 'MORE false than chance (holds)', less: 'LESS false than chance: its breaks follow through (holds)', faded: 'beat chance in the older history, not lately', chance: 'CHANCE: no trait of its own' })[c.verdict] ?? c.verdict} (z ${c.z})`
+    if (where === 'brief') return c.verdict === 'chance' ? ` (chance: ${base})` : ` (vs ${base} by chance: ${c.verdict})`
+    return ({
+        chance: ` — about what its own moves in random order do (${base}): no trait of its own`,
+        more: ` — more often than its moves in random order (${base}): breaks of its lows tend to reverse`,
+        less: ` — less often than its moves in random order (${base}): breaks of its lows tend to follow through`,
+        faded: ` — once apart from chance (${base}), not lately`,
+    })[c.verdict] ?? ''
+}
+
 /** One timeframe → its lines. Pure. */
 export function timeframeLines(tf, t) {
     if (!t) return [`${TF[tf] ?? tf}: too few bars to measure (the 200 SMA needs ~260)`]
@@ -85,7 +104,7 @@ export function timeframeLines(tf, t) {
     return [
         head,
         ...Object.entries(t.indicators).map(([k, s]) => `  ${testLine(LABEL[k] ?? k, s, ['ema20', 'sma50', 'sma200', 'vwap'].includes(k) ? 'touches' : 'events')}`),
-        `  Breaks of a swing low: ${fb.breaks}, ${_pct(fb.false_rate)} FALSE (closed back above within ${PROFILE.sweepBack} bars; recent ${_pct(fb.recent.false_rate)})` +
+        `  Breaks of a swing low: ${fb.breaks}, ${_pct(fb.false_rate)} FALSE (closed back above within ${PROFILE.sweepBack} bars; recent ${_pct(fb.recent.false_rate)})${chanceWords(fb, 'tool')}` +
             `${fb.sweep_depth_atr?.median != null ? `; sweeps went ${fb.sweep_depth_atr.median} ATR under the low (80% within ${fb.sweep_depth_atr.p80})` : ''}` +
             `${fb.bars_to_direction != null ? `; a direction ~${fb.bars_to_direction} bars after the break` : ''}`,
         ...(fb.latest ? [`  ${latestLine(tf, fb.latest)}`] : []),
@@ -107,6 +126,7 @@ export const BADGE_TIMEFRAMES = Object.freeze({
 const BADGE_WORDS = Object.freeze({
     ema20: '20 EMA', sma50: '50 MA', sma200: '200 MA', vwap: 'VWAP', rsi_oversold: 'RSI under 30',
     macd_cross_up: 'MACD cross', volume_up_bar: 'volume', sweeps: 'sweeps lows', order_blocks: 'order blocks', cycle: 'price cycle',
+    fakes: 'fakes its lows', follows: 'breaks follow through',
 })
 
 /**
@@ -128,6 +148,7 @@ export function behaviourBadge(profile, horizon = null) {
             ...(t.false_breaks?.after_sweep?.verdict === 'respects' ? ['sweeps'] : []),
             ...(t.order_blocks?.verdict === 'respects' ? ['order_blocks'] : []),
             ...(t.cycle?.verdict === 'respects' ? ['cycle'] : []),
+            ...(t.false_breaks?.chance?.verdict === 'more' ? ['fakes'] : t.false_breaks?.chance?.verdict === 'less' ? ['follows'] : []),
         ]
         for (const k of keys) holds.push({ key: k, tf, label: `${BADGE_WORDS[k] ?? k} (${TF[tf].toLowerCase()})` })
     }
@@ -140,15 +161,16 @@ export function behaviourBadge(profile, horizon = null) {
             tip: `Measured on the ${on} bars, it holds at: ${holds.map(h => h.label).join(', ')}. Click for the read.`,
         }
     }
-    // Nothing holds: what it DOES do, on the timeframe the horizon trades on first.
-    const lead = present[0], t = profile.timeframes[lead], fb = t.false_breaks
-    const where = TF[lead].toLowerCase()
-    if (Number.isFinite(fb?.false_rate) && fb?.breaks > 0) {
-        const depth = fb.sweep_depth_atr?.median != null ? `, sweeping ~${fb.sweep_depth_atr.median} ATR under the low` : ''
-        const atr = t.atr_pct != null ? ` ${TF[lead].charAt(0)}${TF[lead].slice(1).toLowerCase()} ATR ${t.atr_pct}%.` : ''
+    // Nothing holds: its DAILY ATR — the one number every name has that is its own (Roy, 2026-11-13: the false-break rate
+    // was noise — random walks score 75–86% — and must never be a headline unless it beats chance, when it holds above).
+    const day = profile.timeframes.day
+    const lead = present[0], t = profile.timeframes[lead]
+    const atrPct = day?.atr_pct ?? t.atr_pct
+    if (Number.isFinite(atrPct)) {
+        const per = day?.atr_pct != null ? '/day' : ` per ${TF[lead].toLowerCase()} bar`
         return {
-            badge: `fakes ${_pct(fb.false_rate)}`, kind: 'trait', holds: [],
-            tip: `Nothing technical holds on the ${on} bars. What it does: ${_pct(fb.false_rate)} of its ${fb.breaks} breaks of a ${where} swing low closed back above within ${PROFILE.sweepBack} bars${depth}.${atr} Click for the read.`,
+            badge: `ATR ${atrPct}%${per}`, kind: 'trait', holds: [],
+            tip: `Nothing technical holds on the ${on} bars. It moves ~${atrPct}% a ${day?.atr_pct != null ? 'day' : 'bar'}. Click for the read.`,
         }
     }
     return {
@@ -174,8 +196,8 @@ export function rowProfile(profile, horizon = null) {
         const fb = profile.timeframes[tf].false_breaks
         if (!fb?.breaks) continue
         lines.push([`${tfWord(tf)} breaks of a low`,
-            `${_pct(fb.false_rate)} of ${fb.breaks} closed back above within ${PROFILE.sweepBack} bars (recent ${_pct(fb.recent?.false_rate)})` +
-            `${fb.sweep_depth_atr?.median != null ? `; sweeps ~${fb.sweep_depth_atr.median} ATR under the low (80% within ${fb.sweep_depth_atr.p80})` : ''}` +
+            `${_pct(fb.false_rate)} of ${fb.breaks} closed back above within ${PROFILE.sweepBack} bars${chanceWords(fb, 'row')}` +
+            `${fb.sweep_depth_atr?.median != null ? `; sweeps ~${fb.sweep_depth_atr.median} ATR under the low (80% within ${fb.sweep_depth_atr.p80}) — the room a stop under a low needs` : ''}` +
             `${fb.bars_to_direction != null ? `; a direction ~${fb.bars_to_direction} bars after` : ''}.`])
     }
     for (const tf of tfs) {
@@ -198,6 +220,8 @@ export function holdsOf(timeframes) {
         ...(t.false_breaks?.after_sweep?.verdict === 'respects' ? [`sweeps of lows (${TF[tf].toLowerCase()})`] : []),
         ...(t.order_blocks?.verdict === 'respects' ? [`order blocks (${TF[tf].toLowerCase()})`] : []),
         ...(t.cycle?.verdict === 'respects' ? [`a price cycle (${TF[tf].toLowerCase()})`] : []),
+        ...(t.false_breaks?.chance?.verdict === 'more' ? [`breaks of its lows reverse more than chance (${TF[tf].toLowerCase()})`] : []),
+        ...(t.false_breaks?.chance?.verdict === 'less' ? [`breaks of its lows follow through more than chance (${TF[tf].toLowerCase()})`] : []),
     ] : []))
 }
 
@@ -228,7 +252,7 @@ export function profileBrief(p) {
     const fit = p?.suitability ? `day trade ${p.suitability.day_trade.fits ? 'yes' : 'no'}, swing ${p.suitability.swing.fits ? 'yes' : 'no'}` : null
     return [
         holds.length ? `holds: ${holds.join(', ')}` : 'nothing technical holds',
-        fb?.breaks ? `breaks of a daily swing low are false ${_pct(fb.false_rate)}${fb.sweep_depth_atr?.median != null ? `, sweeps ~${fb.sweep_depth_atr.median} ATR deep (80% within ${fb.sweep_depth_atr.p80})` : ''}` : null,
+        fb?.breaks ? `breaks of a daily swing low are false ${_pct(fb.false_rate)}${chanceWords(fb, 'brief')}${fb.sweep_depth_atr?.median != null ? `, sweeps ~${fb.sweep_depth_atr.median} ATR deep (80% within ${fb.sweep_depth_atr.p80})` : ''}` : null,
         Number.isFinite(d?.atr_pct) ? `daily ATR ${d.atr_pct}%` : null,
         fit,
     ].filter(Boolean).join('; ')

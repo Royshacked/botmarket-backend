@@ -116,7 +116,13 @@ tools move here once Argus is fully defined (argus-rework §4).
    and the cycle test (`cycleTest` — cycleAnalysis's own troughs and consistency vs the same returns reshuffled 100×,
    z ≥ 3 on the older two-thirds, the recent third must still beat it; PROFILE_VERSION 5). Random walks: ≤1 in 20 hold one;
    a 20-session sine is found at ~20 with its next window. Live: NVDA, TSLA, KO, AMD — no cycle on any timeframe
-   (z −2.8 … +2.4; AMD 5-minute the nearest). Next: Wyckoff.
+   (z −2.8 … +2.4; AMD 5-minute the nearest).
+8. **The false-break RATE against chance** (Roy, 2026-11-13: "how come it's always false breaks"): random walks score
+   75–86% on it, so it said nothing about a stock. `falseBreakChance` compares it with the same bars in a shuffled order
+   (30×, seeded; found on the older two-thirds, the recent third must agree): MORE / LESS than chance holds ("fakes its
+   lows" / "breaks follow through"), else CHANCE — said so in the row, the analyst's text, the trader's line and his
+   prompt. Nothing holding → the headline is the DAILY ATR. The sweep depth stays — the room a stop needs, chance or not.
+   PROFILE_VERSION 6. Live: NVDA 77 vs 76, SLS, HAYW, SPCX — chance or faded on every timeframe. Next: Wyckoff.
 
 ## 9. History depth (checked live, FMP, TSLA, 2026-11-12)
 
