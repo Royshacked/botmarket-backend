@@ -28,11 +28,12 @@ const VERB = { setup: 'built', scan: 'saved', coverage: 'wrote coverage on', por
 
 const _cut = (s) => (s.length > LABEL_MAX ? `${s.slice(0, LABEL_MAX - 1)}…` : s)
 
-/** "Mentor built NVDA setup" — what a seal says it made. One wording for the sealed line and the next session's. */
-export function sealLabel({ agent, kind, ids, name = null }) {
+/** "Built NVDA setup" — what a seal says it made, naming no agent (one-axl.md). One wording for the sealed line and the next session's. */
+export function sealLabel({ kind, ids, name = null }) {
     const n     = Array.isArray(ids) ? ids.length : 0
     const label = _cut(name || `${n > 1 ? `${n} ` : ''}${kind.replace('_', ' ')}${n > 1 ? 's' : ''}`)
-    return `${deskOf(agent)?.brand ?? 'The desk'} ${VERB[kind] ?? 'made'} ${label}`
+    const verb  = VERB[kind] ?? 'made'
+    return `${verb.charAt(0).toUpperCase()}${verb.slice(1)} ${label}`
 }
 
 export function makeSealing({ sessions = sessionService, contexts = agentContextService, desks = DESK_DEFS, lock = withSessionLock } = {}) {
@@ -137,9 +138,10 @@ export function makeSealing({ sessions = sessionService, contexts = agentContext
         if (!sameItem) await putAside({ userId, sessionId, agent })
 
         // The collapsed card: what this agent already knows about the item, before the user types.
-        const brand = deskOf(agent).brand
-        const last  = (context?.messages ?? []).slice(-3).map(m => `${m.role === 'user' ? 'You' : brand}: ${m.content}`)
-        const card  = [`${brand} · ${_cut(name ?? `${kind.replace('_', ' ')} ${entityId}`)}`, context?.summary, ...last].filter(Boolean).join('\n')
+        // One Axl (one-axl.md): the card names the role, and the agent's lines are Axl's.
+        const role  = deskOf(agent)?.role ?? null
+        const last  = (context?.messages ?? []).slice(-3).map(m => `${m.role === 'user' ? 'You' : 'Axl'}: ${m.content}`)
+        const card  = [`${role ? `${role.charAt(0).toUpperCase()}${role.slice(1)} · ` : ''}${_cut(name ?? `${kind.replace('_', ' ')} ${entityId}`)}`, context?.summary, ...last].filter(Boolean).join('\n')
         const line  = await sessions.append({ sessionId, userId, message: {
             agent, role: 'assistant', kind: 'sealed', content: card, ref: { kind, ids: [entityId], reopened: true },
         } })

@@ -94,7 +94,7 @@ test('its desk busy → a decision; "set it aside" reopens it by id with force; 
     await r.runner.afterTurn({ user, sessionId: s.sessionId, agent: 'axl', origin: 'user', out: { payload: { edit: { kind: 'setup', ref: 'NVDA', desk: 'trade' } } } })
     const card = (await rows(r.sessions, s)).at(-1)
     assert.equal(card.kind, 'decision')
-    assert.match(card.content, /Mentor is in the middle of something else/)
+    assert.match(card.content, /There is other unsaved work with the trader/)
     assert.deepEqual(card.ref.choices.map(c => c.id), ['reopen', 'keep'])
     assert.deepEqual((await r.sessions.get({ sessionId: s.sessionId, userId: 'u1' })).chain.pending, { edit: { kind: 'setup', id: 's1' } })
 

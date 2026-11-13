@@ -349,3 +349,13 @@ test('ownWords: a desk\'s hand-back to Axl carries the user\'s own question when
     const r = { route: 'research', opening: null }
     assert.equal(ownWords(r, 'proteus', 'yes'), r, 'a desk\'s route elsewhere is unchanged')
 })
+
+test('a route\'s opening and a hand-back are marked as such — the chat draws the user\'s words once (one-axl.md, 2026-11-13)', async () => {
+    const { turn, sessions } = rig()
+    const s = await sessions.getActive({ userId: 'u1' })
+    await turn({ user, sessionId: s.sessionId, agent: 'mentor', text: 'what is in the news on NVDA?' })
+    await turn({ user, sessionId: s.sessionId, agent: 'axl', text: 'what is in the news on NVDA?', origin: 'reception' })
+    await turn({ user, sessionId: s.sessionId, agent: 'mentor', text: 'Build NVDA.', origin: 'opening' })
+    const asked = (await sessions.messagesSince({ sessionId: s.sessionId, userId: 'u1' })).filter(m => m.role === 'user')
+    assert.deepEqual(asked.map(m => m.ref?.opening ?? false), [false, true, true])
+})

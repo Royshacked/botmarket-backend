@@ -148,6 +148,16 @@ Steps 1 and 2 ship together — the chat must never say "Prometheus" under an "A
    Live: 8 desk turns ("who are you?", "who builds the trade?", an off-desk question) — 0 names; each answers as Axl
    in its role; the Proteus hand-back is silent.
 2. **The chat** — rows as Axl + role subtitle, hand-off divider, `@role` mentions, social chat as one Axl.
+   **BUILT 2026-11-13.** FE: `agentMeta` roles + `work` labels + `speakerOf`; every speaker tag, intro, turn tag, card
+   tag, toast and push title is "Axl · Role"; hand-offs AND a route's opening (`ref.opening`, server-marked) are not
+   drawn (`timelineRows.isOffScreen`) — decided on the drive: no divider, the subtitle carries it, and the user's
+   question shows once; the pane says "Trade work"/"Portfolio work"; ~200 board/surface strings reworded (Hotlist
+   "Picks", "Confirmed"). BE: `postBotCard` → the one Axl thread (sender = role), `getMessages` hides admin-only
+   roles' cards from non-admins, `@trader`/`@portfolio manager` mentions, seal/busy lines name no agent, and a chart an
+   agent SHOWS is now LIVE with its labelled lines (the unified chat never drew the PNG — Proteus's example chart was
+   lost). Driven (`scripts/drive-one-axl.mjs`): NVDA behaviour → Axl · Technical analyst + the example chart; the news
+   hand-back silent, answered by Axl, the question once; no internal name anywhere, desktop + 390px.
+   PENDING: `scripts/merge-bot-threads.mjs --apply` (dry run on axl_dev: 23 role threads, 1529 messages) — Roy's call.
 3. **The shared "about you"** — `user_profile`, written by the desks' own work, read by every role.
 4. **The work pane** — item titles; the Floor's desk list as things to do.
 5. **Info diagrams** — `{ flow, step }` from each desk, the five diagrams.

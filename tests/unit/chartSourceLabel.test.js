@@ -30,7 +30,7 @@ test('chart-img fallback is still labelled TradingView', async () => {
     assert.match(text, /^AAPL day TradingView chart/)
 })
 
-test('show_to_user forwards the PNG to onChart regardless of source', async () => {
+test('show_to_user opens a LIVE chart with the lines the agent drew, regardless of source (2026-11-13: the chat draws no PNG)', async () => {
     const seen = []
     const handler = makeChartHandler({
         log: '[test]', readText: '',
@@ -38,5 +38,8 @@ test('show_to_user forwards the PNG to onChart regardless of source', async () =
         renderChart: async () => ({ png: 'BBBB', source: CHART_SOURCE.OWN }),
     })
     await handler({ ticker: 'TSLA', timeframe: '1hr', show_to_user: true })
-    assert.deepEqual(seen, [{ symbol: 'TSLA', timeframe: '1hr', imageBase64: 'BBBB' }])
+    assert.deepEqual(seen, [{ symbol: 'TSLA', timeframe: '1hr', live: true }])
+    seen.length = 0
+    await handler({ ticker: 'NVDA', timeframe: 'day', show_to_user: true, levels: [{ price: 151.49, label: 'swing low Nov 12' }, { price: 148.8, label: 'swept to', kind: 'stop' }] })
+    assert.deepEqual(seen, [{ symbol: 'NVDA', timeframe: 'day', live: true, levels: [{ kind: 'level', price: 151.49, label: 'swing low Nov 12' }, { kind: 'stop', price: 148.8, label: 'swept to' }] }])
 })

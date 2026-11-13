@@ -38,7 +38,7 @@ test('a save RESOLVES the session — not kept, even one the user spoke in (its 
     const [line] = await r.sessions.messagesSince({ sessionId: next.sessionId, userId: 'u1' })
     assert.equal(line.agent, 'axl')
     assert.equal(line.kind, 'sealed')
-    assert.equal(line.content, '✓ Mentor built NVDA setup — saved to your Setups. You\'re back with Axl.')
+    assert.equal(line.content, '✓ Built NVDA setup — saved to your Setups. You\'re back with Axl.')
     assert.deepEqual(line.ref, { kind: 'setup', ids: ['s1'], ended: true })
 })
 

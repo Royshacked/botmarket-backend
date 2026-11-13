@@ -143,7 +143,7 @@ export function makeChainRunner({
         const theirs = session.agentState?.[to] ?? null
         if (!force && to !== chain.origin && theirs?.chainId !== chain.id && hasWork(to, theirs)) {
             return decide({ user, sessionId, agent: 'axl', chain: { ...chain, next: { art, from, index } }, decision: {
-                question: `${deskOf(to).brand} is in the middle of something else — finish that first or set it aside?`,
+                question: `There is other unsaved work with the ${deskOf(to)?.role ?? 'desk'} — finish that first or set it aside?`,
                 choices: [{ id: 'finish', label: 'Finish that first' }, { id: 'aside', label: 'Set it aside' }],
             } })
         }
@@ -208,7 +208,7 @@ export function makeChainRunner({
         if (out.reason === 'wrong_scope') return say('That one opens in the main chat — reopen it there.')
         if (out.reason === 'busy') {
             return decide({ user, sessionId, agent: 'axl', chain: { ...newChain('axl'), pending: { edit: { kind: edit.kind, id: found.id } } }, decision: {
-                question: `${deskOf(out.agent)?.brand ?? 'That desk'} is in the middle of something else — set it aside and open this?`,
+                question: `There is other unsaved work with the ${deskOf(out.agent)?.role ?? 'desk'} — set it aside and open this?`,
                 choices: [{ id: 'reopen', label: 'Set it aside and open it' }, { id: 'keep', label: 'Keep working' }],
             } })
         }
@@ -541,7 +541,7 @@ export function makeChainRunner({
         const running = session.chain && session.chain.status !== 'done' ? session.chain : null
         if (running && running.origin !== 'mentor') return true
         const art = makeArtifact({
-            kind: KIND.PROMETHEUS_READ, from: { agent: 'analyst', label: 'Prometheus' },
+            kind: KIND.PROMETHEUS_READ, from: { agent: 'analyst', label: 'Analyst' },
             items: [{ ticker: pending.symbol, horizon: pending.horizon, kind: read.kind ?? null, state: read.state, facts: read.facts ?? null, against: Boolean(read.against) }],
         })
         // A deciding read is handed ONCE per session and name, however it came (CR 2026-11-12: a landed one was handed again

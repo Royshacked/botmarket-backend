@@ -209,8 +209,12 @@ export function makeChartHandler({ log, onChart, readText, renderChart = cachedC
             // the trade itself, as lines. Capped and colour-coded by the renderer.
             const { png, source } = await renderChart(symbol, timeframe, studies, levels)
 
+            // SHOWN AS A LIVE CHART with the agent's labelled lines (2026-11-13): the unified chat draws live charts only —
+            // a PNG sent here never reached the screen (the Proteus NVDA drive: "as the chart shows", and no chart). The
+            // model still reads its PNG below; the user gets the same candles, interactive, with the lines it drew.
             if (show_to_user && typeof onChart === 'function') {
-                try { onChart({ symbol, timeframe, imageBase64: png }) }
+                const lines = normalizeChartLevels(levels).map(({ kind, price, label }) => ({ kind, price, label }))
+                try { onChart({ symbol, timeframe, live: true, ...(lines.length ? { levels: lines } : {}) }) }
                 catch (err) { logger.warn(log, 'onChart emit failed:', err.message) }
             }
 

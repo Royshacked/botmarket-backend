@@ -45,7 +45,7 @@ test('a seal moves the agent’s turns onto the entity, keeps hand-offs, leaves 
     // The session: Mentor's rows are gone; Axl's turn and Argus's hand-off stay; one sealed line.
     const left = await sessions.messagesSince({ sessionId: s.sessionId, userId: 'u1' })
     assert.deepEqual(left.map(m => `${m.agent}:${m.kind}`), ['axl:msg', 'scanner:handoff', 'mentor:sealed'])
-    assert.equal(left.at(-1).content, 'Mentor built NVDA setup')
+    assert.equal(left.at(-1).content, 'Built NVDA setup')
     const header = await sessions.get({ sessionId: s.sessionId, userId: 'u1' })
     assert.deepEqual(header.links.map(l => `${l.kind}:${l.id}`), ['setup:st1'])
     assert.equal(header.agentState.mentor, null)
@@ -87,7 +87,7 @@ test('Generate-all seals the same turns onto every setup it saved', async () => 
     const out = await seal.sealFromSession({ userId: 'u1', sessionId: s.sessionId, agent: 'mentor', kind: 'setup', entityIds: ['a', 'b'] })
     assert.equal(out.sealed, 2)
     for (const id of ['a', 'b']) assert.equal((await contexts.load({ userId: 'u1', kind: 'setup', entityId: id, agent: 'mentor' })).messages.length, 2)
-    assert.equal(out.line.content, 'Mentor built 2 setups')
+    assert.equal(out.line.content, 'Built 2 setups')
 })
 
 test('the Generate hook does nothing without a sessionId, and never throws with a bad one', async () => {
@@ -110,7 +110,7 @@ test('openForEdit puts the desk’s state back from the entity, marks it editing
     assert.deepEqual(header.agentState.mentor.editing, { kind: 'setup', entityId: 'st1', asset: 'AMD' })
     assert.deepEqual(header.agentState.mentor.draft, { asset: 'AMD', build: { names: [] } })
     assert.equal(header.floor, 'mentor')
-    assert.match(out.line.content, /^Mentor · AMD setup\nkeep size under 2%\nYou: long AMD$/)
+    assert.match(out.line.content, /^Trader · AMD setup\nkeep size under 2%\nYou: long AMD$/)
 })
 
 test('an UPDATE seals only when the agent is editing that entity — never its unrelated work in progress', async () => {

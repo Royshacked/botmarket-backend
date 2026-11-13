@@ -12,6 +12,7 @@ function _match(doc, q) {
         if (k === '$or') return v.some(sub => _match(doc, sub))
         if (v && typeof v === 'object' && '$ne' in v) return (_get(doc, k) ?? null) !== v.$ne
         if (v && typeof v === 'object' && '$in' in v) return v.$in.includes(_get(doc, k))
+        if (v && typeof v === 'object' && '$nin' in v) return !v.$nin.includes(_get(doc, k))
         if (v && typeof v === 'object' && '$exists' in v) return (_get(doc, k) !== undefined) === Boolean(v.$exists)
         if (v && typeof v === 'object' && '$gt' in v) return _get(doc, k) > v.$gt
         if (v && typeof v === 'object' && '$lt' in v) return _get(doc, k) < v.$lt

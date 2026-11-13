@@ -34,12 +34,12 @@ function fakeDb(subs) {
 
 // ── the notification ──────────────────────────────────────────────────────────
 
-test('a bot card is titled by the desk, bodied by the card, and opens on the message', () => {
+test('a bot card is titled Axl and the role (one-axl.md D8), bodied by the card, and opens on the message', () => {
     const n = notificationForMessage(
         { id: 'm1', conversationId: 'c1', senderId: 'mentor', content: 'Your LONG NVDA setup is confirmed — price reached the zone.', payload: { setupId: 's1' } },
         { tag: 'setup:s1' },
     )
-    assert.equal(n.title, 'Mentor')
+    assert.equal(n.title, 'Axl · Trader')
     assert.equal(n.body,  'Your LONG NVDA setup is confirmed — price reached the zone.')
     assert.equal(n.url,   '/?chat=c1&msg=m1')
     assert.equal(n.tag,   'setup:s1')

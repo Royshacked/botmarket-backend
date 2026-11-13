@@ -223,7 +223,11 @@ api/
                           meant a second tab displaced the first WITHOUT closing it — that browser
                           never reconnected and its unread badge silently froze); postCard → postBotCard is
                           the ONE notification transport (sendBotMessage is a back-compat alias with
-                          no caller outside this file); postUserCard is its HUMAN-sender twin — a
+                          no caller outside this file). ONE AXL (one-axl.md D8, 2026-11-13): every card
+                          lands in the user's ONE thread with Axl, the SENDER kept as the role's bot
+                          (the client writes "Axl · Trader"); getMessages drops ADMIN_BOT_IDS senders
+                          for a non-admin, the gate the separate threads used to be.
+                          scripts/merge-bot-threads.mjs moves the old role threads in (dry run default); postUserCard is its HUMAN-sender twin — a
                           card one user sends another (the shared setup), human recipient only,
                           nothing superseded — over the same writer and delivery as a text DM,
                           BOT_IDS (one notify bot per agent — it also keeps an ARCHIVED desk's id,

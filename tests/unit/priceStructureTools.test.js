@@ -50,7 +50,8 @@ test('structure handler surfaces the chart only when show_to_user is true', asyn
     const on = build()
     await on.handler({ ticker: 'AAPL', timeframe: 'day', show_to_user: true })
     assert.equal(on.calls.onChart.length, 1)
-    assert.equal(on.calls.onChart[0].imageBase64, 'PNGBYTES')
+    assert.equal(on.calls.onChart[0].live, true)
+    assert.equal(on.calls.onChart[0].imageBase64, undefined, 'no PNG on the wire — the chat draws live charts only')
 
     const off = build()
     await off.handler({ ticker: 'AAPL', timeframe: 'day' })

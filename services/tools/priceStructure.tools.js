@@ -91,10 +91,11 @@ export function makeStructureVisionHandler({ log, kind, vision, onChart, deps = 
                 logger.info(log, `get_${kind} refused — the turn's vision budget (${ctx.visionBudget.max}) is spent`)
                 return toolError(VISION_BUDGET_SPENT(`get_${kind}`, ctx.visionBudget.max))
             }
-            const { png, text } = await readStructure({ symbol: ticker, timeframe, kind, vision, onUsage: ctx?.onUsage, deps })
+            const { text } = await readStructure({ symbol: ticker, timeframe, kind, vision, onUsage: ctx?.onUsage, deps })
 
             if (show_to_user && typeof onChart === 'function') {
-                try { onChart({ symbol: String(ticker || '').toUpperCase(), timeframe, imageBase64: png }) }
+                // Live, like get_chart's (2026-11-13): the unified chat draws no PNG. The model keeps reading its own.
+                try { onChart({ symbol: String(ticker || '').toUpperCase(), timeframe, live: true }) }
                 catch (err) { logger.warn(log, 'onChart emit failed:', err.message) }
             }
             return text

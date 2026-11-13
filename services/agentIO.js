@@ -152,13 +152,13 @@ export function makePhaseCapture(maxPhase, onPhase) {
 // TWO triggers on ONE event, and the payloads differ because the two things ARE different:
 //
 //   the tag  (the USER asked to see a chart)  → `{ symbol, timeframe, live: true }`
-//   get_chart(show_to_user) (the AGENT shows what it read) → `{ symbol, timeframe, imageBase64 }`
+//   get_chart(show_to_user) (the AGENT shows what it found) → `{ symbol, timeframe, live: true, levels? }`
 //
 // A chart the user asked for is LIVE: the client mounts its own interactive chart (crosshair, zoom,
 // ticker/timeframe header, fresh candles), so nothing is rendered server-side and the row appears
-// instantly instead of after a headless-Chromium round trip. A chart the AGENT looked at stays a
-// still PNG on purpose — it is evidence of what the model actually saw, overlays included, and a
-// live chart would quietly redraw that evidence.
+// instantly instead of after a headless-Chromium round trip. A chart the AGENT shows was a still PNG until 2026-11-13
+// ("evidence of what the model saw") — but the unified chat renders live charts only, so those PNGs never reached the
+// screen. It is live now, carrying the labelled lines the agent drew (`levels`); the model still reads its own PNG.
 //
 // An agent whose TOOL charts are deliberately model-only (Argus) still gets the tag — the user
 // asking to look is not the agent illustrating itself.

@@ -127,12 +127,31 @@ export function segmentQuery(agent) {
  * null when the message names no one (an "@" elsewhere in the text is just text).
  */
 export function parseMention(text) {
-    const m = typeof text === 'string' ? text.match(/^\s*@([A-Za-z]+)[\s,:]+([\s\S]*)$/) : null
+    if (typeof text !== 'string') return null
+    // A ROLE first (one-axl.md, 2026-11-13: the user sees "Axl · Portfolio manager", so "@portfolio manager, …" is what
+    // they type) — the full role, longest first, or its last word when that names one role ("@manager" does not, "@trader"
+    // does). Then the key or the internal name, as before, so nothing already typed breaks.
+    for (const { agent, words } of ROLE_MENTIONS) {
+        const m = text.match(new RegExp(`^\\s*@${words}[\\s,:]+([\\s\\S]*)$`, 'i'))
+        if (m) return { agent, text: m[1].trim() }
+    }
+    const m = text.match(/^\s*@([A-Za-z]+)[\s,:]+([\s\S]*)$/)
     if (!m) return null
     const name  = m[1].toLowerCase()
     const agent = Object.values(DESKS).find(d => d.agent === name || d.brand.toLowerCase() === name)?.agent
     return agent ? { agent, text: m[2].trim() } : null
 }
+
+// "@portfolio manager" / "@portfolio" / "@stock picker" / "@trader" → the agent. Full roles first, longest first, so
+// "@technical analyst" is never read as "@analyst"; a single word only when it names one role.
+const ROLE_MENTIONS = (() => {
+    const roles = Object.values(DESKS).filter(d => d.role)
+    const full = roles.map(d => ({ agent: d.agent, words: d.role.split(' ').join('\\s+') }))
+    const firstWords = roles.map(d => ({ agent: d.agent, word: d.role.split(' ')[0] }))
+    const unique = firstWords.filter(f => firstWords.filter(g => g.word === f.word).length === 1 && f.word !== f.agent)
+        .map(f => ({ agent: f.agent, words: f.word }))
+    return [...full, ...unique].sort((a, b) => b.words.length - a.words.length)
+})()
 
 /** Normalize the messages being sealed: role-checked text, cut, timestamped. */
 export function toContextMessages(messages, now = Date.now()) {

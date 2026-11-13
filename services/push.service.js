@@ -4,6 +4,7 @@ import { config } from './config.js'
 import { logger } from './logger.service.js'
 import { httpError } from './httpError.util.js'
 import { COLLECTION as USERS } from '../api/user/user.model.js'
+import { DESKS } from './desks/registry.js'
 
 // WEB PUSH — the second delivery of a chat message, to the user's devices.
 //
@@ -26,11 +27,12 @@ const BODY_MAX = 140
 const TTL_SEC  = 60 * 60 * 24
 const ICON     = '/img/pwa-192.png'
 
-// The desk each bot id is branded as. Human senders carry their name on the message itself.
-const BOT_BRAND = Object.freeze({
-    axl: 'Axl', mentor: 'Mentor', portfolio: 'Atlas', scanner: 'Argus',
-    analyst: 'Prometheus', strategy: 'Pythia',
-})
+// Every bot is AXL to the user (one-axl.md D8, 2026-11-13), the role beside it: "Axl · Trader". The bot ids are the
+// registry's agent keys, so the role is the registry's — one source. Human senders carry their name on the message itself.
+const _cap = (s) => s.charAt(0).toUpperCase() + s.slice(1)
+const BOT_BRAND = Object.freeze(Object.fromEntries(
+    ['axl', 'mentor', 'portfolio', 'scanner', 'analyst', 'strategy'].map(id => [id, DESKS[id]?.role ? `Axl · ${_cap(DESKS[id].role)}` : 'Axl']),
+))
 
 // Injectable for tests: the send itself and the db.
 export const _deps = {

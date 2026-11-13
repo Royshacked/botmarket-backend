@@ -159,7 +159,10 @@ export function makeSessionTurn({
         // A chain turn has no user message: the hand-off the runner appended (addressed to this agent, in its
         // segment as a user turn) IS its prompt.
         if (origin !== 'chain') {
-            const asked = await sessions.append({ sessionId, userId: user._id, message: { agent, role: 'user', content: text } })
+            // A route's OPENING (or a hand-back to Axl) is the receiving role's first turn, not something the user typed again:
+            // marked, so the chat draws the user's words once (one-axl.md, 2026-11-13 — the drive showed the question twice).
+            const opening = origin === 'opening' || origin === 'reception'
+            const asked = await sessions.append({ sessionId, userId: user._id, message: { agent, role: 'user', content: text, ...(opening ? { ref: { opening: true } } : {}) } })
             if (asked.reason) return asked
         }
 

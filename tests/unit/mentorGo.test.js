@@ -77,7 +77,7 @@ test("a held press acts on the state as it is (no revision to name), and the ses
     const out = await r.actHeld({ user, sessionId: s.sessionId, agent: 'mentor', action: 'generateArmed', args: {} })
     assert.ok(out.result.nextSessionId)
     const [line] = await r.sessions.messagesSince({ sessionId: out.result.nextSessionId, userId: 'u1' })
-    assert.equal(line.content, "✓ Mentor built NVDA setup — saved and armed to your Setups, watching. You're back with Axl.")
+    assert.equal(line.content, "✓ Built NVDA setup — saved and armed to your Setups, watching. You're back with Axl.")
     // A client press still names its revision — a stale one is still refused.
     const r2 = makeActRig({ agent: 'mentor', desk, state: draftState, midChain: false })
     const { s: s2 } = await r2.start(user)

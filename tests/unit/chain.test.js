@@ -93,7 +93,7 @@ test('BUSY: the chain asks before taking over an agent’s own unsealed work; "s
     await argusPicked(r, s)
     const ask = (await rows(r.sessions, s)).at(-1)
     assert.equal(ask.agent, 'axl')
-    assert.match(ask.content, /^Mentor is in the middle of something else/)
+    assert.match(ask.content, /^There is other unsaved work with the trader/)
     assert.deepEqual(ask.ref.choices.map(c => c.id), ['finish', 'aside'])
     assert.equal(r.queued.length, 0)
     await r.runner.resume({ user, sessionId: s.sessionId, choice: 'aside' })

@@ -287,7 +287,10 @@ export async function postBotCard({ userId, content, type = 'text', payload = nu
     if (!userId) return null
     try {
         const bot = isBot(botId) ? String(botId) : BOT_USER_ID
-        const { conv } = await getOrCreateConversation(userId, bot)
+        // ONE AXL (one-axl.md D8, 2026-11-13): every card lands in the user's ONE thread with Axl. The SENDER stays the
+        // role's bot id — that is how the client writes "Axl · Analyst" under it, and how getMessages keeps an admin-only
+        // role's cards from a non-admin now that no separate thread hides them.
+        const { conv } = await getOrCreateConversation(userId, BOT_USER_ID)
         // ONE LIVE ASK PER ENTITY. Cards now survive being ignored, which is the point — but a
         // thesis that oscillates (validating → diverging → validating) would otherwise leave three
         // pending cards for one unfinished job, and "stays alive" would read as "nags". The newest
@@ -595,6 +598,10 @@ export async function getMessages(conversationId, userId, before, limit = 50, ro
     const query = { conversationId }
     if (before) query.createdAt = { $lt: Number(before) }
 
+    // An admin-only role's cards (the analyst's, the industry strategist's) share Axl's thread since one-axl.md — so the
+    // gate their own thread used to be is applied per message: a non-admin never reads them, a demoted admin included.
+    if (role !== undefined && role !== 'admin') query.senderId = { $nin: ADMIN_BOT_IDS }
+
     const msgs = await db.collection(MSGS)
         .find(query)
         .sort({ createdAt: -1 })
@@ -775,12 +782,15 @@ export async function listCardRecipientsSince(type, since) {
 export async function resolvePortfolioReviewCard(userId, portfolioId, { nextReviewAt = null, outcome = 'dismissed' } = {}) {
     try {
         const db = await _db()
-        const participants = [String(userId), 'portfolio'].sort()
-        const conv = await db.collection(CONVS).findOne({ participants })
-        if (!conv) return { ok: false, reason: 'no_conversation' }
+        // The card is in the user's Axl thread since one-axl.md (D8); a thread not yet merged still has it in the old
+        // portfolio feed — both are read, the newest card wins.
+        const convs = await db.collection(CONVS)
+            .find({ $or: [{ participants: [String(userId), BOT_USER_ID].sort() }, { participants: [String(userId), 'portfolio'].sort() }] }, { projection: { id: 1 } })
+            .toArray()
+        if (!convs.length) return { ok: false, reason: 'no_conversation' }
 
         const msg = await db.collection(MSGS)
-            .find({ conversationId: conv.id, type: 'portfolio_review', 'payload.portfolioId': portfolioId })
+            .find({ conversationId: { $in: convs.map(c => c.id) }, type: 'portfolio_review', 'payload.portfolioId': portfolioId })
             .sort({ createdAt: -1 })
             .limit(1)
             .next()
@@ -804,7 +814,7 @@ export async function resolvePortfolioReviewCard(userId, portfolioId, { nextRevi
         // Tell the open panels — the same frame every other resolve sends (this one sent none, so a review
         // card stayed pending on screen, and now in the session timeline too, until a reload).
         await _tryEmit(String(userId), 'message_resolved', {
-            id: msg.id, conversationId: conv.id, status, resolvedAt, resolveOutcome: outcome,
+            id: msg.id, conversationId: msg.conversationId, status, resolvedAt, resolveOutcome: outcome,
             // The review bubble draws "next review <date>" from its payload — the patch rides along so an open
             // card shows it without a reload (plan phase 7, J3).
             payloadPatch: { resolved: true, outcome, nextReviewAt },
