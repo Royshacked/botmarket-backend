@@ -7,8 +7,8 @@ import { SESSION_AGENTS, CONTEXT_KINDS } from '../../services/session.util.js'
 // The one desk registry (services/desks/registry.js). Five hand-kept lists derive from it now; these pin
 // that each derived list is EXACTLY what it replaced, so the move changed no route, no gate and no prompt.
 
-test("the pipelines a route may name: the seven it always was, and Proteus's `technicals` (2026-11-12)", () => {
-    assert.deepEqual([...VALID_PIPELINES].sort(), ['aether', 'assist', 'portfolio', 'research', 'scan', 'strategy', 'technicals', 'trade'])
+test("the pipelines a route may name: the seven it always was, Proteus's `technicals` (2026-11-12) and `reception`, back to Axl (2026-11-13)", () => {
+    assert.deepEqual([...VALID_PIPELINES].sort(), ['aether', 'assist', 'portfolio', 'reception', 'research', 'scan', 'strategy', 'technicals', 'trade'])
     assert.deepEqual([...PIPELINE_KEYS].sort(), [...VALID_PIPELINES].sort())
 })
 

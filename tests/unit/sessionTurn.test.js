@@ -342,3 +342,10 @@ test('the tools a turn called ride on its reply, and the next turn is told about
     assert.match(seen[1].common.messages[2].content, /^\[App note, not the user's words: .*get_behaviour_profile NVDA; get_chart NVDA.*\]\n\nhow did you do it so fast\?$/s)
     assert.ok(statuses.some(([e, d]) => e === 'status' && d.tool === 'get_chart'), 'the desk\'s own status events still go out')
 })
+
+test('ownWords: a desk\'s hand-back to Axl carries the user\'s own question when the desk wrote no opening (Roy, 2026-11-13)', () => {
+    assert.equal(ownWords({ route: 'reception', opening: null }, 'proteus', 'is NVDA a good business?').opening, 'is NVDA a good business?')
+    assert.equal(ownWords({ route: 'reception', opening: 'is it cheap?' }, 'proteus', 'x').opening, 'is it cheap?')
+    const r = { route: 'research', opening: null }
+    assert.equal(ownWords(r, 'proteus', 'yes'), r, 'a desk\'s route elsewhere is unchanged')
+})

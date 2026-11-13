@@ -220,3 +220,25 @@ test('the reconnect replay carries the chain and the agents’ states', async ()
     assert.deepEqual(sent[0].chain, { id: 'c1', status: 'awaiting', awaiting: { agent: 'axl', choices: ['continue'] } })
     assert.deepEqual(sent[0].agentState.mentor, { draft: 1 })
 })
+
+// ─── Back to reception (Roy, 2026-11-13) ─────────────────────────────────────
+
+test('a desk hands a question that is not its own back to Axl, who runs on it and may send it on ONCE — no loop', async () => {
+    const r = rig()
+    const s = await r.sessions.getActive({ userId: 'u1' })
+    const after = (agent, origin, payload, turnId = 't1') => r.runner.afterTurn({ user, sessionId: s.sessionId, agent, turnId, origin, out: { payload } })
+    // Proteus, asked about the business: back to Axl, with the user's question.
+    await after('proteus', 'user', { reply: "That's not mine — passing it to Axl.", route: 'reception', opening: 'is NVDA a good business?' })
+    assert.equal(r.queued.length, 1)
+    assert.deepEqual({ agent: r.queued[0].agent, text: r.queued[0].text, origin: r.queued[0].origin, turnId: r.queued[0].turnId },
+        { agent: 'axl', text: 'is NVDA a good business?', origin: 'reception', turnId: 't1_axl' })
+    // Axl, on that turn, routes it to Prometheus: followed, as an opening.
+    await after('axl', 'reception', { reply: 'Prometheus will look at it.', route: 'research', opening: 'is NVDA a good business?' }, 't1_axl')
+    assert.equal(r.queued.length, 2)
+    assert.deepEqual({ agent: r.queued[1].agent, origin: r.queued[1].origin }, { agent: 'analyst', origin: 'opening' })
+    // Prometheus's opening turn hands back again → not followed: two automatic turns at most.
+    await after('analyst', 'opening', { reply: 'x', route: 'reception', opening: 'is NVDA a good business?' }, 't1_axl_open')
+    // And a reception turn naming reception (a model slip past the gate) is not followed either.
+    await after('axl', 'reception', { reply: 'x', route: 'reception', opening: 'y' }, 't2_axl')
+    assert.equal(r.queued.length, 2)
+})

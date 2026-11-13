@@ -24,7 +24,7 @@
 // `...route.captures` in its tag captures, `...route.result()` in its return, and
 // `...routeFields(result, req.user.role)` in its controller's done payload.
 
-import { DESKS, PIPELINE_KEYS, ADMIN_PIPELINE_KEYS } from './desks/registry.js'
+import { DESKS, PIPELINE_KEYS, ADMIN_PIPELINE_KEYS, RECEPTION } from './desks/registry.js'
 
 // ─── The desks ────────────────────────────────────────────────────────────────
 
@@ -59,9 +59,19 @@ export const ROUTABLE_DESKS = Object.freeze(Object.fromEntries(
 // 'axl'); a capture with no key may not name a restricted desk.
 // Gated in the capture AND left off the sender's prompt, like the self-route.
 export function mayRoute(from, desk) {
+    // Back to reception: a main-chat DESK hands a question that is not its own to Axl. Never Axl himself (reception
+    // sending to reception is a loop), never a capture with no sender, never a desk in its own admin session (Axl does
+    // not speak there).
+    if (desk === RECEPTION) return backToReception(from)
     const d = ROUTABLE_DESKS[desk]
     if (!d?.routedFrom) return true
     return !!from && d.routedFrom.includes(from)
+}
+
+/** Whether `from` may hand a question back to Axl: a main-chat desk agent, not Axl. */
+export function backToReception(from) {
+    const d = DESKS[from]
+    return !!d && from !== 'axl' && d.scope === 'main'
 }
 
 // The desk each agent stands at, so its own door is left off its list. Argus is also the trade
@@ -178,7 +188,9 @@ export function cleanOpening(raw) {
     // Collapse the hard wrapping a model does inside a tag — this becomes a chat message, not a
     // document. Cap it because it is a first turn, not a brief: something longer is a summary the
     // desk did not ask for, and it is better served by the sentences than by an essay.
-    const text = raw.replace(/\s+/g, ' ').trim().slice(0, MAX_OPENING)
+    // A desk's `<ticker>NVDA</ticker>` markup is for ITS reply's chips; in an opening it would show raw as the user's
+    // message (Proteus's hand-back to Axl, 2026-11-13) — the name stays, the tag goes.
+    const text = raw.replace(/<ticker>\s*([^<]*?)\s*<\/ticker>/gi, '$1').replace(/\s+/g, ' ').trim().slice(0, MAX_OPENING)
     return text || null
 }
 
@@ -331,7 +343,23 @@ Emit, each on its own line, at the end of your reply:
 - \`<open>\` is the desk's FIRST TURN — it is sent as the user's message on arrival. The desk cannot see this conversation, so the opening is where what you learned travels: the user's ask, plus what you found on the name in this session. Facts and your read, not a summary of the chat and not the desk's conclusion — it forms its own.
 - **Always emit it.** Naming the desk is how the user said WHERE; the verb and what it acts on are WHAT they want done, and that is the opening. Route bare and the desk opens on a blank page and asks for what they just told you.
 - **Only when the user asked.** Never route to be helpful, and never to close a question you could answer here. One hand-off per turn; several names → ask which one first.
-- Say in one line where they are going and why. Do not describe a queue or a wait, and do not ask them to confirm — the block IS the hand-off; the app shows a button carrying it.`
+- Say in one line where they are going and why. Do not describe a queue or a wait, and do not ask them to confirm — the block IS the hand-off; the app shows a button carrying it.${backToReception(agentKey) ? RECEPTION_RULE : ''}`
 }
+
+// The hand-back half of the rule (Roy, 2026-11-13: "if I ask an agent a question that doesn't belong to him, he turns it
+// to Axl"). Constant, so every desk that carries it keeps one cached prompt. Exported for tests.
+export const RECEPTION_RULE = `
+
+## A question that is not yours — back to Axl
+
+When the user asks you something that belongs to another desk — not a request to go there, just a question outside your own work ("is it a good business?" at a technicals desk, "how does it trade?" at a research desk, a portfolio question while building one trade, the news, their account) — do not answer it, and do not just name the desk and stop. Hand it back to **Axl**, the app's reception, who sends it on to the right desk at once:
+
+<route>${RECEPTION}</route>
+<open>is NVDA a good business at this price?</open>
+
+- \`<open>\` is the user's question as they asked it, with the ticker — Axl reads it as their message.
+- One short line before it: "That's not mine to answer — passing it to Axl." Nothing else on that turn.
+- Only when it is plainly not yours. A question you can answer, even in part, is yours; a follow-up on what you just said is yours.
+- When the user asks to go to a named desk, route there directly (above), not through Axl.`
 
 export const routingUtil = { splitRoute, splitEdit, splitShow, cleanOpening, routeFor, mayRoute, sanitizeRouteSymbol, sanitizeEditRef, validateEdit, validateShow, routeFields, makeRouteCapture, buildRouteRule }

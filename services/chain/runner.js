@@ -16,7 +16,7 @@
 // fails pauses the chain and offers to try again — it is never left "running" with nothing in flight.
 
 import { sessionService } from '../session.service.js'
-import { deskOf, entryOf } from '../desks/registry.js'
+import { deskOf, entryOf, RECEPTION } from '../desks/registry.js'
 import { DESK_DEFS, hasWork } from '../desks/index.js'
 import { canSpeak } from '../desks/sessionTurn.js'
 import { withSessionLock, sessionDepth } from '../desks/turnLock.js'
@@ -183,7 +183,10 @@ export function makeChainRunner({
         if (!entry || !text || !canSpeak(entry.agent, session, user)) return
         // origin 'opening', not 'user': an opening runs ONE turn and never another opening or edit — two desks
         // routing to each other with openings would otherwise ping-pong paid turns with no cap and no chain to pause.
-        runQueued?.({ user, sessionId: session.sessionId, agent: entry.agent, text, input: carried(input), turnId: `${turnId ?? 'turn'}_open`, origin: 'opening' })
+        // A hand-back to Axl runs as 'reception': Axl may send the question on ONCE (to an 'opening', which stops) — so
+        // a question asked at the wrong desk costs at most two automatic turns, and never loops (Roy, 2026-11-13).
+        const origin = payload.route === RECEPTION ? 'reception' : 'opening'
+        runQueued?.({ user, sessionId: session.sessionId, agent: entry.agent, text, input: carried(input), turnId: `${turnId ?? 'turn'}_${origin === 'reception' ? 'axl' : 'open'}`, origin })
             .catch(err => logger.warn(LOG, 'opening turn failed', err.message))
     }
 
@@ -276,7 +279,10 @@ export function makeChainRunner({
         }
         if (payload?.route || !art) {
             if (chain) await end(user, sessionId, chain)
-            if (payload?.route && origin === 'user') followRoute({ user, session, payload, turnId, input })
+            // The user's own turn, or Axl sending on a question a desk handed back (never back to reception again).
+            if (payload?.route && (origin === 'user' || (origin === 'reception' && payload.route !== RECEPTION))) {
+                followRoute({ user, session, payload, turnId, input })
+            }
             return
         }
         return hop({ user, session, chain: chain ?? newChain(agent), art, from: agent })

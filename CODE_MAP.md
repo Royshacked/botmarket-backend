@@ -558,6 +558,12 @@ services/
                           (MainPage.handleRoute → handleAxlPick). Nothing structured crosses — the
                           OPENING is where what the sender found travels, as prose. WHEN to route is
                           each desk's judgment; the rule only gates it on the user's ask.
+                          BACK TO RECEPTION (2026-11-13): `<route>reception</route>` + the user's question
+                          — a main-chat desk asked something not its own hands it to Axl (registry
+                          composite → axl; mayRoute/backToReception: never Axl, never Pythia/Aether;
+                          RECEPTION_RULE closes those desks' route rule). The runner runs Axl as origin
+                          'reception', whose route it follows ONCE (as an 'opening', which stops): two
+                          automatic turns at most, no loop. cleanOpening unwraps <ticker> tags.
                           THIRD VERB (2026-09-25): `<show>setup id</show>` — open that item's own
                           DETAIL page. No desk (a detail view belongs to none), nothing changed, and
                           the capture drops it beside a route or an edit: one destination per turn.

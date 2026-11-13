@@ -250,3 +250,25 @@ for (const { key, own, chatStream, args } of DESKS) {
         assert.equal(result.opening, null)
     })
 }
+
+test('back to reception: every main-chat desk may hand a question to Axl; Axl, the admin desks and no sender may not (Roy, 2026-11-13)', async () => {
+    const { RECEPTION_RULE } = await import('../../services/routing.util.js')
+    const { entryOf } = await import('../../services/desks/registry.js')
+    assert.deepEqual(entryOf('reception'), { agent: 'axl', state: null })
+    for (const from of ['analyst', 'mentor', 'portfolio', 'scanner', 'proteus']) {
+        assert.equal(mayRoute(from, 'reception'), true, from)
+        assert.ok(buildRouteRule(from).endsWith(RECEPTION_RULE), `${from}'s prompt carries the hand-back`)
+    }
+    for (const from of ['axl', 'strategy', 'aether', null, 'nobody']) assert.equal(mayRoute(from, 'reception'), false, String(from))
+    for (const from of ['strategy', 'aether']) assert.ok(!buildRouteRule(from).includes(RECEPTION_RULE), `${from} talks where Axl does not`)
+    // The capture holds it: Axl naming reception routes nowhere; Proteus naming it routes.
+    const axl = makeRouteCapture('axl'); axl.captures.route('reception'); assert.equal(axl.result().route, null)
+    const pr = makeRouteCapture('proteus'); pr.captures.route('reception'); pr.captures.open('is it a good business?')
+    assert.deepEqual({ route: pr.result().route, opening: pr.result().opening }, { route: 'reception', opening: 'is it a good business?' })
+    assert.equal(routeFields({ route: 'reception', opening: 'q' }, 'trader').route, 'reception', 'a trader may be handed back')
+})
+
+test('an opening reads as plain words: a desk\'s <ticker> markup is unwrapped, the name kept (2026-11-13)', async () => {
+    const { cleanOpening } = await import('../../services/routing.util.js')
+    assert.equal(cleanOpening('is <ticker>NVDA</ticker> a good business vs <TICKER> amd </TICKER>?'), 'is NVDA a good business vs amd?')
+})

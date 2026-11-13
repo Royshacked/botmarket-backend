@@ -86,7 +86,13 @@ export const DESKS = Object.freeze({
 // have none (HAND_BACK below brings the name back). Kept as a key so a reply that still says it lands right.
 const COMPOSITES = Object.freeze({
     trade: Object.freeze({ agent: 'mentor', state: null }),
+    // BACK TO RECEPTION (Roy, 2026-11-13): a question asked at a desk that is not that desk's goes back to Axl, who sends
+    // it on — the routing judgment stays his. Any main-chat desk may name it; Axl may not (routing.util.mayRoute).
+    reception: Object.freeze({ agent: 'axl', state: null }),
 })
+
+/** The route key that hands a question back to Axl. */
+export const RECEPTION = 'reception'
 
 // The mode a desk's route PRESETS on its landing when the sender wants the result back: Mentor sending the
 // user to Argus is "find me ONE name to build on", so Argus starts in single-pick mode and the chain carries

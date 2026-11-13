@@ -18,7 +18,7 @@ import { sessionService } from '../session.service.js'
 import { agentContextService } from '../agentContext.service.js'
 import { getExperienceLevel } from '../experience.service.js'
 import { routeFields } from '../routing.util.js'
-import { deskOf, entryOf, handBackOf } from './registry.js'
+import { deskOf, entryOf, handBackOf, RECEPTION } from './registry.js'
 import { DESK_DEFS } from './index.js'
 import { deskCommon } from './common.js'
 import { buildConversation } from './context.js'
@@ -100,7 +100,8 @@ export function showLine(show) {
  */
 export function ownWords(routing, agent, text) {
     const words = typeof text === 'string' ? text.trim() : ''
-    if (agent !== 'axl' || !routing?.route || routing.opening || !words) return routing
+    // Axl's every route, and any desk's hand-back to him (the question it would not answer IS the user's message).
+    if ((agent !== 'axl' && routing?.route !== RECEPTION) || !routing?.route || routing.opening || !words) return routing
     return { ...routing, opening: words }
 }
 

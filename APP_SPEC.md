@@ -461,6 +461,13 @@ The other way out of Argus is **Prometheus**: an investing list goes there by th
 
 ### Desk-to-desk hand-off, by the user's ask (2026-09-18)
 
+**A question asked at the wrong desk goes back to Axl (2026-11-13).** After Axl hands the user to a desk, that desk
+holds the floor and answers what they type next. When the question is plainly another desk's ("is NVDA a good business?"
+at Proteus), the desk says one line and hands it back — `<route>reception</route>` with the user's question — and Axl
+answers it or sends it on, at once, without the user retyping. Routing judgment stays Axl's; a desk still routes
+straight to a desk the user names ("build me the trade" → Mentor). At most two automatic turns (desk → Axl → desk),
+never a loop; Pythia and Aether, in their own sessions, do not hand back.
+
 Any desk can send the user to any other desk with a name, on request. The mechanism is the one Axl
 has always routed with, shared (`services/routing.util.js`): the desk's reply carries
 `<route>desk SYMBOL</route>` + `<open>…</open>`; the controller validates it for this user
