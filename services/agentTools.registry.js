@@ -739,10 +739,12 @@ export const TOOL_SCHEMAS = {
     check_elliott_count: {
         "type": "object",
         "properties": {
+            "ticker": { "type": "string", "description": "The stock the count is on, e.g. NVDA." },
+            "timeframe": { "type": "string", "enum": ["1hr", "4hr", "day", "week"], "description": "The chart the count was read on — its candles are checked." },
             "direction": { "type": "string", "enum": ["up", "down"], "description": "The impulse's direction." },
             "points": { "type": "array", "items": { "type": "number" }, "description": "Prices in order: the start of wave 1, then the end of wave 1, 2, 3, 4, 5 as far as the count has got (3 to 6 prices)." }
         },
-        "required": ["direction", "points"]
+        "required": ["ticker", "timeframe", "direction", "points"]
     },
     // Argus's read of the house's industries for a book (docs/design/argus-on-pythia.md §3.2).
     get_house_industries: {

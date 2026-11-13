@@ -144,6 +144,13 @@ tools move here once Argus is fully defined (argus-rework §4).
      3–4; end of wave 5 once complete — past it wave 5 is still running) and wave 5's cap when wave 3 is shorter than wave 1.
      The prompt: call it before saying or drawing any count; impossible → never shown; one chart, the tool's level only.
      The first live replay invented a kill level for a complete count — hence the complete-count level.
+     THE CANDLE CHECK (Roy, 2026-11-13): the rules only see the prices given, so the tool also takes the ticker and
+     timeframe and finds each wave end on the candles — a high or low within 0.5% of it, the latest fitting bars, in order;
+     nothing between two wave ends past either of them; and the kill level not already crossed (for a complete count: no
+     bar past wave 5's end). A failure is NOT ON THE CHART, never shown; a fetch failure is UNCHECKED, never passed. Live:
+     NVDA daily — a count re-read until it passed; TSLA weekly — neither direction valid, said so, nothing drawn. The
+     false-break example chart is for behaviour answers only — a chart read draws its own chart (replays showed both,
+     then only the wrong one, until the rule said so where it is stated).
    - The Wyckoff phase: from the profile's range NOW, which phase it LOOKS like and the closes that prove it wrong. Live:
      SPY weekly, "Phase B, reaccumulation more plausible", range 702–779 with both invalidations.
    Next: 5b — the trader weighs the read (and the sweep depth) for his levels.

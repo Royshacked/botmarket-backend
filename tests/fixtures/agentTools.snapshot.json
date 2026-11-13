@@ -3631,10 +3631,24 @@
         },
         {
             "name": "check_elliott_count",
-            "description": "Check an Elliott impulse count against the three HARD rules before you say or show it: wave 2 never retraces past the start of wave 1; wave 3 is never the shortest of 1, 3 and 5; wave 4 never enters wave 1's price territory. Give the direction and the wave-end PRICES you read off the chart, in order — the start of wave 1, then the end of wave 1, 2, 3, 4, 5 as far as the count has got (at least the end of wave 2). Returns whether the count is POSSIBLE, which rule breaks if not, and the price that kills it from here (and how far wave 5 may run before wave 3 would be the shortest). Free and exact. A possible count is still an interpretation, never a measured rule — an impossible one is never shown.",
+            "description": "Check an Elliott impulse count against the three HARD rules before you say or show it: wave 2 never retraces past the start of wave 1; wave 3 is never the shortest of 1, 3 and 5; wave 4 never enters wave 1's price territory. Give the direction and the wave-end PRICES you read off the chart, in order — the start of wave 1, then the end of wave 1, 2, 3, 4, 5 as far as the count has got (at least the end of wave 2). Returns whether the count is POSSIBLE, which rule breaks if not, and the price that kills it from here (and how far wave 5 may run before wave 3 would be the shortest). Give the ticker and the timeframe you read it on: each wave end is then found on the candles (a high or low at that price, in order, the extreme of its legs) and the count is checked not to be dead already. A possible count is still an interpretation, never a measured rule — an impossible one is never shown.",
             "input_schema": {
                 "type": "object",
                 "properties": {
+                    "ticker": {
+                        "type": "string",
+                        "description": "The stock the count is on, e.g. NVDA."
+                    },
+                    "timeframe": {
+                        "type": "string",
+                        "enum": [
+                            "1hr",
+                            "4hr",
+                            "day",
+                            "week"
+                        ],
+                        "description": "The chart the count was read on — its candles are checked."
+                    },
                     "direction": {
                         "type": "string",
                         "enum": [
@@ -3652,6 +3666,8 @@
                     }
                 },
                 "required": [
+                    "ticker",
+                    "timeframe",
                     "direction",
                     "points"
                 ]
