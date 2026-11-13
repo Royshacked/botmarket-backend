@@ -157,7 +157,7 @@ Steps 1 and 2 ship together — the chat must never say "Prometheus" under an "A
    agent SHOWS is now LIVE with its labelled lines (the unified chat never drew the PNG — Proteus's example chart was
    lost). Driven (`scripts/drive-one-axl.mjs`): NVDA behaviour → Axl · Technical analyst + the example chart; the news
    hand-back silent, answered by Axl, the question once; no internal name anywhere, desktop + 390px.
-   PENDING: `scripts/merge-bot-threads.mjs --apply` (dry run on axl_dev: 23 role threads, 1529 messages) — Roy's call.
+   Merge APPLIED on axl_dev 2026-11-13 (23 role threads → the Axl threads, 1529 messages, 0 orphaned; backup in backups/). PENDING on prod (`DB_NAME=test`) — with the push.
 3. **The shared "about you"** — `user_profile`, written by the desks' own work, read by every role.
 4. **The work pane** — item titles; the Floor's desk list as things to do.
 5. **Info diagrams** — `{ flow, step }` from each desk, the five diagrams.
