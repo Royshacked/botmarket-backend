@@ -393,6 +393,22 @@ each name's SHUFFLED bars run the identical search — the search's luck lands o
   family's per-name value goes into the profile and Mentor takes it into consideration (Roy, 2026-11-16). Beside it,
   not for the bar: each value pooled over all names, before / after 2026-03-01.
 
+**Result (2026-11-16): FAIL on all five — no ticker has a value of its own beyond luck.**
+`data/lab/proteus-values.out.txt`. 1,133 names, median 10.0 years.
+
+- **Ten years answered it:** `thin` on only 2–4% of names (it was ~all on 4 years). Real `respects` vs shuffled:
+  MA as support 3 vs 4 · MA as a stop 6 vs 5 · RSI oversold 1 vs 1 · volume up bar 0 vs 1 · swing size as a stop 2 vs 1.
+  The bar was 2× and 10 more; at z 3 with the search, a handful a family is what luck gives — and the shuffled bars give
+  as many.
+- **The value names pick is spread like chance:** e.g. MAs as support — real sma200 145 · sma100 141 · ema200 136 …
+  ema10 44; shuffled sma200 149 · ema200 138 · ema100 132 … ema10 56. The order follows how often each line is touched
+  (a slow line is touched rarely, so its rate swings further), not the stock.
+- **Pooled, nothing either:** every MA as support at or UNDER its shifted copies (−3.2 … 0 points older); as a stop,
+  +0 … +1.5 points; RSI and volume bars under the drift in the older years; Mentor's swing size the same at every k
+  (+1.5 … +2.7 points older, ~0 recent).
+- **So:** Proteus keeps its one value of each method; the per-name profile does not choose values. Together with §10.3
+  and stock-playbook test 5: on ~1,100 names, neither the line, the value nor the stop's depth is a trait of a stock.
+
 ## 11. Build order and status
 
 1. **The measured profile engine** — BUILT 2026-11-12 (`services/behaviourProfile.engine.js`, 68080cdf): one
