@@ -409,6 +409,239 @@ each name's SHUFFLED bars run the identical search — the search's luck lands o
 - **So:** Proteus keeps its one value of each method; the per-name profile does not choose values. Together with §10.3
   and stock-playbook test 5: on ~1,100 names, neither the line, the value nor the stop's depth is a trait of a stock.
 
+### 10.5 The moves backwards — one company (declared 2026-11-16, before the run)
+
+Roy: "find the movements · look at the chart · how they started · is there a common thing — let's try one company".
+The other way round from §10.1–10.4: start from the MOVES and look back at the bar each began on. A DESCRIPTION of one
+name (LNG, ~10 years daily, `data/lab/screener-10y.jsonl`), not a test — what it finds is a candidate for a declared
+test across names. `scripts/lab-proteus-moves.mjs`.
+
+- **A move:** from a bar's close, the high reaches +4 ATR within 20 bars before any close 1 ATR under that close. Bars
+  that qualify within 20 bars of each other are ONE move; it STARTS on the one with the lowest close.
+- **The facts at the start's close (fixed now, all known on that bar):** a swept swing low (low under the latest 2-bar
+  swing low, close back above, in the last 3 bars) · a new 60-bar closing low in the last 3 bars · ≥ 3 ATR under the
+  20-bar high close · RSI 14 under 30 in the last 3 bars · 3+ down closes running · close over the 200 SMA · over the
+  50 SMA · within 0.5 ATR of the 50 or 200 SMA · volume ≥ 2× its 20-bar average · volume dried up (5-bar average under
+  0.7× the 50-bar) · ATR squeezed (under 0.8× its 100-bar median) · a tight 10 bars (range under 3 ATR) · a gap down
+  ≥ 0.5 ATR · a reversal bar (closes up, in the bar's top third) · SPY over its 200 SMA · SPY ≥ 5% under its 20-day high.
+- **Why a fact found before moves is not enough:** each is counted at the starts AND on every bar. Shown: its share at
+  the starts, its share on all bars, the LIFT (the ratio), and the forward rate — of the bars with it, how many began a
+  move, against all bars. Older two-thirds and recent third apart; and LNG's own bars SHUFFLED (20 seeds) run the same
+  count — a fact whose lift the shuffled bars give as well is chance (the SPY facts have no shuffled side).
+- **A candidate for a test across names:** lift ≥ 1.5 in the older two-thirds AND the recent third, ≥ 10 starts with
+  it in the older part, and the older lift over the shuffled bars' 95th percentile. Nothing goes into the profile from
+  one name.
+
+**Result (2026-11-16, LNG): no candidate.** `data/lab/proteus-moves-LNG.out.txt`. 2,513 bars, 31 moves (+8% … +52%).
+
+- **The common thing is that a move starts at a low:** at the starts, 3+ down closes (53% vs 15% of bars, older), a new
+  60-bar low (32% vs 7%), ≥ 3 ATR under the 20-bar high (32% vs 12%), under the 50 SMA (79%); never on an up bar.
+  That is the definition — a move starts on its lowest close — not a sign: of the bars that HAD those facts, no more
+  began a move than of any bar (9–21% vs 18%). LNG's shuffled bars show the same facts at their starts with lifts as
+  high or higher (shuffled 95th 4.2–7.6), and as many moves (29 a run vs 31).
+- **Nothing cleared the bar.** The few facts with a better forward rate are a few dozen bars (volume ≥ 2× in the recent
+  third: 29% vs 19%, n 28; at the 50/200 SMA in the recent third, 23% vs 19%) and did not hold in the older part.
+- **So:** looking back from LNG's moves shows the lows they started from, which every chart has; nothing on the start
+  bar told them apart from the bars that went nowhere.
+
+### 10.6 The pullback before an event — one company (declared 2026-11-16, before the run)
+
+Roy: "my next step was to connect it to another event — technical or fundamental". §10.5's common thing (a move starts
+at a low) is a GATE, not a sign; a rarer event may pick which low. The first event: EARNINGS. Same name (LNG), same
+moves and bars as §10.5; the dates from `data/lab/screener.extras.json` (`history`, 40 reports 2017-02 → 2026-10).
+`scripts/lab-proteus-moves-event.mjs`.
+
+- **The gate — a pullback:** 3+ down closes running, OR ≥ 3 ATR under the 20-bar high close, OR a new 60-bar closing
+  low in the last 3 bars (§10.5's three facts at the starts).
+- **The windows:** BEFORE = the 20 bars before a report's date (its bar left out: the report is not known yet);
+  AFTER = the report's bar and the 19 after it (beside it, for the drift after the report).
+- **Counted:** (a) of the moves, how many started in each window, against the share of all bars in it (the lift);
+  (b) the forward rate — of the bars with the gate in the window, how many began a move, against the gate anywhere,
+  the window without the gate, and every bar; (c) ONE entry a report — the first gate bar of its BEFORE window: how
+  many began a move; and the same on LNG's shuffled bars (20 seeds; the report dates stay, the prices are shuffled).
+  Older two-thirds and recent third apart.
+- **A candidate for the test across names:** the gate-in-the-window forward rate ≥ 1.5× the gate anywhere, older AND
+  recent, ≥ 10 one-a-report entries in the older part, over the shuffled bars' 95th percentile. Forty reports on one
+  name is a look, not a result.
+
+**Result (2026-11-16, LNG): no.** `data/lab/proteus-moves-event-LNG.out.txt`.
+
+- **(a) Moves did not gather before reports:** older 8 of 19 started in a BEFORE window (42% vs 31% of bars), recent
+  0 of 8; AFTER 6 of 19 and 1 of 8 (vs 32%).
+- **(b) A pullback before a report began a move as often as any bar:** older 19% vs 18% (every bar) and 17% (a pullback
+  anywhere); recent 15% vs 19%. Not on the declared list but there to see: before a report WITHOUT a pullback, older
+  28% (97/350) — the opposite of the idea, and recent 17%.
+- **(c) One entry a report:** older 5 of 17 (29%; shuffled bars median 17%, 95th 40%), recent 2 of 11 (18%; shuffled
+  median 25%).
+- **The June 2026 low was not in the window:** the 2026-06-18 move started 34 bars before the 2026-08-06 report; that
+  report's first pullback in its 20 bars (07-28) went +12%, under the +4 ATR bar.
+
+### 10.7 The chain backwards — one company, the moves only (declared 2026-11-16, before the run)
+
+Roy: "1. look for moves at the daily chart · 2. what led to the moves — technical · 3. if there is something in
+common, what led to the thing that led to the move — technical or fundamental · 4. what led to that, and so on" —
+"for now I don't care about days that a move didn't start"; "the steps after the first can be technical from the
+chart too". So a DESCRIPTION of the moves alone, link by link — no bars without a move beside it (Roy's call for now;
+§10.5 showed why a link needs that before it is traded). LNG, §10.5's moves. `scripts/lab-proteus-moves-chain.mjs`.
+
+- **Link 1 — the move** (§10.5).
+- **Link 2 — the pullback it started from:** the high = the highest close of the 60 bars before the start; its depth
+  (% and ATR), its length (bars), where it ended against the 50 and 200 SMA.
+- **Link 3 — what led to the pullback, at and just after the high (the chart):** a run into the high (the 20 bars
+  before it, ATR) · the high a new 250-bar high · RSI 14 over 70 at the high · stretched (≥ 3 ATR over the 50 SMA) ·
+  climax volume at the high (≥ 2× the 20-bar average) · a failed breakout (the high over the prior 60-bar high, a close
+  back under it within 5 bars) · a hard start (a gap down ≥ 1 ATR or a down day ≥ 2 ATR within 3 bars after the
+  high). Beside them: SPY over the same span, and a report between the high and the start.
+- **What counts as common:** a fact on at least two-thirds of the moves, in the older two-thirds AND the recent third.
+  It becomes link 3, and link 4 is asked of it the same way.
+
+**Result (2026-11-16, LNG): link 3 = a failed breakout.** `data/lab/proteus-moves-chain-LNG.out.txt`. 26 moves with
+310 bars behind them (18 older, 8 recent).
+
+- **Link 2, the pullback:** ≥ 2 ATR on 94% / 100%, ending under the 50 SMA on 78% / 88%. Median −12.3% (4.4 ATR) over
+  45 bars — slow pullbacks, not quick dips (≤ 20 bars on only 17% / 38%).
+- **Link 3, the high it fell from:** a NEW 60-BAR HIGH THAT REVERSED on 67% / 75% — the high closed over the prior
+  60-bar high and a close was back under THAT within 5 bars. **Corrected the same day: not a failed breakout.** The
+  prior 60-bar high at the top is the close just before it, so any top dips under it. Against the level the breakout
+  first broke (link 4's breakout): it ran a median 3.4 ATR further before the top; 14 of the 18 closed back under that
+  level, but 4–61 bars after the breakout (median ~16), and 4 never did. Near it: stretched ≥ 3 ATR over the 50 SMA 61% / 75%; a run of ≥ 3 ATR into
+  the high 50% / 50%. Not common: a 250-bar high, RSI over 70 (both ~45–50%), climax volume (6% / 0%), a hard start
+  (6% / 25%), SPY down (50% / 50%), a report in the pullback (61% / 50%).
+- **The chain so far:** a breakout to a new 60-bar high runs ~3 ATR on, tops → a slow pullback of ~4 ATR under the 50
+  SMA → the move. Described on the moves alone (§10.7); how often the same chain runs without a move is not counted.
+
+**Link 4 — what led to the failed breakout (declared 2026-11-16, before the run; Roy: "yes").** The moves whose link 3
+is a failed breakout. The breakout = the FIRST close over the prior 60-bar high in the 20 bars up to the high. At it:
+- **the base:** bars since that prior 60-bar high was set (how long it stayed under it); the 40 bars before the
+  breakout spanning < 6 ATR (a tight base); a run of ≥ 3 ATR in the 20 bars into it (off a run, not a base);
+- **the breakout bar:** volume ≥ 1.5× its 20-bar average; a gap up ≥ 0.5 ATR; a bar ≥ 1.5 ATR; over the 200 SMA;
+- **how far it got:** the best close over the old high, in ATR — a shallow breakout ≤ 1 ATR;
+- **beside it:** a report in the 5 bars before the breakout (beat / miss); SPY up over the 20 bars into it; SPY at a
+  60-day high on the breakout day too.
+Common = on ≥ two-thirds of those moves, older AND recent (§10.7's rule).
+
+**Link 4 result (2026-11-16, LNG): only what comes with any breakout.** 18 moves (12 older, 6 recent) — 16 breakouts:
+two pairs of moves fell from the same top. Common: over the 200 SMA (92% / 100% — near-automatic at a new 60-bar high)
+and SPY up over the 20 bars into it (67% / 67%). Not common: a tight base (50% / 33%), off a run (42% / 33%), volume
+≥ 1.5× (25% / 33%), a gap up (8% / 17%), a report in the 5 bars before (0% / 33%), SPY at its own 60-day high
+(33% / 33%), a shallow breakout (8% / 0%). The breakouts were of both kinds — out of a ~60-bar base (2018–2020) or
+straight off the last high (2021, 2024–26). Median: 9 bars under the old high, a 6.6-ATR base, a 2.7-ATR run in.
+The chain on LNG's chart ends here: link 4 is an uptrend in a rising market, which says nothing particular.
+
+**Name by name (declared 2026-11-16, before the run).** Roy: "my vision is this process for each name individually —
+each name's behaviour is different". The same chain, unchanged, on eleven very different names, side by side: LNG ·
+NVDA · TSLA · SMCI · ENPH · CELH (fast, volatile) · KO · PG · DUK (slow, defensive) · JPM · XOM. The question: do the
+chains DIFFER by name? If every name shows the same chain, it is how stocks move, not a name's own behaviour; if
+they differ, the per-name chain is worth building into Proteus. `node scripts/lab-proteus-moves-chain.mjs LNG NVDA …`
+→ each name's file and `data/lab/proteus-moves-chain-summary.out.txt`.
+
+**Result (2026-11-16): the chains do not differ — the same chain on all eleven.** 26–35 moves a name.
+- **Link 2 on every name:** a pullback of ≥ 2 ATR (86–100%) ending under the 50 SMA (72–100%). Only its SIZE differs,
+  and by the kind of stock: median −8% (KO, PG, DUK) … −25 to −29% (TSLA, SMCI, ENPH, CELH) — in ATR, 4.4–7.0 on all.
+- **Link 3:** a new 60-bar high that reversed — common on LNG (67/75%) and KO (68/70%), near it on most (PG 83/62,
+  DUK 73/62, NVDA 65/75, XOM 61/58); a run of ~3–4 ATR into the high and RSI ~63–70 at it on every name.
+- **Link 4 on every name:** over the 200 SMA and SPY up into the breakout — an uptrend in a rising market.
+- **Name by name the differences are of degree, not of chain:** NVDA's pullbacks came with SPY falling (71/75%); ENPH's
+  breakouts off a run (69/100%); LNG's pullbacks the slowest (median 45 bars vs 24–43).
+- **So:** described on its moves alone, every name's chain is the same: up into a new high, a slow pullback of 4–7 ATR
+  under the 50 SMA, the move. That is how stocks move, not a name's own behaviour; a per-name chain built on these
+  facts would read the same for every name. What does differ is size and pace, which the ATR already carries.
+
+**Patterns, order blocks and indicators at every link (declared 2026-11-16, before the run).** Roy: "did you check
+patterns / order blocks / indicators for every step?" — no: the links above used a short list. The same moves, links
+and eleven names, now with Proteus's own detectors (`smc.engine` order blocks and swings, `wyckoffTest` ranges and
+springs, the monitor's EMA / SMA / RSI / MACD). `scripts/lab-proteus-moves-patterns.mjs`. Common = §10.7's rule.
+- **At the low (the start bar; "near" = it or the 3 bars before):** at a bullish order block (a known block's zone —
+  formed within 250 bars — reached by a low, not sliced 0.5 ATR under) · a swept 2-bar swing low (closed back above
+  within 3 bars) · a Wyckoff spring (its dip near the low) · inside a Wyckoff range · the pullback retraced 38.2 / 50 /
+  61.8% (± 5 points) of the run into the top (from the lowest close of the 60 bars before it) — and the median depth ·
+  at the 200 SMA (a low within 0.5 ATR) · MACD under zero · MACD histogram turning up on the start bar · a MACD cross
+  up near it or in the 3 bars after · RSI bullish divergence (a lower close than the lowest of 40–5 bars before, a
+  higher RSI) · MACD bullish divergence (the same on the MACD line) · a double bottom (a low 10–60 bars before within
+  0.5 ATR, ≥ 2 ATR up between) · a hammer or a bullish engulfing on the start bar or the next.
+- **At the top (it ± 3 bars):** at a bearish order block (a known block's zone reached by a high, not cleared 0.5 ATR
+  over) · a swept 2-bar swing high (closed back under within 3 bars) · a MACD cross down in the 5 bars after · RSI
+  bearish divergence · MACD bearish divergence (as above, on highs) · a double top · a shooting star or bearish
+  engulfing on the top or the next bar.
+- **At the breakout (it and the 20 bars before):** a Wyckoff range breakout (a range ended by a close over it within 3
+  bars of the breakout) · a bullish order block retested in the 20 bars before · a swept swing low in them · MACD over
+  zero · a MACD cross up in the 10 bars before · 20 EMA over the 50 SMA · RSI over 60.
+- Left out, said so: head-and-shoulders, flags and wedges — no detector in the app, and drawn by eye they are not a
+  count.
+
+**Result (2026-11-16): the same on every name again; what is "common" is the detector, not the stock.**
+`data/lab/proteus-moves-patterns.out.txt`.
+- **Common on all or nearly all eleven:** at the low a bullish order block (70–100%), a double bottom (70–100%), MACD
+  under zero (10 names); at the top a bearish order block (9) and a double top (8); at the breakout a bullish OB
+  retested in the 20 bars before, MACD over zero, the 20 EMA over the 50, RSI over 60 (all 11).
+- **Those fire on almost any bar.** `detectOrderBlocks` finds 400–530 blocks in ten years (every fair-value gap makes
+  one), so 85–93% of ANY bar of LNG, KO and TSLA sits at a bullish or bearish block; the double bottom / top (0.5 ATR,
+  10–60 bars) fires on 67–83% of any bar. The breakout's four come with the definition — a new 60-bar high after a
+  run has MACD over zero and RSI over 60. Checked on every third bar from bar 400, the scratch count only; not a
+  comparison of outcomes.
+- **The selective ones are on no name's two-thirds:** Wyckoff springs (0–50%), Fibonacci 38.2/50/61.8 (10–44%), RSI /
+  MACD divergence (0–88%, never both parts), a MACD cross up at the low (11–64%), the 200 SMA (7–38%), hammer /
+  engulfing (7–50%), shooting star / engulfing at the top (6–47%), a Wyckoff range breakout (17–75%).
+- **One difference by name, of degree:** the pullback's depth as a share of the run into the top — median ~58% on LNG
+  and NVDA, 66% on PG and JPM, 72–80% on SMCI, ENPH, CELH and KO, ~95% (the whole run given back) on TSLA, DUK and XOM.
+- **So:** with patterns, order blocks and indicators at every link, the chain still reads the same for every name. A
+  detector loose enough to be on two-thirds of the moves is on most bars of any chart; the tight ones are on no name's
+  moves. Proteus's detectors as built are too loose to mark a name's own chain (the order-block count most of all).
+
+**Tightened detectors (declared 2026-11-16, before the run; Roy: "tighten the detectors — fundamentals later").** In
+the lab only (`--tight`); the engine's detectors stay as built until a tight one earns its place. Same moves, links,
+names.
+- **Order block, tight:** a block (as `detectOrderBlocks`) that (1) DISPLACED — the close 3 bars after the block bar
+  ≥ 1.5 ATR beyond its zone; (2) is NARROW — zone ≤ 1.5 ATR; (3) is RECENT — formed ≤ 120 bars before; (4) is FRESH —
+  the bar is its FIRST touch since it was known (no bar traded into the zone before). Bullish at the low and before the
+  breakout, bearish at the top.
+- **Double bottom / top, tight:** the earlier extreme a 2-bar swing, 15–60 bars before, within 0.25 ATR; ≥ 3 ATR the
+  other way between; the anchor's bar the extreme of its ± 2 bars.
+- **How loose each detector is, beside it:** the share of ANY bar it fires on (every third bar from bar 400, LNG / KO /
+  TSLA). Over 30% is marked LOOSE — a calibration of the detector, not an outcome. The others as before.
+- Common = §10.7's rule.
+
+**Result (2026-11-16): tight, they are rare — and then on no name's moves.** `data/lab/proteus-moves-patterns-tight.out.txt`.
+- **Order blocks, tight:** from 85–93% of any bar to 4% (bullish, at the low) and 9% (bearish, at the top). On the
+  moves: at the low 0–33% a name, at the top 0–25%, retested before the breakout 0–46% — on no name's two-thirds.
+- **Double bottom / top, tight:** from 67–83% of any bar to 9% / 15%. On the moves 0–38% / 0–32% — on none.
+- **What is still common is loose or comes with the definition:** MACD under zero at the low (40% of any bar; a
+  pullback under the 50 SMA has it), MACD over zero and the 20 EMA over the 50 at the breakout (60%), RSI over 60 at
+  it (27%, but a new 60-bar high after a run has it), a swept swing high at the top (42%, common on TSLA, DUK, XOM)
+  and a swept swing low before the breakout (73%, on SMCI, DUK, JPM, XOM).
+- **The one selective fact common on a few names:** a MACD cross down within 5 bars after the top (24% of any bar) —
+  LNG 83/75%, PG 72/69%, XOM 72/67% (NVDA 88/58% just misses). After a top momentum turns down, so it says little.
+- **So:** loose, the detectors are on every chart; tight, they are on few moves of any name. Neither marks a name's
+  own chain. On these eleven names the chart has given what it has: the same chain everywhere, its size and pace the
+  name's own (the ATR, the pullback's depth). Next, as Roy said: fundamentals at the pullback link.
+
+### 10.8 Size and pace, on every name (BUILT 2026-11-16)
+
+Roy: "so size and speed might be the individual behaviour we are looking for … we will run it from now on on each
+name"; "if a stock is for day trade, the same check on the lower timeframe — maybe 15-minute is better than 5-minute"
+→ option 2: the 15-minute BESIDE the 5-minute, for size and pace only, until the steadiness says which to keep.
+"Mentor later" — his read does not use it yet.
+
+- **Engine — K, `movesProfile`** (`behaviourProfile.engine.js`): on every timeframe, §10.5's moves (+4 ATR on a high
+  within 20 bars before a close 1 ATR under; one move per cluster, starting at its lowest close). On the 5- and
+  15-minute bars (`SESSION_MOVES`) a move must finish inside its own ET session — a day trade is flat at the close; not
+  on the 1-hour (it is the short term swing's too; inside one session it found 2 moves on LNG). Per move: the run into
+  the top it fell from (ATR, bars), the pullback (% of the run, ATR, bars), RSI and the stretch over the 50 at the top,
+  RSI, MACD (in ATR) and the distance to the 20 EMA / 50 / 200 SMA at the low, the move after (ATR, bars to +4 ATR).
+  Each measure: its median, older / recent medians, and STEADY when the recent third's median sits inside the older
+  two-thirds' middle half (`changed` when not; null under 7 older / 3 recent). Under 10 moves: `thin`. `now`: the top of
+  the last 60 bars, how far (ATR, % of the run) and how long since, RSI — where it stands against its own pullbacks.
+  A description, never an edge: the tool text says "never cite it as support".
+- **15-minute** (`fifteenFromFive`, the service): built from the 5-minute bars already fetched — no extra calls; in the
+  profile's `moves` only (`MOVES_ONLY_TIMEFRAMES`), not a full timeframe.
+- **Shown:** the opened Hotlist row, "<timeframe> size and pace" on the horizon's bars (a day trade: 5-minute,
+  15-minute, 1-hour); Proteus's tool text, a SIZE AND PACE block on every timeframe. PROFILE_VERSION 11 — stored
+  profiles are measured again on their next ask.
+- **Live, LNG 2026-11-16:** daily 27 moves, 11 of 14 measures steady — a run of ~7.5 ATR over ~47 days into a top, a
+  pullback of ~59% of it (4.4 ATR) over ~45 days to 1.8 ATR under the 50 SMA, RSI ~40 at the low, then ~4.8 ATR. Weekly
+  4 moves (thin). 5-minute 71 moves, 12 of 14 steady; 15-minute 15 moves, 4 of 14 steady — on one name the 5-minute is
+  the steadier; the choice waits for more names.
+
 ## 11. Build order and status
 
 1. **The measured profile engine** — BUILT 2026-11-12 (`services/behaviourProfile.engine.js`, 68080cdf): one
@@ -442,3 +675,5 @@ each name's SHUFFLED bars run the identical search — the search's luck lands o
    is queued after the weekly run (`profileHouseBook`), never from a look; Intraday / This week names still queue on a look.
    Driven (scripts/drive-proteus-badge.mjs): Intraday's 9 names, one request, all "nothing"; MBGL's badge → his read.
    Mentor weighing the read for his levels — not built.
+6. **Size and pace (K)** — BUILT 2026-11-16 (§10.8): every timeframe's moves described per name, the 15-minute beside
+   the 5-minute; in the opened row and the tool text. Mentor's use — later (Roy).

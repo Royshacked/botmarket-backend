@@ -10,7 +10,7 @@
 
 import { makeToolHandler } from '../agentUtils.js'
 import { profileFor } from '../behaviourProfile.service.js'
-import { PROFILE } from '../behaviourProfile.engine.js'
+import { PROFILE, MOVES } from '../behaviourProfile.engine.js'
 import { STRUCTURE } from '../swingStructure.service.js'
 
 const LOG = '[behaviourProfile.tools]'
@@ -31,7 +31,41 @@ const VERDICT = Object.freeze({
     respects: 'HOLDS', faded: 'held in the older history, NOT lately', unconfirmed: 'held, too few recent cases to confirm',
     no: 'no edge', thin: 'too few cases to say',
 })
-const TF = Object.freeze({ '5min': '5-MINUTE', '1hour': '1-HOUR', day: 'DAILY', week: 'WEEKLY' })
+const TF = Object.freeze({ '5min': '5-MINUTE', '15min': '15-MINUTE', '1hour': '1-HOUR', day: 'DAILY', week: 'WEEKLY' })
+
+// ─── K. Size and pace (proteus.md §10.8, Roy 2026-11-16) ───────────────────────
+const _n = (x, d = 1) => (Number.isFinite(x) ? String(Math.round(x * 10 ** d) / 10 ** d) : '—')
+const _signedAtr = (x) => (Number.isFinite(x) ? `${_n(Math.abs(x))} ATR ${x < 0 ? 'under' : 'over'}` : null)
+const MEASURE_WORDS = Object.freeze({
+    run_atr: 'the run', run_bars: 'the run\'s length', depth_pct: 'the pullback\'s depth', depth_atr: 'the pullback in ATR', pull_bars: 'the pullback\'s length',
+    rsi_top: 'RSI at the top', stretch_atr: 'the stretch over the 50', rsi_low: 'RSI at the low', macd_low_atr: 'MACD at the low',
+    vs_ema20_atr: 'the low vs the 20 EMA', vs_sma50_atr: 'the low vs the 50 SMA', vs_sma200_atr: 'the low vs the 200 SMA', gain_atr: 'the move', bars_to_move: 'the move\'s pace',
+})
+/** The size-and-pace timeframes of a horizon: its own, with the 15-minute beside the 5-minute (Roy, option 2). */
+export const movesViews = (tfs) => tfs.flatMap(tf => (tf === '5min' ? ['5min', '15min'] : [tf]))
+
+/**
+ * One timeframe's size and pace in words: its moves' typical run into a top, pullback, the indicators at the low, the
+ * move after; how many measures are steady (the recent third like the older two-thirds) and which changed; where it
+ * stands now against its own pullbacks. Null when not measured. Pure.
+ */
+export function movesWords(m, tf) {
+    if (!m) return null
+    const bar = tf === 'day' ? 'days' : tf === 'week' ? 'weeks' : 'bars'
+    if (m.verdict === 'thin') return `too few moves to say (${m.moves}; ${MOVES.minMoves} needed)${m.session_only ? ' — moves inside one session' : ''}.`
+    const x = m.measures, med = (k) => x[k]?.median
+    const lowVs = [['vs_ema20_atr', '20 EMA'], ['vs_sma50_atr', '50 SMA'], ['vs_sma200_atr', '200 SMA']]
+        .map(([k, w]) => (_signedAtr(med(k)) ? `${_signedAtr(med(k))} the ${w}` : null)).filter(Boolean).join(', ')
+    const steady = Object.values(x).filter(v => v.steady === 'steady').length, judged = Object.values(x).filter(v => v.steady).length
+    const changed = Object.entries(x).filter(([, v]) => v.steady === 'changed').map(([k]) => MEASURE_WORDS[k] ?? k)
+    const n = m.now
+    return `${m.moves} moves${m.session_only ? ' (inside one session)' : ''}: a run of ~${_n(med('run_atr'))} ATR over ~${_n(med('run_bars'), 0)} ${bar} into a top` +
+        `${Number.isFinite(med('rsi_top')) ? ` (RSI ~${_n(med('rsi_top'), 0)})` : ''}; a pullback of ~${_n(med('depth_pct'), 0)}% of it (${_n(med('depth_atr'))} ATR) over ~${_n(med('pull_bars'), 0)} ${bar}` +
+        `${lowVs ? `, to ${lowVs}` : ''}${Number.isFinite(med('rsi_low')) ? `, RSI ~${_n(med('rsi_low'), 0)} at the low` : ''}` +
+        `; then ~${_n(med('gain_atr'))} ATR, +${MOVES.up} ATR in ~${_n(med('bars_to_move'), 0)} ${bar}.` +
+        ` Steady lately: ${steady} of ${judged} measures${changed.length ? ` (changed: ${changed.join(', ')})` : ''}.` +
+        (n ? ` Now: ${_n(n.off_top_atr)} ATR${n.off_top_pct_of_run != null ? ` (${_n(n.off_top_pct_of_run, 0)}% of the run)` : ''} off its top ${n.bars_since_top} ${bar} ago${Number.isFinite(n.rsi) ? `, RSI ${_n(n.rsi, 0)}` : ''}.` : '')
+}
 
 /**
  * One test → "20 EMA: no edge — 66% vs 71% baseline (53 touches in the older two-thirds, z -0.5; recent third 71% vs
@@ -370,6 +404,11 @@ export function rowProfile(profile, horizon = null) {
         const f = fibWords(profile.timeframes[tf].fib)
         if (f) lines.push([`${tfWord(tf)} Fibonacci`, f])
     }
+    // Size and pace (K) on the horizon's timeframes — the 15-minute beside the 5-minute (Roy, option 2).
+    for (const tf of movesViews(BADGE_TIMEFRAMES[horizon] ?? BADGE_TIMEFRAMES.swing)) {
+        const w = movesWords(profile.moves?.[tf], tf)
+        if (w) lines.push([`${tfWord(tf)} size and pace`, w])
+    }
     const lead = profile.timeframes[tfs[0]].false_breaks?.latest
     if (lead) lines.push(['Latest example', latestLine(tfs[0], lead).replace(/^Latest false break \(the example to show\): /, '').replace(/ — chart it:.*$/, '.')])
     lines.push(['ATR', tfs.map(tf => `${tfWord(tf)} ${profile.timeframes[tf].atr_pct ?? '—'}%`).join(' · ') +
@@ -395,6 +434,11 @@ export function formatProfile(p) {
         `WHAT HOLDS: ${holds.length ? holds.join('; ') : 'nothing — no indicator, sweep or order-block rule beat its baseline on any timeframe'}.`,
         '',
         ...Object.entries(p.timeframes).flatMap(([tf, t]) => [...timeframeLines(tf, t), '']),
+        ...(p.moves ? [
+            `SIZE AND PACE — described on the name's own moves (+${MOVES.up} ATR within ${MOVES.within} bars before a close ${MOVES.stop} ATR under; intraday moves inside one session), its typical values (medians); "steady" = the recent third's median inside the older two-thirds' middle half. A description of how far and how fast it moves, not an edge — never cite it as support:`,
+            ...Object.entries(p.moves).map(([tf, m]) => `  ${TF[tf] ?? tf}: ${movesWords(m, tf) ?? 'too few bars to measure'}`),
+            '',
+        ] : []),
         `FITS: day trade ${fit(p.suitability.day_trade)}. Swing ${fit(p.suitability.swing)}.`,
     ].join('\n')
 }

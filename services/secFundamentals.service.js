@@ -152,3 +152,74 @@ export function splitAdjusted(sh) {
 
 /** The compact rows → the series fundamentalsAt reads. Pure. */
 export const prepareFundamentals = (c) => (c ? { revQ: quarterly(c.rev), niQ: quarterly(c.ni), eq: c.eq ?? [], sh: splitAdjusted(c.sh) } : null)
+
+// ── Cash flow (screener-lab.md §52, 2026-11-16) ────────────────────────────────────────────────────────────────────────
+
+/** Operating cash flow and capital spending go by more than one name; a period's FIRST filing under any of them wins. */
+export const OCF_CONCEPTS = Object.freeze(['NetCashProvidedByUsedInOperatingActivities', 'NetCashProvidedByUsedInOperatingActivitiesContinuingOperations'])
+export const CAPEX_CONCEPTS = Object.freeze(['PaymentsToAcquirePropertyPlantAndEquipment', 'PaymentsToAcquireProductiveAssets'])
+
+const _firstAcross = (g, concepts) => {
+    const by = new Map()
+    for (const c of concepts) for (const r of _durations(g[c]?.units?.USD)) { const k = `${r[0]}|${r[1]}`, cur = by.get(k); if (!cur || r[3] < cur[3]) by.set(k, r) }
+    return [...by.values()]
+}
+
+/** companyfacts JSON → `{ ocf, capex }`, duration rows `[start, end, val, filed]` (§52). Pure. */
+export function compactCashFlow(json) {
+    const g = json?.facts?.['us-gaap'] ?? {}
+    return { ocf: _firstAcross(g, OCF_CONCEPTS), capex: _firstAcross(g, CAPEX_CONCEPTS) }
+}
+
+/**
+ * Year-to-date duration rows → the quarters `[{ end, val, filed }]`, oldest first. A 10-Q's cash flow is filed from the
+ * fiscal year's start (3, 6, 9 months; the 10-K 12): each quarter is its year-to-date less the one before, filed when the
+ * later one was. A ~3-month period filed as such is kept as it is. Pure.
+ */
+export function quarterlyFromYtd(rows) {
+    const q = new Map(), byStart = new Map()
+    for (const [start, end, val, filed] of rows ?? []) {
+        const n = _days(start, end)
+        if (n >= 80 && n <= 100 && !q.has(end)) q.set(end, { end, val, filed })
+        if (n >= 80 && n <= 380) (byStart.get(start) ?? byStart.set(start, []).get(start)).push({ end, val, filed, n })
+    }
+    for (const ytd of byStart.values()) {
+        ytd.sort((a, b) => a.end.localeCompare(b.end))
+        for (let k = 1; k < ytd.length; k++) {
+            const a = ytd[k - 1], b = ytd[k], step = b.n - a.n
+            if (step < 80 || step > 100 || q.has(b.end)) continue
+            q.set(b.end, { end: b.end, val: b.val - a.val, filed: b.filed })
+        }
+    }
+    return [...q.values()].sort((a, b) => a.end.localeCompare(b.end))
+}
+
+/**
+ * What was known of the cash flow on `day`: the last filed quarter's operating cash flow, the four quarters' operating
+ * and free cash flow (operating less capital spending; capex missing → free cash flow unknown). Pure.
+ */
+export function cashFlowAt(cfq, day) {
+    const out = { ocf_q: null, ocf_q_end: null, ocf_ttm: null, fcf_ttm: null }
+    const oq = (cfq?.ocfQ ?? []).filter(x => x.filed <= day)
+    if (!oq.length) return out
+    const k = oq.length - 1
+    out.ocf_q = oq[k].val
+    out.ocf_q_end = oq[k].end
+    out.ocf_ttm = _ttm(oq, k)
+    if (out.ocf_ttm != null) {
+        const cq = (cfq?.capexQ ?? []).filter(x => x.filed <= day)
+        const j = cq.findIndex(x => x.end === oq[k].end)
+        const capTtm = j >= 0 ? _ttm(cq, j) : null
+        out.fcf_ttm = capTtm != null ? out.ocf_ttm - capTtm : null
+    }
+    return out
+}
+
+/** The compact cash-flow rows → the series cashFlowAt reads. Pure. */
+export const prepareCashFlow = (c) => (c ? { ocfQ: quarterlyFromYtd(c.ocf), capexQ: quarterlyFromYtd(c.capex) } : null)
+
+/** The last filed quarter's net income on `day` → `{ end, val }` or null (the prepared fundamentals' niQ). Pure. */
+export function lastQuarterNi(f, day) {
+    const nq = (f?.niQ ?? []).filter(x => x.filed <= day)
+    return nq.length ? { end: nq.at(-1).end, val: nq.at(-1).val } : null
+}

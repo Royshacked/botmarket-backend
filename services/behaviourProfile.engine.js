@@ -752,8 +752,142 @@ export function suitability(tfs, s = SUITABILITY) {
     }
 }
 
-/** The whole profile: `{ '5min'?, '1hour'?, day?, week? }` bars → each timeframe's profile + F. Pure. */
+// ─── K. SIZE AND PACE — the name's own moves (proteus.md §10.7–10.8, Roy 2026-11-16) ─────────────────────────────
+// The labs walked back from each name's moves (§10.5–10.7): the CHAIN was the same on every name (up into a new high, a
+// slow pullback under the 50 SMA, the move) and no pattern marked a name's own; what differed by name was SIZE and
+// PACE. "We will run it from now on on each name." Described on the name's moves alone; each measure's typical value
+// (median) and whether the recent third still looks like the older two-thirds — the name's own rhythm or a change.
+
+/** K's rules, fixed (§10.5's move, §10.7's links). */
+export const MOVES = Object.freeze({
+    up: 4,          // a move: the high reaches +4 ATR …
+    stop: 1,        // … before a close 1 ATR under the start's close …
+    within: 20,     // … within 20 bars; qualifying bars within 20 of each other are ONE move, starting at the lowest close
+    look: 60,       // the top a move's pullback came from: the highest close of the 60 bars before the start
+    minMoves: 10,   // fewer moves than this is 'thin'
+    minOlder: 7,    // a measure's steadiness needs this many older moves …
+    minRecent: 3,   // … and this many recent ones
+})
+/** The measures, in the order they are told. */
+export const MOVE_MEASURES = Object.freeze(['run_atr', 'run_bars', 'depth_pct', 'depth_atr', 'pull_bars', 'rsi_top', 'stretch_atr',
+    'rsi_low', 'macd_low_atr', 'vs_ema20_atr', 'vs_sma50_atr', 'vs_sma200_atr', 'gain_atr', 'bars_to_move'])
+
+/**
+ * The timeframes whose moves must finish inside one session — the day trade's bars. Not the 1-hour: it is the short term
+ * swing's too, which holds overnight, and +4 hourly ATR inside one session is rare (LNG, live 2026-11-16: 2 moves).
+ */
+export const SESSION_MOVES = new Set(['1min', '5min', '15min', '30min'])
+
+const _q = (xs, p) => { const v = xs.filter(Number.isFinite).sort((a, b) => a - b); if (!v.length) return null; const k = (v.length - 1) * p, lo = Math.floor(k); return v[lo] + (v[Math.min(v.length - 1, lo + 1)] - v[lo]) * (k - lo) }
+
+/**
+ * Per bar: does a move begin at its close? `session` (intraday): the move must finish inside the bar's own ET session —
+ * a day trade is flat at the close, so a rise that completes after the overnight gap is not a day-trade move. Null when
+ * there is no room ahead (or no ATR). Pure.
+ */
+export function moveFlags(bars, atrs, { session = false } = {}, m = MOVES) {
+    const day = session ? bars.map(b => _etDay.format(new Date(_ms(b.timestamp)))) : null
+    return bars.map((b, i) => {
+        const a = atrs[i]
+        if (!Number.isFinite(a) || a <= 0 || i + m.within >= bars.length) return null
+        for (let j = i + 1; j <= i + m.within; j++) {
+            if (session && day[j] !== day[i]) return false
+            if (bars[j].high >= b.close + m.up * a) return true
+            if (bars[j].close <= b.close - m.stop * a) return false
+        }
+        return false
+    })
+}
+
+/** The moves' start bars: qualifying bars within `within` of each other are one move, starting at its lowest close. Pure. */
+export function moveStartsOf(bars, flags, m = MOVES) {
+    const starts = []
+    let group = []
+    const flush = () => { if (group.length) starts.push(group.reduce((x, y) => (bars[y].close < bars[x].close ? y : x))); group = [] }
+    for (let i = 0; i < flags.length; i++) {
+        if (flags[i] !== true) continue
+        if (group.length && i - group.at(-1) > m.within) flush()
+        group.push(i)
+    }
+    flush()
+    return starts
+}
+
+/**
+ * One timeframe's SIZE AND PACE: per move, the run into the top it pulled back from, the pullback, the indicators at the
+ * top and at the low, and the move after — each measure's median, its older / recent medians, and `steady` (the
+ * recent median inside the older moves' middle half), `changed`, or null (too few on a side). `now`: where the name
+ * stands against its own pullbacks at the last bar. Null under 260 bars. Pure.
+ */
+export function movesProfile(bars, timeframe, m = MOVES) {
+    if (!Array.isArray(bars) || bars.length < 260) return null
+    const closes = bars.map(b => b.close)
+    const atrs = calcATRSeries(_mon(bars), PROFILE.atrPeriod)
+    const session = SESSION_MOVES.has(timeframe)
+    const flags = moveFlags(bars, atrs, { session }, m)
+    const starts = moveStartsOf(bars, flags, m)
+    const e20 = calcEMASeries(closes, 20), s50 = calcSMASeries(closes, 50), s200 = calcSMASeries(closes, 200)
+    const rsi = calcRSISeries(closes, 14), { line } = calcMACDSeries(closes)
+    const cut = Math.floor(bars.length * (1 - PROFILE.recentShare))
+    const vs = (series, i) => (Number.isFinite(series[i]) ? (closes[i] - series[i]) / atrs[i] : null)
+    const rows = []
+    for (const s of starts) {
+        const a = atrs[s]
+        if (s < m.look * 2 || !Number.isFinite(a) || a <= 0) continue
+        let h = s - m.look
+        for (let j = s - m.look; j < s; j++) if (closes[j] > closes[h]) h = j
+        let lo = h - m.look
+        for (let j = h - m.look; j < h; j++) if (closes[j] < closes[lo]) lo = j
+        const ah = atrs[h]
+        if (!Number.isFinite(ah) || ah <= 0 || lo < 0) continue
+        let hi = -Infinity, hitAt = null
+        for (let j = s + 1; j <= Math.min(bars.length - 1, s + m.within); j++) {
+            hi = Math.max(hi, bars[j].high)
+            if (hitAt == null && bars[j].high >= closes[s] + m.up * a) hitAt = j - s
+        }
+        const run = closes[h] - closes[lo]
+        rows.push({
+            i: s, recent: s >= cut,
+            run_atr: run / ah, run_bars: h - lo,
+            depth_pct: run > 0 ? (closes[h] - closes[s]) / run * 100 : null, depth_atr: (closes[h] - closes[s]) / a, pull_bars: s - h,
+            rsi_top: rsi[h], stretch_atr: Number.isFinite(s50[h]) ? (closes[h] - s50[h]) / ah : null,
+            rsi_low: rsi[s], macd_low_atr: Number.isFinite(line[s]) ? line[s] / a : null,
+            vs_ema20_atr: vs(e20, s), vs_sma50_atr: vs(s50, s), vs_sma200_atr: vs(s200, s),
+            gain_atr: (hi - closes[s]) / a, bars_to_move: hitAt,
+        })
+    }
+    const older = rows.filter(r => !r.recent), recent = rows.filter(r => r.recent)
+    const measures = Object.fromEntries(MOVE_MEASURES.map(k => {
+        const all = rows.map(r => r[k]), o = older.map(r => r[k]).filter(Number.isFinite), n = recent.map(r => r[k]).filter(Number.isFinite)
+        const p25 = _q(o, 0.25), p75 = _q(o, 0.75), rec = _q(n, 0.5)
+        const steady = o.length >= m.minOlder && n.length >= m.minRecent ? (rec >= p25 && rec <= p75 ? 'steady' : 'changed') : null
+        return [k, { median: _round(_q(all, 0.5), 2), older: _round(_q(o, 0.5), 2), recent: _round(rec, 2), older_mid: [_round(p25, 2), _round(p75, 2)], steady }]
+    }))
+    // Where it stands now: the top of the last `look` bars, how far and how long since, against its own pullbacks.
+    const L = bars.length - 1, aL = atrs[L]
+    let top = Math.max(0, L - m.look)
+    for (let j = top; j <= L; j++) if (closes[j] > closes[top]) top = j
+    let runLo = Math.max(0, top - m.look)
+    for (let j = runLo; j < top; j++) if (closes[j] < closes[runLo]) runLo = j
+    const runNow = closes[top] - closes[runLo]
+    const now = Number.isFinite(aL) && aL > 0 ? {
+        top_at: new Date(_ms(bars[top].timestamp)).toISOString(), bars_since_top: L - top,
+        off_top_atr: _round((closes[top] - closes[L]) / aL, 2), off_top_pct_of_run: runNow > 0 ? _round((closes[top] - closes[L]) / runNow * 100, 1) : null,
+        rsi: _round(rsi[L], 1), vs_sma50_atr: _round(vs(s50, L), 2),
+    } : null
+    return {
+        timeframe, moves: rows.length, older: older.length, recent: recent.length, verdict: rows.length < m.minMoves ? 'thin' : 'measured',
+        session_only: session, measures, now,
+    }
+}
+
+/** The timeframes measured for size and pace only, not for the full profile (Roy 2026-11-16, option 2: 15-minute beside 5-minute). */
+export const MOVES_ONLY_TIMEFRAMES = Object.freeze(['15min'])
+
+/** The whole profile: `{ '5min'?, '15min'?, '1hour'?, day?, week? }` bars → each timeframe's profile + F + K (`moves`). Pure. */
 export function behaviourProfile(symbol, barsByTf, opts = PROFILE) {
-    const timeframes = Object.fromEntries(Object.entries(barsByTf ?? {}).map(([tf, bars]) => [tf, timeframeProfile(bars, tf, opts)]))
-    return { symbol: String(symbol).toUpperCase(), side: 'long', timeframes, suitability: suitability(timeframes) }
+    const entries = Object.entries(barsByTf ?? {})
+    const timeframes = Object.fromEntries(entries.filter(([tf]) => !MOVES_ONLY_TIMEFRAMES.includes(tf)).map(([tf, bars]) => [tf, timeframeProfile(bars, tf, opts)]))
+    const moves = Object.fromEntries(entries.map(([tf, bars]) => [tf, movesProfile(bars, tf)]))
+    return { symbol: String(symbol).toUpperCase(), side: 'long', timeframes, suitability: suitability(timeframes), moves }
 }

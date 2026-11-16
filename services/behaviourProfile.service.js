@@ -37,7 +37,9 @@ export const PROFILE_TTL_MS = 7 * DAY
 // 9 (2026-11-13): the stop's room on the trader's own swing lows (stopRoom) and each line's level now (5b).
 // 10 (2026-11-13, CR): the cycle window in trading time, the stop room followed past 3 bars, breakouts and Fibonacci
 // one per window, dry-up vs the not-dry retests, unfolding breaks not counted, chance from the older bars.
-export const PROFILE_VERSION = 10
+// 11 (2026-11-16): SIZE AND PACE on every timeframe (movesProfile — proteus.md §10.8), and 15-minute bars beside the
+// 5-minute for it (built from the 5-minute, no extra calls; Roy, option 2).
+export const PROFILE_VERSION = 11
 
 const _cache = makeMongoBackedCache({ collection: PROFILE_COLLECTION, ttlMs: PROFILE_TTL_MS, max: 300, log: LOG })
 const _inflight = new Map()
@@ -70,7 +72,32 @@ export function weeklyFromDaily(day, now = Date.now()) {
         .map(b => ({ ...b, timestamp: Date.parse(`${b.date}T14:30:00Z`) / 1000 }))
 }
 
-/** The four timeframes' bars for a symbol. `deps.get` — the candle fetch (a test seam). */
+/**
+ * 5-minute bars → 15-minute (Roy, 2026-11-16, option 2: "maybe 15min is better than 5min" — run beside it for size and
+ * pace, then keep the steadier). The 5-minute bars of one 15-minute slot make one bar, stamped at the slot's first
+ * bar; the regular session opens at :30, a multiple of 15, so no slot straddles the open. Pure.
+ */
+export function fifteenFromFive(five) {
+    const out = []
+    let cur = null, key = null
+    for (const b of five ?? []) {
+        const k = Math.floor(_ms(b.timestamp) / (15 * 60_000))
+        if (k !== key) {
+            if (cur) out.push(cur)
+            key = k
+            cur = { timestamp: b.timestamp, open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume ?? 0 }
+        } else {
+            cur.high = Math.max(cur.high, b.high)
+            cur.low = Math.min(cur.low, b.low)
+            cur.close = b.close
+            cur.volume += b.volume ?? 0
+        }
+    }
+    if (cur) out.push(cur)
+    return out
+}
+
+/** The timeframes' bars for a symbol (15-minute built from the 5-minute). `deps.get` — the candle fetch (a test seam). */
 export async function fetchProfileBars(symbol, { get = getTickerAggregates, now = Date.now() } = {}) {
     const sym = String(symbol).toUpperCase()
     const [five, hour, daily] = await Promise.all([
@@ -81,7 +108,7 @@ export async function fetchProfileBars(symbol, { get = getTickerAggregates, now 
     const day = daily ?? []
     // The daily view reads all ~10 years (Roy, 2026-11-12): found on the older two-thirds alone, 5 years gave a moving
     // average ~20 touches — too few to reach z 3 even for a strong rule (design §10).
-    return { '5min': five, '1hour': hour, day, week: weeklyFromDaily(day, now) }
+    return { '5min': five, '15min': fifteenFromFive(five), '1hour': hour, day, week: weeklyFromDaily(day, now) }
 }
 
 /**

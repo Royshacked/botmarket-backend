@@ -1715,3 +1715,53 @@ no better than the control. In the older years the beat does not pick.
 **Test AB verdict:** part 1 FAILS (the run-up's number is its quiet days); the long-hold lead FAILS (part 3 passes, part
 2 does not). The revenue beat picks in 2024 → 2026 — inside the S&P (§45, mostly after 2024) and outside it, hedged — and
 not in 2019 → 2023. A recent regime, not a constant edge on this evidence.
+
+## 52. The fall with the business intact — a COUNT (declared 2026-11-16, before the run)
+
+Roy, on LNG (Cheniere) from 22 June 2026: down ~23% while cash flow, buybacks and every analyst stayed strong; the GAAP
+loss was a paper one — "are there any fundamentals we check to locate those names" → "yes start with the count". §39
+tested the price, value, growth, report and analysts one by one at a quarter's start (nothing but "came in weak"). Three
+facts LNG had were never tested; this COUNTS how often each happened after a fall, and what followed. **A description,
+not a test** — `scripts/lab-falls-count.mjs`.
+
+- **Universe:** the point-in-time S&P 500 (§30; member on the day, the ≥ 90% coverage rule), daily bars 2019-01-02 →
+  2026-10-26, price ≥ $5. SEC companyfacts as FILED (§39's rule: a period counts from its filing day).
+- **THE FALL (the event):** a close ≥ 20% under the highest close of the 60 sessions before — the first day it crosses;
+  one event per name per 60 sessions. From the 261st session on.
+- **The three facts, as known on the event day:**
+  1. **PAPER LOSS, CASH IN:** the last filed quarter's net income < 0 while its operating cash flow > 0 AND the four
+     quarters' operating cash flow > 0. (New: operating cash flow and capital spending added from the same SEC filings —
+     `secFundamentals.compactCashFlow`; 10-Q cash flows are year-to-date, so a quarter = its year-to-date less the one
+     before.)
+  2. **FREE-CASH-FLOW YIELD:** four quarters' (operating cash flow − capital spending) / market value (shares as filed ×
+     the close). Bands < 0 · 0–4% · 4–8% · ≥ 8%.
+  3. **THE ANALYSTS STAYED:** no downgrade in the 90 days before AND the median price target of the notes in those 90
+     days ≥ 20% over the close. Only where the lab has the notes — the screener's names from 2023-06 (§39) — counted
+     apart, never mixed into the 2019 → counts.
+- **What followed:** the next 63 sessions (a quarter): the return; net of SPY; net of the members' equal-weight average
+  from the same day; the share that beat SPY by 5%+. Split 2019–2022 / 2023 →, so a fact that only works in one regime
+  shows it.
+- **Compared with:** every fall (the base), and the falls WITHOUT the fact — the same fall, so the fact is what differs.
+- **Sanity check before reading:** LNG's 2026 fall must be in the events, and its facts as listed above.
+- **Worth a declared test only if** a fact's falls beat the falls without it by ≥ 2% net of SPY over the quarter, in BOTH
+  periods, on ≥ 100 events each. Otherwise it is written down as counted, and dropped.
+
+**Result (2026-11-16): none of the three is worth a test.** `data/lab/falls-count.out.txt`. 4,042 falls on 638 names
+(2,421 in 2019–2022, 1,621 from 2023); cash flow from SEC for 584 names (`data/lab/sec-cashflow.jsonl`).
+
+- **The sanity check could not run: LNG was never in the S&P 500** — the point-in-time universe has no span for it (it is
+  in the screener's universe). Not a code fault; the S&P count stands, without LNG.
+- **A fall on its own:** over the next quarter +6.4% / +7.7%, net of SPY +0.5% / +0.1% (median +0.1% / −1.3%), 35–37% beat
+  SPY by 5%+ — about the market.
+- **1. Paper loss, cash in — WORSE, both periods:** −0.9% / −0.1% net of SPY (median −2.5% / −4.1%) against +0.9% / +0.5%
+  for the falls without it (161 and 98 events). A loss after a fall is not a buy here, cash or not.
+- **2. Free-cash-flow yield — no order:** ≥ 8% +0.9% / +1.0% net of SPY, the falls under 8% about the same (gap −0.3 /
+  +0.5 points). After 2023 the NEGATIVE-yield falls did best (+3.8%) and 4–8% worst (−2.1%) — no line runs through the
+  bands.
+- **3. The analysts stayed — WORSE (2023 → only):** +0.5% net of SPY against +2.4% for the falls they did not stay on
+  (433 vs 437). Targets 20%+ over the price after a fall did not mark the rebounds.
+- **All three together:** 6 events, +10.3% net of SPY — too few to read; ≥ 8% FCF with the analysts staying: 76 events,
+  +2.9% (+1.1% median), one period.
+- **So:** on the S&P 500 none of LNG's three facts picks the falls that came back — the same answer as §39 at the
+  quarter's start. What lifted LNG (the August and October beats) happened after 22 June.
+
