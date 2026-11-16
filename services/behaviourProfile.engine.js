@@ -321,7 +321,7 @@ export function falseBreaks(bars, atrs, cut, drift, opts = PROFILE) {
     for (const b of breaks) {
         if (!b.false || b.out == null) continue
         if (sweeps.length && b.i <= sweeps.at(-1).i + opts.horizon) continue
-        sweeps.push({ i: b.i, out: b.out })
+        sweeps.push({ i: b.i, out: b.out, at: b.at })   // at: the break bar (the lab's sweep-on-volume, §10.2)
     }
     const after = judge(sweeps, drift, cut, opts)
     const n = breaks.length
@@ -358,7 +358,7 @@ export function falseBreaks(bars, atrs, cut, drift, opts = PROFILE) {
  * measured. Pure.
  */
 export function wyckoffTest(bars, atrs, cut, drift, sweeps, opts = PROFILE) {
-    const springs = [], breakouts = [], retests = [], dry = []
+    const springs = [], breakouts = [], retests = [], dry = [], found = []
     let ranges = 0, upthrusts = 0, current = null
     const spaced = (list, i) => !list.length || i > list.at(-1).i + opts.horizon   // one event per outcome window
     let i = opts.rangeBars
@@ -369,7 +369,7 @@ export function wyckoffTest(bars, atrs, cut, drift, sweeps, opts = PROFILE) {
         if (!Number.isFinite(a) || a <= 0 || hi - lo > opts.rangeAtr * a) { i++; continue }
         ranges++
         const avgVol = win.reduce((t, x) => t + (x.volume ?? 0), 0) / win.length
-        let j = i, ended = false
+        let j = i, ended = false, endAt = null   // endAt: the bar that closed out of the range
         for (; j < bars.length; j++) {
             const bar = bars[j], at = atrs[j]
             if (!Number.isFinite(at) || at <= 0) continue
@@ -381,6 +381,7 @@ export function wyckoffTest(bars, atrs, cut, drift, sweeps, opts = PROFILE) {
                 }
                 // The next range is looked for after this breakout's window: its 20 bars would otherwise still hold the
                 // old range, and one rally would break out again and again (CR 2026-11-13).
+                endAt = j
                 j += opts.horizon - 1
                 ended = true; break
             }
@@ -389,11 +390,13 @@ export function wyckoffTest(bars, atrs, cut, drift, sweeps, opts = PROFILE) {
                 for (let m = j; m < Math.min(bars.length, j + opts.sweepBack); m++) if (bars[m].close > lo) { k = m; break }
                 if (k < 0) {
                     if (j + opts.sweepBack > bars.length) break   // the last bars: not a breakdown yet (CR 2026-11-13)
+                    endAt = j
                     ended = true; break
                 }
                 const ak = atrs[k]
                 const o = Number.isFinite(ak) && ak > 0 ? bracket(bars, k, bars[k].close + opts.up * ak, bars[k].close - opts.down * ak, opts.horizon) : null
-                if (o != null && spaced(springs, k)) springs.push({ i: k, out: o })
+                // `light`: the dip bar on volume under `dryUp` × the range's average (the lab's low-volume spring, §10.2).
+                if (o != null && spaced(springs, k)) springs.push({ i: k, out: o, dip: j, light: avgVol > 0 && (bar.volume ?? 0) < opts.dryUp * avgVol })
                 j = k
                 continue
             }
@@ -407,6 +410,7 @@ export function wyckoffTest(bars, atrs, cut, drift, sweeps, opts = PROFILE) {
             }
         }
         if (!ended) current = { low: _round(lo, 2), high: _round(hi, 2), since: new Date(_ms(bars[from].timestamp)).toISOString() }
+        found.push({ known: i, until: endAt ?? Math.min(j, bars.length - 1), low: lo, high: hi })   // the range's low is known from bar `known`
         i = j + 1
     }
     // The spring's second baseline: ordinary false breaks of swing lows that are NOT themselves springs (a spring is
@@ -417,12 +421,17 @@ export function wyckoffTest(bars, atrs, cut, drift, sweeps, opts = PROFILE) {
     // Wyckoff's only when it beats BOTH an ordinary bar and an ordinary false break: the weaker verdict of the two.
     const vs = [vsDrift.verdict, vsSweeps.verdict]
     const verdict = vs.includes('thin') ? 'thin' : vs.includes('no') ? 'no' : vs.includes('faded') ? 'faded' : vs.includes('unconfirmed') ? 'unconfirmed' : 'respects'
-    return {
+    const result = {
         ranges, current,
         springs: { ...vsDrift, verdict, vs_sweeps: { rate: vsSweeps.rate, base: vsSweeps.base, base_n: vsSweeps.base_n, z: vsSweeps.z, verdict: vsSweeps.verdict } },
         breakouts: { ...judge(breakouts, drift, cut, opts), upthrust_rate: _round(breakouts.length ? upthrusts / breakouts.length : null) },
         dry_up: judge(dry, retests, cut, opts),
     }
+    // The ranges and springs themselves — what the lab's combinations and stop anchors read (proteus.md §10.2–10.3). Not
+    // enumerable, like falseBreaks' sweeps: the stored profile keeps the numbers, never the events.
+    Object.defineProperty(result, 'range_list', { value: found, enumerable: false })
+    Object.defineProperty(result, 'spring_events', { value: springs, enumerable: false })
+    return result
 }
 
 /**
@@ -439,6 +448,7 @@ export function fibPullbackTest(bars, atrs, cut, opts = PROFILE) {
     const sw = swings(bars, opts.swingLookback)
     const fib = [], base = []
     let impulses = 0, low = null, lastEnd = -1, latest = null
+    const pullbacks = []
     const rnd = _rng(bars.length * 7919 + Math.round(bars[0].close * 100))
     for (const s of sw) {
         if (s.type === 'low') { if (!low || s.price < low.price || low.used) low = { ...s, used: false }; continue }
@@ -471,9 +481,13 @@ export function fibPullbackTest(bars, atrs, cut, opts = PROFILE) {
         // the first touch would always be the shallowest.
         for (const [own, list] of [[mine.fib, fib], [mine.base, base]]) if (own.length) list.push(own[Math.floor(rnd() * own.length)])
         lastEnd = end
+        pullbacks.push({ start, end, low: low.price, high: s.price })   // watched on bars start … end-1
         latest = { low: _round(low.price, 2), high: _round(s.price, 2), at: new Date(_ms(bars[s.i].timestamp)).toISOString() }
     }
-    return { impulses, ...judge(fib, base, cut, opts), latest_impulse: latest }
+    const result = { impulses, ...judge(fib, base, cut, opts), latest_impulse: latest }
+    // The pullbacks themselves — the lab's Fibonacci combinations and stop anchor (proteus.md §10.2–10.3). Not enumerable.
+    Object.defineProperty(result, 'pullbacks', { value: pullbacks, enumerable: false })
+    return result
 }
 
 /**
@@ -539,6 +553,8 @@ function _shuffledBars(bars, rnd) {
     }
     return out
 }
+/** The shuffle and its seeded random, for the labs' noise control (scripts/lab-proteus-*.mjs) — the engine's own rule. */
+export { _shuffledBars as shuffledBars, _rng as seededRandom }
 
 /**
  * C2. IS THE FALSE-BREAK RATE THE STOCK'S, OR CHANCE'S? (Roy, 2026-11-13: "how come it's always false breaks") — a dip

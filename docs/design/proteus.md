@@ -237,6 +237,162 @@ longer trades like — the daily test now asks "did it hold for most of a decade
 recently shows as no edge, not as faded. If that proves too slow to catch a change, the alternative is a separate
 recent-only read (e.g. the last 3 years, reported as "lately", never as a rule) — not built.
 
+### 10.1 The false breaks across the whole universe (declared 2026-11-14, before the run)
+
+Roy: "Proteus identifies false breaks / sweeps in a lot of stocks — let's check it." The 23 profiles cached say 65–90%
+of breaks are false on every name — and wherever the chance test ran, "chance"; a sweep leading higher, "no" everywhere.
+`scripts/lab-proteus-sweeps.mjs` runs Proteus's own engine (`falseBreaks`, `falseBreakChance`, `judge`, PROFILE as built)
+on every name at once, with noise run through the identical pipeline beside it:
+
+- **Daily, per name:** the screener's 1,177 names, their ~4 years of daily bars (`data/lab/screener-3y.json`, 2022-09 →
+  2026-10 — shorter than the profile's 10 years). Per name the false-break verdict against chance (`more` · `less` ·
+  `chance` · `faded` · `thin`) and the sweep verdict against the drift (`respects` · `faded` · `unconfirmed` · `no` · `thin`).
+  **The control:** each name's bars shuffled once (`_shuffledBars`' rule, seeded), the same pipeline — how many names
+  noise alone flags.
+- **Pooled, daily and 5-minute:** every name's sweep outcomes together against every name's drift — the one test with the
+  numbers to see a small edge — split older / recent (by date, 2026-03-01 like tests 4–4d), with the shuffled control. The
+  5-minute from test 4's cache (3,185 name-weeks of about ten sessions each, regular hours), per week.
+
+**PASS — false breaks / sweeps are a trait Proteus should report as one:** the real data flags more names than the
+shuffled control (`more` false breaks, or sweeps `respects`) by a clear margin — at least twice as many and at least 10 more
+— AND the pooled sweep win rate beats the pooled drift by ≥ 3 points with the 95% interval above 0, older and recent.
+Otherwise the profile's "nothing holds" on false breaks stands, and the 70–80% rate stays said as what noise does.
+
+**Result (2026-11-14): FAIL — false breaks are everywhere because noise makes them; sweeps lead nowhere.**
+`data/lab/proteus-sweeps.out.txt`.
+
+- **The rate is real and universal, and it is noise's:** across 1,132 names the median false-break rate is 75.6% (middle
+  half 72–79%). Against each name's own bars shuffled: chance on 1,100 names. Flagged `more` false than chance: 4 (ADI BMNR
+  MXL BULL) and `less`: 4 (ALB CLSK HYMC VSTM) — against 1 and 2 on the shuffled bars. At z 3 two-sided about 3 of 1,132
+  are expected by luck; 8 is not "a lot of stocks", and not twice-and-10-more.
+- **A sweep leading higher: 0 names** (`no` 1,077, `thin` 55) — and 0 on the shuffled bars.
+- **Pooled, daily:** sweeps won 48.3% vs the drift's 47.1% in the older years (+1.2 points, 95% +0.6 … +1.8) and 45.8% vs
+  47.1% recently (−1.3, −2.6 … +0.1) — an edge that did not last, and under the 3-point bar anyway.
+- **Pooled, 5-minute** (3,169 name-weeks, ~75,000 sweeps): 43.4% vs 43.9% older, 43.4% vs 43.8% recent — none.
+- **So the profile is right as it stands:** "breaks of a swing low are false ~75% (chance: ~75%)" is a fact about NOISE —
+  useful for the stop (a stop just under a swing low is swept about three times in four), never a trait of the name and
+  never an entry. Tests 4d (intraday sweep entries) said the same with trades.
+
+### 10.2 Ten combinations (declared 2026-11-16, before the run)
+
+Roy: "what about combinations of patterns and indicators and both? … let's pick 10 — you pick." Picked BEFORE looking,
+each one a trader would name — no search over pairs (66 pairs × 4 timeframes would pass something on every name by luck).
+`scripts/lab-proteus-combos.mjs`, Proteus's own engine (PROFILE as built), long side.
+
+**The parts** (all known at the event bar's close): T20 / T50 / T200 — a touch from above of the 20 EMA / 50 SMA / 200
+SMA (`levelTouches`' rule); UP200 — the close over the 200 SMA; STACK — 20 EMA > 50 SMA > 200 SMA; VOL — volume ≥ 2× its
+20-bar average; VUP — VOL on an up bar; SWEEP — a false break of a swing low, at the reclaim (`falseBreaks`); RSI30 — RSI 14
+crossing under 30; MACD↑ — the MACD line crossing up through its signal; FIB — the first touch from above of 38.2 / 50 /
+61.8% in a pullback (`fibPullbackTest`'s pullbacks); SPRING — a Wyckoff spring at its reclaim (`wyckoffTest`).
+
+| # | Combination | Part A alone | Part B alone |
+|---|---|---|---|
+| 1 | T50 + UP200 (a pullback to the 50 in an uptrend) | T50 under the 200 | bars over the 200 |
+| 2 | T20 + STACK (a pullback to the 20 in a stacked trend) | T20 not stacked | stacked bars |
+| 3 | T200 + VOL (the 200 tested on heavy volume) | T200 on ordinary volume | VOL bars off the 200 |
+| 4 | any MA touch on a VUP bar (a touch that closes up on 2× volume) | touches without VUP | VUP bars off any MA |
+| 5 | SWEEP + VOL on the break or reclaim bar (stops run on volume) | sweeps on ordinary volume | VOL bars, no sweep |
+| 6 | SWEEP + UP200 (a sweep in an uptrend) | sweeps under the 200 | bars over the 200 |
+| 7 | RSI30 + UP200 (oversold in an uptrend) | RSI30 under the 200 | bars over the 200 |
+| 8 | MACD↑ under the zero line (the turn from a decline) | MACD↑ over zero | bars with MACD under zero |
+| 9 | FIB within 0.25 ATR of the 20 EMA or 50 SMA (two levels agree) | FIB away from both | T20/T50 not at a FIB level |
+| 10 | SPRING on light volume (dip bar under 70% of the range's average) | springs on ordinary volume | ordinary sweeps (not springs) |
+
+**The one outcome, everywhere:** from the event bar's close, +1 ATR before a close 0.5 ATR lower within 10 bars; one event
+per 10 bars. **A combination must beat Part A alone, Part B alone AND the drift** — three `judge` verdicts, the weakest
+counts (the spring's rule). Each part's events exclude the combination's own, so the baselines are not the combination.
+
+- **Per name, daily:** the screener's 1,177 names, ~4 years each (`data/lab/screener-3y.json`, 2022-09 → 2026-10 —
+  shorter than the profile's 10; the 200 SMA eats the first ~10 months). Per combination, how many names come out
+  `respects`. **The control:** each name's bars shuffled (the engine's own `shuffledBars`), the same pipeline.
+- **Pooled, daily and 5-minute** (test 4's cache, ~3,185 name-weeks): every name's combination events against every
+  name's Part A, Part B and drift, split older / recent by date (2026-03-01), with the shuffled control.
+
+**PASS, per combination — either one is a candidate for the profile:**
+- **A trait of some names** (Roy: "each ticker behaves individually"): real names `respects` at least 2× the shuffled
+  count AND at least 10 more.
+- **An edge everywhere:** pooled, the combination beats its STRONGEST baseline by ≥ 3 points with the 95% interval above 0,
+  older AND recent.
+Otherwise it stays out. Expected limit, said now: on 4 years most names will be `thin` on most combinations.
+
+**Result (2026-11-16): FAIL — no combination passes.** `data/lab/proteus-combos.out.txt`.
+
+- **Per name, daily: `thin` on every combination, on ~all 1,132 names** — on 4 years a combination happens ~5–15 times a
+  name; the bar needs 15 in the older two-thirds. So this run CANNOT answer "per ticker" for combinations; only the
+  profile's 10 years could, and only for the common ones (1, 2, 6, 8, 9). Shuffled: the same.
+- **Pooled, daily:** none beats its strongest baseline (−3.2 … +2.0 points, every interval across 0 or under it). Two do
+  WORSE than their parts: a sweep on 2× volume (−3.2 older, −5.8 recent) and a spring on light volume (−2.8 / −2.1).
+- **Pooled, 5-minute — two near-misses, under the 3-point bar** (both periods, interval above 0, ~0 on shuffled bars):
+  **7. RSI under 30 over the 200 SMA** +3.5 [+1.8 … +5.2] older, +2.6 [+0.7 … +4.6] recent; **3. a 200 SMA touch on 2×
+  volume** +2.7 [+1.2 … +4.3], +2.4 [+0.4 … +4.3]. Three months of 5-minute bars; a 2–3 point edge is small beside
+  intraday costs. Leads for the intraday lab, not rules. Every other one: none; the light-volume spring −4.4 / −2.6.
+- Seen, not fixed: combination 9's Fibonacci touches keep a bar that slices straight through the level (the engine's
+  test drops it) — a handful of events; it scored −0.5 / −0.3, nowhere near the bar either way.
+
+### 10.3 Lines as stops, per name (declared 2026-11-16, before the run)
+
+Roy: "each ticker behaves individually — check stops in the same manner Proteus checks reaction to patterns." Decided
+(Roy, 2026-11-16): **a line that passes, Mentor takes into consideration** for the stop. One setting, Mentor's own: the
+stop 0.2 ATR under the line. `scripts/lab-proteus-stops.mjs`.
+
+- **Anchors** (each a level known at the bar BEFORE the event): SWING — the latest confirmed swing low of Mentor's own
+  swings (swingStructure, 1.5 ATR); EMA20, SMA50, SMA200; RANGE — the low of the Wyckoff range price is in; FIB618 — the
+  61.8% level of the pullback under way; OB — the bottom of the latest known bullish order block under price; VWAP
+  (5-minute only).
+- **Event — the stop is hit:** the previous close over the anchor, this bar's low under anchor − 0.2 ATR. One per 10 bars.
+- **Outcome — was it a good stop?** GOOD: a low 1 ATR past the stop (anchor − 1.2 ATR) before any close back over the
+  anchor — the line broke for real and the stop saved the trade. BAD (whipsaw): a close back over the anchor first — the
+  hit bar's own close included (checked first, like the engine's bracket). Neither within 10 bars: counted, not good.
+- **Baseline:** the same anchor shifted ±2 and ±3 median ATRs (`levelTest`'s baseline) — a stop the same way under a
+  line that is not this one. `respects` = this line is a better stop than a line next to it, on this name.
+- **Per name daily, pooled daily and 5-minute, shuffled control, PASS** — exactly §10.2's rules. Beside it, said not
+  judged: each anchor's whipsaw share.
+- **If an anchor passes:** it goes into the profile's per-name stop test and Mentor weighs it when placing the stop.
+  If none does, Mentor's 0.2 ATR under the swing low stays as it is, with the stop's room as context (5b, option A).
+
+**Result (2026-11-16): FAIL — no line is a better stop than a line next to it, per name or pooled.**
+`data/lab/proteus-stops.out.txt`.
+
+- **Per name, daily — here the question COULD be answered** (unlike the combinations: SWING, EMA20 and OB were `thin` on
+  only 4–8% of names): `respects` on SWING 0 (shuffled 0), EMA20 1 (1), SMA50 1 (0), OB 4 (1: OBDC OLN QUBT FFBC), SMA200 /
+  RANGE / FIB618 0. At z 3 about 1–2 of 1,132 are expected by luck; the bar was 2× the shuffled and 10 more. **Nothing
+  says a ticker has a line of its own that makes a better stop** — Roy's hypothesis, tested on ~1,100 names, not seen.
+- **Pooled:** only about 36–40% of daily stop hits are GOOD (1 ATR more before a close back over the line) on EVERY
+  line — ~6 in 10 are whipsaws or go nowhere, whatever the line. The swing low (Mentor's own) is a touch better than the
+  shifted copies: daily +2.2 [+1.5 … +2.9] older, +0.8 recent; 5-minute +2.2 / +1.1 (shuffled +0.6 / +0.7) — real and small,
+  under the bar. The 5-minute Wyckoff range low is the nearest miss: +3.4 [+2.9 … +4.0] older, +2.2 [+1.6 … +2.9] recent,
+  shuffled ~0.
+- **A worse stop:** the 5-minute 20 EMA, −3.5 / −3.9 points (shuffled −0.8 / −1.1) — a stop under the 20 EMA intraday is
+  whipsawed more than one off it. VWAP −0.9 / −0.5.
+- **So:** nothing goes into the profile's per-name stop test; Mentor keeps 0.2 ATR under his swing low (the one anchor
+  that is slightly better than a line beside it), with the stop's room as context (5b, option A). For intraday the
+  nearest leads are the range low (better) and the 20 EMA (worse), both for the intraday lab.
+
+### 10.4 Indicator values, per name (declared 2026-11-16, before the run)
+
+Roy: "what about different values of indicators and atr" → 3 (the stop depth first — stock-playbook.md Test 5, FAIL —
+then the values). Proteus tests ONE value of each method (`PROFILE` — "nothing holds" means at those settings). Here
+each name may pick its own value, honestly: the older two-thirds choose, the recent third checks only the chosen one, and
+each name's SHUFFLED bars run the identical search — the search's luck lands on both sides.
+`scripts/lab-proteus-values.mjs`, Proteus's engine as built (PROFILE, `judge`, `levelTest`, `eventOutcomes`), long side.
+
+- **Data:** the screener's names, ~10 years of daily bars each (`data/lab/screener-10y.jsonl`, 2016-10 → 2026-10, fetched
+  for this — the profile's own daily depth). Daily only.
+- **The families (fixed now):**
+  1. **MA as support** — a touch from above against the same line shifted ±2/±3 ATR (`levelTest`): EMA and SMA × 10 /
+     20 / 50 / 100 / 200 (10 values).
+  2. **MA as a stop** — §10.3's test (a stop 0.2 ATR under the line; GOOD = 1 ATR more before a close back over) against
+     the shifted line: the same 10 values.
+  3. **RSI oversold** — RSI period 2 / 7 / 14 crossing under 10 / 20 / 30, against the drift (9 values).
+  4. **Volume up bar** — volume ≥ 1.5× / 2× / 3× its 20-bar average on an up bar, against the drift (3 values).
+  5. **Swing size as a stop** — §10.3's swing-low stop on Mentor's swings at 1 / 1.5 / 2 / 3 ATR (4 values).
+- **Per name, per family:** every value judged; the one with the largest older-part edge (rate − baseline) among those
+  not `thin` is the name's value, and ITS verdict counts (`judge`: edge ≥ 10 points at z ≥ 3 on the older part, the
+  recent third still ≥ 5 points). Shown: which value names pick, real vs shuffled.
+- **PASS, per family — "this ticker has its own value":** real names `respects` ≥ 2× the shuffled AND ≥ 10 more. Then the
+  family's per-name value goes into the profile and Mentor takes it into consideration (Roy, 2026-11-16). Beside it,
+  not for the bar: each value pooled over all names, before / after 2026-03-01.
+
 ## 11. Build order and status
 
 1. **The measured profile engine** — BUILT 2026-11-12 (`services/behaviourProfile.engine.js`, 68080cdf): one

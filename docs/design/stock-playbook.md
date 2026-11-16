@@ -494,6 +494,350 @@ held out, screener-lab §6). The per-trade means are lower because the rule is a
   bars missing) did worse per session (+0.13% before, +0.18% held out). Found after the run, so it is a question, not a rule.
 - The weekly stop for long term is still untested.
 
+## Test 4 — the day trade's stop: which timeframe (declared 2026-11-14, before the run)
+
+Roy: "under which timeframe should we look for levels in intraday / day trade?" A daily swing-low stop sits ~2 daily ATRs
+under the price — too far for a trade that lives one session — and the prior (5-minute for intraday, 1-hour for a day trade)
+is reasoning only; test 3 refuted the last such prior. `scripts/lab-daytrade-stop.mjs`. Mechanical stand-ins, as in every test here.
+
+**Data.** The Hotlist screener's universe (1,177 names, today's list — survivorship, the same for every arm), 2024-11-01 →
+2026-10-23. A day is a candidate when the name passed the day board's gates on the prior close (price ≥ $5, 20-day ADV ≥
+$50M, ATR14 ≥ 3%) and the day could have met an in-play rule (a necessary condition only, so no signal is lost: volume ≥ the
+rule's paced share, a high over the prior close). A seeded sample (seed 11) of **8,000 name-weeks** holding a candidate day;
+FMP 5-minute bars of that week and the week before (the history the slower stops need). Regular session only. The 5-minute bars carry ~83% of the consolidated daily volume (a
+40-week dry run, 2026-11-14), so a session's volume is scaled by the name's previous session's daily / 5-minute ratio.
+
+**Signals — the live day-board rules** (`hotlist.columns` inPlay), replayed on the 5-minute bars:
+- **10:30 (mid):** relative volume ≥ 1.5 (paced), the price over the open and over the prior close.
+- **14:30 (eod):** relative volume ≥ 1.3, in the top quarter of the day's range, over the prior close.
+The board's pool (news, movers, earnings) and its 60-name cap are not replayed: every name meeting the rule is a trade.
+Entry at the checkpoint's price (the close of the 5-minute bar ending then), long. The board says which names MOVE, not
+which way — the arms are compared on the same trades, so the stop is what is tested, not the board.
+
+**The stops** (each the last swing low confirmed by the entry, k 1.5 on that chart's 20-bar ATR, less 0.2 of that ATR — the
+tested daily rule, moved down the timeframes; none under the entry → that arm has no trade):
+S5 5-minute · S15 15-minute · S60 1-hour · **SD daily (today's rule)** · LOD the day's low so far − 0.2 × the 5-minute ATR.
+
+**Part A — intraday** (dies at today's close; both checkpoints). Exits: (i) the stop or the close; (ii) **the plan Mentor
+builds: the stop, a target at 1.5R, or the close.** Filled on 5-minute bars; a bar opening under the stop fills at its open;
+a bar touching both the stop and the target → the stop. Plus no stop at all (A0), exit (i) only.
+**Part B — day** (the archived "tomorrow" rule at 15:30: in the top 15% of the range on 1.2× volume, up on the day; held to the
+NEXT session's close; Friday signals left out — the next session is not fetched; on the same candidate days, so under the
+intraday gates, stricter than the archived column's own). Stops S15, S60, SD, and none; a gap under the stop fills at the next open.
+
+**Measured**, before / held out from **2026-03-01** (the last third): R per trade on equal RISK, after the round-trip cost
+(`costFor` by ADV, in R — a tight stop pays more of it), net % per trade on equal dollars, the share stopped, the share
+reaching 1.5R, the stop's distance (% and in daily ATRs), the share of signals each arm can trade.
+**PASS — a timeframe replaces the daily stop for its horizon:** the arm with the best R per trade on the plan exit (ii),
+paired against SD on the signals both trade, > 0 with its month-bootstrap 5% end > 0 before, and > 0 held out. Several passing →
+the best held out. None passing → SD stays and the prompt's day trade keeps the daily structure. A pass changes nothing by
+itself: Roy decides what `get_price_structure` reads for a day trade.
+
+### Test 4 — result (2026-11-14, on 3,185 of the 8,000 name-weeks): FAIL — no timeframe beats the daily stop; the daily stop "wins" by not trading
+
+The fetch was stopped at 3,185 weeks (the laptop ran short of memory); Roy chose to analyse what was in. 1,926 intraday
+signals (1,447 at 10:30, 479 at 14:30; 1,156 before, 770 held out) and 327 day signals. The 5-minute bars carried 78% of
+the daily volume (scaled, as declared). `data/lab/daytrade-stop.out.txt`.
+
+Part A, both checkpoints — R per trade on the plan (stop, 1.5R target or the close), then the paired difference against SD:
+
+| Stop | Before: R, stopped, 1.5R reached, distance | Held out: same | − SD before | − SD held out |
+|---|---|---|---|---|
+| S5 5-minute | −0.046, 38%, 20%, 1.7% (0.36 ATR) | −0.114, 39%, 19%, 1.7% | −0.049 (−0.104 … +0.009) | −0.103 (−0.161 … −0.047) |
+| S15 15-minute | −0.016, 17%, 8%, 3.4% (0.68) | −0.082, 16%, 7%, 3.4% | −0.011 (−0.041 … +0.022) | −0.073 (−0.138 … −0.012) |
+| S60 1-hour | +0.004, 5%, 3%, 6.2% (1.28) | −0.034, 3%, 2%, 6.1% | +0.011 (−0.008 … +0.033) | −0.015 (−0.044 … +0.014) |
+| **SD daily** | −0.004, 2%, 1%, 13.5% (2.76) | −0.028, 1%, 1%, 13.9% | — | — |
+| LOD day's low | −0.024, 18%, 8%, 3.2% (0.67) | −0.085, 18%, 6%, 3.3% | −0.027 (−0.070 … +0.017) | −0.077 (−0.151 … −0.006) |
+
+Part B (day, held to the next close): S15 − SD −0.157 before (clearly worse), S60 − SD −0.031 before / +0.032 held out (a tie). FAIL.
+
+- **By the declared bar, the daily stop stays.** No arm beats it; the 5-minute, 15-minute and day's-low stops are worse
+  held out (their 5% ends under 0), the 1-hour ties it in both periods and in Part B.
+- **But the daily stop "wins" by barely being a trade.** It sits 13–14% under the entry (2.8 daily ATRs): 1–2% of trades
+  reach it and 1% reach a 1.5R target (≈20% away in one session). On equal risk that is a tiny position whose R is close to
+  0 — and on entries with no edge, the arm closest to 0 R wins. The test cannot pick a stop by expectancy here.
+- **The entries have no edge long:** bought at the checkpoint and held to the close, the board's names lost −0.08% a trade
+  after cost before and −0.26% held out (Part B −0.97% / +0.03%). As declared, the board says which names MOVE, not which
+  way — and no stop turns that into an edge.
+- **Seen, not tested for:** a 1.5R target is reached intraday by 20% of trades from a 5-minute stop, 8% from a 15-minute
+  stop and 2–3% from a 1-hour stop. A 1.5R plan only has a target that can fill today from the 5- or 15-minute structure — the
+  stops that cost the most R held out.
+
+## Test 4b — the day trade as Mentor builds it: a limit entry off each chart's stop (declared 2026-11-14, before the run)
+
+Roy, on test 4: "but how far from the stops were the entries?" — 2–15% (0.2–3.4 daily ATRs). Test 4 bought at the
+checkpoint, after the move; Mentor sets the stop and the target, then a LIMIT at the highest price the R:R allows, and the
+monitor waits for price to come down to it. `scripts/lab-daytrade-plan.mjs`, on the 3,185 name-weeks test 4 fetched; the
+same signals, gates, held-out date (2026-03-01), cost and month bootstrap.
+
+**The plan, per chart** (5-minute · 15-minute · 1-hour · daily — the bars known at the checkpoint): S = the last confirmed
+swing low under the price − 0.2 of that chart's ATR (test 4's stop); T = that chart's `rangeTarget` (the highest high of
+the `lookFall` bars before, when over the price; at the highs, the measured move off S's low) — the tested thesis rule on
+that chart; **E = (T + 1.5·S) / 2.5** (R:R 1.5 at E, `plan`). No plan when T ≤ E or the risk at E is over 10% (rule A).
+**The fill:** price at or under E at the checkpoint → in at the checkpoint's price; else a limit at E for the rest of the
+trade's life, filled when a 5-minute bar trades to it (at its open when it opens under E). A bar reaching S before the fill
+cancels; a fill bar that also reaches S is filled AND stopped (−1R, the cautious reading). No strength gate (test 1c: it did
+not move the edge). **The exit:** S, T, or the close (intraday) / the next session's close (day); a gap through a level
+fills at the open; a bar touching both → the stop; the fill bar's own high never counts for T.
+
+**Measured:** **R per SIGNAL** (no plan or no fill = 0) after the cost in R, R per trade, the share filled, target / stop /
+close, the median risk (% and daily ATRs), the median T over E. **PASS — a chart replaces the daily for the day trade's
+levels:** its R per signal paired against the daily's, > 0 with the 5% end > 0 before, and > 0 held out; several → the
+best held out. Read beside it: whether ANY arm makes money per signal (> 0 with the 5% end > 0, both periods) — a stop
+timeframe that only loses less is not a reason to build intraday trades.
+
+### Test 4b — result (2026-11-14): FAIL — no chart beats the daily, none makes money; the fast charts lose
+
+Test 4's 3,185 weeks: 1,926 intraday signals (1,156 before, 770 held out), 327 day. `data/lab/daytrade-plan.out.txt`.
+Part A, both checkpoints — the share planned / filled, R per SIGNAL, and the paired difference against the daily (PD):
+
+| Chart | Before: filled, R/signal, target/stop/close, risk, E under price | Held out: filled, R/signal | − PD before | − PD held out |
+|---|---|---|---|---|
+| P5 5-minute | 66%, −0.056 (−0.103 … −0.006), 25/51/24%, 1.1%, 0.6% | 68%, −0.090 | −0.051 (−0.096 … −0.003) | −0.091 (−0.140 … −0.035) |
+| P15 15-minute | 48%, −0.035 (−0.066 … −0.006), 12/33/54%, 2.1%, 1.3% | 50%, −0.054 | −0.031 (−0.062 … −0.000) | −0.055 (−0.090 … −0.023) |
+| P60 1-hour | 36%, +0.024 (−0.006 … +0.051), 3/12/85%, 4.1%, 2.1% | 34%, −0.000 | +0.028 (−0.001 … +0.058) | −0.002 (−0.015 … +0.012) |
+| **PD daily** | 13% (planned 43%), −0.004, 0/6/94%, 6.7%, 4.8% | 13%, +0.001 | — | — |
+
+Part B (day, to the next close): P60 − PD −0.025 before, +0.085 (+0.007 … +0.179) held out; P15 −0.188 before. FAIL.
+10:30 alone: P60 − PD +0.036 (+0.001 … +0.075) before, −0.000 held out. FAIL.
+
+- **By the bar, the daily stays — and no arm makes money per signal in both periods.**
+- **The 5- and 15-minute plans lose, clearly, in both periods.** Their entry sits 0.6–1.3% under the price and fills 50–70%
+  of the time; their target (1.6–3.2% over E) is reachable, and the trades are stopped more than they reach it (5-minute
+  51% / 25%). The cautious fill rule (a bar that fills and reaches the stop is a loss) bears hardest on the 5-minute.
+- **The 1-hour and the daily come out at ~0 because they mostly do not trade a day:** the 1-hour fills a third of the
+  signals and 85–89% of those end at the close (its target, 6% over E, is out of a day's reach); the daily plans under half
+  and fills 13%.
+- **With test 4: a day-board name has no tested long edge on any chart, bought at the checkpoint or on a limit under it.**
+  The faster the chart, the more the plan trades and the more it loses. Part B's held-out +0.085 for the 1-hour is one
+  period of 121 signals, against a loss before — a question, not a rule.
+
+**R:R 1 (Roy: "what about 1 R:R" — asked AFTER the result, so exploratory, not a declared test).** `--rr 1`
+(`data/lab/daytrade-plan-rr1.out.txt`): the entry halfway between stop and target, nearer the price, so more fills and more
+targets — and the same answer. Intraday, R per signal before → held out: 5-minute −0.048 → −0.069 (fills 74–76%, target /
+stop 32 / 43%), 15-minute −0.031 → −0.045 (16 / 26%), 1-hour +0.000 → +0.004 (87–90% at the close), daily −0.005 → +0.005.
+Against the daily held out: 5-minute −0.074 (−0.112 … −0.030), 15-minute −0.051 (−0.095 … −0.008), 1-hour −0.001. Day:
+15-minute −0.191 before; 1-hour −0.013 / +0.027. At 1:1 a plan needs to win more than half its decided trades; the 5- and
+15-minute plans are stopped before their target 57–62% of the time.
+
+## Test 4c — a VWAP entry on the day board's names (declared 2026-11-14, before the run)
+
+Roy, after 4 and 4b: "test a VWAP entry first". The ENTRY is what failed (tests 4, 4b), not the stop. `scripts/lab-daytrade-vwap.mjs`,
+on test 4's 3,185 name-weeks: the same signals (10:30 and 14:30, the live rules), gates, held-out date (2026-03-01), cost
+and month bootstrap. Intraday only (VWAP is the session's).
+
+**VWAP:** the session's, from its 5-minute bars — Σ(typical price × volume) / Σ volume from the open, each bar's value at its close.
+**The entry — a pullback to VWAP that holds:** after the checkpoint, the first 5-minute bar whose LOW trades at or under VWAP
+and whose CLOSE is back over it → in at that close. None by 15:30 → no trade. (A name already under VWAP at the checkpoint
+waits for the same thing — a reclaim.)
+**The stop:** the lowest low from the checkpoint through the entry bar (the pullback's low) − 0.2 × the 5-minute ATR.
+**The exits:** (a) **1.5R target, the stop or the close** — the primary, Mentor's R:R; (b) 1R; (c) the stop or the close.
+A bar touching both → the stop; a gap through a level fills at its open.
+**The control — is it VWAP, or any dip?** The same rule on VWAP shifted by ± 0.25 × the daily ATR (a line that moves with
+VWAP but is not it), as Proteus's tests shift a line.
+
+**Measured:** R per SIGNAL (no entry = 0) and per trade, after the cost in R; the share entered; target / stop / close;
+the risk (% and daily ATRs); and VWAP − each shifted line, paired by signal.
+**PASS — a VWAP entry is worth building:** R per signal on exit (a) > 0 with its month-bootstrap 5% end > 0 before, and > 0
+held out. Read beside it: whether VWAP beats both shifted lines (if not, the edge is the dip, not VWAP).
+
+### Test 4c — result (2026-11-14): FAIL — the VWAP entry loses, and VWAP is no better than a line beside it
+
+1,926 signals (1,156 before, 770 held out). `data/lab/daytrade-vwap.out.txt`. Both checkpoints, R per signal:
+
+| Line, exit | Entered | Before | Held out | Target / stop / close (before) | Risk |
+|---|---|---|---|---|---|
+| **VWAP, 1.5R (the bar)** | 60–61% | −0.042 (−0.100 … +0.013) | **−0.111 (−0.155 … −0.067)** | 33 / 48 / 18% | 0.7% (0.14 ATR) |
+| VWAP, 1R | 60–61% | −0.075 (−0.123 … −0.033) | −0.115 (−0.145 … −0.085) | 42 / 43 / 15% | |
+| VWAP, stop or close | 60–61% | +0.039 (−0.058 … +0.135) | −0.112 (−0.206 … −0.023) | — / 58 / 42% | |
+| VWAP + 0.25 ATR, 1.5R | 51% | −0.007 | −0.081 | 26 / 37 / 37% | 1.25% |
+| VWAP − 0.25 ATR, 1.5R | 27–30% | −0.051 | −0.036 | 31 / 55 / 14% | 0.6% |
+
+VWAP − the shifted lines (1.5R): before −0.035 (vs +0.25) and +0.009 (vs −0.25); held out −0.030 and **−0.075 (−0.132 … −0.025)**.
+
+- **FAIL:** no exit makes money in both periods; held out every VWAP exit loses, each with its 5% end under 0. 10:30 alone the same
+  (−0.134 held out); at 14:30 few names come back to VWAP (12–15%), and those lose too.
+- **VWAP is not special here:** it does no better than a line a quarter-ATR above it, and worse held out than one a
+  quarter-ATR below. The reclaim of VWAP is not a level these names respect — Proteus's per-name VWAP test says the same
+  ("nothing holds", proteus.md §10).
+- The pullback's low makes a very tight stop (0.7%, 0.14 daily ATR): about half the entries are stopped. A stop under VWAP by
+  a wider buffer was not tried; it was not declared, and it would trade a tighter target miss for a wider stop.
+- **With tests 4 and 4b: four long entries on the day board's names — at the checkpoint, a limit off a 1.5 and a 1:1 plan,
+  and a VWAP reclaim — none has an edge.** The board finds names that MOVE; none of these finds which way.
+
+## Test 4d — a false break of the stop's level, then in (declared 2026-11-14, before the run)
+
+Roy: "what if we place the stop, then wait for a false break of the stop level and only then enter?" — the sweep / spring
+entry: sellers fail at the level first. Prior evidence is against it on daily and weekly bars (Proteus: sweeps that close
+back above have not led higher on any name; the false-break rate is chance's; springs did not beat an ordinary false
+break), never tested intraday on the board's names. `scripts/lab-daytrade-sweep.mjs`, test 4's 3,185 name-weeks, the same
+signals (10:30, 14:30), gates, held-out date (2026-03-01), cost and month bootstrap. **The fifth intraday entry on these
+names** — hence the second part of the bar.
+
+**The level, per chart** (5-minute · 15-minute · 1-hour — the bars known at the checkpoint): the last confirmed swing low
+under the price (k 1.5 on that chart's ATR — the stop's base in tests 4 / 4b). **The entry:** after the checkpoint, the
+first 5-minute bar whose low trades UNDER the level opens a break; the first 5-minute close back OVER the level, on that bar
+or within the 3 bars after it (`sweepBack`, the false-break measure's window) → in at that close. Not back over in time → the
+break was real, no trade (one try a day). No break-and-reclaim by 15:30 → no trade. **The stop:** the sweep's low (from the
+break bar through the entry bar) − 0.2 × the 5-minute ATR. **The exits:** (a) **1.5R target, the stop or the close**; (b) 1R;
+(c) the stop or the close. A bar touching both → the stop; a gap through a level fills at its open.
+**The control:** the same rule on the level shifted ± 0.25 × the daily ATR (a level the price never made); a shifted level
+not under the price at the checkpoint → no trade.
+
+**Measured:** R per SIGNAL (no entry = 0) and per trade after the cost in R; the share entered; target / stop / close; the
+risk (% and daily ATRs); the swing low − each shifted level, paired. **PASS — a sweep entry is worth building:** on some
+chart, R per signal on exit (a) > 0 with its 5% end > 0 before, and > 0 held out, **and** the swing low beats both shifted
+levels on that chart (paired, > 0 before and held out). Two charts passing → the better held out.
+
+### Test 4d — result (2026-11-14): FAIL — the sweep entry loses, and sweeps of the real swing low do WORSE than of a made-up level
+
+1,926 signals (1,156 before, 770 held out). `data/lab/daytrade-sweep.out.txt`. Both checkpoints, exit (a) 1.5R:
+
+| Level | Entered | R/signal before | R/signal held out | Per trade held out | Target / stop / close held out |
+|---|---|---|---|---|---|
+| 5-minute swing low | 25–26% | −0.046 (−0.082 … −0.014) | **−0.086 (−0.102 … −0.072)** | −0.35 | 31 / 65 / 5% |
+| 15-minute swing low | 12% | −0.020 (−0.045 … +0.001) | **−0.055 (−0.069 … −0.039)** | −0.47 | 23 / 69 / 8% |
+| 1-hour swing low | 2–3% | −0.007 | +0.001 | +0.05 (15 trades) | 44 / 50 / 6% |
+
+The swing low − the shifted levels, held out: 5-minute −0.034 (vs +0.25 ATR) and −0.077 (vs −0.25), 15-minute −0.038 and
+−0.045 — all four with the 5% end under 0; 1-hour +0.009 / +0.006 (ties).
+
+- **FAIL on both parts.** No chart makes money in both periods, and the real swing low does not beat a level shifted off it —
+  held out it does clearly WORSE on the 5- and 15-minute: a reclaim of the low these names just made is followed by a
+  stop-out more often than a reclaim of a line nobody drew. The 1-hour sweep is too rare (2–3% of signals) to say anything.
+- Tight stops again (0.5% under, 0.1 daily ATR): two thirds of the sweep trades are stopped held out.
+- **The 14:30 15-minute arm "passed before" (+0.026, 2% entered, 6 trades) and lost held out** — the size of fluke the
+  five-entry bar was written for.
+- **Five long entries on the day board's names now — at the checkpoint, a limit at 1.5 and at 1:1, a VWAP reclaim, a sweep
+  of the stop's level — none has an edge on any chart.** Matches Proteus on daily bars: a reclaimed low is not an entry on
+  these names.
+
+## Test 4e — not closing at the end of the day (declared 2026-11-14, before the run)
+
+Roy: "did you check not closing at the end of the day?" — no: every intraday trade in 4–4d was out at the close, and the
+1-hour and daily plans came out ~0 mostly because the day ran out (85–94% ended at the close, targets 6–15% away).
+`scripts/lab-daytrade-hold.mjs`, test 4's 3,185 name-weeks and signals (10:30, 14:30), gates, held-out date, cost, bootstrap.
+
+**Two entries, each off four charts** (5-minute · 15-minute · 1-hour · daily):
+- **E1 — at the checkpoint** (test 4): in at the checkpoint's price; S = that chart's last swing low − 0.2 of its ATR;
+  T = 1.5R over the entry.
+- **E2 — Mentor's limit plan** (test 4b): S, T = that chart's `rangeTarget`, E = (T + 1.5·S)/2.5; the limit must fill
+  on the SIGNAL day (a fill bar also reaching S → filled and stopped).
+**Holds:** out at S or T, or at the close of the Nth session after the entry day — **N = 0 (the same day, tests 4/4b), 5,
+10, 20.** The entry day plays out on its 5-minute bars; every session after on the daily bars (`screener-3y`, through
+2026-10-23): a gap through a level fills at the open, a day touching both → the stop. A signal without N sessions of daily
+bars after it is left out of that hold (every arm alike).
+
+**Measured:** R per SIGNAL (no entry = 0) after the cost in R, R per trade, target / stop / time, the median sessions held,
+paired against the daily chart of the same entry and hold. **PASS — holding makes a board name worth building:** some
+chart × hold, either entry, with R per signal > 0 and its month-bootstrap 5% end > 0 before, AND > 0 held out. 2 entries ×
+4 charts × 3 new holds = 24 arms: with that many tries one may pass the first half by luck, which is why both halves count.
+A pass held past a session or two is a SHORT TERM SWING started from the day board (test 3's daily stop), not a day trade.
+
+### Test 4e — result (2026-11-14): PASS BY THE LETTER, NOT IN SUBSTANCE — the 1-hour limit plan held 10–20 sessions
+
+`data/lab/daytrade-hold.out.txt` (1,926 signals: 1,156 before, 770 held out). The bar's arms that passed — R per signal:
+
+| Arm | Before | Held out | Against the daily, before / held out |
+|---|---|---|---|
+| **E2 1-hour, hold 10** | +0.133 (+0.062 … +0.200) | +0.006 (−0.070 … +0.074) | +0.108 (+0.040 … +0.177) / −0.006 |
+| **E2 1-hour, hold 20** | +0.127 (+0.047 … +0.203) | +0.027 (−0.051 … +0.108) | +0.100 (+0.020 … +0.181) / +0.023 |
+| E2 1-hour, hold 5 (not a pass) | +0.102 (+0.043 … +0.158) | −0.016 | +0.089 / −0.006 |
+| 14:30 only: E1 15-minute, hold 10 / 20 | +0.181 / +0.207 (283 signals) | +0.030 / +0.019 (196) | +0.189 / −0.036 · +0.170 / +0.036 |
+
+- **The edge lives in the years before March 2026 and is gone after it.** Held out, the passing arms are +0.006 and +0.027 R per
+  signal with intervals from −0.07 to +0.1 — zero, as far as this sample can tell. The bar asked only "> 0 held out", with no
+  interval: too weak a second half for 24 arms × 3 views (~72 tries), where a few first-half passes are expected by luck.
+- **What held across the board:** the same-day exit loses (N = 0 repeats tests 4/4b); the 5- and 15-minute stops lose at every
+  hold for E2 (stopped ~60–65%); holding helps the WIDER charts — the 1-hour and the daily turn from ~0 to positive before March.
+  Holding a long 2–4 weeks in a rising tape earns something on any stop that is not hit; the stock's direction after March
+  (the board's names lost −0.26% a trade at the checkpoint then) took it away.
+- **Read:** a 1-hour limit plan held to the stop or the target is the one thing worth a CONFIRMATION — on data this test has
+  not seen: the 4,815 name-weeks test 4 never fetched (seed 11, the same sample), declared before, with a held-out bar that
+  needs its 5% end > 0. Nothing is built on this result.
+
+## Test 4f — the confirmation, on weeks no test has seen (declared 2026-11-14, before the fetch)
+
+Roy: "yes fetch and run the confirmation." `scripts/lab-daytrade-confirm.mjs`. **Data:** the 8,000-week sample of test 4
+(seed 11, `data/lab/daytrade-sample-keys.json`) LESS the 3,185 weeks tests 4–4e analysed (`data/lab/daytrade-seen-keys.json`,
+saved before the fetch) — the other 4,815, fetched now, the same way. The same gates, signals, volume scaling, cost and month
+bootstrap; held out from 2026-03-01. **Only two arms**, exactly as test 4e ran them:
+- **A — E2 1-hour, hold 10:** Mentor's limit plan off the 1-hour chart (S under its last swing low − 0.2 ATR, T its
+  `rangeTarget`, E at R:R 1.5), filled on the signal day, then the stop, the target or the 10th session's close; both
+  checkpoints (10:30, 14:30).
+- **B — E1 15-minute at 14:30, hold 10:** in at the 14:30 price, S under the last 15-minute swing low − 0.2 ATR, T 1.5R,
+  the stop, the target or the 10th session's close; the 14:30 signals only.
+**CONFIRMED** (each arm on its own): R per signal on the new weeks' **held-out** signals (from 2026-03-01) > 0 **with its
+month-bootstrap 5% end > 0**; also reported: its before-March value on the new weeks, and both periods pooled with tests
+4–4e's weeks. Anything less — the arm stays unconfirmed, and nothing is built on it.
+
+**Result (2026-11-14) — NOT CONFIRMED, both arms.** All 4,815 new weeks fetched (0 failed); `data/lab/daytrade-confirm.out.txt`.
+
+| arm | new weeks, held out (the bar) | new, before March | 4e weeks, held out | all weeks, held out |
+|---|---|---|---|---|
+| A — 1-hour limit plan, hold 10 | +0.020 R (−0.041 … +0.088), 1,076 signals, 38% filled | +0.023 (−0.028 … +0.062) | +0.006 | +0.014 (−0.043 … +0.072) |
+| B — 14:30, 15-minute stop, hold 10 | −0.095 R (−0.307 … +0.170), 286 signals | +0.078 (−0.027 … +0.185) | +0.030 | −0.045 (−0.245 … +0.180) |
+
+What it says: 4e's +0.13 (A) and +0.18 (B) before March were the luck of those 3,185 weeks — on new weeks the same
+period gives +0.02 / +0.08, and held out both sit on zero. Held 10 sessions, a board day trade is a small swing trade
+with no measured edge. Across tests 4–4f no entry off the day boards (checkpoint, limit plans, VWAP, sweep, hold) has
+an edge; nothing is built on any of them.
+
+**Built after it (Roy, 2026-11-14: "i will check it live first - lets go for stop in 1hr").** A day trade (intraday · day)
+is drawn on the 1-hour chart, the stop test 4 left standing (it tied the daily; the 5- and 15-minute did worse):
+`get_price_structure` takes `timeframe: "hour"` — the last 45 days of regular-session hourly bars from the 09:30 open,
+closed bars only (`thesisStructure.tools` `hourRows`), no break scenario (a day trade waits on no close to arm) and no
+heavy days, and no deeper stop (its 60 bars reach ~9 sessions back: AMD's sat 25% away); a bar ends at the
+session's close, 13:00 on the rule-based early closes (`market.service` equityCloseMin). Mentor's turn reads it for a day trade (`_lensTimeframe`), its risk read in normal hours. The trade monitor
+breaks both horizons on a 1-hour close (`BREAK_RUNG_MAX`, was 15 minutes intraday), paces an unnamed thesis day trade on
+the 1h / 15m (`THESIS_PACE_DAY`) and is told strength on the 15m / 1h (`lensLine`). The opening has a day-trade
+version; Mentor never calls a day trade tested better. Whether the board's own picks (its catalyst pool, ranking and
+60-row cap — not replayed by tests 4–4f) behave differently is Roy's live check; test 4g is drafted for it, not run.
+
+
+
+## Test 5 — the stop's depth, per stock (declared 2026-11-16, before the run)
+
+Roy, 2026-11-16: "each ticker behaves individually" — after Proteus's per-name stop test (proteus.md §10.3: no line makes
+a better stop on any name beyond luck), the stop's DEPTH per name, judged on the TRADE (a deeper stop is hit less but
+risks more per share — only R decides). Run knowing it is likely too thin to tell (Roy chose it: ~5–6 reversal trades a
+name in 7 years; telling 0.1R apart on one name needs ~500). `scripts/lab-thesis-buffer-name.mjs`.
+
+- **Trades:** test 1's rules exactly (`thesisLab.service` — plan, play, inR on the planned risk, `costFor`), long, the
+  point-in-time S&P 500 (2019-01-02 → 2026-10-26, the ≥ 90% coverage rule, price ≥ $5, ADV ≥ $5M). Two signal sets, each
+  read on its own: the REVERSAL thesis (test 1's signals) and the BASELINE geometry (every 10th session — ~10× the trades).
+- **The depths (fixed now):** 0.2 ATR under the stop's swing low (Mentor's — the reference), 0.5, 1, 2 ATR, and 0.2 ATR
+  under the 60-day low (`stopAt: 'low60'`). Each SIGNAL is played at every depth; a depth whose plan fails rule A or never
+  fills scores 0R (no trade is a result). A trade open at the data's end is marked at the last close.
+- **Per name:** signals in the older two-thirds of the name's bars choose the depth — the best mean of (R at that depth −
+  R at 0.2) on the SAME signals. `respects`: that best depth beats 0.2 by ≥ 0.1R at z ≥ 3 (paired) on ≥ 15 older signals,
+  and on the recent third (≥ 5 signals) still by ≥ 0.05R; else `faded` / `unconfirmed` / `no` (0.2 is the best, or the
+  gain is under the bar) / `thin`.
+- **The control:** each name's bars shuffled (the Proteus engine's `shuffledBars`), the identical pipeline — the same
+  search over five depths, so the search's luck is on both sides.
+- **PASS — a stop depth is a trait of some stocks:** real names `respects` ≥ 2× the shuffled AND ≥ 10 more, on either
+  signal set. Then the depth goes into the stock's profile and Mentor weighs it (Roy, 2026-11-16). Otherwise Mentor's
+  0.2 ATR stays. Beside it, not for the bar: each depth's pooled mean R before / held out (2025-10-23), and how often
+  each depth is "best" per name, real vs shuffled.
+
+### Test 5 — result (2026-11-16): FAIL — no stock has a stop depth of its own beyond luck
+
+`data/lab/thesis-buffer-name.out.txt`. 638 names.
+
+- **Reversal signals** (median 17 a name, most never trade): `thin` on 546 names, `no` on the other 92 — 0 `respects`
+  (shuffled: 0). Too few, as expected.
+- **Baseline signals** (median 166 a name — here the question CAN be answered): `respects` on 2 names — ELV (2 ATR,
+  +0.27R) and NSC (1 ATR, +0.22R), both just at z 3 and barely confirmed (+0.06 / +0.07R recent) — against 1 on the
+  shuffled bars. The bar was 2× and 10 more. **FAIL.**
+- **The "best" depth per name is spread across all five, on the real bars and the shuffled alike** (real: 2 ATR 135,
+  60-day low 131, 0.2 ATR 121, 1 ATR 95, 0.5 ATR 79; shuffled: 128 / 127 / 115 / 98 / 96 in another order) — which
+  depth "wins" on a name is what chance picks.
+- **Pooled, the depths are alike:** reversal +0.050R at 0.2 ATR before (the best) and +0.012R at 2 ATR; held out
+  +0.048 … +0.075R. Baseline +0.027 … +0.033R before, +0.029 … +0.049R held out (deeper a hair better, held out only —
+  the same small held-out lean as test 1b).
+- **So:** Mentor's 0.2 ATR under the swing low stays, for every stock. With Proteus §10.3 (no line a better stop on any
+  name), the stop is the one rule for all names that the data supports.
+
 ## Built (2026-10-30)
 
 - The `thesis` lens (`services/analysisModes.js` MODES) — Mentor's prompt § The thesis lens: the six steps, the setup
