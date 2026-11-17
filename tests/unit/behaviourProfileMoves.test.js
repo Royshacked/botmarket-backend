@@ -94,3 +94,39 @@ test('the words: size and pace in the row on the horizon\'s bars (15-minute besi
     assert.match(text, /SIZE AND PACE — described on the name's own moves/)
     assert.match(text, /never cite it as support/)
 })
+
+// Fix 1 (Roy, 2026-11-17): a profile is never measured on a short fallback daily history.
+import { fmpDaily, fetchProfileBars } from '../../services/behaviourProfile.service.js'
+import { profileRow } from '../../services/hotlistBehaviour.service.js'
+
+const noSleep = async () => {}
+test('fmpDaily: FMP\'s bars when it answers; retried on a failure; the router only when FMP answers empty', async () => {
+    const bars = [{ timestamp: 1, close: 1 }]
+    let calls = 0
+    assert.deepEqual(await fmpDaily('X', {}, { fmp: async () => { if (++calls < 3) throw Object.assign(new Error('429'), { status: 429 }); return bars }, router: async () => { throw new Error('router must not be asked') }, sleep: noSleep }), bars)
+    assert.equal(calls, 3)
+    const fallback = [{ timestamp: 2, close: 2 }]
+    assert.deepEqual(await fmpDaily('X', {}, { fmp: async () => [], router: async () => fallback, sleep: noSleep }), fallback)
+})
+
+test('fmpDaily: FMP failing every try → no profile, an error saying to try again (code DAILY_UNAVAILABLE, the status kept)', async () => {
+    let router = 0
+    await assert.rejects(
+        fmpDaily('LLY', {}, { fmp: async () => { throw Object.assign(new Error('FMP candles LLY/dayx1 429'), { status: 429 }) }, router: async () => { router++; return [] }, sleep: noSleep }),
+        (err) => err.code === 'DAILY_UNAVAILABLE' && err.status === 429 && /try again later/.test(err.message))
+    assert.equal(router, 0)   // never the short fallback history
+})
+
+test('fetchProfileBars: a test\'s own get still serves the daily; getDaily overrides it', async () => {
+    const day = Array.from({ length: 5 }, (_, i) => ({ timestamp: 1_700_000_000 + i * DAY, open: 1, high: 1, low: 1, close: 1 }))
+    const b = await fetchProfileBars('X', { get: async (s, o) => (o.timeSpan === 'day' ? day : []), now: Date.parse('2026-11-17T00:00:00Z') })
+    assert.equal(b.day.length, 5)
+    const c = await fetchProfileBars('X', { get: async () => [], getDaily: async () => day.slice(0, 2), now: Date.parse('2026-11-17T00:00:00Z') })
+    assert.equal(c.day.length, 2)
+})
+
+test('profileRow: a daily fetch that failed just now reads `unavailable`, not `no_history`', async () => {
+    const err = Object.assign(new Error('the daily history could not be fetched just now'), { code: 'DAILY_UNAVAILABLE', status: 429 })
+    assert.equal((await profileRow('LLY', 'swing', { profile: async () => { throw err } })).reason, 'unavailable')
+    assert.equal((await profileRow('ZZZ', 'swing', { profile: async () => { throw new Error('no price history for ZZZ') } })).reason, 'no_history')
+})

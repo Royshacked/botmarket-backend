@@ -22,7 +22,7 @@ const _deps = {
 
 /**
  * One opened row: `{ symbol, horizon, computed_at, headline, lines, on }`, or `{ symbol, horizon, reason }` — `bad_symbol`,
- * `no_history` (the profile could not be measured), `too_short` (no bars on this horizon's timeframes). Never throws.
+ * `no_history` (the profile could not be measured), `unavailable` (its daily bars could not be fetched just now — try again), `too_short` (no bars on this horizon's timeframes). Never throws.
  */
 export async function profileRow(symbol, horizon = null, deps = _deps) {
     const sym = String(symbol ?? '').trim().toUpperCase()
@@ -33,7 +33,8 @@ export async function profileRow(symbol, horizon = null, deps = _deps) {
         p = await deps.profile(sym)
     } catch (err) {
         logger.warn(LOG, `${sym}: not measured — ${err.message}`)
-        return { symbol: sym, horizon: h, reason: 'no_history' }
+        // The daily bars could not be fetched just now (fmpDaily) — a passing failure, not a name without history.
+        return { symbol: sym, horizon: h, reason: err?.code === 'DAILY_UNAVAILABLE' ? 'unavailable' : 'no_history' }
     }
     const row = rowProfile(p, h)
     if (!row) return { symbol: sym, horizon: h, reason: 'too_short' }

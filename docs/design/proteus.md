@@ -677,3 +677,10 @@ name"; "if a stock is for day trade, the same check on the lower timeframe — m
    Mentor weighing the read for his levels — not built.
 6. **Size and pace (K)** — BUILT 2026-11-16 (§10.8): every timeframe's moves described per name, the 15-minute beside
    the 5-minute; in the opened row and the tool text. Mentor's use — later (Roy).
+7. **No profile on a short fallback history** — FIXED 2026-11-17 (Roy: "fix 1"). When FMP failed (a 429 while the
+   queue profiled several names, a timeout) the candle router fell back to a provider with ~2 years of daily bars, and
+   the profile was measured on them and kept a week (LLY, OXY: ~500 daily bars, no weekly view). The daily now comes
+   from FMP only (`fmpDaily`, 3 tries, 3 s and 10 s apart); still failing, no profile is made or kept — the error says
+   try again (a 429 pauses the queue and retries; the opened row reads "could not be fetched just now"). FMP answering
+   EMPTY (a symbol it does not cover) still takes the fallback; USE_FMP_CANDLES off, the router as before. The
+   intraday pages still fall back page by page (a skipped or mixed page, not a short history).

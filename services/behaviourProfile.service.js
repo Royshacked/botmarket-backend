@@ -15,7 +15,8 @@
 //
 // One profile computing per symbol at a time: a second ask for the same name waits on the first.
 
-import { getTickerAggregates } from '../providers/candles.provider.js'
+import { getTickerAggregates, _deps as candleDeps } from '../providers/candles.provider.js'
+import { getFmpCandles } from '../providers/fmp.price.provider.js'
 import { makeMongoBackedCache } from './mongoCache.util.js'
 import { behaviourProfile } from './behaviourProfile.engine.js'
 import { toWeekly } from './swingStructure.service.js'
@@ -97,13 +98,49 @@ export function fifteenFromFive(five) {
     return out
 }
 
-/** The timeframes' bars for a symbol (15-minute built from the 5-minute). `deps.get` — the candle fetch (a test seam). */
-export async function fetchProfileBars(symbol, { get = getTickerAggregates, now = Date.now() } = {}) {
+/** The daily fetch's tries and the waits between them (ms). */
+export const DAILY_TRIES = Object.freeze([0, 3_000, 10_000])
+
+/**
+ * The daily bars from FMP ONLY — no fallback on a failure (Roy, 2026-11-17: "fix 1"). When FMP fails (a 429 while the
+ * queue profiles several names, a timeout), the router used to fall back to a provider with ~2 years of daily bars:
+ * the profile was measured on them and kept a week — LLY and OXY with 499–501 daily bars and no weekly view (the
+ * weekly needs ~260 weeks). So FMP is tried `DAILY_TRIES` times; still failing, the profile is NOT made — the error
+ * (`code` DAILY_UNAVAILABLE, the provider's `status`, so a 429 pauses the queue and retries) says to try again later.
+ * FMP answering EMPTY (a symbol it does not cover) is not a failure: the router's fallback serves it, as before.
+ */
+export async function fmpDaily(sym, options, { fmp = getFmpCandles, router = getTickerAggregates, sleep = (ms) => new Promise(r => setTimeout(r, ms)), tries = DAILY_TRIES } = {}) {
+    let last = null
+    for (const wait of tries) {
+        if (wait) await sleep(wait)
+        try {
+            const rows = await fmp(sym, options)
+            if (Array.isArray(rows) && rows.length) return rows
+            return (await router(sym, options)) ?? []   // not covered by FMP — the fallback is all there is
+        } catch (err) {
+            last = err
+            logger.warn(LOG, `${sym} daily from FMP failed (${err.status ?? err.message}) — ${wait === tries.at(-1) ? 'not profiled now' : 'retrying'}`)
+        }
+    }
+    const err = new Error(`the daily history could not be fetched just now (${last?.message ?? 'FMP failed'}) — not measured on a short fallback history; try again later`)
+    err.code = 'DAILY_UNAVAILABLE'
+    err.status = last?.status
+    throw err
+}
+
+/**
+ * The timeframes' bars for a symbol (15-minute built from the 5-minute). `deps.get` — the candle fetch (a test seam);
+ * the daily goes through `fmpDaily` unless a test passes its own `get` (or `getDaily`).
+ */
+export async function fetchProfileBars(symbol, { get = getTickerAggregates, getDaily = null, now = Date.now() } = {}) {
     const sym = String(symbol).toUpperCase()
+    const daySpec = { timeSpan: 'day', multiplier: 1, from: now - 10 * 365 * DAY, to: now }
+    // FMP candles switched off (USE_FMP_CANDLES): the router's own source, as before — no FMP to insist on.
+    const dailyOf = getDaily ?? (get === getTickerAggregates && candleDeps.useFmp ? (s, o) => fmpDaily(s, o) : get)
     const [five, hour, daily] = await Promise.all([
         _paged(get, sym, 'minute', 5, 92, 7, now),
         _paged(get, sym, 'hour', 1, 365, 60, now),
-        get(sym, { timeSpan: 'day', multiplier: 1, from: now - 10 * 365 * DAY, to: now }),
+        dailyOf(sym, daySpec),
     ])
     const day = daily ?? []
     // The daily view reads all ~10 years (Roy, 2026-11-12): found on the older two-thirds alone, 5 years gave a moving
