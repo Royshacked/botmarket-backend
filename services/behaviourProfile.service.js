@@ -42,7 +42,9 @@ export const PROFILE_TTL_MS = 7 * DAY
 // 11 (2026-11-16): SIZE AND PACE on every timeframe (movesProfile — proteus.md §10.8), and 15-minute bars beside the
 // 5-minute for it (built from the 5-minute, no extra calls; Roy, option 2).
 // 12 (2026-11-17): the news around the moves (newsProfile — proteus.md §10.10), read beside the bars.
-export const PROFILE_VERSION = 12
+// 13 (2026-11-17): what sits at every step of the moves, every timeframe — patterns, OBs, indicators, volume profile,
+// Elliott (stepsProfile — proteus.md §10.11).
+export const PROFILE_VERSION = 13
 
 const _cache = makeMongoBackedCache({ collection: PROFILE_COLLECTION, ttlMs: PROFILE_TTL_MS, max: 300, log: LOG })
 const _inflight = new Map()

@@ -11,6 +11,7 @@
 import { makeToolHandler } from '../agentUtils.js'
 import { profileFor } from '../behaviourProfile.service.js'
 import { PROFILE, MOVES, NEWS } from '../behaviourProfile.engine.js'
+import { STEPS, STEP_WORDS, STEP_NAMES, stepFact } from '../moveSteps.engine.js'
 import { STRUCTURE } from '../swingStructure.service.js'
 
 const LOG = '[behaviourProfile.tools]'
@@ -95,6 +96,38 @@ export function movesWords(m, tf) {
         `; then ~${_n(med('gain_atr'))} ATR, +${MOVES.up} ATR in ~${_n(med('bars_to_move'), 0)} ${bar}.` +
         ` Steady lately: ${steady} of ${judged} measures${changed.length ? ` (changed: ${changed.join(', ')})` : ''}.` +
         (n ? ` Now: ${_n(n.off_top_atr)} ATR${n.off_top_pct_of_run != null ? ` (${_n(n.off_top_pct_of_run, 0)}% of the run)` : ''} off its top ${n.bars_since_top} ${bar} ago${Number.isFinite(n.rsi) ? `, RSI ${_n(n.rsi, 0)}` : ''}.` : '')
+}
+
+/**
+ * M (§10.11) — what sits at the steps of one timeframe's moves, in words: the facts that STAND OUT (on more of its moves
+ * than of its other lows AND of the moves of its shuffled bars, older and recent), are RARER, or FADED, each with its shares; `full` adds the facts with no
+ * difference, by name (the tool text — so a reader knows they were looked at). Null when not measured. Pure.
+ */
+export function stepsWords(st, { full = false } = {}) {
+    if (!st) return null
+    const pc = (x) => (x == null ? '—' : `${Math.round(x * 100)}%`)
+    const said = { stands_out: [], rarer: [], faded: [], unconfirmed: [] }, rest = []
+    let thin = false
+    for (const [step, words] of Object.entries(STEP_WORDS)) {
+        for (const [k, w] of Object.entries(words)) {
+            const f = stepFact(st[step]?.[k])
+            if (!f) continue
+            if (f.verdict === 'thin') thin = true
+            const one = `${w} ${STEP_NAMES[step]} (${pc(f.older)} of its moves, recent ${pc(f.recent)}, vs ${pc(f.any_older)} of its other lows${f.shuffled_older != null ? `, ${pc(f.shuffled_older)} of its shuffled bars' moves` : ''})`
+            if (said[f.verdict]) said[f.verdict].push(one)
+            else rest.push(`${w} ${STEP_NAMES[step]}`)
+        }
+    }
+    if (thin) return `too few moves to say (${st.moves}; ${STEPS.minMoves} needed).`
+    const n = Object.values(STEP_WORDS).reduce((a, w) => a + Object.keys(w).length, 0)
+    const parts = [
+        said.stands_out.length ? `Stands out: ${said.stands_out.join('; ')}.` : `Nothing stands out — of ${n} patterns, order blocks, indicators, volume-profile and Elliott facts at its tops, pullback lows and the runs into its tops, none is on more of its moves than of its other lows and of its shuffled bars' moves.`,
+        said.rarer.length ? `Rarer: ${said.rarer.join('; ')}.` : null,
+        said.faded.length ? `Faded lately: ${said.faded.join('; ')}.` : null,
+        said.unconfirmed.length ? `Too few recent moves to confirm: ${said.unconfirmed.join('; ')}.` : null,
+        full && rest.length ? `No difference: ${rest.join(', ')}.` : null,
+    ]
+    return `${st.moves} moves: ${parts.filter(Boolean).join(' ')}`
 }
 
 /**
@@ -319,6 +352,47 @@ export function holdKeys(t) {
     ]
 }
 
+/**
+ * EVERY test on one timeframe, key → its verdict (Roy, 2026-11-17: "add the tested line" — the row named only what
+ * holds, so a failed 50 MA looked untested). The same keys as holdKeys, less the chance verdict (the breaks line says
+ * it); a test with no events (no trading range for Wyckoff) is 'thin'. Pure.
+ */
+export function testedKeys(t) {
+    if (!t) return {}
+    const v = (s) => s?.verdict ?? 'thin'
+    return {
+        ...Object.fromEntries(Object.entries(t.indicators ?? {}).map(([k, s]) => [k, v(s)])),
+        sweeps: v(t.false_breaks?.after_sweep),
+        order_blocks: v(t.order_blocks),
+        cycle: v(t.cycle),
+        springs: v(t.wyckoff?.springs),
+        range_breakouts: v(t.wyckoff?.breakouts),
+        dry_up: v(t.wyckoff?.dry_up),
+        fib: v(t.fib),
+    }
+}
+
+/**
+ * The row's "Tested" line: what was measured on the horizon's timeframes and holds on none of them, and what had too
+ * few events to say. Null when nothing was tested. Pure.
+ */
+export function testedWords(profile, tfs) {
+    const order = new Set(), noEdge = new Set(), held = new Set()
+    for (const tf of tfs) {
+        for (const [k, verdict] of Object.entries(testedKeys(profile?.timeframes?.[tf]))) {
+            order.add(k)
+            if (verdict === 'respects') held.add(k)
+            else if (verdict !== 'thin') noEdge.add(k)
+        }
+    }
+    // Measured on one timeframe and too thin on the other is "no edge"; one that holds anywhere is in What it obeys.
+    const keys = [...order].filter(k => !held.has(k))
+    const no = keys.filter(k => noEdge.has(k)).map(k => BADGE_WORDS[k] ?? k)
+    const few = keys.filter(k => !noEdge.has(k)).map(k => BADGE_WORDS[k] ?? k)
+    if (!no.length && !few.length) return null
+    return [no.length ? `No edge: ${no.join(', ')}.` : null, few.length ? `Too few to say: ${few.join(', ')}.` : null].filter(Boolean).join(' ')
+}
+
 /** A held key in words, for the lists that name what holds (holdsOf). */
 const HOLD_WORDS = Object.freeze({
     sweeps: 'sweeps of lows', order_blocks: 'order blocks', cycle: 'a price cycle',
@@ -425,6 +499,8 @@ export function rowProfile(profile, horizon = null) {
     const tfs = (BADGE_TIMEFRAMES[horizon] ?? BADGE_TIMEFRAMES.swing).filter(tf => profile.timeframes[tf])
     const tfWord = (tf) => TF[tf].charAt(0) + TF[tf].slice(1).toLowerCase()
     const lines = [['What it obeys', head.kind === 'holds' ? head.holds.join(', ') : `Nothing technical holds on the ${tfs.map(tf => TF[tf].toLowerCase()).join(' and ')} bars.`]]
+    const tested = testedWords(profile, tfs)
+    if (tested) lines.push(['Tested', tested])
     for (const tf of tfs) {
         const fb = profile.timeframes[tf].false_breaks
         if (!fb?.breaks) continue
@@ -449,6 +525,11 @@ export function rowProfile(profile, horizon = null) {
     for (const tf of movesViews(BADGE_TIMEFRAMES[horizon] ?? BADGE_TIMEFRAMES.swing)) {
         const w = movesWords(profile.moves?.[tf], tf)
         if (w) lines.push([`${tfWord(tf)} size and pace`, w])
+    }
+    // What sits at the steps of those moves (M) — patterns, order blocks, indicators, volume profile, Elliott.
+    for (const tf of movesViews(BADGE_TIMEFRAMES[horizon] ?? BADGE_TIMEFRAMES.swing)) {
+        const w = stepsWords(profile.moves?.[tf]?.steps)
+        if (w) lines.push([`${tfWord(tf)} at the steps`, w])
     }
     // The news around its moves (L): the daily for a swing, the 5-minute's headlines for a day trade (its own bars).
     const views = BADGE_TIMEFRAMES[horizon] ?? BADGE_TIMEFRAMES.swing
@@ -482,6 +563,9 @@ export function formatProfile(p) {
         ...(p.moves ? [
             `SIZE AND PACE — described on the name's own moves (+${MOVES.up} ATR within ${MOVES.within} bars before a close ${MOVES.stop} ATR under; intraday moves inside one session), its typical values (medians); "steady" = the recent third's median inside the older two-thirds' middle half. A description of how far and how fast it moves, not an edge — never cite it as support:`,
             ...Object.entries(p.moves).map(([tf, m]) => `  ${TF[tf] ?? tf}: ${movesWords(m, tf) ?? 'too few bars to measure'}`),
+            '',
+            `AT THE STEPS OF ITS MOVES — patterns, order blocks (first touch), indicators, the volume profile (the ${STEPS.vpBars} bars before) and Elliott's rules (five legs into a top, an A-B-C pullback — never the wave count) at the run into each top, the top, and the low a move started at, against the same facts at its other lows. Stands out = ${STEPS.edge * 100}+ points more of its older moves at z ≥ ${STEPS.z}, and still more of the recent. A description of its moves, not a signal — never cite it as the reason a move will come:`,
+            ...Object.entries(p.moves).filter(([, m]) => m?.steps).map(([tf, m]) => `  ${TF[tf] ?? tf}: ${stepsWords(m.steps, { full: true })}`),
             '',
         ] : []),
         ...(p.news ? [

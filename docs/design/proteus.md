@@ -743,6 +743,59 @@ take it out." So it is ONE part, `news`, easy to remove: the engine's L (`newsPr
   intraday a company headline before 90% of moves vs 87% of any moment. LNG — its moves start away from news (0.3 vs
   1.1), the major news reports inside the pullbacks; intraday 35% vs 40%. As the labs found.
 
+### 10.11 What sits at every step of a move, every timeframe — and volume profile, Elliott (declared 2026-11-17)
+
+Roy: "I prefer to check patterns / OBs / indicators at all move steps — in time I'll see if to take it off. Also we
+tried it only on daily charts. Also — can we add to our profile volume profile and Elliott waves?" §10.7's checks ran
+on the daily bars of 11 names in a lab; now on EVERY name, on every timeframe (5-min, 15-min, 1-hour, daily, weekly),
+in the profile. One part (`steps`, inside each timeframe's size and pace), easy to take out.
+
+- **The moves and steps are K's** (§10.8): the move's start (the LOW), the TOP it pulled back from (the highest close of
+  the 60 bars before), and INTO THE TOP (the run up to it). Session-only moves on 5/15-min, as K.
+- **Each fact is read against ANY bar** — the base: the same fact at every bar treated as a "low" (its top and run
+  found the same way), sampled (≤ ~1,500 bars). A fact on 80% of moves means nothing if it is on 80% of any bar (the
+  lab's LOOSE detectors). Per fact: the share of the older / recent moves, the share of any bar, and `stands_out` when
+  the older moves beat any bar by ≥ 10 points at z ≥ 3 and the recent by ≥ 5 (Proteus's own `edge` / `z` / `recentEdge`).
+  Thin (< 10 moves): shares only.
+- **Changed in the build (2026-11-17, before any result was reported), each for a reason found on the first look:**
+  1. *Any bar → any LOW.* A move starts at a low by construction; any bar made the low's own traits look like the
+     moves' (the MACD histogram still falling at a low: 0% of moves vs 51% of any bar). The base is every local low (the
+     lowest close of 5 bars each side; on 5/15-minute, the same session's bars, as a move's are — 14 of KO's 61
+     5-minute starts were not the lowest of the 5 bars before, those being the session before's).
+  2. *A second baseline: its own bars shuffled.* Against its other lows alone, random walks "stood out" on 10 of 80
+     daily runs (z 3 … 5 never cleared the tail: a deep pullback leaves the MACD under zero in a random walk too). So a
+     fact stands out only when it beats BOTH its other lows and the moves of the name's bars in 4 shuffled orders (each
+     bar kept, the sequence gone — Proteus's own shuffle), like a Wyckoff spring must beat both. Random walks: 0 of 40.
+  3. *The candles split.* "A hammer / bullish engulfing" fired at half of a random walk's lows (an up bar after the red
+     bar that made the low "engulfs"): hammer, bullish engulfing, shooting star, bearish engulfing are each their own fact.
+  A planted trait is found (a unit test: every rally starting at a hammer stands out).
+- **The facts** — §10.7's, with the TIGHT order block and double bottom/top (the loose ones fired on 30%+ of any bar):
+  - at the low: a bullish order block (tight), a swept swing low, a Wyckoff spring, inside a Wyckoff range, a 38.2/50/61.8%
+    retrace (±5), at the 200 SMA, MACD under zero, the histogram turning up, a MACD cross up, RSI / MACD bullish
+    divergence, a double bottom (tight), a hammer / bullish engulfing;
+  - at the top: a bearish order block (tight), a swept swing high, a MACD cross down, RSI / MACD bearish divergence, a
+    double top (tight), a shooting star / bearish engulfing;
+  - into the top: a Wyckoff range breakout, a bullish OB retested, a swept low (20 bars before), MACD over zero, a MACD
+    cross up (10 before), the 20 EMA over the 50 SMA, RSI over 60.
+- **Volume profile (new)** — the volume at each price over the 120 bars before the bar (each bar's volume spread evenly
+  over its high–low, 40 price bins): the point of control (POC, the busiest bin), the value area (the 70% of volume
+  around it, VAL–VAH), high- / low-volume nodes (a bin ≥ 1.5× / ≤ 0.5× the average bin). At the low (its low price): at
+  the POC, at the VAL (each within 0.5 ATR), under the value area, at a high-volume node, at a low-volume node. At the top
+  (its high): at the POC, at the VAH, over the value area, at a high-volume node, at a low-volume node.
+- **Elliott (new) — the part with rules, never the count.** Turns from a zigzag on the closes: a turn needs a reversal
+  ≥ 1.5 ATR. Into the top: the run (its low → the top) is FIVE legs keeping Elliott's three rules — wave 2 never under
+  wave 1's start, wave 3 not the shortest of 1/3/5, wave 4 never into wave 1's range. At the low: the pullback (the top →
+  the low) is THREE legs (A down, B up, C down) with C past A's end, and C within 0.618–1.618 × A. The wave LABELS a
+  chart reader would draw are not measured (§8.1's rule) — only whether the legs were there and kept the rules.
+- **Shown:** the opened row's "<tf> at the steps" line — the facts that stand out (rarer, faded) with their shares, or
+  "nothing stands out of 41 facts"; the tool text the same, plus every other fact by name ("no difference"). A
+  description of the moves, not a signal. PROFILE_VERSION 13. Stored compact (one array a fact): ~31 KB a profile,
+  was ~20 KB. The engine ~1–1.5 s a name (all timeframes, the shuffles included).
+- **Live, 2026-11-17 — KO, LNG, NVDA, TSLA, DUK, every timeframe:** NOTHING stands out, on any name or timeframe (the
+  weekly: too few moves, 4–7). Against the other lows alone a few did (KO and DUK daily MACD under zero, NVDA hourly a
+  MACD cross and RSI divergence) — each also on the shuffled bars' moves: what any move has, not the name. As §10.7's
+  lab found on the daily, now on the intraday too.
+
 ## 11. Build order and status
 
 1. **The measured profile engine** — BUILT 2026-11-12 (`services/behaviourProfile.engine.js`, 68080cdf): one
@@ -787,3 +840,10 @@ take it out." So it is ONE part, `news`, easy to remove: the engine's L (`newsPr
    intraday pages still fall back page by page (a skipped or mixed page, not a short history).
 8. **The news around the moves (L)** — BUILT 2026-11-17 (§10.10): per name, beside size and pace; in the opened row
    and the tool text. One part to take out if it teaches nothing (Roy). Mentor's use — later.
+9. **What sits at every step of the moves (M)** — BUILT 2026-11-17 (§10.11): patterns, order blocks, indicators, a
+   volume profile and Elliott's rules at the run into each top, the top and the low, every timeframe, against its other
+   lows and its shuffled bars (`services/moveSteps.engine.js`, one part to take out). The opened row also lists what was
+   TESTED with no edge (Roy: "add the tested line"). Mentor's use — later.
+   **Horizontal support / resistance** (levels from ≥ 2 swing lows / highs within 0.25 ATR, a forward test against
+   shifted levels, and at the steps: a low at support, a top at resistance, the flip) — proposed 2026-11-17, LEFT FOR
+   LATER (Roy: "let's leave it for now").

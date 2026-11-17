@@ -107,3 +107,15 @@ test('profileFor: the news is read beside the bars (deps.news); a test\'s own ca
     assert.equal(without.news, undefined)
     assert.equal(NEWS.bigAtr, 2)
 })
+
+test('the row\'s Tested line: what failed on the horizon\'s timeframes, what was too thin — a test that holds on either is left out', async () => {
+    const { testedWords } = await import('../../services/tools/behaviourProfile.tools.js')
+    const tf = (over = {}) => ({ indicators: { ema20: { verdict: 'no' }, sma50: { verdict: 'no' }, rsi_oversold: { verdict: 'thin' } },
+        false_breaks: { after_sweep: { verdict: 'no' } }, order_blocks: { verdict: 'no' }, cycle: { verdict: 'thin' }, wyckoff: null, fib: { verdict: 'no' }, ...over })
+    const p = { timeframes: { day: tf(), week: tf({ indicators: { ema20: { verdict: 'respects' }, sma50: { verdict: 'no' }, rsi_oversold: { verdict: 'no' } } }) } }
+    const w = testedWords(p, ['day', 'week'])
+    assert.match(w, /^No edge: 50 MA, RSI under 30, sweeps lows, order blocks, Fibonacci pullbacks\./)
+    assert.doesNotMatch(w, /20 EMA/)                         // holds on the weekly
+    assert.match(w, /Too few to say: price cycle, Wyckoff springs, range breakouts, dry-volume retests\.$/)
+    assert.equal(testedWords({ timeframes: {} }, ['day']), null)
+})

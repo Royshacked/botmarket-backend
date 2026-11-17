@@ -58,6 +58,7 @@ test('an opened row shows how the name trades on its horizon: what holds, the br
     assert.deepEqual(row.on, ['day', 'week'])
     assert.deepEqual(Object.fromEntries(row.lines), {
         'What it obeys': 'Nothing technical holds on the daily and weekly bars.',
+        'Tested': 'No edge: 20 EMA, 50 MA, 200 MA, VWAP, sweeps lows, order blocks. Too few to say: price cycle, Wyckoff springs, range breakouts, dry-volume retests, Fibonacci pullbacks.',
         'Daily breaks of a low': '77% of 40 closed back above within 3 bars — about what its own moves in random order do (79%): no trait of its own; sweeps ~0.24 ATR under the low (80% within 0.53) — how far noise pokes under a low; a direction ~3 bars after.',
         'Weekly breaks of a low': '60% of 12 closed back above within 3 bars — too few breaks to tell it from chance; sweeps ~0.24 ATR under the low (80% within 0.53) — how far noise pokes under a low; a direction ~3 bars after.',
         'Latest example': '2026-11-12 the swing low 151.49 was swept to 148.8 (0.27 ATR under), closed back above 2026-11-12.',

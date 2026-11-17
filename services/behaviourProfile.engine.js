@@ -19,6 +19,7 @@ import { calcSMASeries, calcEMASeries, calcRSISeries, calcMACDSeries, calcATRSer
 import { swings, detectOrderBlocks } from './smc.engine.js'
 import { findExtrema, cycleStats } from './cycleAnalysis.service.js'
 import { STRUCTURE, atr as structureAtr, swings as structureSwings } from './swingStructure.service.js'
+import { stepsProfile, runOf, STEPS } from './moveSteps.engine.js'
 
 export const PROFILE = Object.freeze({
     horizon: 10,        // bars an outcome has to happen in
@@ -834,12 +835,11 @@ export function movesProfile(bars, timeframe, m = MOVES) {
     for (const s of starts) {
         const a = atrs[s]
         if (s < m.look * 2 || !Number.isFinite(a) || a <= 0) continue
-        let h = s - m.look
-        for (let j = s - m.look; j < s; j++) if (closes[j] > closes[h]) h = j
-        let lo = h - m.look
-        for (let j = h - m.look; j < h; j++) if (closes[j] < closes[lo]) lo = j
+        const run0 = runOf(closes, s, m.look)
+        if (!run0) continue
+        const { h, lo } = run0
         const ah = atrs[h]
-        if (!Number.isFinite(ah) || ah <= 0 || lo < 0) continue
+        if (!Number.isFinite(ah) || ah <= 0) continue
         let hi = -Infinity, hitAt = null
         for (let j = s + 1; j <= Math.min(bars.length - 1, s + m.within); j++) {
             hi = Math.max(hi, bars[j].high)
@@ -847,7 +847,7 @@ export function movesProfile(bars, timeframe, m = MOVES) {
         }
         const run = closes[h] - closes[lo]
         rows.push({
-            i: s, recent: s >= cut,
+            i: s, h, lo, recent: s >= cut,
             run_atr: run / ah, run_bars: h - lo,
             depth_pct: run > 0 ? (closes[h] - closes[s]) / run * 100 : null, depth_atr: (closes[h] - closes[s]) / a, pull_bars: s - h,
             rsi_top: rsi[h], stretch_atr: Number.isFinite(s50[h]) ? (closes[h] - s50[h]) / ah : null,
@@ -878,7 +878,33 @@ export function movesProfile(bars, timeframe, m = MOVES) {
     return {
         timeframe, moves: rows.length, older: older.length, recent: recent.length, verdict: rows.length < m.minMoves ? 'thin' : 'measured',
         session_only: session, measures, now,
+        // M (§10.11): what sits at each step of these moves, against its other lows AND the moves of its shuffled bars.
+        steps: stepsProfile(bars, atrs, rows, cut, _wyckoffEvents(bars, atrs, cut), { session, shuffled: _shuffledMoves(bars, cut, session, m) }),
     }
+}
+
+/**
+ * M's second baseline: the name's own bars in `STEPS.shuffles` shuffled orders (each bar kept, the sequence gone), their
+ * moves found by K's rule. A fact that comes with ANY move — a deep pullback leaves the MACD under zero in a random walk
+ * too — is on these as much as on the name's (random walks: 10 of 80 "stood out" on the daily against the other lows
+ * alone). Seeded, so the same bars give the same answer. Pure.
+ */
+function _shuffledMoves(bars, cut, session, m = MOVES) {
+    const rnd = _rng(bars.length * 7919 + 17), out = []
+    for (let k = 0; k < STEPS.shuffles; k++) {
+        const sb = _shuffledBars(bars, rnd), sa = calcATRSeries(_mon(sb), PROFILE.atrPeriod), sc = sb.map(b => b.close)
+        const moves = moveStartsOf(sb, moveFlags(sb, sa, { session }, m), m)
+            .map(s => { const r = Number.isFinite(sa[s]) && sa[s] > 0 ? runOf(sc, s, m.look) : null; return r ? { i: s, h: r.h, lo: r.lo, recent: s >= cut } : null })
+            .filter(Boolean)
+        out.push({ bars: sb, atrs: sa, moves, wyckoff: _wyckoffEvents(sb, sa, cut) })
+    }
+    return out
+}
+
+/** The Wyckoff ranges and springs M reads — the engine's own (wyckoffTest), its events only. */
+function _wyckoffEvents(bars, atrs, cut) {
+    const w = wyckoffTest(bars, atrs, cut, driftOutcomes(bars, atrs), [])
+    return { ranges: w.range_list ?? [], springs: w.spring_events ?? [] }
 }
 
 // ─── L. THE NEWS AROUND THE MOVES (proteus.md §10.9–10.10, Roy 2026-11-17) ─────────────────────────────────────
