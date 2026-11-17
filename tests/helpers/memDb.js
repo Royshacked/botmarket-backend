@@ -32,10 +32,11 @@ function _push(doc, spec) {
     }
 }
 
-// $set (dotted), $inc (dotted, missing counts as 0) and $push, in that order.
+// $set (dotted), $inc (dotted, missing counts as 0), $unset (dotted) and $push, in that order.
 function _apply(doc, u) {
     for (const [k, v] of Object.entries(u.$set ?? {})) _setPath(doc, k, structuredClone(v))
     for (const [k, v] of Object.entries(u.$inc ?? {})) _setPath(doc, k, (_get(doc, k) ?? 0) + v)
+    for (const k of Object.keys(u.$unset ?? {})) { const ks = k.split('.'); const p = ks.length > 1 ? _get(doc, ks.slice(0, -1).join('.')) : doc; if (p && typeof p === 'object') delete p[ks.at(-1)] }
     _push(doc, u.$push)
 }
 

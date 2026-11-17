@@ -11,7 +11,8 @@ import { isPreActive, isExpiring, isPastExpiry, effectiveVerdict, nextStatus, ha
 import { buildOrderPlanForIdea } from '../services/orderPlan.service.js'
 import { notifyManualEntry, entryLegFromIdea } from '../services/manualNotify.service.js'
 import { assessSetup, assessPosition, READINESS_VERDICTS, openingRung } from './talos.assess.js'
-import { scenarioLabel, declaredConditions, projectScenario, pickScenario, stopEdge, entryDrift, targetLevels, addEntryLeg, legQuantity, legPrice, firingLeg, resolveRung, clampGuards, normalizeWatch, normalizePremise, disarmedSetupPatch, watchedLegs, hasWatchedLegs, allowedVerdicts } from '../services/setup.schema.js'
+import { scenarioLabel, declaredConditions, projectScenario, pickScenario, stopEdge, entryDrift, targetLevels, addEntryLeg, legQuantity, legPrice, firingLeg, resolveRung, clampGuards, normalizeWatch, normalizePremise, disarmedSetupPatch, watchedLegs, hasWatchedLegs, allowedVerdicts, breakRung } from '../services/setup.schema.js'
+import { rungMinutes } from '../services/setup.ladder.js'
 import { tierFor, clampExpensiveGap, tickExpensiveDue } from './talos.tiers.js'
 import { cheapRead as _cheapRead } from './talos.cheap.js'
 import { cancelRestingEntryOrders } from '../services/restingOrders.service.js'
@@ -587,15 +588,15 @@ async function _checkValidity(setup, price, nowMs, deps) {
         // ON THE THESIS LENS A CLOSE UNDER THE STOP COUNTS WITH THE TICK BACK OVER IT: price reclaiming the stop before this
         // wake must not hide the close, or the setup reads on and can enter on a broken premise (PENG, 2026-11-06). So the
         // tick filters nothing here, and that costs one candle read a wake. Any other lens keeps the free filter.
+        // Which close decides the breach: the range's own rung, else the PREMISE — capped for a day trade (breakRung,
+        // 2026-11-14: an intraday stop judged on the DAY close was judged at the bell, after the trade was over). It used to
+        // fall to `ladder[0]` — the coarsest of the derived ±2 window — a chart two rungs above anything the plan spoke about.
+        const tf = breakRung(setup, sc)
         // Armed less than a bar ago, the last close can predate the plan (armed after a gap up, the stop over yesterday's close).
-        const barMs = /week/i.test(sc.validity?.timeframe || setup.timeframe || '') ? 7 * 86_400_000 : 86_400_000
+        const barMs = (rungMinutes(tf) ?? 1440) * 60_000
         const stopCounts = setup.trade_mode === 'thesis' && Number.isFinite(adverseEdge(view)) && nowMs - (setup.activatedAt ?? setup.savedAt ?? 0) >= barMs
         if (!suspected && !stopCounts) continue
 
-        // Which close decides the breach: the range's own rung, else the PREMISE. It used to fall
-        // to `ladder[0]` — the coarsest of the derived ±2 window — which on a setup drawn at the
-        // bottom of the rung list was a chart two rungs above anything the plan spoke about.
-        const tf = sc.validity?.timeframe || setup.timeframe
         if (!closes.has(tf)) closes.set(tf, await deps.getClose(setup, tf))
         const close = closes.get(tf)
         if (!Number.isFinite(close)) {
@@ -925,6 +926,20 @@ export const _effectiveVerdict = (verdict, reason, pastExpiry) =>
     effectiveVerdict(verdict, reason, pastExpiry, SPARE_PAST_EXPIRY)
 export const _nextStatus = nextStatus
 
+/**
+ * The close of the last COMPLETED candle in `rows` (`{ t (sec), c }`, oldest first): the last row when its own close
+ * (market.service nextCandleCloseMs from its start) has passed, else the one before — the last is still forming (CR
+ * 2026-11-14: after 16:00 the 15:30 hour bar and the day's bar are closed, and dropping them always let a break in the
+ * last hour, or a swing's day close, wait for the next morning). Null with no usable close. Pure given `nowMs`.
+ */
+export function _lastClosed(rows, asset, tf, nowMs) {
+    if (!Array.isArray(rows) || !rows.length) return null
+    const last = rows.at(-1)
+    const closesAt = Number.isFinite(last?.t) ? nextCandleCloseMs(asset, null, tf, last.t * 1000) : null
+    const closed = closesAt != null && closesAt <= nowMs ? last : rows.at(-2)
+    return Number.isFinite(closed?.c) ? closed.c : null
+}
+
 // ─── Scheduling ───────────────────────────────────────────────────────────────
 
 /**
@@ -1029,13 +1044,11 @@ const _deps = {
     assessPosition,
     persist:    _persist,
     // The CLOSE of the last completed candle on a timeframe — the validity gate's verdict, as
-    // opposed to `getPrice`'s live tick which is only its trigger. The SECOND-TO-LAST row: the last
-    // one is the bar still forming. Null on any failure, read as "don't know".
+    // opposed to `getPrice`'s live tick which is only its trigger. Null on any failure, read as "don't know".
     getClose: async (setup, tf) => {
         // Asking for fewer than fetchCandles accepts made this null on every call: no close judged a stop, a range or an arming line (PENG, 2026-11-06).
         const rows = await fetchCandles(setup.id, setup.asset, tf, MIN_CANDLES)
-        const closed = rows?.at(-2)
-        return Number.isFinite(closed?.c) ? closed.c : null
+        return _lastClosed(rows, setup.asset, tf, Date.now())
     },
     buildOrderPlan: buildOrderPlanForIdea,
     // The cards. Each is this desk's own copy; the transport (postBotCard) is the shared piece.

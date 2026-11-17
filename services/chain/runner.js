@@ -114,6 +114,17 @@ export function makeChainRunner({
     // or landed later (readSettled). Both are BOUNDED (keepBounded): in memory, never pruned by a session ending.
     const handedDecide = new Set()
 
+    /**
+     * THE CHAT'S STATUS LINE for a read in line (Roy, 2026-11-14: a read takes minutes, and after one line the chat went
+     * quiet) — `r` a readFor answer: waiting / missing sets it, anything else clears it. Never fails a turn.
+     */
+    const showWaiting = async ({ userId, sessionId, symbol, horizon, kind, r }) => {
+        if (!sessions.setWaiting || !symbol || !kind) return
+        const on = ['waiting', 'missing'].includes(r?.state)
+        const entry = on ? { symbol, horizon: horizon ?? null, kind, ahead: Number.isFinite(r.ahead) ? r.ahead : null, running: Boolean(r.running), since: Date.now() } : null
+        await sessions.setWaiting({ sessionId, userId, key: `${symbol}|${kind}`, entry }).catch(err => logger.warn(LOG, 'waiting line not set', err.message))
+    }
+
     const save = (user, sessionId, chain) => sessions.setChain({ sessionId, userId: user._id, chain })
     const end  = (user, sessionId, chain) => save(user, sessionId, endedChain(chain))
 
@@ -392,7 +403,10 @@ export function makeChainRunner({
             if (!t) return false
             // A deciding read already handed (fresh here, or landed later through readSettled): never again.
             if (t.horizon == null && handedDecide.has(`${sessionId}|${t.symbol}`)) return false
+            // …or one this turn already judged on (mentor.desk `decide_seen` — a hand-off's first turn reads both experts).
+            if (t.horizon == null && state?.decide_seen === t.symbol) return false
             const r = await reads.request({ ...t, sessionId, userId: user._id })
+            await showWaiting({ userId: user._id, sessionId, symbol: t.symbol, horizon: t.horizon, kind: r?.kind, r })
             // A DECIDING read already fresh (argus-rework.md §2.3): handed to Mentor at once, the way a landed one is — his
             // first reply had no reads to judge on, so his verdict is the turn this hand-off runs. Once per session and name.
             if (t.horizon == null && r?.state === 'ready' && r.decide) {
@@ -529,6 +543,7 @@ export function makeChainRunner({
         const user    = await loadUser(pending.userId)
         const session = await sessions.get({ sessionId: pending.sessionId, userId: user._id })
         if (!session || session.status !== 'active') return false
+        await showWaiting({ userId: user._id, sessionId: pending.sessionId, symbol: pending.symbol, kind: pending.kind ?? read.kind, r: null })
         const line = read.state === 'failed'
             ? `I could not make a read on ${pending.symbol}${pending.horizon ? ` for the ${pending.horizon}` : ''}.`
             : `${pending.symbol}${pending.horizon ? `, ${pending.horizon}` : ''}: ${read.facts}`
@@ -551,6 +566,16 @@ export function makeChainRunner({
         return 'handed'
     }
 
+    /** A read still in line after a run settled (mentorReads → onReadWaiting): the status line's count, kept current. */
+    function readWaiting(pending, read) {
+        // A house read (no user, resumed at boot) has no chat to show it in.
+        if (!pending?.userId || !pending.sessionId) return Promise.resolve()
+        return lock(pending.sessionId, async () => {
+            const user = await loadUser(pending.userId)
+            await showWaiting({ userId: user._id, sessionId: pending.sessionId, symbol: pending.symbol, horizon: pending.horizon, kind: pending.kind, r: read })
+        })
+    }
+
     /** At boot: every chain a restart cut off is PAUSED and its floor-holder asks (G4). */
     async function sweep() {
         const cut = await sessions.findRunningChains()
@@ -566,5 +591,5 @@ export function makeChainRunner({
         return cut.length
     }
 
-    return { afterTurn, requestPause, resume, sweep, sleeveSettled, readSettled, bindRunQueued, bindAct }
+    return { afterTurn, requestPause, resume, sweep, sleeveSettled, readSettled, readWaiting, bindRunQueued, bindAct }
 }

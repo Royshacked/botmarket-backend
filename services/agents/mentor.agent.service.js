@@ -9,6 +9,7 @@ import { DESKS } from '../desks/registry.js'
 import { makeRouteCapture, buildRouteRule } from '../routing.util.js'
 import { TRADING_TOOLS, buildTradingToolHandlers } from '../tools/trading.tools.js'
 import { THESIS_STRUCTURE_HANDLERS, thesisTurnFacts } from '../tools/thesisStructure.tools.js'
+import { isDayTrade } from '../tools/behaviourProfile.tools.js'
 import { STRUCTURE } from '../swingStructure.service.js'
 import { toolsFor } from '../agentTools.registry.js'
 import { consultDescription } from '../deepThink.service.js'
@@ -101,7 +102,7 @@ export const MENTOR_TOOLS = [
     // THE THESIS LENS (docs/design/stock-playbook.md). Same slot rules as the sizing call: past the breakpoint, before
     // consult. The facts and the arithmetic are code; the stop and the targets stay Mentor's judgement.
     ...toolsFor({
-        get_price_structure: `The \`thesis\` lens's chart facts, on the day (swing) or week (long-term) chart: the confirmed swings with their dates, the normal daily move (ATR), WHO IS IN CONTROL (buyers since a close over the last swing high, sellers since a close under the last swing low) and the context of the last break (reversal · continuation · breakout), the last fall (its start and its low), the heavy-volume days of the last 60 sessions, and CANDIDATE levels from the tested rule — the stop under the sellers' last swing, a deeper one under the whole fall (with the last date price traded under it), the target at the start of the fall (or a measured move at the highs) — and the BREAK CANDIDATE (the nearest high over the price, which a day close over arms scenario B; B's ASSUMED stop, target and context). The candidates are a starting point: judge the stop and the targets yourself against the chart and the candles, and say where you differ and why.`,
+        get_price_structure: `The \`thesis\` lens's chart facts, on the hour (a day trade: intraday · day — no break candidate, no heavy days), day (swing) or week (long-term) chart: the confirmed swings with their dates, the normal daily move (ATR), WHO IS IN CONTROL (buyers since a close over the last swing high, sellers since a close under the last swing low) and the context of the last break (reversal · continuation · breakout), the last fall (its start and its low), the heavy-volume days of the last 60 sessions, and CANDIDATE levels from the tested rule — the stop under the sellers' last swing, a deeper one under the whole fall (with the last date price traded under it), the target at the start of the fall (or a measured move at the highs) — and the BREAK CANDIDATE (the nearest high over the price, which a day close over arms scenario B; B's ASSUMED stop, target and context). The candidates are a starting point: judge the stop and the targets yourself against the chart and the candles, and say where you differ and why.`,
         get_entry_level: `The \`thesis\` lens's entry arithmetic. After you judged the stop and the target and the USER gave their risk limit (the stop at most X% from the entry) and/or their minimum reward to risk: the highest entry worth paying (the lowest, on a short) — the entry leg's price, valid "at the level and below". Never compute it yourself; read it out. It also says the last date price traded past the stop you gave — the date for "not traded under since", never a guess.`,
     }),
     ...toolsFor({
@@ -526,7 +527,12 @@ async function chatStream({
     // not ready, whatever the draft says — the button stays dark, and the press is refused too (mentor.actions).
     // The turn may have CONFIRMED the horizon (or moved the name): the read the turn started with is then the wrong one,
     // and Generate would light now only to refuse the press (CR 2026-11-11). Re-checked for the build as it now stands.
-    const after = readTarget({ draft: { build }, active_asset: asset })
+    // …with the seed's horizon (2026-11-14): without it a day board's name with no horizon in the ledger yet read as a
+    // DECIDING read, and Generate was held for a read a day trade never asks for.
+    const _same = (a) => String(a ?? '').toUpperCase().trim() === String(asset ?? '').toUpperCase().trim()
+    const seedHorizon = seed?.horizon && _same(seed.ticker) ? seed.horizon
+        : chatState?.seed_horizon && _same(chatState.active_asset) ? chatState.seed_horizon : null
+    const after = readTarget({ draft: { build }, active_asset: asset, ...(seedHorizon ? { seed_horizon: seedHorizon } : {}) })
     let heldBy = prometheusRead
     if (after && readNow && (after.symbol !== prometheusRead?.symbol || after.horizon !== prometheusRead?.horizon)) {
         heldBy = { ...after, ...(await Promise.resolve(readNow(after)).catch(() => ({ state: 'unknown' }))) }
@@ -767,6 +773,13 @@ Active asset: ${asset}${_buildAccountsSection(accounts, mainAccountId)}${_buildS
  * empty when the horizon needs no read (intraday) or no horizon is confirmed yet.
  */
 export function _buildReadSection(read) {
+    // A DAY TRADE has no analyst read (mentorReads READ_OF) — said, or Mentor tells the user he is asking for one and waits
+    // on it (KDP, 2026-11-14).
+    if (read?.dayTrade && read.symbol) {
+        return `
+
+NO ANALYST READ on ${read.symbol} — a day trade (${read.horizon}) needs none: the business does not move a ${read.horizon} trade, and the board's line is its catalyst. Never say you are asking the analyst, or waiting on him; judge it on the technical read and the chart.`
+    }
     if (!read?.kind || !read.symbol) return ''
     // The DECIDING read (no horizon yet — argus-rework.md §2.3): the experts decide the direction and the horizon.
     if (read.decide && read.state === 'ready') {
@@ -987,8 +1000,8 @@ const _atrs = (from, to, atr) => (atr > 0 ? Math.round(Math.abs(from - to) / atr
 /** A distance the way the user reads it: dollars AND percent (Roy, 2026-11-05). */
 const _distance = (from, to) => `$${Math.round(Math.abs(from - to) * 100) / 100} (${_pctFrom(from, to)}%)`
 
-/** The chart a thesis plan reads: a long-term trade the week, a swing the day. */
-const _lensTimeframe = (d) => (d?.type === 'long_term' || /week/i.test(d?.timeframe ?? '') ? 'week' : 'day')
+/** The chart a thesis plan reads: a long-term trade the week, a day trade the hour (Roy, 2026-11-14: "stop in 1hr"), a swing the day. */
+const _lensTimeframe = (d) => (d?.type === 'long_term' || /week/i.test(d?.timeframe ?? '') ? 'week' : isDayTrade(d?.type) ? 'hour' : 'day')
 
 /**
  * THE TARGET AT THE HIGHS, AS A FACT (Roy, 2026-11-05): price at the highs with no other price to sell at takes the
@@ -1061,7 +1074,7 @@ function _namesPrice(text, price) {
  */
 export function _buildRiskReadSection(facts, draft, { redraw = false } = {}) {
     if (!Number.isFinite(facts?.close) || !(facts.close !== 0)) return ''
-    const unit = facts.timeframe === 'week' ? 'weeks' : 'days'
+    const unit = facts.timeframe === 'week' ? 'weeks' : facts.timeframe === 'hour' ? 'hours' : 'days'
     const aStop = Number(draft?.scenarios?.[0]?.stop_legs?.[0]?.price)
     // The deep stop's date rides here too: the prompt's "from the tool on this turn" met the ledger's "already read —
     // do not call again", and Mentor withheld the offer (drive 9: "can't responsibly quote it without its date").

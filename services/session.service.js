@@ -376,6 +376,33 @@ export function makeSessionService({ getDb = _defaultGetDb, events = silentEvent
         return { ok: true }
     }
 
+    /**
+     * A READ THE CHAT IS WAITING ON (Roy, 2026-11-14: minutes of research showed one line, then nothing): `key` →
+     * `{ symbol, horizon, kind, ahead, since }`, or null to clear it. The whole map is broadcast, so every open screen
+     * draws the same status line, and a reload reads it back off the session.
+     */
+    async function setWaiting({ sessionId, userId, key, entry }) {
+        if (!key) return { reason: 'invalid_key' }
+        const db = await getDb()
+        const slot = String(key).replace(/[.$]/g, '_')
+        const path = `waiting.${slot}`
+        // The ACTIVE session only (CR 2026-11-14): a filed one shows nothing, so it gets no line and no broadcast.
+        const filter = { sessionId: String(sessionId), userId: String(userId), status: 'active' }
+        // The line keeps the time it was FIRST asked: a turn or a run's settle re-states the count, never the wait.
+        const had = entry ? (await db.collection(SESSIONS).findOne(filter, { projection: { waiting: 1 } }))?.waiting?.[slot] : null
+        const value = entry && had?.since ? { ...entry, since: had.since } : entry
+        // A clear with no line there is nothing to do — no write, no broadcast (most turns have a read that is ready).
+        const res = await db.collection(SESSIONS).findOneAndUpdate(
+            value ? filter : { ...filter, [path]: { $exists: true } },
+            value ? { $set: { [path]: value } } : { $unset: { [path]: '' } },
+            { returnDocument: 'after', projection: { waiting: 1 } },
+        )
+        const doc = res?.value ?? res
+        if (!doc) return { reason: value ? 'not_found' : 'nothing_to_clear' }
+        events.state(String(userId), String(sessionId), { waiting: doc.waiting ?? {} })
+        return { ok: true }
+    }
+
     /** Every session whose chain was RUNNING — what the boot sweep pauses after a restart. */
     async function findRunningChains() {
         const db = await getDb()
@@ -433,7 +460,7 @@ export function makeSessionService({ getDb = _defaultGetDb, events = silentEvent
         return r.matchedCount ? { ok: true } : { reason: 'not_found' }
     }
 
-    return { ensureIndexes, getActive, findActive, startNew, resume, importArchived, list, remove, get, append, messagesSince, messagesForAgent, allMessagesSince, removeMessages, setAgentState, setSealedThrough, setChain, findRunningChains, setFloor, setSummary, addLink }
+    return { ensureIndexes, getActive, findActive, startNew, resume, importArchived, list, remove, get, append, messagesSince, messagesForAgent, allMessagesSince, removeMessages, setAgentState, setSealedThrough, setChain, setWaiting, findRunningChains, setFloor, setSummary, addLink }
 }
 
 export const sessionService = makeSessionService({ events: sessionEvents })

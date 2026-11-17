@@ -59,6 +59,8 @@ export async function replay({ userId, data, reply }, store = sessionService) {
         // What the user missed besides rows: the chain a decision card waits on, and each desk's state.
         chain:      session.chain ? { id: session.chain.id, status: session.chain.status, awaiting: session.chain.awaiting ?? null } : null,
         agentState: session.agentState ?? {},
+        // The reads the chat is waiting on (setWaiting) — the status line a reload must draw again.
+        waiting:    session.waiting ?? {},
         // The revision of each — what a press or a hand edit names (plan phase 8a CR D2).
         agentRev:   session.agentRev ?? {},
         messages: messages ?? [],

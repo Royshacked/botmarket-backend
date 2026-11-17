@@ -5,7 +5,7 @@ import { isIntradayTimeframe } from '../services/timeframe.service.js'
 import { userService } from '../api/user/user.service.js'
 import { recordUsage } from '../services/tokenUsage.service.js'
 import { getHouseModels } from '../services/houseModels.service.js'
-import { legPrice } from '../services/setup.schema.js'
+import { legPrice, BREAK_RUNG_MAX } from '../services/setup.schema.js'
 
 // The mechanical parts every monitor assessment shares — model routing, token budgets, and the
 // numeric candle block. Extracted because two monitors once had byte-identical copies of both the
@@ -126,7 +126,7 @@ export const ASSESS_MAX_TOKENS_THINKING = 16_000
  * descriptions of the same three lenses — which is exactly what happened to the condition-mode
  * sentence before it was deduplicated.
  */
-export function lensLine(tradeMode) {
+export function lensLine(tradeMode, horizon = null) {
     switch (tradeMode) {
         case 'smc':
             return 'this setup was built on Smart-Money structure — verify the structural trigger with get_structure / get_fvg / get_liquidity rather than trusting the build-time map.'
@@ -135,7 +135,7 @@ export function lensLine(tradeMode) {
         // The THESIS lens (docs/design/stock-playbook.md): the entry is a LEVEL, "the level and below", and the gate is
         // STRENGTH at it — judged by Talos, no hint how (Roy, 2026-10-30).
         case 'thesis':
-            return 'this setup was built on the thesis lens — the entry leg is a LEVEL, valid at that price and below (above, on a short); over it is `wait`. Enter only when price at the level shows STRENGTH on the 1h / 4h, by your own read of it. The stop is where the thesis breaks — under the sellers\' last swing — so price there means the thesis is wrong, not noise.'
+            return `this setup was built on the thesis lens — the entry leg is a LEVEL, valid at that price and below (above, on a short); over it is \`wait\`. Enter only when price at the level shows STRENGTH on the ${BREAK_RUNG_MAX[horizon] ? '15m / 1h (a day trade: its stop is drawn on the 1-hour chart)' : '1h / 4h'}, by your own read of it. The stop is where the thesis breaks — under the sellers' last swing — so price there means the thesis is wrong, not noise.`
         default:
             return 'this setup was built on classical price action — verify with the chart, order blocks and false breaks.'
     }

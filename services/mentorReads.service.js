@@ -261,11 +261,14 @@ export const FAILED_HOLD_MS = DAY_MS
 export const STALE_CLAIM_MS = 45 * 60 * 1000
 let _subscribed = false
 let _settledHook = null
+let _waitingHook = null
 /** The chain runner's hook: `(pending, read) → Promise<boolean>`. */
 export function onReadSettled(fn) { _settledHook = fn }
+/** The chain runner's hook for a read STILL waiting after a run settled: `(pending, read)` — the chat's status line keeps its count. */
+export function onReadWaiting(fn) { _waitingHook = fn }
 /** Test seams. */
 export function pendingReads() { return [..._pending.values()] }
-export function _resetPending() { _pending.clear(); _failed.clear(); _subscribed = false; _settledHook = null; _settleChain = Promise.resolve() }
+export function _resetPending() { _pending.clear(); _failed.clear(); _subscribed = false; _settledHook = null; _waitingHook = null; _settleChain = Promise.resolve() }
 
 /**
  * Ask for the read a Mentor build on `symbol` / `horizon` needs, for this session: queue it unless it is already waiting,
@@ -344,6 +347,10 @@ async function _settleOnce(deps, run) {
             if (!taken) logger.info(LOG, 'read landed with no session to take it', { symbol: p.symbol, sessionId: p.sessionId })
         } else if (r.state === 'waiting') {
             waiting.push(p.symbol)
+            // NOT awaited (CR 2026-11-14): the hook takes the session's lock, and a turn running there would hold every
+            // other session's landed read — and the next run's start — behind it. The line is a status, never a gate.
+            Promise.resolve().then(() => _waitingHook?.(p, r))
+                .catch(err => logger.warn(LOG, 'waiting line not updated', { symbol: p.symbol, error: err.message }))
         } else if (r.state === 'missing') {
             // Neither answered nor waiting after a run: the run took the row and made nothing of it (it failed to save,
             // or was stopped and cleared). Mentor is told, once, instead of the read waiting forever.
@@ -396,4 +403,4 @@ export async function resumePending(deps = _deps) {
     }
 }
 
-export const mentorReadsService = { readFor, requestRead, readKindFor, readTarget, readPending, resumePending, onReadSettled, freshness, researchedAt }
+export const mentorReadsService = { readFor, requestRead, readKindFor, readTarget, readPending, resumePending, onReadSettled, onReadWaiting, freshness, researchedAt }

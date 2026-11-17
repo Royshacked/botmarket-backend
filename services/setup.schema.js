@@ -13,7 +13,7 @@ import { normalizeAssetClass } from './entity/vocabulary.js'
 import { cleanConviction } from './conviction.util.js'
 import { TRADE_HORIZONS } from './entity/vocabulary.js'
 import { MODES } from './analysisModes.js'
-import { TF_RUNGS, isFetchableRung, ladderFor, MARKET_CAPS } from './setup.ladder.js'
+import { TF_RUNGS, isFetchableRung, ladderFor, MARKET_CAPS, rungMinutes } from './setup.ladder.js'
 import { ENTRY_ARCHETYPES, STOP_ANCHORS, TARGET_ANCHORS, normalizeTaxon } from './setup.taxonomy.js'
 
 // The rung VOCABULARY lives in setup.ladder.js, not here. This module is the entity contract and
@@ -143,6 +143,8 @@ const MAX_CHALLENGES = 3
 
 /** The thesis lens's pace when none is named — Talos judges strength at the level on the 1h / 4h closes. */
 export const THESIS_PACE = Object.freeze(['4hr', '1hr'])
+/** A DAY TRADE's (intraday · day) — its chart is the hour (Roy, 2026-11-14), so the 1h / 15m; a 4h close is half its session. */
+export const THESIS_PACE_DAY = Object.freeze(['1hr', '15min'])
 
 /**
  * The authored pace set: normalised, fetchable-only, deduped, coarse→fine. Empty in, empty out —
@@ -163,6 +165,26 @@ export function paceRungs(setup) {
     if (stored.length) return stored
     const premise = normalizePaceRungs([setup?.timeframe])
     return premise.length ? premise : ladderFor(setup?.type, setup?.market_cap, setup?.timeframe)
+}
+
+/**
+ * THE COARSEST CLOSE THAT MAY BREAK A DAY TRADE (Roy, 2026-11-14). A swing dies on a day close, never on a wick — and every
+ * thesis scenario is drawn with `validity.timeframe: "day"`. On an intraday trade that close comes at the bell, when the
+ * trade is over: a stop broken at 11:00 was never seen, and the setup could still enter on a broken premise. Capped here
+ * at a 1-hour close for both, intraday and day (1 to a few days): the stop is drawn on the hour chart (Roy, 2026-11-14:
+ * "stop in 1hr" — test 4: the 1-hour stop tied the daily, the 5- and 15-minute did worse). A finer rung named stays.
+ */
+export const BREAK_RUNG_MAX = Object.freeze({ intraday: '1hr', day: '1hr' })
+
+/**
+ * The rung whose CLOSE decides a scenario's break or runaway: its validity range's own, else the setup's premise — capped
+ * for a day trade (BREAK_RUNG_MAX). Null when neither names one. Pure.
+ */
+export function breakRung(setup, sc) {
+    const named = normalizeTimeframe(sc?.validity?.timeframe) || normalizeTimeframe(setup?.timeframe) || null
+    const cap = BREAK_RUNG_MAX[setup?.type]
+    if (!cap) return named
+    return !named || (rungMinutes(named) ?? Infinity) > rungMinutes(cap) ? cap : named
 }
 
 /**
@@ -854,7 +876,7 @@ export function normalizeSetup(raw) {
     // The THESIS lens's own read is the 1h / 4h — its entry is strength at the level on those closes (stock-playbook.md),
     // so a thesis setup that names no rungs falls to them, not to the horizon's ladder (NXST, 2026-10-31: a swing's
     // day / 4h / 2h ladder). Still only a fallback: named rungs win outright.
-    const paced     = named.length ? named : tradeMode === 'thesis' ? normalizePaceRungs(THESIS_PACE) : ladderFor(type, marketCap, timeframe)
+    const paced     = named.length ? named : tradeMode === 'thesis' ? normalizePaceRungs(BREAK_RUNG_MAX[type] ? THESIS_PACE_DAY : THESIS_PACE) : ladderFor(type, marketCap, timeframe)
 
     // ONE id space for the whole document — the root tier first, then each scenario, so the single
     // resolved-condition ledger can never have two conditions answering to the same key.

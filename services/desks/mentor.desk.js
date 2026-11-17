@@ -17,8 +17,8 @@ import { setupReason } from '../../api/setups/setupReasons.js'
 import { normalizeBuild, activeName, putName, reopenForRedraw, stageOf } from '../mentorBuild.util.js'
 import { PRE_ENTRY } from '../entity/vocabulary.js'
 import { readFor, readTarget } from '../mentorReads.service.js'
-import { profileFor } from '../behaviourProfile.service.js'
-import { profileBrief, mentorRead } from '../tools/behaviourProfile.tools.js'
+import { profileFor, storedProfile } from '../behaviourProfile.service.js'
+import { profileBrief, mentorRead, isDayTrade } from '../tools/behaviourProfile.tools.js'
 import { sessionService } from '../session.service.js'
 
 /**
@@ -59,21 +59,56 @@ export function _mentorResponse(result) {
  */
 async function _prometheusRead(state, sessionId = null) {
     const t = readTarget(state)
-    if (!t) return null
+    if (!t) return _dayTradeRead(state)
     return { ...t, ...(await readFor(t.symbol, t.horizon, undefined, { sessionId })) }
 }
 
 /**
- * PROTEUS'S READ on the build's name (argus-rework.md §2.3) — his measured profile as one line, with its date. The house's,
- * kept a week (behaviourProfile.service); the first ask for a name computes it in seconds. Null when there is no name or
- * the profile could not be read (Mentor then goes on the chart and Prometheus).
+ * A DAY TRADE needs no analyst read (mentorReads READ_OF) — and Mentor is TOLD so, or he says he is asking for one and
+ * waits on it (KDP off the Intraday tab, 2026-11-14: "I'm asking the analyst…", then "the reads haven't come through").
+ * → `{ symbol, horizon, dayTrade: true }`, or null. Pure.
  */
-async function _proteusRead(state) {
+export function _dayTradeRead(state) {
+    const symbol = String(state?.active_asset || state?.draft?.asset || '').toUpperCase().trim()
+    const horizon = _horizonNow(state)
+    return symbol && isDayTrade(horizon) ? { symbol, horizon, dayTrade: true } : null
+}
+
+/** The horizon the build is on now: settled, else claimed, else the seed's (a day board's name is intraday). Pure. */
+export function _horizonNow(state) {
+    const build = state?.draft?.build
+    const name = build ? activeName(normalizeBuild(build)) : null
+    const c = name?.claimed?.horizon
+    return name?.settled?.horizon ?? (c?.value ?? c) ?? state?.seed_horizon ?? null
+}
+
+/**
+ * The state the experts' reads are checked on. On the FIRST turn of a hand-off the name and its horizon are only on the
+ * seed — mentorNextState writes them after the turn — so both reads were skipped and Mentor told the user he was asking
+ * for them (KDP, 2026-11-14). The seed's name wins as it does in mentorNextState: only a worksheet's name outranks it. Pure.
+ */
+export function _readState(state, seed) {
+    const ticker = String(seed?.ticker ?? '').toUpperCase().trim()
+    if (!ticker || state?.draft?.asset) return state
+    const same = String(state?.active_asset ?? '').toUpperCase().trim() === ticker
+    const horizon = seed.horizon ?? (same ? state?.seed_horizon : null)
+    const { seed_horizon: _drop, ...rest } = state ?? {}
+    return { ...rest, active_asset: ticker, ...(horizon ? { seed_horizon: horizon } : {}) }
+}
+
+/**
+ * PROTEUS'S READ on the build's name (argus-rework.md §2.3) — his measured profile as one line, with its date. The house's,
+ * kept a week (behaviourProfile.service); the first ask for a name computes it in seconds — and the chat SAYS so while it
+ * does (Roy, 2026-11-14: "thinking…" for 15 seconds told the user nothing). The lines he weighs are the horizon's
+ * timeframes (mentorRead). Null when there is no name or the profile could not be read (Mentor then goes on the chart).
+ */
+async function _proteusRead(state, emit = null) {
     const symbol = String(state?.active_asset || state?.draft?.asset || '').toUpperCase().trim()
     if (!symbol) return null
+    if (emit && !(await storedProfile(symbol).catch(() => null))) emit('status', { tool: 'measure_behaviour', targets: [symbol] })
     const p = await profileFor(symbol).catch(() => null)
     // brief: the one line said in the chat; read: the levels he weighs (5b — proteus.md).
-    return p ? { symbol, at: p.computed_at ?? null, brief: profileBrief(p), read: mentorRead(p) } : null
+    return p ? { symbol, at: p.computed_at ?? null, brief: profileBrief(p), read: mentorRead(p, { horizon: _horizonNow(state) }) } : null
 }
 
 // The experts' lines already in a session's chat, by `${sessionId}|${symbol}` — each says its read ONCE per name. Bounded.
@@ -136,6 +171,8 @@ async function _labelSeed(seed) {
  * the old client persistence dropped it); `view` is what the panel draws its cards from (the open gate,
  * readiness, the candidate offer), kept so a reload can redraw them. `ops` is never stored: one-shot.
  */
+const _sym = (s) => String(s ?? '').toUpperCase().trim()
+
 export function mentorNextState(prev, result, input = {}) {
     // The setup it was editing is closed: nothing is left on the table, and no Update to press.
     if (result.closedSetup) return null
@@ -154,6 +191,9 @@ export function mentorNextState(prev, result, input = {}) {
         // A seed's horizon (a day board's name is an intraday trade), kept with ITS name: the read target needs no deciding
         // read for a day trade even before Mentor writes the claim (mentorReads readTarget).
         ...(seedHorizon ? { seed_horizon: seedHorizon } : {}),
+        // The deciding read this name's turn already judged on (mentor.desk run) — the runner's askRead hands it no second time.
+        ...(result.decideSeen && sameName(result.decideSeen, asset) ? { decide_seen: _sym(asset) }
+            : prev?.decide_seen && sameName(prev.decide_seen, asset) ? { decide_seen: prev.decide_seen } : {}),
         draft,
         coverage:     result.coverage ?? prev?.coverage ?? [],
         drafts:       result.drafts ?? {},
@@ -293,8 +333,9 @@ export const mentorDesk = {
     run: async ({ state, input, emit, common, sessionId }) => {
         // Prometheus's read on the build's name — for its confirmed horizon, or, before there is one, the DECIDING read
         // (argus-rework.md §2.3) — and Proteus's measured profile beside it. Checked by code every turn.
-        const read = await _prometheusRead(state, sessionId)
-        const proteus = await _proteusRead(state)
+        const seen = _readState(state, input.seed)
+        const read = await _prometheusRead(seen, sessionId)
+        const proteus = await _proteusRead(seen, emit)
         await _sayExperts({ sessionId, userId: common.userId, read, proteus })
         // A go HELD for a read (runner deskGo, `go_pending`) kept the accounts it was asked with. The chain turn the read's
         // landing runs carries none of its own — so this turn's readiness counts THOSE, for that name only, or it reads
@@ -303,7 +344,7 @@ export const mentorDesk = {
         const heldOn = held?.accounts?.length && String(held.symbol ?? '') === String(state?.active_asset ?? '').toUpperCase().trim()
         const accounts = input.accounts?.length ? input.accounts : (heldOn ? held.accounts : [])
         const mainAccountId = input.accounts?.length ? (input.mainAccountId ?? null) : (heldOn ? held.mainAccountId ?? null : input.mainAccountId ?? null)
-        return mentorAgentService.chatStream({
+        const result = await mentorAgentService.chatStream({
         ...common,
         prometheusRead: read,
         proteusRead: proteus,
@@ -320,6 +361,9 @@ export const mentorDesk = {
         onInterval:  (interval) => emit('interval',  { interval }),
         onCoverage:  (coverage) => emit('coverage',  { coverage }),
         })
+        // A fresh DECIDING read was in THIS turn's context (a hand-off's first turn now reads both experts): the runner must
+        // not hand it over again as a second paid turn (askRead — it did so when the first reply had no reads to judge on).
+        return read?.decide && read.state === 'ready' ? { ...result, decideSeen: read.symbol } : result
     },
     done: (result) => _mentorResponse(result),
     // The session's commits and direct edits (plan phase 8, K2/K3) — services/desks/act.js runs them.

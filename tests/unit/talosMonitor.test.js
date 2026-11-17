@@ -2135,6 +2135,42 @@ test('thesis: armed less than a bar ago, a close from before the plan does not b
 
 test('getClose: the real close read returns the last completed bar, not null', async (t) => {
     const candles = Array.from({ length: 30 }, (_, i) => ({ timestamp: 1_000_000 + i * 86_400, open: 50, high: 51, low: 49, close: 50 + i, volume: 1 }))
-    t.mock.method(priceService, 'getCandles', async () => ({ candles, meta: { cached: true } }))
-    assert.equal(await _testDeps.getClose({ id: 'setup_X', asset: 'X' }, 'day'), 78, 'the bar before the one still forming')
+    const m = t.mock.method(priceService, 'getCandles', async () => ({ candles, meta: { cached: true } }))
+    // 1970's bars are all long closed: the last one counts (CR 2026-11-14 — it used to be dropped whatever the clock said).
+    assert.equal(await _testDeps.getClose({ id: 'setup_X', asset: 'X' }, 'day'), 79, 'every bar here has closed')
+    // A last bar that started now has not closed: the one before decides.
+    const forming = [...candles.slice(0, -1), { ...candles.at(-1), timestamp: Math.floor(Date.now() / 1000) }]
+    m.mock.mockImplementation(async () => ({ candles: forming, meta: { cached: true } }))
+    assert.equal(await _testDeps.getClose({ id: 'setup_X', asset: 'X' }, '1hr'), 78, 'the bar before the one still forming')
+})
+
+// ── A day trade breaks on an intraday close (2026-11-14) ──
+// Every thesis scenario is drawn with `validity.timeframe: "day"`; on an intraday trade that close comes at the bell, after
+// the trade is over — a stop broken at 11:00 was never seen. breakRung caps it at a 1-hour close for both — the chart the
+// stop is drawn on (Roy, 2026-11-14: "stop in 1hr").
+test('breakRung: a day trade\'s "day" close is capped to its horizon\'s; a finer rung stays; a swing keeps its own', async () => {
+    const { breakRung } = await import('../../services/setup.schema.js')
+    const sc = (tf) => ({ validity: { lower: 1, upper: 2, timeframe: tf } })
+    assert.equal(breakRung({ type: 'intraday', timeframe: 'day' }, sc('day')), '1hr')
+    assert.equal(breakRung({ type: 'day', timeframe: 'day' }, sc('day')), '1hr')
+    assert.equal(breakRung({ type: 'intraday' }, sc('5min')), '5min', 'a finer rung named is kept')
+    assert.equal(breakRung({ type: 'intraday', timeframe: '4hr' }, { validity: { lower: 1 } }), '1hr', 'the premise is capped too')
+    assert.equal(breakRung({ type: 'intraday' }, sc('15min')), '15min', 'a 15-minute range named is kept')
+    assert.equal(breakRung({ type: 'intraday' }, { validity: { lower: 1 } }), '1hr', 'nothing named → the cap')
+    assert.equal(breakRung({ type: 'swing', timeframe: '1hr' }, sc('day')), 'day')
+    assert.equal(breakRung({ type: 'short term swing', timeframe: 'day' }, { validity: { lower: 1 } }), 'day')
+})
+
+test('an INTRADAY thesis setup is judged on the 1-hour close, not the day\'s — and a bar old is a 1-hour bar', async () => {
+    const asked = []
+    const intraday = mk({ type: 'intraday', trade_mode: 'thesis', timeframe: 'day', validity: { ...VALID, timeframe: 'day' } },
+        { ...VENUE, activatedAt: T - 70 * 60_000 })   // armed 70 minutes ago: a 1-hour bar has closed since
+    const deps = rangedDeps({ getClose: async (_s, tf) => { asked.push(tf); return 233 } })
+    const res = await _checkSetup(intraday, T, deps)
+    assert.deepEqual([...new Set(asked)], ['1hr'])
+    assert.equal(res.reason, 'invalidation', 'a 1-hour close under the stop breaks it the same morning')
+    const swing = mk({ type: 'swing', trade_mode: 'thesis', timeframe: 'day', validity: { ...VALID, timeframe: 'day' } }, { ...VENUE, activatedAt: T - 70 * 60_000 })
+    const seen = []
+    await _checkSetup(swing, T, rangedDeps({ getClose: async (_s, tf) => { seen.push(tf); return 233 } }))
+    assert.ok(seen.every(tf => tf === 'day'), 'a swing still dies on a day close')
 })

@@ -7,7 +7,7 @@
 import { makeStartTurn } from './startTurn.js'
 import { makeChainRunner } from '../chain/runner.js'
 import { onSleeveSettled } from '../sleeveSource.service.js'
-import { onReadSettled } from '../mentorReads.service.js'
+import { onReadSettled, onReadWaiting } from '../mentorReads.service.js'
 import { deskAct } from './act.js'
 
 export const chain = makeChainRunner()
@@ -20,5 +20,7 @@ chain.bindAct(deskAct.actHeld)
 onSleeveSettled(chain.sleeveSettled)
 // Prometheus's read for a Mentor build lands into that session's chain, and Mentor's turn runs (argus-rework.md step 3).
 onReadSettled(chain.readSettled)
+// …and one still in line keeps the chat's status line counting (Roy, 2026-11-14).
+onReadWaiting(chain.readWaiting)
 
 export const { startTurn, runQueued } = turns

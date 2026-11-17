@@ -6,6 +6,7 @@
 import { makeToolHandler } from '../agentUtils.js'
 import { logger } from '../logger.service.js'
 import { getTickerAggregates } from '../../providers/candles.provider.js'
+import { equityCloseMin } from '../market.service.js'
 import { structureFacts, entryLevel, toWeekly, mirror, lastTradedUnder } from '../swingStructure.service.js'
 
 const LOG = '[thesisStructure.tools]'
@@ -50,9 +51,39 @@ async function dayRows(sym, years, get, now) {
         .map(b => ({ date: _etDay(b.timestamp), open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume ?? 0 }))
 }
 
+// THE DAY TRADE'S CHART (Roy, 2026-11-14: "lets go for stop in 1hr") — the session's hourly bars from the 09:30 open, the
+// grid test 4 measured (docs/design/stock-playbook.md §Test 4: the 1-hour stop tied the daily; no intraday stop beat it).
+const HOUR_DAYS = 45
+const OPEN_MIN = 9 * 60 + 30
+const _etMin = (sec) => {
+    const [h, m] = new Date(sec * 1000).toLocaleTimeString('en-GB', { timeZone: 'America/New_York', hour12: false }).split(':').map(Number)
+    return (h % 24) * 60 + m
+}
+
+/**
+ * The last `HOUR_DAYS` of regular-session hourly bars for `sym`, oldest first, CLOSED only: the bar still forming is
+ * left out (a swing "confirmed" by a bar that has not closed can be gone by its close). A bar ends an hour after it
+ * starts or at the session's close, whichever is first — 16:00, or 13:00 on an early close (market.service
+ * equityCloseMin) — and a bar with a later bar after it has closed whatever the clock says. Each `date` is
+ * "YYYY-MM-DD HH:MM" ET — the swings' dates say the hour. `get` — the bar source.
+ */
+export async function hourRows(sym, get, now) {
+    const raw = await get(sym, { timeSpan: 'hour', multiplier: 1, from: now - HOUR_DAYS * 86_400_000, to: now })
+    const nowMin = Math.floor(now / 60_000)
+    const bars = (Array.isArray(raw) ? raw : []).filter(b => b?.close > 0)
+        .map(b => ({ b, day: _etDay(b.timestamp), min: _etMin(b.timestamp) }))
+        .filter(x => x.min >= OPEN_MIN && x.min < equityCloseMin(x.day))
+    return bars
+        .filter((x, q) => q < bars.length - 1 || Math.floor(x.b.timestamp / 60) + Math.min(60, equityCloseMin(x.day) - x.min) <= nowMin)
+        .map(({ b, day, min }) => ({ date: `${day} ${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`, open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume ?? 0 }))
+}
+
+/** The chart a timeframe names: `week`, `hour` (a day trade), else `day`. Pure. */
+export const chartOf = (timeframe) => (timeframe === 'week' || timeframe === 'hour' ? timeframe : 'day')
+
 /** The target candidate in words, for the chart and the side it was read on. Pure. */
 export function targetWords({ target_kind, lookback_bars }, timeframe = 'day', side = 'long') {
-    const bars = `${lookback_bars} ${timeframe === 'week' ? 'weeks' : 'sessions'}`
+    const bars = `${lookback_bars} ${timeframe === 'week' ? 'weeks' : timeframe === 'hour' ? 'hourly bars' : 'sessions'}`
     if (target_kind === 'measured_move') return `a measured move — at its ${side === 'short' ? 'lows' : 'highs'}, the range's height added ${side === 'short' ? 'under its low' : 'to its high'}`
     return side === 'short'
         ? `the lowest low of the last ${bars} — the start of the rise, or the trend's low before the bounce`
@@ -67,10 +98,17 @@ export function unfinishedWeek(monday, now = Date.now()) {
 }
 
 /**
- * The facts for `sym` on the day or week chart, the right way up for `side` → `{ facts (null under 60 bars), rows,
- * open (the week still trading, or null) }`. One read for the tool and for the turn's break-scenario line.
+ * The facts for `sym` on the day, week or hour chart, the right way up for `side` → `{ facts (null under 60 bars), rows,
+ * open (the week still trading, or null) }`. One read for the tool and for the turn's break-scenario line. The hour chart
+ * (a day trade) carries NO break scenario: a day trade waits on no close to arm (Mentor's prompt, § How a trade goes, 1).
  */
 async function structureRead(sym, timeframe, side, get, now) {
+    if (timeframe === 'hour') {
+        const rows = await hourRows(sym, get, now)
+        const facts = side === 'short' ? unmirrorFacts(structureFacts(mirror(rows))) : structureFacts(rows)
+        // No deep stop either: the low of 60 hourly bars is some nine sessions back (AMD, 2026-11-14: 25% away) — no stop for a day trade.
+        return { facts: facts ? { ...facts, break_candidate: null, candidates: { ...facts.candidates, deep_stop: null, deep_stop_last_traded: null } } : facts, rows, open: null }
+    }
     // Two years of days for a swing read; six for the weekly one (60+ weeks before the first fact).
     const years = timeframe === 'week' ? 6 : 2
     const days = await dayRows(sym, years, get, now)
@@ -90,7 +128,7 @@ async function structureRead(sym, timeframe, side, get, now) {
 export async function thesisTurnFacts({ ticker, timeframe = 'day', side = 'long' }, { get = getTickerAggregates, now = Date.now() } = {}) {
     const sym = String(ticker ?? '').toUpperCase().trim()
     if (!sym) return null
-    const tf = timeframe === 'week' ? 'week' : 'day'
+    const tf = chartOf(timeframe)
     const { facts } = await structureRead(sym, tf, side, get, now)
     if (!facts) return null
     return {
@@ -101,16 +139,23 @@ export async function thesisTurnFacts({ ticker, timeframe = 'day', side = 'long'
     }
 }
 
-/** The facts for `ticker` on the day or week chart, as the JSON text Mentor reads. `get` — the bar source (a seam). */
+/** The facts for `ticker` on the day, week or hour chart, as the JSON text Mentor reads. `get` — the bar source (a seam). */
 export async function priceStructureText({ ticker, timeframe = 'day', side = 'long' }, { get = getTickerAggregates, now = Date.now() } = {}) {
     const sym = String(ticker ?? '').toUpperCase().trim()
     if (!sym) return 'Give a ticker.'
-    const { facts, rows, open } = await structureRead(sym, timeframe, side, get, now)
-    if (!facts) return `Not enough ${timeframe} history for ${sym} (${rows.length} bars; 60 needed).`
-    facts.candidates = { ...facts.candidates, target_kind: targetWords(facts.candidates, timeframe, side), lookback_bars: undefined }
+    const tf = chartOf(timeframe)
+    const { facts, rows, open } = await structureRead(sym, tf, side, get, now)
+    if (!facts) return `Not enough ${tf} history for ${sym} (${rows.length} bars; 60 needed).`
+    facts.candidates = { ...facts.candidates, target_kind: targetWords(facts.candidates, tf, side), lookback_bars: undefined }
     if (facts.break_candidate) facts.break_candidate = { what: breakWords(side), ...facts.break_candidate }
+    if (tf === 'hour') {
+        facts.break_candidate = 'none — a day trade waits on no close to arm'
+        facts.candidates.deep_stop = 'none — a day trade offers no deeper stop'
+        delete facts.candidates.deep_stop_last_traded
+        delete facts.heavy_days
+    }   // the 09:30 bar is always heavy on a 20-bar mean: no read
     if (open) facts.this_week = { note: 'still trading — not in the swings above', from: open.date, high: open.high, low: open.low, close: open.close }
-    return `${sym} ${timeframe} structure, ${side} side (swings of ≥ ${facts.swing_threshold_atr}× ATR; the candidates are the tested rule's — a starting point you judge, never the answer):\n${JSON.stringify({ ...facts, swing_threshold_atr: undefined })}`
+    return `${sym} ${tf === 'hour' ? '1-hour (regular session, closed bars)' : tf} structure, ${side} side (swings of ≥ ${facts.swing_threshold_atr}× ATR; the candidates are the tested rule's — a starting point you judge, never the answer):\n${JSON.stringify({ ...facts, swing_threshold_atr: undefined })}`
 }
 
 /** The entry level as the sentence Mentor reads out. Pure. */

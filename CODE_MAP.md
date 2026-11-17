@@ -377,7 +377,10 @@ services/
                           every turn: decision → stop, emit → hand-off + the receiver's turn queued; busy rule, step
                           cap, pause, boot sweep, sleeveSettled; after a MENTOR turn askRead (mentorReads — the read
                           the build needs, said once with readWaitLine) and readSettled (the read handed to Mentor,
-                          same name + horizon only, never over another desk's running chain); the `research` choice
+                          same name + horizon only, never over another desk's running chain); showWaiting — while it
+                          waits, the session's `waiting` line (session.service setWaiting, slot "SYM|kind"), kept
+                          current by readWaiting (mentorReads onReadWaiting) and cleared when it settles; askRead
+                          skips a deciding read already judged (state.decide_seen, 2026-11-14); the `research` choice
                           on an Argus list went to archive/ 2026-11-09, so the `next` queue walk is dormant). Wired
                           with the turns in desks/turns.js (onSleeveSettled, onReadSettled, bindAct). 2026-11-12
                           (argus-rework.md §2.2–2.3): `deskGo` — a desk's <go> (GO table: Mentor generateArmed, Atlas
@@ -467,6 +470,11 @@ services/
                             turn for mentor.agent's RISK READ and BREAK SCENARIO sections (2026-11-03).
                             Also the target candidate: at the highs (within 1 ATR) a measured move, which
                             mentor.agent's _snapMeasuredTarget writes on the worksheet (2026-11-05).
+                            THE HOUR CHART (2026-11-14, a day trade — intraday · day; stock-playbook.md Test 4–4f):
+                            timeframe `hour` (chartOf) → hourRows: 45 days of regular-session hourly bars from 09:30,
+                            CLOSED only (a bar ends an hour on or at market.service equityCloseMin; a later bar
+                            closes it), dated "YYYY-MM-DD HH:MM" ET; no break candidate, no deep stop, no heavy days.
+                            mentor.agent _lensTimeframe reads it for a day-trade draft; the risk read counts hours.
   runup.tools.js            get_runup_history — the RUN-UP yardstick for a catalyst read (horizon-chains.md §3):
                             the stock's move into each of its last reports over the sessions left, vs SPY;
                             median / quartiles / up share, and THIS CYCLE (the usual full 10-session run-up and
@@ -609,7 +617,8 @@ services/
                           incrementally and merged; a provider failure serves the warm shelf STALE and
                           does not re-stamp it. The shelf was a file under data/news until 2026-09-16
   timeframe.service.js  brokerSymbol.service.js
-  market.service.js       THE market-hours engine: one class-aware gate (isAssetOpen), one status
+  market.service.js       THE market-hours engine (equityCloseMin, 2026-11-14: 13:00 on the rule-based early
+                          closes, else 16:00 — holidays not known): one class-aware gate (isAssetOpen), one status
                           read (getMarketStatus → open/nextOpenMs/session/phase), sessionPhase +
                           sessionStartMs, and nextCandleCloseMs(symbol, assetClass, rung, nowMs) —
                           the ONE place "when does the next `rung` candle close for this instrument"
@@ -842,7 +851,10 @@ services/
                             row: what holds or the daily ATR, breaks vs chance, cycle / Wyckoff / Fibonacci words),
                             behaviourBadge (its headline), profileBrief (the trader's chat line) and mentorRead (the
                             trader's levels: what holds priced now, "never cite one" otherwise, the range now, the
-                            stop's room — mentor.desk _proteusRead → mentor.agent _buildProteusSection, 5b)
+                            stop's room — mentor.desk _proteusRead → mentor.agent _buildProteusSection, 5b).
+                            2026-11-14: mentorRead({ horizon }) — the views BY HORIZON (BADGE_KEY → BADGE_TIMEFRAMES:
+                            5-min / 1-hour for a day trade), no stop-room line and the day-trade fit on a day trade;
+                            isDayTrade (DAY_TRADE_HORIZONS intraday · day) — the one test mentor.desk/agent use
   horizonList.tools.js      get_horizon_list (ARGUS, 2026-11-11, argus-rework.md §3.1) — UNBOUND, read-only: the house's
                             list for a horizon, the only names he may pick from. intraday / day → today's latest DAY
                             BOARD (hotlist.day, todayBoards; before the first, when the next runs); short term swing →
@@ -924,7 +936,8 @@ services/
                             (held a day) · unknown. requestRead queues a missing one (source `mentor`, the session on
                             the row) and starts the house run BY SYMBOL; it waits in line on the one run. On
                             onRunSettled, settlePending hands a landed read to the runner's readSettled (onReadSettled).
-                            readPending = the Generate gate; resumePending at boot
+                            readPending = the Generate gate; resumePending at boot; onReadWaiting (2026-11-14) — a
+                            still-waiting read's place in line, handed to the runner's readWaiting at each settle
                             A covered name's OTHER horizon (two targets, stage 1): the main target answers its own
                             book; else a <horizon_view> under 30 days; else need 'view'. Retired / watchlist → 'reinit'.
                             THE DECIDING READ (horizon null, 2026-11-12, argus-rework.md §2.3): no horizon settled →
@@ -1278,7 +1291,10 @@ services/
   session.service.js  session.util.js   the unified chat's session store: `sessions` (header — scope,
                           status, floor, agentState, summaries, links, seq) + `session_messages` (one row
                           per timeline message, per-session seq; an assistant row may carry `tools`, the
-                          session.util.toolTrace of the calls behind it). ONE active per user per scope; "new"
+                          session.util.toolTrace of the calls behind it). setWaiting (2026-11-14): the header's
+                          `waiting` map — one entry per read the build waits on ($set / $unset of a sanitised
+                          slot, `since` kept), broadcast whole as session_state and replayed (sessionChannel);
+                          the frontend's readWaiting draws one status row each. ONE active per user per scope; "new"
                           archives it; no TTL, no cap. session.util.segmentOf = one agent's context line
                           (its own turns + hand-offs addressed to it). Factory over getDb (memDb-tested)
   sessionEvents.js  sessionChannel.js   the unified chat's live channel ON THE EXISTING WebSocket (chatWs): the
@@ -1378,7 +1394,11 @@ monitoring/
    archive/README.md. Its two shared helpers, _allText and _formatEventRisk, stayed behind in
    assess.shared.js because Talos imports them.)
   talos.monitor.service.js  Talos — the Mentor-setup loop (own tick, kind:'setup'). TWO BRAINS, ONE LOOP:
-                            pre-entry readiness, past-entry management (_managePosition). THE LOOP ONLY:
+                            pre-entry readiness, past-entry management (_managePosition). A scenario's
+                            break/runaway close is setup.schema breakRung (2026-11-14): its range's rung, capped at
+                            1hr for a day trade (BREAK_RUNG_MAX — the stop is drawn on the hour chart); an unnamed
+                            thesis day trade paces on THESIS_PACE_DAY (1hr / 15min), and assess.shared
+                            lensLine(mode, horizon) tells the model strength on the 15m / 1h. THE LOOP ONLY:
                             wake handlers, scheduling, writes and the injectable IO. THE RULE (rebuilt
                             2026-09-17, docs/design/talos-per-candle.md): a model call only on a
                             condition the user wrote in words. It wakes on each candle close of the

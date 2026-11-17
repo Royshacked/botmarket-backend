@@ -367,7 +367,7 @@ export const TOOL_SCHEMAS = {
         "type": "object",
         "properties": {
             "ticker":    { "type": "string", "description": "The symbol, e.g. MTG." },
-            "timeframe": { "type": "string", "enum": ["day", "week"], "description": "The chart the trade is drawn on: `day` for a swing, `week` for a long-term trade (bigger swings, a bigger stop and target)." },
+            "timeframe": { "type": "string", "enum": ["hour", "day", "week"], "description": "The chart the trade is drawn on: `hour` for a day trade (intraday · day — the session's closed 1-hour bars), `day` for a swing, `week` for a long-term trade (bigger swings, a bigger stop and target)." },
             "side":      { "type": "string", "enum": ["long", "short"], "description": "Read for a long (default) or a short — a short reads the chart upside down: its stop over the buyers' last swing up." }
         },
         "required": ["ticker", "timeframe"]

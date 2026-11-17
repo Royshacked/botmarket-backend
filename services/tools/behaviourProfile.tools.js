@@ -200,13 +200,23 @@ export function stopRoomLine(r) {
  *   - the range it is in now (the trading range's bounds — structure, not an edge, unless its springs hold);
  *   - Fibonacci prices of the latest impulse ONLY when Fibonacci holds; the cycle's next window ONLY when it holds;
  *   - the stop's room at his 0.2 ATR stop — context for the deeper stop he already offers, never a rule change.
+ * BY HORIZON (Roy, 2026-11-14): the timeframes the horizon trades on — the SAME ones the Hotlist row shows
+ * (BADGE_TIMEFRAMES): a day trade the 5-minute and 1-hour bars (the daily and weekly said nothing measured about a 10:30
+ * entry), a short term swing the hourly and daily, a swing — or no horizon yet — the daily and weekly. A day trade's
+ * stop's room is left out until the intraday stop rule is set (the daily stop's room is a swing stop's).
  * → string[] (empty when the profile has no daily view). Pure.
  */
-export function mentorRead(p) {
+export const DAY_TRADE_HORIZONS = Object.freeze(['intraday', 'day'])
+export const isDayTrade = (horizon) => DAY_TRADE_HORIZONS.includes(String(horizon ?? '').toLowerCase())
+/** A build's horizon (Mentor's words) → the Hotlist's key for it (BADGE_TIMEFRAMES). */
+const BADGE_KEY = Object.freeze({ intraday: 'intraday', day: 'day', 'short term swing': 'week', swing: 'swing', 'long term': 'long_term' })
+export function mentorRead(p, { horizon = null } = {}) {
     const tfs = p?.timeframes ?? {}
     const out = []
     const lines = []
-    for (const tf of ['day', 'week']) {
+    const dayTrade = isDayTrade(horizon)
+    const views = BADGE_TIMEFRAMES[BADGE_KEY[String(horizon ?? '').toLowerCase()]] ?? BADGE_TIMEFRAMES.swing
+    for (const tf of views) {
         const t = tfs[tf]
         if (!t) continue
         const where = TF[tf].toLowerCase()
@@ -240,11 +250,12 @@ export function mentorRead(p) {
             }
         }
     }
-    out.push(...(lines.length ? lines : ['Nothing technical holds on the daily or weekly bars: no moving average, Fibonacci level or pattern is support on this name — never cite one as the reason for a level; the levels come from the structure and the ATR']))
+    const bars = `the ${views.map(tf => TF[tf].toLowerCase()).join(' or ')} bars`
+    out.push(...(lines.length ? lines : [`Nothing technical holds on ${bars}: no moving average, Fibonacci level or pattern is support on this name — never cite one as the reason for a level; the levels come from the structure and the ATR`]))
     if (lines.length) out.push('Anything not listed above did not hold — never cite it as support')
     const range = tfs.day?.wyckoff?.current
     if (range) out.push(`In a daily trading range ${range.low}–${range.high} since ${range.since.slice(0, 10)} — structure (its low and high are levels), not a measured edge`)
-    const r = tfs.day?.stop_room, own = r?.by_buffer?.[STOP_BUFFER]
+    const r = dayTrade ? null : tfs.day?.stop_room, own = r?.by_buffer?.[STOP_BUFFER]
     if (r?.breaks && own?.whipsaw != null) {
         const deeper = r.by_buffer[1]
         out.push(`Your stop's room (your own daily swing lows, ${r.breaks} breaks): ${_pct(own.stopped_share)} of breaks reached a stop ${STOP_BUFFER} ATR under the low and ${_pct(own.whipsaw)} of those closed back above within ${PROFILE.sweepBack} days` +
@@ -254,7 +265,7 @@ export function mentorRead(p) {
     if (Number.isFinite(tfs.day?.atr_pct)) out.push(`Daily ATR ${tfs.day.atr_pct}% — a day's normal move`)
     // The fit (CR 2026-11-13: the trader's deciding read asks for it, and only the brief carried it).
     const fit = p?.suitability
-    if (fit) out.push(`Fits: day trade ${fit.day_trade.fits ? 'yes' : 'no'}, swing ${fit.swing.fits ? 'yes' : 'no'} — ${fit.swing.fits ? fit.swing.why : fit.day_trade.why}`)
+    if (fit) out.push(`Fits: day trade ${fit.day_trade.fits ? 'yes' : 'no'}, swing ${fit.swing.fits ? 'yes' : 'no'} — ${dayTrade || !fit.swing.fits ? fit.day_trade.why : fit.swing.why}`)
     return out
 }
 

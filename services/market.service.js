@@ -213,6 +213,21 @@ export function nextForexOpenMs(date = new Date()) {
     return date.getTime() + (minutesToMidnight + fullDaysToSunday * 24 * 60 + FX_OPEN_CLOSE) * 60_000
 }
 
+/**
+ * The US equity session's close on `day` (YYYY-MM-DD, ET), in minutes after midnight ET: 13:00 on the NYSE's rule-based
+ * early closes — the day after Thanksgiving (the 4th Thursday of November), Christmas Eve and July 3 when they fall on a
+ * weekday (July 3 is a full holiday when July 4 is a Saturday) — else 16:00. Holidays are not known here. Pure.
+ */
+export function equityCloseMin(day) {
+    const [y, m, d] = String(day).split('-').map(Number)
+    const wd = new Date(Date.UTC(y, m - 1, d)).getUTCDay()
+    if (wd === 0 || wd === 6) return CLOSE
+    const thanksgiving = 22 + ((4 - new Date(Date.UTC(y, 10, 1)).getUTCDay() + 7) % 7)
+    const early = (m === 11 && d === thanksgiving + 1) || (m === 12 && d === 24)
+        || (m === 7 && d === 3 && new Date(Date.UTC(y, 6, 4)).getUTCDay() !== 6)
+    return early ? 13 * 60 : CLOSE
+}
+
 /** True between 9:30 and 16:00 ET on a weekday. */
 export function isMarketOpen(date = new Date()) {
     const et  = _etWall(date)

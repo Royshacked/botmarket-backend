@@ -518,6 +518,18 @@ fundamentals, Mentor trades.
 - **A day-board row builds with Mentor** (2026-11-12): the Intraday tab's row page hands the name on as an `hd_`
   reference (board id + its checkpoint); `hotlistSeed` reads the board's line about the name back (`hotlist.day
   dayFacts` — the same `dayLine` Argus's list uses) as an intraday hand-off.
+- **A day trade (intraday · day) — 2026-11-14.** No analyst read is asked for or waited on: the technical read and the
+  chart decide it, read from the hand-off's own name and horizon on the first turn (Mentor's context says NO ANALYST
+  READ). The trader's read of how it trades is by horizon (5-minute / 1-hour views). The trade is drawn on the
+  **1-hour chart** (`get_price_structure` `hour`: closed regular-session hourly bars, no break scenario, no deeper
+  stop) — test 4's survivor: the 1-hour stop tied the daily, the 5- and 15-minute did worse, and no day-trade entry
+  showed an edge (tests 4–4f, docs/design/stock-playbook.md; Mentor never calls a day trade tested better). The
+  opening says strength on the 15m and 1h and a 1-hour close under the stop; the trade monitor breaks it on a 1-hour
+  close (`breakRung`) and paces it on the 1h / 15m; an intraday trade's time exit is the session's close.
+- **What the user sees while experts work** (2026-11-14). A cold name being measured shows "Measuring how it trades…";
+  a read queued for the build shows a status line in the chat ("The analyst is reading X for the swing trade — N names
+  ahead in line · asked HH:MM. The build carries on when it lands.") until it lands — the session's `waiting` map,
+  live over the session channel and in its replay.
 
 ### Mentor, one way — the experts decide the trade, the user decides how much (2026-11-12)
 
