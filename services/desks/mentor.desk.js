@@ -18,7 +18,7 @@ import { normalizeBuild, activeName, putName, reopenForRedraw, stageOf } from '.
 import { PRE_ENTRY } from '../entity/vocabulary.js'
 import { readFor, readTarget } from '../mentorReads.service.js'
 import { profileFor, storedProfile } from '../behaviourProfile.service.js'
-import { profileBrief, mentorRead, isDayTrade } from '../tools/behaviourProfile.tools.js'
+import { profileBrief, mentorRead, isDayTrade, pullbackZone, stopTimeframe } from '../tools/behaviourProfile.tools.js'
 import { sessionService } from '../session.service.js'
 
 /**
@@ -108,7 +108,10 @@ async function _proteusRead(state, emit = null) {
     if (emit && !(await storedProfile(symbol).catch(() => null))) emit('status', { tool: 'measure_behaviour', targets: [symbol] })
     const p = await profileFor(symbol).catch(() => null)
     // brief: the one line said in the chat; read: the levels he weighs (5b — proteus.md).
-    return p ? { symbol, at: p.computed_at ?? null, brief: profileBrief(p), read: mentorRead(p, { horizon: _horizonNow(state) }) } : null
+    // pullback: its usual-pullback zone on the STOP's chart, as numbers — the turn's stop is checked against it in code
+    // (Roy, 2026-11-17: the prompt rule alone was skipped on the ARMK drive).
+    const horizon = _horizonNow(state), stopTf = stopTimeframe(horizon), zone = p ? pullbackZone(p.moves?.[stopTf]) : null
+    return p ? { symbol, at: p.computed_at ?? null, brief: profileBrief(p), read: mentorRead(p, { horizon }), pullback: zone ? { ...zone, timeframe: stopTf } : null } : null
 }
 
 // The experts' lines already in a session's chat, by `${sessionId}|${symbol}` — each says its read ONCE per name. Bounded.

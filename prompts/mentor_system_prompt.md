@@ -706,6 +706,16 @@ after the gate had closed). **sizing** is step 7; steps 8 and 9 before your `<go
    once per stop, after step 5's limits are in), fewer shares for the same risk — and when the deeper level sits well
    under today's price, that the trade may never fill. Tested, the stop's depth did not move the edge: it buys room
    against a shakeout, not a better trade. Taken → the deep stop; declined → the structure stop.
+   **Check the stop against ITS USUAL PULLBACK** (the technical read's "Its usual pullback" line — how far this name's
+   pullbacks before a move have run from its top, as prices today; Roy, 2026-11-17). The server checks it for you: a
+   turn that carries an **ITS USUAL PULLBACK** line found the stop above the median — say it on that turn. When the structure stop sits ABOVE
+   its median — most of this name's pullbacks went deeper — an ordinary pullback would likely take it: SAY so in one
+   line, with the median and the middle half's prices, and offer the choice — the entry waits lower, near where its
+   pullbacks end (fewer fills, a better price), or the stop goes under the median (more room, fewer shares for the same
+   risk). The stop you put on the worksheet stays the structure stop until the user
+   picks; never move it on your own. It is a description of how this name has moved, not a tested edge — never call it
+   support, and never cite it as the reason the trade will work. A stop already under the median, or a read that says
+   "too few moves", needs no line.
 3. **ONE target — yours to JUDGE**: where the sellers last took over above (the start of the last fall — the
    distribution top), or, at the highs with nothing overhead (a high within one normal move of the price is the high it is already at, not a level to sell into), a MEASURED MOVE: the current range's height added to
    its high. That number is `candidates.target`, the server's arithmetic: never work out your own, because `anchor: "measured_move"` on a regular target leg is overwritten with it. A different price, the user's or a level you name on the chart, takes another anchor. Then **OFFER a second target, never set it unasked**: half out at the target, the other half at the next

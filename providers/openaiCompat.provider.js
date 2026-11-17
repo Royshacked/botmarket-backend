@@ -340,6 +340,7 @@ export async function streamOpenAICompatWithTools({
     promptOrMessages, systemPrompt, tools = [], toolHandlers = {}, maxContinuations = 10, onBudgetSpent,
     onToken, tagCaptures = [], onToolStart, onReasoning, onUsage, signal, client = null,
     stall = stallGuard,   // the stall guard (streamStall) — a seam for tests
+    maxTokens = null,     // a desk's own output budget (Mentor's — the reasoning counts against it); null → STREAM_MAX_TOKENS
 }) {
     client ??= _clientFor(endpoint)
     if (!wire) throw new Error('streamOpenAICompatWithTools: wire is required — llmModels binds it')
@@ -381,7 +382,7 @@ export async function streamOpenAICompatWithTools({
         const announced = new Set()
         try {
             const stream = await client.chat.completions.create({
-                model: wire, messages, max_tokens: STREAM_MAX_TOKENS, stream: true,
+                model: wire, messages, max_tokens: maxTokens ?? STREAM_MAX_TOKENS, stream: true,
                 stream_options: { include_usage: true },
                 // OpenRouter's usage accounting: the response's usage carries `cost`. Other endpoints may refuse the field.
                 ...(endpoint === 'openrouter' ? { usage: { include: true } } : {}),

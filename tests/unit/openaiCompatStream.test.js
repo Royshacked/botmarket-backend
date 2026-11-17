@@ -168,3 +168,12 @@ test('stream: the server search is offered on the first rounds only, and OpenRou
     assert.deepEqual(searches, [true, true, true, false, false])
     assert.deepEqual(client.requests[0].usage, { include: true })
 })
+
+test('stream: a desk\'s own output budget reaches the request; without one, the provider default (16k)', async () => {
+    const one = fakeStreamClient([[chunk({ content: 'ok' }, 'stop')]])
+    await streamOpenAICompatWithTools({ wire: 'openai/gpt-6-luna', model: 'm', client: one, promptOrMessages: 'hi', systemPrompt: 'S', maxTokens: 32_000 })
+    assert.equal(one.requests[0].max_tokens, 32_000)
+    const two = fakeStreamClient([[chunk({ content: 'ok' }, 'stop')]])
+    await streamOpenAICompatWithTools({ wire: 'openai/gpt-6-luna', model: 'm', client: two, promptOrMessages: 'hi', systemPrompt: 'S' })
+    assert.equal(two.requests[0].max_tokens, 16_000)
+})

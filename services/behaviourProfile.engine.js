@@ -872,6 +872,8 @@ export function movesProfile(bars, timeframe, m = MOVES) {
     const runNow = closes[top] - closes[runLo]
     const now = Number.isFinite(aL) && aL > 0 ? {
         top_at: new Date(_ms(bars[top].timestamp)).toISOString(), bars_since_top: L - top,
+        // In price, for the trader's usual-pullback zone (Roy, 2026-11-17: "let's add size and pace" to Mentor's read).
+        top_close: _round(closes[top], 2), atr: _round(aL, 4),
         off_top_atr: _round((closes[top] - closes[L]) / aL, 2), off_top_pct_of_run: runNow > 0 ? _round((closes[top] - closes[L]) / runNow * 100, 1) : null,
         rsi: _round(rsi[L], 1), vs_sma50_atr: _round(vs(s50, L), 2),
     } : null

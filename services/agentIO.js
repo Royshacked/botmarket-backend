@@ -423,6 +423,8 @@ export async function runAgentStream({
     onSpend,
     // The turn's tool budget ran out (the provider's landing round) — see anthropic.provider onBudgetSpent.
     onBudgetSpent,
+    // A desk's own output budget, passed to the provider (reasoning counts against it); omitted → the provider's default.
+    maxTokens,
     meta = {},
     // Injectable so the argument-bag contract can be tested without a provider or a real model id.
     _resolve = resolveAgentStream,
@@ -482,6 +484,7 @@ export async function runAgentStream({
         tagCaptures: chart ? _withChartCapture(tagCaptures, chart.capture) : tagCaptures,
         onToolStart, onReasoning: tagReasoning(REASONING_DESK), onUsage,
         ...(onBudgetSpent ? { onBudgetSpent } : {}),
+        ...(maxTokens ? { maxTokens } : {}),
     })
 
     return chart ? stripChartBlock(raw) : raw

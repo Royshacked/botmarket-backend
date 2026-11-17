@@ -269,6 +269,36 @@ export function stopRoomLine(r) {
  * stop's room is left out until the intraday stop rule is set (the daily stop's room is a swing stop's).
  * → string[] (empty when the profile has no daily view). Pure.
  */
+/** The chart a horizon's stop is drawn on (mentor_system_prompt, the stop): 1-hour for a day trade, weekly for long term, else daily. */
+export const stopTimeframe = (horizon) => (isDayTrade(horizon) ? '1hour' : String(horizon ?? '').toLowerCase() === 'long term' ? 'week' : 'day')
+
+/**
+ * WHERE ITS PULLBACKS USUALLY END, in price today (K's `now` + the pullback depth): from its latest top, the moves'
+ * median depth in ATR and the older moves' middle half, at today's ATR → `{ top, top_at, median, lo, hi, off_top_atr }`,
+ * or null (thin, or a profile stored before the top's price was kept). Pure.
+ */
+export function pullbackZone(m) {
+    const n = m?.now, d = m?.measures?.depth_atr
+    if (!m || m.verdict === 'thin' || !Number.isFinite(n?.top_close) || !Number.isFinite(n?.atr) || !Number.isFinite(d?.median)) return null
+    const [p25, p75] = d.older_mid ?? []
+    const at = (k) => _round2(n.top_close - k * n.atr)
+    return {
+        top: n.top_close, top_at: n.top_at, median: at(d.median),
+        hi: at(Number.isFinite(p25) ? p25 : d.median), lo: at(Number.isFinite(p75) ? p75 : d.median),
+        depth_atr: d.median, off_top_atr: n.off_top_atr,
+    }
+}
+
+/** The usual-pullback zone as the trader's line — what the structure stop is checked against (the prompt's rule). Pure. */
+export function pullbackWords(m, tf) {
+    const z = pullbackZone(m)
+    if (!z) return m?.verdict === 'thin' ? `Its usual pullback (${TF[tf].toLowerCase()}): too few moves to say where its pullbacks end (${m.moves})` : null
+    // The MEDIAN is the line (ARMK daily, 2026-11-17: the middle half ran 42.91–53.93 — "a stop above 42.91 is inside an
+    // ordinary pullback" claimed too much): a stop above it, more than half of its pullbacks reached.
+    return `Its usual pullback (${TF[tf].toLowerCase()}, the stop's chart; ${m.moves} moves): from its latest top ${z.top} (${String(z.top_at).slice(0, 10)}), at today's ATR, half of its pullbacks before a move went deeper than ${z.median} (~${z.depth_atr} ATR under the top); the middle half ended ${z.lo}–${z.hi}. It is ${z.off_top_atr} ATR off that top now. ` +
+        `A stop ABOVE ${z.median} would have been reached by most of this name's pullbacks — a description of its moves, not a tested edge`
+}
+
 export const DAY_TRADE_HORIZONS = Object.freeze(['intraday', 'day'])
 export const isDayTrade = (horizon) => DAY_TRADE_HORIZONS.includes(String(horizon ?? '').toLowerCase())
 /** A build's horizon (Mentor's words) → the Hotlist's key for it (BADGE_TIMEFRAMES). */
@@ -318,6 +348,14 @@ export function mentorRead(p, { horizon = null } = {}) {
     if (lines.length) out.push('Anything not listed above did not hold — never cite it as support')
     const range = tfs.day?.wyckoff?.current
     if (range) out.push(`In a daily trading range ${range.low}–${range.high} since ${range.since.slice(0, 10)} — structure (its low and high are levels), not a measured edge`)
+    // SIZE AND PACE (K — Roy, 2026-11-17: "let's add size and pace" to the trader): how this name's moves go on the trade's
+    // timeframes, and on the STOP's chart where its pullbacks usually end — the zone the stop is checked against.
+    for (const tf of movesViews(views)) {
+        const w = movesWords(p?.moves?.[tf], tf)
+        if (w) out.push(`Size and pace (${TF[tf].toLowerCase()}): ${w}`)
+    }
+    const zone = pullbackWords(p?.moves?.[stopTimeframe(horizon)], stopTimeframe(horizon))
+    if (zone) out.push(zone)
     const r = dayTrade ? null : tfs.day?.stop_room, own = r?.by_buffer?.[STOP_BUFFER]
     if (r?.breaks && own?.whipsaw != null) {
         const deeper = r.by_buffer[1]

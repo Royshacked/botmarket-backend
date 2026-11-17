@@ -110,6 +110,8 @@ export async function streamAnthropicWithTools({
     // build on into another turn instead of leaving it at "I'll continue next turn" (argus-rework.md §2.2).
     onBudgetSpent,
     reasoningEffort,
+    // A desk's own output budget (Mentor, 2026-11-17: Luna spent 16k on reasoning and landed empty); null → the default.
+    maxTokens = null,
     signal,
     client = _defaultClient,   // the test seam — a scripted client drives the loop without a network
     stall = stallGuard,        // a stream that stops sending is cut (streamStall) — a seam for tests
@@ -149,7 +151,7 @@ export async function streamAnthropicWithTools({
             messages,
             tools:      finalTools,
             ...(landing ? { tool_choice: { type: 'none' } } : {}),
-            max_tokens: reasoning ? THINKING_MAX_TOKENS : DEFAULT_MAX_TOKENS,
+            max_tokens: maxTokens ?? (reasoning ? THINKING_MAX_TOKENS : DEFAULT_MAX_TOKENS),
             ...(reasoning ?? {}),
         }, { signal: guard.signal })
 

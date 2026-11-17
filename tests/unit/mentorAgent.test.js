@@ -571,3 +571,20 @@ test('the chosen entries land as scenarios or as legs, and the prompt says which
     // And the thing Roy actually wanted: different sizes per way in is correct, not a problem.
     assert.match(section, /that is\s+correct, not a problem to flag/)
 })
+
+test('Mentor asks for his own output budget (MENTOR_MAX_TOKENS — the reasoning counts against it); runAgentStream passes it on', async () => {
+    const { MENTOR_MAX_TOKENS } = await import('../../services/agents/mentor.agent.service.js')
+    const { runAgentStream } = await import('../../services/agentIO.js')
+    let asked = null
+    await mentorAgentService.chatStream({ messages: [{ role: 'user', content: 'hi' }], _run: async (a) => { asked = a.maxTokens; return '' } })
+    assert.equal(asked, MENTOR_MAX_TOKENS)
+    assert.ok(MENTOR_MAX_TOKENS > 16_000)
+    let got = null
+    await runAgentStream({ log: '[mentorAgent]', messages: [], systemPrompt: 'S', tools: [], toolHandlers: {}, maxTokens: 32_000,
+        _resolve: () => ({ model: 'm', streamFn: async (a) => { got = a; return 'raw' }, provider: 'p' }) })
+    assert.equal(got.maxTokens, 32_000)
+    let other = null
+    await runAgentStream({ log: '[x]', messages: [], systemPrompt: 'S', tools: [], toolHandlers: {},
+        _resolve: () => ({ model: 'm', streamFn: async (a) => { other = a; return 'raw' }, provider: 'p' }) })
+    assert.equal('maxTokens' in other, false, 'another desk sends none — the provider keeps its default')
+})

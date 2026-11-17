@@ -47,20 +47,42 @@ try {
     else console.log('  · no session to file — already fresh')
     expect(!(await page.locator('.chat-timeline__row--assistant').count()), 'the chat starts empty')
 
-    await page.locator('.floor-desk__head', { has: page.locator('.floor-desk__label', { hasText: /^Hotlist$/ }) }).click()
-    await page.waitForTimeout(2500)
-    await page.getByRole('button', { name: /^Intraday\b/ }).first().click()
-    await page.waitForTimeout(2500)
-    // A row's Build button is in the OPENED row (opening it measures the name too — the chip shows only on a cold name).
-    const opens = page.getByRole('button', { name: /^Details for / })
-    const n = await opens.count()
-    if (!n) { await shot(page, '00-no-rows'); throw new Error('no Intraday row to build') }
-    const open = ROW === 'last' ? opens.nth(n - 1) : opens.nth(Number(ROW))
-    const sym = (await open.getAttribute('aria-label'))?.replace('Details for ', '')
-    console.log(`  building row ${ROW} of ${n}: ${sym}`)
-    await open.click()
-    await page.getByRole('button', { name: 'Build a setup' }).first().waitFor({ timeout: 60_000 })
-    await page.getByRole('button', { name: 'Build a setup' }).first().click()
+    // Open the Intraday tab, the row, and press Build — a function, so a leftover draft can be discarded and the build
+    // started again.
+    let sym = null
+    const startBuild = async () => {
+        await page.locator('.floor-desk__head', { has: page.locator('.floor-desk__label', { hasText: /^Hotlist$/ }) }).click()
+        await page.waitForTimeout(2500)
+        await page.getByRole('button', { name: /^Intraday\b/ }).first().click()
+        await page.waitForTimeout(2500)
+        // A row's Build button is in the OPENED row (opening it measures the name too — the chip shows only on a cold name).
+        const opens = page.getByRole('button', { name: /^Details for / })
+        const n = await opens.count()
+        if (!n) { await shot(page, '00-no-rows'); throw new Error('no Intraday row to build') }
+        const open = ROW === 'last' ? opens.nth(n - 1) : opens.nth(Number(ROW))
+        sym = (await open.getAttribute('aria-label'))?.replace('Details for ', '')
+        console.log(`  building row ${ROW} of ${n}: ${sym}`)
+        await open.click()
+        await page.getByRole('button', { name: 'Build a setup' }).first().waitFor({ timeout: 60_000 })
+        await page.getByRole('button', { name: 'Build a setup' }).first().click()
+    }
+    await startBuild()
+    // A LEFTOVER DRAFT of the name (2026-11-17: an earlier drive's unsaved ARMK plan came back on Build and its turn ran
+    // over this one): an old reply is on screen at once, where a fresh build has none for many seconds. Discard it — the
+    // pane's Discard, its confirm accepted — start a new session, and build again.
+    await page.waitForTimeout(4000)
+    if (await page.locator('.chat-timeline__row--assistant').count()) {
+        const discard = page.getByRole('button', { name: /^discard$/i }).first()
+        if (await discard.count()) {
+            page.once('dialog', d => d.accept().catch(() => {}))
+            await discard.click()
+            await page.waitForTimeout(3000)
+            const again = page.getByRole('button', { name: 'New session' })
+            if (await again.isEnabled().catch(() => false)) { await again.click(); await page.waitForTimeout(2500) }
+            console.log('  · a leftover draft was discarded — building again')
+            await startBuild()
+        } else console.log('  · an old reply showed on Build, but no Discard to press')
+    }
 
     // Every chip the chat shows while the turn runs (polled — the measuring one lasts seconds).
     const chips = new Set()
@@ -159,6 +181,11 @@ try {
         expect(!/day close/i.test(reply3), 'no "day close"')
     }
     expect(!NAMES.test(reply3), 'no internal agent name')
+    // ITS USUAL PULLBACK (2026-11-17): when the server found the stop above the median of this name's pullbacks, the
+    // trader says it with the prices and offers the choice (the turn's line; ARMK's 1-hour stop 52.42 vs 50.64).
+    const levelsTalk = reply2 + ' ' + reply3
+    if (/usual pullback|pullbacks? (before a move )?(went|go|ran) deeper|ordinary pullback/i.test(levelsTalk)) console.log('  ✓ the stop was checked against its usual pullback (said in the chat)')
+    else console.log('  · no usual-pullback line in the chat — either the stop sits under the median, or it was not said')
     await shot(page, '03-all-the-way')
 } catch (err) {
     console.error('drive error:', err.message)

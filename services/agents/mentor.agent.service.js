@@ -51,6 +51,11 @@ import { userProfileService } from '../userProfile.service.js'
 const __dirname   = dirname(fileURLToPath(import.meta.url))
 const PROMPT_PATH = join(__dirname, '../../prompts/mentor_system_prompt.md')
 const LOG         = '[mentorAgent]'
+/**
+ * Mentor's output budget a turn — the reasoning counts against it. Raised from the provider's 16k (Roy, 2026-11-17): on
+ * the levels turn of a day-trade drive Luna reasoned 19.5k characters over 7 rounds and landed EMPTY (cut by max_tokens).
+ */
+export const MENTOR_MAX_TOKENS = 32_000
 const MAX_MESSAGES = DESKS.mentor.maxMessages
 
 const _baseSystemPrompt = makePromptLoader(PROMPT_PATH, LOG)
@@ -257,7 +262,7 @@ async function chatStream({
     // the system prompt: free cash moves whenever anything fills, so a volatile system block
     // would sit ahead of the whole conversation in the cache prefix. See buildVenueSection.
     const builtMessages = attachTurnContext(
-        attachTurnContext(normalizeMessages(messages, MAX_MESSAGES), _buildTurnContext(turnState, clientTime, incoming.settled, { delegated: incoming.delegated, hasAccount, mode, thesisFacts, waitingLine })),
+        attachTurnContext(normalizeMessages(messages, MAX_MESSAGES), _buildTurnContext(turnState, clientTime, incoming.settled, { delegated: incoming.delegated, hasAccount, mode, thesisFacts, waitingLine, pullback: proteusRead?.pullback ?? null })),
         venue)
 
     // Coverage is CUMULATIVE across the conversation: the model re-states everything it has read,
@@ -289,6 +294,7 @@ async function chatStream({
         log: LOG, requestedModel, userId, messages: builtMessages, systemPrompt, tools, toolHandlers: kitHandlers,
         reasoningEffort, signal, onToken, tagCaptures, onToolStart, onReasoning, onChart,
         onBudgetSpent: () => { cutShort = true },
+        maxTokens: MENTOR_MAX_TOKENS,
         meta: { asset: chatState?.active_asset || '', accounts: accounts?.length ?? 0 },
     })
 
@@ -899,7 +905,7 @@ Open on it: start with the rules (§ How you build every trade, the opening); th
  * carry-forward rule and the problems block: an instruction separated from the data it governs is
  * how a prompt quietly stops meaning what it says.
  */
-export function _buildTurnContext(chatState, clientTime = null, justSettled = [], { delegated = [], hasAccount = null, mode = undefined, thesisFacts = null, waitingLine = '' } = {}) {
+export function _buildTurnContext(chatState, clientTime = null, justSettled = [], { delegated = [], hasAccount = null, mode = undefined, thesisFacts = null, waitingLine = '', pullback = null } = {}) {
     // THE WORKSHEET, WITHOUT WHAT IS ALREADY WRITTEN OUT ABOVE IT. `build`, `spans`, `entries` and
     // `summary` each have their own section in prose; dumping them again as JSON paid for them
     // twice and buried the instructions under a wall of fields.
@@ -918,7 +924,7 @@ export function _buildTurnContext(chatState, clientTime = null, justSettled = []
     // had already answered.
     return `---
 ${buildTimeSection(clientTime, 'active_from / valid_until')}
-COVERAGE SO FAR: ${covered}. Re-state these in every <coverage> tag plus anything new you read this turn.${draft}${_buildMoneySection(chatState?.draft, waitingLine)}${_buildGenerateSection(chatState, hasAccount)}${_buildModeSection(mode, lensOfName(activeName(normalizeBuild(chatState?.build ?? chatState?.draft?.build))))}${_buildRedrawSection(chatState?.redraw, chatState?.draft)}${_buildTargetSection(thesisFacts, chatState?.draft)}${_buildRiskReadSection(thesisFacts, chatState?.draft, { redraw: !!chatState?.redraw?.event && !chatState.redraw.offer })}${_buildBreakSection(thesisFacts, chatState?.draft, { redraw: !!chatState?.redraw?.event && !chatState.redraw.offer })}${_buildLedgerSection(chatState)}${_buildPressSection(justSettled, chatState, delegated)}`
+COVERAGE SO FAR: ${covered}. Re-state these in every <coverage> tag plus anything new you read this turn.${draft}${_buildMoneySection(chatState?.draft, waitingLine)}${_buildGenerateSection(chatState, hasAccount)}${_buildModeSection(mode, lensOfName(activeName(normalizeBuild(chatState?.build ?? chatState?.draft?.build))))}${_buildRedrawSection(chatState?.redraw, chatState?.draft)}${_buildTargetSection(thesisFacts, chatState?.draft)}${_buildRiskReadSection(thesisFacts, chatState?.draft, { redraw: !!chatState?.redraw?.event && !chatState.redraw.offer })}${_buildPullbackSection(thesisFacts, pullback, chatState?.draft)}${_buildBreakSection(thesisFacts, chatState?.draft, { redraw: !!chatState?.redraw?.event && !chatState.redraw.offer })}${_buildLedgerSection(chatState)}${_buildPressSection(justSettled, chatState, delegated)}`
 }
 
 /**
@@ -1008,6 +1014,27 @@ const _lensTimeframe = (d) => (d?.type === 'long_term' || /week/i.test(d?.timefr
  * current range's height added to its high. Said only while the worksheet has no target and the candidate is that move:
  * the tool's answer is not on every turn. The price stays Mentor's to judge. PURE.
  */
+/** The profile's timeframe for a structure chart (thesisTurnFacts' `timeframe`). */
+const _PROFILE_TF = Object.freeze({ hour: '1hour', day: 'day', week: 'week' })
+
+/**
+ * ITS USUAL PULLBACK, CHECKED IN CODE (Roy, 2026-11-17: "check the stop against the name's usual pullback" — the prompt
+ * rule alone was skipped on the ARMK drive). When the stop on the worksheet (else the structure stop) sits ABOVE the
+ * median depth of this name's pullbacks before a move, on the stop's own chart, the turn says so with the prices — the
+ * trader says it and offers the choice; the stop is never moved for him. Long side only (the house trades long). PURE.
+ */
+export function _buildPullbackSection(facts, zone, draft) {
+    if (!zone || !Number.isFinite(zone.median) || facts?.side === 'short') return ''
+    if (facts?.timeframe && _PROFILE_TF[facts.timeframe] !== zone.timeframe) return ''   // another chart's pullbacks
+    const aStop = Number(draft?.scenarios?.[0]?.stop_legs?.[0]?.price)
+    const stop = Number.isFinite(aStop) && aStop > 0 ? aStop : Number(facts?.stop)
+    if (!Number.isFinite(stop) || stop <= zone.median) return ''
+    const which = Number.isFinite(aStop) && aStop > 0 ? "the worksheet's stop" : 'the structure stop'
+    return `
+
+ITS USUAL PULLBACK (checked: ${which} ${stop} sits ABOVE it) — on this chart, from its latest top ${zone.top}, half of this name's pullbacks before a move went deeper than ${zone.median}; the middle half ended ${zone.lo}–${zone.hi}. SAY IT in one line with these prices: an ordinary pullback of this name would likely reach ${stop}. OFFER the choice — the entry waits lower, near ${zone.median} (fewer fills, a better price), or the stop goes under ${zone.median} (more room, fewer shares for the same risk). Keep ${which} on the worksheet until they pick; never move it on your own. A description of how this name moves, not a tested edge — never call it support. Say it once.`
+}
+
 export function _buildTargetSection(facts, draft) {
     if (facts?.target_kind !== 'measured_move' || !(facts.target > 0)) return ''
     // Said until the worksheet has this number, or another price of its own: a measured move of Mentor's own arithmetic

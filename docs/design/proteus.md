@@ -830,7 +830,13 @@ in the profile. One part (`steps`, inside each timeframe's size and pace), easy 
    Driven (scripts/drive-proteus-badge.mjs): Intraday's 9 names, one request, all "nothing"; MBGL's badge → his read.
    Mentor weighing the read for his levels — not built.
 6. **Size and pace (K)** — BUILT 2026-11-16 (§10.8): every timeframe's moves described per name, the 15-minute beside
-   the 5-minute; in the opened row and the tool text. Mentor's use — later (Roy).
+   the 5-minute; in the opened row and the tool text. **Mentor's use — BUILT 2026-11-17** (Roy: "let's add size and pace"):
+   his read carries size and pace on the trade's timeframes and ITS USUAL PULLBACK on the stop's chart (the median depth
+   from its latest top, and the middle half, as prices — `pullbackZone`); the server checks the stop against the median
+   (`_buildPullbackSection`) and, when it sits above, the turn tells him to say so and offer the choice (entry lower, or
+   the stop under the median) — never moving the stop himself. The prompt rule alone was skipped on the first drive; with
+   the code-side line it was said (ARMK 1-hour, 52.40 vs 50.64). PROFILE_VERSION 14. Mentor's output budget 32k (Luna
+   reasoned 19.5k characters and landed empty at 16k).
 7. **No profile on a short fallback history** — FIXED 2026-11-17 (Roy: "fix 1"). When FMP failed (a 429 while the
    queue profiled several names, a timeout) the candle router fell back to a provider with ~2 years of daily bars, and
    the profile was measured on them and kept a week (LLY, OXY: ~500 daily bars, no weekly view). The daily now comes
