@@ -56,7 +56,7 @@ export function facts(bars, atrs, spy = null) {
         const a = atrs[i]
         if (i < 200 || !Number.isFinite(a) || a <= 0 || s200[i] == null) { out.push(null); continue }
         const win = (k, f) => { for (let j = Math.max(0, i - k + 1); j <= i; j++) if (f(j)) return true; return false }
-        let hi20 = -Infinity, lo60 = Infinity, hi10 = -Infinity, lo10 = Infinity
+        let hi20 = -Infinity, hi10 = -Infinity, lo10 = Infinity
         for (let j = i - 19; j <= i; j++) hi20 = Math.max(hi20, c[j])
         for (let j = i - 9; j <= i; j++) { hi10 = Math.max(hi10, bars[j].high); lo10 = Math.min(lo10, bars[j].low) }
         let downs = 0

@@ -101,7 +101,7 @@ test('publishing writes the verdict with the code facts, a revision, and logs a 
     _setAssessmentIO({ db: async () => m.db })
     const calls = []
     const sub = { code: CODE, name: 'Semiconductors', sector: 'Information Technology' }
-    const r = await industryAssessmentService.publishAssessment(BLOCK({ moved: { hype: false } }),
+    const r = await industryAssessmentService.publishAssessment(BLOCK({ moved: { hype: false }, decides_by: IN_TEN_DAYS(NOW) }),   // dated from the test's clock, not today's
         { sub, row: ROW(), structure: { demand: 'growing' }, recordCall: async (doc) => { calls.push(doc.verdict); return { logged: true } }, now: NOW })
     assert.equal(r.ok, true)
     assert.equal(r.doc.moved.hype, true, 'the agent\'s own "moved" is ignored')
@@ -109,7 +109,7 @@ test('publishing writes the verdict with the code facts, a revision, and logs a 
     assert.equal(r.doc.revisions[0].kind, 'assessment')
     assert.equal(r.doc.expires_at, new Date(Date.parse(NOW) + EXPIRY_DAYS.months * 86_400_000).toISOString())
     assert.deepEqual(calls, ['watch'])
-    const again = await industryAssessmentService.publishAssessment(BLOCK({ verdict: 'avoid' }), { sub, row: ROW(), now: NOW })
+    const again = await industryAssessmentService.publishAssessment(BLOCK({ verdict: 'avoid', decides_by: IN_TEN_DAYS(NOW) }), { sub, row: ROW(), now: NOW })
     assert.deepEqual(again.changed.verdict, { from: 'watch', to: 'avoid' })
     assert.equal(again.doc.revisions[0].kind, 'reassessment')
     assert.equal(again.doc.trigger, null, "an admin's own run carries no trigger")

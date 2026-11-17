@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { newsProfile, newsEvents, bigSessions, NEWS } from '../../services/behaviourProfile.engine.js'
 import { companyPattern, fetchNameNews } from '../../services/proteusNews.service.js'
-import { newsDailyWords, newsIntradayWords, rowProfile, formatProfile } from '../../services/tools/behaviourProfile.tools.js'
+import { newsDailyWords, newsIntradayWords, rowProfile } from '../../services/tools/behaviourProfile.tools.js'
 import { profileFor } from '../../services/behaviourProfile.service.js'
 
 // L. The news around the moves (docs/design/proteus.md §10.10, Roy 2026-11-17).

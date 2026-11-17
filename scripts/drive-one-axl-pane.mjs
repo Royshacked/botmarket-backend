@@ -4,7 +4,7 @@
 //   node scripts/drive-one-axl-pane.mjs [baseUrl] [outDir] [TICKER]     (default http://localhost:5173 · . · NVDA)
 //
 // As the throwaway QA user `ui-smoke`. ONE login per run — drives share the developer's IP for the auth limiter.
-/* global document, window -- the page.evaluate bodies run in the browser */
+/* global document -- the page.evaluate bodies run in the browser */
 import dns from 'dns'
 import 'dotenv/config'
 import { chromium } from 'playwright'
