@@ -81,6 +81,7 @@ try {
     expect(done, 'the trader answered')
     expect(!/asking the analyst|analyst['’]s (and the technical analyst['’]s )?reads? (haven|has not)|waiting (on|for) the analyst/i.test(chat), 'he neither asks for nor waits on an analyst read')
     expect(/measured \d{4}-\d{2}-\d{2}/.test(chat), "the technical analyst's dated line is in the chat on the FIRST turn")
+    expect(!/later than (your|the) current|timestamp is (later|in the future)/i.test(chat), 'the board is read as dated, not a time from the future (2026-11-17)')
     expect(!NAMES.test(chat.replace(/Talking with Axl[^·]*·/g, '')), 'no internal agent name in the chat')
     expect(!/The analyst is reading/.test(chat), 'no research status line for a day trade')
     if ([...chips].some(c => /Measuring how it trades/.test(c))) console.log('  ✓ the measuring chip showed (the name was not cached)')
@@ -139,12 +140,24 @@ try {
         filed = !(await page.locator('.chat-timeline').innerText().catch(() => '')).includes('All the way.')
     }
     console.log(`  your trades: ${trades0} → ${trades1}${filed ? ' · session filed' : ''}`)
-    expect(trades1 > trades0 || filed, 'the setup was generated and saved')
-    expect(/stop[^.]*\$?\d/i.test(reply3), 'a stop price is set')
-    expect(/\b1HR\b/.test(reply3), 'the chat chart is drawn on the 1-hour')
-    expect(!/deep(er)? stop|whole fall/i.test(reply3), 'no deeper stop offered')
-    expect(!/scenario B|break scenario|both scenarios/i.test(reply3), 'no break scenario')
-    expect(!/day close/i.test(reply3), 'no "day close"')
+    // The numbers can put the entry out of a day's reach (ARMK, 2026-11-17: R:R 1.5 off the 1-hour stop allowed 52.95,
+    // 4.5% under the price): the prompt then has him call it swing-shaped and ask — no setup, and that is right.
+    // The prompt (§ The three numbers): he CLAIMS the swing in the same turn, says why in one line, and never asks to
+    // confirm it — "all the way" is never answered with a question. Then the swing's own build follows (a daily stop, a B
+    // that arms on a close, the swing read asked, Generate held until it lands), so nothing is saved within this drive.
+    const saved = trades1 > trades0 || filed
+    const swingShaped = !saved && /swing[- ]shaped|short[- ]term swing/i.test(reply3)
+    if (swingShaped) {
+        console.log('  · claimed a short term swing (the entry the numbers allow is out of a day\'s reach) — the swing build follows')
+        expect(!/should I (carry|treat|make)|want (it|this) as a (short[- ]term )?swing\?/i.test(reply3), 'the swing is claimed, not asked (the prompt: never confirm the horizon)')
+    } else expect(saved, 'the setup was generated and saved')
+    expect(/stop[^.]*\$?\d/i.test(reply3) || swingShaped, 'a stop price is set')
+    if (!swingShaped) {   // a day trade's own levels; a claimed swing has a daily stop and may have a B on a close
+        expect(/\b1HR\b/.test(reply3), 'the chat chart is drawn on the 1-hour')
+        expect(!/deep(er)? stop|whole fall/i.test(reply3), 'no deeper stop offered')
+        expect(!/scenario B|break scenario|both scenarios|\bB: /i.test(reply3), 'no break scenario')
+        expect(!/day close/i.test(reply3), 'no "day close"')
+    }
     expect(!NAMES.test(reply3), 'no internal agent name')
     await shot(page, '03-all-the-way')
 } catch (err) {

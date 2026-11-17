@@ -867,11 +867,11 @@ ${seed.book_facts ? "FROM THE HOUSE'S BOOK" : 'ARGUS HANDED YOU THIS NAME'}: ${s
   thesis: ${seed.thesis}` : ''}`
         + `${seed.analysis ? `
   the stock picker's read: ${seed.analysis}` : ''}`
-        // From today's HOTLIST (daily-names.md): read back from the stored board by code, not from the
+        // From the HOTLIST (daily-names.md) — not "today's": a day board's line carries its own date (yesterday's before the open): read back from the stored board by code, not from the
         // request. The board measures ROOM — free range to the next overhead level — and sets no
         // entry, stop or target; those are built here, with the user.
         + (seed.hotlist_facts ? `
-  From today's HOTLIST: ${seed.hotlist_facts}.${seed.horizon ? ` That column's horizon is ${seed.horizon} — the user's to confirm.` : ''}${seed.caution ? `
+  From the HOTLIST: ${seed.hotlist_facts}.${seed.horizon ? ` That column's horizon is ${seed.horizon} — the user's to confirm.` : ''}${seed.caution ? `
   the stock picker's caution: ${seed.caution}` : ''}
   Free range is room, not a target: the board has no entry, stop or target, and you build those with the user.${seed.catalyst_facts ? `
   the analyst's catalyst read on it: ${seed.catalyst_facts}.

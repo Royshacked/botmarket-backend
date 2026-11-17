@@ -415,5 +415,7 @@ export function dayLine(r, boardDay = null) {
 export function dayFacts(board, symbol) {
     const r = (board?.rows ?? []).find(x => x.symbol === symbol)
     if (!r) return null
-    return `in play on the ${CHECKPOINT_WORDS[board.checkpoint] ?? `${board.checkpoint} board`} — ${dayLine(r, board.day ?? null)}`
+    // The board's DATE with its time (the drive, 2026-11-17): before the open the Intraday tab still shows yesterday's
+    // 14:30 board, and "the 14:30 ET board" at 07:08 ET read to the trader as a timestamp from the future.
+    return `in play on the ${board.day ? `${board.day} ` : ''}${CHECKPOINT_WORDS[board.checkpoint] ?? `${board.checkpoint} board`} — ${dayLine(r, board.day ?? null)}`
 }

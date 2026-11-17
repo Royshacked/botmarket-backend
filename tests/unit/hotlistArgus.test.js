@@ -120,7 +120,7 @@ test('The trader is told the board\'s facts, the horizon, and that free range is
         ticker: 'SPCX', direction: 'long', thesis: 'A real profit swing.', horizon: 'intraday',
         hotlist_facts: seedFacts(BOARD.rows[0], 'mid'), caution: 'Capex worries.',
     })
-    assert.match(text, /From today's HOTLIST: mid-session — /)
+    assert.match(text, /From the HOTLIST: mid-session — /)
     assert.match(text, /That column's horizon is intraday/)
     assert.match(text, /the stock picker's caution: Capex worries\./)
     assert.doesNotMatch(text, /UNVERIFIED/, 'no grade is handed on, so nothing is unverified (2026-10-24)')
@@ -193,7 +193,7 @@ test('hotlistSeed reads a DAY board row: the intraday horizon and the board\'s l
     ] })
     const seed = await hotlistSeed({ board: 'hd_2026-11-11_eod', column: 'eod', symbol: 'CRWV' }, { db: async () => db })
     assert.equal(seed.horizon, 'intraday')
-    assert.equal(seed.hotlist_facts, 'in play on the 14:30 ET board (into the close) — CRWV (CoreWeave) · $60.53 (+24.2%) · 2.25× volume · in the top quarter of the day\'s range on 2.25× volume · rating change · news 14:23 ET: "CoreWeave downgraded"')
+    assert.equal(seed.hotlist_facts, 'in play on the 2026-11-11 14:30 ET board (into the close) — CRWV (CoreWeave) · $60.53 (+24.2%) · 2.25× volume · in the top quarter of the day\'s range on 2.25× volume · rating change · news 14:23 ET: "CoreWeave downgraded"')
     assert.equal(await hotlistSeed({ board: 'hd_2026-11-11_eod', column: 'eod', symbol: 'NOPE' }, { db: async () => db }), null, 'not on the board')
     assert.equal(await hotlistSeed({ board: 'hd_2026-11-11_eod', column: 'mid', symbol: 'CRWV' }, { db: async () => db }), null, 'the column must be the board\'s own checkpoint')
     assert.equal(await hotlistSeed({ board: 'hd_2026-11-10_eod', column: 'eod', symbol: 'CRWV' }, { db: async () => db }), null, 'a pruned board')
