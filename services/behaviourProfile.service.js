@@ -18,7 +18,8 @@
 import { getTickerAggregates, _deps as candleDeps } from '../providers/candles.provider.js'
 import { getFmpCandles } from '../providers/fmp.price.provider.js'
 import { makeMongoBackedCache } from './mongoCache.util.js'
-import { behaviourProfile } from './behaviourProfile.engine.js'
+import { behaviourProfile, newsProfile } from './behaviourProfile.engine.js'
+import { fetchNameNews, companyPattern } from './proteusNews.service.js'
 import { toWeekly } from './swingStructure.service.js'
 import { logger } from './logger.service.js'
 
@@ -40,7 +41,8 @@ export const PROFILE_TTL_MS = 7 * DAY
 // one per window, dry-up vs the not-dry retests, unfolding breaks not counted, chance from the older bars.
 // 11 (2026-11-16): SIZE AND PACE on every timeframe (movesProfile — proteus.md §10.8), and 15-minute bars beside the
 // 5-minute for it (built from the 5-minute, no extra calls; Roy, option 2).
-export const PROFILE_VERSION = 11
+// 12 (2026-11-17): the news around the moves (newsProfile — proteus.md §10.10), read beside the bars.
+export const PROFILE_VERSION = 12
 
 const _cache = makeMongoBackedCache({ collection: PROFILE_COLLECTION, ttlMs: PROFILE_TTL_MS, max: 300, log: LOG })
 const _inflight = new Map()
@@ -176,9 +178,16 @@ export async function profileFor(symbol, { fresh = false, deps = {} } = {}) {
     }
     if (_inflight.has(sym)) return _inflight.get(sym)
     const run = (async () => {
-        const bars = await fetchProfileBars(sym, deps)
+        // The news (L) is read beside the bars and never holds the profile up: a failed read is a profile without it. A
+        // test that passes its own candle source reads no news unless it passes `deps.news` too.
+        const readNews = deps.news ?? (deps.get ? null : (s) => fetchNameNews(s, { now: deps.now ?? Date.now() }))
+        const [bars, news] = await Promise.all([
+            fetchProfileBars(sym, deps),
+            readNews ? readNews(sym).catch(err => { logger.warn(LOG, `${sym} news not read: ${err.message}`); return null }) : null,
+        ])
         if (!bars.day.length) throw new Error(`no price history for ${sym}`)
         const profile = behaviourProfile(sym, bars)
+        if (news) profile.news = newsProfile(bars.day, bars['5min'], news, companyPattern(news.title, sym))
         const computed_at = new Date(deps.now ?? Date.now()).toISOString()
         await cache.write(sym, { version: PROFILE_VERSION, profile, computed_at })
         logger.info(LOG, `${sym} profiled (${Object.entries(bars).map(([k, v]) => `${k} ${v.length}`).join(', ')})`)

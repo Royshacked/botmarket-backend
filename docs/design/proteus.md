@@ -642,6 +642,107 @@ name"; "if a stock is for day trade, the same check on the lower timeframe — m
   4 moves (thin). 5-minute 71 moves, 12 of 14 steady; 15-minute 15 moves, 4 of 14 steady — on one name the 5-minute is
   the steadier; the choice waits for more names.
 
+### 10.9 The news around the moves — one company (declared 2026-11-17, before the run)
+
+Roy: "can we look for any news anywhere before the movement?" → "let's take one name and try this — where the news
+appear around the move and what can we learn from it". LNG. A DESCRIPTION of its moves (§10.5's rule; on the 5-minute,
+inside one session — §10.8), every dated event put on a timeline around each move's start.
+`scripts/lab-proteus-moves-news.mjs`.
+
+- **The sources:** SEC 8-K filings (EDGAR, every year; by item — 2.02 results, 7.01 / 8.01 other news, 1.01
+  agreements, 5.02 people …) · earnings reports (date, beat / miss) · analyst grades and price targets (from 2023-06) ·
+  insider trades (buys / sells) · FMP headlines (`/news/stock`, the last year only — FMP refuses older on this plan).
+- **Daily (~10 years):** for each move, the events from 10 sessions before its start to 5 after, by session relative to
+  the start. Counted: the share of moves with each kind BEFORE (−10…−1), ON the start day, and AFTER (+1…+5).
+- **5-minute (the last ~3 months, fetched now):** for each move, the headlines in the 24 hours before its start, during
+  it (start → +4 ATR) and in the 24 hours after, by hours relative to the start; and the 8-K / report / analyst events
+  of the same session.
+- **Beside it, how dense the news is** — headlines a day on LNG over the year, and the share of sessions with any — so
+  "news before the move" is read against how often there is news at all (a calibration, like §10.7's detectors).
+- What it is for: whether LNG's moves FOLLOW news (it comes before), come WITH it (the start day) or are EXPLAINED by it
+  after. A look at one name, no rule.
+
+**Result (2026-11-17, LNG): the news is there as often before a move as at any other time.**
+`data/lab/proteus-moves-news-LNG.out.txt`; the sources kept in `data/lab/news-LNG.json` (252 8-Ks since 2016, 560
+headlines from 2025-11-20 — 189 name Cheniere, the rest are the LNG industry's news FMP tags with the ticker).
+- **Daily, 31 moves over ten years — before the start (−10…−1) vs any 16-session window:** any 8-K 68% vs 70%;
+  agreements 23% vs 26%; people 19% vs 18%; Reg FD news 16% vs 23%; a report 10% vs 26% (moves start LESS often in the
+  run-in to a report); insider buys 6% (2 moves) vs 3%; analyst targets 2 of the 8 moves since 2023-06. On the start
+  day itself almost nothing (a report 6%, an 8-K 10%).
+- **The three daily moves in the news year:** each had a run of headlines before it — company 6–7, industry 11–18 —
+  as every window does. Two had a NEW price target days before: 2025-12-17 (254, at 189) before 2025-12-26, and
+  Bernstein 2026-06-16 (283, at 231) before 2026-06-18 — with "Buy the dip — there's no more war premium" (06-11).
+- **5-minute, 71 moves in the last three months:** a company headline in the 24 hours before 38% (any 5-minute bar:
+  42%); an industry headline 77% (any bar: 77%); DURING a move almost none (1% company, 4% industry); an 8-K / report /
+  analyst event the same session 8%. The clear exceptions are the Q3 report (2026-10-29/30, results + its coverage)
+  and the Orlen–Qatar cancellation (WSJ, 2026-11-11 06:00) before the 11-11 move.
+- **So, on LNG:** the moves do not follow the news — it is there before them as often as before any bar, and nothing
+  lands during them. What stands out on the daily is an ANALYST STARTING COVERAGE with a target well over the price a
+  few days before the last two moves — two cases, a lead for the names with analyst data, not a finding.
+
+**KO, the same (2026-11-17; Roy: "let's go on KO"): the same answer.** `data/lab/proteus-moves-news-KO.out.txt`; 319
+8-Ks, 1,638 headlines (company = "Coca-Cola" / "Coke" in the title).
+- **Daily, 35 moves:** an 8-K before the start 26% vs 50% of any window; results / a report 9% vs 25%; people 6% vs
+  20% — on KO too the moves start LESS often in the news-heavy stretches, the run-in to a report most of all.
+- **Analysts, 10 moves since 2023-06:** a change before 1 move (an upgrade 9 sessions before 2025-01-23) and a target
+  raise before 1 (89 at 82, before 2026-06-04); the other new targets came AFTER moves (+4, +5 sessions). LNG's lead —
+  new coverage just before the move — is not on KO.
+- **5-minute, 61 moves:** headlines on 88–94% of sessions; a company headline in the 24 hours before 92% (any bar
+  89%), industry 85% (any bar 90%); during a move 13–16% — KO's news never stops, so it is there through everything.
+- **So, two names:** the moves do not follow the news. On the daily they start more often in the quiet stretches, away
+  from reports and filings; intraday the headlines are background. What LNG's last two moves showed (new coverage a
+  few days before) is one name's, twice.
+
+**Major news along the whole chain (declared 2026-11-17, before the run).** Roy: "there weren't any major news before
+or after — even before the steps that led to the move?" Not looked at: how BIG the news was, and the links before the
+start. LNG and KO, daily, §10.9's sources. `scripts/lab-proteus-moves-news-chain.mjs`.
+- **Major:** a session with a dated event (8-K, report, analyst / target, insider trade, a headline in the news year)
+  on which the stock reacted — its close-to-close move ≥ 2 ATR (the day before's ATR) OR volume ≥ 2× its 20-session
+  average. Beside it, a BIG session with no dated event at all (a move nothing explains).
+- **The chain's parts, per move:** AT THE TOP (the highest close of the 60 sessions before the start, ± 5 sessions) ·
+  IN THE PULLBACK (between them) · AT THE LOW (the start ± 5). Counted per 100 sessions in each part, against the same
+  rate over the name's whole history — the parts differ in length (a pullback runs ~45 sessions). And per move, the
+  major news days listed with their part and offset.
+
+**Result (2026-11-17): major news is rare everywhere in the chain, and no part of it gathers it.**
+`data/lab/proteus-moves-news-chain.out.txt`. Per 100 sessions, major news / a big session with nothing dated:
+- **LNG (28 moves):** at the top 0.7 / 1.6 · in the pullback 1.2 / 2.3 · at the low 0.3 / 3.2 · any time 1.1 / 2.5.
+  Moves with any major news — at the top 2, in the pullback 6, at the low 1.
+- **KO (33 moves):** at the top 1.1 / 5.1 · in the pullback 0.3 / 3.3 · at the low 1.1 / 3.0 · any time 0.8 / 2.7.
+  At the top 4, in the pullback 2, at the low 4.
+- **What the major news was:** nearly all EARNINGS reports — LNG's in the pullbacks (2020-02, 2023-05, 2024-05 miss,
+  2026-05-07 the −16.65 miss, −5.6% that day), KO's at the tops (2019-02 −8.4%, 2024-10 with a target cut); then the
+  2020 crash (LNG directors buying on 2020-03-09, −18.1%); KO's 2026-04-28 beat 4 sessions into a move.
+- **Big sessions with nothing dated are 2–5× as common as major news,** in every part — most of what moves these
+  stocks on a day is not in the filings, reports or analyst notes (and before 2025-11 the headlines are not in the
+  sources at all, so part of "nothing dated" is press news this lab cannot see).
+- **So:** the chain is not news-driven on either name. Where major news sits in it, it is a report — inside a pullback
+  (LNG) or at the top (KO) — and the move itself starts away from it.
+
+### 10.10 The news around the moves, on every name (BUILT 2026-11-17)
+
+Roy: "I want Proteus to also characterise this per name — in the future if we see we learn nothing from it we will
+take it out." So it is ONE part, `news`, easy to remove: the engine's L (`newsProfile`), the reader
+`services/proteusNews.service.js`, two word functions and two lines in the tool text / the opened row.
+
+- **Read with the weekly profile, beside the bars** (`profileFor`; never holds it up — a failed source is empty, a
+  failed read is a profile without `news`; each source retried once): SEC 8-Ks since 2016 (`sec.provider.get8kFilings`,
+  EDGAR, free — and the company's name), earnings reports (FMP `/earnings`), analyst ratings (`/grades`) and target
+  notes (`/price-target-news`, ≤ 3 pages), insider purchases, FMP headlines for the last ~3 months (14-day windows, the
+  5-minute bars' span). ~10 FMP calls a name beside the bars' ~22; LNG and KO profiled in 13–14 s.
+- **Counted (L, §10.9's rules):** daily — major news (a dated event on a session the stock moved ≥ 2 ATR or traded ≥ 2×
+  its volume) per 100 sessions at the top / in the pullback / at the low of each move, against any time; the moves
+  with any, what it was and where; an 8-K / a report in the 10 sessions before a start, against any window; big
+  sessions with nothing dated. 5-minute — a company / an industry headline (company = its name's core or "(TICKER)",
+  `companyPattern`) in the 24 hours before its intraday moves, against any moment, and during.
+- **Shown:** the opened row's "News (daily)" for a swing horizon, "News (5-minute)" for a day trade, led by one phrase
+  ("its moves start away from news" / "start ON major news" / "no more common …"); the tool text's NEWS AROUND ITS
+  MOVES block, "a description, not a signal — never cite news as the reason a move will come". Mentor's read: not yet.
+  PROFILE_VERSION 12.
+- **Live, 2026-11-17:** KO — major news at the tops 2.2 per 100 (any 0.8: downgrades, reports), at the low 0.5;
+  intraday a company headline before 90% of moves vs 87% of any moment. LNG — its moves start away from news (0.3 vs
+  1.1), the major news reports inside the pullbacks; intraday 35% vs 40%. As the labs found.
+
 ## 11. Build order and status
 
 1. **The measured profile engine** — BUILT 2026-11-12 (`services/behaviourProfile.engine.js`, 68080cdf): one
@@ -684,3 +785,5 @@ name"; "if a stock is for day trade, the same check on the lower timeframe — m
    try again (a 429 pauses the queue and retries; the opened row reads "could not be fetched just now"). FMP answering
    EMPTY (a symbol it does not cover) still takes the fallback; USE_FMP_CANDLES off, the router as before. The
    intraday pages still fall back page by page (a skipped or mixed page, not a short history).
+8. **The news around the moves (L)** — BUILT 2026-11-17 (§10.10): per name, beside size and pace; in the opened row
+   and the tool text. One part to take out if it teaches nothing (Roy). Mentor's use — later.

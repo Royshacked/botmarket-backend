@@ -150,3 +150,38 @@ test('tight detectors fire on fewer bars than the loose ones (order blocks, doub
     assert.ok(tightC.ob < loose.ob, `order blocks ${tightC.ob} vs ${loose.ob}`)
     assert.ok(tightC.db < loose.db, `double bottoms ${tightC.db} vs ${loose.db}`)
 })
+
+import { around, itemWords, isCompany } from '../../scripts/lab-proteus-moves-news.mjs'
+
+// proteus.md §10.9: the news around the moves.
+test('around: events by session relative to the start, a weekend event on the next session, outside the window dropped', () => {
+    const days = ['2026-06-12', '2026-06-15', '2026-06-16', '2026-06-17', '2026-06-18']
+    const ev = around(days, 3, [{ day: '2026-06-13' }, { day: '2026-06-17' }, { day: '2026-06-18' }, { day: '2026-06-01' }], -2, 1)
+    assert.deepEqual(ev.map(e => [e.day, e.off]), [['2026-06-13', -2], ['2026-06-17', 0], ['2026-06-18', 1]])
+})
+
+test('itemWords / isCompany: an 8-K\'s items in words (exhibits left out); a headline naming the company', () => {
+    assert.deepEqual(itemWords('2.02,7.01,9.01'), ['results', 'Reg FD news'])
+    assert.deepEqual(itemWords(''), [])
+    assert.equal(isCompany('Cheniere confirms Corpus Christi maintenance'), true)
+    assert.equal(isCompany('Dynagas LNG Partners announces results'), false)
+    assert.equal(isCompany('Coca-Cola raises its dividend', 'KO'), true)
+    assert.equal(isCompany('Diet Coke sales jump', 'KO'), true)
+    assert.equal(isCompany('PepsiCo beats', 'KO'), false)
+    assert.equal(isCompany('NVDA jumps on guidance', 'NVDA'), true)
+})
+
+import { bigSessions, partOf } from '../../scripts/lab-proteus-moves-news-chain.mjs'
+
+// proteus.md §10.9: major news along the chain.
+test('bigSessions: a ≥ 2 ATR close-to-close move or ≥ 2× volume is big; partOf: top / pullback / low', () => {
+    const bars = Array.from({ length: 30 }, (_, i) => ({ close: 100, volume: 1000 }))
+    bars[25] = { close: 103, volume: 1000 }   // +3 with ATR 1
+    bars[27] = { close: 103, volume: 2500 }   // flat, 2.5× volume
+    const big = bigSessions(bars, bars.map(() => 1))
+    assert.deepEqual(big.map((b, i) => (b ? i : null)).filter(i => i != null), [25, 26, 27, 28])   // 26 and 28: back from 103 to 100 — a 3-ATR move too
+    assert.equal(partOf(52, 50, 100), 'top')
+    assert.equal(partOf(70, 50, 100), 'pullback')
+    assert.equal(partOf(97, 50, 100), 'low')
+    assert.equal(partOf(30, 50, 100), null)
+})

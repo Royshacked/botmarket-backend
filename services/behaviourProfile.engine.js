@@ -881,6 +881,150 @@ export function movesProfile(bars, timeframe, m = MOVES) {
     }
 }
 
+// ─── L. THE NEWS AROUND THE MOVES (proteus.md §10.9–10.10, Roy 2026-11-17) ─────────────────────────────────────
+// "I want Proteus to also characterise this per name — if we see we learn nothing from it we will take it out." On
+// LNG and KO (§10.9) the moves did not follow the news: major news was as rare along the chain as any time, the run-in
+// to a report was quieter, intraday headlines were background. Per name, counted the same way.
+
+/** L's rules (§10.9). */
+export const NEWS = Object.freeze({ near: 5, before: 10, bigAtr: 2, bigVol: 2, look: 60 })
+
+/** Per session: BIG — |close-to-close| ≥ `bigAtr` × the day before's ATR, or volume ≥ `bigVol` × its 20-session average. Pure. */
+export function bigSessions(bars, atrs, n = NEWS) {
+    const v20 = calcSMASeries(bars.map(b => b.volume ?? 0), 20)
+    return bars.map((b, i) => {
+        if (!i) return false
+        const a = atrs[i - 1], move = Math.abs(b.close - bars[i - 1].close)
+        return (Number.isFinite(a) && a > 0 && move >= n.bigAtr * a) || (v20[i - 1] > 0 && (b.volume ?? 0) >= n.bigVol * v20[i - 1])
+    })
+}
+
+/** A news event's kind, in the words the profile counts. */
+const _kind8k = (items) => {
+    const it = String(items ?? '').split(',').map(s => s.trim())
+    return it.includes('2.02') ? '8-K results' : it.includes('5.02') ? '8-K people' : it.includes('1.01') ? '8-K agreement' : it.some(i => i === '7.01' || i === '8.01') ? '8-K other news' : '8-K'
+}
+
+/**
+ * The name's dated events (from `proteusNews.fetchNameNews`), one list: `{ day, kind }`, plus the headlines with their
+ * time and whether they are about the company (`company` — the pattern from its name). Pure.
+ */
+export function newsEvents(news, companyRe) {
+    if (!news) return { events: [], headlines: [] }
+    const events = [
+        ...(news.filings ?? []).map(f => ({ day: f.day, kind: _kind8k(f.items) })),
+        ...(news.reports ?? []).map(r => ({ day: r.day, kind: r.beat === false ? 'report miss' : 'report beat' })),
+        ...(news.grades ?? []).map(g => ({ day: g.day, kind: /down/i.test(g.action) ? 'downgrade' : /up/i.test(g.action) ? 'upgrade' : 'new coverage' })),
+        ...(news.targets ?? []).map(t => ({ day: t.day, kind: t.dir > 0 ? 'target raised' : t.dir < 0 ? 'target cut' : 'target set' })),
+        ...(news.insiders ?? []).map(r => ({ day: r.day, kind: 'insider buy' })),
+    ].filter(e => e.day)
+    const headlines = (news.headlines ?? []).map(h => {
+        const raw = String(h.at)
+        const t = Date.parse(raw.includes('T') || /[zZ+]/.test(raw.slice(10)) ? raw : `${raw.replace(' ', 'T')}Z`)
+        return { t, day: Number.isFinite(t) ? _etDay.format(new Date(t)) : null, company: companyRe ? companyRe.test(h.title) : false }
+    }).filter(h => Number.isFinite(h.t))
+    return { events, headlines }
+}
+
+/**
+ * L. The news around one name's moves. DAILY (its ~10 years; headlines only from `headlines_from`): along each move's
+ * chain — AT THE TOP it fell from (± near), IN THE PULLBACK, AT THE LOW it started (± near) — MAJOR news (a dated event
+ * on a BIG session) and big sessions with nothing dated, per 100 sessions, against the whole history; the kinds of
+ * major news and where; before the start (−10 … −1) the share of moves with an 8-K / a report, against any window.
+ * 5-MINUTE (moves inside one session, §10.8): a company / an industry headline in the 24 hours before the start,
+ * against any bar, and during the move. Null parts when their bars or sources are missing. Pure.
+ */
+export function newsProfile(dayBars, fiveBars, news, companyRe = null, n = NEWS, m = MOVES) {
+    if (!news) return null
+    const { events, headlines } = newsEvents(news, companyRe)
+    const out = { sources: {
+        filings: news.filings?.length ?? 0, reports: news.reports?.length ?? 0, analyst_notes: (news.grades?.length ?? 0) + (news.targets?.length ?? 0),
+        insider_buys: news.insiders?.length ?? 0, headlines: news.headlines == null ? null : news.headlines.length, headlines_from: news.headlines_from ?? null,
+    }, daily: null, intraday: null }
+    const per100 = (a, b) => (b ? _round(a / b * 100, 1) : null)
+
+    if (Array.isArray(dayBars) && dayBars.length >= 260) {
+        const days = dayBars.map(b => _etDay.format(new Date(_ms(b.timestamp))))
+        const idx = new Map(days.map((d, i) => [d, i]))
+        const at = (d) => (idx.has(d) ? idx.get(d) : days.findIndex(x => x >= d))
+        const atrs = calcATRSeries(_mon(dayBars), PROFILE.atrPeriod)
+        const big = bigSessions(dayBars, atrs, n)
+        const evAt = new Map()
+        for (const e of [...events, ...headlines.filter(h => h.day).map(h => ({ day: h.day, kind: h.company ? 'company news' : 'industry news' }))]) {
+            const i = at(e.day)
+            if (i >= 0) (evAt.get(i) ?? evAt.set(i, []).get(i)).push(e.kind)
+        }
+        const starts = moveStartsOf(dayBars, moveFlags(dayBars, atrs, {}, m), m).filter(s => s >= n.look * 2)
+        const parts = { top: [0, 0, 0], pullback: [0, 0, 0], low: [0, 0, 0] }   // sessions, major, big with nothing dated
+        const movesWith = { top: 0, pullback: 0, low: 0 }
+        const majorKinds = {}
+        let before8k = 0, beforeReport = 0
+        for (const s of starts) {
+            let h = s - n.look
+            for (let j = s - n.look; j < s; j++) if (dayBars[j].close > dayBars[h].close) h = j
+            const seen = new Set()
+            for (let i = Math.max(1, h - n.near); i <= Math.min(dayBars.length - 1, s + n.near); i++) {
+                const p = Math.abs(i - s) <= n.near ? 'low' : Math.abs(i - h) <= n.near ? 'top' : i > h && i < s ? 'pullback' : null
+                if (!p) continue
+                parts[p][0]++
+                if (big[i] && evAt.has(i)) {
+                    parts[p][1]++
+                    seen.add(p)
+                    for (const k of new Set(evAt.get(i))) (majorKinds[k] ??= { top: 0, pullback: 0, low: 0 })[p]++
+                } else if (big[i]) parts[p][2]++
+            }
+            for (const p of seen) movesWith[p]++
+            let k8 = false, kr = false
+            for (let i = Math.max(0, s - n.before); i < s; i++) for (const k of evAt.get(i) ?? []) { if (k.startsWith('8-K')) k8 = true; if (k.startsWith('report')) kr = true }
+            if (k8) before8k++
+            if (kr) beforeReport++
+        }
+        // The whole history, the same rules: per 100 sessions, and the share of any `before`-session window with an 8-K / a report.
+        let N = 0, mj = 0, un = 0, win = 0, w8 = 0, wr = 0
+        for (let i = 260; i < dayBars.length; i++) {
+            N++
+            if (big[i] && evAt.has(i)) mj++
+            else if (big[i]) un++
+            if ((i - 260) % 5) continue
+            win++
+            let k8 = false, kr = false
+            for (let j = i - n.before; j < i; j++) for (const k of evAt.get(j) ?? []) { if (k.startsWith('8-K')) k8 = true; if (k.startsWith('report')) kr = true }
+            if (k8) w8++
+            if (kr) wr++
+        }
+        out.daily = {
+            moves: starts.length,
+            major_per100: { top: per100(parts.top[1], parts.top[0]), pullback: per100(parts.pullback[1], parts.pullback[0]), low: per100(parts.low[1], parts.low[0]), any: per100(mj, N) },
+            unexplained_per100: { top: per100(parts.top[2], parts.top[0]), pullback: per100(parts.pullback[2], parts.pullback[0]), low: per100(parts.low[2], parts.low[0]), any: per100(un, N) },
+            moves_with_major: movesWith,
+            major_kinds: majorKinds,
+            before_start: { filing: per100(before8k, starts.length), report: per100(beforeReport, starts.length), filing_any: per100(w8, win), report_any: per100(wr, win) },
+        }
+    }
+
+    if (Array.isArray(fiveBars) && fiveBars.length >= 260 && news.headlines != null) {
+        const atrs = calcATRSeries(_mon(fiveBars), PROFILE.atrPeriod)
+        const starts = moveStartsOf(fiveBars, moveFlags(fiveBars, atrs, { session: true }, m), m)
+        const D = 86_400_000
+        const share = (cls) => {
+            const hs = headlines.filter(h => h.company === (cls === 'company')).map(h => h.t).sort((a, b) => a - b)
+            const any24 = (t) => { let lo = 0, hi = hs.length; while (lo < hi) { const mid = (lo + hi) >> 1; if (hs[mid] <= t - D) lo = mid + 1; else hi = mid } return lo < hs.length && hs[lo] <= t }
+            let b = 0, d = 0, anyN = 0, anyB = 0
+            for (const s of starts) {
+                const t = _ms(fiveBars[s].timestamp), a = atrs[s]
+                if (any24(t)) b++
+                let hit = null
+                for (let j = s + 1; j < fiveBars.length && j <= s + m.within; j++) if (fiveBars[j].high >= fiveBars[s].close + m.up * a) { hit = _ms(fiveBars[j].timestamp); break }
+                if (hit != null && hs.some(x => x > t && x <= hit)) d++
+            }
+            for (let j = 0; j < fiveBars.length; j += 6) { anyN++; if (any24(_ms(fiveBars[j].timestamp))) anyB++ }
+            return { before: per100(b, starts.length), any: per100(anyB, anyN), during: per100(d, starts.length) }
+        }
+        out.intraday = { moves: starts.length, company: share('company'), industry: share('industry') }
+    }
+    return out
+}
+
 /** The timeframes measured for size and pace only, not for the full profile (Roy 2026-11-16, option 2: 15-minute beside 5-minute). */
 export const MOVES_ONLY_TIMEFRAMES = Object.freeze(['15min'])
 

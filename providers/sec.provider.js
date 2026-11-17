@@ -106,3 +106,26 @@ export async function getSecFilings(ticker) {
     const lines = rows.map(r => `  ${r.date}  ${r.form}${r.tag}${r.url ? `\n    ${r.url}` : ''}`)
     return [`${symbol} — ${entry.title} (CIK ${entry.cik}) — recent SEC filings:`, ...lines].join('\n')
 }
+
+/**
+ * A company's 8-K filings since `since` (YYYY-MM-DD) — every one, with its items: the recent list plus the older pages
+ * EDGAR splits off (`filings.files`, only those reaching past `since`). For Proteus's news profile (proteus.md §10.10).
+ * → `{ cik, title, filings: [{ day, at, items }] }` oldest → newest, or null when the ticker is not an SEC filer.
+ * Throws on a failed read (the caller decides).
+ */
+export async function get8kFilings(ticker, { since = '2016-01-01' } = {}) {
+    const symbol = String(ticker || '').toUpperCase().trim()
+    const entry = (await _getCikMap())[symbol]
+    if (!entry) return null
+    const out = []
+    const take = (f) => (f?.form ?? []).forEach((form, i) => {
+        if ((form === '8-K' || form === '8-K/A') && f.filingDate[i] >= since) out.push({ day: f.filingDate[i], at: f.acceptanceDateTime?.[i] ?? null, items: f.items?.[i] ?? '' })
+    })
+    const sub = await _getSubmissions(entry.cik)
+    take(sub?.filings?.recent)
+    for (const p of sub?.filings?.files ?? []) {
+        if (p.filingTo < since) continue
+        take(await _secGet(`https://data.sec.gov/submissions/${p.name}`))
+    }
+    return { cik: entry.cik, title: entry.title, filings: [...new Map(out.map(f => [`${f.day}|${f.at}|${f.items}`, f])).values()].sort((a, b) => a.day.localeCompare(b.day)) }
+}

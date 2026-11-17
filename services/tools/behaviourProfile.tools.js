@@ -10,7 +10,7 @@
 
 import { makeToolHandler } from '../agentUtils.js'
 import { profileFor } from '../behaviourProfile.service.js'
-import { PROFILE, MOVES } from '../behaviourProfile.engine.js'
+import { PROFILE, MOVES, NEWS } from '../behaviourProfile.engine.js'
 import { STRUCTURE } from '../swingStructure.service.js'
 
 const LOG = '[behaviourProfile.tools]'
@@ -41,6 +41,36 @@ const MEASURE_WORDS = Object.freeze({
     rsi_top: 'RSI at the top', stretch_atr: 'the stretch over the 50', rsi_low: 'RSI at the low', macd_low_atr: 'MACD at the low',
     vs_ema20_atr: 'the low vs the 20 EMA', vs_sma50_atr: 'the low vs the 50 SMA', vs_sma200_atr: 'the low vs the 200 SMA', gain_atr: 'the move', bars_to_move: 'the move\'s pace',
 })
+/** A rate against the name's any-time rate, in a word. */
+const _vs = (x, any) => (!Number.isFinite(x) || !Number.isFinite(any) ? '' : any === 0 ? (x > 0 ? 'more than' : 'as') : x <= any * 0.5 ? 'well under' : x >= any * 2 ? 'well over' : 'about')
+
+/**
+ * L, daily, in words: where major news sits along its moves (top / pullback / low, per 100 sessions vs any time), what
+ * it was, the run-in to the start (an 8-K / a report before vs any window), and the big sessions nothing explains. The
+ * lead phrase reads the low: its moves start away from news, on it, or no differently. Null when not measured. Pure.
+ */
+export function newsDailyWords(n) {
+    const d = n?.daily
+    if (!d?.moves) return null
+    const mp = d.major_per100, up = d.unexplained_per100, bs = d.before_start
+    const lead = _vs(mp.low, mp.any) === 'well under' ? 'its moves start away from news' : _vs(mp.low, mp.any) === 'well over' ? 'its moves start ON major news' : 'major news is no more common where its moves start than any time'
+    const kinds = Object.entries(d.major_kinds ?? {}).map(([k, v]) => [k, v.top + v.pullback + v.low, Object.entries(v).sort((a, b) => b[1] - a[1])[0][0]]).sort((a, b) => b[1] - a[1]).slice(0, 3)
+    return `${d.moves} moves: ${lead}. Major news per 100 sessions — at the top ${mp.top ?? '—'}, in the pullback ${mp.pullback ?? '—'}, at the low ${mp.low ?? '—'} (any time ${mp.any ?? '—'}); moves with any — top ${d.moves_with_major.top}, pullback ${d.moves_with_major.pullback}, low ${d.moves_with_major.low}` +
+        `${kinds.length ? `; it was ${kinds.map(([k, c, where]) => `${k} ×${c} (mostly ${where === 'low' ? 'at the low' : where === 'top' ? 'at the top' : 'in the pullback'})`).join(', ')}` : ''}.` +
+        ` In the ${NEWS.before} sessions before a start: an 8-K ${bs.filing ?? '—'}% (any window ${bs.filing_any ?? '—'}%), a report ${bs.report ?? '—'}% (${bs.report_any ?? '—'}%).` +
+        ` Big sessions with nothing dated: ${up.any ?? '—'} per 100${Number.isFinite(up.any) && Number.isFinite(mp.any) && up.any > mp.any ? ' — more than with news; most of its big days are not in the filings, reports or notes' : ''}.` +
+        `${n.sources?.headlines_from ? ` (Headlines from ${n.sources.headlines_from} only.)` : ''}`
+}
+
+/** L, 5-minute, in words: company / industry headlines in the 24 hours before its intraday moves vs any moment, and during. Null when not measured. Pure. */
+export function newsIntradayWords(n) {
+    const x = n?.intraday
+    if (!x?.moves) return null
+    const one = (c, w) => `${w === 'industry' ? 'an' : 'a'} ${w} headline in the 24h before ${c.before}% of them (any moment ${c.any}%), during ${c.during}%`
+    const lead = _vs(x.company.before, x.company.any) === 'well over' ? 'its intraday moves follow company news' : 'its intraday moves do not follow the news'
+    return `${x.moves} moves inside one session: ${lead} — ${one(x.company, 'company')}; ${one(x.industry, 'industry')}.`
+}
+
 /** The size-and-pace timeframes of a horizon: its own, with the 15-minute beside the 5-minute (Roy, option 2). */
 export const movesViews = (tfs) => tfs.flatMap(tf => (tf === '5min' ? ['5min', '15min'] : [tf]))
 
@@ -420,6 +450,10 @@ export function rowProfile(profile, horizon = null) {
         const w = movesWords(profile.moves?.[tf], tf)
         if (w) lines.push([`${tfWord(tf)} size and pace`, w])
     }
+    // The news around its moves (L): the daily for a swing, the 5-minute's headlines for a day trade (its own bars).
+    const views = BADGE_TIMEFRAMES[horizon] ?? BADGE_TIMEFRAMES.swing
+    const nw = views.includes('day') || views.includes('week') ? newsDailyWords(profile.news) : newsIntradayWords(profile.news)
+    if (nw) lines.push([views.includes('day') || views.includes('week') ? 'News (daily)' : 'News (5-minute)', nw])
     const lead = profile.timeframes[tfs[0]].false_breaks?.latest
     if (lead) lines.push(['Latest example', latestLine(tfs[0], lead).replace(/^Latest false break \(the example to show\): /, '').replace(/ — chart it:.*$/, '.')])
     lines.push(['ATR', tfs.map(tf => `${tfWord(tf)} ${profile.timeframes[tf].atr_pct ?? '—'}%`).join(' · ') +
@@ -448,6 +482,12 @@ export function formatProfile(p) {
         ...(p.moves ? [
             `SIZE AND PACE — described on the name's own moves (+${MOVES.up} ATR within ${MOVES.within} bars before a close ${MOVES.stop} ATR under; intraday moves inside one session), its typical values (medians); "steady" = the recent third's median inside the older two-thirds' middle half. A description of how far and how fast it moves, not an edge — never cite it as support:`,
             ...Object.entries(p.moves).map(([tf, m]) => `  ${TF[tf] ?? tf}: ${movesWords(m, tf) ?? 'too few bars to measure'}`),
+            '',
+        ] : []),
+        ...(p.news ? [
+            `NEWS AROUND ITS MOVES — major news = a dated event (SEC 8-K, earnings report, analyst rating or target note, insider buy, a headline) on a session the stock moved ≥ ${NEWS.bigAtr} ATR or traded ≥ ${NEWS.bigVol}× its volume; the chain's parts: at the top a pullback fell from, in the pullback, at the low a move started. A description, not a signal — never cite news as the reason a move will come:`,
+            `  DAILY: ${newsDailyWords(p.news) ?? 'not measured'}`,
+            `  5-MINUTE: ${newsIntradayWords(p.news) ?? 'not measured'}`,
             '',
         ] : []),
         `FITS: day trade ${fit(p.suitability.day_trade)}. Swing ${fit(p.suitability.swing)}.`,
