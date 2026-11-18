@@ -341,7 +341,7 @@ a **document**, a show names a **page to read**.
   and IPOs) — the last two open BY THEMSELVES as the reply ends (Roy, 2026-10-19), the row keeping a button
   to open them again. The `idea` kind is alive and central — it is the execution tier and a holding IS an
   idea document — but nothing an agent reads ever names one (`get_watched_items` lists setups, books,
-  coverage, scans, queued and Aether; positions carry no entity id), and a kind a model cannot quote is a
+  coverage and queued; positions carry no entity id), and a kind a model cannot quote is a
   tag it can only emit wrong. The CLIENT still opens idea pages on a click — a different list for a
   different question.
 - `<suggest>…</suggest>` — up to three follow-up questions the user can send with one click, offered
@@ -471,7 +471,7 @@ holds the floor and answers what they type next. When the question is plainly an
 at Proteus), the desk says one line and hands it back — `<route>reception</route>` with the user's question — and Axl
 answers it or sends it on, at once, without the user retyping. Routing judgment stays Axl's; a desk still routes
 straight to a desk the user names ("build me the trade" → Mentor). At most two automatic turns (desk → Axl → desk),
-never a loop; Pythia and Aether, in their own sessions, do not hand back.
+never a loop; Pythia, in her own session, does not hand back.
 
 Any desk can send the user to any other desk with a name, on request. The mechanism is the one Axl
 has always routed with, shared (`services/routing.util.js`): the desk's reply carries
@@ -482,8 +482,8 @@ the press on the same doorway reception uses (`handleRoute` → `handleAxlPick`)
 structured crosses.** The `<open>` is the receiving desk's first turn, in prose, written by the
 SENDER: the user's ask plus what it found on the name — because the desk cannot see the sender's
 chat, and a sentence needs no schema and cannot be mistaken for a settled parameter. Each desk's
-spine carries one shared rule (`buildRouteRule`): the routable desks minus its own, never Pythia or
-Aether, and Argus only on Mentor's (since 2026-11-09 a desk may name the only senders it takes — `routedFrom`), and **only when the user asked** — one hand-off per turn, say where they are going, the
+spine carries one shared rule (`buildRouteRule`): the routable desks minus its own, never Pythia,
+and Argus only on Mentor's (since 2026-11-09 a desk may name the only senders it takes — `routedFrom`), and **only when the user asked** — one hand-off per turn, say where they are going, the
 block is the hand-off. The automatic conveyor hops (`argus_pick`, sleeve sourcing) keep their
 artifact kinds: they carry fields the receiver's UI needs; a user's ask is a sentence.
 
@@ -851,7 +851,7 @@ the Nasdaq-100 as the **US100 cash CFD**, but levels are read off the **NQ futur
   agent's substantive floor — `thread.util.isSubstantive` over the agent's *emitted phase*, not
   content → never saved), **draft** (`saveDraft`; TTL-expired via `expiresAt` + LRU-capped per user),
   **linked** (`linkToArtifact` stamps `subjectId` to the generated idea/portfolio/scan and clears the
-  TTL). Since the unified chat (phase 9, 2026-10-20) only Pythia's and Aether's panels write threads, client-side
+  TTL). Since the unified chat (phase 9, 2026-10-20) only Pythia's panel writes threads, client-side
   through `/api/threads`; every other desk talks in the session, and its old threads were moved onto the entities
   they produced (`agent_contexts`, scripts/migrate-unified-chat.mjs).
 - A book's document (`portfolio_books`, renamed from `portfolio_chats`) holds the BOOK — lifecycle, mandate, thesis,
@@ -866,7 +866,8 @@ the Nasdaq-100 as the **US100 cash CFD**, but levels are read off the **NQ futur
 - **Two roles, `trader` (default) and `admin`** (`users.role`, minted into the token at sign-in;
   `scripts/set-admin-role.mjs <username> --apply`). `requireAdmin` (403) is on `/api/strategy`'s writes (the
   stream and publishing — the industry reads are open to every user since 2026-10-05), on the
-  coverage writes + the research queue under `/api/analyst`, and on Aether's chat + discovery.
+  coverage writes + the research queue under `/api/analyst`. (Aether's chat + discovery went with the
+  event board, 2026-11-18.)
   Mentor, setups and trade-ideas routes are never role-gated (`tests/unit/adminGate.test.js`
   pins both facts). Social-chat feeds of the admin desks (`ADMIN_BOT_IDS`: `strategy`, `analyst`)
   are delivered to admins only and hidden from a non-admin on list and on read-by-id. Axl is told the

@@ -86,10 +86,10 @@ test('broadcast reaches every user and every tab, in the emit frame shape', () =
     _register('b1', a2)
     _register('b2', b)
 
-    broadcast('aether:discovery', { running: false })
+    broadcast('test:event', { running: false })
 
     for (const ws of [a1, a2, b]) {
-        assert.deepEqual(events(ws), [{ event: 'aether:discovery', data: { running: false } }])
+        assert.deepEqual(events(ws), [{ event: 'test:event', data: { running: false } }])
     }
 
     _unregister('b1', a1)
@@ -103,7 +103,7 @@ test('broadcast skips a socket that is not OPEN and does not stop at it', () => 
     _register('b3', closing)
     _register('b4', live)
 
-    broadcast('aether:discovery', { running: true })
+    broadcast('test:event', { running: true })
 
     assert.equal(events(closing).length, 0)
     assert.equal(events(live).length, 1)
@@ -113,7 +113,7 @@ test('broadcast skips a socket that is not OPEN and does not stop at it', () => 
 })
 
 test('broadcast with nobody connected is a no-op', () => {
-    assert.doesNotThrow(() => broadcast('aether:discovery', { running: false }))
+    assert.doesNotThrow(() => broadcast('test:event', { running: false }))
 })
 
 // ── Heartbeat ────────────────────────────────────────────────────────────────

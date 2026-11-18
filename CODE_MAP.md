@@ -169,20 +169,6 @@ api/
     screenerData.service.js   Reads the engine's weekly PRICE RUN (industry_timing, market_regime,
                               industry_timing_runs — ENGINE db): latestRun (complete runs only), readRun,
                               readTimingRow(s). The weekly screen that bucketed it was retired 2026-10-11
-  aether/                 Aether — the EVENT-EXPOSURE desk  /api/aether/*. Node is READ-ONLY against the
-                          engine's collections: the Python aether-engine (a separate repo) writes them, and
-                          only when an admin starts a discovery run. What survived the channel-engine
-                          removal (2026-09-09): aether_event_runs (one named event), aether_event_candidates
-                          (one company it reaches, with the engine's filing verdict), aether_scorecard (ONE
-                          document, graded at expiry by the engine's nightly). Stream + discovery are
-                          admin-only; the list, the per-ticker drill-down and the scorecard are broadcast
-    aether.service.js         groupCandidatesByRun (newest event first, best rank inside — sorted BEFORE
-                              the limit, or the newest run fell off) + evidenceOf (a tally off the engine's
-                              verdicts, never a second opinion) + shapeTickerResult + shapeScorecard, all
-                              pure and tested without a database. TICKER_RE (aether.model) bounds a ticker
-                              off a URL path — refused when too long, never trimmed into shape
-    aether.controller.js      hand-rolled try/catch answering fixed slugs — the §9 error-shape decision;
-                              startDiscovery answers off err.status (409 in flight · 503 no engine here)
   broker/                 broker connections/orders/positions  /api/broker/*
     adapters/
       broker.interface.js     BrokerAdapter base class — THE contract every broker fulfils
@@ -264,11 +250,11 @@ api/
   experience/             experience.model — how to TALK to a user (beginner may be inferred,
                           experienced only declared); its own collection, never the user doc
   sessions/               the unified chat's sessions (/api/sessions: active · new · list · :id/messages);
-                          scope 'main' | 'strategy' | 'aether' (admin desks 403 for a trader). Read-only
+                          scope 'main' | 'strategy' (the admin desk 403 for a trader; 'aether' went 2026-11-18). Read-only
                           + "new" until the turn endpoint lands (unified-chat plan phase 5)
-  threads/                Pythia's and Aether's own chats (/api/threads: draft · link · discard) —
+  threads/                Pythia's own chat (/api/threads: draft · link · discard) —
                           the desks' list / get / pin / unfinished / pipeline routes went in phase 9.
-                          AGENTS (the draft-save whitelist) is strategy + aether only; a session desk's
+                          AGENTS (the draft-save whitelist) is strategy only; a session desk's
                           draft would be legacy data written fresh (threadAgents.test pins it)
   turns/                  POST /api/turns/:turnId/stop — stopping a turn is spoken, walking away is
                           silent (turnRegistry); owner-scoped
@@ -299,8 +285,8 @@ api/
                           Express never 304s a probe. Reports leader + loop count (roster only in dev)
   _shared/                cross-controller helpers:
       sse.util.js             startSseStream() — SSE headers + heartbeat + abort wiring
-      deskStream.util.js      makeDeskStream({ log, parse, run, done }) — the streaming desk turn Pythia's and
-                              Aether's POST /stream ride (the other desks answer in the session since unified-chat
+      deskStream.util.js      makeDeskStream({ log, parse, run, done }) — the streaming desk turn Pythia's
+                              POST /stream rides (the other desks answer in the session since unified-chat
                               8e — their /stream routes are gone): shared parse + 400s, the common agent bag
                               (messages/model/user/audience/signal/SSE callbacks), the routing gate
                               appended to every `done`. A desk supplies only its extras, its agent
@@ -586,7 +572,7 @@ services/
                           each desk's judgment; the rule only gates it on the user's ask.
                           BACK TO RECEPTION (2026-11-13): `<route>reception</route>` + the user's question
                           — a main-chat desk asked something not its own hands it to Axl (registry
-                          composite → axl; mayRoute/backToReception: never Axl, never Pythia/Aether;
+                          composite → axl; mayRoute/backToReception: never Axl, never Pythia;
                           RECEPTION_RULE closes those desks' route rule). The runner runs Axl as origin
                           'reception', whose route it follows ONCE (as an 'opening', which stops): two
                           automatic turns at most, no loop. cleanOpening unwraps <ticker> tags.
@@ -865,7 +851,7 @@ services/
                             gate; houseListNames = every list's names today (the gate's second look)
   watchlist.service.js      listWatchedItems — "what am I watching?" across EVERY list the Floor
                             shows, in ONE read (setups · books · coverage · the off-hours
-                            QUEUE · Aether runs, one row per event · and, for an admin, the research
+                            QUEUE · and, for an admin, the research
                             queue — ADMIN_KINDS, dropped before the read for a trader so the list is
                             absent, not refused). SCOPED to the workspace the user is standing in:
                             WORKSPACE_SCOPED_KINDS (setup · portfolio · queued) bind to an account and
@@ -894,35 +880,6 @@ services/
                             memory, like the run. See docs/desks/roles-and-sourcing.md. HOUSE FIRST (houseFirst):
                             Pythia's long-term industries in the sector lead, found inside a 50-wide screen, up to
                             SLEEVE_HOUSE_MAX (6) of SLEEVE_HITS; the card counts them (argus-on-pythia.md §3.5)
-  aetherScheduler.service.js  AETHER_SCHEDULER=off (the laptop, Roy 2026-11-12) keeps the scheduler off on this host;
-                            discovery presses still run. The Node side of the Python aether-engine: spawns scripts/scheduler.py as a
-                            child process when AETHER_ENGINE_PATH points at a checkout with a built venv
-                            (a quiet no-op everywhere else — every deploy), bridging the Mongo connection
-                            Node is ACTUALLY on into MONGO_URI/MONGO_DB and refusing to spawn when the db
-                            name cannot be resolved (an inherited MONGO_DB once wrote a parallel copy of
-                            every aether_* collection). Started OUTSIDE the instance lease, on purpose.
-                            runDiscovery spawns select_events.py on an admin's press — the one leg that
-                            spends real money — one at a time, progress parsed off the engine's own log
-                            lines, refusals stamped with a status. DISCOVERY_DEFAULTS (maxRuns 5 = top 5,
-                            2026-09-20): a press runs every event the selector picked — it was 2, and
-                            every press deferred three. The engine works in AETHER_DB (the house
-                            database, `test`) when set, else the connected one; a laptop on its own
-                            dev database gets the finished run mirrored back (aetherMirror) BEFORE the
-                            "finished" frame goes out (_onDiscoveryExit) — the open lists refetch on
-                            that frame, and it once went out a second before the rows were readable
-  aetherMirror.service.js   Copies one discovery run (aether_event_runs + its candidates + usage, by
-                            run_id, since the spawn time) from the house database into the local one.
-                            A copy, never a second run. Read-only against the source; never throws
-  aetherQuickRead.service.js  Prometheus's quick read on one Aether name (credible · priced_in ·
-                            contradicted · unclear) — phases 1–2 on Sonnet, one paragraph, optional.
-                            Node OWNS aether_candidate_reads (the engine's rows are Python's); one read
-                            per name per event, one in flight, re-read only when the SET of live events
-                            naming the ticker changed. Judged against every live event, not the one pressed.
-                            Since 2026-09-20 the read SIZES the event too (compute_event_delta; `delta` +
-                            `delta_basis` on the doc, null when unsized), runs on the presser's AI-menu
-                            model (quickReadModel: the same house rule as resolveAgentStream — an admin's
-                            own registered choice, anyone else the house chat model, else Sonnet 5; the doc
-                            names what ran) and books under its own ledger row `analystAgent-quickread`
   lastPrice.service.js      fetchLastPrice(symbol): THE last-price read — quote first, a 1-minute-candle
                             fallback second, null only when both fail; a non-positive price is NO price.
                             The input to every zone gate, baseline stamp and coherence check. Lived in
@@ -1212,7 +1169,7 @@ services/
                             while stale. Results carry `long_term` / `long_term_new` (houseScan bookSends: a NEW yes
                             sends to the long-term book)
   engineDb.js               THE rule for which database aether-engine writes (AETHER_DB, else Node's own) —
-                            shared by the engine's scheduler and every desk that reads what it wrote
+                            shared by every desk that reads what it wrote
   manualNotify.service.js   broker-less entry/exit FillCards → social chat (embedded price/qty confirm)
   tradeNotify.service.js    notify+route cards → social chat: entry_confirm (paper/live idea entry)
                             + queue_ready (the market-open nudge, from Axl) + setup_invalidation /
@@ -1286,7 +1243,7 @@ services/
                           the agent's substantive floor (thread.util.isSubstantive over the
                           agent's emitted phase — NOT content), TTL-expired + LRU-capped, and
                           is `linked` to its artifact (idea/portfolio/scan) on generate.
-                          Since phase 9 (2026-10-20) only Pythia's and Aether's panels write here
+                          Since phase 9 (2026-10-20) only Pythia's panel writes here (Aether's went 2026-11-18)
                           (saveDraft · linkToArtifact · discardThread); every other desk's old
                           threads were moved onto their entities (scripts/migrate-unified-chat.mjs).
                           Deleted when those two panels move onto the session (plan D1).
@@ -1605,7 +1562,7 @@ monitoring/
                             early-hit ratchet is scoped to the TARGET it silenced (early_hit_at vs
                             price_target.set_at). Expensive tier = a RE-MODEL: coverage.remodel.
                             remodelDecision (catalyst passed / edge changed category / 90-day floor /
-                            early hit, under a 14-day cooldown; an Aether signal can pull it in) →
+                            early hit, under a 14-day cooldown) →
                             _runRemodels after the tick, held names first, MAX 3 → claimRemodel (a
                             compare-and-swap on last_remodel_at, so a second process stands down) →
                             coverageRefresh.refreshCoverage({ userId: null }) — a HOUSE run: no venue,
@@ -1653,7 +1610,8 @@ scripts/                    ops one-offs — none run by `npm test`. Kinds: migr
                             moved monitor_state.timeline[] into the journal collection, mapping the
                             legacy reasons and dropping quiet-wake lines; run once after deploy;
                             delete-kairos removed the `call` kind's data, the kairos bot's chat and
-                            renamed hermesReasoning → talosReasoning, 2026-11-10), repairs
+                            renamed hermesReasoning → talosReasoning, 2026-11-10; delete-aether-events exported then dropped the
+                            Aether event board's collections and the admin desk's chats, 2026-11-18), repairs
                             (repair-*, drop-ghost-*, dry-run-by-default data fixes), diagnostics
                             (check-*, verify-*, fmp-candle-parity — read-only), admin (set-admin-role,
                             create-admin-user — the latter rides userService.createUser), and dev

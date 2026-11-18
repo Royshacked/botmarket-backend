@@ -84,7 +84,7 @@ export const portfolioDesk = {
         return { ...portfolioNextState(null, null), adopt: true, adoptDraftId: kept.adoptDraftId }
     },
     // No `parse`: it served the desk's own HTTP /stream route, gone with the panels (8e); a session turn hands the desk
-    // its state and input directly (phase 9 cleanup, 2026-10-20). Pythia's and Aether's desks keep theirs.
+    // its state and input directly (phase 9 cleanup, 2026-10-20). Pythia's desk keeps its own.
     run: async ({ user, state, input, signal, emit, common, sessionId = null }) => {
         const { messages } = common
         const { portfolioId = null, reviewMode: isReviewMode = false, mandate: bodyMandate = null, adoptDraftId = null } = state ?? {}

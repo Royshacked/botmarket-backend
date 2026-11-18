@@ -22,7 +22,7 @@
  * @property {string[]}    [routedFrom] when set, ONLY these agents may route here (Axl's key is 'axl') — every other
  *                                     sender cannot
  * @property {string|null} does         the one line a sender's prompt shows (routable desks only)
- * @property {'main'|'strategy'|'aether'} scope  the session it talks in
+ * @property {'main'|'strategy'} scope  the session it talks in
  * @property {boolean}     admin        admin-only (the route gate and the prompts both hold it)
  * @property {number}      maxMessages  how much of its own history a turn carries (trimHistory keep)
  */
@@ -68,16 +68,13 @@ export const DESKS = Object.freeze({
         does: "reads how a stock's price behaves — what it respects technically, if anything, its ATR and false breaks, day trade or swing",
         scope: 'main', admin: false, maxMessages: 10,
     }),
-    // The admin desks: Pythia sets the house view and Aether reads event exposure. Neither is somewhere a
-    // desk sends a user with a name (not routable — no desk agent has to know the user's role to write a
-    // correct offer); Axl still routes admins to both. Each keeps its own panel and session (decision 16).
+    // The admin desk: Pythia sets the house view. Not somewhere a desk sends a user with a name (not
+    // routable — no desk agent has to know the user's role to write a correct offer); Axl still routes admins
+    // to her. She keeps her own panel and session (decision 16). Aether, the event analyst, was the other
+    // admin desk until its board was deleted on 2026-11-18.
     strategy: Object.freeze({
         agent: 'strategy', desk: 'strategy', brand: 'Pythia', role: 'industry strategist', entityKind: 'industry_view', editable: false, routable: false, does: null,
         scope: 'strategy', admin: true, maxMessages: 8,
-    }),
-    aether: Object.freeze({
-        agent: 'aether', desk: 'aether', brand: 'Aether', role: 'event analyst', entityKind: null, editable: false, routable: false, does: null,
-        scope: 'aether', admin: true, maxMessages: 12,
     }),
 })
 

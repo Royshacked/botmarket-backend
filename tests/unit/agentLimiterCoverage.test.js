@@ -82,9 +82,9 @@ test('every streaming endpoint is behind the agent rate limiter', () => {
 
     // Guard the guard: if the parsing above ever stops finding anything, this test would pass by
     // vacuously checking nothing — the exact way a file-walking test rots into decoration.
-    // Two since unified-chat 8e: Pythia's and Aether's — the other desks answer in the session (its turn route).
-    assert.ok(streams.length >= 2, `expected to find the desks' stream routes, found ${streams.length}`)
-    assert.ok(limited.size >= 2, `expected to parse the limiter list, found ${limited.size}`)
+    // One since 2026-11-18: Pythia's (Aether's went with the event board) — the other desks answer in the session (its turn route).
+    assert.ok(streams.length >= 1, `expected to find the desks' stream routes, found ${streams.length}`)
+    assert.ok(limited.size >= 1, `expected to parse the limiter list, found ${limited.size}`)
 
     const unlimited = streams.filter(s => !limited.has(s.path))
     assert.deepEqual(unlimited.map(s => s.path), [],

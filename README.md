@@ -594,7 +594,7 @@ PYTHIA (the industry desk)            POST /api/strategy/stream
 
 **Who gets which desk.** Two roles. A **trader** has Argus, Mentor and Atlas in full, Prometheus
 to research with (every coverage readable, none writable), the Forecasts board and Axl reading the
-house industry views — and no Pythia desk, no Aether. An **admin** has everything, and is the only audience
+house industry views — and no Pythia desk. An **admin** has everything, and is the only audience
 of Pythia's and Prometheus's social-chat feeds (coverage verdicts, industry-view changes). The server owns
 every gate; the client hides what the server would refuse. The matrix and where each gate lives:
 [docs/desks/roles-and-sourcing.md](docs/desks/roles-and-sourcing.md).
@@ -837,7 +837,7 @@ GET  /equity-curve   equity points (?fromMs=)
   against the measured numbers) — admin-only.
 - **Pending actions** `/api/pending-actions` — `GET /` (the queued list), `POST /:id/execute`,
   `POST /:id/cancel`. See the off-hours queue above.
-- **Threads** `/api/threads` — Pythia's and Aether's own panel chats (draft · link · discard). Every other desk
+- **Threads** `/api/threads` — Pythia's own panel chat (draft · link · discard). Every other desk
   talks in the session (`/api/sessions`); an entity's conversation is sealed onto it (`agent_contexts`).
 - **Trades** `/api/trades` + `/api/trades/stats` — the frozen-at-fill analytics ledger (paper + live).
 - **Social chat** `/api/chat` — user-to-user messaging (`/conversations`, messages, read

@@ -56,7 +56,10 @@ yardsticks. Start from the yardstick and move off it only for a reason you can n
    earnings terms at all (a pure sentiment move): then say so, verdict `unclear`, no delta. Supply:
    - `exposed_revenue_pct` — the share of revenue the catalyst reaches. Say where it came from, and "estimated" when it is.
    - `shock_pct` with `shock_low` / `shock_high` — the change to THAT line; a band wide enough to be honest.
-   - `incremental_margin`, `persistence_quarters` — as in the quick read.
+   - `incremental_margin` — how much of a dollar on that line reaches net income: a fee or pass-through line 0.6–0.9,
+     a product line near its segment margin, a hedged line low.
+   - `persistence_quarters` — how long the line stays hit. One quarter for a disruption with a dated end, four for a
+     repricing that sticks; the tool caps at four.
    - `moved_pct` — **the move since the catalyst**, in %, against SPY where you can measure it. This is what turns
      "worth +8%" into "still open +3%".
 6. **Two outside checks on the number.** `get_options_context` — the implied move to the nearest expiry; if the options

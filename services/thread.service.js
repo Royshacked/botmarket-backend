@@ -109,8 +109,8 @@ async function discardThread({ threadId, userId }) {
     }
 }
 
-// What is left after the unified chat (phase 9, 2026-10-20): Pythia's and Aether's panels still keep their own chats
-// here (phase 8e, D1) — they save a draft, link it to what it produced, and discard it. The desks' listing, reading,
+// What is left after the unified chat (phase 9, 2026-10-20): Pythia's panel still keeps its own chat
+// here (phase 8e, D1; Aether's went 2026-11-18) — it saves a draft, links it to what it produced, and discards it. The desks' listing, reading,
 // pinning and badge reads went with the panels that called them.
 export const threadService = {
     ensureThreadIndexes,

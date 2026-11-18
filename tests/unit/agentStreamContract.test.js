@@ -2,7 +2,6 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
 import { analystAgentService }   from '../../services/agents/analyst.agent.service.js'
-import { aetherAgentService }    from '../../services/agents/aether.agent.service.js'
 import { axlAgentService }       from '../../services/agents/axl.agent.service.js'
 import { mentorAgentService }    from '../../services/agents/mentor.agent.service.js'
 import { portfolioAgentService } from '../../services/agents/portfolio.agent.service.js'
@@ -25,7 +24,6 @@ import { REMEMBER_TOOL }        from '../../services/tools/userProfile.tools.js'
 
 const AGENTS = [
     { name: 'analyst  (Prometheus)', chatStream: analystAgentService.chatStream,   args: { messages: [{ role: 'user', content: 'pitch me NVDA' }] } },
-    { name: 'aether',                chatStream: aetherAgentService.chatStream,    args: { messages: [{ role: 'user', content: 'explain the channel model' }] } },
     { name: 'axl',                   chatStream: axlAgentService.chatStream,       args: { messages: [{ role: 'user', content: 'what can you do' }] } },
     { name: 'mentor',                chatStream: mentorAgentService.chatStream,    args: { messages: [{ role: 'user', content: 'walk me through AAPL' }] } },
     { name: 'portfolio (Atlas)',     chatStream: portfolioAgentService.chatStream, args: { messages: [{ role: 'user', content: 'build me a portfolio' }] } },

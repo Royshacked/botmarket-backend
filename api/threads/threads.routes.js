@@ -7,7 +7,7 @@ const router = express.Router()
 
 router.use(requireAuth)
 
-// Pythia's and Aether's own chats (phase 8e, D1) — the rest went with the desk panels (phase 9).
+// Pythia's own chat (phase 8e, D1; Aether's went 2026-11-18) — the rest went with the desk panels (phase 9).
 router.post('/draft',           log, saveDraftThread)
 router.post('/:threadId/link',  log, linkThread)
 router.delete('/:threadId',     log, discardThread)

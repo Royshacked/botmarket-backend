@@ -160,9 +160,8 @@ export function computeValuation(input = {}) {
 
 // ─── One event, priced alone ─────────────────────────────────────────────────
 //
-// WHAT ONE EVENT IS WORTH TO THE PRICE, holding everything else still. Aether names a company as
-// exposed to an event and Prometheus's quick read says whether the exposure is credible; this
-// puts a number on it, so "priced in" has a yardstick — a name that moved 13% on an event worth
+// WHAT ONE EVENT IS WORTH TO THE PRICE, holding everything else still. Prometheus's catalyst read
+// (analyst_mode_catalyst.md) calls it once a catalyst is judged credible; this puts a number on it, so "priced in" has a yardstick — a name that moved 13% on an event worth
 // 3% has overshot, one that moved 1% on an event worth 8% is still open — instead of resting on
 // the estimate trend alone. It is FIRST-ORDER BY CONSTRUCTION: the multiple is held constant
 // (no re-rating, no sentiment), and the rest of the estimate is untouched. That is the point of
@@ -229,7 +228,7 @@ export function computeEventDelta(input = {}) {
     out.delta_price_high = roundOrNull(pct(dNIHigh))
     if (out.spot) out.implied_price = roundOrNull(out.spot * (1 + pct(dNI) / 100))
     // What is still open, on the base leg. moved_pct is the excess move since the event, in %,
-    // the way Aether measures it (vs SPY): the part of the answer the market has already given.
+    // vs SPY: the part of the answer the market has already given.
     if (out.moved_pct !== null) out.remaining_pct = roundOrNull(pct(dNI) - out.moved_pct)
     return out
 }

@@ -24,10 +24,9 @@ const ROOT     = join(dirname(fileURLToPath(import.meta.url)), '../../')
 const SERVICES = join(ROOT, 'services')
 
 // Every desk that mounts a BASE system prompt. Mode/profile FRAGMENTS
-// (e.g. analyst_mode_quickread.md) are deliberately absent: they are concatenated onto a base that already
+// (e.g. analyst_mode_catalyst.md) are deliberately absent: they are concatenated onto a base that already
 // carries the rule, and appending it again would repeat the same paragraph twice in one request.
 const DESKS = [
-    'aether.agent.service.js',
     'analyst.agent.service.js',
     'axl.agent.service.js',
     'marketBrief.service.js',
@@ -127,7 +126,7 @@ test('the rule rides on the CACHED prefix, not the volatile tail', () => {
 // (Pythia) are broadcasts, and neither carries the venue TOOLS either, for the same reason. Proteus (2026-11-12) has a
 // user but no use for the venue: he reads a stock's price behaviour — the house's profile, the same for everyone — and
 // never sizes, places or holds anything, so he carries neither the block nor the tools.
-const NO_VENUE = ['aether.agent.service.js', 'marketBrief.service.js', 'strategy.agent.service.js', 'proteus.agent.service.js']
+const NO_VENUE = ['marketBrief.service.js', 'strategy.agent.service.js', 'proteus.agent.service.js']
 const VENUE_DESKS = DESKS.filter(f => !NO_VENUE.includes(f))
 
 test('every desk that has a user carries the venue rule, exactly once', () => {

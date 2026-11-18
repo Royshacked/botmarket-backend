@@ -49,7 +49,6 @@ import { ensureJournalIndexes } from './services/journal.service.js'
 import { ensureExperienceIndexes } from './api/experience/experience.model.js'
 import { ensureWorkspaceIndexes } from './api/workspace/workspace.model.js'
 import { ensurePendingActionIndexes } from './services/pendingAction/pendingAction.repo.js'
-import { ensureAetherIndexes }        from './api/aether/aether.model.js'
 import { pendingActionRoutes } from './api/pendingAction/pendingAction.routes.js'
 import { threadService } from './services/thread.service.js'
 import { sessionService } from './services/session.service.js'
@@ -68,7 +67,6 @@ import { transcribeRoutes }  from './api/transcribe/transcribe.routes.js'
 import { portfolioRoutes }   from './api/portfolio/portfolio.routes.js'
 import { analystRoutes }     from './api/analyst/analyst.routes.js'
 import { strategyRoutes }    from './api/strategy/strategy.routes.js'
-import { aetherRoutes }      from './api/aether/aether.routes.js'
 import { threadsRoutes }     from './api/threads/threads.routes.js'
 import { sessionsRoutes }    from './api/sessions/sessions.routes.js'
 import { turnsRoutes }       from './api/turns/turns.routes.js'
@@ -99,7 +97,6 @@ import { paperMarkService }   from './monitoring/paperMark.service.js'
 import { guardSweepService } from './monitoring/guardSweep.service.js'
 import { marketBriefNotifier } from './monitoring/marketBrief.notify.js'
 import { marketOpenMonitor } from './monitoring/marketOpen.monitor.js'
-import { aetherSchedulerService } from './services/aetherScheduler.service.js'
 // The software exit monitor — kind-blind, and the caller positionMonitor.checkPosition lost when
 // Minos was deleted. Until it started, a stop that was not a plain price level was accepted, stored
 // and shown as protection while nothing evaluated it. Tied to a CAPABILITY, not to a desk.
@@ -185,7 +182,7 @@ if (config.isProduction) {
 // in mount order and a limiter registered after its route never sees the request.
 //
 // The agent limiter is pinned to the STREAM paths specifically, not to the desk prefixes. Since unified-chat 8e only
-// Pythia and Aether keep a `POST /stream` (their panels still stream); every other desk answers in the session, whose
+// Pythia keeps a `POST /stream` (her panel still streams; Aether's went with the event board, 2026-11-18); every other desk answers in the session, whose
 // turn route carries the same limiter — api/sessions. Those are the only endpoints that buy tokens. Limiting `/api/portfolio` wholesale would have counted its fifteen
 // ordinary reads against the same budget and throttled a user for browsing their own book.
 //
@@ -195,7 +192,7 @@ if (config.isProduction) {
 // tests/unit/agentLimiterCoverage.test.js walks every mounted `/stream` route and fails when one
 // of them is not here, so the omission is caught at the point it is made.
 app.use('/api/auth', authLimiter)
-for (const desk of ['strategy', 'aether']) {
+for (const desk of ['strategy']) {
     app.use(`/api/${desk}/stream`, agentLimiter)
 }
 
@@ -216,7 +213,6 @@ app.use('/api/portfolio',   portfolioRoutes)
 app.use('/api/pending-actions', pendingActionRoutes)
 app.use('/api/analyst',     analystRoutes)
 app.use('/api/strategy',    strategyRoutes)
-app.use('/api/aether',      aetherRoutes)
 app.use('/api/threads',     threadsRoutes)
 app.use('/api/sessions',    sessionsRoutes)
 // Stopping an agent turn — its own endpoint because stopping and walking away are different
@@ -237,7 +233,6 @@ ensureJournalIndexes()
 ensureExperienceIndexes()
 ensureWorkspaceIndexes()
 ensurePendingActionIndexes()
-ensureAetherIndexes()
 ensureIndustryViewIndexes().catch(() => {})   // Pythia's industry_view (api/strategy/industryView.service.js)
 ensureDailyScreenerIndexes().catch(() => {})       // the hotlist's overnight pass (services/dailyScreener.service.js)
 ensureHotlistBoardIndexes().catch(() => {})        // the hotlist's boards (services/hotlist.boards.js)
@@ -299,25 +294,6 @@ function startBackgroundLoops() {
     startLoop('paperMark',    paperMarkService)
     startLoop('marketBrief',  marketBriefNotifier)
 }
-
-// The Aether scheduler is NOT one of these, and that is the point.
-//
-// It used to be, and the consequence was that it ran nowhere. The lease is held by the
-// deployed instance, which has no aether-engine checkout and no Python venv, so it could
-// never spawn the engine; the laptop, which can, is a follower and never even called
-// start(). In twelve days the scheduler started four times — only on the days a Mongo
-// blip briefly handed the laptop the lease — for 2m, 52m, 1s and 10m, and completed zero
-// scheduled runs.
-//
-// The lease answers "should this process own the shared work?". The engine asks a
-// different question: "can this MACHINE run Python against the engine repo?". Only the
-// host with the checkout can, so that is the gate. Two hosts that both qualify are safe
-// because the scheduler claims each job occurrence in Mongo before running it — mutual
-// exclusion per job, which is stricter than per host.
-//
-// Started outside the lease, and deliberately outside startLoop(): stopLoops() also runs
-// when the lease is LOST, and losing a lease we never depended on must not kill the engine.
-aetherSchedulerService.start()
 
 const loopsLock = createInstanceLock({
     getCollection: async () => (await getDb()).collection(LOCK_COLLECTION),
@@ -413,9 +389,6 @@ async function shutdown(signal, code = 0) {
         //    broker round trip after this point has nowhere left to write the answer.
         const stopped = await stopLoops()
         logger.info('[server]', `stopped ${stopped.length} background loops`)
-
-        // Not in the loop registry (see the note by its start), so it is stopped by name.
-        await aetherSchedulerService.stop()
 
         // Release AFTER the loops are down, never before: handing the lease over while ours are
         // still winding up would put a replacement's reconciler alongside our own.

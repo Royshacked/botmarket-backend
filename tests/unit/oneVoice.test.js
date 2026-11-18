@@ -10,7 +10,6 @@ import { TOOLS as PORTFOLIO_TOOLS } from '../../services/agents/portfolio.agent.
 import { TOOLS as SCANNER_TOOLS } from '../../services/agents/scanner.agent.service.js'
 import { TOOLS as ANALYST_TOOLS } from '../../services/agents/analyst.agent.service.js'
 import { TOOLS as AXL_TOOLS } from '../../services/agents/axl.agent.service.js'
-import { TOOLS as AETHER_TOOLS } from '../../services/agents/aether.agent.service.js'
 import { TOOLS as STRATEGY_TOOLS } from '../../services/agents/strategy.agent.service.js'
 import { MENTOR_TOOLS } from '../../services/agents/mentor.agent.service.js'
 import { TOOLS as PROTEUS_TOOLS } from '../../services/agents/proteus.agent.service.js'
@@ -41,7 +40,7 @@ test('every desk\'s route rule lists roles, and the hand-back rule names no one'
 })
 
 test('no tool a chat agent is given names an internal agent', () => {
-    const LIVE = { portfolio: PORTFOLIO_TOOLS, scanner: SCANNER_TOOLS, analyst: ANALYST_TOOLS, axl: AXL_TOOLS, aether: AETHER_TOOLS,
+    const LIVE = { portfolio: PORTFOLIO_TOOLS, scanner: SCANNER_TOOLS, analyst: ANALYST_TOOLS, axl: AXL_TOOLS,
         strategy: STRATEGY_TOOLS, mentor: MENTOR_TOOLS, proteus: PROTEUS_TOOLS }
     for (const [agent, tools] of Object.entries(LIVE)) {
         for (const t of tools) clean(JSON.stringify({ d: t.description, s: t.input_schema }), `${agent}.${t.name}`)

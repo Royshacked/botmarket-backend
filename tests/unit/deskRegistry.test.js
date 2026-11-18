@@ -7,14 +7,14 @@ import { SESSION_AGENTS, CONTEXT_KINDS } from '../../services/session.util.js'
 // The one desk registry (services/desks/registry.js). Five hand-kept lists derive from it now; these pin
 // that each derived list is EXACTLY what it replaced, so the move changed no route, no gate and no prompt.
 
-test("the pipelines a route may name: the seven it always was, Proteus's `technicals` (2026-11-12) and `reception`, back to Axl (2026-11-13)", () => {
-    assert.deepEqual([...VALID_PIPELINES].sort(), ['aether', 'assist', 'portfolio', 'reception', 'research', 'scan', 'strategy', 'technicals', 'trade'])
+test("the pipelines a route may name: the seven it always was less Aether's (2026-11-18), Proteus's `technicals` (2026-11-12) and `reception`, back to Axl (2026-11-13)", () => {
+    assert.deepEqual([...VALID_PIPELINES].sort(), ['assist', 'portfolio', 'reception', 'research', 'scan', 'strategy', 'technicals', 'trade'])
     assert.deepEqual([...PIPELINE_KEYS].sort(), [...VALID_PIPELINES].sort())
 })
 
-test('admin-only desks are Pythia and Aether', () => {
-    assert.deepEqual([...ADMIN_DESKS], ['strategy', 'aether'])
-    assert.deepEqual([...ADMIN_PIPELINE_KEYS], ['strategy', 'aether'])
+test('the admin-only desk is Pythia (Aether went with the event board, 2026-11-18)', () => {
+    assert.deepEqual([...ADMIN_DESKS], ['strategy'])
+    assert.deepEqual([...ADMIN_PIPELINE_KEYS], ['strategy'])
 })
 
 test('the routable desks, IN PROMPT ORDER — research, assist, portfolio, scan, technicals (appended)', () => {
@@ -32,7 +32,7 @@ test('an <edit> reopens the three editable kinds at the desk that owns each — 
 })
 
 test('the session store speaks for every agent and seals onto every kind a desk produces', () => {
-    assert.deepEqual([...SESSION_AGENTS].sort(), ['aether', 'analyst', 'axl', 'mentor', 'portfolio', 'proteus', 'scanner', 'strategy'])
+    assert.deepEqual([...SESSION_AGENTS].sort(), ['analyst', 'axl', 'mentor', 'portfolio', 'proteus', 'scanner', 'strategy'])
     // `scan` left on 2026-11-09: Argus's single pick rides the chain to Mentor and produces no entity of its own.
     assert.deepEqual([...CONTEXT_KINDS].sort(), ['coverage', 'industry_view', 'portfolio', 'setup'])
     assert.equal(agentForKind('scan'), null)
@@ -42,7 +42,7 @@ test('the session store speaks for every agent and seals onto every kind a desk 
 
 test('history depth per desk is what each agent carried before the move', () => {
     const depth = Object.fromEntries(Object.values(DESKS).map(d => [d.agent, d.maxMessages]))
-    assert.deepEqual(depth, { axl: 20, analyst: 8, mentor: 8, portfolio: 10, scanner: 10, strategy: 8, aether: 12, proteus: 10 })
+    assert.deepEqual(depth, { axl: 20, analyst: 8, mentor: 8, portfolio: 10, scanner: 10, strategy: 8, proteus: 10 })
 })
 
 test('the admin desks talk in their own scope; everyone else in the one chat', () => {

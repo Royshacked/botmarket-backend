@@ -4,8 +4,8 @@
 //                     agentState, summaries, links, seq, createdAt, updatedAt, archivedAt }
 //   session_messages  one row per timeline message: { sessionId, seq, agent, role, kind, content, ref, to, at }
 //
-// ONE active session per user per scope — 'main' (the one chat) and 'strategy' / 'aether' (the admin
-// desks' own panels, decision 16). "New session" archives the active one; history lists them. Nothing
+// ONE active session per user per scope — 'main' (the one chat) and 'strategy' (the admin
+// desk's own panel, decision 16; 'aether' went with the event board, 2026-11-18). "New session" archives the active one; history lists them. Nothing
 // expires and there is no cap: a session is the record of what was said, and work that produced an
 // entity leaves the session for that entity's sealed context (agentContext.service).
 //

@@ -1,23 +1,4 @@
 {
-    "aether": [
-        {
-            "name": "get_event_candidates",
-            "description": "Recent event runs and the companies each named. One run is one named event — a tariff, an export ban, an appropriation — and one candidate is one company it reaches, carrying the mechanism, a citable press fact, whatever its own SEC filings said, how far it has moved against SPY since the event, and when it expires. Call it for \"what has the event analyst found\", \"why is this name here\", \"did I miss it\", or any question about a specific event or ticker on the list. Takes an optional `days` (default 30) and `includeDropped` (default false — pass true to see the names a gate rejected and why).",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "days": {
-                        "type": "integer",
-                        "description": "How far back to look, in days. Default 30, capped at 180."
-                    },
-                    "includeDropped": {
-                        "type": "boolean",
-                        "description": "Include candidates a gate rejected, each with its reason. Default false. Every candidate is stored, including the rejected ones — a filter whose rejections leave no trace cannot be shown to be wrong — but the answer normally wants the shortlist."
-                    }
-                }
-            }
-        }
-    ],
     "strategy": [
         {
             "type": "web_search_20260209",
@@ -3201,7 +3182,7 @@
         },
         {
             "name": "get_watched_items",
-            "description": "Every list the user sees in the app: setups, portfolios (as books), coverage, the QUEUED actions waiting for a venue to open, and the the event analyst events with the names each reached — plus, for an admin, the research queue. With status, levels and how fresh each is. This is the PLANS AND BOOKS they have made, NOT their open broker positions, balances or live P&L, which are get_trading_context. Setups and books come back scoped to the workspace the user is standing in (paper / live / manual) — those bind to an account, and merging two books into one list is not an answer. Coverage is research, binds to no account, and is shared across every workspace. Call it for \"what am I watching / what have I got going / what's still open\", and before saying the user has nothing. Finished items are excluded unless asked for.",
+            "description": "Every list the user sees in the app: setups, portfolios (as books), coverage, and the QUEUED actions waiting for a venue to open — plus, for an admin, the research queue. With status, levels and how fresh each is. This is the PLANS AND BOOKS they have made, NOT their open broker positions, balances or live P&L, which are get_trading_context. Setups and books come back scoped to the workspace the user is standing in (paper / live / manual) — those bind to an account, and merging two books into one list is not an answer. Coverage is research, binds to no account, and is shared across every workspace. Call it for \"what am I watching / what have I got going / what's still open\", and before saying the user has nothing. Finished items are excluded unless asked for.",
             "input_schema": {
                 "type": "object",
                 "properties": {
@@ -3213,8 +3194,7 @@
                                 "setup",
                                 "portfolio",
                                 "coverage",
-                                "queued",
-                                "aether"
+                                "queued"
                             ]
                         },
                         "description": "optional — narrow to these kinds. Omit for everything, which is the usual case."

@@ -13,8 +13,7 @@ signs out and back in). Admins today: `roy_shacked`, `marce`.
 | **Atlas** (portfolio) | the full build; an empty sleeve is sourced for them on the server (below) | same, + the `<coverage_refresh>` hop (it rewrites house coverage) |
 | **Argus** (scanner) | same as admin — scans are owner-scoped, no admin side | same |
 | **Mentor** (setups, Talos) | same as admin | same |
-| **Axl** (reception) | knows four desks; shows the house forecast; never routes to Pythia or Aether | knows every desk |
-| **Aether** | reads the candidate list | + the chat and discovery |
+| **Axl** (reception) | knows four desks; shows the house forecast; never routes to Pythia | knows every desk |
 
 What is NOT role-scoped, on purpose: **the house artifacts are read by everyone.** Every coverage
 document, and Pythia's house industry views (`industry_view`, one per GICS sub-industry: demand,
@@ -27,9 +26,9 @@ The server owns every gate; the client hides what the server refuses, as a court
 
 | Layer | Mechanism |
 |---|---|
-| Routes | `requireAdmin` (`middleware/auth.middleware.js`) — on `/api/strategy`'s two writes (`POST /stream`, `POST /industries/:code`; the `GET /industries` reads are open to any signed-in user since 2026-10-05), on the writes + queue under `/api/analyst`, on `/api/aether/stream` + discovery. `tests/unit/adminGate.test.js` pins it, and pins that scanner/mentor/setups routes are **never** gated |
+| Routes | `requireAdmin` (`middleware/auth.middleware.js`) — on `/api/strategy`'s two writes (`POST /stream`, `POST /industries/:code`; the `GET /industries` reads are open to any signed-in user since 2026-10-05), on the writes + queue under `/api/analyst`. (`/api/aether/*` went with the event board, 2026-11-18.) `tests/unit/adminGate.test.js` pins it, and pins that scanner/mentor/setups routes are **never** gated |
 | Social chat | `ADMIN_BOT_IDS = ['strategy', 'analyst']` (`api/chat/chat.service.js`, mirrored in the frontend `agentMeta.jsx`). The notifiers narrow delivery to `listAdminUserIds` and stamp `visibility: 'admin'`; `visibleConversationsFor(convs, role)` hides the threads from a non-admin on list AND on read-by-id, so a demoted admin cannot read the house desk through a thread they still own |
-| Axl | `buildRoleSection(isAdmin)` in the prompt tail tells Axl who it has; `routeFor(role, route)` (`routing.util.js`, the shared routing tier every desk's controller applies) drops an admin desk for a non-admin whatever the model emitted. The desks' own route rule (`buildRouteRule`) never lists Pythia or Aether at all |
+| Axl | `buildRoleSection(isAdmin)` in the prompt tail tells Axl who it has; `routeFor(role, route)` (`routing.util.js`, the shared routing tier every desk's controller applies) drops an admin desk for a non-admin whatever the model emitted. The desks' own route rule (`buildRouteRule`) never lists Pythia at all |
 | Atlas | `<coverage_refresh>` runs only for `req.user.role === 'admin'` (`portfolio.controller.js`); a trader's ask is logged and Atlas reads the standing coverage |
 | Client | `DESKS[].adminOnly` (hub cards), `CoverageActions`, the "Initiate coverage" button, the StrategyPanel's Publish. The Forecasts board (`IndustryView`) is no longer gated — every user sees it |
 

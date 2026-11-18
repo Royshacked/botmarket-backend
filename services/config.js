@@ -395,27 +395,13 @@ export const config = {
     /** Escape hatch for load testing. Opt-IN, and logged loudly at boot when it is on. */
     get rateLimitDisabled()    { return _bool('RATE_LIMIT_DISABLED', 'opt-in') },
 
-    // ── Aether engine scheduler ──
+    // ── The engine's database ──
     /**
-     * Absolute path to the aether-engine Python repo. When set, the backend spawns
-     * scripts/scheduler.py from that directory as a child process on startup (loop-leader only).
-     * Leave unset to disable the scheduler — the engine still serves its read endpoints normally.
-     */
-    get aetherEnginePath() { return _str('AETHER_ENGINE_PATH', '') },
-    /**
-     * Whether THIS host runs the engine's background SCHEDULER (Roy, 2026-11-12: off on the laptop unless he asks). The
-     * engine path also serves an admin's discovery press, so it stays set; `AETHER_SCHEDULER=off` keeps only the
-     * scheduled jobs from starting — a laptop's scheduler writes to the house database beside Render's. Default on.
-     */
-    get aetherSchedulerOn() { return _bool('AETHER_SCHEDULER', 'off-switch') },
-    /**
-     * The HOUSE database the engine reads and writes — the one the deployed instance is on
-     * (`test`), where the daily news queue lands and where every admin's Aether list reads from.
-     * Unset = the database this process is connected to, which is right everywhere except a
-     * laptop on its own dev database: there, an engine pointed at the local clone reads a news
-     * queue nobody refreshes and writes candidates nobody on the deployed app can see. When it
-     * differs from the connected database, a finished discovery run is mirrored back locally
-     * (aetherMirror.service).
+     * The HOUSE database the aether-engine's jobs write (industry metrics, statements, GICS, prices, money,
+     * geopolitics) — the one the deployed instance is on (`test`). Unset = the database this process is
+     * connected to, which is right everywhere except a laptop on its own dev database, whose clone of the
+     * engine's data nobody refreshes. Read through services/engineDb.js. (AETHER_ENGINE_PATH and
+     * AETHER_SCHEDULER went with the event board's scheduler, 2026-11-18.)
      */
     get aetherDb() { return _str('AETHER_DB', '') || null },
 

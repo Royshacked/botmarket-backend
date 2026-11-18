@@ -91,9 +91,9 @@ test('a session is titled by its first user message, cut for a list row', () => 
     assert.equal(sessionTitle([]), 'Untitled')
 })
 
-test('the scopes are the one chat and the two admin desks', () => {
-    for (const s of ['main', 'strategy', 'aether']) assert.equal(isScope(s), true)
-    for (const s of ['', 'mentor', null, undefined]) assert.equal(isScope(s), false)
+test('the scopes are the one chat and the admin desk', () => {
+    for (const s of ['main', 'strategy']) assert.equal(isScope(s), true)
+    for (const s of ['', 'mentor', 'aether', null, undefined]) assert.equal(isScope(s), false)
 })
 
 test('a reply keeps the tools it was written from — strings only, deduplicated, capped; never on a user turn (Roy, 2026-11-13)', async () => {

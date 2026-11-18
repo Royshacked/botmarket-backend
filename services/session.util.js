@@ -9,9 +9,9 @@
 
 import { DESKS, AGENT_KEYS, ENTITY_KINDS } from './desks/registry.js'
 
-/** The scopes a session can belong to: the one chat, and the two admin desks that keep their own panel. */
-export const SCOPES = Object.freeze(['main', 'strategy', 'aether'])
-export const ADMIN_SCOPES = Object.freeze(['strategy', 'aether'])
+/** The scopes a session can belong to: the one chat, and the admin desk that keeps its own panel (Pythia; Aether's went 2026-11-18). */
+export const SCOPES = Object.freeze(['main', 'strategy'])
+export const ADMIN_SCOPES = Object.freeze(['strategy'])
 
 /** The agents that speak in a session (agentMeta / AGENTS keys) — the desk registry's. */
 export const SESSION_AGENTS = AGENT_KEYS

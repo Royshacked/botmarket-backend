@@ -37,7 +37,7 @@ import { DESKS, PIPELINE_KEYS, ADMIN_PIPELINE_KEYS, RECEPTION } from './desks/re
 // it becomes null and the user simply stays where they are.
 export const VALID_PIPELINES = new Set(PIPELINE_KEYS)
 
-// Admin-only: Pythia (strategy) and Aether. The prompts say so; this is the gate that holds when a
+// Admin-only: Pythia (strategy; Aether too until 2026-11-18). The prompts say so; this is the gate that holds when a
 // model forgets, so a trader is never sent to a desk the hub does not show them and the routes 403.
 export const ADMIN_DESKS = ADMIN_PIPELINE_KEYS
 
@@ -45,7 +45,7 @@ export const ADMIN_DESKS = ADMIN_PIPELINE_KEYS
  * The desks one DESK may send the user to — each is ONE agent, keyed by the pipeline whose entry
  * tab is that agent, so "send it to Mentor" is `assist` and never `trade` (which enters at Argus).
  * The admin desks are not here (registry: not routable) — no desk agent has to know the user's role
- * to write a correct offer. Axl still routes admins to both.
+ * to write a correct offer. Axl still routes admins to Pythia.
  *
  * `agent` is the AGENTS / activeTab key the client knows the desk's agent by; `does` is the one line
  * the sender's prompt shows.
@@ -140,7 +140,7 @@ export function splitEdit(raw) {
 // ONE KIND, because a tag is only as good as the handle that reaches it. `idea` was here for a day
 // and came out: the kind is alive — it is the execution tier every order rides and a portfolio
 // holding IS an idea document — but nothing an agent reads ever names one. `get_watched_items`
-// lists setups, books, coverage, scans, queued actions and Aether events; a holding is reached
+// lists setups, books, coverage, scans, queued actions; a holding is reached
 // through its book, and the positions in `get_trading_context` carry no entity id at all. A kind an
 // agent cannot quote is a tag that can only be emitted wrong. The CLIENT still opens ideas — the
 // Floor's holdings and the positions rows do it on a click — which is a different list

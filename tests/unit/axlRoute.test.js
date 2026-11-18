@@ -527,7 +527,7 @@ test('every desk adopt can arrive at is a real desk', () => {
 
 // ── who the user is (2026-09-14) ──────────────────────────────────────────────
 //
-// Pythia (strategy) and Aether are admin desks. Axl is the way in to every desk, so it is told the
+// Pythia (strategy) is the admin desk (Aether was the other until 2026-11-18). Axl is the way in to every desk, so it is told the
 // role in the prompt tail (buildRoleSection) AND the controller drops an admin route for a trader
 // (_routeFor) — the prompt is the courtesy, the gate is the rule. The house sector view is not
 // closed: a trader still reads it; only authoring it is Pythia's.
@@ -535,26 +535,27 @@ test('every desk adopt can arrive at is a real desk', () => {
 import { buildRoleSection, ADMIN_DESKS } from '../../services/agents/axl.agent.service.js'
 import { routeFor as _routeFor } from '../../services/routing.util.js'
 
-test('role: the admin desks are the industry strategist and the event analyst', () => {
-    assert.deepEqual([...ADMIN_DESKS], ['strategy', 'aether'])
+test('role: the admin desk is the industry strategist', () => {
+    assert.deepEqual([...ADMIN_DESKS], ['strategy'])
     for (const d of ADMIN_DESKS) assert.ok(VALID_PIPELINES.has(d), `${d} is a real desk`)
 })
 
-test('role block: a trader is told the two desks do not exist, and that the view is still theirs to read', () => {
+test('role block: a trader is told the admin desk does not exist, and that the view is still theirs to read', () => {
     const t = buildRoleSection(false)
     assert.match(t, /USER ROLE: TRADER/)
-    assert.match(t, /Never route to `strategy` or `aether`/)
+    assert.match(t, /Never route to `strategy`/)
+    assert.doesNotMatch(t, /aether|event analyst/)
     assert.match(t, /get_industry_views/)
     assert.match(t, /end the turn with NO route/)
     // undefined / anything not exactly true reads as a trader — the safe default
     assert.equal(buildRoleSection(undefined), t)
 })
 
-test('role block: an admin has every desk, both admin desks named', () => {
+test('role block: an admin has every desk, the admin desk named', () => {
     const a = buildRoleSection(true)
     assert.match(a, /USER ROLE: ADMIN/)
     assert.match(a, /<route>strategy<\/route>/)
-    assert.match(a, /<route>aether<\/route>/)
+    assert.doesNotMatch(a, /aether|event analyst/)
 })
 
 test('the role block rides the prompt TAIL, not the cached base', async () => {
@@ -572,7 +573,6 @@ test('the role block rides the prompt TAIL, not the cached base', async () => {
 
 test('gate: a trader is never handed to an admin desk, whatever the model emitted', () => {
     assert.equal(_routeFor('trader', 'strategy'), null)
-    assert.equal(_routeFor('trader', 'aether'), null)
     assert.equal(_routeFor(undefined, 'strategy'), null)   // a role-less token is a trader
     assert.equal(_routeFor('trader', 'trade'), 'trade')
     assert.equal(_routeFor('trader', 'research'), 'research')
@@ -580,17 +580,17 @@ test('gate: a trader is never handed to an admin desk, whatever the model emitte
 
 test('gate: an admin is handed to every desk, and junk is still junk', () => {
     assert.equal(_routeFor('admin', 'strategy'), 'strategy')
-    assert.equal(_routeFor('admin', 'aether'), 'aether')
+    assert.equal(_routeFor('admin', 'aether'), null)   // the event board's desk, deleted 2026-11-18
     assert.equal(_routeFor('admin', 'zeus'), null)
     assert.equal(_routeFor('admin', null), null)
 })
 
-test('the prompt teaches the role line and marks both admin desks', () => {
+test('the prompt teaches the role line and marks the admin desk', () => {
     const prompt = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../../prompts/axl_system_prompt.md'), 'utf8')
     assert.match(prompt, /## Who the user is/)
     assert.match(prompt, /USER ROLE/)
     assert.match(prompt, /`<route>strategy<\/route>` — \*\*admin only\.\*\*/)
-    assert.match(prompt, /`<route>aether<\/route>` — \*\*admin only\.\*\*/)
+    assert.doesNotMatch(prompt, /<route>aether<\/route>|event analyst/)
 })
 
 test('web search answers world questions at reception and keeps the broadcast rules', () => {

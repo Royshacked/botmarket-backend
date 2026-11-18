@@ -17,7 +17,6 @@ const setup = (over = {}) => ({ id: 's1', asset: 'NVDA', direction: 'long', stat
 const book = (over = {}) => ({ portfolioId: 'p1', name: 'Growth', holdings: 2, savedAt: 3, statuses: { long: 2 }, symbols: ['MSFT'], ...over })
 const cov = (over = {}) => ({ id: 'cov1', symbol: 'AVGO', status: 'active', updated_at: '2026-07-20T00:00:00Z', ...over })
 const queued = (over = {}) => ({ id: 'q1', asset: 'TSLA', direction: 'long', ready: false, action: { type: 'entry' }, origin: { kind: 'setup', entityId: 's9' }, decidedAt: 5, nextOpenMs: NOW + 3_600_000, queuedReason: 'market shut', ...over })
-const run = (over = {}) => ({ run_id: 'r1', event: 'China restricts rare earth exports', event_date: '2026-09-10', event_category: 'trade', created_at: '2026-09-11T06:00:00Z', candidates: [{ ticker: 'MP', side: 'helped' }, { ticker: 'TSLA', side: 'hurt' }], ...over })
 
 const deps = (over = {}) => ({
     now: NOW,
@@ -25,14 +24,13 @@ const deps = (over = {}) => ({
     portfolios: async () => [book()],
     coverage: async () => [cov()],
     queued: async () => [queued()],
-    aether: async () => [run()],
     ...over,
 })
 
 test('one read answers across every list the Floor shows', async () => {
     const res = await listWatchedItems('u1', {}, deps())
-    assert.deepEqual(res.counts, { setup: 1, portfolio: 1, coverage: 1, queued: 1, aether: 1 })
-    assert.equal(res.items.length, 5)
+    assert.deepEqual(res.counts, { setup: 1, portfolio: 1, coverage: 1, queued: 1 })
+    assert.equal(res.items.length, 4)
     assert.equal(res.asOf, NOW)
 })
 
@@ -44,16 +42,13 @@ test('the research queue is no list, for an admin either — asked for by name, 
     assert.deepEqual(Object.keys(askedAnyway.counts), ['setup'])
 })
 
-test('a queued row says whether it is released, and an Aether row is one EVENT with its names', async () => {
+test('a queued row says whether it is released; the event board’s kind reads nothing (deleted 2026-11-18)', async () => {
     const res = await listWatchedItems('u1', { kinds: ['queued', 'aether'] }, deps())
+    assert.deepEqual(Object.keys(res.counts), ['queued'])
     const q = res.items.find(i => i.kind === 'queued')
     assert.equal(q.status, 'waiting')
     assert.equal(q.symbol, 'TSLA')
     assert.equal(q.detail.verb, 'entry')
-    const a = res.items.find(i => i.kind === 'aether')
-    assert.equal(a.title, 'China restricts rare earth exports')
-    assert.equal(a.detail.candidates, 2)
-    assert.deepEqual(a.detail.top, ['MP (helped)', 'TSLA (hurt)'])
     const released = await listWatchedItems('u1', { kinds: ['queued'] }, deps({ queued: async () => [queued({ ready: true })] }))
     assert.equal(released.items[0].status, 'released')
 })
@@ -66,7 +61,8 @@ test('the default kinds exclude the retired Idea agent’s leftovers', async () 
     assert.ok(!DEFAULT_KINDS.includes('call'))
     // `scan` left on 2026-11-09 with Argus's lists — the list is gone from the app.
     assert.ok(!DEFAULT_KINDS.includes('scan'))
-    assert.deepEqual(DEFAULT_KINDS, ['setup', 'portfolio', 'coverage', 'queued', 'aether'])
+    // `aether` left on 2026-11-18 with the event board.
+    assert.deepEqual(DEFAULT_KINDS, ['setup', 'portfolio', 'coverage', 'queued'])
 })
 
 test('asking for scans by name reads nothing — there is no source for the archived list', async () => {
@@ -100,7 +96,7 @@ test('a failed source is NAMED, never reported as nothing', async () => {
     const res = await listWatchedItems('u1', {}, deps({ setups: async () => { throw new Error('mongo down') } }))
     assert.deepEqual(res.unavailable, ['setup'])
     assert.equal(res.counts.setup, undefined)
-    assert.equal(res.items.length, 4, 'the other lists still answer')
+    assert.equal(res.items.length, 3, 'the other lists still answer')
 })
 
 test('narrowing by kind reads only those sources', async () => {

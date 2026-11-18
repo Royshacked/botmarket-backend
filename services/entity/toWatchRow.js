@@ -230,32 +230,6 @@ export function queuedToWatchRow(item) {
     }
 }
 
-/**
- * One Aether RUN — an event and the names it reached — → a row. Per run, not per candidate: "what
- * is on the Aether list" is a list of events, and a forty-name run reported name by name would
- * bury the four events it sits beside. The names ride in `detail.top` for the model to cite; the
- * desk's own tool answers per ticker.
- */
-export function aetherRunToWatchRow(run) {
-    if (!run?.run_id) return null
-    const cands = Array.isArray(run.candidates) ? run.candidates : []
-    return {
-        kind: 'aether',
-        id: run.run_id,
-        symbol: null,
-        title: _title(run.event || run.subject, 'Event'),
-        direction: null,
-        status: null,
-        updatedAt: _ms(run.created_at) ?? _ms(run.event_date),
-        detail: {
-            eventDate: run.event_date || null,
-            category: run.event_category || null,
-            candidates: cands.length,
-            top: cands.slice(0, 5).map(c => `${c.ticker}${c.side ? ` (${c.side})` : ''}`),
-        },
-    }
-}
-
 /** Kind → projector, for callers that map a mixed set. */
 export const WATCH_ROW_PROJECTORS = {
     setup: setupToWatchRow,
@@ -263,5 +237,4 @@ export const WATCH_ROW_PROJECTORS = {
     scan: scanToWatchRow,
     coverage: coverageToWatchRow,
     queued: queuedToWatchRow,
-    aether: aetherRunToWatchRow,
 }

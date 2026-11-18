@@ -31,8 +31,8 @@ const OPUS     = async () => ({ chatModel: 'claude-opus-5-5' })
 
 test('an ordinary agent tag becomes its bare name', () => {
     assert.equal(agentKeyFromLog('[analystAgent]'), 'analystAgent')
-    // A quick read books under its own row, apart from coverage — the hyphen survives, so the key reads.
-    assert.equal(agentKeyFromLog('[analystAgent-quickread]'), 'analystAgent-quickread')
+    // A mode books under its own row, apart from coverage — the hyphen survives, so the key reads.
+    assert.equal(agentKeyFromLog('[analystAgent-catalyst]'), 'analystAgent-catalyst')
     assert.equal(agentKeyFromLog('[tradingTools]'), 'tradingTools')
     assert.equal(agentKeyFromLog('[marketBrief]'), 'marketBrief')
 })

@@ -60,9 +60,9 @@ test('server.js registers the full fleet', () => {
         // 'aetherScheduler' left this list on 2026-09-06, and its absence is the fix rather than a
         // regression. The lease decides which PROCESS owns shared work; the Aether engine needs a
         // MACHINE with a Python checkout, and the lease holder is the deploy, which has neither.
-        // Under the lease it completed zero scheduled runs in twelve days. It is now started
-        // unconditionally in server.js, gated on the engine being present on this host, and its
-        // mutual exclusion comes from claiming each job occurrence in aether_scheduler_runs.
+        // Under the lease it completed zero scheduled runs in twelve days. It was then started outside
+        // the lease, gated on the engine being present on the host, until it was deleted with the
+        // event board on 2026-11-18.
         // 'pythiaWeekly' (2026-10-11, replaced 'industryScreen') runs Pythia's change scan and its assessments
         // when the engine has a new run (pythia-assessment.md §8).
         // 'pythiaCalls' (2026-10-10) grades Pythia's logged calls at 3 and 12 months (pythia-assessment.md §7).

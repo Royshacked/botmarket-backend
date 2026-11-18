@@ -577,7 +577,7 @@ export const TOOL_SCHEMAS = {
                 "type": "array",
                 "items": {
                     "type": "string",
-                    "enum": ["setup", "portfolio", "coverage", "queued", "aether"]
+                    "enum": ["setup", "portfolio", "coverage", "queued"]
                 },
                 "description": "optional — narrow to these kinds. Omit for everything, which is the usual case."
             },
@@ -826,25 +826,6 @@ export const TOOL_SCHEMAS = {
             "theme": { "type": "string", "description": "The theme's id, th_… (from list_themes)." }
         },
         "required": ["theme"]
-    },
-    // ── Aether desk (event exposure) ──────────────────────────────────────────
-    // get_channel_taxonomy, get_channel_state and get_regime were removed with the
-    // channel engine on 2026-09-09. This is what the desk reads now.
-    get_event_candidates: {
-        "type": "object",
-        "properties": {
-            "days": {
-                "type": "integer",
-                "description": "How far back to look, in days. Default 30, capped at 180.",
-            },
-            "includeDropped": {
-                "type": "boolean",
-                "description": "Include candidates a gate rejected, each with its reason. "
-                    + "Default false. Every candidate is stored, including the rejected "
-                    + "ones — a filter whose rejections leave no trace cannot be shown to "
-                    + "be wrong — but the answer normally wants the shortlist.",
-            },
-        },
     },
 }
 

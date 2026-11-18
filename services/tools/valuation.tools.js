@@ -112,7 +112,7 @@ export function valuationReadText(sym, method, result, meta = {}) {
 
 /**
  * Render a computeEventDelta() result as an LLM-ready read, ending in the ONE LINE the agent copies
- * into its <quickread> block verbatim. The numbers are the tool's; the agent's job was the inputs.
+ * into its read's block (the catalyst read's <catalyst_read>) verbatim. The numbers are the tool's; the agent's job was the inputs.
  */
 export function eventDeltaReadText(sym, result, meta = {}) {
     const S = String(sym || '').toUpperCase().trim()
@@ -142,7 +142,7 @@ export function eventDeltaReadText(sym, result, meta = {}) {
                 + (result.remaining_pct != null && Math.sign(result.remaining_pct) !== Math.sign(result.delta_price_pct || 0) && result.delta_price_pct ? ' — the market has moved PAST what the event is worth' : ''))
         }
     }
-    lines.push('- Copy this into the <quickread> block as `delta`, unchanged:')
+    lines.push('- Copy this into your block as `delta`, unchanged:')
     lines.push(JSON.stringify({
         exposed_revenue_pct: i.exposed_revenue_pct, shock_pct: i.shock_pct, shock_low: i.shock_low, shock_high: i.shock_high,
         incremental_margin: i.incremental_margin, persistence_quarters: i.persistence_quarters,
@@ -246,13 +246,13 @@ export const VALUATION_TOOLS = [
             type: 'object',
             properties: {
                 ticker:               { type: 'string', description: 'e.g. CVX' },
-                exposed_revenue_pct:  { type: 'number', description: 'Share of revenue the event reaches, 0–1. The event analyst’s impact_pct_revenue when the filing sized it; else your read of the segment or concentration note. Say which in your text.' },
+                exposed_revenue_pct:  { type: 'number', description: 'Share of revenue the event reaches, 0–1 — your read of the segment or concentration note, or a figure the filing states. Say which in your text.' },
                 shock_pct:            { type: 'number', description: 'Change to THAT line, signed, as a fraction: −0.30 = that revenue falls 30%; +0.15 = it rises 15%. Your central case.' },
                 shock_low:            { type: 'number', description: 'Optional: the milder end of the shock (same sign convention). Gives the band.' },
                 shock_high:           { type: 'number', description: 'Optional: the harsher end of the shock.' },
                 incremental_margin:   { type: 'number', description: 'How much of a dollar on that line reaches net income, 0–1. A pass-through fee line is high (0.6–0.9); a full-cost product line is near the segment margin; a hedged line is low.' },
                 persistence_quarters: { type: 'number', description: 'How many quarters the shock lasts, 0.25–8 (capped at 4 in the math).' },
-                moved_pct:            { type: 'number', description: 'The excess move since the event in percent (the event analyst’s number, in the opening: "0.5% vs SPY" → 0.5). Omit if none was measured.' },
+                moved_pct:            { type: 'number', description: 'The excess move since the event in percent, vs SPY ("0.5% vs SPY" → 0.5). Omit if none was measured.' },
             },
             required: ['ticker', 'exposed_revenue_pct', 'shock_pct', 'incremental_margin', 'persistence_quarters'],
         },

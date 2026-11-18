@@ -106,7 +106,7 @@ export const TOOLS = toolsFor({
 export const axlAgentService = { chatStream }
 
 // ─── Who the user is ───────────────────────────────────────────────────────────
-// Two desks are admin-only — Pythia (strategy) and Aether — and Axl is the way in to every desk, so
+// One desk is admin-only — Pythia (strategy; Aether was the other until 2026-11-18) — and Axl is the way in to every desk, so
 // it has to know which user it is talking to or it offers a trader a door that answers 403. The
 // house INDUSTRY VIEWS are NOT one of the closed things: they are a broadcast every user may READ
 // (get_industry_views), only their AUTHORING is Pythia's. So a trader's Axl still shows them; it
@@ -123,11 +123,11 @@ export { ADMIN_DESKS }
 /** The role paragraph for the prompt tail. Pure; exported for tests. */
 export function buildRoleSection(isAdmin) {
     if (isAdmin) {
-        return 'USER ROLE: ADMIN. Every desk is open to them, including the industry strategist (`<route>strategy</route>`, to review or change the house industry views) and the event analyst (`<route>aether</route>`, event exposure).'
+        return 'USER ROLE: ADMIN. Every desk is open to them, including the industry strategist (`<route>strategy</route>`, to review or change the house industry views).'
     }
     return [
-        'USER ROLE: TRADER. Two desks DO NOT EXIST for this user — the industry strategist (the strategy desk) and the event analyst (event exposure).',
-        "Never route to `strategy` or `aether`, never offer them, never name the industry strategist or the event analyst as somewhere they can go, and leave them out of any list of the app's desks.",
+        'USER ROLE: TRADER. One desk DOES NOT EXIST for this user — the industry strategist (the strategy desk).',
+        "Never route to `strategy`, never offer it, never name the industry strategist as somewhere they can go, and leave it out of any list of the app's desks.",
         "The HOUSE INDUSTRY VIEWS are still theirs to read: on \"what does the house think of semis / my names' industries\", call `get_industry_views` and report it as \"the house view\" — the report is the whole answer.",
         'If they ask to SET or CHANGE a view, say the industry views are set centrally by the strategy desk and are not something they author here, offer to show the current one, and end the turn with NO route.',
     ].join(' ')

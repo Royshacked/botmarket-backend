@@ -3,7 +3,6 @@ import assert from 'node:assert/strict'
 
 import { buildRouteRule, makeRouteCapture, mayRoute, routeFields, ROUTABLE_DESKS, ROUTE_TAGS } from '../../services/routing.util.js'
 import { analystAgentService }   from '../../services/agents/analyst.agent.service.js'
-import { aetherAgentService }    from '../../services/agents/aether.agent.service.js'
 import { mentorAgentService }    from '../../services/agents/mentor.agent.service.js'
 import { portfolioAgentService } from '../../services/agents/portfolio.agent.service.js'
 import { scannerAgentService }   from '../../services/agents/scanner.agent.service.js'
@@ -33,7 +32,7 @@ test('the rule lists every routable desk but the sender\'s own', () => {
 })
 
 test('the rule never offers an admin desk, and teaches the grammar and the ask-gate', () => {
-    for (const agent of ['scanner', 'mentor', 'analyst', 'portfolio', 'strategy', 'aether', 'proteus']) {
+    for (const agent of ['scanner', 'mentor', 'analyst', 'portfolio', 'strategy', 'proteus']) {
         const rule = buildRouteRule(agent)
         assert.doesNotMatch(rule, /`strategy`|`aether`|the industry strategist/, `${agent}'s rule offers an admin desk`)
         assert.match(rule, /<route>\w+ NVDA<\/route>/)
@@ -80,7 +79,7 @@ test('capture: a desk routing to ITSELF is dropped, opening and all', () => {
 
 test('mayRoute: only the trader may send the user to the stock picker; every open desk stays open to everyone', () => {
     assert.equal(mayRoute('mentor', 'scan'), true)
-    for (const from of [null, undefined, 'axl', 'analyst', 'portfolio', 'strategy', 'aether', 'scanner']) {
+    for (const from of [null, undefined, 'axl', 'analyst', 'portfolio', 'strategy', 'scanner']) {
         assert.equal(mayRoute(from, 'scan'), false, `${from} must not route to the stock picker`)
     }
     for (const desk of ['research', 'assist', 'portfolio']) {
@@ -111,7 +110,7 @@ test('capture: Axl naming the stock picker is dropped, opening and all; the trad
 
 test('mayRoute: Axl and the trader may send the user to the technical analyst; nobody else, and no keyless capture', () => {
     for (const from of ['axl', 'mentor']) assert.equal(mayRoute(from, 'technicals'), true, from)
-    for (const from of [null, undefined, 'analyst', 'portfolio', 'scanner', 'strategy', 'aether', 'proteus']) {
+    for (const from of [null, undefined, 'analyst', 'portfolio', 'scanner', 'strategy', 'proteus']) {
         assert.equal(mayRoute(from, 'technicals'), false, `${from} must not route to the technical analyst`)
     }
     const axl = makeRouteCapture('axl')
@@ -128,7 +127,7 @@ test('mayRoute: Axl and the trader may send the user to the technical analyst; n
 
 test('the rule offers the technical analyst to the trader alone among the desks, and the technical analyst never his own door', () => {
     assert.match(buildRouteRule('mentor'), /\*\*the technical analyst\*\* \(`technicals`\)/)
-    for (const agent of ['analyst', 'portfolio', 'scanner', 'strategy', 'aether', 'proteus']) {
+    for (const agent of ['analyst', 'portfolio', 'scanner', 'strategy', 'proteus']) {
         assert.doesNotMatch(buildRouteRule(agent), /`technicals`/, `${agent}'s rule offers the technical analyst`)
     }
 })
@@ -144,7 +143,7 @@ test("Axl's prompt routes how-a-stock-trades questions to the technical analyst"
 
 test('the rule offers the stock picker to the trader alone', () => {
     assert.match(buildRouteRule('mentor'), /\*\*the stock picker\*\* \(`scan`\)/)
-    for (const agent of ['analyst', 'portfolio', 'scanner', 'strategy', 'aether', 'proteus']) {
+    for (const agent of ['analyst', 'portfolio', 'scanner', 'strategy', 'proteus']) {
         assert.doesNotMatch(buildRouteRule(agent), /`scan`/, `${agent}'s rule offers the stock picker`)
     }
 })
@@ -176,8 +175,10 @@ test('routeFields: validates the desk for the role, sanitizes the symbol, gates 
     assert.equal(routeFields({ route: 'strategy' }, 'admin').route, 'strategy')
 
     // The OPENING travels to the admin desks for an admin, and is dropped with the route for a
-    // trader: a sentence for Pythia or Aether must never survive the desk it was written for.
-    for (const desk of ['strategy', 'aether']) {
+    // trader: a sentence for Pythia must never survive the desk it was written for.
+    // Aether, the other admin desk, went with the event board (2026-11-18): its key routes nowhere now.
+    assert.equal(routeFields({ route: 'aether' }, 'admin').route, null)
+    for (const desk of ['strategy']) {
         const admin = routeFields({ route: desk, opening: 'Change the Technology stance.' }, 'admin')
         assert.deepEqual([admin.route, admin.opening], [desk, 'Change the Technology stance.'])
         const trader = routeFields({ route: desk, opening: 'Change the Technology stance.' }, 'trader')
@@ -196,7 +197,6 @@ const DESKS = [
     { key: 'analyst',   own: 'research',  chatStream: analystAgentService.chatStream,   args: { messages: [{ role: 'user', content: 'send nvda to mentor' }] } },
     { key: 'portfolio', own: 'portfolio', chatStream: portfolioAgentService.chatStream, args: { messages: [{ role: 'user', content: 'send nvda to prometheus' }] } },
     { key: 'strategy',  own: null,        chatStream: strategyAgentService.chatStream,  args: { messages: [{ role: 'user', content: 'send nvda to prometheus' }] } },
-    { key: 'aether',    own: null,        chatStream: aetherAgentService.chatStream,    args: { messages: [{ role: 'user', content: 'send nvda to prometheus' }] } },
     { key: 'proteus',   own: 'technicals', chatStream: proteusAgentService.chatStream,  args: { messages: [{ role: 'user', content: 'send nvda to prometheus' }] } },
 ]
 
@@ -259,8 +259,8 @@ test('back to reception: every main-chat desk may hand a question to Axl; Axl, t
         assert.equal(mayRoute(from, 'reception'), true, from)
         assert.ok(buildRouteRule(from).endsWith(RECEPTION_RULE), `${from}'s prompt carries the hand-back`)
     }
-    for (const from of ['axl', 'strategy', 'aether', null, 'nobody']) assert.equal(mayRoute(from, 'reception'), false, String(from))
-    for (const from of ['strategy', 'aether']) assert.ok(!buildRouteRule(from).includes(RECEPTION_RULE), `${from} talks where Axl does not`)
+    for (const from of ['axl', 'strategy', null, 'nobody']) assert.equal(mayRoute(from, 'reception'), false, String(from))
+    for (const from of ['strategy']) assert.ok(!buildRouteRule(from).includes(RECEPTION_RULE), `${from} talks where Axl does not`)
     // The capture holds it: Axl naming reception routes nowhere; Proteus naming it routes.
     const axl = makeRouteCapture('axl'); axl.captures.route('reception'); assert.equal(axl.result().route, null)
     const pr = makeRouteCapture('proteus'); pr.captures.route('reception'); pr.captures.open('is it a good business?')

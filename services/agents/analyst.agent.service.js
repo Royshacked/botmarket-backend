@@ -27,25 +27,23 @@ import { REMEMBER_DESCRIPTION } from '../tools/userProfile.tools.js'
 
 const __dirname   = dirname(fileURLToPath(import.meta.url))
 const LOG         = '[analystAgent]'
-const QUICKREAD_LOG = '[analystAgent-quickread]'   // its own ledger row — see chatStream
 const PROMPT_PATH = join(__dirname, '../../prompts/analyst_system_prompt.md')
 const _systemPrompt = makePromptLoader(PROMPT_PATH, LOG)
 const MAX_MESSAGES = DESKS.analyst.maxMessages
 
-// QUICK READ is a MODE of Prometheus, not a desk of its own (the shape Argus's hand-off module had until
-// 2026-11-11): the spine stays, and on a quick-read turn one more cached block
-// narrows it to phases 1–2 and a <quickread> verdict instead of a <coverage> draft. Injected as its
-// own block so the coverage-mode prefix stays byte-identical and keeps its cache.
-const _quickreadMode = makePromptLoader(join(__dirname, '../../prompts/analyst_mode_quickread.md'), LOG)
+// A MODE of Prometheus is not a desk of its own: the spine stays, and on a mode's turn one more cached block narrows
+// it to that mode's verdict instead of a <coverage> draft. Injected as its own block so the coverage-mode prefix
+// stays byte-identical and keeps its cache. (The first mode, the quick read on an Aether name, went with the event
+// board on 2026-11-18.)
 // CATALYST READ — the short swing's mode (docs/design/horizon-chains.md §3): the Hotlist's "this week" picks get a
-// catalyst target (what the catalyst is worth, what is still open) instead of coverage. Same shape as the quick read.
+// catalyst target (what the catalyst is worth, what is still open) instead of coverage.
 const _catalystMode = makePromptLoader(join(__dirname, '../../prompts/analyst_mode_catalyst.md'), LOG)
 const CATALYST_LOG = '[analystAgent-catalyst]'   // its own ledger row
 // HORIZON VIEW — a covered name's OTHER horizon (docs/design/argus-rework.md step 3, two targets, stage 1): a Mentor build
 // on a horizon the coverage's one target does not answer. A `<horizon_view>` beside the coverage, never a rewrite of it.
 const _horizonMode = makePromptLoader(join(__dirname, '../../prompts/analyst_mode_horizon.md'), LOG)
 const HORIZON_LOG = '[analystAgent-horizon]'   // its own ledger row
-export const MODES = Object.freeze({ COVERAGE: null, QUICKREAD: 'quickread', CATALYST: 'catalyst', HORIZON: 'horizon' })
+export const MODES = Object.freeze({ COVERAGE: null, CATALYST: 'catalyst', HORIZON: 'horizon' })
 
 export const TOOLS = [
     // web_search leads, then the SHARED valuation module (its own single home), then the
@@ -124,22 +122,16 @@ async function chatStream({
     const route = makeRouteCapture('analyst')
     const tagCaptures = buildTagCaptures({ phase: phase.capture, ...route.captures })
 
-    // A quick read is booked under its own ledger key (agentKeyFromLog). It used to share
-    // `analystAgent` with full coverage turns, which is how "what does a read cost" could only be
-    // estimated (2026-09-20). The log tag is the key, so the tag is what differs.
+    // Each mode is booked under its own ledger key (agentKeyFromLog): the log tag is the key, so the tag is what differs.
     const raw = await _run({
-        log: mode === MODES.QUICKREAD ? QUICKREAD_LOG : mode === MODES.CATALYST ? CATALYST_LOG : mode === MODES.HORIZON ? HORIZON_LOG : LOG, requestedModel, userId, messages: builtMessages, systemPrompt,
+        log: mode === MODES.CATALYST ? CATALYST_LOG : mode === MODES.HORIZON ? HORIZON_LOG : LOG, requestedModel, userId, messages: builtMessages, systemPrompt,
         tools: TOOLS, toolHandlers: { ...TOOL_HANDLERS, ...makeTradingContextHandlers(userId) },
         reasoningEffort, signal, onToken, tagCaptures, onToolStart, onReasoning, onChart, onSpend,
     })
 
     const { reply, coverage } = _parseAnalystResponse(raw)
-    // A quick read never enters the book: in that mode the <coverage> block is dropped even if the
-    // model emitted one against instruction, and the <quickread> verdict is what comes back.
-    const quickread = mode === MODES.QUICKREAD ? _parseQuickRead(raw) : null
     logger.info(LOG, 'chatStream done', { replyLength: reply.length, hasCoverage: Boolean(coverage), mode, phase: phase.get() })
     const routing = route.result()   // { route, routeSymbol, opening, edit } — the controller validates
-    if (mode === MODES.QUICKREAD) return { reply, phase: phase.get(), quickread, ...routing }
     // A catalyst read never enters the book either: its <catalyst_read> is what comes back, any <coverage> dropped.
     if (mode === MODES.CATALYST) return { reply, phase: phase.get(), catalyst: _parseCatalystRead(raw), ...routing }
     // A horizon view never rewrites the coverage: its <horizon_view> is what comes back, any <coverage> dropped.
@@ -155,34 +147,6 @@ export function _parseAnalystResponse(raw) {
     const text  = raw ?? ''
     const reply = cleanReply(text)
     return { reply, coverage: _cleanDraft(parseEmitBlock(text, 'coverage', LOG)) }
-}
-
-const QUICKREAD_VERDICTS = new Set(['credible', 'priced_in', 'contradicted', 'unclear'])
-// The direction across every event naming the company, when more than one does.
-const QUICKREAD_NETS = new Set(['helped', 'hurt', 'unclear'])
-
-/**
- * The <quickread> block, checked rather than trusted. A verdict outside the four is `unclear` —
- * the model saying something the vocabulary does not have is not a fifth verdict, it is an
- * unreadable one, and `unclear` is the honest name for that. Confidence is clamped to [0, 1];
- * evidence keeps only entries with a fact. Null when there is no block at all.
- */
-export function _parseQuickRead(raw) {
-    const q = parseEmitBlock(raw ?? '', 'quickread', LOG)
-    if (!q || typeof q !== 'object' || Array.isArray(q)) return null
-    const conf = Number(q.confidence)
-    return {
-        verdict:    QUICKREAD_VERDICTS.has(q.verdict) ? q.verdict : 'unclear',
-        net:        QUICKREAD_NETS.has(q.net) ? q.net : null,
-        confidence: Number.isFinite(conf) ? Math.min(Math.max(conf, 0), 1) : null,
-        read:       typeof q.read === 'string' ? q.read.trim() : '',
-        evidence:   (Array.isArray(q.evidence) ? q.evidence : [])
-            .filter(e => e && typeof e.fact === 'string' && e.fact.trim())
-            .map(e => ({ fact: e.fact.trim(), source: typeof e.source === 'string' ? e.source.trim() : '' })),
-        checked:    (Array.isArray(q.checked) ? q.checked : []).filter(t => typeof t === 'string'),
-        delta:      _cleanDelta(q.delta),
-        delta_basis: typeof q.delta_basis === 'string' ? q.delta_basis.trim() : '',
-    }
 }
 
 const CATALYST_VERDICTS = new Set(['credible', 'priced_in', 'contradicted', 'unclear'])
@@ -243,7 +207,7 @@ export function _parseHorizonView(raw) {
 }
 
 /**
- * The <catalyst_read> block (horizon-chains.md §3), checked rather than trusted: the quick read's rules — a verdict
+ * The <catalyst_read> block (horizon-chains.md §3), checked rather than trusted: a verdict
  * outside the four is `unclear`, confidence clamped, evidence kept only with a fact, the delta only as the tool's own
  * numbers — plus the catalyst, the window (5–30 days) and the short-swing clauses. Null when there is no block.
  */
@@ -392,8 +356,7 @@ ${audienceBlock}
     return [
         cachedBlock(_systemPrompt() + buildRouteRule('analyst') + LANGUAGE_RULE + VOICE_RULE + VENUE_RULE + buildStandingProposalRule('coverage', 'Initiate / Revise') + BREVITY_RULE),
         // The mode module AFTER the spine and BEFORE the dynamic block, as its own cached block:
-        // coverage turns keep their prefix untouched, and quick-read turns share one across names.
-        ...(mode === MODES.QUICKREAD ? [cachedBlock(_quickreadMode())] : []),
+        // coverage turns keep their prefix untouched, and a mode's turns share one across names.
         ...(mode === MODES.CATALYST ? [cachedBlock(_catalystMode())] : []),
         ...(mode === MODES.HORIZON ? [cachedBlock(_horizonMode())] : []),
         { type: 'text', text: dynamic },

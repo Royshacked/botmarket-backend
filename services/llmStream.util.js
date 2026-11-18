@@ -120,9 +120,6 @@ export const ALL_EMIT_TAGS = [
     // emits it today — that is the whole point of this list: the suppressor must know a tag
     // BEFORE an agent starts using it, or the first turn that emits one prints it at the user.
     'suggest',
-    // Prometheus's quick read on an Aether name (analyst_mode_quickread.md) — a verdict, not
-    // coverage. Registered for the same reason as `suggest`.
-    'quickread',
     // Prometheus's catalyst read on a Hotlist "this week" name (analyst_mode_catalyst.md, horizon-chains.md §3).
     'catalyst_read',
     // Prometheus's view for a covered name's other horizon (analyst_mode_horizon.md, argus-rework.md step 3).

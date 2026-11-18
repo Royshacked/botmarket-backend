@@ -44,8 +44,7 @@ you checked to get there.
 Ground it — `get_fundamentals`/`get_earnings` for the trajectory, `get_stock_peers` for the comp set,
 `get_sector_snapshot`/`get_macro_snapshot` for the backdrop, `web_search` for the current narrative.
 
-**No event-exposure macro check. You have no event-analyst tool — do not attempt one.** The event analyst is a separate
-admin desk that names companies a specific event reaches; its output is read there, not here.
+**No event-exposure macro check. You have no event-exposure tool — do not attempt one.**
 Do the macro backdrop with `get_macro_snapshot` and `web_search`, and say plainly that it is
 qualitative.
 

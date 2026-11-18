@@ -23,7 +23,6 @@ import { coverageService } from '../api/analyst/coverage.service.js'
 import { listPortfolios } from './portfolioState.service.js'
 import { resolveMode } from './venue.resolve.service.js'
 import { listWaiting } from './pendingAction/pendingWork.service.js'
-import { getEventCandidates } from '../api/aether/aether.service.js'
 
 const LOG = '[watchlist]'
 
@@ -36,7 +35,8 @@ const LOG = '[watchlist]'
  */
 // `scan` left on 2026-11-09 with Argus's lists (archive/README.md): the list is gone from the app, so reporting
 // one would offer the user a door that is not there.
-export const DEFAULT_KINDS = ['setup', 'portfolio', 'coverage', 'queued', 'aether']
+// `aether` (the event board's runs) left on 2026-11-18 with the board.
+export const DEFAULT_KINDS = ['setup', 'portfolio', 'coverage', 'queued']
 
 /**
  * The lists only an admin has — for a trader the list does not exist, rather than exists and is refused; asked for by
@@ -78,8 +78,6 @@ export async function listWatchedItems(userId, { kinds = null, includeFinished =
         // rather than reading as empty (listWaiting swallows by default, for the count it feeds).
         // Scoped like a setup: each row carries the `mode` of the entity it is about.
         queued = (uid) => listWaiting(uid, { onError: 'throw' }),
-        // House artifacts, shared like coverage. One row per RUN (see aetherRunToWatchRow).
-        aether = () => getEventCandidates({ days: 30 }),
     } = deps
 
     const asOf = deps.now ?? Date.now()
@@ -96,7 +94,7 @@ export async function listWatchedItems(userId, { kinds = null, includeFinished =
     const sources = [
         ['setup', setups], ['portfolio', portfolios],
         ['coverage', coverage],
-        ['queued', queued], ['aether', aether],
+        ['queued', queued],
     ].filter(([kind]) => want.has(kind))
 
     // Each source is settled independently: one desk's read failing must not cost the user the

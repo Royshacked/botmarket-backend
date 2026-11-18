@@ -78,33 +78,16 @@ The block is captured from the *finished* text (`_parseAnalystResponse`), return
 admin to read, and only persisted when they press Initiate — `initiateCoverage` normalises it then.
 Same shape as every artifact desk: the agent drafts, the service normalises at commit.
 
-**Quick read is a mode, not a desk.** When Aether names a company as exposed to an event, Prometheus
-is asked one narrow question — is that exposure credible, already priced, or contradicted by the
-company's own record — and answers with a `<quickread>` verdict, no target, no thesis
-(`prompts/analyst_mode_quickread.md`, injected as its own cached block so the coverage prefix stays
-byte-identical). The mode's key insight is written into it: a company does not file about a week-old
-event before its next 10-Q, so "nothing filed since" is not evidence; what counts is whether the
-dependency was ever put on paper.
-
-**The read sizes the event (2026-09-20).** "Priced in" had no yardstick — it rested on the estimate
-trend and the move. The read now ends with one deterministic call, `compute_event_delta`
-(`valuation.tools.js` → `computeEventDelta` in `valuation.engine.js`): Δ net income = the Street's
-forward revenue × exposed share × shock × incremental margin × (quarters/4), expressed as Δ EPS % = Δ
-price % at a **constant multiple**, with a band from the shock range and the move since the event
-netted off to say what is still open. First-order by construction — no re-rating, no sentiment; that is
-what "this event alone" means. The model supplies the four judgement inputs and names where each came
-from (`delta_basis`); the tool does the arithmetic and hands back one JSON line the model copies into the
-block as `delta` (the parser keeps numbers only and drops a delta with no percentage — a loss-maker, or
-a block typed by hand). Skipped on `contradicted` and when the record gives no share of revenue to
-stand on. Persistence caps at four quarters: forward EPS is annual, and an effect that outlives it is a
-re-rating question. Costs one more round on top of the read (~$0.15–0.20 a press, up from ~$0.12);
-quick reads book under their own ledger row, `analystAgent-quickread`, so that number is now readable.
-The read runs on the same model rule as every desk turn (`quickReadModel`, 2026-09-21): an admin's
-own menu choice, anyone else the house chat model, else Sonnet 5 — and the stored doc names the
-model that produced it, so two admins can compare candidates on the same name.
-The events-radar name's detail panel shows it under the verdict (`Sized: worth −11% … moved −2% · −9% open`), the
-conclusion line carries it, and the Mentor seed hands it over as a target-shaped number with what is
-already gone taken out.
+**Sizing an event — `compute_event_delta` (2026-09-20).** One deterministic call
+(`valuation.tools.js` → `computeEventDelta` in `valuation.engine.js`): Δ net income = the Street's forward revenue ×
+exposed share × shock × incremental margin × (quarters/4), expressed as Δ EPS % = Δ price % at a **constant multiple**,
+with a band from the shock range and the move since the event netted off to say what is still open. First-order by
+construction — no re-rating, no sentiment; that is what "this event alone" means. The model supplies the four
+judgement inputs and names where each came from; the tool does the arithmetic and hands back one JSON line the model
+copies into its block as `delta` (the parser keeps numbers only and drops a delta with no percentage). Persistence caps
+at four quarters: forward EPS is annual, and an effect that outlives it is a re-rating question. The catalyst read
+below is its caller. It was built for the **quick read** — Prometheus's verdict on a name the Aether event board
+reached — which was deleted with the board on 2026-11-18; `git log` has it.
 
 ### The catalyst read — the short-swing mode (2026-10-23; his own target 2026-10-24)
 
@@ -355,7 +338,6 @@ restarted the window (and cleared the early-hit ratchet). `keepClock` in updateC
 | **The research run** | (Since 2026-10-31 there is no admin list, Start all, Stop or Requeue — Roy: "we dont need anymore the research queue mechanism and list". The queue is the house's pipe only: Pythia's week, the Hotlist's reads and Atlas's sleeves each run their own source.) `researchRun.service`: the whole queue, headless, one name at a time — the same agent, prompt and context, only the audience changes. Skips a name the house already covers (whether the standing thesis needs a look is the pencil's judgment, not the machine's); a PASS is recorded as `rejected: no_edge`; a failed save stays `in_research` with the error. One run at a time, in memory — the day the backend outlives the laptop is the day it needs a collection. **Since 2026-10-23** every name carries its `cost_usd` (~$0.04 on Luna), a house run books to the first admin as `researchRun`, and the run over Pythia's names STARTS BY ITSELF after her week and is picked up by the weekly monitor (`houseResearch.service`, a rolling-week budget `HOUSE_RESEARCH_MAX_USD`); a Pythia name's target must sit on her book's horizon — swing 3m/6m, long term 12m–24m — or it is rejected `horizon_off_book` ([house-research-chain.md](../design/house-research-chain.md)) | house coverage, then `sleeve_sourced` to the Atlas that asked |
 | **Atlas mid-review** | `<coverage_refresh>` → `coverageRefresh.service`, route-and-return: Prometheus rewrites ONE name's coverage (initiate or append a revision), then a `coverage_refreshed` card tells the user to resume. Artifact-mediated: Prometheus writes the doc, Atlas re-reads it — no live judgment injection between agents | the doc, re-read on resume |
 | **The monitor** | the same hop, `userId: null` — a house run; the card fans out to every admin | a fresh target and band |
-| **Aether** | quick-read mode (above) | a `<quickread>` verdict, no doc |
 | **The Hotlist** | catalyst-read mode (above): Argus's This week picks by code (`hotlistResearch.service`, a daily cap), or a user's "Catalyst read" (POST /api/hotlist/reads) | a `catalyst_reads` row — his target, or a pass with its reason |
 | **Mentor, before a build** (2026-11-11) | by CODE, never Mentor's call. **A covered name's OTHER horizon** (two targets, stage 1): a `<horizon_view>` in his `horizon` mode (`analyst_mode_horizon.md`), against his coverage, saved as `coverage.horizon_views.<book>` by `setHorizonView` — its own rating (the house's band), target on the book's horizon, why, what breaks it; the main target, thesis and rating untouched. A retired or watchlist coverage is re-researched and saved live again (`reinit`). The rest: (`mentorReads.service`, [argus-rework.md](../design/argus-rework.md) step 3): once a build has a name and a confirmed horizon — swing / long term → coverage, short term swing → a catalyst read, intraday → none. Queued as source `mentor` (the opening says a user is building the trade; a swing target on 3m/6m, a long-term one on 12m–24m), run as the house BY SYMBOL on the one run, waiting in line. A pass is the answer, not asked again (5 days for a catalyst read, 30 for coverage). Every swing / long-term name a user opens enters house coverage (Roy accepted it, 2026-11-11) | coverage or a `catalyst_reads` row; the chain hands it to Mentor, whose turn runs |
 | **Every desk, reading** | `getCoverage` / `listSymbols` (the one-field projection — Prometheus's own context, the run's skip list and the sleeve orchestrator used to pull whole documents to learn a ticker) | the house view |
@@ -390,7 +372,7 @@ copied. That frozen PT is what Themis compares the *revised* one against.
 - **Peer-multiple compression** as trigger #4 — designed in `coverage.remodel.js`, needs a baseline
   multiple persisted at model time and a noise threshold.
 - **The model + effort a re-model was read with** are not on the revision.
-- **Prometheus, Pythia and Aether are one research layer** in the architecture vision
+- **Prometheus and Pythia are one research layer** (Aether was the third until its event board was deleted, 2026-11-18) in the architecture vision
   ([design/architecture-vision.md](../design/architecture-vision.md)); how the house view
   steers which names get researched is now the 5-year funnel in
   [design/horizons.md](../design/horizons.md) — not built; the tilt-driven house scan that fed the

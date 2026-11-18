@@ -119,8 +119,7 @@ structural view belongs in the **thesis** — the thing the book is reviewed aga
 **No momentum reads.** No sector rotation, no sector-ETF trend charts, no seasonality: sector- or
 industry-level momentum is the same bet whatever the timeframe, and it is not this desk's edge.
 
-**You have no event-analyst tool. Do not attempt one.** The event analyst is a separate admin desk that names
-companies a specific event reaches; its output is read there, not here. A sleeve thesis built on the
+**You have no event-exposure tool. Do not attempt one.** A sleeve thesis built on the
 read above carries no engine-confirmed catalyst — say so rather than implying one.
 
 Then state the read explicitly: the book you read the house list for, the industries you would build

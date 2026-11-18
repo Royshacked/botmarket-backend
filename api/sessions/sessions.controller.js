@@ -1,8 +1,8 @@
 // HTTP handlers for the unified chat's sessions (docs/design/unified-chat.md §3.5, plan phase 3).
 //
 // Read-only plus "new session" in this phase: turns arrive through the session turn endpoint in
-// phase 5. Every read is owner-scoped by the service; the admin desks' scopes ('strategy', 'aether')
-// are refused to a trader here, the same gate their routes keep.
+// phase 5. Every read is owner-scoped by the service; the admin desk's scope ('strategy')
+// is refused to a trader here, the same gate its routes keep.
 
 import { sessionService } from '../../services/session.service.js'
 import { isScope, ADMIN_SCOPES } from '../../services/session.util.js'

@@ -1,5 +1,5 @@
-// The thread API that is left (unified-chat phase 9, 2026-10-20): Pythia's and Aether's panels keep their own
-// chats in `threads` (phase 8e, D1) and drive their persistence from the client — save a draft, link it to what it
+// The thread API that is left (unified-chat phase 9, 2026-10-20): Pythia's panel keeps its own
+// chat in `threads` (phase 8e, D1; Aether's went 2026-11-18) and drives its persistence from the client — save a draft, link it to what it
 // produced, discard it. Every other desk talks in the session (api/sessions); the desks' list / get / pin / badge
 // and pipeline-discard endpoints went with the panels that called them.
 
@@ -24,10 +24,10 @@ const handle = makeHandle(LOG)
 // Live desks only. `idea` (deleted 2026-08-07) was still here a month on; the one client path that
 // saved under it is MainPage's own dead `/api/idea` flow.
 //
-// Since the unified chat (phase 9, 2026-10-20) that is Pythia and Aether alone: every other desk talks in the
+// Since the unified chat (phase 9, 2026-10-20) that is Pythia alone (Aether's panel went 2026-11-18): every other desk talks in the
 // session, its old threads were migrated off this store, and a draft saved under one of them would be legacy data
 // written fresh — so the gate refuses it.
-export const AGENTS = new Set(['strategy', 'aether'])
+export const AGENTS = new Set(['strategy'])
 
 // The service answers `{ ok:false }` with no reason when its write failed — a fault, not a refusal.
 // Thrown bare so the global handler answers the one 500 shape and the log names the handler.

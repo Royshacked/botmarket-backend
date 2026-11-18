@@ -86,8 +86,8 @@ export function getDbName() {
 
 /**
  * A handle on ANOTHER database of the same cluster, over the one connected client — no second
- * pool, no second topology monitor. For the one caller that legitimately reads across the
- * laptop/deployed split: mirroring a house Aether run into the local database. Not a way to
+ * pool, no second topology monitor. For the caller that legitimately reads across the
+ * laptop/deployed split: the engine's house data (services/engineDb.js, AETHER_DB). Not a way to
  * point a process at a database it does not own — the lease rule in config.dbName stands.
  */
 export async function getSiblingDb(name) {
