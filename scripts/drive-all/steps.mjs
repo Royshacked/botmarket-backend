@@ -166,7 +166,10 @@ export const STEPS = [
 
     { name: 'Forecasts', viewport: 'desktop', async run(t) {
         await openDesk(t, 'Forecasts')
-        t.check(await t.page.locator('.fm-tile').count() > 0, 'the forecast map has tiles')
+        // The map reads four sources (~1.7 s on the M0, was 7–9 s before 2026-11-18): wait for the tiles, then say how long.
+        const t0 = Date.now()
+        const tiles = await t.page.locator('.fm-tile').first().waitFor({ timeout: 15_000 }).then(() => true, () => false)
+        t.check(tiles, `the forecast map has tiles${tiles ? ` (${((Date.now() - t0) / 1000 + 1.8).toFixed(1)}s after the click)` : ' within 15s'}`)
         const ranges = panel(t).locator('.cal-nav__btn').filter({ hasText: /^(1m|3m|12m|24m)$/ })
         t.check(await clickAll(t, ranges, 'range') === 4, 'the map offers 1m · 3m · 12m · 24m')
         const filters = panel(t).locator('button').filter({ hasText: /^(All|For swing|For long term|Watch|Avoid)$/ })
