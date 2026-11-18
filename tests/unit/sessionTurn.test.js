@@ -92,6 +92,13 @@ test('ownWords: Axl only, never over an opening the model wrote, never without a
     assert.equal(ownWords(r, 'axl', '   '), r)
 })
 
+test('ownWords: a hand-back route (Mentor → the stock picker) carries the user\'s words when Mentor wrote no opening (the drive, 2026-11-17)', () => {
+    assert.equal(ownWords({ route: 'scan', opening: null }, 'mentor', 'Find me a swing trade.').opening, 'Find me a swing trade.')
+    assert.equal(ownWords({ route: 'scan', opening: 'a swing' }, 'mentor', 'x').opening, 'a swing')
+    const r = { route: 'scan', opening: null }
+    assert.equal(ownWords(r, 'portfolio', 'yes'), r, 'not a hand-back pair → unchanged')
+})
+
 test('Mentor sending the user to Argus presets Argus to find ONE name and hand it back to Mentor', async () => {
     const { turn, sessions } = rig({ run: (ctx) => (ctx.common.messages.at(-1).content === 'yes, find me one'
         ? { reply: 'Argus will find you a name', route: 'scan', opening: 'A swing long in semis' }

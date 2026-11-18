@@ -98,11 +98,15 @@ export function showLine(show) {
  * the desk silent — "Mentor will take it from here", then nothing until the user typed. The user's own words become
  * the opening instead: the desk reads them exactly as if they had been typed there. Axl only — a desk's own route
  * is answered with "yes" as often as not, which is no opening for anyone. Exported for tests.
+ * A HAND-BACK route (Mentor → the stock picker, who brings a name back) carries them too: that desk must run, or the
+ * pane shows "Finding a name" with nobody finding one (the drive, 2026-11-17).
  */
 export function ownWords(routing, agent, text) {
     const words = typeof text === 'string' ? text.trim() : ''
-    // Axl's every route, and any desk's hand-back to him (the question it would not answer IS the user's message).
-    if ((agent !== 'axl' && routing?.route !== RECEPTION) || !routing?.route || routing.opening || !words) return routing
+    // Axl's every route, any desk's hand-back to him (the question it would not answer IS the user's message), and a
+    // sender's route to a desk that works for it.
+    const handBack = !!routing?.route && !!handBackOf(agent, entryOf(routing.route)?.agent)
+    if ((agent !== 'axl' && routing?.route !== RECEPTION && !handBack) || !routing?.route || routing.opening || !words) return routing
     return { ...routing, opening: words }
 }
 

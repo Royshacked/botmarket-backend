@@ -189,7 +189,13 @@ async function chatStream({ messages = [], model: requestedModel, audience = nul
 
     let reply = cleanReply(raw)
 
+    let routing = route.result()   // { route, routeSymbol, opening, edit } — the controller validates
     let pick = _normalizeArgusPick(capturedPick)
+    // His pick sent as a ROUTE back to the trader (`<route>assist S</route>`) instead of the pick tag: the same name, the
+    // same destination — taken as the pick, and the route dropped so the chain's hand-off carries it (the drive,
+    // 2026-11-18: "I'd send S", the route not followed from his opening turn, the trader never got it). The gate below
+    // still checks it is on the house's lists.
+    ;({ pick, routing } = _routeAsPick(pick, routing, reply))
     if (pick && !listed.has(pick.ticker)) {
         // Not shown THIS turn — but the history keeps text only, so "another one" on a later turn picks from a list
         // read earlier. Second look: is it on the house's lists today? A failed read keeps the gate shut.
@@ -209,7 +215,6 @@ async function chatStream({ messages = [], model: requestedModel, audience = nul
         }
     }
     await _attachPickLabel(pick)
-    const routing = route.result()   // { route, routeSymbol, opening, edit } — the controller validates
 
     logger.info(LOG, 'chatStream done', { replyLength: reply.length, hasPick: !!pick, listed: listed.size, route: routing.route, phase: phase.get() })
     return { reply, phase: phase.get(), ...(pick ? { pick } : {}), ...routing }
@@ -230,6 +235,22 @@ export async function _attachPickLabel(pick, { labels = houseLabels } = {}) {
 // Pure: null when there's no usable ticker, else a clean
 // {ticker, direction, thesis, analysis} (direction defaults long; the analysis seeds Mentor's read).
 // Exported for tests.
+/**
+ * A pick sent as a route: no `<argus_pick>`, but a route back to the trader (`assist`) naming a ticker → that ticker is
+ * the pick (its analysis the reply), and the route is dropped — the chain carries a pick back, a route from his opening
+ * turn is never followed. A pick tag AND a route back to the trader: the route goes the same way — any route makes the
+ * runner end the chain instead of carrying the pick (the drive, 2026-11-18: BBWI picked, never reached the trader).
+ * Anything else is returned as it came. Pure; exported for tests.
+ */
+export function _routeAsPick(pick, routing, reply = '') {
+    if (routing?.route !== 'assist') return { pick, routing }
+    const noRoute = { ...routing, route: null, routeSymbol: null, opening: null }
+    if (pick) return { pick, routing: noRoute }
+    if (!routing?.routeSymbol) return { pick, routing }
+    const asPick = _normalizeArgusPick({ ticker: String(routing.routeSymbol), analysis: String(reply ?? '') })
+    return asPick ? { pick: asPick, routing: noRoute } : { pick, routing }
+}
+
 /** The line under a reply whose pick the gate dropped — the user read a name and gets no button. Pure. */
 export function droppedPickNote(ticker) {
     return `\n\n_${ticker} is not on the house's lists today, so it can't go to the trader from here. To trade it anyway, give the trader the name yourself._`

@@ -183,6 +183,18 @@ test('an opening runs ONE turn: a turn that was itself an opening never opens or
     assert.equal(r.opened.length, 0)
 })
 
+test('an opening turn\'s HAND-BACK route is followed once: Mentor\'s opening sends the user to the stock picker, who runs as an opening (the drive, 2026-11-17)', async () => {
+    const r = rig()
+    const s = await r.sessions.getActive({ userId: 'u1' })
+    await r.runner.afterTurn({ user, sessionId: s.sessionId, agent: 'mentor', turnId: 't1_open', origin: 'opening',
+        out: { payload: { reply: "I'll have the stock picker choose one name.", route: 'scan', opening: 'Find me a swing trade.' } } })
+    assert.equal(r.queued.length, 1)
+    assert.deepEqual({ agent: r.queued[0].agent, origin: r.queued[0].origin, text: r.queued[0].text }, { agent: 'scanner', origin: 'opening', text: 'Find me a swing trade.' })
+    // …and the picker's own opening turn routing on is NOT followed: the hand-back is Mentor's → scanner only.
+    await r.runner.afterTurn({ user, sessionId: s.sessionId, agent: 'scanner', turnId: 't1_open_open', origin: 'opening', out: { payload: { route: 'assist', opening: 'over to you' } } })
+    assert.equal(r.queued.length, 1)
+})
+
 test('a reopen whose desk lives in another chat says where, and moves nothing; the card carries the item’s name', async () => {
     const r = rig({ open: async () => ({ reason: 'wrong_scope', agent: 'mentor' }) })
     const s = await r.sessions.getActive({ userId: 'u1' })

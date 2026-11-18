@@ -307,14 +307,14 @@ async function chatStream({ messages = [], ideaAccounts = [], mainAccountId = nu
     const reply = cleanReply(raw)
     // Done — generate the book (argus-rework.md §2.2). A NEW book only: an edit or a review keeps its own press. CODE
     // decides whether it may (the chain runner's go step: the plan sized, the AVOID check).
-    const go = !portfolioId && /<go>[\s\S]*?<\/go>/.test(raw)
     // A book they ALREADY HOLD: the pane opens the adopt grid (portfolio.desk nextState). Not while a saved book is open.
     const adopt = !portfolioId && /<adopt>[\s\S]*?<\/adopt>/.test(raw)
 
     if (capturedPlan) capturedPlan = await _sizePlan(capturedPlan, { mandate: capturedMandate ?? mandate })
     if (capturedUpdate) capturedUpdate = await _markAvoidAdds(capturedUpdate)
+    const go = _atlasGo({ raw, portfolioId, cutShort, plan: capturedPlan, adopt, reply })
 
-    logger.info(LOG, 'chatStream done', { go, replyLength: reply.length, hasPlan: !!capturedPlan, hasUpdate: !!capturedUpdate, hasMandate: !!capturedMandate, hasThesis: !!capturedThesis, screenRequests: screenRequests.length, coverageRefresh: !!coverageRefresh, phase: phase.get() })
+    logger.info(LOG, 'chatStream done', { go, cutShort, replyLength: reply.length, hasPlan: !!capturedPlan, hasUpdate: !!capturedUpdate, hasMandate: !!capturedMandate, hasThesis: !!capturedThesis, screenRequests: screenRequests.length, coverageRefresh: !!coverageRefresh, phase: phase.get() })
     return { reply, plan: capturedPlan, update: capturedUpdate, mandate: capturedMandate, thesis: capturedThesis, phase: phase.get(), ...(go ? { go: true } : {}), ...(adopt ? { adopt: true } : {}), ...(cutShort && !go && !endsAsking(reply) ? { cutShort: true } : {}), ...(screenRequests.length ? { screenRequests } : {}), ...(coverageRefresh ? { coverageRefresh } : {}), ...route.result() }
 }
 
@@ -340,6 +340,20 @@ export function _parseCoverageRefresh(raw) {
 // The singular `_parseScreenRequest` is gone: nothing in production called it (a turn routes EVERY
 // sleeve it decided, which is why the plural exists), and the tests that did now ask for the first
 // of the list — the same thing, without a second exported name to keep in step.
+
+/**
+ * Is Atlas done — generate the book? A NEW book only (an edit or a review keeps its own press). His `<go>` tag says so;
+ * so does a turn the tool budget CUT SHORT that already holds a SIZED plan: the prompt's rule is "plan sized → go"
+ * (argus-rework.md §2.2), and carrying that turn on only re-gathers and re-plans the same book — the drive,
+ * 2026-11-17, saw three carries of 4–5 minutes each, none saying go. The runner's go step still checks the plan is
+ * sized and clear of AVOID names, and activating the book stays the user's press. Not when the reply asks the user
+ * something, and not on an adopt turn. Pure; exported for tests.
+ */
+export function _atlasGo({ raw, portfolioId = null, cutShort = false, plan = null, adopt = false, reply = '' }) {
+    if (portfolioId) return false
+    if (/<go>[\s\S]*?<\/go>/.test(String(raw ?? ''))) return true
+    return !!cutShort && !adopt && Number(plan?.positionSize) > 0 && !endsAsking(reply)
+}
 
 /**
  * EVERY sleeve Atlas routed this turn, in order. A book has three or four, and screening them one

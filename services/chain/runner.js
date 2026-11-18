@@ -16,7 +16,7 @@
 // fails pauses the chain and offers to try again — it is never left "running" with nothing in flight.
 
 import { sessionService } from '../session.service.js'
-import { deskOf, entryOf, RECEPTION } from '../desks/registry.js'
+import { deskOf, entryOf, handBackOf, RECEPTION } from '../desks/registry.js'
 import { DESK_DEFS, hasWork } from '../desks/index.js'
 import { canSpeak } from '../desks/sessionTurn.js'
 import { withSessionLock, sessionDepth } from '../desks/turnLock.js'
@@ -290,8 +290,12 @@ export function makeChainRunner({
         }
         if (payload?.route || !art) {
             if (chain) await end(user, sessionId, chain)
-            // The user's own turn, or Axl sending on a question a desk handed back (never back to reception again).
-            if (payload?.route && (origin === 'user' || (origin === 'reception' && payload.route !== RECEPTION))) {
+            // The user's own turn, or Axl sending on a question a desk handed back (never back to reception again), or an
+            // opening turn's HAND-BACK route (Axl → Mentor's opening → "the stock picker will find one"): that one is
+            // followed, as an opening — the picker cannot route on, and his name comes back through the chain. Not
+            // following it left the floor on the picker with no turn run (the drive, 2026-11-17).
+            const handBack = origin === 'opening' && !!handBackOf(agent, entryOf(payload?.route)?.agent)
+            if (payload?.route && (origin === 'user' || handBack || (origin === 'reception' && payload.route !== RECEPTION))) {
                 followRoute({ user, session, payload, turnId, input })
             }
             return

@@ -13,6 +13,27 @@ test('the marker line goes, and the repeated answer with it', () => {
     assert.equal(dropDebris(`${X}\n\n(No Final Answer)`), X)
 })
 
+test('a marker MID-LINE behind garbled words in another script goes, and the repeated answer with it (the drive, 2026-11-17)', () => {
+    const A = "I'll have the stock picker choose one swing-trade name."
+    assert.equal(dropDebris(`${A} તર્મinal ಥink (final) ${A}`), A)
+    assert.equal(cleanReply(`${A} તર્મinal ಥink (final) ${A}<route>scan</route>`), A)
+    // a different answer after the marker is kept, as its own paragraph
+    assert.equal(dropDebris(`Draft. ಥink (final) The answer.`), 'Draft.\n\nThe answer.')
+    // a curly apostrophe or an accented Latin word before "(final)" is prose, not a marker
+    assert.equal(dropDebris('That’s (final) wording.'), 'That’s (final) wording.')
+    assert.equal(dropDebris('The café (final) offer.'), 'The café (final) offer.')
+})
+
+test('the answer, its reasoning in brackets, the answer again — one copy stays (the drive, 2026-11-18)', () => {
+    const A = "I'll have the stock picker choose one swing-trade name for you."
+    assert.equal(dropDebris(`${A} (Open tags? instructions syntax separate , yes) ${A}`), A)
+    assert.equal(dropDebris(`Sure. ${A} ${A} Next.`), `Sure. ${A} Next.`)
+    // a bracket between two DIFFERENT sentences, or a short repeat, is prose
+    const p = 'The stop sits at 41.20 under the range. (That is 3% below.) The target is the prior high at 48.'
+    assert.equal(dropDebris(p), p)
+    assert.equal(dropDebris('Yes. Yes. Go.'), 'Yes. Yes. Go.')
+})
+
 test('prose is otherwise untouched — a marker inside a sentence, or a repeat that is not adjacent, stays', () => {
     const p = 'The (no final) wording is theirs.'
     assert.equal(dropDebris(p), p)

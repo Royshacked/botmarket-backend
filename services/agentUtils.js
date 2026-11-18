@@ -647,6 +647,16 @@ export function cleanReply(raw) {
 
 // A whole line that is only a channel marker — "(no final)", "(final)", "(no final answer)".
 const DEBRIS_LINE = /^[ \t]*\((?:no )?final(?: answer)?\)[ \t]*$/gim
+// The same marker MID-LINE, behind one to four garbled words in another script (the drive, 2026-11-17: "…one
+// swing-trade name. તર્મinal ಥink (final) I'll have the stock picker…" — the answer, the marker, the answer again).
+// It becomes a paragraph break, so the repeat below drops the second copy. Non-Latin letters only (Greek and up,
+// skipping the punctuation block): a curly apostrophe or "café" is never part of it.
+const DEBRIS_INLINE = /[ \t]*(?:\S*[Ͱ-῿Ⰰ-￿]\S*[ \t]+){1,4}\((?:no )?final(?: answer)?\)[ \t]*/gi
+// The answer, its reasoning in brackets, the answer again — on one line (the drive, 2026-11-18: "I'll have the stock
+// picker choose one swing-trade name for you. (Open tags? instructions syntax separate , yes) I'll have the stock picker
+// choose…"). A whole sentence (20+ characters, from a sentence start to its stop) said twice in a row, with or without
+// a short bracket between, keeps one copy.
+const DEBRIS_ECHO = /(^|[.!?][ \t]+|\n)([^\n]{20,400}?[.!?])[ \t]*(?:\([^()\n]{0,160}\)[ \t]*)?\2/g
 // A stray token in angle brackets (2026-10-19): Argus's reply opened "<չ>\nThe best fit…". Only brackets around one to
 // four NON-ASCII characters, or a special token's `<|name|>` — a tag, "<5%" or "a <-> b" is never that shape. Its
 // spaces go with it, so a reply that opened with one starts on its first word.
@@ -667,7 +677,7 @@ export function dropDebris(text) {
         // Between two words, the spaces collapse to one; at a line's edge, nothing is left.
         const before = all[offset - 1], after = all[offset + m.length]
         return before && after && !/\s/.test(before) && !/[\s.,;:!?)]/.test(after) ? ' ' : ''
-    }).replace(DEBRIS_LINE, '').split(/\n[ \t]*\n/)
+    }).replace(DEBRIS_INLINE, '\n\n').replace(DEBRIS_ECHO, '$1$2').replace(DEBRIS_LINE, '').split(/\n[ \t]*\n/)
     const out = []
     for (const p of paras) {
         const key = p.trim()
