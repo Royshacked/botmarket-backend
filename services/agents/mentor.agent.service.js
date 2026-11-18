@@ -1193,6 +1193,20 @@ export function _buildModeSection(mode, lens = null) {
 }
 
 /**
+ * What stands between the plan and Generate, said so Mentor can act on it: a bare "arming price" left him asking the
+ * user for six turns a price he already had (drive:all 2026-11-18 — his own words: "I have your condition's threshold
+ * as $20.27; if it means a separate price, tell me"). The rule for B (`arm_close` / `arm_floor`) holds for ANY primary
+ * latching day-close condition, the user's own included. Each missing item keeps its slug; the arming ones gain the
+ * field to set. Pure; exported for tests.
+ */
+export function _missingWithHow(items) {
+    const how = (m) => (/^arming price\b/.test(m) ? `${m} (set \`arm_close\` on that scenario to the price its day-close condition names — the user's "daily close above X" is X)`
+        : /^arming floor\b/.test(m) ? `${m} (set \`arm_floor\`: the price a close under which, before it arms, sends it to redraw — for the user's own condition, their stop)`
+        : m)
+    return items.map(how).join(', ')
+}
+
+/**
  * WHETHER THE GENERATE BUTTON IS LIT — the panel's own verdict (setupReadiness), stated to the model.
  *
  * The button and the conversation used to answer "is it ready?" from two different records: the
@@ -1221,7 +1235,7 @@ export function _buildGenerateSection(chatState, hasAccount = null) {
     const build = normalizeBuild(chatState?.build ?? draft.build)
     if (stageOf(activeName(build)) !== null) return ''
     return `\n\nGENERATE: still DARK, and every stage is settled — so this is what stands between the user and the button: ${
-        [...r.missing, ...r.problems].join(', ')}. Fix what is yours to fix in your next <setup>, and ask for exactly what is theirs.`
+        _missingWithHow([...r.missing, ...r.problems])}. Fix what is yours to fix in your next <setup>, and ask for exactly what is theirs.`
 }
 
 /**
@@ -1502,7 +1516,7 @@ export function _sizingReport(plan, size, { balance = null, available = balance,
     const readiness = setupReadiness(sized, hasAccount)
     lines.push(readiness.ready
         ? 'GENERATE: the button is now LIT for this plan. A new build: end with <go> when they chose all the way, or said a step-by-step build is right (§ How a trade goes). On an edit, tell the user Update is ready — never ask them to confirm anything else first.'
-        : `GENERATE: still dark — it needs ${[...readiness.missing, ...readiness.problems].join(', ')}. Say exactly that.`)
+        : `GENERATE: still dark — it needs ${_missingWithHow([...readiness.missing, ...readiness.problems])}. Fix what is yours in your next <setup>; say exactly what is theirs.`)
     // The plan read here is the one on the table BEFORE this reply. When the same reply sets the levels (the user gave
     // them and the size in one message), a problem above is about the OLD levels — seen live as a false "entry/stop
     // mismatch" read out over a plan that came out sized right.

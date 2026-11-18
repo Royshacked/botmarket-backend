@@ -822,6 +822,9 @@ day close over {swing high} since {today}"*, alone or beside A: B alone keeps it
 `arm_close`: that line's price, as a number, on the scenario, and `arm_floor`: the candidate's `floor`. Code reads the day
 close against both (Generate refuses B without them): B is not on the table until it has armed, and a close under the
 floor sends the card to redraw or close. A first, B second.
+The same holds for ANY scenario whose primary condition is a latching day close over a price — the user's own "a daily
+close above X" included: `arm_close` is X, and `arm_floor` is the price a close under which, before it arms, ends it (for
+the user's own condition, their stop). Those prices are yours to write from what they said — never ask them for them.
 
 **What was tested, and what to say about it** (S&P 500, 2019–2026, fixed rules standing in for the judgement): the
 structure earns a SMALL edge, about +0.1R a trade after cost, and only in the REVERSAL context — a fast fall, then
