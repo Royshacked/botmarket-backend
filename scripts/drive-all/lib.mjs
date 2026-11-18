@@ -88,6 +88,27 @@ export const BROWSER_HELPERS = `window.__driveLib = (() => {
 
 const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
 
+// The writes a screen may make — all of them the QA user's own view state, none of them trades,
+// setups, books or chat turns. Anything else a screen tries is stopped and listed in the report.
+export const ALLOW = [
+    { method: 'POST', path: '/api/auth/signin' },
+    { method: 'PUT',  path: '/api/workspace' },                              // the LIVE · PAPER · MANUAL switch
+    { method: 'PUT',  path: '/api/paper/mode' },                             // …which the paper venue mirrors
+    { method: 'POST', path: /^\/api\/chat\/conversations\/[^/]+\/read$/ },   // opening a conversation marks it read
+]
+
+// With --with-agents, the chat may talk: a new session, a turn, a chain's continue, a desk's commit (Generate) and a
+// stop. Still never a broker, an arm (that is the setup window's own route, not on this list) or a delete from the UI.
+// NOT covered by this guard (by design): the drive's own `page.request` calls (the cleanup's deletes) and what a desk's
+// go does on the server — Mentor's go saves AND arms (the trader step never says "all the way"; a setup a turn saved by
+// itself is failed and deleted at once).
+export const ALLOW_AGENTS = [
+    { method: 'POST', path: '/api/sessions/new' },
+    { method: 'POST', path: /^\/api\/sessions\/[^/]+\/(turn|continue|act|edit)$/ },
+    { method: 'POST', path: /^\/api\/turns\/[^/]+\/stop$/ },
+    { method: 'POST', path: '/api/setups/validate' },                        // the pane checks a draft — reads only
+]
+
 /**
  * Should this request be stopped? `allow` is a list of { method, path } (path: exact string or RegExp)
  * that may go through. Only /api/ calls are guarded — page assets and the Vite client are not writes.

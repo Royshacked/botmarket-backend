@@ -649,14 +649,19 @@ export function cleanReply(raw) {
 const DEBRIS_LINE = /^[ \t]*\((?:no )?final(?: answer)?\)[ \t]*$/gim
 // The same marker MID-LINE, behind one to four garbled words in another script (the drive, 2026-11-17: "…one
 // swing-trade name. તર્મinal ಥink (final) I'll have the stock picker…" — the answer, the marker, the answer again).
-// It becomes a paragraph break, so the repeat below drops the second copy. Non-Latin letters only (Greek and up,
-// skipping the punctuation block): a curly apostrophe or "café" is never part of it.
-const DEBRIS_INLINE = /[ \t]*(?:\S*[Ͱ-῿Ⰰ-￿]\S*[ \t]+){1,4}\((?:no )?final(?: answer)?\)[ \t]*/gi
+// It becomes a paragraph break, so the repeat below drops the second copy. Each garbled word MIXES scripts — a non-Latin
+// letter beside a Latin one, as the leak spells them — so a real word in Hebrew or Greek before a "(final)" is prose. Words
+// are capped at 24 characters and the pass runs only when "(final)" is in the text (CR 2026-11-18: an unbounded \S*
+// took 2.6 s on 1,600 CJK characters, on every desk's reply).
+const DEBRIS_INLINE = /[ \t]*(?:[^\s(]{0,24}(?:[Ͱ-῿Ⰰ-￿][A-Za-z]|[A-Za-z][Ͱ-῿Ⰰ-￿])[^\s(]{0,24}[ \t]+){1,4}\((?:no )?final(?: answer)?\)[ \t]*/gi
+const HAS_FINAL = /\((?:no )?final/i
+const _dropInlineMarker = (t) => (HAS_FINAL.test(t) ? t.replace(DEBRIS_INLINE, '\n\n') : t)
 // The answer, its reasoning in brackets, the answer again — on one line (the drive, 2026-11-18: "I'll have the stock
 // picker choose one swing-trade name for you. (Open tags? instructions syntax separate , yes) I'll have the stock picker
 // choose…"). A whole sentence (20+ characters, from a sentence start to its stop) said twice in a row, with or without
-// a short bracket between, keeps one copy.
-const DEBRIS_ECHO = /(^|[.!?][ \t]+|\n)([^\n]{20,400}?[.!?])[ \t]*(?:\([^()\n]{0,160}\)[ \t]*)?\2/g
+// a short bracket between, keeps one copy. The second copy must END where the first did — "…at 41." then "…at 41.50 and
+// the stop…" is two sentences, not one said twice (CR 2026-11-18).
+const DEBRIS_ECHO = /(^|[.!?][ \t]+|\n)([^\n]{20,400}?[.!?])[ \t]*(?:\([^()\n]{0,160}\)[ \t]*)?\2(?=\s|$)/g
 // A stray token in angle brackets (2026-10-19): Argus's reply opened "<չ>\nThe best fit…". Only brackets around one to
 // four NON-ASCII characters, or a special token's `<|name|>` — a tag, "<5%" or "a <-> b" is never that shape. Its
 // spaces go with it, so a reply that opened with one starts on its first word.
@@ -673,11 +678,12 @@ const _dropCapsLabels = (t) => t.replace(DEBRIS_CAPS_PAIR, '$2').replace(DEBRIS_
 
 /** The stray tokens and marker lines out, then a paragraph identical to the one before it dropped. Prose is otherwise untouched. */
 export function dropDebris(text) {
-    const paras = _dropCapsLabels(String(text ?? '')).replace(DEBRIS_TOKEN, (m, offset, all) => {
+    const cleaned = _dropCapsLabels(String(text ?? '')).replace(DEBRIS_TOKEN, (m, offset, all) => {
         // Between two words, the spaces collapse to one; at a line's edge, nothing is left.
         const before = all[offset - 1], after = all[offset + m.length]
         return before && after && !/\s/.test(before) && !/[\s.,;:!?)]/.test(after) ? ' ' : ''
-    }).replace(DEBRIS_INLINE, '\n\n').replace(DEBRIS_ECHO, '$1$2').replace(DEBRIS_LINE, '').split(/\n[ \t]*\n/)
+    })
+    const paras = _dropInlineMarker(cleaned).replace(DEBRIS_ECHO, '$1$2').replace(DEBRIS_LINE, '').split(/\n[ \t]*\n/)
     const out = []
     for (const p of paras) {
         const key = p.trim()

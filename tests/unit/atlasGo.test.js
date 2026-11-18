@@ -20,4 +20,6 @@ test('Atlas go: nothing implied without a cut-short, a sized plan, or when he as
     assert.equal(_atlasGo({ raw: 'plan…', cutShort: true, plan: SIZED, reply: 'What capital should I use?' }), false)
     assert.equal(_atlasGo({ raw: 'plan…', cutShort: true, plan: SIZED, adopt: true, reply: 'x' }), false)
     assert.equal(_atlasGo({ raw: 'plan…', cutShort: true, plan: SIZED, portfolioId: 'p1', reply: 'x' }), false)
+    // CR 2026-11-18: sleeves still out with the picker, or a route on the turn → not done yet
+    assert.equal(_atlasGo({ raw: 'plan…', cutShort: true, plan: SIZED, reply: 'x', pending: true }), false)
 })

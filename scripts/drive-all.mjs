@@ -30,7 +30,7 @@ import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
 
 import { auditPage, settleAnimations } from './drive-all/audit.mjs'
-import { BROWSER_HELPERS, composeSteps, isBlockedWrite, isIgnorableError, summarize } from './drive-all/lib.mjs'
+import { ALLOW, ALLOW_AGENTS, BROWSER_HELPERS, composeSteps, isBlockedWrite, isIgnorableError, summarize } from './drive-all/lib.mjs'
 import { renderReport } from './drive-all/report.mjs'
 import { STEPS } from './drive-all/steps.mjs'
 import { AGENT_STEPS, cleanup as agentCleanup } from './drive-all/agentSteps.mjs'
@@ -53,23 +53,8 @@ const VIEWPORTS = {
     phone:   { width: 390,  height: 844 },
 }
 
-// The writes a screen may make — all of them the QA user's own view state, none of them trades,
-// setups, books or chat turns. Anything else a screen tries is stopped and listed in the report.
-const ALLOW = [
-    { method: 'POST', path: '/api/auth/signin' },
-    { method: 'PUT',  path: '/api/workspace' },                              // the LIVE · PAPER · MANUAL switch
-    { method: 'PUT',  path: '/api/paper/mode' },                             // …which the paper venue mirrors
-    { method: 'POST', path: /^\/api\/chat\/conversations\/[^/]+\/read$/ },   // opening a conversation marks it read
-]
-
-// With --with-agents, the chat may talk: a new session, a turn, a chain's continue, a desk's commit (Generate) and a
-// stop. Still never a broker, an arm (that is the setup window's own route, not on this list) or a delete from the UI.
-const ALLOW_AGENTS = [
-    { method: 'POST', path: '/api/sessions/new' },
-    { method: 'POST', path: /^\/api\/sessions\/[^/]+\/(turn|continue|act|edit)$/ },
-    { method: 'POST', path: /^\/api\/turns\/[^/]+\/stop$/ },
-    { method: 'POST', path: '/api/setups/validate' },                        // the pane checks a draft — reads only
-]
+// The writes a screen may make (ALLOW) and, with --with-agents, the chat's (ALLOW_AGENTS) — in lib.mjs, so the
+// test checks the real lists.
 
 const C = { dim: '\x1b[2m', ok: '\x1b[32m', bad: '\x1b[31m', warn: '\x1b[33m', head: '\x1b[36m', off: '\x1b[0m' }
 const slug = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60)

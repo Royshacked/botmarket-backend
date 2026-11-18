@@ -269,3 +269,31 @@ test("the prompt: a user's own name is the trader's, not a pick", () => {
     assert.match(PROMPT, /trade a name of their own, that is the trader's/)
     assert.doesNotMatch(PROMPT, /VALIDATE-A-NAME/)
 })
+
+// ── his pick sent as a ROUTE back to the trader (the drive 2026-11-18; CR 2026-11-18) ──
+const routing = (text, horizon = null) => async (bag) => {
+    if (horizon) await bag.toolHandlers.get_horizon_list({ horizon })
+    for (const name of ['route', 'open']) {
+        const m = text.match(new RegExp(`<${name}>([\\s\\S]*?)</${name}>`))
+        const cap = bag.tagCaptures?.find(t => t.open === `<${name}>`)
+        if (m && cap?.onCapture) cap.onCapture(m[1])
+    }
+    return text
+}
+
+test('a pick sent as <route>assist X</route>, on the list → the pick, and no route (the chain carries it)', async () => {
+    const out = await scannerAgentService.chatStream({ messages: [{ role: 'user', content: 'swing' }], _venueSection: async () => null,
+        _listDeps: DEPS, _run: routing("I'd send NVDA.<route>assist NVDA</route><open>a swing on NVDA</open>", 'swing') })
+    assert.equal(out.pick?.ticker, 'NVDA')
+    assert.equal(out.route ?? null, null)
+})
+
+test('a pick sent as a route but OFF the house lists → no pick, and the route is kept (the user still reaches the trader)', async () => {
+    const out = await scannerAgentService.chatStream({ messages: [{ role: 'user', content: 'send TSLA to the trader' }], _venueSection: async () => null,
+        _listDeps: DEPS, _run: routing('Over to the trader.<route>assist TSLA</route><open>build TSLA</open>', 'swing') })
+    assert.equal('pick' in out, false)
+    assert.equal(out.route, 'assist')
+    assert.equal(out.routeSymbol, 'TSLA')
+    assert.equal(out.opening, 'build TSLA')
+    assert.doesNotMatch(out.reply, /no button|not on/i, 'no dropped-pick note — he routed, he did not pick')
+})

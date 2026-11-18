@@ -34,6 +34,22 @@ test('the answer, its reasoning in brackets, the answer again — one copy stays
     assert.equal(dropDebris('Yes. Yes. Go.'), 'Yes. Yes. Go.')
 })
 
+test('CR 2026-11-18: a long CJK reply is cleaned in milliseconds, not seconds (no runaway backtracking)', () => {
+    const cjk = '漢'.repeat(3000)
+    const heb = Array.from({ length: 300 }, () => 'אבגדהוזחטיכל').join(' ')
+    for (const s of [cjk, `${cjk} (final) x`, heb, `${heb} (final) x`]) {
+        const t = Date.now()
+        dropDebris(s)
+        assert.ok(Date.now() - t < 200, `took ${Date.now() - t} ms`)
+    }
+})
+
+test('CR 2026-11-18: a sentence the NEXT one starts with is not an echo; a real non-Latin word before "(final)" stays', () => {
+    const p = 'Entry is at the open at 41. Entry is at the open at 41.50 and the stop at 39.'
+    assert.equal(dropDebris(p), p)
+    assert.equal(dropDebris('ספק (final) ההצעה.'), 'ספק (final) ההצעה.')
+})
+
 test('prose is otherwise untouched — a marker inside a sentence, or a repeat that is not adjacent, stays', () => {
     const p = 'The (no final) wording is theirs.'
     assert.equal(dropDebris(p), p)

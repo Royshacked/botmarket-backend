@@ -40,8 +40,19 @@ async function api(t, method, path, data) {
     try { body = await res.json() } catch { /* empty */ }
     return { status: res.status(), body }
 }
-const listSetups = async (t) => { const r = await api(t, 'GET', '/api/setups'); return Array.isArray(r.body) ? r.body : r.body?.items ?? [] }
-const listBooks = async (t) => (await api(t, 'GET', '/api/portfolio')).body?.portfolios ?? []
+// A failed list THROWS — never an empty list. An empty baseline would make every item the account already had look
+// new, and cleanup would delete them all (CR 2026-11-18: a 429 from the auth limiter is enough).
+const listSetups = async (t) => {
+    const r = await api(t, 'GET', '/api/setups')
+    const list = Array.isArray(r.body) ? r.body : r.body?.items
+    if (r.status !== 200 || !Array.isArray(list)) throw new Error(`could not list setups (${r.status})`)
+    return list
+}
+const listBooks = async (t) => {
+    const r = await api(t, 'GET', '/api/portfolio')
+    if (r.status !== 200 || !Array.isArray(r.body?.portfolios)) throw new Error(`could not list books (${r.status})`)
+    return r.body.portfolios
+}
 const bookId = (b) => b?.portfolioId ?? b?.id
 
 /**
@@ -136,14 +147,21 @@ export async function cleanup(t) {
     const s = t.shared
     if (!s?.baseline) return
     const notes = []
-    for (const setup of (await listSetups(t)).filter(x => !s.baseline.setups.has(x.id))) {
+    // Only what THIS run could have made: not in the baseline, on PAPER, and (setups) saved after the run started.
+    // A listing that fails deletes nothing.
+    let setups, books
+    try { [setups, books] = [await listSetups(t), await listBooks(t)] }
+    catch (err) { return [`cleanup skipped — ${err.message}; nothing deleted`] }
+    const ours = (x) => !s.baseline.setups.has(x.id) && (x.mode ?? 'paper') === 'paper' && !(Number(x.savedAt) < s.startedAt)
+    for (const setup of setups.filter(ours)) {
         const r = await api(t, 'DELETE', `/api/setups/${encodeURIComponent(setup.id)}`)
         notes.push(`setup ${setup.asset} ${setup.id}: ${r.status}`)
     }
-    for (const book of (await listBooks(t)).filter(b => !s.baseline.books.has(bookId(b)))) {
+    for (const book of books.filter(b => !s.baseline.books.has(bookId(b)))) {
         const id = bookId(book)
         const items = (await api(t, 'GET', `/api/portfolio/${encodeURIComponent(id)}/items`)).body
         const ideas = Array.isArray(items) ? items : items?.items ?? items?.ideas ?? []
+        if (ideas.some(i => (i.mode ?? 'paper') !== 'paper')) { notes.push(`book ${book.name ?? id}: has a non-paper holding — left alone`); continue }
         for (const i of ideas) await api(t, 'DELETE', `/api/trade-ideas/${encodeURIComponent(i.id)}`)
         const r = await api(t, 'DELETE', `/api/portfolio/chat-state/${encodeURIComponent(id)}`)
         notes.push(`book ${book.name ?? id}: ${ideas.length} holdings, chat-state ${r.status}`)
@@ -172,7 +190,9 @@ const STEPS_RAW = [
         t.shared.swingSet = new Set((book.swing ?? []).map(c => c.symbol))
         t.note(`name: ${pick.symbol} (${pick.name}) · ${pick.industry} · ${pick.horizon} target ${pick.target} · last ${pick.price}`)
 
-        // What exists before — cleanup deletes only what is NEW.
+        // What exists before — cleanup deletes only what is NEW. A list that fails throws here, and the run's agent
+        // steps stop with no baseline (cleanup then deletes nothing).
+        t.shared.startedAt = Date.now() - 60_000   // a minute's slack for the server's clock
         t.shared.baseline = {
             setups: new Set((await listSetups(t)).map(s => s.id)),
             books:  new Set((await listBooks(t)).map(bookId)),
@@ -306,10 +326,18 @@ const STEPS_RAW = [
         await newSession(t)
         let rows = await say(t, 'Build me a portfolio on my paper account.', { label: 'build a portfolio' })
         t.check(hasRole(rows, 'Portfolio manager'), 'the Portfolio manager takes it')
-        const mandate = 'A $20,000 long-term growth book on my paper account: 3 to 4 US stocks, moderate risk, no leverage. '
-            + 'Use only names the house already covers. Build it straight through.'
+        // Every field his mandate asks for, said up front: goal, horizon, the drop they can take, capital, benchmark.
+        const mandate = 'A $20,000 long-term growth book on my paper account, held for years: 3 to 4 US stocks, moderate risk '
+            + '— I can tolerate a 15% drop — no leverage, benchmark the S&P 500. Use only names the house already covers. '
+            + 'Build it straight through.'
         rows = await say(t, mandate, { label: 'the mandate', maxMs: 15 * 60_000 })
         let made = (await listBooks(t)).filter(b => !t.shared.baseline.books.has(bookId(b)))
+        // He may still ask one thing (run 2026-11-18: the drawdown) — answered once, as a user would.
+        const lastAsk = rows.filter(r => /--assistant/.test(r.cls)).at(-1)?.text ?? ''
+        if (!made.length && /\?\s*$/.test(lastAsk.trim())) {
+            rows = await say(t, 'A 15% drop at most; everything else as I said — build it now.', { label: 'his question', maxMs: 15 * 60_000 })
+            made = (await listBooks(t)).filter(b => !t.shared.baseline.books.has(bookId(b)))
+        }
         // Atlas generates on his own go; if he stopped at a ready plan instead, press Generate as the user would.
         const gen = pane(t).getByRole('button', { name: /^Generate( plan)?$/ })
         if (!made.length && (await gen.count()) && !(await gen.first().isDisabled().catch(() => true))) {
@@ -353,5 +381,12 @@ const STEPS_RAW = [
     } },
 ]
 
-// Every agent step: a desktop step, 12 minutes unless it says otherwise (a turn alone may take 6).
-export const AGENT_STEPS = STEPS_RAW.map(st => ({ timeout: 12 * 60_000, ...st }))
+// Every agent step: a desktop step, 12 minutes unless it says otherwise (a turn alone may take 6). A desk step never
+// runs without the baseline "prepare" recorded — a desk may save on its own, and cleanup could not tell it apart.
+export const AGENT_STEPS = STEPS_RAW.map(st => ({
+    timeout: 12 * 60_000, ...st,
+    ...(st.bookend ? {} : { run: async (t) => {
+        if (!t.shared?.baseline) throw new Error('no baseline (prepare failed) — the desk is not driven')
+        return st.run(t)
+    } }),
+}))

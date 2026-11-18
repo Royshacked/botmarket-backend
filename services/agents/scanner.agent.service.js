@@ -189,7 +189,8 @@ async function chatStream({ messages = [], model: requestedModel, audience = nul
 
     let reply = cleanReply(raw)
 
-    let routing = route.result()   // { route, routeSymbol, opening, edit } — the controller validates
+    const routed = route.result()   // { route, routeSymbol, opening, edit } — the controller validates
+    let routing = routed
     let pick = _normalizeArgusPick(capturedPick)
     // His pick sent as a ROUTE back to the trader (`<route>assist S</route>`) instead of the pick tag: the same name, the
     // same destination — taken as the pick, and the route dropped so the chain's hand-off carries it (the drive,
@@ -208,10 +209,16 @@ async function chatStream({ messages = [], model: requestedModel, audience = nul
         } else {
             logger.warn(LOG, 'pick dropped — not on the house lists', { ticker: pick.ticker, listed: listed.size })
             // His prose already named it: say why no button follows, in the stream and in the saved reply.
-            const note = droppedPickNote(pick.ticker)
-            onToken?.(note)
-            reply += note
+            const dropped = pick.ticker
             pick = null
+            // A pick that CAME from his route goes back to being that route — the user is still sent to the trader, with
+            // their words (CR 2026-11-18). A real pick tag dropped says why no button follows.
+            if (routing !== routed) routing = routed
+            else {
+                const note = droppedPickNote(dropped)
+                onToken?.(note)
+                reply += note
+            }
         }
     }
     await _attachPickLabel(pick)

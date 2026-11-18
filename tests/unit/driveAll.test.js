@@ -3,11 +3,11 @@ import assert from 'node:assert/strict'
 
 import {
     parseColor, blend, contrastRatio, nearestColor, firstFamily, BROWSER_HELPERS,
-    isBlockedWrite, summarize, groupWarnings, isIgnorableError, escapeHtml, composeSteps, mentionsNumber, echoedSentence,
+    isBlockedWrite, summarize, groupWarnings, isIgnorableError, escapeHtml, composeSteps, mentionsNumber, echoedSentence, ALLOW, ALLOW_AGENTS,
 } from '../../scripts/drive-all/lib.mjs'
 import { renderReport } from '../../scripts/drive-all/report.mjs'
 import { STEPS, DESKS } from '../../scripts/drive-all/steps.mjs'
-import { AGENT_STEPS } from '../../scripts/drive-all/agentSteps.mjs'
+import { AGENT_STEPS, cleanup } from '../../scripts/drive-all/agentSteps.mjs'
 
 // The whole-app drive (scripts/drive-all.mjs) — its pure parts. The browser parts are proved by
 // running the drive; these keep the judgement it rests on (contrast maths, the read-only guard,
@@ -167,12 +167,8 @@ test('the agent steps: bookends first and last, a long timeout, and the chat wri
     }
 })
 
-test('the guard with agents: a turn and a commit pass; arming, deleting and brokers are still stopped', () => {
-    const allow = [
-        { method: 'POST', path: '/api/sessions/new' },
-        { method: 'POST', path: /^\/api\/sessions\/[^/]+\/(turn|continue|act|edit)$/ },
-        { method: 'POST', path: /^\/api\/turns\/[^/]+\/stop$/ },
-    ]
+test('the guard with agents (the drive\'s REAL lists): a turn and a commit pass; arming, deleting and brokers are still stopped', () => {
+    const allow = [...ALLOW, ...ALLOW_AGENTS]
     const B = 'http://localhost:5173'
     assert.equal(isBlockedWrite('POST', `${B}/api/sessions/ses_1/turn`, allow), false)
     assert.equal(isBlockedWrite('POST', `${B}/api/sessions/ses_1/act`, allow), false)
@@ -181,6 +177,10 @@ test('the guard with agents: a turn and a commit pass; arming, deleting and brok
     assert.equal(isBlockedWrite('POST', `${B}/api/setups/setup_1/action`, allow), true, 'the setup window\'s own routes are not opened')
     assert.equal(isBlockedWrite('POST', `${B}/api/broker/order`, allow), true)
     assert.equal(isBlockedWrite('POST', `${B}/api/sessions/ses_1/turn/extra`, allow), true, 'the pattern is anchored')
+    for (const [m, p] of [['DELETE', '/api/setups/s1'], ['POST', '/api/setups/s1/arm'], ['PUT', '/api/setups/s1'], ['DELETE', '/api/trade-ideas/i1'], ['POST', '/api/portfolio/p1/activate']]) {
+        assert.equal(isBlockedWrite(m, `${B}${p}`, allow), true, `${m} ${p} is stopped`)
+    }
+    assert.equal(isBlockedWrite('POST', `${B}/api/sessions/new`, ALLOW), true, 'without the flag the chat cannot talk')
 })
 
 test('echoedSentence finds a sentence said twice in one reply — the leak around a bracket (2026-11-18)', () => {
@@ -199,4 +199,46 @@ test('mentionsNumber compares by value, not by spelling', () => {
     assert.ok(!mentionsNumber('22.5', 22))
     assert.ok(!mentionsNumber('no numbers', 22))
     assert.ok(!mentionsNumber('22', 'x'))
+})
+
+// ── cleanup safety (CR 2026-11-18): never an empty baseline, never what the run did not make ──
+
+/** A fake page.request: GET answers from `routes`, every DELETE is recorded. */
+function fakeT(routes, shared) {
+    const deleted = []
+    const fetch = async (url, { method }) => {
+        const path = new URL(url).pathname
+        if (method === 'DELETE') { deleted.push(path); return { status: () => 200, json: async () => ({}) } }
+        const r = routes[path] ?? { status: 404, body: null }
+        return { status: () => r.status, json: async () => r.body }
+    }
+    return { t: { base: 'http://x', page: { request: { fetch } }, shared }, deleted }
+}
+
+test('cleanup deletes only NEW paper setups saved during the run, and books whose holdings are all paper', async () => {
+    const startedAt = 1_000_000
+    const shared = { startedAt, baseline: { setups: new Set(['old']), books: new Set(['bOld']) } }
+    const { t, deleted } = fakeT({
+        '/api/setups': { status: 200, body: [
+            { id: 'old', mode: 'paper', savedAt: startedAt + 5 },          // in the baseline
+            { id: 'new', mode: 'paper', savedAt: startedAt + 5 },          // ours
+            { id: 'live', mode: 'live', savedAt: startedAt + 5 },          // never a live one
+            { id: 'before', mode: 'paper', savedAt: startedAt - 5 },       // saved before the run: not ours
+        ] },
+        '/api/portfolio': { status: 200, body: { portfolios: [{ portfolioId: 'bOld' }, { portfolioId: 'bNew' }, { portfolioId: 'bLive' }] } },
+        '/api/portfolio/bNew/items': { status: 200, body: [{ id: 'i1', mode: 'paper' }] },
+        '/api/portfolio/bLive/items': { status: 200, body: [{ id: 'i2', mode: 'live' }] },
+    }, shared)
+    await cleanup(t)
+    assert.deepEqual(deleted.sort(), ['/api/portfolio/chat-state/bNew', '/api/setups/new', '/api/trade-ideas/i1'].sort())
+})
+
+test('cleanup deletes NOTHING when a list fails, and a desk step refuses to run without a baseline', async () => {
+    const { t, deleted } = fakeT({ '/api/setups': { status: 429, body: { error: 'slow down' } } },
+        { startedAt: 0, baseline: { setups: new Set(), books: new Set() } })
+    const notes = await cleanup(t)
+    assert.deepEqual(deleted, [])
+    assert.match(notes[0], /nothing deleted/)
+    const desk = AGENT_STEPS.find(st => !st.bookend)
+    await assert.rejects(desk.run({ shared: {} }), /no baseline/)
 })
