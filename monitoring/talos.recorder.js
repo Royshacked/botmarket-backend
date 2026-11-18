@@ -24,17 +24,38 @@ import { config } from '../services/config.js'
 import { logger } from '../services/logger.service.js'
 import { getDb } from '../providers/mongodb.provider.js'
 import { _fetchCandleRows } from '../services/tools/marketData.tools.js'
-import { cachedChart } from '../services/chartImgCache.service.js'
 import { getQuotes } from '../providers/yahoofinance.provider.js'
 import { TF_RUNGS, isFetchableRung } from '../services/setup.schema.js'
 
 const LOG = '[talos.recorder]'
 
-/** Bump when the bundle shape changes so the replay scripts can refuse what they cannot read. */
-export const BUNDLE_VERSION = 1
+/**
+ * Bump when the bundle shape changes so the replay scripts can refuse what they cannot read.
+ * v2 (2026-11-18 — the M0's 512 MB): no chart PNGs in the pack (62% of a v1 record; a replay redraws them from
+ * `pack.bars` with klineRender's renderCandlesImage), and the system prompt and tool list stored ONCE per version in
+ * PROMPTS_COLLECTION — the bundle carries `prompt.systemRef` / `prompt.toolsRef`. ~170 KB → ~45 KB a read.
+ */
+export const BUNDLE_VERSION = 2
 
 /** The Mongo sink's collection. `pulled: true` is stamped by the pull script, nothing else writes it. */
 export const COLLECTION = 'talos_reads'
+
+/** One document per distinct system prompt or tool list: `{ _id: ref, kind, value }` (v2). On disk: `<dir>/prompts/<ref>.json`. */
+export const PROMPTS_COLLECTION = 'talos_prompts'
+
+/** A stable short id for a prompt text or tool list — the same content, the same ref. null for nothing. Pure. */
+export function promptRef(value) {
+    if (value == null) return null
+    return createHash('sha256').update(typeof value === 'string' ? value : JSON.stringify(value)).digest('hex').slice(0, 16)
+}
+
+/** The prompt pieces a bundle points at, by ref → `{ [ref]: { kind, value } }`. Pure. */
+export function promptPieces({ systemText = null, tools = null } = {}) {
+    const out = {}
+    if (systemText != null) out[promptRef(systemText)] = { kind: 'system', value: systemText }
+    if (tools != null) out[promptRef(tools)] = { kind: 'tools', value: tools }
+    return out
+}
 
 export function isRecording() {
     return config.talosRecordReads
@@ -74,21 +95,19 @@ export function packRungs(setup, rung) {
 /**
  * The frozen market as of the read. `symbols` is the read's own scope (`symbolScope`), rungs are
  * `packRungs`. Every cell fetched independently and guarded, so one bad symbol/rung leaves a hole
- * (recorded in `errors`), not an empty pack. Charts are drawn for the setup's OWN asset only and
- * one at a time — a render is a headless-browser page, and this runs beside live reads that also
- * need the renderer.
+ * (recorded in `errors`), not an empty pack. No chart PNGs since v2: a replay draws the setup's own
+ * asset from these bars (renderCandlesImage) — and a live read no longer waits behind a headless
+ * render per rung in the background.
  *
  * Deps injectable for the tests.
  */
 export async function buildDataPack(setup, symbols, deps = {}) {
     const {
         fetchCandleRows = _fetchCandleRows,
-        renderChart     = cachedChart,
         quotes          = getQuotes,
         rungs           = packRungs(setup, setup?.monitor_state?.timeframe),
     } = deps
 
-    const asset  = String(setup?.asset ?? '').toUpperCase()
     const errors = []
     const note   = (what, err) => errors.push(`${what}: ${err?.message ?? err}`)
 
@@ -103,21 +122,11 @@ export async function buildDataPack(setup, symbols, deps = {}) {
         }))
     }))
 
-    const charts = {}
-    if (asset) {
-        for (const tf of rungs) {
-            try {
-                const { png, source } = await renderChart(asset, tf, [])
-                charts[tf] = { png, source }
-            } catch (err) { charts[tf] = null; note(`chart ${asset}/${tf}`, err) }
-        }
-    }
-
     let quotesText = null
     try { quotesText = symbols.length ? await quotes(symbols) : '' }
     catch (err) { note('quotes', err) }
 
-    return { asOf: new Date().toISOString(), rungs, symbols, bars, charts: asset ? { [asset]: charts } : {}, quotesText, errors }
+    return { asOf: new Date().toISOString(), rungs, symbols, bars, quotesText, errors }
 }
 
 /**
@@ -163,7 +172,9 @@ export function buildBundle({ setup, meta = {}, systemText, userText, trace = {}
             zone: meta.zone ?? null,
             watched: meta.watched ?? null,
         },
-        prompt: { systemText, userText, tools: trace.tools ?? null },
+        // The system prompt and the tool list are the same across thousands of reads: stored once each by ref
+        // (promptPieces → the sink), the bundle points at them. The user text is the read's own.
+        prompt: { userText, systemRef: promptRef(systemText), toolsRef: promptRef(trace.tools ?? null) },
         routing: {
             model: trace.model ?? null,
             reasoningEffort: trace.reasoningEffort ?? null,
@@ -189,9 +200,23 @@ export function bundlePath(dir, bundle) {
     return path.join(dir, bundle.recordedAt.slice(0, 10), `${bundle.readId}.json`)
 }
 
-/** The disk sink. Resolves to the file written. */
+/** Where a prompt piece goes on disk: `<dir>/prompts/<ref>.json`. Pure. */
+export function promptPath(dir, ref) {
+    return path.join(dir, 'prompts', `${ref}.json`)
+}
+
+/**
+ * The disk sink. Resolves to the file written. `prompts` (promptPieces) are written once each — a piece already on disk
+ * (`wx` → EEXIST) is the same content by construction, so it is left alone.
+ */
 export function diskSink({ dir = config.talosRecordDir, write = writeFile, ensureDir = (d) => mkdir(d, { recursive: true }) } = {}) {
-    return async (bundle) => {
+    return async (bundle, prompts = {}) => {
+        for (const [ref, piece] of Object.entries(prompts)) {
+            const file = promptPath(dir, ref)
+            await ensureDir(path.dirname(file))
+            try { await write(file, JSON.stringify({ _id: ref, ...piece }), { flag: 'wx' }) }
+            catch (err) { if (err?.code !== 'EEXIST') throw err }
+        }
         const file = bundlePath(dir, bundle)
         await ensureDir(path.dirname(file))
         await write(file, JSON.stringify(bundle))
@@ -200,13 +225,17 @@ export function diskSink({ dir = config.talosRecordDir, write = writeFile, ensur
 }
 
 /**
- * The Mongo sink. One document per read, keyed by readId, in the app's own database. A bundle is
- * well under the 16 MB document cap (~1 MB with five charts) and the volume is a few hundred a
- * week, so no index is worth its write.
+ * The Mongo sink. One document per read, keyed by readId, in the app's own database, and each prompt piece once in
+ * PROMPTS_COLLECTION (an upsert that writes only on the first sight of a version). A v2 bundle is ~45 KB and the volume
+ * is a few hundred a week, so no index is worth its write.
  */
 export function mongoSink({ db = null } = {}) {
-    return async (bundle) => {
+    return async (bundle, prompts = {}) => {
         const conn = db ?? await getDb()
+        for (const [ref, piece] of Object.entries(prompts)) {
+            await conn.collection(PROMPTS_COLLECTION).updateOne({ _id: ref },
+                { $setOnInsert: { ...piece, firstSeen: bundle.recordedAt } }, { upsert: true })
+        }
         await conn.collection(COLLECTION).insertOne({ _id: bundle.readId, ...bundle, pulled: false })
         return `${COLLECTION}/${bundle.readId}`
     }
@@ -228,7 +257,7 @@ export async function recordRead({ setup, symbols = [], meta, systemText, userTe
         const pack   = await buildDataPack(setup, symbols,
             { rungs: packRungs(setup, meta?.rung ?? setup?.monitor_state?.timeframe), ...packDeps })
         const bundle = buildBundle({ setup, meta, systemText, userText, trace, result, pack })
-        const where  = await sink(bundle)
+        const where  = await sink(bundle, promptPieces({ systemText, tools: trace?.tools ?? null }))
         logger.info(LOG, `[${setup?.id}] recorded ${bundle.readId} → ${where} (${bundle.trajectory.rounds} round(s), ${pack.errors.length} pack error(s))`)
         return where
     } catch (err) {

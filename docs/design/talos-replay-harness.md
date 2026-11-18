@@ -48,6 +48,13 @@ own stop and targets — so a replay is cheap and honest.
    because the reads worth recording are real users' setups, and those run on Render.
 
    Measured on the smoke read: ~0.7 MB per bundle, pack fetched in ~5 s after a 40 s read.
+
+   **Bundle v2 (2026-11-18).** The M0 cluster's 512 MB filled twice; `talos_reads` was 98 MB, 62% of each record the
+   pack's chart PNGs (read by nothing) and 13% the same system prompt and tool list copied into every read. v2 stores
+   no chart PNG — the frozen tool runner draws one from `pack.bars` with klineRender's `renderCandlesImage` when a
+   candidate asks for a chart — and keeps the system prompt and tool list ONCE per version in `talos_prompts`
+   (`prompt.systemRef` / `prompt.toolsRef`; on disk `<dir>/prompts/<ref>.json`, pulled with the reads). A read is
+   ~45 KB. The 388 v1 records were pulled whole to disk, then slimmed in place (`slim-reads.mjs`): 98 → 46.8 MB.
 2. **Label from price, not from Sonnet.** `should_enter` = entry reached and the first target
    printed before the stop within N candles of the rung; `should_not` otherwise; `undetermined`
    while the horizon has not elapsed (excluded, not scored). Decided 2026-09-20: the label is

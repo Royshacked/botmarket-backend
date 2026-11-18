@@ -16,7 +16,7 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { config } from '../../../services/config.js'
 import { getDb, getSiblingDb, closeDb } from '../../../providers/mongodb.provider.js'
-import { COLLECTION, bundlePath } from '../../../monitoring/talos.recorder.js'
+import { COLLECTION, PROMPTS_COLLECTION, bundlePath, promptPath } from '../../../monitoring/talos.recorder.js'
 
 // Same pin server.js applies — a dev router that blocks SRV lookups fails `mongodb+srv://` first.
 if (config.dnsServers.length) dns.setServers(config.dnsServers)
@@ -42,4 +42,15 @@ for await (const doc of cursor) {
     console.log(`${_id} → ${file}`)
 }
 console.log(`${n} read(s) pulled from ${db.databaseName}.${COLLECTION} into ${dir}`)
+
+// v2 bundles point at their system prompt and tool list by ref — every piece comes down too (a handful; a piece on
+// disk already is the same content by construction, so it is skipped).
+let p = 0
+for await (const piece of db.collection(PROMPTS_COLLECTION).find({})) {
+    const file = promptPath(dir, piece._id)
+    await mkdir(path.dirname(file), { recursive: true })
+    try { await writeFile(file, JSON.stringify(piece), { flag: 'wx' }); p++ }
+    catch (err) { if (err?.code !== 'EEXIST') throw err }
+}
+console.log(`${p} new prompt piece(s) from ${db.databaseName}.${PROMPTS_COLLECTION}`)
 await closeDb()

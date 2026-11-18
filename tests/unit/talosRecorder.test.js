@@ -2,8 +2,8 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import path from 'node:path'
 import {
-    BUNDLE_VERSION, COLLECTION, userHash, stripCacheControl, buildDataPack, packRungs, buildBundle, bundlePath,
-    diskSink, mongoSink, recordRead, isRecording,
+    BUNDLE_VERSION, COLLECTION, PROMPTS_COLLECTION, userHash, stripCacheControl, buildDataPack, packRungs, buildBundle, bundlePath,
+    diskSink, mongoSink, recordRead, isRecording, promptRef, promptPieces, promptPath,
 } from '../../monitoring/talos.recorder.js'
 import { normalizeSetup } from '../../services/setup.schema.js'
 
@@ -81,9 +81,12 @@ test('recorder: the bundle carries prompt, routing, trajectory, verdict and ever
     assert.deepEqual(b.setup.referenced_symbols, ['SMH'])
     assert.equal(b.wake.price, 238.2)
     assert.equal(b.wake.rung, '15min')
-    assert.equal(b.prompt.systemText, 'SYS')
+    // v2: the system prompt and the tool list by ref (stored once each); the user text is the read's own
     assert.equal(b.prompt.userText, 'USER')
-    assert.deepEqual(b.prompt.tools, [{ name: 'get_chart' }])
+    assert.equal(b.prompt.systemRef, promptRef('SYS'))
+    assert.equal(b.prompt.toolsRef, promptRef([{ name: 'get_chart' }]))
+    assert.equal('systemText' in b.prompt, false)
+    assert.equal('tools' in b.prompt, false)
     assert.equal(b.routing.model, 'claude-sonnet-4-6')
     assert.equal(b.trajectory.rounds, 2)
     assert.deepEqual(b.trajectory.calls, ['get_chart'])
@@ -101,7 +104,7 @@ test('recorder: an empty trace (the read threw before routing) still builds a bu
     assert.equal(b.result._failReason, 'io')
 })
 
-test('recorder: the data pack covers every symbol × every rung, charts for the asset only, and a bad cell is a hole', async () => {
+test('recorder: the data pack covers every symbol × every rung, no chart PNGs (v2), and a bad cell is a hole', async () => {
     const asked = []
     const pack = await buildDataPack(SETUP, ['NVDA', 'SMH'], {
         rungs: ['1hr', '15min'],
@@ -110,20 +113,14 @@ test('recorder: the data pack covers every symbol × every rung, charts for the 
             if (sym === 'SMH' && tf === '15min') throw new Error('yahoo down')
             return { cfg: {}, bars: [{ timestamp: 1, open: 1, high: 2, low: 0.5, close: 1.5, volume: 10 }] }
         },
-        renderChart: async (sym, tf) => {
-            if (tf === '15min') throw new Error('renderer busy')
-            return { png: `PNG-${sym}-${tf}`, source: 'own' }
-        },
         quotes: async (syms) => syms.map(s => `${s}: $1.00`).join('\n'),
     })
     assert.deepEqual(asked.sort(), ['NVDA/15min', 'NVDA/1hr', 'SMH/15min', 'SMH/1hr'])
     assert.equal(pack.bars.NVDA['1hr'].length, 1)
     assert.equal(pack.bars.SMH['15min'], null)
-    assert.equal(pack.charts.NVDA['1hr'].png, 'PNG-NVDA-1hr')
-    assert.equal(pack.charts.NVDA['15min'], null)
-    assert.equal('SMH' in pack.charts, false)
+    assert.equal('charts' in pack, false, 'a replay draws them from the bars (renderCandlesImage)')
     assert.equal(pack.quotesText, 'NVDA: $1.00\nSMH: $1.00')
-    assert.deepEqual(pack.errors.sort(), ['candles SMH/15min: yahoo down', 'chart NVDA/15min: renderer busy'])
+    assert.deepEqual(pack.errors.sort(), ['candles SMH/15min: yahoo down'])
     assert.deepEqual(pack.rungs, ['1hr', '15min'])
     assert.ok(pack.asOf)
 })
@@ -139,36 +136,44 @@ test('recorder: a pack freezes the premise, the rung read on, and any rung the p
     assert.deepEqual(packRungs({}, null), [], 'nothing known yet is not an empty pack by accident')
 })
 
-const PACK_DEPS = { rungs: ['1hr'], fetchCandleRows: async () => ({ bars: [] }), renderChart: async () => ({ png: 'P', source: 'own' }), quotes: async () => 'NVDA: $1' }
+const PACK_DEPS = { rungs: ['1hr'], fetchCandleRows: async () => ({ bars: [] }), quotes: async () => 'NVDA: $1' }
 
-test('recorder: the disk sink writes one JSON file under <dir>/<day>/ and recordRead returns its path', async () => {
+test('recorder: the disk sink writes the prompt pieces once each, then one JSON file under <dir>/<day>/; recordRead returns its path', async () => {
     const writes = []
     const dirs   = []
     const file = await recordRead(
         { setup: SETUP, symbols: ['NVDA'], meta: { kind: 'pre_entry', reason: 'candle' }, systemText: 'SYS', userText: 'USER', trace: TRACE, result: { verdict: 'wait' } },
-        { sink: diskSink({ dir: 'rec', ensureDir: async (d) => dirs.push(d), write: async (f, body) => writes.push({ f, body }) }), pack: PACK_DEPS },
+        { sink: diskSink({ dir: 'rec', ensureDir: async (d) => dirs.push(d), write: async (f, body, opts) => writes.push({ f, body, opts }) }), pack: PACK_DEPS },
     )
-    assert.equal(writes.length, 1)
-    assert.equal(file, writes[0].f)
-    assert.equal(path.dirname(file), dirs[0])
+    assert.equal(writes.length, 3, 'the system prompt, the tool list, the bundle')
+    assert.deepEqual(writes.slice(0, 2).map(w => w.f).sort(), [promptPath('rec', promptRef('SYS')), promptPath('rec', promptRef(TRACE.tools))].sort())
+    assert.ok(writes.slice(0, 2).every(w => w.opts?.flag === 'wx'), 'a piece already on disk is never rewritten')
+    assert.equal(JSON.parse(writes[0].body).kind, 'system')
+    assert.equal(file, writes[2].f)
     assert.match(path.basename(path.dirname(file)), /^\d{4}-\d{2}-\d{2}$/)
     assert.ok(file.startsWith('rec'))
-    const parsed = JSON.parse(writes[0].body)
+    const parsed = JSON.parse(writes[2].body)
     assert.equal(parsed.v, BUNDLE_VERSION)
     assert.equal(parsed.setup.id, 'setup_NVDA_1')
-    assert.equal(parsed.pack.charts.NVDA['1hr'].png, 'P')
     assert.equal(parsed.pack.quotesText, 'NVDA: $1')
     // The pull script reproduces the same path from the bundle alone.
     assert.equal(bundlePath('rec', parsed), file)
 })
 
-test('recorder: the mongo sink inserts one document keyed by readId, unpulled', async () => {
+test('recorder: the mongo sink upserts each prompt piece once and inserts one document keyed by readId, unpulled', async () => {
     const inserted = []
-    const db = { collection: (name) => ({ insertOne: async (doc) => { inserted.push({ name, doc }) } }) }
+    const upserts  = []
+    const db = { collection: (name) => ({
+        insertOne: async (doc) => { inserted.push({ name, doc }) },
+        updateOne: async (q, u, o) => { upserts.push({ name, q, u, o }) },
+    }) }
     const where = await recordRead(
         { setup: SETUP, symbols: ['NVDA'], meta: { kind: 'pre_entry' }, systemText: 'SYS', userText: 'USER', trace: TRACE, result: { verdict: 'wait' } },
         { sink: mongoSink({ db }), pack: PACK_DEPS },
     )
+    assert.equal(upserts.length, 2)
+    assert.ok(upserts.every(u => u.name === PROMPTS_COLLECTION && u.o.upsert && u.u.$setOnInsert), 'written only on the first sight of a version')
+    assert.deepEqual(upserts.map(u => u.q._id).sort(), [promptRef('SYS'), promptRef(TRACE.tools)].sort())
     assert.equal(inserted.length, 1)
     assert.equal(inserted[0].name, COLLECTION)
     assert.equal(inserted[0].doc._id, inserted[0].doc.readId)
@@ -183,4 +188,15 @@ test('recorder: a failed sink is a null and a log line — it never throws back 
         { sink: async () => { throw new Error('disk full') }, pack: { ladder: [], quotes: async () => '' } },
     )
     assert.equal(file, null)
+})
+
+test('recorder v2: a prompt ref is stable for the same content and differs for different content; nothing has no ref', () => {
+    assert.equal(promptRef('SYS'), promptRef('SYS'))
+    assert.notEqual(promptRef('SYS'), promptRef('SYS2'))
+    assert.equal(promptRef([{ name: 'a' }]), promptRef([{ name: 'a' }]))
+    assert.equal(promptRef(null), null)
+    assert.equal(promptRef('SYS').length, 16)
+    const pieces = promptPieces({ systemText: 'SYS', tools: [{ name: 'a' }] })
+    assert.deepEqual(Object.values(pieces).map(p => p.kind).sort(), ['system', 'tools'])
+    assert.deepEqual(promptPieces({}), {})
 })

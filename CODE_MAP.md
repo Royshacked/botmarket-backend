@@ -1523,15 +1523,21 @@ monitoring/
                             arithmetic redone from here) — plus a DATA PACK fetched AFTER the read:
                             raw candle rows for every symbol in scope × every PACKED rung (packRungs
                             — the premise, the rung read on, any paced rung; deliberately not every
-                            rung in scope, which a pack cannot afford), the quotes, a plain chart of
-                            the asset on each. Fire-and-forget, every
+                            rung in scope, which a pack cannot afford), the quotes. BUNDLE v2
+                            (2026-11-18, the M0's 512 MB): no chart PNGs in the pack — a replay draws
+                            them from `pack.bars` with klineRender's renderCandlesImage — and the system
+                            prompt + tool list stored ONCE per version in `talos_prompts` (the bundle
+                            carries prompt.systemRef / toolsRef; on disk `<dir>/prompts/<ref>.json`).
+                            ~170 KB → ~45 KB a read. Fire-and-forget, every
                             fetch guarded (a bad cell is a null + an `errors` line), never throws back
                             into the read. userId is HASHED. Two sinks (TALOS_RECORD_SINK): `disk`
                             → TALOS_RECORD_DIR/<day>/<readId>.json (gitignored — bundles are live
                             plans); `mongo` → the `talos_reads` collection, for the deployed instance
                             whose disk does not survive a deploy. scripts/eval/talos-replay/
                             pull-reads.mjs brings the Mongo ones down into the disk layout
-                            (--db=test from the laptop) and stamps them `pulled`
+                            (--db=test from the laptop, prompt pieces too) and stamps them `pulled`;
+                            slim-reads.mjs turns PULLED v1 records with a copy on disk into v2 in Mongo
+                            (dry run unless --apply) — 2026-11-18: 388 reads, 98 → 46.8 MB
   dueLoop.js                the wake-up chore every monitor is built on: find what is due, CLAIM it
                             against a lease, check it under a timeout. THE LEASE IS THE SUBTLE PART —
                             withTimeout ABANDONS a slow check but cannot cancel it, so without one the

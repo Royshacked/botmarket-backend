@@ -261,7 +261,17 @@ export async function renderChartImage(symbol, timeframe, studies = [], levels =
 
     const candles = await fetchMarketCandles(symbol, { timeSpan, multiplier, from, to })
     if (candles.length === 0) throw new Error(`renderChartImage: no candles for ${symbol} ${timeframe}`)
+    return renderCandlesImage(candles, timeframe, studies, levels)
+}
 
+/**
+ * The same picture from candles the caller already holds (`{ timestamp, open, high, low, close, volume }`) — the
+ * Talos replay redraws a recorded read's chart from its frozen `pack.bars` instead of storing the PNG (the recorder's
+ * bundle v2, 2026-11-18: the PNGs were 62% of every record). → base64 PNG.
+ */
+export async function renderCandlesImage(candles, timeframe, studies = [], levels = []) {
+    if (!candles?.length) throw new Error(`renderCandlesImage: no candles for ${timeframe}`)
+    const { timeSpan, multiplier } = parseChartInterval(timeframe) ?? { timeSpan: 'day', multiplier: 1 }
     const { overlays, panes } = studiesToIndicators(studies)
     const period = { type: timeSpan, span: multiplier }
 
