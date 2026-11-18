@@ -254,21 +254,6 @@ export function stopRoomLine(r) {
     return `  The trader's stop room (his swing lows, ${r.breaks} breaks): a stop under the low at ${b}. Most names look alike here — the cost of a tight stop, not a trait`
 }
 
-/**
- * THE TRADER'S READ (proteus.md 5b, Roy 2026-11-13, option A): the measured profile as the levels he may USE and the
- * ones he must not lean on — each line from a test's verdict, never from the eye. The daily view (his swing chart), the
- * weekly where it adds a level. Lines:
- *   - what HOLDS, priced at the last bar (a line that holds is a level an entry or a stop may sit on);
- *   - what does NOT — no moving average is "support" on this name unless it holds;
- *   - the range it is in now (the trading range's bounds — structure, not an edge, unless its springs hold);
- *   - Fibonacci prices of the latest impulse ONLY when Fibonacci holds; the cycle's next window ONLY when it holds;
- *   - the stop's room at his 0.2 ATR stop — context for the deeper stop he already offers, never a rule change.
- * BY HORIZON (Roy, 2026-11-14): the timeframes the horizon trades on — the SAME ones the Hotlist row shows
- * (BADGE_TIMEFRAMES): a day trade the 5-minute and 1-hour bars (the daily and weekly said nothing measured about a 10:30
- * entry), a short term swing the hourly and daily, a swing — or no horizon yet — the daily and weekly. A day trade's
- * stop's room is left out until the intraday stop rule is set (the daily stop's room is a swing stop's).
- * → string[] (empty when the profile has no daily view). Pure.
- */
 /** The chart a horizon's stop is drawn on (mentor_system_prompt, the stop): 1-hour for a day trade, weekly for long term, else daily. */
 export const stopTimeframe = (horizon) => (isDayTrade(horizon) ? '1hour' : String(horizon ?? '').toLowerCase() === 'long term' ? 'week' : 'day')
 
@@ -303,6 +288,21 @@ export const DAY_TRADE_HORIZONS = Object.freeze(['intraday', 'day'])
 export const isDayTrade = (horizon) => DAY_TRADE_HORIZONS.includes(String(horizon ?? '').toLowerCase())
 /** A build's horizon (Mentor's words) → the Hotlist's key for it (BADGE_TIMEFRAMES). */
 const BADGE_KEY = Object.freeze({ intraday: 'intraday', day: 'day', 'short term swing': 'week', swing: 'swing', 'long term': 'long_term' })
+/**
+ * THE TRADER'S READ (proteus.md 5b, Roy 2026-11-13, option A): the measured profile as the levels he may USE and the
+ * ones he must not lean on — each line from a test's verdict, never from the eye. The daily view (his swing chart), the
+ * weekly where it adds a level. Lines:
+ *   - what HOLDS, priced at the last bar (a line that holds is a level an entry or a stop may sit on);
+ *   - what does NOT — no moving average is "support" on this name unless it holds;
+ *   - the range it is in now (the trading range's bounds — structure, not an edge, unless its springs hold);
+ *   - Fibonacci prices of the latest impulse ONLY when Fibonacci holds; the cycle's next window ONLY when it holds;
+ *   - the stop's room at his 0.2 ATR stop — context for the deeper stop he already offers, never a rule change.
+ * BY HORIZON (Roy, 2026-11-14): the timeframes the horizon trades on — the SAME ones the Hotlist row shows
+ * (BADGE_TIMEFRAMES): a day trade the 5-minute and 1-hour bars (the daily and weekly said nothing measured about a 10:30
+ * entry), a short term swing the hourly and daily, a swing — or no horizon yet — the daily and weekly. A day trade's
+ * stop's room is left out until the intraday stop rule is set (the daily stop's room is a swing stop's).
+ * → string[] (empty when the profile has no daily view). Pure.
+ */
 export function mentorRead(p, { horizon = null } = {}) {
     const tfs = p?.timeframes ?? {}
     const out = []

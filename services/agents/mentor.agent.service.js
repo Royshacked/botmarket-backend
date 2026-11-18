@@ -1009,11 +1009,6 @@ const _distance = (from, to) => `$${Math.round(Math.abs(from - to) * 100) / 100}
 /** The chart a thesis plan reads: a long-term trade the week, a day trade the hour (Roy, 2026-11-14: "stop in 1hr"), a swing the day. */
 const _lensTimeframe = (d) => (d?.type === 'long_term' || /week/i.test(d?.timeframe ?? '') ? 'week' : isDayTrade(d?.type) ? 'hour' : 'day')
 
-/**
- * THE TARGET AT THE HIGHS, AS A FACT (Roy, 2026-11-05): price at the highs with no other price to sell at takes the
- * current range's height added to its high. Said only while the worksheet has no target and the candidate is that move:
- * the tool's answer is not on every turn. The price stays Mentor's to judge. PURE.
- */
 /** The profile's timeframe for a structure chart (thesisTurnFacts' `timeframe`). */
 const _PROFILE_TF = Object.freeze({ hour: '1hour', day: 'day', week: 'week' })
 
@@ -1035,6 +1030,11 @@ export function _buildPullbackSection(facts, zone, draft) {
 ITS USUAL PULLBACK (checked: ${which} ${stop} sits ABOVE it) — on this chart, from its latest top ${zone.top}, half of this name's pullbacks before a move went deeper than ${zone.median}; the middle half ended ${zone.lo}–${zone.hi}. SAY IT in one line with these prices: an ordinary pullback of this name would likely reach ${stop}. OFFER the choice — the entry waits lower, near ${zone.median} (fewer fills, a better price), or the stop goes under ${zone.median} (more room, fewer shares for the same risk). Keep ${which} on the worksheet until they pick; never move it on your own. A description of how this name moves, not a tested edge — never call it support. Say it once.`
 }
 
+/**
+ * THE TARGET AT THE HIGHS, AS A FACT (Roy, 2026-11-05): price at the highs with no other price to sell at takes the
+ * current range's height added to its high. Said only while the worksheet has no target and the candidate is that move:
+ * the tool's answer is not on every turn. The price stays Mentor's to judge. PURE.
+ */
 export function _buildTargetSection(facts, draft) {
     if (facts?.target_kind !== 'measured_move' || !(facts.target > 0)) return ''
     // Said until the worksheet has this number, or another price of its own: a measured move of Mentor's own arithmetic
