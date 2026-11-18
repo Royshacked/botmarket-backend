@@ -308,6 +308,11 @@ a **document**, a show names a **page to read**.
   `assist`, and the legacy `trade` key lands there too; Mentor asks whether the user has a name or a setup
   and routes to Argus only when they have none — a route FROM Mentor TO Argus presets Argus to find ONE
   name and hand it back (`handBackOf`). Since 2026-11-09 that is the ONLY way in: Argus takes routes from Mentor alone.
+  That hand-back route is followed even from Mentor's OPENING turn (Axl handed him the user's words) — once, as an
+  opening, so Argus cannot route on; with no `<open>` it carries the user's words (2026-11-18: the floor moved to the
+  picker and no turn ran). Argus's pick comes back through the chain (`argus_pick`); a pick he sends as
+  `<route>assist X</route>`, or a route beside the pick tag, is taken as the pick and the route dropped (`_routeAsPick`);
+  if the house-list gate then drops that pick, the route stands — the user still reaches the trader, with their words.
 - `<open>…</open>` — the desk's FIRST TURN, in the user's own words, run as soon as the floor moves.
   Rides with a route (never with an edit, which resumes a conversation that already exists). A route
   from Axl with no `<open>` carries the user's own message instead (`ownWords`), so the desk always
@@ -561,6 +566,13 @@ fundamentals, Mentor trades.
 - **Atlas** asks the mandate once (capital required — the go refuses without `positionSize`), builds straight through
   (no sign-off, AVOID left out) and `<go>` generates the book (`generate`, the marked accounts); activating it stays the
   user's press. A book they already hold: Atlas's `<adopt>` opens the adopt grid (as Axl's adopt hint does).
+  A turn CUT SHORT by the tool budget that already holds a SIZED plan for a new book is his go too (`_atlasGo` — the
+  prompt's own rule, held in code): carrying it on only re-gathered and re-planned the same book (2026-11-18: three
+  carries, no go). Not when the reply asks the user something, nor while work is still out (sleeves sent to the picker,
+  or a route on the turn); the go step's gates are unchanged.
+- **The lists follow a go.** A go commits on the server and ends the session; the client sees the session archive and
+  announces every desk's change event (`announceCommitted` — Your trades, Your portfolios, coverage), so the new trade
+  or book is listed at once, not at the next poll. A press from the pane announces its own desk's the same way.
 - **Auto-continue.** A turn cut short by the tool budget (the provider's `onBudgetSpent`) is carried on by the runner
   (`carryOn`): the same desk's next turn, queued, at most 3 in a row — reset only when the user speaks. Not when the
   reply ended asking the user something (`endsAsking`), nor when the user's own turn is already queued.

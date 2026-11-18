@@ -484,7 +484,9 @@ services/
                           formatMoney/buildAccountLines, stripEmitTags, runtime glue.
                           cleanReply (every desk's reply, stripped from the shared ALL_EMIT_TAGS,
                           <ticker> unwrapped; dropDebris also drops a made-up capitals LABEL tag leading a line
-                          or as a <X>…</X> pair — Proteus's "<MEASURED>", 2026-11-12); normalizeMessages (the one history helper, depth per
+                          or as a <X>…</X> pair — Proteus's "<MEASURED>", 2026-11-12; and a model's channel leaking
+                          mid-line, 2026-11-18: garbled non-Latin words + "(final)" between two copies of the answer
+                          (DEBRIS_INLINE), and "answer (its reasoning) answer" (DEBRIS_ECHO) — one copy stays); normalizeMessages (the one history helper, depth per
                           desk via MAX_MESSAGES); openingTurn(text) — how a headless run opens a desk.
                           ONE VOICE (one-axl.md, 2026-11-13): VOICE_RULE rides every chat agent's cached spine right
                           after LANGUAGE_RULE — you are Axl in a role, speak as "I", never an internal name
@@ -1692,6 +1694,17 @@ scripts/                    ops one-offs — none run by `npm test`. Kinds: migr
                             in the browser → the re-draw turn (entries reopened, the chart read) → a regenerate closes
                             the card. axl_dev only. `node scripts/drive-redraw-card.mjs [baseUrl] [outDir]`
   drive-saved-line.mjs      The "saved — back with Axl" line shows only on the visit it was saved in (2026-11-02).
+  drive-all.mjs             `npm run drive:all` — THE WHOLE APP in a browser (2026-11-17), as `ui-smoke`, with the
+                            pieces in scripts/drive-all/ (steps, agentSteps, audit, report, lib — lib's pure helpers
+                            are tested in tests/unit/driveAll.test.js). Default: every screen at desktop, laptop and
+                            phone, READ-ONLY (a write off the allowlist is aborted and reported) plus a design audit
+                            (tokens, fonts, palette, WCAG contrast, tiny/clipped text, names, tap targets, overlaps,
+                            sideways scroll). `--with-agents` / `--agents-only`: every desk for real on PAPER — the
+                            trader step by step and saved with Generate (never armed: "all the way" arms), the
+                            portfolio manager's book generated (never activated), each checked then DELETED and the
+                            baseline verified; covered names only; ~$0.07–0.16 a run. Writes an HTML report and a JSON of the
+                            results to the OS temp dir (a file in the repo restarts nodemon — and so does editing any backend
+                            file DURING a run, which cuts the live turn). `--only "Name,Name"`, `--headed`, `--base`.
   scan-week.mjs             Pythia's change scan, DRY: what this week would assess and why — no model, no
                             writes. `node scripts/scan-week.mjs [cap]`
   assess-industry.mjs       One Pythia "Assess now" from the command line, as an admin; prints the cost
