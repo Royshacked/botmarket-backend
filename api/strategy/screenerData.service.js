@@ -31,11 +31,14 @@ export async function latestRun() {
     return run ? { asof: run.asof, run } : null
 }
 
-/** Every industry_timing row and the regime for one run date. */
-export async function readRun(asof) {
+/**
+ * Every industry_timing row and the regime for one run date. `projection` narrows the rows to what a caller reads — the
+ * forecast map needs a dozen of each row's fields, and the whole rows took 3.6 s over the M0 (drive:all, 2026-11-18).
+ */
+export async function readRun(asof, { projection = { _id: 0 } } = {}) {
     const db = await _io.db()
     const [rows, regime] = await Promise.all([
-        db.collection(TIMING).find({ asof }, { projection: { _id: 0 } }).toArray(),
+        db.collection(TIMING).find({ asof }, { projection }).toArray(),
         db.collection(REGIME).findOne({ _id: asof }),
     ])
     return { rows, regime }

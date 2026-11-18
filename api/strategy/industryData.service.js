@@ -67,12 +67,20 @@ export async function readSubIndustry(codeOrName, asof = null) {
     return { sub, answering, parents }
 }
 
+/** What listSubIndustries reads from a metrics document. Exported for its test. */
+export const SUB_LIST_FIELDS = Object.freeze({
+    _id: 0, level: 1, code: 1, name: 1, sector: 1, industry_group: 1, industry: 1, answered_at: 1, n_companies: 1,
+    'q1.grade': 1, 'q2.grade': 1, 'q3.grade': 1, 'q3.cyclical': 1, triggers: 1,
+})
+
 /** Every sub-industry row of the latest run, light: code, name, sector, answered_at, the three grades. */
 export async function listSubIndustries(asof = null) {
     const db = await _io.db()
     const when = asof ?? await latestAsof()
     if (!when) return []
-    const all = await db.collection(METRICS).find({ asof: when, level: { $in: LEVELS } }).toArray()
+    // Only the fields the rows below are built from: the whole metric documents are ~2.8 MB, and fetching them took 6.3 s
+    // over the M0 for a 64 KB answer — the forecast map waited on it every open (drive:all, 2026-11-18).
+    const all = await db.collection(METRICS).find({ asof: when, level: { $in: LEVELS } }, { projection: SUB_LIST_FIELDS }).toArray()
     const subs = all.filter(n => n.level === 'sub_industry')
     const nodes = new Map(all.map(n => [`${n.level}|${n.code}`, n]))
     return subs.map(s => {

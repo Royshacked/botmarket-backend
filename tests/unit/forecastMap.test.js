@@ -1,7 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { buildMap, tileMoves, forecastMapService, _setForecastMapIO, COMPANY_LIMIT } from '../../api/strategy/forecastMap.service.js'
+import { buildMap, tileMoves, forecastMapService, _setForecastMapIO, COMPANY_LIMIT, TIMING_FIELDS } from '../../api/strategy/forecastMap.service.js'
+import { factsFor } from '../../api/strategy/industryAssessment.service.js'
 import { getIndustryCompanies } from '../../api/strategy/strategy.controller.js'
 
 // The Forecasts heat map (Roy, 2026-10-14): every sub-industry as a tile coloured by its LATEST move, Pythia's verdict
@@ -106,4 +107,57 @@ test('GET /industries/:code/companies: an unknown code is a 404', async () => {
     const res = { code: 200, body: null, status(c) { this.code = c; return this }, json(b) { this.body = b; return this }, send(b) { this.body = b; return this } }
     await getIndustryCompanies({ params: { code: '99999999' }, user: { role: 'user' } }, res)
     assert.equal(res.code, 404)
+})
+
+// ── the map reads only the fields it uses (drive:all 2026-11-18: 7-9 s per open, now ~1.7 s) ──
+
+/** Mongo's inclusion projection on one document (dotted paths one level deep), for the test. */
+function project(doc, fields) {
+    const out = {}
+    for (const [k, on] of Object.entries(fields)) {
+        if (!on) continue
+        const [a, b] = k.split('.')
+        if (b == null) { if (a in doc) out[a] = doc[a] }
+        else if (doc[a] && b in doc[a]) (out[a] ??= {})[b] = doc[a][b]
+    }
+    return out
+}
+
+test('TIMING_FIELDS keeps every field a tile is coloured by — the projected row gives the same moves as the whole one', () => {
+    const raw = { ret_12m: 0.3, spy_12m: 0.1, ret_24m: 0.5, spy_24m: 0.2, rel_1m: 0.02, rel_3m: -0.04, ext_50: 0.07, ext_percentile: 0.9,
+        ret_12m_vw: 0.25, ret_24m_vw: 0.45, spy_24m_vw: 0.21, hype: true, hype_basis: 'size', bulky: 'x'.repeat(1000) }
+    const row = { code: '45301020', asof: '2026-11-14', basket_name: 'Semis', raw, history: [1, 2, 3] }
+    const slim = project(row, TIMING_FIELDS)
+    assert.deepEqual(tileMoves(slim), tileMoves(row))
+    assert.deepEqual(factsFor(slim).moved, factsFor(row).moved, 'every field moved reads survives the projection')
+    assert.equal('bulky' in slim.raw, false)
+})
+
+test('listSubIndustries reads only SUB_LIST_FIELDS — and returns exactly what it returned from the whole documents', async () => {
+    const { listSubIndustries, _setIndustryIO, SUB_LIST_FIELDS } = await import('../../api/strategy/industryData.service.js')
+    const docs = [
+        { asof: 'd', level: 'sub_industry', code: '45301020', name: 'Semiconductors', sector: 'IT', industry_group: 'Semis', industry: 'Semis',
+            answered_at: { level: 'industry', code: '453010' }, n_companies: 4, q1: { grade: 'A', text: 'x'.repeat(500) }, big: 'y'.repeat(2000) },
+        { asof: 'd', level: 'industry', code: '453010', name: 'Semis', q1: { grade: 'B' }, q2: { grade: 'C' }, q3: { grade: 'A', cyclical: true },
+            triggers: ['t1'], big: 'z'.repeat(2000) },
+    ]
+    const dbWith = (honour) => ({ collection: (name) => ({
+        find: (q, opts = {}) => {
+            if (name !== 'industry_metrics') return { sort: () => ({ limit: () => ({ next: async () => ({ asof: 'd' }) }) }) }
+            const rows = docs.filter(d => d.asof === q.asof && q.level.$in.includes(d.level))
+            return { toArray: async () => (honour && opts.projection ? rows.map(r => project(r, opts.projection)) : rows) }
+        },
+    }) })
+    try {
+        _setIndustryIO({ db: async () => dbWith(false) })
+        const whole = await listSubIndustries()
+        _setIndustryIO({ db: async () => dbWith(true) })
+        const slim = await listSubIndustries()
+        assert.deepEqual(slim, whole)
+        assert.equal(whole[0].grades.demand, 'B', 'the answering node\'s grades, read through the projection')
+        assert.ok(SUB_LIST_FIELDS['q3.cyclical'])
+    } finally {
+        const { getEngineDb } = await import('../../services/engineDb.js')
+        _setIndustryIO({ db: () => getEngineDb() })
+    }
 })

@@ -60,11 +60,19 @@ export function buildMap({ subs = [], timing = [], assessments = [], placed = {}
     return { asof, tiles, unmapped: unmapped.sort(), covered_at: coveredAt }
 }
 
+// What tileMoves reads from a timing row (factsFor's `moved`) — the whole rows took 3.6 s over the M0 (drive:all,
+// 2026-11-18). A field factsFor starts reading must be added here, or the map shows it null. Exported for its test.
+export const TIMING_FIELDS = Object.freeze({
+    _id: 0, code: 1, asof: 1, basket_name: 1,
+    ...Object.fromEntries(['ret_12m', 'spy_12m', 'ret_24m', 'spy_24m', 'rel_1m', 'rel_3m', 'ext_50', 'ext_percentile',
+        'ret_12m_vw', 'ret_24m_vw', 'spy_24m_vw', 'hype', 'hype_basis'].map(k => [`raw.${k}`, 1])),
+})
+
 const _io = {
     subs: () => listSubIndustries(),
     timing: async () => {
         const run = await latestRun()
-        return run ? { asof: run.asof, rows: (await readRun(run.asof)).rows } : { asof: null, rows: [] }
+        return run ? { asof: run.asof, rows: (await readRun(run.asof, { projection: TIMING_FIELDS })).rows } : { asof: null, rows: [] }
     },
     assessments: async () => (await getDb()).collection(ASSESSMENTS)
         .find({ 'subject.kind': 'industry' }, { projection: { ...ROW_PROJECTION, confidence: 1 } }).toArray(),
@@ -82,8 +90,9 @@ export function _setForecastMapIO(io) { Object.assign(_io, io) }
 
 /** The whole map, read in one pass of each source. */
 async function readMap() {
-    const [subs, timing, assessments, covered] = await Promise.all([_io.subs(), _io.timing(), _io.assessments(), _io.covered()])
-    const placed = covered.length ? await _io.placed(covered) : {}
+    // `placed` needs only `covered` (fast), so it runs beside the slow reads instead of after them (drive:all, 2026-11-18).
+    const coveredAndPlaced = _io.covered().then(async (covered) => [covered, covered.length ? await _io.placed(covered) : {}])
+    const [subs, timing, assessments, [covered, placed]] = await Promise.all([_io.subs(), _io.timing(), _io.assessments(), coveredAndPlaced])
     return buildMap({ subs, timing: timing.rows, assessments, placed, covered, asof: timing.asof })
 }
 
