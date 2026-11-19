@@ -5,12 +5,13 @@ import { _tick as loopTick, _reset as resetLoop } from '../../monitoring/echoPip
 
 // Echo's pipeline (docs/design/echo-pipeline.md): framed → mapped → scored → (day-5 close) → checked → watching.
 
-function deps({ map = { ok: true, map: { links: [1] } }, score = { ok: true, scores: { links: [] } }, check = { ok: true, check: { links: [] } }, open = [] } = {}) {
+function deps({ map = { ok: true, map: { links: [1] } }, score = { ok: true, scores: { links: [] } }, check = { ok: true, check: { links: [] } }, open = [], watching = [] } = {}) {
     const writes = []
     const calls = []
     return {
         writes, calls,
-        events: { advance: async (id, status, patch) => { writes.push([id, status, patch]) }, listOpen: async () => open },
+        events: { advance: async (id, status, patch) => { writes.push([id, status, patch]) }, listOpen: async () => open, listWatching: async () => watching },
+        watch: async (ev) => { calls.push(['watch', ev._id]); return { id: ev._id, triggers: 0, expired: false } },
         map: async (ev, o) => { calls.push(['map', o]); return map },
         score: async () => { calls.push(['score']); return score },
         check: async () => { calls.push(['check']); return check },
@@ -53,6 +54,13 @@ test('tick: every open event, one at a time; the loop is opt-in', async () => {
     const r = await tick()
     assert.deepEqual(r.ran.map(x => [x.id, x.status]), [['a', 'watching'], ['b', 'watching']])
     assert.deepEqual(await loopTick({ on: () => false, tick: async () => { throw new Error('must not run') } }), { off: true })
+})
+
+test('tick: the wave watch on watched events, once a day each', async () => {
+    const recent = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString()
+    const d = deps({ watching: [{ _id: 'w1', status: 'watching' }, { _id: 'w2', status: 'watching', watchedAt: recent }] }); _setDeps(d)
+    const r = await tick()
+    assert.deepEqual(r.watched.map(w => w.id), ['w1'], 'w2 was watched two hours ago')
 })
 
 test('the loop: the intake every 3 hours, the steps every hour', async () => {

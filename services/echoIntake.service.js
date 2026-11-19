@@ -30,6 +30,7 @@ import { recordUsage } from './tokenUsage.service.js'
 import { fetchBars, unfinishedSession } from './echoReturns.service.js'
 import { echoEventsService, TYPES, DURABILITIES, EFFECTS, TIMINGS } from './echoEvents.service.js'
 import { UNIVERSE, UNIVERSE_TICKERS } from './echoUniverse.js'
+import { markFollowUp } from './echoWatch.service.js'
 import { logger } from './logger.service.js'
 
 const LOG = '[echoIntake]'
@@ -77,7 +78,7 @@ const _deps = {
     calendar: readCalendarWindow, bars: fetchBars, stockNews: fetchStockNews, eightKs: get8kFilings, text: filingText,
     // A generic client name: only EDGAR asks for a contact (the SEC provider sends its own); no one else gets one.
     fmp: fmpGet, http: (url, o = {}) => getJson(url, { headers: { 'User-Agent': 'ar2trade-echo-intake' }, timeoutMs: 20000, ...o }),
-    call: callAnthropicStructured, record: recordUsage, events: echoEventsService, db: null, now: () => new Date(),
+    call: callAnthropicStructured, record: recordUsage, events: echoEventsService, followUp: markFollowUp, db: null, now: () => new Date(),
     sleep: (ms) => new Promise(r => setTimeout(r, ms)),
     async houseLedger() { const { houseLedgerUserId } = await import('../api/user/user.model.js'); return houseLedgerUserId() },
 }
@@ -259,6 +260,11 @@ confirming an effect already under way).
 - durability, the most important field: price_spike (cures itself through demand destruction), \
 policy_follow_through, drug_class_shift, or multi_year_commitment (a locked-in budget or capex plan) — with the reason.
 - filter: surprise, large, lasting — true/false each — and one sentence why.
+- follow_up_of: when the item follows up one of the ACTIVE EVENTS listed (policy follow-through, a third party \
+confirming the effect, new results in the same drug class, a mapped company's report that mentions it), that event's \
+id; else "". The biggest moves often come on the follow-up, so judge a follow-up's size against the original's chain.
+- resolves: true only when the item resolves the active event's driver — supply caught up, the commitment was spent or \
+reversed, a newer event replaced it.
 Say verdict "skip" with the reason for anything that is not an event.`
 
 export function triageSchema() {
@@ -276,8 +282,9 @@ export function triageSchema() {
                         effect: { type: 'string', enum: [...EFFECTS] }, timing: { type: 'string', enum: [...TIMINGS] },
                         durability: { type: 'object', properties: { kind: { type: 'string', enum: [...DURABILITIES] }, why: { type: 'string' } }, required: ['kind', 'why'], additionalProperties: false },
                         filter: { type: 'object', properties: { surprise: { type: 'boolean' }, large: { type: 'boolean' }, lasting: { type: 'boolean' }, why: { type: 'string' } }, required: ['surprise', 'large', 'lasting', 'why'], additionalProperties: false },
+                        follow_up_of: { type: 'string' }, resolves: { type: 'boolean' },
                     },
-                    required: ['key', 'verdict', 'skip_reason', 'type', 'origin', 'tickers', 'terms', 'what_changed', 'size', 'effect', 'timing', 'durability', 'filter'],
+                    required: ['key', 'verdict', 'skip_reason', 'type', 'origin', 'tickers', 'terms', 'what_changed', 'size', 'effect', 'timing', 'durability', 'filter', 'follow_up_of', 'resolves'],
                     additionalProperties: false,
                 },
             },
@@ -291,14 +298,18 @@ export function triageSchema() {
  * The triage's user message: the candidates NUMBERED 1..n — the model answers each by its number (a key is a URL, and
  * a model shortens a long one: the 2026-11-19 live pass got 34 of 86 back). Pure.
  */
-export function triagePrompt(cands, today) {
-    return [`Today is ${today}. Decide each item (${cands.length}) — answer every one, its key being its number:`, '',
+export function triagePrompt(cands, today, active = []) {
+    const head = [`Today is ${today}.`]
+    if (active.length) {
+        head.push(`ACTIVE EVENTS (a follow-up names one by its id):\n${active.map(e => `- ${e._id}: ${e.date} ${e.origin} — ${e.whatChanged}`).join('\n')}`)
+    }
+    return [...head, `Decide each item (${cands.length}) — answer every one, its key being its number:`, '',
         ...cands.map((c, i) => `[${i + 1}] ${c.source}${c.hint ? ` (likely ${c.hint.replace('_', ' ')})` : ''}, ${c.date}${c.tickers?.length ? `, ${c.tickers.join('/')}` : ''}\n${c.title}\n${c.text}`)].join('\n\n')
 }
 
 /** One batch through the triage model. → the decisions by the candidate's key. */
-async function triage(cands, payer) {
-    const res = await _deps.call({ model: TRIAGE_MODEL, systemPrompt: SYSTEM, user: triagePrompt(cands, day(_deps.now())), schema: triageSchema(), effort: TRIAGE_EFFORT,
+async function triage(cands, payer, active = []) {
+    const res = await _deps.call({ model: TRIAGE_MODEL, systemPrompt: SYSTEM, user: triagePrompt(cands, day(_deps.now()), active), schema: triageSchema(), effort: TRIAGE_EFFORT,
         onUsage: (usage, m) => { if (payer) _deps.record(payer, m, usage, 'echo', { monitor: true }).catch(() => {}) } })
     const out = new Map()
     for (const d of res?.data?.decisions ?? []) {
@@ -329,11 +340,14 @@ export async function intake() {
     const seen = new Set((await col.find({ _id: { $in: found.map(c => c.key) } }, { projection: { _id: 1 } }).toArray()).map(d => d._id))
     const fresh = [...new Map(found.filter(c => !seen.has(c.key)).map(c => [c.key, c])).values()]
     const payer = await _deps.houseLedger().catch(() => null)
+    // The events a new item may follow up (Step 5's wave watch): the house's under way.
+    const active = (await _deps.events.list({ status: ['mapped', 'scored', 'watching'], limit: 40 }).catch(() => [])).filter(e => e.kind === 'house')
+    const activeIds = new Set(active.map(e => e._id))
     const events = [], skipped = []
     for (let i = 0; i < fresh.length; i += BATCH) {
         const batch = fresh.slice(i, i + BATCH)
         let decided
-        try { decided = await triage(batch, payer) } catch (err) {
+        try { decided = await triage(batch, payer, active) } catch (err) {
             logger.warn(LOG, 'triage failed — the batch waits for the next pass', { error: err.message })
             continue
         }
@@ -341,12 +355,18 @@ export async function intake() {
             const d = decided.get(c.key)
             if (!d) continue          // not answered: asked again next pass
             let eventId = null
+            const parentId = activeIds.has(d.follow_up_of) ? d.follow_up_of : null
             if (d.verdict === 'event') {
-                const f = _deps.events.frame({ ...d, tickers: d.tickers?.length ? d.tickers : c.tickers, date: c.date, timing: c.timing ?? d.timing, size: c.size ?? d.size, sources: [c.url ?? c.title] }, day(now))
+                const f = _deps.events.frame({ ...d, follow_up_of: parentId, tickers: d.tickers?.length ? d.tickers : c.tickers, date: c.date, timing: c.timing ?? d.timing, size: c.size ?? d.size, sources: [c.url ?? c.title] }, day(now))
                 if (f.ok && _deps.events.passesFilter(f.event)) {
                     const dup = await _deps.events.findSame(f.event).catch(() => null)
                     if (!dup) eventId = (await _deps.events.create(f.event, { source: c.source }))._id
                 } else if (!f.ok) logger.warn(LOG, 'an event did not frame', { key: c.key, reason: f.reason })
+            }
+            // A follow-up marks the event it follows — even one too small to be an event of its own, and above all one
+            // that RESOLVES the driver (Step 5's expiry).
+            if (parentId && (eventId || d.resolves || d.verdict === 'event')) {
+                await _deps.followUp(parentId, { _id: eventId, date: c.date, whatChanged: d.what_changed }, d.resolves).catch(() => {})
             }
             if (!eventId) skipped.push({ key: c.key, reason: d.verdict === 'skip' ? d.skip_reason : 'did not pass the filter (surprise, large, lasting)' })
             else events.push(eventId)

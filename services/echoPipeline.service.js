@@ -3,7 +3,8 @@
 //
 //   framed  → Step 2 map (echoChain)   → mapped
 //   mapped  → Step 3 score (echoScore) → scored
-//   scored  → Step 4 check (echoCheck) at the day-5 close → checked → watching (Step 5, the wave watch)
+//   scored  → Step 4 check (echoCheck) at the day-5 close → watching
+//   watching → Step 5 (echoWatch): triggers re-run Steps 3 and 4, once a day; expiry → expired
 //
 // `run(event)` goes as far as it can now (a user's event in chat: mapped and scored at once; its check waits for the
 // day-5 close). `tick()` moves every open event along — the house's loop (monitoring/echoPipeline.monitor.service.js,
@@ -13,12 +14,14 @@ import { echoEventsService } from './echoEvents.service.js'
 import { mapEvent } from './echoChain.service.js'
 import { scoreEvent } from './echoScore.service.js'
 import { checkEvent } from './echoCheck.service.js'
+import { watchEvent } from './echoWatch.service.js'
 import { logger } from './logger.service.js'
 
 const LOG = '[echoPipeline]'
 export const OPEN = Object.freeze(['framed', 'mapped', 'scored'])
+export const WATCH_EVERY_MS = 20 * 60 * 60 * 1000
 
-const _deps = { events: echoEventsService, map: mapEvent, score: scoreEvent, check: checkEvent }
+const _deps = { events: echoEventsService, map: mapEvent, score: scoreEvent, check: checkEvent, watch: watchEvent }
 export function _setDeps(d) { Object.assign(_deps, d) }
 
 /**
@@ -58,18 +61,29 @@ export async function run(ev) {
     }
 }
 
-/** Every open event (the house's and the users'), one at a time. → `{ ran: [{ id, ...result }] }`. Never throws. */
+/**
+ * Every open event (the house's and the users'), one at a time; then the wave watch (Step 5) on each watched event not
+ * watched in the last 20 hours — once a day is the doc's pace (a trigger is a filing or an earnings print).
+ * → `{ ran: [{ id, ...result }], watched: [...] }`. Never throws.
+ */
 export async function tick() {
     let open = []
     try { open = await _deps.events.listOpen() } catch (err) {
         logger.warn(LOG, 'could not list open events', { error: err.message })
-        return { ran: [] }
+        return { ran: [], watched: [] }
     }
     const ran = []
     for (const ev of open) ran.push({ id: ev._id, ...await run(ev) })
     const moved = ran.filter(r => !r.stoppedAt).length
     if (ran.length) logger.info(LOG, 'tick', { open: ran.length, moved, waiting: ran.filter(r => r.wait).length, failed: ran.filter(r => r.stoppedAt && !r.wait).length })
-    return { ran }
+    const watched = []
+    const now = Date.now()
+    for (const ev of await _deps.events.listWatching().catch(() => [])) {
+        if (ev.watchedAt && now - Date.parse(ev.watchedAt) < WATCH_EVERY_MS) continue
+        watched.push(await _deps.watch(ev))
+    }
+    if (watched.length) logger.info(LOG, 'watch', { events: watched.length, triggers: watched.reduce((s, w) => s + w.triggers, 0), expired: watched.filter(w => w.expired).length })
+    return { ran, watched }
 }
 
 export const echoPipelineService = { run, tick }

@@ -58,13 +58,17 @@ test('the triage prompt says the source, the hint and the text', () => {
 test('intake: new candidates triaged, events that pass the filter stored, seen ones not asked again, a failing source costs itself', async () => {
     const seen = new Map([['fr|old', { _id: 'fr|old' }]])
     const created = []
-    const events = { ...echoEventsService, findSame: async () => null, create: async (ev, o) => { created.push([ev, o]); return { _id: `ev_${created.length}` } } }
+    const events = { ...echoEventsService, findSame: async () => null, create: async (ev, o) => { created.push([ev, o]); return { _id: `ev_${created.length}` } },
+        list: async () => [{ _id: 'ev_bis', kind: 'house', date: '2026-11-12', origin: 'United States', whatChanged: 'BIS export rule' }] }
+    const followUps = []
     const asked = []
     const D2 = (key, verdict, extra = {}) => ({ key, verdict, skip_reason: verdict === 'skip' ? 'macro data' : '', type: 'policy', origin: 'United States', tickers: [], terms: [],
         what_changed: 'BIS restricted remote access to advanced chips', size: 'all US cloud providers', effect: 'down', timing: 'after_close',
-        durability: { kind: 'policy_follow_through', why: 'a rule' }, filter: { surprise: true, large: true, lasting: true, why: 'a new regime' }, ...extra })
+        durability: { kind: 'policy_follow_through', why: 'a rule' }, filter: { surprise: true, large: true, lasting: true, why: 'a new regime' },
+        follow_up_of: '', resolves: false, ...extra })
     _setDeps({
         now: () => new Date('2026-11-19T22:00:00Z'), sleep: async () => {}, houseLedger: async () => 'house', record: async () => {}, events,
+        followUp: async (parent, child, resolves) => { followUps.push([parent, child._id, resolves]) },
         calendar: async () => { throw new Error('FMP down') }, eightKs: async () => ({ filings: [] }),
         http: async (url) => {
             if (url.includes('federalregister')) return { results: [{ document_number: 'new', publication_date: '2026-11-19', title: 'Remote Access to Advanced Semiconductors', type: 'Rule', agencies: [], abstract: 'x' }, { document_number: 'old', title: 'old' }, { document_number: 'cpi', publication_date: '2026-11-19', title: 'CPI', type: 'Rule' }] }
@@ -75,7 +79,7 @@ test('intake: new candidates triaged, events that pass the filter stored, seen o
             find: (q) => ({ toArray: async () => q._id.$in.filter(k => seen.has(k)).map(k => ({ _id: k })) }),
             updateOne: async (q, u) => { seen.set(q._id, u.$set) },
         }) },
-        call: async (o) => { asked.push(o.user); return { data: { decisions: [D2('1', 'event'), D2('2', 'skip'),
+        call: async (o) => { asked.push(o.user); return { data: { decisions: [D2('1', 'event', { follow_up_of: 'ev_bis' }), D2('2', 'skip'),
             D2('9', 'event', { filter: { surprise: true, large: false, lasting: true, why: 'small' } })] } } },
     })
     const r = await intake()
@@ -87,4 +91,7 @@ test('intake: new candidates triaged, events that pass the filter stored, seen o
     assert.equal(created[0][0].type, 'policy')
     assert.deepEqual(r.skipped.map(s => [s.key, s.reason]), [['fr|cpi', 'macro data']])
     assert.equal(seen.get('fr|new').verdict, 'event')
+    assert.match(asked[0], /ACTIVE EVENTS[^\n]*\n- ev_bis: 2026-11-12 United States — BIS export rule/, 'the triage sees what a follow-up may follow')
+    assert.equal(created[0][0].followUpOf, 'ev_bis', 'a follow-up is its own event, pointing at the one it follows')
+    assert.deepEqual(followUps, [['ev_bis', 'ev_1', false]], '…and marks it — the wave watch re-runs it')
 })

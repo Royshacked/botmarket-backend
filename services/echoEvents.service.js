@@ -127,4 +127,9 @@ export async function findSame(ev) {
     return same.find(d => (ev.originTickers ?? []).some(t => (d.originTickers ?? []).includes(t)) || String(d.origin ?? '').toLowerCase() === name) ?? null
 }
 
-export const echoEventsService = { frame, passesFilter, create, get, advance, list, listOpen, findSame }
+/** The events under the wave watch (Step 5), the house's and every user's. */
+export async function listWatching({ limit = 300 } = {}) {
+    return (await coll()).find({ status: 'watching' }).sort({ date: -1 }).limit(limit).toArray()
+}
+
+export const echoEventsService = { frame, passesFilter, create, get, advance, list, listOpen, listWatching, findSame }
