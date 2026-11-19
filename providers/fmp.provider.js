@@ -879,6 +879,26 @@ export function formatAnalystActionsForSymbols(bySymbol = {}) {
 }
 
 /**
+ * One name's analyst rating actions, newest first (the last 20), as FMP's rows `{ date, action, gradingCompany,
+ * previousGrade, newGrade }`. [] when unread. Cached 30m. Shared by the actions digest below and Echo's market check
+ * (Step 4: "once revisions arrive, the link is no longer hidden").
+ */
+export async function getRatingActions(symbol) {
+    const sym = String(symbol || '').toUpperCase().trim()
+    if (!sym) return []
+    let rows = _gradesCache.get(`sym:${sym}`)
+    if (!rows) {
+        const arr = await _fmpGet(`/grades?symbol=${sym}`).catch(() => [])
+        rows = (Array.isArray(arr) ? arr : [])
+            .filter(r => r?.date)
+            .sort((a, b) => String(b.date).localeCompare(String(a.date)))
+            .slice(0, 20)
+        _gradesCache.set(`sym:${sym}`, rows)
+    }
+    return rows
+}
+
+/**
  * Recent analyst rating changes. No symbols → the market-wide latest-changes feed
  * (discovery). Symbols → each name's recent actions (validation), capped to 12 names.
  * Cached 30m per key.
@@ -889,18 +909,7 @@ export async function getAnalystActions(symbols = [], limit = 25) {
 
     if (wanted.length) {
         const bySymbol = {}
-        await Promise.all(wanted.slice(0, 12).map(async sym => {
-            let rows = _gradesCache.get(`sym:${sym}`)
-            if (!rows) {
-                const arr = await _fmpGet(`/grades?symbol=${sym}`).catch(() => [])
-                rows = (Array.isArray(arr) ? arr : [])
-                    .filter(r => r?.date)
-                    .sort((a, b) => String(b.date).localeCompare(String(a.date)))
-                    .slice(0, 8)
-                _gradesCache.set(`sym:${sym}`, rows)
-            }
-            bySymbol[sym] = rows
-        }))
+        await Promise.all(wanted.slice(0, 12).map(async sym => { bySymbol[sym] = await getRatingActions(sym) }))
         return formatAnalystActionsForSymbols(bySymbol)
     }
 
