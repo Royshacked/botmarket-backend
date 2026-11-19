@@ -5,7 +5,7 @@ import { houseBook } from '../../services/houseBook.service.js'
 import { dayBoards } from '../../services/hotlist.day.js'
 import { prometheusCallsService } from '../../services/prometheusCalls.service.js'
 import { profileRow } from '../../services/hotlistBehaviour.service.js'
-import { echoService } from '../../services/echo.service.js'
+import { echoService, EVENT_ID } from '../../services/echo.service.js'
 import { makeHandle } from '../_shared/handle.util.js'
 import { httpError } from '../../services/httpError.util.js'
 
@@ -98,19 +98,17 @@ export const getRowProfile = handle('getRowProfile', async (req, res) => {
  */
 export const getScorecard = handle('getScorecard', async (req, res) => { res.json(await prometheusCallsService.scorecard()) })
 
-const ECHO_ID = /^[a-z0-9][a-z0-9.-]{0,40}-\d{4}-\d{2}-\d{2}$/
-
 /**
- * GET /api/hotlist/echo — Echo's FORWARD TEST (docs/design/echo-desk.md): the events the engine detected, each with where it
- * stands and its flagged names, and the record SO FAR — labelled, never the verdict (that reads once, on the first 30
- * events graded at 120 sessions).
+ * GET /api/hotlist/echo — Echo's events (docs/design/echo-pipeline.md): the house's and the user's own, each with its
+ * status, its top-scored and flagged names; and the validation report (Step 7) — labelled running until walk-forward
+ * has its events.
  */
-export const getEcho = handle('getEcho', async (req, res) => { res.json(await echoService.listEvents()) })
+export const getEcho = handle('getEcho', async (req, res) => { res.json(await echoService.listEvents(req.user?._id ?? null)) })
 
-/** GET /api/hotlist/echo/:id — one event: every link with its check row and grades, what was dropped, who mapped it. */
+/** GET /api/hotlist/echo/:id — one event: every link with its map line, six factors, market check, flag and grades. */
 export const getEchoEvent = handle('getEchoEvent', async (req, res) => {
-    if (!ECHO_ID.test(String(req.params.id))) throw httpError(400, 'not an event id')
-    const ev = await echoService.getEvent(req.params.id)
+    if (!EVENT_ID.test(String(req.params.id))) throw httpError(400, 'not an event id')
+    const ev = await echoService.getEvent(req.params.id, req.user?._id ?? null)
     if (!ev) throw httpError(404, 'no such event')
     res.json(ev)
 })

@@ -20,6 +20,7 @@ import { getGradesConsensus } from '../providers/fmp.provider.js'
 import { getDb } from '../providers/mongodb.provider.js'
 import { recordUsage } from './tokenUsage.service.js'
 import { supplySentences } from './echoFilings.service.js'
+import { mapLimit } from './concurrency.util.js'
 import { logger } from './logger.service.js'
 
 const LOG = '[echoScore]'
@@ -152,24 +153,23 @@ export function _setDeps(d) { Object.assign(_deps, d) }
 
 /** The supply sentences of the links where a bottleneck can live (suppliers, infrastructure). → {ticker: [sentence]}. */
 export async function supplyEvidence(links, deps = _deps) {
-    const out = {}
-    for (const l of links.filter(x => BOTTLENECK_RELATIONS.has(x.relation))) {
+    const want = links.filter(x => BOTTLENECK_RELATIONS.has(x.relation))
+    const got = await mapLimit(want, async (l) => {
         const r = await deps.supply(l.ticker)
-        out[l.ticker] = (r.sentences ?? []).slice(0, SENTENCES_PER_LINK)
         await deps.sleep(150)
-    }
-    return out
+        return [l.ticker, (r.sentences ?? []).slice(0, SENTENCES_PER_LINK)]
+    }, { concurrency: 3 })
+    return Object.fromEntries(got)
 }
 
 /** Analysts on each name (the sum of FMP's rating counts), null when unread. → {ticker: n}. */
 export async function analystCounts(links, deps = _deps) {
-    const out = {}
-    for (const l of links) {
+    const got = await mapLimit(links, async (l) => {
         const g = await deps.analysts(l.ticker).catch(() => null)
-        out[l.ticker] = g?.counts ? Object.values(g.counts).reduce((s, x) => s + (Number(x) || 0), 0) : null
         await deps.sleep(120)
-    }
-    return out
+        return [l.ticker, g?.counts ? Object.values(g.counts).reduce((s, x) => s + (Number(x) || 0), 0) : null]
+    }, { concurrency: 3 })
+    return Object.fromEntries(got)
 }
 
 /**
@@ -209,7 +209,7 @@ async function otherEvents(tickers, eventId) {
 export async function scoreEvent(ev, map, { userId = null } = {}) {
     const links = map?.links ?? []
     if (!links.length) return { ok: true, scores: { links: [], scoredAt: new Date().toISOString() } }
-    const [sentences, analysts] = [await supplyEvidence(links), await analystCounts(links)]
+    const [sentences, analysts] = await Promise.all([supplyEvidence(links), analystCounts(links)])   // EDGAR and FMP: apart
     const payer = userId ?? await _deps.houseLedger().catch(() => null)
     let res
     try {

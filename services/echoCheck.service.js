@@ -22,6 +22,7 @@
 
 import { getRatingActions } from '../providers/fmp.provider.js'
 import { eventReturns, sectorEtf } from './echoReturns.service.js'
+import { mapLimit } from './concurrency.util.js'
 import { logger } from './logger.service.js'
 
 const LOG = '[echoCheck]'
@@ -109,8 +110,7 @@ export async function checkEvent(ev, map, scores) {
         return { ok: false, wait: true, reason: `the day-${CHECK_DAY} close is not in yet (Day 0 ${d0 ?? '?'})` }
     }
     const yard = yardstick(links, rows, ev, originRow)
-    const out = []
-    for (const l of links) {
+    const out = await mapLimit(links, async (l) => {
         const r = rows[l.ticker]
         const s = byTicker.get(l.ticker)
         const move = signedMove(r, l.direction)
@@ -118,7 +118,7 @@ export async function checkEvent(ev, map, scores) {
         await _deps.sleep(100)
         const vol = r?.volume?.[CHECK_DAY] ?? null
         const flag = flagFor({ direction: l.direction, total: s?.total ?? null, high: Boolean(s?.high), directness: s?.factors?.directness?.score ?? 2, move, yard: yard.median })
-        out.push({
+        return {
             ticker: l.ticker, relation: l.relation, layer: l.layer, direction: l.direction, total: s?.total ?? null,
             moves: Object.fromEntries(DAYS.map(d => [d, { xsSpy: r?.horizons?.[d]?.xsSpyReaction ?? null, xsSector: r?.horizons?.[d]?.xsSectorReaction ?? null }])),
             signedMove: move, gap: r?.gap ?? null,
@@ -128,9 +128,9 @@ export async function checkEvent(ev, map, scores) {
             noticed: (Number.isFinite(vol) && vol >= NOTICED_VOLUME) || (acts.count ?? 0) > 0,
             ...flag,
             missing: r?.missing ?? ['not measured'],
-        })
-    }
-    const order = { underreacted_winner: 0, overreacted_loser: 1, null: 2, fully_priced: 3 }
+        }
+    }, { concurrency: 3 })
+    const order ={ underreacted_winner: 0, overreacted_loser: 1, null: 2, fully_priced: 3 }
     out.sort((a, b) => (order[a.flag] - order[b.flag]) || ((b.total ?? 0) - (a.total ?? 0)))
     return {
         ok: true,

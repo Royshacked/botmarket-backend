@@ -18,6 +18,7 @@ import { getListingProfile } from '../providers/fmp.provider.js'
 import { getDb } from '../providers/mongodb.provider.js'
 import { recordUsage } from './tokenUsage.service.js'
 import { namedIn, customerShare, termsFor } from './echoFilings.service.js'
+import { mapLimit } from './concurrency.util.js'
 import { logger } from './logger.service.js'
 
 const LOG = '[echoChain]'
@@ -149,14 +150,15 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 export async function withFilings(ev, links, deps = _deps) {
     const terms = originTerms(ev)
     const origin = ev.originTickers?.[0] ?? null
-    const out = []
-    for (const l of links) {
+    // Three links at a time, three reads each with a pause between: inside EDGAR's ten a second, and a chat's map in
+    // well under a minute where one at a time took two and a half.
+    return mapLimit(links, async (l) => {
         const byLink = await deps.namedIn(l.ticker, terms); await deps.sleep(FILING_PAUSE_MS)
         const byOrigin = origin ? await deps.namedIn(origin, termsFor(l.name)) : { named: null }; await deps.sleep(FILING_PAUSE_MS)
         const share = await deps.customerShare(l.ticker, terms); await deps.sleep(FILING_PAUSE_MS)
         const named = byLink.named === true || byOrigin.named === true ? true
             : byLink.named === false && (byOrigin.named === false || !origin) ? false : null
-        out.push({
+        return {
             ...l,
             filings: {
                 named: share.share ? true : named,
@@ -164,9 +166,8 @@ export async function withFilings(ev, links, deps = _deps) {
                 share: share.share ? { share: share.share, atLeast: Boolean(share.atLeast), form: share.form, date: share.date, url: share.url } : null,
                 excerpt: share.excerpt ?? byLink.excerpt ?? byOrigin.excerpt ?? null,
             },
-        })
-    }
-    return out
+        }
+    }, { concurrency: 3 })
 }
 
 const templateKey = (ev) => `${ev.type}|${(ev.originTickers?.[0] ?? ev.origin).toLowerCase()}`

@@ -1,71 +1,100 @@
 /**
- * Echo's tools (docs/design/echo-desk.md §5): the forward test's events and maps, read; and a map for an event the user
- * names, made. The numbers and the maps come from code (echo.service reads the engine's `echo_forward`; echoMap.service
- * maps a user event) — these formatters only lay them out so the model reads them as they were meant: a forward-test
- * map is the RECORD (frozen at the day-5 check, graded by the market), the running record is "so far" and never the
- * verdict, and a link's direction follows the event's move by rule, not the model's reading of the news.
+ * Echo's tools (docs/design/echo-pipeline.md, "The app") — the event analyst's view of the pipeline built to the
+ * simulator doc. Code makes every number (the map, the six scores, the market check, the flags, the grades); these
+ * formatters lay them out so the model reads them as meant: links RANKED BY SCORE (high at 8 of 12), each factor with its
+ * reason and its evidence (a 10-K's stated share, the company's own supply sentences), the doc's three flags, and the
+ * validation record as RUNNING — never a verdict until walk-forward has its events.
  *
- * BOUND per turn to the user: their own events are theirs (`echo_user_events` by userId); the forward test is shared.
+ * BOUND per turn to the user: their own events are theirs; the house's are everyone's.
  */
 
 import { makeToolHandler } from '../agentUtils.js'
 import { toolError } from '../toolResult.util.js'
-import { echoService, HORIZONS } from '../echo.service.js'
-import { echoMapService } from '../echoMap.service.js'
+import { echoService } from '../echo.service.js'
+import { echoEventsService, TYPES, DURABILITIES } from '../echoEvents.service.js'
+import { echoPipelineService } from '../echoPipeline.service.js'
 import { echoReadsService, MAX_ASK, MAX_USER_WEEK } from '../echoReads.service.js'
 
 const LOG = '[echo.tools]'
+const FLAG_WORDS = { underreacted_winner: 'UNDERREACTED WINNER', overreacted_loser: 'OVERREACTED LOSER', fully_priced: 'fully priced' }
+const STATUS_WORDS = {
+    framed: 'recorded, not mapped yet', mapped: 'mapped, not scored yet', scored: 'scored, waiting for its day-5 market check',
+    watching: 'checked at day 5, under the wave watch', expired: 'expired',
+}
 
 export const ECHO_TOOL_SPEC = {
-    get_echo_events: `The FORWARD TEST's events (the engine's: earnings moves of 5%+ against SPY in the 152 largest US names, mapped by the model before their 5th session, checked at the day-5 close, graded at 20 / 60 / 120 sessions) with where each stands and its LAGGING links, the record so far, and the user's OWN events (maps they asked you for). Read it first when the user asks what Echo has found, or about an event that may already be here.`,
-    get_event_map: `One event's whole map — every link with its relation, layer, direction (by rule), the model's own direction, why it is linked, and, for a forward-test event once checked, whether the market had caught up by day 5 and how the link did since (vs its own same-sector stand-ins). \`id\` is the event's id from get_echo_events (a forward-test id like "csco-earnings-2026-11-12", or a user event's "ue_…").`,
-    request_reads: `Send names from one of the USER's OWN events (an id "ue_…") to the analyst and the technical analyst: the analyst's SWING coverage (researched for the house when there is none standing — a few minutes each) and the technical analyst's measured profile. \`tickers\`: the names the user picked from that map (at most ${MAX_ASK} at a time, ${MAX_USER_WEEK} a week); omit for its directional links (suppliers, infrastructure, substitutes). Only when the user asks. The forward test's lagging names go on their own after the day-5 check — never send those.`,
-    map_event: `Map an event the USER names to the companies it reaches through the supply chain — anything: a product launch ("GTA 6 is out"), a guidance cut, a strike, a deal, a heatwave. FRAME it first, then call once: \`what_changed\` (one sentence: what happened), \`origin\` (the company the event happens to — or, when no single listed company is the event's, the DEMAND it moves, e.g. "European air-conditioning demand"), \`tickers\` (the origin's US tickers; empty for a demand), \`effect\` (up / down: what the event does to the origin's demand — ask the user once if it could go either way), \`date\` (YYYY-MM-DD it became public; omit for today), \`horizon\` (the user's, if they said one). One model call, about 40 seconds and a few cents; the map is saved to the user's events. Never for an event already in get_echo_events — read that map instead.`,
+    get_echo_events: `Echo's events — the house's (the intake reads earnings moves, 8-K deals, policy, defense awards, trials and news, and keeps what passes the filter: a surprise, large, more than a one-off) and the user's own — each with where it stands, its top-scored names and its flags; and the validation record so far. Read it first when the user asks what Echo has found, or about an event that may already be here.`,
+    get_event_map: `One event whole — the record (type, what changed, size, durability and why), then every link RANKED BY SCORE: relation, layer, direction and why; the six factors (lock-in, supply response, bottleneck, directness, exposure, coverage, 0–2 each, high at 8 of 12) with their reasons; the filing evidence (named in filings, a 10-K's stated share, the company's own supply sentences); the day-5 market check and the flag (underreacted winner, overreacted loser, fully priced); the grades since. \`id\` is "ev_…" from get_echo_events.`,
+    request_reads: `Send names from one of the USER's OWN events (an id "ev_…" they mapped) to the analyst and the technical analyst: the analyst's SWING coverage (researched for the house when there is none standing — a few minutes each) and the technical analyst's measured profile. \`tickers\`: the names the user picked from that map (at most ${MAX_ASK} at a time, ${MAX_USER_WEEK} a week); omit for its top-scored directional links. Only when the user asks. The house's flagged names go on their own after the day-5 check — never send those.`,
+    map_event: `Map an event the USER names through Echo's whole pipeline — the chain (layers 1–3 both ways, losers and substitutes, every link checked against SEC filings) and the six-factor score on every link. Anything: a launch ("GTA 6 is out"), a guidance cut, a rule, a strike, a deal, a war. FRAME it first, then call once: \`what_changed\` (one sentence: the news, not a stock's move), \`origin\` (the company or country it hits directly, or the demand it moves), \`tickers\` (the origin's US tickers; empty for a country or a demand), \`effect\` (up / down / mixed: what it does to demand AT THE ORIGIN — ask the user once if unsure), \`type\` (${TYPES.join(', ')}), \`durability\` ({kind: ${DURABILITIES.join(' / ')}, why} — a locked-in commitment lasts, a price spike cures itself), \`date\` (YYYY-MM-DD it became public; omit for today), \`size\` (as a sentence, if known), \`terms\` (what other companies' filings call the origin). Takes two to three minutes and well under a dollar; the event is saved to the user's events and its market check comes at the day-5 close. Never for an event already in get_echo_events — read that one instead.`,
 }
 
 const pct = (x) => (Number.isFinite(x) ? `${x > 0 ? '+' : ''}${(Math.round(x * 1000) / 10).toFixed(1)}%` : '—')
-const ownDirection = (note) => /model's direction (gains|loses|unclear)/.exec(note ?? '')?.[1] ?? '?'
-const STATUS_WORDS = {
-    detected: 'found, not mapped yet', mapped: 'mapped, waiting for its day-5 market check', late: 'reached after its day-5 close — not mapped, not graded',
-    checked: 'checked at day 5, being graded', done: 'graded at every horizon',
+
+/** The validation record in words — always "so far", never the verdict. Pure. */
+export function recordWords(report) {
+    if (!report || !report.events) return 'Validation: no event graded yet. Until there are, nothing Echo flags is proven — say so whenever a flagged name comes up.'
+    const parts = [20, 60, 120].filter(h => report.horizons?.[h]?.vsStandIns?.n).map(h => {
+        const v = report.horizons[h].vsStandIns
+        return `${h} sessions: flagged names ${pct(v.mean)} against their same-sector stand-ins (median ${pct(v.median)}, ${v.n} events)`
+    })
+    return `Validation so far — ${parts.length ? parts.join('; ') : 'nothing graded past 5 sessions yet'}. ${report.walkForward?.note ?? ''} This is NOT a verdict: until walk-forward has its events the method is unproven — say so whenever a flagged name comes up.`
 }
 
-/** The record so far, in words — never called the verdict. Pure. */
-export function recordWords(record) {
-    if (!record) return 'No record yet.'
-    const parts = HORIZONS.filter(h => record[h]?.n).map(h => `${h} sessions: ${pct(record[h].mean)} mean over ${record[h].n} events, ${Math.round(record[h].positive * 100)}% positive`)
-    return `${parts.length ? `So far — ${parts.join('; ')}.` : 'Nothing graded yet.'} This is NOT the verdict: the pre-declared rule reads ONCE, on the first ${record.verdictAt} events graded at 120 sessions (${record.gradedAt120} so far). Until then the test is unproven — say so whenever a forward-test name comes up.`
-}
-
-/** A forward-test event in one line plus its lagging links. Pure. */
+/** An event in one line plus its top names and flags. Pure. */
 export function eventLine(e) {
-    const head = `${e.id} — ${e.date} · ${e.tickers?.join('/') || e.origin} ${e.effect === 'up' ? 'up' : 'down'} (${e.size ?? ''}) · ${STATUS_WORDS[e.status] ?? e.status} · ${e.links} links`
-    const spreads = HORIZONS.filter(h => Number.isFinite(e.spread?.[h])).map(h => `${h}d ${pct(e.spread[h])}`)
-    const lag = e.flagged?.length ? `\n   lagging at day 5: ${e.flagged.map(f => `${f.ticker} (${f.relation}, ${f.direction})`).join(', ')}` : ''
-    return `${head}${spreads.length ? ` · lagging vs stand-ins ${spreads.join(', ')}` : ''}${lag}`
+    const who = `${e.origin}${e.tickers?.length ? ` (${e.tickers.join('/')})` : ''}`
+    const head = `${e.id}${e.mine ? ' [the user\'s]' : ''} — ${e.date} · ${String(e.type).replace('_', ' ')} · ${who} demand ${e.effect} · ${String(e.durability ?? '').replace(/_/g, ' ')} · ${STATUS_WORDS[e.status] ?? e.status}${e.expiredBecause ? ` (${e.expiredBecause})` : ''}`
+    const lines = [head, `   ${e.whatChanged}`]
+    if (e.top?.length) lines.push(`   top scores: ${e.top.map(t => `${t.ticker} ${t.total}/12`).join(', ')} · ${e.high} high · ${e.links} links`)
+    if (e.flagged?.length) lines.push(`   flagged at day 5: ${e.flagged.map(f => `${f.ticker} (${FLAG_WORDS[f.flag]}, ${f.total}/12)`).join(', ')}`)
+    if (e.followUpOf) lines.push(`   a follow-up of ${e.followUpOf}`)
+    if (e.error) lines.push(`   stopped: ${e.error}`)
+    return lines.join('\n')
 }
 
-/** One link of a map, in one line. Pure. */
-export function linkLine(l) {
-    const own = ownDirection(l.note)
-    const checked = l.group ? ` · day 5 ${l.group === 'flagged' ? 'LAGGING' : 'caught up'} (${pct(l.reaction)})${HORIZONS.filter(h => Number.isFinite(l.spread?.[h])).map(h => `, ${h}d ${pct(l.spread[h])} vs stand-ins`).join('')}` : ''
-    return `- ${l.ticker ?? l.name} (${l.name}) — ${l.relation}, layer ${l.layer}, ${l.direction}${own !== l.direction ? ` (the model said ${own})` : ''}${checked}: ${l.why ?? l.evidence_text ?? ''}`
+const F = (f, label, extra = '') => (f ? `${label} ${f.score}${extra}` : `${label} ?`)
+/** One link in words: its line, its score and factors, its evidence, its check. `full` adds each factor's reason. Pure. */
+export function linkWords(l, full = false) {
+    const f = l.factors
+    const head = `- ${l.ticker} (${l.name}) — ${l.relation}, layer ${l.layer}, ${l.direction}: ${l.why}`
+    const lines = [head]
+    if (f) {
+        lines.push(`  score ${l.total}/12${l.high ? ' HIGH' : ''}: ${[F(f.lockIn, 'lock-in'), F(f.supplyResponse, 'supply response'), F(f.bottleneck, 'bottleneck', ` (${f.bottleneck?.evidence})`),
+            F(f.directness, 'directness'), F(f.exposure, 'exposure', ` (${f.exposure?.source})`), F(f.coverage, 'coverage', ` (${f.coverage?.why})`)].join(' · ')}`)
+        if (full) {
+            for (const [k, label] of [['lockIn', 'lock-in'], ['supplyResponse', 'supply response'], ['bottleneck', 'bottleneck'], ['directness', 'directness'], ['exposure', 'exposure']]) {
+                if (f[k]?.why) lines.push(`    ${label}: ${f[k].why}${k === 'bottleneck' && f[k].quote ? ` — "${f[k].quote}"` : ''}`)
+            }
+        }
+    }
+    const fl = l.filings
+    if (fl) {
+        const where = [fl.share?.form, fl.share?.date].filter(Boolean).join(' ')
+        const named = fl.namedBy?.length ? ` (${fl.namedBy.join(', ')})` : ''
+        lines.push(`  filings: ${fl.share ? `${fl.share.atLeast ? 'over ' : ''}${pct(fl.share.share).replace('+', '')} of its revenue tied to the origin${where ? ` (${where})` : ''}` : fl.named === true ? `named${named}` : fl.named === false ? 'not named in either company\'s filings' : 'not read'}`)
+    }
+    if (l.ledger?.conflicted) lines.push(`  CONFLICTED: other events pull it the other way (${l.ledger.events.map(e => e.origin).join(', ')}) — a weak trade`)
+    if (l.check) lines.push(`  day 5: ${pct(l.check.signedMove)} its way vs SPY · volume ${l.check.volume?.day5 ? `${l.check.volume.day5.toFixed(1)}× its 20-day average` : '—'} · analyst actions since ${l.check.analysts?.count ?? '?'}${l.flag ? ` · ${FLAG_WORDS[l.flag]}: ${l.flagWhy}` : ''}`)
+    const g = Object.entries(l.grades ?? {}).filter(([, v]) => Number.isFinite(v))
+    if (g.length) lines.push(`  since the day-5 close (its way, vs SPY): ${g.map(([h, v]) => `${h}d ${pct(v)}`).join(', ')}`)
+    return lines.join('\n')
 }
 
-/** A whole map in words: the event, the rule, every link, what was dropped. Pure. */
-export function mapWords({ id, event, map, kind }) {
-    const ev = event ?? {}
-    const way = ev.effect === 'up' ? 'up' : 'down'
-    const links = map?.links ?? []
+/** A whole event in words: the record, the map and score, the links by score. Pure. */
+export function mapWords(e, { reasonsFor = 8 } = {}) {
+    const ev = e.event
     const lines = [
-        `${id} — ${kind === 'user' ? 'the user\'s event (not part of the forward test; no market check, no grades)' : 'forward-test event'}`,
-        `Event (${ev.date}): ${ev.what_changed}. Origin: ${ev.origin}${ev.origin_tickers?.length ? ` (${ev.origin_tickers.join(', ')})` : ' — a demand, no single listed company'}; effect ${way}.`,
-        `Direction by rule (the backtest's): suppliers and infrastructure move WITH the origin (${way === 'up' ? 'gain' : 'lose'}), substitutes against it, peers and customers unclear. The model's own reading is kept beside it.`,
-        `Mapped by ${map?.model ?? '?'} (prompt ${map?.prompt_version ?? map?.promptVersion ?? '?'}) — ${links.length} links:`,
-        ...links.map(linkLine),
+        `${e.id}${e.mine ? ' — the user\'s event' : ' — the house\'s event'} (${STATUS_WORDS[e.status] ?? e.status})`,
+        `Event (${ev.date}, ${String(ev.type).replace('_', ' ')}): ${ev.whatChanged}. Origin: ${ev.origin}${ev.tickers.length ? ` (${ev.tickers.join(', ')})` : ''}; demand at the origin ${ev.effect}.${ev.size ? ` Size: ${ev.size}.` : ''}`,
+        `Durability: ${String(ev.durability?.kind).replace(/_/g, ' ')}${ev.durability?.why ? ` — ${ev.durability.why}` : ''}.${ev.filter?.why ? ` Why it is an event: ${ev.filter.why}` : ''}`,
     ]
-    const dropped = map?.dropped ?? []
-    if (dropped.length) lines.push(`Dropped (${dropped.length}): ${dropped.map(d => `${d.ticker || d.name || '?'} — ${d.reason}`).join('; ')}`)
+    if (e.checked) lines.push(`Market check (day 5 = ${e.checked.checkDay}): layer 1 moved ${pct(e.checked.yardstick?.median)} in its direction (${e.checked.yardstick?.from ?? '—'}). Options volatility not measured.`)
+    else if (e.waiting) lines.push(`Market check: ${e.waiting}.`)
+    if (e.triggers?.length) lines.push(`Wave watch — ${e.triggers.length} trigger(s): ${e.triggers.slice(-3).map(t => `${t.date ?? ''} ${t.what}`).join('; ')}`)
+    lines.push(`${e.links.length} links, ranked (flags first, then score; high at 8 of 12):`)
+    e.links.forEach((l, i) => lines.push(linkWords(l, i < reasonsFor)))
+    if (e.map?.dropped?.length) lines.push(`Dropped (${e.map.dropped.length}): ${e.map.dropped.map(d => `${d.ticker || d.name || '?'} — ${d.reason}`).join('; ')}`)
     return lines.join('\n')
 }
 
@@ -75,52 +104,33 @@ const READ_WORDS = {
     not_queued: 'could not be queued', unknown: "the analyst's read could not be checked",
 }
 
-/** echo.service's shaped event → mapWords' shape. */
-const fromForward = (e) => ({ id: e.id, kind: 'forward', event: e.event, map: { ...(e.map ?? {}), links: e.all } })
-/** A stored user event → mapWords' shape (its links have no check: `group` null). */
-const fromUser = (d) => ({ id: d._id, kind: 'user', event: d.event, map: { ...d.map, links: (d.map?.links ?? []).map(l => ({ ...l, why: l.evidence_text, group: null })) } })
-
-export function makeEchoHandlers({ userId = null, events = echoService, maps = echoMapService, reads = echoReadsService } = {}) {
+export function makeEchoHandlers({ userId = null, read = echoService, events = echoEventsService, pipeline = echoPipelineService, reads = echoReadsService } = {}) {
     return {
         get_echo_events: makeToolHandler('get_echo_events', async () => {
-            const { events: list, record } = await events.listEvents()
-            const own = userId ? await maps.listUserEvents(userId) : []
-            const parts = [
-                `FORWARD TEST — ${list.length} events, newest first.`,
-                recordWords(record),
-                ...list.map(eventLine),
-            ]
-            parts.push(own.length
-                ? `\nTHE USER'S OWN EVENTS (${own.length}):\n${own.map(d => `${d._id} — ${d.event.date} · ${d.event.what_changed} · ${d.map?.links?.length ?? 0} links`).join('\n')}`
-                : '\nThe user has no events of their own yet.')
-            return parts.join('\n')
+            const { events: list, report } = await read.listEvents(userId)
+            if (!list.length) return `No events yet — the intake reads its sources every three hours.\n${recordWords(report)}`
+            return [`ECHO — ${list.length} events, newest first.`, recordWords(report), ...list.map(eventLine)].join('\n')
         }, (err) => `Could not read Echo's events: ${err.message}`, LOG),
 
         get_event_map: makeToolHandler('get_event_map', async ({ id }) => {
             const key = String(id ?? '').trim()
             if (!key) return toolError('Give the event id from get_echo_events.')
-            if (key.startsWith('ue_')) {
-                const d = await maps.getUserEvent(key, userId)
-                return d ? mapWords(fromUser(d)) : toolError(`No event ${key} among the user's events.`)
-            }
-            const e = await events.getEvent(key)
-            return e ? mapWords(fromForward(e)) : toolError(`No forward-test event ${key} — read get_echo_events for the ids.`)
+            const e = await read.getEvent(key, userId)
+            return e ? mapWords(e) : toolError(`No event ${key} — read get_echo_events for the ids.`)
         }, (err, { id }) => `Could not read the map for ${id}: ${err.message}`, LOG),
 
         request_reads: makeToolHandler('request_reads', async ({ id, tickers } = {}) => {
             if (!userId) return toolError('There is no signed-in user.')
-            const key = String(id ?? '').trim()
-            if (!key.startsWith('ue_')) return toolError("Only the user's own events (ue_…): the forward test's lagging names go to the analyst on their own after the day-5 check.")
-            const d = await maps.getUserEvent(key, userId)
-            if (!d) return toolError(`No event ${key} among the user's events.`)
-            const links = (d.map?.links ?? []).filter(l => l.ticker)
+            const e = await read.getEvent(String(id ?? '').trim(), userId)
+            if (!e) return toolError(`No event ${id} among the user's events.`)
+            if (!e.mine) return toolError("Only the user's own events: the house's flagged names go to the analyst on their own after the day-5 check.")
+            const links = e.links.filter(l => l.ticker)
             const asked = (Array.isArray(tickers) ? tickers : []).map(t => String(t).toUpperCase().trim()).filter(Boolean)
-            const picked = asked.length ? links.filter(l => asked.includes(l.ticker)) : links.filter(l => l.direction !== 'unclear')
             const missing = asked.filter(t => !links.some(l => l.ticker === t))
             if (missing.length) return toolError(`Not on this map: ${missing.join(', ')}.`)
+            const picked = asked.length ? links.filter(l => asked.includes(l.ticker)) : links.filter(l => l.direction !== 'unclear').slice(0, MAX_ASK)
             if (picked.length > MAX_ASK) return toolError(`${picked.length} names — at most ${MAX_ASK} at a time; ask the user which.`)
             if (!picked.length) return toolError('No directional links on this map — ask the user which names.')
-            // A week's cap per user (code review 2026-11-19): MAX_ASK bounds one ask, this bounds the asking.
             const used = await reads.userAskedThisWeek(userId)
             if (used === null) return toolError('The research queue could not be read just now — try again in a minute.')
             if (used + picked.length > MAX_USER_WEEK) {
@@ -128,22 +138,27 @@ export function makeEchoHandlers({ userId = null, events = echoService, maps = e
                 return toolError(`The user has sent ${used} names for research this week; the limit is ${MAX_USER_WEEK}${left ? ` — ${left} more, so ask which` : ' — tell them it opens again within the week'}.`)
             }
             const by = new Map(picked.map(l => [l.ticker, l]))
-            const ev = d.event
+            const ev = e.event
             const res = await reads.sendNames([...by.keys()], (s) => ({
-                echo: true, forward: false, horizon: 'swing', event_id: d._id, user_event: true,
-                event: `${ev.what_changed} (${ev.date})`, origin: ev.origin, relation: by.get(s).relation, direction: by.get(s).direction,
-                why: by.get(s).evidence_text ?? null, reason: `The event analyst: ${by.get(s).relation} of ${ev.origin} (a user's event)`,
+                echo: true, forward: false, horizon: 'swing', event_id: e.id, user_event: true,
+                event: `${ev.whatChanged} (${ev.date})`, origin: ev.origin, relation: by.get(s).relation, direction: by.get(s).direction,
+                why: by.get(s).why ?? null, reason: `The event analyst: ${by.get(s).relation} of ${ev.origin} (a user's event)`,
             }), { requestedBy: String(userId), maxUsd: Infinity })
             const lines = res.names.map(n => `- ${n.symbol}: ${READ_WORDS[n.read] ?? n.read}; the technical analyst's profile queued`)
             const run = res.research?.outcome === 'busy' ? '\nThe analyst is busy with another run — these wait in line.' : ''
             return `Sent on (swing):\n${lines.join('\n')}${run}\nThe reads land in the analyst's coverage and the technical analyst's profiles — the user finds them on the Hotlist and with the trader.`
         }, (err) => `Could not send the names on: ${err.message}`, LOG),
 
-        map_event: makeToolHandler('map_event', async (args) => {
+        map_event: makeToolHandler('map_event', async (args = {}) => {
             if (!userId) return toolError('There is no signed-in user to save this event for.')
-            const r = await maps.mapUserEvent(args, { userId })
-            if (!r.ok) return toolError(r.reason)
-            return mapWords(fromUser(r.doc))
+            const f = events.frame({ ...args, filter: { surprise: true, large: true, lasting: true, why: 'named by the user' } })
+            if (!f.ok) return toolError(f.reason)
+            const doc = await events.create(f.event, { userId, source: 'chat' })
+            const r = await pipeline.run(doc)
+            const e = await read.getEvent(doc._id, userId)
+            if (!e) return toolError('The event was saved but could not be read back — try get_echo_events.')
+            const note = r.stoppedAt && !r.wait ? `\nStopped at ${r.stoppedAt}: ${r.reason}` : ''
+            return `${mapWords(e)}${note}`
         }, (err) => `Could not map the event: ${err.message}`, LOG),
     }
 }

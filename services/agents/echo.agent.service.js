@@ -1,14 +1,14 @@
 // Echo — the event desk (agent key `echo`, desk `events`; docs/design/echo-desk.md).
 //
-// Maps ONE event to the companies it reaches through the supply chain. Two kinds, never mixed (§2): the FORWARD TEST's
-// events (the engine's, read with get_echo_events / get_event_map — the record, frozen at the day-5 check, graded by
-// the market) and the USER's events (map_event — framed here, mapped by echoMap.service, saved per user, never graded).
-// He sets no levels (the trader's), judges no business (the analyst's), and calls nothing a pick: the forward test is
-// unproven until its verdict reads. Reached from Axl ("what does GTA 6 do to…"), from the Hotlist's Echo tab, or
-// opened directly.
+// Maps ONE event to the companies it reaches through the supply chain, built to the simulator doc
+// (docs/design/echo-pipeline.md): the house's events (the intake's) and the USER's own (map_event — framed here, run
+// through the same pipeline: the chain, the filings, the six-factor score; the day-5 check when it comes). He reads
+// the scores and flags, sets no levels (the trader's), judges no business (the analyst's), and calls nothing a pick:
+// the method is unproven until the validation has its events. Reached from Axl ("what does GTA 6 do to…"), from the
+// Hotlist's Echo tab, or opened directly.
 //
-// Model: the house chat model, like every desk (runAgentStream). The MAP is not this model's — map_event makes one
-// Opus 5.5 call of its own (echoMap.service), costed to the user as `echo`.
+// Model: the house chat model, like every desk (runAgentStream). The MAP and the SCORE are not this model's — map_event
+// runs the pipeline's own Opus 5.5 calls (echoChain, echoScore), costed to the user as `echo`.
 
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'

@@ -7,15 +7,16 @@
 //            stands, nothing is queued. Missing → a research-queue row (source `echo`, the event and the link as its
 //            context — researchRun.echoOpening says them) and the house's run started inside Echo's weekly budget.
 //
-// WHICH NAMES (Roy, 2026-11-19: "flagged only"; horizon SWING for the forward test):
-//   · a forward-test event's LAGGING links, once its day-5 check is frozen — handed off ONCE per event (echo_handoffs);
+// WHICH NAMES (Roy, 2026-11-19: "flagged only"; horizon SWING):
+//   · a house event's FLAGGED links — the simulator doc's underreacted winners and overreacted losers, from the
+//     pipeline's day-5 market check (echoCheck; docs/design/echo-pipeline.md) — handed off ONCE per event (echo_handoffs);
 //   · a user event's names, when the user asks the event analyst for them (request_reads), at most MAX_ASK at a time.
 //
 // The research run lives in memory: a deploy mid-run leaves rows claimed. Each tick puts dead claims back and researches
 // what waits (houseResearch.resumeQueued), as the other chains do.
 
 import { getDb } from '../providers/mongodb.provider.js'
-import { echoService } from './echo.service.js'
+import { echoEventsService } from './echoEvents.service.js'
 import { mentorReadsService } from './mentorReads.service.js'
 import { researchQueueService } from './researchQueue.service.js'
 import { researchQueued, resumeQueued } from './houseResearch.service.js'
@@ -47,7 +48,7 @@ const _deps = {
     research: (o) => researchQueued(o),
     resume: (symbols, research, o) => resumeQueued(symbols, research, undefined, o),
     profiles: (symbols) => queueProfiles(symbols, { source: SOURCE }),
-    events: () => echoService.listEvents(),
+    events: async () => ({ events: (await echoEventsService.list({ status: ['watching', 'expired'], limit: 300 })).filter(d => d.kind === 'house').map(handoffShape) }),
     db: null,
     on: () => config.echoReads,
     maxUsd: () => config.echoResearchMaxUsd,
@@ -56,13 +57,29 @@ const _deps = {
 export function _setDeps(d) { Object.assign(_deps, d) }
 const handoffs = async (deps = _deps) => (deps.db ?? await getDb()).collection(HANDOFFS)
 
-/** What travels with a forward-test name to Prometheus. Pure. */
+const FLAGS = new Set(['underreacted_winner', 'overreacted_loser'])
+const FLAG_WORDS = { underreacted_winner: 'underreacted winner', overreacted_loser: 'overreacted loser' }
+
+/** A checked house event → the hand-off's shape: its flagged links with their map lines and scores. Pure. */
+export function handoffShape(d) {
+    const map = new Map((d.map?.links ?? []).map(l => [l.ticker, l]))
+    return {
+        id: d._id, date: d.date, origin: d.origin, tickers: d.originTickers ?? [], effect: d.effect, size: d.size ?? null,
+        whatChanged: d.whatChanged, status: 'checked',
+        flagged: (d.check?.links ?? []).filter(c => FLAGS.has(c.flag)).map(c => ({
+            ticker: c.ticker, relation: c.relation, direction: c.direction, why: map.get(c.ticker)?.why ?? null, flag: c.flag, total: c.total,
+        })),
+    }
+}
+
+/** What travels with a flagged house name to Prometheus. Pure. */
 export function forwardContext(ev, link) {
+    const who = (ev.tickers ?? []).join('/') || ev.origin
     return {
         echo: true, forward: true, horizon: HORIZON, event_id: ev.id,
-        event: `${ev.origin} (${(ev.tickers ?? []).join('/')}) ${ev.effect === 'up' ? 'up' : 'down'} on its ${ev.date} results — ${ev.size ?? ''}`.trim(),
-        origin: ev.origin, relation: link.relation, direction: link.direction, why: link.why ?? null,
-        reason: `The event analyst: lagging ${link.relation} of ${(ev.tickers ?? []).join('/') || ev.origin} (forward test)`,
+        event: `${ev.whatChanged ?? `${ev.origin} demand ${ev.effect}`} (${ev.date})${ev.size ? ` — ${ev.size}` : ''}`,
+        origin: ev.origin, relation: link.relation, direction: link.direction, why: link.why ?? null, flag: link.flag ?? null, score: link.total ?? null,
+        reason: `The event analyst: ${FLAG_WORDS[link.flag] ?? 'flagged'} — ${link.relation} of ${who}${link.total != null ? `, scored ${link.total}/12` : ''}`,
     }
 }
 

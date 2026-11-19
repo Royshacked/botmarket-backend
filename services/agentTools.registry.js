@@ -726,7 +726,7 @@ export const TOOL_SCHEMAS = {
         },
         "required": ["horizon"]
     },
-    // Echo, the event desk (services/tools/echo.tools.js; docs/design/echo-desk.md §5).
+    // Echo, the event desk (services/tools/echo.tools.js; docs/design/echo-pipeline.md "The app").
     get_echo_events: {
         "type": "object",
         "properties": {}
@@ -734,29 +734,41 @@ export const TOOL_SCHEMAS = {
     get_event_map: {
         "type": "object",
         "properties": {
-            "id": { "type": "string", "description": "The event's id from get_echo_events — a forward-test id (csco-earnings-2026-11-12) or a user event's (ue_…)." }
+            "id": { "type": "string", "description": "The event's id from get_echo_events (ev_…)." }
         },
         "required": ["id"]
     },
     request_reads: {
         "type": "object",
         "properties": {
-            "id": { "type": "string", "description": "The user's event id (ue_…)." },
-            "tickers": { "type": "array", "items": { "type": "string" }, "description": "The names from that map the user picked; omit for its directional links." }
+            "id": { "type": "string", "description": "The user's own event id (ev_…)." },
+            "tickers": { "type": "array", "items": { "type": "string" }, "description": "The names from that map the user picked; omit for its top-scored directional links." }
         },
         "required": ["id"]
     },
     map_event: {
         "type": "object",
         "properties": {
-            "what_changed": { "type": "string", "description": "One sentence: what happened." },
-            "origin": { "type": "string", "description": "The company the event happens to — or the demand it moves when no single listed company is the event's." },
-            "tickers": { "type": "array", "items": { "type": "string" }, "description": "The origin's US tickers; empty for a demand." },
-            "effect": { "type": "string", "enum": ["up", "down"], "description": "What the event does to the origin's demand." },
+            "what_changed": { "type": "string", "description": "One sentence: the news (the guide, the rule, the launch) — never how a stock moved." },
+            "origin": { "type": "string", "description": "The company or country the event hits directly — or the demand it moves when no single listed company is the event's." },
+            "tickers": { "type": "array", "items": { "type": "string" }, "description": "The origin's US tickers; empty for a country or a demand." },
+            "effect": { "type": "string", "enum": ["up", "down", "mixed"], "description": "What the event does to demand AT THE ORIGIN." },
+            "type": { "type": "string", "enum": ["demand_shock", "supply_shock", "policy", "clinical", "geopolitical", "capacity_deal", "confirmation"], "description": "The kind of event." },
+            "durability": {
+                "type": "object",
+                "properties": {
+                    "kind": { "type": "string", "enum": ["price_spike", "policy_follow_through", "drug_class_shift", "multi_year_commitment"] },
+                    "why": { "type": "string", "description": "One sentence: why it lasts or fades." }
+                },
+                "required": ["kind", "why"],
+                "description": "The most important field: a locked-in commitment lasts, a price spike cures itself."
+            },
             "date": { "type": "string", "description": "YYYY-MM-DD the event became public; omit for today." },
-            "horizon": { "type": "string", "enum": ["short term swing", "swing", "long term"], "description": "The user's horizon, only if they said one." }
+            "timing": { "type": "string", "enum": ["before_open", "during_session", "after_close"], "description": "When it landed (US Eastern), if known." },
+            "size": { "type": "string", "description": "Guide vs consensus, budget amount, share of supply affected — a sentence, if known." },
+            "terms": { "type": "array", "items": { "type": "string" }, "description": "What other companies' filings call the origin (\"NVIDIA\", \"GLP-1\")." }
         },
-        "required": ["what_changed", "origin", "tickers", "effect"]
+        "required": ["what_changed", "origin", "tickers", "effect", "type", "durability"]
     },
     // Proteus's measured profile of one stock (services/tools/behaviourProfile.tools.js; docs/design/proteus.md §2).
     get_behaviour_profile: {

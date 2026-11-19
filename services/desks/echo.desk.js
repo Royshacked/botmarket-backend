@@ -1,5 +1,5 @@
-// Echo — the event desk (docs/design/echo-desk.md). Conversational: no working state, no entity — a user's event is
-// saved by its tool (echoMap.service, `echo_user_events`), the forward test is the engine's. Reached from Axl
+// Echo — the event desk (docs/design/echo-desk.md, echo-pipeline.md). Conversational: no working state, no entity — a
+// user's event is saved by its tool (map_event → echoEvents + the pipeline, `echo_events`). Reached from Axl
 // (registry routedFrom), the Hotlist's Echo tab, or opened directly. One definition for the session turn.
 
 import { echoAgentService } from '../agents/echo.agent.service.js'

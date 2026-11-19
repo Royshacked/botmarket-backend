@@ -1,141 +1,84 @@
-// ECHO'S FORWARD TEST, READ (docs/design/echo-desk.md §7 step 1, 2026-11-19).
+// ECHO, READ (docs/design/echo-pipeline.md, "The app") — the events the pipeline built, shaped for the Hotlist's Echo tab
+// and the event analyst. The house's events are everyone's; a user's own events (mapped in chat) are theirs alone.
 //
-// The engine writes `echo_forward` (aether-engine echo/forward.py): one document per event, detected → mapped (or late)
-// → checked (the day-5 market check, frozen) → done (graded at 20 / 60 / 120 sessions). This module only READS it, for
-// the Hotlist's Echo section and Echo's desk. It never writes there: the forward test is the engine's, and a map the
-// user asks for lives in `echo_user_events` (step 3), never in this collection.
+// One event as the screen reads it: the Step 1 record; every link with its map line (layer, relation, direction, why,
+// filing evidence), its Step 3 score (the six factors and their reasons, the total, high or not, the ledger), its Step 4
+// check (the moves, volume, analyst actions, the flag and why) and its Step 7 grades — SORTED BY SCORE, the doc's
+// ranking; the wave watch's triggers; and the validation report over every graded event, which the tab labels as
+// running until walk-forward has its events.
 //
-// The running record shown here is NOT the verdict. The pass rule (forward.py, declared 2026-11-19 before any grade)
-// reads ONCE, on the first 30 events graded at 120 sessions; every number before that is "so far", labelled so.
+// The engine's old forward test (`echo_forward`) is no longer read: Roy, 2026-11-19 — Echo is built to the design.
 
-import { getEngineDb } from './engineDb.js'
+import { echoEventsService } from './echoEvents.service.js'
+import { report as validationReport } from './echoValidate.service.js'
 
-export const COLLECTION = 'echo_forward'
-export const HORIZONS = Object.freeze([20, 60, 120])      // validate.FORWARD
-export const VERDICT_EVENTS = 30                          // forward.MIN_EVENTS — when the verdict reads
-const LIST_LIMIT = 200
+const FLAGS = ['underreacted_winner', 'overreacted_loser']
+export const EVENT_ID = /^ev_[0-9a-f-]{36}$/
 
-const _deps = { db: null }
-/** Test-only: point the reader at a fake db. */
+const _deps = { events: echoEventsService, report: validationReport }
 export function _setDeps(d) { Object.assign(_deps, d) }
-const db = () => _deps.db ?? getEngineDb()
 
-const mean = (xs) => xs.reduce((a, b) => a + b, 0) / xs.length
-
-/** The graded stand-ins of one link at h (forward.py _stand_ins). */
-function standIns(rows, ticker, h) {
-    return rows
-        .filter(r => r.group === 'random' && r.stand_in_for === ticker && Number.isFinite(r.forward?.[String(h)]))
-        .map(r => r.forward[String(h)])
-}
-
-/** A link's spread at h: its signed excess minus the mean of its own stand-ins — null until both are graded. */
-export function linkSpread(rows, row, h) {
-    const v = row.forward?.[String(h)]
-    if (!Number.isFinite(v)) return null
-    const base = standIns(rows, row.ticker, h)
-    return base.length ? v - mean(base) : null
-}
-
-/** The event's spread at h over its FLAGGED links (forward.py event_spread) — null when none is graded with stand-ins. */
-export function eventSpread(rows, h) {
-    const xs = (rows ?? []).filter(r => r.group === 'flagged').map(r => linkSpread(rows, r, h)).filter(Number.isFinite)
-    return xs.length ? mean(xs) : null
-}
-
-/**
- * One link of the map, joined to its row of the frozen check when there is one. A link the check could not price, or a
- * map not checked yet, has `group: null`.
- */
-function shapeLink(link, rows) {
-    const row = link.ticker ? rows.find(r => r.ticker === link.ticker && r.group !== 'random') : null
-    const spread = {}
-    for (const h of HORIZONS) spread[h] = row ? linkSpread(rows, row, h) : null
+/** One event in a line — the list's row. Pure. */
+export function shapeSummary(d) {
+    const scores = d.scores?.links ?? []
+    const checks = d.check?.links ?? []
     return {
-        ticker:    link.ticker ?? null,
-        name:      link.name,
-        relation:  link.relation,
-        layer:     link.layer,
-        direction: link.direction,
-        why:       link.evidence_text,
-        note:      link.note ?? '',
-        group:     row?.group ?? null,                 // flagged · unflagged · null (not checked / not priced / layer 1)
-        reaction:  row?.reaction ?? null,              // day-5 excess vs SPY, signed by direction
-        forward:   row?.forward ?? {},                 // { '20': x, '60': x, '120': x } signed excess from the day-5 close
-        spread,                                        // { 20: x, … } minus its own stand-ins
+        id: d._id, kind: d.kind, mine: d.kind === 'user', date: d.date, type: d.type, origin: d.origin, tickers: d.originTickers ?? [],
+        effect: d.effect, durability: d.durability?.kind ?? null, whatChanged: d.whatChanged, size: d.size ?? null, status: d.status,
+        links: d.map?.links?.length ?? 0, high: scores.filter(s => s.high).length,
+        flagged: checks.filter(c => FLAGS.includes(c.flag)).map(c => ({ ticker: c.ticker, flag: c.flag, total: c.total })),
+        top: scores.slice(0, 3).map(s => ({ ticker: s.ticker, total: s.total })),
+        followUpOf: d.followUpOf ?? null, triggers: d.triggers?.length ?? 0,
+        waiting: d.waiting ?? null, expiredBecause: d.expiredBecause ?? null, error: d.lastError?.reason ?? null,
+        graded: Object.keys(d.grades ?? {}).map(Number),
     }
 }
 
-/** The summary row the Hotlist lists: the event, where it stands, its flagged names. */
-export function shapeSummary(doc) {
-    const ev = doc.event ?? {}
-    const rows = doc.check?.rows ?? []
-    const links = (doc.map?.links ?? []).map(l => shapeLink(l, rows))
-    const spread = {}
-    for (const h of HORIZONS) spread[h] = doc.grades?.[String(h)] ? eventSpread(rows, h) : null
+/** One event whole: every link with its map line, score, check and grades, sorted by score. Pure. */
+export function shapeEvent(d) {
+    const score = new Map((d.scores?.links ?? []).map(s => [s.ticker, s]))
+    const check = new Map((d.check?.links ?? []).map(c => [c.ticker, c]))
+    const grade = (t) => Object.fromEntries(Object.entries(d.grades ?? {}).map(([h, g]) => [h, g.rows?.find(r => r.ticker === t)?.signed ?? null]))
+    const links = (d.map?.links ?? []).map(l => {
+        const s = score.get(l.ticker), c = check.get(l.ticker)
+        return {
+            ticker: l.ticker, name: l.name, relation: l.relation, layer: l.layer, direction: l.direction, why: l.why, confidence: l.confidence,
+            sector: l.sector ?? null, filings: l.filings ?? null,
+            total: s?.total ?? null, high: Boolean(s?.high), factors: s?.factors ?? null, ledger: s?.ledger ?? null, supplySentences: s?.supplySentences ?? [],
+            check: c ? { moves: c.moves, signedMove: c.signedMove, volume: c.volume, analysts: c.analysts, noticed: c.noticed, gap: c.gap } : null,
+            flag: c?.flag ?? null, flagWhy: c?.why ?? null, grades: grade(l.ticker),
+        }
+    })
+    links.sort((a, b) => (FLAGS.includes(b.flag) - FLAGS.includes(a.flag)) || ((b.total ?? -1) - (a.total ?? -1)))
     return {
-        id:         doc._id,
-        date:       ev.date,
-        origin:     ev.origin,
-        tickers:    ev.origin_tickers ?? [],
-        effect:     ev.effect,
-        size:       ev.size,
-        status:     doc.status,                         // detected · mapped · late · checked · done
-        checkDate:  doc.check?.check_date ?? null,
-        links:      links.length,
-        flagged:    links.filter(l => l.group === 'flagged'),
-        graded:     HORIZONS.filter(h => doc.grades?.[String(h)]),
-        spread,
+        ...shapeSummary(d),
+        event: { date: d.date, timing: d.timing, type: d.type, origin: d.origin, tickers: d.originTickers ?? [], terms: d.terms ?? [], whatChanged: d.whatChanged,
+            size: d.size ?? null, durability: d.durability ?? null, effect: d.effect, filter: d.filter ?? null, sources: d.sources ?? [], source: d.source ?? null },
+        map: d.map ? { model: d.map.model, promptVersion: d.map.promptVersion, mappedAt: d.map.mappedAt, fromTemplate: d.map.fromTemplate, dropped: d.map.dropped ?? [] } : null,
+        scored: d.scores ? { model: d.scores.model, scoredAt: d.scores.scoredAt, high: d.scores.high } : null,
+        checked: d.check ? { day0: d.check.day0, checkDay: d.check.checkDay, yardstick: d.check.yardstick, origin: d.check.origin, impliedVolatility: d.check.impliedVolatility } : null,
+        triggers: d.triggers ?? [],
+        links,
     }
 }
 
-/** The whole event: the summary plus every link, what was dropped, and who mapped it. */
-export function shapeEvent(doc) {
-    const rows = doc.check?.rows ?? []
-    return {
-        ...shapeSummary(doc),
-        event:  doc.event,
-        map: doc.map ? {
-            model:         doc.map.model,
-            promptVersion: doc.map.prompt_version,
-            mappedAt:      doc.map.mapped_at,
-            directionRule: doc.map.direction_rule ?? null,
-            dropped:       doc.map.dropped ?? [],
-        } : null,
-        all:    (doc.map?.links ?? []).map(l => shapeLink(l, rows)),
-        grades: doc.grades ?? {},
-        absent: doc.check?.absent ?? [],
-    }
+/** The validation report in the tab's terms: per horizon the flagged against the stand-ins, and walk-forward's state. */
+function reportSummary(r) {
+    return { events: r.events, horizons: r.horizons, factors: r.factors, walkForward: r.walkForward }
 }
 
-/**
- * The record SO FAR, per horizon, over every event graded there: how many, the mean spread, the share positive. Not the
- * verdict — `verdictAt` says how many events the verdict waits for at 120 sessions.
- */
-export function runningRecord(docs) {
-    const out = {}
-    for (const h of HORIZONS) {
-        const xs = docs.filter(d => d.grades?.[String(h)]).map(d => eventSpread(d.check?.rows ?? [], h)).filter(Number.isFinite)
-        out[h] = { n: xs.length, mean: xs.length ? mean(xs) : null, positive: xs.length ? xs.filter(x => x > 0).length / xs.length : null }
-    }
-    return { ...out, verdictAt: VERDICT_EVENTS, gradedAt120: out[120].n }
+/** The house's events and the user's own, newest first, and the validation report. */
+export async function listEvents(userId = null) {
+    const docs = await _deps.events.list({ userId, limit: 200 })
+    const graded = await _deps.events.listGraded().catch(() => [])
+    return { events: docs.map(shapeSummary), report: reportSummary(_deps.report(graded)) }
 }
 
-/** GET list: the newest LIST_LIMIT events, and the running record over EVERY graded one (not only those listed). */
-export async function listEvents() {
-    const c = (await db()).collection(COLLECTION)
-    const [docs, graded] = await Promise.all([
-        c.find({}).sort({ 'event.date': -1 }).limit(LIST_LIMIT).toArray(),
-        c.find({ grades: { $exists: true } }, { projection: { grades: 1, 'check.rows': 1 } }).toArray(),
-    ])
-    return { events: docs.map(shapeSummary), record: runningRecord(graded) }
+/** One event (a user's only for them), or null. */
+export async function getEvent(id, userId = null) {
+    if (!EVENT_ID.test(String(id))) return null
+    const d = await _deps.events.get(id, userId)
+    return d ? shapeEvent(d) : null
 }
 
-/** GET one: the whole event, or null. */
-export async function getEvent(id) {
-    if (!id) return null
-    const doc = await (await db()).collection(COLLECTION).findOne({ _id: String(id) })
-    return doc ? shapeEvent(doc) : null
-}
-
-export const echoService = { listEvents, getEvent }
+export const echoService = { listEvents, getEvent, shapeEvent, shapeSummary }

@@ -1,12 +1,11 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { sendNames, handOffFlagged, forwardContext, userAskedThisWeek, HANDOFFS, SOURCE, MAX_ASK, MAX_USER_WEEK } from '../../services/echoReads.service.js'
+import { sendNames, handOffFlagged, forwardContext, handoffShape, userAskedThisWeek, HANDOFFS, SOURCE } from '../../services/echoReads.service.js'
 import { echoOpening, researchOpening } from '../../services/researchRun.service.js'
-import { makeEchoHandlers } from '../../services/tools/echo.tools.js'
-import { isToolError, toolErrorText } from '../../services/toolResult.util.js'
 import { SOURCES } from '../../services/researchQueue.service.js'
 
-// Echo's names through Prometheus and Proteus (docs/design/echo-desk.md §6): flagged only, swing, once per event.
+// Echo's names through Prometheus and Proteus (docs/design/echo-desk.md §6; echo-pipeline.md): the pipeline's flagged
+// names only, swing, once per event. A user's own asks (request_reads) are tested with the tools (echoTools.test.js).
 
 const NOW = Date.parse('2026-11-20T06:00:00Z')
 function deps({ reads = {}, events = [], done = [], on = true } = {}) {
@@ -31,9 +30,9 @@ function deps({ reads = {}, events = [], done = [], on = true } = {}) {
     }
 }
 
-const link = (ticker, extra = {}) => ({ ticker, name: `${ticker} Inc.`, relation: 'supplier', direction: 'loses', why: `${ticker} builds for Cisco.`, group: 'flagged', ...extra })
+const link = (ticker, extra = {}) => ({ ticker, name: `${ticker} Inc.`, relation: 'supplier', direction: 'loses', why: `${ticker} builds for Cisco.`, flag: 'underreacted_winner', total: 9, ...extra })
 const CSCO = { id: 'csco-earnings-2026-11-12', date: '2026-11-12', origin: 'Cisco', tickers: ['CSCO'], effect: 'down', size: 'Day 0 move -5.9% vs SPY',
-    status: 'checked', flagged: [link('JBL'), link('FLEX')] }
+    whatChanged: 'Cisco guided networking hardware lower', status: 'checked', flagged: [link('JBL'), link('FLEX')] }
 
 test('echo is a research-queue source', () => {
     assert.ok(SOURCES.includes(SOURCE))
@@ -60,11 +59,21 @@ test('sendNames: nothing missing → nothing queued, no run', async () => {
     assert.deepEqual(await sendNames([], () => ({}), {}, d), { ok: true, names: [], queued: [], research: null })
 })
 
-test('the forward context says the event, the link, the rule, and that it lagged', () => {
+test('the context says the event, the link, the flag and the score', () => {
     const c = forwardContext(CSCO, link('JBL'))
     assert.equal(c.echo, true); assert.equal(c.forward, true); assert.equal(c.horizon, 'swing')
-    assert.match(c.event, /^Cisco \(CSCO\) down on its 2026-11-12 results — Day 0 move -5\.9% vs SPY$/)
-    assert.equal(c.reason, 'The event analyst: lagging supplier of CSCO (forward test)')
+    assert.equal(c.event, 'Cisco guided networking hardware lower (2026-11-12) — Day 0 move -5.9% vs SPY')
+    assert.equal(c.flag, 'underreacted_winner'); assert.equal(c.score, 9)
+    assert.equal(c.reason, 'The event analyst: underreacted winner — supplier of CSCO, scored 9/12')
+})
+
+test("the hand-off reads the pipeline's flags: underreacted winners and overreacted losers, with their map lines", () => {
+    const s = handoffShape({ _id: 'ev_1', date: '2026-11-12', origin: 'Cisco', originTickers: ['CSCO'], effect: 'down', whatChanged: 'w',
+        map: { links: [{ ticker: 'FN', why: 'optics' }, { ticker: 'PLUS', why: 'reseller' }, { ticker: 'ANET', why: 'peer' }] },
+        check: { links: [{ ticker: 'FN', flag: 'overreacted_loser', relation: 'supplier', direction: 'loses', total: 5 },
+            { ticker: 'PLUS', flag: 'fully_priced' }, { ticker: 'ANET', flag: null }] } })
+    assert.equal(s.status, 'checked')
+    assert.deepEqual(s.flagged, [{ ticker: 'FN', relation: 'supplier', direction: 'loses', why: 'optics', flag: 'overreacted_loser', total: 5 }])
 })
 
 test('handOffFlagged: checked events with lagging names, once each; mapped / late / no-flag events wait', async () => {
@@ -93,56 +102,18 @@ test('handOffFlagged: Echo rows left waiting are resumed', async () => {
     assert.equal(r.resume.outcome, 'started')
 })
 
-test("Prometheus's opening: the event, the link, the rule; a lagging name is said to be no pick", () => {
+test("Prometheus's opening: the event, the link, and what the flag means — never a pick", () => {
     const o = echoOpening('JBL', forwardContext(CSCO, link('JBL')))
-    assert.match(o, /^Research JBL for coverage — the event analyst linked it to an event: Cisco \(CSCO\) down/)
-    assert.match(o, /It is a supplier of Cisco — JBL builds for Cisco\. By the chain rule the event should hurt it\./)
-    assert.match(o, /NOT caught up by the 5th session — the test is unproven, so this is not a pick/)
+    assert.match(o, /^Research JBL for coverage — the event analyst linked it to an event: Cisco guided networking hardware lower \(2026-11-12\)/)
+    assert.match(o, /It is a supplier of Cisco — JBL builds for Cisco\. By the map the event should hurt it\./)
+    assert.match(o, /Echo scored the link high \(9\/12\) and the market had NOT caught up by the 5th session — the method is unproven, so this is not a pick/)
     assert.match(o, /3m or 6m horizon \(SWING\)/)
     assert.equal(researchOpening({ symbol: 'JBL', context: forwardContext(CSCO, link('JBL')) }), o, 'researchOpening dispatches to it')
+    assert.match(echoOpening('DVA', forwardContext(CSCO, link('DVA', { flag: 'overreacted_loser', relation: 'demand_loser' }))), /a demand loser of Cisco.*fell hard by the 5th session on damage Echo judges slow or indirect — a rebound candidate/)
     const user = echoOpening('AMD', { echo: true, forward: false, event: 'GTA 6 released (2026-11-19)', origin: 'Take-Two', relation: 'supplier', direction: 'gains', reinit: true })
     assert.match(user, /^Re-research AMD — your coverage on it is not live —/)
     assert.match(user, /should help it\. A user mapped this event and asked for your read\./)
-    assert.doesNotMatch(echoOpening('NTES', { echo: true, relation: 'peer', direction: 'unclear' }), /chain rule/)
-})
-
-const USER_DOC = { _id: 'ue_1', userId: 'u1', event: { date: '2026-11-19', what_changed: 'GTA 6 released', origin: 'Take-Two', origin_tickers: ['TTWO'], effect: 'up' },
-    map: { links: [
-        { ticker: 'AMD', relation: 'supplier', direction: 'gains', evidence_text: 'console chips' },
-        { ticker: 'MU', relation: 'infrastructure', direction: 'gains', evidence_text: 'memory' },
-        { ticker: 'GME', relation: 'customer', direction: 'unclear', evidence_text: 'retail' },
-        { ticker: null, name: 'Foxconn', relation: 'supplier', direction: 'gains' },
-    ] } }
-const maps = { getUserEvent: async (id, u) => (id === 'ue_1' && u === 'u1' ? USER_DOC : null) }
-
-test('request_reads: the directional links by default, the picked ones when named, theirs only', async () => {
-    const sent = []
-    const reads = { userAskedThisWeek: async () => 0, sendNames: async (syms, ctx, opts) => { sent.push({ syms, ctx: syms.map(ctx), opts }); return { names: syms.map(s => ({ symbol: s, read: s === 'AMD' ? 'ready' : 'queued' })), research: { outcome: 'busy' } } } }
-    const h = makeEchoHandlers({ userId: 'u1', maps, reads })
-    const out = await h.request_reads({ id: 'ue_1' })
-    assert.deepEqual(sent[0].syms, ['AMD', 'MU'], 'unclear and unpriced links are not sent by default')
-    assert.equal(sent[0].ctx[0].user_event, true); assert.equal(sent[0].ctx[0].forward, false)
-    assert.equal(sent[0].opts.maxUsd, Infinity, 'a user ask is capped by count, not the house budget')
-    assert.equal(sent[0].opts.requestedBy, 'u1')
-    assert.match(out, /- AMD: the analyst's coverage stands — read it there; the technical analyst's profile queued/)
-    assert.match(out, /- MU: queued for the analyst \(swing coverage\)/)
-    assert.match(out, /busy with another run — these wait in line/)
-    await h.request_reads({ id: 'ue_1', tickers: ['gme'] })
-    assert.deepEqual(sent[1].syms, ['GME'], 'a name the user picked goes, unclear or not')
-})
-
-test('request_reads refuses: a forward-test id, another user\'s event, a name not on the map, too many', async () => {
-    const reads = { sendNames: async () => { throw new Error('must not be called') } }
-    const h = makeEchoHandlers({ userId: 'u1', maps, reads })
-    const e = async (args, re) => { const r = await h.request_reads(args); assert.ok(isToolError(r)); assert.match(toolErrorText(r), re) }
-    await e({ id: 'csco-earnings-2026-11-12' }, /on their own after the day-5 check/)
-    await e({ id: 'ue_2' }, /No event ue_2/)
-    await e({ id: 'ue_1', tickers: ['NVDA'] }, /Not on this map: NVDA/)
-    const many = { ...USER_DOC, map: { links: Array.from({ length: MAX_ASK + 1 }, (_, i) => ({ ticker: `T${i}`, relation: 'supplier', direction: 'gains' })) } }
-    const h2 = makeEchoHandlers({ userId: 'u1', maps: { getUserEvent: async () => many }, reads })
-    const r = await h2.request_reads({ id: 'ue_1' })
-    assert.ok(isToolError(r)); assert.match(toolErrorText(r), /at most 5 at a time/)
-    assert.ok(isToolError(await makeEchoHandlers({ userId: null, maps, reads }).request_reads({ id: 'ue_1' })))
+    assert.doesNotMatch(echoOpening('NTES', { echo: true, relation: 'peer', direction: 'unclear' }), /By the map/)
 })
 
 // ── code review 2026-11-19 ──────────────────────────────────────────────────────────────────────────────────────────
@@ -208,17 +179,6 @@ test("userAskedThisWeek: the user's distinct names queued from Echo this week; n
     assert.equal(await userAskedThisWeek('u1', d), 2)
     d.listQueue = async () => null
     assert.equal(await userAskedThisWeek('u1', d), null)
-})
-
-test('request_reads: the weekly cap per user', async () => {
-    const reads = (used) => ({ userAskedThisWeek: async () => used, sendNames: async () => { throw new Error('must not be called') } })
-    const err = async (used, re) => {
-        const r = await makeEchoHandlers({ userId: 'u1', maps, reads: reads(used) }).request_reads({ id: 'ue_1' })
-        assert.ok(isToolError(r)); assert.match(toolErrorText(r), re)
-    }
-    await err(MAX_USER_WEEK - 1, /sent 9 names .* limit is 10 — 1 more, so ask which/)
-    await err(MAX_USER_WEEK, /opens again within the week/)
-    await err(null, /could not be read/)
 })
 
 test("a user's words reach the house analyst QUOTED, as a claim — never as an instruction", () => {

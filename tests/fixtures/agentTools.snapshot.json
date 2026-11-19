@@ -3976,7 +3976,7 @@
     "echo": [
         {
             "name": "get_echo_events",
-            "description": "The FORWARD TEST's events (the engine's: earnings moves of 5%+ against SPY in the 152 largest US names, mapped by the model before their 5th session, checked at the day-5 close, graded at 20 / 60 / 120 sessions) with where each stands and its LAGGING links, the record so far, and the user's OWN events (maps they asked you for). Read it first when the user asks what Echo has found, or about an event that may already be here.",
+            "description": "Echo's events — the house's (the intake reads earnings moves, 8-K deals, policy, defense awards, trials and news, and keeps what passes the filter: a surprise, large, more than a one-off) and the user's own — each with where it stands, its top-scored names and its flags; and the validation record so far. Read it first when the user asks what Echo has found, or about an event that may already be here.",
             "input_schema": {
                 "type": "object",
                 "properties": {}
@@ -3984,13 +3984,13 @@
         },
         {
             "name": "get_event_map",
-            "description": "One event's whole map — every link with its relation, layer, direction (by rule), the model's own direction, why it is linked, and, for a forward-test event once checked, whether the market had caught up by day 5 and how the link did since (vs its own same-sector stand-ins). `id` is the event's id from get_echo_events (a forward-test id like \"csco-earnings-2026-11-12\", or a user event's \"ue_…\").",
+            "description": "One event whole — the record (type, what changed, size, durability and why), then every link RANKED BY SCORE: relation, layer, direction and why; the six factors (lock-in, supply response, bottleneck, directness, exposure, coverage, 0–2 each, high at 8 of 12) with their reasons; the filing evidence (named in filings, a 10-K's stated share, the company's own supply sentences); the day-5 market check and the flag (underreacted winner, overreacted loser, fully priced); the grades since. `id` is \"ev_…\" from get_echo_events.",
             "input_schema": {
                 "type": "object",
                 "properties": {
                     "id": {
                         "type": "string",
-                        "description": "The event's id from get_echo_events — a forward-test id (csco-earnings-2026-11-12) or a user event's (ue_…)."
+                        "description": "The event's id from get_echo_events (ev_…)."
                     }
                 },
                 "required": [
@@ -4000,71 +4000,121 @@
         },
         {
             "name": "map_event",
-            "description": "Map an event the USER names to the companies it reaches through the supply chain — anything: a product launch (\"GTA 6 is out\"), a guidance cut, a strike, a deal, a heatwave. FRAME it first, then call once: `what_changed` (one sentence: what happened), `origin` (the company the event happens to — or, when no single listed company is the event's, the DEMAND it moves, e.g. \"European air-conditioning demand\"), `tickers` (the origin's US tickers; empty for a demand), `effect` (up / down: what the event does to the origin's demand — ask the user once if it could go either way), `date` (YYYY-MM-DD it became public; omit for today), `horizon` (the user's, if they said one). One model call, about 40 seconds and a few cents; the map is saved to the user's events. Never for an event already in get_echo_events — read that map instead.",
+            "description": "Map an event the USER names through Echo's whole pipeline — the chain (layers 1–3 both ways, losers and substitutes, every link checked against SEC filings) and the six-factor score on every link. Anything: a launch (\"GTA 6 is out\"), a guidance cut, a rule, a strike, a deal, a war. FRAME it first, then call once: `what_changed` (one sentence: the news, not a stock's move), `origin` (the company or country it hits directly, or the demand it moves), `tickers` (the origin's US tickers; empty for a country or a demand), `effect` (up / down / mixed: what it does to demand AT THE ORIGIN — ask the user once if unsure), `type` (demand_shock, supply_shock, policy, clinical, geopolitical, capacity_deal, confirmation), `durability` ({kind: price_spike / policy_follow_through / drug_class_shift / multi_year_commitment, why} — a locked-in commitment lasts, a price spike cures itself), `date` (YYYY-MM-DD it became public; omit for today), `size` (as a sentence, if known), `terms` (what other companies' filings call the origin). Takes two to three minutes and well under a dollar; the event is saved to the user's events and its market check comes at the day-5 close. Never for an event already in get_echo_events — read that one instead.",
             "input_schema": {
                 "type": "object",
                 "properties": {
                     "what_changed": {
                         "type": "string",
-                        "description": "One sentence: what happened."
+                        "description": "One sentence: the news (the guide, the rule, the launch) — never how a stock moved."
                     },
                     "origin": {
                         "type": "string",
-                        "description": "The company the event happens to — or the demand it moves when no single listed company is the event's."
+                        "description": "The company or country the event hits directly — or the demand it moves when no single listed company is the event's."
                     },
                     "tickers": {
                         "type": "array",
                         "items": {
                             "type": "string"
                         },
-                        "description": "The origin's US tickers; empty for a demand."
+                        "description": "The origin's US tickers; empty for a country or a demand."
                     },
                     "effect": {
                         "type": "string",
                         "enum": [
                             "up",
-                            "down"
+                            "down",
+                            "mixed"
                         ],
-                        "description": "What the event does to the origin's demand."
+                        "description": "What the event does to demand AT THE ORIGIN."
+                    },
+                    "type": {
+                        "type": "string",
+                        "enum": [
+                            "demand_shock",
+                            "supply_shock",
+                            "policy",
+                            "clinical",
+                            "geopolitical",
+                            "capacity_deal",
+                            "confirmation"
+                        ],
+                        "description": "The kind of event."
+                    },
+                    "durability": {
+                        "type": "object",
+                        "properties": {
+                            "kind": {
+                                "type": "string",
+                                "enum": [
+                                    "price_spike",
+                                    "policy_follow_through",
+                                    "drug_class_shift",
+                                    "multi_year_commitment"
+                                ]
+                            },
+                            "why": {
+                                "type": "string",
+                                "description": "One sentence: why it lasts or fades."
+                            }
+                        },
+                        "required": [
+                            "kind",
+                            "why"
+                        ],
+                        "description": "The most important field: a locked-in commitment lasts, a price spike cures itself."
                     },
                     "date": {
                         "type": "string",
                         "description": "YYYY-MM-DD the event became public; omit for today."
                     },
-                    "horizon": {
+                    "timing": {
                         "type": "string",
                         "enum": [
-                            "short term swing",
-                            "swing",
-                            "long term"
+                            "before_open",
+                            "during_session",
+                            "after_close"
                         ],
-                        "description": "The user's horizon, only if they said one."
+                        "description": "When it landed (US Eastern), if known."
+                    },
+                    "size": {
+                        "type": "string",
+                        "description": "Guide vs consensus, budget amount, share of supply affected — a sentence, if known."
+                    },
+                    "terms": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "What other companies' filings call the origin (\"NVIDIA\", \"GLP-1\")."
                     }
                 },
                 "required": [
                     "what_changed",
                     "origin",
                     "tickers",
-                    "effect"
+                    "effect",
+                    "type",
+                    "durability"
                 ]
             }
         },
         {
             "name": "request_reads",
-            "description": "Send names from one of the USER's OWN events (an id \"ue_…\") to the analyst and the technical analyst: the analyst's SWING coverage (researched for the house when there is none standing — a few minutes each) and the technical analyst's measured profile. `tickers`: the names the user picked from that map (at most 5 at a time, 10 a week); omit for its directional links (suppliers, infrastructure, substitutes). Only when the user asks. The forward test's lagging names go on their own after the day-5 check — never send those.",
+            "description": "Send names from one of the USER's OWN events (an id \"ev_…\" they mapped) to the analyst and the technical analyst: the analyst's SWING coverage (researched for the house when there is none standing — a few minutes each) and the technical analyst's measured profile. `tickers`: the names the user picked from that map (at most 5 at a time, 10 a week); omit for its top-scored directional links. Only when the user asks. The house's flagged names go on their own after the day-5 check — never send those.",
             "input_schema": {
                 "type": "object",
                 "properties": {
                     "id": {
                         "type": "string",
-                        "description": "The user's event id (ue_…)."
+                        "description": "The user's own event id (ev_…)."
                     },
                     "tickers": {
                         "type": "array",
                         "items": {
                             "type": "string"
                         },
-                        "description": "The names from that map the user picked; omit for its directional links."
+                        "description": "The names from that map the user picked; omit for its top-scored directional links."
                     }
                 },
                 "required": [
