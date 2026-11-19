@@ -46,18 +46,25 @@ export async function appendJournal(entityId, entry, db = null) {
 /**
  * Newest first. `before` is the `at` of the oldest row the caller already has — the cursor for the
  * next page.
- * @returns {Promise<object[]>} rows without `_id`
+ *
+ * `at` is NOT unique: one wake can write two rows on the same millisecond (2026-11-18, ARMK: the
+ * arm and the ran-past-the-entry line). So every row carries `id` (its `_id` as a string) for the
+ * client to key and dedupe on, and the cursor is INCLUSIVE (`$lte`) — the rows on the boundary
+ * millisecond come back again and the client drops the ones it has, where `$lt` skipped a twin
+ * that fell just past the page.
+ * @returns {Promise<object[]>} rows with `id`, without `_id`
  */
 export async function listJournal(entityId, { before = null, limit = 50 } = {}, db = null) {
     if (!entityId) return []
     const conn = db ?? await getDb()
     const n = Math.min(Math.max(Number(limit) || 50, 1), MAX_LIMIT)
-    const filter = { entityId, ...(before ? { at: { $lt: String(before) } } : {}) }
-    return conn.collection(COLLECTION)
-        .find(filter, { projection: { _id: 0 } })
-        .sort({ at: -1 })
+    const filter = { entityId, ...(before ? { at: { $lte: String(before) } } : {}) }
+    const rows = await conn.collection(COLLECTION)
+        .find(filter)
+        .sort({ at: -1, _id: -1 })
         .limit(n)
         .toArray()
+    return rows.map(({ _id, ...r }) => ({ ...r, id: String(_id) }))
 }
 
 export const journalService = { append: appendJournal, list: listJournal, ensureIndexes: ensureJournalIndexes }

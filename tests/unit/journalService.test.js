@@ -12,21 +12,27 @@ import { makePersist } from '../../monitoring/dueLoop.js'
 function fakeDb({ failInsert = false } = {}) {
     const rows = []
     const calls = []
+    let seq = 0
     const coll = {
         async insertOne(doc) {
             calls.push(['insertOne', doc])
             if (failInsert) throw new Error('boom')
-            rows.push(doc)
+            rows.push({ _id: `oid${String(++seq).padStart(3, '0')}`, ...doc })
         },
         async updateOne(...a) { calls.push(['updateOne', ...a]); return { modifiedCount: 1 } },
         find(filter, opts) {
             calls.push(['find', filter, opts])
             let out = rows.filter(r => r.entityId === filter.entityId)
-            if (filter.at?.$lt) out = out.filter(r => r.at < filter.at.$lt)
+            if (filter.at?.$lt)  out = out.filter(r => r.at < filter.at.$lt)
+            if (filter.at?.$lte) out = out.filter(r => r.at <= filter.at.$lte)
             const chain = {
-                sort(s)   { out = [...out].sort((a, b) => (a.at < b.at ? 1 : -1) * (s.at === -1 ? 1 : -1)); return chain },
+                sort(s) {
+                    const cmp = (x, y) => (x < y ? -1 : x > y ? 1 : 0)
+                    out = [...out].sort((a, b) => -cmp(a.at, b.at) || (s._id === -1 ? -cmp(a._id, b._id) : 0))
+                    return chain
+                },
                 limit(n)  { out = out.slice(0, n); return chain },
-                async toArray() { return out.map(({ _id, ...r }) => r) },
+                async toArray() { return out },
             }
             return chain
         },
@@ -40,10 +46,13 @@ test('appendJournal writes { entityId, ...entry } and lists newest first', async
     await appendJournal('s1', { at: '2026-09-17T11:00:00.000Z', reason: 'guard',  note: 'second' }, db)
     await appendJournal('s2', { at: '2026-09-17T12:00:00.000Z', reason: 'candle', note: 'other setup' }, db)
 
-    assert.deepEqual(db.rows[0], { entityId: 's1', at: '2026-09-17T10:00:00.000Z', reason: 'candle', note: 'first' })
+    const { _id, ...stored } = db.rows[0]
+    assert.deepEqual(stored, { entityId: 's1', at: '2026-09-17T10:00:00.000Z', reason: 'candle', note: 'first' })
 
     const page = await listJournal('s1', {}, db)
     assert.deepEqual(page.map(r => r.note), ['second', 'first'], 'newest first, scoped to the entity')
+    assert.deepEqual(page.map(r => r.id), ['oid002', 'oid001'], 'each row carries its _id as `id`')
+    assert.ok(page.every(r => !('_id' in r)), 'the raw _id is not sent')
 })
 
 test('listJournal pages with `before` (the oldest `at` the caller has) and clamps the limit', async () => {
@@ -54,12 +63,29 @@ test('listJournal pages with `before` (the oldest `at` the caller has) and clamp
     const first = await listJournal('s1', { limit: 2 }, db)
     assert.deepEqual(first.map(r => r.note), ['4', '3'])
 
-    const next = await listJournal('s1', { limit: 2, before: first[first.length - 1].at }, db)
-    assert.deepEqual(next.map(r => r.note), ['2', '1'])
+    // The cursor is inclusive: the boundary row comes back (the client drops it by id), then the older ones.
+    const next = await listJournal('s1', { limit: 3, before: first[first.length - 1].at }, db)
+    assert.deepEqual(next.map(r => r.note), ['3', '2', '1'])
 
     const big = await listJournal('s1', { limit: 9999 }, db)
     assert.equal(big.length, 5, 'a huge limit is clamped, never rejected')
     assert.equal((await listJournal('s1', { limit: 0 }, db)).length, 5, 'a nonsense limit falls back to the default page')
+})
+
+test('two rows on the same millisecond: distinct ids, and neither is lost across a page boundary', async () => {
+    // 2026-11-18, ARMK: one wake wrote the arm and the ran-past-the-entry line on the same `at`.
+    const db = fakeDb()
+    await appendJournal('s1', { at: '2026-11-18T18:00:00.000Z', note: 'older' }, db)
+    await appendJournal('s1', { at: '2026-11-18T18:34:00.467Z', note: 'armed' }, db)
+    await appendJournal('s1', { at: '2026-11-18T18:34:00.467Z', note: 'ran past' }, db)
+    await appendJournal('s1', { at: '2026-11-18T19:00:00.000Z', note: 'newest' }, db)
+
+    const first = await listJournal('s1', { limit: 2 }, db)
+    assert.deepEqual(first.map(r => r.note), ['newest', 'ran past'], 'the twins split across the page')
+    const next = await listJournal('s1', { limit: 50, before: first[first.length - 1].at }, db)
+    const seen = new Set(first.map(r => r.id))
+    assert.deepEqual(next.filter(r => !seen.has(r.id)).map(r => r.note), ['armed', 'older'],
+        'the twin past the boundary still arrives')
 })
 
 test('appendJournal never throws — a lost line must not fail the wake', async () => {
