@@ -5,6 +5,7 @@ import { houseBook } from '../../services/houseBook.service.js'
 import { dayBoards } from '../../services/hotlist.day.js'
 import { prometheusCallsService } from '../../services/prometheusCalls.service.js'
 import { profileRow } from '../../services/hotlistBehaviour.service.js'
+import { echoService } from '../../services/echo.service.js'
 import { makeHandle } from '../_shared/handle.util.js'
 import { httpError } from '../../services/httpError.util.js'
 
@@ -96,3 +97,20 @@ export const getRowProfile = handle('getRowProfile', async (req, res) => {
  * and graded vs SPY at 1/3/6/12+ months (forward and seeded apart), and his catalyst reads he backed against the ones he passed.
  */
 export const getScorecard = handle('getScorecard', async (req, res) => { res.json(await prometheusCallsService.scorecard()) })
+
+const ECHO_ID = /^[a-z0-9][a-z0-9.-]{0,40}-\d{4}-\d{2}-\d{2}$/
+
+/**
+ * GET /api/hotlist/echo — Echo's FORWARD TEST (docs/design/echo-desk.md): the events the engine detected, each with where it
+ * stands and its flagged names, and the record SO FAR — labelled, never the verdict (that reads once, on the first 30
+ * events graded at 120 sessions).
+ */
+export const getEcho = handle('getEcho', async (req, res) => { res.json(await echoService.listEvents()) })
+
+/** GET /api/hotlist/echo/:id — one event: every link with its check row and grades, what was dropped, who mapped it. */
+export const getEchoEvent = handle('getEchoEvent', async (req, res) => {
+    if (!ECHO_ID.test(String(req.params.id))) throw httpError(400, 'not an event id')
+    const ev = await echoService.getEvent(req.params.id)
+    if (!ev) throw httpError(404, 'no such event')
+    res.json(ev)
+})

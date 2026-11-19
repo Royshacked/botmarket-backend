@@ -273,8 +273,10 @@ api/
                           /outcomes (the log summarised, + `backtest`, the week replay's summary), GET /reads
                           (the catalyst reads), POST /reads (a user's "Catalyst read" on a This week row,
                           HOTLIST_MANUAL_READS a day), GET /book (the Swing / Long term lists + the chain's
-                          `picks`). Shared — research binds to no account, so no workspace scope. Shaping
-                          lives in services/hotlist.service, catalystRead.service, houseBook.service
+                          `picks`), GET /echo + /echo/:id (Echo's forward test, docs/design/echo-desk.md —
+                          read only, the record so far labelled, never the verdict). Shared — research binds to
+                          no account, so no workspace scope. Shaping lives in services/hotlist.service,
+                          catalystRead.service, houseBook.service, echo.service
   transcribe/             raw audio → Whisper (OpenAI SDK, the only OpenAI use). Mounted BEFORE
                           express.json so the raw-body parser sees the bytes; authed — it is a paid API.
                           The language is TOLD (`en`, or a client's 2-letter `?language=`), never
@@ -1168,6 +1170,10 @@ services/
                             DUE_KEYS only (long-term reviews, expired, a watch's date) — the monitor's, once a day
                             while stale. Results carry `long_term` / `long_term_new` (houseScan bookSends: a NEW yes
                             sends to the long-term book)
+  echo.service.js           ECHO'S FORWARD TEST, READ (docs/design/echo-desk.md step 1, 2026-11-19): the engine's
+                            `echo_forward` (aether-engine echo/forward.py) shaped for the Hotlist and Echo's desk —
+                            each link joined to its frozen check row, its spread vs its own stand-ins, the event's
+                            spread over flagged links (forward.py event_spread), the running record. NEVER writes.
   engineDb.js               THE rule for which database aether-engine writes (AETHER_DB, else Node's own) —
                             shared by every desk that reads what it wrote
   manualNotify.service.js   broker-less entry/exit FillCards → social chat (embedded price/qty confirm)
