@@ -66,6 +66,11 @@ export function shareIn(sentence, term) {
     const at = s.search(new RegExp(esc(term), 'i'))
     if (at < 0) return null
     const pctOf = (x) => Math.round(Number(x) * 100) / 10000
+    // A GROUP's figure is no one's share: "our top five manufacturers as a group (Microsoft, Dell, Cisco Systems, HP Inc.
+    // and Lenovo) accounted for approximately 50%" (Insight's 10-K, the 2026-11-19 live map). Only "each" or
+    // "respectively" ties a figure to one name.
+    if (/\b(as a group|collectively|combined|together|in the aggregate|top (?:two|three|four|five|six|seven|eight|nine|ten|\d+))\b/i.test(s)
+        && !/\b(each|respectively)\b/i.test(s)) return null
     // "A, B, C and D contributed 19.9%, 16.3%, 10.7% and 10.5%, respectively": the term's place among the names is
     // its place among the figures (Fabrinet's 10-K; Cisco first there, but not always).
     if (/respectively/i.test(s)) {
