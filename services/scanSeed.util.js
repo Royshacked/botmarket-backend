@@ -47,7 +47,21 @@ export function sanitizeScanSeed(raw) {
         window:           (from || to) ? { from, to } : null,
         hotlist:          _hotlistRef(raw.hotlist, ticker.toUpperCase()),
         book:             _bookRef(raw.book, ticker.toUpperCase()),
+        echo:             _echoRef(raw.echo, ticker.toUpperCase()),
     }
+}
+
+const ECHO_EVENT_ID = /^ev_[0-9a-f-]{36}$/
+
+/**
+ * A hand-off off the Hotlist's Echo tab (echo-pipeline.md Step 6) is a reference too — which event, which name — and the
+ * event, the link, its score, flag and the rule's levels are read back by the server (echoLevels echoSeed). Null unless
+ * the event id is the pipeline's.
+ */
+function _echoRef(raw, ticker) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+    const event = typeof raw.event === 'string' ? raw.event.trim() : ''
+    return ECHO_EVENT_ID.test(event) ? { event, ticker } : null
 }
 
 // `hb_` — the This week boards (hotlist.boards); `hd_` — the day boards (hotlist.day, 2026-11-12: built with Mentor).

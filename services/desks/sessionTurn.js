@@ -179,7 +179,8 @@ export function makeSessionTurn({
         const editing  = state?.editing ?? null
         const sealed   = editing ? await contexts.load({ userId: user._id, kind: editing.kind, entityId: editing.entityId, agent }) : null
 
-        const prepared = desk.prepareInput ? await desk.prepareInput(input) : input
+        // The user rides along for a seed that names something of theirs (an Echo event of their own, echo-pipeline.md).
+        const prepared = desk.prepareInput ? await desk.prepareInput(input, { userId: user._id }) : input
         const common   = deskCommon({
             messages: buildConversation({ messages: messages ?? [], agent, summary, sealed }),
             // The level, and ABOUT THE USER — what they told any role, what is open at the others (one-axl.md step 3).

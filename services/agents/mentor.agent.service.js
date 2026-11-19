@@ -868,7 +868,7 @@ export function _buildSeedSection(seed) {
     if (!seed?.ticker) return ''
     return `
 
-${seed.book_facts ? "FROM THE HOUSE'S BOOK" : 'ARGUS HANDED YOU THIS NAME'}: ${seed.ticker}${seed.direction ? ` (${seed.direction})` : ''}`
+${seed.echo_facts ? 'FROM ECHO, THE EVENT ANALYST' : seed.book_facts ? "FROM THE HOUSE'S BOOK" : 'ARGUS HANDED YOU THIS NAME'}: ${seed.ticker}${seed.direction ? ` (${seed.direction})` : ''}`
         + `${seed.thesis ? `
   thesis: ${seed.thesis}` : ''}`
         + `${seed.analysis ? `
@@ -888,6 +888,11 @@ ${seed.book_facts ? "FROM THE HOUSE'S BOOK" : 'ARGUS HANDED YOU THIS NAME'}: ${s
   From the house's ${seed.book_name === 'long_term' ? 'LONG TERM' : 'SWING'} book: ${seed.book_facts}.${seed.horizon ? ` The horizon is ${seed.horizon} — the user's to confirm.` : ''}${seed.caution ? `
   What would break the thesis: ${seed.caution}` : ''}
   The target is the analyst's valuation over that horizon, not a take-profit: the entry, the stop and any exit are built here, with the user.` : '')
+        // From ECHO (echo-pipeline.md Step 6; Roy 2026-11-19): the event and the link, its score and day-5 flag, and the
+        // levels the simulator's coded rules would set — read back by code. CONSIDERATIONS: Mentor trades his regular setup.
+        + (seed.echo_facts ? `
+  From Echo: ${seed.echo_facts}.${seed.horizon ? ` The horizon is ${seed.horizon} — the user's to confirm.` : ''}
+  The simulator's levels are a CONSIDERATION, not the trade: weigh them — say in a line where your read agrees or differs — and build your regular setup with the user, your entry, stop and exit. Echo is unproven until its validation has the events; the flag is a lead, never a reason the trade will work.` : '')
         // Worked out by code from the ticker (houseLabel.service), not by Argus: the house's industry desk holds this
         // name's industry on its list. Context the user hears once — never a reason the trade will work.
         + (seed.house ? `

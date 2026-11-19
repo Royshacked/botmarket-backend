@@ -11,6 +11,7 @@ import { parseClientTime } from '../../api/_shared/parse.util.js'
 import { sanitizeScanSeed } from '../scanSeed.util.js'
 import { hotlistSeed } from '../hotlist.service.js'
 import { bookSeed } from '../houseBook.service.js'
+import { echoSeed } from '../echoLevels.service.js'
 import { houseLabels, formatHouseLabel } from '../houseLabel.service.js'
 import { mentorActions, mentorApplyEdit } from './actions/mentor.actions.js'
 import { setupReason } from '../../api/setups/setupReasons.js'
@@ -138,7 +139,7 @@ async function _sayExperts({ sessionId, userId, read, proteus }) {
  * The house's label on a handed-over name, worked out from the ticker — never read off a request
  * (argus-on-pythia.md §3.4). No label, or a failed read, leaves it null.
  */
-async function _labelSeed(seed) {
+async function _labelSeed(seed, userId = null) {
     if (seed) seed.house = formatHouseLabel((await houseLabels([seed.ticker], { books: ['swing', 'long_term'] })).get(seed.ticker)) || null
     // A HOTLIST hand-off (daily-names.md §8) names a board and a column; what it says about the name —
     // the horizon, the grade, the free range, the catalyst, Argus's pick note — is read back from the
@@ -163,6 +164,18 @@ async function _labelSeed(seed) {
             seed.book_facts = b.book_facts
             seed.thesis   ??= b.thesis ?? null
             seed.caution  ??= b.caution ?? null
+        }
+    }
+    // A hand-off off the Hotlist's ECHO tab (echo-pipeline.md Step 6; Roy 2026-11-19: "Mentor considers its levels but
+    // trades his regular setup"): the event, the link, its score and flag, and the simulator rule's levels — read back
+    // by code, said to Mentor as considerations.
+    if (seed?.echo) {
+        const e = await echoSeed(seed.echo, userId).catch(() => null)
+        if (e) {
+            seed.horizon     ??= e.horizon
+            seed.echo_facts    = e.echo_facts
+            seed.thesis      ??= e.thesis ?? null
+            seed.caution     ??= e.caution ?? null
         }
     }
     return seed
@@ -314,12 +327,12 @@ export const mentorDesk = {
     stateFromEntity: mentorStateFromEntity,
     // Unsealed work: a setup in the making.
     hasWork: (state) => !!state?.draft,
-    parse: async (body, turn) => ({
+    parse: async (body, turn, user) => ({
         state: turn.chatState ?? emptyMentorState(),
         input: {
             // Argus hand-off: the validated name, its read, and the lens Argus recommends. Absent for a
             // user who opened Mentor on their own, which is the ordinary path.
-            seed:          await _labelSeed(sanitizeScanSeed(body.seed)),
+            seed:          await _labelSeed(sanitizeScanSeed(body.seed), user?._id ?? null),
             // The browser clock, so `active_from` / `valid_until` resolve against the user's calendar.
             clientTime:    parseClientTime(body),
             accounts:      turn.accounts,
@@ -327,7 +340,7 @@ export const mentorDesk = {
         },
     }),
     // A session turn hands its input in already parsed; the seed still needs its house label.
-    prepareInput: async (input = {}) => ({ ...input, seed: await _labelSeed(sanitizeScanSeed(input.seed)) }),
+    prepareInput: async (input = {}, { userId = null } = {}) => ({ ...input, seed: await _labelSeed(sanitizeScanSeed(input.seed), userId) }),
     nextState: mentorNextState,
     // A setup closed in the chat keeps the conversation that closed it (sessionTurn).
     sealAfterTurn: (result) => (result.closedSetup
