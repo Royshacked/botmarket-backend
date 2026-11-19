@@ -206,12 +206,13 @@ async function _profileBasics(ticker) {
 }
 
 /**
- * A listing as Echo's map checks it — `{ name, exchange, activelyTrading, description }` — or null when FMP has no profile
- * for the symbol or could not be reached (the cached /profile row, one fetch shared with the sector and listing facts).
+ * A listing as Echo's map checks it — `{ name, exchange, activelyTrading, description, sector, industry }` — or null when
+ * FMP has no profile for the symbol or could not be reached (the cached /profile row, one fetch shared with the sector and
+ * listing facts). The sector is Step 3's "filed outside the theme" and Step 4's sector fund.
  */
 export async function getListingProfile(ticker) {
     const p = await _profileBasics(ticker)
-    return p ? { name: p.name, exchange: p.exchange, activelyTrading: p.activelyTrading, description: p.description } : null
+    return p ? { name: p.name, exchange: p.exchange, activelyTrading: p.activelyTrading, description: p.description, sector: p.sector ?? null, industry: p.industry ?? null } : null
 }
 
 /** A listing's trading facts — `{ averageVolume, activelyTrading, fund }` — or null when the profile is unreachable. */

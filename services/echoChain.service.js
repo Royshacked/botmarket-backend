@@ -184,11 +184,12 @@ const coll = async (name) => (_deps.db ?? await getDb()).collection(name)
  * → `{ ok: true, map }` or `{ ok: false, reason }`.
  */
 export async function mapEvent(ev, { userId = null } = {}) {
-    let description = ''
+    let description = '', originSector = null
     if (ev.originTickers?.length) {
         const prof = await _deps.profile(ev.originTickers[0])
         if (!prof) return { ok: false, reason: `No listing found for ${ev.originTickers[0]} — check the ticker, or try again in a minute.` }
         description = prof.description ?? ''
+        originSector = prof.sector ?? null
     }
     const tcol = await coll(TEMPLATES)
     const tdoc = await tcol.findOne({ _id: templateKey(ev) })
@@ -211,7 +212,7 @@ export async function mapEvent(ev, { userId = null } = {}) {
     }
     const checked = await withFilings(ev, links)
     const now = _deps.now().toISOString()
-    const map = { model: res.model, promptVersion: PROMPT_VERSION, mappedAt: now, fromTemplate: template?.from ?? null, links: checked, dropped }
+    const map = { model: res.model, promptVersion: PROMPT_VERSION, mappedAt: now, fromTemplate: template?.from ?? null, originSector, links: checked, dropped }
     await tcol.updateOne({ _id: templateKey(ev) }, { $set: { from: `${ev.origin} ${ev.date}`, links: links.map(({ ticker, name, relation, layer, direction, why }) => ({ ticker, name, relation, layer, direction, why })), updatedAt: now } }, { upsert: true })
     return { ok: true, map }
 }
