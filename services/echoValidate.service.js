@@ -14,7 +14,7 @@
 // Walk-forward reweighting needs events to tune on: the report says how many there are.
 
 import { fmpGet } from '../providers/fmp.price.provider.js'
-import { eventReturns } from './echoReturns.service.js'
+import { eventReturns, closedSessionsSince } from './echoReturns.service.js'
 import { echoEventsService } from './echoEvents.service.js'
 import { FACTORS } from './echoScore.service.js'
 import { logger } from './logger.service.js'
@@ -53,7 +53,7 @@ export function stats(xs) {
 }
 
 const _deps = {
-    returns: eventReturns, events: echoEventsService,
+    returns: eventReturns, events: echoEventsService, calendar: closedSessionsSince,
     screen: (q) => fmpGet(`/company-screener?${q}`, { label: 'FMP screener (Echo stand-ins)' }),
     now: () => new Date(),
 }
@@ -77,6 +77,19 @@ export function dueHorizons(ev, sessions) {
 }
 
 /**
+ * When the next horizon not yet graded comes due: its session's date plus the close, estimated on the calendar (252
+ * sessions a year) past the sessions known. Null when every horizon is graded. Pure.
+ */
+export function nextGradeDate(ev, sessions) {
+    const i = sessions.indexOf(ev.check?.checkDay)
+    const h = GRADE_HORIZONS.find(x => !ev.grades?.[x])
+    if (i < 0 || h == null) return null
+    const known = sessions[i + h]
+    const date = known ?? new Date(Date.parse(`${sessions.at(-1)}T00:00:00Z`) + Math.ceil((i + h - (sessions.length - 1)) * 365 / 252) * 86_400_000).toISOString().slice(0, 10)
+    return `${date}T21:45:00.000Z`
+}
+
+/**
  * Grade one checked event at the horizons that are due. → `{ graded: [h], grades }` (grades merged onto the event).
  * Never throws.
  */
@@ -84,7 +97,19 @@ export async function gradeEvent(ev) {
     try {
         const check = ev.check
         if (!check?.checkDay) return { graded: [], grades: ev.grades ?? {} }
-        const links = check.links.filter(l => sign(l.direction))
+        // WHAT IS DUE, from SPY's calendar alone (one cached read) — nothing else is fetched until a horizon is (CR
+        // 2026-11-19: every event re-fetched its ~40 names and the screener every hour between horizons).
+        const calendar = [check.checkDay, ...(await _deps.calendar(check.checkDay)).filter(d => d > check.checkDay)]
+        const dueNow = dueHorizons(ev, calendar)
+        const nextGradeAt = nextGradeDate(ev, calendar)
+        if (!dueNow.length) {
+            await _deps.events.advance(ev._id, ev.status, { nextGradeAt })
+            return { graded: [], grades: ev.grades ?? {} }
+        }
+        // THE DAY-5 FLAGS, as they were (CR 2026-11-19): a rescore after a trigger may move a flag, but the grade is of the
+        // group the check picked at day 5 — never one picked with what came after.
+        const flagAt5 = (l) => (check.flagsAtDay5 ? check.flagsAtDay5[l.ticker] ?? null : l.flag)
+        const links = check.links.filter(l => sign(l.direction)).map(l => ({ ...l, flag: flagAt5(l) }))
         const flagged = links.filter(l => FLAGS.has(l.flag))
         const mapLinks = new Map((ev.map?.links ?? []).map(l => [l.ticker, l]))
         const exclude = new Set([...(ev.originTickers ?? []), ...mapLinks.keys()])
@@ -113,7 +138,7 @@ export async function gradeEvent(ev) {
                 vsUnflagged: f.length && u.length ? mean(f) - mean(u) : null,
             }
         }
-        if (due.length) await _deps.events.advance(ev._id, ev.status, { grades, gradedAt: _deps.now().toISOString() })
+        await _deps.events.advance(ev._id, ev.status, { grades, gradedAt: _deps.now().toISOString(), nextGradeAt: nextGradeDate({ ...ev, grades }, calendar) })
         return { graded: due, grades }
     } catch (err) {
         logger.warn(LOG, 'grading failed', { event: ev._id, error: err.message })

@@ -18,6 +18,8 @@ test('shareIn: the latest period, a floor, and the place in a "respectively" lis
     assert.deepEqual(shareIn(FN, 'Amazon'), { share: 0.105, atLeast: false })
     assert.deepEqual(shareIn('Cisco Systems, Inc 13 % 14 % 12 %', 'Cisco'), { share: 0.13, atLeast: false }, 'a table row')
     assert.equal(shareIn('We sell to Cisco.', 'Cisco'), null)
+    assert.equal(shareIn('Sales of Cisco products grew 12% in fiscal 2026.', 'Cisco'), null, 'a growth rate is no share')
+    assert.deepEqual(shareIn('Cisco accounted for 14% of our net sales in fiscal 2026.', 'Cisco'), { share: 0.14, atLeast: false })
     // Insight's 10-K: a group's figure is no one's share.
     assert.equal(shareIn('Sales of product from our top five manufacturers/publishers as a group (Microsoft, Dell, Cisco Systems, HP Inc. and Lenovo) accounted for approximately 50% of our consolidated net sales during 2025.', 'Cisco'), null)
     assert.equal(shareIn(PLUS, 'Juniper'), null)

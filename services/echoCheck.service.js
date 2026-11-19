@@ -21,7 +21,7 @@
 // wave watch (Step 5) re-runs the check on a trigger.
 
 import { getRatingActions } from '../providers/fmp.provider.js'
-import { eventReturns, sectorEtf } from './echoReturns.service.js'
+import { eventReturns, sectorEtf, closedSessionsSince, day0Index } from './echoReturns.service.js'
 import { mapLimit } from './concurrency.util.js'
 import { logger } from './logger.service.js'
 
@@ -59,23 +59,34 @@ export function yardstick(links, rows, ev, originRow = null) {
     return { median: o, from: o == null ? null : 'the origin', n: o == null ? 0 : 1 }
 }
 
-/** The doc's flag for one link, with why. Pure. → `{ flag, why }`, flag null when none. */
-export function flagFor({ direction, total, high, directness, move, yard }) {
+/**
+ * The doc's flag for one link, with why. Pure. → `{ flag, why }`, flag null when none.
+ *
+ * CR 2026-11-19, to the doc: a CONFLICTED name (the ledger: other events pull it the other way) is skipped — "a
+ * conflicted name is a weak trade"; "fully priced" is a big move that MATCHES THE SCORE (a high one) — a big move on a
+ * low score is no flag; an underreacted winner moved LITTLE — a name that fell hard against its direction did not
+ * "underreact".
+ */
+export function flagFor({ direction, total, high, directness, move, yard, conflicted = false }) {
     if (move == null) return { flag: null, why: 'no day-5 move to check' }
+    if (conflicted) return { flag: null, why: 'conflicted — other events pull it the other way; the doc skips it' }
     if (yard == null || yard <= 0) return { flag: null, why: 'the yardstick did not move with the event — no reaction to have lagged' }
-    if (direction === 'gains' && high && move < yard / 2) {
+    if (direction === 'gains' && high && move < yard / 2 && move > -yard) {
         return { flag: 'underreacted_winner', why: `scored ${total}; moved ${pctS(move)} by day 5, under half the layer-1 median ${pctS(yard)}` }
     }
     // A loser's signed move is its drop: a big one (at least layer 1's, and 10%+ vs SPY) on slow or indirect damage.
     if (direction === 'loses' && move >= yard && move >= BIG_DROP && directness <= 1) {
         return { flag: 'overreacted_loser', why: `fell ${pctS(-move)} vs SPY by day 5 (layer 1 ${pctS(-yard)}), but the damage is slow or indirect (directness ${directness})` }
     }
-    if (move >= yard) return { flag: 'fully_priced', why: `moved ${pctS(move)} its way by day 5, at or past the layer-1 median ${pctS(yard)}` }
+    if (move >= yard && high) return { flag: 'fully_priced', why: `scored ${total} and moved ${pctS(move)} its way by day 5, at or past the layer-1 median ${pctS(yard)} — the move matches the score` }
     return { flag: null, why: `moved ${pctS(move)} by day 5 against a layer-1 median of ${pctS(yard)}` }
 }
 const pctS = (x) => `${x > 0 ? '+' : ''}${(Math.round(x * 1000) / 10).toFixed(1)}%`
 
-const _deps = { returns: eventReturns, actions: getRatingActions, sleep: (ms) => new Promise(r => setTimeout(r, ms)) }
+const _deps = {
+    returns: eventReturns, calendar: closedSessionsSince, sleep: (ms) => new Promise(r => setTimeout(r, ms)),
+    actions: (t) => getRatingActions(t, { strict: true }),   // a failed read is UNKNOWN, never "no analyst wrote" (CR 2026-11-19)
+}
 export function _setDeps(d) { Object.assign(_deps, d) }
 
 /** Analyst actions dated on or after `since` (YYYY-MM-DD). → `{ count, actions }`, count null when unread. */
@@ -97,6 +108,15 @@ export async function checkEvent(ev, map, scores) {
     const tickers = [...new Set([...(ev.originTickers ?? []), ...links.map(l => l.ticker)])]
     const sectors = Object.fromEntries(links.map(l => [l.ticker, sectorEtf(l.sector)]))
     if (ev.originTickers?.[0]) sectors[ev.originTickers[0]] = sectorEtf(map.originSector)
+    // Has the day-5 close come? SPY's calendar alone first (one cached read) — CR 2026-11-19: a waiting event fetched all its
+    // ~33 names every hour for five days.
+    try {
+        const cal = await _deps.calendar(new Date(Date.parse(`${ev.date}T00:00:00Z`) - 10 * 86_400_000).toISOString().slice(0, 10))
+        const i0 = day0Index(ev, cal)
+        if (i0 == null || i0 + CHECK_DAY - 1 >= cal.length) return { ok: false, wait: true, reason: `the day-${CHECK_DAY} close is not in yet${i0 != null ? ` (Day 0 ${cal[i0]})` : ''}` }
+    } catch (err) {
+        return { ok: false, reason: `the calendar could not be read: ${err.message}` }
+    }
     let res
     try { res = await _deps.returns(ev, tickers, sectors) } catch (err) {
         logger.warn(LOG, 'returns failed', { event: ev._id, error: err.message })
@@ -117,7 +137,7 @@ export async function checkEvent(ev, map, scores) {
         const acts = await actionsSince(l.ticker, d0)
         await _deps.sleep(100)
         const vol = r?.volume?.[CHECK_DAY] ?? null
-        const flag = flagFor({ direction: l.direction, total: s?.total ?? null, high: Boolean(s?.high), directness: s?.factors?.directness?.score ?? 2, move, yard: yard.median })
+        const flag = flagFor({ direction: l.direction, total: s?.total ?? null, high: Boolean(s?.high), directness: s?.factors?.directness?.score ?? 2, move, yard: yard.median, conflicted: Boolean(s?.ledger?.conflicted) })
         return {
             ticker: l.ticker, relation: l.relation, layer: l.layer, direction: l.direction, total: s?.total ?? null,
             moves: Object.fromEntries(DAYS.map(d => [d, { xsSpy: r?.horizons?.[d]?.xsSpyReaction ?? null, xsSector: r?.horizons?.[d]?.xsSectorReaction ?? null }])),
@@ -138,6 +158,8 @@ export async function checkEvent(ev, map, scores) {
             checkedAt: new Date().toISOString(), day0: d0, checkDay: res.sessions[i0 + CHECK_DAY - 1],
             yardstick: yard, origin: originRow ? { ticker: originRow.ticker, moves: Object.fromEntries(DAYS.map(d => [d, originRow.horizons?.[d]?.xsSpyReaction ?? null])) } : null,
             links: out, impliedVolatility: 'not measured — no options data on our plan',
+            // The flags AS THEY WERE at day 5 — what Step 7 grades. A rescore keeps the first ones (echoWatch).
+            flagsAtDay5: Object.fromEntries(out.map(l => [l.ticker, l.flag ?? null])),
         },
     }
 }

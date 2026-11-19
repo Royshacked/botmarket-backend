@@ -52,6 +52,10 @@ export function frame(input = {}, today = new Date().toISOString().slice(0, 10))
     if (bad) return { ok: false, reason: `not a ticker: ${bad}` }
     const date = input.date == null || input.date === '' ? today : String(input.date)
     if (!DATE.test(date)) return { ok: false, reason: 'date must be YYYY-MM-DD' }
+    // A REAL date, not ahead of today (CR 2026-11-19: 2026-13-01 passed the pattern, then failed the check every hour).
+    const parsed = new Date(`${date}T00:00:00Z`)
+    if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== date) return { ok: false, reason: `${date} is not a real date` }
+    if (date > today) return { ok: false, reason: `${date} is in the future — an event is recorded once it is public` }
     const f = input.filter ?? {}
     return {
         ok: true,
@@ -79,11 +83,16 @@ const _deps = { db: null, now: () => new Date(), id: () => `ev_${randomUUID()}` 
 export function _setDeps(d) { Object.assign(_deps, d) }
 const coll = async () => (_deps.db ?? await getDb()).collection(COLLECTION)
 
-/** Store a framed event. `userId` null → the house's. → the stored document. */
-export async function create(event, { userId = null, source = null, id = null } = {}) {
+/**
+ * Store a framed event. `userId` null → the house's. `askedBy` — a user's event Echo judged an event by the doc's filter
+ * becomes the HOUSE's (Roy, 2026-11-19: "Echo decides if the user's event is worth it — if it is, it treats it as a
+ * regular event"); `askedBy` keeps whose it was, for their "yours". → the stored document.
+ */
+export async function create(event, { userId = null, source = null, id = null, askedBy = null } = {}) {
     const now = _deps.now().toISOString()
     const doc = {
         _id: id ?? _deps.id(), kind: userId ? 'user' : 'house', userId: userId ? String(userId) : null, source,
+        ...(askedBy ? { askedBy: String(askedBy) } : {}),
         ...event, status: 'framed', createdAt: now, updatedAt: now,
     }
     await (await coll()).insertOne(doc)
@@ -98,22 +107,45 @@ export async function get(id, userId = null) {
     return d
 }
 
-/** Write a step's part onto the event and move its status. */
+/** Write a step's part onto the event and move its status; the run's claim is released. */
 export async function advance(id, status, patch = {}) {
     if (!STATUSES.includes(status)) throw new Error(`unknown status ${status}`)
-    await (await coll()).updateOne({ _id: String(id) }, { $set: { ...patch, status, updatedAt: _deps.now().toISOString() } })
+    await (await coll()).updateOne({ _id: String(id) }, { $set: { ...patch, status, updatedAt: _deps.now().toISOString() }, $unset: { runningUntil: '' } })
 }
 
-/** The house's events and the user's own, newest first. */
+export const CLAIM_MS = 15 * 60 * 1000
+/**
+ * Claim an event for one run (CR 2026-11-19: chat's map_event and the hourly tick mapped the same event at once, two
+ * Opus calls). → the claimed document, or null when another run holds it (a claim lapses after 15 minutes — a run that
+ * died leaves no lock behind).
+ */
+export async function claim(id) {
+    const now = _deps.now()
+    const r = await (await coll()).findOneAndUpdate(
+        { _id: String(id), $or: [{ runningUntil: { $exists: false } }, { runningUntil: { $lt: now.toISOString() } }] },
+        { $set: { runningUntil: new Date(now.getTime() + CLAIM_MS).toISOString() } },
+        { returnDocument: 'after' },
+    )
+    return r ?? null   // driver v6: the document itself (null when the filter matched nothing)
+}
+
+/** The house's events and the user's own (made or asked for), newest first. */
 export async function list({ userId = null, status = null, limit = 100 } = {}) {
     const q = { $or: [{ kind: 'house' }, ...(userId ? [{ kind: 'user', userId: String(userId) }] : [])] }
     if (status) q.status = Array.isArray(status) ? { $in: status } : status
     return (await coll()).find(q).sort({ date: -1, createdAt: -1 }).limit(Math.min(limit, 500)).toArray()
 }
 
-/** Every event a step still has to run on (the pipeline's tick) — the house's and every user's, oldest first. */
+/**
+ * Every event a step has to run on NOW (the pipeline's tick): open, not given up, and due — a failed step backs off and a
+ * check waits for its close (`nextRunAt`). Soonest due first, so stuck or waiting events cannot crowd out new ones.
+ */
 export async function listOpen({ limit = 200 } = {}) {
-    return (await coll()).find({ status: { $in: ['framed', 'mapped', 'scored'] } }).sort({ createdAt: 1 }).limit(limit).toArray()
+    const now = _deps.now().toISOString()
+    return (await coll()).find({
+        status: { $in: ['framed', 'mapped', 'scored'] }, gaveUp: { $ne: true },
+        $or: [{ nextRunAt: { $exists: false } }, { nextRunAt: null }, { nextRunAt: { $lte: now } }],
+    }).sort({ nextRunAt: 1, createdAt: 1 }).limit(limit).toArray()
 }
 
 /**
@@ -127,15 +159,22 @@ export async function findSame(ev) {
     return same.find(d => (ev.originTickers ?? []).some(t => (d.originTickers ?? []).includes(t)) || String(d.origin ?? '').toLowerCase() === name) ?? null
 }
 
-/** The events under the wave watch (Step 5), the house's and every user's. */
+/** The house's events under the wave watch (Step 5) — a user's own event is checked only (Roy, 2026-11-19). */
 export async function listWatching({ limit = 300 } = {}) {
-    return (await coll()).find({ status: 'watching' }).sort({ date: -1 }).limit(limit).toArray()
+    return (await coll()).find({ status: 'watching', kind: 'house' }).sort({ date: -1 }).limit(limit).toArray()
 }
 
-/** Checked events with a horizon still to grade (Step 7) — watched or expired: expiry stops the watch, not the grading. */
+/**
+ * The house's checked events with a horizon to grade NOW (Step 7) — watched or expired (expiry stops the watch, not the
+ * grading), their next grade due (`nextGradeAt`, set from the calendar — CR 2026-11-19: every one re-fetched ~40 names
+ * an hour between horizons).
+ */
 export async function listGradable({ limit = 300 } = {}) {
-    return (await coll()).find({ status: { $in: ['watching', 'expired'] }, 'check.checkDay': { $exists: true }, 'grades.120': { $exists: false } })
-        .sort({ date: 1 }).limit(limit).toArray()
+    const now = _deps.now().toISOString()
+    return (await coll()).find({
+        kind: 'house', status: { $in: ['watching', 'expired'] }, 'check.checkDay': { $exists: true }, 'grades.120': { $exists: false },
+        $or: [{ nextGradeAt: { $exists: false } }, { nextGradeAt: null }, { nextGradeAt: { $lte: now } }],
+    }).sort({ nextGradeAt: 1, date: 1 }).limit(limit).toArray()
 }
 
 /** Every graded event (the validation report). */
@@ -143,4 +182,4 @@ export async function listGraded({ limit = 1000 } = {}) {
     return (await coll()).find({ kind: 'house', grades: { $exists: true } }).sort({ date: 1 }).limit(limit).toArray()
 }
 
-export const echoEventsService = { frame, passesFilter, create, get, advance, list, listOpen, listWatching, listGradable, listGraded, findSame }
+export const echoEventsService = { frame, passesFilter, create, get, advance, claim, list, listOpen, listWatching, listGradable, listGraded, findSame }

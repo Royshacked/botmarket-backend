@@ -169,6 +169,26 @@ the event `f3de8262` · Step 2 `afb3f516` · Step 3 `a02d59a2` · Step 4 `ace2a2
   agreements, EPA rules and registry postings skipped with the doc's reasons.
 - **The app**: driven at desk and phone width (`scripts/drive-hotlist-echo.mjs`).
 
+**QA/CR cycle — done 2026-11-19** (two independent reviews; Roy: "fix all"):
+- **Cost**: a failed step backs off (1, 2, 4, 8 h) and gives up after five (it re-ran an Opus call every hour); a run
+  CLAIMS its event (chat and the tick mapped one twice); a check and a grade read SPY's calendar before fetching any name
+  (a waiting event fetched ~33 names an hour; graded ones ~40 an hour between horizons), with `nextRunAt` /
+  `nextGradeAt`; due events first, so stuck ones cannot starve new ones; dates must be real and not ahead; EDGAR's limit
+  held once for every caller (sec.provider `_pace`).
+- **To the doc**: a CONFLICTED name is skipped; "fully priced" needs a move that MATCHES THE SCORE; a hard wrong-way move
+  is no underreaction; the DAY-5 flags are frozen and graded (a rescore cannot pick the graded group with hindsight);
+  "normalised" and "absorbed" read refreshed day-20 moves and analyst counts.
+- **Safety**: templates are the house's only (a user's map cannot shape the house's next one); only an item that is an
+  event by the filter may RESOLVE (expire) one; the hand-off to Mentor is a reference only.
+- **Smaller**: FDA approvals dated the approval; a same-day trigger counts once; a share needs share words ("grew 12%"
+  is not one); one ATR / EMA (the monitors' structured.evaluator); an unread analyst read is unknown, not zero; the tab
+  reads the validation `report`; Build only on flagged names; Back from a name's page keeps the list.
+- **A USER'S EVENT** (Roy, 2026-11-19: "Echo decides if the user's event is worth it — if it is, it treats it as a
+  regular event"): `map_event` runs the intake's own triage on it (echoIntake.judge). An EVENT by the filter becomes the
+  house's — in the triage's words, never the user's text, `askedBy` kept for their "yours" — or the house's existing one;
+  otherwise it stays the user's: mapped, scored, checked at day 5, then expired ("checked only"). Watch and grading are
+  the house's.
+
 **Still to do**: turn the loop on (`ECHO_PIPELINE=true` on Render) and retire the engine's nightly forward test
 (`echo-forward` in its cron group) — Roy's call; the QA/CR/docs cycle.
 

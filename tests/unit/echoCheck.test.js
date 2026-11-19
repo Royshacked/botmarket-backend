@@ -24,9 +24,12 @@ test("the doc's three flags", () => {
     assert.equal(flagFor({ direction: 'gains', total: 9, high: true, directness: 2, move: 0.01, yard }).flag, 'underreacted_winner', 'the Vertiv: high score, under half of layer 1')
     assert.equal(flagFor({ direction: 'gains', total: 6, high: false, directness: 2, move: 0.01, yard }).flag, null, 'a small move is no flag without the score')
     assert.equal(flagFor({ direction: 'loses', total: 5, high: false, directness: 0, move: 0.15, yard }).flag, 'overreacted_loser', 'the DaVita: a hard drop on slow damage')
-    assert.equal(flagFor({ direction: 'loses', total: 5, high: false, directness: 2, move: 0.15, yard }).flag, 'fully_priced', 'direct damage: the drop is earned')
-    assert.equal(flagFor({ direction: 'loses', total: 5, high: false, directness: 0, move: 0.07, yard }).flag, 'fully_priced', 'under 10%: not a big drop')
+    assert.equal(flagFor({ direction: 'loses', total: 9, high: true, directness: 2, move: 0.15, yard }).flag, 'fully_priced', 'direct damage on a high score: the drop is earned')
+    assert.equal(flagFor({ direction: 'loses', total: 5, high: false, directness: 2, move: 0.15, yard }).flag, null, 'a big move on a LOW score matches nothing — no flag (the doc: "matches the score")')
+    assert.equal(flagFor({ direction: 'loses', total: 5, high: false, directness: 0, move: 0.07, yard }).flag, null, 'under 10%: not a big drop')
     assert.equal(flagFor({ direction: 'gains', total: 9, high: true, directness: 2, move: 0.08, yard }).flag, 'fully_priced')
+    assert.equal(flagFor({ direction: 'gains', total: 9, high: true, directness: 2, move: -0.09, yard }).flag, null, 'a hard fall the wrong way did not "underreact"')
+    assert.match(flagFor({ direction: 'gains', total: 9, high: true, directness: 2, move: 0.01, yard, conflicted: true }).why, /^conflicted/, 'the doc skips a conflicted name')
     assert.equal(flagFor({ direction: 'gains', total: 9, high: true, directness: 2, move: 0.01, yard: -0.02 }).flag, null, 'layer 1 went the other way — nothing to lag')
     assert.match(flagFor({ direction: 'gains', total: 9, high: true, directness: 2, move: 0.01, yard }).why, /scored 9; moved \+1\.0% by day 5, under half the layer-1 median \+6\.0%/)
 })
@@ -41,14 +44,17 @@ test('analyst actions since Day 0', async () => {
 const EV = { _id: 'ev', date: '2026-11-12', timing: 'after_close', effect: 'down', originTickers: ['CSCO'] }
 const SESSIONS = ['2026-11-12', '2026-11-13', '2026-11-16', '2026-11-17', '2026-11-18', '2026-11-19']
 
-test('checkEvent: waits for the day-5 close; then every link measured and flagged, flags first', async () => {
-    _setDeps({ sleep: async () => {}, actions: async () => [], returns: async () => ({ sessions: SESSIONS.slice(0, 4), rows: [row('CSCO', -0.06)] }) })
+test('checkEvent: waits for the day-5 close — from the calendar alone, no name fetched; then every link measured and flagged', async () => {
+    let fetched = 0
+    _setDeps({ sleep: async () => {}, actions: async () => [], calendar: async () => SESSIONS.slice(0, 4),
+        returns: async () => { fetched++; return { sessions: SESSIONS.slice(0, 4), rows: [row('CSCO', -0.06)] } } })
     const map = { originSector: 'Technology', links: [
         { ticker: 'ANET', relation: 'peer', direction: 'loses', sector: 'Technology' }, { ticker: 'HPE', relation: 'peer', direction: 'loses', sector: 'Technology' },
         { ticker: 'VRT', relation: 'infrastructure', direction: 'gains', sector: 'Industrials' }] }
     const wait = await checkEvent(EV, map, { links: [] })
     assert.equal(wait.wait, true)
-    _setDeps({ returns: async (ev, tickers, sectors) => {
+    assert.equal(fetched, 0, 'CR 2026-11-19: a waiting event fetched all its names every hour')
+    _setDeps({ calendar: async () => SESSIONS, returns: async (ev, tickers, sectors) => {
         assert.equal(sectors.VRT, 'XLI'); assert.equal(sectors.CSCO, 'XLK')
         return { sessions: SESSIONS, rows: [row('CSCO', -0.06), row('ANET', -0.05), row('HPE', -0.03), row('VRT', 0.005)] }
     } })
@@ -60,4 +66,5 @@ test('checkEvent: waits for the day-5 close; then every link measured and flagge
     assert.equal(r.check.links[0].flag, 'underreacted_winner')
     assert.equal(r.check.links[0].noticed, false)
     assert.match(r.check.impliedVolatility, /not measured/)
+    assert.equal(r.check.flagsAtDay5.VRT, 'underreacted_winner', 'the day-5 flags, kept for the grading')
 })

@@ -27,7 +27,20 @@ let _cikMap     = null   // { AAPL: { cik: '0000320193', title: 'Apple Inc.' } }
 let _cikMapAt   = 0
 const CIK_TTL_MS = 24 * 60 * 60 * 1000
 
+// EDGAR's ten requests a second, held HERE for every caller at once (CR 2026-11-19: Echo's map, its scorer, a chat map
+// and the scanner's get_sec_filings each paced only themselves — together they could pass it, and EDGAR blocks the
+// server). Eight a second: each request takes the next free slot.
+const SEC_GAP_MS = 125
+let _nextSlot = 0
+async function _pace() {
+    const now = Date.now()
+    const at = Math.max(now, _nextSlot)
+    _nextSlot = at + SEC_GAP_MS
+    if (at > now) await new Promise(r => setTimeout(r, at - now))
+}
+
 async function _secGet(url) {
+    await _pace()
     return getJson(url, {
         headers: { 'User-Agent': UA, 'Accept-Encoding': 'gzip, deflate' },
         label: `SEC ${url} → HTTP`,
@@ -186,6 +199,7 @@ const _docCache = createTtlCache({ ttlMs: DOC_TTL_MS, max: 60 })
 export async function filingText(url) {
     const hit = _docCache.get(url)
     if (hit) return hit
+    await _pace()
     const html = await getJson(url, {
         headers: { 'User-Agent': UA, 'Accept-Encoding': 'gzip, deflate' }, label: `SEC ${url} → HTTP`, as: 'text', timeoutMs: 30000,
     })
@@ -201,6 +215,7 @@ export function htmlToText(html) {
         .replace(/<[^>]+>/g, ' ')
         .replace(/&nbsp;|&#160;|&#xa0;/gi, ' ')
         .replace(/&amp;/g, '&').replace(/&#8217;|&rsquo;/g, '’').replace(/&#8220;|&#8221;|&ldquo;|&rdquo;/g, '"')
+        .replace(/&#37;|&percnt;/gi, '%')   // a share written as an entity is still a share (CR 2026-11-19)
         .replace(/&#\d+;|&#x[0-9a-f]+;|&[a-z]+;/gi, ' ')
         .replace(/\s+/g, ' ')
         .trim()

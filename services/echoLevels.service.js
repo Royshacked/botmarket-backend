@@ -16,6 +16,7 @@
 
 import { fetchBars, unfinishedSession } from './echoReturns.service.js'
 import { echoEventsService } from './echoEvents.service.js'
+import { calcATRSeries, calcEMASeries, calcSMASeries } from '../monitoring/evaluators/structured.evaluator.js'
 
 export const ATR_DAYS = 14
 export const EMA_DAYS = 21
@@ -24,22 +25,18 @@ const LOOKBACK_DAYS = 420     // calendar days: SPY's 200 sessions and the name'
 
 const r2 = (x) => (Number.isFinite(x) ? Math.round(x * 100) / 100 : null)
 
-/** Wilder's ATR over the last `n` sessions of sorted bars. Pure. */
+// The house's indicators (monitoring/evaluators/structured.evaluator — the monitors' and Mentor's), not a copy of their
+// own (CR 2026-11-19: "shared mechanism → one service").
+const lastOf = (xs) => { for (let i = xs.length - 1; i >= 0; i--) if (Number.isFinite(xs[i])) return xs[i]; return null }
+
+/** The ATR now, over sorted bars — the shared calcATRSeries. Pure. */
 export function atr(rows, n = ATR_DAYS) {
-    if (rows.length < n + 1) return null
-    const tr = rows.slice(1).map((b, i) => Math.max(b.high - b.low, Math.abs(b.high - rows[i].close), Math.abs(b.low - rows[i].close)))
-    let a = tr.slice(0, n).reduce((s, x) => s + x, 0) / n
-    for (const x of tr.slice(n)) a = (a * (n - 1) + x) / n
-    return a
+    return rows.length < n + 1 ? null : lastOf(calcATRSeries(rows.map(b => ({ h: b.high, l: b.low, c: b.close })), n))
 }
 
-/** The EMA of the closes. Pure. */
+/** The EMA of the closes now — the shared calcEMASeries. Pure. */
 export function ema(rows, n = EMA_DAYS) {
-    if (rows.length < n) return null
-    const k = 2 / (n + 1)
-    let e = rows.slice(0, n).reduce((s, b) => s + b.close, 0) / n
-    for (const b of rows.slice(n)) e = b.close * k + e * (1 - k)
-    return e
+    return rows.length < n ? null : lastOf(calcEMASeries(rows.map(b => b.close), n))
 }
 
 /**
@@ -52,7 +49,7 @@ export function levelsFrom({ bars, spy, day0, base, flag }) {
     if (!since.length || rows.length < ATR_DAYS + 2) return null
     const a = atr(rows), e21 = ema(rows), last = rows.at(-1)
     const spyRows = Object.keys(spy).sort().map(d => spy[d])
-    const sma200 = spyRows.length >= SMA_LONG ? spyRows.slice(-SMA_LONG).reduce((s, b) => s + b.close, 0) / SMA_LONG : null
+    const sma200 = spyRows.length >= SMA_LONG ? lastOf(calcSMASeries(spyRows.map(b => b.close), SMA_LONG)) : null
     const spyLast = spyRows.at(-1)?.close ?? null
     const filter = sma200 == null ? { ok: null, why: 'SPY 200-day average not readable' }
         : { ok: spyLast >= sma200, why: `SPY ${r2(spyLast)} ${spyLast >= sma200 ? 'above' : 'BELOW'} its 200-day average ${r2(sma200)}${spyLast >= sma200 ? '' : ' — the doc takes no new longs'}` }

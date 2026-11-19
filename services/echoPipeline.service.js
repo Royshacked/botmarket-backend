@@ -22,40 +22,74 @@ import { logger } from './logger.service.js'
 const LOG = '[echoPipeline]'
 export const OPEN = Object.freeze(['framed', 'mapped', 'scored'])
 export const WATCH_EVERY_MS = 20 * 60 * 60 * 1000
+// A failed step backs off — 1, 2, 4, 8 hours — and gives up after the fifth (CR 2026-11-19: a score that failed every
+// time re-ran an Opus call every hour, for ever, billed to whoever owned the event).
+export const MAX_ATTEMPTS = 5
+const BACKOFF_MS = (n) => Math.min(24, 2 ** (n - 1)) * 60 * 60 * 1000
+const CHECK_CHECKED_ONLY = "a user's event the filter did not take (not a surprise, large and more than a one-off): checked at day 5, no watch"
 
-const _deps = { events: echoEventsService, map: mapEvent, score: scoreEvent, check: checkEvent, watch: watchEvent, grade: gradeEvent }
+/** The next US close a check can read (21:45 UTC — after 16:15 New York either side of daylight time), after `now`. */
+export function nextClose(now = new Date()) {
+    const d = new Date(now)
+    d.setUTCHours(21, 45, 0, 0)
+    if (d <= now) d.setUTCDate(d.getUTCDate() + 1)
+    while (d.getUTCDay() === 0 || d.getUTCDay() === 6) d.setUTCDate(d.getUTCDate() + 1)
+    return d
+}
+
+const _deps = { events: echoEventsService, map: mapEvent, score: scoreEvent, check: checkEvent, watch: watchEvent, grade: gradeEvent, now: () => new Date() }
 export function _setDeps(d) { Object.assign(_deps, d) }
 
 /**
  * Take one event as far as it can go now. → `{ status, stoppedAt?, reason?, wait? }` — the status it reached; when a
- * step failed or must wait, which and why (also written onto the event as `lastError`). Never throws.
+ * step failed or must wait, which and why (also written onto the event). A run first CLAIMS the event, so chat and the
+ * tick never run one twice; a failure backs off (`nextRunAt`) and gives up after MAX_ATTEMPTS; a check that waits for its
+ * close sleeps until the next one. Never throws.
  */
 export async function run(ev) {
-    let doc = ev
+    const claimed = await _deps.events.claim(ev._id).catch(() => null)
+    if (!claimed) return { status: ev.status, stoppedAt: 'claim', reason: 'another run holds it', wait: true }
+    let doc = { ...ev, ...claimed }
     const userId = doc.kind === 'user' ? doc.userId : null
     const stop = async (step, reason, wait = false) => {
-        await _deps.events.advance(doc._id, doc.status, { lastError: wait ? null : { step, reason, at: new Date().toISOString() }, waiting: wait ? reason : null }).catch(() => {})
-        return { status: doc.status, stoppedAt: step, reason, wait }
+        const now = _deps.now()
+        const attempts = wait ? (doc.attempts ?? 0) : (doc.attempts ?? 0) + 1
+        const gaveUp = !wait && attempts >= MAX_ATTEMPTS
+        await _deps.events.advance(doc._id, doc.status, {
+            lastError: wait ? null : { step, reason, at: now.toISOString() }, waiting: wait ? reason : null, attempts, gaveUp,
+            nextRunAt: (wait ? nextClose(now) : new Date(now.getTime() + BACKOFF_MS(attempts))).toISOString(),
+        }).catch(() => {})
+        if (gaveUp) logger.warn(LOG, 'gave up on an event', { event: doc._id, step, reason, attempts })
+        return { status: doc.status, stoppedAt: step, reason, wait, ...(gaveUp ? { gaveUp } : {}) }
     }
     try {
+        const clean = { lastError: null, attempts: 0, nextRunAt: null }
         if (doc.status === 'framed') {
             const r = await _deps.map(doc, { userId })
             if (!r.ok) return stop('map', r.reason)
-            await _deps.events.advance(doc._id, 'mapped', { map: r.map, lastError: null })
-            doc = { ...doc, status: 'mapped', map: r.map }
+            await _deps.events.advance(doc._id, 'mapped', { map: r.map, ...clean })
+            await _deps.events.claim(doc._id).catch(() => null)   // the advance released it; the run goes on
+            doc = { ...doc, status: 'mapped', map: r.map, attempts: 0 }
         }
         if (doc.status === 'mapped') {
             const r = await _deps.score(doc, doc.map, { userId })
             if (!r.ok) return stop('score', r.reason)
-            await _deps.events.advance(doc._id, 'scored', { scores: r.scores, lastError: null })
-            doc = { ...doc, status: 'scored', scores: r.scores }
+            await _deps.events.advance(doc._id, 'scored', { scores: r.scores, ...clean })
+            await _deps.events.claim(doc._id).catch(() => null)
+            doc = { ...doc, status: 'scored', scores: r.scores, attempts: 0 }
         }
         if (doc.status === 'scored') {
             const r = await _deps.check(doc, doc.map, doc.scores)
             if (!r.ok) return stop('check', r.reason, Boolean(r.wait))
-            await _deps.events.advance(doc._id, 'watching', { check: r.check, lastError: null, waiting: null })
-            doc = { ...doc, status: 'watching', check: r.check }
+            // A user's own event the filter did not take is checked and stops there (Roy, 2026-11-19); the house's — and a
+            // user's the filter took, now the house's — go on to the wave watch.
+            const checkedOnly = doc.kind === 'user'
+            const next = checkedOnly ? 'expired' : 'watching'
+            await _deps.events.advance(doc._id, next, { check: r.check, ...clean, waiting: null, ...(checkedOnly ? { expiredBecause: CHECK_CHECKED_ONLY } : {}) })
+            doc = { ...doc, status: next, check: r.check }
         }
+        // Nothing to do here: let the claim go.
+        if (!OPEN.includes(doc.status) && doc.status === ev.status) await _deps.events.advance(doc._id, doc.status).catch(() => {})
         return { status: doc.status }
     } catch (err) {
         logger.warn(LOG, 'run failed', { event: doc._id, status: doc.status, error: err.message })

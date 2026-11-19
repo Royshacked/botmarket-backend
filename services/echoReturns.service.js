@@ -153,6 +153,17 @@ const _deps = { bars: fetchBars, now: () => new Date() }
 export function _setDeps(d) { Object.assign(_deps, d) }
 
 /**
+ * The closed sessions from `from` (YYYY-MM-DD) to today — SPY's calendar, one cached read, the session in progress left
+ * out. What a step reads to know whether its day has come BEFORE it fetches every name (CR 2026-11-19).
+ */
+export async function closedSessionsSince(from) {
+    const now = _deps.now()
+    const open = unfinishedSession(now)
+    const spy = await _deps.bars(BENCHMARK, from, now.toISOString().slice(0, 10))
+    return Object.keys(spy ?? {}).filter(d => d !== open).sort()
+}
+
+/**
  * Every ticker's row for one event. `sectors` is {ticker: SPDR fund or null}. SPY failing stops the event (no calendar);
  * any other symbol failing costs only that symbol — its row says why. → `{ sessions, rows }`.
  */
@@ -181,4 +192,4 @@ export async function eventReturns(ev, tickers, sectors = {}) {
     return { sessions, rows }
 }
 
-export const echoReturnsService = { eventReturns, measure, day0Index, sectorEtf, fetchBars }
+export const echoReturnsService = { eventReturns, measure, day0Index, sectorEtf, fetchBars, closedSessionsSince }

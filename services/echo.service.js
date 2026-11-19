@@ -18,12 +18,15 @@ export const EVENT_ID = /^ev_[0-9a-f-]{36}$/
 const _deps = { events: echoEventsService, report: validationReport }
 export function _setDeps(d) { Object.assign(_deps, d) }
 
-/** One event in a line — the list's row. Pure. */
-export function shapeSummary(d) {
+/**
+ * One event in a line — the list's row. `mine`: the viewer's own event, or one they asked for that Echo took as the
+ * house's (`askedBy` — never shown, only compared). Pure.
+ */
+export function shapeSummary(d, viewer = null) {
     const scores = d.scores?.links ?? []
     const checks = d.check?.links ?? []
     return {
-        id: d._id, kind: d.kind, mine: d.kind === 'user', date: d.date, type: d.type, origin: d.origin, tickers: d.originTickers ?? [],
+        id: d._id, kind: d.kind, mine: d.kind === 'user' || (viewer != null && d.askedBy === String(viewer)), date: d.date, type: d.type, origin: d.origin, tickers: d.originTickers ?? [],
         effect: d.effect, durability: d.durability?.kind ?? null, whatChanged: d.whatChanged, size: d.size ?? null, status: d.status,
         links: d.map?.links?.length ?? 0, high: scores.filter(s => s.high).length,
         flagged: checks.filter(c => FLAGS.includes(c.flag)).map(c => ({ ticker: c.ticker, flag: c.flag, total: c.total })),
@@ -35,7 +38,7 @@ export function shapeSummary(d) {
 }
 
 /** One event whole: every link with its map line, score, check and grades, sorted by score. Pure. */
-export function shapeEvent(d) {
+export function shapeEvent(d, viewer = null) {
     const score = new Map((d.scores?.links ?? []).map(s => [s.ticker, s]))
     const check = new Map((d.check?.links ?? []).map(c => [c.ticker, c]))
     const grade = (t) => Object.fromEntries(Object.entries(d.grades ?? {}).map(([h, g]) => [h, g.rows?.find(r => r.ticker === t)?.signed ?? null]))
@@ -51,7 +54,7 @@ export function shapeEvent(d) {
     })
     links.sort((a, b) => (FLAGS.includes(b.flag) - FLAGS.includes(a.flag)) || ((b.total ?? -1) - (a.total ?? -1)))
     return {
-        ...shapeSummary(d),
+        ...shapeSummary(d, viewer),
         event: { date: d.date, timing: d.timing, type: d.type, origin: d.origin, tickers: d.originTickers ?? [], terms: d.terms ?? [], whatChanged: d.whatChanged,
             size: d.size ?? null, durability: d.durability ?? null, effect: d.effect, filter: d.filter ?? null, sources: d.sources ?? [], source: d.source ?? null },
         map: d.map ? { model: d.map.model, promptVersion: d.map.promptVersion, mappedAt: d.map.mappedAt, fromTemplate: d.map.fromTemplate, dropped: d.map.dropped ?? [] } : null,
@@ -71,14 +74,14 @@ function reportSummary(r) {
 export async function listEvents(userId = null) {
     const docs = await _deps.events.list({ userId, limit: 200 })
     const graded = await _deps.events.listGraded().catch(() => [])
-    return { events: docs.map(shapeSummary), report: reportSummary(_deps.report(graded)) }
+    return { events: docs.map(d => shapeSummary(d, userId)), report: reportSummary(_deps.report(graded)) }
 }
 
 /** One event (a user's only for them), or null. */
 export async function getEvent(id, userId = null) {
     if (!EVENT_ID.test(String(id))) return null
     const d = await _deps.events.get(id, userId)
-    return d ? shapeEvent(d) : null
+    return d ? shapeEvent(d, userId) : null
 }
 
 export const echoService = { listEvents, getEvent, shapeEvent, shapeSummary }

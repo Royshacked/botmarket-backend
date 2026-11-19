@@ -21,7 +21,8 @@ import { echoEventsService } from './echoEvents.service.js'
 import { namedIn } from './echoFilings.service.js'
 import { originTerms } from './echoChain.service.js'
 import { scoreEvent } from './echoScore.service.js'
-import { checkEvent } from './echoCheck.service.js'
+import { checkEvent, actionsSince } from './echoCheck.service.js'
+import { eventReturns, sectorEtf } from './echoReturns.service.js'
 import { logger } from './logger.service.js'
 
 const LOG = '[echoWatch]'
@@ -32,11 +33,17 @@ export const ABSORBED_ACTIONS = 2
 export const BACKSTOP_SESSIONS = { price_spike: 63, policy_follow_through: 252, drug_class_shift: 252, multi_year_commitment: 756 }
 const SESSIONS_PER_DAY = 252 / 365
 
-/** The names the watch follows: flagged or high-scoring links. Pure. */
+const FLAGS = new Set(['underreacted_winner', 'overreacted_loser'])
+/** The day-5 flags as they were (a rescore keeps them — CR 2026-11-19). → the flagged tickers. Pure. */
+export function flaggedAtDay5(check) {
+    if (check?.flagsAtDay5) return Object.entries(check.flagsAtDay5).filter(([, f]) => FLAGS.has(f)).map(([t]) => t)
+    return (check?.links ?? []).filter(l => FLAGS.has(l.flag)).map(l => l.ticker)
+}
+
+/** The names the watch follows: flagged at day 5, or high-scoring. Pure. */
 export function watched(ev) {
     const high = new Set((ev.scores?.links ?? []).filter(s => s.high).map(s => s.ticker))
-    const flagged = new Set((ev.check?.links ?? []).filter(l => l.flag === 'underreacted_winner' || l.flag === 'overreacted_loser').map(l => l.ticker))
-    return [...new Set([...flagged, ...high])]
+    return [...new Set([...flaggedAtDay5(ev.check), ...high])]
 }
 
 /** Sessions between two dates, approximately (252 a year) — for the backstop and the noise window. Pure. */
@@ -48,7 +55,10 @@ export const sessionsBetween = (a, b) => Math.max(0, Math.round((Date.parse(b) -
 export function expiry(ev, today) {
     const triggers = ev.triggers ?? []
     if (triggers.some(t => t.resolves)) return { expired: true, reason: 'resolved — a follow-up resolved the driver' }
-    const flagged = (ev.check?.links ?? []).filter(l => l.flag === 'underreacted_winner' || l.flag === 'overreacted_loser')
+    // The day-5 flagged names, with their FRESH day-20 move and analyst count when the watch refreshed them (CR
+    // 2026-11-19: read off the day-5 check, both were frozen and these two expiries could never fire).
+    const at5 = new Set(flaggedAtDay5(ev.check))
+    const flagged = (ev.check?.links ?? []).filter(l => at5.has(l.ticker)).map(l => ({ ...l, ...(ev.fresh?.[l.ticker] ?? {}) }))
     if (flagged.length && flagged.every(l => (l.analysts?.count ?? 0) >= ABSORBED_ACTIONS)) {
         return { expired: true, reason: `absorbed — analysts have written on every flagged name since the event (${ABSORBED_ACTIONS}+ actions each)` }
     }
@@ -65,24 +75,55 @@ export function expiry(ev, today) {
     return { expired: false, reason: null }
 }
 
-const _deps = { events: echoEventsService, calendar: readCalendarWindow, namedIn, score: scoreEvent, check: checkEvent, now: () => new Date(), sleep: (ms) => new Promise(r => setTimeout(r, ms)) }
+const _deps = {
+    events: echoEventsService, calendar: readCalendarWindow, namedIn, score: scoreEvent, check: checkEvent, returns: eventReturns, actions: actionsSince,
+    now: () => new Date(), sleep: (ms) => new Promise(r => setTimeout(r, ms)),
+}
 export function _setDeps(d) { Object.assign(_deps, d) }
 
-/** New triggers since `since` for the watched names: their earnings and their filings naming the origin. */
+const triggerKey = (t) => `${t.kind}|${t.ticker ?? t.eventId ?? ''}|${t.date ?? ''}`
+
+/**
+ * New triggers since `since` for the watched names: their earnings and their filings naming the origin. ON or after
+ * `since` (CR 2026-11-19: a strict "after" lost what was dated the day of the last watch but published after it ran);
+ * one already recorded is not recorded again.
+ */
 export async function findTriggers(ev, since, today) {
     const names = watched(ev)
     if (!names.length) return []
+    const known = new Set((ev.triggers ?? []).map(triggerKey))
     const out = []
     const rows = await _deps.calendar(since, today).catch(() => [])
     for (const r of rows ?? []) {
-        if (names.includes(r.symbol) && r.epsActual != null && r.date > since) out.push({ kind: 'earnings', ticker: r.symbol, date: r.date, what: `${r.symbol} reported (EPS ${r.epsActual} vs ${r.epsEstimated ?? '?'} est)` })
+        if (names.includes(r.symbol) && r.epsActual != null && r.date >= since) out.push({ kind: 'earnings', ticker: r.symbol, date: r.date, what: `${r.symbol} reported (EPS ${r.epsActual} vs ${r.epsEstimated ?? '?'} est)` })
     }
     const terms = originTerms(ev)
     for (const t of names) {
         const n = await _deps.namedIn(t, terms)
-        const fresh = (n.filings ?? []).filter(f => f.date > since)
+        const fresh = (n.filings ?? []).filter(f => f.date >= since)
         if (fresh.length) out.push({ kind: 'filing', ticker: t, date: fresh[0].date, what: `${t}'s ${fresh[0].form} names ${ev.origin}${n.excerpt ? `: "${n.excerpt.slice(0, 200)}"` : ''}`, url: fresh[0].url })
         await _deps.sleep(150)
+    }
+    return out.filter(t => !known.has(triggerKey(t)))
+}
+
+/**
+ * The day-5 flagged names' FRESH numbers for expiry: the day-20 move against their sector and analyst actions since Day 0.
+ * → {ticker: { moves: {20: { xsSector }}, analysts }}. A failed read leaves a name out. Never throws.
+ */
+export async function refreshFlagged(ev) {
+    const names = flaggedAtDay5(ev.check)
+    if (!names.length || !ev.check?.day0) return {}
+    const map = new Map((ev.map?.links ?? []).map(l => [l.ticker, l]))
+    const sectors = Object.fromEntries(names.map(t => [t, sectorEtf(map.get(t)?.sector)]))
+    const out = {}
+    try {
+        const { rows } = await _deps.returns(ev, names, sectors)
+        for (const r of rows) out[r.ticker] = { moves: { 20: { xsSector: r.horizons?.[20]?.xsSectorReaction ?? null } } }
+    } catch { /* the day-20 numbers stay unknown today */ }
+    for (const t of names) {
+        const a = await _deps.actions(t, ev.check.day0)
+        if (a.count != null) out[t] = { ...(out[t] ?? {}), analysts: a }
     }
     return out
 }
@@ -107,14 +148,16 @@ export async function watchEvent(ev) {
             if (s.ok) {
                 scores = s.scores
                 const c = await _deps.check({ ...ev, scores }, ev.map, scores)
-                if (c.ok) check = c.check
+                // The new check's moves and flags are today's; the DAY-5 flags stay what they were (what Step 7 grades).
+                if (c.ok) check = { ...c.check, checkDay: ev.check?.checkDay ?? c.check.checkDay, flagsAtDay5: ev.check?.flagsAtDay5 ?? Object.fromEntries((ev.check?.links ?? []).map(l => [l.ticker, l.flag ?? null])) }
                 rescored = true
                 for (const t of triggers) t.rescoredAt ??= now.toISOString()
             }
         }
-        const exp = expiry({ ...ev, triggers, check }, today)
+        const fresh = await refreshFlagged({ ...ev, check })
+        const exp = expiry({ ...ev, triggers, check, fresh }, today)
         await _deps.events.advance(ev._id, exp.expired ? 'expired' : 'watching', {
-            triggers, scores, check, watchedAt: now.toISOString(), ...(rescored ? { rescoredAt: now.toISOString() } : {}),
+            triggers, scores, check, fresh, watchedAt: now.toISOString(), ...(rescored ? { rescoredAt: now.toISOString() } : {}),
             ...(exp.expired ? { expiredAt: now.toISOString(), expiredBecause: exp.reason } : {}),
         })
         return { id: ev._id, triggers: found.length, rescored, expired: exp.expired, reason: exp.reason }

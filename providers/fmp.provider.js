@@ -883,12 +883,16 @@ export function formatAnalystActionsForSymbols(bySymbol = {}) {
  * previousGrade, newGrade }`. [] when unread. Cached 30m. Shared by the actions digest below and Echo's market check
  * (Step 4: "once revisions arrive, the link is no longer hidden").
  */
-export async function getRatingActions(symbol) {
+export async function getRatingActions(symbol, { strict = false } = {}) {
     const sym = String(symbol || '').toUpperCase().trim()
     if (!sym) return []
     let rows = _gradesCache.get(`sym:${sym}`)
     if (!rows) {
-        const arr = await _fmpGet(`/grades?symbol=${sym}`).catch(() => [])
+        // `strict` (Echo's market check): a failed read THROWS — "no analyst wrote" and "could not read" are not the same
+        // answer. A failed read is not cached either way.
+        let failed = false
+        const arr = await _fmpGet(`/grades?symbol=${sym}`).catch((err) => { failed = true; if (strict) throw err; return [] })
+        if (failed) return []
         rows = (Array.isArray(arr) ? arr : [])
             .filter(r => r?.date)
             .sort((a, b) => String(b.date).localeCompare(String(a.date)))

@@ -14,6 +14,7 @@ import { echoService } from '../echo.service.js'
 import { echoEventsService, TYPES, DURABILITIES } from '../echoEvents.service.js'
 import { echoPipelineService } from '../echoPipeline.service.js'
 import { echoReadsService, MAX_ASK, MAX_USER_WEEK } from '../echoReads.service.js'
+import { judge } from '../echoIntake.service.js'
 
 const LOG = '[echo.tools]'
 const FLAG_WORDS = { underreacted_winner: 'UNDERREACTED WINNER', overreacted_loser: 'OVERREACTED LOSER', fully_priced: 'fully priced' }
@@ -26,7 +27,7 @@ export const ECHO_TOOL_SPEC = {
     get_echo_events: `Echo's events — the house's (the intake reads earnings moves, 8-K deals, policy, defense awards, trials and news, and keeps what passes the filter: a surprise, large, more than a one-off) and the user's own — each with where it stands, its top-scored names and its flags; and the validation record so far. Read it first when the user asks what Echo has found, or about an event that may already be here.`,
     get_event_map: `One event whole — the record (type, what changed, size, durability and why), then every link RANKED BY SCORE: relation, layer, direction and why; the six factors (lock-in, supply response, bottleneck, directness, exposure, coverage, 0–2 each, high at 8 of 12) with their reasons; the filing evidence (named in filings, a 10-K's stated share, the company's own supply sentences); the day-5 market check and the flag (underreacted winner, overreacted loser, fully priced); the grades since. \`id\` is "ev_…" from get_echo_events.`,
     request_reads: `Send names from one of the USER's OWN events (an id "ev_…" they mapped) to the analyst and the technical analyst: the analyst's SWING coverage (researched for the house when there is none standing — a few minutes each) and the technical analyst's measured profile. \`tickers\`: the names the user picked from that map (at most ${MAX_ASK} at a time, ${MAX_USER_WEEK} a week); omit for its top-scored directional links. Only when the user asks. The house's flagged names go on their own after the day-5 check — never send those.`,
-    map_event: `Map an event the USER names through Echo's whole pipeline — the chain (layers 1–3 both ways, losers and substitutes, every link checked against SEC filings) and the six-factor score on every link. Anything: a launch ("GTA 6 is out"), a guidance cut, a rule, a strike, a deal, a war. FRAME it first, then call once: \`what_changed\` (one sentence: the news, not a stock's move), \`origin\` (the company or country it hits directly, or the demand it moves), \`tickers\` (the origin's US tickers; empty for a country or a demand), \`effect\` (up / down / mixed: what it does to demand AT THE ORIGIN — ask the user once if unsure), \`type\` (${TYPES.join(', ')}), \`durability\` ({kind: ${DURABILITIES.join(' / ')}, why} — a locked-in commitment lasts, a price spike cures itself), \`date\` (YYYY-MM-DD it became public; omit for today), \`size\` (as a sentence, if known), \`terms\` (what other companies' filings call the origin). Takes two to three minutes and well under a dollar; the event is saved to the user's events and its market check comes at the day-5 close. Never for an event already in get_echo_events — read that one instead.`,
+    map_event: `Map an event the USER names through Echo's whole pipeline — the chain (layers 1–3 both ways, losers and substitutes, every link checked against SEC filings) and the six-factor score on every link. Anything: a launch ("GTA 6 is out"), a guidance cut, a rule, a strike, a deal, a war. FRAME it first, then call once: \`what_changed\` (one sentence: the news, not a stock's move), \`origin\` (the company or country it hits directly, or the demand it moves), \`tickers\` (the origin's US tickers; empty for a country or a demand), \`effect\` (up / down / mixed: what it does to demand AT THE ORIGIN — ask the user once if unsure), \`type\` (${TYPES.join(', ')}), \`durability\` ({kind: ${DURABILITIES.join(' / ')}, why} — a locked-in commitment lasts, a price spike cures itself), \`date\` (YYYY-MM-DD it became public; omit for today), \`size\` (as a sentence, if known), \`terms\` (what other companies' filings call the origin). Echo first JUDGES it by the intake's own filter (a surprise, large, more than a one-off): an event becomes the house's, watched and graded like any (or the house's own, when the intake already has it); otherwise it stays the user's — mapped, scored and checked at day 5, no watch. Say which. Takes two to three minutes and well under a dollar. Never for an event already in get_echo_events — read that one instead.`,
 }
 
 const pct = (x) => (Number.isFinite(x) ? `${x > 0 ? '+' : ''}${(Math.round(x * 1000) / 10).toFixed(1)}%` : '—')
@@ -104,7 +105,7 @@ const READ_WORDS = {
     not_queued: 'could not be queued', unknown: "the analyst's read could not be checked",
 }
 
-export function makeEchoHandlers({ userId = null, read = echoService, events = echoEventsService, pipeline = echoPipelineService, reads = echoReadsService } = {}) {
+export function makeEchoHandlers({ userId = null, read = echoService, events = echoEventsService, pipeline = echoPipelineService, reads = echoReadsService, judged = judge } = {}) {
     return {
         get_echo_events: makeToolHandler('get_echo_events', async () => {
             const { events: list, report } = await read.listEvents(userId)
@@ -123,7 +124,7 @@ export function makeEchoHandlers({ userId = null, read = echoService, events = e
             if (!userId) return toolError('There is no signed-in user.')
             const e = await read.getEvent(String(id ?? '').trim(), userId)
             if (!e) return toolError(`No event ${id} among the user's events.`)
-            if (!e.mine) return toolError("Only the user's own events: the house's flagged names go to the analyst on their own after the day-5 check.")
+            if (e.kind !== 'user') return toolError("Only the user's own events: the house's flagged names go to the analyst on their own after the day-5 check.")
             const links = e.links.filter(l => l.ticker)
             const asked = (Array.isArray(tickers) ? tickers : []).map(t => String(t).toUpperCase().trim()).filter(Boolean)
             const missing = asked.filter(t => !links.some(l => l.ticker === t))
@@ -149,16 +150,31 @@ export function makeEchoHandlers({ userId = null, read = echoService, events = e
             return `Sent on (swing):\n${lines.join('\n')}${run}\nThe reads land in the analyst's coverage and the technical analyst's profiles — the user finds them on the Hotlist and with the trader.`
         }, (err) => `Could not send the names on: ${err.message}`, LOG),
 
+        // Roy, 2026-11-19: "Echo decides if the user's event is worth it — if it is, it treats it as a regular event". The
+        // intake's own triage judges it by the doc's filter: an EVENT becomes the house's (in the triage's words — never
+        // the user's text in the house's prompts), watched and graded like any; the house's existing one is used when the
+        // intake already has it. Otherwise it stays the user's: mapped, scored, checked at day 5, and no further.
         map_event: makeToolHandler('map_event', async (args = {}) => {
             if (!userId) return toolError('There is no signed-in user to save this event for.')
-            const f = events.frame({ ...args, filter: { surprise: true, large: true, lasting: true, why: 'named by the user' } })
+            const f = events.frame({ ...args, filter: { surprise: null, large: null, lasting: null, why: 'named by the user' } })
             if (!f.ok) return toolError(f.reason)
-            const doc = await events.create(f.event, { userId, source: 'chat' })
-            const r = await pipeline.run(doc)
+            const verdict = await judged(f.event, { userId })
+            let doc, judgedLine
+            if (verdict.event) {
+                const same = await events.findSame(verdict.framed).catch(() => null)
+                doc = same ?? await events.create(verdict.framed, { source: 'chat', askedBy: userId })
+                judgedLine = same
+                    ? `Echo already had this event (${same._id}) — it is the house's, watched and graded; read below.`
+                    : 'Echo judged it an EVENT (a surprise, large, more than a one-off): it is now the house\'s — watched after its day-5 check and graded like any.'
+            } else {
+                doc = await events.create({ ...f.event, filter: { surprise: false, large: false, lasting: false, why: verdict.reason } }, { userId, source: 'chat' })
+                judgedLine = `Echo did not take it as a house event (${verdict.reason}): it is the user's — mapped and scored, checked at its 5th session, then no watch.`
+            }
+            const r = doc.status === 'framed' ? await pipeline.run(doc) : { status: doc.status }
             const e = await read.getEvent(doc._id, userId)
             if (!e) return toolError('The event was saved but could not be read back — try get_echo_events.')
             const note = r.stoppedAt && !r.wait ? `\nStopped at ${r.stoppedAt}: ${r.reason}` : ''
-            return `${mapWords(e)}${note}`
+            return `${judgedLine}\n${mapWords(e)}${note}`
         }, (err) => `Could not map the event: ${err.message}`, LOG),
     }
 }

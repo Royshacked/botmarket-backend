@@ -15,7 +15,7 @@ router.post('/reads',     log, requestRead)    // a user asks for one on a This 
 router.get('/profile/:symbol', log, getRowProfile)   // ?horizon= — how an opened row's name trades (proteus.md §8.1)
 router.get('/book',       log, getBook)        // the house's Swing and Long term names (coverage, by target horizon)
 router.get('/scorecard',  log, getScorecard)   // Prometheus's calls vs SPY: coverage marks, catalyst reads vs passes
-router.get('/echo',       log, getEcho)        // Echo's forward test: events, flagged names, the record so far (echo-desk.md)
+router.get('/echo',       log, getEcho)        // Echo's events (the pipeline's, echo-pipeline.md): ranked names, flags, the validation report
 router.get('/echo/:id',   log, getEchoEvent)
 
 export const hotlistRoutes = router

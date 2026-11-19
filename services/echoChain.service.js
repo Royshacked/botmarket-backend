@@ -193,8 +193,11 @@ export async function mapEvent(ev, { userId = null } = {}) {
         description = prof.description ?? ''
         originSector = prof.sector ?? null
     }
+    // TEMPLATES ARE THE HOUSE'S (CR 2026-11-19): a user's own event neither starts from one nor writes one — a user's
+    // words must not shape the house's next map of that origin.
+    const house = ev.kind !== 'user'
     const tcol = await coll(TEMPLATES)
-    const tdoc = await tcol.findOne({ _id: templateKey(ev) })
+    const tdoc = house ? await tcol.findOne({ _id: templateKey(ev) }) : null
     const template = tdoc ? { from: tdoc.from, links: tdoc.links } : null
     const payer = userId ?? await _deps.houseLedger().catch(() => null)
     let res
@@ -215,7 +218,7 @@ export async function mapEvent(ev, { userId = null } = {}) {
     const checked = await withFilings(ev, links)
     const now = _deps.now().toISOString()
     const map = { model: res.model, promptVersion: PROMPT_VERSION, mappedAt: now, fromTemplate: template?.from ?? null, originSector, links: checked, dropped }
-    await tcol.updateOne({ _id: templateKey(ev) }, { $set: { from: `${ev.origin} ${ev.date}`, links: links.map(({ ticker, name, relation, layer, direction, why }) => ({ ticker, name, relation, layer, direction, why })), updatedAt: now } }, { upsert: true })
+    if (house) await tcol.updateOne({ _id: templateKey(ev) }, { $set: { from: `${ev.origin} ${ev.date}`, links: links.map(({ ticker, name, relation, layer, direction, why }) => ({ ticker, name, relation, layer, direction, why })), updatedAt: now } }, { upsert: true })
     return { ok: true, map }
 }
 

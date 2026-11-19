@@ -41,6 +41,7 @@ test('gradeEvent: flagged vs their stand-ins and vs the unflagged, signed by dir
         now: () => new Date('2026-12-01T00:00:00Z'),
         screen: async () => ['S1', 'S2', 'S3', 'S4', 'S5'].map(symbol => ({ symbol })),
         events: { advance: async (id, status, patch) => { writes.push(patch) } },
+        calendar: async () => ['2026-11-19', '2026-11-20', '2026-11-23', '2026-11-24', '2026-11-25', '2026-11-27'],
         returns: async (from) => {
             assert.deepEqual(from, { _id: 'ev', date: '2026-11-19', timing: 'after_close' }, 'the window opens at the day-5 close')
             return { sessions: ['2026-11-19', '2026-11-20', '2026-11-23', '2026-11-24', '2026-11-25', '2026-11-27'],
@@ -76,4 +77,29 @@ test('the report: distributions per horizon, each factor alone, and whether walk
     assert.equal(r.factors[20].coverage.separates, null, 'no 2s and 0s to compare')
     assert.equal(r.walkForward.ready, false)
     assert.match(r.walkForward.note, /^0 of 30 events graded at 120 sessions/)
+})
+
+test('nothing due: no name fetched, the next grade dated from the calendar (CR 2026-11-19)', async () => {
+    const writes = []
+    let fetched = 0
+    _setDeps({
+        now: () => new Date('2026-11-21T00:00:00Z'), events: { advance: async (id, status, patch) => { writes.push(patch) } },
+        calendar: async () => ['2026-11-19', '2026-11-20'], returns: async () => { fetched++; return { sessions: [], rows: [] } }, screen: async () => { fetched++; return [] },
+    })
+    const r = await gradeEvent({ _id: 'ev', status: 'watching', check: { checkDay: '2026-11-19', links: [] } })
+    assert.deepEqual(r.graded, [])
+    assert.equal(fetched, 0)
+    assert.match(writes[0].nextGradeAt, /^2026-11-2[5-7]T21:45:00\.000Z$/, 'about five sessions after the day-5 close')
+})
+
+test('the grade is of the DAY-5 flags, never a flag a later rescore moved', async () => {
+    _setDeps({
+        now: () => new Date('2026-12-01T00:00:00Z'), events: { advance: async () => {} }, screen: async () => [],
+        calendar: async () => ['2026-11-19', '2026-11-20', '2026-11-23', '2026-11-24', '2026-11-25', '2026-11-27'],
+        returns: async () => ({ sessions: ['2026-11-19', '2026-11-20', '2026-11-23', '2026-11-24', '2026-11-25', '2026-11-27'], rows: [row('VRT', 0.1), row('ANET', 0.02)] }),
+    })
+    const r = await gradeEvent({ _id: 'ev', status: 'watching', map: { links: [] }, check: { checkDay: '2026-11-19',
+        flagsAtDay5: { VRT: null, ANET: 'underreacted_winner' },
+        links: [{ ticker: 'VRT', direction: 'gains', flag: 'underreacted_winner' }, { ticker: 'ANET', direction: 'gains', flag: null }] } })
+    assert.deepEqual(r.grades[5].rows.map(x => [x.ticker, x.group]), [['VRT', 'unflagged'], ['ANET', 'flagged']])
 })

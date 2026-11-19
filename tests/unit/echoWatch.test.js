@@ -1,6 +1,9 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { watched, expiry, sessionsBetween, findTriggers, watchEvent, markFollowUp, BACKSTOP_SESSIONS, _setDeps } from '../../services/echoWatch.service.js'
+import { watched, expiry, sessionsBetween, findTriggers, watchEvent, markFollowUp, refreshFlagged, BACKSTOP_SESSIONS, _setDeps } from '../../services/echoWatch.service.js'
+
+// No network in these tests: the day-20 refresh's prices and analyst reads are stubbed for every case.
+_setDeps({ returns: async () => ({ rows: [] }), actions: async () => ({ count: null, actions: [] }) })
 
 // Echo Step 5 — the wave watch and expiry (docs/design/echo-pipeline.md; the simulator doc's Step 5).
 
@@ -63,4 +66,45 @@ test('markFollowUp: the trigger on the parent, resolving or not; an expired pare
     assert.equal(await markFollowUp('p', { _id: 'c', date: '2026-02-01', whatChanged: 'Germany passed a €100B fund' }, false), true)
     assert.deepEqual(writes[0][2].triggers[0], { kind: 'follow_up', eventId: 'c', date: '2026-02-01', what: 'Germany passed a €100B fund', resolves: false, at: '2026-02-01T00:00:00.000Z' })
     assert.equal(await markFollowUp('x', { _id: 'c' }), false)
+})
+
+// ── code review 2026-11-19 ──────────────────────────────────────────────────────────────────────────────────────────
+
+test('a trigger dated the day of the last watch counts; one already recorded does not count twice', async () => {
+    _setDeps({ sleep: async () => {}, namedIn: async () => ({ named: false, filings: [] }),
+        calendar: async () => [{ symbol: 'VRT', date: '2026-02-10', epsActual: 1 }] })
+    assert.equal((await findTriggers(EV(), '2026-02-10', '2026-02-11')).length, 1, 'same day as the last watch')
+    assert.equal((await findTriggers(EV({ triggers: [{ kind: 'earnings', ticker: 'VRT', date: '2026-02-10', at: '2026-02-10T22:00:00Z' }] }), '2026-02-10', '2026-02-11')).length, 0)
+})
+
+test('a rescore keeps the day-5 flags; expiry reads FRESH day-20 moves and analyst counts', async () => {
+    const writes = []
+    _setDeps({
+        now: () => new Date('2026-03-30T12:00:00Z'), sleep: async () => {}, calendar: async () => [{ symbol: 'VRT', date: '2026-03-20', epsActual: 1 }],
+        namedIn: async () => ({ named: false, filings: [] }),
+        score: async () => ({ ok: true, scores: { links: [] } }),
+        check: async () => ({ ok: true, check: { day0: '2026-01-06', checkDay: '2026-03-30', links: [{ ticker: 'FN', flag: null }] } }),
+        returns: async () => ({ rows: [{ ticker: 'FN', horizons: { 20: { xsSectorReaction: 0.01 } } }] }),
+        actions: async () => ({ count: 0, actions: [] }),
+        events: { advance: async (id, status, patch) => { writes.push([status, patch]) } },
+    })
+    await watchEvent(EV({ check: { day0: '2026-01-06', checkDay: '2026-01-12', flagsAtDay5: { FN: 'underreacted_winner' }, links: [{ ticker: 'FN', flag: 'underreacted_winner', analysts: { count: 0 }, moves: { 20: { xsSector: 0.2 } } }] } }))
+    const [status, patch] = writes.at(-1)
+    assert.deepEqual(patch.check.flagsAtDay5, { FN: 'underreacted_winner' }, 'the rescore moved the flag; the day-5 one stays')
+    assert.equal(patch.check.checkDay, '2026-01-12')
+    assert.equal(patch.fresh.FN.moves[20].xsSector, 0.01)
+    assert.equal(status, 'watching', 'a trigger today: not quiet, no expiry')
+    // A quiet event: no trigger — the stored day-20 move was 20%, the fresh one is 1%: normalised.
+    _setDeps({ calendar: async () => [] })
+    await watchEvent(EV({ check: { day0: '2026-01-06', checkDay: '2026-01-12', flagsAtDay5: { FN: 'underreacted_winner' }, links: [{ ticker: 'FN', flag: 'underreacted_winner', analysts: { count: 0 }, moves: { 20: { xsSector: 0.2 } } }] } }))
+    assert.equal(writes.at(-1)[0], 'expired')
+    assert.match(writes.at(-1)[1].expiredBecause, /^normalised/)
+})
+
+test('refreshFlagged: only the day-5 flagged names; a failed read leaves the numbers unknown', async () => {
+    const asked = []
+    _setDeps({ returns: async (ev, names) => { asked.push(names); throw new Error('FMP down') }, actions: async () => ({ count: null, actions: [] }) })
+    const out = await refreshFlagged(EV())
+    assert.deepEqual(asked, [['FN']])
+    assert.deepEqual(out, {}, 'nothing known, nothing claimed')
 })

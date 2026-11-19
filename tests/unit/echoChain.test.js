@@ -82,3 +82,18 @@ test('mapEvent refuses an unknown origin before the paid call', async () => {
     assert.match((await mapEvent(CSCO)).reason, /No listing found for CSCO/)
     assert.equal(paid, 0)
 })
+
+test("templates are the house's: a user's own event neither starts from one nor writes one (CR 2026-11-19)", async () => {
+    const tpl = { 'demand_shock|csco': { from: 'house map', links: [L('FN')] } }
+    const asked = []
+    _setDeps({
+        db: { collection: () => ({ findOne: async (q) => tpl[q._id] ?? null, updateOne: async (q, u) => { tpl[q._id] = u.$set } }) },
+        profile: profileOf, sleep: async () => {}, now: () => new Date('2026-11-19T12:00:00Z'), houseLedger: async () => 'house', record: async () => {},
+        namedIn: async () => ({ named: false }), customerShare: async () => ({ share: null }),
+        call: async (o) => { asked.push(o.user); return { data: { links: [L('JBL')] }, model: 'claude-opus-5-5', stopReason: 'end_turn' } },
+    })
+    const r = await mapEvent({ ...CSCO, kind: 'user', userId: 'u1' }, { userId: 'u1' })
+    assert.equal(r.map.fromTemplate, null)
+    assert.doesNotMatch(asked[0], /start from it/)
+    assert.equal(tpl['demand_shock|csco'].from, 'house map', "the user's map wrote nothing")
+})

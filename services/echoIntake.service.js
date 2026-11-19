@@ -213,7 +213,11 @@ export async function clinical(now = _deps.now()) {
         const j = await _deps.http(`https://api.fda.gov/drug/drugsfda.json?search=submissions.submission_type:ORIG+AND+submissions.submission_status:AP+AND+submissions.submission_status_date:[${from}+TO+${to}]&limit=30`)
         for (const r of j?.results ?? []) {
             const prod = r.products?.[0] ?? {}
-            out.push({ key: `fda|${r.application_number}`, source: 'FDA approval', date: day(now), tickers: [],
+            // The APPROVAL's date, not the pass's (CR 2026-11-19: dated today, Day 0 came up to three days after the news).
+            const sub = (r.submissions ?? []).filter(s => s.submission_type === 'ORIG' && s.submission_status === 'AP').map(s => String(s.submission_status_date ?? '')).sort().at(-1)
+            const approved = /^\d{8}$/.test(sub ?? '') ? `${sub.slice(0, 4)}-${sub.slice(4, 6)}-${sub.slice(6, 8)}` : null
+            if (!approved) continue
+            out.push({ key: `fda|${r.application_number}`, source: 'FDA approval', date: approved, tickers: [],
                 title: `FDA approved ${prod.brand_name ?? '?'} (${r.sponsor_name})`,
                 text: clip(`Original approval. Active ingredients: ${(prod.active_ingredients ?? []).map(a => a.name).join(', ')}. Route: ${prod.route ?? '?'}.`),
                 url: null, hint: 'clinical' })
@@ -322,6 +326,32 @@ async function triage(cands, payer, active = []) {
 const seenColl = async () => (_deps.db ?? await getDb()).collection(SEEN)
 
 /**
+ * A USER's event, judged as the intake judges any item (Roy, 2026-11-19: "Echo decides if the user's event is worth it —
+ * if it is, it treats it as a regular event"): the same triage, the same filter. → `{ event: true, framed }` — the
+ * record IN THE TRIAGE'S OWN WORDS (the house's prompts never carry a user's text) — or `{ event: false, reason }`.
+ * A failed triage is `{ event: false }`: the user's event stays theirs.
+ */
+export async function judge(framed, { userId = null } = {}) {
+    const c = {
+        key: 'chat', source: 'a user in chat', date: framed.date, tickers: framed.originTickers ?? [], hint: framed.type, timing: framed.timing,
+        title: `${framed.origin}${framed.originTickers?.length ? ` (${framed.originTickers.join('/')})` : ''}: ${framed.whatChanged}`,
+        text: clip([framed.size ? `Size: ${framed.size}.` : null, `Durability as framed: ${String(framed.durability?.kind).replace(/_/g, ' ')}${framed.durability?.why ? ` — ${framed.durability.why}` : ''}.`,
+            `Effect at the origin: ${framed.effect}.`].filter(Boolean).join(' ')),
+    }
+    let decided
+    try { decided = await triage([c], userId ?? await _deps.houseLedger().catch(() => null)) } catch (err) {
+        logger.warn(LOG, 'judging a user event failed', { error: err.message })
+        return { event: false, reason: 'the filter could not be run just now' }
+    }
+    const d = decided.get('chat')
+    if (!d || d.verdict !== 'event') return { event: false, reason: d?.skip_reason || 'not an event by the filter' }
+    const f = _deps.events.frame({ ...d, tickers: d.tickers?.length ? d.tickers : c.tickers, date: framed.date, timing: framed.timing ?? d.timing, sources: ['a user in chat'] }, framed.date)
+    if (!f.ok) return { event: false, reason: f.reason }
+    if (!_deps.events.passesFilter(f.event)) return { event: false, reason: d.filter?.why || 'not a surprise, large and more than a one-off' }
+    return { event: true, framed: f.event }
+}
+
+/**
  * One intake pass: every source, the new candidates triaged, the events that pass the filter stored for the house.
  * → `{ candidates, triaged, events: [ids], skipped, pending }`. A source that fails costs only itself. Never throws.
  */
@@ -365,8 +395,10 @@ export async function intake() {
             }
             // A follow-up marks the event it follows — even one too small to be an event of its own, and above all one
             // that RESOLVES the driver (Step 5's expiry).
-            if (parentId && (eventId || d.resolves || d.verdict === 'event')) {
-                await _deps.followUp(parentId, { _id: eventId, date: c.date, whatChanged: d.what_changed }, d.resolves).catch(() => {})
+            // Only an item that is an EVENT by the filter may resolve one (CR 2026-11-19: a single news line saying "resolved"
+            // must not expire a house event); a smaller follow-up still marks it, as a trigger.
+            if (parentId && (eventId || d.verdict === 'event')) {
+                await _deps.followUp(parentId, { _id: eventId, date: c.date, whatChanged: d.what_changed }, Boolean(d.resolves && eventId)).catch(() => {})
             }
             if (!eventId) skipped.push({ key: c.key, reason: d.verdict === 'skip' ? d.skip_reason : 'did not pass the filter (surprise, large, lasting)' })
             else events.push(eventId)
@@ -377,4 +409,4 @@ export async function intake() {
     return { candidates: found.length, triaged: fresh.length, events, skipped, pending }
 }
 
-export const echoIntakeService = { intake, earnings, eightKs, policy, defense, clinical, news, inferTiming, awardsIn }
+export const echoIntakeService = { intake, judge, earnings, eightKs, policy, defense, clinical, news, inferTiming, awardsIn }

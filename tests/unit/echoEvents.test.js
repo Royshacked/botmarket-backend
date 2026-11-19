@@ -65,3 +65,29 @@ test("store: the house's for everyone, a user's for them only; each step moves t
     assert.deepEqual((await list({ userId: 'u2' })).map(d => d._id), ['ev_1'])
     assert.deepEqual((await list({ userId: 'u1' })).map(d => d._id).sort(), ['ev_1', 'ev_2'])
 })
+
+// ── code review 2026-11-19 ──────────────────────────────────────────────────────────────────────────────────────────
+
+test('frame: a real date, not ahead of today (2026-13-01 passed the pattern and failed every hour)', () => {
+    assert.match(frame({ ...GTA, date: '2026-13-01' }, '2026-11-19').reason, /not a real date/)
+    assert.match(frame({ ...GTA, date: '2026-02-30' }, '2026-11-19').reason, /not a real date/)
+    assert.match(frame({ ...GTA, date: '2026-11-20' }, '2026-11-19').reason, /in the future/)
+    assert.equal(frame({ ...GTA, date: '2026-11-19' }, '2026-11-19').ok, true)
+})
+
+test('claim: one run an event — a held claim refuses, a lapsed one is taken', async () => {
+    const { claim, _setDeps: set } = await import('../../services/echoEvents.service.js')
+    let doc = { _id: 'e', runningUntil: '2026-11-19T12:10:00.000Z' }
+    set({ now: () => new Date('2026-11-19T12:00:00Z'), db: { collection: () => ({
+        findOneAndUpdate: async (q, u) => {
+            const free = !doc.runningUntil || doc.runningUntil < q.$or[1].runningUntil.$lt
+            if (!free) return null
+            doc = { ...doc, ...u.$set }
+            return doc
+        },
+    }) } })
+    assert.equal(await claim('e'), null, 'held until 12:10')
+    set({ now: () => new Date('2026-11-19T12:20:00Z') })
+    const got = await claim('e')
+    assert.equal(got.runningUntil, '2026-11-19T12:35:00.000Z', 'lapsed: taken for fifteen minutes')
+})

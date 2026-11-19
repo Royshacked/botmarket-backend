@@ -71,6 +71,12 @@ export function shareIn(sentence, term) {
     // "respectively" ties a figure to one name.
     if (/\b(as a group|collectively|combined|together|in the aggregate|top (?:two|three|four|five|six|seven|eight|nine|ten|\d+))\b/i.test(s)
         && !/\b(each|respectively)\b/i.test(s)) return null
+    // A SHARE, not any percentage (CR 2026-11-19: "sales of Cisco products grew 12%" read as a 12% share): the sentence
+    // ties the figure to revenue — represented / accounted for / constituted / contributed / "% of net sales" — or it is
+    // a customer table's row (the name, then its figures, nothing else).
+    const shareWords = /\b(represent\w*|account\w* for|constitut\w*|contribut\w*|compris\w*|responsible for)\b|%\s*of\s+(?:our\s+)?(?:total\s+|consolidated\s+)?(?:net\s+)?(?:revenues?|sales)/i
+    const tableRow = s.length < 160 && new RegExp(`${esc(term)}[^%]{0,30}?\\d{1,2}(?:\\.\\d+)?\\s?%`, 'i').test(s) && !/\b(grew|increased|decreased|declined|rose|fell)\b/i.test(s)
+    if (!shareWords.test(s) && !tableRow) return null
     // "A, B, C and D contributed 19.9%, 16.3%, 10.7% and 10.5%, respectively": the term's place among the names is
     // its place among the figures (Fabrinet's 10-K; Cisco first there, but not always).
     if (/respectively/i.test(s)) {
