@@ -182,7 +182,13 @@ export async function mapUserEvent(input, { userId }) {
     const framed = frameEvent(input, _deps.now().toISOString().slice(0, 10))
     if (!framed.ok) return framed
     const ev = framed.event
-    const description = ev.origin_tickers.length ? (await _deps.profile(ev.origin_tickers[0]))?.description ?? '' : ''
+    // The origin's listing, read BEFORE the paid call: an unknown ticker, or FMP unreachable, stops here for free.
+    let description = ''
+    if (ev.origin_tickers.length) {
+        const prof = await _deps.profile(ev.origin_tickers[0])
+        if (!prof) return { ok: false, reason: `No listing found for ${ev.origin_tickers[0]} — check the ticker, or try again in a minute.` }
+        description = prof.description ?? ''
+    }
     let res
     try {
         res = await _deps.call({ model: MODEL, systemPrompt: SYSTEM, user: promptFor(ev, description), schema: schema(), effort: EFFORT,
@@ -195,6 +201,13 @@ export async function mapUserEvent(input, { userId }) {
     if (!Array.isArray(raw)) return { ok: false, reason: `No map came back (${res?.stopReason ?? 'no answer'}) — try again.` }
     const now = _deps.now()
     const { links, dropped } = await resolve(ev, raw, _deps.profile, now.toISOString().slice(0, 10), res.model)
+    // Every named link lost to a missing profile reads as FMP down, not as a map: an empty map is not saved as one
+    // (code review 2026-11-19).
+    const named = raw.filter(r => String(r?.ticker ?? '').trim()).length
+    if (!links.length && named >= 3 && dropped.every(d => d.reason === 'no FMP profile' || !String(d.ticker ?? '').trim())) {
+        logger.warn(LOG, 'every link lost its profile — not saved', { named })
+        return { ok: false, reason: 'The listing data could not be reached to check the names — try again in a minute.' }
+    }
     const doc = {
         _id: _deps.id(), userId: String(userId), createdAt: now.toISOString(), kind: 'user', event: ev,
         map: { model: res.model, prompt_version: PROMPT_VERSION, mapped_at: now.toISOString(),

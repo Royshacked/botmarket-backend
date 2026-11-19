@@ -930,9 +930,11 @@ no model, no card — so a setup filled at the close has its `position_state` be
 One row per read, in its own collection (`journal`, `services/journal.service.js` — append and
 list, newest first, cursor on `at`, no cap, no TTL). `at` is not unique — one wake can write two
 rows on the same millisecond — so each row is sent with `id` (its `_id`), the client keys and
-dedupes on it, and the `before` cursor is inclusive so a twin split off by the page is not skipped. The setup document keeps a pointer-free
+dedupes on it, and the cursor is the oldest row's PAIR (`before` its `at`, `beforeId` its `id`; sorted on both) —
+strictly older, so a page never repeats or skips a row however many share a millisecond (CR 2026-11-19; without a
+`beforeId` the cursor is `at` alone and inclusive). The setup document keeps a pointer-free
 `monitor_state` (memo, guards, `next_check_at`, `timeframe`, `last_assessment`, cost). Read through
-`GET /api/setups/:id/journal?before=<iso>&limit=50`, owner-scoped like every setups route.
+`GET /api/setups/:id/journal?before=<iso>&beforeId=<id>&limit=50`, owner-scoped like every setups route.
 
 `reason` ∈ `first_look · candle · guard · expiry_review · limit_order · limit_disarmed · entry ·
 invalidation · exit · pre_active · manage`. The row carries the rung, the price, the verdict, the

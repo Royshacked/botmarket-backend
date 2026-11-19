@@ -9,7 +9,7 @@ import { makePersist } from '../../monitoring/dueLoop.js'
 // use, so nothing here touches Mongo.
 
 /** A fake db holding one collection as an array, with just enough of the driver's surface. */
-function fakeDb({ failInsert = false } = {}) {
+function fakeDb({ failInsert = false, hexIds = false } = {}) {
     const rows = []
     const calls = []
     let seq = 0
@@ -17,7 +17,8 @@ function fakeDb({ failInsert = false } = {}) {
         async insertOne(doc) {
             calls.push(['insertOne', doc])
             if (failInsert) throw new Error('boom')
-            rows.push({ _id: `oid${String(++seq).padStart(3, '0')}`, ...doc })
+            // hexIds: ids shaped like a real ObjectId's hex (same width, so string order is id order).
+            rows.push({ _id: hexIds ? String(++seq).padStart(24, '0') : `oid${String(++seq).padStart(3, '0')}`, ...doc })
         },
         async updateOne(...a) { calls.push(['updateOne', ...a]); return { modifiedCount: 1 } },
         find(filter, opts) {
@@ -25,6 +26,10 @@ function fakeDb({ failInsert = false } = {}) {
             let out = rows.filter(r => r.entityId === filter.entityId)
             if (filter.at?.$lt)  out = out.filter(r => r.at < filter.at.$lt)
             if (filter.at?.$lte) out = out.filter(r => r.at <= filter.at.$lte)
+            if (filter.$or) {
+                const [older, twin] = filter.$or
+                out = out.filter(r => r.at < older.at.$lt || (r.at === twin.at && r._id < String(twin._id.$lt)))
+            }
             const chain = {
                 sort(s) {
                     const cmp = (x, y) => (x < y ? -1 : x > y ? 1 : 0)
@@ -86,6 +91,26 @@ test('two rows on the same millisecond: distinct ids, and neither is lost across
     const seen = new Set(first.map(r => r.id))
     assert.deepEqual(next.filter(r => !seen.has(r.id)).map(r => r.note), ['armed', 'older'],
         'the twin past the boundary still arrives')
+})
+
+test('the (at, id) cursor: a whole page on one millisecond pages on, never repeating or skipping a row', async () => {
+    // Code review 2026-11-19: with `at` alone and inclusive, a page's worth of rows on one millisecond came back forever.
+    const db = fakeDb({ hexIds: true })
+    for (let i = 0; i < 5; i++) await appendJournal('s1', { at: '2026-11-18T18:34:00.467Z', note: `twin${i}` }, db)
+    await appendJournal('s1', { at: '2026-11-18T18:00:00.000Z', note: 'older' }, db)
+    const got = []
+    let page = await listJournal('s1', { limit: 2 }, db)
+    while (page.length) {
+        got.push(...page)
+        const last = page[page.length - 1]
+        page = await listJournal('s1', { limit: 2, before: last.at, beforeId: last.id }, db)
+    }
+    assert.deepEqual(got.map(r => r.note), ['twin4', 'twin3', 'twin2', 'twin1', 'twin0', 'older'])
+    const q = db.calls.filter(c => c[0] === 'find')[1][1]
+    assert.ok(q.$or && !q.at, 'the pair is the cursor')
+    // A beforeId that is not an id falls back to the inclusive `at` cursor, never to an injected query.
+    await listJournal('s1', { before: '2026-11-18T18:34:00.467Z', beforeId: { $gt: '' } }, db)
+    assert.deepEqual(db.calls.at(-1)[1].at, { $lte: '2026-11-18T18:34:00.467Z' })
 })
 
 test('appendJournal never throws — a lost line must not fail the wake', async () => {

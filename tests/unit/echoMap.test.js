@@ -144,6 +144,20 @@ test('mapUserEvent: a refused frame, a failed call, no answer — nothing stored
     assert.equal(db.rows.length, 0)
 })
 
+test('FMP unreachable: an unknown origin stops before the paid call; every link lost to its profile is not saved', async () => {
+    const db = fakeDb()
+    let calls = 0
+    const call = async () => { calls++; return { data: { links: ['AMD', 'MU', 'NVDA'].map(t => ({ ticker: t, name: t, relation: 'supplier', layer: 1, direction: 'gains', evidence_text: 'x' })) }, model: 'm', stopReason: 'end_turn' } }
+    _setDeps({ db, profile: async () => null, record: async () => {}, call })
+    const r = await mapUserEvent({ what_changed: 'w', origin: 'o', tickers: ['ZZZZ'], effect: 'up' }, { userId: 'u1' })
+    assert.match(r.reason, /No listing found for ZZZZ/)
+    assert.equal(calls, 0, 'no model call paid for')
+    const r2 = await mapUserEvent({ what_changed: 'w', origin: 'a demand', effect: 'up' }, { userId: 'u1' })
+    assert.equal(calls, 1)
+    assert.match(r2.reason, /could not be reached/)
+    assert.equal((await listUserEvents('u1')).length, 0, 'nothing saved')
+})
+
 test('an empty map is an answer, and is stored', async () => {
     const db = fakeDb()
     _setDeps({ db, profile: async () => null, record: async () => {}, call: async () => ({ data: { links: [] }, model: 'm', stopReason: 'end_turn' }) })

@@ -406,10 +406,10 @@ async function getSetup(id, userId) {
  * One page of a setup's journal, newest first (services/journal.service). Ownership-guarded the
  * same way the setup itself is: the rows carry no userId of their own.
  */
-async function getSetupJournal(id, userId, { before = null, limit = 50 } = {}) {
+async function getSetupJournal(id, userId, { before = null, beforeId = null, limit = 50 } = {}) {
     const found = await crud.getOwned(id, userId, { projection: { id: 1 } })
     if (!found.ok) return found
-    return { ok: true, rows: await listJournal(id, { before, limit }) }
+    return { ok: true, rows: await listJournal(id, { before, beforeId, limit }) }
 }
 
 async function listSetups(userId, { status = null, onError } = {}) {

@@ -1180,9 +1180,11 @@ services/
   echoReads.service.js      ECHO'S NAMES THROUGH THE READS (echo-desk.md §6, step 5, 2026-11-19): sendNames — Proteus's
                             profile for every name (queueProfiles), Prometheus's SWING read via mentorReads.readFor;
                             missing → research_queue source `echo` (context: the event, the link, the rule — researchRun
-                            echoOpening) + houseResearch.researchQueued inside ECHO_RESEARCH_MAX_USD a week. handOffFlagged
-                            — a forward-test event's LAGGING names once its day-5 check froze, once per event
-                            (`echo_handoffs`), then Echo's waiting rows resumed. request_reads (echo.tools) is the user's ask.
+                            echoOpening) + houseResearch.researchQueued inside ECHO_RESEARCH_MAX_USD a week (the house's
+                            rows only). handOffFlagged — a forward-test event's LAGGING names once its day-5 check froze,
+                            once per event (`echo_handoffs`, written only when every name settled), then Echo's waiting
+                            rows resumed (a user's first, outside the budget). request_reads (echo.tools) is the user's
+                            ask: MAX_ASK 5 at a time, MAX_USER_WEEK 10 a week (userAskedThisWeek).
   echoMap.service.js        ECHO'S MAP FOR AN EVENT THE USER NAMES (echo-desk.md §3–4, step 3, 2026-11-19): the
                             engine's llm_map PORTED (Render cannot run the Python) — SYSTEM verbatim (a test diffs it
                             against the engine checkout), schema, Opus 5.5 high, resolve (active US listings via

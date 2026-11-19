@@ -12,14 +12,14 @@ import { makeToolHandler } from '../agentUtils.js'
 import { toolError } from '../toolResult.util.js'
 import { echoService, HORIZONS } from '../echo.service.js'
 import { echoMapService } from '../echoMap.service.js'
-import { echoReadsService, MAX_ASK } from '../echoReads.service.js'
+import { echoReadsService, MAX_ASK, MAX_USER_WEEK } from '../echoReads.service.js'
 
 const LOG = '[echo.tools]'
 
 export const ECHO_TOOL_SPEC = {
     get_echo_events: `The FORWARD TEST's events (the engine's: earnings moves of 5%+ against SPY in the 152 largest US names, mapped by the model before their 5th session, checked at the day-5 close, graded at 20 / 60 / 120 sessions) with where each stands and its LAGGING links, the record so far, and the user's OWN events (maps they asked you for). Read it first when the user asks what Echo has found, or about an event that may already be here.`,
     get_event_map: `One event's whole map — every link with its relation, layer, direction (by rule), the model's own direction, why it is linked, and, for a forward-test event once checked, whether the market had caught up by day 5 and how the link did since (vs its own same-sector stand-ins). \`id\` is the event's id from get_echo_events (a forward-test id like "csco-earnings-2026-11-12", or a user event's "ue_…").`,
-    request_reads: `Send names from one of the USER's OWN events (an id "ue_…") to the analyst and the technical analyst: the analyst's SWING coverage (researched for the house when there is none standing — a few minutes each) and the technical analyst's measured profile. \`tickers\`: the names the user picked from that map (at most ${MAX_ASK}); omit for its directional links (suppliers, infrastructure, substitutes). Only when the user asks. The forward test's lagging names go on their own after the day-5 check — never send those.`,
+    request_reads: `Send names from one of the USER's OWN events (an id "ue_…") to the analyst and the technical analyst: the analyst's SWING coverage (researched for the house when there is none standing — a few minutes each) and the technical analyst's measured profile. \`tickers\`: the names the user picked from that map (at most ${MAX_ASK} at a time, ${MAX_USER_WEEK} a week); omit for its directional links (suppliers, infrastructure, substitutes). Only when the user asks. The forward test's lagging names go on their own after the day-5 check — never send those.`,
     map_event: `Map an event the USER names to the companies it reaches through the supply chain — anything: a product launch ("GTA 6 is out"), a guidance cut, a strike, a deal, a heatwave. FRAME it first, then call once: \`what_changed\` (one sentence: what happened), \`origin\` (the company the event happens to — or, when no single listed company is the event's, the DEMAND it moves, e.g. "European air-conditioning demand"), \`tickers\` (the origin's US tickers; empty for a demand), \`effect\` (up / down: what the event does to the origin's demand — ask the user once if it could go either way), \`date\` (YYYY-MM-DD it became public; omit for today), \`horizon\` (the user's, if they said one). One model call, about 40 seconds and a few cents; the map is saved to the user's events. Never for an event already in get_echo_events — read that map instead.`,
 }
 
@@ -120,6 +120,13 @@ export function makeEchoHandlers({ userId = null, events = echoService, maps = e
             if (missing.length) return toolError(`Not on this map: ${missing.join(', ')}.`)
             if (picked.length > MAX_ASK) return toolError(`${picked.length} names — at most ${MAX_ASK} at a time; ask the user which.`)
             if (!picked.length) return toolError('No directional links on this map — ask the user which names.')
+            // A week's cap per user (code review 2026-11-19): MAX_ASK bounds one ask, this bounds the asking.
+            const used = await reads.userAskedThisWeek(userId)
+            if (used === null) return toolError('The research queue could not be read just now — try again in a minute.')
+            if (used + picked.length > MAX_USER_WEEK) {
+                const left = Math.max(0, MAX_USER_WEEK - used)
+                return toolError(`The user has sent ${used} names for research this week; the limit is ${MAX_USER_WEEK}${left ? ` — ${left} more, so ask which` : ' — tell them it opens again within the week'}.`)
+            }
             const by = new Map(picked.map(l => [l.ticker, l]))
             const ev = d.event
             const res = await reads.sendNames([...by.keys()], (s) => ({

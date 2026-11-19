@@ -4,8 +4,8 @@ Behavioral contracts for the core domain. For the architecture overview + ASCII
 flow diagrams see [README.md](README.md); for file layout see [CODE_MAP.md](CODE_MAP.md).
 
 The app turns natural-language chat into **monitored trade ideas** that route to a
-broker. Seven desks produce work — Axl (reception) · Mentor (`setup`, the trader) ·
-Atlas (portfolio) · Argus (one name for Mentor; his scan lists archived 2026-11-09) · Prometheus (`coverage`) · Pythia (`industry_view`, `industry_assessment`) · Proteus (how a stock trades — a shared profile, no kind) — and each
+broker. Eight desks produce work — Axl (reception) · Mentor (`setup`, the trader) ·
+Atlas (portfolio) · Argus (one name for Mentor; his scan lists archived 2026-11-09) · Prometheus (`coverage`) · Pythia (`industry_view`, `industry_assessment`) · Proteus (how a stock trades — a shared profile, no kind) · Echo (who an event reaches through the supply chain — 2026-11-19, no kind) — and each
 authored kind is watched by its desk's own background monitor. The `idea` execution tier
 has no desk, so it is watched by two kind-blind loops instead (§2). One reconciler keeps
 entity state honest against the broker. Nothing reaches a broker while its venue is shut
@@ -676,6 +676,26 @@ app's own login code and the client treats every 401 as "your session expired". 
 unreachable is a failed dependency, and the message names the broker ("cTrader session expired —
 please reconnect").
 
+### Echo — who an event reaches (2026-11-19)
+
+[docs/design/echo-desk.md](docs/design/echo-desk.md) — the event desk (agent `echo`, desk `events`, the "event
+analyst" in chat): ONE event mapped to the companies it reaches through the supply chain. He sets no levels
+(Mentor's), judges no business (Prometheus's), and calls nothing a pick.
+
+- **Two kinds of event, never mixed.** The FORWARD TEST's (the engine's `echo_forward`: earnings moves of 5%+ vs SPY in
+  the largest US names, mapped by Opus 5.5 before the 5th session, frozen at the day-5 check, graded at 20 / 60 / 120
+  sessions against same-sector stand-ins) are read-only here — `GET /api/hotlist/echo`, `/echo/:id`, the Hotlist's
+  Echo tab, labelled unproven until the pre-declared rule reads on its first 30 events at 120 sessions. The USER's
+  (`map_event`: any event — "GTA 6 is out") are mapped by the engine's mapper, ported (`services/echoMap.service.js`,
+  the same prompt, schema and direction rule), kept per user in `echo_user_events`, and never graded.
+- **Direction is the rule's**: suppliers and infrastructure move with the origin, substitutes against it, peers and
+  customers unclear. The model's own reading is kept beside it.
+- **Names go on to Prometheus and Proteus** (`services/echoReads.service.js`, swing): a forward-test event's LAGGING
+  links once, after its day-5 check (`echo_handoffs` remembers it — recorded only when every name settled), inside
+  the house's weekly budget (`ECHO_RESEARCH_MAX_USD`, $2; the house's names only count against it); a user's names
+  only when they ask (`request_reads`: 5 at a time, 10 a week). A user's words reach the house analyst QUOTED, as a
+  claim to check — the coverage he writes is everyone's. `ECHO_READS=false` turns the hand-off off.
+
 ### Off-hours: nothing executes while the venue is shut
 
 **RULE (2026-08-07): nothing executes off-hours, paper included.** A real market order cannot fill
@@ -818,6 +838,9 @@ the Nasdaq-100 as the **US100 cash CFD**, but levels are read off the **NQ futur
   - The legacy `ideas` collection still exists in Mongo holding abandoned pre-cutover documents.
     Nothing reads it. It is queued to be archived and dropped.
 - `trades` — append-only point-in-time capture of each opened/closed idea (paper + live).
+- `echo_forward` — the ENGINE's forward test (aether-engine `scripts/echo_forward.py` writes it; the backend only reads).
+- `echo_user_events` — a user's own event maps (`{ _id: 'ue_…', userId, event, map: { links, dropped, model } }`).
+- `echo_handoffs` — one row per forward-test event whose lagging names went to Prometheus / Proteus (`{ _id: eventId, at, names }`).
 - `proteus_profiles` — Proteus's measured profile per symbol (`{ symbol, version, profile, computed_at, fetchedAt }`),
   the house's, kept a week (`services/behaviourProfile.service.js`; a version bump recomputes).
 - `journal` — the monitor's record for a `setup`, one row per READ plus the code-written events

@@ -1,8 +1,9 @@
 # Project Context
 AI-powered trading assistant backend (ar2trade / TRADVICE) — Express + MongoDB +
-LLM agents on Anthropic Claude (OpenAI for transcription only). SEVEN conversational desks — Axl
+LLM agents on Anthropic Claude (OpenAI for transcription only). EIGHT conversational desks — Axl
 (reception) · Mentor (`setup`, the trader) · Atlas (portfolio) · Argus (finds ONE name for Mentor; his scan lists were archived 2026-11-09) ·
-Prometheus (`coverage`) · Pythia (`industry_view`) · Proteus (how a stock trades, measured — 2026-11-12) — turn natural-language chat into monitored
+Prometheus (`coverage`) · Pythia (`industry_view`) · Proteus (how a stock trades, measured — 2026-11-12) ·
+Echo (who an event reaches through the supply chain — 2026-11-19; docs/design/echo-desk.md) — turn natural-language chat into monitored
 work, which each kind's own background monitor evaluates against condition trees before
 routing to a broker (cTrader live, a paper/simulation venue, manual, or IBKR in progress)
 through one unified capability-flag adapter layer. Nothing reaches a broker while its

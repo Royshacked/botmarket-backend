@@ -4051,7 +4051,7 @@
         },
         {
             "name": "request_reads",
-            "description": "Send names from one of the USER's OWN events (an id \"ue_…\") to the analyst and the technical analyst: the analyst's SWING coverage (researched for the house when there is none standing — a few minutes each) and the technical analyst's measured profile. `tickers`: the names the user picked from that map (at most 5); omit for its directional links (suppliers, infrastructure, substitutes). Only when the user asks. The forward test's lagging names go on their own after the day-5 check — never send those.",
+            "description": "Send names from one of the USER's OWN events (an id \"ue_…\") to the analyst and the technical analyst: the analyst's SWING coverage (researched for the house when there is none standing — a few minutes each) and the technical analyst's measured profile. `tickers`: the names the user picked from that map (at most 5 at a time, 10 a week); omit for its directional links (suppliers, infrastructure, substitutes). Only when the user asks. The forward test's lagging names go on their own after the day-5 check — never send those.",
             "input_schema": {
                 "type": "object",
                 "properties": {

@@ -2,7 +2,7 @@
 
 AI-powered trading assistant backend — Express + MongoDB + LLM agents (Anthropic Claude; OpenAI for transcription only).
 
-**Six conversational desks** turn natural-language chat into monitored work, then route confirmed
+**Eight conversational desks** turn natural-language chat into monitored work, then route confirmed
 entries and exits to a real broker (cTrader), a paper venue, or IBKR (data-only for now) through one
 unified adapter layer. Each desk owns a kind; each kind is watched by its own monitor.
 
@@ -14,6 +14,8 @@ unified adapter layer. Each desk owns a kind; each kind is watched by its own mo
 | **Argus** — finds ONE name for Mentor (scan lists archived 2026-11-09) | — (a session turn) | — | — |
 | **Prometheus** — buy-side research | `/api/analyst` | `coverage` | coverage monitor |
 | **Pythia** — the industry desk | `/api/strategy` | `industry_view` — three structural answers per GICS sub-industry; `industry_assessment` — per industry and theme a near-term verdict (for swing · watch · avoid · no case) and, since 2026-10-31, its own long-term call (yes / no, reviewed monthly), graded forward; `theme` value chains (all **broadcasts**, not per-user) | industry-view monitor · Pythia's weekly change scan · the calls grader |
+| **Proteus** — how a stock trades, measured (2026-11-12) | — (a session turn) | a shared profile per stock (`proteus_profiles`), no kind | — |
+| **Echo** — who an event reaches through the supply chain (2026-11-19) | `/api/hotlist/echo` (the forward test, read) | a user's event maps (`echo_user_events`), no kind; lagging names to Prometheus + Proteus | the echoReads loop (hand-off) |
 
 One desk and its kind are **archived**: frozen whole under [`archive/`](archive/README.md),
 imported by nothing, started by nothing, and deliberately not described here or in APP_SPEC — that

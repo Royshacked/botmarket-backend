@@ -28,8 +28,17 @@ export const SOURCE = 'echo'
 export const HANDOFFS = 'echo_handoffs'
 export const HORIZON = 'swing'
 export const MAX_ASK = 5
+// A user's asks are capped by COUNT, not dollars (Mentor's reads are the same): names queued for them in a week.
+export const MAX_USER_WEEK = 10
 export const BUDGET_WINDOW_MS = 7 * 86_400_000
 const HANDOFF_SCAN = 200
+const HOUSE = 'house'
+// The weekly budget is the HOUSE's — the forward test's names. A user's asks share the source and never count against it
+// (code review 2026-11-19).
+const houseSpend = (r) => (r.requestedBy ?? HOUSE) === HOUSE
+// A name's answer that is final: anything but a read that could not be checked or a row that could not be written.
+const UNSETTLED = new Set(['unknown', 'not_queued'])
+const normal = (s) => String(s ?? '').toUpperCase().trim()
 
 const _deps = {
     readFor: (s, h) => mentorReadsService.readFor(s, h),
@@ -61,27 +70,42 @@ export function forwardContext(ev, link) {
  * Send names on: Proteus's profile for every one, Prometheus's swing read for those without one standing. `contextOf(sym)`
  * says why each is here. → `{ ok, names: [{ symbol, read }], queued: [symbols], research }`. Never throws.
  */
-export async function sendNames(symbols, contextOf, { requestedBy = 'house', maxUsd = null } = {}, deps = _deps) {
-    const syms = [...new Set((symbols ?? []).map(s => String(s ?? '').toUpperCase().trim()).filter(Boolean))]
+export async function sendNames(symbols, contextOf, { requestedBy = HOUSE, maxUsd = null } = {}, deps = _deps) {
+    const syms = [...new Set((symbols ?? []).map(normal).filter(Boolean))]
     if (!syms.length) return { ok: true, names: [], queued: [], research: null }
     try { deps.profiles(syms) } catch (err) { logger.warn(LOG, 'profiles not queued', { error: err.message }) }
     const names = [], queued = []
     for (const symbol of syms) {
-        const r = await deps.readFor(symbol, HORIZON).catch(() => ({ state: 'unknown' }))
-        let read = r.state ?? 'unknown'
-        if (read === 'missing' && (r.need === 'new' || r.need === 'reinit' || !r.need)) {
-            const q = await deps.enqueue({ symbol, source: SOURCE, requestedBy, context: { ...contextOf(symbol), ...(r.need === 'reinit' ? { reinit: true } : {}) } })
-            read = q?.ok ? (q.duplicate ? 'waiting' : 'queued') : 'not_queued'
-            if (q?.ok && !q.duplicate) queued.push(symbol)
-        } else if (read === 'missing') read = 'covered'   // covered on the other book: the coverage stands for now
+        let read
+        try {
+            const r = await deps.readFor(symbol, HORIZON).catch(() => ({ state: 'unknown' }))
+            read = r.state ?? 'unknown'
+            if (read === 'missing' && (r.need === 'new' || r.need === 'reinit' || !r.need)) {
+                const q = await deps.enqueue({ symbol, source: SOURCE, requestedBy, context: { ...contextOf(symbol), ...(r.need === 'reinit' ? { reinit: true } : {}) } })
+                read = q?.ok ? (q.duplicate ? 'waiting' : 'queued') : 'not_queued'
+                if (q?.ok && !q.duplicate) queued.push(symbol)
+            } else if (read === 'missing') read = 'covered'   // covered on the other book: the coverage stands for now
+        } catch (err) {
+            logger.warn(LOG, 'name not sent', { symbol, error: err.message })
+            read = 'not_queued'
+        }
         names.push({ symbol, read })
     }
     const now = deps.now()
+    const user = maxUsd === Infinity
     const research = queued.length
         ? await deps.research({ symbols: queued, since: null, source: SOURCE, maxUsd: maxUsd ?? deps.maxUsd(),
-            budgetSince: new Date(now - BUDGET_WINDOW_MS).toISOString(), ...(maxUsd === Infinity ? { spentBy: () => false } : {}) })
+            budgetSince: new Date(now - BUDGET_WINDOW_MS).toISOString(), spentBy: user ? () => false : houseSpend })
         : null
     return { ok: true, names, queued, research }
+}
+
+/** How many names were queued for this user from Echo in the last week — their asks are capped by it. → a number, or
+ * null when the queue could not be read. */
+export async function userAskedThisWeek(userId, deps = _deps) {
+    const rows = await deps.listQueue({ source: SOURCE, since: new Date(deps.now() - BUDGET_WINDOW_MS).toISOString(), limit: 1000 })
+    if (rows === null) return null
+    return new Set((rows ?? []).filter(r => r.requestedBy === String(userId)).map(r => r.symbol)).size
 }
 
 /**
@@ -98,25 +122,45 @@ export async function handOffFlagged(deps = _deps) {
         if (ready.length) {
             const col = await handoffs(deps)
             const done = new Set((await col.find({ _id: { $in: ready.map(e => e.id) } }, { projection: { _id: 1 } }).toArray()).map(d => d._id))
+            // Each event on its own: one that throws does not hold back the rest. One whose names did not all settle (the
+            // read could not be checked, the row could not be written) is NOT recorded — the next tick sends it again, and
+            // the names already queued come back as `waiting` (code review 2026-11-19).
             for (const ev of ready.filter(e => !done.has(e.id))) {
-                const byTicker = new Map(ev.flagged.filter(l => l.ticker).map(l => [l.ticker, l]))
-                const res = await sendNames([...byTicker.keys()], (s) => forwardContext(ev, byTicker.get(s)), {}, deps)
-                await col.updateOne({ _id: ev.id }, { $setOnInsert: { at: new Date(deps.now()).toISOString(), names: res.names } }, { upsert: true })
-                handed.push(ev.id)
-                logger.info(LOG, 'handed off', { event: ev.id, names: res.names.length, queued: res.queued.length, research: res.research?.outcome ?? null })
+                try {
+                    const byTicker = new Map(ev.flagged.filter(l => normal(l.ticker)).map(l => [normal(l.ticker), l]))
+                    const res = await sendNames([...byTicker.keys()], (s) => forwardContext(ev, byTicker.get(s)), {}, deps)
+                    const unsettled = res.names.filter(n => UNSETTLED.has(n.read)).map(n => n.symbol)
+                    if (unsettled.length) {
+                        logger.warn(LOG, 'hand-off unsettled — tried again next tick', { event: ev.id, unsettled })
+                        continue
+                    }
+                    await col.updateOne({ _id: ev.id }, { $setOnInsert: { at: new Date(deps.now()).toISOString(), names: res.names } }, { upsert: true })
+                    handed.push(ev.id)
+                    logger.info(LOG, 'handed off', { event: ev.id, names: res.names.length, queued: res.queued.length, research: res.research?.outcome ?? null })
+                } catch (err) {
+                    logger.warn(LOG, 'hand-off failed for an event', { event: ev.id, error: err.message })
+                }
             }
         }
     } catch (err) {
         logger.warn(LOG, 'hand-off failed', { error: err.message })
     }
-    // Rows a dead process left claimed, and names a spent budget or a busy run left waiting.
+    // Rows a dead process left claimed, and names a spent budget or a busy run left waiting. A user's names first and
+    // outside the house budget (capped by count where they were asked); the house's inside it. One run at a time: the
+    // house's wait for the next tick when a user's ran.
     let resume = null
     try {
         const waiting = await deps.listQueue({ source: SOURCE, status: ['queued', 'in_research'], limit: 500 })
-        const symbols = [...new Set((waiting ?? []).map(r => r.symbol))]
+        const rows = waiting ?? []
+        const userSyms = [...new Set(rows.filter(r => !houseSpend(r)).map(r => r.symbol))]
+        const houseSyms = [...new Set(rows.filter(houseSpend).map(r => r.symbol))]
+        const symbols = userSyms.length ? userSyms : houseSyms
         if (symbols.length) {
-            resume = await deps.resume(symbols, () => deps.research({ symbols, since: null, source: SOURCE, maxUsd: deps.maxUsd(),
-                budgetSince: new Date(deps.now() - BUDGET_WINDOW_MS).toISOString() }), { now: deps.now(), source: SOURCE })
+            const budgetSince = new Date(deps.now() - BUDGET_WINDOW_MS).toISOString()
+            const args = userSyms.length
+                ? { symbols, since: null, source: SOURCE, maxUsd: Infinity, budgetSince, spentBy: () => false }
+                : { symbols, since: null, source: SOURCE, maxUsd: deps.maxUsd(), budgetSince, spentBy: houseSpend }
+            resume = await deps.resume(symbols, () => deps.research(args), { now: deps.now(), source: SOURCE })
         }
     } catch (err) {
         logger.warn(LOG, 'resume failed', { error: err.message })
@@ -124,4 +168,4 @@ export async function handOffFlagged(deps = _deps) {
     return { handed, resume }
 }
 
-export const echoReadsService = { sendNames, handOffFlagged, forwardContext }
+export const echoReadsService = { sendNames, handOffFlagged, forwardContext, userAskedThisWeek }

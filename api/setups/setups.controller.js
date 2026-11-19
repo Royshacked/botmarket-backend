@@ -66,10 +66,10 @@ export const disarmSetupEntry = _handle('disarmSetupEntry', async (req, res) => 
     res.send(result)
 })
 
-/** GET /:id/journal?before=<iso>&limit=50 — one page of Talos's journal, newest first. */
+/** GET /:id/journal?before=<iso>&beforeId=<row id>&limit=50 — one page of Talos's journal, newest first. */
 export const getSetupJournal = _handle('getSetupJournal', async (req, res) => {
-    const { before = null, limit = 50 } = req.query ?? {}
-    const result = await setupService.getSetupJournal(req.params.id, req.user._id, { before, limit: Number(limit) })
+    const { before = null, beforeId = null, limit = 50 } = req.query ?? {}
+    const result = await setupService.getSetupJournal(req.params.id, req.user._id, { before, beforeId, limit: Number(limit) })
     if (!result.ok) return sendReason(res, result.reason, { overrides: setupReason, fallbackMessage: 'journal_failed' })
     res.send(result.rows)
 })

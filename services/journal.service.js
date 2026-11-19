@@ -10,6 +10,7 @@
 // ONE writer for every caller — the monitor's wake write (dueLoop.makePersist), the reconciler's
 // close line (entityRepo.finalizeClose) — so the shape and the collection are named in one place.
 
+import { ObjectId } from 'mongodb'
 import { getDb } from '../providers/mongodb.provider.js'
 import { logger } from './logger.service.js'
 
@@ -44,21 +45,25 @@ export async function appendJournal(entityId, entry, db = null) {
 }
 
 /**
- * Newest first. `before` is the `at` of the oldest row the caller already has — the cursor for the
- * next page.
+ * Newest first. The cursor is the oldest row the caller already has: `before` its `at`, `beforeId`
+ * its `id`.
  *
  * `at` is NOT unique: one wake can write two rows on the same millisecond (2026-11-18, ARMK: the
- * arm and the ran-past-the-entry line). So every row carries `id` (its `_id` as a string) for the
- * client to key and dedupe on, and the cursor is INCLUSIVE (`$lte`) — the rows on the boundary
- * millisecond come back again and the client drops the ones it has, where `$lt` skipped a twin
- * that fell just past the page.
+ * arm and the ran-past-the-entry line). So every row carries `id` (its `_id` as a string), the
+ * sort breaks ties on `_id`, and the cursor is the PAIR — strictly older than (`at`, `_id`) — so a
+ * page never repeats a row and never skips one, however many share a millisecond (code review
+ * 2026-11-19: an `at`-only `$lte` cursor stalled once a page's worth shared one). Without a usable
+ * `beforeId` (an older client) the cursor is `at` alone and inclusive; the client drops repeats.
  * @returns {Promise<object[]>} rows with `id`, without `_id`
  */
-export async function listJournal(entityId, { before = null, limit = 50 } = {}, db = null) {
+export async function listJournal(entityId, { before = null, beforeId = null, limit = 50 } = {}, db = null) {
     if (!entityId) return []
     const conn = db ?? await getDb()
     const n = Math.min(Math.max(Number(limit) || 50, 1), MAX_LIMIT)
-    const filter = { entityId, ...(before ? { at: { $lte: String(before) } } : {}) }
+    const at = before ? String(before) : null
+    const oid = at && beforeId && ObjectId.isValid(String(beforeId)) && /^[0-9a-f]{24}$/i.test(String(beforeId)) ? new ObjectId(String(beforeId)) : null
+    const cursor = !at ? {} : oid ? { $or: [{ at: { $lt: at } }, { at, _id: { $lt: oid } }] } : { at: { $lte: at } }
+    const filter = { entityId, ...cursor }
     const rows = await conn.collection(COLLECTION)
         .find(filter)
         .sort({ at: -1, _id: -1 })

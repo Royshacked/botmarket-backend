@@ -84,6 +84,14 @@ retail (GameStop); substitutes — other publishers competing for play time. Dir
   Prometheus's swing coverage window. A user event takes the horizon the user says; swing when unsaid.
 - **How**: Prometheus's read through the research queue as the house (source `echo`, waits in line on the one run,
   as Mentor's reads do); Proteus's profile through `queueProfiles(symbols, { source: 'echo' })`.
+- **Whose money** (CR 2026-11-19): the weekly budget (ECHO_RESEARCH_MAX_USD, $2 ≈ 20 names at ~$0.10 each, measured in
+  the Cisco rehearsal) is the HOUSE's — only rows `requestedBy: 'house'` count against it. A user's ask is outside it
+  and capped by count instead: 5 names at a time, 10 a week per user (`MAX_USER_WEEK`). On resume a user's waiting
+  names run first; the house's run on the next tick.
+- **A user's words are quoted** (CR 2026-11-19): the event, its origin and the map's reason reach Prometheus's opening
+  in quotes, as a claim to check and never an instruction — the coverage and target he writes are every user's.
+- **Once, but only when settled** (CR 2026-11-19): `echo_handoffs` is written only when every name reached a final
+  answer; a read that could not be checked or a row that could not be written leaves the event for the next tick.
 - **In the Hotlist row**: the name, its relation and direction, why it was flagged, Prometheus's read and Proteus's
   badge when they land, and the event's grades as they come in.
 
@@ -101,8 +109,13 @@ All built 2026-11-19 (BE ea4e141f · d47cd7d0 · ab3302d3 · step 5; FE 1f0719f 
    Info flow; "Ask about this event" on the tab. `scripts/drive-echo-desk.mjs`.
 5. **The reads hand-off** — `echoReads.service` + the `echoReads` loop (6 h): a checked event's lagging names to
    Prometheus (swing coverage, source `echo`, ECHO_RESEARCH_MAX_USD a week, default $2) and Proteus, once per event;
-   `request_reads` for a user's event (≤ 5 names, capped by count).
-6. Tests at every step; live drives; the QA/CR/docs cycle — pending.
+   `request_reads` for a user's event (≤ 5 names at a time, 10 a week).
+6. Tests at every step; live drives; the QA/CR/docs cycle — DONE 2026-11-19 (two independent reviews; fixed: user
+   words quoted to the house analyst, the house budget counts the house's names only + a weekly cap per user, a
+   hand-off recorded only when settled and each event in its own try, the origin's listing checked before the paid
+   map call and an all-dropped map not saved, the journal's (at, id) cursor; FE: the event row's keyboard toggle, the
+   Echo tab's scoped style, the detail held to a phone's width, the journal hook reset per setup). Left: Echo's
+   `sendNames` repeats `mentorReads.requestRead`'s readFor → enqueue → run — fold them into one when either changes.
 
 ## 8. Open
 
