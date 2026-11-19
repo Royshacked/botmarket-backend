@@ -1,23 +1,21 @@
 /* global document, window -- page.evaluate bodies run in the browser */
-// Drive the Hotlist's ECHO tab (docs/design/echo-desk.md step 2) — desk and phone widths.
+// Drive the Hotlist's ECHO tab (docs/design/echo-pipeline.md "The app") — desk and phone widths.
 //
-//   AETHER_DB=test node scripts/drive-hotlist-echo.mjs [outDir]
+//   node scripts/drive-hotlist-echo.mjs [outDir] [--build]
 //
-// The page, panel, session and clicks are real; /api/hotlist/echo* is answered IN THIS PROCESS by the server's own
-// echo.service (so a dev backend started before the route still drives) from the engine's db — AETHER_DB=test reads
-// prod's forward test, read only. Signs in as `ui-smoke`. LOOK at the screenshots.
-import dns from 'node:dns'
+// Real page, panel, session, backend and data: the dev backend serves the pipeline's own events (echo_events in the dev
+// db) — store a scored event there first. Opens the Cisco event, its ranked links, a name's page ("Why it scores"), and
+// Back; with --build (desk only), "Build with the trader" — one real Mentor turn. Signs in as `ui-smoke`. LOOK at the
+// screenshots.
 import { existsSync } from 'node:fs'
-import 'dotenv/config'
 import { chromium } from 'playwright'
-import { echoService } from '../services/echo.service.js'
 
-dns.setServers(['8.8.8.8', '1.1.1.1'])
-const [OUT = '.'] = process.argv.slice(2)
+const args = process.argv.slice(2)
+const OUT = args.find(a => !a.startsWith('--')) ?? '.'
+const BUILD = args.includes('--build')
 const BASE = 'http://localhost:5173'
 const USER = { username: 'ui-smoke', password: 'Sm0ke!Drive#29' }
 
-const list = await echoService.listEvents()
 const errors = []
 const check = (label, ok, detail = '') => console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${detail ? ` — ${detail}` : ''}`)
 const browser = await chromium.launch({ channel: 'msedge' })
@@ -28,11 +26,6 @@ try {
         const page = await ctx.newPage()
         page.on('pageerror', e => errors.push(e.message))
         page.on('console', m => { if (m.type() === 'error' || /Warning:/.test(m.text())) errors.push(m.text().slice(0, 200)) })
-        await page.route('**/api/hotlist/echo**', async route => {
-            const id = new URL(route.request().url()).pathname.match(/\/echo\/([^/]+)$/)?.[1]
-            const body = id ? await echoService.getEvent(decodeURIComponent(id)) : list
-            return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) })
-        })
         await page.goto(BASE, { waitUntil: 'domcontentloaded' })
         await page.waitForTimeout(2000)
         if (await page.locator('input[type="password"]').count()) {
@@ -57,39 +50,47 @@ try {
         check(`${tag}: Echo tab last`, tabs.at(-1) === 'Echo · test', tabs.join(' | '))
         await page.locator('.hot-horizons button', { hasText: 'Echo · test' }).click()
         await page.waitForSelector('.echo-label', { timeout: 10000 })
-        check(`${tag}: label first`, /Forward test — unproven/.test(await page.locator('.echo-label').textContent()))
-        await page.waitForSelector('.echo .hot-table tbody tr', { timeout: 15000 })
+        check(`${tag}: label first`, /Echo — unproven/.test(await page.locator('.echo-label').textContent()))
+        await page.waitForSelector('.echo-events tbody tr', { timeout: 15000 })
         const rows = await page.locator('.echo-events > tbody > tr:not(.echo-open)').allTextContents()
-        check(`${tag}: one row per event`, rows.length === list.events.length, rows.join(' || '))
+        check(`${tag}: the events, every kind`, rows.length > 0, rows.slice(0, 5).join(' || '))
         await page.screenshot({ path: `${OUT}/echo-${tag}-list.png`, fullPage: false })
-        await page.locator('.echo tbody tr', { hasText: 'CSCO' }).first().click()
+        await page.locator('.echo-events tbody tr', { hasText: 'CSCO' }).first().click()
         await page.waitForSelector('.echo-links', { timeout: 15000 })
-        const links = await page.locator('.echo-links tbody tr').count()
-        check(`${tag}: CSCO opens to its links`, links > 0, `${links} rows`)
-        check(`${tag}: direction explained`, /fell on the event/.test(await page.locator('.echo-detail').textContent()))
+        const linkRows = await page.locator('.echo-links tbody tr').evaluateAll(trs => trs.map(tr => [tr.getAttribute('data-symbol'), tr.children[3]?.textContent]))
+        const scores = linkRows.map(r => Number.parseInt(r[1], 10)).filter(Number.isFinite)
+        check(`${tag}: Cisco's links ranked by score`, scores.length > 0 && scores.every((s, i) => i === 0 || s <= scores[i - 1]), linkRows.slice(0, 6).map(r => r.join(' ')).join(', '))
+        check(`${tag}: the record and its durability`, /Durability: price spike/.test(await page.locator('.echo-detail').textContent()))
         await page.screenshot({ path: `${OUT}/echo-${tag}-open.png`, fullPage: false })
         const width = await page.evaluate(() => [document.documentElement.scrollWidth, window.innerWidth])
         check(`${tag}: no sideways page scroll`, width[0] <= width[1], `${width[0]} vs ${width[1]}`)
-        // A linked name → its page (2026-11-19): how it trades (the technical analyst, swing), why Echo linked it, the
-        // analyst's coverage or where the name goes; the panel's Back returns to the opened event.
+        // The top name → its page: why it scores, how it trades, the analyst; Back to the event.
         const sym = (await page.locator('.echo-links tbody .hot-sym').first().textContent()).trim()
         await page.locator('.echo-links tbody .hot-sym').first().click()
         await page.waitForSelector('.hot-page', { timeout: 15000 })
         const body = await page.locator('.hot-page').textContent()
         check(`${tag}: ${sym} opens its page`, (await page.locator('.hot-page__sym').textContent()) === sym)
+        check(`${tag}: why it scores, factor by factor`, /Why it scores \d+ \/ 12/.test(body) && /Lock-in/.test(body) && /Bottleneck/.test(body) && /Coverage/.test(body))
         check(`${tag}: how it trades`, (await page.locator('.hot-profile').count()) === 1)
-        check(`${tag}: why Echo linked it`, /From Echo/.test(body) && /not a pick/.test(body))
-        const detail = (await page.locator('.hot-page__body').textContent()).replace(/\s+/g, ' ').slice(0, 300)
-        const covered = await page.locator('.hot-page .echo-analyst').count()
-        check(`${tag}: the analyst's read or where it goes`, covered ? /Analyst:.*PT/.test(body) : /Not covered/.test(body),
-            covered ? (await page.locator('.hot-page .echo-analyst').textContent()).replace(/\s+/g, ' ') : detail)
-        await page.waitForTimeout(6000)   // the profile measures a first look on the spot
+        check(`${tag}: a lead, not a pick`, /a lead, not a pick/.test(body))
+        await page.waitForTimeout(5000)
         await page.screenshot({ path: `${OUT}/echo-${tag}-name.png`, fullPage: false })
+        await page.locator('.echo-factors').scrollIntoViewIfNeeded()
+        await page.screenshot({ path: `${OUT}/echo-${tag}-factors.png`, fullPage: false })
         const width2 = await page.evaluate(() => [document.documentElement.scrollWidth, window.innerWidth])
         check(`${tag}: the page, no sideways scroll`, width2[0] <= width2[1], `${width2[0]} vs ${width2[1]}`)
-        await page.getByRole('button', { name: /Back/ }).first().click()
-        await page.waitForSelector('.echo-links', { timeout: 15000 })
-        check(`${tag}: back to the opened event`, (await page.locator('.echo-links tbody tr').count()) === links)
+        if (BUILD && tag === 'desk') {
+            await page.getByRole('button', { name: 'Build with the trader' }).click()
+            await page.waitForTimeout(4000)
+            const chat = await page.locator('body').textContent()
+            check('desk: to the trader with the name', new RegExp(`work on a ${sym} trade`).test(chat))
+            await page.waitForTimeout(40000)
+            await page.screenshot({ path: `${OUT}/echo-desk-mentor.png`, fullPage: false })
+        } else {
+            await page.getByRole('button', { name: /Back/ }).first().click()
+            await page.waitForSelector('.echo-links', { timeout: 15000 })
+            check(`${tag}: back to the opened event`, (await page.locator('.echo-links tbody tr').count()) === linkRows.length)
+        }
         await ctx.close()
     }
 } finally { await browser.close() }
