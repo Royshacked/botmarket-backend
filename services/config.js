@@ -236,6 +236,11 @@ export const config = {
     get houseScanPerIndustry() { return _num('HOUSE_SCAN_PER_INDUSTRY', 10) },
     get houseScanWeeklyMax()   { return _num('HOUSE_SCAN_WEEKLY_MAX', 100) },
     get houseResearchMaxUsd()  { return _num('HOUSE_RESEARCH_MAX_USD', 10) },
+    // ECHO'S NAMES THROUGH THE READS (docs/design/echo-desk.md §6, Roy 2026-11-19): a forward-test event's LAGGING links go
+    // to Prometheus (swing coverage) and Proteus (the profile) once its day-5 check is frozen. ECHO_READS=false is the kill
+    // switch; the house's Echo research is capped at this many dollars over seven days (~$0.04 a name).
+    get echoReads()            { return _bool('ECHO_READS', 'false-0') },
+    get echoResearchMaxUsd()   { return _num('ECHO_RESEARCH_MAX_USD', 2) },
     // The candidate list's liquidity floor, dollars traded a day (20-day average; houseScan.candidates.js). A swing
     // trade has to get in and out; a long-term holding barely trades.
     get houseScanMinAdvSwing() { return _num('HOUSE_SCAN_MIN_ADV_SWING', 20e6) },

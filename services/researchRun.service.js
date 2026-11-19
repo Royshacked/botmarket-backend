@@ -443,6 +443,9 @@ export function researchOpening(item) {
         }
         return `Research ${symbol} for coverage — the industry strategist rates ${where} ${book}${c.horizon ? ` (${c.horizon})` : ''}${thesis}${risks} Judge whether ${symbol} is already priced for it.${tail}`
     }
+    // From ECHO (echo-desk.md §6): an event's linked name — the event, the link and the rule's direction travel; the
+    // forward test's lagging names say the test is unproven. Swing coverage either way (Roy, 2026-11-19).
+    if (c?.echo) return echoOpening(symbol, c)
     // From MENTOR (argus-rework.md step 3): a user is building a swing / long-term trade on the name and needs the read.
     // A covered name's OTHER horizon (two targets, stage 1): the view only, the coverage stands.
     if (c?.mentor && isViewItem(item)) {
@@ -543,6 +546,18 @@ const _io = {
         const { coverageService } = await import('../api/analyst/coverage.service.js')
         return coverageService.initiateCoverage(coverage)
     },
+}
+
+/** The opening for a name Echo sent (echo-desk.md §6). Pure. */
+export function echoOpening(symbol, c) {
+    const pts = BOOK_PT_HORIZONS.swing
+    const link = `${c.relation ?? 'a link'} of ${c.origin ?? 'the origin'}${c.why ? ` — ${String(c.why).replace(/[.\s]+$/, '')}` : ''}`
+    const dir = c.direction && c.direction !== 'unclear' ? ` By the chain rule the event should ${c.direction === 'gains' ? 'help' : 'hurt'} it.` : ''
+    const why = c.forward
+        ? " In the house's event test it had NOT caught up by the 5th session — the test is unproven, so this is not a pick: judge the business and the price on their own."
+        : ' A user mapped this event and asked for your read.'
+    const verb = c.reinit ? `Re-research ${symbol} — your coverage on it is not live —` : `Research ${symbol} for coverage —`
+    return `${verb} the event analyst linked it to an event: ${c.event ?? 'an event'}. It is a ${link}.${dir}${why} Is the link material to ${symbol}'s numbers, and is it priced? Set the price target on a ${pts.join(' or ')} horizon (SWING).`
 }
 
 export const researchRunService = { startRun, stopRun, getRun }

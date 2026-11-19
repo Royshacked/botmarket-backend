@@ -69,7 +69,9 @@ test('server.js registers the full fleet', () => {
         // 'dailyScreener' (2026-10-21) is the hotlist's overnight pass; opt-in (DAILY_SCREENER), so it
         // registers everywhere and does nothing until turned on (daily-names.md §11).
         // 'prometheusScorecard' (2026-10-27) grades Prometheus's frozen calls vs SPY and the catalyst reads' windows.
-        'coverage', 'dailyScreener', 'entries', 'exits', 'guardSweep', 'industryView', 'marketBrief', 'marketOpen', 'paperEquity',
+        // 'echoReads' (2026-11-19) sends a forward-test event's lagging names to Prometheus and Proteus once its day-5
+        // check is frozen (echo-desk.md §6); ECHO_READS=false turns it off.
+        'coverage', 'dailyScreener', 'echoReads', 'entries', 'exits', 'guardSweep', 'industryView', 'marketBrief', 'marketOpen', 'paperEquity',
         'paperFill', 'paperMark', 'prometheusScorecard', 'pythiaCalls', 'pythiaWeekly', 'reconciler', 'talos', 'themis',
     ])
 })

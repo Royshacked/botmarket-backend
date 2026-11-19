@@ -4050,6 +4050,29 @@
             }
         },
         {
+            "name": "request_reads",
+            "description": "Send names from one of the USER's OWN events (an id \"ue_…\") to the analyst and the technical analyst: the analyst's SWING coverage (researched for the house when there is none standing — a few minutes each) and the technical analyst's measured profile. `tickers`: the names the user picked from that map (at most 5); omit for its directional links (suppliers, infrastructure, substitutes). Only when the user asks. The forward test's lagging names go on their own after the day-5 check — never send those.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "The user's event id (ue_…)."
+                    },
+                    "tickers": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "The names from that map the user picked; omit for its directional links."
+                    }
+                },
+                "required": [
+                    "id"
+                ]
+            }
+        },
+        {
             "name": "get_news",
             "description": "Recent dated NEWS (`companies` with a ticker as `subject`, or a topic) — to check what happened before you frame an event the user names (the date, what changed, which way), or to explain a link. Facts for the frame, never the map itself.",
             "input_schema": {

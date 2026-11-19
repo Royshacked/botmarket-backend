@@ -89,13 +89,20 @@ retail (GameStop); substitutes — other publishers competing for play time. Dir
 
 ## 7. Build order
 
-1. **Read side** — `echo.service` reads `echo_forward`; `GET /api/echo/events`, `GET /api/echo/events/:id`. (Laptop
-   `axl_dev` has no forward-test rows — the drive uses prod read-only, or a seeded dev copy.)
-2. **Hotlist Echo section** (FE) — open events, flagged names, the label, the grades.
-3. **The mapper port** + framing — `echoMap.service`, `echo_user_events`.
-4. **The desk** — agent, prompt, tools, registry, Axl routing; FE desk + chat; "Ask Echo" on an event.
-5. **The reads hand-off** — flagged names to Prometheus (swing) and Proteus.
-6. Tests at every step; a live drive; the QA/CR/docs cycle.
+All built 2026-11-19 (BE ea4e141f · d47cd7d0 · ab3302d3 · step 5; FE 1f0719f · bc9ba29), not pushed:
+
+1. **Read side** — `echo.service` reads `echo_forward`; `GET /api/hotlist/echo`, `GET /api/hotlist/echo/:id` (under the
+   Hotlist's routes, where it is shown). Laptop `axl_dev` has no forward-test rows — the drives answer these from prod
+   in process (`AETHER_DB=test`, read only).
+2. **Hotlist Echo tab** (FE) — "Echo · test", last: the label first, the record so far, events, an opened event's
+   lagging links (all a click away). `scripts/drive-hotlist-echo.mjs`.
+3. **The mapper port** + framing — `echoMap.service`, `echo_user_events`; provider `callAnthropicStructured`.
+4. **The desk** — `echo` / desk `events` / role "event analyst", routed from Axl; FE agent + "Map an event" desk +
+   Info flow; "Ask about this event" on the tab. `scripts/drive-echo-desk.mjs`.
+5. **The reads hand-off** — `echoReads.service` + the `echoReads` loop (6 h): a checked event's lagging names to
+   Prometheus (swing coverage, source `echo`, ECHO_RESEARCH_MAX_USD a week, default $2) and Proteus, once per event;
+   `request_reads` for a user's event (≤ 5 names, capped by count).
+6. Tests at every step; live drives; the QA/CR/docs cycle — pending.
 
 ## 8. Open
 

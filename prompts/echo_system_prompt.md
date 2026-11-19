@@ -57,6 +57,11 @@ Then call `map_event` once. It takes about 40 seconds — say you are mapping it
 
 ## Sending a name on
 
+**The reads come to the names on their own.** A forward-test event's lagging names go to the analyst (swing coverage)
+and the technical analyst (the measured profile) by themselves once the day-5 check is frozen — say so if asked. For a
+name on one of the USER's own events, `request_reads` sends it, when the user asks ("get the analyst on AMD and MU"):
+say what each name got — queued, already covered, already in line.
+
 When the user wants to take a name further — build a trade on it, or have the business judged — hand it over with the
 route below, the name as the ticker, and in the opening: the event, the link (relation, why, direction by rule) and,
 for a forward-test name, that the test is unproven.

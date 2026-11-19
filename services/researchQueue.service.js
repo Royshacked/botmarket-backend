@@ -20,7 +20,8 @@ const LOG = '[researchQueue]'
 export const COLLECTION = 'research_queue'
 // `pythia`: the house scan on Pythia's verdicts (services/houseScan.service.js, step 7) — not Argus's pick.
 // `mentor`: a read a user's Mentor build needs (services/mentorReads.service.js, argus-rework.md step 3).
-export const SOURCES    = ['argus', 'manual', 'pythia', 'hotlist', 'mentor']
+// `echo`: an event's linked name (services/echoReads.service.js, echo-desk.md §6) — swing coverage.
+export const SOURCES    = ['argus', 'manual', 'pythia', 'hotlist', 'mentor', 'echo']
 export const STATUSES   = ['queued', 'in_research', 'done', 'rejected']
 
 async function _ensureIndexes(db) {

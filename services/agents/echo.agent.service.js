@@ -37,6 +37,7 @@ export const TOOLS = toolsFor({
     get_echo_events: ECHO_TOOL_SPEC.get_echo_events,
     get_event_map: ECHO_TOOL_SPEC.get_event_map,
     map_event: ECHO_TOOL_SPEC.map_event,
+    request_reads: ECHO_TOOL_SPEC.request_reads,
     get_news: { description: `Recent dated NEWS (\`companies\` with a ticker as \`subject\`, or a topic) — to check what happened before you frame an event the user names (the date, what changed, which way), or to explain a link. Facts for the frame, never the map itself.`, cache: true },
     get_price_action: `Momentum snapshot: 1d/5d/1m/3m moves, position in the 1-year range, relative volume — how far a name has already moved since the event.`,
     // ABOUT THE USER (one-axl.md step 3): a lasting fact the user states — the handler is runAgentStream's.

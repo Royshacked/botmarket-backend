@@ -738,6 +738,14 @@ export const TOOL_SCHEMAS = {
         },
         "required": ["id"]
     },
+    request_reads: {
+        "type": "object",
+        "properties": {
+            "id": { "type": "string", "description": "The user's event id (ue_…)." },
+            "tickers": { "type": "array", "items": { "type": "string" }, "description": "The names from that map the user picked; omit for its directional links." }
+        },
+        "required": ["id"]
+    },
     map_event: {
         "type": "object",
         "properties": {

@@ -12,12 +12,14 @@ import { makeToolHandler } from '../agentUtils.js'
 import { toolError } from '../toolResult.util.js'
 import { echoService, HORIZONS } from '../echo.service.js'
 import { echoMapService } from '../echoMap.service.js'
+import { echoReadsService, MAX_ASK } from '../echoReads.service.js'
 
 const LOG = '[echo.tools]'
 
 export const ECHO_TOOL_SPEC = {
     get_echo_events: `The FORWARD TEST's events (the engine's: earnings moves of 5%+ against SPY in the 152 largest US names, mapped by the model before their 5th session, checked at the day-5 close, graded at 20 / 60 / 120 sessions) with where each stands and its LAGGING links, the record so far, and the user's OWN events (maps they asked you for). Read it first when the user asks what Echo has found, or about an event that may already be here.`,
     get_event_map: `One event's whole map — every link with its relation, layer, direction (by rule), the model's own direction, why it is linked, and, for a forward-test event once checked, whether the market had caught up by day 5 and how the link did since (vs its own same-sector stand-ins). \`id\` is the event's id from get_echo_events (a forward-test id like "csco-earnings-2026-11-12", or a user event's "ue_…").`,
+    request_reads: `Send names from one of the USER's OWN events (an id "ue_…") to the analyst and the technical analyst: the analyst's SWING coverage (researched for the house when there is none standing — a few minutes each) and the technical analyst's measured profile. \`tickers\`: the names the user picked from that map (at most ${MAX_ASK}); omit for its directional links (suppliers, infrastructure, substitutes). Only when the user asks. The forward test's lagging names go on their own after the day-5 check — never send those.`,
     map_event: `Map an event the USER names to the companies it reaches through the supply chain — anything: a product launch ("GTA 6 is out"), a guidance cut, a strike, a deal, a heatwave. FRAME it first, then call once: \`what_changed\` (one sentence: what happened), \`origin\` (the company the event happens to — or, when no single listed company is the event's, the DEMAND it moves, e.g. "European air-conditioning demand"), \`tickers\` (the origin's US tickers; empty for a demand), \`effect\` (up / down: what the event does to the origin's demand — ask the user once if it could go either way), \`date\` (YYYY-MM-DD it became public; omit for today), \`horizon\` (the user's, if they said one). One model call, about 40 seconds and a few cents; the map is saved to the user's events. Never for an event already in get_echo_events — read that map instead.`,
 }
 
@@ -67,12 +69,18 @@ export function mapWords({ id, event, map, kind }) {
     return lines.join('\n')
 }
 
+const READ_WORDS = {
+    queued: 'queued for the analyst (swing coverage)', waiting: 'already in line for the analyst', ready: "the analyst's coverage stands — read it there",
+    covered: 'the analyst covers it on another horizon', passed: 'the analyst researched it and passed', failed: "the analyst's last try failed — not asked again today",
+    not_queued: 'could not be queued', unknown: "the analyst's read could not be checked",
+}
+
 /** echo.service's shaped event → mapWords' shape. */
 const fromForward = (e) => ({ id: e.id, kind: 'forward', event: e.event, map: { ...(e.map ?? {}), links: e.all } })
 /** A stored user event → mapWords' shape (its links have no check: `group` null). */
 const fromUser = (d) => ({ id: d._id, kind: 'user', event: d.event, map: { ...d.map, links: (d.map?.links ?? []).map(l => ({ ...l, why: l.evidence_text, group: null })) } })
 
-export function makeEchoHandlers({ userId = null, events = echoService, maps = echoMapService } = {}) {
+export function makeEchoHandlers({ userId = null, events = echoService, maps = echoMapService, reads = echoReadsService } = {}) {
     return {
         get_echo_events: makeToolHandler('get_echo_events', async () => {
             const { events: list, record } = await events.listEvents()
@@ -98,6 +106,31 @@ export function makeEchoHandlers({ userId = null, events = echoService, maps = e
             const e = await events.getEvent(key)
             return e ? mapWords(fromForward(e)) : toolError(`No forward-test event ${key} — read get_echo_events for the ids.`)
         }, (err, { id }) => `Could not read the map for ${id}: ${err.message}`, LOG),
+
+        request_reads: makeToolHandler('request_reads', async ({ id, tickers } = {}) => {
+            if (!userId) return toolError('There is no signed-in user.')
+            const key = String(id ?? '').trim()
+            if (!key.startsWith('ue_')) return toolError("Only the user's own events (ue_…): the forward test's lagging names go to the analyst on their own after the day-5 check.")
+            const d = await maps.getUserEvent(key, userId)
+            if (!d) return toolError(`No event ${key} among the user's events.`)
+            const links = (d.map?.links ?? []).filter(l => l.ticker)
+            const asked = (Array.isArray(tickers) ? tickers : []).map(t => String(t).toUpperCase().trim()).filter(Boolean)
+            const picked = asked.length ? links.filter(l => asked.includes(l.ticker)) : links.filter(l => l.direction !== 'unclear')
+            const missing = asked.filter(t => !links.some(l => l.ticker === t))
+            if (missing.length) return toolError(`Not on this map: ${missing.join(', ')}.`)
+            if (picked.length > MAX_ASK) return toolError(`${picked.length} names — at most ${MAX_ASK} at a time; ask the user which.`)
+            if (!picked.length) return toolError('No directional links on this map — ask the user which names.')
+            const by = new Map(picked.map(l => [l.ticker, l]))
+            const ev = d.event
+            const res = await reads.sendNames([...by.keys()], (s) => ({
+                echo: true, forward: false, horizon: 'swing', event_id: d._id, user_event: true,
+                event: `${ev.what_changed} (${ev.date})`, origin: ev.origin, relation: by.get(s).relation, direction: by.get(s).direction,
+                why: by.get(s).evidence_text ?? null, reason: `The event analyst: ${by.get(s).relation} of ${ev.origin} (a user's event)`,
+            }), { requestedBy: String(userId), maxUsd: Infinity })
+            const lines = res.names.map(n => `- ${n.symbol}: ${READ_WORDS[n.read] ?? n.read}; the technical analyst's profile queued`)
+            const run = res.research?.outcome === 'busy' ? '\nThe analyst is busy with another run — these wait in line.' : ''
+            return `Sent on (swing):\n${lines.join('\n')}${run}\nThe reads land in the analyst's coverage and the technical analyst's profiles — the user finds them on the Hotlist and with the trader.`
+        }, (err) => `Could not send the names on: ${err.message}`, LOG),
 
         map_event: makeToolHandler('map_event', async (args) => {
             if (!userId) return toolError('There is no signed-in user to save this event for.')

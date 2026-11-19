@@ -1177,6 +1177,12 @@ services/
                             DUE_KEYS only (long-term reviews, expired, a watch's date) — the monitor's, once a day
                             while stale. Results carry `long_term` / `long_term_new` (houseScan bookSends: a NEW yes
                             sends to the long-term book)
+  echoReads.service.js      ECHO'S NAMES THROUGH THE READS (echo-desk.md §6, step 5, 2026-11-19): sendNames — Proteus's
+                            profile for every name (queueProfiles), Prometheus's SWING read via mentorReads.readFor;
+                            missing → research_queue source `echo` (context: the event, the link, the rule — researchRun
+                            echoOpening) + houseResearch.researchQueued inside ECHO_RESEARCH_MAX_USD a week. handOffFlagged
+                            — a forward-test event's LAGGING names once its day-5 check froze, once per event
+                            (`echo_handoffs`), then Echo's waiting rows resumed. request_reads (echo.tools) is the user's ask.
   echoMap.service.js        ECHO'S MAP FOR AN EVENT THE USER NAMES (echo-desk.md §3–4, step 3, 2026-11-19): the
                             engine's llm_map PORTED (Render cannot run the Python) — SYSTEM verbatim (a test diffs it
                             against the engine checkout), schema, Opus 5.5 high, resolve (active US listings via
@@ -1570,6 +1576,8 @@ monitoring/
                             claim is handed back and nothing is spent)
   pythiaCalls.monitor.service.js  The grader — every 6h from boot, scores Pythia's logged calls at 3 and 12
                             months (pythiaCalls.gradeDue). Quotes only, no model; ungated
+  echoReads.monitor.service.js  Every 6h from boot: echoReads.handOffFlagged — lagging names of newly checked forward-test
+                            events to Prometheus + Proteus (ECHO_READS=false: off).
   prometheusScorecard.monitor.service.js  Every 6h from boot: Prometheus's calls due a mark
                             (prometheusCalls.gradeDue, paced 400 ms a name) + the catalyst reads' window marks. Ungated
   dailyScreener.monitor.service.js  Every 30 min: runs the hotlist's overnight pass when a trading day's

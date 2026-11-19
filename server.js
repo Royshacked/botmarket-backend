@@ -89,6 +89,7 @@ import { ensurePythiaCallsIndexes } from './api/strategy/pythiaCalls.service.js'
 import { ensureThemeIndexes } from './api/strategy/theme.service.js'
 import { pythiaCallsMonitorService } from './monitoring/pythiaCalls.monitor.service.js'
 import { prometheusScorecardMonitorService } from './monitoring/prometheusScorecard.monitor.service.js'
+import { echoReadsMonitorService } from './monitoring/echoReads.monitor.service.js'
 import { themisService }      from './monitoring/themis.monitor.service.js'
 import { executionReconciler } from './monitoring/execution.reconciler.js'
 import { paperFillService }  from './monitoring/paperFill.service.js'
@@ -287,6 +288,7 @@ function startBackgroundLoops() {
     startLoop('dailyScreener', dailyScreenerMonitorService)   // opt-in: DAILY_SCREENER
     startLoop('pythiaCalls', pythiaCallsMonitorService)
     startLoop('prometheusScorecard', prometheusScorecardMonitorService)   // Prometheus's calls graded vs SPY
+    startLoop('echoReads',   echoReadsMonitorService)   // Echo's lagging names → Prometheus + Proteus (ECHO_READS)
     startLoop('themis',       themisService)
     startLoop('reconciler',   executionReconciler)
     startLoop('paperFill',    paperFillService)
