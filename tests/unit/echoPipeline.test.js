@@ -5,12 +5,13 @@ import { _tick as loopTick, _reset as resetLoop } from '../../monitoring/echoPip
 
 // Echo's pipeline (docs/design/echo-pipeline.md): framed → mapped → scored → (day-5 close) → checked → watching.
 
-function deps({ map = { ok: true, map: { links: [1] } }, score = { ok: true, scores: { links: [] } }, check = { ok: true, check: { links: [] } }, open = [], watching = [] } = {}) {
+function deps({ map = { ok: true, map: { links: [1] } }, score = { ok: true, scores: { links: [] } }, check = { ok: true, check: { links: [] } }, open = [], watching = [], gradable = [] } = {}) {
     const writes = []
     const calls = []
     return {
         writes, calls,
-        events: { advance: async (id, status, patch) => { writes.push([id, status, patch]) }, listOpen: async () => open, listWatching: async () => watching },
+        events: { advance: async (id, status, patch) => { writes.push([id, status, patch]) }, listOpen: async () => open, listWatching: async () => watching, listGradable: async () => gradable },
+        grade: async (ev) => { calls.push(['grade', ev._id]); return { graded: [5] } },
         watch: async (ev) => { calls.push(['watch', ev._id]); return { id: ev._id, triggers: 0, expired: false } },
         map: async (ev, o) => { calls.push(['map', o]); return map },
         score: async () => { calls.push(['score']); return score },
@@ -61,6 +62,12 @@ test('tick: the wave watch on watched events, once a day each', async () => {
     const d = deps({ watching: [{ _id: 'w1', status: 'watching' }, { _id: 'w2', status: 'watching', watchedAt: recent }] }); _setDeps(d)
     const r = await tick()
     assert.deepEqual(r.watched.map(w => w.id), ['w1'], 'w2 was watched two hours ago')
+})
+
+test('tick: the grades that came due, once a day an event — expired ones too', async () => {
+    const d = deps({ gradable: [{ _id: 'g1', status: 'expired' }, { _id: 'g2', status: 'watching', gradedAt: new Date().toISOString() }] }); _setDeps(d)
+    const r = await tick()
+    assert.deepEqual(r.graded, [{ id: 'g1', horizons: [5] }])
 })
 
 test('the loop: the intake every 3 hours, the steps every hour', async () => {

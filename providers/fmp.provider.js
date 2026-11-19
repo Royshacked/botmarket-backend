@@ -212,7 +212,7 @@ async function _profileBasics(ticker) {
  */
 export async function getListingProfile(ticker) {
     const p = await _profileBasics(ticker)
-    return p ? { name: p.name, exchange: p.exchange, activelyTrading: p.activelyTrading, description: p.description, sector: p.sector ?? null, industry: p.industry ?? null } : null
+    return p ? { name: p.name, exchange: p.exchange, activelyTrading: p.activelyTrading, description: p.description, sector: p.sector ?? null, industry: p.industry ?? null, marketCap: p.marketCap ?? null } : null
 }
 
 /** A listing's trading facts — `{ averageVolume, activelyTrading, fund }` — or null when the profile is unreachable. */

@@ -133,6 +133,7 @@ export async function resolve(ev, raw, profileOf) {
             ticker: tk, name: prof.name || r.name || tk, relation: r.relation, layer: [1, 2, 3].includes(r.layer) ? r.layer : 2,
             direction: ['gains', 'loses', 'unclear'].includes(r.direction) ? r.direction : 'unclear',
             why: String(r.why ?? '').slice(0, 400), confidence: r.confidence ?? null, sector: prof.sector ?? null,
+            marketCap: prof.marketCap ?? null,   // Step 7's stand-ins are drawn from its size band
         })
     }
     return { links, dropped }

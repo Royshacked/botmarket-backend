@@ -132,4 +132,15 @@ export async function listWatching({ limit = 300 } = {}) {
     return (await coll()).find({ status: 'watching' }).sort({ date: -1 }).limit(limit).toArray()
 }
 
-export const echoEventsService = { frame, passesFilter, create, get, advance, list, listOpen, listWatching, findSame }
+/** Checked events with a horizon still to grade (Step 7) — watched or expired: expiry stops the watch, not the grading. */
+export async function listGradable({ limit = 300 } = {}) {
+    return (await coll()).find({ status: { $in: ['watching', 'expired'] }, 'check.checkDay': { $exists: true }, 'grades.120': { $exists: false } })
+        .sort({ date: 1 }).limit(limit).toArray()
+}
+
+/** Every graded event (the validation report). */
+export async function listGraded({ limit = 1000 } = {}) {
+    return (await coll()).find({ kind: 'house', grades: { $exists: true } }).sort({ date: 1 }).limit(limit).toArray()
+}
+
+export const echoEventsService = { frame, passesFilter, create, get, advance, list, listOpen, listWatching, listGradable, listGraded, findSame }

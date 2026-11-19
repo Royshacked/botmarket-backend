@@ -5,6 +5,7 @@
 //   mapped  → Step 3 score (echoScore) → scored
 //   scored  → Step 4 check (echoCheck) at the day-5 close → watching
 //   watching → Step 5 (echoWatch): triggers re-run Steps 3 and 4, once a day; expiry → expired
+//   checked  → Step 7 (echoValidate): graded at 5 / 20 / 60 / 120 sessions as they come due, expired or not
 //
 // `run(event)` goes as far as it can now (a user's event in chat: mapped and scored at once; its check waits for the
 // day-5 close). `tick()` moves every open event along — the house's loop (monitoring/echoPipeline.monitor.service.js,
@@ -15,13 +16,14 @@ import { mapEvent } from './echoChain.service.js'
 import { scoreEvent } from './echoScore.service.js'
 import { checkEvent } from './echoCheck.service.js'
 import { watchEvent } from './echoWatch.service.js'
+import { gradeEvent } from './echoValidate.service.js'
 import { logger } from './logger.service.js'
 
 const LOG = '[echoPipeline]'
 export const OPEN = Object.freeze(['framed', 'mapped', 'scored'])
 export const WATCH_EVERY_MS = 20 * 60 * 60 * 1000
 
-const _deps = { events: echoEventsService, map: mapEvent, score: scoreEvent, check: checkEvent, watch: watchEvent }
+const _deps = { events: echoEventsService, map: mapEvent, score: scoreEvent, check: checkEvent, watch: watchEvent, grade: gradeEvent }
 export function _setDeps(d) { Object.assign(_deps, d) }
 
 /**
@@ -83,7 +85,15 @@ export async function tick() {
         watched.push(await _deps.watch(ev))
     }
     if (watched.length) logger.info(LOG, 'watch', { events: watched.length, triggers: watched.reduce((s, w) => s + w.triggers, 0), expired: watched.filter(w => w.expired).length })
-    return { ran, watched }
+    // Step 7: the grades that came due, once a day an event.
+    const graded = []
+    for (const ev of await _deps.events.listGradable().catch(() => [])) {
+        if (ev.gradedAt && now - Date.parse(ev.gradedAt) < WATCH_EVERY_MS) continue
+        const g = await _deps.grade(ev)
+        if (g.graded.length) graded.push({ id: ev._id, horizons: g.graded })
+    }
+    if (graded.length) logger.info(LOG, 'graded', { events: graded.length })
+    return { ran, watched, graded }
 }
 
 export const echoPipelineService = { run, tick }
