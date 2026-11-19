@@ -131,7 +131,7 @@ still stream to the user, e.g. `<ticker>`.) Each agent registers its own capture
 - **Portfolio:** `<phase>`, `<portfolio_plan>` → `onPlan`, `<portfolio_update>` → `onUpdate`,
   `<portfolio_mandate>` → `onMandate`; `<portfolio_thesis>` post-hoc from raw
 - **Scanner:** `<scan_list>` → `onScan`
-- **Analyst:** `<phase>` live; `<coverage>` (or `<quickread>`) parsed from the finished text
+- **Analyst:** `<phase>` live; `<coverage>` parsed from the finished text
   (`_parseAnalystResponse`)
 - **Strategy:** `<phase>` live; every `<industry_view>` block parsed from the finished text (`_parseStrategyResponse`)
 
