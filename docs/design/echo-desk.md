@@ -1,5 +1,11 @@
 # Echo — the event desk (design, 2026-11-19)
 
+> **Superseded in its engine half the same day.** Roy, 2026-11-19: "I want Echo aligned with the design" — Echo is now
+> built to the simulator doc, in the backend: [echo-pipeline.md](echo-pipeline.md). What stays from here: the desk (the
+> event analyst, routed from Axl), the Hotlist tab, the hand-off to Prometheus and Proteus (§6), the user's own events.
+> What is gone: the engine's forward test as Echo's source (`echo_forward` no longer read), the ported mapper
+> (`echoMap.service`, `echo_user_events`) — one pipeline does both.
+
 Echo maps an event to the companies it reaches through the supply chain, and says which of them the market has not
 caught up with yet. The engine already does this for earnings moves as a FORWARD TEST (aether-engine
 `echo/forward.py`, README "Echo"): the model maps live events, the market grades the maps at 20 / 60 / 120 sessions,

@@ -378,9 +378,10 @@ services/
                           on a user turn); a FRESH deciding read handed to Mentor at once (askRead → _readSettled); a
                           chain Mentor started on his own reads ends with no pause / decision cards
   agents/                 the 8 LLM desks (analyst · axl · echo · mentor · portfolio · proteus · scanner ·
-                          strategy). echo (2026-11-19, docs/design/echo-desk.md): the event desk — get_echo_events /
-                          get_event_map read the forward test (the record, never re-mapped), map_event frames and maps a
-                          user's event (echoMap.service, one Opus call), news + price action, consult last; no working
+                          strategy). echo (2026-11-19, docs/design/echo-pipeline.md): the event desk — get_echo_events /
+                          get_event_map read the pipeline's events (links ranked by score, the six factors and their
+                          evidence, the flags), map_event frames the doc's Step 1 fields and runs the pipeline on a
+                          user's event (the chain + the score), news + price action, consult last; no working
                           state, no entity; LANGUAGE + BREVITY only (no venue). proteus (2026-11-12, docs/design/proteus.md): the technical analysis desk —
                           get_behaviour_profile first, the chart tools (vision ones model-only), SMC, consult last;
                           no working state, no entity; LANGUAGE + BREVITY only (he trades nothing: no venue). A seventh is archived and lives under archive/, imported by
@@ -1181,20 +1182,38 @@ services/
                             profile for every name (queueProfiles), Prometheus's SWING read via mentorReads.readFor;
                             missing → research_queue source `echo` (context: the event, the link, the rule — researchRun
                             echoOpening) + houseResearch.researchQueued inside ECHO_RESEARCH_MAX_USD a week (the house's
-                            rows only). handOffFlagged — a forward-test event's LAGGING names once its day-5 check froze,
-                            once per event (`echo_handoffs`, written only when every name settled), then Echo's waiting
-                            rows resumed (a user's first, outside the budget). request_reads (echo.tools) is the user's
-                            ask: MAX_ASK 5 at a time, MAX_USER_WEEK 10 a week (userAskedThisWeek).
-  echoMap.service.js        ECHO'S MAP FOR AN EVENT THE USER NAMES (echo-desk.md §3–4, step 3, 2026-11-19): the
-                            engine's llm_map PORTED (Render cannot run the Python) — SYSTEM verbatim (a test diffs it
-                            against the engine checkout), schema, Opus 5.5 high, resolve (active US listings via
-                            fmp getListingProfile), directionFor = chains.direction_for. frameEvent checks what the
-                            desk frames ("GTA 6 is out" → origin TTWO, effect up, today). Stored in
-                            `echo_user_events` per user, PROMPT_VERSION `user-…` — never the forward test. ~$0.07 a map.
-  echo.service.js           ECHO'S FORWARD TEST, READ (docs/design/echo-desk.md step 1, 2026-11-19): the engine's
-                            `echo_forward` (aether-engine echo/forward.py) shaped for the Hotlist and Echo's desk —
-                            each link joined to its frozen check row, its spread vs its own stand-ins, the event's
-                            spread over flagged links (forward.py event_spread), the running record. NEVER writes.
+                            rows only). handOffFlagged — a house event's FLAGGED names (underreacted winners, overreacted
+                            losers; handoffShape) once its day-5 check is in, once per event (`echo_handoffs`, written only
+                            when every name settled), then Echo's waiting rows resumed (a user's first, outside the
+                            budget). request_reads (echo.tools) is the user's ask: MAX_ASK 5 at a time, MAX_USER_WEEK 10
+                            a week (userAskedThisWeek).
+  ── ECHO, BUILT TO THE SIMULATOR DESIGN (docs/design/echo-pipeline.md, 2026-11-19) — one module per step ──
+  echoEvents.service.js     Step 1's record — `echo_events` (house + user): the doc's fields, frame(), passesFilter
+                            (surprise, large, lasting), findSame, listOpen / listWatching / listGradable / listGraded.
+  echoIntake.service.js     Step 1, the intake: earnings 5%+ (timing from the gap), 8-K 1.01/2.01, Federal Register,
+                            defense awards $500M+, ClinicalTrials.gov + openFDA, FMP news → one Sonnet triage a batch
+                            (numbered items) → events; follow-ups marked (echoWatch.markFollowUp); `echo_intake` seen.
+  echoUniverse.js           the 152 companies (copied from the engine's universe).
+  echoFilings.service.js    the filing evidence: namedIn (business forms only), customerShare (shareIn: approximately /
+                            more than / respectively / never a group's figure), supplySentences (for the scorer to read).
+  echoChain.service.js      Step 2: the map — layers 1–3 both ways, losers, substitutes; resolve to active US listings;
+                            withFilings on every link (mapLimit 3); `echo_templates`. Opus 5.5 high.
+  echoScore.service.js      Step 3: six factors 0–2, high at 8; coverage counted (FMP analysts, outside the sector),
+                            exposure stated or capped at 1, bottleneck reasoned + filings; ledgerOf. Opus 5.5 high.
+  echoReturns.service.js    the return calculator (the engine's returns.py ported): Day 0, reaction / tradable, vs SPY and
+                            the SPDR sector fund, volume vs 20 days; FMP dividend-adjusted bars; no unfinished session.
+  echoCheck.service.js      Step 4: the day-5 check — signed moves vs the layer-1 yardstick, volume, analyst actions;
+                            underreacted winner / overreacted loser / fully priced. No options IV (Roy: noted for later).
+  echoWatch.service.js      Step 5: triggers (follow-ups, a watched name's earnings / filings) re-run Steps 3–4 once a
+                            day; expiry (resolved, absorbed, normalised) or the durability backstop.
+  echoValidate.service.js   Step 7: grades at 5/20/60/120 from the day-5 close vs same-sector stand-ins (seeded draw)
+                            and the unflagged; report() — distributions, each factor alone, walk-forward readiness.
+  echoLevels.service.js     Step 6, Roy's way: the simulator rules' levels for a flagged name (levelsFrom), echoSeed for
+                            Mentor's hand-off — said as considerations; Mentor trades his regular setup.
+  echoPipeline.service.js   the orchestrator: run(event) framed → mapped → scored → (day 5) → watching; tick() also
+                            watches and grades. monitoring/echoPipeline.monitor (hourly; intake every 3 h; ECHO_PIPELINE).
+  echo.service.js           ECHO, READ: the pipeline's events shaped for the Hotlist and the desk — links ranked (flags,
+                            then score) with factors, evidence, check and grades; the validation report.
   engineDb.js               THE rule for which database aether-engine writes (AETHER_DB, else Node's own) —
                             shared by every desk that reads what it wrote
   manualNotify.service.js   broker-less entry/exit FillCards → social chat (embedded price/qty confirm)

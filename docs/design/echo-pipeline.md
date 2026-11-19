@@ -150,7 +150,29 @@ reweight Step 3 and replace Step 5's backstop lifetimes with measured ones.
 - **The event analyst in chat** maps any event through the SAME pipeline (one copy), and answers from the scores.
 - **Clicking a flagged name → Mentor** with Echo's context (Step 6).
 
-## Build order
+## Built — 2026-11-19
+
+All of it, backend `d6d41ade` … `38e5fa97`, frontend `1ac1cf7`, not pushed: filings `d6d41ade` · returns `8974bf2b` ·
+the event `f3de8262` · Step 2 `afb3f516` · Step 3 `a02d59a2` · Step 4 `ace2a20c` · the pipeline `421fedf2` · Step 1
+`267d199f` · Step 5 `28ff7971` · Step 7 `6c3cb513` · the app's backend `ab81a297` · Step 6 `8e912d61` · the tab
+`1ac1cf7` (+ drive `b1db61e8`, bundle `38e5fa97`). Live on 2026-11-19:
+- **Filings**: twelve Cisco links' 10-Ks — ePlus 29%, ScanSource over 10%, Fabrinet 19.9% stated; Jabil, Flex, Sanmina
+  name no customers (→ evidence, not a gate). Insight's "top five as a group … 50%" caught: a group's figure is no
+  one's share.
+- **Bottleneck language**: a keyword is not a finding ("short lead times", hedged risks, a company quoting its
+  suppliers' lead times) — the scoring model reads the sentences.
+- **The map** of Cisco: 32 links, layers 1–3, peers, distributors, PCB and laminate makers, losers and substitutes.
+- **The score**: no link high — Cisco's guide-down is a price spike, so lock-in and supply response are 0 everywhere
+  (the doc's "price spikes fade"); top by stated exposure: ePlus 6, Fabrinet 5. Coverage is almost always 0 (FMP counts
+  15–80 analysts a name; the "5 or fewer" threshold is ours, not the doc's — Step 7 tunes it).
+- **The intake**: 86 candidates → 4 events (the BIS advanced-chip export rule, Google–Blue Origin, …); credit
+  agreements, EPA rules and registry postings skipped with the doc's reasons.
+- **The app**: driven at desk and phone width (`scripts/drive-hotlist-echo.mjs`).
+
+**Still to do**: turn the loop on (`ECHO_PIPELINE=true` on Render) and retire the engine's nightly forward test
+(`echo-forward` in its cron group) — Roy's call; the QA/CR/docs cycle.
+
+## Build order (as planned)
 
 Each step committed, tested, driven where it shows; QA/CR/docs at the end.
 

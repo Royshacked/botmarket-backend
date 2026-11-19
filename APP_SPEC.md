@@ -678,23 +678,30 @@ please reconnect").
 
 ### Echo — who an event reaches (2026-11-19)
 
-[docs/design/echo-desk.md](docs/design/echo-desk.md) — the event desk (agent `echo`, desk `events`, the "event
-analyst" in chat): ONE event mapped to the companies it reaches through the supply chain. He sets no levels
-(Mentor's), judges no business (Prometheus's), and calls nothing a pick.
+**Built to the simulator design** (Roy, 2026-11-19: [docs/design/echo-pipeline.md](docs/design/echo-pipeline.md), from
+`Event-Driven Supply Chain Simulator.docx`); the desk is [echo-desk.md](docs/design/echo-desk.md) (agent `echo`, desk
+`events`, the "event analyst" in chat). He sets no levels (Mentor's), judges no business (Prometheus's), calls nothing a
+pick.
 
-- **Two kinds of event, never mixed.** The FORWARD TEST's (the engine's `echo_forward`: earnings moves of 5%+ vs SPY in
-  the largest US names, mapped by Opus 5.5 before the 5th session, frozen at the day-5 check, graded at 20 / 60 / 120
-  sessions against same-sector stand-ins) are read-only here — `GET /api/hotlist/echo`, `/echo/:id`, the Hotlist's
-  Echo tab, labelled unproven until the pre-declared rule reads on its first 30 events at 120 sessions. The USER's
-  (`map_event`: any event — "GTA 6 is out") are mapped by the engine's mapper, ported (`services/echoMap.service.js`,
-  the same prompt, schema and direction rule), kept per user in `echo_user_events`, and never graded.
-- **Direction is the rule's**: suppliers and infrastructure move with the origin, substitutes against it, peers and
-  customers unclear. The model's own reading is kept beside it.
-- **Names go on to Prometheus and Proteus** (`services/echoReads.service.js`, swing): a forward-test event's LAGGING
-  links once, after its day-5 check (`echo_handoffs` remembers it — recorded only when every name settled), inside
-  the house's weekly budget (`ECHO_RESEARCH_MAX_USD`, $2; the house's names only count against it); a user's names
-  only when they ask (`request_reads`: 5 at a time, 10 a week). A user's words reach the house analyst QUOTED, as a
-  claim to check — the coverage he writes is everyone's. `ECHO_READS=false` turns the hand-off off.
+- **One pipeline, every event** (`services/echoPipeline.service.js`, `echo_events`): the house's — the INTAKE
+  (`echoIntake`, every 3 hours: the universe's earnings moves of 5%+, 8-K deals, the Federal Register, defense awards,
+  phase-3 results and FDA approvals, FMP news; a triage by the doc's filter — surprise, large, more than a one-off — with
+  durability and its reason) — and the user's own (`map_event` in chat). Each is MAPPED (`echoChain`: layers 1–3 both
+  ways, losers and substitutes, every link checked against SEC filings — evidence, not a gate), SCORED (`echoScore`: six
+  factors 0–2, high at 8 of 12; bottleneck reasoned and read from the company's own filings; exposure stated or capped at
+  1; coverage counted), CHECKED at the 5th session (`echoCheck`: vs SPY and sector, volume, analyst actions, the
+  layer-1 yardstick; underreacted winner, overreacted loser, fully priced), WATCHED (`echoWatch`: follow-ups and the
+  watched names' earnings and filings re-run Steps 3–4; expiry), and GRADED (`echoValidate`: flagged vs same-sector
+  stand-ins and the unflagged at 5–120 sessions; each factor alone). The loop is opt-in (`ECHO_PIPELINE=true`).
+- **The app**: `GET /api/hotlist/echo` and `GET /api/hotlist/echo/:id` (`echo.service`) — the Hotlist's Echo tab: events of every kind, links
+  ranked by score, "why it scores" factor by factor; a name goes to the trader (`echoLevels`: the simulator rules'
+  levels as considerations — Mentor trades his regular setup) or the event analyst.
+- **Names go on to Prometheus and Proteus** (`services/echoReads.service.js`, swing): a house event's FLAGGED links
+  once, after its day-5 check (`echo_handoffs`), inside the house's weekly budget (`ECHO_RESEARCH_MAX_USD`, $2); a
+  user's names only when they ask (`request_reads`: 5 at a time, 10 a week). A user's words reach the house analyst
+  QUOTED. `ECHO_READS=false` turns the hand-off off.
+- **Not wired** (Roy's calls): options implied volatility (no provider — a note for the future); earnings call
+  transcripts (FMP 402 — SEC filings instead).
 
 ### Off-hours: nothing executes while the venue is shut
 
@@ -838,9 +845,13 @@ the Nasdaq-100 as the **US100 cash CFD**, but levels are read off the **NQ futur
   - The legacy `ideas` collection still exists in Mongo holding abandoned pre-cutover documents.
     Nothing reads it. It is queued to be archived and dropped.
 - `trades` — append-only point-in-time capture of each opened/closed idea (paper + live).
-- `echo_forward` — the ENGINE's forward test (aether-engine `scripts/echo_forward.py` writes it; the backend only reads).
-- `echo_user_events` — a user's own event maps (`{ _id: 'ue_…', userId, event, map: { links, dropped, model } }`).
-- `echo_handoffs` — one row per forward-test event whose lagging names went to Prometheus / Proteus (`{ _id: eventId, at, names }`).
+- `echo_events` — every Echo event, the house's and users' (`{ _id: 'ev_…', kind, userId, date, timing, type, origin,
+  originTickers, whatChanged, size, durability, effect, filter, status, map, scores, check, triggers, grades }`).
+- `echo_intake` — every intake item seen, with its verdict (event or skip, and why) — never asked twice.
+- `echo_templates` — the last map per event type and origin, the next map's starting point.
+- `echo_handoffs` — one row per house event whose flagged names went to Prometheus / Proteus (`{ _id: eventId, at, names }`).
+- (retired 2026-11-19: `echo_forward`, the engine's forward test, no longer read; `echo_user_events`, replaced by
+  `echo_events`.)
 - `proteus_profiles` — Proteus's measured profile per symbol (`{ symbol, version, profile, computed_at, fetchedAt }`),
   the house's, kept a week (`services/behaviourProfile.service.js`; a version bump recomputes).
 - `journal` — the monitor's record for a `setup`, one row per READ plus the code-written events
