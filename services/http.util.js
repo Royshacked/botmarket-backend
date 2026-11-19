@@ -147,8 +147,9 @@ async function _errorBody(res) {
  *   A non-2xx answer throws with `err.status` AND `err.body` — the parsed error body when the
  *   provider sent JSON (cTrader's `description`, GNews's `errors`), else its text — so a caller
  *   that wants the provider's own words in its message has them without a second request.
+ *   `as: 'text'` returns the body as text (a filing's HTML — the SEC provider), with the same retries and timeout.
  */
-export async function getJson(url, { headers, timeoutMs = 10000, label, retries = RETRIES, retryBaseMs = RETRY_BASE_MS, retryMinMs = 0, method = 'GET', body } = {}) {
+export async function getJson(url, { headers, timeoutMs = 10000, label, retries = RETRIES, retryBaseMs = RETRY_BASE_MS, retryMinMs = 0, method = 'GET', body, as = 'json' } = {}) {
     const attempts = Math.max(0, retries) + 1
     const init = { method, headers: { ...(headers ?? {}) } }
     if (body !== undefined) {
@@ -165,7 +166,7 @@ export async function getJson(url, { headers, timeoutMs = 10000, label, retries 
         let res, data, errBody
         try {
             res = await fetch(url, { ...init, signal: ac.signal })
-            if (res.ok) data = await res.json()
+            if (res.ok) data = as === 'text' ? await res.text() : await res.json()
             else errBody = await _errorBody(res)
         } finally {
             clearTimeout(timer)

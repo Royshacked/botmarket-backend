@@ -129,3 +129,85 @@ export async function get8kFilings(ticker, { since = '2016-01-01' } = {}) {
     }
     return { cik: entry.cik, title: entry.title, filings: [...new Map(out.map(f => [`${f.day}|${f.at}|${f.items}`, f])).values()].sort((a, b) => a.day.localeCompare(b.day)) }
 }
+
+// ─── Echo's filing reads (docs/design/echo-pipeline.md, Steps 1–3) ─────────────────────────────────────────────────
+// EDGAR full-text search (efts.sec.gov) answers "does X's filing name Y" and "which filings say *lead times*" across
+// every form since 2001; the document itself is read for the sentence. Both are EDGAR's, under its 10-requests-a-second
+// ask — the callers are a few names an event, never a sweep.
+
+/** A ticker's SEC filer — `{ cik, title }` — or null (foreign / OTC / funds). Throws on a failed read. */
+export async function cikFor(ticker) {
+    return (await _getCikMap())[String(ticker || '').toUpperCase().trim()] ?? null
+}
+
+const FTS_TTL_MS = 6 * 60 * 60 * 1000
+const _ftsCache = createTtlCache({ ttlMs: FTS_TTL_MS, max: 500 })
+
+/**
+ * EDGAR full-text search. `query` is EDGAR's syntax (quoted phrases, OR). `cik` narrows to one filer; `forms` is kept
+ * here, after the answer (EDGAR's own form filter fails on long queries). → `[{ form, date, cik, url, names }]` newest
+ * first, at most the first page (100). Throws on a failed read.
+ */
+export async function searchFullText(query, { cik = null, forms = null, since = null, until = null } = {}) {
+    const p = new URLSearchParams({ q: query })
+    if (cik) p.set('ciks', String(cik).padStart(10, '0'))
+    if (since || until) {
+        p.set('dateRange', 'custom')
+        p.set('startdt', since ?? '2001-01-01')
+        p.set('enddt', until ?? new Date().toISOString().slice(0, 10))
+    }
+    const url = `https://efts.sec.gov/LATEST/search-index?${p}`
+    let j = _ftsCache.get(url)
+    if (!j) { j = await _secGet(url); _ftsCache.set(url, j) }
+    const want = forms ? new Set(forms) : null
+    return (j?.hits?.hits ?? [])
+        .map(h => {
+            const [acc, file] = String(h._id ?? '').split(':')
+            const filer = String(h._source?.ciks?.[0] ?? cik ?? '').replace(/^0+/, '')
+            return {
+                form: h._source?.form ?? null, date: h._source?.file_date ?? null, cik: filer,
+                url: acc && file && filer ? `https://www.sec.gov/Archives/edgar/data/${filer}/${acc.replace(/-/g, '')}/${file}` : null,
+                names: h._source?.display_names ?? [],
+            }
+        })
+        .filter(h => h.url && (!want || want.has(h.form)))
+        .sort((a, b) => String(b.date).localeCompare(String(a.date)))
+}
+
+const DOC_TTL_MS = 24 * 60 * 60 * 1000
+const _docCache = createTtlCache({ ttlMs: DOC_TTL_MS, max: 60 })
+
+/** A filing document as plain text (tags out, entities out, one space). Cached a day. Throws on a failed read. */
+export async function filingText(url) {
+    const hit = _docCache.get(url)
+    if (hit) return hit
+    const html = await getJson(url, {
+        headers: { 'User-Agent': UA, 'Accept-Encoding': 'gzip, deflate' }, label: `SEC ${url} → HTTP`, as: 'text', timeoutMs: 30000,
+    })
+    const text = htmlToText(html)
+    _docCache.set(url, text)
+    return text
+}
+
+/** Pure: a filing's HTML → plain text. */
+export function htmlToText(html) {
+    return String(html ?? '')
+        .replace(/<(script|style)[\s\S]*?<\/\1>/gi, ' ')
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/&nbsp;|&#160;|&#xa0;/gi, ' ')
+        .replace(/&amp;/g, '&').replace(/&#8217;|&rsquo;/g, '’').replace(/&#8220;|&#8221;|&ldquo;|&rdquo;/g, '"')
+        .replace(/&#\d+;|&#x[0-9a-f]+;|&[a-z]+;/gi, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+}
+
+/** A filer's latest annual report (10-K, else 20-F / 40-F) — `{ form, date, url }` or null. Throws on a failed read. */
+export async function latestAnnualReport(ticker) {
+    const entry = await cikFor(ticker)
+    if (!entry) return null
+    const rec = (await _getSubmissions(entry.cik))?.filings?.recent
+    const i = (rec?.form ?? []).findIndex(f => f === '10-K' || f === '20-F' || f === '40-F')
+    if (i < 0) return null
+    const acc = String(rec.accessionNumber[i]).replace(/-/g, '')
+    return { form: rec.form[i], date: rec.filingDate[i], url: `https://www.sec.gov/Archives/edgar/data/${Number(entry.cik)}/${acc}/${rec.primaryDocument[i]}` }
+}
