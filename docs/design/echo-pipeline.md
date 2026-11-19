@@ -65,10 +65,14 @@ From the origin, both directions, winners AND losers:
 - **Layer 0** origin · **Layer 1** direct peers and customers · **Layer 2** suppliers · **Layer 3** suppliers' suppliers
   and infrastructure (power, cooling, materials, real estate) · **loser layers** (whose demand shrinks or supply is cut).
 - The model proposes the links, with the layer from what the link IS (not a fixed table per relation).
-- **Each link is checked against the filings** (the doc's default: *include a link only if it is named in filings or
-  10%+ of the company's revenue is exposed*): EDGAR full-text search for the origin in the linked company's filings and
-  the reverse, and the 10-K major-customer disclosure (any customer above 10% of revenue) for the **revenue share**. A
-  link that fails is dropped and listed with the reason.
+- **Each link is checked against the filings**: EDGAR search for the origin in the linked company's filings (8-K, 10-Q,
+  10-K) and the reverse, and the 10-K major-customer disclosure (any customer above 10% of revenue) for the **revenue
+  share**. The doc's default is a GATE (*include a link only if it is named in filings or 10%+ of revenue is exposed*).
+  **Departure, Roy 2026-11-19: evidence, not a gate.** A sample of twelve Cisco links' latest 10-Ks found four name
+  Cisco — ePlus (29% of net sales), ScanSource (over 10%), Fabrinet (a 10%+ customer), CDW (named, no share) — and eight
+  do not, among them Jabil, Flex and Sanmina, real Cisco manufacturers that report "customers above 10%" without naming
+  them. The gate would drop them. So every mapped link stays, marked **named in filings** or **not named**; a link not
+  named scores Exposure only from the model's estimate (labelled) and never above 1 of 2.
 - Each link stores: the two companies, direction (gains / loses), the **revenue share exposed**, the layer, the evidence.
 - **Event templates** (the doc): a map saved per event type (AI capex, drug class, energy shock, defense spending) is the
   starting point for the next event of that type, and grows as events come in.
