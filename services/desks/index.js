@@ -9,6 +9,7 @@ import { scannerDesk } from './scanner.desk.js'
 import { analystDesk } from './analyst.desk.js'
 import { strategyDesk } from './strategy.desk.js'
 import { proteusDesk } from './proteus.desk.js'
+import { echoDesk } from './echo.desk.js'
 
 /**
  * Whether an agent holds UNSEALED work — what the busy rule and openForEdit ask before taking it over. Each
@@ -31,5 +32,5 @@ export function framePayload(agent, payload) {
 
 export const DESK_DEFS = Object.freeze({
     axl: axlDesk, mentor: mentorDesk, portfolio: portfolioDesk, scanner: scannerDesk,
-    analyst: analystDesk, strategy: strategyDesk, proteus: proteusDesk,
+    analyst: analystDesk, strategy: strategyDesk, proteus: proteusDesk, echo: echoDesk,
 })

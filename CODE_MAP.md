@@ -312,8 +312,9 @@ services/
                               admin, maxMessages; routing.util / session.util / each agent's MAX_MESSAGES
                               derive from it. entryOf(desk): where a route lands (composite `trade` →
                               Argus preset to pick one name for Mentor). routedFrom: the only senders a desk takes
-                              (Argus: Mentor alone, since 2026-11-09; Proteus: Axl and Mentor, 2026-11-12 — Axl's
-                              capture carries the key 'axl' — routing.util mayRoute gates the capture + rule)
+                              (Argus: Mentor alone, since 2026-11-09; Proteus: Axl and Mentor, 2026-11-12; Echo `events`:
+                              Axl alone, 2026-11-19 — Axl's capture carries the key 'axl' — routing.util mayRoute
+                              gates the capture + rule)
       <agent>.desk.js         parse(body, turn, user) → { state, input } · run · done · nextState (the fold
                               the client did on every `done`) · stateFromEntity(entity, opts) (rebuild to edit) ·
                               prepareInput · onRouted (a route landing) · hasWork · stateFields (what `done`
@@ -376,8 +377,11 @@ services/
                           act.actHeld; `carryOn` — a turn cut short by the tool budget queued again (MAX_CARRY 3, reset
                           on a user turn); a FRESH deciding read handed to Mentor at once (askRead → _readSettled); a
                           chain Mentor started on his own reads ends with no pause / decision cards
-  agents/                 the 7 LLM desks (analyst · axl · mentor · portfolio · proteus · scanner ·
-                          strategy). proteus (2026-11-12, docs/design/proteus.md): the technical analysis desk —
+  agents/                 the 8 LLM desks (analyst · axl · echo · mentor · portfolio · proteus · scanner ·
+                          strategy). echo (2026-11-19, docs/design/echo-desk.md): the event desk — get_echo_events /
+                          get_event_map read the forward test (the record, never re-mapped), map_event frames and maps a
+                          user's event (echoMap.service, one Opus call), news + price action, consult last; no working
+                          state, no entity; LANGUAGE + BREVITY only (no venue). proteus (2026-11-12, docs/design/proteus.md): the technical analysis desk —
                           get_behaviour_profile first, the chart tools (vision ones model-only), SMC, consult last;
                           no working state, no entity; LANGUAGE + BREVITY only (he trades nothing: no venue). A seventh is archived and lives under archive/, imported by
                           nothing — see archive/README.md, and `npm run check:archive`, which
@@ -834,6 +838,9 @@ services/
                             CHART are never shown; a fetch failure is UNCHECKED. Reads years of candles (CHECK_WINDOW_DAYS
                             → _fetchCandleRows windowDays) and returns each wave end's price as found. The waves must
                             alternate; price after the last end is checked too. deps.fetchBars is the test seam
+  echo.tools.js             get_echo_events · get_event_map · map_event (ECHO, 2026-11-19, echo-desk.md §5) — BOUND per
+                            turn to the user (their own events are theirs). Formatters only: the record "so far",
+                            never the verdict; direction said to be the rule's, the model's own beside it.
   behaviourProfile.tools.js get_behaviour_profile (PROTEUS, 2026-11-12) — UNBOUND: profileFor → formatProfile (how
                             to read it, WHAT HOLDS, each timeframe's tests with rate vs baseline / n / recent third,
                             the false breaks + sweep depth, the fit). A failure tells him not to describe the stock
@@ -1708,7 +1715,8 @@ scripts/                    ops one-offs — none run by `npm test`. Kinds: migr
                             one in a sibling repo. Mechanical only — it says which sentences to distrust, not whether
                             the prose is still true. Its verdict rules are pinned by
                             tests/unit/docsDrift.test.js (the cases a code review found it passing).
-prompts/                    every prompt loaded at RUNTIME (7 desks — proteus_system_prompt.md 2026-11-12 — + Argus's
+prompts/                    every prompt loaded at RUNTIME (8 desks — proteus_system_prompt.md 2026-11-12,
+                            echo_system_prompt.md 2026-11-19 — + Argus's
                             profile/handoff + market brief + concepts). Hot-reloaded, lazily —
                             so a bad path is an ENOENT on a live turn, not an import error.
                             tests/unit/promptPaths.test.js guards both directions (a path that

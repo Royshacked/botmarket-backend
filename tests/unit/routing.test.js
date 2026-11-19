@@ -43,7 +43,7 @@ test('the rule never offers an admin desk, and teaches the grammar and the ask-g
         assert.match(rule, /Only when the user asked/)
         assert.match(rule, /never your own desk/)
     }
-    assert.deepEqual(Object.keys(ROUTABLE_DESKS).sort(), ['assist', 'portfolio', 'research', 'scan', 'technicals'])
+    assert.deepEqual(Object.keys(ROUTABLE_DESKS).sort(), ['assist', 'events', 'portfolio', 'research', 'scan', 'technicals'])
 })
 
 test('the rule is constant per agent — the cached spine stays byte-identical across turns', () => {
@@ -139,6 +139,38 @@ test("Axl's prompt routes how-a-stock-trades questions to the technical analyst"
     assert.match(axl, /`<route>technicals TSLA<\/route>` \+ `<open>How does TSLA behave\?<\/open>`/)
     // It is a QUESTION, and Axl answers questions himself — so the exception is spelled out where that rule is.
     assert.match(axl, /The one question you route instead of answering: how a stock TRADES/)
+})
+
+// ── Echo takes Axl's (2026-11-19) ────────────────────────────────────────────
+// docs/design/echo-desk.md §5: "GTA 6 is out — who benefits?" goes from Axl to the event analyst. No other desk lists
+// him, so their cached prompts did not change.
+
+test('mayRoute: only Axl may send the user to the event analyst', () => {
+    assert.equal(mayRoute('axl', 'events'), true)
+    for (const from of [null, undefined, 'analyst', 'mentor', 'portfolio', 'scanner', 'strategy', 'proteus', 'echo']) {
+        assert.equal(mayRoute(from, 'events'), false, `${from} must not route to the event analyst`)
+    }
+    const axl = makeRouteCapture('axl')
+    axl.captures.route('events TTWO'); axl.captures.open('GTA 6 is out — who does it reach?')
+    assert.deepEqual(axl.result(), { route: 'events', routeSymbol: 'TTWO', opening: 'GTA 6 is out — who does it reach?', edit: null, show: null })
+})
+
+test("no desk's rule offers the event analyst, and his own offers the open desks but not the restricted ones", () => {
+    for (const agent of ['analyst', 'mentor', 'portfolio', 'scanner', 'strategy', 'proteus', 'echo']) {
+        assert.doesNotMatch(buildRouteRule(agent), /`events`/, `${agent}'s rule offers the event analyst`)
+    }
+    const echo = buildRouteRule('echo')
+    for (const key of ['research', 'assist', 'portfolio']) assert.ok(echo.includes(`(\`${key}\`)`), key)
+    for (const key of ['scan', 'technicals', 'strategy']) assert.ok(!echo.includes(`(\`${key}\`)`), key)
+})
+
+test("Axl's prompt routes who-an-event-reaches questions to the event analyst", async () => {
+    const { readFileSync } = await import('node:fs')
+    const axl = readFileSync(new URL('../../prompts/axl_system_prompt.md', import.meta.url), 'utf8')
+    assert.match(axl, /<route>events<\/route>/)
+    assert.match(axl, /`<route>events TTWO<\/route>` \+ `<open>GTA 6 is out/)
+    assert.match(axl, /And one more: who an EVENT reaches through the supply chain/)
+    assert.doesNotMatch(axl, /event-exposure|what's on the event list/, 'the deleted event board is not offered')
 })
 
 test('the rule offers the stock picker to the trader alone', () => {

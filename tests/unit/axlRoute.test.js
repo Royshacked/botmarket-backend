@@ -590,7 +590,9 @@ test('the prompt teaches the role line and marks the admin desk', () => {
     assert.match(prompt, /## Who the user is/)
     assert.match(prompt, /USER ROLE/)
     assert.match(prompt, /`<route>strategy<\/route>` — \*\*admin only\.\*\*/)
-    assert.doesNotMatch(prompt, /<route>aether<\/route>|event analyst/)
+    // Aether's admin desk went with its board (2026-11-18). The event analyst is Echo's now (2026-11-19) — every user's.
+    assert.doesNotMatch(prompt, /<route>aether<\/route>/)
+    assert.doesNotMatch(prompt, /`<route>events<\/route>` — \*\*admin only/)
 })
 
 test('web search answers world questions at reception and keeps the broadcast rules', () => {

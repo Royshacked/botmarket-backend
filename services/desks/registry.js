@@ -68,6 +68,15 @@ export const DESKS = Object.freeze({
         does: "reads how a stock's price behaves — what it respects technically, if anything, its ATR and false breaks, day trade or swing",
         scope: 'main', admin: false, maxMessages: 10,
     }),
+    // Echo, the event analyst (docs/design/echo-desk.md, 2026-11-19): which companies an event reaches through the supply
+    // chain — the forward test's events (the engine's) and any event the user names. APPENDED after Proteus, so the
+    // routable desks' order in every prompt stays as it was; only Axl sends users here (routedFrom), so only Axl's route
+    // rule changes. Opened directly from the desks list and from the Hotlist's Echo tab too.
+    echo: Object.freeze({
+        agent: 'echo', desk: 'events', brand: 'Echo', role: 'event analyst', entityKind: null, editable: false, routable: true, routedFrom: Object.freeze(['axl']),
+        does: 'maps an event — a launch, a guidance cut, a strike, a deal — to the companies it reaches through the supply chain',
+        scope: 'main', admin: false, maxMessages: 10,
+    }),
     // The admin desk: Pythia sets the house view. Not somewhere a desk sends a user with a name (not
     // routable — no desk agent has to know the user's role to write a correct offer); Axl still routes admins
     // to her. She keeps her own panel and session (decision 16). Aether, the event analyst, was the other

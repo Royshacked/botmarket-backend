@@ -726,6 +726,30 @@ export const TOOL_SCHEMAS = {
         },
         "required": ["horizon"]
     },
+    // Echo, the event desk (services/tools/echo.tools.js; docs/design/echo-desk.md §5).
+    get_echo_events: {
+        "type": "object",
+        "properties": {}
+    },
+    get_event_map: {
+        "type": "object",
+        "properties": {
+            "id": { "type": "string", "description": "The event's id from get_echo_events — a forward-test id (csco-earnings-2026-11-12) or a user event's (ue_…)." }
+        },
+        "required": ["id"]
+    },
+    map_event: {
+        "type": "object",
+        "properties": {
+            "what_changed": { "type": "string", "description": "One sentence: what happened." },
+            "origin": { "type": "string", "description": "The company the event happens to — or the demand it moves when no single listed company is the event's." },
+            "tickers": { "type": "array", "items": { "type": "string" }, "description": "The origin's US tickers; empty for a demand." },
+            "effect": { "type": "string", "enum": ["up", "down"], "description": "What the event does to the origin's demand." },
+            "date": { "type": "string", "description": "YYYY-MM-DD the event became public; omit for today." },
+            "horizon": { "type": "string", "enum": ["short term swing", "swing", "long term"], "description": "The user's horizon, only if they said one." }
+        },
+        "required": ["what_changed", "origin", "tickers", "effect"]
+    },
     // Proteus's measured profile of one stock (services/tools/behaviourProfile.tools.js; docs/design/proteus.md §2).
     get_behaviour_profile: {
         "type": "object",

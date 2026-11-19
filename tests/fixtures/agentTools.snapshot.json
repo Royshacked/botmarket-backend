@@ -3972,5 +3972,167 @@
                 ]
             }
         }
+    ],
+    "echo": [
+        {
+            "name": "get_echo_events",
+            "description": "The FORWARD TEST's events (the engine's: earnings moves of 5%+ against SPY in the 152 largest US names, mapped by the model before their 5th session, checked at the day-5 close, graded at 20 / 60 / 120 sessions) with where each stands and its LAGGING links, the record so far, and the user's OWN events (maps they asked you for). Read it first when the user asks what Echo has found, or about an event that may already be here.",
+            "input_schema": {
+                "type": "object",
+                "properties": {}
+            }
+        },
+        {
+            "name": "get_event_map",
+            "description": "One event's whole map — every link with its relation, layer, direction (by rule), the model's own direction, why it is linked, and, for a forward-test event once checked, whether the market had caught up by day 5 and how the link did since (vs its own same-sector stand-ins). `id` is the event's id from get_echo_events (a forward-test id like \"csco-earnings-2026-11-12\", or a user event's \"ue_…\").",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "The event's id from get_echo_events — a forward-test id (csco-earnings-2026-11-12) or a user event's (ue_…)."
+                    }
+                },
+                "required": [
+                    "id"
+                ]
+            }
+        },
+        {
+            "name": "map_event",
+            "description": "Map an event the USER names to the companies it reaches through the supply chain — anything: a product launch (\"GTA 6 is out\"), a guidance cut, a strike, a deal, a heatwave. FRAME it first, then call once: `what_changed` (one sentence: what happened), `origin` (the company the event happens to — or, when no single listed company is the event's, the DEMAND it moves, e.g. \"European air-conditioning demand\"), `tickers` (the origin's US tickers; empty for a demand), `effect` (up / down: what the event does to the origin's demand — ask the user once if it could go either way), `date` (YYYY-MM-DD it became public; omit for today), `horizon` (the user's, if they said one). One model call, about 40 seconds and a few cents; the map is saved to the user's events. Never for an event already in get_echo_events — read that map instead.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "what_changed": {
+                        "type": "string",
+                        "description": "One sentence: what happened."
+                    },
+                    "origin": {
+                        "type": "string",
+                        "description": "The company the event happens to — or the demand it moves when no single listed company is the event's."
+                    },
+                    "tickers": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "The origin's US tickers; empty for a demand."
+                    },
+                    "effect": {
+                        "type": "string",
+                        "enum": [
+                            "up",
+                            "down"
+                        ],
+                        "description": "What the event does to the origin's demand."
+                    },
+                    "date": {
+                        "type": "string",
+                        "description": "YYYY-MM-DD the event became public; omit for today."
+                    },
+                    "horizon": {
+                        "type": "string",
+                        "enum": [
+                            "short term swing",
+                            "swing",
+                            "long term"
+                        ],
+                        "description": "The user's horizon, only if they said one."
+                    }
+                },
+                "required": [
+                    "what_changed",
+                    "origin",
+                    "tickers",
+                    "effect"
+                ]
+            }
+        },
+        {
+            "name": "get_news",
+            "description": "Recent dated NEWS (`companies` with a ticker as `subject`, or a topic) — to check what happened before you frame an event the user names (the date, what changed, which way), or to explain a link. Facts for the frame, never the map itself.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "category": {
+                        "type": "string",
+                        "enum": [
+                            "companies",
+                            "headlines",
+                            "topic"
+                        ],
+                        "description": "which kind of news read this is. `companies` — one listed company, `subject` is its TICKER. `headlines` — the market's front page, no subject needed. `topic` — free-text search for a theme, an institution or an asset with no ticker."
+                    },
+                    "subject": {
+                        "type": "string",
+                        "description": "for `companies`, the TICKER (NVDA, BA, AAPL). For `topic`, the theme in the words a paper would print (\"Federal Reserve\", \"OPEC\", \"semiconductors\", \"gold\"). Omit for `headlines`. It is both the search and the cache key, so ask for the same subject the same way each time."
+                    }
+                },
+                "required": [
+                    "category"
+                ]
+            },
+            "cache_control": {
+                "type": "ephemeral"
+            }
+        },
+        {
+            "name": "get_price_action",
+            "description": "Momentum snapshot: 1d/5d/1m/3m moves, position in the 1-year range, relative volume — how far a name has already moved since the event.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "ticker": {
+                        "type": "string",
+                        "description": "e.g. AAPL, NVDA, SPY"
+                    }
+                },
+                "required": [
+                    "ticker"
+                ]
+            }
+        },
+        {
+            "name": "remember_about_user",
+            "description": "Keep a LASTING fact about the user that they STATED, so every role knows it next time — \"I never trade low-float names\", \"I only trade the first hour\", \"I hold through earnings\", \"call me by my first name\". What you keep shows in ABOUT THE USER on every role's turns.\n- Only what THEY said about themselves, as a lasting rule or preference — never your read of them, never this trade's levels or size (the build keeps those), never a mood.\n- Never ask questions to fill it. Keep it the moment they say it, and say in a few words that you will remember.\n- They take one back (\"I do trade small caps now\") → call it with `forget: true` and the words of the old note.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "note": {
+                        "type": "string",
+                        "description": "The fact, in a short third-person line, as the user put it: \"never trades low-float names\", \"only trades the open\". To take one back, the words of the note to remove."
+                    },
+                    "forget": {
+                        "type": "boolean",
+                        "description": "true when the user takes a fact back (\"I do trade small caps now\") — removes the note matching `note`."
+                    }
+                },
+                "required": [
+                    "note"
+                ]
+            }
+        },
+        {
+            "name": "consult",
+            "description": "Put ONE decision to a more capable desk head and get a straight answer back. It cannot see this conversation and cannot fetch anything — you hand it the question and every number it needs, and it thinks harder than you can in-line.\n\nReach for it in one situation only: framing an event where the direction at the origin honestly could go either way and the user cannot say — never to map, and never to read a map.\n\nDo NOT reach for it to look something up, to double-check work you are already confident in, to summarize, or because a question feels big. A consult costs a full model call and adds seconds to the turn: if you already know the answer, or a tool call would settle it, that is the cheaper and better move. Most turns should end without it.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "question": {
+                        "type": "string",
+                        "description": "The single decision to make, stated as a question. One decision per call — not a list, and not 'what do you think'."
+                    },
+                    "context": {
+                        "type": "string",
+                        "description": "Everything needed to answer it: the levels, the account size and risk rule, the two readings that disagree. The consulted desk head cannot see your conversation and cannot fetch anything, so whatever you leave out simply is not considered."
+                    }
+                },
+                "required": [
+                    "question",
+                    "context"
+                ]
+            }
+        }
     ]
 }
