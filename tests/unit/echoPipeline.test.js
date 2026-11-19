@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { run, tick, _setDeps } from '../../services/echoPipeline.service.js'
-import { _tick as loopTick } from '../../monitoring/echoPipeline.monitor.service.js'
+import { _tick as loopTick, _reset as resetLoop } from '../../monitoring/echoPipeline.monitor.service.js'
 
 // Echo's pipeline (docs/design/echo-pipeline.md): framed → mapped → scored → (day-5 close) → checked → watching.
 
@@ -53,4 +53,17 @@ test('tick: every open event, one at a time; the loop is opt-in', async () => {
     const r = await tick()
     assert.deepEqual(r.ran.map(x => [x.id, x.status]), [['a', 'watching'], ['b', 'watching']])
     assert.deepEqual(await loopTick({ on: () => false, tick: async () => { throw new Error('must not run') } }), { off: true })
+})
+
+test('the loop: the intake every 3 hours, the steps every hour', async () => {
+    resetLoop()
+    let t = 0, intakes = 0
+    const deps = { on: () => true, now: () => t, intake: async () => { intakes++; return { events: [] } }, tick: async () => ({ ran: [] }) }
+    await loopTick(deps); t += 60 * 60 * 1000
+    await loopTick(deps); t += 2 * 60 * 60 * 1000
+    await loopTick(deps)
+    assert.equal(intakes, 2, 'at boot, then three hours later')
+    deps.intake = async () => { throw new Error('sources down') }
+    t += 3 * 60 * 60 * 1000
+    assert.deepEqual(await loopTick(deps), { intake: null, ran: [] }, 'a failed intake does not stop the steps')
 })

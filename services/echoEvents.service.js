@@ -116,4 +116,15 @@ export async function listOpen({ limit = 200 } = {}) {
     return (await coll()).find({ status: { $in: ['framed', 'mapped', 'scored'] } }).sort({ createdAt: 1 }).limit(limit).toArray()
 }
 
-export const echoEventsService = { frame, passesFilter, create, get, advance, list, listOpen }
+/**
+ * The house's event this one repeats — the same type on the same date about the same origin (a ticker in common, or
+ * the same origin name) — or null. Two sources telling one event (the 8-K and the news of a deal) must not be two votes.
+ */
+export async function findSame(ev) {
+    const q = { kind: 'house', type: ev.type, date: ev.date }
+    const same = await (await coll()).find(q).limit(50).toArray()
+    const name = String(ev.origin ?? '').toLowerCase()
+    return same.find(d => (ev.originTickers ?? []).some(t => (d.originTickers ?? []).includes(t)) || String(d.origin ?? '').toLowerCase() === name) ?? null
+}
+
+export const echoEventsService = { frame, passesFilter, create, get, advance, list, listOpen, findSame }

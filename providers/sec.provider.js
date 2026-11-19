@@ -118,8 +118,13 @@ export async function get8kFilings(ticker, { since = '2016-01-01' } = {}) {
     const entry = (await _getCikMap())[symbol]
     if (!entry) return null
     const out = []
+    // `url` (Echo's 8-K intake reads the filing): the primary document, when EDGAR names it.
     const take = (f) => (f?.form ?? []).forEach((form, i) => {
-        if ((form === '8-K' || form === '8-K/A') && f.filingDate[i] >= since) out.push({ day: f.filingDate[i], at: f.acceptanceDateTime?.[i] ?? null, items: f.items?.[i] ?? '' })
+        if ((form === '8-K' || form === '8-K/A') && f.filingDate[i] >= since) {
+            const acc = String(f.accessionNumber?.[i] ?? '').replace(/-/g, '')
+            const doc = f.primaryDocument?.[i]
+            out.push({ day: f.filingDate[i], at: f.acceptanceDateTime?.[i] ?? null, items: f.items?.[i] ?? '', url: acc && doc ? `https://www.sec.gov/Archives/edgar/data/${Number(entry.cik)}/${acc}/${doc}` : null })
+        }
     })
     const sub = await _getSubmissions(entry.cik)
     take(sub?.filings?.recent)
