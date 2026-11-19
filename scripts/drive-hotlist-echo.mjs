@@ -70,6 +70,26 @@ try {
         await page.screenshot({ path: `${OUT}/echo-${tag}-open.png`, fullPage: false })
         const width = await page.evaluate(() => [document.documentElement.scrollWidth, window.innerWidth])
         check(`${tag}: no sideways page scroll`, width[0] <= width[1], `${width[0]} vs ${width[1]}`)
+        // A linked name → its page (2026-11-19): how it trades (the technical analyst, swing), why Echo linked it, the
+        // analyst's coverage or where the name goes; the panel's Back returns to the opened event.
+        const sym = (await page.locator('.echo-links tbody .hot-sym').first().textContent()).trim()
+        await page.locator('.echo-links tbody .hot-sym').first().click()
+        await page.waitForSelector('.hot-page', { timeout: 15000 })
+        const body = await page.locator('.hot-page').textContent()
+        check(`${tag}: ${sym} opens its page`, (await page.locator('.hot-page__sym').textContent()) === sym)
+        check(`${tag}: how it trades`, (await page.locator('.hot-profile').count()) === 1)
+        check(`${tag}: why Echo linked it`, /From Echo/.test(body) && /not a pick/.test(body))
+        const detail = (await page.locator('.hot-page__body').textContent()).replace(/\s+/g, ' ').slice(0, 300)
+        const covered = await page.locator('.hot-page .echo-analyst').count()
+        check(`${tag}: the analyst's read or where it goes`, covered ? /Analyst:.*PT/.test(body) : /Not covered/.test(body),
+            covered ? (await page.locator('.hot-page .echo-analyst').textContent()).replace(/\s+/g, ' ') : detail)
+        await page.waitForTimeout(6000)   // the profile measures a first look on the spot
+        await page.screenshot({ path: `${OUT}/echo-${tag}-name.png`, fullPage: false })
+        const width2 = await page.evaluate(() => [document.documentElement.scrollWidth, window.innerWidth])
+        check(`${tag}: the page, no sideways scroll`, width2[0] <= width2[1], `${width2[0]} vs ${width2[1]}`)
+        await page.getByRole('button', { name: /Back/ }).first().click()
+        await page.waitForSelector('.echo-links', { timeout: 15000 })
+        check(`${tag}: back to the opened event`, (await page.locator('.echo-links tbody tr').count()) === links)
         await ctx.close()
     }
 } finally { await browser.close() }

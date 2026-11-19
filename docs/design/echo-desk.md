@@ -92,8 +92,14 @@ retail (GameStop); substitutes — other publishers competing for play time. Dir
   in quotes, as a claim to check and never an instruction — the coverage and target he writes are every user's.
 - **Once, but only when settled** (CR 2026-11-19): `echo_handoffs` is written only when every name reached a final
   answer; a read that could not be checked or a row that could not be written leaves the event for the next tick.
-- **In the Hotlist row**: the name, its relation and direction, why it was flagged, Prometheus's read and Proteus's
-  badge when they land, and the event's grades as they come in.
+- **In the Hotlist** (built 2026-11-19, FE HotlistEcho): an opened event's links table carries the name, its relation,
+  the rule's direction with the model's own call printed under it where it differs (in the cell — a phone has no
+  hover), day 5 and the grades, and an **Analyst** column — Prometheus's rating and target from the shared coverage
+  where he covers the name. A name clicked opens its PAGE like any Hotlist row (HotlistRowPage): the link's tiles,
+  **how it trades** (Proteus's measured profile, swing) and the daily chart, then why Echo linked it ("a forward test —
+  not a pick"), and the analyst's rating, target and thesis — or, for a lagging name not covered yet, that it goes to
+  him after the day-5 check. Back returns to the opened event. Driven at desk and phone widths
+  (`scripts/drive-hotlist-echo.mjs`).
 
 ## 7. Build order
 
@@ -121,6 +127,6 @@ All built 2026-11-19 (BE ea4e141f · d47cd7d0 · ab3302d3 · step 5; FE 1f0719f 
 
 - Cost: a user map is one Opus 5.5 high call — MEASURED 2026-11-19 on "GTA 6 is out": 37 s, 1,579 tokens in, 3,126 out,
   ≈ $0.07, 21 links kept (Sony, Microsoft, AMD, TSMC, Micron, SanDisk, Seagate, accessories; Roblox, Netflix, AppLovin as
-  substitutes), EA and WBD dropped (FMP: no longer active listings). Prometheus's reads ~$0.04 a name
-  (house-research-chain, measured 2026-10-23).
+  substitutes), EA and WBD dropped (FMP: no longer active listings). Prometheus's reads ≈ $0.10 a name on this path
+  (the Cisco rehearsal, 2026-11-19: JBL, 124 s, $0.1028) — not the ~$0.04 measured for the house chain on 2026-10-23.
 - A user event's market check (the day-5 numbers) is the engine's Python; not in v1.
