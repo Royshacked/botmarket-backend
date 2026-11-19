@@ -73,6 +73,5 @@ try {
         await ctx.close()
     }
 } finally { await browser.close() }
-console.log(results.join('\n'))
 console.log('errors:', errors.length ? errors.join('\n  ') : 'none')
 process.exit(0)
