@@ -1170,6 +1170,12 @@ services/
                             DUE_KEYS only (long-term reviews, expired, a watch's date) — the monitor's, once a day
                             while stale. Results carry `long_term` / `long_term_new` (houseScan bookSends: a NEW yes
                             sends to the long-term book)
+  echoMap.service.js        ECHO'S MAP FOR AN EVENT THE USER NAMES (echo-desk.md §3–4, step 3, 2026-11-19): the
+                            engine's llm_map PORTED (Render cannot run the Python) — SYSTEM verbatim (a test diffs it
+                            against the engine checkout), schema, Opus 5.5 high, resolve (active US listings via
+                            fmp getListingProfile), directionFor = chains.direction_for. frameEvent checks what the
+                            desk frames ("GTA 6 is out" → origin TTWO, effect up, today). Stored in
+                            `echo_user_events` per user, PROMPT_VERSION `user-…` — never the forward test. ~$0.07 a map.
   echo.service.js           ECHO'S FORWARD TEST, READ (docs/design/echo-desk.md step 1, 2026-11-19): the engine's
                             `echo_forward` (aether-engine echo/forward.py) shaped for the Hotlist and Echo's desk —
                             each link joined to its frozen check row, its spread vs its own stand-ins, the event's
@@ -1278,6 +1284,9 @@ providers/
                                 stop_details category. The model is the caller's (llmModels resolves it);
                                 there is no second default here. The non-streaming twins were deleted
                                 2026-09-16 with no caller. (OpenAI SDK is used directly, transcribe only)
+                                callAnthropicStructured (2026-11-19, Echo's map): one STREAMED beta request whose
+                                answer is JSON in a schema (output_config.format), server-side fallback on — returns
+                                { data, model SERVED, stopReason }; data null on a refusal, cut-off or bad JSON.
                                 The LANDING ROUND (2026-09-20, both loops): the last of maxContinuations
                                 runs with tool_choice none and TOOL_BUDGET_LANDING (llmStream.util) on
                                 the final tool results, so a turn still reading at the cap lands as text

@@ -99,6 +99,8 @@ retail (GameStop); substitutes — other publishers competing for play time. Dir
 
 ## 8. Open
 
-- Cost: a user map is one Opus 5.5 high call — measured at build, not guessed here; Prometheus's reads ~$0.04 a name
+- Cost: a user map is one Opus 5.5 high call — MEASURED 2026-11-19 on "GTA 6 is out": 37 s, 1,579 tokens in, 3,126 out,
+  ≈ $0.07, 21 links kept (Sony, Microsoft, AMD, TSMC, Micron, SanDisk, Seagate, accessories; Roblox, Netflix, AppLovin as
+  substitutes), EA and WBD dropped (FMP: no longer active listings). Prometheus's reads ~$0.04 a name
   (house-research-chain, measured 2026-10-23).
 - A user event's market check (the day-5 numbers) is the engine's Python; not in v1.

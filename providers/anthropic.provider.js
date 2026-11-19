@@ -310,6 +310,53 @@ export async function callAnthropicOnce({ model, systemPrompt, user, image = nul
     return text
 }
 
+// ─── The structured one-shot ──────────────────────────────────────────────────
+// One request whose answer is JSON in a schema (output_config.format) — the third way to ask, for a
+// call whose reply is DATA a caller stores, not text a person reads (Echo's chain map, 2026-11-19;
+// docs/design/echo-desk.md §4). STREAMED: a thinking model at effort high shares max_tokens with its
+// reasoning, and a long non-streamed request hits the client's timeout. SERVER-SIDE FALLBACK on: a
+// refusal or an overload can be answered by another model, so the model that SERVED is returned —
+// a caller that stores the answer must store who gave it.
+
+/** The request body — pure, so the shape is testable without a client. */
+export function _structuredRequest({ model, systemPrompt, user, schema, effort, maxTokens }) {
+    return {
+        model,
+        max_tokens: maxTokens,
+        betas:      ['server-side-fallback-2026-07-01'],
+        fallbacks:  'default',
+        system:     systemPrompt,
+        output_config: { effort, format: { type: 'json_schema', schema } },
+        messages:   [{ role: 'user', content: user }],
+    }
+}
+
+/**
+ * @param {{ model: string, systemPrompt: string, user: string, schema: object, effort?: string, maxTokens?: number,
+ *           onUsage?: (usage: object, model: string) => void, client?: object }} args
+ * @returns {Promise<{ data: object|null, model: string, stopReason: string|null }>} `data` is null when the answer is
+ *          not a finished, parseable one (a refusal through the whole fallback chain, a cut-off, unreadable JSON) —
+ *          `stopReason` says which; nothing throws for those. A transport error does throw.
+ */
+export async function callAnthropicStructured({ model, systemPrompt, user, schema, effort = 'high', maxTokens = 64000, onUsage, client = _defaultClient }) {
+    if (!model) throw new Error('callAnthropicStructured: model is required')
+    const msg = await client.beta.messages.stream(_structuredRequest({ model, systemPrompt, user, schema, effort, maxTokens })).finalMessage()
+    const served = msg.model || model
+    onUsage?.(msg.usage, served)
+    const stopReason = msg.stop_reason ?? null
+    if (stopReason !== 'end_turn') {
+        logger.warn(LOG, `structured call ended ${stopReason} on ${served} — no answer`)
+        return { data: null, model: served, stopReason }
+    }
+    const text = (msg.content ?? []).filter(b => b.type === 'text').map(b => b.text).join('')
+    try {
+        return { data: JSON.parse(text), model: served, stopReason }
+    } catch {
+        logger.warn(LOG, `structured call on ${served} returned unreadable JSON (${text.length} chars)`)
+        return { data: null, model: served, stopReason: 'unreadable' }
+    }
+}
+
 /** The one-shot request body — pure, so the thinking rule above is testable without a client. */
 export function _oneShotRequest({ model, systemPrompt, content, maxTokens }) {
     const reasoning = _thinkingConfig(undefined, model)

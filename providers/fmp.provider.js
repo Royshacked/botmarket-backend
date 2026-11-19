@@ -192,12 +192,26 @@ async function _profileBasics(ticker) {
             averageVolume: Number.isFinite(vol) && vol >= 0 ? vol : null,
             activelyTrading: p.isActivelyTrading !== false,
             fund: p.isEtf === true || p.isFund === true,
+            // Echo's chain map (echo-desk.md §4): a link is kept only on an active US listing, named as FMP names it,
+            // and the origin's own description goes into the map's prompt — the same /profile row, no second call.
+            name: p.companyName || null,
+            exchange: p.exchangeShortName || p.exchange || null,
+            description: p.description ? String(p.description).slice(0, 1500) : null,
         }
         _profileCache.set(symbol, entry)
         return entry
     } catch {
         return null
     }
+}
+
+/**
+ * A listing as Echo's map checks it — `{ name, exchange, activelyTrading, description }` — or null when FMP has no profile
+ * for the symbol or could not be reached (the cached /profile row, one fetch shared with the sector and listing facts).
+ */
+export async function getListingProfile(ticker) {
+    const p = await _profileBasics(ticker)
+    return p ? { name: p.name, exchange: p.exchange, activelyTrading: p.activelyTrading, description: p.description } : null
 }
 
 /** A listing's trading facts — `{ averageVolume, activelyTrading, fund }` — or null when the profile is unreachable. */
