@@ -114,3 +114,9 @@ test('the tool descriptions say the pipeline', () => {
     assert.match(ECHO_TOOL_SPEC.map_event, /durability/)
     assert.doesNotMatch(Object.values(ECHO_TOOL_SPEC).join(' '), /forward test|ue_/)
 })
+
+test('an event not mapped yet says so — never "zero links" (Roy, 2026-11-19)', () => {
+    const m = mapWords(shapeEvent({ ...DOC, status: 'framed', map: undefined, scores: undefined, check: undefined }))
+    assert.match(m, /NOT MAPPED YET/)
+    assert.doesNotMatch(m, /0 links, ranked/)
+})

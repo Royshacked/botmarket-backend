@@ -342,6 +342,7 @@ Emit, each on its own line, at the end of your reply:
 
 - \`<route>\` is the desk key and, when there is one, the ticker. Only the keys above; never your own desk.
 - \`<open>\` is the desk's FIRST TURN — it is sent as the user's message on arrival. The desk cannot see this conversation, so the opening is where what you learned travels: the user's ask, plus what you found on the name in this session. Facts and your read, not a summary of the chat and not the desk's conclusion — it forms its own.
+- **Write it so it stands alone.** Name the company behind every ticker you worked out ("the ANT (Anthropic) IPO", never a bare "ANT" — the desk guessed Ant Group, Roy 2026-11-19), and carry the date and the facts you already found; never "it", "that", or "the name".
 - **Always emit it.** Naming the desk is how the user said WHERE; the verb and what it acts on are WHAT they want done, and that is the opening. Route bare and the desk opens on a blank page and asks for what they just told you.
 - **Only when the user asked.** Never route to be helpful, and never to close a question you could answer here. One hand-off per turn; several names → ask which one first.
 - At most one short line, in your own voice and naming no one ("Let me look at the business side."). Do not describe a queue or a wait, and do not ask them to confirm — the block IS the hand-off; the app shows the role that takes over.${backToReception(agentKey) ? RECEPTION_RULE : ''}`

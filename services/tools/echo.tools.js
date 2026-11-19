@@ -93,6 +93,11 @@ export function mapWords(e, { reasonsFor = 8 } = {}) {
     if (e.checked) lines.push(`Market check (day 5 = ${e.checked.checkDay}): layer 1 moved ${pct(e.checked.yardstick?.median)} in its direction (${e.checked.yardstick?.from ?? '—'}). Options volatility not measured.`)
     else if (e.waiting) lines.push(`Market check: ${e.waiting}.`)
     if (e.triggers?.length) lines.push(`Wave watch — ${e.triggers.length} trigger(s): ${e.triggers.slice(-3).map(t => `${t.date ?? ''} ${t.what}`).join('; ')}`)
+    // Not mapped yet is not "no links" (Roy, 2026-11-19: the analyst said an unmapped event "returned zero links").
+    if (!e.map) {
+        lines.push(`NOT MAPPED YET — the event is recorded; its chain is mapped and scored when the pipeline next runs${e.error ? ` (the last try stopped: ${e.error})` : ''}. There are no links to read yet — say so; never "zero links" or "nothing found".`)
+        return lines.join('\n')
+    }
     lines.push(`${e.links.length} links, ranked (flags first, then score; high at 8 of 12):`)
     e.links.forEach((l, i) => lines.push(linkWords(l, i < reasonsFor)))
     if (e.map?.dropped?.length) lines.push(`Dropped (${e.map.dropped.length}): ${e.map.dropped.map(d => `${d.ticker || d.name || '?'} — ${d.reason}`).join('; ')}`)

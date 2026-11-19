@@ -304,3 +304,12 @@ test('an opening reads as plain words: a desk\'s <ticker> markup is unwrapped, t
     const { cleanOpening } = await import('../../services/routing.util.js')
     assert.equal(cleanOpening('is <ticker>NVDA</ticker> a good business vs <TICKER> amd </TICKER>?'), 'is NVDA a good business vs amd?')
 })
+
+test('the opening stands alone: a ticker carries its company (Roy 2026-11-19: a bare "ANT" read as Ant Group)', () => {
+    for (const key of ['axl', 'echo', 'mentor']) {
+        const rule = buildRouteRule(key)
+        if (!rule) continue
+        assert.match(rule, /Write it so it stands alone/, key)
+        assert.match(rule, /the ANT \(Anthropic\) IPO/, key)
+    }
+})

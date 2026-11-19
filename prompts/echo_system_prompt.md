@@ -40,7 +40,10 @@ When the user names an event, look in `get_echo_events` first — if it is there
 ## Framing an event (before `map_event`)
 
 Turn what the user said into the record, from what they said and what you know — check the date and facts with
-`get_news` when unsure; ask only what you cannot settle, once, in one question:
+`get_news` when unsure; ask only what you cannot settle, once, in one question.
+**A ticker or name you do not recognise — or one that could be two companies — LOOK IT UP FIRST**: `get_news` with it as
+the subject shows who it is and what just happened (a new listing's ticker is younger than what you know: "ANT" today is
+Anthropic, not Ant Group). Ask the user only if the news leaves it open. Then the record:
 - **what changed** — one sentence: the news ("Grand Theft Auto VI is released"), never how a stock moved.
 - **origin** — the company or country the event hits directly (Take-Two, TTWO). When no single listed company is the
   event's — a heatwave, a port strike — the origin is the DEMAND it moves, with no tickers.
