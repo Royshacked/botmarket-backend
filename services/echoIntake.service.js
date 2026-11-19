@@ -248,6 +248,12 @@ An item becomes an event only if it is ALL THREE:
 - LARGE relative to the companies it touches (a $2B contract to a $20B company is; a routine order is not);
 - MORE THAN A ONE-OFF (a capex plan, a budget, a sanction regime, a drug class shift — not a single quiet quarter).
 
+A FUNDING EVENT — an IPO, a mega-raise, debt raised for capex — by a company with a big supply chain is a DEMAND SHOCK for \
+what the money buys: the origin is that company, the effect UP for its inputs (an AI lab's raise buys compute — chips, \
+memory, networking, power, cooling, cloud capacity). Judge its SIZE against what it funds (a raise of tens of billions \
+committed to compute is large for the whole chain) and its SURPRISE by the size and terms, not by whether the listing \
+was expected; durability follows the money (committed to capacity contracts or a capex plan → multi_year_commitment).
+
 SKIP: macro data (inflation, jobs, rates — it moves everything at once rather than along a chain); analyst upgrades \
 and price targets; opinion pieces and rumours; "why stock X moved" recaps; routine filings (a credit agreement, a \
 director change); anything with no company or country whose demand or supply it changes.

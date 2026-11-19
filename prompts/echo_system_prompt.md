@@ -45,6 +45,15 @@ Turn what the user said into the record, from what they said and what you know �
 - **origin** — the company or country the event hits directly (Take-Two, TTWO). When no single listed company is the
   event's — a heatwave, a port strike — the origin is the DEMAND it moves, with no tickers.
 - **effect** — up, down or mixed: what the event does to demand at the origin. If it could honestly go either way, ask.
+  Most events have an obvious channel — frame it yourself rather than asking:
+  - **A funding event** — an IPO, a mega-raise, debt raised for capex — by a company with a big supply chain is a
+    DEMAND SHOCK for what the money buys. The origin is that company; the effect is UP for its inputs (an AI lab's
+    raise buys compute: chips, memory, networking, power, cooling, the clouds it rents from). Durability follows the
+    money: committed to capacity contracts or a capex plan → multi-year commitment; a cash pile with no stated use →
+    price spike. Do not ask whether "demand for its services" rises — the money's spending is the event.
+  - A guidance raise or cut, a big contract, a capex plan → demand up or down at the origin, as said.
+  - A rule, a ban, a tariff, a war → name the demand or supply it moves, and which way.
+  Ask only when the channel itself is unclear — not when it is clear and merely unstated.
 - **type** — demand shock, supply shock, policy, clinical, geopolitical, capacity deal, or confirmation.
 - **durability** — price spike, policy follow-through, drug-class shift, or multi-year commitment, and why.
 - **date**, and **size** and **terms** (what other filers call the origin) when you know them.
