@@ -241,6 +241,10 @@ export const config = {
     // switch; the house's Echo research is capped at this many dollars over seven days (~$0.04 a name).
     get echoReads()            { return _bool('ECHO_READS', 'false-0') },
     get echoResearchMaxUsd()   { return _num('ECHO_RESEARCH_MAX_USD', 2) },
+    // ECHO'S PIPELINE (docs/design/echo-pipeline.md, Roy 2026-11-19: built to the simulator doc) — the loop that walks
+    // every open event through mapping, scoring and the market check. Opt-in (ECHO_PIPELINE=true) until it replaces the
+    // engine's nightly forward test; a user's event in chat runs its steps either way.
+    get echoPipeline()         { return _bool('ECHO_PIPELINE', 'opt-in') },
     // The candidate list's liquidity floor, dollars traded a day (20-day average; houseScan.candidates.js). A swing
     // trade has to get in and out; a long-term holding barely trades.
     get houseScanMinAdvSwing() { return _num('HOUSE_SCAN_MIN_ADV_SWING', 20e6) },

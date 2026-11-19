@@ -111,4 +111,9 @@ export async function list({ userId = null, status = null, limit = 100 } = {}) {
     return (await coll()).find(q).sort({ date: -1, createdAt: -1 }).limit(Math.min(limit, 500)).toArray()
 }
 
-export const echoEventsService = { frame, passesFilter, create, get, advance, list }
+/** Every event a step still has to run on (the pipeline's tick) — the house's and every user's, oldest first. */
+export async function listOpen({ limit = 200 } = {}) {
+    return (await coll()).find({ status: { $in: ['framed', 'mapped', 'scored'] } }).sort({ createdAt: 1 }).limit(limit).toArray()
+}
+
+export const echoEventsService = { frame, passesFilter, create, get, advance, list, listOpen }

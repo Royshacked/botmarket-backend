@@ -71,7 +71,9 @@ test('server.js registers the full fleet', () => {
         // 'prometheusScorecard' (2026-10-27) grades Prometheus's frozen calls vs SPY and the catalyst reads' windows.
         // 'echoReads' (2026-11-19) sends a forward-test event's lagging names to Prometheus and Proteus once its day-5
         // check is frozen (echo-desk.md §6); ECHO_READS=false turns it off.
-        'coverage', 'dailyScreener', 'echoReads', 'entries', 'exits', 'guardSweep', 'industryView', 'marketBrief', 'marketOpen', 'paperEquity',
+        // 'echoPipeline' (2026-11-19) walks every open Echo event through the simulator doc's steps (echo-pipeline.md);
+        // opt-in, ECHO_PIPELINE=true.
+        'coverage', 'dailyScreener', 'echoPipeline', 'echoReads', 'entries', 'exits', 'guardSweep', 'industryView', 'marketBrief', 'marketOpen', 'paperEquity',
         'paperFill', 'paperMark', 'prometheusScorecard', 'pythiaCalls', 'pythiaWeekly', 'reconciler', 'talos', 'themis',
     ])
 })
