@@ -171,7 +171,9 @@ export function makeSessionTurn({
             // A route's OPENING (or a hand-back to Axl) is the receiving role's first turn, not something the user typed again:
             // marked, so the chat draws the user's words once (one-axl.md, 2026-11-13 — the drive showed the question twice).
             const opening = origin === 'opening' || origin === 'reception'
-            const asked = await sessions.append({ sessionId, userId: user._id, message: { agent, role: 'user', content: text, ...(opening ? { ref: { opening: true } } : {}) } })
+            // A subagent's turn (its map landing, the trader's hand-off) is Axl's to read too (`via`, subagent.js).
+            const via = isSubagent(agent) ? { via: 'axl' } : {}
+            const asked = await sessions.append({ sessionId, userId: user._id, message: { agent, role: 'user', content: text, ...(opening ? { ref: { opening: true, ...via } } : {}) } })
             if (asked.reason) return asked
         }
 
@@ -259,7 +261,7 @@ export function makeSessionTurn({
         const tools   = [...toolsCalled].map(([name, targets]) => (targets.size ? `${name} ${[...targets].join(', ')}` : name))
         if (tools.length) logger.info(LOG, `${agent} turn tools`, { tools })
         const replied = prose
-            ? await sessions.append({ sessionId, userId: user._id, message: { agent, role: 'assistant', content: prose, ref: extras, tools } })
+            ? await sessions.append({ sessionId, userId: user._id, message: { agent, role: 'assistant', content: prose, ref: isSubagent(agent) ? { ...(extras ?? {}), via: 'axl' } : extras, tools } })
             : null
 
         const next = desk.nextState ? desk.nextState(state, result, prepared) : state

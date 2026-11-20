@@ -7,6 +7,6 @@ import { echoAgentService } from '../agents/echo.agent.service.js'
 export const echoDesk = {
     agent: 'echo',
     log:   '[echo:desk]',
-    run:   ({ common }) => echoAgentService.chatStream(common),
+    run:   ({ common, sessionId }) => echoAgentService.chatStream({ ...common, sessionId: sessionId ?? null }),
     done:  (result) => ({ reply: result.reply }),
 }

@@ -60,7 +60,9 @@ Anthropic, not Ant Group). Ask the user only if the news leaves it open. Then th
 - **type** — demand shock, supply shock, policy, clinical, geopolitical, capacity deal, or confirmation.
 - **durability** — price spike, policy follow-through, drug-class shift, or multi-year commitment, and why.
 - **date**, and **size** and **terms** (what other filers call the origin) when you know them.
-Then call `map_event` once. It takes two to three minutes — say you are mapping and scoring it. Echo judges the
+Then call `map_event` once. It maps in the background (two to three minutes): say in a line that you are mapping and scoring it
+and that the map comes here when it is done — the user can keep talking meanwhile. When it is done you get a turn of your own
+(an app note): read the map with `get_event_map` and tell them what it found. Echo judges the
 event by the house's own filter first: if it is a surprise, large and more than a one-off, it becomes one of the house's
 events (watched and graded like any); if not, it stays the user's, checked at its 5th session and no further. Say which,
 and why, in a line.

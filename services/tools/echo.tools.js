@@ -15,6 +15,7 @@ import { echoEventsService, TYPES, DURABILITIES } from '../echoEvents.service.js
 import { echoPipelineService } from '../echoPipeline.service.js'
 import { echoReadsService, MAX_ASK, MAX_USER_WEEK } from '../echoReads.service.js'
 import { judge } from '../echoIntake.service.js'
+import { echoMapJobs } from '../echoMapJobs.service.js'
 
 const LOG = '[echo.tools]'
 const FLAG_WORDS = { underreacted_winner: 'UNDERREACTED WINNER', overreacted_loser: 'OVERREACTED LOSER', fully_priced: 'fully priced' }
@@ -27,7 +28,7 @@ export const ECHO_TOOL_SPEC = {
     get_echo_events: `Echo's events — the house's (the intake reads earnings moves, 8-K deals, policy, defense awards, trials and news, and keeps what passes the filter: a surprise, large, more than a one-off) and the user's own — each with where it stands, its top-scored names and its flags; and the validation record so far. Read it first when the user asks what Echo has found, or about an event that may already be here.`,
     get_event_map: `One event whole — the record (type, what changed, size, durability and why), then every link RANKED BY SCORE: relation, layer, direction and why; the six factors (lock-in, supply response, bottleneck, directness, exposure, coverage, 0–2 each, high at 8 of 12) with their reasons; the filing evidence (named in filings, a 10-K's stated share, the company's own supply sentences); the day-5 market check and the flag (underreacted winner, overreacted loser, fully priced); the grades since. \`id\` is "ev_…" from get_echo_events.`,
     request_reads: `Send names from one of the USER's OWN events (an id "ev_…" they mapped) to the analyst and the technical analyst: the analyst's SWING coverage (researched for the house when there is none standing — a few minutes each) and the technical analyst's measured profile. \`tickers\`: the names the user picked from that map (at most ${MAX_ASK} at a time, ${MAX_USER_WEEK} a week); omit for its top-scored directional links. Only when the user asks. The house's flagged names go on their own after the day-5 check — never send those.`,
-    map_event: `Map an event the USER names through Echo's whole pipeline — the chain (layers 1–3 both ways, losers and substitutes, every link checked against SEC filings) and the six-factor score on every link. Anything: a launch ("GTA 6 is out"), a guidance cut, a rule, a strike, a deal, a war. FRAME it first, then call once: \`what_changed\` (one sentence: the news, not a stock's move), \`origin\` (the company or country it hits directly, or the demand it moves), \`tickers\` (the origin's US tickers; empty for a country or a demand), \`effect\` (up / down / mixed: what it does to demand AT THE ORIGIN — ask the user once if unsure), \`type\` (${TYPES.join(', ')}), \`durability\` ({kind: ${DURABILITIES.join(' / ')}, why} — a locked-in commitment lasts, a price spike cures itself), \`date\` (YYYY-MM-DD it became public; omit for today), \`size\` (as a sentence, if known), \`terms\` (what other companies' filings call the origin). Echo first JUDGES it by the intake's own filter (a surprise, large, more than a one-off): an event becomes the house's, watched and graded like any (or the house's own, when the intake already has it); otherwise it stays the user's — mapped, scored and checked at day 5, no watch. Say which. Takes two to three minutes and well under a dollar. Never for an event already in get_echo_events — read that one instead.`,
+    map_event: `Map an event the USER names through Echo's whole pipeline — the chain (layers 1–3 both ways, losers and substitutes, every link checked against SEC filings) and the six-factor score on every link. Anything: a launch ("GTA 6 is out"), a guidance cut, a rule, a strike, a deal, a war. FRAME it first, then call once: \`what_changed\` (one sentence: the news, not a stock's move), \`origin\` (the company or country it hits directly, or the demand it moves), \`tickers\` (the origin's US tickers; empty for a country or a demand), \`effect\` (up / down / mixed: what it does to demand AT THE ORIGIN — ask the user once if unsure), \`type\` (${TYPES.join(', ')}), \`durability\` ({kind: ${DURABILITIES.join(' / ')}, why} — a locked-in commitment lasts, a price spike cures itself), \`date\` (YYYY-MM-DD it became public; omit for today), \`size\` (as a sentence, if known), \`terms\` (what other companies' filings call the origin). Echo first JUDGES it by the intake's own filter (a surprise, large, more than a one-off): an event becomes the house's, watched and graded like any (or the house's own, when the intake already has it); otherwise it stays the user's — mapped, scored and checked at day 5, no watch. Say which. Takes two to three minutes and well under a dollar — in a chat it runs in the BACKGROUND: the call returns at once, and you get a turn of your own to tell the user what the map found when it is done. Never for an event already in get_echo_events — read that one instead.`,
 }
 
 const pct = (x) => (Number.isFinite(x) ? `${x > 0 ? '+' : ''}${(Math.round(x * 1000) / 10).toFixed(1)}%` : '—')
@@ -104,13 +105,24 @@ export function mapWords(e, { reasonsFor = 8 } = {}) {
     return lines.join('\n')
 }
 
+const LABEL_MAX = 70
+
+/** The event as the chat's status line names it — short, in quotes; a long framing is cut at a word. Exported for tests. */
+export function mapLabel(whatChanged) {
+    const s = String(whatChanged ?? '').trim().replace(/\.$/, '')
+    if (!s) return 'the event'
+    if (s.length <= LABEL_MAX) return `"${s}"`
+    const cut = s.slice(0, LABEL_MAX)
+    return `"${cut.slice(0, cut.lastIndexOf(' ') > 30 ? cut.lastIndexOf(' ') : LABEL_MAX).replace(/[,;:\s]+$/, '')}…"`
+}
+
 const READ_WORDS = {
     queued: 'queued for the analyst (swing coverage)', waiting: 'already in line for the analyst', ready: "the analyst's coverage stands — read it there",
     covered: 'the analyst covers it on another horizon', passed: 'the analyst researched it and passed', failed: "the analyst's last try failed — not asked again today",
     not_queued: 'could not be queued', unknown: "the analyst's read could not be checked",
 }
 
-export function makeEchoHandlers({ userId = null, read = echoService, events = echoEventsService, pipeline = echoPipelineService, reads = echoReadsService, judged = judge } = {}) {
+export function makeEchoHandlers({ userId = null, sessionId = null, read = echoService, events = echoEventsService, pipeline = echoPipelineService, reads = echoReadsService, judged = judge, jobs = echoMapJobs } = {}) {
     return {
         get_echo_events: makeToolHandler('get_echo_events', async () => {
             const { events: list, report } = await read.listEvents(userId)
@@ -174,6 +186,14 @@ export function makeEchoHandlers({ userId = null, read = echoService, events = e
             } else {
                 doc = await events.create({ ...f.event, filter: { surprise: false, large: false, lasting: false, why: verdict.reason } }, { userId, source: 'chat' })
                 judgedLine = `Echo did not take it as a house event (${verdict.reason}): it is the user's — mapped and scored, checked at its 5th session, then no watch.`
+            }
+            // In a chat, the map runs in the BACKGROUND (modes-and-builders.md step 2): the chat stays free, and the event
+            // analyst comes back with the map when it is done.
+            if (doc.status === 'framed' && sessionId) {
+                jobs.start({ userId, sessionId, doc, label: mapLabel(doc.whatChanged ?? f.event.whatChanged) })
+                return `${judgedLine}\nMAPPING STARTED (${doc._id}) — two to three minutes, in the background. Tell the user in one or two ` +
+                    'lines: which it is (the house\'s or theirs, and why), that it is being mapped and scored now, and that the map comes ' +
+                    'here when it is done — they can keep talking meanwhile. Say nothing about its links: there are none yet.'
             }
             const r = doc.status === 'framed' ? await pipeline.run(doc) : { status: doc.status }
             const e = await read.getEvent(doc._id, userId)

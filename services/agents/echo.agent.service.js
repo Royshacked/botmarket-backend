@@ -56,6 +56,7 @@ export const echoAgentService = { chatStream }
 
 async function chatStream({
     messages = [], model: requestedModel, audience = null, reasoningEffort, userId,
+    sessionId = null,   // the chat this turn is in — map_event maps in the background and comes back here (modes-and-builders.md step 2)
     onToken, onToolStart, onReasoning, onChart, signal,
     _run = runAgentStream,   // the shared contract-test seam (agentIO.runAgentStream)
 }) {
@@ -75,7 +76,7 @@ async function chatStream({
         log: LOG, requestedModel, userId, messages: normalized, systemPrompt,
         tools: TOOLS,
         // The user's own events are theirs: the Echo handlers are bound to this turn's user.
-        toolHandlers: { ...TOOL_HANDLERS, ...makeEchoHandlers({ userId }) },
+        toolHandlers: { ...TOOL_HANDLERS, ...makeEchoHandlers({ userId, sessionId }) },
         reasoningEffort, signal, onToken, onToolStart, onReasoning, onChart,
         tagCaptures: buildTagCaptures({ ...route.captures }),
     })

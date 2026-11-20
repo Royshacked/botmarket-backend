@@ -116,6 +116,18 @@ test('refused before anything runs: an unknown specialist, no question, no compa
     assert.ok(isToolError(failed)); assert.match(toolErrorText(failed), /the event analyst failed \(model down\) — say so/)
 })
 
+test("Axl's summary fold keeps who said it: the specialist's answer is labelled as its, not the desk's", async () => {
+    const { makeSummarizer } = await import('../../services/desks/summarize.js')
+    let sent = null
+    const summarize = makeSummarizer({ once: async ({ user }) => { sent = user; return 'ok' }, record: async () => {} })
+    await summarize({ userId: 'u1', agent: 'axl', turns: [
+        { agent: 'axl', role: 'user', kind: 'msg', content: 'does the ANT IPO reach others?' },
+        { agent: 'echo', role: 'assistant', kind: 'msg', content: 'Broadcom scores 9.', ref: { via: 'axl' } },
+        { agent: 'axl', role: 'assistant', kind: 'msg', content: 'Ask about any name on the map.' },
+    ] })
+    assert.match(sent, /USER: does the ANT IPO reach others\?\nEVENT ANALYST \(asked by the desk\): Broadcom scores 9\.\nDESK: Ask about any name on the map\./)
+})
+
 test("Axl's desk turns `via` into the hint: a subagent's role only", () => {
     assert.deepEqual(specialistHint('echo'), { key: 'event_analyst', role: 'event analyst' })
     assert.deepEqual(specialistHint('proteus'), { key: 'technical_analyst', role: 'technical analyst' })

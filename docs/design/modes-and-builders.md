@@ -61,10 +61,16 @@ the existing turn machinery:
   back to Axl as data ("the user wants a trade on FN") — Axl switches the mode (§4).
 - **A clarifying question** from the role is its reply; the user answers Axl; Axl calls again with the answer and the
   exchange.
-- **Echo's `map_event` becomes background work**: it returns at once ("mapping — 2–3 minutes"), the pipeline runs as a job,
-  the work pane shows "Mapping: ANT IPO", and the result lands as an event-analyst row (the settle-hook pattern of
-  `runner.readSettled`).
+- **Echo's `map_event` becomes background work**: it returns at once ("mapping — 2–3 minutes"), the pipeline runs as a job
+  (`echoMapJobs.service.js`), and when it is done the event analyst gets ONE turn (a hidden app opening) to say what the
+  map found, under its own role. **BUILT 2026-11-20 (step 2)** — one departure from M16: the "mapping…" line is the chat's
+  STATUS LINE (`session.waiting`, the analyst-read line's pipe), not the work pane — a map is nothing to confirm, and the
+  status line is where the chat already says what it is waiting on. Live (axl_dev): Axl's turn ended at 32 s instead of
+  ~3 min, "is the market open?" was answered while it mapped, the map came back at 214 s.
 - Direct entries (Hotlist Echo tab "Walk me through…", the desk list) send the text to Axl with a hint naming the role.
+- **BUILT 2026-11-20 (step 1)** — `ask_specialist` (Axl), `desks/subagent.js`, `startTurn` sends a subagent's turn to Axl
+  (`input.via`), a subagent never takes the floor (`sessionTurn.land`); its rows carry `ref.via: 'axl'` and are in Axl's
+  segment, labelled as the role's (context + summary). The analyst stays a desk until Analyst mode (step 9).
 - `RECEPTION_RULE` and the Echo/Proteus routes go from Axl's prompt; `routedFrom` loses `axl` for them.
 
 ## 4. Builder modes

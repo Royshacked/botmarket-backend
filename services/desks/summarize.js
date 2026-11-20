@@ -12,7 +12,8 @@
 import { callAnthropicOnce } from '../../providers/anthropic.provider.js'
 import { CHEAP_MODEL } from '../llmModels.js'
 import { recordUsage } from '../tokenUsage.service.js'
-import { segmentOf, contextRole } from '../session.util.js'
+import { segmentOf, contextRole, isAnswerFor } from '../session.util.js'
+import { DESKS } from './registry.js'
 import { logger } from '../logger.service.js'
 
 const LOG = '[summarize]'
@@ -44,7 +45,9 @@ export function makeSummarizer({ once = callAnthropicOnce, record = recordUsage,
      * Fold `turns` into `prior`. Returns the new summary text, or null on any failure.
      */
     return async function summarize({ userId, agent, prior = null, turns }) {
-        const lines = turns.map(m => `${contextRole(m, agent) === 'user' ? 'USER' : 'DESK'}: ${m.content}`)
+        // A specialist's answer in this desk's turn (desks/subagent.js) is the specialist's words, not the desk's.
+        const speaker = (m) => (contextRole(m, agent) === 'user' ? 'USER' : isAnswerFor(m, agent) ? `${String(DESKS[m.agent]?.role ?? m.agent).toUpperCase()} (asked by the desk)` : 'DESK')
+        const lines = turns.map(m => `${speaker(m)}: ${m.content}`)
         const user  = `${prior ? `CURRENT SUMMARY:\n${prior}\n\n` : ''}NEW TURNS (${agent}):\n${lines.join('\n')}`
         try {
             const text = await once({

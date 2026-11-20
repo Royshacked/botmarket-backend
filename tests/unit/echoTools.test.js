@@ -90,6 +90,33 @@ test("map_event: an event by the filter becomes the house's — in the triage's 
     assert.equal(created.length, 1, 'no second event, no second map')
 })
 
+test('map_event in a chat maps in the BACKGROUND: it returns at once and the pipeline runs as a job (modes-and-builders.md step 2)', async () => {
+    const { frame } = await import('../../services/echoEvents.service.js')
+    const started = [], ran = []
+    const h = makeEchoHandlers({
+        userId: 'u1', sessionId: 's1',
+        judged: async () => ({ event: false, reason: 'a dated launch' }),
+        events: { frame, create: async (ev) => ({ _id: 'ev_bg', ...ev, kind: 'user', status: 'framed' }) },
+        pipeline: { run: async (doc) => { ran.push(doc._id); return { status: 'scored' } } },
+        jobs: { start: (x) => { started.push(x); return { started: true } } },
+        read: { getEvent: async () => null },
+    })
+    const out = await h.map_event({ what_changed: 'GTA 6 released.', origin: 'Take-Two', tickers: ['TTWO'], effect: 'up', type: 'demand_shock', durability: { kind: 'price_spike', why: 'a launch' } })
+    assert.deepEqual(ran, [], 'not run inside the call')
+    assert.deepEqual([started[0].userId, started[0].sessionId, started[0].doc._id, started[0].label], ['u1', 's1', 'ev_bg', '"GTA 6 released"'])
+    assert.match(out, /^Echo did not take it as a house event \(a dated launch\)/)
+    assert.match(out, /MAPPING STARTED \(ev_bg\) — two to three minutes, in the background/)
+    assert.match(out, /Say nothing about its links: there are none yet\./)
+})
+
+test("the status line's label: short, quoted, a long framing cut at a word (the live run's was 230 characters)", async () => {
+    const { mapLabel } = await import('../../services/tools/echo.tools.js')
+    assert.equal(mapLabel('GTA 6 released.'), '"GTA 6 released"')
+    assert.equal(mapLabel(''), 'the event')
+    const long = mapLabel('A reported but unverified Spanish policy would pause new data-center construction for three years beginning November 20, 2026')
+    assert.equal(long, '"A reported but unverified Spanish policy would pause new data-center…"')
+})
+
 test('request_reads: the user\'s own events only, capped, the top directional links by default', async () => {
     const sent = []
     const mine = { ...shapeEvent({ ...SCORED, kind: 'user', userId: 'u1' }) }
