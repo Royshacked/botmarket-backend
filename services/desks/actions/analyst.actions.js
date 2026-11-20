@@ -25,8 +25,9 @@ const elsewhere = (state, draft) => !!state?.editingSymbol && !!draft && _sym(dr
 export function makeAnalystActions({ commit = defaultCommit } = {}) {
     return {
         /** Initiate coverage on the draft's name — revised instead when the name is already covered. */
-        async generate({ user, state }) {
-            if (user?.role !== 'admin') return { reason: 'forbidden' }
+        // EVERY user may save coverage, and a coverage a user saves is the house's — saved for everyone (Roy,
+        // 2026-11-20, modes-and-builders.md M17). It was admin-only until then.
+        async generate({ state }) {
             const draft = proposal(state)
             if (!draft) return { reason: 'nothing_to_commit' }
             if (editingId(state) && !elsewhere(state, draft)) return { reason: 'not_new' }
@@ -40,8 +41,7 @@ export function makeAnalystActions({ commit = defaultCommit } = {}) {
         },
 
         /** Revise the thesis being edited with the draft — only a draft about THAT name. */
-        async update({ user, state }) {
-            if (user?.role !== 'admin') return { reason: 'forbidden' }
+        async update({ state }) {
             const id = editingId(state)
             const draft = proposal(state)
             if (!id || !draft) return { reason: 'nothing_to_commit' }

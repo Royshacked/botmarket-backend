@@ -381,7 +381,10 @@ test('every role reads ABOUT THE USER: what they told any role, the size they la
     const seen = []
     const stub = (agent) => ({ agent, run: async (ctx) => { seen.push(ctx); return { reply: 'ok' } }, done: (r) => ({ reply: r.reply }), nextState: (prev) => prev })
     const profiles = { read: async () => ({ notes: [{ text: 'no low-float names' }], size: { unit: 'risk_pct', value: 1, asset: 'NVDA' } }) }
-    const turn = makeSessionTurn({ sessions, contexts, desks: { analyst: stub('analyst'), mentor: stub('mentor') }, experience: async () => null, profiles, summarize: async () => 'S' })
+    // The analyst's first message starts a coverage build (step 9) — on this memDb, not the real store.
+    const { makeBuilds } = await import('../../services/desks/builds.js')
+    const buildsSvc = makeBuilds({ sessions, depth: () => 0, runTurn: async () => {} })
+    const turn = makeSessionTurn({ sessions, contexts, desks: { analyst: stub('analyst'), mentor: stub('mentor') }, experience: async () => null, profiles, summarize: async () => 'S', buildsSvc })
     const s = await sessions.getActive({ userId: 'u1' })
     await sessions.setAgentState({ sessionId: s.sessionId, userId: 'u1', agent: 'mentor', state: { draft: { asset: 'nvda', direction: 'LONG' } } })
     await turn({ user, sessionId: s.sessionId, agent: 'analyst', text: 'is it cheap?' })

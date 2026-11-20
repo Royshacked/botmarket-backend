@@ -87,13 +87,11 @@ test('generate saves the standing draft FROM THE SESSION and seals onto the cove
     assert.equal(await stateOf(), null)
 })
 
-test('coverage is an admin write — a trader\'s press is refused and writes nothing', async () => {
-    const r = rig({ state: { draft: DRAFT, standing: true, ...EDITING } })
-    const { press, stateOf } = await r.start(TRADER)
-    assert.deepEqual(await press('generate'), { reason: 'forbidden' })
-    assert.deepEqual(await press('update'), { reason: 'forbidden' })
-    assert.equal(r.calls.initiate.length + r.calls.revise.length, 0)
-    assert.deepEqual((await stateOf()).draft, DRAFT)
+test("every user saves coverage — a trader's press goes through, for everyone (Roy, 2026-11-20, M17; it was admin-only)", async () => {
+    const r = rig({ state: { draft: DRAFT, standing: true } })
+    const { press } = await r.start(TRADER)
+    assert.deepEqual(shapeOf(await press('generate')), { result: { coverage: { id: 'cov_1', symbol: 'NVDA' }, revised: false } })
+    assert.equal(r.calls.initiate.length, 1)
 })
 
 test('a withdrawn draft cannot be saved; a refusal keeps the draft and carries its detail', async () => {

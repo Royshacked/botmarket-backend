@@ -63,8 +63,16 @@ export function midQuestion(text) {
     return { id: 'answer', header: 'Answer', question, multiSelect: false, other: true, options }
 }
 
-/** Could the builder's draft be generated now — the readiness the pane's Generate reads (the trader's)? Pure. */
-export const generatable = (state) => !!state?.draft && state?.view?.readiness?.ready === true
+/**
+ * Could the build be confirmed now? Each builder's own "done" (step 9): a trade — the readiness the pane's Generate reads;
+ * a new book — a sized plan on the table; a review — reviewed (its changes, or none = hold); coverage — a draft the
+ * analyst stands behind. Pure.
+ */
+export function generatable(state, agent = 'mentor') {
+    if (agent === 'portfolio') return state?.reviewMode ? state?.reviewed === true : !!state?.pendingPlan
+    if (agent === 'analyst') return state?.standing === true && !!state?.draft
+    return !!state?.draft && state?.view?.readiness?.ready === true
+}
 
 /** The app's note that carries a stalled build on. Pure. */
 export function carryLine() {
@@ -172,7 +180,9 @@ export function makeBuilds({ sessions = sessionService, depth = sessionDepth, ru
         const session = await sessions.get({ sessionId, userId: user._id })
         const state = session?.agentState?.[agent]
         if (!state?.build) return false
-        await write(user, sessionId, agent, { ...state, build: { ...state.build, status: 'ready', readyAt: now() } })
+        // Coverage is named once the analyst has drafted it ("MSFT coverage").
+        const title = agent === 'analyst' && state.draft?.symbol ? `${String(state.draft.symbol).toUpperCase()} coverage` : state.build.title
+        await write(user, sessionId, agent, { ...state, build: { ...state.build, title, status: 'ready', readyAt: now() } })
         logger.info(LOG, 'build ready', { sessionId, agent, title: state.build.title })
         await startNext({ user, sessionId })
         return true
@@ -196,13 +206,11 @@ export function makeBuilds({ sessions = sessionService, depth = sessionDepth, ru
         if (out?.stopped || stillWorking(session, agent, depth(sessionId))) return null
         const rows = await sessions.messagesForAgent({ sessionId, userId: user._id, agent, afterSeq: 0 })
         const last = [...(rows ?? [])].reverse().find(r => r.role === 'assistant' && r.ref?.build === b.id)
-        // Stopped on a statement, not a question. Its draft could be generated → the build is DONE, go or no go (after a
-        // Change the trader says "press Update" instead of going — the drive, 2026-11-20). Otherwise carry it on (a few
-        // times) rather than hand it to the user.
-        if (!asksTheUser(last?.content)) {
-            if (generatable(state)) { await ready({ user, sessionId, agent }); return 'ready' }
-            if (await carry({ user, sessionId, agent })) return 'carried'
-        }
+        // Could it be confirmed now → the build is DONE, go or no go — even when it ends asking "shall I apply it?", which IS
+        // the Confirm (after a Change the trader said "press Update" instead of going — the drive, 2026-11-20; a review ends
+        // asking to accept). Otherwise: stopped on a statement → carry it on (a few times); on a question → the card.
+        if (generatable(state, agent)) { await ready({ user, sessionId, agent }); return 'ready' }
+        if (!asksTheUser(last?.content) && await carry({ user, sessionId, agent })) return 'carried'
         // THE BUILD PAUSES ON A CARD (step 8, M8): the builder's question — with the options it listed — above the prompt
         // box; the chat stays where the user is. Answering it sends the build back to work (asking.answer).
         const card = await sessions.append({ sessionId, userId: user._id, message: {
@@ -270,7 +278,21 @@ export function makeBuilds({ sessions = sessionService, depth = sessionDepth, ru
         return { ok: true }
     }
 
-    return { start, startNext, carry, ready, settle, rework, resume }
+    /**
+     * A build with no card (step 9): a portfolio review the review card opened, coverage asked for in Analyst mode — started
+     * (or queued) and its first turn run in the background; the chat goes back to Axl. The caller holds the lock.
+     */
+    async function begin({ user, sessionId, agent, state, title, text, input = {} }) {
+        const started = await start({ user, sessionId, agent, state, title, text, input })
+        await sessions.setFloor({ sessionId, userId: user._id, agent: 'axl' })
+        if (started.run) {
+            runTurn({ user, sessionId, agent, text, input: { ...input, answered: true }, origin: 'opening', turnId: `build_${started.build.id}_${now()}` })
+                .catch(err => logger.warn(LOG, 'the build failed to start', err.message))
+        }
+        return started
+    }
+
+    return { start, startNext, carry, ready, settle, rework, resume, begin }
 }
 
 export const builds = makeBuilds()

@@ -217,6 +217,15 @@ answers with that name (`build.pending`). Unit-tested; not yet driven (memory).
 ~4 min/name) — BUT today a run auto-saves (`initiateCoverage`). For a mode build it returns a draft instead; Initiate is
 the Confirm. Initiate is admin-only today (`analyst.actions.js:23`) — see §6.
 
+**BUILT 2026-11-20 (step 9, M11 + M17).** Each builder's own "done" (`builds.generatable(state, agent)`): a trade — the
+pane's readiness; a new book — a sized plan; a REVIEW — reviewed (changes, or none = a hold); coverage — a standing draft.
+Checked BEFORE "did it ask?": a done build that ends "shall I apply it?" is ready — that question is the Confirm. A REVIEW
+opened from its card runs in the background (`builds.begin` from the edit route; no card — it reads the book); its
+Confirm is Accept. A book's sleeve line (the stock picker's screen) is the pane's. ANALYST MODE: the user's first message
+to the analyst with nothing on his table starts a coverage build (no card) — that turn is its first; ready on a standing
+draft, titled by its name. INITIATE AND UPDATE ARE OPEN TO EVERY USER (M17): a coverage any user saves is the house's,
+read by every user's trader and Hotlist. Unit-tested; not yet driven (memory).
+
 ## 5. Build order
 
 Each step ships on its own, with tests and a drive.

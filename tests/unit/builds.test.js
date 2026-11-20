@@ -298,3 +298,52 @@ test('"Find one for me" (M18): the stock picker\'s candidates on a card; the pic
     assert.doesNotMatch(turns[0].text, /Find one for me/)
     assert.deepEqual(turns[0].input.accounts, [{ id: 'p1', broker: 'paper' }], "the card's account rides on")
 })
+
+test("each builder's own \"done\" (step 9): a trade's readiness, a new book's sized plan, a review's verdict, a standing coverage draft", async () => {
+    const { generatable } = await import('../../services/desks/builds.js')
+    assert.equal(generatable({ pendingPlan: { holdings: [] } }, 'portfolio'), true)
+    assert.equal(generatable({ mandate: {} }, 'portfolio'), false)
+    assert.equal(generatable({ reviewMode: true, reviewed: true }, 'portfolio'), true, 'a review that found nothing is a hold — done too')
+    assert.equal(generatable({ reviewMode: true, pendingPlan: {} }, 'portfolio'), false, 'not reviewed yet')
+    assert.equal(generatable({ draft: { symbol: 'MSFT' }, standing: true }, 'analyst'), true)
+    assert.equal(generatable({ draft: { symbol: 'MSFT' }, standing: false }, 'analyst'), false, 'a withdrawn draft')
+})
+
+test("a done build that ends asking \"shall I apply it?\" is READY — the question IS the Confirm (step 9)", async () => {
+    const { sessions, builds } = rig()
+    const s = await sessions.getActive({ userId: 'u1' })
+    await sessions.setAgentState({ sessionId: s.sessionId, userId: 'u1', agent: 'portfolio', state: { reviewMode: true, reviewed: true, build: { id: 'b1', status: 'building', title: 'Growth review', since: 1 } } })
+    await sessions.append({ sessionId: s.sessionId, userId: 'u1', message: { agent: 'portfolio', role: 'assistant', content: 'Trim MSFT by a third. Shall I apply it?', ref: { build: 'b1' } } })
+    assert.equal(await builds.settle({ user, sessionId: s.sessionId, agent: 'portfolio', out: { payload: {} } }), 'ready')
+})
+
+test('a review opened from its card runs in the background: begin starts it, runs its first turn, the chat back with Axl (step 9, M11)', async () => {
+    const { sessions, builds, turns } = rig()
+    const s = await sessions.getActive({ userId: 'u1' })
+    await sessions.setFloor({ sessionId: s.sessionId, userId: 'u1', agent: 'portfolio' })
+    const started = await builds.begin({ user, sessionId: s.sessionId, agent: 'portfolio', state: { reviewMode: true, portfolioId: 'p1', editing: { kind: 'portfolio', entityId: 'p1' } }, title: 'Growth review', text: '[App note] review it' })
+    assert.equal(started.run, true)
+    const ses = await sessions.get({ sessionId: s.sessionId, userId: 'u1' })
+    assert.equal(ses.floor, 'axl')
+    assert.deepEqual([ses.agentState.portfolio.build.status, ses.agentState.portfolio.reviewMode, ses.agentState.portfolio.editing.entityId], ['building', true, 'p1'])
+    assert.deepEqual([turns[0].agent, turns[0].origin, turns[0].input.answered], ['portfolio', 'opening', true])
+})
+
+test("Analyst mode (M17): the user's first message starts a coverage build — this turn is its first, its reply the pane's, the chat back with Axl", async () => {
+    const { db, sessions, builds } = rig()
+    const contexts = makeAgentContextService({ getDb: async () => db })
+    const analyst = { agent: 'analyst', run: async () => ({ reply: 'Researching MSFT.' }), done: (r) => ({ reply: r.reply }), nextState: (p) => ({ ...(p ?? {}), draft: { symbol: 'MSFT' }, standing: true }) }
+    const noCards = { post: async () => ({ reason: 'off' }), setAside: async ({ state }) => state }
+    const turn = makeSessionTurn({ sessions, contexts, desks: { analyst }, experience: async () => 'novice', profiles: { read: async () => ({ notes: [], size: null }) }, summarize: async () => 'S', asks: noCards, buildsSvc: builds })
+    const s = await sessions.getActive({ userId: 'u1' })
+    await sessions.setFloor({ sessionId: s.sessionId, userId: 'u1', agent: 'analyst' })
+    await turn({ user, sessionId: s.sessionId, agent: 'analyst', text: 'Research MSFT into coverage', origin: 'user' })
+    const ses = await sessions.get({ sessionId: s.sessionId, userId: 'u1' })
+    assert.equal(ses.floor, 'axl')
+    assert.equal(ses.agentState.analyst.build.status, 'building')
+    const rows = await sessions.allMessagesSince({ sessionId: s.sessionId, userId: 'u1', afterSeq: 0 })
+    assert.deepEqual(rows.map(r => `${r.role}:${r.ref?.build ? 'build' : '-'}`), ['user:-', 'assistant:build'], "the user's ask in the chat, the analyst's work in the pane")
+    // Then it is ready: a standing draft; titled by its name.
+    assert.equal(await builds.settle({ user, sessionId: s.sessionId, agent: 'analyst', out: { payload: {} } }), 'ready')
+    assert.equal((await st(sessions, s)).analyst.build.title, 'MSFT coverage')
+})

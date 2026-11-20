@@ -29,7 +29,7 @@ import { keepMarkers } from './markers.js'
 import { sealing as defaultSealing } from './seal.js'
 import { asking as defaultAsking } from './asking.js'
 import { needsQuestions } from './questions.js'
-import { buildLines } from './builds.js'
+import { buildLines, builds as defaultBuilds } from './builds.js'
 
 const LOG = '[sessionTurn]'
 
@@ -122,6 +122,7 @@ export function makeSessionTurn({
     summarize  = defaultSummarize,
     sealing    = defaultSealing,
     asks       = defaultAsking,
+    buildsSvc  = defaultBuilds,
 } = {}) {
 
     async function maybeSummarize({ user, sessionId, agent, messages, summary }) {
@@ -208,6 +209,14 @@ export function makeSessionTurn({
         if (state?.build?.status === 'building' && origin === 'user') {
             state = { ...state, build: { ...state.build, status: 'awaiting' } }
             await sessions.setAgentState({ sessionId, userId: user._id, agent, state })
+        }
+        // ANALYST MODE (step 9, M17): the user's first message to the analyst, with nothing on his table, starts a coverage
+        // build — no card (the analyst asks nothing); this very turn is its first. Queued behind another build: it waits.
+        if (agent === 'analyst' && origin === 'user' && !state?.build && !state?.draft && !state?.editing) {
+            const started = await buildsSvc.start({ user, sessionId, agent, state, title: 'coverage', text, input: {} })
+            await sessions.setFloor({ sessionId, userId: user._id, agent: 'axl' })
+            if (!started.run) return { payload: { reply: '', queued: true }, reply: null }
+            state = { ...(state ?? {}), build: started.build }
         }
         const building = state?.build?.status === 'building' ? state.build.id : null
         // A build's turn binds to the account(s) picked on its card, whatever turn it is (a chain step carries none).
@@ -307,7 +316,9 @@ export function makeSessionTurn({
         // The floor follows the reply: a route lands on its desk's entry agent; otherwise the agent that
         // answered keeps it. (Hand-offs and "@agent" join in phase 5.)
         // A subagent's own turn (its opening from the trader) leaves the floor where it was.
-        const floor = (isSubagent(agent) || building) && !routing.route ? (session.floor ?? 'axl')
+        // A build never leaves the chat on its builder: the user is back with Axl while it works (M7).
+        const floor = building && !routing.route ? (session.floor && session.floor !== agent ? session.floor : 'axl')
+            : isSubagent(agent) && !routing.route ? (session.floor ?? 'axl')
             : await land({ user, session, routing, agent, next: kept, hints: payload.adopt === true ? { adopt: true } : null })
         await sessions.setFloor({ sessionId, userId: user._id, agent: floor })
 

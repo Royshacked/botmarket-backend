@@ -541,7 +541,8 @@ export function makeChainRunner({
         const line = outcome.covered.length
             ? `Screened ${outcome.screened} for the ${label} sleeve${school} → ${outcome.covered.length} now in coverage: ${outcome.covered.join(', ')}${tail ? `; ${tail}` : ''}.`
             : `Screened ${outcome.screened} for the ${label} sleeve${school} → none came into coverage${tail ? ` (${tail})` : ''}.`
-        await sessions.append({ sessionId: sleeve.sessionId, userId: user._id, message: { agent: 'scanner', role: 'assistant', content: line } })
+        // A book built in the background takes its sleeve's line into its pane (step 9).
+        await sessions.append({ sessionId: sleeve.sessionId, userId: user._id, message: { agent: 'scanner', role: 'assistant', content: line, ref: buildRef(session.agentState?.portfolio) } })
 
         // `sector` on an item is the sleeve's label (the brief groups by it) — the industry for an industry sleeve.
         const declined = [...outcome.passed, ...outcome.failed].map(ticker => ({ ticker, sector: label }))
