@@ -8,7 +8,7 @@ unified adapter layer. Each desk owns a kind; each kind is watched by its own mo
 
 | Desk | Route | Produces | Watched by |
 |---|---|---|---|
-| **Axl** — reception / concierge / critic | `/api/sessions` (the session turn) | nothing (read-only); hands over to a desk, or ASKS Proteus and Echo as subagents (`ask_specialist`, 2026-11-20 — docs/design/modes-and-builders.md) | — |
+| **Axl** — reception / concierge / critic | `/api/sessions` (the session turn) | nothing (read-only); hands over to a desk, or ASKS Proteus and Echo as subagents (`ask_specialist`, 2026-11-20); the builders (Mentor, Atlas, Prometheus' coverage) are MODES — a question card, the build in the background, a summary to confirm (docs/design/modes-and-builders.md) | — |
 | **Mentor** — the trading desk | `/api/mentor`, `/api/setups` | `setup` | Talos |
 | **Atlas** — portfolio construction + review | `/api/portfolio` | `portfolio_item` holdings | Themis |
 | **Argus** — finds ONE name for Mentor (scan lists archived 2026-11-09) | — (a session turn) | — | — |

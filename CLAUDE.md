@@ -14,7 +14,8 @@ SSE (agent streams) and WebSocket (social chat). Their work lands on one executi
 
 **Proteus and Echo are Axl's SUBAGENTS since 2026-11-20** (docs/design/modes-and-builders.md): Axl asks them
 (`ask_specialist`, services/desks/subagent.js); they answer inside his turn and never hold the floor. The builders
-(Mentor, Atlas, Prometheus' coverage) become modes — steps 3–10 of that doc, not built yet.
+(Mentor, Atlas, Prometheus' coverage) are MODES — the picker in the prompt box, one question card up front, the build
+in the background on its own lane (desks/builds.js), a summary to confirm. Coverage is every user's to save (M17).
 
 **Kairos (the `call` kind) and its monitor Hermes were DELETED on 2026-11-10**, code and data
 (`scripts/delete-kairos.mjs`); `git log` before that date has them. A new trade is always Mentor's.

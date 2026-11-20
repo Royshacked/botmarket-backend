@@ -316,6 +316,17 @@ services/
                               since 2026-11-20 — routing.util mayRoute gates the capture + rule). `subagent`
                               (2026-11-20): the roles Axl ASKS (Echo `event_analyst`, Proteus `technical_analyst`) —
                               SUBAGENTS / isSubagent; they never hold the floor
+      modes.js                THE CHAT'S MODE (modes-and-builders.md step 3): MODES, modeOf(floor) — a builder on the floor
+                              is its mode, anyone else General; setMode moves the floor in Axl's lane (POST /mode)
+      questions.js · asking.js  QUESTIONS UP FRONT (step 4): the trader's and the portfolio manager's cards built by code,
+                              needsQuestions (a NEW build only), checkAnswers, answersText · post / setAside / answer
+                              (POST /answers) — incl. a build's mid card and the pick card
+      builds.js               THE BUILD IN THE BACKGROUND (steps 5–9): on the builder's state — start / startNext (one at a
+                              time, queued) / begin (no card: a review, coverage) / carry (a stalled turn, ≤3) / ready /
+                              settle (after each turn: ready on generatable, a question → a mid card, a statement → carry)
+                              / rework (Change, Retry, Recheck — POST /build) / resume (a card answered, a pick);
+                              buildRef, buildLines (Axl's context), midQuestion
+      candidates.js           "FIND ONE FOR ME" (step 8): the stock picker headless → <argus_candidates> → a pick card
       subagent.js             AXL'S SUBAGENTS (modes-and-builders.md §3, 2026-11-20): makeAskSpecialist → the
                               `ask_specialist` handler for one Axl turn — the role's question appended hidden to its
                               segment (`ref: {opening, via:'axl'}`), its desk run headless inside Axl's turn, streaming
@@ -359,7 +370,8 @@ services/
                               "and SPY" got NVDA again)
       summarize.js            the rolling per-agent summary past the trimHistory high-water mark (Haiku 4.5,
                               booked to the user; failure changes nothing)
-      turnLock.js · startTurn.js · turns.js   one turn at a time per session · accept a turn (202) and run it
+      turnLock.js · startTurn.js · turns.js   one turn at a time per LANE (laneKey: Axl's `#axl`, every desk the session's own —
+                              step 5a) · accept a turn (202) and run it; runQueued settles a build after each turn
                               (a turn addressed to a subagent, or "@stock picker" off his floor, goes to Axl with
                               `input.via` — 2026-11-20)
                               queued, stoppable, streamed · the turns + chain wired as one pair. sessionDepth

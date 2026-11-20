@@ -479,6 +479,33 @@ leaves the user with Mentor. The event analyst's `map_event` maps in the BACKGRO
 chat's status line says it is mapping, the chat stays free, and the event analyst gets one turn to say what it found;
 the boot sweep picks up a map a restart cut off. The analyst (`research`) stays a desk until Analyst mode (step 9).
 
+### Modes and builders — questions up front, the build in the background (2026-11-20)
+
+[docs/design/modes-and-builders.md](docs/design/modes-and-builders.md) steps 3–9. The chat has a MODE — General (Axl) or a
+BUILDER: the trader, the portfolio manager, the analyst. It is derived from the floor (`desks/modes.js` `modeOf`), shown and
+switched by the picker in the prompt box (`POST /api/sessions/:id/mode`), and switched by Axl when the user asks to build.
+
+- **Two lanes** (`turnLock.laneKey`): Axl's turns (and the mode switch) on `${sessionId}#axl`; every desk turn, chain step,
+  commit and seal on the session's own key — the chat is free while a builder works. An Axl turn never ends, pauses or
+  advances a desk's chain.
+- **Questions up front** (`desks/questions.js`, `desks/asking.js`, `POST /answers`): a NEW trade or book asks everything on
+  ONE card built by code — the trader: name (or "Find one for me"), account, size, risk, minimum R:R, scenarios, what to
+  do if it breaks, decide-or-ask; the portfolio manager: the mandate, account(s), decide-or-ask. Typing instead sets it
+  aside. The analyst and a portfolio REVIEW ask nothing.
+- **The build in the background** (`desks/builds.js`, on the builder's state: queued / building / awaiting / ready /
+  failed — one at a time): the chat goes back to General; the build's turns keep no floor and their rows (and the lines
+  said for it) carry `ref.build` — the work pane's, not the chat's; the card's account(s) ride every turn of it. A turn
+  that stops on a statement is carried on (`carry`, ≤3); one that asks pauses on a card above the prompt box (`mid`); a
+  build is READY on its builder's own "done" (`generatable`: a trade's readiness, a sized plan, a review's verdict, a
+  standing coverage draft) — `<go>` never saves on its own. "Find one for me" asks the stock picker headless for two or
+  three names (`<argus_candidates>`, gated to the house's lists) and a card picks one (`desks/candidates.js`).
+- **The summary** (client `BuildSummary`): Watch summary → the builder's reasoning and the live trade chart → Confirm
+  (save and arm a trade, generate a book, ACCEPT a review, initiate coverage), Change (`POST /build`, rebuilt in the
+  background), Dismiss (the queued build starts). Older than 30 min → Recheck first. A failed build → Retry.
+- **Axl knows the builds** (their lines in his turn) and points a change to the builder's mode.
+- **Coverage is every user's to save** (M17, 2026-11-20): Initiate and Update are no longer admin-only; a coverage any user
+  saves is the house's.
+
 ### Desk-to-desk hand-off, by the user's ask (2026-09-18)
 
 **A question asked at the wrong desk goes back to Axl (2026-11-13).** After Axl hands the user to a desk, that desk
