@@ -41,6 +41,7 @@ import { attach as attachChatWs } from './api/chat/chatWs.js'
 import { registerSessionChannel } from './services/sessionChannel.js'
 import { chain } from './services/desks/turns.js'
 import { resumePending as resumeMentorReads } from './services/mentorReads.service.js'
+import { echoMapJobs } from './services/echoMapJobs.service.js'
 import { ensureIndexes as ensureChatIndexes } from './api/chat/chat.service.js'
 import { ensureUserIndexes } from './api/user/user.model.js'
 import { ensureIdeaIndexes } from './api/trade-ideas/tradeIdeas.service.js'
@@ -250,6 +251,8 @@ sessionService.ensureIndexes()        // the unified chat's sessions + session_m
 chain.sweep().catch(err => logger.warn('[server]', 'chain sweep failed', err.message))
 // The reads Mentor builds were waiting on: found again from their queue rows, handed on when they land (argus-rework.md step 3).
 resumeMentorReads().catch(() => {})
+// The event analyst's maps a restart cut off: picked up again, their status lines and announcements as before (modes-and-builders.md step 2).
+echoMapJobs.sweep().catch(err => logger.warn('[server]', 'echo map sweep failed', err.message))
 agentContextService.ensureIndexes()   // sealed agent contexts (services/agentContext.service.js)
 ensurePortfolioBookIndexes()
 

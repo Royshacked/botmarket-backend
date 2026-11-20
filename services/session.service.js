@@ -411,6 +411,15 @@ export function makeSessionService({ getDb = _defaultGetDb, events = silentEvent
             .toArray()
     }
 
+    /** Every ACTIVE session with a status line up — what the boot sweep of background work reads (echoMapJobs.sweep). */
+    async function findWaiting() {
+        const db = await getDb()
+        const rows = await db.collection(SESSIONS)
+            .find({ status: 'active', waiting: { $exists: true } }, { projection: { _id: 0, sessionId: 1, userId: 1, waiting: 1 } })
+            .toArray()
+        return rows.filter(r => r.waiting && Object.keys(r.waiting).length)
+    }
+
     /** Who has the floor — the agent the user's next message goes to (unified-chat.md §3.3). */
     async function setFloor({ sessionId, userId, agent }) {
         if (!isAgent(agent)) return { reason: 'invalid_agent' }
@@ -460,7 +469,7 @@ export function makeSessionService({ getDb = _defaultGetDb, events = silentEvent
         return r.matchedCount ? { ok: true } : { reason: 'not_found' }
     }
 
-    return { ensureIndexes, getActive, findActive, startNew, resume, importArchived, list, remove, get, append, messagesSince, messagesForAgent, allMessagesSince, removeMessages, setAgentState, setSealedThrough, setChain, setWaiting, findRunningChains, setFloor, setSummary, addLink }
+    return { ensureIndexes, getActive, findActive, startNew, resume, importArchived, list, remove, get, append, messagesSince, messagesForAgent, allMessagesSince, removeMessages, setAgentState, setSealedThrough, setChain, setWaiting, findRunningChains, findWaiting, setFloor, setSummary, addLink }
 }
 
 export const sessionService = makeSessionService({ events: sessionEvents })

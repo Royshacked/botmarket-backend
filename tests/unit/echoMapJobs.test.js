@@ -47,3 +47,48 @@ test('a failed or stopped map is still announced — the event analyst says so',
     assert.match(doneOpening('ev_3', { stoppedAt: 'score', reason: 'the model failed' }), /It stopped at score: the model failed\./)
     assert.doesNotMatch(doneOpening('ev_3', { stoppedAt: 'check', wait: true, reason: 'the day-5 close is not in yet' }), /stopped/, 'waiting for the close is not a failure')
 })
+
+test('another run holds the event (the hourly pipeline): it waits for THAT run to finish before announcing — never a half map', async () => {
+    const states = [{ status: 'mapped', runningUntil: 'x' }, { status: 'scored' }]
+    const turns = []
+    const jobs = makeEchoMapJobs({
+        sessions: { setWaiting: async () => ({ ok: true }) },
+        pipeline: { run: async () => ({ status: 'framed', stoppedAt: 'claim', reason: 'another run holds it', wait: true }) },
+        events: { get: async () => states.shift() ?? { status: 'scored' } },
+        runTurn: async (x) => { turns.push(x) }, sleep: async () => {}, pollMs: 1, maxWaitMs: 10,
+    })
+    const r = await jobs.start({ userId: 'u1', sessionId: 's1', doc: { _id: 'ev_4' }, label: 'x' }).done
+    assert.deepEqual(r, { status: 'scored' })
+    assert.doesNotMatch(turns[0].text, /stopped/)
+})
+
+test('the boot sweep picks up a map a restart cut off: its claim released, mapped again; a finished one announced; a lost one said', async () => {
+    const { memDb } = await import('../helpers/memDb.js')
+    const { makeSessionService } = await import('../../services/session.service.js')
+    const { db } = memDb()
+    const sessions = makeSessionService({ getDb: async () => db })
+    const s = await sessions.getActive({ userId: 'u1' })
+    const line = (eventId, label) => ({ kind: 'echo_map', text: 'mapping', eventId, label, since: Date.now() })
+    await sessions.setWaiting({ sessionId: s.sessionId, userId: 'u1', key: 'echo|ev_cut', entry: line('ev_cut', '"cut"') })
+    await sessions.setWaiting({ sessionId: s.sessionId, userId: 'u1', key: 'echo|ev_done', entry: line('ev_done', '"done"') })
+    await sessions.setWaiting({ sessionId: s.sessionId, userId: 'u1', key: 'echo|ev_gone', entry: line('ev_gone', '"gone"') })
+    await sessions.setWaiting({ sessionId: s.sessionId, userId: 'u1', key: 'NVDA|coverage', entry: { symbol: 'NVDA', kind: 'coverage', since: Date.now() } })
+    const docs = { ev_cut: { _id: 'ev_cut', status: 'mapped' }, ev_done: { _id: 'ev_done', status: 'scored' } }
+    const released = [], ran = [], turns = []
+    const jobs = makeEchoMapJobs({
+        sessions,
+        events: { get: async (id) => docs[id] ?? null, advance: async (id, status) => { released.push(`${id}:${status}`) } },
+        pipeline: { run: async (doc) => { ran.push(doc._id); return { status: 'scored' } } },
+        runTurn: async (x) => { turns.push(x.text) },
+    })
+    assert.equal(await jobs.sweep(), 3)
+    await new Promise(r => setTimeout(r, 20))
+    assert.deepEqual(released, ['ev_cut:mapped'])
+    assert.deepEqual(ran, ['ev_cut'])
+    assert.equal(turns.length, 2, 'the restarted one and the finished one are announced')
+    assert.ok(turns.every(t => /that you started is done/.test(t)))
+    const rows = await sessions.allMessagesSince({ sessionId: s.sessionId, userId: 'u1', afterSeq: 0 })
+    assert.deepEqual(rows.map(r => r.content), ['The map of "gone" was cut off by a restart and could not be picked up again — ask me to map it again.'])
+    const left = (await sessions.get({ sessionId: s.sessionId, userId: 'u1' })).waiting
+    assert.deepEqual(Object.keys(left), ['NVDA|coverage'], "the analyst's read line is not the sweep's")
+})
