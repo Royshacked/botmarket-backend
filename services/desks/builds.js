@@ -32,6 +32,37 @@ export function asksTheUser(text) {
     return /\?/.test(String(text ?? '').trim().slice(-400))
 }
 
+const MAX_QUESTION = 600
+const MAX_OPTIONS = 6
+
+/**
+ * The builder's question as a card (step 8): its LAST paragraph with a question mark, and the bullet lines under it as
+ * the options ("- A: the pullback at $436"); "Other" always. A reply that asks nothing (the carries ran out on a
+ * statement) is put as it is, to be answered in words. Pure.
+ */
+export function midQuestion(text) {
+    const clean = (s) => String(s ?? '').replace(/\*\*/g, '').trim()
+    const lines = String(text ?? '').split('\n')
+    let at = -1
+    for (let i = lines.length - 1; i >= 0; i--) if (lines[i].includes('?') && !/^\s*[-*•\d]+[.)]?\s/.test(lines[i])) { at = i; break }
+    if (at < 0) {
+        return { id: 'answer', header: 'Answer', question: `The build stopped here: ${clean(text).slice(-MAX_QUESTION)} — how should it go on?`, multiSelect: false, other: true, options: [] }
+    }
+    // The paragraph the question ends: back to the blank line before it.
+    let from = at
+    while (from > 0 && lines[from - 1].trim() && !/^\s*[-*•]\s/.test(lines[from - 1])) from--
+    const question = clean(lines.slice(from, at + 1).join(' ')).slice(-MAX_QUESTION)
+    const options = []
+    for (const l of lines.slice(at + 1)) {
+        const m = l.match(/^\s*(?:[-*•]|\d+[.)])\s+(.*)$/)
+        if (!m) { if (options.length && !l.trim()) continue; if (options.length) break; continue }
+        const label = clean(m[1]).slice(0, 120)
+        if (label && !options.some(o => o.label === label)) options.push({ label })
+        if (options.length >= MAX_OPTIONS) break
+    }
+    return { id: 'answer', header: 'Answer', question, multiSelect: false, other: true, options }
+}
+
 /** Could the builder's draft be generated now — the readiness the pane's Generate reads (the trader's)? Pure. */
 export const generatable = (state) => !!state?.draft && state?.view?.readiness?.ready === true
 
@@ -77,7 +108,7 @@ export function stillWorking(session, agent, depth = 0) {
 /** The builds in a session, for Axl's turn context — one line each. Pure. */
 export function buildLines(agentState = {}) {
     const ROLE = { mentor: 'the trader', portfolio: 'the portfolio manager', analyst: 'the analyst' }
-    const SAY = { queued: 'queued behind another build', building: 'building in the background', awaiting: 'waiting for the user in its own mode', ready: 'READY — waiting for the user to review and Generate it in the pane', failed: 'failed — the user can try it again' }
+    const SAY = { queued: 'queued behind another build', building: 'building in the background', awaiting: 'has a question for the user — on the card above the prompt box, answered there', ready: 'READY — waiting for the user to review and Generate it in the pane', failed: 'failed — the user can try it again' }
     return BUILDERS.map(a => [a, agentState?.[a]?.build]).filter(([, b]) => b && SAY[b.status])
         .map(([a, b]) => `- ${ROLE[a]}: ${b.title} — ${SAY[b.status]}`)
 }
@@ -172,12 +203,13 @@ export function makeBuilds({ sessions = sessionService, depth = sessionDepth, ru
             if (generatable(state)) { await ready({ user, sessionId, agent }); return 'ready' }
             if (await carry({ user, sessionId, agent })) return 'carried'
         }
-        if (last) {
-            const { build: _hidden, ...ref } = last.ref
-            await sessions.updateRef({ sessionId, userId: user._id, seq: last.seq, ref: { ...ref, fromBuild: b.id } })
-        }
-        await write(user, sessionId, agent, { ...state, build: { ...b, status: 'awaiting' } })
-        await sessions.setFloor({ sessionId, userId: user._id, agent })
+        // THE BUILD PAUSES ON A CARD (step 8, M8): the builder's question — with the options it listed — above the prompt
+        // box; the chat stays where the user is. Answering it sends the build back to work (asking.answer).
+        const card = await sessions.append({ sessionId, userId: user._id, message: {
+            agent, role: 'assistant', kind: 'questions', content: `${b.title} — a question before it goes on.`,
+            ref: { state: 'open', mid: true, buildId: b.id, questions: [midQuestion(last?.content)] },
+        } })
+        await write(user, sessionId, agent, { ...state, build: { ...b, status: 'awaiting', ...(card?.message ? { card: card.message.seq } : {}) } })
         logger.info(LOG, 'build needs the user', { sessionId, agent, title: b.title })
         return 'awaiting'
     }
@@ -211,7 +243,34 @@ export function makeBuilds({ sessions = sessionService, depth = sessionDepth, ru
         return { ok: true }
     }
 
-    return { start, startNext, carry, ready, settle, rework }
+    /**
+     * The user answered the build's question card (step 8): back to the background with the answer. Caller holds the lock.
+     * @returns {Promise<{ ok: true } | { reason: string }>}
+     */
+    async function resume({ user, sessionId, agent, text = '', pick = null }) {
+        const session = await sessions.get({ sessionId, userId: user._id })
+        const state = session?.agentState?.[agent]
+        const b = state?.build
+        if (!b || b.status !== 'awaiting') return { reason: 'wrong_status' }
+        const { card: _answered, pending, picking: _picked, ...rest } = b
+        // THE PICK (M18): the build's held answers run now, with the name picked in place of "Find one for me".
+        if (pick && pending) {
+            const answers = String(pending.text ?? '').replace(/(Which stock\? )Find one for me/, `$1${pick}`)
+            await write(user, sessionId, agent, { ...state, build: { ...rest, title: `${pick} trade`, status: 'building', carries: 0 } })
+            runTurn({ user, sessionId, agent, text: answers, input: pending.input ?? {}, origin: 'opening', turnId: `build_${b.id}_pick_${now()}` })
+                .catch(err => logger.warn(LOG, 'the picked build failed to start', err.message))
+            logger.info(LOG, 'build picked', { sessionId, agent, pick })
+            return { ok: true }
+        }
+        await write(user, sessionId, agent, { ...state, build: { ...rest, status: 'building', carries: 0 } })
+        runTurn({ user, sessionId, agent, input: {}, origin: 'opening', turnId: `build_${b.id}_answer_${now()}`,
+            text: `[App note: the user answered your question on the card, in the background build.]\n${text}\nCarry on building with that — call your tools again for any figure you need — then go.` })
+            .catch(err => logger.warn(LOG, 'resume failed to start', err.message))
+        logger.info(LOG, 'build resumed', { sessionId, agent, title: b.title })
+        return { ok: true }
+    }
+
+    return { start, startNext, carry, ready, settle, rework, resume }
 }
 
 export const builds = makeBuilds()

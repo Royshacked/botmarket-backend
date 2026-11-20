@@ -44,18 +44,45 @@ test('one build at a time: a second is queued with its answers, and starts when 
     assert.deepEqual([turns[0].agent, turns[0].text, turns[0].origin, turns[0].input.accounts[0].id], ['portfolio', 'answers', 'opening', 'p1'])
 })
 
-test('a build turn that leaves nothing in flight needs the user: its last reply comes into the chat, the mode goes back to the builder', async () => {
-    const { sessions, builds } = rig()
+test("a build that asks the user PAUSES on a card — the question and the options it listed; the chat stays put (step 8, M8)", async () => {
+    const { sessions, builds, turns } = rig()
+    const s = await sessions.getActive({ userId: 'u1' })
+    await sessions.setFloor({ sessionId: s.sessionId, userId: 'u1', agent: 'axl' })
+    await builds.start({ user, sessionId: s.sessionId, agent: 'mentor', state: {}, title: 'NVDA trade', text: 't', input: {} })
+    const id = (await st(sessions, s)).mentor.build.id
+    await sessions.append({ sessionId: s.sessionId, userId: 'u1', message: { agent: 'mentor', role: 'assistant', content: 'Two ways in.\n\nWhich of the two stops?\n- the swing low at $393\n- the full fall at $402', ref: { build: id } } })
+    assert.equal(await builds.settle({ user, sessionId: s.sessionId, agent: 'mentor', out: { payload: {} } }), 'awaiting')
+    const card = (await sessions.allMessagesSince({ sessionId: s.sessionId, userId: 'u1', afterSeq: 0 })).at(-1)
+    assert.deepEqual([card.kind, card.ref.state, card.ref.mid, card.ref.buildId], ['questions', 'open', true, id])
+    assert.equal(card.ref.questions[0].question, 'Which of the two stops?')
+    assert.deepEqual(card.ref.questions[0].options.map(o => o.label), ['the swing low at $393', 'the full fall at $402'])
+    let ses = await sessions.get({ sessionId: s.sessionId, userId: 'u1' })
+    assert.equal(ses.floor, 'axl', 'the chat stays with Axl')
+    assert.deepEqual([ses.agentState.mentor.build.status, ses.agentState.mentor.build.card], ['awaiting', card.seq])
+
+    // Answered: back to the background with the answer.
+    assert.deepEqual(await builds.resume({ user, sessionId: s.sessionId, agent: 'mentor', text: 'My answer:\n- the full fall' }), { ok: true })
+    ses = await sessions.get({ sessionId: s.sessionId, userId: 'u1' })
+    assert.equal(ses.agentState.mentor.build.status, 'building')
+    assert.equal(ses.agentState.mentor.build.card, undefined)
+    assert.match(turns.at(-1).text, /the user answered your question on the card[\s\S]*the full fall[\s\S]*then go/)
+    assert.equal((await builds.resume({ user, sessionId: s.sessionId, agent: 'mentor', text: 'x' })).reason, 'wrong_status')
+})
+
+test("answering a build's card through the answers endpoint resumes it (asking.answer, mid)", async () => {
+    const { makeAsking } = await import('../../services/desks/asking.js')
+    const { sessions, builds, turns } = rig()
+    const asks = makeAsking({ sessions, profiles: { read: async () => ({ notes: [], size: null }) }, runTurn: async () => {}, builds })
     const s = await sessions.getActive({ userId: 'u1' })
     await builds.start({ user, sessionId: s.sessionId, agent: 'mentor', state: {}, title: 'NVDA trade', text: 't', input: {} })
     const id = (await st(sessions, s)).mentor.build.id
-    await sessions.append({ sessionId: s.sessionId, userId: 'u1', message: { agent: 'mentor', role: 'assistant', content: 'Which of the two stops?', ref: { build: id } } })
-    assert.equal(await builds.settle({ user, sessionId: s.sessionId, agent: 'mentor', out: { payload: {} } }), 'awaiting')
-    const row = (await sessions.allMessagesSince({ sessionId: s.sessionId, userId: 'u1', afterSeq: 0 })).at(-1)
-    assert.deepEqual(row.ref, { fromBuild: id }, 'shown in the chat now')
-    const ses = await sessions.get({ sessionId: s.sessionId, userId: 'u1' })
-    assert.equal(ses.floor, 'mentor')
-    assert.equal(ses.agentState.mentor.build.status, 'awaiting')
+    await sessions.append({ sessionId: s.sessionId, userId: 'u1', message: { agent: 'mentor', role: 'assistant', content: 'Which stop?\n- $393\n- $402', ref: { build: id } } })
+    await builds.settle({ user, sessionId: s.sessionId, agent: 'mentor', out: { payload: {} } })
+    const card = (await sessions.allMessagesSince({ sessionId: s.sessionId, userId: 'u1', afterSeq: 0 })).at(-1)
+    assert.equal((await asks.answer({ user, sessionId: s.sessionId, seq: card.seq, answers: { answer: {} } })).reason, 'unanswered:answer')
+    assert.deepEqual(await asks.answer({ user, sessionId: s.sessionId, seq: card.seq, answers: { answer: { choice: '$402' } } }), { agent: 'mentor', resumed: true })
+    assert.match(turns.at(-1).text, /- Which stop\? \$402/)
+    assert.equal((await asks.answer({ user, sessionId: s.sessionId, seq: card.seq, answers: { answer: { choice: '$402' } } })).reason, 'already_answered')
 })
 
 test('a build with something in flight keeps building; a failed turn fails it', async () => {
@@ -237,4 +264,37 @@ test("a build that stopped on a statement with a draft that could be generated i
     assert.equal(await builds.settle({ user, sessionId: s.sessionId, agent: 'mentor', out: { payload: {} } }), 'ready')
     assert.equal((await st(sessions, s)).mentor.build.status, 'ready')
     assert.equal(turns.length, 0, 'not carried on')
+})
+
+test('"Find one for me" (M18): the stock picker\'s candidates on a card; the pick runs the held answers with that name', async () => {
+    const { makeAsking } = await import('../../services/desks/asking.js')
+    const { candidatesNote, pickQuestion } = await import('../../services/desks/candidates.js')
+    const { _normalizeCandidates } = await import('../../services/agents/scanner.agent.service.js')
+    assert.deepEqual(_normalizeCandidates([{ ticker: 'nvda', thesis: 'x' }, { ticker: 'NVDA' }, { ticker: 'amd' }, { ticker: 'bad ticker' }, { ticker: 'TSM' }, { ticker: 'MU' }]).map(c => c.ticker), ['NVDA', 'AMD', 'TSM'])
+    assert.match(candidatesNote('swing'), /CANDIDATES[\s\S]*Horizon: swing[\s\S]*<argus_candidates>/)
+    assert.match(pickQuestion([], 'the list is empty — SPY is under its 200-day').question, /found no name: the list is empty/)
+
+    const { sessions, builds, turns } = rig()
+    const finds = []
+    const finder = { find: async (x) => { finds.push(x.userId); return { candidates: [{ ticker: 'NVDA', thesis: 'room to target' }, { ticker: 'AMD', thesis: 'a NOW read' }], reply: '' } } }
+    const asks = makeAsking({ sessions, profiles: { read: async () => ({ notes: [], size: null }) }, runTurn: async (x) => { turns.push(x) }, builds, finder })
+    const s = await sessions.getActive({ userId: 'u1' })
+    const post = await asks.post({ user, sessionId: s.sessionId, agent: 'mentor', state: null, input: {} })
+    const answers = { name: { choice: 'Find one for me' }, account: { accountId: 'p1', accountLabel: 'Paper' }, size: { other: '$10,000' },
+        risk: { choice: '1% of the account' }, rr: { choice: '1.5' }, scenarios: { choice: 'Both (recommended)' }, invalidation: { choice: 'Redraw it' }, surprises: { choice: 'Decide for me' } }
+    const out = await asks.answer({ user, sessionId: s.sessionId, seq: post.seq, answers, accounts: [{ id: 'p1', broker: 'paper' }] })
+    assert.equal(out.picking, true)
+    assert.equal(turns.length, 0, 'the trader does not run without a name')
+    await new Promise(r => setTimeout(r, 10))
+    assert.deepEqual(finds, ['u1'])
+    const card = (await sessions.allMessagesSince({ sessionId: s.sessionId, userId: 'u1', afterSeq: 0 })).at(-1)
+    assert.deepEqual([card.ref.pick, card.ref.mid, card.ref.questions[0].options.map(o => o.label)], [true, true, ['NVDA', 'AMD']])
+    assert.equal((await st(sessions, s)).mentor.build.status, 'awaiting')
+
+    assert.deepEqual(await asks.answer({ user, sessionId: s.sessionId, seq: card.seq, answers: { name: { choice: 'AMD' } } }), { agent: 'mentor', resumed: true })
+    const b = (await st(sessions, s)).mentor.build
+    assert.deepEqual([b.status, b.title, b.pending, b.picking], ['building', 'AMD trade', undefined, undefined])
+    assert.match(turns[0].text, /- Which stock\? AMD\n/)
+    assert.doesNotMatch(turns[0].text, /Find one for me/)
+    assert.deepEqual(turns[0].input.accounts, [{ id: 'p1', broker: 'paper' }], "the card's account rides on")
 })

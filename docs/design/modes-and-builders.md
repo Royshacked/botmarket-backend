@@ -203,6 +203,14 @@ Driven: ready → Watch summary (reasoning + chart) → Change → back to the b
 drive (`scripts/drive-build-summary.mjs`) was stopped twice by the machine running low on memory — still to drive. The
 `public/` bundle is NOT rebuilt for steps 5b-fixes/6 (memory).
 
+**BUILT 2026-11-20 (step 8, M8 + M18).** A build that stops on a QUESTION (or runs out of carries) PAUSES ON A CARD: its
+question — the last paragraph with a question mark, the bullet lines under it as the options (`builds.midQuestion`), Other
+always — posted as a `mid` question card above the prompt box whatever the mode; the chat stays with Axl (it no longer
+switches to the builder). Answering it sends the build back to the background (`builds.resume`). "Find one for me": the
+trader does not run; the stock picker is asked headless (`desks/candidates.js`) for two or three names in
+`<argus_candidates>` — gated to the house's lists like his pick — and a `pick` card asks which; the pick runs the held
+answers with that name (`build.pending`). Unit-tested; not yet driven (memory).
+
 ### 4.5 The analyst
 
 "Research MSFT" → Analyst mode → no questions → the build is the existing headless research run (`researchRun`,

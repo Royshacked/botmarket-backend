@@ -92,13 +92,15 @@ try {
     await shot(page, '02-axl-meanwhile')
 
     // The end of the build: ready (announced) or back to the user.
-    const end = await page.waitForFunction(() => /is ready|needs you|did not finish/.test(document.querySelector('.side-pane__build-status')?.innerText ?? ''), null, { timeout: 600_000 })
+    const end = await page.waitForFunction(() => /is ready|has a question|did not finish/.test(document.querySelector('.side-pane__build-status')?.innerText ?? ''), null, { timeout: 600_000 })
         .then(() => true).catch(() => false)
     const final = await strip(page)
     expect(end, `the build ended: "${final}"`)
-    if (/needs you/.test(final ?? '')) {
+    if (/has a question/.test(final ?? '')) {
+        // Step 8: the build pauses on a card above the prompt box; the chat stays with Axl.
+        expect(await page.locator('.question-card').count() > 0, "the build's question is on a card above the prompt box")
         const mode = await page.locator('.mode-picker__toggle').getAttribute('aria-label')
-        expect(mode === 'Mode: Trader', `needing the user, the mode is back on the trader (${mode})`)
+        expect(mode === 'Mode: General', `the chat stays with Axl (${mode})`)
     }
     if (/is ready/.test(final ?? '')) {
         const toast = await page.evaluate(() => document.body.innerText.includes('is ready — review it in the pane'))

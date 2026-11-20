@@ -161,10 +161,13 @@ async function chatStream({ messages = [], model: requestedModel, audience = nul
     ]
 
     let capturedPick = null
+    // A background trade build's "find one for me" (modes-and-builders.md M18, step 8): two or three names, the user picks.
+    let capturedCandidates = null
     // <route>/<open>: the user asked to be sent to another desk with a name (routing.util).
     const route = makeRouteCapture('scanner')
 
     const onPick = (json) => { try { capturedPick = JSON.parse(json) } catch { /* malformed — ignore */ } }
+    const onCandidates = (json) => { try { capturedCandidates = JSON.parse(json) } catch { /* malformed — ignore */ } }
     const phase = makePhaseCapture(4, onPhase)
 
     // All known emit tags suppressed by default — a stray <scan_list> from the spine is swallowed, never shown.
@@ -173,6 +176,7 @@ async function chatStream({ messages = [], model: requestedModel, audience = nul
         phase:       phase.capture,
         ticker:      { onCapture: onTicker, keepText: true },
         argus_pick: onPick,
+        argus_candidates: onCandidates,
         ...route.captures,
     })
 
@@ -222,9 +226,30 @@ async function chatStream({ messages = [], model: requestedModel, audience = nul
         }
     }
     await _attachPickLabel(pick)
+    // The candidates pass the same gate as the pick: on a list he was shown, or on the house's lists today.
+    let candidates = _normalizeCandidates(capturedCandidates)
+    if (candidates.length && candidates.some(c => !listed.has(c.ticker))) {
+        const onLists = await houseListNames(_listDeps).catch(() => new Set())
+        const kept = candidates.filter(c => listed.has(c.ticker) || onLists.has(c.ticker))
+        if (kept.length < candidates.length) logger.warn(LOG, 'candidates dropped — not on the house lists', { dropped: candidates.filter(c => !kept.includes(c)).map(c => c.ticker) })
+        candidates = kept
+    }
 
     logger.info(LOG, 'chatStream done', { replyLength: reply.length, hasPick: !!pick, listed: listed.size, route: routing.route, phase: phase.get() })
-    return { reply, phase: phase.get(), ...(pick ? { pick } : {}), ...routing }
+    return { reply, phase: phase.get(), ...(pick ? { pick } : {}), ...(candidates.length ? { candidates } : {}), ...routing }
+}
+
+/** A captured <argus_candidates> — up to three distinct `{ ticker, thesis }`. Pure; exported for tests. */
+export function _normalizeCandidates(raw) {
+    const list = Array.isArray(raw) ? raw : Array.isArray(raw?.candidates) ? raw.candidates : []
+    const out = []
+    for (const c of list) {
+        const ticker = typeof c?.ticker === 'string' ? c.ticker.toUpperCase().trim() : ''
+        if (!/^[A-Z][A-Z0-9.-]{0,9}$/.test(ticker) || out.some(o => o.ticker === ticker)) continue
+        out.push({ ticker, thesis: typeof c.thesis === 'string' ? c.thesis.trim().slice(0, 200) : '' })
+        if (out.length >= 3) break
+    }
+    return out
 }
 
 /**
