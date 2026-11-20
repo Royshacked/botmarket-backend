@@ -212,12 +212,10 @@ export function makeBuilds({ sessions = sessionService, depth = sessionDepth, ru
         if (out?.stopped || stillWorking(session, agent, depth(sessionId))) return null
         const rows = await sessions.messagesForAgent({ sessionId, userId: user._id, agent, afterSeq: 0 })
         const last = [...(rows ?? [])].reverse().find(r => r.role === 'assistant' && r.ref?.build === b.id)
-        // Could it be confirmed now → the build is DONE, go or no go — even when it ends asking "shall I apply it?", which IS
-        // the Confirm (after a Change the trader said "press Update" instead of going — the drive, 2026-11-20; a review ends
-        // asking to accept). Otherwise: stopped on a statement → carry it on (a few times); on a question → the card.
-        if (generatable(state, agent)) { await ready({ user, sessionId, agent }); return 'ready' }
         // DECLINED (step 10 — the drive): the builder's verdict is that there is no trade. Not carried on (three paid turns
-        // asking him to build what he has ruled out), not a question: the bar says it — Change or Dismiss.
+        // asking him to build what he has ruled out), not a question: the bar says it — Change or Dismiss. FIRST: a verdict
+        // of no trade beats a draft still left from before it (the drive: after a Change, "No trade: …", and the old draft
+        // was confirmed and armed).
         const declined = noTradeReason(last?.content)
         if (declined) {
             await write(user, sessionId, agent, { ...state, build: { ...b, status: 'declined', reason: declined } })
@@ -225,6 +223,10 @@ export function makeBuilds({ sessions = sessionService, depth = sessionDepth, ru
             logger.info(LOG, 'build declined', { sessionId, agent, title: b.title })
             return 'declined'
         }
+        // Could it be confirmed now → the build is DONE, go or no go — even when it ends asking "shall I apply it?", which IS
+        // the Confirm (after a Change the trader said "press Update" instead of going — the drive, 2026-11-20; a review ends
+        // asking to accept). Otherwise: stopped on a statement → carry it on (a few times); on a question → the card.
+        if (generatable(state, agent)) { await ready({ user, sessionId, agent }); return 'ready' }
         if (!asksTheUser(last?.content) && await carry({ user, sessionId, agent })) return 'carried'
         // THE BUILD PAUSES ON A CARD (step 8, M8): the builder's question — with the options it listed — above the prompt
         // box; the chat stays where the user is. Answering it sends the build back to work (asking.answer).

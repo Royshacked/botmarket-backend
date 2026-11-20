@@ -22,6 +22,23 @@ let failed = false
 const expect = (ok, what) => { console.log(`${ok ? '  ✓' : '  ✗'} ${what}`); if (!ok) failed = true }
 const noSideways = (page) => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)
 
+// A leftover build from an earlier run is dismissed first, as a user would — "New session" rightly keeps unsaved work.
+async function clearBuilds(page) {
+    for (let i = 0; i < 4; i++) {
+        const bar = page.locator('.build-bar')
+        if (!(await bar.count())) return
+        const text = await bar.first().innerText()
+        if (/is ready/.test(text)) {
+            await page.locator('.build-bar__btn', { hasText: 'Watch summary' }).click()
+            await page.locator('.build-summary__btn', { hasText: 'Dismiss' }).click()
+            await page.locator('.build-summary__btn', { hasText: 'Dismiss it' }).click()
+        } else {
+            await page.locator('.build-bar__btn', { hasText: 'Dismiss' }).click()
+        }
+        await page.waitForTimeout(2500)
+    }
+}
+
 const browser = await chromium.launch()
 const page = await browser.newPage({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
 const errors = []
@@ -38,6 +55,7 @@ try {
         await page.waitForTimeout(3500)
     }
     expect(await page.locator('.mode-picker__toggle').count() > 0, 'signed in')
+    await clearBuilds(page)
     const fresh = page.getByRole('button', { name: 'New session' })
     if (await fresh.isEnabled().catch(() => false)) { await fresh.click(); await page.waitForTimeout(2000) }
 

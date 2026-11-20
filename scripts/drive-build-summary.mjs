@@ -30,6 +30,23 @@ async function answerNumbers(page) {
     await q('Min R:R').locator('.question-card__option', { hasText: /^1\.5$/ }).click()
 }
 
+// A leftover build from an earlier run is dismissed first, as a user would — "New session" rightly keeps unsaved work.
+async function clearBuilds(page) {
+    for (let i = 0; i < 4; i++) {
+        const bar = page.locator('.build-bar')
+        if (!(await bar.count())) return
+        const text = await bar.first().innerText()
+        if (/is ready/.test(text)) {
+            await page.locator('.build-bar__btn', { hasText: 'Watch summary' }).click()
+            await page.locator('.build-summary__btn', { hasText: 'Dismiss' }).click()
+            await page.locator('.build-summary__btn', { hasText: 'Dismiss it' }).click()
+        } else {
+            await page.locator('.build-bar__btn', { hasText: 'Dismiss' }).click()
+        }
+        await page.waitForTimeout(2500)
+    }
+}
+
 const browser = await chromium.launch()
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } })
 const errors = []
@@ -46,6 +63,7 @@ try {
         await page.waitForTimeout(3500)
     }
     expect(await page.locator('.mode-picker__toggle').count() > 0, 'signed in (the auth limiter let us in)')
+    await clearBuilds(page)
     const fresh = page.getByRole('button', { name: 'New session' })
     if (await fresh.isEnabled().catch(() => false)) { await fresh.click(); await page.waitForTimeout(2000) }
 
@@ -69,15 +87,19 @@ try {
                 const bar = document.querySelector('.build-bar__text')?.innerText ?? ''
                 if (/is ready/.test(bar)) return 'ready'
                 if (/^No trade/.test(bar)) return 'declined'
-                if (document.querySelector('.question-card .question-card__submit')) return 'question'
+                // A BUILD's own card — its question, or the pick — never the start card still leaving the screen.
+                const title = document.querySelector('.question-card__title')?.innerText ?? ''
+                if (/a question before it goes on|Pick the name/.test(title)) return 'question'
                 return false
             }, null, { timeout: Math.max(1000, until - Date.now()) }).then(h => h.jsonValue()).catch(() => null)
             console.log('  the build:', what)
             if (what === 'ready' || !what) return what === 'ready'
             if (what === 'question') {
-                const other = page.locator('.question-card__other').first()
+                const question = await page.locator('.question-card__question').first().innerText().catch(() => '')
+                console.log('    its question:', question.slice(0, 200))
                 const opt = page.locator('.question-card__option').first()
-                if (await opt.count()) await opt.click(); else await other.fill('Decide for me — build it all the way.')
+                if (await opt.count()) await opt.click(); else await page.locator('.question-card__other').first().fill('Decide for me — build it all the way.')
+                await page.waitForFunction(() => !document.querySelector('.question-card__submit')?.disabled, null, { timeout: 10_000 }).catch(() => {})
                 await page.locator('.question-card__submit').click()
             } else {
                 await page.locator('.build-bar__btn', { hasText: 'Change' }).click()

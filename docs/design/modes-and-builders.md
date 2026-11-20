@@ -226,6 +226,16 @@ to the analyst with nothing on his table starts a coverage build (no card) — t
 draft, titled by its name. INITIATE AND UPDATE ARE OPEN TO EVERY USER (M17): a coverage any user saves is the house's,
 read by every user's trader and Hotlist. Unit-tested; not yet driven (memory).
 
+**STEP 10 DONE 2026-11-20** — docs (APP_SPEC "Modes and builders", CODE_MAP, README, CLAUDE.md), the bundle, the drives.
+Driven live: the summary end to end (`scripts/drive-build-summary.mjs`: ready → Watch summary — reasoning + live chart →
+Change → ready again → Confirm "saved and armed"), the build in the background (`drive-lanes.mjs`), the phone at 390px
+(`drive-builds-phone.mjs`: the menu, the card, Build it in reach, back to General, the status line, no sideways scroll).
+Found by the drives and fixed: a build a restart cut off stayed "building" (now the boot sweep marks it failed — Retry);
+a no-trade verdict was carried on three paid turns (now DECLINED — Change or Dismiss — and it beats a draft left from
+before it, which had been confirmed and armed); a builder's background chart docked over the summary and squashed it
+(now never docked; the summary keeps its height). Not driven: the portfolio review and Analyst-mode builds, the
+find-one-for-me pick card, a mid-build question card answered by a person (the drive answers them).
+
 ## 5. Build order
 
 Each step ships on its own, with tests and a drive.

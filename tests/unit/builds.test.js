@@ -382,3 +382,11 @@ test('a build whose verdict is NO TRADE is DECLINED — not carried on, not a qu
     assert.deepEqual(await builds.rework({ user, sessionId: s.sessionId, agent: 'mentor', kind: 'drop' }), { ok: true })
     assert.equal((await st(sessions, s)).mentor.build, undefined, 'off the table')
 })
+
+test("a NO TRADE verdict beats a draft left from before it — declined, never confirmable (the drive: an old draft was armed)", async () => {
+    const { sessions, builds } = rig()
+    const s = await sessions.getActive({ userId: 'u1' })
+    await sessions.setAgentState({ sessionId: s.sessionId, userId: 'u1', agent: 'mentor', state: { draft: { asset: 'NVDA' }, view: { readiness: { ready: true } }, build: { id: 'b1', status: 'building', title: 'NVDA trade', since: 1 } } })
+    await sessions.append({ sessionId: s.sessionId, userId: 'u1', message: { agent: 'mentor', role: 'assistant', content: 'No trade: the pullback alternative is invalid now — NVDA is below both stops.', ref: { build: 'b1' } } })
+    assert.equal(await builds.settle({ user, sessionId: s.sessionId, agent: 'mentor', out: { payload: {} } }), 'declined')
+})
