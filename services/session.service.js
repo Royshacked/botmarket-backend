@@ -431,6 +431,15 @@ export function makeSessionService({ getDb = _defaultGetDb, events = silentEvent
             .toArray()
     }
 
+    /** Every ACTIVE session where a builder is BUILDING — what the boot sweep of builds reads (builds.sweep). */
+    async function findBuilding() {
+        const db = await getDb()
+        return db.collection(SESSIONS)
+            .find({ status: 'active', $or: ['mentor', 'portfolio', 'analyst'].map(a => ({ [`agentState.${a}.build.status`]: 'building' })) },
+                { projection: { _id: 0, sessionId: 1, userId: 1, agentState: 1 } })
+            .toArray()
+    }
+
     /** Every ACTIVE session with a status line up — what the boot sweep of background work reads (echoMapJobs.sweep). */
     async function findWaiting() {
         const db = await getDb()
@@ -489,7 +498,7 @@ export function makeSessionService({ getDb = _defaultGetDb, events = silentEvent
         return r.matchedCount ? { ok: true } : { reason: 'not_found' }
     }
 
-    return { ensureIndexes, getActive, findActive, startNew, resume, importArchived, list, remove, get, append, messagesSince, messagesForAgent, allMessagesSince, removeMessages, setAgentState, setSealedThrough, setChain, setWaiting, findRunningChains, findWaiting, setFloor, updateRef, setSummary, addLink }
+    return { ensureIndexes, getActive, findActive, startNew, resume, importArchived, list, remove, get, append, messagesSince, messagesForAgent, allMessagesSince, removeMessages, setAgentState, setSealedThrough, setChain, setWaiting, findRunningChains, findWaiting, findBuilding, setFloor, updateRef, setSummary, addLink }
 }
 
 export const sessionService = makeSessionService({ events: sessionEvents })

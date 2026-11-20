@@ -292,7 +292,29 @@ export function makeBuilds({ sessions = sessionService, depth = sessionDepth, ru
         return started
     }
 
-    return { start, startNext, carry, ready, settle, rework, resume, begin }
+    /**
+     * At boot (step 10 — the drive found it): a build still BUILDING was cut off by the restart; nothing runs it now. It is
+     * marked failed — its bar offers Retry, the user decides (no paid turn while they may be away) — and the queue moves.
+     * @returns {Promise<number>} the builds swept
+     */
+    async function sweep() {
+        const list = await sessions.findBuilding().catch(err => { logger.warn(LOG, 'sweep could not list sessions', err.message); return [] })
+        let n = 0
+        for (const s of list) {
+            const user = { _id: s.userId }
+            for (const agent of BUILDERS) {
+                const state = s.agentState?.[agent]
+                if (state?.build?.status !== 'building') continue
+                await write(user, s.sessionId, agent, { ...state, build: { ...state.build, status: 'failed', failedBy: 'restart' } }).catch(() => {})
+                n++
+            }
+            await startNext({ user, sessionId: s.sessionId }).catch(() => {})
+        }
+        if (n) logger.info(LOG, 'builds a restart cut off — marked failed (Retry)', { n })
+        return n
+    }
+
+    return { start, startNext, carry, ready, settle, rework, resume, begin, sweep }
 }
 
 export const builds = makeBuilds()

@@ -347,3 +347,16 @@ test("Analyst mode (M17): the user's first message starts a coverage build — t
     assert.equal(await builds.settle({ user, sessionId: s.sessionId, agent: 'analyst', out: { payload: {} } }), 'ready')
     assert.equal((await st(sessions, s)).analyst.build.title, 'MSFT coverage')
 })
+
+test('at boot, a build a restart cut off is marked failed (Retry) and the queue moves (step 10 — the drive found it)', async () => {
+    const { sessions, builds, turns } = rig()
+    const s = await sessions.getActive({ userId: 'u1' })
+    await sessions.setAgentState({ sessionId: s.sessionId, userId: 'u1', agent: 'mentor', state: { build: { id: 'b1', status: 'building', title: 'AMD trade', since: 1 } } })
+    await sessions.setAgentState({ sessionId: s.sessionId, userId: 'u1', agent: 'portfolio', state: { build: { id: 'b2', status: 'queued', title: 'Growth book', since: 2, pending: { text: 'answers', input: {} } } } })
+    assert.equal(await builds.sweep(), 1)
+    const now = await st(sessions, s)
+    assert.deepEqual([now.mentor.build.status, now.mentor.build.failedBy], ['failed', 'restart'])
+    assert.equal(now.portfolio.build.status, 'building', 'the queued build started')
+    assert.equal(turns[0].agent, 'portfolio')
+    assert.equal(await builds.sweep(), 1, "the queued one, now building, is the next boot's — this one's turn is in flight")
+})
