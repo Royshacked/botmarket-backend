@@ -20,6 +20,24 @@ import { sessionDepth } from './turnLock.js'
 import { logger } from '../logger.service.js'
 
 const LOG = '[builds]'
+// A build turn that stopped on a STATEMENT, not a question — "the earlier price figures are not in this turn, I won't
+// invent them" (the drive, 2026-11-20) — has nobody to say "go on" in the background: the build says it, this many times.
+export const MAX_CARRIES = 3
+
+/**
+ * Does a builder's reply ask the user something? A question mark near its end (its last 400 characters — a question with
+ * its options listed under it still counts). In doubt it does: a question is the user's, never carried past. Pure.
+ */
+export function asksTheUser(text) {
+    return /\?/.test(String(text ?? '').trim().slice(-400))
+}
+
+/** The app's note that carries a stalled build on. Pure. */
+export function carryLine() {
+    return "[App note, not the user's words: the user is not here — the build runs in the background. Carry on building from where you stopped: " +
+        "call your tools again for any figure you need (a previous turn's numbers are not repeated to you), and finish it. Ask the user only " +
+        'what their answers do not settle.]'
+}
 export const BUILDERS = Object.freeze(['mentor', 'portfolio', 'analyst'])
 export const ACTIVE = Object.freeze(['building', 'awaiting'])
 const now = () => Date.now()
@@ -98,6 +116,23 @@ export function makeBuilds({ sessions = sessionService, depth = sessionDepth, ru
         return agent
     }
 
+    /**
+     * Carry a build on with the app's note — after a turn that stopped on a statement, or a go that was not ready yet (the
+     * reason in `note`). At most MAX_CARRIES a build. Fire-and-forget (the turn queues behind the caller's lock).
+     * @returns {Promise<boolean>} false when the carries are spent (the build is the user's then)
+     */
+    async function carry({ user, sessionId, agent, note = null }) {
+        const session = await sessions.get({ sessionId, userId: user._id })
+        const state = session?.agentState?.[agent]
+        const b = state?.build
+        if (!b || b.status !== 'building' || (b.carries ?? 0) >= MAX_CARRIES) return false
+        await write(user, sessionId, agent, { ...state, build: { ...b, carries: (b.carries ?? 0) + 1 } })
+        runTurn({ user, sessionId, agent, text: note ? `${carryLine()}\n${note}` : carryLine(), input: {}, origin: 'opening', turnId: `build_${b.id}_carry_${now()}` })
+            .catch(err => logger.warn(LOG, 'carry failed to start', err.message))
+        logger.info(LOG, 'build carried on', { sessionId, agent, carries: (b.carries ?? 0) + 1, note: note ? 'not ready' : 'statement' })
+        return true
+    }
+
     /** The builder said go: built, waiting for the user's Confirm. Then the next queued build. */
     async function ready({ user, sessionId, agent }) {
         const session = await sessions.get({ sessionId, userId: user._id })
@@ -127,6 +162,8 @@ export function makeBuilds({ sessions = sessionService, depth = sessionDepth, ru
         if (out?.stopped || stillWorking(session, agent, depth(sessionId))) return null
         const rows = await sessions.messagesForAgent({ sessionId, userId: user._id, agent, afterSeq: 0 })
         const last = [...(rows ?? [])].reverse().find(r => r.role === 'assistant' && r.ref?.build === b.id)
+        // Stopped on a statement, not a question: carry it on (a few times) rather than hand it to the user.
+        if (!asksTheUser(last?.content) && await carry({ user, sessionId, agent })) return 'carried'
         if (last) {
             const { build: _hidden, ...ref } = last.ref
             await sessions.updateRef({ sessionId, userId: user._id, seq: last.seq, ref: { ...ref, fromBuild: b.id } })
@@ -137,7 +174,7 @@ export function makeBuilds({ sessions = sessionService, depth = sessionDepth, ru
         return 'awaiting'
     }
 
-    return { start, startNext, ready, settle }
+    return { start, startNext, carry, ready, settle }
 }
 
 export const builds = makeBuilds()

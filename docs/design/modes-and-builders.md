@@ -175,8 +175,11 @@ pane's build strip (status, what it does now, the latest step), the chat's statu
 Driven (`scripts/drive-lanes.mjs`, twice): back to General by itself, the pane and the status line say it, Axl answered in
 6–7 s while it built and knew its status, a build that needed the user came back to it with the mode on Trader. Both runs
 ended AWAITING for real gaps, both fixed: the card took the three numbers as one answer (now Size, Risk, Min R:R), and the
-chain turns after a read carried no account (now the build's). The READY path is unit-tested; its live run was stopped by
-the machine running low on memory — to drive again.
+chain turns after a read carried no account (now the build's). Three more the drives found, fixed: a turn that stopped on a
+STATEMENT ("the earlier figures are not in this turn") is CARRIED ON with an app note (`builds.carry`, at most 3 — a
+question still goes to the user); a read landing pulled the floor to the builder (`hop` keeps it now); a go that could not be
+generated was marked ready (now READY only when the pane's readiness says so — else carried with what is missing). READY
+driven 2026-11-20: built in the background, Axl answering meanwhile, ready announced, the chat still General, Generate on.
 
 ### 4.4 The summary (M9, M13, M14, M15)
 

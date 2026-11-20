@@ -176,7 +176,9 @@ export function makeChainRunner({
         // thrown away to receive a hand-off.
         const base = force ? (desks[to]?.emptyState?.() ?? {}) : (theirs ?? desks[to]?.emptyState?.() ?? {})
         await sessions.setAgentState({ sessionId, userId: user._id, agent: to, state: { ...base, chainId: chain.id } })
-        await sessions.setFloor({ sessionId, userId: user._id, agent: to })
+        // A builder building in the background takes the hand-off without the floor — the chat stays where the user is
+        // (step 5b; the drive found the trader's read landing pulled the chat to him).
+        if (!isBuilding(theirs)) await sessions.setFloor({ sessionId, userId: user._id, agent: to })
         const step = chain.steps + 1
         // Written BEFORE the turn runs: a restart mid-turn finds `current` and can offer to run it again.
         await save(user, sessionId, {
@@ -258,7 +260,19 @@ export function makeChainRunner({
         // A DESK'S GO (argus-rework.md §2.2): Mentor or Atlas said done — generate it (Mentor's armed too), if code lets
         // them. A go that went through ended the session; nothing else runs after it.
         // A BUILD's go (step 5b): built — READY for the user's Confirm, never saved on its own.
-        if (out.payload?.go && GO[agent] && isBuilding(session.agentState?.[agent])) { await builds.ready({ user, sessionId, agent }); return }
+        if (out.payload?.go && GO[agent] && isBuilding(session.agentState?.[agent])) {
+            // Ready only when the draft could be generated — the readiness the pane's Generate reads. Not yet: carried on
+            // with what is missing, as a refused go always was (the drive, 2026-11-20: "go" with no quantities).
+            const r = session.agentState[agent]?.view?.readiness
+            if (r && r.ready === false) {
+                const why = [...(r.missing ?? []), ...(r.problems ?? [])].join('; ')
+                await builds.carry({ user, sessionId, agent, note: `Your go did not generate: it still needs ${why || 'more'}. Fix exactly that (size_position for a quantity), then go again.` })
+                return
+            }
+            if (chain) await end(user, sessionId, chain)
+            await builds.ready({ user, sessionId, agent })
+            return
+        }
         if (out.payload?.go && GO[agent] && await deskGo({ user, sessionId, session, input, agent })) return
         // A one-answer build cut short by the turn's tool budget: carried on into another turn, at most MAX_CARRY in a row
         // (the count resets when the user speaks).
@@ -604,5 +618,5 @@ export function makeChainRunner({
         return cut.length
     }
 
-    return { afterTurn, requestPause, resume, sweep, sleeveSettled, readSettled, readWaiting, bindRunQueued, bindAct }
+    return { afterTurn, requestPause, resume, sweep, sleeveSettled, readSettled, readWaiting, bindRunQueued, bindAct, _hop: hop }
 }

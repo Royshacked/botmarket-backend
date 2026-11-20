@@ -132,3 +132,55 @@ test("a build's later turns (a chain step after a read lands) bind to the card's
     await turn({ user, sessionId: s.sessionId, agent: 'mentor', origin: 'chain', input: {} })
     assert.deepEqual([seen[0].accounts, seen[0].mainAccountId], [[acct], 'p1'])
 })
+
+test('a build that stopped on a statement is carried on (twice at most); one that asks the user goes to them (the drive, 2026-11-20)', async () => {
+    const { asksTheUser, carryLine, MAX_CARRIES } = await import('../../services/desks/builds.js')
+    assert.equal(asksTheUser('What dollar amount are you willing to risk?'), true)
+    assert.equal(asksTheUser('Which of the two?\n\n- A: $436\n- B: $514'), true, 'a question with its options under it')
+    assert.equal(asksTheUser("I can't generate the entry because the earlier figures aren't in this turn, and I won't invent them."), false)
+    assert.match(carryLine(), /call your tools again for any figure you need/)
+
+    const { sessions, builds, turns } = rig()
+    const s = await sessions.getActive({ userId: 'u1' })
+    await builds.start({ user, sessionId: s.sessionId, agent: 'mentor', state: {}, title: 'AMD trade', text: 't', input: {} })
+    const id = (await st(sessions, s)).mentor.build.id
+    await sessions.append({ sessionId: s.sessionId, userId: 'u1', message: { agent: 'mentor', role: 'assistant', content: "I won't invent the figures.", ref: { build: id } } })
+    for (let i = 0; i < MAX_CARRIES; i++) assert.equal(await builds.settle({ user, sessionId: s.sessionId, agent: 'mentor', out: { payload: {} } }), 'carried')
+    assert.equal(turns.length, MAX_CARRIES)
+    assert.equal(turns[0].origin, 'opening')
+    assert.equal(await builds.settle({ user, sessionId: s.sessionId, agent: 'mentor', out: { payload: {} } }), 'awaiting', 'then it is the user\'s')
+})
+
+test("a read landing hands the build its turn WITHOUT the floor; the build's go ends its chain (the drive, 2026-11-20)", async () => {
+    const { makeChainRunner } = await import('../../services/chain/runner.js')
+    const { sessions } = rig()
+    const s = await sessions.getActive({ userId: 'u1' })
+    await sessions.setFloor({ sessionId: s.sessionId, userId: 'u1', agent: 'axl' })
+    await sessions.setAgentState({ sessionId: s.sessionId, userId: 'u1', agent: 'mentor', state: { draft: { asset: 'AMD' }, build: { id: 'b1', status: 'building', title: 'AMD trade', since: 1 } } })
+    const ran = []
+    const runner = makeChainRunner({ sessions, builds: { ready: async () => {} }, loadUser: async () => user })
+    runner.bindRunQueued(async (x) => { ran.push(x.agent); return {} })
+    // The hand-off a landed read makes (the same hop readSettled runs).
+    const chain = { id: 'c1', status: 'running', origin: 'mentor', steps: 0 }
+    await sessions.setChain({ sessionId: s.sessionId, userId: 'u1', chain })
+    await runner._hop({ user, session: await sessions.get({ sessionId: s.sessionId, userId: 'u1' }), chain, art: { kind: 'prometheus_read', items: [{ ticker: 'AMD', facts: 'a hold' }] }, from: 'analyst' })
+    assert.equal((await sessions.get({ sessionId: s.sessionId, userId: 'u1' })).floor, 'axl', 'the chat stays with Axl')
+
+    await runner.afterTurn({ user, sessionId: s.sessionId, agent: 'mentor', turnId: 't', origin: 'chain', out: { payload: { go: {} } }, input: {} })
+    assert.equal((await sessions.get({ sessionId: s.sessionId, userId: 'u1' })).chain.status, 'done')
+})
+
+test("a build's go that could not be generated yet is carried on with what is missing — not READY (the drive, 2026-11-20)", async () => {
+    const { makeChainRunner } = await import('../../services/chain/runner.js')
+    const { sessions } = rig()
+    const s = await sessions.getActive({ userId: 'u1' })
+    await sessions.setAgentState({ sessionId: s.sessionId, userId: 'u1', agent: 'mentor', state: {
+        draft: { asset: 'AMD' }, view: { readiness: { ready: false, missing: ['quantity on pullback'], problems: [] } },
+        build: { id: 'b1', status: 'building', title: 'AMD trade', since: 1 },
+    } })
+    const carried = [], readied = []
+    const runner = makeChainRunner({ sessions, builds: { carry: async (x) => { carried.push(x.note); return true }, ready: async (x) => { readied.push(x.agent) } } })
+    await runner.afterTurn({ user, sessionId: s.sessionId, agent: 'mentor', turnId: 't', origin: 'opening', out: { payload: { go: {} } }, input: {} })
+    assert.deepEqual(readied, [])
+    assert.match(carried[0], /still needs quantity on pullback/)
+})

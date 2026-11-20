@@ -103,6 +103,9 @@ try {
     if (/is ready/.test(final ?? '')) {
         const toast = await page.evaluate(() => document.body.innerText.includes('is ready — review it in the pane'))
         expect(toast, 'a ready build is announced')
+        const mode = await page.locator('.mode-picker__toggle').getAttribute('aria-label')
+        expect(mode === 'Mode: General', `ready, the chat is still with Axl (${mode})`)
+        expect(await page.locator('.side-pane button', { hasText: /generate/i }).first().isEnabled().catch(() => false), 'Generate is on in the pane')
     }
     await shot(page, '03-end')
 } catch (err) {
