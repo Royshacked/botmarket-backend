@@ -60,7 +60,34 @@ try {
     await page.locator('.question-card__q', { hasText: 'Surprises' }).locator('.question-card__option', { hasText: 'Decide for me' }).click()
     await page.locator('.question-card__submit').click()
 
-    const ready = async (ms) => page.waitForFunction(() => /is ready/.test(document.querySelector('.build-bar__text')?.innerText ?? ''), null, { timeout: ms }).then(() => true).catch(() => false)
+    // Until READY — answering the build's question card ("decide for me") and changing a declined build ("build the long
+    // anyway") on the way, as a user would (steps 8 + 10): the drive is about the summary, not the market's mood.
+    const ready = async (ms) => {
+        const until = Date.now() + ms
+        for (let round = 0; round < 4 && Date.now() < until; round++) {
+            const what = await page.waitForFunction(() => {
+                const bar = document.querySelector('.build-bar__text')?.innerText ?? ''
+                if (/is ready/.test(bar)) return 'ready'
+                if (/^No trade/.test(bar)) return 'declined'
+                if (document.querySelector('.question-card .question-card__submit')) return 'question'
+                return false
+            }, null, { timeout: Math.max(1000, until - Date.now()) }).then(h => h.jsonValue()).catch(() => null)
+            console.log('  the build:', what)
+            if (what === 'ready' || !what) return what === 'ready'
+            if (what === 'question') {
+                const other = page.locator('.question-card__other').first()
+                const opt = page.locator('.question-card__option').first()
+                if (await opt.count()) await opt.click(); else await other.fill('Decide for me — build it all the way.')
+                await page.locator('.question-card__submit').click()
+            } else {
+                await page.locator('.build-bar__btn', { hasText: 'Change' }).click()
+                await page.getByLabel('The change').fill('Build the long on the pullback anyway — the user takes the risk.')
+                await page.locator('.build-bar__btn', { hasText: 'Rebuild' }).click()
+            }
+            await page.waitForTimeout(5000)
+        }
+        return false
+    }
     const status = () => page.evaluate(() => document.querySelector('.side-pane__build-status')?.innerText ?? null)
     expect(await ready(600_000), `built: the bar says it is ready (${await status()})`)
     await page.locator('.build-bar__btn', { hasText: 'Watch summary' }).click()

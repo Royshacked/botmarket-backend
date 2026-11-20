@@ -175,7 +175,7 @@ export function answersText(agent, questions, answers, opening = null) {
     const lines = questions.map(q => `- ${q.question} ${words(q, answers[q.id] ?? {})}`)
     const decide = answers.surprises?.choice === 'Decide for me'
     const tail = agent === 'mentor'
-        ? (decide ? 'Take it all the way: build it and generate it, telling me what you chose.' : 'Build it, and ask me before any choice these answers do not settle.')
+        ? `${decide ? 'Take it all the way: build it and generate it, telling me what you chose.' : 'Build it, and ask me before any choice these answers do not settle.'} If there is no trade to build, say so in one line that starts with "No trade:" and why.`
         : (decide ? 'Build it all the way and tell me what you chose.' : 'Build it, and ask me before any choice these answers do not settle.')
     return [
         opening ? `${opening}\n` : '',

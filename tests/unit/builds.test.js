@@ -360,3 +360,25 @@ test('at boot, a build a restart cut off is marked failed (Retry) and the queue 
     assert.equal(turns[0].agent, 'portfolio')
     assert.equal(await builds.sweep(), 1, "the queued one, now building, is the next boot's — this one's turn is in flight")
 })
+
+test('a build whose verdict is NO TRADE is DECLINED — not carried on, not a question; Change or drop it (step 10 — the drive)', async () => {
+    const { noTradeReason } = await import('../../services/desks/builds.js')
+    assert.equal(noTradeReason('No trade: the chart challenge favored the short side.'), 'the chart challenge favored the short side.')
+    assert.equal(noTradeReason('**No trade** — earnings in 2 days.'), 'earnings in 2 days.')
+    assert.equal(noTradeReason('I see no trade-off here.'), null)
+    const { sessions, builds, turns } = rig()
+    const s = await sessions.getActive({ userId: 'u1' })
+    await builds.start({ user, sessionId: s.sessionId, agent: 'mentor', state: {}, title: 'AMD trade', text: 't', input: {} })
+    const id = (await st(sessions, s)).mentor.build.id
+    await sessions.append({ sessionId: s.sessionId, userId: 'u1', message: { agent: 'mentor', role: 'assistant', content: 'No trade: the chart favors the short side, and this desk builds longs only.', ref: { build: id } } })
+    assert.equal(await builds.settle({ user, sessionId: s.sessionId, agent: 'mentor', out: { payload: {} } }), 'declined')
+    assert.equal(turns.length, 0, 'not carried on')
+    let b = (await st(sessions, s)).mentor.build
+    assert.deepEqual([b.status, b.reason], ['declined', 'the chart favors the short side, and this desk builds longs only.'])
+    assert.deepEqual(await builds.rework({ user, sessionId: s.sessionId, agent: 'mentor', kind: 'change', text: 'build the long on the pullback anyway' }), { ok: true })
+    b = (await st(sessions, s)).mentor.build
+    assert.equal(b.status, 'building')
+    await sessions.setAgentState({ sessionId: s.sessionId, userId: 'u1', agent: 'mentor', state: { build: { ...b, status: 'declined' } } })
+    assert.deepEqual(await builds.rework({ user, sessionId: s.sessionId, agent: 'mentor', kind: 'drop' }), { ok: true })
+    assert.equal((await st(sessions, s)).mentor.build, undefined, 'off the table')
+})

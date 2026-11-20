@@ -78,7 +78,13 @@ export function generatable(state, agent = 'mentor') {
 export function carryLine() {
     return "[App note, not the user's words: the user is not here — the build runs in the background. Carry on building from where you stopped: " +
         "call your tools again for any figure you need (a previous turn's numbers are not repeated to you), and finish it. Ask the user only " +
-        'what their answers do not settle.]'
+        "what their answers do not settle. If there is no trade to build, say so in ONE line that starts with \"No trade:\" and why.]"
+}
+
+/** The builder's verdict that there is nothing to build — a line starting "No trade:". → its reason, or null. Pure. */
+export function noTradeReason(text) {
+    const m = String(text ?? '').match(/(?:^|\n)\s*(?:\*\*)?no trade(?:\*\*)?\s*[:—-]\s*(.+)/i)
+    return m ? m[1].replace(/\*\*/g, '').trim().slice(0, 300) : null
 }
 export const BUILDERS = Object.freeze(['mentor', 'portfolio', 'analyst'])
 export const ACTIVE = Object.freeze(['building', 'awaiting'])
@@ -116,7 +122,7 @@ export function stillWorking(session, agent, depth = 0) {
 /** The builds in a session, for Axl's turn context — one line each. Pure. */
 export function buildLines(agentState = {}) {
     const ROLE = { mentor: 'the trader', portfolio: 'the portfolio manager', analyst: 'the analyst' }
-    const SAY = { queued: 'queued behind another build', building: 'building in the background', awaiting: 'has a question for the user — on the card above the prompt box, answered there', ready: 'READY — waiting for the user to review and Generate it in the pane', failed: 'failed — the user can try it again' }
+    const SAY = { queued: 'queued behind another build', building: 'building in the background', awaiting: 'has a question for the user — on the card above the prompt box, answered there', declined: 'found NO TRADE — the user may Change it or Dismiss it', ready: 'READY — waiting for the user to review and Generate it in the pane', failed: 'failed — the user can try it again' }
     return BUILDERS.map(a => [a, agentState?.[a]?.build]).filter(([, b]) => b && SAY[b.status])
         .map(([a, b]) => `- ${ROLE[a]}: ${b.title} — ${SAY[b.status]}`)
 }
@@ -210,6 +216,15 @@ export function makeBuilds({ sessions = sessionService, depth = sessionDepth, ru
         // the Confirm (after a Change the trader said "press Update" instead of going — the drive, 2026-11-20; a review ends
         // asking to accept). Otherwise: stopped on a statement → carry it on (a few times); on a question → the card.
         if (generatable(state, agent)) { await ready({ user, sessionId, agent }); return 'ready' }
+        // DECLINED (step 10 — the drive): the builder's verdict is that there is no trade. Not carried on (three paid turns
+        // asking him to build what he has ruled out), not a question: the bar says it — Change or Dismiss.
+        const declined = noTradeReason(last?.content)
+        if (declined) {
+            await write(user, sessionId, agent, { ...state, build: { ...b, status: 'declined', reason: declined } })
+            await startNext({ user, sessionId })
+            logger.info(LOG, 'build declined', { sessionId, agent, title: b.title })
+            return 'declined'
+        }
         if (!asksTheUser(last?.content) && await carry({ user, sessionId, agent })) return 'carried'
         // THE BUILD PAUSES ON A CARD (step 8, M8): the builder's question — with the options it listed — above the prompt
         // box; the chat stays where the user is. Answering it sends the build back to work (asking.answer).
@@ -233,7 +248,15 @@ export function makeBuilds({ sessions = sessionService, depth = sessionDepth, ru
         const state = session?.agentState?.[agent]
         const b = state?.build
         if (!b) return { reason: 'no_build' }
-        const from = { change: ['ready', 'awaiting'], retry: ['failed'], recheck: ['ready'] }[kind]
+        // `drop`: a build with nothing to save (declined, failed) taken off the table — Dismiss, where discard has no draft.
+        if (kind === 'drop') {
+            if (!['declined', 'failed'].includes(b.status)) return { reason: 'wrong_status' }
+            const { build: _gone, ...left } = state
+            await write(user, sessionId, agent, left)
+            await startNext({ user, sessionId })
+            return { ok: true }
+        }
+        const from = { change: ['ready', 'awaiting', 'declined'], retry: ['failed'], recheck: ['ready'] }[kind]
         if (!from) return { reason: 'invalid_action' }
         if (!from.includes(b.status)) return { reason: 'wrong_status' }
         const change = String(text ?? '').trim().slice(0, 1000)

@@ -201,7 +201,7 @@ export const answerSessionQuestions = handle('answerSessionQuestions', async (re
 // Recheck before Confirm. Under the desk lock; the builder's turn runs in the background (202).
 const BUILD_REASONS = {
     no_build: [404, 'There is no build on that desk'], wrong_status: [409, 'That build is not in a state for this'],
-    change_required: [400, 'Say what to change'], invalid_action: [400, 'action must be change, retry or recheck'],
+    change_required: [400, 'Say what to change'], invalid_action: [400, 'action must be change, retry, recheck or drop'],
 }
 export const reworkSessionBuild = handle('reworkSessionBuild', async (req, res) => {
     const { agent, action, text } = req.body ?? {}
