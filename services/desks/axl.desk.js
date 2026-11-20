@@ -3,13 +3,20 @@
 
 import { axlAgentService } from '../agents/axl.agent.service.js'
 import { getMarketBrief } from '../marketBrief.service.js'
+import { askSpecialist as defaultAskSpecialist } from './subagent.js'
+import { DESKS } from './registry.js'
 
 export const axlDesk = {
     agent: 'axl',
     log:   '[axl:desk]',
-    run: ({ user, input, signal, emit, common }) => (input?.brief
+    run: ({ user, input, signal, emit, common, sessionId }) => (input?.brief
         ? briefTurn({ emit, signal })
-        : axlAgentService.chatStream({ ...common, isAdmin: user.role === 'admin' })),
+        : axlAgentService.chatStream({
+            ...common, isAdmin: user.role === 'admin',
+            // The answering roles, called as a tool (modes-and-builders.md §3) — bound to this session and this turn's stream.
+            askSpecialist: sessionId ? defaultAskSpecialist({ user, sessionId, emit, signal, audience: common.audience }) : null,
+            specialistHint: specialistHint(input?.via),
+        })),
     // route / routeSymbol / edit / show / opening are appended by the caller, validated for this user.
     done: (result, { routing: { route } }) => ({
         reply: result.reply,
@@ -22,6 +29,12 @@ export const axlDesk = {
         suggestions: route ? [] : (Array.isArray(result.suggestions) ? result.suggestions : []),
         chart: result.chart ?? null,
     }),
+}
+
+/** The role a turn was addressed to (startTurn sends a subagent's turn to Axl with `via`) → the hint Axl acts on. */
+export function specialistHint(via) {
+    const d = via ? DESKS[via] : null
+    return d?.subagent ? { key: d.subagent, role: d.role } : null
 }
 
 /**

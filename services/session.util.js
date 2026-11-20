@@ -104,7 +104,16 @@ export function segmentOf(messages, agent) {
     return messages.filter(m => m && (
         (m.agent === agent && (m.kind === 'msg' || m.kind === 'handoff' || m.kind === 'decision'))
         || (m.kind === 'handoff' && m.to === agent)
+        || isAnswerFor(m, agent)
     ))
+}
+
+/**
+ * A subagent's ANSWER given inside `agent`'s turn (desks/subagent.js — `ref.via`): the user read it there, so the agent
+ * that asked reads it too (Axl's next turn knows what the event analyst said). Its question stays the subagent's own.
+ */
+export function isAnswerFor(m, agent) {
+    return !!m && m.agent !== agent && m.role === 'assistant' && (m.kind ?? 'msg') === 'msg' && m.ref?.via === agent
 }
 
 /**
@@ -118,7 +127,7 @@ export function contextRole(m, agent) {
 
 /** The Mongo filter for ONE agent's segment rows — the query form of segmentOf. */
 export function segmentQuery(agent) {
-    return { $or: [{ agent, kind: { $in: ['msg', 'handoff', 'decision'] } }, { kind: 'handoff', to: agent }] }
+    return { $or: [{ agent, kind: { $in: ['msg', 'handoff', 'decision'] } }, { kind: 'handoff', to: agent }, { 'ref.via': agent, role: 'assistant', kind: 'msg' }] }
 }
 
 /**

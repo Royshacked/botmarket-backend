@@ -24,7 +24,14 @@ test('the routable desks, IN PROMPT ORDER — research, assist, portfolio, scan,
     for (const d of Object.values(ROUTABLE_DESKS)) assert.ok(d.brand && d.does, d.agent)
     // Since 2026-11-09 Argus takes the user only from Mentor (his list-building chat is archived); the rest are open.
     assert.deepEqual(Object.fromEntries(Object.entries(ROUTABLE_DESKS).map(([k, d]) => [k, d.routedFrom])),
-        { research: null, assist: null, portfolio: null, scan: ['mentor'], technicals: ['axl', 'mentor'], events: ['axl'] })
+        { research: null, assist: null, portfolio: null, scan: ['mentor'], technicals: ['mentor'], events: [] })
+})
+
+test('the subagents — the roles Axl ASKS (modes-and-builders.md M2): the event analyst and the technical analyst', async () => {
+    const { SUBAGENTS, isSubagent } = await import('../../services/desks/registry.js')
+    assert.deepEqual({ ...SUBAGENTS }, { technical_analyst: 'proteus', event_analyst: 'echo' })
+    for (const a of ['echo', 'proteus']) assert.equal(isSubagent(a), true, a)
+    for (const a of ['axl', 'mentor', 'portfolio', 'analyst', 'scanner', 'strategy', 'nobody']) assert.equal(isSubagent(a), false, a)
 })
 
 test('an <edit> reopens the three editable kinds at the desk that owns each — `scan` left with Argus’s lists (2026-11-09)', () => {

@@ -18,6 +18,7 @@ import { turnEmitter } from '../sessionChannel.js'
 import { withSessionLock } from './turnLock.js'
 import { sessionTurn as defaultSessionTurn, canSpeak } from './sessionTurn.js'
 import { framePayload } from './index.js'
+import { isSubagent } from './registry.js'
 import { logger } from '../logger.service.js'
 
 const LOG = '[startTurn]'
@@ -80,8 +81,14 @@ export function makeStartTurn({
         if (!session || session.status !== 'active') return { reason: 'not_found' }
 
         const mention = agent ? null : parseMention(text)
-        const who     = agent ?? mention?.agent ?? session.floor ?? 'axl'
-        if (!canSpeak(who, session, user)) return { reason: 'forbidden' }
+        const asked   = agent ?? mention?.agent ?? session.floor ?? 'axl'
+        if (!canSpeak(asked, session, user)) return { reason: 'forbidden' }
+        // Who actually answers (modes-and-builders.md M2/M16): a subagent's turn — its tab, "@event analyst", a floor
+        // left on it by an older session — is Axl's, who asks it; the stock picker only while the trader has the user
+        // with it (its floor), never by a mention.
+        const toAxl = isSubagent(asked) || (asked === 'scanner' && session.floor !== 'scanner')
+        const who   = toAxl ? 'axl' : asked
+        if (toAxl) input = { ...input, via: asked }
 
         await onUserTurn({ user, sessionId })
         const id = typeof turnId === 'string' && turnId ? turnId : `turn_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`

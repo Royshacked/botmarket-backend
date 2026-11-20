@@ -610,8 +610,8 @@ test('web search answers world questions at reception and keeps the broadcast ru
 
 test('The technical analyst only on an ask about technicals or behaviour — "how is NVDA today?" is Axl\'s own, and an unclear one is asked (Roy, 2026-11-12)', () => {
     const prompt = readFileSync(new URL('../../prompts/axl_system_prompt.md', import.meta.url), 'utf8')
-    assert.match(prompt, /`<route>technicals<\/route>` — ONLY when the user asks about a stock's TECHNICALS or how it TRADES/)
-    assert.match(prompt, /"How is NVDA today\?"[^\n]*NOT this: that is the price and the news, and it is YOURS to answer — no route/)
+    assert.match(prompt, /\*\*Only on an ask about technicals or behaviour\.\*\* "How is NVDA today\?"/)
+    assert.match(prompt, /are the price and the news — answer them yourself/)
     assert.match(prompt, /Not sure which they mean\? Ask in one line/)
 })
 

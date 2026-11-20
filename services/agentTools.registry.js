@@ -293,6 +293,40 @@ export const TOOL_SCHEMAS = {
         },
         "required": ["question", "context"]
     },
+    // Axl's SUBAGENTS (docs/design/modes-and-builders.md §3): the event analyst and the technical analyst answer through
+    // Axl. `companies` is REQUIRED with the name beside the ticker — a bare "ANT" reached the event analyst as Ant Group
+    // (Roy, 2026-11-19), and a prompt rule alone did not hold on Luna; the schema does.
+    ask_specialist: {
+        "type": "object",
+        "properties": {
+            "specialist": {
+                "type": "string",
+                "enum": ["event_analyst", "technical_analyst"],
+                "description": "Who answers: event_analyst (who an event reaches through the supply chain) or technical_analyst (how a stock's price behaves, measured)."
+            },
+            "question": {
+                "type": "string",
+                "description": "The user's question, written to stand alone: name the company, the event and its date. The specialist sees nothing of this conversation except earlier exchanges with it."
+            },
+            "companies": {
+                "type": "array",
+                "description": "Every company the question is about, ticker AND company name (\"ANT\", \"Anthropic\"). Empty only when no listed company is involved (a heatwave, a port strike).",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "ticker": { "type": "string" },
+                        "name":   { "type": "string" }
+                    },
+                    "required": ["ticker", "name"]
+                }
+            },
+            "context": {
+                "type": "string",
+                "description": "What you already found that the answer needs: facts from the news, figures, what the user said earlier. Optional."
+            }
+        },
+        "required": ["specialist", "question", "companies"]
+    },
     // ABOUT THE USER (services/userProfile.service.js, one-axl.md step 3): a lasting fact the user STATED, kept for every
     // role. The handler is wired in runAgentStream (the consult pattern) — a desk opts in by declaring it.
     remember_about_user: {

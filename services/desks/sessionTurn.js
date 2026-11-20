@@ -19,7 +19,7 @@ import { agentContextService } from '../agentContext.service.js'
 import { getExperienceLevel } from '../experience.service.js'
 import { userProfileService, aboutSection, workingOnLines } from '../userProfile.service.js'
 import { routeFields } from '../routing.util.js'
-import { deskOf, entryOf, handBackOf, RECEPTION } from './registry.js'
+import { deskOf, entryOf, handBackOf, isSubagent, RECEPTION } from './registry.js'
 import { DESK_DEFS } from './index.js'
 import { deskCommon } from './common.js'
 import { buildConversation } from './context.js'
@@ -138,6 +138,9 @@ export function makeSessionTurn({
     async function land({ user, session, routing, agent, next, hints = null }) {
         const entry = routing.route ? entryOf(routing.route) : null
         if (!entry || !canSpeak(entry.agent, session, user)) return agent
+        // A subagent answers and never holds the floor (modes-and-builders.md M2): the trader sending the user's "how does
+        // it trade?" to the technical analyst keeps the user — the answer comes, the next message is the trader's again.
+        if (isSubagent(entry.agent)) return agent
         const landing = desks[entry.agent]
         const theirs  = entry.agent === agent ? next : (session.agentState?.[entry.agent] ?? null)
         // `hints`: what the routing desk knows about the landing (Axl's adopt — the user already owns this book).
@@ -271,7 +274,9 @@ export function makeSessionTurn({
 
         // The floor follows the reply: a route lands on its desk's entry agent; otherwise the agent that
         // answered keeps it. (Hand-offs and "@agent" join in phase 5.)
-        const floor = await land({ user, session, routing, agent, next: kept, hints: payload.adopt === true ? { adopt: true } : null })
+        // A subagent's own turn (its opening from the trader) leaves the floor where it was.
+        const floor = isSubagent(agent) && !routing.route ? (session.floor ?? 'axl')
+            : await land({ user, session, routing, agent, next: kept, hints: payload.adopt === true ? { adopt: true } : null })
         await sessions.setFloor({ sessionId, userId: user._id, agent: floor })
 
         // In the background, after the reply is out: fold the oldest turns into the summary when the

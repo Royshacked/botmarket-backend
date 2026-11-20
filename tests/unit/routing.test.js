@@ -108,14 +108,14 @@ test('capture: Axl naming the stock picker is dropped, opening and all; the trad
 // docs/design/proteus.md §4: "how does TSLA behave?" goes from Axl to Proteus; Mentor offers him too. No other desk
 // lists him, so their cached prompts did not change.
 
-test('mayRoute: Axl and the trader may send the user to the technical analyst; nobody else, and no keyless capture', () => {
-    for (const from of ['axl', 'mentor']) assert.equal(mayRoute(from, 'technicals'), true, from)
-    for (const from of [null, undefined, 'analyst', 'portfolio', 'scanner', 'strategy', 'proteus']) {
+test('mayRoute: only the trader sends the user to the technical analyst — Axl ASKS him (modes-and-builders.md M2)', () => {
+    assert.equal(mayRoute('mentor', 'technicals'), true)
+    for (const from of [null, undefined, 'axl', 'analyst', 'portfolio', 'scanner', 'strategy', 'proteus']) {
         assert.equal(mayRoute(from, 'technicals'), false, `${from} must not route to the technical analyst`)
     }
     const axl = makeRouteCapture('axl')
     axl.captures.route('technicals TSLA'); axl.captures.open('How does TSLA behave?')
-    assert.deepEqual(axl.result(), { route: 'technicals', routeSymbol: 'TSLA', opening: 'How does TSLA behave?', edit: null, show: null })
+    assert.equal(axl.result().route, null, "Axl's old route is dropped — he calls ask_specialist")
     // Axl under his own key routes to every open desk as before, and still never to Argus.
     for (const desk of ['assist', 'research', 'portfolio']) {
         const c = makeRouteCapture('axl'); c.captures.route(`${desk} NVDA`)
@@ -132,27 +132,24 @@ test('the rule offers the technical analyst to the trader alone among the desks,
     }
 })
 
-test("Axl's prompt routes how-a-stock-trades questions to the technical analyst", async () => {
+test("Axl's prompt ASKS the technical analyst how a stock trades — no route (modes-and-builders.md §3)", async () => {
     const { readFileSync } = await import('node:fs')
     const axl = readFileSync(new URL('../../prompts/axl_system_prompt.md', import.meta.url), 'utf8')
-    assert.match(axl, /<route>technicals<\/route>/)
-    assert.match(axl, /`<route>technicals TSLA<\/route>` \+ `<open>How does TSLA behave\?<\/open>`/)
-    // It is a QUESTION, and Axl answers questions himself — so the exception is spelled out where that rule is.
-    assert.match(axl, /The one question you route instead of answering: how a stock TRADES/)
+    assert.doesNotMatch(axl, /<route>technicals/)
+    assert.match(axl, /\*\*How a stock TRADES, technically\*\* → `specialist: "technical_analyst"`/)
 })
 
 // ── Echo takes Axl's (2026-11-19) ────────────────────────────────────────────
 // docs/design/echo-desk.md §5: "GTA 6 is out — who benefits?" goes from Axl to the event analyst. No other desk lists
 // him, so their cached prompts did not change.
 
-test('mayRoute: only Axl may send the user to the event analyst', () => {
-    assert.equal(mayRoute('axl', 'events'), true)
-    for (const from of [null, undefined, 'analyst', 'mentor', 'portfolio', 'scanner', 'strategy', 'proteus', 'echo']) {
+test('mayRoute: nobody sends the user to the event analyst — Axl ASKS him (modes-and-builders.md M2)', () => {
+    for (const from of [null, undefined, 'axl', 'analyst', 'mentor', 'portfolio', 'scanner', 'strategy', 'proteus', 'echo']) {
         assert.equal(mayRoute(from, 'events'), false, `${from} must not route to the event analyst`)
     }
     const axl = makeRouteCapture('axl')
     axl.captures.route('events TTWO'); axl.captures.open('GTA 6 is out — who does it reach?')
-    assert.deepEqual(axl.result(), { route: 'events', routeSymbol: 'TTWO', opening: 'GTA 6 is out — who does it reach?', edit: null, show: null })
+    assert.equal(axl.result().route, null)
 })
 
 test("no desk's rule offers the event analyst, and his own offers the open desks but not the restricted ones", () => {
@@ -164,12 +161,13 @@ test("no desk's rule offers the event analyst, and his own offers the open desks
     for (const key of ['scan', 'technicals', 'strategy']) assert.ok(!echo.includes(`(\`${key}\`)`), key)
 })
 
-test("Axl's prompt routes who-an-event-reaches questions to the event analyst", async () => {
+test("Axl's prompt ASKS the event analyst who an event reaches, naming every company (ANT, Roy 2026-11-19)", async () => {
     const { readFileSync } = await import('node:fs')
     const axl = readFileSync(new URL('../../prompts/axl_system_prompt.md', import.meta.url), 'utf8')
-    assert.match(axl, /<route>events<\/route>/)
-    assert.match(axl, /`<route>events TTWO<\/route>` \+ `<open>GTA 6 is out/)
-    assert.match(axl, /And one more: who an EVENT reaches through the supply chain/)
+    assert.doesNotMatch(axl, /<route>events/)
+    assert.match(axl, /\*\*Who an EVENT reaches through the supply chain\*\* → `specialist: "event_analyst"`/)
+    assert.match(axl, /`\[\{"ticker": "ANT", "name": "Anthropic"\}\]`/)
+    assert.match(axl, /After the answer, the next message is yours again/)
     assert.doesNotMatch(axl, /event-exposure|what's on the event list/, 'the deleted event board is not offered')
 })
 

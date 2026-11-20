@@ -10,7 +10,8 @@
 // Pure: the caller loads the rows. The desk's agent then runs `normalizeMessages` on the result, which
 // coalesces neighbouring same-role turns and trims to its maxMessages exactly as on the HTTP path.
 
-import { segmentOf, contextRole } from '../session.util.js'
+import { segmentOf, contextRole, isAnswerFor } from '../session.util.js'
+import { DESKS } from './registry.js'
 
 const SEALED_LEAD  = 'Earlier, on this item (summary): '
 const SUMMARY_LEAD = 'Earlier in this conversation (summary): '
@@ -37,6 +38,12 @@ export function buildConversation({ messages, agent, summary = null, sealed = nu
         if (Number.isFinite(m.seq) && m.seq <= through) continue
         const role = contextRole(m, agent)
         if (role === 'assistant') {
+            // A specialist's answer inside this agent's turn: its words, said as the role's (subagent.js).
+            if (isAnswerFor(m, agent)) {
+                out.push({ role, content: `[The ${DESKS[m.agent]?.role ?? m.agent}'s answer, shown to the user as written:]
+${m.content}` })
+                continue
+            }
             for (const t of Array.isArray(m.tools) ? m.tools : []) if (!trace.includes(t)) trace.push(t)
             out.push({ role, content: m.content })
             continue

@@ -3432,6 +3432,55 @@
                     "note"
                 ]
             }
+        },
+        {
+            "name": "ask_specialist",
+            "description": "Ask the event analyst or the technical analyst, who answers the user DIRECTLY: its reply goes on screen as written, under its role. event_analyst — who an EVENT reaches through the supply chain (suppliers, customers, infrastructure, substitutes), the house's events, a map's scores and flags, a follow-up on a map. technical_analyst — how ONE stock's price BEHAVES, measured from its candles: what it respects technically (moving averages, VWAP, order blocks), false breaks, ATR, day trade or swing, what its chart shows. Write the question to stand alone (the specialist sees none of this conversation, only its own earlier answers), and name every company with its ticker AND name. After it answers, add at most one short line, or nothing — never repeat it.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "specialist": {
+                        "type": "string",
+                        "enum": [
+                            "event_analyst",
+                            "technical_analyst"
+                        ],
+                        "description": "Who answers: event_analyst (who an event reaches through the supply chain) or technical_analyst (how a stock's price behaves, measured)."
+                    },
+                    "question": {
+                        "type": "string",
+                        "description": "The user's question, written to stand alone: name the company, the event and its date. The specialist sees nothing of this conversation except earlier exchanges with it."
+                    },
+                    "companies": {
+                        "type": "array",
+                        "description": "Every company the question is about, ticker AND company name (\"ANT\", \"Anthropic\"). Empty only when no listed company is involved (a heatwave, a port strike).",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "ticker": {
+                                    "type": "string"
+                                },
+                                "name": {
+                                    "type": "string"
+                                }
+                            },
+                            "required": [
+                                "ticker",
+                                "name"
+                            ]
+                        }
+                    },
+                    "context": {
+                        "type": "string",
+                        "description": "What you already found that the answer needs: facts from the news, figures, what the user said earlier. Optional."
+                    }
+                },
+                "required": [
+                    "specialist",
+                    "question",
+                    "companies"
+                ]
+            }
         }
     ],
     "proteus": [

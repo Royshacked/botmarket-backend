@@ -21,6 +21,7 @@
  * @property {boolean}     routable     whether ANOTHER desk may send the user here with a name
  * @property {string[]}    [routedFrom] when set, ONLY these agents may route here (Axl's key is 'axl') — every other
  *                                     sender cannot
+ * @property {string}      [subagent]   set on a role Axl CALLS (ask_specialist's enum key) — it never holds the floor
  * @property {string|null} does         the one line a sender's prompt shows (routable desks only)
  * @property {'main'|'strategy'} scope  the session it talks in
  * @property {boolean}     admin        admin-only (the route gate and the prompts both hold it)
@@ -64,7 +65,7 @@ export const DESKS = Object.freeze({
     // every prompt stays as it was. Axl ("how does TSLA behave?") and Mentor send users here; the other desks do not,
     // so only Mentor's route rule — not every desk's cached prompt — changes. Opened directly from the desks list too.
     proteus: Object.freeze({
-        agent: 'proteus', desk: 'technicals', brand: 'Proteus', role: 'technical analyst', entityKind: null, editable: false, routable: true, routedFrom: Object.freeze(['axl', 'mentor']),
+        agent: 'proteus', desk: 'technicals', brand: 'Proteus', role: 'technical analyst', entityKind: null, editable: false, routable: true, routedFrom: Object.freeze(['mentor']), subagent: 'technical_analyst',
         does: "reads how a stock's price behaves — what it respects technically, if anything, its ATR and false breaks, day trade or swing",
         scope: 'main', admin: false, maxMessages: 10,
     }),
@@ -73,7 +74,7 @@ export const DESKS = Object.freeze({
     // routable desks' order in every prompt stays as it was; only Axl sends users here (routedFrom), so only Axl's route
     // rule changes. Opened directly from the desks list and from the Hotlist's Echo tab too.
     echo: Object.freeze({
-        agent: 'echo', desk: 'events', brand: 'Echo', role: 'event analyst', entityKind: null, editable: false, routable: true, routedFrom: Object.freeze(['axl']),
+        agent: 'echo', desk: 'events', brand: 'Echo', role: 'event analyst', entityKind: null, editable: false, routable: true, routedFrom: Object.freeze([]), subagent: 'event_analyst',
         does: 'maps an event — a launch, a guidance cut, a strike, a deal — to the companies it reaches through the supply chain',
         scope: 'main', admin: false, maxMessages: 10,
     }),
@@ -145,6 +146,14 @@ export function handBackOf(from, to) {
     const preset = HAND_BACK[from]?.[to]
     return preset ? { ...preset } : null
 }
+
+// SUBAGENTS (docs/design/modes-and-builders.md M2, Roy 2026-11-20): the roles that ANSWER are called by Axl as a tool
+// (`ask_specialist`) — they never hold the floor, and the user never talks to them directly: a turn addressed to one goes
+// to Axl, who asks it. Its key in the tool's `specialist` enum → the agent.
+export const SUBAGENTS = Object.freeze(Object.fromEntries(entries.filter(d => d.subagent).map(d => [d.subagent, d.agent])))
+
+/** Whether an agent is a subagent (answers through Axl only). */
+export const isSubagent = (agent) => !!DESKS[agent]?.subagent
 
 /** The agent whose work produces an entity kind, or null. */
 export const agentForKind = (kind) => entries.find(d => d.entityKind === kind)?.agent ?? null

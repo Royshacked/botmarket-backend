@@ -82,7 +82,13 @@ export const TOOLS = toolsFor({
     web_search: '',
     // ABOUT THE USER (one-axl.md step 3): a lasting fact the user states — the handler is runAgentStream's. Appended LAST.
     remember_about_user: REMEMBER_DESCRIPTION,
+    // SUBAGENTS (docs/design/modes-and-builders.md §3, 2026-11-20): the event analyst and the technical analyst answer
+    // through Axl — no route, no floor. Appended last, per the rule above. Its handler is the turn's (desks/subagent.js).
+    ask_specialist: `Ask the event analyst or the technical analyst, who answers the user DIRECTLY: its reply goes on screen as written, under its role. event_analyst — who an EVENT reaches through the supply chain (suppliers, customers, infrastructure, substitutes), the house's events, a map's scores and flags, a follow-up on a map. technical_analyst — how ONE stock's price BEHAVES, measured from its candles: what it respects technically (moving averages, VWAP, order blocks), false breaks, ATR, day trade or swing, what its chart shows. Write the question to stand alone (the specialist sees none of this conversation, only its own earlier answers), and name every company with its ticker AND name. After it answers, add at most one short line, or nothing — never repeat it.`,
 })
+
+// Without the turn's handler (the social chat — a DM, no session to write the specialist's row into) the tool is not offered.
+const TOOLS_NO_SPECIALIST = TOOLS.filter(t => t.name !== 'ask_specialist')
 
 // NO `consult` HERE, deliberately — the reasoning sidecar reached the other five desks on
 // 2026-08-16 and was pulled back off this one the same day. Not because reception never faces a
@@ -151,6 +157,8 @@ export function buildSurfaceSection(surface) {
 // routing SECTION of its spine (reception's whole job is deciding where); the mechanism is common.
 
 async function chatStream({ messages = [], audience = null, isAdmin = false, surface = 'chat', model: requestedModel, reasoningEffort, userId, onToken, onToolStart, onReasoning, onChart, signal,
+    askSpecialist = null,   // the turn's ask_specialist handler (desks/subagent.js) — null where there is no session
+    specialistHint = null,  // the role the user addressed (the Hotlist's Echo tab, "@event analyst") — Axl asks it
     _run = runAgentStream,   // the shared contract-test seam — see runAgentStream in agentIO.js
     _tradingContextHandlers = makeTradingContextHandlers,
     _userDataHandlers = makeUserDataHandlers,
@@ -223,12 +231,17 @@ ${audienceBlock}` : ''}` },
         // Unbound: the hotlist is built once for everyone.
         ..._hotlistHandlers(),
         ..._experienceHandlers(userId),
+        ...(askSpecialist ? { ask_specialist: askSpecialist } : {}),
     }
+    // The user addressed a specialist (a tab, a mention): the question is its — Axl asks it rather than answering.
+    const conversation = specialistHint && askSpecialist
+        ? attachTurnContext(normalized, `[App note, not the user's words: the user asked this of the ${specialistHint.role} — call ask_specialist with specialist "${specialistHint.key}" unless it is plainly not that role's question.]`)
+        : normalized
 
     const raw = await _run({
         log: LOG, requestedModel, userId,
-        messages: normalized, systemPrompt,
-        tools: TOOLS, toolHandlers,
+        messages: conversation, systemPrompt,
+        tools: askSpecialist ? TOOLS : TOOLS_NO_SPECIALIST, toolHandlers,
         reasoningEffort, signal, onToken,
         tagCaptures: buildTagCaptures({
             ...route.captures,

@@ -26,9 +26,11 @@ export function turnEmitter({ userId, sessionId, turnId, agent, send = wsEmit })
     const live = { turnId, agent, userId: uid, text: '', startedAt: Date.now() }
     running.set(sessionId, live)
     return {
-        emit(type, data) {
-            if (type === 'token' && typeof data?.text === 'string') live.text += data.text
-            send(uid, 'session_delta', { sessionId, turnId, agent, type, data })
+        // `as`: a SUBAGENT streaming inside this turn (desks/subagent.js) — its frames name the role that writes them, so
+        // the chat draws its words under that role. The replay keeps only the turn's own agent's text.
+        emit(type, data, as = agent) {
+            if (type === 'token' && typeof data?.text === 'string' && as === agent) live.text += data.text
+            send(uid, 'session_delta', { sessionId, turnId, agent: as, type, data })
         },
         status(status, extra = {}) {
             send(uid, 'session_turn', { sessionId, turnId, agent, status, ...extra })

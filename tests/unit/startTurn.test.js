@@ -76,7 +76,27 @@ test('who answers: the tapped agent, else an @mention (stripped), else the floor
     await startTurn({ user, sessionId: s.sessionId, text: '@Argus find semis', turnId: 'b' })
     await startTurn({ user, sessionId: s.sessionId, text: 'hi', agent: 'axl', turnId: 'c' })
     await tick()
-    assert.deepEqual(ran.map(r => `${r.agent}:${r.text}`), ['mentor:next', 'scanner:find semis', 'axl:hi'])
+    // "@Argus" while the trader has the user is NOT the stock picker's (Roy, 2026-11-20: the user never chats with him
+    // directly) — it is Axl's, marked with who was asked.
+    assert.deepEqual(ran.map(r => `${r.agent}:${r.text}`), ['mentor:next', 'axl:find semis', 'axl:hi'])
+    assert.equal(ran[1].input.via, 'scanner')
+})
+
+test('a subagent is never answered directly — its tab, an @mention, a floor left on it: Axl answers, marked `via` (M2)', async () => {
+    const { sessions, startTurn, ran } = rig()
+    const s = await sessions.getActive({ userId: 'u1' })
+    await startTurn({ user, sessionId: s.sessionId, text: 'walk me through the NVDA event', agent: 'echo', turnId: 'a' })
+    await startTurn({ user, sessionId: s.sessionId, text: '@technical analyst how does TSLA behave?', turnId: 'b' })
+    await sessions.setFloor({ sessionId: s.sessionId, userId: 'u1', agent: 'echo' })
+    await startTurn({ user, sessionId: s.sessionId, text: 'show me the hotlist', turnId: 'c' })
+    await tick()
+    assert.deepEqual(ran.map(r => `${r.agent}:${r.input?.via ?? '-'}:${r.text}`),
+        ['axl:echo:walk me through the NVDA event', 'axl:proteus:how does TSLA behave?', 'axl:echo:show me the hotlist'])
+    // The stock picker still answers while the trader has the user with it (its floor).
+    await sessions.setFloor({ sessionId: s.sessionId, userId: 'u1', agent: 'scanner' })
+    await startTurn({ user, sessionId: s.sessionId, text: 'the second one', turnId: 'd' })
+    await tick()
+    assert.equal(ran.at(-1).agent, 'scanner')
 })
 
 test('refused before anything runs: empty text, another user’s session, an admin desk for a trader', async () => {
