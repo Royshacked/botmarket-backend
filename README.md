@@ -8,14 +8,14 @@ unified adapter layer. Each desk owns a kind; each kind is watched by its own mo
 
 | Desk | Route | Produces | Watched by |
 |---|---|---|---|
-| **Axl** — reception / concierge / critic | `/api/sessions` (the session turn) | nothing (read-only); hands over to a desk | — |
+| **Axl** — reception / concierge / critic | `/api/sessions` (the session turn) | nothing (read-only); hands over to a desk, or ASKS Proteus and Echo as subagents (`ask_specialist`, 2026-11-20 — docs/design/modes-and-builders.md) | — |
 | **Mentor** — the trading desk | `/api/mentor`, `/api/setups` | `setup` | Talos |
 | **Atlas** — portfolio construction + review | `/api/portfolio` | `portfolio_item` holdings | Themis |
 | **Argus** — finds ONE name for Mentor (scan lists archived 2026-11-09) | — (a session turn) | — | — |
 | **Prometheus** — buy-side research | `/api/analyst` | `coverage` | coverage monitor |
 | **Pythia** — the industry desk | `/api/strategy` | `industry_view` — three structural answers per GICS sub-industry; `industry_assessment` — per industry and theme a near-term verdict (for swing · watch · avoid · no case) and, since 2026-10-31, its own long-term call (yes / no, reviewed monthly), graded forward; `theme` value chains (all **broadcasts**, not per-user) | industry-view monitor · Pythia's weekly change scan · the calls grader |
-| **Proteus** — how a stock trades, measured (2026-11-12) | — (a session turn) | a shared profile per stock (`proteus_profiles`), no kind | — |
-| **Echo** — who an event reaches through the supply chain, built to the simulator design (2026-11-19) | `/api/hotlist/echo` | events (`echo_events`): intake → chain map → six-factor score → day-5 check → wave watch → grades; no kind; flagged names to Prometheus + Proteus | the echoPipeline loop (opt-in) · the echoReads hand-off |
+| **Proteus** — how a stock trades, measured (2026-11-12); Axl's subagent since 2026-11-20 | — (inside Axl's turn; Mentor's hand-off) | a shared profile per stock (`proteus_profiles`), no kind | — |
+| **Echo** — who an event reaches through the supply chain, built to the simulator design (2026-11-19); Axl's subagent since 2026-11-20, maps in the background | `/api/hotlist/echo` | events (`echo_events`): intake → chain map → six-factor score → day-5 check → wave watch → grades; no kind; flagged names to Prometheus + Proteus | the echoPipeline loop (opt-in) · the echoReads hand-off |
 
 One desk and its kind are **archived**: frozen whole under [`archive/`](archive/README.md),
 imported by nothing, started by nothing, and deliberately not described here or in APP_SPEC — that

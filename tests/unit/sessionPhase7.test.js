@@ -170,6 +170,8 @@ test('Axl in the social chat is told hand-offs do not happen there; the chat nee
     assert.equal(buildSurfaceSection(undefined), '')
     assert.match(buildSurfaceSection('social'), /SOCIAL CHAT/)
     assert.match(buildSurfaceSection('social'), /continue in the main chat/)
+    // No ask_specialist in a DM (CR 2026-11-20): Axl must not pretend to have asked one.
+    assert.match(buildSurfaceSection('social'), /there is no ask_specialist in a direct message/)
 })
 
 // ─── Phase 7 CR ───────────────────────────────────────────────────────────────

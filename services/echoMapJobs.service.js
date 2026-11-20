@@ -57,18 +57,31 @@ export function makeEchoMapJobs({ sessions = sessionService, pipeline = echoPipe
         return { failed: 'it is taking longer than usual' }
     }
 
-    const running = new Map()   // eventId → promise, so a second ask of the same event does not run it twice
+    // eventId → { done, asked: [{ userId, sessionId }] } — one run per event; every chat that asked for it while it maps
+    // gets its own line and its own announcement (CR 2026-11-20: a second ask was promised a map that never came).
+    const running = new Map()
+
+    const lineFor = ({ userId, sessionId, doc, label }) => sessions.setWaiting({ sessionId, userId, key: `${KEY}${doc._id}`,
+        entry: { kind: 'echo_map', text: mappingLine(label), eventId: doc._id, label, since: Date.now() } })
+        .catch(err => logger.warn(LOG, 'mapping line not set', err.message))
 
     /**
-     * Start mapping `doc` for the user's session. Resolves at once with `{ started }`; `done` is the settle (tests await it).
+     * Start mapping `doc` for the user's session — or join the run already mapping it. Returns at once with
+     * `{ started }` (false: joined); `done` is the settle (tests await it).
      * @param {{ userId: string, sessionId: string, doc: { _id: string }, label: string }} p
      */
     function start({ userId, sessionId, doc, label }) {
-        if (running.has(doc._id)) return { started: false, done: running.get(doc._id) }
-        const key = `${KEY}${doc._id}`
+        const job = running.get(doc._id)
+        if (job) {
+            if (!job.asked.some(a => a.sessionId === sessionId)) {
+                job.asked.push({ userId, sessionId })
+                lineFor({ userId, sessionId, doc, label })
+            }
+            return { started: false, done: job.done }
+        }
+        const asked = [{ userId, sessionId }]
         const done = (async () => {
-            await sessions.setWaiting({ sessionId, userId, key, entry: { kind: 'echo_map', text: mappingLine(label), eventId: doc._id, label, since: Date.now() } })
-                .catch(err => logger.warn(LOG, 'mapping line not set', err.message))
+            await lineFor({ userId, sessionId, doc, label })
             let r
             try {
                 r = await pipeline.run(doc)
@@ -77,15 +90,18 @@ export function makeEchoMapJobs({ sessions = sessionService, pipeline = echoPipe
                 logger.warn(LOG, 'map failed', { event: doc._id, message: err.message })
                 r = { failed: err.message }
             }
-            await sessions.setWaiting({ sessionId, userId, key, entry: null }).catch(() => {})
-            await runTurn({
-                user: { _id: userId, role: 'user' }, sessionId, agent: 'echo', origin: 'opening',
-                text: doneOpening(doc._id, r), input: {}, turnId: `echo_map_${doc._id}_${Date.now()}`,
-            })
-            logger.info(LOG, 'map settled', { event: doc._id, status: r?.status ?? null, failed: r?.failed ?? null })
+            running.delete(doc._id)   // a later ask maps afresh (or reads the finished map)
+            for (const a of asked) {
+                await sessions.setWaiting({ sessionId: a.sessionId, userId: a.userId, key: `${KEY}${doc._id}`, entry: null }).catch(() => {})
+                await runTurn({
+                    user: { _id: a.userId, role: 'user' }, sessionId: a.sessionId, agent: 'echo', origin: 'background',
+                    text: doneOpening(doc._id, r), input: {}, turnId: `echo_map_${doc._id}_${Date.now()}`,
+                }).catch(err => logger.warn(LOG, 'announcement failed', { session: a.sessionId, message: err.message }))
+            }
+            logger.info(LOG, 'map settled', { event: doc._id, status: r?.status ?? null, failed: r?.failed ?? null, chats: asked.length })
             return r
         })().catch(err => logger.warn(LOG, 'settle failed', err.message)).finally(() => running.delete(doc._id))
-        running.set(doc._id, done)
+        running.set(doc._id, { done, asked })
         return { started: true, done }
     }
 
@@ -112,7 +128,7 @@ export function makeEchoMapJobs({ sessions = sessionService, pipeline = echoPipe
                 }
                 await sessions.setWaiting({ sessionId, userId, key, entry: null }).catch(() => {})
                 if (doc) {
-                    await runTurn({ user: { _id: userId, role: 'user' }, sessionId, agent: 'echo', origin: 'opening',
+                    await runTurn({ user: { _id: userId, role: 'user' }, sessionId, agent: 'echo', origin: 'background',
                         text: doneOpening(doc._id, { status: doc.status }), input: {}, turnId: `echo_map_${doc._id}_${Date.now()}` }).catch(() => {})
                 } else {
                     await sessions.append({ sessionId, userId, message: { agent: 'echo', role: 'assistant', content: interruptedLine(w.label), ref: { via: 'axl' } } }).catch(() => {})

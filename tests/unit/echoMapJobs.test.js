@@ -26,18 +26,21 @@ test('it starts at once: the line goes up, the pipeline runs, the line comes dow
     await done
     assert.deepEqual(waiting.map(w => w.entry === null), [false, true], 'the line cleared when it settled')
     assert.equal(turns.length, 1)
-    assert.deepEqual([turns[0].agent, turns[0].origin, turns[0].sessionId, turns[0].user._id], ['echo', 'opening', 's1', 'u1'])
+    assert.deepEqual([turns[0].agent, turns[0].origin, turns[0].sessionId, turns[0].user._id], ['echo', 'background', 's1', 'u1'])
     assert.match(turns[0].text, /^\[App note, not the user's words: the map of event ev_1 that you started is done\. Read it with get_event_map/)
 })
 
-test('the same event asked twice maps once', async () => {
+test('the same event asked twice maps once — and a second chat that asked meanwhile gets its own line and announcement (CR)', async () => {
     let runs = 0
-    const { jobs } = rig({ run: async () => { runs++; await new Promise(r => setTimeout(r, 5)); return { status: 'scored' } } })
+    const { jobs, waiting, turns } = rig({ run: async () => { runs++; await new Promise(r => setTimeout(r, 5)); return { status: 'scored' } } })
     const a = jobs.start({ userId: 'u1', sessionId: 's1', doc: { _id: 'ev_1' }, label: 'x' })
     const b = jobs.start({ userId: 'u1', sessionId: 's1', doc: { _id: 'ev_1' }, label: 'x' })
-    assert.deepEqual([a.started, b.started], [true, false])
+    const c = jobs.start({ userId: 'u2', sessionId: 's2', doc: { _id: 'ev_1' }, label: 'x' })
+    assert.deepEqual([a.started, b.started, c.started], [true, false, false])
     await a.done
     assert.equal(runs, 1)
+    assert.deepEqual(turns.map(t => t.sessionId), ['s1', 's2'], 'each chat that asked is told once')
+    assert.deepEqual(waiting.filter(w => w.entry === null).map(w => w.sessionId), ['s1', 's2'], 'each line comes down')
 })
 
 test('a failed or stopped map is still announced — the event analyst says so', async () => {

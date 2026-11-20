@@ -167,13 +167,14 @@ export function makeSessionTurn({
 
         // A chain turn has no user message: the hand-off the runner appended (addressed to this agent, in its
         // segment as a user turn) IS its prompt.
+        // A subagent's turn is read by whoever it answers for (`via`, subagent.js): the trader who handed the user's "how does it
+        // trade?" over keeps the floor and reads the answer (CR 2026-11-20); a background announcement (its map landing) is Axl's.
+        const via = isSubagent(agent) ? { via: origin === 'background' ? 'axl' : (session.floor ?? 'axl') } : null
         if (origin !== 'chain') {
-            // A route's OPENING (or a hand-back to Axl) is the receiving role's first turn, not something the user typed again:
-            // marked, so the chat draws the user's words once (one-axl.md, 2026-11-13 — the drive showed the question twice).
-            const opening = origin === 'opening' || origin === 'reception'
-            // A subagent's turn (its map landing, the trader's hand-off) is Axl's to read too (`via`, subagent.js).
-            const via = isSubagent(agent) ? { via: 'axl' } : {}
-            const asked = await sessions.append({ sessionId, userId: user._id, message: { agent, role: 'user', content: text, ...(opening ? { ref: { opening: true, ...via } } : {}) } })
+            // A route's OPENING (or a hand-back to Axl, or the app's own background note) is the receiving role's first turn,
+            // not something the user typed: marked, so the chat draws the user's words once (one-axl.md, 2026-11-13).
+            const opening = origin === 'opening' || origin === 'reception' || origin === 'background'
+            const asked = await sessions.append({ sessionId, userId: user._id, message: { agent, role: 'user', content: text, ...(opening ? { ref: { opening: true, ...(via ?? {}) } } : {}) } })
             if (asked.reason) return asked
         }
 
@@ -261,7 +262,7 @@ export function makeSessionTurn({
         const tools   = [...toolsCalled].map(([name, targets]) => (targets.size ? `${name} ${[...targets].join(', ')}` : name))
         if (tools.length) logger.info(LOG, `${agent} turn tools`, { tools })
         const replied = prose
-            ? await sessions.append({ sessionId, userId: user._id, message: { agent, role: 'assistant', content: prose, ref: isSubagent(agent) ? { ...(extras ?? {}), via: 'axl' } : extras, tools } })
+            ? await sessions.append({ sessionId, userId: user._id, message: { agent, role: 'assistant', content: prose, ref: via ? { ...(extras ?? {}), ...via } : extras, tools } })
             : null
 
         const next = desk.nextState ? desk.nextState(state, result, prepared) : state

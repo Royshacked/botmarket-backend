@@ -1,4 +1,7 @@
 /* global document, window -- page.evaluate bodies run in the browser */
+// SUPERSEDED 2026-11-20 (docs/design/modes-and-builders.md): Axl no longer ROUTES to the event analyst — he asks it as a
+// subagent, and the forward test it drives was retired with the pipeline. Drive scripts/drive-subagents.mjs and
+// scripts/drive-echo-background.mjs instead; kept for its history.
 // Drive ECHO's DESK (docs/design/echo-desk.md step 4) in the browser: Axl routes "GTA 6 is out" to the event analyst, who
 // maps it (one real map — a few cents — saved to the QA user's events and deleted at the end); then the Hotlist's Echo
 // tab hands a forward-test event over with "Ask about this event".

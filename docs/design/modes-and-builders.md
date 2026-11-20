@@ -73,6 +73,14 @@ the existing turn machinery:
   segment, labelled as the role's (context + summary). The analyst stays a desk until Analyst mode (step 9).
 - `RECEPTION_RULE` and the Echo/Proteus routes go from Axl's prompt; `routedFrom` loses `axl` for them.
 
+- **QA/CR cycle 2026-11-20** (steps 1–2): an independent review found 2 medium + 3 low, all but one cosmetic FIXED —
+  a background announcement ended any chain in progress (now `origin: 'background'`, which the chain runner skips); the
+  trader's hand-off to the technical analyst left the answer out of the trader's context (`via` is now the floor holder;
+  `axl` for background notes); a second ask of an event already mapping now joins the run (its own line and
+  announcement); Axl in the social DM is told there is no `ask_specialist`. A server restart mid-map is picked up at boot
+  (`echoMapJobs.sweep`); a map another run holds waits for it. Left: Axl's words before a call leave the live bubble
+  until his row lands (cosmetic).
+
 ## 4. Builder modes
 
 ### 4.1 The session's mode and builds

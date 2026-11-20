@@ -312,9 +312,15 @@ services/
                               admin, maxMessages; routing.util / session.util / each agent's MAX_MESSAGES
                               derive from it. entryOf(desk): where a route lands (composite `trade` →
                               Argus preset to pick one name for Mentor). routedFrom: the only senders a desk takes
-                              (Argus: Mentor alone, since 2026-11-09; Proteus: Axl and Mentor, 2026-11-12; Echo `events`:
-                              Axl alone, 2026-11-19 — Axl's capture carries the key 'axl' — routing.util mayRoute
-                              gates the capture + rule)
+                              (Argus: Mentor alone, since 2026-11-09; Proteus: Mentor alone and Echo `events`: nobody,
+                              since 2026-11-20 — routing.util mayRoute gates the capture + rule). `subagent`
+                              (2026-11-20): the roles Axl ASKS (Echo `event_analyst`, Proteus `technical_analyst`) —
+                              SUBAGENTS / isSubagent; they never hold the floor
+      subagent.js             AXL'S SUBAGENTS (modes-and-builders.md §3, 2026-11-20): makeAskSpecialist → the
+                              `ask_specialist` handler for one Axl turn — the role's question appended hidden to its
+                              segment (`ref: {opening, via:'axl'}`), its desk run headless inside Axl's turn, streaming
+                              as itself (turnEmitter emit's 3rd arg), its reply kept as its row (`ref.via: 'axl'`); a
+                              hand-back or an offer to route comes back to Axl as words (routeNote). companies required
       <agent>.desk.js         parse(body, turn, user) → { state, input } · run · done · nextState (the fold
                               the client did on every `done`) · stateFromEntity(entity, opts) (rebuild to edit) ·
                               prepareInput · onRouted (a route landing) · hasWork · stateFields (what `done`
@@ -338,7 +344,8 @@ services/
       markers.js · scannerMode.js   keepMarkers (editing / chainId survive a fold, an edit, Atlas's onRouted) ·
                               Argus's mode — fixed since 2026-11-09: the single pick for Mentor, whatever is passed
       context.js              buildConversation — what ONE agent reads: sealed context when editing, its
-                              summary, its own segment (a hand-off to it reads as the user). The turn after a reply
+                              summary, its own segment (a hand-off to it reads as the user; a subagent's answer in its
+                              turn — session.util isAnswerFor — labelled as the role's). The turn after a reply
                               that carries `tools` opens with toolNote — the app's note naming the calls that reply
                               was written from (2026-11-13: the history holds text, never the calls, so Proteus
                               disowned a measured profile as "made up")
@@ -353,6 +360,8 @@ services/
       summarize.js            the rolling per-agent summary past the trimHistory high-water mark (Haiku 4.5,
                               booked to the user; failure changes nothing)
       turnLock.js · startTurn.js · turns.js   one turn at a time per session · accept a turn (202) and run it
+                              (a turn addressed to a subagent, or "@stock picker" off his floor, goes to Axl with
+                              `input.via` — 2026-11-20)
                               queued, stoppable, streamed · the turns + chain wired as one pair. sessionDepth
                               (2026-11-12): turns queued or running — a carry never runs behind the user's newer turn
       entityLookup.js         the entity an edit reopens, owner-checked through its own service
@@ -1210,6 +1219,10 @@ services/
                             and the unflagged; report() — distributions, each factor alone, walk-forward readiness.
   echoLevels.service.js     Step 6, Roy's way: the simulator rules' levels for a flagged name (levelsFrom), echoSeed for
                             Mentor's hand-off — said as considerations; Mentor trades his regular setup.
+  echoMapJobs.service.js    THE EVENT ANALYST'S MAP IN THE BACKGROUND (modes-and-builders.md step 2, 2026-11-20): start —
+                            the chat's status line (session.waiting `echo|<id>`, kind echo_map), pipeline.run (another
+                            run's claim → wait for it), the line cleared, ONE hidden opening turn for Echo (runQueued);
+                            sweep at boot — a map a restart cut off is released and restarted
   echoPipeline.service.js   the orchestrator: run(event) framed → mapped → scored → (day 5) → watching; tick() also
                             watches and grades. monitoring/echoPipeline.monitor (hourly; intake every 3 h; ECHO_PIPELINE).
   echo.service.js           ECHO, READ: the pipeline's events shaped for the Hotlist and the desk — links ranked (flags,

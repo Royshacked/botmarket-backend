@@ -229,6 +229,9 @@ export function makeChainRunner({
     /** startTurn's after-hook: what, if anything, runs next. */
     async function afterTurn({ user, sessionId, agent, turnId, origin, out, input }) {
         if (!out) return
+        // A BACKGROUND announcement (the event analyst's map landing — echoMapJobs) is no step of anything: no user acted, so
+        // it must not end, pause or advance a chain the user has going (CR 2026-11-20).
+        if (origin === 'background') return
         const session = await sessions.get({ sessionId, userId: user._id })
         if (!session) return
         let chain = session.chain && session.chain.status !== 'done' ? session.chain : null

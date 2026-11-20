@@ -464,6 +464,21 @@ The other way out of Argus is **Prometheus**: an investing list goes there by th
 (top N to research), a single name by clicking it on a saved list — or by **asking in the chat**
 ("send NVDA to Prometheus"), which is the desk-to-desk hand-off every desk has (below).
 
+### Specialists answer through Axl — they never hold the floor (2026-11-20)
+
+[docs/design/modes-and-builders.md](docs/design/modes-and-builders.md) §3 (steps 1–2 built). The roles that ANSWER — the
+event analyst (`echo`) and the technical analyst (`proteus`) — are Axl's SUBAGENTS (registry `subagent`): Axl calls
+`ask_specialist { specialist, question, companies: [{ticker, name}], context }` (`services/desks/subagent.js`); the role
+runs its own desk inside Axl's turn, streams as itself ("Axl · Event analyst"), and its reply is kept as its own row
+(`ref.via: 'axl'`), which Axl's next turns read, labelled. The floor never moves: "show me the hotlist" after an event
+answer is Axl's (the ANT chat, 2026-11-19). `companies` is required with the NAME — a bare "ANT" reached the event
+analyst as Ant Group. A turn addressed to a subagent (the Hotlist's Echo tab, "@event analyst", a floor an older session
+left on one) goes to Axl with `input.via`, who asks it; "@stock picker" goes to Axl too (the user never chats with the
+stock picker — only the trader's hand-off reaches him). Mentor's own hand-off to the technical analyst still runs, and
+leaves the user with Mentor. The event analyst's `map_event` maps in the BACKGROUND (`echoMapJobs.service.js`): the
+chat's status line says it is mapping, the chat stays free, and the event analyst gets one turn to say what it found;
+the boot sweep picks up a map a restart cut off. The analyst (`research`) stays a desk until Analyst mode (step 9).
+
 ### Desk-to-desk hand-off, by the user's ask (2026-09-18)
 
 **A question asked at the wrong desk goes back to Axl (2026-11-13).** After Axl hands the user to a desk, that desk
@@ -626,9 +641,9 @@ business (Prometheus's), picks nothing (Argus's). Long side only, for now.
   cycle / Wyckoff / Fibonacci lines), replacing the badge.
 - **Knows where his numbers came from** (2026-11-13, every desk): a reply keeps the tools it was written from, and the
   next turn is told them — asked "how so fast?", he names the cached profile instead of calling it made up.
-- **Who sends users to him:** Axl ("how does TSLA behave?" → `<route>technicals TSLA</route>`) and Mentor (registry
-  `routedFrom`); no other desk lists him. Opened directly from the desks list too. Mentor reads his profile on every
-  turn of a build (step 4, built).
+- **Who reaches him:** Axl ASKS him (`ask_specialist`, `technical_analyst` — since 2026-11-20 he is a subagent and never
+  holds the floor; see "Specialists answer through Axl"), and Mentor hands a "how does it trade?" to him (registry
+  `routedFrom: ['mentor']`), keeping the user. Mentor reads his profile on every turn of a build (step 4, built).
 - **No venue block.** He trades nothing, so he is the one desk with a user that carries neither `VENUE_RULE` nor the
   venue tools (`tests/unit/languageRule.test.js`).
 
@@ -686,7 +701,8 @@ pick.
 - **One pipeline, every event** (`services/echoPipeline.service.js`, `echo_events`): the house's — the INTAKE
   (`echoIntake`, every 3 hours: the universe's earnings moves of 5%+, 8-K deals, the Federal Register, defense awards,
   phase-3 results and FDA approvals, FMP news; a triage by the doc's filter — surprise, large, more than a one-off — with
-  durability and its reason) — and the user's own (`map_event` in chat). Each is MAPPED (`echoChain`: layers 1–3 both
+  durability and its reason) — and the user's own (`map_event` in chat — in the background since 2026-11-20, the event
+  analyst being Axl's subagent: see "Specialists answer through Axl"). Each is MAPPED (`echoChain`: layers 1–3 both
   ways, losers and substitutes, every link checked against SEC filings — evidence, not a gate), SCORED (`echoScore`: six
   factors 0–2, high at 8 of 12; bottleneck reasoned and read from the company's own filings; exposure stated or capped at
   1; coverage counted), CHECKED at the 5th session (`echoCheck`: vs SPY and sector, volume, analyst actions, the

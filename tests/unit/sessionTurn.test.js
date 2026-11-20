@@ -391,3 +391,33 @@ test('every role reads ABOUT THE USER: what they told any role, the size they la
     await turn({ user, sessionId: s.sessionId, agent: 'mentor', text: 'go on' })
     assert.doesNotMatch(seen[1].common.audience.about, /On the table with the trader/, 'the role answering has its own work in front of it')
 })
+
+// ── subagents (docs/design/modes-and-builders.md §3) ─────────────────────────
+
+test("a subagent's turn never takes the floor, and is read by whoever it answers for — the trader's hand-off by the trader, a background note by Axl (CR 2026-11-20)", async () => {
+    const { db } = memDb()
+    const sessions = makeSessionService({ getDb: async () => db })
+    const contexts = makeAgentContextService({ getDb: async () => db })
+    const proteus = { agent: 'proteus', run: async () => ({ reply: 'TSLA false-breaks 70% of the time.' }), done: (r) => ({ reply: r.reply }) }
+    const echo = { agent: 'echo', run: async () => ({ reply: 'The map is in: AVGO 9.' }), done: (r) => ({ reply: r.reply }) }
+    const turn = makeSessionTurn({ sessions, contexts, desks: { proteus, echo }, experience: async () => 'novice', profiles: NO_PROFILE, summarize: async () => 'S' })
+    const s = await sessions.getActive({ userId: 'u1' })
+    await sessions.setFloor({ sessionId: s.sessionId, userId: 'u1', agent: 'mentor' })
+
+    await turn({ user, sessionId: s.sessionId, agent: 'proteus', text: 'How does TSLA trade?', origin: 'opening' })
+    await turn({ user, sessionId: s.sessionId, agent: 'echo', text: '[App note] the map is done', origin: 'background' })
+    const rows = await sessions.allMessagesSince({ sessionId: s.sessionId, userId: 'u1', afterSeq: 0 })
+    assert.deepEqual(rows.map(r => `${r.agent}/${r.role}:${r.ref?.via}:${r.ref?.opening ?? '-'}`),
+        ['proteus/user:mentor:true', 'proteus/assistant:mentor:-', 'echo/user:axl:true', 'echo/assistant:axl:-'])
+    assert.equal((await sessions.get({ sessionId: s.sessionId, userId: 'u1' })).floor, 'mentor', 'the user stays with the trader')
+    const mentorReads = await sessions.messagesForAgent({ sessionId: s.sessionId, userId: 'u1', agent: 'mentor', afterSeq: 0 })
+    assert.deepEqual(mentorReads.map(r => r.content), ['TSLA false-breaks 70% of the time.'], "the trader reads the technical analyst's answer")
+})
+
+test('a background announcement is no chain step: the after-hook leaves any chain the user has going alone (CR 2026-11-20)', async () => {
+    const { makeChainRunner } = await import('../../services/chain/runner.js')
+    const touched = []
+    const runner = makeChainRunner({ sessions: new Proxy({}, { get: (_, k) => async () => { touched.push(k); return null } }) })
+    await runner.afterTurn({ user, sessionId: 's1', agent: 'echo', turnId: 't', origin: 'background', out: { payload: { reply: 'x' } } })
+    assert.deepEqual(touched, [], 'not even read')
+})

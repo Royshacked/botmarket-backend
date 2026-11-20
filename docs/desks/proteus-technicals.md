@@ -51,10 +51,11 @@ week; ~22 provider calls the first time (seconds), nothing after. The bars are n
 
 ## How users get here
 
-- **Axl** routes "how does TSLA behave?" — `<route>technicals TSLA</route>` + the question as `<open>`.
-- **Mentor** offers him when the user asks how a name trades rather than to build the trade.
-- The desks list ("Technicals Desk"), or `@Proteus` in the chat.
-- No other desk lists him (`registry.js` `routedFrom: ['axl', 'mentor']`), so their cached prompts did not change.
+- **Axl ASKS him** (2026-11-20, docs/design/modes-and-builders.md §3): `ask_specialist` with `technical_analyst` — he
+  answers inside Axl's turn, as himself, and never holds the floor. The desks list, the Hotlist and `@technical analyst`
+  reach him through Axl (`startTurn` sends the turn to Axl with `via`).
+- **Mentor** hands him "how does it trade?" (`<route>technicals</route>`, `registry.js` `routedFrom: ['mentor']`); the
+  user stays with Mentor.
 
 ## Not built yet (design §4, build steps 4–5)
 

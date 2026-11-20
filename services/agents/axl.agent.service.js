@@ -146,7 +146,7 @@ export function buildRoleSection(isAdmin) {
  */
 export function buildSurfaceSection(surface) {
     if (surface !== 'social') return ''
-    return 'SURFACE: the SOCIAL CHAT (a direct message, not the main chat). Nothing can be handed to a desk from here — no <route>, <edit> or <show> takes effect. Answer what you can; when the user wants a desk, say plainly to continue in the main chat, where that desk will pick it up. Never say a desk "will take it from here".'
+    return 'SURFACE: the SOCIAL CHAT (a direct message, not the main chat). Nothing can be handed to a desk from here — no <route>, <edit> or <show> takes effect. Answer what you can; when the user wants a desk, say plainly to continue in the main chat, where that desk will pick it up. Never say a desk "will take it from here". The specialists are not reachable here either — there is no ask_specialist in a direct message: for how a stock trades, or who an event reaches, say to ask in the main chat, and never pretend to have asked one.'
 }
 
 // The grammar — `<route>desk SYMBOL</route>`, `<edit>kind id</edit>`, `<open>…</open>` — and its

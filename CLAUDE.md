@@ -3,7 +3,7 @@ AI-powered trading assistant backend (ar2trade / TRADVICE) — Express + MongoDB
 LLM agents on Anthropic Claude (OpenAI for transcription only). EIGHT conversational desks — Axl
 (reception) · Mentor (`setup`, the trader) · Atlas (portfolio) · Argus (finds ONE name for Mentor; his scan lists were archived 2026-11-09) ·
 Prometheus (`coverage`) · Pythia (`industry_view`) · Proteus (how a stock trades, measured — 2026-11-12) ·
-Echo (who an event reaches through the supply chain — 2026-11-19; docs/design/echo-desk.md) — turn natural-language chat into monitored
+Echo (who an event reaches through the supply chain — 2026-11-19; docs/design/echo-pipeline.md) — turn natural-language chat into monitored
 work, which each kind's own background monitor evaluates against condition trees before
 routing to a broker (cTrader live, a paper/simulation venue, manual, or IBKR in progress)
 through one unified capability-flag adapter layer. Nothing reaches a broker while its
@@ -11,6 +11,10 @@ venue is shut — a confirmed decision is queued, never fired and never lost. Re
 SSE (agent streams) and WebSocket (social chat). Their work lands on one execution tier: the
 `idea` kind (`/api/trade-ideas`, which portfolio holdings ride) plus the per-desk kind
 `setup`. See README.md for the full architecture and app-flow diagrams.
+
+**Proteus and Echo are Axl's SUBAGENTS since 2026-11-20** (docs/design/modes-and-builders.md): Axl asks them
+(`ask_specialist`, services/desks/subagent.js); they answer inside his turn and never hold the floor. The builders
+(Mentor, Atlas, Prometheus' coverage) become modes — steps 3–10 of that doc, not built yet.
 
 **Kairos (the `call` kind) and its monitor Hermes were DELETED on 2026-11-10**, code and data
 (`scripts/delete-kairos.mjs`); `git log` before that date has them. A new trade is always Mentor's.
