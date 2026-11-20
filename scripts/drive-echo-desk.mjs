@@ -63,7 +63,7 @@ try {
     expect(answered, 'Axl routed to the event analyst, who mapped GTA 6 and said it is not the forward test')
     console.log('  tail:', text.replace(/\s+/g, ' ').slice(-900))
     expect(!/<route>|<open>|<ticker>/.test(text), 'no raw tags in the chat')
-    expect(!/\b(Echo|Proteus|Prometheus|Mentor|Argus)\b/.test(text.replace(/Echo · test/g, '')), 'no internal desk names in the chat (one voice)')
+    expect(!/\b(Echo|Proteus|Prometheus|Mentor|Argus)\b/.test(text.replace(/Event driven/g, '')), 'no internal desk names in the chat (one voice)')
     await page.screenshot({ path: `${OUT}/desk-01-gta-desktop.png` })
     await page.setViewportSize({ width: 390, height: 844 }); await page.waitForTimeout(1500)
     await page.screenshot({ path: `${OUT}/desk-02-gta-phone.png` })
@@ -74,7 +74,7 @@ try {
     // The Hotlist's Echo tab → "Ask about this event"
     await page.locator('.floor-desk__head', { has: page.locator('.floor-desk__label', { hasText: /^Hotlist$/ }) }).click()
     await page.waitForSelector('.hot-horizons', { timeout: 45000 })
-    await page.locator('.hot-horizons button', { hasText: 'Echo · test' }).click()
+    await page.locator('.hot-horizons button', { hasText: 'Event driven' }).click()
     await page.locator('.echo tbody tr', { hasText: 'CSCO' }).first().click()
     await page.getByRole('button', { name: 'Ask about this event' }).click({ timeout: 15000 })
     const handed = await page.waitForFunction(() => /Walk me through the CSCO event of 2026-11-12 \(csco-earnings-2026-11-12\)/.test(document.querySelector('.chat-timeline')?.innerText ?? ''), null, { timeout: 20000 }).then(() => true).catch(() => false)

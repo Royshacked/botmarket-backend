@@ -44,7 +44,7 @@ try {
     await page.locator('.mode-picker__toggle').click()
     await page.waitForTimeout(400)
     const options = await page.locator('.mode-picker__option-label').allInnerTexts()
-    expect(options.join('|') === 'General|Trader|Portfolio manager|Analyst', `the menu: ${options.join(' · ')}`)
+    expect(options.join('|') === 'Trader|Portfolio|Analyst', `the menu: ${options.join(' · ')}`)
     await shot(page, '01-menu-desktop')
 
     await page.locator('.mode-picker__option', { hasText: 'Trader' }).click()

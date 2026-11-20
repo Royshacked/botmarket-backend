@@ -82,11 +82,14 @@ try {
     await page.locator('.chat-timeline').waitFor({ timeout: 15000 })
     await shot(page, '01-empty')
     check('opening question shown', /What would you like to do\?/.test(await text(page)))
-    check('opening taps shown', (await page.getByRole('button', { name: 'Trade it' }).count()) > 0)
+    // The opening tap chips were removed in the style session (2026-11-20): the question and the input only.
+    check('no opening taps', (await page.locator('.chat-timeline .suggestion-chips').count()) === 0)
 
-    // ── 2. a tap → Axl answers, and (when it routes with an opening) a desk answers below, in the same chat ──
-    await page.getByRole('button', { name: 'Build a portfolio' }).click()
-    console.log('tapped "Build a portfolio" — waiting for the turns…')
+    // ── 2. typed → Axl answers, and (when it routes with an opening) a desk answers below, in the same chat ──
+    const opener = page.locator('.chat-timeline textarea')
+    await opener.fill('Build a portfolio')
+    await opener.press('Enter')
+    console.log('sent "Build a portfolio" — waiting for the turns…')
     await waitIdle(page, 150000)
     await page.waitForTimeout(4000)   // a routed opening is queued just after Axl's turn ends
     await waitIdle(page, 150000)
