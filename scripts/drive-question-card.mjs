@@ -20,6 +20,15 @@ const shot = async (page, name) => { await page.screenshot({ path: `${OUT}/card-
 let failed = false
 const expect = (ok, what) => { console.log(`${ok ? '  ✓' : '  ✗'} ${what}`); if (!ok) failed = true }
 
+// The three numbers (2026-11-20: each its own question). Last time's option stays when it is there.
+async function answerNumbers(page) {
+    const q = (h) => page.locator('.question-card__q', { has: page.locator('.question-card__chip', { hasText: h }) })
+    const picked = async (h) => (await q(h).locator('.question-card__option[aria-checked="true"]').count()) > 0
+    if (!(await picked('Size'))) await page.getByLabel('Size: other').fill('$10,000')
+    if (!(await picked('Risk'))) await q('Risk').locator('.question-card__option', { hasText: '1% of the account' }).click()
+    await q('Min R:R').locator('.question-card__option', { hasText: /^1\.5$/ }).click()
+}
+
 const browser = await chromium.launch()
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } })
 const errors = []
@@ -54,7 +63,7 @@ try {
     await page.locator('.question-card__option', { hasText: 'NVDA' }).first().click()
     const acct = page.locator('.question-card__q', { hasText: 'Account' }).locator('.question-card__option').first()
     if (await acct.count()) { if ((await acct.getAttribute('aria-checked')) !== 'true') await acct.click() }
-    await page.getByLabel('Size: other').fill('$10,000 position, 1% risk, R:R 1.5')
+    await answerNumbers(page)
     await page.locator('.question-card__q', { hasText: 'If it breaks' }).locator('.question-card__option', { hasText: 'Redraw it' }).click()
     await page.locator('.question-card__q', { hasText: 'Surprises' }).locator('.question-card__option', { hasText: 'Decide for me' }).click()
     expect(await page.locator('.question-card__submit').isEnabled(), 'every question answered → Build it is on')

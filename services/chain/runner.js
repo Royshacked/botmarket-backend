@@ -30,6 +30,7 @@ import { emitted, decisionFor, endedChain } from './rules.js'
 import { requestRead as _requestRead, readTarget as _readTarget } from '../mentorReads.service.js'
 import { logger } from '../logger.service.js'
 import { keepBounded } from '../bounded.util.js'
+import { builds as defaultBuilds, isBuilding, buildRef } from '../desks/builds.js'
 
 const LOG = '[chain]'
 export const MAX_STEPS = 12
@@ -98,7 +99,7 @@ export function makeChainRunner({
     sessions = sessionService, desks = DESK_DEFS, maxSteps = MAX_STEPS,
     loadUser = _loadUser, isCovered = _covered, lock = withSessionLock,
     findEdit = findForEdit, lookupEdit = lookupForEdit, sealing = defaultSealing,
-    reads = { request: _requestRead, target: _readTarget }, depth = sessionDepth,
+    reads = { request: _requestRead, target: _readTarget }, depth = sessionDepth, builds = defaultBuilds,
 } = {}) {
     // The queued-turn runner (startTurn's runQueued) — bound after construction, because it needs this
     // runner's afterTurn in return (services/desks/turns.js wires the pair).
@@ -256,6 +257,8 @@ export function makeChainRunner({
         if (agent === 'mentor' && await askRead({ user, sessionId, state: session.agentState?.mentor ?? null })) return
         // A DESK'S GO (argus-rework.md §2.2): Mentor or Atlas said done — generate it (Mentor's armed too), if code lets
         // them. A go that went through ended the session; nothing else runs after it.
+        // A BUILD's go (step 5b): built — READY for the user's Confirm, never saved on its own.
+        if (out.payload?.go && GO[agent] && isBuilding(session.agentState?.[agent])) { await builds.ready({ user, sessionId, agent }); return }
         if (out.payload?.go && GO[agent] && await deskGo({ user, sessionId, session, input, agent })) return
         // A one-answer build cut short by the turn's tool budget: carried on into another turn, at most MAX_CARRY in a row
         // (the count resets when the user speaks).
@@ -422,7 +425,7 @@ export function makeChainRunner({
                 return await _readSettled({ userId: user._id, sessionId, symbol: t.symbol, horizon: null }, r) === 'handed'
             }
             if (!r?.asked) return false
-            await sessions.append({ sessionId, userId: user._id, message: { agent: 'mentor', role: 'assistant', content: readWaitLine(t, r) } })
+            await sessions.append({ sessionId, userId: user._id, message: { agent: 'mentor', role: 'assistant', content: readWaitLine(t, r), ref: buildRef(state) } })
             return false
         } catch (err) {
             logger.warn(LOG, 'read not asked for', { error: err.message })
@@ -556,7 +559,8 @@ export function makeChainRunner({
         const line = read.state === 'failed'
             ? `I could not make a read on ${pending.symbol}${pending.horizon ? ` for the ${pending.horizon}` : ''}.`
             : `${pending.symbol}${pending.horizon ? `, ${pending.horizon}` : ''}: ${read.facts}`
-        await sessions.append({ sessionId: pending.sessionId, userId: user._id, message: { agent: 'analyst', role: 'assistant', content: line } })
+        // A build in the background takes the read into its pane, not the chat (step 5b).
+        await sessions.append({ sessionId: pending.sessionId, userId: user._id, message: { agent: 'analyst', role: 'assistant', content: line, ref: buildRef(session.agentState?.mentor) } })
 
         const now = reads.target(session.agentState?.mentor ?? null)
         if (now?.symbol !== pending.symbol || now?.horizon !== pending.horizon) return true

@@ -13,5 +13,7 @@ export function keepMarkers(next, prev) {
         // A builder's question card (desks/asking.js): open (`asking`), or answered in this build (`asked`).
         ...(prev?.asking ? { asking: prev.asking } : {}),
         ...(prev?.asked ? { asked: prev.asked } : {}),
+        // The build in the background (desks/builds.js) — its status is the builds' to move, never a desk's fold.
+        ...(prev?.build ? { build: prev.build } : {}),
     }
 }

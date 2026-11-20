@@ -162,6 +162,22 @@ route → Trader + the card with NVDA first → answered → the trader built on
 - **Axl's view**: a volatile block lists the builds ("NVDA trade — building", "Growth book — queued"); Axl's tool
   `change_build({ buildId, change })` queues the change as a build turn (status back to `building`).
 
+**BUILT 2026-11-20 (step 5: 5a lanes + 5b builds).** 5a: `turnLock.laneKey` — Axl's turns (and the mode switch) on
+`${sessionId}#axl`, every desk turn / chain step / commit / seal on the session's own key; an Axl turn never ends, pauses or
+advances a desk's chain; the running turn is kept per lane, the replay gives `running` + `background`; the client keeps a
+builder's frames out of the live bubble (`background`). 5b: `desks/builds.js` — the build on the builder's own state
+(queued / building / awaiting / ready / failed, one at a time, the card's account(s) carried to every turn of it); answering
+the card returns the chat to General; a build's turns keep no floor and their rows — and the lines said for it (the experts',
+the read-wait line, a landed read) — carry `ref.build` (the pane's, not the chat's); `<go>` → READY, never saved on its own;
+a turn that leaves nothing in flight → AWAITING (its last reply into the chat, the mode back to the builder); the user
+turning to the builder mid-build → awaiting. Axl's turn lists the builds. FE: the desk opens when its build starts, the
+pane's build strip (status, what it does now, the latest step), the chat's status line, a toast when ready.
+Driven (`scripts/drive-lanes.mjs`, twice): back to General by itself, the pane and the status line say it, Axl answered in
+6–7 s while it built and knew its status, a build that needed the user came back to it with the mode on Trader. Both runs
+ended AWAITING for real gaps, both fixed: the card took the three numbers as one answer (now Size, Risk, Min R:R), and the
+chain turns after a read carried no account (now the build's). The READY path is unit-tested; its live run was stopped by
+the machine running low on memory — to drive again.
+
 ### 4.4 The summary (M9, M13, M14, M15)
 
 - `ready` → a toast ("NVDA trade is ready — Watch summary"), a push if no client is connected; the pane's Generate enabled.

@@ -21,6 +21,7 @@ import { readFor, readTarget } from '../mentorReads.service.js'
 import { profileFor, storedProfile } from '../behaviourProfile.service.js'
 import { profileBrief, mentorRead, isDayTrade, pullbackZone, stopTimeframe } from '../tools/behaviourProfile.tools.js'
 import { sessionService } from '../session.service.js'
+import { buildRef } from './builds.js'
 
 /**
  * WHAT REACHES THE PANEL. Pure and tested — because everything the desk computes for the user has to
@@ -122,7 +123,7 @@ const _saidExperts = new Set()
  * Each expert's DATED line in the chat, once per session and name, before Mentor answers (argus-rework.md §2.3): Prometheus's
  * deciding read when it is in (one landing later says itself — runner readSettled), and Proteus's profile. Never throws.
  */
-async function _sayExperts({ sessionId, userId, read, proteus }) {
+async function _sayExperts({ sessionId, userId, read, proteus, ref = null }) {
     if (!sessionId || !userId) return
     const symbol = read?.symbol ?? proteus?.symbol
     const key = `${sessionId}|${symbol}`
@@ -132,7 +133,7 @@ async function _sayExperts({ sessionId, userId, read, proteus }) {
     if (proteus?.brief) lines.push({ agent: 'proteus', content: `${symbol}, measured ${String(proteus.at ?? '').slice(0, 10)}: ${proteus.brief}` })
     if (!lines.length) return
     keepBounded(_saidExperts, key)
-    for (const l of lines) await sessionService.append({ sessionId, userId, message: { ...l, role: 'assistant' } }).catch(() => {})
+    for (const l of lines) await sessionService.append({ sessionId, userId, message: { ...l, role: 'assistant', ref } }).catch(() => {})
 }
 
 /**
@@ -352,7 +353,8 @@ export const mentorDesk = {
         const seen = _readState(state, input.seed)
         const read = await _prometheusRead(seen, sessionId)
         const proteus = await _proteusRead(seen, emit)
-        await _sayExperts({ sessionId, userId: common.userId, read, proteus })
+        // In a build in the background, the experts' lines are the pane's (step 5b).
+        await _sayExperts({ sessionId, userId: common.userId, read, proteus, ref: buildRef(state) })
         // A go HELD for a read (runner deskGo, `go_pending`) kept the accounts it was asked with. The chain turn the read's
         // landing runs carries none of its own — so this turn's readiness counts THOSE, for that name only, or it reads
         // "no trading account" and the held go never comes back (the TSLA drive, 2026-11-12).

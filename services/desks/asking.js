@@ -13,6 +13,7 @@ import { sessionService } from '../session.service.js'
 import { userProfileService } from '../userProfile.service.js'
 import { withSessionLock } from './turnLock.js'
 import { questionsFor, checkAnswers, answersText } from './questions.js'
+import { builds as defaultBuilds, buildTitle } from './builds.js'
 import { logger } from '../logger.service.js'
 
 const LOG = '[asking]'
@@ -25,7 +26,7 @@ const keptInput = (input = {}) => ({ ...(input.seed ? { seed: input.seed } : {})
 // The turn path, imported when an answer runs its turn: turns.js → … → sessionTurn → here would otherwise be a cycle.
 const defaultRunTurn = async (args) => (await import('./turns.js')).runQueued(args)
 
-export function makeAsking({ sessions = sessionService, profiles = userProfileService, lock = withSessionLock, runTurn = defaultRunTurn } = {}) {
+export function makeAsking({ sessions = sessionService, profiles = userProfileService, lock = withSessionLock, runTurn = defaultRunTurn, builds = defaultBuilds } = {}) {
     /**
      * Post the card for a new build. The caller holds the session lock (a turn, the mode switch).
      * @returns {Promise<{ seq: number } | { reason: string }>}
@@ -78,19 +79,21 @@ export function makeAsking({ sessions = sessionService, profiles = userProfileSe
             const marked = await sessions.updateRef({ sessionId, userId: user._id, seq: card.seq, ref: { ...card.ref, state: 'answered', answers: checked.answers }, match: { 'ref.state': 'open' } })
             if (marked.reason) return { reason: 'already_answered' }
             const { asking, ...rest } = state
-            await sessions.setAgentState({ sessionId, userId: user._id, agent, state: { ...rest, asked: true } })
-            await sessions.setFloor({ sessionId, userId: user._id, agent })
             const main = mainAccountId && picked.includes(String(mainAccountId)) ? String(mainAccountId) : (picked[0] ?? null)
-            return {
-                agent, text: answersText(agent, card.ref.questions, checked.answers),
-                input: { ...(asking?.input ?? {}), accounts: chosen, mainAccountId: main, answered: true, ...(clientTime ? { clientTime } : {}) },
-            }
+            const text = answersText(agent, card.ref.questions, checked.answers)
+            const input = { ...(asking?.input ?? {}), accounts: chosen, mainAccountId: main, answered: true, ...(clientTime ? { clientTime } : {}) }
+            // THE BUILD GOES TO THE BACKGROUND (step 5b): the chat is back with Axl, and the builder works — or waits its
+            // turn behind the build already running (M10).
+            const started = await builds.start({ user, sessionId, agent, state: { ...rest, asked: true }, title: buildTitle(agent, checked.answers, state), text, input })
+            await sessions.setFloor({ sessionId, userId: user._id, agent: 'axl' })
+            return { agent, text, input, run: started.run, build: started.build }
         })
         if (ready.reason) return ready
+        if (!ready.run) return { agent: ready.agent, queued: true, build: ready.build.id }
         const turnId = `answers_${sessionId}_${Date.now()}`
         runTurn({ user, sessionId, agent: ready.agent, text: ready.text, input: ready.input, origin: 'opening', turnId })
             .catch(err => logger.warn(LOG, 'the answers turn failed', err.message))
-        return { turnId, agent: ready.agent }
+        return { turnId, agent: ready.agent, build: ready.build.id }
     }
 
     return { post, setAside, answer }

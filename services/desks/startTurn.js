@@ -18,6 +18,7 @@ import { turnEmitter } from '../sessionChannel.js'
 import { withSessionLock, laneKey } from './turnLock.js'
 import { sessionTurn as defaultSessionTurn, canSpeak } from './sessionTurn.js'
 import { framePayload } from './index.js'
+import { builds as defaultBuilds } from './builds.js'
 import { isSubagent } from './registry.js'
 import { logger } from '../logger.service.js'
 
@@ -30,6 +31,7 @@ export function makeStartTurn({
     afterTurn   = async () => {},
     onUserTurn  = async () => {},   // a user turn accepted — the chain pauses after the turn in flight (G4)
     lock        = withSessionLock,
+    builds      = defaultBuilds,
 } = {}) {
 
     /**
@@ -55,6 +57,8 @@ export function makeStartTurn({
                 else if (out.stopped) te.status('stopped')
                 else te.status('done', { payload: framePayload(agent, out.payload) })
                 await afterTurn({ user, sessionId, agent, turnId, origin, out, input })
+                // A build's turn that left nothing in flight: it needs the user (builds.settle).
+                await builds.settle({ user, sessionId, agent, out }).catch(err => logger.warn(LOG, 'build settle failed', err.message))
                 return out
             } catch (err) {
                 logger.warn(LOG, 'turn failed', { sessionId, agent, message: err.message })
@@ -63,6 +67,7 @@ export function makeStartTurn({
                 // staying "running" with nothing in flight.
                 await afterTurn({ user, sessionId, agent, turnId, origin, out: { reason: 'error' } })
                     .catch(e => logger.warn(LOG, 'after-turn on a failed turn failed', e.message))
+                await builds.settle({ user, sessionId, agent, out: { reason: 'error' } }).catch(() => {})
                 return { reason: 'error' }
             } finally {
                 release()

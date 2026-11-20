@@ -1,9 +1,9 @@
-// DRIVE THE SCREEN — lanes (docs/design/modes-and-builders.md step 5a): Axl's turns no longer wait behind a builder's.
-// Start a trade build (the question card), switch to General while the trader works, ask Axl a question — he answers
-// at once, while the status line says the trader is working in the background, and the trader's words never stream into
-// Axl's bubble.
+// DRIVE THE SCREEN — the build in the background (docs/design/modes-and-builders.md steps 5a + 5b): answer the trader's
+// card → the chat goes back to General by itself, the pane says the trader is building, the chat's status line says it;
+// Axl answers a question at once meanwhile, and knows how the build is going; the build ends READY (announced, never saved
+// on its own) or comes back needing the user. Desktop screenshots.
 //
-//   node scripts/drive-lanes.mjs [baseUrl] [outDir]     (default http://localhost:5173 · .)
+//   node scripts/drive-lanes.mjs [baseUrl] [outDir] [TICKER]     (default http://localhost:5173 · . · AMD)
 //
 // As the throwaway QA user `ui-smoke` (paper). One login per run (the auth limiter). Runs a real trader build.
 /* global document -- the page.evaluate bodies run in the browser */
@@ -13,17 +13,42 @@ import { chromium } from 'playwright'
 
 const BASE = process.argv[2] ?? 'http://localhost:5173'
 const OUT = process.argv[3] ?? '.'
+const TICKER = (process.argv[4] ?? 'AMD').toUpperCase()
 const USER = { username: 'ui-smoke', password: 'Sm0ke!Drive#29' }
 dns.setServers(['8.8.8.8', '1.1.1.1'])
 
-const shot = async (page, name) => { await page.screenshot({ path: `${OUT}/lanes-${name}.png` }); console.log('  shot:', name) }
+const shot = async (page, name) => { await page.screenshot({ path: `${OUT}/build-${name}.png` }); console.log('  shot:', name) }
 let failed = false
 const expect = (ok, what) => { console.log(`${ok ? '  ✓' : '  ✗'} ${what}`); if (!ok) failed = true }
+const strip = (page) => page.evaluate(() => document.querySelector('.side-pane__build-status')?.innerText ?? null)
+
+// The three numbers (2026-11-20: each its own question). Last time's option stays when it is there.
+async function answerNumbers(page) {
+    const q = (h) => page.locator('.question-card__q', { has: page.locator('.question-card__chip', { hasText: h }) })
+    const picked = async (h) => (await q(h).locator('.question-card__option[aria-checked="true"]').count()) > 0
+    if (!(await picked('Size'))) await page.getByLabel('Size: other').fill('$10,000')
+    if (!(await picked('Risk'))) await q('Risk').locator('.question-card__option', { hasText: '1% of the account' }).click()
+    await q('Min R:R').locator('.question-card__option', { hasText: /^1\.5$/ }).click()
+}
 
 const browser = await chromium.launch()
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } })
 const errors = []
 page.on('pageerror', e => errors.push(`PAGEERROR ${e.message.slice(0, 200)}`))
+
+async function askAxl(text, re, ms = 120_000) {
+    const box = page.locator('.chat-timeline textarea')
+    const t = Date.now()
+    await box.fill(text)
+    await box.press('Enter')
+    const key = text.slice(-24)
+    const ok = await page.waitForFunction(([k, src]) => {
+        const after = document.querySelector('.chat-timeline')?.innerText.split(k)[1] ?? ''
+        return new RegExp(src, 'i').test(after) && !document.querySelector('.chat-timeline__row--live')
+    }, [key, re.source], { timeout: ms }).then(() => true).catch(() => false)
+    const after = ((await page.locator('.chat-timeline').innerText()).split(key)[1] ?? '').replace(/\s+/g, ' ')
+    return { ok, secs: Math.round((Date.now() - t) / 1000), after }
+}
 
 try {
     await page.goto(BASE, { waitUntil: 'domcontentloaded' })
@@ -35,56 +60,51 @@ try {
         await page.keyboard.press('Enter')
         await page.waitForTimeout(3500)
     }
+    expect(await page.locator('.mode-picker__toggle').count() > 0, 'signed in (the auth limiter let us in)')
     const fresh = page.getByRole('button', { name: 'New session' })
     if (await fresh.isEnabled().catch(() => false)) { await fresh.click(); await page.waitForTimeout(2000) }
 
-    // A trade build from the picker's card.
     await page.locator('.mode-picker__toggle').click()
     await page.locator('.mode-picker__option', { hasText: 'Trader' }).click()
     await page.waitForSelector('.question-card', { timeout: 30_000 })
-    await page.getByLabel('Name: other').fill('AMD')
+    await page.getByLabel('Name: other').fill(TICKER)
     const acct = page.locator('.question-card__q', { hasText: 'Account' }).locator('.question-card__option').first()
     if ((await acct.getAttribute('aria-checked')) !== 'true') await acct.click()
-    const size = page.locator('.question-card__q', { hasText: 'Size' }).locator('.question-card__option').first()
-    if (!(await size.count())) await page.getByLabel('Size: other').fill('$10,000 position, 1% risk, R:R 1.5')
-    else if ((await size.getAttribute('aria-checked')) !== 'true') await size.click()
+    await answerNumbers(page)
     await page.locator('.question-card__q', { hasText: 'If it breaks' }).locator('.question-card__option', { hasText: 'Redraw it' }).click()
     await page.locator('.question-card__q', { hasText: 'Surprises' }).locator('.question-card__option', { hasText: 'Decide for me' }).click()
     await page.locator('.question-card__submit').click()
-    const started = await page.waitForFunction(() => document.querySelector('.chat-timeline__row--live'), null, { timeout: 60_000 }).then(() => true).catch(() => false)
-    expect(started, 'the trader started building')
-    await page.waitForTimeout(4000)
 
-    // Switch to General mid-build — it lands at once, not after the trader.
-    const t0 = Date.now()
-    await page.locator('.mode-picker__toggle').click()
-    await page.locator('.mode-picker__option', { hasText: 'General' }).click()
-    const switched = await page.waitForFunction(() => document.querySelector('.mode-picker__toggle')?.getAttribute('aria-label') === 'Mode: General'
-        && !document.querySelector('.mode-picker__toggle.is-pending'), null, { timeout: 30_000 }).then(() => true).catch(() => false)
-    expect(switched, `General landed in ${Math.round((Date.now() - t0) / 1000)}s, while the trader works`)
-    await page.waitForTimeout(1500)
+    const general = await page.waitForFunction(() => document.querySelector('.mode-picker__toggle')?.getAttribute('aria-label') === 'Mode: General', null, { timeout: 30_000 }).then(() => true).catch(() => false)
+    expect(general, 'the chat went back to General by itself')
+    const building = await page.waitForFunction(() => /is building/.test(document.querySelector('.side-pane__build-status')?.innerText ?? ''), null, { timeout: 30_000 }).then(() => true).catch(() => false)
+    expect(building, `the pane says it: "${await strip(page)}"`)
     const line = await page.evaluate(() => document.querySelector('.chat-timeline__row--behind')?.innerText ?? null)
-    console.log('  status line:', line)
-    expect(/trader is working in the background/i.test(line ?? ''), 'the status line says the trader works in the background')
-    await shot(page, '01-behind')
+    expect(/building .* in the background/i.test(line ?? ''), `the chat's status line: "${line}"`)
+    await shot(page, '01-building')
 
-    const box = page.locator('.chat-timeline textarea')
-    const t1 = Date.now()
-    await box.fill('Quick one — is the US market open right now?')
-    await box.press('Enter')
-    const answered = await page.waitForFunction(() => {
-        const rows = [...document.querySelectorAll('.chat-timeline__row--user')]
-        const asked = rows.findIndex(r => /market open right now/.test(r.innerText))
-        if (asked < 0) return false
-        const after = document.querySelector('.chat-timeline__messages')?.innerText.split('market open right now?')[1] ?? ''
-        return /\bopen|closed\b/i.test(after) && !document.querySelector('.chat-timeline__row--live')
-    }, null, { timeout: 120_000 }).then(() => true).catch(() => false)
-    const secs = Math.round((Date.now() - t1) / 1000)
-    const stillBehind = await page.evaluate(() => !!document.querySelector('.chat-timeline__row--behind'))
-    expect(answered, `Axl answered in ${secs}s${stillBehind ? ', the trader still working behind' : ''}`)
-    const tail = (await page.locator('.chat-timeline').innerText()).split('market open right now?')[1] ?? ''
-    console.log('  after the question:', tail.replace(/\s+/g, ' ').slice(0, 400))
-    await shot(page, '02-axl-answered')
+    const q1 = await askAxl('Quick one — is the US market open right now?', /\b(open|closed)\b/)
+    expect(q1.ok, `Axl answered in ${q1.secs}s while the trader builds`)
+    console.log('   ', q1.after.slice(0, 200))
+    const q2 = await askAxl(`How is the ${TICKER} trade going?`, /(build|background|ready|working|needs)/)
+    expect(q2.ok, `Axl knows the build (${q2.secs}s)`)
+    console.log('   ', q2.after.slice(0, 260))
+    await shot(page, '02-axl-meanwhile')
+
+    // The end of the build: ready (announced) or back to the user.
+    const end = await page.waitForFunction(() => /is ready|needs you|did not finish/.test(document.querySelector('.side-pane__build-status')?.innerText ?? ''), null, { timeout: 600_000 })
+        .then(() => true).catch(() => false)
+    const final = await strip(page)
+    expect(end, `the build ended: "${final}"`)
+    if (/needs you/.test(final ?? '')) {
+        const mode = await page.locator('.mode-picker__toggle').getAttribute('aria-label')
+        expect(mode === 'Mode: Trader', `needing the user, the mode is back on the trader (${mode})`)
+    }
+    if (/is ready/.test(final ?? '')) {
+        const toast = await page.evaluate(() => document.body.innerText.includes('is ready — review it in the pane'))
+        expect(toast, 'a ready build is announced')
+    }
+    await shot(page, '03-end')
 } catch (err) {
     console.error('drive error:', err.message)
     failed = true

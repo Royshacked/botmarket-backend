@@ -159,6 +159,7 @@ export function buildSurfaceSection(surface) {
 async function chatStream({ messages = [], audience = null, isAdmin = false, surface = 'chat', model: requestedModel, reasoningEffort, userId, onToken, onToolStart, onReasoning, onChart, signal,
     askSpecialist = null,   // the turn's ask_specialist handler (desks/subagent.js) — null where there is no session
     specialistHint = null,  // the role the user addressed (the Hotlist's Echo tab, "@event analyst") — Axl asks it
+    builds = [],            // the builds in this session, one line each (desks/builds.js buildLines) — step 5b
     _run = runAgentStream,   // the shared contract-test seam — see runAgentStream in agentIO.js
     _tradingContextHandlers = makeTradingContextHandlers,
     _userDataHandlers = makeUserDataHandlers,
@@ -185,7 +186,11 @@ async function chatStream({ messages = [], audience = null, isAdmin = false, sur
         cachedBlock(_systemPrompt() + LANGUAGE_RULE + VOICE_RULE + VENUE_RULE + BREVITY_RULE),
         { type: 'text', text: `CURRENT DATE: ${today}. Resolve relative timeframes (today, this week, this month) against this date.
 
-${roleBlock}${surfaceBlock ? `
+${roleBlock}${builds?.length ? `
+
+BUILDS IN THIS CHAT (they run in the background while you talk; the work pane shows each):
+${builds.join('\n')}
+Asked how one is going, say its status from this list. A change to one is the builder's: tell the user to pick its mode (the picker on the prompt box) and say it there — never change a build yourself. A READY one is reviewed and saved in the pane (Generate).` : ''}${surfaceBlock ? `
 
 ${surfaceBlock}` : ''}${audienceBlock ? `
 

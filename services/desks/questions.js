@@ -43,9 +43,22 @@ export function traderQuestions({ symbol = null, size = null } = {}) {
             ],
         },
         ACCOUNT(false),
+        // The trader needs THREE numbers (his opening's one question): a "last time" that carried only one of them sent the
+        // build back to the user for the other two (the drive, 2026-11-20) — so each is its own question.
         {
-            id: 'size', header: 'Size', question: 'Your position size, your risk and the minimum R:R?', multiSelect: false, other: true,
-            options: last ? [{ label: `As last time: ${last}`, description: 'Type in Other to change it or add the R:R' }] : [],
+            id: 'size', header: 'Size', question: 'How big is the position?', multiSelect: false, other: true,
+            options: size && /^size_/.test(size.unit) ? [{ label: `As last time: ${last}` }] : [],
+        },
+        {
+            id: 'risk', header: 'Risk', question: 'How much do you lose if the stop is hit?', multiSelect: false, other: true,
+            options: [
+                ...(size && /^risk_/.test(size.unit) ? [{ label: `As last time: ${last}` }] : []),
+                { label: '0.5% of the account' }, { label: '1% of the account' }, { label: '2% of the account' },
+            ],
+        },
+        {
+            id: 'rr', header: 'Min R:R', question: 'The least reward-to-risk worth taking?', multiSelect: false, other: true,
+            options: [{ label: '1.5' }, { label: '2' }, { label: '3' }],
         },
         {
             id: 'scenarios', header: 'Scenarios', question: 'Which scenarios should the trade carry?', multiSelect: false, other: false,
@@ -110,6 +123,8 @@ export function needsQuestions(agent, state, origin, input = null) {
     if (input?.answered || input?.ops) return false
     const s = state ?? {}
     if (s.asking || s.editing || s.chainId) return false
+    // A build already on this builder's table (in the background, ready, waiting for the user) — not a new one.
+    if (s.build && s.build.status !== 'failed') return false
     // Already asked in THIS build: the user talking on with the builder. A new route or the picker, with nothing on the
     // table, starts a new build (a build that ended in "no setup" left `asked` behind).
     if (s.asked && origin === 'user') return false

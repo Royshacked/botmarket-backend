@@ -5,22 +5,28 @@ import { makeSessionService } from '../../services/session.service.js'
 import { traderQuestions, portfolioQuestions, questionsFor, needsQuestions, checkAnswers, answersText } from '../../services/desks/questions.js'
 import { makeAsking, CARD_LINE } from '../../services/desks/asking.js'
 import { makeModes } from '../../services/desks/modes.js'
+import { makeBuilds } from '../../services/desks/builds.js'
 
 // Questions up front (docs/design/modes-and-builders.md M5/M6, step 4): one card, built by code, answered once.
 
 const user = { _id: 'u1', role: 'user' }
 
-test("the trader's card: the name (the one they came with first), the account, the size (last time's offered), the scenarios, the breaking rule, the policy", () => {
+test("the trader's card: the name (the one they came with first), the account, the THREE numbers each asked (last time's under its own), the scenarios, the breaking rule, the policy", () => {
     const q = traderQuestions({ symbol: 'nvda', size: { unit: 'risk_pct', value: 1 } })
-    assert.deepEqual(q.map(x => x.id), ['name', 'account', 'size', 'scenarios', 'invalidation', 'surprises'])
-    assert.deepEqual(q[0].options.map(o => o.label), ['NVDA', 'Find one for me'])
-    assert.equal(q[1].kind, 'account'); assert.equal(q[1].multiSelect, false)
-    assert.deepEqual(q[2].options.map(o => o.label), ['As last time: 1% of the account at risk'])
-    assert.deepEqual(q[3].options.map(o => o.label), ['Both (recommended)', 'A only', 'B only'])
-    assert.deepEqual(q[4].options.map(o => o.label), ['Redraw it', 'Close it', 'Ask me'])
+    const by = Object.fromEntries(q.map(x => [x.id, x]))
+    assert.deepEqual(q.map(x => x.id), ['name', 'account', 'size', 'risk', 'rr', 'scenarios', 'invalidation', 'surprises'])
+    assert.deepEqual(by.name.options.map(o => o.label), ['NVDA', 'Find one for me'])
+    assert.equal(by.account.kind, 'account'); assert.equal(by.account.multiSelect, false)
+    // Last time was a RISK — offered under Risk, never as the whole answer (the drive, 2026-11-20: "$10,000 in the
+    // position" alone sent the build back for the risk and the R:R).
+    assert.deepEqual(by.size.options, [])
+    assert.deepEqual(by.risk.options.map(o => o.label), ['As last time: 1% of the account at risk', '0.5% of the account', '1% of the account', '2% of the account'])
+    assert.deepEqual(by.rr.options.map(o => o.label), ['1.5', '2', '3'])
+    assert.deepEqual(traderQuestions({ size: { unit: 'size_cash', value: 10000 } }).find(x => x.id === 'size').options.map(o => o.label), ['As last time: $10,000 in the position'])
+    assert.deepEqual(by.scenarios.options.map(o => o.label), ['Both (recommended)', 'A only', 'B only'])
+    assert.deepEqual(by.invalidation.options.map(o => o.label), ['Redraw it', 'Close it', 'Ask me'])
     assert.ok(q.every(x => x.header.length <= 12), 'headers fit the chip')
     assert.deepEqual(traderQuestions()[0].options.map(o => o.label), ['Find one for me'])
-    assert.deepEqual(traderQuestions()[2].options, [], 'no last size → Other only')
 })
 
 test("the portfolio manager's card: the mandate, the account(s) — several allowed — and the policy; the analyst asks nothing", () => {
@@ -53,7 +59,7 @@ test('a card is due only for a NEW build', () => {
 test('the answers are checked: every question, an option or Other, an account by id — one where one is asked', () => {
     const q = traderQuestions({ symbol: 'NVDA' })
     const full = {
-        name: { choice: 'NVDA' }, account: { accountId: 'a1', accountLabel: 'Paper main' }, size: { other: '$10,000, 1% risk, R:R 1.5' },
+        name: { choice: 'NVDA' }, account: { accountId: 'a1', accountLabel: 'Paper main' }, size: { other: '$10,000' }, risk: { choice: '1% of the account' }, rr: { choice: '1.5' },
         scenarios: { choice: 'Both (recommended)' }, invalidation: { choice: 'Redraw it' }, surprises: { choice: 'Decide for me' },
     }
     const ok = checkAnswers(q, full)
@@ -66,7 +72,7 @@ test('the answers are checked: every question, an option or Other, an account by
 
     const text = answersText('mentor', q, ok.answers)
     assert.match(text, /^My answers to the build questions \(asked up front — do not ask them again\):/)
-    assert.match(text, /- Which stock\? NVDA\n- Which account does it go to\? Paper main\n- Your position size, your risk and the minimum R:R\? \$10,000, 1% risk, R:R 1\.5/)
+    assert.match(text, /- Which stock\? NVDA\n- Which account does it go to\? Paper main\n- How big is the position\? \$10,000\n- How much do you lose if the stop is hit\? 1% of the account\n- The least reward-to-risk worth taking\? 1\.5/)
     assert.match(text, /Take it all the way: build it and generate it/)
 })
 
@@ -74,12 +80,14 @@ function rig() {
     const { db } = memDb()
     const sessions = makeSessionService({ getDb: async () => db })
     const turns = []
-    const asks = makeAsking({ sessions, profiles: { read: async () => ({ notes: [], size: { unit: 'risk_pct', value: 1 } }) }, runTurn: async (x) => { turns.push(x) } })
+    const runTurn = async (x) => { turns.push(x) }
+    const builds = makeBuilds({ sessions, depth: () => 0, runTurn })
+    const asks = makeAsking({ sessions, profiles: { read: async () => ({ notes: [], size: { unit: 'risk_pct', value: 1 } }) }, runTurn, builds })
     return { sessions, asks, turns, modes: makeModes({ sessions, asks }) }
 }
 // A card opened from the picker has no name to offer: the name arrives as Other.
 const answersFor = (over = {}) => ({
-    name: { other: 'NVDA' }, account: { accountId: 'a1', accountLabel: 'Paper main' }, size: { choice: 'As last time: 1% of the account at risk' },
+    name: { other: 'NVDA' }, account: { accountId: 'a1', accountLabel: 'Paper main' }, size: { other: '$10,000' }, risk: { choice: 'As last time: 1% of the account at risk' }, rr: { choice: '2' },
     scenarios: { choice: 'Both (recommended)' }, invalidation: { choice: 'Ask me' }, surprises: { choice: 'Ask me' }, ...over,
 })
 
@@ -102,7 +110,11 @@ test('picking Trader posts the card; answering it marks it, picks the account, a
     assert.equal(turns[0].input.answered, true)
     assert.match(turns[0].text, /Which stock\? NVDA/)
     const after = await sessions.get({ sessionId: s.sessionId, userId: 'u1' })
-    assert.deepEqual(after.agentState.mentor, { asked: true })
+    // The build goes to the background (step 5b): the chat is Axl's again, and the trader builds.
+    assert.equal(after.floor, 'axl')
+    assert.equal(after.agentState.mentor.asked, true)
+    assert.deepEqual([after.agentState.mentor.build.status, after.agentState.mentor.build.title], ['building', 'NVDA trade'])
+    assert.equal(out.build, after.agentState.mentor.build.id)
     const [answered] = await sessions.allMessagesSince({ sessionId: s.sessionId, userId: 'u1', afterSeq: 0 })
     assert.equal(answered.ref.state, 'answered')
     assert.equal(answered.ref.answers.name.other, 'NVDA')
