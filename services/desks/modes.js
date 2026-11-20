@@ -9,7 +9,7 @@
 // Built as a factory so the tests run it on memDb.
 
 import { sessionService } from '../session.service.js'
-import { withSessionLock } from './turnLock.js'
+import { withSessionLock, laneKey } from './turnLock.js'
 import { canSpeak } from './sessionTurn.js'
 import { asking as defaultAsking } from './asking.js'
 import { needsQuestions } from './questions.js'
@@ -33,7 +33,8 @@ export function makeModes({ sessions = sessionService, lock = withSessionLock, a
         const session = await sessions.get({ sessionId, userId: user._id })
         if (!session || session.status !== 'active') return { reason: 'not_found' }
         if (!canSpeak(agent, session, user)) return { reason: 'forbidden' }
-        const done = lock(sessionId, async () => {
+        // Axl's lane (step 5a): a switch never waits behind a builder at work — only behind Axl's own turn.
+        const done = lock(laneKey(sessionId, 'axl'), async () => {
             const r = await sessions.setFloor({ sessionId, userId: user._id, agent })
             if (r.reason) return r
             // A builder picked with nothing on its table starts a new build: its questions, on a card (step 4).

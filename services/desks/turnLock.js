@@ -30,6 +30,17 @@ export function withSessionLock(sessionId, fn) {
     return run
 }
 
+/**
+ * THE LANE a turn runs in (docs/design/modes-and-builders.md step 5a, 2026-11-20). Axl — and the specialists he asks
+ * inside his turn — have a lane of their own, so the chat stays free while a builder works: picking General while the
+ * trader built used to wait minutes behind him. Every desk turn, chain step, commit and seal keeps the session's own key,
+ * exactly as before. What the two lanes both write is per-agent (state, summaries) or atomic (a row's seq); the floor
+ * and the chain have their own rules (sessionTurn, chain runner).
+ */
+export function laneKey(sessionId, agent) {
+    return agent === 'axl' ? `${sessionId}#axl` : String(sessionId)
+}
+
 /** Whether a turn is queued or running on this session. */
 export function sessionBusy(sessionId) {
     return (depth.get(String(sessionId)) ?? 0) > 0

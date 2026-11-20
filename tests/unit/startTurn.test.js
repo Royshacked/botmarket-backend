@@ -157,3 +157,15 @@ test('Stop on a turn still WAITING in the queue cancels it — it never runs', a
     assert.deepEqual(ran.map(r => r.text), ['first'])
     assert.ok(statuses.some(([id, , st, extra]) => id === 'q2' && st === 'stopped' && extra?.queued))
 })
+
+test("talking to Axl never pauses a desk's chain — talking to a desk does (lanes, step 5a)", async () => {
+    const { db } = memDb()
+    const sessions = makeSessionService({ getDb: async () => db })
+    const paused = []
+    const { startTurn } = makeStartTurn({ sessions, sessionTurn: async () => ({ payload: {} }), emitterFor: () => ({ emit: () => {}, status: () => {}, end: () => {} }), onUserTurn: async () => { paused.push(1) } })
+    const s = await sessions.getActive({ userId: 'u1' })
+    await startTurn({ user, sessionId: s.sessionId, text: 'hi', agent: 'axl', turnId: 'a' })
+    assert.equal(paused.length, 0)
+    await startTurn({ user, sessionId: s.sessionId, text: 'next', agent: 'mentor', turnId: 'b' })
+    assert.equal(paused.length, 1)
+})

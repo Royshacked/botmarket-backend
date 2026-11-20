@@ -456,3 +456,15 @@ test("a NEW build's first turn posts the question card instead of running the bu
     await turn({ user, sessionId: s.sessionId, agent: 'mentor', text: 'and the stop?', origin: 'user' })
     assert.equal(ran.length, 2, 'talking on with the builder never brings the card back')
 })
+
+test("an Axl turn leaves a desk's chain alone — it is the builder's (lanes, step 5a)", async () => {
+    const { makeChainRunner } = await import('../../services/chain/runner.js')
+    const { db } = memDb()
+    const sessions = makeSessionService({ getDb: async () => db })
+    const s = await sessions.getActive({ userId: 'u1' })
+    const chain = { id: 'c1', status: 'running', origin: 'mentor', steps: 1 }
+    await sessions.setChain({ sessionId: s.sessionId, userId: 'u1', chain })
+    const runner = makeChainRunner({ sessions })
+    await runner.afterTurn({ user, sessionId: s.sessionId, agent: 'axl', turnId: 't', origin: 'user', out: { payload: { reply: 'the hotlist is empty' } } })
+    assert.equal((await sessions.get({ sessionId: s.sessionId, userId: 'u1' })).chain.status, 'running')
+})

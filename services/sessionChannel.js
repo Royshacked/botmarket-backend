@@ -15,7 +15,9 @@ import { emit as wsEmit, onClientEvent } from '../api/chat/chatWs.js'
 import { sessionService } from './session.service.js'
 
 // sessionId → the turn streaming in it right now: { turnId, agent, userId, text, startedAt }
+// Keyed by LANE (step 5a): Axl's turn and a desk's can stream at once — `${sessionId}|axl` / `${sessionId}|desk`.
 const running = new Map()
+const laneOf = (sessionId, agent) => `${sessionId}|${agent === 'axl' ? 'axl' : 'desk'}`
 
 /**
  * The emitter for one session turn.
@@ -24,7 +26,8 @@ const running = new Map()
 export function turnEmitter({ userId, sessionId, turnId, agent, send = wsEmit }) {
     const uid  = String(userId)
     const live = { turnId, agent, userId: uid, text: '', startedAt: Date.now() }
-    running.set(sessionId, live)
+    const lane = laneOf(sessionId, agent)
+    running.set(lane, live)
     return {
         // `as`: a SUBAGENT streaming inside this turn (desks/subagent.js) — its frames name the role that writes them, so
         // the chat draws its words under that role. The replay keeps only the turn's own agent's text.
@@ -36,14 +39,15 @@ export function turnEmitter({ userId, sessionId, turnId, agent, send = wsEmit })
             send(uid, 'session_turn', { sessionId, turnId, agent, status, ...extra })
         },
         end() {
-            if (running.get(sessionId) === live) running.delete(sessionId)
+            if (running.get(lane) === live) running.delete(lane)
         },
     }
 }
 
-/** The turn streaming in a session right now, or null. Exported for tests and the turn lock. */
-export function runningTurn(sessionId) {
-    return running.get(sessionId) ?? null
+/** The turn streaming in a session's lane right now (Axl's, else a desk's), or null. Exported for tests. */
+export function runningTurn(sessionId, lane = null) {
+    if (lane) return running.get(`${sessionId}|${lane}`) ?? null
+    return running.get(`${sessionId}|axl`) ?? running.get(`${sessionId}|desk`) ?? null
 }
 
 /** Answer one `session_sync` frame. */
@@ -53,7 +57,10 @@ export async function replay({ userId, data, reply }, store = sessionService) {
     const session = await store.get({ sessionId, userId })
     if (!session) return reply('session_replay', { sessionId, error: 'not_found' })
     const messages = await store.allMessagesSince({ sessionId, userId, afterSeq: Number(data?.afterSeq) || 0 })
-    const live = running.get(sessionId)
+    // The turn the user is watching — the floor's lane — and the one running behind it in the other lane (step 5a).
+    const own = (t) => (t && t.userId === String(userId) ? { turnId: t.turnId, agent: t.agent, text: t.text } : null)
+    const axl = own(running.get(`${sessionId}|axl`)), desk = own(running.get(`${sessionId}|desk`))
+    const watching = (session.floor ?? 'axl') === 'axl' ? axl ?? desk : desk ?? axl
     reply('session_replay', {
         sessionId,
         status:   session.status,
@@ -66,7 +73,8 @@ export async function replay({ userId, data, reply }, store = sessionService) {
         // The revision of each — what a press or a hand edit names (plan phase 8a CR D2).
         agentRev:   session.agentRev ?? {},
         messages: messages ?? [],
-        running:  live && live.userId === String(userId) ? { turnId: live.turnId, agent: live.agent, text: live.text } : null,
+        running:    watching,
+        background: watching === axl ? desk : null,
     })
 }
 

@@ -234,7 +234,9 @@ export function makeChainRunner({
         if (origin === 'background') return
         const session = await sessions.get({ sessionId, userId: user._id })
         if (!session) return
-        let chain = session.chain && session.chain.status !== 'done' ? session.chain : null
+        // A chain is a DESK's: Axl's turns run in their own lane (step 5a) and never end, pause or advance one a builder
+        // has going — his routes are still followed below.
+        let chain = agent !== 'axl' && session.chain && session.chain.status !== 'done' ? session.chain : null
 
         // A CHAIN step that was refused or failed: pause and offer to try it again — `current` still names it.
         if (out.reason) {

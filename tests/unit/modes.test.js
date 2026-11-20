@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { memDb } from '../helpers/memDb.js'
 import { makeSessionService } from '../../services/session.service.js'
 import { makeModes, modeOf, MODES } from '../../services/desks/modes.js'
-import { withSessionLock } from '../../services/desks/turnLock.js'
+import { withSessionLock, laneKey } from '../../services/desks/turnLock.js'
 
 // The chat's mode (docs/design/modes-and-builders.md M3/M4, step 3): General or a builder — derived from the floor.
 
@@ -36,16 +36,23 @@ test('picking a mode moves the floor — General is Axl; a builder keeps its par
     assert.equal((await r.done).floor, 'analyst', 'Analyst mode is for every user (M17)')
 })
 
-test('a switch waits for a running turn — it lands after it, never under it', async () => {
+test("a switch waits for Axl's running turn — never for a builder's (lanes, step 5a)", async () => {
     const { sessions, modes } = rig()
     const s = await sessions.getActive({ userId: 'u1' })
     const log = []
-    const turn = withSessionLock(s.sessionId, async () => { await new Promise(r => setTimeout(r, 15)); await sessions.setFloor({ sessionId: s.sessionId, userId: 'u1', agent: 'mentor' }); log.push('turn') })
-    const r = await modes.setMode({ user, sessionId: s.sessionId, mode: 'general' })
-    await r.done.then(() => log.push('mode'))
-    await turn
-    assert.deepEqual(log, ['turn', 'mode'])
-    assert.equal((await sessions.get({ sessionId: s.sessionId, userId: 'u1' })).floor, 'axl')
+    const slow = (name) => async () => { await new Promise(r => setTimeout(r, 15)); log.push(name) }
+    // A builder at work on the session's own key: the switch lands at once.
+    const desk = withSessionLock(s.sessionId, slow('desk'))
+    await (await modes.setMode({ user, sessionId: s.sessionId, mode: 'general' })).done.then(() => log.push('mode'))
+    await desk
+    assert.deepEqual(log, ['mode', 'desk'])
+    // Axl's turn in his lane: the switch lands after it.
+    log.length = 0
+    const axl = withSessionLock(laneKey(s.sessionId, 'axl'), slow('axl'))
+    await (await modes.setMode({ user, sessionId: s.sessionId, mode: 'general' })).done.then(() => log.push('mode'))
+    await axl
+    assert.deepEqual(log, ['axl', 'mode'])
+    assert.equal(laneKey('s9', 'mentor'), 's9', "every desk keeps the session's own key")
 })
 
 test('refused: an unknown mode, another user\'s session; nothing moves', async () => {

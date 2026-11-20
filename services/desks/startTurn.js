@@ -15,7 +15,7 @@ import { sessionService } from '../session.service.js'
 import { parseMention } from '../session.util.js'
 import { registerTurn } from '../../api/_shared/turnRegistry.js'
 import { turnEmitter } from '../sessionChannel.js'
-import { withSessionLock } from './turnLock.js'
+import { withSessionLock, laneKey } from './turnLock.js'
 import { sessionTurn as defaultSessionTurn, canSpeak } from './sessionTurn.js'
 import { framePayload } from './index.js'
 import { isSubagent } from './registry.js'
@@ -41,7 +41,7 @@ export function makeStartTurn({
         // stop too — Stop on a queued turn must cancel it, not let it run later and spend anyway.
         const ac      = new AbortController()
         const release = registerTurn(turnId, ac, user._id)
-        return lock(sessionId, async () => {
+        return lock(laneKey(sessionId, agent), async () => {
             if (ac.signal.aborted) {
                 release()
                 emitterFor({ userId: user._id, sessionId, turnId, agent }).status('stopped', { queued: true })
@@ -90,7 +90,8 @@ export function makeStartTurn({
         const who   = toAxl ? 'axl' : asked
         if (toAxl) input = { ...input, via: asked }
 
-        await onUserTurn({ user, sessionId })
+        // A chain is a desk's: talking to Axl leaves it running (his own lane — step 5a); talking to a desk pauses it (G4).
+        if (who !== 'axl') await onUserTurn({ user, sessionId })
         const id = typeof turnId === 'string' && turnId ? turnId : `turn_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
         runQueued({ user, sessionId, agent: who, text: mention ? mention.text || text : text, input, turnId: id })
             .catch(err => logger.warn(LOG, 'queued turn crashed', err.message))

@@ -109,3 +109,22 @@ test('chatWs routes a client frame to its registered handler, with a reply bound
     assert.deepEqual(ws.sent, [{ event: 'test_answer', data: { ok: true } }])
     _dispatch('u1', ws, { event: 'nobody_listens' })   // an unknown frame is ignored, not an error
 })
+
+test("lanes (step 5a): Axl's turn and a desk's stream at once — the replay gives the one the user watches, and the other behind it", async () => {
+    const { db } = memDb()
+    const store = makeSessionService({ getDb: async () => db })
+    const s = await store.getActive({ userId: 'u1' })
+    const sent = []
+    const desk = turnEmitter({ userId: 'u1', sessionId: s.sessionId, turnId: 'tm', agent: 'mentor', send: (...a) => sent.push(a) })
+    const axl = turnEmitter({ userId: 'u1', sessionId: s.sessionId, turnId: 'ta', agent: 'axl', send: (...a) => sent.push(a) })
+    desk.emit('token', { text: 'building' }); axl.emit('token', { text: 'hi' })
+    assert.equal(runningTurn(s.sessionId, 'desk').turnId, 'tm')
+    assert.equal(runningTurn(s.sessionId, 'axl').turnId, 'ta', 'neither overwrote the other')
+    const replies = []
+    await replay({ userId: 'u1', data: { sessionId: s.sessionId }, reply: (e, d) => replies.push(d) }, store)
+    assert.deepEqual([replies[0].running.turnId, replies[0].background.turnId], ['ta', 'tm'], 'the floor is Axl: his turn is watched, the trader works behind')
+    axl.end()
+    assert.equal(runningTurn(s.sessionId, 'axl'), null)
+    assert.equal(runningTurn(s.sessionId).turnId, 'tm')
+    desk.end()
+})
