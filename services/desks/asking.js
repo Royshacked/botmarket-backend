@@ -24,6 +24,9 @@ export const CARD_LINE = 'A few questions before I build it.'
 // accounts: the answer names them.
 const keptInput = (input = {}) => ({ ...(input.seed ? { seed: input.seed } : {}), ...(input.clientTime ? { clientTime: input.clientTime } : {}) })
 
+// The name picked on a trader's card, against a hand-off's ticker ("Other" typed wins over a choice, as the pick card's).
+const sameName = (ticker, a) => String(a?.other || a?.choice || '').toUpperCase().trim() === String(ticker).toUpperCase().trim()
+
 // The turn path, imported when an answer runs its turn: turns.js → … → sessionTurn → here would otherwise be a cycle.
 const defaultRunTurn = async (args) => (await import('./turns.js')).runQueued(args)
 
@@ -116,7 +119,11 @@ export function makeAsking({ sessions = sessionService, profiles = userProfileSe
             const { asking, ...rest } = state
             const main = mainAccountId && picked.includes(String(mainAccountId)) ? String(mainAccountId) : (picked[0] ?? null)
             const text = answersText(agent, card.ref.questions, checked.answers)
-            const input = { ...(asking?.input ?? {}), accounts: chosen, mainAccountId: main, answered: true, ...(clientTime ? { clientTime } : {}) }
+            // The hand-off's facts (a Hotlist board's, a list's, an event's) are about ITS name: a different name picked on
+            // the card builds without them.
+            const kept = { ...(asking?.input ?? {}) }
+            if (agent === 'mentor' && kept.seed?.ticker && !sameName(kept.seed.ticker, checked.answers.name)) delete kept.seed
+            const input = { ...kept, accounts: chosen, mainAccountId: main, answered: true, ...(clientTime ? { clientTime } : {}) }
             // THE BUILD GOES TO THE BACKGROUND (step 5b): the chat is back with Axl, and the builder works — or waits its
             // turn behind the build already running (M10).
             const started = await builds.start({ user, sessionId, agent, state: { ...rest, asked: true }, title: buildTitle(agent, checked.answers, state), text, input })

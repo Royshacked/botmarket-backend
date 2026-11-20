@@ -150,3 +150,25 @@ test("a route's ticker is the card's first name (Axl's <route>assist NVDA</route
     const [row] = await sessions.allMessagesSince({ sessionId: s.sessionId, userId: 'u1', afterSeq: 0 })
     assert.deepEqual(row.ref.questions[0].options.map(o => o.label), ['NVDA', 'Find one for me'])
 })
+
+// Build trade off the Hotlist (Roy, 2026-11-20): Trader, the card, the name filled in, the build on the Hotlist's context.
+test('a hand-off: the card starts on its name, asks again after an earlier build, and keeps its facts only for its own name', async () => {
+    const name = traderQuestions({ symbol: 'nvda' })[0]
+    assert.equal(name.default, 'NVDA', 'picked already')
+    assert.equal(traderQuestions()[0].default, undefined)
+    assert.equal(needsQuestions('mentor', { asked: true }, 'user', { seed: { ticker: 'NVDA' } }), true, 'a hand-off is a new build')
+    assert.equal(needsQuestions('mentor', { draft: {} }, 'user', { seed: { ticker: 'NVDA' } }), false, 'but not over a trade on the table')
+
+    const { sessions, asks, turns } = rig()
+    const s = await sessions.getActive({ userId: 'u1' })
+    const seed = { ticker: 'NVDA', hotlist: { board: 'hb_1', column: 'mid' } }
+    const accounts = [{ id: 'a1', broker: 'paper', name: 'Paper main' }]
+    const same = await asks.post({ user, sessionId: s.sessionId, agent: 'mentor', state: null, input: { seed } })
+    await asks.answer({ user, sessionId: s.sessionId, seq: same.seq, answers: answersFor({ name: { choice: 'NVDA' } }), accounts })
+    assert.deepEqual(turns[0].input.seed, seed, 'the build reads the Hotlist board')
+
+    await sessions.setAgentState({ sessionId: s.sessionId, userId: 'u1', agent: 'mentor', state: null })
+    const other = await asks.post({ user, sessionId: s.sessionId, agent: 'mentor', state: null, input: { seed } })
+    await asks.answer({ user, sessionId: s.sessionId, seq: other.seq, answers: answersFor({ name: { other: 'amd' } }), accounts })
+    assert.equal(turns.at(-1).input.seed, undefined, "another name picked builds without NVDA's facts")
+})

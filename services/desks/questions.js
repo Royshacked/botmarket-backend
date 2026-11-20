@@ -3,7 +3,8 @@
 // prose, one turn at a time. The card is built HERE, by code (a model writing JSON on Luna is not a contract); the
 // answers become the builder's opening, with the account the user picked.
 //
-//   a card:     { id, header, question, options: [{ label, description? }], multiSelect, other, kind? }
+//   a card:     { id, header, question, options: [{ label, description? }], multiSelect, other, kind?, default? }
+//               default — the option the card starts on (a hand-off's name: picked already, the user can change it)
 //               kind 'account' — the client fills the options from the workspace's accounts (the workspace is the
 //               client's scope; the server never picks it)
 //   an answer:  { [id]: { choice?: string | string[], other?: string, accountId?: string, accountLabel?: string } }
@@ -28,7 +29,8 @@ const ACCOUNT = (multi) => ({
 })
 
 /**
- * The trader's card. `symbol`: the name the build already has (a route's, a hand-off's) — offered first. `size`: the
+ * The trader's card. `symbol`: the name the build already has (a route's, a hand-off's) — offered first and picked
+ * already (Roy, 2026-11-20: Build trade off the Hotlist opens the card with the name filled in). `size`: the
  * user's last size (user_profile) — offered as an option.
  */
 export function traderQuestions({ symbol = null, size = null } = {}) {
@@ -37,6 +39,7 @@ export function traderQuestions({ symbol = null, size = null } = {}) {
     return [
         {
             id: 'name', header: 'Name', question: 'Which stock?', multiSelect: false, other: true,
+            ...(sym ? { default: sym } : {}),
             options: [
                 ...(sym ? [{ label: sym, description: 'The name you came with' }] : []),
                 { label: 'Find one for me', description: 'The stock picker finds two or three names; you pick one' },
@@ -127,7 +130,8 @@ export function needsQuestions(agent, state, origin, input = null) {
     if (s.build && s.build.status !== 'failed') return false
     // Already asked in THIS build: the user talking on with the builder. A new route or the picker, with nothing on the
     // table, starts a new build (a build that ended in "no setup" left `asked` behind).
-    if (s.asked && origin === 'user') return false
+    // A HAND-OFF (Build trade off the Hotlist, an Echo name — it carries a seed) is a new build whatever came before.
+    if (s.asked && origin === 'user' && !input?.seed?.ticker) return false
     if (agent === 'mentor') return !s.draft
     if (agent === 'portfolio') return !s.mandate && !s.portfolioId && !s.reviewMode && !s.adoptDraftId && !s.pendingPlan && !s.reviewUpdate
     return false
