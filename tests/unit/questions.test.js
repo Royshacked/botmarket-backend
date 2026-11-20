@@ -1,0 +1,140 @@
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import { memDb } from '../helpers/memDb.js'
+import { makeSessionService } from '../../services/session.service.js'
+import { traderQuestions, portfolioQuestions, questionsFor, needsQuestions, checkAnswers, answersText } from '../../services/desks/questions.js'
+import { makeAsking, CARD_LINE } from '../../services/desks/asking.js'
+import { makeModes } from '../../services/desks/modes.js'
+
+// Questions up front (docs/design/modes-and-builders.md M5/M6, step 4): one card, built by code, answered once.
+
+const user = { _id: 'u1', role: 'user' }
+
+test("the trader's card: the name (the one they came with first), the account, the size (last time's offered), the scenarios, the breaking rule, the policy", () => {
+    const q = traderQuestions({ symbol: 'nvda', size: { unit: 'risk_pct', value: 1 } })
+    assert.deepEqual(q.map(x => x.id), ['name', 'account', 'size', 'scenarios', 'invalidation', 'surprises'])
+    assert.deepEqual(q[0].options.map(o => o.label), ['NVDA', 'Find one for me'])
+    assert.equal(q[1].kind, 'account'); assert.equal(q[1].multiSelect, false)
+    assert.deepEqual(q[2].options.map(o => o.label), ['As last time: 1% of the account at risk'])
+    assert.deepEqual(q[3].options.map(o => o.label), ['Both (recommended)', 'A only', 'B only'])
+    assert.deepEqual(q[4].options.map(o => o.label), ['Redraw it', 'Close it', 'Ask me'])
+    assert.ok(q.every(x => x.header.length <= 12), 'headers fit the chip')
+    assert.deepEqual(traderQuestions()[0].options.map(o => o.label), ['Find one for me'])
+    assert.deepEqual(traderQuestions()[2].options, [], 'no last size → Other only')
+})
+
+test("the portfolio manager's card: the mandate, the account(s) — several allowed — and the policy; the analyst asks nothing", () => {
+    assert.deepEqual(portfolioQuestions().map(x => x.id), ['objective', 'horizon', 'drawdown', 'capital', 'constraints', 'account', 'surprises'])
+    assert.equal(portfolioQuestions().find(x => x.id === 'account').multiSelect, true)
+    assert.equal(questionsFor('analyst'), null)
+    assert.equal(questionsFor('axl'), null)
+})
+
+test('a card is due only for a NEW build', () => {
+    assert.equal(needsQuestions('mentor', null, 'user'), true)
+    assert.equal(needsQuestions('mentor', { active_asset: 'NVDA' }, 'opening'), true)
+    assert.equal(needsQuestions('portfolio', {}, 'mode'), true)
+    for (const [why, args] of [
+        ['a trade on the table', ['mentor', { draft: {} }, 'user']],
+        ['a chain step', ['mentor', null, 'chain']],
+        ['editing a saved item', ['mentor', { editing: { kind: 'setup' } }, 'user']],
+        ['working for a chain', ['mentor', { chainId: 'c' }, 'user']],
+        ['a card already open', ['mentor', { asking: { seq: 3 } }, 'user']],
+        ['already asked — the user talking on', ['mentor', { asked: true }, 'user']],
+        ['the answers\' own turn', ['mentor', { asked: true }, 'opening', { answered: true }]],
+        ['a press', ['mentor', null, 'user', { ops: [{}] }]],
+        ['a book in review', ['portfolio', { reviewMode: true }, 'user']],
+        ['a mandate already given', ['portfolio', { mandate: {} }, 'user']],
+        ['the analyst', ['analyst', null, 'user']],
+    ]) assert.equal(needsQuestions(...args), false, why)
+    assert.equal(needsQuestions('mentor', { asked: true }, 'opening'), true, 'a new route after a build that ended with nothing asks again')
+})
+
+test('the answers are checked: every question, an option or Other, an account by id — one where one is asked', () => {
+    const q = traderQuestions({ symbol: 'NVDA' })
+    const full = {
+        name: { choice: 'NVDA' }, account: { accountId: 'a1', accountLabel: 'Paper main' }, size: { other: '$10,000, 1% risk, R:R 1.5' },
+        scenarios: { choice: 'Both (recommended)' }, invalidation: { choice: 'Redraw it' }, surprises: { choice: 'Decide for me' },
+    }
+    const ok = checkAnswers(q, full)
+    assert.equal(ok.ok, true)
+    assert.deepEqual(ok.answers.account, { accountIds: ['a1'], accountLabel: 'Paper main' })
+    assert.equal(checkAnswers(q, { ...full, size: {} }).reason, 'unanswered:size')
+    assert.equal(checkAnswers(q, { ...full, scenarios: { choice: 'Something else' } }).reason, 'unanswered:scenarios', 'not an option, and no Other here')
+    assert.equal(checkAnswers(q, { ...full, account: { accountIds: ['a1', 'a2'] } }).reason, 'one_account:account')
+    assert.equal(checkAnswers(q, null).reason, 'invalid_answers')
+
+    const text = answersText('mentor', q, ok.answers)
+    assert.match(text, /^My answers to the build questions \(asked up front — do not ask them again\):/)
+    assert.match(text, /- Which stock\? NVDA\n- Which account does it go to\? Paper main\n- Your position size, your risk and the minimum R:R\? \$10,000, 1% risk, R:R 1\.5/)
+    assert.match(text, /Take it all the way: build it and generate it/)
+})
+
+function rig() {
+    const { db } = memDb()
+    const sessions = makeSessionService({ getDb: async () => db })
+    const turns = []
+    const asks = makeAsking({ sessions, profiles: { read: async () => ({ notes: [], size: { unit: 'risk_pct', value: 1 } }) }, runTurn: async (x) => { turns.push(x) } })
+    return { sessions, asks, turns, modes: makeModes({ sessions, asks }) }
+}
+// A card opened from the picker has no name to offer: the name arrives as Other.
+const answersFor = (over = {}) => ({
+    name: { other: 'NVDA' }, account: { accountId: 'a1', accountLabel: 'Paper main' }, size: { choice: 'As last time: 1% of the account at risk' },
+    scenarios: { choice: 'Both (recommended)' }, invalidation: { choice: 'Ask me' }, surprises: { choice: 'Ask me' }, ...over,
+})
+
+test('picking Trader posts the card; answering it marks it, picks the account, and runs the trader on the answers', async () => {
+    const { sessions, asks, turns, modes } = rig()
+    const s = await sessions.getActive({ userId: 'u1' })
+    const r = await modes.setMode({ user, sessionId: s.sessionId, mode: 'mentor' })
+    const { card } = await r.done
+    const [row] = await sessions.allMessagesSince({ sessionId: s.sessionId, userId: 'u1', afterSeq: 0 })
+    assert.deepEqual([row.seq, row.kind, row.agent, row.content, row.ref.state], [card, 'questions', 'mentor', CARD_LINE, 'open'])
+    assert.equal((await sessions.get({ sessionId: s.sessionId, userId: 'u1' })).agentState.mentor.asking.seq, card)
+
+    const accounts = [{ id: 'a1', broker: 'paper', name: 'Paper main' }, { id: 'a2', broker: 'paper' }]
+    const out = await asks.answer({ user, sessionId: s.sessionId, seq: card, answers: answersFor(), accounts, mainAccountId: 'a2' })
+    assert.equal(out.agent, 'mentor')
+    assert.equal(turns.length, 1)
+    assert.equal(turns[0].origin, 'opening')
+    assert.deepEqual(turns[0].input.accounts, [accounts[0]], 'only the account picked on the card')
+    assert.equal(turns[0].input.mainAccountId, 'a1', 'a main the user did not pick is not kept')
+    assert.equal(turns[0].input.answered, true)
+    assert.match(turns[0].text, /Which stock\? NVDA/)
+    const after = await sessions.get({ sessionId: s.sessionId, userId: 'u1' })
+    assert.deepEqual(after.agentState.mentor, { asked: true })
+    const [answered] = await sessions.allMessagesSince({ sessionId: s.sessionId, userId: 'u1', afterSeq: 0 })
+    assert.equal(answered.ref.state, 'answered')
+    assert.equal(answered.ref.answers.name.other, 'NVDA')
+    assert.equal((await asks.answer({ user, sessionId: s.sessionId, seq: card, answers: answersFor(), accounts })).reason, 'already_answered', 'twice → once')
+})
+
+test('refused: unanswered questions, an account not offered, another card, another user', async () => {
+    const { sessions, asks, modes } = rig()
+    const s = await sessions.getActive({ userId: 'u1' })
+    const { card } = await (await modes.setMode({ user, sessionId: s.sessionId, mode: 'mentor' })).done
+    const accounts = [{ id: 'a1', broker: 'paper' }]
+    assert.equal((await asks.answer({ user, sessionId: s.sessionId, seq: card, answers: answersFor({ size: {} }), accounts })).reason, 'unanswered:size')
+    assert.equal((await asks.answer({ user, sessionId: s.sessionId, seq: card, answers: answersFor(), accounts: [] })).reason, 'unknown_account')
+    assert.equal((await asks.answer({ user, sessionId: s.sessionId, seq: card + 5, answers: answersFor(), accounts })).reason, 'not_found')
+    assert.equal((await asks.answer({ user: { _id: 'u2' }, sessionId: s.sessionId, seq: card, answers: answersFor(), accounts })).reason, 'not_found')
+    const [row] = await sessions.allMessagesSince({ sessionId: s.sessionId, userId: 'u1', afterSeq: 0 })
+    assert.equal(row.ref.state, 'open', 'nothing refused changed the card')
+})
+
+test('picking a builder with work on its table posts no card; picking the analyst never does', async () => {
+    const { sessions, modes } = rig()
+    const s = await sessions.getActive({ userId: 'u1' })
+    await sessions.setAgentState({ sessionId: s.sessionId, userId: 'u1', agent: 'mentor', state: { draft: { asset: 'AMD' } } })
+    assert.equal((await (await modes.setMode({ user, sessionId: s.sessionId, mode: 'mentor' })).done).card, undefined)
+    assert.equal((await (await modes.setMode({ user, sessionId: s.sessionId, mode: 'analyst' })).done).card, undefined)
+    assert.deepEqual(await sessions.allMessagesSince({ sessionId: s.sessionId, userId: 'u1', afterSeq: 0 }), [])
+})
+
+test("a route's ticker is the card's first name (Axl's <route>assist NVDA</route> — the drive, 2026-11-20)", async () => {
+    const { sessions, asks } = rig()
+    const s = await sessions.getActive({ userId: 'u1' })
+    await asks.post({ user, sessionId: s.sessionId, agent: 'mentor', state: null, input: { routeSymbol: 'NVDA' } })
+    const [row] = await sessions.allMessagesSince({ sessionId: s.sessionId, userId: 'u1', afterSeq: 0 })
+    assert.deepEqual(row.ref.questions[0].options.map(o => o.label), ['NVDA', 'Find one for me'])
+})

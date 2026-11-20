@@ -13,6 +13,7 @@ import { sealing } from '../../services/desks/seal.js'
 import { withSessionLock } from '../../services/desks/turnLock.js'
 import { deskAct } from '../../services/desks/act.js'
 import { modes } from '../../services/desks/modes.js'
+import { asking } from '../../services/desks/asking.js'
 import { DESK_DEFS } from '../../services/desks/index.js'
 import { parseIdeaAccounts, parseClientTime } from '../_shared/parse.util.js'
 import { makeHandle } from '../_shared/handle.util.js'
@@ -157,6 +158,29 @@ export const setSessionMode = handle('setSessionMode', async (req, res) => {
     if (out.reason) return sendReason(res, out.reason, { overrides: { invalid_mode: [400, 'mode must be general, mentor, portfolio or analyst'] } })
     out.done.catch(() => {})
     res.status(202).json({ mode: out.mode, floor: out.floor })
+})
+
+// A builder's question card answered (modes-and-builders.md step 4): checked, marked, and the builder's turn run on the
+// answers — with the account(s) picked on the card. Answered at once (202); the turn streams on the channel.
+const ANSWER_REASONS = (reason) => {
+    if (reason === 'already_answered') return [409, 'Those questions were already answered']
+    if (reason === 'stale_card') return [409, 'That card is no longer the open one']
+    if (reason === 'unknown_account') return [400, 'Pick an account from this workspace']
+    if (String(reason).startsWith('unanswered:')) return [400, 'Answer every question first']
+    if (String(reason).startsWith('one_account:')) return [400, 'Pick one account']
+    if (reason === 'invalid_answers') return [400, 'invalid answers']
+    return null
+}
+export const answerSessionQuestions = handle('answerSessionQuestions', async (req, res) => {
+    const { seq, answers, accounts, mainAccountId, clientTime } = req.body ?? {}
+    if (!Number.isInteger(seq)) throw httpError(400, 'seq is required')
+    const out = await asking.answer({
+        user: req.user, sessionId: req.params.id, seq, answers,
+        accounts: parseIdeaAccounts(accounts), mainAccountId: mainAccountId != null ? String(mainAccountId) : null,
+        clientTime: parseClientTime({ clientNow: clientTime?.clientNow, clientTz: clientTime?.clientTz }),
+    })
+    if (out.reason) return sendReason(res, out.reason, { overrides: ANSWER_REASONS, fallback: 404 })
+    res.status(202).json(out)
 })
 
 // History's resume (Roy, 2026-10-19): an archived session becomes the live one; the live one is put away.

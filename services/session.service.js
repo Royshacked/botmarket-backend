@@ -347,6 +347,26 @@ export function makeSessionService({ getDb = _defaultGetDb, events = silentEvent
     }
 
     /**
+     * Rewrite one row's `ref` — a question card answered or set aside (desks/answers.js). Owner-scoped; the row goes out
+     * again on the channel, and the client merges it by seq. `match` guards it: `{ 'ref.state': 'open' }` answers only an
+     * open card, so two submits never both land.
+     */
+    async function updateRef({ sessionId, userId, seq, ref, match = {} }) {
+        if (!Number.isFinite(seq) || !ref || typeof ref !== 'object') return { reason: 'invalid_ref' }
+        const db = await getDb()
+        const owns = await db.collection(SESSIONS).findOne(
+            { sessionId: String(sessionId), userId: String(userId) }, { projection: { _id: 0, sessionId: 1 } })
+        if (!owns) return { reason: 'not_found' }
+        const res = await db.collection(MESSAGES).findOneAndUpdate(
+            { sessionId: String(sessionId), seq, ...match }, { $set: { ref } }, { returnDocument: 'after' })
+        const row = res?.value ?? res
+        if (!row) return { reason: 'not_found' }
+        const stored = stripId(row)
+        events.message(String(userId), String(sessionId), stored)
+        return { message: stored }
+    }
+
+    /**
      * Remove timeline rows by seq — sealing moves an agent's turns OUT of the session onto the entity they
      * produced (§6.2). Owner-checked first; the seqs are only ever this session's.
      */
@@ -469,7 +489,7 @@ export function makeSessionService({ getDb = _defaultGetDb, events = silentEvent
         return r.matchedCount ? { ok: true } : { reason: 'not_found' }
     }
 
-    return { ensureIndexes, getActive, findActive, startNew, resume, importArchived, list, remove, get, append, messagesSince, messagesForAgent, allMessagesSince, removeMessages, setAgentState, setSealedThrough, setChain, setWaiting, findRunningChains, findWaiting, setFloor, setSummary, addLink }
+    return { ensureIndexes, getActive, findActive, startNew, resume, importArchived, list, remove, get, append, messagesSince, messagesForAgent, allMessagesSince, removeMessages, setAgentState, setSealedThrough, setChain, setWaiting, findRunningChains, findWaiting, setFloor, updateRef, setSummary, addLink }
 }
 
 export const sessionService = makeSessionService({ events: sessionEvents })

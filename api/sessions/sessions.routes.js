@@ -2,7 +2,7 @@ import express         from 'express'
 import { log }         from '../../middleware/logger.middleware.js'
 import { requireAuth } from '../../middleware/auth.middleware.js'
 import { agentLimiter } from '../../middleware/rateLimit.middleware.js'
-import { getActiveSession, startNewSession, listSessions, getSessionMessages, postSessionTurn, editInSession, continueSession, actInSession, editSessionState, deleteSession, resumeSession, setSessionMode } from './sessions.controller.js'
+import { getActiveSession, startNewSession, listSessions, getSessionMessages, postSessionTurn, editInSession, continueSession, actInSession, editSessionState, deleteSession, resumeSession, setSessionMode, answerSessionQuestions } from './sessions.controller.js'
 
 const router = express.Router()
 
@@ -27,5 +27,7 @@ router.post('/:id/act',      log, actInSession)
 router.patch('/:id/state',   log, editSessionState)
 // The mode picker (modes-and-builders.md M4): General / the trader / the portfolio manager / the analyst. No model call.
 router.post('/:id/mode',     log, setSessionMode)
+// A builder's question card answered (step 4) — runs the builder's turn: the same model budget as a turn.
+router.post('/:id/answers',  agentLimiter, log, answerSessionQuestions)
 
 export const sessionsRoutes = router

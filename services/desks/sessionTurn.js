@@ -27,6 +27,8 @@ import { foldPlan, summarize as defaultSummarize } from './summarize.js'
 import { logger } from '../logger.service.js'
 import { keepMarkers } from './markers.js'
 import { sealing as defaultSealing } from './seal.js'
+import { asking as defaultAsking } from './asking.js'
+import { needsQuestions } from './questions.js'
 
 const LOG = '[sessionTurn]'
 
@@ -118,6 +120,7 @@ export function makeSessionTurn({
     profiles   = userProfileService,
     summarize  = defaultSummarize,
     sealing    = defaultSealing,
+    asks       = defaultAsking,
 } = {}) {
 
     async function maybeSummarize({ user, sessionId, agent, messages, summary }) {
@@ -181,12 +184,24 @@ export function makeSessionTurn({
         const summary  = session.summaries?.[agent] ?? null
         // Only this agent's segment past its summary — never the whole timeline.
         const messages = await sessions.messagesForAgent({ sessionId, userId: user._id, agent, afterSeq: summary?.throughSeq ?? 0 })
-        const state    = session.agentState?.[agent] ?? desk.emptyState?.() ?? null
+        let state      = session.agentState?.[agent] ?? desk.emptyState?.() ?? null
         const editing  = state?.editing ?? null
         const sealed   = editing ? await contexts.load({ userId: user._id, kind: editing.kind, entityId: editing.entityId, agent }) : null
 
         // The user rides along for a seed that names something of theirs (an Echo event of their own, echo-pipeline.md).
         const prepared = desk.prepareInput ? await desk.prepareInput(input, { userId: user._id }) : input
+
+        // QUESTIONS UP FRONT (modes-and-builders.md step 4): a NEW build asks everything on one card instead of in prose —
+        // the builder does not run; the answers run it (asking.answer). A card left open while the user typed is set
+        // aside, and the build goes on in words.
+        if (needsQuestions(agent, state, origin, prepared)) {
+            const posted = await asks.post({ user, sessionId, agent, state, input: prepared })
+            if (!posted.reason) {
+                await sessions.setFloor({ sessionId, userId: user._id, agent })
+                return { payload: { reply: '', questions: true }, reply: null }
+            }
+        }
+        if (state?.asking && (origin === 'user' || origin === 'opening')) state = await asks.setAside({ user, sessionId, agent, state })
         const common   = deskCommon({
             messages: buildConversation({ messages: messages ?? [], agent, summary, sealed }),
             // The level, and ABOUT THE USER — what they told any role, what is open at the others (one-axl.md step 3).

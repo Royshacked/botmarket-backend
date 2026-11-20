@@ -197,7 +197,7 @@ export function makeChainRunner({
         // A hand-back to Axl runs as 'reception': Axl may send the question on ONCE (to an 'opening', which stops) — so
         // a question asked at the wrong desk costs at most two automatic turns, and never loops (Roy, 2026-11-13).
         const origin = payload.route === RECEPTION ? 'reception' : 'opening'
-        runQueued?.({ user, sessionId: session.sessionId, agent: entry.agent, text, input: carried(input), turnId: `${turnId ?? 'turn'}_${origin === 'reception' ? 'axl' : 'open'}`, origin })
+        runQueued?.({ user, sessionId: session.sessionId, agent: entry.agent, text, input: { ...carried(input), ...(payload.routeSymbol ? { routeSymbol: payload.routeSymbol } : {}) }, turnId: `${turnId ?? 'turn'}_${origin === 'reception' ? 'axl' : 'open'}`, origin })
             .catch(err => logger.warn(LOG, 'opening turn failed', err.message))
     }
 

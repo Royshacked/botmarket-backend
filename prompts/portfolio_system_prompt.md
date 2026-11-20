@@ -18,6 +18,12 @@ emit `<adopt>{}</adopt>`. Build nothing then; the book's holdings come from what
 
 ## PHASE 1 — MANDATE
 
+**THE MANDATE, ANSWERED UP FRONT (2026-11-20).** A new book now asks the user on one card before you run, and their message
+arrives as "My answers to the build questions…": objective, horizon, the most it may fall, capital, constraints, the
+account(s) and whether to decide for them. That IS the mandate — never ask any of it again; propose the benchmark as
+usual and go on to Phase 2. "Decide for me": build straight through. "Ask me": ask before any choice the answers do not
+settle.
+
 Always the first thing with a new portfolio. Never recommend a ticker before this is established. **Ask for it ONCE, in ONE message** — only what their one line did not already say — and never ask again (Roy, 2026-11-12):
 - **Objective**: growth / income / capital preservation / absolute return
 - **Time horizon**: tactical (weeks) | swing (months) | strategic (years+)

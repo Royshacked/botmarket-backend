@@ -14,6 +14,8 @@ import { makeSealing } from '../../services/desks/seal.js'
 
 // The shared ABOUT THE USER record (userProfile.service) — empty unless a test gives one.
 const NO_PROFILE = { read: async () => ({ notes: [], size: null }) }
+// The builders' question cards (step 4) OFF — these tests pin the turn's mechanics; the card has its own test below.
+const NO_CARDS = { post: async () => ({ reason: 'off' }), setAside: async ({ state }) => state }
 
 function rig({ run, nextState = (prev, r) => ({ ...(prev ?? {}), last: r.reply }), summarize = async () => 'S' } = {}) {
     const { db, rows } = memDb()
@@ -29,7 +31,7 @@ function rig({ run, nextState = (prev, r) => ({ ...(prev ?? {}), last: r.reply }
     })
     // Argus keeps its real onRouted: the route-lands-and-resets rule is what some tests below pin.
     const desks = { axl: stub('axl'), mentor: stub('mentor'), scanner: { ...stub('scanner'), onRouted: DESK_DEFS.scanner.onRouted }, strategy: stub('strategy') }
-    const turn = makeSessionTurn({ sessions, contexts, desks, experience: async () => 'novice', profiles: NO_PROFILE, summarize })
+    const turn = makeSessionTurn({ sessions, contexts, desks, experience: async () => 'novice', profiles: NO_PROFILE, summarize, asks: NO_CARDS })
     return { turn, sessions, contexts, rows, seen }
 }
 const user = { _id: 'u1', role: 'user' }
@@ -243,7 +245,7 @@ function finishingRig({ sealing } = {}) {
         nextState: () => null,
         sealAfterTurn: DESK_DEFS.mentor.sealAfterTurn,
     }
-    const turn = makeSessionTurn({ sessions, contexts, desks: { mentor }, experience: async () => 'novice', profiles: NO_PROFILE, summarize: async () => 'S',
+    const turn = makeSessionTurn({ sessions, contexts, desks: { mentor }, experience: async () => 'novice', profiles: NO_PROFILE, summarize: async () => 'S', asks: NO_CARDS,
         sealing: sealing ?? makeSealing({ sessions, contexts, desks: DESK_DEFS }) })
     return { turn, sessions, contexts }
 }
@@ -283,7 +285,7 @@ test('a close followed by Stop still finishes: the desk is not left editing a cl
         run: async ({ common }) => { common.onFinished({ closedSetup: { id: 'st1', asset: 'AMD' } }); ctl.abort(); return null },
         done: (r) => ({ reply: r.reply }), nextState: () => null, sealAfterTurn: DESK_DEFS.mentor.sealAfterTurn,
     }
-    const turn = makeSessionTurn({ sessions, contexts, desks: { mentor }, experience: async () => 'novice', profiles: NO_PROFILE, summarize: async () => 'S', sealing: makeSealing({ sessions, contexts, desks: DESK_DEFS }) })
+    const turn = makeSessionTurn({ sessions, contexts, desks: { mentor }, experience: async () => 'novice', profiles: NO_PROFILE, summarize: async () => 'S', asks: NO_CARDS, sealing: makeSealing({ sessions, contexts, desks: DESK_DEFS }) })
     const { s, out } = await editingTurn({ turn, sessions }, { signal: ctl.signal })
     assert.equal(out.stopped, true)
     const after = await sessions.get({ sessionId: s.sessionId, userId: 'u1' })
@@ -296,7 +298,7 @@ test('a Stop with nothing finished keeps the state, as it always did', async () 
     const sessions = makeSessionService({ getDb: async () => db })
     const contexts = makeAgentContextService({ getDb: async () => db })
     const mentor = { agent: 'mentor', run: async () => null, done: (r) => r, nextState: () => null, sealAfterTurn: DESK_DEFS.mentor.sealAfterTurn }
-    const turn = makeSessionTurn({ sessions, contexts, desks: { mentor }, experience: async () => 'novice', profiles: NO_PROFILE, summarize: async () => 'S', sealing: makeSealing({ sessions, contexts, desks: DESK_DEFS }) })
+    const turn = makeSessionTurn({ sessions, contexts, desks: { mentor }, experience: async () => 'novice', profiles: NO_PROFILE, summarize: async () => 'S', asks: NO_CARDS, sealing: makeSealing({ sessions, contexts, desks: DESK_DEFS }) })
     const { s } = await editingTurn({ turn, sessions })
     const after = await sessions.get({ sessionId: s.sessionId, userId: 'u1' })
     assert.equal(after.agentState.mentor.editing.entityId, 'st1')
@@ -420,4 +422,37 @@ test('a background announcement is no chain step: the after-hook leaves any chai
     const runner = makeChainRunner({ sessions: new Proxy({}, { get: (_, k) => async () => { touched.push(k); return null } }) })
     await runner.afterTurn({ user, sessionId: 's1', agent: 'echo', turnId: 't', origin: 'background', out: { payload: { reply: 'x' } } })
     assert.deepEqual(touched, [], 'not even read')
+})
+
+test("a NEW build's first turn posts the question card instead of running the builder; typing instead sets it aside (step 4)", async () => {
+    const { makeAsking } = await import('../../services/desks/asking.js')
+    const { db } = memDb()
+    const sessions = makeSessionService({ getDb: async () => db })
+    const contexts = makeAgentContextService({ getDb: async () => db })
+    const ran = []
+    const mentor = { agent: 'mentor', run: async (ctx) => { ran.push(ctx.state); return { reply: 'building' } }, done: (r) => ({ reply: r.reply }), nextState: (p) => p }
+    const asks = makeAsking({ sessions, profiles: NO_PROFILE, runTurn: async () => {} })
+    const turn = makeSessionTurn({ sessions, contexts, desks: { mentor }, experience: async () => 'novice', profiles: NO_PROFILE, summarize: async () => 'S', asks })
+    const s = await sessions.getActive({ userId: 'u1' })
+
+    const out = await turn({ user, sessionId: s.sessionId, agent: 'mentor', text: 'build me a trade on NVDA', origin: 'opening', input: { seed: { ticker: 'NVDA' } } })
+    assert.deepEqual(out.payload, { reply: '', questions: true })
+    assert.equal(ran.length, 0, 'the builder did not run')
+    let rows = await sessions.allMessagesSince({ sessionId: s.sessionId, userId: 'u1', afterSeq: 0 })
+    assert.deepEqual(rows.map(r => `${r.role}/${r.kind}`), ['user/msg', 'assistant/questions'])
+    assert.deepEqual(rows[1].ref.questions[0].options.map(o => o.label), ['NVDA', 'Find one for me'], "the hand-off's name offered first")
+    let st = (await sessions.get({ sessionId: s.sessionId, userId: 'u1' }))
+    assert.equal(st.floor, 'mentor')
+    assert.deepEqual(st.agentState.mentor.asking, { seq: rows[1].seq, input: { seed: { ticker: 'NVDA' } } })
+
+    // The user types instead of answering: the card is set aside, the builder runs on their words, and asks no more.
+    await turn({ user, sessionId: s.sessionId, agent: 'mentor', text: 'just use 1% risk and go', origin: 'user' })
+    assert.equal(ran.length, 1)
+    assert.equal(ran[0].asking, undefined)
+    rows = await sessions.allMessagesSince({ sessionId: s.sessionId, userId: 'u1', afterSeq: 0 })
+    assert.equal(rows[1].ref.state, 'set_aside')
+    st = (await sessions.get({ sessionId: s.sessionId, userId: 'u1' }))
+    assert.equal(st.agentState.mentor.asked, true, 'kept across the fold (markers)')
+    await turn({ user, sessionId: s.sessionId, agent: 'mentor', text: 'and the stop?', origin: 'user' })
+    assert.equal(ran.length, 2, 'talking on with the builder never brings the card back')
 })

@@ -132,6 +132,18 @@ Analyst: no questions — the symbol comes from the request.
 
 **Portfolio review**: no questions (it reads the book) — straight to the build.
 
+**BUILT 2026-11-20 (step 4).** `desks/questions.js` (pure: the two forms, `needsQuestions`, `checkAnswers`,
+`answersText`), `desks/asking.js` (post / setAside / answer), `POST /api/sessions/:id/answers` (202). A card is posted
+instead of the builder's first turn for a NEW build — the picker, a route's opening (the route's ticker now rides to the
+opening: `runner.followRoute` → `input.routeSymbol`, offered first), the user's first message — never on a chain step, an
+edit, work on the table, a press, or the answers' own turn (`input.answered`). Markers `asking` / `asked` (markers.js). The
+answers run the builder as an opening, bound to the account(s) picked on the card, which the venue picker marks too.
+Typing instead sets the card aside. FE: `QuestionCard` above the prompt box (the box's width; 55vh, scrolls), an answered
+card stays in the thread as "Your answers". The builders' prompts say the answers are settled. The model-written extra
+questions (`<questions>`) are left for step 8, with the mid-build pause. Driven (`scripts/drive-question-card.mjs`): Axl's
+route → Trader + the card with NVDA first → answered → the trader built on $10,000 / 1% / R:R 1.5 without asking again
+(read in the session); the portfolio card from the picker; phone at 390px.
+
 ### 4.3 The background build (M7, M8, M12)
 
 - After the answers, the mode returns to **General**, the build goes `queued` → `building`.

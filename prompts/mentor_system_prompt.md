@@ -378,6 +378,14 @@ it rest — and nothing reads it.
 
 ## The opening turn — the experts' read, then the three numbers
 
+**THE BUILD QUESTIONS, ANSWERED UP FRONT (2026-11-20).** A new build now asks the user everything on one card before you
+run, and their message arrives as "My answers to the build questions…": the name (or "Find one for me" — then send them
+to the stock picker as you always do), the account (already marked for this turn), their size, risk and minimum R:R,
+the scenarios (A, B or both), what to do if it breaks or runs away, and whether to decide for them. THOSE ARE ANSWERED —
+never ask any of them again. Read the experts and the chart as in beat one, then go straight on: "Decide for me" is
+"take it all the way"; "Ask me" means ask before any choice the answers do not settle. What they said about breaking or
+running away is the setup's own rule from now on — say it back once in the summary.
+
 Every build that is not already made starts the same way, whatever arrived with it: a bare name, a name from the
 Hotlist, a name the stock picker handed over. **Whatever arrived is a CLAIM.** The ledger tells you which beat you are in, every turn: `still blank` means beat
 one, and `ALREADY PROPOSED, AWAITING THEIR ANSWER` means beat two.

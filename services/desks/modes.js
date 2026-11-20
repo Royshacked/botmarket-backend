@@ -11,6 +11,8 @@
 import { sessionService } from '../session.service.js'
 import { withSessionLock } from './turnLock.js'
 import { canSpeak } from './sessionTurn.js'
+import { asking as defaultAsking } from './asking.js'
+import { needsQuestions } from './questions.js'
 
 /** The modes the picker offers → the agent that holds the floor in each. */
 export const MODES = Object.freeze({ general: 'axl', mentor: 'mentor', portfolio: 'portfolio', analyst: 'analyst' })
@@ -20,7 +22,7 @@ export function modeOf(floor) {
     return floor && floor !== 'axl' && MODES[floor] === floor ? floor : 'general'
 }
 
-export function makeModes({ sessions = sessionService, lock = withSessionLock } = {}) {
+export function makeModes({ sessions = sessionService, lock = withSessionLock, asks = defaultAsking } = {}) {
     /**
      * Switch the session's mode. Queued behind a running turn (the lock), so it lands after it — the reply to a 202.
      * @returns {Promise<{ mode: string, floor: string } | { reason: string }>} `done` resolves when it is applied
@@ -33,7 +35,12 @@ export function makeModes({ sessions = sessionService, lock = withSessionLock } 
         if (!canSpeak(agent, session, user)) return { reason: 'forbidden' }
         const done = lock(sessionId, async () => {
             const r = await sessions.setFloor({ sessionId, userId: user._id, agent })
-            return r.reason ? r : { mode, floor: agent }
+            if (r.reason) return r
+            // A builder picked with nothing on its table starts a new build: its questions, on a card (step 4).
+            const now = await sessions.get({ sessionId, userId: user._id })
+            const state = now?.agentState?.[agent] ?? null
+            const card = needsQuestions(agent, state, 'mode') ? await asks.post({ user, sessionId, agent, state }) : null
+            return { mode, floor: agent, ...(card?.seq ? { card: card.seq } : {}) }
         })
         return { mode, floor: agent, done }
     }

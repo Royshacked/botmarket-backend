@@ -10,5 +10,8 @@ export function keepMarkers(next, prev) {
         ...next,
         ...(prev?.editing ? { editing: prev.editing } : {}),
         ...(prev?.chainId ? { chainId: prev.chainId } : {}),
+        // A builder's question card (desks/asking.js): open (`asking`), or answered in this build (`asked`).
+        ...(prev?.asking ? { asking: prev.asking } : {}),
+        ...(prev?.asked ? { asked: prev.asked } : {}),
     }
 }
