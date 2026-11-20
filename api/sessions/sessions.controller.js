@@ -14,6 +14,7 @@ import { withSessionLock } from '../../services/desks/turnLock.js'
 import { deskAct } from '../../services/desks/act.js'
 import { modes } from '../../services/desks/modes.js'
 import { asking } from '../../services/desks/asking.js'
+import { builds, BUILDERS } from '../../services/desks/builds.js'
 import { DESK_DEFS } from '../../services/desks/index.js'
 import { parseIdeaAccounts, parseClientTime } from '../_shared/parse.util.js'
 import { makeHandle } from '../_shared/handle.util.js'
@@ -181,6 +182,20 @@ export const answerSessionQuestions = handle('answerSessionQuestions', async (re
     })
     if (out.reason) return sendReason(res, out.reason, { overrides: ANSWER_REASONS, fallback: 404 })
     res.status(202).json(out)
+})
+
+// A build sent back to work (modes-and-builders.md step 6): the summary's Change, a failed build's Retry, a stale one's
+// Recheck before Confirm. Under the desk lock; the builder's turn runs in the background (202).
+const BUILD_REASONS = {
+    no_build: [404, 'There is no build on that desk'], wrong_status: [409, 'That build is not in a state for this'],
+    change_required: [400, 'Say what to change'], invalid_action: [400, 'action must be change, retry or recheck'],
+}
+export const reworkSessionBuild = handle('reworkSessionBuild', async (req, res) => {
+    const { agent, action, text } = req.body ?? {}
+    if (!BUILDERS.includes(agent)) throw httpError(400, 'invalid agent')
+    const out = await withSessionLock(req.params.id, () => builds.rework({ user: req.user, sessionId: req.params.id, agent, kind: action, text }))
+    if (out.reason) return sendReason(res, out.reason, { overrides: BUILD_REASONS, fallback: 400 })
+    res.status(202).json({ ok: true })
 })
 
 // History's resume (Roy, 2026-10-19): an archived session becomes the live one; the live one is put away.

@@ -32,6 +32,9 @@ export function asksTheUser(text) {
     return /\?/.test(String(text ?? '').trim().slice(-400))
 }
 
+/** Could the builder's draft be generated now — the readiness the pane's Generate reads (the trader's)? Pure. */
+export const generatable = (state) => !!state?.draft && state?.view?.readiness?.ready === true
+
 /** The app's note that carries a stalled build on. Pure. */
 export function carryLine() {
     return "[App note, not the user's words: the user is not here — the build runs in the background. Carry on building from where you stopped: " +
@@ -162,8 +165,13 @@ export function makeBuilds({ sessions = sessionService, depth = sessionDepth, ru
         if (out?.stopped || stillWorking(session, agent, depth(sessionId))) return null
         const rows = await sessions.messagesForAgent({ sessionId, userId: user._id, agent, afterSeq: 0 })
         const last = [...(rows ?? [])].reverse().find(r => r.role === 'assistant' && r.ref?.build === b.id)
-        // Stopped on a statement, not a question: carry it on (a few times) rather than hand it to the user.
-        if (!asksTheUser(last?.content) && await carry({ user, sessionId, agent })) return 'carried'
+        // Stopped on a statement, not a question. Its draft could be generated → the build is DONE, go or no go (after a
+        // Change the trader says "press Update" instead of going — the drive, 2026-11-20). Otherwise carry it on (a few
+        // times) rather than hand it to the user.
+        if (!asksTheUser(last?.content)) {
+            if (generatable(state)) { await ready({ user, sessionId, agent }); return 'ready' }
+            if (await carry({ user, sessionId, agent })) return 'carried'
+        }
         if (last) {
             const { build: _hidden, ...ref } = last.ref
             await sessions.updateRef({ sessionId, userId: user._id, seq: last.seq, ref: { ...ref, fromBuild: b.id } })
@@ -174,7 +182,36 @@ export function makeBuilds({ sessions = sessionService, depth = sessionDepth, ru
         return 'awaiting'
     }
 
-    return { start, startNext, carry, ready, settle }
+    /**
+     * The summary's CHANGE, a failed build's RETRY, a stale one's RECHECK before Confirm (step 6, M9/M13/M14): the build goes
+     * back to the background — its turns hidden again, its carries reset — and comes back READY with a new summary. The
+     * caller holds the desk lock; the turn queues behind it.
+     * @returns {Promise<{ ok: true } | { reason: string }>}
+     */
+    async function rework({ user, sessionId, agent, kind, text = null }) {
+        const session = await sessions.get({ sessionId, userId: user._id })
+        const state = session?.agentState?.[agent]
+        const b = state?.build
+        if (!b) return { reason: 'no_build' }
+        const from = { change: ['ready', 'awaiting'], retry: ['failed'], recheck: ['ready'] }[kind]
+        if (!from) return { reason: 'invalid_action' }
+        if (!from.includes(b.status)) return { reason: 'wrong_status' }
+        const change = String(text ?? '').trim().slice(0, 1000)
+        if (kind === 'change' && !change) return { reason: 'change_required' }
+        const note = kind === 'change'
+            ? `[App note, not the user's words: the user was shown this build and asks for a change: "${change}". Make exactly that change — call your tools again for any figure you need — then go.]`
+            : kind === 'recheck'
+                ? `[App note, not the user's words: the user is about to confirm this build, made ${Math.max(1, Math.round((now() - (b.readyAt ?? b.since)) / 60_000))} minutes ago. Recheck it against the current price and chart — redraw anything that moved, keep what still holds — then go.]`
+                : carryLine()
+        const { readyAt: _r, ...rest } = b
+        await write(user, sessionId, agent, { ...state, build: { ...rest, status: 'building', carries: 0, ...(kind === 'change' ? { change } : {}) } })
+        runTurn({ user, sessionId, agent, text: note, input: {}, origin: 'opening', turnId: `build_${b.id}_${kind}_${now()}` })
+            .catch(err => logger.warn(LOG, `${kind} failed to start`, err.message))
+        logger.info(LOG, `build ${kind}`, { sessionId, agent, title: b.title })
+        return { ok: true }
+    }
+
+    return { start, startNext, carry, ready, settle, rework }
 }
 
 export const builds = makeBuilds()

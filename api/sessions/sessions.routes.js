@@ -2,7 +2,7 @@ import express         from 'express'
 import { log }         from '../../middleware/logger.middleware.js'
 import { requireAuth } from '../../middleware/auth.middleware.js'
 import { agentLimiter } from '../../middleware/rateLimit.middleware.js'
-import { getActiveSession, startNewSession, listSessions, getSessionMessages, postSessionTurn, editInSession, continueSession, actInSession, editSessionState, deleteSession, resumeSession, setSessionMode, answerSessionQuestions } from './sessions.controller.js'
+import { getActiveSession, startNewSession, listSessions, getSessionMessages, postSessionTurn, editInSession, continueSession, actInSession, editSessionState, deleteSession, resumeSession, setSessionMode, answerSessionQuestions, reworkSessionBuild } from './sessions.controller.js'
 
 const router = express.Router()
 
@@ -29,5 +29,7 @@ router.patch('/:id/state',   log, editSessionState)
 router.post('/:id/mode',     log, setSessionMode)
 // A builder's question card answered (step 4) — runs the builder's turn: the same model budget as a turn.
 router.post('/:id/answers',  agentLimiter, log, answerSessionQuestions)
+// A build sent back to work — Change / Retry / Recheck (step 6). Runs the builder's turn: the model budget.
+router.post('/:id/build',    agentLimiter, log, reworkSessionBuild)
 
 export const sessionsRoutes = router

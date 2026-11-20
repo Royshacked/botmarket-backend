@@ -191,6 +191,18 @@ driven 2026-11-20: built in the background, Axl answering meanwhile, ready annou
 - `failed` (error, timeout, a restart — `runner.sweep` today posts "I was interrupted"): the pane shows Failed + Retry; a
   toast.
 
+**BUILT 2026-11-20 (step 6).** `builds.rework` (change / retry / recheck → back to the background, carries reset) behind
+`POST /api/sessions/:id/build`; Dismiss is the pipe's `discard`, which now starts the queued build. FE: the build bar above
+the prompt box (ready → "Watch summary"; failed → "Retry") and `BuildSummary` — the builder's reasoning (its last build
+reply) and the live trade chart, Confirm (the trader's `generateArmed` = save and arm, as the old go; a book's
+`generate`), Change (the user's words → rebuilt in the background → a new summary), Dismiss (asked once). A summary older
+than 30 min offers "Recheck it" first (M14), "Confirm as is" beside it. A trade built in the background is shown in its
+summary, not at the end of the thread. Found on the drive and fixed: after a Change the trader said "press Update" rather
+than going — a build that stops on a statement with a GENERATABLE draft is now READY, go or no go (`builds.generatable`).
+Driven: ready → Watch summary (reasoning + chart) → Change → back to the background. The rebuilt-ready → Confirm half of the
+drive (`scripts/drive-build-summary.mjs`) was stopped twice by the machine running low on memory — still to drive. The
+`public/` bundle is NOT rebuilt for steps 5b-fixes/6 (memory).
+
 ### 4.5 The analyst
 
 "Research MSFT" → Analyst mode → no questions → the build is the existing headless research run (`researchRun`,

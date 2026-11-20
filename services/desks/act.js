@@ -24,6 +24,7 @@ import { endedChain } from '../chain/rules.js'
 import { canSpeak } from './sessionTurn.js'
 import { sealing as defaultSealing, sealLabel } from './seal.js'
 import { withSessionLock } from './turnLock.js'
+import { builds as defaultBuilds } from './builds.js'
 import { agentForKind } from './registry.js'
 import { keepMarkers } from './markers.js'
 import { logger } from '../logger.service.js'
@@ -35,7 +36,7 @@ const ACTION_NAME = /^[a-zA-Z]{1,40}$/
 const HELD = Symbol('held')
 const WHERE = { setup: ' to your Setups', portfolio: ' to your Portfolios', scan: ' to your Scans', coverage: ' to Coverage', industry_view: ' to the house views' }
 
-export function makeAct({ sessions = sessionService, desks = DESK_DEFS, sealing = defaultSealing, lock = withSessionLock } = {}) {
+export function makeAct({ sessions = sessionService, desks = DESK_DEFS, sealing = defaultSealing, lock = withSessionLock, builds = defaultBuilds } = {}) {
 
     /** The session, the desk, the speaker rule and the revision every press passes first (`rev: HELD` skips the
      *  revision: the caller holds the lock and acts on the state as it is now — the chain runner's go). */
@@ -125,6 +126,8 @@ export function makeAct({ sessions = sessionService, desks = DESK_DEFS, sealing 
             const kept = typeof opened.desk.cleanTable === 'function' ? opened.desk.cleanTable(state) : null
             await sessions.setAgentState({ sessionId, userId: user._id, agent, state: kept })
             await sealing.putAside({ userId: user._id, sessionId, agent })
+            // A build dismissed frees the slot: the next queued build starts (modes-and-builders.md M10, step 6).
+            if (state.build) await builds.startNext({ user, sessionId }).catch(() => {})
             return { result: {}, rev: await _revNow({ user, sessionId, agent }) }
         }
         if (typeof handler !== 'function') return { reason: 'no_such_action' }

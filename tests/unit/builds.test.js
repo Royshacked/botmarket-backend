@@ -184,3 +184,57 @@ test("a build's go that could not be generated yet is carried on with what is mi
     assert.deepEqual(readied, [])
     assert.match(carried[0], /still needs quantity on pullback/)
 })
+
+test("the summary's Change, a failed build's Retry, a stale one's Recheck send the build back to work (step 6)", async () => {
+    const { sessions, builds, turns } = rig()
+    const s = await sessions.getActive({ userId: 'u1' })
+    const put = (status) => sessions.setAgentState({ sessionId: s.sessionId, userId: 'u1', agent: 'mentor', state: { draft: { asset: 'AMD' }, build: { id: 'b1', status, title: 'AMD trade', since: 1, readyAt: Date.now() - 45 * 60_000, carries: 3 } } })
+    await put('ready')
+    assert.deepEqual(await builds.rework({ user, sessionId: s.sessionId, agent: 'mentor', kind: 'change', text: 'a tighter stop' }), { ok: true })
+    let b = (await st(sessions, s)).mentor.build
+    assert.deepEqual([b.status, b.carries, b.readyAt, b.change], ['building', 0, undefined, 'a tighter stop'])
+    assert.match(turns.at(-1).text, /asks for a change: "a tighter stop"\. Make exactly that change/)
+    assert.equal(turns.at(-1).origin, 'opening')
+
+    await put('ready')
+    await builds.rework({ user, sessionId: s.sessionId, agent: 'mentor', kind: 'recheck' })
+    assert.match(turns.at(-1).text, /made 45 minutes ago\. Recheck it against the current price/)
+    await put('failed')
+    await builds.rework({ user, sessionId: s.sessionId, agent: 'mentor', kind: 'retry' })
+    assert.match(turns.at(-1).text, /Carry on building/)
+
+    await put('building')
+    assert.equal((await builds.rework({ user, sessionId: s.sessionId, agent: 'mentor', kind: 'change', text: 'x' })).reason, 'wrong_status')
+    await put('ready')
+    assert.equal((await builds.rework({ user, sessionId: s.sessionId, agent: 'mentor', kind: 'change', text: ' ' })).reason, 'change_required')
+    assert.equal((await builds.rework({ user, sessionId: s.sessionId, agent: 'mentor', kind: 'nuke' })).reason, 'invalid_action')
+    assert.equal((await builds.rework({ user, sessionId: s.sessionId, agent: 'portfolio', kind: 'retry' })).reason, 'no_build')
+})
+
+test('Dismiss on a build frees the slot — the queued build starts (step 6, M10)', async () => {
+    const { makeAct } = await import('../../services/desks/act.js')
+    const { db, sessions } = rig()
+    const s = await sessions.getActive({ userId: 'u1' })
+    await sessions.setAgentState({ sessionId: s.sessionId, userId: 'u1', agent: 'mentor', state: { draft: { asset: 'AMD' }, build: { id: 'b1', status: 'ready', title: 'AMD trade', since: 1 } } })
+    const started = []
+    const sealing = { putAside: async () => {} }
+    const act = makeAct({ sessions, sealing, builds: { startNext: async (x) => { started.push(x.sessionId) } } })
+    void db
+    const out = await act.act({ user, sessionId: s.sessionId, agent: 'mentor', action: 'discard', args: {}, rev: (await sessions.get({ sessionId: s.sessionId, userId: 'u1' })).agentRev?.mentor ?? 0 })
+    assert.equal(out.reason, undefined, JSON.stringify(out))
+    assert.deepEqual(started, [s.sessionId])
+})
+
+test("a build that stopped on a statement with a draft that could be generated is READY — go or no go (after a Change, the drive)", async () => {
+    const { generatable } = await import('../../services/desks/builds.js')
+    assert.equal(generatable({ draft: {}, view: { readiness: { ready: true } } }), true)
+    assert.equal(generatable({ draft: {}, view: { readiness: { ready: false } } }), false)
+    assert.equal(generatable({ view: { readiness: { ready: true } } }), false, 'no draft, nothing to generate')
+    const { sessions, builds, turns } = rig()
+    const s = await sessions.getActive({ userId: 'u1' })
+    await sessions.setAgentState({ sessionId: s.sessionId, userId: 'u1', agent: 'mentor', state: { draft: { asset: 'AMD' }, view: { readiness: { ready: true } }, build: { id: 'b1', status: 'building', title: 'AMD trade', since: 1 } } })
+    await sessions.append({ sessionId: s.sessionId, userId: 'u1', message: { agent: 'mentor', role: 'assistant', content: 'Kept only scenario A. Press Update to save this edit.', ref: { build: 'b1' } } })
+    assert.equal(await builds.settle({ user, sessionId: s.sessionId, agent: 'mentor', out: { payload: {} } }), 'ready')
+    assert.equal((await st(sessions, s)).mentor.build.status, 'ready')
+    assert.equal(turns.length, 0, 'not carried on')
+})
