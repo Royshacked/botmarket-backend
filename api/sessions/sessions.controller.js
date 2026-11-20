@@ -12,6 +12,7 @@ import { lookupForEdit } from '../../services/desks/entityLookup.js'
 import { sealing } from '../../services/desks/seal.js'
 import { withSessionLock } from '../../services/desks/turnLock.js'
 import { deskAct } from '../../services/desks/act.js'
+import { modes } from '../../services/desks/modes.js'
 import { DESK_DEFS } from '../../services/desks/index.js'
 import { parseIdeaAccounts, parseClientTime } from '../_shared/parse.util.js'
 import { makeHandle } from '../_shared/handle.util.js'
@@ -147,6 +148,15 @@ export const editSessionState = handle('editSessionState', async (req, res) => {
     const out = await deskAct.editState({ user: req.user, sessionId: req.params.id, agent, edit, rev })
     if (out.reason) return sendReason(res, out.reason, { overrides: _reasonsFor(agent), fallback: 400, extra: out.extra ?? null })
     res.json({ ok: true, rev: out.rev })
+})
+
+// The mode picker on the prompt box (docs/design/modes-and-builders.md M4): General or a builder. Answered at once (202) —
+// it lands after any running turn (the session lock) and arrives on the channel as the floor.
+export const setSessionMode = handle('setSessionMode', async (req, res) => {
+    const out = await modes.setMode({ user: req.user, sessionId: req.params.id, mode: req.body?.mode })
+    if (out.reason) return sendReason(res, out.reason, { overrides: { invalid_mode: [400, 'mode must be general, mentor, portfolio or analyst'] } })
+    out.done.catch(() => {})
+    res.status(202).json({ mode: out.mode, floor: out.floor })
 })
 
 // History's resume (Roy, 2026-10-19): an archived session becomes the live one; the live one is put away.

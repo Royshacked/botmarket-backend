@@ -99,6 +99,16 @@ builds: [{ id, agent, title, status, answers, accounts, mainAccountId, questions
   model never decides who holds the floor.
 - **One build at a time** (M10): at most one `building`/`awaiting`; the next `queued` starts when it finishes.
 
+**BUILT 2026-11-20 (step 3, with step 7's picker pulled forward):** the mode is DERIVED from the floor, not stored —
+`services/desks/modes.js` `modeOf(floor)`: a builder on the floor is its mode, anyone else General (a stored copy would
+drift). `POST /api/sessions/:id/mode { mode }` (202) moves the floor under the session lock, so it lands after a running
+turn; a builder left with work keeps it parked in agentState. Axl's route to a builder switches the mode by itself (it
+moves the floor). FE: `ModePicker` INSIDE the prompt box on its left (ChatInputRow's `leading` slot — a row under the box
+sat differently on desktop, phone and the landing screen), short labels on the chip, the full ones in a menu that opens
+upward; it replaced "Ask something else". The `builds` records move to steps 4–5, where they first do anything.
+Driven (`scripts/drive-mode-picker.mjs`): General → Trader → General; "I'd like to build a swing trade on NVDA" switched
+it to Trader by itself; the menu fits at 390px.
+
 ### 4.2 Questions (M5, M6)
 
 A question card: `{ id, header, question, options: [{ label, description }], multiSelect, other: true, default? }` — the

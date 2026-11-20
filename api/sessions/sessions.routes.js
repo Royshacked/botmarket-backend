@@ -2,7 +2,7 @@ import express         from 'express'
 import { log }         from '../../middleware/logger.middleware.js'
 import { requireAuth } from '../../middleware/auth.middleware.js'
 import { agentLimiter } from '../../middleware/rateLimit.middleware.js'
-import { getActiveSession, startNewSession, listSessions, getSessionMessages, postSessionTurn, editInSession, continueSession, actInSession, editSessionState, deleteSession, resumeSession } from './sessions.controller.js'
+import { getActiveSession, startNewSession, listSessions, getSessionMessages, postSessionTurn, editInSession, continueSession, actInSession, editSessionState, deleteSession, resumeSession, setSessionMode } from './sessions.controller.js'
 
 const router = express.Router()
 
@@ -25,5 +25,7 @@ router.post('/:id/continue', agentLimiter, log, continueSession)
 // A desk's commit (Generate, Arm, Update…) and a direct edit of its work — no model call (plan phase 8).
 router.post('/:id/act',      log, actInSession)
 router.patch('/:id/state',   log, editSessionState)
+// The mode picker (modes-and-builders.md M4): General / the trader / the portfolio manager / the analyst. No model call.
+router.post('/:id/mode',     log, setSessionMode)
 
 export const sessionsRoutes = router
