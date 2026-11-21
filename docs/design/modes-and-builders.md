@@ -22,7 +22,7 @@ holds the conversation. Shaped on Claude Code: one main agent, subagents as tool
 | M2 | **Answering roles are subagents Axl calls**: the event analyst (Echo), the technical analyst (Proteus), the stock picker (Argus — reached only inside the trader's build, never by the user directly), and the analyst for a plain question. Their answer is shown **as written**, under "Axl · Event analyst", not paraphrased by Axl. |
 | M3 | **Builders are modes**: the trader (Mentor), the portfolio manager (Atlas), the analyst when building coverage (Prometheus). Code signal: the desk's `hasWork(state)`. |
 | M4 | **A mode picker on the prompt box** shows the mode ("General"); its menu: Trader / Portfolio manager / Analyst. Axl may switch the user himself when the prompt asks to build. |
-| M5 | **Questions up front, Claude-CLI style** — several questions on one card, options + "Other", submit. The trader and the portfolio manager ask; the analyst asks none. |
+| M5 | **Questions up front, Claude-CLI style** — several questions on one card, options + "Other", submit. The trader and the portfolio manager ask; the analyst asks too since 2026-11-21 (§4.2b). |
 | M6 | Asked up front: the **account** (a menu of the user's accounts), the scenarios (A / B / both), invalidation and redraw, and a **policy for the unexpected** — "decide for me" / "ask me". |
 | M7 | **The build runs in the background.** The mode goes back to General; the build's progress shows in the work pane; Axl chats meanwhile. |
 | M8 | **A question mid-build** (policy "ask me", or nothing covers it) pauses the build; the question pops above the chat box, with Edit. |
@@ -129,6 +129,20 @@ AskUserQuestion shape. Stored as a session row `kind: 'questions'`, `ref: { buil
 | If the stop breaks the thesis, or the trade runs away — redraw / close / ask me | Constraints (Other) |
 | Anything unexpected — decide for me / ask me | Account(s) |
 | | Anything unexpected — decide for me / ask me |
+
+### 4.2b The analyst's card (Roy, 2026-11-21)
+
+"When choosing analyst mode — open the questions window like in trader and portfolio → the user clicks a name → if the
+name exists the user decides whether to update → after send we are back in Axl's chat, without remnants of the analyst
+chat or the user's choices."
+
+- **Which company?** — the name the build came with (a route's) offered and picked, any ticker typed.
+- **Update it?** — shown ONLY when the name is in the house's book: the card carries the book's symbols
+  (`when: { id: 'name', in: [...] }`, `isShown` on both sides). Update it / Leave it as is.
+- **Sent** (asking.answerAnalyst): the card is marked answered AND `hidden` — nothing of it stays in the chat — and the
+  floor goes back to Axl. A name not covered → a new coverage build in the background (`<SYM> coverage`); covered +
+  Update it → its REVISION build (the item's own edit, without the reopened line); Leave it as is → nothing runs.
+- Typing instead of answering still sets the card aside and starts the build in words (sessionTurn's analyst mode).
 
 The builder may ADD questions it needs from data (a `<questions>` block, validated against the schema).
 Analyst: no questions — the symbol comes from the request.

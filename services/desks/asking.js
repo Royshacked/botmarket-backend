@@ -12,10 +12,23 @@
 import { sessionService } from '../session.service.js'
 import { userProfileService } from '../userProfile.service.js'
 import { withSessionLock } from './turnLock.js'
-import { questionsFor, checkAnswers, answersText } from './questions.js'
+import { questionsFor, checkAnswers, answersText, nameOf, SYMBOL_RE, UPDATE_IT } from './questions.js'
 import { builds as defaultBuilds, buildTitle } from './builds.js'
 import { candidates as defaultCandidates, pickQuestion, FIND_ONE } from './candidates.js'
+import { coverageService } from '../../api/analyst/coverage.service.js'
 import { logger } from '../logger.service.js'
+
+/** A new coverage's first turn (the analyst's card answered with a name the house does not cover). Pure. */
+export function coverNote(symbol) {
+    return `Cover ${symbol}: write the thesis and the price target. If you cannot defend a number, say so in one line that starts with "PASS —" and why.`
+}
+
+// The analyst's desk (stateFromEntity, the revision's note), imported when a revision starts — the desk pulls in the
+// analyst's agent, which this module (imported by sessionTurn and modes) has no need to load up front.
+const defaultAnalyst = async () => {
+    const m = await import('./analyst.desk.js')
+    return { stateFromEntity: m.analystDesk.stateFromEntity, revisionNote: m.revisionNote, revisionTitle: m.revisionTitle }
+}
 
 const LOG = '[asking]'
 export const CARD_LINE = 'A few questions before I build it.'
@@ -30,7 +43,40 @@ const sameName = (ticker, a) => String(a?.other || a?.choice || '').toUpperCase(
 // The turn path, imported when an answer runs its turn: turns.js → … → sessionTurn → here would otherwise be a cycle.
 const defaultRunTurn = async (args) => (await import('./turns.js')).runQueued(args)
 
-export function makeAsking({ sessions = sessionService, profiles = userProfileService, lock = withSessionLock, runTurn = defaultRunTurn, builds = defaultBuilds, finder = defaultCandidates } = {}) {
+export function makeAsking({ sessions = sessionService, profiles = userProfileService, lock = withSessionLock, runTurn = defaultRunTurn, builds = defaultBuilds, finder = defaultCandidates, coverage = coverageService, analyst = defaultAnalyst } = {}) {
+    /**
+     * THE ANALYST'S CARD ANSWERED (Roy, 2026-11-21) — inside the lock. The card leaves nothing in the chat (hidden), the
+     * floor goes back to Axl, and: a name the house does not cover → a new coverage build in the background; a covered
+     * one with "Update it" → its revision build (the item's own edit, without the reopened line in the chat); "Leave it
+     * as is" → nothing runs.
+     */
+    async function answerAnalyst({ user, sessionId, card, state, checked }) {
+        const sym = nameOf(checked.answers.name)
+        if (!SYMBOL_RE.test(sym)) return { reason: 'bad_symbol' }
+        const marked = await sessions.updateRef({ sessionId, userId: user._id, seq: card.seq, ref: { ...card.ref, state: 'answered', answers: checked.answers, hidden: true }, match: { 'ref.state': 'open' } })
+        if (marked.reason) return { reason: 'already_answered' }
+        const { asking: _answered, ...rest } = state ?? {}
+        const agent = 'analyst'
+        // Covered NOW (the card's list was the book when it was posted): the live doc decides.
+        const doc = await coverage.getCoverageBySymbol(sym).catch(() => null)
+        if (doc && checked.answers.update?.choice !== UPDATE_IT) {
+            await sessions.setAgentState({ sessionId, userId: user._id, agent, state: rest })
+            await sessions.setFloor({ sessionId, userId: user._id, agent: 'axl' })
+            return { agent, none: true }
+        }
+        if (doc) {
+            const desk = await analyst()
+            const editState = { ...desk.stateFromEntity(doc), editing: { kind: 'coverage', entityId: String(doc.id) } }
+            const started = await builds.begin({ user, sessionId, agent, state: editState, title: desk.revisionTitle(sym), text: desk.revisionNote(sym) })
+            return { agent, began: true, build: started.build }
+        }
+        const text = coverNote(sym)
+        const input = { answered: true }
+        const started = await builds.start({ user, sessionId, agent, state: { ...rest, asked: true, active_symbol: sym }, title: `${sym} coverage`, text, input })
+        await sessions.setFloor({ sessionId, userId: user._id, agent: 'axl' })
+        return { agent, text, input, run: started.run, build: started.build, picking: false }
+    }
+
     /**
      * "Find one for me" (M18, step 8): the stock picker's candidates, then a card to pick from — the build waits on it.
      * Fire-and-forget after the answer; the card is posted under the lock.
@@ -57,8 +103,10 @@ export function makeAsking({ sessions = sessionService, profiles = userProfileSe
     async function post({ user, sessionId, agent, state = null, input = {} }) {
         const profile = await profiles.read(user._id).catch(() => null)
         // The name the build came with: a hand-off's seed, the route's ticker (runner.followRoute), the desk's own.
-        const symbol  = input.seed?.ticker ?? input.routeSymbol ?? state?.active_asset ?? null
-        const questions = questionsFor(agent, { symbol, size: profile?.size ?? null })
+        const symbol  = input.seed?.ticker ?? input.routeSymbol ?? state?.active_asset ?? state?.active_symbol ?? null
+        // The analyst's card asks "update it?" only for a name in the book — so it carries the book's names.
+        const covered = agent === 'analyst' ? await coverage.listSymbols().catch(() => []) : []
+        const questions = questionsFor(agent, { symbol, size: profile?.size ?? null, covered })
         if (!questions) return { reason: 'no_questions' }
         const row = await sessions.append({ sessionId, userId: user._id, message: {
             agent, role: 'assistant', kind: 'questions', content: CARD_LINE, ref: { state: 'open', questions },
@@ -110,6 +158,7 @@ export function makeAsking({ sessions = sessionService, profiles = userProfileSe
             if (state?.asking?.seq !== card.seq) return { reason: 'stale_card' }
             const checked = checkAnswers(card.ref.questions, answers)
             if (!checked.ok) return { reason: checked.reason }
+            if (agent === 'analyst') return answerAnalyst({ user, sessionId, card, state, checked })
             // The accounts the turn binds to are the ones the user picked — and only those.
             const picked = Object.values(checked.answers).flatMap(a => a.accountIds ?? [])
             const chosen = (Array.isArray(accounts) ? accounts : []).filter(a => a && picked.includes(String(a.id)))
@@ -138,6 +187,8 @@ export function makeAsking({ sessions = sessionService, profiles = userProfileSe
         })
         if (ready.reason) return ready
         if (ready.mid) return { agent: ready.agent, resumed: true }
+        if (ready.none) return { agent: ready.agent, none: true }
+        if (ready.began) return { agent: ready.agent, build: ready.build?.id ?? null, revision: true }
         if (!ready.run) return { agent: ready.agent, queued: true, build: ready.build.id }
         if (ready.picking) {
             pickJob({ user, sessionId, agent: ready.agent }).catch(() => {})

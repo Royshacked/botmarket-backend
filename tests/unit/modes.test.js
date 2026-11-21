@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { memDb } from '../helpers/memDb.js'
 import { makeSessionService } from '../../services/session.service.js'
 import { makeModes, modeOf, MODES } from '../../services/desks/modes.js'
+import { makeAsking } from '../../services/desks/asking.js'
 import { withSessionLock, laneKey } from '../../services/desks/turnLock.js'
 
 // The chat's mode (docs/design/modes-and-builders.md M3/M4, step 3): General or a builder — derived from the floor.
@@ -18,7 +19,9 @@ test('the mode a floor means: a builder on the floor is its mode, anyone else is
 function rig() {
     const { db } = memDb()
     const sessions = makeSessionService({ getDb: async () => db })
-    return { sessions, modes: makeModes({ sessions }) }
+    // The analyst's card (2026-11-21) reads the coverage book — a stub, never the real store.
+    const asks = makeAsking({ sessions, profiles: { read: async () => null }, runTurn: async () => {}, coverage: { listSymbols: async () => [], getCoverageBySymbol: async () => null } })
+    return { sessions, modes: makeModes({ sessions, asks }) }
 }
 
 test('picking a mode moves the floor — General is Axl; a builder keeps its parked work when the user leaves and comes back', async () => {

@@ -187,6 +187,7 @@ const ANSWER_REASONS = (reason) => {
     if (reason === 'already_answered') return [409, 'Those questions were already answered']
     if (reason === 'stale_card') return [409, 'That card is no longer the open one']
     if (reason === 'unknown_account') return [400, 'Pick an account from this workspace']
+    if (reason === 'bad_symbol') return [400, 'That is not a ticker — type one like TSLA']
     if (String(reason).startsWith('unanswered:')) return [400, 'Answer every question first']
     if (String(reason).startsWith('one_account:')) return [400, 'Pick one account']
     if (reason === 'invalid_answers') return [400, 'invalid answers']

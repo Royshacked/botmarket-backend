@@ -387,6 +387,8 @@ test('every role reads ABOUT THE USER: what they told any role, the size they la
     const turn = makeSessionTurn({ sessions, contexts, desks: { analyst: stub('analyst'), mentor: stub('mentor') }, experience: async () => null, profiles, summarize: async () => 'S', buildsSvc })
     const s = await sessions.getActive({ userId: 'u1' })
     await sessions.setAgentState({ sessionId: s.sessionId, userId: 'u1', agent: 'mentor', state: { draft: { asset: 'nvda', direction: 'LONG' } } })
+    // Its card set aside (the user typed instead): the message starts the build in words.
+    await sessions.setAgentState({ sessionId: s.sessionId, userId: 'u1', agent: 'analyst', state: { asked: true } })
     await turn({ user, sessionId: s.sessionId, agent: 'analyst', text: 'is it cheap?' })
     const about = seen[0].common.audience.about
     assert.match(about, /^ABOUT THE USER/)

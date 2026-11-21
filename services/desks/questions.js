@@ -13,8 +13,29 @@
 
 import { sizeWords } from '../userProfile.service.js'
 
-/** The builders that ask up front. The analyst asks nothing (M5). */
-export const ASKS = Object.freeze(['mentor', 'portfolio'])
+/**
+ * The builders that ask up front. The analyst asked nothing (M5) until Roy, 2026-11-21: "when choosing analyst mode — open
+ * the questions window like in trader and portfolio; the user clicks a name; if the name exists the user decides whether
+ * to update; after send we are back in Axl's chat, without remnants of the analyst chat or the user's choices".
+ */
+export const ASKS = Object.freeze(['mentor', 'portfolio', 'analyst'])
+
+/** A ticker as the analyst's card takes it. */
+export const SYMBOL_RE = /^[A-Z][A-Z0-9.-]{0,9}$/
+/** The analyst's answer to "update it?" that re-models the coverage. */
+export const UPDATE_IT = 'Update it'
+
+/** The name a card's answer gives (typed "Other" wins over a choice), upper-cased. */
+export const nameOf = (a) => String(a?.other || a?.choice || '').toUpperCase().trim()
+
+/**
+ * Is a question shown? One with `when: { id, in }` only while the answer to `id` names one of `in` (the analyst's "update
+ * it?" — only for a name the house covers already). The client shows it by the same rule.
+ */
+export function isShown(q, answers) {
+    if (!q?.when) return true
+    return (q.when.in ?? []).includes(nameOf(answers?.[q.when.id]))
+}
 
 const SURPRISES = {
     id: 'surprises', header: 'Surprises', question: 'When something comes up mid-build that these answers do not cover?', multiSelect: false, other: false,
@@ -108,10 +129,35 @@ export function portfolioQuestions() {
     ]
 }
 
+/**
+ * The analyst's card: the company, and — only when the house covers it already (`covered`, every symbol in the book) —
+ * whether to update it. `symbol`: the name the build came with (a route's), offered and picked already.
+ */
+export function analystQuestions({ symbol = null, covered = [] } = {}) {
+    const sym = String(symbol ?? '').toUpperCase().trim()
+    const book = [...new Set((covered ?? []).map(s => String(s).toUpperCase().trim()).filter(Boolean))]
+    return [
+        {
+            id: 'name', header: 'Company', question: 'Which company?', multiSelect: false, other: true,
+            ...(sym ? { default: sym } : {}),
+            options: sym ? [{ label: sym, description: book.includes(sym) ? 'Covered already' : 'The name you came with' }] : [],
+        },
+        {
+            id: 'update', header: 'Update', question: 'We cover it already — update the coverage?', multiSelect: false, other: false,
+            when: { id: 'name', in: book },
+            options: [
+                { label: UPDATE_IT, description: "Re-model the thesis and the target on today's data" },
+                { label: 'Leave it as is', description: 'Nothing runs — the coverage stays as it is' },
+            ],
+        },
+    ]
+}
+
 /** The card for a builder, or null when it asks nothing. */
 export function questionsFor(agent, ctx = {}) {
     if (agent === 'mentor') return traderQuestions(ctx)
     if (agent === 'portfolio') return portfolioQuestions(ctx)
+    if (agent === 'analyst') return analystQuestions(ctx)
     return null
 }
 
@@ -134,6 +180,7 @@ export function needsQuestions(agent, state, origin, input = null) {
     if (s.asked && origin === 'user' && !input?.seed?.ticker) return false
     if (agent === 'mentor') return !s.draft
     if (agent === 'portfolio') return !s.mandate && !s.portfolioId && !s.reviewMode && !s.adoptDraftId && !s.pendingPlan && !s.reviewUpdate
+    if (agent === 'analyst') return !s.draft
     return false
 }
 
@@ -147,6 +194,8 @@ export function checkAnswers(questions, raw) {
     if (!Array.isArray(questions) || !raw || typeof raw !== 'object') return { ok: false, reason: 'invalid_answers' }
     const out = {}
     for (const q of questions) {
+        // A question not shown for these answers (the analyst's "update it?" for a name not covered) is not asked.
+        if (!isShown(q, raw)) continue
         const a = raw[q.id] ?? {}
         if (q.kind === 'account') {
             const ids = (Array.isArray(a.accountIds) ? a.accountIds : a.accountId ? [a.accountId] : []).map(String).filter(Boolean).slice(0, 10)
@@ -176,7 +225,7 @@ function words(q, a) {
  * card (a route's opening, the first message), kept above the answers.
  */
 export function answersText(agent, questions, answers, opening = null) {
-    const lines = questions.map(q => `- ${q.question} ${words(q, answers[q.id] ?? {})}`)
+    const lines = questions.filter(q => isShown(q, answers)).map(q => `- ${q.question} ${words(q, answers[q.id] ?? {})}`)
     const decide = answers.surprises?.choice === 'Decide for me'
     const tail = agent === 'mentor'
         ? `${decide ? 'Take it all the way: build it and generate it, telling me what you chose.' : 'Build it, and ask me before any choice these answers do not settle.'} If there is no trade to build, say so in one line that starts with "No trade:" and why.`
