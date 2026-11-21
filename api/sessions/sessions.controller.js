@@ -16,6 +16,7 @@ import { modes } from '../../services/desks/modes.js'
 import { asking } from '../../services/desks/asking.js'
 import { builds, BUILDERS } from '../../services/desks/builds.js'
 import { DESK_DEFS } from '../../services/desks/index.js'
+import { revisionNote, revisionTitle } from '../../services/desks/analyst.desk.js'
 import { parseIdeaAccounts, parseClientTime } from '../_shared/parse.util.js'
 import { makeHandle } from '../_shared/handle.util.js'
 import { httpError }  from '../../services/httpError.util.js'
@@ -98,6 +99,12 @@ export const editInSession = handle('editInSession', async (req, res) => {
             const session = await sessionService.get({ sessionId: req.params.id, userId: req.user._id })
             await builds.begin({ user: req.user, sessionId: req.params.id, agent: 'portfolio', state: session?.agentState?.portfolio ?? null,
                 title: `${name || found.doc?.portfolioName || 'the book'} review`, text: REVIEW_NOTE })
+        }
+        // A thesis reopened is a REVISION, run in the background too (Roy, 2026-11-21) — the same as Axl's <edit> (chain/runner).
+        if (!opened.reason && kind === 'coverage') {
+            const session = await sessionService.get({ sessionId: req.params.id, userId: req.user._id })
+            await builds.begin({ user: req.user, sessionId: req.params.id, agent: 'analyst', state: session?.agentState?.analyst ?? null,
+                title: revisionTitle(found.doc?.symbol), text: revisionNote(found.doc?.symbol) })
         }
         return opened
     })

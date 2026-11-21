@@ -68,20 +68,9 @@ const LIST_LINES = Object.freeze({
     positions: "Here are your positions.", board: "Here's the forecast board.", research: "Here's the research queue.",
 })
 
-const TIMEFRAME_WORD = Object.freeze({ day: 'daily', week: 'weekly', month: 'monthly', '1day': 'daily', '1week': 'weekly' })
-
-/**
- * A reply that was ONLY a chart still gets a row: one plain line naming it ("Here's the NVDA daily chart."), so the chart
- * comes back on a reload and the agent's memory knows which chart it already showed. Null when there is no chart. Exported
- * for tests.
- */
-export function chartLine(chart) {
-    const ticker = String(chart?.ticker ?? '').trim()
-    if (!ticker) return null
-    const tf = String(chart.timeframe ?? '').trim()
-    const word = TIMEFRAME_WORD[tf] ?? (tf ? tf : '')
-    return `Here's the ${ticker}${word ? ` ${word}` : ''} chart.`
-}
+// chartLine moved to its own leaf module (desks/chartLine.js) — re-exported here for its callers.
+import { chartLine } from './chartLine.js'
+export { chartLine }
 
 /**
  * A reply that was ONLY a `<show>` still offers its button, so it gets a row — one plain line saying what it

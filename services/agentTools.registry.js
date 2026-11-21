@@ -301,8 +301,8 @@ export const TOOL_SCHEMAS = {
         "properties": {
             "specialist": {
                 "type": "string",
-                "enum": ["event_analyst", "technical_analyst"],
-                "description": "Who answers: event_analyst (who an event reaches through the supply chain) or technical_analyst (how a stock's price behaves, measured)."
+                "enum": ["event_analyst", "technical_analyst", "research_analyst"],
+                "description": "Who answers: event_analyst (who an event reaches through the supply chain), technical_analyst (how a stock's price behaves, measured) or research_analyst (a company as an investment: the rating, the target and why, the case for and against)."
             },
             "question": {
                 "type": "string",
@@ -746,8 +746,17 @@ export const TOOL_SCHEMAS = {
         }
     },
     // Axl's read of today's hotlist (services/tools/hotlist.tools.js; Roy, 2026-10-22).
-    // Axl's read of the analyst's thesis on ONE name (services/tools/coverage.tools.js — Roy, 2026-11-20).
-    get_coverage_view: {
+    // The monitors' view of ONE of the user's items (services/tools/itemStatus.tools.js — Roy, 2026-11-21).
+    get_item_status: {
+        "type": "object",
+        "properties": {
+            "kind": { "type": "string", "enum": ["setup", "book"], "description": "setup or book, as get_watched_items tags it" },
+            "id":   { "type": "string", "description": "the id get_watched_items prints after the colon" }
+        },
+        "required": ["kind", "id"]
+    },
+    // Axl's read of the house's work on ONE company (services/tools/companyView.tools.js — Roy, 2026-11-21).
+    get_company_view: {
         "type": "object",
         "properties": {
             "symbol": { "type": "string", "description": "one ticker, e.g. NVDA" }

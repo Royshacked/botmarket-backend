@@ -12,7 +12,7 @@ export const axlDesk = {
     run: ({ user, input, signal, emit, common, sessionId }) => (input?.brief
         ? briefTurn({ emit, signal })
         : axlAgentService.chatStream({
-            ...common, isAdmin: user.role === 'admin',
+            ...common, isAdmin: user.role === 'admin', sessionId: sessionId ?? null,
             // The answering roles, called as a tool (modes-and-builders.md §3) — bound to this session and this turn's stream.
             askSpecialist: sessionId ? defaultAskSpecialist({ user, sessionId, emit, signal, audience: common.audience }) : null,
             specialistHint: specialistHint(input?.via),

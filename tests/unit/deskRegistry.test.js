@@ -27,9 +27,9 @@ test('the routable desks, IN PROMPT ORDER — research, assist, portfolio, scan,
         { research: null, assist: null, portfolio: null, scan: ['mentor'], technicals: ['mentor'], events: [] })
 })
 
-test('the subagents — the roles Axl ASKS (modes-and-builders.md M2): the event analyst and the technical analyst', async () => {
+test('the roles Axl ASKS (modes-and-builders.md M2): the event and technical analysts (subagents) and the analyst (a builder, askable 2026-11-21)', async () => {
     const { SUBAGENTS, isSubagent } = await import('../../services/desks/registry.js')
-    assert.deepEqual({ ...SUBAGENTS }, { technical_analyst: 'proteus', event_analyst: 'echo' })
+    assert.deepEqual({ ...SUBAGENTS }, { research_analyst: 'analyst', technical_analyst: 'proteus', event_analyst: 'echo' })
     for (const a of ['echo', 'proteus']) assert.equal(isSubagent(a), true, a)
     for (const a of ['axl', 'mentor', 'portfolio', 'analyst', 'scanner', 'strategy', 'nobody']) assert.equal(isSubagent(a), false, a)
 })

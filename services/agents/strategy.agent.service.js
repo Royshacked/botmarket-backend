@@ -172,6 +172,16 @@ function _forPrompt({ monitor, revisions, ...rest }) {   // eslint-disable-line 
     return { ...rest, next_review: monitor?.next_check_at ?? null, revisions: (revisions ?? []).slice(0, PROMPT_REVISIONS) }
 }
 
+/**
+ * The industry strategist's READ tools, shared with Axl (docs/design/axl-one-voice.md §7, Roy 2026-11-21: "user might ask
+ * about industries or the general market — Pythia's input should be available to Axl"). One pipe: the same handlers; each
+ * agent writes its own descriptions. Unbound — the house's industry work is the same for every reader.
+ */
+export const INDUSTRY_READ_TOOLS = Object.freeze(['get_industry_news', 'get_industry_moves', 'get_industry_money', 'get_capex_leaders', 'list_themes', 'get_theme', 'get_geopolitics'])
+export function makeIndustryReadHandlers() {
+    return Object.fromEntries(INDUSTRY_READ_TOOLS.map(n => [n, TOOL_HANDLERS[n]]))
+}
+
 export const strategyAgentService = { chatStream }
 
 async function chatStream({

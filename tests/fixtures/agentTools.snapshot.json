@@ -3435,7 +3435,7 @@
         },
         {
             "name": "ask_specialist",
-            "description": "Ask the event analyst or the technical analyst, who answers the user DIRECTLY: its reply goes on screen as written, under its role. event_analyst — who an EVENT reaches through the supply chain (suppliers, customers, infrastructure, substitutes), the house's events, a map's scores and flags, a follow-up on a map. technical_analyst — how ONE stock's price BEHAVES, measured from its candles: what it respects technically (moving averages, VWAP, order blocks), false breaks, ATR, day trade or swing, what its chart shows. Write the question to stand alone (the specialist sees none of this conversation, only its own earlier answers), and name every company with its ticker AND name. After it answers, add at most one short line, or nothing — never repeat it.",
+            "description": "Ask the analyst, the event analyst or the technical analyst — its answer comes back to YOU as material (nothing of it is on screen), and you write the reply in your own voice, its findings said as the house's. research_analyst — a deeper question on a company's case the coverage in get_company_view does not answer: a margin trend, a valuation argument, the latest print against the thesis. event_analyst — who a NEW EVENT reaches through the supply chain (suppliers, customers, infrastructure, substitutes), the house's events, a map's scores and flags, a follow-up on a map. technical_analyst — a chart question the measured profile in get_company_view does not answer: what patterns or order blocks its chart shows now. Write the question to stand alone (the specialist sees none of this conversation, only its own earlier answers), and name every company with its ticker AND name.",
             "input_schema": {
                 "type": "object",
                 "properties": {
@@ -3443,9 +3443,10 @@
                         "type": "string",
                         "enum": [
                             "event_analyst",
-                            "technical_analyst"
+                            "technical_analyst",
+                            "research_analyst"
                         ],
-                        "description": "Who answers: event_analyst (who an event reaches through the supply chain) or technical_analyst (how a stock's price behaves, measured)."
+                        "description": "Who answers: event_analyst (who an event reaches through the supply chain), technical_analyst (how a stock's price behaves, measured) or research_analyst (a company as an investment: the rating, the target and why, the case for and against)."
                     },
                     "question": {
                         "type": "string",
@@ -3483,8 +3484,8 @@
             }
         },
         {
-            "name": "get_coverage_view",
-            "description": "The analyst's standing COVERAGE thesis on ONE stock, if the house covers it: the rating, our price target and its date, the thesis, conviction, the bear / base / bull case, the next catalysts, the kill criteria, and when it was last revised. Use it whenever the user asks what the analyst — or the house, or \"you\" — THINKS of a name (\"how is NVDA for the long term?\", \"is AMD still a buy?\", \"what's our view on TSLA?\"): answer from it, attributed and dated. Not covered → say so, and offer the analyst's research (a route) only if they want it. Updating a thesis is the analyst's desk, not this tool.",
+            "name": "get_company_view",
+            "description": "The HOUSE'S WORK on one company: the analyst's coverage (rating, our target and why, the thesis, bull/bear, catalysts, what breaks it, the revisions) with a verdict — VALID, STALE, WITHDRAWN or none; our technical profile, measured from its candles (what holds, ATR, false breaks, day trade or swing); and the events we mapped that reach it. Call it for a VIEW on a company — is it a buy, how is it for the long term, the risks, the valuation, how it trades, is it exposed to an event — not for \"what happened / why is it down\" (that is the news). A missing or invalid coverage is built or re-modelled in the background by this call — the result says so; tell the user, and a line comes to the chat when it lands. Answer in your own voice: each part said as the house's, dated; your own reading (news, web, knowledge) as yours.",
             "input_schema": {
                 "type": "object",
                 "properties": {
@@ -3495,6 +3496,124 @@
                 },
                 "required": [
                     "symbol"
+                ]
+            }
+        },
+        {
+            "name": "get_industry_news",
+            "description": "The last month's news on one sub-industry's largest companies, dated and attributed. Pass `industry` (a GICS sub-industry name or code — get_industry_views gives a name's). For \"what's going on in semis\".",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "industry": {
+                        "type": "string",
+                        "description": "A GICS sub-industry: its 8-digit code or its exact name."
+                    }
+                },
+                "required": [
+                    "industry"
+                ]
+            }
+        },
+        {
+            "name": "get_industry_moves",
+            "description": "How far one sub-industry has MOVED: its basket against SPY over 12 and 24 months and the last 1 and 3, how stretched it is, the HYPE flag, the market regime. Measured facts, not a forecast.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "industry": {
+                        "type": "string",
+                        "description": "A GICS sub-industry: its 8-digit code or its exact name."
+                    }
+                },
+                "required": [
+                    "industry"
+                ]
+            }
+        },
+        {
+            "name": "get_industry_money",
+            "description": "Where the money goes in one sub-industry: its companies' capex, buybacks, dividends and acquisitions (this year against last), insiders buying, funds' crowding, government contracts. Facts to state; capex is the suppliers' revenue.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "industry": {
+                        "type": "string",
+                        "description": "A GICS sub-industry: its 8-digit code or its exact name."
+                    }
+                },
+                "required": [
+                    "industry"
+                ]
+            }
+        },
+        {
+            "name": "get_capex_leaders",
+            "description": "Where corporate capex is rising and falling most across the whole market, by industry — follow the money to the industries it lands in. No arguments.",
+            "input_schema": {
+                "type": "object",
+                "properties": {}
+            }
+        },
+        {
+            "name": "list_themes",
+            "description": "The house's THEMES (the industry strategist's) — each with its thesis and its value chain of sub-industries. For \"what themes does the house follow\", or to find a theme's id.",
+            "input_schema": {
+                "type": "object",
+                "properties": {}
+            }
+        },
+        {
+            "name": "get_theme",
+            "description": "One house theme by its id (th_…): the thesis, the value chain link by link with why, how far each link has moved and where its companies put money.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "theme": {
+                        "type": "string",
+                        "description": "The theme's id, th_… (from list_themes)."
+                    }
+                },
+                "required": [
+                    "theme"
+                ]
+            }
+        },
+        {
+            "name": "get_geopolitics",
+            "description": "Geopolitical risk, MEASURED: the index of newspaper attention to geopolitical tension against its ten years, and the house's mapped risks (Taiwan Strait, US–China, the Gulf, the Red Sea, Russia–Ukraine…), elevated ones flagged; pass `industry` for the risks that touch it. Attention, not impact.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "industry": {
+                        "type": "string",
+                        "description": "Optional: a GICS sub-industry (8-digit code or exact name) for the risks touching it."
+                    }
+                }
+            }
+        },
+        {
+            "name": "get_item_status",
+            "description": "The MONITORS' view of ONE of the user's items, by the id get_watched_items prints ([setup:…] or [book:…]). A setup: the trade monitor's latest reads — what it looked at, its verdict, its own words, what it is WAITING FOR, the next check — and the live order state (awaiting the user's confirm, awaiting the market, filled). A book: what the portfolio monitor last checked and flagged, the review schedule, a review waiting on the user, and what the last review concluded. For \"how is my NVDA trade doing?\", \"why hasn't it entered?\", \"is my book OK?\", \"what's waiting for me?\". It is the LAST read, not a fresh one — say when it was. Say it as the monitor's, with the time.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "kind": {
+                        "type": "string",
+                        "enum": [
+                            "setup",
+                            "book"
+                        ],
+                        "description": "setup or book, as get_watched_items tags it"
+                    },
+                    "id": {
+                        "type": "string",
+                        "description": "the id get_watched_items prints after the colon"
+                    }
+                },
+                "required": [
+                    "kind",
+                    "id"
                 ]
             }
         }

@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { _parseAnalystResponse, _buildSystemPrompt, analystAgentService } from '../../services/agents/analyst.agent.service.js'
+import { _parseAnalystResponse, _buildSystemPrompt, analystAgentService, MODES } from '../../services/agents/analyst.agent.service.js'
 import { _resolveCoverageContext } from '../../services/desks/analyst.desk.js'
 import { sanitizeScanSeed } from '../../services/scanSeed.util.js'
 
@@ -205,4 +205,28 @@ test('system prompt: a short revision trail is shown whole', () => {
     const prompt = _buildSystemPrompt({ active_symbol: 'X', existing_coverage: { symbol: 'X', rating: 'buy', thesis: 't', revisions } })
     const text = prompt[1].text
     assert.ok(text.includes('only-recent') && text.includes('first'))
+})
+
+// ── ANSWER mode — a question Axl asks him (ask_specialist, Roy 2026-11-21) ──
+test('answer mode: the standing thesis framed as the answer\'s source (not "update mode"), the answer module cached, any <coverage> dropped', async () => {
+    let got = null
+    const thesis = { symbol: 'NVDA', rating: 'strong_buy', thesis: 'Blackwell sold out', revisions: [{ kind: 'remodel_pass', note: 'I withdraw the prior target' }] }
+    const result = await analystAgentService.chatStream({
+        messages: [{ role: 'user', content: 'How is NVDA for investment?' }],
+        chatState: { active_symbol: 'NVDA', existing_coverage: thesis, coverage_symbols: ['NVDA', 'AMD'] },
+        mode: MODES.ANSWER,
+        _run: async (args) => { got = args; return 'Strong buy on paper, but I withdrew the target. <coverage>{ "symbol": "nvda", "rating": "buy" }</coverage>' },
+        _venueSection: async () => '',
+    })
+    assert.equal(got.log, '[analystAgent-answer]', 'booked under its own ledger row')
+    assert.equal(got.systemPrompt.length, 3, 'spine + the answer module + the dynamic block')
+    assert.match(got.systemPrompt[1].text, /ANSWER MODE/)
+    assert.match(got.systemPrompt[1].text, /Read the revisions/)
+    assert.match(got.systemPrompt[2].text, /THE STANDING THESIS on NVDA — answer from it/)
+    assert.match(got.systemPrompt[2].text, /I withdraw the prior target/)
+    assert.doesNotMatch(got.systemPrompt[2].text, /update mode|do NOT start the research/)
+    assert.match(got.systemPrompt[2].text, /names the house covers: NVDA, AMD/)
+    assert.equal(result.coverage, undefined)
+    assert.equal(result.phase, null)
+    assert.match(result.reply, /withdrew the target/)
 })

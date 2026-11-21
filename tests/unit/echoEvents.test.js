@@ -91,3 +91,27 @@ test('claim: one run an event — a held claim refuses, a lapsed one is taken', 
     const got = await claim('e')
     assert.equal(got.runningUntil, '2026-11-19T12:35:00.000Z', 'lapsed: taken for fifteen minutes')
 })
+
+// ── the events that reach ONE company (docs/design/axl-one-voice.md §2, 2026-11-21) ─────────────────────────────────
+
+test('eventsFor: the house\'s mapped events and the user\'s own whose map links the ticker — how it reaches it, its score and check', async () => {
+    const { memDb } = await import('../helpers/memDb.js')
+    const { eventsFor, _setDeps: set } = await import('../../services/echoEvents.service.js')
+    const { db } = memDb()
+    set({ db })
+    const link = (ticker, direction) => ({ ticker, name: ticker, relation: 'customer', layer: 1, direction, why: `${ticker} buys`, confidence: 'high' })
+    await db.collection('echo_events').insertMany([
+        { _id: 'ev_a', kind: 'house', status: 'checked', date: '2026-11-10', origin: 'TSMC', whatChanged: 'capacity cut', map: { links: [link('NVDA', 'loses'), link('AMD', 'loses')] }, scores: { links: [{ ticker: 'NVDA', total: 7 }] }, check: { links: [{ ticker: 'NVDA', flag: 'priced_in' }] } },
+        { _id: 'ev_b', kind: 'house', status: 'expired', date: '2026-10-01', origin: 'Old', map: { links: [link('NVDA', 'gains')] } },
+        { _id: 'ev_c', kind: 'user', userId: 'u1', status: 'mapped', date: '2026-11-15', origin: 'Mine', map: { links: [link('NVDA', 'gains')] } },
+        { _id: 'ev_d', kind: 'user', userId: 'u2', status: 'mapped', date: '2026-11-16', origin: 'Theirs', map: { links: [link('NVDA', 'gains')] } },
+        { _id: 'ev_e', kind: 'house', status: 'framed', date: '2026-11-17', origin: 'Unmapped' },
+    ])
+    const rows = await eventsFor('nvda', { userId: 'u1' })
+    assert.deepEqual(rows.map(r => r.id), ['ev_c', 'ev_a'], 'newest first; no expired, no other user\'s, no unmapped')
+    const a = rows.find(r => r.id === 'ev_a')
+    assert.deepEqual([a.link.direction, a.link.relation, a.score, a.flag], ['loses', 'customer', 7, 'priced_in'])
+    assert.equal(rows.find(r => r.id === 'ev_c').score, null, 'mapped, not scored yet')
+    assert.deepEqual((await eventsFor('NVDA')).map(r => r.id), ['ev_a'], 'without a user: the house\'s only')
+    assert.deepEqual(await eventsFor('not a ticker!'), [])
+})

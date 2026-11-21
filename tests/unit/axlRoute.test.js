@@ -608,11 +608,15 @@ test('web search answers world questions at reception and keeps the broadcast ru
     assert.doesNotMatch(prompt, /the one place the outside world enters/, 'the brief is no longer the only window')
 })
 
-test('The technical analyst only on an ask about technicals or behaviour — "how is NVDA today?" is Axl\'s own, and an unclear one is asked (Roy, 2026-11-12)', () => {
+// Superseded 2026-11-21 (axl-one-voice.md V4): Axl picks his sources by the question and answers himself — the news for
+// what happened, the house's work (get_company_view) for a view.
+test('A company question: the news for what happened, the house\'s work for a view — Axl answers himself (Roy, 2026-11-21)', () => {
     const prompt = readFileSync(new URL('../../prompts/axl_system_prompt.md', import.meta.url), 'utf8')
-    assert.match(prompt, /\*\*Only on an ask about technicals or behaviour\.\*\* "How is NVDA today\?"/)
-    assert.match(prompt, /are the price and the news — answer them yourself/)
-    assert.match(prompt, /Not sure which they mean\? Ask in one line/)
+    assert.match(prompt, /\*\*What happened \/ why it moved\*\* — "what's wrong with NVDA\?"/)
+    assert.match(prompt, /That is the whole answer; no house tool\./)
+    assert.match(prompt, /\*\*A VIEW on the company\*\* — "is NVDA a good investment now\?"/)
+    assert.match(prompt, /call `get_company_view` FIRST/)
+    assert.match(prompt, /\*\*Never route a view question to a builder\.\*\*/)
 })
 
 test('The technical analyst labels the two kinds of answer in plain words, never as tags', () => {

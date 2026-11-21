@@ -48,6 +48,7 @@ import { ensureUserIndexes } from './api/user/user.model.js'
 import { ensureIdeaIndexes } from './api/trade-ideas/tradeIdeas.service.js'
 import { ensureTradeIndexes } from './services/tradeCapture.service.js'
 import { ensureJournalIndexes } from './services/journal.service.js'
+import { ensureEchoEventIndexes } from './services/echoEvents.service.js'
 import { ensureExperienceIndexes } from './api/experience/experience.model.js'
 import { ensureWorkspaceIndexes } from './api/workspace/workspace.model.js'
 import { ensurePendingActionIndexes } from './services/pendingAction/pendingAction.repo.js'
@@ -243,6 +244,7 @@ ensureHotlistBoardIndexes().catch(() => {})        // the hotlist's boards (serv
 ensureDayBoardIndexes().catch(() => {})            // the day boards, their own collection (services/hotlist.day.js)
 ensureHotlistOutcomeIndexes().catch(() => {})      // the hotlist's outcome log (services/hotlist.outcomes.js)
 ensurePythiaWeeklyIndexes().catch(() => {})      // Pythia's week: the change scan and its assessments (services/pythiaWeekly.service.js)
+ensureEchoEventIndexes().catch(() => {})          // the events reaching a company — Axl's company view (services/echoEvents.service.js)
 ensureIndustryAssessmentIndexes().catch(() => {}) // Pythia's industry_assessment (api/strategy/industryAssessment.service.js)
 ensurePythiaCallsIndexes().catch(() => {})        // Pythia's forward log, pythia_calls (api/strategy/pythiaCalls.service.js)
 ensureThemeIndexes().catch(() => {})              // Pythia's themes (api/strategy/theme.service.js)

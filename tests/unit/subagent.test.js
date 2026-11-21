@@ -32,7 +32,8 @@ test('composeQuestion: the ask, every company BY NAME, what is already known', (
     assert.equal(composeQuestion({ question: 'Heatwave — who gains?', companies: [] }), 'Heatwave — who gains?')
 })
 
-test('the event analyst answers as itself: its question hidden in its segment, its reply its own row, the tool result tells Axl not to repeat it', async () => {
+// ONE VOICE (axl-one-voice.md §5, 2026-11-21): the answer is Axl's material — hidden, its tokens never streamed; Axl writes.
+test('the event analyst\'s answer is Axl\'s material: its question and answer hidden in its segment, no tokens on screen, Axl told to write it', async () => {
     const { sessions, ask, runs, frames, emit } = rig(({ common }) => {
         common.onToken('Broadcom scores 9.')
         common.onToolStart('get_event_map')
@@ -43,16 +44,16 @@ test('the event analyst answers as itself: its question hidden in its segment, i
     await sessions.append({ sessionId: s.sessionId, userId: 'u1', message: { agent: 'axl', role: 'user', content: 'does the ANT ipo affect others?' } })
     const out = await ask({ user, sessionId: s.sessionId, emit })({ specialist: 'event_analyst', question: 'Does the ANT IPO reach other companies?', companies: [{ ticker: 'ANT', name: 'Anthropic' }] })
 
-    assert.match(out, /^THE EVENT ANALYST ANSWERED — its reply is ALREADY ON SCREEN/)
-    assert.match(out, /--- its reply ---\nBroadcom scores 9\./)
-    // It read the question with the company named, and streamed AS the event analyst.
+    assert.match(out, /^THE EVENT ANALYST'S ANSWER — your MATERIAL; nothing of it is on screen\. Write the answer yourself/)
+    assert.match(out, /--- the event analyst's answer ---\nBroadcom scores 9\./)
+    // It read the question with the company named; only its tool status reached the screen, as Axl's working.
     const conv = runs[0].common.messages
     assert.match(conv.at(-1).content, /Companies: ANT \(Anthropic\)\./)
-    assert.deepEqual(frames.map(f => `${f.type}:${f.as}`), ['token:echo', 'status:echo'])
+    assert.deepEqual(frames.map(f => `${f.type}:${f.as}`), ['status:undefined'])
     const rows = await sessions.allMessagesSince({ sessionId: s.sessionId, userId: 'u1', afterSeq: 0 })
     const [, q, a] = rows
     assert.deepEqual([q.agent, q.role, q.ref], ['echo', 'user', { opening: true, via: 'axl' }])
-    assert.deepEqual([a.agent, a.role, a.content, a.ref], ['echo', 'assistant', 'Broadcom scores 9.', { via: 'axl' }])
+    assert.deepEqual([a.agent, a.role, a.content, a.ref], ['echo', 'assistant', 'Broadcom scores 9.', { via: 'axl', material: true }])
     assert.deepEqual(a.tools, ['get_event_map'])
     // The floor did not move.
     assert.equal((await sessions.get({ sessionId: s.sessionId, userId: 'u1' })).floor, 'axl')
@@ -91,12 +92,13 @@ test('a hand-back ("not mine") and an offer to take the user to a builder come b
     assert.equal(rows.filter(r => r.role === 'assistant').length, 0, 'a wordless hand-back writes no row')
 })
 
-test('the technical analyst keeps the chart it showed on its row', async () => {
+test('a chart the technical analyst drew stays on screen: its own Axl row, outside the hidden material', async () => {
     const { sessions, ask, emit } = rig(({ common }) => { common.onChart({ symbol: 'TSLA', timeframe: 'day' }); return { reply: 'TSLA false-breaks 70% of the time.' } })
     const s = await sessions.getActive({ userId: 'u1' })
     await ask({ user, sessionId: s.sessionId, emit })({ specialist: 'technical_analyst', question: 'How does TSLA behave?', companies: [{ ticker: 'TSLA', name: 'Tesla' }] })
     const rows = await sessions.allMessagesSince({ sessionId: s.sessionId, userId: 'u1', afterSeq: 0 })
-    assert.deepEqual(rows.at(-1).ref, { via: 'axl', chart: { ticker: 'TSLA', timeframe: 'day' } })
+    assert.deepEqual([rows.at(-2).agent, rows.at(-2).ref], ['proteus', { via: 'axl', material: true }])
+    assert.deepEqual([rows.at(-1).agent, rows.at(-1).content, rows.at(-1).ref], ['axl', "Here's the TSLA daily chart.", { chart: { ticker: 'TSLA', timeframe: 'day' } }])
 })
 
 test('refused before anything runs: an unknown specialist, no question, no companies; a failure is said, never thrown', async () => {
@@ -104,7 +106,7 @@ test('refused before anything runs: an unknown specialist, no question, no compa
     const s = await sessions.getActive({ userId: 'u1' })
     const a = ask({ user, sessionId: s.sessionId, emit })
     for (const [args, re] of [
-        [{ specialist: 'trader', question: 'x', companies: [] }, /specialist must be one of: technical_analyst, event_analyst|specialist must be one of: event_analyst, technical_analyst/],
+        [{ specialist: 'trader', question: 'x', companies: [] }, /specialist must be one of: research_analyst, technical_analyst, event_analyst/],
         [{ specialist: 'event_analyst', question: ' ', companies: [] }, /question is required/],
         [{ specialist: 'event_analyst', question: 'x' }, /companies is required/],
     ]) {
@@ -133,4 +135,24 @@ test("Axl's desk turns `via` into the hint: a subagent's role only", () => {
     assert.deepEqual(specialistHint('proteus'), { key: 'technical_analyst', role: 'technical analyst' })
     assert.equal(specialistHint('scanner'), null)
     assert.equal(specialistHint(undefined), null)
+})
+
+// The ANALYST is a builder Axl may also ASK (Roy, 2026-11-21: "how is NVDA for investment" is his, not Axl's): the question
+// goes to his `ask` — never his build's `run` — with the question's companies, and his build state is not touched.
+test('the analyst, asked: his ask answers (not his build), with the companies; the floor and his mode stay', async () => {
+    const { db } = memDb()
+    const sessions = makeSessionService({ getDb: async () => db })
+    const asked = [], built = []
+    const desks = { analyst: { agent: 'analyst', run: async (a) => { built.push(a); return { reply: 'a build' } }, ask: async (a) => { asked.push(a); return { reply: 'Strong buy, because Blackwell is sold out.' } } } }
+    const s = await sessions.getActive({ userId: 'u1' })
+    await sessions.setFloor({ sessionId: s.sessionId, userId: 'u1', agent: 'axl' })
+    const out = await makeAskSpecialist({ sessions, desks })({ user, sessionId: s.sessionId, emit: () => {} })({ specialist: 'research_analyst', question: 'How is NVDA for investment?', companies: [{ ticker: 'NVDA', name: 'NVIDIA' }] })
+    assert.match(out, /^THE ANALYST'S ANSWER — your MATERIAL/)
+    assert.equal(built.length, 0)
+    assert.deepEqual(asked[0].asked.companies, [{ ticker: 'NVDA', name: 'NVIDIA' }])
+    const rows = await sessions.allMessagesSince({ sessionId: s.sessionId, userId: 'u1', afterSeq: 0 })
+    assert.deepEqual([rows.at(-1).agent, rows.at(-1).content, rows.at(-1).ref], ['analyst', 'Strong buy, because Blackwell is sold out.', { via: 'axl', material: true }])
+    const after = await sessions.get({ sessionId: s.sessionId, userId: 'u1' })
+    assert.equal(after.floor, 'axl')
+    assert.equal(after.agentState?.analyst ?? null, null)
 })

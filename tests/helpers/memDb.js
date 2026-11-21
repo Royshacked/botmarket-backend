@@ -1,11 +1,19 @@
 // A small in-memory Mongo — enough for the Pythia services' and the session store's tests. Supports:
 // equality (null also matching a missing field, as in Mongo) and `$ne` / `$in` / `$exists` / `$gt` / `$lt`
-// filters on dotted paths, and a top-level `$or`; multi-key sort; find().sort().limit().next/toArray; skip; findOne;
+// filters on dotted paths (equality also through an array, as Mongo), and a top-level `$or`; multi-key sort; find().sort().limit().next/toArray; skip; findOne;
 // insertOne; insertMany; deleteOne; deleteMany; updateMany; replaceOne and updateOne with upsert, $setOnInsert, $set (dotted), $inc and
 // $push (one value, or $each/$position); findOneAndUpdate (returns the document AFTER); createIndex as
 // a no-op — unique indexes are NOT enforced. `rows(name)` exposes a collection's documents for assertions.
 
 function _get(o, path) { return path.split('.').reduce((x, k) => (x == null ? x : x[k]), o) }
+// A path THROUGH an array ('map.links.ticker'): every value it reaches, as Mongo matches any element. Only consulted
+// where the plain walk finds nothing, so every query that worked before reads the same.
+function _values(o, keys) {
+    if (!keys.length) return [o]
+    if (o == null) return []
+    if (Array.isArray(o)) return o.flatMap(x => _values(x, keys))
+    return _values(o[keys[0]], keys.slice(1))
+}
 function _setPath(o, path, v) { const ks = path.split('.'); let x = o; for (const k of ks.slice(0, -1)) x = (x[k] ??= {}); x[ks.at(-1)] = v }
 function _match(doc, q) {
     return Object.entries(q).every(([k, v]) => {
@@ -18,7 +26,9 @@ function _match(doc, q) {
         if (v && typeof v === 'object' && '$lt' in v) return _get(doc, k) < v.$lt
         // Mongo: { field: null } matches a null field AND a missing one.
         if (v === null) return _get(doc, k) == null
-        return JSON.stringify(_get(doc, k)) === JSON.stringify(v)
+        const at = _get(doc, k)
+        if (at === undefined && k.includes('.')) return _values(doc, k.split('.')).some(x => JSON.stringify(x) === JSON.stringify(v))
+        return JSON.stringify(at) === JSON.stringify(v)
     })
 }
 
@@ -60,6 +70,8 @@ export function memDb() {
                     return c
                 },
                 skip: (n) => { out = out.slice(n); return c },
+                // A projection is a payload trim, not a filter: the rows come back whole (no test reads a projected-away field).
+                project: () => c,
                 limit: (n) => { out = out.slice(0, n); return c },
                 next: async () => out[0] ?? null,
                 toArray: async () => out,

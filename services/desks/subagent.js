@@ -2,8 +2,9 @@
 //
 // Before: Axl ROUTED to the event analyst, who then held the floor — "show me the hotlist" went to it too, and it saw
 // only its own segment (a bare "ANT" read as Ant Group). Now Axl calls `ask_specialist`: the role runs its own desk —
-// its prompt, its tools, its earlier exchanges in this session — inside Axl's turn, streams as itself, and its reply is
-// kept as ITS row, shown as written. The floor never moves; the next message is Axl's.
+// its prompt, its tools, its earlier exchanges in this session — inside Axl's turn, and its reply is kept as ITS row in its
+// segment. Since 2026-11-21 (axl-one-voice.md §5) that row is Axl's hidden MATERIAL: Axl writes the answer. The floor
+// never moves; the next message is Axl's.
 //
 //   append the question to the role's segment (hidden: an opening) → run the role's desk headless → append its reply
 //   (`ref.via: 'axl'`, so Axl's own next turn reads it too) → hand Axl the reply as the tool result.
@@ -18,6 +19,7 @@ import { DESK_DEFS } from './index.js'
 import { DESKS, SUBAGENTS, RECEPTION } from './registry.js'
 import { deskCommon } from './common.js'
 import { buildConversation } from './context.js'
+import { chartLine } from './chartLine.js'
 
 const LOG = '[subagent]'
 const MAX_QUESTION = 2000
@@ -76,8 +78,9 @@ export function makeAskSpecialist({ sessions = sessionService, desks = null } = 
             const session  = await sessions.get({ sessionId, userId: user._id })
             const summary  = session?.summaries?.[agent] ?? null
             const messages = await sessions.messagesForAgent({ sessionId, userId: user._id, agent, afterSeq: summary?.throughSeq ?? 0 })
-            // Streams AS the role: the chat draws "Axl · Event analyst" for these tokens (sessionChannel, agent override).
-            const emitAs = (type, data) => emit(type, data, agent)
+            // ONE VOICE (docs/design/axl-one-voice.md §5, Roy 2026-11-21): its tokens are Axl's material, not the chat's —
+            // only its tool status (and a chart it draws) reach the screen, as Axl's working.
+            const emitAs = (type, data) => (type === 'token' ? undefined : emit(type, data))
             const common = deskCommon({ messages: buildConversation({ messages: messages ?? [], agent, summary }), user, signal, emit: emitAs, audience })
             let chart = null
             const deskOnChart = common.onChart
@@ -92,9 +95,12 @@ export function makeAskSpecialist({ sessions = sessionService, desks = null } = 
                 return deskOnToolStart?.(tool, extra)
             }
 
+            // A builder Axl may ask (the analyst) answers through its own `ask`: a question, not its build — no draft,
+            // no state. A subagent's desk is only ever asked, so its `run` is the answer.
             let result
             try {
-                result = await desk.run({ user, state: session?.agentState?.[agent] ?? null, input: {}, signal, emit: emitAs, common, sessionId })
+                const answer = desk.ask ?? desk.run
+                result = await answer({ user, state: session?.agentState?.[agent] ?? null, input: {}, signal, emit: emitAs, common, sessionId, asked: args })
             } catch (err) {
                 logger.warn(LOG, 'specialist failed', { agent, message: err.message })
                 return toolError(`the ${roleWord} failed (${err.message}) — say so; do not answer from memory`)
@@ -104,12 +110,16 @@ export function makeAskSpecialist({ sessions = sessionService, desks = null } = 
             const reply = String(result.reply ?? '').trim()
             const note  = routeNote(result, roleWord)
             if (reply) {
-                await sessions.append({ sessionId, userId: user._id, message: { agent, role: 'assistant', content: reply, ref: { via: 'axl', ...(chart ? { chart } : {}) }, tools } })
+                // Kept in its segment (a follow-up keeps its thread; Axl's next turn reads it), hidden from the chat (`material`).
+                await sessions.append({ sessionId, userId: user._id, message: { agent, role: 'assistant', content: reply, ref: { via: 'axl', material: true }, tools } })
             }
+            // A chart it drew is the chat's, not material: its own row, as Axl's — the row a chart-only reply gets (chartLine),
+            // so it is still on screen after a reload.
+            if (chart) await sessions.append({ sessionId, userId: user._id, message: { agent: 'axl', role: 'assistant', content: chartLine(chart), ref: { chart } } })
             logger.info(LOG, 'specialist answered', { agent, replyLength: reply.length, route: result.route ?? null, tools })
             if (!reply) return note || `The ${roleWord} had nothing to say. Answer the user yourself.`
-            return `THE ${roleWord.toUpperCase()} ANSWERED — its reply is ALREADY ON SCREEN as written, under its role. ` +
-                `Do not repeat or summarise it: add at most one short line of your own, or nothing.${note ? `\n${note}` : ''}\n\n--- its reply ---\n${reply}`
+            return `THE ${roleWord.toUpperCase()}'S ANSWER — your MATERIAL; nothing of it is on screen. Write the answer yourself, in your ` +
+                `own voice: the ${roleWord}'s findings said as the house's, your own reading as yours.${note ? `\n${note}` : ''}\n\n--- the ${roleWord}'s answer ---\n${reply}`
         }
     }
 }

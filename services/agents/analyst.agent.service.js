@@ -43,7 +43,12 @@ const CATALYST_LOG = '[analystAgent-catalyst]'   // its own ledger row
 // on a horizon the coverage's one target does not answer. A `<horizon_view>` beside the coverage, never a rewrite of it.
 const _horizonMode = makePromptLoader(join(__dirname, '../../prompts/analyst_mode_horizon.md'), LOG)
 const HORIZON_LOG = '[analystAgent-horizon]'   // its own ledger row
-export const MODES = Object.freeze({ COVERAGE: null, CATALYST: 'catalyst', HORIZON: 'horizon' })
+// ANSWER — a question about a company that Axl asks him (ask_specialist, Roy 2026-11-21: "how is NVDA for investment" is the
+// analyst's to answer, not Axl's): from the standing thesis and his read tools, in conversation — no <coverage>, no phases.
+const _answerMode = makePromptLoader(join(__dirname, '../../prompts/analyst_mode_answer.md'), LOG)
+const ANSWER_LOG = '[analystAgent-answer]'   // its own ledger row
+export const MODES = Object.freeze({ COVERAGE: null, CATALYST: 'catalyst', HORIZON: 'horizon', ANSWER: 'answer' })
+const MODE_LOG = { catalyst: CATALYST_LOG, horizon: HORIZON_LOG, answer: ANSWER_LOG }
 
 export const TOOLS = [
     // web_search leads, then the SHARED valuation module (its own single home), then the
@@ -124,7 +129,7 @@ async function chatStream({
 
     // Each mode is booked under its own ledger key (agentKeyFromLog): the log tag is the key, so the tag is what differs.
     const raw = await _run({
-        log: mode === MODES.CATALYST ? CATALYST_LOG : mode === MODES.HORIZON ? HORIZON_LOG : LOG, requestedModel, userId, messages: builtMessages, systemPrompt,
+        log: MODE_LOG[mode] ?? LOG, requestedModel, userId, messages: builtMessages, systemPrompt,
         tools: TOOLS, toolHandlers: { ...TOOL_HANDLERS, ...makeTradingContextHandlers(userId) },
         reasoningEffort, signal, onToken, tagCaptures, onToolStart, onReasoning, onChart, onSpend,
     })
@@ -136,6 +141,8 @@ async function chatStream({
     if (mode === MODES.CATALYST) return { reply, phase: phase.get(), catalyst: _parseCatalystRead(raw), ...routing }
     // A horizon view never rewrites the coverage: its <horizon_view> is what comes back, any <coverage> dropped.
     if (mode === MODES.HORIZON) return { reply, phase: phase.get(), horizonView: _parseHorizonView(raw), ...routing }
+    // An answer never drafts: what it says is the reply, any <coverage> dropped.
+    if (mode === MODES.ANSWER) return { reply, phase: null, ...routing }
     // The coverage is a DRAFT — returned for preview, NOT saved. Initiating persists it (P1).
     return { reply, phase: phase.get(), ...(coverage ? { coverage } : {}), ...routing }
 }
@@ -331,12 +338,19 @@ function _objectionsBlock(flags) {
 export function _buildSystemPrompt(chatState, seed = null, audience = null, mode = MODES.COVERAGE) {
     const today  = new Date().toISOString().slice(0, 10)
     const active = chatState?.active_symbol || 'none'
-    const existingBlock = chatState?.existing_coverage
+    const answering = mode === MODES.ANSWER
+    const existingBlock = chatState?.existing_coverage && answering
+        ? `\nTHE STANDING THESIS on ${chatState.existing_coverage.symbol} — answer from it; this is a question, not a revision.\n`
+            + `${JSON.stringify(_forPrompt(chatState.existing_coverage), null, 2)}`
+            + _objectionsBlock(chatState.existing_coverage?.flags)
+        : chatState?.existing_coverage
         ? `\nEXISTING COVERAGE — update mode: this name is already in the book. Revise the thesis rather than starting from scratch. Reference what's changed since the prior view.\n`
             + `${JSON.stringify(_forPrompt(chatState.existing_coverage), null, 2)}`
             + _objectionsBlock(chatState.existing_coverage?.flags)
         : ''
-    const coverageListBlock = chatState?.coverage_symbols?.length && !chatState?.existing_coverage
+    const coverageListBlock = chatState?.coverage_symbols?.length && answering
+        ? `\nCOVERAGE BOOK — names the house covers: ${chatState.coverage_symbols.join(', ')}.`
+        : chatState?.coverage_symbols?.length && !chatState?.existing_coverage
         ? `\nCOVERAGE BOOK — names already in coverage: ${chatState.coverage_symbols.join(', ')}.\nIf the user asks to research or cover one of these names and you are NOT in update mode, do NOT start the research. Instead, tell them the name is already in the book and ask whether they want to update the existing thesis or work on a different name.`
         : ''
     // P4b: an Argus INVESTING-profile candidate handed over for research. Start Phase 1 with this name +
@@ -359,6 +373,7 @@ ${audienceBlock}
         // coverage turns keep their prefix untouched, and a mode's turns share one across names.
         ...(mode === MODES.CATALYST ? [cachedBlock(_catalystMode())] : []),
         ...(mode === MODES.HORIZON ? [cachedBlock(_horizonMode())] : []),
+        ...(answering ? [cachedBlock(_answerMode())] : []),
         { type: 'text', text: dynamic },
     ]
 }

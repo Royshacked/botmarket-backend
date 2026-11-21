@@ -31,6 +31,7 @@ import { requestRead as _requestRead, readTarget as _readTarget } from '../mento
 import { logger } from '../logger.service.js'
 import { keepBounded } from '../bounded.util.js'
 import { builds as defaultBuilds, isBuilding, buildRef } from '../desks/builds.js'
+import { revisionNote, revisionTitle } from '../desks/analyst.desk.js'
 
 const LOG = '[chain]'
 export const MAX_STEPS = 12
@@ -205,6 +206,19 @@ export function makeChainRunner({
     }
 
     /**
+     * A COVERAGE reopened for revision is a BUILD (Roy, 2026-11-21: "I am revising NVDA — instead of the building line it
+     * only put a chip above the prompt box"): the analyst re-models it in the background, the building line says so, and
+     * the summary's Confirm saves the revision — the way a portfolio's review runs (sessions.controller editInSession).
+     * The chat stays with Axl. Other kinds reopen on their desk's floor, as before.
+     */
+    async function reviseInBackground({ user, sessionId, kind, doc }) {
+        if (kind !== 'coverage') return
+        const session = await sessions.get({ sessionId, userId: user._id })
+        await builds.begin({ user, sessionId, agent: 'analyst', state: session?.agentState?.analyst ?? null, title: revisionTitle(doc?.symbol), text: revisionNote(doc?.symbol) })
+            .catch(err => logger.warn(LOG, 'the revision build failed to start', err.message))
+    }
+
+    /**
      * An `edit`: reopen the item it names in the live session — the same openForEdit the edit route runs. Its
      * desk holding other unsealed work → ask (set it aside, or keep working). Nothing found → say so.
      */
@@ -226,7 +240,8 @@ export function makeChainRunner({
                 choices: [{ id: 'reopen', label: 'Set it aside and open it' }, { id: 'keep', label: 'Keep working' }],
             } })
         }
-        if (out.reason) logger.warn(LOG, 'reopen refused', { kind: edit.kind, reason: out.reason })
+        if (out.reason) return logger.warn(LOG, 'reopen refused', { kind: edit.kind, reason: out.reason })
+        await reviseInBackground({ user, sessionId, kind: edit.kind, doc: found.doc })
     }
 
     /** startTurn's after-hook: what, if anything, runs next. */
@@ -491,7 +506,9 @@ export function makeChainRunner({
             await end(user, sessionId, { ...chain, pending: null })
             if (!found.ok) return { reason: 'not_found' }
             const out = await sealing.openForEdit({ userId: user._id, sessionId, kind: edit.kind, entity: found.doc, name: nameOf(found.doc), force: true })
-            return out.reason ? { reason: out.reason } : { ok: true }
+            if (out.reason) return { reason: out.reason }
+            await reviseInBackground({ user, sessionId, kind: edit.kind, doc: found.doc })
+            return { ok: true }
         }
         // 'research' (an investing list's top N → Prometheus) left on 2026-11-09 with Argus's lists (archive/README.md).
         // Nothing builds a research queue any more, so the 'next' branch below is dormant; it is the generic queue walk.

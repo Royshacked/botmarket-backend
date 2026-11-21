@@ -22,6 +22,8 @@
  * @property {string[]}    [routedFrom] when set, ONLY these agents may route here (Axl's key is 'axl') — every other
  *                                     sender cannot
  * @property {string}      [subagent]   set on a role Axl CALLS (ask_specialist's enum key) — it never holds the floor
+ * @property {string}      [askable]    set on a BUILDER Axl may also ask (ask_specialist's enum key): it answers a question
+ *                                     through Axl and keeps its mode — the analyst (Roy, 2026-11-21)
  * @property {string|null} does         the one line a sender's prompt shows (routable desks only)
  * @property {'main'|'strategy'} scope  the session it talks in
  * @property {boolean}     admin        admin-only (the route gate and the prompts both hold it)
@@ -37,8 +39,11 @@ export const DESKS = Object.freeze({
     }),
     // ORDER IS LOAD-BEARING for the routable desks: buildRouteRule lists them in this order inside every
     // desk's prompt, and a reorder changes every prompt (and its cache).
+    // ASKABLE as well as a builder (Roy, 2026-11-21: "how is NVDA for investment" — Axl should turn it to the analyst, not
+    // answer about investments himself): a question about a company goes to him through ask_specialist; a thesis to write
+    // or revise is his mode.
     analyst: Object.freeze({
-        agent: 'analyst', desk: 'research', brand: 'Prometheus', role: 'analyst', entityKind: 'coverage', editable: true, routable: true,
+        agent: 'analyst', desk: 'research', brand: 'Prometheus', role: 'analyst', entityKind: 'coverage', editable: true, routable: true, askable: 'research_analyst',
         does: 'researches a company into house coverage — a thesis and a price target vs the Street',
         scope: 'main', admin: false, maxMessages: 8,
     }),
@@ -150,7 +155,8 @@ export function handBackOf(from, to) {
 // SUBAGENTS (docs/design/modes-and-builders.md M2, Roy 2026-11-20): the roles that ANSWER are called by Axl as a tool
 // (`ask_specialist`) — they never hold the floor, and the user never talks to them directly: a turn addressed to one goes
 // to Axl, who asks it. Its key in the tool's `specialist` enum → the agent.
-export const SUBAGENTS = Object.freeze(Object.fromEntries(entries.filter(d => d.subagent).map(d => [d.subagent, d.agent])))
+// An ASKABLE builder is in the enum too, but it is not a subagent: it keeps its mode and its floor (isSubagent below).
+export const SUBAGENTS = Object.freeze(Object.fromEntries(entries.filter(d => d.subagent || d.askable).map(d => [d.subagent ?? d.askable, d.agent])))
 
 /** Whether an agent is a subagent (answers through Axl only). */
 export const isSubagent = (agent) => !!DESKS[agent]?.subagent

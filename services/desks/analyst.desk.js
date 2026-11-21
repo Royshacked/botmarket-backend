@@ -2,7 +2,7 @@
 // the coverage list and the standing thesis are read fresh every turn (_resolveCoverageContext).
 // One definition for the HTTP desk stream and the session turn (unified-chat plan phase 4).
 
-import { analystAgentService } from '../agents/analyst.agent.service.js'
+import { analystAgentService, MODES } from '../agents/analyst.agent.service.js'
 import { coverageService } from '../../api/analyst/coverage.service.js'
 import { sanitizeScanSeed } from '../scanSeed.util.js'
 import { logger } from '../logger.service.js'
@@ -61,6 +61,25 @@ export function analystNextState(prev, result, input = {}) {
     }
 }
 
+/**
+ * What the analyst reads to ANSWER a question Axl asks him (ask_specialist): the coverage book, and the standing thesis on
+ * the first company named — the one the question is about. Never his working state: a question is not his build.
+ */
+export async function _askContext(asked) {
+    const first = (Array.isArray(asked?.companies) ? asked.companies : []).map(c => String(c?.ticker ?? '').toUpperCase().trim()).find(Boolean)
+    return _resolveCoverageContext(first ? { active_symbol: first } : {}, null)
+}
+
+/**
+ * A thesis reopened for REVISION runs as a background build (Roy, 2026-11-21) — its first turn's note. Pure; one home for
+ * both ways in (Axl's <edit>, chain/runner; the item's own edit, sessions.controller).
+ */
+export const revisionTitle = (symbol) => `${symbol ?? 'the name'} revision`
+export function revisionNote(symbol) {
+    const s = symbol ?? 'the name'
+    return `[App note, not the user's words: the user asked to REVISE the ${s} thesis, and it runs in the background — they are not watching. Re-model it now on today's data: the price, the latest print, the Street's estimates, your estimate and multiple, and the target. Say what changed and why, and emit the revised <coverage>. If you still cannot defend a target, say plainly why and what would settle it. Do not ask the user anything you can settle yourself.]`
+}
+
 export const analystDesk = {
     agent: 'analyst',
     log:   LOG,
@@ -79,6 +98,9 @@ export const analystDesk = {
         seed:      input.seed ?? null,
         onPhase:   phase => emit('phase', { phase }),
     }),
+    // ASKED through Axl (ask_specialist, Roy 2026-11-21): a question about a company, answered from the coverage and his
+    // read tools — no <coverage>, no phases, no state. Writing or revising a thesis stays his mode (`run`).
+    ask: async ({ common, asked }) => analystAgentService.chatStream({ ...common, chatState: await _askContext(asked), mode: MODES.ANSWER }),
     // The session's commits (plan phase 8, K2) — services/desks/act.js runs them. No direct edits (K3).
     actions: analystActions,
     reasons: ANALYST_REASONS,

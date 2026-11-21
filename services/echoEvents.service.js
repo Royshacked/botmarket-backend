@@ -182,4 +182,39 @@ export async function listGraded({ limit = 1000 } = {}) {
     return (await coll()).find({ kind: 'house', grades: { $exists: true } }).sort({ date: 1 }).limit(limit).toArray()
 }
 
-export const echoEventsService = { frame, passesFilter, create, get, advance, claim, list, listOpen, listWatching, listGradable, listGraded, findSame }
+/** The statuses an event's map stands in: mapped and on (expired ones are history, framed ones have no map yet). */
+export const MAPPED = Object.freeze(['mapped', 'scored', 'checked', 'watching'])
+
+/**
+ * The events that REACH one company (docs/design/axl-one-voice.md §2, Roy 2026-11-21: "if I ask about a company, Axl can
+ * also check with Echo if this company is prone to be affected by an event"): the house's mapped events and the user's
+ * own whose map links the ticker — each with how it reaches it (the link) and, once scored, its score and its check.
+ * Newest first. → [{ id, kind, date, type, origin, whatChanged, status, link, score, flag }]
+ */
+export async function eventsFor(ticker, { userId = null, limit = 20 } = {}) {
+    const t = String(ticker ?? '').trim().toUpperCase().replace(/\./g, '-')
+    if (!TICKER.test(t)) return []
+    const docs = await (await coll()).find({
+        'map.links.ticker': t, status: { $in: MAPPED },
+        $or: [{ kind: 'house' }, ...(userId ? [{ kind: 'user', userId: String(userId) }] : [])],
+    }).project({ kind: 1, date: 1, type: 1, origin: 1, whatChanged: 1, status: 1, map: 1, scores: 1, check: 1 })
+        .sort({ date: -1, createdAt: -1 }).limit(Math.min(limit, 50)).toArray()
+    return docs.map(d => {
+        const link  = (d.map?.links ?? []).find(l => l.ticker === t) ?? null
+        const score = (d.scores?.links ?? []).find(l => l.ticker === t) ?? null
+        const check = (d.check?.links ?? []).find(l => l.ticker === t) ?? null
+        return {
+            id: d._id, kind: d.kind, date: d.date ?? null, type: d.type ?? null, origin: d.origin ?? null, whatChanged: d.whatChanged ?? null, status: d.status,
+            link: link ? { relation: link.relation ?? null, layer: link.layer ?? null, direction: link.direction ?? null, why: link.why ?? null, confidence: link.confidence ?? null } : null,
+            score: Number.isFinite(score?.total) ? score.total : null,
+            flag: check?.flag ?? null,
+        }
+    })
+}
+
+/** The lookup by company reads the map's links — a multikey index (the M0's 512 MB: one small index). */
+export async function ensureEchoEventIndexes() {
+    await (await coll()).createIndex({ 'map.links.ticker': 1, date: -1 })
+}
+
+export const echoEventsService = { frame, passesFilter, create, get, advance, claim, list, listOpen, listWatching, listGradable, listGraded, findSame, eventsFor }

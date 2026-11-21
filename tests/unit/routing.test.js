@@ -136,7 +136,10 @@ test("Axl's prompt ASKS the technical analyst how a stock trades — no route (m
     const { readFileSync } = await import('node:fs')
     const axl = readFileSync(new URL('../../prompts/axl_system_prompt.md', import.meta.url), 'utf8')
     assert.doesNotMatch(axl, /<route>technicals/)
-    assert.match(axl, /\*\*How a stock TRADES, technically\*\* → `specialist: "technical_analyst"`/)
+    // 2026-11-21 (axl-one-voice.md §5): the measured profile comes with get_company_view; the technical analyst is asked for
+    // what it does not answer, and his answer is Axl's material.
+    assert.match(axl, /\*\*A chart question the profile does not answer\*\* → `specialist: "technical_analyst"`/)
+    assert.match(axl, /gives you material, not a reply/)
 })
 
 // ── Echo takes Axl's (2026-11-19) ────────────────────────────────────────────
@@ -165,9 +168,10 @@ test("Axl's prompt ASKS the event analyst who an event reaches, naming every com
     const { readFileSync } = await import('node:fs')
     const axl = readFileSync(new URL('../../prompts/axl_system_prompt.md', import.meta.url), 'utf8')
     assert.doesNotMatch(axl, /<route>events/)
-    assert.match(axl, /\*\*Who an EVENT reaches through the supply chain\*\* → `specialist: "event_analyst"`/)
+    assert.match(axl, /\*\*Who a NEW event reaches through the supply chain\*\* → `specialist: "event_analyst"`/)
     assert.match(axl, /`\[\{"ticker": "ANT", "name": "Anthropic"\}\]`/)
-    assert.match(axl, /After the answer, the next message is yours again/)
+    // 2026-11-21: events already mapped that reach one company come with get_company_view.
+    assert.match(axl, /Events already\s+mapped that reach ONE company come with `get_company_view`/)
     assert.doesNotMatch(axl, /event-exposure|what's on the event list/, 'the deleted event board is not offered')
 })
 

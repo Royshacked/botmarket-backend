@@ -93,8 +93,10 @@ test('the handler is unbound and never throws — a failed read is an error line
 })
 
 test('Axl carries get_hotlist, appended last; its description says the run-up rule and never sells a name', () => {
-    // Fifth from last: web_search (2026-11-06), remember_about_user (2026-11-13), ask_specialist and get_coverage_view (2026-11-20) after it.
-    assert.equal(AXL_TOOLS.at(-5).name, 'get_hotlist')
+    // Appended after get_news and before web_search (2026-11-06) — every tool added since is appended after it.
+    const names = AXL_TOOLS.map(t => t.name)
+    assert.equal(names[names.indexOf('get_news') + 1], 'get_hotlist')
+    assert.equal(names[names.indexOf('get_hotlist') + 1], 'web_search')
     assert.match(HOTLIST_TOOL_SPEC.get_hotlist, /run-up names/)
     assert.match(HOTLIST_TOOL_SPEC.get_hotlist, /last three reports all beat/)
     assert.match(HOTLIST_TOOL_SPEC.get_hotlist, /never present a name as a reason a stock will rise/)

@@ -17,7 +17,9 @@ import { makeMarketBriefHandlers, MARKET_BRIEF_TOOL_SPEC } from '../tools/market
 import { makeIndustryViewsHandlers, INDUSTRY_VIEWS_TOOL_SPEC } from '../tools/industryViews.tools.js'
 import { makeNewsHandlers, NEWS_TOOL_SPEC } from '../tools/news.tools.js'
 import { makeHotlistHandlers, HOTLIST_TOOL_SPEC } from '../tools/hotlist.tools.js'
-import { makeCoverageHandlers, COVERAGE_TOOL_SPEC } from '../tools/coverage.tools.js'
+import { makeCompanyViewHandlers, COMPANY_VIEW_TOOL_SPEC } from '../tools/companyView.tools.js'
+import { makeIndustryReadHandlers } from './strategy.agent.service.js'
+import { makeItemStatusHandlers, ITEM_STATUS_TOOL_SPEC } from '../tools/itemStatus.tools.js'
 import { REMEMBER_DESCRIPTION } from '../tools/userProfile.tools.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -83,11 +85,22 @@ export const TOOLS = toolsFor({
     web_search: '',
     // ABOUT THE USER (one-axl.md step 3): a lasting fact the user states — the handler is runAgentStream's. Appended LAST.
     remember_about_user: REMEMBER_DESCRIPTION,
-    // SUBAGENTS (docs/design/modes-and-builders.md §3, 2026-11-20): the event analyst and the technical analyst answer
-    // through Axl — no route, no floor. Appended last, per the rule above. Its handler is the turn's (desks/subagent.js).
-    ask_specialist: `Ask the event analyst or the technical analyst, who answers the user DIRECTLY: its reply goes on screen as written, under its role. event_analyst — who an EVENT reaches through the supply chain (suppliers, customers, infrastructure, substitutes), the house's events, a map's scores and flags, a follow-up on a map. technical_analyst — how ONE stock's price BEHAVES, measured from its candles: what it respects technically (moving averages, VWAP, order blocks), false breaks, ATR, day trade or swing, what its chart shows. Write the question to stand alone (the specialist sees none of this conversation, only its own earlier answers), and name every company with its ticker AND name. After it answers, add at most one short line, or nothing — never repeat it.`,
-    // The analyst's thesis on one name — a VIEW is a read, not new research (Roy, 2026-11-20). Appended last, per the rule above.
-    get_coverage_view: COVERAGE_TOOL_SPEC.get_coverage_view,
+    // SUBAGENTS (docs/design/modes-and-builders.md §3, 2026-11-20): the event analyst, the technical analyst and — asked, a
+    // builder still (2026-11-21) — the analyst answer through Axl: no route, no floor. Appended last, per the rule above. Its handler is the turn's (desks/subagent.js).
+    ask_specialist: `Ask the analyst, the event analyst or the technical analyst — its answer comes back to YOU as material (nothing of it is on screen), and you write the reply in your own voice, its findings said as the house's. research_analyst — a deeper question on a company's case the coverage in get_company_view does not answer: a margin trend, a valuation argument, the latest print against the thesis. event_analyst — who a NEW EVENT reaches through the supply chain (suppliers, customers, infrastructure, substitutes), the house's events, a map's scores and flags, a follow-up on a map. technical_analyst — a chart question the measured profile in get_company_view does not answer: what patterns or order blocks its chart shows now. Write the question to stand alone (the specialist sees none of this conversation, only its own earlier answers), and name every company with its ticker AND name.`,
+    // THE HOUSE'S WORK on one company — coverage, technicals, events, with verdicts; builds what is missing in the background
+    // (docs/design/axl-one-voice.md, Roy 2026-11-21). Appended last, per the rule above.
+    get_company_view: COMPANY_VIEW_TOOL_SPEC.get_company_view,
+    // THE INDUSTRY STRATEGIST'S READS (axl-one-voice.md §7, Roy 2026-11-21) — her handlers, his own descriptions. Appended last.
+    get_industry_news: `The last month's news on one sub-industry's largest companies, dated and attributed. Pass \`industry\` (a GICS sub-industry name or code — get_industry_views gives a name's). For "what's going on in semis".`,
+    get_industry_moves: `How far one sub-industry has MOVED: its basket against SPY over 12 and 24 months and the last 1 and 3, how stretched it is, the HYPE flag, the market regime. Measured facts, not a forecast.`,
+    get_industry_money: `Where the money goes in one sub-industry: its companies' capex, buybacks, dividends and acquisitions (this year against last), insiders buying, funds' crowding, government contracts. Facts to state; capex is the suppliers' revenue.`,
+    get_capex_leaders: `Where corporate capex is rising and falling most across the whole market, by industry — follow the money to the industries it lands in. No arguments.`,
+    list_themes: `The house's THEMES (the industry strategist's) — each with its thesis and its value chain of sub-industries. For "what themes does the house follow", or to find a theme's id.`,
+    get_theme: `One house theme by its id (th_…): the thesis, the value chain link by link with why, how far each link has moved and where its companies put money.`,
+    get_geopolitics: `Geopolitical risk, MEASURED: the index of newspaper attention to geopolitical tension against its ten years, and the house's mapped risks (Taiwan Strait, US–China, the Gulf, the Red Sea, Russia–Ukraine…), elevated ones flagged; pass \`industry\` for the risks that touch it. Attention, not impact.`,
+    // THE MONITORS' VIEW of one of the user's items (axl-one-voice.md §6, Roy 2026-11-21). Appended last.
+    get_item_status: ITEM_STATUS_TOOL_SPEC.get_item_status,
 })
 
 // Without the turn's handler (the social chat — a DM, no session to write the specialist's row into) the tool is not offered.
@@ -149,7 +162,7 @@ export function buildRoleSection(isAdmin) {
  */
 export function buildSurfaceSection(surface) {
     if (surface !== 'social') return ''
-    return 'SURFACE: the SOCIAL CHAT (a direct message, not the main chat). Nothing can be handed to a desk from here — no <route>, <edit> or <show> takes effect. Answer what you can; when the user wants a desk, say plainly to continue in the main chat, where that desk will pick it up. Never say a desk "will take it from here". The specialists are not reachable here either — there is no ask_specialist in a direct message: for how a stock trades, or who an event reaches, say to ask in the main chat, and never pretend to have asked one.'
+    return 'SURFACE: the SOCIAL CHAT (a direct message, not the main chat). Nothing can be handed to a desk from here — no <route>, <edit> or <show> takes effect. Answer what you can; when the user wants a desk, say plainly to continue in the main chat, where that desk will pick it up. Never say a desk "will take it from here". The specialists are not reachable here either — there is no ask_specialist in a direct message: for how a stock trades, who an event reaches, or a view on a company as an investment, say to ask in the main chat, and never pretend to have asked one.'
 }
 
 // The grammar — `<route>desk SYMBOL</route>`, `<edit>kind id</edit>`, `<open>…</open>` — and its
@@ -161,6 +174,7 @@ export function buildSurfaceSection(surface) {
 
 async function chatStream({ messages = [], audience = null, isAdmin = false, surface = 'chat', model: requestedModel, reasoningEffort, userId, onToken, onToolStart, onReasoning, onChart, signal,
     askSpecialist = null,   // the turn's ask_specialist handler (desks/subagent.js) — null where there is no session
+    sessionId = null,       // where a background build's "ready" line goes (get_company_view) — null in a direct message
     specialistHint = null,  // the role the user addressed (the Hotlist's Echo tab, "@event analyst") — Axl asks it
     builds = [],            // the builds in this session, one line each (desks/builds.js buildLines) — step 5b
     _run = runAgentStream,   // the shared contract-test seam — see runAgentStream in agentIO.js
@@ -173,7 +187,9 @@ async function chatStream({ messages = [], audience = null, isAdmin = false, sur
     _industryViewsHandlers = makeIndustryViewsHandlers,
     _newsHandlers = makeNewsHandlers,
     _hotlistHandlers = makeHotlistHandlers,
-    _coverageHandlers = makeCoverageHandlers,
+    _companyViewHandlers = makeCompanyViewHandlers,
+    _industryReadHandlers = makeIndustryReadHandlers,
+    _itemStatusHandlers = makeItemStatusHandlers,
     _venueSection = buildVenueSection,
 } = {}) {
     // The venue rides the last USER message, not the system prompt: free cash moves whenever
@@ -239,9 +255,13 @@ ${audienceBlock}` : ''}` },
         ..._newsHandlers(),
         // Unbound: the hotlist is built once for everyone.
         ..._hotlistHandlers(),
-        // Unbound: coverage is the house's.
-        ..._coverageHandlers(),
         ..._experienceHandlers(userId),
+        // Bound to the user (their own events) and the session (the "ready" line).
+        ..._companyViewHandlers({ userId, sessionId }),
+        // Unbound: the industry strategist's work is the house's, the same for every reader.
+        ..._industryReadHandlers(),
+        // Bound: the user's own items, owner-checked.
+        ..._itemStatusHandlers(userId),
         ...(askSpecialist ? { ask_specialist: askSpecialist } : {}),
     }
     // The user addressed a specialist (a tab, a mention): the question is its — Axl asks it rather than answering.

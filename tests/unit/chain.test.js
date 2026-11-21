@@ -274,3 +274,26 @@ test('BUSY is about real work: Atlas’s own sleeve never asks, and a state that
     await argusPicked(r, s)
     assert.equal(r.queued.at(-1).agent, 'mentor')
 })
+
+// A COVERAGE reopened through Axl's <edit> is a REVISION BUILD (Roy, 2026-11-21: "I am revising NVDA — instead of the
+// building line it only put a chip"): the analyst re-models it in the background; other kinds reopen as before.
+test('an <edit> of coverage starts the analyst\'s revision build; a setup\'s edit does not', async () => {
+    const { db } = memDb()
+    const sessions = makeSessionService({ getDb: async () => db })
+    const begun = []
+    const runner = makeChainRunner({
+        sessions, loadUser: async (id) => ({ _id: id, role: 'trader' }),
+        findEdit: async ({ kind }) => ({ ok: true, id: kind === 'coverage' ? 'cov_NVDA_1' : 'set_1', doc: kind === 'coverage' ? { id: 'cov_NVDA_1', symbol: 'NVDA' } : { id: 'set_1', asset: 'AMD' } }),
+        sealing: { openForEdit: async () => ({ agent: 'analyst' }), sealFromSession: async () => ({}) },
+        builds: { begin: async (a) => { begun.push(a); return { run: true } } },
+    })
+    runner.bindRunQueued(async () => ({}))
+    const s = await sessions.getActive({ userId: 'u1' })
+    await runner.afterTurn({ user, sessionId: s.sessionId, agent: 'axl', origin: 'user', out: { payload: { reply: 'Reopening it.', edit: { kind: 'coverage', ref: 'NVDA' } } } })
+    assert.equal(begun.length, 1)
+    assert.equal(begun[0].agent, 'analyst')
+    assert.equal(begun[0].title, 'NVDA revision')
+    assert.match(begun[0].text, /REVISE the NVDA thesis/)
+    await runner.afterTurn({ user, sessionId: s.sessionId, agent: 'axl', origin: 'user', out: { payload: { reply: 'Reopening it.', edit: { kind: 'setup', ref: 'AMD' } } } })
+    assert.equal(begun.length, 1, 'a setup reopens on its desk, no build')
+})
