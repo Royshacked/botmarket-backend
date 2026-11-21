@@ -23,8 +23,6 @@ import { themeService } from '../api/strategy/theme.service.js'
 import { scanIndustry, scanTheme, pickForWeek } from '../api/strategy/changeScan.service.js'
 import { assessIndustry, assessTheme } from './industryAssessmentRun.service.js'
 import { runHouseScan } from './houseScan.service.js'
-import { queueProfiles } from './proteusQueue.service.js'
-import { profileHouseBook } from './hotlistBehaviour.service.js'
 import { houseResearchService, RESUME_WEEKS } from './houseResearch.service.js'
 import { houseLedgerUserId, listAdminUserIds } from '../api/user/user.model.js'
 import { postCard } from './notifyCard.js'
@@ -34,16 +32,6 @@ import { logger } from './logger.service.js'
 
 const LOG = '[pythiaWeekly]'
 
-/**
- * The house scan's picks queued for Proteus's measured profile (proteus.md §4.5). Returns the scan's result untouched; a
- * queue that throws never fails the week. Exported for tests.
- */
-export function profileHousePicks(house, queue = queueProfiles) {
-    try { queue((house?.queued ?? []).map(q => q?.symbol).filter(Boolean), { source: 'house_scan' }) } catch (err) {
-        logger.warn(LOG, 'house picks not queued for Proteus', { error: err.message })
-    }
-    return house
-}
 export const COLLECTION = 'pythia_weekly'
 /** Weeks of history kept; older weeks are deleted when a week completes. */
 export const KEEP_WEEKS = 26
@@ -67,12 +55,11 @@ const _deps = {
     maxUsd: () => config.pythiaWeeklyMaxUsd,
     // Step 7: the week's FOR SWING / FOR LONG TERM verdicts send names to Prometheus's research queue.
     // Argus's picks also get Proteus's measured profile, in the background (proteus.md §4.5) — never holds up the week.
-    houseScan: (results, opts) => runHouseScan(results, undefined, opts).then(profileHousePicks),
+    houseScan: (results, opts) => runHouseScan(results, undefined, opts),
     // ...and Prometheus researches them by himself (house-research-chain.md steps 5-6).
     research: (week) => houseResearchService.researchWeek(week),
     resumeResearch: (weeks) => houseResearchService.resumeWeeks(weeks),
     // The covered book's weekly profile (the Hotlist badges, proteus.md step 5).
-    profileBook: () => profileHouseBook(),
     db: () => getDb(),
     now: () => new Date().toISOString(),
     // The stale-engine card (pythia-two-verdicts.md §3.2): every admin, through the one card transport.
@@ -373,9 +360,6 @@ export async function runWeekly({ force = false, dueOnly = false, by = null, lim
                 // Filter 2 starts by itself (step 5); a run already going leaves it to the monitor's next tick.
                 await Promise.resolve(deps.research?.({ ...(week ?? {}), id, asof, started_at: week?.started_at ?? started, house_scan })).catch(() => null)
             }
-            // The covered book's measured profiles, at this quiet hour (proteus.md step 5, Roy 2026-11-13 option b): the
-            // Hotlist's Swing and Long term badges are ready before anyone looks. In the background; never holds up the week.
-            Promise.resolve().then(() => deps.profileBook?.()).catch(() => {})
             await _prune(coll)
         }
         const published = results.filter(r => r.outcome === 'published').length

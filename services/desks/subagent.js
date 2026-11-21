@@ -80,7 +80,8 @@ export function makeAskSpecialist({ sessions = sessionService, desks = null } = 
             const messages = await sessions.messagesForAgent({ sessionId, userId: user._id, agent, afterSeq: summary?.throughSeq ?? 0 })
             // ONE VOICE (docs/design/axl-one-voice.md §5, Roy 2026-11-21): its tokens are Axl's material, not the chat's —
             // only its tool status (and a chart it draws) reach the screen, as Axl's working.
-            const emitAs = (type, data) => (type === 'token' ? undefined : emit(type, data))
+            // A reset too: the subagent's text was never on screen, and a reset frame would clear Axl's own.
+            const emitAs = (type, data) => (type === 'token' || type === 'reset' ? undefined : emit(type, data))
             const common = deskCommon({ messages: buildConversation({ messages: messages ?? [], agent, summary }), user, signal, emit: emitAs, audience })
             let chart = null
             const deskOnChart = common.onChart

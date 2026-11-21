@@ -1,5 +1,8 @@
 # Echo — the event desk (design, 2026-11-19)
 
+> **2026-11-21:** the hand-off to Proteus (§1 item 4, §6) is gone — Proteus's profile queue was dropped with the old engine; a
+> profile builds in seconds when a name is opened or asked about ([proteus-v2.md](proteus-v2.md) §6). Names go on to Prometheus only.
+
 > **Superseded in its engine half the same day.** Roy, 2026-11-19: "I want Echo aligned with the design" — Echo is now
 > built to the simulator doc, in the backend: [echo-pipeline.md](echo-pipeline.md). What stays from here: the desk (the
 > event analyst, routed from Axl), the Hotlist tab, the hand-off to Prometheus and Proteus (§6), the user's own events.

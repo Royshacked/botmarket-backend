@@ -21,6 +21,7 @@
 
 import { logger } from '../../services/logger.service.js'
 import { registerTurn } from './turnRegistry.js'
+import { STREAM_RESET } from '../../services/llmStream.util.js'
 
 const HEARTBEAT_MS = 30000
 
@@ -84,7 +85,8 @@ export function startSseStream(req, res, { turnId = null, userId = null } = {}) 
  */
 export function sseAgentCallbacks(sendEvent) {
     return {
-        onToken:     (text)         => sendEvent('token',     { text }),
+        // STREAM_RESET (llmStream.util): what streamed is withdrawn — a `reset` frame, the chat clears the turn's text.
+        onToken:     (text)         => (text === STREAM_RESET ? sendEvent('reset', {}) : sendEvent('token', { text })),
         // `targets`: the names the call is about, once it runs (agentIO.announceTargets) — absent at its start.
         onToolStart: (tool, extra)  => sendEvent('status',    { tool, ...(extra?.targets?.length ? { targets: extra.targets } : {}) }),
         onReasoning: (text, source) => sendEvent('reasoning', { text, source }),

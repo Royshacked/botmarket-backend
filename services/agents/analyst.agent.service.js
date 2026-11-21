@@ -15,7 +15,7 @@ import { dirname, join } from 'path'
 import { getFundamentals, getEarnings, getStockPeers, getSectorSnapshot, getMacroSnapshot } from '../../providers/fmp.provider.js'
 import { getSecFilings } from '../../providers/sec.provider.js'
 import { makePromptLoader, cleanReply, makeToolHandler, buildAudienceSection, attachTurnContext, LANGUAGE_RULE, VOICE_RULE, BREVITY_RULE, VENUE_RULE, buildStandingProposalRule, COMMON_TOOL_HANDLERS, cachedBlock, normalizeMessages } from '../agentUtils.js'
-import { makeTradingContextHandlers, buildVenueSection, TRADING_CONTEXT_TOOL_SPEC } from '../tools/tradingContext.tools.js'
+import { makeTradingContextHandlers, buildVenueSection } from '../tools/tradingContext.tools.js'
 import { makeMarketHoursHandlers, MARKET_HOURS_TOOL_SPEC } from '../tools/marketHours.tools.js'
 import { buildTagCaptures } from '../llmStream.util.js'
 import { DESKS } from '../desks/registry.js'
@@ -66,7 +66,8 @@ export const TOOLS = [
         get_macro_snapshot: `Hard macro regime: treasury curve, key econ indicators, sector move. The top-down backdrop for a long-horizon thesis. No arguments.`,
         get_short_interest: `Short % of float + days-to-cover for a US single stock (FINRA, ~2-week lag). Crowded-bearish / squeeze context for the thesis. No ETFs/crypto.`,
         get_options_context: `Options positioning for a US equity/ETF: put/call ratio + ATM implied vol (nearest expiry). How big a move the market is pricing around a catalyst.`,
-        get_trading_context: TRADING_CONTEXT_TOOL_SPEC.get_trading_context,
+        // The account tool TURNED OFF 2026-11-21 (Roy): the user's accounts have no place in coverage — on prod it fed a
+        // TSLA coverage build the paper account's numbers, and the build opened a trade.
         check_broker_symbol: `Check whether a name is actually TRADABLE at the user's connected live broker, and what the broker calls it. Coverage on a name the user physically cannot buy is research nobody can act on — check before initiating, and say so in the thesis if the name is unavailable. tradable null means the broker could not be reached: UNKNOWN, never treat as unavailable.`,
         // APPENDED, never inserted — the snapshot compares by index and prompt caching keys off
         // the array prefix.

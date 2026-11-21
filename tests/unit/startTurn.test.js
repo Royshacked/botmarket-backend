@@ -86,12 +86,12 @@ test('a subagent is never answered directly — its tab, an @mention, a floor le
     const { sessions, startTurn, ran } = rig()
     const s = await sessions.getActive({ userId: 'u1' })
     await startTurn({ user, sessionId: s.sessionId, text: 'walk me through the NVDA event', agent: 'echo', turnId: 'a' })
-    await startTurn({ user, sessionId: s.sessionId, text: '@technical analyst how does TSLA behave?', turnId: 'b' })
+    await startTurn({ user, sessionId: s.sessionId, text: '@event analyst who does the recall reach?', turnId: 'b' })
     await sessions.setFloor({ sessionId: s.sessionId, userId: 'u1', agent: 'echo' })
     await startTurn({ user, sessionId: s.sessionId, text: 'show me the hotlist', turnId: 'c' })
     await tick()
     assert.deepEqual(ran.map(r => `${r.agent}:${r.input?.via ?? '-'}:${r.text}`),
-        ['axl:echo:walk me through the NVDA event', 'axl:proteus:how does TSLA behave?', 'axl:echo:show me the hotlist'])
+        ['axl:echo:walk me through the NVDA event', 'axl:echo:who does the recall reach?', 'axl:echo:show me the hotlist'])
     // The stock picker still answers while the trader has the user with it (its floor).
     await sessions.setFloor({ sessionId: s.sessionId, userId: 'u1', agent: 'scanner' })
     await startTurn({ user, sessionId: s.sessionId, text: 'the second one', turnId: 'd' })

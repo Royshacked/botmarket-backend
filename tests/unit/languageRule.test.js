@@ -33,7 +33,6 @@ const DESKS = [
     'marketBrief.service.js',
     'mentor.agent.service.js',
     'portfolio.agent.service.js',
-    'proteus.agent.service.js',
     'scanner.agent.service.js',
     'strategy.agent.service.js',
 ]
@@ -129,7 +128,7 @@ test('the rule rides on the CACHED prefix, not the volatile tail', () => {
 // never sizes, places or holds anything, so he carries neither the block nor the tools.
 // Echo (2026-11-19) likewise: he maps events to companies — the house's forward test and the user's own maps — and never
 // sizes, places or holds anything.
-const NO_VENUE = ['marketBrief.service.js', 'strategy.agent.service.js', 'proteus.agent.service.js', 'echo.agent.service.js']
+const NO_VENUE = ['marketBrief.service.js', 'strategy.agent.service.js', 'echo.agent.service.js']
 const VENUE_DESKS = DESKS.filter(f => !NO_VENUE.includes(f))
 
 test('every desk that has a user carries the venue rule, exactly once', () => {

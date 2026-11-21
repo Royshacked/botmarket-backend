@@ -354,7 +354,7 @@ export const RECEPTION_RULE = `
 
 ## A question that is not yours — back to reception
 
-When the user asks you something that belongs to another role — not a request to go there, just a question outside your own work ("is it a good business?" to the technical analyst, "how does it trade?" to the analyst, a portfolio question while building one trade, the news, their account) — do not answer it, and do not just name the role and stop. Hand it back to reception, which sends it on to the right role at once:
+When the user asks you something that belongs to another role — not a request to go there, just a question outside your own work ("is it a good business?" to the trader, "how does it trade?" to the analyst, a portfolio question while building one trade, the news, their account) — do not answer it, and do not just name the role and stop. Hand it back to reception, which sends it on to the right role at once:
 
 <route>${RECEPTION}</route>
 <open>is NVDA a good business at this price?</open>

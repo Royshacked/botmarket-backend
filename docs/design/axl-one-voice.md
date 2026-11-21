@@ -29,7 +29,7 @@ one voice — that happens to have something a regular LLM does not: our coverag
 | Part | Source | Valid when | Not valid → |
 |---|---|---|---|
 | Coverage | `coverage` (api/analyst/coverage.service.js) | status `active`; a standing target the latest revision did not withdraw; no re-model due (see §3) | **none**: initiate in the background · **stale / withdrawn**: re-model in the background |
-| Technical profile | `proteus_profiles` (behaviourProfile.service.js) | `computed_at` within 7 days and the current `PROFILE_VERSION` (the existing rule) | computed **inline** — `profileFor`, code only, seconds; nothing in the background |
+| Technical profile | `proteus_profiles` (behaviourProfile.service.js) — **since 2026-11-21 `stock_profiles` (stockProfile.service.js, Proteus v2, [proteus-v2.md](proteus-v2.md)): each scale's `built` within 7 days (the day scale 1 day) and the current `VERSION`** | `computed_at` within 7 days and the current `PROFILE_VERSION` (the existing rule) | computed **inline** — `profileFor`, code only, seconds; nothing in the background |
 | Events | `echo_events` — house events scored/checked/watching whose `scores.links` hold the ticker, and the user's own | the event's own status (expired ones are left out) | nothing to build: no event reaching it is an answer ("no mapped event reaches it") |
 
 3. **Axl answers in one voice, with attribution kept**: "our analyst rates it buy, target $X (revised Nov 20) because…",

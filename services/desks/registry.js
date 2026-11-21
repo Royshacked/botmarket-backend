@@ -65,17 +65,11 @@ export const DESKS = Object.freeze({
         does: 'finds ONE tradeable name when the user has none, and hands it back here to build',
         scope: 'main', admin: false, maxMessages: 10,
     }),
-    // Proteus, the technical analysis expert (docs/design/proteus.md, 2026-11-12): how a stock's price behaves —
-    // measured from its candles, and what its chart shows now. APPENDED after Argus so the routable desks' order in
-    // every prompt stays as it was. Axl ("how does TSLA behave?") and Mentor send users here; the other desks do not,
-    // so only Mentor's route rule — not every desk's cached prompt — changes. Opened directly from the desks list too.
-    proteus: Object.freeze({
-        agent: 'proteus', desk: 'technicals', brand: 'Proteus', role: 'technical analyst', entityKind: null, editable: false, routable: true, routedFrom: Object.freeze(['mentor']), subagent: 'technical_analyst',
-        does: "reads how a stock's price behaves — what it respects technically, if anything, its ATR and false breaks, day trade or swing",
-        scope: 'main', admin: false, maxMessages: 10,
-    }),
+    // Proteus is no desk since 2026-11-21 (docs/design/proteus-v2.md P1): no chat, no subagent — his measured profile is
+    // the house's technical read, read by Axl (get_company_view) and Mentor (his context, get_levels_for). Old chat rows
+    // by `proteus` still render (the frontend's plain fallback).
     // Echo, the event analyst (docs/design/echo-desk.md, 2026-11-19): which companies an event reaches through the supply
-    // chain — the forward test's events (the engine's) and any event the user names. APPENDED after Proteus, so the
+    // chain — the forward test's events (the engine's) and any event the user names. APPENDED after Argus, so the
     // routable desks' order in every prompt stays as it was; only Axl sends users here (routedFrom), so only Axl's route
     // rule changes. Opened directly from the desks list and from the Hotlist's Echo tab too.
     echo: Object.freeze({

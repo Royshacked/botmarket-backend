@@ -619,12 +619,6 @@ test('A company question: the news for what happened, the house\'s work for a vi
     assert.match(prompt, /\*\*Never route a view question to a builder\.\*\*/)
 })
 
-test('The technical analyst labels the two kinds of answer in plain words, never as tags', () => {
-    const p = readFileSync(new URL('../../prompts/proteus_system_prompt.md', import.meta.url), 'utf8')
-    assert.match(p, /Say it in PLAIN WORDS inside the sentence/)
-    assert.match(p, /Never a tag, a\s+bracket or a capitalised label of your own/)
-})
-
 test('chartLine names the chart a wordless reply showed; nothing without a ticker', async () => {
     const { chartLine } = await import('../../services/desks/sessionTurn.js')
     assert.equal(chartLine({ ticker: 'NVDA', timeframe: 'day' }), "Here's the NVDA daily chart.")

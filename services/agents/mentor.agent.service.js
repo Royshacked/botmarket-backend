@@ -9,7 +9,8 @@ import { DESKS } from '../desks/registry.js'
 import { makeRouteCapture, buildRouteRule } from '../routing.util.js'
 import { TRADING_TOOLS, buildTradingToolHandlers } from '../tools/trading.tools.js'
 import { THESIS_STRUCTURE_HANDLERS, thesisTurnFacts } from '../tools/thesisStructure.tools.js'
-import { isDayTrade } from '../tools/behaviourProfile.tools.js'
+import { isDayTrade } from '../stockProfile.engine.js'
+import { STOCK_PROFILE_HANDLERS, LEVELS_FOR_DESCRIPTION } from '../tools/stockProfile.tools.js'
 import { STRUCTURE } from '../swingStructure.service.js'
 import { toolsFor } from '../agentTools.registry.js'
 import { consultDescription } from '../deepThink.service.js'
@@ -109,6 +110,8 @@ export const MENTOR_TOOLS = [
     ...toolsFor({
         get_price_structure: `The \`thesis\` lens's chart facts, on the hour (a day trade: intraday · day — no break candidate, no heavy days), day (swing) or week (long-term) chart: the confirmed swings with their dates, the normal daily move (ATR), WHO IS IN CONTROL (buyers since a close over the last swing high, sellers since a close under the last swing low) and the context of the last break (reversal · continuation · breakout), the last fall (its start and its low), the heavy-volume days of the last 60 sessions, and CANDIDATE levels from the tested rule — the stop under the sellers' last swing, a deeper one under the whole fall (with the last date price traded under it), the target at the start of the fall (or a measured move at the highs) — and the BREAK CANDIDATE (the nearest high over the price, which a day close over arms scenario B; B's ASSUMED stop, target and context). The candidates are a starting point: judge the stop and the targets yourself against the chart and the candles, and say where you differ and why.`,
         get_entry_level: `The \`thesis\` lens's entry arithmetic. After you judged the stop and the target and the USER gave their risk limit (the stop at most X% from the entry) and/or their minimum reward to risk: the highest entry worth paying (the lowest, on a short) — the entry leg's price, valid "at the level and below". Never compute it yourself; read it out. It also says the last date price traded past the stop you gave — the date for "not traded under since", never a guess.`,
+        // PROTEUS v2 (docs/design/proteus-v2.md §3, P3): a ratio the user asks for, measured on the stock.
+        get_levels_for: LEVELS_FOR_DESCRIPTION,
     }),
     ...toolsFor({
         [CLOSE_TOOL]: `Close the saved setup being edited here: its status turns to closed and the trade monitor stops watching it. It cannot be reopened. Call it only when the USER has said to close it or let it go, never on your own read that the trade is gone: say that, and ask. Saying a setup is closed without this call leaves it open.`,
@@ -134,7 +137,7 @@ async function chatStream({
     messages, chatState = emptyMentorState(), accounts = [], mainAccountId = null,
     clientTime = null, audience = null, seed = null,
     prometheusRead = null,   // Prometheus's read on the build's name for its horizon (mentorReads.readFor; argus-rework.md step 3)
-    proteusRead = null,      // Proteus's measured profile on the name, one line + its date (mentor.desk; argus-rework.md §2.3)
+    proteusRead = null,      // the technical read on the name (Proteus v2, its scale; mentor.desk _proteusRead)
     readNow = null,          // (target) → its read now — the post-turn re-check when this turn confirmed the horizon
     model: requestedModel, reasoningEffort, userId,
     onToken, onAsset, onInterval, onChart, onToolStart, onReasoning, onCoverage, signal,
@@ -181,6 +184,7 @@ async function chatStream({
         }),
         ..._newsHandlers(),
         ...THESIS_STRUCTURE_HANDLERS,
+        ...STOCK_PROFILE_HANDLERS,
         get_analyst_actions: makeToolHandler('get_analyst_actions',
             ({ symbols, limit }) => _analystActions(Array.isArray(symbols) ? symbols : [], limit),
             (err) => `Could not fetch analyst actions: ${err.message}`, LOG),
@@ -262,7 +266,7 @@ async function chatStream({
     // the system prompt: free cash moves whenever anything fills, so a volatile system block
     // would sit ahead of the whole conversation in the cache prefix. See buildVenueSection.
     const builtMessages = attachTurnContext(
-        attachTurnContext(normalizeMessages(messages, MAX_MESSAGES), _buildTurnContext(turnState, clientTime, incoming.settled, { delegated: incoming.delegated, hasAccount, mode, thesisFacts, waitingLine, pullback: proteusRead?.pullback ?? null })),
+        attachTurnContext(normalizeMessages(messages, MAX_MESSAGES), _buildTurnContext(turnState, clientTime, incoming.settled, { delegated: incoming.delegated, hasAccount, mode, thesisFacts, waitingLine, pullback: proteusRead?.noise ?? null })),
         venue)
 
     // Coverage is CUMULATIVE across the conversation: the model re-states everything it has read,
@@ -833,26 +837,23 @@ THE ANALYST'S READ on ${on} could not be checked just now. If it matters to the 
 }
 
 /**
- * PROTEUS'S READ — the name's measured price behaviour as one line, with its date (argus-rework.md §2.3). Weighed beside
- * Prometheus's: what holds technically (usually nothing), how often its breaks are false and how deep (stop room), its
- * ATR, the day-trade / swing fit. Empty when there is none. Pure.
+ * THE TECHNICAL READ — Proteus v2's profile of the name on the trade's scale (docs/design/proteus-v2.md §5): how it moves
+ * in its own σ, its natural stop and target and their record, trend or revert, its regime. `p` = `{ symbol, at, scale,
+ * read: string[] }` (mentor.desk _proteusRead). Empty when there is none. Pure.
  */
 export function _buildProteusSection(p) {
-    if (!p?.brief || !p.symbol) return ''
-    // 5b (proteus.md, Roy 2026-11-13, option A): the read as the levels he may USE and the ones he must not lean on. The
-    // stop rule is unchanged — the old line here ("a stop under a swing low sits inside the sweep depth — use it for the
-    // stop's room") moved a tested stop on an untested number; the stop's room is now context for the deeper stop only.
-    const read = Array.isArray(p.read) && p.read.length ? p.read : [p.brief]
+    const read = Array.isArray(p?.read) ? p.read : []
+    if (!p?.symbol || !read.length) return ''
     return `
 
-THE TECHNICAL ANALYST'S READ on ${p.symbol} (measured ${String(p.at ?? '').slice(0, 10) || 'this week'}) — counted from its candles, his numbers, not yours:
-${read.map(l => `  - ${l}`).join('\n')}
-  How you weigh it for your levels: a line that HOLDS may anchor an entry or a stop — say which and why, with its numbers.
-  Nothing else in it is support: never put a level "at the 50 MA" or "at the 61.8%" on a name where it did not hold. The
-  trading range's low and high are structure, like any swing. Your stop rule does not change: the stop's room is the
-  cost of the tight stop — say it in one line when you offer the deeper stop, never move the stop on it unasked. Say
-  the technical analyst's read in one line when you say the horizon or set the stop — by the job, never a name: these
-  numbers are "the technical read", never "the analyst's" (the analyst is the business).`
+THE TECHNICAL READ on ${p.symbol} — the ${p.scale ?? 'swing'} scale, measured ${String(p.at ?? '').slice(0, 10) || 'this week'} from its own candles (numbers, not yours):
+${read.map(l => `  ${l.startsWith('- ') ? `  ${l}` : `- ${l}`}`).join('\n')}
+  How you weigh it for your levels: it is how this name MOVES — a description, not support and not an edge; never put a
+  level "at 1.5σ" as if the market respects it. Its natural stop is where its noise says: a stop tighter than that is
+  shaken out by its ordinary counter-moves — say so in one line when your stop is tighter, never move the stop unasked.
+  Check the time: if its levels usually take longer than the trade's horizon, say it. When the USER names a reward : risk
+  ("I want 3:1"), call get_levels_for and say what that ratio costs on this name. Say the read in one line when you set
+  the stop — as "the technical read", never "the analyst's" (the analyst is the business).`
 }
 
 /**
@@ -1014,25 +1015,35 @@ const _distance = (from, to) => `$${Math.round(Math.abs(from - to) * 100) / 100}
 /** The chart a thesis plan reads: a long-term trade the week, a day trade the hour (Roy, 2026-11-14: "stop in 1hr"), a swing the day. */
 const _lensTimeframe = (d) => (d?.type === 'long_term' || /week/i.test(d?.timeframe ?? '') ? 'week' : isDayTrade(d?.type) ? 'hour' : 'day')
 
-/** The profile's timeframe for a structure chart (thesisTurnFacts' `timeframe`). */
-const _PROFILE_TF = Object.freeze({ hour: '1hour', day: 'day', week: 'week' })
+/** The profile's scale for a structure chart (thesisTurnFacts' `timeframe`; proteus-v2 §2b). */
+// A short term swing and a swing both read the day chart (v2 added the short term swing scale).
+const _SCALES_OF_TF = Object.freeze({ hour: ['day'], day: ['short', 'swing'], week: ['long'] })
 
 /**
- * ITS USUAL PULLBACK, CHECKED IN CODE (Roy, 2026-11-17: "check the stop against the name's usual pullback" — the prompt
- * rule alone was skipped on the ARMK drive). When the stop on the worksheet (else the structure stop) sits ABOVE the
- * median depth of this name's pullbacks before a move, on the stop's own chart, the turn says so with the prices — the
- * trader says it and offers the choice; the stop is never moved for him. Long side only (the house trades long). PURE.
+ * ITS NOISE, CHECKED IN CODE (Roy, 2026-11-17: "check the stop against the name's usual pullback" — the prompt rule alone
+ * was skipped on the ARMK drive; since 2026-11-21 measured by Proteus v2: the counter-moves inside moves that went on).
+ * When the stop on the worksheet (else the structure stop) is CLOSER to the entry than this name's noise, on the stop's own
+ * scale, the turn says so with the prices — the trader says it and offers the choice; the stop is never moved for him.
+ * `noise` = `{ scale, side, stop_pct, stop_sig }` (mentor.desk _proteusRead). Each side its own noise. PURE.
  */
-export function _buildPullbackSection(facts, zone, draft) {
-    if (!zone || !Number.isFinite(zone.median) || facts?.side === 'short') return ''
-    if (facts?.timeframe && _PROFILE_TF[facts.timeframe] !== zone.timeframe) return ''   // another chart's pullbacks
-    const aStop = Number(draft?.scenarios?.[0]?.stop_legs?.[0]?.price)
+export function _buildPullbackSection(facts, noise, draft) {
+    if (!noise || !(noise.stop_pct > 0)) return ''
+    const short = facts?.side === 'short'
+    if ((noise.side ?? 'long') !== (short ? 'short' : 'long')) return ''
+    if (facts?.timeframe && !(_SCALES_OF_TF[facts.timeframe] ?? []).includes(noise.scale)) return ''   // another scale's noise
+    const sc = draft?.scenarios?.[0]
+    const aStop = Number(sc?.stop_legs?.[0]?.price), aEntry = Number(sc?.entry_legs?.[0]?.price)
     const stop = Number.isFinite(aStop) && aStop > 0 ? aStop : Number(facts?.stop)
-    if (!Number.isFinite(stop) || stop <= zone.median) return ''
+    const entry = Number.isFinite(aEntry) && aEntry > 0 ? aEntry : Number(facts?.price ?? facts?.last ?? facts?.close)
+    if (!Number.isFinite(stop) || !(entry > 0)) return ''
+    const dist = short ? stop / entry - 1 : 1 - stop / entry
+    if (!(dist > 0) || dist >= noise.stop_pct) return ''
+    const at = Math.round(entry * (short ? 1 + noise.stop_pct : 1 - noise.stop_pct) * 100) / 100
     const which = Number.isFinite(aStop) && aStop > 0 ? "the worksheet's stop" : 'the structure stop'
+    const pct = (x) => `${Math.round(x * 1000) / 10}%`
     return `
 
-ITS USUAL PULLBACK (checked: ${which} ${stop} sits ABOVE it) — on this chart, from its latest top ${zone.top}, half of this name's pullbacks before a move went deeper than ${zone.median}; the middle half ended ${zone.lo}–${zone.hi}. SAY IT in one line with these prices: an ordinary pullback of this name would likely reach ${stop}. OFFER the choice — the entry waits lower, near ${zone.median} (fewer fills, a better price), or the stop goes under ${zone.median} (more room, fewer shares for the same risk). Keep ${which} on the worksheet until they pick; never move it on your own. A description of how this name moves, not a tested edge — never call it support. Say it once.`
+ITS NOISE (checked: ${which} ${stop} is ${pct(dist)} from the entry ${entry} — inside it) — on this scale, an ordinary ${short ? 'rally inside a fall' : 'pullback inside a run'} of this name reaches ~${pct(noise.stop_pct)} (${noise.stop_sig}σ of its usual move): from ${entry} that is ${at}. SAY IT in one line with these prices: an ordinary ${short ? 'rally' : 'pullback'} of this name would likely reach ${stop}. OFFER the choice — the entry waits ${short ? 'higher' : 'lower'} (fewer fills, a better price), or the stop goes ${short ? 'over' : 'under'} ${at} (more room, fewer shares for the same risk). Keep ${which} on the worksheet until they pick; never move it on your own. A description of how this name moves, not a tested edge — never call it support. Say it once.`
 }
 
 /**

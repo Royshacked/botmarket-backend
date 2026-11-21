@@ -21,7 +21,7 @@
 import OpenAI from 'openai'
 import { config } from '../services/config.js'
 import { logger } from '../services/logger.service.js'
-import { createTagSuppressor, TOOL_BUDGET_LANDING, EMPTY_REPLY_NUDGE, MAX_PARALLEL_TOOLS, makeVisionBudget } from '../services/llmStream.util.js'
+import { createTagSuppressor, TOOL_BUDGET_LANDING, EMPTY_REPLY_NUDGE, LEAK_REPLY_NUDGE, isChannelLeak, MAX_PARALLEL_TOOLS, makeVisionBudget } from '../services/llmStream.util.js'
 import { mapLimit } from '../services/concurrency.util.js'
 import { _runTool } from './anthropic.provider.js'
 import { WEB_SEARCH_COMPAT, makeWebSearchCompatHandler } from '../services/tools/webSearchCompat.tools.js'
@@ -432,6 +432,15 @@ export async function streamOpenAICompatWithTools({
             if (!text.trim() && i > 0 && !nudged && stopReason !== 'max_tokens') {
                 nudged = true
                 messages.push({ role: 'user', content: EMPTY_REPLY_NUDGE })
+                continue
+            }
+            // A round that LEAKED its tool syntax as the reply (isChannelLeak) is no reply either: asked once to write it,
+            // the leaked text not kept (the stored reply is the return value — the cleaner drops any leak left in it).
+            if (isChannelLeak(text) && !nudged) {
+                logger.warn(LOG, `channel leak on ${wire}`, { round: i, chars: text.length, sample: text.slice(0, 120) })
+                nudged = true
+                suppressor.reset()   // what streamed of the leak is withdrawn from the chat
+                messages.push({ role: 'user', content: LEAK_REPLY_NUDGE })
                 continue
             }
             suppressor.flush()

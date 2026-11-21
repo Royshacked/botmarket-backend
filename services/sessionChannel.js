@@ -33,6 +33,7 @@ export function turnEmitter({ userId, sessionId, turnId, agent, send = wsEmit })
         // the chat draws its words under that role. The replay keeps only the turn's own agent's text.
         emit(type, data, as = agent) {
             if (type === 'token' && typeof data?.text === 'string' && as === agent) live.text += data.text
+            if (type === 'reset' && as === agent) live.text = ''   // a replay must not bring the withdrawn text back
             send(uid, 'session_delta', { sessionId, turnId, agent: as, type, data })
         },
         status(status, extra = {}) {

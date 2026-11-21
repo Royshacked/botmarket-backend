@@ -1,5 +1,8 @@
 # One Axl — one assistant, many roles (design, 2026-11-13)
 
+> **2026-11-21:** Proteus / the technical analyst is no longer a role in the chat — rebuilt as a stored profile read by
+> code ([proteus-v2.md](proteus-v2.md)); the Technicals flow below is history.
+
 Roy's talk of 2026-11-13. Moving from agent to agent in the chat is confusing: after Axl hands the user to a desk,
 a new name answers, and a hand-back puts three speakers on screen in a row ("passing it to Axl", "Prometheus will
 look at it", the answer). The user meets ONE assistant. The specialists stay — as roles under it.

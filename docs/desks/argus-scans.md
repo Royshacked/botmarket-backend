@@ -14,7 +14,8 @@
 > `get_sector_snapshot`, `get_analyst_actions`), the house-industries first look, the hand-off module and the grounding
 > ledger are gone (archived). THE PICK GATE is code: a pick not shown this turn gets a second look at every house list
 > today, and is dropped otherwise, with a line under the reply. One short prompt (`scanner_system_prompt.md`). His chart
-> tools stay for close calls until Proteus takes them. Argus the house agent — the house scan, Book timing, the sleeve
+> tools stay for close calls until Proteus takes them (2026-11-21: Proteus is now a profile with no chart tools —
+> [proteus-v2.md](../design/proteus-v2.md) — so they stay with Argus and Mentor). Argus the house agent — the house scan, Book timing, the sleeve
 > screen — is a different code path and unaffected.
 >
 > Everything below is the desk as it was, kept for the reasoning: the list shape, scoring, editing, the funnel,

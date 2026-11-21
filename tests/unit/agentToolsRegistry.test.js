@@ -11,7 +11,6 @@ import { TOOLS as AXL_TOOLS }       from '../../services/agents/axl.agent.servic
 import { TOOLS as STRATEGY_TOOLS } from '../../services/agents/strategy.agent.service.js'
 import { TRADING_TOOLS }             from '../../services/tools/trading.tools.js'
 import { MENTOR_TOOLS }             from '../../services/agents/mentor.agent.service.js'
-import { TOOLS as PROTEUS_TOOLS }  from '../../services/agents/proteus.agent.service.js'
 import { TOOLS as ECHO_TOOLS }     from '../../services/agents/echo.agent.service.js'
 import { SMC_TOOLS }                from '../../services/tools/smc.tools.js'
 import { VALUATION_TOOLS }          from '../../services/tools/valuation.tools.js'
@@ -55,7 +54,6 @@ const LIVE = {
     trading:   TRADING_TOOLS,
     mentor:    MENTOR_TOOLS,
     axl:       AXL_TOOLS,
-    proteus:   PROTEUS_TOOLS,
     echo:      ECHO_TOOLS,
 }
 
@@ -123,7 +121,9 @@ test('no tool is declared in BOTH the registry and a shared module', () => {
 // Argus's market-wide screen left his kit on 2026-11-11 (docs/design/argus-rework.md): he picks from the house's lists
 // now. No live agent carries these two, but the archived list-building Argus does, and `npm run check:archive` imports
 // it — toolsFor throws on an unknown name. Kept for the archive, listed here so it is a decision, not a hole.
-const ARCHIVE_ONLY = new Set(['screen_candidates', 'get_market_movers'])
+// TURNED OFF 2026-11-21 (Roy: "turn off the tools not in use"): declared by no agent, their schemas and handlers kept so
+// one can be turned back on by declaring it again.
+const ARCHIVE_ONLY = new Set(['screen_candidates', 'get_market_movers', 'get_cycle_analysis', 'get_false_breaks', 'get_indicators', 'get_orderblocks', 'get_peers'])
 
 test('the registry has no orphans — every schema is used by some agent', () => {
     // An unused schema is dead weight that will drift out of sync with reality unnoticed.
@@ -140,7 +140,7 @@ test('the registry has no orphans — every schema is used by some agent', () =>
 //   • axl    — reception authors nothing, and its clause would have ruled out routing/explaining,
 //     i.e. nearly everything it does. A declaration read on every turn and reached for almost never
 //     loses money. See the note at the foot of axl.agent.service.js's TOOLS.
-const CONSULTS = new Set(['strategy', 'portfolio', 'scanner', 'analyst', 'mentor', 'proteus', 'echo'])
+const CONSULTS = new Set(['strategy', 'portfolio', 'scanner', 'analyst', 'mentor', 'echo'])
 
 for (const [agent, live] of Object.entries(LIVE)) {
     test(`${agent}: ${CONSULTS.has(agent) ? 'declares' : 'does not declare'} the reasoning sidecar`, () => {

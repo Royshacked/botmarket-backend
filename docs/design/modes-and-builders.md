@@ -1,5 +1,8 @@
 # Modes and builders — Axl in front, roles as subagents, builds in the background
 
+> **2026-11-21:** the technical analyst (Proteus) is no longer a subagent — `technical_analyst` left `ask_specialist` when
+> Proteus was rebuilt as a stored profile read by code ([proteus-v2.md](proteus-v2.md)). The event analyst is Axl's one subagent.
+
 Decided with Roy 2026-11-20, after the ANT chat (2026-11-19): Axl answered about the ANT IPO, the event analyst took the
 "does it affect other companies?" question and kept the floor, so "show me the hotlist" was answered by the event analyst
 with its own mapped names; the event analyst, seeing only its own segment, did not know ANT was Anthropic.

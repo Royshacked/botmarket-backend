@@ -38,10 +38,10 @@ test('echo is a research-queue source', () => {
     assert.ok(SOURCES.includes(SOURCE))
 })
 
-test('sendNames: Proteus for every name; Prometheus queued only where no read stands', async () => {
+test('sendNames: Prometheus queued only where no read stands; names de-duplicated and upper-cased (no Proteus queue since 2026-11-21)', async () => {
     const d = deps({ reads: { AMD: { state: 'ready' }, MU: { state: 'waiting' }, TSM: { state: 'missing', need: 'view' }, SNDK: { state: 'missing', need: 'reinit' } } })
     const r = await sendNames(['amd', 'MU', 'TSM', 'SNDK', 'STX', 'STX'], (s) => ({ echo: true, why: s }), {}, d)
-    assert.deepEqual(d.calls.profiles, [['AMD', 'MU', 'TSM', 'SNDK', 'STX']], 'every name to Proteus, once, upper-cased')
+    assert.deepEqual(d.calls.profiles, [], 'no profile queue — a profile builds when a name is opened')
     assert.deepEqual(r.names, [{ symbol: 'AMD', read: 'ready' }, { symbol: 'MU', read: 'waiting' }, { symbol: 'TSM', read: 'covered' },
         { symbol: 'SNDK', read: 'queued' }, { symbol: 'STX', read: 'queued' }])
     assert.deepEqual(d.calls.enqueue.map(e => [e.symbol, e.source, e.context.reinit ?? false]), [['SNDK', 'echo', true], ['STX', 'echo', false]])

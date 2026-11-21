@@ -274,7 +274,9 @@ api/
                           (the catalyst reads), POST /reads (a user's "Catalyst read" on a This week row,
                           HOTLIST_MANUAL_READS a day), GET /book (the Swing / Long term lists + the chain's
                           `picks`), GET /echo + /echo/:id (Echo's forward test, docs/design/echo-desk.md —
-                          read only, the record so far labelled, never the verdict). Shared — research binds to
+                          read only, the record so far labelled, never the verdict), GET /profile/:symbol?horizon
+                          (an opened row's "how it trades" — hotlistBehaviour.profileRow: ROW_SCALE → the Proteus v2
+                          profile's scale → stockProfile.format rowLines, built when missing; 2026-11-21). Shared — research binds to
                           no account, so no workspace scope. Shaping lives in services/hotlist.service,
                           catalystRead.service, houseBook.service, echo.service
   transcribe/             raw audio → Whisper (OpenAI SDK, the only OpenAI use). Mounted BEFORE
@@ -312,10 +314,11 @@ services/
                               admin, maxMessages; routing.util / session.util / each agent's MAX_MESSAGES
                               derive from it. entryOf(desk): where a route lands (composite `trade` →
                               Argus preset to pick one name for Mentor). routedFrom: the only senders a desk takes
-                              (Argus: Mentor alone, since 2026-11-09; Proteus: Mentor alone and Echo `events`: nobody,
-                              since 2026-11-20 — routing.util mayRoute gates the capture + rule). `subagent`
-                              (2026-11-20): the roles Axl ASKS (Echo `event_analyst`, Proteus `technical_analyst`) —
-                              SUBAGENTS / isSubagent; they never hold the floor
+                              (Argus: Mentor alone, since 2026-11-09; Echo `events`: nobody, since 2026-11-20 —
+                              routing.util mayRoute gates the capture + rule). `subagent` (2026-11-20): the role Axl
+                              ASKS (Echo `event_analyst`) — SUBAGENTS / isSubagent; it never holds the floor.
+                              Proteus is no desk since 2026-11-21 (proteus-v2.md P1: `proteus` / `technicals` /
+                              `technical_analyst` deleted — his profile is stockProfile.service, read by code)
       modes.js                THE CHAT'S MODE (modes-and-builders.md step 3): MODES, modeOf(floor) — a builder on the floor
                               is its mode, anyone else General; setMode moves the floor in Axl's lane (POST /mode)
       questions.js · asking.js  QUESTIONS UP FRONT (step 4): the trader's and the portfolio manager's cards built by code,
@@ -358,12 +361,12 @@ services/
                               summary, its own segment (a hand-off to it reads as the user; a subagent's answer in its
                               turn — session.util isAnswerFor — labelled as the role's). The turn after a reply
                               that carries `tools` opens with toolNote — the app's note naming the calls that reply
-                              was written from (2026-11-13: the history holds text, never the calls, so Proteus
+                              was written from (2026-11-13: the history holds text, never the calls, so a desk
                               disowned a measured profile as "made up")
       sessionTurn.js          a desk turn against the session: append → context → run → reply → nextState →
                               floor (entryOf on a route) → background summary fold. No HTTP until phase 5.
                               Every desk's onToolStart is recorded here too: the reply row keeps `tools`
-                              ("get_behaviour_profile NVDA"), logged as "<agent> turn tools".
+                              ("get_levels_for KO"), logged as "<agent> turn tools".
                               A reply with NO words still gets its row: a `<show>` → showLine, a chart the turn drew
                               (every desk's onChart, recorded here) → chartLine "Here's the NVDA daily chart." with the
                               chart on the row (2026-11-12 — a chart-only reply was never saved, so the next ask
@@ -398,14 +401,12 @@ services/
                           act.actHeld; `carryOn` — a turn cut short by the tool budget queued again (MAX_CARRY 3, reset
                           on a user turn); a FRESH deciding read handed to Mentor at once (askRead → _readSettled); a
                           chain Mentor started on his own reads ends with no pause / decision cards
-  agents/                 the 8 LLM desks (analyst · axl · echo · mentor · portfolio · proteus · scanner ·
-                          strategy). echo (2026-11-19, docs/design/echo-pipeline.md): the event desk — get_echo_events /
+  agents/                 the 7 LLM desks (analyst · axl · echo · mentor · portfolio · scanner · strategy;
+                          proteus.agent.service deleted 2026-11-21, proteus-v2.md §6). echo (2026-11-19, docs/design/echo-pipeline.md): the event desk — get_echo_events /
                           get_event_map read the pipeline's events (links ranked by score, the six factors and their
                           evidence, the flags), map_event frames the doc's Step 1 fields and runs the pipeline on a
                           user's event (the chain + the score), news + price action, consult last; no working
-                          state, no entity; LANGUAGE + BREVITY only (no venue). proteus (2026-11-12, docs/design/proteus.md): the technical analysis desk —
-                          get_behaviour_profile first, the chart tools (vision ones model-only), SMC, consult last;
-                          no working state, no entity; LANGUAGE + BREVITY only (he trades nothing: no venue). A seventh is archived and lives under archive/, imported by
+                          state, no entity; LANGUAGE + BREVITY only (no venue). A further one is archived and lives under archive/, imported by
                           nothing — see archive/README.md, and `npm run check:archive`, which
                           is what keeps "imported by nothing" from meaning "loads no more".
                           Five of the six append LANGUAGE_RULE + VENUE_RULE + BREVITY_RULE to their
@@ -853,27 +854,15 @@ services/
   houseIndustries.tools.js  get_house_industries (ATLAS; Argus's until 2026-11-11 — his words archived in
                             archive/services/tools/houseIndustries.argus.js) — `book` → the house's industries for it
                             (first 20 in full), `industry` → its largest companies: the candidate sleeves of a book
-  elliott.tools.js          check_elliott_count (PROTEUS, 2026-11-13, proteus.md §8.1 item 10) — checkElliottCount (the
-                            three hard rules on the wave-end prices + the price that kills the count, wave 5's cap)
-                            then checkCountOnCandles (each wave end a high/low on the candles, in order, the extreme of
-                            its legs, not already dead) via marketData._fetchCandleRows. IMPOSSIBLE / NOT ON THE
-                            CHART are never shown; a fetch failure is UNCHECKED. Reads years of candles (CHECK_WINDOW_DAYS
-                            → _fetchCandleRows windowDays) and returns each wave end's price as found. The waves must
-                            alternate; price after the last end is checked too. deps.fetchBars is the test seam
   echo.tools.js             get_echo_events · get_event_map · map_event (ECHO, 2026-11-19, echo-desk.md §5) — BOUND per
                             turn to the user (their own events are theirs). Formatters only: the record "so far",
                             never the verdict; direction said to be the rule's, the model's own beside it.
-  behaviourProfile.tools.js get_behaviour_profile (PROTEUS, 2026-11-12) — UNBOUND: profileFor → formatProfile (how
-                            to read it, WHAT HOLDS, each timeframe's tests with rate vs baseline / n / recent third,
-                            the false breaks + sweep depth, the fit). A failure tells him not to describe the stock
-                            from memory. holdKeys — the ONE list of what holds (CR 2026-11-13). Also the profile's other readers, one home: rowProfile (the opened Hotlist
-                            row: what holds or the daily ATR, breaks vs chance, cycle / Wyckoff / Fibonacci words),
-                            behaviourBadge (its headline), profileBrief (the trader's chat line) and mentorRead (the
-                            trader's levels: what holds priced now, "never cite one" otherwise, the range now, the
-                            stop's room — mentor.desk _proteusRead → mentor.agent _buildProteusSection, 5b).
-                            2026-11-14: mentorRead({ horizon }) — the views BY HORIZON (BADGE_KEY → BADGE_TIMEFRAMES:
-                            5-min / 1-hour for a day trade), no stop-room line and the day-trade fit on a day trade;
-                            isDayTrade (DAY_TRADE_HORIZONS intraday · day) — the one test mentor.desk/agent use
+  stockProfile.tools.js     get_levels_for (MENTOR, 2026-11-21, proteus-v2.md §3 / P3) — UNBOUND: { ticker, ratio,
+                            horizon, side } → stockProfile.levelsFor → levelsBrief. The user's reward : risk on THIS
+                            stock: the stop at its noise, the target ratio × the stop, prices from the last close, the
+                            pair's record (target first, time, never resolved). Says what a ratio costs, never refuses
+                            one. Replaced get_behaviour_profile / check_elliott_count (behaviourProfile.tools,
+                            elliott.tools — deleted with the old engine 2026-11-21)
   horizonList.tools.js      get_horizon_list (ARGUS, 2026-11-11, argus-rework.md §3.1) — UNBOUND, read-only: the house's
                             list for a horizon, the only names he may pick from. intraday / day → today's latest DAY
                             BOARD (hotlist.day, todayBoards; before the first, when the next runs); short term swing →
@@ -1113,34 +1102,33 @@ services/
                             the live outcome log does. The catalyst path is replayed by proxy (`earningsBeat`:
                             an EPS beat of 5%+ reported the session before, from the calendar's actuals). The
                             summary rides GET /api/hotlist/outcomes as `backtest`
-  behaviourProfile.engine.js PROTEUS'S MEASURED PROFILE (docs/design/proteus.md §2, 2026-11-12) — how a stock's price
-                            behaves, COUNTED from candles, long side: touches of EMA20 / SMA50 / SMA200 (+ session VWAP
-                            intraday), RSI under 30, MACD cross up, high-volume up bars, false breaks of swing lows and
-                            what followed, bullish order-block retests (smc.engine); ATR %, gap, dollar volume; F
-                            (suitability: day trade / swing). ONE outcome everywhere (bracket: +1 ATR before a close
-                            −0.5 ATR, 10 bars); every rate against a BASELINE (a level shifted ±2/3 ATR, or the drift
-                            from every bar), two-proportion z ≥ 3, and the recent third must still beat its own
-                            baseline (judge → respects / faded / unconfirmed / no / thin); false breaks carry
-                            sweep_depth_atr (median, p80) and `latest` (the last false break: at, reclaimed_at,
-                            level, swept_to, depth_atr — the example Proteus charts, 2026-11-13). PURE.
-                            2026-11-13 (proteus.md §8.1 items 7–11): cycleTest (trough spacing vs the same returns
-                            reshuffled 100×; the next window only when it holds); falseBreakChance (the false-break
-                            RATE vs the same bars shuffled 30× — more / less / chance; noise scores 75–86%);
-                            wyckoffTest (ranges of 20 bars within 4 ATR; springs vs the drift AND ordinary sweeps,
-                            breakouts + the upthrust share, dry-volume retests, `current` range); fibPullbackTest
-                            (first touches of 38.2/50/61.8% on 4-ATR impulses vs other depths); stopRoom (breaks of
-                            the TRADER'S swing lows — swingStructure — reaching a stop 0.2/0.5/1 ATR under, and how
-                            many came back); `levels_now` (each line's price at the last bar). Seeded shuffles.
-  proteusQueue.service.js   PROTEUS'S PROFILE AHEAD OF ANY ASK (proteus.md §4.4–4.5, step 4, 2026-11-12): queueProfiles
-                            (symbols, { source }) — the day boards (hotlist.day after a board is saved) and the house
-                            scan's picks (pythiaWeekly profileHousePicks) add names; ONE worker profiles them one at a
-                            time (profileFor — a name fresh this week costs nothing), GAP_MS between names, a 429 pauses
-                            and retries the same name. In memory on the loop leader; never throws
-  behaviourProfile.service.js profileFor(symbol, { fresh }) — the profile FETCHED and KEPT: fetchProfileBars (5-minute
-                            paged by week ~3 months, 1-hour by ~2 months a year, daily 10 years, weekly built from it
-                            — weeklyFromDaily), the engine, makeMongoBackedCache `proteus_profiles` (a week;
-                            PROFILE_VERSION bump recomputes); one compute per symbol at a time. Keeps the profile,
-                            never the bars (the Atlas quota). scripts/proteus-sample.mjs runs it fresh on a sample.
+  stockProfile.engine.js    PROTEUS v2 — HOW A STOCK MOVES, IN ITS OWN σ (docs/design/proteus-v2.md, 2026-11-21; replaced
+                            behaviourProfile.engine / moveSteps.engine, deleted). PURE, bars in → profile out. SCALES
+                            day (15-minute bars, a session's σ, resolves by the close) · and since VERSION 2 (2026-11-21) on the
+                            DAILY bars, σ over the horizon H, trades capped at 3 × H: short (short term swing, a week)
+                            · swing (a month) · long (a quarter). Their stop / target are CONSTANTS × σ (SCALES .stop
+                            .target: 2.08/0.69 · 1.73/0.81 · 0.94/0.70 — labs lab-proteus-fit/-horizon/-target/-rolling:
+                            the same on every name, nothing per-name carried); the day keeps measured levels. scaleProfile — the eight measures of §2 on
+                            one scale (σ, swing scale, noise, natural levels per side, implied reward : risk + record,
+                            trend or revert, stretch from the line, regime now), with the record of every RATIOS pair;
+                            levelsAt (the stop at the noise, target = ratio × stop, the nearest kept record); swingLegs
+                            (zigzag on a σ turn) · counterLegs (only counter-moves inside a move that CONTINUED) ·
+                            sessionMoves (the day scale's one reading a session) · weeklyOf · scaleOf (horizon → scale)
+                            · isDayTrade (DAY_TRADE_HORIZONS intraday · day — the one test mentor.desk/agent use).
+                            MIN_N 10, MIN_LEGS 8; under them "too few to say", never borrowed from another scale
+  stockProfile.service.js   profileFor(symbol, { scales, fresh }) — the profile FETCHED and KEPT in `stock_profiles`
+                            ({ symbol, version, scales: {day, short, swing, long}, built: {…} }, makeMongoBackedCache):
+                            VALID 7 days (short, swing, long), 1 day (day); a VERSION bump rebuilds. Bars (fetchScaleBars): 5-minute
+                            ~3 months paged by week → fifteenFromFive, daily ~10 years FMP only (fmpDaily, retried — a
+                            short fallback would mis-measure the long scale) for short / swing / long. Only the missing scales built,
+                            merged onto what is stored NOW; one build per symbol+scales at a time. Code only, no model,
+                            seconds. storedProfile (no build) · levelsFor(symbol, ratio, { horizon, side }) (§3, Mentor's
+                            get_levels_for). Keeps the profile, never the bars (the Atlas quota)
+  stockProfile.format.js    PROTEUS v2 IN WORDS — the ONE text form for every reader: profileBrief (Axl's company view,
+                            Mentor's context; the scale traded first) · scaleLines · levelsBrief (get_levels_for) ·
+                            rowLines (the Hotlist row page's bottom lines → { headline, bottom, lines, as_of }) · bottomLine
+                            (Leans up / down · Mixed · No clear lean, by fixed rules) · riskLine (a normal pullback in %). Every record line
+                            carries its count; always a description, never a rule that beats holding. PURE
   swingStructure.service.js WHO IS IN CONTROL of a chart, from its swings (2026-10-30) — the shared mechanism of the
                             THESIS lens: STRUCTURE (the rule's settings, one home), atr, swings (zigzag k × ATR, known
                             only once confirmed), mirror, toWeekly, controlReplay (who is in control + each break's
@@ -1199,8 +1187,8 @@ services/
                             DUE_KEYS only (long-term reviews, expired, a watch's date) — the monitor's, once a day
                             while stale. Results carry `long_term` / `long_term_new` (houseScan bookSends: a NEW yes
                             sends to the long-term book)
-  echoReads.service.js      ECHO'S NAMES THROUGH THE READS (echo-desk.md §6, step 5, 2026-11-19): sendNames — Proteus's
-                            profile for every name (queueProfiles), Prometheus's SWING read via mentorReads.readFor;
+  echoReads.service.js      ECHO'S NAMES THROUGH THE READS (echo-desk.md §6, step 5, 2026-11-19): sendNames — Prometheus's
+                            SWING read via mentorReads.readFor (the Proteus profile queue dropped 2026-11-21, proteus-v2.md §6);
                             missing → research_queue source `echo` (context: the event, the link, the rule — researchRun
                             echoOpening) + houseResearch.researchQueued inside ECHO_RESEARCH_MAX_USD a week (the house's
                             rows only). handOffFlagged — a house event's FLAGGED names (underreacted winners, overreacted
@@ -1623,7 +1611,7 @@ monitoring/
   pythiaCalls.monitor.service.js  The grader — every 6h from boot, scores Pythia's logged calls at 3 and 12
                             months (pythiaCalls.gradeDue). Quotes only, no model; ungated
   echoReads.monitor.service.js  Every 6h from boot: echoReads.handOffFlagged — lagging names of newly checked forward-test
-                            events to Prometheus + Proteus (ECHO_READS=false: off).
+                            events to Prometheus (ECHO_READS=false: off; Proteus's queue dropped 2026-11-21).
   prometheusScorecard.monitor.service.js  Every 6h from boot: Prometheus's calls due a mark
                             (prometheusCalls.gradeDue, paced 400 ms a name) + the catalyst reads' window marks. Ungated
   dailyScreener.monitor.service.js  Every 30 min: runs the hotlist's overnight pass when a trading day's
@@ -1769,8 +1757,8 @@ scripts/                    ops one-offs — none run by `npm test`. Kinds: migr
                             one in a sibling repo. Mechanical only — it says which sentences to distrust, not whether
                             the prose is still true. Its verdict rules are pinned by
                             tests/unit/docsDrift.test.js (the cases a code review found it passing).
-prompts/                    every prompt loaded at RUNTIME (8 desks — proteus_system_prompt.md 2026-11-12,
-                            echo_system_prompt.md 2026-11-19 — + Argus's
+prompts/                    every prompt loaded at RUNTIME (7 desks — echo_system_prompt.md 2026-11-19;
+                            Proteus's prompt deleted 2026-11-21 — + Argus's
                             profile/handoff + market brief + concepts). Hot-reloaded, lazily —
                             so a bad path is an ENOENT on a live turn, not an import error.
                             tests/unit/promptPaths.test.js guards both directions (a path that

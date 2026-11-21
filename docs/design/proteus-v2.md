@@ -43,7 +43,7 @@ year-long position live on different scales of the same stock:
 
 | Scale | For | Bars | σ (the unit) | History read | Line / regime window | Levels resolve by |
 |---|---|---|---|---|---|---|
-| **Day** | a day trade | hourly (regular hours) | the last 60 intraday hourly returns (the overnight one left out) × √7 — a session's σ | the last 3 months | the last 5 sessions | the session's close (a day trade is flat at the close) |
+| **Day** | a day trade | 15-minute (regular hours) | the last 260 intraday 15-minute returns (the overnight one left out) × √26 — a session's σ | the last 3 months | the last 5 sessions | the session's close (a day trade is flat at the close) |
 | **Swing** | 2 weeks – ~6 months | daily | 60-day daily σ × √21 — a month's σ | the last 3 years | 63 sessions | a 1-year cap |
 | **Long term** | 6 months – 2 years | weekly (from the daily) | 52-week weekly σ × √13 — a quarter's σ | the last 10 years | 26 weeks | a 2-year cap |
 
@@ -53,6 +53,25 @@ year-long position live on different scales of the same stock:
   scale, or tells the user the level needs the time.
 - A scale without enough bars or swings (a new listing, a day scale on a thin name) says "too few to say" — never borrowed
   from another scale.
+
+**As built (step 1, 2026-11-21 — what the live runs on KO, NVDA, TSLA changed):**
+- **The day scale reads 15-minute bars** (built from the 5-minute, ~3 months, 26 a session; σ = 260 intraday returns × √26)
+  — hourly bars give 7 a session, too coarse for a session's swings. Its swings are **one reading per session**: the
+  session's biggest run (a low to a later high) and fall, and its noise the deepest dip from a running high that the
+  session later EXCEEDED (a short's: the bounce later undercut). A zigzag rarely completes run–pullback–run in a session.
+- **The noise is the counter-move inside a move that CONTINUED** (both sides): a pullback counts only when the next run
+  made a new high; a rally (a short's noise) only when the next fall made a new low. All counter-legs made a trending
+  name's short stop absurd (NVDA: 55% swing, 480% long term) — the trend's own legs counted as noise.
+- **The swings are read over all the history** (10 years daily / weekly): in σ units they scale with today's σ, and three
+  years held ~6 continued pullbacks. The levels' RECORD stays on the scale's history (3 years / 10 years / 3 months).
+- **Long term turns on half a quarter's σ** (a 1σ turn: ~9 swings in 10 years). Too few still says so — NVDA's
+  long-term short has too few continued declines to read.
+- **A swing count of 8 is enough** (MIN_LEGS); trades / windows / episodes keep 10.
+- **Each side its own levels** (long / short), and the record of every ratio in 0.5, 1, 1.5, 2, 2.5, 3, 4, 5 kept with the
+  profile — `levels_for` answers the nearest, no bars fetched.
+- Seen live: KO swing — stop ~9%, target ~9.5%, 86% wins, ~58 sessions; 3:1 → a 26% target, 44% first. A day trade's
+  natural target (~1 session σ) came before the close in only 8–15% of entries on KO / NVDA — most are still open at
+  the close.
 
 ## 3. Levels for a requested reward : risk (P3)
 
@@ -80,7 +99,60 @@ scale of the trade (§2b; a day trade's 3:1 is in the session's σ and must reso
 - **Axl** (`get_company_view`): the profile's lines, said as "our technical read".
 - **Mentor:** the profile on the trade's scale in his context; `levels_for` as a tool.
 - **The Hotlist row page:** "How it trades" in bottom lines — σ, its swing scale, its natural levels, trend or revert.
+- **The BOTTOM LINE (2026-11-21, Roy: "if a user reads this — what's the bottom line?")** — first on the row and first in
+  each scale of the brief Axl reads (`bottomLine`, stockProfile.format.js), by fixed rules: a trend leans only when its
+  steep moves PERSIST (reverting is "cools off", no lean); a stretch of 2+ leans only when what followed went that way
+  and beat its usual by ¼σ; trend and stretch opposed → "Mixed", both named. Then the trade on the lean's side (long when
+  none): its natural reward : risk, how often it worked, and whether it beat holding — or that the levels mostly never
+  finished on that scale. On NVDA / KO / TSLA / AAPL / XOM most scales read "No clear lean", which is the honest read.
+  Mentor keeps the full lines.
+- **The fit lab (`scripts/lab-proteus-fit.mjs`, 102 large caps, 2026-11-21)** — can Proteus recommend a name's horizon,
+  its reward : risk, its risk? Picked on the first five years, checked on the last five, long side, against holding:
+  - **Horizon / R:R — no.** The first half's pick beat holding in 34% against 30% for any pick; names where holding beat
+    every trade went on to beat holding 34% too; swing ratios that beat holding did so again 25% (33% for the ones that
+    had not); the best ratio landed 4th of 8. So nothing recommends a horizon or a ratio, and the bottom line no longer
+    says "beat holding / holding did better".
+  - **Risk — yes, as σ.** The swing pullback in σ is the same for every name (median 1.73σ → 1.80σ) and a name's own
+    difference from it noise (correlation 0.07); σ carries (0.40). → the RISK line (`riskLine`): a normal pullback is
+    1.75 × σ on the swing scale; the day and long scales (not tested so) say the name's measured noise.
+    (Superseded by VERSION 2 below: the risk is the side's stop, the horizon's constant × σ.)
 - **Gone:** the technical-analyst chat agent (Axl no longer asks it), its chart tools, the profile's old lines.
+
+## 5b. VERSION 2 — the periods fit the horizon (2026-11-21, Roy: "fit the period to the horizon" → "build the engine change")
+
+**The labs** (102 large caps, 10 years of daily bars cached in `data/tmp/lab-fit-bars.json`; long side):
+- `lab-proteus-horizon.mjs` — the normal pullback (75th percentile of the counter-moves inside moves that went on) is a
+  CONSTANT × σ over the horizon H, on every name: H 5 → 2.08σ (2.08 → 2.09 between the halves), H 21 → 1.73σ
+  (1.73 → 1.82), H 63 (½σ turns) → 0.94σ (0.94 → 0.94). A name's own difference does not carry (correlation −0.08 / 0.11 /
+  0.05), and the constant fitted the second half better than the name's own (off by 6 / 11 / 8% against 8 / 14 / 11%).
+- `lab-proteus-target.mjs` — the old target (30th percentile of the RUNS between swing turns) belonged to the next
+  timeframe up: runs last ~2 × H, so 47% (H 5) and 36% (H 21) of trades had not finished by 3 × H. Measured from the
+  entry (what 70% of entries reached within 3 × H before the stop): H 5 0.69σ, H 21 0.81σ, H 63 0.70σ — ~2 in 3 first,
+  finished in ~H. One timeframe down gave nearly the same. The result per trade (~+0.1R) was the same for every target
+  tried: placement is not an edge, it trades hit rate for size.
+- `lab-proteus-rolling.mjs` (Roy: "five years is a long time — I need it for the next horizon") — every month, the
+  horizon × ratio that did best on a name over the last 6 / 12 months, traded the next month: 44% / 43% beat most others
+  (chance 46.7%), average rank 7.7 / 7.6 of 15 (chance 8), the horizon alone right 34% (chance 33%). **Nothing about a
+  name's best horizon or ratio carries — over five years or one month.** What carries is σ.
+
+**As built** (`stockProfile.engine` VERSION 2; a stored v1 profile is rebuilt on its next read):
+- Four scales. `day` unchanged (15-minute bars, its measured levels — its own lab is parked). `short` (short term swing,
+  NEW — Mentor's `short term swing` had read the month-sized swing levels), `swing`, `long` — all on the DAILY bars, σ the
+  last 60 daily returns × √H (5 / 21 / 63), the record's trades capped at 3 × H (15 / 63 / 189 sessions; the swing's
+  was a year, which is why "never resolved" always read 0%), entries over the last 3 years.
+- The levels: stop = `SCALES[k].stop` × σ, target = `SCALES[k].target` × σ (basis `constant`); the natural reward : risk
+  ~0.33 : 1 (short), ~0.47 : 1 (swing), ~0.74 : 1 (long). The measured swings / pullbacks stay as the description.
+- Re-checked on the 102 names (the engine itself, last 3 years): short — stop 8%, target 3%, first 70%, not finished
+  17%, ~5 sessions; swing — 14%, 7%, 69%, 12%, ~20; long — 13%, 10%, 67%, 0%, ~30. A 3 : 1 inside the horizon: 0% / 1% /
+  19% first, 81% / 73% / 29% not finished.
+- The words: no "against holding" anywhere; each record says "held up to N sessions … not finished within N";
+  `get_levels_for` adds the target that fits the horizon's time beside the one asked, and that the ratio is the
+  trader's choice, not the name's. Mentor's and Axl's prompts say never to call a ratio or a horizon "this name's".
+- Where: Axl reads short / swing / long; the Hotlist's This week row reads the short term swing (it holds ~a week);
+  Mentor's noise check accepts either daily-chart scale (short, swing).
+- **Open:** the long-term stop (0.94σ of a quarter, ~13% median) sits about at the swing's (~14%) — it is what the
+  ½σ-turn pullbacks measured, untested against a 1σ turn. The short side reuses the long side's constants (the labs were
+  long-only). The day scale's levels (its own lab, from the entry).
 
 ## 6. What is deleted, what is rewired (P4 — mapped from the code 2026-11-21)
 

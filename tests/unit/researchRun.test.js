@@ -1,7 +1,8 @@
 import { test } from 'node:test'
 import assert   from 'node:assert/strict'
 
-import { startRun, stopRun, getRun, researchOpening, isRunFatal } from '../../services/researchRun.service.js'
+import { startRun, stopRun, getRun, researchOpening, isRunFatal, silentTurn } from '../../services/researchRun.service.js'
+import { cleanReply } from '../../services/agentUtils.js'
 
 // ─── researchRun ──────────────────────────────────────────────────────────────
 // Injected deps — no DB, no agent. `research` is a stub that answers per symbol; `covered` is the
@@ -287,4 +288,50 @@ test('researchRun: no house ledger → the name is still measured, nothing booke
     assert.equal(run.status, 'done')
     assert.equal(run.results[0].cost_usd, 0.35)
     assert.deepEqual(d.calls.booked, [])
+})
+
+// ─── A TURN THAT SAID NOTHING IS THE MODEL FAILING (prod 2026-11-21: TSLA "no_edge" after a Luna leak) ─────────────
+
+test('researchRun: a silent turn is asked once more — a pass written then is a pass', async () => {
+    let n = 0
+    const d = makeDeps({ queued: [q('TSLA')], answers: { TSLA: () => (++n === 1 ? { reply: '', coverage: null } : { reply: 'No edge at this price — the margin story is priced in.', coverage: null }) } })
+    await startRun({ userId: 'u1' }, d)
+    const run = await settled()
+    assert.equal(d.calls.researched.length, 2)
+    assert.deepEqual(d.calls.rejected, [['rq_TSLA', 'no_edge']])
+    assert.equal(run.passed, 1)
+})
+
+test('researchRun: silent twice → failed, reason model_failed — never recorded as his pass', async () => {
+    const d = makeDeps({ queued: [q('TSLA')], answers: { TSLA: () => ({ reply: '', coverage: null }) } })
+    await startRun({ userId: 'u1' }, d)
+    const run = await settled()
+    assert.equal(d.calls.researched.length, 2)
+    assert.deepEqual(d.calls.rejected, [['rq_TSLA', 'model_failed']])
+    assert.equal(run.failed, 1)
+    assert.equal(run.passed, 0)
+    assert.equal(run.results.at(-1).reason, 'model_failed')
+})
+
+test('researchRun: a silent turn then coverage is covered', async () => {
+    let n = 0
+    const d = makeDeps({ queued: [q('TSLA')], answers: { TSLA: () => (++n === 1 ? { reply: '' } : draft('TSLA')) } })
+    await startRun({ userId: 'u1' }, d)
+    const run = await settled()
+    assert.deepEqual(d.calls.initiated, ['TSLA'])
+    assert.equal(run.covered, 1)
+})
+
+test('silentTurn: empty reply and nothing parsed; anything written or parsed is not silent', () => {
+    assert.equal(silentTurn(null), true)
+    assert.equal(silentTurn({ reply: '  ' }), true)
+    assert.equal(silentTurn({ reply: 'Nothing here.' }), false)
+    assert.equal(silentTurn({ reply: '', coverage: { symbol: 'X' } }), false)
+    assert.equal(silentTurn({ reply: '', catalyst: {} }), false)
+})
+
+test('cleanReply: a channel leak and its stray words leave nothing; prose beside a leak line stays', () => {
+    assert.equal(cleanReply('Erotiske\n马会assistant to=functions.get_trading_context? no.'), '')
+    assert.equal(cleanReply('TSLA trades at 345. The coverage needs one answer.\nassistant to=functions.get_quote'), 'TSLA trades at 345. The coverage needs one answer.')
+    assert.equal(cleanReply('Send it to=someone, please, today.'), 'Send it to=someone, please, today.')
 })

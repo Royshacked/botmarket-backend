@@ -1,5 +1,8 @@
 # Stock playbook — how to trade THIS stock
 
+> **2026-11-21:** the Proteus engine cited in the labs below (`shuffledBars`, its per-name tests) is deleted; Proteus is now
+> a behaviour profile ([proteus-v2.md](proteus-v2.md)). The results stand as recorded; git holds the code.
+
 **STATUS: BUILDING (2026-10-30).** The lens is built (below, § Built); the learning loop (the file per stock, grading, replay) is not. Tests 1 / 1b / 1c ran. Branch `feat/stock-playbook` (from main). Supersedes the
 one-ticker pattern test in [future-projects.md §5](../future-projects.md#5-test-a-pattern-on-one-tickers-history--with-the-lab-we-built)
 — Roy restarted the question from scratch ("forget what we discussed until now").

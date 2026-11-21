@@ -1,5 +1,9 @@
 # Proteus — the technical analysis desk (design, 2026-11-12)
 
+> **Superseded 2026-11-21 — the historical lab record.** Proteus was rebuilt as a stored behaviour profile on three
+> scales, no desk / chat / subagent: [proteus-v2.md](proteus-v2.md) (decided after §10.12–10.21 here). The engine, tools,
+> queues, prompt and `proteus_profiles` described below are deleted; the write-up is [desks/proteus-technicals.md](../desks/proteus-technicals.md).
+
 Part of the desk rework (`docs/design/argus-rework.md` §1: Proteus = what this stock obeys technically, per horizon;
 not picking, not levels). Branch `feat/desk-architecture`. Roy's talk of 2026-11-12; decisions in §8, history depth in §9.
 

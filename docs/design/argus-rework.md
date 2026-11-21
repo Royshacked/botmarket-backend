@@ -1,5 +1,8 @@
 # Argus rework — the desk architecture of 2026-11
 
+> **2026-11-21:** Proteus is no longer a desk — rebuilt as a stored profile read by code ([proteus-v2.md](proteus-v2.md));
+> where this doc has Proteus "read" or hand off, Mentor now reads the profile on the trade's scale and asks `get_levels_for`.
+
 Status: **Step 1 BUILT (2026-11-11, `b74ac3c7` + `c3367bfd`); step 2 in progress; the rest is design.** Branch `feat/desk-architecture` (backend + frontend),
 one branch for the whole rework (Argus first, then Proteus and Daedalus, then Mentor without lenses).
 

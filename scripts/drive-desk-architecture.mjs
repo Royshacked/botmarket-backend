@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Live drive of the desk rework (docs/design/argus-rework.md steps 1–3 + two targets stage 1), real models, real database.
 //
-//   node scripts/drive-desk-architecture.mjs [part ...]      parts: pick · view · intraday · proteus · oneq · atlas (default: pick view)
+//   node scripts/drive-desk-architecture.mjs [part ...]      parts: pick · view · intraday · oneq · atlas (default: pick view)
 //                                            [--user ui-smoke]
 //
 // On THIS process's database (axl_dev on the laptop; it refuses `test`), as a throwaway QA user (default `ui-smoke`), so
@@ -14,8 +14,6 @@
 //             confirmed, the read is asked for (a long-term VIEW), Generate is held while it runs, Prometheus writes
 //             coverage.horizon_views.long_term, and the chain hands the read to Mentor, whose turn runs by itself.
 //   intraday  Mentor, no name, an INTRADAY trade → Argus picks from today's latest DAY BOARD (needs a board today).
-//   proteus   Axl, "how does TSLA behave?" → routes to Proteus (technicals) → Proteus reads the MEASURED profile
-//             (get_behaviour_profile; computed and kept in proteus_profiles) and answers; a follow-up on the daily 50 SMA.
 //   oneq      argus-rework.md §2.2: Axl, "let's swing on EQPT" → Mentor asks ONE question (size, risk, R:R) → the
 //             answer with the paper account marked → Mentor builds, says <go>, and the setup is SAVED AND ARMED (it
 //             waits for Prometheus's read if one runs). Leaves a real armed setup on the QA user's paper account.
@@ -197,29 +195,6 @@ async function partIntraday(user) {
     expect(back?.data.status === 'done', `handed back to Mentor (${back?.data.status})`)
 }
 
-async function partProteus(user) {
-    step('PROTEUS — Axl hands "how does TSLA behave?" to the technical analysis desk')
-    const sid = await freshSession(user, 'axl')
-    const a = await say(user, sid, 'axl', 'How does TSLA behave? Does it respect any moving average?')
-    if (!expect(a?.data.payload?.route === 'technicals', `Axl routed to Proteus (${a?.data.payload?.route})`)) return
-    const t0 = Date.now()
-    const p = await doneFor('proteus', 'opening')
-    expect(p?.data.status === 'done', `Proteus's opening turn ${p?.data.status} (${Math.round((Date.now() - t0) / 1000)}s)`)
-    const tools = frames.filter(f => f.event === 'tool_start' || f.event === 'status').map(f => f.data?.tool ?? f.data?.name).filter(Boolean)
-    note(`  tools seen: ${[...new Set(tools)].join(', ') || '(none captured)'}`)
-    const reply = p?.data.payload?.reply ?? ''
-    note(`  Proteus: ${short(reply, 900)}`)
-    const doc = await (await getDb()).collection('proteus_profiles').findOne({ symbol: 'TSLA' })
-    expect(!!doc?.profile?.timeframes?.day, `TSLA's profile kept in proteus_profiles (computed ${doc?.computed_at ?? 'never'})`)
-    expect(/ATR/i.test(reply), 'the answer gives the ATR')
-    expect(!/\bwill (go|rise|fall|break)\b/i.test(reply), 'no forecast in the answer')
-    const f = await say(user, sid, 'proteus', 'And on the daily — the 50-day SMA specifically? Should I put my stop under it?')
-    const r2 = f?.data.payload?.reply ?? ''
-    note(`  Proteus (follow-up): ${short(r2, 700)}`)
-    expect(/mentor/i.test(r2), 'the stop question is sent to Mentor, not answered with a level')
-    void sid
-}
-
 async function partOneQuestion(user) {
     step('ONE QUESTION — Mentor asks size, risk and R:R once, then builds, generates and arms')
     const db = await getDb()
@@ -315,7 +290,6 @@ async function run() {
         if (p === 'pick') await partPick(user)
         else if (p === 'view') await partView(user)
         else if (p === 'intraday') await partIntraday(user)
-        else if (p === 'proteus') await partProteus(user)
         else if (p === 'oneq') await partOneQuestion(user)
         else if (p === 'atlas') await partAtlas(user)
         else expect(false, `unknown part ${p}`)

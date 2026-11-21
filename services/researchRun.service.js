@@ -209,8 +209,23 @@ async function _loop(run, queued, covered, { userId, audience, model, signal, li
                 run.failed++
                 continue
             }
-            const result = await deps.research({ item, symbol, opening: researchOpening(item), covered, userId, audience, model, signal, onSpend,
+            const ask = () => deps.research({ item, symbol, opening: researchOpening(item), covered, userId, audience, model, signal, onSpend,
                 mode: catalyst ? 'catalyst' : view ? 'horizon' : null, existing })
+            let result = await ask()
+            // A turn that SAID NOTHING is the model failing, not Prometheus passing (prod 2026-11-21: TSLA "no_edge" after
+            // 29 s and $0.025 — Luna leaked its tool syntax and wrote no reply). Asked once more; still nothing → `failed`,
+            // reason model_failed, never recorded as his judgment.
+            if (!run.stop && silentTurn(result)) {
+                logger.warn(LOG, `${symbol}: the research turn said nothing — asking once more`)
+                result = await ask()
+                if (!run.stop && silentTurn(result)) {
+                    await leave()
+                    await deps.reject(item.id, 'model_failed')
+                    _settle(run, { symbol, outcome: 'failed', reason: 'model_failed', cost_usd: priced() })
+                    run.failed++
+                    continue
+                }
+            }
             const { coverage } = result ?? {}
             if (run.stop) { await leave({ reason: 'stopped' }); _settle(run, { symbol, outcome: 'stopped', cost_usd: priced() }); break }   // aborted mid-turn: row stays in_research
             await leave()
@@ -373,6 +388,17 @@ const _cost = usd => Number((Number(usd) || 0).toFixed(4))
 const _withoutKeys = (o, keys) => Object.fromEntries(Object.entries(o ?? {}).filter(([k]) => !keys.includes(k)))
 
 const _sym = s => String(s ?? '').toUpperCase().trim()
+
+/**
+ * A research turn that SAID NOTHING: no coverage, no catalyst read, no view — and an EMPTY reply (cleaned: cleanReply
+ * empties a channel leak and its stray words). A pass is a written decision ("no edge here, because…"); silence is the
+ * model failing. Pure.
+ */
+export function silentTurn(result) {
+    if (!result) return true
+    if (result.coverage || result.catalyst || result.horizonView) return false
+    return !String(result.reply ?? '').trim()
+}
 
 /** A Mentor row asking for a covered name's OTHER horizon (`context.view`: 'swing' | 'long_term'). Pure. */
 export function isViewItem(item) {

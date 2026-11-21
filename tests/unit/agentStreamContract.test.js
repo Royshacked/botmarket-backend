@@ -6,7 +6,6 @@ import { axlAgentService }       from '../../services/agents/axl.agent.service.j
 import { mentorAgentService }    from '../../services/agents/mentor.agent.service.js'
 import { portfolioAgentService } from '../../services/agents/portfolio.agent.service.js'
 import { scannerAgentService }   from '../../services/agents/scanner.agent.service.js'
-import { proteusAgentService }   from '../../services/agents/proteus.agent.service.js'
 import { echoAgentService }      from '../../services/agents/echo.agent.service.js'
 import { CONSULT_TOOL }         from '../../services/deepThink.service.js'
 import { REMEMBER_TOOL }        from '../../services/tools/userProfile.tools.js'
@@ -29,7 +28,6 @@ const AGENTS = [
     { name: 'mentor',                chatStream: mentorAgentService.chatStream,    args: { messages: [{ role: 'user', content: 'walk me through AAPL' }] } },
     { name: 'portfolio (Atlas)',     chatStream: portfolioAgentService.chatStream, args: { messages: [{ role: 'user', content: 'build me a portfolio' }] } },
     { name: 'scanner   (Argus)',     chatStream: scannerAgentService.chatStream,   args: { messages: [{ role: 'user', content: 'find me momentum names' }] } },
-    { name: 'proteus',               chatStream: proteusAgentService.chatStream,   args: { messages: [{ role: 'user', content: 'how does TSLA behave' }] } },
     { name: 'echo',                  chatStream: echoAgentService.chatStream,      args: { messages: [{ role: 'user', content: 'GTA 6 is out — who benefits?' }] } },
 ]
 

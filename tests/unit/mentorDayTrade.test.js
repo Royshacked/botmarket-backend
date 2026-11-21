@@ -1,7 +1,7 @@
 import { test, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { memDb } from '../helpers/memDb.js'
-import { mentorRead, isDayTrade } from '../../services/tools/behaviourProfile.tools.js'
+import { isDayTrade } from '../../services/stockProfile.engine.js'
 import { _readState, _dayTradeRead, _horizonNow, mentorNextState } from '../../services/desks/mentor.desk.js'
 import { _buildReadSection } from '../../services/agents/mentor.agent.service.js'
 import { readTarget, requestRead, settlePending, onReadWaiting, onReadSettled, _resetPending } from '../../services/mentorReads.service.js'
@@ -14,29 +14,11 @@ import { makeChainRunner } from '../../services/chain/runner.js'
 
 beforeEach(() => _resetPending())
 
-const tf = (holds = []) => ({ indicators: Object.fromEntries(['ema20', 'sma50', 'vwap'].map(k => [k, { verdict: holds.includes(k) ? 'respects' : 'no' }])) })
-const PROFILE = {
-    timeframes: {
-        '5min': { ...tf(['vwap']), levels_now: { vwap: 41.2 } }, '1hour': tf(),
-        day: { ...tf(['sma50']), levels_now: { sma50: 39.5 }, atr_pct: 2.35, stop_room: { breaks: 80, by_buffer: { 0.2: { stopped_share: 0.7, whipsaw: 0.6 }, 1: { stopped_share: 0.3, whipsaw: 0.2 } } } },
-        week: tf(),
-    },
-    suitability: { day_trade: { fits: true, why: 'liquid, moves 2.4% a day' }, swing: { fits: true, why: 'trends' } },
-}
-
-test("the trader's read follows the horizon: a day trade reads the 5-minute and 1-hour bars, a swing the daily and weekly", () => {
-    const day = mentorRead(PROFILE, { horizon: 'intraday' })
-    assert.match(day[0], /^VWAP \(5-minute\) HOLDS; at 41\.2 now/)
-    assert.ok(!day.some(l => /50 SMA/.test(l)), 'the daily 50 SMA is not an intraday level')
-    assert.ok(!day.some(l => /stop's room/.test(l)), "the daily stop's room is a swing stop's — left out of a day trade")
-    assert.match(day.at(-1), /^Fits: day trade yes, swing yes — liquid, moves 2\.4% a day$/, "a day trade says the day trade's why")
-    const swing = mentorRead(PROFILE, { horizon: 'swing' })
-    assert.match(swing[0], /^50 SMA \(daily\) HOLDS; at 39\.5 now/)
-    assert.ok(swing.some(l => /stop's room/.test(l)))
-    assert.deepEqual(mentorRead(PROFILE), swing, 'no horizon yet reads as a swing')
-    assert.match(mentorRead({ timeframes: { '5min': tf(), '1hour': tf(), day: tf() } }, { horizon: 'day' })[0], /^Nothing technical holds on the 5-minute or 1-hour bars/)
+test('a day trade is the intraday and day horizons — flat by the close (proteus-v2: the day scale)', () => {
     assert.equal(isDayTrade('Intraday'), true)
+    assert.equal(isDayTrade('day'), true)
     assert.equal(isDayTrade('short term swing'), false)
+    assert.equal(isDayTrade(null), false)
 })
 
 test("the first turn of a hand-off reads the experts on the SEED's name and horizon — the state has neither yet", () => {

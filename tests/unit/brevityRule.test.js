@@ -32,7 +32,6 @@ const DESKS = [
     'echo.agent.service.js',
     'mentor.agent.service.js',
     'portfolio.agent.service.js',
-    'proteus.agent.service.js',
     'scanner.agent.service.js',
     'strategy.agent.service.js',
 ]

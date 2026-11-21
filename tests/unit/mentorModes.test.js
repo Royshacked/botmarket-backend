@@ -36,12 +36,12 @@ test('the risk-based kit keeps ONE tools-cache breakpoint, on the last shared to
     const kit = kitFor(MODE_THESIS, MENTOR_TOOLS, TRADING_TOOLS.length)
     const stamped = kit.filter(t => t.cache_control).map(t => t.name)
     assert.deepEqual(stamped, ['get_market_hours'])
-    assert.ok(MENTOR_TOOLS.find(t => t.name === 'get_derivatives_context').cache_control, 'the full kit keeps its breakpoint')
+    assert.ok(MENTOR_TOOLS.find(t => t.name === 'get_market_hours').cache_control, 'the full kit keeps its breakpoint')
     assert.equal(MENTOR_TOOLS.filter(t => t.cache_control).length, 1)
 })
 
 test('the risk-based kit drops the HANDLERS too — a call to an undeclared tool cannot run (CR #8)', () => {
-    const handlers = { get_quote: () => 'q', get_orderblocks: () => 'ob', get_key_levels: () => 'kl' }
+    const handlers = { get_quote: () => 'q', get_macro_snapshot: () => 'm', get_sector_snapshot: () => 's' }
     assert.deepEqual(Object.keys(handlersFor(MODE_THESIS, handlers)), ['get_quote'])
     assert.equal(handlersFor(MODE_USER, handlers), handlers)
 })
@@ -70,7 +70,7 @@ test('a SAVED setup on its own lens, opened for an edit, keeps it — and the wh
     const section = _buildModeSection(MODE_USER, 'smc')
     assert.match(section, /keep `trade_mode: "smc"`/)
     assert.doesNotMatch(section, /trade_mode: "thesis"/)
-    assert.ok(names(kitFor(MODE_USER, MENTOR_TOOLS)).includes('get_orderblocks'))
+    assert.ok(names(kitFor(MODE_USER, MENTOR_TOOLS)).includes('get_macro_snapshot'))
 })
 
 test('a hand-off (no lens yet) is risk-based without a read', async () => {
@@ -186,9 +186,9 @@ const turn = ({ raw = '', chatState = { active_asset: '', draft: null, coverage:
 
 test('every turn runs on the one way\'s kit — a hand-off and a typed build alike (2026-11-12)', async () => {
     const seeded = await turn({ seed: { ticker: 'MTG' }, read: never })
-    assert.ok(!seeded.tools.includes('get_orderblocks') && seeded.tools.includes('get_price_structure'))
+    assert.ok(!seeded.tools.includes('get_macro_snapshot') && seeded.tools.includes('get_price_structure'))
     const typed = await turn({ read: never })
-    assert.ok(!typed.tools.includes('get_orderblocks') && typed.tools.includes('get_price_structure'))
+    assert.ok(!typed.tools.includes('get_macro_snapshot') && typed.tools.includes('get_price_structure'))
 })
 
 test('a turn carrying the old switch_lens tag switches nothing (2026-11-12)', async () => {
@@ -214,6 +214,6 @@ test('a risk-based turn runs with the pattern handlers gone (CR #8)', async () =
         messages: [{ role: 'user', content: 'hi' }], seed: { ticker: 'MTG' },
         _run: async (args) => { handlers = args.toolHandlers; return '' }, _readSetup: never, _venueSection: async () => '',
     })
-    assert.ok(!('get_orderblocks' in handlers) && 'get_price_structure' in handlers)
+    assert.ok(!('get_macro_snapshot' in handlers) && 'get_price_structure' in handlers)
 })
 

@@ -2,20 +2,20 @@
 
 AI-powered trading assistant backend — Express + MongoDB + LLM agents (Anthropic Claude; OpenAI for transcription only).
 
-**Eight conversational desks** turn natural-language chat into monitored work, then route confirmed
+**Seven conversational desks** (Proteus, once the eighth, is a profile read by code since 2026-11-21) turn natural-language chat into monitored work, then route confirmed
 entries and exits to a real broker (cTrader), a paper venue, or IBKR (data-only for now) through one
 unified adapter layer. Each desk owns a kind; each kind is watched by its own monitor.
 
 | Desk | Route | Produces | Watched by |
 |---|---|---|---|
-| **Axl** — reception / concierge / critic | `/api/sessions` (the session turn) | nothing (read-only); hands over to a desk, or ASKS Proteus and Echo as subagents (`ask_specialist`, 2026-11-20); the builders (Mentor, Atlas, Prometheus' coverage) are MODES — a question card, the build in the background, a summary to confirm (docs/design/modes-and-builders.md) | — |
+| **Axl** — reception / concierge / critic | `/api/sessions` (the session turn) | nothing (read-only); hands over to a desk, or ASKS Echo as a subagent (`ask_specialist`, 2026-11-20); answers a company with the house's coverage and Proteus's technical profile (`get_company_view`, 2026-11-21); the builders (Mentor, Atlas, Prometheus' coverage) are MODES — a question card, the build in the background, a summary to confirm (docs/design/modes-and-builders.md) | — |
 | **Mentor** — the trading desk | `/api/mentor`, `/api/setups` | `setup` | Talos |
 | **Atlas** — portfolio construction + review | `/api/portfolio` | `portfolio_item` holdings | Themis |
 | **Argus** — finds ONE name for Mentor (scan lists archived 2026-11-09) | — (a session turn) | — | — |
 | **Prometheus** — buy-side research | `/api/analyst` | `coverage` | coverage monitor |
 | **Pythia** — the industry desk | `/api/strategy` | `industry_view` — three structural answers per GICS sub-industry; `industry_assessment` — per industry and theme a near-term verdict (for swing · watch · avoid · no case) and, since 2026-10-31, its own long-term call (yes / no, reviewed monthly), graded forward; `theme` value chains (all **broadcasts**, not per-user) | industry-view monitor · Pythia's weekly change scan · the calls grader |
-| **Proteus** — how a stock trades, measured (2026-11-12); Axl's subagent since 2026-11-20 | — (inside Axl's turn; Mentor's hand-off) | a shared profile per stock (`proteus_profiles`), no kind | — |
-| **Echo** — who an event reaches through the supply chain, built to the simulator design (2026-11-19); Axl's subagent since 2026-11-20, maps in the background | `/api/hotlist/echo` | events (`echo_events`): intake → chain map → six-factor score → day-5 check → wave watch → grades; no kind; flagged names to Prometheus + Proteus | the echoPipeline loop (opt-in) · the echoReads hand-off |
+| **Proteus** — how a stock moves, in its own σ (v2, 2026-11-21: no desk, no chat — a profile read by code; docs/design/proteus-v2.md) | `/api/hotlist/profile/:symbol`; Axl's `get_company_view`, Mentor's context + `get_levels_for` | a shared profile per stock on 3 scales (`stock_profiles`, valid a week, the day scale a day), no kind | — (built on demand, seconds) |
+| **Echo** — who an event reaches through the supply chain, built to the simulator design (2026-11-19); Axl's subagent since 2026-11-20, maps in the background | `/api/hotlist/echo` | events (`echo_events`): intake → chain map → six-factor score → day-5 check → wave watch → grades; no kind; flagged names to Prometheus | the echoPipeline loop (opt-in) · the echoReads hand-off |
 
 One desk and its kind are **archived**: frozen whole under [`archive/`](archive/README.md),
 imported by nothing, started by nothing, and deliberately not described here or in APP_SPEC — that

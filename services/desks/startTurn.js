@@ -19,7 +19,7 @@ import { withSessionLock, laneKey, trackTurn, sessionDepth } from './turnLock.js
 import { sessionTurn as defaultSessionTurn, canSpeak } from './sessionTurn.js'
 import { framePayload } from './index.js'
 import { builds as defaultBuilds } from './builds.js'
-import { isSubagent } from './registry.js'
+import { isSubagent, deskOf } from './registry.js'
 import { logger } from '../logger.service.js'
 
 const LOG = '[startTurn]'
@@ -93,7 +93,10 @@ export function makeStartTurn({
         if (!session || session.status !== 'active') return { reason: 'not_found' }
 
         const mention = agent ? null : parseMention(text)
-        const asked   = agent ?? mention?.agent ?? session.floor ?? 'axl'
+        // A floor left on a desk that no longer exists (Proteus, deleted 2026-11-21 — proteus-v2.md P1) is Axl's: the
+        // session would otherwise refuse every turn (canSpeak knows no such desk).
+        const floor   = session.floor && deskOf(session.floor) ? session.floor : null
+        const asked   = agent ?? mention?.agent ?? floor ?? 'axl'
         if (!canSpeak(asked, session, user)) return { reason: 'forbidden' }
         // Who actually answers (modes-and-builders.md M2/M16): a subagent's turn — its tab, "@event analyst", a floor
         // left on it by an older session — is Axl's, who asks it; the stock picker only while the trader has the user

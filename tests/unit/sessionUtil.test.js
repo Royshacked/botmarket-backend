@@ -98,20 +98,21 @@ test('the scopes are the one chat and the admin desk', () => {
 
 test('a reply keeps the tools it was written from — strings only, deduplicated, capped; never on a user turn (Roy, 2026-11-13)', async () => {
     const { toTimelineMessage, toolTrace, MAX_TOOL_TRACE } = await import('../../services/session.util.js')
-    assert.deepEqual(toolTrace(['get_behaviour_profile NVDA', ' get_behaviour_profile NVDA ', '', null, 7, 'get_chart NVDA']), ['get_behaviour_profile NVDA', 'get_chart NVDA'])
+    assert.deepEqual(toolTrace(['get_company_view NVDA', ' get_company_view NVDA ', '', null, 7, 'get_chart NVDA']), ['get_company_view NVDA', 'get_chart NVDA'])
     assert.equal(toolTrace(Array.from({ length: 50 }, (_, i) => `t${i}`)).length, MAX_TOOL_TRACE)
     assert.deepEqual(toolTrace('get_chart'), [])
-    const reply = toTimelineMessage({ agent: 'proteus', role: 'assistant', content: 'x', tools: ['get_behaviour_profile NVDA'] }, 1)
-    assert.deepEqual(reply.message.tools, ['get_behaviour_profile NVDA'])
-    assert.equal('tools' in toTimelineMessage({ agent: 'proteus', role: 'assistant', content: 'x', tools: [] }, 1).message, false, 'no tools → no field')
-    assert.equal('tools' in toTimelineMessage({ agent: 'proteus', role: 'user', content: 'x', tools: ['a'] }, 1).message, false)
+    const reply = toTimelineMessage({ agent: 'echo', role: 'assistant', content: 'x', tools: ['get_company_view NVDA'] }, 1)
+    assert.deepEqual(reply.message.tools, ['get_company_view NVDA'])
+    assert.equal('tools' in toTimelineMessage({ agent: 'echo', role: 'assistant', content: 'x', tools: [] }, 1).message, false, 'no tools → no field')
+    assert.equal('tools' in toTimelineMessage({ agent: 'echo', role: 'user', content: 'x', tools: ['a'] }, 1).message, false)
 })
 
-test('"@role, …" reaches that role — full roles first, so "@technical analyst" is never "@analyst"; the old names still work (one-axl.md)', async () => {
+test('"@role, …" reaches that role — full roles first, so "@event analyst" is never "@analyst"; the old names still work (one-axl.md)', async () => {
     const { parseMention } = await import('../../services/session.util.js')
     assert.deepEqual(parseMention('@trader, build NVDA'), { agent: 'mentor', text: 'build NVDA' })
     assert.deepEqual(parseMention('@Portfolio Manager: rebalance'), { agent: 'portfolio', text: 'rebalance' })
-    assert.deepEqual(parseMention('@technical analyst how does TSLA trade?'), { agent: 'proteus', text: 'how does TSLA trade?' })
+    assert.deepEqual(parseMention('@event analyst who does it reach?'), { agent: 'echo', text: 'who does it reach?' })
+    assert.equal(parseMention('@technical analyst how does TSLA trade?'), null, 'no technical analyst since 2026-11-21 — and never the analyst')
     assert.deepEqual(parseMention('@analyst is it cheap?'), { agent: 'analyst', text: 'is it cheap?' })
     assert.deepEqual(parseMention('@stock picker find me one'), { agent: 'scanner', text: 'find me one' })
     assert.deepEqual(parseMention('@mentor go'), { agent: 'mentor', text: 'go' }, 'the internal key still works')

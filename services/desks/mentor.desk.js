@@ -5,7 +5,6 @@
 // Streams tokens / chart / status / coverage; the agent returns a DRAFT setup in `done`. Nothing
 // persists until the user presses Generate.
 
-import { keepBounded } from '../bounded.util.js'
 import { mentorAgentService, emptyMentorState } from '../agents/mentor.agent.service.js'
 import { parseClientTime } from '../../api/_shared/parse.util.js'
 import { sanitizeScanSeed } from '../scanSeed.util.js'
@@ -18,10 +17,8 @@ import { setupReason } from '../../api/setups/setupReasons.js'
 import { normalizeBuild, activeName, putName, reopenForRedraw, stageOf } from '../mentorBuild.util.js'
 import { PRE_ENTRY } from '../entity/vocabulary.js'
 import { readFor, readTarget } from '../mentorReads.service.js'
-import { profileFor, storedProfile } from '../behaviourProfile.service.js'
-import { profileBrief, mentorRead, isDayTrade, pullbackZone, stopTimeframe } from '../tools/behaviourProfile.tools.js'
-import { sessionService } from '../session.service.js'
-import { buildRef } from './builds.js'
+import { profileFor, storedProfile, scaleOf, isDayTrade } from '../stockProfile.service.js'
+import { scaleLines } from '../stockProfile.format.js'
 
 /**
  * WHAT REACHES THE PANEL. Pure and tested — because everything the desk computes for the user has to
@@ -99,41 +96,27 @@ export function _readState(state, seed) {
 }
 
 /**
- * PROTEUS'S READ on the build's name (argus-rework.md §2.3) — his measured profile as one line, with its date. The house's,
- * kept a week (behaviourProfile.service); the first ask for a name computes it in seconds — and the chat SAYS so while it
- * does (Roy, 2026-11-14: "thinking…" for 15 seconds told the user nothing). The lines he weighs are the horizon's
- * timeframes (mentorRead). Null when there is no name or the profile could not be read (Mentor then goes on the chart).
+ * THE TECHNICAL READ on the build's name — Proteus v2's profile on the trade's SCALE (docs/design/proteus-v2.md §2b, §5):
+ * the horizon picks the scale (a day trade the session's 15-minute bars; a short term swing, a swing and long term the daily, σ over a week / a month / a quarter; no
+ * horizon yet → the swing). The house's, valid a week (a day the day scale); the first ask for a name builds it in seconds
+ * — and the chat SAYS so while it does (Roy, 2026-11-14: "thinking…" for 15 seconds told the user nothing).
+ * `noise`: the side's natural stop as numbers — the turn's stop is checked against it in code (_buildPullbackSection).
+ * Null when there is no name or the profile could not be built (Mentor then goes on the chart).
  */
 async function _proteusRead(state, emit = null) {
     const symbol = String(state?.active_asset || state?.draft?.asset || '').toUpperCase().trim()
     if (!symbol) return null
-    if (emit && !(await storedProfile(symbol).catch(() => null))) emit('status', { tool: 'measure_behaviour', targets: [symbol] })
-    const p = await profileFor(symbol).catch(() => null)
-    // brief: the one line said in the chat; read: the levels he weighs (5b — proteus.md).
-    // pullback: its usual-pullback zone on the STOP's chart, as numbers — the turn's stop is checked against it in code
-    // (Roy, 2026-11-17: the prompt rule alone was skipped on the ARMK drive).
-    const horizon = _horizonNow(state), stopTf = stopTimeframe(horizon), zone = p ? pullbackZone(p.moves?.[stopTf]) : null
-    return p ? { symbol, at: p.computed_at ?? null, brief: profileBrief(p), read: mentorRead(p, { horizon }), pullback: zone ? { ...zone, timeframe: stopTf } : null } : null
-}
-
-// The experts' lines already in a session's chat, by `${sessionId}|${symbol}` — each says its read ONCE per name. Bounded.
-const _saidExperts = new Set()
-
-/**
- * Each expert's DATED line in the chat, once per session and name, before Mentor answers (argus-rework.md §2.3): Prometheus's
- * deciding read when it is in (one landing later says itself — runner readSettled), and Proteus's profile. Never throws.
- */
-async function _sayExperts({ sessionId, userId, read, proteus, ref = null }) {
-    if (!sessionId || !userId) return
-    const symbol = read?.symbol ?? proteus?.symbol
-    const key = `${sessionId}|${symbol}`
-    if (!symbol || _saidExperts.has(key)) return
-    // Prometheus's line is the hand-off's (runner readSettled — a fresh read is handed on the same way as a landed one).
-    const lines = []
-    if (proteus?.brief) lines.push({ agent: 'proteus', content: `${symbol}, measured ${String(proteus.at ?? '').slice(0, 10)}: ${proteus.brief}` })
-    if (!lines.length) return
-    keepBounded(_saidExperts, key)
-    for (const l of lines) await sessionService.append({ sessionId, userId, message: { ...l, role: 'assistant', ref } }).catch(() => {})
+    const scale = scaleOf(_horizonNow(state))
+    if (emit && !(await storedProfile(symbol, { scale }).catch(() => null))) emit('status', { tool: 'measure_behaviour', targets: [symbol] })
+    const entry = await profileFor(symbol, { scales: [scale] }).catch(() => null)
+    const p = entry?.scales?.[scale]
+    if (!p) return null
+    const side = String(state?.draft?.side ?? state?.draft?.direction ?? 'long').toLowerCase() === 'short' ? 'short' : 'long'
+    const lv = p.enough ? p.levels?.[side] : null
+    return {
+        symbol, scale: p.scale ?? scale, at: entry.built?.[scale] ?? null, read: scaleLines(p, scale),
+        noise: lv?.enough ? { scale, side, stop_pct: lv.stop_pct, stop_sig: lv.stop_sig } : null,
+    }
 }
 
 /**
@@ -349,12 +332,11 @@ export const mentorDesk = {
         : null),
     run: async ({ state, input, emit, common, sessionId }) => {
         // Prometheus's read on the build's name — for its confirmed horizon, or, before there is one, the DECIDING read
-        // (argus-rework.md §2.3) — and Proteus's measured profile beside it. Checked by code every turn.
+        // (argus-rework.md §2.3) — and the technical read beside it (Proteus v2). Checked by code every turn. Mentor says
+        // the technical read himself, in one line (no Proteus line in the chat since 2026-11-21: Proteus is no chat role).
         const seen = _readState(state, input.seed)
         const read = await _prometheusRead(seen, sessionId)
         const proteus = await _proteusRead(seen, emit)
-        // In a build in the background, the experts' lines are the pane's (step 5b).
-        await _sayExperts({ sessionId, userId: common.userId, read, proteus, ref: buildRef(state) })
         // A go HELD for a read (runner deskGo, `go_pending`) kept the accounts it was asked with. The chain turn the read's
         // landing runs carries none of its own — so this turn's readiness counts THOSE, for that name only, or it reads
         // "no trading account" and the held go never comes back (the TSLA drive, 2026-11-12).

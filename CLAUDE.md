@@ -1,8 +1,8 @@
 # Project Context
 AI-powered trading assistant backend (ar2trade / TRADVICE) — Express + MongoDB +
-LLM agents on Anthropic Claude (OpenAI for transcription only). EIGHT conversational desks — Axl
+LLM agents on Anthropic Claude (OpenAI for transcription only). SEVEN conversational desks — Axl
 (reception) · Mentor (`setup`, the trader) · Atlas (portfolio) · Argus (finds ONE name for Mentor; his scan lists were archived 2026-11-09) ·
-Prometheus (`coverage`) · Pythia (`industry_view`) · Proteus (how a stock trades, measured — 2026-11-12) ·
+Prometheus (`coverage`) · Pythia (`industry_view`) ·
 Echo (who an event reaches through the supply chain — 2026-11-19; docs/design/echo-pipeline.md) — turn natural-language chat into monitored
 work, which each kind's own background monitor evaluates against condition trees before
 routing to a broker (cTrader live, a paper/simulation venue, manual, or IBKR in progress)
@@ -12,8 +12,16 @@ SSE (agent streams) and WebSocket (social chat). Their work lands on one executi
 `idea` kind (`/api/trade-ideas`, which portfolio holdings ride) plus the per-desk kind
 `setup`. See README.md for the full architecture and app-flow diagrams.
 
-**Proteus and Echo are Axl's SUBAGENTS since 2026-11-20** (docs/design/modes-and-builders.md): Axl asks them
-(`ask_specialist`, services/desks/subagent.js); they answer inside his turn and never hold the floor. The builders
+**Echo is Axl's SUBAGENT since 2026-11-20** (docs/design/modes-and-builders.md): Axl asks him (`ask_specialist`,
+services/desks/subagent.js); he answers inside Axl's turn and never holds the floor.
+
+**Proteus is NOT a desk since 2026-11-21** (docs/design/proteus-v2.md): no chat, no subagent. He is a per-stock behaviour
+profile measured by code in the stock's own σ on three scales (day / swing / long term) — services/stockProfile.*, stored
+in `stock_profiles` like coverage. Axl reads it (`get_company_view`), Mentor reads it on the trade's scale and asks
+`get_levels_for` for a requested reward : risk; the Hotlist row shows its bottom lines. A DESCRIPTION, never a rule that
+beats holding. The v1 engine (indicator / pattern tests, moves, steps) was DELETED, code and data.
+
+The builders
 (Mentor, Atlas, Prometheus' coverage) are MODES — the picker in the prompt box, one question card up front, the build
 in the background on its own lane (desks/builds.js), a summary to confirm. Coverage is every user's to save (M17).
 

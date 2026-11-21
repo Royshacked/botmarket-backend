@@ -1,68 +1,51 @@
-# Proteus — how a stock trades
+# Proteus — how a stock moves, in its own σ (v2)
 
-The technical analysis desk (agent `proteus`, pipeline `technicals`), built 2026-11-12 from
-[design/proteus.md](../design/proteus.md). He answers ONE question about ONE stock: **what does its price respect,
-if anything?** — and says what that is worth. He sets no levels (Mentor's), judges no business (Prometheus's), picks
-nothing (Argus's). Long side only, like the rest of the app.
+Rebuilt 2026-11-21 to [design/proteus-v2.md](../design/proteus-v2.md) (the source of truth: decisions P1–P6, the
+measures, §2b "As built", §6 what was deleted). The labs of [design/proteus.md](../design/proteus.md) §10.12–10.21 found
+no dependable entry signal on daily bars; what holds is a DESCRIPTION of how a name moves. Proteus is now that, and only
+that.
 
-## Two kinds of answer
+**No desk, no chat, no subagent** (P1). The ~~`proteus`~~ registry desk (pipeline ~~`technicals`~~, Axl's ~~`technical_analyst`~~),
+its agent and prompt, ~~`get_behaviour_profile`~~ / ~~`check_elliott_count`~~, the old engine (~~`behaviourProfile.*`~~,
+~~`moveSteps.engine`~~), the profile queues (Echo's hand-off, Pythia's weekly picks / book, the day boards) and
+~~`proteus_profiles`~~ are deleted. Old chat rows by `proteus` still render (a history-only label in the frontend); a session
+floor left on `proteus` falls back to Axl (`startTurn`).
 
-| | Where it comes from | What it may claim |
-|---|---|---|
-| **Measured** | `get_behaviour_profile` — counted in code from the stock's own candles | a rate against a baseline, with its sample and the recent stretch |
-| **Seen now** | `get_chart`, `get_orderblocks`, `get_false_breaks` — a vision read of today's chart | what is visible; never a hit rate |
+## The profile
 
-The prompt (`prompts/proteus_system_prompt.md`) makes him call the profile first on every stock, label which kind
-each statement is, and treat "nothing holds" as the usual, honest answer.
+`services/stockProfile.engine.js` (pure). Eight measures, every one in the stock's own σ (design §2): σ · the swing scale
+(runs and pullbacks of a zigzag that turns on a σ reversal) · the noise (the counter-move inside a move that CONTINUED —
+the depth a stop must clear) · the natural levels, per side (stop past the noise; target the run ~70% of runs reach) ·
+their implied reward : risk with its record (target first, time, never resolved, against holding) · trend or revert ·
+the stretch from the line · the regime now. Every record line carries its count; under 10 (swings: 8) it says "too
+few to say".
 
-**Patterns are by eye** (Roy, 2026-11-12): head and shoulders, flags, wedges are seen on the chart, never counted. **He
-shows what he found**: `get_chart` with `show_to_user` and labelled horizontal `levels` (shoulders, head, neckline, the
-measured target, where it fails; an order block's edges; a swept low) — a sloped line drawn at its price now. Found
-nothing → no chart. In Mentor's build his profile line is posted by Mentor's desk (`_sayExperts`) beside Prometheus's.
+| Scale | For | Bars | σ | Resolves by |
+|---|---|---|---|---|
+| day | a day trade | 15-minute, from ~3 months of 5-minute | a session's | the session's close |
+| swing | 2 weeks – ~6 months | daily, ~10 years (FMP only) | a month's | a 1-year cap |
+| long | 6 months – 2 years | weekly, built from the daily | a quarter's | a 2-year cap |
 
-## The measured profile
-
-`services/behaviourProfile.engine.js` (pure) on four timeframes — 5-minute (~3 months), 1-hour (~1 year), daily
-(~10 years), weekly (~10 years, built from the daily):
-
-- **Levels** — touches from above of the 20 EMA, 50 SMA, 200 SMA (and session VWAP intraday; a session's first bar
-  has none). Baseline: the same line shifted ±2 and ±3 median ATRs, same touch rule.
-- **Events** — RSI crossing under 30, MACD crossing up, an up bar on twice its 20-bar volume. Baseline: the same
-  outcome from every bar (the drift).
-- **False breaks** — a low under any confirmed swing low not broken before, closing back above within 3 bars: the rate, how
-  deep the sweep went in ATRs (median, 80th percentile — the room a stop under a swing low needs), bars until a
-  direction, and whether a move up follows the reclaim (against the drift).
-- **Order blocks** — bullish blocks (`smc.engine`), retested from above once the block is known (two bars after its
-  earliest impulse): held or not, against zones shifted in % of price; retests a window apart.
-- **ATR %, gap, dollar volume**, and **day trade / swing** fit (thresholds in `SUITABILITY`).
-
-One outcome everywhere: +1 ATR before a close 0.5 ATR lower, within 10 bars. A test **holds** only at 10+ points over
-its baseline, two-proportion z ≥ 3 (a profile runs ~36 tests; at z 2 noise passed ~2% of them), found on the OLDER
-two-thirds of the history alone, AND still beating its baseline in the most recent third, which the finding never saw
-(else `faded`). Few cases → `thin`. On 11 names, 0 of 396 tests held (§10 of the design); false breaks of swing lows
-ran ~70–80% on every name, sweeping a median ~0.25 ATR under the low (80% within ~0.5) — a fact for stops, not an
-entry signal.
+The horizon picks the scale (`scaleOf`). A scale without enough bars never borrows from another.
 
 ## Kept and shared
 
-`services/behaviourProfile.service.js` — one profile per symbol, the house's (no account), in `proteus_profiles` for a
-week; ~22 provider calls the first time (seconds), nothing after. The bars are never stored (the Atlas quota). A
-`PROFILE_VERSION` bump recomputes every stored profile on its next ask.
+`services/stockProfile.service.js` — like coverage (P2): one profile per symbol, the house's, in `stock_profiles`
+(`{ symbol, version, scales: {day, swing, long}, built: {day, swing, long} }`). Valid 7 days (the day scale 1 day);
+missing or stale → built inline, code only, seconds, only the scales asked. The bars are never stored (the Atlas quota).
 
-## How users get here
+## Who reads it
 
-- **Axl ASKS him** (2026-11-20, docs/design/modes-and-builders.md §3): `ask_specialist` with `technical_analyst` — he
-  answers inside Axl's turn, as himself, and never holds the floor. The desks list, the Hotlist and `@technical analyst`
-  reach him through Axl (`startTurn` sends the turn to Axl with `via`).
-- **Mentor** hands him "how does it trade?" (`<route>technicals</route>`, `registry.js` `routedFrom: ['mentor']`); the
-  user stays with Mentor.
-
-## Not built yet (design §4, build steps 4–5)
-
-Mentor's pre-trade read through the chain (pick → Prometheus → Proteus → Mentor), the measured profile on day-board
-names, the nightly Pythia names, the Hotlist badge, and Mentor weighing the read for his levels.
+One text form, `services/stockProfile.format.js`:
+- **Axl** — `get_company_view` (`companyView.service`): the swing and long-term lines, "our technical read".
+- **Mentor** — `mentor.desk` `_proteusRead` → "THE TECHNICAL READ" on the trade's scale; "ITS NOISE" checks his stop
+  against the side's natural stop. `get_levels_for { ticker, ratio, horizon, side }` (`tools/stockProfile.tools.js`,
+  P3): the user's "I want 3:1" → stop at the noise, target ratio × stop, prices from the last close, and what that ratio
+  cost on this stock. It never refuses a ratio; the trade is Mentor's.
+- **The Hotlist row page** — `GET /api/hotlist/profile/:symbol?horizon` (`hotlistBehaviour.profileRow`, `ROW_SCALE`):
+  "How it trades" in bottom lines (`rowLines`).
 
 ## Proving it
 
-`scripts/proteus-sample.mjs` (the profile on a sample, read-only), `scripts/drive-desk-architecture.mjs proteus`
-(Axl → Proteus in process, real models), `scripts/drive-proteus-ui.mjs` (the same in a browser, desktop + phone).
+`tests/unit/stockProfile.test.js`, `stockProfileFormat.test.js`, `hotlistBehaviour.test.js`, `companyView.test.js`.
+Drives (design step 7): Axl on a company, Mentor asked "3:1 on KO", the Hotlist row page.

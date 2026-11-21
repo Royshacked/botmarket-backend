@@ -275,7 +275,14 @@ export function makeSessionTurn({
             return { stopped: true }
         }
 
-        const routing = ownWords(routeFields(result, user.role), agent, text)
+        let routing = ownWords(routeFields(result, user.role), agent, text)
+        // A BUILD never hands the user to another desk (M7: the builder works in the background; the user is with Axl). A
+        // route out of one is the model off its task — the TSLA coverage build on prod, 2026-11-21, routed to the trader
+        // with a trade opening after a garbled reply — so it is dropped, not followed.
+        if (building && (routing.route || routing.edit)) {
+            logger.warn(LOG, `${agent} build ${building} emitted a route — dropped`, { route: routing.route, edit: !!routing.edit })
+            routing = { ...routing, route: null, routeSymbol: null, opening: null, edit: null }
+        }
         const payload = { ...desk.done(result, { routing }), ...routing }
 
         // A reply that was only tags (a card, a route) has no prose to keep — the state still moves. One with

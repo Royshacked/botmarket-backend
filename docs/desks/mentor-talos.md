@@ -979,13 +979,14 @@ with the names ahead (`runner.readWaitLine`), and every turn's context carries w
 trade: he validates with it. **Against** it (not a Buy, a broken thesis, a pass, priced in): he says so plainly and asks
 ONCE whether to build anyway — the user's call; he does not refuse. While it runs, **Generate is held in code**:
 readiness goes dark and the press is refused (`read_pending`). A read that failed or could not be checked holds
-nothing. Proteus's technical read joins it when Proteus exists.
+nothing. Proteus's technical read joins it when Proteus exists. (2026-11-21: it does — Proteus v2's profile on the
+trade's scale, "THE TECHNICAL READ" in his context, and `get_levels_for` for a ratio the user names; [proteus-v2.md](../design/proteus-v2.md).)
 
 **ONE WAY since 2026-11-12 — the two modes below are history ([design/argus-rework.md](../design/argus-rework.md)
 §2.2–§2.3).** `resolveMode` always gives the one build (`thesis`, internal); no lens, mode or "risk-based" is ever said.
 "Let's trade X" asks no direction or horizon: the DECIDING read (`mentorReads`, horizon `null`) brings Prometheus's
 coverage — re-researched first when over 30 days old or a report came out since — and Proteus's measured profile, each
-posted as one line; Mentor says whether it is a LONG now and on which horizon (one that fits the trade that can be
+posted as one line (since 2026-11-21 only Prometheus's — the Proteus v2 profile is in Mentor's context, no line of its own); Mentor says whether it is a LONG now and on which horizon (one that fits the trade that can be
 built). A read against it is a warning the user may override. Then the three numbers (position size, risk, R:R) →
 `size_position` → "all the way, or step by step?"; all the way ends in `<go>`, which the chain runner presses as
 `generateArmed` (saved and armed; the entry is still a card to confirm). A turn cut short by the tool budget is carried

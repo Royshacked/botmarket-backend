@@ -85,9 +85,9 @@ export const TOOLS = toolsFor({
     web_search: '',
     // ABOUT THE USER (one-axl.md step 3): a lasting fact the user states — the handler is runAgentStream's. Appended LAST.
     remember_about_user: REMEMBER_DESCRIPTION,
-    // SUBAGENTS (docs/design/modes-and-builders.md §3, 2026-11-20): the event analyst, the technical analyst and — asked, a
+    // SUBAGENTS (docs/design/modes-and-builders.md §3, 2026-11-20): the event analyst and — asked, a
     // builder still (2026-11-21) — the analyst answer through Axl: no route, no floor. Appended last, per the rule above. Its handler is the turn's (desks/subagent.js).
-    ask_specialist: `Ask the analyst, the event analyst or the technical analyst — its answer comes back to YOU as material (nothing of it is on screen), and you write the reply in your own voice, its findings said as the house's. research_analyst — a deeper question on a company's case the coverage in get_company_view does not answer: a margin trend, a valuation argument, the latest print against the thesis. event_analyst — who a NEW EVENT reaches through the supply chain (suppliers, customers, infrastructure, substitutes), the house's events, a map's scores and flags, a follow-up on a map. technical_analyst — a chart question the measured profile in get_company_view does not answer: what patterns or order blocks its chart shows now. Write the question to stand alone (the specialist sees none of this conversation, only its own earlier answers), and name every company with its ticker AND name.`,
+    ask_specialist: `Ask the analyst or the event analyst — its answer comes back to YOU as material (nothing of it is on screen), and you write the reply in your own voice, its findings said as the house's. research_analyst — a deeper question on a company's case the coverage in get_company_view does not answer: a margin trend, a valuation argument, the latest print against the thesis. event_analyst — who a NEW EVENT reaches through the supply chain (suppliers, customers, infrastructure, substitutes), the house's events, a map's scores and flags, a follow-up on a map. How a stock trades is not a specialist's: the measured profile in get_company_view is the house's technical read. Write the question to stand alone (the specialist sees none of this conversation, only its own earlier answers), and name every company with its ticker AND name.`,
     // THE HOUSE'S WORK on one company — coverage, technicals, events, with verdicts; builds what is missing in the background
     // (docs/design/axl-one-voice.md, Roy 2026-11-21). Appended last, per the rule above.
     get_company_view: COMPANY_VIEW_TOOL_SPEC.get_company_view,
@@ -224,7 +224,7 @@ ${audienceBlock}` : ''}` },
     // because this return value is a second consumer that would otherwise hand the client "…to the
     // trading desk. <route>trade</route>", parsed after the turn.
     let chartRow = null
-    // Axl's own key: a desk restricted to named senders (registry routedFrom — Proteus takes Axl's) checks it.
+    // Axl's own key: a desk restricted to named senders (registry routedFrom) checks it.
     const route = makeRouteCapture('axl')
     // <adopt> is a THIRD sibling of <route>, for the same reason <edit> is a second one: "the user
     // already owns this book" is not a destination, it is what the portfolio desk must do on arrival.

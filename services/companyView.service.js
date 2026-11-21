@@ -1,12 +1,13 @@
 /**
  * A COMPANY, as Axl reads it (docs/design/axl-one-voice.md §2–§4, Roy 2026-11-21): the house's work on it — the analyst's
- * coverage, the technical analyst's measured profile, the events the event analyst mapped that reach it — each with a
+ * coverage, Proteus's measured profile (how the stock moves, docs/design/proteus-v2.md), the events the event analyst mapped that reach it — each with a
  * verdict CODE decides (never the model), and the background work a missing or invalid coverage needs, started here.
  *
  *   coverage    none → initiate (the research queue + run, as mentorReads.requestRead) · withdrawn / stale → re-model
  *               (the monitor's claimRemodel, then refreshCoverage) · valid → read as is. A "ready" line goes to the
  *               session that asked when the work lands.
- *   technicals  the stored profile, or computed now (code only, seconds) — profileFor.
+ *   technicals  the stored profile's swing and long-term scales, or built now (code only, one daily fetch, seconds) —
+ *               stockProfile.profileFor. The day scale is Mentor's (a day trade); a company question is not one.
  *   events      echoEvents.eventsFor — the house's mapped events and the user's own whose map links the name.
  *
  * Shared mechanism, one home each: the queue, the run, the claim, the re-model and the profile are the existing services;
@@ -17,8 +18,8 @@ import { coverageService } from '../api/analyst/coverage.service.js'
 import { researchQueueService } from './researchQueue.service.js'
 import { startRun, onRunSettled } from './researchRun.service.js'
 import { refreshCoverage } from './coverageRefresh.service.js'
-import { profileFor } from './behaviourProfile.service.js'
-import { profileBrief } from './tools/behaviourProfile.tools.js'
+import { profileFor } from './stockProfile.service.js'
+import { profileBrief } from './stockProfile.format.js'
 import { eventsFor } from './echoEvents.service.js'
 import { sessionService } from './session.service.js'
 import { remodelDecision, VERDICT_COOLDOWN_DAYS } from '../monitoring/coverage.remodel.js'
@@ -100,7 +101,7 @@ export function formatCompanyView(v) {
             formatCoverage(cov.doc),
         ].filter(Boolean).join('\n')
     const tech = v.technicals.profile
-        ? `OUR TECHNICAL PROFILE (the technical analyst's, measured from the candles, ${day(v.technicals.profile.computed_at) ?? 'recent'}):\n${profileBrief(v.technicals.profile)}`
+        ? `OUR TECHNICAL PROFILE (measured from the candles, ${day(v.technicals.profile.built?.swing) ?? 'recent'}):\n${profileBrief(v.technicals.profile, { scales: TECH_SCALES })}`
         : `OUR TECHNICAL PROFILE: not available${v.technicals.error ? ` (${v.technicals.error})` : ''}.`
     const ev = v.events.length
         ? `EVENTS WE MAPPED THAT REACH ${v.symbol} (the event analyst's):\n${v.events.map(e => `  ${e.date ?? '?'} ${e.origin ?? ''} — ${String(e.whatChanged ?? '').slice(0, 160)} → ${v.symbol} ${e.link?.direction ?? 'reached'}${e.link?.relation ? ` as ${e.link.relation}` : ''}${e.link?.why ? `: ${String(e.link.why).slice(0, 200)}` : ''}${e.score != null ? ` · score ${e.score}` : ''}${e.flag ? ` · ${e.flag}` : ''}${e.kind === 'user' ? ' · the user\'s own event' : ''}`).join('\n')}`
@@ -110,6 +111,9 @@ export function formatCompanyView(v) {
         covBlock, tech, ev,
     ].join('\n\n')
 }
+
+/** The scales a company question reads (proteus-v2 §5): a swing and long term. */
+const TECH_SCALES = ['short', 'swing', 'long']   // v2: the short term swing too (one daily fetch for all three)
 
 // ─── The service ───────────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -121,7 +125,7 @@ const _deps = {
     waiting: (s) => researchQueueService.listQueue({ status: ['queued', 'in_research'], symbols: [s] }),
     startRun: (args) => startRun(args),
     onRunSettled,
-    profile: (s) => profileFor(s),
+    profile: (s) => profileFor(s, { scales: TECH_SCALES }),
     events: (s, userId) => eventsFor(s, { userId }),
     say: ({ sessionId, userId, content }) => sessionService.append({ sessionId, userId, message: { agent: 'axl', role: 'assistant', content } }),
     now: () => Date.now(),
@@ -137,7 +141,17 @@ export function makeCompanyView(deps = {}) {
     const headline = (c) => `${String(c.rating ?? 'unrated').replace('_', ' ')}${fmtPrice(c.price_target?.value) ? `, target ${fmtPrice(c.price_target.value)}` : ''}`
 
     // A run settled: each name asked for that now has coverage gets its line; one no longer in line and still uncovered failed.
-    async function settled() {
+    async function settled(run = null) {
+        // Why a name came back uncovered, from the run's own result for it (Roy, 2026-11-21: "could not build coverage this
+        // time" said nothing — TSLA's was the model failing, recorded as a pass).
+        const why = (sym) => {
+            const r = [...(run?.results ?? [])].reverse().find(x => x?.symbol === sym)
+            if (!r) return ''
+            if (r.reason === 'no_edge') return ' — he researched it and passed: no edge he could stand behind at this price. Ask me and I can say what the news and the numbers show.'
+            if (r.reason === 'model_failed') return ' — the research turn failed twice (the model wrote nothing usable), not a judgment on the stock. Ask again and it is queued once more.'
+            if (r.reason === 'horizon_off_book') return ' — his view did not fit the horizon it was asked for.'
+            return r.reason ? ` (${String(r.reason).replace(/_/g, ' ')}).` : ''
+        }
         for (const [sym, who] of [...asked]) {
             const c = await d.coverageOf(sym).catch(() => null)
             if (c && c.status !== 'retired' && c.status !== 'watchlist') {
@@ -148,7 +162,7 @@ export function makeCompanyView(deps = {}) {
             const rows = await d.waiting(sym).catch(() => null)
             if (Array.isArray(rows) && !rows.length) {
                 asked.delete(sym)
-                await tell(who, `The analyst could not build coverage on ${sym} this time.`)
+                await tell(who, `The analyst could not build coverage on ${sym} this time${why(sym) || '.'}`)
             }
         }
     }
@@ -157,7 +171,7 @@ export function makeCompanyView(deps = {}) {
         const who = asked.get(sym) ?? []
         if (sessionId && !who.some(w => w.sessionId === sessionId)) who.push({ sessionId, userId })
         asked.set(sym, who)
-        if (!subscribed) { subscribed = true; d.onRunSettled(() => { settled().catch(err => logger.warn(LOG, 'settle failed', err.message)) }) }
+        if (!subscribed) { subscribed = true; d.onRunSettled((run) => { settled(run).catch(err => logger.warn(LOG, 'settle failed', err.message)) }) }
         return Promise.resolve(d.enqueue({ symbol: sym, source: 'axl', requestedBy: userId ? String(userId) : 'house', context: { axl: true, ...(reinit ? { reinit: true } : {}) } }))
             .then(async (q) => {
                 if (!q?.ok) { logger.warn(LOG, 'coverage not queued', { symbol: sym, reason: q?.reason ?? null }); return false }

@@ -12,7 +12,6 @@ import { TOOLS as ANALYST_TOOLS } from '../../services/agents/analyst.agent.serv
 import { TOOLS as AXL_TOOLS } from '../../services/agents/axl.agent.service.js'
 import { TOOLS as STRATEGY_TOOLS } from '../../services/agents/strategy.agent.service.js'
 import { MENTOR_TOOLS } from '../../services/agents/mentor.agent.service.js'
-import { TOOLS as PROTEUS_TOOLS } from '../../services/agents/proteus.agent.service.js'
 import { SYSTEM as BOOK_TIMING_SYSTEM } from '../../services/bookTiming.service.js'
 import { SYSTEM as HOTLIST_ARGUS_SYSTEM } from '../../services/hotlist.argus.js'
 import { SYSTEM as HOUSE_SCAN_SYSTEM } from '../../services/houseScan.argus.js'
@@ -41,7 +40,7 @@ test('every desk\'s route rule lists roles, and the hand-back rule names no one'
 
 test('no tool a chat agent is given names an internal agent', () => {
     const LIVE = { portfolio: PORTFOLIO_TOOLS, scanner: SCANNER_TOOLS, analyst: ANALYST_TOOLS, axl: AXL_TOOLS,
-        strategy: STRATEGY_TOOLS, mentor: MENTOR_TOOLS, proteus: PROTEUS_TOOLS }
+        strategy: STRATEGY_TOOLS, mentor: MENTOR_TOOLS }
     for (const [agent, tools] of Object.entries(LIVE)) {
         for (const t of tools) clean(JSON.stringify({ d: t.description, s: t.input_schema }), `${agent}.${t.name}`)
     }

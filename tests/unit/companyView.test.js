@@ -48,12 +48,12 @@ function rig({ cov = null, claim = true, refresh = async () => ({ ok: true }), e
         waiting: async () => [],
         startRun: async (a) => { calls.run.push(a); return { ok: true } },
         onRunSettled: (fn) => { settle = fn },
-        profile: async () => ({ symbol: 'X', computed_at: ago(1), timeframes: {} }),
+        profile: async () => ({ symbol: 'X', version: 1, scales: {}, built: { swing: ago(1) } }),
         events: async () => [],
         say: async (a) => { calls.said.push(a) },
         now: () => NOW,
     })
-    return { cv, calls, settle: () => settle?.(), done: () => refreshed, setCov: (c) => { cov = c } }
+    return { cv, calls, settle: () => settle?.(), settleWith: (run) => settle?.(run), done: () => refreshed, setCov: (c) => { cov = c } }
 }
 
 test('no coverage: queued for the house as Axl\'s ask, the run started, and the asking session told when it lands', async () => {
@@ -110,4 +110,16 @@ test('a part that cannot be read says so; a bad symbol is refused; kick:false on
     assert.equal((await r.cv.view({ symbol: 'not a ticker' })).invalid, true)
     await r.cv.view({ symbol: 'PLTR', kick: false })
     assert.equal(r.calls.enqueue.length, 0)
+})
+
+test('no coverage after the run: Axl says WHY — a pass, or the model failing (prod 2026-11-21: TSLA said "could not build" and nothing else)', async () => {
+    for (const [reason, re] of [['no_edge', /passed: no edge/], ['model_failed', /failed twice .* not a judgment on the stock/]]) {
+        const r = rig()
+
+        await r.cv.view({ symbol: 'TSLA', userId: 'u1', sessionId: 's1' })
+
+        await r.settleWith({ results: [{ symbol: 'TSLA', outcome: 'failed', reason }] }); await new Promise(res => setImmediate(res))
+        assert.match(r.calls.said.at(-1).content, re, reason)
+        assert.match(r.calls.said.at(-1).content, /^The analyst could not build coverage on TSLA this time/)
+    }
 })

@@ -8,7 +8,6 @@ import { portfolioDesk } from './portfolio.desk.js'
 import { scannerDesk } from './scanner.desk.js'
 import { analystDesk } from './analyst.desk.js'
 import { strategyDesk } from './strategy.desk.js'
-import { proteusDesk } from './proteus.desk.js'
 import { echoDesk } from './echo.desk.js'
 
 /**
@@ -32,5 +31,5 @@ export function framePayload(agent, payload) {
 
 export const DESK_DEFS = Object.freeze({
     axl: axlDesk, mentor: mentorDesk, portfolio: portfolioDesk, scanner: scannerDesk,
-    analyst: analystDesk, strategy: strategyDesk, proteus: proteusDesk, echo: echoDesk,
+    analyst: analystDesk, strategy: strategyDesk, echo: echoDesk,
 })

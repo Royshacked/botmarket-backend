@@ -410,3 +410,20 @@ test('trackTurn counts one agent\'s turns on a session, released once', async ()
     assert.equal(agentDepth('sX', 'mentor'), 0)
     assert.equal(agentDepth('sX', 'analyst'), 0)
 })
+
+test("a build never hands the user to another desk — a route out of one is dropped (prod 2026-11-21: the TSLA coverage build routed to the trader)", async () => {
+    const { db, sessions, builds } = rig()
+    const contexts = makeAgentContextService({ getDb: async () => db })
+    const analyst = { agent: 'analyst', run: async () => ({ reply: 'Researching TSLA.', route: 'trade', opening: 'Build a TSLA trade setup.' }), done: (r) => ({ reply: r.reply }), nextState: (p) => ({ ...(p ?? {}), draft: { symbol: 'TSLA' } }) }
+    const noCards = { post: async () => ({ reason: 'off' }), setAside: async ({ state }) => state }
+    const turn = makeSessionTurn({ sessions, contexts, desks: { analyst }, experience: async () => 'novice', profiles: { read: async () => ({ notes: [], size: null }) }, summarize: async () => 'S', asks: noCards, buildsSvc: builds })
+    const s = await sessions.getActive({ userId: 'u1' })
+    await sessions.setFloor({ sessionId: s.sessionId, userId: 'u1', agent: 'analyst' })
+    const out = await turn({ user, sessionId: s.sessionId, agent: 'analyst', text: 'Build tsla', origin: 'user' })
+    const ses = await sessions.get({ sessionId: s.sessionId, userId: 'u1' })
+    assert.equal(ses.floor, 'axl', 'the chat back with Axl, not the trader')
+    assert.equal(ses.agentState.analyst.build.status, 'building')
+    assert.equal(out?.payload?.route ?? null, null, 'no route in the payload')
+    const rows = await sessions.allMessagesSince({ sessionId: s.sessionId, userId: 'u1', afterSeq: 0 })
+    assert.ok(!rows.some(r => r.agent === 'mentor'), 'no trader opening')
+})

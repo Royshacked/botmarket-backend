@@ -1,60 +1,39 @@
-// HOW A HOTLIST NAME TRADES (docs/design/proteus.md §8.1 decision 4, Roy 2026-11-13): the technical analyst's measured
-// profile, shown in the OPENED row on its horizon — "instead of a badge" (the step-5 badge is gone). One name, opened by
-// the user, so a profile not stored yet is computed now (~10 s on a first look; a week's cache after that).
-//
-// And the covered book's weekly profile (Roy, option b): the Swing and Long term names are queued after the weekly run
-// (pythiaWeekly), so opening one of their rows is instant.
+// HOW A HOTLIST NAME TRADES (Roy 2026-11-13; since 2026-11-21 Proteus v2 — docs/design/proteus-v2.md §5): the measured
+// profile on the row's horizon's SCALE, shown in the OPENED row as bottom lines. One name, opened by the user, so a scale
+// not stored yet is built now (seconds; valid a week, the day scale a day).
 
-import { profileFor } from './behaviourProfile.service.js'
-import { rowProfile, BADGE_TIMEFRAMES } from './tools/behaviourProfile.tools.js'
-import { queueProfiles } from './proteusQueue.service.js'
-import { houseBook } from './houseBook.service.js'
+import { profileFor } from './stockProfile.service.js'
+import { rowLines } from './stockProfile.format.js'
 import { logger } from './logger.service.js'
 
 const LOG = '[hotlistBehaviour]'
 const SYMBOL = /^[A-Z][A-Z0-9.-]{0,9}$/
 
+/** The Hotlist's horizon keys → the profile's scale (proteus-v2 §2b). */
+export const ROW_SCALE = Object.freeze({ intraday: 'day', day: 'day', week: 'short', swing: 'swing', long_term: 'long' })
+
 const _deps = {
-    profile: (sym) => profileFor(sym),
-    queue:   (symbols, opts) => queueProfiles(symbols, opts),
-    book:    () => houseBook(),
+    profile: (sym, scale) => profileFor(sym, { scales: [scale] }),
 }
 
 /**
- * One opened row: `{ symbol, horizon, computed_at, headline, lines, on }`, or `{ symbol, horizon, reason }` — `bad_symbol`,
- * `no_history` (the profile could not be measured), `unavailable` (its daily bars could not be fetched just now — try again), `too_short` (no bars on this horizon's timeframes). Never throws.
+ * One opened row: `{ symbol, horizon, computed_at, headline, lines }`, or `{ symbol, horizon, reason }` — `bad_symbol`,
+ * `no_history` (the profile could not be measured), `unavailable` (its daily bars could not be fetched just now — try
+ * again), `too_short` (not enough bars on this horizon's scale). Never throws.
  */
 export async function profileRow(symbol, horizon = null, deps = _deps) {
     const sym = String(symbol ?? '').trim().toUpperCase()
-    const h = Object.hasOwn(BADGE_TIMEFRAMES, horizon) ? horizon : 'swing'
+    const h = Object.hasOwn(ROW_SCALE, horizon) ? horizon : 'swing'
     if (!SYMBOL.test(sym)) return { symbol: sym, horizon: h, reason: 'bad_symbol' }
-    let p
+    const scale = ROW_SCALE[h]
+    let entry
     try {
-        p = await deps.profile(sym)
+        entry = await deps.profile(sym, scale)
     } catch (err) {
         logger.warn(LOG, `${sym}: not measured — ${err.message}`)
-        // The daily bars could not be fetched just now (fmpDaily) — a passing failure, not a name without history.
         return { symbol: sym, horizon: h, reason: err?.code === 'DAILY_UNAVAILABLE' ? 'unavailable' : 'no_history' }
     }
-    const row = rowProfile(p, h)
-    if (!row) return { symbol: sym, horizon: h, reason: 'too_short' }
-    return { symbol: sym, horizon: h, computed_at: p.computed_at ?? null, ...row }
-}
-
-/**
- * The weekly profile of the house's Swing and Long term names — queued for the technical analyst's measured profile
- * after the weekly run (pythiaWeekly), so their rows open with it ready. A name profiled this week costs nothing (the
- * profile's week cache). Never throws. → how many were queued.
- */
-export async function profileHouseBook(deps = _deps) {
-    try {
-        const b = await deps.book()
-        const syms = [...new Set([...(b?.swing ?? []), ...(b?.long_term ?? [])].map(r => String(r?.symbol ?? '').toUpperCase()).filter(s => SYMBOL.test(s)))]
-        const n = syms.length ? (deps.queue(syms.sort(), { source: 'house_book_weekly' }) ?? 0) : 0
-        logger.info(LOG, `the house book queued for its weekly profile: ${n} of ${syms.length} name(s)`)
-        return n
-    } catch (err) {
-        logger.warn(LOG, 'the house book was not queued', err.message)
-        return 0
-    }
+    const row = rowLines(entry, scale)
+    if (!row.headline) return { symbol: sym, horizon: h, reason: row.reason ?? 'too_short' }
+    return { symbol: sym, horizon: h, computed_at: entry.built?.[scale] ?? null, headline: row.headline, lines: row.lines }
 }

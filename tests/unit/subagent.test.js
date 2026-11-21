@@ -8,7 +8,7 @@ import { segmentOf } from '../../services/session.util.js'
 import { specialistHint } from '../../services/desks/axl.desk.js'
 import { isToolError, toolErrorText } from '../../services/toolResult.util.js'
 
-// Axl's subagents (docs/design/modes-and-builders.md §3): the event analyst and the technical analyst answer INSIDE Axl's
+// Axl's subagents (docs/design/modes-and-builders.md §3): the event analyst (and, asked, the analyst) answer INSIDE Axl's
 // turn — as themselves, kept as their own rows, the floor never moving.
 
 const user = { _id: 'u1', role: 'user' }
@@ -19,7 +19,6 @@ function rig(deskImpl) {
     const runs = [], frames = []
     const desks = {
         echo:    { agent: 'echo', run: async (args) => { runs.push(args); return deskImpl(args) } },
-        proteus: { agent: 'proteus', run: async (args) => { runs.push(args); return deskImpl(args) } },
     }
     const ask = makeAskSpecialist({ sessions, desks })
     const emit = (type, data, as) => frames.push({ type, data, as })
@@ -92,12 +91,12 @@ test('a hand-back ("not mine") and an offer to take the user to a builder come b
     assert.equal(rows.filter(r => r.role === 'assistant').length, 0, 'a wordless hand-back writes no row')
 })
 
-test('a chart the technical analyst drew stays on screen: its own Axl row, outside the hidden material', async () => {
-    const { sessions, ask, emit } = rig(({ common }) => { common.onChart({ symbol: 'TSLA', timeframe: 'day' }); return { reply: 'TSLA false-breaks 70% of the time.' } })
+test('a chart a specialist drew stays on screen: its own Axl row, outside the hidden material', async () => {
+    const { sessions, ask, emit } = rig(({ common }) => { common.onChart({ symbol: 'TSLA', timeframe: 'day' }); return { reply: 'The recall reaches TSLA as a customer.' } })
     const s = await sessions.getActive({ userId: 'u1' })
-    await ask({ user, sessionId: s.sessionId, emit })({ specialist: 'technical_analyst', question: 'How does TSLA behave?', companies: [{ ticker: 'TSLA', name: 'Tesla' }] })
+    await ask({ user, sessionId: s.sessionId, emit })({ specialist: 'event_analyst', question: 'Who does the battery recall reach?', companies: [{ ticker: 'TSLA', name: 'Tesla' }] })
     const rows = await sessions.allMessagesSince({ sessionId: s.sessionId, userId: 'u1', afterSeq: 0 })
-    assert.deepEqual([rows.at(-2).agent, rows.at(-2).ref], ['proteus', { via: 'axl', material: true }])
+    assert.deepEqual([rows.at(-2).agent, rows.at(-2).ref], ['echo', { via: 'axl', material: true }])
     assert.deepEqual([rows.at(-1).agent, rows.at(-1).content, rows.at(-1).ref], ['axl', "Here's the TSLA daily chart.", { chart: { ticker: 'TSLA', timeframe: 'day' } }])
 })
 
@@ -106,7 +105,7 @@ test('refused before anything runs: an unknown specialist, no question, no compa
     const s = await sessions.getActive({ userId: 'u1' })
     const a = ask({ user, sessionId: s.sessionId, emit })
     for (const [args, re] of [
-        [{ specialist: 'trader', question: 'x', companies: [] }, /specialist must be one of: research_analyst, technical_analyst, event_analyst/],
+        [{ specialist: 'trader', question: 'x', companies: [] }, /specialist must be one of: research_analyst, event_analyst/],
         [{ specialist: 'event_analyst', question: ' ', companies: [] }, /question is required/],
         [{ specialist: 'event_analyst', question: 'x' }, /companies is required/],
     ]) {
@@ -132,7 +131,7 @@ test("Axl's summary fold keeps who said it: the specialist's answer is labelled 
 
 test("Axl's desk turns `via` into the hint: a subagent's role only", () => {
     assert.deepEqual(specialistHint('echo'), { key: 'event_analyst', role: 'event analyst' })
-    assert.deepEqual(specialistHint('proteus'), { key: 'technical_analyst', role: 'technical analyst' })
+    assert.equal(specialistHint('proteus'), null, 'Proteus is no subagent since 2026-11-21 (proteus-v2.md)')
     assert.equal(specialistHint('scanner'), null)
     assert.equal(specialistHint(undefined), null)
 })

@@ -1,8 +1,8 @@
-// ECHO'S NAMES THROUGH PROMETHEUS AND PROTEUS (docs/design/echo-desk.md §6; Roy, 2026-11-19: "when a name comes up it
-// should go through Prometheus and Proteus according to horizon").
+// ECHO'S NAMES THROUGH PROMETHEUS (docs/design/echo-desk.md §6; Roy, 2026-11-19: "when a name comes up it should go
+// through Prometheus and Proteus according to horizon"). Proteus's profile is no longer queued here (2026-11-21, Proteus
+// v2 — docs/design/proteus-v2.md): it builds in seconds when a name is opened or asked about.
 //
 // No new research path: the chain Mentor's reads use. For each name —
-//   PROTEUS  his measured profile, queued (proteusQueue.queueProfiles) — kept a week, shared;
 //   PROMETHEUS  his read FOR THE HORIZON (mentorReads.readFor): swing → coverage. Ready, waiting, passed or failed → it
 //            stands, nothing is queued. Missing → a research-queue row (source `echo`, the event and the link as its
 //            context — researchRun.echoOpening says them) and the house's run started inside Echo's weekly budget.
@@ -20,7 +20,6 @@ import { echoEventsService } from './echoEvents.service.js'
 import { mentorReadsService } from './mentorReads.service.js'
 import { researchQueueService } from './researchQueue.service.js'
 import { researchQueued, resumeQueued } from './houseResearch.service.js'
-import { queueProfiles } from './proteusQueue.service.js'
 import { config } from './config.js'
 import { logger } from './logger.service.js'
 
@@ -47,7 +46,6 @@ const _deps = {
     listQueue: (q) => researchQueueService.listQueue(q),
     research: (o) => researchQueued(o),
     resume: (symbols, research, o) => resumeQueued(symbols, research, undefined, o),
-    profiles: (symbols) => queueProfiles(symbols, { source: SOURCE }),
     events: async () => ({ events: (await echoEventsService.list({ status: ['watching', 'expired'], limit: 300 })).filter(d => d.kind === 'house').map(handoffShape) }),
     db: null,
     on: () => config.echoReads,
@@ -84,13 +82,12 @@ export function forwardContext(ev, link) {
 }
 
 /**
- * Send names on: Proteus's profile for every one, Prometheus's swing read for those without one standing. `contextOf(sym)`
+ * Send names on: Prometheus's swing read for those without one standing. `contextOf(sym)`
  * says why each is here. → `{ ok, names: [{ symbol, read }], queued: [symbols], research }`. Never throws.
  */
 export async function sendNames(symbols, contextOf, { requestedBy = HOUSE, maxUsd = null } = {}, deps = _deps) {
     const syms = [...new Set((symbols ?? []).map(normal).filter(Boolean))]
     if (!syms.length) return { ok: true, names: [], queued: [], research: null }
-    try { deps.profiles(syms) } catch (err) { logger.warn(LOG, 'profiles not queued', { error: err.message }) }
     const names = [], queued = []
     for (const symbol of syms) {
         let read

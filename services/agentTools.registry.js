@@ -293,7 +293,7 @@ export const TOOL_SCHEMAS = {
         },
         "required": ["question", "context"]
     },
-    // Axl's SUBAGENTS (docs/design/modes-and-builders.md §3): the event analyst and the technical analyst answer through
+    // Axl's SUBAGENTS (docs/design/modes-and-builders.md §3): the event analyst and the analyst answer through
     // Axl. `companies` is REQUIRED with the name beside the ticker — a bare "ANT" reached the event analyst as Ant Group
     // (Roy, 2026-11-19), and a prompt rule alone did not hold on Luna; the schema does.
     ask_specialist: {
@@ -301,8 +301,8 @@ export const TOOL_SCHEMAS = {
         "properties": {
             "specialist": {
                 "type": "string",
-                "enum": ["event_analyst", "technical_analyst", "research_analyst"],
-                "description": "Who answers: event_analyst (who an event reaches through the supply chain), technical_analyst (how a stock's price behaves, measured) or research_analyst (a company as an investment: the rating, the target and why, the case for and against)."
+                "enum": ["event_analyst", "research_analyst"],
+                "description": "Who answers: event_analyst (who an event reaches through the supply chain) or research_analyst (a company as an investment: the rating, the target and why, the case for and against)."
             },
             "question": {
                 "type": "string",
@@ -821,25 +821,17 @@ export const TOOL_SCHEMAS = {
         },
         "required": ["what_changed", "origin", "tickers", "effect", "type", "durability"]
     },
-    // Proteus's measured profile of one stock (services/tools/behaviourProfile.tools.js; docs/design/proteus.md §2).
-    get_behaviour_profile: {
+    // Proteus v2: where the stop and the target go for a reward : risk the user asks for (services/stockProfile.service.js
+    // levelsFor; docs/design/proteus-v2.md §3).
+    get_levels_for: {
         "type": "object",
         "properties": {
-            "ticker": { "type": "string", "description": "The stock's ticker, e.g. TSLA." },
-            "fresh": { "type": "boolean", "description": "true recomputes now instead of using this week's profile — only when the user asks for it." }
+            "ticker":  { "type": "string", "description": "The symbol, e.g. KO." },
+            "ratio":   { "type": "number", "description": "The reward : risk the USER asked for, as reward per 1 of risk — 3 for \"3:1\", 1.5 for \"1.5:1\"." },
+            "horizon": { "type": "string", "enum": ["intraday", "day", "short term swing", "swing", "long term"], "description": "The trade's horizon — it picks the scale the levels are read on (a day trade the session's 15-minute bars; a short term swing, a swing and long term the daily bars, with the stop and the target in σ over a week / a month / a quarter)." },
+            "side":    { "type": "string", "enum": ["long", "short"], "description": "long (default) or short." }
         },
-        "required": ["ticker"]
-    },
-    // Proteus's Elliott rule check (services/tools/elliott.tools.js; docs/design/proteus.md §8.1).
-    check_elliott_count: {
-        "type": "object",
-        "properties": {
-            "ticker": { "type": "string", "description": "The stock the count is on, e.g. NVDA." },
-            "timeframe": { "type": "string", "enum": ["1hr", "4hr", "day", "week"], "description": "The chart the count was read on — its candles are checked." },
-            "direction": { "type": "string", "enum": ["up", "down"], "description": "The impulse's direction." },
-            "points": { "type": "array", "items": { "type": "number" }, "description": "Prices in order: the start of wave 1, then the end of wave 1, 2, 3, 4, 5 as far as the count has got (3 to 6 prices)." }
-        },
-        "required": ["ticker", "timeframe", "direction", "points"]
+        "required": ["ticker", "ratio", "horizon"]
     },
     // Argus's read of the house's industries for a book (docs/design/argus-on-pythia.md §3.2).
     get_house_industries: {

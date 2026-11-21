@@ -19,7 +19,6 @@ import { TOOLS as PORTFOLIO_TOOLS } from '../../services/agents/portfolio.agent.
 import { TOOLS as ANALYST_TOOLS }   from '../../services/agents/analyst.agent.service.js'
 import { TOOLS as AXL_TOOLS }       from '../../services/agents/axl.agent.service.js'
 import { TOOLS as SCANNER_TOOLS } from '../../services/agents/scanner.agent.service.js'
-import { TOOLS as PROTEUS_TOOLS } from '../../services/agents/proteus.agent.service.js'
 import { MENTOR_TOOLS }             from '../../services/agents/mentor.agent.service.js'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '../../prompts/')
@@ -32,7 +31,6 @@ const DESKS = [
     { prompt: 'analyst_system_prompt.md',         tools: ANALYST_TOOLS },
     { prompt: 'axl_system_prompt.md',             tools: AXL_TOOLS },
     { prompt: 'scanner_system_prompt.md',         tools: SCANNER_TOOLS },
-    { prompt: 'proteus_system_prompt.md',         tools: PROTEUS_TOOLS },
     // Mentor's guided build names a tool at nearly every rung, so it is the prompt most likely to
     // outrun its kit — it was missing from this list until the ladder was written.
     { prompt: 'mentor_system_prompt.md',          tools: MENTOR_TOOLS },
@@ -58,15 +56,9 @@ for (const { prompt, tools } of DESKS) {
 // tools in the kit across a whole pool.
 // Argus's one prompt since 2026-11-11 (argus-rework.md) still carries the three vision tools until Proteus takes the
 // chart: so it still has to say which of them bill per use, and point at the cheap numbers instead.
-test('the scanner prompt marks all THREE vision tools as the per-use spend, not just get_chart', () => {
+test('the scanner prompt names none of the chart tools turned off on 2026-11-21 (Roy: "turn off the tools not in use")', () => {
     const spine = readFileSync(join(ROOT, 'scanner_system_prompt.md'), 'utf8')
-    const at = spine.indexOf('BILL PER USE')
-    assert.ok(at > 0, 'the prompt must say which tools bill per use')
-    const claim = spine.slice(Math.max(0, at - 200), at + 300)
-    for (const t of ['get_chart', 'get_orderblocks', 'get_false_breaks']) {
-        assert.match(claim, new RegExp(t), `${t} must be named as a per-use spend`)
+    for (const t of ['get_chart', 'get_orderblocks', 'get_false_breaks', 'get_candles', 'get_indicators', 'get_cycle_analysis']) {
+        assert.doesNotMatch(spine, new RegExp(`\`${t}\``), `${t} is off Argus's kit — the prompt must not offer it`)
     }
-    assert.match(claim, /never across a list/)
-    assert.match(claim, /get_candles/)
-    assert.match(claim, /get_indicators/)
 })

@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { streamAnthropicWithTools } from '../../providers/anthropic.provider.js'
 import { streamOpenAICompatWithTools } from '../../providers/openaiCompat.provider.js'
-import { TOOL_BUDGET_LANDING, EMPTY_REPLY_NUDGE, MAX_PARALLEL_TOOLS } from '../../services/llmStream.util.js'
+import { TOOL_BUDGET_LANDING, EMPTY_REPLY_NUDGE, LEAK_REPLY_NUDGE, isChannelLeak, STREAM_RESET, MAX_PARALLEL_TOOLS } from '../../services/llmStream.util.js'
 
 // The tool loop's LANDING ROUND, on both providers. A turn that is still calling tools when the
 // continuation cap arrives used to throw — and Mentor's "go all the way" build, which climbs eight
@@ -322,4 +322,59 @@ test('anthropic: onBudgetSpent fires once on the landing round, and never on a t
         maxContinuations: 10, client: fakeAnthropic([toolRound('t1'), textRound('done')]), onBudgetSpent: () => { quiet++ },
     })
     assert.equal(quiet, 0)
+})
+
+// ─── A CHANNEL LEAK IS NO REPLY (openai-compat; prod 2026-11-21, the analyst on Luna) ─────────────
+// "Erotiske\n马会assistant to=functions.get_trading_context? no." came back as the reply. Asked once to write it, the
+// leaked text not returned.
+
+test('openai-compat: a round that leaked its tool syntax is asked once to write — the leak is not returned', async () => {
+    const client = fakeOpenAI([oaToolRound('c1'), [chunk({ content: 'Erotiske\n马会assistant to=functions.get_trading_context? no.' }, 'stop')], [chunk({ content: 'TSLA needs one answer first.' }, 'stop')]])
+    assert.equal(await oaRun(client), 'TSLA needs one answer first.')
+    const r3 = client.requests[2]
+    assert.equal(r3.tool_choice, 'none')
+    assert.deepEqual(r3.messages.at(-1), { role: 'user', content: LEAK_REPLY_NUDGE })
+    assert.ok(!r3.messages.some(m => /to=functions/.test(String(m.content ?? ''))), 'the leaked round is not replayed')
+})
+
+test('openai-compat: a leak is asked about once — a second one is returned for the cleaner', async () => {
+    const leak = () => [chunk({ content: 'x assistant to=functions.get_quote' }, 'stop')]
+    const client = fakeOpenAI([oaToolRound('c1'), leak(), leak()])
+    assert.match(await oaRun(client), /to=functions/)
+    assert.equal(client.requests.length, 3)
+})
+
+test('isChannelLeak: the recipient header and the channel tokens — never prose', () => {
+    assert.equal(isChannelLeak('马会assistant to=functions.get_trading_context? no.'), true)
+    assert.equal(isChannelLeak('<|channel|>commentary'), false, 'a lone token is for the token cleaner')
+    assert.equal(isChannelLeak('Send it to=someone, please.'), false)
+    assert.equal(isChannelLeak('The stop goes under 340.'), false)
+})
+
+test('openai-compat: a leaked round is WITHDRAWN from the stream — the reset marker, then the reply', async () => {
+    const seen = []
+    const client = fakeOpenAI([oaToolRound('c1'), [chunk({ content: 'Erotiske\nassistant to=functions.get_quote' }, 'stop')], [chunk({ content: 'AAPL reads long.' }, 'stop')]])
+    const text = await streamOpenAICompatWithTools({
+        wire: 'openai/gpt-6-luna', model: 'gpt-6-luna', client, promptOrMessages: 'x', systemPrompt: 'S',
+        tools: [TOOL], toolHandlers: { get_quote: async () => 'AAPL 230' }, maxContinuations: 5, onToken: (t) => seen.push(t),
+    })
+    assert.equal(text, 'AAPL reads long.')
+    const at = seen.indexOf(STREAM_RESET)
+    assert.ok(at > 0, 'the reset follows what leaked')
+    assert.equal(seen.slice(at + 1).join(''), 'AAPL reads long.')
+})
+
+test('the reset marker: a `reset` frame from the shared callbacks; the replay text cleared; a subagent never resets Axl', async () => {
+    const { sseAgentCallbacks } = await import('../../api/_shared/sse.util.js')
+    const sent = []
+    const cb = sseAgentCallbacks((type, data) => sent.push([type, data]))
+    cb.onToken('Hi'); cb.onToken(STREAM_RESET)
+    assert.deepEqual(sent, [['token', { text: 'Hi' }], ['reset', {}]])
+    const { turnEmitter, runningTurn } = await import('../../services/sessionChannel.js')
+    const e = turnEmitter({ userId: 'u1', sessionId: 'sR', turnId: 't', agent: 'axl', send: () => {} })
+    e.emit('token', { text: 'garbage' })
+    e.emit('reset', {})
+    e.emit('token', { text: 'fine' })
+    assert.equal(runningTurn('sR', 'axl').text, 'fine')
+    e.end()
 })

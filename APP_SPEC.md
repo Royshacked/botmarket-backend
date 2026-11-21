@@ -4,8 +4,8 @@ Behavioral contracts for the core domain. For the architecture overview + ASCII
 flow diagrams see [README.md](README.md); for file layout see [CODE_MAP.md](CODE_MAP.md).
 
 The app turns natural-language chat into **monitored trade ideas** that route to a
-broker. Eight desks produce work — Axl (reception) · Mentor (`setup`, the trader) ·
-Atlas (portfolio) · Argus (one name for Mentor; his scan lists archived 2026-11-09) · Prometheus (`coverage`) · Pythia (`industry_view`, `industry_assessment`) · Proteus (how a stock trades — a shared profile, no kind) · Echo (who an event reaches through the supply chain — 2026-11-19, no kind) — and each
+broker. Seven desks produce work — Axl (reception) · Mentor (`setup`, the trader) ·
+Atlas (portfolio) · Argus (one name for Mentor; his scan lists archived 2026-11-09) · Prometheus (`coverage`) · Pythia (`industry_view`, `industry_assessment`) · Echo (who an event reaches through the supply chain — 2026-11-19, no kind) — plus Proteus (how a stock moves — a stored profile read by code, no desk since 2026-11-21) — and each
 authored kind is watched by its desk's own background monitor. The `idea` execution tier
 has no desk, so it is watched by two kind-blind loops instead (§2). One reconciler keeps
 entity state honest against the broker. Nothing reaches a broker while its venue is shut
@@ -467,15 +467,15 @@ The other way out of Argus is **Prometheus**: an investing list goes there by th
 ### Specialists answer through Axl — they never hold the floor (2026-11-20)
 
 [docs/design/modes-and-builders.md](docs/design/modes-and-builders.md) §3 (steps 1–2 built). The roles that ANSWER — the
-event analyst (`echo`) and the technical analyst (`proteus`) — are Axl's SUBAGENTS (registry `subagent`): Axl calls
+event analyst (`echo`; the technical analyst `proteus` too until 2026-11-21, when Proteus stopped being a desk) — are Axl's SUBAGENTS (registry `subagent`): Axl calls
 `ask_specialist { specialist, question, companies: [{ticker, name}], context }` (`services/desks/subagent.js`); the role
 runs its own desk inside Axl's turn, streams as itself ("Axl · Event analyst"), and its reply is kept as its own row
 (`ref.via: 'axl'`), which Axl's next turns read, labelled. The floor never moves: "show me the hotlist" after an event
 answer is Axl's (the ANT chat, 2026-11-19). `companies` is required with the NAME — a bare "ANT" reached the event
 analyst as Ant Group. A turn addressed to a subagent (the Hotlist's Echo tab, "@event analyst", a floor an older session
 left on one) goes to Axl with `input.via`, who asks it; "@stock picker" goes to Axl too (the user never chats with the
-stock picker — only the trader's hand-off reaches him). Mentor's own hand-off to the technical analyst still runs, and
-leaves the user with Mentor. The event analyst's `map_event` maps in the BACKGROUND (`echoMapJobs.service.js`): the
+stock picker — only the trader's hand-off reaches him). (Mentor's hand-off to the technical analyst went with Proteus's desk
+2026-11-21 — Mentor reads the profile in his context and asks `get_levels_for`.) The event analyst's `map_event` maps in the BACKGROUND (`echoMapJobs.service.js`): the
 chat's status line says it is mapping, the chat stays free, and the event analyst gets one turn to say what it found;
 the boot sweep picks up a map a restart cut off. The analyst (`research`) stays a desk until Analyst mode (step 9).
 
@@ -510,7 +510,7 @@ switched by the picker in the prompt box (`POST /api/sessions/:id/mode`), and sw
 
 **A question asked at the wrong desk goes back to Axl (2026-11-13).** After Axl hands the user to a desk, that desk
 holds the floor and answers what they type next. When the question is plainly another desk's ("is NVDA a good business?"
-at Proteus), the desk says one line and hands it back — `<route>reception</route>` with the user's question — and Axl
+at Mentor), the desk says one line and hands it back — `<route>reception</route>` with the user's question — and Axl
 answers it or sends it on, at once, without the user retyping. Routing judgment stays Axl's; a desk still routes
 straight to a desk the user names ("build me the trade" → Mentor). At most two automatic turns (desk → Axl → desk),
 never a loop; Pythia, in her own session, does not hand back.
@@ -587,9 +587,10 @@ fundamentals, Mentor trades.
   LEVELS are talked through inside it; their own METHOD is Daedalus's (coming — Mentor says so).
 - **"Let's trade TSLA."** No direction or horizon is asked. The DECIDING read (`mentorReads`, horizon `null`):
   Prometheus's coverage, re-researched first (the run's `reinit`) when its last full research is over 30 days old or a
-  report came out since; Proteus's measured profile (`behaviourProfile.service`, ≤ a week). The name comes from the
+  report came out since; the technical profile beside it (Proteus v2, `stockProfile.service` on the trade's scale —
+since 2026-11-21 no expert line of its own). The name comes from the
   worksheet, the seed, or Mentor's own `<asset>` tag (a first reply has no worksheet). A fresh read is handed to Mentor
-  at once (`askRead` → `readSettled`); a missing one waits in line as before. Each expert posts one dated line. Mentor
+  at once (`askRead` → `readSettled`); a missing one waits in line as before. Prometheus's read posts one dated line. Mentor
   says whether it is a LONG now (long only, for now) and on which horizon — which must fit the trade that can be built
   (a day trade only when the entry can fill today). A read AGAINST the trade is a warning the user may override —
   said in one line, never a question of its own (their three numbers are their yes).
@@ -629,50 +630,35 @@ fundamentals, Mentor trades.
   Arm / Leave, Update / Later; Atlas: the book, thesis shown; Prometheus: the draft, always open). No chips, gate cards
   or tables — Mentor asks in words.
 
-### Proteus — how a stock trades (2026-11-12)
+### Proteus — how a stock moves, in its own σ (v2, 2026-11-21)
 
-[docs/design/proteus.md](docs/design/proteus.md) — the technical analysis desk (agent `proteus`, pipeline
-`technicals`): what ONE stock's price respects technically, if anything. He sets no levels (Mentor's), judges no
-business (Prometheus's), picks nothing (Argus's). Long side only, for now.
+[docs/design/proteus-v2.md](docs/design/proteus-v2.md) — rebuilt after the labs of [proteus.md](docs/design/proteus.md)
+§10.12–10.21 found no dependable entry signal on daily bars. **Proteus is a stored PROFILE, read by code — no desk, no
+chat, no subagent** (P1): the ~~`proteus`~~ desk, its pipeline ~~`technicals`~~, Axl's ~~`technical_analyst`~~, the tools
+~~`get_behaviour_profile`~~ / ~~`check_elliott_count`~~ and the old engine are deleted (§6). Old chat rows by `proteus` still
+render (a history-only label in the frontend).
 
-- **Measured, then seen.** `get_behaviour_profile` is his evidence: counted in code from the stock's own candles
-  (`services/behaviourProfile.engine.js`) on 5-minute (~3 months), 1-hour (~1 year), daily (~10 years) and weekly
-  (~10 years) bars — holds at the 20 EMA / 50 / 200 SMA / VWAP, what follows RSI under 30, a MACD cross up or a
-  high-volume up bar, false breaks of swing lows (how often, how deep in ATRs, how fast a direction), bullish
-  order-block retests, ATR, gap, dollar volume, and whether it fits a day trade / a swing. Every rate is against a
-  **baseline** (the level shifted, or the stock's drift); a test **holds** only at 10+ points over it, z ≥ 3, on the
-  OLDER two-thirds of the history, AND still beating it in the recent third it never saw. "Nothing holds" is the usual
-  answer (sample of 11 names: 0 of 396 tests). What is SEEN on the chart now (patterns, today's order blocks and sweeps) comes from the vision tools and
-  never carries a hit rate.
-- **One profile per stock, the house's** (`services/behaviourProfile.service.js`): binds to no account, kept a week
-  in `proteus_profiles`; a name already profiled costs nothing whoever asks. Only the profile is kept, never the bars.
-- **Profiled before anyone asks** (2026-11-12, step 4): every day-board name (09:20 · 10:30 · 14:30) and every name
-  the house scan picks is queued for its measured profile (`proteusQueue.service` — code only, one name at a time, a
-  pause between names, the loop leader only), so Mentor, the chat and the Hotlist badge find it ready. The WRITTEN read
-  stays on open.
-- **One example on a chart** (2026-11-13): every behaviour answer shows one chart — the line that holds as its overlay,
-  or (the usual case) the profile's latest false break on the asked timeframe (daily by default), its swing low and
-  sweep drawn at the exact prices the count found, and one sentence saying what it shows.
-- **More methods, the same discipline** (2026-11-13, proteus.md §8.1): MEASURED — price cycles (trough spacing vs the
-  same moves reshuffled; a next window only when it holds), the false-break RATE against chance (noise fakes 75–86% of
-  breaks, so the rate alone is no trait), Wyckoff (trading ranges, springs vs an ordinary bar AND an ordinary false
-  break, range breakouts, dry-volume retests, the range now) and Fibonacci pullbacks (38.2/50/61.8% vs other depths of
-  the same pullbacks). SEEN — an Elliott count (checked by `check_elliott_count`: the three hard rules, each wave end on
-  the candles, not already dead, with the price that kills it — an impossible one is never shown) and a Wyckoff phase
-  from the measured range, with the closes that prove it wrong. On the names tested, none of the measured ones holds.
-- **The trader weighs it** (5b, 2026-11-13): Mentor's per-turn read lists what HOLDS priced now (a level he may anchor
-  to), otherwise "nothing is support — never cite one", the range now, and the stop's room on his own swing lows (about
-  two thirds of breaks reach his 0.2-ATR stop and most come back, alike on every name) — context for the deeper stop
-  he offers; the tested stop rule is unchanged.
-- **The opened Hotlist row** shows the profile on its horizon (what holds or the daily ATR, the breaks against chance,
-  cycle / Wyckoff / Fibonacci lines), replacing the badge.
-- **Knows where his numbers came from** (2026-11-13, every desk): a reply keeps the tools it was written from, and the
-  next turn is told them — asked "how so fast?", he names the cached profile instead of calling it made up.
-- **Who reaches him:** Axl ASKS him (`ask_specialist`, `technical_analyst` — since 2026-11-20 he is a subagent and never
-  holds the floor; see "Specialists answer through Axl"), and Mentor hands a "how does it trade?" to him (registry
-  `routedFrom: ['mentor']`), keeping the user. Mentor reads his profile on every turn of a build (step 4, built).
-- **No venue block.** He trades nothing, so he is the one desk with a user that carries neither `VENUE_RULE` nor the
-  venue tools (`tests/unit/languageRule.test.js`).
+- **The profile** (`services/stockProfile.engine.js`, pure): eight measures, all in the stock's own σ — σ, the swing scale
+  (runs and pullbacks), the noise (the counter-move inside a move that CONTINUED — the depth a stop must clear), the
+  natural levels per side (stop past the noise, target the run ~70% of runs reach), their implied reward : risk with its
+  record, trend or revert, the stretch from the line, the regime now. Every record line carries its count; under 10 (8
+  swings) it says "too few to say". A DESCRIPTION, never a rule that beats holding.
+- **Three scales** (P6): **day** (15-minute bars from the 5-minute, ~3 months; a session's σ; resolves by the close) ·
+  **swing** (daily, ~10 years FMP; a month's σ; 1-year cap) · **long** (weekly built from the daily; a quarter's σ; 2-year
+  cap). The horizon picks the scale (`scaleOf`); a scale without enough bars never borrows from another.
+- **Like coverage** (P2, `services/stockProfile.service.js`): one profile per symbol, the house's (binds to no account), in
+  `stock_profiles`; valid 7 days (the day scale 1 day). Missing or stale → built inline from the bars, code only, seconds,
+  only the scales asked. Only the profile is kept, never the bars. No background queue — the day boards', Pythia's weekly
+  and Echo's profile queues were dropped.
+- **One text form** (`services/stockProfile.format.js`): `profileBrief` · `scaleLines` · `levelsBrief` · `rowLines`.
+- **Axl** (`get_company_view`, `companyView.service`): the swing and long-term lines, said as "our technical read".
+- **Mentor** (`mentor.desk` `_proteusRead` → `mentor.agent` "THE TECHNICAL READ"): the profile on the trade's scale in his
+  context, no line of its own in the chat; "ITS NOISE" checks the turn's stop against the side's natural stop.
+  `get_levels_for { ticker, ratio, horizon, side }` (P3): the user's "I want 3:1" → the stop at the noise, the target
+  ratio × the stop, in prices from the last close, with how often that pair's target came first. It never refuses a
+  ratio; the trade stays Mentor's.
+- **The opened Hotlist row** (`GET /api/hotlist/profile/:symbol?horizon`, `hotlistBehaviour.profileRow`): "How it
+  trades" in bottom lines on the row's scale (`ROW_SCALE`) — σ, the swing scale, the natural levels, trend or revert.
 
 ---
 
@@ -739,7 +725,7 @@ pick.
 - **The app**: `GET /api/hotlist/echo` and `GET /api/hotlist/echo/:id` (`echo.service`) — the Hotlist's Echo tab: events of every kind, links
   ranked by score, "why it scores" factor by factor; a name goes to the trader (`echoLevels`: the simulator rules'
   levels as considerations — Mentor trades his regular setup) or the event analyst.
-- **Names go on to Prometheus and Proteus** (`services/echoReads.service.js`, swing): a house event's FLAGGED links
+- **Names go on to Prometheus** (`services/echoReads.service.js`, swing; Proteus's profile queue dropped 2026-11-21 — it builds on demand): a house event's FLAGGED links
   once, after its day-5 check (`echo_handoffs`), inside the house's weekly budget (`ECHO_RESEARCH_MAX_USD`, $2); a
   user's names only when they ask (`request_reads`: 5 at a time, 10 a week). A user's words reach the house analyst
   QUOTED. `ECHO_READS=false` turns the hand-off off.
@@ -892,11 +878,12 @@ the Nasdaq-100 as the **US100 cash CFD**, but levels are read off the **NQ futur
   originTickers, whatChanged, size, durability, effect, filter, status, map, scores, check, triggers, grades }`).
 - `echo_intake` — every intake item seen, with its verdict (event or skip, and why) — never asked twice.
 - `echo_templates` — the last map per event type and origin, the next map's starting point.
-- `echo_handoffs` — one row per house event whose flagged names went to Prometheus / Proteus (`{ _id: eventId, at, names }`).
+- `echo_handoffs` — one row per house event whose flagged names went to Prometheus (Proteus too, before 2026-11-21) (`{ _id: eventId, at, names }`).
 - (retired 2026-11-19: `echo_forward`, the engine's forward test, no longer read; `echo_user_events`, replaced by
   `echo_events`.)
-- `proteus_profiles` — Proteus's measured profile per symbol (`{ symbol, version, profile, computed_at, fetchedAt }`),
-  the house's, kept a week (`services/behaviourProfile.service.js`; a version bump recomputes).
+- `stock_profiles` — Proteus v2's profile per symbol (`{ symbol, version, scales: {day, swing, long}, built: {day, swing, long} }`),
+  the house's; each scale valid 7 days (the day scale 1 day) from its `built` stamp; a version bump rebuilds
+  (`services/stockProfile.service.js`). Replaced ~~`proteus_profiles`~~ 2026-11-21 (dropped on axl_dev; prod pending).
 - `journal` — the monitor's record for a `setup`, one row per READ plus the code-written events
   (`entry`, `exit`, `invalidation`, `pre_active`): `{ entityId, at, reason, price, rung, verdict,
   note, conditions[{id, met, note}], tools[], fired?, armed[], proposal?, next_check_at }`.

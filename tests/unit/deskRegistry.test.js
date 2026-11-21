@@ -7,8 +7,8 @@ import { SESSION_AGENTS, CONTEXT_KINDS } from '../../services/session.util.js'
 // The one desk registry (services/desks/registry.js). Five hand-kept lists derive from it now; these pin
 // that each derived list is EXACTLY what it replaced, so the move changed no route, no gate and no prompt.
 
-test("the pipelines a route may name: the seven it always was less Aether's (2026-11-18), Proteus's `technicals` (2026-11-12), `reception`, back to Axl (2026-11-13), and Echo's `events` (2026-11-19)", () => {
-    assert.deepEqual([...VALID_PIPELINES].sort(), ['assist', 'events', 'portfolio', 'reception', 'research', 'scan', 'strategy', 'technicals', 'trade'])
+test("the pipelines a route may name: the seven it always was less Aether's (2026-11-18), Proteus's `technicals` (2026-11-12, gone 2026-11-21 — proteus-v2.md), `reception`, back to Axl (2026-11-13), and Echo's `events` (2026-11-19)", () => {
+    assert.deepEqual([...VALID_PIPELINES].sort(), ['assist', 'events', 'portfolio', 'reception', 'research', 'scan', 'strategy', 'trade'])
     assert.deepEqual([...PIPELINE_KEYS].sort(), [...VALID_PIPELINES].sort())
 })
 
@@ -17,21 +17,21 @@ test('the admin-only desk is Pythia (Aether went with the event board, 2026-11-1
     assert.deepEqual([...ADMIN_PIPELINE_KEYS], ['strategy'])
 })
 
-test('the routable desks, IN PROMPT ORDER — research, assist, portfolio, scan, technicals, events (appended)', () => {
+test('the routable desks, IN PROMPT ORDER — research, assist, portfolio, scan, events (appended; Proteus no desk since 2026-11-21)', () => {
     // buildRouteRule lists them in this order inside every desk's prompt; a reorder is a prompt change.
-    assert.deepEqual(Object.keys(ROUTABLE_DESKS), ['research', 'assist', 'portfolio', 'scan', 'technicals', 'events'])
-    assert.deepEqual(Object.values(ROUTABLE_DESKS).map(d => d.agent), ['analyst', 'mentor', 'portfolio', 'scanner', 'proteus', 'echo'])
+    assert.deepEqual(Object.keys(ROUTABLE_DESKS), ['research', 'assist', 'portfolio', 'scan', 'events'])
+    assert.deepEqual(Object.values(ROUTABLE_DESKS).map(d => d.agent), ['analyst', 'mentor', 'portfolio', 'scanner', 'echo'])
     for (const d of Object.values(ROUTABLE_DESKS)) assert.ok(d.brand && d.does, d.agent)
     // Since 2026-11-09 Argus takes the user only from Mentor (his list-building chat is archived); the rest are open.
     assert.deepEqual(Object.fromEntries(Object.entries(ROUTABLE_DESKS).map(([k, d]) => [k, d.routedFrom])),
-        { research: null, assist: null, portfolio: null, scan: ['mentor'], technicals: ['mentor'], events: [] })
+        { research: null, assist: null, portfolio: null, scan: ['mentor'], events: [] })
 })
 
-test('the roles Axl ASKS (modes-and-builders.md M2): the event and technical analysts (subagents) and the analyst (a builder, askable 2026-11-21)', async () => {
+test('the roles Axl ASKS (modes-and-builders.md M2): the event analyst (a subagent) and the analyst (a builder, askable 2026-11-21)', async () => {
     const { SUBAGENTS, isSubagent } = await import('../../services/desks/registry.js')
-    assert.deepEqual({ ...SUBAGENTS }, { research_analyst: 'analyst', technical_analyst: 'proteus', event_analyst: 'echo' })
-    for (const a of ['echo', 'proteus']) assert.equal(isSubagent(a), true, a)
-    for (const a of ['axl', 'mentor', 'portfolio', 'analyst', 'scanner', 'strategy', 'nobody']) assert.equal(isSubagent(a), false, a)
+    assert.deepEqual({ ...SUBAGENTS }, { research_analyst: 'analyst', event_analyst: 'echo' })
+    assert.equal(isSubagent('echo'), true)
+    for (const a of ['axl', 'mentor', 'portfolio', 'analyst', 'scanner', 'strategy', 'proteus', 'nobody']) assert.equal(isSubagent(a), false, a)
 })
 
 test('an <edit> reopens the three editable kinds at the desk that owns each — `scan` left with Argus’s lists (2026-11-09)', () => {
@@ -39,7 +39,7 @@ test('an <edit> reopens the three editable kinds at the desk that owns each — 
 })
 
 test('the session store speaks for every agent and seals onto every kind a desk produces', () => {
-    assert.deepEqual([...SESSION_AGENTS].sort(), ['analyst', 'axl', 'echo', 'mentor', 'portfolio', 'proteus', 'scanner', 'strategy'])
+    assert.deepEqual([...SESSION_AGENTS].sort(), ['analyst', 'axl', 'echo', 'mentor', 'portfolio', 'scanner', 'strategy'])
     // `scan` left on 2026-11-09: Argus's single pick rides the chain to Mentor and produces no entity of its own.
     assert.deepEqual([...CONTEXT_KINDS].sort(), ['coverage', 'industry_view', 'portfolio', 'setup'])
     assert.equal(agentForKind('scan'), null)
@@ -49,7 +49,7 @@ test('the session store speaks for every agent and seals onto every kind a desk 
 
 test('history depth per desk is what each agent carried before the move', () => {
     const depth = Object.fromEntries(Object.values(DESKS).map(d => [d.agent, d.maxMessages]))
-    assert.deepEqual(depth, { axl: 20, analyst: 8, mentor: 8, portfolio: 10, scanner: 10, strategy: 8, proteus: 10, echo: 10 })
+    assert.deepEqual(depth, { axl: 20, analyst: 8, mentor: 8, portfolio: 10, scanner: 10, strategy: 8, echo: 10 })
 })
 
 test('the admin desks talk in their own scope; everyone else in the one chat', () => {

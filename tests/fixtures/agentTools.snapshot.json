@@ -769,211 +769,6 @@
             }
         },
         {
-            "name": "get_candles",
-            "description": "Fetch recent OHLCV candles for a ticker + timeframe — the exact price structure to name the setup and run the structure-respect check (swing highs/lows, prior-day levels, breakout shelves, base/range). Baseline Phase-3 tool: read the structure from the candles before you score `technical`. Always call it before committing to a named setup or a level.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "ticker": {
-                        "type": "string",
-                        "description": "Stock ticker symbol e.g. AAPL, NVDA"
-                    },
-                    "timeframe": {
-                        "type": "string",
-                        "enum": [
-                            "1min",
-                            "5min",
-                            "15min",
-                            "30min",
-                            "1hr",
-                            "2hr",
-                            "4hr",
-                            "day",
-                            "week",
-                            "month"
-                        ],
-                        "description": "Candle timeframe. 2hr and 4hr are aggregated server-side from native 1hr bars into true 2hr/4hr OHLCV (Yahoo has no native 2hr/4hr); every other resolution is a native interval. Sub-hour history is limited (1min ~5 days, 5/15/30min ~weeks) — match the timeframe to the setup."
-                    }
-                },
-                "required": [
-                    "ticker",
-                    "timeframe"
-                ]
-            }
-        },
-        {
-            "name": "get_indicators",
-            "description": "Compute exact indicator VALUES from recent candles — the SAME math the monitor uses (EMA, SMA, RSI, MACD, ATR, VWAP). Use it to CONFIRM the technical read with hard numbers: price vs EMA/VWAP for location, RSI for momentum/divergence, MACD for trend, ATR for how violent the name is. Price action / structure (get_candles) leads; indicators only confirm — a name clean on price with soft indicators is a lower `technical` score, not a reject.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "ticker": {
-                        "type": "string",
-                        "description": "Stock ticker symbol e.g. AAPL, NVDA"
-                    },
-                    "timeframe": {
-                        "type": "string",
-                        "enum": [
-                            "1min",
-                            "5min",
-                            "15min",
-                            "30min",
-                            "1hr",
-                            "2hr",
-                            "4hr",
-                            "day",
-                            "week",
-                            "month"
-                        ],
-                        "description": "Candle timeframe to compute on."
-                    },
-                    "indicators": {
-                        "type": "string",
-                        "description": "Comma-separated list with optional period, e.g. \"ema(20), ema(50), rsi(14), atr(14), macd, vwap\". Period is optional (defaults: ema/sma 20, rsi/atr 14). VWAP is session-anchored (intraday)."
-                    }
-                },
-                "required": [
-                    "ticker",
-                    "timeframe",
-                    "indicators"
-                ]
-            }
-        },
-        {
-            "name": "get_chart",
-            "description": "Render an actual candlestick chart IMAGE (KLineCharts, optional indicator overlays) and look at it directly for VISUAL / structural analysis — chart patterns, trend, where price sits vs moving averages / VWAP, base/breakout geometry. Use it to CONFIRM the named setup on the strongest names. EXPENSIVE (image render + vision) — reserve it for the top shortlist and the hand-off single-pick, NOT every candidate. For exact numeric levels prefer get_candles.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "ticker": {
-                        "type": "string",
-                        "description": "Ticker symbol e.g. AAPL, NVDA, BTCUSDT"
-                    },
-                    "timeframe": {
-                        "type": "string",
-                        "enum": [
-                            "1min",
-                            "5min",
-                            "15min",
-                            "30min",
-                            "1hr",
-                            "2hr",
-                            "4hr",
-                            "day",
-                            "week",
-                            "month"
-                        ],
-                        "description": "Chart timeframe. All resolutions render natively via TradingView."
-                    },
-                    "indicators": {
-                        "type": "string",
-                        "description": "Optional free-text indicators to overlay, e.g. \"rsi(14), ema(50), volume, vwap\". Leave EMPTY for a PLAIN price-only chart (the default) — best for reading structure, orderblocks and S/R without moving-average clutter. Add an overlay ONLY to confirm a read against it."
-                    },
-                    "levels": {
-                        "type": "array",
-                        "description": "Price lines to DRAW on the chart — the trade, shown rather than described. Use it when you are putting candidate trades or a built plan in front of the user (with show_to_user true), not for your own reading. At most 8 lines; more than a handful and the picture stops being a trade.",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "price": {
-                                    "type": "number",
-                                    "description": "Where the line sits."
-                                },
-                                "kind": {
-                                    "type": "string",
-                                    "enum": [
-                                        "from",
-                                        "to",
-                                        "stop",
-                                        "level"
-                                    ],
-                                    "description": "What it MEANS, which is what colours it: `from` where the trade starts, `to` where it pays, `stop` where it is wrong, `level` structure drawn for reference."
-                                },
-                                "label": {
-                                    "type": "string",
-                                    "description": "A few words shown on the line — \"the 238 shelf\", \"gap fill\". Keep it to the name of the thing, not a sentence."
-                                }
-                            },
-                            "required": [
-                                "price",
-                                "kind"
-                            ]
-                        }
-                    }
-                },
-                "required": [
-                    "ticker",
-                    "timeframe"
-                ]
-            }
-        },
-        {
-            "name": "get_orderblocks",
-            "description": "Detect ORDER BLOCKS on a plain candlestick chart (one ticker + timeframe): the last opposing candle/cluster before an impulsive structure break, whether it is fresh/untested or mitigated, and its zone vs current price. Angle-triggered — reach for it when the scan angle is structure / supply-demand / entry-zone hunting. Levels are approximate; confirm exact prices with get_candles.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "ticker": {
-                        "type": "string",
-                        "description": "Ticker symbol e.g. AAPL, NVDA, BTCUSDT"
-                    },
-                    "timeframe": {
-                        "type": "string",
-                        "enum": [
-                            "1min",
-                            "5min",
-                            "15min",
-                            "30min",
-                            "1hr",
-                            "2hr",
-                            "4hr",
-                            "day",
-                            "week",
-                            "month"
-                        ],
-                        "description": "Chart timeframe — read the orderblocks on the timeframe(s) you trade on."
-                    }
-                },
-                "required": [
-                    "ticker",
-                    "timeframe"
-                ]
-            }
-        },
-        {
-            "name": "get_false_breaks",
-            "description": "Detect FALSE BREAKS / liquidity sweeps on a plain candlestick chart (one ticker + timeframe): where price pushed beyond a clear prior high/low, failed, and closed back inside the range (a stop run / trap), whether the level was reclaimed, and how recent. Angle-triggered — reach for it for a failed-breakout / reversal / squeeze angle. Levels are approximate; confirm exact prices with get_candles.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "ticker": {
-                        "type": "string",
-                        "description": "Ticker symbol e.g. AAPL, NVDA, BTCUSDT"
-                    },
-                    "timeframe": {
-                        "type": "string",
-                        "enum": [
-                            "1min",
-                            "5min",
-                            "15min",
-                            "30min",
-                            "1hr",
-                            "2hr",
-                            "4hr",
-                            "day",
-                            "week",
-                            "month"
-                        ],
-                        "description": "Chart timeframe — read the sweeps on the timeframe(s) you trade on."
-                    }
-                },
-                "required": [
-                    "ticker",
-                    "timeframe"
-                ]
-            }
-        },
-        {
             "name": "get_fundamentals",
             "description": "Company fundamentals for a single ticker: sector/industry, market cap, valuation, margins, ROE, growth. Use it to qualify a longer-horizon pick. ETFs return exposure/profile only.",
             "input_schema": {
@@ -1034,127 +829,6 @@
             }
         },
         {
-            "name": "get_sec_filings",
-            "description": "What a company has actually filed with the SEC: latest 8-K (item 2.02 = the real earnings release), 10-Q, 10-K, with dates and links. Use it to confirm an earnings event truly dropped. US filers only; most ETFs and foreign tickers aren't in EDGAR.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "ticker": {
-                        "type": "string",
-                        "description": "e.g. AAPL, NVDA, TSLA"
-                    }
-                },
-                "required": [
-                    "ticker"
-                ]
-            }
-        },
-        {
-            "name": "get_cycle_analysis",
-            "description": "Detect recurring cycles in a stock's price history. Two modes: \"price\" finds the dominant peak-to-peak / trough-to-trough interval, tells you the current phase, and estimates the next turning point. \"calendar\" shows how the stock behaved in a specific calendar window (e.g. late June) over the past 3–5 years — average return, hit rate, and whether this year is tracking with the historical pattern. Use \"price\" for recurring-interval / cyclic-window theses (\"cycles every ~6 weeks\"); use \"calendar\" for seasonal / calendar-pattern theses (\"June is always weak\"). The angle makes the mode clear — pick it directly rather than asking which they mean.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "ticker": {
-                        "type": "string",
-                        "description": "e.g. AAPL, NVDA, SPY"
-                    },
-                    "mode": {
-                        "type": "string",
-                        "enum": [
-                            "price",
-                            "calendar"
-                        ],
-                        "description": "\"price\" for recurring interval cycles, \"calendar\" for seasonal window analysis"
-                    },
-                    "calendar_window": {
-                        "type": "object",
-                        "description": "Required for mode \"calendar\". Defines the window to analyze each year.",
-                        "properties": {
-                            "month_start": {
-                                "type": "number",
-                                "description": "1-based month number (Jan=1). Start month of the window."
-                            },
-                            "month_end": {
-                                "type": "number",
-                                "description": "1-based month number. End month — same as month_start for a single month."
-                            },
-                            "day_start": {
-                                "type": "number",
-                                "description": "Optional. Starting day within month_start (default 1)."
-                            },
-                            "day_end": {
-                                "type": "number",
-                                "description": "Optional. Ending day within month_end (default last day of month)."
-                            }
-                        },
-                        "required": [
-                            "month_start"
-                        ]
-                    },
-                    "lookback_years": {
-                        "type": "number",
-                        "description": "Years of history to use (default 4, max 6)."
-                    }
-                },
-                "required": [
-                    "ticker",
-                    "mode"
-                ]
-            }
-        },
-        {
-            "name": "get_short_interest",
-            "description": "Short interest for a US-listed single stock/ADR: short % of float, days-to-cover (short ratio), and month-over-month change. FINRA data, reported bi-monthly with a ~2-week lag — use it for squeeze potential and crowded-bearish-positioning context on a scan candidate, not as a live read. No data for ETFs, crypto, FX or futures.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "ticker": {
-                        "type": "string",
-                        "description": "e.g. GME, TSLA, AAPL"
-                    }
-                },
-                "required": [
-                    "ticker"
-                ]
-            }
-        },
-        {
-            "name": "get_options_context",
-            "description": "Options positioning for a US equity/ETF: put/call ratio (by open interest and by volume) and at-the-money implied volatility for the nearest expiry. Use it to gauge directional skew and how big a move the market is pricing (elevated IV = expensive options / large expected move, often around a catalyst). Quotes ~15-min delayed. No data for crypto, FX or futures.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "ticker": {
-                        "type": "string",
-                        "description": "e.g. NVDA, SPY, AAPL"
-                    }
-                },
-                "required": [
-                    "ticker"
-                ]
-            }
-        },
-        {
-            "name": "get_derivatives_context",
-            "description": "Crypto-perp positioning from Binance: funding rate (who pays to hold the trade — a crowding signal), open interest (committed leverage), and the global long/short account ratio (retail skew). This is the crypto analog to short-interest/options sentiment. Crypto perps only (BTC, ETH, SOL…) — not equities, FX or traditional futures.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "symbol": {
-                        "type": "string",
-                        "description": "e.g. BTC, ETH, SOL (or BTC-USD / BTCUSDT)"
-                    }
-                },
-                "required": [
-                    "symbol"
-                ]
-            },
-            "cache_control": {
-                "type": "ephemeral"
-            }
-        },
-        {
             "name": "get_market_hours",
             "description": "Whether an instrument's market is OPEN right now, and if not, exactly when it next opens. Asset-class aware: crypto is 24/7, forex is 24/5, index futures run near-24/5 on CME hours, and stocks/ETFs only trade the 09:30–16:00 ET regular session. Every get_quote already comes back with this line attached, so call this only when you need the answer WITHOUT pricing something — \"is the market open?\", \"when does it reopen?\", \"can we still get in today?\". Note it does not know about exchange holidays or half-days.",
             "input_schema": {
@@ -1179,6 +853,9 @@
                 "required": [
                     "ticker"
                 ]
+            },
+            "cache_control": {
+                "type": "ephemeral"
             }
         },
         {
@@ -1381,7 +1058,7 @@
                     },
                     "exposed_revenue_pct": {
                         "type": "number",
-                        "description": "Share of revenue the event reaches, 0–1. Aether’s impact_pct_revenue when the filing sized it; else your read of the segment or concentration note. Say which in your text."
+                        "description": "Share of revenue the event reaches, 0–1 — your read of the segment or concentration note, or a figure the filing states. Say which in your text."
                     },
                     "shock_pct": {
                         "type": "number",
@@ -1405,7 +1082,7 @@
                     },
                     "moved_pct": {
                         "type": "number",
-                        "description": "The excess move since the event in percent (Aether’s number, in the opening: \"0.5% vs SPY\" → 0.5). Omit if none was measured."
+                        "description": "The excess move since the event in percent, vs SPY (\"0.5% vs SPY\" → 0.5). Omit if none was measured."
                     }
                 },
                 "required": [
@@ -1527,14 +1204,6 @@
                 "required": [
                     "ticker"
                 ]
-            }
-        },
-        {
-            "name": "get_trading_context",
-            "description": "The user's live trading venue + accounts: which modes are available (paper / live / manual), which live brokers are connected, and every account with its balance, capabilities, whether it is the SELECTED one, and the positions currently open in it. Call it before you size anything, commit to a venue, or answer any question about accounts, balances, buying power or what the user is already holding — never guess these.",
-            "input_schema": {
-                "type": "object",
-                "properties": {}
             }
         },
         {
@@ -1713,22 +1382,6 @@
             }
         },
         {
-            "name": "get_peers",
-            "description": "Fetch the fundamental PEER SET for a ticker (same sector/size cohort) — the candidate names it may move with. Use it in the correlation read to STOP GUESSING peers: pull the set, pick the ones that matter (close competitors, the sector/industry ETF, a lead-lag driver), then feed those into get_correlations to measure how tightly the asset ACTUALLY tracks each. US-listed equities/ETFs.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "ticker": {
-                        "type": "string",
-                        "description": "e.g. NVDA, AAPL, XOM"
-                    }
-                },
-                "required": [
-                    "ticker"
-                ]
-            }
-        },
-        {
             "name": "get_macro_snapshot",
             "description": "Hard macro read for the regime call: the current Treasury curve (3M/2Y/10Y/30Y + 2s10s inversion flag), key economic indicators (GDP, CPI, inflation, unemployment, Fed funds, consumer sentiment), and today's sector rotation (leaders/laggards). The DATA half of the regime read — pair it with web_search for the narrative. Weight by horizon: real weight for swing, a lighter backdrop for intraday/day. No arguments.",
             "input_schema": {
@@ -1765,25 +1418,6 @@
                 },
                 "required": [
                     "ticker"
-                ]
-            }
-        },
-        {
-            "name": "get_correlations",
-            "description": "Pairwise correlation matrix (1y daily returns) for a set of tickers. Use it in the correlation read: include the traded asset alongside the names you suspect drive it — its sector/industry ETF, close peers (from get_peers), an index (SPY/QQQ), or a lead-lag driver (e.g. SMH for a chip name, BTC for a high-beta alt, a crude proxy for an E&P) — to measure how tightly it actually moves with each, beyond eyeballing charts. The numbers ground the drivers you name in referenced_symbols.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "tickers": {
-                        "type": "array",
-                        "items": {
-                            "type": "string"
-                        },
-                        "description": "two or more tickers, e.g. [\"NVDA\",\"AAPL\",\"GLD\"]"
-                    }
-                },
-                "required": [
-                    "tickers"
                 ]
             }
         },
@@ -1856,186 +1490,6 @@
                 "required": [
                     "ticker",
                     "timeframe"
-                ]
-            }
-        },
-        {
-            "name": "get_orderblocks",
-            "description": "Detect ORDER BLOCKS on a plain (indicator-free) candlestick chart for one ticker + timeframe. Renders the chart and runs a focused visual read: the last opposing candle/cluster before an impulsive structure break (bullish OB = last down-candle before a rally; bearish OB = last up-candle before a selloff), whether each is fresh/untested or mitigated, and its zone vs current price. Reach for this to find price-action entry zones and triggers — as easily as you would an indicator value. Levels are approximate; confirm exact prices with get_candles.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "ticker": {
-                        "type": "string",
-                        "description": "Ticker symbol e.g. AAPL, NVDA, BTCUSDT"
-                    },
-                    "timeframe": {
-                        "type": "string",
-                        "enum": [
-                            "1min",
-                            "5min",
-                            "15min",
-                            "30min",
-                            "1hr",
-                            "2hr",
-                            "4hr",
-                            "day",
-                            "week",
-                            "month"
-                        ],
-                        "description": "Chart timeframe — read the orderblocks on the timeframe(s) you trade on."
-                    },
-                    "show_to_user": {
-                        "type": "boolean",
-                        "description": "Set true to render the analyzed chart in the user's chat (the plain chart the read is based on). Leave false for an internal read."
-                    }
-                },
-                "required": [
-                    "ticker",
-                    "timeframe"
-                ]
-            }
-        },
-        {
-            "name": "get_false_breaks",
-            "description": "Detect FALSE BREAKS / liquidity sweeps on a plain (indicator-free) candlestick chart for one ticker + timeframe. Renders the chart and runs a focused visual read: where price pushed beyond a clear prior high/low, failed, and closed back inside the range (a stop run / trap), whether the level was reclaimed, and how recent. Reach for this to find price-action triggers. Levels are approximate; confirm exact prices with get_candles.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "ticker": {
-                        "type": "string",
-                        "description": "Ticker symbol e.g. AAPL, NVDA, BTCUSDT"
-                    },
-                    "timeframe": {
-                        "type": "string",
-                        "enum": [
-                            "1min",
-                            "5min",
-                            "15min",
-                            "30min",
-                            "1hr",
-                            "2hr",
-                            "4hr",
-                            "day",
-                            "week",
-                            "month"
-                        ],
-                        "description": "Chart timeframe — read the sweeps on the timeframe(s) you trade on."
-                    },
-                    "show_to_user": {
-                        "type": "boolean",
-                        "description": "Set true to render the analyzed chart in the user's chat. Leave false for an internal read."
-                    }
-                },
-                "required": [
-                    "ticker",
-                    "timeframe"
-                ]
-            }
-        },
-        {
-            "name": "get_indicators",
-            "description": "Compute exact indicator VALUES from recent candles — the SAME math the monitor uses (EMA, SMA, RSI, MACD, ATR, VWAP). Use it to confirm a read with hard numbers: ATR for sizing an entry zone to volatility, price vs EMA / VWAP for location, RSI for momentum/divergence, MACD for trend. Price action leads; indicators only confirm.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "ticker": {
-                        "type": "string",
-                        "description": "Stock ticker symbol e.g. AAPL, NVDA"
-                    },
-                    "timeframe": {
-                        "type": "string",
-                        "enum": [
-                            "1min",
-                            "5min",
-                            "15min",
-                            "30min",
-                            "1hr",
-                            "2hr",
-                            "4hr",
-                            "day",
-                            "week",
-                            "month"
-                        ],
-                        "description": "Candle timeframe to compute on."
-                    },
-                    "indicators": {
-                        "type": "string",
-                        "description": "Comma-separated list with optional period, e.g. \"ema(20), ema(50), rsi(14), atr(14), macd, vwap\". Period is optional (defaults: ema/sma 20, rsi/atr 14). VWAP is session-anchored (intraday)."
-                    }
-                },
-                "required": [
-                    "ticker",
-                    "timeframe",
-                    "indicators"
-                ]
-            }
-        },
-        {
-            "name": "get_cycle_analysis",
-            "description": "Detect recurring cycles in a stock's price history. Two modes: \"price\" finds the dominant peak-to-peak / trough-to-trough interval, the current phase, and the next estimated turning point. \"calendar\" shows how the stock behaved in a specific calendar window (e.g. late June) over the past 3–5 years — average return, hit rate, and whether this year is tracking. Use \"price\" for recurring-interval / cyclic-window theses, \"calendar\" for seasonal / calendar-pattern theses. Pass `timeframe` on a \"price\" read to choose the resolution: a sub-hourly-to-hourly rung (1min–1hr) times a session-scale INTRADAY cycle (in bars); day/week/month (the default) times the multi-day swing cycle.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "ticker": {
-                        "type": "string",
-                        "description": "e.g. AAPL, NVDA, SPY"
-                    },
-                    "mode": {
-                        "type": "string",
-                        "enum": [
-                            "price",
-                            "calendar"
-                        ],
-                        "description": "\"price\" for recurring interval cycles, \"calendar\" for seasonal window analysis"
-                    },
-                    "timeframe": {
-                        "type": "string",
-                        "enum": [
-                            "1min",
-                            "5min",
-                            "15min",
-                            "30min",
-                            "1hr",
-                            "day",
-                            "week",
-                            "month"
-                        ],
-                        "description": "For \"price\" mode: the cycle resolution. 1min–1hr = intraday cycle (bars); day (default)/week/month = multi-day swing cycle. Ignored for \"calendar\"."
-                    },
-                    "calendar_window": {
-                        "type": "object",
-                        "description": "Required for mode \"calendar\". Defines the window to analyze each year.",
-                        "properties": {
-                            "month_start": {
-                                "type": "number",
-                                "description": "1-based month number (Jan=1). Start month of the window."
-                            },
-                            "month_end": {
-                                "type": "number",
-                                "description": "1-based month number. End month — same as month_start for a single month."
-                            },
-                            "day_start": {
-                                "type": "number",
-                                "description": "Optional. Starting day within month_start (default 1)."
-                            },
-                            "day_end": {
-                                "type": "number",
-                                "description": "Optional. Ending day within month_end (default last day of month)."
-                            }
-                        },
-                        "required": [
-                            "month_start"
-                        ]
-                    },
-                    "lookback_years": {
-                        "type": "number",
-                        "description": "Years of history to use (default 4, max 6)."
-                    }
-                },
-                "required": [
-                    "ticker",
-                    "mode"
                 ]
             }
         },
@@ -2148,25 +1602,6 @@
             }
         },
         {
-            "name": "get_derivatives_context",
-            "description": "Crypto-perp positioning from Binance: funding rate, open interest, global long/short ratio. The crypto analog to short-interest/options sentiment. Crypto perps only.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "symbol": {
-                        "type": "string",
-                        "description": "e.g. BTC, ETH, SOL (or BTC-USD / BTCUSDT)"
-                    }
-                },
-                "required": [
-                    "symbol"
-                ]
-            },
-            "cache_control": {
-                "type": "ephemeral"
-            }
-        },
-        {
             "name": "get_market_hours",
             "description": "Whether an instrument's market is OPEN right now, and if not, exactly when it next opens. Asset-class aware: crypto is 24/7, forex is 24/5, index futures run near-24/5 on CME hours, and stocks/ETFs only trade the 09:30–16:00 ET regular session. Every get_quote already comes back with this line attached, so call this only when you need the answer WITHOUT pricing something — \"is the market open?\", \"when does it reopen?\", \"can we still get in today?\". Note it does not know about exchange holidays or half-days.",
             "input_schema": {
@@ -2191,90 +1626,9 @@
                 "required": [
                     "ticker"
                 ]
-            }
-        },
-        {
-            "name": "get_fvg",
-            "description": "Fair-value gaps (3-candle imbalances) computed from OHLCV — exact bullish/bearish gap ranges, newest first, with whether each is still unfilled. Unfilled FVGs are draws + entry zones. SMC mode.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "ticker": {
-                        "type": "string",
-                        "description": "ticker symbol e.g. AAPL, NVDA"
-                    },
-                    "timeframe": {
-                        "type": "string",
-                        "description": "timeframe rung, e.g. 5min, 15min, 1hr, 4hr, day"
-                    }
-                },
-                "required": [
-                    "ticker",
-                    "timeframe"
-                ]
-            }
-        },
-        {
-            "name": "get_structure",
-            "description": "Market structure from OHLCV: trend (up/down/range), the last BOS (continuation) or CHoCH (reversal) with its exact broken level, the last swing high/low, the premium/discount split of the dealing range, and the fresh order-block zones (origin of the last impulses). SMC mode's core structural read.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "ticker": {
-                        "type": "string",
-                        "description": "ticker symbol e.g. AAPL, NVDA"
-                    },
-                    "timeframe": {
-                        "type": "string",
-                        "description": "timeframe rung, e.g. 5min, 15min, 1hr, 4hr, day"
-                    }
-                },
-                "required": [
-                    "ticker",
-                    "timeframe"
-                ]
-            }
-        },
-        {
-            "name": "get_liquidity",
-            "description": "Liquidity pools from OHLCV: near-equal swing highs (buy-side, above) and lows (sell-side, below) where stops cluster — the exact levels price is drawn to sweep. SMC mode.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "ticker": {
-                        "type": "string",
-                        "description": "ticker symbol e.g. AAPL, NVDA"
-                    },
-                    "timeframe": {
-                        "type": "string",
-                        "description": "timeframe rung, e.g. 5min, 15min, 1hr, 4hr, day"
-                    }
-                },
-                "required": [
-                    "ticker",
-                    "timeframe"
-                ]
-            }
-        },
-        {
-            "name": "get_key_levels",
-            "description": "Exact prior-day and current-day high/low from OHLCV — the session \"draw on liquidity\" references (PDH/PDL). Useful in BOTH discretionary (prior-day levels) and SMC (session liquidity). Best on an intraday/day timeframe.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "ticker": {
-                        "type": "string",
-                        "description": "ticker symbol e.g. AAPL, NVDA"
-                    },
-                    "timeframe": {
-                        "type": "string",
-                        "description": "timeframe rung, e.g. 5min, 15min, 1hr, 4hr, day"
-                    }
-                },
-                "required": [
-                    "ticker",
-                    "timeframe"
-                ]
+            },
+            "cache_control": {
+                "type": "ephemeral"
             }
         }
     ],
@@ -2349,22 +1703,6 @@
             }
         },
         {
-            "name": "get_peers",
-            "description": "Fetch the fundamental PEER SET for a ticker (same sector/size cohort) — the candidate names it may move with. Use it in the correlation read to STOP GUESSING peers: pull the set, pick the ones that matter (close competitors, the sector/industry ETF, a lead-lag driver), then feed those into get_correlations to measure how tightly the asset ACTUALLY tracks each. US-listed equities/ETFs.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "ticker": {
-                        "type": "string",
-                        "description": "e.g. NVDA, AAPL, XOM"
-                    }
-                },
-                "required": [
-                    "ticker"
-                ]
-            }
-        },
-        {
             "name": "get_macro_snapshot",
             "description": "Hard macro read for the regime call: the current Treasury curve (3M/2Y/10Y/30Y + 2s10s inversion flag), key economic indicators (GDP, CPI, inflation, unemployment, Fed funds, consumer sentiment), and today's sector rotation (leaders/laggards). The DATA half of the regime read — pair it with web_search for the narrative. Weight by horizon: real weight for swing, a lighter backdrop for intraday/day. No arguments.",
             "input_schema": {
@@ -2401,25 +1739,6 @@
                 },
                 "required": [
                     "ticker"
-                ]
-            }
-        },
-        {
-            "name": "get_correlations",
-            "description": "Pairwise correlation matrix (1y daily returns) for a set of tickers. Use it in the correlation read: include the traded asset alongside the names you suspect drive it — its sector/industry ETF, close peers (from get_peers), an index (SPY/QQQ), or a lead-lag driver (e.g. SMH for a chip name, BTC for a high-beta alt, a crude proxy for an E&P) — to measure how tightly it actually moves with each, beyond eyeballing charts. The numbers ground the drivers you name in referenced_symbols.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "tickers": {
-                        "type": "array",
-                        "items": {
-                            "type": "string"
-                        },
-                        "description": "two or more tickers, e.g. [\"NVDA\",\"AAPL\",\"GLD\"]"
-                    }
-                },
-                "required": [
-                    "tickers"
                 ]
             }
         },
@@ -2492,186 +1811,6 @@
                 "required": [
                     "ticker",
                     "timeframe"
-                ]
-            }
-        },
-        {
-            "name": "get_orderblocks",
-            "description": "Detect ORDER BLOCKS on a plain (indicator-free) candlestick chart for one ticker + timeframe. Renders the chart and runs a focused visual read: the last opposing candle/cluster before an impulsive structure break (bullish OB = last down-candle before a rally; bearish OB = last up-candle before a selloff), whether each is fresh/untested or mitigated, and its zone vs current price. Reach for this to find price-action entry zones and triggers — as easily as you would an indicator value. Levels are approximate; confirm exact prices with get_candles.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "ticker": {
-                        "type": "string",
-                        "description": "Ticker symbol e.g. AAPL, NVDA, BTCUSDT"
-                    },
-                    "timeframe": {
-                        "type": "string",
-                        "enum": [
-                            "1min",
-                            "5min",
-                            "15min",
-                            "30min",
-                            "1hr",
-                            "2hr",
-                            "4hr",
-                            "day",
-                            "week",
-                            "month"
-                        ],
-                        "description": "Chart timeframe — read the orderblocks on the timeframe(s) you trade on."
-                    },
-                    "show_to_user": {
-                        "type": "boolean",
-                        "description": "Set true to render the analyzed chart in the user's chat (the plain chart the read is based on). Leave false for an internal read."
-                    }
-                },
-                "required": [
-                    "ticker",
-                    "timeframe"
-                ]
-            }
-        },
-        {
-            "name": "get_false_breaks",
-            "description": "Detect FALSE BREAKS / liquidity sweeps on a plain (indicator-free) candlestick chart for one ticker + timeframe. Renders the chart and runs a focused visual read: where price pushed beyond a clear prior high/low, failed, and closed back inside the range (a stop run / trap), whether the level was reclaimed, and how recent. Reach for this to find price-action triggers. Levels are approximate; confirm exact prices with get_candles.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "ticker": {
-                        "type": "string",
-                        "description": "Ticker symbol e.g. AAPL, NVDA, BTCUSDT"
-                    },
-                    "timeframe": {
-                        "type": "string",
-                        "enum": [
-                            "1min",
-                            "5min",
-                            "15min",
-                            "30min",
-                            "1hr",
-                            "2hr",
-                            "4hr",
-                            "day",
-                            "week",
-                            "month"
-                        ],
-                        "description": "Chart timeframe — read the sweeps on the timeframe(s) you trade on."
-                    },
-                    "show_to_user": {
-                        "type": "boolean",
-                        "description": "Set true to render the analyzed chart in the user's chat. Leave false for an internal read."
-                    }
-                },
-                "required": [
-                    "ticker",
-                    "timeframe"
-                ]
-            }
-        },
-        {
-            "name": "get_indicators",
-            "description": "Compute exact indicator VALUES from recent candles — the SAME math the monitor uses (EMA, SMA, RSI, MACD, ATR, VWAP). Use it to confirm a read with hard numbers: ATR for sizing an entry zone to volatility, price vs EMA / VWAP for location, RSI for momentum/divergence, MACD for trend. Price action leads; indicators only confirm.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "ticker": {
-                        "type": "string",
-                        "description": "Stock ticker symbol e.g. AAPL, NVDA"
-                    },
-                    "timeframe": {
-                        "type": "string",
-                        "enum": [
-                            "1min",
-                            "5min",
-                            "15min",
-                            "30min",
-                            "1hr",
-                            "2hr",
-                            "4hr",
-                            "day",
-                            "week",
-                            "month"
-                        ],
-                        "description": "Candle timeframe to compute on."
-                    },
-                    "indicators": {
-                        "type": "string",
-                        "description": "Comma-separated list with optional period, e.g. \"ema(20), ema(50), rsi(14), atr(14), macd, vwap\". Period is optional (defaults: ema/sma 20, rsi/atr 14). VWAP is session-anchored (intraday)."
-                    }
-                },
-                "required": [
-                    "ticker",
-                    "timeframe",
-                    "indicators"
-                ]
-            }
-        },
-        {
-            "name": "get_cycle_analysis",
-            "description": "Detect recurring cycles in a stock's price history. Two modes: \"price\" finds the dominant peak-to-peak / trough-to-trough interval, the current phase, and the next estimated turning point. \"calendar\" shows how the stock behaved in a specific calendar window (e.g. late June) over the past 3–5 years — average return, hit rate, and whether this year is tracking. Use \"price\" for recurring-interval / cyclic-window theses, \"calendar\" for seasonal / calendar-pattern theses. Pass `timeframe` on a \"price\" read to choose the resolution: a sub-hourly-to-hourly rung (1min–1hr) times a session-scale INTRADAY cycle (in bars); day/week/month (the default) times the multi-day swing cycle.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "ticker": {
-                        "type": "string",
-                        "description": "e.g. AAPL, NVDA, SPY"
-                    },
-                    "mode": {
-                        "type": "string",
-                        "enum": [
-                            "price",
-                            "calendar"
-                        ],
-                        "description": "\"price\" for recurring interval cycles, \"calendar\" for seasonal window analysis"
-                    },
-                    "timeframe": {
-                        "type": "string",
-                        "enum": [
-                            "1min",
-                            "5min",
-                            "15min",
-                            "30min",
-                            "1hr",
-                            "day",
-                            "week",
-                            "month"
-                        ],
-                        "description": "For \"price\" mode: the cycle resolution. 1min–1hr = intraday cycle (bars); day (default)/week/month = multi-day swing cycle. Ignored for \"calendar\"."
-                    },
-                    "calendar_window": {
-                        "type": "object",
-                        "description": "Required for mode \"calendar\". Defines the window to analyze each year.",
-                        "properties": {
-                            "month_start": {
-                                "type": "number",
-                                "description": "1-based month number (Jan=1). Start month of the window."
-                            },
-                            "month_end": {
-                                "type": "number",
-                                "description": "1-based month number. End month — same as month_start for a single month."
-                            },
-                            "day_start": {
-                                "type": "number",
-                                "description": "Optional. Starting day within month_start (default 1)."
-                            },
-                            "day_end": {
-                                "type": "number",
-                                "description": "Optional. Ending day within month_end (default last day of month)."
-                            }
-                        },
-                        "required": [
-                            "month_start"
-                        ]
-                    },
-                    "lookback_years": {
-                        "type": "number",
-                        "description": "Years of history to use (default 4, max 6)."
-                    }
-                },
-                "required": [
-                    "ticker",
-                    "mode"
                 ]
             }
         },
@@ -2784,25 +1923,6 @@
             }
         },
         {
-            "name": "get_derivatives_context",
-            "description": "Crypto-perp positioning from Binance: funding rate, open interest, global long/short ratio. The crypto analog to short-interest/options sentiment. Crypto perps only.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "symbol": {
-                        "type": "string",
-                        "description": "e.g. BTC, ETH, SOL (or BTC-USD / BTCUSDT)"
-                    }
-                },
-                "required": [
-                    "symbol"
-                ]
-            },
-            "cache_control": {
-                "type": "ephemeral"
-            }
-        },
-        {
             "name": "get_market_hours",
             "description": "Whether an instrument's market is OPEN right now, and if not, exactly when it next opens. Asset-class aware: crypto is 24/7, forex is 24/5, index futures run near-24/5 on CME hours, and stocks/ETFs only trade the 09:30–16:00 ET regular session. Every get_quote already comes back with this line attached, so call this only when you need the answer WITHOUT pricing something — \"is the market open?\", \"when does it reopen?\", \"can we still get in today?\". Note it does not know about exchange holidays or half-days.",
             "input_schema": {
@@ -2827,90 +1947,9 @@
                 "required": [
                     "ticker"
                 ]
-            }
-        },
-        {
-            "name": "get_fvg",
-            "description": "Fair-value gaps (3-candle imbalances) computed from OHLCV — exact bullish/bearish gap ranges, newest first, with whether each is still unfilled. Unfilled FVGs are draws + entry zones. SMC mode.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "ticker": {
-                        "type": "string",
-                        "description": "ticker symbol e.g. AAPL, NVDA"
-                    },
-                    "timeframe": {
-                        "type": "string",
-                        "description": "timeframe rung, e.g. 5min, 15min, 1hr, 4hr, day"
-                    }
-                },
-                "required": [
-                    "ticker",
-                    "timeframe"
-                ]
-            }
-        },
-        {
-            "name": "get_structure",
-            "description": "Market structure from OHLCV: trend (up/down/range), the last BOS (continuation) or CHoCH (reversal) with its exact broken level, the last swing high/low, the premium/discount split of the dealing range, and the fresh order-block zones (origin of the last impulses). SMC mode's core structural read.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "ticker": {
-                        "type": "string",
-                        "description": "ticker symbol e.g. AAPL, NVDA"
-                    },
-                    "timeframe": {
-                        "type": "string",
-                        "description": "timeframe rung, e.g. 5min, 15min, 1hr, 4hr, day"
-                    }
-                },
-                "required": [
-                    "ticker",
-                    "timeframe"
-                ]
-            }
-        },
-        {
-            "name": "get_liquidity",
-            "description": "Liquidity pools from OHLCV: near-equal swing highs (buy-side, above) and lows (sell-side, below) where stops cluster — the exact levels price is drawn to sweep. SMC mode.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "ticker": {
-                        "type": "string",
-                        "description": "ticker symbol e.g. AAPL, NVDA"
-                    },
-                    "timeframe": {
-                        "type": "string",
-                        "description": "timeframe rung, e.g. 5min, 15min, 1hr, 4hr, day"
-                    }
-                },
-                "required": [
-                    "ticker",
-                    "timeframe"
-                ]
-            }
-        },
-        {
-            "name": "get_key_levels",
-            "description": "Exact prior-day and current-day high/low from OHLCV — the session \"draw on liquidity\" references (PDH/PDL). Useful in BOTH discretionary (prior-day levels) and SMC (session liquidity). Best on an intraday/day timeframe.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "ticker": {
-                        "type": "string",
-                        "description": "ticker symbol e.g. AAPL, NVDA"
-                    },
-                    "timeframe": {
-                        "type": "string",
-                        "description": "timeframe rung, e.g. 5min, 15min, 1hr, 4hr, day"
-                    }
-                },
-                "required": [
-                    "ticker",
-                    "timeframe"
-                ]
+            },
+            "cache_control": {
+                "type": "ephemeral"
             }
         },
         {
@@ -3102,6 +2141,47 @@
                     "ticker",
                     "stop",
                     "target"
+                ]
+            }
+        },
+        {
+            "name": "get_levels_for",
+            "description": "Where the stop and the target go on THIS stock for a reward : risk the USER asked for (\"I want 3:1\") — measured from its own candles on the trade's scale (the horizon picks it). The stop sits past a normal pullback (the same multiple of the stock's σ over the horizon on every stock — a tighter stop is shaken out by its ordinary counter-moves), the target is the ratio × the stop; with the prices from the last close, how often that pair's target came first on its last 3 years, how long it took and how often it did not finish within the horizon's hold, and the target that FITS the horizon's time. Call it when the user names a ratio; say what the ratio COSTS on this stock in one line (e.g. \"3:1 on a KO swing is a ~26% target — in the last 3 years it came first in ~2%, and 88% did not finish within the 3 months a swing holds; the target that fits a swing is ~4%\"). It does not refuse a ratio and it is a description, not an edge: the stop and the target stay your judgement against the chart.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "ticker": {
+                        "type": "string",
+                        "description": "The symbol, e.g. KO."
+                    },
+                    "ratio": {
+                        "type": "number",
+                        "description": "The reward : risk the USER asked for, as reward per 1 of risk — 3 for \"3:1\", 1.5 for \"1.5:1\"."
+                    },
+                    "horizon": {
+                        "type": "string",
+                        "enum": [
+                            "intraday",
+                            "day",
+                            "short term swing",
+                            "swing",
+                            "long term"
+                        ],
+                        "description": "The trade's horizon — it picks the scale the levels are read on (a day trade the session's 15-minute bars, a swing the daily, long term the weekly)."
+                    },
+                    "side": {
+                        "type": "string",
+                        "enum": [
+                            "long",
+                            "short"
+                        ],
+                        "description": "long (default) or short."
+                    }
+                },
+                "required": [
+                    "ticker",
+                    "ratio",
+                    "horizon"
                 ]
             }
         },
@@ -3435,7 +2515,7 @@
         },
         {
             "name": "ask_specialist",
-            "description": "Ask the analyst, the event analyst or the technical analyst — its answer comes back to YOU as material (nothing of it is on screen), and you write the reply in your own voice, its findings said as the house's. research_analyst — a deeper question on a company's case the coverage in get_company_view does not answer: a margin trend, a valuation argument, the latest print against the thesis. event_analyst — who a NEW EVENT reaches through the supply chain (suppliers, customers, infrastructure, substitutes), the house's events, a map's scores and flags, a follow-up on a map. technical_analyst — a chart question the measured profile in get_company_view does not answer: what patterns or order blocks its chart shows now. Write the question to stand alone (the specialist sees none of this conversation, only its own earlier answers), and name every company with its ticker AND name.",
+            "description": "Ask the analyst or the event analyst — its answer comes back to YOU as material (nothing of it is on screen), and you write the reply in your own voice, its findings said as the house's. research_analyst — a deeper question on a company's case the coverage in get_company_view does not answer: a margin trend, a valuation argument, the latest print against the thesis. event_analyst — who a NEW EVENT reaches through the supply chain (suppliers, customers, infrastructure, substitutes), the house's events, a map's scores and flags, a follow-up on a map. How a stock trades is not a specialist's: the measured profile in get_company_view is the house's technical read. Write the question to stand alone (the specialist sees none of this conversation, only its own earlier answers), and name every company with its ticker AND name.",
             "input_schema": {
                 "type": "object",
                 "properties": {
@@ -3443,10 +2523,9 @@
                         "type": "string",
                         "enum": [
                             "event_analyst",
-                            "technical_analyst",
                             "research_analyst"
                         ],
-                        "description": "Who answers: event_analyst (who an event reaches through the supply chain), technical_analyst (how a stock's price behaves, measured) or research_analyst (a company as an investment: the rating, the target and why, the case for and against)."
+                        "description": "Who answers: event_analyst (who an event reaches through the supply chain) or research_analyst (a company as an investment: the rating, the target and why, the case for and against)."
                     },
                     "question": {
                         "type": "string",
@@ -3614,545 +2693,6 @@
                 "required": [
                     "kind",
                     "id"
-                ]
-            }
-        }
-    ],
-    "proteus": [
-        {
-            "name": "get_behaviour_profile",
-            "description": "The MEASURED behaviour profile of one stock — how its price has actually behaved, counted from its candles on 5-minute (~3 months), 1-hour (~1 year), daily (~10 years) and weekly (~10 years) bars, LONG SIDE: does it hold at the 20 EMA / 50 / 200 SMA / VWAP, what follows RSI under 30, a MACD cross up, a high-volume up bar; how often its breaks of a swing low are FALSE (closed back above within 3 bars), how deep those sweeps go in ATRs, how many bars until it picks a direction; whether bullish order blocks hold on a retest; whether its lows come in a regular PRICE CYCLE (against the same returns reshuffled — the next window is stated only when the cycle holds); WYCKOFF, measured: tight trading ranges found in code, whether a SPRING (a dip under the range low closed back inside) beats both an ordinary bar and an ordinary false break, whether a breakout above the range follows through (and how often it fails back inside — the upthrust share), whether a retest of the low on dried-up volume beats any retest, and the range it is in now; FIBONACCI, measured: whether pullbacks of big impulses turn at 38.2 / 50 / 61.8% more than at other depths of the same pullbacks; its ATR %, gap, dollar volume; and whether it fits a day trade / a swing. Every rate is against a BASELINE (the same line shifted, or the stock's own drift) and must still hold in the most recent third. Kept for a week, shared by everyone; the first ask for a name takes several seconds. `ticker`; `fresh: true` recomputes now (only when the user asks for it).",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "ticker": {
-                        "type": "string",
-                        "description": "The stock's ticker, e.g. TSLA."
-                    },
-                    "fresh": {
-                        "type": "boolean",
-                        "description": "true recomputes now instead of using this week's profile — only when the user asks for it."
-                    }
-                },
-                "required": [
-                    "ticker"
-                ]
-            }
-        },
-        {
-            "name": "get_candles",
-            "description": "Recent OHLCV candles for a ticker + timeframe — exact prices for a level, a swing high/low, a range, a gap. The cheap, exact numbers; prefer it to a chart when the question is a price.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "ticker": {
-                        "type": "string",
-                        "description": "Stock ticker symbol e.g. AAPL, NVDA"
-                    },
-                    "timeframe": {
-                        "type": "string",
-                        "enum": [
-                            "1min",
-                            "5min",
-                            "15min",
-                            "30min",
-                            "1hr",
-                            "2hr",
-                            "4hr",
-                            "day",
-                            "week",
-                            "month"
-                        ],
-                        "description": "Candle timeframe. 2hr and 4hr are aggregated server-side from native 1hr bars into true 2hr/4hr OHLCV (Yahoo has no native 2hr/4hr); every other resolution is a native interval. Sub-hour history is limited (1min ~5 days, 5/15/30min ~weeks) — match the timeframe to the setup."
-                    }
-                },
-                "required": [
-                    "ticker",
-                    "timeframe"
-                ]
-            }
-        },
-        {
-            "name": "get_indicators",
-            "description": "Exact indicator VALUES now (EMA, SMA, RSI, MACD, ATR, VWAP — the monitor's math), for where price sits today against the lines the profile tested. A value now is not a rule: whether the stock RESPECTS a line is the profile's answer, never this one.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "ticker": {
-                        "type": "string",
-                        "description": "Stock ticker symbol e.g. AAPL, NVDA"
-                    },
-                    "timeframe": {
-                        "type": "string",
-                        "enum": [
-                            "1min",
-                            "5min",
-                            "15min",
-                            "30min",
-                            "1hr",
-                            "2hr",
-                            "4hr",
-                            "day",
-                            "week",
-                            "month"
-                        ],
-                        "description": "Candle timeframe to compute on."
-                    },
-                    "indicators": {
-                        "type": "string",
-                        "description": "Comma-separated list with optional period, e.g. \"ema(20), ema(50), rsi(14), atr(14), macd, vwap\". Period is optional (defaults: ema/sma 20, rsi/atr 14). VWAP is session-anchored (intraday)."
-                    }
-                },
-                "required": [
-                    "ticker",
-                    "timeframe",
-                    "indicators"
-                ]
-            }
-        },
-        {
-            "name": "get_price_action",
-            "description": "Momentum snapshot: 1d/5d/1m/3m moves, position in the 1-year range, relative volume — the stock's state today.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "ticker": {
-                        "type": "string",
-                        "description": "e.g. AAPL, NVDA, SPY"
-                    }
-                },
-                "required": [
-                    "ticker"
-                ]
-            }
-        },
-        {
-            "name": "get_cycle_analysis",
-            "description": "Recurring cycles in the price history: \"price\" mode finds the dominant peak-to-peak interval and the current phase; \"calendar\" mode shows how the stock behaved in a calendar window (e.g. late June) over past years. Only when the user asks about cycles or seasonality.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "ticker": {
-                        "type": "string",
-                        "description": "e.g. AAPL, NVDA, SPY"
-                    },
-                    "mode": {
-                        "type": "string",
-                        "enum": [
-                            "price",
-                            "calendar"
-                        ],
-                        "description": "\"price\" for recurring interval cycles, \"calendar\" for seasonal window analysis"
-                    },
-                    "timeframe": {
-                        "type": "string",
-                        "enum": [
-                            "1min",
-                            "5min",
-                            "15min",
-                            "30min",
-                            "1hr",
-                            "day",
-                            "week",
-                            "month"
-                        ],
-                        "description": "For \"price\" mode: the cycle resolution. 1min–1hr = intraday cycle (bars); day (default)/week/month = multi-day swing cycle. Ignored for \"calendar\"."
-                    },
-                    "calendar_window": {
-                        "type": "object",
-                        "description": "Required for mode \"calendar\". Defines the window to analyze each year.",
-                        "properties": {
-                            "month_start": {
-                                "type": "number",
-                                "description": "1-based month number (Jan=1). Start month of the window."
-                            },
-                            "month_end": {
-                                "type": "number",
-                                "description": "1-based month number. End month — same as month_start for a single month."
-                            },
-                            "day_start": {
-                                "type": "number",
-                                "description": "Optional. Starting day within month_start (default 1)."
-                            },
-                            "day_end": {
-                                "type": "number",
-                                "description": "Optional. Ending day within month_end (default last day of month)."
-                            }
-                        },
-                        "required": [
-                            "month_start"
-                        ]
-                    },
-                    "lookback_years": {
-                        "type": "number",
-                        "description": "Years of history to use (default 4, max 6)."
-                    }
-                },
-                "required": [
-                    "ticker",
-                    "mode"
-                ]
-            }
-        },
-        {
-            "name": "check_elliott_count",
-            "description": "Check an Elliott impulse count against the three HARD rules before you say or show it: wave 2 never retraces past the start of wave 1; wave 3 is never the shortest of 1, 3 and 5; wave 4 never enters wave 1's price territory. Give the direction and the wave-end PRICES you read off the chart, in order — the start of wave 1, then the end of wave 1, 2, 3, 4, 5 as far as the count has got (at least the end of wave 2). Returns whether the count is POSSIBLE, which rule breaks if not, and the price that kills it from here (and how far wave 5 may run before wave 3 would be the shortest). Give the ticker and the timeframe you read it on: each wave end is then found on the candles (a high or low at that price, in order, the extreme of its legs) and the count is checked not to be dead already. A possible count is still an interpretation, never a measured rule — an impossible one is never shown.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "ticker": {
-                        "type": "string",
-                        "description": "The stock the count is on, e.g. NVDA."
-                    },
-                    "timeframe": {
-                        "type": "string",
-                        "enum": [
-                            "1hr",
-                            "4hr",
-                            "day",
-                            "week"
-                        ],
-                        "description": "The chart the count was read on — its candles are checked."
-                    },
-                    "direction": {
-                        "type": "string",
-                        "enum": [
-                            "up",
-                            "down"
-                        ],
-                        "description": "The impulse's direction."
-                    },
-                    "points": {
-                        "type": "array",
-                        "items": {
-                            "type": "number"
-                        },
-                        "description": "Prices in order: the start of wave 1, then the end of wave 1, 2, 3, 4, 5 as far as the count has got (3 to 6 prices)."
-                    }
-                },
-                "required": [
-                    "ticker",
-                    "timeframe",
-                    "direction",
-                    "points"
-                ]
-            }
-        },
-        {
-            "name": "get_chart",
-            "description": "Render a candlestick chart IMAGE (with optional overlays) and LOOK at it — for what is SEEN NOW: a pattern forming or just completed (flag, cup and handle, head and shoulders, range, wedge), trend, where price sits vs the lines. A reading of one chart, never a hit rate. BILLS PER USE (render + vision): only when the user asks about patterns or the chart now; once or twice a turn at most.\nSHOW IT when you FOUND something (Roy, 2026-11-12): call it with `show_to_user: true` and `levels` labelling what you found, so the user sees it on the chart — a head and shoulders as \"left shoulder\", \"head\", \"right shoulder\", \"neckline\" (kind `level`), its measured target (`to`) and where it fails (`stop`); an order block as its top and bottom; a swept low as \"swept 412\". Horizontal lines only, at most 8: a sloped neckline or trendline is drawn at its price NOW — say so. Found nothing → do not show a chart.\nTHE EXAMPLE (Roy, 2026-11-13): every behaviour answer shows ONE chart — the profile's latest false break at the prices and timeframe its line names, or the line that holds as the overlay.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "ticker": {
-                        "type": "string",
-                        "description": "Ticker symbol e.g. AAPL, NVDA, BTCUSDT"
-                    },
-                    "timeframe": {
-                        "type": "string",
-                        "enum": [
-                            "1min",
-                            "5min",
-                            "15min",
-                            "30min",
-                            "1hr",
-                            "2hr",
-                            "4hr",
-                            "day",
-                            "week",
-                            "month"
-                        ],
-                        "description": "Chart timeframe. All resolutions render natively via TradingView."
-                    },
-                    "indicators": {
-                        "type": "string",
-                        "description": "Optional free-text indicators to overlay, e.g. \"rsi(14), ema(50), volume, vwap\". Leave EMPTY for a PLAIN price-only chart (the default) — best for reading structure, orderblocks and S/R without moving-average clutter. Add an overlay ONLY to confirm a read against it."
-                    },
-                    "show_to_user": {
-                        "type": "boolean",
-                        "description": "Set true whenever this chart relates to the user's ACTUAL setup — you are defining, validating, or refining their entry / stop / take-profit or reading the market structure behind it, or they asked to see it. In those cases the user wants to see what you are looking at, so show it. Leave false / omit ONLY for a quick throwaway internal peek that does not inform the setup under discussion; such a check must NOT appear in the chat."
-                    },
-                    "levels": {
-                        "type": "array",
-                        "description": "Price lines to DRAW on the chart — the trade, shown rather than described. Use it when you are putting candidate trades or a built plan in front of the user (with show_to_user true), not for your own reading. At most 8 lines; more than a handful and the picture stops being a trade.",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "price": {
-                                    "type": "number",
-                                    "description": "Where the line sits."
-                                },
-                                "kind": {
-                                    "type": "string",
-                                    "enum": [
-                                        "from",
-                                        "to",
-                                        "stop",
-                                        "level"
-                                    ],
-                                    "description": "What it MEANS, which is what colours it: `from` where the trade starts, `to` where it pays, `stop` where it is wrong, `level` structure drawn for reference."
-                                },
-                                "label": {
-                                    "type": "string",
-                                    "description": "A few words shown on the line — \"the 238 shelf\", \"gap fill\". Keep it to the name of the thing, not a sentence."
-                                }
-                            },
-                            "required": [
-                                "price",
-                                "kind"
-                            ]
-                        }
-                    }
-                },
-                "required": [
-                    "ticker",
-                    "timeframe"
-                ]
-            }
-        },
-        {
-            "name": "get_orderblocks",
-            "description": "ORDER BLOCKS on a plain candlestick chart now (one ticker + timeframe): where the zones sit today, fresh or mitigated, vs current price. Whether its order blocks HOLD is the profile's answer; this is where they are. BILLS PER USE (render + vision).",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "ticker": {
-                        "type": "string",
-                        "description": "Ticker symbol e.g. AAPL, NVDA, BTCUSDT"
-                    },
-                    "timeframe": {
-                        "type": "string",
-                        "enum": [
-                            "1min",
-                            "5min",
-                            "15min",
-                            "30min",
-                            "1hr",
-                            "2hr",
-                            "4hr",
-                            "day",
-                            "week",
-                            "month"
-                        ],
-                        "description": "Chart timeframe — read the orderblocks on the timeframe(s) you trade on."
-                    }
-                },
-                "required": [
-                    "ticker",
-                    "timeframe"
-                ]
-            }
-        },
-        {
-            "name": "get_false_breaks",
-            "description": "FALSE BREAKS / sweeps on a plain candlestick chart now (one ticker + timeframe): where price recently pushed past a prior high or low and closed back inside. How OFTEN it does that is the profile's answer; this is where it happened lately. BILLS PER USE (render + vision).",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "ticker": {
-                        "type": "string",
-                        "description": "Ticker symbol e.g. AAPL, NVDA, BTCUSDT"
-                    },
-                    "timeframe": {
-                        "type": "string",
-                        "enum": [
-                            "1min",
-                            "5min",
-                            "15min",
-                            "30min",
-                            "1hr",
-                            "2hr",
-                            "4hr",
-                            "day",
-                            "week",
-                            "month"
-                        ],
-                        "description": "Chart timeframe — read the sweeps on the timeframe(s) you trade on."
-                    }
-                },
-                "required": [
-                    "ticker",
-                    "timeframe"
-                ]
-            }
-        },
-        {
-            "name": "get_market_hours",
-            "description": "Whether an instrument's market is OPEN right now, and if not, exactly when it next opens. Asset-class aware: crypto is 24/7, forex is 24/5, index futures run near-24/5 on CME hours, and stocks/ETFs only trade the 09:30–16:00 ET regular session. Every get_quote already comes back with this line attached, so call this only when you need the answer WITHOUT pricing something — \"is the market open?\", \"when does it reopen?\", \"can we still get in today?\". Note it does not know about exchange holidays or half-days.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "ticker": {
-                        "type": "string",
-                        "description": "e.g. AAPL, NQ, BTCUSD, EURUSD"
-                    },
-                    "asset_class": {
-                        "type": "string",
-                        "enum": [
-                            "stock",
-                            "etf",
-                            "futures",
-                            "forex",
-                            "crypto"
-                        ],
-                        "description": "the instrument's class, when you know it — it picks the right trading calendar. Omit it and the class is inferred from the ticker."
-                    }
-                },
-                "required": [
-                    "ticker"
-                ]
-            }
-        },
-        {
-            "name": "get_news",
-            "description": "Recent dated NEWS on a name, newest first (`companies` with the ticker as `subject`). Only to explain a move on the chart the user asks about — the news is the analyst's field, not yours.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "category": {
-                        "type": "string",
-                        "enum": [
-                            "companies",
-                            "headlines",
-                            "topic"
-                        ],
-                        "description": "which kind of news read this is. `companies` — one listed company, `subject` is its TICKER. `headlines` — the market's front page, no subject needed. `topic` — free-text search for a theme, an institution or an asset with no ticker."
-                    },
-                    "subject": {
-                        "type": "string",
-                        "description": "for `companies`, the TICKER (NVDA, BA, AAPL). For `topic`, the theme in the words a paper would print (\"Federal Reserve\", \"OPEC\", \"semiconductors\", \"gold\"). Omit for `headlines`. It is both the search and the cache key, so ask for the same subject the same way each time."
-                    }
-                },
-                "required": [
-                    "category"
-                ]
-            },
-            "cache_control": {
-                "type": "ephemeral"
-            }
-        },
-        {
-            "name": "get_fvg",
-            "description": "Fair-value gaps (3-candle imbalances) computed from OHLCV — exact bullish/bearish gap ranges, newest first, with whether each is still unfilled. Unfilled FVGs are draws + entry zones. SMC mode.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "ticker": {
-                        "type": "string",
-                        "description": "ticker symbol e.g. AAPL, NVDA"
-                    },
-                    "timeframe": {
-                        "type": "string",
-                        "description": "timeframe rung, e.g. 5min, 15min, 1hr, 4hr, day"
-                    }
-                },
-                "required": [
-                    "ticker",
-                    "timeframe"
-                ]
-            }
-        },
-        {
-            "name": "get_structure",
-            "description": "Market structure from OHLCV: trend (up/down/range), the last BOS (continuation) or CHoCH (reversal) with its exact broken level, the last swing high/low, the premium/discount split of the dealing range, and the fresh order-block zones (origin of the last impulses). SMC mode's core structural read.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "ticker": {
-                        "type": "string",
-                        "description": "ticker symbol e.g. AAPL, NVDA"
-                    },
-                    "timeframe": {
-                        "type": "string",
-                        "description": "timeframe rung, e.g. 5min, 15min, 1hr, 4hr, day"
-                    }
-                },
-                "required": [
-                    "ticker",
-                    "timeframe"
-                ]
-            }
-        },
-        {
-            "name": "get_liquidity",
-            "description": "Liquidity pools from OHLCV: near-equal swing highs (buy-side, above) and lows (sell-side, below) where stops cluster — the exact levels price is drawn to sweep. SMC mode.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "ticker": {
-                        "type": "string",
-                        "description": "ticker symbol e.g. AAPL, NVDA"
-                    },
-                    "timeframe": {
-                        "type": "string",
-                        "description": "timeframe rung, e.g. 5min, 15min, 1hr, 4hr, day"
-                    }
-                },
-                "required": [
-                    "ticker",
-                    "timeframe"
-                ]
-            }
-        },
-        {
-            "name": "get_key_levels",
-            "description": "Exact prior-day and current-day high/low from OHLCV — the session \"draw on liquidity\" references (PDH/PDL). Useful in BOTH discretionary (prior-day levels) and SMC (session liquidity). Best on an intraday/day timeframe.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "ticker": {
-                        "type": "string",
-                        "description": "ticker symbol e.g. AAPL, NVDA"
-                    },
-                    "timeframe": {
-                        "type": "string",
-                        "description": "timeframe rung, e.g. 5min, 15min, 1hr, 4hr, day"
-                    }
-                },
-                "required": [
-                    "ticker",
-                    "timeframe"
-                ]
-            }
-        },
-        {
-            "name": "remember_about_user",
-            "description": "Keep a LASTING fact about the user that they STATED, so every role knows it next time — \"I never trade low-float names\", \"I only trade the first hour\", \"I hold through earnings\", \"call me by my first name\". What you keep shows in ABOUT THE USER on every role's turns.\n- Only what THEY said about themselves, as a lasting rule or preference — never your read of them, never this trade's levels or size (the build keeps those), never a mood.\n- Never ask questions to fill it. Keep it the moment they say it, and say in a few words that you will remember.\n- They take one back (\"I do trade small caps now\") → call it with `forget: true` and the words of the old note.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "note": {
-                        "type": "string",
-                        "description": "The fact, in a short third-person line, as the user put it: \"never trades low-float names\", \"only trades the open\". To take one back, the words of the note to remove."
-                    },
-                    "forget": {
-                        "type": "boolean",
-                        "description": "true when the user takes a fact back (\"I do trade small caps now\") — removes the note matching `note`."
-                    }
-                },
-                "required": [
-                    "note"
-                ]
-            }
-        },
-        {
-            "name": "consult",
-            "description": "Put ONE decision to a more capable desk head and get a straight answer back. It cannot see this conversation and cannot fetch anything — you hand it the question and every number it needs, and it thinks harder than you can in-line.\n\nReach for it in one situation only: the user asks for a judgment the profile does not settle — two readings of the same chart that point opposite ways — and the answer matters to them. Never to read the profile itself.\n\nDo NOT reach for it to look something up, to double-check work you are already confident in, to summarize, or because a question feels big. A consult costs a full model call and adds seconds to the turn: if you already know the answer, or a tool call would settle it, that is the cheaper and better move. Most turns should end without it.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "question": {
-                        "type": "string",
-                        "description": "The single decision to make, stated as a question. One decision per call — not a list, and not 'what do you think'."
-                    },
-                    "context": {
-                        "type": "string",
-                        "description": "Everything needed to answer it: the levels, the account size and risk rule, the two readings that disagree. The consulted desk head cannot see your conversation and cannot fetch anything, so whatever you leave out simply is not considered."
-                    }
-                },
-                "required": [
-                    "question",
-                    "context"
                 ]
             }
         }

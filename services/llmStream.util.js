@@ -39,6 +39,17 @@ export function endsAsking(reply) {
 export const EMPTY_REPLY_NUDGE = 'You ended that round without writing anything to the user. Write your reply to them now, from what you already read — no more tool calls.'
 
 /**
+ * A CHANNEL LEAK — the model's own tool-call syntax written as the reply (prod, 2026-11-21, the analyst on gpt-6-luna:
+ * "Erotiske\n马会assistant to=functions.get_trading_context? no."): a recipient header (`to=functions.x`, `assistant
+ * to=`). Never prose. A leaked round is asked once more to write its reply (LEAK_REPLY_NUDGE), and the reply cleaner drops
+ * the leak's lines (agentUtils.dropDebris). A lone special token (`<|end|>`, `<|channel|>`) is not this: the cleaner's
+ * DEBRIS_TOKEN takes the token and keeps the prose around it. Pure.
+ */
+export const CHANNEL_LEAK = /(?:\bto=functions\.[A-Za-z_]|\bassistant\s*to=)/
+export const isChannelLeak = (text) => CHANNEL_LEAK.test(String(text ?? ''))
+export const LEAK_REPLY_NUDGE = 'That round leaked internal tool syntax instead of a reply. Write your reply to the user now, in plain words, from what you already read — no more tool calls, no routing tags.'
+
+/**
  * How many tool calls in ONE round actually run at once.
  *
  * A round used to be `Promise.all(uses.map(...))` in both providers: every call the model asked for,
@@ -245,5 +256,23 @@ export function createTagSuppressor({ onToken, captures = [] }) {
         keepText        = false
     }
 
-    return { push, flush }
+    // What streamed of this round is withdrawn (a channel leak — the provider asks again): the lookahead dropped, and the
+    // STREAM_RESET marker sent down the token channel — sseAgentCallbacks makes it a `reset` frame, the chat clears.
+    function reset() {
+        pending         = ''
+        inBlock         = false
+        closeTag        = ''
+        captureCallback = null
+        keepText        = false
+        emit(STREAM_RESET)
+    }
+
+    return { push, flush, reset }
 }
+
+/**
+ * The token that WITHDRAWS what a turn streamed so far (2026-11-21: Luna's leaked tool call flashed on screen before the
+ * retry). Sent through onToken so no agent has to pass a new callback; never prose (two NULs around a word). The shared
+ * callbacks (api/_shared/sse.util.js) turn it into a `reset` frame; a collector of tokens must drop what it had.
+ */
+export const STREAM_RESET = '\u0000reset\u0000'

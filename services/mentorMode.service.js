@@ -13,12 +13,12 @@
 export const MODE_THESIS = 'thesis'
 export const MODE_USER   = 'user'
 
-/** What the risk-based kit leaves out. Every other Mentor tool stays. */
-export const THESIS_DROPPED = new Set([
-    'get_orderblocks', 'get_false_breaks', 'get_fvg', 'get_liquidity', 'get_structure', 'get_key_levels',
-    'get_indicators', 'get_cycle_analysis', 'get_correlations', 'get_peers',
-    'get_macro_snapshot', 'get_sector_snapshot', 'get_derivatives_context',
-])
+/**
+ * What the risk-based kit leaves out. Every other Mentor tool stays. The pattern and indicator reads it used to drop
+ * (order blocks, false breaks, the SMC four, indicators, cycles, correlations, peers, crypto positioning) are off Mentor's
+ * kit altogether since 2026-11-21 (trading.tools — never called); the two macro reads are what is left to drop.
+ */
+export const THESIS_DROPPED = new Set(['get_macro_snapshot', 'get_sector_snapshot'])
 
 /**
  * The tool list for a mode. PURE; the input is not touched.

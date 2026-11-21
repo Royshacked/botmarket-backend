@@ -7,7 +7,7 @@ import { logger } from './logger.service.js'
 import { resolveStreamFn, CHEAP_MODEL, DEFAULT_MODEL } from './llmModels.js'
 import { recordUsage, recordTurn, userCeiling, overCeiling, chatSpend, calcCost } from './tokenUsage.service.js'
 import { getHouseModels } from './houseModels.service.js'
-import { ALL_EMIT_TAGS } from './llmStream.util.js'
+import { ALL_EMIT_TAGS, CHANNEL_LEAK } from './llmStream.util.js'
 
 const LOG = '[agentUtils]'
 
@@ -676,9 +676,21 @@ const DEBRIS_CAPS_LEAD = /(^|\n)[ \t]*<[A-Z][A-Z0-9_]{1,23}>[ \t]*/g
 const DEBRIS_CAPS_PAIR = /<([A-Z][A-Z0-9_]{1,23})>([\s\S]*?)<\/\1>/g
 const _dropCapsLabels = (t) => t.replace(DEBRIS_CAPS_PAIR, '$2').replace(DEBRIS_CAPS_LEAD, '$1')
 
+/**
+ * A CHANNEL LEAK's lines out (llmStream CHANNEL_LEAK; prod 2026-11-21, the analyst on Luna: a stray word, then
+ * "assistant to=functions.get_trading_context? no."): each line carrying the tool syntax goes, and when what is left holds
+ * no sentence (no line of three words or more) the reply is empty, so the turn says nothing rather than garbage. A reply
+ * with real prose keeps it. Runs only when a leak is in the text.
+ */
+function _dropLeak(text) {
+    if (!CHANNEL_LEAK.test(text)) return text
+    const kept = text.split(/\r?\n/).filter(l => !CHANNEL_LEAK.test(l))
+    return kept.some(l => l.trim().split(/\s+/).length >= 3) ? kept.join('\n') : ''
+}
+
 /** The stray tokens and marker lines out, then a paragraph identical to the one before it dropped. Prose is otherwise untouched. */
 export function dropDebris(text) {
-    const cleaned = _dropCapsLabels(String(text ?? '')).replace(DEBRIS_TOKEN, (m, offset, all) => {
+    const cleaned = _dropCapsLabels(_dropLeak(String(text ?? ''))).replace(DEBRIS_TOKEN, (m, offset, all) => {
         // Between two words, the spaces collapse to one; at a line's edge, nothing is left.
         const before = all[offset - 1], after = all[offset + m.length]
         return before && after && !/\s/.test(before) && !/[\s.,;:!?)]/.test(after) ? ' ' : ''
