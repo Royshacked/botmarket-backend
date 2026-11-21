@@ -796,6 +796,471 @@ in the profile. One part (`steps`, inside each timeframe's size and pace), easy 
   MACD cross and RSI divergence) — each also on the shuffled bars' moves: what any move has, not the name. As §10.7's
   lab found on the daily, now on the intraday too.
 
+### 10.12 Signals not yet tested — RSI / MACD both ways, Ichimoku, RSI(2), squeeze, gaps, prior highs, trend filters (declared 2026-11-21, before the run)
+
+Roy: "is there an important indicator or pattern we don't use in Proteus?" → "what about ZigZag and Ichimoku?" → "also
+in RSI and MACD — test bullish and bearish reversions" → "go — run the lab". `scripts/lab-proteus-signals.mjs`, Proteus's
+own engine (PROFILE as built: z 3, edge 0.10, recent edge 0.05, horizon 10, one event per 10 bars). Every signal known at
+its bar's close; nothing looks ahead (a divergence fires on the bar that CONFIRMS its second swing, never on the swing).
+
+**ZigZag is not tested:** its last leg repaints (it knows a turn only after the threshold), so as a signal it looks ahead.
+Its job — the swings — is already K's (the moves) and the Elliott check's (a 1.5 ATR turn).
+
+**The outcomes.** LONG (the engine's): +1 ATR before a close 0.5 ATR lower, within 10 bars. SHORT (the mirror, for the
+bearish signals — for a long-only app, an exit / do-not-enter signal): −1 ATR before a close 0.5 ATR higher. Each signal
+against the DRIFT of its own side (the same outcome from bars spaced 10 apart). Swings: the engine's (a low / high of 2
+bars each side, confirmed 2 bars after).
+
+| # | Signal | Side | Baseline |
+|---|---|---|---|
+| R1 | RSI 14 crosses back **above 30** (the reclaim) | long | drift |
+| R2 | RSI bullish divergence: a confirmed swing low under the previous one (5–40 bars before), RSI higher at it | long | drift |
+| R3 | RSI 14 crosses back **below 70** | short | short drift |
+| R4 | RSI bearish divergence: a confirmed swing high over the previous one, RSI lower at it | short | short drift |
+| M1 | MACD cross up **below zero** (as §10.2's c8, now on 10 years) | long | drift |
+| M2 | MACD bullish divergence (the MACD line, as R2) | long | drift |
+| M3 | MACD histogram turns up below zero | long | drift |
+| M4 | MACD cross down **above zero** | short | short drift |
+| M5 | MACD bearish divergence | short | short drift |
+| M6 | MACD histogram turns down above zero | short | short drift |
+| I1 | Ichimoku: a touch from above of the **Kijun** (26-bar midpoint) — `levelTouches` | long | the Kijun shifted ±2/3 ATR (the level test's own) |
+| I2 | Ichimoku: a touch from above of the **cloud top** (max of Senkou A/B, plotted 26 ahead — known at the bar) | long | the cloud top shifted |
+| I3 | Tenkan crosses up through Kijun while the close is above the cloud | long | drift |
+| I4 | the first close above the cloud (from inside or under it) | long | drift |
+| X1 | RSI(2) under 10 while the close is over the 200 SMA (short-term mean reversion) | long | drift over the 200 |
+| X2 | Squeeze breakout: Bollinger width (20, 2σ) at its 120-bar low within the last 5 bars, then a close above the upper band | long | drift |
+| G1 | Gap up ≥ 0.5 ATR that holds (closes above its open) — gap-and-go | long | drift |
+| G2 | Gap down ≥ 0.5 ATR that closes above its open (bought) | long | drift |
+| H1 | First close above the latest confirmed swing high (5 bars each side) | long | drift |
+| F1 | The 20 EMA touched from above **while above the cloud** | long | its shifted levels, also above the cloud |
+| F2 | The 50 SMA touched from above while above the cloud | long | its shifted levels, above the cloud |
+| F3 | RSI 14 crossing under 30 while above the cloud | long | drift above the cloud |
+| F4 | MACD cross up while above the cloud | long | drift above the cloud |
+
+**Data.** Per name: the 10-year daily bars (`data/lab/screener-10y.jsonl`, ~1,177 names). Pooled: the same, and the
+5-minute name-weeks (test 4's cache). **The control:** each series shuffled (the engine's `shuffledBars`), the same
+pipeline beside it.
+
+**PASS — §10.2's rule, either one makes a candidate for the profile:**
+- **A trait of some names:** real names `respects` ≥ 2× the shuffled count AND ≥ 10 more.
+- **An edge everywhere:** pooled, the signal beats its baseline by ≥ 3 points with the 95% interval above 0, older AND
+  recent (split at 2026-03-01).
+Otherwise it stays out. Expected, said now: most fail, as every Proteus test so far; the bearish ones are the least
+tested anywhere in this app.
+
+**Result (2026-11-21): FAIL — no signal passes.** `data/lab/proteus-signals.out.txt` (1,177 names × 10 years daily; 8,000
+5-minute name-weeks; every series also shuffled).
+
+- **Per name: nothing is a trait.** `respects` on 0–2 real names per signal (M5: LVS, SLM; F1: QSR, WPC — the shuffled
+  control finds as many), far from 2× the shuffled and +10.
+- **The one declared PASS is an artifact — F2** (the 50 SMA touched while above the cloud), 5-minute pooled: +3.4 older,
+  +3.6 recent. **The shuffled control passes it more strongly** (+4.7 / +4.4; daily the same, +4.0 / +4.1 shuffled vs
+  +4.4 / +2.9 real). A level test FILTERED by a condition (the touch above the cloud, its shifted copies above the cloud)
+  favours the real line over its copies on random data too — so the filtered level tests (F1, F2) measure the filter,
+  not the stock. Real minus shuffled: −1.3 / −0.8. Out.
+- **The bullish reversions do not reverse** (daily, older): RSI back above 30 −3.3, RSI divergence −1.8, MACD cross up
+  under zero −3.2 (as §10.2's c8), MACD divergence −2.3, the histogram turn −2.3; recent ~0. Ichimoku: Kijun +0.6,
+  cloud top −0.4, TK cross −1.5, the break above the cloud −1.8. RSI(2) +0.1. Squeeze −1.0. Prior-high breakout −2.2.
+- **The bearish ones lean the right way in the older years, then fade:** RSI divergence +3.0 older / −0.8 recent, MACD
+  cross down over zero +2.9 / −1.9, MACD divergence +2.7 / −1.5 (shuffled ~0) — the same "worked once, not lately" as the
+  thesis-lens shorts. **RSI back below 70** is the best of them: +3.3 older [+2.7 … +3.9], +2.4 recent [+0.1 … +4.8]
+  (shuffled +1.2 / +0.1) — a weak EXIT warning, under the bar.
+- **Two leads, under the bar, both real-only (the shuffled control ~0 or negative), both 5-minute:** a gap down of ≥ 0.5
+  ATR that is BOUGHT (closes over its open) +3.2 older / +2.1 recent; a gap up that HOLDS +2.2 / +2.4. On 5-minute bars a
+  "gap" is almost always the session's first bar — so these are opening-bar facts, beside §10.2's 5-minute near-misses
+  (RSI under 30 over the 200, the 200 touched on volume). 2–3 points before costs: leads for an intraday lab, not rules.
+- **F3 (RSI under 30 above the cloud) almost never happens** — 11 daily events in 1,177 names × 10 years: a fall sharp
+  enough for RSI 30 takes the price under the cloud first.
+
+Nothing goes into the profile. ZigZag: not tested (it looks ahead), as declared.
+
+### 10.13 Our signals, measured three other ways — forward returns, excursions, the cross-section (declared 2026-11-21, before the run)
+
+Roy: "how do you decide if something works?" → "other ways to check?" → "let's do a lab on our signals that tests 1, 3, 7"
+— (1) forward returns at fixed horizons net of SPY, (3) the excursions (MFE / MAE), (7) the cross-section (rank all names,
+the information coefficient). §10.2/§10.12's one outcome (+1 ATR before −0.5 ATR in 10 bars) cannot see a move's SIZE,
+a slow effect, or one name against the others; these can. `scripts/lab-proteus-xsection.mjs`, daily bars only
+(`data/lab/screener-10y.jsonl`, ~1,177 names, 10 years; SPY from the same file). Every series also shuffled (the engine's
+`shuffledBars` — the dates kept, so "net of SPY" means the same on both).
+
+**The split, for all three:** older = before 2023-07-01, recent = from it (the last third of the 10 years — §10.2's
+2026-03 cut leaves too few months for a 3-month horizon).
+
+**The signals (1, 3)** — Proteus's own (`T20` / `T50` / `T200` touches from above, `RSI30` under 30, `MACD↑`, `VUP` a 2×
+volume up bar, `SWEEP` a swing low's false break at its reclaim, `SPRING` a Wyckoff spring) and §10.12's 23 (R1 … F4; the
+bearish five — R3, R4, M4, M5, M6 — measured SIGNED, a fall counted as a gain). Events one per 10 bars (§10.12's lists).
+
+**(1) Forward returns.** For each event: the return over the next 5, 20 and 60 bars MINUS SPY's over the same bars
+(excess), winsorized at the 1st / 99th percentile across all events. The baseline: the same from every 5th bar of the same
+names. The edge: the event mean minus the baseline mean, with its 95% interval.
+**PASS (20 bars, the declared horizon):** ≥ +0.5% excess over the baseline (≈ 6% a year), the interval above 0, older
+AND recent, and the shuffled control NOT passing. The 5 and 60 bars are reported, not judged.
+
+**(3) Excursions.** For each event, over the next 20 bars, in ATRs from the entry close: the MFE (the best high) minus the
+MAE (the worst low) — the room a trade gets in its favour against the room against it. The baseline: every 5th bar.
+**PASS:** the event's mean MFE − MAE beats the baseline's by ≥ 0.15 ATR, the interval above 0, older AND recent, shuffled
+not passing.
+
+**(7) The cross-section.** Every 21st SPY session, every name with ≥ 260 bars before it is scored on 14 MEASURES (the
+continuous form of our signals, plus the classics our per-name tests cannot see): RSI 14; RSI 2; the MACD histogram /
+price; the distance to the 20 EMA, 50 SMA, 200 SMA and to the cloud top, in ATRs; the Bollinger width against its
+120-bar range (the squeeze); the last bar's gap in ATRs; 1-month return (reversal); 12-1 month momentum (12 months back to
+1, skipping the last); the close / its 52-week high; ATR % (volatility); volume 20 / 60 bars. For each date, the Spearman
+rank correlation (IC) between a measure and the next 21 and 63 sessions' return net of SPY; the top-minus-bottom fifth.
+**PASS (21 sessions, the declared horizon):** |mean IC| ≥ 0.02 at t ≥ 2 (over the dates) in the older part AND the same sign
+with |IC| ≥ 0.01 in the recent part, the shuffled control NOT passing. The 63 sessions and the fifths are reported.
+
+Expected, said now: the classics (momentum, the 52-week high, reversal, volatility) are the likeliest to show an IC — a
+CROSS-SECTIONAL fact (which names, not when), a use for the Hotlist's ranking rather than for Proteus's per-name profile.
+The per-name signals: most fail, as before.
+
+**Result (2026-11-21): FAIL — nothing passes, on any of the three.** `data/lab/proteus-xsection.out.txt` (1,133 names with
+enough bars, 2016-10 → 2026-10; 107 rebalance dates; every series also shuffled).
+
+- **(1) Forward returns, 20 bars:** no signal reaches +0.5% in both periods; the best are a quarter of that. What
+  stands out is the FLIP — an edge in 2016–2023 that turns negative after: the bearish RSI back under 70 +0.36% →
+  −0.31%, the MACD cross down +0.28% → −0.04%, RSI divergence +0.23% → −0.20%, the MACD cross up under zero +0.16% →
+  −0.27%; and the other way, the 2× volume up bar −0.33% → +0.39%, the squeeze breakout −0.42% → +0.36%. The only one
+  positive in both: RSI(2) under 10 over the 200 SMA, +0.09% → +0.32% (older not significant). Proteus's own levels
+  (the 20 / 50 / 200 touches) are at or under zero.
+- **(3) Excursions, 20 bars:** none reaches +0.15 ATR in both periods; the same flip (RSI back under 70 +0.24 → −0.15,
+  RSI divergence +0.19 → −0.07; the volume up bar −0.18 → +0.19, a bought gap down −0.16 → +0.16).
+- **(7) The cross-section, 21 sessions:** no measure reaches |IC| 0.02 at t 2. 12-1 momentum +0.018 / +0.021 (t < 1);
+  the distance over the 200 SMA +0.023 / +0.021 (t ~1; at 63 sessions +0.052, t 2.7, older only). And two go the WRONG
+  way for the textbook: the top fifth by the 52-week high under the bottom fifth (−1.4% / −2.5% a month, −3.8% / −8.9%
+  at 3 months), and the most volatile fifth over the calmest (+2.4% / +4.9% a month).
+- **Why the classics could not show here — a limit of the DATA, said plainly:** the universe is TODAY's screener names.
+  A name that fell and was delisted in the ten years is not in it, so the beaten-down names we see are the ones that
+  SURVIVED and came back — which flatters losers and volatility and works against momentum and the 52-week high. A fair
+  test of the classics needs a universe as it stood at each date (the delisted names included). The per-name signals are
+  less exposed (each against its own bars), and they fail on their own.
+- The shuffled control: no PASS anywhere; its cross-section ICs lean slightly negative (−0.005 … −0.013) — the mechanical
+  floor of a ranking on random paths, under every real number above.
+
+So, three ways, the same answer as §10.2 and §10.12: none of our signals is a dependable edge on daily bars, and what
+looked like one in 2016–2023 has not lasted since. Nothing goes into the profile.
+
+### 10.14 Is "what worked lately keeps working" a trait of the NAME? (declared 2026-11-21, before the run)
+
+Roy: "Proteus is ongoing — two dimensions, the individual stock and time; behaviour changes between stocks and in time"
+→ "a swing trade checks three months back and one month forward". On one name at a time (§10.13's follow-up, NVDA / KO /
+LNG / TSLA), the walk-forward said: on LNG a signal that WORKED in the last 3 months kept working the next month (+7 vs
+−5 after one that failed), on KO it REVERSED (−10 vs +1), on NVDA and TSLA nothing. If that PERSISTENCE is a stable trait
+of a name, Proteus can say per name how far to trust its recent behaviour; if not, those four were chance.
+`scripts/lab-proteus-persistence.mjs` (Roy: "begin with 100 stocks").
+
+- **Names:** the first 100 of `data/lab/screener-10y.jsonl` (SPY left out), daily, 10 years. Every name also shuffled.
+- **The walk-forward** (§10.13's one-name rules): every 21 sessions, the last 63 (events whose 10-bar outcome is known by
+  then) and the next 21; per signal (the 31), the edge = its win rate minus the same window's drift (the bearish five
+  mirrored). A window counts with ≥ 2 events back and ≥ 1 forward.
+- **A name's PERSISTENCE in a period:** over all its signals' windows in that period, the mean next-month edge after a
+  window that WORKED (back edge ≥ +15 points) minus after one that FAILED (≤ −15). Positive = what worked keeps working;
+  negative = it reverses.
+- **The two halves:** older 2016-10 → 2021-10, recent 2021-10 → 2026-10.
+- **PASS — persistence is a trait:** across the 100 names, the correlation between a name's older and recent persistence
+  r ≥ 0.20 and above its 95% band under a permutation of the names (1,000 shuffles of the pairing), AND the shuffled-bars
+  names do NOT pass. Also reported: the market-wide persistence (all names pooled, each half), and how many names keep
+  the sign from one half to the other.
+- If it passes on 100, the same on all names; if not, it stops here.
+
+**Result (2026-11-21, the first 100 names): NO — persistence is not a trait of the name.** `data/lab/proteus-persistence.out.txt`.
+
+- **Across names, older vs recent persistence: r 0.008** (the shuffled pairing's 95th percentile 0.169); the sign kept in
+  54 of 96 names — a coin. The shuffled-bars names: r −0.071, 51 of 96. A name that kept what worked in 2016–2021 is no
+  likelier to keep it in 2021–2026.
+- **Market-wide:** −3 points older, +2 recent (shuffled −0 / −1) — no persistence in either half; nothing to lean on.
+- The familiar names flip: MSFT −15 → +14, TSLA −15 → +7, AAPL +8 → −5, NVDA −13 → −1. KO −13 → −10 kept its sign
+  (one of the 54). LNG was not in the first 100.
+- So the one-name read of §10.13's follow-up (LNG persistent, KO reversing) was the noise of 1–3 events a window, as
+  feared: a "how it behaves now" read built on a name's own recent SIGNAL outcomes would show noise. Declared: it stops
+  here (not run on all names).
+
+**10.14b — a shorter forward window (declared 2026-11-21, before the run).** Roy: "maybe the forward period should be
+shorter — not a third but half of that." The same 100 names and rules, the forward window 10 sessions (~2 weeks) instead
+of 21; a window counts with ≥ 2 events back and ≥ 1 forward (one event per 10 bars: the forward is one event at most).
+The same PASS. If it fails, the forward length is not what hid a trait.
+
+**Result 10.14b (forward 10 sessions): NO, the same.** r 0.035 across names (95th percentile 0.161), the sign kept in 51
+of 96; market-wide −1 older / +2 recent (shuffled +0 / −1). The names flip harder at two weeks (MSFT −19 → +26, AAPL +13
+→ −18, NVDA +7 → −8). A shorter forward does not uncover a trait. `data/lab/proteus-persistence-fwd10.out.txt`.
+
+### 10.15 The best NOW, checked backwards — and getting better toward now (declared 2026-11-21, before the run)
+
+Roy: "what about the opposite way — see what worked best recently and then check what it did backwards … I check what
+works best now and see if it's OK backwards — and also, if the back period is 3 months, maybe we can see whether it got
+better the more we got closer to recently." Two things §10.14 did not test: a SELECTION (each name's best signals now,
+not the average relation), and the TREND inside the 3 months. `scripts/lab-proteus-bestnow.mjs`, the same 100 names,
+daily, the 31 signals, the engine's outcome (bearish mirrored), every series also shuffled.
+
+At each month-end e (every 21 sessions, from ~1 year in), per name and signal, each window's edge = its win rate minus
+the same window's drift (only events whose 10-bar outcome is known at e):
+- **NOW** — the last 3 months (63 sessions); split into its three months **M1** (oldest) … **M3** (latest).
+- **BEFORE** — the 6 months before NOW (126 sessions).
+- **NEXT** — the next month (21 sessions): what it did after.
+
+**A. The best now, checked backwards.** Per name and date, the signals with ≥ 3 events NOW ranked by their NOW edge; the
+top 3 are "the best now".
+- A1 (reported): the BEFORE edge of the best now vs the other signals — were today's best also good before?
+- **A2 (decides): the NEXT edge of the best now that were also OK BEFORE (BEFORE edge ≥ 0, ≥ 2 events) against every
+  other signal's NEXT edge.** Also reported: the best now that were NOT OK before, and the best now alone.
+
+**B. Getting better toward now.** Per name, date and signal with ≥ 1 event in M1 and in M3: IMPROVING when M3's edge is ≥
+25 points over M1's, WORSENING when ≥ 25 under. **B (decides): the NEXT edge of the improving minus the worsening.**
+
+**PASS (each of A2 and B):** ≥ +5 points, the 95% interval above 0, in the older half (to 2021-10) AND the recent half,
+and the shuffled control NOT passing. The intervals treat each (name, date, signal) as one case — they overlap in time,
+so they are narrower than the truth; the shuffled control is the check on that.
+
+**Result (2026-11-21, the first 100 names): NO on both.** `data/lab/proteus-bestnow.out.txt`.
+
+- **A1 — were today's best also good before?** No: their BEFORE edge is the same as every other signal's (−0.1 older,
+  +0.2 recent). What a name does best now says nothing about what it did best in the 6 months before.
+- **A2 — the best now that were also OK before, next month:** −0.4 points vs the others older, +1.2 recent (both
+  intervals across 0); the best now that were NOT OK before: −0.4 / +0.9 — the same. Checking backwards adds nothing.
+  The best now, any: −0.4 / +1.1. On the shuffled bars: +0.5 / +0.1.
+- **B — getting better toward now:** improving M1 → M3 minus worsening, next month: +2.1 older [−0.2 … +4.5], +0.5
+  recent — under the bar, and the shuffled control shows the same +2.0 older (regression of a one-event month), so it is
+  the arithmetic of thin months, not the name.
+- So, a fourth way round (the average relation §10.14, a shorter forward 10.14b, the selection and its history A, the
+  trend inside the window B): a name's own recent SIGNAL outcomes do not tell its next ones, on daily bars.
+
+**The path into "the best now" (Roy: "did a signal get better in the back period, even if not to now's level?") — no.**
+`scripts/lab-proteus-path.mjs`, `data/lab/proteus-path.out.txt`. The top 3 per name and month, their edge month by month:
+B1 (6–3 months before the window) +0.5 / +0.6, B2 (3–0 months before) +0.8 / +0.9 — the same as the other signals (+1.1 →
++1.4, +0.6 → +0.5); the ramp B1 → B2 best minus others +0.2 [−1.1 … +1.4] older, +0.8 [−0.3 … +1.8] recent. Then the
+window (picked): +15 / +14 / +10. Then NEXT: +2.3 / +1.9, as the others (+2.6 / +0.9). The shuffled bars draw the SAME
+shape (flat, a spike, back to flat). A name's best signals now come out of nowhere and go back to nowhere — the shape of
+luck in 2–4 events, not of behaviour building up.
+
+**10.15c — the same on HOURLY bars (declared 2026-11-21, before the run).** Roy: "run it on hourly bars with 100 stocks."
+On daily bars a signal fires 2–4 times in 3 months — the path's months were luck. Hourly bars (regular hours, ~7 a
+session) give up to ~44 events a signal in 3 months. The same 100 names, 5 years of hourly bars (FMP, the router Proteus
+uses; `scripts/lab-proteus-fetch-hourly.mjs` → `data/lab/hourly-5y.jsonl`), the same signals and outcome (10 bars ≈ 1.5
+sessions), the windows in sessions × 7 bars: NOW 441 (3 months; M1 / M2 / M3 147 each), BEFORE 882 (B1 / B2 441 each),
+NEXT 147, every 147 bars. The halves split at 2024-05-01 (the middle of the 5 years). The same reports — §10.15 A and B,
+and the path — and the same PASS (A2, B: ≥ +5 points, interval above 0, both halves, the shuffled control not passing).
+The path's question: do the best now RISE from B1 to B2 more than the others (the ramp, the pick never saw it)?
+
+**Result 10.15c (hourly, 100 names, 5 years): NO — the same as daily.** `data/lab/proteus-path-hourly.out.txt`,
+`data/lab/proteus-bestnow-hourly.out.txt`. With ~3× the events, the path of each name's best 3 signals is still flat →
+spike → flat: B1 / B2 −0.6 / +0.0 older, −0.7 / −0.6 recent, like the others; the ramp best-minus-others +0.8
+[+0.0 … +1.5] older, +0.3 recent (shuffled +0.1 / +0.6); the picked months +25 … +28; NEXT −0.3 / −0.2, the others −1.1 /
+−0.8. A1 (were the best also good before) −0.0 / +0.3; A2 (best now and OK before, next) +0.9 / +1.2; B (improving)
+−0.3 / −0.0. On hourly bars too, a name's recent signal outcomes do not build up, and do not carry forward.
+
+### 10.16 Reward / risk in PERCENT, 2/1 to 20/10, each on its horizon's windows (declared 2026-11-21, before the run)
+
+Roy: "now we check 1 ATR against 0.5 drawdown — what about percents, profit / drawdown 2/1, 3/1.5, 4/2 … up to 20/10" →
+"run it on 100 stocks — go for periods according to horizon; 10 years is too much for our 'now' principle".
+`scripts/lab-proteus-brackets.mjs`, the same 100 names, daily, the 31 signals, every series also shuffled. The 10 years
+only supply the WINDOWS; every read uses its own horizon's window ("now").
+
+**The outcome:** from the signal bar's close, the target (+p%) or the stop (−p/2 %), whichever a bar reaches first within
+the cap; a bar reaching both counts as the stop. Neither by the cap = no win. The bearish five mirrored.
+
+| Group | Brackets (target / stop %) | Cap | Look back | Forward |
+|---|---|---|---|---|
+| short swing | 2/1, 3/1.5, 4/2 | 10 sessions | 21 | 7 |
+| swing | 5/2.5, 6/3, 8/4 | 21 | 63 | 21 |
+| long swing | 10/5, 12/6, 15/7.5 | 42 | 126 | 42 |
+| position | 20/10 | 63 | 252 | 84 |
+
+Windows every FORWARD sessions; back events only with their outcome known at the window's end. Each edge = the signal's
+win rate minus the SAME window's drift at the SAME bracket (every 5th bar) — a volatile name's easy 2% is its baseline's
+too. Halves: older to 2021-10, recent from it.
+
+- **1. Does it work NOW?** Per signal and bracket, the mean FORWARD edge over all windows (≥ 1 event). PASS: ≥ +5
+  points, the 95% interval above 0, both halves, the shuffled control not passing, AND a neighbouring bracket of the same
+  group ≥ +3 points (one lucky bracket alone is not a size).
+- **2. Does what worked best now keep working?** Per name and window, the top 3 (signal, bracket) of the group by the
+  LOOK-BACK edge (≥ 3 events): their forward edge minus every other pair's. PASS: ≥ +5 points, interval above 0, both
+  halves, shuffled not.
+- Reported: each bracket's win rate against 33.3% (2:1's break-even, before costs).
+
+**Result (2026-11-21, 100 names): NO — the four passes of question 1 are an artifact of the design; question 2 no.**
+`data/lab/proteus-brackets.out.txt`, the check `scripts/lab-proteus-brackets-check.mjs` → `data/lab/proteus-brackets-check.out.txt`.
+
+- The verdict code passed F2 / F1 at 2/1–4/2 (+5.6 … +9.1, both halves), X1 at 5/2.5–6/3 (+5.3 … +7.1), M2 at 2/1
+  (+6.4 / +5.0). **The shuffled bars show nearly the same** (F2 3/1.5: +4.3 / +7.8 shuffled vs +8.6 / +7.0 real; against
+  same-condition bars +10.1 / +12.1 shuffled vs +10.2 / +11.0) — they missed the "shuffled passes" bar narrowly (older
+  +3.9 … +4.4), so the code counted a pass that real-minus-shuffled does not support.
+- **The flaw (mine, in the design):** each signal was judged against the drift of the SAME short window. Dip signals (a
+  level touched, RSI(2) under 10, a divergence low) fire at a window's low; the window's other bars, earlier, have that
+  dip in their FUTURE and lose more — a bias toward any dip-buying signal, random walks included. A window-local baseline
+  needs the baseline bars' outcomes not to overlap the dip (e.g. bars after the event only, or the whole-series drift
+  as §10.12), and the verdict must read real MINUS shuffled.
+- **Real minus shuffled:** F1, F2 ≈ 0; X1 +3 older / −1 recent; M2 (MACD bullish divergence, 2/1) +4.4 / +2.1 against
+  every bar — the largest residue, under the bar, weak lately.
+- **Question 2 (the look-back's best pairs, forward): no** in every group (swing +0.4 / +1.2 with the shuffled +2.4 / +0.9;
+  long swing 0 / −0.6; position +1.0 / +1.3 with the shuffled +0.7 / +1.4). The short-swing group could not be measured:
+  a 21-session look-back with a 10-session cap leaves room for one event — a flaw of the table.
+
+**10.16b — the baseline fixed, rerun (declared 2026-11-21, before the run).** Roy: "fix the baseline and rerun the
+brackets." (1) **The baseline** = the same bracket from the bars of the 126 sessions BEFORE each window (every 2nd bar,
+outcomes known by the window's start) — recent ("now"), and no baseline bar can hold the event's dip in its future. (2) **The
+verdict reads real MINUS shuffled:** per signal and bracket, the mean forward edge real minus the shuffled one ≥ +5 points,
+its 95% interval above 0, in both halves; the neighbouring bracket's real-minus-shuffled ≥ +3. Question 2 the same way
+(best-minus-others, real minus shuffled). (3) **The short-swing look-back 63 sessions** (21 left room for one event). The
+rest as §10.16.
+
+**Result 10.16b (2026-11-21, 100 names): ONE pass — RSI 14 crossing under 30, long swing 15/7.5** (real minus shuffled
++9.7 older, +5.0 recent; `data/lab/proteus-brackets-b.out.txt`). Its neighbours agree: 10/5 +10.5 / +0.8, 12/6 +11.1 /
++3.7, 20/10 +4.1 / +4.8; RSI back above 30 +9 … +11 older at the long-swing sizes, RSI bullish divergence +4 … +6. Short
+brackets (2–8%) small or none. Question 2: no in every group (the short swing measurable now). Three cautions, said now:
+(1) **survivorship** — today's names only; an oversold name that kept falling to delisting is not there, the exact path
+this result rewards, and shuffling cannot remove a path that was never in the data; (2) **not yet profit** — 15/7.5 wins
+31%, under 2:1's 33.3% break-even before costs (the edge is relative: plain bars win less); (3) **310 checks** (31 × 10),
+the recent half cleared by a hair. Next, declared before any run: the same on the OTHER 1,077 names (RSI under 30, 10/5 …
+20/10), and the mean return per trade with the neither-hit trades and costs.
+
+### 10.17 Every bracket at every horizon — the full grid (declared 2026-11-21, before the run)
+
+Roy: "why not check all brackets at all horizons — properly?" §10.16 tied each bracket to one horizon (2–4% in 10
+sessions … 20% in 63); the full grid crosses them. `scripts/lab-proteus-grid.mjs`, the same 100 names, daily, the 31
+signals, §10.16b's baseline (the 126 sessions before each window) and outcome (target or stop first, a bar with both = the
+stop, neither by the cap = no win; the bearish five mirrored).
+
+- **The grid:** brackets 2/1, 3/1.5, … 20/10 (every whole percent, 19) × horizons (the cap) 10, 21, 42, 63 sessions —
+  each horizon with its windows: 10 → look back 63 / forward 7; 21 → 63 / 21; 42 → 126 / 42; 63 → 252 / 84. 31 × 19 × 4 =
+  2,356 cells.
+- **Question 1, a cell PASSES:** real minus shuffled ≥ +5 points with its 95% interval above 0, in both halves (split
+  2021-10), AND at least half of its grid neighbours (one bracket either side, one horizon either side) at real minus
+  shuffled ≥ +3 in both halves.
+- **How many passes chance makes:** the same rule on a SECOND shuffle (another seed) minus the first. Real passes count
+  only as far as they exceed that number; a signal whose passes sit in one connected patch of the grid is the reading.
+- **Question 2:** per name, window and horizon, the top 3 (signal, bracket) by the look-back edge (≥ 3 events) — their
+  forward edge minus the others', real minus shuffled, ≥ +5, interval above 0, both halves.
+- Reported per passing cell: its win rate against 33.3% (2:1's break-even, before costs). Aggregated name by name (the
+  rows are not kept). The survivorship caution of 10.16b stands.
+
+**Result (2026-11-21, 100 names): ONE signal, in ONE connected patch — beyond chance.** `data/lab/proteus-grid.out.txt`.
+
+- **Passing cells: 6 real, 0 by chance** (the second shuffle minus the first) of 2,356. All six are **RSI 14 crossing
+  under 30**, brackets **15/7.5 … 20/10 within 42 sessions** (real minus shuffled +9.2 … +11.3 older, +5.0 … +8.5 recent).
+- **Its map:** in the OLDER half it is broad — +7 … +13 from ~5/2.5 up, at every horizon. In the RECENT half it is narrow
+  and smaller — only the big brackets (15–20%) at 42 sessions reach +5 … +8.5; the 63-session row +3 … +5, the small
+  brackets ~0. So: after an oversold dip, a 15–20% rebound within ~2 months came more often than at any time — strongly
+  before 2021, less since. No other signal passes anywhere on the grid.
+- **Not profit yet:** its win rates are 23 … 31%, under 2:1's 33.3% (neither-hit trades count as no win). The per-trade
+  return, with the neither-hit trades at their exit and costs, decides that.
+- **Survivorship — the biggest doubt, for exactly this pattern:** today's names only; oversold names that kept falling to
+  delisting are missing, and an oversold rebound is what a survivors-only universe flatters.
+- **Question 2 (the look-back's best, forward): no** at every horizon (real minus shuffled −1.8 … +2.3).
+- Next, declared before any run: (a) the other 1,077 names, RSI under 30 at 15/7.5 … 20/10 within 42 sessions, the same
+  rules; (b) the mean return per trade with the neither-hit trades and 0.1% costs, against plain bars.
+
+### 10.18 The full grid with EVERY pattern (declared 2026-11-21, before the run)
+
+Roy: "did you check all indicators and patterns with the brackets?" → "add all the indicators and patterns and rerun the
+grid". §10.17's 31 signals + 22 more — the rest of what Proteus reads at its moves, each fired on the bar it is KNOWN at
+(`scripts/lab-proteus-signals2.mjs`): bullish / bearish order-block touches; the first touch of a 38.2 / 50 / 61.8%
+Fibonacci level; a Wyckoff range breakout and its dry-volume retest; a dip where a cycle low is due; double bottom / top
+(moveSteps' tight rule, 2 bars late as it reads 2 bars on); hammer, bullish engulfing, shooting star, bearish engulfing;
+a swept swing high (the false break on the mirrored bars); the volume profile of the 120 bars before — the POC and the
+value-area low touched from above, the VAL reclaimed, a bought bar at a high- / low-volume node, the VAH touched from
+below, a close back under the VAH; Elliott's rules — an A-B-C pullback at its low, a five-wave run at its high. The bearish
+eight mirrored. VWAP is intraday and not on daily bars. **53 signals × 19 brackets × 4 horizons = 4,028 cells; every rule
+of §10.17 unchanged** (real minus shuffled ≥ +5, interval above 0, both halves; half the grid neighbours ≥ +3; chance
+counted by a second shuffle; question 2 per horizon). `scripts/lab-proteus-grid.mjs` → `data/lab/proteus-grid2.out.txt`.
+
+**Result (2026-11-21, 100 names): the same single patch — none of the 22 added patterns passes anywhere.**
+`data/lab/proteus-grid2.out.txt`. Passing cells: 6 real, 0 by chance, of 4,028 — the same six (RSI 14 crossing under 30,
+15/7.5 … 20/10 within 42 sessions) as §10.17. Order blocks, Fibonacci touches, Wyckoff breakouts and retests, the cycle,
+double bottoms / tops, the four candles, swept highs, the volume profile's seven, Elliott's two: no cell clears the rule
+at any bracket or horizon. Question 2 as §10.17.
+
+**Nearly passed (real minus shuffled ≥ +3, interval above 0, both halves): 36 real cells, 0 by chance.** RSI under 30 14
+(10/21/42 sessions; best 20/10 in 42 +9.2 / +8.5), a gap up that holds 13 (21/42; best 15/7.5 in 42 +5.1 / +4.7), a 2×
+volume up bar 5 (42; +4.8 / +3.8), RSI back above 30 3 (42; +7.8 / +5.3), a bullish order block 1 (42; +4.8 / +4.0). MACD,
+Ichimoku, divergences, candles, Fibonacci, the volume profile, Elliott: none. Every cell saved: `data/lab/proteus-grid2.cells.json`.
+**A suspect for the passes and the near misses alike — VOLATILITY, not direction:** all sit at big brackets (15–20%) over
+1–2 months, after moments of high volatility (an oversold drop, a gap, a 2× volume bar). Real volatility CLUSTERS; the
+shuffle destroys clustering — and a 2:1 bracket's win rate rises with volatility alone (more trades reach a target within
+the cap; the stops too). Next, before any confirmation: the stop rate beside the win rate, the target's share of the
+resolved trades, and the return per trade.
+
+**10.18c — the same grid at reward : risk 1.5 (declared 2026-11-21, before the run).** Roy: "what about the same check
+with r:r of 1.5?" Every rule of §10.17/§10.18 unchanged; the stop is the target / 1.5 (2/1.33 … 20/13.3) instead of / 2.
+The targets from 1.5% (Roy: "in all the brackets — 1.5 to 20"): 1.5/1, 2/1.33 … 20/13.3, 20 brackets × 4 horizons. Break-even 40% instead of 33.3%. `LAB_RR=1.5 scripts/lab-proteus-grid.mjs` → `data/lab/proteus-grid2-rr1.5.out.txt`.
+
+**Result 10.18c (reward : risk 1.5, targets 1.5 … 20%): the same family, a little stronger.** `data/lab/proteus-grid2-rr1.5.out.txt`.
+Passing cells 10 real, 0 by chance, of 4,240: RSI under 30 at 13/8.67 … 20/13.33 within 42 sessions (8 cells; +10.7 …
++12.7 older, +5.1 … +9.2 recent) and RSI back above 30 at 16/10.67 and 17/11.33 within 42 (+8.3 … +8.9 / +5.3 … +5.9).
+Nearly passed 56 real, 0 by chance: RSI under 30 28, a gap up that holds 14, RSI back above 30 8, a 2× volume up bar 4, a
+bullish order block 2 — the same five as at 2:1, again only at the big targets within 1–2 months. Win rates 24 … 40%
+against 1.5:1's break-even 40%: the one cell at break-even (13/8.67) is the smallest. The volatility suspect stands — a
+wider stop lets a volatile name reach its target more before the stop, which favours exactly these cells.
+
+### 10.19 The best reward : risk per stock and horizon, no signal — 5 names (2026-11-21)
+
+Roy: "put indicators and patterns aside — check what is the best r:r for each stock; start with 5 stocks on each
+horizon." `scripts/lab-proteus-best-rr.mjs` → `data/lab/proteus-best-rr.out.txt`. An entry at EVERY close; targets 1.5 …
+20% × reward:risk 1, 1.5, 2, 2.5, 3 (55 brackets); exit at the target, the stop (a bar with both = the stop) or the
+horizon's close (10 / 21 / 42 / 63 sessions); 0.1% cost; ranked by return per session held, against buy-and-hold over the
+same horizon; the older / recent halves (split 2021-10). An exploration on 5 names, not a declared test.
+
+- **NVDA, TSLA (strong trends): no bracket beats buy-and-hold** at any horizon (0 of 55) — any target caps the run.
+- **KO (range-bound): many do** (22–36 of 55) — but its best bracket FLIPS: 3–5% at 1:1 in 2016–21, ranked 29–39 of 55
+  since; the recent best is 15% / 15% — close to just holding.
+- **LNG: the best is the widest, 15–20% at 1:1** — about holding, barely above it (1–4 of 55 beat hold), and stable.
+- **JPM: unstable** — the older best (15% / 10%, 20% / 13%) ranks 30–37 since; the recent best is 6% at 1:2.5.
+- **TSLA's best flipped completely:** 20% / 6.7% (1:3) to 2021, ranked 8–13 since; the recent best 4% / 1.3% (1:3).
+- So on these five: a name's best bracket follows its REGIME (a trend → hold, wide; a range → small targets) and moves
+  when the regime moves; the older half's best ranks 13th–39th of 55 in the recent half, except where the best is just
+  holding. The next test, on the "now" frame: pick each name's best bracket from its last 12 months, trade it the next 3,
+  against holding and against one fixed bracket for all — on the 100 names.
+
+### 10.20 The best reward : risk NOW — 3 years back, the last year forward, 100 names (declared 2026-11-21, before the run)
+
+Roy: "run the walk-forward on 100 stocks — but do it 3 years to last year". `scripts/lab-proteus-rr-walk.mjs`, the first
+100 names, daily, §10.19's 55 brackets (targets 1.5 … 20% × reward:risk 1, 1.5, 2, 2.5, 3; exit at the target, the stop —
+a bar with both = the stop — or the horizon's close; 0.1% cost) plus JUST HOLDING, at horizons 10 / 21 / 42 / 63.
+
+- **The pick:** each name's entries of the 3 years before the last year (756 sessions; only trades that ended before the
+  last year began). **The test:** every entry of the last year (252 sessions, trades ending inside the data). Return per
+  session held = the trades' returns / the sessions they held.
+- **A — the name's own best:** of the 56 (55 brackets + holding), the best on its 3 years. **B — one for all:** the best
+  on all names' 3 years pooled. **C — just holding.**
+- **PASS:** across the names, the mean of A minus B AND of A minus C ≥ +0.01% a session (≈ 2.5% a year), the 95% interval
+  above 0, and the shuffled control NOT passing (a shuffled name has no regime to carry).
+- Reported per name: A's pick, its last-year result, B's and C's; how often A picked holding.
+
+**Result (2026-11-21, 98 names with the data): NO — a name's own best bracket loses to just holding.**
+`data/lab/proteus-rr-walk.out.txt`. On the last year (2025-10 → 2026-10), per session held: A (the name's best of its 3
+years) +0.065 … +0.089%, B and C (one for all = HOLDING at every horizon) +0.100 … +0.141%. **A − C −0.035 … −0.052% a
+session** (≈ −9 … −13% a year), every interval under 0; A beat holding on only 20–31 of 98 names. A picked holding itself
+for 11–23 names. Shuffled: the same direction, smaller. One year, a strong one (holding ≈ +25 … +35% a year) — a year
+any target caps; a down or flat year is the other half of the question (e.g. 2019–22 → 2022).
+
+**10.20b — the same with 2022 as the test year (declared 2026-11-21, before the run).** Roy: "run the 2022 version." The
+pick: 2019-01 → 2021-12 (trades ending before 2022); the test: every entry of 2022 (a down year for the market). Every
+rule of §10.20 unchanged. `LAB_TEST=2022 scripts/lab-proteus-rr-walk.mjs` → `data/lab/proteus-rr-walk-2022.out.txt`.
+
+**Result 10.20b (2022, a down year; 94 names with a full 2019–21): NO — the same.** `data/lab/proteus-rr-walk-2022.out.txt`.
+Per session held in 2022: A (the name's best of 2019–21) −0.050 … −0.060%; B = C = HOLDING −0.009 … −0.037%. A − C
+−0.013 … −0.051% a session, every interval under 0; A beat holding on 16–27 of 94 names. So in a falling year too, the
+bracket that was best for a name in its last 3 years did WORSE than just holding — brackets picked in a bull run (wide
+targets, tight stops) were stopped out over and over in the fall. On both test years the best single choice for all
+names was holding; a name's own past-best bracket is hindsight, not a "now" read.
+
+### 10.21 How one name moves — KO's behaviour, no horizon (2026-11-21, an exploration)
+
+Roy: "a behaviour — 1. best r:r 2. best standard dev for stops 3. … for profits 4. the regime behaviour; with r:r and
+levels I don't care about the horizon" → "also regression lines and angles". `scripts/lab-proteus-behaviour.mjs KO`; σ = the
+monthly σ (60-day daily σ × √21, median 4.5%); trades held to the stop or the target (a 1-year cap only).
+- **Swings** (a zigzag turning on 1σ): runs up median 10.2% = 2.3σ (35 sessions), pullbacks 7.6% = 1.5σ (21 sessions).
+- **Levels:** the best stop ~1.5σ (~7%), just past a normal pullback; the best target ~1.25–1.5σ (6–7%), under a typical
+  run — 1:0.8 … 1:1, 72–78% wins, ~1 month to resolve, 2–4% never in a year. +7.9% a year over holding in 10 years —
+  +13 … +15 in 2016–21, +1 … +2 since: a description of KO, paid in its range years.
+- **Regime, by episode:** after a strong 3-month fall (9 episodes) the next 6 months median +7.5% (7/9 up); after a rise
+  (12) +1.7%; any 3 months +1.5% — a hint, few episodes (the overlapping-day count of the regime lab overstated it).
+- **Regression lines (63 sessions):** the angle median +0.9% a month, R² median 0.40 (KO rarely trends cleanly). The
+  angle REVERSES: −0.22 with the next window's angle, −0.25 with its return (38 separate windows); after the steepest-down
+  third the next 3 months median +7.0% (9/12 up), after the steepest-up +0.4% (6/12). Stretched 2+ under its line (33
+  episodes): the next 3 months median +4.5% (25/33 up); 2+ over (26): +3.2% (16/25).
+- One consistent picture: KO reverts toward its line over months. One name, small counts, not declared — the next steps
+  are the 5 names, then a walk-forward on 100.
+
 ## 11. Build order and status
 
 1. **The measured profile engine** — BUILT 2026-11-12 (`services/behaviourProfile.engine.js`, 68080cdf): one
