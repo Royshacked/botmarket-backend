@@ -1,6 +1,6 @@
 // The entity a session reopens for editing, read through its OWN service — owner-checked where it has an
-// owner (unified-chat plan phase 5b, the edit route). Coverage is house data with no owner; revising it is
-// an admin's job, the same gate the coverage routes keep.
+// owner (unified-chat plan phase 5b, the edit route). Coverage is house data with no owner, and EVERY user may revise it
+// (Roy, 2026-11-21 — it was admin-only; saving opened to all on 2026-11-20, modes-and-builders.md M17).
 
 import { setupService } from '../../api/setups/setups.service.js'
 import { coverageService } from '../../api/analyst/coverage.service.js'
@@ -10,7 +10,7 @@ import { isTerminal } from '../entity/vocabulary.js'
 
 const LOOKUPS = {
     setup:     ({ id, user }) => setupService.getSetup(id, user._id),
-    coverage:  async ({ id, user }) => (user.role === 'admin' ? coverageService.getCoverageById(id) : { ok: false, reason: 'forbidden' }),
+    coverage:  async ({ id }) => coverageService.getCoverageById(id),
     // A book is its portfolio_books document — present only for its owner.
     portfolio: async ({ id, user }) => {
         const book = await portfolioChatService.getChatState(id, user._id)
@@ -40,7 +40,7 @@ const BY_NAME = {
         return hits.length === 1 ? hits[0].id : null
     },
     // One coverage per symbol by construction.
-    coverage: async ({ ref, user }) => (user.role === 'admin' ? (await coverageService.getCoverageBySymbol(ref.toUpperCase()))?.id ?? null : null),
+    coverage: async ({ ref }) => (await coverageService.getCoverageBySymbol(ref.toUpperCase()))?.id ?? null,
     portfolio: async ({ ref, user }) => {
         const hits = (await listPortfolios(user._id)).filter(b => String(b.name ?? '').toUpperCase() === ref.toUpperCase())
         return hits.length === 1 ? hits[0].portfolioId : null

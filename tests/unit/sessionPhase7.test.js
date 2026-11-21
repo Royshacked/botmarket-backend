@@ -256,3 +256,20 @@ test('a desk hands a question that is not its own back to Axl, who runs on it an
     await after('axl', 'reception', { reply: 'x', route: 'reception', opening: 'y' }, 't2_axl')
     assert.equal(r.queued.length, 2)
 })
+
+// Coverage is every user's to revise (Roy, 2026-11-21 — it was admin-only): a trader's <edit> finds it by id or by symbol.
+test('findForEdit: a TRADER reopens house coverage by its symbol or id — no admin gate', async () => {
+    const { coverageService } = await import('../../api/analyst/coverage.service.js')
+    const saved = { byId: coverageService.getCoverageById, bySym: coverageService.getCoverageBySymbol }
+    const doc = { id: 'cov_NVDA_1', symbol: 'NVDA' }
+    coverageService.getCoverageById = async (id) => (id === doc.id ? { ok: true, doc } : { ok: false, reason: 'not_found' })
+    coverageService.getCoverageBySymbol = async (s) => (s === 'NVDA' ? doc : null)
+    try {
+        const trader = { _id: 'u2', role: 'user' }
+        assert.deepEqual(await findForEdit({ kind: 'coverage', ref: 'nvda', user: trader }), { ok: true, doc, id: 'cov_NVDA_1' })
+        assert.deepEqual(await findForEdit({ kind: 'coverage', ref: 'cov_NVDA_1', user: trader }), { ok: true, doc, id: 'cov_NVDA_1' })
+    } finally {
+        coverageService.getCoverageById = saved.byId
+        coverageService.getCoverageBySymbol = saved.bySym
+    }
+})

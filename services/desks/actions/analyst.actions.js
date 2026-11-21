@@ -3,8 +3,8 @@
 // The draft is read from Prometheus's agentState — never from the client — and handed to the SAME service the
 // coverage routes use (api/analyst/coverageCommit.service.js). The action contract is mentor.actions.js's.
 //
-// HOUSE COVERAGE IS AN ADMIN WRITE. The routes hold it with requireAdmin; the session route has no such gate, so
-// every action here holds it itself. A trader talks to Prometheus and reads the draft — only an admin saves it.
+// HOUSE COVERAGE IS EVERY USER'S TO SAVE AND REVISE (modes-and-builders.md M17, 2026-11-20; revising, 2026-11-21). The old
+// REST routes keep requireAdmin; the session's actions — what users press — have no role gate.
 //
 // ONLY A STANDING DRAFT IS SAVED. The draft is also the conversation's SUBJECT (a revise seeds it with the thesis in
 // the book, and it is fed back as the draft-so-far), so a turn without a <coverage> block cannot clear it — it

@@ -8,7 +8,7 @@
 //   6. "let's revise nvda" → a background build: the building line, still General (never confirmed — it would overwrite
 //      the house thesis)
 //
-//   node scripts/drive-one-voice.mjs [baseUrl] [outDir] [uncoveredTicker]     (default http://localhost:5173 · . · SOFI)
+//   node scripts/drive-one-voice.mjs [baseUrl] [outDir] [uncoveredTicker] [--revise-only]     (default http://localhost:5173 · . · SOFI)
 //
 // As the throwaway QA user `ui-smoke-panel` (paper). One login. Real turns; step 5 starts a REAL analyst run, and its
 // coverage is the house's after (that is the design: built once, for everyone).
@@ -18,6 +18,8 @@ import { chromium } from 'playwright'
 const BASE = process.argv[2] ?? 'http://localhost:5173'
 const OUT = process.argv[3] ?? '.'
 const NEW = (process.argv[4] ?? 'SOFI').toUpperCase()
+// `--revise-only`: step 6 alone (the rest builds real coverage and runs real turns).
+const REVISE_ONLY = process.argv.includes('--revise-only')
 const USER = { username: 'ui-smoke-panel', password: 'Sm0ke!Drive#29' }
 
 let failed = false
@@ -70,6 +72,7 @@ try {
         await page.waitForFunction(() => { const t = document.querySelector('.mode-picker__toggle'); return t?.getAttribute('aria-label') === 'Mode: General' && !t.classList.contains('is-pending') }, null, { timeout: 30_000 })
     }
 
+    if (!REVISE_ONLY) {
     console.log('1. a view on a covered name')
     const r1 = await ask('is nvda a good investment now?')
     console.log('  →', r1.slice(0, 1200))
@@ -102,6 +105,8 @@ try {
     console.log('  line:', ready)
     expect(!!ready && /is ready/.test(ready), 'the "ready" line landed in the chat')
     await page.screenshot({ path: `${OUT}/one-voice-5.png` })
+
+    }
 
     console.log('6. a revision runs as a build')
     await page.locator('.chat-timeline textarea').fill("let's revise nvda")
