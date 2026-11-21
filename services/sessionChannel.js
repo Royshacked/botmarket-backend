@@ -44,6 +44,14 @@ export function turnEmitter({ userId, sessionId, turnId, agent, send = wsEmit })
     }
 }
 
+/**
+ * A turn's status frame WITHOUT taking its lane — a turn still waiting behind another (`queued`) must not replace the one
+ * that runs, which a replay reads from `running`.
+ */
+export function turnNotice({ userId, sessionId, turnId, agent, status, extra = {}, send = wsEmit }) {
+    send(String(userId), 'session_turn', { sessionId, turnId, agent, status, ...extra })
+}
+
 /** The turn streaming in a session's lane right now (Axl's, else a desk's), or null. Exported for tests. */
 export function runningTurn(sessionId, lane = null) {
     if (lane) return running.get(`${sessionId}|${lane}`) ?? null

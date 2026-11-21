@@ -128,7 +128,7 @@ test('Axl carries the tool, and it is APPENDED last', () => {
     //
     // get_news sits after every tool that was there before it; get_hotlist (2026-10-22) and web_search (2026-11-06) were appended
     // after it, which is the rule working, not breaking.
-    assert.deepEqual(names.slice(-5), ['get_news', 'get_hotlist', 'web_search', 'remember_about_user', 'ask_specialist'])   // + ABOUT THE USER 2026-11-13, + the subagents 2026-11-20
+    assert.deepEqual(names.slice(-6), ['get_news', 'get_hotlist', 'web_search', 'remember_about_user', 'ask_specialist', 'get_coverage_view'])   // + ABOUT THE USER 2026-11-13, + the subagents and the coverage view 2026-11-20
 })
 
 test('the tool description holds the line against the brief and against advice', () => {

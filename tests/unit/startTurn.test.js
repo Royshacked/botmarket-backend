@@ -169,3 +169,22 @@ test("talking to Axl never pauses a desk's chain — talking to a desk does (lan
     await startTurn({ user, sessionId: s.sessionId, text: 'next', agent: 'mentor', turnId: 'b' })
     assert.equal(paused.length, 1)
 })
+
+test("a turn behind another on its lane says it is QUEUED — without taking the lane's running slot (Roy, 2026-11-20)", async () => {
+    const { db } = memDb()
+    const sessions = makeSessionService({ getDb: async () => db })
+    const notices = []
+    let release
+    const gate = new Promise(r => { release = r })
+    const sessionTurn = async ({ agent }) => { if (agent === 'mentor') await gate; return { payload: { reply: 'ok' } } }
+    const emitterFor = () => ({ emit: () => {}, status: () => {}, end: () => {} })
+    const { runQueued } = makeStartTurn({ sessions, sessionTurn, emitterFor, notice: (n) => notices.push(n), builds: { settle: async () => null } })
+    const s = await sessions.getActive({ userId: 'u1' })
+    const first = runQueued({ user, sessionId: s.sessionId, agent: 'mentor', text: 'build', turnId: 't1', origin: 'opening' })
+    await tick()
+    assert.deepEqual(notices, [], 'the first turn has nothing to wait for')
+    const second = runQueued({ user, sessionId: s.sessionId, agent: 'analyst', text: 'cover AMD', turnId: 't2' })
+    assert.deepEqual(notices.map(n => [n.turnId, n.agent, n.status]), [['t2', 'analyst', 'queued']])
+    release()
+    await Promise.all([first, second])
+})

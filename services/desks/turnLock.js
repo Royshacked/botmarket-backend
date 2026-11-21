@@ -41,6 +41,32 @@ export function laneKey(sessionId, agent) {
     return agent === 'axl' ? `${sessionId}#axl` : String(sessionId)
 }
 
+// session|agent → how many of THAT agent's turns are accepted and not finished (runQueued tracks them).
+const perAgent = new Map()
+
+/**
+ * Count one accepted turn of `agent` on this session until the returned release is called. The lane is shared by every
+ * desk, so "is anything queued on the lane" cannot say whether THIS builder still has a turn coming (Roy's drive,
+ * 2026-11-20: the analyst's turn queued behind the trader's build step made the build think it had more work in flight,
+ * and it sat "building" for good).
+ */
+export function trackTurn(sessionId, agent) {
+    const key = `${sessionId}|${agent}`
+    perAgent.set(key, (perAgent.get(key) ?? 0) + 1)
+    let done = false
+    return () => {
+        if (done) return
+        done = true
+        const n = (perAgent.get(key) ?? 1) - 1
+        if (n <= 0) perAgent.delete(key); else perAgent.set(key, n)
+    }
+}
+
+/** How many of `agent`'s turns are accepted and not finished on this session (the one running counts). */
+export function agentDepth(sessionId, agent) {
+    return perAgent.get(`${sessionId}|${agent}`) ?? 0
+}
+
 /** Whether a turn is queued or running on this session. */
 export function sessionBusy(sessionId) {
     return (depth.get(String(sessionId)) ?? 0) > 0

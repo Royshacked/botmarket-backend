@@ -81,10 +81,16 @@ export function makeAct({ sessions = sessionService, desks = DESK_DEFS, sealing 
         return next.sessionId
     }
 
-    /** Whether a commit by `agent` ends this session — always, except a save by a desk a running chain went THROUGH. */
+    /**
+     * Whether a commit by `agent` ends this session — always, except a save by a desk a running chain went THROUGH, and
+     * except while ANOTHER builder has a build in this session (queued, building, waiting on the user, ready, declined,
+     * failed): ending the session would throw that build away (Roy, 2026-11-20 — the trader's Generate opened a new
+     * session and the analyst's queued coverage build was lost). The save is still sealed; its line lands in the thread.
+     */
     function endsSession(session, agent) {
         const chain = session.chain
-        return !(chain && chain.status !== 'done' && chain.origin && chain.origin !== agent)
+        if (chain && chain.status !== 'done' && chain.origin && chain.origin !== agent) return false
+        return !Object.entries(session.agentState ?? {}).some(([a, s]) => a !== agent && s?.build)
     }
 
     /** @returns {Promise<{ reason: string, extra?: object } | { result: object, rev: number|null, stateWritten?: false }>} */

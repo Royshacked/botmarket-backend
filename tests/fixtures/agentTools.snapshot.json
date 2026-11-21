@@ -3481,6 +3481,22 @@
                     "companies"
                 ]
             }
+        },
+        {
+            "name": "get_coverage_view",
+            "description": "The analyst's standing COVERAGE thesis on ONE stock, if the house covers it: the rating, our price target and its date, the thesis, conviction, the bear / base / bull case, the next catalysts, the kill criteria, and when it was last revised. Use it whenever the user asks what the analyst — or the house, or \"you\" — THINKS of a name (\"how is NVDA for the long term?\", \"is AMD still a buy?\", \"what's our view on TSLA?\"): answer from it, attributed and dated. Not covered → say so, and offer the analyst's research (a route) only if they want it. Updating a thesis is the analyst's desk, not this tool.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "symbol": {
+                        "type": "string",
+                        "description": "one ticker, e.g. NVDA"
+                    }
+                },
+                "required": [
+                    "symbol"
+                ]
+            }
         }
     ],
     "proteus": [

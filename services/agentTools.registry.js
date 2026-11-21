@@ -746,6 +746,14 @@ export const TOOL_SCHEMAS = {
         }
     },
     // Axl's read of today's hotlist (services/tools/hotlist.tools.js; Roy, 2026-10-22).
+    // Axl's read of the analyst's thesis on ONE name (services/tools/coverage.tools.js — Roy, 2026-11-20).
+    get_coverage_view: {
+        "type": "object",
+        "properties": {
+            "symbol": { "type": "string", "description": "one ticker, e.g. NVDA" }
+        },
+        "required": ["symbol"]
+    },
     get_hotlist: {
         "type": "object",
         "properties": {

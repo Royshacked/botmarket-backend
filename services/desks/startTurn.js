@@ -14,8 +14,8 @@
 import { sessionService } from '../session.service.js'
 import { parseMention } from '../session.util.js'
 import { registerTurn } from '../../api/_shared/turnRegistry.js'
-import { turnEmitter } from '../sessionChannel.js'
-import { withSessionLock, laneKey } from './turnLock.js'
+import { turnEmitter, turnNotice } from '../sessionChannel.js'
+import { withSessionLock, laneKey, trackTurn, sessionDepth } from './turnLock.js'
 import { sessionTurn as defaultSessionTurn, canSpeak } from './sessionTurn.js'
 import { framePayload } from './index.js'
 import { builds as defaultBuilds } from './builds.js'
@@ -28,6 +28,7 @@ export function makeStartTurn({
     sessions    = sessionService,
     sessionTurn = defaultSessionTurn,
     emitterFor  = turnEmitter,
+    notice      = turnNotice,
     afterTurn   = async () => {},
     onUserTurn  = async () => {},   // a user turn accepted — the chain pauses after the turn in flight (G4)
     lock        = withSessionLock,
@@ -43,9 +44,14 @@ export function makeStartTurn({
         // stop too — Stop on a queued turn must cancel it, not let it run later and spend anyway.
         const ac      = new AbortController()
         const release = registerTurn(turnId, ac, user._id)
+        // This agent's own count — what a build reads to know whether its builder still has a turn coming (builds.settle).
+        const untrack = trackTurn(sessionId, agent)
+        // Behind another turn on its lane (a build's step): the screen says it waits, not "thinking…" (Roy, 2026-11-20).
+        if (sessionDepth(laneKey(sessionId, agent)) > 0) notice({ userId: user._id, sessionId, turnId, agent, status: 'queued', extra: { origin } })
         return lock(laneKey(sessionId, agent), async () => {
             if (ac.signal.aborted) {
                 release()
+                untrack()
                 emitterFor({ userId: user._id, sessionId, turnId, agent }).status('stopped', { queued: true })
                 return { stopped: true }
             }
@@ -71,6 +77,7 @@ export function makeStartTurn({
                 return { reason: 'error' }
             } finally {
                 release()
+                untrack()
                 te.end()
             }
         })

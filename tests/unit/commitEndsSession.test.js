@@ -124,3 +124,15 @@ test('a chain that is DONE does not hold the session open', async () => {
     await r.sessions.setChain({ sessionId: s.sessionId, userId: 'u1', chain: { id: 'c1', status: 'done', origin: 'portfolio' } })
     assert.ok((await press('generate')).result.nextSessionId)
 })
+
+test("a save KEEPS the session while another builder has a build in it — ending it would lose that build (Roy, 2026-11-20)", async () => {
+    const r = rigFor()
+    const { s, press } = await r.start(user)
+    await say(r, s)
+    await r.sessions.setAgentState({ sessionId: s.sessionId, userId: 'u1', agent: 'analyst', state: { build: { id: 'b2', status: 'queued', title: 'coverage' } } })
+    const out = await press('generate')
+    assert.equal(out.result.nextSessionId, undefined, 'no new session')
+    const still = await r.sessions.get({ sessionId: s.sessionId, userId: 'u1' })
+    assert.equal(still.status, 'active')
+    assert.equal(still.agentState.analyst.build.status, 'queued', "the analyst's build is still there")
+})

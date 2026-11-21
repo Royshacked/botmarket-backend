@@ -17,6 +17,7 @@ import { makeMarketBriefHandlers, MARKET_BRIEF_TOOL_SPEC } from '../tools/market
 import { makeIndustryViewsHandlers, INDUSTRY_VIEWS_TOOL_SPEC } from '../tools/industryViews.tools.js'
 import { makeNewsHandlers, NEWS_TOOL_SPEC } from '../tools/news.tools.js'
 import { makeHotlistHandlers, HOTLIST_TOOL_SPEC } from '../tools/hotlist.tools.js'
+import { makeCoverageHandlers, COVERAGE_TOOL_SPEC } from '../tools/coverage.tools.js'
 import { REMEMBER_DESCRIPTION } from '../tools/userProfile.tools.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -85,6 +86,8 @@ export const TOOLS = toolsFor({
     // SUBAGENTS (docs/design/modes-and-builders.md §3, 2026-11-20): the event analyst and the technical analyst answer
     // through Axl — no route, no floor. Appended last, per the rule above. Its handler is the turn's (desks/subagent.js).
     ask_specialist: `Ask the event analyst or the technical analyst, who answers the user DIRECTLY: its reply goes on screen as written, under its role. event_analyst — who an EVENT reaches through the supply chain (suppliers, customers, infrastructure, substitutes), the house's events, a map's scores and flags, a follow-up on a map. technical_analyst — how ONE stock's price BEHAVES, measured from its candles: what it respects technically (moving averages, VWAP, order blocks), false breaks, ATR, day trade or swing, what its chart shows. Write the question to stand alone (the specialist sees none of this conversation, only its own earlier answers), and name every company with its ticker AND name. After it answers, add at most one short line, or nothing — never repeat it.`,
+    // The analyst's thesis on one name — a VIEW is a read, not new research (Roy, 2026-11-20). Appended last, per the rule above.
+    get_coverage_view: COVERAGE_TOOL_SPEC.get_coverage_view,
 })
 
 // Without the turn's handler (the social chat — a DM, no session to write the specialist's row into) the tool is not offered.
@@ -170,6 +173,7 @@ async function chatStream({ messages = [], audience = null, isAdmin = false, sur
     _industryViewsHandlers = makeIndustryViewsHandlers,
     _newsHandlers = makeNewsHandlers,
     _hotlistHandlers = makeHotlistHandlers,
+    _coverageHandlers = makeCoverageHandlers,
     _venueSection = buildVenueSection,
 } = {}) {
     // The venue rides the last USER message, not the system prompt: free cash moves whenever
@@ -235,6 +239,8 @@ ${audienceBlock}` : ''}` },
         ..._newsHandlers(),
         // Unbound: the hotlist is built once for everyone.
         ..._hotlistHandlers(),
+        // Unbound: coverage is the house's.
+        ..._coverageHandlers(),
         ..._experienceHandlers(userId),
         ...(askSpecialist ? { ask_specialist: askSpecialist } : {}),
     }

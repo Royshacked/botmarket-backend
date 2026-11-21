@@ -390,3 +390,23 @@ test("a NO TRADE verdict beats a draft left from before it — declined, never c
     await sessions.append({ sessionId: s.sessionId, userId: 'u1', message: { agent: 'mentor', role: 'assistant', content: 'No trade: the pullback alternative is invalid now — NVDA is below both stops.', ref: { build: 'b1' } } })
     assert.equal(await builds.settle({ user, sessionId: s.sessionId, agent: 'mentor', out: { payload: {} } }), 'declined')
 })
+
+test("another desk's turn queued on the lane is not the build's work — the build settles (the drive, 2026-11-20: it sat \"building\" for good)", async () => {
+    const { sessions, builds } = rig({ depth: (_s, agent) => (agent === 'mentor' ? 1 : 2) })
+    const s = await sessions.getActive({ userId: 'u1' })
+    await builds.start({ user, sessionId: s.sessionId, agent: 'mentor', state: {}, title: 'RDW trade', text: 't', input: {} })
+    await sessions.append({ sessionId: s.sessionId, userId: 'u1', message: { agent: 'mentor', role: 'assistant', content: 'No trade: the structure is broken.', ref: { build: (await st(sessions, s)).mentor.build.id } } })
+    assert.equal(await builds.settle({ user, sessionId: s.sessionId, agent: 'mentor', out: { payload: {} } }), 'declined')
+})
+
+test('trackTurn counts one agent\'s turns on a session, released once', async () => {
+    const { trackTurn, agentDepth } = await import('../../services/desks/turnLock.js')
+    const a = trackTurn('sX', 'mentor'); const b = trackTurn('sX', 'mentor'); const c = trackTurn('sX', 'analyst')
+    assert.equal(agentDepth('sX', 'mentor'), 2)
+    assert.equal(agentDepth('sX', 'analyst'), 1)
+    a(); a()
+    assert.equal(agentDepth('sX', 'mentor'), 1, 'a release twice counts once')
+    b(); c()
+    assert.equal(agentDepth('sX', 'mentor'), 0)
+    assert.equal(agentDepth('sX', 'analyst'), 0)
+})

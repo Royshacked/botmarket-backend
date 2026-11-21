@@ -16,7 +16,7 @@
 
 import { randomUUID } from 'node:crypto'
 import { sessionService } from '../session.service.js'
-import { sessionDepth } from './turnLock.js'
+import { agentDepth } from './turnLock.js'
 import { logger } from '../logger.service.js'
 
 const LOG = '[builds]'
@@ -110,7 +110,7 @@ export function buildTitle(agent, answers = {}, state = null) {
     return 'coverage'
 }
 
-/** Is anything still in flight for this builder's build — a read it waits on, a chain step, a held go, a queued turn? */
+/** Is anything still in flight for this builder's build — a read it waits on, a chain step, a held go, a turn of ITS OWN queued? */
 export function stillWorking(session, agent, depth = 0) {
     const chain = session?.chain
     if (chain && chain.status !== 'done' && (chain.origin === agent || chain.current?.to === agent)) return true
@@ -130,7 +130,7 @@ export function buildLines(agentState = {}) {
 // The turn path, imported when a queued build starts: turns.js → … → here would otherwise be a cycle.
 const defaultRunTurn = async (args) => (await import('./turns.js')).runQueued(args)
 
-export function makeBuilds({ sessions = sessionService, depth = sessionDepth, runTurn = defaultRunTurn } = {}) {
+export function makeBuilds({ sessions = sessionService, depth = agentDepth, runTurn = defaultRunTurn } = {}) {
     const write = (user, sessionId, agent, state) => sessions.setAgentState({ sessionId, userId: user._id, agent, state })
 
     /**
@@ -209,7 +209,7 @@ export function makeBuilds({ sessions = sessionService, depth = sessionDepth, ru
             await startNext({ user, sessionId })
             return 'failed'
         }
-        if (out?.stopped || stillWorking(session, agent, depth(sessionId))) return null
+        if (out?.stopped || stillWorking(session, agent, depth(sessionId, agent))) return null
         const rows = await sessions.messagesForAgent({ sessionId, userId: user._id, agent, afterSeq: 0 })
         const last = [...(rows ?? [])].reverse().find(r => r.role === 'assistant' && r.ref?.build === b.id)
         // DECLINED (step 10 — the drive): the builder's verdict is that there is no trade. Not carried on (three paid turns
