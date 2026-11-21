@@ -8,6 +8,7 @@
 //   node scripts/drive-proteus-v2.mjs [baseUrl] [outDir]     (default http://localhost:5173 · .)
 //
 // As the throwaway QA user `ui-smoke-panel` (paper). One login. Real Axl + trader turns (minutes on Luna).
+/* global document -- the page.evaluate bodies run in the browser */
 import dns from 'dns'
 import 'dotenv/config'
 import { chromium } from 'playwright'

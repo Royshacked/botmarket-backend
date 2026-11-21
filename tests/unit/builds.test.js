@@ -391,6 +391,33 @@ test("a NO TRADE verdict beats a draft left from before it — declined, never c
     assert.equal(await builds.settle({ user, sessionId: s.sessionId, agent: 'mentor', out: { payload: {} } }), 'declined')
 })
 
+// The TSLA prod build (2026-11-21): the analyst PASSED ("PASS — I can't defend a price target…"), the build carried it on
+// twice with the TRADE wording, and it answered "No trade: I can't build a TSLA trade setup with the tools available in
+// this analyst role" — the screen said "no trade on coverage".
+test('the analyst\'s PASS ends a coverage build the first time — declined with its reason, named, never carried on', async () => {
+    const { passReason, declineReason, carryLine, buildLines } = await import('../../services/desks/builds.js')
+    assert.equal(passReason("PASS — I can't defend a price target: my $360 base uses speculative FY2026 EPS."), "I can't defend a price target: my $360 base uses speculative FY2026 EPS.")
+    assert.equal(passReason('**PASS** - the filings contradict each other.'), 'the filings contradict each other.')
+    assert.equal(passReason('I would pass on this for now.'), null, 'only the verdict line, in capitals')
+    assert.equal(declineReason('PASS — no defensible number.', 'mentor'), null, "a PASS is the analyst's word, not the trader's")
+    assert.equal(declineReason('No trade: x.', 'analyst'), 'x.', "the older wording still ends the analyst's build")
+    assert.match(carryLine('analyst'), /starts with "PASS —"/)
+    assert.doesNotMatch(carryLine('analyst'), /trade/i, 'no trade wording for the analyst')
+    assert.match(carryLine(), /starts with "No trade:"/)
+
+    const { sessions, builds, turns } = rig()
+    const s = await sessions.getActive({ userId: 'u1' })
+    await builds.start({ user, sessionId: s.sessionId, agent: 'analyst', state: { active_symbol: 'TSLA' }, title: 'coverage', text: 'Tsla', input: {} })
+    const id = (await st(sessions, s)).analyst.build.id
+    await sessions.append({ sessionId: s.sessionId, userId: 'u1', message: { agent: 'analyst', role: 'assistant', content: "PASS — I can't defend a price target: my $360 base uses speculative FY2026 EPS of $2.00 versus Street's $1.68.", ref: { build: id } } })
+    assert.equal(await builds.settle({ user, sessionId: s.sessionId, agent: 'analyst', out: { payload: {} } }), 'declined')
+    assert.equal(turns.length, 0, 'not carried on')
+    const b = (await st(sessions, s)).analyst.build
+    assert.deepEqual([b.status, b.title], ['declined', 'TSLA coverage'])
+    assert.match(b.reason, /^I can't defend a price target/)
+    assert.match(buildLines({ analyst: { build: b } })[0], /the analyst: TSLA coverage — PASSED — no price target it can defend/)
+})
+
 test("another desk's turn queued on the lane is not the build's work — the build settles (the drive, 2026-11-20: it sat \"building\" for good)", async () => {
     const { sessions, builds } = rig({ depth: (_s, agent) => (agent === 'mentor' ? 1 : 2) })
     const s = await sessions.getActive({ userId: 'u1' })

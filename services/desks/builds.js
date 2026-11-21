@@ -74,11 +74,19 @@ export function generatable(state, agent = 'mentor') {
     return !!state?.draft && state?.view?.readiness?.ready === true
 }
 
-/** The app's note that carries a stalled build on. Pure. */
-export function carryLine() {
+/**
+ * The app's note that carries a stalled build on — in the BUILDER's own words for "nothing to build". The analyst's is a
+ * PASS (analyst_system_prompt: a line beginning "PASS —", no coverage) — the TSLA prod build, 2026-11-21: told the trade
+ * wording, the analyst that had PASSED twice answered "No trade: I can't build a TSLA trade setup with the tools
+ * available in this analyst role", and the screen said "no trade on coverage". Pure.
+ */
+export function carryLine(agent = 'mentor') {
+    const none = agent === 'analyst'
+        ? 'If you cannot defend a number, say so in ONE line that starts with "PASS —" and why.'
+        : 'If there is no trade to build, say so in ONE line that starts with "No trade:" and why.'
     return "[App note, not the user's words: the user is not here — the build runs in the background. Carry on building from where you stopped: " +
         "call your tools again for any figure you need (a previous turn's numbers are not repeated to you), and finish it. Ask the user only " +
-        "what their answers do not settle. If there is no trade to build, say so in ONE line that starts with \"No trade:\" and why.]"
+        `what their answers do not settle. ${none}]`
 }
 
 /** The builder's verdict that there is nothing to build — a line starting "No trade:". → its reason, or null. Pure. */
@@ -86,6 +94,15 @@ export function noTradeReason(text) {
     const m = String(text ?? '').match(/(?:^|\n)\s*(?:\*\*)?no trade(?:\*\*)?\s*[:—-]\s*(.+)/i)
     return m ? m[1].replace(/\*\*/g, '').trim().slice(0, 300) : null
 }
+
+/** The analyst's verdict that it cannot defend a number — a line starting "PASS —". → its reason, or null. Pure. */
+export function passReason(text) {
+    const m = String(text ?? '').match(/(?:^|\n)\s*(?:\*\*)?PASS(?:\*\*)?\s*[:—–-]\s*(.+)/)
+    return m ? m[1].replace(/\*\*/g, '').trim().slice(0, 300) : null
+}
+
+/** A builder's "nothing to build", in its own words: the analyst's PASS, anyone's "No trade:". → its reason, or null. */
+export const declineReason = (text, agent) => (agent === 'analyst' ? passReason(text) ?? noTradeReason(text) : noTradeReason(text))
 export const BUILDERS = Object.freeze(['mentor', 'portfolio', 'analyst'])
 export const ACTIVE = Object.freeze(['building', 'awaiting'])
 const now = () => Date.now()
@@ -124,7 +141,7 @@ export function buildLines(agentState = {}) {
     const ROLE = { mentor: 'the trader', portfolio: 'the portfolio manager', analyst: 'the analyst' }
     const SAY = { queued: 'queued behind another build', building: 'building in the background', awaiting: 'has a question for the user — on the card above the prompt box, answered there', declined: 'found NO TRADE — the user may Change it or Dismiss it', ready: 'READY — waiting for the user to review and Generate it in the pane', failed: 'failed — the user can try it again' }
     return BUILDERS.map(a => [a, agentState?.[a]?.build]).filter(([, b]) => b && SAY[b.status])
-        .map(([a, b]) => `- ${ROLE[a]}: ${b.title} — ${SAY[b.status]}`)
+        .map(([a, b]) => `- ${ROLE[a]}: ${b.title} — ${a === 'analyst' && b.status === 'declined' ? `PASSED — no price target it can defend${b.reason ? ` (${b.reason})` : ''}; the user may Change it or Dismiss it` : SAY[b.status]}`)
 }
 
 // The turn path, imported when a queued build starts: turns.js → … → here would otherwise be a cycle.
@@ -175,7 +192,7 @@ export function makeBuilds({ sessions = sessionService, depth = agentDepth, runT
         const b = state?.build
         if (!b || b.status !== 'building' || (b.carries ?? 0) >= MAX_CARRIES) return false
         await write(user, sessionId, agent, { ...state, build: { ...b, carries: (b.carries ?? 0) + 1 } })
-        runTurn({ user, sessionId, agent, text: note ? `${carryLine()}\n${note}` : carryLine(), input: {}, origin: 'opening', turnId: `build_${b.id}_carry_${now()}` })
+        runTurn({ user, sessionId, agent, text: note ? `${carryLine(agent)}\n${note}` : carryLine(agent), input: {}, origin: 'opening', turnId: `build_${b.id}_carry_${now()}` })
             .catch(err => logger.warn(LOG, 'carry failed to start', err.message))
         logger.info(LOG, 'build carried on', { sessionId, agent, carries: (b.carries ?? 0) + 1, note: note ? 'not ready' : 'statement' })
         return true
@@ -216,9 +233,12 @@ export function makeBuilds({ sessions = sessionService, depth = agentDepth, runT
         // asking him to build what he has ruled out), not a question: the bar says it — Change or Dismiss. FIRST: a verdict
         // of no trade beats a draft still left from before it (the drive: after a Change, "No trade: …", and the old draft
         // was confirmed and armed).
-        const declined = noTradeReason(last?.content)
+        // The analyst's PASS is its "no trade": it ends the build the first time, with its reason — never carried on.
+        const declined = declineReason(last?.content, agent)
         if (declined) {
-            await write(user, sessionId, agent, { ...state, build: { ...b, status: 'declined', reason: declined } })
+            const sym = String(state?.draft?.symbol ?? state?.active_symbol ?? '').toUpperCase()
+            const title = agent === 'analyst' && sym && b.title === 'coverage' ? `${sym} coverage` : b.title
+            await write(user, sessionId, agent, { ...state, build: { ...b, title, status: 'declined', reason: declined } })
             await startNext({ user, sessionId })
             logger.info(LOG, 'build declined', { sessionId, agent, title: b.title })
             return 'declined'
@@ -267,7 +287,7 @@ export function makeBuilds({ sessions = sessionService, depth = agentDepth, runT
             ? `[App note, not the user's words: the user was shown this build and asks for a change: "${change}". Make exactly that change — call your tools again for any figure you need — then go.]`
             : kind === 'recheck'
                 ? `[App note, not the user's words: the user is about to confirm this build, made ${Math.max(1, Math.round((now() - (b.readyAt ?? b.since)) / 60_000))} minutes ago. Recheck it against the current price and chart — redraw anything that moved, keep what still holds — then go.]`
-                : carryLine()
+                : carryLine(agent)
         const { readyAt: _r, ...rest } = b
         await write(user, sessionId, agent, { ...state, build: { ...rest, status: 'building', carries: 0, ...(kind === 'change' ? { change } : {}) } })
         runTurn({ user, sessionId, agent, text: note, input: {}, origin: 'opening', turnId: `build_${b.id}_${kind}_${now()}` })
