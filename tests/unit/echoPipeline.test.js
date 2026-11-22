@@ -42,6 +42,15 @@ test("run: a user's own event (the filter did not take it) is checked at day 5 a
     assert.match(d.writes.at(-1)[2].expiredBecause, /checked at day 5, no watch/)
 })
 
+test('run: a what-if is mapped and scored, then stops — no day-5 check of a thing that did not happen (Roy 2026-11-22)', async () => {
+    const d = deps(); _setDeps(d)
+    const r = await run({ _id: 'wi', kind: 'user', userId: 'u1', status: 'framed', hypothetical: true })
+    assert.equal(r.status, 'expired')
+    assert.deepEqual(d.writes.map(w => w[1]), ['mapped', 'scored', 'expired'])
+    assert.equal(d.calls.some(c => c[0] === 'check'), false, 'never checked')
+    assert.match(d.writes.at(-1)[2].expiredBecause, /a what-if/)
+})
+
 test('run: a run already holding the event is left alone (chat and the tick never map one twice)', async () => {
     const d = deps({ claimed: false }); _setDeps(d)
     const r = await run({ _id: 'e0', kind: 'house', status: 'framed' })

@@ -104,7 +104,7 @@ export function formatCompanyView(v) {
         ? `OUR TECHNICAL PROFILE (measured from the candles, ${day(v.technicals.profile.built?.swing) ?? 'recent'}):\n${profileBrief(v.technicals.profile, { scales: TECH_SCALES })}`
         : `OUR TECHNICAL PROFILE: not available${v.technicals.error ? ` (${v.technicals.error})` : ''}.`
     const ev = v.events.length
-        ? `EVENTS WE MAPPED THAT REACH ${v.symbol} (the event analyst's):\n${v.events.map(e => `  ${e.date ?? '?'} ${e.origin ?? ''} — ${String(e.whatChanged ?? '').slice(0, 160)} → ${v.symbol} ${e.link?.direction ?? 'reached'}${e.link?.relation ? ` as ${e.link.relation}` : ''}${e.link?.why ? `: ${String(e.link.why).slice(0, 200)}` : ''}${e.score != null ? ` · score ${e.score}` : ''}${e.flag ? ` · ${e.flag}` : ''}${e.kind === 'user' ? ' · the user\'s own event' : ''}`).join('\n')}`
+        ? `EVENTS WE MAPPED THAT REACH ${v.symbol} (the event analyst's):\n${v.events.map(e => `  ${e.date ?? '?'} ${e.origin ?? ''} — ${String(e.whatChanged ?? '').slice(0, 160)} → ${v.symbol} ${e.link?.direction ?? 'reached'}${e.link?.relation ? ` as ${e.link.relation}` : ''}${e.link?.why ? `: ${String(e.link.why).slice(0, 200)}` : ''}${e.score != null ? ` · score ${e.score}` : ''}${e.flag ? ` · ${e.flag}` : ''}${e.hypothetical ? ' · the user\'s WHAT-IF (it has not happened — a scenario)' : e.kind === 'user' ? ' · the user\'s own event' : ''}`).join('\n')}`
         : `EVENTS WE MAPPED THAT REACH ${v.symbol}: none.`
     return [
         `THE HOUSE'S WORK ON ${v.symbol} — say each part as the house's (the analyst's / our technical read / an event we mapped), dated; your own reading (news, web, knowledge) as yours, never blurred into it.`,

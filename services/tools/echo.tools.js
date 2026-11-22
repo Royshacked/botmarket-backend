@@ -28,7 +28,7 @@ export const ECHO_TOOL_SPEC = {
     get_echo_events: `Echo's events — the house's (the intake reads earnings moves, 8-K deals, policy, defense awards, trials and news, and keeps what passes the filter: a surprise, large, more than a one-off) and the user's own — each with where it stands, its top-scored names and its flags; and the validation record so far. Read it first when the user asks what Echo has found, or about an event that may already be here.`,
     get_event_map: `One event whole — the record (type, what changed, size, durability and why), then every link RANKED BY SCORE: relation, layer, direction and why; the six factors (lock-in, supply response, bottleneck, directness, exposure, coverage, 0–2 each, high at 8 of 12) with their reasons; the filing evidence (named in filings, a 10-K's stated share, the company's own supply sentences); the day-5 market check and the flag (underreacted winner, overreacted loser, fully priced); the grades since. \`id\` is "ev_…" from get_echo_events.`,
     request_reads: `Send names from one of the USER's OWN events (an id "ev_…" they mapped) to the analyst and the technical analyst: the analyst's SWING coverage (researched for the house when there is none standing — a few minutes each) and the technical analyst's measured profile. \`tickers\`: the names the user picked from that map (at most ${MAX_ASK} at a time, ${MAX_USER_WEEK} a week); omit for its top-scored directional links. Only when the user asks. The house's flagged names go on their own after the day-5 check — never send those.`,
-    map_event: `Map an event the USER names through Echo's whole pipeline — the chain (layers 1–3 both ways, losers and substitutes, every link checked against SEC filings) and the six-factor score on every link. Anything: a launch ("GTA 6 is out"), a guidance cut, a rule, a strike, a deal, a war. FRAME it first, then call once: \`what_changed\` (one sentence: the news, not a stock's move), \`origin\` (the company or country it hits directly, or the demand it moves), \`tickers\` (the origin's US tickers; empty for a country or a demand), \`effect\` (up / down / mixed: what it does to demand AT THE ORIGIN — ask the user once if unsure), \`type\` (${TYPES.join(', ')}), \`durability\` ({kind: ${DURABILITIES.join(' / ')}, why} — a locked-in commitment lasts, a price spike cures itself), \`date\` (YYYY-MM-DD it became public; omit for today), \`size\` (as a sentence, if known), \`terms\` (what other companies' filings call the origin). Echo first JUDGES it by the intake's own filter (a surprise, large, more than a one-off): an event becomes the house's, watched and graded like any (or the house's own, when the intake already has it); otherwise it stays the user's — mapped, scored and checked at day 5, no watch. Say which. Takes two to three minutes and well under a dollar — in a chat it runs in the BACKGROUND: the call returns at once, and you get a turn of your own to tell the user what the map found when it is done. Never for an event already in get_echo_events — read that one instead.`,
+    map_event: `Map an event the USER names through Echo's whole pipeline — the chain (layers 1–3 both ways, losers and substitutes, every link checked against SEC filings) and the six-factor score on every link. Anything: a launch ("GTA 6 is out"), a guidance cut, a rule, a strike, a deal, a war. FRAME it first, then call once: \`what_changed\` (one sentence: the news, not a stock's move), \`origin\` (the company or country it hits directly, or the demand it moves), \`tickers\` (the origin's US tickers; empty for a country or a demand), \`effect\` (up / down / mixed: what it does to demand AT THE ORIGIN — ask the user once if unsure), \`type\` (${TYPES.join(', ')}), \`durability\` ({kind: ${DURABILITIES.join(' / ')}, why} — a locked-in commitment lasts, a price spike cures itself), \`date\` (YYYY-MM-DD it became public; omit for today), \`size\` (as a sentence, if known), \`terms\` (what other companies' filings call the origin). Echo first JUDGES it by the intake's own filter (a surprise, large, more than a one-off): an event becomes the house's, watched and graded like any (or the house's own, when the intake already has it); otherwise it stays the user's — mapped, scored and checked at day 5, no watch. Say which. Takes two to three minutes and well under a dollar — in a chat it runs in the BACKGROUND: the call returns at once, and you get a turn of your own to tell the user what the map found when it is done. Never for an event already in get_echo_events — read that one instead. NEVER for a what-if ("what happens if China attacks Taiwan?") on your own: it has not happened — answer it from reasoning and offer to map it; only when the user says yes, call with \`hypothetical: true\` (never the house's, no day-5 check).`,
 }
 
 const pct = (x) => (Number.isFinite(x) ? `${x > 0 ? '+' : ''}${(Math.round(x * 1000) / 10).toFixed(1)}%` : '—')
@@ -46,7 +46,7 @@ export function recordWords(report) {
 /** An event in one line plus its top names and flags. Pure. */
 export function eventLine(e) {
     const who = `${e.origin}${e.tickers?.length ? ` (${e.tickers.join('/')})` : ''}`
-    const head = `${e.id}${e.mine ? ' [the user\'s]' : ''} — ${e.date} · ${String(e.type).replace('_', ' ')} · ${who} demand ${e.effect} · ${String(e.durability ?? '').replace(/_/g, ' ')} · ${STATUS_WORDS[e.status] ?? e.status}${e.expiredBecause ? ` (${e.expiredBecause})` : ''}`
+    const head = `${e.id}${e.mine ? ' [the user\'s]' : ''}${e.hypothetical ? ' [A WHAT-IF — it has not happened]' : ''} — ${e.date} · ${String(e.type).replace('_', ' ')} · ${who} demand ${e.effect} · ${String(e.durability ?? '').replace(/_/g, ' ')} · ${STATUS_WORDS[e.status] ?? e.status}${e.expiredBecause ? ` (${e.expiredBecause})` : ''}`
     const lines = [head, `   ${e.whatChanged}`]
     if (e.top?.length) lines.push(`   top scores: ${e.top.map(t => `${t.ticker} ${t.total}/12`).join(', ')} · ${e.high} high · ${e.links} links`)
     if (e.flagged?.length) lines.push(`   flagged at day 5: ${e.flagged.map(f => `${f.ticker} (${FLAG_WORDS[f.flag]}, ${f.total}/12)`).join(', ')}`)
@@ -87,7 +87,7 @@ export function linkWords(l, full = false) {
 export function mapWords(e, { reasonsFor = 8 } = {}) {
     const ev = e.event
     const lines = [
-        `${e.id}${e.mine ? ' — the user\'s event' : ' — the house\'s event'} (${STATUS_WORDS[e.status] ?? e.status})`,
+        `${e.id}${e.hypothetical ? ' — the user\'s WHAT-IF (it has not happened: a scenario, never checked against the market)' : e.mine ? ' — the user\'s event' : ' — the house\'s event'} (${STATUS_WORDS[e.status] ?? e.status})`,
         `Event (${ev.date}, ${String(ev.type).replace('_', ' ')}): ${ev.whatChanged}. Origin: ${ev.origin}${ev.tickers.length ? ` (${ev.tickers.join(', ')})` : ''}; demand at the origin ${ev.effect}.${ev.size ? ` Size: ${ev.size}.` : ''}`,
         `Durability: ${String(ev.durability?.kind).replace(/_/g, ' ')}${ev.durability?.why ? ` — ${ev.durability.why}` : ''}.${ev.filter?.why ? ` Why it is an event: ${ev.filter.why}` : ''}`,
     ]
@@ -175,9 +175,15 @@ export function makeEchoHandlers({ userId = null, sessionId = null, read = echoS
             if (!userId) return toolError('There is no signed-in user to save this event for.')
             const f = events.frame({ ...args, filter: { surprise: null, large: null, lasting: null, why: 'named by the user' } })
             if (!f.ok) return toolError(f.reason)
-            const verdict = await judged(f.event, { userId })
             let doc, judgedLine
-            if (verdict.event) {
+            // A WHAT-IF (Roy, 2026-11-22) — mapped only because the user said yes to it. It has not happened, so the house's
+            // filter never sees it (it would be no event of the house's) and the pipeline stops it before a day-5 check.
+            const hypothetical = args.hypothetical === true || args.hypothetical === 'true'
+            const verdict = hypothetical ? null : await judged(f.event, { userId })
+            if (hypothetical) {
+                doc = await events.create({ ...f.event, hypothetical: true, filter: { surprise: null, large: null, lasting: null, why: 'a what-if the user asked to have mapped — it has not happened' } }, { userId, source: 'chat' })
+                judgedLine = 'A WHAT-IF, the user\'s alone: it has not happened, so it is never the house\'s and has no day-5 market check — the map is a scenario, not a reading of the market. Say so.'
+            } else if (verdict.event) {
                 const same = await events.findSame(verdict.framed).catch(() => null)
                 doc = same ?? await events.create(verdict.framed, { source: 'chat', askedBy: userId })
                 judgedLine = same

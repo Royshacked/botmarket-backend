@@ -31,7 +31,7 @@ export function shapeSummary(d, viewer = null) {
         links: d.map?.links?.length ?? 0, high: scores.filter(s => s.high).length,
         flagged: checks.filter(c => FLAGS.includes(c.flag)).map(c => ({ ticker: c.ticker, flag: c.flag, total: c.total })),
         top: scores.slice(0, 3).map(s => ({ ticker: s.ticker, total: s.total })),
-        followUpOf: d.followUpOf ?? null, triggers: d.triggers?.length ?? 0,
+        followUpOf: d.followUpOf ?? null, triggers: d.triggers?.length ?? 0, hypothetical: d.hypothetical === true,
         waiting: d.waiting ?? null, expiredBecause: d.expiredBecause ?? null, error: d.lastError?.reason ?? null,
         graded: Object.keys(d.grades ?? {}).map(Number),
     }

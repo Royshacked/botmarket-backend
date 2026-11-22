@@ -817,7 +817,8 @@ export const TOOL_SCHEMAS = {
             "date": { "type": "string", "description": "YYYY-MM-DD the event became public; omit for today." },
             "timing": { "type": "string", "enum": ["before_open", "during_session", "after_close"], "description": "When it landed (US Eastern), if known." },
             "size": { "type": "string", "description": "Guide vs consensus, budget amount, share of supply affected — a sentence, if known." },
-            "terms": { "type": "array", "items": { "type": "string" }, "description": "What other companies' filings call the origin (\"NVIDIA\", \"GLP-1\")." }
+            "terms": { "type": "array", "items": { "type": "string" }, "description": "What other companies' filings call the origin (\"NVIDIA\", \"GLP-1\")." },
+            "hypothetical": { "type": "boolean", "description": "true for a WHAT-IF the user said yes to mapping (\"if China attacks Taiwan\") — it has not happened: the user's alone, never the house's, no day-5 market check. Omit for a real event." }
         },
         "required": ["what_changed", "origin", "tickers", "effect", "type", "durability"]
     },

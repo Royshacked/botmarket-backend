@@ -197,7 +197,7 @@ export async function eventsFor(ticker, { userId = null, limit = 20 } = {}) {
     const docs = await (await coll()).find({
         'map.links.ticker': t, status: { $in: MAPPED },
         $or: [{ kind: 'house' }, ...(userId ? [{ kind: 'user', userId: String(userId) }] : [])],
-    }).project({ kind: 1, date: 1, type: 1, origin: 1, whatChanged: 1, status: 1, map: 1, scores: 1, check: 1 })
+    }).project({ kind: 1, date: 1, type: 1, origin: 1, whatChanged: 1, status: 1, map: 1, scores: 1, check: 1, hypothetical: 1 })
         .sort({ date: -1, createdAt: -1 }).limit(Math.min(limit, 50)).toArray()
     return docs.map(d => {
         const link  = (d.map?.links ?? []).find(l => l.ticker === t) ?? null
@@ -205,6 +205,7 @@ export async function eventsFor(ticker, { userId = null, limit = 20 } = {}) {
         const check = (d.check?.links ?? []).find(l => l.ticker === t) ?? null
         return {
             id: d._id, kind: d.kind, date: d.date ?? null, type: d.type ?? null, origin: d.origin ?? null, whatChanged: d.whatChanged ?? null, status: d.status,
+            hypothetical: d.hypothetical === true,
             link: link ? { relation: link.relation ?? null, layer: link.layer ?? null, direction: link.direction ?? null, why: link.why ?? null, confidence: link.confidence ?? null } : null,
             score: Number.isFinite(score?.total) ? score.total : null,
             flag: check?.flag ?? null,

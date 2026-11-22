@@ -109,6 +109,34 @@ test('map_event in a chat maps in the BACKGROUND: it returns at once and the pip
     assert.match(out, /Say nothing about its links: there are none yet\./)
 })
 
+test("map_event on a WHAT-IF the user said yes to: never judged, never the house's, saved and labelled as one (Roy 2026-11-22)", async () => {
+    const { frame } = await import('../../services/echoEvents.service.js')
+    const created = [], started = []
+    let judgedCalls = 0
+    const h = makeEchoHandlers({
+        userId: 'u1', sessionId: 's1',
+        judged: async () => { judgedCalls++; return { event: true, framed: {} } },
+        events: { frame, findSame: async () => { throw new Error('never looked up') }, create: async (ev, o) => { created.push([ev, o]); return { _id: 'ev_wi', ...ev, kind: 'user', status: 'framed' } } },
+        jobs: { start: (x) => { started.push(x); return { started: true } } },
+        read: { getEvent: async () => null },
+    })
+    const out = await h.map_event({ what_changed: 'China attacks Taiwan', origin: 'Taiwan', tickers: [], effect: 'down', type: 'geopolitical',
+        durability: { kind: 'multi_year_commitment', why: 'a war' }, hypothetical: true })
+    assert.equal(judgedCalls, 0, "the house's filter never sees a what-if")
+    assert.equal(created[0][0].hypothetical, true)
+    assert.equal(created[0][1].userId, 'u1', "the user's")
+    assert.match(out, /^A WHAT-IF, the user's alone/)
+    assert.match(out, /MAPPING STARTED \(ev_wi\)/)
+    assert.match(ECHO_TOOL_SPEC.map_event, /NEVER for a what-if/)
+})
+
+test('a mapped what-if says so everywhere it is read', () => {
+    const d = { ...SCORED, kind: 'user', userId: 'u1', hypothetical: true }
+    assert.match(eventLine(shapeSummary(d, 'u1')), /\[A WHAT-IF — it has not happened\]/)
+    assert.match(mapWords(shapeEvent(d, 'u1')), /the user's WHAT-IF \(it has not happened/)
+    assert.doesNotMatch(eventLine(shapeSummary(DOC)), /WHAT-IF/)
+})
+
 test("the status line's label: short, quoted, a long framing cut at a word (the live run's was 230 characters)", async () => {
     const { mapLabel } = await import('../../services/tools/echo.tools.js')
     assert.equal(mapLabel('GTA 6 released.'), '"GTA 6 released"')

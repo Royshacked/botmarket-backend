@@ -27,6 +27,7 @@ export const WATCH_EVERY_MS = 20 * 60 * 60 * 1000
 export const MAX_ATTEMPTS = 5
 const BACKOFF_MS = (n) => Math.min(24, 2 ** (n - 1)) * 60 * 60 * 1000
 const CHECK_CHECKED_ONLY = "a user's event the filter did not take (not a surprise, large and more than a one-off): checked at day 5, no watch"
+export const HYPOTHETICAL_STOP = 'a what-if — it has not happened, so there is no market reaction to check: mapped and scored, no day-5 check, no watch'
 
 /** The next US close a check can read (21:45 UTC — after 16:15 New York either side of daylight time), after `now`. */
 export function nextClose(now = new Date()) {
@@ -77,6 +78,12 @@ export async function run(ev) {
             await _deps.events.advance(doc._id, 'scored', { scores: r.scores, ...clean })
             await _deps.events.claim(doc._id).catch(() => null)
             doc = { ...doc, status: 'scored', scores: r.scores, attempts: 0 }
+        }
+        // A WHAT-IF the user asked to have mapped (Roy, 2026-11-22: "it's a what-if question — no need to build an event that
+        // didn't happen") has no market reaction to check: mapped and scored, then it stops — never checked, never watched.
+        if (doc.status === 'scored' && doc.hypothetical) {
+            await _deps.events.advance(doc._id, 'expired', { ...clean, waiting: null, expiredBecause: HYPOTHETICAL_STOP })
+            doc = { ...doc, status: 'expired' }
         }
         if (doc.status === 'scored') {
             const r = await _deps.check(doc, doc.map, doc.scores)
