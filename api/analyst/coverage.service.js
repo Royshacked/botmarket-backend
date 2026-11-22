@@ -19,9 +19,10 @@ import { logger }          from '../../services/logger.service.js'
 import { cleanConviction } from '../../services/conviction.util.js'
 import { toNum }           from '../../services/format.util.js'
 import { HORIZONS, DEFAULT_HORIZON, openWindow, normalizeHorizon } from '../../services/forecastClock.js'
-import { ratingBand, RERATE_KIND } from '../../services/ratingBands.js'
+import { ratingBand, stickyBand, RERATE_KIND } from '../../services/ratingBands.js'
 import { normalizeSector, normalizeIndustry }  from '../../services/entity/vocabulary.js'
 import { newRevision, diffFields } from '../../services/revisionTrail.js'
+import { perShare } from '../../services/corporateActions.service.js'
 
 const LOG = '[coverage]'
 export const COLLECTION = 'coverage'
@@ -62,6 +63,7 @@ export const coverageService = {
     recordMonitorState,
     claimRemodel,
     rerateCoverage,
+    applySplit,
 }
 
 /**
@@ -71,12 +73,15 @@ export const coverageService = {
  * call: the scorecard neither logs it (no _logCall) nor rebuilds one from the trail (prometheusCalls.backfill). →
  * `{ ok, outcome: 'rerated' | 'same' | 'no_price' | 'no_target', from?, to?, band? }`; `dry` reads and writes nothing.
  */
-async function rerateCoverage(id, { dry = false, io = _io } = {}) {
+async function rerateCoverage(id, { dry = false, io = _io, price = null } = {}) {
     const found = await getCoverageById(id)
     if (!found.ok) return found
     const cur = found.doc
     if (_num(cur?.price_target?.value) === null) return { ok: true, outcome: 'no_target', symbol: cur.symbol }
-    const house = await _houseRating(cur, io)
+    // `price` — today's, when the caller (the coverage monitor's daily tick, 2026-11-21) has already read it. The target's
+    // reference (withTargetRef) is NOT touched: only the label follows the price. Held near an edge (stickyBand): a label
+    // following the price must not flip on a day's noise.
+    const house = await _houseRating(cur, io, { price, sticky: true })
     if (!house) return { ok: true, outcome: 'no_price', symbol: cur.symbol }
     if (house.from === undefined) return { ok: true, outcome: 'same', symbol: cur.symbol, rating: cur.rating }
     const out = { ok: true, outcome: 'rerated', symbol: cur.symbol, from: cur.rating ?? null, to: house.band.rating, band: house.band }
@@ -89,6 +94,105 @@ async function rerateCoverage(id, { dry = false, io = _io } = {}) {
         return out
     } catch (err) {
         logger.error(LOG, 'coverage re-rate failed', err)
+        return { ok: false, error: err }
+    }
+}
+
+// ─── stock splits (2026-11-22, services/corporateActions) ───────────────────
+
+/** The revision kind of a split restated by the house — mechanical, not a call of Prometheus's. */
+export const SPLIT_KIND = 'split_adjust'
+/**
+ * Is an estimate's KEY a per-share amount? Its words (split on `_`): it starts with eps / dps / bvps / fcfps, or ends
+ * `per_share` — and names no rate (`eps_growth_pct`, `eps_cagr`, `eps_yoy`… stay). The estimates are free-form model
+ * output, so a key is read word by word, never by a substring (code review, 2026-11-22). Pure.
+ */
+export function perShareKey(key) {
+    const w = String(key ?? '').toLowerCase().split(/[_\s-]+/).filter(Boolean)
+    if (!w.length) return false
+    if (w.some(x => /^(pct|percent|growth|cagr|yoy|qoq|rate|ratio|margin|payout|yield|surprise|revisions?|count|beats?|misses?)$/.test(x))) return false
+    return /^(eps|dps|bvps|fcfps)$/.test(w[0]) || (w.at(-2) === 'per' && w.at(-1) === 'share')
+}
+
+/** Every per-share number under an estimates object, nested too (`fy2026: { eps }`) → [path, value]. Pure. */
+function _perShareEstimates(obj, base, inPerShare = false, depth = 0) {
+    const out = []
+    if (!obj || typeof obj !== 'object' || depth > 3) return out
+    for (const [k, v] of Object.entries(obj)) {
+        const path = `${base}.${k}`
+        const ps = perShareKey(k)
+        if (v && typeof v === 'object' && !Array.isArray(v)) out.push(..._perShareEstimates(v, path, ps || inPerShare, depth + 1))
+        else if ((ps || (inPerShare && /^(fy\d*|q\d|low|high|mean|median|value|ntm|ttm)$/i.test(k))) && v != null && Number.isFinite(Number(v))) out.push([path, v])
+    }
+    return out
+}
+
+/**
+ * A coverage's PER-SHARE numbers after a split → the `$set` (dotted paths), the target's clock untouched. The target
+ * (value, low, high, ref_price), the scenario legs (value and their per-share forward metric — EPS; the multiple stays),
+ * the per-share estimates (`eps…`, `…per_share`, `dps…`), the recorded gap, and the horizon views' targets. A percentage
+ * (σ, a gap's %) is not per-share. The prose — thesis, kill criteria — cannot be restated: the re-model does it. Pure.
+ */
+export function splitAdjustment(doc, ratio) {
+    const set = {}
+    const put = (path, v) => { if (v != null && Number.isFinite(Number(v))) set[path] = perShare(v, ratio) }
+    for (const k of ['value', 'low', 'high', 'ref_price']) put(`price_target.${k}`, doc?.price_target?.[k])
+    for (const leg of ['bear', 'base', 'bull']) {
+        const l = doc?.risk_reward?.[leg]
+        if (l && typeof l === 'object') {
+            put(`risk_reward.${leg}.value`, l.value)
+            // The forward metric only when it IS per share — the multiple × it is the leg's price (P/E on EPS). An EV/sales
+            // leg's metric is revenue, which a split does not touch.
+            if (_looksLikePE(l)) put(`risk_reward.${leg}.forward_metric`, l.forward_metric)
+        } else put(`risk_reward.${leg}`, l)
+    }
+    for (const side of ['ours', 'consensus']) for (const [path, v] of _perShareEstimates(doc?.estimates?.[side], `estimates.${side}`)) put(path, v)
+    for (const k of ['our_pt', 'consensus_pt', 'low', 'high', 'median']) put(`gap.${k}`, doc?.gap?.[k])
+    for (const [book, view] of Object.entries(doc?.horizon_views ?? {})) {
+        for (const k of ['value', 'low', 'high']) put(`horizon_views.${book}.target.${k}`, view?.target?.[k])
+        put(`horizon_views.${book}.price_at_set`, view?.price_at_set)
+    }
+    return set
+}
+
+/**
+ * RESTATE a coverage for a split (the coverage monitor, the day it sees one): every per-share number ÷ the ratio, with a
+ * SPLIT_KIND revision that says so; its open scorecard calls the same (prometheusCalls.adjustCallsForSplit); then a
+ * re-model queued (`monitor.pending_revision`, state 'split'), since the prose still speaks in pre-split dollars.
+ * `monitor.split_through` records the split so it is applied once. → `{ ok, outcome: 'restated', doc, calls }` |
+ * `{ ok: true, outcome: 'done_already' }` | `{ ok: false, … }`.
+ */
+async function applySplit(id, split, { calls = null } = {}) {
+    const found = await getCoverageById(id)
+    if (!found.ok) return found
+    const cur = found.doc
+    const ratio = Number(split?.ratio)
+    if (!(ratio > 0) || !split?.date) return { ok: false, reason: 'bad_split' }
+    if (cur.monitor?.split_through && cur.monitor.split_through >= split.date) return { ok: true, outcome: 'done_already' }
+    const set = splitAdjustment(cur, ratio)
+    const words = `${split.numerator}-for-${split.denominator}`
+    const pt = cur.price_target?.value
+    const note = `${cur.symbol} split ${words} on ${split.date}: every per-share number restated ÷ ${Math.round(ratio * 1000) / 1000}`
+        + (pt != null ? ` (target ${pt} → ${set['price_target.value']})` : '') + '. The thesis text is pre-split — a re-model restates it.'
+    const at = new Date().toISOString()
+    try {
+        // ONE conditional write — the numbers and the stamp together, and only while the stamp is still before this split:
+        // a restate written without its stamp would be divided again by the next check, and a second process racing this
+        // one finds the condition gone (→ done_already).
+        const res = await _repo.revise(id, {
+            ...set, updated_at: at,
+            'monitor.split_through': split.date,
+            'monitor.pending_revision': { state: 'split', reason: `${words} split on ${split.date}`, at },
+        }, newRevision({ kind: SPLIT_KIND, note, changed: pt != null ? { price_target: { from: pt, to: set['price_target.value'] } } : {} }), {
+            where: { $or: [{ 'monitor.split_through': { $exists: false } }, { 'monitor.split_through': { $lt: split.date } }] },
+        })
+        if (!res.ok) return { ok: true, outcome: 'done_already' }
+        const restated = await (calls ?? (async (a) => (await import('../../services/prometheusCalls.service.js')).prometheusCallsService.adjustCallsForSplit(a)))({ coverageId: id, symbol: cur.symbol, split })
+        logger.info(LOG, 'coverage restated for a split', { id, symbol: cur.symbol, date: split.date, ratio, calls: restated })
+        const after = await getCoverageById(id)
+        return { ok: true, outcome: 'restated', doc: after.ok ? after.doc : null, calls: restated }
+    } catch (err) {
+        logger.error(LOG, 'split restate failed', err)
         return { ok: false, error: err }
     }
 }
@@ -185,6 +289,14 @@ const _io = {
     getPrice: async (symbol) => {
         try { return await fetchLastPrice(symbol) } catch { return null }
     },
+    // The stock's σ over a target's horizon, % — the rating bands' margin (2026-11-21). Proteus's profile, the one
+    // shared read; null (the flat margin) when there is none. Lazy so a test can stub it without the candle stack.
+    getSigma: async (symbol, horizon) => {
+        try {
+            const { horizonSigma } = await import('../../services/stockProfile.service.js')
+            return await horizonSigma(symbol, horizon)
+        } catch { return null }
+    },
     getMultipleHistory: async (symbol) => {
         try {
             const { getHistoricalMultiples } = await import('../../providers/fmp.provider.js')
@@ -205,18 +317,47 @@ export function _setCoverageIO(io) { Object.assign(_io, io) }
  * horizon → `{ band, from }` (`from` — the rating Prometheus wrote, when the band differs), or null when there is no
  * target or no price (his rating stands then). The rating is the BAND, not a direction he picks: before it his holds
  * ran from −30% to +37% at the call. It replaces the old direction check (ratingCoherence), which a band never fails.
+ *
+ * Since 2026-11-21 the margin is in the stock's own σ over the horizon and a LOW conviction caps a strong rating
+ * (ratingBands). `price` — the price the band was read at (a caller that already has today's, the monitor, passes it).
+ * `sticky` — a re-rate of the label already on the doc: held there near an edge (ratingBands.stickyBand, 2026-11-22).
+ * → `{ band, from, price }`.
  */
-async function _houseRating(doc, io = _io) {
+async function _houseRating(doc, io = _io, { price = null, sticky = false } = {}) {
     if (_num(doc?.price_target?.value) === null) return null
-    const band = ratingBand({ target: doc.price_target.value, price: await io.getPrice(doc.symbol), horizon: doc.price_target.horizon })
+    const px = _num(price) ?? _num(await io.getPrice(doc.symbol))
+    if (!(px > 0)) return null
+    const sigma = _num(await Promise.resolve(io.getSigma?.(doc.symbol, doc.price_target.horizon)).catch(() => null))
+    const conviction = doc.conviction?.level ?? null
+    let band = ratingBand({ target: doc.price_target.value, price: px, horizon: doc.price_target.horizon, sigma_pct: sigma, conviction })
     if (!band) return null
-    return { band, from: band.rating !== doc.rating ? (doc.rating ?? null) : undefined }
+    if (sticky) band = stickyBand(band, doc.rating, { conviction })
+    return { band, price: px, from: band.rating !== doc.rating ? (doc.rating ?? null) : undefined }
+}
+
+/**
+ * The target's REFERENCE — the price and σ its band was first read at, kept on the target (`ref_price`, `sigma_pct`):
+ * which way the target points is a fact about the day it was set, not about today's price. A daily re-rate moves the
+ * rating with the price; it must not move which side of the price the target is on (coverage.assess reads this for a
+ * hit). A reaffirmed target (keepClock — the same `set_at`) keeps its reference. A draft's own `ref_price` / `sigma_pct`
+ * is never taken (code review, 2026-11-22): a new target without a price read has no reference (the rating's way). Pure.
+ */
+export function withTargetRef(next, cur, house) {
+    if (!next) return next
+    const { ref_price: _draftRef, sigma_pct: _draftSigma, ...bare } = next
+    if (cur?.set_at && next.set_at === cur.set_at && _num(cur.ref_price) !== null) {
+        return { ...bare, ref_price: cur.ref_price, ...(cur.sigma_pct != null ? { sigma_pct: cur.sigma_pct } : {}) }
+    }
+    if (!house) return bare
+    return { ...bare, ref_price: Math.round(house.price * 100) / 100, ...(house.band.sigma_pct != null ? { sigma_pct: house.band.sigma_pct } : {}) }
 }
 
 /** What a re-rating says on the revision. Pure. */
 export function houseRatingNote({ band, from } = {}) {
     if (!band || from === undefined) return null
-    return `Rated ${band.rating.replace('_', ' ')} by the house bands: the target is ${band.implied_pct > 0 ? '+' : ''}${band.implied_pct}% against SPY's ~+${band.market_pct}% over ${band.horizon} (${from ? `${from.replace('_', ' ')} given` : 'no rating given'})`
+    const sigma = band.basis === 'sigma' ? `, a margin of ${band.margin_pct}% (0.25σ of the stock's ${band.sigma_pct}%)` : ''
+    const cap = band.capped ? ', capped by low conviction' : ''
+    return `Rated ${band.rating.replace('_', ' ')} by the house bands: the target is ${band.implied_pct > 0 ? '+' : ''}${band.implied_pct}% against SPY's ~+${band.market_pct}% over ${band.horizon}${sigma}${cap} (${from ? `${from.replace('_', ' ')} given` : 'no rating given'})`
 }
 
 export async function _plausibilityFlags(doc, io = _io) {
@@ -262,7 +403,12 @@ function _priceTarget(pt, now) {
     // 12m and nothing told a chosen one from a default. Marked, not refused: a refused save strands an automatic run's name.
     // A stored target keeps its mark when it is normalised again (an update merges it); a new one with a horizon clears it.
     const defaulted = !HORIZONS.includes(pt.horizon) || pt.horizon_defaulted === true
-    return { value, horizon, basis: _str(pt.basis), set_at, target_date: ends_at, ...(defaulted ? { horizon_defaulted: true } : {}) }
+    // The reference the band was read at (withTargetRef) rides along through a re-normalise; never from a draft's own say.
+    const ref = _num(pt.ref_price), sig = _num(pt.sigma_pct)
+    return {
+        value, horizon, basis: _str(pt.basis), set_at, target_date: ends_at, ...(defaulted ? { horizon_defaulted: true } : {}),
+        ...(ref > 0 ? { ref_price: ref } : {}), ...(sig > 0 ? { sigma_pct: sig } : {}),
+    }
 }
 
 function _gap(g) {
@@ -407,6 +553,7 @@ async function initiateCoverage(raw) {
         const doc = await _withTaxonomy(normalizeCoverage(raw), symbol)
         const house = await _houseRating(doc)
         if (house) doc.rating = house.band.rating
+        doc.price_target = withTargetRef(doc.price_target, null, house)
         const rerated = houseRatingNote(house ?? {})
         if (rerated) logger.info(LOG, 'coverage RE-RATED by the house bands', { symbol, from: house.from, to: house.band.rating, implied: house.band.implied_pct })
         doc.flags = await _plausibilityFlags(doc)
@@ -573,15 +720,19 @@ async function updateCoverage(id, patch = {}) {
     if ('price_target' in p) p.price_target = keepClock(cur.price_target, p.price_target)
     const merged = normalizeCoverage({ ...cur, ...p, id: cur.id, symbol: cur.symbol, created_at: cur.created_at, revisions: cur.revisions })
 
-    // The house's rating, whenever the rating or the target moves — written into the patch so the update saves it.
+    // The house's rating, whenever the rating, the target or the conviction (it caps a strong rating) moves — written into
+    // the patch so the update saves it.
     let rerated = null
-    if ('rating' in p || 'price_target' in p) {
+    if ('rating' in p || 'price_target' in p || 'conviction' in p) {
         const house = await _houseRating(merged)
         if (house) {
             merged.rating = p.rating = house.band.rating
             rerated = houseRatingNote(house)
             if (rerated) logger.info(LOG, 'coverage update RE-RATED by the house bands', { id, symbol: merged.symbol, from: house.from, to: house.band.rating, implied: house.band.implied_pct })
         }
+        // The target's reference: the stored one for a reaffirmed target, today's for a new one — never the draft's own,
+        // with or without a price (code review, 2026-11-22: a save echoing the old ref_price with the price read failing).
+        if ('price_target' in p) merged.price_target = p.price_target = withTargetRef(merged.price_target, cur.price_target, house)
     }
 
     const flagsRecomputed = FLAG_INPUTS.some(k => k in p)
@@ -686,8 +837,11 @@ async function setHorizonView(id, book, raw, io = _io) {
     if (!view) return { ok: false, reason: 'no_target' }
     const price = _num(await Promise.resolve(io.getPrice(cur.symbol)).catch(() => null))
     view.price_at_set = price > 0 ? Math.round(price * 100) / 100 : null
-    const band = ratingBand({ target: view.target.value, price, horizon: view.target.horizon })
-    if (band) view.rating = band.rating
+    // In the stock's σ over the view's own horizon, as a main target's band (2026-11-21). No conviction cap: a view carries
+    // none of its own, and the coverage's belongs to the main target.
+    const sigma = price > 0 ? _num(await Promise.resolve(io.getSigma?.(cur.symbol, view.target.horizon)).catch(() => null)) : null
+    const band = ratingBand({ target: view.target.value, price, horizon: view.target.horizon, sigma_pct: sigma })
+    if (band) { view.rating = band.rating; if (band.sigma_pct != null) view.sigma_pct = band.sigma_pct }
     const revision = newRevision({ kind: 'horizon_view', note: `${book === 'swing' ? 'Swing' : 'Long-term'} view: ${String(view.rating ?? 'unrated').replace('_', ' ')}, target ${view.target.value} by ${view.target.target_date}` })
     try {
         const res = await _repo.revise(id, { [`horizon_views.${book}`]: view, updated_at: new Date().toISOString() }, revision)

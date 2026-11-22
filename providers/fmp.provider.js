@@ -416,6 +416,16 @@ export async function getEarningsRowsRaw(ticker, limit = 12) {
     return Array.isArray(arr) ? arr : []
 }
 
+// ─── Stock splits (2026-11-22 — services/corporateActions.service) ───────────
+// `/stable/splits-calendar?from&to` → every split in the window, `{ symbol, date, numerator, denominator, splitType }`:
+// 8-for-1 is numerator 8 / denominator 1, a 1-for-5 reverse split 1 / 5. One request covers every name.
+
+/** The splits in a window (YYYY-MM-DD), every symbol — [] on a miss. */
+export async function getSplitsCalendarRaw(from, to) {
+    const arr = await _fmpGet(`/splits-calendar?from=${from}&to=${to}`)
+    return Array.isArray(arr) ? arr : []
+}
+
 /** Earnings summary for a ticker (next date + last 4 quarters actual vs estimate), LLM-ready. */
 export async function getEarnings(ticker) {
     const sym = String(ticker || '').toUpperCase().trim()

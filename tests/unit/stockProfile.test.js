@@ -271,3 +271,17 @@ test('levelsFor: the horizon picks the scale', async () => {
     assert.equal(st.scale, 'short term swing', 'its own scale since v2')
     assert.equal(st.stop.sig, 2.08)
 })
+
+// 2026-11-21: the house's rating bands measure a target in the stock's σ over its horizon — this one read.
+test('horizonSigma: the swing scale\'s σ (a month, a fraction) × √months, in %; no history → null, never a throw', async () => {
+    const { horizonSigma } = await import('../../services/stockProfile.service.js')
+    const cache = fakeCache(), { get } = fakeGet()
+    const now = Date.parse('2026-11-20T21:00:00Z')
+    const entry = await profileFor('KO', { scales: ['swing'], deps: { cache, get, now } })
+    const m = entry.scales.swing.sigma
+    assert.ok(m > 0)
+    assert.equal(await horizonSigma('KO', '3m', { deps: { cache, get, now } }), Math.round(m * Math.sqrt(3) * 1000) / 10)
+    assert.equal(await horizonSigma('KO', '12m', { deps: { cache, get, now } }), Math.round(m * Math.sqrt(12) * 1000) / 10)
+    const empty = { get: async () => [], getDaily: async () => [] }
+    assert.equal(await horizonSigma('NONE', '3m', { deps: { cache: fakeCache(), ...empty, now } }), null)
+})

@@ -22,6 +22,7 @@ import { notifyCoverageEvent }    from '../services/coverageNotify.service.js'
 import { entityRepo }             from '../services/entity/entityRepo.service.js'
 import { LIVE_POSITION }          from '../services/entity/vocabulary.js'
 import { fetchLastPrice } from '../services/lastPrice.service.js'
+import { corporateActionsService, etDay } from '../services/corporateActions.service.js'
 import { createDueLoop }   from './dueLoop.js'
 import { logger }                 from '../services/logger.service.js'
 
@@ -48,6 +49,13 @@ const _deps = {
     // two files with nothing keeping them in step.
     recordMonitorState: coverageService.recordMonitorState,
     claimRemodel:       coverageService.claimRemodel,
+    // The daily RE-RATE (Roy, 2026-11-21): the house's band at today's price, which the tick already read — its own
+    // revision (RERATE_KIND), not a call. See _dailyRerate for when it stands down.
+    rerate:             (id, price) => coverageService.rerateCoverage(id, { price }),
+    // A STOCK SPLIT since the numbers were set (2026-11-22): the one shared read (corporateActions — one FMP calendar
+    // call for every name, cached), and the restate through coverage's owner. See _catchSplits.
+    getSplits:          (symbol, sinceDay) => corporateActionsService.splitsSince(symbol, sinceDay),
+    applySplit:         (id, split) => coverageService.applySplit(id, split),
     // The expensive tier — the SAME headless-Prometheus hop Atlas triggers mid-review, reused rather
     // than forked, so a re-model persists identically however it was asked for. House coverage has
     // no userId, so `userId: null` here means "a house run": no venue, no audience level, and the
@@ -180,8 +188,63 @@ export async function _runRemodels(candidates, deps = _deps) {
     return launched
 }
 
+/**
+ * THE DAILY RE-RATE (Roy, 2026-11-21: 146 of 297 live ratings no longer matched their band — set once, at the save, while
+ * the price moved). The label follows today's price; the target, its reference and the thesis do not.
+ *
+ * It STANDS DOWN on a reached target — today's verdict or one already on the doc (`status: target_hit`): that call is
+ * Prometheus's to revise (REVISE_STATES queue the re-model), and re-banding it would flip a bearish call that came true
+ * into a strong buy (DVN: strong sell at $49.36, now $41.54). Never throws: a failed re-rate leaves yesterday's label,
+ * and the check goes on. → the re-rate's outcome, or null when it stood down.
+ */
+export async function _dailyRerate(cov, price, verdict, deps = _deps) {
+    if (!deps.rerate || !(Number(price) > 0)) return null
+    if (verdict?.state === 'target_hit' || verdict?.state === 'target_hit_early' || cov?.status === 'target_hit') return null
+    try {
+        const res = await deps.rerate(cov.id, price)
+        if (res?.outcome === 'rerated') logger.info(LOG, 'daily re-rate', { symbol: cov.symbol, from: res.from, to: res.to })
+        return res ?? null
+    } catch (err) {
+        logger.warn(LOG, `daily re-rate ${cov.symbol} failed (label unchanged)`, err.message)
+        return null
+    }
+}
+
+/**
+ * THE SPLIT CHECK, first on every daily check (Roy, 2026-11-22: "on this daily fetch catch also the split event" — SNDK
+ * 8-for-1 on 2026-11-20 left a $1,710 target over a $105 price). A split dated after the numbers were set — after
+ * `monitor.split_through` (the last one restated), else the target's `set_at` day — is restated before anything reads
+ * them: the gap, the hit, the re-rate. → the coverage to check (restated, or as it was). Never throws: a failed restate
+ * logs and the check goes on with what it has; `split_through` is not moved, so the next check tries again.
+ */
+export async function _catchSplits(cov, deps = _deps) {
+    if (!deps.getSplits || !deps.applySplit) return cov
+    // In New York days: a target set at 20:30 ET the evening before a split is pre-split, though its UTC date is the
+    // split's (code review, 2026-11-22).
+    const setMs = Date.parse(cov?.price_target?.set_at ?? cov?.created_at ?? '')
+    const since = cov?.monitor?.split_through ?? (Number.isFinite(setMs) ? etDay(setMs) : null)
+    if (!since) return cov
+    let doc = cov
+    try {
+        for (const split of await deps.getSplits(cov.symbol, since)) {
+            const res = await deps.applySplit(doc.id, split)
+            if (res?.outcome === 'restated' && res.doc) {
+                doc = res.doc
+                logger.info(LOG, `split caught: ${cov.symbol} ${split.numerator}-for-${split.denominator} on ${split.date}`, { calls: res.calls })
+            } else if (!res?.ok) {
+                logger.warn(LOG, `split restate ${cov.symbol} failed — checked as it was`, res?.reason ?? res?.error?.message ?? 'unknown')
+                break
+            }
+        }
+    } catch (err) {
+        logger.warn(LOG, `split check ${cov.symbol} failed`, err.message)
+    }
+    return doc
+}
+
 // Check one coverage: fetch fresh price + consensus → classify the gap → apply. Exported for tests.
 export async function _checkCoverage(cov, nowMs, deps = _deps) {
+    cov = await _catchSplits(cov, deps)
     const [price, street] = await Promise.all([deps.getPrice(cov.symbol), deps.getConsensusPt(cov.symbol)])
     // The classifier compares point-to-point (our PT vs the Street's mean); the stored gap keeps the
     // whole distribution. A bare number is still accepted, so an injected test dep can stay simple.
@@ -202,6 +265,7 @@ export async function _checkCoverage(cov, nowMs, deps = _deps) {
     const alreadyRecorded = (verdict.state === 'target_hit'       && cov.status === 'target_hit')
                          || (verdict.state === 'target_hit_early' && earlyAlreadyStamped)
     const remodel = remodelDecision(cov, { street, nowMs, gapState: alreadyRecorded ? null : verdict.state, gapReason: verdict.reason })
+    await _dailyRerate(cov, price, verdict, deps)
     // (An Aether-triggered override rode here until 2026-09-16 — a `pending_aether_remodel` flag
     // set by a change stream on the channel engine's opportunity collections. Those collections
     // went with the engine on 2026-09-09 and the stream had been watching a collection named

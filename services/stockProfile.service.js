@@ -14,6 +14,7 @@ import { getTickerAggregates, _deps as candleDeps } from '../providers/candles.p
 import { getFmpCandles } from '../providers/fmp.price.provider.js'
 import { makeMongoBackedCache } from './mongoCache.util.js'
 import { SCALES, VERSION, scaleProfile, levelsAt, scaleOf } from './stockProfile.engine.js'
+import { horizonSigmaPct } from './ratingBands.js'
 
 export { scaleOf, isDayTrade } from './stockProfile.engine.js'
 import { logger } from './logger.service.js'
@@ -162,4 +163,19 @@ export async function levelsFor(symbol, ratio, { horizon = 'swing', side = 'long
     if (!prof?.enough) return { symbol: entry.symbol, scale, enough: false, reason: prof?.reason ?? 'too_short' }
     const out = levelsAt(prof, Number(ratio), side)
     return out ? { symbol: entry.symbol, enough: true, ...out } : { symbol: entry.symbol, scale, enough: false, reason: 'too_few_swings' }
+}
+
+/**
+ * The stock's σ over a price target's horizon, in % — the house's rating bands measure a target in it (services/ratingBands,
+ * 2026-11-21). The swing scale's σ (60 daily returns × √21, a fraction a month) × √months. Null when there is no profile to
+ * be had (no history, a fetch failure): the bands fall back to their flat margin, so a save never waits on it.
+ */
+export async function horizonSigma(symbol, horizon, { deps = {} } = {}) {
+    try {
+        const entry = await profileFor(symbol, { scales: ['swing'], deps })
+        return horizonSigmaPct(entry?.scales?.swing?.sigma, horizon)
+    } catch (err) {
+        logger.warn(LOG, `${symbol} σ for the rating bands unavailable: ${err.message}`)
+        return null
+    }
 }

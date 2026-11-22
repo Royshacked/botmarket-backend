@@ -63,6 +63,9 @@ export const _deps = {
     findOpenPosition: (broker, userId, acct, positionId)      => brokerService.findOpenPosition(broker, userId, acct, positionId),
     closePosition:    (broker, userId, acct, positionId, opts)=> brokerService.closePosition(broker, userId, acct, positionId, opts),
     amendOrder:       (broker, userId, acct, orderId, fields) => brokerService.amendOrder(broker, userId, acct, orderId, fields),
+    // A stock split the trade has not been restated for yet is restated BEFORE a verb reaches the broker (splitSweep
+    // ensureRestated, 2026-11-22). Lazy: the sweep's module reaches the reconciler and the notifiers.
+    ensureRestated:   async (id) => (await import('../monitoring/splitSweep.service.js')).ensureRestated(id),
 }
 
 // Every write goes through the entity repo — the ONE write funnel (P1b) — built over the injected
@@ -242,7 +245,7 @@ export async function executeManage(verb, proposal, holder, link, open, userId, 
  *
  * Returns the same { ok, reason?, accounts? } shape the desk handoffs return to their controllers.
  */
-export async function applyManage({ entity, holder, verb, proposal, userId, origin = null, nowMs = Date.now(), deps = _deps }) {
+export async function applyManage({ entity, holder, verb, proposal, userId, origin = null, nowMs = Date.now(), proposedAtMs = null, deps = _deps }) {
     // THE SET IS A GATE, not a list. It was neither until 2026-09-29: MANAGE_VERBS was exported,
     // documented and never asked, so the only thing standing between a retired verb and the broker
     // calls was each desk's own copy (`SETUP_MANAGE_VERBS`) and the queue's. A desk that forgot to
@@ -251,6 +254,20 @@ export async function applyManage({ entity, holder, verb, proposal, userId, orig
     // not have must stop at the door, before the venue check, because a bad verb is bad on every
     // venue.
     if (!MANAGE_VERBS.has(verb)) return { ok: false, reason: 'bad_verb' }
+
+    // A SPLIT not yet restated (code review, 2026-11-22): restate the trade first, then act on the fresh docs — and the
+    // proposal, if it was made before the split (`proposedAtMs`; a queued off-hours row has none and was, by its nature,
+    // made before the trade caught up). Without it a pre-split $1,380 stop would be placed against a $175 price.
+    if (deps.ensureRestated && entity?.id) {
+        const caught = await deps.ensureRestated(entity.id)
+        if (caught?.splits?.length && caught.doc) {
+            const sameHolder = holder?.id === entity.id
+            entity = caught.doc
+            holder = sameHolder ? caught.doc : ((await deps.ensureRestated(holder?.id))?.doc ?? holder)
+            const { restateProposal } = await import('./tradeSplit.service.js')
+            proposal = restateProposal(proposal, caught.splits, proposedAtMs)
+        }
+    }
 
     // SELF-EXECUTED VENUE — the app is not the one with hands here, so this function has nothing to
     // do and says so. The desk posts its instruction card and records the intent.

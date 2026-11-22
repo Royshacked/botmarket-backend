@@ -1068,15 +1068,38 @@ services/
                             hand-off. GET /api/hotlist/reads. markWindows (2026-10-27): every settled read AND pass
                             held to its window's last close vs SPY → `window_mark` — the scorecard's yardstick
   ratingBands.js            THE HOUSE'S RATING BANDS (2026-10-28): a rating is the band of the target's implied return
-                            against SPY's over its horizon (8% a year, the margin 8% a year, pro rata). coverage.service
-                            sets the rating from it on every save (houseRatingNote on the trail when it differs)
+                            against SPY's over its horizon (8% a year). Since 2026-11-21 the margin is 0.25σ of the
+                            stock's own σ over the horizon (strong at 0.5σ; stockProfile.horizonSigma, the flat 8% a year
+                            without one) and LOW conviction caps a strong rating. coverage.service sets the rating from it
+                            on every save (houseRatingNote on the trail when it differs) and keeps the target's
+                            `ref_price` / `sigma_pct`; the coverage monitor re-rates daily (_dailyRerate, stands down on
+                            a reached target; stickyBand holds the label 0.2 × the margin past an edge); coverage.assess.
+                            targetWay reads `ref_price` for a hit (old targets: scripts/backfill-coverage-ref-price.mjs)
   prometheusCalls.service.js PROMETHEUS'S SCORECARD (2026-10-27): every coverage call (a new rating, target or
                             horizon) FROZEN in `prometheus_calls` when made — coverage.service logs it on initiate /
                             update (loaded lazily: a static import is a cycle via houseBook) — graded vs SPY at
                             1/3/6/12/18/24 months up to its horizon (`signed` by the rating; holds apart) and
                             target_reached. `source` forward | backfill (prometheusCalls.backfill callsFromTrail,
                             scripts/backfill-prometheus-calls.mjs — the revision trail walked back). scorecard():
-                            coverage by source/mark/rating + catalyst reads backed vs passed. GET /api/hotlist/scorecard
+                            coverage by source/mark/rating + catalyst reads backed vs passed. GET /api/hotlist/scorecard.
+                            A split restates open calls' pt / entry.price once (splitAdjustedCall, adjustCallsForSplit)
+  corporateActions.service.js STOCK SPLITS (2026-11-22): splitsSince(symbol, day) — one FMP splits-calendar read (60 days,
+                            cached 6h) for every name; splitRatio / perShare arithmetic. The coverage monitor's daily
+                            check asks first (_catchSplits) and restates through coverage.service applySplit (per-share
+                            numbers ÷ ratio, `split_adjust` revision, `monitor.split_through`, a 'split' re-model queued).
+                            perShare keeps 4 places under $1; splitEffect words it ("prices × 20, shares ÷ 20")
+  tradeSplit.service.js     OPEN TRADES THROUGH A SPLIT (2026-11-22; Roy: restate + flag, live re-reads the broker).
+                            restateTrade(doc, ratio) → { set, flags }: every per-share level ÷ and share size × on an
+                            idea / holding / setup (condition trees — the app's own "price touches N" rewritten, free
+                            text FLAGGED, never guessed —, exits, nativeExit, brokerOrders, pendingOrder, invalidation,
+                            research_basis.coveragePt, scenarios + flat legs, Talos guards, position_state, Mentor's
+                            draft); restatePaperPosition / restatePaperOrder / restateLedgerRow; memoWithSplit (Talos is
+                            told). restateOpenTrades(split, io) runs it once per row (`split_through`). Driven hourly by
+                            monitoring/splitSweep.service.js (loop 'splitSweep'; only names something is open on);
+                            a LIVE trade then goes through execution.reconciler reconcileSplit (broker size onto the
+                            link; each working exit kept / amended / re-placed; a resting entry amended); the user's card
+                            is tradeNotify buildSplitRestated. price.service dropCandleCache(ticker) on every split. A
+                            pre-position setup redraw stamps `split_through` (setups.service _update)
   houseBook.service.js      the Hotlist's SWING / LONG TERM lists (horizon-chains.md): live coverage by its target's
                             horizon (3m/6m · 12m+), each name's origin (the weekly chain's research_queue row, or
                             the desk), the move since its target was set vs SPY, progress to target, and each

@@ -658,6 +658,7 @@ monitoring/
 
   ../services/protectionPlan.service.js   Routes touch leaves → broker native / closing orders
   ../monitoring/paperFill.service.js      Global 5s loop: intra-bar touch/limit paper fills
+  ../monitoring/splitSweep.service.js     Hourly: open trades through a stock split (services/tradeSplit.service.js)
 
   providers/
     ohlcv.service.js         Thin wrapper around priceService; normalises to {t,o,h,l,c,v}
@@ -667,6 +668,40 @@ monitoring/
 ```
 
 ---
+
+## Stock splits on open trades (2026-11-22)
+
+FMP's price history is split-adjusted the day a split happens; every level an open trade stored is not. SNDK split
+8-for-1 on 2026-11-20 (a paper long, 5 @ 1428, against a ~$80 quote) and SLQT 1-for-20 on 2026-11-17 (a paper holding,
+90 @ $0.37 against $5 — a fake +$418). Roy chose: RESTATE + FLAG, and on a live venue RE-READ THE BROKER.
+
+- **Found** — `splitSweep` (hourly, eager) reads the split calendar (`corporateActions.recentSplits`, the cached read the
+  coverage monitor shares) and keeps only the names something is open on: an idea, holding or setup in a pre- or
+  past-entry status, a paper / manual position or working order.
+- **Restated once per row** (`split_through`, a conditional write) — `tradeSplit.restateTrade`: every per-share level ÷
+  the ratio, every share size × it, across the condition trees, exits, native exits, broker links, the parked order
+  plan, the invalidation range, the coverage target frozen at entry, a setup's scenarios and flat legs, Talos's guards,
+  the position's fill / stop / targets, a pending manage proposal and Mentor's draft. The venue's positions (size,
+  average, a pre-split mark) and working orders, and the open `trades` row, the same. Only rows saved / opened before the
+  split day; a setup redrawn before position stamps `split_through` on the redraw.
+- **Text** — the app's own `price touches N` is rewritten (a fresh text is a fresh parse). Any other condition naming a
+  number is LEFT and FLAGGED: the card lists it; a setup's Talos memo gets a first line saying the levels moved.
+- **Live** — `executionReconciler.reconcileSplit`, under the per-position lock: the broker's size onto the link; each
+  working exit still there at the restated price kept, there at the old one amended, gone re-placed for what the broker
+  holds; a resting entry amended. A read that fails places nothing; the card says check it.
+- **Told** — one card per trade from its desk (`tradeNotify.buildSplitRestated`), and a journal line.
+- `price.service.dropCandleCache(symbol)` on each split: a cached pre-split series must not merge with adjusted bars.
+- **New York days** (code review, 2026-11-22) — `corporateActions.etDay` / `etMidnightMs`: a split counts from 00:00 ET
+  on its date, never from the UTC date (which reads as the split day from 19:00 ET the evening before, while the stock
+  still trades pre-split); a call or target made that evening is pre-split.
+- **Edits catch up first** — `splitSweep.ensureRestated(id)` runs before a setup redraw / patch, an idea edit and every
+  manage verb (`positionManage.applyManage`): a split the trade has not been through is restated then, so a level written
+  on post-split prices is never divided again. The manage proposal in hand — a card's, or one queued off-hours in
+  `pending_actions` — is restated with it when it was made before the split (`tradeSplit.restateProposal`).
+- **Live, safely** — on a FRESH read under the lock (a fill recorded meanwhile stands); exits matched by position; a
+  position gone at the broker gets nothing placed; an amend's new order id is kept (cTrader re-places on amend).
+
+Not restated: the journal and closed rows (history), and adoption drafts not yet committed.
 
 ## Future improvements (deferred)
 

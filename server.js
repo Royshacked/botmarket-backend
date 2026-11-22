@@ -99,6 +99,7 @@ import { executionReconciler } from './monitoring/execution.reconciler.js'
 import { paperFillService }  from './monitoring/paperFill.service.js'
 import { paperEquityService } from './monitoring/paperEquity.service.js'
 import { paperMarkService }   from './monitoring/paperMark.service.js'
+import { splitSweepService }  from './monitoring/splitSweep.service.js'
 import { guardSweepService } from './monitoring/guardSweep.service.js'
 import { marketBriefNotifier } from './monitoring/marketBrief.notify.js'
 import { marketOpenMonitor } from './monitoring/marketOpen.monitor.js'
@@ -304,6 +305,8 @@ function startBackgroundLoops() {
     startLoop('paperFill',    paperFillService)
     startLoop('paperEquity',  paperEquityService)
     startLoop('paperMark',    paperMarkService)
+    // Open trades through a stock split — ideas, holdings, setups, the paper / manual venue, the ledger (tradeSplit).
+    startLoop('splitSweep',   splitSweepService)
     startLoop('marketBrief',  marketBriefNotifier)
 }
 

@@ -19,7 +19,7 @@ function _match(doc, q) {
     return Object.entries(q).every(([k, v]) => {
         if (k === '$or') return v.some(sub => _match(doc, sub))
         if (v && typeof v === 'object' && '$ne' in v) return (_get(doc, k) ?? null) !== v.$ne
-        if (v && typeof v === 'object' && '$in' in v) return v.$in.includes(_get(doc, k))
+        if (v && typeof v === 'object' && '$in' in v) return v.$in.includes(_get(doc, k) ?? null)   // a missing field matches null, as in Mongo
         if (v && typeof v === 'object' && '$nin' in v) return !v.$nin.includes(_get(doc, k))
         if (v && typeof v === 'object' && '$exists' in v) return (_get(doc, k) !== undefined) === Boolean(v.$exists)
         if (v && typeof v === 'object' && '$gt' in v) return _get(doc, k) > v.$gt
@@ -81,6 +81,7 @@ export function memDb() {
         return {
             rows,
             findOne: async (q) => structuredClone(rows.find(r => _match(r, q)) ?? null),
+            distinct: async (field, q = {}) => [...new Set(rows.filter(r => _match(r, q)).map(r => _get(r, field)).filter(v => v !== undefined))],
             find: (q = {}) => cursor(rows.filter(r => _match(r, q)).map(r => structuredClone(r))),
             insertOne: async (d) => { rows.push(structuredClone(d)); return { acknowledged: true } },
             insertMany: async (ds) => { for (const d of ds ?? []) rows.push(structuredClone(d)); return { acknowledged: true, insertedCount: ds?.length ?? 0 } },

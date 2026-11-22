@@ -56,7 +56,9 @@ export const FLOOR_DAYS    = 90   // ...but never leave one un-modelled longer t
 // "Revise thesis" card and wait for an admin's click are now re-model triggers, and the only card is the
 // re-model's own "done" card (coverageNotify, house). `validating` is not here: the Street catching up to
 // us asks for nothing.
-export const REVISE_STATES = new Set(['target_hit', 'target_hit_early', 'diverging'])
+// 'split' (2026-11-22) is not a gap verdict: the monitor stores it when it restates a split (coverage.service applySplit)
+// — the numbers are restated, the thesis prose still speaks pre-split, and the re-model rewrites it.
+export const REVISE_STATES = new Set(['target_hit', 'target_hit_early', 'diverging', 'split'])
 // A verdict outranks the 14-day cooldown — a thesis that needs revising must not wait two weeks in
 // silence now that no card says so — but not a run that has just landed: the verdict waits this long
 // (kept as `monitor.pending_revision`, so it is not lost) rather than buying the same research twice.
@@ -65,6 +67,7 @@ const VERDICT_WHY = {
     target_hit:       'the price reached our target',
     target_hit_early: 'target reached early — the model was too conservative',
     diverging:        'the Street is moving away from our target',
+    split:            'the stock split — the house restated every per-share number; restate the thesis in post-split terms',
 }
 
 /**

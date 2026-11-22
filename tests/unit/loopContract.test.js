@@ -74,7 +74,8 @@ test('server.js registers the full fleet', () => {
         // 'echoPipeline' (2026-11-19) walks every open Echo event through the simulator doc's steps (echo-pipeline.md);
         // opt-in, ECHO_PIPELINE=true.
         'coverage', 'dailyScreener', 'echoPipeline', 'echoReads', 'entries', 'exits', 'guardSweep', 'industryView', 'marketBrief', 'marketOpen', 'paperEquity',
-        'paperFill', 'paperMark', 'prometheusScorecard', 'pythiaCalls', 'pythiaWeekly', 'reconciler', 'talos', 'themis',
+        // 'splitSweep' (2026-11-22) restates open trades through a stock split (tradeSplit.service).
+        'paperFill', 'paperMark', 'prometheusScorecard', 'pythiaCalls', 'pythiaWeekly', 'reconciler', 'splitSweep', 'talos', 'themis',
     ])
 })
 

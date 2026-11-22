@@ -30,7 +30,7 @@ Emit exactly one block at the end:
 
 - `book` is the one the opening asked for. `target.horizon` must be that book's: `3m` or `6m` for swing, `12m`, `18m`
   or `24m` for long term.
-- `rating` is yours, but the house re-rates it by its bands against SPY over the horizon, exactly as it does your
-  coverage's.
+- `rating` is yours, but the house re-rates it by its bands against SPY over the horizon, in the stock's own σ, exactly
+  as it does your coverage's.
 - **No view you would stand behind** (nothing in the window can move it, or the picture is too unclear): say so in the
   reply and emit no block. That is an answer too: The trader is told you passed.

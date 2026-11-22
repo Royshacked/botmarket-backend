@@ -16,6 +16,7 @@ import { cardActions, botForKind, BOT_USER_ID } from '../api/chat/chat.service.j
 import { siblingOf } from './setup.taxonomy.js'
 import { kindForDoc } from './entity/envelope.js'
 import { postCard } from './notifyCard.js'
+import { splitEffect } from './corporateActions.service.js'
 import { entryDrift } from './setup.schema.js'
 
 // A price in card copy: two decimals, so 198.6 reads as 198.60 beside a 196.00 plan.
@@ -339,7 +340,36 @@ export function buildSetupManage(setup, card) {
 
 // Delegates to the shared poster, which NEVER throws — these cards are posted AFTER the state
 // change they announce, so a delivery failure must not abort the caller's remaining work.
+/**
+ * An open trade RESTATED for a stock split (tradeSplit, 2026-11-22 — Roy: restate + flag). Says what moved, what the
+ * broker needed (a live trade), and — the flag — every condition that still names a pre-split price in words, which code
+ * did not touch. From the desk that owns the trade. No action: the trade goes on; a flagged condition is the user's to
+ * re-draw. Pure.
+ */
+export function buildSplitRestated(trade, split, { before = {}, after = {}, flags = [], notes = [] } = {}) {
+    const dir   = String(trade?.direction || '').toUpperCase()
+    const kind  = trade?.kind ?? kindForDoc(trade)
+    const words = `${split.numerator}-for-${split.denominator}`
+    const at = (s) => [s.quantity != null ? `${s.quantity} sh` : null, s.entry != null ? `entry ${s.entry}` : null, s.stop != null ? `stop ${s.stop}` : null].filter(Boolean).join(', ')
+    const moved = at(before) && at(after) ? ` ${at(before)} → ${at(after)}.` : ''
+    const broker = notes.length ? ` At the broker: ${notes.join('; ')}.` : ''
+    const flag = flags.length
+        ? ` ${flags.length === 1 ? 'One condition still names' : `${flags.length} conditions still name`} a pre-split price — edit ${flags.length === 1 ? 'it' : 'them'} (${splitEffect(split.ratio).split(',')[0]}): ${flags.slice(0, 4).map(f => `"${String(f).slice(0, 80)}"`).join('; ')}${flags.length > 4 ? '…' : ''}`
+        : ''
+    return {
+        userId:  trade?.userId ?? null,
+        content: `${split.symbol} split ${words} on ${split.date}. Your ${dir} ${split.symbol} ${kind === 'setup' ? 'setup' : kind === 'portfolio_item' ? 'holding' : 'trade'} was restated — ${splitEffect(split.ratio)}.${moved}${broker}${flag}`,
+        type:    'split_restated',
+        payload: { kind, ...(kind === 'setup' ? { setupId: trade?.id } : { ideaId: trade?.id }), asset: split.symbol, direction: trade?.direction ?? null, split: { date: split.date, numerator: split.numerator, denominator: split.denominator }, flags: flags.length },
+        botId:   botForKind(kind),
+    }
+}
+
 const _post = (card, tag) => postCard(card, { tag, log: LOG })
+
+export async function notifySplitRestated(trade, split, summary) {
+    return _post(buildSplitRestated(trade, split, summary), `Split-restated card (${split.symbol})`)
+}
 
 export async function notifyIdeaEntryConfirm(idea, note = null) {
     return _post(buildIdeaEntryConfirm(idea, note), 'Entry-confirm card')

@@ -43,6 +43,7 @@ import { round, remainingForAccount } from './monitorUtils.js'
 import { buildExitOrder, exitOrderRecord } from '../services/exitOrders.util.js'
 import { entityRepo }    from '../services/entity/entityRepo.service.js'
 import { journalEntry }  from './monitorJournal.js'
+import { applyOffset }   from '../api/broker/brokerPrice.service.js'
 
 const LOG        = '[execution.reconciler]'
 const EPS        = 1e-6   // quantity comparison slack
@@ -61,7 +62,7 @@ export function _setDeps(overrides) {
 
 let _started = false
 
-export const executionReconciler = { start, stop, handleExecution, placeExits }
+export const executionReconciler = { start, stop, handleExecution, placeExits, reconcileSplit }
 
 function start() {
     if (_started) return
@@ -601,6 +602,118 @@ async function _cancelWorkingExits(idea, accountId) {
         changed = true
     }
     if (changed) await _deps.entityRepo.setExitOrders(idea.id, orders)
+}
+
+// ─── A stock split on a LIVE trade (2026-11-22, services/tradeSplit) ─────────
+
+/** Two prices the same order, to half a percent — a broker's own restate rounds to its tick. Pure. */
+export const sameOrderPrice = (a, b) => Number(a) > 0 && Number(b) > 0 && Math.abs(Number(a) - Number(b)) / Number(b) <= 0.005
+
+/**
+ * RE-READ THE BROKER after a split (Roy's answer: a live broker restates its own position and resting orders — or cancels
+ * them, by broker). Our copies are ALREADY restated in the database (tradeSplit). One link — one position, or one resting
+ * entry — at a time, under the same per-position lock as every execution, and on a FRESH read taken inside it (a fill the
+ * execution handler records meanwhile is never written over — code review, 2026-11-22):
+ *   • the position: the broker's size onto our link. GONE (closed around the split) → its missing exits are marked
+ *     cancelled and NOTHING is placed (a closing order with no position opens one on a netting account). UNREAD (the
+ *     read failed, or the broker cannot answer) → amends only, nothing placed.
+ *   • its working exits (matched by position, not just account): still at the broker at the restated price → kept; at the
+ *     old one → amended, and the id the broker answers with is the one kept (cTrader cancels and re-places on an amend);
+ *     gone → re-placed at the restated level for what the broker holds.
+ *   • a resting entry order the same — its link takes the amend's new id.
+ * → `{ notes[] }`, one line a change, for the user's card.
+ */
+async function reconcileSplit(idea) {
+    const notes = []
+    const links = idea.brokerOrders ?? []
+    const firstOfAccount = new Map()
+    links.forEach((l, i) => { const a = String(l.accountId); if (!firstOfAccount.has(a)) firstOfAccount.set(a, i) })
+
+    for (let li = 0; li < links.length; li++) {
+        const link = links[li]
+        const acct = String(link.accountId)
+        const broker = link.broker ?? _brokerFor(idea, acct)
+        if (!broker) continue
+        await _withLock(acct, link.positionId ?? `entry:${link.orderId}`, async () => {
+            let volume = null, gone = false, unread = Boolean(link.positionId)
+            if (link.positionId) {
+                try {
+                    const pos = await _deps.brokerService.findOpenPosition(broker, idea.userId, acct, link.positionId)
+                    if (pos === null) { gone = true; unread = false }
+                    else if (pos !== undefined) {
+                        const v = Number(pos?.volume ?? pos?.quantity)
+                        if (v > 0) { volume = v; unread = false }
+                    }
+                } catch (err) { notes.push(`the position could not be read at the broker (${err.message})`) }
+            }
+            if (volume !== null && Math.abs(volume - Number(link.quantity)) > EPS) {
+                await _deps.entityRepo.setLegQuantity(idea.id, { accountId: acct, positionId: link.positionId, quantity: volume })
+                notes.push(`the broker holds ${volume} shares`)
+            }
+            let working
+            try { working = (await _deps.brokerService.listOrders(broker, idea.userId, acct)) ?? [] }
+            catch (err) { notes.push(`the orders could not be read at the broker (${err.message}) — check them`); return }
+            const byId = new Map(working.map(o => [String(o.orderId), o]))
+
+            const fresh = (await _deps.entityRepo.getById(idea.id)) ?? idea
+            const offset = fresh.basisOffset
+            const amend = (orderId, kind, level) => _deps.brokerService.amendOrder(broker, fresh.userId, acct, orderId,
+                kind === 'stop' ? { stopPrice: applyOffset(level, offset) } : { limitPrice: applyOffset(level, offset) })
+            const mine = (o) => o.status === 'working' && String(o.accountId) === acct && o.type !== 'market' && Boolean(link.positionId)
+                && (String(o.positionId ?? '') === String(link.positionId) || (o.positionId == null && firstOfAccount.get(acct) === li))
+
+            const orders = [...(fresh.exitOrders ?? [])]
+            let changed = false
+            for (let i = 0; i < orders.length; i++) {
+                const o = orders[i]
+                if (!mine(o)) continue
+                const there = byId.get(String(o.orderId))
+                if (gone) {
+                    if (!there) { orders[i] = { ...o, status: 'cancelled', cancelledAt: Date.now() }; changed = true }
+                    continue
+                }
+                if (there && sameOrderPrice(there.price, applyOffset(o.price, offset))) continue
+                if (there) {
+                    try {
+                        const res = await amend(o.orderId, o.leg === 'stop' ? 'stop' : 'limit', o.price)
+                        if (res?.orderId != null && String(res.orderId) !== String(o.orderId)) { orders[i] = { ...o, orderId: String(res.orderId) }; changed = true }
+                        notes.push(`${o.leg} moved to ${o.price} at the broker`)
+                    } catch (err) { notes.push(`${o.leg} rests at ${there.price} and could not be moved — move it to ${o.price}`) }
+                    continue
+                }
+                if (unread) { notes.push(`${o.leg} at ${o.price} is not at the broker and the position could not be read — check it`); continue }
+                const qty = volume !== null ? Math.min(Number(o.quantity), volume) : Number(o.quantity)
+                try {
+                    const placed = await _placeOneExit(fresh, acct, broker, o.leg, o.price, qty, o.positionId)
+                    orders[i] = { ...o, orderId: placed.orderId, quantity: qty }
+                    notes.push(`${o.leg} was gone at the broker — re-placed at ${o.price}`)
+                } catch (err) {
+                    orders[i] = { ...o, status: 'cancelled', cancelledAt: Date.now() }
+                    notes.push(`${o.leg} at ${o.price} is gone at the broker and could not be re-placed — place it yourself`)
+                }
+                changed = true
+            }
+            if (gone) notes.push('the position is closed at the broker')
+            if (changed) await _deps.entityRepo.setExitOrders(idea.id, orders)
+
+            // A resting ENTRY order, not filled yet.
+            if (link.orderId && !link.positionId && Number(fresh.entryTriggerPrice) > 0) {
+                const there = byId.get(String(link.orderId))
+                if (!there) notes.push(`the entry order is gone at the broker — re-arm it at ${fresh.entryTriggerPrice}`)
+                else if (!sameOrderPrice(there.price, applyOffset(fresh.entryTriggerPrice, offset))) {
+                    try {
+                        const res = await amend(link.orderId, fresh.entryOrderType === 'stop' ? 'stop' : 'limit', fresh.entryTriggerPrice)
+                        if (res?.orderId != null && String(res.orderId) !== String(link.orderId)) {
+                            const relinked = (fresh.brokerOrders ?? []).map(b => (String(b.accountId) === acct && String(b.orderId) === String(link.orderId) ? { ...b, orderId: String(res.orderId) } : b))
+                            await _deps.entityRepo.patch(idea.id, { brokerOrders: relinked })
+                        }
+                        notes.push(`the entry order moved to ${fresh.entryTriggerPrice}`)
+                    } catch (err) { notes.push(`the entry order rests at ${there.price} and could not be moved — move it to ${fresh.entryTriggerPrice}`) }
+                }
+            }
+        })
+    }
+    return { notes }
 }
 
 /** Place a single exit order as a CLOSING order (close side, tied to positionId). */

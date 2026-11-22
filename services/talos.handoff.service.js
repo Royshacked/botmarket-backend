@@ -82,6 +82,8 @@ const _deps = {
     findOpenPosition: manage._deps.findOpenPosition,
     closePosition:    manage._deps.closePosition,
     amendOrder:       manage._deps.amendOrder,
+    // A split the setup has not been restated for — caught up before the verb reaches the broker (splitSweep).
+    ensureRestated:   manage._deps.ensureRestated,
     cancelOrder:      manage._deps.cancelOrder,
     notifyManage:     (setup, card) => notifySetupManage(setup, card),
     notifyDisarm:     (setup, reason) => notifySetupLimitDisarm(setup, reason),
@@ -126,7 +128,7 @@ export async function manageSetup(id, userId, verb, deps = _deps) {
     // Talos used to ask the venue itself (`knownVenue(setup.broker) === 'manual'`) and branch before
     // calling in, which made this desk the only thing standing between a broker-less account and the
     // three broker calls inside executeManage. A second desk would not have known to do the same.
-    const res = await manage.applyManage({ entity: setup, holder: setup, verb, proposal, userId, nowMs: now, deps })
+    const res = await manage.applyManage({ entity: setup, holder: setup, verb, proposal, userId, nowMs: now, proposedAtMs: Date.parse(pending?.at ?? ''), deps })
 
     // Self-executed venue: tell the user what to do at their own institution, then record the
     // intent. NOTIFY FIRST and un-guarded, deliberately — an instruction only a human can carry out

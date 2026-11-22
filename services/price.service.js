@@ -235,6 +235,18 @@ const _envelopeKey = (ticker, { timeSpan, multiplier }) => `${ticker}|${timeSpan
 /** Drop every cached series. Exported for tests — nothing in production clears this. */
 export function _resetCandleCache() { _envelopes.clear() }
 
+/**
+ * Drop ONE ticker's cached series — a STOCK SPLIT (tradeSplit, 2026-11-22): the provider re-adjusts the whole history
+ * the day it happens, and a cached pre-split envelope would have post-split tail bars merged onto it, 8× apart.
+ * → how many series went.
+ */
+export function dropCandleCache(ticker) {
+    const prefix = `${String(ticker ?? '').toUpperCase()}|`
+    let n = 0
+    for (const key of [..._envelopes.keys()]) if (key.toUpperCase().startsWith(prefix)) { _envelopes.delete(key); n++ }
+    return n
+}
+
 async function _loadEnvelope(ticker, barOpts) {
     return _normalizeEnvelope(_envelopes.get(_envelopeKey(ticker, barOpts)) ?? null)
 }

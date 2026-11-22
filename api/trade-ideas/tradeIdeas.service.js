@@ -581,6 +581,10 @@ async function updateIdea(id, body, userId) {
     // own refusals. Checked before the read below because that operation does its own.
     if (patch.status === 'resting') return placeRestingEntryForIdea(id, userId)
 
+    // A split this idea has not been restated for is restated FIRST (splitSweep ensureRestated, code review 2026-11-22):
+    // the edit's levels are post-split, and the sweep must not divide them again. Never blocks the edit.
+    try { await (await import('../../monitoring/splitSweep.service.js')).ensureRestated(id) } catch { /* the sweep retries */ }
+
     // PHASE 2 — the transitions, every one of which needs to know what the idea currently IS.
     try {
         const db = await getDb()

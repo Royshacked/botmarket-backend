@@ -92,20 +92,24 @@ or the conviction is too high (say `medium`/`low` and mean it). Decide which, an
 - **THE RATING IS THE TARGET AGAINST THE MARKET. THE GAP IS VS THE STREET.** Two different questions,
   and only the first one is the rating. The house rates like the big desks — against a benchmark: a
   rating is the BAND your target's implied return falls in against **SPY's expected return over the
-  same horizon** (about +8% a year, pro rata). The margin is the same 8% a year, pro rata:
+  same horizon** (about +8% a year, pro rata), measured in **the stock's own σ over that horizon** —
+  how far it wanders anyway (60 daily returns, scaled to the horizon):
 
-  | horizon | SPY ~ | strong_buy | buy | hold | sell | strong_sell |
-  |---|---|---|---|---|---|---|
-  | 3m  | +2%  | ≥ +6%  | ≥ +4%  | between | ≤ 0%  | ≤ −2% |
-  | 6m  | +4%  | ≥ +12% | ≥ +8%  | between | ≤ 0%  | ≤ −4% |
-  | 12m | +8%  | ≥ +24% | ≥ +16% | between | ≤ 0%  | ≤ −8% |
-  | 18m | +12% | ≥ +36% | ≥ +24% | between | ≤ 0%  | ≤ −12% |
-  | 24m | +16% | ≥ +48% | ≥ +32% | between | ≤ 0%  | ≤ −16% |
+  | excess over SPY | strong_buy | buy | hold | sell | strong_sell |
+  |---|---|---|---|---|---|
+  | in the stock's σ over the horizon | ≥ +0.5σ | ≥ +0.25σ | between | ≤ −0.25σ | ≤ −0.5σ |
 
-  **The code sets the rating from your target, price and horizon** — whatever you write, the band wins,
-  and the coverage trail says so when it differs. So write the rating the band gives, and let the
-  thesis argue the TARGET: that is your judgment; the rating is its label. A +5% twelve-month target
-  is a `hold` (it trails the market), a +20% one a `buy`. Wherever the Street sits: being $16 under a
+  With SPY at ~+2% over three months, a stock with a 20% three-month σ needs a target of about +7%
+  for a `buy` and +12% for a `strong_buy`; a quiet one with 8% needs +4% and +6%. A target inside the stock's normal
+  noise is a `hold`, however you feel about the name. And **`low` conviction is never "strong"** —
+  the house caps it at `buy` / `sell`: your strongest word goes with your strongest view.
+
+  **The code sets the rating from your target, price, horizon, σ and conviction** — whatever you write,
+  the band wins, and the coverage trail says so when it differs. It is re-read every day at that day's
+  price (only the label: your target stands, and a target the price has reached comes back to you to
+  revise). So write the rating you expect, and let the thesis argue the TARGET: that is your judgment;
+  the rating is its label. A target a few percent over SPY is a `hold` (it is inside the noise), one
+  well clear of the stock's σ a `buy`. Wherever the Street sits: being $16 under a
   consensus of $101 while the stock trades at $77 is a view about the *consensus*, not the stock. Read
   the band the same way: if base **and** bull both sit above spot, you are not bearish on the name —
   you are bearish on the Street's target. Say that in the thesis and rate the stock.

@@ -14,6 +14,16 @@ import { round2 }           from '../services/number.util.js'
 const BULLISH = new Set(['buy', 'strong_buy'])
 const BEARISH = new Set(['sell', 'strong_sell'])
 
+/**
+ * Which way the coverage's target points: +1 up, −1 down, 0 neither — from the price it was set against
+ * (`price_target.ref_price`), else (a target saved before 2026-11-21) the rating's direction, a hold none. Pure.
+ */
+export function targetWay(coverage) {
+    const pt = _price(coverage?.price_target?.value), ref = _price(coverage?.price_target?.ref_price)
+    if (pt !== null && ref !== null) return pt > ref ? 1 : pt < ref ? -1 : 0
+    return BULLISH.has(coverage?.rating) ? 1 : BEARISH.has(coverage?.rating) ? -1 : 0
+}
+
 // A consensus PT move below this (%) is noise, not a signal.
 export const CONSENSUS_MOVE_PCT = 2
 
@@ -130,10 +140,14 @@ export function classifyGapState(coverage, fresh = {}) {
     const bullish = BULLISH.has(coverage?.rating)
     const bearish = BEARISH.has(coverage?.rating)
 
-    // 1. Target hit — split by WHEN it landed inside the target's own horizon (see _hitVerdict).
+    // 1. Target hit — split by WHEN it landed inside the target's own horizon (see _hitVerdict). Which way the target
+    // points is a fact about the day it was SET (`price_target.ref_price`, coverage.service withTargetRef, 2026-11-21),
+    // not about the rating: the rating is re-banded daily from today's price, and the σ bands make a hold of many a
+    // target — a hold's +12% target reached is still reached. Targets saved before it carry no reference: the rating's way.
     if (ourPt !== null && price !== null) {
-        if (bullish && price >= ourPt) return _hitVerdict(coverage, price, ourPt, fresh.nowMs)
-        if (bearish && price <= ourPt) return _hitVerdict(coverage, price, ourPt, fresh.nowMs)
+        const way = targetWay(coverage)
+        if (way > 0 && price >= ourPt) return _hitVerdict(coverage, price, ourPt, fresh.nowMs)
+        if (way < 0 && price <= ourPt) return _hitVerdict(coverage, price, ourPt, fresh.nowMs)
     }
 
     // 2. Consensus movement — is the Street catching up to us, or moving away?

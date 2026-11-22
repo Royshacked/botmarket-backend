@@ -315,7 +315,17 @@ export function mergeInPositionScenarios(cur, next) {
         : s))
 }
 
+/**
+ * A split this setup has not been restated for is restated FIRST (splitSweep ensureRestated, code review 2026-11-22): an
+ * edit drawn on post-split prices then lands on post-split numbers, and the sweep never divides it again. Lazy (the sweep
+ * reaches the reconciler); a failure is the sweep's to retry and never blocks the edit.
+ */
+async function _catchUpSplit(id) {
+    try { await (await import('../../monitoring/splitSweep.service.js')).ensureRestated(id) } catch { /* the sweep retries */ }
+}
+
 async function _update(id, bound, userId) {
+    await _catchUpSplit(id)
     const found = await crud.getOwned(id, userId)
     if (!found.ok) return found
     const cur = found.doc
@@ -339,6 +349,11 @@ async function _update(id, bound, userId) {
         $set['monitor_state.next_check_at'] = null
     }
     if (bound.chat_state !== undefined) $set.chat_state = bound.chat_state
+    // A REDRAWN plan is drawn on today's prices — after any split already (the split sweep, tradeSplit, 2026-11-22). The
+    // stamp keeps the sweep from dividing the new levels again: it restates only a trade whose `split_through` is before
+    // the split. Not in position: there the armed entry, stop and size are put back as they were (mergeInPositionScenarios)
+    // and still need the sweep.
+    if (!inPosition && $set.scenarios !== undefined) $set.split_through = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
 
     // Pre-position: a rewritten plan DISARMS — the user must Arm again, because the plan Talos
     // was watching no longer exists. In-position: NEVER — flipping a live setup back would orphan
@@ -422,6 +437,7 @@ async function listSetups(userId, { status = null, onError } = {}) {
  * the check timer so Talos picks it up on the next tick.
  */
 async function patchSetup(id, patch, userId) {
+    await _catchUpSplit(id)
     const found = await crud.getOwned(id, userId)
     if (!found.ok) return found
     const cur = found.doc

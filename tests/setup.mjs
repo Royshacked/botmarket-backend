@@ -15,6 +15,11 @@
 // precisely what an open Mongo client prevents. The hook that never runs is worse than no hook.
 import { after } from 'node:test'
 import { closeDb } from '../providers/mongodb.provider.js'
+import { _setCorporateActionsIO } from '../services/corporateActions.service.js'
+
+// No test reads FMP's split calendar for real (2026-11-22): every edit path asks it first (splitSweep ensureRestated),
+// so a test saving a setup would otherwise make a network call. A test that needs splits sets its own.
+_setCorporateActionsIO({ calendar: async () => [] })
 
 after(async () => {
     // Never fail a green suite on teardown. A close that throws is worth seeing, but it is not a

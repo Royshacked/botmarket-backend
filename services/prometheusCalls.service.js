@@ -78,11 +78,71 @@ export function callFromCoverage(cov, { madeAt, source = 'forward' } = {}) {
         pt: _num(cov.price_target?.value),
         horizon,
         sector: cov.sector ?? null,
+        // What the house's band read the call in (ratingBands, 2026-11-21): the stock's σ over the horizon then, and the
+        // conviction that may cap it. Absent on calls before it — those are read on the flat margin.
+        sigma_pct: _num(cov.price_target?.sigma_pct),
+        conviction: cov.conviction?.level ?? null,
         entry: null,
         marks: {},
         target_reached: null,
         superseded_at: null,
         created_at: new Date().toISOString(),
+    }
+}
+
+/**
+ * The SET-PRICE of a live target from its frozen calls (2026-11-22 backfill of `price_target.ref_price` — targets saved
+ * before withTargetRef have none): the entry close of the call that froze THIS target — same coverage, same value —
+ * the one made nearest the target's `set_at`. → the price, or null (no such call, or not yet entered). Pure.
+ */
+export function refPriceFromCalls(cov, calls) {
+    const pt = _num(cov?.price_target?.value)
+    if (pt === null) return null
+    const setMs = Date.parse(cov.price_target.set_at ?? '')
+    const same = (calls ?? []).filter(c => (c.coverage_id ? c.coverage_id === cov.id : c.symbol === cov.symbol)
+        && _num(c.pt) !== null && Math.abs(c.pt - pt) < 0.005 && _num(c.entry?.price) > 0)
+    if (!same.length) return null
+    const dist = (c) => Number.isFinite(setMs) ? Math.abs(Date.parse(c.made_at) - setMs) : -Date.parse(c.made_at)
+    return same.sort((a, b) => dist(a) - dist(b))[0].entry.price
+}
+
+/**
+ * A STOCK SPLIT restated on a call (corporateActions, 2026-11-22) → the `$set` for it, or null when it does not apply. A
+ * call made before the split day has a pre-split target, and an entry priced before that day a pre-split price; the bars
+ * it is graded on are split-adjusted, so both divide by the ratio — or every later mark reads an 8-for-1 split as −87%.
+ * Marks already graded keep their own: a return is a ratio, and their prices were read on one basis. Once per split
+ * (`splits_applied`). Pure.
+ */
+export function splitAdjustedCall(call, split) {
+    const ratio = Number(split?.ratio)
+    if (!(ratio > 0) || !split?.date || call?.done) return null
+    // Its New York day: a call made at 20:30 ET the evening before is pre-split, though its UTC date is the split's.
+    const madeMs = Date.parse(call?.made_at ?? '')
+    if (!Number.isFinite(madeMs) || !(_etDay(madeMs) < split.date)) return null
+    if ((call.splits_applied ?? []).includes(split.date)) return null
+    const set = { splits_applied: [...(call.splits_applied ?? []), split.date] }
+    if (_ok(call.pt)) set.pt = _r2(call.pt / ratio)
+    if (_ok(call.entry?.price) && String(call.entry.day ?? '') < split.date) set['entry.price'] = _r2(call.entry.price / ratio)
+    return set
+}
+
+/** Restate every open call of one coverage for a split → how many rows changed. Never throws (0, logged). */
+async function adjustCallsForSplit({ coverageId, symbol, split }, deps = _deps) {
+    try {
+        const coll = await _coll(deps)
+        const rows = await coll.find(coverageId ? { coverage_id: coverageId } : { symbol }, { projection: { _id: 0 } }).toArray()
+        let n = 0
+        for (const call of rows) {
+            const set = splitAdjustedCall(call, split)
+            if (!set) continue
+            await coll.updateOne({ id: call.id }, { $set: set })
+            n++
+        }
+        if (n) logger.info(LOG, 'calls restated for a split', { symbol, date: split.date, ratio: split.ratio, calls: n })
+        return n
+    } catch (err) {
+        logger.warn(LOG, `split restate of ${symbol}'s calls failed`, err.message)
+        return 0
     }
 }
 
@@ -152,7 +212,8 @@ export function summarise(xs) {
  * price or a target. Pure.
  */
 export function callBand(call) {
-    return ratingBand({ target: call?.pt, price: call?.entry?.price, horizon: call?.horizon })?.rating ?? null
+    // In the σ and under the conviction the call was made with (none recorded — the calls before 2026-11-21: the flat margin).
+    return ratingBand({ target: call?.pt, price: call?.entry?.price, horizon: call?.horizon, sigma_pct: call?.sigma_pct ?? null, conviction: call?.conviction ?? null })?.rating ?? null
 }
 
 /**
@@ -303,4 +364,4 @@ async function scorecard(deps = _deps) {
     return { coverage: coverageRecord(calls), catalyst: catalystRecord(reads), as_of: new Date(deps.now()).toISOString(), min_judge: MIN_JUDGE }
 }
 
-export const prometheusCallsService = { recordCoverageCall, gradeDue, scorecard }
+export const prometheusCallsService = { recordCoverageCall, gradeDue, scorecard, adjustCallsForSplit }

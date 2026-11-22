@@ -302,6 +302,48 @@ Live coverage was re-rated once by `scripts/rerate-coverage-bands.mjs` (dry by d
 revision. Not a call — the scorecard neither logs it nor rebuilds one from the trail (`prometheusCalls.backfill` undoes
 it but makes no step of it). axl_dev 2026-10-28: 106 of 167 relabelled, the scorecard's 233 calls untouched.
 
+**In the stock's own σ, capped by conviction, re-read daily (2026-11-21).** A review of prod's 263 open calls found the
+flat margin pro-rated to nothing on short horizons — a 3m target 2% under the price was a strong SELL, 6% over it a
+strong BUY, while the median 3-month σ was ~18% (22 open 3m "strong" calls implied moves under 10%); 76 of the 111 strong
+calls were low conviction; and 146 of 297 live ratings no longer matched their band (set once, at the save). Roy chose:
+
+| excess over SPY, in the stock's σ over the horizon | strong buy | buy | hold | sell | strong sell |
+|---|---|---|---|---|---|
+| margin 0.25σ (`SIGMA_MARGIN`) | ≥ +0.5σ | ≥ +0.25σ | between | ≤ −0.25σ | ≤ −0.5σ |
+
+- **σ** — Proteus's (`stockProfile.horizonSigma`: the swing scale's 60 daily returns × √21, × √months), the one read the
+  desks share. No profile → the flat 8% a year, `basis: 'flat'` on the band. 0.5σ / 1σ was tried and rejected: 81% holds.
+- **Conviction** — `low` caps strong buy → buy, strong sell → sell (`capped: true`, and the trail says "capped by low
+  conviction"). A conviction change re-bands like a rating or target change.
+- **The target's reference** — the save keeps `price_target.ref_price` and `sigma_pct` (`withTargetRef`; a reaffirmed
+  target keeps its own). Which way a target points is a fact about the day it was set: `coverage.assess.targetWay` reads
+  it for a HIT, so a hold's target reached is reached, and a re-banded rating cannot turn a target round. Targets saved
+  before it are backfilled from the entry close of the scorecard call that froze them
+  (`scripts/backfill-coverage-ref-price.mjs`, `prometheusCalls.refPriceFromCalls`; the dry run on prod, 2026-11-22,
+  filled 260 of 297 — the other 37 have no entered call and keep the rating's way). Validating / diverging still read the rating (unchanged: a hold there
+  would mean more re-models).
+- **Daily** — the coverage monitor re-rates every due name at the price its tick already read (`_dailyRerate` →
+  `rerateCoverage`, a `house_rerate` revision, never a call). It STANDS DOWN on a reached target (today's verdict or
+  `status: target_hit`): that call goes back to Prometheus to revise, rather than flipping a bearish call that came true
+  into a strong buy (DVN: strong sell at $49.36, $41.54 on 2026-11-20). A GUARD keeps the label off a day's noise
+  (`ratingBands.stickyBand`, 2026-11-22): it leaves its band only once the excess is `HYSTERESIS` (0.2) × the margin past
+  the edge — 0.05σ — so a name on an edge does not flip buy ↔ hold daily, a revision each time. A save is never held.
+- **Splits** (2026-11-22) — the same daily check asks first whether the name split since its numbers were set
+  (`_catchSplits` → `corporateActions.splitsSince`, one FMP calendar read for every name; since `monitor.split_through`,
+  else the target's `set_at` day). A split is restated before the gap, the hit or the re-rate read anything
+  (`coverage.service applySplit`): the target, its reference, the scenario legs and their EPS, the per-share estimates,
+  the recorded gap and the horizon views ÷ the ratio (never a %, a multiple or the target's clock), a `split_adjust`
+  revision, and the open scorecard calls' target and pre-split entry the same (graded marks keep theirs: a return is a
+  ratio). Then a re-model is queued (`pending_revision` state `split`, in REVISE_STATES): the thesis prose still speaks
+  in pre-split dollars. SNDK 8-for-1 on 2026-11-20 was the case: $1,710 → $213.75. Setups, positions and paper fills
+  are not restated.
+- **The scorecard** — a frozen call keeps `sigma_pct` and `conviction`; `callBand` reads the call in its own band (calls
+  before it: the flat margin).
+
+A dry run on prod at 2026-11-20's prices (after a ~8% fall in SPY since 4 Nov) moved 297 live ratings from 81 SB / 64 B /
+124 H / 7 S / 20 SS to 54 / 145 / 67 / 25 / 6: the prices fell under unchanged targets, so the labels lean to buy until
+the targets are revised. Five reached targets stood down for review (CRCL, RHI, NSC, VNO, DVN).
+
 **The horizon, marked when it was not chosen (same day).** 84% of the book sat on `12m`, and a missing horizon stored as
 `12m` silently. It still does — a refused save would strand an automatic run's name — but the target now carries
 `horizon_defaulted: true` and the log a warning, and the prompt says the horizon is required. Count the warnings before
