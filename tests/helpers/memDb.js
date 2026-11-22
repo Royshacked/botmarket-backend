@@ -81,7 +81,7 @@ export function memDb() {
         return {
             rows,
             findOne: async (q) => structuredClone(rows.find(r => _match(r, q)) ?? null),
-            distinct: async (field, q = {}) => [...new Set(rows.filter(r => _match(r, q)).map(r => _get(r, field)).filter(v => v !== undefined))],
+            // NO distinct: the real client runs apiStrict (Stable API v1), where distinct is refused — a fake that has it hides that.
             find: (q = {}) => cursor(rows.filter(r => _match(r, q)).map(r => structuredClone(r))),
             insertOne: async (d) => { rows.push(structuredClone(d)); return { acknowledged: true } },
             insertMany: async (ds) => { for (const d of ds ?? []) rows.push(structuredClone(d)); return { acknowledged: true, insertedCount: ds?.length ?? 0 } },

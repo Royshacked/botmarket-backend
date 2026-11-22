@@ -99,13 +99,16 @@ export async function _tick() {
     if (!splits.length) return { splits: 0, restated: [] }
     const db = await _io.db()
     const syms = [...new Set(splits.map(s => s.symbol))]
-    // Only the names something is open on — one query each side, not one per split.
+    // Only the names something is open on — one query each side, not one per split. A find with a projection, NOT
+    // `distinct`: the client runs the Stable API strictly (apiStrict), and `distinct` is not in API Version 1 — every
+    // tick failed on it on its first run (2026-11-22).
+    const names = (coll, field, filter) => db.collection(coll).find(filter).project({ _id: 0, [field]: 1 }).toArray().then(rows => rows.map(r => r[field]))
     const [ents, pos, ords] = await Promise.all([
-        db.collection(ENTITIES).distinct('asset', { asset: { $in: syms }, kind: { $in: TRADE_KIND_QUERY }, status: { $in: OPEN_STATUSES } }),
-        db.collection(POSITIONS).distinct('symbol', { symbol: { $in: syms }, status: 'open' }),
-        db.collection(ORDERS).distinct('symbol', { symbol: { $in: syms }, status: 'working' }),
+        names(ENTITIES, 'asset', { asset: { $in: syms }, kind: { $in: TRADE_KIND_QUERY }, status: { $in: OPEN_STATUSES } }),
+        names(POSITIONS, 'symbol', { symbol: { $in: syms }, status: 'open' }),
+        names(ORDERS, 'symbol', { symbol: { $in: syms }, status: 'working' }),
     ])
-    const open = new Set([...ents, ...pos, ...ords].map(s => String(s).toUpperCase()))
+    const open = new Set([...ents, ...pos, ...ords].filter(Boolean).map(s => String(s).toUpperCase()))
     const io = _tradeIO(db)
     const restated = []
     for (const split of splits.filter(s => open.has(s.symbol))) {
