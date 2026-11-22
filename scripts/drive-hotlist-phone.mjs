@@ -108,7 +108,9 @@ async function pass(admin) {
         const w = await widths(page)
         await page.screenshot({ path: `${OUT}/hotlist-phone-${who}-${name}.png`, fullPage: false })
         check(`${who} ${name}: no sideways page scroll`, w.page <= 0, `page over by ${w.page}px`)
-        check(`${who} ${name}: every table fits the phone`, w.tables.every(t => t.over <= 1 && t.right <= 390), JSON.stringify(w.tables))
+        // Every column is there since 2026-11-22 (Roy: swipe sideways, the symbol stuck left): a table may be wider than
+        // the phone, but it scrolls in its OWN box — it never pushes past the screen's edge.
+        check(`${who} ${name}: every table stays inside the phone`, w.tables.every(t => t.right <= 390), JSON.stringify(w.tables))
         if (!admin) check(`${who} ${name}: no notes or view switches`, w.notes === 0 && w.switches === 0, `notes ${w.notes}, switches ${w.switches}`)
         else if (name !== 'covered' && name !== 'week') check(`${who} ${name}: the view switch is there`, w.switches === 1)
     }
